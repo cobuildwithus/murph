@@ -119,6 +119,9 @@ export interface AssistantProviderTurn {
   onFinishWithoutReplyAccepted?: ((event: {
     deliveryContextOrdinal: number
   }) => Promise<void> | void) | null
+  onFinishWithoutReplyRecorded?: ((event: {
+    deliveryContextOrdinal: number
+  }) => Promise<void> | void) | null
   onEvent?: ((event: AssistantProviderProgressEvent) => void) | null
   onProviderRequestStarted?: ((event: AssistantProviderRequestStartedEvent) => Promise<void> | void) | null
   onTraceEvent?: (event: AssistantProviderTraceEvent) => void
@@ -269,6 +272,7 @@ export type AssistantProviderTurnAttemptResult =
       ok: false
       providerRequestOutcome?: Exclude<AssistantProviderRequestOutcome, 'succeeded'>
       codexContinuation?: AssistantCodexContinuation
+      codexRolloutRelativePath?: string | null
       codexThreadId?: string | null
       acceptedNoReplyDeliveryContextOrdinals?: readonly number[] | null
       reactions?: readonly AssistantCurrentMessageReactionAction[] | null

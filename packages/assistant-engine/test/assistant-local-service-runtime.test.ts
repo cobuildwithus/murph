@@ -5475,6 +5475,9 @@ test('sendAssistantMessageLocal recovers reaction no-reply before draining later
     await providerInput.onFinishWithoutReplyAccepted?.({
       deliveryContextOrdinal: 0,
     })
+    await providerInput.onFinishWithoutReplyRecorded?.({
+      deliveryContextOrdinal: 0,
+    })
     releaseLiveTurn?.()
     return {
       acceptedNoReplyDeliveryContextOrdinals: [0],
@@ -6161,6 +6164,9 @@ test('sendAssistantMessageLocal durably records accepted no-reply markers before
     await providerInput.onFinishWithoutReplyAccepted?.({
       deliveryContextOrdinal: 0,
     })
+    await providerInput.onFinishWithoutReplyRecorded?.({
+      deliveryContextOrdinal: 0,
+    })
     return {
       kind: 'succeeded',
       providerTurn: {
@@ -6260,6 +6266,10 @@ test('sendAssistantMessageLocal writes no-reply markers after caller retry fence
 })
 
 test('sendAssistantMessageLocal completes no-reply if marker persistence fails after acceptance', async () => {
+  const codexThreadId = '00000000-0000-4000-8000-000000000620'
+  const codexRolloutRelativePath =
+    `sessions/2026/07/14/rollout-2026-07-14T01-02-03-${codexThreadId}.jsonl`
+  const assistantContractFingerprint = 'a'.repeat(64)
   const session = createAssistantSession({
     sessionId: 'session-no-reply-marker-final-write',
   })
@@ -6279,16 +6289,21 @@ test('sendAssistantMessageLocal completes no-reply if marker persistence fails a
       await providerInput.onFinishWithoutReplyAccepted?.({
         deliveryContextOrdinal: 0,
       })
+      await providerInput.onFinishWithoutReplyRecorded?.({
+        deliveryContextOrdinal: 0,
+      })
     } catch (error) {
       terminalError = error
     }
     return {
       acceptedNoReplyDeliveryContextOrdinals: [0],
+      assistantContractFingerprint,
       attemptCount: 1,
       codexContinuation: {
         kind: 'explicit-structured-history',
       },
-      codexThreadId: 'provider-thread-no-reply-marker-final-write',
+      codexRolloutRelativePath,
+      codexThreadId,
       error: terminalError instanceof Error
         ? terminalError
         : new Error('missing marker failure'),
@@ -6335,6 +6350,9 @@ test('sendAssistantMessageLocal completes no-reply if marker persistence fails a
       assistantTranscriptText: null,
       providerResult: expect.objectContaining({
         acceptedNoReplyDeliveryContextOrdinals: [0],
+        assistantContractFingerprint,
+        codexRolloutRelativePath,
+        codexThreadId,
         finalAction: {
           kind: 'none',
         },
@@ -6405,6 +6423,9 @@ test('sendAssistantMessageLocal persists live-steered input before its no-reply 
     providerStarted.resolve()
     await providerRelease.promise
     await providerInput.onFinishWithoutReplyAccepted?.({
+      deliveryContextOrdinal: 1,
+    })
+    await providerInput.onFinishWithoutReplyRecorded?.({
       deliveryContextOrdinal: 1,
     })
     releaseLiveTurn?.()
@@ -6545,6 +6566,9 @@ test('sendAssistantMessageLocal completes terminal provider failures after live-
     providerStarted.resolve()
     await providerRelease.promise
     await providerInput.onFinishWithoutReplyAccepted?.({
+      deliveryContextOrdinal: 1,
+    })
+    await providerInput.onFinishWithoutReplyRecorded?.({
       deliveryContextOrdinal: 1,
     })
     releaseLiveTurn?.()

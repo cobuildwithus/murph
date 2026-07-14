@@ -427,6 +427,9 @@ export interface CodexAppServerTurnInput {
   onFinishWithoutReplyAccepted?: ((event: {
     deliveryContextOrdinal: number
   }) => Promise<void> | void) | null
+  onFinishWithoutReplyRecorded?: ((event: {
+    deliveryContextOrdinal: number
+  }) => Promise<void> | void) | null
   onProviderRequestStarted?: ((event: AssistantProviderRequestStartedEvent) => Promise<void> | void) | null
   onTraceEvent?: (event: AssistantProviderTraceEvent) => void
   hostedGeneratedImageUploader?: AssistantHostedGeneratedImageUploader | null
@@ -464,6 +467,7 @@ export interface CodexAppServerTurnFailureContext {
   }[]
   codexThreadId: string | null
   providerTurnId: string | null
+  rolloutRelativePath: string | null
 }
 
 const CODEX_APP_SERVER_TURN_FAILURE_CONTEXT =
@@ -501,6 +505,7 @@ export function readCodexAppServerTurnFailureContext(
     reactions: (context.reactions ?? []).map((entry) => ({ ...entry })),
     codexThreadId: context.codexThreadId,
     providerTurnId: context.providerTurnId,
+    rolloutRelativePath: context.rolloutRelativePath,
   }
 }
 
@@ -2488,6 +2493,7 @@ async function runCodexAppServerTurnOnProcess(
       })),
       codexThreadId,
       providerTurnId: turnId,
+      rolloutRelativePath,
     } satisfies CodexAppServerTurnFailureContext
     codexAppServerTurnFailureContexts.set(error, context)
     try {
@@ -3037,6 +3043,9 @@ async function runCodexAppServerTurnOnProcess(
       ]
       if (patch.kind === 'none') {
         reservedNoReplyDeliveryContextOrdinals.delete(deliveryContextOrdinal)
+        await input.onFinishWithoutReplyRecorded?.({
+          deliveryContextOrdinal,
+        })
       }
       return true
     } catch (error) {

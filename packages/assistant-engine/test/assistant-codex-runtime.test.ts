@@ -13893,6 +13893,106 @@ describe('assistant codex event shaping', () => {
       })
     })
 
+    it('preserves accepted no-reply and rollout context when the recorded hook fails', async () => {
+      const workingDirectory = await createTempDir('assistant-codex-no-reply-recorded-fail-work-')
+      const codexHome = await createTempDir('assistant-codex-no-reply-recorded-fail-home-')
+      const threadId = '00000000-0000-4000-8000-000000000620'
+      const rolloutRelativePath =
+        `sessions/2026/07/14/rollout-2026-07-14T01-02-03-${threadId}.jsonl`
+      const onFinishWithoutReplyAccepted = vi.fn()
+      const markerFailure = new Error('no-reply marker persistence failed')
+      const recordedHookCalled = createDeferred<void>()
+      const onFinishWithoutReplyRecorded = vi.fn(async () => {
+        recordedHookCalled.resolve()
+        throw markerFailure
+      })
+      const spawnedChildren: MockChildProcess[] = []
+      mockProcessGroupSignalsForChildren(spawnedChildren)
+
+      codexMocks.spawn.mockImplementation(() => {
+        const child = new MockChildProcess()
+        child.pid = 31_475 + spawnedChildren.length
+        spawnedChildren.push(child)
+
+        queueMicrotask(() => {
+          void (async () => {
+            const initialize = await waitForRpcMethod(child, 'initialize')
+            child.stdout.write(jsonLine({ id: initialize.id, result: {} }))
+            const thread = await waitForRpcMethod(child, 'thread/start')
+            child.stdout.write(jsonLine({
+              id: thread.id,
+              result: {
+                thread: {
+                  id: threadId,
+                  path: path.join(codexHome, rolloutRelativePath),
+                },
+              },
+            }))
+            const turn = await waitForRpcMethod(child, 'turn/start')
+            child.stdout.write(jsonLine({
+              id: turn.id,
+              result: {
+                turn: {
+                  id: 'turn-no-reply-recorded-fail',
+                },
+              },
+            }))
+            child.stdout.write(jsonLine({
+              id: 43,
+              method: 'item/tool/call',
+              params: {
+                namespace: 'murph',
+                tool: 'finish_without_reply',
+                arguments: {},
+                threadId,
+                turnId: 'turn-no-reply-recorded-fail',
+              },
+            }))
+            await recordedHookCalled.promise
+          })()
+        })
+
+        return child
+      })
+
+      const error: unknown = await executeCodexAppServerTurn({
+        approvalPolicy: 'never',
+        codexHome,
+        env: {
+          PATH: '/custom/bin',
+        },
+        onFinishWithoutReplyAccepted,
+        onFinishWithoutReplyRecorded,
+        prompt: 'finish without replying',
+        sandbox: 'workspace-write',
+        workingDirectory,
+      }).then(
+        () => {
+          throw new Error('expected the recorded hook to fail the Codex turn')
+        },
+        (turnError: unknown) => turnError,
+      )
+
+      expect(error).toBe(markerFailure)
+      expect(onFinishWithoutReplyAccepted).toHaveBeenCalledWith({
+        deliveryContextOrdinal: 0,
+      })
+      expect(onFinishWithoutReplyRecorded).toHaveBeenCalledWith({
+        deliveryContextOrdinal: 0,
+      })
+      expect(
+        onFinishWithoutReplyAccepted.mock.invocationCallOrder[0],
+      ).toBeLessThan(
+        onFinishWithoutReplyRecorded.mock.invocationCallOrder[0],
+      )
+      expect(readCodexAppServerTurnFailureContext(error)).toMatchObject({
+        acceptedNoReplyDeliveryContextOrdinals: [0],
+        codexThreadId: threadId,
+        providerTurnId: 'turn-no-reply-recorded-fail',
+        rolloutRelativePath,
+      })
+    })
+
     it('caps tracked subagent usage threads and reports the dropped-thread count', async () => {
       const workingDirectory = await createTempDir('assistant-codex-subagent-cap-work-')
       const codexHome = await createTempDir('assistant-codex-subagent-cap-home-')

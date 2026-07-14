@@ -222,6 +222,7 @@ export async function executeCodexAssistantTurnAttempt(
     model: providerConfig.target.model ?? undefined,
     modelProvider: providerConfig.target.modelProvider ?? undefined,
     onFinishWithoutReplyAccepted: input.onFinishWithoutReplyAccepted ?? null,
+    onFinishWithoutReplyRecorded: input.onFinishWithoutReplyRecorded ?? null,
     publicInternetFetch: input.publicInternetFetch ?? null,
     onLiveTurn:
       input.activeTurnSteering
@@ -464,6 +465,7 @@ export async function executeCodexAssistantTurnAttempt(
           ? {
               acceptedNoReplyDeliveryContextOrdinals:
                 failureContext.acceptedNoReplyDeliveryContextOrdinals,
+              codexRolloutRelativePath: failureContext.rolloutRelativePath,
               reactions: failureContext.reactions,
               codexThreadId: failureContext.codexThreadId,
               providerTurnId: failureContext.providerTurnId,

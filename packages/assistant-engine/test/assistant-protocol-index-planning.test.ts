@@ -111,13 +111,15 @@ describe('assistant protocol index planning', () => {
     expect(plan).not.toHaveProperty(removedRouteEnvProperty)
   })
 
-  it('preserves the no-reply acceptance hook in Codex execution plans', async () => {
+  it('preserves the no-reply hooks in Codex execution plans', async () => {
     const onFinishWithoutReplyAccepted = vi.fn()
+    const onFinishWithoutReplyRecorded = vi.fn()
 
     const plan = await buildCodexTurnExecutionPlan({
       allowFinishWithoutReply: true,
       input: createMessageInput(),
       onFinishWithoutReplyAccepted,
+      onFinishWithoutReplyRecorded,
       plan: createSharedPlan(),
       resolvedSession: createSession(),
       route: createRoute(),
@@ -127,6 +129,7 @@ describe('assistant protocol index planning', () => {
 
     expect(plan.allowFinishWithoutReply).toBe(true)
     expect(plan.onFinishWithoutReplyAccepted).toBe(onFinishWithoutReplyAccepted)
+    expect(plan.onFinishWithoutReplyRecorded).toBe(onFinishWithoutReplyRecorded)
   })
 
   it('resolves disabled native resume notification turns as isolated threads', async () => {

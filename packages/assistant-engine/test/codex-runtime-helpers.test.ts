@@ -2263,11 +2263,14 @@ describe('Codex assistant registry helpers', () => {
 
     codexAppServerMocks.executeCodexAppServerTurn.mockRejectedValueOnce(error)
     codexAppServerMocks.readCodexAppServerTurnFailureContext.mockReturnValueOnce({
+      acceptedNoReplyDeliveryContextOrdinals: [0],
       additionalUsages: [],
       codexThreadId: 'thread-failed-issues',
       jsonEvents: [],
       providerActionCount: 1,
       providerTurnId: 'turn-failed-issues',
+      reactions: [],
+      rolloutRelativePath: 'sessions/2026/07/14/rollout-thread-failed-issues.jsonl',
       runtimeIssueInputs: [runtimeIssueInput],
     })
 
@@ -2290,6 +2293,10 @@ describe('Codex assistant registry helpers', () => {
       runtimeIssueInputs: [runtimeIssueInput],
     })
     expect(attempt.rawEvents).toEqual([])
+    expect(attempt.acceptedNoReplyDeliveryContextOrdinals).toEqual([0])
+    expect(attempt.codexRolloutRelativePath).toBe(
+      'sessions/2026/07/14/rollout-thread-failed-issues.jsonl',
+    )
     expect(attempt.codexThreadId).toBe('thread-failed-issues')
     expect(attempt.providerTurnId).toBe('turn-failed-issues')
   })

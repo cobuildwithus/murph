@@ -1064,6 +1064,8 @@ export async function sendAssistantMessageLocal(
                   sharedPlan,
                 }),
             })
+          },
+          onFinishWithoutReplyRecorded: async (event) => {
             await persistAssistantNoReplyTranscriptMarkers({
               deliveryContextOrdinals: [event.deliveryContextOrdinal],
               sessionId: currentSession.sessionId,
@@ -1241,9 +1243,12 @@ export async function sendAssistantMessageLocal(
             const failedNoReplySession = currentSession
             const failedNoReplyProviderResult: ExecutedAssistantProviderTurnResult = {
               acceptedNoReplyDeliveryContextOrdinals: acceptedNoReplyOrdinals,
-              assistantContractFingerprint: '',
+              assistantContractFingerprint:
+                providerOutcome.assistantContractFingerprint,
               attemptCount: providerOutcome.attemptCount,
               codexContinuation: providerOutcome.codexContinuation,
+              codexRolloutRelativePath:
+                providerOutcome.codexRolloutRelativePath,
               codexThreadId: providerOutcome.codexThreadId,
               finalAction: {
                 kind: 'none',

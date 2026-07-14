@@ -257,6 +257,9 @@ export interface AssistantCodexTurnExecutionPlan {
   onFinishWithoutReplyAccepted?: ((event: {
     deliveryContextOrdinal: number
   }) => Promise<void> | void) | null
+  onFinishWithoutReplyRecorded?: ((event: {
+    deliveryContextOrdinal: number
+  }) => Promise<void> | void) | null
   profile: AssistantCodexTurnResolvedExecutionProfile
   preferenceContext?: AssistantTurnPreferenceContext
   promptTimeContext: AssistantPromptTimeContext
@@ -338,6 +341,9 @@ export async function buildCodexTurnExecutionPlan(input: {
   onFinishWithoutReplyAccepted?: ((event: {
     deliveryContextOrdinal: number
   }) => Promise<void> | void) | null
+  onFinishWithoutReplyRecorded?: ((event: {
+    deliveryContextOrdinal: number
+  }) => Promise<void> | void) | null
   plan: AssistantTurnSharedPlan
   profile?: AssistantCodexTurnThreadScopeProfile | null
   resolvedSession: AssistantSession
@@ -363,6 +369,7 @@ export async function buildCodexTurnExecutionPlan(input: {
     executionContext,
     input: input.input,
     onFinishWithoutReplyAccepted: input.onFinishWithoutReplyAccepted ?? null,
+    onFinishWithoutReplyRecorded: input.onFinishWithoutReplyRecorded ?? null,
     profile,
     preferenceContext,
     promptTimeContext,
