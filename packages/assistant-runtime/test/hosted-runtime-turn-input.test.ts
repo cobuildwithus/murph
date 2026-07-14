@@ -464,7 +464,7 @@ describe("createHostedAssistantInputSource", () => {
       source: "linq",
       threadIsDirect: false,
     },
-  ])("exposes an older $name before a newly enqueued strict input", async (scenario) => {
+  ])("keeps an older $name outside a fresh active turn", async (scenario) => {
     const vaultRoot = await createTempVault();
     await enableAutoReply(vaultRoot, scenario.source);
     const initial = await upsertAssistantInputEvent({
@@ -512,10 +512,7 @@ describe("createHostedAssistantInputSource", () => {
       vaultRoot,
     });
     expect(selection.inputIds).toEqual([initial.inputId]);
-    expect(selection.activeTurnInputIds).toEqual([
-      initial.inputId,
-      barrier.inputId,
-    ]);
+    expect(selection.activeTurnInputIds).toEqual([initial.inputId]);
     const source = createHostedAssistantInputSource({
       initialActiveTurnInputIds: selection.activeTurnInputIds,
       pendingInputRefreshMode: "existing",

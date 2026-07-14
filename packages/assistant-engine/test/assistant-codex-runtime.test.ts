@@ -14840,7 +14840,10 @@ describe('steered final segments', () => {
       onCodexThreadHistoryUnsafe,
     })
 
-    expect(groupTool.request).toHaveBeenCalledWith({ action: 'list_memberships' })
+    expect(groupTool.request).toHaveBeenCalledWith(
+      { action: 'list_memberships' },
+      { deliveryContextOrdinal: 0 },
+    )
     expect(onCodexThreadHistoryUnsafe).toHaveBeenCalledOnce()
     expect(result.codexThreadHistoryUnsafe).toBe(true)
     expect(result.finalMessage).toBe('You belong to Sunday runners.')
