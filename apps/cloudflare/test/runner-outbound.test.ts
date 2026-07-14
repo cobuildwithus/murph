@@ -5279,13 +5279,13 @@ describe("handleRunnerOutboundRequest", () => {
         snapshotId,
       }),
     }));
-    expect(runner.deleteHostedWorkspaceSnapshotUploadSession).toHaveBeenCalledOnce();
-    expect(runner.workspaceSnapshotUploadSessions.has(snapshotId)).toBe(false);
+    expect(runner.deleteHostedWorkspaceSnapshotUploadSession).not.toHaveBeenCalled();
+    expect(runner.workspaceSnapshotUploadSessions.has(snapshotId)).toBe(true);
     expect(runner.recordHostedWorkspaceSnapshotOrphanCandidate).not.toHaveBeenCalled();
     expect(head).toHaveBeenCalledWith(objectKey);
   });
 
-  it("deletes the replaced successful workspace snapshot after checkpoint CAS", async () => {
+  it("retains the replaced successful workspace snapshot for delayed cleanup after checkpoint CAS", async () => {
     const runner = createWorkspaceVersionAwareUserRunner();
     const bytes = new Uint8Array([1, 2, 3, 4]);
     const snapshotId = "snapshot_complete_replaces_previous";
@@ -5362,12 +5362,16 @@ describe("handleRunnerOutboundRequest", () => {
     );
 
     expect(response.status).toBe(200);
-    expect(deleteObject).toHaveBeenCalledWith(replacedObjectKey);
+    expect(deleteObject).not.toHaveBeenCalled();
     expect(runner.recordHostedWorkspaceSnapshotOrphanCandidate).not.toHaveBeenCalled();
     expect(runner.workspaceSnapshotOrphanCandidates.has(replacedSnapshotId)).toBe(false);
+    expect(runner.workspaceSnapshotUploadSessions.get(snapshotId)).toMatchObject({
+      replacedSnapshotRef,
+      snapshotId,
+    });
   });
 
-  it("deletes replaced legacy workspace snapshot bundles and artifacts after checkpoint CAS", async () => {
+  it("retains replaced legacy workspace snapshot bundles for delayed cleanup after checkpoint CAS", async () => {
     const fixture = await createHostedRuntimeCryptoContextFixture();
     const runner = createWorkspaceVersionAwareUserRunner();
     const bytes = new Uint8Array([1, 2, 3, 4]);
@@ -5470,20 +5474,20 @@ describe("handleRunnerOutboundRequest", () => {
     );
 
     expect(response.status).toBe(200);
-    expect(bucket.objects.has(legacyBaseRef.key)).toBe(false);
-    expect(bucket.objects.has(legacyDeltaRef.key)).toBe(false);
-    expect(bucket.objects.has(legacyArtifactKey)).toBe(false);
-    expect(bucket.deleted).toEqual(expect.arrayContaining([
-      legacyBaseRef.key,
-      legacyDeltaRef.key,
-      legacyArtifactKey,
-    ]));
+    expect(bucket.objects.has(legacyBaseRef.key)).toBe(true);
+    expect(bucket.objects.has(legacyDeltaRef.key)).toBe(true);
+    expect(bucket.objects.has(legacyArtifactKey)).toBe(true);
+    expect(bucket.deleted).toEqual([]);
     expect(runner.recordHostedWorkspaceSnapshotOrphanCandidate).not.toHaveBeenCalled();
     expect(runner.workspaceSnapshotOrphanCandidates.has(`legacy-${snapshotId}`)).toBe(false);
-    expect(fixture.fetchMock).toHaveBeenCalledOnce();
+    expect(runner.workspaceSnapshotUploadSessions.get(snapshotId)).toMatchObject({
+      replacedSnapshotRef,
+      snapshotId,
+    });
+    expect(fixture.fetchMock).not.toHaveBeenCalled();
   });
 
-  it("records the replaced successful workspace snapshot for retry when direct deletion fails", async () => {
+  it("does not attempt direct replaced snapshot deletion after checkpoint CAS", async () => {
     const runner = createWorkspaceVersionAwareUserRunner();
     const bytes = new Uint8Array([1, 2, 3, 4]);
     const snapshotId = "snapshot_complete_replaces_previous_delete_fails";
@@ -5562,124 +5566,15 @@ describe("handleRunnerOutboundRequest", () => {
     );
 
     expect(response.status).toBe(200);
-    expect(deleteObject).toHaveBeenCalledWith(replacedObjectKey);
-    expect(runner.recordHostedWorkspaceSnapshotOrphanCandidate).toHaveBeenCalledWith({
-      createdAt: expect.stringMatching(/^20/u),
-      objectKey: replacedObjectKey,
-      schema: HOSTED_WORKSPACE_SNAPSHOT_ORPHAN_CANDIDATE_SCHEMA,
-      snapshotId: replacedSnapshotId,
-      userId: "member_123",
-    });
-    expect(runner.workspaceSnapshotOrphanCandidates.get(replacedSnapshotId)).toMatchObject({
-      objectKey: replacedObjectKey,
-      snapshotId: replacedSnapshotId,
-    });
-  });
-
-  it("rejects snapshot completion when replaced snapshot cleanup has no durable outcome", async () => {
-    const runner = createWorkspaceVersionAwareUserRunner();
-    const bytes = new Uint8Array([1, 2, 3, 4]);
-    const snapshotId = "snapshot_complete_replaces_previous_cleanup_fails";
-    const objectKey = await hostedWorkspaceSnapshotObjectKey({
-      snapshotId,
-      userId: "member_123",
-    });
-    const snapshotRef = createWorkspaceSnapshotV2Ref({
-      encryptedByteSize: bytes.byteLength,
-      encryptedObjectSha256: sha256Hex(bytes),
-      objectKey,
-      snapshotId,
-      userId: "member_123",
-    });
-    const replacedSnapshotId = "snapshot_previous_cleanup_fails";
-    const replacedObjectKey = await hostedWorkspaceSnapshotObjectKey({
-      snapshotId: replacedSnapshotId,
-      userId: "member_123",
-    });
-    const replacedSnapshotRef = createWorkspaceSnapshotV2Ref({
-      encryptedByteSize: 5,
-      encryptedObjectSha256: "b".repeat(64),
-      objectKey: replacedObjectKey,
-      snapshotId: replacedSnapshotId,
-      userId: "member_123",
-    });
-    runner.recordHostedWorkspaceSnapshotOrphanCandidate.mockImplementationOnce(async () => {
-      throw new Error("orphan recording failed");
-    });
-    runner.workspaceSnapshotUploadSessions.set(snapshotId, createWorkspaceSnapshotUploadSession(snapshotRef));
-    const deleteObject = vi.fn(async () => {
-      throw new Error("delete failed");
-    });
-    const env = createRunnerOutboundEnv({
-      BUNDLES: createWorkspaceSnapshotBucket(
-        async (key) => ({ key, size: bytes.byteLength }),
-        async (key) => ({
-          checksums: createWorkspaceSnapshotHeadChecksums(snapshotRef),
-          customMetadata: createWorkspaceSnapshotHeadMetadata(snapshotRef),
-          key,
-          size: bytes.byteLength,
-        }),
-        deleteObject,
-      ),
-      USER_RUNNER: {
-        getByName: runner.getByName,
-      },
-    });
-    const fetchMock = createWorkspaceSnapshotCompleteWebFetchMock({
-      currentSnapshotRef: replacedSnapshotRef,
-      onCheckpoint: (args) => {
-        const checkpointRequest = readTestFetchBodyObject(args, "workspace snapshot checkpoint request");
-        return new Response(
-          JSON.stringify({
-            ...createHostedWorkspaceCheckpointResponseWithSnapshotRef(
-              "5",
-              checkpointRequest.snapshotRef,
-            ),
-            replacedSnapshotRef,
-          }),
-          {
-            headers: {
-              "content-type": "application/json; charset=utf-8",
-            },
-            status: 200,
-          },
-        );
-      },
-    });
-    vi.stubGlobal("fetch", fetchMock);
-
-    const response = await handleRunnerOutboundRequest(
-      createWorkspaceSnapshotCompleteRequest({
-        snapshotId,
-        snapshotRef,
-        workspaceVersion: "4",
-      }),
-      env,
-      "member_123",
-    );
-
-    expect(response.status).toBe(503);
-    await expect(response.json()).resolves.toEqual({
-      error: "Hosted workspace replaced snapshot cleanup failed.",
-    });
-    expect(fetchMock).toHaveBeenCalledTimes(2);
-    expect(runner.deleteHostedWorkspaceSnapshotUploadSession).not.toHaveBeenCalled();
-    expect(deleteObject).toHaveBeenCalledWith(replacedObjectKey);
-    expect(runner.recordHostedWorkspaceSnapshotOrphanCandidate).toHaveBeenCalledOnce();
-    expect(runner.workspaceSnapshotOrphanCandidates.has(replacedSnapshotId)).toBe(false);
-    expect(runner.rememberHostedWorkspaceSnapshotReplacedRef).toHaveBeenCalledWith({
-      expectedSession: expect.objectContaining({
-        snapshotId,
-      }),
-      replacedSnapshotRef,
-    });
+    expect(deleteObject).not.toHaveBeenCalled();
+    expect(runner.recordHostedWorkspaceSnapshotOrphanCandidate).not.toHaveBeenCalled();
     expect(runner.workspaceSnapshotUploadSessions.get(snapshotId)).toMatchObject({
       replacedSnapshotRef,
       snapshotId,
     });
   });
 
-  it("preserves the replacement owner's session when post-checkpoint cleanup becomes stale", async () => {
+  it("preserves the selected restore object when post-checkpoint completion becomes stale", async () => {
     const runner = createWorkspaceVersionAwareUserRunner();
     const bytes = new Uint8Array([1, 2, 3, 4]);
     const snapshotId = "snapshot_complete_stale_cleanup_owner";
@@ -5728,12 +5623,7 @@ describe("handleRunnerOutboundRequest", () => {
       attemptId: "attempt_2",
       leaseGeneration: "10",
     };
-    runner.recordHostedWorkspaceSnapshotOrphanCandidate.mockImplementationOnce(async () => {
-      throw new Error("orphan recording failed");
-    });
-    const deleteObject = vi.fn(async () => {
-      throw new Error("delete failed");
-    });
+    const deleteObject = vi.fn(async () => {});
     const env = createRunnerOutboundEnv({
       BUNDLES: createWorkspaceSnapshotBucket(
         async (key) => ({ key, size: bytes.byteLength }),
@@ -5750,6 +5640,7 @@ describe("handleRunnerOutboundRequest", () => {
       },
     });
     const fetchMock = createWorkspaceSnapshotCompleteWebFetchMock({
+      currentSnapshotRef: replacedSnapshotRef,
       onCheckpoint: async (args) => {
         const checkpointRequest = readTestFetchBodyObject(
           args,
@@ -5789,10 +5680,7 @@ describe("handleRunnerOutboundRequest", () => {
       "member_123",
     );
 
-    expect(response.status).toBe(503);
-    await expect(response.json()).resolves.toEqual({
-      error: "Hosted workspace replaced snapshot cleanup failed.",
-    });
+    expect(response.status).toBe(200);
     expect(runner.rememberHostedWorkspaceSnapshotReplacedRef).toHaveBeenCalledWith({
       expectedSession: staleSession,
       replacedSnapshotRef,
@@ -5803,7 +5691,7 @@ describe("handleRunnerOutboundRequest", () => {
       .toBeUndefined();
     expect(runner.deleteHostedWorkspaceSnapshotUploadSession).not.toHaveBeenCalled();
     expect(runner.workspaceSnapshotOrphanCandidates.has(activeSnapshotId)).toBe(false);
-    expect(deleteObject).toHaveBeenCalledWith(replacedObjectKey);
+    expect(deleteObject).not.toHaveBeenCalled();
   });
 
   it("does not checkpoint when the replaced snapshot cleanup ref cannot be persisted first", async () => {
@@ -5886,7 +5774,7 @@ describe("handleRunnerOutboundRequest", () => {
     expect(runner.workspaceSnapshotUploadSessions.get(snapshotId)?.replacedSnapshotRef).toBeUndefined();
   });
 
-  it("finishes replaced snapshot cleanup when completion retry sees the new snapshot already current", async () => {
+  it("retains delayed cleanup when completion retry sees the new snapshot already current", async () => {
     const runner = createWorkspaceVersionAwareUserRunner();
     const bytes = new Uint8Array([1, 2, 3, 4]);
     const snapshotId = "snapshot_complete_retry_replaced_cleanup";
@@ -5982,13 +5870,13 @@ describe("handleRunnerOutboundRequest", () => {
         version: "5",
       }),
     }));
-    expect(deleteObject).toHaveBeenCalledWith(replacedObjectKey);
+    expect(deleteObject).not.toHaveBeenCalled();
     expect(runner.recordHostedWorkspaceSnapshotOrphanCandidate).not.toHaveBeenCalled();
-    expect(runner.deleteHostedWorkspaceSnapshotUploadSession).toHaveBeenCalledWith({
+    expect(runner.deleteHostedWorkspaceSnapshotUploadSession).not.toHaveBeenCalled();
+    expect(runner.workspaceSnapshotUploadSessions.get(snapshotId)).toMatchObject({
+      replacedSnapshotRef,
       snapshotId,
-      userId: "member_123",
     });
-    expect(runner.workspaceSnapshotUploadSessions.has(snapshotId)).toBe(false);
   });
 
   it("ignores replaced successful workspace snapshots outside the bound user namespace", async () => {
@@ -6198,8 +6086,8 @@ describe("handleRunnerOutboundRequest", () => {
       },
       method: "HEAD",
     }));
-    expect(runner.deleteHostedWorkspaceSnapshotUploadSession).toHaveBeenCalledOnce();
-    expect(runner.workspaceSnapshotUploadSessions.has(snapshotId)).toBe(false);
+    expect(runner.deleteHostedWorkspaceSnapshotUploadSession).not.toHaveBeenCalled();
+    expect(runner.workspaceSnapshotUploadSessions.has(snapshotId)).toBe(true);
   });
 
   it("rejects hosted-local workspace snapshot completion when HEAD omits the checksum header", async () => {
