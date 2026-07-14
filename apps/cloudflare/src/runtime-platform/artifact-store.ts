@@ -231,6 +231,16 @@ export function createCloudflareArtifactStore(input: {
           response = await fetchHostedResponse({
             description: "Hosted artifact fetch",
             fetchImpl,
+            ...(input.workspaceCheckpointBridge
+              ? {
+                  init: {
+                    headers: await requireHostedRuntimeWriteFenceHeaders(
+                      input.workspaceCheckpointBridge,
+                      "Hosted artifact fetch",
+                    ),
+                  },
+                }
+              : {}),
             redactedLogPath: "/objects/REDACTED",
             timeoutMs,
             url: new URL(`/objects/${sha256}`, `${CLOUDFLARE_HOSTED_RUNTIME_BASE_URLS.artifactStore}/`),

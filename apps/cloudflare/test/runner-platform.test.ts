@@ -2335,6 +2335,20 @@ describe("buildHostedExecutionRuntimePlatform", () => {
     expect(serializedLogs).not.toContain("a".repeat(64));
   });
 
+  it("attaches the active runtime write fence to legacy artifact reads", async () => {
+    const fetchMock = vi.fn(async () => new Response(null, { status: 404 }));
+    const platform = buildTestHostedExecutionRuntimePlatform({
+      boundUserId: "member_123",
+      fetchImpl: fetchMock as typeof fetch,
+    });
+
+    await expect(platform.artifactStore.get("a".repeat(64))).resolves.toBeNull();
+
+    const request = requireFetchRequest(fetchMock.mock.calls[0], "artifact read");
+    expect(request.url).toBe(`http://artifacts.worker/objects/${"a".repeat(64)}`);
+    expectDefaultRuntimeWriteFenceHeaders(request);
+  });
+
   it("retries replay-safe artifact fetch transport failures once", async () => {
     const fetchMock = vi.fn(async () => {
       if (fetchMock.mock.calls.length === 1) {
@@ -3506,7 +3520,7 @@ describe("buildHostedExecutionRuntimePlatform", () => {
     expect(fetchMock).toHaveBeenCalledTimes(1);
   });
 
-  it("routes raw email reads through the Cloudflare internal effects port and attaches the invocation proxy token", async () => {
+  it("routes raw email reads through the Cloudflare internal effects port with the active runtime fence", async () => {
     const fetchMock = vi.fn(async () => new Response(null, { status: 200 }));
     const platform = buildTestHostedExecutionRuntimePlatform({
       boundUserId: "member_123",
@@ -3526,6 +3540,9 @@ describe("buildHostedExecutionRuntimePlatform", () => {
     expect(fetchMock).toHaveBeenCalledTimes(1);
     const request = requireFetchRequest(fetchMock.mock.calls[0], "effects port fetch");
     expect(request.url).toBe("http://results.worker/messages/raw%2Fmessage%231");
+    expect(request.headers.get(HOSTED_RUNTIME_ATTEMPT_ID_HEADER)).toBe("attempt_1");
+    expect(request.headers.get(HOSTED_RUNTIME_LEASE_GENERATION_HEADER)).toBe("9");
+    expect(request.headers.get(HOSTED_RUNTIME_WORKSPACE_VERSION_HEADER)).toBe("4");
     expect(request.headers.has("x-hosted-execution-runner-proxy-token")).toBe(false);
     expect(request.method).toBe("GET");
   });

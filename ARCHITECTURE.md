@@ -1,6 +1,6 @@
 # Murph Architecture
 
-Last verified: 2026-07-13
+Last verified: 2026-07-14
 
 ## Hosted Group Self-Awareness
 
@@ -14,6 +14,8 @@ Hosted group runtimes execute as synthetic thread-container members, not as any 
 External conversation directness is three-state authority. Explicit direct evidence and the local no-route fallback permit private-member context; explicit non-direct evidence permits synthetic group-container context; an external audience with unknown directness is unverified and receives neither authority. One conversation-scope resolver owns that classification. Stored directness applies only to its stored audience, and an allowed session rebind clears it when the audience changes without fresh directness evidence. Unverified inbound conversations receive a deterministic audience-safety reply without starting the provider, unverified notifications skip before every model or exact-text delivery path, and provider planning rejects unverified audiences as a final boundary assertion.
 
 Hosted automation writes also use the current-route bridge as an authority boundary. A hosted conversation may create, edit, import, pause, or reactivate an automation only for that same conversation; the CLI persists a canonical trusted snapshot with authoritative audience evidence instead of trusting model-supplied locators or directness. Explicit cross-route authoring remains a local operator capability. Hosted execution refuses legacy routes whose audience directness is still unknown before provider or delivery work, records a typed retryable failure without consuming the occurrence, and requires an edit or reactivation from the intended conversation to repair the route.
+
+Member-scoped hosted runner operations validate the existing active runtime write fence at the Cloudflare route that owns the read or effect. The fence binds the claimed member, attempt, and lease generation before private-content decryption, artifact access, signed web callbacks, or durable mutation. Runtime clients attach the current lease through their existing transport boundary; member-scoped identity and authority are never derived from Cloudflare container ids. The pre-binding container-fatal sink is the sole log-only exception.
 
 ## Hosted Computer Authentication
 
