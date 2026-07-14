@@ -17,7 +17,7 @@ const mocks = vi.hoisted(() => {
 
   return {
     appendHostedMailboxEnvelopeTx: vi.fn(),
-    checkHostedAiUsageGate: vi.fn(),
+    readHostedAiUsageGate: vi.fn(),
     ensureHostedWorkspace: vi.fn(),
     getPrisma: vi.fn(),
     hostedMemberFindUnique,
@@ -68,8 +68,8 @@ vi.mock("@/src/lib/hosted-orchestration/runtime-usage-decision", () => ({
 }));
 
 vi.mock("@/src/lib/hosted-execution/usage-allowance", () => ({
-  checkHostedAiUsageGate: mocks.checkHostedAiUsageGate,
-  readHostedAiUsageGate: vi.fn(),
+  checkHostedAiUsageGate: vi.fn(),
+  readHostedAiUsageGate: mocks.readHostedAiUsageGate,
   resolveHostedAiUsageGate: vi.fn(),
 }));
 
@@ -92,7 +92,7 @@ describe("hosted runtime Temporal signaling", () => {
     mocks.resolveHostedRuntimeAiUsageGate.mockResolvedValue({
       status: "allowed",
     });
-    mocks.checkHostedAiUsageGate.mockResolvedValue({
+    mocks.readHostedAiUsageGate.mockResolvedValue({
       allowed: true,
       usageAttribution: {
         groupId: "family_explicit_prisma",
@@ -754,7 +754,7 @@ describe("hosted runtime Temporal signaling", () => {
       },
     });
 
-    expect(mocks.checkHostedAiUsageGate).toHaveBeenCalledWith({
+    expect(mocks.readHostedAiUsageGate).toHaveBeenCalledWith({
       memberId: "member_123",
       now: new Date("2026-05-20T12:00:00.000Z"),
       prisma: explicitPrisma,
