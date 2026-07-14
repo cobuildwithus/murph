@@ -158,7 +158,8 @@ extension bridge: `POST /api/device-sync/companion/imessage-mini-app/enrollment`
 uses a verified Privy identity token to mint a random 24-hour, member-scoped
 derived bearer. Only its hash enters the existing short-lived session store,
 its `hbds_imessage_` prefix is rejected by device-agent authority, and every
-Messages action re-checks active access plus launch consent. The containing
+proof action re-checks active access plus launch consent. Authenticated
+self-revocation remains available after access or consent is lost. The containing
 app may share only this derived credential through an explicitly addressed
 Keychain group; Privy tokens remain host-private and never enter the extension
 or capability-less message URL. The proof action is non-durable and does not
