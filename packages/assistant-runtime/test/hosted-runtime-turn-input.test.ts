@@ -20,6 +20,7 @@ import {
 import { resolveAssistantStatePaths } from "@murphai/runtime-state/node/assistant-state-fs";
 
 import {
+  compactHostedPendingAssistantInputIds,
   enqueueHostedPendingAssistantInputId,
   ensureHostedPendingAssistantInputIndex,
   readHostedPendingAssistantInputIds,
@@ -1083,7 +1084,6 @@ describe("selectHostedConversationReplayInputs", () => {
   });
 
   it("recovers a committed exact intent after terminal compaction", async () => {
-    const listSpy = vi.spyOn(assistantEngine, "listAssistantInputEvents");
     const vaultRoot = await createTempVault();
     await enableLinqAutoReply(vaultRoot);
     const accepted = await upsertAssistantInputEvent({
@@ -1109,6 +1109,7 @@ describe("selectHostedConversationReplayInputs", () => {
       inputId: accepted.inputId,
       vaultRoot,
     });
+    await expect(compactHostedPendingAssistantInputIds({ vaultRoot })).resolves.toEqual([]);
     await writeFile(
       path.join(
         resolveAssistantStatePaths(vaultRoot).assistantStateRoot,
@@ -1118,6 +1119,7 @@ describe("selectHostedConversationReplayInputs", () => {
       "{malformed unrelated record",
       "utf8",
     );
+    const listSpy = vi.spyOn(assistantEngine, "listAssistantInputEvents");
 
     const selection = await selectHostedConversationReplayInputs({
       acceptedConversationSeq: "20",

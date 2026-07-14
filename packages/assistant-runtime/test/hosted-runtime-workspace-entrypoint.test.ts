@@ -1242,6 +1242,9 @@ describe("hosted workspace runtime entrypoint", () => {
                       inputId: restoredInputId,
                       vaultRoot: input.durableRoot,
                     });
+                    await expect(compactHostedPendingAssistantInputIds({
+                      vaultRoot: input.durableRoot,
+                    })).resolves.toEqual([]);
                     await writeFile(
                       path.join(
                         resolveAssistantStatePaths(input.durableRoot).assistantStateRoot,
@@ -1580,6 +1583,7 @@ describe("hosted workspace runtime entrypoint", () => {
     const events: string[] = [];
     const fetchRequests: HostedMailboxFetchRequest[] = [];
     let assistantPhaseCalls = 0;
+    let identityOnlyImportCalls = 0;
     let acceptedInputId: string | null = null;
     let laterInputId: string | null = null;
     const sourceSnapshotRef = createWorkspaceSnapshotV2Ref(
@@ -1611,10 +1615,18 @@ describe("hosted workspace runtime entrypoint", () => {
             ),
           };
         },
-        async importItem() {
-          throw new Error(
-            "A restored watermark ahead of the accepted row must not re-import mailbox items.",
-          );
+        async importItem(importedItem) {
+          if (importedItem.replayIdentityOnly !== true) {
+            throw new Error(
+              "A restored accepted row may recover identity only, not run a fresh import.",
+            );
+          }
+          identityOnlyImportCalls += 1;
+          assert.ok(acceptedInputId);
+          return {
+            assistantInputId: acceptedInputId,
+            status: "imported",
+          };
         },
         platform: createPlatform({
           mailboxPort: {
@@ -1688,6 +1700,7 @@ describe("hosted workspace runtime entrypoint", () => {
       });
 
       expect(assistantPhaseCalls).toBe(1);
+      expect(identityOnlyImportCalls).toBe(1);
       expect(checkpointRequests).toHaveLength(1);
       expect(checkpointRequests[0]?.conversationConsumedSeq).toBe("1");
       expect(fetchRequests[0]?.replayAuthority).toEqual({
@@ -23560,11 +23573,22 @@ function createMailboxPort(input: {
           fetchedAt: TEST_NOW,
           items: request.lanes.flatMap((lane) => {
             const importedSeq = BigInt(lane.importedSeq);
-            return input.items
+            const sequentialItems = input.items
               .filter((item) =>
                 lane.lane === item.lane && BigInt(item.laneSeq) > importedSeq
-              )
-              .slice(0, request.limitPerLane);
+              );
+            const exactReplayItem = lane.lane === "conversation"
+              && request.replayAuthority
+              ? input.items.find((item) =>
+                item.lane === lane.lane
+                && item.laneSeq === request.replayAuthority?.acceptedConversationSeq
+              ) ?? null
+              : null;
+            const selectedItems = exactReplayItem
+              && !sequentialItems.some((item) => item.id === exactReplayItem.id)
+              ? [exactReplayItem, ...sequentialItems]
+              : sequentialItems;
+            return selectedItems.slice(0, request.limitPerLane);
           }),
           maxSeqByLane: request.lanes.map((lane) => ({
             lane: lane.lane,
