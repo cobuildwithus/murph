@@ -48,6 +48,11 @@ describe("hosted mailbox routing", () => {
         lane: "system",
       },
       {
+        action: "run-clinical-records-sync",
+        kind: "clinical-records.sync-requested",
+        lane: "system",
+      },
+      {
         action: "run-device-sync-wake",
         kind: "device-sync.wake",
         lane: "system",
@@ -120,6 +125,7 @@ describe("hosted mailbox routing", () => {
     assert.equal(resolveExpectedLaneForHostedMailboxKind("member.channels.updated"), "system");
     assert.equal(resolveExpectedLaneForHostedMailboxKind("member.preferences.updated"), "system");
     assert.equal(resolveExpectedLaneForHostedMailboxKind("assistant.notification.requested"), "system");
+    assert.equal(resolveExpectedLaneForHostedMailboxKind("clinical-records.sync-requested"), "system");
     assert.equal(resolveExpectedLaneForHostedMailboxKind("device-sync.wake"), "system");
     assert.equal(resolveExpectedLaneForHostedMailboxKind("group-newsletter.email-needed"), "system");
     assert.equal(resolveExpectedLaneForHostedMailboxKind("meal-photo.captured"), "system");

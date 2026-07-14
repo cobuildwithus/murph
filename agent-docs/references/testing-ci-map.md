@@ -21,6 +21,12 @@ Last verified: 2026-07-14
 | `pnpm --dir apps/web test:viewport-overflow` | Playwright gate that renders each public marketing route at 320/375/390/768/1280px and fails on any horizontal document overflow, naming the offending element. Playwright owns the dev-server lifecycle (`apps/web/playwright.config.ts` `webServer`) and boots hosted-web with the placeholder smoke env on its own `.next-smoke-overflow` dist dir, so the pages render anonymously without a database or real secrets. Runs in its own CI workflow rather than `apps/web verify` so the Chromium dependency stays out of the build/lint/test/smoke lanes. | `apps/web/e2e/**`, `apps/web/playwright.config.ts`, and the public marketing routes listed in `apps/web/e2e/viewport-overflow.spec.ts` |
 | `MURPH_IMESSAGE_ENROLLMENT_TEST_DB_URL="$LOCAL_POSTGRES_URL" pnpm exec vitest run --config apps/web/vitest.config.ts apps/web/test/imessage-mini-app-account-deletion.db.test.ts --no-coverage` | Opt-in real-PostgreSQL proof for bounded Messages credential rotation and enrollment versus account deletion against an isolated, migrated local test database. The URL guard permits only loopback or local socket targets; the ordinary hosted-web workspace excludes `*.db.test.ts`, and the focused config additionally skips this suite when the dedicated variable is absent. | Repeated enrollment rotates one Messages-owned row while invalidating prior bearers and preserving ordinary sessions, including stale-generation self-revocation, re-enrollment after revocation and expiry, plus both deletion-first and enrollment-first serialization orders with final absence of the member and its device-agent session |
 
+Clinical-record execution coverage is split at its owners: hosted-execution
+tests lock the pointer/run/page/outcome codecs, vault-usecases tests prove
+raw-first replay plus real multi-page importer resolution, assistant-runtime
+tests prove finite retry/preemption/reauthorization behavior, and Cloudflare
+tests prove the signed web-control adapter and POST-only outbound allowlist.
+
 ## Current CI Workflows
 
 - Linux CI `apps/web verify` invocations default to wrapping the hosted-web production

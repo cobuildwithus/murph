@@ -44,8 +44,9 @@ export const RUNNER_ENTRYPOINT_BUNDLE_DIRECTORY_NAME = "dist-bundled";
 // headroom: the guard holds it to the measured baseline plus a tight noise
 // band. Any growth past baseline + tolerance fails the assembly, so weight
 // can only land on the boot path as a reviewed edit to the baseline constant
-// below. When an increase is intentional, set the baseline to the measured
-// value the failure prints and say why in the same change.
+// below. When an increase is intentional, advance the baseline by the exact
+// measured overage and say why in the same change; keep the existing noise
+// band separate so the reviewed growth cannot silently consume it.
 //
 // Node parses the entry chunk plus every statically reachable chunk before
 // HTTP listen, so the static boot closure is ratcheted with the same reviewed

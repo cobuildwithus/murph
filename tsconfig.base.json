@@ -75,6 +75,9 @@
       "@murphai/hosted-execution/clinical-records": [
         "./packages/hosted-execution/src/clinical-records.ts"
       ],
+      "@murphai/hosted-execution/clinical-records-boundary": [
+        "./packages/hosted-execution/src/clinical-records-boundary.ts"
+      ],
       "@murphai/hosted-execution/contracts": [
         "./packages/hosted-execution/src/contracts.ts"
       ],

@@ -10,6 +10,9 @@ import type {
   HostedWorkspaceInvocationResult,
 } from "@murphai/hosted-execution/runtime-control";
 import type {
+  HostedClinicalRecordsRecordOutcomeRequest,
+} from "@murphai/hosted-execution/clinical-records";
+import type {
   HostedRuntimePlatform,
 } from "./platform.ts";
 
@@ -147,6 +150,11 @@ export interface HostedDeviceSyncDirtyProcessedPostCheckpointRecord {
 }
 
 export type HostedSystemMailboxPostCheckpointRecord =
+  | {
+      kind: "clinical-records.outcome-recorded";
+      nextWakeAt?: null;
+      request: HostedClinicalRecordsRecordOutcomeRequest;
+    }
   | (HostedDeviceSyncDirtyProcessedPostCheckpointRecord & {
       kind: "device-sync.dirty-processed";
     })
@@ -170,6 +178,7 @@ export interface HostedConversationWakeMetrics {
 export type HostedMailboxLane =
   | "assistant-notification"
   | "conversation-message"
+  | "clinical-records"
   | "device-sync"
   | "member-activated"
   | "member-channels-updated"

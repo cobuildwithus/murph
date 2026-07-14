@@ -55,6 +55,7 @@ export const HOSTED_MAILBOX_KINDS = [
   "member.channels.updated",
   "member.preferences.updated",
   "assistant.notification.requested",
+  "clinical-records.sync-requested",
   "device-sync.wake",
   "group-newsletter.email-needed",
   "meal-photo.captured",
