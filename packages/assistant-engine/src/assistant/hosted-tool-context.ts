@@ -29,6 +29,7 @@ import type {
 import {
   resolveAssistantHostedReturnContactKind,
 } from './return-contact-kind.js'
+import { createAssistantNewsletterOutboxTool } from './newsletter-outbox.js'
 
 export interface AssistantHostedDeliveryContext {
   conversationId: string | null
@@ -84,6 +85,7 @@ export interface AssistantHostedToolContext {
   currentAssistantPersonalizationInputId?(): string | null
   currentAssistantPreferenceCausalSeq?(): string | null
   currentScheduledAutomationAuthority?(): HostedRuntimeNewsletterScheduledAuthority | null
+  closeNewsletterCapability?(): void
   recordNewsletterSendResult?(
     result: Extract<HostedRuntimeNewsletterToolResponse, { action: 'send' }>,
   ): void
@@ -113,6 +115,10 @@ export function createAssistantHostedToolContext(input: {
   getDeliveryContext?: () => AssistantHostedToolDeliveryContext
   getUserActionAcceptedInputIds?: () => readonly string[]
   messageInput: AssistantMessageInput
+  newsletterOutbox?: {
+    turnId: string
+    vault: string
+  } | null
   phoneCalls?: AssistantPhoneCallPort | null
   recordNewsletterSendResult?: (
     result: Extract<HostedRuntimeNewsletterToolResponse, { action: 'send' }>,
@@ -136,6 +142,16 @@ export function createAssistantHostedToolContext(input: {
       recipientKey: context?.recipientKey ?? null,
     }
   }
+  const newsletterOutboxTool = input.newsletterTool && input.newsletterOutbox
+    ? createAssistantNewsletterOutboxTool({
+        authority: input.messageInput.scheduledAutomationAuthority ?? null,
+        newsletterTool: input.newsletterTool,
+        sessionId: input.session.sessionId,
+        turnId: input.newsletterOutbox.turnId,
+        vault: input.newsletterOutbox.vault,
+      })
+    : null
+  const newsletterTool = newsletterOutboxTool ?? input.newsletterTool ?? null
 
   return {
     actionApprovalPort: input.actionApprovalPort ?? null,
@@ -143,7 +159,7 @@ export function createAssistantHostedToolContext(input: {
     connectedApps: input.connectedApps ?? null,
     familyPlanTool: input.familyPlanTool ?? null,
     groupTool: input.groupTool ?? null,
-    newsletterTool: input.newsletterTool ?? null,
+    newsletterTool,
     personalizationTool: input.personalizationTool ?? null,
     planUsageTool: input.planUsageTool ?? null,
     phoneCalls: input.phoneCalls ?? null,
@@ -202,6 +218,7 @@ export function createAssistantHostedToolContext(input: {
       const deliveryContext = readDeliveryContext()
       return deliveryContext.messageInput.scheduledAutomationAuthority ?? null
     },
+    closeNewsletterCapability: newsletterOutboxTool?.closeCapability,
     recordNewsletterSendResult: input.recordNewsletterSendResult,
     currentPhoneCallToolRequestKeyScope: () => {
       const acceptedInputIds = input.getUserActionAcceptedInputIds?.() ?? []

@@ -517,20 +517,20 @@ describe("runner bundle container-entrypoint esbuild step", () => {
 
     // Entry = measured CI Linux baseline (1,423,217B after the 2026-07-13
     // mainline integration) + 48,000B noise band. Static closure = measured
-    // CI Linux baseline (6,961,132B after the PR 550 requested-field
-    // metadata addition) + 96,000B
+    // CI Linux baseline (7,059,427B for the exact PR 608 head after the
+    // generic group newsletter reader and native-memory isolation) + 96,000B
     // noise band.
     // Locking exact values makes any silent change to a ratchet a failing,
     // reviewed diff.
     expect(budgets).toEqual({
       entryBytes: 1_423_217 + 48_000,
-      staticClosureBytes: 6_961_132 + 96_000,
+      staticClosureBytes: 7_059_427 + 96_000,
       totalBytes: 9_300_000,
     });
     // The ratchet is meaningfully tighter than the prior loose 2.9MB ceiling
     // it replaced, so real boot-path creep can no longer hide in headroom.
     expect(budgets.entryBytes).toBeLessThan(2_900_000);
-    expect(budgets.staticClosureBytes).toBeLessThan(7_100_000);
+    expect(budgets.staticClosureBytes).toBeLessThan(7_200_000);
   });
 
   it("gates the entry chunk at the production ratchet boundary", () => {

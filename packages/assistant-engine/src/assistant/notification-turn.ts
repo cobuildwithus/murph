@@ -246,7 +246,12 @@ export async function sendAssistantNotificationLocal(
       )
       let newsletterSendResult:
         | AssistantNotificationPostTurnDeliveryExpectations['newsletterSendResult']
-        | null = null
+        | null = input.scheduledAutomationAuthority
+          ? {
+              status: 'unavailable',
+              unavailableReason: 'newsletter_send_not_observed',
+            }
+          : null
       const resolved =
         isAssistantNotificationMaintenanceExactSkip(input)
           ? createAssistantMaintenanceNotificationResolvedSession({
@@ -264,21 +269,6 @@ export async function sendAssistantNotificationLocal(
         resolved,
         source: 'assistant-notification',
       })
-      const hostedNewsletterTool = executionContext?.hosted?.newsletterTool ?? null
-      const hostedToolContext =
-        hostedNewsletterTool
-          ? createAssistantHostedToolContext({
-              newsletterTool: hostedNewsletterTool,
-              messageInput,
-              recordNewsletterSendResult: (result) => {
-                newsletterSendResult = resolveAssistantNotificationNewsletterSendResult({
-                  current: newsletterSendResult ?? null,
-                  next: result.result,
-                })
-              },
-              session: resolved.session,
-            })
-          : null
       const withPostTurnDeliveryExpectations = (
         result: AssistantNotificationResult,
       ): AssistantNotificationResult =>
@@ -297,7 +287,7 @@ export async function sendAssistantNotificationLocal(
           sharedPlan.conversationPolicy.audience,
         ) === 'unverified-external'
       ) {
-        return {
+        return withPostTurnDeliveryExpectations({
           audienceVerification: 'unverified',
           decision: {
             kind: 'skip',
@@ -306,7 +296,7 @@ export async function sendAssistantNotificationLocal(
           },
           response: null,
           session: resolved.session,
-        }
+        })
       }
       const firstContactDocIds = resolveAssistantNotificationFirstContactDocIds({
         input: messageInput,
@@ -322,31 +312,52 @@ export async function sendAssistantNotificationLocal(
           vault: input.vault,
         })
       ) {
-        return {
+        return withPostTurnDeliveryExpectations({
           decision: {
             kind: 'skip',
             privateSummary: 'First-contact notification already accepted for this route.',
           },
           response: null,
           session: resolved.session,
-        }
+        })
       }
 
       const responsePolicy: AssistantNotificationResponsePolicy =
         input.responsePolicy ?? { kind: 'allow_send_or_skip' }
       if (responsePolicy.kind === 'require_send_exact_text') {
-        return await sendAssistantExactTextNotificationLocal({
-          firstContactDocIds,
-          input,
-          messageInput,
-          responseText: responsePolicy.text,
-          session: resolved.session,
-          sharedPlan,
-        })
+        return withPostTurnDeliveryExpectations(
+          await sendAssistantExactTextNotificationLocal({
+            firstContactDocIds,
+            input,
+            messageInput,
+            responseText: responsePolicy.text,
+            session: resolved.session,
+            sharedPlan,
+          }),
+        )
       }
 
-      const route = resolveAssistantTurnRoute(messageInput, defaults, resolved)
       const turnId = createAssistantTurnId()
+      const hostedNewsletterTool = executionContext?.hosted?.newsletterTool ?? null
+      const hostedToolContext =
+        hostedNewsletterTool
+          ? createAssistantHostedToolContext({
+              newsletterTool: hostedNewsletterTool,
+              messageInput,
+              newsletterOutbox: {
+                turnId,
+                vault: input.vault,
+              },
+              recordNewsletterSendResult: (result) => {
+                newsletterSendResult = resolveAssistantNotificationNewsletterSendResult({
+                  current: newsletterSendResult ?? null,
+                  next: result.result,
+                })
+              },
+              session: resolved.session,
+            })
+          : null
+      const route = resolveAssistantTurnRoute(messageInput, defaults, resolved)
       const turnCreatedAt = new Date().toISOString()
       const progressDelivery = null
       let committedDeliveryOutcomeKind: AssistantDeliveryOutcome['kind'] | null = null
@@ -903,22 +914,10 @@ function resolveAssistantNotificationNewsletterSendResult(input: {
   current: AssistantNotificationNewsletterSendResult | null
   next: AssistantNotificationNewsletterSendResult
 }): AssistantNotificationNewsletterSendResult {
-  if (newsletterSendResultHasSuccessfulRecipient(input.current)) {
+  if (input.current && input.current.status !== 'unavailable') {
     return input.current
   }
   return input.next
-}
-
-function newsletterSendResultHasSuccessfulRecipient(
-  result: AssistantNotificationNewsletterSendResult | null,
-): result is AssistantNotificationNewsletterSendResult {
-  if (!result) {
-    return false
-  }
-  if (result.status === 'sent') {
-    return result.participantCount > 0
-  }
-  return result.status === 'partial_failure' && result.sentRecipientCount > 0
 }
 
 async function runAssistantNotificationBeforeCommit(
@@ -1169,7 +1168,8 @@ function buildAssistantNotificationMessageInput(
   // drift apart across separate conditional spreads.
   const maintenanceOverlay = isAssistantNotificationMaintenanceExactSkip(input)
     ? {
-        codexConfigOverrides: ASSISTANT_NOTIFICATION_MAINTENANCE_CODEX_CONFIG_OVERRIDES,
+        codexConfigOverrides:
+          ASSISTANT_NOTIFICATION_MAINTENANCE_CODEX_CONFIG_OVERRIDES,
         suppressProviderFailureTranscriptAudit: true,
       }
     : {}

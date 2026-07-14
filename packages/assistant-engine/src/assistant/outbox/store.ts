@@ -4,6 +4,7 @@ import {
   assistantOutboxIntentSchema,
   type AssistantOutboxIntent,
 } from '@murphai/operator-config/assistant-cli-contracts'
+import { parseHostedEmailThreadTarget } from '@murphai/runtime-state'
 import { recordAssistantDiagnosticEvent } from '../diagnostics.js'
 import { withAssistantRuntimeWriteLock } from '../runtime-write-lock.js'
 import { ensureAssistantState } from '../store/persistence.js'
@@ -24,6 +25,7 @@ import {
 import { normalizeAssistantDeliveryError } from './retry-policy.js'
 import { compareAssistantOutboxDeliverySequenceOrder } from './ordering.js'
 import type { AssistantStatePaths } from '../store/paths.js'
+import { readAssistantCronCanonicalRuntimeStore } from '../cron/runtime-state.js'
 
 const ASSISTANT_TERMINAL_OUTBOX_RETENTION_LIMIT = 100
 const ASSISTANT_TERMINAL_OUTBOX_RETENTION_MS = 14 * 24 * 60 * 60 * 1000
@@ -104,6 +106,8 @@ export async function pruneAssistantTerminalOutboxIntents(input: {
     intentPath: string
     terminalAtMs: number
   }> = []
+  const protectedNewsletterOccurrencePrefixes =
+    await readProtectedNewsletterOccurrencePrefixes(input.paths)
 
   for (const entry of entries) {
     if (!entry.isFile() || !entry.name.endsWith('.json')) {
@@ -112,7 +116,14 @@ export async function pruneAssistantTerminalOutboxIntents(input: {
 
     const intentPath = path.join(input.paths.outboxDirectory, entry.name)
     const intent = await readAssistantOutboxIntentInventoryEntry(input.vault, intentPath)
-    if (!intent || !isTerminalAssistantOutboxIntent(intent)) {
+    if (
+      !intent
+      || !isTerminalAssistantOutboxIntent(intent)
+      || isPruneProtectedAssistantOutboxIntent(
+        intent,
+        protectedNewsletterOccurrencePrefixes,
+      )
+    ) {
       continue
     }
 
@@ -266,6 +277,38 @@ function isTerminalAssistantOutboxIntent(intent: AssistantOutboxIntent): boolean
     intent.status === 'sent' ||
     intent.status === 'failed' ||
     intent.status === 'abandoned'
+  )
+}
+
+function isPruneProtectedAssistantOutboxIntent(
+  intent: AssistantOutboxIntent,
+  protectedNewsletterOccurrencePrefixes: readonly string[],
+): boolean {
+  const deliveryIdempotencyKey = intent.deliveryIdempotencyKey
+  if (
+    !deliveryIdempotencyKey
+    || !protectedNewsletterOccurrencePrefixes.some((prefix) =>
+      deliveryIdempotencyKey.startsWith(prefix)
+    )
+  ) {
+    return false
+  }
+  const target = parseHostedEmailThreadTarget(intent.explicitTarget)
+  return target?.targetKind === 'group'
+}
+
+async function readProtectedNewsletterOccurrencePrefixes(
+  paths: AssistantStatePaths,
+): Promise<string[]> {
+  const store = await readAssistantCronCanonicalRuntimeStore(paths, {
+    reclaimStaleRunningClaims: false,
+  })
+  return store.jobs.flatMap((record) =>
+    record.state.pendingOccurrenceAt
+      ? [
+          `group-newsletter:${record.jobId}:${record.state.pendingOccurrenceAt}:`,
+        ]
+      : []
   )
 }
 

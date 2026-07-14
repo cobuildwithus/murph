@@ -1238,9 +1238,10 @@ describe('monorepo release flow coverage audit', () => {
     expect(agentWorkflowRouting).toContain('proportional low-risk exemptions')
     expect(agentWorkflowRouting).toContain('scope-anomaly signal')
     expect(prReviewGptLoop).toContain('does **not** run the local Codex')
-    expect(prReviewGptLoop).toContain('replaces the default local `deep-review` pass')
-    expect(prReviewGptLoop).toContain(
-      'specialist `prompt-review`, `security-privacy-review`, `frontend-review`, or',
+    expect(prReviewGptLoop).toContain('sole cross-cutting audit')
+    expect(prReviewGptLoop).toContain('Never run both for the same completed')
+    expect(prReviewGptLoop).toMatch(
+      /specialist `prompt-review`,\s+`frontend-review`, or write-capable `coverage-write`/u,
     )
     const completionWorkflow = readFileSync(
       path.join(repoRoot, 'agent-docs', 'operations', 'completion-workflow.md'),
@@ -1249,6 +1250,12 @@ describe('monorepo release flow coverage audit', () => {
     expect(completionWorkflow).toContain('not complete until the PR branch has no merge conflicts')
     expect(completionWorkflow).toContain('fetch the latest `main`')
     expect(completionWorkflow).toContain('still runs every specialist pass triggered')
+    expect(completionWorkflow).toContain(
+      'local `deep-review` or PR-lane ReviewGPT, never both',
+    )
+    expect(completionWorkflow).not.toContain(
+      'Run local `deep-review` too only when the user explicitly asks',
+    )
     expect(completionWorkflow).not.toContain(
       'may skip the individual required local audit subagent passes',
     )
@@ -1268,7 +1275,6 @@ describe('monorepo release flow coverage audit', () => {
     const completionAuditPrompts = [
       'prompt-review.md',
       'frontend-review.md',
-      'security-privacy-review.md',
       'coverage-write.md',
     ].map((fileName) =>
       readFileSync(
@@ -1285,8 +1291,17 @@ describe('monorepo release flow coverage audit', () => {
     expect(completionAuditPrompts[0]).toContain('upgrading-to-gpt-5p6-sol.md')
     expect(completionAuditPrompts[1]).toContain('render and inspect')
     expect(completionAuditPrompts[1]).toContain('desktop and mobile viewports')
-    expect(completionAuditPrompts[2]).toContain('trace the changed source to its sink')
-    expect(completionAuditPrompts[3]).toContain('completion-workflow.md` § Audit Worker Rules')
+    expect(completionAuditPrompts[2]).toContain('completion-workflow.md` § Audit Worker Rules')
+    expect(
+      existsSync(
+        path.join(
+          repoRoot,
+          'agent-docs',
+          'prompts',
+          'security-privacy-review.md',
+        ),
+      ),
+    ).toBe(false)
     expect(existsSync(path.join(repoRoot, 'scripts', 'review-gpt-full.config.sh'))).toBe(false)
     expect(existsSync(path.join(repoRoot, 'scripts', 'review-gpt.data.config.sh'))).toBe(false)
     expect(existsSync(path.join(repoRoot, 'scripts', 'research-run.mjs'))).toBe(false)
@@ -2769,7 +2784,7 @@ done <<< "\${COBUILD_AUDIT_CONTEXT_ALWAYS_PATHS:-}"
     )
     expect(workspaceVerify).toContain('MURPH_ACCEPTANCE_APP_VERIFY_DELAY_SECONDS')
     expect(workspaceVerify).toContain(
-      'readonly acceptance_app_verify_delay_seconds_default="$([[ -n "${CI:-}" ]] && echo 0 || echo 45)"',
+      'readonly acceptance_app_verify_delay_seconds_default="$([[ -n "${CI:-}" || "$shared_host_mode" == "1" ]] && echo 0 || echo 45)"',
     )
     expect(workspaceVerify).toContain(
       'delay App verification ${acceptance_app_verify_delay_seconds}s to preserve package coverage throughput',
@@ -2778,7 +2793,7 @@ done <<< "\${COBUILD_AUDIT_CONTEXT_ALWAYS_PATHS:-}"
       'readonly package_coverage_vitest_max_workers_default="$([[ -n "${CI:-}" ]] && echo 50% || local_worker_budget_default "$package_coverage_concurrency_limit" 1)"',
     )
     expect(workspaceVerify).toContain(
-      'readonly package_coverage_cli_active_concurrency_default="$([[ -n "${CI:-}" ]] && echo 1 || echo 4)"',
+      'readonly package_coverage_cli_active_concurrency_default="$([[ -n "${CI:-}" || "$shared_host_mode" == "1" ]] && echo 1 || echo 4)"',
     )
     expect(workspaceVerify).toContain('MURPH_PACKAGE_COVERAGE_CLI_ACTIVE_CONCURRENCY')
     expect(workspaceVerify).toContain('current_package_coverage_concurrency()')

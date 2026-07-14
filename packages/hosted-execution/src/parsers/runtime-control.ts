@@ -108,6 +108,8 @@ import {
   HOSTED_RUNTIME_GROUP_KINDS,
   HOSTED_RUNTIME_GROUP_CHAT_PARTICIPANTS_MAX,
   HOSTED_RUNTIME_GROUP_MEMBERSHIPS_MAX,
+  HOSTED_RUNTIME_NEWSLETTER_AUTHORIZED_SHARES_PER_PARTICIPANT_MAX,
+  isHostedRuntimeNewsletterAuthorizationProof,
   HOSTED_RUNTIME_NEWSLETTER_HTML_MAX_LENGTH,
   HOSTED_RUNTIME_NEWSLETTER_PARTICIPANTS_MAX,
   HOSTED_RUNTIME_NEWSLETTER_SUBJECT_MAX_LENGTH,
@@ -123,6 +125,7 @@ import {
   type HostedRuntimeGroupToolSelfOptOutContext,
   type HostedRuntimeGroupToolRequest,
   type HostedRuntimeGroupToolResponse,
+  type HostedRuntimeNewsletterAuthorizedShare,
   type HostedRuntimeNewsletterParticipantSummary,
   type HostedRuntimeNewsletterToolRequest,
   type HostedRuntimeNewsletterToolResponse,
@@ -1427,8 +1430,46 @@ export function parseHostedRuntimeNewsletterToolRequest(
   if (action === "prepare") {
     assertAllowedObjectKeys(
       record,
-      new Set(["action", "groupId"]),
+      new Set([
+        "action",
+        "groupId",
+        "includeAuthorizationProof",
+        "includeAuthorizationSnapshot",
+      ]),
       "Hosted runtime newsletter tool prepare request",
+    );
+    if (
+      record.includeAuthorizationProof !== undefined
+      && record.includeAuthorizationProof !== true
+    ) {
+      throw new TypeError(
+        "Hosted runtime newsletter tool includeAuthorizationProof must be true when present.",
+      );
+    }
+    if (
+      record.includeAuthorizationSnapshot !== undefined
+      && record.includeAuthorizationSnapshot !== true
+    ) {
+      throw new TypeError(
+        "Hosted runtime newsletter tool includeAuthorizationSnapshot must be true when present.",
+      );
+    }
+    return {
+      action,
+      groupId: requireString(record.groupId, "Hosted runtime newsletter tool groupId"),
+      ...(record.includeAuthorizationProof === true
+        ? { includeAuthorizationProof: true as const }
+        : {}),
+      ...(record.includeAuthorizationSnapshot === true
+        ? { includeAuthorizationSnapshot: true as const }
+        : {}),
+    };
+  }
+  if (action === "read_stats") {
+    assertAllowedObjectKeys(
+      record,
+      new Set(["action", "groupId"]),
+      "Hosted runtime newsletter tool read_stats request",
     );
     return {
       action,
@@ -1487,12 +1528,21 @@ export function parseHostedRuntimeNewsletterToolResponse(
     if (status === "ok") {
       assertAllowedObjectKeys(
         result,
-        new Set(["status", "groupId", "participants", "missingEmailParticipants"]),
+        new Set([
+          "authorizationProof",
+          "status",
+          "groupId",
+          "participants",
+          "missingEmailParticipants",
+        ]),
         "Hosted runtime newsletter tool prepare ok response result",
       );
       return {
         action,
         result: {
+          authorizationProof: requireHostedRuntimeNewsletterAuthorizationProof(
+            result.authorizationProof,
+          ),
           groupId: requireString(result.groupId, "Hosted runtime newsletter tool groupId"),
           missingEmailParticipants: parseHostedRuntimeNewsletterParticipants(
             result.missingEmailParticipants,
@@ -1525,10 +1575,32 @@ export function parseHostedRuntimeNewsletterToolResponse(
     }
   }
 
+  if (action === "read_stats") {
+    const result = requireObject(record.result, "Hosted runtime newsletter tool read_stats response result");
+    const status = requireString(result.status, "Hosted runtime newsletter tool read_stats response status");
+    if (status === "unavailable") {
+      assertAllowedObjectKeys(
+        result,
+        new Set(["status", "unavailableReason"]),
+        "Hosted runtime newsletter tool read_stats unavailable response result",
+      );
+      return {
+        action,
+        result: {
+          status,
+          unavailableReason: requireString(
+            result.unavailableReason,
+            "Hosted runtime newsletter tool unavailableReason",
+          ),
+        },
+      };
+    }
+  }
+
   if (action === "send") {
     const result = requireObject(record.result, "Hosted runtime newsletter tool send response result");
     const status = requireString(result.status, "Hosted runtime newsletter tool send response status");
-    if (status === "sent" || status === "no_recipients") {
+    if (status === "accepted" || status === "sent" || status === "no_recipients") {
       assertAllowedObjectKeys(
         result,
         new Set(["status", "participantCount", "skippedNoEmailMemberIds"]),
@@ -1637,6 +1709,15 @@ export function parseHostedRuntimeNewsletterToolResponse(
   throw new TypeError("Hosted runtime newsletter tool response action/status is not supported.");
 }
 
+function requireHostedRuntimeNewsletterAuthorizationProof(value: unknown): string {
+  if (!isHostedRuntimeNewsletterAuthorizationProof(value)) {
+    throw new TypeError(
+      "Hosted runtime newsletter tool authorizationProof must be a SHA-256 hex digest.",
+    );
+  }
+  return value;
+}
+
 function parseHostedRuntimeNewsletterParticipants(
   value: unknown,
   label: string,
@@ -1647,10 +1728,45 @@ function parseHostedRuntimeNewsletterParticipants(
   }
   return entries.map((entry) => {
     const record = requireObject(entry, `${label} entry`);
-    assertAllowedObjectKeys(record, new Set(["hasEmail", "memberId"]), `${label} entry`);
+    assertAllowedObjectKeys(
+      record,
+      new Set(["authorizedShares", "hasEmail", "memberId"]),
+      `${label} entry`,
+    );
     return {
+      authorizedShares: parseHostedRuntimeNewsletterAuthorizedShares(
+        record.authorizedShares,
+        `${label} entry authorizedShares`,
+      ),
       hasEmail: requireBoolean(record.hasEmail, `${label} entry hasEmail`),
       memberId: requireString(record.memberId, `${label} entry memberId`),
+    };
+  });
+}
+
+function parseHostedRuntimeNewsletterAuthorizedShares(
+  value: unknown,
+  label: string,
+): HostedRuntimeNewsletterAuthorizedShare[] {
+  const entries = requireArray(value, label);
+  if (entries.length > HOSTED_RUNTIME_NEWSLETTER_AUTHORIZED_SHARES_PER_PARTICIPANT_MAX) {
+    throw new TypeError(
+      `${label} must contain at most ${HOSTED_RUNTIME_NEWSLETTER_AUTHORIZED_SHARES_PER_PARTICIPANT_MAX} entries.`,
+    );
+  }
+  return entries.map((entry) => {
+    const record = requireObject(entry, `${label} entry`);
+    assertAllowedObjectKeys(
+      record,
+      new Set(["projectionScopeKey", "shareId"]),
+      `${label} entry`,
+    );
+    return {
+      projectionScopeKey: requireString(
+        record.projectionScopeKey,
+        `${label} entry projectionScopeKey`,
+      ),
+      shareId: requireString(record.shareId, `${label} entry shareId`),
     };
   });
 }

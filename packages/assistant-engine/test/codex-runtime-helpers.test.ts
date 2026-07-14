@@ -2434,7 +2434,7 @@ describe('Codex assistant registry helpers', () => {
     ).toBe(false)
   })
 
-  it('appends turn-local Codex config overrides after provider overrides', async () => {
+  it('appends turn-local memory isolation after provider overrides', async () => {
     codexAppServerMocks.executeCodexAppServerTurn.mockResolvedValueOnce({
       finalMessage: 'Completed turn-local override.',
       jsonEvents: [],
@@ -2450,8 +2450,10 @@ describe('Codex assistant registry helpers', () => {
       codexConfigOverrides: [
         'memories.use_memories=false',
         'memories.generate_memories=false',
+        'features.shell_tool=false',
       ],
       providerConfig: normalizeAssistantProviderConfig({
+        codexHome: '/tmp/provider-tests/shared-codex-home',
         provider: 'codex-cli',
         model: 'hosted-model',
         modelProvider: 'venice',
@@ -2471,7 +2473,9 @@ describe('Codex assistant registry helpers', () => {
       'model_providers.venice.requires_openai_auth=false',
       'memories.use_memories=false',
       'memories.generate_memories=false',
+      'features.shell_tool=false',
     ])
+    expect(appServerInput?.codexHome).toBe('/tmp/provider-tests/shared-codex-home')
   })
 
   it('does not replay committed history after stale native resume fails', async () => {

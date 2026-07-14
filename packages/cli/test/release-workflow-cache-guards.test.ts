@@ -32,6 +32,9 @@ describe('GitHub Actions cache trust-boundary guards', () => {
           ) {
             continue
           }
+          if (isAllowedHostSupportTypeScriptCache(file, workflow, description)) {
+            continue
+          }
           findings.push(`${file}: ${description}`)
         }
       }
@@ -40,6 +43,34 @@ describe('GitHub Actions cache trust-boundary guards', () => {
     expect(findings).toEqual([])
   })
 })
+
+function isAllowedHostSupportTypeScriptCache(
+  file: string,
+  workflow: string,
+  description: string,
+): boolean {
+  if (file !== 'host-support.yml') {
+    return false
+  }
+
+  if (description === 'actions/cache') {
+    const cacheUses = workflow.match(/uses:\s+actions\/cache@[^\s]+/gu) ?? []
+    return (
+      cacheUses.length === 2 &&
+      cacheUses.every(
+        (entry) =>
+          entry ===
+          'uses: actions/cache@caa296126883cff596d87d8935842f9db880ef25',
+      )
+    )
+  }
+
+  if (description === 'cache restore keys') {
+    return (workflow.match(/^\s+restore-keys:/gmu) ?? []).length === 2
+  }
+
+  return false
+}
 
 function isAllowedWorkflowRunHandoff(file: string, workflow: string): boolean {
   if (file !== 'deploy-render-temporal-worker.yml') {

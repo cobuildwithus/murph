@@ -53,6 +53,7 @@ function newsletterToolCall(argumentsValue: unknown): Record<string, unknown> {
 }
 
 type NewsletterToolRequest = NonNullable<AssistantHostedToolContext["newsletterTool"]>["request"];
+const NEWSLETTER_AUTHORIZATION_PROOF = "a".repeat(64);
 type GroupToolRequest = NonNullable<AssistantHostedToolContext["groupTool"]>["request"];
 
 const webpBytes = new Uint8Array([
@@ -985,19 +986,22 @@ describe("murph.newsletter dynamic tool", () => {
 
   it("keeps the automation name in scheduled email subjects", () => {
     expect(MURPH_NEWSLETTER_TOOL.description).toContain(
-      "vault-cli automation show group-health-newsletter",
+      "current scheduled automation instructions",
     );
     expect(MURPH_NEWSLETTER_TOOL.description).toContain(
-      "start the subject with that exact name",
+      "Start the subject",
     );
     expect(MURPH_NEWSLETTER_TOOL.description).toContain(
-      "Never substitute a generic label",
+      "never a generic label",
     );
     expect(MURPH_NEWSLETTER_TOOL.description).toContain(
-      "vault-cli group weekly --as-of <referenceAt>",
+      "current-week shared facts",
     );
     expect(MURPH_NEWSLETTER_TOOL.description).toContain(
-      "does not read health data",
+      "exact live email and health-share grants",
+    );
+    expect(MURPH_NEWSLETTER_TOOL.description).toContain(
+      "compose only from its members",
     );
   });
 
@@ -1039,7 +1043,7 @@ describe("murph.newsletter dynamic tool", () => {
     }))?.kind).toBe("invalid-newsletter-arguments");
   });
 
-  it("prepares recipient eligibility with the scheduled occurrence reference but no health data", async () => {
+  it("prepares recipient eligibility and an empty member set without a local projection", async () => {
     vi.useFakeTimers();
     try {
       const hostedToolContext = createNewsletterHostedToolContext();
@@ -1077,6 +1081,7 @@ describe("murph.newsletter dynamic tool", () => {
         result: {
           groupId: "group_1",
           missingEmailParticipants: [],
+          members: [],
           participants: [
             {
               hasEmail: true,
@@ -1093,7 +1098,81 @@ describe("murph.newsletter dynamic tool", () => {
     }
   });
 
-  it("does not inspect the shared projection while preparing recipients", async () => {
+  it("records no recipients and closes send authority after an all-missing-email prepare", async () => {
+    const closeNewsletterCapability = vi.fn();
+    const recordNewsletterSendResult = vi.fn();
+    const newsletterRequest = vi.fn<NewsletterToolRequest>(async (request) => ({
+      action: "prepare",
+      result: {
+        authorizationProof: NEWSLETTER_AUTHORIZATION_PROOF,
+        groupId: request.groupId,
+        missingEmailParticipants: [
+          {
+            authorizedShares: [],
+            hasEmail: false,
+            memberId: "member_a",
+          },
+        ],
+        participants: [
+          {
+            authorizedShares: [],
+            hasEmail: false,
+            memberId: "member_a",
+          },
+        ],
+        status: "ok",
+      },
+    }));
+    const request = readMurphDynamicToolRequest(newsletterToolCall({
+      action: "prepare",
+      groupId: "group_1",
+    }));
+    if (!request || request.kind !== "newsletter") {
+      throw new Error("Expected newsletter request.");
+    }
+
+    const result = await executeMurphDynamicToolRequest({
+      env: {},
+      fetchImpl: fetch,
+      hostedToolContext: createNewsletterHostedToolContext({
+        closeNewsletterCapability,
+        newsletterRequest,
+        recordNewsletterSendResult,
+      }),
+      nextUsageOrdinal: () => 1,
+      progressDelivery: null,
+      request,
+      vaultRoot: null,
+    });
+
+    expect(readNewsletterToolPayload(result)).toEqual({
+      action: "prepare",
+      result: {
+        groupId: "group_1",
+        members: [],
+        missingEmailParticipants: [
+          { hasEmail: false, memberId: "member_a" },
+        ],
+        participants: [
+          { hasEmail: false, memberId: "member_a" },
+        ],
+        referenceAt: "2026-07-06T03:30:00.000Z",
+        status: "ok",
+      },
+    });
+    expect(closeNewsletterCapability).toHaveBeenCalledTimes(1);
+    expect(recordNewsletterSendResult).toHaveBeenCalledWith({
+      action: "send",
+      result: {
+        participantCount: 0,
+        skippedNoEmailMemberIds: ["member_a"],
+        status: "no_recipients",
+      },
+    });
+    expect(newsletterRequest).toHaveBeenCalledTimes(1);
+  });
+
+  it("returns an empty member set when the shared projection store is empty", async () => {
     const vaultRoot = await mkdtemp(join(tmpdir(), "assistant-codex-newsletter-stats-missing-"));
     try {
       const hostedToolContext = createNewsletterHostedToolContext();
@@ -1121,6 +1200,7 @@ describe("murph.newsletter dynamic tool", () => {
         result: {
           groupId: "group_1",
           missingEmailParticipants: [],
+          members: [],
           participants: [
             {
               hasEmail: true,
@@ -1136,7 +1216,265 @@ describe("murph.newsletter dynamic tool", () => {
     }
   });
 
-  it("prepares recipients independently but blocks send when shared projections are corrupt", async () => {
+  it("returns shared facts only for exact current member, scope, and share grants", async () => {
+    const vaultRoot = await mkdtemp(join(tmpdir(), "assistant-codex-newsletter-eligible-"));
+    try {
+      await initializeVault({ timezone: "UTC", vaultRoot });
+      await mkdir(join(vaultRoot, "derived", "vault-share"), { recursive: true });
+      await writeFile(
+        join(vaultRoot, "derived", "vault-share", "projections.json"),
+        JSON.stringify({
+          projections: {
+            "steps-days.v0": {
+              grantors: {
+                member_a: sharedDailyMetricGrantor({
+                  memberId: "member_a",
+                  staleRecordShareId: "share-member_a-revoked",
+                  staleRecordValue: 50_000,
+                  value: 7_000,
+                }),
+                member_opted_out: sharedDailyMetricGrantor({
+                  memberId: "member_opted_out",
+                  value: 20_000,
+                }),
+                member_stale_grant: sharedDailyMetricGrantor({
+                  memberId: "member_stale_grant",
+                  value: 30_000,
+                }),
+              },
+            },
+            "resting-heart-rate-days.v0": {
+              grantors: {
+                member_a: sharedDailyMetricGrantor({
+                  memberId: "member_a",
+                  metricKey: "resting-heart-rate",
+                  projectionKind: "resting-heart-rate-days.v0",
+                  shareId: "share-member_a",
+                  unit: "bpm",
+                  value: 45,
+                }),
+              },
+            },
+          },
+          schema: "murph.shared-vault-projections.v1",
+          updatedAt: "2026-07-06T12:00:00.000Z",
+        }),
+        "utf8",
+      );
+      const newsletterRequest = vi.fn<NewsletterToolRequest>(async () => ({
+        action: "prepare",
+        result: {
+          authorizationProof: NEWSLETTER_AUTHORIZATION_PROOF,
+          groupId: "group_1",
+          missingEmailParticipants: [
+            {
+              authorizedShares: [],
+              hasEmail: false,
+              memberId: "member_opted_out",
+            },
+          ],
+          participants: [
+            {
+              authorizedShares: [
+                {
+                  projectionScopeKey: "steps-days.v0",
+                  shareId: "share-member_a",
+                },
+              ],
+              hasEmail: true,
+              memberId: "member_a",
+            },
+            {
+              authorizedShares: [],
+              hasEmail: false,
+              memberId: "member_opted_out",
+            },
+            {
+              authorizedShares: [
+                {
+                  projectionScopeKey: "steps-days.v0",
+                  shareId: "share-current-replacement",
+                },
+              ],
+              hasEmail: true,
+              memberId: "member_stale_grant",
+            },
+          ],
+          status: "ok",
+        },
+      }));
+      const request = readMurphDynamicToolRequest(newsletterToolCall({
+        action: "prepare",
+        groupId: "group_1",
+      }));
+      if (!request || request.kind !== "newsletter") {
+        throw new Error("Expected newsletter request.");
+      }
+
+      const result = await executeMurphDynamicToolRequest({
+        env: {},
+        fetchImpl: fetch,
+        hostedToolContext: createNewsletterHostedToolContext({ newsletterRequest }),
+        nextUsageOrdinal: () => 1,
+        progressDelivery: null,
+        request,
+        vaultRoot,
+      });
+
+      expect(readNewsletterToolPayload(result)).toEqual({
+        action: "prepare",
+        result: {
+          groupId: "group_1",
+          members: [
+            {
+              displayName: null,
+              memberId: "member_a",
+              weeklyStats: [
+                {
+                  currentWeekAvg: 7_000,
+                  stream: "steps",
+                  unit: "count",
+                },
+              ],
+            },
+          ],
+          missingEmailParticipants: [
+            { hasEmail: false, memberId: "member_opted_out" },
+          ],
+          participants: [
+            { hasEmail: true, memberId: "member_a" },
+            { hasEmail: false, memberId: "member_opted_out" },
+            { hasEmail: true, memberId: "member_stale_grant" },
+          ],
+          referenceAt: "2026-07-06T03:30:00.000Z",
+          status: "ok",
+        },
+      });
+      expect(newsletterRequest).toHaveBeenCalledWith({
+        action: "prepare",
+        groupId: "group_1",
+        includeAuthorizationProof: true,
+        includeAuthorizationSnapshot: true,
+        scheduledAutomationAuthority: {
+          automationId: "automation_newsletter",
+          occurrenceAt: "2026-07-06T03:30:00.000Z",
+        },
+      });
+    } finally {
+      await rm(vaultRoot, { force: true, recursive: true });
+    }
+  });
+
+  it.each([
+    {
+      finalParticipants: [
+        { authorizedShares: [], hasEmail: true, memberId: "member_a" },
+      ],
+      revokeKind: "health share",
+      visibleParticipants: [{ hasEmail: true, memberId: "member_a" }],
+    },
+    {
+      finalParticipants: [],
+      revokeKind: "email grant",
+      visibleParticipants: [],
+    },
+    {
+      finalParticipants: [],
+      revokeKind: "member access",
+      visibleParticipants: [],
+    },
+    {
+      finalParticipants: [
+        {
+          authorizedShares: [
+            {
+              projectionScopeKey: "steps-days.v0",
+              shareId: "share-member_a",
+            },
+          ],
+          hasEmail: false,
+          memberId: "member_a",
+        },
+      ],
+      revokeKind: "verified email",
+      visibleParticipants: [{ hasEmail: false, memberId: "member_a" }],
+    },
+  ])("loads stale projection data before the final $revokeKind authority result", async ({
+    finalParticipants,
+    visibleParticipants,
+  }) => {
+    const vaultRoot = await mkdtemp(join(tmpdir(), "assistant-codex-newsletter-revoke-race-"));
+    const projectionPath = join(vaultRoot, "derived", "vault-share", "projections.json");
+    try {
+      await initializeVault({ timezone: "UTC", vaultRoot });
+      await mkdir(join(vaultRoot, "derived", "vault-share"), { recursive: true });
+      await writeFile(projectionPath, JSON.stringify({
+        projections: {
+          "steps-days.v0": {
+            grantors: {
+              member_a: sharedDailyMetricGrantor({
+                memberId: "member_a",
+                shareId: "share-member_a",
+                value: 7_000,
+              }),
+            },
+          },
+        },
+        schema: "murph.shared-vault-projections.v1",
+        updatedAt: "2026-07-06T12:00:00.000Z",
+      }), "utf8");
+      const newsletterRequest = vi.fn<NewsletterToolRequest>(async () => {
+        // Canonical revocation wins before model handoff even though asynchronous
+        // projection cleanup has not repaired the already-loaded local source.
+        await writeFile(projectionPath, "{ stale projection cleanup pending", "utf8");
+        return {
+          action: "prepare",
+          result: {
+            authorizationProof: NEWSLETTER_AUTHORIZATION_PROOF,
+            groupId: "group_1",
+            missingEmailParticipants: [],
+            participants: finalParticipants,
+            status: "ok",
+          },
+        };
+      });
+      const request = readMurphDynamicToolRequest(newsletterToolCall({
+        action: "prepare",
+        groupId: "group_1",
+      }));
+      if (!request || request.kind !== "newsletter") {
+        throw new Error("Expected newsletter request.");
+      }
+
+      const result = await executeMurphDynamicToolRequest({
+        env: {},
+        fetchImpl: fetch,
+        hostedToolContext: createNewsletterHostedToolContext({ newsletterRequest }),
+        nextUsageOrdinal: () => 1,
+        progressDelivery: null,
+        request,
+        vaultRoot,
+      });
+
+      expect(result.rpcResult.success).toBe(true);
+      expect(readNewsletterToolPayload(result)).toEqual({
+        action: "prepare",
+        result: {
+          groupId: "group_1",
+          members: [],
+          missingEmailParticipants: [],
+          participants: visibleParticipants,
+          referenceAt: "2026-07-06T03:30:00.000Z",
+          status: "ok",
+        },
+      });
+      expect(newsletterRequest).toHaveBeenCalledTimes(1);
+    } finally {
+      await rm(vaultRoot, { force: true, recursive: true });
+    }
+  });
+
+  it("blocks prepare and send when shared projections are corrupt", async () => {
     const vaultRoot = await mkdtemp(join(tmpdir(), "assistant-codex-newsletter-stats-corrupt-"));
     try {
       await mkdir(join(vaultRoot, "derived", "vault-share"), { recursive: true });
@@ -1150,10 +1488,15 @@ describe("murph.newsletter dynamic tool", () => {
           ? {
               action: "prepare" as const,
               result: {
+                authorizationProof: NEWSLETTER_AUTHORIZATION_PROOF,
                 groupId: request.groupId,
                 missingEmailParticipants: [],
                 participants: [
-                  { hasEmail: true, memberId: "member_a" },
+                  {
+                    authorizedShares: [],
+                    hasEmail: true,
+                    memberId: "member_a",
+                  },
                 ],
                 status: "ok" as const,
               },
@@ -1208,13 +1551,8 @@ describe("murph.newsletter dynamic tool", () => {
       expect(readNewsletterToolPayload(readResult)).toEqual({
         action: "prepare",
         result: {
-          groupId: "group_1",
-          missingEmailParticipants: [],
-          participants: [
-            { hasEmail: true, memberId: "member_a" },
-          ],
-          referenceAt: "2026-07-06T03:30:00.000Z",
-          status: "ok",
+          status: "unavailable",
+          unavailableReason: "shared_projection_unavailable",
         },
       });
       expect(sendResult.rpcResult.success).toBe(true);
@@ -1225,11 +1563,7 @@ describe("murph.newsletter dynamic tool", () => {
           unavailableReason: "shared_projection_unavailable",
         },
       });
-      expect(newsletterRequest).toHaveBeenCalledTimes(1);
-      expect(newsletterRequest).toHaveBeenCalledWith({
-        action: "prepare",
-        groupId: "group_1",
-      });
+      expect(newsletterRequest).not.toHaveBeenCalled();
     } finally {
       await rm(vaultRoot, { force: true, recursive: true });
     }
@@ -1250,10 +1584,15 @@ describe("murph.newsletter dynamic tool", () => {
           : {
               action: "prepare",
               result: {
+                authorizationProof: NEWSLETTER_AUTHORIZATION_PROOF,
                 groupId: request.groupId,
                 missingEmailParticipants: [],
                 participants: [
-                  { hasEmail: true, memberId: "member_a" },
+                  {
+                    authorizedShares: [],
+                    hasEmail: true,
+                    memberId: "member_a",
+                  },
                 ],
                 status: "ok",
               },
@@ -1300,12 +1639,16 @@ describe("murph.newsletter dynamic tool", () => {
 });
 
 function createNewsletterHostedToolContext(input: {
+  closeNewsletterCapability?: () => void;
   newsletterRequest?: NewsletterToolRequest;
   recordNewsletterSendResult?: (result: unknown) => void;
 } = {}): AssistantHostedToolContext {
   const context = {
     connectedApps: null,
     computerToolsAvailable: false,
+    ...(input.closeNewsletterCapability
+      ? { closeNewsletterCapability: input.closeNewsletterCapability }
+      : {}),
     currentHostedDeliveryContext: () => null,
     currentHostedMailboxItemIds: () => [],
     currentPhoneCallToolRequestKeyScope: () => null,
@@ -1321,10 +1664,15 @@ function createNewsletterHostedToolContext(input: {
           ? {
               action: "prepare",
               result: {
+                authorizationProof: NEWSLETTER_AUTHORIZATION_PROOF,
                 groupId: request.groupId,
                 missingEmailParticipants: [],
                 participants: [
-                  { hasEmail: true, memberId: "member_a" },
+                  {
+                    authorizedShares: [],
+                    hasEmail: true,
+                    memberId: "member_a",
+                  },
                 ],
                 status: "ok",
               },
@@ -1349,6 +1697,63 @@ function createNewsletterHostedToolContext(input: {
     vaultFileSendAvailable: false,
   };
   return context as AssistantHostedToolContext;
+}
+
+function sharedDailyMetricGrantor(input: {
+  memberId: string;
+  metricKey?: string;
+  projectionKind?: string;
+  shareId?: string;
+  staleRecordShareId?: string;
+  staleRecordValue?: number;
+  unit?: string;
+  value: number;
+}) {
+  const projectionKind = input.projectionKind ?? "steps-days.v0";
+  const shareId = input.shareId ?? `share-${input.memberId}`;
+  return {
+    grantorMemberId: input.memberId,
+    projectionKind,
+    records: [
+      ...(
+        input.staleRecordShareId !== undefined
+        && input.staleRecordValue !== undefined
+          ? [{
+              receivedEventId: `event-stale-${input.memberId}`,
+              record: {
+                data: {
+                  date: "2026-07-06",
+                  metricKey: input.metricKey ?? "steps",
+                  unit: input.unit ?? "count",
+                  value: input.staleRecordValue,
+                },
+                occurredAt: "2026-07-06T00:00:00.000Z",
+                recordKey: "2026-07-06",
+              },
+              schema: "murph.vault-share.delivery.v1",
+              shareId: input.staleRecordShareId,
+            }]
+          : []
+      ),
+      {
+        receivedEventId: `event-${input.memberId}`,
+        record: {
+          data: {
+            date: "2026-07-06",
+            metricKey: input.metricKey ?? "steps",
+            unit: input.unit ?? "count",
+            value: input.value,
+          },
+          occurredAt: "2026-07-06T00:00:00.000Z",
+          recordKey: "2026-07-06",
+        },
+        schema: "murph.vault-share.delivery.v1",
+        shareId,
+      },
+    ],
+    shareId,
+    updatedAt: "2026-07-06T12:00:00.000Z",
+  };
 }
 
 function createGroupHostedToolContext(input: {

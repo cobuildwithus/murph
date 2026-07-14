@@ -105,6 +105,13 @@ export type {
   OverviewWeeklyStat,
 } from "./overview.ts";
 export {
+  buildSharedGroupWeeklyMembers,
+} from "./group-weekly.ts";
+export type {
+  SharedGroupWeeklyMember,
+  SharedGroupWeeklyStat,
+} from "./group-weekly.ts";
+export {
   analyzeExperimentOutcome,
   collectExperimentAdherenceCalendar,
   decideExperimentFollowupDue,

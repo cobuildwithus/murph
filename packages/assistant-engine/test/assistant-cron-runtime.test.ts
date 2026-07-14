@@ -3481,14 +3481,15 @@ describe('assistant cron runtime orchestration', () => {
         trigger: 'scheduled',
         vault: vaultRoot,
       })
-      expect(result.run.status).toBe('succeeded')
       const input = cronMocks.sendAssistantMessageLocal.mock.calls.at(-1)?.[0] as
         | { scheduledAutomationAuthority?: unknown }
         | undefined
       if (!input) {
         throw new Error('Expected scheduled notification input.')
       }
-      return input.scheduledAutomationAuthority ?? null
+      const authority = input.scheduledAutomationAuthority ?? null
+      expect(result.run.status).toBe(authority ? 'failed' : 'succeeded')
+      return authority
     }
 
     vi.useFakeTimers()
@@ -3575,14 +3576,15 @@ describe('assistant cron runtime orchestration', () => {
         trigger: 'scheduled',
         vault: vaultRoot,
       })
-      expect(result.run.status).toBe('succeeded')
       const input = cronMocks.sendAssistantMessageLocal.mock.calls.at(-1)?.[0] as
         | { scheduledAutomationAuthority?: unknown }
         | undefined
       if (!input) {
         throw new Error('Expected scheduled notification input.')
       }
-      return input.scheduledAutomationAuthority ?? null
+      const authority = input.scheduledAutomationAuthority ?? null
+      expect(result.run.status).toBe(authority ? 'failed' : 'succeeded')
+      return authority
     }
 
     vi.useFakeTimers()
@@ -3604,7 +3606,36 @@ describe('assistant cron runtime orchestration', () => {
     }
   })
 
-  it('fails and preserves a scheduled newsletter occurrence when every email recipient fails', async () => {
+  it.each([
+    {
+      label: 'every email recipient fails',
+      newsletterSendResult: {
+        status: 'unavailable' as const,
+        unavailableReason: 'send_failed',
+      },
+    },
+    {
+      label: 'recipient authorization changes after preparation',
+      newsletterSendResult: {
+        status: 'unavailable' as const,
+        unavailableReason: 'newsletter_authorization_changed',
+      },
+    },
+    {
+      label: 'durable recipient delivery is still pending',
+      newsletterSendResult: {
+        participantCount: 2,
+        skippedNoEmailMemberIds: [],
+        status: 'accepted' as const,
+      },
+    },
+    {
+      label: 'the model exits without a newsletter send result',
+      newsletterSendResult: null,
+    },
+  ])('fails and preserves a scheduled newsletter occurrence when $label', async ({
+    newsletterSendResult,
+  }) => {
     vi.useFakeTimers()
     vi.setSystemTime(new Date('2026-07-12T13:00:00.000Z'))
     try {
@@ -3676,12 +3707,11 @@ describe('assistant cron runtime orchestration', () => {
           privateSummary: 'Newsletter delivery failed.',
           text: 'Newsletter delivery failed.',
         },
-        postTurnDeliveryExpectations: {
-          newsletterSendResult: {
-            status: 'unavailable',
-            unavailableReason: 'send_failed',
-          },
-        },
+        ...(newsletterSendResult
+          ? {
+              postTurnDeliveryExpectations: { newsletterSendResult },
+            }
+          : {}),
         response: 'Newsletter delivery failed.',
         session: {
           sessionId: 'session-newsletter-send-failed',
@@ -3697,7 +3727,7 @@ describe('assistant cron runtime orchestration', () => {
 
       expect(result.run.status).toBe('failed')
       expect(result.run.error).toBe(
-        'Group health newsletter email send failed for every recipient.',
+        'Group health newsletter delivery did not complete.',
       )
       const currentStore = await readAssistantCronCanonicalRuntimeStore(paths)
       const current = currentStore.jobs.find((record) => record.jobId === source.automationId)

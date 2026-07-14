@@ -236,6 +236,7 @@ export type AssistantOutboxCreateIntentInput = {
   deliveryIdempotencyKey?: string | null
   deliverySource?: AssistantDeliverySource | null
   deliveryTransportIdempotent?: boolean
+  emailHtml?: string | null
   explicitTarget?: string | null
   identityId?: string | null
   initialState?:
@@ -243,6 +244,7 @@ export type AssistantOutboxCreateIntentInput = {
     | { nextAttemptAt: string; status: 'awaiting_approval' }
   media?: readonly AssistantResponseMedia[] | null
   message: string
+  newsletterAuthorizationProof?: string | null
   operation?: AssistantOutboxOperation | null
   replyToMessageId?: string | null
   sessionId: string
@@ -389,6 +391,7 @@ export async function createAssistantOutboxIntent(
       attemptCount: 0,
       status: initialState.status,
       message,
+      emailHtml: input.emailHtml ?? null,
       media,
       subject,
       operation,
@@ -399,6 +402,7 @@ export async function createAssistantOutboxIntent(
       deliveryConfirmationPending: false,
       deliveryIdempotencyKey,
       deliveryTransportIdempotent,
+      newsletterAuthorizationProof: input.newsletterAuthorizationProof ?? null,
       answeredMailboxItemIds,
       lastError: null,
     })

@@ -252,6 +252,36 @@ describe('assistant protocol index planning', () => {
       binding: expect.anything(),
     })
 
+    const scheduledNewsletterPlan = await resolveAssistantRouteTurnPlan({
+      executionContext,
+      input: {
+        ...createMessageInput(),
+        scheduledAutomationAuthority: {
+          automationId: 'automation_newsletter',
+          occurrenceAt: '2026-07-12T13:00:00.000Z',
+        },
+      },
+      preferenceContext,
+      profile: {
+        promptProfile: 'notification-decision',
+        threadScope: 'session-thread',
+        toolProfile: 'notification-turn',
+      },
+      promptTimeContext,
+      route: createRoute(),
+      session: createSession(),
+      sharedPlan: createSharedPlan(),
+    })
+    expect(scheduledNewsletterPlan.systemPrompt).not.toContain(
+      'Trusted scheduled newsletter instructions',
+    )
+    expect(scheduledNewsletterPlan.systemPrompt).not.toContain(
+      '## Compose each edition',
+    )
+    expect(scheduledNewsletterPlan.systemPrompt).toContain(
+      'same full read and write tools as an interactive Murph turn',
+    )
+
     const conversationNotificationPlan = await resolveAssistantRouteTurnPlan({
       executionContext,
       input: createMessageInput(),
