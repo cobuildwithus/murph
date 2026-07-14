@@ -19,8 +19,7 @@ export type RuntimeProcessingRetryReason =
   | "container_rpc_timeout"
   | "command_budget_exhausted"
   | "missing_container_binding"
-  | "starting_fence_preserved"
-  | "stale_fence_replacement_race";
+  | "starting_fence_preserved";
 
 export type RuntimeProcessingStartFailureRetryReason = Extract<
   RuntimeProcessingRetryReason,

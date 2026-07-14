@@ -47,9 +47,6 @@ vi.mock("@murphai/operator-config/linq-runtime", () => ({
 import {
   importHostedConversationMessageWakeIntoLocalInbox,
 } from "../src/hosted-runtime/events/conversation.ts";
-import {
-  prepareHostedInboxProjectionRuntime,
-} from "../src/hosted-runtime/context.ts";
 
 describe("hosted Linq document preservation", () => {
   it("projects a cold current-message document without rebuilding history", async () => {
@@ -65,13 +62,21 @@ describe("hosted Linq document preservation", () => {
         },
       };
     });
+    const services = createIntegratedInboxServices({
+      loadImportersModule: async () => ({
+        createImporters: () => ({
+          importDocument,
+        }),
+      }),
+    });
 
     await initializeVault({ vaultRoot, createdAt: "2026-04-29T00:00:00.000Z" });
-    await prepareHostedInboxProjectionRuntime(
-      vaultRoot,
-      "req_init_cold_inbox_runtime",
-    );
-
+    await services.init({
+      rebuild: false,
+      rebuildParserJobs: false,
+      requestId: "req_init_cold_inbox_runtime",
+      vault: vaultRoot,
+    });
     mocks.createHostedLinqAttachmentDownloadDriver.mockReturnValue({
       downloadPart: vi.fn(async (part: { url?: string | null }) => {
         assert.equal(part.url, "https://cdn.example.test/attachments/lab-results.pdf");
@@ -156,14 +161,6 @@ describe("hosted Linq document preservation", () => {
       } finally {
         runtime.close();
       }
-
-      const services = createIntegratedInboxServices({
-        loadImportersModule: async () => ({
-          createImporters: () => ({
-            importDocument,
-          }),
-        }),
-      });
 
       await expect(
         services.show({

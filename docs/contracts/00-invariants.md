@@ -69,6 +69,10 @@ executable tests.
   compaction, cleanup, device sync, browser refresh, cron, replay catch-up, and
   unrelated mailbox work stay off that path. Keep their static dependency
   closure and initialization off-path too, not only their explicit waits.
+- Once current input is durably staged, a rebuildable projection may precede
+  assistant admission only when that input needs projection-owned evidence not
+  present in the staged input. Projection maintenance, indexing, or dedupe is
+  never itself admission authority.
 - Signal foreground availability at the earliest durable staging boundary,
   before projection, full import completion, maintenance, or routine
   checkpointing. Typing or activity signals are best-effort and cannot delay
@@ -190,6 +194,9 @@ executable tests.
   has an item, time, or attempt bound plus an abort or durable continuation
   path. Foreground latency must not grow without bound with unrelated history,
   backlog, workspace size, file count, transcripts, or logs.
+- Recovery candidate enumeration begins from surviving staged evidence. Clean
+  terminal metadata without stage residue is not recovery work. Narrowing that
+  enumeration must preserve canonical identity across physical partitions.
 
 ## Provider And Runtime Boundaries
 
@@ -209,6 +216,10 @@ executable tests.
 - Execution planes stay thin. Platform coordination, secret injection,
   workspace transport, and write fences remain separate from assistant business
   logic, canonical data semantics, and product state.
+- A runtime ownership grace window may be bypassed only after exact,
+  target-specific proof that the prior owner has no live execution. Missing,
+  ambiguous, or same-target evidence stays fail-closed, and concurrent claimants
+  converge on the durable owner record.
 
 ## Product-Critical Flow Preservation
 

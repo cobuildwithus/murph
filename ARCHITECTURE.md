@@ -1,6 +1,6 @@
 # Murph Architecture
 
-Last verified: 2026-07-13
+Last verified: 2026-07-14
 
 ## Hosted Group Self-Awareness
 
@@ -319,9 +319,11 @@ owner of execution and commit authority rather than mailbox-work truth. Exact
 accepted wakes may coalesce under Cloudflare's active owner; durable mailbox lag
 remains recovery truth but duplicate execution is prevented by the write fence;
 accepted processing returns an owner recheck instead of a short
-durable-lag polling loop; old runtime fences with missing children are replaced
-by identity after startup grace, wake-unconfirmed active children retry instead
-of being replaced, and alarm cleanup
+durable-lag polling loop; a same-version startup fence keeps its startup grace,
+while an exact prior-version container that reports no active child is replaced
+immediately by identity; concurrent replacement callers converge on the current
+fence record instead of entering a timed race state; wake-unconfirmed active
+children retry instead of being replaced, and alarm cleanup
 failures are rethrown so the platform can retry instead of permanently deleting
 the alarm. New v2 foreground leases restore from durable workspace snapshots and
 legacy refs also cold-restore from durable bundles instead of trusting dirty
