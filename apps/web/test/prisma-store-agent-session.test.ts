@@ -13,6 +13,7 @@ vi.mock("node:crypto", async () => {
 });
 
 import { PrismaDeviceSyncControlPlaneStore } from "@/src/lib/device-sync/prisma-store";
+import { PrismaHostedAgentSessionStore } from "@/src/lib/device-sync/prisma-store/agent-sessions";
 
 type MutableAgentSession = {
   id: string;
@@ -113,8 +114,10 @@ function createSessionStore(seed: MutableAgentSession[]) {
       decrypt: (value: string) => value,
     },
   });
+  const agentSessionStore = new PrismaHostedAgentSessionStore(prisma as never);
 
   return {
+    agentSessionStore,
     sessions,
     store,
   };
@@ -178,6 +181,104 @@ describe("PrismaDeviceSyncControlPlaneStore agent sessions", () => {
       replacedBySessionId: null,
     });
     expect(sessions.get("dsa_expired")?.revokedAt?.toISOString()).toBe("2026-03-25T00:00:00.000Z");
+  });
+
+  it("does not let a stale token revoke a replacement using the same session id", async () => {
+    const { agentSessionStore, sessions } = createSessionStore([
+      {
+        id: "dsa_stable",
+        userId: "user-123",
+        label: "Murph Messages mini app",
+        tokenHash: "hash-replacement",
+        createdAt: new Date("2026-03-25T00:00:00.000Z"),
+        updatedAt: new Date("2026-03-25T01:00:00.000Z"),
+        expiresAt: new Date("2026-03-26T01:00:00.000Z"),
+        lastSeenAt: new Date("2026-03-25T01:00:00.000Z"),
+        revokedAt: null,
+        revokeReason: null,
+        replacedBySessionId: null,
+      },
+    ]);
+
+    await expect(agentSessionStore.revokeAgentSession({
+      expectedTokenHash: "hash-stale",
+      sessionId: "dsa_stable",
+      now: "2026-03-25T02:00:00.000Z",
+      reason: "imessage_app_request",
+    })).resolves.toBeNull();
+    expect(sessions.get("dsa_stable")).toMatchObject({
+      tokenHash: "hash-replacement",
+      revokedAt: null,
+      revokeReason: null,
+    });
+  });
+
+  it("does not let stale expiry cleanup revoke a replacement using the same session id", async () => {
+    const expiredSnapshot = {
+      id: "dsa_stable",
+      userId: "user-123",
+      label: "Murph Messages mini app",
+      tokenHash: "hash-expired",
+      createdAt: new Date("2026-03-24T00:00:00.000Z"),
+      updatedAt: new Date("2026-03-24T00:00:00.000Z"),
+      expiresAt: new Date("2026-03-24T12:00:00.000Z"),
+      lastSeenAt: new Date("2026-03-24T11:00:00.000Z"),
+      revokedAt: null,
+      revokeReason: null,
+      replacedBySessionId: null,
+    };
+    const replacement = {
+      ...expiredSnapshot,
+      tokenHash: "hash-replacement",
+      updatedAt: new Date("2026-03-25T00:00:00.000Z"),
+      expiresAt: new Date("2026-03-26T00:00:00.000Z"),
+      lastSeenAt: new Date("2026-03-25T00:00:00.000Z"),
+    };
+    let liveSession = { ...expiredSnapshot };
+    const updateMany = vi.fn(async ({
+      data,
+      where,
+    }: {
+      data: Record<string, unknown>;
+      where: Record<string, unknown>;
+    }) => {
+      if (!matchesWhere(liveSession, where)) {
+        return { count: 0 };
+      }
+
+      applyUpdate(liveSession, data);
+      return { count: 1 };
+    });
+    const findUnique = vi.fn(async () => {
+      const snapshot = cloneSession(liveSession);
+      liveSession = { ...replacement };
+      return snapshot;
+    });
+    const tx = {
+      deviceAgentSession: { findUnique, updateMany },
+    };
+    const prisma = {
+      deviceAgentSession: {
+        findUnique,
+        updateMany,
+      },
+      $transaction: async <TResult>(
+        callback: (transaction: typeof tx) => Promise<TResult>,
+      ) => await callback(tx),
+    };
+    const store = new PrismaHostedAgentSessionStore(prisma as never);
+
+    await expect(store.authenticateAgentSessionByTokenHash(
+      "hash-expired",
+      "2026-03-25T00:00:00.000Z",
+    )).resolves.toEqual({ status: "missing", session: null });
+    expect(updateMany).toHaveBeenCalledTimes(2);
+    expect(findUnique).toHaveBeenCalledTimes(1);
+    expect(liveSession).toMatchObject({
+      tokenHash: "hash-replacement",
+      revokedAt: null,
+      revokeReason: null,
+    });
   });
 
   it("rotates active sessions into a replacement record", async () => {
