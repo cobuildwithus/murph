@@ -630,6 +630,13 @@ describe("hosted Prisma baseline migration", () => {
       ),
       "utf8",
     );
+    const assistantPreferenceProjectionWatermarkContractMigrationSql = readFileSync(
+      new URL(
+        "../prisma/contract-migrations/20260714120000_seed_assistant_preference_projection_watermarks/migration.sql",
+        import.meta.url,
+      ),
+      "utf8",
+    );
     const hostedComputerRunResumeMailboxLaneSeqMigrationSql = readFileSync(
       new URL(
         "../prisma/migrations/20260712190000_hosted_computer_run_resume_mailbox_lane_seq/migration.sql",
@@ -1404,6 +1411,21 @@ describe("hosted Prisma baseline migration", () => {
     );
     expect(hostedMailboxCausalSeqContractMigrationSql).toContain("NOT VALID");
     expect(hostedMailboxCausalSeqContractMigrationSql).not.toContain('"consumed_at"');
+    expect(assistantPreferenceProjectionWatermarkContractMigrationSql).toContain(
+      'FROM "hosted_mailbox_lane_counter" AS causal_counter',
+    );
+    expect(assistantPreferenceProjectionWatermarkContractMigrationSql).toContain(
+      "causal_counter.\"lane\" = 'causal'",
+    );
+    expect(assistantPreferenceProjectionWatermarkContractMigrationSql).toContain(
+      'COALESCE(causal_counter."next_seq" - 1, 0)',
+    );
+    expect(assistantPreferenceProjectionWatermarkContractMigrationSql).toMatch(
+      /WHEN member\."assistant_tone" IS NULL THEN NULL[\s\S]*GREATEST\([\s\S]*member\."assistant_tone_causal_seq"/u,
+    );
+    expect(assistantPreferenceProjectionWatermarkContractMigrationSql).toMatch(
+      /WHEN member\."assistant_voice" IS NULL THEN NULL[\s\S]*GREATEST\([\s\S]*member\."assistant_voice_causal_seq"/u,
+    );
     expect(linqPendingParticipantContactMigrationSql).toContain(
       'ALTER TABLE "hosted_member_routing"',
     );

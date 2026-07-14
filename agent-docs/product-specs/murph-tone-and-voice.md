@@ -366,7 +366,11 @@ switch, then contract rollout:
    function window, then fails closed only if a legacy preference row remains
    above the authoritative system-lane `consumed_seq`. It installs the
    new-write check `NOT VALID`, so handled retained history does not block the
-   rollout and new null-sequence preference writes are rejected.
+   rollout and new null-sequence preference writes are rejected. After that
+   same drain, it advances each populated web projection field to the member's
+   current mailbox causal counter. That one-time cutover barrier makes every
+   pre-cutover conversational turn stale at the projection without inventing
+   ordering for an absent field.
 3. Deploy the new Cloudflare worker and runner with
    `container_rollout=immediate`; prove the managed fleet has converged. The
    compatible runtime always installs the invocation-local causal binding, so

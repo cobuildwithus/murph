@@ -812,9 +812,12 @@ the nullable sequence expansion and deploy the sequence-producing web build
 with personality writes gated off. The automatic post-deploy contract lane
 waits for old functions and applies the causal-sequence constraint only when no
 unconsumed sequence-less preference row remains; otherwise it fails closed for
-a later retry. Deploy the new Cloudflare runner with an immediate rollout and
-its gate off, then enable Cloudflare before Vercel. Once enabled, both planes
-are rollback floors and must be forward-deployed together.
+a later retry. After the same drain, it advances each populated tone/voice
+projection watermark to the member's current causal counter so a delayed
+pre-cutover turn cannot overwrite a newer Settings projection. Deploy the new
+Cloudflare runner with an immediate rollout and its gate off, then enable
+Cloudflare before Vercel. Once enabled, both planes are rollback floors and
+must be forward-deployed together.
 The `2026062100_hosted_computer_single_member_profile` migration is an explicit
 greenfield computer-use hard cut: deploy it only as part of a coordinated
 hosted web plus Worker cutover with hosted computer-use traffic paused during
