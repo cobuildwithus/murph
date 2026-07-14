@@ -33,9 +33,11 @@ one exact head for CI plus ReviewGPT round 9. Do not merge the PR.
 
 ## Status
 
-- Active: both round-8 findings, the account-bound route isolation audit
-  finding, and same-fresh-batch context retention are corrected. Current
-  `main` is merged; final scoped verification and exact-head gates remain.
+- Implementation and scoped local verification are complete. Both round-8
+  findings, the account-bound route isolation audit finding, same-fresh-batch
+  context retention, and deferred-context cursor preservation are corrected.
+  Current `main` is merged; exact-head CI and ReviewGPT round 9 follow the
+  final commit and push.
 
 ## Verification
 
@@ -56,5 +58,10 @@ one exact head for CI plus ReviewGPT round 9. Do not merge the PR.
   gaps were corrected with focused regressions.
 - Passed diff-check, conflict-marker, unmerged-file, retired-route-proof, and
   non-mutating mergeability checks after reconciling current `main`.
-- Pending final hygiene/base-alignment checks, exact-head CI, and ReviewGPT
-  round 9.
+- Reconciled the final base advance with a conflict-free ordinary merge; it
+  changed only unrelated web and completed-plan files, leaving the verified
+  assistant-engine/runtime patch unchanged.
+- Pending exact-head CI and ReviewGPT round 9 after push.
+Status: completed
+Updated: 2026-07-14
+Completed: 2026-07-14
