@@ -1,6 +1,6 @@
 # Simplify hosted mailbox receipt ordering
 
-Status: active
+Status: completed
 Created: 2026-07-14
 Updated: 2026-07-14
 
@@ -70,3 +70,11 @@ Updated: 2026-07-14
   - PR CI, mergeability preflight, and `pnpm review:gpt pr-review` rounds on each PR-specific pushed head until zero accepted findings.
 - Expected outcomes:
   - All required checks pass without new state, dependencies, services, recovery branches, or weakened restore validation.
+
+### Results
+
+- `pnpm test:diff packages/assistant-runtime agent-docs/references/hosted-runtime-protocol.md` passed on the rebased shared-host profile: 1,609 package tests passed with 2 skipped; 1,781 Cloudflare Node tests and the Workers smoke test passed.
+- The complete hosted-runtime entrypoint file passed all 208 tests, including direct cold-restore receipt ordering, retained shutdown import/effect preservation, and empty-import held-wake reconciliation.
+- The required `coverage-write` audit found no missing proof and made no edits.
+- Parent final review found no remaining scope, ownership, privacy, or proof gap.
+Completed: 2026-07-14
