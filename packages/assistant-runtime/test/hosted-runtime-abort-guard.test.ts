@@ -122,7 +122,6 @@ describe("hosted runtime abort guard", () => {
           assert.equal(item.payload.payloadCiphertext, "ciphertext_synthetic_sidecar");
           return {
             assistantInputId: "ain_prototype_mailbox_guard",
-            assistantReplyEligible: true,
             status: "imported",
           };
         },

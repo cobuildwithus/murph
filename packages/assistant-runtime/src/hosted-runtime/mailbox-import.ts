@@ -47,9 +47,7 @@ export type HostedMailboxItemImportOutcome =
     }
   | {
       status: "imported" | "skipped";
-      assistantInputId?: string | null;
-      // Only true when this conversation input may enter the current foreground turn.
-      assistantReplyEligible?: boolean;
+      assistantInputId?: string;
       emailDeliveryContext?: HostedAssistantEmailDeliveryContext | null;
       linqDeliveryContext?: HostedAssistantLinqDeliveryContext | null;
       usageNoticeDeliveryTarget?: HostedRuntimeUsageNoticeDeliveryTarget | null;
@@ -489,9 +487,7 @@ export async function fetchAndProcessHostedMailboxPrefix(input: {
       if (conversationInput) {
         conversationImportedCount += 1;
       }
-      const replyableConversationInput =
-        conversationInput && outcome.assistantReplyEligible === true;
-      if (replyableConversationInput && outcome.assistantInputId) {
+      if (conversationInput && outcome.assistantInputId) {
         assistantInputIds.push(outcome.assistantInputId);
         assistantInputRecords.push({
           assistantInputId: outcome.assistantInputId,

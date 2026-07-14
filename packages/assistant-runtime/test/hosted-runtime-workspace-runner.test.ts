@@ -1355,7 +1355,6 @@ describe("runHostedWorkspaceUntilIdleOrBudget", () => {
             });
             return {
               assistantInputId: staged.inputId,
-              assistantReplyEligible: true,
               status: "imported",
             };
           }
@@ -1955,7 +1954,6 @@ describe("runHostedWorkspaceUntilIdleOrBudget", () => {
             });
             return {
               assistantInputId: staged.inputId,
-              assistantReplyEligible: true,
               status: "imported",
             };
           }
@@ -4073,7 +4071,6 @@ describe("runHostedWorkspaceUntilIdleOrBudget", () => {
               }
               : null,
             assistantInputId: staged.inputId,
-            assistantReplyEligible: true,
             status: "imported",
           };
         },
@@ -4431,7 +4428,6 @@ describe("runHostedWorkspaceUntilIdleOrBudget", () => {
           });
           return {
             assistantInputId: staged.inputId,
-            assistantReplyEligible: true,
             status: "imported",
           };
         },
@@ -4879,7 +4875,6 @@ describe("runHostedWorkspaceUntilIdleOrBudget", () => {
           });
           return {
             assistantInputId: staged.inputId,
-            assistantReplyEligible: true,
             status: "imported",
           };
         },
@@ -5110,7 +5105,6 @@ describe("runHostedWorkspaceUntilIdleOrBudget", () => {
           importedSeqs.push(item.item.laneSeq);
           return {
             assistantInputId: staged.inputId,
-            assistantReplyEligible: true,
             status: "imported",
           };
         },
@@ -5231,7 +5225,6 @@ describe("runHostedWorkspaceUntilIdleOrBudget", () => {
           stagedInputId = staged.inputId;
           return {
             assistantInputId: staged.inputId,
-            assistantReplyEligible: true,
             status: "imported",
           };
         },
@@ -5721,7 +5714,6 @@ describe("runHostedWorkspaceUntilIdleOrBudget", () => {
             );
             return {
               assistantInputId: staged.inputId,
-              assistantReplyEligible: true,
               status: "imported",
             };
           },
@@ -5907,7 +5899,6 @@ describe("runHostedWorkspaceUntilIdleOrBudget", () => {
           });
           return {
             assistantInputId: staged.inputId,
-            assistantReplyEligible: true,
             status: "imported",
           };
         },
@@ -6083,7 +6074,6 @@ describe("runHostedWorkspaceUntilIdleOrBudget", () => {
           });
           return {
             assistantInputId: staged.inputId,
-            assistantReplyEligible: true,
             status: "imported",
           };
         },
@@ -7074,7 +7064,6 @@ describe("runHostedWorkspaceUntilIdleOrBudget", () => {
           });
           return {
             assistantInputId: staged.inputId,
-            assistantReplyEligible: true,
             status: "imported",
           };
         },
@@ -7177,7 +7166,6 @@ describe("runHostedWorkspaceUntilIdleOrBudget", () => {
           });
           return {
             assistantInputId: staged.inputId,
-            assistantReplyEligible: true,
             status: "imported",
           };
         },
@@ -7271,7 +7259,6 @@ describe("runHostedWorkspaceUntilIdleOrBudget", () => {
           assistantInputStaged = true;
           return {
             assistantInputId: staged.inputId,
-            assistantReplyEligible: true,
             status: "imported",
           };
         },
