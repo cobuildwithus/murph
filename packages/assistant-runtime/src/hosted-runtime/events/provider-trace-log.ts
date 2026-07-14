@@ -21,16 +21,10 @@ const ASSISTANT_CODEX_INVALID_OUTPUT_TRACE_SCHEMA =
   "murph.assistant-codex-invalid-output-diagnostics.v1";
 const ASSISTANT_CODEX_INVALID_OUTPUT_FAILURE_TRACE_TYPE =
   "assistant.codex.invalid_output_resume_failure";
-const ASSISTANT_CODEX_INVALID_OUTPUT_FALLBACK_TRACE_TYPE =
-  "assistant.codex.invalid_output_resume_fallback";
 const ASSISTANT_CODEX_RESUME_FAILURE_TRACE_SCHEMA =
   "murph.assistant-codex-resume-failure-diagnostics.v1";
 const ASSISTANT_CODEX_RESUME_FAILURE_TRACE_TYPE =
   "assistant.codex.resume_failure";
-const ASSISTANT_CODEX_FRESH_THREAD_FALLBACK_TRACE_SCHEMA =
-  "murph.assistant-codex-fresh-thread-fallback-diagnostics.v1";
-const ASSISTANT_CODEX_FRESH_THREAD_FALLBACK_TRACE_TYPE =
-  "assistant.codex.fresh_thread_fallback";
 const ASSISTANT_CODEX_APP_SERVER_TIMING_TRACE_SCHEMA =
   "murph.assistant-codex-app-server-timing.v1";
 const ASSISTANT_CODEX_APP_SERVER_TIMING_TRACE_TYPE =
@@ -64,17 +58,10 @@ const HOSTED_ASSISTANT_ROUTE_PLANNING_STAGE_VALUES = new Set([
   "target_capabilities",
 ]);
 const HOSTED_ASSISTANT_PROVIDER_PROMPT_DIAGNOSTIC_KIND_VALUES = new Set([
-  "fresh-thread-fallback",
   "primary",
 ]);
 const HOSTED_ASSISTANT_CODEX_INVALID_OUTPUT_PHASE_VALUES = new Set([
-  "fallback-failed",
-  "fallback-succeeded",
   "resume-failed",
-]);
-const HOSTED_ASSISTANT_CODEX_INVALID_OUTPUT_RESULT_VALUES = new Set([
-  "failed",
-  "succeeded",
 ]);
 const HOSTED_ASSISTANT_CODEX_INVALID_OUTPUT_ERROR_CODES = new Set([
   "ASSISTANT_CODEX_APPROVAL_POLICY_UNSUPPORTED",
@@ -124,19 +111,6 @@ const HOSTED_ASSISTANT_CODEX_RESUME_FAILURE_ERROR_PHRASE_VALUES = new Set([
   "status-failed",
   "timeout",
   "usage-limit",
-]);
-const HOSTED_ASSISTANT_CODEX_FRESH_THREAD_FALLBACK_PHASE_VALUES = new Set([
-  "fallback-failed",
-  "fallback-started",
-  "fallback-succeeded",
-]);
-const HOSTED_ASSISTANT_CODEX_FRESH_THREAD_FALLBACK_REASON_VALUES = new Set([
-  "resume-transport-failure",
-]);
-const HOSTED_ASSISTANT_CODEX_FRESH_THREAD_FALLBACK_RESULT_VALUES = new Set([
-  "failed",
-  "started",
-  "succeeded",
 ]);
 const HOSTED_ASSISTANT_CODEX_PROCESS_SIGNAL_VALUES = new Set([
   "SIGINT",
@@ -266,20 +240,12 @@ const HOSTED_ASSISTANT_CODEX_INVALID_OUTPUT_KEY_BUCKET_VALUES = new Set([
   "type",
 ]);
 const HOSTED_ASSISTANT_CODEX_INVALID_OUTPUT_BOOLEAN_KEYS = [
-  "codexInvalidOutputFallbackAttempted",
-  "codexInvalidOutputFallbackErrorMessagePresent",
-  "codexInvalidOutputFallbackSessionChanged",
-  "codexInvalidOutputFallbackSessionPresent",
-  "codexInvalidOutputFallbackTurnPresent",
   "codexInvalidOutputFailureSessionPresent",
   "codexInvalidOutputFailureTurnPresent",
   "codexInvalidOutputResumeMatchesFailureSession",
   "codexInvalidOutputResumeSessionPresent",
 ] as const;
 const HOSTED_ASSISTANT_CODEX_INVALID_OUTPUT_NUMBER_KEYS = [
-  "codexInvalidOutputFallbackEventCount",
-  "codexInvalidOutputFallbackErrorMessageLength",
-  "codexInvalidOutputFallbackProviderActionCount",
   "codexInvalidOutputFailureEventCount",
   "codexInvalidOutputFailureProviderActionCount",
   "codexInvalidOutputErrorMessageLength",
@@ -314,25 +280,6 @@ const HOSTED_ASSISTANT_CODEX_RESUME_FAILURE_NUMBER_KEYS = [
 const HOSTED_ASSISTANT_CODEX_RESUME_FAILURE_NUMBER_ARRAY_KEYS = [
   "codexResumeFailureOutputArrayLengths",
   "codexResumeFailureOutputStringLengths",
-] as const;
-const HOSTED_ASSISTANT_CODEX_FRESH_THREAD_FALLBACK_BOOLEAN_KEYS = [
-  "codexFreshThreadFallbackErrorMessagePresent",
-  "codexFreshThreadFallbackFailureSessionPresent",
-  "codexFreshThreadFallbackFailureTurnPresent",
-  "codexFreshThreadFallbackFallbackErrorMessagePresent",
-  "codexFreshThreadFallbackResumeMatchesFailureSession",
-  "codexFreshThreadFallbackResumeSessionPresent",
-  "codexFreshThreadFallbackSessionChanged",
-  "codexFreshThreadFallbackSessionPresent",
-  "codexFreshThreadFallbackTurnPresent",
-] as const;
-const HOSTED_ASSISTANT_CODEX_FRESH_THREAD_FALLBACK_NUMBER_KEYS = [
-  "codexFreshThreadFallbackErrorMessageLength",
-  "codexFreshThreadFallbackEventCount",
-  "codexFreshThreadFallbackFailureEventCount",
-  "codexFreshThreadFallbackFailureProviderActionCount",
-  "codexFreshThreadFallbackFallbackErrorMessageLength",
-  "codexFreshThreadFallbackProviderActionCount",
 ] as const;
 const HOSTED_ASSISTANT_CODEX_ACTION_DIAGNOSTIC_BOOLEAN_KEYS = [
   "codexActionThreadIdPresent",
@@ -485,15 +432,6 @@ function readHostedAssistantProviderDiagnosticTrace(
     };
   }
 
-  const freshThreadFallbackDiagnostic =
-    readHostedAssistantCodexFreshThreadFallbackDiagnosticTrace(event);
-  if (freshThreadFallbackDiagnostic) {
-    return {
-      details: freshThreadFallbackDiagnostic,
-      message: "Hosted assistant Codex fresh-thread fallback diagnostics captured.",
-    };
-  }
-
   const appServerTimingDiagnostic =
     readHostedAssistantCodexAppServerTimingTrace(event);
   if (appServerTimingDiagnostic) {
@@ -620,7 +558,6 @@ function readHostedAssistantProviderPlanDiagnosticTrace(
     "routePlanningCliBootstrapElapsedMs",
     "routePlanningElapsedMs",
     "routePlanningFallbackInstructionsElapsedMs",
-    "routePlanningFreshThreadFallbackPromptElapsedMs",
     "routePlanningMemoryOverviewElapsedMs",
     "routePlanningMeasuredElapsedMs",
     "routePlanningPrimaryInstructionsElapsedMs",
@@ -650,7 +587,6 @@ function readHostedAssistantProviderPlanDiagnosticTrace(
   for (const key of [
     "routePlanningAnyBootstrapContextPrepared",
     "routePlanningBootstrapContextPrepared",
-    "routePlanningFreshThreadFallbackPrepared",
   ] as const) {
     maybeSetHostedAssistantProviderDiagnosticDetail(
       details,
@@ -723,23 +659,14 @@ function readHostedAssistantCodexInvalidOutputDiagnosticTrace(
   const type = readHostedAssistantProviderPlanString(record, "type");
   if (
     schema !== ASSISTANT_CODEX_INVALID_OUTPUT_TRACE_SCHEMA
-    || (
-      type !== ASSISTANT_CODEX_INVALID_OUTPUT_FAILURE_TRACE_TYPE
-      && type !== ASSISTANT_CODEX_INVALID_OUTPUT_FALLBACK_TRACE_TYPE
-    )
+    || type !== ASSISTANT_CODEX_INVALID_OUTPUT_FAILURE_TRACE_TYPE
   ) {
     return null;
   }
 
   const details: HostedExecutionStructuredLogDetails = {
-    codexInvalidOutputTraceType:
-      type === ASSISTANT_CODEX_INVALID_OUTPUT_FAILURE_TRACE_TYPE
-        ? "failure"
-        : "fallback",
-    providerTraceKind:
-      type === ASSISTANT_CODEX_INVALID_OUTPUT_FAILURE_TRACE_TYPE
-        ? "codex.invalid_output_resume_failure"
-        : "codex.invalid_output_resume_fallback",
+    codexInvalidOutputTraceType: "failure",
+    providerTraceKind: "codex.invalid_output_resume_failure",
     schema: ASSISTANT_CODEX_INVALID_OUTPUT_TRACE_SCHEMA,
   };
 
@@ -752,16 +679,6 @@ function readHostedAssistantCodexInvalidOutputDiagnosticTrace(
       HOSTED_ASSISTANT_CODEX_INVALID_OUTPUT_PHASE_VALUES,
     ),
   );
-  maybeSetHostedAssistantProviderDiagnosticDetail(
-    details,
-    "codexInvalidOutputFallbackResult",
-    readHostedAssistantProviderDiagnosticAllowedString(
-      record,
-      "codexInvalidOutputFallbackResult",
-      HOSTED_ASSISTANT_CODEX_INVALID_OUTPUT_RESULT_VALUES,
-    ),
-  );
-
   for (const key of HOSTED_ASSISTANT_CODEX_INVALID_OUTPUT_BOOLEAN_KEYS) {
     maybeSetHostedAssistantProviderDiagnosticDetail(
       details,
@@ -783,15 +700,6 @@ function readHostedAssistantCodexInvalidOutputDiagnosticTrace(
     readHostedAssistantProviderDiagnosticAllowedString(
       record,
       "codexInvalidOutputErrorCode",
-      HOSTED_ASSISTANT_CODEX_INVALID_OUTPUT_ERROR_CODES,
-    ),
-  );
-  maybeSetHostedAssistantProviderDiagnosticDetail(
-    details,
-    "codexInvalidOutputFallbackErrorCode",
-    readHostedAssistantProviderDiagnosticAllowedString(
-      record,
-      "codexInvalidOutputFallbackErrorCode",
       HOSTED_ASSISTANT_CODEX_INVALID_OUTPUT_ERROR_CODES,
     ),
   );
@@ -1029,111 +937,6 @@ function readHostedAssistantCodexResumeFailureDiagnosticTrace(
       readHostedAssistantProviderDiagnosticNumberArray(record, key),
     );
   }
-
-  return details;
-}
-
-function readHostedAssistantCodexFreshThreadFallbackDiagnosticTrace(
-  event: unknown,
-): HostedExecutionStructuredLogDetails | null {
-  const record = readHostedAssistantProviderRawTraceRecord(event);
-  if (!record) {
-    return null;
-  }
-
-  const schema = readHostedAssistantProviderPlanString(record, "schema");
-  const type = readHostedAssistantProviderPlanString(record, "type");
-  if (
-    schema !== ASSISTANT_CODEX_FRESH_THREAD_FALLBACK_TRACE_SCHEMA
-    || type !== ASSISTANT_CODEX_FRESH_THREAD_FALLBACK_TRACE_TYPE
-  ) {
-    return null;
-  }
-
-  const details: HostedExecutionStructuredLogDetails = {
-    codexFreshThreadFallbackTraceType: "fallback",
-    providerTraceKind: "codex.fresh_thread_fallback",
-    schema: ASSISTANT_CODEX_FRESH_THREAD_FALLBACK_TRACE_SCHEMA,
-  };
-
-  maybeSetHostedAssistantProviderDiagnosticDetail(
-    details,
-    "codexFreshThreadFallbackPhase",
-    readHostedAssistantProviderDiagnosticAllowedString(
-      record,
-      "codexFreshThreadFallbackPhase",
-      HOSTED_ASSISTANT_CODEX_FRESH_THREAD_FALLBACK_PHASE_VALUES,
-    ),
-  );
-  maybeSetHostedAssistantProviderDiagnosticDetail(
-    details,
-    "codexFreshThreadFallbackReason",
-    readHostedAssistantProviderDiagnosticAllowedString(
-      record,
-      "codexFreshThreadFallbackReason",
-      HOSTED_ASSISTANT_CODEX_FRESH_THREAD_FALLBACK_REASON_VALUES,
-    ),
-  );
-  maybeSetHostedAssistantProviderDiagnosticDetail(
-    details,
-    "codexFreshThreadFallbackResult",
-    readHostedAssistantProviderDiagnosticAllowedString(
-      record,
-      "codexFreshThreadFallbackResult",
-      HOSTED_ASSISTANT_CODEX_FRESH_THREAD_FALLBACK_RESULT_VALUES,
-    ),
-  );
-  for (const key of [
-    "codexFreshThreadFallbackErrorCode",
-    "codexFreshThreadFallbackFallbackErrorCode",
-  ] as const) {
-    maybeSetHostedAssistantProviderDiagnosticDetail(
-      details,
-      key,
-      readHostedAssistantProviderDiagnosticAllowedString(
-        record,
-        key,
-        HOSTED_ASSISTANT_CODEX_INVALID_OUTPUT_ERROR_CODES,
-      ),
-    );
-  }
-  for (const key of [
-    "codexFreshThreadFallbackErrorKind",
-    "codexFreshThreadFallbackFallbackErrorKind",
-  ] as const) {
-    maybeSetHostedAssistantProviderDiagnosticDetail(
-      details,
-      key,
-      readHostedAssistantProviderDiagnosticAllowedString(
-        record,
-        key,
-        HOSTED_ASSISTANT_CODEX_RESUME_FAILURE_ERROR_KIND_VALUES,
-      ),
-    );
-  }
-  for (const key of HOSTED_ASSISTANT_CODEX_FRESH_THREAD_FALLBACK_BOOLEAN_KEYS) {
-    maybeSetHostedAssistantProviderDiagnosticDetail(
-      details,
-      key,
-      readHostedAssistantProviderDiagnosticBoolean(record, key),
-    );
-  }
-  for (const key of HOSTED_ASSISTANT_CODEX_FRESH_THREAD_FALLBACK_NUMBER_KEYS) {
-    maybeSetHostedAssistantProviderDiagnosticDetail(
-      details,
-      key,
-      readHostedAssistantProviderDiagnosticNonnegativeNumber(record, key),
-    );
-  }
-  maybeSetHostedAssistantProviderDiagnosticDetail(
-    details,
-    "codexFreshThreadFallbackErrorPhrases",
-    readHostedAssistantProviderDiagnosticAllowedStringArray(
-      record,
-      "codexFreshThreadFallbackErrorPhrases",
-      HOSTED_ASSISTANT_CODEX_RESUME_FAILURE_ERROR_PHRASE_VALUES,
-    ),
-  );
 
   return details;
 }

@@ -2294,8 +2294,6 @@ describe("hosted runtime control contracts", () => {
         routePlanningFallbackInstructionsElapsedMs: null,
         routePlanningAnyBootstrapContextPrepared: true,
         routePlanningBootstrapContextPrepared: false,
-        routePlanningFreshThreadFallbackPromptElapsedMs: null,
-        routePlanningFreshThreadFallbackPrepared: false,
         routePlanningMeasuredElapsedMs: 15,
         routePlanningMemoryOverviewElapsedMs: null,
         routePlanningPrimaryInstructionsElapsedMs: 12,
@@ -2323,8 +2321,6 @@ describe("hosted runtime control contracts", () => {
       routePlanningFallbackInstructionsElapsedMs: null,
       routePlanningAnyBootstrapContextPrepared: true,
       routePlanningBootstrapContextPrepared: false,
-      routePlanningFreshThreadFallbackPromptElapsedMs: null,
-      routePlanningFreshThreadFallbackPrepared: false,
       routePlanningMeasuredElapsedMs: 15,
       routePlanningMemoryOverviewElapsedMs: null,
       routePlanningPrimaryInstructionsElapsedMs: 12,
@@ -2341,7 +2337,6 @@ describe("hosted runtime control contracts", () => {
       "routePlanningActiveExperimentContextElapsedMs",
       "routePlanningAssistantContextSnapshotElapsedMs",
       "routePlanningElapsedMs",
-      "routePlanningFreshThreadFallbackPromptElapsedMs",
       "routePlanningPrimarySystemPromptElapsedMs",
       "routePlanningVaultOverviewElapsedMs",
     ] as const) {
@@ -2364,6 +2359,17 @@ describe("hosted runtime control contracts", () => {
         routePlanningGlucoseContextElapsedMs: 12,
       },
     })).toThrow(/allowed route-planning diagnostic key/u);
+    for (const [removedKey, removedValue] of [
+      ["routePlanningFreshThreadFallbackPrepared", true],
+      ["routePlanningFreshThreadFallbackPromptElapsedMs", 12],
+    ] as const) {
+      expect(() => parseHostedRuntimeLogEntry({
+        ...entry,
+        redactedJson: {
+          [removedKey]: removedValue,
+        },
+      })).toThrow(/allowed route-planning diagnostic key/u);
+    }
     expect(() => parseHostedRuntimeLogEntry({
       ...entry,
       redactedJson: {

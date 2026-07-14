@@ -1956,8 +1956,6 @@ describe("hosted runtime log store", () => {
         routePlanningFallbackInstructionsElapsedMs: null,
         routePlanningAnyBootstrapContextPrepared: true,
         routePlanningBootstrapContextPrepared: false,
-        routePlanningFreshThreadFallbackPromptElapsedMs: null,
-        routePlanningFreshThreadFallbackPrepared: false,
         routePlanningMeasuredElapsedMs: 15,
         routePlanningMemoryOverviewElapsedMs: null,
         routePlanningPrimaryInstructionsElapsedMs: 12,
@@ -1994,8 +1992,6 @@ describe("hosted runtime log store", () => {
       routePlanningFallbackInstructionsElapsedMs: null,
       routePlanningAnyBootstrapContextPrepared: true,
       routePlanningBootstrapContextPrepared: false,
-      routePlanningFreshThreadFallbackPromptElapsedMs: null,
-      routePlanningFreshThreadFallbackPrepared: false,
       routePlanningMeasuredElapsedMs: 15,
       routePlanningMemoryOverviewElapsedMs: null,
       routePlanningPrimaryInstructionsElapsedMs: 12,
@@ -2013,7 +2009,6 @@ describe("hosted runtime log store", () => {
       "routePlanningActiveExperimentContextElapsedMs",
       "routePlanningAssistantContextSnapshotElapsedMs",
       "routePlanningElapsedMs",
-      "routePlanningFreshThreadFallbackPromptElapsedMs",
       "routePlanningPrimarySystemPromptElapsedMs",
       "routePlanningVaultOverviewElapsedMs",
     ] as const) {
@@ -2057,6 +2052,24 @@ describe("hosted runtime log store", () => {
       tx,
       userId: "member_workspace_1",
     })).rejects.toThrow(/allowed route-planning diagnostic key/u);
+    for (const [removedKey, removedValue] of [
+      ["routePlanningFreshThreadFallbackPrepared", true],
+      ["routePlanningFreshThreadFallbackPromptElapsedMs", 12],
+    ] as const) {
+      await expect(recordHostedRuntimeLogTx({
+        at: "2026-04-26T00:02:00.000Z",
+        component: "assistant",
+        errorCode: "ASSISTANT_CODEX_FAILED",
+        eventCode: "assistant.automation_detail",
+        level: "warn",
+        phase: "invoke",
+        redacted: {
+          [removedKey]: removedValue,
+        },
+        tx,
+        userId: "member_workspace_1",
+      })).rejects.toThrow(/allowed route-planning diagnostic key/u);
+    }
     await expect(recordHostedRuntimeLogTx({
       at: "2026-04-26T00:02:00.000Z",
       component: "assistant",
