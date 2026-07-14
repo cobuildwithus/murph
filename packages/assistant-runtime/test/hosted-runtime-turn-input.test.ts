@@ -719,6 +719,58 @@ describe("createHostedAssistantInputSource", () => {
 });
 
 describe("selectHostedAssistantInputIds", () => {
+  it("keeps the background active-turn frontier on the selected source", async () => {
+    const vaultRoot = await createTempVault();
+    await saveAssistantAutomationState(vaultRoot, {
+      autoReply: [
+        {
+          channel: "linq",
+          eligibleAfter: null,
+          enabledAt: "2026-04-23T00:00:00.000Z",
+        },
+        {
+          channel: "telegram",
+          eligibleAfter: null,
+          enabledAt: "2026-04-23T00:00:00.000Z",
+        },
+      ],
+      updatedAt: "2026-04-23T00:00:00.000Z",
+      version: 1,
+    });
+    await ensureHostedPendingAssistantInputIndex({ vaultRoot });
+    const pendingEvents = [];
+    for (const [index, source] of ["linq", "telegram", "telegram", "linq"].entries()) {
+      const event = await upsertAssistantInputEvent({
+        vault: vaultRoot,
+        event: createAssistantInputEvent({
+          dedupeKey: `dedupe_mixed_frontier_${index}`,
+          eventId: `event_mixed_frontier_${index}`,
+          itemId: `item_mixed_frontier_${index}`,
+          laneSeq: String(index + 1),
+          messageId: `message_mixed_frontier_${index}`,
+          occurredAt: `2026-04-23T00:00:0${index + 1}.000Z`,
+          receivedAt: `2026-04-23T00:00:1${index + 1}.000Z`,
+          source,
+          text: `mixed frontier ${index}`,
+        }),
+      });
+      pendingEvents.push(event);
+      await enqueueHostedPendingAssistantInputId({ inputId: event.inputId, vaultRoot });
+    }
+
+    const selection = await selectHostedAssistantInputIds({
+      mode: "background",
+      vaultRoot,
+    });
+
+    expect(selection.inputIds).toEqual([pendingEvents[0]?.inputId]);
+    expect(selection.activeTurnSourceId).toBe("linq");
+    expect(selection.activeTurnInputIds).toEqual([
+      pendingEvents[0]?.inputId,
+      pendingEvents[3]?.inputId,
+    ]);
+  });
+
   it("does not let older pending input displace fresh foreground input", async () => {
     const vaultRoot = await createTempVault();
     await enableLinqAutoReply(vaultRoot);
@@ -886,6 +938,7 @@ describe("selectHostedAssistantInputIds", () => {
 
     expect(selection).toEqual({
       activeTurnInputIds: [fresh.inputId],
+      activeTurnSourceId: "linq",
       freshInputIds: [fresh.inputId],
       inputIds: [fresh.inputId],
       mode: "foreground",

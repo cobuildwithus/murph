@@ -34,6 +34,7 @@ type HostedPendingInputRefreshMode = "compact" | "existing";
 export type HostedAssistantInputSelection =
   | {
       activeTurnInputIds: string[];
+      activeTurnSourceId: string | null;
       freshInputIds: string[];
       inputIds: string[];
       mode: "foreground";
@@ -41,6 +42,7 @@ export type HostedAssistantInputSelection =
     }
   | {
       activeTurnInputIds: string[];
+      activeTurnSourceId: string | null;
       inputIds: string[];
       mode: "background";
       pendingInputIds: string[];
@@ -69,6 +71,7 @@ export async function resolveHostedPreferenceCausalSeqForSelectedInput(input: {
 }
 
 export function createHostedAssistantInputSource(input: {
+  activeTurnSourceId?: string | null;
   /** Cursor-ordered candidates available to active-turn admission. */
   initialActiveTurnInputIds?: readonly string[] | null;
   /** All pending candidates already observed before this runtime pass. */
@@ -114,13 +117,22 @@ export function createHostedAssistantInputSource(input: {
         observedInputIds.add(inputId);
         newPendingInputIds.push(inputId);
       }
-      const appendablePendingInputIds = input.pendingInputRefreshMode === "existing"
-        ? (await readHostedReplyablePendingAssistantInputEvents({
+      const appendablePendingEvents = input.pendingInputRefreshMode === "existing"
+        ? await readHostedReplyablePendingAssistantInputEvents({
             inputIds: newPendingInputIds,
             missingInput: "skip",
             vaultRoot: input.vaultRoot,
-          })).map((event) => event.inputId)
-        : newPendingInputIds;
+          })
+        : await readHostedAssistantInputEventsById({
+            inputIds: newPendingInputIds,
+            vaultRoot: input.vaultRoot,
+          });
+      const appendablePendingInputIds = appendablePendingEvents
+        .filter((event) =>
+          !input.activeTurnSourceId
+          || hostedAssistantInputSourceId(event) === input.activeTurnSourceId
+        )
+        .map((event) => event.inputId);
       const selectedAdded = appendHostedAssistantInputIds({
         inputIds: appendablePendingInputIds.slice(
           0,
@@ -209,8 +221,15 @@ export async function selectHostedAssistantInputIds(
     const orderedPendingEvents = pendingEvents.sort((left, right) =>
       compareAssistantInputCursors(left.cursor, right.cursor)
     );
+    const selectedEvent = orderedPendingEvents[0] ?? null;
+    const activeTurnSourceId = selectedEvent
+      ? hostedAssistantInputSourceId(selectedEvent)
+      : null;
     return {
-      activeTurnInputIds: orderedPendingEvents.map((event) => event.inputId),
+      activeTurnInputIds: orderedPendingEvents
+        .filter((event) => hostedAssistantInputSourceId(event) === activeTurnSourceId)
+        .map((event) => event.inputId),
+      activeTurnSourceId,
       inputIds: orderedPendingEvents
         .slice(0, Math.min(limit, 1))
         .map((event) => event.inputId),
@@ -226,6 +245,7 @@ export async function selectHostedAssistantInputIds(
   if (freshInputIds.length === 0) {
     return {
       activeTurnInputIds: [],
+      activeTurnSourceId: null,
       freshInputIds,
       inputIds: [],
       mode: "foreground",
@@ -244,6 +264,9 @@ export async function selectHostedAssistantInputIds(
 
   return {
     activeTurnInputIds: orderedFreshEvents.map((event) => event.inputId),
+    activeTurnSourceId: orderedFreshEvents[0]
+      ? hostedAssistantInputSourceId(orderedFreshEvents[0])
+      : null,
     freshInputIds,
     inputIds: orderedFreshEvents
       .slice(0, 1)
@@ -251,6 +274,10 @@ export async function selectHostedAssistantInputIds(
     mode: "foreground",
     pendingInputIds,
   };
+}
+
+function hostedAssistantInputSourceId(event: AssistantInputEventRecord): string {
+  return event.conversation?.source ?? event.sourceRef.source;
 }
 
 async function readHostedAssistantInputCandidatesById(input: {

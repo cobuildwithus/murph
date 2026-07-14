@@ -1050,6 +1050,7 @@ async function planHostedLinqExplicitThreadRouteWebhook(input: {
     event: input.event,
     prisma: input.prisma,
     route: input.route,
+    sourceMailboxConsumedAt: input.sourceMailboxConsumedAt,
   });
   if (leavePlan) {
     return leavePlan;
@@ -1294,6 +1295,7 @@ async function planHostedLinqExactRoutedGroupLeaveWebhook(input: {
   event: HostedLinqWebhookEvent;
   prisma: Prisma.TransactionClient;
   route: HostedThreadRouteSnapshot;
+  sourceMailboxConsumedAt?: Date | null;
 }): Promise<HostedOnboardingLinqDirectPlan | null> {
   if (!isHostedGroupLeaveEnabled()) {
     return null;
@@ -1351,6 +1353,54 @@ async function planHostedLinqExactRoutedGroupLeaveWebhook(input: {
     routeAuthority,
     userId: input.route.containerMemberId,
   });
+  if (input.sourceMailboxConsumedAt) {
+    const existingMailboxItem = await readHostedMailboxItemByDedupeKey({
+      dedupeKey: input.event.event_id,
+      prisma: input.prisma,
+      userId: input.route.containerMemberId,
+    });
+    const evidence = existingMailboxItem
+      ? { dedupeConflict: false, item: existingMailboxItem }
+      : await appendHostedMailboxEnvelopeTx({
+          envelope: mailboxWake,
+          tx: input.prisma,
+        });
+    if (evidence.dedupeConflict) {
+      return buildHostedLinqInactiveGroupLeaveDecision({
+        ...input,
+        participantMemberId: null,
+        result: "evidence_conflict",
+        routeAuthority,
+      });
+    }
+    await input.prisma.hostedMailboxItem.updateMany({
+      data: { consumedAt: input.sourceMailboxConsumedAt },
+      where: {
+        consumedAt: null,
+        id: evidence.item.id,
+        userId: input.route.containerMemberId,
+      },
+    });
+    return logHostedLinqWebhookPlannerDecisionAndReturn(
+      buildActiveMemberDirectPlan({
+        desiredSideEffects: [],
+        response: {
+          ...(existingMailboxItem ? { duplicate: true } : {}),
+          ignored: true,
+          ok: true,
+          reason: "already-consumed-before-thread-route",
+        },
+      }),
+      buildHostedLinqWebhookPlannerDetails(input.event, input.context, {
+        duplicate: existingMailboxItem !== null,
+        existingMemberActive: false,
+        existingMemberMatch: "none",
+        mailboxAppendPresent: existingMailboxItem === null,
+        reason: "already-consumed-before-thread-route",
+        routeStage: "thread-route-already-consumed",
+      }),
+    );
+  }
   const evidence = await appendHostedMailboxEnvelopeTx({
     envelope: mailboxWake,
     tx: input.prisma,

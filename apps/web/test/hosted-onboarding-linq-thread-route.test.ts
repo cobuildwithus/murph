@@ -1135,6 +1135,50 @@ describe("Linq explicit external-thread routing", () => {
     });
   });
 
+  it("does not reapply a consumed leave event during route handoff", async () => {
+    const prisma = createPrisma({
+      routeContainerActive: false,
+      routeContainerMemberId: "member_thread_container_123",
+    });
+    const consumedAt = new Date("2026-06-24T12:00:03.000Z");
+    vi.mocked(memberRoutingStore.demoteHostedMemberLinqGroupChatBindingsTx)
+      .mockResolvedValueOnce({ mailboxConsumedAt: consumedAt });
+    vi.mocked(mailboxStore.appendHostedMailboxEnvelopeTx).mockResolvedValueOnce({
+      dedupeConflict: false,
+      duplicate: false,
+      inserted: true,
+      item: buildHostedMailboxItem({
+        id: "mailbox_consumed_leave_handoff_123",
+        userId: "member_thread_container_123",
+      }),
+    });
+
+    const plan = await planHostedOnboardingLinqWebhook({
+      event: buildLinqMessageReceivedEvent({
+        text: "remove me from this group",
+      }),
+      prisma: prisma as never,
+    });
+
+    expect(plan.response).toMatchObject({
+      ignored: true,
+      ok: true,
+      reason: "already-consumed-before-thread-route",
+    });
+    expect(prisma.hostedMailboxItem.updateMany).toHaveBeenCalledWith({
+      data: { consumedAt },
+      where: {
+        consumedAt: null,
+        id: "mailbox_consumed_leave_handoff_123",
+        userId: "member_thread_container_123",
+      },
+    });
+    expect(memberIdentityStore.lookupHostedMemberIdentityByPhoneNumber).not.toHaveBeenCalled();
+    expect(groupStore.leaveHostedGroupMemberTx).not.toHaveBeenCalled();
+    expect(plan.wakeHandoffs ?? []).toEqual([]);
+    expect(plan.postHandoffSideEffects ?? []).toEqual([]);
+  });
+
   it("authorizes routed thread traffic when the owner is family-sponsored", async () => {
     const prisma = createPrisma({
       routeContainerMemberId: "member_thread_container_123",

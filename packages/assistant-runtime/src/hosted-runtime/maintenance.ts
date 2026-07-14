@@ -382,6 +382,7 @@ export async function runHostedAssistantAutomation(
           },
     );
   const baseInputSource = createHostedAssistantInputSource({
+    activeTurnSourceId: selectedInputIds.activeTurnSourceId,
     initialActiveTurnInputIds: selectedInputIds.activeTurnInputIds,
     initialPendingInputIds: selectedInputIds.pendingInputIds,
     pendingInputRefreshMode:
