@@ -195,6 +195,7 @@ describe("hosted Stripe webhook reconciliation helpers", () => {
         userId: true,
       },
       where: {
+        consumedAt: null,
         dedupeKey: {
           endsWith: ":invoice:in_123",
           startsWith: "member.activated:stripe.invoice.paid:",
@@ -276,6 +277,7 @@ describe("hosted Stripe webhook reconciliation helpers", () => {
         userId: true,
       },
       where: {
+        consumedAt: null,
         dedupeKey: {
           endsWith: ":family-subscription:sub_family",
           startsWith: "member.activated:hosted.family.sponsorship:",
@@ -310,10 +312,10 @@ describe("hosted Stripe webhook reconciliation helpers", () => {
     );
   });
 
-  it("rederives family activation targets when bounded usage repair completes", async () => {
+  it("rederives pending family activation targets after repair-marker persistence is interrupted", async () => {
     const pendingReceipt = {
       claimExpiresAt: null,
-      familyUsageRepairGroupId: "hbag_family",
+      familyUsageRepairGroupId: null,
       nextAttemptAt: new Date("2026-04-23T00:00:00.000Z"),
       status: HostedStripeEventStatus.pending,
       type: "customer.subscription.updated",

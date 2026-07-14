@@ -1,23 +1,12 @@
-import { randomUUID } from "node:crypto";
-
 import {
   readHostedIngressLatencySource,
   type HostedIngressLatencySource,
-  type HostedRuntimeLatencyPhaseBreakdown,
 } from "@murphai/hosted-execution/runtime-control";
-import type {
-  CloudflareHostedControlRuntimeEnsureProcessingTiming,
-} from "@murphai/cloudflare-hosted-control/client";
-
-import {
-  readHostedExecutionControlClientIfConfigured,
-} from "../hosted-execution/control";
 import {
   signalHostedMailboxAppendRuntime,
 } from "../hosted-orchestration/signal-runtime";
 import {
   recordHostedIngressAcceptedFromMailboxItem,
-  recordHostedIngressDirectEnsureTiming,
   recordHostedIngressTemporalSignalAccepted,
 } from "../hosted-runtime-latency/store";
 import {
@@ -80,12 +69,9 @@ export async function maybeHandoffHostedExecutionWebhookWake(input: {
           userId,
         }
       : undefined;
-  const directEnsureEligible = Boolean(knownCheckpoint && source === "linq");
-
   const handoffTiming = startHostedOnboardingTiming(
     `hosted-onboarding.webhook.${source}.wake-handoff`,
     {
-      directEnsureWakeEligible: directEnsureEligible,
       eventIdSuffix: toHostedOnboardingLogIdSuffix(eventId),
       plannerCheckpointPresent: Boolean(knownCheckpoint),
       responseReason: input.response.reason,
@@ -118,31 +104,9 @@ export async function maybeHandoffHostedExecutionWebhookWake(input: {
     });
     const errorName = deriveHostedOnboardingTimingErrorName(error);
     finishHostedOnboardingTiming(handoffTiming, "failed", {
-      directEnsureWakeStarted: false,
       errorName,
     });
     throw error;
-  }
-
-  // Linq-only latency fast path, after Temporal has accepted the durable wake.
-  // With consumed_at live, a racing ensure is harmless: consumed mailbox items
-  // restage with a null reply target, and a gap invocation that imports only
-  // already-consumed work finds nothing replyable and exits.
-  const directEnsureWake = directEnsureEligible
-    ? startHostedDirectEnsureWakeBestEffort({
-        mailboxItemId,
-        source: "linq",
-        userId,
-      })
-    : null;
-  if (directEnsureWake) {
-    if (input.scheduleAfterResponse) {
-      // Keep the in-flight request alive past the response without ever
-      // putting its latency on the provider success path.
-      input.scheduleAfterResponse(() => directEnsureWake);
-    } else {
-      void directEnsureWake;
-    }
   }
 
   scheduleHostedWebhookIngressLatencyTraceWritesAfterResponse({
@@ -154,7 +118,6 @@ export async function maybeHandoffHostedExecutionWebhookWake(input: {
   });
 
   finishHostedOnboardingTiming(handoffTiming, "temporal-signaled", {
-    directEnsureWakeStarted: Boolean(directEnsureWake),
     workflowIdSuffix: toHostedOnboardingLogIdSuffix(signal.workflowId),
   });
   return {
@@ -163,116 +126,6 @@ export async function maybeHandoffHostedExecutionWebhookWake(input: {
     started: true,
     workflowId: signal.workflowId,
   };
-}
-
-// Starts the direct Cloudflare ensure request immediately and never throws or
-// rejects, including on synchronous client-configuration errors. The returned
-// promise exists only so callers can keep the request alive past the webhook
-// response; the Temporal signal never waits on it.
-function startHostedDirectEnsureWakeBestEffort(wake: {
-  mailboxItemId: string;
-  source: "linq";
-  userId: string;
-}): Promise<void> {
-  const wakeSource = wake.source;
-  let client: ReturnType<typeof readHostedExecutionControlClientIfConfigured>;
-  try {
-    client = readHostedExecutionControlClientIfConfigured();
-  } catch (error) {
-    console.warn("Hosted direct ensure wake client is misconfigured.", {
-      errorName: deriveHostedOnboardingTimingErrorName(error),
-      source: wakeSource,
-    });
-    return Promise.resolve();
-  }
-  if (!client) {
-    return Promise.resolve();
-  }
-
-  try {
-    let directEnsureTiming: CloudflareHostedControlRuntimeEnsureProcessingTiming | null = null;
-    return client
-      .ensureRuntimeProcessing({
-        onTiming: (timing) => {
-          directEnsureTiming = timing;
-        },
-        orchestrationAttemptId: `web-ingress-${randomUUID()}`,
-        userId: wake.userId,
-      })
-      .then((ensureResult) => {
-        if ("kind" in ensureResult) {
-          console.info("Hosted direct ensure wake completed.", {
-            kind: ensureResult.kind,
-            ...(ensureResult.kind === "runtime_processing_accepted"
-              ? { action: ensureResult.action }
-              : {}),
-            source: wakeSource,
-          });
-          return;
-        }
-
-        console.info("Hosted direct ensure wake accepted.", {
-          accepted: ensureResult.accepted,
-          source: wakeSource,
-        });
-      })
-      .catch((error: unknown) => {
-        console.warn("Hosted direct ensure wake failed.", {
-          errorName: deriveHostedOnboardingTimingErrorName(error),
-          source: wakeSource,
-        });
-      })
-      .finally(async () => {
-        if (!directEnsureTiming) {
-          return;
-        }
-        await recordHostedDirectEnsureWakeTimingBestEffort({
-          mailboxItemId: wake.mailboxItemId,
-          source: wakeSource,
-          timing: directEnsureTiming,
-          userId: wake.userId,
-        });
-      });
-  } catch (error) {
-    console.warn("Hosted direct ensure wake failed.", {
-      errorName: deriveHostedOnboardingTimingErrorName(error),
-      source: wakeSource,
-    });
-    return Promise.resolve();
-  }
-}
-
-async function recordHostedDirectEnsureWakeTimingBestEffort(timingRecord: {
-  mailboxItemId: string;
-  source: "linq";
-  timing: CloudflareHostedControlRuntimeEnsureProcessingTiming;
-  userId: string;
-}): Promise<void> {
-  const phaseBreakdown: HostedRuntimeLatencyPhaseBreakdown = {
-    schemaVersion: 1,
-    orchestration: {
-      tokenAcquireStartedAtEpochMs: timingRecord.timing.tokenAcquireStartedAtEpochMs,
-      tokenAcquiredAtEpochMs: timingRecord.timing.tokenAcquiredAtEpochMs,
-      directEnsureRequestStartedAtEpochMs:
-        timingRecord.timing.directEnsureRequestStartedAtEpochMs,
-      directEnsureResponseReceivedAtEpochMs:
-        timingRecord.timing.directEnsureResponseReceivedAtEpochMs,
-    },
-  };
-
-  try {
-    await recordHostedIngressDirectEnsureTiming({
-      expectedUserId: timingRecord.userId,
-      mailboxItemId: timingRecord.mailboxItemId,
-      phaseBreakdown,
-      source: timingRecord.source,
-    });
-  } catch (error) {
-    console.warn("Hosted direct ensure wake timing record failed.", {
-      errorName: deriveHostedOnboardingTimingErrorName(error),
-      source: timingRecord.source,
-    });
-  }
 }
 
 function scheduleHostedWebhookIngressLatencyTraceWritesAfterResponse(input: {

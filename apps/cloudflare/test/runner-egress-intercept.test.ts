@@ -52,6 +52,7 @@ import {
   HOSTED_PROVIDER_EGRESS_TOKEN_HEADER,
   HOSTED_RUNTIME_ATTEMPT_ID_HEADER,
   HOSTED_RUNTIME_LEASE_GENERATION_HEADER,
+  HOSTED_RUNTIME_USAGE_ATTRIBUTION_HEADER,
   HOSTED_RUNTIME_WORKSPACE_VERSION_HEADER,
   HOSTED_RUNNER_BOUND_USER_ID_HEADER,
 } from "../src/runner-outbound/headers.ts";
@@ -89,6 +90,10 @@ const BOUND_USER_WRITE_FENCE_WITH_BEARER_SENTINEL_HEADERS = {
 const PROVIDER_EGRESS_TOKEN = "provider-egress-test-token";
 const PROVIDER_EGRESS_CREDENTIAL_SIGNING_SECRET = "provider-egress-signing-secret";
 const RUNNER_CONTAINER_NAME = "member_123--v-version_1";
+const TEST_USAGE_ATTRIBUTION = {
+  groupId: "hbag_family",
+  kind: "family",
+} as const;
 const BOUND_USER_PROVIDER_EGRESS_HEADERS = {
   [HOSTED_RUNNER_BOUND_USER_ID_HEADER]: "member_123",
   [HOSTED_PROVIDER_EGRESS_TOKEN_HEADER]: PROVIDER_EGRESS_TOKEN,
@@ -1111,6 +1116,7 @@ describe("hostedRunnerIntercept", () => {
           cookie: "session=user-supplied-cookie",
           "content-type": "application/json",
           "proxy-authorization": "Bearer user-supplied-proxy-token",
+          [HOSTED_RUNTIME_USAGE_ATTRIBUTION_HEADER]: JSON.stringify(TEST_USAGE_ATTRIBUTION),
           "xi-api-key": HOSTED_CLOUDFLARE_INJECTED_CREDENTIAL,
         },
         method: "POST",
@@ -1144,6 +1150,7 @@ describe("hostedRunnerIntercept", () => {
     expect(forwardedRequest.headers.has("cookie")).toBe(false);
     expect(forwardedRequest.headers.has("proxy-authorization")).toBe(false);
     expect(forwardedRequest.headers.has(HOSTED_RUNNER_BOUND_USER_ID_HEADER)).toBe(false);
+    expect(forwardedRequest.headers.has(HOSTED_RUNTIME_USAGE_ATTRIBUTION_HEADER)).toBe(false);
     expect(await forwardedRequest.clone().json()).toEqual({
       model_id: "eleven_multilingual_v2",
       text: "Short memo.",
@@ -1154,7 +1161,9 @@ describe("hostedRunnerIntercept", () => {
     expect(usageCall).toBeDefined();
     const usageBody = JSON.parse(String(usageCall?.[1]?.body)) as {
       usage: Record<string, unknown>;
+      usageAttribution?: unknown;
     };
+    expect(usageBody.usageAttribution).toEqual(TEST_USAGE_ATTRIBUTION);
     expect(usageBody.usage).toMatchObject({
       apiKeyEnv: "ELEVENLABS_API_KEY",
       baseUrl: "https://api.elevenlabs.io",
@@ -1201,6 +1210,7 @@ describe("hostedRunnerIntercept", () => {
         headers: {
           ...BOUND_USER_WRITE_FENCE_HEADERS,
           "content-type": "application/json",
+          [HOSTED_RUNTIME_USAGE_ATTRIBUTION_HEADER]: JSON.stringify(TEST_USAGE_ATTRIBUTION),
           "xi-api-key": HOSTED_CLOUDFLARE_INJECTED_CREDENTIAL,
         },
         method: "POST",
@@ -1291,6 +1301,7 @@ describe("hostedRunnerIntercept", () => {
         headers: {
           ...BOUND_USER_WRITE_FENCE_HEADERS,
           "content-type": "application/json",
+          [HOSTED_RUNTIME_USAGE_ATTRIBUTION_HEADER]: JSON.stringify(TEST_USAGE_ATTRIBUTION),
           "xi-api-key": HOSTED_CLOUDFLARE_INJECTED_CREDENTIAL,
         },
         method: "POST",
@@ -1422,6 +1433,7 @@ describe("hostedRunnerIntercept", () => {
         headers: {
           ...BOUND_USER_WRITE_FENCE_HEADERS,
           "content-type": "application/json",
+          [HOSTED_RUNTIME_USAGE_ATTRIBUTION_HEADER]: JSON.stringify(TEST_USAGE_ATTRIBUTION),
           "xi-api-key": HOSTED_CLOUDFLARE_INJECTED_CREDENTIAL,
         },
         method: "POST",
@@ -1446,6 +1458,7 @@ describe("hostedRunnerIntercept", () => {
       "https://api.elevenlabs.io/v1/music?output_format=mp3_48000_192",
     );
     expect(forwardedRequest.headers.get("xi-api-key")).toBe("elevenlabs-worker-secret");
+    expect(forwardedRequest.headers.has(HOSTED_RUNTIME_USAGE_ATTRIBUTION_HEADER)).toBe(false);
     expect(await forwardedRequest.clone().json()).toEqual({
       force_instrumental: true,
       model_id: "music_v2",
@@ -1458,7 +1471,9 @@ describe("hostedRunnerIntercept", () => {
     expect(usageCall).toBeDefined();
     const usageBody = JSON.parse(String(usageCall?.[1]?.body)) as {
       usage: Record<string, unknown>;
+      usageAttribution?: unknown;
     };
+    expect(usageBody.usageAttribution).toEqual(TEST_USAGE_ATTRIBUTION);
     expect(usageBody.usage).toMatchObject({
       apiKeyEnv: "ELEVENLABS_API_KEY",
       baseUrl: "https://api.elevenlabs.io",
@@ -6471,6 +6486,7 @@ describe("maybeHandleHostedTranscribeRequest", () => {
         body: "wav-bytes",
         headers: {
           "content-type": "audio/wav",
+          [HOSTED_RUNTIME_USAGE_ATTRIBUTION_HEADER]: JSON.stringify(TEST_USAGE_ATTRIBUTION),
         },
         method: "POST",
       }),
@@ -6511,7 +6527,9 @@ describe("maybeHandleHostedTranscribeRequest", () => {
     expect(usageInit?.method).toBe("POST");
     const usageBody = JSON.parse(String(usageInit?.body)) as {
       usage: Record<string, unknown>;
+      usageAttribution?: unknown;
     };
+    expect(usageBody.usageAttribution).toEqual(TEST_USAGE_ATTRIBUTION);
     expect(usageBody.usage).toMatchObject({
       attemptCount: 1,
       credentialSource: "platform",

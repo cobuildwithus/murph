@@ -10,3 +10,5 @@ export const HOSTED_RUNTIME_LEASE_GENERATION_HEADER =
   "x-hosted-runtime-lease-generation";
 export const HOSTED_RUNTIME_WORKSPACE_VERSION_HEADER =
   "x-hosted-runtime-workspace-version";
+export const HOSTED_RUNTIME_USAGE_ATTRIBUTION_HEADER =
+  "x-hosted-runtime-usage-attribution";

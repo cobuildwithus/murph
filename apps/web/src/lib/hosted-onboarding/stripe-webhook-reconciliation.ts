@@ -151,10 +151,7 @@ export async function reconcileRecordedHostedStripeWebhookEvent(input: {
     hostedExecutionMailboxItemId: null,
   };
 
-  if (
-    storedEvent.familyUsageRepairGroupId
-    && resolveHostedStripeWebhookActivationTargets(reconciliationResult).length === 0
-  ) {
+  if (resolveHostedStripeWebhookActivationTargets(reconciliationResult).length === 0) {
     return await resolveCompletedHostedStripeWebhookActivationResult({
       eventId: input.eventId,
       eventType: storedEvent.type,
@@ -312,7 +309,6 @@ async function readHostedStripeWebhookEventReceipt(
   return prisma.hostedStripeEvent.findUnique({
     select: {
       claimExpiresAt: true,
-      familyUsageRepairGroupId: true,
       nextAttemptAt: true,
       status: true,
       type: true,
@@ -421,6 +417,7 @@ async function readHostedStripeActivationMailboxItemsForCompletedEvent(input: {
         userId: true,
       },
       where: {
+        consumedAt: null,
         dedupeKey: {
           endsWith: `:${sourceEventId}`,
           startsWith: `member.activated:${sourceType}:`,

@@ -119,6 +119,7 @@ export function buildHostedExecutionRuntimePlatform(input: {
                 input.providerFetchBaseUrlSource ?? undefined,
               providerFetchBaseUrls: input.providerFetchBaseUrls ?? undefined,
               readCurrentLease: input.workspaceCheckpointBridge.readCurrentLease,
+              usageAttribution: input.usageAttribution ?? null,
             },
           ),
         }

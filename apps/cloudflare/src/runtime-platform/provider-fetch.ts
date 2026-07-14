@@ -3,6 +3,7 @@ import {
 } from "@murphai/assistant-runtime/hosted-runtime-contracts";
 import { emitHostedExecutionStructuredLog } from "@murphai/hosted-execution";
 import { HOSTED_RUNTIME_LATENCY_TRACE_PATH } from "@murphai/hosted-execution/routes";
+import type { HostedRuntimeUsageAttribution } from "@murphai/hosted-execution/runtime-control";
 
 import {
   CLOUDFLARE_HOSTED_RUNTIME_BASE_URLS,
@@ -24,6 +25,7 @@ import {
   HOSTED_PROVIDER_EGRESS_TOKEN_HEADER,
   HOSTED_RUNTIME_ATTEMPT_ID_HEADER,
   HOSTED_RUNTIME_LEASE_GENERATION_HEADER,
+  HOSTED_RUNTIME_USAGE_ATTRIBUTION_HEADER,
   HOSTED_RUNTIME_WORKSPACE_VERSION_HEADER,
   HOSTED_RUNNER_BOUND_USER_ID_HEADER,
 } from "../runner-outbound/headers.ts";
@@ -283,6 +285,7 @@ export function createCloudflareHostedProviderFetch(
     providerFetchBaseUrlSource?: Readonly<Record<string, unknown>>;
     providerFetchBaseUrls?: readonly string[];
     readCurrentLease?: HostedWorkspaceCheckpointBridgeAuthority["readCurrentLease"];
+    usageAttribution?: HostedRuntimeUsageAttribution | null;
   },
 ): typeof fetch {
   const normalizedFetchImpl = normalizeCloudflareWorkerFetch(fetchImpl);
@@ -306,6 +309,7 @@ export function createCloudflareHostedProviderFetch(
     const headers = new Headers(request.headers);
     headers.delete(HOSTED_RUNTIME_ATTEMPT_ID_HEADER);
     headers.delete(HOSTED_RUNTIME_LEASE_GENERATION_HEADER);
+    headers.delete(HOSTED_RUNTIME_USAGE_ATTRIBUTION_HEADER);
     headers.delete(HOSTED_RUNTIME_WORKSPACE_VERSION_HEADER);
     headers.delete(HOSTED_PROVIDER_EGRESS_TOKEN_HEADER);
     headers.delete(HOSTED_EXECUTION_RUNNER_PROXY_TOKEN_HEADER);
@@ -313,6 +317,12 @@ export function createCloudflareHostedProviderFetch(
     const lease = await options.readCurrentLease?.() ?? null;
     if (lease?.providerEgressToken) {
       headers.set(HOSTED_PROVIDER_EGRESS_TOKEN_HEADER, lease.providerEgressToken);
+    }
+    if (options.usageAttribution) {
+      headers.set(
+        HOSTED_RUNTIME_USAGE_ATTRIBUTION_HEADER,
+        JSON.stringify(options.usageAttribution),
+      );
     }
 
     const providerRequest = new Request(request, { headers });

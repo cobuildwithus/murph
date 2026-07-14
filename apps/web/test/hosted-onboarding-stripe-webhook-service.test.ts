@@ -96,7 +96,6 @@ describe("hosted Stripe webhook service", () => {
     expect(prisma.hostedStripeEvent.findUnique).toHaveBeenCalledWith({
       select: {
         claimExpiresAt: true,
-        familyUsageRepairGroupId: true,
         nextAttemptAt: true,
         status: true,
         type: true,

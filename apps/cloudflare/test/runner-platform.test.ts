@@ -103,6 +103,7 @@ import {
   HOSTED_RUNNER_BOUND_USER_ID_HEADER,
   HOSTED_RUNTIME_ATTEMPT_ID_HEADER,
   HOSTED_RUNTIME_LEASE_GENERATION_HEADER,
+  HOSTED_RUNTIME_USAGE_ATTRIBUTION_HEADER,
   HOSTED_RUNTIME_WORKSPACE_VERSION_HEADER,
 } from "../src/runner-outbound/headers.ts";
 import {
@@ -2866,6 +2867,36 @@ describe("buildHostedExecutionRuntimePlatform", () => {
     expect(request.headers.get(HOSTED_PROVIDER_EGRESS_TOKEN_HEADER)).toBe(
       "provider-egress-token-123",
     );
+  });
+
+  it("binds provider egress to the current invocation attribution", async () => {
+    const fetchMock = vi.fn(async () => new Response(null, { status: 204 }));
+    const hostedFetch = createCloudflareHostedProviderFetch(
+      "member_123",
+      fetchMock as typeof fetch,
+      {
+        usageAttribution: {
+          groupId: "hbag_current",
+          kind: "family",
+        },
+      },
+    );
+
+    await hostedFetch("https://api.elevenlabs.io/v1/music", {
+      headers: {
+        [HOSTED_RUNTIME_USAGE_ATTRIBUTION_HEADER]: JSON.stringify({
+          groupId: "hbag_caller_spoof",
+          kind: "family",
+        }),
+      },
+      method: "POST",
+    });
+
+    const request = requireFetchRequest(fetchMock.mock.calls[0], "attributed provider fetch");
+    expect(request.headers.get(HOSTED_RUNTIME_USAGE_ATTRIBUTION_HEADER)).toBe(JSON.stringify({
+      groupId: "hbag_current",
+      kind: "family",
+    }));
   });
 
   it("calls ambient Worker fetch with the global receiver across hosted fetch boundaries", async () => {

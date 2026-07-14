@@ -568,9 +568,23 @@ describe("runHostedIdleCheckpointMaintenance", () => {
     const firstWakeAt = new Date("2026-04-26T00:00:01.000Z");
     const requeueAt = new Date("2026-04-26T00:00:05.000Z");
     const wakeSignal = createCoalescingRuntimeWakeSignal();
+    const wakeInput = {
+      orchestration: {
+        activeWakeAccepted: true,
+        activeWakeStartedAtEpochMs: firstWakeAt.getTime() - 10,
+      },
+      usageAttribution: {
+        groupId: "hbag_family",
+        kind: "family" as const,
+      },
+      usageAttributionMaxSeqByLane: [{
+        lane: "conversation" as const,
+        maxSeq: "42",
+      }],
+    };
     compactWarmCodexThread.mockImplementation(async (input: { signal: AbortSignal }) => {
       vi.setSystemTime(firstWakeAt);
-      wakeSignal.notify();
+      wakeSignal.notify(wakeInput);
       await new Promise<void>((resolve) => {
         input.signal.addEventListener("abort", () => {
           vi.setSystemTime(requeueAt);
@@ -603,6 +617,7 @@ describe("runHostedIdleCheckpointMaintenance", () => {
       // must still observe it afterwards with the original notification time.
       expect(wakeSignal.consumePending()).toEqual({
         notifiedAtEpochMs: firstWakeAt.getTime(),
+        ...wakeInput,
       });
     } finally {
       vi.useRealTimers();

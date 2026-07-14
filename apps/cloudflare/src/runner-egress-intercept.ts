@@ -25,6 +25,12 @@ import {
   buildHostedElevenLabsTtsUsageRecord,
   buildHostedTranscriptionUsageRecord,
 } from "@murphai/hosted-execution/assistant-usage";
+import {
+  parseHostedRuntimeUsageAttribution,
+} from "@murphai/hosted-execution/parsers";
+import type {
+  HostedRuntimeUsageAttribution,
+} from "@murphai/hosted-execution/runtime-control";
 
 import { readHostedExecutionEnvironment } from "./env.ts";
 import { asWorkerStringEnvironment } from "./worker-contracts.ts";
@@ -61,6 +67,7 @@ import {
   HOSTED_PROVIDER_EGRESS_TOKEN_HEADER,
   HOSTED_RUNTIME_ATTEMPT_ID_HEADER,
   HOSTED_RUNTIME_LEASE_GENERATION_HEADER,
+  HOSTED_RUNTIME_USAGE_ATTRIBUTION_HEADER,
   HOSTED_RUNTIME_WORKSPACE_VERSION_HEADER,
   HOSTED_RUNNER_BOUND_USER_ID_HEADER,
 } from "./runner-outbound/headers.ts";
@@ -964,6 +971,7 @@ async function maybeHandleHostedTranscribeRequest(input: {
     durationMs: readHostedTranscribeOutputDurationMs(output),
     env: input.env,
     memberId: authorization.userId,
+    usageAttribution: readHostedRuntimeUsageAttributionHeader(input.request.headers),
   });
 
   let response: Response;
@@ -1020,6 +1028,7 @@ function recordHostedTranscribeUsage(input: {
   durationMs: number | null;
   env: RunnerOutboundEnvironmentSource;
   memberId: string | null;
+  usageAttribution: HostedRuntimeUsageAttribution | null;
 }): Promise<void> {
   return (async () => {
     if (!input.memberId) {
@@ -1043,6 +1052,9 @@ function recordHostedTranscribeUsage(input: {
         webControlBaseUrl: environment.hostedWebBaseUrl,
         workspaceCheckpointBridge: null,
       },
+      ...(input.usageAttribution
+        ? { usageAttribution: input.usageAttribution }
+        : {}),
     });
   })().catch((error: unknown) => {
     emitHostedExecutionStructuredLog({
@@ -1366,6 +1378,7 @@ async function maybeHandleElevenLabsRequest(input: {
           env: input.env,
           memberId: authorization.userId,
           model: providerRequest.modelId,
+          usageAttribution: readHostedRuntimeUsageAttributionHeader(input.request.headers),
         })
       : recordHostedElevenLabsMusicUsage({
           durationMs: providerRequest.durationMs,
@@ -1373,6 +1386,7 @@ async function maybeHandleElevenLabsRequest(input: {
           memberId: authorization.userId,
           model: providerRequest.modelId,
           providerRequestId: response.headers.get("request-id"),
+          usageAttribution: readHostedRuntimeUsageAttributionHeader(input.request.headers),
         });
     if (typeof input.ctx?.waitUntil === "function") {
       input.ctx.waitUntil(usageRecording);
@@ -1388,6 +1402,7 @@ function recordHostedElevenLabsTtsUsage(input: {
   env: RunnerOutboundEnvironmentSource;
   memberId: string | null;
   model: string;
+  usageAttribution: HostedRuntimeUsageAttribution | null;
 }): Promise<void> {
   return (async () => {
     if (!input.memberId) {
@@ -1410,6 +1425,9 @@ function recordHostedElevenLabsTtsUsage(input: {
         webControlBaseUrl: environment.hostedWebBaseUrl,
         workspaceCheckpointBridge: null,
       },
+      ...(input.usageAttribution
+        ? { usageAttribution: input.usageAttribution }
+        : {}),
     });
   })().catch((error: unknown) => {
     emitHostedExecutionStructuredLog({
@@ -1431,6 +1449,7 @@ function recordHostedElevenLabsMusicUsage(input: {
   memberId: string | null;
   model: string;
   providerRequestId: string | null;
+  usageAttribution: HostedRuntimeUsageAttribution | null;
 }): Promise<void> {
   return (async () => {
     if (!input.memberId) {
@@ -1454,6 +1473,9 @@ function recordHostedElevenLabsMusicUsage(input: {
         webControlBaseUrl: environment.hostedWebBaseUrl,
         workspaceCheckpointBridge: null,
       },
+      ...(input.usageAttribution
+        ? { usageAttribution: input.usageAttribution }
+        : {}),
     });
   })().catch((error: unknown) => {
     emitHostedExecutionStructuredLog({
@@ -3758,7 +3780,22 @@ function stripHostedRuntimeAuthorityHeaders(headers: Headers): Headers {
   stripped.delete(HOSTED_RUNNER_BOUND_USER_ID_HEADER);
   stripped.delete(HOSTED_PROVIDER_EGRESS_TOKEN_HEADER);
   stripped.delete(HOSTED_EXECUTION_RUNNER_PROXY_TOKEN_HEADER);
+  stripped.delete(HOSTED_RUNTIME_USAGE_ATTRIBUTION_HEADER);
   return stripped;
+}
+
+function readHostedRuntimeUsageAttributionHeader(
+  headers: Headers,
+): HostedRuntimeUsageAttribution | null {
+  const value = headers.get(HOSTED_RUNTIME_USAGE_ATTRIBUTION_HEADER);
+  if (!value) {
+    return null;
+  }
+  try {
+    return parseHostedRuntimeUsageAttribution(JSON.parse(value));
+  } catch {
+    return null;
+  }
 }
 
 function stripHostedProviderUpstreamHeaders(headers: Headers): Headers {
