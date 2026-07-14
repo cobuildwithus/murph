@@ -620,16 +620,12 @@ async function processClaimedHostedStripeEvent(
         );
     const { memberId: processingMemberId, result } = processing;
     if (legacyFamilySubscriptionId) {
-      try {
-        await executeHostedLegacySyntheticFamilyCleanup({
-          invoice: stripeEvent.type === "invoice.paid"
-            ? stripeEvent.data.object as Stripe.Invoice
-            : null,
-          subscriptionId: legacyFamilySubscriptionId,
-        });
-      } catch {
-        throw new HostedLegacyFamilyCleanupPendingError("Legacy Family Stripe cleanup is still pending.");
-      }
+      await executeHostedLegacySyntheticFamilyCleanup({
+        invoice: stripeEvent.type === "invoice.paid"
+          ? stripeEvent.data.object as Stripe.Invoice
+          : null,
+        subscriptionId: legacyFamilySubscriptionId,
+      });
     }
     if (result.cleanupPulseTrialStripeSubscriptionId) {
       if (!processingMemberId) {
@@ -991,26 +987,26 @@ async function executeHostedLegacySyntheticFamilyCleanup(input: {
   if (matchingRefunds.some((refund) => refund.status === "succeeded")) {
     return;
   }
-  if (matchingRefunds.some((refund) =>
-    refund.status === "pending" || refund.status === "requires_action"
-  )) {
-    throw new Error("Legacy Family refund is pending.");
+  if (matchingRefunds.some((refund) => refund.status === "pending")) {
+    throw new HostedLegacyFamilyCleanupPendingError("Legacy Family refund is pending.");
+  }
+  if (matchingRefunds.length > 0) {
+    throw new Error("Legacy Family refund previously failed.");
   }
 
-  const previousTerminalRefund = matchingRefunds[0] ?? null;
   const refund = await stripe.refunds.create({
     ...payment,
     metadata: {
       [HOSTED_LEGACY_FAMILY_REFUND_INVOICE_METADATA_KEY]: input.invoice.id,
     },
   }, {
-    idempotencyKey: [
-      `hosted-family-legacy-refund:${input.invoice.id}`,
-      ...(previousTerminalRefund ? [`after:${previousTerminalRefund.id}`] : []),
-    ].join(":"),
+    idempotencyKey: `hosted-family-legacy-refund:${input.invoice.id}`,
   });
+  if (refund.status === "pending") {
+    throw new HostedLegacyFamilyCleanupPendingError("Legacy Family refund is pending.");
+  }
   if (refund.status !== "succeeded") {
-    throw new Error("Legacy Family refund is pending.");
+    throw new Error("Legacy Family refund failed.");
   }
 }
 
