@@ -99,7 +99,6 @@ const replyMocks = vi.hoisted(() => ({
   prepareAssistantAutoReplyInput: vi.fn(),
   readTelegramAutoReplyMetadataFromAssistantInput: vi.fn(),
   renderAssistantInputAttachmentDescriptorPromptSection: vi.fn(),
-  renderAssistantInputGroupParticipantAddedPrompt: vi.fn(),
   resolveAssistantSession: vi.fn(),
   sendAssistantMessage: vi.fn(),
   writeAssistantChatErrorArtifacts: vi.fn(),
@@ -273,15 +272,19 @@ vi.mock('../src/assistant/automation/provider-watchdog.ts', () => ({
   createAssistantProviderWatchdog: replyMocks.createAssistantProviderWatchdog,
 }))
 
-vi.mock('../src/assistant/automation/prompt-builder.ts', () => ({
-  prepareAssistantAutoReplyInput: replyMocks.prepareAssistantAutoReplyInput,
-  readTelegramAutoReplyMetadataFromAssistantInput:
-    replyMocks.readTelegramAutoReplyMetadataFromAssistantInput,
-  renderAssistantInputAttachmentDescriptorPromptSection:
-    replyMocks.renderAssistantInputAttachmentDescriptorPromptSection,
-  renderAssistantInputGroupParticipantAddedPrompt:
-    replyMocks.renderAssistantInputGroupParticipantAddedPrompt,
-}))
+vi.mock('../src/assistant/automation/prompt-builder.ts', async (importOriginal) => {
+  const actual = await importOriginal<
+    typeof import('../src/assistant/automation/prompt-builder.ts')
+  >()
+  return {
+    ...actual,
+    prepareAssistantAutoReplyInput: replyMocks.prepareAssistantAutoReplyInput,
+    readTelegramAutoReplyMetadataFromAssistantInput:
+      replyMocks.readTelegramAutoReplyMetadataFromAssistantInput,
+    renderAssistantInputAttachmentDescriptorPromptSection:
+      replyMocks.renderAssistantInputAttachmentDescriptorPromptSection,
+  }
+})
 
 function createCaptureSummary(
   overrides: Partial<
@@ -1180,16 +1183,6 @@ beforeEach(() => {
     prompt: 'reply prompt',
     userMessageContent: null,
   })
-  replyMocks.renderAssistantInputGroupParticipantAddedPrompt
-    .mockReset()
-    .mockImplementation((input: AssistantInputCandidate['event']) =>
-      input.groupParticipantAdded === true &&
-        input.sourceMetadata?.kind === 'linq' &&
-        input.sourceMetadata.externalThreadRouteAuthorityPresent === true &&
-        input.conversation?.threadIsDirect === false
-        ? 'Group context:\nOne or more participants were recently added to this group chat. Treat this as context only; check the current roster before deciding whether any room-wide offer fits.'
-        : null,
-    )
   replyMocks.resolveAssistantSession.mockReset().mockRejectedValue(
     Object.assign(new Error('not found'), {
       code: 'ASSISTANT_SESSION_NOT_FOUND',
