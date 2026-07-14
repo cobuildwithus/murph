@@ -1575,6 +1575,7 @@ describe("hosted mailbox conversation import adapter", () => {
         channel: "linq",
         contactKind: "email",
         contactLookupKey,
+        groupParticipantAdded: true,
         linqMessage: {
           chatId: "chat_email_identity",
           from: "buddy@example.test",
@@ -1659,6 +1660,7 @@ describe("hosted mailbox conversation import adapter", () => {
         channel: "linq",
         contactKind: "phone",
         contactLookupKey,
+        groupParticipantAdded: true,
         linqMessage: {
           chatId: "chat_group_identity",
           from: "+15551110000",
@@ -1739,7 +1741,90 @@ describe("hosted mailbox conversation import adapter", () => {
         : null,
       "+15551110000",
     );
+    assert.equal(
+      Object.hasOwn(event.sourceMetadata ?? {}, "groupParticipantAdded"),
+      false,
+    );
     assert.equal(event.replyTarget?.threadId, "chat_group_identity");
+
+    const source = createHostedAssistantInputSource({
+      selectedInputIds: [event.inputId],
+      vaultRoot,
+    });
+    const candidates = await source.listInputCandidates({ sourceId: "linq" });
+    assert.equal(candidates.inputs[0]?.event.groupParticipantAdded, true);
+  });
+
+  test("does not project participant-addition context for a route-authorized direct chat", async () => {
+    const parentRoot = await mkdtemp(path.join(tmpdir(), "murph-hosted-input-linq-direct-"));
+    tempRoots.push(parentRoot);
+    const vaultRoot = path.join(parentRoot, "vault");
+    const accountLookupKey = "hbidx:phone:v1:route-account";
+    const contactLookupKey = "hbidx:phone:v1:participant";
+    const decodedWake = createConversationWake({
+      message: {
+        accountLookupKey,
+        channel: "linq",
+        contactKind: "phone",
+        contactLookupKey,
+        groupParticipantAdded: true,
+        linqMessage: {
+          chatId: "chat_direct_identity",
+          from: "+15551110000",
+          isFromMe: false,
+          messageId: "msg_direct_identity",
+          parts: [{ type: "text", value: "hello direct" }],
+          threadIsDirect: true,
+        },
+        phoneLookupKey: contactLookupKey,
+        routeAuthority: {
+          accountLookupKey,
+          channel: "linq",
+          containerMemberId: TEST_USER_ID,
+          threadId: "chat_direct_identity",
+        },
+      },
+    });
+
+    const outcome = await importHostedConversationMailboxItem({
+      decodePayload: createDecodedPayloadDecoder(decodedWake),
+      async importConversationWake() {
+        return {
+          captureId: "cap_direct_identity_001",
+          metrics: { nextWakeAt: null, parserProcessed: 0 },
+        };
+      },
+      async prepareWakeContext() {},
+      item: createResolvedConversationMailboxItem({
+        dedupeKey: decodedWake.eventId,
+        id: "mailbox_item_linq_direct_identity_001",
+      }),
+      runtime: createRuntime(),
+      vaultRoot,
+    });
+
+    assert.equal(outcome.status, "imported");
+    const event = (await listAssistantInputEvents({ vault: vaultRoot })).events[0];
+    assert.ok(event);
+    assert.equal(event.conversation?.threadIsDirect, true);
+    assert.equal(event.sourceMetadata?.kind, "linq");
+    assert.equal(
+      event.sourceMetadata?.kind === "linq"
+        ? event.sourceMetadata.externalThreadRouteAuthorityPresent
+        : false,
+      true,
+    );
+    assert.equal(
+      Object.hasOwn(event.sourceMetadata ?? {}, "groupParticipantAdded"),
+      false,
+    );
+
+    const source = createHostedAssistantInputSource({
+      selectedInputIds: [event.inputId],
+      vaultRoot,
+    });
+    const candidates = await source.listInputCandidates({ sourceId: "linq" });
+    assert.equal(candidates.inputs[0]?.event.groupParticipantAdded, undefined);
   });
 
   test("stages WhatsApp input with hashed conversation metadata and private reply target", async () => {

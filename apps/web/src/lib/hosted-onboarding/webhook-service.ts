@@ -74,6 +74,7 @@ import {
 } from "./webhook-service-wake";
 import {
   assertHostedThreadRouteEgressAuthority,
+  markHostedLinqThreadRouteParticipantAdditionPendingTx,
   readHostedThreadRouteByThreadIdentity,
 } from "../hosted-routing/thread-route-store";
 import {
@@ -235,10 +236,16 @@ export async function handleHostedOnboardingLinqWebhook(input: {
     }
     if (providerEvent && event.event_type !== "message.received") {
       const prisma = input.prisma ?? getPrisma();
-      const providerResult = await ingestHostedLinqProviderEventDirect({
-        event: providerEvent,
-        prisma,
-      });
+      const providerResult = event.event_type === "participant.added"
+        || event.event_type === "participant.removed"
+        ? await ingestHostedLinqParticipantEventDirect({
+            event: providerEvent,
+            prisma,
+          })
+        : await ingestHostedLinqProviderEventDirect({
+            event: providerEvent,
+            prisma,
+          });
       await scheduleHostedLinqProviderAlertEmails({
         alertIds: providerResult.alertIds,
         prisma,
@@ -778,6 +785,42 @@ async function ingestHostedLinqProviderEventDirect(input: {
       prisma: transaction,
     }),
   );
+}
+
+async function ingestHostedLinqParticipantEventDirect(input: {
+  event: Parameters<typeof ingestHostedLinqProviderEventTx>[0]["event"];
+  prisma: PrismaClient;
+}): Promise<Awaited<ReturnType<typeof ingestHostedLinqProviderEventTx>>> {
+  return runHostedOnboardingWebhookTransaction(input.prisma, async (transaction) => {
+    const providerResult = await ingestHostedLinqProviderEventTx({
+      event: input.event,
+      prisma: transaction,
+    });
+    if (providerResult.duplicate || input.event.eventType !== "participant.added") {
+      return providerResult;
+    }
+
+    const chatId = input.event.linqChatId;
+    if (!chatId) {
+      return providerResult;
+    }
+
+    const route = await readHostedThreadRouteByThreadIdentity({
+      channel: "linq",
+      prisma: transaction,
+      threadId: chatId,
+    });
+    if (!route) {
+      return providerResult;
+    }
+
+    await markHostedLinqThreadRouteParticipantAdditionPendingTx({
+      containerMemberId: route.containerMemberId,
+      prisma: transaction,
+      threadId: chatId,
+    });
+    return providerResult;
+  });
 }
 
 function scheduleHostedLinqProviderEventIngestionBestEffort(input: {

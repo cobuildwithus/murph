@@ -130,6 +130,7 @@ function buildHostedExecutionLinqConversationMessagePayload(input: {
   accountLookupKey?: string | null;
   contactKind?: HostedExecutionLinqConversationContactKind;
   contactLookupKey?: string;
+  groupParticipantAdded?: true;
   linqMessage: HostedExecutionLinqConversationMessage;
   phoneLookupKey?: string | null;
   routeAuthority?: HostedExecutionLinqExternalThreadRouteAuthority | null;
@@ -147,6 +148,9 @@ function buildHostedExecutionLinqConversationMessagePayload(input: {
     channel: "linq",
     contactKind,
     contactLookupKey,
+    ...(input.groupParticipantAdded === true
+      ? { groupParticipantAdded: true as const }
+      : {}),
     linqMessage: cloneLinqMessage(input.linqMessage),
     ...(input.phoneLookupKey === undefined
       ? {}
@@ -215,6 +219,7 @@ export function buildHostedExecutionLinqConversationMessageWake(input: {
   contactKind?: HostedExecutionLinqConversationContactKind;
   contactLookupKey?: string;
   eventId: string;
+  groupParticipantAdded?: true;
   linqMessage: HostedExecutionLinqConversationMessage;
   occurredAt: string;
   phoneLookupKey?: string | null;

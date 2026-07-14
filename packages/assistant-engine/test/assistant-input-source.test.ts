@@ -1,4 +1,4 @@
-import { rm, writeFile } from 'node:fs/promises'
+import { readFile, rm, writeFile } from 'node:fs/promises'
 import { afterEach, describe, expect, it } from 'vitest'
 import {
   type AssistantInputCursor,
@@ -10,6 +10,7 @@ import {
 } from '../src/assistant/input-store.ts'
 import {
   recordHostedMailboxAssistantInputItem,
+  readHostedMailboxAssistantInputItemDetails,
 } from '../src/assistant/hosted-mailbox-input-items.ts'
 import {
   createStoreBackedAssistantInputSource,
@@ -167,6 +168,74 @@ describe('store-backed assistant input source', () => {
       },
     })
     expect(result.nextCursor).toEqual(stored.cursor)
+    expect(result.inputs[0]?.event.groupParticipantAdded).toBeUndefined()
+    expect(await readHostedMailboxAssistantInputItemDetails({
+      inputIds: [stored.inputId],
+      vault: vaultRoot,
+    })).toEqual(new Map([
+      [stored.inputId, {
+        inputId: stored.inputId,
+        mailboxItemId: 'raw_mailbox_item_store',
+      }],
+    ]))
+  })
+
+  it('projects literal participant context from the sidecar without persisting it in the input event', async () => {
+    const { vaultRoot } = await createAssistantInputSourceVault(
+      'assistant-input-source-participant-context-',
+    )
+    const storedInput = createStoredHostedMailboxInput({
+      eventId: 'evt_participant_context',
+      laneSeq: '43',
+      threadId: 'chat_group',
+    })
+    const stored = await upsertAssistantInputEvent({
+      vault: vaultRoot,
+      event: {
+        ...storedInput,
+        conversation: {
+          ...storedInput.conversation,
+          threadIsDirect: false,
+        },
+        sourceMetadata: {
+          externalThreadRouteAuthorityPresent: true,
+          kind: 'linq',
+          partCount: 1,
+          reactionEligible: true,
+          replyToMessageId: null,
+          service: 'iMessage',
+        },
+      },
+    })
+    await recordHostedMailboxAssistantInputItem({
+      groupParticipantAdded: true,
+      inputId: stored.inputId,
+      mailboxItemId: 'raw_mailbox_item_participant_context',
+      vault: vaultRoot,
+    })
+
+    const source = createStoreBackedAssistantInputSource({ vault: vaultRoot })
+    const result = await source.listInputCandidates({})
+
+    expect(result.inputs[0]?.event.groupParticipantAdded).toBe(true)
+    expect(await readHostedMailboxAssistantInputItemDetails({
+      inputIds: [stored.inputId],
+      vault: vaultRoot,
+    })).toEqual(new Map([
+      [stored.inputId, {
+        groupParticipantAdded: true,
+        inputId: stored.inputId,
+        mailboxItemId: 'raw_mailbox_item_participant_context',
+      }],
+    ]))
+    const storedEventFile = await readFile(
+      resolveAssistantInputEventPath({
+        inputId: stored.inputId,
+        paths: resolveAssistantStatePaths(vaultRoot),
+      }),
+      'utf8',
+    )
+    expect(storedEventFile).not.toContain('groupParticipantAdded')
   })
 
   it('filters stored input events by conversation and known input id', async () => {

@@ -336,10 +336,13 @@ describe("createHostedAssistantInputSource", () => {
         messageId: "msg_selected_raw_mailbox",
         occurredAt: "2026-04-23T00:00:01.000Z",
         receivedAt: "2026-04-23T00:00:02.000Z",
+        routeAuthority: true,
         text: "selected continuation message",
+        threadIsDirect: false,
       }),
     });
     await recordHostedMailboxAssistantInputItem({
+      groupParticipantAdded: true,
       inputId: selected.inputId,
       mailboxItemId: "mailbox_item_runtime_resume_001",
       vault: vaultRoot,
@@ -361,6 +364,7 @@ describe("createHostedAssistantInputSource", () => {
       .toBe("blinded_item_selected_raw_mailbox");
     expect(listed.inputs[0]?.event.hostedMailboxItemId)
       .toBe("mailbox_item_runtime_resume_001");
+    expect(listed.inputs[0]?.event.groupParticipantAdded).toBe(true);
   });
 
   it("defers newly enqueued pending ids once the turn has a causal input", async () => {
@@ -1251,6 +1255,7 @@ function createAssistantInputEvent(input: {
   occurredAt?: string;
   receivedAt?: string;
   replyTarget?: string | null;
+  routeAuthority?: boolean;
   source?: string;
   text?: string;
   threadId?: string;
@@ -1290,13 +1295,13 @@ function createAssistantInputEvent(input: {
     sourceMetadata: source === "linq"
       ? {
           ...(input.contextOnly ? { contextOnly: true } : {}),
-          externalThreadRouteAuthorityPresent: false,
+          externalThreadRouteAuthorityPresent: input.routeAuthority ?? false,
           kind: "linq" as const,
           partCount: 1,
           reactionEligible: false,
           replyToMessageId: null,
           service: null,
-      }
+        }
       : null,
     sourceRef: {
       dedupeKey: input.dedupeKey ?? "dedupe_selected",

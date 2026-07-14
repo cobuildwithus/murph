@@ -159,6 +159,52 @@ describe("parseHostedLinqProviderEvent", () => {
     })).toBe("accept");
   });
 
+  it("parses participant changes without retaining participant identifiers", () => {
+    const added = parseHostedLinqProviderEvent({
+      event: buildGenericEvent({
+        data: {
+          added_at: "2026-03-26T12:01:00.000Z",
+          chat_id: "chat_group_123",
+          participant: {
+            handle: "+15551234567",
+            id: "participant_private_123",
+            service: "iMessage",
+          },
+        },
+        eventType: "participant.added",
+      }),
+    });
+    const removed = parseHostedLinqProviderEvent({
+      event: buildGenericEvent({
+        data: {
+          chat_id: "chat_group_123",
+          handle: "person@example.test",
+          removed_at: "not-a-provider-timestamp",
+        },
+        eventType: "participant.removed",
+      }),
+    });
+
+    expect(added).toMatchObject({
+      eventType: "participant.added",
+      linqChatLookupKey: expect.stringMatching(/^hbidx:linq-chat:/u),
+      phoneNumber: null,
+      phoneNumberRole: "unknown",
+      providerCreatedAt: new Date("2026-03-26T12:01:00.000Z"),
+      service: "iMessage",
+    });
+    expect(removed).toMatchObject({
+      eventType: "participant.removed",
+      phoneNumber: null,
+      phoneNumberRole: "unknown",
+      providerCreatedAt: new Date("2026-03-26T12:00:00.000Z"),
+    });
+    const persisted = JSON.stringify([added, removed]);
+    expect(persisted).not.toContain("+15551234567");
+    expect(persisted).not.toContain("person@example.test");
+    expect(persisted).not.toContain("participant_private_123");
+  });
+
   it("normalizes the join-offer reaction allowlist deterministically", () => {
     expect(normalizeHostedLinqGroupJoinOfferReaction({
       eventType: "reaction.added",
