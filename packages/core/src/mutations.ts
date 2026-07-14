@@ -1909,6 +1909,10 @@ interface EventExternalRefIndex {
     string,
     Map<string, Map<string, Set<number>>>
   >;
+  whoopCompanionHrvRevisionBySourceVersionAndOwner: Map<
+    string,
+    Map<string, EventSpineEntry<EventRecord>>
+  >;
   latestByRefKey: Map<string, IndexedEventExternalRefMatch>;
   latestById: Map<string, EventRecord>;
   maxRevisionById: Map<string, number>;
@@ -1937,6 +1941,10 @@ async function indexLatestEventsByExternalRef(
     string,
     Map<string, Map<string, Set<number>>>
   >();
+  const whoopCompanionHrvRevisionBySourceVersionAndOwner = new Map<
+    string,
+    Map<string, EventSpineEntry<EventRecord>>
+  >();
   const latestByRefKey = new Map<string, IndexedEventExternalRefMatch>();
   const latestById = new Map<string, EventRecord>();
   const maxRevisionById = new Map<string, number>();
@@ -1962,7 +1970,6 @@ async function indexLatestEventsByExternalRef(
         if (!parsed.success) {
           return;
         }
-
         const entry = { relativePath, record: parsed.data };
         maxRevisionById.set(
           entry.record.id,
@@ -1991,6 +1998,19 @@ async function indexLatestEventsByExternalRef(
           const latestDeviceExternalRefEntry = latestDeviceExternalRefEntryByRefKey.get(refKey);
           if (!latestDeviceExternalRefEntry || compareEventSpineEntries(latestDeviceExternalRefEntry, entry) < 0) {
             latestDeviceExternalRefEntryByRefKey.set(refKey, entry);
+          }
+          const sourceVersion = entry.record.externalRef.version;
+          if (
+            sourceVersion
+            && isWhoopCompanionHrvRmssdDailyRetentionExternalRef(entry.record.externalRef)
+          ) {
+            const entriesByOwner = whoopCompanionHrvRevisionBySourceVersionAndOwner.get(sourceVersion)
+              ?? new Map<string, EventSpineEntry<EventRecord>>();
+            const indexedForOwner = entriesByOwner.get(entry.record.id);
+            if (!indexedForOwner || compareEventSpineEntries(indexedForOwner, entry) < 0) {
+              entriesByOwner.set(entry.record.id, entry);
+            }
+            whoopCompanionHrvRevisionBySourceVersionAndOwner.set(sourceVersion, entriesByOwner);
           }
         }
 
@@ -2053,6 +2073,7 @@ async function indexLatestEventsByExternalRef(
 
   return {
     deviceOwnerRevisionsByRefKeyAndFingerprint,
+    whoopCompanionHrvRevisionBySourceVersionAndOwner,
     latestByRefKey,
     latestById,
     maxRevisionById,
@@ -2352,6 +2373,25 @@ function toIndexedExternalRefMatch(
   };
 }
 
+function indexWhoopCompanionHrvSourceVersionOwner(
+  index: EventExternalRefIndex,
+  entry: EventSpineEntry<EventRecord>,
+): void {
+  const externalRef = entry.record.externalRef;
+  if (!externalRef || !isWhoopCompanionHrvRmssdDailyRetentionExternalRef(externalRef)) {
+    return;
+  }
+
+  const sourceVersion = externalRef.version;
+  if (!sourceVersion) {
+    return;
+  }
+  const revisionsByOwner = index.whoopCompanionHrvRevisionBySourceVersionAndOwner.get(sourceVersion)
+    ?? new Map<string, EventSpineEntry<EventRecord>>();
+  revisionsByOwner.set(entry.record.id, entry);
+  index.whoopCompanionHrvRevisionBySourceVersionAndOwner.set(sourceVersion, revisionsByOwner);
+}
+
 interface LegacyExternalRefReservation {
   entry: PreparedDeviceEventEntry;
   indexedMatch: IndexedEventExternalRefMatch;
@@ -2445,6 +2485,7 @@ async function buildDeviceEventIdentityContext(
     return {
       index: {
         deviceOwnerRevisionsByRefKeyAndFingerprint: new Map(),
+        whoopCompanionHrvRevisionBySourceVersionAndOwner: new Map(),
         latestByRefKey: new Map(),
         latestById: new Map(),
         maxRevisionById: new Map(),
@@ -2470,6 +2511,15 @@ function cloneDeviceEventIdentityContext(
     index: {
       deviceOwnerRevisionsByRefKeyAndFingerprint:
         context.index.deviceOwnerRevisionsByRefKeyAndFingerprint,
+      whoopCompanionHrvRevisionBySourceVersionAndOwner: new Map(
+        [...context.index.whoopCompanionHrvRevisionBySourceVersionAndOwner].map(([
+          sourceVersion,
+          revisionsByOwner,
+        ]) => [
+          sourceVersion,
+          new Map(revisionsByOwner),
+        ]),
+      ),
       latestByRefKey: new Map(context.index.latestByRefKey),
       latestById: new Map(context.index.latestById),
       maxRevisionById: new Map(context.index.maxRevisionById),
@@ -2484,6 +2534,7 @@ function buildEmptyDeviceEventIdentityContext(
 ): DeviceEventIdentityContext {
   const index: EventExternalRefIndex = {
     deviceOwnerRevisionsByRefKeyAndFingerprint: new Map(),
+    whoopCompanionHrvRevisionBySourceVersionAndOwner: new Map(),
     latestByRefKey: new Map(),
     latestById: new Map(),
     maxRevisionById: new Map(),
@@ -2551,23 +2602,38 @@ function resolveDeviceEventIdentity(
       return (!reservation || reservation.entry === entry)
         && isCompatibleLegacyExternalRefMatch(match.indexedMatch, entry.record, match.legacyExternalRef);
     });
-  const versionMatchedEntry =
-    !primaryMatch
-    && legacyMatchedEntries.length === 0
-    && entry.externalRefUpdatePolicy === "prefer-higher-confidence"
+  const exactSourceVersionMatches =
+    entry.externalRefUpdatePolicy === "prefer-higher-confidence"
     && isWhoopCompanionHrvRmssdDailyRetentionExternalRef(externalRef)
-      ? [...index.latestByRefKey.entries()].find(([, match]) =>
-          isWhoopCompanionHrvRmssdDailyRetentionExternalRef(match.indexedExternalRef)
-          && match.indexedExternalRef.version === externalRef.version
-        )
-      : undefined;
-  const matchedEntries = [
-    ...(primaryMatch ? [{ refKey, indexedMatch: primaryMatch }] : []),
-    ...legacyMatchedEntries,
-    ...(versionMatchedEntry
-      ? [{ refKey: versionMatchedEntry[0], indexedMatch: versionMatchedEntry[1] }]
-      : []),
-  ];
+    && externalRef.version
+      ? [...(
+          index.whoopCompanionHrvRevisionBySourceVersionAndOwner.get(externalRef.version)?.entries()
+            ?? []
+        )].flatMap(([ownerId, indexedEntry]) => {
+          const currentRecord = index.latestById.get(ownerId);
+          const indexedExternalRef = indexedEntry.record.externalRef;
+          return currentRecord && indexedExternalRef
+            ? [{
+                refKey: eventExternalRefKey(indexedExternalRef),
+                indexedMatch: {
+                  indexedExternalRef,
+                  indexedRecord: indexedEntry.record,
+                  relativePath: indexedEntry.relativePath,
+                  record: currentRecord,
+                },
+              }]
+            : [];
+        })
+      : [];
+  // The immutable admission digest is the stable replay identity. Resolve it
+  // before the vault-timezone-derived daily key so a timezone change cannot
+  // select and overwrite a neighboring day's retained event.
+  const matchedEntries = exactSourceVersionMatches.length > 0
+    ? exactSourceVersionMatches
+    : [
+        ...(primaryMatch ? [{ refKey, indexedMatch: primaryMatch }] : []),
+        ...legacyMatchedEntries,
+      ];
   const selectedPrimaryMatch = matchedEntries.find((match) => match.refKey === refKey);
   const latest = selectedPrimaryMatch?.indexedMatch.record ?? matchedEntries[0]?.indexedMatch.record;
   let associationSafe = true;
@@ -2795,6 +2861,11 @@ async function reconcileDeviceEventEntriesByExternalRef(
         ? entry.record
         : { ...entry.record, id: canonicalRecordId };
       index.latestByRefKey.set(refKey, toIndexedExternalRefMatch(canonicalRecord, externalRef));
+      index.latestById.set(canonicalRecord.id, canonicalRecord);
+      indexWhoopCompanionHrvSourceVersionOwner(index, {
+        relativePath: entry.relativePath,
+        record: canonicalRecord,
+      });
       appendEntries.push({ relativePath: entry.relativePath, record: canonicalRecord });
       appendRecordIdByPreparedRecordId.set(entry.record.id, canonicalRecord.id);
       records.push(canonicalRecord);
@@ -2896,6 +2967,8 @@ async function reconcileDeviceEventEntriesByExternalRef(
 
     if (isDeletedEventSpineRecord(latest)) {
       index.latestByRefKey.set(refKey, toIndexedExternalRefMatch(entry.record, externalRef));
+      index.latestById.set(entry.record.id, entry.record);
+      indexWhoopCompanionHrvSourceVersionOwner(index, entry);
       appendEntries.push(entry);
       appendRecordIdByPreparedRecordId.set(entry.record.id, entry.record.id);
       records.push(entry.record);
@@ -2954,6 +3027,11 @@ async function reconcileDeviceEventEntriesByExternalRef(
 
     forceAppendIds.add(latest.id);
     index.latestByRefKey.set(refKey, toIndexedExternalRefMatch(superseding, externalRef));
+    index.latestById.set(superseding.id, superseding);
+    indexWhoopCompanionHrvSourceVersionOwner(index, {
+      relativePath: entry.relativePath,
+      record: superseding,
+    });
     for (const { refKey: matchedRefKey, indexedMatch } of matchedEntries) {
       const currentMatch = index.latestByRefKey.get(matchedRefKey);
       if (
