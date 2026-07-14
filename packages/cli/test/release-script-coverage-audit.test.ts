@@ -1150,6 +1150,23 @@ describe('monorepo release flow coverage audit', () => {
     )
     expect(prDeepReviewPrompt).toContain('change-shape breakdown')
     expect(prDeepReviewPrompt).toContain('UX outline')
+    expect(prDeepReviewPrompt).toContain('`Non-obvious affected surfaces`')
+    expect(prDeepReviewPrompt).toContain('**Purpose Drift**')
+    expect(prDeepReviewPrompt).toContain(
+      'Every material behavior or ownership change is necessary',
+    )
+    expect(prDeepReviewPrompt).toContain(
+      'Every non-obvious affected surface is also disclosed',
+    )
+    expect(prDeepReviewPrompt).toContain(
+      'Disclosure does not make\nan unsafe or needless change acceptable',
+    )
+    expect(prDeepReviewPrompt).toContain(
+      'Delete or split unnecessary scope. When\nthe surface is necessary but undisclosed',
+    )
+    expect(prDeepReviewPrompt).toContain(
+      'require the intent contract to add the reason',
+    )
     const genericReviewGptPrompts = [
       'security-audit.md',
       'privacy.md',
@@ -1199,6 +1216,11 @@ describe('monorepo release flow coverage audit', () => {
     expect(prReviewGptLoop).toContain('managed ReviewGPT browser lanes')
     expect(prReviewGptLoop).toContain('randomly among usable')
     expect(prReviewGptLoop).toContain('zero accepted findings')
+    expect(prReviewGptLoop).toContain('non-obvious affected surfaces')
+    expect(prReviewGptLoop).toContain('Accepted purpose drift')
+    expect(prReviewGptLoop).toContain(
+      'Disclosure alone does not cure unnecessary scope',
+    )
     expect(prReviewGptLoop).toContain('`review-gpt-pr-context/pr.diff`')
     expect(prReviewGptLoop).toContain('`review-gpt-pr-context/review-round.json`')
     expect(prReviewGptLoop).toContain(
@@ -1268,6 +1290,8 @@ describe('monorepo release flow coverage audit', () => {
     expect(completionWorkflow).toContain('evidenced current member/event volume')
     expect(completionWorkflow).toContain('`ROUND_OUTCOME: PASS`')
     expect(completionWorkflow).toContain('User experience (when applicable)')
+    expect(completionWorkflow).toContain('Non-obvious affected surfaces')
+    expect(completionWorkflow).toContain('If none exist,')
     expect(completionWorkflow).toContain(
       'Prompt-primary PRs use `prompt-review` and do not run ReviewGPT',
     )
