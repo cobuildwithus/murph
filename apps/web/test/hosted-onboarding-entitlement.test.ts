@@ -10,6 +10,7 @@ import {
   hasActiveHostedMemberAccess,
   hasActiveHostedThreadContainerAccess,
   hasActiveHostedThreadContainerAccessWithParticipants,
+  readActiveHostedFamilySponsorship,
   readActiveHostedMemberAccess,
   readHostedRuntimeAiAccessDecision,
 } from "@/src/lib/hosted-onboarding/member-access";
@@ -303,6 +304,29 @@ describe("hosted member access (single resolver)", () => {
         containerMemberId: "member_container",
         removedAt: null,
       }),
+    });
+  });
+
+  it("reads active Family sponsorship without treating own billing as sponsorship", async () => {
+    const findFirst = vi.fn().mockResolvedValue({ id: "membership_123" });
+
+    await expect(readActiveHostedFamilySponsorship({
+      memberId: "member_123",
+      prisma: {
+        hostedAccountGroupMembership: { findFirst },
+      } as never,
+    })).resolves.toBe(true);
+
+    expect(findFirst).toHaveBeenCalledWith({
+      select: { id: true },
+      where: {
+        group: {
+          billingStatus: HostedBillingStatus.active,
+          suspendedAt: null,
+        },
+        memberId: "member_123",
+        status: "active",
+      },
     });
   });
 });

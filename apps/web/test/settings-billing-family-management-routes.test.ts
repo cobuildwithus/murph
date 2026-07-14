@@ -471,6 +471,7 @@ test("updates the exact paid Pulse and Edge capacity", async () => {
       pulse: { active: 2, billed: 2, invited: 0, remaining: 0, used: 2 },
     },
     seats: { active: 2, billed: 2, invited: 0, max: 6, min: 2, remaining: 0, used: 2 },
+    syncing: false,
   });
   expect(mocks.updateHostedFamilyPlanCapacities).toHaveBeenCalledWith({
     groupId: "hbag_family",
@@ -483,6 +484,22 @@ test("updates the exact paid Pulse and Edge capacity", async () => {
     prisma: expect.any(Object),
     targetCapacities: { edge: 1, pulse: 2 },
   });
+});
+
+test("reports a paid capacity change that is still syncing", async () => {
+  mocks.waitForHostedFamilyPlanCapacities.mockResolvedValueOnce(false);
+
+  const response = await capacityRoute.PATCH(
+    new Request("https://join.example.test/api/settings/billing/family/capacity", {
+      body: JSON.stringify({ capacities: { edge: 1, pulse: 2 } }),
+      headers: { "content-type": "application/json", origin: "https://join.example.test" },
+      method: "PATCH",
+    }),
+  );
+
+  expect(response.status).toBe(200);
+  await expect(response.json()).resolves.toMatchObject({ syncing: true });
+  expect(mocks.readHostedFamilyOwnerSnapshotForMember).not.toHaveBeenCalled();
 });
 
 test("changes an active Family member tier", async () => {

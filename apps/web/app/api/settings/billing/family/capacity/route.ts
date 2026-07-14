@@ -53,5 +53,6 @@ export const PATCH = withJsonError(async (request: Request) => {
   return jsonOk({
     plans: current.plans,
     seats: current.seats,
+    syncing: confirmed === null,
   });
 });

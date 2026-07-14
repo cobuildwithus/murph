@@ -8,8 +8,8 @@ import {
 } from "@/src/lib/hosted-ops/growth-metrics";
 import { requireHostedOpsPageAccess } from "@/src/lib/hosted-ops/access";
 import {
-  HOSTED_FAMILY_SEAT_RECURRING_AMOUNT_USD_CENTS,
   HOSTED_PULSE_TRIAL_DAYS,
+  getHostedFamilyBillingOfferDefinition,
 } from "@/src/lib/hosted-onboarding/billing-plans";
 import { getHostedDashboardPageAuthSnapshot } from "@/src/lib/hosted-onboarding/page-auth";
 import {
@@ -60,9 +60,14 @@ export default async function HostedOpsGrowthPage() {
           <div className="flex flex-wrap gap-2">
             <SummaryChip label="Captured" value={formatDateTime(dashboard.capturedAt)} />
             <SummaryChip label="Trial maturity" value={`${HOSTED_PULSE_TRIAL_DAYS} days`} />
-            <SummaryChip label="Family seat" value={`${formatCurrency(
-              HOSTED_FAMILY_SEAT_RECURRING_AMOUNT_USD_CENTS,
-            )} monthly`} />
+            <SummaryChip
+              label="Family seats"
+              value={`${formatCurrency(
+                getHostedFamilyBillingOfferDefinition("pulse").recurringAmountUsdCents,
+              )} Pulse · ${formatCurrency(
+                getHostedFamilyBillingOfferDefinition("edge").recurringAmountUsdCents,
+              )} Edge`}
+            />
           </div>
         </div>
       </header>

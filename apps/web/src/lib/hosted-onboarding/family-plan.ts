@@ -1312,6 +1312,14 @@ export async function applyHostedFamilyStripeSubscriptionUpdatedTx(input: {
   }
 
   if (billingStatus === HostedBillingStatus.active) {
+    // A direct-paid owner conversion reuses the same Stripe subscription. The
+    // Family webhook is the single handoff point: only clear the old individual
+    // billing owner after the paid Family projection is durably reconciled.
+    await clearHostedFamilyOwnerDirectPaidBillingTx({
+      ownerMemberId: group.ownerMemberId,
+      stripeSubscriptionId: input.subscription.id,
+      tx: input.tx,
+    });
     await revokeNewestHostedFamilyPendingInvitesToFitPlanCapacitiesTx({
       capacities: familyPlanState.capacities,
       groupId: group.id,
@@ -1438,10 +1446,7 @@ export async function createHostedFamilyBillingCheckout(input: {
     };
   }
   if (isHostedFamilyDirectPaidUpgradeInput(checkoutInput)) {
-    return upgradeHostedFamilyDirectPaidSubscription({
-      ...checkoutInput,
-      prisma,
-    });
+    return upgradeHostedFamilyDirectPaidSubscription(checkoutInput);
   }
 
   const stripe = stripeApi ?? requireHostedStripeApi();
@@ -1555,7 +1560,7 @@ async function readHostedFamilyDirectPaidUpgradeInputTx(input: {
 }
 
 async function upgradeHostedFamilyDirectPaidSubscription(
-  input: HostedFamilyDirectPaidUpgradeInput & { prisma: PrismaClient },
+  input: HostedFamilyDirectPaidUpgradeInput,
 ): Promise<{ alreadyActive: boolean; url: string | null }> {
   const stripe = requireHostedStripeApi();
   const subscription = await callHostedFamilyDirectPaidStripeOperation(
@@ -1613,14 +1618,8 @@ async function upgradeHostedFamilyDirectPaidSubscription(
     };
   }
 
-  await reconcileHostedFamilyDirectPaidUpgrade({
-    group: input.group,
-    prisma: input.prisma,
-    subscription: appliedSubscription,
-  });
-
   return {
-    alreadyActive: true,
+    alreadyActive: false,
     url: null,
   };
 }
@@ -1800,96 +1799,19 @@ async function createHostedFamilyDirectPaidUpgradePortalUrl(input: {
   return session.url;
 }
 
-async function reconcileHostedFamilyDirectPaidUpgrade(input: {
-  group: HostedAccountGroupAccessSnapshot;
-  prisma: PrismaClient;
-  subscription: Stripe.Subscription;
-}): Promise<void> {
-  const occurredAt = new Date();
-  await input.prisma.$transaction(async (tx) => {
-    const familyPlanState = readHostedFamilyStripePlanState({
-      priceIdsByPlan: readHostedOnboardingEnvironment().stripeFamilyPriceIdsByPlan,
-      subscription: input.subscription,
-    });
-    if (!familyPlanState) {
-      throw hostedOnboardingError({
-        code: "HOSTED_FAMILY_DIRECT_PAID_RECONCILIATION_PENDING",
-        httpStatus: 409,
-        message: "Your Family plan change is still syncing. Try again shortly.",
-        retryable: true,
-      });
-    }
-
-    const activeMemberships = await tx.hostedAccountGroupMembership.findMany({
-      select: { planCode: true },
-      where: {
-        groupId: input.group.id,
-        status: "active",
-      },
-    });
-    const stripeBillingStatus = mapStripeSubscriptionStatusToHostedBillingStatus(
-      input.subscription.status,
-    );
-    const activeCounts = countHostedFamilyAssignmentsByPlan(activeMemberships);
-    const activeMembersFitPaidSeats = HOSTED_PLAN_CODES.every(
-      (planCode) => activeCounts[planCode] <= familyPlanState.capacities[planCode],
-    );
-    const billedSeatCount = sumHostedFamilyPlanCapacities(familyPlanState.capacities);
-    const legacyPulseItem = familyPlanState.itemsByPlan.pulse;
-    const billingStatus = stripeBillingStatus === HostedBillingStatus.active &&
-        !activeMembersFitPaidSeats
-      ? HostedBillingStatus.unpaid
-      : stripeBillingStatus;
-
-    await writeHostedAccountGroupStripeBillingTx({
-      billingStatus,
-      currentBillingPhase:
-        input.subscription.status === "active" && activeMembersFitPaidSeats ? "paid" : null,
-      currentBillingPlanCode: HOSTED_FAMILY_BILLING_PLAN_CODE,
-      ...buildHostedFamilyStripeSubscriptionPeriodSnapshot(
-        input.subscription,
-        legacyPulseItem ?? input.subscription.items.data[0] ?? null,
-      ),
-      billedSeatCount,
-      groupId: input.group.id,
-      stripeCustomerId: coerceStripeObjectId(input.subscription.customer),
-      stripeEventCreatedAt: occurredAt,
-      stripeSubscriptionItemId: legacyPulseItem?.id ?? null,
-      stripeSubscriptionId: input.subscription.id,
-      tx,
-    });
-    await replaceHostedFamilyPlanCapacitiesTx({
-      capacities: familyPlanState.capacities,
-      groupId: input.group.id,
-      tx,
-    });
-
-    if (billingStatus === HostedBillingStatus.active) {
-      await revokeNewestHostedFamilyPendingInvitesToFitPlanCapacitiesTx({
-        capacities: familyPlanState.capacities,
-        groupId: input.group.id,
-        now: occurredAt,
-        tx,
-      });
-      await activateHostedFamilyGroupMembersForActiveBillingTx({
-        groupId: input.group.id,
-        occurredAt,
-        sourceEventId: `family-subscription:${input.subscription.id}`,
-        tx,
-      });
-    }
-
-    await clearHostedFamilyOwnerDirectPaidBillingTx({
-      ownerMemberId: input.group.ownerMemberId,
-      tx,
-    });
-  }, HOSTED_ONBOARDING_TRANSACTION_OPTIONS);
-}
-
 async function clearHostedFamilyOwnerDirectPaidBillingTx(input: {
   ownerMemberId: string;
+  stripeSubscriptionId: string;
   tx: Prisma.TransactionClient;
 }): Promise<void> {
+  const billingRef = await readHostedMemberStripeBillingRef({
+    memberId: input.ownerMemberId,
+    prisma: input.tx,
+  });
+  if (billingRef?.stripeSubscriptionId !== input.stripeSubscriptionId) {
+    return;
+  }
+
   await input.tx.hostedMember.update({
     data: {
       billingStatus: HostedBillingStatus.not_started,
@@ -2646,7 +2568,33 @@ export async function issueHostedFamilyInviteTx(input: {
       })
     : null;
   if (existingTargetInvite) {
-    return projectHostedFamilyInvitePrivateSnapshot(existingTargetInvite, input.tx);
+    const existingPlanCode = requireHostedFamilyPlanCode(existingTargetInvite.planCode);
+    if (existingPlanCode === planCode) {
+      return projectHostedFamilyInvitePrivateSnapshot(existingTargetInvite, input.tx);
+    }
+
+    const assignments = await readHostedFamilyAssignmentsTx({
+      groupId: group.id,
+      now,
+      tx: input.tx,
+    });
+    const projectedUsage = countHostedFamilyAssignmentsByPlan(assignments);
+    projectedUsage[existingPlanCode] -= 1;
+    projectedUsage[planCode] += 1;
+    if (!HOSTED_PLAN_CODES.every((code) => projectedUsage[code] <= capacities[code])) {
+      throw hostedOnboardingError({
+        code: "HOSTED_FAMILY_SEAT_LIMIT_REACHED",
+        httpStatus: 409,
+        message: "This Family plan has no open paid seats. Add a Family seat before inviting another person.",
+      });
+    }
+
+    const updatedInvite = await input.tx.hostedAccountGroupInvite.update({
+      data: { planCode },
+      select: hostedAccountGroupInviteSelect,
+      where: { id: existingTargetInvite.id },
+    });
+    return projectHostedFamilyInvitePrivateSnapshot(updatedInvite, input.tx);
   }
 
   await assertHostedFamilySeatAvailableTx({

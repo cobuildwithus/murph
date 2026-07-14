@@ -133,6 +133,10 @@ describe("hosted ops growth metrics", () => {
             { memberId: "member_edge" },
             { memberId: "member_family_child" },
           ],
+          planCapacities: [
+            { billedQuantity: 2, planCode: "pulse" },
+            { billedQuantity: 1, planCode: "edge" },
+          ],
         },
       ],
       payingIndividuals: [
@@ -170,7 +174,8 @@ describe("hosted ops growth metrics", () => {
     expect(metrics.payingFamilyGroups).toBe(1);
     expect(metrics.payingFamilySeats).toBe(3);
     expect(metrics.coveredMembers).toBe(4);
-    expect(metrics.mrrUsdCents).toBe(800 + 2_000 + 3 * 700);
+    expect(metrics.familyMrrUsdCents).toBe(2 * 700 + 1_900);
+    expect(metrics.mrrUsdCents).toBe(800 + 2_000 + 2 * 700 + 1_900);
     expect(metrics.unpricedPaidMembers).toBe(1);
   });
 
@@ -658,6 +663,7 @@ function queueCurrentMetricMocks() {
       },
       id: "group_family",
       memberships: [{ memberId: "member_family" }],
+      planCapacities: [{ billedQuantity: 1, planCode: "pulse" }],
     },
   ]);
 }

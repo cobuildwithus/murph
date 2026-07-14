@@ -3,12 +3,17 @@ import "server-only";
 import { HostedBillingStatus, type Prisma, type PrismaClient } from "@prisma/client";
 
 import {
-  HOSTED_FAMILY_SEAT_RECURRING_AMOUNT_USD_CENTS,
+  HOSTED_PLAN_CODES,
   HOSTED_PULSE_TRIAL_DAYS,
   getHostedBillingPlanDefinition,
+  getHostedFamilyBillingOfferDefinition,
   isHostedPulseTrialBillingState,
   parseHostedBillingPlanCode,
 } from "@/src/lib/hosted-onboarding/billing-plans";
+import {
+  readHostedFamilyPlanCapacities,
+  sumHostedFamilyPlanCapacities,
+} from "@/src/lib/hosted-onboarding/family-plan-capacity";
 import { getPrisma } from "@/src/lib/prisma";
 
 const MS_PER_DAY = 24 * 60 * 60 * 1000;
@@ -77,6 +82,10 @@ export interface HostedGrowthPayingFamilyGroupRow {
   } | null;
   memberships: {
     memberId: string;
+  }[];
+  planCapacities: {
+    billedQuantity: number;
+    planCode: string;
   }[];
 }
 
@@ -269,14 +278,24 @@ export function calculateHostedGrowthCurrentMetrics(
 
   let payingFamilyGroups = 0;
   let payingFamilySeats = 0;
+  let familyMrrUsdCents = 0;
   for (const group of input.payingFamilyGroups) {
     const billedSeatCount = group.billingRef?.billedSeatCount ?? 0;
-    if (group.billingRef?.currentBillingPhase !== "paid" || billedSeatCount < 1) {
+    const capacities = readHostedFamilyPlanCapacities(
+      group.planCapacities,
+      billedSeatCount > 0 ? billedSeatCount : null,
+    );
+    if (group.billingRef?.currentBillingPhase !== "paid" || !capacities) {
       continue;
     }
 
     payingFamilyGroups += 1;
-    payingFamilySeats += billedSeatCount;
+    payingFamilySeats += sumHostedFamilyPlanCapacities(capacities);
+    familyMrrUsdCents += HOSTED_PLAN_CODES.reduce(
+      (sum, planCode) => sum + capacities[planCode] *
+        getHostedFamilyBillingOfferDefinition(planCode).recurringAmountUsdCents,
+      0,
+    );
     for (const membership of group.memberships) {
       coveredMemberIds.add(membership.memberId);
     }
@@ -286,8 +305,6 @@ export function calculateHostedGrowthCurrentMetrics(
     rows: input.trialCandidates,
     windowEnd: input.windowEnd,
   });
-  const familyMrrUsdCents =
-    payingFamilySeats * HOSTED_FAMILY_SEAT_RECURRING_AMOUNT_USD_CENTS;
   const payingIndividuals = paidMemberIds.size;
 
   return {
@@ -822,6 +839,12 @@ async function readCurrentHostedGrowthMetrics(
               suspendedAt: null,
             },
             status: "active",
+          },
+        },
+        planCapacities: {
+          select: {
+            billedQuantity: true,
+            planCode: true,
           },
         },
       },
