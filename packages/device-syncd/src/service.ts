@@ -6,7 +6,10 @@ import {
 } from "./provider-job-definitions.ts";
 import { buildDeviceSyncTokenCipherOptions, createSecretCodec } from "./local-secret-codec.ts";
 import { deviceSyncError, isDeviceSyncError } from "./errors.ts";
-import { isJunctionCompanionHrvRmssdJob } from "./junction-resources.ts";
+import {
+  isJunctionCompanionHrvRmssdJob,
+  JUNCTION_COMPANION_HRV_OBSERVATION_INVALID_CODE,
+} from "./junction-resources.ts";
 import {
   sanitizeHostedRuntimeDiagnosticText,
   sanitizeHostedRuntimeErrorText,
@@ -1053,7 +1056,7 @@ class DeviceSyncServiceController {
 
       const failure = normalizeExecutionError(error);
       const retainsAcceptedCompanionHrvUntilSuccess = preservesAcceptedCompanionHrv
-        && failure.code !== "JUNCTION_COMPANION_HRV_OBSERVATION_INVALID";
+        && failure.code !== JUNCTION_COMPANION_HRV_OBSERVATION_INVALID_CODE;
       const retainedFailureRetryable = failure.retryable || retainsAcceptedCompanionHrvUntilSuccess;
       const failureNow = currentNow();
       if (!isAccountExecutionCurrent()) {

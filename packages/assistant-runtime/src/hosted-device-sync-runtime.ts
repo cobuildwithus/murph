@@ -7,7 +7,10 @@ import {
   serializeCompanionHrvRmssdObservation,
 } from "@murphai/contracts";
 import { buildJunctionProviderSourceInstanceKey } from "@murphai/device-syncd/connect-config";
-import { isJunctionCompanionHrvRmssdJob } from "@murphai/device-syncd/junction-resources";
+import {
+  isJunctionCompanionHrvRmssdJob,
+  JUNCTION_COMPANION_HRV_OBSERVATION_INVALID_CODE,
+} from "@murphai/device-syncd/junction-resources";
 import { buildDeviceSyncTokenCipherOptions, createSecretCodec } from "@murphai/device-syncd/local-secret-codec";
 import { requiresHistoricalResetDeviceSyncSource } from "@murphai/device-syncd/public-account";
 import type { DeviceSyncService } from "@murphai/device-syncd/service";
@@ -806,6 +809,7 @@ export function promoteHostedCompletedDirtyPayloadAcks(input: {
     const isCompanionHrv = job ? isJunctionCompanionHrvRmssdJob(job) : false;
     const completed = job?.status === "dead"
       ? !isCompanionHrv
+        || job.lastErrorCode === JUNCTION_COMPANION_HRV_OBSERVATION_INVALID_CODE
       : job?.status === "succeeded" && (
         isCompanionHrv
         || store.getAccountById(job.accountId)?.status === "active"

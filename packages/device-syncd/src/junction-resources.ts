@@ -2,6 +2,8 @@ import { COMPANION_HRV_RMSSD_RESOURCE } from "@murphai/contracts";
 import { normalizeJunctionResourceName } from "@murphai/importers/device-providers/junction-resources";
 
 export { normalizeJunctionResourceName };
+export const JUNCTION_COMPANION_HRV_OBSERVATION_INVALID_CODE =
+  "JUNCTION_COMPANION_HRV_OBSERVATION_INVALID";
 export {
   JUNCTION_COMPANION_HEALTH_METADATA_EVENT_TYPE,
   JUNCTION_COMPANION_HEALTH_METADATA_MAX_BATCH_BYTES,

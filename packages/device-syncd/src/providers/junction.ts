@@ -62,6 +62,7 @@ import {
   subtractDays,
 } from "../shared.ts";
 import {
+  JUNCTION_COMPANION_HRV_OBSERVATION_INVALID_CODE,
   JUNCTION_COMPANION_HEALTH_METADATA_EVENT_TYPE,
   JUNCTION_COMPANION_HEALTH_METADATA_MAX_BATCH_BYTES,
   JUNCTION_COMPANION_HEALTH_METADATA_RESOURCE,
@@ -1470,7 +1471,7 @@ export function createJunctionDeviceSyncProvider(
         }
       } catch {
         throw deviceSyncError({
-          code: "JUNCTION_COMPANION_HRV_OBSERVATION_INVALID",
+          code: JUNCTION_COMPANION_HRV_OBSERVATION_INVALID_CODE,
           message: "Companion HRV observation payload was invalid.",
           retryable: false,
         });

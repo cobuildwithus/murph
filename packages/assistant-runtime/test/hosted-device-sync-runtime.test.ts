@@ -15,6 +15,7 @@ import {
 } from "@murphai/contracts";
 import { createConfiguredDeviceSyncProvidersFromConfigs } from "@murphai/device-syncd/config";
 import { buildJunctionProviderSourceInstanceKey } from "@murphai/device-syncd/connect-config";
+import { JUNCTION_COMPANION_HRV_OBSERVATION_INVALID_CODE } from "@murphai/device-syncd/junction-resources";
 import { buildDeviceSyncTokenCipherOptions, createSecretCodec } from "@murphai/device-syncd/local-secret-codec";
 import { deviceSyncError } from "@murphai/device-syncd/errors";
 import {
@@ -2780,6 +2781,98 @@ describe("hosted device-sync runtime", () => {
         jobId: job.id,
         processedRevision: "7",
       }]);
+    } finally {
+      closeHostedRuntimeDeviceSyncService(service);
+      await cleanup();
+    }
+  });
+
+  test("structurally invalid companion work promotes its hosted payload exactly once", async () => {
+    const { cleanup, vaultRoot } = await createHostedRuntimeWorkspace(
+      "hosted-device-sync-runtime-invalid-companion-",
+    );
+    const baseProvider = createFakeProvider();
+    const junctionProvider: DeviceSyncProvider = {
+      ...baseProvider,
+      provider: "junction",
+      descriptor: {
+        ...baseProvider.descriptor,
+        displayName: "Junction",
+        provider: "junction",
+      },
+      jobExecutor: {
+        async executeJob() {
+          throw deviceSyncError({
+            code: JUNCTION_COMPANION_HRV_OBSERVATION_INVALID_CODE,
+            message: "Companion HRV observation payload was invalid.",
+            retryable: false,
+          });
+        },
+      },
+    };
+    const service = createDeviceSyncServiceForVault(vaultRoot, [junctionProvider]);
+
+    try {
+      const account = getStore(service).upsertAccount({
+        connectedAt: "2026-04-04T09:00:00.000Z",
+        credential: {
+          credentialMetadata: {},
+          kind: "provider_config",
+          providerConfigKey: "junction",
+        },
+        displayName: "Junction",
+        externalAccountId: "junction-invalid-companion-payload",
+        provider: "junction",
+        scopes: [],
+        status: "active",
+      });
+      const job = getStore(service).enqueueJob({
+        accountId: account.id,
+        kind: "resource",
+        maxAttempts: 1,
+        payload: {
+          companionAdmissionId: "f".repeat(64),
+          companionObservationJson: "{}",
+          resource: COMPANION_HRV_RMSSD_RESOURCE,
+          resourceCategory: "derived",
+          sourceProviderSlug: "whoop",
+        },
+        provider: "junction",
+      });
+      const state = {
+        hostedToLocalAccountIds: new Map([["hosted_invalid", account.id]]),
+        localToHostedAccountIds: new Map([[account.id, "hosted_invalid"]]),
+        observedTokenVersions: new Map<string, number | null>(),
+        pendingDirtyAcks: [{
+          connectionId: "hosted_invalid",
+          nextWakeAt: null,
+          processedRevision: "8",
+        }],
+        pendingDirtyPayloadJobs: [{
+          connectionId: "hosted_invalid",
+          dirtyPayloadId: "dsp_invalid",
+          jobId: job.id,
+          processedRevision: "8",
+        }],
+        snapshot: null,
+      };
+
+      assert.equal(await service.drainWorker(1), 1);
+      const terminalJob = getStore(service).getJobById(job.id);
+      assert.equal(terminalJob?.lastErrorCode, JUNCTION_COMPANION_HRV_OBSERVATION_INVALID_CODE);
+      assert.equal(terminalJob?.status, "dead");
+
+      promoteHostedCompletedDirtyPayloadAcks({ service, state });
+      promoteHostedCompletedDirtyPayloadAcks({ service, state });
+
+      assert.deepEqual(state.pendingDirtyAcks, [{
+        connectionId: "hosted_invalid",
+        nextWakeAt: null,
+        processedDirtyPayloadIds: ["dsp_invalid"],
+        processedRevision: "8",
+      }]);
+      assert.deepEqual(state.pendingDirtyPayloadJobs, []);
+      assert.equal(readJobsForAccount(service, account.id).length, 1);
     } finally {
       closeHostedRuntimeDeviceSyncService(service);
       await cleanup();
