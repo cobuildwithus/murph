@@ -310,7 +310,9 @@ describe("hosted member assistant preferences", () => {
       assistantHumor: 3 as number | null,
       assistantPush: 3 as number | null,
       assistantTone: "casual" as string | null,
+      assistantToneCausalSeq: 102n as bigint | null,
       assistantVoice: "warm" as string | null,
+      assistantVoiceCausalSeq: null as bigint | null,
       id: "member_123",
     };
     const prisma = createPreferencesPrismaDouble(member);
@@ -326,6 +328,7 @@ describe("hosted member assistant preferences", () => {
       mailboxPayloadMode: "legacy_snapshot",
       memberId: "member_123",
       occurredAt: "2026-07-08T12:00:00.000Z",
+      preferenceCausalSeq: "100",
       preferences: {
         voice: "deep-calm",
       },
@@ -343,9 +346,27 @@ describe("hosted member assistant preferences", () => {
       tx: prisma,
     });
     expect(member).toMatchObject({
-      assistantToneCausalSeq: 1n,
-      assistantVoiceCausalSeq: 1n,
+      assistantTone: "casual",
+      assistantToneCausalSeq: 102n,
+      assistantVoiceCausalSeq: 100n,
     });
+
+    mocks.appendHostedMailboxEnvelopeTx.mockClear();
+    await expect(upsertHostedMemberAssistantPreferencesTx({
+      causalOrigin: "turn",
+      mailboxPayloadMode: "legacy_snapshot",
+      memberId: "member_123",
+      occurredAt: "2026-07-08T12:01:00.000Z",
+      preferenceCausalSeq: "101",
+      preferences: { tone: "formal" },
+      prisma,
+    })).resolves.toMatchObject({
+      assistantTone: "casual",
+      dispatch: null,
+      updated: false,
+    });
+    expect(member.assistantToneCausalSeq).toBe(102n);
+    expect(mocks.appendHostedMailboxEnvelopeTx).not.toHaveBeenCalled();
   });
 
   it("persists sparse personality intent and preserves sibling values", async () => {

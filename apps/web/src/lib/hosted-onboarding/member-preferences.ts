@@ -55,6 +55,10 @@ type HostedMemberPersonalityColumns = {
   assistantPush: number | null;
 };
 
+function maxCausalSeq(current: bigint | null, next: bigint): bigint {
+  return current !== null && current > next ? current : next;
+}
+
 export async function upsertHostedMemberAssistantPreferencesTx(input: {
   causalOrigin?: "event" | "turn";
   mailboxPayloadMode: HostedMemberAssistantPreferencesMailboxPayloadMode;
@@ -185,13 +189,19 @@ export async function upsertHostedMemberAssistantPreferencesTx(input: {
         ? {}
         : {
             assistantTone: projectedTone,
-            assistantToneCausalSeq: effectiveCausalSeq,
+            assistantToneCausalSeq: maxCausalSeq(
+              member.assistantToneCausalSeq,
+              effectiveCausalSeq,
+            ),
           }),
       ...(projectedVoice === undefined
         ? {}
         : {
             assistantVoice: projectedVoice,
-            assistantVoiceCausalSeq: effectiveCausalSeq,
+            assistantVoiceCausalSeq: maxCausalSeq(
+              member.assistantVoiceCausalSeq,
+              effectiveCausalSeq,
+            ),
           }),
       ...(applicablePreferences.personality?.humor === undefined
         ? {}
