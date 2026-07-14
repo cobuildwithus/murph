@@ -4,6 +4,7 @@ import {
   mergeGuardedJunctionHistoricalBackfillMetadata,
 } from "@murphai/device-syncd/hosted-runtime";
 import {
+  isDeviceSyncDisconnectInProgress,
   isEstablishedDeviceSyncConnection,
   toRedactedPublicDeviceSyncAccount,
 } from "@murphai/device-syncd/public-account";
@@ -182,6 +183,15 @@ export class PrismaHostedConnectionStore {
             code: "CONNECTION_OWNERSHIP_CONFLICT",
             message: "This provider account is already connected to a different Murph user.",
             retryable: false,
+            httpStatus: 409,
+          });
+        }
+
+        if (isDeviceSyncDisconnectInProgress(existing)) {
+          throw deviceSyncError({
+            code: "CONNECTION_DISCONNECT_IN_PROGRESS",
+            message: "Device sync disconnect is still in progress. Retry later.",
+            retryable: true,
             httpStatus: 409,
           });
         }
