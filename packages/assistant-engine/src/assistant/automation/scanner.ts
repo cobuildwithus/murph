@@ -50,6 +50,9 @@ interface AssistantAutomationCandidate {
   summary: AssistantAutomationInputSummary
 }
 
+const MAX_ASSISTANT_REPLY_DISCOVERY_ACTIONABLE = 256
+const MAX_ASSISTANT_REPLY_DISCOVERY_CONTEXT = 256
+
 export async function scanAssistantAutomationOnce(input: {
   applyCanonicalWrites?: boolean
   allowSelfAuthored?: boolean
@@ -123,6 +126,7 @@ export async function scanAssistantAutomationOnce(input: {
     vault: input.vault,
   })
   if (candidates.length === 0) {
+    await persistScanState()
     return {
       currentTurnDeliveryIntentIds,
       replies,
@@ -280,10 +284,10 @@ export async function hasPendingAssistantAutoReplyInput(input: {
   vault: string
 }): Promise<boolean> {
   const candidates = await listAssistantReplyCandidates({
-    autoReply: input.state.autoReply,
+    autoReply: cloneAutomationScanState(input.state).autoReply,
     inputSource: input.inputSource,
     limit: 1,
-    queryLimit: 1,
+    queryLimit: 100,
     signal: input.signal,
     vault: input.vault,
   })
@@ -319,43 +323,74 @@ async function listAssistantReplyCandidates(input: {
 
   const candidates = await Promise.all(
     input.autoReply.map(async (channelState) => {
-      const channelCandidates: AssistantAutomationCandidate[] = []
-      let actionableCandidateCount = 0
-      let cursor = channelState.eligibleAfter
-
-      while (actionableCandidateCount < input.limit) {
-        const listed = await input.inputSource.listInputCandidates({
-          afterCursor: cursor,
-          limit: input.queryLimit,
-          signal: input.signal,
-          sourceId: channelState.channel,
-        })
-        const listedItems = listed.inputs
-        if (listedItems.length === 0) {
-          break
-        }
-
-        for (const candidate of listedItems) {
-          if (candidate.event.source !== channelState.channel) {
-            continue
-          }
-          if (await terminalEvidenceComplete(candidate)) {
-            continue
-          }
-          const automationCandidate = assistantAutomationCandidateFromInput(candidate)
-          channelCandidates.push(automationCandidate)
-          if (!automationCandidate.summary.contextOnly) {
-            actionableCandidateCount += 1
-          }
-        }
-
-        cursor = listed.nextCursor ?? cursor
-        if (listedItems.length < input.queryLimit || !listed.nextCursor) {
-          break
+      const actionableLimit = Math.min(
+        MAX_ASSISTANT_REPLY_DISCOVERY_ACTIONABLE,
+        Math.max(input.limit, input.queryLimit),
+      )
+      const totalLimit = actionableLimit + MAX_ASSISTANT_REPLY_DISCOVERY_CONTEXT
+      const listed = await input.inputSource.listInputCandidates({
+        actionableLimit,
+        afterCursor: channelState.eligibleAfter,
+        limit: totalLimit,
+        signal: input.signal,
+        sourceId: channelState.channel,
+      })
+      const channelCandidates = listed.inputs
+        .filter((candidate) => candidate.event.source === channelState.channel)
+        .map(assistantAutomationCandidateFromInput)
+      const terminalInputIds = new Set<string>()
+      for (const candidate of channelCandidates) {
+        if (await terminalEvidenceComplete(candidate.inputCandidate)) {
+          terminalInputIds.add(candidate.summary.inputId)
         }
       }
+      const candidatesByInputId = new Map(
+        channelCandidates.map((candidate) => [
+          candidate.summary.inputId,
+          candidate,
+        ] as const),
+      )
+      const ordered = orderAssistantAutoReplyInputSummaries(
+        channelCandidates.map((candidate) => candidate.summary),
+      )
+      const retained: AssistantAutomationCandidate[] = []
+      let deferredContext: AssistantAutomationCandidate[] = []
+      let listedActionableCount = 0
+      let retainedActionableCount = 0
+      for (const summary of ordered) {
+        const candidate = candidatesByInputId.get(summary.inputId)
+        if (!candidate) {
+          continue
+        }
+        if (summary.contextOnly) {
+          if (!terminalInputIds.has(summary.inputId)) {
+            deferredContext.push(candidate)
+          }
+          continue
+        }
 
-      return channelCandidates
+        listedActionableCount += 1
+        if (terminalInputIds.has(summary.inputId)) {
+          deferredContext = []
+          continue
+        }
+        retained.push(...deferredContext, candidate)
+        deferredContext = []
+        retainedActionableCount += 1
+      }
+      if (
+        listedActionableCount > 0 &&
+        retainedActionableCount === 0 &&
+        listed.nextCursor
+      ) {
+        advanceAssistantAutoReplyChannelCursor({
+          autoReply: input.autoReply,
+          channel: channelState.channel,
+          cursor: listed.nextCursor,
+        })
+      }
+
+      return retained
     }),
   )
 

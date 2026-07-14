@@ -1,6 +1,7 @@
 import type { AssistantInputCandidate } from '../input-source.js'
 import {
   isSameAssistantConversationRef,
+  isSameAssistantDeferredContextRoute,
   type AssistantInputConversationRef,
 } from '../conversation-ref.js'
 import {
@@ -13,12 +14,9 @@ import {
   type AssistantAutomationInputSummary,
 } from './input-summary.js'
 import {
-  assistantInputCandidateFromStoredEvent,
-} from '../input-source.js'
-import type {
-  AssistantInputEventRecord,
+  compareAssistantInputCursors,
+  isAssistantInputEventDeferredContextCausalForActionable,
 } from '../input-store.js'
-import { compareAssistantInputCursors } from '../input-store.js'
 import { compareAssistantTimestampsAscending } from '../shared.js'
 
 export interface AssistantAutoReplyGroupItem {
@@ -193,20 +191,9 @@ function isAssistantDeferredContextCausallyBefore(
   return true
 }
 
-export function isAssistantInputEventDeferredContextCausalForActionable(input: {
-  actionable: AssistantInputEventRecord
-  context: AssistantInputEventRecord
-}): boolean {
-  const actionable = assistantAutomationInputSummaryFromCandidate(
-    assistantInputCandidateFromStoredEvent(input.actionable),
-  )
-  const context = assistantAutomationInputSummaryFromCandidate(
-    assistantInputCandidateFromStoredEvent(input.context),
-  )
-  return !actionable.contextOnly
-    && context.contextOnly
-    && isSameAssistantDeferredContextRoute(context.conversation, actionable.conversation)
-    && isAssistantDeferredContextCausallyBefore(context, actionable)
+export {
+  isAssistantInputEventDeferredContextCausalForActionable,
+  isSameAssistantDeferredContextRoute,
 }
 
 function compareAssistantDeferredContextCausalOrder(
@@ -232,21 +219,6 @@ function compareDeferredContextSemanticOrder(
   right: AssistantAutomationInputSummary,
 ): number {
   return compareAssistantInputSummaryOrder(left, right)
-}
-
-export function isSameAssistantDeferredContextRoute(
-  left: AssistantInputConversationRef,
-  right: AssistantInputConversationRef,
-): boolean {
-  return (
-    left.source === 'linq' &&
-    right.source === 'linq' &&
-    left.accountId === right.accountId &&
-    left.source === right.source &&
-    left.threadId === right.threadId &&
-    left.threadIsDirect === false &&
-    right.threadIsDirect === false
-  )
 }
 
 function nextActionableInputSharesReplyAnchor(input: {

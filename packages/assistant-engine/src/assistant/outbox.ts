@@ -254,6 +254,17 @@ export type AssistantOutboxCreateIntentInput = {
   vault: string
 }
 
+async function runAssistantOutboxPostPersistBestEffort(
+  task: () => Promise<unknown>,
+): Promise<void> {
+  try {
+    await task()
+  } catch {
+    // The durable intent remains the delivery source of truth. Repair and
+    // observability must not hide its id from the commit/cleanup owner.
+  }
+}
+
 export async function createAssistantOutboxIntent(
   input: AssistantOutboxCreateIntentInput,
 ): Promise<AssistantOutboxIntent> {
@@ -365,11 +376,13 @@ export async function createAssistantOutboxIntent(
           persistedUpgradedExisting,
         )
       }
-      await repairAssistantOutboxReceiptForIntent({
-        at: upgradedExisting.updatedAt,
-        intent: upgradedExisting,
-        vault: input.vault,
-      })
+      await runAssistantOutboxPostPersistBestEffort(() =>
+        repairAssistantOutboxReceiptForIntent({
+          at: upgradedExisting.updatedAt,
+          intent: upgradedExisting,
+          vault: input.vault,
+        }),
+      )
       return upgradedExisting
     }
 
@@ -419,23 +432,27 @@ export async function createAssistantOutboxIntent(
       resolveAssistantOutboxIntentPath(paths.outboxDirectory, intent.intentId),
       persistedIntentValue,
     )
-    await repairAssistantOutboxReceiptForIntent({
-      at: createdAt,
-      intent: persistedIntent,
-      vault: input.vault,
-    })
-    await recordAssistantDiagnosticEvent({
-      vault: input.vault,
-      component: 'outbox',
-      kind: 'delivery.queued',
-      message: `Queued outbound delivery for ${intent.channel ?? 'unknown'} channel.`,
-      sessionId: intent.sessionId,
-      turnId: intent.turnId,
-      intentId: intent.intentId,
-      counterDeltas: {
-        deliveriesQueued: 1,
-      },
-    })
+    await runAssistantOutboxPostPersistBestEffort(() =>
+      repairAssistantOutboxReceiptForIntent({
+        at: createdAt,
+        intent: persistedIntent,
+        vault: input.vault,
+      }),
+    )
+    await runAssistantOutboxPostPersistBestEffort(() =>
+      recordAssistantDiagnosticEvent({
+        vault: input.vault,
+        component: 'outbox',
+        kind: 'delivery.queued',
+        message: `Queued outbound delivery for ${intent.channel ?? 'unknown'} channel.`,
+        sessionId: intent.sessionId,
+        turnId: intent.turnId,
+        intentId: intent.intentId,
+        counterDeltas: {
+          deliveriesQueued: 1,
+        },
+      }),
+    )
 
     return persistedIntent
   })

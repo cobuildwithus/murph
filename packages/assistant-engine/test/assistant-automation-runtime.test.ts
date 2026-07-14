@@ -28,6 +28,7 @@ import {
 import {
   createStoreBackedAssistantInputSource,
   type AssistantInputCandidate,
+  type AssistantInputCandidateQuery,
   type AssistantInputSource,
   type AssistantTurnConversationInputQuery,
 } from '../src/assistant/input-source.ts'
@@ -1892,7 +1893,10 @@ describe('assistant automation scanner', () => {
     })
 
     expect(inputSource.listInputCandidates).toHaveBeenCalledWith(
-      expect.objectContaining({ limit: 2 }),
+      expect.objectContaining({
+        actionableLimit: 2,
+        limit: 258,
+      }),
     )
     expect(scannerReplyMocks.processAssistantAutoReplyGroup).toHaveBeenCalledOnce()
     expect(scannerReplyMocks.processAssistantAutoReplyGroup).toHaveBeenCalledWith(
@@ -2047,8 +2051,8 @@ describe('assistant automation scanner', () => {
     )).toEqual(messageA.event.cursor)
   })
 
-  it('scans past more than one candidate window of reaction context', async () => {
-    const reactions = Array.from({ length: 51 }, (_, index) =>
+  it('processes one source-bounded deferred-context batch without paging', async () => {
+    const reactions = Array.from({ length: 32 }, (_, index) =>
       createCapturelessAssistantInputCandidate({
         actorId: `safe_actor_${String(index).padStart(2, '0')}`,
         conversationThreadId: 'safe_group_a',
@@ -2097,23 +2101,73 @@ describe('assistant automation scanner', () => {
     const scanner = await vi.importActual<typeof import('../src/assistant/automation/scanner.ts')>(
       '../src/assistant/automation/scanner.ts',
     )
+    const inputSource = createAssistantInputSourceForCandidates([
+      ...reactions,
+      message,
+    ])
 
     await scanner.scanAssistantAutomationOnce({
       inboxServices: createInboxServices(),
-      inputSource: createAssistantInputSourceForCandidates([...reactions, message]),
+      inputSource,
       state: createAutomationState({ autoReplyChannels: ['linq'] }),
       vault: '/tmp/assistant-automation-vault',
     })
 
+    expect(inputSource.listInputCandidates).toHaveBeenCalledTimes(1)
+    expect(inputSource.listInputCandidates).toHaveBeenCalledWith(
+      expect.objectContaining({
+        actionableLimit: 50,
+        limit: 306,
+      }),
+    )
     expect(scannerReplyMocks.processAssistantAutoReplyGroup).toHaveBeenCalledOnce()
     expect(scannerReplyMocks.processAssistantAutoReplyGroup).toHaveBeenCalledWith(
       expect.objectContaining({
         context: expect.objectContaining({
-          inputCount: 52,
+          inputCount: 33,
           inputIds: [...reactions.map((reaction) => reaction.event.inputId), message.event.inputId],
         }),
       }),
     )
+  })
+
+  it('persists a bounded continuation when the listed actionable window is terminal', async () => {
+    const terminal = createCapturelessAssistantInputCandidate({
+      actorId: 'safe_actor_terminal',
+      conversationThreadId: 'safe_thread_terminal',
+      inputId: 'ain_terminal_window_0001',
+      occurredAt: '2026-04-08T00:01:00.000Z',
+      text: 'Already handled input.',
+      threadIsDirect: true,
+    })
+    evidenceMocks.hasCompleteAssistantAutoReplyTerminalEvidence
+      .mockResolvedValue(true)
+    const stateUpdates: AssistantAutomationState[] = []
+    const scanner = await vi.importActual<typeof import('../src/assistant/automation/scanner.ts')>(
+      '../src/assistant/automation/scanner.ts',
+    )
+
+    const result = await scanner.scanAssistantAutomationOnce({
+      inboxServices: createInboxServices(),
+      inputCandidateQueryLimit: 1,
+      inputSource: createAssistantInputSourceForCandidates([terminal]),
+      maxPerScan: 1,
+      onStateProgress: async (next) => {
+        stateUpdates.push({
+          ...createAutomationState(),
+          autoReply: [...next.autoReply],
+        })
+      },
+      state: createAutomationState({ autoReplyChannels: ['linq'] }),
+      vault: '/tmp/assistant-automation-vault',
+    })
+
+    expect(result.replies.considered).toBe(0)
+    expect(scannerReplyMocks.processAssistantAutoReplyGroup).not.toHaveBeenCalled()
+    expect(readAutoReplyCursor(
+      stateUpdates.at(-1) ?? createAutomationState(),
+      'linq',
+    )).toEqual(terminal.event.cursor)
   })
 
   it('clears reply backlog state once the backlog is drained', async () => {
@@ -7670,7 +7724,7 @@ describe('assistant auto-reply runtime', () => {
       )
   })
 
-  it('admits causally earlier cross-actor context against the current active-turn message', async () => {
+  it('admits causally earlier cross-actor context in one active-turn route query', async () => {
     const initial = createCapturelessAssistantInputCandidate({
       actorId: 'safe_actor_initial',
       conversationThreadId: 'safe_group_live',
@@ -7701,16 +7755,6 @@ describe('assistant auto-reply runtime', () => {
       text: 'A participant added a laugh reaction.',
       threadIsDirect: false,
     })
-    const unrelatedRoutePage = Array.from({ length: 100 }, (_, index) =>
-      createCapturelessAssistantInputCandidate({
-        actorId: `safe_actor_unrelated_${index}`,
-        conversationThreadId: `safe_group_unrelated_${index}`,
-        inputId: `ain_live_group_unrelated_${String(index).padStart(3, '0')}`,
-        occurredAt: '2026-04-08T00:04:00.000Z',
-        receivedAt: '2026-04-08T00:05:00.000Z',
-        text: 'Unrelated active-turn input.',
-        threadIsDirect: false,
-      }))
     const message = createCapturelessAssistantInputCandidate({
       actorId: 'safe_actor_message',
       conversationThreadId: 'safe_group_live',
@@ -7725,29 +7769,30 @@ describe('assistant auto-reply runtime', () => {
       threadIsDirect: false,
     })
     const checkpointAcceptedInput = vi.fn(async () => undefined)
-    let routeListCount = 0
-    let reactionOnlyAdmission: unknown
     let pairedAdmission: unknown
+    const listInputCandidates = vi.fn(
+      async (query: AssistantInputCandidateQuery) => {
+        expect(query).toMatchObject({
+          actionableLimit: 50,
+          deliveryRoute: {
+            channel: 'linq',
+            target: 'real_group_live',
+          },
+          limit: 100,
+          sourceId: 'linq',
+        })
+        return {
+          inputs: [reaction, message],
+          nextCursor: message.event.cursor,
+        }
+      },
+    )
     const inputSource = {
       checkpointAcceptedInput,
       async listNewConversationInputs(input: AssistantTurnConversationInputQuery) {
         return { inputs: [], nextCursor: input.afterCursor ?? null }
       },
-      async listInputCandidates() {
-        routeListCount += 1
-        return {
-          inputs: routeListCount === 1
-            ? unrelatedRoutePage
-            : routeListCount === 2
-              ? [reaction]
-              : [message],
-          nextCursor: routeListCount === 1
-            ? unrelatedRoutePage.at(-1)!.event.cursor
-            : routeListCount === 2
-              ? reaction.event.cursor
-              : message.event.cursor,
-        }
-      },
+      listInputCandidates,
       async refresh() {
         return { progressed: true, reason: 'ingested_input' as const }
       },
@@ -7762,11 +7807,6 @@ describe('assistant auto-reply runtime', () => {
         vault: string
       }) => Promise<unknown>
     }) => {
-      reactionOnlyAdmission = await input.activeTurnInput?.({
-        sessionId: 'session-1',
-        turnId: 'turn-1',
-        vault: '/tmp/assistant-automation-vault',
-      })
       pairedAdmission = await input.activeTurnInput?.({
         sessionId: 'session-1',
         turnId: 'turn-1',
@@ -7813,21 +7853,17 @@ describe('assistant auto-reply runtime', () => {
       vault: '/tmp/assistant-automation-vault',
     })
 
-    expect(routeListCount).toBe(3)
-    expect(reactionOnlyAdmission).toMatchObject({
-      acceptedInputs: [
-        expect.objectContaining({ id: reaction.event.inputId }),
-      ],
-      kind: 'accepted',
-      prompt: expect.stringMatching(/participant added a laugh reaction/u),
-    })
+    expect(listInputCandidates).toHaveBeenCalledTimes(1)
     expect(pairedAdmission).toMatchObject({
       acceptedInputs: [
+        expect.objectContaining({ id: reaction.event.inputId }),
         expect.objectContaining({ id: message.event.inputId }),
       ],
       deliveryTarget: 'real_group_live',
       kind: 'accepted',
-      prompt: expect.stringMatching(/next participant sent a message/u),
+      prompt: expect.stringMatching(
+        /participant added a laugh reaction[\s\S]*next participant sent a message/u,
+      ),
     })
     expect(result.replied).toBe(1)
     expect(checkpointAcceptedInput).toHaveBeenCalledWith(

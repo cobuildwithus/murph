@@ -5796,6 +5796,250 @@ test('sendAssistantMessageLocal abandons every queued bubble from a preceding re
   ])
 })
 
+test('sendAssistantMessageLocal cleans a partial preceding bubble queue when the causal guard rejects', async () => {
+  const session = createAssistantSession({
+    sessionId: 'session-partial-preceding-guard-rejected',
+  })
+  const commitBarrierError = new Error('causal guard rejected reply')
+  const beforeDeliveryIntentCommit = vi.fn(async () => {
+    throw commitBarrierError
+  })
+  const { mocks, sendAssistantMessageLocal } = await loadLocalServiceModule({
+    deliveryOutcome: {
+      error: null,
+      intentId: 'intent-final-after-partial-preceding',
+      kind: 'queued',
+      media: [],
+      session,
+    },
+    providerOutcome: {
+      kind: 'succeeded',
+      providerTurn: {
+        onboardingGuidanceInjected: false,
+        codexContinuation: {
+          kind: 'explicit-structured-history',
+        },
+        precedingResponseSegments: [{ response: 'first\n---\nsecond' }],
+        response: 'stale final response',
+        session,
+      },
+    },
+    session,
+  })
+  mocks.deliverAssistantPrecedingReplies.mockResolvedValueOnce([{
+    error: {
+      code: 'ASSISTANT_DELIVERY_FAILED',
+      message: 'second preceding bubble queue failed',
+    },
+    intentId: null,
+    kind: 'failed',
+    media: [],
+    queuedIntentIds: ['intent-partial-preceding-first'],
+    session,
+  }])
+
+  await expect(sendAssistantMessageLocal({
+    beforeDeliveryIntentCommit,
+    deliverResponse: true,
+    deliveryDispatchMode: 'queue-only',
+    persistUserPromptOnFailure: false,
+    prompt: 'Queue a reply that becomes stale',
+    turnTrigger: 'automation-auto-reply',
+    vault: '/vaults/test',
+  })).rejects.toBe(commitBarrierError)
+
+  expect(beforeDeliveryIntentCommit).toHaveBeenCalledWith({
+    deliveryIntentId: 'intent-final-after-partial-preceding',
+    turnId: 'turn-1',
+  })
+  expect(mocks.finalizeAssistantTurnArtifacts).not.toHaveBeenCalled()
+  expect(mocks.markAssistantOutboxIntentMirrorTerminalById.mock.calls.map(
+    ([call]) => call.intentId,
+  )).toEqual([
+    'intent-partial-preceding-first',
+    'intent-final-after-partial-preceding',
+  ])
+})
+
+test('sendAssistantMessageLocal cleans a partial preceding bubble queue when artifact finalization fails', async () => {
+  const session = createAssistantSession({
+    sessionId: 'session-partial-preceding-artifacts-failed',
+  })
+  const turnArtifactsError = new Error('turn artifacts failed')
+  const beforeDeliveryIntentCommit = vi.fn(async () => undefined)
+  const { mocks, sendAssistantMessageLocal } = await loadLocalServiceModule({
+    deliveryOutcome: {
+      error: null,
+      intentId: 'intent-final-before-artifacts-fail',
+      kind: 'queued',
+      media: [],
+      session,
+    },
+    providerOutcome: {
+      kind: 'succeeded',
+      providerTurn: {
+        onboardingGuidanceInjected: false,
+        codexContinuation: {
+          kind: 'explicit-structured-history',
+        },
+        precedingResponseSegments: [{ response: 'first\n---\nsecond' }],
+        response: 'stale final response',
+        session,
+      },
+    },
+    session,
+  })
+  mocks.deliverAssistantPrecedingReplies.mockResolvedValueOnce([{
+    error: {
+      code: 'ASSISTANT_DELIVERY_FAILED',
+      message: 'second preceding bubble queue failed',
+    },
+    intentId: null,
+    kind: 'failed',
+    media: [],
+    queuedIntentIds: ['intent-partial-preceding-before-artifacts'],
+    session,
+  }])
+  mocks.finalizeAssistantTurnArtifacts.mockRejectedValueOnce(turnArtifactsError)
+
+  await expect(sendAssistantMessageLocal({
+    beforeDeliveryIntentCommit,
+    deliverResponse: true,
+    deliveryDispatchMode: 'queue-only',
+    persistUserPromptOnFailure: false,
+    prompt: 'Queue a reply whose artifacts fail',
+    turnTrigger: 'automation-auto-reply',
+    vault: '/vaults/test',
+  })).rejects.toBe(turnArtifactsError)
+
+  expect(beforeDeliveryIntentCommit).toHaveBeenCalledWith({
+    deliveryIntentId: 'intent-final-before-artifacts-fail',
+    turnId: 'turn-1',
+  })
+  expect(mocks.finalizeAssistantTurnArtifacts).toHaveBeenCalledTimes(1)
+  expect(mocks.markAssistantOutboxIntentMirrorTerminalById.mock.calls.map(
+    ([call]) => call.intentId,
+  )).toEqual([
+    'intent-partial-preceding-before-artifacts',
+    'intent-final-before-artifacts-fail',
+  ])
+})
+
+test('sendAssistantMessageLocal cleans preceding delivery when final reply queueing throws', async () => {
+  const session = createAssistantSession({
+    sessionId: 'session-final-queue-throws',
+  })
+  const finalQueueError = new Error('final reply queue failed')
+  const beforeDeliveryIntentCommit = vi.fn(async () => undefined)
+  const { mocks, sendAssistantMessageLocal } = await loadLocalServiceModule({
+    providerOutcome: {
+      kind: 'succeeded',
+      providerTurn: {
+        onboardingGuidanceInjected: false,
+        codexContinuation: {
+          kind: 'explicit-structured-history',
+        },
+        precedingResponseSegments: [{ response: 'queued preceding reply' }],
+        response: 'final response',
+        session,
+      },
+    },
+    session,
+  })
+  mocks.deliverAssistantPrecedingReplies.mockResolvedValueOnce([{
+    error: null,
+    intentId: 'intent-preceding-before-final-throw',
+    kind: 'queued',
+    media: [],
+    session,
+  }])
+  mocks.dispatchAssistantReply.mockRejectedValueOnce(finalQueueError)
+
+  await expect(sendAssistantMessageLocal({
+    beforeDeliveryIntentCommit,
+    deliverResponse: true,
+    deliveryDispatchMode: 'queue-only',
+    persistUserPromptOnFailure: false,
+    prompt: 'Queue replies',
+    turnTrigger: 'automation-auto-reply',
+    vault: '/vaults/test',
+  })).rejects.toBe(finalQueueError)
+
+  expect(beforeDeliveryIntentCommit).not.toHaveBeenCalled()
+  expect(mocks.finalizeAssistantTurnArtifacts).not.toHaveBeenCalled()
+  expect(mocks.markAssistantOutboxIntentMirrorTerminalById.mock.calls.map(
+    ([call]) => call.intentId,
+  )).toEqual(['intent-preceding-before-final-throw'])
+})
+
+test('sendAssistantMessageLocal keeps queued reactions visible to cleanup when a later reaction throws', async () => {
+  const session = createAssistantSession({
+    sessionId: 'session-later-reaction-throws',
+  })
+  const commitBarrierError = new Error('causal guard rejected reactions')
+  const beforeDeliveryIntentCommit = vi.fn(async () => {
+    throw commitBarrierError
+  })
+  const { mocks, sendAssistantMessageLocal } = await loadLocalServiceModule({
+    deliveryOutcome: {
+      error: null,
+      intentId: 'intent-final-before-reaction-throw',
+      kind: 'queued',
+      media: [],
+      session,
+    },
+    providerOutcome: {
+      kind: 'succeeded',
+      providerTurn: {
+        onboardingGuidanceInjected: false,
+        codexContinuation: {
+          kind: 'explicit-structured-history',
+        },
+        reactions: [
+          {
+            deliveryContextOrdinal: 0,
+            reaction: 'heart',
+          },
+          {
+            deliveryContextOrdinal: 0,
+            reaction: 'thumbs_up',
+          },
+        ],
+        response: 'final response',
+        session,
+      },
+    },
+    session,
+  })
+  mocks.deliverAssistantReaction
+    .mockResolvedValueOnce({
+      error: null,
+      intentId: 'intent-reaction-before-throw',
+      kind: 'queued',
+      media: [],
+      session,
+    })
+    .mockRejectedValueOnce(new Error('later reaction queue failed'))
+
+  await expect(sendAssistantMessageLocal({
+    beforeDeliveryIntentCommit,
+    deliverResponse: true,
+    deliveryDispatchMode: 'queue-only',
+    persistUserPromptOnFailure: false,
+    prompt: 'Queue reply and reactions',
+    turnTrigger: 'automation-auto-reply',
+    vault: '/vaults/test',
+  })).rejects.toBe(commitBarrierError)
+
+  expect(mocks.deliverAssistantReaction).toHaveBeenCalledTimes(2)
+  expect(mocks.markAssistantOutboxIntentMirrorTerminalById.mock.calls.map(
+    ([call]) => call.intentId,
+  )).toEqual([
+    'intent-final-before-reaction-throw',
+    'intent-reaction-before-throw',
+  ])
+})
+
 test('sendAssistantMessageLocal abandons every queued bubble when turn-artifact finalization fails', async () => {
   const session = createAssistantSession({
     sessionId: 'session-artifact-failure-bubbles',

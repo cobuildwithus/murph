@@ -5,6 +5,7 @@ import { afterEach, describe, expect, it, vi } from "vitest";
 
 import * as assistantEngine from "@murphai/assistant-engine";
 import {
+  type AssistantInputEventRecord,
   hasPendingAssistantAutoReplyInput,
   recordHostedMailboxAssistantInputItem,
   updateAssistantInputProjection,
@@ -131,6 +132,196 @@ describe("createHostedAssistantInputSource", () => {
       older.inputId,
     ]);
     expect(listSpy).not.toHaveBeenCalled();
+  });
+
+  it("rejects a selected direct input from the wrong account even when the target matches", async () => {
+    const vaultRoot = await createTempVault();
+    const wrongAccount = await upsertAssistantInputEvent({
+      vault: vaultRoot,
+      event: createAssistantInputEvent({
+        accountId: "acct_wrong",
+        dedupeKey: "dedupe_wrong_account_same_target",
+        eventId: "evt_wrong_account_same_target",
+        itemId: "item_wrong_account_same_target",
+        laneSeq: "10",
+        messageId: "msg_wrong_account_same_target",
+        threadId: "shared_target",
+      }),
+    });
+    const matching = await upsertAssistantInputEvent({
+      vault: vaultRoot,
+      event: createAssistantInputEvent({
+        accountId: "acct_1",
+        dedupeKey: "dedupe_matching_account_same_target",
+        eventId: "evt_matching_account_same_target",
+        itemId: "item_matching_account_same_target",
+        laneSeq: "20",
+        messageId: "msg_matching_account_same_target",
+        threadId: "shared_target",
+      }),
+    });
+    const source = createHostedAssistantInputSource({
+      selectedInputIds: [wrongAccount.inputId, matching.inputId],
+      vaultRoot,
+    });
+
+    const listed = await source.listInputCandidates({
+      actionableLimit: 1,
+      deliveryRoute: {
+        channel: "linq",
+        conversation: matching.conversation!,
+        target: "shared_target",
+      },
+      limit: 2,
+      sourceId: "linq",
+    });
+
+    expect(listed.inputs.map((candidate) => candidate.event.inputId)).toEqual([
+      matching.inputId,
+    ]);
+  });
+
+  it("retains only causal newest selected context within route and global bounds", async () => {
+    const vaultRoot = await createTempVault();
+    const baseOccurredAt = Date.parse("2026-04-23T00:00:00.000Z");
+    let laneSequence = 1;
+    const nextLaneSeq = () => String(laneSequence++).padStart(4, "0");
+    const contextsByGroup: AssistantInputEventRecord[][] = [];
+    const selectedInputIds: string[] = [];
+
+    for (let groupIndex = 0; groupIndex < 9; groupIndex += 1) {
+      const groupContexts: AssistantInputEventRecord[] = [];
+      const contextCount = groupIndex === 0 ? 33 : groupIndex === 8 ? 28 : 29;
+      for (let contextIndex = 0; contextIndex < contextCount; contextIndex += 1) {
+        const context = await upsertAssistantInputEvent({
+          vault: vaultRoot,
+          event: createAssistantInputEvent({
+            actorId: `actor_context_${groupIndex}_${contextIndex}`,
+            contextOnly: true,
+            dedupeKey: `dedupe_context_${groupIndex}_${contextIndex}`,
+            eventId: `evt_context_${groupIndex}_${contextIndex}`,
+            itemId: `item_context_${groupIndex}_${contextIndex}`,
+            laneSeq: nextLaneSeq(),
+            occurredAt: new Date(
+              baseOccurredAt + ((groupIndex * 100) + contextIndex) * 1_000,
+            ).toISOString(),
+            receivedAt: new Date(
+              baseOccurredAt + ((groupIndex * 100) + contextIndex) * 1_000,
+            ).toISOString(),
+            replyTarget: null,
+            threadId: `group_${groupIndex}`,
+            threadIsDirect: false,
+          }),
+        });
+        groupContexts.push(context);
+        selectedInputIds.push(context.inputId);
+      }
+      contextsByGroup.push(groupContexts);
+    }
+
+    const actionables: AssistantInputEventRecord[] = [];
+    for (let groupIndex = 0; groupIndex < 9; groupIndex += 1) {
+      const actionable = await upsertAssistantInputEvent({
+        vault: vaultRoot,
+        event: createAssistantInputEvent({
+          actorId: `actor_actionable_${groupIndex}`,
+          dedupeKey: `dedupe_actionable_${groupIndex}`,
+          eventId: `evt_actionable_${groupIndex}`,
+          itemId: `item_actionable_${groupIndex}`,
+          laneSeq: nextLaneSeq(),
+          messageId: `msg_actionable_${groupIndex}`,
+          occurredAt: new Date(
+            baseOccurredAt + ((groupIndex * 100) + 90) * 1_000,
+          ).toISOString(),
+          receivedAt: new Date(
+            baseOccurredAt + ((groupIndex * 100) + 90) * 1_000,
+          ).toISOString(),
+          threadId: `group_${groupIndex}`,
+          threadIsDirect: false,
+        }),
+      });
+      actionables.push(actionable);
+      selectedInputIds.push(actionable.inputId);
+    }
+
+    const lateCursorCausalContext = await upsertAssistantInputEvent({
+      vault: vaultRoot,
+      event: createAssistantInputEvent({
+        actorId: "actor_context_8_late_cursor",
+        contextOnly: true,
+        dedupeKey: "dedupe_context_8_late_cursor",
+        eventId: "evt_context_8_late_cursor",
+        itemId: "item_context_8_late_cursor",
+        laneSeq: nextLaneSeq(),
+        occurredAt: new Date(baseOccurredAt + 828_000).toISOString(),
+        receivedAt: new Date(baseOccurredAt + 828_000).toISOString(),
+        replyTarget: null,
+        threadId: "group_8",
+        threadIsDirect: false,
+      }),
+    });
+    contextsByGroup[8]!.push(lateCursorCausalContext);
+    selectedInputIds.push(lateCursorCausalContext.inputId);
+    const nonCausalContext = await upsertAssistantInputEvent({
+      vault: vaultRoot,
+      event: createAssistantInputEvent({
+        actorId: "actor_context_0_too_late",
+        contextOnly: true,
+        dedupeKey: "dedupe_context_0_too_late",
+        eventId: "evt_context_0_too_late",
+        itemId: "item_context_0_too_late",
+        laneSeq: nextLaneSeq(),
+        occurredAt: new Date(baseOccurredAt + 10_000_000).toISOString(),
+        receivedAt: new Date(baseOccurredAt + 10_000_000).toISOString(),
+        replyTarget: null,
+        threadId: "group_0",
+        threadIsDirect: false,
+      }),
+    });
+    selectedInputIds.push(nonCausalContext.inputId);
+    const source = createHostedAssistantInputSource({
+      selectedInputIds,
+      vaultRoot,
+    });
+
+    const routeResult = await source.listInputCandidates({
+      actionableLimit: 1,
+      deliveryRoute: {
+        channel: "linq",
+        conversation: actionables[0]!.conversation!,
+        target: "group_0",
+      },
+      limit: 100,
+      sourceId: "linq",
+    });
+    expect(routeResult.inputs
+      .filter((candidate) => candidate.event.sourceMetadata?.kind === "linq"
+        && candidate.event.sourceMetadata.contextOnly === true)
+      .map((candidate) => candidate.event.inputId)).toEqual(
+        contextsByGroup[0]!.slice(-32).map((context) => context.inputId),
+      );
+    expect(routeResult.inputs.at(-1)?.event.inputId).toBe(actionables[0]!.inputId);
+
+    const globalResult = await source.listInputCandidates({
+      actionableLimit: actionables.length,
+      limit: 400,
+      sourceId: "linq",
+    });
+    const globalContextIds = globalResult.inputs
+      .filter((candidate) => candidate.event.sourceMetadata?.kind === "linq"
+        && candidate.event.sourceMetadata.contextOnly === true)
+      .map((candidate) => candidate.event.inputId);
+    expect(globalContextIds).toEqual([
+      ...contextsByGroup[0]!.slice(9).map((context) => context.inputId),
+      ...contextsByGroup.slice(1).flat().map((context) => context.inputId),
+    ]);
+    expect(globalContextIds).toHaveLength(256);
+    expect(globalContextIds).toContain(lateCursorCausalContext.inputId);
+    expect(globalContextIds).not.toContain(nonCausalContext.inputId);
+    expect(globalResult.inputs.map((candidate) => candidate.event.inputId))
+      .toEqual(expect.arrayContaining(
+        actionables.map((actionable) => actionable.inputId),
+      ));
   });
 
   it("hydrates selected hosted mailbox proof from the sidecar", async () => {
@@ -420,6 +611,59 @@ describe("createHostedAssistantInputSource", () => {
 });
 
 describe("selectHostedAssistantInputIds", () => {
+  it("keeps causal reaction context when it arrives in the same fresh batch", async () => {
+    const vaultRoot = await createTempVault();
+    await enableLinqAutoReply(vaultRoot);
+    const reaction = await upsertAssistantInputEvent({
+      vault: vaultRoot,
+      event: createAssistantInputEvent({
+        actorId: "actor_reactor",
+        contextOnly: true,
+        dedupeKey: "dedupe_fresh_batch_reaction",
+        eventId: "evt_fresh_batch_reaction",
+        itemId: "item_fresh_batch_reaction",
+        laneSeq: "10",
+        occurredAt: "2026-04-23T00:00:01.000Z",
+        receivedAt: "2026-04-23T00:00:02.000Z",
+        replyTarget: null,
+        text: "A participant added a reaction",
+        threadId: "fresh_batch_group",
+        threadIsDirect: false,
+      }),
+    });
+    const message = await upsertAssistantInputEvent({
+      vault: vaultRoot,
+      event: createAssistantInputEvent({
+        actorId: "actor_message",
+        dedupeKey: "dedupe_fresh_batch_message",
+        eventId: "evt_fresh_batch_message",
+        itemId: "item_fresh_batch_message",
+        laneSeq: "20",
+        messageId: "msg_fresh_batch_message",
+        occurredAt: "2026-04-23T00:00:03.000Z",
+        receivedAt: "2026-04-23T00:00:04.000Z",
+        text: "The next participant sent a message",
+        threadId: "fresh_batch_group",
+        threadIsDirect: false,
+      }),
+    });
+    await enqueueHostedPendingAssistantInputId({
+      inputId: reaction.inputId,
+      vaultRoot,
+    });
+
+    await expect(selectHostedAssistantInputIds({
+      freshAssistantInputIds: [reaction.inputId, message.inputId],
+      mode: "foreground",
+      vaultRoot,
+    })).resolves.toEqual({
+      freshInputIds: [reaction.inputId, message.inputId],
+      inputIds: [reaction.inputId, message.inputId],
+      mode: "foreground",
+      pendingInputIds: [reaction.inputId],
+    });
+  });
+
   it("does not let older pending input displace fresh foreground input", async () => {
     const vaultRoot = await createTempVault();
     await enableLinqAutoReply(vaultRoot);
@@ -938,66 +1182,6 @@ describe("selectHostedAssistantInputIds", () => {
     ]);
   });
 
-  it("background mode skips terminal route proof without dropping it", async () => {
-    const vaultRoot = await createTempVault();
-    await enableLinqAutoReply(vaultRoot);
-    const terminalProof = await upsertAssistantInputEvent({
-      vault: vaultRoot,
-      event: createAssistantInputEvent({
-        dedupeKey: "dedupe_terminal_route_proof",
-        eventId: "evt_terminal_route_proof",
-        itemId: "item_terminal_route_proof",
-        laneSeq: "10",
-        messageId: "msg_terminal_route_proof",
-        occurredAt: "2026-04-23T00:00:01.000Z",
-        previousHomeThreadId: "thread_previous",
-        receivedAt: "2026-04-23T00:00:02.000Z",
-        text: "terminal route proof",
-      }),
-    });
-    const replyable = await upsertAssistantInputEvent({
-      vault: vaultRoot,
-      event: createAssistantInputEvent({
-        dedupeKey: "dedupe_replyable_after_proof",
-        eventId: "evt_replyable_after_proof",
-        itemId: "item_replyable_after_proof",
-        laneSeq: "20",
-        messageId: "msg_replyable_after_proof",
-        occurredAt: "2026-04-23T00:00:03.000Z",
-        receivedAt: "2026-04-23T00:00:04.000Z",
-        text: "replyable after terminal proof",
-      }),
-    });
-    await writeTerminalEvidence({
-      evidenceId: terminalProof.inputId,
-      groupInputIds: [terminalProof.inputId],
-      vaultRoot,
-    });
-    await enqueueHostedPendingAssistantInputId({
-      inputId: terminalProof.inputId,
-      routeProof: true,
-      vaultRoot,
-    });
-    await enqueueHostedPendingAssistantInputId({
-      inputId: replyable.inputId,
-      vaultRoot,
-    });
-
-    const selection = await selectHostedAssistantInputIds({
-      mode: "background",
-      vaultRoot,
-    });
-
-    expect(selection.inputIds).toEqual([replyable.inputId]);
-    expect(selection.pendingInputIds).toEqual([
-      terminalProof.inputId,
-      replyable.inputId,
-    ]);
-    await expect(readHostedPendingAssistantInputIds({ vaultRoot })).resolves.toEqual([
-      terminalProof.inputId,
-      replyable.inputId,
-    ]);
-  });
 });
 
 async function createTempVault(): Promise<string> {
@@ -1067,7 +1251,6 @@ function createAssistantInputEvent(input: {
   occurredAt?: string;
   receivedAt?: string;
   replyTarget?: string | null;
-  previousHomeThreadId?: string;
   source?: string;
   text?: string;
   threadId?: string;
@@ -1110,7 +1293,6 @@ function createAssistantInputEvent(input: {
           externalThreadRouteAuthorityPresent: false,
           kind: "linq" as const,
           partCount: 1,
-          previousHomeThreadId: input.previousHomeThreadId ?? null,
           reactionEligible: false,
           replyToMessageId: null,
           service: null,

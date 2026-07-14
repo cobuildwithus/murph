@@ -63,12 +63,14 @@ export {
 } from './hosted-mailbox-input-items.js'
 export {
   assistantInputCandidateFromStoredEvent,
+  assistantInputCandidateMatchesDeliveryRoute,
   assistantInputIdFromInboxCaptureId,
   createStoreBackedAssistantInputSource,
   type AssistantInputCandidate,
   type AssistantInputCandidateBatch,
   type AssistantInputCandidateQuery,
   type AssistantInputCursor,
+  type AssistantInputDeliveryRoute,
   type AssistantInputEvent,
   type AssistantInputProjection,
   type AssistantInputProjectionStatus,

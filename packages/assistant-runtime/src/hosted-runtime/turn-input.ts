@@ -1,5 +1,6 @@
 import {
   assistantInputCandidateFromStoredEvent,
+  assistantInputCandidateMatchesDeliveryRoute,
   compareAssistantInputCursors,
   isAssistantInputEventDeferredContextCausalForActionable,
   isSameAssistantConversationRef,
@@ -17,6 +18,10 @@ import {
   readAssistantAutomationState,
 } from "@murphai/assistant-engine/assistant-state";
 import { assistantPreferenceCausalSeqSchema } from "@murphai/contracts";
+import {
+  HOSTED_DEFERRED_GROUP_CONTEXT_MAX_PER_GROUP,
+  HOSTED_DEFERRED_GROUP_CONTEXT_MAX_TOTAL,
+} from "@murphai/hosted-execution/runtime-control";
 
 import {
   compactHostedPendingAssistantInputIds,
@@ -248,17 +253,22 @@ export async function selectHostedAssistantInputIds(
     .find((event) => !isHostedDeferredContextInputEvent(event)) ?? null;
   const matchingContextEvents = actionableEvent === null
     ? []
-    : (await readHostedReplyablePendingAssistantInputEvents({
-      inputIds: pendingInputIds.filter((inputId) => !freshInputIds.includes(inputId)),
-      missingInput: "skip",
-      vaultRoot: input.vaultRoot,
-    })).filter((event) =>
-      isHostedDeferredContextInputEvent(event)
-      && isAssistantInputEventDeferredContextCausalForActionable({
-        actionable: actionableEvent,
-        context: event,
-      })
-    );
+    : [
+        ...freshEvents,
+        ...(await readHostedReplyablePendingAssistantInputEvents({
+          inputIds: pendingInputIds.filter(
+            (inputId) => !freshInputIds.includes(inputId),
+          ),
+          missingInput: "skip",
+          vaultRoot: input.vaultRoot,
+        })),
+      ].filter((event) =>
+        isHostedDeferredContextInputEvent(event)
+        && isAssistantInputEventDeferredContextCausalForActionable({
+          actionable: actionableEvent,
+          context: event,
+        })
+      );
 
   return {
     freshInputIds,
@@ -353,19 +363,38 @@ function filterHostedAssistantInputCandidates(input: {
   query: AssistantInputCandidateQuery;
 }): AssistantInputCandidateBatch {
   const knownInputIds = new Set(input.query.knownInputIds ?? []);
+  const knownProjectionCaptureIds = new Set(
+    input.query.knownProjectionCaptureIds ?? [],
+  );
   const afterCursor = readEffectiveHostedAssistantInputSourceAfterCursor({
     afterCursor: input.query.afterCursor ?? null,
     emittedCursorKeys: input.emittedCursorKeys,
   });
   const batch = buildHostedAssistantInputCandidateBatch({
+    actionableLimit: input.query.actionableLimit,
     afterCursor,
     candidates: input.candidates.filter((candidate) => {
       if (knownInputIds.has(candidate.event.inputId)) {
         return false;
       }
       if (
+        candidate.projection.captureId
+        && knownProjectionCaptureIds.has(candidate.projection.captureId)
+      ) {
+        return false;
+      }
+      if (
         input.query.sourceId
         && candidate.event.source !== input.query.sourceId
+      ) {
+        return false;
+      }
+      if (
+        input.query.deliveryRoute
+        && !assistantInputCandidateMatchesDeliveryRoute({
+          candidate,
+          deliveryRoute: input.query.deliveryRoute,
+        })
       ) {
         return false;
       }
@@ -410,12 +439,13 @@ function filterHostedAssistantNewConversationInputs(input: {
 }
 
 function buildHostedAssistantInputCandidateBatch(input: {
+  actionableLimit?: number;
   afterCursor: AssistantInputCursor | null;
   candidates: readonly AssistantInputCandidate[];
   limit?: number;
 }): AssistantInputCandidateBatch {
   const limit = normalizeHostedAssistantInputQueryLimit(input.limit);
-  const selected = input.candidates
+  const candidates = input.candidates
     .filter((candidate) =>
       input.afterCursor
         ? compareAssistantInputCursors(candidate.event.cursor, input.afterCursor) > 0
@@ -423,8 +453,14 @@ function buildHostedAssistantInputCandidateBatch(input: {
     )
     .sort((left, right) =>
       compareAssistantInputCursors(left.event.cursor, right.event.cursor)
-    )
-    .slice(0, limit);
+    );
+  const selected = input.actionableLimit === undefined
+    ? candidates.slice(0, limit)
+    : selectHostedAssistantInputCandidates({
+        actionableLimit: input.actionableLimit,
+        candidates,
+        limit,
+      });
 
   return {
     inputs: selected,
@@ -432,6 +468,105 @@ function buildHostedAssistantInputCandidateBatch(input: {
       ? selected[selected.length - 1]!.event.cursor
       : input.afterCursor,
   };
+}
+
+function selectHostedAssistantInputCandidates(input: {
+  actionableLimit: number;
+  candidates: readonly AssistantInputCandidate[];
+  limit: number;
+}): AssistantInputCandidate[] {
+  const allActionable = input.candidates
+    .filter((candidate) => !isHostedDeferredContextCandidate(candidate))
+  const actionable = allActionable.slice(0, Math.min(
+    input.limit,
+    normalizeHostedAssistantInputQueryLimit(
+      input.actionableLimit,
+    ),
+  ));
+  const nextActionable = allActionable[actionable.length] ?? null;
+  const contextBudget = Math.max(0, input.limit - actionable.length);
+  const context = actionable.length === 0 || contextBudget === 0
+    ? []
+    : retainHostedDeferredContextCandidatesWithinLimits(
+        input.candidates
+          .filter(isHostedDeferredContextCandidate)
+          .filter((candidate) =>
+            nextActionable === null
+            || compareAssistantInputCursors(
+              candidate.event.cursor,
+              nextActionable.event.cursor,
+            ) < 0
+          )
+          .filter((candidate) => actionable.some((actionableCandidate) =>
+            isAssistantInputEventDeferredContextCausalForActionable({
+              actionable: actionableCandidate.event,
+              context: candidate.event,
+            })
+          ))
+          .sort(compareHostedDeferredContextCandidateSemanticOrder),
+        contextBudget,
+      );
+  return [...context, ...actionable].sort((left, right) =>
+    compareAssistantInputCursors(left.event.cursor, right.event.cursor)
+  );
+}
+
+function retainHostedDeferredContextCandidatesWithinLimits(
+  candidates: readonly AssistantInputCandidate[],
+  contextBudget: number,
+): AssistantInputCandidate[] {
+  const retainedInputIds = new Set<string>();
+  const candidatesByGroup = new Map<string, AssistantInputCandidate[]>();
+  for (const candidate of candidates) {
+    const groupKey = hostedDeferredContextCandidateGroupKey(candidate);
+    const groupCandidates = candidatesByGroup.get(groupKey) ?? [];
+    groupCandidates.push(candidate);
+    candidatesByGroup.set(groupKey, groupCandidates);
+  }
+  for (const groupCandidates of candidatesByGroup.values()) {
+    for (const candidate of groupCandidates.slice(
+      -HOSTED_DEFERRED_GROUP_CONTEXT_MAX_PER_GROUP,
+    )) {
+      retainedInputIds.add(candidate.event.inputId);
+    }
+  }
+  return candidates
+    .filter((candidate) => retainedInputIds.has(candidate.event.inputId))
+    .slice(-Math.min(contextBudget, HOSTED_DEFERRED_GROUP_CONTEXT_MAX_TOTAL));
+}
+
+function hostedDeferredContextCandidateGroupKey(
+  candidate: AssistantInputCandidate,
+): string {
+  return JSON.stringify([
+    candidate.event.conversation?.source ?? null,
+    candidate.event.conversation?.accountId ?? null,
+    candidate.event.conversation?.threadId ?? null,
+    candidate.event.conversation?.threadIsDirect ?? null,
+  ]);
+}
+
+function compareHostedDeferredContextCandidateSemanticOrder(
+  left: AssistantInputCandidate,
+  right: AssistantInputCandidate,
+): number {
+  const leftOccurredAt = Date.parse(left.event.occurredAt);
+  const rightOccurredAt = Date.parse(right.event.occurredAt);
+  if (
+    Number.isFinite(leftOccurredAt)
+    && Number.isFinite(rightOccurredAt)
+    && leftOccurredAt !== rightOccurredAt
+  ) {
+    return leftOccurredAt - rightOccurredAt;
+  }
+  return compareAssistantInputCursors(left.event.cursor, right.event.cursor);
+}
+
+function isHostedDeferredContextCandidate(
+  candidate: AssistantInputCandidate,
+): boolean {
+  return candidate.event.sourceMetadata?.kind === "linq"
+    && candidate.event.sourceMetadata.contextOnly === true;
 }
 
 function readEffectiveHostedAssistantInputSourceAfterCursor(input: {

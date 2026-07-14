@@ -20,7 +20,7 @@ import {
   hasAssistantSeenFirstContact,
   resolveAssistantFirstContactStateDocIds,
 } from '../src/assistant/first-contact.ts'
-import { readAssistantDiagnosticsSnapshot } from '../src/assistant/diagnostics.ts'
+import * as assistantDiagnostics from '../src/assistant/diagnostics.ts'
 import {
   buildAssistantOutboxSummary,
   beginAssistantOutboxIntentMirrorDispatch,
@@ -36,6 +36,7 @@ import {
   saveAssistantOutboxIntent,
 } from '../src/assistant/outbox.ts'
 import { pruneAssistantTerminalOutboxIntents } from '../src/assistant/outbox/store.ts'
+import * as assistantOutboxReceiptRepair from '../src/assistant/outbox/receipt-repair.ts'
 import { ensureAssistantState } from '../src/assistant/store/persistence.ts'
 import { resolveAssistantStatePaths } from '../src/assistant/store/paths.ts'
 import {
@@ -249,6 +250,70 @@ describe('assistant outbox runtime', () => {
         vault: vaultRoot,
       }),
     ).resolves.toEqual(new Set([intent.intentId]))
+  })
+
+  it('returns durable intents when post-write receipt repair or diagnostics fail', async () => {
+    const { vaultRoot } = await createAssistantVault(
+      'assistant-outbox-post-write-repair-failure-',
+    )
+    await createAssistantTurnReceipt({
+      deliveryRequested: true,
+      prompt: 'queue this message',
+      provider: 'codex-cli',
+      providerModel: 'gpt-5.4',
+      sessionId: 'session-post-write-repair-failure',
+      turnId: 'turn-post-write-repair-failure',
+      vault: vaultRoot,
+    })
+
+    const receiptRepairFailure = vi.spyOn(
+      assistantOutboxReceiptRepair,
+      'repairAssistantOutboxReceiptForIntent',
+    ).mockRejectedValueOnce(new Error('receipt repair unavailable'))
+    const receiptFailureIntent = await createAssistantOutboxIntent({
+      actorId: 'telegram-user-1',
+      channel: 'telegram',
+      message: 'durable reply after receipt failure',
+      sessionId: 'session-post-write-repair-failure',
+      threadId: 'telegram-thread-1',
+      threadIsDirect: true,
+      turnId: 'turn-post-write-repair-failure',
+      vault: vaultRoot,
+    })
+
+    expect(receiptRepairFailure).toHaveBeenCalledOnce()
+    await expect(readAssistantOutboxIntent(
+      vaultRoot,
+      receiptFailureIntent.intentId,
+    ))
+      .resolves.toMatchObject({
+        intentId: receiptFailureIntent.intentId,
+        status: 'pending',
+      })
+
+    const diagnosticFailure = vi.spyOn(
+      assistantDiagnostics,
+      'recordAssistantDiagnosticEvent',
+    ).mockRejectedValueOnce(new Error('diagnostics unavailable'))
+    const diagnosticFailureIntent = await createAssistantOutboxIntent({
+      actorId: 'telegram-user-1',
+      channel: 'telegram',
+      message: 'durable reply after diagnostic failure',
+      sessionId: 'session-post-write-diagnostic-failure',
+      threadId: 'telegram-thread-1',
+      threadIsDirect: true,
+      turnId: 'turn-post-write-diagnostic-failure',
+      vault: vaultRoot,
+    })
+
+    expect(diagnosticFailure).toHaveBeenCalledOnce()
+    await expect(readAssistantOutboxIntent(
+      vaultRoot,
+      diagnosticFailureIntent.intentId,
+    )).resolves.toMatchObject({
+      intentId: diagnosticFailureIntent.intentId,
+      status: 'pending',
+    })
   })
 
   it('persists auto-reply provenance when a malformed-receipt retry dedupes to an existing intent', async () => {
@@ -824,7 +889,9 @@ describe('assistant outbox runtime', () => {
     expect(quarantined[0]).toMatch(/^broken\.\d+\.invalid\.json$/u)
     expect(await readAssistantOutboxIntent(vaultRoot, 'broken')).toBeNull()
 
-    const diagnostics = await readAssistantDiagnosticsSnapshot(vaultRoot)
+    const diagnostics = await assistantDiagnostics.readAssistantDiagnosticsSnapshot(
+      vaultRoot,
+    )
     expect(diagnostics.recentWarnings.at(-1)).toContain(
       '[ASSISTANT_OUTBOX_INTENT_INVALID]',
     )

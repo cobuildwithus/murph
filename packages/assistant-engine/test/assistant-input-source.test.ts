@@ -439,6 +439,213 @@ describe('store-backed assistant input source', () => {
         candidate.acceptedInput.contentRef?.kind === 'assistant-input-event',
     )).toBe(true)
   })
+
+  it('filters a delivery route before the fixed candidate budget', async () => {
+    const { vaultRoot } = await createAssistantInputSourceVault(
+      'assistant-input-source-route-budget-',
+    )
+    for (let index = 1; index <= 101; index += 1) {
+      await upsertAssistantInputEvent({
+        vault: vaultRoot,
+        event: createStoredHostedMailboxInput({
+          eventId: `evt_unrelated_route_${index}`,
+          laneSeq: String(index),
+          replyTarget: {
+            channel: 'linq',
+            messageId: `message_unrelated_${index}`,
+            threadId: `provider_unrelated_${index}`,
+          },
+          threadId: `hidden_unrelated_${index}`,
+        }),
+      })
+    }
+    await upsertAssistantInputEvent({
+      vault: vaultRoot,
+      event: createStoredHostedMailboxInput({
+        accountId: 'acct_wrong',
+        eventId: 'evt_wrong_account_same_target',
+        laneSeq: '102',
+        replyTarget: {
+          channel: 'linq',
+          messageId: 'message_wrong_account',
+          threadId: 'provider_matching',
+        },
+        threadId: 'hidden_matching',
+      }),
+    })
+    const matching = await upsertAssistantInputEvent({
+      vault: vaultRoot,
+      event: createStoredHostedMailboxInput({
+        eventId: 'evt_matching_route',
+        laneSeq: '103',
+        replyTarget: {
+          channel: 'linq',
+          messageId: 'message_matching',
+          threadId: 'provider_matching',
+        },
+        threadId: 'hidden_matching',
+      }),
+    })
+    const source = createStoreBackedAssistantInputSource({ vault: vaultRoot })
+
+    const result = await source.listInputCandidates({
+      actionableLimit: 1,
+      deliveryRoute: {
+        channel: 'linq',
+        conversation: {
+          accountId: 'acct_1',
+          actorId: 'actor_1',
+          actorIsSelf: false,
+          source: 'linq',
+          threadId: 'hidden_initial',
+          threadIsDirect: true,
+        },
+        target: 'provider_matching',
+      },
+      limit: 2,
+      sourceId: 'linq',
+    })
+
+    expect(result.inputs.map((candidate) => candidate.event.inputId)).toEqual([
+      matching.inputId,
+    ])
+    expect(result.nextCursor).toEqual(matching.cursor)
+
+    const abortController = new AbortController()
+    const abortReason = new Error('stop bounded route discovery')
+    abortController.abort(abortReason)
+    await expect(source.listInputCandidates({
+      deliveryRoute: {
+        channel: 'linq',
+        conversation: result.inputs[0]!.event.conversation!,
+        target: 'provider_matching',
+      },
+      signal: abortController.signal,
+    })).rejects.toBe(abortReason)
+  })
+
+  it('retains only causal newest deferred context within route and global bounds', async () => {
+    const { vaultRoot } = await createAssistantInputSourceVault(
+      'assistant-input-source-context-bounds-',
+    )
+    const baseOccurredAt = Date.parse('2026-04-22T10:00:00.000Z')
+    let laneSequence = 1
+    const nextLaneSeq = () => String(laneSequence++).padStart(4, '0')
+    const contextsByGroup: AssistantInputEventRecord[][] = []
+
+    for (let groupIndex = 0; groupIndex < 9; groupIndex += 1) {
+      const groupContexts: AssistantInputEventRecord[] = []
+      const contextCount = groupIndex === 0 ? 33 : groupIndex === 8 ? 28 : 29
+      for (let contextIndex = 0; contextIndex < contextCount; contextIndex += 1) {
+        groupContexts.push(await upsertAssistantInputEvent({
+          vault: vaultRoot,
+          event: createStoredHostedMailboxInput({
+            actorId: `actor_context_${groupIndex}_${contextIndex}`,
+            contextOnly: true,
+            eventId: `evt_context_${groupIndex}_${contextIndex}`,
+            laneSeq: nextLaneSeq(),
+            occurredAt: new Date(
+              baseOccurredAt + ((groupIndex * 100) + contextIndex) * 1_000,
+            ).toISOString(),
+            replyTarget: null,
+            threadId: `hidden_group_${groupIndex}`,
+            threadIsDirect: false,
+          }),
+        }))
+      }
+      contextsByGroup.push(groupContexts)
+    }
+
+    const actionables: AssistantInputEventRecord[] = []
+    for (let groupIndex = 0; groupIndex < 9; groupIndex += 1) {
+      actionables.push(await upsertAssistantInputEvent({
+        vault: vaultRoot,
+        event: createStoredHostedMailboxInput({
+          actorId: `actor_actionable_${groupIndex}`,
+          eventId: `evt_actionable_${groupIndex}`,
+          laneSeq: nextLaneSeq(),
+          occurredAt: new Date(
+            baseOccurredAt + ((groupIndex * 100) + 90) * 1_000,
+          ).toISOString(),
+          replyTarget: {
+            channel: 'linq',
+            messageId: `message_actionable_${groupIndex}`,
+            threadId: `provider_group_${groupIndex}`,
+          },
+          threadId: `hidden_group_${groupIndex}`,
+          threadIsDirect: false,
+        }),
+      }))
+    }
+
+    const lateCursorCausalContext = await upsertAssistantInputEvent({
+      vault: vaultRoot,
+      event: createStoredHostedMailboxInput({
+        actorId: 'actor_context_8_late_cursor',
+        contextOnly: true,
+        eventId: 'evt_context_8_late_cursor',
+        laneSeq: nextLaneSeq(),
+        occurredAt: new Date(baseOccurredAt + 828_000).toISOString(),
+        replyTarget: null,
+        threadId: 'hidden_group_8',
+        threadIsDirect: false,
+      }),
+    })
+    contextsByGroup[8]!.push(lateCursorCausalContext)
+    const nonCausalContext = await upsertAssistantInputEvent({
+      vault: vaultRoot,
+      event: createStoredHostedMailboxInput({
+        actorId: 'actor_context_0_too_late',
+        contextOnly: true,
+        eventId: 'evt_context_0_too_late',
+        laneSeq: nextLaneSeq(),
+        occurredAt: new Date(baseOccurredAt + 10_000_000).toISOString(),
+        replyTarget: null,
+        threadId: 'hidden_group_0',
+        threadIsDirect: false,
+      }),
+    })
+    const source = createStoreBackedAssistantInputSource({ vault: vaultRoot })
+
+    const routeResult = await source.listInputCandidates({
+      actionableLimit: 1,
+      deliveryRoute: {
+        channel: 'linq',
+        conversation: actionables[0]!.conversation!,
+        target: 'provider_group_0',
+      },
+      limit: 100,
+      sourceId: 'linq',
+    })
+    expect(routeResult.inputs
+      .filter((candidate) => candidate.event.sourceMetadata?.kind === 'linq'
+        && candidate.event.sourceMetadata.contextOnly === true)
+      .map((candidate) => candidate.event.inputId)).toEqual(
+        contextsByGroup[0]!.slice(-32).map((context) => context.inputId),
+      )
+    expect(routeResult.inputs.at(-1)?.event.inputId).toBe(actionables[0]!.inputId)
+
+    const globalResult = await source.listInputCandidates({
+      actionableLimit: actionables.length,
+      limit: 400,
+      sourceId: 'linq',
+    })
+    const globalContextIds = globalResult.inputs
+      .filter((candidate) => candidate.event.sourceMetadata?.kind === 'linq'
+        && candidate.event.sourceMetadata.contextOnly === true)
+      .map((candidate) => candidate.event.inputId)
+    expect(globalContextIds).toEqual([
+      ...contextsByGroup[0]!.slice(9).map((context) => context.inputId),
+      ...contextsByGroup.slice(1).flat().map((context) => context.inputId),
+    ])
+    expect(globalContextIds).toHaveLength(256)
+    expect(globalContextIds).toContain(lateCursorCausalContext.inputId)
+    expect(globalContextIds).not.toContain(nonCausalContext.inputId)
+    expect(globalResult.inputs.map((candidate) => candidate.event.inputId))
+      .toEqual(expect.arrayContaining(
+        actionables.map((actionable) => actionable.inputId),
+      ))
+  })
 })
 
 async function createAssistantInputSourceVault(prefix: string): Promise<{
@@ -451,11 +658,21 @@ async function createAssistantInputSourceVault(prefix: string): Promise<{
 }
 
 function createStoredHostedMailboxInput(input: {
+  accountId?: string
+  actorId?: string
+  contextOnly?: boolean
   eventId: string
   laneSeq: string
+  occurredAt?: string
+  replyTarget?: {
+    channel: string
+    messageId: string
+    threadId: string
+  } | null
   threadId: string
+  threadIsDirect?: boolean
 }) {
-  const occurredAt = new Date(
+  const occurredAt = input.occurredAt ?? new Date(
     Date.UTC(2026, 3, 22, 10, 0, Number(input.laneSeq)),
   ).toISOString()
   return {
@@ -463,15 +680,28 @@ function createStoredHostedMailboxInput(input: {
       text: `${input.eventId} text`,
     },
     conversation: {
-      accountId: 'acct_1',
-      actorId: 'actor_1',
+      accountId: input.accountId ?? 'acct_1',
+      actorId: input.actorId ?? 'actor_1',
       actorIsSelf: false,
       source: 'linq',
       threadId: input.threadId,
-      threadIsDirect: true,
+      threadIsDirect: input.threadIsDirect ?? true,
     },
     occurredAt,
     receivedAt: occurredAt,
+    ...(input.replyTarget === undefined ? {} : { replyTarget: input.replyTarget }),
+    ...(input.contextOnly
+      ? {
+          sourceMetadata: {
+            contextOnly: true,
+            kind: 'linq' as const,
+            partCount: 1,
+            reactionEligible: false,
+            replyToMessageId: null,
+            service: null,
+          },
+        }
+      : {}),
     sourceRef: createHostedMailboxSourceRef({
       eventId: input.eventId,
       laneSeq: input.laneSeq,

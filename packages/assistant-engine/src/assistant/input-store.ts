@@ -4,6 +4,10 @@ import path from 'node:path'
 import { z } from 'zod'
 import { assistantPreferenceCausalSeqSchema } from '@murphai/contracts'
 import {
+  HOSTED_DEFERRED_GROUP_CONTEXT_MAX_PER_GROUP,
+  HOSTED_DEFERRED_GROUP_CONTEXT_MAX_TOTAL,
+} from '@murphai/hosted-execution/runtime-control'
+import {
   assertAssistantStatePathHasNoSymlinks,
   ensureAssistantStateDir,
   parseVersionedJsonStateEnvelope,
@@ -13,11 +17,13 @@ import type { AssistantStatePaths } from '@murphai/runtime-state/node'
 import { VaultCliError } from '@murphai/operator-config/vault-cli-errors'
 import {
   isSameAssistantConversationCapture,
+  isSameAssistantDeferredContextRoute,
   type AssistantInputConversationRef,
 } from './conversation-ref.js'
 import {
   compareAssistantTimestampsAscending,
   isMissingFileError,
+  normalizeNullableString,
   resolveTimestamp,
 } from './shared.js'
 import { ensureAssistantState } from './store/persistence.js'
@@ -494,6 +500,19 @@ export interface AssistantInputEventRecordParseFailure {
   fileName: string
 }
 
+export interface AssistantInputDeliveryRoute {
+  channel: string
+  conversation: AssistantInputConversationRef
+  target: string
+}
+
+interface AssistantInputDeferredContextEvent {
+  conversation: AssistantInputConversationRef | null
+  cursor: AssistantInputCursor
+  occurredAt: string
+  sourceMetadata: AssistantInputSourceMetadata
+}
+
 export function createAssistantInputEventId(input: {
   sourceRef: AssistantInputSourceRef
 }): string {
@@ -569,11 +588,16 @@ export async function readAssistantInputEvent(input: {
 }
 
 export async function listAssistantInputEvents(input: {
+  actionableLimit?: number
   afterCursor?: AssistantInputCursor | null
   conversation?: AssistantInputConversationRef | null
+  deliveryRoute?: AssistantInputDeliveryRoute | null
+  excludeInputIds?: readonly string[]
+  excludeProjectionCaptureIds?: readonly string[]
   limit?: number
   onInvalidRecord?: ((failure: AssistantInputEventRecordParseFailure) => void) | null
   paths?: AssistantStatePaths
+  signal?: AbortSignal
   skipInvalidRecords?: boolean
   source?: string | null
   vault?: string
@@ -594,6 +618,7 @@ export async function listAssistantInputEvents(input: {
     const records: AssistantInputEventRecord[] = []
 
     for (const entry of entries) {
+      assertAssistantInputEventSignalNotAborted(input.signal)
       if (!entry.name.endsWith('.json')) {
         continue
       }
@@ -619,9 +644,16 @@ export async function listAssistantInputEvents(input: {
       }
     }
 
+    assertAssistantInputEventSignalNotAborted(input.signal)
+    const excludedInputIds = new Set(input.excludeInputIds ?? [])
+    const excludedProjectionCaptureIds = new Set(
+      input.excludeProjectionCaptureIds ?? [],
+    )
     const filtered = records
       .filter((record) =>
-        input.source ? record.sourceRef.source === input.source : true,
+        input.source
+          ? (record.conversation?.source ?? record.sourceRef.source) === input.source
+          : true,
       )
       .filter((record) =>
         input.conversation
@@ -638,14 +670,31 @@ export async function listAssistantInputEvents(input: {
           ? compareAssistantInputCursors(record.cursor, input.afterCursor) > 0
           : true,
       )
+      .filter((record) => !excludedInputIds.has(record.inputId))
+      .filter((record) =>
+        record.projection.captureId
+          ? !excludedProjectionCaptureIds.has(record.projection.captureId)
+          : true,
+      )
+      .filter((record) =>
+        input.deliveryRoute
+          ? isAssistantInputEventOnDeliveryRoute(record, input.deliveryRoute)
+          : true,
+      )
       .sort((left, right) =>
         compareAssistantInputCursors(left.cursor, right.cursor),
       )
 
-    const events = filtered.slice(0, limit)
+    const events = selectAssistantInputEvents({
+      actionableLimit: input.actionableLimit,
+      events: filtered,
+      limit,
+    })
     const nextCursor = events[0]
       ? events[events.length - 1]!.cursor
-      : input.afterCursor ?? null
+      : filtered.length > 0
+        ? filtered[Math.min(filtered.length, limit) - 1]!.cursor
+        : input.afterCursor ?? null
 
     return {
       events,
@@ -660,6 +709,198 @@ export async function listAssistantInputEvents(input: {
     }
     throw error
   }
+}
+
+export function isAssistantInputEventDeferredContextCausalForActionable(input: {
+  actionable: AssistantInputDeferredContextEvent
+  context: AssistantInputDeferredContextEvent
+}): boolean {
+  if (
+    isAssistantInputEventDeferredContext(input.actionable) ||
+    !isAssistantInputEventDeferredContext(input.context) ||
+    !input.actionable.conversation ||
+    !input.context.conversation ||
+    !isSameAssistantDeferredContextRoute(
+      input.context.conversation,
+      input.actionable.conversation,
+    )
+  ) {
+    return false
+  }
+
+  const timestampOrder = compareAssistantTimestampsAscending(
+    input.context.occurredAt,
+    input.actionable.occurredAt,
+  )
+  if (timestampOrder !== 0) {
+    return timestampOrder < 0
+  }
+  if (
+    input.context.cursor.sourceKind === 'hosted-mailbox' &&
+    input.actionable.cursor.sourceKind === 'hosted-mailbox'
+  ) {
+    return compareAssistantInputCursors(
+      input.context.cursor,
+      input.actionable.cursor,
+    ) < 0
+  }
+  return true
+}
+
+export function isAssistantInputEventOnDeliveryRoute(
+  event: Pick<
+    AssistantInputEventRecord,
+    'conversation' | 'replyTarget' | 'sourceMetadata'
+  > & { source?: string | null },
+  route: AssistantInputDeliveryRoute,
+): boolean {
+  return (
+    (
+      typeof route.conversation.threadIsDirect === 'boolean' &&
+      event.conversation?.accountId === route.conversation.accountId &&
+      event.conversation?.threadIsDirect === route.conversation.threadIsDirect &&
+      normalizeNullableString(event.replyTarget?.channel) === route.channel &&
+      normalizeNullableString(
+        event.source ?? event.conversation?.source,
+      ) === route.channel &&
+      readAssistantProviderRouteScalar(event.replyTarget?.threadId) === route.target
+    ) || (
+      event.sourceMetadata?.kind === 'linq' &&
+      event.sourceMetadata.contextOnly === true &&
+      event.conversation !== null &&
+      isSameAssistantDeferredContextRoute(
+        event.conversation,
+        route.conversation,
+      )
+    )
+  )
+}
+
+function selectAssistantInputEvents(input: {
+  actionableLimit?: number
+  events: readonly AssistantInputEventRecord[]
+  limit: number
+}): AssistantInputEventRecord[] {
+  if (input.actionableLimit === undefined) {
+    return input.events.slice(0, input.limit)
+  }
+
+  const actionableLimit = Math.min(
+    input.limit,
+    normalizeAssistantInputEventListLimit(input.actionableLimit),
+  )
+  const allActionable = input.events
+    .filter((event) => !isAssistantInputEventDeferredContext(event))
+  const actionable = allActionable.slice(0, actionableLimit)
+  const nextActionable = allActionable[actionable.length] ?? null
+  const contextBudget = Math.max(0, input.limit - actionable.length)
+  const context = contextBudget === 0
+    ? []
+    : retainAssistantDeferredContextWithinLimits(
+        input.events
+          .filter((event) => isAssistantInputEventDeferredContext(event))
+          .filter((event) =>
+            nextActionable === null ||
+            compareAssistantInputCursors(event.cursor, nextActionable.cursor) < 0,
+          )
+          .filter((event) => actionable.some((candidate) =>
+            isAssistantInputEventDeferredContextCausalForActionable({
+              actionable: candidate,
+              context: event,
+            }),
+          ))
+          .sort(compareAssistantDeferredContextEventSemanticOrder),
+        contextBudget,
+      )
+
+  return [...context, ...actionable].sort(compareAssistantInputEventOrder)
+}
+
+function retainAssistantDeferredContextWithinLimits(
+  events: readonly AssistantInputEventRecord[],
+  contextBudget: number,
+): AssistantInputEventRecord[] {
+  const retainedInputIds = new Set<string>()
+  const eventsByGroup = new Map<string, AssistantInputEventRecord[]>()
+  for (const event of events) {
+    const groupKey = assistantDeferredContextGroupKey(event)
+    const groupEvents = eventsByGroup.get(groupKey) ?? []
+    groupEvents.push(event)
+    eventsByGroup.set(groupKey, groupEvents)
+  }
+  for (const groupEvents of eventsByGroup.values()) {
+    for (const event of groupEvents.slice(
+      -HOSTED_DEFERRED_GROUP_CONTEXT_MAX_PER_GROUP,
+    )) {
+      retainedInputIds.add(event.inputId)
+    }
+  }
+  return events
+    .filter((event) => retainedInputIds.has(event.inputId))
+    .slice(-Math.min(contextBudget, HOSTED_DEFERRED_GROUP_CONTEXT_MAX_TOTAL))
+}
+
+function assistantDeferredContextGroupKey(
+  event: AssistantInputEventRecord,
+): string {
+  return JSON.stringify([
+    event.conversation?.source ?? null,
+    event.conversation?.accountId ?? null,
+    event.conversation?.threadId ?? null,
+    event.conversation?.threadIsDirect ?? null,
+  ])
+}
+
+function compareAssistantDeferredContextEventSemanticOrder(
+  left: AssistantInputEventRecord,
+  right: AssistantInputEventRecord,
+): number {
+  const timestampOrder = compareAssistantTimestampsAscending(
+    left.occurredAt,
+    right.occurredAt,
+  )
+  return timestampOrder === 0
+    ? compareAssistantInputCursors(left.cursor, right.cursor)
+    : timestampOrder
+}
+
+function isAssistantInputEventDeferredContext(
+  event: AssistantInputDeferredContextEvent,
+): boolean {
+  return event.sourceMetadata?.kind === 'linq' &&
+    event.sourceMetadata.contextOnly === true
+}
+
+function compareAssistantInputEventOrder(
+  left: AssistantInputEventRecord,
+  right: AssistantInputEventRecord,
+): number {
+  return compareAssistantInputCursors(left.cursor, right.cursor)
+}
+
+function readAssistantProviderRouteScalar(
+  value: string | null | undefined,
+): string | null {
+  const normalized = normalizeNullableString(value)
+  if (
+    !normalized ||
+    /(?:^|:)ain_/u.test(normalized) ||
+    /(?:^|:)hid_/u.test(normalized) ||
+    normalized.includes('hbid:') ||
+    normalized.includes('hbidx:')
+  ) {
+    return null
+  }
+  return normalized
+}
+
+function assertAssistantInputEventSignalNotAborted(signal?: AbortSignal): void {
+  if (!signal?.aborted) {
+    return
+  }
+  throw signal.reason instanceof Error
+    ? signal.reason
+    : new Error('Assistant input event query was aborted.')
 }
 
 export async function readLatestAssistantInputCursor(input: {

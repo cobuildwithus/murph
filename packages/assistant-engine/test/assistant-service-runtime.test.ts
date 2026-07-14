@@ -1383,6 +1383,126 @@ describe("assistant delivery orchestration seam", () => {
     ]);
   });
 
+  it("retains queued bubble intent ids when a later preceding bubble throws", async () => {
+    const session = createAssistantSession({
+      binding: {
+        actorId: "linq-actor",
+        channel: "linq",
+        conversationKey: "linq-conversation",
+        delivery: {
+          kind: "thread",
+          target: "linq-thread",
+        },
+        identityId: "linq-identity",
+        threadId: "linq-thread",
+        threadIsDirect: true,
+      },
+    });
+    runtimeState.outbox.deliverMessage
+      .mockResolvedValueOnce({
+        deliveryError: null,
+        intent: {
+          intentId: "intent-preceding-bubble-one",
+        },
+        kind: "queued",
+        session: null,
+      })
+      .mockRejectedValueOnce(new Error("second bubble queue failed"));
+
+    const outcomes = await deliverAssistantPrecedingReplies({
+      input: {
+        deliverResponse: true,
+        deliveryDispatchMode: "queue-only",
+        prompt: "hello",
+        vault: "/vault",
+      },
+      segments: [{
+        response: "First.\n---\nSecond.\n---\nThird.",
+      }],
+      session,
+      sharedPlan: createSharedPlan({
+        conversationPolicy: {
+          audience: {
+            channel: "linq",
+          },
+        },
+      }),
+      turnId: "turn-preceding-bubble-throw",
+    });
+
+    expect(outcomes).toEqual([{
+      error: {
+        code: "ASSISTANT_DELIVERY_FAILED",
+        message: "normalized delivery failure",
+      },
+      intentId: null,
+      kind: "failed",
+      media: [],
+      queuedIntentIds: ["intent-preceding-bubble-one"],
+      session,
+    }]);
+    expect(runtimeState.outbox.deliverMessage).toHaveBeenCalledTimes(2);
+  });
+
+  it("retains queued bubble intent ids when the final bubble throws", async () => {
+    const session = createAssistantSession({
+      binding: {
+        actorId: "linq-actor",
+        channel: "linq",
+        conversationKey: "linq-conversation",
+        delivery: {
+          kind: "thread",
+          target: "linq-thread",
+        },
+        identityId: "linq-identity",
+        threadId: "linq-thread",
+        threadIsDirect: true,
+      },
+    });
+    runtimeState.outbox.deliverMessage
+      .mockResolvedValueOnce({
+        deliveryError: null,
+        intent: {
+          intentId: "intent-bubble-before-final",
+        },
+        kind: "queued",
+        session: null,
+      })
+      .mockRejectedValueOnce(new Error("final bubble queue failed"));
+
+    const outcome = await deliverAssistantReply({
+      input: {
+        deliverResponse: true,
+        deliveryDispatchMode: "queue-only",
+        prompt: "hello",
+        vault: "/vault",
+      },
+      response: "First.\n---\nFinal.",
+      session,
+      sharedPlan: createSharedPlan({
+        conversationPolicy: {
+          audience: {
+            channel: "linq",
+          },
+        },
+      }),
+      turnId: "turn-final-bubble-throw",
+    });
+
+    expect(outcome).toEqual({
+      error: {
+        code: "ASSISTANT_DELIVERY_FAILED",
+        message: "normalized delivery failure",
+      },
+      intentId: null,
+      kind: "failed",
+      media: [],
+      queuedIntentIds: ["intent-bubble-before-final"],
+      session,
+    });
+    expect(runtimeState.outbox.deliverMessage).toHaveBeenCalledTimes(2);
+  });
+
   it("suppresses Telegram auto-reply native reply anchors for final text delivery", async () => {
     const session = createAssistantSession({
       binding: {

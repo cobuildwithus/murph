@@ -4,10 +4,12 @@ import {
 } from './hosted-mailbox-input-items.js'
 import {
   listAssistantInputEvents,
+  isAssistantInputEventOnDeliveryRoute,
   type AssistantInputAttachmentEvidence,
   type AssistantInputAttachmentDescriptor,
   type AssistantInputConversationRef,
   type AssistantInputCursor,
+  type AssistantInputDeliveryRoute,
   type AssistantInputEventRecord,
   type AssistantInputProjectionStatus,
   type AssistantInputSourceMetadata,
@@ -26,6 +28,7 @@ const INBOX_ASSISTANT_INPUT_ID_PREFIX = 'inbox:'
 export type {
   AssistantInputConversationRef,
   AssistantInputCursor,
+  AssistantInputDeliveryRoute,
   AssistantInputProjectionStatus,
   AssistantInputSourceRef,
 }
@@ -62,8 +65,11 @@ export interface AssistantInputCandidate {
 }
 
 export interface AssistantInputCandidateQuery {
+  actionableLimit?: number
   afterCursor?: AssistantInputCursor | null
+  deliveryRoute?: AssistantInputDeliveryRoute | null
   knownInputIds?: readonly string[]
+  knownProjectionCaptureIds?: readonly string[]
   limit?: number
   signal?: AbortSignal
   sourceId?: string | null
@@ -114,7 +120,10 @@ export function createStoreBackedAssistantInputSource(input: {
     },
     async listInputCandidates(query) {
       return listStoredAssistantInputCandidates({
+        actionableLimit: query.actionableLimit,
         afterCursor: query.afterCursor ?? null,
+        deliveryRoute: query.deliveryRoute ?? null,
+        knownProjectionCaptureIds: query.knownProjectionCaptureIds,
         knownInputIds: query.knownInputIds,
         limit: query.limit,
         signal: query.signal,
@@ -138,8 +147,10 @@ export function createStoreBackedAssistantInputSource(input: {
 }
 
 async function listStoredAssistantInputCandidates(input: {
+  actionableLimit?: number
   afterCursor: AssistantInputCursor | null
   conversation?: AssistantInputConversationRef
+  deliveryRoute?: AssistantInputDeliveryRoute | null
   knownProjectionCaptureIds?: readonly string[]
   knownInputIds?: readonly string[]
   limit?: number
@@ -151,51 +162,20 @@ async function listStoredAssistantInputCandidates(input: {
   const knownInputIds = new Set(input.knownInputIds ?? [])
   const knownProjectionCaptureIds = new Set(input.knownProjectionCaptureIds ?? [])
   const candidateLimit = normalizeAssistantInputQueryLimit(input.limit)
-  const scanLimit = Math.max(candidateLimit, DEFAULT_ASSISTANT_INPUT_QUERY_LIMIT)
-  const selected: AssistantInputEventRecord[] = []
-  let cursor = input.afterCursor
-  let nextCursor = input.afterCursor
-
-  while (selected.length < candidateLimit) {
-    const listed = await listAssistantInputEvents({
-      afterCursor: cursor,
-      conversation: input.conversation,
-      limit: scanLimit,
-      source: null,
-      vault: input.vault,
-    })
-    assertAssistantInputSignalNotAborted(input.signal)
-    if (listed.events.length === 0) {
-      nextCursor = listed.nextCursor
-      break
-    }
-
-    for (const event of listed.events
-        .filter((candidate) => !knownInputIds.has(candidate.inputId))
-        .filter((event) =>
-          event.projection.captureId
-            ? !knownProjectionCaptureIds.has(event.projection.captureId)
-            : true,
-        )
-        .filter((event) =>
-          input.sourceId
-            ? (event.conversation?.source ?? event.sourceRef.source) === input.sourceId
-            : true,
-        )) {
-      selected.push(event)
-      if (selected.length >= candidateLimit) {
-        nextCursor = event.cursor
-        break
-      }
-    }
-    cursor = listed.nextCursor
-    if (selected.length < candidateLimit) {
-      nextCursor = listed.nextCursor
-    }
-    if (!cursor || listed.events.length < scanLimit) {
-      break
-    }
-  }
+  const listed = await listAssistantInputEvents({
+    actionableLimit: input.actionableLimit,
+    afterCursor: input.afterCursor,
+    conversation: input.conversation,
+    deliveryRoute: input.deliveryRoute,
+    excludeInputIds: [...knownInputIds],
+    excludeProjectionCaptureIds: [...knownProjectionCaptureIds],
+    limit: candidateLimit,
+    signal: input.signal,
+    source: input.sourceId,
+    vault: input.vault,
+  })
+  assertAssistantInputSignalNotAborted(input.signal)
+  const selected = listed.events
 
   const hostedMailboxItems = await readHostedMailboxAssistantInputItems({
     inputIds: selected.map((event) => event.inputId),
@@ -209,8 +189,18 @@ async function listStoredAssistantInputCandidates(input: {
         hostedMailboxItemId: hostedMailboxItems.get(event.inputId) ?? null,
       }),
     ),
-    nextCursor,
+    nextCursor: listed.nextCursor,
   }
+}
+
+export function assistantInputCandidateMatchesDeliveryRoute(input: {
+  candidate: AssistantInputCandidate
+  deliveryRoute: AssistantInputDeliveryRoute
+}): boolean {
+  return isAssistantInputEventOnDeliveryRoute(
+    input.candidate.event,
+    input.deliveryRoute,
+  )
 }
 
 export function assistantInputCandidateFromStoredEvent(

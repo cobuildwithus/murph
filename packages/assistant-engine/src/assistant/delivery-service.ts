@@ -230,24 +230,38 @@ export async function deliverAssistantReply(input: {
       index: bubbleIndex,
       turnId: input.turnId,
     })
-    const outcome = await deliverAssistantCurrentAudienceMessage({
-      dedupeToken: bubbleIdempotencyKey,
-      answeredMailboxItemIds: [],
-      deliveryIdempotencyKey: bubbleIdempotencyKey,
-      deliveryTransportIdempotent:
-        resolveHostedAssistantDeliveryTransportIdempotentOverride({
-          channel: deliveryFields.channel,
-          deliveryIdempotencyKey: bubbleIdempotencyKey,
-          executionContext: input.input.executionContext,
-          media: [],
-        }),
-      input: input.input,
-      media: [],
-      message: replyBubbles[bubbleIndex]!,
-      session,
-      sharedPlan: input.sharedPlan,
-      turnId: input.turnId,
-    })
+    let outcome: AssistantDeliveryOutcome
+    try {
+      outcome = await deliverAssistantCurrentAudienceMessage({
+        dedupeToken: bubbleIdempotencyKey,
+        answeredMailboxItemIds: [],
+        deliveryIdempotencyKey: bubbleIdempotencyKey,
+        deliveryTransportIdempotent:
+          resolveHostedAssistantDeliveryTransportIdempotentOverride({
+            channel: deliveryFields.channel,
+            deliveryIdempotencyKey: bubbleIdempotencyKey,
+            executionContext: input.input.executionContext,
+            media: [],
+          }),
+        input: input.input,
+        media: [],
+        message: replyBubbles[bubbleIndex]!,
+        session,
+        sharedPlan: input.sharedPlan,
+        turnId: input.turnId,
+      })
+    } catch (error) {
+      if (queuedIntentIds.size === 0) {
+        throw error
+      }
+      return attachAssistantQueuedIntentIds({
+        kind: 'failed',
+        error: normalizeAssistantDeliveryError(error),
+        intentId: null,
+        media: [],
+        session,
+      }, queuedIntentIds)
+    }
     collectAssistantQueuedIntentIds(queuedIntentIds, outcome)
     session = outcome.session
     if (outcome.kind === 'failed') {
@@ -255,18 +269,32 @@ export async function deliverAssistantReply(input: {
     }
   }
 
-  const finalOutcome = await deliverAssistantCurrentAudienceMessage({
-    dedupeToken: baseDedupeToken,
-    answeredMailboxItemIds: input.input.answeredMailboxItemIds ?? [],
-    deliveryIdempotencyKey: hostedDelivery.deliveryIdempotencyKey,
-    deliveryTransportIdempotent: hostedDelivery.deliveryTransportIdempotent,
-    input: input.input,
-    media: deliveryMedia,
-    message: replyBubbles[replyBubbles.length - 1]!,
-    session,
-    sharedPlan: input.sharedPlan,
-    turnId: input.turnId,
-  })
+  let finalOutcome: AssistantDeliveryOutcome
+  try {
+    finalOutcome = await deliverAssistantCurrentAudienceMessage({
+      dedupeToken: baseDedupeToken,
+      answeredMailboxItemIds: input.input.answeredMailboxItemIds ?? [],
+      deliveryIdempotencyKey: hostedDelivery.deliveryIdempotencyKey,
+      deliveryTransportIdempotent: hostedDelivery.deliveryTransportIdempotent,
+      input: input.input,
+      media: deliveryMedia,
+      message: replyBubbles[replyBubbles.length - 1]!,
+      session,
+      sharedPlan: input.sharedPlan,
+      turnId: input.turnId,
+    })
+  } catch (error) {
+    if (queuedIntentIds.size === 0) {
+      throw error
+    }
+    return attachAssistantQueuedIntentIds({
+      kind: 'failed',
+      error: normalizeAssistantDeliveryError(error),
+      intentId: null,
+      media: deliveryMedia,
+      session,
+    }, queuedIntentIds)
+  }
   collectAssistantQueuedIntentIds(queuedIntentIds, finalOutcome)
   return attachAssistantQueuedIntentIds(finalOutcome, queuedIntentIds)
 }

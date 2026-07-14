@@ -1620,142 +1620,167 @@ export async function sendAssistantMessageLocal(
         let precedingDeliveryOutcomes: Awaited<
           ReturnType<typeof deliverAssistantPrecedingReplies>
         > = []
+        let deliveryOutcome: AssistantDeliveryOutcome | null = null
+        let deliverySession = session
+        let reactionDeliveryOutcomes: AssistantDeliveryOutcome[] = []
+        let replyDispatchStartedAt = 0
+        let replyIntentReadyAt: number | null = null
+        const abandonedDeliveryIntentIds = new Set<string>()
         try {
-          precedingDeliveryOutcomes = await deliverAssistantPrecedingReplies({
-            input: currentInput,
-            segments: precedingResponseSegments,
-            session,
-            sharedPlan,
-            turnId: currentUserTurn.turnId,
-          })
-        } catch (precedingError) {
-          const normalizedPrecedingError =
-            normalizeAssistantDeliveryError(precedingError)
-          if (finalResponseText === null) {
-            precedingDeliveryOutcomes = [
-              {
-                kind: 'failed',
-                error: normalizedPrecedingError,
-                intentId: null,
-                media: [],
-                session,
-              },
-            ]
-          } else {
+          try {
+            precedingDeliveryOutcomes = await deliverAssistantPrecedingReplies({
+              input: currentInput,
+              segments: precedingResponseSegments,
+              session,
+              sharedPlan,
+              turnId: currentUserTurn.turnId,
+            })
+          } catch (precedingError) {
+            const normalizedPrecedingError =
+              normalizeAssistantDeliveryError(precedingError)
+            if (finalResponseText === null) {
+              precedingDeliveryOutcomes = [
+                {
+                  kind: 'failed',
+                  error: normalizedPrecedingError,
+                  intentId: null,
+                  media: [],
+                  session,
+                },
+              ]
+            } else {
+              await runAssistantTurnBestEffort(() =>
+                recordAssistantDiagnosticEvent({
+                  vault: input.vault,
+                  component: 'assistant',
+                  kind: 'delivery.preceding-reply.failed',
+                  level: 'error',
+                  message: normalizedPrecedingError.message,
+                  code: normalizedPrecedingError.code,
+                  sessionId: session.sessionId,
+                  turnId: currentUserTurn.turnId,
+                }),
+              )
+            }
+          }
+          for (const [precedingOutcomeIndex, precedingOutcome] of
+            precedingDeliveryOutcomes.entries()) {
+            const precedingSegment =
+              precedingResponseSegments[precedingOutcomeIndex] ?? null
+            const precedingDeliveryFields = precedingSegment
+              ? resolveAssistantCurrentAudienceDeliveryFields({
+                  input: applyAssistantReplyDeliveryContext({
+                    context: precedingSegment.deliveryContext ?? null,
+                    input: currentInput,
+                  }),
+                  session: precedingOutcome.session,
+                  sharedPlan,
+                })
+              : null
+            deliverySupersededTypingIndicator =
+              deliverySupersededTypingIndicator ||
+              assistantDeliveryOutcomeSupersedesTypingIndicatorForTarget({
+                deliveryFields: precedingDeliveryFields,
+                kind: precedingOutcome.kind,
+                typingIndicatorDeliveryFields,
+              })
+            if (precedingOutcome.kind !== 'failed') {
+              continue
+            }
             await runAssistantTurnBestEffort(() =>
               recordAssistantDiagnosticEvent({
                 vault: input.vault,
                 component: 'assistant',
                 kind: 'delivery.preceding-reply.failed',
                 level: 'error',
-                message: normalizedPrecedingError.message,
-                code: normalizedPrecedingError.code,
-                sessionId: session.sessionId,
+                message: precedingOutcome.error.message,
+                code: precedingOutcome.error.code,
+                sessionId: precedingOutcome.session.sessionId,
+                turnId: currentUserTurn.turnId,
+              }),
+            )
+            if ((precedingOutcome.queuedIntentIds?.length ?? 0) > 0) {
+              await abandonQueuedAssistantTurnDeliveries({
+                abandonedIntentIds: abandonedDeliveryIntentIds,
+                error: precedingOutcome.error,
+                outcomes: [precedingOutcome],
+                vault: input.vault,
+              })
+            }
+          }
+          deliverySession =
+            precedingDeliveryOutcomes.at(-1)?.session ?? session
+          replyDispatchStartedAt = Date.now()
+          deliveryOutcome =
+            finalResponseText !== null
+              ? await dispatchAssistantReply({
+                  input: finalReplyInput,
+                  media: providerResult.responseMedia ?? [],
+                  response: rawFinalResponseText ?? '',
+                  session: deliverySession,
+                  sharedPlan,
+                  turnId: currentUserTurn.turnId,
+                })
+              : resolveAssistantNoReplyDeliveryOutcome({
+                  precedingDeliveryOutcomes,
+                  session: deliverySession,
+                })
+          replyIntentReadyAt = finalResponseText === null ? null : Date.now()
+          if (
+            deliveryOutcome.kind === 'failed' &&
+            (deliveryOutcome.queuedIntentIds?.length ?? 0) > 0
+          ) {
+            await abandonQueuedAssistantTurnDeliveries({
+              abandonedIntentIds: abandonedDeliveryIntentIds,
+              error: deliveryOutcome.error,
+              outcomes: [deliveryOutcome],
+              vault: input.vault,
+            })
+          }
+          const finalReplyDeliveryFields =
+            finalResponseText !== null
+              ? resolveAssistantCurrentAudienceDeliveryFields({
+                  input: finalReplyInput,
+                  session: deliveryOutcome.session,
+                  sharedPlan,
+                })
+              : null
+          deliverySupersededTypingIndicator =
+            deliverySupersededTypingIndicator ||
+            assistantDeliveryOutcomeSupersedesTypingIndicatorForTarget({
+              deliveryFields: finalReplyDeliveryFields,
+              kind: finalResponseText !== null ? deliveryOutcome.kind : null,
+              typingIndicatorDeliveryFields,
+            })
+          const reactionDeliveryResult = await deliverAssistantProviderReactions({
+            currentInput,
+            providerResult,
+            replyDeliveryContexts,
+            session: deliverySession,
+            sharedPlan,
+            turnId: currentUserTurn.turnId,
+          })
+          deliverySession = reactionDeliveryResult.deliverySession
+          reactionDeliveryOutcomes =
+            reactionDeliveryResult.reactionDeliveryOutcomes
+          for (const reactionOutcome of reactionDeliveryOutcomes) {
+            if (reactionOutcome.kind !== 'failed' || finalResponseText === null) {
+              continue
+            }
+            await runAssistantTurnBestEffort(() =>
+              recordAssistantDiagnosticEvent({
+                vault: input.vault,
+                component: 'assistant',
+                kind: 'delivery.reaction.failed',
+                level: 'error',
+                message: reactionOutcome.error.message,
+                code: reactionOutcome.error.code,
+                sessionId: reactionOutcome.session.sessionId,
                 turnId: currentUserTurn.turnId,
               }),
             )
           }
-        }
-        for (const [precedingOutcomeIndex, precedingOutcome] of
-          precedingDeliveryOutcomes.entries()) {
-          const precedingSegment =
-            precedingResponseSegments[precedingOutcomeIndex] ?? null
-          const precedingDeliveryFields = precedingSegment
-            ? resolveAssistantCurrentAudienceDeliveryFields({
-                input: applyAssistantReplyDeliveryContext({
-                  context: precedingSegment.deliveryContext ?? null,
-                  input: currentInput,
-                }),
-                session: precedingOutcome.session,
-                sharedPlan,
-              })
-            : null
-          deliverySupersededTypingIndicator =
-            deliverySupersededTypingIndicator ||
-            assistantDeliveryOutcomeSupersedesTypingIndicatorForTarget({
-              deliveryFields: precedingDeliveryFields,
-              kind: precedingOutcome.kind,
-              typingIndicatorDeliveryFields,
-            })
-          if (precedingOutcome.kind !== 'failed') {
-            continue
-          }
-          await runAssistantTurnBestEffort(() =>
-            recordAssistantDiagnosticEvent({
-              vault: input.vault,
-              component: 'assistant',
-              kind: 'delivery.preceding-reply.failed',
-              level: 'error',
-              message: precedingOutcome.error.message,
-              code: precedingOutcome.error.code,
-              sessionId: precedingOutcome.session.sessionId,
-              turnId: currentUserTurn.turnId,
-            }),
-          )
-        }
-        let deliverySession =
-          precedingDeliveryOutcomes.at(-1)?.session ?? session
-        const replyDispatchStartedAt = Date.now()
-        const deliveryOutcome =
-          finalResponseText !== null
-            ? await dispatchAssistantReply({
-                input: finalReplyInput,
-                media: providerResult.responseMedia ?? [],
-                response: rawFinalResponseText ?? '',
-                session: deliverySession,
-                sharedPlan,
-                turnId: currentUserTurn.turnId,
-              })
-            : resolveAssistantNoReplyDeliveryOutcome({
-                precedingDeliveryOutcomes,
-                session: deliverySession,
-              })
-        const replyIntentReadyAt = finalResponseText === null ? null : Date.now()
-        const finalReplyDeliveryFields =
-          finalResponseText !== null
-            ? resolveAssistantCurrentAudienceDeliveryFields({
-                input: finalReplyInput,
-                session: deliveryOutcome.session,
-                sharedPlan,
-              })
-            : null
-        deliverySupersededTypingIndicator =
-          deliverySupersededTypingIndicator ||
-          assistantDeliveryOutcomeSupersedesTypingIndicatorForTarget({
-            deliveryFields: finalReplyDeliveryFields,
-            kind: finalResponseText !== null ? deliveryOutcome.kind : null,
-            typingIndicatorDeliveryFields,
-          })
-        const reactionDeliveryResult = await deliverAssistantProviderReactions({
-          currentInput,
-          providerResult,
-          replyDeliveryContexts,
-          session: deliverySession,
-          sharedPlan,
-          turnId: currentUserTurn.turnId,
-        })
-        deliverySession = reactionDeliveryResult.deliverySession
-        const reactionDeliveryOutcomes =
-          reactionDeliveryResult.reactionDeliveryOutcomes
-        for (const reactionOutcome of reactionDeliveryOutcomes) {
-          if (reactionOutcome.kind !== 'failed' || finalResponseText === null) {
-            continue
-          }
-          await runAssistantTurnBestEffort(() =>
-            recordAssistantDiagnosticEvent({
-              vault: input.vault,
-              component: 'assistant',
-              kind: 'delivery.reaction.failed',
-              level: 'error',
-              message: reactionOutcome.error.message,
-              code: reactionOutcome.error.code,
-              sessionId: reactionOutcome.session.sessionId,
-              turnId: currentUserTurn.turnId,
-            }),
-          )
-        }
-        if (deferTurnArtifactsUntilDeliveryIntentCommit) {
-          try {
+          if (deferTurnArtifactsUntilDeliveryIntentCommit) {
             if (deliveryOutcome.kind === 'queued') {
               await currentInput.beforeDeliveryIntentCommit?.({
                 deliveryIntentId: deliveryOutcome.intentId,
@@ -1764,13 +1789,16 @@ export async function sendAssistantMessageLocal(
             }
             session = await commitTurnArtifacts(deliveryOutcome.session)
             deliverySession = session
-          } catch (error) {
+          }
+        } catch (error) {
+          if (deferTurnArtifactsUntilDeliveryIntentCommit) {
             try {
-              await abandonQueuedAssistantTurnDeliveriesAfterCommitFailure({
+              await abandonQueuedAssistantTurnDeliveries({
+                abandonedIntentIds: abandonedDeliveryIntentIds,
                 error,
                 outcomes: [
                   ...precedingDeliveryOutcomes,
-                  deliveryOutcome,
+                  ...(deliveryOutcome ? [deliveryOutcome] : []),
                   ...reactionDeliveryOutcomes,
                 ],
                 vault: input.vault,
@@ -1781,8 +1809,11 @@ export async function sendAssistantMessageLocal(
                 'Assistant turn commit failed and queued delivery cleanup was incomplete.',
               )
             }
-            throw error
           }
+          throw error
+        }
+        if (deliveryOutcome === null) {
+          throw new Error('Assistant delivery phase completed without an outcome.')
         }
         const committedDeliveryOutcome = deferTurnArtifactsUntilDeliveryIntentCommit
           ? {
@@ -1966,12 +1997,13 @@ export async function sendAssistantMessageLocal(
   }
 }
 
-async function abandonQueuedAssistantTurnDeliveriesAfterCommitFailure(input: {
+async function abandonQueuedAssistantTurnDeliveries(input: {
+  abandonedIntentIds?: Set<string>
   error: unknown
   outcomes: readonly AssistantDeliveryOutcome[]
   vault: string
 }): Promise<void> {
-  const abandonedIntentIds = new Set<string>()
+  const abandonedIntentIds = input.abandonedIntentIds ?? new Set<string>()
   for (const outcome of input.outcomes) {
     const queuedIntentIds = new Set(outcome.queuedIntentIds ?? [])
     if (outcome.kind === 'queued') {
@@ -2479,14 +2511,25 @@ async function deliverAssistantProviderReactions(input: {
       context: resolvedDeliveryContext.context,
       input: input.currentInput,
     })
-    const reactionOutcome = await deliverAssistantReaction({
-      deliveryContextOrdinal: reaction.deliveryContextOrdinal,
-      input: reactionInput,
-      reaction: reaction.reaction,
-      session: deliverySession,
-      sharedPlan: input.sharedPlan,
-      turnId: input.turnId,
-    })
+    let reactionOutcome: AssistantDeliveryOutcome
+    try {
+      reactionOutcome = await deliverAssistantReaction({
+        deliveryContextOrdinal: reaction.deliveryContextOrdinal,
+        input: reactionInput,
+        reaction: reaction.reaction,
+        session: deliverySession,
+        sharedPlan: input.sharedPlan,
+        turnId: input.turnId,
+      })
+    } catch (error) {
+      reactionOutcome = {
+        kind: 'failed',
+        error: normalizeAssistantDeliveryError(error),
+        intentId: null,
+        media: [],
+        session: deliverySession,
+      }
+    }
     deliverySession = reactionOutcome.session
     reactionDeliveryOutcomes.push(reactionOutcome)
   }

@@ -437,7 +437,6 @@ describe("hosted mailbox conversation import adapter", () => {
         externalThreadRouteAuthorityPresent: true,
         kind: "linq",
         partCount: 1,
-        previousHomeThreadId: null,
         reactionEligible: false,
         reactionOperation: "removed",
         reactionTargetKey: "linq-reaction-target.v1:synthetic-target",

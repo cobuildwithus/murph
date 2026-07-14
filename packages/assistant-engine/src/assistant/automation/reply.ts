@@ -87,7 +87,6 @@ import {
 } from './failure-observability.js'
 import {
   collectAssistantAutoReplyGroup,
-  isSameAssistantDeferredContextRoute,
   loadAssistantAutoReplyGroupItems,
   orderAssistantAutoReplyInputSummaries,
   type AssistantAutoReplyGroupItem,
@@ -2134,64 +2133,28 @@ async function listAutoReplyActiveTurnInputs(input: {
     return strict
   }
 
-  const knownInputIds = new Set(input.knownInputIds)
-  const knownProjectionCaptureIds = new Set(input.knownProjectionCaptureIds)
-  const routeInputs: AssistantInputCandidate[] = []
-  const routePageLimit = 100
-  let routeCursor: AssistantInputCandidate['event']['cursor'] | null = input.afterCursor
-  let previousPageCursor: AssistantInputCandidate['event']['cursor'] | null = null
-  while (true) {
-    const routeListed = await input.inputSource.listInputCandidates({
-      afterCursor: routeCursor,
-      knownInputIds: [
-        ...input.knownInputIds,
-        ...strict.inputs.map((candidate) => candidate.event.inputId),
-      ],
-      limit: routePageLimit,
-      signal: input.signal,
-      sourceId: expectedChannel,
-    })
-    routeInputs.push(...routeListed.inputs
-      .filter((candidate) => !knownInputIds.has(candidate.event.inputId))
-      .filter((candidate) =>
-        candidate.projection.captureId
-          ? !knownProjectionCaptureIds.has(candidate.projection.captureId)
-          : true,
-      )
-      .filter((candidate) =>
-        isSameAutoReplyDeliveryRoute({
-          candidate,
-          conversation: input.conversation,
-          expectedChannel,
-          threadIsDirect: input.conversation.threadIsDirect,
-          threadId: deliveryTarget,
-        }),
-      ))
-
-    const nextCursor = routeListed.nextCursor
-    if (
-      routeListed.inputs.length < routePageLimit
-      || !nextCursor
-      || (
-        previousPageCursor
-        && compareAssistantInputCursors(nextCursor, previousPageCursor) <= 0
-      )
-    ) {
-      break
-    }
-    previousPageCursor = nextCursor
-    routeCursor = nextCursor
-  }
+  const routeListed = await input.inputSource.listInputCandidates({
+    actionableLimit: 50,
+    afterCursor: input.afterCursor,
+    deliveryRoute: {
+      channel: expectedChannel,
+      conversation: input.conversation,
+      target: deliveryTarget,
+    },
+    knownInputIds: [
+      ...input.knownInputIds,
+      ...strict.inputs.map((candidate) => candidate.event.inputId),
+    ],
+    knownProjectionCaptureIds: input.knownProjectionCaptureIds,
+    limit: 100,
+    signal: input.signal,
+    sourceId: expectedChannel,
+  })
 
   return retainCausallyPairedActiveTurnInputs({
     batch: mergeAssistantInputCandidateBatches([
       strict,
-      {
-        inputs: routeInputs,
-        nextCursor: routeInputs[0]
-          ? routeInputs[routeInputs.length - 1]!.event.cursor
-          : strict.nextCursor,
-      },
+      routeListed,
     ]),
     currentItems: input.context.items,
   })
@@ -2266,34 +2229,6 @@ function mergeAssistantInputCandidateBatches(
     inputs,
     nextCursor,
   }
-}
-
-function isSameAutoReplyDeliveryRoute(input: {
-  candidate: AssistantInputCandidate
-  conversation: AssistantInputConversationRef
-  expectedChannel: string
-  threadIsDirect: boolean | null
-  threadId: string
-}): boolean {
-  const replyTarget = input.candidate.event.replyTarget
-  return (
-    (
-      typeof input.threadIsDirect === 'boolean' &&
-      input.candidate.event.conversation?.threadIsDirect === input.threadIsDirect &&
-      normalizeNullableString(replyTarget?.channel) === input.expectedChannel &&
-      normalizeNullableString(input.candidate.event.source) === input.expectedChannel &&
-      readProviderRouteScalar(replyTarget?.threadId) === input.threadId
-    )
-    || (
-      input.candidate.event.sourceMetadata?.kind === 'linq'
-      && input.candidate.event.sourceMetadata.contextOnly === true
-      && input.candidate.event.conversation !== null
-      && isSameAssistantDeferredContextRoute(
-        input.candidate.event.conversation,
-        input.conversation,
-      )
-    )
-  )
 }
 
 function loadAssistantInputCandidateSummaries(input: {

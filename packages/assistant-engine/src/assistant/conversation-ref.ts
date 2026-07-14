@@ -244,6 +244,20 @@ export function isSameAssistantConversationRef(
   )
 }
 
+export function isSameAssistantDeferredContextRoute(
+  left: AssistantInputConversationRef,
+  right: AssistantInputConversationRef,
+): boolean {
+  return (
+    left.source === 'linq' &&
+    right.source === 'linq' &&
+    left.accountId === right.accountId &&
+    left.threadId === right.threadId &&
+    left.threadIsDirect === false &&
+    right.threadIsDirect === false
+  )
+}
+
 export function isSameAssistantConversationCapture(
   left: {
     accountId?: string | null
