@@ -1286,18 +1286,18 @@ describe("assistant delivery orchestration seam", () => {
     );
   });
 
-  it("queues bubble intents in message order and returns the final bubble outcome", async () => {
+  it("queues every bubble once in order and returns all queued intent ids", async () => {
     const session = createAssistantSession({
       binding: {
-        actorId: "telegram-actor",
-        channel: "telegram",
-        conversationKey: "telegram-conversation",
+        actorId: "linq-actor",
+        channel: "linq",
+        conversationKey: "linq-conversation",
         delivery: {
           kind: "thread",
-          target: "telegram-thread",
+          target: "linq-thread",
         },
-        identityId: "telegram-identity",
-        threadId: "telegram-thread",
+        identityId: "linq-identity",
+        threadId: "linq-thread",
         threadIsDirect: true,
       },
     });
@@ -1339,7 +1339,7 @@ describe("assistant delivery orchestration seam", () => {
       sharedPlan: createSharedPlan({
         conversationPolicy: {
           audience: {
-            channel: "telegram",
+            channel: "linq",
           },
         },
       }),
@@ -1351,6 +1351,11 @@ describe("assistant delivery orchestration seam", () => {
       intentId: "intent-bubble-three",
       kind: "queued",
       media: [],
+      queuedIntentIds: [
+        "intent-bubble-one",
+        "intent-bubble-two",
+        "intent-bubble-three",
+      ],
       session,
     });
     expect(

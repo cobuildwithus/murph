@@ -223,6 +223,7 @@ export async function deliverAssistantReply(input: {
   // gating, so hosted queue-only delivery stays strictly ordered across
   // retries; local immediate retry behavior remains best-effort like steered
   // segments.
+  const queuedIntentIds = new Set<string>()
   for (let bubbleIndex = 0; bubbleIndex < replyBubbles.length - 1; bubbleIndex += 1) {
     const bubbleIdempotencyKey = buildAssistantReplyBubbleDeliveryIdempotencyKey({
       deliveryIdempotencyKey: hostedDelivery.deliveryIdempotencyKey,
@@ -247,13 +248,14 @@ export async function deliverAssistantReply(input: {
       sharedPlan: input.sharedPlan,
       turnId: input.turnId,
     })
+    collectAssistantQueuedIntentIds(queuedIntentIds, outcome)
     session = outcome.session
     if (outcome.kind === 'failed') {
-      return outcome
+      return attachAssistantQueuedIntentIds(outcome, queuedIntentIds)
     }
   }
 
-  return await deliverAssistantCurrentAudienceMessage({
+  const finalOutcome = await deliverAssistantCurrentAudienceMessage({
     dedupeToken: baseDedupeToken,
     answeredMailboxItemIds: input.input.answeredMailboxItemIds ?? [],
     deliveryIdempotencyKey: hostedDelivery.deliveryIdempotencyKey,
@@ -265,6 +267,29 @@ export async function deliverAssistantReply(input: {
     sharedPlan: input.sharedPlan,
     turnId: input.turnId,
   })
+  collectAssistantQueuedIntentIds(queuedIntentIds, finalOutcome)
+  return attachAssistantQueuedIntentIds(finalOutcome, queuedIntentIds)
+}
+
+function collectAssistantQueuedIntentIds(
+  target: Set<string>,
+  outcome: AssistantDeliveryOutcome,
+): void {
+  for (const intentId of outcome.queuedIntentIds ?? []) {
+    target.add(intentId)
+  }
+  if (outcome.kind === 'queued') {
+    target.add(outcome.intentId)
+  }
+}
+
+function attachAssistantQueuedIntentIds(
+  outcome: AssistantDeliveryOutcome,
+  queuedIntentIds: ReadonlySet<string>,
+): AssistantDeliveryOutcome {
+  return queuedIntentIds.size === 0
+    ? outcome
+    : { ...outcome, queuedIntentIds: [...queuedIntentIds] }
 }
 
 export function buildAssistantReplyBubbleDeliveryIdempotencyKey(input: {

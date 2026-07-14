@@ -1973,25 +1973,28 @@ async function abandonQueuedAssistantTurnDeliveriesAfterCommitFailure(input: {
 }): Promise<void> {
   const abandonedIntentIds = new Set<string>()
   for (const outcome of input.outcomes) {
-    if (
-      outcome.kind !== 'queued' ||
-      abandonedIntentIds.has(outcome.intentId)
-    ) {
-      continue
+    const queuedIntentIds = new Set(outcome.queuedIntentIds ?? [])
+    if (outcome.kind === 'queued') {
+      queuedIntentIds.add(outcome.intentId)
     }
-    const abandonedIntent = await markAssistantOutboxIntentMirrorTerminalById({
-      error: input.error,
-      intentId: outcome.intentId,
-      onlyCurrentStatuses: ['awaiting_approval', 'pending', 'retryable'],
-      status: 'abandoned',
-      vault: input.vault,
-    })
-    if (!abandonedIntent || abandonedIntent.status !== 'abandoned') {
-      throw new Error(
-        'Assistant turn commit failure could not abandon every queued delivery.',
-      )
+    for (const intentId of queuedIntentIds) {
+      if (abandonedIntentIds.has(intentId)) {
+        continue
+      }
+      const abandonedIntent = await markAssistantOutboxIntentMirrorTerminalById({
+        error: input.error,
+        intentId,
+        onlyCurrentStatuses: ['awaiting_approval', 'pending', 'retryable'],
+        status: 'abandoned',
+        vault: input.vault,
+      })
+      if (!abandonedIntent || abandonedIntent.status !== 'abandoned') {
+        throw new Error(
+          'Assistant turn commit failure could not abandon every queued delivery.',
+        )
+      }
+      abandonedIntentIds.add(intentId)
     }
-    abandonedIntentIds.add(outcome.intentId)
   }
 }
 

@@ -205,7 +205,7 @@ export interface ExecutedAssistantProviderTurnResult extends AssistantProviderTu
   workingDirectory: string
 }
 
-export type AssistantDeliveryOutcome =
+export type AssistantDeliveryOutcome = (
   | {
       kind: 'failed'
       error: AssistantDeliveryError
@@ -232,6 +232,10 @@ export type AssistantDeliveryOutcome =
       media: AssistantAskResult['media']
       session: AssistantSession
     }
+) & {
+  /** Every current-turn outbox intent still eligible for commit-failure cleanup. */
+  queuedIntentIds?: readonly string[]
+}
 
 export interface AssistantTurnDeliveryFinalizationPlan {
   diagnostic: Omit<Parameters<typeof recordAssistantDiagnosticEvent>[0], 'vault'>

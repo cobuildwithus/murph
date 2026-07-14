@@ -5678,9 +5678,64 @@ test('sendAssistantMessageLocal returns deferred delivery results and keeps typi
   assert.equal(mocks.refreshAssistantStatusSnapshotLocal.mock.calls.length, 0)
 })
 
-test('sendAssistantMessageLocal abandons queued turn deliveries before persisting an invalidated reply', async () => {
+test('sendAssistantMessageLocal abandons every queued final-reply bubble before persisting an invalidated reply', async () => {
   const session = createAssistantSession({
     sessionId: 'session-invalidated-before-commit',
+  })
+  const commitBarrierError = new Error('paired reaction invalidated reply')
+  const beforeDeliveryIntentCommit = vi.fn(async () => {
+    throw commitBarrierError
+  })
+  const { mocks, sendAssistantMessageLocal } = await loadLocalServiceModule({
+    deliveryOutcome: {
+      error: null,
+      intentId: 'intent-invalidated-final-second',
+      kind: 'queued',
+      media: [],
+      queuedIntentIds: [
+        'intent-invalidated-final-first',
+        'intent-invalidated-final-second',
+      ],
+      session,
+    },
+    session,
+  })
+
+  await expect(sendAssistantMessageLocal({
+    beforeDeliveryIntentCommit,
+    deliverResponse: true,
+    deliveryDispatchMode: 'queue-only',
+    persistUserPromptOnFailure: false,
+    prompt: 'Queue a reply that becomes stale',
+    turnTrigger: 'automation-auto-reply',
+    vault: '/vaults/test',
+  })).rejects.toBe(commitBarrierError)
+
+  expect(beforeDeliveryIntentCommit).toHaveBeenCalledWith({
+    deliveryIntentId: 'intent-invalidated-final-second',
+    turnId: 'turn-1',
+  })
+  expect(mocks.finalizeAssistantTurnArtifacts).not.toHaveBeenCalled()
+  expect(mocks.finalizeDeliveredAssistantTurn).not.toHaveBeenCalled()
+  expect(mocks.markAssistantOutboxIntentMirrorTerminalById.mock.calls.map(
+    ([call]) => call,
+  )).toEqual([
+    expect.objectContaining({
+      intentId: 'intent-invalidated-final-first',
+      onlyCurrentStatuses: ['awaiting_approval', 'pending', 'retryable'],
+      status: 'abandoned',
+    }),
+    expect.objectContaining({
+      intentId: 'intent-invalidated-final-second',
+      onlyCurrentStatuses: ['awaiting_approval', 'pending', 'retryable'],
+      status: 'abandoned',
+    }),
+  ])
+})
+
+test('sendAssistantMessageLocal abandons every queued bubble from a preceding reply segment', async () => {
+  const session = createAssistantSession({
+    sessionId: 'session-invalidated-preceding-bubbles',
   })
   const commitBarrierError = new Error('paired reaction invalidated reply')
   const beforeDeliveryIntentCommit = vi.fn(async () => {
@@ -5701,7 +5756,7 @@ test('sendAssistantMessageLocal abandons queued turn deliveries before persistin
         codexContinuation: {
           kind: 'explicit-structured-history',
         },
-        precedingResponseSegments: [{ response: 'preceding response' }],
+        precedingResponseSegments: [{ response: 'first\n---\nsecond' }],
         response: 'stale final response',
         session,
       },
@@ -5711,9 +5766,13 @@ test('sendAssistantMessageLocal abandons queued turn deliveries before persistin
   mocks.deliverAssistantPrecedingReplies.mockResolvedValueOnce([
     {
       error: null,
-      intentId: 'intent-invalidated-preceding',
+      intentId: 'intent-invalidated-preceding-second',
       kind: 'queued',
       media: [],
+      queuedIntentIds: [
+        'intent-invalidated-preceding-first',
+        'intent-invalidated-preceding-second',
+      ],
       session,
     },
   ])
@@ -5728,25 +5787,57 @@ test('sendAssistantMessageLocal abandons queued turn deliveries before persistin
     vault: '/vaults/test',
   })).rejects.toBe(commitBarrierError)
 
+  expect(mocks.markAssistantOutboxIntentMirrorTerminalById.mock.calls.map(
+    ([call]) => call.intentId,
+  )).toEqual([
+    'intent-invalidated-preceding-first',
+    'intent-invalidated-preceding-second',
+    'intent-invalidated-final',
+  ])
+})
+
+test('sendAssistantMessageLocal abandons every queued bubble when turn-artifact finalization fails', async () => {
+  const session = createAssistantSession({
+    sessionId: 'session-artifact-failure-bubbles',
+  })
+  const turnArtifactsError = new Error('turn artifacts failed')
+  const beforeDeliveryIntentCommit = vi.fn(async () => undefined)
+  const { mocks, sendAssistantMessageLocal } = await loadLocalServiceModule({
+    deliveryOutcome: {
+      error: null,
+      intentId: 'intent-artifact-failure-second',
+      kind: 'queued',
+      media: [],
+      queuedIntentIds: [
+        'intent-artifact-failure-first',
+        'intent-artifact-failure-second',
+      ],
+      session,
+    },
+    session,
+  })
+  mocks.finalizeAssistantTurnArtifacts.mockRejectedValueOnce(turnArtifactsError)
+
+  await expect(sendAssistantMessageLocal({
+    beforeDeliveryIntentCommit,
+    deliverResponse: true,
+    deliveryDispatchMode: 'queue-only',
+    persistUserPromptOnFailure: false,
+    prompt: 'Queue a reply whose artifacts fail',
+    turnTrigger: 'automation-auto-reply',
+    vault: '/vaults/test',
+  })).rejects.toBe(turnArtifactsError)
+
   expect(beforeDeliveryIntentCommit).toHaveBeenCalledWith({
-    deliveryIntentId: 'intent-invalidated-final',
+    deliveryIntentId: 'intent-artifact-failure-second',
     turnId: 'turn-1',
   })
-  expect(mocks.finalizeAssistantTurnArtifacts).not.toHaveBeenCalled()
-  expect(mocks.finalizeDeliveredAssistantTurn).not.toHaveBeenCalled()
+  expect(mocks.finalizeAssistantTurnArtifacts).toHaveBeenCalledTimes(1)
   expect(mocks.markAssistantOutboxIntentMirrorTerminalById.mock.calls.map(
-    ([call]) => call,
+    ([call]) => call.intentId,
   )).toEqual([
-    expect.objectContaining({
-      intentId: 'intent-invalidated-preceding',
-      onlyCurrentStatuses: ['awaiting_approval', 'pending', 'retryable'],
-      status: 'abandoned',
-    }),
-    expect.objectContaining({
-      intentId: 'intent-invalidated-final',
-      onlyCurrentStatuses: ['awaiting_approval', 'pending', 'retryable'],
-      status: 'abandoned',
-    }),
+    'intent-artifact-failure-first',
+    'intent-artifact-failure-second',
   ])
 })
 
