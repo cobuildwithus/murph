@@ -272,6 +272,54 @@ export async function executeCodexAssistantTurnAttempt(
 
   let result: Awaited<ReturnType<typeof executeCodexAppServerTurn>>
   let codexContinuation
+  const buildFailedProviderAttempt = (
+    failureError: unknown,
+    failureCodexContinuation?: { kind: 'thread-start' },
+    knownFailureContext?: CodexAppServerTurnFailureContext | null,
+  ): AssistantProviderTurnAttemptResult => {
+    const failureContext = knownFailureContext ??
+      readCodexAppServerTurnFailureContext(failureError)
+    const rawEvents = failureContext?.jsonEvents ?? []
+    const usage = rawEvents.length > 0
+      ? extractCodexAssistantProviderUsage({
+          providerConfig,
+          rawEvents,
+          serviceTier: input.serviceTier ?? null,
+        })
+      : null
+    const surfacedError = addCodexModelProviderFailureHint({
+      error: failureError,
+      failureHint: providerFailureHint,
+      providerSecretValue,
+    })
+    return {
+      additionalUsages: failureContext?.additionalUsages ?? [],
+      error: surfacedError,
+      metadata: {
+        activityLabels: [],
+        executedToolCount: 0,
+        providerActionCount: failureContext?.providerActionCount ?? 0,
+        rawToolEvents: [],
+        runtimeIssueInputs: failureContext?.runtimeIssueInputs ?? [],
+      },
+      ok: false,
+      ...(failureCodexContinuation
+        ? { codexContinuation: failureCodexContinuation }
+        : {}),
+      ...(failureContext
+        ? {
+            acceptedNoReplyDeliveryContextOrdinals:
+              failureContext.acceptedNoReplyDeliveryContextOrdinals,
+            codexRolloutRelativePath: failureContext.rolloutRelativePath,
+            reactions: failureContext.reactions,
+            codexThreadId: failureContext.codexThreadId,
+            providerTurnId: failureContext.providerTurnId,
+            rawEvents,
+          }
+        : {}),
+      ...(hasCodexAssistantProviderUsageData(usage) ? { usage } : {}),
+    }
+  }
   const runFreshThreadFallback = async (
     resume: AssistantProviderCodexResume,
   ) => {
@@ -338,10 +386,23 @@ export async function executeCodexAssistantTurnAttempt(
 
     if (
       input.resume &&
+      (failureContext?.acceptedNoReplyDeliveryContextOrdinals?.length ?? 0) > 0
+    ) {
+      return buildFailedProviderAttempt(error, undefined, failureContext)
+    }
+
+    if (
+      input.resume &&
       error instanceof VaultCliError &&
       error.code === 'ASSISTANT_CODEX_RESUME_STALE'
     ) {
-      result = await runFreshThreadFallback(input.resume)
+      try {
+        result = await runFreshThreadFallback(input.resume)
+      } catch (fallbackError) {
+        return buildFailedProviderAttempt(fallbackError, {
+          kind: 'thread-start',
+        })
+      }
       codexContinuation = {
         kind: 'thread-start' as const,
       }
@@ -373,7 +434,9 @@ export async function executeCodexAssistantTurnAttempt(
             resumeCodexThreadId: input.resume.codexThreadId,
           }),
         })
-        throw fallbackError
+        return buildFailedProviderAttempt(fallbackError, {
+          kind: 'thread-start',
+        })
       }
       emitCodexFreshThreadFallbackTraceEvent({
         onTraceEvent: input.onTraceEvent,
@@ -416,10 +479,8 @@ export async function executeCodexAssistantTurnAttempt(
             resumeCodexThreadId: input.resume.codexThreadId,
           }),
         })
-        throw addCodexModelProviderFailureHint({
-          error: fallbackError,
-          failureHint: providerFailureHint,
-          providerSecretValue,
+        return buildFailedProviderAttempt(fallbackError, {
+          kind: 'thread-start',
         })
       }
 
@@ -437,43 +498,7 @@ export async function executeCodexAssistantTurnAttempt(
         kind: 'thread-start' as const,
       }
     } else {
-      const rawEvents = failureContext?.jsonEvents ?? []
-      const usage = rawEvents.length > 0
-          ? extractCodexAssistantProviderUsage({
-              providerConfig,
-              rawEvents,
-              serviceTier: input.serviceTier ?? null,
-            })
-          : null
-      const surfacedError = addCodexModelProviderFailureHint({
-        error,
-        failureHint: providerFailureHint,
-        providerSecretValue,
-      })
-      return {
-        additionalUsages: failureContext?.additionalUsages ?? [],
-        error: surfacedError,
-        metadata: {
-          activityLabels: [],
-          executedToolCount: 0,
-          providerActionCount: failureContext?.providerActionCount ?? 0,
-          rawToolEvents: [],
-          runtimeIssueInputs: failureContext?.runtimeIssueInputs ?? [],
-        },
-        ok: false,
-        ...(failureContext
-          ? {
-              acceptedNoReplyDeliveryContextOrdinals:
-                failureContext.acceptedNoReplyDeliveryContextOrdinals,
-              codexRolloutRelativePath: failureContext.rolloutRelativePath,
-              reactions: failureContext.reactions,
-              codexThreadId: failureContext.codexThreadId,
-              providerTurnId: failureContext.providerTurnId,
-              rawEvents,
-            }
-          : {}),
-        ...(hasCodexAssistantProviderUsageData(usage) ? { usage } : {}),
-      }
+      return buildFailedProviderAttempt(error, undefined, failureContext)
     }
   }
 

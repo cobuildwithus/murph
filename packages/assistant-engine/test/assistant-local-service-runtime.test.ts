@@ -6300,7 +6300,7 @@ test('sendAssistantMessageLocal completes no-reply if marker persistence fails a
       assistantContractFingerprint,
       attemptCount: 1,
       codexContinuation: {
-        kind: 'explicit-structured-history',
+        kind: 'thread-start',
       },
       codexRolloutRelativePath,
       codexThreadId,
@@ -6351,6 +6351,9 @@ test('sendAssistantMessageLocal completes no-reply if marker persistence fails a
       providerResult: expect.objectContaining({
         acceptedNoReplyDeliveryContextOrdinals: [0],
         assistantContractFingerprint,
+        codexContinuation: {
+          kind: 'thread-start',
+        },
         codexRolloutRelativePath,
         codexThreadId,
         finalAction: {

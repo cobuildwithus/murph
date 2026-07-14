@@ -2589,6 +2589,50 @@ describe('Codex assistant registry helpers', () => {
     })
   })
 
+  it('preserves fresh-thread failure context after stale resume fallback', async () => {
+    const staleError = new VaultCliError(
+      'ASSISTANT_CODEX_RESUME_STALE',
+      'thread/resume failed: no rollout found for thread id stale-thread',
+    )
+    const fallbackError = new Error('fresh fallback marker failed')
+
+    codexAppServerMocks.executeCodexAppServerTurn
+      .mockRejectedValueOnce(staleError)
+      .mockRejectedValueOnce(fallbackError)
+    codexAppServerMocks.readCodexAppServerTurnFailureContext
+      .mockReturnValueOnce(null)
+      .mockReturnValueOnce({
+        acceptedNoReplyDeliveryContextOrdinals: [0],
+        additionalUsages: [],
+        codexThreadId: 'fresh-thread',
+        jsonEvents: [],
+        providerActionCount: 0,
+        providerTurnId: 'fresh-turn',
+        reactions: [],
+        rolloutRelativePath: null,
+        runtimeIssueInputs: [],
+      })
+
+    const attempt = await executeCodexAssistantTurnAttempt({
+      providerConfig: normalizeAssistantProviderConfig({
+        provider: 'codex-cli',
+      }),
+      resume: testCodexResume('stale-thread'),
+      userPrompt: 'late follow up',
+      workingDirectory: '/tmp/provider-tests',
+    })
+
+    expect(attempt).toMatchObject({
+      acceptedNoReplyDeliveryContextOrdinals: [0],
+      codexContinuation: {
+        kind: 'thread-start',
+      },
+      codexThreadId: 'fresh-thread',
+      ok: false,
+      providerTurnId: 'fresh-turn',
+    })
+  })
+
   it('starts a fresh thread when resumed Codex transport fails before provider actions', async () => {
     const expectedError = new VaultCliError(
       'ASSISTANT_CODEX_FAILED',
@@ -2869,6 +2913,123 @@ describe('Codex assistant registry helpers', () => {
       providerTraceKind: 'codex.fresh_thread_fallback',
     })
     expect(JSON.stringify(traceEvents)).not.toContain('api.openai.com')
+  })
+
+  it('does not replay a resumed turn after finish_without_reply was accepted', async () => {
+    const expectedError = new VaultCliError(
+      'ASSISTANT_CODEX_FAILED',
+      'Codex app-server stream disconnected before completion',
+      {
+        codexFailureStage: 'turn_failed',
+        codexTurnStatus: 'failed',
+      },
+    )
+    const rolloutRelativePath =
+      'sessions/2026/07/14/rollout-resume-thread.jsonl'
+
+    codexAppServerMocks.executeCodexAppServerTurn.mockRejectedValueOnce(expectedError)
+    codexAppServerMocks.readCodexAppServerTurnFailureContext.mockReturnValueOnce({
+      acceptedNoReplyDeliveryContextOrdinals: [0],
+      additionalUsages: [],
+      codexThreadId: 'resume-thread',
+      jsonEvents: [],
+      providerActionCount: 1,
+      providerTurnId: 'turn-failed-after-no-reply',
+      reactions: [],
+      rolloutRelativePath,
+      runtimeIssueInputs: [],
+    })
+
+    const attempt = await executeCodexAssistantTurnAttempt({
+      providerConfig: normalizeAssistantProviderConfig({
+        provider: 'codex-cli',
+      }),
+      resume: testCodexResume('resume-thread'),
+      userPrompt: 'no reply needed',
+      workingDirectory: '/tmp/provider-tests',
+    })
+
+    expect(attempt.ok).toBe(false)
+    expect(codexAppServerMocks.executeCodexAppServerTurn).toHaveBeenCalledTimes(1)
+    expect(attempt).toMatchObject({
+      acceptedNoReplyDeliveryContextOrdinals: [0],
+      codexRolloutRelativePath: rolloutRelativePath,
+      codexThreadId: 'resume-thread',
+      providerTurnId: 'turn-failed-after-no-reply',
+    })
+  })
+
+  it('preserves fresh-thread no-reply context when fallback recording fails', async () => {
+    const resumeError = new VaultCliError(
+      'ASSISTANT_CODEX_FAILED',
+      'Codex app-server stream disconnected before completion',
+      {
+        codexFailureStage: 'turn_failed',
+        codexTurnStatus: 'failed',
+      },
+    )
+    const fallbackError = new Error('no-reply marker persistence failed')
+    const rolloutRelativePath =
+      'sessions/2026/07/14/rollout-fresh-thread-after-failure.jsonl'
+
+    codexAppServerMocks.executeCodexAppServerTurn
+      .mockRejectedValueOnce(resumeError)
+      .mockRejectedValueOnce(fallbackError)
+    codexAppServerMocks.readCodexAppServerTurnFailureContext
+      .mockReturnValueOnce({
+        acceptedNoReplyDeliveryContextOrdinals: [],
+        additionalUsages: [],
+        codexThreadId: 'resume-thread',
+        jsonEvents: [],
+        providerActionCount: 0,
+        providerTurnId: 'turn-resume-failed',
+        reactions: [],
+        rolloutRelativePath: null,
+        runtimeIssueInputs: [],
+      })
+      .mockReturnValueOnce({
+        acceptedNoReplyDeliveryContextOrdinals: [0],
+        additionalUsages: [],
+        codexThreadId: 'fresh-thread-after-failure',
+        jsonEvents: [],
+        providerActionCount: 0,
+        providerTurnId: 'turn-fresh-failed',
+        reactions: [
+          {
+            deliveryContextOrdinal: 0,
+            reaction: 'heart',
+          },
+        ],
+        rolloutRelativePath,
+        runtimeIssueInputs: [],
+      })
+
+    const attempt = await executeCodexAssistantTurnAttempt({
+      providerConfig: normalizeAssistantProviderConfig({
+        provider: 'codex-cli',
+      }),
+      resume: testCodexResume('resume-thread'),
+      userPrompt: 'no reply needed',
+      workingDirectory: '/tmp/provider-tests',
+    })
+
+    expect(attempt.ok).toBe(false)
+    expect(codexAppServerMocks.executeCodexAppServerTurn).toHaveBeenCalledTimes(2)
+    expect(attempt).toMatchObject({
+      acceptedNoReplyDeliveryContextOrdinals: [0],
+      codexContinuation: {
+        kind: 'thread-start',
+      },
+      codexRolloutRelativePath: rolloutRelativePath,
+      codexThreadId: 'fresh-thread-after-failure',
+      providerTurnId: 'turn-fresh-failed',
+      reactions: [
+        {
+          deliveryContextOrdinal: 0,
+          reaction: 'heart',
+        },
+      ],
+    })
   })
 
   it('starts a fresh thread when resumed Codex history has invalid tool output', async () => {
@@ -3341,6 +3502,9 @@ describe('Codex assistant registry helpers', () => {
       throw new Error('expected failed provider attempt')
     }
     expect(attempt.error).toBe(fallbackError)
+    expect(attempt.codexContinuation).toEqual({
+      kind: 'thread-start',
+    })
     expect(findProviderTraceRawEvent(
       traceEvents,
       'codex.invalid_output_resume_failure',
