@@ -59,6 +59,7 @@ import {
   clearAssistantSessionCodexResumeState,
   persistAssistantNoReplyTranscriptMarkers,
   persistAssistantTurnAndSession as finalizeAssistantTurnArtifacts,
+  resolveAssistantResumeStateFromProviderTurn,
 } from './turn-finalizer.js'
 import {
   readAssistantCodexResume,
@@ -85,6 +86,7 @@ import {
   resolveAssistantCodexThreadScope,
   type AssistantCodexThreadScope,
 } from './codex-turn-runner.js'
+import { readCodexThreadRouteFingerprint } from './codex-thread-route.js'
 import {
   normalizeAssistantAskResultForReturn,
   serializeAssistantSessionForResult,
@@ -952,8 +954,6 @@ export async function sendAssistantMessageLocal(
         let providerRequestJournal: Awaited<
           ReturnType<typeof runtimeState.turns.acceptedInputs.recordProviderRequest>
         > = null
-        let codexUnsafeResumeStateInvalidated = false
-        const noReplyTranscriptMarkerDeliveryContextOrdinals = new Set<number>()
         let providerRequestContinuation:
           ExecutedAssistantProviderTurnResult['codexContinuation'] | null = null
         let providerRequestAcceptedInputIds: readonly string[] =
@@ -1030,39 +1030,6 @@ export async function sendAssistantMessageLocal(
           acceptedInputItems: providerRequestAcceptedInputItems,
           activeTurnSteering: turnInputController,
           input: currentInput,
-          onCodexThreadHistoryUnsafe: async (event) => {
-            if (!codexUnsafeResumeStateInvalidated) {
-              currentSession = await clearAssistantSessionCodexResumeStateIfNeeded({
-                action: resolveProviderResumeStateAction({
-                  codexThreadHistoryUnsafe: true,
-                  codexThreadId: null,
-                  threadScope,
-                }),
-                session: currentSession,
-                vault: input.vault,
-              })
-              codexUnsafeResumeStateInvalidated = true
-            }
-            const deliveryContextOrdinal = event?.deliveryContextOrdinal
-            if (
-              typeof deliveryContextOrdinal !== 'number' ||
-              noReplyTranscriptMarkerDeliveryContextOrdinals.has(
-                deliveryContextOrdinal,
-              )
-            ) {
-              return
-            }
-            await persistAssistantNoReplyTranscriptMarkers({
-              deliveryContextOrdinals: [deliveryContextOrdinal],
-              sessionId: currentSession.sessionId,
-              turnCreatedAt: currentUserTurn.turnCreatedAt,
-              turnId: currentUserTurn.turnId,
-              vault: input.vault,
-            })
-            noReplyTranscriptMarkerDeliveryContextOrdinals.add(
-              deliveryContextOrdinal,
-            )
-          },
           onFinishWithoutReplyAccepted: async (event) => {
             await drainLiveSteeredActiveTurnInputs({
               continuation: providerRequestContinuation,
@@ -1098,6 +1065,15 @@ export async function sendAssistantMessageLocal(
                   session: currentSession,
                   sharedPlan,
                 }),
+            })
+          },
+          onFinishWithoutReplyRecorded: async (event) => {
+            await persistAssistantNoReplyTranscriptMarkers({
+              deliveryContextOrdinals: [event.deliveryContextOrdinal],
+              sessionId: currentSession.sessionId,
+              turnCreatedAt: currentUserTurn.turnCreatedAt,
+              turnId: currentUserTurn.turnId,
+              vault: input.vault,
             })
           },
           onProviderRequestPlanned: async (event) => {
@@ -1242,26 +1218,27 @@ export async function sendAssistantMessageLocal(
             turnId: currentUserTurn.turnId,
           })
           const failedProviderResumeStateAction = resolveProviderResumeStateAction({
-            codexThreadHistoryUnsafe:
-              providerOutcome.codexThreadHistoryUnsafe === true ||
-              acceptedNoReplyOrdinals.length > 0,
             codexThreadId: providerOutcome.codexThreadId ?? null,
             threadScope,
           })
-          if (
-            !codexUnsafeResumeStateInvalidated &&
-            failedProviderResumeStateAction === 'clear'
-          ) {
+          if (progressDeliveredSessionRef.value) {
             currentSession = applyAssistantProgressDeliveredSession({
               progressDeliveredSession: progressDeliveredSessionRef.value,
               session: providerOutcome.session,
             })
-            currentSession = await clearAssistantSessionCodexResumeStateIfNeeded({
-              action: failedProviderResumeStateAction,
-              session: currentSession,
-              vault: input.vault,
-            })
           }
+          currentSession = await applyAssistantSessionCodexResumeStateAction({
+            action: failedProviderResumeStateAction,
+            assistantContractFingerprint:
+              providerOutcome.assistantContractFingerprint,
+            codexRolloutRelativePath:
+              providerOutcome.codexRolloutRelativePath,
+            codexThreadId: providerOutcome.codexThreadId,
+            routeFingerprint:
+              readCodexThreadRouteFingerprint(providerOutcome.route),
+            session: currentSession,
+            vault: input.vault,
+          })
           if (recoverableNoReplyDeliveryContextOrdinal !== null) {
             turnInputController.close()
             await runtimeState.turns.acceptedInputs.updateAdmissionState({
@@ -1275,10 +1252,12 @@ export async function sendAssistantMessageLocal(
             const failedNoReplySession = currentSession
             const failedNoReplyProviderResult: ExecutedAssistantProviderTurnResult = {
               acceptedNoReplyDeliveryContextOrdinals: acceptedNoReplyOrdinals,
-              assistantContractFingerprint: '',
+              assistantContractFingerprint:
+                providerOutcome.assistantContractFingerprint,
               attemptCount: providerOutcome.attemptCount,
               codexContinuation: providerOutcome.codexContinuation,
-              codexThreadHistoryUnsafe: true,
+              codexRolloutRelativePath:
+                providerOutcome.codexRolloutRelativePath,
               codexThreadId: providerOutcome.codexThreadId,
               finalAction: {
                 kind: 'none',
@@ -1547,15 +1526,11 @@ export async function sendAssistantMessageLocal(
           })
         )
         const providerResumeStateAction = resolveProviderResumeStateAction({
-          codexThreadHistoryUnsafe:
-            providerResult.codexThreadHistoryUnsafe === true ||
-            providerResult.finalAction?.kind === 'none',
           codexThreadId: providerResult.codexThreadId ?? null,
           threadScope,
         })
-        if (!codexUnsafeResumeStateInvalidated) {
-          currentSession = await clearAssistantSessionCodexResumeStateIfNeeded({
-            action: providerResumeStateAction,
+        if (providerResumeStateAction === 'clear') {
+          currentSession = await clearAssistantSessionCodexResumeState({
             session: currentSession,
             vault: input.vault,
           })
@@ -2025,32 +2000,50 @@ async function runAssistantTurnBestEffort(
   }
 }
 
-async function clearAssistantSessionCodexResumeStateIfNeeded(input: {
+async function applyAssistantSessionCodexResumeStateAction(input: {
   action: ReturnType<typeof resolveProviderResumeStateAction>
+  assistantContractFingerprint: string
+  codexRolloutRelativePath: string | null
+  codexThreadId: string | null
+  routeFingerprint: string
   session: AssistantSession
   vault: string
 }): Promise<AssistantSession> {
-  if (input.action !== 'clear') {
-    return input.session
+  switch (input.action) {
+    case 'preserve-existing':
+      return input.session
+    case 'clear':
+      return await clearAssistantSessionCodexResumeState({
+        session: input.session,
+        vault: input.vault,
+      })
+    case 'persist-from-provider-turn': {
+      const resumeState = resolveAssistantResumeStateFromProviderTurn({
+        assistantContractFingerprint: input.assistantContractFingerprint,
+        codexRolloutRelativePath: input.codexRolloutRelativePath,
+        codexThreadId: input.codexThreadId,
+        routeFingerprint: input.routeFingerprint,
+      })
+      if (!resumeState) {
+        return input.session
+      }
+      const updatedAt = new Date().toISOString()
+      return await saveAssistantSession(input.vault, {
+        ...input.session,
+        codexResume: resumeState,
+        resumeState,
+        updatedAt,
+      })
+    }
   }
-
-  return await clearAssistantSessionCodexResumeState({
-    session: input.session,
-    vault: input.vault,
-  })
 }
 
 function resolveProviderResumeStateAction(input: {
-  codexThreadHistoryUnsafe: boolean
   codexThreadId: string | null
   threadScope: AssistantCodexThreadScope
 }): 'clear' | 'persist-from-provider-turn' | 'preserve-existing' {
   if (input.threadScope === 'isolated-thread') {
     return 'preserve-existing'
-  }
-
-  if (input.codexThreadHistoryUnsafe) {
-    return 'clear'
   }
 
   return normalizeNullableString(input.codexThreadId)

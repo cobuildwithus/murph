@@ -1,6 +1,6 @@
 # PR ReviewGPT Loop
 
-Last verified: 2026-07-13
+Last verified: 2026-07-14
 
 Required post-completion ReviewGPT loop for ReviewGPT-eligible PR-lane work. It runs
 the repo-local `pr-review` preset through `pnpm review:gpt`, using one of the
@@ -218,7 +218,7 @@ the touched surface, push it, and use the ordinary review-loop rules.
 ## Stop Condition
 
 - Stop when a round produces zero accepted findings after local triage.
-- Hard cap: 15 rounds per PR. If the cap is hit with accepted findings still
+- Hard cap: 5 rounds per PR. If the cap is hit with accepted findings still
   landing each round, stop and report that the PR likely needs structural
   rework rather than more review rounds.
 - Report a per-round summary at handoff: findings received, accepted, rejected

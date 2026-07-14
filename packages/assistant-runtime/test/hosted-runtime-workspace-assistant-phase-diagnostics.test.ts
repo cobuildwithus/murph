@@ -387,7 +387,6 @@ describe("hosted workspace assistant diagnostics detail logs", () => {
           providerTraceKind: "assistant.provider.plan",
           routePlanningElapsedMs: 71_000,
           routePlanningFallbackInstructionsElapsedMs: 66_000,
-          routePlanningFreshThreadFallbackPromptElapsedMs: 66_000,
           routePlanningMeasuredElapsedMs: 70_990,
           routePlanningMemoryOverviewElapsedMs: 900,
           routePlanningPrimaryInstructionsElapsedMs: 70,
@@ -418,7 +417,6 @@ describe("hosted workspace assistant diagnostics detail logs", () => {
     }));
     expect(filteredLogRequests[0]?.entries[0]?.redactedJson).not.toEqual(
       expect.objectContaining({
-        routePlanningFreshThreadFallbackPromptElapsedMs: expect.anything(),
         routePlanningPrimarySystemPromptElapsedMs: expect.anything(),
         routePlanningVaultOverviewElapsedMs: expect.anything(),
       }),
