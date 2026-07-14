@@ -25,6 +25,7 @@ import {
   decodeHostedMailboxStoredPayload,
   readHostedMailboxLiveItemById,
   readHostedMailboxPayload,
+  readHostedMailboxRecentLiveConversationItemIds,
 } from "../hosted-mailbox/store";
 
 type HostedLinqEngagementClient = PrismaClient | Prisma.TransactionClient;
@@ -45,6 +46,7 @@ export type HostedLinqRuntimeEgressAssertionResult = {
 };
 
 const HOSTED_LINQ_SIGNUP_WELCOME_IDEMPOTENCY_PREFIX = "signup-welcome:";
+const HOSTED_LINQ_RECENT_DIRECT_INBOUND_SCAN_LIMIT = 100;
 
 export function assertHostedLinqRouteAuthorityMatchesTarget(input: {
   chatId: string | null | undefined;
@@ -183,6 +185,29 @@ async function matchesPersistedHostedLinqDirectInbound(input: {
     const mailboxItemId = input.answeredMailboxItemIds[index];
     if (
       mailboxItemId
+      && await matchesPersistedHostedLinqDirectInboundMailboxItem({
+        legacyProof: null,
+        mailboxItemId,
+        memberId: input.memberId,
+        prisma: input.prisma,
+        replyToMessageId: requestReplyToMessageId,
+        target,
+      })
+    ) {
+      return true;
+    }
+  }
+
+  const answeredMailboxItemIds = new Set(input.answeredMailboxItemIds);
+  const recentMailboxItemIds = await readHostedMailboxRecentLiveConversationItemIds({
+    availableAt: new Date(),
+    limit: HOSTED_LINQ_RECENT_DIRECT_INBOUND_SCAN_LIMIT,
+    prisma: input.prisma,
+    userId: input.memberId,
+  });
+  for (const mailboxItemId of recentMailboxItemIds) {
+    if (
+      !answeredMailboxItemIds.has(mailboxItemId)
       && await matchesPersistedHostedLinqDirectInboundMailboxItem({
         legacyProof: null,
         mailboxItemId,
