@@ -300,7 +300,7 @@ test("HomePage shows an advisory while Pulse replies continue after included usa
 });
 
 test("HomePage keeps the exhausted Pulse advisory when action resolution fails closed", async () => {
-  mocks.readHostedMemberBillingEligibilityState.mockRejectedValueOnce(
+  mocks.readHostedMemberBillingEligibilityState.mockRejectedValue(
     new Error("billing eligibility unavailable"),
   );
   mocks.resolveHostedAiUsageGate.mockResolvedValueOnce({
