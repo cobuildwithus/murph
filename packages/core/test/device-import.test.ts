@@ -1873,6 +1873,7 @@ function buildJunctionStyleWorkoutEvent(overrides: {
     maxHeartRate?: number;
     durationMinutes?: number;
   }>;
+  note?: string;
   resourceId?: string;
   resourceType?: string;
   sourceApp?: string;
@@ -1883,6 +1884,7 @@ function buildJunctionStyleWorkoutEvent(overrides: {
     occurredAt: overrides.occurredAt ?? "2026-06-03T19:55:00.000Z",
     recordedAt: overrides.recordedAt ?? "2026-06-03T20:30:00.000Z",
     title: "Running",
+    ...(overrides.note === undefined ? {} : { note: overrides.note }),
     externalRef: {
       system: "junction",
       resourceType: overrides.resourceType ?? "junction-whoop-v2-workouts",
@@ -6376,7 +6378,7 @@ test("importDeviceBatch chains repeated updates into successive spine revisions 
   const vaultRoot = await makeTempDirectory("murph-device-import-externalref-revision-chain");
   await initializeVault({ vaultRoot, createdAt: "2026-06-01T12:00:00.000Z" });
 
-  const importAt = (importedAt: string, durationMinutes: number) =>
+  const importAt = (importedAt: string, durationMinutes: number, note: string) =>
     importDeviceBatch({
       vaultRoot,
       provider: "junction",
@@ -6386,13 +6388,14 @@ test("importDeviceBatch chains repeated updates into successive spine revisions 
         buildJunctionStyleWorkoutEvent({
           recordedAt: importedAt,
           durationMinutes,
+          note,
         }),
       ],
     });
 
-  const first = await importAt("2026-06-03T21:00:00.000Z", 34);
-  const second = await importAt("2026-06-04T21:00:00.000Z", 36);
-  const third = await importAt("2026-06-05T21:00:00.000Z", 38);
+  const first = await importAt("2026-06-03T21:00:00.000Z", 34, "Provider note v1");
+  const second = await importAt("2026-06-04T21:00:00.000Z", 36, "Provider note v2");
+  const third = await importAt("2026-06-05T21:00:00.000Z", 38, "Provider note v3");
 
   const eventRecords = (await readJsonlRecords({
     vaultRoot,
@@ -6419,6 +6422,7 @@ test("importDeviceBatch chains repeated updates into successive spine revisions 
 
   assert.equal(latest?.id, first.events[0]?.id);
   assert.equal(latest?.lifecycle?.revision, 3);
+  assert.equal(latest?.note, "Provider note v3");
   assert.equal((latest as { durationMinutes?: number } | null)?.durationMinutes, 38);
 });
 
