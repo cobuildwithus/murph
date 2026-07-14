@@ -759,6 +759,7 @@ describe("hosted Prisma baseline migration", () => {
       "20260713190000_hosted_group_join_confirmation_drain_index",
       "20260713210000_hosted_thread_route_participant_addition",
       "20260714060000_add_assistant_preference_projection_watermarks",
+      "20260714130000_hosted_mailbox_assistant_input_identity",
       "migration_lock.toml",
     ]);
     expect(hostedGroupJoinConfirmationEligibilityMigrationSql).toContain(

@@ -81,6 +81,7 @@ export interface AssistantHostedToolContext {
   currentAssistantConfigurationApprovalScope?():
     AssistantHostedAssistantConfigurationApprovalScope | null
   currentHostedMailboxItemIds(): readonly string[]
+  currentAssistantPersonalizationInputId?(): string | null
   currentAssistantPreferenceCausalSeq?(): string | null
   currentScheduledAutomationAuthority?(): HostedRuntimeNewsletterScheduledAuthority | null
   recordNewsletterSendResult?(
@@ -107,6 +108,7 @@ export function createAssistantHostedToolContext(input: {
   personalizationTool?: AssistantHostedPersonalizationTool | null
   planUsageTool?: AssistantHostedPlanUsageTool | null
   computerToolsAvailable?: boolean
+  getAssistantPersonalizationInputId?: () => string | null
   getAssistantPreferenceCausalSeq?: () => string | null
   getDeliveryContext?: () => AssistantHostedToolDeliveryContext
   getUserActionAcceptedInputIds?: () => readonly string[]
@@ -146,6 +148,8 @@ export function createAssistantHostedToolContext(input: {
     planUsageTool: input.planUsageTool ?? null,
     phoneCalls: input.phoneCalls ?? null,
     computerToolsAvailable: input.computerToolsAvailable === true,
+    currentAssistantPersonalizationInputId: () =>
+      input.getAssistantPersonalizationInputId?.() ?? null,
     currentAssistantPreferenceCausalSeq: () =>
       input.getAssistantPreferenceCausalSeq?.() ?? null,
     currentAssistantTarget: () => {

@@ -3988,6 +3988,31 @@ test('sendAssistantMessageLocal probes active-turn input once before provider st
   ])
 })
 
+test('sendAssistantMessageLocal exposes hosted personalization input authority to dynamic tools', async () => {
+  const assistantInputId = 'ain_44444444444444444444444444444444'
+  const { mocks, sendAssistantMessageLocal } = await loadLocalServiceModule()
+
+  await sendAssistantMessageLocal({
+    executionContext: {
+      hosted: {
+        currentAssistantPersonalizationInputId: () => assistantInputId,
+        memberId: 'member-hosted',
+        userEnvKeys: [],
+      },
+    },
+    prompt: 'Use the current hosted personalization authority.',
+    vault: '/vaults/test',
+  })
+
+  const hostedToolContext =
+    mocks.executeCodexTurnWithRecovery.mock.calls[0]?.[0]?.hostedToolContext
+  assert.ok(hostedToolContext)
+  assert.equal(
+    hostedToolContext.currentAssistantPersonalizationInputId?.(),
+    assistantInputId,
+  )
+})
+
 // Hosted-runner turns always run queue-only (the outbox owns final-reply
 // delivery), including interactive auto-replies where a member is actively
 // waiting. Progress delivery stays wired there for explicit model progress and

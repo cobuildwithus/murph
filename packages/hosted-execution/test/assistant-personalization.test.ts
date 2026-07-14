@@ -1,11 +1,34 @@
 import { describe, expect, it } from "vitest";
 
 import {
+  parseHostedRuntimeAssistantPersonalizationToolAuthority,
   parseHostedRuntimeAssistantPersonalizationToolRequest,
   parseHostedRuntimeAssistantPersonalizationToolResponse,
 } from "../src/assistant-personalization.ts";
 
 describe("hosted assistant personalization contract", () => {
+  it("accepts only canonical assistant input authority", () => {
+    expect(parseHostedRuntimeAssistantPersonalizationToolAuthority({
+      assistantInputId: "ain_0123456789abcdef0123456789abcdef",
+    })).toEqual({
+      assistantInputId: "ain_0123456789abcdef0123456789abcdef",
+    });
+
+    for (const authority of [
+      { assistantInputId: "input_1" },
+      { assistantInputId: "ain_0123456789ABCDEF0123456789ABCDEF" },
+      { preferenceCausalSeq: "42" },
+      {
+        assistantInputId: "ain_0123456789abcdef0123456789abcdef",
+        preferenceCausalSeq: "42",
+      },
+    ]) {
+      expect(() => parseHostedRuntimeAssistantPersonalizationToolAuthority(
+        authority,
+      )).toThrow();
+    }
+  });
+
   it("accepts strict read and non-empty update requests", () => {
     expect(parseHostedRuntimeAssistantPersonalizationToolRequest({
       action: "read",

@@ -752,14 +752,18 @@ describe("runHostedWorkspaceAssistantPhase runtime logs", () => {
     const assistantPersonalizationToolPort = {
       request: vi.fn(),
     };
+    const currentAssistantPersonalizationInputId = () =>
+      "ain_33333333333333333333333333333333";
 
     await runHostedWorkspaceAssistantPhase(createPhaseInput({
+      currentAssistantPersonalizationInputId,
       runtimeAssistantPersonalizationToolPort: assistantPersonalizationToolPort,
     }));
 
     expect(mocks.hydrateHostedExecutionDefaultTarget).toHaveBeenCalledWith(
       {
         hosted: expect.objectContaining({
+          currentAssistantPersonalizationInputId,
           personalizationTool: assistantPersonalizationToolPort,
         }),
       },
@@ -769,6 +773,7 @@ describe("runHostedWorkspaceAssistantPhase runtime logs", () => {
       expect.objectContaining({
         executionContext: expect.objectContaining({
           hosted: expect.objectContaining({
+            currentAssistantPersonalizationInputId,
             personalizationTool: assistantPersonalizationToolPort,
           }),
         }),
@@ -12660,6 +12665,8 @@ function createPhaseInput(input: {
     HostedWorkspaceRuntimeAssistantPhaseInput["initialMailboxImport"]["importResult"]["assistantInputRecords"]
   >;
   conversationImportedCount?: number;
+  currentAssistantPersonalizationInputId?:
+    HostedWorkspaceRuntimeAssistantPhaseInput["currentAssistantPersonalizationInputId"];
   currentDeliveryRouteScope?: HostedWorkspaceRuntimeAssistantPhaseInput["currentDeliveryRouteScope"];
   deviceSyncWorkspaceWakeHandled?: HostedWorkspaceRuntimeAssistantPhaseInput["deviceSyncWorkspaceWakeHandled"];
   importedCount?: number;
@@ -12703,6 +12710,8 @@ function createPhaseInput(input: {
   const assistantInputIds = input.assistantInputIds
     ?? (input.importedCount ? ["ain_00000000000000000000000000000001"] : []);
   return {
+    currentAssistantPersonalizationInputId:
+      input.currentAssistantPersonalizationInputId,
     deviceSyncWorkspaceWakeHandled: input.deviceSyncWorkspaceWakeHandled,
     initialAssistantInputBatch: input.initialAssistantInputBatch,
     latestAssistantInputBatch: input.latestAssistantInputBatch,

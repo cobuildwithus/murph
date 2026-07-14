@@ -154,7 +154,13 @@ The hosted Prisma schema keeps ownership sharp and nested:
   history plus current launch-required and optional feature-consent state
 - `HostedMailboxItem`, `HostedMailboxPayload`, and `HostedMailboxLaneCounter`
   own append-only encrypted execution inputs, per-lane progress sequences, and
-  the serialized per-member causal sequence carried across lanes
+  the serialized per-member causal sequence carried across lanes. New
+  conversation-message rows also store a nullable server-keyed lookup of their
+  existing deterministic assistant input id, never the raw id. Web derives the
+  configured lookup-key candidates from the callback id and uses the matching
+  database projection to bind
+  personalization writes to a live member-owned conversation row; it does not
+  change the mailbox wire, `sourceRef`, or event id.
 - `HostedWorkspace` owns the latest encrypted checkpoint pointer and redacted
   status projection
 - `HostedRuntimeLog` owns bounded redacted observability events
@@ -807,17 +813,24 @@ use the neutral confirmation. The
 `20260711230000_drop_group_join_compatibility_bridges` contract migration
 removes both only after the consumer-capable production deployment is live and
 the guarded prior-function drain and alias proof have completed.
-The first assistant-personality causal rollout follows that same split. Apply
-the nullable sequence expansion and deploy the sequence-producing web build
-with personality writes gated off. The automatic post-deploy contract lane
-waits for old functions and applies the causal-sequence constraint only when no
-unconsumed sequence-less preference row remains; otherwise it fails closed for
-a later retry. After the same drain, it advances each populated tone/voice
-projection watermark to the member's current causal counter so a delayed
-pre-cutover turn cannot overwrite a newer Settings projection. Deploy the new
-Cloudflare runner with an immediate rollout and its gate off, then enable
-Cloudflare before Vercel. Once enabled, both planes are rollback floors and
-must be forward-deployed together.
+The first assistant-personality causal rollout adds nullable causal-sequence
+state and a nullable `assistant_input_lookup_key` projection on conversation
+mailbox rows. Deploy the web build with personality writes gated off. It writes
+a server-keyed blind lookup derived from the existing deterministic input id
+for new conversation messages, never the raw id, and hard-rejects callbacks
+that cannot resolve the callback member plus a derived candidate key to one
+live conversation-lane `conversation.message` row; there is no numeric sequence
+fallback and no mailbox wire, `sourceRef`, or event-id change. The automatic
+post-deploy contract lane waits for old functions and applies the
+causal-sequence constraint only when no unconsumed sequence-less preference row
+remains; otherwise it fails closed for a later retry. After the same drain, it
+advances each populated tone/voice projection watermark to the member's current
+causal counter so a delayed pre-cutover turn cannot overwrite a newer Settings
+projection. This web hard cut is the rollback floor. Deploy the Cloudflare
+worker/runtime next with an immediate rollout, then enable the web personality
+gate after fleet convergence. Legacy or mixed-version runtimes continue
+ordinary replies while incompatible preference writes fail closed. Deploy the
+two planes in tandem to minimize that temporary unavailable-write window.
 The `2026062100_hosted_computer_single_member_profile` migration is an explicit
 greenfield computer-use hard cut: deploy it only as part of a coordinated
 hosted web plus Worker cutover with hosted computer-use traffic paused during

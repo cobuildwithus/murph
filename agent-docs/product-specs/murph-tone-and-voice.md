@@ -1,6 +1,6 @@
 # How Murph Talks
 
-Last verified: 2026-07-13
+Last verified: 2026-07-14
 Status: Implemented for onboarding, settings, hosted mailbox handoff, prompt tone, voice memo default resolution, supervisor-run preview generation, and private Humor, Push, and Detail controls in conversation and Settings
 
 ## Product Contract
@@ -295,15 +295,23 @@ after the canonical commit is therefore an idempotent no-op without an event
 receipt, reservation lifecycle, cap, or mailbox-removal acknowledgment.
 Ordering never uses the web projection or wall-clock comparison.
 
-The conversation personalization callback carries that runtime-owned sequence
-as signed internal authority outside the model-visible request. The web
-projection stores nullable per-field tone and voice watermarks and stale-no-ops
-only requested fields whose later Settings or conversation intent already has
-a higher sequence. A conversation wake keeps its origin sequence and `turn`
-origin for canonical application even though the mailbox row receives a newer
-transport sequence; Settings wakes continue to use their row sequence. This
-keeps the display projection and canonical vault on the same field-local order
-without making the callback time a new intent.
+New `conversation.message` mailbox rows also store a nullable server-keyed
+lookup of the existing deterministic assistant input id. The raw id is not
+persisted in that projection; the mailbox wire shape, `sourceRef`, and event id
+do not change. For an update, the conversation personalization callback carries the
+sole input id only when the provider accepted exactly one input; it does not
+carry a sequence. Inside the mutation transaction,
+web derives the configured lookup-key candidates and resolves the callback
+member and one matching key to one live conversation-lane
+`conversation.message` row and reads its canonical causal sequence. Missing,
+legacy, mismatched, or ambiguous identity fails closed without a numeric
+sequence fallback. The web projection stores nullable per-field tone and voice
+watermarks and stale-no-ops only requested fields whose later Settings or
+conversation intent already has a higher sequence. A conversation wake keeps
+its origin sequence and `turn` origin for canonical application even though
+the mailbox row receives a newer transport sequence; Settings wakes continue
+to use their row sequence. This keeps the display projection and canonical
+vault on the same field-local order without making callback time a new intent.
 During the legacy complete-snapshot rollout, additive `requestedFields`
 metadata preserves the caller's exact tone/voice field set for new runtimes;
 the web projection still advances every field visible to an old snapshot
@@ -319,14 +327,13 @@ rollback leaves pending work replayable.
 The canonical assistant-input selector admits at most one mailbox-backed input
 to each hosted provider turn. Later accepted inputs remain pending for a later
 turn instead of being folded into or steered through a turn with a different
-causal anchor. During the selected turn, the runtime exposes that input's exact
-sequence to hosted style commands through the existing authenticated loopback
-CLI bridge. This binding is installed by every compatible runtime rather than
-being feature-gated, so the personality commands advertised by that runtime
-are executable throughout rollout. The model can request a style command but
-cannot provide or replace the numeric sequence. The invocation-local bridge
-value is transport only; it is cleared when the turn ends and never becomes an
-ordering authority.
+causal anchor. For web-owned tone and voice, the runtime forwards the selected
+provider-accepted input id through the dedicated personalization port. The
+model cannot provide or replace that id or a numeric sequence. The id is
+invocation-local transport only; web's mailbox row remains the ordering
+authority. The local `murph.assistant_style` operation continues to receive the
+selected turn's canonical sequence through its authenticated invocation-local
+bridge for Humor, Push, and Detail ordering.
 
 Tokenless pending items restored from the legacy v1 local mailbox state are
 treated as sequence zero. They drain through the same terminal path. A legacy
@@ -352,16 +359,18 @@ so adding them does not alter the strict `bank/preferences.json` shape.
 
 The rollback floor is therefore the first deployed runtime and CLI version that understands the optional personality field. Rollback below that floor requires removing the new field with a current compatible binary or forward-deploying a compatible reader. Do not hand-edit canonical preferences files.
 
-The sparse-delta and shared-causal-sequence transition uses one gated expand,
-switch, then contract rollout:
+The sparse-delta, shared-causal-sequence, and personalization-authority
+transition uses one additive expansion followed by a hard cut:
 
-1. Vercel predeploy applies only the nullable `causal_seq` column and unique
-   index. Deploy the new sequence-producing web build with
+1. Vercel predeploy applies the nullable `causal_seq` expansion and the
+   nullable keyed assistant-input lookup projection. Deploy the new web build
+   with
    `MURPH_ASSISTANT_PERSONALITY_CAUSAL_WRITES_ENABLED=0`; the Settings
-   personality controls remain unavailable while old functions drain. The old
-   Cloudflare parser ignores the new optional mailbox field and its consumer
-   continues receiving complete snapshots during the mixed-version window even
-   though each new row already carries a causal sequence.
+   personality controls remain unavailable while old functions drain. That
+   build writes a server-keyed lookup of the existing deterministic assistant
+   input id for new conversation messages and hard-rejects personalization callbacks that do
+   not resolve it. It does not change the mailbox wire, `sourceRef`, or event
+   id. This web build is the rollback floor.
 2. The normal post-deploy contract-migration lane waits for the old Vercel
    function window, then fails closed only if a legacy preference row remains
    above the authoritative system-lane `consumed_seq`. It installs the
@@ -373,23 +382,24 @@ switch, then contract rollout:
    ordering for an absent field.
 3. Deploy the new Cloudflare worker and runner with
    `container_rollout=immediate`; prove the managed fleet has converged. The
-   compatible runtime always installs the invocation-local causal binding, so
-   its advertised conversational personality commands do not depend on a
-   second Cloudflare gate.
+   runtime forwards the sole input id only when the provider accepted exactly
+   one input, and web derives its causal sequence from the live member-owned
+   mailbox row inside the write transaction. There is no sequence fallback.
 4. Enable the Vercel gate. Settings switches tone/voice to sparse deltas and
    exposes personality controls only after the FIFO consumer fleet is present.
-   Tone, voice, ordinary conversation, and current-inbound replies stay
-   available throughout.
+   Existing reply styling, ordinary conversation, and current-inbound replies
+   stay available throughout.
 
 The new consumer accepts already-imported tokenless v1 local pending items
 through the explicit sequence-zero path. The pre-switch drain ensures that
 compatibility path is not asked to reconstruct unavailable cross-lane order.
 
-After the new Cloudflare runtime can accept conversational personality writes
-or the Vercel gate is enabled, both the new Cloudflare runtime and
-causal-sequence-producing Vercel build are rollback floors. Do not disable the
-web gate or roll either plane back independently; forward-deploy the compatible
-pair. Post-deploy, save one dial, run a
+During the web-first mixed-version window, legacy runtimes continue ordinary
+replies while conversational preference writes fail closed. Deploying web and
+Cloudflare/runtime in tandem minimizes that temporary unavailable-write window.
+Keep web at or above the hard-cut build during any runtime rollback; an older
+runtime may continue replies but cannot write preferences through the rejected
+legacy numeric-sequence callback. Post-deploy, save one dial, run a
 conversational change to the same dial, confirm the later accepted intent wins
 canonically, and confirm no preference item remains rejected or stuck.
 

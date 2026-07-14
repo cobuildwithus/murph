@@ -1,0 +1,142 @@
+# Resolve PR 550 merge conflicts
+
+Status: active
+Created: 2026-07-14
+Updated: 2026-07-14
+
+## Goal
+
+- Reconcile PR #550 with the latest `origin/main` so the hosted conversation
+  personalization controls remain correct, the newer base-branch runtime and
+  migration contracts remain intact, and GitHub reports the PR mergeable.
+
+## Success criteria
+
+- Latest `origin/main` is merged through ordinary Git history with no unresolved
+  conflict markers or dropped base/PR behavior.
+- All reproduced conflicts are resolved from code-path evidence and focused
+  regression coverage passes for the web migration guard and assistant runtime;
+  clean auto-merge interactions are checked for the same class of drift.
+- Required security/privacy and coverage audits have no unresolved actionable
+  findings; parent final review is complete.
+- The resolved commit is pushed to `agent/conversation-personalization`, the PR
+  has no merge conflict, required CI is green, and the manual resolution receives
+  the required ReviewGPT round.
+
+## Scope
+
+- In scope: merge `origin/main`; resolve the conflicts in the hosted-web
+  migration guard and assistant-runtime source/tests; inspect auto-merged
+  overlapping files; correct merge-induced configuration drift; bind hosted
+  preference writes to a web-owned canonical causal sequence resolved from the
+  accepted assistant input ID; run the scoped completion and PR gates.
+- Out of scope: unrelated personalization behavior, unrelated refactors, changes to
+  `main`, deployment, or cleanup of unrelated worktrees/ledger rows.
+
+## Constraints
+
+- Technical constraints: preserve web as the hosted preference owner, exact
+  runtime write-fence/member authority, single-causal-input semantics, current
+  TypeScript/runtime config ownership, and additive migration compatibility.
+- Product/process constraints: keep the existing PR branch and history, do not
+  force-push, preserve unrelated checkout state, and rerun ReviewGPT because
+  manual conflict resolution changes the pushed PR head.
+
+## Risks and mitigations
+
+1. Risk: choosing one side mechanically drops a newer base contract or a PR
+   personalization requirement.
+   Mitigation: inspect merge base, both stages, adjacent callers, and focused
+   tests before editing; retain the union only where both behaviors are valid.
+2. Risk: the merge is syntactically clean but changes runtime configuration or
+   migration-guard coverage.
+   Mitigation: run focused tests plus truthful diff-aware verification and inspect
+   the base-to-head PR patch after the merge.
+3. Risk: `origin/main` advances while the conflict resolution is being verified.
+   Mitigation: certify the recorded merge parent first, then merge the newer base
+   through ordinary history and rerun conflict-specific proof before pushing.
+4. Risk: persisted model-writable mailbox metadata is accepted as hosted
+   preference ordering authority.
+   Mitigation: keep mailbox wire/source metadata unchanged, pass only the
+   provider-accepted assistant input ID, and resolve its live member-owned row to
+   the canonical database causal sequence inside the web transaction.
+5. Risk: the same persisted numeric metadata remains authority for the local
+   `murph.assistant_style` sibling path.
+   Mitigation: remove that numeric fallback too and derive its canonical
+   sequence from Web-owned mailbox evidence bound to the provider-accepted
+   input ID, without a new state owner or reconciliation mechanism.
+
+## Tasks
+
+1. Merge the latest `origin/main` and capture the exact conflict stages.
+2. Resolve each conflict from surrounding code and test intent; inspect all
+   auto-merged overlaps for semantic loss.
+3. Run focused and diff-aware verification, required specialist audits, and
+   parent final review; address only evidence-backed findings.
+4. Finish the plan through the scoped commit path, push the PR head, start
+   ReviewGPT alongside CI, and confirm mergeability/green gates.
+
+## Decisions
+
+- Reuse the existing clean PR worktree at the exact remote head rather than
+  creating duplicate checkout state.
+- Use a normal merge of `origin/main`; avoid rebasing or force-pushing an active
+  reviewed PR.
+- Preserve the PR's per-invocation CLI bearer and runtime-owned timeout while
+  accepting main's deletion of the unused preference causal-sequence loopback;
+  the live causal authority remains the direct accepted-input callback.
+- Keep both new migrations in lexicographic execution order.
+- Main's TypeScript 7 change removed `baseUrl`; make the two PR-added
+  `assistant-personalization` aliases relative instead of restoring `baseUrl`.
+- Preserve mailbox wire payloads and existing message/event identifiers. Store a
+  nullable server-keyed blind lookup derived from the existing assistant input
+  ID for new conversation messages, never the raw ID; derive read candidates
+  for every configured contact-privacy key version and fail preference writes
+  closed for legacy or mixed-version rows instead of trusting a caller-supplied
+  sequence or adding a fallback authority path.
+- Incorporate `ffefbb210813975c42346d3cf7012b30abc6bb32` through a normal merge and
+  retain both its correction-only ReviewGPT policy assertions and the PR's
+  prompt-primary review assertion in the release audit.
+- Store only a contact-privacy-keyed lookup of the assistant input ID on the
+  mailbox row. Read every configured key version, require exactly one live
+  member-owned match, and never expose the lookup through runtime projections.
+- Lock the hosted member and sponsored-access rows before rechecking mutation
+  eligibility so billing suspension and sponsorship removal serialize with the
+  preference write.
+- Preserve the current dirty scope in a checkpoint commit, then adopt PR #640's
+  shared-host verification changes through the user-requested rebase before
+  resuming verification.
+
+## Verification
+
+- Focused web migration test: 5 passed.
+- Focused hosted-execution CLI bridge test: 9 passed.
+- Focused assistant-runtime bridge/config/workspace selection: 265 passed, 2
+  skipped.
+- Owning web, assistant-runtime, and hosted-execution TypeScript 7 typechecks:
+  passed after correcting the two relative path aliases.
+- Truthful diff-aware lane for the four conflict files plus both config fixes:
+  passed in 786 seconds. Assistant runtime passed 1,616 tests with 2 skips; web
+  passed 5,043 tests with 139 skips plus lint, smoke, and production build;
+  Cloudflare passed 1,787 tests.
+- The first security/privacy audit found one accepted Medium issue: a persisted
+  caller-controlled `sourceRef.causalSeq` could be replayed as hosted preference
+  authority. The Web-owned assistant-input lookup correction, keyed-at-rest
+  privacy hardening, exact-one ambiguity check, access-lock ordering, and
+  regression coverage are implemented.
+- Focused owner-bound correction checks passed: all five owning package
+  typechecks, 13 hosted-execution tests, 129 assistant-engine tests, 104 web
+  tests, and 304 Cloudflare tests. The assistant-runtime integration slice is in
+  flight.
+- The exact `ffefbb...` conflict regression passed. The broader CLI release audit
+  passed 34 tests with 1 skip but its unrelated archive-packaging case exceeded
+  the 120-second timeout; the targeted merged assertion passes independently.
+- The keyed lookup focused Web slice passed 70 tests, its latest schema/store
+  rerun passed 52 tests, and Web typecheck passed.
+- The fresh security/privacy rerun found one remaining accepted Medium issue:
+  local `murph.assistant_style` still trusts persisted numeric sequence metadata.
+  The owner-bound correction and its rerun remain pending after the PR #640
+  shared-host rebase.
+- The final security/privacy and coverage-write passes, post-correction
+  diff-aware verification, conflict-marker/privacy scans, mergeability proof,
+  CI, and ReviewGPT remain pending.

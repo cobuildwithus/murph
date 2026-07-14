@@ -1662,6 +1662,7 @@ export async function runHostedWorkspaceRuntimeJobInProcess(
         status: "start",
       });
       try {
+        let currentAssistantPersonalizationInputId: string | null = null;
         let currentPreferenceCausalSeq: string | null = null;
         const passResult = await hostedCliBridge.runWithInvocation(
           {
@@ -1692,12 +1693,15 @@ export async function runHostedWorkspaceRuntimeJobInProcess(
                 startedAtEpochMs: passStartedAtEpochMs,
               },
               runAssistantPhase: async (phaseInput) => {
+                currentAssistantPersonalizationInputId = null;
                 currentPreferenceCausalSeq = null;
                 try {
                   return await (
                     options.runAssistantPhase ?? runHostedWorkspaceAssistantPhase
                   )({
                     ...phaseInput,
+                    currentAssistantPersonalizationInputId: () =>
+                      currentAssistantPersonalizationInputId,
                     currentAssistantPreferenceCausalSeq: () =>
                       currentPreferenceCausalSeq,
                     currentDeliveryRouteScope,
@@ -1707,12 +1711,19 @@ export async function runHostedWorkspaceRuntimeJobInProcess(
                     runtime: foregroundRuntime,
                     runtimeEnv: invocationRuntimeEnv,
                     beforeProviderAcceptedInputs: async ({ acceptedInputs }) => {
+                      const assistantPersonalizationInputId =
+                        acceptedInputs.length === 1
+                          ? acceptedInputs[0]?.id ?? null
+                          : null;
                       currentPreferenceCausalSeq =
                         await resolveHostedPreferenceCausalSeqForSelectedInput({
                           assistantInputIds: acceptedInputs.map((item) => item.id),
                           vaultRoot: restored.vaultRoot,
                         });
+                      currentAssistantPersonalizationInputId =
+                        assistantPersonalizationInputId;
                       return () => {
+                        currentAssistantPersonalizationInputId = null;
                         currentPreferenceCausalSeq = null;
                       };
                     },
@@ -1721,6 +1732,7 @@ export async function runHostedWorkspaceRuntimeJobInProcess(
                     signal: passSignal,
                   });
                 } finally {
+                  currentAssistantPersonalizationInputId = null;
                   currentPreferenceCausalSeq = null;
                 }
               },

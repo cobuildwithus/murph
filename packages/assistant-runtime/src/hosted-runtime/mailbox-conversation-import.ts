@@ -25,6 +25,8 @@ import {
   createHostedAssistantConversationIdentifierBlind,
   hashHostedAssistantConversationIdentifier,
   hashNullableHostedAssistantConversationIdentifier,
+  readHostedConversationAssistantIdentifierSecret,
+  resolveHostedEmailConversationThreadIdentity,
   type HostedAssistantConversationIdentifierBlind,
 } from "@murphai/hosted-execution/assistant-identifiers";
 import {
@@ -1398,26 +1400,6 @@ function createHostedConversationAssistantInputConversation(
   return null;
 }
 
-function resolveHostedEmailConversationThreadIdentity(input: {
-  message: HostedExecutionEmailConversationMessagePayload;
-  threadTarget: ReturnType<typeof parseHostedEmailThreadTarget>;
-}): string {
-  const { message, threadTarget } = input;
-  if (threadTarget?.targetKind !== "group" || !threadTarget.groupId) {
-    return message.threadKey ?? message.threadTarget ?? message.rawMessageKey;
-  }
-
-  const threadKey = message.threadKey?.trim() ?? "";
-  if (threadKey) {
-    return `group:${threadTarget.groupId}\0thread:${threadKey}`;
-  }
-
-  const legacyRoot = threadTarget.references[0]?.trim() ?? "";
-  return legacyRoot
-    ? `group:${threadTarget.groupId}\0root:${legacyRoot}`
-    : message.rawMessageKey;
-}
-
 function resolveHostedEmailConversationDirectness(input: {
   message: HostedExecutionEmailConversationMessagePayload;
   threadTarget: ReturnType<typeof parseHostedEmailThreadTarget>;
@@ -1447,42 +1429,6 @@ function resolveHostedEmailConversationDirectness(input: {
     selfAddresses: [selfAddress],
     to: message.to,
   });
-}
-
-function readHostedConversationAssistantIdentifierSecret(
-  wake: HostedExecutionConversationMessageWake,
-): string {
-  if (isHostedLinqConversationMessageWake(wake)) {
-    return readHostedLinqConversationMessageAccountLookupKey(wake.message);
-  }
-
-  if (isHostedTelegramConversationMessageWake(wake)) {
-    return wake.message.telegramMessage.threadId;
-  }
-
-  if (isHostedEmailConversationMessageWake(wake)) {
-    const threadTarget = parseHostedEmailThreadTarget(wake.message.threadTarget);
-    if (threadTarget?.targetKind === "group") {
-      return resolveHostedEmailConversationThreadIdentity({
-        message: wake.message,
-        threadTarget,
-      });
-    }
-
-    return (
-      wake.message.identityId
-      ?? wake.message.selfAddress
-      ?? wake.message.threadKey
-      ?? wake.message.threadTarget
-      ?? wake.message.rawMessageKey
-    );
-  }
-
-  if (isHostedWhatsAppConversationMessageWake(wake)) {
-    return wake.message.whatsappMessage.threadId || wake.message.whatsappMessage.fromWaId;
-  }
-
-  return wake.eventId;
 }
 
 function createHostedConversationAssistantInputReplyTarget(

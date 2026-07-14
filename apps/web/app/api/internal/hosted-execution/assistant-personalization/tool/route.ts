@@ -1,4 +1,5 @@
 import {
+  parseHostedRuntimeAssistantPersonalizationToolAuthority,
   parseHostedRuntimeAssistantPersonalizationToolRequest,
 } from "@murphai/hosted-execution/assistant-personalization";
 import { after } from "next/server";
@@ -26,26 +27,33 @@ export const POST = withJsonError(async (request: Request) => {
   const body = parseHostedRuntimeAssistantPersonalizationToolRequest(
     payloadText.trim() ? JSON.parse(payloadText) : {},
   );
+  const authority = readAssistantInputAuthority(request);
+  if (body.action === "update" && authority === null) {
+    throw new TypeError(
+      "Assistant personalization update requires assistant input authority.",
+    );
+  }
 
   return jsonOk(await handleHostedRuntimeAssistantPersonalizationTool({
     memberId,
-    ...(readPreferenceCausalAuthority(request) ?? {}),
+    ...(authority ?? {}),
     request: body,
     scheduleMailboxWake: scheduleMailboxWakeAfterResponse,
   }));
 });
 
-function readPreferenceCausalAuthority(request: Request): {
-  authority: { preferenceCausalSeq: string };
+function readAssistantInputAuthority(request: Request): {
+  authority: { assistantInputId: string };
 } | null {
-  const value = new URL(request.url).searchParams.get("preferenceCausalSeq");
+  const value = new URL(request.url).searchParams.get("assistantInputId");
   if (value === null) {
     return null;
   }
-  if (!/^(0|[1-9]\d*)$/u.test(value)) {
-    throw new TypeError("Assistant personalization causal authority is invalid.");
-  }
-  return { authority: { preferenceCausalSeq: value } };
+  return {
+    authority: parseHostedRuntimeAssistantPersonalizationToolAuthority({
+      assistantInputId: value,
+    }),
+  };
 }
 
 function scheduleMailboxWakeAfterResponse(input: {

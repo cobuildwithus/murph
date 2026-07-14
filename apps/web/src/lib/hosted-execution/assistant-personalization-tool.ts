@@ -22,7 +22,14 @@ import {
   readHostedMemberAssistantPreferences,
   upsertHostedMemberAssistantPreferencesTx,
 } from "@/src/lib/hosted-onboarding/member-preferences";
-import { HOSTED_ONBOARDING_TRANSACTION_OPTIONS } from "@/src/lib/hosted-onboarding/shared";
+import {
+  HOSTED_ONBOARDING_TRANSACTION_OPTIONS,
+  lockHostedMemberRow,
+  lockHostedMemberSponsoredAccessRows,
+} from "@/src/lib/hosted-onboarding/shared";
+import {
+  readHostedMailboxPreferenceCausalSeqByAssistantInputIdTx,
+} from "@/src/lib/hosted-mailbox/store";
 
 type HostedRuntimeAssistantPersonalizationUpdateResponse = Extract<
   HostedRuntimeAssistantPersonalizationToolResponse,
@@ -61,10 +68,12 @@ export async function handleHostedRuntimeAssistantPersonalizationTool(input: {
   const request = input.request;
   const authority = input.authority;
   if (!authority) {
-    throw new TypeError("Assistant personalization update requires turn causal authority.");
+    throw new TypeError("Assistant personalization update requires assistant input authority.");
   }
   const prisma = getPrisma();
   const transactionResult = await prisma.$transaction(async (tx) => {
+    await lockHostedMemberRow(tx, input.memberId);
+    await lockHostedMemberSponsoredAccessRows(tx, input.memberId);
     await assertActiveHostedMemberAccessAllowed({
       memberId: input.memberId,
       prisma: tx,
@@ -73,6 +82,15 @@ export async function handleHostedRuntimeAssistantPersonalizationTool(input: {
       memberId: input.memberId,
       prisma: tx,
     });
+    const preferenceCausalSeq =
+      await readHostedMailboxPreferenceCausalSeqByAssistantInputIdTx({
+        assistantInputId: authority.assistantInputId,
+        memberId: input.memberId,
+        prisma: tx,
+      });
+    if (preferenceCausalSeq === null) {
+      throw new TypeError("Assistant personalization input authority is invalid.");
+    }
     const styleResult = request.tone !== undefined || request.voice !== undefined
       ? await upsertHostedMemberAssistantPreferencesTx({
           causalOrigin: "turn",
@@ -81,7 +99,7 @@ export async function handleHostedRuntimeAssistantPersonalizationTool(input: {
             : "legacy_snapshot",
           memberId: input.memberId,
           occurredAt: new Date().toISOString(),
-          preferenceCausalSeq: authority.preferenceCausalSeq,
+          preferenceCausalSeq,
           preferences: {
             ...(request.tone === undefined ? {} : { tone: request.tone }),
             ...(request.voice === undefined ? {} : { voice: request.voice }),

@@ -2541,17 +2541,17 @@ async function executePersonalizationTool(input: {
     return toolTextResult(false, 'personalization is unavailable for this turn')
   }
 
-  const preferenceCausalSeq = input.request.action === 'update'
-    ? input.hostedToolContext?.currentAssistantPreferenceCausalSeq?.() ?? null
+  const assistantInputId = input.request.action === 'update'
+    ? input.hostedToolContext?.currentAssistantPersonalizationInputId?.() ?? null
     : null
-  if (input.request.action === 'update' && preferenceCausalSeq === null) {
+  if (input.request.action === 'update' && assistantInputId === null) {
     return toolTextResult(false, 'personalization is unavailable for this turn')
   }
 
   try {
     const result = await personalizationTool.request(
       input.request,
-      preferenceCausalSeq === null ? undefined : { preferenceCausalSeq },
+      assistantInputId === null ? undefined : { assistantInputId },
     )
     return toolTextResult(true, safeToolPayloadText(result))
   } catch {

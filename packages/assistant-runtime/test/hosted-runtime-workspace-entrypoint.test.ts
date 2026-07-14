@@ -20351,7 +20351,7 @@ describe("hosted workspace runtime entrypoint", () => {
     }
   });
 
-  test("installs preference causal binding before the personality exposure gate is enabled", async () => {
+  test("binds exactly one provider input for personalization and clears it after the attempt", async () => {
     const vaultRoot = await mkdtemp(path.join(tmpdir(), "murph-workspace-entrypoint-"));
 
     try {
@@ -20372,6 +20372,7 @@ describe("hosted workspace runtime entrypoint", () => {
         }),
         async runAssistantPhase(input) {
           assert.equal(typeof input.beforeProviderAcceptedInputs, "function");
+          assert.equal(input.currentAssistantPersonalizationInputId?.(), null);
           assert.equal(input.currentAssistantPreferenceCausalSeq?.(), null);
           const item = createMailboxItem({
             id: "mailbox_item_preference_causal_binding",
@@ -20382,14 +20383,40 @@ describe("hosted workspace runtime entrypoint", () => {
             item,
             vaultRoot,
           });
+          const emptyRelease = await input.beforeProviderAcceptedInputs?.({
+            acceptedInputs: [],
+          });
+          assert.equal(input.currentAssistantPersonalizationInputId?.(), null);
+          assert.equal(input.currentAssistantPreferenceCausalSeq?.(), null);
+          await emptyRelease?.();
+          const ambiguousRelease = await input.beforeProviderAcceptedInputs?.({
+            acceptedInputs: [
+              {
+                id: assistantInputId,
+                source: "assistant-input",
+              },
+              {
+                id: "ain_22222222222222222222222222222222",
+                source: "assistant-input",
+              },
+            ],
+          });
+          assert.equal(input.currentAssistantPersonalizationInputId?.(), null);
+          assert.equal(input.currentAssistantPreferenceCausalSeq?.(), null);
+          await ambiguousRelease?.();
           const release = await input.beforeProviderAcceptedInputs?.({
             acceptedInputs: [{
               id: assistantInputId,
               source: "assistant-input",
             }],
           });
+          assert.equal(
+            input.currentAssistantPersonalizationInputId?.(),
+            assistantInputId,
+          );
           assert.equal(input.currentAssistantPreferenceCausalSeq?.(), "41");
           await release?.();
+          assert.equal(input.currentAssistantPersonalizationInputId?.(), null);
           assert.equal(input.currentAssistantPreferenceCausalSeq?.(), null);
           return { progressed: false };
         },

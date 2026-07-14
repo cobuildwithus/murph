@@ -94,10 +94,10 @@ describe("hosted assistant personalization internal route", () => {
     });
   });
 
-  it("binds a signed causal sequence to an update without changing the request body", async () => {
+  it("binds a signed assistant input ID to an update without changing the request body", async () => {
     const payload = JSON.stringify({ action: "update", tone: "casual" });
     const request = new Request(
-      "https://join.example.test/api/internal/hosted-execution/assistant-personalization/tool?preferenceCausalSeq=42",
+      "https://join.example.test/api/internal/hosted-execution/assistant-personalization/tool?assistantInputId=ain_0123456789abcdef0123456789abcdef",
       {
         body: payload,
         headers: { "content-type": "application/json" },
@@ -113,17 +113,37 @@ describe("hosted assistant personalization internal route", () => {
       { maxBodyBytes: 2_048, payloadText: payload },
     );
     expect(mocks.handleHostedRuntimeAssistantPersonalizationTool).toHaveBeenCalledWith({
-      authority: { preferenceCausalSeq: "42" },
+      authority: {
+        assistantInputId: "ain_0123456789abcdef0123456789abcdef",
+      },
       memberId: "member_personalization_route",
       request: { action: "update", tone: "casual" },
       scheduleMailboxWake: expect.any(Function),
     });
   });
 
-  it("rejects malformed causal authority after callback authentication", async () => {
+  it("rejects malformed assistant input authority after callback authentication", async () => {
     const payload = JSON.stringify({ action: "update", tone: "casual" });
     const request = new Request(
-      "https://join.example.test/api/internal/hosted-execution/assistant-personalization/tool?preferenceCausalSeq=-1",
+      "https://join.example.test/api/internal/hosted-execution/assistant-personalization/tool?assistantInputId=input_1",
+      {
+        body: payload,
+        headers: { "content-type": "application/json" },
+        method: "POST",
+      },
+    );
+
+    const response = await route.POST(request);
+
+    expect(response.status).toBe(400);
+    expect(mocks.requireHostedCloudflareCallbackRequest).toHaveBeenCalledOnce();
+    expect(mocks.handleHostedRuntimeAssistantPersonalizationTool).not.toHaveBeenCalled();
+  });
+
+  it("rejects legacy sequence query parameters instead of treating them as authority", async () => {
+    const payload = JSON.stringify({ action: "update", tone: "casual" });
+    const request = new Request(
+      "https://join.example.test/api/internal/hosted-execution/assistant-personalization/tool?preferenceCausalSeq=42",
       {
         body: payload,
         headers: { "content-type": "application/json" },

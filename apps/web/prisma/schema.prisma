@@ -715,6 +715,7 @@ model HostedMemberEmailAuthorization {
 model HostedMailboxItem {
   id                      String                @id
   userId                  String                @map("user_id")
+  assistantInputLookupKey String?               @map("assistant_input_lookup_key")
   causalSeq               BigInt?               @map("causal_seq")
   lane                    String
   laneSeq                 BigInt                @map("lane_seq")
@@ -737,6 +738,7 @@ model HostedMailboxItem {
   @@unique([userId, id])
   @@unique([userId, lane, laneSeq])
   @@unique([userId, causalSeq])
+  @@unique([userId, assistantInputLookupKey])
   @@unique([userId, dedupeKey])
   @@index([userId, lane, laneSeq])
   @@index([userId, kind, createdAt])

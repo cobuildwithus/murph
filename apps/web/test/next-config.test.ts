@@ -115,6 +115,14 @@ test("hosted web tsconfig resolves Temporal orchestration-control from source", 
     ["../../packages/hosted-execution/src/plan-usage.ts"],
   );
   assert.deepEqual(
+    tsconfig.compilerOptions?.paths?.["@murphai/hosted-execution/assistant-identifiers"],
+    ["../../packages/hosted-execution/src/assistant-identifiers.ts"],
+  );
+  assert.deepEqual(
+    tsconfig.compilerOptions?.paths?.["@murphai/hosted-execution/assistant-personalization"],
+    ["../../packages/hosted-execution/src/assistant-personalization.ts"],
+  );
+  assert.deepEqual(
     tsconfig.compilerOptions?.paths?.["@murphai/device-syncd/providers/junction-client"],
     ["../../packages/device-syncd/src/providers/junction-client.ts"],
   );

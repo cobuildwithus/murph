@@ -23,7 +23,7 @@ export function createHostedRuntimeAssistantPersonalizationToolPort(input: {
         description: "Hosted assistant personalization tool",
         fetchImpl: input.fetchImpl,
         path: authority
-          ? `${HOSTED_RUNTIME_ASSISTANT_PERSONALIZATION_TOOL_PATH}?preferenceCausalSeq=${encodeURIComponent(authority.preferenceCausalSeq)}`
+          ? `${HOSTED_RUNTIME_ASSISTANT_PERSONALIZATION_TOOL_PATH}?assistantInputId=${encodeURIComponent(authority.assistantInputId)}`
           : HOSTED_RUNTIME_ASSISTANT_PERSONALIZATION_TOOL_PATH,
         timeoutMs: input.timeoutMs,
         transport: input.transport,

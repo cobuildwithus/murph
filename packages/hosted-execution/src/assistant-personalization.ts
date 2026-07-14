@@ -22,9 +22,13 @@ export type HostedRuntimeAssistantPersonalizationToolRequest =
       voice?: AssistantVoiceOptionId;
     };
 
-export interface HostedRuntimeAssistantPersonalizationToolAuthority {
-  preferenceCausalSeq: string;
-}
+const hostedRuntimeAssistantPersonalizationToolAuthoritySchema = z.object({
+  assistantInputId: z.string().regex(/^ain_[0-9a-f]{32}$/u),
+}).strict();
+
+export type HostedRuntimeAssistantPersonalizationToolAuthority = z.infer<
+  typeof hostedRuntimeAssistantPersonalizationToolAuthoritySchema
+>;
 
 
 export interface HostedRuntimeAssistantPersonalizationSnapshot {
@@ -101,6 +105,18 @@ export function parseHostedRuntimeAssistantPersonalizationToolRequest(
   value: unknown,
 ): HostedRuntimeAssistantPersonalizationToolRequest {
   return hostedRuntimeAssistantPersonalizationToolRequestSchema.parse(value);
+}
+
+export function parseHostedRuntimeAssistantPersonalizationToolAuthority(
+  value: unknown,
+): HostedRuntimeAssistantPersonalizationToolAuthority {
+  const parsed = hostedRuntimeAssistantPersonalizationToolAuthoritySchema.safeParse(value);
+  if (!parsed.success) {
+    throw new TypeError("Hosted assistant personalization input authority is invalid.", {
+      cause: parsed.error,
+    });
+  }
+  return parsed.data;
 }
 
 export function parseHostedRuntimeAssistantPersonalizationToolResponse(

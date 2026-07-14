@@ -849,6 +849,8 @@ describe("handleRunnerOutboundRequest", () => {
   it("forwards and signs assistant personalization only for the fence-bound user", async () => {
     const boundUserId = "member_personalization_bound";
     const payload = JSON.stringify({ action: "read" });
+    const assistantInputSearch =
+      "?assistantInputId=ain_0123456789abcdef0123456789abcdef";
     const validateRuntimeWriteFence = vi.fn(async (input: {
       attemptId: string;
       generation: string;
@@ -888,7 +890,7 @@ describe("handleRunnerOutboundRequest", () => {
         "x-hosted-runner-bound-user-id": "member_spoofed",
         "x-hosted-runtime-attempt-id": "attempt_active",
         "x-hosted-runtime-lease-generation": "9",
-      }),
+      }, assistantInputSearch),
       env,
       boundUserId,
     );
@@ -907,7 +909,7 @@ describe("handleRunnerOutboundRequest", () => {
     const [url, init] = firstCall;
     const headers = new Headers(init?.headers);
     expect(String(url)).toBe(
-      `https://web.example.test${HOSTED_RUNTIME_ASSISTANT_PERSONALIZATION_TOOL_PATH}`,
+      `https://web.example.test${HOSTED_RUNTIME_ASSISTANT_PERSONALIZATION_TOOL_PATH}${assistantInputSearch}`,
     );
     expect(init?.body).toBe(payload);
     expect(headers.get("x-hosted-runtime-attempt-id")).toBe("attempt_active");
@@ -937,7 +939,7 @@ describe("handleRunnerOutboundRequest", () => {
       path: HOSTED_RUNTIME_ASSISTANT_PERSONALIZATION_TOOL_PATH,
       payload,
       request: forwardedRequest,
-      search: "",
+      search: assistantInputSearch,
     };
     await expect(verifyHostedWebCallbackSignatureHeaders({
       ...signatureInput,
@@ -8771,9 +8773,10 @@ function createRunnerProxyHeaders(headers: Record<string, string> = {}) {
 
 function createAssistantPersonalizationRunnerRequest(
   headers: Record<string, string> = {},
+  search = "",
 ): Request {
   return new Request(
-    `http://web-control.worker${HOSTED_RUNTIME_ASSISTANT_PERSONALIZATION_TOOL_PATH}`,
+    `http://web-control.worker${HOSTED_RUNTIME_ASSISTANT_PERSONALIZATION_TOOL_PATH}${search}`,
     {
       body: JSON.stringify({ action: "read" }),
       headers: createRunnerProxyHeaders({

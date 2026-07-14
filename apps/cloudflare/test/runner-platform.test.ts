@@ -3820,6 +3820,10 @@ describe("buildHostedExecutionRuntimePlatform", () => {
           voice: "warm",
         },
       });
+    await expect(platform.assistantPersonalizationToolPort!.request(
+      { action: "read" },
+      { assistantInputId: "ain_0123456789abcdef0123456789abcdef" },
+    )).resolves.toMatchObject({ action: "read" });
     await expect(platform.groupToolPort!.request({ action: "read_current" }))
       .resolves.toEqual({
         action: "read_current",
@@ -3832,7 +3836,7 @@ describe("buildHostedExecutionRuntimePlatform", () => {
       connectionId: "conn_123",
     });
 
-    expect(fetchMock).toHaveBeenCalledTimes(12);
+    expect(fetchMock).toHaveBeenCalledTimes(13);
     const requests = fetchMock.mock.calls.map((call, index) =>
       requireFetchRequest(call, `callback web-control request ${index}`)
     );
@@ -3846,6 +3850,7 @@ describe("buildHostedExecutionRuntimePlatform", () => {
       "http://web-control.worker/api/internal/hosted-execution/usage/record",
       "http://web-control.worker/api/internal/hosted-execution/product-feedback/record",
       `http://web-control.worker${HOSTED_RUNTIME_ASSISTANT_PERSONALIZATION_TOOL_PATH}`,
+      `http://web-control.worker${HOSTED_RUNTIME_ASSISTANT_PERSONALIZATION_TOOL_PATH}?assistantInputId=ain_0123456789abcdef0123456789abcdef`,
       `http://web-control.worker${buildExpectedGroupToolPath()}`,
       `http://web-control.worker${buildExpectedVaultShareActiveKindsPath()}`,
       "http://web-control.worker/api/internal/device-sync/runtime/snapshot",

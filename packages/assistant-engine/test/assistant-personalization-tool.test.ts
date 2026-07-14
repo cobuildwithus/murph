@@ -64,7 +64,9 @@ describe('assistant personalization tool', () => {
       computerToolsAvailable: false,
       currentHostedDeliveryContext: () => null,
       currentHostedMailboxItemIds: () => [],
-      currentAssistantPreferenceCausalSeq: () => '42',
+      currentAssistantPersonalizationInputId: () =>
+        'ain_11111111111111111111111111111111',
+      currentAssistantPreferenceCausalSeq: () => 'untrusted-local-sequence',
       personalizationTool,
       sendVaultFile: vi.fn(async () => ({
         approvalUrl: 'https://murph.test/approve/unused',
@@ -89,10 +91,57 @@ describe('assistant personalization tool', () => {
         tone: 'formal',
         voice: 'upbeat',
       },
-      { preferenceCausalSeq: '42' },
+      { assistantInputId: 'ain_11111111111111111111111111111111' },
     )
     expect(result.rpcResult.success).toBe(true)
     expect(result.rpcResult.contentItems[0]?.text).toContain('"status":"saved"')
+  })
+
+  it('fails closed when an update has no provider-accepted input authority', async () => {
+    const request = readMurphDynamicToolRequest({
+      method: 'item/tool/call',
+      params: {
+        arguments: {
+          action: 'update',
+          tone: 'formal',
+        },
+        namespace: 'murph',
+        tool: 'personalization',
+      },
+    })
+    if (!request) {
+      throw new Error('Expected a personalization dynamic tool request.')
+    }
+
+    const personalizationTool = {
+      request: vi.fn(),
+    }
+    const result = await executeMurphDynamicToolRequest({
+      env: {},
+      fetchImpl: fetch,
+      hostedToolContext: {
+        computerToolsAvailable: false,
+        currentAssistantPersonalizationInputId: () => null,
+        currentHostedDeliveryContext: () => null,
+        currentHostedMailboxItemIds: () => [],
+        personalizationTool,
+        sendVaultFile: vi.fn(async () => ({
+          approvalUrl: 'https://murph.test/approve/unused',
+          filename: 'unused.pdf',
+          status: 'pending' as const,
+        })),
+        vaultFileSendAvailable: false,
+      },
+      nextUsageOrdinal: () => 0,
+      progressDelivery: null,
+      request,
+    })
+
+    expect(personalizationTool.request).not.toHaveBeenCalled()
+    expect(result.rpcResult.success).toBe(false)
+    expect(result.rpcResult.contentItems[0]?.text).toContain(
+      'personalization is unavailable for this turn',
+    )
   })
 
   it('rejects empty updates and unknown values before calling the owner', () => {
