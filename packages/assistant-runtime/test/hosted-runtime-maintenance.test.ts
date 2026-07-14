@@ -1237,6 +1237,8 @@ describe("runHostedAssistantAutomation", () => {
         progressed: false,
       };
     });
+    const assertLinqRecentInboundEngagement = vi.fn(async () => ({}));
+
     const result = await runHostedAssistantAutomation(
       "/tmp/vault-root",
       "req_candidate_query",
@@ -1257,6 +1259,11 @@ describe("runHostedAssistantAutomation", () => {
       [],
       undefined,
       undefined,
+      {
+        effectsPort: {
+          assertLinqRecentInboundEngagement,
+        },
+      },
     );
 
     expect(result.timings).toEqual(expect.objectContaining({
@@ -1285,6 +1292,13 @@ describe("runHostedAssistantAutomation", () => {
       entry.message === "Hosted assistant input candidate query finished."
     );
     expect(candidateLog?.redacted).not.toHaveProperty("requestId");
+    expect(assertLinqRecentInboundEngagement).toHaveBeenCalledWith(
+      expect.objectContaining({
+        authorityCheckOnly: true,
+        target: "thread_1",
+      }),
+      { signal: undefined },
+    );
   });
 
   it("runs hosted assistant automation through the queue-only scanner path", async () => {
