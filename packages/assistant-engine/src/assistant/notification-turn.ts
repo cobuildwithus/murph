@@ -196,6 +196,7 @@ export interface AssistantNotificationInput
       | 'workingDirectory'
     > {
   deliveryDedupeToken?: string | null
+  directHomeRouteOnly?: boolean | null
   beforeCommit?: ((context: AssistantNotificationCommitContext) => Promise<void> | void) | null
   deferCommitUntilDeliveryAccepted?: boolean | null
   firstContactPolicy?: AssistantNotificationFirstContactPolicy | null
@@ -550,6 +551,7 @@ export async function sendAssistantNotificationLocal(
           const deliveryOutcome = await deliverAssistantNotificationMessage({
             dedupeToken: input.deliveryDedupeToken ?? null,
             decisionSubject: decision.subject ?? null,
+            directHomeRouteOnly: input.directHomeRouteOnly === true,
             input: messageInput,
             media: providerResult.responseMedia ?? [],
             message: responseText,
@@ -614,6 +616,7 @@ export async function sendAssistantNotificationLocal(
         const deliveryOutcome = await deliverAssistantNotificationMessage({
           dedupeToken: input.deliveryDedupeToken ?? null,
           decisionSubject: decision.subject ?? null,
+          directHomeRouteOnly: input.directHomeRouteOnly === true,
           input: messageInput,
           media: providerResult.responseMedia ?? [],
           message: responseText,
@@ -758,6 +761,7 @@ async function sendAssistantExactTextNotificationLocal(input: {
   const deliveryOutcome = await deliverAssistantNotificationMessage({
     dedupeToken: input.input.deliveryDedupeToken ?? null,
     decisionSubject: null,
+    directHomeRouteOnly: input.input.directHomeRouteOnly === true,
     input: input.messageInput,
     media: [],
     message: responseText,
@@ -1213,6 +1217,7 @@ function buildAssistantNotificationMessageInput(
 async function deliverAssistantNotificationMessage(input: {
   dedupeToken: string | null
   decisionSubject: string | null
+  directHomeRouteOnly: boolean
   input: AssistantMessageInput
   media?: readonly AssistantResponseMedia[] | null
   message: string
@@ -1256,6 +1261,7 @@ async function deliverAssistantNotificationMessage(input: {
     dedupeToken: input.dedupeToken,
     deliveryIdempotencyKey: hostedDelivery.deliveryIdempotencyKey,
     deliveryTransportIdempotent: hostedDelivery.deliveryTransportIdempotent,
+    directHomeRouteOnly: input.directHomeRouteOnly,
     signal: input.input.abortSignal,
     ...deliveryFields,
     media,

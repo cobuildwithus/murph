@@ -20,7 +20,7 @@ import {
 import { buildHostedBillingOfferMetadata } from "./billing-offer-metadata";
 import { assertHostedMemberCanOwnDirectBilling } from "./billing-authority";
 import { isHostedMemberSuspended } from "./entitlement";
-import { hostedOnboardingError } from "./errors";
+import { hostedOnboardingError, isHostedOnboardingError } from "./errors";
 import {
   bindHostedMemberBillingCheckoutSessionTx,
   bindHostedMemberStripeCustomerIdIfMissingTx,
@@ -72,6 +72,11 @@ export interface HostedBillingCheckoutLineItem {
   price: string;
   quantity?: number;
 }
+
+type HostedBillingCheckoutFinalization =
+  | { kind: "already-active" }
+  | { kind: "bound" }
+  | { error: unknown; kind: "rejected" };
 
 export function buildHostedBillingCheckoutLineItems(priceId: string): HostedBillingCheckoutLineItem[] {
   return [
@@ -273,6 +278,134 @@ export async function createHostedBillingCheckout(
       idempotencyKey: checkoutIdempotencyKey,
     });
 
+    let finalization: HostedBillingCheckoutFinalization;
+    try {
+      finalization = await prisma.$transaction(
+        async (tx): Promise<HostedBillingCheckoutFinalization> => {
+          await lockHostedMemberRow(tx, invite.member.id);
+          const rejectStaleCheckout = async (
+            error: unknown,
+          ): Promise<HostedBillingCheckoutFinalization> => {
+            const recordedForRetirement = await bindHostedMemberBillingCheckoutSessionTx({
+              attemptId: reservation.attemptId,
+              memberId: invite.member.id,
+              previousSessionId: reservation.previousSessionId,
+              sessionId: checkoutSession.id,
+              tx,
+            });
+            return recordedForRetirement
+              ? { error, kind: "rejected" }
+              : {
+                  error: buildHostedBillingCheckoutAttemptStaleError(),
+                  kind: "rejected",
+                };
+          };
+          const currentMember = await tx.hostedMember.findUnique({
+            select: {
+              billingStatus: true,
+              suspendedAt: true,
+            },
+            where: {
+              id: invite.member.id,
+            },
+          });
+          if (!currentMember || isHostedMemberSuspended(currentMember.suspendedAt)) {
+            return await rejectStaleCheckout(hostedOnboardingError({
+              code: "HOSTED_MEMBER_SUSPENDED",
+              message: "This hosted account is suspended. Contact support to restore access.",
+              httpStatus: 403,
+            }));
+          }
+          if (currentMember.billingStatus === HostedBillingStatus.active) {
+            const recordedForRetirement = await bindHostedMemberBillingCheckoutSessionTx({
+              attemptId: reservation.attemptId,
+              memberId: invite.member.id,
+              previousSessionId: reservation.previousSessionId,
+              sessionId: checkoutSession.id,
+              tx,
+            });
+            return recordedForRetirement
+              ? { kind: "already-active" }
+              : {
+                  error: buildHostedBillingCheckoutAttemptStaleError(),
+                  kind: "rejected",
+                };
+          }
+          if (!requiresHostedBillingCheckout(currentMember.billingStatus)) {
+            return await rejectStaleCheckout(hostedOnboardingError({
+              code: "HOSTED_BILLING_CHECKOUT_BLOCKED",
+              message: "This hosted account cannot start a new checkout right now. Contact support to restore access.",
+              httpStatus: 403,
+            }));
+          }
+          try {
+            await assertHostedMemberCanOwnDirectBilling({
+              memberId: invite.member.id,
+              prisma: tx,
+            });
+          } catch (error) {
+            if (
+              !isHostedOnboardingError(error)
+              || error.code !== "HOSTED_BILLING_FAMILY_AUTHORITY_ACTIVE"
+            ) {
+              throw error;
+            }
+            return await rejectStaleCheckout(error);
+          }
+          const currentBillingRef = await readHostedMemberStripeBillingRef({
+            memberId: invite.member.id,
+            prisma: tx,
+          });
+          if (currentBillingRef?.stripeSubscriptionId) {
+            return await rejectStaleCheckout(hostedOnboardingError({
+              code: "HOSTED_BILLING_CHECKOUT_BLOCKED",
+              message: "This hosted account already has a billing subscription. Refresh billing before starting another checkout.",
+              httpStatus: 409,
+            }));
+          }
+          const bound = await bindHostedMemberBillingCheckoutSessionTx({
+            attemptId: reservation.attemptId,
+            memberId: invite.member.id,
+            previousSessionId: reservation.previousSessionId,
+            sessionId: checkoutSession.id,
+            tx,
+          });
+          if (!bound) {
+            return {
+              error: buildHostedBillingCheckoutAttemptStaleError(),
+              kind: "rejected",
+            };
+          }
+          return { kind: "bound" };
+        },
+        HOSTED_ONBOARDING_TRANSACTION_OPTIONS,
+      );
+    } catch (error) {
+      await expireHostedBillingCheckoutSessionFailClosed({
+        sessionId: checkoutSession.id,
+        stripe,
+      });
+      throw error;
+    }
+
+    if (finalization.kind !== "bound") {
+      await expireHostedBillingCheckoutSessionFailClosed({
+        sessionId: checkoutSession.id,
+        stripe,
+      });
+    }
+    if (finalization.kind === "rejected") {
+      throw finalization.error;
+    }
+    if (finalization.kind === "already-active") {
+      finishHostedOnboardingTiming(timing, "completed", {
+        alreadyActive: true,
+      });
+      return {
+        alreadyActive: true,
+        url: null,
+      };
+    }
     if (!checkoutSession.url) {
       await expireHostedBillingCheckoutSessionFailClosed({
         sessionId: checkoutSession.id,
@@ -283,51 +416,6 @@ export async function createHostedBillingCheckout(
         message: "Stripe Checkout did not return a redirect URL.",
         httpStatus: 502,
       });
-    }
-
-    try {
-      await prisma.$transaction(async (tx) => {
-        await lockHostedMemberRow(tx, invite.member.id);
-        const currentMember = await tx.hostedMember.findUnique({
-          select: {
-            suspendedAt: true,
-          },
-          where: {
-            id: invite.member.id,
-          },
-        });
-        if (!currentMember || isHostedMemberSuspended(currentMember.suspendedAt)) {
-          throw hostedOnboardingError({
-            code: "HOSTED_MEMBER_SUSPENDED",
-            message: "This hosted account is suspended. Contact support to restore access.",
-            httpStatus: 403,
-          });
-        }
-        await assertHostedMemberCanOwnDirectBilling({
-          memberId: invite.member.id,
-          prisma: tx,
-        });
-        const bound = await bindHostedMemberBillingCheckoutSessionTx({
-          attemptId: reservation.attemptId,
-          memberId: invite.member.id,
-          previousSessionId: reservation.previousSessionId,
-          sessionId: checkoutSession.id,
-          tx,
-        });
-        if (!bound) {
-          throw hostedOnboardingError({
-            code: "HOSTED_BILLING_CHECKOUT_ATTEMPT_STALE",
-            message: "Billing checkout changed before Stripe returned a session. Start checkout again.",
-            httpStatus: 409,
-          });
-        }
-      }, HOSTED_ONBOARDING_TRANSACTION_OPTIONS);
-    } catch (error) {
-      await expireHostedBillingCheckoutSessionFailClosed({
-        sessionId: checkoutSession.id,
-        stripe,
-      });
-      throw error;
     }
 
     finishHostedOnboardingTiming(timing, "completed", {
@@ -474,6 +562,14 @@ async function expireHostedBillingCheckoutSessionFailClosed(input: {
     message: "Billing changed while checkout was starting. Contact support before retrying.",
     httpStatus: 409,
     retryable: true,
+  });
+}
+
+function buildHostedBillingCheckoutAttemptStaleError() {
+  return hostedOnboardingError({
+    code: "HOSTED_BILLING_CHECKOUT_ATTEMPT_STALE",
+    message: "Billing checkout changed before Stripe returned a session. Start checkout again.",
+    httpStatus: 409,
   });
 }
 

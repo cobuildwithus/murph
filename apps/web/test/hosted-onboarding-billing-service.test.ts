@@ -202,6 +202,287 @@ describe("createHostedBillingCheckout", () => {
     expect(mocks.stripe.checkout.sessions.expire).toHaveBeenCalledWith("cs_123");
   });
 
+  it("retires a rejected checkout session before a later eligible retry", async () => {
+    mocks.requireHostedInviteForBillingCheckout.mockResolvedValue(makeInvite());
+    mocks.stripe.checkout.sessions.create
+      .mockResolvedValueOnce({
+        id: "cs_stale",
+        status: "open",
+        url: "https://billing.example.test/session_stale",
+      })
+      .mockResolvedValueOnce({
+        id: "cs_retry",
+        status: "open",
+        url: "https://billing.example.test/session_retry",
+      });
+    mocks.stripe.checkout.sessions.retrieve
+      .mockResolvedValueOnce({
+        id: "cs_stale",
+        status: "open",
+        url: "https://billing.example.test/session_stale",
+      })
+      .mockResolvedValueOnce({
+        id: "cs_stale",
+        status: "expired",
+        url: null,
+      });
+    const prisma = makePrisma({
+      familyAuthorityResults: [false, true, false, false],
+    });
+
+    await expect(createHostedBillingCheckout({
+      inviteCode: "invite-code",
+      member: makeAuthenticatedMember(),
+      prisma: prisma as never,
+    })).rejects.toMatchObject({
+      code: "HOSTED_BILLING_FAMILY_AUTHORITY_ACTIVE",
+      httpStatus: 409,
+    });
+    await expect(createHostedBillingCheckout({
+      inviteCode: "invite-code",
+      member: makeAuthenticatedMember(),
+      prisma: prisma as never,
+    })).resolves.toEqual({
+      alreadyActive: false,
+      url: "https://billing.example.test/session_retry",
+    });
+
+    const firstIdempotencyKey = mocks.stripe.checkout.sessions.create.mock.calls[0]?.[1]
+      ?.idempotencyKey;
+    const retryIdempotencyKey = mocks.stripe.checkout.sessions.create.mock.calls[1]?.[1]
+      ?.idempotencyKey;
+    expect(mocks.stripe.checkout.sessions.expire).toHaveBeenCalledWith("cs_stale");
+    expect(mocks.stripe.checkout.sessions.retrieve).toHaveBeenCalledTimes(2);
+    expect(firstIdempotencyKey).toEqual(expect.any(String));
+    expect(retryIdempotencyKey).toEqual(expect.any(String));
+    expect(retryIdempotencyKey).not.toBe(firstIdempotencyKey);
+  });
+
+  it("expires a new checkout when billing becomes active before its session is bound", async () => {
+    mocks.requireHostedInviteForBillingCheckout.mockResolvedValue(makeInvite());
+
+    await expect(createHostedBillingCheckout({
+      inviteCode: "invite-code",
+      member: makeAuthenticatedMember(),
+      prisma: makePrisma({
+        billingStatusResults: [
+          HostedBillingStatus.not_started,
+          HostedBillingStatus.active,
+        ],
+      }) as never,
+    })).resolves.toEqual({
+      alreadyActive: true,
+      url: null,
+    });
+
+    expect(mocks.stripe.checkout.sessions.create).toHaveBeenCalledOnce();
+    expect(mocks.stripe.checkout.sessions.expire).toHaveBeenCalledWith("cs_123");
+  });
+
+  it("expires a new checkout when billing becomes ineligible before its session is bound", async () => {
+    mocks.requireHostedInviteForBillingCheckout.mockResolvedValue(makeInvite());
+
+    await expect(createHostedBillingCheckout({
+      inviteCode: "invite-code",
+      member: makeAuthenticatedMember(),
+      prisma: makePrisma({
+        billingStatusResults: [
+          HostedBillingStatus.not_started,
+          HostedBillingStatus.past_due,
+        ],
+      }) as never,
+    })).rejects.toMatchObject({
+      code: "HOSTED_BILLING_CHECKOUT_BLOCKED",
+      httpStatus: 403,
+    });
+
+    expect(mocks.stripe.checkout.sessions.create).toHaveBeenCalledOnce();
+    expect(mocks.stripe.checkout.sessions.expire).toHaveBeenCalledWith("cs_123");
+  });
+
+  it("expires a new checkout when its final binding transaction fails unexpectedly", async () => {
+    mocks.requireHostedInviteForBillingCheckout.mockResolvedValue(makeInvite());
+    const transactionError = new Error("final binding transaction failed");
+
+    await expect(createHostedBillingCheckout({
+      inviteCode: "invite-code",
+      member: makeAuthenticatedMember(),
+      prisma: makePrisma({ finalizationTransactionError: transactionError }) as never,
+    })).rejects.toBe(transactionError);
+
+    expect(mocks.stripe.checkout.sessions.create).toHaveBeenCalledOnce();
+    expect(mocks.stripe.checkout.sessions.expire).toHaveBeenCalledWith("cs_123");
+  });
+
+  it("expires an ambiguously committed session before a retry retires it", async () => {
+    mocks.requireHostedInviteForBillingCheckout.mockResolvedValue(makeInvite());
+    const resultError = new Error("final binding transaction result lost");
+    mocks.stripe.checkout.sessions.create
+      .mockResolvedValueOnce({
+        id: "cs_ambiguous",
+        status: "open",
+        url: "https://billing.example.test/session_ambiguous",
+      })
+      .mockResolvedValueOnce({
+        id: "cs_retry",
+        status: "open",
+        url: "https://billing.example.test/session_retry",
+      });
+    mocks.stripe.checkout.sessions.retrieve
+      .mockResolvedValueOnce({
+        id: "cs_ambiguous",
+        status: "open",
+        url: "https://billing.example.test/session_ambiguous",
+      })
+      .mockResolvedValueOnce({
+        id: "cs_ambiguous",
+        status: "expired",
+        url: null,
+      });
+    const prisma = makePrisma({ finalizationResultError: resultError });
+
+    await expect(createHostedBillingCheckout({
+      inviteCode: "invite-code",
+      member: makeAuthenticatedMember(),
+      prisma: prisma as never,
+    })).rejects.toBe(resultError);
+    expect(mocks.stripe.checkout.sessions.expire).toHaveBeenCalledWith(
+      "cs_ambiguous",
+    );
+
+    await expect(createHostedBillingCheckout({
+      inviteCode: "invite-code",
+      member: makeAuthenticatedMember(),
+      prisma: prisma as never,
+    })).resolves.toEqual({
+      alreadyActive: false,
+      url: "https://billing.example.test/session_retry",
+    });
+
+    expect(mocks.stripe.checkout.sessions.retrieve).toHaveBeenCalledWith(
+      "cs_ambiguous",
+    );
+    expect(mocks.stripe.checkout.sessions.expire).toHaveBeenCalledWith(
+      "cs_ambiguous",
+    );
+    const firstIdempotencyKey = mocks.stripe.checkout.sessions.create.mock.calls[0]?.[1]
+      ?.idempotencyKey;
+    const retryIdempotencyKey = mocks.stripe.checkout.sessions.create.mock.calls[1]?.[1]
+      ?.idempotencyKey;
+    expect(retryIdempotencyKey).not.toBe(firstIdempotencyKey);
+  });
+
+  it("binds a URL-less checkout before expiry so a retry uses a fresh key", async () => {
+    mocks.requireHostedInviteForBillingCheckout.mockResolvedValue(makeInvite());
+    mocks.stripe.checkout.sessions.create
+      .mockResolvedValueOnce({
+        id: "cs_missing_url",
+        status: "open",
+        url: null,
+      })
+      .mockResolvedValueOnce({
+        id: "cs_retry",
+        status: "open",
+        url: "https://billing.example.test/session_retry",
+      });
+    mocks.stripe.checkout.sessions.retrieve
+      .mockResolvedValueOnce({
+        id: "cs_missing_url",
+        status: "open",
+        url: null,
+      })
+      .mockResolvedValueOnce({
+        id: "cs_missing_url",
+        status: "expired",
+        url: null,
+      });
+    const prisma = makePrisma();
+
+    await expect(createHostedBillingCheckout({
+      inviteCode: "invite-code",
+      member: makeAuthenticatedMember(),
+      prisma: prisma as never,
+    })).rejects.toMatchObject({
+      code: "CHECKOUT_URL_MISSING",
+      httpStatus: 502,
+    });
+    await expect(createHostedBillingCheckout({
+      inviteCode: "invite-code",
+      member: makeAuthenticatedMember(),
+      prisma: prisma as never,
+    })).resolves.toEqual({
+      alreadyActive: false,
+      url: "https://billing.example.test/session_retry",
+    });
+
+    expect(mocks.stripe.checkout.sessions.expire).toHaveBeenCalledWith(
+      "cs_missing_url",
+    );
+    expect(mocks.stripe.checkout.sessions.retrieve).toHaveBeenNthCalledWith(
+      1,
+      "cs_missing_url",
+    );
+    expect(mocks.stripe.checkout.sessions.retrieve).toHaveBeenNthCalledWith(
+      2,
+      "cs_missing_url",
+    );
+    const firstIdempotencyKey = mocks.stripe.checkout.sessions.create.mock.calls[0]?.[1]
+      ?.idempotencyKey;
+    const retryIdempotencyKey = mocks.stripe.checkout.sessions.create.mock.calls[1]?.[1]
+      ?.idempotencyKey;
+    expect(retryIdempotencyKey).not.toBe(firstIdempotencyKey);
+  });
+
+  it("treats an unexpected final Family-authority read error as unknown state", async () => {
+    mocks.requireHostedInviteForBillingCheckout.mockResolvedValue(makeInvite());
+    const authorityError = new Error("family authority read failed");
+
+    await expect(createHostedBillingCheckout({
+      inviteCode: "invite-code",
+      member: makeAuthenticatedMember(),
+      prisma: makePrisma({
+        familyAuthorityError: authorityError,
+        familyAuthorityErrorCall: 2,
+      }) as never,
+    })).rejects.toBe(authorityError);
+
+    expect(mocks.stripe.checkout.sessions.create).toHaveBeenCalledOnce();
+    expect(mocks.stripe.checkout.sessions.expire).toHaveBeenCalledWith("cs_123");
+  });
+
+  it("expires a new checkout when a direct subscription appears before binding", async () => {
+    mocks.requireHostedInviteForBillingCheckout.mockResolvedValue(makeInvite());
+    const prisma = makePrisma();
+    const billingPrivateColumns = await buildHostedMemberBillingPrivateColumns({
+      memberId: "member_123",
+      stripeCustomerId: "cus_active_123",
+      stripeSubscriptionId: "sub_active_123",
+    });
+    mocks.stripe.checkout.sessions.create.mockImplementationOnce(async () => {
+      prisma.mergeBillingRef({
+        ...billingPrivateColumns,
+        stripeCustomerLookupKey: "hbidx:stripe-customer:v1:active",
+        stripeSubscriptionLookupKey: "hbidx:stripe-subscription:v1:active",
+      });
+      return {
+        id: "cs_123",
+        status: "open",
+        url: "https://billing.example.test/session_123",
+      };
+    });
+
+    await expect(createHostedBillingCheckout({
+      inviteCode: "invite-code",
+      member: makeAuthenticatedMember(),
+      prisma: prisma as never,
+    })).rejects.toMatchObject({
+      code: "HOSTED_BILLING_CHECKOUT_BLOCKED",
+      httpStatus: 409,
+    });
+
+    expect(mocks.stripe.checkout.sessions.expire).toHaveBeenCalledWith("cs_123");
+  });
+
   it("creates a first-time Stripe Checkout Session without pre-creating a customer", async () => {
     const consoleInfo = vi.spyOn(console, "info").mockImplementation(() => {});
     mocks.requireHostedInviteForBillingCheckout.mockResolvedValue(makeInvite());
@@ -587,7 +868,7 @@ describe("createHostedBillingCheckout", () => {
     expect(checkoutSessionRequest).not.toHaveProperty("customer_email");
   });
 
-  it("does not reread or synthesize a customer binding when none exists yet", async () => {
+  it("revalidates without synthesizing a customer binding when none exists yet", async () => {
     mocks.requireHostedInviteForBillingCheckout.mockResolvedValue(makeInvite());
     const prisma = makePrisma({
       billingRef: null,
@@ -600,7 +881,7 @@ describe("createHostedBillingCheckout", () => {
       prisma: prisma as never,
     });
 
-    expect(prisma.hostedMemberBillingRef.findUnique).toHaveBeenCalledTimes(3);
+    expect(prisma.hostedMemberBillingRef.findUnique).toHaveBeenCalledTimes(4);
     expect(mocks.stripe.customers.create).not.toHaveBeenCalled();
     expect(mocks.stripe.customers.update).not.toHaveBeenCalled();
     expect(mocks.stripe.checkout.sessions.create).toHaveBeenCalledWith(
@@ -906,8 +1187,15 @@ function makePrisma(input: {
     stripeSubscriptionIdEncrypted: string | null;
     stripeSubscriptionLookupKey: string | null;
   } | null;
+  billingStatusResults?: HostedBillingStatus[];
+  familyAuthorityError?: Error;
+  familyAuthorityErrorCall?: number;
   familyAuthorityResults?: boolean[];
+  finalizationResultError?: Error;
+  finalizationTransactionError?: Error;
 } = {}) {
+  const billingStatusResults = [...(input.billingStatusResults ?? [])];
+  let familyAuthorityCallCount = 0;
   let billingRef: Record<string, unknown> | null = input.billingRef ?? null;
   const findUnique = vi.fn(async () => billingRef);
   const upsert = vi.fn().mockImplementation(
@@ -948,15 +1236,24 @@ function makePrisma(input: {
   const prismaTx = {
     $queryRaw: vi.fn().mockResolvedValue([]),
     hostedAccountGroupMembership: {
-      findFirst: vi.fn(async () =>
-        input.familyAuthorityResults?.shift() ? { id: "membership_family" } : null
-      ),
+      findFirst: vi.fn(async () => {
+        familyAuthorityCallCount += 1;
+        if (
+          input.familyAuthorityError
+          && familyAuthorityCallCount === input.familyAuthorityErrorCall
+        ) {
+          throw input.familyAuthorityError;
+        }
+        return input.familyAuthorityResults?.shift()
+          ? { id: "membership_family" }
+          : null;
+      }),
     },
     hostedMember: {
-      findUnique: vi.fn().mockResolvedValue({
-        billingStatus: HostedBillingStatus.not_started,
+      findUnique: vi.fn(async () => ({
+        billingStatus: billingStatusResults.shift() ?? HostedBillingStatus.not_started,
         suspendedAt: null,
-      }),
+      })),
     },
     hostedMemberBillingRef: {
       findMany: vi.fn().mockResolvedValue([]),
@@ -967,13 +1264,28 @@ function makePrisma(input: {
   };
   let transactionTail = Promise.resolve();
   let transactionActive = false;
+  let transactionCallCount = 0;
   const transaction = vi.fn(<T>(
     callback: (tx: typeof prismaTx) => Promise<T>,
   ): Promise<T> => {
     const result = transactionTail.then(async () => {
+      transactionCallCount += 1;
+      if (
+        transactionCallCount === 2
+        && input.finalizationTransactionError
+      ) {
+        throw input.finalizationTransactionError;
+      }
       transactionActive = true;
       try {
-        return await callback(prismaTx);
+        const callbackResult = await callback(prismaTx);
+        if (
+          transactionCallCount === 2
+          && input.finalizationResultError
+        ) {
+          throw input.finalizationResultError;
+        }
+        return callbackResult;
       } finally {
         transactionActive = false;
       }
@@ -991,6 +1303,11 @@ function makePrisma(input: {
       upsert,
     },
     isTransactionActive: () => transactionActive,
+    mergeBillingRef(nextBillingRef: Record<string, unknown>) {
+      billingRef = billingRef
+        ? { ...billingRef, ...nextBillingRef }
+        : nextBillingRef;
+    },
     setBillingRef(nextBillingRef: Record<string, unknown> | null) {
       billingRef = nextBillingRef;
     },

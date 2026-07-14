@@ -236,6 +236,7 @@ export type AssistantOutboxCreateIntentInput = {
   deliveryIdempotencyKey?: string | null
   deliverySource?: AssistantDeliverySource | null
   deliveryTransportIdempotent?: boolean
+  directHomeRouteOnly?: boolean | null
   explicitTarget?: string | null
   identityId?: string | null
   initialState?:
@@ -325,10 +326,15 @@ export async function createAssistantOutboxIntent(
     })
     const isAutoReplyIntent = input.turnTrigger === 'automation-auto-reply'
     if (existing) {
+      const authorityClassifiedExisting =
+        maybeUpgradeAssistantOutboxIntentDirectHomeRouteAuthority({
+          directHomeRouteOnly: input.directHomeRouteOnly === true,
+          intent: existing,
+        })
       const idempotencyUpgradedExisting = maybeUpgradeAssistantOutboxIntentDeliveryIdempotency({
         deliveryIdempotencyKey,
         deliveryTransportIdempotent,
-        intent: existing,
+        intent: authorityClassifiedExisting,
       })
       const answeredItemsUpgradedExisting = maybeUpgradeAssistantOutboxIntentAnsweredMailboxItemIds({
         answeredMailboxItemIds,
@@ -395,6 +401,7 @@ export async function createAssistantOutboxIntent(
       dedupeKey,
       targetFingerprint: hashAssistantOutboxTargetFingerprint(rawTargetIdentity),
       ...persistedTarget,
+      directHomeRouteOnly: input.directHomeRouteOnly === true,
       delivery: null,
       deliveryConfirmationPending: false,
       deliveryIdempotencyKey,
@@ -1023,6 +1030,7 @@ export async function deliverAssistantOutboxMessage(input: {
   deliveryIdempotencyKey?: string | null
   deliverySource?: AssistantDeliverySource | null
   deliveryTransportIdempotent?: boolean
+  directHomeRouteOnly?: boolean | null
   dependencies?: AssistantChannelDependencies
   dispatchHooks?: AssistantOutboxDispatchHooks
   dispatchMode?: AssistantOutboxDispatchMode
@@ -1050,6 +1058,7 @@ export async function deliverAssistantOutboxMessage(input: {
     deliveryIdempotencyKey: input.deliveryIdempotencyKey,
     deliverySource: input.deliverySource ?? null,
     deliveryTransportIdempotent: input.deliveryTransportIdempotent,
+    directHomeRouteOnly: input.directHomeRouteOnly,
     explicitTarget: input.explicitTarget,
     identityId: input.identityId,
     media: input.media,
@@ -2016,6 +2025,25 @@ function maybeUpgradeAssistantOutboxIntentDeliveryIdempotency(input: {
       ...input.intent,
       deliveryIdempotencyKey,
       deliveryTransportIdempotent,
+    }),
+  )
+}
+
+function maybeUpgradeAssistantOutboxIntentDirectHomeRouteAuthority(input: {
+  directHomeRouteOnly: boolean
+  intent: AssistantOutboxIntent
+}): AssistantOutboxIntent {
+  if (
+    input.intent.directHomeRouteOnly === true
+    || input.intent.directHomeRouteOnly === input.directHomeRouteOnly
+  ) {
+    return input.intent
+  }
+
+  return assistantOutboxIntentSchema.parse(
+    sanitizeAssistantOutboxIntentForPersistence({
+      ...input.intent,
+      directHomeRouteOnly: input.directHomeRouteOnly,
     }),
   )
 }

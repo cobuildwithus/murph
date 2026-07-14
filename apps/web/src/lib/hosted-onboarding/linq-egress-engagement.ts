@@ -111,6 +111,15 @@ export async function assertHostedLinqRecentInboundEngagementForRuntime(input: {
   });
 
   if (input.directHomeRouteOnly === true) {
+    const durableThreadRoute = await readHostedThreadRouteByThreadIdentity({
+      channel: "linq",
+      prisma: input.prisma,
+      threadId: input.target,
+    });
+    if (durableThreadRoute) {
+      throwHostedLinqRouteAuthorityMismatch();
+    }
+
     const asserted = await assertHostedMemberLinqRouteMatchesEgressTarget({
       chatId: input.target,
       homeRouteFallbackAllowed: false,

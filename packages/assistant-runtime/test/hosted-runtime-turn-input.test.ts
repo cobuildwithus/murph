@@ -377,6 +377,71 @@ describe("createHostedAssistantInputSource", () => {
     ]);
   });
 
+  it("skips the same direct route from another configured account", async () => {
+    const vaultRoot = await createTempVault();
+    await enableLinqAutoReply(vaultRoot);
+    const current = await upsertAssistantInputEvent({
+      vault: vaultRoot,
+      event: createAssistantInputEvent({
+        accountId: "acct_1",
+        dedupeKey: "dedupe_current_account",
+        eventId: "evt_current_account",
+        itemId: "item_current_account",
+        laneSeq: "10",
+        messageId: "msg_current_account",
+        threadId: "thread_shared",
+      }),
+    });
+    const otherAccount = await upsertAssistantInputEvent({
+      vault: vaultRoot,
+      event: createAssistantInputEvent({
+        accountId: "acct_2",
+        dedupeKey: "dedupe_other_account",
+        eventId: "evt_other_account",
+        itemId: "item_other_account",
+        laneSeq: "20",
+        messageId: "msg_other_account",
+        threadId: "thread_shared",
+      }),
+    });
+    const expected = await upsertAssistantInputEvent({
+      vault: vaultRoot,
+      event: createAssistantInputEvent({
+        accountId: "acct_1",
+        dedupeKey: "dedupe_expected_account",
+        eventId: "evt_expected_account",
+        itemId: "item_expected_account",
+        laneSeq: "30",
+        messageId: "msg_expected_account",
+        threadId: "thread_shared",
+      }),
+    });
+    for (const inputId of [otherAccount.inputId, expected.inputId]) {
+      await enqueueHostedPendingAssistantInputId({
+        inputId,
+        vaultRoot,
+      });
+    }
+    const source = createHostedAssistantInputSource({
+      selectedInputIds: [current.inputId],
+      vaultRoot,
+    });
+
+    await expect(source.listNewConversationActorInputs?.({
+      afterCursor: current.cursor,
+      conversation: current.conversation!,
+      deliveryRoute: {
+        channel: "linq",
+        threadId: "thread_shared",
+      },
+    })).resolves.toEqual(expect.objectContaining({
+      inputs: [expect.objectContaining({
+        event: expect.objectContaining({ inputId: expected.inputId }),
+      })],
+      nextCursor: expected.cursor,
+    }));
+  });
+
   it("does not fold late existing pending ids into an active causal turn", async () => {
     const vaultRoot = await createTempVault();
     await saveAssistantAutomationState(vaultRoot, {
@@ -1010,6 +1075,7 @@ async function writeTerminalEvidence(input: {
 }
 
 function createAssistantInputEvent(input: {
+  accountId?: string;
   actorId?: string;
   dedupeKey?: string;
   eventId?: string;
@@ -1040,7 +1106,7 @@ function createAssistantInputEvent(input: {
       ],
     },
     conversation: {
-      accountId: "acct_1",
+      accountId: input.accountId ?? "acct_1",
       actorId: input.actorId ?? "actor_1",
       actorIsSelf: false,
       source,

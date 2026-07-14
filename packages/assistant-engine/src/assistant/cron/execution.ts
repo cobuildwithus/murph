@@ -763,6 +763,10 @@ async function executePreparedClaimedAssistantCronJob(
               job: claimedJob,
               trigger: input.trigger,
             }),
+            directHomeRouteOnly:
+              hostedAutomationRoute?.channel === 'linq' &&
+              hostedAutomationRoute.currentRouteSnapshot === true &&
+              hostedAutomationRoute.threadIsDirect === true,
             sessionId: claimedJob.target.sessionId,
             alias: claimedJob.target.alias,
             allowBindingRebind: claimedJob.target.sessionId !== null,

@@ -439,6 +439,55 @@ describe('store-backed assistant input source', () => {
         candidate.acceptedInput.contentRef?.kind === 'assistant-input-event',
     )).toBe(true)
   })
+
+  it('skips the same direct route from another configured account', async () => {
+    const { vaultRoot } = await createAssistantInputSourceVault(
+      'assistant-input-source-store-account-route-',
+    )
+    await upsertAssistantInputEvent({
+      vault: vaultRoot,
+      event: createStoredHostedMailboxInput({
+        accountId: 'acct_2',
+        eventId: 'evt_other_account',
+        laneSeq: '1',
+        replyTarget: true,
+        threadId: 'chat_shared',
+      }),
+    })
+    const expected = await upsertAssistantInputEvent({
+      vault: vaultRoot,
+      event: createStoredHostedMailboxInput({
+        accountId: 'acct_1',
+        eventId: 'evt_expected_account',
+        laneSeq: '2',
+        replyTarget: true,
+        threadId: 'chat_shared',
+      }),
+    })
+    const source = createStoreBackedAssistantInputSource({
+      vault: vaultRoot,
+    })
+
+    await expect(source.listNewConversationActorInputs?.({
+      conversation: {
+        accountId: 'acct_1',
+        actorId: 'actor_1',
+        actorIsSelf: false,
+        source: 'linq',
+        threadId: 'chat_shared',
+        threadIsDirect: true,
+      },
+      deliveryRoute: {
+        channel: 'linq',
+        threadId: 'chat_shared',
+      },
+    })).resolves.toEqual(expect.objectContaining({
+      inputs: [expect.objectContaining({
+        event: expect.objectContaining({ inputId: expected.inputId }),
+      })],
+      nextCursor: expected.cursor,
+    }))
+  })
 })
 
 async function createAssistantInputSourceVault(prefix: string): Promise<{
@@ -451,8 +500,10 @@ async function createAssistantInputSourceVault(prefix: string): Promise<{
 }
 
 function createStoredHostedMailboxInput(input: {
+  accountId?: string
   eventId: string
   laneSeq: string
+  replyTarget?: boolean
   threadId: string
 }) {
   const occurredAt = new Date(
@@ -463,7 +514,7 @@ function createStoredHostedMailboxInput(input: {
       text: `${input.eventId} text`,
     },
     conversation: {
-      accountId: 'acct_1',
+      accountId: input.accountId ?? 'acct_1',
       actorId: 'actor_1',
       actorIsSelf: false,
       source: 'linq',
@@ -472,6 +523,15 @@ function createStoredHostedMailboxInput(input: {
     },
     occurredAt,
     receivedAt: occurredAt,
+    ...(input.replyTarget === true
+      ? {
+          replyTarget: {
+            channel: 'linq',
+            messageId: `${input.eventId}_message`,
+            threadId: input.threadId,
+          },
+        }
+      : {}),
     sourceRef: createHostedMailboxSourceRef({
       eventId: input.eventId,
       laneSeq: input.laneSeq,

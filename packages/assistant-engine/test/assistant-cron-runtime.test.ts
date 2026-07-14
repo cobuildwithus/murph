@@ -1391,6 +1391,7 @@ describe('assistant cron runtime orchestration', () => {
         assistantTargetOverride: {
           reasoningEffort: 'high',
         },
+        directHomeRouteOnly: false,
         threadIsDirect: false,
         instructions: 'Ask about the imported run.',
       }),
@@ -1798,6 +1799,7 @@ describe('assistant cron runtime orchestration', () => {
     expect(cronMocks.sendAssistantMessageLocal).toHaveBeenCalledOnce()
     expect(cronMocks.sendAssistantMessageLocal.mock.calls[0]?.[0]).toMatchObject({
       bindingDeliveryTarget: 'saved-linq-chat',
+      directHomeRouteOnly: true,
       instructions: 'Ask about the imported run.',
       threadIsDirect: true,
     })

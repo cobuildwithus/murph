@@ -284,6 +284,7 @@ test('sendAssistantNotificationLocal persists the turn before outbound delivery 
 
   const notificationInput = {
     deliveryDedupeToken: 'cron-slot-token',
+    directHomeRouteOnly: true,
     executionContext: {
       hosted: {
         defaultTarget: hostedDefaultTarget,
@@ -327,6 +328,10 @@ test('sendAssistantNotificationLocal persists the turn before outbound delivery 
   assert.equal(
     deliverMessage.mock.calls[0]?.[0]?.deliveryTransportIdempotent,
     false,
+  )
+  assert.equal(
+    deliverMessage.mock.calls[0]?.[0]?.directHomeRouteOnly,
+    true,
   )
   assert.equal(result.response, 'Raw notification text')
   assert.deepEqual(result.session, deliveredSession)

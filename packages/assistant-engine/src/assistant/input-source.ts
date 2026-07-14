@@ -197,6 +197,7 @@ async function listStoredAssistantRouteActorInputs(input: {
 
     for (const event of listed.events) {
       if (!assistantInputEventMatchesDeliveryRoute({
+        accountId: input.conversation.accountId,
         conversation: event.conversation,
         deliveryRoute: input.deliveryRoute,
         replyTarget: event.replyTarget,
@@ -282,6 +283,7 @@ export function selectContiguousAssistantRouteActorInputBatch(input: {
       continue
     }
     if (!assistantInputEventMatchesDeliveryRoute({
+      accountId: input.query.conversation.accountId,
       conversation: candidate.event.conversation,
       deliveryRoute: input.query.deliveryRoute,
       replyTarget: candidate.event.replyTarget,
@@ -315,6 +317,7 @@ export function selectContiguousAssistantRouteActorInputBatch(input: {
 }
 
 function assistantInputEventMatchesDeliveryRoute(input: {
+  accountId: string | null
   conversation: AssistantInputConversationRef | null
   deliveryRoute: AssistantTurnRouteActorInputQuery['deliveryRoute']
   replyTarget: AssistantInputEventRecord['replyTarget']
@@ -322,6 +325,7 @@ function assistantInputEventMatchesDeliveryRoute(input: {
   threadIsDirect: boolean | null
 }): boolean {
   return typeof input.threadIsDirect === 'boolean' &&
+    input.conversation?.accountId === input.accountId &&
     input.conversation?.threadIsDirect === input.threadIsDirect &&
     normalizeAssistantInputRouteScalar(input.source) ===
       normalizeAssistantInputRouteScalar(input.deliveryRoute.channel) &&

@@ -859,6 +859,10 @@ export const assistantOutboxIntentSchema = z
     actorId: z.string().min(1).nullable(),
     threadId: z.string().min(1).nullable(),
     threadIsDirect: z.boolean().nullable(),
+    // `undefined` is reserved for pre-field legacy intents. New writers persist
+    // an explicit boolean so provider admission can fail closed only for the
+    // finite legacy ambiguity without changing ordinary current replies.
+    directHomeRouteOnly: z.boolean().optional(),
     replyToMessageId: z.string().min(1).nullable().default(null),
     bindingDelivery: assistantBindingDeliverySchema.nullable(),
     deliverySource: assistantDeliverySourceSchema.nullable().default(null),

@@ -214,6 +214,74 @@ describe('assistant outbox runtime', () => {
     ).rejects.toThrow('answered mailbox item ids exceed the 100 item limit')
   })
 
+  it('persists an explicit direct-home route authority classification', async () => {
+    const { vaultRoot } = await createAssistantVault(
+      'assistant-outbox-direct-home-route-',
+    )
+
+    const directHomeIntent = await createIntent(vaultRoot, {
+      directHomeRouteOnly: true,
+      sessionId: 'session-direct-home-route',
+      turnId: 'turn-direct-home-route',
+    })
+    const ordinaryIntent = await createIntent(vaultRoot, {
+      directHomeRouteOnly: false,
+      sessionId: 'session-ordinary-route',
+      turnId: 'turn-ordinary-route',
+    })
+
+    await expect(readAssistantOutboxIntent(vaultRoot, directHomeIntent.intentId))
+      .resolves.toMatchObject({ directHomeRouteOnly: true })
+    await expect(readAssistantOutboxIntent(vaultRoot, ordinaryIntent.intentId))
+      .resolves.toMatchObject({ directHomeRouteOnly: false })
+  })
+
+  it('monotonically strengthens legacy deduped direct-home route authority', async () => {
+    const { vaultRoot } = await createAssistantVault(
+      'assistant-outbox-direct-home-route-upgrade-',
+    )
+    const ordinaryIntent = await createIntent(vaultRoot, {
+      directHomeRouteOnly: false,
+      sessionId: 'session-direct-home-route-upgrade',
+      turnId: 'turn-direct-home-route-upgrade',
+    })
+    await saveAssistantOutboxIntent(vaultRoot, {
+      ...ordinaryIntent,
+      directHomeRouteOnly: undefined,
+    })
+
+    const classifiedOrdinaryIntent = await createIntent(vaultRoot, {
+      directHomeRouteOnly: false,
+      sessionId: 'session-direct-home-route-upgrade',
+      turnId: 'turn-direct-home-route-upgrade',
+    })
+    const strengthenedIntent = await createIntent(vaultRoot, {
+      directHomeRouteOnly: true,
+      sessionId: 'session-direct-home-route-upgrade',
+      turnId: 'turn-direct-home-route-upgrade',
+    })
+    const attemptedDowngrade = await createIntent(vaultRoot, {
+      directHomeRouteOnly: false,
+      sessionId: 'session-direct-home-route-upgrade',
+      turnId: 'turn-direct-home-route-upgrade',
+    })
+
+    expect(classifiedOrdinaryIntent).toMatchObject({
+      directHomeRouteOnly: false,
+      intentId: ordinaryIntent.intentId,
+    })
+    expect(strengthenedIntent).toMatchObject({
+      directHomeRouteOnly: true,
+      intentId: ordinaryIntent.intentId,
+    })
+    expect(attemptedDowngrade).toMatchObject({
+      directHomeRouteOnly: true,
+      intentId: ordinaryIntent.intentId,
+    })
+    await expect(readAssistantOutboxIntent(vaultRoot, ordinaryIntent.intentId))
+      .resolves.toMatchObject({ directHomeRouteOnly: true })
+  })
+
   it('persists auto-reply intent provenance when receipt repair has no receipt', async () => {
     const { vaultRoot } = await createAssistantVault('assistant-outbox-auto-reply-provenance-')
 
@@ -3431,6 +3499,7 @@ async function createIntent(
     createdAt: string
     deliveryIdempotencyKey: string | null
     dedupeToken: string | null
+    directHomeRouteOnly: boolean | null
     explicitTarget: string | null
     identityId: string | null
     message: string
@@ -3456,6 +3525,7 @@ async function createIntent(
       overrides.dedupeToken === undefined
         ? `${sessionId}:${turnId}`
         : overrides.dedupeToken,
+    directHomeRouteOnly: overrides.directHomeRouteOnly,
     explicitTarget: overrides.explicitTarget ?? null,
     identityId: overrides.identityId ?? 'participant-1',
     media: overrides.media ?? [],

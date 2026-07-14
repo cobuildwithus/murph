@@ -9185,7 +9185,19 @@ describe("hosted runtime callbacks", () => {
     ]);
   });
 
-  it("blocks routed Linq provider egress when route authority is revoked", async () => {
+  it("fails closed for a legacy unanchored direct Linq intent at provider entry", async () => {
+    mocks.readAssistantOutboxIntentMirrorState.mockResolvedValueOnce(
+      createMirrorState({
+        answeredMailboxItemIds: [],
+        channel: "linq",
+        delivery: null,
+        intentId: "intent_123",
+        lastError: null,
+        replyToMessageId: null,
+        status: "pending",
+        threadIsDirect: true,
+      }),
+    );
     const routeAuthority = {
       accountLookupKey: "hbidx:phone:v1:account",
       channel: "linq" as const,
@@ -9246,11 +9258,98 @@ describe("hosted runtime callbacks", () => {
       vaultRoot: HOSTED_WAKE.vaultRoot,
     })).rejects.toThrow("route revoked");
 
+    expect(assertRecentInbound).toHaveBeenCalledTimes(1);
     expect(assertRecentInbound).toHaveBeenCalledWith(
-      expect.objectContaining({ target: routeAuthority.threadId }),
+      expect.objectContaining({
+        authorityCheckOnly: false,
+        directHomeRouteOnly: true,
+        target: routeAuthority.threadId,
+      }),
       { signal: null },
     );
     expect(mocks.sendLinqMessage).not.toHaveBeenCalled();
+  });
+
+  it("preserves ordinary authority for a legacy reply-anchored direct Linq intent", async () => {
+    mocks.readAssistantOutboxIntentMirrorState.mockResolvedValueOnce(
+      createMirrorState({
+        answeredMailboxItemIds: ["mailbox_item_current"],
+        channel: "linq",
+        delivery: null,
+        intentId: "intent_123",
+        lastError: null,
+        replyToMessageId: "linq_message_current",
+        status: "pending",
+        threadIsDirect: true,
+      }),
+    );
+    const wake = buildHostedExecutionLinqConversationMessageWake({
+      eventId: "evt_linq_legacy_reply",
+      linqMessage: {
+        chatId: "linq_chat_current",
+        from: "+15550001",
+        isFromMe: false,
+        messageId: "linq_message_current",
+        parts: [{ type: "text", value: "hello on the current wake" }],
+      },
+      occurredAt: "2026-04-08T00:00:00.000Z",
+      phoneLookupKey: "+15559990000",
+      userId: "member_123",
+    });
+    const effect = createEffect({
+      actorId: "ain_hashed_actor",
+      bindingDeliveryKind: "thread",
+      bindingDeliveryTarget: "linq_chat_current",
+      channel: "linq",
+      explicitTarget: "linq_chat_current",
+      threadIsDirect: true,
+      transportIdempotent: true,
+    });
+    const assertRecentInbound = vi.fn(async (request) =>
+      buildClaimedLinqEngagementResult(request)
+    );
+    mocks.sendLinqMessage.mockResolvedValueOnce({
+      providerMessageId: "linq_message_sent",
+      providerThreadId: "linq_chat_current",
+      target: "linq_chat_current",
+      targetKind: "thread" as const,
+    });
+    mocks.dispatchAssistantOutboxIntent.mockImplementationOnce(async ({ dependencies }) => {
+      const delivery = await dependencies.sendLinq({
+        answeredMailboxItemIds: ["mailbox_item_current"],
+        idempotencyKey: "assistant-outbox:intent_123",
+        message: "hello from hosted",
+        replyToMessageId: "linq_message_current",
+        target: "linq_chat_current",
+        targetKind: "thread",
+      });
+      return createDispatchResult({
+        delivery: createDelivery({
+          channel: "linq",
+          providerMessageId: delivery.providerMessageId,
+          providerThreadId: delivery.providerThreadId,
+          target: delivery.target,
+          targetKind: delivery.targetKind,
+        }),
+        status: "sent",
+      });
+    });
+
+    await expect(drainHostedPreparedAssistantDeliveries({
+      assistantDeliveryEffects: [effect],
+      effectsPort: createHostedRuntimeEffectsPortStub({
+        assertLinqRecentInboundEngagement: assertRecentInbound,
+      }),
+      providerFetch: vi.fn<typeof fetch>(),
+      vaultRoot: HOSTED_WAKE.vaultRoot,
+      wake,
+    })).resolves.toHaveLength(1);
+
+    expect(assertRecentInbound).toHaveBeenCalledWith(
+      expect.not.objectContaining({ directHomeRouteOnly: true }),
+      { signal: null },
+    );
+    expect(mocks.sendLinqMessage).toHaveBeenCalledOnce();
   });
 
   it("authorizes routed Linq sends before vault-file approval or reads", async () => {
@@ -9685,12 +9784,24 @@ describe("hosted runtime callbacks", () => {
   );
 
   it("uses providerFetch for hosted Linq voice memo deliveries when the runtime can intercept egress", async () => {
+    mocks.readAssistantOutboxIntentMirrorState.mockResolvedValueOnce(
+      createMirrorState({
+        answeredMailboxItemIds: [],
+        channel: "linq",
+        delivery: null,
+        intentId: "intent_123",
+        lastError: null,
+        replyToMessageId: null,
+        status: "pending",
+        threadIsDirect: true,
+      }),
+    );
     const effect = createEffect({
       bindingDeliveryKind: "thread",
       bindingDeliveryTarget: "linq_chat_current",
       channel: "linq",
       explicitTarget: "linq_chat_current",
-      threadIsDirect: false,
+      threadIsDirect: true,
       transportIdempotent: false,
     });
     const providerFetch = vi.fn<typeof fetch>(async () => {
@@ -9730,6 +9841,7 @@ describe("hosted runtime callbacks", () => {
       assistantDeliveryEffects: [effect],
       wake: HOSTED_WAKE.wake,
       effectsPort: createHostedRuntimeEffectsPortStub({
+        assertLinqRecentInboundEngagement: assertRecentInbound,
         recordLinqDeliveryOutcome: recordDeliveryOutcome,
       }),
       providerFetch,
@@ -9737,6 +9849,13 @@ describe("hosted runtime callbacks", () => {
     });
     await drainHostedAssistantLinqDeliveryOutcomeWritesBestEffort();
 
+    expect(assertRecentInbound).toHaveBeenCalledWith(
+      expect.objectContaining({
+        directHomeRouteOnly: true,
+        target: "linq_chat_current",
+      }),
+      { signal: null },
+    );
     expect(mocks.sendLinqVoiceMemoMessage).toHaveBeenCalledWith({
       attachmentId: "attachment_voice_1",
       target: "linq_chat_current",
@@ -9768,7 +9887,7 @@ describe("hosted runtime callbacks", () => {
         providerThreadId: "linq_chat_current",
         target: "linq_chat_current",
         targetKind: "thread",
-        threadIsDirect: false,
+        threadIsDirect: true,
       }),
       { signal: expect.any(AbortSignal) },
     );

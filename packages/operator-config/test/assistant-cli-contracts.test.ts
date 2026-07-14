@@ -110,6 +110,15 @@ describe('assistant CLI delivery contracts', () => {
     expect(intent.intentId).toBe('outbox_123')
     expect(intent.sessionId).toBe('session_123')
     expect(intent.turnId).toBe('turn_123')
+    expect(intent.directHomeRouteOnly).toBeUndefined()
+    expect(assistantOutboxIntentSchema.parse({
+      ...intent,
+      directHomeRouteOnly: true,
+    }).directHomeRouteOnly).toBe(true)
+    expect(assistantOutboxIntentSchema.parse({
+      ...intent,
+      directHomeRouteOnly: false,
+    }).directHomeRouteOnly).toBe(false)
   })
 
   it('bounds assistant outbox answered mailbox item ids above the hosted import default', () => {

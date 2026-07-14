@@ -189,7 +189,6 @@ describe("hosted Linq egress authority", () => {
   it("confirms legacy automation migration only against the member home route", async () => {
     const prisma = createPrismaStub({
       homeChatId: "chat-home",
-      threadRouteContainerMemberId: "member-1",
     });
 
     await expect(assertHostedLinqRecentInboundEngagementForRuntime({
@@ -208,6 +207,21 @@ describe("hosted Linq egress authority", () => {
       memberId: "member-1",
       prisma: asRuntimeEngagementPrisma(prisma),
       target: "group-thread",
+      targetKind: "thread",
+    })).rejects.toMatchObject({
+      code: "HOSTED_LINQ_EGRESS_ROUTE_AUTHORITY_MISMATCH",
+      httpStatus: 403,
+    });
+
+    const groupRoutedHomePrisma = createPrismaStub({
+      homeChatId: "chat-home",
+      threadRouteContainerMemberId: "member-1",
+    });
+    await expect(assertHostedLinqRecentInboundEngagementForRuntime({
+      directHomeRouteOnly: true,
+      memberId: "member-1",
+      prisma: asRuntimeEngagementPrisma(groupRoutedHomePrisma),
+      target: "chat-home",
       targetKind: "thread",
     })).rejects.toMatchObject({
       code: "HOSTED_LINQ_EGRESS_ROUTE_AUTHORITY_MISMATCH",

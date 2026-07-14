@@ -139,6 +139,28 @@ interface HostedAssistantDeliveryBoundaryFields {
   turnId: string;
 }
 
+function resolveHostedAssistantDirectHomeRouteOnly(
+  intent: AssistantOutboxIntent | null,
+): boolean {
+  if (!intent) {
+    return false;
+  }
+  if (typeof intent.directHomeRouteOnly === "boolean") {
+    return intent.directHomeRouteOnly;
+  }
+
+  // Legacy intents predate the explicit authority classification. Proactive
+  // direct Linq sends have no inbound reply anchor, so fail them closed as
+  // direct-home-only. Legacy current-inbound replies keep their persisted
+  // reply evidence and continue through ordinary route authority.
+  return (
+    intent.channel === "linq"
+    && intent.threadIsDirect === true
+    && intent.replyToMessageId === null
+    && intent.answeredMailboxItemIds.length === 0
+  );
+}
+
 export interface CollectHostedAssistantDeliverySideEffectsInput {
   actionApprovalPort?: HostedRuntimeActionApprovalPort | null;
   includeBackgroundDueIntents: boolean;
@@ -2191,6 +2213,9 @@ async function deliverHostedPreparedAssistantDelivery(input: {
           intentId: input.assistantDeliveryEffect.effectId,
           linqEnv: input.linqEnv,
           linqDeliveryContexts,
+          directHomeRouteOnly: resolveHostedAssistantDirectHomeRouteOnly(
+            mirrorState.intent,
+          ),
           threadIsDirect: input.assistantDeliveryEffect.payload.threadIsDirect ?? null,
           shouldYieldBackgroundDelivery: input.shouldYieldBackgroundDelivery,
           onProviderDispatchEntered: () => {
@@ -2206,6 +2231,9 @@ async function deliverHostedPreparedAssistantDelivery(input: {
           effectsPort: input.effectsPort,
           linqEnv: input.linqEnv,
           linqDeliveryContexts,
+          directHomeRouteOnly: resolveHostedAssistantDirectHomeRouteOnly(
+            mirrorState.intent,
+          ),
           threadIsDirect: input.assistantDeliveryEffect.payload.threadIsDirect ?? null,
           shouldYieldBackgroundDelivery: input.shouldYieldBackgroundDelivery,
           onProviderDispatchEntered: () => {
@@ -2616,6 +2644,7 @@ function resolveHostedAssistantLinqDeliveryContexts(input: {
 function createHostedAssistantLinqSendDependency(input: {
   actionApprovalPort?: HostedRuntimeActionApprovalPort | null;
   assertLiveness?: () => Promise<void>;
+  directHomeRouteOnly?: boolean | null;
   effectsPort?: Pick<
     HostedRuntimeEffectsPort,
     "assertLinqRecentInboundEngagement" | "recordLinqDeliveryOutcome"
@@ -2666,6 +2695,7 @@ function createHostedAssistantLinqSendDependency(input: {
           answeredMailboxItemIds: request.answeredMailboxItemIds,
           authorityCheckOnly: true,
           deliveryContext,
+          directHomeRouteOnly: input.directHomeRouteOnly,
           directRecipientPhoneNumber,
           effectsPort: input.effectsPort ?? null,
           fromPhoneNumber,
@@ -2714,6 +2744,7 @@ function createHostedAssistantLinqSendDependency(input: {
           await assertHostedAssistantLinqRecentInboundEngagementForDelivery({
             answeredMailboxItemIds: request.answeredMailboxItemIds,
             deliveryContext,
+            directHomeRouteOnly: input.directHomeRouteOnly,
             directRecipientPhoneNumber,
             effectsPort: input.effectsPort ?? null,
             fromPhoneNumber,
@@ -2939,6 +2970,7 @@ function buildHostedVaultFileMediaIdentity(input: {
 
 function createHostedAssistantLinqVoiceMemoSendDependency(input: {
   assertLiveness?: () => Promise<void>;
+  directHomeRouteOnly?: boolean | null;
   effectsPort?: Pick<
     HostedRuntimeEffectsPort,
     "assertLinqRecentInboundEngagement" | "recordLinqDeliveryOutcome"
@@ -2982,6 +3014,7 @@ function createHostedAssistantLinqVoiceMemoSendDependency(input: {
           answeredMailboxItemIds: request.answeredMailboxItemIds,
           authorityCheckOnly: true,
           deliveryContext,
+          directHomeRouteOnly: input.directHomeRouteOnly,
           directRecipientPhoneNumber: deliveryContext?.directRecipientPhoneNumber ?? null,
           effectsPort: input.effectsPort ?? null,
           fromPhoneNumber: deliveryContext?.fromPhoneNumber ?? null,
@@ -3005,6 +3038,7 @@ function createHostedAssistantLinqVoiceMemoSendDependency(input: {
           await assertHostedAssistantLinqRecentInboundEngagementForDelivery({
             answeredMailboxItemIds: request.answeredMailboxItemIds,
             deliveryContext,
+            directHomeRouteOnly: input.directHomeRouteOnly,
             directRecipientPhoneNumber:
               deliveryContext?.directRecipientPhoneNumber ?? null,
             effectsPort: input.effectsPort ?? null,
@@ -3339,6 +3373,7 @@ async function assertHostedAssistantLinqRecentInboundEngagementForDelivery(input
   answeredMailboxItemIds?: readonly string[] | null;
   authorityCheckOnly?: boolean;
   deliveryContext: HostedAssistantLinqDeliveryContext | null;
+  directHomeRouteOnly?: boolean | null;
   directRecipientPhoneNumber: string | null;
   effectsPort?: Pick<HostedRuntimeEffectsPort, "assertLinqRecentInboundEngagement"> | null;
   fromPhoneNumber: string | null;
@@ -3369,6 +3404,9 @@ async function assertHostedAssistantLinqRecentInboundEngagementForDelivery(input
         : {}),
       authorityCheckOnly: input.authorityCheckOnly === true,
       ...(currentInbound ? { currentInbound } : {}),
+      ...(input.directHomeRouteOnly === true
+        ? { directHomeRouteOnly: true }
+        : {}),
       directRecipientPhoneNumber: input.directRecipientPhoneNumber,
       fromPhoneNumber: input.fromPhoneNumber,
       homeRouteFallbackAllowed: input.homeRouteFallbackAllowed,
