@@ -142,19 +142,24 @@ describe("importDeviceBatch", () => {
     ).rejects.toMatchObject({ code: "VAULT_INVALID_EXTERNAL_REF" });
   });
 
-  it("requires externalRef for immutable update policy", async () => {
+  it("requires externalRef for supported update policies", async () => {
     const vaultRoot = await createTestVaultRoot();
 
-    await expect(
-      importDeviceBatch({
-        vaultRoot,
-        provider: "oura",
-        events: invalidTestValue<typeof VALID_DEVICE_EVENT[]>([{
-          ...VALID_DEVICE_EVENT,
-          externalRefUpdatePolicy: "immutable",
-        }]),
-      }),
-    ).rejects.toMatchObject({ code: "VAULT_INVALID_EXTERNAL_REF" });
+    for (const externalRefUpdatePolicy of [
+      "immutable",
+      "prefer-higher-confidence",
+    ] as const) {
+      await expect(
+        importDeviceBatch({
+          vaultRoot,
+          provider: "oura",
+          events: invalidTestValue<typeof VALID_DEVICE_EVENT[]>([{
+            ...VALID_DEVICE_EVENT,
+            externalRefUpdatePolicy,
+          }]),
+        }),
+      ).rejects.toMatchObject({ code: "VAULT_INVALID_EXTERNAL_REF" });
+    }
   });
 
   it("rejects device event fields that try to override canonical event identity", async () => {
