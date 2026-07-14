@@ -300,7 +300,6 @@ describe("murph.group dynamic tool", () => {
     });
 
     expect(result.rpcResult.success).toBe(true);
-    expect(result.codexThreadHistoryUnsafe).toBe(true);
     expect(readGroupToolPayload(result)).toEqual(response);
     expect(groupRequest).toHaveBeenCalledWith({ action: "list_memberships" });
   });

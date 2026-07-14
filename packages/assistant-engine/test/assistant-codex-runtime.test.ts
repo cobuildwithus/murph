@@ -9878,19 +9878,28 @@ describe('assistant codex runtime', () => {
       return child
     })
 
-    await expect(
-      executeCodexAppServerTurn({
-        prompt: 'resume please',
-        resumeSessionId: 'stale-thread',
-        workingDirectory,
-      }),
-    ).rejects.toMatchObject({
+    const error: unknown = await executeCodexAppServerTurn({
+      prompt: 'resume please',
+      resumeSessionId: 'stale-thread',
+      workingDirectory,
+    }).then(
+      () => {
+        throw new Error('expected stale resume to fail')
+      },
+      (turnError: unknown) => turnError,
+    )
+
+    expect(error).toMatchObject({
       code: 'ASSISTANT_CODEX_RESUME_STALE',
       context: {
         retryable: true,
         staleResume: true,
       },
       message: expect.stringContaining('no rollout found for thread id stale-thread'),
+    })
+    expect(readCodexAppServerTurnFailureContext(error)).toMatchObject({
+      codexThreadId: null,
+      providerTurnId: null,
     })
   })
 
@@ -10046,16 +10055,21 @@ describe('assistant codex runtime', () => {
       return child
     })
 
-    await expect(
-      executeCodexAppServerTurn({
-        approvalPolicy: 'never',
-        model: 'gpt-5.1',
-        modelProvider: 'openai',
-        prompt: 'resume with wrong returned id',
-        resumeSessionId: 'requested-thread',
-        workingDirectory,
-      }),
-    ).rejects.toMatchObject({
+    const error: unknown = await executeCodexAppServerTurn({
+      approvalPolicy: 'never',
+      model: 'gpt-5.1',
+      modelProvider: 'openai',
+      prompt: 'resume with wrong returned id',
+      resumeSessionId: 'requested-thread',
+      workingDirectory,
+    }).then(
+      () => {
+        throw new Error('expected mismatched resume identity to fail')
+      },
+      (turnError: unknown) => turnError,
+    )
+
+    expect(error).toMatchObject({
       code: 'ASSISTANT_CODEX_RESUME_STALE',
       context: {
         mismatchedFields: ['threadId'],
@@ -10063,6 +10077,10 @@ describe('assistant codex runtime', () => {
         retryable: true,
         staleResume: true,
       },
+    })
+    expect(readCodexAppServerTurnFailureContext(error)).toMatchObject({
+      codexThreadId: null,
+      providerTurnId: null,
     })
 
     const child = requireMockChildProcess(spawnedChildren[0] ?? null)
@@ -13893,6 +13911,106 @@ describe('assistant codex event shaping', () => {
       })
     })
 
+    it('preserves accepted no-reply and rollout context when the recorded hook fails', async () => {
+      const workingDirectory = await createTempDir('assistant-codex-no-reply-recorded-fail-work-')
+      const codexHome = await createTempDir('assistant-codex-no-reply-recorded-fail-home-')
+      const threadId = '00000000-0000-4000-8000-000000000620'
+      const rolloutRelativePath =
+        `sessions/2026/07/14/rollout-2026-07-14T01-02-03-${threadId}.jsonl`
+      const onFinishWithoutReplyAccepted = vi.fn()
+      const markerFailure = new Error('no-reply marker persistence failed')
+      const recordedHookCalled = createDeferred<void>()
+      const onFinishWithoutReplyRecorded = vi.fn(async () => {
+        recordedHookCalled.resolve()
+        throw markerFailure
+      })
+      const spawnedChildren: MockChildProcess[] = []
+      mockProcessGroupSignalsForChildren(spawnedChildren)
+
+      codexMocks.spawn.mockImplementation(() => {
+        const child = new MockChildProcess()
+        child.pid = 31_475 + spawnedChildren.length
+        spawnedChildren.push(child)
+
+        queueMicrotask(() => {
+          void (async () => {
+            const initialize = await waitForRpcMethod(child, 'initialize')
+            child.stdout.write(jsonLine({ id: initialize.id, result: {} }))
+            const thread = await waitForRpcMethod(child, 'thread/start')
+            child.stdout.write(jsonLine({
+              id: thread.id,
+              result: {
+                thread: {
+                  id: threadId,
+                  path: path.join(codexHome, rolloutRelativePath),
+                },
+              },
+            }))
+            const turn = await waitForRpcMethod(child, 'turn/start')
+            child.stdout.write(jsonLine({
+              id: turn.id,
+              result: {
+                turn: {
+                  id: 'turn-no-reply-recorded-fail',
+                },
+              },
+            }))
+            child.stdout.write(jsonLine({
+              id: 43,
+              method: 'item/tool/call',
+              params: {
+                namespace: 'murph',
+                tool: 'finish_without_reply',
+                arguments: {},
+                threadId,
+                turnId: 'turn-no-reply-recorded-fail',
+              },
+            }))
+            await recordedHookCalled.promise
+          })()
+        })
+
+        return child
+      })
+
+      const error: unknown = await executeCodexAppServerTurn({
+        approvalPolicy: 'never',
+        codexHome,
+        env: {
+          PATH: '/custom/bin',
+        },
+        onFinishWithoutReplyAccepted,
+        onFinishWithoutReplyRecorded,
+        prompt: 'finish without replying',
+        sandbox: 'workspace-write',
+        workingDirectory,
+      }).then(
+        () => {
+          throw new Error('expected the recorded hook to fail the Codex turn')
+        },
+        (turnError: unknown) => turnError,
+      )
+
+      expect(error).toBe(markerFailure)
+      expect(onFinishWithoutReplyAccepted).toHaveBeenCalledWith({
+        deliveryContextOrdinal: 0,
+      })
+      expect(onFinishWithoutReplyRecorded).toHaveBeenCalledWith({
+        deliveryContextOrdinal: 0,
+      })
+      expect(
+        onFinishWithoutReplyAccepted.mock.invocationCallOrder[0],
+      ).toBeLessThan(
+        onFinishWithoutReplyRecorded.mock.invocationCallOrder[0],
+      )
+      expect(readCodexAppServerTurnFailureContext(error)).toMatchObject({
+        acceptedNoReplyDeliveryContextOrdinals: [0],
+        codexThreadId: threadId,
+        providerTurnId: 'turn-no-reply-recorded-fail',
+        rolloutRelativePath,
+      })
+    })
+
     it('caps tracked subagent usage threads and reports the dropped-thread count', async () => {
       const workingDirectory = await createTempDir('assistant-codex-subagent-cap-work-')
       const codexHome = await createTempDir('assistant-codex-subagent-cap-home-')
@@ -14629,7 +14747,6 @@ describe('steered final segments', () => {
     steps: Array<Record<string, unknown> | ScriptedSteeredFinalStep>,
     input: {
       hostedToolContext?: CodexAppServerTurnInput['hostedToolContext']
-      onCodexThreadHistoryUnsafe?: CodexAppServerTurnInput['onCodexThreadHistoryUnsafe']
       onProgress?: CodexAppServerTurnInput['onProgress']
       onTraceEvent?: CodexAppServerTurnInput['onTraceEvent']
       progressDelivery?: CodexAppServerTurnInput['progressDelivery']
@@ -14779,7 +14896,6 @@ describe('steered final segments', () => {
       codexCommand: 'codex',
       codexHome,
       hostedToolContext: input.hostedToolContext,
-      onCodexThreadHistoryUnsafe: input.onCodexThreadHistoryUnsafe,
       onProgress: input.onProgress,
       onTraceEvent: input.onTraceEvent,
       progressDelivery: input.progressDelivery,
@@ -14798,7 +14914,7 @@ describe('steered final segments', () => {
     }
   }
 
-  it('marks successful membership reads history-unsafe before preserving Codex continuity', async () => {
+  it('returns successful membership reads while preserving Codex continuity', async () => {
     const response = {
       action: 'list_memberships' as const,
       result: {
@@ -14819,7 +14935,6 @@ describe('steered final segments', () => {
         truncated: false,
       },
     }
-    const onCodexThreadHistoryUnsafe = vi.fn()
     const groupTool = {
       request: vi.fn(async () => response),
     }
@@ -14837,59 +14952,10 @@ describe('steered final segments', () => {
       }),
     ], {
       hostedToolContext: createHostedToolContext({ groupTool }),
-      onCodexThreadHistoryUnsafe,
     })
 
     expect(groupTool.request).toHaveBeenCalledWith({ action: 'list_memberships' })
-    expect(onCodexThreadHistoryUnsafe).toHaveBeenCalledOnce()
-    expect(result.codexThreadHistoryUnsafe).toBe(true)
     expect(result.finalMessage).toBe('You belong to Sunday runners.')
-  })
-
-  it('retains the history-unsafe signal when the provider fails after a membership read', async () => {
-    const response = {
-      action: 'list_memberships' as const,
-      result: {
-        memberships: [{
-          displayName: 'Private membership failure sentinel',
-          grantedVaultShareProjectionScopes: [],
-          kind: 'family',
-          memberCount: 2,
-          permissionsUrl: null,
-          requestedVaultShareProjectionScopes: [],
-          role: 'member',
-        }],
-        status: 'ok' as const,
-        truncated: false,
-      },
-    }
-    const onCodexThreadHistoryUnsafe = vi.fn()
-    const groupTool = {
-      request: vi.fn(async () => response),
-    }
-
-    let error: unknown
-    try {
-      await runScriptedSteeredFinalSegmentsTurn([
-        {
-          expectedText: JSON.stringify(response),
-          id: 84,
-          kind: 'list-memberships',
-        },
-      ], {
-        hostedToolContext: createHostedToolContext({ groupTool }),
-        onCodexThreadHistoryUnsafe,
-        turnStatus: 'failed',
-      })
-    } catch (caught) {
-      error = caught
-    }
-
-    expect(error).toBeInstanceOf(Error)
-    expect(onCodexThreadHistoryUnsafe).toHaveBeenCalledOnce()
-    expect(readCodexAppServerTurnFailureContext(error)).toMatchObject({
-      codexThreadHistoryUnsafe: true,
-    })
   })
 
   it('returns no final text or outbound progress for a commentary-only turn', async () => {
@@ -15358,7 +15424,6 @@ describe('steered final segments', () => {
     ])
 
     expect(result.finalAction).toBeNull()
-    expect(result.codexThreadHistoryUnsafe).toBe(true)
     expect(result.acceptedNoReplyDeliveryContextOrdinals).toEqual([0])
     expect(result.finalMessage).toBe('Visible answer.')
     expect(result.precedingAgentMessageSegments).toEqual([])
@@ -15394,7 +15459,6 @@ describe('steered final segments', () => {
     expect(result.finalAction).toBeNull()
     expect(result.finalActionExplicit).toBe(false)
     expect(result.acceptedNoReplyDeliveryContextOrdinals).toEqual([])
-    expect(result.codexThreadHistoryUnsafe).toBe(false)
     expect(result.finalMessage).toBe('This final text should be delivered.')
     expect(result.responseMedia).toEqual([media])
     expect(result.precedingAgentMessageSegments).toEqual([])
@@ -15431,7 +15495,6 @@ describe('steered final segments', () => {
     expect(result.finalAction).toEqual({ kind: 'none' })
     expect(result.finalActionExplicit).toBe(true)
     expect(result.acceptedNoReplyDeliveryContextOrdinals).toEqual([0])
-    expect(result.codexThreadHistoryUnsafe).toBe(true)
     expect(result.finalMessage).toBe('')
     expect(result.responseMedia).toEqual([])
     expect(result.precedingAgentMessageSegments).toEqual([])
@@ -15481,7 +15544,6 @@ describe('steered final segments', () => {
     expect(result.finalAction).toBeNull()
     expect(result.finalActionExplicit).toBe(false)
     expect(result.acceptedNoReplyDeliveryContextOrdinals).toEqual([0])
-    expect(result.codexThreadHistoryUnsafe).toBe(true)
     expect(result.finalMessage).toBe('Visible answer with media.')
     expect(result.responseMedia).toEqual([media])
     expect(result.precedingAgentMessageSegments).toEqual([])
@@ -15512,7 +15574,6 @@ describe('steered final segments', () => {
       },
     ])
 
-    expect(result.codexThreadHistoryUnsafe).toBe(false)
     expect(result.acceptedNoReplyDeliveryContextOrdinals).toEqual([])
     expect(result.finalMessage).toBe('Answer one.')
     expect(result.finalAction).toBeNull()
@@ -15550,7 +15611,6 @@ describe('steered final segments', () => {
       },
     ])
 
-    expect(result.codexThreadHistoryUnsafe).toBe(false)
     expect(result.acceptedNoReplyDeliveryContextOrdinals).toEqual([])
     expect(result.finalMessage).toBe('Answer two.')
     expect(result.finalAction).toBeNull()

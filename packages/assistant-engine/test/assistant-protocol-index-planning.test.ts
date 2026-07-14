@@ -111,15 +111,15 @@ describe('assistant protocol index planning', () => {
     expect(plan).not.toHaveProperty(removedRouteEnvProperty)
   })
 
-  it('preserves no-reply execution hooks in Codex execution plans', async () => {
-    const onCodexThreadHistoryUnsafe = vi.fn()
+  it('preserves the no-reply hooks in Codex execution plans', async () => {
     const onFinishWithoutReplyAccepted = vi.fn()
+    const onFinishWithoutReplyRecorded = vi.fn()
 
     const plan = await buildCodexTurnExecutionPlan({
       allowFinishWithoutReply: true,
       input: createMessageInput(),
-      onCodexThreadHistoryUnsafe,
       onFinishWithoutReplyAccepted,
+      onFinishWithoutReplyRecorded,
       plan: createSharedPlan(),
       resolvedSession: createSession(),
       route: createRoute(),
@@ -128,8 +128,8 @@ describe('assistant protocol index planning', () => {
     })
 
     expect(plan.allowFinishWithoutReply).toBe(true)
-    expect(plan.onCodexThreadHistoryUnsafe).toBe(onCodexThreadHistoryUnsafe)
     expect(plan.onFinishWithoutReplyAccepted).toBe(onFinishWithoutReplyAccepted)
+    expect(plan.onFinishWithoutReplyRecorded).toBe(onFinishWithoutReplyRecorded)
   })
 
   it('resolves disabled native resume notification turns as isolated threads', async () => {
@@ -757,7 +757,6 @@ describe('assistant protocol index planning', () => {
     expect(resumedPlan.developerInstructions).toBeNull()
     expect(resumedPlan.sessionContext).toBeUndefined()
     expect(resumedPlan.turnContextPrompt).toContain(turnContext)
-    expect(resumedPlan.resume?.prepareFreshThreadFallback).toEqual(expect.any(Function))
     expect(resumedPlan.planningDiagnostics).toMatchObject({
       shouldPrepareBootstrapContext: false,
     })
@@ -769,19 +768,6 @@ describe('assistant protocol index planning', () => {
       vaultRoot: '/vault',
     })
 
-    const fallback = await resumedPlan.resume?.prepareFreshThreadFallback()
-
-    expect(fallback?.developerInstructions).toContain(
-      'bootstrap contract',
-    )
-    expect(fallback?.turnContextPrompt).toContain(turnContext)
-    expect(fallback?.sessionContext).toEqual({
-      binding: resumedSession.binding,
-    })
-    expect(
-      planningMocks.readAssistantCliSurfaceBootstrapContext,
-    ).toHaveBeenCalledTimes(1)
-    expect(planningMocks.readAssistantContextSnapshotPrompt).toHaveBeenCalledTimes(1)
   })
 
   it('starts a fresh thread once for legacy resume state without an assistant contract fingerprint', async () => {
@@ -1722,23 +1708,9 @@ describe('assistant protocol index planning', () => {
     ).toHaveBeenCalledTimes(1)
     expect(planningMocks.readAssistantContextSnapshotPrompt).toHaveBeenCalledTimes(1)
 
-    planningMocks.readAssistantContextSnapshotPrompt.mockClear()
-    const fallback = await resumedPlan.resume?.prepareFreshThreadFallback()
-
-    expect(fallback?.developerInstructions).toContain('bootstrap contract')
-    expect(fallback?.developerInstructions).not.toContain(
-      'Current assistant context snapshot.',
-    )
-    expect(fallback?.turnContextPrompt).toContain(
-      'Current assistant context snapshot.',
-    )
-    expect(
-      planningMocks.readAssistantCliSurfaceBootstrapContext,
-    ).toHaveBeenCalledTimes(1)
-    expect(planningMocks.readAssistantContextSnapshotPrompt).not.toHaveBeenCalled()
   })
 
-  it('plans native resume while preparing committed transcript fallback lazily', async () => {
+  it('plans native resume without preparing committed transcript replay', async () => {
     planningMocks.readAssistantCliSurfaceBootstrapContext.mockResolvedValue('bootstrap contract')
     planningMocks.readAssistantContextSnapshotPrompt.mockResolvedValue(null)
     planningMocks.resolveCodexAssistantTargetCapabilities.mockReturnValue({
@@ -1787,7 +1759,6 @@ describe('assistant protocol index planning', () => {
     expect(resumedPlan.codexContinuation).toEqual({
       kind: 'provider-state-optimization',
     })
-    expect(resumedPlan.resume?.prepareFreshThreadFallback).toEqual(expect.any(Function))
   })
 
   it('replays bounded committed transcript messages when provider-native resume is unavailable', async () => {
@@ -2212,7 +2183,7 @@ describe('assistant protocol index planning', () => {
     }
   })
 
-  it('prepares committed transcript messages for stale native-resume fallback', async () => {
+  it('does not replay committed transcript messages for native resume', async () => {
     planningMocks.readAssistantCliSurfaceBootstrapContext.mockResolvedValue('bootstrap contract')
     planningMocks.readAssistantContextSnapshotPrompt.mockResolvedValue(null)
     planningMocks.resolveCodexAssistantTargetCapabilities.mockReturnValue({
@@ -2288,24 +2259,12 @@ describe('assistant protocol index planning', () => {
 
       expect(plan.resume?.codexThreadId).toBe('thread-resume')
       expect(plan.conversationHistoryMessages).toBeUndefined()
-      await expect(plan.resume?.prepareFreshThreadFallback()).resolves.toMatchObject({
-        conversationHistoryMessages: [
-          {
-            content: 'Earlier protocol context.',
-            role: 'user',
-          },
-          {
-            content: 'Got it.',
-            role: 'assistant',
-          },
-        ],
-      })
     } finally {
       await rm(vault, { force: true, recursive: true })
     }
   })
 
-  it('prepares committed transcript messages for notification fresh-thread fallback', async () => {
+  it('does not replay committed transcript messages for notification native resume', async () => {
     planningMocks.readAssistantCliSurfaceBootstrapContext.mockResolvedValue('bootstrap contract')
     planningMocks.readAssistantContextSnapshotPrompt.mockResolvedValue(null)
     planningMocks.resolveCodexAssistantTargetCapabilities.mockReturnValue({
@@ -2377,18 +2336,6 @@ describe('assistant protocol index planning', () => {
 
       expect(plan.resume?.codexThreadId).toBe('thread-resume')
       expect(plan.conversationHistoryMessages).toBeUndefined()
-      await expect(plan.resume?.prepareFreshThreadFallback()).resolves.toMatchObject({
-        conversationHistoryMessages: [
-          {
-            content: 'Prior sensitive context.',
-            role: 'user',
-          },
-          {
-            content: 'Prior assistant context.',
-            role: 'assistant',
-          },
-        ],
-      })
     } finally {
       await rm(vault, { force: true, recursive: true })
     }
