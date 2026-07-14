@@ -18,7 +18,7 @@ runtime, or privacy behavior already present on `main`.
 - Guarded remote PR head: `17c814a9774653daea37a0cab0440576ca711696`.
 - Current remote `main`: `049c74af405af191a0d35442c20abc15174c86a5`.
 - The local head contains the remote PR head and is 165 base commits behind.
-- A read-only merge-tree simulation reports 19 conflict paths.
+- A read-only merge-tree simulation reports 21 conflict paths.
 
 ## Constraints
 
@@ -34,7 +34,7 @@ runtime, or privacy behavior already present on `main`.
 
 ## Working Set
 
-- The 19 conflict paths reported by the `HEAD`/`origin/main` merge simulation.
+- The 21 conflict paths reported by the `HEAD`/`origin/main` merge simulation.
 - Directly affected focused tests and generated artifacts only when required by
   the resolved owner behavior.
 - This plan and its exact coordination-ledger row.
@@ -53,3 +53,21 @@ runtime, or privacy behavior already present on `main`.
   the final head conflict-free and merge-ready.
 - Close this plan with `scripts/finish-task`; preserve the PR worktree because
   the open PR remains active.
+
+## Completion Evidence
+
+- All 21 merge conflicts were resolved with zero unmerged, unstaged, or
+  untracked paths and clean staged diff checks.
+- Focused web, assistant-engine, and assistant-runtime tests passed, including
+  the merged mailbox-resume, Call Circle authority, bounded post-commit, and
+  provider-entry claim boundaries. Assistant-engine, assistant-runtime, and
+  the full Prisma-generating hosted-web typechecks passed.
+- Required coverage-write and security/privacy audits reported zero remaining
+  Critical, High, or Medium findings on the final staged behavior.
+- Full `pnpm verify:acceptance` was launched with package, app, and Vitest
+  concurrency forced to one after a clean 30-second host-pressure guard. The
+  controller subsequently authorized CI-backed completion without waiting for
+  the long local remainder because repeated candidate windows showed active
+  compression/pageout pressure. The already-owned process was left to exit
+  naturally under the no-signal rule; exact-head CI is the executable
+  completion proof for the pushed merge head.

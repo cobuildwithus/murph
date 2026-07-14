@@ -403,6 +403,7 @@ model HostedMember {
   hostedCryptoEnvelopes          HostedUserCryptoEnvelope[]
   hostedCryptoAudits             HostedUserCryptoAudit[]
   webSessions                    HostedWebSession[]
+  mealPhotoCaptureEnrollments    HostedMealPhotoCaptureEnrollment[]
   connectedAppsSession           HostedConnectedAppsSession?
   connectedAppConnectIntents     HostedConnectedAppConnectIntent[]
   codexAuthConnection            HostedCodexAuthConnection?
@@ -471,6 +472,25 @@ model HostedWebSession {
   @@index([expiresAt])
   @@index([revokedAt])
   @@map("hosted_web_session")
+}
+
+model HostedMealPhotoCaptureEnrollment {
+  id                         String       @id
+  memberId                   String       @map("member_id")
+  installationIdHash         String       @map("installation_id_hash")
+  uploadTokenHash            String       @unique @map("upload_token_hash")
+  idempotencySecretEncrypted String       @map("idempotency_secret_encrypted")
+  expiresAt                  DateTime     @map("expires_at")
+  revokedAt                  DateTime?    @map("revoked_at")
+  revokeReason               String?      @map("revoke_reason")
+  createdAt                  DateTime     @default(now()) @map("created_at")
+  updatedAt                  DateTime     @updatedAt @map("updated_at")
+  member                     HostedMember @relation(fields: [memberId], references: [id], onDelete: Cascade)
+
+  @@unique([memberId, installationIdHash])
+  @@index([memberId, revokedAt, expiresAt])
+  @@index([expiresAt])
+  @@map("hosted_meal_photo_capture_enrollment")
 }
 
 model HostedSensitiveActionChallenge {
@@ -547,6 +567,7 @@ model HostedComputerRun {
   awaitingMessage            String?                        @map("awaiting_message")
   suggestedReply             String?                        @map("suggested_reply")
   pausedAt                   DateTime?                      @map("paused_at")
+  resumeAfterMailboxLaneSeq  BigInt?                        @map("resume_after_mailbox_lane_seq")
   pendingHandoffId           String?                        @map("pending_handoff_id")
   metadataJson               Json?                          @map("metadata_json")
   expiresAt                  DateTime                       @map("expires_at")
@@ -691,6 +712,9 @@ model HostedMemberRouting {
   /// Sticky post-activation Linq home thread for the member's long-lived Murph number.
   linqChatLookupKey                  String?      @unique @map("linq_chat_lookup_key")
   linqChatIdEncrypted                String?      @map("linq_chat_id_encrypted")
+  /// Blinded participant identity that owns the durable home thread.
+  linqParticipantContactKind        String?      @map("linq_participant_contact_kind")
+  linqParticipantContactLookupKey   String?      @map("linq_participant_contact_lookup_key")
   linqRecipientPhoneLookupKey        String?      @map("linq_recipient_phone_lookup_key")
   linqRecipientPhoneEncrypted        String?      @map("linq_recipient_phone_encrypted")
   linqHomeLineAssignedAt             DateTime?    @map("linq_home_line_assigned_at")
@@ -1190,6 +1214,8 @@ model HostedGroupMember {
   memberId  String       @map("member_id")
   role      String       @default("member")
   joinedAt  DateTime?    @map("joined_at")
+  joinConfirmationEligibleAt DateTime? @map("join_confirmation_eligible_at")
+  joinConfirmationOrigin String?       @map("join_confirmation_origin")
   createdAt DateTime     @default(now()) @map("created_at")
   updatedAt DateTime     @updatedAt @map("updated_at")
   group     HostedGroup  @relation(fields: [groupId], references: [id], onDelete: Cascade)

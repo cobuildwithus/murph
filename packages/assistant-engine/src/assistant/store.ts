@@ -38,6 +38,7 @@ import {
   readAssistantTranscriptEntries,
   readAssistantTranscriptTailEntries,
   readAutomationState,
+  retireLegacyAssistantConversationKey,
   writeAutomationState,
   replaceTranscriptEntries,
   synchronizeAssistantIndexes,
@@ -48,6 +49,7 @@ import {
   bindingPatchFromLocator,
   normalizeProviderOptions,
   createAssistantSessionId,
+  resolveLegacyAssistantConversationLookupKeyEntries,
   resolveAssistantConversationLookupKeyEntries,
   resolveAssistantStatePaths,
   type AssistantStatePaths,
@@ -115,6 +117,8 @@ export async function resolveAssistantSession(
     }
     const conversationLookupEntries =
       resolveAssistantConversationLookupKeyEntries(input)
+    const legacyConversationLookupEntries =
+      resolveLegacyAssistantConversationLookupKeyEntries(input)
 
     if (sessionId) {
       const resolved = await loadAndPersistResolvedSession({
@@ -194,6 +198,53 @@ export async function resolveAssistantSession(
       }
     }
 
+    const legacyResetSessions = new Map<string, AssistantSession>()
+    for (const legacyLookupEntry of legacyConversationLookupEntries) {
+      const sessionId = indexes.conversationKeys[legacyLookupEntry.key]
+      if (!sessionId) {
+        continue
+      }
+
+      const legacySession = await readAssistantSession({ paths, sessionId })
+      if (
+        !legacySession ||
+        legacySession.binding.conversationKey !== legacyLookupEntry.key
+      ) {
+        continue
+      }
+
+      if (canMigrateLegacyAssistantAudienceSession({
+        bindingPatch,
+        session: legacySession,
+      })) {
+        const resolved = await loadAndPersistResolvedSession({
+          paths,
+          sessionId,
+          persistenceInput: {
+            ...persistenceInput,
+            lookupSource: 'conversation-key',
+          },
+          expectedContinuityFingerprint: requestedContinuityFingerprint,
+          skipIfExpired: true,
+          maxSessionAgeMs: input.maxSessionAgeMs,
+          now: input.now,
+        })
+        if (resolved) {
+          return withAssistantSessionResolutionDiagnostics(
+            resolved,
+            buildAssistantSessionResolutionDiagnostics({
+              ...conversationLookupDiagnosticsInput,
+              legacyAudienceContinuity: 'migrated',
+              lookupSource: 'conversation-key',
+              matchedEntry: legacyLookupEntry,
+            }),
+          )
+        }
+      }
+
+      legacyResetSessions.set(legacySession.sessionId, legacySession)
+    }
+
     if (input.createIfMissing === false) {
       throw new VaultCliError(
         'ASSISTANT_SESSION_NOT_FOUND',
@@ -224,12 +275,18 @@ export async function resolveAssistantSession(
     })
 
     const savedSession = await saveAssistantSessionAtPaths(paths, session)
+    for (const legacySession of legacyResetSessions.values()) {
+      await retireLegacyAssistantConversationKey(paths, legacySession)
+    }
 
     return {
       created: true,
       paths,
       resolutionDiagnostics: buildAssistantSessionResolutionDiagnostics({
         ...conversationLookupDiagnosticsInput,
+        ...(legacyResetSessions.size > 0
+          ? { legacyAudienceContinuity: 'reset' as const }
+          : {}),
         lookupSource: 'created',
       }),
       session: savedSession,
@@ -253,6 +310,7 @@ function buildAssistantSessionResolutionDiagnostics(input: {
     conversationKeys: Readonly<Record<string, string>>
   }
   lookupSource: AssistantSessionResolutionLookupSource
+  legacyAudienceContinuity?: 'migrated' | 'reset'
   matchedEntry?: AssistantConversationLookupKeyEntry | null
 }): AssistantSessionResolutionDiagnostics {
   const primaryEntry = input.conversationLookupEntries[0] ?? null
@@ -283,8 +341,24 @@ function buildAssistantSessionResolutionDiagnostics(input: {
     primaryConversationIndexed: input.indexes && primaryEntry
       ? input.indexes.conversationKeys[primaryEntry.key] !== undefined
       : null,
+    ...(input.legacyAudienceContinuity
+      ? { legacyAudienceContinuity: input.legacyAudienceContinuity }
+      : {}),
     sessionResolutionLookupSource: input.lookupSource,
   }
+}
+
+function canMigrateLegacyAssistantAudienceSession(input: {
+  bindingPatch: AssistantBindingPatch
+  session: AssistantSession
+}): boolean {
+  const channel = normalizeNullableString(input.bindingPatch.channel)
+  return (
+    (channel === 'telegram' || channel === 'whatsapp') &&
+    input.bindingPatch.threadIsDirect === true &&
+    input.session.binding.channel === channel &&
+    input.session.binding.threadIsDirect === true
+  )
 }
 
 function resolveAssistantSessionRequestedProviderOptions(

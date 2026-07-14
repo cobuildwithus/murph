@@ -2,11 +2,19 @@ import { requireCloudflareHostedControlUserId } from "./user-id.ts";
 
 export const CLOUDFLARE_HOSTED_CONTROL_BROWSER_VAULT_REPLICA_NOT_FOUND_CODE =
   "BROWSER_VAULT_REPLICA_NOT_FOUND";
+export const CLOUDFLARE_HOSTED_CONTROL_MEAL_PHOTO_CAPTURE_ID_HEADER =
+  "x-murph-meal-photo-capture-id";
+export const CLOUDFLARE_HOSTED_CONTROL_MEAL_PHOTO_SHA256_HEADER =
+  "x-murph-meal-photo-sha256";
 
 export const CLOUDFLARE_HOSTED_CONTROL_USER_ROUTE_SPECS = {
   browserVaultSession: {
     method: "POST",
     suffix: "browser-vault/session",
+  },
+  mealPhotoStage: {
+    method: "POST",
+    suffix: "meal-photos/stage",
   },
   runtimeEnsureProcessing: {
     method: "POST",
@@ -49,6 +57,10 @@ export function buildCloudflareHostedControlUserDataDeletionPath(userId: string)
 
 export function buildCloudflareHostedControlBrowserVaultSessionPath(userId: string): string {
   return buildCloudflareHostedControlUserRoutePath("browserVaultSession", userId);
+}
+
+export function buildCloudflareHostedControlMealPhotoStagePath(userId: string): string {
+  return buildCloudflareHostedControlUserRoutePath("mealPhotoStage", userId);
 }
 
 export function matchCloudflareHostedControlUserRoutePath(

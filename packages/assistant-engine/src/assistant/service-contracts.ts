@@ -118,6 +118,9 @@ export interface AssistantTurnEnvironment {
 
 export interface AssistantMessageInput extends AssistantSessionResolutionFields {
   abortSignal?: AbortSignal
+  // Exact-turn authorization for private assistant style settings. Email
+  // ingress must opt in after authenticating the current member sender.
+  assistantStyleSettingsAuthorized?: boolean
   acceptedTurnInput?: {
     initialInputs?: readonly AssistantAcceptedTurnInputItemInput[] | null
   } | null

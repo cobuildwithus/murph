@@ -8,6 +8,7 @@ import type {
   HostedRuntimeLatencyTraceRequest,
   HostedRuntimeLogRequest,
 } from "@murphai/hosted-execution/runtime-control";
+import { parseHostedRuntimeLogRequest } from "@murphai/hosted-execution/parsers";
 import type {
   AssistantOutboxIntent,
 } from "@murphai/operator-config/assistant-cli-contracts";
@@ -755,6 +756,7 @@ describe("runHostedWorkspaceAssistantPhase runtime logs", () => {
     const callCircle: RuntimeCallCirclePort = {
       respond: vi.fn(async () => ({ status: "ok" as const })),
     };
+    const currentAssistantPreferenceCausalSeq = vi.fn(() => "41");
 
     try {
       await mkdir(path.join(vaultRoot, "bank"), { recursive: true });
@@ -774,6 +776,7 @@ describe("runHostedWorkspaceAssistantPhase runtime logs", () => {
       );
 
       await runHostedWorkspaceAssistantPhase(createPhaseInput({
+        currentAssistantPreferenceCausalSeq,
         runtimeCallCirclePort: callCircle,
         vaultRoot,
       }));
@@ -781,6 +784,9 @@ describe("runHostedWorkspaceAssistantPhase runtime logs", () => {
       const hydratedContext = mocks.hydrateHostedExecutionDefaultTarget.mock.calls[0]?.[0];
       const hydratedCallCircle = hydratedContext?.hosted?.callCircle;
       expect(hydratedCallCircle).not.toBe(callCircle);
+      expect(hydratedContext?.hosted?.currentAssistantPreferenceCausalSeq).toBe(
+        currentAssistantPreferenceCausalSeq,
+      );
       await expect(hydratedCallCircle?.respond(
         { kind: "confirm" },
         {
@@ -799,7 +805,10 @@ describe("runHostedWorkspaceAssistantPhase runtime logs", () => {
       expect(mocks.runHostedAssistantAutomationLane).toHaveBeenCalledWith(
         expect.objectContaining({
           executionContext: expect.objectContaining({
-            hosted: expect.objectContaining({ callCircle: hydratedCallCircle }),
+            hosted: expect.objectContaining({
+              callCircle: hydratedCallCircle,
+              currentAssistantPreferenceCausalSeq,
+            }),
           }),
         }),
       );
@@ -5456,10 +5465,13 @@ describe("runHostedWorkspaceAssistantPhase runtime logs", () => {
       configurable: true,
       value: [{
         component: "runtime.provider",
-        level: "info",
-        message: "Hosted assistant turn timing milestone captured.",
-        phase: "wake.running",
+        level: "error",
+        message: "Hosted assistant automation pass failed.",
+        phase: "failed",
         redacted: {
+          errorCode: "authorization_error",
+          errorCodeDetail: "HOSTED_LINQ_EGRESS_ROUTE_AUTHORITY_MISMATCH",
+          safeErrorMessage: "Hosted execution authorization failed.",
           schema: "murph.assistant-turn-timing.v1",
           type: "assistant.turn.timing",
           turnTimingDeliveryIntentId: "intent_timing_failure",
@@ -5478,10 +5490,14 @@ describe("runHostedWorkspaceAssistantPhase runtime logs", () => {
 
     expect(logRequests[0]?.entries[0]).toEqual(expect.objectContaining({
       component: "assistant",
+      errorCode: "authorization_error",
       eventCode: "assistant.automation_detail",
       redactedJson: expect.objectContaining({
+        errorCode: "authorization_error",
+        errorCodeDetail: "HOSTED_LINQ_EGRESS_ROUTE_AUTHORITY_MISMATCH",
         detailComponent: "runtime.provider",
         schema: "murph.assistant-turn-timing.v1",
+        safeErrorMessage: "Hosted execution authorization failed.",
         turnTimingDeliveryIntentId: "intent_timing_failure",
         turnTimingElapsedMs: 41,
         turnTimingProviderRequestElapsedMs: 31,
@@ -5489,6 +5505,7 @@ describe("runHostedWorkspaceAssistantPhase runtime logs", () => {
         turnTimingStage: "reply-dispatched",
       }),
     }));
+    expect(() => parseHostedRuntimeLogRequest(logRequests[0])).not.toThrow();
   });
 
   it("persists redacted full Codex failure diagnostics in assistant detail logs", async () => {
@@ -8929,7 +8946,7 @@ describe("runHostedWorkspaceAssistantPhase runtime logs", () => {
           expect.objectContaining({
             deliveryErrorCode: "provider.raw_tenant_123",
             deliveryErrorMessage:
-              "Telegram HTTP 400 authorization=Bearer [redacted] for <REDACTED_PATH> note to [redacted-email] [redacted-phone]",
+              "Telegram HTTP 400 authorization [redacted] for <REDACTED_PATH> note to [redacted-email] [redacted-phone]",
           }),
           expect.objectContaining({
             deliveryErrorCode: "LINQ_API_TOKEN_REQUIRED",
@@ -8941,6 +8958,45 @@ describe("runHostedWorkspaceAssistantPhase runtime logs", () => {
         sent: 0,
       }),
     }));
+  });
+
+  it("produces parser-safe delivery diagnostics from redacted home paths", async () => {
+    const logRequests: HostedRuntimeLogRequest[] = [];
+    mocks.collectHostedAssistantDeliverySideEffects.mockResolvedValueOnce([
+      createDeliveryEffect(),
+    ]);
+    mocks.drainHostedPreparedAssistantDeliveries.mockResolvedValueOnce([
+      createFailedDeliveryOutcome({
+        deliveryErrorCode: "LINQ_API_REQUEST_FAILED",
+        deliveryErrorDetails: {
+          description:
+            "Linq response referenced <HOME_DIR>/vault/outbox.json.",
+        },
+        deliveryErrorMessage:
+          "Linq delivery failed while reading <HOME_DIR>/vault/outbox.json.",
+        effectId: "effect_pre_redacted_home_path",
+      }),
+    ]);
+
+    const result = await runHostedWorkspaceAssistantPhase(createPhaseInput({
+      logRequests,
+      workspace: createDueAssistantWorkspace(),
+    }));
+    await result.afterCheckpoint?.();
+    const filteredLogRequests = withoutAssistantTurnTimingLogs(logRequests);
+    const deliveryLogRequest = filteredLogRequests[1];
+
+    expect(deliveryLogRequest?.entries[0]?.redactedJson).toEqual(expect.objectContaining({
+      deliveryErrorSummaries: [
+        expect.objectContaining({
+          deliveryErrorDetailDescription:
+            "Linq response referenced <REDACTED_PATH>",
+          deliveryErrorMessage:
+            "Linq delivery failed while reading <REDACTED_PATH>",
+        }),
+      ],
+    }));
+    expect(() => parseHostedRuntimeLogRequest(deliveryLogRequest)).not.toThrow();
   });
 
   it("preserves safe Telegram reaction delivery error codes", async () => {
@@ -12742,6 +12798,7 @@ function createPhaseInput(input: {
     HostedWorkspaceRuntimeAssistantPhaseInput["initialMailboxImport"]["importResult"]["assistantInputRecords"]
   >;
   conversationImportedCount?: number;
+  currentAssistantPreferenceCausalSeq?: HostedWorkspaceRuntimeAssistantPhaseInput["currentAssistantPreferenceCausalSeq"];
   currentDeliveryRouteScope?: HostedWorkspaceRuntimeAssistantPhaseInput["currentDeliveryRouteScope"];
   deviceSyncWorkspaceWakeHandled?: HostedWorkspaceRuntimeAssistantPhaseInput["deviceSyncWorkspaceWakeHandled"];
   importedCount?: number;
@@ -12783,6 +12840,7 @@ function createPhaseInput(input: {
   const assistantInputIds = input.assistantInputIds
     ?? (input.importedCount ? ["ain_00000000000000000000000000000001"] : []);
   return {
+    currentAssistantPreferenceCausalSeq: input.currentAssistantPreferenceCausalSeq,
     deviceSyncWorkspaceWakeHandled: input.deviceSyncWorkspaceWakeHandled,
     initialAssistantInputBatch: input.initialAssistantInputBatch,
     latestAssistantInputBatch: input.latestAssistantInputBatch,

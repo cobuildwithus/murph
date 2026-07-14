@@ -20,7 +20,7 @@ export interface CaptureRow {
   text_content: string | null;
   raw_json: string;
   vault_event_id: string;
-  envelope_path: string;
+  source_directory: string;
   created_at: string;
 }
 
@@ -52,7 +52,7 @@ export interface SearchRow {
   thread_title: string | null;
   occurred_at: string;
   text_content: string | null;
-  envelope_path: string;
+  source_directory: string;
   indexed_text: string | null;
   indexed_attachment_text: string | null;
   score: number;
@@ -79,7 +79,7 @@ export function decodeCaptureRow(row: Record<string, unknown>): CaptureRow {
     text_content: expectNullableString(row.text_content, "capture.text_content"),
     raw_json: expectString(row.raw_json, "capture.raw_json"),
     vault_event_id: expectString(row.vault_event_id, "capture.vault_event_id"),
-    envelope_path: expectString(row.envelope_path, "capture.envelope_path"),
+    source_directory: expectString(row.source_directory, "capture.source_directory"),
     created_at: expectString(row.created_at, "capture.created_at"),
   };
 }
@@ -147,7 +147,7 @@ export function decodeSearchRow(row: Record<string, unknown>): SearchRow {
     thread_title: expectNullableString(row.thread_title, "capture_search.thread_title"),
     occurred_at: expectString(row.occurred_at, "capture_search.occurred_at"),
     text_content: expectNullableString(row.text_content, "capture_search.text_content"),
-    envelope_path: expectString(row.envelope_path, "capture_search.envelope_path"),
+    source_directory: expectString(row.source_directory, "capture_search.source_directory"),
     indexed_text: expectNullableString(row.indexed_text, "capture_search.indexed_text"),
     indexed_attachment_text: expectNullableString(
       row.indexed_attachment_text,
@@ -241,7 +241,7 @@ export function hydrateCaptureRow(
     text: row.text_content,
     attachments: attachmentsByCapture.get(row.capture_id) ?? [],
     raw: JSON.parse(row.raw_json) as Record<string, unknown>,
-    envelopePath: row.envelope_path,
+    sourceDirectory: row.source_directory,
     createdAt: row.created_at,
   };
 }

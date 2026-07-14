@@ -17,6 +17,8 @@ export const hostedMemberRoutingStateSelect =
     linqChatIdEncrypted: true,
     linqChatLookupKey: true,
     linqHomeLineAssignedAt: true,
+    linqParticipantContactKind: true,
+    linqParticipantContactLookupKey: true,
     linqRecipientPhoneEncrypted: true,
     linqRecipientPhoneLookupKey: true,
     memberId: true,
@@ -42,6 +44,8 @@ export const hostedMemberRoutingLookupSelect =
     linqChatIdEncrypted: true,
     linqChatLookupKey: true,
     linqHomeLineAssignedAt: true,
+    linqParticipantContactKind: true,
+    linqParticipantContactLookupKey: true,
     linqRecipientPhoneEncrypted: true,
     linqRecipientPhoneLookupKey: true,
     memberId: true,
@@ -84,6 +88,10 @@ export interface HostedMemberRoutingStateSnapshot {
   // stale or missing key still gets re-written.
   linqChatLookupKey?: string | null;
   linqHomeLineAssignedAt: Date | null;
+  linqParticipantContact?: {
+    kind: "email" | "phone";
+    lookupKey: string;
+  } | null;
   linqRecipientPhone: string | null;
   linqRecipientPhoneLookupKey?: string | null;
   memberId: string;
@@ -142,6 +150,10 @@ export async function projectHostedMemberRoutingState(
     linqChatId: privateState.linqChatId,
     linqChatLookupKey: routing.linqChatLookupKey ?? null,
     linqHomeLineAssignedAt: routing.linqHomeLineAssignedAt,
+    ...projectHostedLinqParticipantIdentity({
+      kind: routing.linqParticipantContactKind,
+      lookupKey: routing.linqParticipantContactLookupKey,
+    }),
     linqRecipientPhone: privateState.linqRecipientPhone,
     linqRecipientPhoneLookupKey: routing.linqRecipientPhoneLookupKey ?? null,
     memberId: routing.memberId,
@@ -178,6 +190,16 @@ export async function projectHostedMemberRoutingLookup(
       memberId: routingState.memberId,
     },
   };
+}
+
+function projectHostedLinqParticipantIdentity(input: {
+  kind: string | null;
+  lookupKey: string | null;
+}): Pick<HostedMemberRoutingStateSnapshot, "linqParticipantContact"> {
+  const kind = normalizeHostedLinqParticipantContactKind(input.kind);
+  return kind && input.lookupKey
+    ? { linqParticipantContact: { kind, lookupKey: input.lookupKey } }
+    : {};
 }
 
 function projectHostedPendingLinqParticipantContact(input: {

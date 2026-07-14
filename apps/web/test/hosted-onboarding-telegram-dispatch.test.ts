@@ -57,6 +57,7 @@ const mocks = vi.hoisted(() => {
       signalAccepted: true,
       workflowId: "hosted-user-runtime:member_123",
     })),
+    materializePendingHostedGroupJoinConfirmationsBestEffort: vi.fn(async () => {}),
     provisionActiveHostedDomainRootEnvelopeForUserOnly: vi.fn(async () => ({})),
     readHostedMailboxItemByDedupeKey: vi.fn(async () => null),
     readHostedMailboxItemOwnerById: vi.fn(async (input: {
@@ -140,6 +141,10 @@ vi.mock("@/src/lib/hosted-onboarding/member-activation", async () => {
       mocks.activateHostedMemberForFamilySponsorshipTx,
   };
 });
+vi.mock("@/src/lib/hosted-groups/group-join-confirmation", () => ({
+  materializePendingHostedGroupJoinConfirmationsBestEffort:
+    mocks.materializePendingHostedGroupJoinConfirmationsBestEffort,
+}));
 
 vi.mock("@/src/lib/hosted-onboarding/runtime", async () => {
   const actual = await vi.importActual<typeof import("@/src/lib/hosted-onboarding/runtime")>(
@@ -358,6 +363,7 @@ describe("handleHostedOnboardingTelegramWebhook", () => {
     expect(mocks.nudgeHostedRunnerUserBestEffort).not.toHaveBeenCalled();
     expect(mocks.nudgeHostedRunnerUserBestEffortResult).not.toHaveBeenCalled();
     expect(mocks.signalHostedMailboxAppendRuntime).toHaveBeenCalledWith({
+      abortSignal: expect.any(AbortSignal),
       expectedUserId: "member_telegram_123",
       mailboxItemId: "mailbox_telegram:update:321",
     });
@@ -365,6 +371,19 @@ describe("handleHostedOnboardingTelegramWebhook", () => {
     expect(hostedWebhookReceiptCreate).not.toHaveBeenCalled();
     expect(hostedWebhookReceiptUpdateMany).not.toHaveBeenCalled();
     expect(hostedMemberRoutingUpsert).toHaveBeenCalledTimes(1);
+    expect(mocks.materializePendingHostedGroupJoinConfirmationsBestEffort).toHaveBeenCalledWith({
+      memberId: "member_telegram_123",
+      prisma,
+      timeoutMs: expect.any(Number),
+    });
+    expect(hostedMemberRoutingUpsert.mock.invocationCallOrder[0]).toBeLessThan(
+      mocks.appendHostedMailboxEnvelopeTx.mock.invocationCallOrder[0],
+    );
+    expect(
+      mocks.appendHostedMailboxEnvelopeTx.mock.invocationCallOrder[0],
+    ).toBeLessThan(
+      mocks.materializePendingHostedGroupJoinConfirmationsBestEffort.mock.invocationCallOrder[0],
+    );
     expect(readHostedWebhookSideEffectUpsertCalls(prisma)).toEqual([]);
   });
 
@@ -605,6 +624,7 @@ describe("handleHostedOnboardingTelegramWebhook", () => {
       }),
     );
     expect(mocks.signalHostedMailboxAppendRuntime).toHaveBeenCalledWith({
+      abortSignal: expect.any(AbortSignal),
       expectedUserId: acceptedMemberId,
       mailboxItemId: "mailbox_assistant.notification.requested:family-chat:member_telegram_family:telegram:update:333",
     });
@@ -687,6 +707,7 @@ describe("handleHostedOnboardingTelegramWebhook", () => {
       }),
     );
     expect(mocks.signalHostedMailboxAppendRuntime).toHaveBeenCalledWith({
+      abortSignal: expect.any(AbortSignal),
       expectedUserId: "member_telegram_123",
       mailboxItemId: "mailbox_telegram:update:326",
     });
@@ -988,6 +1009,8 @@ describe("handleHostedOnboardingTelegramWebhook", () => {
           linqChatIdEncrypted: true,
           linqChatLookupKey: true,
           linqHomeLineAssignedAt: true,
+          linqParticipantContactKind: true,
+          linqParticipantContactLookupKey: true,
           linqRecipientPhoneEncrypted: true,
           linqRecipientPhoneLookupKey: true,
           member: {
@@ -1167,6 +1190,7 @@ describe("handleHostedOnboardingTelegramWebhook", () => {
     expect(mocks.nudgeHostedRunnerUserBestEffort).not.toHaveBeenCalled();
     expect(mocks.nudgeHostedRunnerUserBestEffortResult).not.toHaveBeenCalled();
     expect(mocks.signalHostedMailboxAppendRuntime).toHaveBeenCalledWith({
+      abortSignal: expect.any(AbortSignal),
       expectedUserId: "member_telegram_123",
       mailboxItemId: "mailbox_telegram:update:654",
     });
@@ -1237,6 +1261,7 @@ describe("handleHostedOnboardingTelegramWebhook", () => {
     expect(mocks.nudgeHostedRunnerUserBestEffort).not.toHaveBeenCalled();
     expect(mocks.nudgeHostedRunnerUserBestEffortResult).not.toHaveBeenCalled();
     expect(mocks.signalHostedMailboxAppendRuntime).toHaveBeenCalledWith({
+      abortSignal: expect.any(AbortSignal),
       expectedUserId: "member_telegram_123",
       mailboxItemId: "mailbox_telegram:update:655",
     });

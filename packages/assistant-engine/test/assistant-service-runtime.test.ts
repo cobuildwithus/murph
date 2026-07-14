@@ -3288,6 +3288,10 @@ describe("assistant execution context normalization", () => {
   });
 
   it("normalizes hosted context and preserves callable helpers only", () => {
+    const callCircle = {
+      respond: vi.fn(async () => ({ status: "ok" as const })),
+    };
+    const currentAssistantPreferenceCausalSeq = vi.fn(() => "41");
     const issueDeviceConnectLink = vi.fn();
     const defaultTarget = createAssistantModelTarget({
       model: "gpt-5.5",
@@ -3298,6 +3302,8 @@ describe("assistant execution context normalization", () => {
     expect(
       normalizeAssistantExecutionContext({
         hosted: {
+          callCircle,
+          currentAssistantPreferenceCausalSeq,
           defaultTarget,
           deviceConnectProviders: [
             { label: " Oura ", provider: " OURA " },
@@ -3311,6 +3317,10 @@ describe("assistant execution context normalization", () => {
       })
     ).toEqual({
       hosted: {
+        callCircle: {
+          respond: expect.any(Function),
+        },
+        currentAssistantPreferenceCausalSeq,
         defaultTarget,
         deviceConnectProviders: [
           { label: "Oura", provider: "oura" },

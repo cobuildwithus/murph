@@ -6,6 +6,7 @@ export interface HostedEmailSendRequest {
   html?: string | null;
   idempotencyKey?: string | null;
   message: string;
+  planGroupFanout?: boolean | null;
   replyToMessageId?: string | null;
   subject?: string | null;
   target: string;
@@ -21,11 +22,16 @@ export interface HostedEmailDeliverySummary {
 
 export interface HostedEmailSendResult {
   delivery?: HostedEmailDeliverySummary | null;
+  fanoutRecipientMemberIds?: string[] | null;
   target: string;
 }
 
 export function parseHostedEmailSendRequest(value: unknown): HostedEmailSendRequest {
   const record = requireHostedEmailSendRequestObject(value, "Hosted email send request");
+  const planGroupFanout = readOptionalHostedEmailSendRequestBoolean(
+    record.planGroupFanout ?? null,
+    "Hosted email send request planGroupFanout",
+  );
 
   return {
     html: readOptionalHostedEmailSendRequestString(
@@ -40,6 +46,7 @@ export function parseHostedEmailSendRequest(value: unknown): HostedEmailSendRequ
       record.message,
       "Hosted email send request message",
     ),
+    ...(planGroupFanout === null ? {} : { planGroupFanout }),
     replyToMessageId: readOptionalHostedEmailSendRequestString(
       record.replyToMessageId ?? null,
       "Hosted email send request replyToMessageId",
@@ -57,6 +64,19 @@ export function parseHostedEmailSendRequest(value: unknown): HostedEmailSendRequ
       "Hosted email send request targetKind",
     ),
   };
+}
+
+function readOptionalHostedEmailSendRequestBoolean(
+  value: unknown,
+  label: string,
+): boolean | null {
+  if (value === null || value === undefined) {
+    return null;
+  }
+  if (typeof value !== "boolean") {
+    throw new TypeError(`${label} must be a boolean.`);
+  }
+  return value;
 }
 
 function requireHostedEmailSendRequestObject(

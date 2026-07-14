@@ -25,7 +25,6 @@ import {
 export const runnerBundleManifestFileName = ".murph-runner-bundle-manifest.json";
 
 const runnerBundleManifestSchemaVersion = 2;
-const deployArtifactTimestampGraceMs = 2_000;
 const scriptDir = path.dirname(fileURLToPath(import.meta.url));
 const defaultAppDir = path.resolve(scriptDir, "..");
 const defaultRepoRoot = path.resolve(defaultAppDir, "../..");
@@ -153,19 +152,16 @@ export async function assertPreparedDeployArtifacts(input: {
     ...(input.repoRoot ? { repoRoot: input.repoRoot } : {}),
     runnerBundleDir: input.runnerBundleDir,
   });
-  const manifestGeneratedAtMs = parseManifestGeneratedAt(manifest.generatedAt);
-
   const generatedConfig = await readJsonObjectFile(
     input.configPath,
     "generated Wrangler config",
   );
   assertGeneratedWranglerConfig(generatedConfig);
-  assertGeneratedWranglerConfigMatchesCurrentEnvironment(generatedConfig, source);
-  await assertArtifactNotNewerThanManifest({
-    artifactPath: input.configPath,
-    label: "generated Wrangler config",
-    manifestGeneratedAtMs,
-  });
+  assertGeneratedWranglerConfigMatchesCurrentEnvironment(
+    generatedConfig,
+    manifest,
+    source,
+  );
 
   if (input.includeSecrets) {
     const workerSecretsPayload = await readJsonObjectFile(
@@ -419,10 +415,12 @@ function assertGeneratedContainerUsesPreparedImage(
 
 function assertGeneratedWranglerConfigMatchesCurrentEnvironment(
   config: Record<string, unknown>,
+  runnerBundleManifest: RunnerBundleManifest,
   source: EnvSource,
 ): void {
   const expectedConfig = buildHostedWranglerDeployConfig(
     readHostedDeployAutomationEnvironment(source),
+    { runnerBundleManifest },
   );
 
   if (!stableJsonEqual(config, expectedConfig)) {
@@ -443,30 +441,6 @@ function assertWorkerSecretsPayloadMatchesCurrentEnvironment(
       "Worker secrets payload does not match the current deploy environment; rerender deploy artifacts before deploying.",
     );
   }
-}
-
-async function assertArtifactNotNewerThanManifest(input: {
-  artifactPath: string;
-  label: string;
-  manifestGeneratedAtMs: number;
-}): Promise<void> {
-  const artifactStat = await stat(input.artifactPath);
-
-  if (artifactStat.mtimeMs > input.manifestGeneratedAtMs + deployArtifactTimestampGraceMs) {
-    throw new Error(
-      `${input.label} is newer than the runner bundle; rebuild deploy artifacts before deploying.`,
-    );
-  }
-}
-
-function parseManifestGeneratedAt(value: string): number {
-  const timestampMs = Date.parse(value);
-
-  if (!Number.isFinite(timestampMs)) {
-    throw new Error("Runner bundle manifest has an invalid generatedAt timestamp.");
-  }
-
-  return timestampMs;
 }
 
 function assertNoWorkspaceDependencySpecs(

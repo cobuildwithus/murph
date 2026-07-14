@@ -17,6 +17,7 @@ import {
 import {
   type AutomationQueryRecord,
 } from '@murphai/query'
+import { parseHostedEmailThreadTarget } from '@murphai/runtime-state'
 import { VaultCliError } from '@murphai/operator-config/vault-cli-errors'
 import { mergeAssistantBinding } from './bindings.js'
 import {
@@ -308,12 +309,14 @@ export async function createAssistantOutboxIntent(
             channel: input.channel ?? null,
             deliveryTransportIdempotent: input.deliveryTransportIdempotent,
           })
-        : resolveAssistantOutboxDeliveryTransportIdempotentForCreation({
-            channel: input.channel ?? null,
-            deliveryTransportIdempotent: input.deliveryTransportIdempotent,
-            media,
-            message,
-          })
+        : isReplaySafeHostedEmailGroupFanoutPlanner(persistedTarget)
+          ? true
+          : resolveAssistantOutboxDeliveryTransportIdempotentForCreation({
+              channel: input.channel ?? null,
+              deliveryTransportIdempotent: input.deliveryTransportIdempotent,
+              media,
+              message,
+            })
     const existing = await findAssistantOutboxIntentByDedupeIdentity({
       dedupeKey,
       deliveryIdempotencyKey,
@@ -1971,6 +1974,22 @@ function resolveAssistantOutboxDeliveryTransportIdempotentForCreation(input: {
     media,
     message: input.message ?? '',
   })
+}
+
+function isReplaySafeHostedEmailGroupFanoutPlanner(
+  target: AssistantOutboxPersistedTarget,
+): boolean {
+  if (normalizeNullableString(target.channel)?.toLowerCase() !== 'email') {
+    return false
+  }
+
+  const serializedTarget = target.explicitTarget
+    ?? (target.bindingDelivery?.kind === 'thread'
+      ? target.bindingDelivery.target
+      : null)
+  const hostedTarget = parseHostedEmailThreadTarget(serializedTarget)
+  return hostedTarget?.targetKind === 'group'
+    && hostedTarget.recipientMemberId === null
 }
 
 function maybeUpgradeAssistantOutboxIntentDeliveryIdempotency(input: {

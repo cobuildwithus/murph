@@ -69,7 +69,7 @@ test('resolveAssistantAliasKey prefers explicit alias and otherwise derives a st
       participantId: 'contact:bob',
       threadId: 'thread/1',
     }),
-    'channel:telegram|identity:assistant%3Aprimary|thread:thread%2F1',
+    'channel:telegram|identity:assistant%3Aprimary|audience:indeterminate|thread:thread%2F1',
   )
   assert.equal(resolveAssistantAliasKey({}), null)
 })
@@ -99,7 +99,7 @@ test('resolveAssistantAliasKey only derives actor-scoped fallback keys when the 
       threadId: 'chat-override',
       threadIsDirect: true,
     }),
-    'channel:telegram|identity:assistant%3Aprimary|thread:chat-override',
+    'channel:telegram|identity:assistant%3Aprimary|audience:direct|thread:chat-override',
   )
 })
 
@@ -239,7 +239,7 @@ test('assistant sessions live under the vault runtime area, omit redundant path 
   assert.equal(first.session.binding.threadId, 'chat-1')
   assert.equal(
     first.session.binding.conversationKey,
-    'channel:telegram|identity:assistant%3Aprimary|thread:chat-1',
+    'channel:telegram|identity:assistant%3Aprimary|audience:indeterminate|thread:chat-1',
   )
 
   const persisted = JSON.parse(
@@ -837,7 +837,7 @@ test('resolveAssistantSession merges conversation refs with explicit locator ove
   assert.equal(resolved.session.binding.threadIsDirect, true)
   assert.equal(
     resolved.session.binding.conversationKey,
-    'channel:telegram|identity:assistant%3Aprimary|thread:chat-override',
+    'channel:telegram|identity:assistant%3Aprimary|audience:direct|thread:chat-override',
   )
 })
 

@@ -1,6 +1,6 @@
 # Hosted Mailbox Runtime Protocol
 
-Last verified: 2026-07-10
+Last verified: 2026-07-12
 
 ## Decision
 
@@ -805,6 +805,12 @@ reason to take another workspace checkpoint, so failed or slow projection does
 not block assistant admission and does not imply a durable retry queue.
 Successful projection may make raw attachment paths, image evidence, or
 audio/video transcript evidence available to the same assistant turn.
+Assistant prompt preparation reads derived attachment evidence sequentially
+under one 32 MiB budget for the current turn and a 16 MiB per-file limit. Hosted
+artifact materialization rejects an external artifact whose declared size is
+over the caller's limit before fetching its bytes. Evidence outside those
+bounds remains rebuildable local state and is omitted best-effort; it must not
+block an already accepted foreground turn.
 Retryable mailbox import blockers, including lane gaps, missing or temporarily
 unavailable sidecar payloads, deferred imports, and retryable importer blocks,
 stay pending instead of aging into quarantine. They do not advance lane
@@ -830,6 +836,11 @@ supported by the hosted foreground mailbox import loop plus the store-backed
 assistant input spine: a payloadless runtime wake causes the active child to
 import conversation mailbox rows, stage any new `AssistantInputEvent` records,
 run prompt-preparation effects best-effort, and notify active-turn admission.
+The pre-delivery system-mailbox consistency barrier may pause that loop, but it
+must resume before post-checkpoint delivery or background drains continue. A
+source-less wake preempts those drains only after the resumed import proves new
+conversation work; a no-progress or system-only nudge must not starve bounded
+maintenance or the idle checkpoint.
 The assistant engine then admits the persisted input through live steering or
 pre-provider admission without using hosted-specific mailbox
 refresh/checkpoint ports. While a Codex turn is live, same-conversation input is

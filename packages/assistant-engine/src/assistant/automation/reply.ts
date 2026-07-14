@@ -531,8 +531,20 @@ async function resolveAssistantAutoReplyGroupOutcome(input: {
     inputId: primaryAutoReplyInputId(context),
     details: 'assistant provider turn started',
   })
+  const assistantStyleSettingsAuthorized =
+    decision.primaryInput.source === 'email'
+      ? context.items.every((item) =>
+          item.summary.source === 'email' &&
+          item.inputCandidate?.event.sourceMetadata?.kind === 'email' &&
+          item.inputCandidate.event.sourceMetadata
+            .assistantStyleSettingsAuthorized === true
+        )
+      : undefined
   const activeTurnHooks = input.inputSource
     ? createAssistantAutoReplyActiveTurnInputHooks({
+        ...(assistantStyleSettingsAuthorized === undefined
+          ? {}
+          : { assistantStyleSettingsAuthorized }),
         context,
         contextMailboxItemIds: decision.hostedContextMailboxItemIds,
         deliveryTarget: decision.deliveryTarget,
@@ -554,6 +566,9 @@ async function resolveAssistantAutoReplyGroupOutcome(input: {
     contextMailboxItemIds: decision.hostedContextMailboxItemIds,
   })
   const result = await executeAssistantAutoReply({
+    ...(assistantStyleSettingsAuthorized === undefined
+      ? {}
+      : { assistantStyleSettingsAuthorized }),
     acceptedTurnInputInitialInputs: buildAutoReplyAcceptedTurnInputItems({
       inputSummaries: context.items.map((item) => item.summary),
       inputCandidates: context.items.map((item) => item.inputCandidate ?? null),
@@ -1193,6 +1208,7 @@ async function evaluateAssistantAutoReplyGroup(input: {
     externalThreadRouteAuthorityPresent:
       primaryReplyInput.sourceMetadata?.kind === 'linq' &&
       primaryReplyInput.sourceMetadata.externalThreadRouteAuthorityPresent === true,
+    replyTargetThreadId: primaryReplyInput.replyTarget?.threadId ?? null,
     source: primaryReplyInput.source,
     threadIsDirect: primaryReplyInput.conversation.threadIsDirect,
   }) ?? null
@@ -1537,6 +1553,7 @@ async function executeAssistantAutoReply(input: {
   acceptedTurnInputInitialInputs?: readonly AssistantAcceptedTurnInputItemInput[] | null
   activeTurnCheckpoint?: AssistantActiveTurnInputCheckpointHook
   activeTurnInput?: AssistantActiveTurnInputAdmissionHook
+  assistantStyleSettingsAuthorized?: boolean
   bindingDeliveryTarget: string | null
   beforeProviderAcceptedInputs?: AssistantBeforeProviderAcceptedInputsHook | null
   captureIds: readonly string[]
@@ -1590,6 +1607,12 @@ async function executeAssistantAutoReply(input: {
     const result = await sendAssistantMessage({
       vault: input.vault,
       ...automationTurn,
+      ...(input.assistantStyleSettingsAuthorized === undefined
+        ? {}
+        : {
+            assistantStyleSettingsAuthorized:
+              input.assistantStyleSettingsAuthorized,
+          }),
       acceptedTurnInput: {
         initialInputs: input.acceptedTurnInputInitialInputs ?? null,
       },
@@ -1725,6 +1748,7 @@ interface AssistantAutoReplyActiveTurnPendingAcceptance {
 }
 
 function createAssistantAutoReplyActiveTurnInputHooks(input: {
+  assistantStyleSettingsAuthorized?: boolean
   context: AssistantAutoReplyGroupContext
   contextMailboxItemIds?: readonly string[] | null
   deliveryTarget: string | null
@@ -1772,6 +1796,17 @@ function createAssistantAutoReplyActiveTurnInputHooks(input: {
       signal: admissionInput.signal,
     })
     if (lateInputs.inputs.length === 0) {
+      return {
+        kind: 'no-new-input',
+      }
+    }
+    if (
+      input.assistantStyleSettingsAuthorized === true &&
+      lateInputs.inputs.some((candidate) =>
+        candidate.event.sourceMetadata?.kind !== 'email' ||
+        candidate.event.sourceMetadata.assistantStyleSettingsAuthorized !== true
+      )
+    ) {
       return {
         kind: 'no-new-input',
       }
@@ -2045,6 +2080,7 @@ async function listAutoReplyActiveTurnInputs(input: {
       isSameAutoReplyDeliveryRoute({
         candidate,
         expectedChannel,
+        threadIsDirect: input.conversation.threadIsDirect,
         threadId: deliveryTarget,
       }),
     )
@@ -2097,10 +2133,13 @@ function mergeAssistantInputCandidateBatches(
 function isSameAutoReplyDeliveryRoute(input: {
   candidate: AssistantInputCandidate
   expectedChannel: string
+  threadIsDirect: boolean | null
   threadId: string
 }): boolean {
   const replyTarget = input.candidate.event.replyTarget
   return (
+    typeof input.threadIsDirect === 'boolean' &&
+    input.candidate.event.conversation?.threadIsDirect === input.threadIsDirect &&
     normalizeNullableString(replyTarget?.channel) === input.expectedChannel &&
     normalizeNullableString(input.candidate.event.source) === input.expectedChannel &&
     readProviderRouteScalar(replyTarget?.threadId) === input.threadId

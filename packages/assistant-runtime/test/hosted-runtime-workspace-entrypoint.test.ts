@@ -204,6 +204,7 @@ import {
 } from "../src/hosted-runtime/context.ts";
 import {
   collectHostedPendingAssistantInputMediaRetentionProtections,
+  compactHostedPendingAssistantInputIds,
   enqueueHostedPendingAssistantInputId,
   readHostedPendingAssistantInputIds,
 } from "../src/hosted-runtime/pending-input-index.ts";
@@ -767,7 +768,7 @@ describe("hosted workspace runtime entrypoint", () => {
       expect(codexPrepareDoneLog?.details).toEqual(expect.objectContaining({
         codexProviderRequestMaxRetries: 4,
         codexProviderStreamIdleTimeoutMs: 90_000,
-        codexProviderStreamMaxRetries: 5,
+        codexProviderStreamMaxRetries: 0,
         codexProviderTransportMode: "codex-native-provider-transport",
       }));
       expect(phaseLogs.every((entry) =>
@@ -8666,7 +8667,7 @@ describe("hosted workspace runtime entrypoint", () => {
     }
   });
 
-  test("late runtime wake imports conversation input after foreground loop stop", async () => {
+  test("late runtime wake imports conversation input after the delivery barrier", async () => {
     const vaultRoot = await mkdtemp(
       path.join(tmpdir(), "murph-runtime-late-foreground-direct-"),
     );
@@ -8756,7 +8757,7 @@ describe("hosted workspace runtime entrypoint", () => {
         },
       );
 
-      assert.equal(assistantPhaseCalls, 2);
+      assert.equal(assistantPhaseCalls, 1);
       assert.deepEqual(
         importedSeqs,
         Array.from({ length: 14 }, (_, index) => String(index + 1)),
@@ -8767,7 +8768,7 @@ describe("hosted workspace runtime entrypoint", () => {
           && request.limitPerLane === 13
         ),
       );
-      assert.ok(events.includes("assistant:2:14"));
+      assert.ok(events.includes("assistant:1:12"));
       assert.ok(events.includes("snapshot:idle_shutdown:14"));
       assert.equal(
         checkpointRequests[0]?.redactedStatus?.hostedMailboxConversationImportedSeq,
@@ -13990,13 +13991,21 @@ describe("hosted workspace runtime entrypoint", () => {
                 inputId,
                 vaultRoot,
               });
+              return {
+                checkpointReason: "assistant_runtime_commit" as const,
+                nextWakeAt: null,
+                progressed: true,
+                redactedStatus: {
+                  hostedAssistantProgressed: true,
+                },
+              };
             }
+            await compactHostedPendingAssistantInputIds({ vaultRoot });
             return {
-              checkpointReason: "assistant_runtime_commit" as const,
               nextWakeAt: null,
-              progressed: true,
+              progressed: false,
               redactedStatus: {
-                hostedAssistantProgressed: true,
+                hostedAssistantProgressed: false,
               },
             };
           },
@@ -14032,7 +14041,10 @@ describe("hosted workspace runtime entrypoint", () => {
       assert.equal(checkpointRequests.length, 2);
       assert.equal(checkpointRequests[0]?.reason, "idle_shutdown");
       assert.equal(checkpointRequests[1]?.reason, "idle_shutdown");
-      assert.equal(result.status, "idle");
+      assert.equal(checkpointRequests[1]?.nextWakeReason, "assistant");
+      assert.ok(assistantPhaseCalls >= 3);
+      assert.deepEqual(await readHostedPendingAssistantInputIds({ vaultRoot }), []);
+      assert.equal(result.status, "scheduled");
     } finally {
       runtimeAbortController.abort();
       mocks.summarizeWearableSleepRuntime.mockClear();

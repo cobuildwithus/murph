@@ -22,7 +22,7 @@ function createPersistedCapture(capture: InboundCapture): PersistedCapture {
     captureId: `cap-${capture.externalId}`,
     eventId: `evt-${capture.externalId}`,
     auditId: `aud-${capture.externalId}`,
-    envelopePath: `raw/inbox/${capture.source}/${capture.externalId}.json`,
+    sourceDirectory: `raw/inbox/${capture.source}/${capture.externalId}`,
     createdAt: capture.occurredAt,
     deduped: false,
   };
@@ -322,6 +322,15 @@ test("parseRawEmailMessage parses multipart email and normalizeParsedEmailMessag
   assert.equal(capture.attachments[0]?.kind, 'document');
   assert.equal(capture.attachments[0]?.fileName, 'summary.pdf');
   assert.equal(capture.attachments[0]?.byteSize, 'pdf-data'.length);
+
+  const indeterminateCapture = await normalizeParsedEmailMessage({
+    accountAddress: 'assistant@example.test',
+    accountId: 'assistant@example.test',
+    message: parsed,
+    threadIsDirect: null,
+    threadTarget,
+  });
+  assert.equal(indeterminateCapture.thread.isDirect, undefined);
 });
 
 test("normalizeParsedEmailMessage treats the hosted stable alias as self and prefers Reply-To for first-contact thread targets", async () => {

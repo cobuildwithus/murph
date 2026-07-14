@@ -13,6 +13,7 @@ import {
   hostedArtifactUserPrefix,
   hostedBrowserVaultReplicaUserPrefix,
   hostedBundleUserPrefix,
+  hostedMealPhotoUserPrefix,
   hostedRunnerSecretsObjectKey,
   hostedWorkspaceSnapshotUserPrefix,
 } from "../storage-paths.js";
@@ -199,6 +200,7 @@ async function deleteHostedUserR2Data(input: {
       await hostedBundleUserPrefix({ userId: input.userId }),
       await hostedArtifactUserPrefix({ userId: input.userId }),
       await hostedBrowserVaultReplicaUserPrefix({ userId: input.userId }),
+      await hostedMealPhotoUserPrefix({ userId: input.userId }),
       await hostedWorkspaceSnapshotUserPrefix({ userId: input.userId }),
     ];
     for (const prefix of prefixes) {

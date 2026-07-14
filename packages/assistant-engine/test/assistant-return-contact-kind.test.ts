@@ -71,11 +71,15 @@ describe('assistant return contact kind', () => {
         hostedDeliveryIdempotency: {
           assistantTurnOrdinal: 1,
           contextMailboxItemIds: [
-            'mailbox_reply',
+            'mailbox_prior_reply',
+            'mailbox_latest_reply',
             'mailbox_setup_notification',
           ],
           conversationId: 'conversation-123',
-          inboundMailboxItemIds: ['mailbox_reply'],
+          inboundMailboxItemIds: [
+            'mailbox_prior_reply',
+            'mailbox_latest_reply',
+          ],
           recipientKey: null,
         },
       }),
@@ -83,9 +87,13 @@ describe('assistant return contact kind', () => {
     })
 
     expect(hostedToolContext.currentHostedMailboxItemIds()).toEqual([
-      'mailbox_reply',
+      'mailbox_prior_reply',
+      'mailbox_latest_reply',
       'mailbox_setup_notification',
     ])
+    expect(hostedToolContext.currentHostedResumeMailboxItemId?.()).toBe(
+      'mailbox_latest_reply',
+    )
   })
 })
 

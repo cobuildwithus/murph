@@ -17,9 +17,6 @@ import {
 import type {
   HostedMailboxLane,
 } from "@murphai/hosted-execution/runtime-control";
-import {
-  HOSTED_RUNTIME_TEMPORAL_SIGNAL_RPC_TIMEOUT_MS,
-} from "@murphai/hosted-execution/temporal-env";
 
 import {
   appendHostedMailboxEnvelopeTx,
@@ -28,6 +25,10 @@ import {
 import {
   requireHostedRuntimeActiveAccess,
 } from "../hosted-mailbox/runtime-access";
+import {
+  createHostedPostCommitDeadline,
+  waitForHostedPostCommitOperation,
+} from "../hosted-onboarding/bounded-post-commit";
 import {
   hostedOnboardingError,
 } from "../hosted-onboarding/errors";
@@ -54,17 +55,18 @@ export interface HostedRuntimeSignalResult {
 }
 
 export interface SignalHostedUserRuntimeWorkflowInput {
+  abortSignal?: AbortSignal;
   client?: HostedRuntimeTemporalSignalClient | null;
   environment?: NodeJS.ProcessEnv;
   ensureWorkspace?: boolean;
   prisma?: PrismaClient;
-  signalRpcDeadline?: number | Date;
   signal: HostedRuntimeSignal;
   taskQueue?: string | null;
   userId: string;
 }
 
 export interface SignalHostedMailboxAppendInput {
+  abortSignal?: AbortSignal;
   client?: HostedRuntimeTemporalSignalClient | null;
   environment?: NodeJS.ProcessEnv;
   expectedUserId?: string | null;
@@ -88,6 +90,13 @@ export interface HostedMailboxAppendSignal {
   memberId: string;
 }
 
+export interface SignalHostedMailboxAppendsBestEffortOptions {
+  client?: HostedRuntimeTemporalSignalClient | null;
+  environment?: NodeJS.ProcessEnv;
+  signal?: AbortSignal;
+  timeoutMs?: number;
+}
+
 export interface SignalHostedBrowserVaultRefreshInput {
   client?: HostedRuntimeTemporalSignalClient | null;
   environment?: NodeJS.ProcessEnv;
@@ -96,6 +105,7 @@ export interface SignalHostedBrowserVaultRefreshInput {
 }
 
 export interface SignalHostedRuntimeMaintenanceInput {
+  abortSignal?: AbortSignal;
   client?: HostedRuntimeTemporalSignalClient | null;
   environment?: NodeJS.ProcessEnv;
   prisma?: PrismaClient;
@@ -156,6 +166,7 @@ export async function signalHostedMailboxAppendRuntime(
   }
 
   return signalHostedUserRuntimeWorkflow({
+    abortSignal: input.abortSignal,
     client: input.client,
     environment: input.environment,
     ensureWorkspace: input.knownCheckpoint === undefined,
@@ -172,13 +183,24 @@ export async function signalHostedMailboxAppendRuntime(
 
 export async function signalHostedMailboxAppendsBestEffort(
   signals: readonly (HostedMailboxAppendSignal | null | undefined)[],
+  options: SignalHostedMailboxAppendsBestEffortOptions = {},
 ): Promise<void> {
+  const deadlineMs = createHostedPostCommitDeadline(options.timeoutMs);
   await Promise.all(signals.map(async (signal) => {
     if (!signal) return;
     try {
-      await signalHostedMailboxAppendRuntime({
-        expectedUserId: signal.memberId,
-        mailboxItemId: signal.mailboxItemId,
+      await waitForHostedPostCommitOperation({
+        deadlineMs,
+        operation: (abortSignal) => signalHostedMailboxAppendRuntime({
+          abortSignal,
+          ...(options.client !== undefined ? { client: options.client } : {}),
+          ...(options.environment !== undefined
+            ? { environment: options.environment }
+            : {}),
+          expectedUserId: signal.memberId,
+          mailboxItemId: signal.mailboxItemId,
+        }),
+        ...(options.signal ? { signal: options.signal } : {}),
       });
     } catch {
       // Mailbox rows are durable; the recovery sweep or a later wake imports them.
@@ -218,6 +240,7 @@ export async function signalHostedRuntimeMaintenanceRuntime(
   });
 
   return signalHostedRuntimeControlMailboxRequest({
+    abortSignal: input.abortSignal,
     client: input.client,
     environment: input.environment,
     eventId: control.eventId,
@@ -317,6 +340,7 @@ async function assertHostedManualRunAiUsageAllowed(input: {
 }
 
 async function signalHostedRuntimeControlMailboxRequest(input: {
+  abortSignal?: AbortSignal;
   client?: HostedRuntimeTemporalSignalClient | null;
   environment?: NodeJS.ProcessEnv;
   eventId?: string | null;
@@ -344,6 +368,7 @@ async function signalHostedRuntimeControlMailboxRequest(input: {
   )).item;
 
   return signalHostedUserRuntimeWorkflow({
+    abortSignal: input.abortSignal,
     client: input.client,
     environment: input.environment,
     ensureWorkspace: false,
@@ -459,24 +484,24 @@ export async function signalHostedUserRuntimeWorkflow(
     || HOSTED_USER_RUNTIME_TASK_QUEUE;
   const signal = parseHostedRuntimeSignal(input.signal);
 
-  const signalRpcDeadline = input.signalRpcDeadline
-    ?? Date.now() + HOSTED_RUNTIME_TEMPORAL_SIGNAL_RPC_TIMEOUT_MS;
-  await client.withDeadline(
-    signalRpcDeadline,
-    async () => await client.workflow.signalWithStart(
-      HOSTED_USER_RUNTIME_WORKFLOW_TYPE,
-      {
-        args: [{
-          options: readHostedRuntimeTemporalWorkflowOptions(environment),
-          userId: input.userId,
-        }],
-        signal: HOSTED_USER_RUNTIME_SIGNAL_NAME,
-        signalArgs: [signal],
-        taskQueue,
-        workflowId,
-      },
-    ),
+  const signalWithStart = () => client.workflow.signalWithStart(
+    HOSTED_USER_RUNTIME_WORKFLOW_TYPE,
+    {
+      args: [{
+        options: readHostedRuntimeTemporalWorkflowOptions(environment),
+        userId: input.userId,
+      }],
+      signal: HOSTED_USER_RUNTIME_SIGNAL_NAME,
+      signalArgs: [signal],
+      taskQueue,
+      workflowId,
+    },
   );
+  if (input.abortSignal) {
+    await client.withAbortSignal(input.abortSignal, signalWithStart);
+  } else {
+    await signalWithStart();
+  }
 
   return {
     signalAccepted: true,

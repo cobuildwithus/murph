@@ -23,6 +23,10 @@ const expectedExports = {
     types: "./dist/index.d.ts",
     default: "./dist/index.js",
   },
+  "./connectors/email/directness": {
+    types: "./dist/connectors/email/directness.d.ts",
+    default: "./dist/connectors/email/directness.js",
+  },
   "./connectors/email/normalize-parsed": {
     types: "./dist/connectors/email/normalize-parsed.d.ts",
     default: "./dist/connectors/email/normalize-parsed.js",
@@ -42,6 +46,14 @@ const expectedExports = {
   "./runtime": {
     types: "./dist/runtime.d.ts",
     default: "./dist/runtime.js",
+  },
+  "./retention": {
+    types: "./dist/retention.d.ts",
+    default: "./dist/retention.js",
+  },
+  "./checkpoint": {
+    types: "./dist/checkpoint.d.ts",
+    default: "./dist/checkpoint.js",
   },
   "./connectors/hosted-conversation": {
     types: "./dist/connectors/hosted-conversation.d.ts",

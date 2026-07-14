@@ -1688,6 +1688,8 @@ export async function runHostedWorkspaceRuntimeJobInProcess(
                     options.runAssistantPhase ?? runHostedWorkspaceAssistantPhase
                   )({
                     ...phaseInput,
+                    currentAssistantPreferenceCausalSeq: () =>
+                      currentPreferenceCausalSeq,
                     currentDeliveryRouteScope,
                     deviceSyncWorkspaceWakeHandled: deviceSyncWorkspaceWakeHandledUntilCheckpoint,
                     request: input.request,
@@ -4252,6 +4254,18 @@ function createAbortGuardedHostedRuntimePlatform(
         ? {
             getTelegramFile: (getInput, context) =>
               guard(() => platform.effectsPort.getTelegramFile!(getInput, context)),
+          }
+        : {}),
+      ...(platform.effectsPort.deleteMealPhoto
+        ? {
+            deleteMealPhoto: (mealPhotoKey) =>
+              guard(() => platform.effectsPort.deleteMealPhoto!(mealPhotoKey)),
+          }
+        : {}),
+      ...(platform.effectsPort.readMealPhoto
+        ? {
+            readMealPhoto: (mealPhotoKey) =>
+              guard(() => platform.effectsPort.readMealPhoto!(mealPhotoKey)),
           }
         : {}),
       ...(platform.effectsPort.readAssistantDeliveryRecord

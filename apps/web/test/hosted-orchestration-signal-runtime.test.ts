@@ -1,10 +1,3 @@
-import { createServer, type Socket } from "node:net";
-
-import {
-  Client,
-  Connection,
-  isGrpcDeadlineError,
-} from "@temporalio/client";
 import {
   beforeEach,
   describe,
@@ -17,10 +10,6 @@ import {
   HOSTED_USER_RUNTIME_TASK_QUEUE,
   HOSTED_USER_RUNTIME_WORKFLOW_TYPE,
 } from "@murphai/hosted-execution";
-import {
-  HOSTED_RUNTIME_TEMPORAL_SIGNAL_RPC_TIMEOUT_MS,
-} from "@murphai/hosted-execution/temporal-env";
-
 const mocks = vi.hoisted(() => {
   const hostedMemberFindUnique = vi.fn();
   const hostedThreadContainerParticipantFindFirst = vi.fn();
@@ -50,7 +39,7 @@ const mocks = vi.hoisted(() => {
     readHostedMailboxItemCheckpointById: vi.fn(),
     resolveHostedRuntimeAiUsageGate: vi.fn(),
     signalWithStart: vi.fn(),
-    withDeadline: vi.fn(),
+    withAbortSignal: vi.fn(),
   };
 });
 
@@ -80,10 +69,10 @@ import {
   signalHostedBrowserVaultRefreshRuntime,
   signalHostedDeviceSyncMailboxRuntime,
   signalHostedMailboxAppendRuntime,
+  signalHostedMailboxAppendsBestEffort,
   signalHostedManualRunRuntime,
   signalHostedRuntimeRecheckRuntime,
   signalHostedRuntimeMaintenanceRuntime,
-  signalHostedUserRuntimeWorkflow,
 } from "@/src/lib/hosted-orchestration/signal-runtime";
 
 describe("hosted runtime Temporal signaling", () => {
@@ -118,82 +107,7 @@ describe("hosted runtime Temporal signaling", () => {
     });
   });
 
-  it("bounds a non-responsive signal RPC with the native Temporal deadline", async () => {
-    const sockets = new Set<Socket>();
-    const server = createServer((socket) => {
-      sockets.add(socket);
-      socket.pause();
-      socket.once("close", () => sockets.delete(socket));
-    });
-    await new Promise<void>((resolve, reject) => {
-      server.once("error", reject);
-      server.listen(0, "127.0.0.1", resolve);
-    });
-
-    const serverAddress = server.address();
-    if (serverAddress === null || typeof serverAddress === "string") {
-      throw new Error("Expected a loopback TCP server address.");
-    }
-
-    const connection = Connection.lazy({
-      address: `127.0.0.1:${serverAddress.port}`,
-      interceptors: [],
-      tls: false,
-    });
-    const client = new Client({
-      connection,
-      namespace: "default",
-    });
-    let connectionClosed = false;
-    const closeConnection = () => {
-      if (!connectionClosed) {
-        connection.close();
-        connectionClosed = true;
-      }
-    };
-    let watchdogFired = false;
-    const watchdog = setTimeout(() => {
-      watchdogFired = true;
-      closeConnection();
-      for (const socket of sockets) {
-        socket.destroy();
-      }
-    }, 3_000);
-    watchdog.unref();
-
-    const startedAt = Date.now();
-    let signalError: unknown;
-    try {
-      try {
-        await signalHostedUserRuntimeWorkflow({
-          client,
-          environment: { NODE_ENV: "test" },
-          signal: { kind: "runtime_recheck_requested" },
-          signalRpcDeadline: Date.now() + 250,
-          taskQueue: "hosted-runtime-test",
-          userId: "member_deadline_test",
-        });
-      } catch (error) {
-        signalError = error;
-      }
-    } finally {
-      clearTimeout(watchdog);
-      closeConnection();
-      for (const socket of sockets) {
-        socket.destroy();
-      }
-      await new Promise<void>((resolve, reject) => {
-        server.close((error) => error ? reject(error) : resolve());
-      });
-    }
-
-    expect(watchdogFired).toBe(false);
-    expect(Date.now() - startedAt).toBeLessThan(3_000);
-    expect(isGrpcDeadlineError(signalError)).toBe(true);
-  });
-
   it("signals the per-user workflow with only a mailbox pointer", async () => {
-    const startedAt = Date.now();
     await expect(signalHostedMailboxAppendRuntime({
       client: buildClient(),
       mailboxItemId: "mailbox_123",
@@ -201,15 +115,6 @@ describe("hosted runtime Temporal signaling", () => {
       signalAccepted: true,
       workflowId: "hosted-user-runtime:member_123",
     });
-    const signalRpcDeadline = mocks.withDeadline.mock.calls[0]?.[0];
-    expect(signalRpcDeadline).toEqual(expect.any(Number));
-    expect(signalRpcDeadline).toBeGreaterThanOrEqual(
-      startedAt + HOSTED_RUNTIME_TEMPORAL_SIGNAL_RPC_TIMEOUT_MS,
-    );
-    expect(signalRpcDeadline).toBeLessThanOrEqual(
-      Date.now() + HOSTED_RUNTIME_TEMPORAL_SIGNAL_RPC_TIMEOUT_MS,
-    );
-
     expect(mocks.signalWithStart).toHaveBeenCalledWith(
       HOSTED_USER_RUNTIME_WORKFLOW_TYPE,
       {
@@ -241,6 +146,48 @@ describe("hosted runtime Temporal signaling", () => {
       "mailboxItemId",
     ]);
     expect(JSON.stringify(signal)).not.toMatch(/Please look|providerHeaders|messageText/u);
+  });
+
+  it("runs a bounded workflow signal inside the Temporal abort boundary", async () => {
+    const abortSignal = new AbortController().signal;
+
+    await signalHostedMailboxAppendRuntime({
+      abortSignal,
+      client: buildClient(),
+      mailboxItemId: "mailbox_123",
+    });
+
+    expect(mocks.withAbortSignal).toHaveBeenCalledWith(
+      abortSignal,
+      expect.any(Function),
+    );
+    expect(mocks.signalWithStart).toHaveBeenCalledTimes(1);
+  });
+
+  it("bounds best-effort mailbox append signaling with the shared post-commit deadline", async () => {
+    vi.useFakeTimers();
+    try {
+      mocks.signalWithStart.mockImplementationOnce(async () =>
+        await new Promise<never>(() => undefined)
+      );
+
+      const signaling = signalHostedMailboxAppendsBestEffort([{
+        mailboxItemId: "mailbox_123",
+        memberId: "member_123",
+      }], {
+        client: buildClient(),
+        timeoutMs: 25,
+      });
+
+      await vi.advanceTimersByTimeAsync(25);
+      await expect(signaling).resolves.toBeUndefined();
+      expect(mocks.withAbortSignal).toHaveBeenCalledWith(
+        expect.objectContaining({ aborted: true }),
+        expect.any(Function),
+      );
+    } finally {
+      vi.useRealTimers();
+    }
   });
 
   it("skips the checkpoint re-read and workspace ensure but still requires active access when the caller supplies planner lane facts", async () => {
@@ -930,12 +877,12 @@ describe("hosted runtime Temporal signaling", () => {
 
 function buildClient() {
   return {
-    async withDeadline<Result>(
-      deadline: number | Date,
-      callback: () => Promise<Result>,
-    ): Promise<Result> {
-      mocks.withDeadline(deadline);
-      return await callback();
+    async withAbortSignal<R>(
+      signal: AbortSignal,
+      operation: () => Promise<R>,
+    ): Promise<R> {
+      mocks.withAbortSignal(signal, operation);
+      return await operation();
     },
     workflow: {
       signalWithStart: mocks.signalWithStart,

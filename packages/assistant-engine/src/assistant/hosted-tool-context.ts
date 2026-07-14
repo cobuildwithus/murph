@@ -79,6 +79,8 @@ export interface AssistantHostedToolContext {
   currentAssistantConfigurationApprovalScope?():
     AssistantHostedAssistantConfigurationApprovalScope | null
   currentHostedMailboxItemIds(): readonly string[]
+  currentHostedResumeMailboxItemId?(): string | null
+  currentAssistantPreferenceCausalSeq?(): string | null
   currentScheduledAutomationAuthority?(): HostedRuntimeNewsletterScheduledAuthority | null
   recordNewsletterSendResult?(
     result: Extract<HostedRuntimeNewsletterToolResponse, { action: 'send' }>,
@@ -103,6 +105,7 @@ export function createAssistantHostedToolContext(input: {
   groupTool?: AssistantHostedGroupTool | null
   newsletterTool?: AssistantHostedNewsletterTool | null
   computerToolsAvailable?: boolean
+  getAssistantPreferenceCausalSeq?: () => string | null
   getDeliveryContext?: () => AssistantHostedToolDeliveryContext
   getUserActionAcceptedInputIds?: () => readonly string[]
   messageInput: AssistantMessageInput
@@ -140,6 +143,8 @@ export function createAssistantHostedToolContext(input: {
     newsletterTool: input.newsletterTool ?? null,
     phoneCalls: input.phoneCalls ?? null,
     computerToolsAvailable: input.computerToolsAvailable === true,
+    currentAssistantPreferenceCausalSeq: () =>
+      input.getAssistantPreferenceCausalSeq?.() ?? null,
     currentAssistantTarget: () => {
       const session = readDeliveryContext().session
       return {
@@ -187,6 +192,18 @@ export function createAssistantHostedToolContext(input: {
       return context?.contextMailboxItemIds
         ?? context?.inboundMailboxItemIds
         ?? []
+    },
+    currentHostedResumeMailboxItemId: () => {
+      const deliveryContext = readDeliveryContext()
+      const itemIds = deliveryContext.messageInput.hostedDeliveryIdempotency
+        ?.inboundMailboxItemIds ?? []
+      for (let index = itemIds.length - 1; index >= 0; index -= 1) {
+        const itemId = normalizeHostedDeliveryContextValue(itemIds[index])
+        if (itemId) {
+          return itemId
+        }
+      }
+      return null
     },
     currentScheduledAutomationAuthority: () => {
       const deliveryContext = readDeliveryContext()

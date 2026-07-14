@@ -42,6 +42,19 @@ export interface AssistantBindingIsolationConflict {
 export function resolveAssistantConversationKey(
   input: AssistantBindingInput,
 ): string | null {
+  return resolveAssistantConversationKeyWithAudience(input, true)
+}
+
+export function resolveLegacyAssistantConversationKey(
+  input: AssistantBindingInput,
+): string | null {
+  return resolveAssistantConversationKeyWithAudience(input, false)
+}
+
+function resolveAssistantConversationKeyWithAudience(
+  input: AssistantBindingInput,
+  includeAudience: boolean,
+): string | null {
   const channel = normalizeNullableString(input.channel)
   const identityId = normalizeNullableString(input.identityId)
   const actorId = normalizeNullableString(input.actorId)
@@ -64,6 +77,9 @@ export function resolveAssistantConversationKey(
   const entries = [
     ['channel', channel],
     ['identity', identityId],
+    ...(includeAudience
+      ? [['audience', resolveAssistantConversationAudience(input.threadIsDirect)] as [string, string]]
+      : []),
     scope,
   ].filter((entry): entry is [string, string] => entry[1] !== null)
 
@@ -281,7 +297,7 @@ function getAssistantBindingDeliveryContextLine(
     return null
   }
 
-  if (binding.channel === 'linq') {
+  if (binding.channel === 'linq' || binding.channel === 'email') {
     return `delivery: ${binding.delivery.kind} route available`
   }
 
@@ -314,15 +330,22 @@ const assistantBindingIsolationFields = [
   'threadIsDirect',
 ] as const satisfies readonly AssistantBindingIsolationField[]
 
-// Isolation fields that may legitimately differ between two contexts that share
-// the same conversation key: the active speaker (`actorId`) in a group thread,
-// and the direct/group classification (`threadIsDirect`) as the roster changes.
-// `channel`, `identityId`, and the thread/actor scope are all encoded in the
-// conversation key, so a conversation-key match already proves those are equal —
-// a conflict on any of them signals upstream key-derivation drift and must still
-// fail closed rather than silently rebind across a routing boundary.
+// The active speaker (`actorId`) may legitimately differ between two contexts
+// that share a group conversation key. Channel, identity, audience, and the
+// thread/actor scope are encoded in the key, so conflicts on those routing facts
+// must fail closed rather than silently rebind across an audience boundary.
 export const assistantWithinConversationDriftFields: ReadonlySet<AssistantBindingIsolationField> =
-  new Set(['actorId', 'threadIsDirect'])
+  new Set(['actorId'])
+
+function resolveAssistantConversationAudience(
+  threadIsDirect: boolean | null | undefined,
+): 'direct' | 'group' | 'indeterminate' {
+  return threadIsDirect === true
+    ? 'direct'
+    : threadIsDirect === false
+      ? 'group'
+      : 'indeterminate'
+}
 
 function canUseActorScopedConversationKey(
   input: Pick<AssistantBindingInput, 'threadIsDirect'>,

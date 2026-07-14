@@ -39,8 +39,13 @@ describe("assistant Call Circle dynamic tool", () => {
   });
 
   it("parses and executes member-owned responses through the hosted transport", async () => {
-    const respond = vi.fn(async (request) => {
+    const abortController = new AbortController();
+    const respond = vi.fn(async (request, context) => {
       expect(request).toEqual(REQUEST);
+      expect(context).toEqual({
+        inboundMailboxItemIds: ["mailbox_current_reply", "mailbox_carried_ask"],
+        signal: abortController.signal,
+      });
       return { status: "ok" as const };
     });
     const request = readMurphDynamicToolRequest(dynamicToolCall({
@@ -52,10 +57,12 @@ describe("assistant Call Circle dynamic tool", () => {
     }
 
     const result = await executeMurphDynamicToolRequest({
+      abortSignal: abortController.signal,
       env: {},
       fetchImpl: fetch,
       hostedToolContext: createHostedToolContext({
         callCircle: { respond },
+        mailboxItemIds: ["mailbox_current_reply", "mailbox_carried_ask"],
       }),
       nextUsageOrdinal: () => 1,
       progressDelivery: null,
@@ -121,12 +128,13 @@ function dynamicToolCall(input: {
 
 function createHostedToolContext(input: {
   callCircle?: AssistantHostedToolContext["callCircle"];
+  mailboxItemIds?: readonly string[];
 }): AssistantHostedToolContext {
   return {
     callCircle: input.callCircle ?? null,
     computerToolsAvailable: false,
     currentHostedDeliveryContext: () => null,
-    currentHostedMailboxItemIds: () => [],
+    currentHostedMailboxItemIds: () => input.mailboxItemIds ?? [],
     sendVaultFile: vi.fn(async () => {
       throw new Error("Vault-file sending is unavailable for this turn.");
     }),

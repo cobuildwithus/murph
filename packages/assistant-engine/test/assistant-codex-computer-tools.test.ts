@@ -238,6 +238,62 @@ describe("murph computer dynamic tools", () => {
           "hmi_latest_user_reply",
           "hmi_prior_notification",
         ],
+        hostedResumeMailboxItemId: "hmi_latest_user_reply",
+      }),
+      nextUsageOrdinal: () => 1,
+      progressDelivery: createProgressDelivery(),
+      request,
+    });
+
+    expect(result.rpcResult.success).toBe(true);
+    expect(fetchImpl).toHaveBeenCalledOnce();
+  });
+
+  it("does not resume from carried notification context without current inbound", async () => {
+    const fetchImpl = vi.fn(async (
+      url: string | URL | Request,
+      init?: RequestInit,
+    ): Promise<Response> => {
+      expect(String(url)).toBe("http://web-control.worker/api/internal/computer/runs");
+      expect(JSON.parse(String(init?.body))).toEqual({
+        goal: "Hosted computer task.",
+        resumeAfterMailboxItemId: null,
+        resumeDeliveryContext: null,
+        startUrl: "https://shop.example.test/checkout",
+      });
+
+      return jsonResponse({
+        expiresAt: "2026-06-17T13:00:00.000Z",
+        reused: false,
+        runId: "run_123",
+        status: "running",
+        title: "Checkout",
+        url: "https://shop.example.test/checkout",
+        visibleText: "Ready to check out",
+      });
+    });
+
+    const request = readMurphDynamicToolRequest(dynamicToolCall({
+      argumentsValue: {
+        startUrl: "https://shop.example.test/checkout",
+      },
+      tool: "computer_open",
+    }));
+
+    if (!request || request.kind !== "computer-open") {
+      throw new Error("Expected computer_open request.");
+    }
+
+    const result = await executeMurphDynamicToolRequest({
+      env: {},
+      fetchImpl,
+      hostedToolContext: createHostedToolContext({
+        deliveryContext: {
+          conversationId: "conversation-123",
+          recipientKey: "recipient-123",
+        },
+        hostedMailboxItemIds: ["hmi_prior_notification"],
+        hostedResumeMailboxItemId: null,
       }),
       nextUsageOrdinal: () => 1,
       progressDelivery: createProgressDelivery(),
@@ -1039,6 +1095,7 @@ function createHostedToolContext(input: {
     returnContactKind?: "text" | "telegram" | "email" | null;
   };
   hostedMailboxItemIds?: string[];
+  hostedResumeMailboxItemId?: string | null;
 } = {}): AssistantHostedToolContext {
   return {
     currentHostedDeliveryContext: () => input.deliveryContext
@@ -1048,6 +1105,12 @@ function createHostedToolContext(input: {
         }
       : null,
     currentHostedMailboxItemIds: () => input.hostedMailboxItemIds ?? [],
+    ...(Object.prototype.hasOwnProperty.call(input, "hostedResumeMailboxItemId")
+      ? {
+          currentHostedResumeMailboxItemId: () =>
+            input.hostedResumeMailboxItemId ?? null,
+        }
+      : {}),
     computerToolsAvailable: input.computerToolsAvailable ?? true,
     sendVaultFile: vi.fn(async () => {
       throw new Error("Vault-file sending is unavailable for this turn.");
