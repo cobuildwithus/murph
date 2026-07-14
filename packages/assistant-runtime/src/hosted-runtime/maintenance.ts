@@ -545,10 +545,13 @@ export async function runHostedAssistantAutomation(
               }, { signal });
               return result?.routeAuthorityKind === "member-home";
             } catch {
+              signal?.throwIfAborted();
               return false;
             }
           },
           now: options?.now ?? new Date(),
+          shouldYield: options?.shouldYieldBackgroundMaintenance ?? null,
+          signal,
           vaultRoot,
         });
         legacyRoutesRepaired += serverRepair.repaired;

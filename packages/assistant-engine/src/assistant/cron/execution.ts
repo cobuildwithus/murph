@@ -666,9 +666,12 @@ async function executePreparedClaimedAssistantCronJob(
             : deviceActivityAuthority.route
         if (
           assistantCronExecutionDeliveryTargetProfile(input) === 'hosted' &&
-          hostedAutomationRoute !== null &&
-          hostedAutomationRoute.channel === 'linq' &&
-          hostedAutomationRoute.currentRouteSnapshot !== true
+          claimedJob.target.channel === 'linq' &&
+          (
+            hostedAutomationRoute === null ||
+            hostedAutomationRoute.channel !== 'linq' ||
+            hostedAutomationRoute.currentRouteSnapshot !== true
+          )
         ) {
           throw new VaultCliError(
             'ASSISTANT_CRON_AUDIENCE_UNVERIFIED',

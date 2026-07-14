@@ -132,6 +132,34 @@ async function stageDirectLinqRouteEvidence(input: {
   return event.inputId
 }
 
+async function createServerRepairAutomation(input: {
+  automationId: string
+  deliveryTarget: string
+  vaultRoot: string
+}): Promise<void> {
+  await upsertAutomation({
+    automationId: input.automationId,
+    continuityPolicy: 'fresh',
+    instructions: 'Send the saved reminder.',
+    route: {
+      channel: 'linq',
+      deliverySource: null,
+      deliveryTarget: input.deliveryTarget,
+      identityId: null,
+      participantId: null,
+      threadId: null,
+      threadIsDirect: true,
+    },
+    schedule: { at: '2026-07-13T15:00:00.000Z', kind: 'at' },
+    slug: `server-repair-${input.deliveryTarget}`,
+    status: 'active',
+    summary: null,
+    tags: ['assistant', 'scheduled'],
+    title: 'Server repair reminder',
+    vaultRoot: input.vaultRoot,
+  })
+}
+
 describe('applyMurphManagedAutomations core integration', () => {
   it('reauthorizes an exact server-confirmed pre-marker direct route only', async () => {
     const vaultRoot = await createVaultRoot()
@@ -275,6 +303,68 @@ describe('applyMurphManagedAutomations core integration', () => {
     })).resolves.toMatchObject({
       route: { currentRouteSnapshot: true, threadIsDirect: true },
     })
+  })
+
+  it('yields mid-batch before writing partially confirmed server routes', async () => {
+    const vaultRoot = await createVaultRoot()
+    await createServerRepairAutomation({
+      automationId: 'automation_01KZ0000000000000000000091',
+      deliveryTarget: 'yield-home-a',
+      vaultRoot,
+    })
+    await createServerRepairAutomation({
+      automationId: 'automation_01KZ0000000000000000000092',
+      deliveryTarget: 'yield-home-b',
+      vaultRoot,
+    })
+    const checkedTargets: string[] = []
+    let shouldYield = false
+
+    await expect(repairServerConfirmedPersonalHomeAutomationRoutes({
+      confirmDirectHomeTarget: async (target) => {
+        checkedTargets.push(target)
+        shouldYield = true
+        return true
+      },
+      now: new Date('2026-07-13T14:59:00.000Z'),
+      shouldYield: () => shouldYield,
+      vaultRoot,
+    })).resolves.toEqual({ pending: true, repaired: 0, verified: 1 })
+
+    expect(checkedTargets).toEqual(['yield-home-a'])
+    await expect(showAutomation({
+      automationId: 'automation_01KZ0000000000000000000091',
+      vaultRoot,
+    })).resolves.not.toHaveProperty('route.currentRouteSnapshot')
+    await expect(showAutomation({
+      automationId: 'automation_01KZ0000000000000000000092',
+      vaultRoot,
+    })).resolves.not.toHaveProperty('route.currentRouteSnapshot')
+  })
+
+  it('propagates a mid-assertion abort before writing server-confirmed routes', async () => {
+    const vaultRoot = await createVaultRoot()
+    await createServerRepairAutomation({
+      automationId: 'automation_01KZ0000000000000000000093',
+      deliveryTarget: 'abort-home',
+      vaultRoot,
+    })
+    const controller = new AbortController()
+
+    await expect(repairServerConfirmedPersonalHomeAutomationRoutes({
+      confirmDirectHomeTarget: async () => {
+        controller.abort()
+        return true
+      },
+      now: new Date('2026-07-13T14:59:00.000Z'),
+      signal: controller.signal,
+      vaultRoot,
+    })).rejects.toMatchObject({ name: 'AbortError' })
+
+    await expect(showAutomation({
+      automationId: 'automation_01KZ0000000000000000000093',
+      vaultRoot,
+    })).resolves.not.toHaveProperty('route.currentRouteSnapshot')
   })
 
   it('creates managed health automations through the canonical automation registry', async () => {

@@ -47,7 +47,54 @@ export function assistantDeviceActivityAuthorityKeyMatches(input: {
   automation: AssistantDeviceActivityAuthorityInput
   authorityKey: string
 }): boolean {
-  return buildAssistantDeviceActivityAuthorityKey(input.automation) === input.authorityKey
+  if (buildAssistantDeviceActivityAuthorityKey(input.automation) === input.authorityKey) {
+    return true
+  }
+
+  const route = input.automation.route
+  if (
+    route.channel !== 'linq' ||
+    route.currentRouteSnapshot !== true ||
+    route.deliverySource !== null ||
+    !route.deliveryTarget ||
+    route.threadIsDirect !== true
+  ) {
+    return false
+  }
+
+  // A server-confirmed personal-home repair only strengthens these route
+  // markers. Preserve authority for an occurrence queued immediately before
+  // that repair without ignoring any user-editable route field.
+  const legacyDirectRoute = { ...route }
+  delete legacyDirectRoute.currentRouteSnapshot
+  if (
+    buildAssistantDeviceActivityAuthorityKey({
+      ...input.automation,
+      route: legacyDirectRoute,
+    }) === input.authorityKey
+  ) {
+    return true
+  }
+
+  if (
+    route.identityId !== null ||
+    route.participantId !== null ||
+    route.threadId !== null
+  ) {
+    return false
+  }
+
+  const legacyBareRoute = { ...legacyDirectRoute }
+  delete legacyBareRoute.threadIsDirect
+  return [
+    legacyBareRoute,
+    { ...legacyBareRoute, threadIsDirect: null },
+  ].some((candidate) =>
+    buildAssistantDeviceActivityAuthorityKey({
+      ...input.automation,
+      route: candidate,
+    }) === input.authorityKey
+  )
 }
 
 function hashAssistantDeviceActivityAuthorityPayload(

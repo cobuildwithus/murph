@@ -3108,7 +3108,17 @@ describe("hosted Family plan", () => {
       billedSeatCount: null,
       group,
     });
-    tx.hostedAccountGroupBillingRef.findUnique.mockResolvedValueOnce(null);
+    tx.hostedAccountGroupBillingRef.findUnique.mockResolvedValue(createBillingRefMock({
+      billedSeatCount: null,
+      checkoutAttemptId: "hbfca_pending_before_direct_upgrade",
+      checkoutSeatCount: 2,
+      currentBillingPhase: null,
+      group,
+      stripeCheckoutSessionIdEncrypted: "encrypted:cs_pending_before_direct_upgrade",
+      stripeCustomerIdEncrypted: "encrypted:cus_pending_family",
+      stripeSubscriptionIdEncrypted: null,
+      stripeSubscriptionItemIdEncrypted: null,
+    }));
     tx.hostedMember.findUnique.mockResolvedValue({
       billingStatus: HostedBillingStatus.active,
       suspendedAt: null,
@@ -3144,12 +3154,22 @@ describe("hosted Family plan", () => {
       priceId: "price_family",
       subscriptionId: "sub_direct",
     });
+    const checkoutRetrieve = vi.fn().mockResolvedValue({
+      id: "cs_pending_before_direct_upgrade",
+      status: "open",
+    });
+    const checkoutExpire = vi.fn().mockResolvedValue({
+      id: "cs_pending_before_direct_upgrade",
+      status: "expired",
+    });
     const subscriptionRetrieve = vi.fn().mockResolvedValue(directSubscription);
     const subscriptionUpdate = vi.fn().mockResolvedValue(updatedSubscription);
     runtimeMocks.requireHostedStripeApi.mockReturnValue({
       checkout: {
         sessions: {
           create: checkoutCreate,
+          expire: checkoutExpire,
+          retrieve: checkoutRetrieve,
         },
       },
       subscriptions: {
@@ -3169,6 +3189,11 @@ describe("hosted Family plan", () => {
     });
 
     expect(checkoutCreate).not.toHaveBeenCalled();
+    expect(checkoutRetrieve).toHaveBeenCalledWith("cs_pending_before_direct_upgrade");
+    expect(checkoutExpire).toHaveBeenCalledWith("cs_pending_before_direct_upgrade");
+    expect(checkoutExpire.mock.invocationCallOrder[0]).toBeLessThan(
+      subscriptionRetrieve.mock.invocationCallOrder[0] ?? Number.POSITIVE_INFINITY,
+    );
     expect(prisma.$transaction).toHaveBeenCalledWith(
       expect.any(Function),
       expect.objectContaining({ maxWait: 5_000, timeout: 780_000 }),
@@ -3223,6 +3248,75 @@ describe("hosted Family plan", () => {
         memberId: "member_owner",
       },
     }));
+  });
+
+  it("fails closed when a persisted Family checkout completed before direct conversion", async () => {
+    const group = {
+      billingStatus: HostedBillingStatus.not_started,
+      id: "hbag_family",
+      ownerMemberId: "member_owner",
+      suspendedAt: null,
+    };
+    const tx = createTxMock({
+      billedSeatCount: null,
+      group,
+    });
+    tx.hostedAccountGroupBillingRef.findUnique.mockResolvedValue(createBillingRefMock({
+      billedSeatCount: null,
+      checkoutAttemptId: "hbfca_completed_before_direct_upgrade",
+      checkoutSeatCount: 2,
+      currentBillingPhase: null,
+      group,
+      stripeCheckoutSessionIdEncrypted: "encrypted:cs_completed_before_direct_upgrade",
+      stripeCustomerIdEncrypted: "encrypted:cus_pending_family",
+      stripeSubscriptionIdEncrypted: null,
+      stripeSubscriptionItemIdEncrypted: null,
+    }));
+    tx.hostedMember.findUnique.mockResolvedValue({
+      billingStatus: HostedBillingStatus.active,
+      suspendedAt: null,
+    });
+    tx.hostedMemberBillingRef.findUnique.mockResolvedValue(createMemberBillingRefMock());
+    const prisma = tx as FamilyPlanTxMock & {
+      $transaction: ReturnType<typeof vi.fn>;
+    };
+    prisma.$transaction = vi.fn((callback) => callback(tx));
+    const checkoutExpire = vi.fn();
+    const subscriptionRetrieve = vi.fn();
+    const subscriptionUpdate = vi.fn();
+    runtimeMocks.requireHostedStripeApi.mockReturnValue({
+      checkout: {
+        sessions: {
+          expire: checkoutExpire,
+          retrieve: vi.fn().mockResolvedValue({
+            id: "cs_completed_before_direct_upgrade",
+            status: "complete",
+          }),
+        },
+      },
+      subscriptions: {
+        retrieve: subscriptionRetrieve,
+        update: subscriptionUpdate,
+      },
+    });
+
+    await expect(createHostedFamilyBillingCheckout({
+      groupId: "hbag_family",
+      ownerMemberId: "member_owner",
+      prisma: prisma as never,
+      seatCount: 2,
+    })).rejects.toMatchObject({
+      code: "HOSTED_FAMILY_CHECKOUT_CLEANUP_REQUIRED",
+      httpStatus: 409,
+      retryable: true,
+    });
+
+    expect(checkoutExpire).not.toHaveBeenCalled();
+    expect(subscriptionRetrieve).not.toHaveBeenCalled();
+    expect(subscriptionUpdate).not.toHaveBeenCalled();
+    expect(tx.hostedAccountGroupBillingRef.upsert).not.toHaveBeenCalled();
+    expect(tx.hostedMember.update).not.toHaveBeenCalled();
+    expect(tx.hostedMemberBillingRef.updateMany).not.toHaveBeenCalled();
   });
 
   it("leaves direct billing unchanged when the atomic Family subscription update fails", async () => {

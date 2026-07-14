@@ -43,12 +43,14 @@ const cronMocks = vi.hoisted(() => ({
   getAssistantChannelAdapter: vi.fn(),
   listCanonicalScheduledLogs: vi.fn(),
   listCanonicalAutomations: vi.fn(),
+  listManagedAutomations: vi.fn(),
   loadImporterRuntime: vi.fn(),
   loadRuntimeModule: vi.fn(),
   loadVault: vi.fn(),
   nextAutomationId: 1,
   renderAutoLoggedFoodMealNote: vi.fn(),
   readAutomationByRelativePath: vi.fn(),
+  repairLegacyPersonalHomeAutomationRoutes: vi.fn(),
   resolveAssistantBindingDelivery: vi.fn(),
   sendAssistantMessageLocal: vi.fn(),
   setScheduledLogStatus: vi.fn(),
@@ -60,7 +62,10 @@ const cronMocks = vi.hoisted(() => ({
 
 vi.mock('@murphai/core', () => ({
   executeScheduledLogOccurrence: cronMocks.executeScheduledLogOccurrence,
+  listAutomations: cronMocks.listManagedAutomations,
   loadVault: cronMocks.loadVault,
+  repairLegacyPersonalHomeAutomationRoutes:
+    cronMocks.repairLegacyPersonalHomeAutomationRoutes,
   setScheduledLogStatus: cronMocks.setScheduledLogStatus,
   upsertAutomation: cronMocks.upsertAutomation,
 }))
@@ -160,6 +165,7 @@ import {
 import {
   MURPH_OVERNIGHT_MEMORY_CONSOLIDATION_AUTOMATION_ID,
   MURPH_OVERNIGHT_MEMORY_CONSOLIDATION_PRIVATE_SUMMARY,
+  repairServerConfirmedPersonalHomeAutomationRoutes,
 } from '../src/assistant/managed-automations.ts'
 import { resolveAssistantStatePaths } from '../src/assistant/store/paths.ts'
 import {
@@ -240,6 +246,45 @@ beforeEach(() => {
       timezone: 'UTC',
     },
   })
+  cronMocks.listManagedAutomations.mockReset().mockImplementation(
+    async ({ vaultRoot }: { vaultRoot: string }) => {
+      const items = getVaultAutomationStore(vaultRoot)
+      return {
+        count: items.length,
+        items,
+      }
+    },
+  )
+  cronMocks.repairLegacyPersonalHomeAutomationRoutes
+    .mockReset()
+    .mockImplementation(async ({
+      confirmedDirectDeliveryTargets,
+      vaultRoot,
+    }: {
+      confirmedDirectDeliveryTargets: string[]
+      vaultRoot: string
+    }) => {
+      const confirmed = new Set(confirmedDirectDeliveryTargets)
+      let updated = 0
+      for (const record of getVaultAutomationStore(vaultRoot)) {
+        if (
+          record.status !== 'archived' &&
+          record.route.channel === 'linq' &&
+          record.route.currentRouteSnapshot !== true &&
+          record.route.deliverySource === null &&
+          record.route.threadIsDirect === true &&
+          confirmed.has(record.route.deliveryTarget ?? '')
+        ) {
+          record.route = {
+            ...record.route,
+            currentRouteSnapshot: true,
+            threadIsDirect: true,
+          }
+          updated += 1
+        }
+      }
+      return { updated }
+    })
   cronMocks.sendAssistantMessageLocal.mockReset().mockResolvedValue({
     response: 'Completed scheduled check-in.',
     session: {
@@ -1601,7 +1646,7 @@ describe('assistant cron runtime orchestration', () => {
     )
   })
 
-  it('keeps hosted device activity jobs pending when the parent route is unmarked', async () => {
+  it('keeps a hosted device occurrence pending until route repair, then delivers it', async () => {
     vi.useFakeTimers()
     vi.setSystemTime(new Date('2026-07-13T15:20:00.000Z'))
     const { vaultRoot } = await createRuntimeContext(
@@ -1710,6 +1755,130 @@ describe('assistant cron runtime orchestration', () => {
       runs: [
         expect.objectContaining({
           error: expect.stringContaining('could not verify its saved audience'),
+          outcome: 'failed',
+          reason: 'ASSISTANT_CRON_AUDIENCE_UNVERIFIED',
+          status: 'failed',
+        }),
+      ],
+    })
+
+    const confirmDirectHomeTarget = vi.fn(async (deliveryTarget: string) =>
+      deliveryTarget === 'saved-linq-chat'
+    )
+    await expect(repairServerConfirmedPersonalHomeAutomationRoutes({
+      confirmDirectHomeTarget,
+      now: new Date('2026-07-13T15:20:30.000Z'),
+      vaultRoot,
+    })).resolves.toEqual({
+      pending: false,
+      repaired: 1,
+      verified: 1,
+    })
+    expect(confirmDirectHomeTarget).toHaveBeenCalledOnce()
+    expect(parentAutomation.route).toMatchObject({
+      currentRouteSnapshot: true,
+      threadIsDirect: true,
+    })
+    vi.setSystemTime(new Date('2026-07-13T15:21:00.000Z'))
+
+    await expect(processDueAssistantCronJobsLocal({
+      executionContext: {
+        hosted: {
+          memberId: 'member-unmarked-device-activity',
+          userEnvKeys: [],
+        },
+      },
+      limit: 1,
+      vault: vaultRoot,
+    })).resolves.toEqual({
+      failed: 0,
+      processed: 1,
+      succeeded: 1,
+    })
+    expect(cronMocks.sendAssistantMessageLocal).toHaveBeenCalledOnce()
+    expect(cronMocks.sendAssistantMessageLocal.mock.calls[0]?.[0]).toMatchObject({
+      bindingDeliveryTarget: 'saved-linq-chat',
+      instructions: 'Ask about the imported run.',
+      threadIsDirect: true,
+    })
+  })
+
+  it('keeps an unparented hosted local Linq job pending before provider admission', async () => {
+    vi.useFakeTimers()
+    vi.setSystemTime(new Date('2026-07-13T15:20:00.000Z'))
+    const { vaultRoot } = await createRuntimeContext(
+      'assistant-cron-runtime-unparented-local-linq-',
+    )
+    const localJob = assistantCronJobSchema.parse({
+      createdAt: '2026-07-13T15:00:00.000Z',
+      enabled: true,
+      jobId: 'cron_unparented_local_linq',
+      keepAfterRun: false,
+      name: 'Legacy local Linq reminder',
+      prompt: 'Send the saved reminder.',
+      schedule: {
+        at: '2026-07-13T15:10:00.000Z',
+        kind: 'at',
+      },
+      schema: 'murph.assistant-cron-job.v1',
+      state: {
+        consecutiveFailures: 0,
+        lastError: null,
+        lastFailedAt: null,
+        lastRunAt: null,
+        lastSucceededAt: null,
+        nextRunAt: '2026-07-13T15:10:00.000Z',
+        runningAt: null,
+        runningPid: null,
+      },
+      target: {
+        alias: null,
+        channel: 'linq',
+        deliverySource: null,
+        deliveryTarget: 'stale-saved-linq-chat',
+        identityId: 'h1_111111111111111111111111',
+        participantId: 'h1_222222222222222222222222',
+        sessionId: null,
+        threadId: 'h1_333333333333333333333333',
+        threadIsDirect: true,
+      },
+      updatedAt: '2026-07-13T15:00:00.000Z',
+    })
+    await writeAssistantCronStore(resolveAssistantStatePaths(vaultRoot), {
+      jobs: [localJob],
+      version: 1,
+    })
+
+    await expect(processDueAssistantCronJobsLocal({
+      executionContext: {
+        hosted: {
+          memberId: 'member-unparented-local-linq',
+          userEnvKeys: [],
+        },
+      },
+      limit: 1,
+      vault: vaultRoot,
+    })).resolves.toEqual({
+      failed: 1,
+      processed: 1,
+      succeeded: 0,
+    })
+
+    expect(cronMocks.sendAssistantMessageLocal).not.toHaveBeenCalled()
+    await expect(getAssistantCronJob(vaultRoot, localJob.jobId)).resolves.toMatchObject({
+      enabled: true,
+      state: expect.objectContaining({
+        consecutiveFailures: 1,
+        lastFailedAt: '2026-07-13T15:20:00.000Z',
+        nextRunAt: '2026-07-13T15:20:30.000Z',
+      }),
+    })
+    await expect(listAssistantCronRuns({
+      job: localJob.jobId,
+      vault: vaultRoot,
+    })).resolves.toMatchObject({
+      runs: [
+        expect.objectContaining({
           outcome: 'failed',
           reason: 'ASSISTANT_CRON_AUDIENCE_UNVERIFIED',
           status: 'failed',

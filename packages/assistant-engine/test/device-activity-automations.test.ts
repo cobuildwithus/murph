@@ -20,6 +20,8 @@ import {
 import { assistantCronJobSchema } from '@murphai/operator-config/assistant-cli-contracts'
 import {
   appendAssistantDeviceActivityCronJobMetadata,
+  assistantDeviceActivityAuthorityKeyMatches,
+  buildAssistantDeviceActivityAuthorityKey,
   readAssistantDeviceActivityCronJobMetadata,
 } from '../src/assistant/device-activity-cron-tags.ts'
 
@@ -79,6 +81,76 @@ describe('device activity triggered automations', () => {
 
   afterEach(async () => {
     await rm(vaultRoot, { recursive: true, force: true })
+  })
+
+  it.each([
+    {
+      legacyRoute: {
+        channel: 'linq',
+        deliverySource: null,
+        deliveryTarget: 'linq-home-with-direct-evidence',
+        identityId: 'hosted-identity',
+        participantId: 'hosted-participant',
+        threadId: 'hosted-thread',
+        threadIsDirect: true,
+      },
+      name: 'snapshot marker',
+    },
+    {
+      legacyRoute: {
+        channel: 'linq',
+        deliverySource: null,
+        deliveryTarget: 'linq-bare-home',
+        identityId: null,
+        participantId: null,
+        threadId: null,
+      },
+      name: 'snapshot and directness markers',
+    },
+  ])('keeps queued authority through a trusted $name repair only', ({ legacyRoute }) => {
+    const automation = createDeviceActivityAutomation({
+      activityKind: 'run',
+      after: '2026-07-13T14:00:00.000Z',
+      automationId: 'auto_route_repair_authority',
+    })
+    automation.route = legacyRoute
+    if (automation.schedule.kind !== 'deviceActivity') {
+      throw new Error('Expected device activity automation.')
+    }
+    const authorityInput = {
+      automationId: automation.automationId,
+      continuityPolicy: automation.continuityPolicy,
+      instructions: automation.instructions,
+      route: automation.route,
+      schedule: {
+        activityKind: automation.schedule.activityKind,
+        source: automation.schedule.source,
+      },
+    }
+    const authorityKey = buildAssistantDeviceActivityAuthorityKey(authorityInput)
+    const repaired = {
+      ...authorityInput,
+      route: {
+        ...authorityInput.route,
+        currentRouteSnapshot: true,
+        threadIsDirect: true,
+      },
+    }
+
+    expect(assistantDeviceActivityAuthorityKeyMatches({
+      authorityKey,
+      automation: repaired,
+    })).toBe(true)
+    expect(assistantDeviceActivityAuthorityKeyMatches({
+      authorityKey,
+      automation: {
+        ...repaired,
+        route: {
+          ...repaired.route,
+          deliveryTarget: 'different-linq-home',
+        },
+      },
+    })).toBe(false)
   })
 
   it('schedules the first matching walk activity for assistant delivery', async () => {

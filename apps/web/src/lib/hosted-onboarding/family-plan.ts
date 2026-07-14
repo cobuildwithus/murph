@@ -1639,6 +1639,17 @@ async function upgradeHostedFamilyDirectPaidSubscription(
       });
     }
 
+    const currentFamilyBillingRef = await readHostedAccountGroupStripeBillingRef({
+      groupId: currentGroup.id,
+      prisma: tx,
+    });
+    if (currentFamilyBillingRef?.stripeCheckoutSessionId) {
+      await expireHostedFamilyCheckoutSessionFailClosed({
+        sessionId: currentFamilyBillingRef.stripeCheckoutSessionId,
+        stripe,
+      });
+    }
+
     const subscription = await callHostedFamilyDirectPaidStripeOperation(
       "subscription.retrieve",
       () => stripe.subscriptions.retrieve(currentInput.stripeSubscriptionId, {

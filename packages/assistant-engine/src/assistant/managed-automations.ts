@@ -799,6 +799,8 @@ const HOSTED_SERVER_ROUTE_REPAIR_BATCH_LIMIT = 25
 export async function repairServerConfirmedPersonalHomeAutomationRoutes(input: {
   confirmDirectHomeTarget: (deliveryTarget: string) => Promise<boolean>
   now?: Date
+  shouldYield?: (() => boolean) | null
+  signal?: AbortSignal
   vaultRoot: string
 }): Promise<{
   pending: boolean
@@ -839,9 +841,28 @@ export async function repairServerConfirmedPersonalHomeAutomationRoutes(input: {
     batchStart + HOSTED_SERVER_ROUTE_REPAIR_BATCH_LIMIT,
   )
   const confirmed: string[] = []
+  let yielded = false
   for (const target of batch) {
+    input.signal?.throwIfAborted()
+    if (input.shouldYield?.() === true) {
+      yielded = true
+      break
+    }
     if (await input.confirmDirectHomeTarget(target)) {
       confirmed.push(target)
+    }
+    input.signal?.throwIfAborted()
+    if (input.shouldYield?.() === true) {
+      yielded = true
+      break
+    }
+  }
+  input.signal?.throwIfAborted()
+  if (yielded || input.shouldYield?.() === true) {
+    return {
+      pending: true,
+      repaired: 0,
+      verified: confirmed.length,
     }
   }
   const result = await repairLegacyPersonalHomeAutomationRoutes({

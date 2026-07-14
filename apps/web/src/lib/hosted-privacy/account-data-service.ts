@@ -89,6 +89,9 @@ export type HostedAccountStoreDeletionMode =
 const HOSTED_CHECKOUT_SESSION_PERSISTENCE_ROLLOUT_STARTED_AT = Math.floor(
   Date.parse("2026-07-01T00:00:00.000Z") / 1_000,
 );
+const HOSTED_CHECKOUT_SESSION_PERSISTENCE_ROLLOUT_ENDED_AT = Math.floor(
+  Date.parse("2026-08-01T00:00:00.000Z") / 1_000,
+) - 1;
 
 export interface HostedAccountDataStoreCoverageEntry {
   readonly slug: string;
@@ -1251,6 +1254,7 @@ async function listHostedLegacyCheckoutSessionsForAccountDeletion(input: {
             ? {
                 created: {
                   gte: HOSTED_CHECKOUT_SESSION_PERSISTENCE_ROLLOUT_STARTED_AT,
+                  lte: HOSTED_CHECKOUT_SESSION_PERSISTENCE_ROLLOUT_ENDED_AT,
                 },
               }
             : {}),

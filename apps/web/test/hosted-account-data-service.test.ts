@@ -659,6 +659,7 @@ describe("deleteHostedAccountData", () => {
     expect(stripe.checkout.sessions.list).toHaveBeenCalledWith({
       created: {
         gte: 1_782_864_000,
+        lte: 1_785_542_399,
       },
       limit: 100,
       status: "complete",
@@ -864,6 +865,7 @@ describe("deleteHostedAccountData", () => {
     expect(stripe.checkout.sessions.list).toHaveBeenNthCalledWith(3, {
       created: {
         gte: 1_782_864_000,
+        lte: 1_785_542_399,
       },
       limit: 100,
       status: "complete",

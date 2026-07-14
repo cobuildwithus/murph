@@ -29,7 +29,9 @@ receives an individual Pulse-equivalent monthly usage cap.
   the Family event is canceled locally and its Stripe-event receipt owns the
   idempotent subscription cancellation and exact initial-invoice refund. The
   sole conversion path is an explicit owner upgrade, which performs one atomic
-  Stripe price change while holding the group and owner-member locks. A webhook
+  Stripe price change while holding the group and owner-member locks. Before
+  that change, an already-persisted Family Checkout must be settled under the
+  same locks: expire it if open and fail closed if it already completed. A webhook
   heals provider-success/local-rollback only when the incoming Family object is
   that exact direct subscription; a different subscription is compensated.
   Direct state clears only after active Family billing fits the paid seats.
@@ -45,9 +47,11 @@ receives an individual Pulse-equivalent monthly usage cap.
   folded into the subscriptions and customers that deletion must settle before
   removing local state. During
   rollout, deletion also discovers pre-migration open sessions and completed
-  sessions created in the bounded deployment-compatibility window from Stripe's
-  member/Family metadata, plus subscriptions attached to reserved customers
-  with no local subscription reference.
+  sessions created from 2026-07-01 through 2026-07-31 in the finite
+  deployment-compatibility window from Stripe's member/Family metadata, plus
+  subscriptions attached to reserved customers with no local subscription
+  reference. Sessions issued after that window are owned by the persisted exact
+  session reference instead of an ever-growing global completed-session scan.
 - A Pulse Trial loser is accepted as an event-owned encrypted cleanup receipt
   before Stripe cancellation. Retry reads that receipt without fetching or
   reclassifying the event, and account deletion settles then scrubs it before
