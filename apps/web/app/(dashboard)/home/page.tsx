@@ -67,7 +67,6 @@ export default async function HomePage({
     usageGate,
     deviceSyncCompletionDialog,
     connectedAppCompletionDialog,
-    trialBillingState,
     initialVisitContactAction,
   ] = await Promise.all([
     shouldShowHomeDeviceSyncStep({
@@ -89,12 +88,6 @@ export default async function HomePage({
       member,
       searchParams: resolvedSearchParams,
     }),
-    member
-      ? readHostedMemberBillingEligibilityState({
-          memberId: member.id,
-          prisma,
-        })
-      : Promise.resolve(null),
     showInitialVisitDialog
       ? resolveHomeInitialVisitContactAction()
       : Promise.resolve(null),
@@ -118,6 +111,12 @@ export default async function HomePage({
         decision: usageGate,
         memberId: member.id,
         now: usageGateCheckedAt,
+        prisma,
+      })
+    : null;
+  const trialBillingState = !usageLimitNotice && member
+    ? await readHostedMemberBillingEligibilityState({
+        memberId: member.id,
         prisma,
       })
     : null;

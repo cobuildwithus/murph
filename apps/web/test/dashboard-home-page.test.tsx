@@ -250,6 +250,7 @@ test("HomePage shows the resume billing banner for paused Pulse Trial users", as
   assert.match(markup, /href="\/settings"/);
   assert.doesNotMatch(markup, /hit this month/);
   assert.doesNotMatch(markup, /Start Pulse now/);
+  assert.equal(mocks.readHostedMemberBillingEligibilityState.mock.calls.length, 1);
 });
 
 test("HomePage shows an advisory while Pulse replies continue after included usage is exhausted", async () => {
@@ -299,6 +300,9 @@ test("HomePage shows an advisory while Pulse replies continue after included usa
 });
 
 test("HomePage keeps the exhausted Pulse advisory when action resolution fails closed", async () => {
+  mocks.readHostedMemberBillingEligibilityState.mockRejectedValueOnce(
+    new Error("billing eligibility unavailable"),
+  );
   mocks.resolveHostedAiUsageGate.mockResolvedValueOnce({
     allowed: true,
     billingPlanCode: "launch_monthly",
@@ -340,6 +344,7 @@ test("HomePage keeps the exhausted Pulse advisory when action resolution fails c
   assert.doesNotMatch(markup, /Edge offers more included usage/);
   assert.doesNotMatch(markup, /Upgrade from usage projection/);
   assert.doesNotMatch(markup, /settings#subscription/);
+  assert.equal(mocks.readHostedMemberBillingEligibilityState.mock.calls.length, 0);
 });
 
 test("UsageLimitBanner omits thread-container notices from the personal dashboard", async () => {
