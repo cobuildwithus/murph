@@ -2729,15 +2729,11 @@ describe("hosted device-sync runtime", () => {
       });
       const companionObservationJson = serializeCompanionHrvRmssdObservation({
         schema: COMPANION_HRV_RMSSD_SCHEMA,
-        captureId: "123e4567-e89b-42d3-a456-426614174001",
-        observedAt: "2026-04-04T09:58:00.000Z",
-        durationMs: 60_000,
-        rmssdMs: 48.25,
-        intervalCount: 72,
-        acceptedIntervalCount: 68,
-        successivePairCount: 63,
-        quality: "good",
         methodVersion: COMPANION_HRV_RMSSD_METHOD_VERSION,
+        nightDate: "2026-04-04",
+        rmssdMs: 48.25,
+        completedWindowCount: 60,
+        acceptedWindowCount: 56,
       });
       const job = getStore(service).enqueueJob({
         accountId: account.id,
@@ -2960,15 +2956,11 @@ describe("hosted device-sync runtime", () => {
     const connectionId = "hosted_cold_restore";
     const companionObservationJson = serializeCompanionHrvRmssdObservation({
       schema: COMPANION_HRV_RMSSD_SCHEMA,
-      captureId: "123e4567-e89b-42d3-a456-426614174002",
-      observedAt: "2026-04-04T09:58:00.000Z",
-      durationMs: 60_000,
-      rmssdMs: 48.25,
-      intervalCount: 72,
-      acceptedIntervalCount: 68,
-      successivePairCount: 63,
-      quality: "good",
       methodVersion: COMPANION_HRV_RMSSD_METHOD_VERSION,
+      nightDate: "2026-04-04",
+      rmssdMs: 48.25,
+      completedWindowCount: 60,
+      acceptedWindowCount: 56,
     });
     const dirtyState = buildDirtyState({
       connectionId,
@@ -4237,15 +4229,11 @@ describe("hosted device-sync runtime", () => {
         });
         const companionObservationJson = serializeCompanionHrvRmssdObservation({
           schema: COMPANION_HRV_RMSSD_SCHEMA,
-          captureId: "123e4567-e89b-42d3-a456-426614174000",
-          observedAt: "2026-04-04T09:58:00.000Z",
-          durationMs: 60_000,
-          rmssdMs: 48.25,
-          intervalCount: 72,
-          acceptedIntervalCount: 68,
-          successivePairCount: 63,
-          quality: "good",
           methodVersion: COMPANION_HRV_RMSSD_METHOD_VERSION,
+          nightDate: "2026-04-04",
+          rmssdMs: 48.25,
+          completedWindowCount: 60,
+          acceptedWindowCount: 56,
         });
         const changedCompanionObservationJson = JSON.stringify({
           ...JSON.parse(companionObservationJson),
@@ -4388,15 +4376,11 @@ describe("hosted device-sync runtime", () => {
     const dirtyPayloadId = "dsp_companion_timezone_replay";
     const companionObservationJson = serializeCompanionHrvRmssdObservation({
       schema: COMPANION_HRV_RMSSD_SCHEMA,
-      captureId: "123e4567-e89b-42d3-a456-426614174000",
-      observedAt: "2026-07-10T02:30:00.000Z",
-      durationMs: 60_000,
-      rmssdMs: 48.25,
-      intervalCount: 72,
-      acceptedIntervalCount: 68,
-      successivePairCount: 63,
-      quality: "good",
       methodVersion: COMPANION_HRV_RMSSD_METHOD_VERSION,
+      nightDate: "2026-07-10",
+      rmssdMs: 48.25,
+      completedWindowCount: 60,
+      acceptedWindowCount: 56,
     });
     const companionAdmissionId = createHash("sha256")
       .update(companionObservationJson)
@@ -4809,15 +4793,11 @@ describe("hosted device-sync runtime", () => {
       });
       const companionObservationJson = serializeCompanionHrvRmssdObservation({
         schema: COMPANION_HRV_RMSSD_SCHEMA,
-        captureId: "223e4567-e89b-42d3-a456-426614174000",
-        observedAt: "2026-07-13T01:01:00.000Z",
-        durationMs: 60_000,
-        rmssdMs: 47.5,
-        intervalCount: 70,
-        acceptedIntervalCount: 68,
-        successivePairCount: 65,
-        quality: "good",
         methodVersion: COMPANION_HRV_RMSSD_METHOD_VERSION,
+        nightDate: "2026-07-13",
+        rmssdMs: 47.5,
+        completedWindowCount: 60,
+        acceptedWindowCount: 56,
       });
       const companionJob = getStore(service).enqueueJob({
         accountId: account.id,

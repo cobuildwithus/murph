@@ -86,7 +86,7 @@ export interface DeviceEventPayload {
   links?: DeviceEventLinkPayload[];
   evidenceRoles?: string[];
   externalRef?: DeviceExternalRefPayload;
-  externalRefUpdatePolicy?: "immutable" | "prefer-higher-confidence";
+  externalRefUpdatePolicy?: "immutable";
   legacyExternalRefs?: DeviceExternalRefPayload[];
   dataOrigin?: DeviceDataOrigin;
   fields?: Record<string, unknown>;

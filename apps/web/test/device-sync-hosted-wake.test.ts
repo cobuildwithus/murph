@@ -16,7 +16,7 @@ const mocks = vi.hoisted(() => {
     getConnectionForUser: vi.fn(),
     getConnectionOwnerId: vi.fn(),
     hasPendingDirtyConnection: vi.fn(),
-    inspectCompanionHrvCaptureReceipt: vi.fn(),
+    inspectCompanionHrvNightReceipt: vi.fn(),
     getStoredConnectionAccountForUser: vi.fn(),
     clearStoredProviderConfigCredential: vi.fn(),
     listConnectionSources: vi.fn(),
@@ -132,16 +132,12 @@ function createHostedEnv(overrides: Partial<{
 
 function buildCompanionHrvRmssdObservation() {
   return {
-    schema: "murph.companion.hrv-rmssd.v1" as const,
-    captureId: "123e4567-e89b-42d3-a456-426614174000",
-    observedAt: "2026-07-10T13:45:00.000Z",
-    durationMs: 60_000 as const,
-    rmssdMs: 48.25,
-    intervalCount: 72,
-    acceptedIntervalCount: 68,
-    successivePairCount: 63,
-    quality: "good" as const,
-    methodVersion: "rmssd-pulse-interval-v1" as const,
+    schema: "murph.companion.overnight-prv-rmssd.v1" as const,
+    methodVersion: "prv-rmssd-5m-mean-v1" as const,
+    nightDate: "2026-07-10",
+    rmssdMs: 52.75,
+    completedWindowCount: 96,
+    acceptedWindowCount: 72,
   };
 }
 
@@ -311,7 +307,7 @@ vi.mock("@/src/lib/device-sync/prisma-store", () => ({
     getConnectionForUser = mocks.getConnectionForUser;
     getConnectionOwnerId = mocks.getConnectionOwnerId;
     hasPendingDirtyConnection = mocks.hasPendingDirtyConnection;
-    inspectCompanionHrvCaptureReceipt = mocks.inspectCompanionHrvCaptureReceipt;
+    inspectCompanionHrvNightReceipt = mocks.inspectCompanionHrvNightReceipt;
     getDirtyConnection = mocks.getDirtyConnection;
     getStoredConnectionAccountForUser = mocks.getStoredConnectionAccountForUser;
     clearStoredProviderConfigCredential = mocks.clearStoredProviderConfigCredential;
@@ -490,7 +486,7 @@ describe("hosted device-sync wakes", () => {
     }));
     mocks.getConnectionOwnerId.mockResolvedValue("user-123");
     mocks.hasPendingDirtyConnection.mockResolvedValue(false);
-    mocks.inspectCompanionHrvCaptureReceipt.mockResolvedValue("missing");
+    mocks.inspectCompanionHrvNightReceipt.mockResolvedValue("missing");
     mocks.upsertDirtyConnection.mockResolvedValue({
       dirty: buildDirtyConnectionRecord(),
       shouldRequestWake: true,
@@ -2562,9 +2558,9 @@ describe("hosted device-sync wakes", () => {
     await acceptTestCompanionHrvRmssdObservation();
 
     expect(mocks.listConnectionsForUser).toHaveBeenCalledWith("user-123");
-    expect(mocks.inspectCompanionHrvCaptureReceipt).toHaveBeenCalledWith({
-      captureId: "123e4567-e89b-42d3-a456-426614174000",
+    expect(mocks.inspectCompanionHrvNightReceipt).toHaveBeenCalledWith({
       connectionIds: ["dsc_junction_123"],
+      nightDate: "2026-07-10",
       now: "2026-07-10T13:46:00.000Z",
       resource: expect.objectContaining({
         resource: "companion_hrv_rmssd",
@@ -2606,8 +2602,8 @@ describe("hosted device-sync wakes", () => {
     expect(mocks.sha256Hex).toHaveBeenCalledWith(staged);
     expect(stagedPayload?.companionAdmissionId).toBe("a".repeat(64));
     expect(JSON.parse(staged)).toEqual(expect.objectContaining({
-      captureId: "123e4567-e89b-42d3-a456-426614174000",
-      rmssdMs: 48.25,
+      nightDate: "2026-07-10",
+      rmssdMs: 52.75,
     }));
     expect(staged).not.toContain("rrIntervals");
     expect(staged).not.toContain("rawBleBytes");
@@ -2633,13 +2629,13 @@ describe("hosted device-sync wakes", () => {
         status: "disconnected",
       }),
     ]);
-    mocks.inspectCompanionHrvCaptureReceipt.mockResolvedValue("exact");
+    mocks.inspectCompanionHrvNightReceipt.mockResolvedValue("exact");
 
     await expect(acceptTestCompanionHrvRmssdObservation({
       acceptedAt: "2026-07-20T13:46:00.000Z",
     })).resolves.toBeUndefined();
 
-    expect(mocks.inspectCompanionHrvCaptureReceipt).toHaveBeenCalledTimes(1);
+    expect(mocks.inspectCompanionHrvNightReceipt).toHaveBeenCalledTimes(1);
     expect(mocks.getConnectionForUser).not.toHaveBeenCalled();
     expect(mocks.upsertDirtyConnection).not.toHaveBeenCalled();
     expect(mocks.appendHostedMailboxEnvelope).not.toHaveBeenCalled();
@@ -2653,7 +2649,7 @@ describe("hosted device-sync wakes", () => {
         status: "disconnected",
       }),
     ]);
-    mocks.inspectCompanionHrvCaptureReceipt.mockResolvedValue("conflict");
+    mocks.inspectCompanionHrvNightReceipt.mockResolvedValue("conflict");
 
     await expect(acceptTestCompanionHrvRmssdObservation({
       acceptedAt: "2026-07-20T13:46:00.000Z",
@@ -2662,7 +2658,7 @@ describe("hosted device-sync wakes", () => {
         rmssdMs: 49.25,
       },
     })).rejects.toMatchObject({
-      code: "COMPANION_HRV_CAPTURE_CONFLICT",
+      code: "COMPANION_HRV_NIGHT_CONFLICT",
       httpStatus: 409,
       retryable: false,
     });
@@ -2672,9 +2668,9 @@ describe("hosted device-sync wakes", () => {
   });
 
   it.each([
-    ["stale", "2026-07-20T13:46:00.000Z"],
-    ["future", "2026-07-10T13:39:59.000Z"],
-  ])("rejects unseen %s HRV work at first admission", async (_label, acceptedAt) => {
+    ["stale", "2026-07-07"],
+    ["future", "2026-07-12"],
+  ])("rejects an unseen %s HRV night at first admission", async (_label, nightDate) => {
     const connection = buildHostedConnection({
       id: "dsc_junction_123",
       provider: "junction",
@@ -2682,13 +2678,18 @@ describe("hosted device-sync wakes", () => {
     });
     mocks.listConnectionsForUser.mockResolvedValue([connection]);
 
-    await expect(acceptTestCompanionHrvRmssdObservation({ acceptedAt })).rejects.toMatchObject({
+    await expect(acceptTestCompanionHrvRmssdObservation({
+      observation: {
+        ...buildCompanionHrvRmssdObservation(),
+        nightDate,
+      },
+    })).rejects.toMatchObject({
       code: "COMPANION_REQUEST_INVALID",
       httpStatus: 400,
       retryable: false,
     });
 
-    expect(mocks.inspectCompanionHrvCaptureReceipt).toHaveBeenCalledTimes(1);
+    expect(mocks.inspectCompanionHrvNightReceipt).toHaveBeenCalledTimes(1);
     expect(mocks.getConnectionForUser).not.toHaveBeenCalled();
     expect(mocks.upsertDirtyConnection).not.toHaveBeenCalled();
   });

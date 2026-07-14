@@ -24,21 +24,19 @@ If a provider adapter returns a non-empty snapshot without any provider-owned ra
 
 Built-in providers now share one descriptor surface in `device-providers/provider-descriptors.ts`. That descriptor is the single source for provider key, transport modes, OAuth paths/scopes, webhook support, default sync windows, metric families, and source-priority hints, so importers and `device-syncd` no longer drift on provider metadata.
 
-The iOS companion's direct WHOOP spot-HRV path is a deliberately narrower
+The iOS companion's direct WHOOP overnight-HRV path is a deliberately narrower
 Junction-account ingress rather than a fourth transport provider. It accepts
-only the strict `murph.companion.hrv-rmssd.v1` derived observation, maps it to
-one live canonical `hrv-rmssd` millisecond fact per vault-local day and method
-with direct-WHOOP provenance, and derives exact replay identity from the
-verified admission digest rather than the reusable client capture id. The first
-reading in a confidence tier wins, and medium-confidence signal may upgrade a
-low-confidence reading; rejected same-day captures retain no extra evidence.
-Raw R-R intervals, BLE
-frames, device identity, and Apple Health comparison values are outside this
-package's contract. Apple HealthKit's generic HRV input maps separately to
-canonical `hrv-sdnn`; the importer never combines SDNN with the companion RMSSD
-series. Its provider external identity remains stable across that metric
-correction so a re-import supersedes an older generic Apple HRV event instead
-of duplicating it.
+only the strict `murph.companion.overnight-prv-rmssd.v1` derived observation
+and maps it to one immutable `hrv-rmssd` millisecond summary per phone-owned
+sleep night. The canonical identity is the night date; the verified admission
+digest and versioned calculation method remain provenance, so retry cannot mint
+another nightly fact. Raw R-R intervals, BLE frames, exact capture timestamps,
+per-window values, device identity, and Apple Health comparison values are
+outside this package's contract. Apple HealthKit's generic HRV input maps
+separately to canonical `hrv-sdnn`; the importer never combines SDNN with the
+companion RMSSD series. Its provider external identity remains stable across
+that metric correction so a re-import supersedes an older generic Apple HRV
+event instead of duplicating it.
 
 For the next provider, importers should only need:
 - one shared descriptor entry

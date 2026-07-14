@@ -114,7 +114,7 @@ describe("PrismaHostedDirtyConnectionStore dirty pending state", () => {
     }
   });
 
-  it("keeps retained replays idempotent and gives post-expiry companion admissions distinct payloads", async () => {
+  it("keeps retained nightly replays idempotent and rejects changed same-night content", async () => {
     installHostedSecureBoxStringTestCodec();
 
     try {
@@ -151,9 +151,9 @@ describe("PrismaHostedDirtyConnectionStore dirty pending state", () => {
             receiptRows.set(input.data.id, input.data);
             return { count: 1 };
           }),
-          // Model a connection already holding 1,023 unrelated retained
+          // Model a connection already holding 63 unrelated retained
           // receipts so the accepted row brings it exactly to the hard cap.
-          count: vi.fn(async () => receiptRows.size + 1_023),
+          count: vi.fn(async () => receiptRows.size + 63),
           deleteMany: vi.fn(async (input: {
             where: { createdAt: { lt: Date } };
           }) => {
@@ -232,31 +232,24 @@ describe("PrismaHostedDirtyConnectionStore dirty pending state", () => {
       const store = new PrismaHostedDirtyConnectionStore(prisma as never);
       const observation = {
         schema: COMPANION_HRV_RMSSD_SCHEMA as typeof COMPANION_HRV_RMSSD_SCHEMA,
-        captureId: "123e4567-e89b-42d3-a456-426614174000",
-        observedAt: "2026-07-10T13:45:00.000Z",
-        durationMs: 60_000 as const,
-        rmssdMs: 48.25,
-        intervalCount: 72,
-        acceptedIntervalCount: 68,
-        successivePairCount: 63,
-        quality: "good" as const,
         methodVersion: COMPANION_HRV_RMSSD_METHOD_VERSION as typeof COMPANION_HRV_RMSSD_METHOD_VERSION,
+        nightDate: "2026-07-10",
+        rmssdMs: 52.75,
+        completedWindowCount: 96,
+        acceptedWindowCount: 72,
       };
       const buildInput = (
         rmssdMs: number,
-        captureId = observation.captureId,
-        options: {
-          dirtyAt?: string;
-        } = {},
+        nightDate = observation.nightDate,
       ) => {
         const companionObservationJson = serializeCompanionHrvRmssdObservation({
           ...observation,
-          captureId,
+          nightDate,
           rmssdMs,
         });
         return {
           connectionId: "dsc_companion_hrv_1",
-          dirtyAt: options.dirtyAt ?? "2026-07-10T13:46:00.000Z",
+          dirtyAt: "2026-07-10T13:46:00.000Z",
           eventType: "companion.hrv-rmssd.created",
           provider: "junction",
           resourceCategory: "derived",
@@ -291,45 +284,42 @@ describe("PrismaHostedDirtyConnectionStore dirty pending state", () => {
       expect(receiptRows.size).toBe(1);
 
       const exactResource = buildInput(observation.rmssdMs).resources[0]!;
-      await expect(store.inspectCompanionHrvCaptureReceipt({
-        captureId: observation.captureId,
+      await expect(store.inspectCompanionHrvNightReceipt({
         connectionIds: [buildInput(observation.rmssdMs).connectionId],
+        nightDate: observation.nightDate,
         now: "2026-07-10T13:46:00.000Z",
         resource: exactResource,
         userId: buildInput(observation.rmssdMs).userId,
       })).resolves.toBe("exact");
-      await expect(store.inspectCompanionHrvCaptureReceipt({
-        captureId: observation.captureId,
+      await expect(store.inspectCompanionHrvNightReceipt({
         connectionIds: [buildInput(observation.rmssdMs).connectionId],
+        nightDate: observation.nightDate,
         now: "2026-07-10T13:46:00.000Z",
         resource: buildInput(49.25).resources[0]!,
         userId: buildInput(observation.rmssdMs).userId,
       })).resolves.toBe("conflict");
+      await expect(store.inspectCompanionHrvNightReceipt({
+        connectionIds: ["dsc_companion_hrv_2"],
+        nightDate: observation.nightDate,
+        now: "2026-07-10T13:46:00.000Z",
+        resource: exactResource,
+        userId: buildInput(observation.rmssdMs).userId,
+      })).resolves.toBe("missing");
+      await expect(store.inspectCompanionHrvNightReceipt({
+        connectionIds: [buildInput(observation.rmssdMs).connectionId],
+        nightDate: "2026-07-11",
+        now: "2026-07-10T13:46:00.000Z",
+        resource: buildInput(observation.rmssdMs, "2026-07-11").resources[0]!,
+        userId: buildInput(observation.rmssdMs).userId,
+      })).resolves.toBe("missing");
 
       const pendingReplay = await store.upsertDirtyConnection(buildInput(observation.rmssdMs));
       expect(pendingReplay.shouldRequestWake).toBe(false);
       expect(payloadRows.size).toBe(1);
 
-      const retainedReceipt = [...receiptRows.values()][0];
-      expect(retainedReceipt).toBeDefined();
-      retainedReceipt!.createdAt = new Date("2026-06-01T00:00:00.000Z");
-      const changedAfterExpiryInput = buildInput(
-        49.25,
-        observation.captureId,
-        { dirtyAt: "2026-08-11T13:46:00.000Z" },
-      );
-      const changedAfterExpiry = await store.upsertDirtyConnection(changedAfterExpiryInput);
-      const changedPayloadId = Object.values(changedAfterExpiry.dirty.dirtyResources)
-        .find((resource) => resource.payload?.companionAdmissionId)?.dirtyPayloadId;
-
-      expect(changedPayloadId).toMatch(/^dsp_/u);
-      expect(changedPayloadId).not.toBe(acceptedPayloadId);
-      expect(payloadRows.size).toBe(2);
-      expect(receiptRows.size).toBe(1);
-
       await store.markDirtyConnectionProcessed({
         connectionId: buildInput(observation.rmssdMs).connectionId,
-        processedDirtyPayloadIds: [acceptedPayloadId, changedPayloadId].filter(
+        processedDirtyPayloadIds: [acceptedPayloadId].filter(
           (value): value is string => Boolean(value),
         ),
         processedRevision: first.dirty.dirtyRevision,
@@ -338,13 +328,13 @@ describe("PrismaHostedDirtyConnectionStore dirty pending state", () => {
       expect(payloadRows.size).toBe(0);
       expect(receiptRows.size).toBe(1);
 
-      const completedReplay = await store.upsertDirtyConnection(changedAfterExpiryInput);
+      const completedReplay = await store.upsertDirtyConnection(buildInput(observation.rmssdMs));
       expect(completedReplay.shouldRequestWake).toBe(false);
       expect(completedReplay.dirty.dirtyRevision).toBe(first.dirty.dirtyRevision);
       expect(payloadRows.size).toBe(0);
 
-      await expect(store.upsertDirtyConnection(buildInput(observation.rmssdMs))).rejects.toMatchObject({
-        code: "COMPANION_HRV_CAPTURE_CONFLICT",
+      await expect(store.upsertDirtyConnection(buildInput(49.25))).rejects.toMatchObject({
+        code: "COMPANION_HRV_NIGHT_CONFLICT",
         httpStatus: 409,
         retryable: false,
       });
@@ -353,9 +343,9 @@ describe("PrismaHostedDirtyConnectionStore dirty pending state", () => {
 
       await expect(store.upsertDirtyConnection(buildInput(
         observation.rmssdMs,
-        "223e4567-e89b-42d3-a456-426614174000",
+        "2026-07-11",
       ))).rejects.toMatchObject({
-        code: "COMPANION_HRV_CAPTURE_RECEIPT_CAPACITY_REACHED",
+        code: "COMPANION_HRV_NIGHT_RECEIPT_CAPACITY_REACHED",
         httpStatus: 429,
         retryable: true,
       });
@@ -365,7 +355,7 @@ describe("PrismaHostedDirtyConnectionStore dirty pending state", () => {
     }
   });
 
-  it("lazily removes expired companion capture receipts before replay inspection", async () => {
+  it("lazily removes expired companion night receipts before replay inspection", async () => {
     const oldReceipt = {
       connectionId: "dsc_companion_hrv_expired",
       createdAt: new Date("2026-06-09T13:46:00.000Z"),
@@ -393,15 +383,11 @@ describe("PrismaHostedDirtyConnectionStore dirty pending state", () => {
     const store = new PrismaHostedDirtyConnectionStore(prisma as never);
     const observation = {
       schema: COMPANION_HRV_RMSSD_SCHEMA as typeof COMPANION_HRV_RMSSD_SCHEMA,
-      captureId: "323e4567-e89b-42d3-a456-426614174000",
-      observedAt: "2026-07-10T13:45:00.000Z",
-      durationMs: 60_000 as const,
-      rmssdMs: 48.25,
-      intervalCount: 72,
-      acceptedIntervalCount: 68,
-      successivePairCount: 63,
-      quality: "good" as const,
       methodVersion: COMPANION_HRV_RMSSD_METHOD_VERSION as typeof COMPANION_HRV_RMSSD_METHOD_VERSION,
+      nightDate: "2026-07-10",
+      rmssdMs: 52.75,
+      completedWindowCount: 96,
+      acceptedWindowCount: 72,
     };
     const resource = {
       count: 1,
@@ -419,9 +405,9 @@ describe("PrismaHostedDirtyConnectionStore dirty pending state", () => {
       windowStart: null,
     };
 
-    await expect(store.inspectCompanionHrvCaptureReceipt({
-      captureId: observation.captureId,
+    await expect(store.inspectCompanionHrvNightReceipt({
       connectionIds: [oldReceipt.connectionId],
+      nightDate: observation.nightDate,
       now: "2026-07-10T13:46:00.000Z",
       resource,
       userId: oldReceipt.userId,
