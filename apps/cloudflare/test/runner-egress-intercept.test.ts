@@ -2251,6 +2251,9 @@ describe("hostedRunnerIntercept", () => {
         message: "Hosted runner provider egress completed.",
       }),
     );
+    expect(JSON.stringify(mocks.emitHostedExecutionStructuredLog.mock.calls)).not.toContain(
+      "providerResponse",
+    );
   });
 
   async function expectTokenlessDeliveryProviderRejected(
@@ -4823,6 +4826,116 @@ describe("hostedRunnerIntercept", () => {
     );
   });
 
+  it("logs bounded Cloudflare challenge metadata for a failed Linq response without reading it", async () => {
+    const responseBody = "<html>private upstream challenge body</html>";
+    const privatePhoneNumber = "+15555550123";
+    const fetchMock = vi.fn<typeof fetch>(async () =>
+      new Response(responseBody, {
+        headers: {
+          "cf-mitigated": "challenge",
+          "cf-ray": "230b030023ae2822-SJC",
+          "content-type": "text/html; charset=UTF-8",
+          "x-provider-debug": "private arbitrary header value",
+        },
+        status: 403,
+      })
+    );
+    vi.stubGlobal("fetch", fetchMock);
+    const requestBody = JSON.stringify({
+      text: `private outbound message body ${privatePhoneNumber}`,
+    });
+
+    const response = await hostedRunnerIntercept(
+      new Request("https://api.linqapp.com/api/partner/v3/chats/private_chat_id/messages", {
+        body: requestBody,
+        headers: {
+          ...BOUND_USER_WRITE_FENCE_HEADERS,
+          authorization: `Bearer ${HOSTED_CLOUDFLARE_INJECTED_CREDENTIAL}`,
+          "content-type": "application/json",
+        },
+        method: "POST",
+      }),
+      createInterceptEnv({
+        LINQ_API_TOKEN: "linq-worker-secret",
+        validateRuntimeWriteFence: vi.fn(async () => true),
+      }),
+      { containerId: "opaque-container-id" },
+    );
+
+    expect(response.status).toBe(403);
+    await expect(response.text()).resolves.toBe(responseBody);
+    expect(mocks.emitHostedExecutionStructuredLog).toHaveBeenCalledWith(
+      expect.objectContaining({
+        details: expect.objectContaining({
+          providerKind: "linq",
+          providerOperation: "message_send",
+          providerResponseCloudflareChallenge: true,
+          providerResponseCloudflareRay: "230b030023ae2822-SJC",
+          providerResponseContentKind: "html",
+          responseStatus: 403,
+        }),
+        message: "Hosted runner provider egress completed.",
+      }),
+    );
+    const serializedLogs = JSON.stringify(mocks.emitHostedExecutionStructuredLog.mock.calls);
+    expect(serializedLogs).not.toContain(responseBody);
+    expect(serializedLogs).not.toContain(requestBody);
+    expect(serializedLogs).not.toContain("private_chat_id");
+    expect(serializedLogs).not.toContain("linq-worker-secret");
+    expect(serializedLogs).not.toContain("member_123");
+    expect(serializedLogs).not.toContain(privatePhoneNumber);
+    expect(serializedLogs).not.toContain("private arbitrary header value");
+  });
+
+  it("classifies a failed Linq API response without logging invalid correlation values", async () => {
+    const responseBody = '{"error":"private upstream API body"}';
+    const responseBytes = TEST_TEXT_ENCODER.encode(responseBody);
+    const fetchMock = vi.fn<typeof fetch>(async () =>
+      new Response(responseBytes, {
+        headers: {
+          "cf-mitigated": "not-a-challenge",
+          "cf-ray": "private invalid correlation value",
+          "content-type": "application/problem+json; charset=utf-8",
+        },
+        status: 403,
+      })
+    );
+    vi.stubGlobal("fetch", fetchMock);
+
+    const response = await hostedRunnerIntercept(
+      new Request("https://api.linqapp.com/api/partner/v3/phone_numbers", {
+        headers: {
+          ...BOUND_USER_WRITE_FENCE_HEADERS,
+          authorization: `Bearer ${HOSTED_CLOUDFLARE_INJECTED_CREDENTIAL}`,
+        },
+        method: "GET",
+      }),
+      createInterceptEnv({
+        LINQ_API_TOKEN: "linq-worker-secret",
+        validateRuntimeWriteFence: vi.fn(async () => true),
+      }),
+      { containerId: "opaque-container-id" },
+    );
+
+    expect(response.status).toBe(403);
+    expect(new Uint8Array(await response.arrayBuffer())).toEqual(responseBytes);
+    expect(mocks.emitHostedExecutionStructuredLog).toHaveBeenCalledWith(
+      expect.objectContaining({
+        details: expect.objectContaining({
+          providerKind: "linq",
+          providerOperation: "phone_numbers_list",
+          providerResponseCloudflareChallenge: false,
+          providerResponseContentKind: "json",
+          responseStatus: 403,
+        }),
+      }),
+    );
+    const serializedLogs = JSON.stringify(mocks.emitHostedExecutionStructuredLog.mock.calls);
+    expect(serializedLogs).not.toContain("providerResponseCloudflareRay");
+    expect(serializedLogs).not.toContain("private invalid correlation value");
+    expect(serializedLogs).not.toContain(responseBody);
+  });
+
   it("requires the active write fence before injecting Linq credentials for reads", async () => {
     const fetchMock = vi.fn<typeof fetch>(async () => new Response(JSON.stringify({
       phone_numbers: [],
@@ -4907,12 +5020,14 @@ describe("hostedRunnerIntercept", () => {
     {
       name: "phone number probe",
       method: "GET",
+      operation: "phone_numbers_list",
       path: "/phone_numbers",
       responseBody: JSON.stringify({ phone_numbers: [] }),
     },
     {
       name: "attachment metadata",
       method: "GET",
+      operation: "attachment_read",
       path: "/attachments/attachment_metadata_1",
       responseBody: "{}",
     },
@@ -4924,6 +5039,7 @@ describe("hostedRunnerIntercept", () => {
       },
       method: "POST",
       name: "attachment upload creation",
+      operation: "attachment_create",
       path: "/attachments",
     },
     {
@@ -4934,6 +5050,7 @@ describe("hostedRunnerIntercept", () => {
       },
       method: "POST",
       name: "chat creation",
+      operation: "chat_create",
       path: "/chats",
     },
     {
@@ -4942,6 +5059,7 @@ describe("hostedRunnerIntercept", () => {
       },
       method: "POST",
       name: "chat message send",
+      operation: "message_send",
       path: "/chats/chat_1/messages",
     },
     {
@@ -4950,6 +5068,7 @@ describe("hostedRunnerIntercept", () => {
       },
       method: "POST",
       name: "voice memo send",
+      operation: "voice_memo_send",
       path: "/chats/chat_1/voicememo",
     },
     {
@@ -4959,26 +5078,31 @@ describe("hostedRunnerIntercept", () => {
       },
       method: "POST",
       name: "message reaction",
+      operation: "reaction_create",
       path: "/messages/message_1/reactions",
     },
     {
       method: "POST",
       name: "typing start",
+      operation: "typing_start",
       path: "/chats/chat_1/typing",
     },
     {
       method: "POST",
       name: "read receipt",
+      operation: "read_receipt_send",
       path: "/chats/chat_1/read",
     },
     {
       method: "DELETE",
       name: "typing stop",
+      operation: "typing_stop",
       path: "/chats/chat_1/typing",
     },
     {
       method: "DELETE",
       name: "message cleanup",
+      operation: "message_delete",
       path: "/messages/message_1",
     },
   ] as const)("allows required Linq runtime route: $name", async (route) => {
@@ -5023,6 +5147,13 @@ describe("hostedRunnerIntercept", () => {
     expect(forwarded.headers.get("authorization")).toBe("Bearer linq-worker-secret");
     expect(forwarded.headers.has("x-hosted-runtime-attempt-id")).toBe(false);
     expect(forwarded.headers.has(HOSTED_RUNNER_BOUND_USER_ID_HEADER)).toBe(false);
+    expect(mocks.emitHostedExecutionStructuredLog).toHaveBeenCalledWith(
+      expect.objectContaining({
+        details: expect.objectContaining({
+          providerOperation: route.operation,
+        }),
+      }),
+    );
   });
 
   it("honors configured Linq base URL pathname prefixes before validating allowed suffixes", async () => {

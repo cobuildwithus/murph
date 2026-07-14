@@ -12,7 +12,10 @@ the existing device-syncd pipeline. Junction remains the broad sync path. One
 narrow native exception reads WHOOP's `WHOOP Recovery` and `WHOOP Strain`
 custom metadata because Junction and normal HealthKit quantity/category
 mapping omit those values. The exception is closed to those two keys and does
-not create a general native HealthKit ingestion engine.
+not create a general native HealthKit ingestion engine. A separately gated
+internal path also supports a direct WHOOP spot-RMSSD reading; it does not
+change the source-agnostic Apple Health sync or claim parity with WHOOP's
+proprietary overnight metrics.
 
 Growth framing: the nearest payoff is not WHOOP — it is **Apple Watch and
 iPhone-health members**. Apple Health remains a native-only authorization flow;
@@ -220,12 +223,73 @@ verification (existing `@privy-io/node`):
 ### Deployment order and rollback floor
 
 Current companion volume is low, so the iOS release is the rollout gate. Do not
-add a runtime feature flag or capability handshake, and do not require an
-immediate container rollout, queue drain, or tandem deploy. Deploy the
+add a runtime feature flag or per-request availability probe, and do not require
+an immediate container rollout, queue drain, or tandem deploy. Deploy the
 Cloudflare/device-syncd and Vercel/web changes through their normal backend
 release paths, verify both, and release the iOS app last. After the iOS release,
 keep both backend surfaces on feature-aware versions while supported clients
 can upload companion metadata.
+4. `POST /api/device-sync/companion/hrv-rmssd`
+   — validate a strict, sub-512-byte `murph.companion.hrv-rmssd.v1`
+   observation for exactly 60,000 milliseconds, reuse the single active
+   member-owned Junction device
+   connection established by the explicit sign-in-token flow, stage one
+   encrypted compact dirty job, and wake the existing hosted device-sync
+   runtime. Missing, terminal, or ambiguous connection state fails closed;
+   data upload never establishes or reconnects a Junction account. The
+   established-lane requirement is rechecked under the connection mutation
+   lock. Disconnect commits a durable fail-closed intent before provider
+   revocation, so companion uploads and reconnect writes cannot enter the lane
+   until disconnect finalizes or a retry completes the interrupted operation.
+   Ordinary companion metadata continues to require the active member-owned
+   lane described above; it does not inherit HRV's source-confirmation gate. The
+   contract has no field for raw R-R
+   intervals, BLE packets, device identity, heart-rate samples, or Apple
+   Health values; unknown fields are rejected. Structural parsing happens at
+   the route, while the replay-aware service checks retained receipt identity
+   before applying freshness or connection-liveness gates to first admission.
+   The first accepted envelope owns its client capture id during the retained
+   replay window: a web-owned Postgres receipt containing only connection-scoped
+   capture-key and strict-envelope hashes plus `created_at` keeps exact replay
+   idempotent after pending work is acknowledged or the connection disconnects;
+   changed content conflicts. Receipts are excluded from hosted workspace
+   snapshots, lazily expire after 30 days through the indexed
+   `(user_id, connection_id, created_at)` path, and are capped at 1,024 retained
+   rows per connection. After expiry, a replay is new admission and must pass
+   the normal freshness and live-connection gates. Each accepted canonical
+   observation receives a verified SHA-256 admission identity over the strict
+   derived envelope. That identity owns the dirty payload, local job, and
+   canonical external reference, so separate changed admissions that reuse a
+   client capture id after receipt expiry remain distinct. The accepted
+   companion RMSSD encrypted dirty payload remains the durable retry authority
+   until its mapped local job completes the canonical importer write. A
+   revision-only checkpoint may advance while the payload remains pending, but
+   the payload id is acknowledged only after import success; yield, retryable failure, or loss of
+   the machine-local queue therefore causes a safe refetch instead of data loss.
+   A later disconnect does not cancel an already accepted credential-free local
+   import. Runtime hydration keys the local account by
+   the opaque hosted connection id before provider identity, so terminal
+   privacy scrubbing cannot fork the lane into a stale runnable account. An
+   unbound legacy row with unsanitized identity may be adopted through its
+   unique provider-plus-external-account match. Once a terminal scrub leaves
+   only opaque identity, fallback adoption requires a unique candidate with the
+   same provider and connection epoch. A recognized original-plus-opaque fork
+   from an older runtime is consolidated transactionally with its jobs and
+   sources preserved on the hosted-bound row; additional or opaque siblings
+   fail closed.
+   Runtime import writes canonical `hrv-rmssd` milliseconds with direct-WHOOP
+   provenance. Apple HealthKit HRV is canonical `hrv-sdnn`; it never aliases to
+   or aggregates with the direct WHOOP RMSSD series.
+
+### Direct spot-HRV deployment order and rollback floor
+
+Deploy the Cloudflare runtime first with `container_rollout=immediate`, require
+managed-container smoke to report the new runner-bundle fingerprint, and pass a
+functional compact-observation import smoke. Then deploy web acceptance and
+release iOS last. Do not probe runtime availability on each request for this
+low-volume, release-gated lane. Roll back web acceptance first, let
+already-staged jobs drain, and only then remove runtime support. This explicit
+order does not change the metadata lane's iOS-last rollout above.
 
 ### Why the account-ensure step is load-bearing (verified in repo)
 
@@ -313,8 +377,8 @@ licensing unresolved.
   description, 5.1.3(i) specific-data disclosure, privacy nutrition labels,
   and explicit consent for third-party AI processing of synced health data
   (Apple's Nov 2025 guideline) before public submission.
-- Android, BLE (`VitalDevices`), widgets, Live Activities, watchOS (parent
-  spec roadmap).
+- Android, `VitalDevices`, widgets, Live Activities, watchOS, background WHOOP
+  capture, and WHOOP historical offload (parent spec roadmap).
 - No analytics events containing health payloads.
 
 ## Open Items

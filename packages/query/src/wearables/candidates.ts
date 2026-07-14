@@ -15,6 +15,7 @@ import {
 import { dedupeExactMetricCandidates, dedupeSleepWindowCandidates } from "./dedupe.ts";
 import {
   inferJunctionWearableDataOriginFromExternalRef,
+  normalizeWearableOriginSourceSlug,
   resolveWearablePublicSourceProvider,
   wearableDataOriginKey,
 } from "./origin.ts";
@@ -808,11 +809,38 @@ function buildObservationMetricCandidates(
     return [];
   }
 
+  // An explicit event-grain observation is a point-in-time fact, not a
+  // provider day summary. Keep it in the canonical metric-point lane without
+  // promoting it into synthetic sleep/recovery summaries. Missing grain stays
+  // compatible with legacy provider observations whose resource type carries
+  // the summary semantics.
+  const observationGrain = normalizeLowercaseString(entity.attributes.observationGrain)
+    ?.replace(/_/gu, "-");
+  if (observationGrain && ![
+    "summary",
+    "day",
+    "daily-summary",
+    "daily-timeseries-aggregate",
+  ].includes(observationGrain)) {
+    return [];
+  }
+
   const rawMetric = normalizeLowercaseString(entity.attributes.metric);
   const rawValue = readNumber(entity.attributes.value);
   const date = deriveWearableObservationEffectiveDate(entity, externalRef);
 
   if (!rawMetric || rawValue === null || !date) {
+    return [];
+  }
+
+  const dataOrigin = readWearableDataOrigin(entity.attributes.dataOrigin, externalRef);
+  if (
+    rawMetric === "hrv"
+    && normalizeWearableOriginSourceSlug(dataOrigin?.sourceProviderSlug) === APPLE_HEALTH_KIT_PROVIDER
+  ) {
+    // Historical Junction imports used generic `hrv` for HealthKit's SDNN
+    // quantity. The metric-point projection reclassifies those facts as SDNN;
+    // do not also promote them into the RMSSD-only wearable summary field.
     return [];
   }
 

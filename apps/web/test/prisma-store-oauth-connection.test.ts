@@ -1,4 +1,5 @@
 import { beforeEach, describe, expect, it, vi } from "vitest";
+import { DEVICE_SYNC_DISCONNECT_IN_PROGRESS_ERROR_CODE } from "@murphai/device-syncd/public-account";
 
 const { randomBytesMock } = vi.hoisted(() => ({
   randomBytesMock: vi.fn((length: number) => Buffer.from(Array.from({ length }, (_, index) => index))),
@@ -830,6 +831,59 @@ describe("PrismaDeviceSyncControlPlaneStore hosted connection access", () => {
     expect(stored.lastErrorMessage).toBeNull();
     expect(stored.lastSyncErrorAt).toBeNull();
     expect(stored.refreshLeaseOwner).toBeNull();
+  });
+
+  it("rejects reconnect writes while the existing account is being disconnected", async () => {
+    const existing = createConnection({
+      accessTokenEncrypted: "enc:old-access-token",
+      id: "dsc_123",
+      keyVersion: "v1",
+      lastErrorCode: DEVICE_SYNC_DISCONNECT_IN_PROGRESS_ERROR_CODE,
+      provider: "whoop",
+      refreshTokenEncrypted: "enc:old-refresh-token",
+      status: "reauthorization_required",
+      tokenVersion: 2,
+      userId: "user-123",
+    });
+    const updateConnection = vi.fn(async () => {
+      throw new Error("disconnect intent should block reconnect writes");
+    });
+    const tx = {
+      $executeRaw: vi.fn(async () => 0),
+      deviceConnection: {
+        findUnique: vi.fn(async () => cloneConnection(existing)),
+        update: updateConnection,
+      },
+    };
+    const store = new PrismaDeviceSyncControlPlaneStore({
+      codec: TEST_CODEC,
+      prisma: {
+        $transaction: async <TResult>(callback: (transaction: typeof tx) => Promise<TResult>) => callback(tx),
+      } as never,
+      providerAccountBlindIndexKey: BLIND_INDEX_KEY,
+    });
+
+    await expect(store.upsertConnection({
+      ownerId: "user-123",
+      provider: "whoop",
+      externalAccountId: "acct_456",
+      displayName: "WHOOP",
+      scopes: ["read:recovery"],
+      tokens: {
+        accessToken: "new-access-token",
+        refreshToken: "new-refresh-token",
+        accessTokenExpiresAt: "2026-03-26T04:00:00.000Z",
+      },
+      metadata: {},
+      connectedAt: "2026-03-26T03:00:00.000Z",
+      nextReconcileAt: "2026-03-26T09:00:00.000Z",
+    })).rejects.toMatchObject({
+      code: "CONNECTION_DISCONNECT_IN_PROGRESS",
+      httpStatus: 409,
+      retryable: true,
+    });
+    expect(tx.$executeRaw).toHaveBeenCalledTimes(1);
+    expect(updateConnection).not.toHaveBeenCalled();
   });
 
   it("rejects OAuth reconnect while a current refresh lease is active", async () => {

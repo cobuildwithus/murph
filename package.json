@@ -85,7 +85,7 @@
   },
   "devDependencies": {
     "@cobuild/repo-tools": "^0.1.15",
-    "@cobuild/review-gpt": "^0.5.106",
+    "@cobuild/review-gpt": "^0.5.108",
     "@typescript/typescript6": "^6.0.2",
     "@murphai/hosted-local-harness": "workspace:*",
     "@murphai/health-metrics": "workspace:*",

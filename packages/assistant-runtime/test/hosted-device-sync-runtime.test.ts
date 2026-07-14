@@ -1,12 +1,21 @@
 import assert from "node:assert/strict";
+import { createHash } from "node:crypto";
 import { mkdir } from "node:fs/promises";
 import path from "node:path";
 
 import { beforeEach, describe, test, vi } from "vitest";
+import { initializeVault, updateVaultSummary } from "@murphai/core";
 import { openSqliteRuntimeDatabase } from "@murphai/runtime-state/node";
 
+import {
+  COMPANION_HRV_RMSSD_METHOD_VERSION,
+  COMPANION_HRV_RMSSD_RESOURCE,
+  COMPANION_HRV_RMSSD_SCHEMA,
+  serializeCompanionHrvRmssdObservation,
+} from "@murphai/contracts";
 import { createConfiguredDeviceSyncProvidersFromConfigs } from "@murphai/device-syncd/config";
 import { buildJunctionProviderSourceInstanceKey } from "@murphai/device-syncd/connect-config";
+import { JUNCTION_COMPANION_HRV_OBSERVATION_INVALID_CODE } from "@murphai/device-syncd/junction-resources";
 import { buildDeviceSyncTokenCipherOptions, createSecretCodec } from "@murphai/device-syncd/local-secret-codec";
 import { deviceSyncError } from "@murphai/device-syncd/errors";
 import {
@@ -32,11 +41,16 @@ import {
   requireHostedRuntimeDeviceSyncStore,
 } from "../src/device-sync-service.ts";
 import {
+  promoteHostedCompletedDirtyPayloadAcks,
   reconcileHostedDeviceSyncControlPlaneState,
   syncHostedDeviceSyncControlPlaneState,
 } from "../src/hosted-device-sync-runtime.ts";
 import type { HostedRuntimeDeviceSyncPort } from "../src/hosted-runtime/platform.ts";
-import { createHostedRuntimeWorkspace } from "./hosted-runtime-test-helpers.ts";
+import { recordHostedDeviceSyncDirtyPostCheckpointRecord } from "../src/hosted-runtime/system-mailbox.ts";
+import {
+  createHostedRuntimeResolvedConfig,
+  createHostedRuntimeWorkspace,
+} from "./hosted-runtime-test-helpers.ts";
 
 const hostedExecutionMocks = vi.hoisted(() => ({
   emitHostedExecutionStructuredLog: vi.fn(),
@@ -386,6 +400,33 @@ function createSnapshotOnlyDeviceSyncPort(
   };
 }
 
+function createDeviceSyncPostCheckpointRuntime(
+  deviceSyncPort: HostedRuntimeDeviceSyncPort,
+): Parameters<typeof recordHostedDeviceSyncDirtyPostCheckpointRecord>[0]["runtime"] {
+  return {
+    commitTimeoutMs: null,
+    forwardedEnv: {},
+    platform: {
+      artifactStore: {
+        async get() {
+          return null;
+        },
+        async put() {},
+      },
+      deviceSyncPort,
+      effectsPort: {
+        async readRawEmailMessage() {
+          return null;
+        },
+        async sendEmail() {},
+      },
+    },
+    platformEnv: {},
+    resolvedConfig: createHostedRuntimeResolvedConfig(),
+    userEnv: {},
+  };
+}
+
 function requireApplyUpdatesRequest(
   request: ApplyUpdatesRequest | null,
 ): ApplyUpdatesRequest {
@@ -401,6 +442,7 @@ function readJobsForAccount(service: DeviceSyncService, accountId: string) {
       select
         available_at as availableAt,
         dedupe_key as dedupeKey,
+        id,
         kind,
         last_error_code as lastErrorCode,
         last_error_message as lastErrorMessage,
@@ -414,6 +456,7 @@ function readJobsForAccount(service: DeviceSyncService, accountId: string) {
     `).all(accountId) as Array<{
       availableAt: string;
       dedupeKey: string | null;
+      id: string;
       kind: string;
       lastErrorCode: string | null;
       lastErrorMessage: string | null;
@@ -2202,11 +2245,16 @@ describe("hosted device-sync runtime", () => {
       assert.deepEqual(state.pendingDirtyAcks, [{
         connectionId: "hosted_conn_dirty_wake",
         nextWakeAt: null,
-        processedDirtyPayloadIds: ["dsp_payload_steps_1"],
         processedRevision: "42",
       }]);
       const jobs = readJobsForAccount(service, connected.account.id);
       assert.equal(jobs.length, 1);
+      assert.deepEqual(state.pendingDirtyPayloadJobs, [{
+        connectionId: "hosted_conn_dirty_wake",
+        dirtyPayloadId: "dsp_payload_steps_1",
+        jobId: jobs[0]?.id,
+        processedRevision: "42",
+      }]);
       assert.deepEqual(
         {
           dedupeKey: jobs[0]?.dedupeKey,
@@ -2230,6 +2278,16 @@ describe("hosted device-sync runtime", () => {
           status: "queued",
         },
       );
+
+      assert.equal(await service.drainWorker(1), 1);
+      promoteHostedCompletedDirtyPayloadAcks({ service, state });
+      assert.deepEqual(state.pendingDirtyAcks, [{
+        connectionId: "hosted_conn_dirty_wake",
+        nextWakeAt: null,
+        processedDirtyPayloadIds: ["dsp_payload_steps_1"],
+        processedRevision: "42",
+      }]);
+      assert.deepEqual(state.pendingDirtyPayloadJobs, []);
     } finally {
       closeHostedRuntimeDeviceSyncService(service);
       await cleanup();
@@ -2348,18 +2406,796 @@ describe("hosted device-sync runtime", () => {
         {
           connectionId: "hosted_conn_dirty_batch_1",
           nextWakeAt: "2026-04-04T10:01:00.000Z",
-          processedDirtyPayloadIds: ["dsp_payload_batch_1"],
           processedRevision: "51",
         },
         {
           connectionId: "hosted_conn_dirty_batch_2",
           nextWakeAt: "2026-04-04T10:01:00.000Z",
-          processedDirtyPayloadIds: ["dsp_payload_batch_2"],
           processedRevision: "52",
         },
       ]);
       assert.equal(readJobsForAccount(service, firstConnected.account.id).length, 1);
       assert.equal(readJobsForAccount(service, secondConnected.account.id).length, 1);
+      assert.deepEqual(
+        state.pendingDirtyPayloadJobs.map(({ connectionId, dirtyPayloadId }) => ({
+          connectionId,
+          dirtyPayloadId,
+        })),
+        [{
+          connectionId: "hosted_conn_dirty_batch_1",
+          dirtyPayloadId: "dsp_payload_batch_1",
+        }, {
+          connectionId: "hosted_conn_dirty_batch_2",
+          dirtyPayloadId: "dsp_payload_batch_2",
+        }],
+      );
+    } finally {
+      closeHostedRuntimeDeviceSyncService(service);
+      await cleanup();
+    }
+  });
+
+  test("generic Strava payloads honor local retry timing and survive a cold restore", async () => {
+    const firstWorkspace = await createHostedRuntimeWorkspace(
+      "hosted-device-sync-runtime-strava-retry-first-",
+    );
+    const restoredWorkspace = await createHostedRuntimeWorkspace(
+      "hosted-device-sync-runtime-strava-retry-restored-",
+    );
+    await mkdir(firstWorkspace.vaultRoot, { recursive: true });
+    await mkdir(restoredWorkspace.vaultRoot, { recursive: true });
+    const baseProvider = createFakeProvider();
+    const stravaProvider: DeviceSyncProvider = {
+      ...baseProvider,
+      provider: "strava",
+      descriptor: {
+        ...baseProvider.descriptor,
+        displayName: "Strava",
+        provider: "strava",
+      },
+      jobExecutor: {
+        async executeJob(_context, job) {
+          const terminal = job.payload.resourceId === "strava-activity-terminal";
+          throw deviceSyncError({
+            code: terminal ? "STRAVA_ACTIVITY_INVALID" : "STRAVA_API_RATE_LIMITED",
+            httpStatus: terminal ? 400 : 429,
+            message: terminal
+              ? "Strava activity fetch cannot be retried."
+              : "Strava activity fetch was rate limited.",
+            retryable: !terminal,
+          });
+        },
+      },
+    };
+    const service = createDeviceSyncServiceForVault(firstWorkspace.vaultRoot, [stravaProvider]);
+    const restoredService = createDeviceSyncServiceForVault(
+      restoredWorkspace.vaultRoot,
+      [{
+        ...stravaProvider,
+        jobExecutor: baseProvider.jobExecutor,
+      }],
+    );
+    const connectionId = "hosted_strava_retry";
+    const dirtyPayloadId = "dsp_strava_retry";
+    const terminalDirtyPayloadId = "dsp_strava_terminal";
+    const pendingPayloadIds = new Set([dirtyPayloadId, terminalDirtyPayloadId]);
+    const ackRequests: Array<Parameters<HostedRuntimeDeviceSyncPort["ackDirtyStateProcessed"]>[0]> = [];
+    let firstClosed = false;
+
+    try {
+      const begin = await service.startConnection({ provider: "strava" });
+      const connected = await service.handleOAuthCallback({
+        code: "strava-retry",
+        provider: "strava",
+        state: begin.state,
+      });
+      const snapshot = buildRuntimeSnapshot({
+        connectionId,
+        externalAccountId: connected.account.externalAccountId,
+        provider: "strava",
+      });
+      const dirtyState = buildDirtyState({
+        connectionId,
+        dirtyRevision: "7",
+        dirtyResources: [{
+          count: 1,
+          dirtyPayloadId,
+          jobKind: "resource",
+          payload: {
+            eventType: "activity.create",
+            occurredAt: "2026-04-04T10:00:00.000Z",
+            resourceId: "strava-activity-123",
+            resourceType: "activity",
+          },
+          resource: "activity",
+          resourceCategory: "activity",
+          sourceProviderSlug: "strava",
+          windowEnd: null,
+          windowStart: null,
+        }, {
+          count: 1,
+          dirtyPayloadId: terminalDirtyPayloadId,
+          jobKind: "resource",
+          payload: {
+            eventType: "activity.create",
+            occurredAt: "2026-04-04T10:00:00.000Z",
+            resourceId: "strava-activity-terminal",
+            resourceType: "activity",
+          },
+          resource: "activity",
+          resourceCategory: "activity",
+          sourceProviderSlug: "strava",
+          windowEnd: null,
+          windowStart: null,
+        }],
+        provider: "strava",
+      });
+      const deviceSyncPort: HostedRuntimeDeviceSyncPort = {
+        async ackDirtyStateProcessed(input) {
+          ackRequests.push(input);
+          for (const processedId of input.processedDirtyPayloadIds ?? []) {
+            pendingPayloadIds.delete(processedId);
+          }
+          const stillDirty = pendingPayloadIds.size > 0;
+          return {
+            connectionId,
+            dirtyRevision: "7",
+            nextWakeAt: stillDirty ? "2026-04-04T10:00:01.000Z" : null,
+            processedRevision: "7",
+            recorded: true,
+            stillDirty,
+            userId: "member_123",
+          };
+        },
+        async applyUpdates() {
+          throw new Error("applyUpdates should not be called during dirty-state sync.");
+        },
+        async createConnectLink() {
+          throw new Error("createConnectLink should not be called during dirty-state sync.");
+        },
+        async fetchDirtyStates() {
+          const pendingResources = dirtyState.dirtyResources.filter((resource) =>
+            resource.dirtyPayloadId && pendingPayloadIds.has(resource.dirtyPayloadId)
+          );
+          return {
+            hasMore: false,
+            items: pendingResources.length > 0
+              ? [{ ...dirtyState, dirtyResources: pendingResources }]
+              : [],
+            nextWakeAt: null,
+            userId: "member_123",
+          };
+        },
+        async fetchSnapshot() {
+          return snapshot;
+        },
+      };
+
+      const state = await syncHostedDeviceSyncControlPlaneState({
+        deviceSyncPort,
+        wake: buildCronWake("2026-04-04T10:00:00.000Z"),
+        secret: DEVICE_SYNC_SECRET,
+        service,
+      });
+      const retryScheduledAfter = Date.now();
+      assert.equal(await service.drainWorker(2), 2);
+      promoteHostedCompletedDirtyPayloadAcks({ service, state });
+      const jobs = readJobsForAccount(service, connected.account.id);
+      const retryJob = jobs.find((job) =>
+        JSON.parse(job.payloadJson).resourceId === "strava-activity-123"
+      );
+      const terminalJob = jobs.find((job) =>
+        JSON.parse(job.payloadJson).resourceId === "strava-activity-terminal"
+      );
+      assert.equal(retryJob?.status, "queued");
+      assert.ok(Date.parse(retryJob?.availableAt ?? "") > retryScheduledAfter);
+      assert.equal(terminalJob?.status, "dead");
+      assert.deepEqual(state.pendingDirtyAcks, [{
+        connectionId,
+        nextWakeAt: null,
+        processedDirtyPayloadIds: [terminalDirtyPayloadId],
+        processedRevision: "7",
+      }]);
+      assert.deepEqual(state.pendingDirtyPayloadJobs, [{
+        connectionId,
+        dirtyPayloadId,
+        jobId: retryJob?.id,
+        processedRevision: "7",
+      }]);
+
+      const [ack] = state.pendingDirtyAcks;
+      assert.ok(ack);
+      assert.ok(retryJob);
+      const recorded = await recordHostedDeviceSyncDirtyPostCheckpointRecord({
+        record: {
+          kind: "device-sync.dirty-processed",
+          ...ack,
+          nextWakeAt: retryJob.availableAt,
+        },
+        runtime: createDeviceSyncPostCheckpointRuntime(deviceSyncPort),
+      });
+      assert.deepEqual(recorded, {
+        nextWakeAt: retryJob.availableAt,
+        recorded: 1,
+        stillDirty: true,
+      });
+      assert.deepEqual(ackRequests, [{
+        connectionId,
+        processedDirtyPayloadIds: [terminalDirtyPayloadId],
+        processedRevision: "7",
+      }]);
+      assert.deepEqual([...pendingPayloadIds], [dirtyPayloadId]);
+
+      closeHostedRuntimeDeviceSyncService(service);
+      firstClosed = true;
+
+      const restoredState = await syncHostedDeviceSyncControlPlaneState({
+        deviceSyncPort,
+        wake: buildCronWake("2026-04-04T10:00:01.000Z"),
+        secret: DEVICE_SYNC_SECRET,
+        service: restoredService,
+      });
+      assert.equal(restoredState.pendingDirtyPayloadJobs.length, 1);
+      assert.equal(await restoredService.drainWorker(1), 1);
+      promoteHostedCompletedDirtyPayloadAcks({
+        service: restoredService,
+        state: restoredState,
+      });
+      assert.deepEqual(restoredState.pendingDirtyAcks, [{
+        connectionId,
+        nextWakeAt: null,
+        processedDirtyPayloadIds: [dirtyPayloadId],
+        processedRevision: "7",
+      }]);
+      assert.deepEqual(restoredState.pendingDirtyPayloadJobs, []);
+      const [restoredAck] = restoredState.pendingDirtyAcks;
+      assert.ok(restoredAck);
+      assert.deepEqual(
+        await recordHostedDeviceSyncDirtyPostCheckpointRecord({
+          record: {
+            kind: "device-sync.dirty-processed",
+            ...restoredAck,
+          },
+          runtime: createDeviceSyncPostCheckpointRuntime(deviceSyncPort),
+        }),
+        {
+          nextWakeAt: null,
+          recorded: 1,
+          stillDirty: false,
+        },
+      );
+      assert.equal(pendingPayloadIds.size, 0);
+      const restoredAccountId = restoredState.hostedToLocalAccountIds.get(connectionId);
+      assert.ok(restoredAccountId);
+      assert.equal(
+        readJobsForAccount(restoredService, restoredAccountId).length,
+        1,
+      );
+    } finally {
+      if (!firstClosed) {
+        closeHostedRuntimeDeviceSyncService(service);
+      }
+      closeHostedRuntimeDeviceSyncService(restoredService);
+      await firstWorkspace.cleanup();
+      await restoredWorkspace.cleanup();
+    }
+  });
+
+  test("companion payload acknowledgement remains deferred after retryable canonical import failure", async () => {
+    const { cleanup, vaultRoot } = await createHostedRuntimeWorkspace(
+      "hosted-device-sync-runtime-",
+    );
+    await mkdir(vaultRoot, { recursive: true });
+    const baseProvider = createFakeProvider();
+    const junctionProvider: DeviceSyncProvider = {
+      ...baseProvider,
+      provider: "junction",
+      descriptor: {
+        ...baseProvider.descriptor,
+        displayName: "Junction",
+        provider: "junction",
+      },
+      jobExecutor: {
+        async executeJob() {
+          throw deviceSyncError({
+            code: "IMPORT_RETRYABLE",
+            httpStatus: 503,
+            message: "Canonical import is temporarily unavailable.",
+            retryable: true,
+          });
+        },
+      },
+    };
+    const service = createDeviceSyncServiceForVault(vaultRoot, [junctionProvider]);
+
+    try {
+      const account = getStore(service).upsertAccount({
+        connectedAt: "2026-04-04T09:00:00.000Z",
+        credential: {
+          credentialMetadata: {},
+          kind: "provider_config",
+          providerConfigKey: "junction",
+        },
+        displayName: "Junction",
+        externalAccountId: "junction-retryable-companion-payload",
+        provider: "junction",
+        scopes: [],
+        status: "active",
+      });
+      const companionObservationJson = serializeCompanionHrvRmssdObservation({
+        schema: COMPANION_HRV_RMSSD_SCHEMA,
+        captureId: "123e4567-e89b-42d3-a456-426614174001",
+        observedAt: "2026-04-04T09:58:00.000Z",
+        durationMs: 60_000,
+        rmssdMs: 48.25,
+        intervalCount: 72,
+        acceptedIntervalCount: 68,
+        successivePairCount: 63,
+        quality: "good",
+        methodVersion: COMPANION_HRV_RMSSD_METHOD_VERSION,
+      });
+      const job = getStore(service).enqueueJob({
+        accountId: account.id,
+        kind: "resource",
+        payload: {
+          companionAdmissionId: createHash("sha256")
+            .update(companionObservationJson)
+            .digest("hex"),
+          companionObservationJson,
+          resource: COMPANION_HRV_RMSSD_RESOURCE,
+          resourceCategory: "derived",
+          sourceProviderSlug: "whoop",
+        },
+        provider: "junction",
+      });
+      const state = {
+        hostedToLocalAccountIds: new Map([["hosted_retryable", account.id]]),
+        localToHostedAccountIds: new Map([[account.id, "hosted_retryable"]]),
+        observedTokenVersions: new Map<string, number | null>(),
+        pendingDirtyAcks: [{
+          connectionId: "hosted_retryable",
+          nextWakeAt: null,
+          processedRevision: "7",
+        }],
+        pendingDirtyPayloadJobs: [{
+          connectionId: "hosted_retryable",
+          dirtyPayloadId: "dsp_retryable",
+          jobId: job.id,
+          processedRevision: "7",
+        }],
+        snapshot: null,
+      };
+
+      assert.equal(await service.drainWorker(1), 1);
+      assert.equal(getStore(service).getJobById(job.id)?.status, "queued");
+      promoteHostedCompletedDirtyPayloadAcks({ service, state });
+
+      assert.deepEqual(state.pendingDirtyAcks, [{
+        connectionId: "hosted_retryable",
+        nextWakeAt: null,
+        processedRevision: "7",
+      }]);
+      assert.deepEqual(state.pendingDirtyPayloadJobs, [{
+        connectionId: "hosted_retryable",
+        dirtyPayloadId: "dsp_retryable",
+        jobId: job.id,
+        processedRevision: "7",
+      }]);
+    } finally {
+      closeHostedRuntimeDeviceSyncService(service);
+      await cleanup();
+    }
+  });
+
+  test("structurally invalid companion work promotes its hosted payload exactly once", async () => {
+    const { cleanup, vaultRoot } = await createHostedRuntimeWorkspace(
+      "hosted-device-sync-runtime-invalid-companion-",
+    );
+    const baseProvider = createFakeProvider();
+    const junctionProvider: DeviceSyncProvider = {
+      ...baseProvider,
+      provider: "junction",
+      descriptor: {
+        ...baseProvider.descriptor,
+        displayName: "Junction",
+        provider: "junction",
+      },
+      jobExecutor: {
+        async executeJob() {
+          throw deviceSyncError({
+            code: JUNCTION_COMPANION_HRV_OBSERVATION_INVALID_CODE,
+            message: "Companion HRV observation payload was invalid.",
+            retryable: false,
+          });
+        },
+      },
+    };
+    const service = createDeviceSyncServiceForVault(vaultRoot, [junctionProvider]);
+    const store = getStore(service);
+
+    try {
+      const account = getStore(service).upsertAccount({
+        connectedAt: "2026-04-04T09:00:00.000Z",
+        credential: {
+          credentialMetadata: {},
+          kind: "provider_config",
+          providerConfigKey: "junction",
+        },
+        displayName: "Junction",
+        externalAccountId: "junction-invalid-companion-payload",
+        provider: "junction",
+        scopes: [],
+        status: "active",
+      });
+      const job = getStore(service).enqueueJob({
+        accountId: account.id,
+        kind: "resource",
+        maxAttempts: 1,
+        payload: {
+          companionAdmissionId: "f".repeat(64),
+          companionObservationJson: "{}",
+          resource: COMPANION_HRV_RMSSD_RESOURCE,
+          resourceCategory: "derived",
+          sourceProviderSlug: "whoop",
+        },
+        provider: "junction",
+      });
+      const state = {
+        hostedToLocalAccountIds: new Map([["hosted_invalid", account.id]]),
+        localToHostedAccountIds: new Map([[account.id, "hosted_invalid"]]),
+        observedTokenVersions: new Map<string, number | null>(),
+        pendingDirtyAcks: [{
+          connectionId: "hosted_invalid",
+          nextWakeAt: null,
+          processedRevision: "8",
+        }],
+        pendingDirtyPayloadJobs: [{
+          connectionId: "hosted_invalid",
+          dirtyPayloadId: "dsp_invalid",
+          jobId: job.id,
+          processedRevision: "8",
+        }],
+        snapshot: null,
+      };
+
+      assert.equal(await service.drainWorker(1), 1);
+      const terminalJob = store.getJobById(job.id);
+      assert.equal(terminalJob?.lastErrorCode, JUNCTION_COMPANION_HRV_OBSERVATION_INVALID_CODE);
+      assert.equal(terminalJob?.status, "dead");
+
+      const retainedJob = store.enqueueJob({
+        accountId: account.id,
+        availableAt: "2026-04-04T10:00:00.000Z",
+        kind: "resource",
+        maxAttempts: 1,
+        payload: {
+          companionAdmissionId: "e".repeat(64),
+          companionObservationJson: "{}",
+          resource: COMPANION_HRV_RMSSD_RESOURCE,
+          resourceCategory: "derived",
+          sourceProviderSlug: "whoop",
+        },
+        provider: "junction",
+      });
+      assert.equal(
+        store.claimDueJob("lease-expired-worker", "2026-04-04T10:00:00.000Z", 60_000)?.id,
+        retainedJob.id,
+      );
+      assert.equal(
+        store.failJobIfOwned(
+          retainedJob.id,
+          "lease-expired-worker",
+          "2026-04-04T10:00:01.000Z",
+          "LEASE_EXPIRED",
+          "Companion worker lease expired before completion.",
+          null,
+          false,
+        ),
+        true,
+      );
+      assert.equal(store.getJobById(retainedJob.id)?.status, "dead");
+      state.pendingDirtyPayloadJobs.push({
+        connectionId: "hosted_invalid",
+        dirtyPayloadId: "dsp_lease_expired",
+        jobId: retainedJob.id,
+        processedRevision: "8",
+      });
+
+      promoteHostedCompletedDirtyPayloadAcks({ service, state });
+      promoteHostedCompletedDirtyPayloadAcks({ service, state });
+
+      assert.deepEqual(state.pendingDirtyAcks, [{
+        connectionId: "hosted_invalid",
+        nextWakeAt: null,
+        processedDirtyPayloadIds: ["dsp_invalid"],
+        processedRevision: "8",
+      }]);
+      assert.deepEqual(state.pendingDirtyPayloadJobs, [{
+        connectionId: "hosted_invalid",
+        dirtyPayloadId: "dsp_lease_expired",
+        jobId: retainedJob.id,
+        processedRevision: "8",
+      }]);
+      assert.equal(readJobsForAccount(service, account.id).length, 2);
+    } finally {
+      closeHostedRuntimeDeviceSyncService(service);
+      await cleanup();
+    }
+  });
+
+  test("a fresh local runtime refetches retained companion work after a pre-worker yield", async () => {
+    const firstWorkspace = await createHostedRuntimeWorkspace(
+      "hosted-device-sync-runtime-cold-restore-first-",
+    );
+    const restoredWorkspace = await createHostedRuntimeWorkspace(
+      "hosted-device-sync-runtime-cold-restore-second-",
+    );
+    await mkdir(firstWorkspace.vaultRoot, { recursive: true });
+    await mkdir(restoredWorkspace.vaultRoot, { recursive: true });
+    const baseProvider = createFakeProvider();
+    const junctionProvider: DeviceSyncProvider = {
+      ...baseProvider,
+      provider: "junction",
+      descriptor: {
+        ...baseProvider.descriptor,
+        displayName: "Junction",
+        provider: "junction",
+      },
+    };
+    const firstService = createDeviceSyncServiceForVault(
+      firstWorkspace.vaultRoot,
+      [junctionProvider],
+    );
+    const restoredService = createDeviceSyncServiceForVault(
+      restoredWorkspace.vaultRoot,
+      [junctionProvider],
+    );
+    let firstClosed = false;
+    let fetchCount = 0;
+    const connectionId = "hosted_cold_restore";
+    const companionObservationJson = serializeCompanionHrvRmssdObservation({
+      schema: COMPANION_HRV_RMSSD_SCHEMA,
+      captureId: "123e4567-e89b-42d3-a456-426614174002",
+      observedAt: "2026-04-04T09:58:00.000Z",
+      durationMs: 60_000,
+      rmssdMs: 48.25,
+      intervalCount: 72,
+      acceptedIntervalCount: 68,
+      successivePairCount: 63,
+      quality: "good",
+      methodVersion: COMPANION_HRV_RMSSD_METHOD_VERSION,
+    });
+    const dirtyState = buildDirtyState({
+      connectionId,
+      dirtyRevision: "9",
+      dirtyResources: [{
+        count: 1,
+        dirtyPayloadId: "dsp_cold_restore",
+        jobKind: "resource",
+        payload: {
+          companionAdmissionId: createHash("sha256")
+            .update(companionObservationJson)
+            .digest("hex"),
+          companionObservationJson,
+          resource: COMPANION_HRV_RMSSD_RESOURCE,
+          resourceCategory: "derived",
+          sourceProviderSlug: "whoop",
+        },
+        resource: COMPANION_HRV_RMSSD_RESOURCE,
+        resourceCategory: "derived",
+        sourceProviderSlug: "whoop",
+        windowEnd: null,
+        windowStart: null,
+      }],
+      provider: "junction",
+    });
+
+    const syncFreshRuntime = async (service: DeviceSyncService) => {
+      const account = getStore(service).upsertAccount({
+        connectedAt: "2026-04-04T09:00:00.000Z",
+        credential: {
+          credentialMetadata: {},
+          kind: "provider_config",
+          providerConfigKey: "junction",
+        },
+        displayName: "Junction",
+        externalAccountId: "junction-companion-cold-restore",
+        provider: "junction",
+        scopes: [],
+        status: "active",
+      });
+      const snapshot = buildRuntimeSnapshot({
+        connectionId,
+        credential: {
+          credentialMetadata: {},
+          kind: "provider_config",
+          providerConfigKey: "junction",
+        },
+        externalAccountId: account.externalAccountId,
+        provider: "junction",
+        tokenBundle: null,
+      });
+      return syncHostedDeviceSyncControlPlaneState({
+        deviceSyncPort: {
+          ...createNoDirtyStateDeviceSyncPortMethods(),
+          async applyUpdates() {
+            throw new Error("applyUpdates should not be called during sync");
+          },
+          async createConnectLink() {
+            throw new Error("createConnectLink should not be called during sync");
+          },
+          async fetchDirtyStates() {
+            fetchCount += 1;
+            return {
+              hasMore: false,
+              items: [dirtyState],
+              nextWakeAt: null,
+              userId: "member_123",
+            };
+          },
+          async fetchSnapshot() {
+            return snapshot;
+          },
+        },
+        wake: buildCronWake("2026-04-04T10:00:00.000Z"),
+        secret: DEVICE_SYNC_SECRET,
+        service,
+      });
+    };
+
+    try {
+      const yieldedState = await syncFreshRuntime(firstService);
+      assert.deepEqual(yieldedState.pendingDirtyAcks, [{
+        connectionId,
+        nextWakeAt: null,
+        processedRevision: "9",
+      }]);
+      assert.equal(yieldedState.pendingDirtyPayloadJobs.length, 1);
+
+      closeHostedRuntimeDeviceSyncService(firstService);
+      firstClosed = true;
+
+      const restoredState = await syncFreshRuntime(restoredService);
+      assert.equal(fetchCount, 2);
+      assert.deepEqual(restoredState.pendingDirtyAcks, [{
+        connectionId,
+        nextWakeAt: null,
+        processedRevision: "9",
+      }]);
+      assert.equal(await restoredService.drainWorker(1), 1);
+      promoteHostedCompletedDirtyPayloadAcks({
+        service: restoredService,
+        state: restoredState,
+      });
+      assert.deepEqual(restoredState.pendingDirtyAcks, [{
+        connectionId,
+        nextWakeAt: null,
+        processedDirtyPayloadIds: ["dsp_cold_restore"],
+        processedRevision: "9",
+      }]);
+    } finally {
+      if (!firstClosed) {
+        closeHostedRuntimeDeviceSyncService(firstService);
+      }
+      closeHostedRuntimeDeviceSyncService(restoredService);
+      await firstWorkspace.cleanup();
+      await restoredWorkspace.cleanup();
+    }
+  });
+
+  test("retains a disconnect-skipped generic payload for an authoritative active snapshot", async () => {
+    const { cleanup, vaultRoot } = await createHostedRuntimeWorkspace(
+      "hosted-device-sync-runtime-",
+    );
+    await mkdir(vaultRoot, { recursive: true });
+    const service = createDeviceSyncServiceForVault(vaultRoot);
+
+    try {
+      const account = getStore(service).upsertAccount({
+        connectedAt: "2026-04-04T09:00:00.000Z",
+        credential: {
+          credentialMetadata: {},
+          kind: "none",
+        },
+        displayName: "Demo",
+        externalAccountId: "demo-skipped-dirty-payload",
+        provider: "demo",
+        scopes: [],
+        status: "disconnected",
+      });
+      const job = getStore(service).enqueueJob({
+        accountId: account.id,
+        kind: "resource",
+        payload: { resource: "steps" },
+        provider: "demo",
+      });
+      const state = {
+        hostedToLocalAccountIds: new Map([["hosted_skipped", account.id]]),
+        localToHostedAccountIds: new Map([[account.id, "hosted_skipped"]]),
+        observedTokenVersions: new Map<string, number | null>(),
+        pendingDirtyAcks: [{
+          connectionId: "hosted_skipped",
+          nextWakeAt: null,
+          processedRevision: "8",
+        }],
+        pendingDirtyPayloadJobs: [{
+          connectionId: "hosted_skipped",
+          dirtyPayloadId: "dsp_skipped",
+          jobId: job.id,
+          processedRevision: "8",
+        }],
+        snapshot: null,
+      };
+
+      assert.equal(await service.drainWorker(1), 1);
+      assert.equal(getStore(service).getJobById(job.id)?.status, "succeeded");
+      promoteHostedCompletedDirtyPayloadAcks({ service, state });
+
+      assert.deepEqual(state.pendingDirtyAcks, [{
+        connectionId: "hosted_skipped",
+        nextWakeAt: null,
+        processedRevision: "8",
+      }]);
+      assert.deepEqual(state.pendingDirtyPayloadJobs, [{
+        connectionId: "hosted_skipped",
+        dirtyPayloadId: "dsp_skipped",
+        jobId: job.id,
+        processedRevision: "8",
+      }]);
+
+      const recoveredState = await syncHostedDeviceSyncControlPlaneState({
+        deviceSyncPort: {
+          ...createNoDirtyStateDeviceSyncPortMethods(),
+          async applyUpdates() {
+            throw new Error("applyUpdates should not be called during recovery sync");
+          },
+          async createConnectLink() {
+            throw new Error("createConnectLink should not be called during recovery sync");
+          },
+          async fetchDirtyStates() {
+            return {
+              hasMore: false,
+              items: [buildDirtyState({
+                connectionId: "hosted_skipped",
+                dirtyRevision: "8",
+                dirtyResources: [{
+                  count: 1,
+                  dirtyPayloadId: "dsp_skipped",
+                  jobKind: "resource",
+                  resource: "steps",
+                  resourceCategory: "timeseries",
+                  sourceProviderSlug: "demo",
+                  windowEnd: "2026-04-04T00:00:00.000Z",
+                  windowStart: "2026-04-03T00:00:00.000Z",
+                }],
+              })],
+              nextWakeAt: null,
+              userId: "member_123",
+            };
+          },
+          async fetchSnapshot() {
+            return buildRuntimeSnapshot({
+              connectionId: "hosted_skipped",
+              externalAccountId: account.externalAccountId,
+            });
+          },
+        },
+        wake: buildCronWake("2026-04-04T10:01:00.000Z"),
+        secret: DEVICE_SYNC_SECRET,
+        service,
+      });
+
+      assert.equal(getStore(service).getAccountById(account.id)?.status, "active");
+      assert.equal(recoveredState.pendingDirtyPayloadJobs.length, 1);
+      assert.equal(await service.drainWorker(1), 1);
+      promoteHostedCompletedDirtyPayloadAcks({ service, state: recoveredState });
+      assert.deepEqual(recoveredState.pendingDirtyAcks, [{
+        connectionId: "hosted_skipped",
+        nextWakeAt: null,
+        processedDirtyPayloadIds: ["dsp_skipped"],
+        processedRevision: "8",
+      }]);
+      assert.deepEqual(recoveredState.pendingDirtyPayloadJobs, []);
     } finally {
       closeHostedRuntimeDeviceSyncService(service);
       await cleanup();
@@ -3288,6 +4124,7 @@ describe("hosted device-sync runtime", () => {
         dirtyResources: [
           {
             count: 4,
+            dirtyPayloadId: "dsp_dirty_disconnected",
             jobKind: "resource",
             resource: "steps",
             resourceCategory: "timeseries",
@@ -3334,6 +4171,7 @@ describe("hosted device-sync runtime", () => {
       assert.deepEqual(state.pendingDirtyAcks, [{
         connectionId: "hosted_conn_dirty_disconnected",
         nextWakeAt: "2026-04-04T10:15:00.000Z",
+        processedDirtyPayloadIds: ["dsp_dirty_disconnected"],
         processedRevision: "14",
       }]);
       assert.equal(readJobsForAccount(service, connected.account.id).length, 0);
@@ -3341,6 +4179,693 @@ describe("hosted device-sync runtime", () => {
         hostedExecutionMocks.emitHostedExecutionStructuredLog.mock.calls[0]?.[0].details?.eventCode,
         "dirty_state.disconnected",
       );
+    } finally {
+      closeHostedRuntimeDeviceSyncService(service);
+      await cleanup();
+    }
+  });
+
+  test("terminal Junction accounts retain distinct accepted companion RMSSD dirty work", async () => {
+    for (const status of ["disconnected", "reauthorization_required"] as const) {
+      const { cleanup, vaultRoot } = await createHostedRuntimeWorkspace(
+        "hosted-device-sync-runtime-",
+      );
+      await mkdir(vaultRoot, { recursive: true });
+      const demoProvider = createFakeProvider();
+      const junctionProvider: DeviceSyncProvider = {
+        ...demoProvider,
+        provider: "junction",
+        descriptor: {
+          ...demoProvider.descriptor,
+          provider: "junction",
+          displayName: "Junction",
+        },
+      };
+      const service = createDeviceSyncServiceForVault(vaultRoot, [junctionProvider]);
+
+      try {
+        const account = getStore(service).upsertAccount({
+          connectedAt: "2026-04-04T09:00:00.000Z",
+          credential: {
+            credentialMetadata: {},
+            kind: "provider_config",
+            providerConfigKey: "junction",
+          },
+          displayName: "Junction",
+          externalAccountId: `junction-terminal-${status}`,
+          provider: "junction",
+          scopes: [],
+          status,
+        });
+        const connectionId = `hosted_conn_companion_hrv_${status}`;
+        const snapshot = buildRuntimeSnapshot({
+          connectionId,
+          credential: {
+            credentialMetadata: {},
+            kind: "provider_config",
+            providerConfigKey: "junction",
+          },
+          externalAccountId: account.externalAccountId,
+          provider: "junction",
+          status,
+          tokenBundle: null,
+        });
+        const companionObservationJson = serializeCompanionHrvRmssdObservation({
+          schema: COMPANION_HRV_RMSSD_SCHEMA,
+          captureId: "123e4567-e89b-42d3-a456-426614174000",
+          observedAt: "2026-04-04T09:58:00.000Z",
+          durationMs: 60_000,
+          rmssdMs: 48.25,
+          intervalCount: 72,
+          acceptedIntervalCount: 68,
+          successivePairCount: 63,
+          quality: "good",
+          methodVersion: COMPANION_HRV_RMSSD_METHOD_VERSION,
+        });
+        const changedCompanionObservationJson = JSON.stringify({
+          ...JSON.parse(companionObservationJson),
+          rmssdMs: 49.25,
+        });
+        const companionAdmissionId = createHash("sha256")
+          .update(companionObservationJson)
+          .digest("hex");
+        const changedCompanionAdmissionId = createHash("sha256")
+          .update(changedCompanionObservationJson)
+          .digest("hex");
+        const dirtyState = buildDirtyState({
+          connectionId,
+          dirtyRevision: "15",
+          dirtyResources: [{
+            count: 1,
+            dirtyPayloadId: `dsp_companion_hrv_${status}`,
+            jobKind: "resource",
+            payload: {
+              companionAdmissionId,
+              companionObservationJson,
+              resource: COMPANION_HRV_RMSSD_RESOURCE,
+              resourceCategory: "derived",
+              sourceProviderSlug: "whoop",
+            },
+            resource: COMPANION_HRV_RMSSD_RESOURCE,
+            resourceCategory: "derived",
+            sourceProviderSlug: "whoop",
+            windowEnd: null,
+            windowStart: null,
+          }, {
+            count: 1,
+            dirtyPayloadId: `dsp_companion_hrv_changed_${status}`,
+            jobKind: "resource",
+            payload: {
+              companionAdmissionId: changedCompanionAdmissionId,
+              companionObservationJson: changedCompanionObservationJson,
+              resource: COMPANION_HRV_RMSSD_RESOURCE,
+              resourceCategory: "derived",
+              sourceProviderSlug: "whoop",
+            },
+            resource: COMPANION_HRV_RMSSD_RESOURCE,
+            resourceCategory: "derived",
+            sourceProviderSlug: "whoop",
+            windowEnd: null,
+            windowStart: null,
+          }],
+          provider: "junction",
+        });
+
+        const state = await syncHostedDeviceSyncControlPlaneState({
+          deviceSyncPort: {
+            ...createNoDirtyStateDeviceSyncPortMethods(),
+            async applyUpdates() {
+              throw new Error("applyUpdates should not be called during sync");
+            },
+            async createConnectLink() {
+              throw new Error("createConnectLink should not be called during sync");
+            },
+            async fetchDirtyStates() {
+              return {
+                hasMore: false,
+                items: [dirtyState],
+                nextWakeAt: null,
+                userId: "member_123",
+              };
+            },
+            async fetchSnapshot() {
+              return snapshot;
+            },
+          },
+          wake: buildCronWake("2026-04-04T10:00:00.000Z"),
+          secret: DEVICE_SYNC_SECRET,
+          service,
+        });
+
+        assert.deepEqual([...state.pendingDirtyAcks], [{
+          connectionId,
+          nextWakeAt: null,
+          processedRevision: "15",
+        }]);
+        const jobs = readJobsForAccount(service, account.id);
+        assert.equal(jobs.length, 2);
+        assert.ok(jobs.every((job) => job.status === "queued"));
+        assert.ok(jobs.every((job) => job.dedupeKey?.includes("companion-admission-")));
+        assert.deepEqual(
+          jobs.map((job) => job.payloadJson ? JSON.parse(job.payloadJson).companionAdmissionId : null)
+            .sort(),
+          [companionAdmissionId, changedCompanionAdmissionId].sort(),
+        );
+        assert.equal(await service.drainWorker(1), 1);
+        promoteHostedCompletedDirtyPayloadAcks({ service, state });
+        assert.equal(state.pendingDirtyAcks[0]?.processedDirtyPayloadIds?.length, 1);
+        assert.equal(await service.drainWorker(1), 1);
+        promoteHostedCompletedDirtyPayloadAcks({ service, state });
+        assert.equal(state.pendingDirtyAcks.length, 1);
+        assert.deepEqual(state.pendingDirtyAcks[0]?.connectionId, connectionId);
+        assert.deepEqual(state.pendingDirtyAcks[0]?.nextWakeAt, null);
+        assert.deepEqual(state.pendingDirtyAcks[0]?.processedRevision, "15");
+        assert.deepEqual(
+          [...(state.pendingDirtyAcks[0]?.processedDirtyPayloadIds ?? [])].sort(),
+          [
+            `dsp_companion_hrv_${status}`,
+            `dsp_companion_hrv_changed_${status}`,
+          ].sort(),
+        );
+      } finally {
+        closeHostedRuntimeDeviceSyncService(service);
+        await cleanup();
+      }
+    }
+  });
+
+  test("retained companion RMSSD replay stays ackable after the vault timezone changes", async () => {
+    const { cleanup, vaultRoot } = await createHostedRuntimeWorkspace(
+      "hosted-device-sync-runtime-companion-timezone-replay-",
+    );
+    await initializeVault({
+      createdAt: "2026-07-10T01:00:00.000Z",
+      timezone: "America/New_York",
+      vaultRoot,
+    });
+    const [provider] = createConfiguredDeviceSyncProvidersFromConfigs({
+      junction: {
+        apiKey: "sk_us_test_123",
+        clientUserIdSecret: "junction-client-user-id-secret",
+        environment: "sandbox",
+        fetchImpl: async () => {
+          throw new Error("Junction network access is not expected for companion RMSSD replay.");
+        },
+        region: "us",
+        summaryBackfillDays: 2,
+        summaryResources: [],
+        timeseriesResources: [],
+      },
+    });
+    assert.ok(provider);
+    const service = createDeviceSyncServiceForVault(vaultRoot, [provider]);
+    const connectionId = "hosted_conn_companion_timezone_replay";
+    const dirtyPayloadId = "dsp_companion_timezone_replay";
+    const companionObservationJson = serializeCompanionHrvRmssdObservation({
+      schema: COMPANION_HRV_RMSSD_SCHEMA,
+      captureId: "123e4567-e89b-42d3-a456-426614174000",
+      observedAt: "2026-07-10T02:30:00.000Z",
+      durationMs: 60_000,
+      rmssdMs: 48.25,
+      intervalCount: 72,
+      acceptedIntervalCount: 68,
+      successivePairCount: 63,
+      quality: "good",
+      methodVersion: COMPANION_HRV_RMSSD_METHOD_VERSION,
+    });
+    const companionAdmissionId = createHash("sha256")
+      .update(companionObservationJson)
+      .digest("hex");
+    const dirtyState = buildDirtyState({
+      connectionId,
+      dirtyRevision: "16",
+      dirtyResources: [{
+        count: 1,
+        dirtyPayloadId,
+        jobKind: "resource",
+        payload: {
+          companionAdmissionId,
+          companionObservationJson,
+          resource: COMPANION_HRV_RMSSD_RESOURCE,
+          resourceCategory: "derived",
+          sourceProviderSlug: "whoop",
+        },
+        resource: COMPANION_HRV_RMSSD_RESOURCE,
+        resourceCategory: "derived",
+        sourceProviderSlug: "whoop",
+        windowEnd: null,
+        windowStart: null,
+      }],
+      provider: "junction",
+    });
+    const snapshot = buildRuntimeSnapshot({
+      connectionId,
+      credential: {
+        credentialMetadata: {},
+        kind: "provider_config",
+        providerConfigKey: "junction",
+      },
+      externalAccountId: "junction-companion-timezone-replay",
+      provider: "junction",
+    });
+    const deviceSyncPort: HostedRuntimeDeviceSyncPort = {
+      ...createNoDirtyStateDeviceSyncPortMethods(),
+      async applyUpdates() {
+        throw new Error("applyUpdates should not be called during companion RMSSD replay.");
+      },
+      async createConnectLink() {
+        throw new Error("createConnectLink should not be called during companion RMSSD replay.");
+      },
+      async fetchDirtyStates() {
+        return {
+          hasMore: false,
+          items: [dirtyState],
+          nextWakeAt: null,
+          userId: "member_123",
+        };
+      },
+      async fetchSnapshot() {
+        return snapshot;
+      },
+    };
+
+    try {
+      const firstState = await syncHostedDeviceSyncControlPlaneState({
+        deviceSyncPort,
+        wake: buildCronWake("2026-07-10T02:31:00.000Z"),
+        secret: DEVICE_SYNC_SECRET,
+        service,
+      });
+      assert.equal(await service.drainWorker(1), 1);
+      assert.equal(firstState.pendingDirtyAcks[0]?.processedDirtyPayloadIds, undefined);
+
+      await updateVaultSummary({ vaultRoot, timezone: "UTC" });
+
+      const replayState = await syncHostedDeviceSyncControlPlaneState({
+        deviceSyncPort,
+        wake: buildCronWake("2026-07-10T03:00:00.000Z"),
+        secret: DEVICE_SYNC_SECRET,
+        service,
+      });
+      assert.equal(await service.drainWorker(1), 1);
+      promoteHostedCompletedDirtyPayloadAcks({ service, state: replayState });
+
+      assert.deepEqual(replayState.pendingDirtyAcks, [{
+        connectionId,
+        nextWakeAt: null,
+        processedDirtyPayloadIds: [dirtyPayloadId],
+        processedRevision: "16",
+      }]);
+      const localAccountId = replayState.hostedToLocalAccountIds.get(connectionId);
+      assert.ok(localAccountId);
+      assert.equal(
+        readJobsForAccount(service, localAccountId)
+          .filter((job) => job.status === "succeeded")
+          .length,
+        2,
+      );
+    } finally {
+      closeHostedRuntimeDeviceSyncService(service);
+      await cleanup();
+    }
+  });
+
+  test("terminal hydration precedes a newer reconnect and keeps both hosted epochs distinct", async () => {
+    for (const activeFirst of [true, false]) {
+      const { cleanup, vaultRoot } = await createHostedRuntimeWorkspace(
+        "hosted-device-sync-runtime-reconnect-order-",
+      );
+      await mkdir(vaultRoot, { recursive: true });
+      const demoProvider = createFakeProvider();
+      const junctionProvider: DeviceSyncProvider = {
+        ...demoProvider,
+        provider: "junction",
+        descriptor: {
+          ...demoProvider.descriptor,
+          provider: "junction",
+          displayName: "Junction",
+        },
+      };
+      const service = createDeviceSyncServiceForVault(vaultRoot, [junctionProvider]);
+
+      try {
+        const externalAccountId = `junction-reconnect-${activeFirst ? "active-first" : "terminal-first"}`;
+        const original = getStore(service).upsertAccount({
+          connectedAt: "2026-07-13T01:00:00.000Z",
+          credential: {
+            credentialMetadata: {},
+            kind: "provider_config",
+            providerConfigKey: "junction",
+          },
+          displayName: "Original Junction",
+          externalAccountId,
+          provider: "junction",
+          scopes: [],
+          status: "active",
+        });
+        const originalConnectionId = `hosted-reconnect-a-${activeFirst}`;
+        const reconnectedConnectionId = `hosted-reconnect-b-${activeFirst}`;
+        const originalActiveSnapshot = buildRuntimeSnapshot({
+          connectedAt: "2026-07-13T01:00:00.000Z",
+          connectionId: originalConnectionId,
+          credential: {
+            credentialMetadata: {},
+            kind: "provider_config",
+            providerConfigKey: "junction",
+          },
+          displayName: "Original Junction",
+          externalAccountId,
+          hostedUpdatedAt: "2026-07-13T01:01:00.000Z",
+          provider: "junction",
+          status: "active",
+          tokenBundle: null,
+        });
+        await syncHostedDeviceSyncControlPlaneState({
+          deviceSyncPort: createSnapshotOnlyDeviceSyncPort(originalActiveSnapshot),
+          wake: buildCronWake("2026-07-13T01:01:30.000Z"),
+          secret: DEVICE_SYNC_SECRET,
+          service,
+        });
+        const providerJob = getStore(service).enqueueJob({
+          accountId: original.id,
+          availableAt: "2026-07-13T01:02:00.000Z",
+          kind: "resource-sync",
+          payload: {},
+          provider: "junction",
+        });
+        const activeReconnectSnapshot = buildRuntimeSnapshot({
+          connectedAt: "2026-07-13T02:00:00.000Z",
+          connectionId: reconnectedConnectionId,
+          credential: {
+            credentialMetadata: {},
+            kind: "provider_config",
+            providerConfigKey: "junction",
+          },
+          displayName: "Reconnected Junction",
+          externalAccountId,
+          hostedUpdatedAt: "2026-07-13T02:01:00.000Z",
+          provider: "junction",
+          status: "active",
+          tokenBundle: null,
+        });
+        const terminalOriginalSnapshot = buildRuntimeSnapshot({
+          connectedAt: "2026-07-13T01:00:00.000Z",
+          connectionId: originalConnectionId,
+          credential: {
+            credentialMetadata: {},
+            kind: "none",
+          },
+          displayName: "Disconnected Junction",
+          externalAccountId: `opaque:${originalConnectionId}`,
+          hostedUpdatedAt: "2026-07-13T01:30:00.000Z",
+          provider: "junction",
+          status: "disconnected",
+          tokenBundle: null,
+        });
+        const snapshot = {
+          ...activeReconnectSnapshot,
+          connections: activeFirst
+            ? [
+                ...activeReconnectSnapshot.connections,
+                ...terminalOriginalSnapshot.connections,
+              ]
+            : [
+                ...terminalOriginalSnapshot.connections,
+                ...activeReconnectSnapshot.connections,
+              ],
+        };
+
+        const state = await syncHostedDeviceSyncControlPlaneState({
+          deviceSyncPort: createSnapshotOnlyDeviceSyncPort(snapshot),
+          wake: buildCronWake("2026-07-13T02:02:00.000Z"),
+          secret: DEVICE_SYNC_SECRET,
+          service,
+        });
+
+        const terminalAccount = getStore(service).getAccountByHostedConnectionId(
+          originalConnectionId,
+        );
+        const activeAccount = getStore(service).getAccountByHostedConnectionId(
+          reconnectedConnectionId,
+        );
+        assert.ok(terminalAccount);
+        assert.ok(activeAccount);
+        assert.notEqual(activeAccount.id, terminalAccount.id);
+        assert.equal(terminalAccount.id, original.id);
+        assert.equal(terminalAccount.status, "disconnected");
+        assert.equal(terminalAccount.externalAccountId, `opaque:${originalConnectionId}`);
+        assert.equal(activeAccount.status, "active");
+        assert.equal(activeAccount.externalAccountId, externalAccountId);
+        assert.equal(activeAccount.connectedAt, "2026-07-13T02:00:00.000Z");
+        assert.equal(state.hostedToLocalAccountIds.get(originalConnectionId), terminalAccount.id);
+        assert.equal(state.hostedToLocalAccountIds.get(reconnectedConnectionId), activeAccount.id);
+        assert.equal(state.localToHostedAccountIds.get(terminalAccount.id), originalConnectionId);
+        assert.equal(state.localToHostedAccountIds.get(activeAccount.id), reconnectedConnectionId);
+        assert.equal(getStore(service).getJobById(providerJob.id)?.status, "dead");
+      } finally {
+        closeHostedRuntimeDeviceSyncService(service);
+        await cleanup();
+      }
+    }
+  });
+
+  test("a reconnect without its predecessor terminal snapshot cannot adopt a bound account", async () => {
+    const { cleanup, vaultRoot } = await createHostedRuntimeWorkspace(
+      "hosted-device-sync-runtime-reconnect-collision-",
+    );
+    await mkdir(vaultRoot, { recursive: true });
+    const demoProvider = createFakeProvider();
+    const junctionProvider: DeviceSyncProvider = {
+      ...demoProvider,
+      provider: "junction",
+      descriptor: {
+        ...demoProvider.descriptor,
+        provider: "junction",
+        displayName: "Junction",
+      },
+    };
+    const service = createDeviceSyncServiceForVault(vaultRoot, [junctionProvider]);
+
+    try {
+      const externalAccountId = "junction-reconnect-without-terminal";
+      const original = getStore(service).upsertAccount({
+        connectedAt: "2026-07-13T01:00:00.000Z",
+        credential: {
+          credentialMetadata: {},
+          kind: "provider_config",
+          providerConfigKey: "junction",
+        },
+        displayName: "Original Junction",
+        externalAccountId,
+        provider: "junction",
+        scopes: [],
+        status: "active",
+      });
+      const originalConnectionId = "hosted-reconnect-without-terminal-a";
+      await syncHostedDeviceSyncControlPlaneState({
+        deviceSyncPort: createSnapshotOnlyDeviceSyncPort(buildRuntimeSnapshot({
+          connectedAt: "2026-07-13T01:00:00.000Z",
+          connectionId: originalConnectionId,
+          credential: {
+            credentialMetadata: {},
+            kind: "provider_config",
+            providerConfigKey: "junction",
+          },
+          displayName: "Original Junction",
+          externalAccountId,
+          hostedUpdatedAt: "2026-07-13T01:01:00.000Z",
+          provider: "junction",
+          status: "active",
+          tokenBundle: null,
+        })),
+        wake: buildCronWake("2026-07-13T01:01:30.000Z"),
+        secret: DEVICE_SYNC_SECRET,
+        service,
+      });
+
+      await assert.rejects(
+        () => syncHostedDeviceSyncControlPlaneState({
+          deviceSyncPort: createSnapshotOnlyDeviceSyncPort(buildRuntimeSnapshot({
+            connectedAt: "2026-07-13T02:00:00.000Z",
+            connectionId: "hosted-reconnect-without-terminal-b",
+            credential: {
+              credentialMetadata: {},
+              kind: "provider_config",
+              providerConfigKey: "junction",
+            },
+            displayName: "Wrong reconnect",
+            externalAccountId,
+            hostedUpdatedAt: "2026-07-13T02:01:00.000Z",
+            provider: "junction",
+            status: "active",
+            tokenBundle: null,
+          })),
+          wake: buildCronWake("2026-07-13T02:02:00.000Z"),
+          secret: DEVICE_SYNC_SECRET,
+          service,
+        }),
+        /bound to another hosted connection/u,
+      );
+
+      const preserved = getStore(service).getAccountById(original.id);
+      assert.ok(preserved);
+      assert.equal(preserved.displayName, "Original Junction");
+      assert.equal(preserved.connectedAt, "2026-07-13T01:00:00.000Z");
+      assert.equal(preserved.externalAccountId, externalAccountId);
+      assert.equal(preserved.status, "active");
+      assert.equal(
+        getStore(service).getAccountByHostedConnectionId(originalConnectionId)?.id,
+        original.id,
+      );
+      assert.equal(
+        getStore(service).getAccountByHostedConnectionId("hosted-reconnect-without-terminal-b"),
+        null,
+      );
+      assert.equal(getStore(service).listAccounts().length, 1);
+    } finally {
+      closeHostedRuntimeDeviceSyncService(service);
+      await cleanup();
+    }
+  });
+
+  test("an active binding of the original legacy account still consolidates the terminal identity fork", async () => {
+    const { cleanup, vaultRoot } = await createHostedRuntimeWorkspace(
+      "hosted-device-sync-runtime-",
+    );
+    await mkdir(vaultRoot, { recursive: true });
+    const demoProvider = createFakeProvider();
+    const junctionProvider: DeviceSyncProvider = {
+      ...demoProvider,
+      provider: "junction",
+      descriptor: {
+        ...demoProvider.descriptor,
+        provider: "junction",
+        displayName: "Junction",
+      },
+    };
+    const service = createDeviceSyncServiceForVault(vaultRoot, [junctionProvider]);
+
+    try {
+      const account = getStore(service).upsertAccount({
+        connectedAt: "2026-07-13T01:00:00.000Z",
+        credential: {
+          credentialMetadata: {},
+          kind: "provider_config",
+          providerConfigKey: "junction",
+        },
+        displayName: "Junction",
+        externalAccountId: "junction-account-before-terminal-scrub",
+        provider: "junction",
+        scopes: [],
+        status: "active",
+      });
+      const connectionId = "hosted-connection-terminal-scrub";
+      const fork = getStore(service).upsertAccount({
+        connectedAt: "2026-07-13T01:00:00.000Z",
+        credential: {
+          credentialMetadata: {},
+          kind: "none",
+        },
+        displayName: "Junction",
+        externalAccountId: `opaque:${connectionId}`,
+        provider: "junction",
+        scopes: [],
+        status: "disconnected",
+      });
+      const activeSnapshot = buildRuntimeSnapshot({
+        connectedAt: "2026-07-13T01:00:00.000Z",
+        connectionId,
+        credential: {
+          credentialMetadata: {},
+          kind: "provider_config",
+          providerConfigKey: "junction",
+        },
+        externalAccountId: account.externalAccountId,
+        hostedUpdatedAt: "2026-07-13T01:02:00.000Z",
+        provider: "junction",
+        status: "active",
+        tokenBundle: null,
+      });
+      const activeState = await syncHostedDeviceSyncControlPlaneState({
+        deviceSyncPort: createSnapshotOnlyDeviceSyncPort(activeSnapshot),
+        wake: buildCronWake("2026-07-13T01:02:30.000Z"),
+        secret: DEVICE_SYNC_SECRET,
+        service,
+      });
+      assert.equal(activeState.hostedToLocalAccountIds.get(connectionId), account.id);
+      const providerJob = getStore(service).enqueueJob({
+        accountId: fork.id,
+        availableAt: "2026-07-13T01:02:00.000Z",
+        dedupeKey: "terminal-scrub-provider-work",
+        kind: "resource-sync",
+        payload: {},
+        priority: 1,
+        provider: "junction",
+      });
+      const companionObservationJson = serializeCompanionHrvRmssdObservation({
+        schema: COMPANION_HRV_RMSSD_SCHEMA,
+        captureId: "223e4567-e89b-42d3-a456-426614174000",
+        observedAt: "2026-07-13T01:01:00.000Z",
+        durationMs: 60_000,
+        rmssdMs: 47.5,
+        intervalCount: 70,
+        acceptedIntervalCount: 68,
+        successivePairCount: 65,
+        quality: "good",
+        methodVersion: COMPANION_HRV_RMSSD_METHOD_VERSION,
+      });
+      const companionJob = getStore(service).enqueueJob({
+        accountId: account.id,
+        availableAt: "2026-07-13T01:02:00.000Z",
+        kind: "resource",
+        payload: {
+          companionAdmissionId: createHash("sha256")
+            .update(companionObservationJson)
+            .digest("hex"),
+          companionObservationJson,
+          resource: COMPANION_HRV_RMSSD_RESOURCE,
+          resourceCategory: "derived",
+          sourceProviderSlug: "whoop",
+        },
+        provider: "junction",
+      });
+      const terminalSnapshot = buildRuntimeSnapshot({
+        connectedAt: "2026-07-13T01:00:00.000Z",
+        connectionId,
+        credential: {
+          credentialMetadata: {},
+          kind: "none",
+        },
+        externalAccountId: `opaque:${connectionId}`,
+        hostedUpdatedAt: "2026-07-13T01:03:00.000Z",
+        provider: "junction",
+        status: "disconnected",
+        tokenBundle: null,
+      });
+      const state = await syncHostedDeviceSyncControlPlaneState({
+        deviceSyncPort: createSnapshotOnlyDeviceSyncPort(terminalSnapshot),
+        wake: buildCronWake("2026-07-13T01:03:30.000Z"),
+        secret: DEVICE_SYNC_SECRET,
+        service,
+      });
+
+      const accounts = getStore(service).listAccounts();
+      assert.equal(accounts.length, 1);
+      assert.equal(accounts[0]?.id, account.id);
+      assert.equal(accounts[0]?.externalAccountId, `opaque:${connectionId}`);
+      assert.equal(accounts[0]?.status, "disconnected");
+      assert.equal(getStore(service).getAccountById(fork.id), null);
+      assert.equal(state.hostedToLocalAccountIds.get(connectionId), account.id);
+      const jobs = readJobsForAccount(service, account.id);
+      assert.equal(getStore(service).getJobById(providerJob.id)?.accountId, account.id);
+      assert.equal(getStore(service).getJobById(providerJob.id)?.status, "dead");
+      assert.equal(getStore(service).getJobById(companionJob.id)?.accountId, account.id);
+      const companionJobs = jobs.filter((job) => {
+        const payload = job.payloadJson ? JSON.parse(job.payloadJson) : null;
+        return payload?.companionObservationJson === companionObservationJson;
+      });
+      assert.equal(companionJobs.length, 1);
+      assert.equal(companionJobs[0]?.status, "queued");
     } finally {
       closeHostedRuntimeDeviceSyncService(service);
       await cleanup();
@@ -5988,6 +7513,7 @@ describe("hosted device-sync runtime", () => {
           localToHostedAccountIds: new Map(),
           observedTokenVersions: new Map(),
           pendingDirtyAcks: [],
+          pendingDirtyPayloadJobs: [],
           snapshot: null,
         },
       });
@@ -6003,6 +7529,7 @@ describe("hosted device-sync runtime", () => {
             localToHostedAccountIds: new Map([["local_missing", "hosted_missing"]]),
             observedTokenVersions: new Map(),
             pendingDirtyAcks: [],
+            pendingDirtyPayloadJobs: [],
             snapshot: buildRuntimeSnapshot({
               connectionId: "hosted_missing",
               externalAccountId: "demo-missing",
@@ -6055,6 +7582,7 @@ describe("hosted device-sync runtime", () => {
           localToHostedAccountIds: new Map([["local_missing", "hosted_missing"]]),
           observedTokenVersions: new Map(),
           pendingDirtyAcks: [],
+          pendingDirtyPayloadJobs: [],
           snapshot: buildRuntimeSnapshot({
             connectionId: "hosted_missing",
             externalAccountId: "demo-missing",

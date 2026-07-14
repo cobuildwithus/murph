@@ -1,4 +1,13 @@
+import { createHash } from "node:crypto";
+
 import { describe, expect, it, vi } from "vitest";
+
+import {
+  COMPANION_HRV_RMSSD_METHOD_VERSION,
+  COMPANION_HRV_RMSSD_RESOURCE,
+  COMPANION_HRV_RMSSD_SCHEMA,
+  serializeCompanionHrvRmssdObservation,
+} from "@murphai/contracts";
 
 import { PrismaHostedDirtyConnectionStore } from "@/src/lib/device-sync/prisma-store/dirty-connections";
 import { sealHostedDeviceSyncDirtyPayloadJson } from "@/src/lib/device-sync/prisma-store/dirty-payloads";
@@ -103,6 +112,329 @@ describe("PrismaHostedDirtyConnectionStore dirty pending state", () => {
     } finally {
       installHostedSecureBoxStringTestCodec();
     }
+  });
+
+  it("keeps retained replays idempotent and gives post-expiry companion admissions distinct payloads", async () => {
+    installHostedSecureBoxStringTestCodec();
+
+    try {
+      let dirtyRecord: Record<string, unknown> | null = null;
+      const payloadRows = new Map<string, {
+        connectionId: string;
+        dirtyRevision: bigint;
+        id: string;
+        provider: string;
+        resourceEncrypted: string;
+        userId: string;
+      }>();
+      const receiptRows = new Map<string, {
+        connectionId: string;
+        createdAt: Date;
+        envelopeHash: string;
+        id: string;
+        userId: string;
+      }>();
+      const prisma = {
+        $transaction: vi.fn(async (callback: (tx: unknown) => Promise<unknown>) => callback(prisma)),
+        $queryRaw: vi.fn(async () => [{ pending: payloadRows.size > 0 }]),
+        deviceSyncCompanionCaptureReceipt: {
+          createMany: vi.fn(async (input: { data: {
+            connectionId: string;
+            createdAt: Date;
+            envelopeHash: string;
+            id: string;
+            userId: string;
+          } }) => {
+            if (receiptRows.has(input.data.id)) {
+              return { count: 0 };
+            }
+            receiptRows.set(input.data.id, input.data);
+            return { count: 1 };
+          }),
+          // Model a connection already holding 1,023 unrelated retained
+          // receipts so the accepted row brings it exactly to the hard cap.
+          count: vi.fn(async () => receiptRows.size + 1_023),
+          deleteMany: vi.fn(async (input: {
+            where: { createdAt: { lt: Date } };
+          }) => {
+            let count = 0;
+            for (const [id, row] of receiptRows) {
+              if (row.createdAt < input.where.createdAt.lt) {
+                receiptRows.delete(id);
+                count += 1;
+              }
+            }
+            return { count };
+          }),
+          findUnique: vi.fn(async (input: { where: { id: string } }) =>
+            receiptRows.get(input.where.id) ?? null),
+          findMany: vi.fn(async (input: {
+            where: { createdAt: { gte: Date }; id: { in: string[] } };
+          }) => [...receiptRows.values()].filter((row) =>
+            input.where.id.in.includes(row.id)
+            && row.createdAt >= input.where.createdAt.gte
+          )),
+        },
+        deviceSyncDirtyConnection: {
+          createMany: vi.fn(async (input: { data: Record<string, unknown> }) => {
+            if (dirtyRecord) {
+              return { count: 0 };
+            }
+            dirtyRecord = {
+              ...input.data,
+              createdAt: input.data.firstDirtyAt,
+              updatedAt: input.data.latestDirtyAt,
+            };
+            return { count: 1 };
+          }),
+          findFirst: vi.fn(async () => dirtyRecord),
+          findUnique: vi.fn(async () => dirtyRecord),
+          updateMany: vi.fn(async (input: { data: Record<string, unknown> }) => {
+            if (!dirtyRecord) {
+              return { count: 0 };
+            }
+            dirtyRecord = {
+              ...dirtyRecord,
+              ...input.data,
+            };
+            return { count: 1 };
+          }),
+        },
+        deviceSyncDirtyPayload: {
+          createMany: vi.fn(async (input: { data: Array<{
+            connectionId: string;
+            dirtyRevision: bigint;
+            id: string;
+            provider: string;
+            resourceEncrypted: string;
+            userId: string;
+          }> }) => {
+            let count = 0;
+            for (const row of input.data) {
+              if (!payloadRows.has(row.id)) {
+                payloadRows.set(row.id, row);
+                count += 1;
+              }
+            }
+            return { count };
+          }),
+          deleteMany: vi.fn(async (input: { where: { id: { in: string[] } } }) => {
+            let count = 0;
+            for (const id of input.where.id.in) {
+              if (payloadRows.delete(id)) {
+                count += 1;
+              }
+            }
+            return { count };
+          }),
+        },
+      };
+      const store = new PrismaHostedDirtyConnectionStore(prisma as never);
+      const observation = {
+        schema: COMPANION_HRV_RMSSD_SCHEMA as typeof COMPANION_HRV_RMSSD_SCHEMA,
+        captureId: "123e4567-e89b-42d3-a456-426614174000",
+        observedAt: "2026-07-10T13:45:00.000Z",
+        durationMs: 60_000 as const,
+        rmssdMs: 48.25,
+        intervalCount: 72,
+        acceptedIntervalCount: 68,
+        successivePairCount: 63,
+        quality: "good" as const,
+        methodVersion: COMPANION_HRV_RMSSD_METHOD_VERSION as typeof COMPANION_HRV_RMSSD_METHOD_VERSION,
+      };
+      const buildInput = (
+        rmssdMs: number,
+        captureId = observation.captureId,
+        options: {
+          dirtyAt?: string;
+        } = {},
+      ) => {
+        const companionObservationJson = serializeCompanionHrvRmssdObservation({
+          ...observation,
+          captureId,
+          rmssdMs,
+        });
+        return {
+          connectionId: "dsc_companion_hrv_1",
+          dirtyAt: options.dirtyAt ?? "2026-07-10T13:46:00.000Z",
+          eventType: "companion.hrv-rmssd.created",
+          provider: "junction",
+          resourceCategory: "derived",
+          resources: [{
+            count: 1,
+            jobKind: "resource",
+            payload: {
+              companionAdmissionId: createHash("sha256")
+                .update(companionObservationJson)
+                .digest("hex"),
+              companionObservationJson,
+              resource: COMPANION_HRV_RMSSD_RESOURCE,
+              resourceCategory: "derived",
+              sourceProviderSlug: "whoop",
+            },
+            resource: COMPANION_HRV_RMSSD_RESOURCE,
+            resourceCategory: "derived",
+            sourceProviderSlug: "whoop",
+            windowEnd: null,
+            windowStart: null,
+          }],
+          traceId: "trace_companion_hrv_1",
+          userId: "member_companion_hrv_1",
+        };
+      };
+
+      const first = await store.upsertDirtyConnection(buildInput(observation.rmssdMs));
+      const acceptedPayloadId = Object.values(first.dirty.dirtyResources)[0]?.dirtyPayloadId;
+      expect(acceptedPayloadId).toMatch(/^dsp_/u);
+
+      expect(payloadRows.size).toBe(1);
+      expect(receiptRows.size).toBe(1);
+
+      const exactResource = buildInput(observation.rmssdMs).resources[0]!;
+      await expect(store.inspectCompanionHrvCaptureReceipt({
+        captureId: observation.captureId,
+        connectionIds: [buildInput(observation.rmssdMs).connectionId],
+        now: "2026-07-10T13:46:00.000Z",
+        resource: exactResource,
+        userId: buildInput(observation.rmssdMs).userId,
+      })).resolves.toBe("exact");
+      await expect(store.inspectCompanionHrvCaptureReceipt({
+        captureId: observation.captureId,
+        connectionIds: [buildInput(observation.rmssdMs).connectionId],
+        now: "2026-07-10T13:46:00.000Z",
+        resource: buildInput(49.25).resources[0]!,
+        userId: buildInput(observation.rmssdMs).userId,
+      })).resolves.toBe("conflict");
+
+      const pendingReplay = await store.upsertDirtyConnection(buildInput(observation.rmssdMs));
+      expect(pendingReplay.shouldRequestWake).toBe(false);
+      expect(payloadRows.size).toBe(1);
+
+      const retainedReceipt = [...receiptRows.values()][0];
+      expect(retainedReceipt).toBeDefined();
+      retainedReceipt!.createdAt = new Date("2026-06-01T00:00:00.000Z");
+      const changedAfterExpiryInput = buildInput(
+        49.25,
+        observation.captureId,
+        { dirtyAt: "2026-08-11T13:46:00.000Z" },
+      );
+      const changedAfterExpiry = await store.upsertDirtyConnection(changedAfterExpiryInput);
+      const changedPayloadId = Object.values(changedAfterExpiry.dirty.dirtyResources)
+        .find((resource) => resource.payload?.companionAdmissionId)?.dirtyPayloadId;
+
+      expect(changedPayloadId).toMatch(/^dsp_/u);
+      expect(changedPayloadId).not.toBe(acceptedPayloadId);
+      expect(payloadRows.size).toBe(2);
+      expect(receiptRows.size).toBe(1);
+
+      await store.markDirtyConnectionProcessed({
+        connectionId: buildInput(observation.rmssdMs).connectionId,
+        processedDirtyPayloadIds: [acceptedPayloadId, changedPayloadId].filter(
+          (value): value is string => Boolean(value),
+        ),
+        processedRevision: first.dirty.dirtyRevision,
+        userId: buildInput(observation.rmssdMs).userId,
+      });
+      expect(payloadRows.size).toBe(0);
+      expect(receiptRows.size).toBe(1);
+
+      const completedReplay = await store.upsertDirtyConnection(changedAfterExpiryInput);
+      expect(completedReplay.shouldRequestWake).toBe(false);
+      expect(completedReplay.dirty.dirtyRevision).toBe(first.dirty.dirtyRevision);
+      expect(payloadRows.size).toBe(0);
+
+      await expect(store.upsertDirtyConnection(buildInput(observation.rmssdMs))).rejects.toMatchObject({
+        code: "COMPANION_HRV_CAPTURE_CONFLICT",
+        httpStatus: 409,
+        retryable: false,
+      });
+      expect(payloadRows.size).toBe(0);
+      expect(receiptRows.size).toBe(1);
+
+      await expect(store.upsertDirtyConnection(buildInput(
+        observation.rmssdMs,
+        "223e4567-e89b-42d3-a456-426614174000",
+      ))).rejects.toMatchObject({
+        code: "COMPANION_HRV_CAPTURE_RECEIPT_CAPACITY_REACHED",
+        httpStatus: 429,
+        retryable: true,
+      });
+      expect(receiptRows.size).toBe(1);
+    } finally {
+      installHostedSecureBoxStringTestCodec();
+    }
+  });
+
+  it("lazily removes expired companion capture receipts before replay inspection", async () => {
+    const oldReceipt = {
+      connectionId: "dsc_companion_hrv_expired",
+      createdAt: new Date("2026-06-09T13:46:00.000Z"),
+      envelopeHash: "b".repeat(64),
+      id: "receipt_expired",
+      userId: "member_companion_hrv_expired",
+    };
+    const receiptRows = [oldReceipt];
+    const prisma = {
+      deviceSyncCompanionCaptureReceipt: {
+        deleteMany: vi.fn(async (input: {
+          where: { createdAt: { lt: Date } };
+        }) => {
+          const before = receiptRows.length;
+          for (let index = receiptRows.length - 1; index >= 0; index -= 1) {
+            if (receiptRows[index]!.createdAt < input.where.createdAt.lt) {
+              receiptRows.splice(index, 1);
+            }
+          }
+          return { count: before - receiptRows.length };
+        }),
+        findMany: vi.fn(async () => receiptRows),
+      },
+    };
+    const store = new PrismaHostedDirtyConnectionStore(prisma as never);
+    const observation = {
+      schema: COMPANION_HRV_RMSSD_SCHEMA as typeof COMPANION_HRV_RMSSD_SCHEMA,
+      captureId: "323e4567-e89b-42d3-a456-426614174000",
+      observedAt: "2026-07-10T13:45:00.000Z",
+      durationMs: 60_000 as const,
+      rmssdMs: 48.25,
+      intervalCount: 72,
+      acceptedIntervalCount: 68,
+      successivePairCount: 63,
+      quality: "good" as const,
+      methodVersion: COMPANION_HRV_RMSSD_METHOD_VERSION as typeof COMPANION_HRV_RMSSD_METHOD_VERSION,
+    };
+    const resource = {
+      count: 1,
+      jobKind: "resource" as const,
+      payload: {
+        companionObservationJson: serializeCompanionHrvRmssdObservation(observation),
+        resource: COMPANION_HRV_RMSSD_RESOURCE,
+        resourceCategory: "derived",
+        sourceProviderSlug: "whoop",
+      },
+      resource: COMPANION_HRV_RMSSD_RESOURCE,
+      resourceCategory: "derived",
+      sourceProviderSlug: "whoop",
+      windowEnd: null,
+      windowStart: null,
+    };
+
+    await expect(store.inspectCompanionHrvCaptureReceipt({
+      captureId: observation.captureId,
+      connectionIds: [oldReceipt.connectionId],
+      now: "2026-07-10T13:46:00.000Z",
+      resource,
+      userId: oldReceipt.userId,
+    })).resolves.toBe("missing");
+
+    expect(prisma.deviceSyncCompanionCaptureReceipt.deleteMany).toHaveBeenCalledWith({
+      where: {
+        connectionId: { in: [oldReceipt.connectionId] },
+        createdAt: { lt: new Date("2026-06-10T13:46:00.000Z") },
+        userId: oldReceipt.userId,
+      },
+    });
+    expect(receiptRows).toEqual([]);
   });
 
   it("seals through caller-owned dirty transactions instead of precomputing on the root client", async () => {

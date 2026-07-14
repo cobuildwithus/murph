@@ -53,7 +53,8 @@ export {
 } from './attachment-file-name.js'
 export {
   recordHostedMailboxAssistantInputItem,
-  readHostedMailboxAssistantInputItems,
+  readHostedMailboxAssistantInputItemDetails,
+  type HostedMailboxAssistantInputItem,
 } from './hosted-mailbox-input-items.js'
 export {
   assistantInputCandidateFromStoredEvent,
