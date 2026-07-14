@@ -135,4 +135,31 @@ describe("hosted member messaging authority", () => {
       },
     });
   });
+
+  it("prefers an inbound Telegram thread and otherwise uses the verified user id", () => {
+    const resolveRoute = (telegramThreadId: string | null) => {
+      const messaging = resolveHostedMemberMessagingState({
+        identity: null,
+        routing: {
+          telegramThreadId,
+          telegramUserId: "456",
+        },
+      });
+
+      return resolveHostedMemberAssistantNotificationRoute({
+        linqChatId: null,
+        memberId: "member_telegram",
+        messaging,
+      });
+    };
+
+    expect(resolveRoute("456:business:connection:dm-topic:9")?.delivery).toEqual({
+      kind: "thread",
+      target: "456:business:connection:dm-topic:9",
+    });
+    expect(resolveRoute(null)?.delivery).toEqual({
+      kind: "thread",
+      target: "456",
+    });
+  });
 });
