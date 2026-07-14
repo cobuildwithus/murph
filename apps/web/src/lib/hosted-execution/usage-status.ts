@@ -12,8 +12,9 @@ import {
   canUpgradeHostedBillingPlanToEdge,
 } from "../hosted-onboarding/billing-plans";
 import { hasHostedMemberOwnActiveBilling } from "../hosted-onboarding/entitlement";
-import { readHostedMemberStripeBillingRef } from "../hosted-onboarding/hosted-member-billing-store";
+import { readHostedMemberBillingEligibilityState } from "../hosted-onboarding/hosted-member-billing-store";
 import { readHostedMemberCoreState } from "../hosted-onboarding/hosted-member-store";
+import { sanitizeHostedOnboardingStructuredLogDetails } from "../hosted-onboarding/logging";
 import {
   readHostedAiUsageGate,
   type HostedAiUsageGateDecisionWithSource,
@@ -255,28 +256,43 @@ async function resolveRecommendedAction(input: {
     return null;
   }
 
-  const [member, billingRef] = await Promise.all([
+  const actionState = await Promise.all([
     readHostedMemberCoreState({
       memberId: input.memberId,
       prisma: input.prisma,
     }),
-    readHostedMemberStripeBillingRef({
+    readHostedMemberBillingEligibilityState({
       memberId: input.memberId,
       prisma: input.prisma,
     }),
-  ]);
-  if (!member || !billingRef) {
+  ]).catch((error: unknown) => {
+    console.warn(
+      "Hosted plan usage action resolution failed.",
+      sanitizeHostedOnboardingStructuredLogDetails({
+        accessKind: input.accessKind,
+        errorName: error instanceof Error ? error.name : "UnknownError",
+        planCode: input.planCode,
+      }),
+    );
+    return null;
+  });
+  if (!actionState) {
+    return null;
+  }
+
+  const [member, billingState] = actionState;
+  if (!member || !billingState) {
     return null;
   }
 
   if (input.accessKind === "trial") {
     return canStartHostedPulseTrialPaidPlan({
       billingStatus: member.billingStatus,
-      currentBillingPhase: billingRef.currentBillingPhase,
-      currentBillingPlanCode: billingRef.currentBillingPlanCode,
-      currentCheckoutOffer: billingRef.currentCheckoutOffer,
-      stripeCustomerId: billingRef.stripeCustomerId,
-      stripeSubscriptionId: billingRef.stripeSubscriptionId,
+      currentBillingPhase: billingState.currentBillingPhase,
+      currentBillingPlanCode: billingState.currentBillingPlanCode,
+      currentCheckoutOffer: billingState.currentCheckoutOffer,
+      hasStripeCustomerId: billingState.hasStripeCustomerId,
+      hasStripeSubscriptionId: billingState.hasStripeSubscriptionId,
       suspendedAt: member.suspendedAt,
     })
       ? buildRecommendedAction("start_pulse", input.actionUrl)
@@ -285,12 +301,12 @@ async function resolveRecommendedAction(input: {
 
   if (
     hasHostedMemberOwnActiveBilling(member)
-    && billingRef.stripeCustomerId !== null
-    && billingRef.stripeSubscriptionId !== null
+    && billingState.hasStripeCustomerId
+    && billingState.hasStripeSubscriptionId
     && canUpgradeHostedBillingPlanToEdge({
-      currentBillingPhase: billingRef.currentBillingPhase,
-      currentBillingPlanCode: billingRef.currentBillingPlanCode,
-      currentCheckoutOffer: billingRef.currentCheckoutOffer,
+      currentBillingPhase: billingState.currentBillingPhase,
+      currentBillingPlanCode: billingState.currentBillingPlanCode,
+      currentCheckoutOffer: billingState.currentCheckoutOffer,
     })
   ) {
     return buildRecommendedAction("upgrade_edge", input.actionUrl);

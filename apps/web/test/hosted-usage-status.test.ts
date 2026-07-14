@@ -2,8 +2,8 @@ import { beforeEach, describe, expect, it, vi } from "vitest";
 
 const mocks = vi.hoisted(() => ({
   readHostedAiUsageGate: vi.fn(),
+  readHostedMemberBillingEligibilityState: vi.fn(),
   readHostedMemberCoreState: vi.fn(),
-  readHostedMemberStripeBillingRef: vi.fn(),
 }));
 
 vi.mock("@/src/lib/hosted-execution/usage-allowance", () => ({
@@ -15,7 +15,7 @@ vi.mock("@/src/lib/hosted-web/public-url", () => ({
 }));
 
 vi.mock("@/src/lib/hosted-onboarding/hosted-member-billing-store", () => ({
-  readHostedMemberStripeBillingRef: mocks.readHostedMemberStripeBillingRef,
+  readHostedMemberBillingEligibilityState: mocks.readHostedMemberBillingEligibilityState,
 }));
 
 vi.mock("@/src/lib/hosted-onboarding/hosted-member-store", () => ({
@@ -41,24 +41,22 @@ describe("readHostedPersonalAiUsageStatus", () => {
       billingStatus: "active",
       suspendedAt: null,
     });
-    mocks.readHostedMemberStripeBillingRef.mockResolvedValue({
+    mocks.readHostedMemberBillingEligibilityState.mockResolvedValue({
       currentBillingPhase: "paid",
       currentBillingPlanCode: "launch_monthly",
       currentCheckoutOffer: "standard",
-      memberId: "member_usage",
-      stripeCustomerId: "cus_usage",
-      stripeSubscriptionId: "sub_usage",
+      hasStripeCustomerId: true,
+      hasStripeSubscriptionId: true,
     });
   });
 
   it("returns an evidence-backed trial forecast and server-selected Pulse action", async () => {
-    mocks.readHostedMemberStripeBillingRef.mockResolvedValue({
+    mocks.readHostedMemberBillingEligibilityState.mockResolvedValue({
       currentBillingPhase: "trial",
       currentBillingPlanCode: "launch_monthly",
       currentCheckoutOffer: "pulse_trial_7d",
-      memberId: "member_usage_1",
-      stripeCustomerId: "cus_usage",
-      stripeSubscriptionId: "sub_usage",
+      hasStripeCustomerId: true,
+      hasStripeSubscriptionId: true,
     });
     mocks.readHostedAiUsageGate.mockResolvedValue(buildDecision({
       allowanceSource: "direct_trial",
@@ -125,13 +123,12 @@ describe("readHostedPersonalAiUsageStatus", () => {
   });
 
   it("does not recommend an upgrade when the billing action is ineligible", async () => {
-    mocks.readHostedMemberStripeBillingRef.mockResolvedValue({
+    mocks.readHostedMemberBillingEligibilityState.mockResolvedValue({
       currentBillingPhase: null,
       currentBillingPlanCode: "launch_monthly",
       currentCheckoutOffer: null,
-      memberId: "member_legacy",
-      stripeCustomerId: "cus_usage",
-      stripeSubscriptionId: "sub_usage",
+      hasStripeCustomerId: true,
+      hasStripeSubscriptionId: true,
     });
     mocks.readHostedAiUsageGate.mockResolvedValue(buildDecision({
       allowanceSource: "direct_paid_member_plan",
@@ -152,18 +149,17 @@ describe("readHostedPersonalAiUsageStatus", () => {
   });
 
   it.each([
-    [null, "sub_usage"],
-    ["cus_usage", null],
+    [false, true],
+    [true, false],
   ])(
     "does not recommend an upgrade with incomplete Stripe billing references",
-    async (stripeCustomerId, stripeSubscriptionId) => {
-      mocks.readHostedMemberStripeBillingRef.mockResolvedValue({
+    async (hasStripeCustomerId, hasStripeSubscriptionId) => {
+      mocks.readHostedMemberBillingEligibilityState.mockResolvedValue({
         currentBillingPhase: "paid",
         currentBillingPlanCode: "launch_monthly",
         currentCheckoutOffer: "standard",
-        memberId: "member_usage_incomplete",
-        stripeCustomerId,
-        stripeSubscriptionId,
+        hasStripeCustomerId,
+        hasStripeSubscriptionId,
       });
       mocks.readHostedAiUsageGate.mockResolvedValue(buildDecision({
         allowanceSource: "direct_paid_member_plan",
@@ -183,6 +179,45 @@ describe("readHostedPersonalAiUsageStatus", () => {
       });
     },
   );
+
+  it("keeps exhausted paid usage available when billing action state cannot be read", async () => {
+    const warn = vi.spyOn(console, "warn").mockImplementation(() => {});
+    mocks.readHostedMemberBillingEligibilityState.mockRejectedValueOnce(
+      new Error("private billing read failed"),
+    );
+    const prisma = buildPrisma(null);
+
+    try {
+      await expect(projectHostedPersonalAiUsageStatus({
+        decision: buildDecision({
+          remainingUsdMicros: 0n,
+          spentUsdMicros: 10_000_000n,
+        }),
+        memberId: "member_usage_action_failure",
+        now: NOW,
+        prisma: prisma as never,
+        publicBaseUrl: "https://example.test",
+      })).resolves.toMatchObject({
+        recommendedAction: null,
+        remainingPercent: 0,
+        status: "exhausted",
+        usedPercent: 100,
+      });
+      expect(warn).toHaveBeenCalledWith(
+        "Hosted plan usage action resolution failed.",
+        {
+          accessKind: "paid",
+          errorName: "Error",
+          planCode: "launch_monthly",
+        },
+      );
+      expect(JSON.stringify(warn.mock.calls)).not.toMatch(
+        /member_usage_action_failure|private billing read failed/u,
+      );
+    } finally {
+      warn.mockRestore();
+    }
+  });
 
   it("does not invent a higher-plan action for Edge or a personal action for Family", async () => {
     const prisma = buildPrisma(null);
@@ -317,13 +352,12 @@ describe("readHostedPersonalAiUsageStatus", () => {
       billingStatus: "paused",
       suspendedAt: null,
     });
-    mocks.readHostedMemberStripeBillingRef.mockResolvedValue({
+    mocks.readHostedMemberBillingEligibilityState.mockResolvedValue({
       currentBillingPhase: null,
       currentBillingPlanCode: "launch_monthly",
       currentCheckoutOffer: "pulse_trial_7d",
-      memberId: "member_trial_ended",
-      stripeCustomerId: "cus_usage",
-      stripeSubscriptionId: "sub_usage",
+      hasStripeCustomerId: true,
+      hasStripeSubscriptionId: true,
     });
     mocks.readHostedAiUsageGate.mockResolvedValue(buildDecision({
       allowed: false,
@@ -354,13 +388,12 @@ describe("readHostedPersonalAiUsageStatus", () => {
       billingStatus: "paused",
       suspendedAt: null,
     });
-    mocks.readHostedMemberStripeBillingRef.mockResolvedValue({
+    mocks.readHostedMemberBillingEligibilityState.mockResolvedValue({
       currentBillingPhase: null,
       currentBillingPlanCode: "launch_monthly",
       currentCheckoutOffer: "pulse_trial_7d",
-      memberId: "member_trial_incomplete",
-      stripeCustomerId: "cus_usage",
-      stripeSubscriptionId: null,
+      hasStripeCustomerId: true,
+      hasStripeSubscriptionId: false,
     });
     mocks.readHostedAiUsageGate.mockResolvedValue(buildDecision({
       allowed: false,
@@ -380,6 +413,50 @@ describe("readHostedPersonalAiUsageStatus", () => {
       recommendedAction: null,
       status: "unavailable",
     });
+  });
+
+  it("keeps trial conversion available when billing action state cannot be read", async () => {
+    const warn = vi.spyOn(console, "warn").mockImplementation(() => {});
+    mocks.readHostedMemberCoreState.mockResolvedValue({
+      billingStatus: "paused",
+      suspendedAt: null,
+    });
+    mocks.readHostedMemberBillingEligibilityState.mockRejectedValueOnce(
+      new Error("private billing read failed"),
+    );
+
+    try {
+      await expect(projectHostedPersonalAiUsageStatus({
+        decision: buildDecision({
+          allowed: false,
+          allowanceSource: "direct_trial",
+          reason: "trial_expired_pending_billing",
+          spentUsdMicros: 0n,
+        }),
+        memberId: "member_trial_action_failure",
+        now: NOW,
+        prisma: buildPrisma(null) as never,
+        publicBaseUrl: "https://example.test",
+      })).resolves.toEqual({
+        generatedAt: NOW.toISOString(),
+        reason: "trial_conversion_pending",
+        recommendedAction: null,
+        status: "unavailable",
+      });
+      expect(warn).toHaveBeenCalledWith(
+        "Hosted plan usage action resolution failed.",
+        {
+          accessKind: "trial",
+          errorName: "Error",
+          planCode: "launch_monthly",
+        },
+      );
+      expect(JSON.stringify(warn.mock.calls)).not.toMatch(
+        /member_trial_action_failure|private billing read failed/u,
+      );
+    } finally {
+      warn.mockRestore();
+    }
   });
 
   it("projects an already-resolved exhausted allowance without re-reading it", async () => {

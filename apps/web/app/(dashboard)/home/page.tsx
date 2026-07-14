@@ -32,7 +32,7 @@ import { shouldShowHomeDeviceSyncStep } from "@/src/lib/device-sync/home-onboard
 import { listHealthCommonsExperimentBrowseProtocols } from "@/src/lib/health-commons/experiment-browse";
 import { resolveHostedAiUsageGate } from "@/src/lib/hosted-execution/usage-allowance";
 import { projectHostedPersonalAiUsageStatus } from "@/src/lib/hosted-execution/usage-status";
-import { readHostedMemberHomeTrialBillingState } from "@/src/lib/hosted-onboarding/hosted-member-billing-store";
+import { readHostedMemberBillingEligibilityState } from "@/src/lib/hosted-onboarding/hosted-member-billing-store";
 import { getHostedDashboardPageAuthSnapshot } from "@/src/lib/hosted-onboarding/page-auth";
 import { getPrisma } from "@/src/lib/prisma";
 import { createMurphPageMetadata } from "@/src/lib/site-metadata";
@@ -90,7 +90,7 @@ export default async function HomePage({
       searchParams: resolvedSearchParams,
     }),
     member
-      ? readHostedMemberHomeTrialBillingState({
+      ? readHostedMemberBillingEligibilityState({
           memberId: member.id,
           prisma,
         })
