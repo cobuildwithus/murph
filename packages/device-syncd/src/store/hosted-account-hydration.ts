@@ -16,7 +16,11 @@ import type {
   ProviderAuthTokens,
   StoredDeviceSyncAccount,
 } from "../types.ts";
-import { getAccountByExternalAccount, getAccountById } from "./accounts.ts";
+import {
+  getAccountByExternalAccount,
+  getAccountByHostedConnectionId,
+  getAccountById,
+} from "./accounts.ts";
 
 type EncryptedProviderAuthTokens = ProviderAuthTokens & {
   accessTokenEncrypted: string;
@@ -30,6 +34,7 @@ type HostedAccountCredentialInput = DeviceAccountCredential & {
 export interface HostedAccountHydrationInput {
   advanceHostedObservedConnectionRevision?: boolean;
   clearTokens?: boolean;
+  hostedConnectionId?: string | null;
   connection: {
     connectedAt: string;
     displayName: string | null;
@@ -587,11 +592,15 @@ export function hydrateHostedAccount(
   input: HostedAccountHydrationInput,
 ): StoredDeviceSyncAccount | null {
   return withImmediateTransaction(database, () => {
-    const existing = getAccountByExternalAccount(
-      database,
-      input.connection.provider,
-      input.connection.externalAccountId,
-    );
+    const existing = (input.hostedConnectionId
+      ? getAccountByHostedConnectionId(database, input.hostedConnectionId)
+      : null)
+      ?? getAccountByExternalAccount(
+        database,
+        input.connection.provider,
+        input.connection.externalAccountId,
+      );
+    const hostedConnectionId = input.hostedConnectionId ?? existing?.hostedConnectionId ?? null;
 
     if (!existing && getHostedHydrationTokenInput(input) === undefined && input.credential === undefined) {
       return null;
@@ -735,7 +744,8 @@ export function hydrateHostedAccount(
 
       database.prepare(`
         update device_observation_state
-        set hosted_observed_updated_at = ?,
+        set hosted_connection_id = ?,
+            hosted_observed_updated_at = ?,
             hosted_observed_connection_revision = ?,
             hosted_observed_token_version = ?,
             hosted_observed_token_revision = ?,
@@ -749,6 +759,7 @@ export function hydrateHostedAccount(
             updated_at = ?
         where account_id = ?
       `).run(
+        hostedConnectionId,
         hostedObservedUpdatedAt,
         hostedObservedConnectionRevision,
         hostedObservedTokenVersion,
@@ -827,6 +838,7 @@ export function hydrateHostedAccount(
     database.prepare(`
       insert into device_observation_state (
         account_id,
+        hosted_connection_id,
         hosted_observed_updated_at,
         hosted_observed_connection_revision,
         hosted_observed_token_version,
@@ -840,9 +852,10 @@ export function hydrateHostedAccount(
         next_reconcile_at,
         created_at,
         updated_at
-      ) values (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+      ) values (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
     `).run(
       id,
+      hostedConnectionId,
       hostedObservedUpdatedAt,
       hostedObservedConnectionRevision,
       hostedObservedTokenVersion,

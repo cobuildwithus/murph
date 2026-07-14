@@ -1330,7 +1330,7 @@ describe("hosted device-sync runtime", () => {
       currentSnapshot = buildRuntimeSnapshot({
         connectionId: "hosted_conn_reconnect_after_clear",
         displayName: "Hosted Disconnected",
-        externalAccountId: connected.account.externalAccountId,
+        externalAccountId: "hosted-connection:opaque-disconnected-identity",
         hostedUpdatedAt: "2026-04-06T09:15:00.000Z",
         localState: {
           lastSyncCompletedAt: "2026-04-06T09:14:00.000Z",
@@ -1352,6 +1352,8 @@ describe("hosted device-sync runtime", () => {
       const disconnected = getStore(service).getAccountById(connected.account.id);
       assert.ok(disconnected);
       assert.equal(disconnected.status, "disconnected");
+      assert.equal(disconnected.hostedConnectionId, "hosted_conn_reconnect_after_clear");
+      assert.equal(getStore(service).listAccounts().length, 1);
       assertStoredCredentialKind(disconnected, "none");
       assert.equal(disconnected.hostedObservedTokenVersion, null);
 

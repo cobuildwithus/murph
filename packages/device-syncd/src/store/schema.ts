@@ -5,8 +5,8 @@
 
 import type { DatabaseSync } from "node:sqlite";
 
-// v7: oauth_state.consumed_at (replay-tolerant OAuth state consumption).
-export const DEVICE_SYNC_STORE_SQLITE_SCHEMA_VERSION = 7;
+// v8: stable hosted connection identity for terminal hydration after provider identity scrubbing.
+export const DEVICE_SYNC_STORE_SQLITE_SCHEMA_VERSION = 8;
 
 interface SqliteTableColumn {
   name?: unknown;
@@ -40,6 +40,10 @@ function readDeviceConnectionColumns(database: DatabaseSync): SqliteTableColumn[
 
 function readOAuthStateColumns(database: DatabaseSync): SqliteTableColumn[] {
   return database.prepare("pragma table_info(oauth_state)").all() as SqliteTableColumn[];
+}
+
+function readDeviceObservationStateColumns(database: DatabaseSync): SqliteTableColumn[] {
+  return database.prepare("pragma table_info(device_observation_state)").all() as SqliteTableColumn[];
 }
 
 function readWebhookTraceColumns(database: DatabaseSync): SqliteTableColumn[] {
@@ -206,6 +210,22 @@ function ensureOAuthStateColumns(database: DatabaseSync): void {
   }
 }
 
+function ensureHostedConnectionIdentityColumn(database: DatabaseSync): void {
+  if (!tableExists(database, "device_observation_state")) {
+    return;
+  }
+
+  const names = columnNames(readDeviceObservationStateColumns(database));
+  if (!names.has("hosted_connection_id")) {
+    database.exec("alter table device_observation_state add column hosted_connection_id text");
+  }
+  database.exec(`
+    create unique index if not exists device_observation_state_hosted_connection_id_idx
+    on device_observation_state (hosted_connection_id)
+    where hosted_connection_id is not null
+  `);
+}
+
 function clearLegacyEmptyTokenCredentials(database: DatabaseSync): void {
   if (!tableExists(database, "device_credential_state")) {
     return;
@@ -292,6 +312,7 @@ export function ensureDeviceSyncStoreSchema(database: DatabaseSync): void {
 
       create table if not exists device_observation_state (
         account_id text primary key references device_connection(id) on delete cascade,
+        hosted_connection_id text,
         hosted_observed_updated_at text,
         hosted_observed_connection_revision integer not null default 0,
         hosted_observed_token_version integer,
@@ -360,6 +381,7 @@ export function ensureDeviceSyncStoreSchema(database: DatabaseSync): void {
   ensureDeviceCredentialStateSchema(database);
   ensureOAuthStateColumns(database);
   ensureDeviceConnectionSetupColumns(database);
+  ensureHostedConnectionIdentityColumn(database);
   ensureWebhookTraceClaimTokenColumn(database);
   clearLegacyEmptyTokenCredentials(database);
 }

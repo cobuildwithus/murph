@@ -79,6 +79,7 @@ export interface StoredAccountRow {
   refresh_token_encrypted: string | null;
   access_token_expires_at: string | null;
   credential_metadata_json: string | null;
+  hosted_connection_id: string | null;
   hosted_observed_updated_at: string | null;
   hosted_observed_connection_revision: number;
   hosted_observed_token_version: number | null;
@@ -129,6 +130,7 @@ export const ACCOUNT_ROW_SELECT = `
     credential.refresh_token_encrypted as refresh_token_encrypted,
     credential.access_token_expires_at as access_token_expires_at,
     credential.credential_metadata_json as credential_metadata_json,
+    observation.hosted_connection_id as hosted_connection_id,
     observation.hosted_observed_updated_at as hosted_observed_updated_at,
     observation.hosted_observed_connection_revision as hosted_observed_connection_revision,
     observation.hosted_observed_token_version as hosted_observed_token_version,
@@ -576,6 +578,10 @@ export function decodeStoredAccountRow(row: SqliteRow): StoredAccountRow {
       row.credential_metadata_json,
       "device_credential_state.credential_metadata_json",
     ),
+    hosted_connection_id: expectNullableString(
+      row.hosted_connection_id,
+      "device_observation_state.hosted_connection_id",
+    ),
     hosted_observed_updated_at: expectNullableString(
       row.hosted_observed_updated_at,
       "device_observation_state.hosted_observed_updated_at",
@@ -671,6 +677,7 @@ export function mapAccountRow(row: StoredAccountRow): StoredDeviceSyncAccount {
     scopes: parseStoredStringArray(row.scopes_json, "device_connection.scopes_json"),
     disconnectGeneration: row.disconnect_generation,
     credential: buildStoredAccountCredential(row),
+    hostedConnectionId: row.hosted_connection_id,
     hostedObservedConnectionRevision: row.hosted_observed_connection_revision,
     hostedObservedTokenRevision: row.hosted_observed_token_revision,
     hostedObservedTokenVersion: row.hosted_observed_token_version,
@@ -778,6 +785,18 @@ export function getAccountByExternalAccount(
     ${ACCOUNT_ROW_SELECT}
     where connection.provider = ? and connection.external_account_id = ?
   `).get(provider, externalAccountId);
+
+  return row ? mapAccountRow(decodeStoredAccountRow(row)) : null;
+}
+
+export function getAccountByHostedConnectionId(
+  database: DatabaseSync,
+  hostedConnectionId: string,
+): StoredDeviceSyncAccount | null {
+  const row = database.prepare(`
+    ${ACCOUNT_ROW_SELECT}
+    where observation.hosted_connection_id = ?
+  `).get(hostedConnectionId);
 
   return row ? mapAccountRow(decodeStoredAccountRow(row)) : null;
 }

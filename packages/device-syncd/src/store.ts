@@ -11,6 +11,7 @@ import {
   disconnectAccount as disconnectStoredAccount,
   disconnectAccountIfCurrentInTransaction as disconnectStoredAccountIfCurrentInTransaction,
   getAccountByExternalAccount as getStoredAccountByExternalAccount,
+  getAccountByHostedConnectionId as getStoredAccountByHostedConnectionId,
   getAccountById as getStoredAccountById,
   listAccounts as listStoredAccounts,
   patchAccount as patchStoredAccount,
@@ -188,6 +189,11 @@ export class SqliteDeviceSyncStore {
 
   getAccountByExternalAccount(provider: string, externalAccountId: string): StoredDeviceSyncAccount | null {
     const account = getStoredAccountByExternalAccount(this.database, provider, externalAccountId);
+    return account ? this.hydrateAccountSources(account) : null;
+  }
+
+  getAccountByHostedConnectionId(hostedConnectionId: string): StoredDeviceSyncAccount | null {
+    const account = getStoredAccountByHostedConnectionId(this.database, hostedConnectionId);
     return account ? this.hydrateAccountSources(account) : null;
   }
 

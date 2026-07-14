@@ -130,15 +130,8 @@ export async function readHostedDeviceSyncRuntimeState(input: {
     ...hostedConnectionRecordArgs,
   });
 
-  const connections = await Promise.all(
+  const connectionCandidates = await Promise.all(
     records.map(async (record) => {
-      const storedAccount = await controlPlane.store.getStoredConnectionAccountForUser(
-        input.trustedUserId,
-        record.id,
-      );
-      const durableConnection = storedAccount
-        ? null
-        : await controlPlane.store.getConnectionForUser(input.trustedUserId, record.id);
       const sources = boundedSourceLimit && boundedSourceProviderKeys.length > 0
         ? await controlPlane.store.listRuntimeSnapshotConnectionSources({
             connectionId: record.id,
@@ -146,17 +139,55 @@ export async function readHostedDeviceSyncRuntimeState(input: {
             sourceProviderSlugs: boundedSourceProviderKeys,
           })
         : await controlPlane.store.listConnectionSources(record.id);
+      const sourceSnapshots = sources.map(toHostedRuntimeConnectionSourceSnapshot);
+
+      if (parsed.includeCredentialMaterial) {
+        return controlPlane.store.withConnectionMutationLock(record.id, async (tx) => {
+          const currentRecord = await controlPlane.store.getConnectionRecordForUser(
+            input.trustedUserId,
+            record.id,
+            tx,
+          );
+          if (!currentRecord) {
+            return null;
+          }
+          const storedAccount = await controlPlane.store.getStoredConnectionAccountForUser(
+            input.trustedUserId,
+            record.id,
+            tx,
+          );
+          const durableConnection = storedAccount
+            ? null
+            : await controlPlane.store.getConnectionForUser(input.trustedUserId, record.id, tx);
+
+          return buildHostedRuntimeConnectionSnapshot(
+            currentRecord,
+            storedAccount,
+            storedAccount?.externalAccountId ?? durableConnection?.externalAccountId ?? null,
+            sourceSnapshots,
+            { includeCredentialMaterial: true },
+          );
+        });
+      }
+
+      const storedAccount = await controlPlane.store.getStoredConnectionAccountForUser(
+        input.trustedUserId,
+        record.id,
+      );
+      const durableConnection = storedAccount
+        ? null
+        : await controlPlane.store.getConnectionForUser(input.trustedUserId, record.id);
 
       return buildHostedRuntimeConnectionSnapshot(
         record,
         storedAccount,
         storedAccount?.externalAccountId ?? durableConnection?.externalAccountId ?? null,
-        sources.map(toHostedRuntimeConnectionSourceSnapshot),
-        {
-          includeCredentialMaterial: parsed.includeCredentialMaterial,
-        },
+        sourceSnapshots,
       );
     }),
+  );
+  const connections = connectionCandidates.filter(
+    (connection): connection is HostedRuntimeConnectionSnapshot => connection !== null,
   );
 
   return {
@@ -607,11 +638,15 @@ function buildHostedRuntimeConnectionSnapshot(
     record.disconnectLeaseOwner !== null
     || record.disconnectLeaseExpiresAt !== null
   );
+  const executionFencedByTerminalStatus = options.includeCredentialMaterial
+    && mappedRecord.status !== "active";
   const withholdRuntimeTokenMaterial = shouldWithholdHostedRuntimeTokenMaterial({
     record,
     tokenVersion: storedTokenBundle?.tokenVersion ?? null,
   });
-  const credential: HostedExecutionDeviceSyncRuntimeCredentialSnapshot = executionFencedByDisconnectLease
+  const credential: HostedExecutionDeviceSyncRuntimeCredentialSnapshot = (
+    executionFencedByDisconnectLease || executionFencedByTerminalStatus
+  )
     ? {
         credentialMetadata: sanitizeHostedExecutionDeviceSyncRuntimeCredentialMetadata(
           mappedRecord.credentialMetadata,
@@ -637,7 +672,7 @@ function buildHostedRuntimeConnectionSnapshot(
       scopes: [...publicConnection.scopes],
       setupExpiresAt: publicConnection.setupExpiresAt ?? null,
       setupPhase: publicConnection.setupPhase ?? null,
-      status: executionFencedByDisconnectLease ? "disconnected" : publicConnection.status,
+      status: executionFencedByDisconnectLease ? "disconnected" : mappedRecord.status,
       updatedAt: publicConnection.updatedAt,
     },
     localState: {

@@ -109,10 +109,11 @@ export async function syncHostedDeviceSyncControlPlaneState(input: {
   const store = requireHostedRuntimeDeviceSyncStore(input.service);
 
   for (const entry of snapshot.connections) {
-    const existing = store.getAccountByExternalAccount(
-      entry.connection.provider,
-      entry.connection.externalAccountId,
-    );
+    const existing = store.getAccountByHostedConnectionId(entry.connection.id)
+      ?? store.getAccountByExternalAccount(
+        entry.connection.provider,
+        entry.connection.externalAccountId,
+      );
     const stored = store.hydrateHostedAccount(
       buildHostedAccountHydrationInput({
         codec,
@@ -1317,6 +1318,7 @@ function buildHostedAccountHydrationInput(input: {
     clearTokens: shouldClearTokens,
     advanceHostedObservedConnectionRevision: !preserveUnpublishedLocalProviderProgress,
     ...(credential ? { credential } : {}),
+    hostedConnectionId: hostedConnection.id,
     hostedObservedTokenVersion: nextHostedObservedTokenVersion,
     hostedObservedUpdatedAt: nextHostedObservedUpdatedAt,
     connection,

@@ -154,6 +154,7 @@ export interface StoredDeviceSyncAccount extends PublicDeviceSyncAccount {
   externalAccountId: string;
   disconnectGeneration: number;
   credential: StoredDeviceSyncAccountCredential;
+  hostedConnectionId?: string | null;
   hostedObservedConnectionRevision: number;
   hostedObservedTokenRevision: number;
   hostedObservedTokenVersion: number | null;

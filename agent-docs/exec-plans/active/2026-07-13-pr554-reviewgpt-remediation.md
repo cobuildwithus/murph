@@ -96,3 +96,15 @@ without restoring its durable routing blind index. The existing-row update now
 writes both representations atomically, and focused coverage proves the same row
 is reused and immediately resolves through the real external identity. Focused
 Prisma-store evidence: 43 tests pass.
+
+The next exact-head round accepted two lifecycle findings. Device-syncd now
+persists the stable hosted connection id beside observation state and hydrates
+by that id before the provider identity, so a successful disconnect that
+scrubs external identity updates the existing warm local account, clears its
+credential, and kills its queued work instead of creating a second row.
+Credential-bearing web snapshots now reread the connection and credential
+inside the connection mutation lock, and terminal connection status fences
+both OAuth and provider-config execution material. Focused evidence:
+device-syncd store 38 tests, assistant hosted-runtime 61 tests, hosted web
+authority 46 tests, and device-syncd, assistant-runtime, and web typechecks
+pass.

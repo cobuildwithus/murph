@@ -304,6 +304,7 @@ function createAuthorityHarness(input: {
   };
 
   const store = {
+    getConnectionRecordForUser: vi.fn(async () => currentRecord),
     getConnectionForUser: vi.fn(async () =>
       buildPublicConnection({
         ...currentRecord,
@@ -2426,11 +2427,63 @@ describe("applyHostedDeviceSyncRuntimeResult", () => {
 
     expect(response.connections[0]?.credential).toEqual({
       credentialMetadata: {},
-      kind: "oauth_tokens_redacted",
-      tokenVersion: 3,
+      kind: "none",
     });
     expect(JSON.stringify(response)).not.toContain("stored-access-token");
     expect(JSON.stringify(response)).not.toContain("stored-refresh-token");
+  });
+
+  it("rereads connection state under the mutation lock before exporting credentials", async () => {
+    const candidate = buildHostedRecord();
+    const terminal = buildHostedRecord({ status: "disconnected" });
+    const harness = createAuthorityHarness({ record: candidate });
+    const { readHostedDeviceSyncRuntimeState } = await import(
+      "@/src/lib/device-sync/hosted-runtime-authority"
+    );
+    harness.store.prisma.deviceConnection.findMany.mockResolvedValue([candidate]);
+    harness.store.getConnectionRecordForUser.mockResolvedValue(terminal);
+
+    const response = await readHostedDeviceSyncRuntimeState({
+      request: new Request("https://example.test/device-sync/runtime/snapshot", {
+        body: JSON.stringify({ includeCredentialMaterial: true, userId: "user_123" }),
+        method: "POST",
+      }),
+      trustedUserId: "user_123",
+    });
+
+    expect(response.connections[0]).toMatchObject({
+      connection: { status: "disconnected" },
+      credential: { kind: "none" },
+    });
+    expect(JSON.stringify(response)).not.toContain("stored-access-token");
+  });
+
+  it("withholds provider config from terminal execution snapshots without a lease", async () => {
+    const record = buildHostedRecord({
+      credentialKind: "provider_config",
+      provider: "junction",
+      providerConfigKey: "junction",
+      status: "disconnected",
+    });
+    const harness = createAuthorityHarness({ record, storedAccount: null });
+    const { readHostedDeviceSyncRuntimeState } = await import(
+      "@/src/lib/device-sync/hosted-runtime-authority"
+    );
+    harness.store.prisma.deviceConnection.findMany.mockResolvedValue([record]);
+
+    const response = await readHostedDeviceSyncRuntimeState({
+      request: new Request("https://example.test/device-sync/runtime/snapshot", {
+        body: JSON.stringify({ includeCredentialMaterial: true, userId: "user_123" }),
+        method: "POST",
+      }),
+      trustedUserId: "user_123",
+    });
+
+    expect(response.connections[0]).toMatchObject({
+      connection: { status: "disconnected" },
+      credential: { kind: "none" },
+    });
+    expect(JSON.stringify(response)).not.toContain("providerConfigKey");
   });
 
   it("reads provider-config hosted snapshots without token material", async () => {
