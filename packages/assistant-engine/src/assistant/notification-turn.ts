@@ -207,7 +207,6 @@ export interface AssistantNotificationInput
 }
 
 export interface AssistantNotificationResult {
-  audienceVerification?: 'unverified'
   decision: AssistantNotificationDecision
   deliveryOutcome?: AssistantDeliveryOutcome | null
   postTurnDeliveryExpectations?: AssistantNotificationPostTurnDeliveryExpectations | null
@@ -287,16 +286,10 @@ export async function sendAssistantNotificationLocal(
           sharedPlan.conversationPolicy.audience,
         ) === 'unverified-external'
       ) {
-        return withPostTurnDeliveryExpectations({
-          audienceVerification: 'unverified',
-          decision: {
-            kind: 'skip',
-            privateSummary:
-              'Notification skipped because the external audience could not be verified as direct or group.',
-          },
-          response: null,
-          session: resolved.session,
-        })
+        throw new VaultCliError(
+          'ASSISTANT_AUDIENCE_UNVERIFIED',
+          'Notification audience could not be verified as direct or group.',
+        )
       }
       const firstContactDocIds = resolveAssistantNotificationFirstContactDocIds({
         input: messageInput,

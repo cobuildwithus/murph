@@ -2521,7 +2521,7 @@ describe("cloudflare worker routes", () => {
       vi.useFakeTimers();
       vi.setSystemTime(new Date("2026-04-27T00:00:00.000Z"));
       const runtimeNextWakeAt = "2026-04-27T00:04:00.000Z";
-      const { alarms, invoke, runner, sql, waitUntil } = createRuntimeControlRunnerHarness({
+      const { alarms, invoke, runner, sql } = createRuntimeControlRunnerHarness({
         invocationResults: [{
           nextWakeAt: runtimeNextWakeAt,
           nextWakeReason: "assistant",
@@ -2546,17 +2546,14 @@ describe("cloudflare worker routes", () => {
         userId: "test-user",
         workspaceVersion: "7",
       });
-      expect(waitUntil).toHaveBeenCalledOnce();
-      const background = waitUntil.mock.calls[0]?.[0];
-      if (background instanceof Promise) {
-        await background;
-      }
-      expect(readRunnerMetaForRuntimeControl(sql)).toMatchObject({
-        active_attempt_id: null,
-        backoff_until: null,
-        failure_count: 0,
-        wake_at: null,
-      });
+      await vi.waitFor(() =>
+        expect(readRunnerMetaForRuntimeControl(sql)).toMatchObject({
+          active_attempt_id: null,
+          backoff_until: null,
+          failure_count: 0,
+          wake_at: null,
+        })
+      );
       expect(alarms).toEqual([]);
     });
 

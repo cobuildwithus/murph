@@ -282,7 +282,6 @@ function assistantOutboxErrorCodeIsInternal(code: string): boolean {
     code.startsWith('HOSTED_') ||
     code.startsWith('LINQ_') ||
     code.startsWith('TELEGRAM_') ||
-    code.startsWith('WHATSAPP_') ||
     code.startsWith('AGENTMAIL_')
 }
 

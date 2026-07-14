@@ -691,10 +691,13 @@ describe('assistant skill assets', () => {
     expect(raw).toContain('`group-email.v0`, `sleep-duration-days.v0`')
     expect(raw).not.toContain('sleep-times.v0')
     expect(raw).toContain('`resting-heart-rate-days.v0`, and `hrv-days.v0`')
+    expect(raw).toContain('Every join offer must lead with "Like this message,"')
+    expect(raw).not.toContain('lead with "react to this message')
     expect(raw).toContain('include `{{join_url}}` exactly once as the customize link')
     expect(raw).toContain('pass the group\'s')
     expect(raw).toContain('chosen name as `displayName` on the `post_join_offer` call')
-    expect(raw).toContain('Reacting grants the')
+    expect(raw).toContain('Liking the message')
+    expect(raw).toContain('grants the disclosed snapshot')
     expect(raw).toContain('disclosed snapshot')
     expect(raw).toContain('Never silently')
     expect(raw).toContain('share health data that the message did not disclose')
@@ -798,6 +801,9 @@ describe('assistant skill assets', () => {
     )
     expect(buildAssistantSkillFileRef('stress-regulation')).toBe(
       '$MURPH_ASSISTANT_SKILLS_ROOT/stress-regulation/SKILL.md',
+    )
+    expect(buildAssistantSkillFileRef('appointment-scheduling')).toBe(
+      '$MURPH_ASSISTANT_SKILLS_ROOT/appointment-scheduling/SKILL.md',
     )
     expect(buildAssistantSkillFileRef('computer-use')).toBe(
       '$MURPH_ASSISTANT_SKILLS_ROOT/computer-use/SKILL.md',

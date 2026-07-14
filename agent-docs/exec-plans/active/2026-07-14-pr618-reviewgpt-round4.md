@@ -20,8 +20,8 @@ provider-claim state and post-entry ambiguity fail-closed.
 - Release an exact unused non-idempotent Linq provider claim through its
   existing Web-owned outcome boundary before restoring local dispatch state;
   retain conservative ambiguity if that release cannot be proven.
-- Treat hosted WhatsApp transport loss after provider entry as terminally
-  ambiguous while preserving explicit HTTP rejection and pre-entry proof.
+- Adopt latest `main`'s deletion of the retired channel without resurrecting
+  its runtime, tests, or transport-specific policy.
 - Keep PR 618 open; do not merge or deploy.
 
 ## Working Set
@@ -36,9 +36,7 @@ provider-claim state and post-entry ambiguity fail-closed.
 - `packages/assistant-runtime/test/hosted-runtime-callbacks.test.ts`
 - `packages/operator-config/src/assistant/delivery-failure.ts`
 - `packages/operator-config/src/http-json-retry.ts`
-- `packages/operator-config/src/whatsapp-runtime.ts`
 - `packages/operator-config/test/runtime-helpers.test.ts`
-- `packages/operator-config/test/whatsapp-runtime.test.ts`
 - `apps/web/app/api/internal/hosted-runtime/linq-egress/delivery/route.ts`
 - `apps/web/app/api/internal/hosted-runtime/linq-egress/engagement/route.ts`
 - `apps/web/src/lib/hosted-onboarding/linq-delivery-store.ts`
@@ -53,13 +51,11 @@ provider-claim state and post-entry ambiguity fail-closed.
   boundary, then prove identity-preserving rethrow after the correction.
 - Focused text, image, and voice-memo adapter coverage plus the real hosted
   asynchronous provider-entry fence.
-- Shared JSON transport proof that Linq and WhatsApp cannot erase the same
-  explicit no-egress marker.
+- Shared JSON transport proof that an explicit no-egress marker is preserved
+  by identity.
 - Existing generic Telegram ambiguity and exact outbox restoration regressions.
 - Exact non-idempotent Linq claim release before local restoration, including
   release-conflict ambiguity and one successful retry.
-- Hosted WhatsApp pre-entry restoration, post-entry transport ambiguity, and
-  explicit HTTP-response retry behavior.
 - Affected package typechecks and owner suites, required coverage-write and
   security/privacy refreshes, parent final review, exact-head CI, and ReviewGPT
   rerun to zero accepted findings.
@@ -77,9 +73,10 @@ provider-claim state and post-entry ambiguity fail-closed.
   persist that exact attempt timestamp with the web-owned claim, require it in
   the release compare-and-set for marked control-plane response loss, and
   exclude definitive web rejections and known existing claims.
-- Transport audit: raw WhatsApp response loss, including caller abort after
-  provider entry, could be retried. Keep it terminally ambiguous while
-  preserving explicit HTTP-response semantics and exact pre-entry proof.
+- Latest-main adoption: the retired channel was deleted upstream. Accept that
+  deletion and remove the branch's transport-specific implementation and
+  tests rather than preserving dead behavior. Keep the generic
+  non-idempotent ambiguity invariant proved with a supported channel.
 - Complexity collapse: derive ambiguous non-idempotent outbox handling from the
   existing transport-idempotence fact and delete channel-specific allowlists.
 
@@ -113,13 +110,14 @@ a new requirement-level continuation decision; there is no automatic Round 6.
 
 - Shared-host focused verification: assistant-engine retry policy 5/5;
   assistant-runtime callbacks and channel activity 224/224; Cloudflare runner
-  platform 125/125; Web engagement, delivery route, and store 142/142; operator
-  runtime helpers and WhatsApp 36/36.
+  platform 125/125; Web engagement, delivery route, and store 142/142; and the
+  operator runtime-helper owner suite passed before the latest-main merge.
 - Coverage proves the same claim-attempt timestamp flows from the runtime
   request through Web persistence and exact release CAS, including invalid-
   timestamp rejection and timestamp-mismatch conflict.
 - Control-plane invalid JSON and body-read failure are marked response-
-  unavailable; caller-aborted WhatsApp transport remains terminally ambiguous.
+  unavailable. Latest `main` removed the retired channel, and the merge keeps it
+  deleted.
 - Scoped `git diff --check` is green. Final exact-head typechecks, verification,
   bundle assembly, CI, and ReviewGPT remain required after latest-main lineage
   reconstruction.

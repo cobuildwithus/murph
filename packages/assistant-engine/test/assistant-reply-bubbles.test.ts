@@ -10,7 +10,7 @@ describe('assistant reply bubbles', () => {
   it('detects bubble-capable texting channels only', () => {
     expect(assistantChannelSupportsReplyBubbles('linq')).toBe(true)
     expect(assistantChannelSupportsReplyBubbles(' Telegram ')).toBe(true)
-    expect(assistantChannelSupportsReplyBubbles('WHATSAPP')).toBe(true)
+    expect(assistantChannelSupportsReplyBubbles('SIGNAL')).toBe(false)
     expect(assistantChannelSupportsReplyBubbles('email')).toBe(false)
     expect(assistantChannelSupportsReplyBubbles('local')).toBe(false)
     expect(assistantChannelSupportsReplyBubbles(null)).toBe(false)

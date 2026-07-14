@@ -5,7 +5,6 @@ import {
   isHostedEmailConversationMessageWake,
   isHostedLinqConversationMessageWake,
   isHostedTelegramConversationMessageWake,
-  isHostedWhatsAppConversationMessageWake,
   readHostedLinqConversationMessageAccountLookupKey,
 } from "@murphai/hosted-execution";
 import {
@@ -18,7 +17,6 @@ import {
   normalizeHostedEmailConversationCapture,
   normalizeHostedLinqConversationCapture,
   normalizeHostedTelegramConversationCapture,
-  normalizeHostedWhatsAppConversationCapture,
 } from "@murphai/inboxd/connectors/hosted-conversation";
 import {
   createInboxPipeline,
@@ -445,16 +443,6 @@ async function normalizeHostedConversationMessageWake(input: {
       source: "email",
       threadIsDirect: input.wake.message.threadIsDirect,
       threadTarget: input.wake.message.threadTarget ?? null,
-    });
-  }
-
-  if (isHostedWhatsAppConversationMessageWake(input.wake)) {
-    return normalizeHostedWhatsAppConversationCapture({
-      accountId: input.wake.message.whatsappMessage.phoneNumberId ?? "cloud-api",
-      externalId: input.wake.eventId,
-      message: input.wake.message.whatsappMessage,
-      occurredAt: input.wake.occurredAt,
-      receivedAt: input.wake.occurredAt,
     });
   }
 

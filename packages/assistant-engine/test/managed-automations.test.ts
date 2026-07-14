@@ -14,7 +14,6 @@ type StoredAutomationRecord = {
   instructions: string
   route: {
     channel: string
-    currentRouteSnapshot?: boolean | null
     deliverySource?: { kind: 'linq'; fromPhoneNumber: string } | null
     deliveryTarget: string | null
     identityId: string | null
@@ -139,7 +138,6 @@ const defaultRoute = {
 
 const groupChatRoute = {
   channel: 'linq',
-  currentRouteSnapshot: true,
   deliverySource: null,
   deliveryTarget: 'linq-group-chat',
   identityId: 'linq-identity',

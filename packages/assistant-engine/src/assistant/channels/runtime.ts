@@ -32,9 +32,6 @@ import {
   startTelegramTypingSession,
 } from '@murphai/operator-config/telegram-runtime'
 import {
-  sendWhatsAppTextMessage,
-} from '@murphai/operator-config/whatsapp-runtime'
-import {
   createLinkedAbortSignal,
   createTimeoutAbortController,
 } from '@murphai/operator-config/http-retry'
@@ -55,7 +52,6 @@ import type {
   EmailRuntimeDependencies,
   LinqRuntimeDependencies,
   TelegramRuntimeDependencies,
-  WhatsAppRuntimeDependencies,
 } from './types.js'
 import type {
   AssistantMessageReaction,
@@ -671,25 +667,6 @@ export async function setLinqMessageReaction(
     reaction: delivered.reaction,
     targetMessageId: delivered.targetMessageId,
   }
-}
-
-export async function sendWhatsAppMessage(
-  input: {
-    message: string
-    replyToMessageId?: string | null
-    target: string
-  },
-  dependencies: WhatsAppRuntimeDependencies = {},
-): Promise<{
-  providerMessageId: string | null
-  providerThreadId: string | null
-  target: string
-}> {
-  return sendWhatsAppTextMessage(input, {
-    env: dependencies.env,
-    fetchImplementation: dependencies.fetchImplementation,
-    signal: dependencies.signal,
-  })
 }
 
 export async function startTelegramTypingIndicator(

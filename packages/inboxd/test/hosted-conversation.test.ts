@@ -30,7 +30,6 @@ import {
   normalizeHostedEmailConversationCapture,
   normalizeHostedLinqConversationCapture,
   normalizeHostedTelegramConversationCapture,
-  normalizeHostedWhatsAppConversationCapture,
 } from "../src/connectors/hosted-conversation.ts";
 
 beforeEach(() => {
@@ -126,43 +125,4 @@ describe("hosted conversation connector barrel", () => {
     assert.equal(result, emailCapture);
   });
 
-  it("normalizes hosted WhatsApp text messages with sparse provider metadata", async () => {
-    const capture = await normalizeHostedWhatsAppConversationCapture({
-      accountId: "phone-number-id",
-      externalId: "whatsapp:wamid.test",
-      message: {
-        fromWaId: "15551234567",
-        messageId: "wamid.test",
-        phoneNumberId: "phone-number-id",
-        text: "CHECKIN",
-        threadId: "15551234567",
-      },
-      occurredAt: "2026-04-08T00:02:00.000Z",
-    });
-
-    expect(capture).toMatchObject({
-      accountId: "phone-number-id",
-      actor: {
-        displayName: null,
-        id: "15551234567",
-        isSelf: false,
-      },
-      attachments: [],
-      externalId: "whatsapp:wamid.test",
-      occurredAt: "2026-04-08T00:02:00.000Z",
-      raw: {
-        message_id: "wamid.test",
-        phone_number_id: "phone-number-id",
-        schema: "murph.whatsapp-capture.v1",
-      },
-      receivedAt: "2026-04-08T00:02:00.000Z",
-      source: "whatsapp",
-      text: "CHECKIN",
-      thread: {
-        id: "15551234567",
-        isDirect: true,
-        title: null,
-      },
-    });
-  });
 });

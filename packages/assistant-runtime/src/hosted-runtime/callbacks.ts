@@ -44,7 +44,6 @@ import {
   readAssistantVaultFileMedia,
   readVerifiedAssistantVaultFileBytes,
   sendTelegramMessage,
-  sendWhatsAppMessage,
   readAssistantOutboxIntentMirrorState,
   resetAssistantOutboxPreparedDispatchById,
   saveAssistantOutboxIntentIfUnchanged,
@@ -98,7 +97,6 @@ import {
   buildHostedLinqChannelEnv,
   buildHostedTelegramChannelEnv,
   buildHostedTelegramVoiceMemoChannelEnv,
-  buildHostedWhatsAppChannelEnv,
 } from "./channel-activity.ts";
 import {
   looksLikeHostedProviderRedactedLinqTarget,
@@ -1641,10 +1639,6 @@ export async function drainHostedPreparedAssistantDeliveries(input: {
     forwardedEnv: input.forwardedEnv ?? {},
     userEnv: input.userEnv ?? {},
   }) as NodeJS.ProcessEnv;
-  const whatsAppEnv = buildHostedWhatsAppChannelEnv({
-    forwardedEnv: input.forwardedEnv ?? {},
-    platformEnv: input.platformEnv,
-  }) as NodeJS.ProcessEnv;
   const linqDeliveryContexts = resolveHostedAssistantLinqDeliveryContexts({
     context: input.linqDeliveryContext ?? null,
     contexts: input.linqDeliveryContexts ?? null,
@@ -1739,7 +1733,6 @@ export async function drainHostedPreparedAssistantDeliveries(input: {
           preparedDispatch: ownsPreparedDispatch ? preparedDispatch : null,
           telegramEnv,
           telegramVoiceMemoEnv,
-          whatsAppEnv,
           providerFetch: input.providerFetch ?? null,
           publicInternetFetch: input.publicInternetFetch ?? null,
           userId: input.wake.userId,
@@ -2303,7 +2296,6 @@ async function deliverHostedPreparedAssistantDelivery(input: {
   preparedDispatch: HostedAssistantDeliveryPreparedDispatch | null;
   telegramEnv: NodeJS.ProcessEnv;
   telegramVoiceMemoEnv: NodeJS.ProcessEnv;
-  whatsAppEnv: NodeJS.ProcessEnv;
   providerFetch: typeof fetch | null;
   publicInternetFetch: typeof fetch | null;
   userId: string;
@@ -2734,31 +2726,6 @@ async function deliverHostedPreparedAssistantDelivery(input: {
             ...result,
             target: providerTarget,
           };
-        },
-        sendWhatsApp: async (request) => {
-          await assertHostedDeliveryCanEnterProvider(input);
-          const dependencies = requireHostedProviderFetchDependencies({
-            env: input.whatsAppEnv,
-            fetchImplementation: createHostedProviderFetchBoundary({
-              assertLive: () => assertHostedDeliveryLiveNow(input),
-              assertProviderEntryLive: () => assertHostedDeliveryCanEnterProvider(input),
-              assertProviderEntryCurrent: () =>
-                assertHostedProviderEntryCurrent(input),
-              onProviderDispatchEntered: () => {
-                providerDispatchEntered = true;
-              },
-              operation: "Hosted assistant WhatsApp delivery",
-              providerFetch: input.providerFetch,
-            }),
-            ...(input.signal ? { signal: input.signal } : {}),
-          }, "Hosted assistant WhatsApp delivery");
-          const result = await sendWhatsAppMessage(request, dependencies);
-          try {
-            await assertHostedDeliveryLiveNow(input);
-          } catch (error) {
-            throw markHostedDeliveryMayHaveSucceeded(error);
-          }
-          return result;
         },
       },
       intentId: input.assistantDeliveryEffect.effectId,

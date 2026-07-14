@@ -34,6 +34,7 @@ const mocks = vi.hoisted(() => ({
   checkHostedAiUsageGate: vi.fn(),
   sendHostedLinqChatMessage: vi.fn(),
   sendHostedLinqReadReceipt: vi.fn(),
+  stageHostedLinqGroupReactionContext: vi.fn(),
   nudgeHostedAssistantRunnerUserBestEffortResult: vi.fn(async (
     input: { context?: string; timeoutMs?: number; userId: string },
   ) => {
@@ -175,6 +176,11 @@ vi.mock("@/src/lib/hosted-groups/join-offer-reaction", () => ({
   handleHostedGroupJoinOfferReaction: mocks.handleHostedGroupJoinOfferReaction,
 }));
 
+vi.mock("@/src/lib/hosted-onboarding/webhook-provider-linq-reaction-context", () => ({
+  stageHostedLinqGroupReactionContext:
+    mocks.stageHostedLinqGroupReactionContext,
+}));
+
 import { buildHostedInviteReply } from "@/src/lib/hosted-onboarding/linq";
 import {
   createHostedLinqChatLookupKey,
@@ -216,6 +222,7 @@ describe("hosted onboarding Linq webhook hard-cut flows", () => {
       reason: "accepted",
       status: "accepted",
     });
+    mocks.stageHostedLinqGroupReactionContext.mockResolvedValue(false);
     mocks.markHostedLinqOnboardingLinkNoticeSent.mockResolvedValue(true);
     mocks.releaseHostedLinqOnboardingLinkNoticeClaim.mockResolvedValue(undefined);
     mocks.releaseHostedLinqQuotaReplyNoticeClaim.mockResolvedValue(undefined);
@@ -523,8 +530,61 @@ describe("hosted onboarding Linq webhook hard-cut flows", () => {
         prisma,
       }),
     );
+    expect(mocks.stageHostedLinqGroupReactionContext).not.toHaveBeenCalled();
     expect(mocks.appendHostedMailboxEnvelopeTx).not.toHaveBeenCalled();
     expect(mocks.nudgeHostedRunnerUserBestEffort).not.toHaveBeenCalled();
+  });
+
+  it("stages group reaction context without scheduling, sending, or waking", async () => {
+    const prisma = createPrismaStub();
+    const scheduleAfterResponse = vi.fn();
+    mocks.getPrisma.mockReturnValue(prisma);
+    mocks.handleHostedGroupJoinOfferReaction.mockResolvedValue({
+      reason: "unsupported_reaction",
+      status: "ignored",
+    });
+    mocks.stageHostedLinqGroupReactionContext.mockResolvedValue(true);
+
+    await expect(
+      handleHostedOnboardingLinqWebhook({
+        rawBody: buildLinqProviderWebhookBody({
+          data: {
+            chat_id: "chat_group_1",
+            custom_emoji: "😂",
+            from: "+15551234567",
+            message_id: "msg_group_123",
+            reaction_type: "custom",
+          },
+          eventId: "evt_reaction_context_123",
+          eventType: "reaction.added",
+        }),
+        scheduleAfterResponse,
+        signature: null,
+        timestamp: null,
+      }),
+    ).resolves.toMatchObject({
+      ignored: false,
+      ok: true,
+      reason: "staged-linq-group-reaction-context",
+    });
+
+    expect(mocks.stageHostedLinqGroupReactionContext).toHaveBeenCalledWith({
+      event: expect.objectContaining({
+        eventId: "evt_reaction_context_123",
+        eventType: "reaction.added",
+        linqChatId: "chat_group_1",
+        linqMessageId: "msg_group_123",
+      }),
+      prisma,
+    });
+    expect(scheduleAfterResponse).not.toHaveBeenCalled();
+    expect(mocks.appendHostedMailboxEnvelopeTx).not.toHaveBeenCalled();
+    expect(mocks.sendHostedLinqChatMessage).not.toHaveBeenCalled();
+    expect(mocks.signalHostedMailboxAppendRuntime).not.toHaveBeenCalled();
+    expect(mocks.nudgeHostedRunnerUserBestEffort).not.toHaveBeenCalled();
+    expect(mocks.nudgeHostedRunnerUserBestEffortResult).not.toHaveBeenCalled();
+    expect(mocks.nudgeHostedAssistantRunnerUserBestEffortResult)
+      .not.toHaveBeenCalled();
   });
 
   it("reruns duplicate Linq reaction.added events so a failed join-offer confirmation can retry", async () => {

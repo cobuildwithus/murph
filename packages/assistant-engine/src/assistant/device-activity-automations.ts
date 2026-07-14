@@ -616,9 +616,6 @@ function buildDeviceActivityAutomationNotificationTarget(input: {
     sessionId: preservedSessionId,
     alias: preservedAlias,
     channel: input.automation.route.channel,
-    ...(input.automation.route.currentRouteSnapshot === true
-      ? { currentRouteSnapshot: true }
-      : {}),
     deliverySource: input.automation.route.deliverySource,
     deliveryTarget: input.automation.route.deliveryTarget,
     identityId: input.automation.route.identityId,
@@ -635,7 +632,6 @@ function assistantCronTargetMatchesAutomationRoute(
   route: DeviceActivityAutomation['route'],
 ): boolean {
   return target.channel === route.channel &&
-    (target.currentRouteSnapshot === true) === (route.currentRouteSnapshot === true) &&
     JSON.stringify(target.deliverySource) === JSON.stringify(route.deliverySource) &&
     target.deliveryTarget === route.deliveryTarget &&
     target.identityId === route.identityId &&

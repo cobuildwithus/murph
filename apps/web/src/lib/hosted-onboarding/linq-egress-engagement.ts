@@ -42,6 +42,7 @@ export type HostedLinqRuntimeEgressTargetOverride = {
   targetKind: "thread";
 };
 export type HostedLinqRuntimeEgressAssertionResult = {
+  threadIsDirect: boolean;
   targetOverride: HostedLinqRuntimeEgressTargetOverride | null;
 };
 
@@ -100,7 +101,7 @@ export async function assertHostedLinqRecentInboundEngagementForRuntime(input: {
       target: input.target,
       targetKind: input.targetKind,
     });
-    return { targetOverride: null };
+    return { targetOverride: null, threadIsDirect: true };
   }
 
   await assertActiveHostedThreadRouteContainerAccess({
@@ -118,7 +119,7 @@ export async function assertHostedLinqRecentInboundEngagementForRuntime(input: {
       throwHostedLinqRouteAuthorityMismatch();
     }
 
-    return { targetOverride: null };
+    return { targetOverride: null, threadIsDirect: false };
   }
 
   if (await matchesPersistedHostedLinqDirectInbound({
@@ -129,7 +130,7 @@ export async function assertHostedLinqRecentInboundEngagementForRuntime(input: {
     replyToMessageId: input.replyToMessageId,
     target: input.target,
   })) {
-    return { targetOverride: null };
+    return { targetOverride: null, threadIsDirect: true };
   }
 
   return await assertHostedMemberLinqRouteMatchesEgressTarget({
@@ -340,25 +341,25 @@ async function assertHostedMemberLinqRouteMatchesEgressTarget(input: {
     routing.linqChatLookupKey
     && chatLookupKeys.includes(routing.linqChatLookupKey)
   ) {
-    return { targetOverride: null };
+    return { targetOverride: null, threadIsDirect: true };
   }
   if (
     routing.pendingLinqChatLookupKey
     && chatLookupKeys.includes(routing.pendingLinqChatLookupKey)
   ) {
-    return { targetOverride: null };
+    return { targetOverride: null, threadIsDirect: true };
   }
   if (
     routing.linqRecipientPhoneLookupKey
     && recipientPhoneLookupKeys.includes(routing.linqRecipientPhoneLookupKey)
   ) {
-    return { targetOverride: null };
+    return { targetOverride: null, threadIsDirect: true };
   }
   if (
     routing.pendingLinqRecipientPhoneLookupKey
     && recipientPhoneLookupKeys.includes(routing.pendingLinqRecipientPhoneLookupKey)
   ) {
-    return { targetOverride: null };
+    return { targetOverride: null, threadIsDirect: true };
   }
 
   if (canResolveHostedLinqHomeRouteOverride(input)) {
@@ -370,6 +371,7 @@ async function assertHostedMemberLinqRouteMatchesEgressTarget(input: {
           target: homeChatId,
           targetKind: "thread",
         },
+        threadIsDirect: true,
       };
     }
   }

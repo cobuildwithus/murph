@@ -307,7 +307,8 @@ async function resolveHostedMemberActivationWelcomeLinqRoute(input: {
     || input.member.routing?.pendingLinqChatId,
   );
   const hasTelegramRoute = Boolean(
-    input.member.routing?.telegramThreadId,
+    input.member.routing?.telegramThreadId
+    || input.member.routing?.telegramUserId,
   );
 
   if (

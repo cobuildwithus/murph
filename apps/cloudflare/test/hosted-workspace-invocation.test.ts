@@ -106,8 +106,6 @@ describe("runHostedWorkspaceInvocation", () => {
         OPENAI_API_KEY: "fixture-openai-key",
         TELEGRAM_API_BASE_URL: "https://telegram.example.test",
         TELEGRAM_BOT_TOKEN: "fixture-telegram-token",
-        WHATSAPP_ACCESS_TOKEN: "fixture-whatsapp-token",
-        WHATSAPP_PHONE_NUMBER_ID: "fixture-whatsapp-phone-number-id",
       },
     });
 
@@ -121,12 +119,8 @@ describe("runHostedWorkspaceInvocation", () => {
     expect(runtime.platformEnv).toMatchObject({
       TELEGRAM_API_BASE_URL: "https://telegram.example.test",
       TELEGRAM_BOT_TOKEN: HOSTED_CLOUDFLARE_INJECTED_CREDENTIAL,
-      WHATSAPP_ACCESS_TOKEN: HOSTED_CLOUDFLARE_INJECTED_CREDENTIAL,
-      WHATSAPP_PHONE_NUMBER_ID: HOSTED_CLOUDFLARE_INJECTED_CREDENTIAL,
     });
     expect(JSON.stringify(runtime.platformEnv)).not.toContain("fixture-telegram-token");
-    expect(JSON.stringify(runtime.platformEnv)).not.toContain("fixture-whatsapp-token");
-    expect(JSON.stringify(runtime.platformEnv)).not.toContain("fixture-whatsapp-phone-number-id");
     expect(runtime.parserToolchain?.tools.ffmpeg?.command).toBe(
       "/app/test-parser-toolchain/ffmpeg",
     );

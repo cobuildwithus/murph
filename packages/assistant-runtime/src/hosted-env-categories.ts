@@ -1,15 +1,12 @@
 import {
   HOSTED_LINQ_DELIVERY_ENV_NAMES,
   HOSTED_TELEGRAM_DELIVERY_FORWARDED_ENV_NAMES,
-  HOSTED_WHATSAPP_DELIVERY_FORWARDED_ENV_NAMES,
 } from "@murphai/hosted-execution/assistant-capabilities";
 
 // Ingress-only verification secrets stay on the control-plane/webhook boundary
 // and must not enter user-executable hosted runtime env.
 export const HOSTED_SHARED_INGRESS_ONLY_SECRET_ENV_NAMES = [
   "LINQ_WEBHOOK_SECRET",
-  "WHATSAPP_APP_SECRET",
-  "WHATSAPP_VERIFY_TOKEN",
 ] as const;
 
 export const HOSTED_SHARED_MAILBOX_PLATFORM_ENV_NAMES = [
@@ -29,10 +26,6 @@ export const HOSTED_SHARED_CHANNEL_PLATFORM_ENV_NAMES = [
   "TELEGRAM_API_BASE_URL",
   "TELEGRAM_BOT_TOKEN",
   "TELEGRAM_FILE_BASE_URL",
-  "WHATSAPP_ACCESS_TOKEN",
-  "WHATSAPP_API_BASE_URL",
-  "WHATSAPP_GRAPH_VERSION",
-  "WHATSAPP_PHONE_NUMBER_ID",
 ] as const;
 
 export const HOSTED_SHARED_DEVICE_SYNC_PLATFORM_ENV_NAMES = [
@@ -82,7 +75,6 @@ export const HOSTED_SHARED_FORWARDED_ENV_CATEGORY_KEYS = {
   ],
   linqConfigured: HOSTED_LINQ_DELIVERY_ENV_NAMES,
   telegramConfigured: HOSTED_TELEGRAM_DELIVERY_FORWARDED_ENV_NAMES,
-  whatsappConfigured: HOSTED_WHATSAPP_DELIVERY_FORWARDED_ENV_NAMES,
 } as const satisfies Record<string, readonly string[]>;
 
 export const HOSTED_SHARED_MODEL_CREDENTIAL_ENV_NAMES = [

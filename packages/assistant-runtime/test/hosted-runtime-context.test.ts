@@ -313,7 +313,6 @@ test("hosted channel state reconciliation preserves unmanaged entries while prun
       {
         emailSendReady: false,
         telegramBotConfigured: true,
-        whatsappCloudApiConfigured: false,
       },
       true,
     );

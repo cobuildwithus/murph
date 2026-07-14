@@ -11,7 +11,7 @@ const TEXTING_RHYTHM_PROMPT = `Texting rhythm:
 - Keep each bubble coherent and split only between complete sentences, paragraphs, or list items. Lists and structured answers can span bubbles; group related items together. Never separate a safety caveat, dosage, or warning from the item it qualifies. If the user needs to respond, ask exactly one question in the final bubble and put nothing after it.`
 
 describe('assistant reply bubble prompt guidance', () => {
-  it.each(['linq', 'telegram', 'whatsapp'])(
+  it.each(['linq', 'telegram'])(
     'includes texting rhythm guidance for %s',
     (channel) => {
       const layers = buildAssistantSystemPromptLayers(

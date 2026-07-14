@@ -59,7 +59,7 @@ async function withTempVault(run: (vault: string) => Promise<void>): Promise<voi
 
 async function createSendingIntent(input: {
   attemptCount: number
-  channel?: 'email' | 'linq' | 'telegram' | 'whatsapp'
+  channel?: 'email' | 'linq' | 'telegram'
   deliveryTransportIdempotent?: boolean
   vault: string
 }): Promise<Awaited<ReturnType<typeof saveAssistantOutboxIntent>>> {
@@ -209,7 +209,7 @@ describe('assistant outbox dispatch-state', () => {
     await withTempVault(async (vault) => {
       const sending = await createSendingIntent({
         attemptCount: 1,
-        channel: 'whatsapp',
+        channel: 'telegram',
         vault,
       })
       const paths = resolveAssistantStatePaths(vault)
@@ -217,8 +217,8 @@ describe('assistant outbox dispatch-state', () => {
       const abandoned = await updateAssistantOutboxAfterDispatchFailure({
         deliveryMayHaveSucceeded: true,
         deliveryTransportIdempotent: false,
-        error: Object.assign(new Error('WhatsApp provider response was lost'), {
-          code: 'ASSISTANT_WHATSAPP_REQUEST_FAILED',
+        error: Object.assign(new Error('provider response was lost'), {
+          code: 'ASSISTANT_PROVIDER_RESPONSE_LOST',
           deliveryMayHaveSucceeded: true,
           retryable: false,
         }),
@@ -246,7 +246,7 @@ describe('assistant outbox dispatch-state', () => {
     await withTempVault(async (vault) => {
       const sending = await createSendingIntent({
         attemptCount: 1,
-        channel: 'whatsapp',
+        channel: 'telegram',
         deliveryTransportIdempotent: true,
         vault,
       })

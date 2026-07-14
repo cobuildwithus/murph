@@ -23,6 +23,7 @@ import {
   MURPH_WEEKLY_PRODUCT_UPDATES_AUTOMATION_ID,
   applyMurphManagedAutomations,
 } from '../src/assistant/managed-automations.ts'
+import { completeAssistantOnboarding } from '../src/assistant/onboarding-state.ts'
 import { ASSISTANT_REQUIRE_SEND_AUTOMATION_TAG } from '../src/assistant/automation-tags.ts'
 import { createTempVaultContext } from './test-helpers.ts'
 
@@ -371,7 +372,6 @@ describe('applyMurphManagedAutomations core integration', () => {
     await expect(applyMurphManagedAutomations({
       defaultRoute: {
         ...legacyGroupRoute,
-        currentRouteSnapshot: true,
         threadIsDirect: false,
       },
       now: new Date('2026-07-10T12:05:00.000Z'),
@@ -384,7 +384,6 @@ describe('applyMurphManagedAutomations core integration', () => {
     ]) {
       const record = await showAutomation({ automationId, vaultRoot })
       expect(record?.route).toMatchObject(legacyGroupRoute)
-      expect(record?.route).not.toHaveProperty('currentRouteSnapshot')
       expect(record?.route).not.toHaveProperty('threadIsDirect')
     }
   })
@@ -426,7 +425,6 @@ describe('applyMurphManagedAutomations core integration', () => {
     await expect(applyMurphManagedAutomations({
       defaultRoute: {
         ...originalRoute,
-        currentRouteSnapshot: true,
         deliveryTarget: 'current-home-chat',
         threadIsDirect: true,
       },
@@ -513,7 +511,6 @@ describe('applyMurphManagedAutomations core integration', () => {
     await applyMurphManagedAutomations({
       defaultRoute: {
         ...liveLegacyRoute,
-        currentRouteSnapshot: true,
         deliveryTarget: 'current-home-chat',
         threadIsDirect: true,
       },
@@ -527,7 +524,6 @@ describe('applyMurphManagedAutomations core integration', () => {
     ]) {
       const record = await showAutomation({ automationId, vaultRoot })
       expect(record?.route).toMatchObject(liveLegacyRoute)
-      expect(record?.route).not.toHaveProperty('currentRouteSnapshot')
       expect(record?.route).not.toHaveProperty('threadIsDirect')
     }
     for (const automationId of [
@@ -536,7 +532,6 @@ describe('applyMurphManagedAutomations core integration', () => {
     ]) {
       const record = await showAutomation({ automationId, vaultRoot })
       expect(record?.route).toMatchObject(archivedLegacyRoute)
-      expect(record?.route).not.toHaveProperty('currentRouteSnapshot')
       expect(record?.route).not.toHaveProperty('threadIsDirect')
     }
     await expect(showAutomation({
@@ -578,7 +573,6 @@ describe('applyMurphManagedAutomations core integration', () => {
       now: new Date('2026-07-10T12:01:00.000Z'),
       route: {
         ...legacyHomeRoute,
-        currentRouteSnapshot: true,
         threadIsDirect: true,
       },
       schedule: { kind: 'dailyLocal', localTime: '09:00' },
@@ -592,7 +586,6 @@ describe('applyMurphManagedAutomations core integration', () => {
 
     const currentHomeRoute = {
       ...legacyHomeRoute,
-      currentRouteSnapshot: true,
       deliveryTarget: 'current-home-chat',
       threadIsDirect: true,
     }
@@ -620,14 +613,6 @@ describe('applyMurphManagedAutomations core integration', () => {
         deliveryTarget: 'legacy-home-chat',
       },
     })
-    expect((await showAutomation({
-      automationId: MURPH_WEEKLY_HEALTH_DIGEST_AUTOMATION_ID,
-      vaultRoot,
-    }))?.route).not.toHaveProperty('currentRouteSnapshot')
-    expect((await showAutomation({
-      automationId: MURPH_WEEKLY_HEALTH_INSIGHT_AUTOMATION_ID,
-      vaultRoot,
-    }))?.route).not.toHaveProperty('currentRouteSnapshot')
     await expect(applyMurphManagedAutomations({
       defaultRoute: currentHomeRoute,
       now: new Date('2026-07-10T12:10:00.000Z'),
@@ -908,6 +893,45 @@ describe('applyMurphManagedAutomations core integration', () => {
       summary: MURPH_ONBOARDING_FOLLOWUP_AUTOMATION.summary,
       tags: MURPH_ONBOARDING_FOLLOWUP_AUTOMATION.tags,
       title: MURPH_ONBOARDING_FOLLOWUP_AUTOMATION.title,
+    })
+  })
+
+  it('archives the managed onboarding follow-up after onboarding completes', async () => {
+    const vaultRoot = await createVaultRoot()
+    await upsertAutomation({
+      automationId: 'automation_01JNW7YJ7MNE7M9Q2QWQK4Z3FB',
+      continuityPolicy: MURPH_ONBOARDING_FOLLOWUP_AUTOMATION.continuityPolicy,
+      instructions: MURPH_ONBOARDING_FOLLOWUP_AUTOMATION.instructions,
+      now: new Date('2026-06-23T12:00:00.000Z'),
+      route: defaultRoute,
+      schedule: MURPH_ONBOARDING_FOLLOWUP_AUTOMATION.schedule,
+      slug: MURPH_ONBOARDING_FOLLOWUP_AUTOMATION.slug,
+      status: 'active',
+      summary: MURPH_ONBOARDING_FOLLOWUP_AUTOMATION.summary,
+      tags: [...MURPH_ONBOARDING_FOLLOWUP_AUTOMATION.tags],
+      title: MURPH_ONBOARDING_FOLLOWUP_AUTOMATION.title,
+      vaultRoot,
+    })
+    await completeAssistantOnboarding({
+      completedAt: '2026-06-23T12:30:00.000Z',
+      reason: 'user_answered',
+      vault: vaultRoot,
+    })
+
+    await expect(applyMurphManagedAutomations({
+      defaultRoute,
+      now: new Date('2026-06-23T13:00:00.000Z'),
+      vaultRoot,
+    })).resolves.toEqual({
+      created: 5,
+      skipped: 0,
+      updated: 1,
+    })
+    await expect(showAutomation({
+      automationId: 'automation_01JNW7YJ7MNE7M9Q2QWQK4Z3FB',
+      vaultRoot,
+    })).resolves.toMatchObject({
+      status: 'archived',
     })
   })
 

@@ -147,6 +147,7 @@ export const POST = withJsonError(async (request: Request) => {
 
   return jsonOk({
     ok: true,
+    threadIsDirect: assertion.asserted.threadIsDirect,
     ...(assertion.asserted.targetOverride
       ? { targetOverride: assertion.asserted.targetOverride }
       : {}),

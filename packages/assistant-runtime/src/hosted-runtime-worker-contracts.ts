@@ -40,8 +40,6 @@ export type {
   HostedRuntimeTelegramSendResponse,
   HostedRuntimeUsageRecordPort,
   HostedRuntimeUsageRecordResponse,
-  HostedRuntimeWhatsAppSendRequest,
-  HostedRuntimeWhatsAppSendResponse,
   HostedRuntimeWorkspacePort,
 } from "./hosted-runtime/platform.ts";
 export {

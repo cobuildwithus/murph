@@ -748,6 +748,69 @@ describe("runHostedWorkspaceAssistantPhase runtime logs", () => {
     );
   });
 
+  it("resolves scheduled Linq routes through egress authority and fails closed", async () => {
+    const signal = new AbortController().signal;
+    const assertLinqRecentInboundEngagement = vi.fn()
+      .mockResolvedValueOnce({
+        targetOverride: {
+          target: "chat_current_group",
+          targetKind: "thread" as const,
+        },
+        threadIsDirect: false,
+      })
+      .mockResolvedValueOnce({
+        targetOverride: {
+          target: "chat_current_direct",
+          targetKind: "thread" as const,
+        },
+      });
+    const phaseInput = createPhaseInput({});
+    phaseInput.runtime.platform.effectsPort.assertLinqRecentInboundEngagement =
+      assertLinqRecentInboundEngagement;
+    mocks.runHostedAssistantAutomationLane.mockImplementationOnce(
+      async ({ executionContext }) => {
+        const resolveScheduledLinqRoute =
+          executionContext.hosted?.resolveScheduledLinqRoute;
+        if (!resolveScheduledLinqRoute) {
+          throw new Error("Expected scheduled Linq route authority.");
+        }
+
+        await expect(resolveScheduledLinqRoute({
+          homeRouteFallbackAllowed: false,
+          signal,
+          target: "chat_saved_group",
+          targetKind: "thread",
+        })).resolves.toEqual({
+          target: "chat_current_group",
+          threadIsDirect: false,
+        });
+        await expect(resolveScheduledLinqRoute({
+          homeRouteFallbackAllowed: true,
+          target: "chat_saved_direct",
+          targetKind: "explicit",
+        })).rejects.toMatchObject({
+          code: "ASSISTANT_LINQ_AUDIENCE_AUTHORITY_UNAVAILABLE",
+        });
+
+        return {
+          assistantAutomationCurrentTurnDeliveryIntentIds: [],
+          assistantAutomationProgressed: false,
+          nextWakeAt: null,
+          redactedLogEntries: [],
+        };
+      },
+    );
+
+    await runHostedWorkspaceAssistantPhase(phaseInput);
+
+    expect(assertLinqRecentInboundEngagement).toHaveBeenCalledWith({
+      authorityCheckOnly: true,
+      homeRouteFallbackAllowed: false,
+      target: "chat_saved_group",
+      targetKind: "thread",
+    }, { signal });
+  });
+
   it("passes the hosted assistant configuration port into assistant execution", async () => {
     const assistantConfigurationToolPort: RuntimeAssistantConfigurationToolPort = {
       request: vi.fn(),
@@ -1052,7 +1115,6 @@ describe("runHostedWorkspaceAssistantPhase runtime logs", () => {
     };
     const defaultRoute = {
       channel: "linq",
-      currentRouteSnapshot: true,
       deliverySource: null,
       deliveryTarget: "chat_synthetic_seed_route",
       identityId: "identity_synthetic_seed_route",
@@ -2525,7 +2587,6 @@ describe("runHostedWorkspaceAssistantPhase runtime logs", () => {
     const seededNextWakeAt = "2026-04-30T17:00:00.000Z";
     const defaultRoute = {
       channel: "linq",
-      currentRouteSnapshot: true,
       deliverySource: null,
       deliveryTarget: "chat_synthetic_seed_route",
       identityId: "identity_synthetic_seed_route",
@@ -2607,7 +2668,6 @@ describe("runHostedWorkspaceAssistantPhase runtime logs", () => {
       const retryWakeAt = "2026-04-27T00:00:30.000Z";
       const defaultRoute = {
         channel: "linq",
-        currentRouteSnapshot: true,
         deliverySource: null,
         deliveryTarget: "chat_synthetic_seed_route",
         identityId: "identity_synthetic_seed_route",
@@ -2689,7 +2749,6 @@ describe("runHostedWorkspaceAssistantPhase runtime logs", () => {
     );
     const defaultRoute = {
       channel: "linq",
-      currentRouteSnapshot: true,
       deliverySource: null,
       deliveryTarget: "chat_synthetic_seed_route",
       identityId: "identity_synthetic_seed_route",
@@ -13773,7 +13832,6 @@ function createPhaseInput(input: {
         channelCapabilities: {
           emailSendReady: false,
           telegramBotConfigured: false,
-          whatsappCloudApiConfigured: false,
         },
         deviceSync: input.resolvedDeviceSync ?? null,
       },

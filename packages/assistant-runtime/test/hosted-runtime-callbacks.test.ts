@@ -56,7 +56,6 @@ const mocks = vi.hoisted(() => ({
   sendLinqVoiceMemoMessage: vi.fn(),
   sendTelegramMessage: vi.fn(),
   sendTelegramVoiceMemoMessage: vi.fn(),
-  sendWhatsAppMessage: vi.fn(),
   shouldDispatchAssistantOutboxIntent: vi.fn(),
 }));
 
@@ -109,7 +108,6 @@ vi.mock("@murphai/assistant-engine", async () => {
     sendLinqMessage: mocks.sendLinqMessage,
     sendTelegramMessage: mocks.sendTelegramMessage,
     sendTelegramVoiceMemoMessage: mocks.sendTelegramVoiceMemoMessage,
-    sendWhatsAppMessage: mocks.sendWhatsAppMessage,
     shouldDispatchAssistantOutboxIntent: mocks.shouldDispatchAssistantOutboxIntent,
   };
 });
@@ -11347,155 +11345,6 @@ describe("hosted runtime callbacks", () => {
         deliveryStatus: "sent",
         providerThreadId: "linq_chat_stale",
         target: "linq_chat_stale",
-      }),
-    ]);
-  });
-
-  it("routes WhatsApp deliveries through the shared WhatsApp runtime with platform env and provider fetch", async () => {
-    const effect = createEffect({
-      bindingDeliveryTarget: "whatsapp_thread_123",
-      channel: "whatsapp",
-      explicitTarget: "whatsapp_thread_123",
-    });
-    const providerFetch = vi.fn<typeof fetch>(async () => new Response(null, {
-      status: 204,
-    }));
-    mocks.sendWhatsAppMessage.mockResolvedValueOnce({
-      providerMessageId: "whatsapp_message_123",
-      providerThreadId: "whatsapp_thread_123",
-      target: "whatsapp_thread_123",
-      targetKind: "thread" as const,
-    });
-    mocks.dispatchAssistantOutboxIntent.mockImplementationOnce(async ({ dependencies }) => {
-      const delivery = await dependencies.sendWhatsApp({
-        message: "hello from hosted",
-        replyToMessageId: "whatsapp_inbound_123",
-        target: "whatsapp_thread_123",
-      });
-
-      return createDispatchResult({
-        delivery: createDelivery({
-          channel: "whatsapp",
-          providerMessageId: delivery.providerMessageId,
-          providerThreadId: delivery.providerThreadId,
-          target: delivery.target,
-          targetKind: delivery.targetKind,
-        }),
-        status: "sent",
-      });
-    });
-
-    const outcomes = await drainHostedPreparedAssistantDeliveries({
-      assistantDeliveryEffects: [effect],
-      forwardedEnv: {
-        LINQ_API_TOKEN: "linq-token",
-        WHATSAPP_ACCESS_TOKEN: "forwarded-whatsapp-token",
-      },
-      platformEnv: {
-        WHATSAPP_ACCESS_TOKEN: "platform-whatsapp-token",
-        WHATSAPP_API_BASE_URL: "https://graph.whatsapp.example",
-        WHATSAPP_GRAPH_VERSION: "v20.0",
-        WHATSAPP_PHONE_NUMBER_ID: "phone_number_123",
-      },
-      providerFetch,
-      wake: HOSTED_WAKE.wake,
-      effectsPort: createHostedRuntimeEffectsPortStub(),
-      vaultRoot: HOSTED_WAKE.vaultRoot,
-    });
-
-    expect(mocks.sendWhatsAppMessage).toHaveBeenCalledWith({
-      message: "hello from hosted",
-      replyToMessageId: "whatsapp_inbound_123",
-      target: "whatsapp_thread_123",
-    }, {
-      env: {
-        WHATSAPP_ACCESS_TOKEN: "platform-whatsapp-token",
-        WHATSAPP_API_BASE_URL: "https://graph.whatsapp.example",
-        WHATSAPP_GRAPH_VERSION: "v20.0",
-        WHATSAPP_PHONE_NUMBER_ID: "phone_number_123",
-      },
-      fetchImplementation: expect.any(Function),
-      signal: undefined,
-    });
-    expect(outcomes).toEqual([
-      expect.objectContaining({
-        deliveryChannel: "whatsapp",
-        deliveryStatus: "sent",
-        providerMessageId: "whatsapp_message_123",
-        providerThreadId: "whatsapp_thread_123",
-        target: "whatsapp_thread_123",
-      }),
-    ]);
-  });
-
-  it("marks post-success WhatsApp liveness loss as possibly committed", async () => {
-    const effect = createEffect({
-      bindingDeliveryTarget: "whatsapp_thread_123",
-      channel: "whatsapp",
-      explicitTarget: "whatsapp_thread_123",
-      transportIdempotent: false,
-    });
-    let capturedError: unknown = null;
-    const assertLiveness = vi.fn()
-      .mockResolvedValueOnce(undefined)
-      .mockResolvedValueOnce(undefined)
-      .mockRejectedValueOnce(new Error("aborted after WhatsApp response"));
-    mocks.sendWhatsAppMessage.mockResolvedValueOnce({
-      providerMessageId: "whatsapp_message_123",
-      providerThreadId: "whatsapp_thread_123",
-      target: "whatsapp_thread_123",
-      targetKind: "thread" as const,
-    });
-    mocks.dispatchAssistantOutboxIntent.mockImplementationOnce(async ({ dependencies }) => {
-      try {
-        await dependencies.sendWhatsApp({
-          message: "hello from hosted",
-          replyToMessageId: "whatsapp_inbound_123",
-          target: "whatsapp_thread_123",
-        });
-      } catch (error) {
-        capturedError = error;
-        return createDispatchResult(
-          {
-            intentId: effect.effectId,
-            lastError: {
-              code: "ASSISTANT_DELIVERY_AMBIGUOUS",
-              message: "Ambiguous WhatsApp delivery.",
-            },
-            status: "abandoned",
-          },
-          {
-            code: "ASSISTANT_DELIVERY_AMBIGUOUS",
-            message: "Ambiguous WhatsApp delivery.",
-          },
-        );
-      }
-
-      throw new Error("expected post-success WhatsApp liveness failure");
-    });
-
-    const outcomes = await drainHostedPreparedAssistantDeliveries({
-      assistantDeliveryEffects: [effect],
-      assertLiveness,
-      effectsPort: createHostedRuntimeEffectsPortStub(),
-      platformEnv: {
-        WHATSAPP_ACCESS_TOKEN: "platform-whatsapp-token",
-        WHATSAPP_PHONE_NUMBER_ID: "phone_number_123",
-      },
-      providerFetch: vi.fn<typeof fetch>(),
-      vaultRoot: HOSTED_WAKE.vaultRoot,
-      wake: HOSTED_WAKE.wake,
-    });
-
-    expect(assertLiveness).toHaveBeenCalledTimes(4);
-    expect(capturedError).toMatchObject({
-      deliveryMayHaveSucceeded: true,
-      message: "aborted after WhatsApp response",
-    });
-    expect(outcomes).toEqual([
-      expect.objectContaining({
-        deliveryStatus: "failed_ambiguous",
-        retryable: false,
       }),
     ]);
   });

@@ -31,7 +31,6 @@ export async function fetchJsonResponse<TResponse extends JsonFetchResponse>(inp
   fetchImplementation: JsonFetch<TResponse>
   headers: Record<string, string>
   method: string
-  treatCallerAbortAsTransportAmbiguity?: boolean
   signal?: AbortSignal
   timeoutMs: number
   url: string
@@ -49,10 +48,7 @@ export async function fetchJsonResponse<TResponse extends JsonFetchResponse>(inp
     if (readAssistantDeliveryMayHaveSucceeded(error) === false) {
       throw error
     }
-    if (
-      input.signal?.aborted
-      && input.treatCallerAbortAsTransportAmbiguity !== true
-    ) {
+    if (input.signal?.aborted) {
       throw error
     }
 

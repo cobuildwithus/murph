@@ -173,6 +173,15 @@ export interface AssistantHostedExecutionContext {
   providerFetch?: typeof fetch | null
   phoneCalls?: AssistantPhoneCallPort | null
   publicInternetFetch?: typeof fetch | null
+  resolveScheduledLinqRoute?(input: {
+    homeRouteFallbackAllowed: boolean
+    signal?: AbortSignal | null
+    target: string
+    targetKind: 'explicit' | 'thread'
+  }): Promise<{
+    target: string
+    threadIsDirect: boolean
+  }>
   usageRecorder?: AssistantUsageRecorder | null
   userEnvKeys: readonly string[]
 }
@@ -287,6 +296,9 @@ export function normalizeAssistantExecutionContext(
         : {}),
       ...(typeof hosted?.publicInternetFetch === 'function'
         ? { publicInternetFetch: hosted.publicInternetFetch }
+        : {}),
+      ...(typeof hosted?.resolveScheduledLinqRoute === 'function'
+        ? { resolveScheduledLinqRoute: hosted.resolveScheduledLinqRoute }
         : {}),
       userEnvKeys:
         hosted?.userEnvKeys

@@ -149,10 +149,6 @@ const DISALLOWED_RUNNER_SECRET_KEYS = new Set([
   "TELEGRAM_API_BASE_URL",
   "TELEGRAM_BOT_TOKEN",
   "TELEGRAM_FILE_BASE_URL",
-  "WHATSAPP_ACCESS_TOKEN",
-  "WHATSAPP_API_BASE_URL",
-  "WHATSAPP_GRAPH_VERSION",
-  "WHATSAPP_PHONE_NUMBER_ID",
   "VAULT",
 ]);
 
@@ -166,6 +162,9 @@ const DISALLOWED_RUNNER_SECRET_PREFIXES = [
   "HOSTED_EXECUTION_",
   "HOSTED_WEB_CALLBACK_SIGNING_",
   "NPM_CONFIG_",
+  // Retired provider configuration remains permanently non-forwardable so a
+  // stale deployed allowlist cannot expose old credentials to the runner.
+  "WHATSAPP_",
   "npm_config_",
   "WRANGLER_",
 ];
@@ -233,7 +232,6 @@ const CONTAINER_REWRITABLE_RUNNER_URL_KEYS = new Set([
   "LINQ_API_BASE_URL",
   "TELEGRAM_API_BASE_URL",
   "TELEGRAM_FILE_BASE_URL",
-  "WHATSAPP_API_BASE_URL",
 ]);
 
 export function rewriteHostedRunnerLoopbackUrlForContainer(

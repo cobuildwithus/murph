@@ -5,7 +5,6 @@ import {
 
 export interface AssistantDeliveryRouteFields {
   channel?: string | null
-  currentRouteSnapshot?: boolean | null
   deliveryTarget?: string | null
   identityId?: string | null
   participantId?: string | null
@@ -34,7 +33,6 @@ export interface AssistantAutomationRouteDeliverabilityIssue {
 
 export interface NormalizedAssistantDeliveryRouteFields {
   channel: string | null
-  currentRouteSnapshot?: boolean | null
   deliveryTarget: string | null
   identityId: string | null
   participantId: string | null
@@ -123,9 +121,6 @@ export function resolveAssistantDeliveryRouteWithCurrentRoute(
     channel: normalizeAssistantRouteString(input.channel)
       ?? normalizedCurrentRoute?.channel
       ?? null,
-    ...(input.currentRouteSnapshot === true
-      ? { currentRouteSnapshot: true }
-      : {}),
     deliveryTarget: normalizeAssistantRouteString(input.deliveryTarget),
     identityId: normalizeAssistantRouteString(input.identityId),
     participantId: normalizeAssistantRouteString(input.participantId),

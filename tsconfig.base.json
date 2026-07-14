@@ -378,9 +378,6 @@
       "@murphai/operator-config/message-formatting": [
         "./packages/operator-config/src/message-formatting.ts"
       ],
-      "@murphai/operator-config/whatsapp-runtime": [
-        "./packages/operator-config/src/whatsapp-runtime.ts"
-      ],
       "@murphai/operator-config/device-daemon": [
         "./packages/operator-config/src/device-daemon.ts"
       ],
