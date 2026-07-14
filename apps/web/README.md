@@ -786,12 +786,14 @@ GitHub Actions; `HOSTED_WEB_CONTRACT_MIGRATION_DRAIN_SECONDS` defaults to
 contract migration succeeds, the workflow also completes the group-join
 confirmation transition: it derives a rollout credential in memory from the
 existing Vercel credential, upserts that sensitive value and the production
-producer flag, re-proves the alias, redeploys the exact proven commit, verifies
-the new production deployment, and drains eligible rows through a private
-server endpoint until pagination completes. It refreshes the credential by the
-same exact-deployment path if the Vercel credential later changes. No secret or
-group content is printed or sent to a model, and alias drift, provider failure,
-invalid responses, or incomplete pagination fail closed. The workflow
+producer flag, re-proves the alias, builds the exact proven commit as a staged
+production deployment with domain assignment disabled, and monitors production
+while it builds. If production moves, the old workflow performs no promotion or
+drain. Otherwise it promotes once, verifies the exact enabled deployment, and
+drains eligible rows through a private server endpoint until pagination
+completes. No secret or group content is printed or sent to a model, and alias
+drift, provider failure, invalid responses, or incomplete pagination fail
+closed. The workflow
 does not use GitHub Actions concurrency for this lane; the final alias check and
 the contract migration advisory lock make stale or duplicate runs skip safely
 without letting stale events replace valid pending runs. After those gates, it calls
@@ -816,7 +818,13 @@ use the neutral confirmation. The
 removes both only after the consumer-capable production deployment is live and
 the guarded prior-function drain and alias proof have completed. That same
 workflow then owns producer enablement, exact redeployment, and the bounded
-rollout drain; it is not an operator-only prose step.
+rollout drain; it is not an operator-only prose step. This control path is
+temporary. Hosted-web release ownership deletes its workflow step, provider
+script, internal route, rollout bearer, and rollout-only tests in the first
+post-transition change after the enabled consumer is current, both compatibility
+bridges are gone, prior functions are drained, and one full eligibility scan
+returns a null cursor. Steady-state joins and deferred retries then remain on the
+membership-owned materializer plus the existing authenticated ops drain.
 The first assistant-personality causal rollout follows that same split. Apply
 the nullable sequence expansion and deploy the sequence-producing web build
 with personality writes gated off. The automatic post-deploy contract lane

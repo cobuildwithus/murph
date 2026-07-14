@@ -99,12 +99,15 @@ Last verified: 2026-07-13
   After contract cleanup succeeds, the same workflow invokes the checked-in
   group-join-confirmation rollout helper. That helper re-proves the exact
   production deployment, updates the project-bound sensitive rollout bearer
-  and producer flag through Vercel, re-proves the alias before redeploying the
-  same commit, waits for that exact production deployment, and drains the
-  authenticated server-side cursor route to completion. Focused hosted-web
-  coverage proves route authorization, enablement probing, configuration
-  refresh, alias drift, exact redeploy, provider response parsing, and drain
-  pagination without calling live Vercel or production Postgres.
+  and producer flag through Vercel, re-proves the alias before staging the same
+  production commit without domain assignment, abandons stale work on alias
+  drift, promotes once only while the original deployment remains current, and
+  drains the authenticated server-side cursor route to completion. Focused
+  hosted-web coverage proves route authorization, enablement probing,
+  configuration update, drift during the staged build, absence of stale
+  promotion/drain, exact promotion, provider response parsing, pagination, and
+  the documented one-time retirement condition without calling live Vercel or
+  production Postgres.
   After contract cleanup applies, the rollback floor is the first deployed Vercel
   commit that no longer reads or writes the dropped schema shape; rollback below
   that floor requires DB restore/re-expand or a forward deploy. Cloudflare

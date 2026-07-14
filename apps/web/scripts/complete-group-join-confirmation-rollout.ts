@@ -37,6 +37,14 @@ const DEPLOYMENT_WAIT_MS = 15 * 60_000;
 const DRAIN_LIMIT = 25;
 const DRAIN_MAX_PAGES = 10_000;
 
+const EMPTY_ROLLOUT_RESULT: HostedGroupJoinConfirmationRolloutResult = {
+  appended: 0,
+  deferred: 0,
+  redeployed: false,
+  scanned: 0,
+  terminalSkipped: 0,
+};
+
 export async function completeHostedGroupJoinConfirmationRollout(
   environment: HostedGroupJoinConfirmationRolloutEnvironment =
     readProcessRolloutEnvironment(),
@@ -84,18 +92,45 @@ export async function completeHostedGroupJoinConfirmationRollout(
     }
     assertExpectedProduction(current, expectedSha);
 
-    const redeploymentId = await createProductionRedeployment({
+    const redeploymentId = await createStagedProductionRedeployment({
       deployment: current,
       environment,
       fetchImpl,
     });
-    await waitForProductionRedeployment({
+    const staged = await waitForStagedProductionRedeployment({
       environment,
-      expectedSha,
       fetchImpl,
+      originalProductionId: current.id,
       redeploymentId,
       sleep,
     });
+    if (!staged) {
+      return EMPTY_ROLLOUT_RESULT;
+    }
+    const beforePromotion = await resolveVercelProductionDeployment(
+      environment,
+      fetchImpl,
+    );
+    if (beforePromotion.id !== current.id) {
+      return EMPTY_ROLLOUT_RESULT;
+    }
+    assertExpectedProduction(beforePromotion, expectedSha);
+    await promoteStagedProductionRedeployment({
+      environment,
+      fetchImpl,
+      redeploymentId,
+    });
+    const promoted = await waitForProductionPromotion({
+      environment,
+      expectedSha,
+      fetchImpl,
+      originalProductionId: current.id,
+      redeploymentId,
+      sleep,
+    });
+    if (!promoted) {
+      return EMPTY_ROLLOUT_RESULT;
+    }
     const enabledStatus = await readRolloutStatus(
       environment,
       fetchImpl,
@@ -145,7 +180,7 @@ async function upsertProductionEnvironmentVariable(input: {
   });
 }
 
-async function createProductionRedeployment(input: {
+async function createStagedProductionRedeployment(input: {
   deployment: VercelProductionDeployment;
   environment: HostedGroupJoinConfirmationRolloutEnvironment;
   fetchImpl: FetchLike;
@@ -155,6 +190,7 @@ async function createProductionRedeployment(input: {
   appendTeamId(url, input.environment.HOSTED_WEB_VERCEL_TEAM_ID);
   const response = await requestJson(url.toString(), {
     body: JSON.stringify({
+      autoAssignCustomDomains: false,
       deploymentId: input.deployment.id,
       name: input.deployment.name,
       target: "production",
@@ -171,13 +207,13 @@ async function createProductionRedeployment(input: {
   return deploymentId;
 }
 
-async function waitForProductionRedeployment(input: {
+async function waitForStagedProductionRedeployment(input: {
   environment: HostedGroupJoinConfirmationRolloutEnvironment;
-  expectedSha: string;
   fetchImpl: FetchLike;
+  originalProductionId: string;
   redeploymentId: string;
   sleep: (milliseconds: number) => Promise<void>;
-}): Promise<VercelProductionDeployment> {
+}): Promise<boolean> {
   const expiresAt = Date.now() + DEPLOYMENT_WAIT_MS;
   while (Date.now() < expiresAt) {
     const deployment = await readDeployment(input.redeploymentId, input.environment, input.fetchImpl);
@@ -186,19 +222,67 @@ async function waitForProductionRedeployment(input: {
     if (readyState === "ERROR" || readyState === "CANCELED") {
       throw new Error(`Vercel rollout redeploy ended in ${readyState}.`);
     }
+    const production = await resolveVercelProductionDeployment(
+      input.environment,
+      input.fetchImpl,
+    );
+    if (production.id !== input.originalProductionId) {
+      return false;
+    }
     if (readyState === "READY") {
-      const production = await resolveVercelProductionDeployment(
-        input.environment,
-        input.fetchImpl,
-      );
-      if (production.id === input.redeploymentId) {
-        assertExpectedProduction(production, input.expectedSha);
-        return production;
-      }
+      return true;
     }
     await input.sleep(DEPLOYMENT_POLL_MS);
   }
   throw new Error(`Vercel rollout redeploy timed out after ${DEPLOYMENT_WAIT_MS}ms.`);
+}
+
+async function promoteStagedProductionRedeployment(input: {
+  environment: HostedGroupJoinConfirmationRolloutEnvironment;
+  fetchImpl: FetchLike;
+  redeploymentId: string;
+}): Promise<void> {
+  const projectId = readRequiredEnvironment(
+    input.environment,
+    "HOSTED_WEB_VERCEL_PROJECT_ID",
+  );
+  const url = new URL(
+    `https://api.vercel.com/v10/projects/${encodeURIComponent(projectId)}/promote/${encodeURIComponent(input.redeploymentId)}`,
+  );
+  appendTeamId(url, input.environment.HOSTED_WEB_VERCEL_TEAM_ID);
+  await requestEmpty(url.toString(), {
+    body: "{}",
+    environment: input.environment,
+    fetchImpl: input.fetchImpl,
+    label: "Vercel staged production promotion",
+    method: "POST",
+  });
+}
+
+async function waitForProductionPromotion(input: {
+  environment: HostedGroupJoinConfirmationRolloutEnvironment;
+  expectedSha: string;
+  fetchImpl: FetchLike;
+  originalProductionId: string;
+  redeploymentId: string;
+  sleep: (milliseconds: number) => Promise<void>;
+}): Promise<boolean> {
+  const expiresAt = Date.now() + DEPLOYMENT_WAIT_MS;
+  while (Date.now() < expiresAt) {
+    const production = await resolveVercelProductionDeployment(
+      input.environment,
+      input.fetchImpl,
+    );
+    if (production.id === input.redeploymentId) {
+      assertExpectedProduction(production, input.expectedSha);
+      return true;
+    }
+    if (production.id !== input.originalProductionId) {
+      return false;
+    }
+    await input.sleep(DEPLOYMENT_POLL_MS);
+  }
+  throw new Error(`Vercel rollout promotion timed out after ${DEPLOYMENT_WAIT_MS}ms.`);
 }
 
 async function readDeployment(
@@ -325,6 +409,37 @@ async function requestJson(
     label: input.label,
     method: input.method,
   });
+}
+
+async function requestEmpty(
+  url: string,
+  input: {
+    body?: string;
+    environment: HostedGroupJoinConfirmationRolloutEnvironment;
+    fetchImpl: FetchLike;
+    label: string;
+    method: "POST";
+  },
+): Promise<void> {
+  const headers = new Headers({
+    accept: "application/json",
+    authorization: `Bearer ${readRequiredEnvironment(
+      input.environment,
+      "HOSTED_WEB_VERCEL_TOKEN",
+    )}`,
+  });
+  if (input.body !== undefined) {
+    headers.set("content-type", "application/json");
+  }
+  const response = await input.fetchImpl(url, {
+    ...(input.body === undefined ? {} : { body: input.body }),
+    headers,
+    method: input.method,
+    signal: AbortSignal.timeout(REQUEST_TIMEOUT_MS),
+  });
+  if (!response.ok) {
+    throw new Error(`${input.label} failed with HTTP ${response.status}.`);
+  }
 }
 
 async function requestPublicJson(

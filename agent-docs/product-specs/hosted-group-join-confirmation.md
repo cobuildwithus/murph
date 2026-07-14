@@ -197,18 +197,34 @@ recorded eligibility without also running the materializer:
 3. After contract migration succeeds, the same repository workflow derives a
    rollout credential in memory from its existing Vercel credential, upserts
    the producer flag plus the sensitive credential in Vercel production, and
-   re-proves the production alias before redeploying that exact commit.
-4. The workflow waits for that redeploy to become the production alias,
-   verifies both enablement and credential authority, then calls the private
-   internal drain in bounded pages until `nextCursor` is `null`. If the
-   credential changes later, the same status proof refreshes it and redeploys
-   the exact proven production commit before draining. Rows that still lack
-   crypto roots or a safe private route remain eligible for a later activation,
-   private inbound, join retry, or another workflow drain.
+   re-proves the production alias before building that exact commit as a staged
+   production deployment with automatic domain assignment disabled.
+4. While the staged build runs and immediately before promotion, the workflow
+   requires production to remain on the original proven deployment. If a newer
+   deployment becomes current, the old workflow leaves the staged build
+   unpromoted and performs no rollout drain. Otherwise it requests one staged
+   promotion, waits for that exact commit to become current, verifies both
+   enablement and credential authority, then calls the private internal drain
+   in bounded pages until `nextCursor` is `null`. Rows that still lack crypto
+   roots or a safe private route remain eligible for a later activation,
+   private inbound, or join retry.
 
-Environment update, alias drift, redeploy, authority, response-validation, and
-incomplete-pagination failures all stop the workflow. Secret values are never
-downloaded or printed, and group content never crosses this control path.
+Environment update, alias drift, staged build, promotion, authority,
+response-validation, and incomplete-pagination failures all stop the workflow.
+Secret values are never downloaded or printed, and group content never crosses
+this control path.
+
+This is a one-time compatibility transition, not a permanent deployment owner.
+Hosted-web release ownership must delete the feature-specific workflow step,
+provider orchestration script, internal route, rollout bearer configuration,
+and rollout-only tests and documentation in the first post-transition change
+after all of these facts are proven together: the producer-enabled consumer is
+current, `20260711230000_drop_group_join_compatibility_bridges` has applied,
+prior production functions have drained, and one complete eligibility scan has
+reached `nextCursor: null`. The ordinary producer flag remains enabled; current
+joins and deferred recovery continue through the membership-owned materializer
+and the existing authenticated ops drain remains available for deliberate
+maintenance.
 
 The first consumer-capable commit is the rollback floor while the producer is
 enabled. To roll back below it, disable the producer and redeploy, wait the
