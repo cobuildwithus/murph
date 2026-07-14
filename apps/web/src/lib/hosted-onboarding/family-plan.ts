@@ -999,20 +999,26 @@ export async function writeHostedAccountGroupStripeBillingTx(input: {
     && input.currentPeriodEnd
     && input.currentPeriodStart.getTime() < input.currentPeriodEnd.getTime()
   ) {
-    await input.tx.hostedAccountGroupBillingPeriod.upsert({
-      create: {
+    const projectedPeriod = {
         billingPlanCode: projectedBillingPlanCode,
         groupId: input.groupId,
         lastStripeEventCreatedAt: input.stripeEventCreatedAt ?? null,
         limitUsdMicros: HOSTED_FAMILY_SPONSORED_USAGE_ALLOWANCE_USD_MICROS,
         periodEnd: input.currentPeriodEnd,
         periodStart: input.currentPeriodStart,
-      },
-      update: {
-        billingPlanCode: projectedBillingPlanCode,
-        lastStripeEventCreatedAt: input.stripeEventCreatedAt ?? null,
-        limitUsdMicros: HOSTED_FAMILY_SPONSORED_USAGE_ALLOWANCE_USD_MICROS,
-        periodEnd: input.currentPeriodEnd,
+    };
+    await input.tx.hostedAccountGroupBillingPeriod.createMany({
+      data: projectedPeriod,
+      skipDuplicates: true,
+    });
+    const storedPeriod = await input.tx.hostedAccountGroupBillingPeriod.findUniqueOrThrow({
+      select: {
+        billingPlanCode: true,
+        groupId: true,
+        lastStripeEventCreatedAt: true,
+        limitUsdMicros: true,
+        periodEnd: true,
+        periodStart: true,
       },
       where: {
         groupId_periodStart: {
@@ -1021,6 +1027,15 @@ export async function writeHostedAccountGroupStripeBillingTx(input: {
         },
       },
     });
+    if (
+      storedPeriod.billingPlanCode !== projectedPeriod.billingPlanCode
+      || storedPeriod.groupId !== projectedPeriod.groupId
+      || storedPeriod.limitUsdMicros !== projectedPeriod.limitUsdMicros
+      || storedPeriod.periodEnd.getTime() !== projectedPeriod.periodEnd.getTime()
+      || storedPeriod.periodStart.getTime() !== projectedPeriod.periodStart.getTime()
+    ) {
+      throw new Error("Hosted Family billing period conflicts with its immutable history.");
+    }
   }
 
   await input.tx.hostedAccountGroup.update({

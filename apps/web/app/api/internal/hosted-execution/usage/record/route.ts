@@ -2,6 +2,10 @@ import {
   recordHostedAiUsageRecordsAndSendLimitNotices,
 } from "@/src/lib/hosted-execution/usage";
 import {
+  isHostedUsageCausalAttributionEnabled,
+  verifyHostedRuntimeUsageAttribution,
+} from "@/src/lib/hosted-execution/usage-attribution-proof";
+import {
   requireHostedCloudflareCallbackRequest,
 } from "@/src/lib/hosted-execution/cloudflare-callback-auth";
 import { readRawBodyBuffer } from "@/src/lib/http";
@@ -21,17 +25,25 @@ export const POST = withJsonError(async (request: Request) => {
   const body = parseHostedRuntimeUsageRecordRequest(
     payloadText.trim() ? JSON.parse(payloadText) : {},
   );
+  if (!body.usageAttribution && isHostedUsageCausalAttributionEnabled()) {
+    throw new TypeError("Hosted runtime usage attribution is required.");
+  }
 
   const usage = body.usage;
-  if (!body.usageAttribution) {
-    throw new TypeError("Hosted usage recording requires its admission attribution.");
-  }
   const result = await recordHostedAiUsageRecordsAndSendLimitNotices({
     accountAllowance: true,
     ...(body.noticeDeliveryTarget === undefined
       ? {}
       : { noticeDeliveryTarget: body.noticeDeliveryTarget }),
-    usageAttribution: body.usageAttribution,
+    // Before cutover, already-running pre-attribution containers can omit this
+    // field and use legacy accounting. After cutover the guard above rejects
+    // omission; every supplied causal attribution is verified here.
+    usageAttribution: body.usageAttribution
+      ? verifyHostedRuntimeUsageAttribution({
+          attribution: body.usageAttribution,
+          userId,
+        })
+      : null,
     trustedUserId: userId,
     usage: [usage],
   });

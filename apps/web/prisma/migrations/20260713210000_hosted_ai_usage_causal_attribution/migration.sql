@@ -73,7 +73,17 @@ WHERE "allowance_accounted_at" IS NULL
   AND NULLIF(
     BTRIM("allowance_pricing_snapshot_json" ->> 'familyGroupId'),
     ''
-  ) IS NOT NULL;
+  ) IS NOT NULL
+  AND EXISTS (
+    SELECT 1
+    FROM "hosted_account_group_billing_period" AS billing_period
+    WHERE billing_period."group_id" = NULLIF(
+      BTRIM("hosted_ai_usage"."allowance_pricing_snapshot_json" ->> 'familyGroupId'),
+      ''
+    )
+      AND billing_period."period_start" <= "hosted_ai_usage"."occurred_at"
+      AND billing_period."period_end" > "hosted_ai_usage"."occurred_at"
+  );
 
 CREATE INDEX CONCURRENTLY "hosted_ai_usage_family_repair_idx"
   ON "hosted_ai_usage"(

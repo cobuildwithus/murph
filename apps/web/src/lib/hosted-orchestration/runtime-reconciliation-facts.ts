@@ -36,6 +36,10 @@ import {
 import {
   sendHostedTrialConversionNoticeToLinqChat,
 } from "../hosted-execution/usage-limit-notice";
+import {
+  isHostedUsageCausalAttributionEnabled,
+  signHostedRuntimeUsageAttribution,
+} from "../hosted-execution/usage-attribution-proof";
 import { readActiveHostedMemberAccess } from "../hosted-onboarding/member-access";
 import {
   readHostedMemberCoreState,
@@ -275,7 +279,15 @@ export async function readHostedRuntimeReconciliationFacts(
     const facts = parseHostedRuntimeReconciliationFacts({
       blocked: null,
       mailboxLag,
-      usageAttribution: gate.usageAttribution,
+      ...(isHostedUsageCausalAttributionEnabled()
+        ? {
+            usageAttribution: signHostedRuntimeUsageAttribution({
+              attribution: gate.usageAttribution,
+              userId: input.userId,
+            }),
+            usageAttributionMailboxLag: mailboxLag,
+          }
+        : {}),
       workspace: projectedWorkspace,
     });
     emitHostedRuntimeReconciliationFacts({
@@ -290,7 +302,6 @@ export async function readHostedRuntimeReconciliationFacts(
   const facts = parseHostedRuntimeReconciliationFacts({
     blocked: null,
     mailboxLag,
-    usageAttribution: null,
     workspace: projectedWorkspace,
   });
   emitHostedRuntimeReconciliationFacts({
@@ -314,7 +325,6 @@ function buildHostedRuntimeBlockedFacts(input: {
       retryAt: input.retryAt,
     },
     mailboxLag: input.mailboxLag,
-    usageAttribution: null,
     workspace: input.workspace,
   });
 }

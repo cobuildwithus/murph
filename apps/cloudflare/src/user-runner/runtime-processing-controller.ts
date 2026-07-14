@@ -97,6 +97,15 @@ function toRuntimeInvocationInput(input: RuntimeProcessingInput): RuntimeInvocat
     ...(input.usageAttribution === undefined
       ? {}
       : { usageAttribution: input.usageAttribution }),
+    ...(input.usageAttributionMailboxLag === undefined
+      ? {}
+      : {
+          usageAttributionMaxSeqByLane:
+            input.usageAttributionMailboxLag?.map(({ lane, maxSeq }) => ({
+              lane,
+              maxSeq,
+            })) ?? null,
+        }),
     userId: input.userId,
   };
 }
@@ -271,6 +280,17 @@ export class RuntimeProcessingController {
           ? { orchestration: inputAtActiveWakeStart.orchestration }
           : {}),
         processingMode: activeFence.processingMode,
+        ...(inputAtActiveWakeStart.usageAttribution === undefined
+          ? {}
+          : { usageAttribution: inputAtActiveWakeStart.usageAttribution }),
+        ...(inputAtActiveWakeStart.usageAttributionMailboxLag === undefined
+          ? {}
+          : {
+              usageAttributionMaxSeqByLane:
+                inputAtActiveWakeStart.usageAttributionMailboxLag?.map(
+                  ({ lane, maxSeq }) => ({ lane, maxSeq }),
+                ) ?? null,
+            }),
         userId: record.userId,
       },
       commandBudget: input.commandBudget,

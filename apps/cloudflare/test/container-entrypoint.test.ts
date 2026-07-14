@@ -848,6 +848,14 @@ describe("startHostedContainerEntrypoint", () => {
           activeWakeStartedAtEpochMs: 1_777_009_999_950,
           cloudflareRouteReceivedAtEpochMs: 1_777_009_999_900,
         },
+        usageAttribution: {
+          groupId: "family_pending_wake",
+          kind: "family",
+        },
+        usageAttributionMaxSeqByLane: [{
+          lane: "conversation",
+          maxSeq: "10",
+        }],
         userId: "u1",
       }),
       headers: {
@@ -857,6 +865,22 @@ describe("startHostedContainerEntrypoint", () => {
     });
     nowEpochMs = secondPendingWakeAcceptedAtEpochMs;
     const secondPendingWake = await fetch(`http://127.0.0.1:${address.port}/internal/runtime-wake`, {
+      body: JSON.stringify({
+        attemptId: "attempt_evt_runtime_wake_ready",
+        leaseGeneration: "1",
+        usageAttribution: {
+          groupId: "family_latest_pending_wake",
+          kind: "family",
+        },
+        usageAttributionMaxSeqByLane: [{
+          lane: "conversation",
+          maxSeq: "11",
+        }],
+        userId: "u1",
+      }),
+      headers: {
+        "content-type": "application/json; charset=utf-8",
+      },
       method: "POST",
     });
     nowEpochMs = runtimeReadyAtEpochMs;
@@ -895,6 +919,14 @@ describe("startHostedContainerEntrypoint", () => {
           activeWakeStartedAtEpochMs: 1_777_009_999_950,
           cloudflareRouteReceivedAtEpochMs: 1_777_009_999_900,
         },
+        usageAttribution: {
+          groupId: "family_pending_wake",
+          kind: "family",
+        },
+        usageAttributionMaxSeqByLane: [{
+          lane: "conversation",
+          maxSeq: "10",
+        }],
       },
       { notifiedAtEpochMs: firstWakeAcceptedAtEpochMs },
       { notifiedAtEpochMs: secondWakeAcceptedAtEpochMs },

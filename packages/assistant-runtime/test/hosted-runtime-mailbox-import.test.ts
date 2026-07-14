@@ -31,6 +31,33 @@ const TEST_NOW = "2026-04-26T00:00:00.000Z";
 const TEST_USER_ID = "member_synthetic_import";
 
 describe("hosted mailbox import loop", () => {
+  test("bounds every requested lane to the causal admission high-water", async () => {
+    const state = createEmptyHostedMailboxImportState();
+    const { fetchRequests, mailboxPort } = createMailboxPort({ items: [] });
+
+    await fetchAndProcessHostedMailboxPrefix({
+      expectedUserId: TEST_USER_ID,
+      async importItem() {
+        return { status: "imported" };
+      },
+      limitPerLane: 10,
+      mailboxPort,
+      requestId: "request_bounded_admission",
+      state,
+      throughSeqByLane: { conversation: "10" },
+    });
+
+    assert.deepEqual(fetchRequests, [{
+      cursorMode: "imported_seq",
+      lanes: [
+        { importedSeq: "0", lane: "system", throughSeq: "0" },
+        { importedSeq: "0", lane: "conversation", throughSeq: "10" },
+      ],
+      limitPerLane: 10,
+      requestId: "request_bounded_admission",
+    }]);
+  });
+
   test("reuses one mixed prefetch for isolated conversation and system phases", async () => {
     const state = createEmptyHostedMailboxImportState();
     const conversation = createMailboxItem({

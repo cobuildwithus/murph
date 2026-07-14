@@ -96,6 +96,7 @@ export function parseHostedRuntimeReconciliationFacts(
     "blocked",
     "mailboxLag",
     "usageAttribution",
+    "usageAttributionMailboxLag",
     "workspace",
   ]);
 
@@ -107,10 +108,23 @@ export function parseHostedRuntimeReconciliationFacts(
       record.mailboxLag,
       "Hosted runtime reconciliation facts mailboxLag",
     ),
-    usageAttribution: record.usageAttribution === null
-      || record.usageAttribution === undefined
-      ? null
-      : parseHostedRuntimeUsageAttribution(record.usageAttribution),
+    ...(record.usageAttribution === undefined
+      ? {}
+      : {
+          usageAttribution: record.usageAttribution === null
+            ? null
+            : parseHostedRuntimeUsageAttribution(record.usageAttribution),
+        }),
+    ...(record.usageAttributionMailboxLag === undefined
+      ? {}
+      : {
+          usageAttributionMailboxLag: record.usageAttributionMailboxLag === null
+            ? null
+            : parseHostedRuntimeMailboxLaneLagArray(
+                record.usageAttributionMailboxLag,
+                "Hosted runtime reconciliation facts usage attribution mailboxLag",
+              ),
+        }),
     workspace: record.workspace === null
       ? null
       : parseHostedRuntimeReconciliationFactsWorkspace(record.workspace),
@@ -178,6 +192,7 @@ export function parseHostedRuntimeEnsureProcessingRequest(
     "orchestrationAttemptId",
     "processingMode",
     "usageAttribution",
+    "usageAttributionMailboxLag",
   ]);
 
   return {
@@ -200,6 +215,16 @@ export function parseHostedRuntimeEnsureProcessingRequest(
           usageAttribution: record.usageAttribution === null
             ? null
             : parseHostedRuntimeUsageAttribution(record.usageAttribution),
+        }),
+    ...(record.usageAttributionMailboxLag === undefined
+      ? {}
+      : {
+          usageAttributionMailboxLag: record.usageAttributionMailboxLag === null
+            ? null
+            : parseHostedRuntimeMailboxLaneLagArray(
+                record.usageAttributionMailboxLag,
+                "Hosted runtime ensure-processing request usage attribution mailboxLag",
+              ),
         }),
   };
 }

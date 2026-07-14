@@ -762,6 +762,12 @@ describe("hosted Prisma baseline migration", () => {
       '"allowance_pricing_snapshot_json" ->> \'familyGroupId\'',
     );
     expect(hostedAiUsageCausalAttributionMigrationSql).toContain(
+      'FROM "hosted_account_group_billing_period" AS billing_period',
+    );
+    expect(hostedAiUsageCausalAttributionMigrationSql).toContain(
+      'billing_period."period_start" <= "hosted_ai_usage"."occurred_at"',
+    );
+    expect(hostedAiUsageCausalAttributionMigrationSql).toContain(
       'CREATE INDEX CONCURRENTLY "hosted_ai_usage_family_repair_idx"',
     );
     expect(hostedGroupJoinConfirmationEligibilityMigrationSql).toContain(

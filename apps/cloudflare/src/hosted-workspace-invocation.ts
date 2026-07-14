@@ -21,8 +21,10 @@ import {
 } from "@murphai/hosted-execution";
 import type {
   HostedRuntimeLatencyPhaseBreakdown,
+  HostedMailboxLaneHighWater,
   HostedRuntimeOrchestrationLatencyDiagnostics,
   HostedRuntimeLatencyTraceStagedMilestones,
+  HostedRuntimeUsageAttribution,
 } from "@murphai/hosted-execution/runtime-control";
 
 import {
@@ -71,6 +73,8 @@ type HostedWorkspaceInvocationRuntimeWakeInput =
   | {
       notifiedAtEpochMs?: number | null;
       orchestration?: HostedRuntimeOrchestrationLatencyDiagnostics | null;
+      usageAttribution?: HostedRuntimeUsageAttribution | null;
+      usageAttributionMaxSeqByLane?: HostedMailboxLaneHighWater[] | null;
     };
 
 export interface HostedWorkspaceInvocationOptions {

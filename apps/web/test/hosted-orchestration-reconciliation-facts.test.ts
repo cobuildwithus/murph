@@ -566,6 +566,68 @@ describe("hosted orchestration reconciliation facts", () => {
     });
   });
 
+  it("omits causal attribution until the consumer-first rollout gate is enabled", async () => {
+    mocks.readHostedWorkspace.mockResolvedValue(buildWorkspaceRecord({
+      redactedStatusJson: {
+        conversationImportedSeq: "2",
+        systemImportedSeq: "0",
+      },
+    }));
+    mocks.readHostedMailboxMaxSeqByLane.mockResolvedValue([
+      { lane: "conversation", maxSeq: "3" },
+      { lane: "system", maxSeq: "0" },
+    ]);
+    mocks.resolveHostedRuntimeAiUsageGate.mockResolvedValue({
+      status: "allowed",
+      usageAttribution: {
+        groupId: "hbag_rollout_family",
+        kind: "family",
+      },
+    });
+
+    const response = await reconciliationRoute.GET(
+      requestForFacts(),
+      routeContext(),
+    );
+
+    await expect(response.json()).resolves.not.toHaveProperty("usageAttribution");
+  });
+
+  it("publishes causal attribution after the consumer-first rollout gate is enabled", async () => {
+    vi.stubEnv("HOSTED_USAGE_CAUSAL_ATTRIBUTION_ENABLED", "1");
+    vi.stubEnv("HOSTED_USAGE_ATTRIBUTION_SIGNING_SECRET", "test-attribution-signing-secret");
+    mocks.readHostedWorkspace.mockResolvedValue(buildWorkspaceRecord({
+      redactedStatusJson: {
+        conversationImportedSeq: "2",
+        systemImportedSeq: "0",
+      },
+    }));
+    mocks.readHostedMailboxMaxSeqByLane.mockResolvedValue([
+      { lane: "conversation", maxSeq: "3" },
+      { lane: "system", maxSeq: "0" },
+    ]);
+    const usageAttribution = {
+      groupId: "hbag_rollout_family",
+      kind: "family",
+    } as const;
+    mocks.resolveHostedRuntimeAiUsageGate.mockResolvedValue({
+      status: "allowed",
+      usageAttribution,
+    });
+
+    const response = await reconciliationRoute.GET(
+      requestForFacts(),
+      routeContext(),
+    );
+
+    await expect(response.json()).resolves.toMatchObject({
+      usageAttribution: {
+        ...usageAttribution,
+        proof: expect.any(String),
+      },
+    });
+  });
+
   it("keeps a future inbox media retention wake when assistant work is AI-denied", async () => {
     const retentionWakeAt = "2026-05-20T12:14:00.000Z";
     mocks.readHostedWorkspace.mockResolvedValue(buildWorkspaceRecord({
@@ -1281,7 +1343,6 @@ describe("hosted orchestration reconciliation facts", () => {
         retryAt: null,
       },
       mailboxLag: [],
-      usageAttribution: null,
       workspace: {
         inboxMediaRetentionWakeAt: null,
         nextWakeAt: null,

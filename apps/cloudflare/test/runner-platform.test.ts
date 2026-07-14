@@ -4322,12 +4322,16 @@ describe("buildHostedExecutionRuntimePlatform", () => {
       groupId: "hbag_family",
       kind: "family",
     } as const;
+    const acceptedInputUsageAttribution = {
+      groupId: "hbag_family_active_wake",
+      kind: "family",
+    } as const;
     const fetchMock = vi.fn(async (input: RequestInfo | URL, init?: RequestInit) => {
       const request = input instanceof Request ? input : new Request(input, init);
       await expect(request.clone().json()).resolves.toEqual({
         noticeDeliveryTarget,
         usage: usageRecord,
-        usageAttribution,
+        usageAttribution: acceptedInputUsageAttribution,
       });
 
       return new Response(JSON.stringify({
@@ -4352,7 +4356,11 @@ describe("buildHostedExecutionRuntimePlatform", () => {
     });
 
     await expect(
-      platform.usageRecordPort!.recordUsage(usageRecord, noticeDeliveryTarget),
+      platform.usageRecordPort!.recordUsage(
+        usageRecord,
+        noticeDeliveryTarget,
+        acceptedInputUsageAttribution,
+      ),
     ).resolves.toEqual({
       recorded: true,
       usageId: "turn_usage.attempt-1",
@@ -4366,6 +4374,40 @@ describe("buildHostedExecutionRuntimePlatform", () => {
     expect(headers.get("content-type")).toBe("application/json");
     expect(headers.get("x-hosted-execution-user-id")).toBe("member_123");
     expect(headers.get("x-hosted-execution-signature")).toMatch(/^[A-Za-z0-9\-_]+$/u);
+  });
+
+  it("omits an absent causal proof for legacy hosted-web callback compatibility", async () => {
+    const usageRecord = createAssistantUsageRecord();
+    const fetchMock = vi.fn(async (input: RequestInfo | URL, init?: RequestInit) => {
+      const request = input instanceof Request ? input : new Request(input, init);
+      await expect(request.clone().json()).resolves.toEqual({
+        usage: usageRecord,
+      });
+      return new Response(JSON.stringify({
+        recorded: true,
+        usageId: usageRecord.usageId,
+      }), {
+        headers: { "content-type": "application/json; charset=utf-8" },
+        status: 200,
+      });
+    });
+    const environment = readHostedExecutionEnvironment(createHostedExecutionTestEnv({
+      HOSTED_WEB_BASE_URL: "https://web.example.test",
+    }));
+    const platform = buildHostedExecutionRuntimePlatform({
+      boundUserId: "member_123",
+      fetchImpl: fetchMock as typeof fetch,
+      usageAttribution: {
+        groupId: "hbag_static_fallback",
+        kind: "family",
+      },
+      webCallbackSigning: environment.webCallbackSigning,
+      webControlBaseUrl: "https://web.example.test",
+    });
+
+    await platform.usageRecordPort!.recordUsage(usageRecord, undefined, null);
+
+    expect(fetchMock).toHaveBeenCalledOnce();
   });
 
   it("preserves omitted and explicit-null usage notice targets", async () => {

@@ -1,13 +1,10 @@
 import type {
+  HostedRuntimeEnsureProcessingRequest,
   HostedRuntimeEnsureProcessingResponse,
 } from "../index.js";
-import type {
-  HostedRuntimeUsageAttribution,
-} from "@murphai/hosted-execution/runtime-control";
 import {
   parseHostedRuntimeEnsureProcessingRequest,
   parseHostedRuntimeEnsureProcessingResponse,
-  parseHostedRuntimeUsageAttribution,
 } from "@murphai/hosted-execution/parsers";
 import {
   HOSTED_RUNTIME_ENSURE_PROCESSING_ACTIVITY_STARTED_AT_MS_HEADER,
@@ -24,7 +21,8 @@ import {
 export interface EnsureRuntimeProcessingInput {
   orchestrationAttemptId: string;
   processingMode?: "default" | "inbox_media_retention" | null;
-  usageAttribution?: HostedRuntimeUsageAttribution | null;
+  usageAttribution?: HostedRuntimeEnsureProcessingRequest["usageAttribution"];
+  usageAttributionMailboxLag?: HostedRuntimeEnsureProcessingRequest["usageAttributionMailboxLag"];
   userId: string;
 }
 
@@ -44,6 +42,12 @@ export async function ensureRuntimeProcessing(
     ...(parsedRequest.usageAttribution === undefined
       ? {}
       : { usageAttribution: parsedRequest.usageAttribution }),
+    ...(parsedRequest.usageAttributionMailboxLag === undefined
+      ? {}
+      : {
+          usageAttributionMailboxLag:
+            parsedRequest.usageAttributionMailboxLag,
+        }),
   });
 
   return observeHostedTemporalActivity({
@@ -88,47 +92,33 @@ function parseEnsureRuntimeProcessingInput(
     "orchestrationAttemptId",
     "processingMode",
     "usageAttribution",
+    "usageAttributionMailboxLag",
     "userId",
   ]);
 
-  return {
-    orchestrationAttemptId: requireOpaqueIdentifier(
-      record.orchestrationAttemptId,
-      "Hosted runtime ensure-processing Activity input orchestrationAttemptId",
-    ),
+  const controlRequest = parseHostedRuntimeEnsureProcessingRequest({
+    orchestrationAttemptId: record.orchestrationAttemptId,
     ...(record.processingMode === undefined
       ? {}
-      : {
-          processingMode: parseNullableProcessingMode(
-            record.processingMode,
-            "Hosted runtime ensure-processing Activity input processingMode",
-          ),
-        }),
+      : { processingMode: record.processingMode }),
     ...(record.usageAttribution === undefined
       ? {}
+      : { usageAttribution: record.usageAttribution }),
+    ...(record.usageAttributionMailboxLag === undefined
+      ? {}
       : {
-          usageAttribution: record.usageAttribution === null
-            ? null
-            : parseHostedRuntimeUsageAttribution(record.usageAttribution),
+          usageAttributionMailboxLag:
+            record.usageAttributionMailboxLag,
         }),
+  });
+
+  return {
+    ...controlRequest,
     userId: requireOpaqueIdentifier(
       record.userId,
       "Hosted runtime ensure-processing Activity input userId",
     ),
   };
-}
-
-function parseNullableProcessingMode(
-  value: unknown,
-  label: string,
-): "default" | "inbox_media_retention" | null {
-  if (value === null) {
-    return null;
-  }
-  if (value === "default" || value === "inbox_media_retention") {
-    return value;
-  }
-  throw new TypeError(`${label} is not supported.`);
 }
 
 function buildCloudflareRuntimeEnsureProcessingPath(userId: string): string {

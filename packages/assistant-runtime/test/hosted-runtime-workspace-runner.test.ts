@@ -169,7 +169,7 @@ describe("runHostedWorkspaceUntilIdleOrBudget", () => {
     }
   });
 
-  test("coalesced runtime wakes preserve first and latest pending notify timestamps", () => {
+  test("coalesced runtime wakes preserve the first bounded admission", () => {
     vi.useFakeTimers();
     const firstNotifyAt = new Date("2026-04-26T00:00:01.000Z");
     const secondNotifyAt = new Date("2026-04-26T00:00:05.000Z");
@@ -177,14 +177,40 @@ describe("runHostedWorkspaceUntilIdleOrBudget", () => {
     try {
       const runtimeWakeSignal = createCoalescingRuntimeWakeSignal();
       vi.setSystemTime(firstNotifyAt);
-      runtimeWakeSignal.notify();
+      runtimeWakeSignal.notify({
+        usageAttribution: {
+          groupId: "family_first",
+          kind: "family",
+        },
+        usageAttributionMaxSeqByLane: [{
+          lane: "conversation",
+          maxSeq: "10",
+        }],
+      });
       vi.setSystemTime(secondNotifyAt);
-      runtimeWakeSignal.notify();
+      runtimeWakeSignal.notify({
+        usageAttribution: {
+          groupId: "family_second",
+          kind: "family",
+        },
+        usageAttributionMaxSeqByLane: [{
+          lane: "conversation",
+          maxSeq: "11",
+        }],
+      });
       runtimeWakeSignal.notify(firstNotifyAt.getTime() + 2_000);
 
       assert.deepEqual(runtimeWakeSignal.consumePending(), {
         latestNotifiedAtEpochMs: secondNotifyAt.getTime(),
         notifiedAtEpochMs: firstNotifyAt.getTime(),
+        usageAttribution: {
+          groupId: "family_first",
+          kind: "family",
+        },
+        usageAttributionMaxSeqByLane: [{
+          lane: "conversation",
+          maxSeq: "10",
+        }],
       });
     } finally {
       vi.useRealTimers();

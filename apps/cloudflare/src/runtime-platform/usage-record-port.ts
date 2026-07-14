@@ -23,7 +23,10 @@ export function createHostedRuntimeUsageRecordPort(input: {
   usageAttribution?: HostedRuntimeUsageAttribution | null;
 }): NonNullable<HostedRuntimePlatform["usageRecordPort"]> {
   return {
-    async recordUsage(record, noticeDeliveryTarget) {
+    async recordUsage(record, noticeDeliveryTarget, usageAttribution) {
+      const effectiveUsageAttribution = usageAttribution === undefined
+        ? input.usageAttribution
+        : usageAttribution;
       return recordHostedRuntimeUsageRecord({
         boundUserId: input.boundUserId,
         fetchImpl: input.fetchImpl,
@@ -31,9 +34,9 @@ export function createHostedRuntimeUsageRecordPort(input: {
         record,
         timeoutMs: input.timeoutMs,
         transport: input.transport,
-        ...(input.usageAttribution === undefined
-          ? {}
-          : { usageAttribution: input.usageAttribution }),
+        ...(effectiveUsageAttribution
+          ? { usageAttribution: effectiveUsageAttribution }
+          : {}),
       });
     },
   };
@@ -53,7 +56,7 @@ export async function recordHostedRuntimeUsageRecord(input: {
       ...(input.noticeDeliveryTarget === undefined
         ? {}
         : { noticeDeliveryTarget: input.noticeDeliveryTarget }),
-      ...(input.usageAttribution === undefined
+      ...(input.usageAttribution == null
         ? {}
         : { usageAttribution: input.usageAttribution }),
       usage: input.record,

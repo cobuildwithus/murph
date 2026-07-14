@@ -1616,7 +1616,7 @@ describe("fetchHostedMailboxItemsAfterLaneCursors", () => {
 
 describe("fetchHostedRuntimeMailboxProjection", () => {
   it("projects both requested lanes with one query while preserving item payload metadata", async () => {
-    const queryRaw = vi.fn(async () => [
+    const queryRaw = vi.fn(async (..._args: unknown[]) => [
       {
         consumedSeq: 11n,
         itemConsumedAt: new Date("2026-04-26T00:00:04.000Z"),
@@ -1671,7 +1671,7 @@ describe("fetchHostedRuntimeMailboxProjection", () => {
     const result = await fetchHostedRuntimeMailboxProjection({
       cursorMode: "imported_seq",
       lanes: [
-        { importedSeq: "11", lane: "conversation" },
+        { importedSeq: "11", lane: "conversation", throughSeq: "12" },
         { importedSeq: "2", lane: "system" },
       ],
       limitPerLane: 10,
@@ -1681,6 +1681,21 @@ describe("fetchHostedRuntimeMailboxProjection", () => {
     });
 
     expect(queryRaw).toHaveBeenCalledTimes(1);
+    const projectionSql = readHostedMailboxPrismaSql(queryRaw.mock.calls[0]?.[0]);
+    expect(projectionSql.sql).toContain(
+      "requested_lane (ordinal, lane, imported_seq, through_seq)",
+    );
+    expect(
+      projectionSql.sql.match(
+        /mailbox_item\.lane_seq <= requested_lane\.through_seq/gu,
+      ),
+    ).toHaveLength(2);
+    expect(
+      projectionSql.sql.match(
+        /mailbox_item\.lane_seq <= lane_projection\.through_seq/gu,
+      ),
+    ).toHaveLength(1);
+    expect(projectionSql?.values).toContain(12n);
     expect(result.consumedSeqByLane).toEqual([
       { consumedSeq: "11", lane: "conversation" },
       { consumedSeq: "2", lane: "system" },
@@ -2251,6 +2266,20 @@ function buildHostedGroupEmailEnvelope(userId: string) {
 function readHostedMailboxRawSql(call: unknown[] | undefined): string {
   const strings = call?.[0] as TemplateStringsArray | undefined;
   return strings ? strings.join("?") : "";
+}
+
+function readHostedMailboxPrismaSql(value: unknown): {
+  sql: string;
+  values: readonly unknown[];
+} {
+  if (!value || typeof value !== "object") {
+    throw new TypeError("Expected a Prisma SQL query object.");
+  }
+  const record = value as Record<string, unknown>;
+  if (typeof record.sql !== "string" || !Array.isArray(record.values)) {
+    throw new TypeError("Expected a Prisma SQL query with sql and values.");
+  }
+  return { sql: record.sql, values: record.values };
 }
 
 function createHostedMailboxClient(input: {

@@ -77,7 +77,8 @@ export interface HostedRuntimeReconciliationFactsBlocked {
 export interface HostedRuntimeReconciliationFacts {
   blocked: HostedRuntimeReconciliationFactsBlocked | null;
   mailboxLag: HostedMailboxLaneLag[];
-  usageAttribution: HostedRuntimeUsageAttribution | null;
+  usageAttribution?: HostedRuntimeUsageAttribution | null;
+  usageAttributionMailboxLag?: HostedMailboxLaneLag[] | null;
   workspace: HostedRuntimeReconciliationFactsWorkspace | null;
 }
 
@@ -85,6 +86,7 @@ export interface HostedRuntimeEnsureProcessingRequest {
   orchestrationAttemptId: string;
   processingMode?: HostedRuntimeProcessingMode | null;
   usageAttribution?: HostedRuntimeUsageAttribution | null;
+  usageAttributionMailboxLag?: HostedMailboxLaneLag[] | null;
 }
 
 export const HOSTED_RUNTIME_ENSURE_PROCESSING_RESPONSE_KINDS = [

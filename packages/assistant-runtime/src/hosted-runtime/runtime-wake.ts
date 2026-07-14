@@ -1,16 +1,22 @@
 import type {
+  HostedMailboxLaneHighWater,
   HostedRuntimeOrchestrationLatencyDiagnostics,
+  HostedRuntimeUsageAttribution,
 } from "@murphai/hosted-execution/runtime-control";
 
 export interface RuntimeWakeNotifyInput {
   notifiedAtEpochMs?: number | null;
   orchestration?: HostedRuntimeOrchestrationLatencyDiagnostics | null;
+  usageAttribution?: HostedRuntimeUsageAttribution | null;
+  usageAttributionMaxSeqByLane?: HostedMailboxLaneHighWater[] | null;
 }
 
 export interface RuntimeWakeNotification {
   latestNotifiedAtEpochMs?: number;
   notifiedAtEpochMs: number;
   orchestration?: HostedRuntimeOrchestrationLatencyDiagnostics | null;
+  usageAttribution?: HostedRuntimeUsageAttribution | null;
+  usageAttributionMaxSeqByLane?: HostedMailboxLaneHighWater[] | null;
 }
 
 export interface RuntimeWakeSignal {
@@ -34,6 +40,8 @@ export function createCoalescingRuntimeWakeSignal(): RuntimeWakeSignal {
   let latestPendingNotifyAtEpochMs: number | null = null;
   let pendingNotifyAtEpochMs: number | null = null;
   let pendingOrchestration: HostedRuntimeOrchestrationLatencyDiagnostics | null = null;
+  let pendingUsageAttribution: HostedRuntimeUsageAttribution | null = null;
+  let pendingUsageAttributionMaxSeqByLane: HostedMailboxLaneHighWater[] | null = null;
   let pending = false;
   let flushScheduled = false;
   const waiters = new Set<(notification: RuntimeWakeNotification) => void>();
@@ -47,10 +55,18 @@ export function createCoalescingRuntimeWakeSignal(): RuntimeWakeSignal {
         : {}),
       notifiedAtEpochMs,
       ...(pendingOrchestration ? { orchestration: pendingOrchestration } : {}),
+      ...(pendingUsageAttribution
+        ? { usageAttribution: pendingUsageAttribution }
+        : {}),
+      ...(pendingUsageAttributionMaxSeqByLane
+        ? { usageAttributionMaxSeqByLane: pendingUsageAttributionMaxSeqByLane }
+        : {}),
     };
     latestPendingNotifyAtEpochMs = null;
     pendingNotifyAtEpochMs = null;
     pendingOrchestration = null;
+    pendingUsageAttribution = null;
+    pendingUsageAttributionMaxSeqByLane = null;
     return notification;
   };
   const flushWaiters = () => {
@@ -82,6 +98,9 @@ export function createCoalescingRuntimeWakeSignal(): RuntimeWakeSignal {
         latestPendingNotifyAtEpochMs = notification.notifiedAtEpochMs;
         pendingNotifyAtEpochMs = notification.notifiedAtEpochMs;
         pendingOrchestration = notification.orchestration ?? null;
+        pendingUsageAttribution = notification.usageAttribution ?? null;
+        pendingUsageAttributionMaxSeqByLane =
+          notification.usageAttributionMaxSeqByLane ?? null;
       } else {
         latestPendingNotifyAtEpochMs = Math.max(
           latestPendingNotifyAtEpochMs
@@ -91,6 +110,14 @@ export function createCoalescingRuntimeWakeSignal(): RuntimeWakeSignal {
         );
         if (!pendingOrchestration && notification.orchestration) {
           pendingOrchestration = notification.orchestration;
+        }
+        // Keep the first admission and its mailbox high-water together. The
+        // bound fetch cannot import later rows, so a later wake remains durable
+        // lag and receives its own admission after owner reconciliation.
+        if (!pendingUsageAttribution && notification.usageAttribution) {
+          pendingUsageAttribution = notification.usageAttribution;
+          pendingUsageAttributionMaxSeqByLane =
+            notification.usageAttributionMaxSeqByLane ?? null;
         }
       }
       pending = true;
@@ -147,6 +174,12 @@ function normalizeRuntimeWakeNotifyInput(
   return {
     ...(input?.orchestration ? { orchestration: input.orchestration } : {}),
     notifiedAtEpochMs: input?.notifiedAtEpochMs ?? Date.now(),
+    ...(input?.usageAttribution
+      ? { usageAttribution: input.usageAttribution }
+      : {}),
+    ...(input?.usageAttributionMaxSeqByLane
+      ? { usageAttributionMaxSeqByLane: input.usageAttributionMaxSeqByLane }
+      : {}),
   };
 }
 

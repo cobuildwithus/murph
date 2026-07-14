@@ -301,6 +301,10 @@ describe("RunnerContainer", () => {
         activeWakeStartedAtEpochMs: 1_777_000_000_100,
         cloudflareRouteReceivedAtEpochMs: 1_777_000_000_050,
       },
+      usageAttribution: {
+        groupId: "family_active_wake",
+        kind: "family",
+      },
       userId: "member_123",
     })).resolves.toEqual({
       action: "woken",
@@ -330,6 +334,10 @@ describe("RunnerContainer", () => {
       orchestration: {
         activeWakeStartedAtEpochMs: 1_777_000_000_100,
         cloudflareRouteReceivedAtEpochMs: 1_777_000_000_050,
+      },
+      usageAttribution: {
+        groupId: "family_active_wake",
+        kind: "family",
       },
       userId: "member_123",
     });

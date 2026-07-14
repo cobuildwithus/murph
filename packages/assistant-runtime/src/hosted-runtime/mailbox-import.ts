@@ -127,6 +127,7 @@ export interface HostedMailboxPrefixPrefetch {
   lanes: readonly HostedMailboxLane[];
   limitPerLane: number;
   response: Promise<HostedMailboxFetchResponse>;
+  throughSeqByLane: Partial<Record<HostedMailboxLane, string>> | null;
 }
 
 export class HostedMailboxUserMismatchError extends Error {
@@ -150,6 +151,7 @@ export function prefetchHostedMailboxPrefix(input: {
   mailboxPort: HostedRuntimeMailboxPort;
   requestId: string;
   state: HostedMailboxImportState;
+  throughSeqByLane?: Partial<Record<HostedMailboxLane, string>> | null;
 }): HostedMailboxPrefixPrefetch {
   const lanes = input.lanes ?? HOSTED_MAILBOX_LANES;
   const importedSeqByLane = Object.fromEntries(
@@ -160,6 +162,12 @@ export function prefetchHostedMailboxPrefix(input: {
     lanes: lanes.map((lane) => ({
       importedSeq: importedSeqByLane[lane],
       lane,
+      ...(input.throughSeqByLane
+        ? {
+            throughSeq:
+              input.throughSeqByLane[lane] ?? importedSeqByLane[lane],
+          }
+        : {}),
     })),
     limitPerLane: input.limitPerLane,
     requestId: input.requestId,
@@ -177,6 +185,7 @@ export function prefetchHostedMailboxPrefix(input: {
     lanes,
     limitPerLane: input.limitPerLane,
     response,
+    throughSeqByLane: input.throughSeqByLane ?? null,
   };
 }
 
@@ -191,6 +200,7 @@ export async function fetchAndProcessHostedMailboxPrefix(input: {
   prefetch?: HostedMailboxPrefixPrefetch | null;
   requestId: string;
   state: HostedMailboxImportState;
+  throughSeqByLane?: Partial<Record<HostedMailboxLane, string>> | null;
 }): Promise<HostedMailboxImportLoopResult> {
   const now = input.now ?? (() => new Date().toISOString());
   const lanes = input.lanes ?? HOSTED_MAILBOX_LANES;
@@ -201,6 +211,7 @@ export async function fetchAndProcessHostedMailboxPrefix(input: {
     prefetch: input.prefetch ?? null,
     requestId: input.requestId,
     state: input.state,
+    throughSeqByLane: input.throughSeqByLane ?? null,
   });
   assertHostedMailboxFetchUser({
     expectedUserId: input.expectedUserId,
@@ -635,12 +646,14 @@ async function fetchHostedMailboxPrefix(input: {
   prefetch: HostedMailboxPrefixPrefetch | null;
   requestId: string;
   state: HostedMailboxImportState;
+  throughSeqByLane: Partial<Record<HostedMailboxLane, string>> | null;
 }): Promise<HostedMailboxFetchResponse> {
   if (input.prefetch && canUseHostedMailboxPrefixPrefetch({
     lanes: input.lanes,
     limitPerLane: input.limitPerLane,
     prefetch: input.prefetch,
     state: input.state,
+    throughSeqByLane: input.throughSeqByLane,
   })) {
     try {
       return await input.prefetch.response;
@@ -662,12 +675,20 @@ async function fetchHostedMailboxPrefixFromPort(input: {
   mailboxPort: HostedRuntimeMailboxPort;
   requestId: string;
   state: HostedMailboxImportState;
+  throughSeqByLane: Partial<Record<HostedMailboxLane, string>> | null;
 }): Promise<HostedMailboxFetchResponse> {
   return await input.mailboxPort.fetch({
     cursorMode: "imported_seq",
     lanes: input.lanes.map((lane) => ({
       importedSeq: input.state.watermarks[lane],
       lane,
+      ...(input.throughSeqByLane
+        ? {
+            throughSeq:
+              input.throughSeqByLane[lane]
+              ?? input.state.watermarks[lane],
+          }
+        : {}),
     })),
     limitPerLane: input.limitPerLane,
     requestId: input.requestId,
@@ -679,9 +700,16 @@ function canUseHostedMailboxPrefixPrefetch(input: {
   limitPerLane: number;
   prefetch: HostedMailboxPrefixPrefetch;
   state: HostedMailboxImportState;
+  throughSeqByLane: Partial<Record<HostedMailboxLane, string>> | null;
 }): boolean {
   const prefetch = input.prefetch;
   if (prefetch.limitPerLane !== input.limitPerLane) {
+    return false;
+  }
+  if (!hostedMailboxThroughSeqByLaneEqual(
+    prefetch.throughSeqByLane,
+    input.throughSeqByLane,
+  )) {
     return false;
   }
 
@@ -693,6 +721,16 @@ function canUseHostedMailboxPrefixPrefetch(input: {
   return input.lanes.every((lane) =>
     prefetch.importedSeqByLane[lane] === input.state.watermarks[lane]
   );
+}
+
+function hostedMailboxThroughSeqByLaneEqual(
+  left: Partial<Record<HostedMailboxLane, string>> | null,
+  right: Partial<Record<HostedMailboxLane, string>> | null,
+): boolean {
+  if (left === null || right === null) {
+    return left === right;
+  }
+  return HOSTED_MAILBOX_LANES.every((lane) => left[lane] === right[lane]);
 }
 
 function selectHostedMailboxFetchResponseLanes(

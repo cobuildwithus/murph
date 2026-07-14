@@ -397,9 +397,9 @@ async function readHostedFamilySponsoredBillingRefForGroup(input: {
   };
 }
 
-function buildHostedAiUsageAdmissionPeriodBillingRef(
+function resolveHostedAiUsageAdmissionPeriod(
   attribution: Extract<HostedRuntimeUsageAttribution, { kind: "period" }>,
-): HostedAiUsageAllowanceBillingRef {
+): Extract<HostedAiUsageAllowancePeriodResolution, { kind: "period" }> {
   const currentPeriodStart = normalizeHostedAiUsageAllowanceDate(
     attribution.periodStart,
   );
@@ -426,16 +426,13 @@ function buildHostedAiUsageAdmissionPeriodBillingRef(
   }
 
   return {
-    currentBillingPhase: "paid",
-    currentBillingPlanCode: billingPlanCode,
-    currentCheckoutOffer: null,
-    currentPeriodEnd,
-    currentPeriodStart,
-    currentTrialEndsAt: null,
-    currentTrialStartedAt: null,
-    pulseTrialPolicyVersion: null,
-    pulseTrialRedeemedAt: null,
-    usageLimitUsdMicrosOverride: limitUsdMicros,
+    allowanceSource: attribution.allowanceSource,
+    billingPlanCode,
+    kind: "period",
+    limitUsdMicros,
+    periodEnd: currentPeriodEnd,
+    periodStart: currentPeriodStart,
+    source: attribution.allowanceSource === "direct_trial" ? "trial" : "billing",
   };
 }
 
@@ -906,13 +903,10 @@ export async function accountHostedAiUsageForAllowanceTx(input: {
       })).candidate;
     }
 
-    const period = await ensureHostedAiUsageAllowancePeriodTx({
-      at,
-      billingRef: buildHostedAiUsageAdmissionPeriodBillingRef(
-        input.usageAttribution,
-      ),
+    const period = await materializeHostedAiUsageAllowancePeriodTx({
       memberId: input.memberId,
       now,
+      resolved: resolveHostedAiUsageAdmissionPeriod(input.usageAttribution),
       tx: input.tx,
     });
     if (period.kind === "denied") {
@@ -922,10 +916,7 @@ export async function accountHostedAiUsageForAllowanceTx(input: {
       expectedFamilyGroupId: null,
       memberId: input.memberId,
       now,
-      period: {
-        ...period,
-        allowanceSource: input.usageAttribution.allowanceSource,
-      },
+      period,
       record: input.record,
       tx: input.tx,
     });
@@ -1273,20 +1264,9 @@ async function reconcileHostedAiUsageFamilyAttributionTx(input: {
     }
   }
 
-  const remaining = await input.tx.hostedAiUsage.findFirst({
-    select: {
-      id: true,
-    },
-    where: {
-      allowanceAccountedAt: null,
-      allowanceFamilyGroupId: input.groupId ?? { not: null },
-      ...(input.memberId ? { memberId: input.memberId } : {}),
-    },
-  });
-
   return {
     candidates,
-    hasMore: eligibleIds.length > pageSize || remaining !== null,
+    hasMore: eligibleIds.length > pageSize,
     processedCount,
   };
 }
@@ -1741,6 +1721,21 @@ async function ensureHostedAiUsageAllowancePeriodTx(input: {
     threadContainer: input.threadContainer ?? null,
     threadContainerAccessActive: input.threadContainerAccessActive ?? null,
   });
+  return materializeHostedAiUsageAllowancePeriodTx({
+    memberId: input.memberId,
+    now: input.now,
+    resolved,
+    tx: input.tx,
+  });
+}
+
+async function materializeHostedAiUsageAllowancePeriodTx(input: {
+  memberId: string;
+  now: Date;
+  resolved: HostedAiUsageAllowancePeriodResolution;
+  tx: Prisma.TransactionClient;
+}): Promise<HostedAiUsageAllowancePeriodResult> {
+  const resolved = input.resolved;
   if (resolved.kind === "denied") {
     return {
       kind: "denied",

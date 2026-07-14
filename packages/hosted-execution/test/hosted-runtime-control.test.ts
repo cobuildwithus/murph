@@ -580,6 +580,19 @@ describe("hosted runtime control contracts", () => {
     );
     expect(parseHostedWorkspaceInvocationRequest({
       ...workspaceInvocationRequest,
+      usageAttributionMaxSeqByLane: [
+        { lane: "conversation", maxSeq: "11" },
+        { lane: "system", maxSeq: "4" },
+      ],
+    })).toEqual({
+      ...workspaceInvocationRequest,
+      usageAttributionMaxSeqByLane: [
+        { lane: "conversation", maxSeq: "11" },
+        { lane: "system", maxSeq: "4" },
+      ],
+    });
+    expect(parseHostedWorkspaceInvocationRequest({
+      ...workspaceInvocationRequest,
       workspace: workspaceState,
     })).toEqual({
       ...workspaceInvocationRequest,
@@ -685,7 +698,7 @@ describe("hosted runtime control contracts", () => {
     expect(parseHostedMailboxFetchRequest({
       cursorMode: "imported_seq",
       lanes: [
-        { importedSeq: "0", lane: "conversation" },
+        { importedSeq: "0", lane: "conversation", throughSeq: "11" },
         { importedSeq: "4", lane: "system" },
       ],
       limitPerLane: 25,
@@ -693,7 +706,7 @@ describe("hosted runtime control contracts", () => {
     })).toEqual({
       cursorMode: "imported_seq",
       lanes: [
-        { importedSeq: "0", lane: "conversation" },
+        { importedSeq: "0", lane: "conversation", throughSeq: "11" },
         { importedSeq: "4", lane: "system" },
       ],
       limitPerLane: 25,

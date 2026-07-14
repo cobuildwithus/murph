@@ -17614,6 +17614,13 @@ describe("hosted workspace runtime entrypoint", () => {
     });
     let fetchCount = 0;
     const runtimeWakeSignal = createCoalescingRuntimeWakeSignal();
+    const activeWakeUsageAttribution = {
+      groupId: "family_active_runtime_wake",
+      kind: "family",
+    } as const;
+    const usageRecordAttributions: unknown[] = [];
+    let lateAssistantInputId: string | null = null;
+    let assistantPhaseCount = 0;
 
     const mailboxPort: HostedRuntimeMailboxPort = {
       async fetch(request): Promise<HostedMailboxFetchResponse> {
@@ -17662,22 +17669,63 @@ describe("hosted workspace runtime entrypoint", () => {
         createCheckpointSnapshot,
         async importItem(item) {
           events.push(`import:${item.item.laneSeq}`);
-          return { status: "imported" };
+          lateAssistantInputId = "ain_00000000000000000000000000000001";
+          return {
+            assistantInputId: lateAssistantInputId,
+            status: "imported",
+          };
         },
-        platform: createPlatform({
-          mailboxPort,
-          workspacePort: createWorkspacePort({
-            checkpointRequests,
-            events,
-            workspace: createWorkspaceState({ version: "0" }),
+        platform: {
+          ...createPlatform({
+            mailboxPort,
+            workspacePort: createWorkspacePort({
+              checkpointRequests,
+              events,
+              workspace: createWorkspaceState({ version: "0" }),
+            }),
           }),
-        }),
+          usageRecordPort: {
+            async recordUsage(record, _noticeDeliveryTarget, usageAttribution) {
+              usageRecordAttributions.push(usageAttribution);
+              return {
+                recorded: true,
+                usageId: record.usageId,
+              };
+            },
+          },
+        },
         runtimeWakeSignal,
-        async runAssistantPhase() {
-          runtimeWakeSignal.notify();
-          await waitUntil(() => {
-            assert.equal(events.includes("import:1"), true);
-          });
+        async runAssistantPhase(input) {
+          assistantPhaseCount += 1;
+          if (assistantPhaseCount === 1) {
+            runtimeWakeSignal.notify({
+              usageAttribution: activeWakeUsageAttribution,
+            });
+            await waitUntil(() => {
+              assert.equal(events.includes("import:1"), true);
+            });
+            return {
+              checkpointReason: "canonical_runtime_commit",
+              progressed: true,
+              redactedStatus: {
+                hostedMailboxConversationImportedSeq: "0",
+                hostedMailboxSystemImportedSeq: "999",
+              },
+            };
+          }
+          assert.ok(lateAssistantInputId);
+          const boundUsageAttribution = input.resolveUsageAttribution?.([
+            lateAssistantInputId,
+          ]);
+          assert.deepEqual(
+            boundUsageAttribution,
+            activeWakeUsageAttribution,
+          );
+          input.recordDeferredUsage?.(
+            createAssistantUsageRecord(),
+            undefined,
+            boundUsageAttribution,
+          );
           return {
             checkpointReason: "canonical_runtime_commit",
             progressed: true,
@@ -17700,6 +17748,7 @@ describe("hosted workspace runtime entrypoint", () => {
         "mailbox.fetch:2",
         "mailbox.fetch:3",
         "import:1",
+        "mailbox.fetch:4",
         "snapshot:idle_shutdown",
         "workspace.checkpoint",
       ]);
@@ -17707,6 +17756,8 @@ describe("hosted workspace runtime entrypoint", () => {
         "idle_shutdown",
       ]);
       expect(createCheckpointSnapshot).toHaveBeenCalledOnce();
+      assert.equal(assistantPhaseCount, 2);
+      assert.deepEqual(usageRecordAttributions, [activeWakeUsageAttribution]);
     } finally {
       await removeTempRoot(vaultRoot);
     }
@@ -21504,6 +21555,14 @@ describe("hosted workspace runtime entrypoint", () => {
   test("parses additive workspace-invocation inputs and rejects legacy run-drain fields", () => {
     const parsed = parseHostedAssistantWorkspaceRuntimeJobInput({
       request: createWorkspaceRunRequest({
+        usageAttribution: {
+          groupId: "family_bounded_invocation",
+          kind: "family",
+        },
+        usageAttributionMaxSeqByLane: [{
+          lane: "conversation",
+          maxSeq: "11",
+        }],
         workspace: createWorkspaceState({ version: "0" }),
       }),
       runtime: {
@@ -21514,6 +21573,14 @@ describe("hosted workspace runtime entrypoint", () => {
     });
 
     assert.equal(parsed.request.attemptId, "attempt_synthetic_workspace_run");
+    assert.deepEqual(parsed.request.usageAttribution, {
+      groupId: "family_bounded_invocation",
+      kind: "family",
+    });
+    assert.deepEqual(parsed.request.usageAttributionMaxSeqByLane, [{
+      lane: "conversation",
+      maxSeq: "11",
+    }]);
     assert.equal(parsed.request.workspace?.version, "0");
     assert.deepEqual(parsed.runtime?.forwardedEnv, {
       HOSTED_ASSISTANT_MODEL: "gpt-synthetic",

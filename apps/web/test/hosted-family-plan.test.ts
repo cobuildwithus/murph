@@ -131,7 +131,8 @@ type FamilyPlanTxMock = Prisma.TransactionClient & {
     upsert: MockFn;
   };
   hostedAccountGroupBillingPeriod: Prisma.TransactionClient["hostedAccountGroupBillingPeriod"] & {
-    upsert: MockFn;
+    createMany: MockFn;
+    findUniqueOrThrow: MockFn;
   };
   hostedAccountGroupInvite: Prisma.TransactionClient["hostedAccountGroupInvite"] & {
     count: MockFn;
@@ -2122,8 +2123,8 @@ describe("hosted Family plan", () => {
         currentPeriodStart: FAMILY_STRIPE_PERIOD_START,
       }),
     }));
-    expect(tx.hostedAccountGroupBillingPeriod.upsert).toHaveBeenCalledWith({
-      create: {
+    expect(tx.hostedAccountGroupBillingPeriod.createMany).toHaveBeenCalledWith({
+      data: {
         billingPlanCode: "launch_family_monthly",
         groupId: "hbag_family",
         lastStripeEventCreatedAt: new Date("2026-06-18T12:30:00.000Z"),
@@ -2131,11 +2132,16 @@ describe("hosted Family plan", () => {
         periodEnd: FAMILY_STRIPE_PERIOD_END,
         periodStart: FAMILY_STRIPE_PERIOD_START,
       },
-      update: {
-        billingPlanCode: "launch_family_monthly",
-        lastStripeEventCreatedAt: new Date("2026-06-18T12:30:00.000Z"),
-        limitUsdMicros: 10_000_000n,
-        periodEnd: FAMILY_STRIPE_PERIOD_END,
+      skipDuplicates: true,
+    });
+    expect(tx.hostedAccountGroupBillingPeriod.findUniqueOrThrow).toHaveBeenCalledWith({
+      select: {
+        billingPlanCode: true,
+        groupId: true,
+        lastStripeEventCreatedAt: true,
+        limitUsdMicros: true,
+        periodEnd: true,
+        periodStart: true,
       },
       where: {
         groupId_periodStart: {
@@ -2144,6 +2150,57 @@ describe("hosted Family plan", () => {
         },
       },
     });
+  });
+
+  it("accepts a newer Stripe event for the same immutable Family billing period", async () => {
+    const tx = createTxMock();
+    tx.hostedAccountGroupBillingPeriod.createMany.mockResolvedValueOnce({ count: 0 });
+    tx.hostedAccountGroupBillingPeriod.findUniqueOrThrow.mockResolvedValueOnce({
+      billingPlanCode: "launch_family_monthly",
+      groupId: "hbag_family",
+      lastStripeEventCreatedAt: new Date("2026-06-18T12:30:00.000Z"),
+      limitUsdMicros: 10_000_000n,
+      periodEnd: FAMILY_STRIPE_PERIOD_END,
+      periodStart: FAMILY_STRIPE_PERIOD_START,
+    });
+
+    await expect(writeHostedAccountGroupStripeBillingTx({
+      billingStatus: HostedBillingStatus.active,
+      currentBillingPhase: "paid",
+      currentBillingPlanCode: "launch_family_monthly",
+      currentPeriodEnd: FAMILY_STRIPE_PERIOD_END,
+      currentPeriodStart: FAMILY_STRIPE_PERIOD_START,
+      groupId: "hbag_family",
+      stripeEventCreatedAt: new Date("2026-06-18T12:31:00.000Z"),
+      tx,
+    })).resolves.toMatchObject({ groupId: "hbag_family" });
+  });
+
+  it("rejects a conflicting replay of immutable Family billing-period history", async () => {
+    const tx = createTxMock();
+    tx.hostedAccountGroupBillingPeriod.createMany.mockResolvedValueOnce({ count: 0 });
+    tx.hostedAccountGroupBillingPeriod.findUniqueOrThrow.mockResolvedValueOnce({
+      billingPlanCode: "launch_family_monthly",
+      groupId: "hbag_family",
+      lastStripeEventCreatedAt: new Date("2026-06-18T12:30:00.000Z"),
+      limitUsdMicros: 10_000_000n,
+      periodEnd: new Date(FAMILY_STRIPE_PERIOD_END.getTime() + 1_000),
+      periodStart: FAMILY_STRIPE_PERIOD_START,
+    });
+
+    await expect(writeHostedAccountGroupStripeBillingTx({
+      billingStatus: HostedBillingStatus.active,
+      currentBillingPhase: "paid",
+      currentBillingPlanCode: "launch_family_monthly",
+      currentPeriodEnd: FAMILY_STRIPE_PERIOD_END,
+      currentPeriodStart: FAMILY_STRIPE_PERIOD_START,
+      groupId: "hbag_family",
+      stripeEventCreatedAt: new Date("2026-06-18T12:30:00.000Z"),
+      tx,
+    })).rejects.toThrow(
+      "Hosted Family billing period conflicts with its immutable history.",
+    );
+    expect(tx.hostedAccountGroup.update).not.toHaveBeenCalled();
   });
 
   it("rejects subscription reconciliation for a synthetic Family owner before billing writes", async () => {
@@ -3543,9 +3600,16 @@ function createTxMock(input: {
         stripeSubscriptionIdEncrypted: create.stripeSubscriptionIdEncrypted,
       })),
     },
-    hostedAccountGroupBillingPeriod: {
-      upsert: vi.fn().mockImplementation(async ({ create }) => create),
-    },
+    hostedAccountGroupBillingPeriod: (() => {
+      let projectedPeriod: Record<string, unknown> | null = null;
+      return {
+        createMany: vi.fn().mockImplementation(async ({ data }) => {
+          projectedPeriod = data;
+          return { count: 1 };
+        }),
+        findUniqueOrThrow: vi.fn().mockImplementation(async () => projectedPeriod),
+      };
+    })(),
     hostedAccountGroupInvite: {
       count: vi.fn().mockImplementation(async ({ where }) =>
         where?.NOT?.id === "hbagi_invite"

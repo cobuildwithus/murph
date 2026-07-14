@@ -42,6 +42,7 @@ export interface HostedMailboxImportCheckpointInput {
   mailboxPort: HostedRuntimeMailboxPort;
   checkpointReason?: HostedWorkspaceCheckpointReason;
   prefetch?: HostedMailboxPrefixPrefetch | null;
+  throughSeqByLane?: Partial<Record<HostedMailboxLane, string>> | null;
   requestId: string;
   vaultRoot: string;
   workspacePort: HostedRuntimeWorkspacePort;
@@ -125,6 +126,7 @@ export async function importHostedMailboxPrefixAndCheckpoint(
     prefetch: input.prefetch ?? null,
     requestId: input.requestId,
     state: previousState,
+    throughSeqByLane: input.throughSeqByLane ?? null,
   });
   const stateChanged = !hostedMailboxImportStatesEqual(
     previousState,

@@ -17,6 +17,7 @@ const mocks = vi.hoisted(() => {
 
   return {
     appendHostedMailboxEnvelopeTx: vi.fn(),
+    checkHostedAiUsageGate: vi.fn(),
     ensureHostedWorkspace: vi.fn(),
     getPrisma: vi.fn(),
     hostedMemberFindUnique,
@@ -66,6 +67,12 @@ vi.mock("@/src/lib/hosted-orchestration/runtime-usage-decision", () => ({
   resolveHostedRuntimeAiUsageGate: mocks.resolveHostedRuntimeAiUsageGate,
 }));
 
+vi.mock("@/src/lib/hosted-execution/usage-allowance", () => ({
+  checkHostedAiUsageGate: mocks.checkHostedAiUsageGate,
+  readHostedAiUsageGate: vi.fn(),
+  resolveHostedAiUsageGate: vi.fn(),
+}));
+
 import {
   signalHostedBrowserVaultRefreshRuntime,
   signalHostedDeviceSyncMailboxRuntime,
@@ -84,6 +91,13 @@ describe("hosted runtime Temporal signaling", () => {
     mocks.hostedThreadContainerParticipantFindFirst.mockResolvedValue(null);
     mocks.resolveHostedRuntimeAiUsageGate.mockResolvedValue({
       status: "allowed",
+    });
+    mocks.checkHostedAiUsageGate.mockResolvedValue({
+      allowed: true,
+      usageAttribution: {
+        groupId: "family_explicit_prisma",
+        kind: "family",
+      },
     });
     mocks.signalWithStart.mockResolvedValue(undefined);
     mocks.appendHostedMailboxEnvelopeTx.mockImplementation(async (input) => ({
@@ -720,7 +734,10 @@ describe("hosted runtime Temporal signaling", () => {
         now: string;
         prisma: typeof mocks.prisma;
         userId: string;
-      }) => Promise<{ status: "allowed" } | { status: "denied" }>;
+      }) => Promise<
+        | { status: "allowed"; usageAttribution: { groupId: string; kind: "family" } }
+        | { status: "denied" }
+      >;
     }>("@/src/lib/hosted-orchestration/runtime-usage-decision");
     const explicitPrisma = mocks.prisma;
 
@@ -731,11 +748,16 @@ describe("hosted runtime Temporal signaling", () => {
       userId: "member_123",
     })).resolves.toEqual({
       status: "allowed",
+      usageAttribution: {
+        groupId: "family_explicit_prisma",
+        kind: "family",
+      },
     });
 
-    expect(mocks.hostedMemberFindUnique).toHaveBeenCalledWith({
-      select: expect.any(Object),
-      where: { id: "member_123" },
+    expect(mocks.checkHostedAiUsageGate).toHaveBeenCalledWith({
+      memberId: "member_123",
+      now: new Date("2026-05-20T12:00:00.000Z"),
+      prisma: explicitPrisma,
     });
   });
 

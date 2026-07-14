@@ -47,6 +47,9 @@ export const POST = withJsonError(async (request: Request) => {
     lanes: body.lanes.map((laneCursor) => ({
       importedSeq: laneCursor.importedSeq,
       lane: laneCursor.lane,
+      ...(laneCursor.throughSeq === undefined
+        ? {}
+        : { throughSeq: laneCursor.throughSeq }),
     })),
     limitPerLane: body.limitPerLane,
     now: fetchedAt,

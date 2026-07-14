@@ -40,6 +40,10 @@ import {
   type HostedRuntimeOrchestrationLatencyDiagnostics,
 } from "./orchestration-latency-diagnostics.ts";
 import type {
+  HostedMailboxLaneHighWater,
+  HostedRuntimeUsageAttribution,
+} from "@murphai/hosted-execution/runtime-control";
+import type {
   WorkerActiveRuntimeUserFenceResult,
 } from "./worker-contracts.ts";
 
@@ -339,6 +343,8 @@ export interface RunnerRuntimeWakeInput {
   leaseGeneration: string;
   orchestration?: HostedRuntimeOrchestrationLatencyDiagnostics | null;
   processingMode?: RunnerRuntimeProcessingMode | null;
+  usageAttribution?: HostedRuntimeUsageAttribution | null;
+  usageAttributionMaxSeqByLane?: HostedMailboxLaneHighWater[] | null;
   userId: string;
 }
 

@@ -591,6 +591,43 @@ describe("hosted Stripe event reconciliation", () => {
     }));
   });
 
+  it("does not refund stalled Family repair attempts and poisons them at the retry bound", async () => {
+    const prisma = createStripeEventPrismaHarness();
+    const event = makeSubscriptionUpdatedEvent();
+    mocks.stripe.events.retrieve.mockResolvedValue(event);
+    mocks.applyStripeSubscriptionUpdated.mockResolvedValue({
+      familyUsageRepairGroupId: "hbag_family",
+    });
+    mocks.reconcileHostedAiUsageFamilyAttributionForGroupTx.mockResolvedValue({
+      candidates: [],
+      hasMore: true,
+      processedCount: 0,
+    });
+
+    await recordHostedStripeEvent({ event, prisma: prisma.client });
+
+    for (let attempt = 1; attempt <= 6; attempt += 1) {
+      const result = await reconcileHostedStripeEventById({
+        eventId: event.id,
+        prisma: prisma.client,
+      });
+      expect(prisma.rows[0]?.attemptCount).toBe(attempt);
+      if (attempt < 6) {
+        expect(result).toMatchObject({ status: "failed" });
+        expect(prisma.rows[0]?.status).toBe(HostedStripeEventStatus.pending);
+        prisma.rows[0]!.nextAttemptAt = new Date(0);
+      } else {
+        expect(result).toMatchObject({ status: "failed" });
+        expect(prisma.rows[0]?.status).toBe(HostedStripeEventStatus.poisoned);
+      }
+    }
+
+    expect(mocks.stripe.events.retrieve).toHaveBeenCalledOnce();
+    expect(mocks.applyStripeSubscriptionUpdated).toHaveBeenCalledOnce();
+    expect(mocks.reconcileHostedAiUsageFamilyAttributionForGroupTx)
+      .toHaveBeenCalledTimes(6);
+  });
+
   it("processes a no-owner family invoice without the ordinary billing-owner gate", async () => {
     const prisma = createStripeEventPrismaHarness();
     const event = makeInvoicePaidEvent();

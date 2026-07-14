@@ -76,6 +76,36 @@ After both deploys, confirm there is no extra metadata-only handoff checkpoint
 for the same shutdown and actionable late input causes the existing Temporal
 recheck after owner release.
 
+## Causal Usage-Attribution Rollout
+
+The first admission-time usage-attribution release is consumer-first because
+the prior Temporal and Cloudflare request parsers reject additive keys. Roll it
+out in this order:
+
+1. Deploy the database migration, hosted web, and Temporal package with
+   `HOSTED_USAGE_CAUSAL_ATTRIBUTION_ENABLED=0` (or unset). Web omits the new
+   reconciliation-facts field while disabled, the new consumers accept both
+   shapes, and the usage callback keeps accepting omission from an already
+   running old container through the legacy accounting path. Configure the
+   web-only `HOSTED_USAGE_ATTRIBUTION_SIGNING_SECRET` before continuing; never
+   expose that key to the Cloudflare Worker or runner container.
+2. Require the post-CI Render deploy workflow to target the exact `main` commit
+   and confirm that commit is live on the Temporal worker before continuing.
+3. Deploy the Cloudflare Worker and runner bundle with
+   `container_rollout=immediate`; require managed-container smoke to report the
+   new bundle fingerprint so no old exact-key parser remains warm.
+4. Set `HOSTED_USAGE_CAUSAL_ATTRIBUTION_ENABLED=1` and redeploy hosted web.
+   The usage callback now rejects attribution omission as well as invalid
+   proofs. Then prove one direct and one Family-gated turn record the admission
+   period or group carried by the accepted input.
+
+Before step 4, each component may roll back independently because producers
+still emit the legacy shape. Once step 4 emits causal attribution, the deployed
+Temporal worker, Cloudflare Worker/runner, and hosted web callback are a hard
+rollback floor: disable the web producer before any coordinated rollback, let
+accepted work drain, and otherwise use a forward fix rather than restoring an
+older exact-key consumer.
+
 ## Linq Provider-Claim Protocol Rollout
 
 The Linq provider-entry callback is an additive two-phase protocol. Roll it out

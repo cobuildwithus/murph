@@ -900,6 +900,11 @@ describe("runHostedWorkspaceAssistantPhase runtime logs", () => {
   it("defers hosted usage records until after a progressed assistant checkpoint", async () => {
     const events: string[] = [];
     const deferredUsageRecords: AssistantUsageRecord[] = [];
+    const deferredUsageAttributions: unknown[] = [];
+    const usageAttribution = {
+      groupId: "family_assistant_phase",
+      kind: "family",
+    } as const;
     const usageRecordPort: RuntimeUsageRecordPort = {
       async recordUsage(record) {
         events.push(`record:${record.usageId}`);
@@ -923,9 +928,11 @@ describe("runHostedWorkspaceAssistantPhase runtime logs", () => {
     });
 
     const result = await runHostedWorkspaceAssistantPhase(createPhaseInput({
-      recordDeferredUsage: (record) => {
+      recordDeferredUsage: (record, _noticeDeliveryTarget, attribution) => {
         deferredUsageRecords.push(record);
+        deferredUsageAttributions.push(attribution);
       },
+      resolveUsageAttribution: () => usageAttribution,
       runtimeUsageRecordPort: usageRecordPort,
     }));
 
@@ -938,6 +945,7 @@ describe("runHostedWorkspaceAssistantPhase runtime logs", () => {
         usageId: "turn_direct_usage.attempt-1",
       }),
     ]);
+    expect(deferredUsageAttributions).toEqual([usageAttribution]);
     expect(events).toEqual(["assistant"]);
 
     events.push("checkpoint");
@@ -950,6 +958,38 @@ describe("runHostedWorkspaceAssistantPhase runtime logs", () => {
       "checkpoint",
       "record:turn_direct_usage.attempt-1",
     ]);
+  });
+
+  it("preserves an explicit null causal attribution on deferred usage", async () => {
+    const deferredUsageAttributions: unknown[] = [];
+    mocks.runHostedAssistantAutomationLane.mockImplementationOnce(async (laneInput) => {
+      await laneInput.executionContext.hosted?.usageRecorder?.recordUsage(
+        createAssistantUsageRecord(),
+      );
+      return {
+        assistantAutomationCurrentTurnDeliveryIntentIds: [],
+        assistantAutomationProgressed: true,
+        nextWakeAt: null,
+        redactedLogEntries: [],
+      };
+    });
+
+    await runHostedWorkspaceAssistantPhase(createPhaseInput({
+      recordDeferredUsage: (_record, _noticeDeliveryTarget, attribution) => {
+        deferredUsageAttributions.push(attribution);
+      },
+      resolveUsageAttribution: () => null,
+      runtimeUsageRecordPort: {
+        async recordUsage(record) {
+          return {
+            recorded: true,
+            usageId: record.usageId,
+          };
+        },
+      },
+    }));
+
+    expect(deferredUsageAttributions).toEqual([null]);
   });
 
   it("associates deferred usage with exact accepted-input targets", async () => {
@@ -12739,6 +12779,7 @@ function createPhaseInput(input: {
   now?: () => string;
   prepareAutoReplyDelivery?: HostedWorkspaceRuntimeAssistantPhaseInput["prepareAutoReplyDelivery"];
   recordDeferredUsage?: HostedWorkspaceRuntimeAssistantPhaseInput["recordDeferredUsage"];
+  resolveUsageAttribution?: HostedWorkspaceRuntimeAssistantPhaseInput["resolveUsageAttribution"];
   resolvedDeviceSync?: HostedWorkspaceRuntimeAssistantPhaseInput["runtime"]["resolvedConfig"]["deviceSync"];
   runtimeDeviceSyncPort?: RuntimeDeviceSyncPort;
   runtimeGroupToolPort?: NonNullable<
@@ -12908,6 +12949,7 @@ function createPhaseInput(input: {
       userEnv: input.runtimeUserEnv ?? {},
     },
     currentDeliveryRouteScope: input.currentDeliveryRouteScope,
+    resolveUsageAttribution: input.resolveUsageAttribution,
     runtimeEnv: input.runtimeEnv ?? {},
     shouldYieldBackgroundMaintenance: input.shouldYieldBackgroundMaintenance,
     workspace: input.workspace ?? null,

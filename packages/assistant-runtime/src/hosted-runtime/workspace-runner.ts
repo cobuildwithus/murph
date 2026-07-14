@@ -15,9 +15,11 @@ import {
   type HostedCanonicalWritePort,
 } from "@murphai/core";
 import type {
+  HostedMailboxLaneHighWater,
   HostedRuntimeRedactedJson,
   HostedRuntimeLatencyPhaseBreakdown,
   HostedRuntimeLatencyTraceStagedMilestones,
+  HostedRuntimeUsageAttribution,
   HostedRuntimeUsageNoticeDeliveryTarget,
   HostedWorkspaceCheckpointReason,
   HostedWorkspaceCheckpointRequest,
@@ -209,6 +211,7 @@ export interface HostedWorkspaceRunnerAssistantPhaseInput {
   recordDeferredUsage?: ((
     record: AssistantUsageRecord,
     noticeDeliveryTarget?: HostedRuntimeUsageNoticeDeliveryTarget | null,
+    usageAttribution?: HostedRuntimeUsageAttribution | null,
   ) => void) | null;
   shouldYieldBackgroundMaintenance?: (() => boolean) | null;
   workspace: HostedWorkspaceState | null;
@@ -227,6 +230,7 @@ export interface HostedWorkspaceRunnerAssistantInputBatch {
 interface HostedDeferredAssistantUsageRecord {
   noticeDeliveryTarget?: HostedRuntimeUsageNoticeDeliveryTarget | null;
   record: AssistantUsageRecord;
+  usageAttribution?: HostedRuntimeUsageAttribution | null;
 }
 
 export interface HostedWorkspaceRunnerHandledDeviceSyncWake {
@@ -298,6 +302,8 @@ export interface HostedWorkspaceRunnerMailboxImportContext {
   onConversationInputStaged?: (() => void) | null;
   runtimeAttemptId?: string | null;
   signal?: AbortSignal | null;
+  usageAttribution?: HostedRuntimeUsageAttribution | null;
+  usageAttributionMaxSeqByLane?: HostedMailboxLaneHighWater[] | null;
 }
 
 export interface HostedWorkspaceRunnerRuntimePassDiagnostics {
@@ -341,6 +347,10 @@ export interface HostedWorkspaceRunnerInput {
   initialMailboxPrefetch?: HostedMailboxPrefixPrefetch | null;
   limitPerLane: number;
   materializeWorkspaceArtifacts?: HostedWorkspaceArtifactMaterializer | null;
+  recordAssistantInputUsageAttribution?: ((input: {
+    assistantInputIds: readonly string[];
+    usageAttribution: HostedRuntimeUsageAttribution;
+  }) => void) | null;
   trackDeferredUsageCapture?: ((capture: HostedWorkspaceRunnerDeferredUsageCapture) => void) | null;
   trackLocalWorkspaceMutationCompletion?: ((completion: Promise<void> | null) => void) | null;
   withCanonicalWritePersistence?: (<T>(run: () => Promise<T>) => Promise<T>) | null;
@@ -869,6 +879,15 @@ export async function runHostedWorkspaceUntilIdleOrBudget(
         ? { orchestration: pendingRuntimeWake.orchestration }
         : {}),
       notifiedAtEpochMs: pendingRuntimeWake.notifiedAtEpochMs,
+      ...(pendingRuntimeWake.usageAttribution
+        ? { usageAttribution: pendingRuntimeWake.usageAttribution }
+        : {}),
+      ...(pendingRuntimeWake.usageAttributionMaxSeqByLane
+        ? {
+            usageAttributionMaxSeqByLane:
+              pendingRuntimeWake.usageAttributionMaxSeqByLane,
+          }
+        : {}),
     });
     if (
       pendingRuntimeWake.latestNotifiedAtEpochMs !== undefined
@@ -912,12 +931,16 @@ export async function runHostedWorkspaceUntilIdleOrBudget(
     recordDeferredUsage(
       record: AssistantUsageRecord,
       noticeDeliveryTarget?: HostedRuntimeUsageNoticeDeliveryTarget | null,
+      usageAttribution?: HostedRuntimeUsageAttribution | null,
     ): void {
       const deferredRecord = {
         ...(noticeDeliveryTarget === undefined
           ? {}
           : { noticeDeliveryTarget }),
         record,
+        ...(usageAttribution === undefined
+          ? {}
+          : { usageAttribution }),
       };
       if (deferredUsageCaptureStarted) {
         startDeferredUsageRecords([deferredRecord]);
@@ -1222,6 +1245,15 @@ function startHostedForegroundConversationMailboxImportLoop(input: {
                 latencyMilestones,
                 onConversationInputStaged: observeForegroundConversationWork,
                 runtimeAttemptId: input.input.runtimeLogContext?.attemptId ?? null,
+                ...(notification.usageAttribution
+                  ? { usageAttribution: notification.usageAttribution }
+                  : {}),
+                ...(notification.usageAttributionMaxSeqByLane
+                  ? {
+                      usageAttributionMaxSeqByLane:
+                        notification.usageAttributionMaxSeqByLane,
+                    }
+                  : {}),
               },
               input: input.input,
               lanes: ["conversation"],
@@ -1258,6 +1290,15 @@ function startHostedForegroundConversationMailboxImportLoop(input: {
               importItemContext: {
                 latencyMilestones,
                 runtimeAttemptId: input.input.runtimeLogContext?.attemptId ?? null,
+                ...(notification.usageAttribution
+                  ? { usageAttribution: notification.usageAttribution }
+                  : {}),
+                ...(notification.usageAttributionMaxSeqByLane
+                  ? {
+                      usageAttributionMaxSeqByLane:
+                        notification.usageAttributionMaxSeqByLane,
+                    }
+                  : {}),
               },
               input: input.input,
               lanes: ["system"],
@@ -1803,6 +1844,9 @@ async function importHostedMailboxForWorkspaceRunnerUntracked(
     now: input.input.now,
     prefetch: input.prefetch ?? null,
     requestId: input.requestId,
+    throughSeqByLane: buildHostedMailboxThroughSeqByLane(
+      input.importItemContext?.usageAttributionMaxSeqByLane,
+    ),
     vaultRoot: input.input.vaultRoot,
     workspacePort: input.input.platform.workspacePort,
   });
@@ -1824,8 +1868,27 @@ async function importHostedMailboxForWorkspaceRunnerUntracked(
     });
   }
   await input.checkpointCanonicalMailboxImportProgress?.(result);
+  const usageAttribution = input.importItemContext?.usageAttribution ?? null;
+  const assistantInputIds = result.importResult.assistantInputIds ?? [];
+  if (usageAttribution && assistantInputIds.length > 0) {
+    input.input.recordAssistantInputUsageAttribution?.({
+      assistantInputIds,
+      usageAttribution,
+    });
+  }
 
   return result;
+}
+
+function buildHostedMailboxThroughSeqByLane(
+  maxSeqByLane: readonly HostedMailboxLaneHighWater[] | null | undefined,
+): Partial<Record<"conversation" | "system" | "device-sync", string>> | null {
+  if (!maxSeqByLane) {
+    return null;
+  }
+  return Object.fromEntries(
+    maxSeqByLane.map(({ lane, maxSeq }) => [lane, maxSeq]),
+  );
 }
 
 async function writeHostedMailboxImportRuntimeLog(input: {
@@ -1925,9 +1988,13 @@ async function flushHostedAssistantUsageRecordsBestEffort(input: {
     return;
   }
 
-  for (const { noticeDeliveryTarget, record } of input.records) {
+  for (const { noticeDeliveryTarget, record, usageAttribution } of input.records) {
     try {
-      await usageRecordPort.recordUsage(record, noticeDeliveryTarget);
+      await usageRecordPort.recordUsage(
+        record,
+        noticeDeliveryTarget,
+        usageAttribution,
+      );
     } catch (error) {
       const diagnostics = buildHostedExecutionSafeErrorDiagnostics(error);
       const safeErrorMessage =

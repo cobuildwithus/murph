@@ -23,6 +23,7 @@ import {
   type HostedRuntimeRedactedJson,
   type HostedRuntimeRedactedObject,
   type HostedRuntimeRedactedScalar,
+  type HostedRuntimeUsageAttribution,
   type HostedRuntimeUsageNoticeDeliveryTarget,
 } from "@murphai/hosted-execution/runtime-control";
 import type { AssistantUsageRecord } from "@murphai/hosted-execution/assistant-usage";
@@ -226,6 +227,9 @@ export interface HostedWorkspaceRuntimeAssistantPhaseInput
   runtimeEnv: Readonly<Record<string, string>>;
   beforeProviderAcceptedInputs?: AssistantBeforeProviderAcceptedInputsHook | null;
   currentAssistantPreferenceCausalSeq?: () => string | null;
+  resolveUsageAttribution?: (
+    acceptedInputIds: readonly string[],
+  ) => HostedRuntimeUsageAttribution | null;
   stagedDirtyAcks?: readonly HostedDeviceSyncDirtyProcessedPostCheckpointRecord[] | null;
   suppressDirtyPendingFetch?: boolean;
   signal?: AbortSignal | null;
@@ -791,6 +795,9 @@ export async function runHostedWorkspaceAssistantPhase(
         input,
         providerRequestAcceptedInputIds ?? [],
       ),
+      input.resolveUsageAttribution
+        ? input.resolveUsageAttribution(providerRequestAcceptedInputIds ?? [])
+        : undefined,
     );
     return Promise.resolve();
   };

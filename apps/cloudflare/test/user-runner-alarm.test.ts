@@ -146,6 +146,13 @@ describe("HostedUserRunner execution coordination", () => {
 
     const accepted = runner.ensureRuntimeProcessingForUser({
       orchestrationAttemptId: "test-orchestration-attempt",
+      usageAttributionMailboxLag: [{
+        importedSeq: "1",
+        lag: "1",
+        lane: "conversation",
+        maxSeq: "2",
+        maxUpdatedAt: FIXED_NOW,
+      }],
       userId: TEST_USER_ID,
     });
     let acceptedSettled = false;
@@ -174,6 +181,10 @@ describe("HostedUserRunner execution coordination", () => {
     await vi.waitFor(() => expect(invoke).toHaveBeenCalledOnce());
     expect(invoke).toHaveBeenCalledOnce();
     expect(invoke.mock.calls[0]?.[0].job.request).toMatchObject({
+      usageAttributionMaxSeqByLane: [{
+        lane: "conversation",
+        maxSeq: "2",
+      }],
       userId: TEST_USER_ID,
       workspace: expect.objectContaining({
         userId: TEST_USER_ID,
@@ -1653,9 +1664,22 @@ describe("HostedUserRunner execution coordination", () => {
     const token = writeRuntimeFenceForTest(sql, {
       workspaceVersion: "7",
     });
+    const usageAttribution = {
+      groupId: "family_active_fence",
+      kind: "family",
+    } as const;
+    const usageAttributionMailboxLag = [{
+      importedSeq: "1",
+      lag: "1",
+      lane: "conversation" as const,
+      maxSeq: "2",
+      maxUpdatedAt: FIXED_NOW,
+    }];
 
     await expect(runner.ensureRuntimeProcessingForUser({
       orchestrationAttemptId: "test-orchestration-attempt",
+      usageAttribution,
+      usageAttributionMailboxLag,
       userId: TEST_USER_ID,
     })).resolves.toMatchObject({
       action: "woken",
@@ -1673,6 +1697,11 @@ describe("HostedUserRunner execution coordination", () => {
           userRunnerEnsureStartedAtEpochMs: Date.parse(FIXED_NOW),
         },
         processingMode: "default",
+        usageAttribution,
+        usageAttributionMaxSeqByLane: [{
+          lane: "conversation",
+          maxSeq: "2",
+        }],
         userId: TEST_USER_ID,
       },
       userId: TEST_USER_ID,

@@ -680,10 +680,13 @@ export function parseHostedRuntimeUsageAttribution(
   const kind = requireString(record.kind, `${label} kind`);
 
   if (kind === "family") {
-    assertAllowedObjectKeys(record, new Set(["groupId", "kind"]), label);
+    assertAllowedObjectKeys(record, new Set(["groupId", "kind", "proof"]), label);
     return {
       groupId: requireString(record.groupId, `${label} groupId`),
       kind,
+      ...(record.proof === undefined
+        ? {}
+        : { proof: requireString(record.proof, `${label} proof`) }),
     };
   }
 
@@ -700,6 +703,7 @@ export function parseHostedRuntimeUsageAttribution(
       "limitUsdMicros",
       "periodEnd",
       "periodStart",
+      "proof",
     ]),
     label,
   );
@@ -735,6 +739,9 @@ export function parseHostedRuntimeUsageAttribution(
     ),
     periodEnd,
     periodStart,
+    ...(record.proof === undefined
+      ? {}
+      : { proof: requireString(record.proof, `${label} proof`) }),
   };
 }
 
@@ -3867,6 +3874,20 @@ export function parseHostedWorkspaceInvocationRequest(value: unknown): HostedWor
             ? null
             : parseHostedRuntimeUsageAttribution(record.usageAttribution),
         }),
+    ...(record.usageAttributionMaxSeqByLane === undefined
+      ? {}
+      : {
+          usageAttributionMaxSeqByLane:
+            record.usageAttributionMaxSeqByLane === null
+              ? null
+              : requireArray(
+                  record.usageAttributionMaxSeqByLane,
+                  "Hosted workspace invocation request usageAttributionMaxSeqByLane",
+                ).map((entry, index) => parseHostedMailboxLaneHighWater(
+                  entry,
+                  `Hosted workspace invocation request usageAttributionMaxSeqByLane[${index}]`,
+                )),
+        }),
     userId: requireString(record.userId, "Hosted workspace invocation request userId"),
     ...(record.workspace === undefined
       ? {}
@@ -4061,6 +4082,14 @@ function parseHostedMailboxLaneCursor(
   return {
     importedSeq: requireNonNegativeBigIntString(record.importedSeq, `${label}.importedSeq`),
     lane: parseHostedMailboxLane(record.lane),
+    ...(record.throughSeq === undefined || record.throughSeq === null
+      ? {}
+      : {
+          throughSeq: requireNonNegativeBigIntString(
+            record.throughSeq,
+            `${label}.throughSeq`,
+          ),
+        }),
   };
 }
 
@@ -4076,7 +4105,7 @@ function parseHostedMailboxLaneConsumed(
   };
 }
 
-function parseHostedMailboxLaneHighWater(
+export function parseHostedMailboxLaneHighWater(
   value: unknown,
   label: string,
 ): HostedMailboxLaneHighWater {

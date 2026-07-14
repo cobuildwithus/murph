@@ -152,6 +152,7 @@ export {
   parseHostedRuntimeUsageRecordRequest,
   parseHostedRuntimeUsageRecordResponse,
   parseHostedRuntimeUsageAttribution,
+  parseHostedMailboxLaneHighWater,
   parseHostedRuntimeGroupToolRequest,
   parseHostedRuntimeGroupToolResponse,
   parseHostedRuntimeNewsletterToolRequest,

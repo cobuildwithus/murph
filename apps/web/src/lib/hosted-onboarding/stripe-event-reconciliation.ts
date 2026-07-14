@@ -806,6 +806,9 @@ async function continueHostedStripeFamilyUsageRepair(input: {
   repairPage: HostedAiUsageFamilyAttributionRepairPage;
 }): Promise<void> {
   const stalled = input.repairPage.processedCount === 0;
+  if (stalled && input.claimed.attemptCount >= STRIPE_EVENT_MAX_ATTEMPTS) {
+    throw new Error("Hosted Family usage repair remained stalled without an eligible period.");
+  }
   await input.prisma.hostedStripeEvent.updateMany({
     where: {
       attemptCount: input.claimed.attemptCount,
@@ -813,9 +816,13 @@ async function continueHostedStripeFamilyUsageRepair(input: {
       status: HostedStripeEventStatus.processing,
     },
     data: {
-      attemptCount: {
-        decrement: 1,
-      },
+      ...(stalled
+        ? {}
+        : {
+            attemptCount: {
+              decrement: 1,
+            },
+          }),
       claimExpiresAt: null,
       familyUsageRepairGroupId: input.groupId,
       lastErrorCode: stalled

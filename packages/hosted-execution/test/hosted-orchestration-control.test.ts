@@ -147,7 +147,6 @@ describe("hosted orchestration control contracts", () => {
     })).toEqual({
       blocked: null,
       mailboxLag,
-      usageAttribution: null,
       workspace: {
         inboxMediaRetentionWakeAt: null,
         nextWakeAt: null,
@@ -266,6 +265,25 @@ describe("hosted orchestration control contracts", () => {
     })).toEqual({
       orchestrationAttemptId: "orchestration_attempt_test",
       processingMode: "inbox_media_retention",
+    });
+    expect(parseHostedRuntimeEnsureProcessingRequest({
+      orchestrationAttemptId: "orchestration_attempt_test",
+      usageAttributionMailboxLag: [{
+        importedSeq: "10",
+        lag: "1",
+        lane: "conversation",
+        maxSeq: "11",
+        maxUpdatedAt: "2026-05-20T12:00:01.000Z",
+      }],
+    })).toEqual({
+      orchestrationAttemptId: "orchestration_attempt_test",
+      usageAttributionMailboxLag: [{
+        importedSeq: "10",
+        lag: "1",
+        lane: "conversation",
+        maxSeq: "11",
+        maxUpdatedAt: "2026-05-20T12:00:01.000Z",
+      }],
     });
     expect(parseHostedRuntimeEnsureProcessingRequest({
       orchestrationAttemptId: "orchestration_attempt_test",

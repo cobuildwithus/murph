@@ -1497,7 +1497,9 @@ describe("accountHostedAiUsageForAllowanceTx", () => {
       now: new Date("2026-04-09T12:00:00.000Z"),
       record: {
         ...BASE_USAGE_RECORD,
-        occurredAt: "2026-04-05T12:00:00.000Z",
+        // Provider completion can cross the admitted period boundary. The
+        // supplied proof, rather than the completion month, owns accounting.
+        occurredAt: "2026-04-09T12:00:00.000Z",
       },
       tx: tx as never,
       usageAttribution: {
@@ -1687,7 +1689,7 @@ describe("accountHostedAiUsageForAllowanceTx", () => {
     expect(updateMany).toHaveBeenCalledTimes(2);
   });
 
-  it("repairs later claimed work even when an earlier group period is unavailable", async () => {
+  it("completes an eligible repair page even when other claimed work is not ready", async () => {
     const ready = buildStoredPendingFamilyUsageRecord({
       groupId: "hbag_ready",
       occurredAt: new Date("2026-04-09T12:00:01.000Z"),
@@ -1724,7 +1726,7 @@ describe("accountHostedAiUsageForAllowanceTx", () => {
       pageSize: 2,
       tx: tx as never,
     })).resolves.toMatchObject({
-      hasMore: true,
+      hasMore: false,
       processedCount: 1,
     });
 
@@ -1734,6 +1736,47 @@ describe("accountHostedAiUsageForAllowanceTx", () => {
         id: "turn_ready.attempt-1",
       }),
     }));
+  });
+
+  it("does not reschedule unready Family work and repairs it after its period appears", async () => {
+    const pending = buildStoredPendingFamilyUsageRecord({
+      occurredAt: new Date("2026-04-09T12:00:01.000Z"),
+    });
+    const queryRaw = vi.fn()
+      .mockResolvedValueOnce([])
+      .mockResolvedValueOnce([{ id: pending.id }]);
+    const findMany = vi.fn(async () => [pending]);
+    const updateMany = vi.fn(async () => ({ count: 1 }));
+    const tx = createAllowanceTx({
+      executeRaw: vi.fn<AllowanceExecuteRaw>(async () => 1),
+      familyAccessActive: true,
+      familyPeriodEnd: new Date("2026-05-01T00:00:00.000Z"),
+      familyPeriodStart: new Date("2026-04-01T00:00:00.000Z"),
+      hostedAiUsageFindMany: findMany,
+      hostedAiUsageUpdateMany: updateMany,
+      periodEnd: new Date("2026-05-01T00:00:00.000Z"),
+      periodStart: new Date("2026-04-01T00:00:00.000Z"),
+      queryRaw,
+    });
+
+    await expect(reconcileHostedAiUsageFamilyAttributionForGroupTx({
+      groupId: "hbag_family",
+      tx: tx as never,
+    })).resolves.toEqual({
+      candidates: [],
+      hasMore: false,
+      processedCount: 0,
+    });
+    await expect(reconcileHostedAiUsageFamilyAttributionForGroupTx({
+      groupId: "hbag_family",
+      tx: tx as never,
+    })).resolves.toMatchObject({
+      hasMore: false,
+      processedCount: 1,
+    });
+
+    expect(findMany).toHaveBeenCalledOnce();
+    expect(updateMany).toHaveBeenCalledOnce();
   });
 
   it("validates OpenAI flex evidence before marking stale-trial usage denied", async () => {

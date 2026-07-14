@@ -5,11 +5,13 @@ import path from "node:path";
 
 import {
   HOSTED_RUNTIME_LATENCY_PHASE_BREAKDOWN_PHASE_KEYS,
+  type HostedMailboxLaneHighWater,
   type HostedRuntimeLatencyPhaseBreakdown,
   type HostedRuntimeRedactedJson,
   type HostedRuntimeOrchestrationLatencyDiagnostics,
   type HostedRuntimeLatencyTraceMilestone,
   type HostedRuntimeLatencyTraceStagedMilestones,
+  type HostedRuntimeUsageAttribution,
   type HostedWorkspaceCheckpointResponse,
   type HostedWorkspaceInvocationResult,
   type HostedWorkspaceState,
@@ -50,6 +52,9 @@ import {
   normalizeHostedAssistantRuntimeConfig,
   projectHostedRuntimeTrustStoreEnv,
 } from "./hosted-runtime/environment.ts";
+import {
+  createHostedRuntimeUsageAttributionAuthority,
+} from "./hosted-runtime/usage-attribution-authority.ts";
 import {
   HOSTED_CODEX_OPERATOR_MEMORY_DIAGNOSTICS,
   HOSTED_CODEX_PROVIDER_TRANSPORT_DIAGNOSTICS,
@@ -443,6 +448,7 @@ async function importHostedInitialMailboxForWorkspaceRunner(input: {
     ? null
     : await createHostedForegroundMailboxPrefetch({
         limitPerLane: input.runnerInput.limitPerLane,
+        importItemContext: input.importItemContext ?? null,
         requestId: input.requestId,
         runnerInput: input.runnerInput,
       });
@@ -475,6 +481,7 @@ async function importHostedInitialMailboxForWorkspaceRunner(input: {
 }
 
 async function createHostedForegroundMailboxPrefetch(input: {
+  importItemContext?: HostedWorkspaceRunnerMailboxImportContext | null;
   limitPerLane: number;
   requestId: string;
   runnerInput: HostedWorkspaceRunnerInput;
@@ -488,6 +495,13 @@ async function createHostedForegroundMailboxPrefetch(input: {
     mailboxPort: input.runnerInput.platform.mailboxPort,
     requestId: input.requestId,
     state,
+    throughSeqByLane: input.importItemContext?.usageAttributionMaxSeqByLane
+      ? Object.fromEntries(
+          input.importItemContext.usageAttributionMaxSeqByLane.map(
+            ({ lane, maxSeq }) => [lane, maxSeq],
+          ),
+        )
+      : null,
   });
 }
 
@@ -540,6 +554,8 @@ interface HostedRuntimeWakeLatencySeed {
   foregroundWaitResolvedAtEpochMs?: number;
   orchestration?: HostedRuntimeOrchestrationLatencyDiagnostics | null;
   runtimeWakeNotifiedAtEpochMs?: number | null;
+  usageAttribution?: HostedRuntimeUsageAttribution | null;
+  usageAttributionMaxSeqByLane?: HostedMailboxLaneHighWater[] | null;
 }
 
 function mergeHostedRuntimeLatencyTraceStagedMilestones(
@@ -630,7 +646,31 @@ function createHostedRuntimeWakeLatencySeed(
     foregroundWaitResolvedAtEpochMs: Date.now(),
     ...(notification.orchestration ? { orchestration: notification.orchestration } : {}),
     runtimeWakeNotifiedAtEpochMs: notification.notifiedAtEpochMs,
+    ...(notification.usageAttribution
+      ? { usageAttribution: notification.usageAttribution }
+      : {}),
+    ...(notification.usageAttributionMaxSeqByLane
+      ? {
+          usageAttributionMaxSeqByLane:
+            notification.usageAttributionMaxSeqByLane,
+        }
+      : {}),
   };
+}
+
+function createHostedRuntimeUsageAttributionLatencySeed(
+  usageAttribution: HostedRuntimeUsageAttribution | null | undefined,
+  usageAttributionMaxSeqByLane:
+    HostedMailboxLaneHighWater[] | null | undefined,
+): HostedRuntimeWakeLatencySeed | null {
+  return usageAttribution
+    ? {
+        usageAttribution,
+        ...(usageAttributionMaxSeqByLane
+          ? { usageAttributionMaxSeqByLane }
+          : {}),
+      }
+    : null;
 }
 
 function createHostedRuntimeOrchestrationLatencySeed(
@@ -655,6 +695,13 @@ function mergeHostedRuntimeWakeLatencySeeds(
     ...(base ?? {}),
     ...(extra ?? {}),
     ...(Object.keys(orchestration).length > 0 ? { orchestration } : {}),
+    ...(base?.usageAttribution
+      ? {
+          usageAttribution: base.usageAttribution,
+          usageAttributionMaxSeqByLane:
+            base.usageAttributionMaxSeqByLane ?? null,
+        }
+      : {}),
   };
 }
 
@@ -666,6 +713,15 @@ function createHostedRuntimeWakeInitialImportContext(
   }
 
   return {
+    ...(seed.usageAttribution
+      ? { usageAttribution: seed.usageAttribution }
+      : {}),
+    ...(seed.usageAttributionMaxSeqByLane
+      ? {
+          usageAttributionMaxSeqByLane:
+            seed.usageAttributionMaxSeqByLane,
+        }
+      : {}),
     latencyMilestones: {
       phaseBreakdown: {
         schemaVersion: 1,
@@ -1232,6 +1288,10 @@ export async function runHostedWorkspaceRuntimeJobInProcess(
       ...guardedRuntime,
       platform: runnerPlatform,
     };
+    const usageAttributionAuthority =
+      createHostedRuntimeUsageAttributionAuthority(
+        input.request.usageAttribution ?? null,
+      );
     const baseRunnerInput: HostedWorkspaceRunnerInput = {
       checkpointRuntimeRedactedStatus,
       checkpointRequestBuilder,
@@ -1240,6 +1300,9 @@ export async function runHostedWorkspaceRuntimeJobInProcess(
       importItem: importMailboxItem,
       limitPerLane: mailboxBudget.fetchLimitPerLane,
       materializeWorkspaceArtifacts: restored.materializeWorkspaceArtifacts,
+      recordAssistantInputUsageAttribution: (attributionInput) => {
+        usageAttributionAuthority.recordAssistantInputs(attributionInput);
+      },
       trackDeferredUsageCapture,
       trackLocalWorkspaceMutationCompletion,
       platform: runnerPlatform,
@@ -1328,14 +1391,24 @@ export async function runHostedWorkspaceRuntimeJobInProcess(
     const initialMailboxImportPlan = resolveHostedInitialMailboxImportPlan({
       vaultRoot: restored.vaultRoot,
     });
-    const initialMailboxImportContext = createHostedRuntimeWakeInitialImportContext(
+    const initialRuntimeWakeLatencySeed = mergeHostedRuntimeWakeLatencySeeds(
       mergeHostedRuntimeWakeLatencySeeds(
         invocationOrchestrationLatencySeed,
-        consumePendingHostedRuntimeWake(
-          options.runtimeWakeSignal ?? null,
-          options.shutdownSignal ?? null,
+        createHostedRuntimeUsageAttributionLatencySeed(
+          input.request.usageAttribution ?? null,
+          input.request.usageAttributionMaxSeqByLane ?? null,
         ),
       ),
+      consumePendingHostedRuntimeWake(
+        options.runtimeWakeSignal ?? null,
+        options.shutdownSignal ?? null,
+      ),
+    );
+    usageAttributionAuthority.recordLatest(
+      initialRuntimeWakeLatencySeed?.usageAttribution,
+    );
+    const initialMailboxImportContext = createHostedRuntimeWakeInitialImportContext(
+      initialRuntimeWakeLatencySeed,
     );
     emitPhaseLog({
       details: {
@@ -1631,6 +1704,7 @@ export async function runHostedWorkspaceRuntimeJobInProcess(
       initialMailboxPrefetch?: HostedMailboxPrefixPrefetch | null;
       requestId: string;
       signal?: AbortSignal;
+      usageAttribution?: HostedRuntimeUsageAttribution | null;
       workspace: HostedWorkspaceState | null;
     }): Promise<HostedWorkspaceRunnerResult> => {
       const passSignal = passInput.signal ?? runtimeAbortController.signal;
@@ -1706,6 +1780,11 @@ export async function runHostedWorkspaceRuntimeJobInProcess(
                         currentPreferenceCausalSeq = null;
                       };
                     },
+                    resolveUsageAttribution: (acceptedInputIds) =>
+                      usageAttributionAuthority.resolve(
+                        acceptedInputIds,
+                        passInput.usageAttribution,
+                      ),
                     stagedDirtyAcks: stagedDeviceSyncDirtyAcks,
                     suppressDirtyPendingFetch: suppressDirtyPendingFetchUntilCheckpoint,
                     signal: passSignal,
@@ -2320,6 +2399,9 @@ export async function runHostedWorkspaceRuntimeJobInProcess(
           const passWorkspace = overlayPendingWakeOnCommittedWorkspace(
             checkpointPendingBeforePass,
           );
+          const usageAttribution =
+            singleWakeInput.latencySeed?.usageAttribution ?? null;
+          usageAttributionAuthority.recordLatest(usageAttribution);
           result = await runWorkspaceForegroundPass({
             initialAssistantInputBatch: singleWakeInput.initialAssistantInputBatch ?? null,
             initialMailboxImport: singleWakeInput.initialMailboxImport ?? null,
@@ -2328,6 +2410,7 @@ export async function runHostedWorkspaceRuntimeJobInProcess(
             initialMailboxPrefetch: singleWakeInput.initialMailboxPrefetch ?? null,
             requestId: `${requestId}:${singleWakeInput.requestIdKind}:${idleWakeOrdinal}`,
             signal: singleWakeInput.signal,
+            usageAttribution,
             workspace: passWorkspace,
           });
           absorbForegroundPassResult(
@@ -2455,6 +2538,7 @@ export async function runHostedWorkspaceRuntimeJobInProcess(
         const initialMailboxPrefetch = input.lanes.length === 1
             && input.lanes[0] === "conversation"
           ? await createHostedForegroundMailboxPrefetch({
+              importItemContext: initialMailboxImportContext,
               limitPerLane: input.limitPerLane ?? mailboxBudget.fetchLimitPerLane,
               requestId: mailboxImportRequestId,
               runnerInput: baseRunnerInput,
@@ -2557,7 +2641,7 @@ export async function runHostedWorkspaceRuntimeJobInProcess(
         initialMailboxImport,
         initialMailboxImportContext,
         initialMailboxPrefetch: initialMailboxImportResult.prefetch,
-        latencySeed: null,
+        latencySeed: initialRuntimeWakeLatencySeed,
         requestIdKind: "idle-wake",
       });
       const committedInboxMediaRetentionWakeDue = isHostedInboxMediaRetentionWakeDue({
@@ -2678,7 +2762,11 @@ export async function runHostedWorkspaceRuntimeJobInProcess(
               providerName: runtimeEnv[HOSTED_CODEX_EFFECTIVE_MODEL_PROVIDER_ID_ENV] ?? null,
               recordUsage: guardedRuntime.platform.usageRecordPort
                 ? async (record) => {
-                    await guardedRuntime.platform.usageRecordPort?.recordUsage(record);
+                    await guardedRuntime.platform.usageRecordPort?.recordUsage(
+                      record,
+                      undefined,
+                      usageAttributionAuthority.readLatest(),
+                    );
                   }
                 : null,
               resolveAssistantSessionId: (codexThreadId) =>

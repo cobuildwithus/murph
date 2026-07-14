@@ -21,6 +21,7 @@ import {
   type HostedRuntimeUsageAttribution,
   type HostedRuntimeWebStatusResponse,
   type HostedWorkspaceInvocationResult,
+  type HostedWorkspaceInvocationRequest,
   type HostedWorkspaceReadResponse,
   type HostedWorkspaceState,
 } from "@murphai/hosted-execution/runtime-control";
@@ -135,6 +136,7 @@ export type RuntimeInvocationInput = {
   orchestrationAttemptId: string;
   processingMode?: "default" | "inbox_media_retention" | null;
   usageAttribution?: HostedRuntimeUsageAttribution | null;
+  usageAttributionMaxSeqByLane?: HostedWorkspaceInvocationRequest["usageAttributionMaxSeqByLane"];
   userId: string;
 };
 
@@ -196,6 +198,12 @@ export class RuntimeInvocationService {
       ...(input.input.usageAttribution === undefined
         ? {}
         : { usageAttribution: input.input.usageAttribution }),
+      ...(input.input.usageAttributionMaxSeqByLane === undefined
+        ? {}
+        : {
+            usageAttributionMaxSeqByLane:
+              input.input.usageAttributionMaxSeqByLane,
+          }),
       token,
       userId: input.input.userId,
       workspace: workspaceRead.workspace,
@@ -637,6 +645,7 @@ export class RuntimeInvocationService {
       HostedAssistantReasoningEffortOverride | null;
     processingMode?: "default" | "inbox_media_retention" | null;
     usageAttribution?: HostedRuntimeUsageAttribution | null;
+    usageAttributionMaxSeqByLane?: HostedWorkspaceInvocationRequest["usageAttributionMaxSeqByLane"];
     token: RunnerWriteFenceToken;
     userId: string;
     workspace: HostedWorkspaceState | null;
@@ -784,6 +793,12 @@ export class RuntimeInvocationService {
         ...(input.usageAttribution === undefined
           ? {}
           : { usageAttribution: input.usageAttribution }),
+        ...(input.usageAttributionMaxSeqByLane === undefined
+          ? {}
+          : {
+              usageAttributionMaxSeqByLane:
+                input.usageAttributionMaxSeqByLane,
+            }),
         providerEgressToken: input.token.providerEgressToken,
         userId: input.userId,
         workspace: input.workspace,

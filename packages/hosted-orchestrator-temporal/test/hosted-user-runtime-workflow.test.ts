@@ -48,6 +48,13 @@ describe("hostedUserRuntimeWorkflow loop", () => {
           groupId: "hbag_family",
           kind: "family",
         },
+        usageAttributionMailboxLag: [{
+          importedSeq: "0",
+          lag: "1",
+          lane: "conversation",
+          maxSeq: "1",
+          maxUpdatedAt: "2026-05-20T11:59:30.000Z",
+        }],
         userId: "member_test",
       },
     ]);

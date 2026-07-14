@@ -702,6 +702,7 @@ export interface HostedMailboxLaneCounterState {
 export interface HostedMailboxLaneCursor {
   importedSeq: string;
   lane: HostedMailboxLane;
+  throughSeq?: string | null;
 }
 
 export const HOSTED_MAILBOX_FETCH_CURSOR_MODES = [
@@ -790,6 +791,7 @@ export type HostedRuntimeUsageAttribution =
   | {
       groupId: string;
       kind: "family";
+      proof?: string;
     }
   | {
       allowanceSource: "direct_paid_member_plan" | "direct_trial";
@@ -798,6 +800,7 @@ export type HostedRuntimeUsageAttribution =
       limitUsdMicros: string;
       periodEnd: string;
       periodStart: string;
+      proof?: string;
     };
 
 export interface HostedRuntimeUsageRecordRequest {
@@ -2180,6 +2183,7 @@ export interface HostedWorkspaceInvocationRequest {
   processingMode?: HostedWorkspaceInvocationProcessingMode | null;
   providerEgressToken?: string | null;
   usageAttribution?: HostedRuntimeUsageAttribution | null;
+  usageAttributionMaxSeqByLane?: HostedMailboxLaneHighWater[] | null;
   userId: string;
   workspace?: HostedWorkspaceState | null;
   workspaceVersion: string;

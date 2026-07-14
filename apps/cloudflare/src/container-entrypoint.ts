@@ -26,6 +26,14 @@ import {
   type HostedExecutionStructuredLogDetails,
 } from "@murphai/hosted-execution";
 import {
+  parseHostedMailboxLaneHighWater,
+  parseHostedRuntimeUsageAttribution,
+} from "@murphai/hosted-execution/parsers";
+import type {
+  HostedMailboxLaneHighWater,
+  HostedRuntimeUsageAttribution,
+} from "@murphai/hosted-execution/runtime-control";
+import {
   buildHostedRunnerExecutablePath,
   HOSTED_RUNTIME_CODEX_MODEL_CATALOG_JSON_ENV,
   HOSTED_RUNNER_EXECUTABLE_PATH,
@@ -293,12 +301,16 @@ interface HostedContainerRuntimeWakeRequest {
   attemptId: string;
   leaseGeneration: string;
   orchestration?: HostedRuntimeOrchestrationLatencyDiagnostics | null;
+  usageAttribution?: HostedRuntimeUsageAttribution | null;
+  usageAttributionMaxSeqByLane?: HostedMailboxLaneHighWater[] | null;
   userId: string;
 }
 
 type HostedContainerRuntimeWakeNotification = {
   notifiedAtEpochMs?: number | null;
   orchestration?: HostedRuntimeOrchestrationLatencyDiagnostics | null;
+  usageAttribution?: HostedRuntimeUsageAttribution | null;
+  usageAttributionMaxSeqByLane?: HostedMailboxLaneHighWater[] | null;
 };
 
 // The only remaining cleanup is the off-invocation warm-Codex stop, and it
@@ -326,6 +338,9 @@ export async function startHostedContainerEntrypoint(input: {
   let activeRuntimeWakePendingLeaseGeneration: string | null = null;
   let activeRuntimeWakePendingNotifiedAtEpochMs: number | null = null;
   let activeRuntimeWakePendingOrchestration: HostedRuntimeOrchestrationLatencyDiagnostics | null = null;
+  let activeRuntimeWakePendingUsageAttribution: HostedRuntimeUsageAttribution | null = null;
+  let activeRuntimeWakePendingUsageAttributionMaxSeqByLane:
+    HostedMailboxLaneHighWater[] | null = null;
   let activeRuntimeWakePendingUserId: string | null = null;
   let activeWorkspaceInvocationAbort: {
     abort: (reason: Error) => void;
@@ -475,6 +490,15 @@ export async function startHostedContainerEntrypoint(input: {
           accepted = !mismatch && wake({
             ...(acceptedWakeOrchestration ? { orchestration: acceptedWakeOrchestration } : {}),
             notifiedAtEpochMs,
+            ...(wakeRequest.usageAttribution
+              ? { usageAttribution: wakeRequest.usageAttribution }
+              : {}),
+            ...(wakeRequest.usageAttributionMaxSeqByLane
+              ? {
+                  usageAttributionMaxSeqByLane:
+                    wakeRequest.usageAttributionMaxSeqByLane,
+                }
+              : {}),
           }) === true;
         } else if (!wakeRequest) {
           accepted = wake?.({ notifiedAtEpochMs }) === true;
@@ -498,8 +522,20 @@ export async function startHostedContainerEntrypoint(input: {
             if (!activeRuntimeWakePending) {
               activeRuntimeWakePendingNotifiedAtEpochMs = notifiedAtEpochMs;
               activeRuntimeWakePendingOrchestration = acceptedWakeOrchestration;
+              activeRuntimeWakePendingUsageAttribution =
+                wakeRequest?.usageAttribution ?? null;
+              activeRuntimeWakePendingUsageAttributionMaxSeqByLane =
+                wakeRequest?.usageAttributionMaxSeqByLane ?? null;
             } else if (!activeRuntimeWakePendingOrchestration && acceptedWakeOrchestration) {
               activeRuntimeWakePendingOrchestration = acceptedWakeOrchestration;
+            }
+            if (
+              !activeRuntimeWakePendingUsageAttribution
+              && wakeRequest?.usageAttribution
+            ) {
+              activeRuntimeWakePendingUsageAttribution = wakeRequest.usageAttribution;
+              activeRuntimeWakePendingUsageAttributionMaxSeqByLane =
+                wakeRequest.usageAttributionMaxSeqByLane ?? null;
             }
             activeRuntimeWakePending = true;
             pending = true;
@@ -871,9 +907,14 @@ export async function startHostedContainerEntrypoint(input: {
           const pendingWake = activeRuntimeWakePending;
           const pendingWakeNotifiedAtEpochMs = activeRuntimeWakePendingNotifiedAtEpochMs;
           const pendingWakeOrchestration = activeRuntimeWakePendingOrchestration;
+          const pendingWakeUsageAttribution = activeRuntimeWakePendingUsageAttribution;
+          const pendingWakeUsageAttributionMaxSeqByLane =
+            activeRuntimeWakePendingUsageAttributionMaxSeqByLane;
           activeRuntimeWakePending = false;
           activeRuntimeWakePendingNotifiedAtEpochMs = null;
           activeRuntimeWakePendingOrchestration = null;
+          activeRuntimeWakePendingUsageAttribution = null;
+          activeRuntimeWakePendingUsageAttributionMaxSeqByLane = null;
           emitHostedExecutionStructuredLog({
             component: "container",
             details: {
@@ -885,6 +926,15 @@ export async function startHostedContainerEntrypoint(input: {
                       ? { orchestration: pendingWakeOrchestration }
                       : {}),
                     notifiedAtEpochMs: pendingWakeNotifiedAtEpochMs ?? undefined,
+                    ...(pendingWakeUsageAttribution
+                      ? { usageAttribution: pendingWakeUsageAttribution }
+                      : {}),
+                    ...(pendingWakeUsageAttributionMaxSeqByLane
+                      ? {
+                          usageAttributionMaxSeqByLane:
+                            pendingWakeUsageAttributionMaxSeqByLane,
+                        }
+                      : {}),
                   })
                 : false,
               workspaceAttemptId: activeRuntimeWakeAttemptId,
@@ -957,6 +1007,8 @@ export async function startHostedContainerEntrypoint(input: {
         activeRuntimeWakePendingLeaseGeneration = null;
         activeRuntimeWakePendingNotifiedAtEpochMs = null;
         activeRuntimeWakePendingOrchestration = null;
+        activeRuntimeWakePendingUsageAttribution = null;
+        activeRuntimeWakePendingUsageAttributionMaxSeqByLane = null;
         activeRuntimeWakePendingUserId = null;
       }
       if (
@@ -1423,8 +1475,40 @@ function parseHostedContainerRuntimeWakeRequest(
     attemptId,
     leaseGeneration,
     orchestration: readHostedContainerRuntimeWakeOrchestration(record.orchestration),
+    ...(record.usageAttribution === undefined
+      ? {}
+      : {
+          usageAttribution: record.usageAttribution === null
+            ? null
+            : parseHostedRuntimeUsageAttribution(record.usageAttribution),
+        }),
+    ...(record.usageAttributionMaxSeqByLane === undefined
+      ? {}
+      : {
+          usageAttributionMaxSeqByLane:
+            readHostedContainerUsageAttributionMaxSeqByLane(
+              record.usageAttributionMaxSeqByLane,
+            ),
+        }),
     userId,
   };
+}
+
+function readHostedContainerUsageAttributionMaxSeqByLane(
+  value: unknown,
+): HostedMailboxLaneHighWater[] | null {
+  if (value === null) {
+    return null;
+  }
+  if (!Array.isArray(value)) {
+    throw new TypeError(
+      "Runtime wake usage attribution mailbox high-water must be an array.",
+    );
+  }
+  return value.map((entry, index) => parseHostedMailboxLaneHighWater(
+    entry,
+    `Runtime wake usage attribution mailbox high-water[${index}]`,
+  ));
 }
 
 function readHostedContainerRuntimeWakeOrchestration(

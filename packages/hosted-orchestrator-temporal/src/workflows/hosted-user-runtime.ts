@@ -113,6 +113,7 @@ export interface HostedUserRuntimeWorkflowRuntime {
     orchestrationAttemptId: string;
     processingMode?: "default" | "inbox_media_retention" | null;
     usageAttribution?: HostedRuntimeUsageAttribution | null;
+    usageAttributionMailboxLag?: HostedRuntimeReconciliationFacts["mailboxLag"] | null;
     userId: string;
   }): Promise<HostedRuntimeEnsureProcessingResponse>;
   nowMs(): number;
@@ -194,6 +195,7 @@ export function createHostedUserRuntimeWorkflowMachine(
     clearMailboxPointerOnAccepted: boolean;
     processingMode?: "default" | "inbox_media_retention" | null;
     usageAttribution?: HostedRuntimeUsageAttribution | null;
+    usageAttributionMailboxLag?: HostedRuntimeReconciliationFacts["mailboxLag"] | null;
   }): Promise<void> => {
     const signalVersionBeforeExecution = state.signalVersion;
     const mailboxVersionBeforeExecution = mailboxSignalVersion;
@@ -209,6 +211,12 @@ export function createHostedUserRuntimeWorkflowMachine(
         ...(processingInput.usageAttribution === undefined
           ? {}
           : { usageAttribution: processingInput.usageAttribution }),
+        ...(processingInput.usageAttributionMailboxLag === undefined
+          ? {}
+          : {
+              usageAttributionMailboxLag:
+                processingInput.usageAttributionMailboxLag,
+            }),
         userId: input.userId,
       });
     } catch (error) {
@@ -377,7 +385,11 @@ export function createHostedUserRuntimeWorkflowMachine(
         await executeRuntimeProcessing({
           clearMailboxPointerOnAccepted: true,
           ...(facts.usageAttribution
-            ? { usageAttribution: facts.usageAttribution }
+            ? {
+                usageAttribution: facts.usageAttribution,
+                usageAttributionMailboxLag:
+                  facts.usageAttributionMailboxLag ?? facts.mailboxLag,
+              }
             : {}),
         });
         continue;
@@ -390,7 +402,11 @@ export function createHostedUserRuntimeWorkflowMachine(
         await executeRuntimeProcessing({
           clearMailboxPointerOnAccepted: false,
           ...(facts.usageAttribution
-            ? { usageAttribution: facts.usageAttribution }
+            ? {
+                usageAttribution: facts.usageAttribution,
+                usageAttributionMailboxLag:
+                  facts.usageAttributionMailboxLag ?? facts.mailboxLag,
+              }
             : {}),
         });
         continue;

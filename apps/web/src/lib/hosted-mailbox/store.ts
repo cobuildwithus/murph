@@ -110,6 +110,7 @@ export interface HostedMailboxLaneCursor {
 export interface HostedMailboxRuntimeFetchLaneCursor {
   lane: HostedMailboxLane | string;
   importedSeq: bigint | number | string;
+  throughSeq?: bigint | number | string | null;
 }
 
 export interface FetchHostedMailboxItemsResult {
@@ -680,6 +681,12 @@ async function fetchHostedRuntimeMailboxProjectionTx(input: {
       ),
       lane,
       ordinal,
+      throughSeq: cursor.throughSeq === undefined || cursor.throughSeq === null
+        ? null
+        : normalizeHostedMailboxSeq(
+            cursor.throughSeq,
+            "Hosted mailbox throughSeq",
+          ),
     };
   });
 
@@ -694,10 +701,11 @@ async function fetchHostedRuntimeMailboxProjectionTx(input: {
   const requestedLaneValues = lanes.map((entry) => Prisma.sql`(
     ${entry.ordinal}::integer,
     ${entry.lane}::text,
-    ${entry.importedSeq}::bigint
+    ${entry.importedSeq}::bigint,
+    ${entry.throughSeq}::bigint
   )`);
   const rows = await prisma.$queryRaw<HostedRuntimeMailboxProjectionRow[]>(Prisma.sql`
-    WITH requested_lane (ordinal, lane, imported_seq) AS (
+    WITH requested_lane (ordinal, lane, imported_seq, through_seq) AS (
       VALUES ${Prisma.join(requestedLaneValues)}
     ),
     lane_projection AS (
@@ -705,10 +713,20 @@ async function fetchHostedRuntimeMailboxProjectionTx(input: {
         requested_lane.ordinal,
         requested_lane.lane,
         requested_lane.imported_seq,
-        GREATEST(
-          COALESCE(lane_counter.consumed_seq, 0::bigint),
-          COALESCE(oldest_live.lane_seq - 1::bigint, 0::bigint)
-        ) AS consumed_seq,
+        requested_lane.through_seq,
+        CASE
+          WHEN requested_lane.through_seq IS NULL THEN GREATEST(
+            COALESCE(lane_counter.consumed_seq, 0::bigint),
+            COALESCE(oldest_live.lane_seq - 1::bigint, 0::bigint)
+          )
+          ELSE LEAST(
+            requested_lane.through_seq,
+            GREATEST(
+              COALESCE(lane_counter.consumed_seq, 0::bigint),
+              COALESCE(oldest_live.lane_seq - 1::bigint, 0::bigint)
+            )
+          )
+        END AS consumed_seq,
         COALESCE(newest_live.lane_seq, 0::bigint) AS max_seq,
         newest_live.updated_at AS max_updated_at
       FROM requested_lane
@@ -720,6 +738,10 @@ async function fetchHostedRuntimeMailboxProjectionTx(input: {
         FROM hosted_mailbox_item AS mailbox_item
         WHERE mailbox_item.user_id = ${userId}
           AND mailbox_item.lane = requested_lane.lane
+          AND (
+            requested_lane.through_seq IS NULL
+            OR mailbox_item.lane_seq <= requested_lane.through_seq
+          )
           AND mailbox_item.created_at >= ${retainedAt}
           AND (mailbox_item.expires_at IS NULL OR mailbox_item.expires_at > ${fetchedAt})
         ORDER BY mailbox_item.lane_seq ASC
@@ -730,6 +752,10 @@ async function fetchHostedRuntimeMailboxProjectionTx(input: {
         FROM hosted_mailbox_item AS mailbox_item
         WHERE mailbox_item.user_id = ${userId}
           AND mailbox_item.lane = requested_lane.lane
+          AND (
+            requested_lane.through_seq IS NULL
+            OR mailbox_item.lane_seq <= requested_lane.through_seq
+          )
           AND mailbox_item.created_at >= ${retainedAt}
           AND (mailbox_item.expires_at IS NULL OR mailbox_item.expires_at > ${fetchedAt})
         ORDER BY mailbox_item.lane_seq DESC
@@ -764,6 +790,10 @@ async function fetchHostedRuntimeMailboxProjectionTx(input: {
       FROM hosted_mailbox_item AS mailbox_item
       WHERE mailbox_item.user_id = ${userId}
         AND mailbox_item.lane = lane_projection.lane
+        AND (
+          lane_projection.through_seq IS NULL
+          OR mailbox_item.lane_seq <= lane_projection.through_seq
+        )
         AND mailbox_item.lane_seq > CASE
           WHEN ${input.cursorMode === "imported_seq"}
             OR lane_projection.lane <> 'conversation'

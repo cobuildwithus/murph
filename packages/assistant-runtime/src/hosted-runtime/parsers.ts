@@ -2,6 +2,8 @@ import {
   parseConfiguredDeviceSyncRuntimeConfig,
 } from "@murphai/device-syncd/runtime-config";
 import {
+  parseHostedMailboxLaneHighWater,
+  parseHostedRuntimeUsageAttribution,
   parseHostedWorkspaceState,
 } from "@murphai/hosted-execution/parsers";
 
@@ -117,6 +119,25 @@ export function parseHostedAssistantWorkspaceRuntimeJobRequest(
       record.leaseGeneration,
       "Hosted assistant workspace runtime job request.leaseGeneration",
     ),
+    ...(record.usageAttribution === undefined
+      ? {}
+      : {
+          usageAttribution: record.usageAttribution === null
+            ? null
+            : parseHostedRuntimeUsageAttribution(record.usageAttribution),
+        }),
+    ...(record.usageAttributionMaxSeqByLane === undefined
+      || record.usageAttributionMaxSeqByLane === null
+      ? {}
+      : {
+          usageAttributionMaxSeqByLane: requireArray(
+            record.usageAttributionMaxSeqByLane,
+            "Hosted assistant workspace runtime job request.usageAttributionMaxSeqByLane",
+          ).map((entry, index) => parseHostedMailboxLaneHighWater(
+            entry,
+            `Hosted assistant workspace runtime job request.usageAttributionMaxSeqByLane[${index}]`,
+          )),
+        }),
     ...(record.providerEgressToken === undefined
       ? {}
       : {
