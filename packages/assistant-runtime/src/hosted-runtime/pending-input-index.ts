@@ -5,8 +5,7 @@ import {
 } from "@murphai/assistant-engine/assistant-automation";
 import {
   compareAssistantInputCursors,
-  createStoreBackedAssistantInputSource,
-  DEFAULT_ASSISTANT_AUTOMATION_SCAN_LIMIT,
+  listAssistantInputEventsByInputId,
   readAssistantInputEvent,
   type AssistantInputCursor,
   type AssistantInputEventRecord,
@@ -31,11 +30,20 @@ export const HOSTED_PENDING_ASSISTANT_INPUT_STATE_RELATIVE_PATH =
   ".runtime/operations/assistant/hosted-pending-inputs.json";
 
 export interface HostedPendingAssistantInputState {
+  backfillAfterInputId: string | null;
   backfilled: boolean;
   inputIds: string[];
 }
 
+export interface HostedPendingAssistantInputMigrationResult {
+  pending: boolean;
+  processed: number;
+  progressed: boolean;
+  yielded: boolean;
+}
+
 export interface HostedPendingAssistantInputMediaRetentionProtections {
+  migrationPending: boolean;
   protectedAttachmentIds: string[];
   protectedCaptureIds: string[];
   protectedStoredPaths: string[];
@@ -49,7 +57,8 @@ interface HostedPendingAssistantInputStateReadResult {
 const HOSTED_PENDING_ASSISTANT_INPUT_STATE_LABEL =
   "hosted pending assistant input state";
 const HOSTED_PENDING_ASSISTANT_INPUT_STATE_KEYS =
-  new Set(["backfilled", "inputIds"]);
+  new Set(["backfillAfterInputId", "backfilled", "inputIds"]);
+export const HOSTED_PENDING_INPUT_MIGRATION_BATCH_LIMIT = 4;
 type HostedPendingAssistantInputReplyabilityEvent = Pick<
   AssistantInputEventRecord,
   "conversation" | "replyTarget" | "sourceRef"
@@ -85,6 +94,12 @@ export async function collectHostedPendingAssistantInputMediaRetentionProtection
   const inputIds = await compactHostedPendingAssistantInputIds({
     vaultRoot: input.vaultRoot,
   });
+  const [pendingState, automationState] = await Promise.all([
+    readHostedPendingAssistantInputState(input),
+    readAssistantAutomationState(input.vaultRoot),
+  ]);
+  const migrationPending = automationState.autoReply.length > 0
+    && !pendingState.backfilled;
   const protectedAttachmentIds = new Set<string>();
   const protectedCaptureIds = new Set<string>();
   const protectedStoredPaths = new Set<string>();
@@ -137,6 +152,7 @@ export async function collectHostedPendingAssistantInputMediaRetentionProtection
   }
 
   return {
+    migrationPending,
     protectedAttachmentIds: [...protectedAttachmentIds].sort(),
     protectedCaptureIds: [...protectedCaptureIds].sort(),
     protectedStoredPaths: [...protectedStoredPaths].sort(),
@@ -178,16 +194,7 @@ export async function hasHostedPendingAssistantInputWakeCandidate(input: {
   const existing = await readHostedPendingAssistantInputStateAtPath({
     filePath: resolveHostedPendingAssistantInputStatePath(input.vaultRoot),
   });
-  if (existing.state.inputIds.length > 0) {
-    return true;
-  }
-  if (!existing.missing && existing.state.backfilled) {
-    return false;
-  }
-
-  return (await compactHostedPendingAssistantInputIds({
-    vaultRoot: input.vaultRoot,
-  })).length > 0;
+  return existing.state.inputIds.length > 0;
 }
 
 export async function enqueueHostedPendingAssistantInputId(input: {
@@ -226,62 +233,195 @@ export async function compactHostedPendingAssistantInputIds(input: {
   vaultRoot: string;
 }): Promise<string[]> {
   const filePath = resolveHostedPendingAssistantInputStatePath(input.vaultRoot);
-  const existingBeforeLock = await readHostedPendingAssistantInputStateAtPath({
+  const existing = await readHostedPendingAssistantInputStateAtPath({
     filePath,
   });
-  const backfilledState = existingBeforeLock.missing || !existingBeforeLock.state.backfilled
-    ? await createBackfilledHostedPendingAssistantInputState({
-      respectEligibleAfter: true,
-      vaultRoot: input.vaultRoot,
-    })
-    : null;
+  if (existing.missing) {
+    return [];
+  }
   return await withAssistantRuntimeWriteLock(input.vaultRoot, async (paths) => {
     const filePath = resolveHostedPendingAssistantInputStatePathFromRoot(
       paths.assistantStateRoot,
     );
-    const stateBeforeCompaction = await readHostedPendingAssistantInputStateForWrite({
+    const state = await readHostedPendingAssistantInputStateForWrite({
       filePath,
-      missingState: backfilledState,
+      missingState: null,
     });
-    const state = stateBeforeCompaction.backfilled
-      ? stateBeforeCompaction
-      : mergeHostedPendingAssistantInputBackfill({
-        backfilledState: backfilledState
-          ?? await createBackfilledHostedPendingAssistantInputState({
-            respectEligibleAfter: true,
-            vaultRoot: input.vaultRoot,
-          }),
-        state: stateBeforeCompaction,
-      });
     return await compactHostedPendingAssistantInputStateForWrite({
-      backfilled: true,
       filePath,
       paths,
       state,
-      stateBeforeCompaction,
       vaultRoot: input.vaultRoot,
     });
   });
 }
 
+export async function migrateLegacyHostedPendingAssistantInputIndex(input: {
+  batchLimit?: number;
+  shouldYield?: (() => boolean) | null;
+  signal?: AbortSignal;
+  vaultRoot: string;
+}): Promise<HostedPendingAssistantInputMigrationResult> {
+  const batchLimit = normalizeHostedPendingAssistantInputMigrationBatchLimit(
+    input.batchLimit,
+  );
+  if (shouldYieldHostedPendingInputMigration(input)) {
+    return pendingHostedPendingInputMigrationYield();
+  }
+  const automationState = await readAssistantAutomationState(input.vaultRoot);
+  const enabledAutoReplyChannels = new Set(
+    automationState.autoReply.map((entry) => entry.channel),
+  );
+  if (automationState.autoReply.length === 0) {
+    return {
+      pending: false,
+      processed: 0,
+      progressed: false,
+      yielded: false,
+    };
+  }
+  const paths = resolveAssistantStatePaths(input.vaultRoot);
+  const filePath = resolveHostedPendingAssistantInputStatePathFromRoot(
+    paths.assistantStateRoot,
+  );
+  const observedState = (await readHostedPendingAssistantInputStateAtPath({
+    filePath,
+  })).state;
+  if (observedState.backfilled) {
+    return {
+      pending: false,
+      processed: 0,
+      progressed: false,
+      yielded: false,
+    };
+  }
+
+  let page: Awaited<ReturnType<typeof listAssistantInputEventsByInputId>>;
+  try {
+    page = await listAssistantInputEventsByInputId({
+      afterInputId: observedState.backfillAfterInputId,
+      limit: batchLimit,
+      paths,
+      shouldYield: input.shouldYield ?? null,
+      signal: input.signal,
+    });
+  } catch (error) {
+    if (!shouldYieldHostedPendingInputMigration(input)) {
+      throw error;
+    }
+    return pendingHostedPendingInputMigrationYield();
+  }
+
+  let processed = 0;
+  let backfillAfterInputId = observedState.backfillAfterInputId;
+  const recoveredInputIds: string[] = [];
+  let yielded = false;
+  for (const event of page.events) {
+    if (shouldYieldHostedPendingInputMigration(input)) {
+      yielded = true;
+      break;
+    }
+    processed += 1;
+    backfillAfterInputId = event.inputId;
+    if (
+      isHostedPendingAssistantInputStillReplyable({
+        enabledAutoReplyChannels,
+        event,
+      })
+      && isHostedLegacyPendingBackfillCandidateAfterEligibleCursor({
+        automationState,
+        event,
+      })
+      && !await hasCompleteAssistantAutoReplyTerminalEvidence({
+        captureId: event.projection.captureId,
+        inputId: event.inputId,
+        vault: input.vaultRoot,
+      })
+    ) {
+      recoveredInputIds.push(event.inputId);
+    }
+  }
+
+  return await withAssistantRuntimeWriteLock(input.vaultRoot, async () => {
+    const state = (await readHostedPendingAssistantInputStateAtPath({ filePath })).state;
+    if (state.backfilled) {
+      return {
+        pending: false,
+        processed: 0,
+        progressed: false,
+        yielded: false,
+      };
+    }
+    if (state.backfillAfterInputId !== observedState.backfillAfterInputId) {
+      return {
+        pending: true,
+        processed: 0,
+        progressed: false,
+        yielded: false,
+      };
+    }
+    const backfilled = !yielded && page.events.length < batchLimit;
+    const nextState = createHostedPendingAssistantInputState([
+      ...state.inputIds,
+      ...recoveredInputIds.filter((inputId) => !state.inputIds.includes(inputId)),
+    ], {
+      backfillAfterInputId: backfilled ? null : backfillAfterInputId,
+      backfilled,
+    });
+    const progressed = !sameHostedPendingAssistantInputState(nextState, state);
+    if (progressed) {
+      await writeHostedPendingAssistantInputStateAtPath({ filePath, state: nextState });
+    }
+    return {
+      pending: !nextState.backfilled,
+      processed,
+      progressed,
+      yielded,
+    };
+  });
+}
+
+function pendingHostedPendingInputMigrationYield(): HostedPendingAssistantInputMigrationResult {
+  return {
+    pending: true,
+    processed: 0,
+    progressed: false,
+    yielded: true,
+  };
+}
+
+function shouldYieldHostedPendingInputMigration(input: {
+  shouldYield?: (() => boolean) | null;
+  signal?: AbortSignal;
+}): boolean {
+  return input.signal?.aborted === true || input.shouldYield?.() === true;
+}
+
+function isHostedLegacyPendingBackfillCandidateAfterEligibleCursor(input: {
+  automationState: Awaited<ReturnType<typeof readAssistantAutomationState>>;
+  event: AssistantInputEventRecord;
+}): boolean {
+  const channel = input.event.replyTarget?.channel;
+  if (!channel) {
+    return false;
+  }
+  const channelState = input.automationState.autoReply.find(
+    (entry) => entry.channel === channel,
+  );
+  return channelState !== undefined
+    && (
+      channelState.eligibleAfter === null
+      || compareAssistantInputCursors(input.event.cursor, channelState.eligibleAfter) > 0
+    );
+}
+
 async function compactHostedPendingAssistantInputStateForWrite(input: {
-  backfilled: boolean;
   filePath: string;
   paths: Parameters<typeof readAssistantInputEvent>[0]["paths"];
   state: HostedPendingAssistantInputState;
-  stateBeforeCompaction: HostedPendingAssistantInputState;
   vaultRoot: string;
 }): Promise<string[]> {
   if (input.state.inputIds.length === 0) {
-    const emptyState = createHostedPendingAssistantInputState([], {
-      backfilled: input.backfilled,
-    });
-    if (!sameHostedPendingAssistantInputState(emptyState, input.stateBeforeCompaction)) {
-      await writeHostedPendingAssistantInputStateAtPath({
-        filePath: input.filePath,
-        state: emptyState,
-      });
-    }
     return [];
   }
 
@@ -323,10 +463,13 @@ async function compactHostedPendingAssistantInputStateForWrite(input: {
     remaining
       .sort((left, right) => compareAssistantInputCursors(left.cursor, right.cursor))
       .map((item) => item.inputId),
-    { backfilled: input.backfilled },
+    {
+      backfillAfterInputId: input.state.backfillAfterInputId,
+      backfilled: input.state.backfilled,
+    },
   );
 
-  if (!sameHostedPendingAssistantInputState(remainingState, input.stateBeforeCompaction)) {
+  if (!sameHostedPendingAssistantInputState(remainingState, input.state)) {
     await writeHostedPendingAssistantInputStateAtPath({
       filePath: input.filePath,
       state: remainingState,
@@ -366,14 +509,25 @@ export function parseHostedPendingAssistantInputState(
     );
   }
   const inputIds = parseHostedPendingAssistantInputIds(state.inputIds);
+  const backfillAfterInputId = "backfillAfterInputId" in state
+    ? state.backfillAfterInputId === null
+      ? null
+      : parseHostedPendingAssistantInputId(state.backfillAfterInputId)
+    : null;
   const backfilled = "backfilled" in state
     ? parseHostedPendingAssistantInputBoolean(
       state.backfilled,
       "hosted pending assistant input state backfilled",
     )
     : false;
+  if (backfilled && backfillAfterInputId !== null) {
+    throw new TypeError(
+      "hosted pending assistant input state cannot retain a backfill cursor after backfill.",
+    );
+  }
 
   return {
+    backfillAfterInputId,
     backfilled,
     inputIds,
   };
@@ -440,11 +594,17 @@ async function writeHostedPendingAssistantInputStateAtPath(input: {
   filePath: string;
   state: HostedPendingAssistantInputState;
 }): Promise<void> {
+  const state = parseHostedPendingAssistantInputState(input.state);
   await writeAssistantStateVersionedJson({
     filePath: input.filePath,
     schema: HOSTED_PENDING_ASSISTANT_INPUT_STATE_SCHEMA,
     schemaVersion: HOSTED_PENDING_ASSISTANT_INPUT_STATE_SCHEMA_VERSION,
-    value: parseHostedPendingAssistantInputState(input.state),
+    value: state.backfillAfterInputId
+      ? state
+      : {
+          backfilled: state.backfilled,
+          inputIds: state.inputIds,
+        },
   });
 }
 
@@ -452,83 +612,6 @@ function resolveHostedPendingAssistantInputStatePathFromRoot(
   assistantStateRoot: string,
 ): string {
   return path.join(assistantStateRoot, "hosted-pending-inputs.json");
-}
-
-async function createBackfilledHostedPendingAssistantInputState(input: {
-  respectEligibleAfter: boolean;
-  vaultRoot: string;
-}): Promise<HostedPendingAssistantInputState> {
-  const automationState = await readAssistantAutomationState(input.vaultRoot);
-  if (automationState.autoReply.length === 0) {
-    return createEmptyHostedPendingAssistantInputState({
-      backfilled: true,
-    });
-  }
-
-  const source = createStoreBackedAssistantInputSource({
-    vault: input.vaultRoot,
-  });
-  const pending: { cursor: AssistantInputCursor; inputId: string }[] = [];
-
-  for (const channelState of automationState.autoReply) {
-    let cursor = input.respectEligibleAfter ? channelState.eligibleAfter : null;
-
-    while (true) {
-      const listed = await source.listInputCandidates({
-        afterCursor: cursor,
-        limit: DEFAULT_ASSISTANT_AUTOMATION_SCAN_LIMIT,
-        sourceId: channelState.channel,
-      });
-      const listedItems = listed.inputs;
-      if (listedItems.length === 0) {
-        break;
-      }
-
-      for (const candidate of listedItems) {
-        if (candidate.event.source !== channelState.channel) {
-          continue;
-        }
-        if (candidate.event.replyTarget?.channel !== channelState.channel) {
-          continue;
-        }
-        const complete = await hasCompleteAssistantAutoReplyTerminalEvidence({
-          captureId: candidate.projection.captureId,
-          inputId: candidate.event.inputId,
-          vault: input.vaultRoot,
-        });
-        if (!complete) {
-          pending.push({
-            cursor: candidate.event.cursor,
-            inputId: candidate.event.inputId,
-          });
-        }
-      }
-
-      cursor = listed.nextCursor ?? cursor;
-      if (
-        listedItems.length < DEFAULT_ASSISTANT_AUTOMATION_SCAN_LIMIT
-        || !listed.nextCursor
-      ) {
-        break;
-      }
-    }
-  }
-
-  const inputIds: string[] = [];
-  const seen = new Set<string>();
-  for (const item of pending.sort((left, right) =>
-    compareAssistantInputCursors(left.cursor, right.cursor)
-  )) {
-    if (seen.has(item.inputId)) {
-      continue;
-    }
-    seen.add(item.inputId);
-    inputIds.push(item.inputId);
-  }
-
-  return createHostedPendingAssistantInputState(inputIds, {
-    backfilled: true,
-  });
 }
 
 export function isHostedPendingAssistantInputStillReplyable(input: {
@@ -553,6 +636,7 @@ function createEmptyHostedPendingAssistantInputState(input: {
   backfilled: boolean;
 }): HostedPendingAssistantInputState {
   return {
+    backfillAfterInputId: null,
     backfilled: input.backfilled,
     inputIds: [],
   };
@@ -561,10 +645,12 @@ function createEmptyHostedPendingAssistantInputState(input: {
 function createHostedPendingAssistantInputState(
   inputIds: readonly string[],
   input?: {
+    backfillAfterInputId?: string | null;
     backfilled?: boolean;
   },
 ): HostedPendingAssistantInputState {
   return {
+    backfillAfterInputId: input?.backfillAfterInputId ?? null,
     backfilled: input?.backfilled ?? false,
     inputIds: parseHostedPendingAssistantInputIds(inputIds),
   };
@@ -582,21 +668,21 @@ function appendHostedPendingAssistantInputId(input: {
     ...input.state.inputIds,
     input.inputId,
   ], {
+    backfillAfterInputId: input.state.backfillAfterInputId,
     backfilled: input.state.backfilled,
   });
 }
 
-function mergeHostedPendingAssistantInputBackfill(input: {
-  backfilledState: HostedPendingAssistantInputState;
-  state: HostedPendingAssistantInputState;
-}): HostedPendingAssistantInputState {
-  return createHostedPendingAssistantInputState(
-    uniqueHostedPendingAssistantInputIds([
-      ...input.state.inputIds,
-      ...input.backfilledState.inputIds,
-    ]),
-    { backfilled: true },
-  );
+function normalizeHostedPendingAssistantInputMigrationBatchLimit(
+  value: number | undefined,
+): number {
+  if (value === undefined) {
+    return HOSTED_PENDING_INPUT_MIGRATION_BATCH_LIMIT;
+  }
+  if (!Number.isInteger(value) || value <= 0) {
+    throw new TypeError("hosted pending assistant input batch limit must be a positive integer.");
+  }
+  return Math.min(value, HOSTED_PENDING_INPUT_MIGRATION_BATCH_LIMIT);
 }
 
 function parseHostedPendingAssistantInputIds(value: unknown): string[] {
@@ -670,21 +756,8 @@ function sameHostedPendingAssistantInputState(
   right: HostedPendingAssistantInputState,
 ): boolean {
   return left.backfilled === right.backfilled
+    && left.backfillAfterInputId === right.backfillAfterInputId
     && sameStringArray(left.inputIds, right.inputIds);
-}
-
-function uniqueHostedPendingAssistantInputIds(inputIds: readonly string[]): string[] {
-  const unique: string[] = [];
-  const seen = new Set<string>();
-  for (const inputId of inputIds) {
-    const parsed = parseHostedPendingAssistantInputId(inputId);
-    if (seen.has(parsed)) {
-      continue;
-    }
-    seen.add(parsed);
-    unique.push(parsed);
-  }
-  return unique;
 }
 
 function isRetainableAssistantInputMediaKind(kind: string): boolean {

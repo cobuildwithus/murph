@@ -20,6 +20,7 @@ import { assistantPreferenceCausalSeqSchema } from "@murphai/contracts";
 import {
   compactHostedPendingAssistantInputIds,
   isHostedPendingAssistantInputStillReplyable,
+  migrateLegacyHostedPendingAssistantInputIndex,
   readExistingHostedPendingAssistantInputIds,
 } from "./pending-input-index.ts";
 
@@ -36,6 +37,8 @@ export type HostedAssistantInputSelection =
     }
   | {
       inputIds: string[];
+      migrationPending?: boolean;
+      migrationProgressed?: boolean;
       mode: "background";
       pendingInputIds: string[];
     };
@@ -179,13 +182,30 @@ export async function selectHostedAssistantInputIds(
         mode: "foreground";
         vaultRoot: string;
       }
-    | {
+      | {
         limit?: number;
         mode: "background";
+        shouldYield?: (() => boolean) | null;
+        signal?: AbortSignal;
         vaultRoot: string;
       },
 ): Promise<HostedAssistantInputSelection> {
   if (input.mode === "background") {
+    const migration = await migrateLegacyHostedPendingAssistantInputIndex({
+      batchLimit: input.limit,
+      shouldYield: input.shouldYield ?? null,
+      signal: input.signal,
+      vaultRoot: input.vaultRoot,
+    });
+    if (migration.yielded) {
+      return {
+        inputIds: [],
+        migrationPending: true,
+        ...(migration.progressed ? { migrationProgressed: true } : {}),
+        mode: "background",
+        pendingInputIds: [],
+      };
+    }
     const pendingInputIds = await compactHostedPendingAssistantInputIds({
       vaultRoot: input.vaultRoot,
     });
@@ -201,6 +221,8 @@ export async function selectHostedAssistantInputIds(
         )
         .slice(0, Math.min(limit, 1))
         .map((event) => event.inputId),
+      ...(migration.pending || migration.yielded ? { migrationPending: true } : {}),
+      ...(migration.progressed ? { migrationProgressed: true } : {}),
       mode: "background",
       pendingInputIds,
     };

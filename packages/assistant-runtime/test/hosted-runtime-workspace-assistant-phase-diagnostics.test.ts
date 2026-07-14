@@ -566,6 +566,7 @@ function createPhaseInput(input: {
       },
       stateChanged: false,
     },
+    markRuntimeStateDirty: vi.fn(),
     platform: {
       artifactStore: {
         get: vi.fn(async () => null),

@@ -1126,6 +1126,9 @@ export async function runHostedWorkspaceAssistantPhase(
       assistantAutomationRedactedLogEntries.push(
         ...(assistantMetrics.redactedLogEntries ?? []),
       );
+      if (assistantMetrics.assistantAutomationRuntimeStateDirty === true) {
+        input.markRuntimeStateDirty();
+      }
       writeHostedAssistantTurnTimingRuntimeLog({
         currentTurnDeliveryIntentCount:
           assistantMetrics.assistantAutomationCurrentTurnDeliveryIntentIds?.length ?? 0,

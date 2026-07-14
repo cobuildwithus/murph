@@ -3928,6 +3928,86 @@ describe("runHostedWorkspaceAssistantPhase runtime logs", () => {
     }));
   });
 
+  it("marks migration-only state dirty without replacing a delayed workspace wake", async () => {
+    const delayedWakeAt = "2026-04-27T00:05:00.000Z";
+    const markRuntimeStateDirty = vi.fn();
+    mocks.runHostedAssistantAutomationLane.mockResolvedValueOnce({
+      assistantAutomationCurrentTurnDeliveryIntentIds: [],
+      assistantAutomationProgressed: false,
+      assistantAutomationRuntimeStateDirty: true,
+      nextWakeAt: null,
+      redactedLogEntries: [],
+    });
+
+    const result = await runHostedWorkspaceAssistantPhase(createPhaseInput({
+      importedCount: 0,
+      markRuntimeStateDirty,
+      now: () => "2026-04-27T00:00:00.000Z",
+      workspace: {
+        checkpointedAt: "2026-04-27T00:00:00.000Z",
+        createdAt: "2026-04-27T00:00:00.000Z",
+        nextWakeAt: delayedWakeAt,
+        nextWakeReason: "assistant",
+        redactedStatus: null,
+        snapshotRef: null,
+        updatedAt: "2026-04-27T00:00:00.000Z",
+        userId: "member_synthetic_phase",
+        version: "8",
+      },
+    }));
+
+    expect(markRuntimeStateDirty).toHaveBeenCalledTimes(1);
+    expect(result).toEqual({
+      progressed: false,
+      redactedStatus: expect.objectContaining({
+        hostedAssistantNextWakeAt: null,
+        hostedAssistantProgressed: false,
+      }),
+    });
+    expect(result).not.toHaveProperty("nextWakeAt");
+  });
+
+  it("checkpoints migration cursor progress with its immediate continuation wake", async () => {
+    const dueAt = "2026-04-27T00:00:00.000Z";
+    const continuationAt = "2026-04-27T00:00:01.000Z";
+    const markRuntimeStateDirty = vi.fn();
+    mocks.runHostedAssistantAutomationLane.mockResolvedValueOnce({
+      assistantAutomationCurrentTurnDeliveryIntentIds: [],
+      assistantAutomationProgressed: false,
+      assistantAutomationRuntimeStateDirty: true,
+      nextWakeAt: continuationAt,
+      redactedLogEntries: [],
+    });
+
+    const result = await runHostedWorkspaceAssistantPhase(createPhaseInput({
+      importedCount: 0,
+      markRuntimeStateDirty,
+      now: () => dueAt,
+      workspace: {
+        checkpointedAt: dueAt,
+        createdAt: dueAt,
+        nextWakeAt: dueAt,
+        nextWakeReason: "assistant",
+        redactedStatus: null,
+        snapshotRef: null,
+        updatedAt: dueAt,
+        userId: "member_synthetic_phase",
+        version: "8",
+      },
+    }));
+
+    expect(markRuntimeStateDirty).toHaveBeenCalledTimes(1);
+    expect(result).toEqual(expect.objectContaining({
+      checkpointReason: "canonical_runtime_commit",
+      nextWakeAt: continuationAt,
+      progressed: true,
+      redactedStatus: expect.objectContaining({
+        hostedAssistantNextWakeAt: continuationAt,
+        hostedAssistantProgressed: true,
+      }),
+    }));
+  });
+
   it("checkpoints a new future automation wake from manual runtime maintenance", async () => {
     const nextWakeAt = "2026-04-27T00:05:00.000Z";
     const logRequests: HostedRuntimeLogRequest[] = [];
@@ -12646,6 +12726,7 @@ function createPhaseInput(input: {
     threadIsDirect: boolean | null;
   };
   logRequests?: HostedRuntimeLogRequest[];
+  markRuntimeStateDirty?: () => void;
   now?: () => string;
   prepareAutoReplyDelivery?: HostedWorkspaceRuntimeAssistantPhaseInput["prepareAutoReplyDelivery"];
   recordDeferredUsage?: HostedWorkspaceRuntimeAssistantPhaseInput["recordDeferredUsage"];
@@ -12674,6 +12755,7 @@ function createPhaseInput(input: {
     deviceSyncWorkspaceWakeHandled: input.deviceSyncWorkspaceWakeHandled,
     initialAssistantInputBatch: input.initialAssistantInputBatch,
     latestAssistantInputBatch: input.latestAssistantInputBatch,
+    markRuntimeStateDirty: input.markRuntimeStateDirty ?? (() => {}),
     initialMailboxImport: {
       afterCheckpointEffects: [],
       checkpoint: null,

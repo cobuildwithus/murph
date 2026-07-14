@@ -10,6 +10,7 @@ import {
   compareAssistantInputCursors,
   createAssistantInputEventId,
   listAssistantInputEvents,
+  listAssistantInputEventsByInputId,
   readAssistantInputEvent,
   readLatestAssistantInputCursor,
   resolveAssistantInputEventPath,
@@ -1412,6 +1413,84 @@ describe('assistant input event store', () => {
       vault: vaultRoot,
     })
     expect(finalPage.events).toEqual([])
+  })
+
+  it('pages every input exactly once in deterministic input-id order', async () => {
+    const { vaultRoot } = await createAssistantInputStoreVault(
+      'assistant-input-store-input-id-pagination-',
+    )
+    const stored = await Promise.all([
+      upsertAssistantInputEvent({
+        event: createHostedMailboxEventInput({
+          eventId: 'evt_input_id_page_a',
+          laneSeq: '30',
+          occurredAt: '2026-04-22T10:00:03.000Z',
+          text: 'third cursor',
+          threadId: 'chat_1',
+        }),
+        vault: vaultRoot,
+      }),
+      upsertAssistantInputEvent({
+        event: createHostedMailboxEventInput({
+          eventId: 'evt_input_id_page_b',
+          laneSeq: '10',
+          occurredAt: '2026-04-22T10:00:01.000Z',
+          text: 'first cursor',
+          threadId: 'chat_1',
+        }),
+        vault: vaultRoot,
+      }),
+      upsertAssistantInputEvent({
+        event: createHostedMailboxEventInput({
+          eventId: 'evt_input_id_page_c',
+          laneSeq: '20',
+          occurredAt: '2026-04-22T10:00:02.000Z',
+          text: 'second cursor',
+          threadId: 'chat_1',
+        }),
+        vault: vaultRoot,
+      }),
+    ])
+    const pagedInputIds: string[] = []
+    let afterInputId: string | null = null
+    for (let pageCount = 0; pageCount < 4; pageCount += 1) {
+      const page = await listAssistantInputEventsByInputId({
+        afterInputId,
+        limit: 1,
+        vault: vaultRoot,
+      })
+      if (page.events.length === 0) {
+        break
+      }
+      pagedInputIds.push(page.events[0]!.inputId)
+      afterInputId = page.events[0]!.inputId
+    }
+
+    expect(pagedInputIds).toEqual(
+      stored.map((event) => event.inputId).sort((left, right) =>
+        left.localeCompare(right),
+      ),
+    )
+  })
+
+  it('honors abort and yield signals during input-id pagination', async () => {
+    const { vaultRoot } = await createAssistantInputStoreVault(
+      'assistant-input-store-input-id-pagination-abort-',
+    )
+    const controller = new AbortController()
+    const abortReason = new Error('stop input-id pagination')
+    controller.abort(abortReason)
+
+    await expect(listAssistantInputEventsByInputId({
+      signal: controller.signal,
+      vault: vaultRoot,
+    })).rejects.toBe(abortReason)
+    await expect(listAssistantInputEventsByInputId({
+      shouldYield: () => true,
+      vault: vaultRoot,
+    })).rejects.toMatchObject({
+      name: 'AbortError',
+    })
   })
 
   it('uses timestamps before inbox capture ids when listing after a cursor', async () => {

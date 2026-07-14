@@ -208,6 +208,7 @@ export interface HostedWorkspaceRunnerAssistantPhaseInput {
   initialAssistantInputBatch?: HostedWorkspaceRunnerAssistantInputBatch | null;
   initialMailboxImport: HostedMailboxImportCheckpointResult;
   latestAssistantInputBatch?: (() => HostedWorkspaceRunnerAssistantInputBatch | null) | null;
+  markRuntimeStateDirty(): void;
   materializeWorkspaceArtifacts?: HostedWorkspaceArtifactMaterializer | null;
   now?: () => string;
   platform: HostedRuntimePlatform;
@@ -912,6 +913,7 @@ export async function runHostedWorkspaceUntilIdleOrBudget(
     initialMailboxImport,
     latestAssistantInputBatch: () =>
       checkpointRequestSession.latestAssistantInputBatch(),
+    markRuntimeStateDirty: () => checkpointRequestSession.markRuntimeStateDirty(),
     materializeWorkspaceArtifacts: input.materializeWorkspaceArtifacts ?? null,
     now: input.now,
     platform: input.platform,

@@ -210,10 +210,12 @@ describe("runHostedPendingInputProtectedIdleMaintenance", () => {
         protectedAttachmentIds?: readonly string[];
         protectedCaptureIds?: readonly string[];
         protectedStoredPaths?: readonly string[];
+        skipInboxMediaRetention?: boolean;
       };
       assert.deepEqual(callArg.protectedAttachmentIds ?? [], []);
       assert.deepEqual(callArg.protectedCaptureIds ?? [], ["cap_helper_audio"]);
       assert.deepEqual(callArg.protectedStoredPaths ?? [], []);
+      assert.equal(callArg.skipInboxMediaRetention, true);
     } finally {
       await rm(vaultRoot, { force: true, recursive: true });
     }

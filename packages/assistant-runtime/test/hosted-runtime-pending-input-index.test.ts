@@ -1,4 +1,4 @@
-import { mkdir, mkdtemp, rm, writeFile } from "node:fs/promises";
+import { mkdir, mkdtemp, readFile, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import path from "node:path";
 import { afterEach, describe, expect, it } from "vitest";
@@ -25,6 +25,8 @@ import {
   collectHostedPendingAssistantInputMediaRetentionProtections,
   enqueueHostedPendingAssistantInputId,
   ensureHostedPendingAssistantInputIndex,
+  migrateLegacyHostedPendingAssistantInputIndex,
+  parseHostedPendingAssistantInputState,
   readHostedPendingAssistantInputIds,
   resolveHostedPendingAssistantInputStatePath,
 } from "../src/hosted-runtime/pending-input-index.ts";
@@ -140,6 +142,7 @@ describe("hosted pending assistant input index", () => {
       now: "2026-04-25T00:00:00.000Z",
       vaultRoot,
     })).resolves.toEqual({
+      migrationPending: true,
       protectedAttachmentIds: ["att_cap_pending_media_01", "descriptor_image_1"],
       protectedCaptureIds: ["cap_pending_media"],
       protectedStoredPaths: [rawPath],
@@ -201,6 +204,7 @@ describe("hosted pending assistant input index", () => {
       now: "2026-04-25T00:00:00.000Z",
       vaultRoot,
     })).resolves.toEqual({
+      migrationPending: true,
       protectedAttachmentIds: [],
       protectedCaptureIds: [captureId],
       protectedStoredPaths: [],
@@ -262,6 +266,7 @@ describe("hosted pending assistant input index", () => {
       now: "2026-05-06T00:00:00.000Z",
       vaultRoot,
     })).resolves.toEqual({
+      migrationPending: true,
       protectedAttachmentIds: [],
       protectedCaptureIds: [],
       protectedStoredPaths: [],
@@ -320,12 +325,17 @@ describe("hosted pending assistant input index", () => {
       vaultRoot,
     })).resolves.toBe("2026-04-23T00:00:09.000Z");
     await expect(compactHostedPendingAssistantInputIds({ vaultRoot })).resolves.toEqual([
+      fresh.inputId,
+    ]);
+    await expect(migrateLegacyHostedPendingAssistantInputIndex({ vaultRoot }))
+      .resolves.toMatchObject({ pending: false, progressed: true });
+    await expect(compactHostedPendingAssistantInputIds({ vaultRoot })).resolves.toEqual([
       oldPending.inputId,
       fresh.inputId,
     ]);
   });
 
-  it("backfills an incomplete rollout index when resolving a pending wake", async () => {
+  it("leaves an incomplete rollout index to background migration", async () => {
     const vaultRoot = await createTempVault();
     await saveAssistantAutomationState(vaultRoot, {
       autoReply: [{
@@ -358,16 +368,22 @@ describe("hosted pending assistant input index", () => {
     await expect(resolveHostedPendingAssistantInputWakeAt({
       now: () => "2026-04-23T00:00:09.000Z",
       vaultRoot,
-    })).resolves.toBe("2026-04-23T00:00:09.000Z");
+    })).resolves.toBeNull();
+    await expect(migrateLegacyHostedPendingAssistantInputIndex({ vaultRoot }))
+      .resolves.toMatchObject({ pending: false, progressed: true });
     await expect(readHostedPendingAssistantInputIds({ vaultRoot })).resolves.toEqual([
       oldPending.inputId,
     ]);
+    await expect(resolveHostedPendingAssistantInputWakeAt({
+      now: () => "2026-04-23T00:00:09.000Z",
+      vaultRoot,
+    })).resolves.toBe("2026-04-23T00:00:09.000Z");
     await expect(compactHostedPendingAssistantInputIds({ vaultRoot })).resolves.toEqual([
       oldPending.inputId,
     ]);
   });
 
-  it("backfills a missing rollout index during background compaction", async () => {
+  it("backfills a missing rollout index during bounded background migration", async () => {
     const vaultRoot = await createTempVault();
     await saveAssistantAutomationState(vaultRoot, {
       autoReply: [{
@@ -423,12 +439,109 @@ describe("hosted pending assistant input index", () => {
       groupInputIds: [oldComplete.inputId],
       vaultRoot,
     });
+    await expect(migrateLegacyHostedPendingAssistantInputIndex({ vaultRoot }))
+      .resolves.toMatchObject({ pending: false, progressed: true });
     const indexedInputIds = await compactHostedPendingAssistantInputIds({ vaultRoot });
     expect(indexedInputIds).toEqual([
       oldPending.inputId,
     ]);
     expect(indexedInputIds).not.toContain(oldContextOnly.inputId);
     expect(indexedInputIds).not.toContain(oldComplete.inputId);
+  });
+
+  it("migrates at most four legacy inputs per resumable background pass", async () => {
+    const vaultRoot = await createTempVault();
+    await saveAssistantAutomationState(vaultRoot, {
+      autoReply: [{
+        channel: "linq",
+        eligibleAfter: null,
+        enabledAt: "2026-04-23T00:00:00.000Z",
+      }],
+      updatedAt: "2026-04-23T00:00:00.000Z",
+      version: 1,
+    });
+    const storedInputIds: string[] = [];
+    for (let index = 0; index < 6; index += 1) {
+      const event = await upsertAssistantInputEvent({
+        vault: vaultRoot,
+        event: createAssistantInputEvent({
+          dedupeKey: `dedupe_bounded_migration_${index}`,
+          eventId: `evt_bounded_migration_${index}`,
+          itemId: `item_bounded_migration_${index}`,
+          laneSeq: String(index + 1),
+          messageId: `msg_bounded_migration_${index}`,
+          occurredAt: `2026-04-23T00:00:0${index + 1}.000Z`,
+          receivedAt: `2026-04-23T00:00:0${index + 1}.500Z`,
+          text: `pending migration input ${index}`,
+        }),
+      });
+      storedInputIds.push(event.inputId);
+    }
+
+    const firstPass = await migrateLegacyHostedPendingAssistantInputIndex({
+      batchLimit: 100,
+      vaultRoot,
+    });
+    expect(firstPass.processed).toBe(4);
+    expect(firstPass).toMatchObject({
+      pending: true,
+      progressed: true,
+      yielded: false,
+    });
+    const expectedInputIds = [...storedInputIds].sort((left, right) =>
+      left.localeCompare(right),
+    );
+    const firstStateEnvelope = JSON.parse(await readFile(
+      resolveHostedPendingAssistantInputStatePath(vaultRoot),
+      "utf8",
+    )) as { value: unknown };
+    expect(parseHostedPendingAssistantInputState(firstStateEnvelope.value)).toEqual({
+      backfillAfterInputId: expectedInputIds[3],
+      backfilled: false,
+      inputIds: expectedInputIds.slice(0, 4),
+    });
+    const secondPass = await migrateLegacyHostedPendingAssistantInputIndex({
+      batchLimit: 100,
+      vaultRoot,
+    });
+    expect(secondPass.processed).toBe(2);
+    expect(secondPass).toMatchObject({
+      pending: false,
+      progressed: true,
+      yielded: false,
+    });
+    await expect(readHostedPendingAssistantInputIds({ vaultRoot })).resolves
+      .toEqual(expectedInputIds);
+    const completedStateEnvelope = JSON.parse(await readFile(
+      resolveHostedPendingAssistantInputStatePath(vaultRoot),
+      "utf8",
+    )) as { value: Record<string, unknown> };
+    expect(completedStateEnvelope.value).not.toHaveProperty("backfillAfterInputId");
+    expect(parseHostedPendingAssistantInputState(completedStateEnvelope.value)).toEqual({
+      backfillAfterInputId: null,
+      backfilled: true,
+      inputIds: expectedInputIds,
+    });
+  });
+
+  it("yields or aborts legacy migration before reading input records", async () => {
+    const vaultRoot = await createTempVault();
+    const expected = {
+      pending: true,
+      processed: 0,
+      progressed: false,
+      yielded: true,
+    };
+    await expect(migrateLegacyHostedPendingAssistantInputIndex({
+      shouldYield: () => true,
+      vaultRoot,
+    })).resolves.toEqual(expected);
+    const controller = new AbortController();
+    controller.abort();
+    await expect(migrateLegacyHostedPendingAssistantInputIndex({
+      signal: controller.signal,
+      vaultRoot,
+    })).resolves.toEqual(expected);
   });
 
   it("compacts only after terminal group evidence is complete", async () => {

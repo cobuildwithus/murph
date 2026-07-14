@@ -3569,6 +3569,7 @@ describe("hosted workspace runtime entrypoint", () => {
           vaultRoot,
         }),
         {
+          migrationPending: true,
           protectedAttachmentIds: [],
           protectedCaptureIds: ["cap_workspace_retention_only"],
           protectedStoredPaths: [],

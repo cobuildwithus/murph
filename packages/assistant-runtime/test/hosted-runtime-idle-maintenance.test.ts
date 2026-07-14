@@ -80,6 +80,27 @@ describe("runHostedIdleCheckpointMaintenance", () => {
     expect(compactWarmCodexThread).not.toHaveBeenCalled();
   });
 
+  it("defers media retention while the legacy pending-input index is incomplete", async () => {
+    await expect(runHostedIdleCheckpointMaintenance({
+      credentialSource: "platform",
+      memberId: "member_1",
+      model: null,
+      pendingWork: false,
+      providerName: null,
+      recordUsage: null,
+      resolveAssistantSessionId: null,
+      shutdownSignal: null,
+      skipInboxMediaRetention: true,
+      vaultRoot: "/tmp/test-vault",
+      wakeSignal: null,
+    })).resolves.toEqual({
+      kind: "skipped",
+      reason: "missing_model",
+      threadContextTokensBefore: null,
+    });
+    expect(runInboxMediaRetention).not.toHaveBeenCalled();
+  });
+
   it("records provider compaction usage without the estimate marker", async () => {
     compactWarmCodexThread.mockResolvedValue({
       kind: "compacted",

@@ -3,7 +3,7 @@ import assert from "node:assert/strict";
 import { mkdir, mkdtemp, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import path from "node:path";
-import { beforeEach, describe, expect, it, vi } from "vitest";
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import type { HostedRuntimeLogRequest } from "@murphai/hosted-execution/runtime-control";
 import { SqliteDeviceSyncStore } from "@murphai/device-syncd/service";
 import {
@@ -32,6 +32,10 @@ const mocks = vi.hoisted(() => ({
   promoteHostedCompletedDirtyPayloadAcks: vi.fn(),
   syncHostedDeviceSyncControlPlaneState: vi.fn(),
 }));
+
+afterEach(() => {
+  vi.restoreAllMocks();
+});
 
 vi.mock("@murphai/device-syncd/config", () => ({
   createConfiguredDeviceSyncProvidersFromConfigs:
@@ -3946,6 +3950,145 @@ describe("runHostedAssistantAutomationLane", () => {
         maxPerScan: 1,
       }),
     );
+  });
+
+  it("reports migration-only writes as runtime dirtiness without semantic progress", async () => {
+    const shouldYieldBackgroundMaintenance = vi.fn(() => false);
+    const signal = new AbortController().signal;
+    mocks.selectHostedAssistantInputIds.mockResolvedValueOnce({
+      inputIds: [],
+      migrationProgressed: true,
+      mode: "background",
+      pendingInputIds: [],
+    });
+    mocks.runAssistantAutomationPass.mockResolvedValueOnce({
+      nextWakeAt: null,
+      progressed: false,
+    });
+
+    const result = await runHostedAssistantAutomationLane({
+      wake: {
+        eventId: "evt_background_migration_only",
+        kind: "runtime.timer",
+        occurredAt: "2026-04-08T00:00:00.000Z",
+        triggerKind: "runtime_timer",
+        userId: "member_123",
+      },
+      executionContext: {
+        hosted: {
+          issueDeviceConnectLink: vi.fn(),
+          memberId: "member_123",
+          userEnvKeys: [],
+        },
+      },
+      requestId: "req_background_migration_only",
+      runtime: createHostedAutomationRuntime(),
+      shouldYieldBackgroundMaintenance,
+      signal,
+      vaultRoot: "/tmp/vault-root",
+    });
+
+    expect(mocks.selectHostedAssistantInputIds).toHaveBeenCalledWith({
+      limit: 50,
+      mode: "background",
+      shouldYield: shouldYieldBackgroundMaintenance,
+      signal,
+      vaultRoot: "/tmp/vault-root",
+    });
+    expect(result).toEqual(expect.objectContaining({
+      assistantAutomationProgressed: false,
+      assistantAutomationRuntimeStateDirty: true,
+      nextWakeAt: null,
+    }));
+    expect(mocks.runAssistantAutomationPass).toHaveBeenCalledTimes(1);
+  });
+
+  it("retains an immediate continuation wake for an incomplete migration-only page", async () => {
+    vi.spyOn(Date, "now").mockReturnValue(Date.parse("2026-04-08T00:00:05.000Z"));
+    mocks.selectHostedAssistantInputIds.mockResolvedValueOnce({
+      inputIds: [],
+      migrationPending: true,
+      migrationProgressed: true,
+      mode: "background",
+      pendingInputIds: [],
+    });
+
+    const result = await runHostedAssistantAutomationLane({
+      wake: {
+        eventId: "evt_background_migration_continuation",
+        kind: "runtime.timer",
+        occurredAt: "2026-04-08T00:00:00.000Z",
+        triggerKind: "runtime_timer",
+        userId: "member_123",
+      },
+      executionContext: {
+        hosted: {
+          issueDeviceConnectLink: vi.fn(),
+          memberId: "member_123",
+          userEnvKeys: [],
+        },
+      },
+      requestId: "req_background_migration_continuation",
+      runtime: createHostedAutomationRuntime(),
+      vaultRoot: "/tmp/vault-root",
+    });
+
+    expect(mocks.runAssistantAutomationPass).not.toHaveBeenCalled();
+    expect(result).toEqual(expect.objectContaining({
+      assistantAutomationProgressed: false,
+      assistantAutomationRuntimeStateDirty: true,
+      nextWakeAt: "2026-04-08T00:00:06.000Z",
+    }));
+  });
+
+  it("runs a recovered reply while migration remains pending", async () => {
+    vi.spyOn(Date, "now").mockReturnValue(Date.parse("2026-04-08T00:00:05.000Z"));
+    const recoveredInputId = "ain_recovered_00000000000000000000001";
+    mocks.selectHostedAssistantInputIds.mockResolvedValueOnce({
+      inputIds: [recoveredInputId],
+      migrationPending: true,
+      migrationProgressed: true,
+      mode: "background",
+      pendingInputIds: [recoveredInputId],
+    });
+    mocks.runAssistantAutomationPass.mockResolvedValueOnce({
+      nextWakeAt: null,
+      progressed: true,
+    });
+
+    const result = await runHostedAssistantAutomationLane({
+      wake: {
+        eventId: "evt_background_recovered_reply",
+        kind: "runtime.timer",
+        occurredAt: "2026-04-08T00:00:00.000Z",
+        triggerKind: "runtime_timer",
+        userId: "member_123",
+      },
+      executionContext: {
+        hosted: {
+          issueDeviceConnectLink: vi.fn(),
+          memberId: "member_123",
+          userEnvKeys: [],
+        },
+      },
+      requestId: "req_background_recovered_reply",
+      runtime: createHostedAutomationRuntime(),
+      vaultRoot: "/tmp/vault-root",
+    });
+
+    expect(mocks.runAssistantAutomationPass).toHaveBeenCalledTimes(1);
+    expect(mocks.createHostedAssistantInputSource).toHaveBeenCalledWith({
+      initialPendingInputIds: [recoveredInputId],
+      pendingInputRefreshMode: "compact",
+      selectedInputIds: [recoveredInputId],
+      vaultRoot: "/tmp/vault-root",
+    });
+    expect(result).toEqual(expect.objectContaining({
+      assistantAutomationProgressed: true,
+      assistantAutomationRuntimeStateDirty: true,
+      assistantAutomationSelectedInputIds: [recoveredInputId],
+      nextWakeAt: "2026-04-08T00:00:06.000Z",
+    }));
   });
 
   it("does not synthesize a wake when assistant work progressed without a due time", async () => {

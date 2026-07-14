@@ -3387,6 +3387,7 @@ export async function runHostedPendingInputProtectedIdleMaintenance(input: {
     recordUsage: input.recordUsage,
     resolveAssistantSessionId: input.resolveAssistantSessionId,
     shutdownSignal: input.shutdownSignal,
+    skipInboxMediaRetention: mediaRetentionProtections.migrationPending,
     vaultRoot: input.vaultRoot,
     wakeSignal: input.wakeSignal,
   });

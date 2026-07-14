@@ -75,6 +75,7 @@ export async function runHostedIdleCheckpointMaintenance(input: {
   recordUsage: ((record: AssistantUsageRecord) => Promise<void>) | null;
   resolveAssistantSessionId: ((codexThreadId: string) => Promise<string | null>) | null;
   shutdownSignal: AbortSignal | null;
+  skipInboxMediaRetention?: boolean;
   vaultRoot?: string | null;
   wakeSignal: RuntimeWakeSignal | null;
 }): Promise<HostedIdleMaintenanceOutcome> {
@@ -104,7 +105,7 @@ export async function runHostedIdleCheckpointMaintenance(input: {
 
   try {
     let retentionWake: HostedIdleMaintenanceWake = {};
-    if (input.vaultRoot) {
+    if (input.vaultRoot && input.skipInboxMediaRetention !== true) {
       try {
         const retentionResult = await runInboxMediaRetention({
           materializeCandidatePaths: input.materializeRetentionCandidatePaths ?? undefined,

@@ -6146,7 +6146,7 @@ describe("runHostedWorkspaceUntilIdleOrBudget", () => {
     }
   });
 
-  test("backfills an incomplete pending index before checkpointing an initial fresh turn wake", async () => {
+  test("does not backfill an incomplete pending index before an initial fresh turn", async () => {
     const vaultRoot = await mkdtemp(path.join(tmpdir(), "murph-workspace-runner-"));
     const items = [
       createMailboxItem({
@@ -6221,8 +6221,8 @@ describe("runHostedWorkspaceUntilIdleOrBudget", () => {
         now: () => TEST_NOW,
       });
 
-      assert.equal(result.assistantPhaseResult?.nextWakeAt, TEST_NOW);
-      assert.equal(result.assistantPhaseResult?.nextWakeReason, "assistant");
+      assert.equal(result.assistantPhaseResult?.nextWakeAt, undefined);
+      assert.equal(result.assistantPhaseResult?.nextWakeReason, undefined);
       assert.equal(result.runtimeStateDirty, true);
       assert.deepEqual(checkpointRequests, []);
     } finally {

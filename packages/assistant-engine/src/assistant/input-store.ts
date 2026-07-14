@@ -1,5 +1,5 @@
 import { createHash } from 'node:crypto'
-import { readdir, readFile } from 'node:fs/promises'
+import { opendir, readdir, readFile } from 'node:fs/promises'
 import path from 'node:path'
 import { z } from 'zod'
 import { assistantPreferenceCausalSeqSchema } from '@murphai/contracts'
@@ -654,6 +654,91 @@ export async function listAssistantInputEvents(input: {
       }
     }
     throw error
+  }
+}
+
+export async function listAssistantInputEventsByInputId(input: {
+  afterInputId?: string | null
+  limit?: number
+  paths?: AssistantStatePaths
+  shouldYield?: (() => boolean) | null
+  signal?: AbortSignal
+  vault?: string
+}): Promise<{
+  events: AssistantInputEventRecord[]
+  nextInputId: string | null
+}> {
+  const { paths } = resolveAssistantInputContext(input)
+  const afterInputId = input.afterInputId
+    ? normalizeAssistantInputEventId(input.afterInputId)
+    : null
+  const limit = normalizeAssistantInputEventListLimit(input.limit)
+  const directory = resolveAssistantInputEventsDirectory(paths)
+
+  try {
+    assertAssistantInputEventListLive(input)
+    const selectedNames: string[] = []
+    const entries = await opendir(directory)
+    for await (const entry of entries) {
+      assertAssistantInputEventListLive(input)
+      if (
+        !entry.name.endsWith('.json')
+        || (afterInputId && entry.name.localeCompare(`${afterInputId}.json`) <= 0)
+      ) {
+        continue
+      }
+      const insertionIndex = selectedNames.findIndex((name) =>
+        entry.name.localeCompare(name) < 0,
+      )
+      selectedNames.splice(
+        insertionIndex === -1 ? selectedNames.length : insertionIndex,
+        0,
+        entry.name,
+      )
+      if (selectedNames.length > limit) {
+        selectedNames.pop()
+      }
+    }
+
+    const events: AssistantInputEventRecord[] = []
+    for (const fileName of selectedNames) {
+      assertAssistantInputEventListLive(input)
+      const filePath = path.join(directory, fileName)
+      await assertAssistantStatePathHasNoSymlinks(filePath)
+      const raw = await readFile(filePath, 'utf8')
+      assertAssistantInputEventListLive(input)
+      const event = parseAssistantInputEventFile(JSON.parse(raw))
+      if (fileName !== `${event.inputId}.json`) {
+        throw new TypeError('Assistant input event file name must match its input id.')
+      }
+      events.push(event)
+    }
+    return {
+      events,
+      nextInputId: events.at(-1)?.inputId ?? afterInputId,
+    }
+  } catch (error) {
+    if (isMissingFileError(error)) {
+      return {
+        events: [],
+        nextInputId: afterInputId,
+      }
+    }
+    throw error
+  }
+}
+
+function assertAssistantInputEventListLive(input: {
+  shouldYield?: (() => boolean) | null
+  signal?: AbortSignal
+}): void {
+  if (input.signal?.aborted) {
+    throw input.signal.reason instanceof Error
+      ? input.signal.reason
+      : new DOMException('Assistant input event listing was aborted.', 'AbortError')
+  }
+  if (input.shouldYield?.() === true) {
+    throw new DOMException('Assistant input event listing yielded.', 'AbortError')
   }
 }
 
