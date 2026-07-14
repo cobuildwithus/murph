@@ -1,6 +1,6 @@
 # PR 511 Current-Main Recovery
 
-Status: active
+Status: completed
 Updated: 2026-07-14
 
 ## Outcome
@@ -61,4 +61,31 @@ or deleting either preserved recovery checkout.
 ## Progress
 
 - Fresh isolated recovery worktree created from exact remote PR head.
-- Read-only merge-tree proof identifies fourteen current-main conflicts.
+- Ordinary merge of current `origin/main` produced fifteen conflicts; every
+  conflict is resolved without changing the PR's participant-context or exact
+  replay intent and without restoring runner-owned Linq route authority.
+- Proven stale CI expectations were narrowed to current behavior: successor
+  checkpoint retries may include one no-progress assistant phase before the
+  exact later input is selected, and the selected row is still processed once.
+- Runner static-boot growth was measured against a refreshed 7,078,454-byte
+  baseline; the hosted-local bundle passes all entrypoint, closure, and total
+  size limits.
+- Security/privacy review found and closed one stale-roster egress regression:
+  web-owned route authority now refreshes the current provider roster before
+  strict route revalidation under lock and fails closed after participant
+  removal. The corrected security re-audit has no remaining medium-or-higher
+  findings.
+- Coverage-write review found no missing coverage. Focused replay/runtime,
+  Cloudflare, release-audit, and web route/store suites pass.
+- Final integration typecheck restored current `main`'s web-owned route-target
+  assertion export and added the now-required allowance source to the accepted
+  conversation inactive-access result; the standalone web typecheck and 148
+  focused usage/route tests pass afterward. A narrow static security re-audit
+  confirmed both corrections preserve the fail-closed authority boundary and
+  found no medium-or-higher issue.
+- Stable-tree `test:diff` passed every repo guard, the affected runtime
+  typecheck, 1,641 runtime tests, lint with no errors, and the full production
+  web build. Its aggregate exit remained nonzero only because host pressure
+  caused the dev-smoke health wait and one unrelated route-test import hook to
+  time out; 5,051 other web tests passed. Diff hygiene is clean.
+Completed: 2026-07-14

@@ -1,5 +1,9 @@
 import type { Prisma, PrismaClient } from "@prisma/client";
 
+import type {
+  HostedExecutionExternalThreadRouteAuthority,
+  HostedExecutionLinqExternalThreadRouteAuthority,
+} from "@murphai/hosted-execution";
 import { parseHostedExecutionWake } from "@murphai/hosted-execution/parsers";
 
 import {
@@ -15,8 +19,12 @@ import {
 import { normalizePhoneNumber } from "./phone";
 import {
   assertActiveHostedThreadRouteContainerAccess,
+  assertHostedLinqRouteEgressAuthority,
   readHostedThreadRouteByThreadIdentity,
 } from "../hosted-routing/thread-route-store";
+import type {
+  HostedLinqThreadRosterSnapshot,
+} from "../hosted-routing/linq-thread-roster";
 import {
   decodeHostedMailboxStoredPayload,
   readHostedMailboxLiveItemById,
@@ -44,6 +52,35 @@ export type HostedLinqRuntimeEgressAssertionResult = {
 const HOSTED_LINQ_SIGNUP_WELCOME_IDEMPOTENCY_PREFIX = "signup-welcome:";
 const HOSTED_LINQ_RECENT_DIRECT_INBOUND_SCAN_LIMIT = 100;
 
+export function assertHostedLinqRouteAuthorityMatchesTarget(input: {
+  chatId: string | null | undefined;
+  memberId?: string | null;
+  routeAuthority: HostedExecutionExternalThreadRouteAuthority;
+}): HostedExecutionLinqExternalThreadRouteAuthority {
+  const authority = input.routeAuthority;
+  const chatId = normalizeNullable(input.chatId);
+  const memberId = normalizeNullable(input.memberId);
+
+  if (
+    authority.channel !== "linq"
+    || !chatId
+    || authority.threadId !== chatId
+    || (memberId !== null && authority.containerMemberId !== memberId)
+  ) {
+    throw hostedOnboardingError({
+      code: "HOSTED_LINQ_EGRESS_ROUTE_AUTHORITY_MISMATCH",
+      httpStatus: 403,
+      message: "Linq egress route authority does not match the requested thread.",
+      retryable: false,
+    });
+  }
+
+  return {
+    ...authority,
+    channel: "linq",
+  };
+}
+
 export async function assertHostedLinqRecentInboundEngagementForRuntime(input: {
   answeredMailboxItemIds?: readonly string[] | null;
   currentInbound?: HostedLinqLegacyCurrentInboundProof | null;
@@ -54,6 +91,7 @@ export async function assertHostedLinqRecentInboundEngagementForRuntime(input: {
   memberId: string;
   prisma: HostedLinqEngagementClient;
   replyToMessageId?: string | null;
+  routeRosterSnapshot?: HostedLinqThreadRosterSnapshot | null;
   target: string | null;
   targetKind?: string | null;
 }): Promise<HostedLinqRuntimeEgressAssertionResult> {
@@ -70,23 +108,35 @@ export async function assertHostedLinqRecentInboundEngagementForRuntime(input: {
     return { targetOverride: null };
   }
 
-  await assertActiveHostedThreadRouteContainerAccess({
-    containerMemberId: input.memberId,
-    prisma: input.prisma,
-  });
-
+  const target = normalizeNullable(input.target);
   const targetThreadRoute = await readHostedThreadRouteByThreadIdentity({
     channel: "linq",
     prisma: input.prisma,
-    threadId: input.target,
+    threadId: target,
   });
-  if (targetThreadRoute) {
+  if (targetThreadRoute && target) {
     if (targetThreadRoute.containerMemberId !== input.memberId) {
       throwHostedLinqRouteAuthorityMismatch();
     }
 
+    await assertHostedLinqRouteEgressAuthority({
+      authority: {
+        channel: "linq",
+        containerMemberId: input.memberId,
+        threadId: target,
+      },
+      prisma: input.prisma,
+      ...(input.routeRosterSnapshot
+        ? { rosterSnapshot: input.routeRosterSnapshot }
+        : {}),
+    });
     return { targetOverride: null };
   }
+
+  await assertActiveHostedThreadRouteContainerAccess({
+    containerMemberId: input.memberId,
+    prisma: input.prisma,
+  });
 
   if (await matchesPersistedHostedLinqDirectInbound({
     answeredMailboxItemIds: input.answeredMailboxItemIds ?? [],

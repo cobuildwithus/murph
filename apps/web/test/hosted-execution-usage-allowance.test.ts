@@ -2590,6 +2590,7 @@ describe("resolveHostedAiUsageGate", () => {
       prisma: prisma as never,
     })).resolves.toMatchObject({
       allowed: false,
+      allowanceSource: "direct_paid_member_plan",
       reason: "hosted_access_inactive",
     });
     expect(prisma.hostedAiUsagePeriod.createMany).not.toHaveBeenCalled();

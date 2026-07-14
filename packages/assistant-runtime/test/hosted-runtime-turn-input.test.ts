@@ -618,7 +618,6 @@ describe("selectHostedAssistantInputIds", () => {
 
     const selection = await selectHostedAssistantInputIds({
       freshAssistantInputIds: [accepted.inputId],
-      includeRelatedPendingInputs: false,
       mode: "foreground",
       vaultRoot,
     });

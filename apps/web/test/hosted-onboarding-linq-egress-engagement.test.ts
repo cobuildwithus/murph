@@ -48,6 +48,8 @@ import {
   createHostedLinqChatLookupKey,
   createHostedPhoneLookupKey,
 } from "@/src/lib/hosted-onboarding/contact-privacy";
+import { hostedOnboardingError } from "@/src/lib/hosted-onboarding/errors";
+import * as threadRouteStore from "@/src/lib/hosted-routing/thread-route-store";
 import {
   assertHostedLinqRecentInboundEngagementForRuntime,
 } from "@/src/lib/hosted-onboarding/linq-egress-engagement";
@@ -200,7 +202,7 @@ describe("hosted Linq egress authority", () => {
 
     expect(prisma.hostedThreadRoute.findMany).toHaveBeenCalled();
     expect(prisma.hostedMemberRouting.findUnique).not.toHaveBeenCalled();
-    expect(prisma.hostedMember.findUnique).toHaveBeenCalled();
+    expect(prisma.hostedMember.findUnique).not.toHaveBeenCalled();
 
     await expect(assertHostedLinqRecentInboundEngagementForRuntime({
       memberId: "member-1",
@@ -210,10 +212,9 @@ describe("hosted Linq egress authority", () => {
     })).resolves.toEqual({ targetOverride: null });
   });
 
-  it("rejects non-participant sends before route resolution when member access is inactive", async () => {
+  it("rejects non-route sends when member access is inactive", async () => {
     const prisma = createPrismaStub({
       activeMemberAccess: false,
-      threadRouteContainerMemberId: "member-1",
     });
     await expect(assertHostedLinqRecentInboundEngagementForRuntime({
       memberId: "member-1",
@@ -225,7 +226,7 @@ describe("hosted Linq egress authority", () => {
       httpStatus: 403,
     });
 
-    expect(prisma.hostedThreadRoute.findMany).not.toHaveBeenCalled();
+    expect(prisma.hostedThreadRoute.findMany).toHaveBeenCalled();
     expect(prisma.hostedMemberRouting.findUnique).not.toHaveBeenCalled();
     expect(prisma.hostedMember.findUnique).toHaveBeenCalled();
   });
@@ -770,6 +771,75 @@ describe("hosted Linq egress authority", () => {
     });
   });
 
+  it("denies stale projected access after the live route roster removes its participant", async () => {
+    const prisma = createPrismaStub({
+      threadRouteContainerMemberId: "member-1",
+      threadRouteOwnerActive: false,
+    });
+    const rosterSnapshot = {
+      handles: [{ handle: "+15550100099", isMe: true, status: "active" }],
+      observationOrdinal: 8n,
+      observedAt: new Date("2026-07-14T12:00:00.000Z"),
+    };
+    const prepareRoster = vi.spyOn(
+      threadRouteStore,
+      "prepareHostedLinqRouteEgressRosterSnapshot",
+    ).mockResolvedValueOnce(rosterSnapshot);
+    const assertRouteAuthority = vi.spyOn(
+      threadRouteStore,
+      "assertHostedLinqRouteEgressAuthority",
+    ).mockRejectedValueOnce(hostedOnboardingError({
+      code: "HOSTED_THREAD_ROUTE_EGRESS_UNAUTHORIZED",
+      httpStatus: 403,
+      message: "Current Linq route access required.",
+      retryable: false,
+    }));
+    mocks.getPrisma.mockReturnValue(prisma);
+
+    try {
+      const response = await postHostedLinqEgressEngagement(
+        new Request("https://internal.example.test/engagement", {
+          body: JSON.stringify({
+            idempotencyKey: "assistant-outbox:stale-projected-access",
+            target: "chat-external",
+            targetKind: "thread",
+          }),
+          headers: { "content-type": "application/json" },
+          method: "POST",
+        }),
+      );
+
+      expect(response.status).toBe(403);
+      await expect(response.json()).resolves.toMatchObject({
+        error: { code: "HOSTED_THREAD_ROUTE_EGRESS_UNAUTHORIZED" },
+      });
+      expect(prepareRoster).toHaveBeenCalledWith({
+        authority: {
+          channel: "linq",
+          containerMemberId: "member-1",
+          threadId: "chat-external",
+        },
+        prisma,
+      });
+      expect(assertRouteAuthority).toHaveBeenCalledWith({
+        authority: {
+          channel: "linq",
+          containerMemberId: "member-1",
+          threadId: "chat-external",
+        },
+        prisma: expect.any(Object),
+        rosterSnapshot,
+      });
+      expect(prepareRoster.mock.invocationCallOrder[0]).toBeLessThan(
+        prisma.$transaction.mock.invocationCallOrder[0]!,
+      );
+      expect(prisma.hostedLinqDelivery.createMany).not.toHaveBeenCalled();
+    } finally {
+      prepareRoster.mockRestore();
+      assertRouteAuthority.mockRestore();
+    }
+  });
+
   it("rejects old-runner currentInbound payloads for another member's external thread", async () => {
     const prisma = createPrismaStub({
       threadRouteContainerMemberId: "member-2",
@@ -836,7 +906,6 @@ describe("hosted Linq egress authority", () => {
   it("rejects old-runner currentInbound payloads when external thread access is inactive", async () => {
     const prisma = createPrismaStub({
       activeMemberAccess: false,
-      threadRouteContainerMemberId: "member-1",
     });
 
     await expect(assertHostedLinqRecentInboundEngagementForRuntime({
@@ -1018,6 +1087,7 @@ function createPrismaStub(input: {
   identityPhone?: string;
   pendingChatId?: string;
   threadRouteContainerMemberId?: string;
+  threadRouteOwnerActive?: boolean;
 }) {
   const prisma = {
     $executeRaw: vi.fn().mockResolvedValue(1),
@@ -1053,7 +1123,10 @@ function createPrismaStub(input: {
     },
     hostedThreadRoute: {
       findMany: vi.fn().mockResolvedValue(input.threadRouteContainerMemberId
-        ? [buildHostedLinqRouteRow(input.threadRouteContainerMemberId)]
+        ? [buildHostedLinqRouteRow(
+            input.threadRouteContainerMemberId,
+            input.threadRouteOwnerActive !== false,
+          )]
         : []),
     },
     hostedLinqDelivery: {
@@ -1130,7 +1203,7 @@ function mockPersistedLinqInbound(input: {
   });
 }
 
-function buildHostedLinqRouteRow(containerMemberId: string) {
+function buildHostedLinqRouteRow(containerMemberId: string, ownerActive = true) {
   const routeTimestamp = new Date("2026-06-01T00:00:00.000Z");
   return {
     channel: "linq",
@@ -1144,7 +1217,7 @@ function buildHostedLinqRouteRow(containerMemberId: string) {
       },
       owner: {
         accountGroupMemberships: [],
-        billingStatus: "active",
+        billingStatus: ownerActive ? "active" : "paused",
         createdAt: routeTimestamp,
         id: "owner-1",
         suspendedAt: null,

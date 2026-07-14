@@ -2243,9 +2243,14 @@ function resolveHostedAiUsageAllowancePeriod(input: {
     at: input.at,
     billingRef: input.billingRef,
   });
+  const allowanceSource =
+    input.billingRef?.allowanceSource === "family_sponsored_pulse"
+      ? "family_sponsored_pulse"
+      : "direct_paid_member_plan";
 
   if (input.acceptedConversation === true && period.source !== "billing") {
     return {
+      allowanceSource,
       billingPlanCode,
       kind: "denied",
       limitUsdMicros: 0n,
@@ -2258,10 +2263,7 @@ function resolveHostedAiUsageAllowancePeriod(input: {
   }
 
   return {
-    allowanceSource:
-      input.billingRef?.allowanceSource === "family_sponsored_pulse"
-        ? "family_sponsored_pulse"
-        : "direct_paid_member_plan",
+    allowanceSource,
     billingPlanCode,
     kind: "period",
     limitUsdMicros:

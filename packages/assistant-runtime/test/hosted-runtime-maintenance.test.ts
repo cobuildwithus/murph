@@ -3850,7 +3850,6 @@ describe("runHostedAssistantAutomationLane", () => {
     expect(mocks.selectHostedAssistantInputIds).toHaveBeenCalledWith(
       expect.objectContaining({
         freshAssistantInputIds: ["ain_current_foreground"],
-        includeRelatedPendingInputs: true,
         mode: "foreground",
       }),
     );
@@ -3894,7 +3893,6 @@ describe("runHostedAssistantAutomationLane", () => {
 
     expect(mocks.selectHostedAssistantInputIds).toHaveBeenCalledWith({
       freshAssistantInputIds: [acceptedInputId],
-      includeRelatedPendingInputs: false,
       mode: "foreground",
       vaultRoot: "/tmp/vault-root",
     });

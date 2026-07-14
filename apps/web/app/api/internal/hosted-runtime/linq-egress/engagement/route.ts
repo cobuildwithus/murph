@@ -22,6 +22,10 @@ import { getPrisma } from "@/src/lib/prisma";
 import {
   acquireHostedLinqChatOwnershipLockTx,
 } from "@/src/lib/hosted-routing/linq-chat-ownership-lock";
+import {
+  prepareHostedLinqRouteEgressRosterSnapshot,
+  readHostedThreadRouteByThreadIdentity,
+} from "@/src/lib/hosted-routing/thread-route-store";
 
 const HOSTED_LINQ_EGRESS_ENGAGEMENT_BODY_LIMIT_BYTES = 8 * 1024;
 const HOSTED_LINQ_ENGAGEMENT_ANSWERED_MAILBOX_ITEM_ID_LIMIT = 100;
@@ -50,6 +54,25 @@ export const POST = withJsonError(async (request: Request) => {
       ? `legacy-current-inbound:${currentInbound.dedupeKey}`
       : null);
   const prisma = getPrisma();
+  const targetThreadRoute = targetKind !== "participant" && target
+    ? await readHostedThreadRouteByThreadIdentity({
+        channel: "linq",
+        prisma,
+        threadId: target,
+      })
+    : null;
+  const routeRosterSnapshot =
+    target
+    && targetThreadRoute?.containerMemberId === userId
+      ? await prepareHostedLinqRouteEgressRosterSnapshot({
+          authority: {
+            channel: "linq",
+            containerMemberId: userId,
+            threadId: target,
+          },
+          prisma,
+        })
+      : null;
   const assertion = await prisma.$transaction(async (tx) => {
     if (targetKind !== "participant") {
       await acquireHostedMemberHomeLinqRouteLockTx({
@@ -74,6 +97,7 @@ export const POST = withJsonError(async (request: Request) => {
       memberId: userId,
       prisma: tx,
       replyToMessageId,
+      routeRosterSnapshot,
       target,
       targetKind,
     });
