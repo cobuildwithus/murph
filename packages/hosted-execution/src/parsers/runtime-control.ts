@@ -1546,7 +1546,7 @@ export function parseHostedRuntimeNewsletterToolResponse(
   if (action === "send") {
     const result = requireObject(record.result, "Hosted runtime newsletter tool send response result");
     const status = requireString(result.status, "Hosted runtime newsletter tool send response status");
-    if (status === "sent" || status === "no_recipients") {
+    if (status === "accepted" || status === "sent" || status === "no_recipients") {
       assertAllowedObjectKeys(
         result,
         new Set(["status", "participantCount", "skippedNoEmailMemberIds"]),

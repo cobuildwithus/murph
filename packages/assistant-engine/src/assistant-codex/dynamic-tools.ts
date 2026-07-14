@@ -624,7 +624,7 @@ export const MURPH_NEWSLETTER_TOOL = {
   namespace: 'murph',
   name: 'newsletter',
   description:
-    'Prepare or send the scheduled group health newsletter. `prepare` returns recipient eligibility, the occurrence reference, and current-week shared facts filtered to exact live email and health-share grants; compose only from its members. `send` is same-run only and fails closed if authorization changes. Start the subject with the exact name in the current scheduled automation instructions, never a generic label. Send the first edition only after the setup notice and opt-out window. This tool sends one shared email thread, never exposes addresses or grant metadata, and does not manage the automation.',
+    'Prepare or send the scheduled group health newsletter. `prepare` returns recipient eligibility, the occurrence reference, and current-week shared facts filtered to exact live email and health-share grants; compose only from its members. Each turn allows one prepare attempt and at most one send attempt. `send` durably queues recipient-scoped delivery and may return `accepted` while that outbox work is pending; stop after that result and do not claim provider completion. Start the subject with the exact name in the current scheduled automation instructions, never a generic label. Send the first edition only after the setup notice and opt-out window. This tool sends one shared email thread, never exposes addresses or grant metadata, and does not manage the automation.',
   inputSchema: {
     type: 'object',
     additionalProperties: false,
@@ -2887,6 +2887,7 @@ async function executeNewsletterTool(input: {
 }): Promise<MurphDynamicToolExecutionResult> {
   const newsletterTool = input.hostedToolContext?.newsletterTool ?? null
   if (!newsletterTool) {
+    recordNewsletterUnavailable(input.hostedToolContext, 'newsletter_tool_unavailable')
     return toolTextResult(false, 'newsletter tools are unavailable for this turn')
   }
   try {
@@ -2895,6 +2896,10 @@ async function executeNewsletterTool(input: {
       && input.vaultRoot
       && !await isGroupSharedProjectionAvailable(input.vaultRoot)
     ) {
+      recordNewsletterUnavailable(
+        input.hostedToolContext,
+        'newsletter_preparation_unavailable',
+      )
       return groupSharedProjectionUnavailableResult(input.request.action)
     }
 
@@ -2908,6 +2913,10 @@ async function executeNewsletterTool(input: {
         vaultRoot: input.vaultRoot,
       })
       if (newsletterWeeklySource === null) {
+        recordNewsletterUnavailable(
+          input.hostedToolContext,
+          'newsletter_preparation_unavailable',
+        )
         return groupSharedProjectionUnavailableResult(input.request.action)
       }
     }
@@ -2927,6 +2936,11 @@ async function executeNewsletterTool(input: {
     const result = await newsletterTool.request(request)
     if (result.action === 'send') {
       input.hostedToolContext?.recordNewsletterSendResult?.(result)
+    } else if (result.action === 'prepare' && result.result.status === 'unavailable') {
+      recordNewsletterUnavailable(
+        input.hostedToolContext,
+        result.result.unavailableReason,
+      )
     }
     const toolSucceeded = !isNewsletterAllRecipientSendFailure(result)
     if (result.action !== 'prepare' || result.result.status !== 'ok') {
@@ -2934,6 +2948,10 @@ async function executeNewsletterTool(input: {
     }
     const referenceAt = scheduledAutomationAuthority?.occurrenceAt ?? null
     if (newsletterWeeklySource === null) {
+      recordNewsletterUnavailable(
+        input.hostedToolContext,
+        'newsletter_preparation_unavailable',
+      )
       return groupSharedProjectionUnavailableResult(input.request.action)
     }
     const members = buildEligibleNewsletterWeeklyMembers({
@@ -2958,8 +2976,20 @@ async function executeNewsletterTool(input: {
       },
     }))
   } catch {
+    recordNewsletterUnavailable(input.hostedToolContext, 'newsletter_tool_failed')
     return toolTextResult(false, 'newsletter tool request failed')
   }
+}
+
+function recordNewsletterUnavailable(
+  hostedToolContext: AssistantHostedToolContext | null,
+  unavailableReason: string,
+): void {
+  hostedToolContext?.closeNewsletterCapability?.()
+  hostedToolContext?.recordNewsletterSendResult?.({
+    action: 'send',
+    result: { status: 'unavailable', unavailableReason },
+  })
 }
 
 function isNewsletterAllRecipientSendFailure(
@@ -2967,8 +2997,13 @@ function isNewsletterAllRecipientSendFailure(
 ): boolean {
   return (
     result.action === 'send' &&
-    result.result.status === 'unavailable' &&
-    result.result.unavailableReason === 'send_failed'
+    (
+      result.result.status === 'unavailable'
+      || (
+        result.result.status === 'partial_failure'
+        && result.result.sentRecipientCount === 0
+      )
+    )
   )
 }
 

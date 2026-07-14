@@ -114,11 +114,13 @@ export interface HostedAssistantDeliveryPayload {
   bindingDeliveryTarget: string | null;
   channel: string | null;
   deliverySourceKey: string | null;
+  emailHtml?: string | null;
   explicitTarget: string | null;
   idempotencyKey: string;
   identityId: string | null;
   media: readonly HostedAssistantDeliveryMedia[];
   message: string;
+  newsletterAuthorizationProof?: string | null;
   subject: string | null;
   replyToMessageId: string | null;
   sessionId: string;
@@ -667,6 +669,11 @@ function parseHostedAssistantDeliveryPayload(
       record.deliverySourceKey ?? null,
       `${label}.deliverySourceKey`,
     ),
+    ...(record.emailHtml === undefined
+      ? {}
+      : {
+          emailHtml: requireNullableString(record.emailHtml, `${label}.emailHtml`),
+        }),
     explicitTarget: requireNullableString(
       record.explicitTarget ?? null,
       `${label}.explicitTarget`,
@@ -675,6 +682,14 @@ function parseHostedAssistantDeliveryPayload(
     identityId: requireNullableString(record.identityId ?? null, `${label}.identityId`),
     media: parseHostedAssistantDeliveryMediaList(record.media ?? [], `${label}.media`),
     message: requireStringValue(record.message, `${label}.message`),
+    ...(record.newsletterAuthorizationProof === undefined
+      ? {}
+      : {
+          newsletterAuthorizationProof: requireNullableNewsletterAuthorizationProof(
+            record.newsletterAuthorizationProof,
+            `${label}.newsletterAuthorizationProof`,
+          ),
+        }),
     subject: requireNullableString(record.subject ?? null, `${label}.subject`),
     replyToMessageId: requireNullableString(
       record.replyToMessageId ?? null,
@@ -692,6 +707,20 @@ function parseHostedAssistantDeliveryPayload(
     ),
     turnId: requireString(record.turnId, `${label}.turnId`),
   };
+}
+
+function requireNullableNewsletterAuthorizationProof(
+  value: unknown,
+  label: string,
+): string | null {
+  if (value === null) {
+    return null;
+  }
+  const proof = requireString(value, label);
+  if (!/^[0-9a-f]{64}$/u.test(proof)) {
+    throw new TypeError(`${label} must be a SHA-256 hex digest.`);
+  }
+  return proof;
 }
 
 function parseHostedAssistantDeliveryAnsweredMailboxItemIds(

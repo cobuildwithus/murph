@@ -1125,6 +1125,11 @@ export type HostedRuntimeNewsletterToolResponse =
         | {
             participantCount: number;
             skippedNoEmailMemberIds: string[];
+            status: "accepted";
+          }
+        | {
+            participantCount: number;
+            skippedNoEmailMemberIds: string[];
             status: "sent";
           }
         | {

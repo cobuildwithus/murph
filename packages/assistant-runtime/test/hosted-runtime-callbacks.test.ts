@@ -22,6 +22,7 @@ import {
   buildHostedActionApprovalOutcomeEffectId,
 } from "@murphai/hosted-execution/action-approval";
 import { VaultCliError } from "@murphai/operator-config/vault-cli-errors";
+import type { AssistantOutboxIntent } from "@murphai/operator-config/assistant-cli-contracts";
 import {
   parseHostedEmailThreadTarget,
   serializeHostedEmailThreadTarget,
@@ -405,6 +406,7 @@ beforeEach(() => {
     }),
   );
   mocks.readAssistantOutboxIntent.mockResolvedValue(null);
+  mocks.listAssistantOutboxIntents.mockResolvedValue([]);
   mocks.readAssistantVaultFileMedia.mockReturnValue(null);
   mocks.readVerifiedAssistantVaultFileBytes.mockResolvedValue(
     new Uint8Array([1, 2, 3]),
@@ -3689,6 +3691,58 @@ describe("hosted runtime callbacks", () => {
     ).rejects.toMatchObject({
       code: "ASSISTANT_HOSTED_EMAIL_PARTICIPANT_UNSUPPORTED",
     });
+  });
+
+  it("collects newsletter HTML and authorization proof from the durable parent intent", async () => {
+    const groupTarget = serializeHostedEmailThreadTarget({
+      groupId: "group_123",
+      subject: "Weekly health note",
+      targetKind: "group",
+    });
+    mocks.listAssistantOutboxIntents.mockResolvedValue([
+      {
+        actorId: null,
+        bindingDelivery: null,
+        channel: "email",
+        createdAt: "2026-07-12T13:00:00.000Z",
+        dedupeKey: "dedupe_newsletter",
+        deliveryIdempotencyKey:
+          "group-newsletter:automation_123:2026-07-12T13:00:00.000Z:group_123",
+        deliveryTransportIdempotent: true,
+        emailHtml: "<p>Weekly</p>",
+        explicitTarget: groupTarget,
+        identityId: null,
+        intentId: "intent_newsletter",
+        lastError: null,
+        message: "Weekly",
+        newsletterAuthorizationProof: "a".repeat(64),
+        nextAttemptAt: "2026-07-12T13:00:00.000Z",
+        replyToMessageId: null,
+        sessionId: "session_newsletter",
+        status: "pending",
+        subject: null,
+        targetFingerprint: "target_group_123",
+        threadId: null,
+        threadIsDirect: false,
+        turnId: "turn_newsletter",
+      },
+    ]);
+
+    const sideEffects = await collectHostedAssistantDeliverySideEffects({
+      includeBackgroundDueIntents: true,
+      preferredIntentIds: [],
+      vaultRoot: "/tmp/vault",
+    });
+
+    expect(sideEffects).toEqual([
+      expect.objectContaining({
+        effectId: "intent_newsletter",
+        payload: expect.objectContaining({
+          emailHtml: "<p>Weekly</p>",
+          newsletterAuthorizationProof: "a".repeat(64),
+        }),
+      }),
+    ]);
   });
 
   it("collects stale non-idempotent sending intents for outbox reconciliation", async () => {
@@ -10587,8 +10641,10 @@ describe("hosted runtime callbacks", () => {
     });
 
     expect(sendEmail).toHaveBeenCalledWith({
+      html: null,
       idempotencyKey: "assistant-outbox:intent_123",
       message: "hello from hosted",
+      newsletterAuthorizationProof: null,
       planGroupFanout: true,
       replyToMessageId: "<message_parent_123@example.test>",
       subject: "Hosted subject",
@@ -10618,7 +10674,9 @@ describe("hosted runtime callbacks", () => {
       explicitTarget: fanoutTarget,
       idempotencyKey: "assistant-outbox:intent_123",
       identityId: "identity_123",
+      emailHtml: "<p>Group reply</p>",
       message: "Group reply",
+      newsletterAuthorizationProof: "a".repeat(64),
       subject: null,
       threadId: "thread_123",
       threadIsDirect: false,
@@ -10663,7 +10721,9 @@ describe("hosted runtime callbacks", () => {
       deliveryIdempotencyKey: "assistant-outbox:intent_123",
       deliveryTransportIdempotent: false,
       identityId: "identity_123",
+      emailHtml: "<p>Group reply</p>",
       message: "Group reply",
+      newsletterAuthorizationProof: "a".repeat(64),
       subject: null,
       threadId: "thread_123",
       threadIsDirect: false,
@@ -10672,6 +10732,73 @@ describe("hosted runtime callbacks", () => {
     expect(childInputs.map((child) =>
       parseHostedEmailThreadTarget(child.explicitTarget)?.recipientMemberId
     )).toEqual(["member_one", "member_two"]);
+  });
+
+  it("does not recreate sent or ambiguous newsletter recipient children", async () => {
+    const fanoutTarget = serializeHostedEmailThreadTarget({
+      groupId: "group_123",
+      subject: "Group subject",
+      targetKind: "group",
+    });
+    const deliveryIdempotencyKey =
+      "group-newsletter:automation_123:2026-07-12T13:00:00.000Z:group_123";
+    const effect = createEffect({
+      bindingDeliveryKind: "thread",
+      bindingDeliveryTarget: fanoutTarget,
+      channel: "email",
+      explicitTarget: fanoutTarget,
+      idempotencyKey: deliveryIdempotencyKey,
+      threadIsDirect: false,
+    });
+    const existingRecipient = (
+      memberId: string,
+      status: "abandoned" | "sent",
+      errorCode: string | null,
+    ) => ({
+      deliveryIdempotencyKey,
+      explicitTarget: serializeHostedEmailThreadTarget({
+        groupId: "group_123",
+        recipientMemberId: memberId,
+        subject: "Group subject",
+        targetKind: "group",
+      }),
+      lastError: errorCode ? { code: errorCode, message: "terminal" } : null,
+      status,
+    }) as AssistantOutboxIntent;
+    mocks.listAssistantOutboxIntents.mockResolvedValueOnce([
+      existingRecipient("member_one", "sent", null),
+      existingRecipient(
+        "member_two",
+        "abandoned",
+        "ASSISTANT_DELIVERY_AMBIGUOUS",
+      ),
+    ]);
+    mocks.dispatchAssistantOutboxIntent.mockImplementationOnce(async ({ dependencies }) => {
+      const delivery = await dependencies.sendEmail({
+        message: "Group reply",
+        target: fanoutTarget,
+        targetKind: "thread",
+      });
+      return createDispatchResult({
+        delivery: createDelivery({ channel: "email", target: fanoutTarget }),
+        status: "sent",
+        transportResult: delivery,
+      });
+    });
+
+    await drainHostedPreparedAssistantDeliveries({
+      assistantDeliveryEffects: [effect],
+      wake: HOSTED_WAKE.wake,
+      effectsPort: createHostedRuntimeEffectsPortStub({
+        sendEmail: vi.fn(async () => ({
+          fanoutRecipientMemberIds: ["member_one", "member_two"],
+          target: fanoutTarget,
+        })),
+      }),
+      vaultRoot: HOSTED_WAKE.vaultRoot,
+    });
+
+    expect(mocks.createAssistantOutboxIntent).not.toHaveBeenCalled();
   });
 
   it("keeps partial group fanout intent persistence replayable", async () => {

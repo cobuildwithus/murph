@@ -829,6 +829,9 @@ describe("hosted email routing and transport", () => {
     expect(emailBinding.send).toHaveBeenCalledTimes(1);
     expect(emailBinding.send.mock.calls[0]?.[0].to).toBe("two@example.test");
     expect(emailBinding.send.mock.calls[0]?.[0].raw).toContain("Subject: Weekly health note");
+    expect(emailBinding.send.mock.calls[0]?.[0].raw).toContain(
+      "To: one@example.test, two@example.test",
+    );
     expect(parseHostedEmailThreadTarget(child.target)?.recipientMemberId).toBe("member_two");
 
     webControlPlane.fetchHostedExecutionWebControlPlaneResponse

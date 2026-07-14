@@ -87,6 +87,7 @@ export async function sendHostedEmailMessage(input: {
   webControlBaseUrl?: string | null;
 }): Promise<HostedEmailSendResult> {
   let prepared: Awaited<ReturnType<typeof prepareHostedEmailSend>>;
+  let envelopeRecipients: readonly string[] | null = null;
   try {
     if (!input.config.domain || !input.config.signingSecret) {
       throw new Error("Hosted email routing is not configured.");
@@ -165,11 +166,14 @@ export async function sendHostedEmailMessage(input: {
         target: input.request.target,
       };
     }
+    envelopeRecipients = selectedGroupRecipients?.map(
+      (recipient) => recipient.address,
+    ) ?? null;
     prepared = await prepareHostedEmailSend({
       config: input.config,
       existingThreadTarget: preflight.existingThreadTarget,
       groupId,
-      groupRecipients: selectedGroupRecipients?.map((recipient) => recipient.address) ?? null,
+      groupRecipients: groupRecipients?.map((recipient) => recipient.address) ?? null,
       html: input.request.html ?? null,
       idempotencyKey: input.request.idempotencyKey ?? null,
       message: input.request.message,
@@ -208,7 +212,7 @@ export async function sendHostedEmailMessage(input: {
     continueOnFailure: prepared.isGroupDelivery,
     fromAddress: prepared.fromAddress,
     mimeMessage: prepared.mimeMessage,
-    recipients: prepared.recipients,
+    recipients: envelopeRecipients ?? prepared.recipients,
   });
 
   return {

@@ -2082,8 +2082,11 @@ async function deliverHostedPreparedAssistantDelivery(input: {
           let result: Awaited<ReturnType<HostedRuntimeEffectsPort["sendEmail"]>>;
           try {
             result = await input.effectsPort.sendEmail({
+              html: input.assistantDeliveryEffect.payload.emailHtml ?? null,
               idempotencyKey: request.idempotencyKey ?? null,
               message: request.message,
+              newsletterAuthorizationProof:
+                input.assistantDeliveryEffect.payload.newsletterAuthorizationProof ?? null,
               planGroupFanout: true,
               replyToMessageId: request.replyToMessageId ?? null,
               subject: request.subject ?? null,
@@ -2465,7 +2468,20 @@ async function persistHostedEmailGroupFanoutIntents(input: {
   }
 
   const payload = input.assistantDeliveryEffect.payload;
+  let existingIntents: AssistantOutboxIntent[];
+  try {
+    existingIntents = await listAssistantOutboxIntents(input.vaultRoot);
+  } catch (error) {
+    throw markHostedDeliveryPreProviderRetryable(error);
+  }
   for (const memberId of input.fanoutRecipientMemberIds) {
+    if (hasNonReplayableHostedNewsletterRecipientIntent({
+      deliveryIdempotencyKey: payload.idempotencyKey,
+      intents: existingIntents,
+      memberId,
+    })) {
+      continue;
+    }
     const recipientTarget = serializeHostedEmailThreadTarget({
       ...threadTarget,
       recipientMemberId: memberId,
@@ -2482,6 +2498,8 @@ async function persistHostedEmailGroupFanoutIntents(input: {
         identityId: payload.identityId,
         media: [],
         message: payload.message,
+        emailHtml: payload.emailHtml ?? null,
+        newsletterAuthorizationProof: payload.newsletterAuthorizationProof ?? null,
         replyToMessageId: payload.replyToMessageId,
         sessionId: payload.sessionId,
         subject: null,
@@ -2494,6 +2512,32 @@ async function persistHostedEmailGroupFanoutIntents(input: {
       throw markHostedDeliveryPreProviderRetryable(error);
     }
   }
+}
+
+function hasNonReplayableHostedNewsletterRecipientIntent(input: {
+  deliveryIdempotencyKey: string;
+  intents: readonly AssistantOutboxIntent[];
+  memberId: string;
+}): boolean {
+  return input.intents.some((intent) => {
+    if (intent.deliveryIdempotencyKey !== input.deliveryIdempotencyKey) {
+      return false;
+    }
+    const target = parseHostedEmailThreadTarget(intent.explicitTarget);
+    if (target?.recipientMemberId !== input.memberId) {
+      return false;
+    }
+    if (
+      intent.status === "awaiting_approval"
+      || intent.status === "pending"
+      || intent.status === "retryable"
+      || intent.status === "sending"
+      || intent.status === "sent"
+    ) {
+      return true;
+    }
+    return intent.lastError?.code === "ASSISTANT_DELIVERY_AMBIGUOUS";
+  });
 }
 
 async function maybeResetHostedPreparedDeliveryAfterPreProviderAbort(input: {
@@ -4033,11 +4077,13 @@ function buildHostedAssistantDeliveryPayloadFromIntent(
     | "deliveryIdempotencyKey"
     | "deliverySource"
     | "deliveryTransportIdempotent"
+    | "emailHtml"
     | "explicitTarget"
     | "identityId"
     | "intentId"
     | "media"
     | "message"
+    | "newsletterAuthorizationProof"
     | "subject"
     | "replyToMessageId"
     | "sessionId"
@@ -4053,11 +4099,15 @@ function buildHostedAssistantDeliveryPayloadFromIntent(
     bindingDeliveryTarget: intent.bindingDelivery?.target ?? null,
     channel: intent.channel ?? null,
     deliverySourceKey: readHostedAssistantDeliverySourceKey(intent.deliverySource),
+    ...(intent.emailHtml == null ? {} : { emailHtml: intent.emailHtml }),
     explicitTarget: intent.explicitTarget ?? null,
     idempotencyKey: intent.deliveryIdempotencyKey ?? `assistant-outbox:${intent.intentId}`,
     identityId: intent.identityId ?? null,
     media: normalizeHostedAssistantDeliveryMedia(intent.media),
     message: intent.message,
+    ...(intent.newsletterAuthorizationProof == null
+      ? {}
+      : { newsletterAuthorizationProof: intent.newsletterAuthorizationProof }),
     subject: intent.subject ?? null,
     replyToMessageId: intent.replyToMessageId ?? null,
     sessionId: intent.sessionId,

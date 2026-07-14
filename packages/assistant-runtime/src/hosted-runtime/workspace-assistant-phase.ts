@@ -17,8 +17,6 @@ import {
   type HostedRuntimeGroupToolRequest,
   type HostedRuntimeGroupToolResponse,
   type HostedRuntimeGroupToolSelfOptOutContext,
-  type HostedRuntimeNewsletterScheduledAuthority,
-  type HostedRuntimeNewsletterToolRequest,
   type HostedWorkspaceCheckpointReason,
   type HostedRuntimeRedactedJson,
   type HostedRuntimeRedactedObject,
@@ -347,168 +345,6 @@ function resolveHostedGroupToolSelfOptOutContext(input: {
   }
 
   return eligible.size === 1 ? [...eligible.values()][0] ?? null : null;
-}
-
-export function createHostedNewsletterToolWithEmailSend(input: {
-  effectsPort: Pick<HostedRuntimePlatform["effectsPort"], "sendEmail">;
-  newsletterToolPort: NonNullable<HostedRuntimePlatform["newsletterToolPort"]>;
-  scheduledAutomationAuthority?: HostedRuntimeNewsletterScheduledAuthority | null;
-}): NonNullable<HostedRuntimePlatform["newsletterToolPort"]> {
-  let preparedAuthorization: {
-    authorizationProof: string;
-    authority: HostedRuntimeNewsletterScheduledAuthority;
-    groupId: string;
-    participantCount: number;
-    skippedNoEmailMemberIds: string[];
-  } | null = null;
-
-  return {
-    async request(request) {
-      if (request.action === "read_stats") {
-        return await input.newsletterToolPort.request(request);
-      }
-      if (request.action === "prepare") {
-        preparedAuthorization = null;
-        const result = await input.newsletterToolPort.request({
-          action: "prepare",
-          groupId: request.groupId,
-          includeAuthorizationProof: true,
-          includeAuthorizationSnapshot: true,
-        });
-        const authority = input.scheduledAutomationAuthority
-          ?? request.scheduledAutomationAuthority
-          ?? null;
-        if (authority && result.action === "prepare" && result.result.status === "ok") {
-          const emailParticipants = result.result.participants
-            .filter((participant) => participant.hasEmail);
-          preparedAuthorization = {
-            authorizationProof: result.result.authorizationProof,
-            authority,
-            groupId: request.groupId,
-            participantCount: emailParticipants.length,
-            skippedNoEmailMemberIds: result.result.participants
-              .filter((participant) => !participant.hasEmail)
-              .map((participant) => participant.memberId),
-          };
-        }
-        return result;
-      }
-
-      const scheduledAutomationAuthority =
-        input.scheduledAutomationAuthority ??
-        request.scheduledAutomationAuthority ??
-        null;
-      if (!scheduledAutomationAuthority) {
-        return {
-          action: "send",
-          result: {
-            status: "unavailable",
-            unavailableReason: "scheduled_automation_required",
-          },
-        };
-      }
-
-      const preparation = preparedAuthorization;
-      preparedAuthorization = null;
-      if (
-        !preparation
-        || preparation.groupId !== request.groupId
-        || preparation.authority.automationId !== scheduledAutomationAuthority.automationId
-        || preparation.authority.occurrenceAt !== scheduledAutomationAuthority.occurrenceAt
-      ) {
-        return {
-          action: "send",
-          result: {
-            status: "unavailable",
-            unavailableReason: "newsletter_preparation_required",
-          },
-        };
-      }
-
-      const participantCount = preparation.participantCount;
-      const skippedNoEmailMemberIds = preparation.skippedNoEmailMemberIds;
-      if (participantCount === 0) {
-        return {
-          action: "send",
-          result: {
-            participantCount: 0,
-            skippedNoEmailMemberIds,
-            status: "no_recipients",
-          },
-        };
-      }
-
-      let emailResult: Awaited<ReturnType<typeof input.effectsPort.sendEmail>>;
-      try {
-        emailResult = await input.effectsPort.sendEmail({
-          html: request.html,
-          idempotencyKey: buildHostedNewsletterEmailIdempotencyKey({
-            request,
-            scheduledAutomationAuthority,
-          }),
-          message: request.text ?? "Open this email in an HTML-capable mail client.",
-          newsletterAuthorizationProof: preparation.authorizationProof,
-          subject: request.subject,
-          target: request.groupId,
-          targetKind: "group",
-        });
-      } catch {
-        return {
-          action: "send",
-          result: {
-            status: "unavailable",
-            unavailableReason: "send_failed",
-          },
-        };
-      }
-
-      const delivery = emailResult?.delivery ?? null;
-      if (delivery && (delivery.status === "failed" || delivery.sentCount === 0)) {
-        return {
-          action: "send",
-          result: {
-            status: "unavailable",
-            unavailableReason: "send_failed",
-          },
-        };
-      }
-      if (delivery && (delivery.status === "partial_failure" || delivery.failedCount > 0)) {
-        return {
-          action: "send",
-          result: {
-            failedRecipientCount: delivery.failedCount,
-            participantCount,
-            sentRecipientCount: delivery.sentCount,
-            skippedNoEmailMemberIds,
-            status: "partial_failure",
-          },
-        };
-      }
-
-      return {
-        action: "send",
-        result: {
-          participantCount,
-          skippedNoEmailMemberIds,
-          status: "sent",
-        },
-      };
-    },
-  };
-}
-
-function buildHostedNewsletterEmailIdempotencyKey(
-  input: {
-    request: Extract<HostedRuntimeNewsletterToolRequest, { action: "send" }>;
-    scheduledAutomationAuthority: HostedRuntimeNewsletterScheduledAuthority;
-  },
-): string {
-  return [
-    "group-newsletter",
-    input.scheduledAutomationAuthority.automationId,
-    input.scheduledAutomationAuthority.occurrenceAt,
-    input.request.groupId,
-  ].join(":");
 }
 
 function resolveHostedGroupToolLinqThreadContext(
@@ -871,10 +707,7 @@ export async function runHostedWorkspaceAssistantPhase(
           : {}),
         ...(input.runtime.platform.newsletterToolPort
           ? {
-              newsletterTool: createHostedNewsletterToolWithEmailSend({
-                effectsPort: input.runtime.platform.effectsPort,
-                newsletterToolPort: input.runtime.platform.newsletterToolPort,
-              }),
+              newsletterTool: input.runtime.platform.newsletterToolPort,
             }
           : {}),
         ...(input.runtime.platform.planUsageToolPort

@@ -2153,7 +2153,7 @@ test('sendAssistantNotificationLocal returns skip decisions without delivering',
 
   vi.clearAllMocks()
 
-  await sendAssistantNotificationLocal({
+  const scheduledNewsletterResult = await sendAssistantNotificationLocal({
     executionContext: {
       hosted: null,
     },
@@ -2164,6 +2164,13 @@ test('sendAssistantNotificationLocal returns skip decisions without delivering',
     },
     serviceTier: 'flex',
     vault: '/vaults/skip',
+  })
+
+  expect(scheduledNewsletterResult.postTurnDeliveryExpectations).toEqual({
+    newsletterSendResult: {
+      status: 'unavailable',
+      unavailableReason: 'newsletter_send_not_observed',
+    },
   })
 
   expect(mocks.executeCodexTurnWithRecovery).toHaveBeenCalledWith(

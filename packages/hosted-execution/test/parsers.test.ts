@@ -1610,6 +1610,22 @@ describe("parseHostedRuntimeNewsletterTool", () => {
       result: {
         participantCount: 2,
         skippedNoEmailMemberIds: ["member_without_email"],
+        status: "accepted",
+      },
+    })).toEqual({
+      action: "send",
+      result: {
+        participantCount: 2,
+        skippedNoEmailMemberIds: ["member_without_email"],
+        status: "accepted",
+      },
+    });
+
+    expect(parseHostedRuntimeNewsletterToolResponse({
+      action: "send",
+      result: {
+        participantCount: 2,
+        skippedNoEmailMemberIds: ["member_without_email"],
         status: "sent",
       },
     })).toEqual({

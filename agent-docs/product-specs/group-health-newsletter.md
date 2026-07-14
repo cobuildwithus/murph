@@ -102,16 +102,26 @@ committed transcript replay or bypass the filtered result with the unfiltered
 generic CLI reader. Ordinary group-chat turns retain their normal conversation
 thread and generic reader.
 
-Preparation binds the web-owned authorization proof, participant counts, group,
-and current automation occurrence in runtime memory. Send carries that proof
-through the existing hosted-email request to the existing web recipient
-callback. Immediately before MIME construction and provider entry, the callback
-resolves the complete canonical snapshot again and returns addresses only when
-its proof matches. The runtime does not perform a duplicate second preparation
-read. An email-eligibility or health-grant change fails before provider entry as
-`send_failed`, and the cron occurrence remains pending for a fresh
-prepare-and-compose retry. A failed or zero-sent provider result is also
-`send_failed`; `partial_failure` requires at least one successful recipient.
+Each isolated scheduled turn owns a one-shot capability: exactly one preparation
+attempt and at most one send attempt. Any failure or send closes it, so a model
+cannot compose from one snapshot, refresh the proof, and reuse the older body.
+Send persists the HTML body and address-free proof on a parent intent in the
+existing assistant outbox; it never calls the provider from the tool. The
+existing hosted group fanout planner revalidates the proof, persists one child
+intent per authorized recipient before provider entry, and then sends each child
+with one envelope recipient while preserving the full authorized `To` audience
+in the shared MIME. No new queue, table, route, scheduler, or state owner exists.
+
+The parent and children share the occurrence-scoped delivery key. A later fresh
+cron turn reads their durable states: active work returns `accepted` and retains
+the occurrence; all-sent or durably classified partial work is terminal; safe
+pre-provider failures may create a fresh planner; sent and ambiguous children
+are never replayed. Missing prepare/send results and unavailable preparation are
+explicit retryable failures. The first-run opt-out window remains separate and
+supplies no scheduled send authority, so it can still consume its intentional
+no-send occurrence. Immediately before MIME construction and each recipient
+provider entry, the web callback resolves the complete canonical snapshot again
+and returns addresses only when its proof matches.
 
 ## Content and Tone
 
@@ -261,7 +271,7 @@ proof-less
 both `includeAuthorizationSnapshot: true` and
 `includeAuthorizationProof: true`, and returns the address-free live grant
 snapshot plus its SHA-256 proof. The model-facing schema exposes only `prepare`
-and `send`; the proof stays in trusted runtime/effect state. The legacy request
+and `send`; the proof and HTML stay in trusted outbox/effect state. The legacy request
 parser exists only to prevent an ambiguous transport failure during rollout.
 
 Deploy the fail-closed Vercel/web callback first and keep that version as the
@@ -276,9 +286,11 @@ the current runner is active. After both are live, run one
 preparation call and confirm the trusted web wire contains only member ids,
 email eligibility, and address-free share ids/scope keys, while the model-facing
 runner result contains only the authorized current-week facts and no raw email
-addresses or grant metadata. Confirm a scheduled send re-resolves the current
+addresses or grant metadata. Confirm a scheduled send first persists the
+existing-outbox parent and recipient children, re-resolves the current
 authorization snapshot, fails closed when either recipients or health grants
-change after preparation, and preserves its idempotency key.
+change after preparation, and preserves its idempotency key without replaying a
+sent or ambiguous child.
 
 The base newsletter change spans **Cloudflare** (`apps/cloudflare`: HTML MIME, group-send path, address-resolution callback, inbound thread participation) and **Vercel/web** (`apps/web`: `group-email.v0` display + default request, address-resolution endpoint, `?addEmail=true`). Safe deploy order is **web first, then Cloudflare** — the web resolution endpoint and the new grant kind must exist before the Worker calls them. Both sides must recognize `group-email.v0` during the window.
 

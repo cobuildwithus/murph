@@ -782,6 +782,7 @@ async function executePreparedClaimedAssistantCronJob(
           const postTurnDeliveryFailure =
             resolveAssistantCronPostTurnDeliveryFailure({
               job: input.job,
+              occurrenceAt,
               result,
               trigger: input.trigger,
             })
@@ -1156,27 +1157,23 @@ function resolveAssistantCronScheduledNewsletterAuthority(input: {
 
 function resolveAssistantCronPostTurnDeliveryFailure(input: {
   job: ResolvedAssistantCronJob
+  occurrenceAt: string
   result: Awaited<ReturnType<typeof sendAssistantNotificationLocal>>
   trigger: AssistantCronTrigger
 }): string | null {
-  if (
-    input.trigger !== 'scheduled' ||
-    input.job.kind !== 'canonical' ||
-    input.job.source.kind !== 'automation' ||
-    input.job.source.schedule.kind !== 'cron' ||
-    input.job.source.slug !== GROUP_HEALTH_NEWSLETTER_AUTOMATION_SLUG
-  ) {
+  if (!resolveAssistantCronScheduledNewsletterAuthority({
+    job: input.job,
+    occurrenceAt: input.occurrenceAt,
+    trigger: input.trigger,
+  })) {
     return null
   }
 
   const newsletterSendResult =
     input.result.postTurnDeliveryExpectations?.newsletterSendResult ?? null
-  return newsletterSendResult?.status === 'unavailable' && [
-    'newsletter_authorization_changed',
-    'newsletter_preparation_required',
-    'newsletter_preparation_unavailable',
-    'send_failed',
-  ].includes(newsletterSendResult.unavailableReason)
+  return !newsletterSendResult
+    || newsletterSendResult.status === 'unavailable'
+    || newsletterSendResult.status === 'accepted'
     ? ASSISTANT_CRON_NEWSLETTER_DELIVERY_FAILED_ERROR
     : null
 }
