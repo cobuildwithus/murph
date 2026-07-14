@@ -10,6 +10,12 @@ if [[ "$#" -gt 0 ]]; then
   workspace_artifact_lock_label+=" $1"
 fi
 
+readonly shared_host_mode="${MURPH_VERIFY_SHARED_HOST:-0}"
+if [[ "$shared_host_mode" != "0" && "$shared_host_mode" != "1" ]]; then
+  printf '[workspace-verify] ERROR: MURPH_VERIFY_SHARED_HOST must be 0 or 1.\n' >&2
+  exit 1
+fi
+
 command_requires_workspace_artifact_lock() {
   case "${1:-}" in
     "typecheck" | "typecheck:packages" | "test" | "test:packages" | "test:apps" | "test:diff" | "test:packages:coverage" | "test:coverage" | "verify:acceptance" | "verify:cli")
@@ -26,6 +32,11 @@ if [[ "${MURPH_WORKSPACE_ARTIFACT_LOCK_HELD:-0}" != "1" ]] && command_requires_w
     bash "$repo_root/scripts/workspace-verify.sh" "$@"
 fi
 
+if [[ "$shared_host_mode" == "1" && "${MURPH_VERIFY_HOST_SLOT_HELD:-0}" != "1" ]] && command_requires_workspace_artifact_lock "${1:-}"; then
+  exec node "$repo_root/scripts/run-with-host-verification-slot.mjs" "$workspace_artifact_lock_label" -- \
+    bash "$repo_root/scripts/workspace-verify.sh" "$@"
+fi
+
 readonly shell_syntax_check_scripts=(
   "scripts/check-agent-docs-drift.sh"
   "scripts/doc-gardening.sh"
@@ -34,6 +45,7 @@ readonly shell_syntax_check_scripts=(
   "scripts/finish-task"
   "scripts/committer"
   "scripts/package-audit-context.sh"
+  "scripts/package-audit-context-full.sh"
   "scripts/package-data-context.sh"
   "scripts/repo-tools.config.sh"
   "scripts/release.sh"
@@ -50,6 +62,9 @@ readonly shell_syntax_check_scripts=(
 
 readonly node_syntax_check_scripts=(
   "scripts/build-test-runtime-prepared.mjs"
+  "scripts/benchmark-typescript.mjs"
+  "scripts/run-typescript.mjs"
+  "scripts/run-with-host-verification-slot.mjs"
   "scripts/run-with-workspace-artifact-lock.mjs"
   "scripts/check-workspace-package-cycles.mjs"
   "scripts/check-hosted-crypto-hardcut.mjs"
@@ -156,29 +171,29 @@ local_worker_budget_default() {
   normalize_positive_integer "$worker_budget" "$fallback"
 }
 
-readonly app_verify_parallel_default="$([[ -n "${CI:-}" ]] && echo 0 || echo 1)"
+readonly app_verify_parallel_default="$([[ -n "${CI:-}" || "$shared_host_mode" == "1" ]] && echo 0 || echo 1)"
 readonly app_verify_parallel="${MURPH_APP_VERIFY_PARALLEL:-$app_verify_parallel_default}"
-readonly acceptance_app_verify_with_coverage_default="$([[ -n "${CI:-}" ]] && echo 0 || echo 1)"
+readonly acceptance_app_verify_with_coverage_default="$([[ -n "${CI:-}" || "$shared_host_mode" == "1" ]] && echo 0 || echo 1)"
 readonly acceptance_app_verify_with_coverage="${MURPH_ACCEPTANCE_APP_VERIFY_WITH_COVERAGE:-$acceptance_app_verify_with_coverage_default}"
-readonly acceptance_app_verify_delay_seconds_default="$([[ -n "${CI:-}" ]] && echo 0 || echo 45)"
+readonly acceptance_app_verify_delay_seconds_default="$([[ -n "${CI:-}" || "$shared_host_mode" == "1" ]] && echo 0 || echo 45)"
 readonly acceptance_app_verify_delay_seconds="$(normalize_non_negative_integer "${MURPH_ACCEPTANCE_APP_VERIFY_DELAY_SECONDS:-$acceptance_app_verify_delay_seconds_default}" "$acceptance_app_verify_delay_seconds_default")"
 # Package coverage and app verification share generated setup. Keep the legacy
 # Cloudflare-only overlap as an explicit escape hatch when full app overlap is
 # disabled.
 readonly acceptance_early_cloudflare_verify="${MURPH_ACCEPTANCE_EARLY_CLOUDFLARE_VERIFY:-0}"
-readonly test_lane_parallel_default="$([[ -n "${CI:-}" ]] && echo 0 || echo 1)"
+readonly test_lane_parallel_default="$([[ -n "${CI:-}" || "$shared_host_mode" == "1" ]] && echo 0 || echo 1)"
 readonly test_lane_parallel="${MURPH_TEST_LANES_PARALLEL:-$test_lane_parallel_default}"
-readonly package_coverage_concurrency_default="$([[ -n "${CI:-}" ]] && echo 1 || local_concurrency_default 6 4)"
+readonly package_coverage_concurrency_default="$([[ -n "${CI:-}" ]] && echo 1 || [[ "$shared_host_mode" == "1" ]] && echo 2 || local_concurrency_default 6 4)"
 readonly package_coverage_concurrency_limit="$(normalize_positive_integer "${MURPH_PACKAGE_COVERAGE_CONCURRENCY:-$package_coverage_concurrency_default}" "$package_coverage_concurrency_default")"
-readonly package_coverage_cli_active_concurrency_default="$([[ -n "${CI:-}" ]] && echo 1 || echo 4)"
+readonly package_coverage_cli_active_concurrency_default="$([[ -n "${CI:-}" || "$shared_host_mode" == "1" ]] && echo 1 || echo 4)"
 readonly package_coverage_cli_active_concurrency_limit="$(normalize_positive_integer "${MURPH_PACKAGE_COVERAGE_CLI_ACTIVE_CONCURRENCY:-$package_coverage_cli_active_concurrency_default}" "$package_coverage_cli_active_concurrency_default")"
 readonly package_coverage_vitest_max_workers_default="$([[ -n "${CI:-}" ]] && echo 50% || local_worker_budget_default "$package_coverage_concurrency_limit" 1)"
 readonly package_coverage_vitest_max_workers="${MURPH_PACKAGE_COVERAGE_VITEST_MAX_WORKERS:-$package_coverage_vitest_max_workers_default}"
-readonly typecheck_workspace_concurrency_default="$([[ -n "${CI:-}" ]] && echo 2 || local_concurrency_default 8 4)"
-readonly typecheck_preflight_parallel_default="1"
+readonly typecheck_workspace_concurrency_default="$([[ -n "${CI:-}" || "$shared_host_mode" == "1" ]] && echo 2 || local_concurrency_default 8 4)"
+readonly typecheck_preflight_parallel_default="$([[ "$shared_host_mode" == "1" ]] && echo 0 || echo 1)"
 readonly typecheck_preflight_parallel="${MURPH_TYPECHECK_PREFLIGHT_PARALLEL:-$typecheck_preflight_parallel_default}"
 readonly typecheck_workspace_concurrency="$(normalize_positive_integer "${MURPH_TYPECHECK_WORKSPACE_CONCURRENCY:-$typecheck_workspace_concurrency_default}" "$typecheck_workspace_concurrency_default")"
-readonly test_diff_workspace_concurrency_default="$([[ -n "${CI:-}" ]] && echo 1 || local_concurrency_default 4 2)"
+readonly test_diff_workspace_concurrency_default="$([[ -n "${CI:-}" || "$shared_host_mode" == "1" ]] && echo 1 || local_concurrency_default 4 2)"
 readonly test_diff_workspace_concurrency="$(normalize_positive_integer "${MURPH_TEST_DIFF_WORKSPACE_CONCURRENCY:-$test_diff_workspace_concurrency_default}" "$test_diff_workspace_concurrency_default")"
 readonly test_diff_vitest_max_workers_default="$([[ -n "${CI:-}" ]] && echo 50% || local_worker_budget_default "$test_diff_workspace_concurrency" 1)"
 readonly test_diff_vitest_max_workers="${MURPH_TEST_DIFF_VITEST_MAX_WORKERS:-$test_diff_vitest_max_workers_default}"
@@ -452,13 +467,16 @@ run_package_command_without_node_v8_coverage_with_retry() {
 
 run_app_verify_command_with_retry() {
   local app_dir="$1"
-  local skip_cloudflare_typecheck="${2:-0}"
+  local skip_app_typechecks="${2:-0}"
   local health_commons_generated_prepared="${3:-0}"
-  local hosted_web_prisma_generated_prepared="${4:-$skip_cloudflare_typecheck}"
+  local hosted_web_prisma_generated_prepared="${4:-$skip_app_typechecks}"
   local env_args=(env -u NODE_V8_COVERAGE)
 
-  if [[ "$app_dir" == "apps/cloudflare" && "$skip_cloudflare_typecheck" == "1" ]]; then
-    env_args+=(MURPH_CLOUDFLARE_VERIFY_SKIP_TYPECHECK=1)
+  if [[ "$skip_app_typechecks" == "1" ]]; then
+    case "$app_dir" in
+      "apps/cloudflare") env_args+=(MURPH_CLOUDFLARE_VERIFY_SKIP_TYPECHECK=1) ;;
+      "apps/web") env_args+=(MURPH_HOSTED_WEB_VERIFY_SKIP_TYPECHECK=1) ;;
+    esac
   fi
   if [[ "$health_commons_generated_prepared" == "1" ]]; then
     env_args+=(MURPH_HEALTH_COMMONS_GENERATED_PREPARED=1)
@@ -526,9 +544,9 @@ run_test_packages_common() {
 }
 
 run_test_apps() {
-  local skip_cloudflare_typecheck="${1:-0}"
+  local skip_app_typechecks="${1:-0}"
   local health_commons_generated_prepared="${2:-0}"
-  local hosted_web_prisma_generated_prepared="${3:-$skip_cloudflare_typecheck}"
+  local hosted_web_prisma_generated_prepared="${3:-$skip_app_typechecks}"
 
   if [[ "$health_commons_generated_prepared" != "1" ]]; then
     run_timed_step "Health Commons generated artifacts" generate_health_commons_artifacts_with_retry || return $?
@@ -544,11 +562,11 @@ run_test_apps() {
     local pids=()
 
     # App verification should not emit V8 coverage into the repo coverage workspace.
-    run_app_verify_command_with_retry "apps/web" "$skip_cloudflare_typecheck" "$health_commons_generated_prepared" "$hosted_web_prisma_generated_prepared" &
+    run_app_verify_command_with_retry "apps/web" "$skip_app_typechecks" "$health_commons_generated_prepared" "$hosted_web_prisma_generated_prepared" &
     local hosted_web_verify_pid="$!"
     pids+=("$hosted_web_verify_pid")
     register_background_pid "$hosted_web_verify_pid"
-    run_app_verify_command_with_retry "apps/cloudflare" "$skip_cloudflare_typecheck" "$health_commons_generated_prepared" "$hosted_web_prisma_generated_prepared" &
+    run_app_verify_command_with_retry "apps/cloudflare" "$skip_app_typechecks" "$health_commons_generated_prepared" "$hosted_web_prisma_generated_prepared" &
     local cloudflare_verify_pid="$!"
     pids+=("$cloudflare_verify_pid")
     register_background_pid "$cloudflare_verify_pid"
@@ -560,8 +578,8 @@ run_test_apps() {
     return 0
   fi
 
-  run_app_verify_command_with_retry "apps/web" "$skip_cloudflare_typecheck" "$health_commons_generated_prepared" "$hosted_web_prisma_generated_prepared" || return $?
-  run_app_verify_command_with_retry "apps/cloudflare" "$skip_cloudflare_typecheck" "$health_commons_generated_prepared" "$hosted_web_prisma_generated_prepared"
+  run_app_verify_command_with_retry "apps/web" "$skip_app_typechecks" "$health_commons_generated_prepared" "$hosted_web_prisma_generated_prepared" || return $?
+  run_app_verify_command_with_retry "apps/cloudflare" "$skip_app_typechecks" "$health_commons_generated_prepared" "$hosted_web_prisma_generated_prepared"
 }
 
 run_test_apps_with_workspace_artifact_lock() {
@@ -1063,7 +1081,7 @@ run_typecheck_preflight() {
   run_timed_step "Hosted Temporal orchestration guard" pnpm hosted-temporal:guard
   run_timed_step "Hosted crypto hard-cut guard" pnpm hosted-crypto:guard
   run_timed_step "Raw health log payload guard" pnpm logs:guard
-  run_timed_step "Repo TS tools typecheck" pnpm exec tsc -p "tsconfig.tools.json" --pretty false
+  run_timed_step "Repo TS tools typecheck" node "scripts/run-typescript.mjs" package -p "tsconfig.tools.json" --pretty false
   run_timed_step "Contracts build" pnpm --dir "packages/contracts" build
 }
 
@@ -1110,7 +1128,7 @@ run_typecheck_overlapped() {
   pids+=("$raw_health_log_guard_pid")
   register_background_pid "$raw_health_log_guard_pid"
 
-  run_timed_step "Repo TS tools typecheck" pnpm exec tsc -p "tsconfig.tools.json" --pretty false &
+  run_timed_step "Repo TS tools typecheck" node "scripts/run-typescript.mjs" package -p "tsconfig.tools.json" --pretty false &
   local repo_tools_typecheck_pid="$!"
   pids+=("$repo_tools_typecheck_pid")
   register_background_pid "$repo_tools_typecheck_pid"
@@ -1275,7 +1293,7 @@ run_diff_repo_internal_fast_path() {
   run_timed_step "Hosted Temporal orchestration guard" pnpm hosted-temporal:guard
   run_timed_step "Hosted crypto hard-cut guard" pnpm hosted-crypto:guard
   run_timed_step "Raw health log payload guard" pnpm logs:guard
-  run_timed_step "Repo TS tools typecheck" pnpm exec tsc -p "tsconfig.tools.json" --pretty false
+  run_timed_step "Repo TS tools typecheck" node "scripts/run-typescript.mjs" package -p "tsconfig.tools.json" --pretty false
 }
 
 run_test_diff() {

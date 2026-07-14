@@ -167,6 +167,7 @@ test("workspace clean build preserves importers dist until the safe build refres
 
 test("non-forced package TypeScript builds clean matching build info", () => {
   const packageNames = readdirSync(packagesRoot).sort();
+  let checkedBuildCount = 0;
 
   for (const packageName of packageNames) {
     const packageRoot = path.join(packagesRoot, packageName);
@@ -179,15 +180,18 @@ test("non-forced package TypeScript builds clean matching build info", () => {
       scripts?: Record<string, string | undefined>;
     };
     const buildScript = packageManifest.scripts?.build ?? "";
+    const tsConfigMatch = buildScript.match(
+      /run-typescript\.mjs\s+package\s+-b\s+([^&\s]+)/u,
+    );
     if (
       !/rm-paths\.mjs\s+dist\b/u.test(buildScript) ||
-      !/\btsc\s+-b\b/u.test(buildScript) ||
+      !tsConfigMatch ||
       /\b--force\b/u.test(buildScript)
     ) {
       continue;
     }
 
-    const tsConfigMatch = buildScript.match(/\btsc\s+-b\s+([^&\s]+)/u);
+    checkedBuildCount += 1;
     const tsConfigPath = path.join(packageRoot, tsConfigMatch?.[1] ?? "tsconfig.json");
     const tsConfig = readMergedTsConfig(tsConfigPath);
     const tsBuildInfoFile = tsConfig.compilerOptions?.tsBuildInfoFile;
@@ -202,6 +206,8 @@ test("non-forced package TypeScript builds clean matching build info", () => {
       `${path.relative(repoRoot, packageJsonPath)} build must clean ${tsBuildInfoFile} with dist`,
     );
   }
+
+  assert.ok(checkedBuildCount > 0, "expected routed package TypeScript builds to be audited");
 });
 
 test("safe build publishes temp dist only after TypeScript succeeds", () => {

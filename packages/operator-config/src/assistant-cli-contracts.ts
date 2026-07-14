@@ -849,6 +849,7 @@ export const assistantOutboxIntentSchema = z
     attemptCount: z.number().int().nonnegative(),
     status: z.enum(assistantOutboxIntentStatusValues),
     message: z.string(),
+    emailHtml: z.string().max(500_000).nullable().optional(),
     media: z.array(assistantResponseMediaSchema).max(40).default([]),
     subject: z.string().trim().min(1).nullable().default(null),
     operation: assistantOutboxOperationSchema.nullable().default(null),
@@ -871,6 +872,11 @@ export const assistantOutboxIntentSchema = z
     deliveryConfirmationPending: z.boolean().default(false),
     deliveryIdempotencyKey: z.string().min(1).nullable().default(null),
     deliveryTransportIdempotent: z.boolean().default(false),
+    newsletterAuthorizationProof: z
+      .string()
+      .regex(/^[0-9a-f]{64}$/u)
+      .nullable()
+      .optional(),
     answeredMailboxItemIds: z.array(z.string().trim().min(1))
       .max(ASSISTANT_ANSWERED_MAILBOX_ITEM_ID_LIMIT)
       .default([]),

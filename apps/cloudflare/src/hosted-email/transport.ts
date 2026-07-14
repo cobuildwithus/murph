@@ -87,6 +87,7 @@ export async function sendHostedEmailMessage(input: {
   webControlBaseUrl?: string | null;
 }): Promise<HostedEmailSendResult> {
   let prepared: Awaited<ReturnType<typeof prepareHostedEmailSend>>;
+  let envelopeRecipients: readonly string[] | null = null;
   try {
     if (!input.config.domain || !input.config.signingSecret) {
       throw new Error("Hosted email routing is not configured.");
@@ -96,6 +97,12 @@ export async function sendHostedEmailMessage(input: {
     }
 
     const preflight = assertSupportedHostedEmailSendRequest(input.request);
+    if (
+      input.request.idempotencyKey?.startsWith("group-newsletter:")
+      && !input.request.newsletterAuthorizationProof
+    ) {
+      throw new Error("Hosted newsletter delivery requires an authorization proof.");
+    }
     const groupId = resolveHostedEmailSendGroupId({
       existingThreadTarget: preflight.existingThreadTarget,
       target: input.request.target,
@@ -112,6 +119,8 @@ export async function sendHostedEmailMessage(input: {
     });
     const groupRecipientResolution = groupId
       ? await resolveHostedEmailGroupRecipients({
+          expectedNewsletterAuthorizationProof:
+            input.request.newsletterAuthorizationProof ?? null,
           fetchImpl: input.fetchImpl,
           groupId,
           userId: input.userId,
@@ -157,11 +166,14 @@ export async function sendHostedEmailMessage(input: {
         target: input.request.target,
       };
     }
+    envelopeRecipients = selectedGroupRecipients?.map(
+      (recipient) => recipient.address,
+    ) ?? null;
     prepared = await prepareHostedEmailSend({
       config: input.config,
       existingThreadTarget: preflight.existingThreadTarget,
       groupId,
-      groupRecipients: selectedGroupRecipients?.map((recipient) => recipient.address) ?? null,
+      groupRecipients: groupRecipients?.map((recipient) => recipient.address) ?? null,
       html: input.request.html ?? null,
       idempotencyKey: input.request.idempotencyKey ?? null,
       message: input.request.message,
@@ -200,7 +212,7 @@ export async function sendHostedEmailMessage(input: {
     continueOnFailure: prepared.isGroupDelivery,
     fromAddress: prepared.fromAddress,
     mimeMessage: prepared.mimeMessage,
-    recipients: prepared.recipients,
+    recipients: envelopeRecipients ?? prepared.recipients,
   });
 
   return {
@@ -355,6 +367,7 @@ async function sendPreparedHostedEmailMimeMessages(input: {
 }
 
 async function resolveHostedEmailGroupRecipients(input: {
+  expectedNewsletterAuthorizationProof?: string | null;
   fetchImpl?: typeof fetch;
   groupId: string;
   userId: string;
@@ -370,6 +383,12 @@ async function resolveHostedEmailGroupRecipients(input: {
     ...(input.webControlAllowHttpHosts ? { allowHttpHosts: input.webControlAllowHttpHosts } : {}),
     baseUrl: input.webControlBaseUrl,
     body: JSON.stringify({
+      ...(input.expectedNewsletterAuthorizationProof
+        ? {
+            expectedNewsletterAuthorizationProof:
+              input.expectedNewsletterAuthorizationProof,
+          }
+        : {}),
       groupId: input.groupId,
     }),
     boundUserId: input.userId,
@@ -517,6 +536,7 @@ async function prepareHostedEmailSend(input: {
       fromAddress,
       inReplyTo: replyToMessageId,
       messageId,
+      mimeDate: resolveHostedEmailMimeDate(input.idempotencyKey),
       references: previousReferences,
       replyToAddress: input.replyAddress,
       subject,
@@ -550,6 +570,7 @@ function buildRawMimeMessage(input: {
   fromAddress: string;
   inReplyTo: string | null;
   messageId: string;
+  mimeDate: string;
   references: string[];
   replyToAddress: string | null;
   subject: string;
@@ -561,7 +582,7 @@ function buildRawMimeMessage(input: {
     input.cc.length > 0 ? formatMimeHeaderLine("Cc", input.cc.join(", ")) : null,
     formatMimeHeaderLine("Subject", encodeMimeHeader(input.subject)),
     formatMimeHeaderLine("Message-ID", input.messageId),
-    formatMimeHeaderLine("Date", new Date().toUTCString()),
+    formatMimeHeaderLine("Date", input.mimeDate),
     input.replyToAddress ? formatMimeHeaderLine("Reply-To", input.replyToAddress) : null,
     input.inReplyTo ? formatMimeHeaderLine("In-Reply-To", input.inReplyTo) : null,
     input.references.length > 0
@@ -596,6 +617,23 @@ function buildRawMimeMessage(input: {
   return `${headers.join("\r\n")}\r\n\r\n${wrapMimeBase64(
     encodeUtf8Base64(input.bodyText),
   )}\r\n`;
+}
+
+function resolveHostedEmailMimeDate(idempotencyKey: string | null): string {
+  const newsletterOccurrenceAt = parseHostedNewsletterOccurrenceAt(idempotencyKey);
+  return (newsletterOccurrenceAt ?? new Date()).toUTCString();
+}
+
+function parseHostedNewsletterOccurrenceAt(idempotencyKey: string | null): Date | null {
+  const trimmed = idempotencyKey?.trim() ?? "";
+  const match = /^group-newsletter:[^:]+:(.+):[^:]+$/u.exec(trimmed);
+  const occurrenceAt = match?.[1] ?? "";
+  if (!occurrenceAt) {
+    return null;
+  }
+
+  const parsed = new Date(occurrenceAt);
+  return Number.isNaN(parsed.getTime()) ? null : parsed;
 }
 
 async function createHostedEmailMessageId(input: {

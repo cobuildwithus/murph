@@ -33,6 +33,34 @@ if (process.env.MURPH_WORKSPACE_ARTIFACT_LOCK_HELD !== "1") {
   process.exit(result.status ?? 1);
 }
 
+if (
+  process.env.MURPH_VERIFY_SHARED_HOST === "1" &&
+  process.env.MURPH_VERIFY_HOST_SLOT_HELD !== "1"
+) {
+  const result = spawnSync(
+    process.execPath,
+    [
+      path.join(repoRoot, "scripts", "run-with-host-verification-slot.mjs"),
+      "build:test-runtime:prepared",
+      "--",
+      process.execPath,
+      scriptPath,
+      ...process.argv.slice(2),
+    ],
+    {
+      cwd: repoRoot,
+      env: process.env,
+      stdio: "inherit",
+    },
+  );
+
+  if (result.error) {
+    throw result.error;
+  }
+
+  process.exit(result.status ?? 1);
+}
+
 const cliSourceRoot = path.join(repoRoot, "packages/cli/src");
 const workspaceSmokePackages = [
   {
@@ -293,8 +321,8 @@ function walkTypeScriptFiles(directoryPath) {
 
 function runPreparedBuild(force = false) {
   const args = [
-    "exec",
-    "tsc",
+    path.join(repoRoot, "scripts", "run-typescript.mjs"),
+    "workspace-build",
     "-b",
     "tsconfig.test-runtime.json",
   ];
@@ -304,7 +332,7 @@ function runPreparedBuild(force = false) {
   }
 
   args.push("--pretty", "false");
-  const buildStatus = runCommand("pnpm", args);
+  const buildStatus = runCommand(process.execPath, args);
   if (buildStatus !== 0) {
     return buildStatus;
   }
