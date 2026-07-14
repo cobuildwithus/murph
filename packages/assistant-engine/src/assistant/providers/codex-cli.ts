@@ -386,7 +386,10 @@ export async function executeCodexAssistantTurnAttempt(
 
     if (
       input.resume &&
-      (failureContext?.acceptedNoReplyDeliveryContextOrdinals?.length ?? 0) > 0
+      (
+        (failureContext?.acceptedNoReplyDeliveryContextOrdinals?.length ?? 0) > 0 ||
+        (failureContext?.providerActionCount ?? 0) > 0
+      )
     ) {
       return buildFailedProviderAttempt(error, undefined, failureContext)
     }

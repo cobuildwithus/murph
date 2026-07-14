@@ -1093,7 +1093,7 @@ describe('assistant codex runtime', () => {
           source: 'cat-catalog-item',
         },
       ],
-      providerActionCount: 1,
+      providerActionCount: 3,
       rolloutRelativePath,
       sessionId: threadId,
       stderr: 'Retrying after timeout',
@@ -13988,6 +13988,7 @@ describe('assistant codex event shaping', () => {
       expect(readCodexAppServerTurnFailureContext(error)).toMatchObject({
         acceptedNoReplyDeliveryContextOrdinals: [0],
         codexThreadId: threadId,
+        providerActionCount: 1,
         providerTurnId: 'turn-no-reply-recorded-fail',
         rolloutRelativePath,
       })
