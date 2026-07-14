@@ -1,7 +1,18 @@
 import { readFile, readdir } from 'node:fs/promises'
 import path from 'node:path'
 import { fileURLToPath } from 'node:url'
-import ts from '@typescript/typescript6'
+import { parse } from '@babel/parser'
+import {
+  isCallExpression,
+  isExportAllDeclaration,
+  isExportNamedDeclaration,
+  isImport,
+  isImportDeclaration,
+  isImportExpression,
+  isStringLiteral,
+  isTSImportType,
+  traverseFast,
+} from '@babel/types'
 import { describe, expect, it } from 'vitest'
 
 const packageDir = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..')
@@ -44,7 +55,14 @@ function readWorkspacePackageName(specifier: string): string | null {
 }
 
 function collectWorkspaceImportsFromSourceFile(filePath: string, sourceText: string): Set<string> {
-  const sourceFile = ts.createSourceFile(filePath, sourceText, ts.ScriptTarget.Latest, true)
+  const sourceFile = parse(sourceText, {
+    allowAwaitOutsideFunction: true,
+    allowUndeclaredExports: true,
+    attachComment: false,
+    plugins: ['typescript', ...(filePath.endsWith('.tsx') ? ['jsx' as const] : [])],
+    sourceFilename: filePath,
+    sourceType: 'unambiguous',
+  })
   const importedPackages = new Set<string>()
 
   const recordSpecifier = (specifier: string): void => {
@@ -54,34 +72,27 @@ function collectWorkspaceImportsFromSourceFile(filePath: string, sourceText: str
     }
   }
 
-  const visit = (node: ts.Node): void => {
-    if (
-      ts.isImportDeclaration(node) ||
-      ts.isExportDeclaration(node)
+  traverseFast(sourceFile, (node) => {
+    if (isImportDeclaration(node)) {
+      recordSpecifier(node.source.value)
+    } else if (
+      (isExportNamedDeclaration(node) || isExportAllDeclaration(node)) &&
+      node.source
     ) {
-      const specifier = node.moduleSpecifier
-      if (specifier && ts.isStringLiteral(specifier)) {
-        recordSpecifier(specifier.text)
-      }
-    } else if (ts.isCallExpression(node) && node.expression.kind === ts.SyntaxKind.ImportKeyword) {
+      recordSpecifier(node.source.value)
+    } else if (isImportExpression(node) && isStringLiteral(node.source)) {
+      recordSpecifier(node.source.value)
+    } else if (isCallExpression(node) && isImport(node.callee)) {
       const [argument] = node.arguments
-      if (argument && ts.isStringLiteral(argument)) {
-        recordSpecifier(argument.text)
+      if (argument && isStringLiteral(argument)) {
+        recordSpecifier(argument.value)
       }
-    } else if (ts.isImportTypeNode(node)) {
-      const argument = node.argument
-      if (
-        ts.isLiteralTypeNode(argument) &&
-        ts.isStringLiteral(argument.literal)
-      ) {
-        recordSpecifier(argument.literal.text)
+    } else if (isTSImportType(node)) {
+      if (isStringLiteral(node.argument)) {
+        recordSpecifier(node.argument.value)
       }
     }
-
-    ts.forEachChild(node, visit)
-  }
-
-  visit(sourceFile)
+  })
 
   return importedPackages
 }

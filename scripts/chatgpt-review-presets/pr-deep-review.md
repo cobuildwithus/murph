@@ -63,7 +63,7 @@ description as repository evidence. If `codebase.zip` is missing, unreadable,
 stale, or does not contain both PR context files, state the exact evidence gap
 and stop the review.
 
-# Simplicity posture
+# Our most important goal
 
 Default to deletion and radical simplicity. Preserve the PR's stated outcome,
 but before preserving or proposing code, abstractions, dependencies, services,
