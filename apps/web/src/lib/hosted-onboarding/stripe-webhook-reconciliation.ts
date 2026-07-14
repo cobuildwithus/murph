@@ -142,8 +142,7 @@ export async function reconcileRecordedHostedStripeWebhookEvent(input: {
   }
 
   const activatedMembers = reconciled.activatedMembers ?? [];
-
-  return {
+  const reconciliationResult: HostedStripeWebhookReconciliationResult = {
     activatedMemberId: reconciled.activatedMemberId ?? null,
     ...(activatedMembers.length > 0 ? { activatedMembers } : {}),
     eventId: reconciled.eventId,
@@ -151,6 +150,19 @@ export async function reconcileRecordedHostedStripeWebhookEvent(input: {
     hostedExecutionEventId: reconciled.hostedExecutionEventId ?? null,
     hostedExecutionMailboxItemId: null,
   };
+
+  if (
+    storedEvent.familyUsageRepairGroupId
+    && resolveHostedStripeWebhookActivationTargets(reconciliationResult).length === 0
+  ) {
+    return await resolveCompletedHostedStripeWebhookActivationResult({
+      eventId: input.eventId,
+      eventType: storedEvent.type,
+      prisma,
+    });
+  }
+
+  return reconciliationResult;
 }
 
 export async function processRecordedHostedStripeWebhookEvent(input: {
@@ -300,6 +312,7 @@ async function readHostedStripeWebhookEventReceipt(
   return prisma.hostedStripeEvent.findUnique({
     select: {
       claimExpiresAt: true,
+      familyUsageRepairGroupId: true,
       nextAttemptAt: true,
       status: true,
       type: true,

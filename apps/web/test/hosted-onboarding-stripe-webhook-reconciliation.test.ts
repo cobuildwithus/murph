@@ -310,6 +310,120 @@ describe("hosted Stripe webhook reconciliation helpers", () => {
     );
   });
 
+  it("rederives family activation targets when bounded usage repair completes", async () => {
+    const pendingReceipt = {
+      claimExpiresAt: null,
+      familyUsageRepairGroupId: "hbag_family",
+      nextAttemptAt: new Date("2026-04-23T00:00:00.000Z"),
+      status: HostedStripeEventStatus.pending,
+      type: "customer.subscription.updated",
+      updatedAt: new Date("2026-04-23T00:00:00.000Z"),
+    };
+    const prisma = createPrisma({
+      hostedMailboxItem: {
+        findMany: vi.fn(async (args: { where: { dedupeKey: { endsWith: string } } }) =>
+          args.where.dedupeKey.endsWith === ":family-subscription:sub_family"
+            ? [
+                {
+                  dedupeKey:
+                    "member.activated:hosted.family.sponsorship:member_owner:family-subscription:sub_family",
+                  id: "mailbox_item_family_owner",
+                  userId: "member_owner",
+                },
+                {
+                  dedupeKey:
+                    "member.activated:hosted.family.sponsorship:member_child:family-subscription:sub_family",
+                  id: "mailbox_item_family_child",
+                  userId: "member_child",
+                },
+              ]
+            : []),
+      },
+      hostedStripeEvent: {
+        findUnique: vi.fn().mockResolvedValue(pendingReceipt),
+      },
+    });
+    mocks.stripeEventsRetrieve.mockResolvedValue({
+      data: {
+        object: {
+          id: "sub_family",
+        },
+      },
+      id: "evt_family",
+      type: "customer.subscription.updated",
+    });
+    mocks.reconcileHostedStripeEventById
+      .mockResolvedValueOnce({
+        activatedMemberId: null,
+        eventId: "evt_family",
+        hostedExecutionEventId: null,
+        status: "failed",
+      })
+      .mockResolvedValueOnce({
+        activatedMemberId: null,
+        eventId: "evt_family",
+        hostedExecutionEventId: null,
+        status: "completed",
+      });
+
+    await expect(processRecordedHostedStripeWebhookEvent({
+      eventId: "evt_family",
+      prisma: prisma as never,
+      timeoutMs: 5_000,
+    })).rejects.toMatchObject({
+      code: "STRIPE_WEBHOOK_RECONCILE_FAILED",
+      retryable: true,
+    });
+    expect(mocks.signalHostedMemberActivationRuntimeWakeBestEffortResult).not.toHaveBeenCalled();
+
+    await expect(processRecordedHostedStripeWebhookEvent({
+      eventId: "evt_family",
+      prisma: prisma as never,
+      timeoutMs: 5_000,
+    })).resolves.toEqual({
+      accepted: true,
+      required: true,
+    });
+
+    expect(mocks.signalHostedMemberActivationRuntimeWakeBestEffortResult).toHaveBeenCalledTimes(2);
+    expect(mocks.signalHostedMemberActivationRuntimeWakeBestEffortResult).toHaveBeenNthCalledWith(
+      1,
+      expect.objectContaining({
+        hostedExecutionEventId:
+          "member.activated:hosted.family.sponsorship:member_owner:family-subscription:sub_family",
+        mailboxItemId: "mailbox_item_family_owner",
+        memberId: "member_owner",
+      }),
+    );
+    expect(mocks.signalHostedMemberActivationRuntimeWakeBestEffortResult).toHaveBeenNthCalledWith(
+      2,
+      expect.objectContaining({
+        hostedExecutionEventId:
+          "member.activated:hosted.family.sponsorship:member_child:family-subscription:sub_family",
+        mailboxItemId: "mailbox_item_family_child",
+        memberId: "member_child",
+      }),
+    );
+
+    prisma.hostedStripeEvent.findUnique.mockResolvedValue({
+      ...pendingReceipt,
+      familyUsageRepairGroupId: null,
+      status: HostedStripeEventStatus.completed,
+    });
+    mocks.reconcileHostedStripeEventById.mockResolvedValueOnce(null);
+
+    await expect(processRecordedHostedStripeWebhookEvent({
+      eventId: "evt_family",
+      prisma: prisma as never,
+      timeoutMs: 5_000,
+    })).resolves.toEqual({
+      accepted: true,
+      required: true,
+    });
+
+    expect(mocks.signalHostedMemberActivationRuntimeWakeBestEffortResult).toHaveBeenCalledTimes(4);
+  });
+
   it("signals activated members without requiring member ids in workflow input", async () => {
     await expect(signalHostedStripeWebhookActivationRuntimeWake({
       activatedMemberId: "member_123",
@@ -397,6 +511,7 @@ describe("hosted Stripe webhook reconciliation helpers", () => {
 function createPrisma(
   storedEvent: {
     claimExpiresAt: Date | null;
+    familyUsageRepairGroupId?: string | null;
     nextAttemptAt: Date;
     status: HostedStripeEventStatus;
     type: string;
