@@ -62,6 +62,7 @@ import {
   type HostedOnboardingReadClient,
 } from "./shared";
 import {
+  coerceStripeInvoiceSubscriptionId,
   coerceStripeObjectId,
   coerceStripeSubscriptionId,
   mapStripeSubscriptionStatusToHostedBillingStatus,
@@ -1028,6 +1029,55 @@ export async function findHostedAccountGroupForStripeSubscription(input: {
     subscriptionId: input.subscription.id,
   });
   return match?.group ?? null;
+}
+
+export async function prepareHostedLegacySyntheticFamilyCleanupTx(input: {
+  event: Stripe.Event;
+  tx: Prisma.TransactionClient;
+}): Promise<string | null> {
+  const binding = readHostedLegacySyntheticFamilyStripeBinding(input.event);
+  if (!binding) {
+    return null;
+  }
+
+  const findMatch = () => findHostedAccountGroupForStripeObject({
+    ...binding,
+    customerLookupAllowed: false,
+    prisma: input.tx,
+  });
+  const initialMatch = await findMatch();
+  if (!initialMatch) {
+    return null;
+  }
+
+  await lockHostedMemberRow(input.tx, initialMatch.group.ownerMemberId);
+  const match = await findMatch();
+  if (
+    !match ||
+    match.group.id !== initialMatch.group.id ||
+    match.group.ownerMemberId !== initialMatch.group.ownerMemberId
+  ) {
+    return null;
+  }
+
+  const threadContainer = await input.tx.hostedThreadContainer.findUnique({
+    select: { memberId: true },
+    where: { memberId: match.group.ownerMemberId },
+  });
+  if (!threadContainer || match.group.billingStatus === HostedBillingStatus.active) {
+    return null;
+  }
+
+  await writeHostedAccountGroupStripeBillingTx({
+    billingStatus: HostedBillingStatus.canceled,
+    groupId: match.group.id,
+    stripeEventCreatedAt: match.billingRef?.lastStripeEventCreatedAt ?? null,
+    stripeCustomerId: binding.customerId ?? match.billingRef?.stripeCustomerId ?? null,
+    stripeSubscriptionId: binding.subscriptionId,
+    tx: input.tx,
+  });
+
+  return binding.subscriptionId;
 }
 
 export async function applyHostedFamilyStripeCheckoutCompletedTx(input: {
@@ -4159,6 +4209,54 @@ async function findHostedAccountGroupForStripeObject(input: {
         group: lookup.group,
       };
     }
+  }
+
+  return null;
+}
+
+function readHostedLegacySyntheticFamilyStripeBinding(event: Stripe.Event): {
+  accountGroupId: string | null;
+  checkoutAttemptId?: string | null;
+  checkoutSessionId?: string | null;
+  customerId: string | null;
+  subscriptionId: string;
+} | null {
+  if (event.type === "checkout.session.completed") {
+    const session = event.data.object as Stripe.Checkout.Session;
+    const subscriptionId = coerceStripeSubscriptionId(session.subscription);
+    return session.metadata?.kind === HOSTED_FAMILY_STRIPE_METADATA_KIND && subscriptionId
+      ? {
+          accountGroupId: normalizeNullableString(session.metadata.accountGroupId),
+          checkoutAttemptId: normalizeNullableString(session.metadata.checkoutAttemptId),
+          checkoutSessionId: session.id,
+          customerId: coerceStripeObjectId(session.customer),
+          subscriptionId,
+        }
+      : null;
+  }
+
+  if (event.type.startsWith("customer.subscription.")) {
+    const subscription = event.data.object as Stripe.Subscription;
+    return isHostedFamilyStripeSubscriptionMetadata(subscription)
+      ? {
+          accountGroupId: normalizeNullableString(subscription.metadata.accountGroupId),
+          checkoutAttemptId: normalizeNullableString(subscription.metadata.checkoutAttemptId),
+          customerId: coerceStripeObjectId(subscription.customer),
+          subscriptionId: subscription.id,
+        }
+      : null;
+  }
+
+  if (event.type === "invoice.paid" || event.type === "invoice.payment_failed") {
+    const invoice = event.data.object as Stripe.Invoice;
+    const subscriptionId = coerceStripeInvoiceSubscriptionId(invoice);
+    return subscriptionId
+      ? {
+          accountGroupId: null,
+          customerId: coerceStripeObjectId(invoice.customer),
+          subscriptionId,
+        }
+      : null;
   }
 
   return null;
