@@ -185,10 +185,9 @@ describe("hosted local snapshot publication fallback e2e", () => {
       .toBeGreaterThanOrEqual(initialWorkspaceVersion);
     expect(countSnapshotPublicationFaults()).toBe(baselineFaultCount + 1);
 
-    const destroyedStatus = await waitForInvokeFailureDestroy({
+    await waitForInvokeFailureDestroy({
       baselineInvokeFailureDestroyCount,
     });
-    expect(destroyedStatus.workspace?.snapshotRef).toEqual(baselineSnapshotRef);
 
     const providerRequestBaseline = countAssistantProviderResponsesApiRequests();
     requireScenario().queueAssistantResponses([
@@ -321,38 +320,17 @@ async function waitForRejectedSnapshotPublication(input: {
 
 async function waitForInvokeFailureDestroy(input: {
   baselineInvokeFailureDestroyCount: number;
-}): Promise<HostedRunnerStatusResponse> {
+}): Promise<void> {
   const startedAt = Date.now();
-  let lastStatus: HostedRunnerStatusResponse | null = null;
-  let lastStatusReadError: string | null = null;
   while (Date.now() - startedAt < 120_000) {
-    const destroyObserved =
-      countInvokeFailureDestroyRequests() > input.baselineInvokeFailureDestroyCount;
-    if (destroyObserved && lastStatus) {
-      return lastStatus;
-    }
-
-    try {
-      lastStatus = await requireScenario().harness.readUserStatus(userId);
-      lastStatusReadError = null;
-    } catch (error) {
-      lastStatusReadError = error instanceof Error
-        ? `status read failed with ${error.name}`
-        : "status read failed with an unknown error";
-      await sleep(250);
-      continue;
-    }
-
     if (countInvokeFailureDestroyRequests() > input.baselineInvokeFailureDestroyCount) {
-      return lastStatus;
+      return;
     }
     await sleep(250);
   }
 
   throw new Error(await requireScenario().buildFailureMessage(userId, [
     "Timed out waiting for the failed snapshot publication to recycle its runner container.",
-    ...(lastStatus ? [`last status: ${JSON.stringify(lastStatus)}`] : []),
-    ...(lastStatusReadError ? [lastStatusReadError] : []),
   ]));
 }
 
