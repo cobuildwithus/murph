@@ -1107,6 +1107,13 @@ Without the fingerprint secret, checkpoint diagnostics omit relative-name hashes
 - hosted AI usage ledger, pricing/accounting projection, and monthly allowance aggregate
 - anonymized assistant-runtime issue sink
 
+The runtime may attach one bounded usage-notice delivery target to an assistant
+usage record only when every accepted input for that provider request resolves
+to the same authority-bound Linq group route. Web remains the notice-claim and
+delivery owner. Missing or ambiguous target provenance is explicit and a
+thread-container crossing must never derive a replacement from member home
+routing.
+
 ### Runtime Owns
 
 - mailbox import watermarks
