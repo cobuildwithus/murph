@@ -808,6 +808,62 @@ describe("runHostedAssistantAutomation", () => {
     }, { signal: undefined });
   });
 
+  it("forwards the production runtime effects port into server-owned route repair", async () => {
+    const now = new Date("2026-04-23T00:00:00.000Z");
+    const assertLinqRecentInboundEngagement = vi.fn(async () => ({
+      routeAuthorityKind: "member-home" as const,
+    }));
+    const runtime = createHostedAutomationRuntime({
+      platform: {
+        effectsPort: {
+          assertLinqRecentInboundEngagement,
+          readRawEmailMessage: vi.fn(async () => null),
+          sendEmail: vi.fn(async () => undefined),
+        },
+      },
+    });
+    mocks.repairServerConfirmedPersonalHomeAutomationRoutes.mockImplementationOnce(
+      async (input) => ({
+        pending: false,
+        repaired: await input.confirmDirectHomeTarget("saved-home-chat") ? 1 : 0,
+        verified: 1,
+      }),
+    );
+    mocks.runAssistantAutomationPass.mockImplementationOnce(async (input) => {
+      await input.beforeCronProcessing?.();
+      return { nextWakeAt: null, progressed: false };
+    });
+
+    const result = await runHostedAssistantAutomationLane({
+      executionContext: {
+        hosted: {
+          issueDeviceConnectLink: vi.fn(),
+          memberId: "member_123",
+          userEnvKeys: [],
+        },
+      },
+      now,
+      requestId: "req_lane_server_route_proof",
+      runtime,
+      vaultRoot: "/tmp/vault-root",
+      wake: {
+        eventId: "evt_lane_server_route_proof",
+        kind: "runtime.timer",
+        occurredAt: now.toISOString(),
+        triggerKind: "runtime_timer",
+        userId: "member_123",
+      },
+    });
+
+    expect(result.assistantAutomationProgressed).toBe(true);
+    expect(assertLinqRecentInboundEngagement).toHaveBeenCalledWith({
+      authorityCheckOnly: true,
+      directHomeRouteOnly: true,
+      target: "saved-home-chat",
+      targetKind: "thread",
+    }, { signal: undefined });
+  });
+
   it("does not defer cron for an opportunistic server-route repair backlog", async () => {
     const now = new Date("2026-04-23T00:00:00.000Z");
     let cronDeferred: boolean | null = null;
