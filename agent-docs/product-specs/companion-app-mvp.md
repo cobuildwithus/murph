@@ -307,10 +307,12 @@ can upload companion metadata.
    `(user_id, connection_id, created_at)` path, and are capped at 1,024 retained
    rows per connection. After expiry, a replay is new admission and must pass
    the normal freshness and live-connection gates. Each accepted canonical
-   observation receives a verified SHA-256 admission identity over the strict
-   derived envelope. That identity owns the dirty payload, local job, and
-   canonical external reference, so separate changed admissions that reuse a
-   client capture id after receipt expiry remain distinct. The accepted
+   envelope receives a verified SHA-256 admission identity over the strict
+   derived payload. That identity owns the dirty payload, local job, and exact
+   replay source version. Canonical event identity is method plus vault-local
+   day: the first confidence-tier reading wins, medium confidence may upgrade
+   low confidence, and other same-day captures retain no event revision,
+   evidence, or ingest receipt. The accepted
    companion RMSSD encrypted dirty payload remains the durable retry authority
    until its mapped local job completes the canonical importer write. A
    revision-only checkpoint may advance while the payload remains pending, but
@@ -327,9 +329,11 @@ can upload companion metadata.
    from an older runtime is consolidated transactionally with its jobs and
    sources preserved on the hosted-bound row; additional or opaque siblings
    fail closed.
-   Runtime import writes canonical `hrv-rmssd` milliseconds with direct-WHOOP
-   provenance. Apple HealthKit HRV is canonical `hrv-sdnn`; it never aliases to
-   or aggregates with the direct WHOOP RMSSD series.
+   Runtime import writes one live canonical `hrv-rmssd` spot fact per
+   vault-local day and method with direct-WHOOP provenance. Apple HealthKit HRV
+   is canonical `hrv-sdnn`; it never aliases to or aggregates with the direct
+   WHOOP RMSSD series. Overnight WHOOP/Oura summaries keep their summary grain
+   and source provenance rather than becoming spot-capture revisions.
 
 ### Direct spot-HRV deployment order and rollback floor
 

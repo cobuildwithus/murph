@@ -209,10 +209,15 @@ drain/batch service seam in `packages/device-syncd/src/service.ts`.
 
 7. **HRV method semantics survive import and reprojection.** HealthKit's
    standard HRV quantity is SDNN (`hrv-sdnn`); direct WHOOP spot RMSSD is
-   `hrv-rmssd`. Every accepted direct-WHOOP canonical observation carries a
-   verified SHA-256 admission identity from web staging through local dedupe and
-   importer external identity. The admission identity, not the reusable client
-   capture id, owns canonical idempotency after receipt retention expires.
+   `hrv-rmssd`. Every admitted direct-WHOOP envelope carries a verified SHA-256
+   admission identity from web staging through local dedupe and importer source
+   versioning. The admission identity, not the reusable client capture id, owns
+   exact-envelope idempotency after receipt retention expires. Canonical event
+   identity is instead method plus vault-local day: the first reading in a
+   confidence tier wins, medium confidence may upgrade low confidence, and all
+   other same-day captures are no-ops that retain no extra evidence or ingest
+   receipt. This bounds the append-only path to one live event and at most two
+   revisions per day and method.
    Its encrypted hosted payload remains authoritative until canonical import
    succeeds, including across runtime yield or cold restore. That success gate
    is companion-specific. Generic provider payload rows remain available to
@@ -233,10 +238,9 @@ drain/batch service seam in `packages/device-syncd/src/service.ts`.
    replay into replacement dead rows. While provider revocation is in flight, the web-owned
    `DISCONNECT_IN_PROGRESS` sentinel rejects every runtime connection, local
    state, credential, source, and local-heartbeat mutation under the connection lock.
-   A replay after mutable vault-timezone metadata changes preserves the first
-   canonical `dayKey` and `timeZone`; that placement drift alone is duplicate
-   content, while every other same-admission content difference remains an
-   immutable conflict.
+   An exact admission replay after mutable vault-timezone metadata changes
+   matches its verified source version and preserves the first canonical
+   `dayKey` and `timeZone`; that placement drift alone is duplicate content.
    Re-import preserves the provider external identity while correcting the
    metric, and query reprojection classifies unreimported generic Apple HRV
    facts from source provenance as SDNN without promoting them into RMSSD
