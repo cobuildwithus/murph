@@ -912,6 +912,10 @@ function normalizeCompanionHrvRmssd(
   context: NormalizationContext,
 ): void {
   for (const { admissionId, observation } of entries ?? []) {
+    const dayKey =
+      resolveVaultLocalDayKey(observation.observedAt, context.defaultTimeZone)
+      ?? extractIsoDatePrefix(observation.observedAt)
+      ?? observation.observedAt.slice(0, 10);
     const contentVersion = `${observation.methodVersion}:${
       createHash("sha256")
         .update(serializeCompanionHrvRmssdObservation(observation))
@@ -934,21 +938,25 @@ function normalizeCompanionHrvRmssd(
     context.events.push({
       kind: "observation",
       occurredAt: observation.observedAt,
-      dayKey:
-        resolveVaultLocalDayKey(observation.observedAt, context.defaultTimeZone)
-        ?? extractIsoDatePrefix(observation.observedAt)
-        ?? undefined,
+      dayKey,
       source: "device",
       title: "WHOOP BLE spot RMSSD",
       evidenceRoles: [evidenceRole],
       externalRef: makeProviderExternalRef(
         "whoop",
         "ble-hrv-rmssd",
-        admissionId,
+        `${observation.methodVersion}:${dayKey}`,
         contentVersion,
         HRV_RMSSD_METRIC,
       ),
-      externalRefUpdatePolicy: "immutable",
+      externalRefUpdatePolicy: "prefer-higher-confidence",
+      legacyExternalRefs: [makeProviderExternalRef(
+        "whoop",
+        "ble-hrv-rmssd",
+        admissionId,
+        contentVersion,
+        HRV_RMSSD_METRIC,
+      )],
       dataOrigin: {
         version: 1,
         aggregatorProvider: "murph-companion",
