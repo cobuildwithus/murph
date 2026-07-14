@@ -2369,15 +2369,10 @@ function eventSpineRevisionsAreComplete(
 ): boolean {
   const maxRevision = index.maxRevisionById.get(eventId) ?? 0;
   const revisions = index.revisionsById.get(eventId);
-  if (maxRevision < 1 || !revisions) {
-    return false;
-  }
-  for (let revision = 1; revision <= maxRevision; revision += 1) {
-    if (!revisions.has(revision)) {
-      return false;
-    }
-  }
-  return true;
+  return Number.isSafeInteger(maxRevision)
+    && maxRevision > 0
+    && revisions !== undefined
+    && revisions.size === maxRevision;
 }
 
 function resolveDeviceEventIdentity(

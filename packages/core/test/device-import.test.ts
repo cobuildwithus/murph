@@ -9243,6 +9243,61 @@ test("dedupeDeviceEventsByExternalRef keeps the highest-revision duplicate and s
   );
 });
 
+test("stale WHOOP replay stays bounded for a huge stored lifecycle revision", async () => {
+  const vaultRoot = await makeTempDirectory("murph-device-import-huge-revision-completeness");
+  await initializeVault({ vaultRoot, createdAt: "2026-06-01T12:00:00.000Z" });
+  const buildWhoopEvent = (version: string, value: number) => ({
+    kind: "observation" as const,
+    occurredAt: "2026-06-03T20:30:00.000Z",
+    recordedAt: "2026-06-03T20:30:00.000Z",
+    title: "WHOOP recovery",
+    externalRef: {
+      system: "whoop",
+      resourceType: "recovery",
+      resourceId: "huge-revision-recovery",
+      version,
+      facet: "score",
+    },
+    fields: {
+      metric: "recovery-score",
+      value,
+      unit: "%",
+    },
+  });
+  const input = {
+    vaultRoot,
+    provider: "whoop",
+    accountId: "whoop_huge_revision",
+    importedAt: "2026-06-04T21:00:00.000Z",
+    events: [buildWhoopEvent("3", 72), buildWhoopEvent("1", 68)],
+  } as const;
+  const accepted = await importDeviceBatch(input);
+  const eventShardPath = accepted.eventShardPaths[0];
+  assert.ok(eventShardPath);
+  const [stored] = (await readJsonlRecords({
+    vaultRoot,
+    relativePath: eventShardPath,
+  })) as EventRecord[];
+  assert.ok(stored);
+  await fs.writeFile(
+    path.join(vaultRoot, eventShardPath),
+    `${JSON.stringify({
+      ...stored,
+      lifecycle: { revision: 1_000_000_000_000 },
+    })}\n`,
+    "utf8",
+  );
+  const beforeReplay = await snapshotVaultFiles(vaultRoot);
+
+  await assert.rejects(
+    importDeviceBatch(input),
+    (error) =>
+      error instanceof VaultError
+      && error.code === "INTEGRATION_INGEST_EVENT_MAPPING_AMBIGUOUS",
+  );
+  assert.deepEqual(await snapshotVaultFiles(vaultRoot), beforeReplay);
+});
+
 test("exact replay does not relink evidence to a different-content dedupe survivor", async () => {
   const vaultRoot = await makeTempDirectory("murph-device-import-distinct-dedupe-survivor");
   await initializeVault({ vaultRoot, createdAt: "2026-06-01T12:00:00.000Z" });
