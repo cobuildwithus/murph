@@ -782,25 +782,33 @@ The active invocation remains dirty until the runtime-owned
 idle or scheduled-wake checkpoint succeeds. RunnerContainer never records
 pending checkpoint intent. Activity expiry is cleanup-only. Projection status
 is logged and artifacts remain rebuildable best-effort state rather than a
-reason to take another workspace checkpoint, so failed or slow projection does
-not block assistant admission and does not imply a durable retry queue.
+reason to take another workspace checkpoint. Failed or slow projection does not
+block admission when the input already includes native user-authored text.
 Successful projection may make raw attachment paths, image evidence, or
 audio/video transcript evidence available to the same assistant turn.
 Hosted conversation projection persists the plain inbox capture and records
 best-effort initial attachment evidence locally before the importer returns.
-When pending audio/video parser work exists, its drain is post-assistant
-enrichment. The runner keeps that background mutation separate from
-prompt-preparation effects, tracks its
-real completion without a timeout race during normal idle, and refreshes the
-owning assistant input evidence from the capture so later turns can use the
-transcript or terminal parse state. Replay-budget returns and failed assistant
-passes discard parser effects that have not started. Once parser enrichment
-starts, runtime ownership waits for its real completion before snapshotting the
-workspace or releasing it after an error, including during graceful shutdown.
-A process-fatal termination may still abandon this best-effort
-enrichment, but the runtime must not intentionally snapshot or release the
-workspace while it is writing. The plain capture and best-effort initial
-attachment evidence are already local before parser work begins.
+It also persists audio/video parser jobs in the inbox SQLite projection. That
+SQLite job plus the staged pending-input record, rather than an
+invocation-local closure, owns parser continuation across restart.
+
+Native text plus media is the fast path: native user-authored text makes the
+input eligible immediately, while later parser evidence remains optional
+enrichment. A media-only audio/video input stays durable in the pending-input
+index but is ineligible for provider admission until its exact assistant input
+records terminal successful parser evidence with a non-empty transcript.
+Pending, running, missing, failed, unsupported, or empty transcript evidence
+must never be promoted to user-authored text. Terminal failure receives an
+explicit durable disposition instead of silent loss or an endless runnable
+retry.
+
+Awaited idle maintenance owns parser progress. Each bounded unit drains at
+most one durable SQLite parser job, refreshes the exact owning assistant input
+from the capture, and finishes before the runtime snapshots or releases the
+workspace. Remaining durable work or newly refreshed evidence requests an
+immediate continuation wake; parser setup, drain, or evidence-refresh failure
+requests the bounded retry wake. No transient post-assistant callback or
+background effect owns this work.
 Assistant prompt preparation reads derived attachment evidence sequentially
 under one 32 MiB budget for the current turn and a 16 MiB per-file limit. Hosted
 artifact materialization rejects an external artifact whose declared size is
@@ -872,11 +880,14 @@ terminal auto-reply evidence, not from mailbox import progress.
 
 Mailbox import has no provider-visible pre-assistant side-effect phase.
 Provider-visible cleanup and read acknowledgement must not run between local
-mailbox staging and assistant admission. Local inbox projection and audio/video
-transcript enrichment may run after local staging and before assistant admission because
-they only update rebuildable local projection artifacts and `AssistantInputEvent`
-projection metadata. These projection updates must not request an additional
-workspace checkpoint. Linq inbound message deletion is still eventual, but it is
+mailbox staging and assistant admission. Local inbox projection may run after
+local staging because it updates only rebuildable local projection artifacts
+and `AssistantInputEvent` projection metadata. Native-text inputs continue to
+assistant admission without waiting for audio/video enrichment. Media-only
+audio/video inputs remain staged and ineligible until bounded idle maintenance
+records the terminal successful transcript evidence described above. These
+projection updates must not request an additional workspace checkpoint. Linq
+inbound message deletion is still eventual, but it is
 queued only after terminal handling evidence is durable under
 `.runtime/operations/assistant/auto-reply/evidence/<captureId>.json` and is
 drained through hosted provider-cleanup after the next successful runtime-owned

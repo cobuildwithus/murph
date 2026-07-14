@@ -53,7 +53,6 @@ export type HostedMailboxItemImportOutcome =
       usageNoticeDeliveryTarget?: HostedRuntimeUsageNoticeDeliveryTarget | null;
       reasonCode?: string | null;
       afterCheckpoint?: HostedMailboxPostCheckpointEffect | null;
-      backgroundAfterCheckpoint?: HostedMailboxPostCheckpointEffect | null;
       conversationImportTiming?: HostedMailboxConversationImportTiming | null;
     };
 
@@ -65,7 +64,7 @@ export interface HostedMailboxConversationImportTiming {
 }
 
 export interface HostedMailboxPostCheckpointEffectResult {
-  kind: "inbox_parser_enrichment" | "inbox_projection" | "meal_photo_cleanup";
+  kind: "inbox_projection" | "meal_photo_cleanup";
   projectionUpdated: boolean | null;
   attachmentEvidenceUpdated: boolean | null;
   status: "succeeded" | "failed" | "partial";

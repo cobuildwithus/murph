@@ -62,7 +62,6 @@ export interface HostedMailboxImportCheckpointResult {
   afterCheckpointEffects: readonly HostedMailboxPostCheckpointEffect[];
   checkpoint: HostedWorkspaceCheckpointResponse | null;
   checkpointDeferred: boolean;
-  backgroundAfterCheckpointEffects: readonly HostedMailboxPostCheckpointEffect[];
   importResult: HostedMailboxImportLoopResult;
   previousState: HostedMailboxImportState;
   state: HostedMailboxImportState;
@@ -106,7 +105,6 @@ export async function importHostedMailboxPrefixAndCheckpoint(
         vaultRoot: input.vaultRoot,
       });
   const afterCheckpointEffects: HostedMailboxPostCheckpointEffect[] = [];
-  const backgroundAfterCheckpointEffects: HostedMailboxPostCheckpointEffect[] = [];
   const importResult = await fetchAndProcessHostedMailboxPrefix({
     deferConversationUntil: input.deferConversationUntil ?? null,
     expectedUserId: input.expectedUserId,
@@ -117,12 +115,6 @@ export async function importHostedMailboxPrefixAndCheckpoint(
         && outcome.afterCheckpoint
       ) {
         afterCheckpointEffects.push(outcome.afterCheckpoint);
-      }
-      if (
-        (outcome.status === "imported" || outcome.status === "skipped")
-        && outcome.backgroundAfterCheckpoint
-      ) {
-        backgroundAfterCheckpointEffects.push(outcome.backgroundAfterCheckpoint);
       }
       return outcome;
     },
@@ -145,7 +137,6 @@ export async function importHostedMailboxPrefixAndCheckpoint(
       afterCheckpointEffects: [],
       checkpoint: null,
       checkpointDeferred: false,
-      backgroundAfterCheckpointEffects: [],
       importResult,
       previousState,
       state: importResult.state,
@@ -165,7 +156,6 @@ export async function importHostedMailboxPrefixAndCheckpoint(
       afterCheckpointEffects,
       checkpoint: null,
       checkpointDeferred: true,
-      backgroundAfterCheckpointEffects,
       importResult,
       previousState,
       state: importResult.state,
@@ -226,7 +216,6 @@ export async function importHostedMailboxPrefixAndCheckpoint(
     afterCheckpointEffects,
     checkpoint,
     checkpointDeferred: false,
-    backgroundAfterCheckpointEffects,
     importResult,
     previousState,
     state: importResult.state,

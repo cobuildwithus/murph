@@ -2311,7 +2311,7 @@ describe("runHostedWorkspaceUntilIdleOrBudget", () => {
     }
   });
 
-  test("starts the assistant before background parser enrichment and returns while it runs", async () => {
+  test("does not wait for post-assistant import enrichment before returning", async () => {
     const vaultRoot = await mkdtemp(path.join(tmpdir(), "murph-workspace-runner-"));
     const { mailboxPort } = createMailboxPort({
       items: [
@@ -2345,14 +2345,13 @@ describe("runHostedWorkspaceUntilIdleOrBudget", () => {
         async importItem() {
           events.push("import:1");
           return {
-            backgroundAfterCheckpoint: async () => {
-              events.push("mailbox:backgroundAfterCheckpoint:start");
+            afterCheckpoint: async () => {
+              events.push("mailbox:afterCheckpoint:start");
               effectStartedResolve?.();
               return await new Promise<HostedMailboxPostCheckpointEffectResult>((resolve) => {
                 effectRelease.current = () => resolve(createInboxProjectionEffectResult({
                   attachmentEvidenceUpdated: true,
-                  kind: "inbox_parser_enrichment",
-                  projectionUpdated: null,
+                  projectionUpdated: true,
                   status: "succeeded",
                 }));
               });
@@ -2389,7 +2388,7 @@ describe("runHostedWorkspaceUntilIdleOrBudget", () => {
       assert.deepEqual(events, [
         "import:1",
         "assistant:returned",
-        "mailbox:backgroundAfterCheckpoint:start",
+        "mailbox:afterCheckpoint:start",
       ]);
       assert.equal(result.assistantPhaseResult?.progressed, false);
       assert.equal(result.latestWorkspace, null);
@@ -2406,8 +2405,8 @@ describe("runHostedWorkspaceUntilIdleOrBudget", () => {
       assert.deepEqual(effectLog?.redactedJson, {
         attemptedCount: 1,
         effectAttachmentEvidenceUpdated: [true],
-        effectKinds: ["inbox_parser_enrichment"],
-        effectProjectionUpdated: [null],
+        effectKinds: ["inbox_projection"],
+        effectProjectionUpdated: [true],
         effectReasonCodes: [null],
         effectStatuses: ["succeeded"],
         errorCodes: [],
@@ -6183,7 +6182,6 @@ describe("runHostedWorkspaceUntilIdleOrBudget", () => {
       ],
     });
     const checkpointRequests: HostedWorkspaceCheckpointRequest[] = [];
-    let backgroundEffectStarted = false;
 
     try {
       await assert.rejects(
@@ -6198,16 +6196,7 @@ describe("runHostedWorkspaceUntilIdleOrBudget", () => {
           }),
           expectedUserId: TEST_USER_ID,
           async importItem() {
-            return {
-              backgroundAfterCheckpoint: async () => {
-                backgroundEffectStarted = true;
-                return createInboxProjectionEffectResult({
-                  kind: "inbox_parser_enrichment",
-                  projectionUpdated: null,
-                });
-              },
-              status: "imported",
-            };
+            return { status: "imported" };
           },
           limitPerLane: 10,
           platform: createPlatform({
@@ -6229,7 +6218,6 @@ describe("runHostedWorkspaceUntilIdleOrBudget", () => {
 
       assert.deepEqual(checkpointRequests.map((request) => request.reason), [
       ]);
-      assert.equal(backgroundEffectStarted, false);
     } finally {
       await rm(vaultRoot, {
         force: true,
@@ -8264,7 +8252,6 @@ function createCheckpointedMailboxImportResult(): HostedMailboxImportCheckpointR
 
   return {
     afterCheckpointEffects: [],
-    backgroundAfterCheckpointEffects: [],
     checkpoint: {
       checkpointed: true,
       workspace: createWorkspaceState({ version: "0" }),
@@ -8298,7 +8285,6 @@ function createDeferredMailboxImportResult(): HostedMailboxImportCheckpointResul
 
   return {
     afterCheckpointEffects: [],
-    backgroundAfterCheckpointEffects: [],
     checkpoint: null,
     checkpointDeferred: true,
     importResult: {
@@ -8329,7 +8315,6 @@ function createReplayOnlyConversationMailboxImportResult(): HostedMailboxImportC
 
   return {
     afterCheckpointEffects: [],
-    backgroundAfterCheckpointEffects: [],
     checkpoint: null,
     checkpointDeferred: false,
     importResult: {

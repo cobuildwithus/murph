@@ -67,6 +67,9 @@ import {
   type HostedIdleMaintenanceOutcome,
 } from "./hosted-runtime/idle-maintenance.ts";
 import {
+  readHostedConversationParserContinuationWakeAt,
+} from "./hosted-runtime/parser-maintenance.ts";
+import {
   getOrCreateHostedCliRuntimeBridge,
 } from "./hosted-runtime/cli-runtime-bridge.ts";
 import {
@@ -926,9 +929,7 @@ export async function runHostedWorkspaceRuntimeJobInProcess(
     );
   };
   const drainLocalWorkspaceMutationsBestEffort = async (): Promise<void> => {
-    while (pendingLocalWorkspaceMutationCompletions.size > 0) {
-      await Promise.allSettled([...pendingLocalWorkspaceMutationCompletions]);
-    }
+    await Promise.allSettled([...pendingLocalWorkspaceMutationCompletions]);
   };
 
   try {
@@ -2573,10 +2574,26 @@ export async function runHostedWorkspaceRuntimeJobInProcess(
       });
       const runtimeDirtyAfterForeground = result.runtimeStateDirty
         || hostedVaultFormatMigration.mutated;
-      runtimeStateDirty ||= runtimeDirtyAfterForeground || committedInboxMediaRetentionWakeDue;
+      const dueParserContinuationRequiresCheckpoint =
+        !runtimeDirtyAfterForeground
+        && hostedRuntimeWakeReasonIsAssistant(
+          committedWorkspace?.nextWakeReason ?? null,
+        )
+        && hostedRuntimeWakeIsDue(committedWorkspace?.nextWakeAt ?? null)
+        && (await readHostedConversationParserContinuationWakeAt({
+          memberId: input.request.userId,
+          vaultRoot: restored.vaultRoot,
+        })) !== null;
+      runtimeStateDirty ||=
+        runtimeDirtyAfterForeground
+        || committedInboxMediaRetentionWakeDue
+        || dueParserContinuationRequiresCheckpoint;
       if (runtimeDirtyAfterForeground) {
         markIdleCheckpointTimerAfterDirtyWork();
-      } else if (committedInboxMediaRetentionWakeDue) {
+      } else if (
+        committedInboxMediaRetentionWakeDue
+        || dueParserContinuationRequiresCheckpoint
+      ) {
         idleCheckpointStartByMs = Date.now();
       }
       if (!runtimeStateDirty) {
@@ -2685,7 +2702,10 @@ export async function runHostedWorkspaceRuntimeJobInProcess(
             && Date.parse(pendingWake.nextWakeAt) - Date.now()
               < HOSTED_IDLE_COMPACT_TIMEOUT_MS);
         const idleMaintenance = dirtyWindowCheckpointTrigger === "shutdown_signal"
-          ? buildHostedShutdownIdleMaintenanceOutcome()
+          ? await buildHostedShutdownIdleMaintenanceOutcome({
+              memberId: input.request.userId,
+              vaultRoot: restored.vaultRoot,
+            })
           : await runHostedPendingInputProtectedIdleMaintenance({
               // The compact call rides the same warm-process credential as turns,
               // so attribute it the same way: members using their own provider key
@@ -2700,6 +2720,7 @@ export async function runHostedWorkspaceRuntimeJobInProcess(
               memberId: input.request.userId,
               model: runtimeEnv.HOSTED_ASSISTANT_MODEL ?? null,
               pendingWork: idleMaintenancePendingWork,
+              parserToolchain: guardedRuntime.parserToolchain,
               providerName: runtimeEnv[HOSTED_CODEX_EFFECTIVE_MODEL_PROVIDER_ID_ENV] ?? null,
               recordUsage: guardedRuntime.platform.usageRecordPort
                 ? async (record) => {
@@ -2778,7 +2799,6 @@ export async function runHostedWorkspaceRuntimeJobInProcess(
         });
         let checkpoint: HostedWorkspaceCheckpointResponse;
         try {
-          await drainLocalWorkspaceMutationsBestEffort();
           latestCheckpointSnapshotCleanForWarmReuse = false;
           checkpoint = await checkpointHostedRuntimeDirtyWorkspace({
             assertRuntimeNotAborted,
@@ -3017,8 +3037,9 @@ export async function runHostedWorkspaceRuntimeJobInProcess(
           committedDefaultWakeKey !== null
           && unservicedRecheckWakeKeys.has(committedDefaultWakeKey);
         const immediateRetentionContinuationProduced =
-          idleMaintenance.nextWakeReason === "inbox_media_retention"
-          && idleMaintenance.nextWakeAt !== null;
+          (idleMaintenance.nextWakeReason === "inbox_media_retention"
+            && idleMaintenance.nextWakeAt !== null)
+          || isHostedRuntimeWakeDue(idleMaintenance.parserNextWakeAt);
         const immediateRecheckCandidate =
           immediateDefaultWakeWasNotPresented
           || immediateRetentionContinuationProduced;
@@ -3162,8 +3183,8 @@ export async function runHostedWorkspaceRuntimeJobInProcess(
       stage: "runtime",
       status: "fail",
     });
-    await drainLocalWorkspaceMutationsBestEffort();
     if (hostAbortObserved) {
+      await drainLocalWorkspaceMutationsBestEffort();
       throw hostAbortReason;
     }
     await drainDeferredUsageBestEffort();
@@ -3357,6 +3378,7 @@ export async function runHostedPendingInputProtectedIdleMaintenance(input: {
   memberId: string;
   model: string | null;
   pendingWork: boolean;
+  parserToolchain?: Parameters<typeof runHostedIdleCheckpointMaintenance>[0]["parserToolchain"];
   providerName: string | null;
   recordUsage: Parameters<typeof runHostedIdleCheckpointMaintenance>[0]["recordUsage"];
   resolveAssistantSessionId: Parameters<typeof runHostedIdleCheckpointMaintenance>[0]["resolveAssistantSessionId"];
@@ -3384,6 +3406,7 @@ export async function runHostedPendingInputProtectedIdleMaintenance(input: {
     memberId: input.memberId,
     model: input.model,
     pendingWork: input.pendingWork,
+    parserToolchain: input.parserToolchain ?? null,
     protectedAttachmentIds: mediaRetentionProtections.protectedAttachmentIds,
     protectedCaptureIds: mediaRetentionProtections.protectedCaptureIds,
     protectedStoredPaths: mediaRetentionProtections.protectedStoredPaths,
@@ -3418,13 +3441,17 @@ async function runHostedInboxMediaRetentionOnlyCheckpoint(input: {
   }
 
   const idleMaintenance = input.shutdownSignal?.aborted === true
-    ? buildHostedShutdownIdleMaintenanceOutcome()
+    ? await buildHostedShutdownIdleMaintenanceOutcome({
+        memberId: input.input.request.userId,
+        vaultRoot: input.vaultRoot,
+      })
     : await runHostedPendingInputProtectedIdleMaintenance({
         credentialSource: "platform",
         materializeWorkspaceArtifacts: input.materializeWorkspaceArtifacts,
         memberId: input.input.request.userId,
         model: null,
         pendingWork: false,
+        parserToolchain: input.input.runtime?.parserToolchain ?? null,
         providerName: null,
         recordUsage: null,
         resolveAssistantSessionId: null,
@@ -3451,8 +3478,16 @@ async function runHostedInboxMediaRetentionOnlyCheckpoint(input: {
         input.workspace.inboxMediaRetentionWakeAt ?? null,
     }),
     issueExportPort: input.issueExportPort ?? null,
-    nextWakeAt: input.workspace.nextWakeAt ?? null,
-    nextWakeReason: input.workspace.nextWakeReason ?? null,
+    ...selectEarliestHostedRuntimeWake([
+      {
+        at: input.workspace.nextWakeAt ?? null,
+        reason: input.workspace.nextWakeReason ?? null,
+      },
+      {
+        at: idleMaintenance.parserNextWakeAt ?? null,
+        reason: idleMaintenance.parserNextWakeAt ? "assistant" : null,
+      },
+    ]),
     redactedStatus: input.workspace.redactedStatus ?? null,
     runtimeAbortSignal: input.runtimeAbortSignal,
     vaultRoot: input.vaultRoot,
@@ -3471,8 +3506,9 @@ async function runHostedInboxMediaRetentionOnlyCheckpoint(input: {
     },
   ]);
   const immediateRecheckCandidate =
-    idleMaintenance.nextWakeReason === "inbox_media_retention"
-    && idleMaintenance.nextWakeAt !== null;
+    (idleMaintenance.nextWakeReason === "inbox_media_retention"
+      && idleMaintenance.nextWakeAt !== null)
+    || isHostedRuntimeWakeDue(idleMaintenance.parserNextWakeAt);
   const immediateRecheckRequested =
     immediateRecheckCandidate
     && !isHostedRuntimeFutureMailboxContinuation({
@@ -4611,12 +4647,28 @@ function isHostedInboxMediaRetentionWakeDue(input: {
   return Number.isFinite(wakeMs) && wakeMs <= input.nowMs;
 }
 
-function buildHostedShutdownIdleMaintenanceOutcome(): HostedIdleMaintenanceOutcome {
+async function buildHostedShutdownIdleMaintenanceOutcome(input: {
+  memberId: string;
+  vaultRoot: string;
+}): Promise<HostedIdleMaintenanceOutcome> {
+  const parserNextWakeAt = await readHostedConversationParserContinuationWakeAt({
+    memberId: input.memberId,
+    vaultRoot: input.vaultRoot,
+  });
   return {
     kind: "skipped",
+    ...(parserNextWakeAt ? { parserNextWakeAt } : {}),
     reason: "shutdown",
     threadContextTokensBefore: null,
   };
+}
+
+function isHostedRuntimeWakeDue(nextWakeAt: string | undefined): boolean {
+  if (!nextWakeAt) {
+    return false;
+  }
+  const nextWakeAtMs = Date.parse(nextWakeAt);
+  return Number.isFinite(nextWakeAtMs) && nextWakeAtMs <= Date.now();
 }
 
 function selectEarliestHostedRuntimeWake(
@@ -4651,12 +4703,22 @@ function selectHostedIdleCheckpointWake(input: {
     )
     && !input.idleMaintenance.nextWakeAt;
 
+  const workspaceWake = selectEarliestHostedRuntimeWake([
+    {
+      at: input.projectedWakeAt,
+      reason: input.projectedWakeReason,
+    },
+    {
+      at: input.idleMaintenance.parserNextWakeAt ?? null,
+      reason: input.idleMaintenance.parserNextWakeAt ? "assistant" : null,
+    },
+  ]);
   return {
     inboxMediaRetentionWakeAt: preservePreviousRetentionWake
       ? input.previousInboxMediaRetentionWakeAt
       : input.idleMaintenance.nextWakeAt ?? null,
-    nextWakeAt: input.projectedWakeAt,
-    nextWakeReason: input.projectedWakeReason,
+    nextWakeAt: workspaceWake.nextWakeAt,
+    nextWakeReason: workspaceWake.nextWakeReason,
   };
 }
 

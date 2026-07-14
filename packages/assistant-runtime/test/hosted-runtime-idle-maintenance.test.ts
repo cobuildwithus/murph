@@ -14,6 +14,11 @@ const runInboxMediaRetention = vi.fn();
 vi.mock("@murphai/inboxd/retention", () => ({
   runInboxMediaRetention: (input: unknown) => runInboxMediaRetention(input),
 }));
+const runHostedConversationParserMaintenance = vi.fn();
+vi.mock("../src/hosted-runtime/parser-maintenance.ts", () => ({
+  runHostedConversationParserMaintenance: (input: unknown) =>
+    runHostedConversationParserMaintenance(input),
+}));
 
 import {
   HOSTED_IDLE_COMPACT_MIN_THREAD_TOKENS,
@@ -26,7 +31,39 @@ import { createCoalescingRuntimeWakeSignal } from "../src/hosted-runtime/runtime
 beforeEach(() => {
   compactWarmCodexThread.mockReset();
   runInboxMediaRetention.mockReset();
+  runHostedConversationParserMaintenance.mockReset();
+  runHostedConversationParserMaintenance.mockResolvedValue({
+    nextWakeAt: null,
+    progressed: false,
+  });
 });
+
+const NO_RETENTION_WORK = {
+  expiredAttachments: 0,
+  expiredBytes: 0,
+  hasMoreEligibleAttachments: false,
+  nextEligibleAt: null,
+  records: [],
+} as const;
+
+function runParserIdleMaintenance(
+  overrides: Partial<Parameters<typeof runHostedIdleCheckpointMaintenance>[0]> = {},
+) {
+  return runHostedIdleCheckpointMaintenance({
+    credentialSource: "platform",
+    memberId: "member_1",
+    model: "gpt-5.5",
+    parserToolchain: null,
+    pendingWork: false,
+    providerName: "hosted-openai",
+    recordUsage: null,
+    resolveAssistantSessionId: null,
+    shutdownSignal: null,
+    vaultRoot: "/vault",
+    wakeSignal: null,
+    ...overrides,
+  });
+}
 
 describe("runHostedIdleCheckpointMaintenance", () => {
   it("keeps idle-shutdown compaction below the hosted Codex auto-compact ceiling", () => {
@@ -703,6 +740,118 @@ describe("runHostedIdleCheckpointMaintenance", () => {
         vaultRoot: "/vault",
       });
       expect(compactWarmCodexThread).not.toHaveBeenCalled();
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
+  it("preserves a durable parser continuation wake when member-visible work skips compaction", async () => {
+    runInboxMediaRetention.mockResolvedValue(NO_RETENTION_WORK);
+    runHostedConversationParserMaintenance.mockResolvedValue({
+      nextWakeAt: "2026-07-05T00:01:00.000Z",
+      progressed: false,
+    });
+
+    await expect(
+      runParserIdleMaintenance({
+        pendingWork: true,
+      }),
+    ).resolves.toEqual({
+      kind: "skipped",
+      parserNextWakeAt: "2026-07-05T00:01:00.000Z",
+      reason: "pending_work",
+      threadContextTokensBefore: null,
+    });
+    expect(runHostedConversationParserMaintenance).toHaveBeenCalledWith({
+      memberId: "member_1",
+      parserToolchain: null,
+      signal: expect.any(AbortSignal),
+      vaultRoot: "/vault",
+    });
+    expect(compactWarmCodexThread).not.toHaveBeenCalled();
+  });
+
+  it("preserves the parser wake when deploy shutdown interrupts maintenance after parser progress", async () => {
+    const shutdownController = new AbortController();
+    runInboxMediaRetention.mockResolvedValue(NO_RETENTION_WORK);
+    runHostedConversationParserMaintenance.mockImplementation(async () => {
+      shutdownController.abort(new Error("Synthetic container shutdown."));
+      return {
+        nextWakeAt: "2026-07-05T00:00:00.000Z",
+        progressed: true,
+      };
+    });
+
+    await expect(
+      runParserIdleMaintenance({
+        shutdownSignal: shutdownController.signal,
+      }),
+    ).resolves.toEqual({
+      kind: "skipped",
+      parserNextWakeAt: "2026-07-05T00:00:00.000Z",
+      reason: "shutdown",
+      threadContextTokensBefore: null,
+    });
+    expect(compactWarmCodexThread).not.toHaveBeenCalled();
+  });
+
+  it("preserves the parser wake when a runtime wake interrupts maintenance after parser progress", async () => {
+    const wakeSignal = createCoalescingRuntimeWakeSignal();
+    const notifiedAtEpochMs = Date.parse("2026-07-05T00:00:00.000Z");
+    runInboxMediaRetention.mockResolvedValue(NO_RETENTION_WORK);
+    runHostedConversationParserMaintenance.mockImplementation(async () => {
+      wakeSignal.notify(notifiedAtEpochMs);
+      await Promise.resolve();
+      return {
+        nextWakeAt: "2026-07-05T00:00:00.000Z",
+        progressed: true,
+      };
+    });
+
+    await expect(
+      runParserIdleMaintenance({
+        wakeSignal,
+      }),
+    ).resolves.toEqual({
+      kind: "skipped",
+      parserNextWakeAt: "2026-07-05T00:00:00.000Z",
+      reason: "pending_work",
+      threadContextTokensBefore: null,
+    });
+    expect(wakeSignal.consumePending()).toEqual({ notifiedAtEpochMs });
+    expect(compactWarmCodexThread).not.toHaveBeenCalled();
+  });
+
+  it("keeps parser retry backoff in the future and immediate continuation at its due time", async () => {
+    vi.useFakeTimers();
+    vi.setSystemTime(new Date("2026-07-05T00:00:00.000Z"));
+    runInboxMediaRetention.mockResolvedValue(NO_RETENTION_WORK);
+
+    try {
+      runHostedConversationParserMaintenance.mockRejectedValueOnce(
+        new Error("Synthetic parser maintenance failure."),
+      );
+      await expect(
+        runParserIdleMaintenance({
+          pendingWork: true,
+        }),
+      ).resolves.toMatchObject({
+        parserNextWakeAt: "2026-07-05T00:01:00.000Z",
+        reason: "pending_work",
+      });
+
+      runHostedConversationParserMaintenance.mockResolvedValueOnce({
+        nextWakeAt: "2026-07-05T00:00:00.000Z",
+        progressed: true,
+      });
+      await expect(
+        runParserIdleMaintenance({
+          pendingWork: true,
+        }),
+      ).resolves.toMatchObject({
+        parserNextWakeAt: "2026-07-05T00:00:00.000Z",
+        reason: "pending_work",
+      });
     } finally {
       vi.useRealTimers();
     }

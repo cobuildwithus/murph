@@ -33,11 +33,13 @@ import {
 } from "../src/hosted-runtime/mailbox-conversation-import.ts";
 import {
   fetchAndProcessHostedMailboxPrefix,
-  type HostedMailboxPostCheckpointEffect,
 } from "../src/hosted-runtime/mailbox-import.ts";
 import {
   createEmptyHostedMailboxImportState,
 } from "../src/hosted-runtime/mailbox-state.ts";
+import {
+  runHostedConversationParserMaintenance,
+} from "../src/hosted-runtime/parser-maintenance.ts";
 import type {
   NormalizedHostedAssistantRuntimeConfig,
 } from "../src/hosted-runtime/models.ts";
@@ -75,7 +77,7 @@ import {
 } from "../src/hosted-runtime/events/conversation.ts";
 
 describe("hosted Linq audio conversation ingestion", () => {
-  it("keeps mailbox admission ahead of parser drain when stop arrives during parsing", async () => {
+  it("keeps mailbox admission durable when stop arrives during parser maintenance", async () => {
     const workspaceRoot = await mkdtemp(path.join(tmpdir(), "murph-hosted-linq-audio-abort-"));
     const vaultRoot = path.join(workspaceRoot, "vault");
     const fakeFfmpeg = path.join(workspaceRoot, "fake-ffmpeg");
@@ -183,22 +185,10 @@ describe("hosted Linq audio conversation ingestion", () => {
         vaultRoot,
       });
       let state = createEmptyHostedMailboxImportState();
-      const backgroundEffect: {
-        current: HostedMailboxPostCheckpointEffect | null;
-      } = { current: null };
 
       const first = await fetchAndProcessHostedMailboxPrefix({
         expectedUserId: "member_linq_audio",
-        importItem: async (item) => {
-          const outcome = await importItem(item, { signal: controller.signal });
-          if (
-            (outcome.status === "imported" || outcome.status === "skipped")
-            && outcome.backgroundAfterCheckpoint
-          ) {
-            backgroundEffect.current = outcome.backgroundAfterCheckpoint;
-          }
-          return outcome;
-        },
+        importItem,
         lanes: ["conversation"],
         limitPerLane: 10,
         mailboxPort: mailboxPort.port,
@@ -219,16 +209,33 @@ describe("hosted Linq audio conversation ingestion", () => {
         vaultRoot,
       });
 
-      assert.ok(backgroundEffect.current);
-      const effectResult = await backgroundEffect.current();
-      assert.equal(effectResult.kind, "inbox_parser_enrichment");
-      assert.equal(effectResult.status, "succeeded");
+      const abortedMaintenance = await runHostedConversationParserMaintenance({
+        memberId: "member_linq_audio",
+        parserToolchain: null,
+        signal: controller.signal,
+        vaultRoot,
+      });
+      assert.equal(abortedMaintenance.parserProcessed, 0);
+      assert.notEqual(abortedMaintenance.nextWakeAt, null);
+      await assertSingleLinqAudioCapture({
+        parseState: "pending",
+        transcript: null,
+        vaultRoot,
+      });
+      assert.equal(providerSignals.length, 1);
+
+      const retryResult = await runHostedConversationParserMaintenance({
+        memberId: "member_linq_audio",
+        parserToolchain: null,
+        vaultRoot,
+      });
+      assert.equal(retryResult.parserProcessed, 1);
       await assertSingleLinqAudioCapture({
         parseState: "succeeded",
         transcript,
         vaultRoot,
       });
-      assert.equal(providerSignals.length, 1);
+      assert.deepEqual(providerSignals, [controller.signal, undefined]);
     } finally {
       await rm(workspaceRoot, {
         force: true,
@@ -295,15 +302,12 @@ describe("hosted Linq audio conversation ingestion", () => {
     };
 
     mocks.createHostedLinqAttachmentDownloadDriver.mockReturnValue(downloadDriver);
-    mocks.createConfiguredParserRegistry.mockImplementationOnce(async () => {
-      controller.abort(abortReason);
-      return {
-        ffmpeg: {
-          allowSystemLookup: false,
-          commandCandidates: [fakeFfmpeg],
-        },
-        registry: createParserRegistry([audioProvider]),
-      };
+    mocks.createConfiguredParserRegistry.mockResolvedValue({
+      ffmpeg: {
+        allowSystemLookup: false,
+        commandCandidates: [fakeFfmpeg],
+      },
+      registry: createParserRegistry([audioProvider]),
     });
     mocks.markLinqChatRead.mockResolvedValue(undefined);
 
@@ -332,15 +336,27 @@ describe("hosted Linq audio conversation ingestion", () => {
         userId: "member_linq_audio",
       });
 
+      const importResult = await importHostedConversationMessageWakeIntoLocalInbox({
+        runtime: createRuntimeConfig(),
+        vaultRoot,
+        wake,
+      });
+      assert.deepEqual(importResult.metrics, {
+        nextWakeAt: null,
+        parserProcessed: 0,
+      });
+      assert.equal(importResult.requiresTerminalMediaParserEvidence, true);
+
+      controller.abort(abortReason);
       await assert.rejects(
         withTestTimeout(
-          importHostedConversationMessageWakeIntoLocalInbox({
-            runtime: createRuntimeConfig(),
+          runHostedConversationParserMaintenance({
+            memberId: "member_linq_audio",
+            parserToolchain: null,
             signal: controller.signal,
             vaultRoot,
-            wake,
           }),
-          "pre-drain aborted parser projection did not settle",
+          "pre-drain aborted parser maintenance did not settle",
         ),
         (error) => error === abortReason,
       );
@@ -379,22 +395,12 @@ describe("hosted Linq audio conversation ingestion", () => {
         runtime.close();
       }
 
-      mocks.createConfiguredParserRegistry.mockResolvedValue({
-        ffmpeg: {
-          allowSystemLookup: false,
-          commandCandidates: [fakeFfmpeg],
-        },
-        registry: createParserRegistry([audioProvider]),
-      });
-      const retryResult = await importHostedConversationMessageWakeIntoLocalInbox({
-        runtime: createRuntimeConfig(),
+      const retryResult = await runHostedConversationParserMaintenance({
+        memberId: "member_linq_audio",
+        parserToolchain: null,
         vaultRoot,
-        wake,
       });
-      assert.deepEqual(retryResult.metrics, {
-        nextWakeAt: null,
-        parserProcessed: 1,
-      });
+      assert.equal(retryResult.parserProcessed, 1);
       await assertSingleLinqAudioCapture({
         parseState: "succeeded",
         transcript,
@@ -521,10 +527,24 @@ describe("hosted Linq audio conversation ingestion", () => {
       });
       assert.deepEqual(importResult.metrics, {
         nextWakeAt: null,
-        parserProcessed: 1,
+        parserProcessed: 0,
       });
+      assert.equal(importResult.requiresTerminalMediaParserEvidence, true);
       expect(downloadDriver.downloadPart).toHaveBeenCalledTimes(1);
       expect(downloadDriver.downloadUrl).not.toHaveBeenCalled();
+      assert.equal(parserInputs.length, 0);
+      await assertSingleLinqAudioCapture({
+        parseState: "pending",
+        transcript: null,
+        vaultRoot,
+      });
+
+      const maintenanceResult = await runHostedConversationParserMaintenance({
+        memberId: "member_linq_audio",
+        parserToolchain: null,
+        vaultRoot,
+      });
+      assert.equal(maintenanceResult.parserProcessed, 1);
       assert.equal(parserInputs.length, 1);
       assert.equal(parserInputs[0]?.preparedKind, "audio");
 

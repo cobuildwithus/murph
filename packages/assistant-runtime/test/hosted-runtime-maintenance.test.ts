@@ -26,6 +26,7 @@ const mocks = vi.hoisted(() => ({
   readConfiguredJunctionDeviceSyncProviderConfig: vi.fn(),
   readHostedAssistantRuntimeState: vi.fn(),
   reconcileHostedDeviceSyncControlPlaneState: vi.fn(),
+  readAssistantInputEvent: vi.fn(),
   repairHostedPendingAssistantRouteProofBatch: vi.fn(),
   runAssistantAutomationPass: vi.fn(),
   selectHostedAssistantInputIds: vi.fn(),
@@ -56,6 +57,7 @@ vi.mock("@murphai/assistant-engine", () => ({
   HOSTED_ASSISTANT_CONTEXT_DIAGNOSTICS_TYPE: "assistant.context.diagnostics",
   HOSTED_ASSISTANT_TURN_TIMING_SCHEMA: "murph.assistant-turn-timing.v1",
   HOSTED_ASSISTANT_TURN_TIMING_TYPE: "assistant.turn.timing",
+  readAssistantInputEvent: mocks.readAssistantInputEvent,
   runAssistantAutomationPass: mocks.runAssistantAutomationPass,
 }));
 
@@ -196,6 +198,7 @@ async function expectDenseRawRetentionMailboxWakeAt(
 function createHostedAutomationRuntime(input: {
   deviceSync?: HostedTimerRuntime["resolvedConfig"]["deviceSync"];
   platform?: Partial<HostedTimerRuntime["platform"]>;
+  whatsappCloudApiConfigured?: boolean;
 } = {}): HostedTimerRuntime {
   return {
     commitTimeoutMs: 45_000,
@@ -216,7 +219,8 @@ function createHostedAutomationRuntime(input: {
       channelCapabilities: {
         emailSendReady: false,
         telegramBotConfigured: false,
-        whatsappCloudApiConfigured: false,
+        whatsappCloudApiConfigured:
+          input.whatsappCloudApiConfigured ?? false,
       },
       deviceSync: input.deviceSync ?? null,
     },
@@ -291,6 +295,7 @@ beforeEach(async () => {
     assistantConfigured: true,
     assistantProvider: "codex-cli",
   });
+  mocks.readAssistantInputEvent.mockResolvedValue(null);
   mocks.repairHostedPendingAssistantRouteProofBatch.mockResolvedValue({
     pending: false,
     processedInputIds: [],
@@ -3853,6 +3858,199 @@ describe("runHostedAssistantAutomationLane", () => {
         mode: "foreground",
       }),
     );
+  });
+
+  it("transiently enables WhatsApp only for the exact fresh direct foreground input", async () => {
+    const inputId = "ain_whatsapp_current_foreground";
+    mocks.readAssistantInputEvent.mockResolvedValueOnce({
+      conversation: {
+        actorIsSelf: false,
+        source: "whatsapp",
+        threadIsDirect: true,
+      },
+      replyTarget: {
+        channel: "whatsapp",
+      },
+      sourceRef: {
+        kind: "hosted-mailbox",
+        lane: "conversation",
+      },
+    });
+
+    await runHostedAssistantAutomationLane({
+      executionContext: {
+        hosted: {
+          memberId: "member_123",
+          userEnvKeys: [],
+        },
+      },
+      freshAssistantInputIds: [inputId],
+      requestId: "req_whatsapp_current_foreground",
+      runtime: createHostedAutomationRuntime({
+        whatsappCloudApiConfigured: true,
+      }),
+      vaultRoot: "/tmp/vault-root",
+      wake: {
+        eventId: "evt_whatsapp_current_foreground",
+        kind: "runtime.timer",
+        occurredAt: "2026-04-08T00:00:00.000Z",
+        triggerKind: "runtime_timer",
+        userId: "member_123",
+      },
+    });
+
+    expect(mocks.readAssistantInputEvent).toHaveBeenCalledWith({
+      inputId,
+      vault: "/tmp/vault-root",
+    });
+    expect(mocks.runAssistantAutomationPass).toHaveBeenCalledWith(
+      expect.objectContaining({
+        foregroundAutoReplyChannels: ["whatsapp"],
+      }),
+    );
+  });
+
+  it("does not transiently enable WhatsApp for a non-direct foreground input", async () => {
+    const inputId = "ain_whatsapp_group_foreground";
+    mocks.readAssistantInputEvent.mockResolvedValueOnce({
+      conversation: {
+        actorIsSelf: false,
+        source: "whatsapp",
+        threadIsDirect: false,
+      },
+      replyTarget: {
+        channel: "whatsapp",
+      },
+      sourceRef: {
+        kind: "hosted-mailbox",
+        lane: "conversation",
+      },
+    });
+
+    await runHostedAssistantAutomationLane({
+      executionContext: {
+        hosted: {
+          memberId: "member_123",
+          userEnvKeys: [],
+        },
+      },
+      freshAssistantInputIds: [inputId],
+      requestId: "req_whatsapp_group_foreground",
+      runtime: createHostedAutomationRuntime({
+        whatsappCloudApiConfigured: true,
+      }),
+      vaultRoot: "/tmp/vault-root",
+      wake: {
+        eventId: "evt_whatsapp_group_foreground",
+        kind: "runtime.timer",
+        occurredAt: "2026-04-08T00:00:00.000Z",
+        triggerKind: "runtime_timer",
+        userId: "member_123",
+      },
+    });
+
+    const automationPassInput =
+      mocks.runAssistantAutomationPass.mock.calls[0]?.[0] as RunAssistantAutomationPassInput;
+    expect(automationPassInput).not.toHaveProperty("foregroundAutoReplyChannels");
+  });
+
+  it("does not inspect or transiently enable WhatsApp without runtime capability", async () => {
+    const inputId = "ain_whatsapp_unconfigured_foreground";
+
+    await runHostedAssistantAutomationLane({
+      executionContext: {
+        hosted: {
+          memberId: "member_123",
+          userEnvKeys: [],
+        },
+      },
+      freshAssistantInputIds: [inputId],
+      requestId: "req_whatsapp_unconfigured_foreground",
+      runtime: createHostedAutomationRuntime(),
+      vaultRoot: "/tmp/vault-root",
+      wake: {
+        eventId: "evt_whatsapp_unconfigured_foreground",
+        kind: "runtime.timer",
+        occurredAt: "2026-04-08T00:00:00.000Z",
+        triggerKind: "runtime_timer",
+        userId: "member_123",
+      },
+    });
+
+    expect(mocks.readAssistantInputEvent).not.toHaveBeenCalled();
+    const automationPassInput =
+      mocks.runAssistantAutomationPass.mock.calls[0]?.[0] as RunAssistantAutomationPassInput;
+    expect(automationPassInput).not.toHaveProperty("foregroundAutoReplyChannels");
+  });
+
+  it("does not transiently enable WhatsApp when the selected foreground input is not fresh", async () => {
+    mocks.selectHostedAssistantInputIds.mockResolvedValueOnce({
+      freshInputIds: ["ain_fresh_unselected"],
+      inputIds: ["ain_pending_selected"],
+      mode: "foreground",
+      pendingInputIds: ["ain_pending_selected"],
+    });
+
+    await runHostedAssistantAutomationLane({
+      executionContext: {
+        hosted: {
+          memberId: "member_123",
+          userEnvKeys: [],
+        },
+      },
+      freshAssistantInputIds: ["ain_fresh_unselected"],
+      requestId: "req_whatsapp_unselected_fresh",
+      runtime: createHostedAutomationRuntime({
+        whatsappCloudApiConfigured: true,
+      }),
+      vaultRoot: "/tmp/vault-root",
+      wake: {
+        eventId: "evt_whatsapp_unselected_fresh",
+        kind: "runtime.timer",
+        occurredAt: "2026-04-08T00:00:00.000Z",
+        triggerKind: "runtime_timer",
+        userId: "member_123",
+      },
+    });
+
+    expect(mocks.readAssistantInputEvent).not.toHaveBeenCalled();
+    const automationPassInput =
+      mocks.runAssistantAutomationPass.mock.calls[0]?.[0] as RunAssistantAutomationPassInput;
+    expect(automationPassInput).not.toHaveProperty("foregroundAutoReplyChannels");
+  });
+
+  it("does not transiently enable WhatsApp during background recovery", async () => {
+    mocks.selectHostedAssistantInputIds.mockResolvedValueOnce({
+      inputIds: ["ain_whatsapp_background"],
+      mode: "background",
+      pendingInputIds: ["ain_whatsapp_background"],
+    });
+
+    await runHostedAssistantAutomationLane({
+      executionContext: {
+        hosted: {
+          memberId: "member_123",
+          userEnvKeys: [],
+        },
+      },
+      requestId: "req_whatsapp_background",
+      runtime: createHostedAutomationRuntime({
+        whatsappCloudApiConfigured: true,
+      }),
+      vaultRoot: "/tmp/vault-root",
+      wake: {
+        eventId: "evt_whatsapp_background",
+        kind: "runtime.timer",
+        occurredAt: "2026-04-08T00:00:00.000Z",
+        triggerKind: "runtime_timer",
+        userId: "member_123",
+      },
+    });
+
+    expect(mocks.readAssistantInputEvent).not.toHaveBeenCalled();
+    const automationPassInput =
+      mocks.runAssistantAutomationPass.mock.calls[0]?.[0] as RunAssistantAutomationPassInput;
+    expect(automationPassInput).not.toHaveProperty("foregroundAutoReplyChannels");
   });
 
   it("records provider trace diagnostics from the maintenance automation lane", async () => {

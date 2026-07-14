@@ -24,6 +24,9 @@ import {
   resolveAssistantStatePaths,
   writeAssistantStateVersionedJson,
 } from "@murphai/runtime-state/node/assistant-state-fs";
+import {
+  classifyHostedAssistantInputMediaSemanticState,
+} from "./media-parser-evidence.ts";
 
 export const HOSTED_PENDING_ASSISTANT_INPUT_STATE_SCHEMA =
   "murph.hosted-pending-assistant-inputs.v1";
@@ -403,12 +406,16 @@ async function compactHostedPendingAssistantInputStateForWrite(input: {
     ) {
       continue;
     }
+    const mediaState = classifyHostedAssistantInputMediaSemanticState(event);
+    if (mediaState === "failed") {
+      continue;
+    }
     const complete = await hasCompleteAssistantAutoReplyTerminalEvidence({
       captureId: event.projection.captureId,
       inputId,
       vault: input.vaultRoot,
     });
-    if (!complete) {
+    if (!complete || mediaState === "pending") {
       const destination = hasRouteProof
         ? repairedReplyableRouteProofInputs
         : remaining;
@@ -602,7 +609,17 @@ async function createBackfilledHostedPendingAssistantInputState(input: {
           inputId: candidate.event.inputId,
           vault: input.vaultRoot,
         });
-        if (!complete) {
+        const storedEvent = await readAssistantInputEvent({
+          inputId: candidate.event.inputId,
+          vault: input.vaultRoot,
+        });
+        if (!storedEvent) {
+          continue;
+        }
+        const mediaState = classifyHostedAssistantInputMediaSemanticState(
+          storedEvent,
+        );
+        if (mediaState !== "failed" && (!complete || mediaState === "pending")) {
           pending.push({
             cursor: candidate.event.cursor,
             inputId: candidate.event.inputId,

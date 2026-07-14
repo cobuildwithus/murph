@@ -93,6 +93,7 @@ import {
   buildHostedTelegramChannelEnv,
   buildHostedTelegramVoiceMemoChannelEnv,
   buildHostedWhatsAppChannelEnv,
+  isHostedWhatsAppChannelReady,
 } from "./channel-activity.ts";
 import {
   looksLikeHostedProviderRedactedLinqTarget,
@@ -2036,6 +2037,7 @@ async function deliverHostedPreparedAssistantDelivery(input: {
       userId: input.userId,
       vaultRoot: input.vaultRoot,
       wake: input.wake,
+      whatsAppEnv: input.whatsAppEnv,
     });
     if (disabledAutoReplyOutcome) {
       return disabledAutoReplyOutcome;
@@ -3704,6 +3706,7 @@ async function maybeFailHostedDisabledAutoReplyDelivery(input: {
   userId: string;
   vaultRoot: string;
   wake: HostedRuntimeEvent;
+  whatsAppEnv: NodeJS.ProcessEnv;
 }): Promise<HostedAssistantDeliveryOutcome | null> {
   const intent = input.mirrorState.intent;
   if (!intent) {
@@ -3720,6 +3723,14 @@ async function maybeFailHostedDisabledAutoReplyDelivery(input: {
     intent.channel ?? input.assistantDeliveryEffect.payload.channel,
   );
   if (!channel) {
+    return null;
+  }
+
+  if (
+    channel.toLowerCase() === "whatsapp"
+    && input.assistantDeliveryEffect.deliveryPhase === "foreground_current_turn"
+    && isHostedWhatsAppChannelReady(input.whatsAppEnv)
+  ) {
     return null;
   }
 

@@ -120,10 +120,17 @@ describe("hosted local Linq webhook audio e2e", () => {
     );
     expect(assistantProviderBody.includes("Attachment context:")).toBe(true);
     expect(assistantProviderBody.includes("fileName: Audio Message.wav")).toBe(true);
+    const providerRequestShape = summarizeProviderAudioRequestShape(assistantProviderBody);
     expect(
       assistantProviderBody.includes(hostedLinqVoiceNoteTranscriptText),
-      summarizeProviderAudioRequestShape(assistantProviderBody),
+      providerRequestShape,
     ).toBe(true);
+    expect(
+      assistantProviderBody.includes(
+        "Attachment parser status: audio/video transcript is not available yet.",
+      ),
+      providerRequestShape,
+    ).toBe(false);
     expect(assistantProviderBody.includes("raw evidence: not_attempted")).toBe(false);
     expectNoNativeAttachmentLeaks(assistantProviderBody, [
       attachmentId,

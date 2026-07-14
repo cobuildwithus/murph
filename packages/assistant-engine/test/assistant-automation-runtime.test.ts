@@ -1535,6 +1535,98 @@ describe('assistant automation scanner', () => {
     )
   })
 
+  it('scans foreground auto-reply channels without persisting transient cursor state', async () => {
+    const whatsapp = createCaptureSummary({
+      captureId: 'capture-whatsapp-foreground',
+      source: 'whatsapp',
+    })
+    const inputSource = createAssistantInputSourceForCaptures([whatsapp])
+    const onStateProgress = vi.fn()
+    const scanner = await vi.importActual<typeof import('../src/assistant/automation/scanner.ts')>(
+      '../src/assistant/automation/scanner.ts',
+    )
+
+    const result = await scanner.scanAssistantAutomationOnce({
+      foregroundAutoReplyChannels: [' whatsapp ', 'whatsapp'],
+      inboxServices: createInboxServices(),
+      inputSource,
+      onStateProgress,
+      state: createAutomationState({
+        autoReplyChannels: ['telegram'],
+      }),
+      vault: '/tmp/assistant-automation-vault',
+    })
+
+    expect(result.replies).toMatchObject({
+      considered: 1,
+      skipped: 1,
+    })
+    expect(inputSource.listInputCandidates).toHaveBeenCalledTimes(2)
+    expect(inputSource.listInputCandidates).toHaveBeenNthCalledWith(
+      1,
+      expect.objectContaining({ sourceId: 'telegram' }),
+    )
+    expect(inputSource.listInputCandidates).toHaveBeenNthCalledWith(
+      2,
+      expect.objectContaining({ sourceId: 'whatsapp' }),
+    )
+    expect(scannerReplyMocks.processAssistantAutoReplyGroup).toHaveBeenCalledWith(
+      expect.objectContaining({
+        enabledChannels: ['telegram', 'whatsapp'],
+      }),
+    )
+    expect(onStateProgress).not.toHaveBeenCalled()
+  })
+
+  it('keeps the durable channel cursor when the same channel is foreground-enabled', async () => {
+    const first = createCaptureSummary({
+      captureId: 'capture-whatsapp-first',
+      occurredAt: '2026-04-08T00:01:00.000Z',
+      source: 'whatsapp',
+    })
+    const second = createCaptureSummary({
+      captureId: 'capture-whatsapp-second',
+      occurredAt: '2026-04-08T00:02:00.000Z',
+      source: 'whatsapp',
+    })
+    const firstCursor = assistantInputCandidateFromInboxCapture(first).event.cursor
+    const stateUpdates: AssistantAutomationState[] = []
+    const scanner = await vi.importActual<typeof import('../src/assistant/automation/scanner.ts')>(
+      '../src/assistant/automation/scanner.ts',
+    )
+
+    await scanner.scanAssistantAutomationOnce({
+      foregroundAutoReplyChannels: ['whatsapp'],
+      inboxServices: createInboxServices(),
+      inputSource: createAssistantInputSourceForCaptures([first, second]),
+      onStateProgress: async (next) => {
+        stateUpdates.push({
+          ...createAutomationState(),
+          autoReply: [...next.autoReply],
+        })
+      },
+      state: createAutomationState({
+        autoReply: [
+          {
+            channel: 'whatsapp',
+            eligibleAfter: firstCursor,
+            enabledAt: '2026-04-08T00:00:00.000Z',
+          },
+        ],
+      }),
+      vault: '/tmp/assistant-automation-vault',
+    })
+
+    expect(scannerReplyMocks.processAssistantAutoReplyGroup).toHaveBeenCalledOnce()
+    expect(scannerReplyMocks.processAssistantAutoReplyGroup).toHaveBeenCalledWith(
+      expect.objectContaining({ enabledChannels: ['whatsapp'] }),
+    )
+    expect(readAutoReplyCursor(
+      stateUpdates[stateUpdates.length - 1] ?? createAutomationState(),
+      'whatsapp',
+    )).toEqual(assistantInputCandidateFromInboxCapture(second).event.cursor)
+  })
+
   it('shares one history reader across every group in an automation pass', async () => {
     const first = createCaptureSummary({
       captureId: 'capture-history-first',
@@ -5282,6 +5374,7 @@ describe('assistant auto-reply runtime', () => {
     const result = await runLoop.runAssistantAutomationPass({
       beforeProviderAcceptedInputs,
       executionContext,
+      foregroundAutoReplyChannels: ['whatsapp'],
       onProviderEvent,
       requestId: 'request-hosted',
       vault: '/tmp/assistant-automation-vault',
@@ -5294,6 +5387,7 @@ describe('assistant auto-reply runtime', () => {
       expect.objectContaining({
         beforeProviderAcceptedInputs,
         executionContext,
+        foregroundAutoReplyChannels: ['whatsapp'],
         onProviderEvent,
         inputSource: expect.objectContaining({
           listInputCandidates: expect.any(Function),

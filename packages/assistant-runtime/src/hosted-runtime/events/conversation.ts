@@ -1,7 +1,5 @@
 import type { HostedExecutionConversationMessageWake } from "@murphai/hosted-execution";
 import {
-  buildHostedExecutionSafeErrorDiagnostics,
-  deriveHostedExecutionErrorCode,
   isHostedEmailConversationMessageWake,
   isHostedLinqConversationMessageWake,
   isHostedTelegramConversationMessageWake,
@@ -25,19 +23,11 @@ import {
   type PersistedCapture,
   openInboxRuntime,
 } from "@murphai/inboxd/runtime";
-import {
-  createConfiguredParserRegistry,
-  createInboxParserService,
-} from "@murphai/parsers";
 
 import {
   buildHostedLinqChannelEnv,
   buildHostedTelegramChannelEnv,
 } from "../channel-activity.ts";
-import {
-  compactHostedRuntimeLogCodes,
-  writeHostedRuntimeLogBestEffort,
-} from "../runtime-logs.ts";
 import { readHostedRawEmailMessage } from "./email.ts";
 import {
   createHostedLinqAttachmentDownloadDriver,
@@ -56,12 +46,12 @@ import type {
   NormalizedHostedAssistantRuntimeConfig,
 } from "../models.ts";
 
-const HOSTED_CONVERSATION_PARSER_RETRY_DELAY_MS = 60_000;
+const HOSTED_LINQ_INTERNAL_STAGING_NOTE_PREFIX = "Internal staging note:";
 
 export interface HostedConversationWakeLocalImportResult {
   capture: PersistedCapture | null;
-  deferredParserDrain?: () => Promise<HostedConversationWakeMetrics>;
   metrics: HostedConversationWakeMetrics;
+  requiresTerminalMediaParserEvidence: boolean;
 }
 
 export class HostedConversationInboxProjectionError extends Error {
@@ -72,10 +62,8 @@ export class HostedConversationInboxProjectionError extends Error {
 }
 
 export async function importHostedConversationMessageWakeIntoLocalInbox(input: {
-  deferParserDrain?: boolean;
   wake: HostedExecutionConversationMessageWake;
-  runtime: Pick<NormalizedHostedAssistantRuntimeConfig, "forwardedEnv" | "platform" | "platformEnv" | "userEnv">
-    & Partial<Pick<NormalizedHostedAssistantRuntimeConfig, "parserToolchain">>;
+  runtime: Pick<NormalizedHostedAssistantRuntimeConfig, "forwardedEnv" | "platform" | "platformEnv" | "userEnv">;
   signal?: AbortSignal | null;
   vaultRoot: string;
 }): Promise<HostedConversationWakeLocalImportResult> {
@@ -83,6 +71,7 @@ export async function importHostedConversationMessageWakeIntoLocalInbox(input: {
     return {
       capture: null,
       metrics: createHostedConversationParserMetrics(),
+      requiresTerminalMediaParserEvidence: false,
     };
   }
 
@@ -112,37 +101,15 @@ export async function importHostedConversationMessageWakeIntoLocalInbox(input: {
       );
     }
     assertHostedConversationProjectionLive(input.signal ?? null);
-    if (
-      input.deferParserDrain === true
-      && hasPendingHostedConversationMediaParserWork({
-        captureId: persistedCapture.captureId,
-        runtime,
-      })
-    ) {
-      return {
-        capture: persistedCapture,
-        deferredParserDrain: async () =>
-          await drainHostedConversationParsersAfterCheckpoint({
-            captureId: persistedCapture.captureId,
-            parserToolchain: input.runtime.parserToolchain ?? null,
-            platform: input.runtime.platform,
-            vaultRoot: input.vaultRoot,
-          }),
-        metrics: createHostedConversationParserMetrics(),
-      };
-    }
-    const metrics = await drainHostedConversationParsers({
-      captureId: persistedCapture.captureId,
-      parserToolchain: input.runtime.parserToolchain ?? null,
-      platform: input.runtime.platform,
-      runtime,
-      signal: input.signal ?? null,
-      vaultRoot: input.vaultRoot,
-    });
 
     return {
       capture: persistedCapture,
-      metrics,
+      metrics: createHostedConversationParserMetrics(),
+      requiresTerminalMediaParserEvidence:
+        requiresTerminalHostedConversationMediaParserEvidence({
+          capture,
+          wake: input.wake,
+        }),
     };
   } finally {
     if (pipeline) {
@@ -151,182 +118,6 @@ export async function importHostedConversationMessageWakeIntoLocalInbox(input: {
       runtime.close();
     }
   }
-}
-
-async function drainHostedConversationParsersAfterCheckpoint(input: {
-  captureId: string;
-  parserToolchain: NormalizedHostedAssistantRuntimeConfig["parserToolchain"];
-  platform: Pick<NormalizedHostedAssistantRuntimeConfig["platform"], "logPort">;
-  vaultRoot: string;
-}): Promise<HostedConversationWakeMetrics> {
-  const runtime = await openInboxRuntime({
-    vaultRoot: input.vaultRoot,
-  });
-  try {
-    return await drainHostedConversationParsers({
-      ...input,
-      runtime,
-      signal: null,
-    });
-  } finally {
-    runtime.close();
-  }
-}
-
-async function drainHostedConversationParsers(input: {
-  captureId: string;
-  parserToolchain: NormalizedHostedAssistantRuntimeConfig["parserToolchain"];
-  platform: Pick<NormalizedHostedAssistantRuntimeConfig["platform"], "logPort">;
-  runtime: Awaited<ReturnType<typeof openInboxRuntime>>;
-  signal?: AbortSignal | null;
-  vaultRoot: string;
-}): Promise<HostedConversationWakeMetrics> {
-  if (
-    !hasPendingHostedConversationMediaParserWork({
-      captureId: input.captureId,
-      runtime: input.runtime,
-    })
-  ) {
-    return createHostedConversationParserMetrics();
-  }
-
-  let parserService: ReturnType<typeof createInboxParserService>;
-  try {
-    const parserConfig = await createConfiguredParserRegistry({
-      ...(input.parserToolchain
-        ? {
-            allowEnvToolchain: false,
-            allowSystemToolchainLookup: false,
-            readVaultToolchainConfig: false,
-            toolchain: {
-              source: "platform",
-              tools: input.parserToolchain.tools,
-            },
-          }
-        : {}),
-      vaultRoot: input.vaultRoot,
-    });
-    parserService = createInboxParserService({
-      ffmpeg: parserConfig.ffmpeg,
-      registry: parserConfig.registry,
-      runtime: input.runtime,
-      vaultRoot: input.vaultRoot,
-    });
-  } catch (error) {
-    return await logHostedConversationParserRetryFailure({
-      captureId: input.captureId,
-      error,
-      platform: input.platform,
-      safeFallbackMessage: "Hosted conversation parser setup failed.",
-    });
-  }
-
-  assertHostedConversationProjectionLive(input.signal ?? null);
-  // The parser drain is not abort-safe: a cooperative abort can terminalize
-  // the claimed parse job. Let the bounded parser pipeline finish, then land
-  // hosted preemption at the post-drain liveness boundary.
-  let results: Awaited<ReturnType<typeof parserService.drain>>;
-  try {
-    results = await parserService.drain({
-      captureId: input.captureId,
-    });
-  } catch (error) {
-    return await logHostedConversationParserRetryFailure({
-      captureId: input.captureId,
-      error,
-      platform: input.platform,
-      safeFallbackMessage: "Hosted conversation parser drain failed.",
-    });
-  }
-  const failedResults = results.filter((result) => result.status === "failed");
-  const observedFailedJobs = input.runtime.listAttachmentParseJobs({
-    captureId: input.captureId,
-    state: "failed",
-  });
-  const parserFailures = collectHostedParserFailures({
-    failedJobs: observedFailedJobs,
-    failedResults,
-  });
-  if (parserFailures.length > 0) {
-    await writeHostedRuntimeLogBestEffort({
-      entry: {
-        component: "mailbox",
-        errorCode: "parser_jobs_failed",
-        eventCode: "mailbox.parser_jobs_failed",
-        level: "warn",
-        phase: "import",
-        redactedJson: {
-          captureIdPresent: Boolean(input.captureId),
-          errorCode: "parser_jobs_failed",
-          errorCodes: compactHostedRuntimeLogCodes(
-            parserFailures.map((failure) => failure.errorCode ?? "parser_failed"),
-          ),
-          nextWakeAtPresent: false,
-          safeErrorMessage: "One or more hosted conversation parser jobs failed.",
-          parserFailed: parserFailures.length,
-          parserObservedFailedJobs: observedFailedJobs.length,
-          parserProcessed: results.length,
-          parserSucceeded: results.length - failedResults.length,
-        },
-      },
-      platform: input.platform,
-    });
-  }
-  // Failed-job warnings are durable once drained, so emit them before landing
-  // a hosted preemption abort: a retried import skips drain when no jobs are
-  // pending and would otherwise never log these terminal parser failures.
-  assertHostedConversationProjectionLive(input.signal ?? null);
-  return createHostedConversationParserMetrics({
-    nextWakeAt: null,
-    parserProcessed: results.length,
-  });
-}
-
-function hasPendingHostedConversationMediaParserWork(input: {
-  captureId: string;
-  runtime: Awaited<ReturnType<typeof openInboxRuntime>>;
-}): boolean {
-  const hasPendingJob = input.runtime.listAttachmentParseJobs({
-    captureId: input.captureId,
-    limit: 1,
-    state: "pending",
-  }).length > 0;
-  return hasPendingJob && hasPendingHostedConversationMediaParseJob(input);
-}
-
-async function logHostedConversationParserRetryFailure(input: {
-  captureId: string;
-  error: unknown;
-  platform: Pick<NormalizedHostedAssistantRuntimeConfig["platform"], "logPort">;
-  safeFallbackMessage: string;
-}): Promise<HostedConversationWakeMetrics> {
-  const errorCode = deriveHostedExecutionErrorCode(input.error);
-  const diagnostics = buildHostedExecutionSafeErrorDiagnostics(input.error);
-  const nextWakeAt = new Date(Date.now() + HOSTED_CONVERSATION_PARSER_RETRY_DELAY_MS)
-    .toISOString();
-  await writeHostedRuntimeLogBestEffort({
-    entry: {
-      component: "mailbox",
-      errorCode,
-      eventCode: "mailbox.parser_drain_failed",
-      level: "warn",
-      phase: "import",
-      redactedJson: {
-        captureIdPresent: Boolean(input.captureId),
-        errorCode,
-        nextWakeAtPresent: true,
-        parserTerminalizedPendingJobs: 0,
-        safeErrorMessage:
-          typeof diagnostics?.errorMessage === "string"
-            ? diagnostics.errorMessage
-            : input.safeFallbackMessage,
-      },
-    },
-    platform: input.platform,
-  });
-  return createHostedConversationParserMetrics({
-    nextWakeAt,
-  });
 }
 
 function assertHostedConversationProjectionLive(signal: AbortSignal | null): void {
@@ -360,70 +151,52 @@ function readHostedConversationProjectionAbortReason(
   return signal?.reason ?? error;
 }
 
-function createHostedConversationParserMetrics(input: {
-  nextWakeAt?: string | null;
-  parserProcessed?: number;
-} = {}): HostedConversationWakeMetrics {
+function createHostedConversationParserMetrics(): HostedConversationWakeMetrics {
   return {
-    nextWakeAt: input.nextWakeAt ?? null,
-    parserProcessed: input.parserProcessed ?? 0,
+    nextWakeAt: null,
+    parserProcessed: 0,
   };
 }
 
-interface HostedParserFailureLogItem {
-  errorCode?: string | null;
-  jobId: string;
-}
-
-function collectHostedParserFailures(input: {
-  failedJobs: readonly HostedParserFailureLogItem[];
-  failedResults: ReadonlyArray<{
-    errorCode?: string | null;
-    job: HostedParserFailureLogItem;
-  }>;
-}): HostedParserFailureLogItem[] {
-  const failuresByJobId = new Map<string, HostedParserFailureLogItem>();
-  for (const result of input.failedResults) {
-    failuresByJobId.set(result.job.jobId, {
-      errorCode: result.errorCode ?? result.job.errorCode ?? null,
-      jobId: result.job.jobId,
-    });
-  }
-  for (const job of input.failedJobs) {
-    if (!failuresByJobId.has(job.jobId)) {
-      failuresByJobId.set(job.jobId, job);
-    }
-  }
-
-  return [...failuresByJobId.values()];
-}
-
-function hasPendingHostedConversationMediaParseJob(input: {
-  captureId: string;
-  runtime: Awaited<ReturnType<typeof openInboxRuntime>>;
+function requiresTerminalHostedConversationMediaParserEvidence(input: {
+  capture: {
+    attachments: readonly { kind: string }[];
+    text: string | null;
+  };
+  wake: HostedExecutionConversationMessageWake;
 }): boolean {
-  const capture = input.runtime.getCapture(input.captureId);
-  if (!capture) {
+  if (
+    !isHostedLinqConversationMessageWake(input.wake)
+    && !isHostedTelegramConversationMessageWake(input.wake)
+  ) {
     return false;
   }
+  return !hasHostedConversationUserAuthoredText(input)
+    && input.capture.attachments.some((attachment) =>
+      attachment.kind === "audio" || attachment.kind === "video"
+    );
+}
 
-  return capture.attachments.some((attachment) => {
-    if (attachment.kind !== "audio" && attachment.kind !== "video") {
-      return false;
-    }
-    return input.runtime.listAttachmentParseJobs({
-      attachmentId: attachment.attachmentId,
-      captureId: input.captureId,
-      limit: 1,
-      state: "pending",
-    }).length > 0;
-  });
+function hasHostedConversationUserAuthoredText(input: {
+  capture: { text: string | null };
+  wake: HostedExecutionConversationMessageWake;
+}): boolean {
+  if (isHostedLinqConversationMessageWake(input.wake)) {
+    return input.wake.message.linqMessage.parts.some((part) =>
+      (part.type === "text" || part.type === "link")
+      && part.value.trim().length > 0
+      && !part.value.trimStart().startsWith(HOSTED_LINQ_INTERNAL_STAGING_NOTE_PREFIX)
+    );
+  }
+  if (isHostedTelegramConversationMessageWake(input.wake)) {
+    return (input.wake.message.telegramMessage.text?.trim() ?? "").length > 0;
+  }
+  return (input.capture.text?.trim() ?? "").length > 0;
 }
 
 async function normalizeHostedConversationMessageWake(input: {
   wake: HostedExecutionConversationMessageWake;
-  runtime: Pick<NormalizedHostedAssistantRuntimeConfig, "forwardedEnv" | "platform" | "platformEnv" | "userEnv">
-    & Partial<Pick<NormalizedHostedAssistantRuntimeConfig, "parserToolchain">>;
+  runtime: Pick<NormalizedHostedAssistantRuntimeConfig, "forwardedEnv" | "platform" | "platformEnv" | "userEnv">;
   signal?: AbortSignal | null;
 }) {
   if (isHostedLinqConversationMessageWake(input.wake)) {

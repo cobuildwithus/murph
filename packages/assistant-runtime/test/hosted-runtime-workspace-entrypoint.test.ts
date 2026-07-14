@@ -9602,7 +9602,7 @@ describe("hosted workspace runtime entrypoint", () => {
     );
   });
 
-  test("does not let background parser enrichment delay replay-budget checkpointing", async () => {
+  test("checkpoints replay budget progress before servicing active wakes", async () => {
     const vaultRoot = await mkdtemp(path.join(tmpdir(), "murph-runtime-replay-wake-barrier-"));
     const checkpointRequests: HostedWorkspaceCheckpointRequest[] = [];
     const events: string[] = [];
@@ -9610,7 +9610,6 @@ describe("hosted workspace runtime entrypoint", () => {
     const importedSeqs: string[] = [];
     const snapshotWatermarks: string[] = [];
     const runtimeWakeSignal = createCoalescingRuntimeWakeSignal();
-    const backgroundEffectGate = createDeferred<void>();
     const mailboxItems = [
       ...Array.from({ length: 4 }, (_, index) =>
         createMailboxItem({
@@ -9628,7 +9627,7 @@ describe("hosted workspace runtime entrypoint", () => {
 
     try {
       await initializeVault({ createdAt: TEST_NOW, vaultRoot });
-      const resultPromise = runHostedWorkspaceRuntimeJobInProcess(
+      const result = await runHostedWorkspaceRuntimeJobInProcess(
         createWorkspaceRuntimeJobInput({
           request: {
             attemptId: "attempt_synthetic_consumed_replay_wake_barrier",
@@ -9648,7 +9647,6 @@ describe("hosted workspace runtime entrypoint", () => {
               vaultRoot,
             );
             snapshotWatermarks.push(checkpointWatermark);
-            events.push("snapshot:replay-budget");
             const state = "state" in snapshotInput
               ? snapshotInput.state
               : await readHostedMailboxImportState({ vaultRoot });
@@ -9665,29 +9663,12 @@ describe("hosted workspace runtime entrypoint", () => {
             const kind = item.durablyConsumed === true ? "consumed" : "fresh";
             importedSeqs.push(`${item.item.laneSeq}:${kind}`);
             events.push(`import:${item.item.laneSeq}:${kind}`);
-            if (item.durablyConsumed !== true) {
-              return {
-                assistantInputId: "assistant_input_replay_wake_barrier_fresh_tail",
-                status: "imported",
-              };
-            }
-            return item.item.laneSeq === "1"
-              ? {
-                  backgroundAfterCheckpoint: async () => {
-                    events.push("backgroundAfterCheckpoint:start");
-                    await backgroundEffectGate.promise;
-                    events.push("backgroundAfterCheckpoint:done");
-                    return {
-                      attachmentEvidenceUpdated: true,
-                      kind: "inbox_parser_enrichment" as const,
-                      projectionUpdated: null,
-                      reasonCode: null,
-                      status: "succeeded" as const,
-                    };
-                  },
+            return item.durablyConsumed === true
+              ? { status: "imported" }
+              : {
+                  assistantInputId: "assistant_input_replay_wake_barrier_fresh_tail",
                   status: "imported",
-                }
-              : { status: "imported" };
+                };
           },
           platform: createPlatform({
             mailboxPort: createMailboxPort({
@@ -9716,14 +9697,6 @@ describe("hosted workspace runtime entrypoint", () => {
         },
       );
 
-      const result = await withRealTimeout(
-        resultPromise,
-        1_000,
-        () => `Replay-budget checkpoint waited for background parser work: ${
-          events.join(",")
-        }`,
-      );
-
       assert.equal(result.status, "budget_exhausted");
       assert.deepEqual(fetchRequests.map(readConversationImportedSeq), ["0"]);
       assert.deepEqual(importedSeqs, ["1:consumed", "2:consumed"]);
@@ -9734,9 +9707,7 @@ describe("hosted workspace runtime entrypoint", () => {
         "2",
       );
       assert.ok(!events.includes("import:5:fresh"));
-      assert.equal(events.includes("backgroundAfterCheckpoint:start"), false);
     } finally {
-      backgroundEffectGate.resolve();
       await removeTempRoot(vaultRoot);
     }
   });
@@ -24595,130 +24566,7 @@ describe("hosted runtime shutdown signal", () => {
     }
   }, 30_000);
 
-  test("waits for started background parser enrichment before returning a later pass error", async () => {
-    const vaultRoot = await mkdtemp(path.join(tmpdir(), "murph-workspace-entrypoint-"));
-    const checkpointRequests: HostedWorkspaceCheckpointRequest[] = [];
-    const events: string[] = [];
-    const mailboxItems = [createMailboxItem({
-      id: "mailbox_item_background_parser_error_pass_001",
-      laneSeq: "1",
-    })];
-    const runtimeWakeSignal = createCoalescingRuntimeWakeSignal();
-    const effectGate = createDeferred<void>();
-    const effectStarted = createDeferred<void>();
-    let assistantPhaseCalls = 0;
-    let resultPromise: ReturnType<typeof runHostedWorkspaceRuntimeJobInProcess> | null = null;
-    let settled = false;
-
-    try {
-      await initializeVault({ createdAt: TEST_NOW, vaultRoot });
-      resultPromise = runHostedWorkspaceRuntimeJobInProcess(
-        createWorkspaceRuntimeJobInput({
-          request: {
-            attemptId: "attempt_synthetic_background_parser_error_pass",
-            idleCheckpointDelayMs: 120_000,
-            leaseGeneration: "7",
-            userId: TEST_USER_ID,
-            workspaceVersion: "0",
-          },
-        }),
-        {
-          async createCheckpointSnapshot() {
-            throw new Error("A failed second pass must not checkpoint.");
-          },
-          async importItem(item) {
-            events.push(`import:${item.item.laneSeq}`);
-            if (item.item.laneSeq !== "1") {
-              return {
-                assistantInputId: "assistant_input_background_parser_error_pass_002",
-                status: "imported",
-              };
-            }
-            return {
-              assistantInputId: "assistant_input_background_parser_error_pass_001",
-              backgroundAfterCheckpoint: async () => {
-                events.push("background-parser:start");
-                mailboxItems.push(createMailboxItem({
-                  id: "mailbox_item_background_parser_error_pass_002",
-                  laneSeq: "2",
-                  occurredAt: "2026-04-27T00:00:02.000Z",
-                }));
-                effectStarted.resolve();
-                runtimeWakeSignal.notify();
-                await effectGate.promise;
-                events.push("background-parser:done");
-                return {
-                  attachmentEvidenceUpdated: true,
-                  kind: "inbox_parser_enrichment" as const,
-                  projectionUpdated: null,
-                  reasonCode: null,
-                  status: "succeeded" as const,
-                };
-              },
-              status: "imported",
-            };
-          },
-          platform: createPlatform({
-            mailboxPort: createMailboxPort({
-              events,
-              items: mailboxItems,
-            }),
-            workspacePort: createWorkspacePort({
-              checkpointRequests,
-              events,
-              workspace: createWorkspaceState({ version: "0" }),
-            }),
-          }),
-          runtimeWakeSignal,
-          async runAssistantPhase() {
-            assistantPhaseCalls += 1;
-            events.push(`assistant:${assistantPhaseCalls}`);
-            if (assistantPhaseCalls === 2) {
-              throw new Error("Synthetic second pass failure.");
-            }
-            return {
-              checkpointReason: "assistant_runtime_commit",
-              progressed: true,
-            };
-          },
-          vaultRoot,
-        },
-      );
-      void resultPromise.then(
-        () => {
-          settled = true;
-        },
-        () => {
-          settled = true;
-        },
-      );
-
-      await withRealTimeout(
-        effectStarted.promise,
-        1_000,
-        () => `Background parser effect did not start: ${events.join(",")}`,
-      );
-      await waitUntil(() => {
-        assert.equal(assistantPhaseCalls, 2);
-      });
-      await new Promise<void>((resolve) => setTimeout(resolve, 25));
-      assert.equal(settled, false);
-
-      effectGate.resolve();
-      await assert.rejects(resultPromise, /Synthetic second pass failure\./u);
-      assert.ok(
-        requireEventIndex(events, "assistant:2")
-          < requireEventIndex(events, "background-parser:done"),
-      );
-      assert.deepEqual(checkpointRequests, []);
-    } finally {
-      effectGate.resolve();
-      await resultPromise?.catch(() => undefined);
-      await removeTempRoot(vaultRoot);
-    }
-  }, 30_000);
-
-  test("shutdown checkpoint waits for background parser enrichment before snapshotting", async () => {
+  test("shutdown checkpoint ignores post-shutdown runtime wake and does not wait for pending import enrichment", async () => {
     const vaultRoot = await mkdtemp(path.join(tmpdir(), "murph-workspace-entrypoint-"));
     const checkpointRequests: HostedWorkspaceCheckpointRequest[] = [];
     const events: string[] = [];
@@ -24757,14 +24605,14 @@ describe("hosted runtime shutdown signal", () => {
           async importItem() {
             events.push("import");
             return {
-              backgroundAfterCheckpoint: async () => {
-                events.push("mailbox:backgroundAfterCheckpoint:start");
+              afterCheckpoint: async () => {
+                events.push("mailbox:afterCheckpoint:start");
                 await enrichmentGate.promise;
-                events.push("mailbox:backgroundAfterCheckpoint:done");
+                events.push("mailbox:afterCheckpoint:done");
                 return {
                   attachmentEvidenceUpdated: true,
-                  kind: "inbox_parser_enrichment",
-                  projectionUpdated: null,
+                  kind: "inbox_projection",
+                  projectionUpdated: true,
                   reasonCode: null,
                   status: "succeeded",
                 };
@@ -24797,7 +24645,7 @@ describe("hosted runtime shutdown signal", () => {
               };
             }
 
-            throw new Error("Runtime wake should not preempt background parser enrichment.");
+            throw new Error("Runtime wake should not preempt pending import enrichment.");
           },
           shutdownSignal: shutdownController.signal,
           vaultRoot,
@@ -24805,16 +24653,23 @@ describe("hosted runtime shutdown signal", () => {
       );
 
       await waitUntil(() => {
-        assert.equal(events.includes("mailbox:backgroundAfterCheckpoint:start"), true);
+        assert.equal(events.includes("mailbox:afterCheckpoint:start"), true);
       });
       assert.equal(assistantPhaseCalls, 1);
-      await new Promise<void>((resolve) => setTimeout(resolve, 25));
-      assert.equal(events.includes("snapshot:idle_shutdown"), false);
-      assert.equal(events.includes("mailbox:backgroundAfterCheckpoint:done"), false);
+      await withRealTimeout(
+        snapshotStarted.promise,
+        1_000,
+        () => `Shutdown checkpoint did not start while import enrichment was pending: ${
+          events.join(",")
+        }`,
+      );
+      assert.equal(events.includes("mailbox:afterCheckpoint:done"), false);
 
       enrichmentGate.resolve();
       const result = await resultPromise;
-      await snapshotStarted.promise;
+      await waitUntil(() => {
+        assert.equal(events.includes("mailbox:afterCheckpoint:done"), true);
+      });
 
       assert.equal(assistantPhaseCalls, 1);
       assert.equal(checkpointRequests[0]?.reason, "idle_shutdown");
@@ -24823,8 +24678,8 @@ describe("hosted runtime shutdown signal", () => {
       assert.equal(result.status, "idle");
       assert.equal(result.nextWakeAt, null);
       assert.ok(
-        requireEventIndex(events, "mailbox:backgroundAfterCheckpoint:done")
-          < requireEventIndex(events, "snapshot:idle_shutdown"),
+        requireEventIndex(events, "snapshot:idle_shutdown")
+          < requireEventIndex(events, "mailbox:afterCheckpoint:done"),
       );
     } finally {
       enrichmentGate.resolve();

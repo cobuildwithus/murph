@@ -58,6 +58,7 @@ test("lazy conversation events import retries after rejection while preserving p
           nextWakeAt: null,
           parserProcessed: 0,
         },
+        requiresTerminalMediaParserEvidence: false,
       }),
     );
 

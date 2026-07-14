@@ -25,6 +25,10 @@ import {
 } from "@murphai/inboxd/retention";
 
 import type { RuntimeWakeSignal } from "./runtime-wake.ts";
+import type { NormalizedHostedAssistantRuntimeConfig } from "./models.ts";
+import {
+  runHostedConversationParserMaintenance,
+} from "./parser-maintenance.ts";
 
 // Compact only when the saving clears the measured post-compaction floor
 // (~40k tokens); below this the compact call costs more than it recovers. Keep
@@ -34,10 +38,12 @@ import type { RuntimeWakeSignal } from "./runtime-wake.ts";
 export const HOSTED_IDLE_COMPACT_MIN_THREAD_TOKENS = 100_000;
 export const HOSTED_IDLE_COMPACT_TIMEOUT_MS = 120_000;
 export const HOSTED_INBOX_MEDIA_RETENTION_RETRY_DELAY_MS = 5 * 60 * 1000;
+const HOSTED_PARSER_MAINTENANCE_RETRY_DELAY_MS = 60_000;
 
 type HostedIdleMaintenanceWake = {
   nextWakeAt?: string;
   nextWakeReason?: "inbox_media_retention";
+  parserNextWakeAt?: string;
 };
 
 export type HostedIdleMaintenanceOutcome =
@@ -68,6 +74,7 @@ export async function runHostedIdleCheckpointMaintenance(input: {
   memberId: string;
   model: string | null;
   pendingWork: boolean;
+  parserToolchain?: NormalizedHostedAssistantRuntimeConfig["parserToolchain"];
   protectedAttachmentIds?: readonly string[];
   protectedCaptureIds?: readonly string[];
   protectedStoredPaths?: readonly string[];
@@ -115,6 +122,13 @@ export async function runHostedIdleCheckpointMaintenance(input: {
           signal: abortController.signal,
           vaultRoot: input.vaultRoot,
         });
+        if (abortController.signal.aborted) {
+          return buildInterruptedMaintenanceOutcome({
+            shutdownSignal: input.shutdownSignal,
+            vaultRoot: input.vaultRoot,
+            wakeInterrupted,
+          });
+        }
         retentionWake = resolveInboxMediaRetentionWake(retentionResult);
       } catch (error) {
         if (isInboxMediaRetentionAbortError(error, abortController.signal)) {
@@ -141,6 +155,49 @@ export async function runHostedIdleCheckpointMaintenance(input: {
         retentionWake,
         shutdownSignal: input.shutdownSignal,
         vaultRoot: input.vaultRoot,
+        wakeInterrupted,
+      });
+    }
+    if (input.vaultRoot) {
+      try {
+        const parserMaintenance = await runHostedConversationParserMaintenance({
+          memberId: input.memberId,
+          parserToolchain: input.parserToolchain ?? null,
+          signal: abortController.signal,
+          vaultRoot: input.vaultRoot,
+        });
+        if (parserMaintenance.nextWakeAt) {
+          retentionWake = {
+            ...retentionWake,
+            parserNextWakeAt: parserMaintenance.nextWakeAt,
+          };
+        }
+      } catch (error) {
+        if (abortController.signal.aborted) {
+          return buildInterruptedMaintenanceOutcome({
+            retentionWake,
+            shutdownSignal: input.shutdownSignal,
+            vaultRoot: input.vaultRoot,
+            wakeInterrupted,
+          });
+        }
+        emitHostedParserMaintenanceUnexpectedFailureLog({
+          error,
+          memberId: input.memberId,
+        });
+        retentionWake = {
+          ...retentionWake,
+          parserNextWakeAt: new Date(
+            Date.now() + HOSTED_PARSER_MAINTENANCE_RETRY_DELAY_MS,
+          ).toISOString(),
+        };
+      }
+    }
+    if (abortController.signal.aborted) {
+      return buildInterruptedMaintenanceOutcome({
+        retentionWake,
+        shutdownSignal: input.shutdownSignal,
+        vaultRoot: input.vaultRoot ?? null,
         wakeInterrupted,
       });
     }
@@ -302,6 +359,28 @@ function emitInboxMediaRetentionFailureLog(input: {
   });
 }
 
+function emitHostedParserMaintenanceUnexpectedFailureLog(input: {
+  error: unknown;
+  memberId: string;
+}): void {
+  const diagnostics = buildHostedExecutionSafeErrorDiagnostics(input.error);
+  emitHostedExecutionStructuredLog({
+    component: "runtime",
+    details: {
+      failureCode: "inbox_parser_maintenance_failed",
+      ...(typeof diagnostics?.errorCode === "string"
+        ? { failureErrorCode: diagnostics.errorCode }
+        : {}),
+      failureErrorDetailPresent: typeof diagnostics?.errorDetail === "string",
+    },
+    error: input.error,
+    level: "warn",
+    message: "Hosted idle parser maintenance failed; retrying from durable state.",
+    phase: "checkpoint",
+    userId: input.memberId,
+  });
+}
+
 function resolveInboxMediaRetentionImmediateWake(): HostedIdleMaintenanceWake {
   return {
     nextWakeAt: new Date().toISOString(),
@@ -330,14 +409,21 @@ function attachInboxMediaRetentionWake(
   outcome: HostedIdleMaintenanceOutcome,
   wake: HostedIdleMaintenanceWake,
 ): HostedIdleMaintenanceOutcome {
-  if (!wake.nextWakeAt) {
+  if (!wake.nextWakeAt && !wake.parserNextWakeAt) {
     return outcome;
   }
 
   return {
     ...outcome,
-    nextWakeAt: wake.nextWakeAt,
-    nextWakeReason: wake.nextWakeReason,
+    ...(wake.nextWakeAt
+      ? {
+          nextWakeAt: wake.nextWakeAt,
+          nextWakeReason: wake.nextWakeReason,
+        }
+      : {}),
+    ...(wake.parserNextWakeAt
+      ? { parserNextWakeAt: wake.parserNextWakeAt }
+      : {}),
   };
 }
 
@@ -356,10 +442,16 @@ function buildInterruptedMaintenanceOutcome(input: {
   };
 
   if (!input.shutdownSignal?.aborted || input.wakeInterrupted || !input.vaultRoot) {
-    return outcome;
+    return attachInboxMediaRetentionWake(
+      outcome,
+      input.retentionWake ?? {},
+    );
   }
 
-  if (input.retentionWake?.nextWakeAt) {
+  if (
+    input.retentionWake?.nextWakeAt
+    || input.retentionWake?.parserNextWakeAt
+  ) {
     return attachInboxMediaRetentionWake(outcome, input.retentionWake);
   }
 

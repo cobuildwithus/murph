@@ -109,6 +109,15 @@ export function buildHostedWhatsAppChannelEnv(input: {
   return pickHostedChannelEnv(source, HOSTED_WHATSAPP_CHANNEL_ENV_KEYS);
 }
 
+export function isHostedWhatsAppChannelReady(
+  env: Readonly<Record<string, string | undefined>>,
+): boolean {
+  return typeof env.WHATSAPP_ACCESS_TOKEN === "string"
+    && env.WHATSAPP_ACCESS_TOKEN.trim().length > 0
+    && typeof env.WHATSAPP_PHONE_NUMBER_ID === "string"
+    && env.WHATSAPP_PHONE_NUMBER_ID.trim().length > 0;
+}
+
 export function createHostedAssistantChannelTypingDependencies(input: {
   forwardedEnv: Readonly<Record<string, string>>;
   latencyTraceContext?: HostedAssistantMilestoneTraceContext | null;

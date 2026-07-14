@@ -100,11 +100,7 @@ async function runAttachmentParseJobAttempt(
       signal: input.signal,
     });
     if (input.signal?.aborted) {
-      input.runtime.requeueAttachmentParseJobs({
-        attachmentId: job.attachmentId,
-        captureId: job.captureId,
-        state: "running",
-      });
+      requeueClaimedAttachmentParseJob(input.runtime, job);
       return null;
     }
     const published = await writeParserResult({
@@ -114,11 +110,7 @@ async function runAttachmentParseJobAttempt(
     });
     publishedAttemptDirectoryPath = published.attemptDirectoryPath;
     if (input.signal?.aborted) {
-      input.runtime.requeueAttachmentParseJobs({
-        attachmentId: job.attachmentId,
-        captureId: job.captureId,
-        state: "running",
-      });
+      requeueClaimedAttachmentParseJob(input.runtime, job);
       return null;
     }
     const transcriptOnly = isTranscriptOnlyArtifact(artifact.kind);
@@ -142,6 +134,11 @@ async function runAttachmentParseJobAttempt(
       resultPath: published.resultPath,
     };
   } catch (error) {
+    if (input.signal?.aborted) {
+      requeueClaimedAttachmentParseJob(input.runtime, job);
+      return null;
+    }
+
     const errorMessage = redactSensitiveText(error instanceof Error ? error.message : String(error));
     const errorCode = classifyParseError(errorMessage);
     const failedJob = input.runtime.failAttachmentParseJob({
@@ -165,6 +162,17 @@ async function runAttachmentParseJobAttempt(
       await removePublishedArtifacts(input.vaultRoot, publishedAttemptDirectoryPath);
     }
   }
+}
+
+function requeueClaimedAttachmentParseJob(
+  runtime: ParserRuntimeStore,
+  job: AttachmentParseJobRecord,
+): void {
+  runtime.requeueAttachmentParseJobs({
+    attachmentId: job.attachmentId,
+    captureId: job.captureId,
+    state: "running",
+  });
 }
 
 function isTranscriptOnlyArtifact(kind: ParserArtifactKind): boolean {

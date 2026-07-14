@@ -89,6 +89,7 @@ export interface RunAssistantAutomationInput {
   deliveryDispatchMode?: AssistantOutboxDispatchMode
   drainOutbox?: boolean
   executionContext?: AssistantExecutionContext | null
+  foregroundAutoReplyChannels?: readonly string[]
   operationScope?: AssistantAutomationOperationScope | null
   buildDynamicContextPrompt?: AssistantDynamicContextPromptBuilder
   beforeCronProcessing?: (() => Promise<void>) | null
@@ -931,6 +932,7 @@ export async function runAssistantAutomationPass(
       : {}),
     deliveryDispatchMode: input.deliveryDispatchMode,
     executionContext,
+    foregroundAutoReplyChannels: input.foregroundAutoReplyChannels,
     ...(input.operationScope ? { operationScope: input.operationScope } : {}),
     inboxServices,
     maxPerScan: input.maxPerScan,

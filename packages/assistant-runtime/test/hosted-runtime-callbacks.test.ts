@@ -317,6 +317,12 @@ function createDispatchResult(
   };
 }
 
+function createHostedTestPlatformEnv(
+  env: Readonly<Record<string, string>>,
+): Readonly<Record<string, string>> {
+  return env;
+}
+
 function createPendingHostedDeliveryIntent(
   overrides: Record<string, unknown>,
 ) {
@@ -4646,6 +4652,160 @@ describe("hosted runtime callbacks", () => {
     const outcomes = await drainHostedPreparedAssistantDeliveries({
       assistantDeliveryEffects: [effect],
       effectsPort: createHostedRuntimeEffectsPortStub(),
+      vaultRoot: HOSTED_WAKE.vaultRoot,
+      wake: HOSTED_WAKE.wake,
+    });
+
+    expect(outcomes).toEqual([
+      expect.objectContaining({
+        deliveryErrorCode: "ASSISTANT_DELIVERY_CHANNEL_DISABLED",
+        deliveryStatus: "failed",
+        retryable: false,
+      }),
+    ]);
+    expect(mocks.markAssistantOutboxIntentMirrorTerminalById).toHaveBeenCalledWith(
+      expect.objectContaining({
+        intentId: effect.effectId,
+        status: "failed",
+        vault: HOSTED_WAKE.vaultRoot,
+      }),
+    );
+    expect(mocks.dispatchAssistantOutboxIntent).not.toHaveBeenCalled();
+  });
+
+  it("delivers a ready foreground WhatsApp reply without persisted auto-reply state", async () => {
+    const effect = buildHostedAssistantDeliveryEffect({
+      dedupeKey: "dedupe_whatsapp_foreground",
+      deliveryPhase: "foreground_current_turn",
+      effectId: "intent_whatsapp_foreground",
+      payload: createPayload({
+        bindingDeliveryKind: "thread",
+        bindingDeliveryTarget: "whatsapp_thread_123",
+        channel: "whatsapp",
+        explicitTarget: "whatsapp_thread_123",
+        idempotencyKey: "assistant-outbox:intent_whatsapp_foreground",
+      }),
+    });
+    mocks.findAssistantAutoReplyDeliveryIntentIds.mockResolvedValue(
+      new Set([effect.effectId]),
+    );
+    mocks.hasAssistantAutoReplyChannel.mockReturnValue(false);
+    mocks.readAssistantAutomationState.mockResolvedValue({ autoReply: [] });
+    mocks.readAssistantOutboxIntentMirrorState.mockResolvedValue(
+      createMirrorState({
+        channel: "whatsapp",
+        delivery: null,
+        intentId: effect.effectId,
+        lastError: null,
+        status: "pending",
+        turnId: "turn_123",
+      }),
+    );
+    mocks.dispatchAssistantOutboxIntent.mockResolvedValueOnce(
+      createDispatchResult({
+        delivery: createDelivery({
+          channel: "whatsapp",
+          providerThreadId: "whatsapp_thread_123",
+          target: "whatsapp_thread_123",
+          targetKind: "thread",
+        }),
+        intentId: effect.effectId,
+        status: "sent",
+      }),
+    );
+
+    const outcomes = await drainHostedPreparedAssistantDeliveries({
+      assistantDeliveryEffects: [effect],
+      effectsPort: createHostedRuntimeEffectsPortStub(),
+      platformEnv: {
+        WHATSAPP_ACCESS_TOKEN: "test-whatsapp-token",
+        WHATSAPP_PHONE_NUMBER_ID: "test-whatsapp-phone-number-id",
+      },
+      vaultRoot: HOSTED_WAKE.vaultRoot,
+      wake: HOSTED_WAKE.wake,
+    });
+
+    expect(outcomes).toEqual([
+      expect.objectContaining({
+        deliveryChannel: "whatsapp",
+        deliveryStatus: "sent",
+      }),
+    ]);
+    expect(mocks.readAssistantAutomationState).not.toHaveBeenCalled();
+    expect(mocks.hasAssistantAutoReplyChannel).not.toHaveBeenCalled();
+    expect(mocks.markAssistantOutboxIntentMirrorTerminalById).not.toHaveBeenCalled();
+    expect(mocks.dispatchAssistantOutboxIntent).toHaveBeenCalledTimes(1);
+  });
+
+  it.each([
+    {
+      channel: "whatsapp",
+      deliveryPhase: "background_retry",
+      label: "background WhatsApp retry",
+      platformEnv: createHostedTestPlatformEnv({
+        WHATSAPP_ACCESS_TOKEN: "test-whatsapp-token",
+        WHATSAPP_PHONE_NUMBER_ID: "test-whatsapp-phone-number-id",
+      }),
+    },
+    {
+      channel: "whatsapp",
+      deliveryPhase: "foreground_current_turn",
+      label: "foreground WhatsApp reply without an access token",
+      platformEnv: createHostedTestPlatformEnv({
+        WHATSAPP_PHONE_NUMBER_ID: "test-whatsapp-phone-number-id",
+      }),
+    },
+    {
+      channel: "whatsapp",
+      deliveryPhase: "foreground_current_turn",
+      label: "foreground WhatsApp reply without a phone-number id",
+      platformEnv: createHostedTestPlatformEnv({
+        WHATSAPP_ACCESS_TOKEN: "test-whatsapp-token",
+      }),
+    },
+    {
+      channel: "telegram",
+      deliveryPhase: "foreground_current_turn",
+      label: "foreground non-WhatsApp reply",
+      platformEnv: createHostedTestPlatformEnv({
+        WHATSAPP_ACCESS_TOKEN: "test-whatsapp-token",
+        WHATSAPP_PHONE_NUMBER_ID: "test-whatsapp-phone-number-id",
+      }),
+    },
+  ] as const)("keeps $label disabled without persisted auto-reply state", async ({
+    channel,
+    deliveryPhase,
+    platformEnv,
+  }) => {
+    const effect = buildHostedAssistantDeliveryEffect({
+      dedupeKey: `dedupe_${channel}_${deliveryPhase}`,
+      deliveryPhase,
+      effectId: `intent_${channel}_${deliveryPhase}`,
+      payload: createPayload({
+        channel,
+        idempotencyKey: `assistant-outbox:intent_${channel}_${deliveryPhase}`,
+      }),
+    });
+    mocks.findAssistantAutoReplyDeliveryIntentIds.mockResolvedValue(
+      new Set([effect.effectId]),
+    );
+    mocks.hasAssistantAutoReplyChannel.mockReturnValue(false);
+    mocks.readAssistantAutomationState.mockResolvedValue({ autoReply: [] });
+    mocks.readAssistantOutboxIntentMirrorState.mockResolvedValue(
+      createMirrorState({
+        channel,
+        delivery: null,
+        intentId: effect.effectId,
+        lastError: null,
+        status: "pending",
+        turnId: "turn_123",
+      }),
+    );
+
+    const outcomes = await drainHostedPreparedAssistantDeliveries({
+      assistantDeliveryEffects: [effect],
+      effectsPort: createHostedRuntimeEffectsPortStub(),
+      platformEnv,
       vaultRoot: HOSTED_WAKE.vaultRoot,
       wake: HOSTED_WAKE.wake,
     });

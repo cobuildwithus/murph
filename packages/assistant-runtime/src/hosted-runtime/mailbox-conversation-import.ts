@@ -51,7 +51,6 @@ import {
 import type {
   HostedMailboxConversationImportTiming,
   HostedMailboxItemImportOutcome,
-  HostedMailboxPostCheckpointEffect,
   HostedMailboxPostCheckpointEffectResult,
   HostedMailboxResolvedImportItem,
 } from "./mailbox-import.ts";
@@ -94,8 +93,8 @@ const CONVERSATION_ATTACHMENT_EVIDENCE_UPDATE_FAILED_REASON =
   "conversation-import.attachment-evidence-update-failed";
 const CONVERSATION_INBOX_RUNTIME_UNAVAILABLE_REASON =
   "conversation-import.inbox-runtime-unavailable";
-const CONVERSATION_PARSER_ENRICHMENT_FAILED_REASON =
-  "conversation-import.parser-enrichment-failed";
+const CONVERSATION_MEDIA_PARSER_EVIDENCE_REQUIRED_REASON =
+  "conversation-import.media-parser-evidence-required";
 const CONVERSATION_RAW_EMAIL_MISSING_REASON =
   "conversation-import.raw-email-missing";
 const ATTACHMENT_EVIDENCE_PARTIAL_REASON =
@@ -154,8 +153,8 @@ export interface HostedConversationMailboxPayloadDecodeInput {
 
 export interface HostedConversationMailboxLocalImportResult {
   captureId: string | null;
-  deferredParserDrain?: () => Promise<HostedConversationWakeMetrics>;
   metrics: HostedConversationWakeMetrics;
+  requiresTerminalMediaParserEvidence?: boolean;
 }
 
 type HostedConversationMailboxRuntime = Pick<
@@ -169,7 +168,6 @@ type HostedConversationMailboxRuntime = Pick<
 >;
 
 export type HostedConversationMailboxLocalImporter = (input: {
-  deferParserDrain: boolean;
   runtime: HostedConversationMailboxRuntime;
   signal?: AbortSignal | null;
   vaultRoot: string;
@@ -183,6 +181,7 @@ export interface HostedConversationMailboxAssistantInputProjectionUpdate {
 }
 
 export interface HostedConversationMailboxAssistantInputStageResult {
+  admitPendingReply?(): Promise<void>;
   attachmentDescriptorCount?: number;
   inputId: string;
   recordAttachmentEvidence?(
@@ -224,7 +223,6 @@ export type HostedConversationMailboxWakeContextPreparer = (input: {
 
 export type HostedConversationMailboxImportOutcome =
   | {
-      backgroundAfterCheckpoint?: HostedMailboxPostCheckpointEffect | null;
       assistantInputId?: string;
       captureId: string | null;
       conversationImportTiming?: HostedMailboxConversationImportTiming | null;
@@ -349,6 +347,7 @@ export async function importHostedConversationMailboxItem(input: {
   const prepareWakeContext =
     input.prepareWakeContext ?? prepareHostedConversationMailboxWakeContext;
   let pendingReplyEligible = true;
+  let foregroundReplyEligible = true;
   let autoReplyPreparedAtEpochMs: number | null = null;
   let pendingIndexEnsuredAtEpochMs: number | null = null;
   assertHostedConversationMailboxImportLive(input.signal ?? null);
@@ -366,6 +365,11 @@ export async function importHostedConversationMailboxItem(input: {
     autoReplyPreparedAtEpochMs = Date.now();
     pendingReplyEligible = isHostedConversationMailboxPendingReplyEligible({
       assistantRuntimeState,
+      wake: decoded.wake,
+    });
+    foregroundReplyEligible = isHostedConversationMailboxForegroundReplyEligible({
+      assistantRuntimeState,
+      runtime: input.runtime,
       wake: decoded.wake,
     });
   }
@@ -403,13 +407,6 @@ export async function importHostedConversationMailboxItem(input: {
       runtimeAttemptId: input.runtimeAttemptId ?? null,
       wake: decoded.wake,
     });
-    if (pendingReplyEligible) {
-      await notifyAssistantActiveTurnInputAvailableForInputIds({
-        inputIds: [stagedInput.inputId],
-        ...(input.signal ? { signal: input.signal } : {}),
-        vault: input.vaultRoot,
-      });
-    }
   }
 
   const linqDeliveryContext = buildHostedAssistantLinqDeliveryContextFromWake(
@@ -431,18 +428,51 @@ export async function importHostedConversationMailboxItem(input: {
     vaultRoot: input.vaultRoot,
     wake: decoded.wake,
   });
+  if (
+    projectionEffect.requiresTerminalMediaParserEvidence
+    && !projectionEffect.projectionSucceeded
+  ) {
+    return {
+      reasonCode: CONVERSATION_MEDIA_PARSER_EVIDENCE_REQUIRED_REASON,
+      retryable: true,
+      status: "blocked",
+    };
+  }
+  if (
+    pendingReplyEligible
+    && input.item.durablyConsumed !== true
+  ) {
+    await stagedInput.admitPendingReply?.();
+  }
+  const replyReady = !projectionEffect.requiresTerminalMediaParserEvidence;
+  if (
+    replyReady
+    && foregroundReplyEligible
+    && input.item.durablyConsumed !== true
+  ) {
+    await notifyAssistantActiveTurnInputAvailableForInputIds({
+      inputIds: [stagedInput.inputId],
+      ...(input.signal ? { signal: input.signal } : {}),
+      vault: input.vaultRoot,
+    });
+  }
   return {
-    ...(projectionEffect.backgroundAfterCheckpoint
-      ? { backgroundAfterCheckpoint: projectionEffect.backgroundAfterCheckpoint }
+    ...(replyReady
+      && foregroundReplyEligible
+      && input.item.durablyConsumed !== true
+      ? { assistantInputId: stagedInput.inputId }
       : {}),
-    ...(pendingReplyEligible ? { assistantInputId: stagedInput.inputId } : {}),
     captureId: null,
     ...(emailDeliveryContext ? { emailDeliveryContext } : {}),
     ...(linqDeliveryContext ? { linqDeliveryContext } : {}),
     ...(usageNoticeDeliveryTarget ? { usageNoticeDeliveryTarget } : {}),
     conversationImportTiming: projectionEffect.timing,
     metrics: createEmptyHostedConversationWakeMetrics(),
-    ...(projectionEffect.effect.reasonCode ? { reasonCode: projectionEffect.effect.reasonCode } : {}),
+    ...(projectionEffect.requiresTerminalMediaParserEvidence
+      ? { reasonCode: CONVERSATION_MEDIA_PARSER_EVIDENCE_REQUIRED_REASON }
+      : projectionEffect.effect.reasonCode
+        ? { reasonCode: projectionEffect.effect.reasonCode }
+        : {}),
     status: "imported",
   };
 }
@@ -624,8 +654,9 @@ async function projectHostedConversationAssistantInputBestEffort(input: {
   vaultRoot: string;
   wake: HostedExecutionConversationMessageWake;
 }): Promise<{
-  backgroundAfterCheckpoint?: HostedMailboxPostCheckpointEffect | null;
   effect: HostedMailboxPostCheckpointEffectResult;
+  projectionSucceeded: boolean;
+  requiresTerminalMediaParserEvidence: boolean;
   timing: HostedMailboxConversationImportTiming;
 }> {
   const projectionStartedAt = Date.now();
@@ -644,7 +675,6 @@ async function projectHostedConversationAssistantInputBestEffort(input: {
     assertHostedConversationMailboxImportLive(input.signal ?? null);
     importStartedAt = Date.now();
     imported = await input.importConversationWake({
-      deferParserDrain: true,
       runtime: input.runtime,
       signal: input.signal ?? null,
       vaultRoot: input.vaultRoot,
@@ -684,6 +714,9 @@ async function projectHostedConversationAssistantInputBestEffort(input: {
         reasonCode,
         status: "failed",
       },
+      projectionSucceeded: false,
+      requiresTerminalMediaParserEvidence:
+        potentiallyRequiresHostedConversationMediaParserEvidence(input.wake),
       timing,
     };
   }
@@ -698,6 +731,9 @@ async function projectHostedConversationAssistantInputBestEffort(input: {
         reasonCode: null,
         status: "succeeded",
       },
+      projectionSucceeded: true,
+      requiresTerminalMediaParserEvidence:
+        imported.requiresTerminalMediaParserEvidence === true,
       timing,
     };
   }
@@ -718,62 +754,14 @@ async function projectHostedConversationAssistantInputBestEffort(input: {
   timing.attachmentEvidenceMs = elapsedHostedConversationImportMs(attachmentEvidenceStartedAt);
   timing.projectionTotalMs = elapsedHostedConversationImportMs(projectionStartedAt);
   return {
-    ...(imported.deferredParserDrain
-      ? {
-          backgroundAfterCheckpoint:
-            createHostedConversationParserEnrichmentEffect({
-              captureId: imported.captureId,
-              deferredParserDrain: imported.deferredParserDrain,
-              loadAttachmentEvidenceCapture: input.loadAttachmentEvidenceCapture,
-              requestId: input.wake.eventId,
-              stagedInput: input.stagedInput,
-              vaultRoot: input.vaultRoot,
-            }),
-        }
-      : {}),
     effect: buildHostedConversationProjectionEffectResult({
       attachmentEvidenceResult,
       projectionUpdated,
     }),
+    projectionSucceeded: true,
+    requiresTerminalMediaParserEvidence:
+      imported.requiresTerminalMediaParserEvidence === true,
     timing,
-  };
-}
-
-function createHostedConversationParserEnrichmentEffect(input: {
-  captureId: string;
-  deferredParserDrain: () => Promise<HostedConversationWakeMetrics>;
-  loadAttachmentEvidenceCapture: HostedConversationMailboxAttachmentEvidenceCaptureLoader;
-  requestId: string | null;
-  stagedInput: HostedConversationMailboxAssistantInputStageResult;
-  vaultRoot: string;
-}): HostedMailboxPostCheckpointEffect {
-  return async () => {
-    const metrics = await input.deferredParserDrain();
-    const attachmentEvidenceResult =
-      await recordHostedConversationAttachmentEvidenceFromProjectionBestEffort({
-        captureId: input.captureId,
-        loadAttachmentEvidenceCapture: input.loadAttachmentEvidenceCapture,
-        requestId: input.requestId,
-        stagedInput: input.stagedInput,
-        vaultRoot: input.vaultRoot,
-      });
-    const parserEnrichmentFailed = typeof metrics.nextWakeAt === "string"
-      && metrics.nextWakeAt.trim().length > 0;
-    const reasonCode = parserEnrichmentFailed
-      ? CONVERSATION_PARSER_ENRICHMENT_FAILED_REASON
-      : attachmentEvidenceResult.reasonCode;
-    return {
-      attachmentEvidenceUpdated: attachmentEvidenceResult.updated,
-      kind: "inbox_parser_enrichment",
-      projectionUpdated: null,
-      reasonCode,
-      status:
-        parserEnrichmentFailed
-        || attachmentEvidenceResult.updated === false
-        || attachmentEvidenceResult.reasonCode !== null
-          ? "partial"
-          : "succeeded",
-    };
   };
 }
 
@@ -909,7 +897,6 @@ function createHostedConversationAttachmentEvidenceFromCapture(input: {
 }
 
 async function importHostedConversationWakeWithLocalInbox(input: {
-  deferParserDrain: boolean;
   runtime: HostedConversationMailboxRuntime;
   signal?: AbortSignal | null;
   vaultRoot: string;
@@ -921,10 +908,9 @@ async function importHostedConversationWakeWithLocalInbox(input: {
   const result = await importHostedConversationMessageWakeIntoLocalInbox(input);
   return {
     captureId: result.capture?.captureId ?? null,
-    ...(result.deferredParserDrain
-      ? { deferredParserDrain: result.deferredParserDrain }
-      : {}),
     metrics: result.metrics,
+    requiresTerminalMediaParserEvidence:
+      result.requiresTerminalMediaParserEvidence,
   };
 }
 
@@ -969,15 +955,26 @@ async function stageHostedConversationAssistantInputEvent(input: {
     });
   }
   const routeProof = hasHostedPendingAssistantInputRouteProof(event);
-  if ((input.pendingReplyEligible && event.replyTarget) || routeProof) {
+  if (routeProof) {
     await enqueueHostedPendingAssistantInputId({
       inputId: event.inputId,
-      routeProof,
+      routeProof: true,
       vaultRoot: input.vaultRoot,
     });
   }
 
   return {
+    ...(input.pendingReplyEligible && event.replyTarget
+      ? {
+          async admitPendingReply() {
+            await enqueueHostedPendingAssistantInputId({
+              inputId: event.inputId,
+              routeProof,
+              vaultRoot: input.vaultRoot,
+            });
+          },
+        }
+      : {}),
     attachmentDescriptorCount: event.content.attachmentDescriptors.length,
     inputId: event.inputId,
     async recordAttachmentEvidence(attachmentEvidence) {
@@ -1042,6 +1039,19 @@ function isHostedConversationMailboxPendingReplyEligible(input: {
     default:
       return false;
   }
+}
+
+function isHostedConversationMailboxForegroundReplyEligible(input: {
+  assistantRuntimeState: HostedAssistantAutoReplyReadinessState;
+  runtime: HostedConversationMailboxRuntime;
+  wake: HostedExecutionConversationMessageWake;
+}): boolean {
+  if (isHostedConversationMailboxPendingReplyEligible(input)) {
+    return true;
+  }
+  return input.assistantRuntimeState.assistantConfigured
+    && isHostedWhatsAppConversationMessageWake(input.wake)
+    && input.runtime.resolvedConfig.channelCapabilities.whatsappCloudApiConfigured === true;
 }
 
 function readHostedConversationProjectionFailureReason(
@@ -1197,6 +1207,7 @@ function createHostedConversationAssistantInputContent(
   identifierBlind: HostedAssistantConversationIdentifierBlind,
 ): UpsertAssistantInputEventInput["content"] {
   const text = createHostedConversationAssistantInputText(wake);
+  const userAuthoredText = createHostedConversationUserAuthoredInputText(wake);
   return {
     attachmentDescriptors: createHostedConversationAssistantInputAttachmentDescriptors(
       wake,
@@ -1204,15 +1215,96 @@ function createHostedConversationAssistantInputContent(
     ),
     text,
     transcriptText: text,
-    userMessageContent: text
+    userMessageContent: userAuthoredText
       ? [
           {
-            text,
+            text: userAuthoredText,
             type: "text",
           },
         ]
       : null,
   };
+}
+
+function createHostedConversationUserAuthoredInputText(
+  wake: HostedExecutionConversationMessageWake,
+): string | null {
+  if (isHostedLinqConversationMessageWake(wake)) {
+    return normalizeHostedAssistantInputText(
+      wake.message.linqMessage.parts
+        .flatMap((part) => {
+          if (part.type !== "text" && part.type !== "link") {
+            return [];
+          }
+          return part.value.trimStart().startsWith("Internal staging note:")
+            ? []
+            : [part.value];
+        })
+        .join("\n"),
+    );
+  }
+  if (isHostedTelegramConversationMessageWake(wake)) {
+    return normalizeHostedAssistantInputText(
+      wake.message.telegramMessage.text ?? "",
+    );
+  }
+  return createHostedConversationAssistantInputText(wake);
+}
+
+function potentiallyRequiresHostedConversationMediaParserEvidence(
+  wake: HostedExecutionConversationMessageWake,
+): boolean {
+  if (createHostedConversationUserAuthoredInputText(wake)) {
+    return false;
+  }
+  if (isHostedLinqConversationMessageWake(wake)) {
+    return wake.message.linqMessage.parts.some((part) =>
+      (part.type === "voice_memo")
+      || (
+        part.type === "media"
+        && isHostedConversationAudioVideoDescriptor({
+          contentType: part.mimeType,
+          fileName: part.fileName,
+        })
+      )
+    );
+  }
+  if (isHostedTelegramConversationMessageWake(wake)) {
+    return (wake.message.telegramMessage.attachments ?? []).some((attachment) =>
+      attachment.kind === "audio"
+      || attachment.kind === "voice"
+      || attachment.kind === "video"
+      || attachment.kind === "video_note"
+      || attachment.kind === "animation"
+      || isHostedConversationAudioVideoDescriptor({
+        contentType: attachment.mimeType,
+        fileName: attachment.fileName,
+      })
+    );
+  }
+  if (isHostedEmailConversationMessageWake(wake)) {
+    return !normalizeHostedAssistantInputText(wake.message.textPreview ?? "")
+      && (wake.message.attachmentSummaries ?? []).some((attachment) =>
+        isHostedConversationAudioVideoDescriptor({
+          contentType: attachment.contentType,
+          fileName: attachment.fileName,
+        })
+      );
+  }
+  return false;
+}
+
+function isHostedConversationAudioVideoDescriptor(input: {
+  contentType?: string | null;
+  fileName?: string | null;
+}): boolean {
+  const contentType = input.contentType?.trim().toLowerCase() ?? "";
+  if (contentType.startsWith("audio/") || contentType.startsWith("video/")) {
+    return true;
+  }
+  const fileName = input.fileName?.trim().toLowerCase() ?? "";
+  return /\.(?:aac|aiff?|amr|avi|flac|m4a|m4v|mkv|mov|mp3|mp4|mpeg|mpg|oga|ogg|opus|wav|webm|wma|wmv)$/u
+    .test(fileName);
 }
 
 function createHostedConversationAssistantInputText(

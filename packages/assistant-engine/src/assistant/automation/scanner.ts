@@ -15,7 +15,10 @@ import {
   type AssistantInputSource,
 } from '../input-source.js'
 import { compareAssistantInputCursors } from '../input-store.js'
-import { sameAssistantAutoReplyState } from '../automation-state.js'
+import {
+  normalizeAssistantAutoReplyChannels,
+  sameAssistantAutoReplyState,
+} from '../automation-state.js'
 import { emitHostedAssistantTurnTimingTrace } from '../hosted-turn-timing.js'
 import { collectAssistantAutoReplyGroup } from './grouping.js'
 import {
@@ -52,6 +55,7 @@ export async function scanAssistantAutomationOnce(input: {
   beforeProviderAcceptedInputs?: AssistantBeforeProviderAcceptedInputsHook | null
   deliveryDispatchMode?: AssistantOutboxDispatchMode
   executionContext?: AssistantExecutionContext | null
+  foregroundAutoReplyChannels?: readonly string[]
   operationScope?: AssistantAutomationOperationScope | null
   inboxServices: InboxServices
   maxPerScan?: number
@@ -82,9 +86,13 @@ export async function scanAssistantAutomationOnce(input: {
   const scanState = cloneAutomationScanState(input.state)
   let persistedState = cloneAutomationScanState(scanState)
   void input.vaultServices
-  const replyChannels = applyCanonicalWrites
-    ? scanState.autoReply.map((entry) => entry.channel)
+  const candidateChannels = applyCanonicalWrites
+    ? createAssistantAutoReplyCandidateChannels({
+        durable: scanState.autoReply,
+        foreground: input.foregroundAutoReplyChannels ?? [],
+      })
     : []
+  const replyChannels = candidateChannels.map((entry) => entry.channel)
   const persistScanState = async (): Promise<boolean> => {
     return await persistAssistantAutomationScanState({
       onStateProgress: input.onStateProgress,
@@ -105,7 +113,7 @@ export async function scanAssistantAutomationOnce(input: {
   }
 
   const candidates = await listAssistantReplyCandidates({
-    autoReply: applyCanonicalWrites ? scanState.autoReply : [],
+    autoReply: candidateChannels,
     inputSource: input.inputSource,
     limit: normalizeScanLimit(input.maxPerScan),
     signal: input.signal,
@@ -262,7 +270,7 @@ export async function hasPendingAssistantAutoReplyInput(input: {
 }
 
 async function listAssistantReplyCandidates(input: {
-  autoReply: AssistantAutomationScanStateProgress['autoReply']
+  autoReply: AssistantAutoReplyCandidateChannel[]
   inputSource: AssistantInputSource
   limit: number
   signal?: AbortSignal
@@ -332,6 +340,37 @@ async function listAssistantReplyCandidates(input: {
         right.inputCandidate.event.cursor,
       ))
     .slice(0, input.limit)
+}
+
+type AssistantAutoReplyCandidateChannel = Pick<
+  AssistantAutomationScanStateProgress['autoReply'][number],
+  'channel' | 'eligibleAfter'
+>
+
+function createAssistantAutoReplyCandidateChannels(input: {
+  durable: AssistantAutomationScanStateProgress['autoReply']
+  foreground: readonly string[]
+}): AssistantAutoReplyCandidateChannel[] {
+  const channels: AssistantAutoReplyCandidateChannel[] = input.durable.map(
+    (entry) => ({
+      channel: entry.channel,
+      eligibleAfter: entry.eligibleAfter,
+    }),
+  )
+  const seen = new Set(channels.map((entry) => entry.channel))
+
+  for (const channel of normalizeAssistantAutoReplyChannels(input.foreground)) {
+    if (seen.has(channel)) {
+      continue
+    }
+    seen.add(channel)
+    channels.push({
+      channel,
+      eligibleAfter: null,
+    })
+  }
+
+  return channels
 }
 
 function advanceAssistantAutoReplyChannelCursor(input: {

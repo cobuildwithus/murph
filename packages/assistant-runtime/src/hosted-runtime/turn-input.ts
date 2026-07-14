@@ -26,6 +26,9 @@ import {
   isHostedPendingAssistantInputStillReplyable,
   readExistingHostedPendingAssistantInputIds,
 } from "./pending-input-index.ts";
+import {
+  classifyHostedAssistantInputMediaSemanticState,
+} from "./media-parser-evidence.ts";
 
 const DEFAULT_HOSTED_ASSISTANT_INPUT_QUERY_LIMIT = 100;
 
@@ -200,6 +203,7 @@ export async function selectHostedAssistantInputIds(
     const limit = normalizeHostedAssistantInputQueryLimit(input.limit);
     return {
       inputIds: pendingEvents
+        .filter(isHostedAssistantInputMediaReplyReady)
         .sort((left, right) =>
           compareAssistantInputCursors(left.cursor, right.cursor)
         )
@@ -231,6 +235,7 @@ export async function selectHostedAssistantInputIds(
   return {
     freshInputIds,
     inputIds: freshEvents
+      .filter(isHostedAssistantInputMediaReplyReady)
       .sort((left, right) =>
         compareAssistantInputCursors(left.cursor, right.cursor)
       )
@@ -239,6 +244,13 @@ export async function selectHostedAssistantInputIds(
     mode: "foreground",
     pendingInputIds,
   };
+}
+
+function isHostedAssistantInputMediaReplyReady(
+  event: AssistantInputEventRecord,
+): boolean {
+  const state = classifyHostedAssistantInputMediaSemanticState(event);
+  return state === "not_required" || state === "ready";
 }
 
 async function readHostedAssistantInputCandidatesById(input: {

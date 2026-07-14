@@ -6,34 +6,27 @@ import {
   buildHostedExecutionTelegramConversationMessageWake,
   buildHostedExecutionWhatsAppConversationMessageWake,
 } from "@murphai/hosted-execution";
-import type { HostedRuntimeLogRequest } from "@murphai/hosted-execution/runtime-control";
-import type { AttachmentParseJobRecord, RunAttachmentParseJobResult } from "@murphai/parsers";
 import {
   createHostedRuntimeEffectsPortStub,
 } from "./hosted-runtime-test-helpers.ts";
 
 const mocks = vi.hoisted(() => ({
-  createConfiguredParserRegistry: vi.fn(),
   createHostedLinqAttachmentDownloadDriver: vi.fn(),
   createHostedTelegramAttachmentDownloadDriver: vi.fn(),
   createHostedTelegramEffectsAttachmentDownloadDriver: vi.fn(),
   logHostedTelegramAttachmentDownloadUnavailable: vi.fn(),
-  createInboxParserService: vi.fn(),
   createInboxPipeline: vi.fn(),
-  createParsedInboxPipeline: vi.fn(),
   normalizeHostedEmailConversationCapture: vi.fn(),
   normalizeHostedLinqConversationCapture: vi.fn(),
   normalizeHostedTelegramConversationCapture: vi.fn(),
   normalizeHostedWhatsAppConversationCapture: vi.fn(),
   openInboxRuntime: vi.fn(),
   readHostedRawEmailMessage: vi.fn(),
-  markLinqChatRead: vi.fn(),
   resolveHostedEmailSelfAddresses: vi.fn(),
 }));
 
 vi.mock("@murphai/inboxd/runtime", () => ({
   createInboxPipeline: mocks.createInboxPipeline,
-  createParsedInboxPipeline: mocks.createParsedInboxPipeline,
   openInboxRuntime: mocks.openInboxRuntime,
 }));
 
@@ -42,11 +35,6 @@ vi.mock("@murphai/inboxd/connectors/hosted-conversation", () => ({
   normalizeHostedLinqConversationCapture: mocks.normalizeHostedLinqConversationCapture,
   normalizeHostedTelegramConversationCapture: mocks.normalizeHostedTelegramConversationCapture,
   normalizeHostedWhatsAppConversationCapture: mocks.normalizeHostedWhatsAppConversationCapture,
-}));
-
-vi.mock("@murphai/parsers", () => ({
-  createConfiguredParserRegistry: mocks.createConfiguredParserRegistry,
-  createInboxParserService: mocks.createInboxParserService,
 }));
 
 vi.mock("../src/hosted-runtime/events/email.ts", () => ({
@@ -73,10 +61,6 @@ vi.mock("../src/hosted-runtime/events/telegram.ts", () => ({
   withHostedTelegramAttachmentDownloadRetry: (
     driver: unknown,
   ) => driver,
-}));
-
-vi.mock("@murphai/operator-config/linq-runtime", () => ({
-  markLinqChatRead: mocks.markLinqChatRead,
 }));
 
 vi.mock("@murphai/hosted-execution/hosted-email", () => ({
@@ -106,199 +90,11 @@ function createRuntime() {
   } as const;
 }
 
-function createRuntimeWithLogPort(logRequests: HostedRuntimeLogRequest[]) {
-  const runtime = createRuntime();
-  return {
-    ...runtime,
-    platform: {
-      ...runtime.platform,
-      logPort: {
-        async write(request: HostedRuntimeLogRequest) {
-          logRequests.push(request);
-          return {
-            loggedCount: request.entries.length,
-          };
-        },
-      },
-    },
-  } as const;
-}
-
-function createParseJobResult(
-  overrides: Pick<RunAttachmentParseJobResult, "status"> & Partial<RunAttachmentParseJobResult>,
-): RunAttachmentParseJobResult {
-  return {
-    job: createParseJobRecord({
-      state: overrides.status,
-    }),
-    ...overrides,
-  };
-}
-
-function createParseJobRecord(
-  overrides: Partial<AttachmentParseJobRecord>,
-): AttachmentParseJobRecord {
-  return {
-    attachmentId: "attachment_123",
-    attempts: 1,
-    captureId: "capture_123",
-    createdAt: "2026-04-08T00:00:00.000Z",
-    jobId: "job_123",
-    pipeline: "attachment_text",
-    state: "pending",
-    ...overrides,
-  };
-}
-
-function mockOpenInboxRuntimeWithParseJobs(input: {
-  attachmentKinds?: Readonly<Record<string, "audio" | "video" | "document" | "image" | "other">>;
-  failedJobs?: AttachmentParseJobRecord[];
-  pendingJobs?: AttachmentParseJobRecord[];
-} = {}) {
-  const pendingJobs = input.pendingJobs ?? [
-    createParseJobRecord({
-      state: "pending",
-    }),
-  ];
-  const failedJobs = input.failedJobs ?? [];
-  const attachmentKinds = input.attachmentKinds ?? {};
-  const attachmentIds = Array.from(
-    new Set(
-      [...pendingJobs, ...failedJobs].map((job) => job.attachmentId),
-    ),
-  );
-  const runningJobs: AttachmentParseJobRecord[] = [];
-  const filterJobs = (
-    jobs: AttachmentParseJobRecord[],
-    filters: { attachmentId?: string; captureId?: string; limit?: number } = {},
-  ) => {
-    const filtered = jobs.filter((job) =>
-      (filters.captureId === undefined || job.captureId === filters.captureId)
-        && (filters.attachmentId === undefined || job.attachmentId === filters.attachmentId)
-    );
-    return filtered.slice(0, filters.limit ?? filtered.length);
-  };
-  const runtime = {
-    claimNextAttachmentParseJob: vi.fn((filters: { captureId?: string } = {}) => {
-      const pendingJobIndex = pendingJobs.findIndex((job) => {
-        const kind = attachmentKinds[job.attachmentId] ?? "audio";
-        return (filters.captureId === undefined || job.captureId === filters.captureId)
-          && (kind === "audio" || kind === "video");
-      });
-      if (pendingJobIndex < 0) {
-        return null;
-      }
-      const [pendingJob] = pendingJobs.splice(pendingJobIndex, 1);
-      if (!pendingJob) {
-        return null;
-      }
-      const runningJob: AttachmentParseJobRecord = {
-        ...pendingJob,
-        attempts: pendingJob.attempts + 1,
-        state: "running",
-        startedAt: "2026-04-08T00:00:01.000Z",
-      };
-      runningJobs.push(runningJob);
-      return runningJob;
-    }),
-    close: vi.fn(),
-    failAttachmentParseJob: vi.fn((input: {
-      attempt: number;
-      errorCode?: string | null;
-      errorMessage: string;
-      jobId: string;
-    }) => {
-      const runningJobIndex = runningJobs.findIndex(
-        (job) => job.jobId === input.jobId && job.attempts === input.attempt,
-      );
-      if (runningJobIndex < 0) {
-        throw new Error("Expected a claimed parser job to fail.");
-      }
-      const [runningJob] = runningJobs.splice(runningJobIndex, 1);
-      if (!runningJob) {
-        throw new Error("Expected a claimed parser job to fail.");
-      }
-      const failedJob: AttachmentParseJobRecord = {
-        ...runningJob,
-        errorCode: input.errorCode ?? null,
-        errorMessage: input.errorMessage,
-        finishedAt: "2026-04-08T00:00:02.000Z",
-        state: "failed",
-      };
-      failedJobs.push(failedJob);
-      return {
-        applied: true,
-        job: failedJob,
-      };
-    }),
-    requeueAttachmentParseJobs: vi.fn((filters: {
-      attachmentId?: string;
-      captureId?: string;
-      state?: string;
-    } = {}) => {
-      const requeuedJobs = failedJobs.filter((job) =>
-        (filters.captureId === undefined || job.captureId === filters.captureId)
-          && (filters.attachmentId === undefined || job.attachmentId === filters.attachmentId)
-          && (filters.state === undefined || job.state === filters.state)
-          && ((attachmentKinds[job.attachmentId] ?? "audio") === "audio"
-            || (attachmentKinds[job.attachmentId] ?? "audio") === "video")
-      );
-      for (const job of requeuedJobs) {
-        failedJobs.splice(failedJobs.indexOf(job), 1);
-        pendingJobs.push({
-          ...job,
-          errorCode: null,
-          errorMessage: null,
-          finishedAt: null,
-          providerId: null,
-          resultPath: null,
-          startedAt: null,
-          state: "pending",
-        });
-      }
-      return requeuedJobs.length;
-    }),
-    getCapture: vi.fn((captureId: string) => ({
-      attachments: attachmentIds.map((attachmentId, index) => ({
-        attachmentId,
-        kind: attachmentKinds[attachmentId] ?? "audio",
-        ordinal: index + 1,
-      })),
-      captureId,
-    })),
-    listAttachmentParseJobs: vi.fn((filters: {
-      attachmentId?: string;
-      captureId?: string;
-      limit?: number;
-      state?: string;
-    } = {}) => {
-      if (filters.state === "pending") {
-        return filterJobs(pendingJobs, filters);
-      }
-      if (filters.state === "running") {
-        return filterJobs(runningJobs, filters);
-      }
-      if (filters.state === "failed") {
-        return filterJobs(failedJobs, filters);
-      }
-      return [];
-    }),
-  };
-  mocks.openInboxRuntime.mockResolvedValueOnce(runtime);
-  return runtime;
-}
-
 beforeEach(() => {
   mocks.createHostedTelegramEffectsAttachmentDownloadDriver.mockReturnValue(null);
   mocks.logHostedTelegramAttachmentDownloadUnavailable.mockResolvedValue(undefined);
-  mocks.markLinqChatRead.mockResolvedValue(undefined);
   mocks.openInboxRuntime.mockResolvedValue({
     close: vi.fn(),
-    listAttachmentParseJobs: vi.fn(() => []),
-  });
-  mocks.createConfiguredParserRegistry.mockResolvedValue({
-    ffmpeg: undefined,
-    registry: Symbol("parser-registry"),
   });
   mocks.createInboxPipeline.mockImplementation(async (input) => ({
     close: vi.fn(),
@@ -313,9 +109,6 @@ beforeEach(() => {
     }),
     runtime: input.runtime,
   }));
-  mocks.createInboxParserService.mockReturnValue({
-    drain: vi.fn(async () => [{} as never, {} as never]),
-  });
 });
 
 afterEach(() => {
@@ -541,12 +334,12 @@ describe("importHostedConversationMessageWakeIntoLocalInbox", () => {
     expect(processCapture).toHaveBeenNthCalledWith(2, telegramCapture);
     expect(processCapture).toHaveBeenNthCalledWith(3, emailCapture);
     expect(processCapture).toHaveBeenNthCalledWith(4, whatsappCapture);
-    expect(mocks.markLinqChatRead).not.toHaveBeenCalled();
     expect(pipelineClose).toHaveBeenCalledTimes(4);
     expect(linqImport.metrics).toEqual({
       nextWakeAt: null,
       parserProcessed: 0,
     });
+    expect(linqImport.requiresTerminalMediaParserEvidence).toBe(false);
   });
 
   it("prefers effects-backed Telegram attachment driver when available", async () => {
@@ -629,7 +422,15 @@ describe("importHostedConversationMessageWakeIntoLocalInbox", () => {
     });
     mocks.normalizeHostedTelegramConversationCapture.mockImplementationOnce(async () => {
       calls.push("normalize");
-      return { source: "telegram" };
+      return {
+        attachments: [
+          {
+            kind: "document",
+          },
+        ],
+        source: "telegram",
+        text: null,
+      };
     });
 
     const wake = buildHostedExecutionTelegramConversationMessageWake({
@@ -701,156 +502,54 @@ describe("importHostedConversationMessageWakeIntoLocalInbox", () => {
     ).rejects.toThrow("pipeline failed");
 
     expect(runtimeClose).toHaveBeenCalledTimes(1);
-    expect(mocks.markLinqChatRead).not.toHaveBeenCalled();
   });
 
-  it("passes explicit hosted parser toolchain config to parser registry without env fallback", async () => {
-    const parserToolchain = {
-      tools: {
-        ffmpeg: {
-          command: "/usr/bin/ffmpeg",
+  it("persists media-only parser work without draining it and reports the terminal-evidence gate", async () => {
+    const mediaCapture = {
+      accountId: "15551234567",
+      attachments: [
+        {
+          attachmentId: "attachment_audio",
+          kind: "audio",
         },
-        whisper: {
-          command: "/usr/local/bin/whisper-cli",
-          modelPath: "/home/runner/.murph/models/whisper/ggml-base.en.bin",
-        },
+      ],
+      actor: {
+        isSelf: false,
+      },
+      externalId: "linq:msg_media_only",
+      occurredAt: "2026-04-08T00:00:00.000Z",
+      raw: {},
+      source: "linq",
+      text: null,
+      thread: {
+        id: "chat_media_only",
       },
     };
-    mocks.normalizeHostedLinqConversationCapture.mockResolvedValue({
-      source: "linq",
-    });
-    mockOpenInboxRuntimeWithParseJobs();
-
-    await importHostedConversationMessageWakeIntoLocalInbox({
-      runtime: {
-        ...createRuntime(),
-        parserToolchain,
-      },
-      vaultRoot: "/tmp/assistant-runtime-conversation",
-      wake: buildHostedExecutionLinqConversationMessageWake({
-        eventId: "evt_linq",
-        linqMessage: {
-          chatId: "chat_123",
-          from: "+15551234567",
-          isFromMe: false,
-          messageId: "msg_123",
-          parts: [],
-        },
-        occurredAt: "2026-04-08T00:00:00.000Z",
-        phoneLookupKey: "15551234567",
-        userId: "member_123",
-      }),
-    });
-
-    expect(mocks.createConfiguredParserRegistry).toHaveBeenCalledWith({
-      allowEnvToolchain: false,
-      allowSystemToolchainLookup: false,
-      readVaultToolchainConfig: false,
-      toolchain: {
-        source: "platform",
-        tools: parserToolchain.tools,
-      },
-      vaultRoot: "/tmp/assistant-runtime-conversation",
-    });
-  });
-
-  it("marks inbound Linq chats read after post-checkpoint import effects without failing ingestion", async () => {
-    const order: string[] = [];
-    mocks.createInboxPipeline.mockImplementation(async (input) => ({
-      close: vi.fn(),
-      processCapture: vi.fn(async () => {
-        order.push("processCapture");
-        return {
-          captureId: "capture_123",
-          createdAt: "2026-04-08T00:00:00.000Z",
-          deduped: false,
-          sourceDirectory: "raw/inbox/linq/capture_123",
-          eventId: "evt_capture_123",
-        };
-      }),
+    const processCapture = vi.fn(async () => ({
+      captureId: "capture_media_only",
+      createdAt: "2026-04-08T00:00:00.000Z",
+      deduped: false,
+      sourceDirectory: "raw/inbox/linq/capture_media_only",
+      eventId: "evt_capture_media_only",
+    }));
+    const pipelineClose = vi.fn();
+    mocks.createInboxPipeline.mockImplementationOnce(async (input) => ({
+      close: pipelineClose,
+      processCapture,
       runtime: input.runtime,
     }));
-    mocks.createInboxParserService.mockReturnValueOnce({
-      drain: vi.fn(async () => [{} as never]),
-    });
-    mocks.markLinqChatRead.mockImplementationOnce(async () => {
-      order.push("markRead");
-      throw new Error("provider unavailable");
-    });
-    mocks.normalizeHostedLinqConversationCapture.mockResolvedValueOnce({
-      source: "linq",
-    });
-    mockOpenInboxRuntimeWithParseJobs();
+    mocks.normalizeHostedLinqConversationCapture.mockResolvedValueOnce(mediaCapture);
 
     const importResult = await importHostedConversationMessageWakeIntoLocalInbox({
-      runtime: {
-        ...createRuntime(),
-        forwardedEnv: {
-          LINQ_API_BASE_URL: "https://api.linq.example",
-          LINQ_API_TOKEN: "linq-token",
-        },
-        platformEnv: {
-          TELEGRAM_BOT_TOKEN: "telegram-token",
-        },
-      },
-      vaultRoot: "/tmp/assistant-runtime-conversation",
-      wake: buildHostedExecutionLinqConversationMessageWake({
-        eventId: "evt_linq",
-        linqMessage: {
-          chatId: "chat_after_import",
-          from: "+15551234567",
-          isFromMe: false,
-          messageId: "msg_123",
-          parts: [],
-        },
-        occurredAt: "2026-04-08T00:00:00.000Z",
-        phoneLookupKey: "15551234567",
-        userId: "member_123",
-      }),
-    });
-    expect(order).toEqual(["processCapture"]);
-    expect(mocks.markLinqChatRead).not.toHaveBeenCalled();
-
-    expect(order).toEqual(["processCapture"]);
-    expect(importResult.metrics).toEqual({
-      nextWakeAt: null,
-      parserProcessed: 1,
-    });
-    expect(mocks.markLinqChatRead).not.toHaveBeenCalled();
-  });
-
-  it("returns persisted capture before a deferred parser drain completes", async () => {
-    const inboxRuntime = mockOpenInboxRuntimeWithParseJobs();
-    mocks.openInboxRuntime.mockResolvedValueOnce(inboxRuntime);
-    let resolveParserDrain!: (results: RunAttachmentParseJobResult[]) => void;
-    let markParserDrainStarted!: () => void;
-    const parserDrainStarted = new Promise<void>((resolve) => {
-      markParserDrainStarted = resolve;
-    });
-    const parserDrain = vi.fn(async () => {
-      markParserDrainStarted();
-      return await new Promise<RunAttachmentParseJobResult[]>((resolve) => {
-        resolveParserDrain = resolve;
-      });
-    });
-    mocks.createInboxParserService.mockReturnValueOnce({
-      drain: parserDrain,
-    });
-    mocks.normalizeHostedLinqConversationCapture.mockResolvedValueOnce({
-      source: "linq",
-    });
-
-    const importResult = await importHostedConversationMessageWakeIntoLocalInbox({
-      deferParserDrain: true,
       runtime: createRuntime(),
       vaultRoot: "/tmp/assistant-runtime-conversation",
       wake: buildHostedExecutionLinqConversationMessageWake({
-        eventId: "evt_linq_deferred_parser",
+        eventId: "evt_linq_media_only",
         linqMessage: {
-          chatId: "chat_deferred_parser",
+          chatId: "chat_media_only",
           from: "+15551234567",
           isFromMe: false,
-          messageId: "msg_deferred_parser",
+          messageId: "msg_media_only",
           parts: [],
         },
         occurredAt: "2026-04-08T00:00:00.000Z",
@@ -859,94 +558,58 @@ describe("importHostedConversationMessageWakeIntoLocalInbox", () => {
       }),
     });
 
-    expect(importResult.capture?.captureId).toBe("capture_123");
-    expect(importResult.metrics).toEqual({
-      nextWakeAt: null,
-      parserProcessed: 0,
-    });
-    expect(importResult.deferredParserDrain).toEqual(expect.any(Function));
-    expect(parserDrain).not.toHaveBeenCalled();
-
-    let deferredDrainFinished = false;
-    const deferredDrain = importResult.deferredParserDrain?.().then((metrics) => {
-      deferredDrainFinished = true;
-      return metrics;
-    });
-    expect(deferredDrain).toBeDefined();
-    await parserDrainStarted;
-    expect(deferredDrainFinished).toBe(false);
-    resolveParserDrain([
-      createParseJobResult({
-        status: "succeeded",
+    expect(processCapture).toHaveBeenCalledWith(mediaCapture);
+    expect(importResult).toEqual({
+      capture: expect.objectContaining({
+        captureId: "capture_media_only",
       }),
-    ]);
-
-    await expect(deferredDrain).resolves.toEqual({
-      nextWakeAt: null,
-      parserProcessed: 1,
+      metrics: {
+        nextWakeAt: null,
+        parserProcessed: 0,
+      },
+      requiresTerminalMediaParserEvidence: true,
     });
-    expect(inboxRuntime.close).toHaveBeenCalledTimes(1);
+    expect(pipelineClose).toHaveBeenCalledTimes(1);
   });
 
-  it("keeps persisted conversation import successful when post-persistence parser setup fails", async () => {
-    vi.useFakeTimers();
-    vi.setSystemTime(new Date("2026-04-08T00:00:00.000Z"));
-    const order: string[] = [];
-    const logRequests: HostedRuntimeLogRequest[] = [];
-    mocks.createInboxPipeline.mockImplementationOnce(async (input) => ({
-      close: vi.fn(),
-      processCapture: vi.fn(async () => {
-        order.push("processCapture");
-        return {
-          captureId: "capture_after_parser_setup_failure",
-          createdAt: "2026-04-08T00:00:00.000Z",
-          deduped: false,
-          sourceDirectory: "raw/inbox/linq/capture_after_parser_setup_failure",
-          eventId: "evt_capture_after_parser_setup_failure",
-        };
-      }),
-      runtime: input.runtime,
-    }));
-    mocks.markLinqChatRead.mockImplementationOnce(async () => {
-      order.push("markRead");
-    });
-    mocks.createConfiguredParserRegistry.mockRejectedValueOnce(new Error("parser setup failed"));
+  it("does not gate text-plus-media conversation input on parser evidence", async () => {
     mocks.normalizeHostedLinqConversationCapture.mockResolvedValueOnce({
-      source: "linq",
-    });
-    const inboxRuntime = mockOpenInboxRuntimeWithParseJobs({
-      pendingJobs: [
-        createParseJobRecord({
-          attachmentId: "attachment_123",
-          captureId: "capture_after_parser_setup_failure",
-          jobId: "job_123",
-          state: "pending",
-        }),
-        createParseJobRecord({
-          attachmentId: "attachment_456",
-          captureId: "capture_after_parser_setup_failure",
-          jobId: "job_456",
-          state: "pending",
-        }),
+      accountId: "15551234567",
+      attachments: [
+        {
+          attachmentId: "attachment_audio",
+          kind: "audio",
+        },
       ],
+      actor: {
+        isSelf: false,
+      },
+      externalId: "linq:msg_text_and_media",
+      occurredAt: "2026-04-08T00:00:00.000Z",
+      raw: {},
+      source: "linq",
+      text: "Please listen to this.",
+      thread: {
+        id: "chat_text_and_media",
+      },
     });
 
     const importResult = await importHostedConversationMessageWakeIntoLocalInbox({
-      runtime: {
-        ...createRuntimeWithLogPort(logRequests),
-        forwardedEnv: {
-          LINQ_API_TOKEN: "linq-token",
-        },
-      },
+      runtime: createRuntime(),
       vaultRoot: "/tmp/assistant-runtime-conversation",
       wake: buildHostedExecutionLinqConversationMessageWake({
-        eventId: "evt_linq_parser_setup_failure",
+        eventId: "evt_linq_text_and_media",
         linqMessage: {
-          chatId: "chat_after_parser_setup_failure",
+          chatId: "chat_text_and_media",
           from: "+15551234567",
           isFromMe: false,
-          messageId: "msg_123",
-          parts: [],
+          messageId: "msg_text_and_media",
+          parts: [
+            {
+              type: "text",
+              value: "Please listen to this.",
+            },
+          ],
         },
         occurredAt: "2026-04-08T00:00:00.000Z",
         phoneLookupKey: "15551234567",
@@ -954,178 +617,16 @@ describe("importHostedConversationMessageWakeIntoLocalInbox", () => {
       }),
     });
 
-    expect(order).toEqual(["processCapture"]);
+    expect(importResult.requiresTerminalMediaParserEvidence).toBe(false);
     expect(importResult.metrics).toEqual({
-      nextWakeAt: "2026-04-08T00:01:00.000Z",
-      parserProcessed: 0,
-    });
-    expect(mocks.createInboxPipeline).toHaveBeenCalledTimes(1);
-    expect(mocks.createConfiguredParserRegistry).toHaveBeenCalledTimes(1);
-    expect(mocks.createInboxParserService).not.toHaveBeenCalled();
-    expect(inboxRuntime.claimNextAttachmentParseJob).not.toHaveBeenCalled();
-    expect(inboxRuntime.failAttachmentParseJob).not.toHaveBeenCalled();
-    expect(logRequests).toHaveLength(1);
-    expect(logRequests[0]?.entries).toEqual([
-      expect.objectContaining({
-        component: "mailbox",
-        errorCode: "runtime_error",
-        eventCode: "mailbox.parser_drain_failed",
-        level: "warn",
-        phase: "import",
-        redactedJson: {
-          captureIdPresent: true,
-          errorCode: "runtime_error",
-          nextWakeAtPresent: true,
-          parserTerminalizedPendingJobs: 0,
-          safeErrorMessage: "Hosted execution runtime failed.",
-        },
-      }),
-    ]);
-
-    mocks.openInboxRuntime.mockResolvedValueOnce(inboxRuntime);
-    mocks.createInboxPipeline.mockImplementationOnce(async (input) => ({
-      close: vi.fn(),
-      processCapture: vi.fn(async () => {
-        order.push("processCaptureRetry");
-        return {
-          captureId: "capture_after_parser_setup_failure",
-          createdAt: "2026-04-08T00:01:00.000Z",
-          deduped: false,
-          sourceDirectory: "raw/inbox/linq/capture_after_parser_setup_failure",
-          eventId: "evt_capture_after_parser_setup_failure_retry",
-        };
-      }),
-      runtime: input.runtime,
-    }));
-    mocks.normalizeHostedLinqConversationCapture.mockResolvedValueOnce({
-      source: "linq",
-    });
-
-    const retryResult = await importHostedConversationMessageWakeIntoLocalInbox({
-      runtime: {
-        ...createRuntimeWithLogPort(logRequests),
-        forwardedEnv: {
-          LINQ_API_TOKEN: "linq-token",
-        },
-      },
-      vaultRoot: "/tmp/assistant-runtime-conversation",
-      wake: buildHostedExecutionLinqConversationMessageWake({
-        eventId: "evt_linq_parser_setup_failure_retry",
-        linqMessage: {
-          chatId: "chat_after_parser_setup_failure",
-          from: "+15551234567",
-          isFromMe: false,
-          messageId: "msg_123",
-          parts: [],
-        },
-        occurredAt: "2026-04-08T00:01:00.000Z",
-        phoneLookupKey: "15551234567",
-        userId: "member_123",
-      }),
-    });
-
-    expect(order).toEqual(["processCapture", "processCaptureRetry"]);
-    expect(retryResult.metrics).toEqual({
       nextWakeAt: null,
-      parserProcessed: 2,
-    });
-    expect(mocks.createConfiguredParserRegistry).toHaveBeenCalledTimes(2);
-    expect(mocks.createInboxParserService).toHaveBeenCalledTimes(1);
-    expect(inboxRuntime.failAttachmentParseJob).not.toHaveBeenCalled();
-  });
-
-  it("keeps pending parser jobs retryable when parser drain throws", async () => {
-    vi.useFakeTimers();
-    vi.setSystemTime(new Date("2026-04-08T00:00:00.000Z"));
-    const order: string[] = [];
-    const logRequests: HostedRuntimeLogRequest[] = [];
-    mocks.createInboxPipeline.mockImplementationOnce(async (input) => ({
-      close: vi.fn(),
-      processCapture: vi.fn(async () => {
-        order.push("processCapture");
-        return {
-          captureId: "capture_after_parser_drain_failure",
-          createdAt: "2026-04-08T00:00:00.000Z",
-          deduped: false,
-          sourceDirectory: "raw/inbox/linq/capture_after_parser_drain_failure",
-          eventId: "evt_capture_after_parser_drain_failure",
-        };
-      }),
-      runtime: input.runtime,
-    }));
-    mocks.createInboxParserService.mockReturnValueOnce({
-      drain: vi.fn(async () => {
-        throw new Error("parser drain failed");
-      }),
-    });
-    mocks.normalizeHostedLinqConversationCapture.mockResolvedValueOnce({
-      source: "linq",
-    });
-    const inboxRuntime = mockOpenInboxRuntimeWithParseJobs({
-      pendingJobs: [
-        createParseJobRecord({
-          attachmentId: "attachment_123",
-          captureId: "capture_after_parser_drain_failure",
-          jobId: "job_123",
-          state: "pending",
-        }),
-      ],
-    });
-
-    const importResult = await importHostedConversationMessageWakeIntoLocalInbox({
-      runtime: {
-        ...createRuntimeWithLogPort(logRequests),
-        forwardedEnv: {
-          LINQ_API_TOKEN: "linq-token",
-        },
-      },
-      vaultRoot: "/tmp/assistant-runtime-conversation",
-      wake: buildHostedExecutionLinqConversationMessageWake({
-        eventId: "evt_linq_parser_drain_failure",
-        linqMessage: {
-          chatId: "chat_after_parser_drain_failure",
-          from: "+15551234567",
-          isFromMe: false,
-          messageId: "msg_123",
-          parts: [],
-        },
-        occurredAt: "2026-04-08T00:00:00.000Z",
-        phoneLookupKey: "15551234567",
-        userId: "member_123",
-      }),
-    });
-
-    expect(order).toEqual(["processCapture"]);
-    expect(importResult.metrics).toEqual({
-      nextWakeAt: "2026-04-08T00:01:00.000Z",
       parserProcessed: 0,
     });
-    expect(mocks.createConfiguredParserRegistry).toHaveBeenCalledTimes(1);
-    expect(mocks.createInboxParserService).toHaveBeenCalledTimes(1);
-    expect(inboxRuntime.failAttachmentParseJob).not.toHaveBeenCalled();
-    expect(logRequests).toHaveLength(1);
-    expect(logRequests[0]?.entries).toEqual([
-      expect.objectContaining({
-        component: "mailbox",
-        errorCode: "runtime_error",
-        eventCode: "mailbox.parser_drain_failed",
-        level: "warn",
-        phase: "import",
-        redactedJson: {
-          captureIdPresent: true,
-          errorCode: "runtime_error",
-          nextWakeAtPresent: true,
-          parserTerminalizedPendingJobs: 0,
-          safeErrorMessage: "Hosted execution runtime failed.",
-        },
-      }),
-    ]);
   });
 
   it("rejects promptly when projection aborts after canonical capture persistence", async () => {
     const abortController = new AbortController();
     const abortReason = new DOMException("Stop requested.", "AbortError");
-    const logRequests: HostedRuntimeLogRequest[] = [];
     const pipelineClose = vi.fn();
     const processCapture = vi.fn(async () => {
       abortController.abort(abortReason);
@@ -1143,21 +644,14 @@ describe("importHostedConversationMessageWakeIntoLocalInbox", () => {
       runtime: input.runtime,
     }));
     mocks.normalizeHostedLinqConversationCapture.mockResolvedValueOnce({
+      attachments: [],
       source: "linq",
-    });
-    mockOpenInboxRuntimeWithParseJobs({
-      pendingJobs: [
-        createParseJobRecord({
-          captureId: "capture_after_process_abort",
-          jobId: "job_after_process_abort",
-          state: "pending",
-        }),
-      ],
+      text: null,
     });
 
     await expect(
       importHostedConversationMessageWakeIntoLocalInbox({
-        runtime: createRuntimeWithLogPort(logRequests),
+        runtime: createRuntime(),
         signal: abortController.signal,
         vaultRoot: "/tmp/assistant-runtime-conversation",
         wake: buildHostedExecutionLinqConversationMessageWake({
@@ -1177,324 +671,7 @@ describe("importHostedConversationMessageWakeIntoLocalInbox", () => {
     ).rejects.toBe(abortReason);
 
     expect(processCapture).toHaveBeenCalledTimes(1);
-    expect(mocks.createConfiguredParserRegistry).not.toHaveBeenCalled();
-    expect(mocks.createInboxParserService).not.toHaveBeenCalled();
-    expect(logRequests).toHaveLength(0);
     expect(pipelineClose).toHaveBeenCalledTimes(1);
-  });
-
-  it("keeps the abort signal out of parser drain and propagates post-drain aborts", async () => {
-    const abortController = new AbortController();
-    const abortReason = new DOMException("Stop requested.", "AbortError");
-    const logRequests: HostedRuntimeLogRequest[] = [];
-    const pipelineClose = vi.fn();
-    const observedDrainSignals: Array<AbortSignal | null> = [];
-    const drain = vi.fn(async (input: { signal?: AbortSignal | null }) => {
-      observedDrainSignals.push(input.signal ?? null);
-      abortController.abort(abortReason);
-      return [];
-    });
-    mocks.createInboxPipeline.mockImplementationOnce(async (input) => ({
-      close: pipelineClose,
-      processCapture: vi.fn(async () => ({
-        captureId: "capture_abort_at_parser_drain",
-        createdAt: "2026-04-08T00:00:00.000Z",
-        deduped: false,
-        sourceDirectory: "raw/inbox/linq/capture_abort_at_parser_drain",
-        eventId: "evt_capture_abort_at_parser_drain",
-      })),
-      runtime: input.runtime,
-    }));
-    mocks.createInboxParserService.mockReturnValueOnce({
-      drain,
-    });
-    mocks.normalizeHostedLinqConversationCapture.mockResolvedValueOnce({
-      source: "linq",
-    });
-    mockOpenInboxRuntimeWithParseJobs({
-      pendingJobs: [
-        createParseJobRecord({
-          captureId: "capture_abort_at_parser_drain",
-          jobId: "job_abort_at_parser_drain",
-          state: "pending",
-        }),
-      ],
-    });
-
-    await expect(
-      importHostedConversationMessageWakeIntoLocalInbox({
-        runtime: createRuntimeWithLogPort(logRequests),
-        signal: abortController.signal,
-        vaultRoot: "/tmp/assistant-runtime-conversation",
-        wake: buildHostedExecutionLinqConversationMessageWake({
-          eventId: "evt_linq_abort_at_parser_drain",
-          linqMessage: {
-            chatId: "chat_abort_at_parser_drain",
-            from: "+15551234567",
-            isFromMe: false,
-            messageId: "msg_abort_at_parser_drain",
-            parts: [],
-          },
-          occurredAt: "2026-04-08T00:00:00.000Z",
-          phoneLookupKey: "15551234567",
-          userId: "member_123",
-        }),
-      }),
-    ).rejects.toBe(abortReason);
-
-    expect(drain).toHaveBeenCalledWith({
-      captureId: "capture_abort_at_parser_drain",
-    });
-    expect(observedDrainSignals).toEqual([null]);
-    expect(mocks.createInboxParserService).toHaveBeenCalledTimes(1);
-    expect(logRequests).toHaveLength(0);
-    expect(pipelineClose).toHaveBeenCalledTimes(1);
-  });
-
-  it("does not initialize parser tooling for legacy non-media pending jobs", async () => {
-    mocks.normalizeHostedLinqConversationCapture.mockResolvedValueOnce({
-      source: "linq",
-    });
-    mockOpenInboxRuntimeWithParseJobs({
-      attachmentKinds: {
-        "attachment-document": "document",
-      },
-      pendingJobs: [
-        createParseJobRecord({
-          attachmentId: "attachment-document",
-          state: "pending",
-        }),
-      ],
-    });
-
-    const importResult = await importHostedConversationMessageWakeIntoLocalInbox({
-      runtime: createRuntime(),
-      vaultRoot: "/tmp/assistant-runtime-conversation",
-      wake: buildHostedExecutionLinqConversationMessageWake({
-        eventId: "evt_linq_legacy_document_parse_job",
-        linqMessage: {
-          chatId: "chat_legacy_document_parse_job",
-          from: "+15551234567",
-          isFromMe: false,
-          messageId: "msg_123",
-          parts: [],
-        },
-        occurredAt: "2026-04-08T00:00:00.000Z",
-        phoneLookupKey: "15551234567",
-        userId: "member_123",
-      }),
-    });
-
-    expect(importResult.metrics).toEqual({
-      nextWakeAt: null,
-      parserProcessed: 0,
-    });
-    expect(mocks.createConfiguredParserRegistry).not.toHaveBeenCalled();
-    expect(mocks.createInboxParserService).not.toHaveBeenCalled();
-  });
-
-  it("initializes parser tooling when legacy non-media jobs sort before pending media", async () => {
-    mocks.normalizeHostedLinqConversationCapture.mockResolvedValueOnce({
-      source: "linq",
-    });
-    const legacyDocumentJobs = Array.from({ length: 20 }, (_, index) =>
-      createParseJobRecord({
-        attachmentId: `attachment-document-${String(index).padStart(2, "0")}`,
-        captureId: "capture_123",
-        jobId: `job_document_${String(index).padStart(2, "0")}`,
-        state: "pending",
-      })
-    );
-    mockOpenInboxRuntimeWithParseJobs({
-      attachmentKinds: {
-        ...Object.fromEntries(
-          legacyDocumentJobs.map((job) => [job.attachmentId, "document"] as const),
-        ),
-        "attachment-media": "audio",
-      },
-      pendingJobs: [
-        ...legacyDocumentJobs,
-        createParseJobRecord({
-          attachmentId: "attachment-media",
-          captureId: "capture_123",
-          jobId: "job_media",
-          state: "pending",
-        }),
-      ],
-    });
-
-    const importResult = await importHostedConversationMessageWakeIntoLocalInbox({
-      runtime: createRuntime(),
-      vaultRoot: "/tmp/assistant-runtime-conversation",
-      wake: buildHostedExecutionLinqConversationMessageWake({
-        eventId: "evt_linq_media_after_legacy_document_jobs",
-        linqMessage: {
-          chatId: "chat_media_after_legacy_document_jobs",
-          from: "+15551234567",
-          isFromMe: false,
-          messageId: "msg_123",
-          parts: [],
-        },
-        occurredAt: "2026-04-08T00:00:00.000Z",
-        phoneLookupKey: "15551234567",
-        userId: "member_123",
-      }),
-    });
-
-    expect(importResult.metrics).toEqual({
-      nextWakeAt: null,
-      parserProcessed: 2,
-    });
-    expect(mocks.createConfiguredParserRegistry).toHaveBeenCalledTimes(1);
-    expect(mocks.createInboxParserService).toHaveBeenCalledTimes(1);
-  });
-
-  it("logs aggregate parser job failures without exposing attachment paths", async () => {
-    const logRequests: HostedRuntimeLogRequest[] = [];
-    mocks.createInboxParserService.mockReturnValueOnce({
-      drain: vi.fn(async () => [
-        createParseJobResult({
-          errorCode: "ffmpeg_unavailable",
-          errorMessage: "spawn /app/test-parser-toolchain/ffmpeg ENOENT",
-          job: createParseJobRecord({
-            jobId: "job_ffmpeg_failure",
-            state: "failed",
-          }),
-          status: "failed",
-        }),
-        createParseJobResult({
-          errorCode: "provider_unavailable",
-          errorMessage: "No parser provider found for audio/mp4",
-          job: createParseJobRecord({
-            jobId: "job_provider_failure",
-            state: "failed",
-          }),
-          status: "failed",
-        }),
-        createParseJobResult({
-          job: createParseJobRecord({
-            jobId: "job_success",
-            state: "succeeded",
-          }),
-          resultPath: "derived/inbox/capture_123/attachments/attachment_123/attempts/0001/result.json",
-          providerId: "provider_123",
-          status: "succeeded",
-        }),
-      ]),
-    });
-    mocks.normalizeHostedLinqConversationCapture.mockResolvedValueOnce({
-      source: "linq",
-    });
-    mockOpenInboxRuntimeWithParseJobs();
-
-    const importResult = await importHostedConversationMessageWakeIntoLocalInbox({
-      runtime: createRuntimeWithLogPort(logRequests),
-      vaultRoot: "/tmp/assistant-runtime-conversation",
-      wake: buildHostedExecutionLinqConversationMessageWake({
-        eventId: "evt_linq_parser_job_failure",
-        linqMessage: {
-          chatId: "chat_after_parser_job_failure",
-          from: "+15551234567",
-          isFromMe: false,
-          messageId: "msg_123",
-          parts: [],
-        },
-        occurredAt: "2026-04-08T00:00:00.000Z",
-        phoneLookupKey: "15551234567",
-        userId: "member_123",
-      }),
-    });
-
-    expect(importResult.metrics).toEqual({
-      nextWakeAt: null,
-      parserProcessed: 3,
-    });
-    expect(logRequests).toHaveLength(1);
-    expect(logRequests[0]?.entries).toEqual([
-      expect.objectContaining({
-        component: "mailbox",
-        errorCode: "parser_jobs_failed",
-        eventCode: "mailbox.parser_jobs_failed",
-        level: "warn",
-        phase: "import",
-        redactedJson: {
-          captureIdPresent: true,
-          errorCode: "parser_jobs_failed",
-          errorCodes: ["ffmpeg_unavailable", "provider_unavailable"],
-          nextWakeAtPresent: false,
-          parserFailed: 2,
-          parserObservedFailedJobs: 0,
-          parserProcessed: 3,
-          parserSucceeded: 1,
-          safeErrorMessage: "One or more hosted conversation parser jobs failed.",
-        },
-      }),
-    ]);
-  });
-
-  it("logs failed parser job state without requeueing terminal failures", async () => {
-    const logRequests: HostedRuntimeLogRequest[] = [];
-    const runtime = mockOpenInboxRuntimeWithParseJobs({
-      failedJobs: [
-        createParseJobRecord({
-          errorCode: "ffmpeg_unavailable",
-          errorMessage: "spawn /app/test-parser-toolchain/ffmpeg ENOENT",
-          jobId: "job_failed_from_state",
-          state: "failed",
-        }),
-      ],
-    });
-    mocks.createInboxParserService.mockReturnValueOnce({
-      drain: vi.fn(async () => []),
-    });
-    mocks.normalizeHostedLinqConversationCapture.mockResolvedValueOnce({
-      source: "linq",
-    });
-
-    const importResult = await importHostedConversationMessageWakeIntoLocalInbox({
-      runtime: createRuntimeWithLogPort(logRequests),
-      vaultRoot: "/tmp/assistant-runtime-conversation",
-      wake: buildHostedExecutionLinqConversationMessageWake({
-        eventId: "evt_linq_parser_state_failure",
-        linqMessage: {
-          chatId: "chat_after_parser_state_failure",
-          from: "+15551234567",
-          isFromMe: false,
-          messageId: "msg_123",
-          parts: [],
-        },
-        occurredAt: "2026-04-08T00:00:00.000Z",
-        phoneLookupKey: "15551234567",
-        userId: "member_123",
-      }),
-    });
-
-    expect(importResult.metrics).toEqual({
-      nextWakeAt: null,
-      parserProcessed: 0,
-    });
-    expect(runtime.requeueAttachmentParseJobs).not.toHaveBeenCalled();
-    expect(logRequests).toHaveLength(1);
-    expect(logRequests[0]?.entries).toEqual([
-      expect.objectContaining({
-        component: "mailbox",
-        errorCode: "parser_jobs_failed",
-        eventCode: "mailbox.parser_jobs_failed",
-        level: "warn",
-        phase: "import",
-        redactedJson: {
-          captureIdPresent: true,
-          errorCode: "parser_jobs_failed",
-          errorCodes: ["ffmpeg_unavailable"],
-          nextWakeAtPresent: false,
-          parserFailed: 1,
-          parserObservedFailedJobs: 1,
-          parserProcessed: 0,
-          parserSucceeded: 0,
-          safeErrorMessage: "One or more hosted conversation parser jobs failed.",
-        },
-      }),
-    ]);
   });
 
   it("does not fall back to transient inbox projection when canonical inbox persistence fails", async () => {
@@ -1526,9 +703,6 @@ describe("importHostedConversationMessageWakeIntoLocalInbox", () => {
       runtime: input.runtime,
     }));
     mocks.normalizeHostedLinqConversationCapture.mockResolvedValueOnce(capture);
-    mocks.createInboxParserService.mockReturnValueOnce({
-      drain: vi.fn(async () => []),
-    });
 
     await expect(
       importHostedConversationMessageWakeIntoLocalInbox({
@@ -1550,34 +724,7 @@ describe("importHostedConversationMessageWakeIntoLocalInbox", () => {
       }),
     ).rejects.toThrow("Canonical inbox capture projection failed.");
 
-    expect(mocks.createInboxParserService).not.toHaveBeenCalled();
     expect(pipelineClose).toHaveBeenCalledTimes(1);
-  });
-
-  it("does not mark self-authored Linq messages as read", async () => {
-    mocks.normalizeHostedLinqConversationCapture.mockResolvedValueOnce({
-      source: "linq",
-    });
-
-    await importHostedConversationMessageWakeIntoLocalInbox({
-      runtime: createRuntime(),
-      vaultRoot: "/tmp/assistant-runtime-conversation",
-      wake: buildHostedExecutionLinqConversationMessageWake({
-        eventId: "evt_linq_from_me",
-        linqMessage: {
-          chatId: "chat_from_me",
-          from: "+15551234567",
-          isFromMe: true,
-          messageId: "msg_123",
-          parts: [],
-        },
-        occurredAt: "2026-04-08T00:00:00.000Z",
-        phoneLookupKey: "15551234567",
-        userId: "member_123",
-      }),
-    });
-
-    expect(mocks.markLinqChatRead).not.toHaveBeenCalled();
   });
 
   it("fails closed on unsupported conversation wake kinds before opening the inbox runtime", async () => {
