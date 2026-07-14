@@ -9,6 +9,14 @@ export interface DeviceSyncCompletionContactAction {
   target?: string;
 }
 
+export interface DeviceSyncCompletionSetupAction {
+  ariaLabel: string;
+  href: string;
+  label: string;
+  rel: string;
+  target: "_blank";
+}
+
 // `kind` chooses the dialog header icon: "device-sync" → watch+check (the
 // wearable connect flow), "connected-app" → connect-link (Composio-backed
 // integrations like Gmail). The model shape itself is shared because the
@@ -21,6 +29,7 @@ export interface DeviceSyncCompletionDialogModel {
   failed: boolean;
   kind: CompletionDialogKind;
   retryHref: string | null;
+  setupAction?: DeviceSyncCompletionSetupAction | null;
   title: string;
   // True when the URL asserted a successful device connect but the server could
   // not verify it: no member session, no matching active source, or a transient

@@ -44,9 +44,11 @@ describe("device sync messaging return route", () => {
     expect(response.headers.get("referrer-policy")).toBe("no-referrer");
     const html = await response.text();
     expect(html).toContain(
-      '<meta http-equiv="refresh" content="0;url=sms:+15550100001?body=I%20just%20connected%20my%20WHOOP">',
+      '<meta http-equiv="refresh" content="0;url=sms:+15550100001?body=I%20just%20connected%20my%20WHOOP.%20Help%20me%20finish%20Apple%20Health%20sync.">',
     );
-    expect(html).toContain('href="sms:+15550100001?body=I%20just%20connected%20my%20WHOOP"');
+    expect(html).toContain(
+      'href="sms:+15550100001?body=I%20just%20connected%20my%20WHOOP.%20Help%20me%20finish%20Apple%20Health%20sync."',
+    );
     expect(html).toContain("WHOOP is connected");
     expect(html).not.toContain("<script");
   });

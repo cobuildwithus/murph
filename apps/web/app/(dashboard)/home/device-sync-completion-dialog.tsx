@@ -9,6 +9,7 @@ import {
   MessageCircleIcon,
   RefreshCwIcon,
   SendIcon,
+  SmartphoneIcon,
 } from "lucide-react";
 
 import { WatchCheckIcon } from "@/src/components/icons/home-icons";
@@ -104,6 +105,21 @@ export function DeviceSyncCompletionDialog({
         </DialogHeader>
 
         <div className="flex flex-col gap-2">
+          {model.setupAction ? (
+            <a
+              aria-label={model.setupAction.ariaLabel}
+              className={buttonVariants({
+                className: "w-full",
+                size: "xl",
+              })}
+              href={model.setupAction.href}
+              rel={model.setupAction.rel}
+              target={model.setupAction.target}
+            >
+              <SmartphoneIcon data-icon="inline-start" />
+              {model.setupAction.label}
+            </a>
+          ) : null}
           {model.failed && model.retryHref ? (
             <Link
               href={model.retryHref}
@@ -121,6 +137,7 @@ export function DeviceSyncCompletionDialog({
               className={buttonVariants({
                 className: "w-full",
                 size: "xl",
+                variant: model.setupAction ? "outline" : "default",
               })}
               href={model.contactAction.href}
               rel={model.contactAction.rel}
