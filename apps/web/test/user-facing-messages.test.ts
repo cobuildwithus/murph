@@ -19,6 +19,7 @@ const TEST_TEMPLATE_KEYS = [
   "linq.ai_usage.edge_limit_reached",
   "linq.ai_usage.family_limit_reached",
   "linq.ai_usage.pulse_upgrade_edge",
+  "linq.ai_usage.thread_limit_reached",
 ] as const satisfies readonly UserFacingMessageTemplateKey[];
 
 const TEST_CONTEXT_BY_KEY = {
@@ -48,6 +49,7 @@ const TEST_CONTEXT_BY_KEY = {
   "linq.ai_usage.pulse_upgrade_edge": {
     homeUrl: "https://withmurph.ai/home",
   },
+  "linq.ai_usage.thread_limit_reached": {},
 } satisfies {
   [K in UserFacingMessageTemplateKey]: UserFacingMessageContextByKey[K];
 };
@@ -106,6 +108,41 @@ describe("user-facing message variants", () => {
 
   it("identifies Murph in every phone signup invite", () => {
     expectEveryVariantMatches("linq.invite_signup", /Murph/u);
+  });
+
+  it("keeps thread allowance copy neutral and advisory", () => {
+    for (const text of collectRenderedTexts("linq.ai_usage.thread_limit_reached")) {
+      expect(text).not.toMatch(/trial|upgrade|checkout|Edge|Pulse|top[ -]?up|payer|https?:\/\//iu);
+      expect(text).not.toMatch(/paused?|resume|reset|back after|return after/iu);
+    }
+  });
+
+  it("keeps notice templates neutral about unprojected billing actions", () => {
+    for (const key of [
+      "linq.ai_usage.trial_conversion_pending",
+      "linq.ai_usage.trial_limit_reached",
+      "linq.ai_usage.edge_limit_reached",
+      "linq.ai_usage.family_limit_reached",
+    ] as const) {
+      for (const text of collectRenderedTexts(key)) {
+        expect(text).not.toMatch(/upgrade|start pulse|checkout|subscribe/iu);
+      }
+    }
+  });
+
+  it("communicates every included-usage limit as a percentage without currency progress", () => {
+    for (const key of [
+      "linq.ai_usage.trial_limit_reached",
+      "linq.ai_usage.edge_limit_reached",
+      "linq.ai_usage.family_limit_reached",
+      "linq.ai_usage.pulse_upgrade_edge",
+      "linq.ai_usage.thread_limit_reached",
+    ] as const) {
+      for (const text of collectRenderedTexts(key)) {
+        expect(text).toMatch(/^.+ \(100% used\)\./u);
+        expect(text).not.toMatch(/\$|USD|dollars?|\$\d+(?:\.\d+)?\s*\/\s*\$\d+/iu);
+      }
+    }
   });
 
   it("keeps every direct welcome broad, private, context-aware, and reply-oriented", () => {

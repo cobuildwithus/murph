@@ -263,7 +263,7 @@ export function createHostedGroupToolWithLinqThreadContext(input: {
         && request.action !== "read_current"
         && request.action !== "revoke_own_email_share"
       ) {
-        return buildHostedGroupEmailMutationUnavailable(request);
+        return buildHostedGroupEmailRestrictedActionUnavailable(request);
       }
       if (request.action === "revoke_own_email_share") {
         if (emailIngressPresent) {
@@ -296,7 +296,7 @@ export function createHostedGroupToolWithLinqThreadContext(input: {
   };
 }
 
-function buildHostedGroupEmailMutationUnavailable(
+function buildHostedGroupEmailRestrictedActionUnavailable(
   request: Exclude<
     HostedRuntimeGroupToolRequest,
     { action: "read_current" | "revoke_own_email_share" }
@@ -304,6 +304,11 @@ function buildHostedGroupEmailMutationUnavailable(
 ): HostedRuntimeGroupToolResponse {
   const unavailableReason = "authenticated_sender_required";
   switch (request.action) {
+    case "list_memberships":
+      return {
+        action: request.action,
+        result: { memberships: null, status: "unavailable", unavailableReason },
+      };
     case "create_join_link":
     case "post_join_offer":
     case "update_display_name":
@@ -854,6 +859,9 @@ export async function runHostedWorkspaceAssistantPhase(
                 newsletterToolPort: input.runtime.platform.newsletterToolPort,
               }),
             }
+          : {}),
+        ...(input.runtime.platform.planUsageToolPort
+          ? { planUsageTool: input.runtime.platform.planUsageToolPort }
           : {}),
         ...(issueDeviceConnectLink ? { issueDeviceConnectLink } : {}),
         ...(input.materializeWorkspaceArtifacts
