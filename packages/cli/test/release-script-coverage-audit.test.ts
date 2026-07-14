@@ -1164,6 +1164,7 @@ describe('monorepo release flow coverage audit', () => {
     expect(agentWorkflowRouting).toContain(
       "For prompt-primary changes, run the completion workflow's `prompt-review` pass",
     )
+    expect(agentWorkflowRouting).toContain('proportional low-risk exemptions')
     expect(prReviewGptLoop).toContain('does **not** run the local Codex')
     expect(prReviewGptLoop).toContain('replaces the default local `deep-review` pass')
     expect(prReviewGptLoop).toContain(

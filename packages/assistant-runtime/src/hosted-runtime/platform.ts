@@ -215,6 +215,7 @@ export interface HostedRuntimeLinqCurrentInboundProof {
 }
 
 export interface HostedRuntimeLinqRecentInboundEngagementRequest {
+  answeredMailboxItemIds?: readonly string[] | null;
   authorityCheckOnly?: boolean | null;
   currentInbound?: HostedRuntimeLinqCurrentInboundProof | null;
   directRecipientPhoneNumber?: string | null;
