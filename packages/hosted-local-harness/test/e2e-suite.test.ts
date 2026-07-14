@@ -311,6 +311,7 @@ describe("hosted-local E2E suite preparation", () => {
     expect(vitestCalls[12]).toEqual(expect.objectContaining({
       args: expect.arrayContaining([
         "apps/cloudflare/test/hosted-local-linq-webhook-e2e.test.ts",
+        "apps/cloudflare/test/hosted-local-linq-same-wake-batching-e2e.test.ts",
         "apps/cloudflare/test/hosted-local-telegram-first-contact-e2e.test.ts",
       ]),
       command: "pnpm",

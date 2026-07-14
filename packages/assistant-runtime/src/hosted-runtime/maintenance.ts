@@ -346,9 +346,8 @@ export async function runHostedAssistantAutomation(
     selectedInputIds: selectedInputIds.inputIds,
     vaultRoot,
   });
-  const shouldDeferCronForSelectedInput = selectedInputIds.inputIds.length > 0;
   const shouldDeferCron = () =>
-    shouldDeferCronForSelectedInput
+    baseInputSource.readSelectedInputIds().length > 0
     || options?.shouldYieldBackgroundMaintenance?.() === true;
   const inputSource: AssistantInputSource = {
     ...baseInputSource,
@@ -368,7 +367,7 @@ export async function runHostedAssistantAutomation(
             query,
             queryIndex,
             result,
-            selectedInputCount: selectedInputIds.inputIds.length,
+            selectedInputCount: baseInputSource.readSelectedInputIds().length,
           }),
           wake,
           message: "Hosted assistant input candidate query finished.",
@@ -402,11 +401,7 @@ export async function runHostedAssistantAutomation(
     },
     async refresh(refreshInput) {
       const result = await baseInputSource.refresh(refreshInput);
-      if (
-        selectedInputIds.mode === "background"
-        && result.progressed
-        && result.reason === "ingested_input"
-      ) {
+      if (result.progressed && result.reason === "ingested_input") {
         activeTurnInputIngested = true;
       }
 
@@ -430,6 +425,9 @@ export async function runHostedAssistantAutomation(
   try {
     passStartedAt = Date.now();
     const maxPerScan = Math.max(1, selectedInputIds.inputIds.length);
+    const maxInputPerScan = selectedInputIds.inputIds.length > 0
+      ? maxPerScan
+      : DEFAULT_ASSISTANT_AUTOMATION_SCAN_LIMIT;
     const buildBackgroundDynamicContextPrompt =
       selectedInputIds.mode === "background"
       && selectedInputIds.inputIds.length === 0
@@ -448,6 +446,7 @@ export async function runHostedAssistantAutomation(
       executionContext,
       ...(options?.operationScope ? { operationScope: options.operationScope } : {}),
       inboxServices,
+      ...(maxInputPerScan === maxPerScan ? {} : { maxInputPerScan }),
       onEvent: (event) => {
         automationEventCounts.set(
           event.type,
@@ -580,7 +579,7 @@ export async function runHostedAssistantAutomation(
       inferBacklogFromSaturation: selectedInputIds.mode === "background",
       nowMs: resolveHostedMaintenanceWakeNowMs(wake),
       resultNextWakeAt: result.nextWakeAt,
-      scanLimit: maxPerScan,
+      scanLimit: Math.max(1, baseInputSource.readSelectedInputIds().length),
       scanResult: {
         replies,
         routing,

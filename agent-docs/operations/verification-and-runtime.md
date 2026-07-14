@@ -228,7 +228,9 @@ the advisory budget.
   `pnpm dev` profile and hosted-local E2E profiles start managed local
   Temporal plus the worker through the canonical hosted-local stack, and the
   non-manual `temporal-orchestration` scenario
-  proves web signal, worker query handling, and Cloudflare ensure-processing.
+  proves web signal, worker query handling, and Cloudflare ensure-processing;
+  `linq-same-wake-batching` deterministically proves that one Temporal wake
+  batches the already-arrived rapid Linq messages into one assistant turn.
   The package build pre-bundles Workflow code into
   `dist/workflow-bundle.js`; local/dev workers use `workflowsPath`, while the
   Render production path uses `workflowBundle` through the package-local built

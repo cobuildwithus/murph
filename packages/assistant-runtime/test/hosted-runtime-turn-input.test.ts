@@ -275,6 +275,109 @@ describe("createHostedAssistantInputSource", () => {
     expect(listSpy).not.toHaveBeenCalled();
   });
 
+  it("batches newly enqueued exact successors while the pre-provider selection is empty", async () => {
+    const vaultRoot = await createTempVault();
+    await enableLinqAutoReply(vaultRoot);
+    const source = createHostedAssistantInputSource({
+      initialPendingInputIds: [],
+      pendingInputRefreshMode: "compact",
+      selectedInputIds: [],
+      vaultRoot,
+    });
+    const first = await upsertAssistantInputEvent({
+      vault: vaultRoot,
+      event: createAssistantInputEvent({
+        causalSeq: "40",
+        dedupeKey: "dedupe_refresh_batch_first",
+        eventId: "evt_refresh_batch_first",
+        itemId: "item_refresh_batch_first",
+        laneSeq: "40",
+        messageId: "msg_refresh_batch_first",
+        occurredAt: "2026-04-23T00:00:01.000Z",
+        receivedAt: "2026-04-23T00:00:02.000Z",
+        text: "first refresh batch input",
+      }),
+    });
+    const second = await upsertAssistantInputEvent({
+      vault: vaultRoot,
+      event: createAssistantInputEvent({
+        causalSeq: "41",
+        dedupeKey: "dedupe_refresh_batch_second",
+        eventId: "evt_refresh_batch_second",
+        itemId: "item_refresh_batch_second",
+        laneSeq: "41",
+        messageId: "msg_refresh_batch_second",
+        occurredAt: "2026-04-23T00:00:03.000Z",
+        receivedAt: "2026-04-23T00:00:04.000Z",
+        text: "second refresh batch input",
+      }),
+    });
+    const third = await upsertAssistantInputEvent({
+      vault: vaultRoot,
+      event: createAssistantInputEvent({
+        causalSeq: "42",
+        dedupeKey: "dedupe_refresh_batch_third",
+        eventId: "evt_refresh_batch_third",
+        itemId: "item_refresh_batch_third",
+        laneSeq: "42",
+        messageId: "msg_refresh_batch_third",
+        occurredAt: "2026-04-23T00:00:05.000Z",
+        receivedAt: "2026-04-23T00:00:06.000Z",
+        text: "third refresh batch input",
+      }),
+    });
+    for (const inputId of [first.inputId, second.inputId, third.inputId]) {
+      await enqueueHostedPendingAssistantInputId({ inputId, vaultRoot });
+    }
+
+    await expect(source.refresh()).resolves.toEqual({
+      progressed: true,
+      reason: "ingested_input",
+    });
+    expect(source.readSelectedInputIds()).toEqual([
+      first.inputId,
+      second.inputId,
+      third.inputId,
+    ]);
+    const selected = await source.listInputCandidates({
+      limit: 50,
+      sourceId: "linq",
+    });
+    expect(selected.inputs.map((candidate) => candidate.event.inputId)).toEqual([
+      first.inputId,
+      second.inputId,
+      third.inputId,
+    ]);
+
+    const late = await upsertAssistantInputEvent({
+      vault: vaultRoot,
+      event: createAssistantInputEvent({
+        causalSeq: "43",
+        dedupeKey: "dedupe_refresh_batch_late",
+        eventId: "evt_refresh_batch_late",
+        itemId: "item_refresh_batch_late",
+        laneSeq: "43",
+        messageId: "msg_refresh_batch_late",
+        occurredAt: "2026-04-23T00:00:07.000Z",
+        receivedAt: "2026-04-23T00:00:08.000Z",
+        text: "late input after refresh freeze",
+      }),
+    });
+    await enqueueHostedPendingAssistantInputId({
+      inputId: late.inputId,
+      vaultRoot,
+    });
+    await expect(source.refresh()).resolves.toEqual({
+      progressed: false,
+      reason: "no_new_input",
+    });
+    expect(source.readSelectedInputIds()).toEqual([
+      first.inputId,
+      second.inputId,
+      third.inputId,
+    ]);
+  });
+
   it("discovers input queued after an empty background selection", async () => {
     const vaultRoot = await createTempVault();
     await enableLinqAutoReply(vaultRoot);
