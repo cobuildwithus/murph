@@ -675,6 +675,9 @@ describe('assistant execution prompt contract', () => {
     expect(prompt).toContain('vault-cli memory upsert')
     expect(prompt).toContain('standing instruction')
     expect(prompt).toContain(
+      "For appointment work, follow appointment-scheduling's explicit user-approval memory boundary.",
+    )
+    expect(prompt).toContain(
       'Do not create a memory record for routine success',
     )
     expect(prompt).toContain(
@@ -1723,6 +1726,7 @@ describe('assistant experiment onboarding guidance', () => {
     expect(prompt).toContain('Setup/support: murph-onboarding, experiment-onboarding, behavior-followthrough, self-management-experiments.')
     expect(prompt).toContain('Sleep/readiness: sleep-improvement, circadian-rhythm, sleep-recovery-readiness, hrv-resting-heart-rate, energy-fatigue.')
     expect(prompt).toContain('Nutrition/metabolic: food-journal, nutrition-strategy, body-composition, gut-digestion, micronutrients-supplements, cardiometabolic-health, cycle-hormonal-health.')
+    expect(prompt).toContain('Care logistics: appointment-scheduling.')
     expect(prompt).toContain('Execution/artifacts: computer-use, pdf, music-generation. Groups: group-chat, groupchat-comedy, group-challenge, group-newsletter.')
     expect(prompt).toContain('Overlaps: sleep-improvement owns sleep mechanics; circadian-rhythm clock timing;')
     expect(prompt).not.toContain(
