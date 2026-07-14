@@ -3,6 +3,7 @@ import { createHash } from "node:crypto";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 
 import {
+  assertCurrentMealPhotoCaptureEnrollmentTx,
   issueMealPhotoCaptureEnrollment,
   requireActiveMealPhotoCaptureEnrollment,
   revokeMealPhotoCaptureEnrollmentForMember,
@@ -13,6 +14,7 @@ const mocks = vi.hoisted(() => ({
   assertActiveHostedMemberAccessAllowed: vi.fn(),
   assertHostedLaunchRequiredConsentGranted: vi.fn(),
   lockHostedMemberRow: vi.fn(),
+  lockHostedMemberSponsoredAccessRows: vi.fn(),
 }));
 
 vi.mock("@/src/lib/hosted-onboarding/member-access", () => ({
@@ -30,6 +32,7 @@ vi.mock("@/src/lib/hosted-onboarding/shared", async (importOriginal) => {
   return {
     ...actual,
     lockHostedMemberRow: mocks.lockHostedMemberRow,
+    lockHostedMemberSponsoredAccessRows: mocks.lockHostedMemberSponsoredAccessRows,
   };
 });
 
@@ -39,6 +42,8 @@ const INSTALLATION_HASH = sha256(INSTALLATION_ID);
 
 type MealPhotoCapturePrismaForTest =
   Parameters<typeof issueMealPhotoCaptureEnrollment>[0]["prisma"];
+type MealPhotoCaptureTransactionForTest =
+  Parameters<typeof assertCurrentMealPhotoCaptureEnrollmentTx>[0]["prisma"];
 
 interface StoredEnrollment {
   createdAt: Date;
@@ -59,6 +64,7 @@ describe("meal photo capture enrollment credentials", () => {
     mocks.assertActiveHostedMemberAccessAllowed.mockResolvedValue(undefined);
     mocks.assertHostedLaunchRequiredConsentGranted.mockResolvedValue(undefined);
     mocks.lockHostedMemberRow.mockResolvedValue(undefined);
+    mocks.lockHostedMemberSponsoredAccessRows.mockResolvedValue(undefined);
   });
 
   it("persists only hashed bearer/installation values and an encrypted secret", async () => {
@@ -311,6 +317,57 @@ describe("meal photo capture enrollment credentials", () => {
     })).rejects.toMatchObject({ code: "AUTH_REQUIRED", httpStatus: 401 });
     expect(mocks.assertActiveHostedMemberAccessAllowed).not.toHaveBeenCalled();
   });
+
+  it("rechecks the same enrollment under the member lock before commit", async () => {
+    const prisma = createEnrollmentPrismaHarness();
+    const issued = await issueMealPhotoCaptureEnrollment({
+      memberId: MEMBER_ID,
+      prisma: prisma.client,
+      request: enrollmentRequest(),
+    });
+    const request = new Request("https://app.example.test/photos", {
+      headers: { authorization: `Bearer ${issued.uploadToken}` },
+    });
+    const enrollment = await requireActiveMealPhotoCaptureEnrollment({
+      prisma: prisma.client,
+      request,
+    });
+    vi.clearAllMocks();
+
+    await expect(assertCurrentMealPhotoCaptureEnrollmentTx({
+      enrollment,
+      prisma: prisma.tx,
+      request,
+    })).resolves.toBeUndefined();
+
+    expect(mocks.lockHostedMemberRow).toHaveBeenCalledWith(prisma.tx, MEMBER_ID);
+    expect(mocks.lockHostedMemberSponsoredAccessRows).toHaveBeenCalledWith(
+      prisma.tx,
+      MEMBER_ID,
+    );
+    expect(mocks.lockHostedMemberRow.mock.invocationCallOrder[0])
+      .toBeLessThan(mocks.lockHostedMemberSponsoredAccessRows.mock.invocationCallOrder[0] ?? 0);
+    expect(mocks.lockHostedMemberSponsoredAccessRows.mock.invocationCallOrder[0])
+      .toBeLessThan(mocks.assertActiveHostedMemberAccessAllowed.mock.invocationCallOrder[0] ?? 0);
+    expect(mocks.assertActiveHostedMemberAccessAllowed).toHaveBeenCalledWith({
+      memberId: MEMBER_ID,
+      prisma: prisma.tx,
+    });
+    expect(mocks.assertHostedLaunchRequiredConsentGranted).toHaveBeenCalledWith({
+      memberId: MEMBER_ID,
+      prisma: prisma.tx,
+    });
+
+    prisma.setRecord({
+      ...requireStoredEnrollment(prisma.getRecord()),
+      revokedAt: new Date(),
+    });
+    await expect(assertCurrentMealPhotoCaptureEnrollmentTx({
+      enrollment,
+      prisma: prisma.tx,
+      request,
+    })).rejects.toMatchObject({ code: "AUTH_REQUIRED", httpStatus: 401 });
+  });
 });
 
 function enrollmentRequest() {
@@ -326,7 +383,7 @@ function createEnrollmentPrismaHarness(): {
   getRecord: () => StoredEnrollment | null;
   setBeforeUpsert: (callback: (() => Promise<void>) | null) => void;
   setRecord: (record: StoredEnrollment | null) => void;
-  tx: object;
+  tx: MealPhotoCaptureTransactionForTest;
 } {
   let record: StoredEnrollment | null = null;
   let beforeUpsert: (() => Promise<void>) | null = null;
@@ -406,8 +463,20 @@ function createEnrollmentPrismaHarness(): {
     setRecord: (next) => {
       record = next;
     },
-    tx,
+    tx: mealPhotoCaptureTransactionForTest(tx),
   };
+}
+
+function mealPhotoCaptureTransactionForTest(tx: {
+  hostedMealPhotoCaptureEnrollment: object;
+}): MealPhotoCaptureTransactionForTest {
+  // Narrow test boundary: member locking and the access/consent reads are
+  // mocked, so this harness needs only the enrollment delegate.
+  const narrowTx = tx as Pick<
+    MealPhotoCaptureTransactionForTest,
+    "hostedMealPhotoCaptureEnrollment"
+  >;
+  return narrowTx as MealPhotoCaptureTransactionForTest;
 }
 
 function mealPhotoCapturePrismaClientForTest(client: {

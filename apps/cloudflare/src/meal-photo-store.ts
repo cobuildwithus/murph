@@ -15,7 +15,7 @@ import {
 export const HOSTED_MEAL_PHOTO_CONTENT_TYPE = "image/jpeg";
 export const HOSTED_MEAL_PHOTO_MAX_BYTES = HOSTED_EXECUTION_MEAL_PHOTO_MAX_BYTES;
 
-const HOSTED_MEAL_PHOTO_KEY_SALT = "murph.hosted.meal-photo-key.v1";
+const HOSTED_MEAL_PHOTO_KEY_SALT = "murph.hosted.meal-photo-key.v2";
 const HOSTED_MEAL_PHOTO_CAPTURE_ID_PATTERN = /^[a-f0-9]{64}$/u;
 const HOSTED_MEAL_PHOTO_KEY_PATTERN = /^[a-f0-9]{40}$/u;
 const HOSTED_SHA256_PATTERN = /^[a-f0-9]{64}$/u;
@@ -53,11 +53,12 @@ export function createHostedMealPhotoStore(input: {
 
   return {
     async deleteMealPhoto(mealPhotoKey) {
-      const objectKey = await resolveObjectKey(mealPhotoKey);
-      if (!input.bucket.delete) {
-        throw new Error("Hosted meal photo deletion is unavailable.");
-      }
-      await input.bucket.delete(objectKey);
+      await deleteHostedMealPhotoObject({
+        bucket: input.bucket,
+        mealPhotoKey,
+        storageNamespaceId: input.storageNamespaceId,
+        userId,
+      });
     },
     async readMealPhoto(mealPhotoKey) {
       const normalizedKey = requireHostedMealPhotoKey(mealPhotoKey);
@@ -87,6 +88,7 @@ export function createHostedMealPhotoStore(input: {
         throw new TypeError("Hosted meal photo sha256 must match the JPEG bytes.");
       }
       const mealPhotoKey = await deriveHostedMealPhotoKey({
+        attemptId: crypto.randomUUID(),
         captureId,
         sha256,
         userId,
@@ -117,6 +119,22 @@ export function createHostedMealPhotoStore(input: {
       userId,
     });
   }
+}
+
+export async function deleteHostedMealPhotoObject(input: {
+  bucket: R2BucketLike;
+  mealPhotoKey: string;
+  storageNamespaceId?: string | null;
+  userId: string;
+}): Promise<void> {
+  if (!input.bucket.delete) {
+    throw new Error("Hosted meal photo deletion is unavailable.");
+  }
+  await input.bucket.delete(await hostedMealPhotoObjectKey({
+    mealPhotoKey: requireHostedMealPhotoKey(input.mealPhotoKey),
+    storageNamespaceId: input.storageNamespaceId,
+    userId: requireNonEmptyString(input.userId, "Hosted meal photo userId"),
+  }));
 }
 
 export function requireHostedMealPhotoKey(value: string): string {
@@ -184,6 +202,7 @@ function createHostedMealPhotoAad(input: {
 }
 
 async function deriveHostedMealPhotoKey(input: {
+  attemptId: string;
   captureId: string;
   sha256: string;
   userId: string;
@@ -193,6 +212,7 @@ async function deriveHostedMealPhotoKey(input: {
     input.userId,
     input.captureId,
     input.sha256,
+    input.attemptId,
   ].join("\0")));
   return digest.slice(0, 40);
 }

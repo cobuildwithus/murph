@@ -36,6 +36,7 @@ import { getHostedDashboardPageAuthSnapshot } from "@/src/lib/hosted-onboarding/
 import { getPrisma } from "@/src/lib/prisma";
 import { readHostedSecureApprovalStatus } from "@/src/lib/sensitive-actions/secure-approval-status";
 import { createMurphPageMetadata } from "@/src/lib/site-metadata";
+import { readHostedPersonalAiUsageStatus } from "@/src/lib/hosted-execution/usage-status";
 
 export const metadata: Metadata = createMurphPageMetadata({
   title: "Settings — Murph",
@@ -73,6 +74,7 @@ export default async function SettingsPage({
     familyOwner,
     familyAccess,
     secureApprovalStatus,
+    usageStatus,
   ] =
     authenticatedMember
       ? await Promise.all([
@@ -99,8 +101,12 @@ export default async function SettingsPage({
           readHostedSecureApprovalStatus({
             privyUserId: session?.privyUserId,
           }),
+          readHostedPersonalAiUsageStatus({
+            memberId: authenticatedMember.id,
+            prisma,
+          }),
         ])
-      : [null, null, null, null, null, null, { status: "unavailable" } as const];
+      : [null, null, null, null, null, null, { status: "unavailable" } as const, null];
   const activeFamilyOwner = familyOwner?.billingActive === true;
   const sponsoredMember = familyAccess !== null && familyOwner === null;
   const canStartFamily =
@@ -155,7 +161,7 @@ export default async function SettingsPage({
         description="Plan, model, connected accounts, and data privacy."
       />
 
-      <section className="flex flex-col gap-4">
+      <section id="subscription" className="flex scroll-mt-24 flex-col gap-4">
         <div className="font-mono text-[10px] uppercase tracking-[0.12em] text-muted-foreground">
           Subscription
         </div>
@@ -188,6 +194,7 @@ export default async function SettingsPage({
           currentPeriodEnd={billingRef?.currentPeriodEnd}
           scheduledBillingEffectiveAt={billingRef?.scheduledBillingEffectiveAt}
           scheduledBillingPlanCode={billingRef?.scheduledBillingPlanCode}
+          usageStatus={usageStatus}
         />
       </section>
 

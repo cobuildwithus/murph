@@ -32,6 +32,22 @@ export async function lockHostedMemberRow(
   await tx.$queryRaw`select 1 from "hosted_member" where "id" = ${memberId} for update`;
 }
 
+export async function lockHostedMemberSponsoredAccessRows(
+  tx: Pick<Prisma.TransactionClient, "$queryRaw">,
+  memberId: string,
+): Promise<void> {
+  await tx.$queryRaw`
+    select 1
+    from "hosted_account_group_membership" as "membership"
+    join "hosted_account_group" as "account_group"
+      on "account_group"."id" = "membership"."group_id"
+    where "membership"."member_id" = ${memberId}
+      and "membership"."status" = 'active'
+    order by "account_group"."id", "membership"."id"
+    for update of "account_group", "membership"
+  `;
+}
+
 export function extractLinqTextMessage(input: unknown): string | null {
   if (!input || typeof input !== "object") {
     return null;

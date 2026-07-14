@@ -1,6 +1,6 @@
 # Product Specs Index
 
-Last verified: 2026-07-12
+Last verified: 2026-07-13
 
 | Path | Purpose | Status |
 | --- | --- | --- |
@@ -8,7 +8,8 @@ Last verified: 2026-07-12
 | `agent-docs/product-specs/pulse-trial-checkout-offer.md` | Implemented Pulse Trial checkout-offer architecture over the existing hosted billing and AI usage allowance system. | Active |
 | `agent-docs/product-specs/pulse-trial-start-paid-pulse.md` | Implemented exhausted Pulse Trial conversion to paid Pulse through Stripe trial-end billing. | Active |
 | `agent-docs/product-specs/hosted-plan-downgrades.md` | Conversation-first direct billing controls with canonical financial terms and exact-action approval, Edge-to-Pulse renewal switches, assistant-model gating, and deployment compatibility. | Active |
-| `agent-docs/product-specs/hosted-family-plan.md` | Hosted Family sponsored access, private member accounts, chat-first owner management, canonical seat terms, exact-action approval, and privacy boundaries. | Active |
+| `agent-docs/product-specs/hosted-plan-usage.md` | Web-owned advisory included-usage projection shared by Settings and the read-only assistant tool, including forecast, server-selected action, and group privacy boundaries. | Active |
+| `agent-docs/product-specs/hosted-family-plan.md` | Hosted Family sponsored access for 2-6 people, private member accounts, chat-first owner management, canonical seat terms, exact-action approval, and privacy boundaries. | Active |
 | `agent-docs/product-specs/health-commons.md` | Health Commons page graph, catalog, versioning, future aggregate outcome summaries, and artifact-storage product boundary. | Active |
 | `agent-docs/product-specs/protocol-summary-copy.md` | Source-of-truth copy rules for Health Commons protocol `summary:` fields shown on `/experiments` cards. | Active |
 | `agent-docs/product-specs/murph-onboarding.md` | Value-first onboarding for a private broad-assistant relationship, an ongoing support loop, progressive health-foundation checkpoints, optional baseline review, and finite completion. | Active |
