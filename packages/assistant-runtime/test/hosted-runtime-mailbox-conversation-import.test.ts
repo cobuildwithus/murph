@@ -69,6 +69,9 @@ import type {
 import type {
   NormalizedHostedAssistantRuntimeConfig,
 } from "../src/hosted-runtime/models.ts";
+import {
+  resolveHostedUsageNoticeDeliveryTargetFromAcceptedInputs,
+} from "../src/hosted-runtime/workspace-runner.ts";
 
 const TEST_NOW = "2026-04-26T00:00:00.000Z";
 const TEST_USER_ID = "member_synthetic_conversation_import";
@@ -169,13 +172,6 @@ describe("hosted mailbox conversation import adapter", () => {
       target: "chat_synthetic",
       threadIsDirect: null,
     });
-    assert.deepEqual(outcome.usageNoticeDeliveryTarget, {
-      channel: "linq",
-      replyToMessageId: "msg_synthetic_projection_failure",
-      routeAuthority: null,
-      target: "chat_synthetic",
-    });
-
     const listed = await listAssistantInputEvents({
       vault: vaultRoot,
     });
@@ -640,12 +636,6 @@ describe("hosted mailbox conversation import adapter", () => {
           parserProcessed: 0,
         },
         status: "imported",
-        usageNoticeDeliveryTarget: {
-          channel: "linq",
-          replyToMessageId: "msg_notify_failure",
-          routeAuthority: null,
-          target: "chat_notify_failure",
-        },
       });
     } finally {
       warn.mockRestore();
@@ -1036,11 +1026,6 @@ describe("hosted mailbox conversation import adapter", () => {
     });
 
     assert.equal(outcome.status, "imported");
-    assert.deepEqual(outcome.usageNoticeDeliveryTarget, {
-      channel: "telegram",
-      replyToMessageId: "987654",
-      target: "telegram_chat_latency",
-    });
     expect(latencyTraceRequests.map((request) => request.event)).toEqual([
       expect.objectContaining({
         mailboxItemId: "mailbox_item_telegram_latency_001",
@@ -1254,6 +1239,19 @@ describe("hosted mailbox conversation import adapter", () => {
       messageId: "777",
       threadId: "123456789",
     });
+    assert.equal(event.sourceMetadata, null);
+    assert.deepEqual(
+      await resolveHostedUsageNoticeDeliveryTargetFromAcceptedInputs({
+        inputIds: [event.inputId],
+        memberId: TEST_USER_ID,
+        vaultRoot,
+      }),
+      {
+        channel: "telegram",
+        replyToMessageId: "777",
+        target: "123456789",
+      },
+    );
     assert.deepEqual(await readHostedPendingAssistantInputIds({ vaultRoot }), [
       event.inputId,
     ]);
@@ -1642,7 +1640,6 @@ describe("hosted mailbox conversation import adapter", () => {
     });
 
     assert.equal(outcome.status, "imported");
-
     const listed = await listAssistantInputEvents({
       vault: vaultRoot,
     });
