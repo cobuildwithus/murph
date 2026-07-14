@@ -1090,6 +1090,7 @@ describe('monorepo release flow coverage audit', () => {
       'managed_browser_background_mode="${managed_browser_background_mode:-balanced}"',
     )
     expect(reviewGptConfig).toContain('codebase.zip')
+    expect(reviewGptConfig).toContain('package_script="scripts/package-audit-context-full.sh"')
     expect(reviewGptConfig).not.toContain('snapshot_attachment_name=')
     expect(reviewGptConfig).not.toContain('repomix_attachment_format=')
     expect(reviewGptConfig).not.toContain('repomix_ignore_patterns=')
@@ -1100,11 +1101,20 @@ describe('monorepo release flow coverage audit', () => {
     expect(prDeepReviewPrompt).toContain(
       'Use `codebase.zip` as the sole repository-content source.',
     )
-    expect(prDeepReviewPrompt).toMatch(/Do not review the diff in\s+isolation\./u)
-    expect(prDeepReviewPrompt).toContain('Do not use app connectors, memory, pasted context')
+    expect(prDeepReviewPrompt).toMatch(/Do not review a\s+diff hunk in isolation\./u)
+    expect(prDeepReviewPrompt).toContain(
+      'Do not use app connectors, memory, pasted repository context',
+    )
     expect(prDeepReviewPrompt).toContain('`review-gpt-pr-context/pr.diff`')
     expect(prDeepReviewPrompt).toContain('`review-gpt-pr-context/changed-files.txt`')
-    expect(prDeepReviewPrompt).toContain('If `codebase.zip` is missing, unreadable,')
+    expect(prDeepReviewPrompt).toContain('`review-gpt-pr-context/review-round.json`')
+    expect(prDeepReviewPrompt).toContain(
+      '`review-gpt-pr-context/since-first-reviewed-head.diff`',
+    )
+    expect(prDeepReviewPrompt).toContain(
+      '`review-gpt-pr-context/since-previous-reviewed-head.diff`',
+    )
+    expect(prDeepReviewPrompt).toContain('If any required artifact is missing, unreadable, stale,')
     expect(prDeepReviewPrompt).not.toContain('repo.snapshot.zip')
     expect(prDeepReviewPrompt).not.toContain('repo.repomix.zip')
     expect(prDeepReviewPrompt.toLowerCase()).not.toContain('repomix')
@@ -1113,7 +1123,31 @@ describe('monorepo release flow coverage audit', () => {
     expect(prDeepReviewPrompt).not.toContain('connected repository, PR diff, or touched files')
     expect(prDeepReviewPrompt).toContain('Start with one line identifying the target')
     expect(prDeepReviewPrompt).toContain('`Checked: PR #123 @ abc1234`')
-    expect(prDeepReviewPrompt).toContain('Treat reuse and composability as primary concerns')
+    expect(prDeepReviewPrompt).toContain('Our utmost priority is clean, simple, long-term maintainable')
+    expect(prDeepReviewPrompt).toContain('Default to deletion and radical')
+    expect(prDeepReviewPrompt).toContain('Round 1 is the only full-patch audit')
+    expect(prDeepReviewPrompt).toContain('correction-verification rounds, not fresh full-PR audits')
+    expect(prDeepReviewPrompt).toContain('`ORIGINAL_PR`')
+    expect(prDeepReviewPrompt).toContain('`REVIEW_INDUCED`')
+    expect(prDeepReviewPrompt).toContain('`PRE_EXISTING_OR_ADJACENT`')
+    expect(prDeepReviewPrompt).toContain('`RETROSPECTIVE_REQUIRED`')
+    expect(prDeepReviewPrompt).toContain('at least 2,000 lines')
+    expect(prDeepReviewPrompt).toContain('at least 3,000 lines')
+    expect(prDeepReviewPrompt).toContain('This is neither an automatic merge rejection')
+    expect(prDeepReviewPrompt).toContain('do not emit a standalone Invariant Violation')
+    expect(prDeepReviewPrompt).toContain('current scale, event volume,')
+    expect(prDeepReviewPrompt).toContain('never assume hypothetical future or internet')
+    expect(prDeepReviewPrompt).toMatch(
+      /rare one-window miss affecting one or\s+a\s+few members/u,
+    )
+    expect(prDeepReviewPrompt).toContain('Do not demand replay, backfill, migration, dual-write,')
+    expect(prDeepReviewPrompt).toContain('`ROUND_OUTCOME: PASS`')
+    expect(prDeepReviewPrompt).toContain('`ROUND_OUTCOME: FINDINGS`')
+    expect(prDeepReviewPrompt).toContain('`ROUND_OUTCOME: RETROSPECTIVE_REQUIRED`')
+    expect(prDeepReviewPrompt).toContain('`ROUND_OUTCOME: INVALID`')
+    expect(prDeepReviewPrompt).toMatch(
+      /does\s+not actually resolve counts as `REVIEW_INDUCED`/u,
+    )
     expect(prDeepReviewPrompt).toContain('change-shape breakdown')
     expect(prDeepReviewPrompt).toContain('UX outline')
     const genericReviewGptPrompts = [
@@ -1166,6 +1200,29 @@ describe('monorepo release flow coverage audit', () => {
     expect(prReviewGptLoop).toContain('randomly among usable')
     expect(prReviewGptLoop).toContain('zero accepted findings')
     expect(prReviewGptLoop).toContain('`review-gpt-pr-context/pr.diff`')
+    expect(prReviewGptLoop).toContain('`review-gpt-pr-context/review-round.json`')
+    expect(prReviewGptLoop).toContain(
+      '`review-gpt-pr-context/since-first-reviewed-head.diff`',
+    )
+    expect(prReviewGptLoop).toContain(
+      '`review-gpt-pr-context/since-previous-reviewed-head.diff`',
+    )
+    expect(prReviewGptLoop).toContain('REVIEW_GPT_ROUND_NUMBER')
+    expect(prReviewGptLoop).toContain('REVIEW_GPT_FIRST_REVIEWED_HEAD')
+    expect(prReviewGptLoop).toContain('REVIEW_GPT_PREVIOUS_REVIEWED_HEAD')
+    expect(prReviewGptLoop).toContain('Round 1 is the only full-patch')
+    expect(prReviewGptLoop).toMatch(/Keep that line and baseline\s+immutable/u)
+    expect(prReviewGptLoop).toContain('ReviewGPT first-reviewed head: <full-sha>')
+    expect(prReviewGptLoop).toContain('`ROUND_OUTCOME: INVALID`')
+    expect(prReviewGptLoop).toContain('Browser, model, capture, and attachment')
+    expect(prReviewGptLoop).toContain('review remediation has added at least 500')
+    expect(prReviewGptLoop).toContain('source additions by at least 25 percent')
+    expect(prReviewGptLoop).toContain('The retrospective is')
+    expect(prReviewGptLoop).toContain('not an automatic merge rejection')
+    expect(prReviewGptLoop).toContain('There is no automatic sixth substantive round')
+    expect(prReviewGptLoop).not.toContain('likely needs structural rework')
+    expect(prReviewGptLoop).toContain('current member/event volume')
+    expect(prReviewGptLoop).toContain('First try deleting the rollout seam')
     expect(prReviewGptLoop).toContain('It does **not** run the local Codex')
     expect(prReviewGptLoop).toContain('scripts/review-gpt-pr-head-preflight.sh')
     expect(prReviewGptLoop).toContain('REVIEW_COMPLETE')
@@ -1173,7 +1230,10 @@ describe('monorepo release flow coverage audit', () => {
     expect(prReviewGptLoop).not.toContain('Hard cap: 15 rounds per PR')
     expect(prReviewGptLoop).toContain('Prompt-primary PRs use the local')
     expect(agentsGuide).toContain('Prompt-primary PRs do not run ReviewGPT')
+    expect(agentsGuide).toContain('isolated regression test or explanatory doc')
+    expect(agentsGuide).toContain('later rounds verify only remediation deltas')
     expect(agentWorkflowRouting).toContain('proportional low-risk exemptions')
+    expect(agentWorkflowRouting).toContain('scope-anomaly signal')
     expect(prReviewGptLoop).toContain('does **not** run the local Codex')
     expect(prReviewGptLoop).toContain('replaces the default local `deep-review` pass')
     expect(prReviewGptLoop).toContain(
@@ -1193,6 +1253,10 @@ describe('monorepo release flow coverage audit', () => {
     expect(completionWorkflow).toContain('prompt-guidance-gpt-5p6.md')
     expect(completionWorkflow).not.toContain('prompt-guidance?model=gpt-5.5')
     expect(completionWorkflow).toContain('Change-shape breakdown')
+    expect(completionWorkflow).toContain('scope-anomaly signal')
+    expect(completionWorkflow).toContain('not a quality target or an automatic merge')
+    expect(completionWorkflow).toContain('evidenced current member/event volume')
+    expect(completionWorkflow).toContain('`ROUND_OUTCOME: PASS`')
     expect(completionWorkflow).toContain('User experience (when applicable)')
     expect(completionWorkflow).toContain(
       'Prompt-primary PRs use `prompt-review` and do not run ReviewGPT',
@@ -2275,10 +2339,326 @@ Updated: 2026-04-24
     expect(fullPackageScript).toContain("export COBUILD_AUDIT_CONTEXT_INCLUDE_TESTS_DEFAULT='1'")
     expect(fullPackageScript).toContain("export COBUILD_AUDIT_CONTEXT_INCLUDE_DOCS_DEFAULT='1'")
     expect(fullPackageScript).toContain("export COBUILD_AUDIT_CONTEXT_INCLUDE_CI_DEFAULT='1'")
+    expect(fullPackageScript).toContain('REVIEW_GPT_ROUND_NUMBER')
+    expect(fullPackageScript).toContain('REVIEW_GPT_FIRST_REVIEWED_HEAD')
+    expect(fullPackageScript).toContain('REVIEW_GPT_PREVIOUS_REVIEWED_HEAD')
+    expect(fullPackageScript).toContain('review-round.json')
+    expect(fullPackageScript).toContain('since-first-reviewed-head.diff')
+    expect(fullPackageScript).toContain('since-previous-reviewed-head.diff')
+    expect(fullPackageScript).toContain('git diff --no-ext-diff --no-textconv --patch')
     expect(fullPackageScript).toContain(
       'export COBUILD_AUDIT_CONTEXT_EXCLUDE_GLOBS="${COBUILD_AUDIT_CONTEXT_BINARY_EXCLUDE_GLOBS:-}"',
     )
   })
+
+  it('packages exact ReviewGPT round metadata and remediation deltas', () => {
+    const harnessRoot = mkdtempSync(path.join(os.tmpdir(), 'murph-review-round-harness-'))
+    const fakeBin = path.join(harnessRoot, '.fake-tools')
+    const packageScript = path.join(harnessRoot, 'scripts', 'package-audit-context-full.sh')
+
+    try {
+      writeHarnessFile(
+        harnessRoot,
+        'scripts/package-audit-context-full.sh',
+        readFileSync(
+          path.join(repoRoot, 'scripts', 'package-audit-context-full.sh'),
+          'utf8',
+        ),
+        true,
+      )
+      writeHarnessFile(
+        harnessRoot,
+        'scripts/repo-tools.config.sh',
+        `#!/usr/bin/env bash
+export COBUILD_REPO_ROOT="$(pwd)"
+COBUILD_AUDIT_CONTEXT_BINARY_EXCLUDE_GLOBS=""
+repo_tools_join_lines() { :; }
+cobuild_repo_tool_bin() {
+  printf '%s\\n' "$COBUILD_REPO_ROOT/.fake-tools/cobuild-package-audit-context"
+}
+`,
+        true,
+      )
+      writeHarnessFile(
+        harnessRoot,
+        '.fake-tools/pnpm',
+        `#!/usr/bin/env bash
+set -euo pipefail
+[[ "\${1:-}" == "no-js" ]]
+`,
+        true,
+      )
+      writeHarnessFile(
+        harnessRoot,
+        '.fake-tools/gh',
+        `#!/usr/bin/env bash
+set -euo pipefail
+case "$*" in
+  *".baseRefName"*) printf 'main\\n' ;;
+  *".baseRefOid"*) printf '%s\\n' "$TEST_BASE_SHA" ;;
+  *".headRefOid"*) printf '%s\\n' "$TEST_HEAD_SHA" ;;
+  *".body"*) printf 'ReviewGPT first-reviewed head: %s\\n' "$TEST_FIRST_SHA" ;;
+  *) printf 'unexpected gh invocation: %s\\n' "$*" >&2; exit 1 ;;
+esac
+`,
+        true,
+      )
+      writeHarnessFile(
+        harnessRoot,
+        '.fake-tools/cobuild-package-audit-context',
+        `#!/usr/bin/env bash
+set -euo pipefail
+out_dir=""
+name=""
+while (( "$#" )); do
+  case "$1" in
+    --out-dir) out_dir="$2"; shift 2 ;;
+    --name) name="$2"; shift 2 ;;
+    *) shift ;;
+  esac
+done
+mkdir -p "$out_dir"
+entries=()
+while IFS= read -r entry; do
+  [[ -z "$entry" ]] || entries+=("$entry")
+done <<< "\${COBUILD_AUDIT_CONTEXT_ALWAYS_PATHS:-}"
+(( "\${#entries[@]}" > 0 ))
+(
+  cd "$COBUILD_REPO_ROOT"
+  zip -q "$out_dir/$name.zip" "\${entries[@]}"
+)
+`,
+        true,
+      )
+
+      execFileSync('git', ['init', '-q'], { cwd: harnessRoot })
+      execFileSync('git', ['config', 'core.hooksPath', '.disabled-hooks'], {
+        cwd: harnessRoot,
+      })
+      execFileSync('git', ['config', 'user.name', 'Test'], { cwd: harnessRoot })
+      execFileSync('git', ['config', 'user.email', 'test@users.noreply.github.com'], {
+        cwd: harnessRoot,
+      })
+      writeHarnessFile(harnessRoot, 'apps/demo/source.ts', 'export const value = 0\n')
+      execFileSync('git', ['add', '.'], { cwd: harnessRoot })
+      execFileSync('git', ['commit', '-q', '-m', 'base'], { cwd: harnessRoot })
+      const baseHead = execFileSync('git', ['rev-parse', 'HEAD'], {
+        cwd: harnessRoot,
+        encoding: 'utf8',
+      }).trim()
+
+      writeHarnessFile(harnessRoot, 'apps/demo/source.ts', 'export const value = 1\n')
+      execFileSync('git', ['add', '.'], { cwd: harnessRoot })
+      execFileSync('git', ['commit', '-q', '-m', 'first review'], { cwd: harnessRoot })
+      const firstHead = execFileSync('git', ['rev-parse', 'HEAD'], {
+        cwd: harnessRoot,
+        encoding: 'utf8',
+      }).trim()
+
+      writeHarnessFile(harnessRoot, 'apps/demo/source.ts', 'export const value = 2\n')
+      execFileSync('git', ['add', '.'], { cwd: harnessRoot })
+      execFileSync('git', ['commit', '-q', '-m', 'correction'], { cwd: harnessRoot })
+      const currentHead = execFileSync('git', ['rev-parse', 'HEAD'], {
+        cwd: harnessRoot,
+        encoding: 'utf8',
+      }).trim()
+
+      execFileSync('git', ['checkout', '-q', '-b', 'non-ancestor', baseHead], {
+        cwd: harnessRoot,
+      })
+      writeHarnessFile(harnessRoot, 'apps/demo/source.ts', 'export const value = 99\n')
+      execFileSync('git', ['add', 'apps/demo/source.ts'], { cwd: harnessRoot })
+      execFileSync('git', ['commit', '-q', '-m', 'unrelated line'], { cwd: harnessRoot })
+      const nonAncestorHead = execFileSync('git', ['rev-parse', 'HEAD'], {
+        cwd: harnessRoot,
+        encoding: 'utf8',
+      }).trim()
+      execFileSync('git', ['checkout', '-q', '--detach', currentHead], { cwd: harnessRoot })
+
+      const invokePackager = (
+        name: string,
+        head: string,
+        roundEnv: Record<string, string>,
+      ) => {
+        const outDir = path.join(harnessRoot, 'out', name)
+        const result = spawnSync(
+          'bash',
+          [packageScript, '--zip', '--out-dir', outDir, '--name', name],
+          {
+            cwd: harnessRoot,
+            encoding: 'utf8',
+            env: {
+              ...withoutNodeV8Coverage(),
+              PATH: `${fakeBin}${path.delimiter}${process.env.PATH ?? ''}`,
+              REVIEW_GPT_PR_REF: '',
+              REVIEW_GPT_PR_URL: '123',
+              TEST_BASE_SHA: baseHead,
+              TEST_FIRST_SHA:
+                roundEnv.TEST_RECORDED_FIRST_HEAD ??
+                (roundEnv.REVIEW_GPT_ROUND_NUMBER === '1' ? head : firstHead),
+              TEST_HEAD_SHA: head,
+              ...roundEnv,
+            },
+          },
+        )
+        return {
+          outDir,
+          result,
+          zipPath: path.join(outDir, `${name}.zip`),
+        }
+      }
+
+      const roundOne = invokePackager('round-one', firstHead, {
+        REVIEW_GPT_FIRST_REVIEWED_HEAD: '',
+        REVIEW_GPT_PREVIOUS_REVIEWED_HEAD: '',
+        REVIEW_GPT_ROUND_NUMBER: '1',
+      })
+      expect(roundOne.result.status, roundOne.result.stderr).toBe(0)
+      const roundOneMetadata = JSON.parse(
+        execFileSync(
+          'unzip',
+          ['-p', roundOne.zipPath, 'review-gpt-pr-context/review-round.json'],
+          { encoding: 'utf8' },
+        ),
+      ) as Record<string, unknown>
+      expect(roundOneMetadata).toEqual({
+        schemaVersion: 1,
+        roundNumber: 1,
+        reviewScope: 'full',
+        currentBaseHead: baseHead,
+        firstReviewedHead: firstHead,
+        previousReviewedHead: null,
+        currentReviewedHead: firstHead,
+        firstReviewedHeadIsAncestorOfCurrent: true,
+        previousReviewedHeadIsAncestorOfCurrent: null,
+      })
+      expect(
+        execFileSync(
+          'unzip',
+          [
+            '-p',
+            roundOne.zipPath,
+            'review-gpt-pr-context/since-previous-reviewed-head.diff',
+          ],
+          { encoding: 'utf8' },
+        ),
+      ).toBe('')
+      expect(
+        execFileSync(
+          'unzip',
+          ['-p', roundOne.zipPath, 'review-gpt-pr-context/since-first-reviewed-head.diff'],
+          { encoding: 'utf8' },
+        ),
+      ).toBe('')
+      expect(existsSync(path.join(harnessRoot, 'review-gpt-pr-context'))).toBe(false)
+
+      const roundTwo = invokePackager('round-two', currentHead, {
+        REVIEW_GPT_FIRST_REVIEWED_HEAD: firstHead,
+        REVIEW_GPT_PREVIOUS_REVIEWED_HEAD: firstHead,
+        REVIEW_GPT_ROUND_NUMBER: '2',
+      })
+      expect(roundTwo.result.status, roundTwo.result.stderr).toBe(0)
+      const roundTwoMetadata = JSON.parse(
+        execFileSync(
+          'unzip',
+          ['-p', roundTwo.zipPath, 'review-gpt-pr-context/review-round.json'],
+          { encoding: 'utf8' },
+        ),
+      ) as Record<string, unknown>
+      expect(roundTwoMetadata).toEqual({
+        schemaVersion: 1,
+        roundNumber: 2,
+        reviewScope: 'correction',
+        currentBaseHead: baseHead,
+        firstReviewedHead: firstHead,
+        previousReviewedHead: firstHead,
+        currentReviewedHead: currentHead,
+        firstReviewedHeadIsAncestorOfCurrent: true,
+        previousReviewedHeadIsAncestorOfCurrent: true,
+      })
+      const expectedDelta = execFileSync(
+        'git',
+        ['diff', '--no-ext-diff', '--no-textconv', '--patch', firstHead, currentHead, '--'],
+        { cwd: harnessRoot, encoding: 'utf8' },
+      )
+      expect(
+        execFileSync(
+          'unzip',
+          [
+            '-p',
+            roundTwo.zipPath,
+            'review-gpt-pr-context/since-previous-reviewed-head.diff',
+          ],
+          { encoding: 'utf8' },
+        ),
+      ).toBe(expectedDelta)
+      expect(
+        execFileSync(
+          'unzip',
+          ['-p', roundTwo.zipPath, 'review-gpt-pr-context/since-first-reviewed-head.diff'],
+          { encoding: 'utf8' },
+        ),
+      ).toBe(expectedDelta)
+      expect(existsSync(path.join(harnessRoot, 'review-gpt-pr-context'))).toBe(false)
+
+      const missingPrevious = invokePackager('missing-previous', currentHead, {
+        REVIEW_GPT_FIRST_REVIEWED_HEAD: firstHead,
+        REVIEW_GPT_PREVIOUS_REVIEWED_HEAD: '',
+        REVIEW_GPT_ROUND_NUMBER: '2',
+      })
+      expect(missingPrevious.result.status).not.toBe(0)
+      expect(missingPrevious.result.stderr).toContain(
+        'later ReviewGPT rounds require REVIEW_GPT_FIRST_REVIEWED_HEAD and REVIEW_GPT_PREVIOUS_REVIEWED_HEAD',
+      )
+      expect(existsSync(path.join(harnessRoot, 'review-gpt-pr-context'))).toBe(false)
+
+      const malformedFirst = invokePackager('malformed-first', currentHead, {
+        REVIEW_GPT_FIRST_REVIEWED_HEAD: 'not-a-sha',
+        REVIEW_GPT_PREVIOUS_REVIEWED_HEAD: firstHead,
+        REVIEW_GPT_ROUND_NUMBER: '2',
+      })
+      expect(malformedFirst.result.status).not.toBe(0)
+      expect(malformedFirst.result.stderr).toContain(
+        'first-reviewed head must be a full lowercase 40-character commit SHA',
+      )
+      expect(existsSync(path.join(harnessRoot, 'review-gpt-pr-context'))).toBe(false)
+
+      const resetBaseline = invokePackager('reset-baseline', currentHead, {
+        REVIEW_GPT_FIRST_REVIEWED_HEAD: baseHead,
+        REVIEW_GPT_PREVIOUS_REVIEWED_HEAD: firstHead,
+        REVIEW_GPT_ROUND_NUMBER: '2',
+      })
+      expect(resetBaseline.result.status).not.toBe(0)
+      expect(resetBaseline.result.stderr).toContain(
+        'REVIEW_GPT_FIRST_REVIEWED_HEAD must match the immutable PR body baseline',
+      )
+
+      const unavailableHead = 'f'.repeat(40)
+      const unavailableBaseline = invokePackager('unavailable-baseline', currentHead, {
+        REVIEW_GPT_FIRST_REVIEWED_HEAD: unavailableHead,
+        REVIEW_GPT_PREVIOUS_REVIEWED_HEAD: firstHead,
+        REVIEW_GPT_ROUND_NUMBER: '2',
+        TEST_RECORDED_FIRST_HEAD: unavailableHead,
+      })
+      expect(unavailableBaseline.result.status).not.toBe(0)
+      expect(unavailableBaseline.result.stderr).toContain(
+        'first-reviewed head commit is not available locally',
+      )
+
+      const nonAncestorBaseline = invokePackager('non-ancestor-baseline', currentHead, {
+        REVIEW_GPT_FIRST_REVIEWED_HEAD: nonAncestorHead,
+        REVIEW_GPT_PREVIOUS_REVIEWED_HEAD: firstHead,
+        REVIEW_GPT_ROUND_NUMBER: '2',
+        TEST_RECORDED_FIRST_HEAD: nonAncestorHead,
+      })
+      expect(nonAncestorBaseline.result.status).not.toBe(0)
+      expect(nonAncestorBaseline.result.stderr).toContain(
+        'first-reviewed head must be an ancestor of the current reviewed head',
+      )
+    } finally {
+      rmSync(harnessRoot, { force: true, recursive: true })
+    }
+  }, 30_000)
 
   it('keeps the lean audit bundle smaller than the full one while preserving durable agent docs', () => {
     const leanBundle = createAuditZip('package-audit-context.sh', 'murph-lean-audit')
