@@ -1557,11 +1557,15 @@ function createHostedConversationAssistantInputSourceMetadata(
   if (isHostedLinqConversationMessageWake(wake)) {
     const externalThreadRouteAuthorityPresent = wake.message.routeAuthority !== undefined
       && wake.message.routeAuthority !== null;
+    const groupParticipantAdded = wake.message.groupParticipantAdded === true
+      && externalThreadRouteAuthorityPresent
+      && wake.message.linqMessage.threadIsDirect === false;
     const previousHomeThreadId = normalizeHostedAssistantInputReplyTargetIdentifier(
       wake.message.linqMessage.previousHomeChatId,
     );
     return {
       externalThreadRouteAuthorityPresent,
+      ...(groupParticipantAdded ? { groupParticipantAdded: true as const } : {}),
       kind: "linq",
       partCount: wake.message.linqMessage.parts.length,
       ...(previousHomeThreadId ? { previousHomeThreadId } : {}),

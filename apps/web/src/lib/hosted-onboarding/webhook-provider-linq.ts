@@ -11,6 +11,7 @@ import {
 } from "./entitlement";
 import { readActiveHostedMemberAccess } from "./member-access";
 import {
+  hostedOnboardingError,
   isHostedOnboardingError,
 } from "./errors";
 import {
@@ -89,6 +90,7 @@ import type {
 } from "./linq-first-contact-admission";
 import type { HostedWebhookWakeHandoff } from "./webhook-service-types";
 import {
+  consumeHostedLinqThreadRouteParticipantAdditionPendingTx,
   readHostedThreadRouteByThreadIdentity,
   type HostedLinqThreadRouteEgressAuthority,
   type HostedThreadRouteSnapshot,
@@ -1107,33 +1109,35 @@ async function planHostedLinqExplicitThreadRouteWebhook(input: {
     route: input.route,
     threadId: summary.chatId,
   });
-  const mailboxWake = buildHostedLinqConversationWakeForMailbox({
-    ...(currentLineAccountLookupKey ? { accountLookupKey: currentLineAccountLookupKey } : {}),
-    eventId: input.event.event_id,
-    linqMessage: {
-      chatId: summary.chatId,
-      from: participantContact.value,
-      isFromMe: summary.isFromMe,
-      messageId: summary.messageId,
-      reactionEligible: isHostedLinqMessageReactionEligible({
-        parts: messageEvent.data.message.parts,
-        service: messageEvent.data.service ?? null,
-      }),
-      threadIsDirect: false,
-      ...(messageEvent.data.message.reply_to?.message_id === undefined
-        ? {}
-        : { replyToMessageId: messageEvent.data.message.reply_to.message_id }),
-      ...(messageEvent.data.message.reply_to?.part_index === undefined
-        ? {}
-        : { replyToPartIndex: messageEvent.data.message.reply_to.part_index }),
-      ...(messageEvent.data.service === undefined ? {} : { service: messageEvent.data.service }),
-    },
-    occurredAt,
-    participantContact,
-    rawParts: messageEvent.data.message.parts,
-    routeAuthority,
-    userId: input.route.containerMemberId,
-  });
+  const buildMailboxWake = (groupParticipantAdded?: true) =>
+    buildHostedLinqConversationWakeForMailbox({
+      ...(currentLineAccountLookupKey ? { accountLookupKey: currentLineAccountLookupKey } : {}),
+      eventId: input.event.event_id,
+      ...(groupParticipantAdded ? { groupParticipantAdded } : {}),
+      linqMessage: {
+        chatId: summary.chatId,
+        from: participantContact.value,
+        isFromMe: summary.isFromMe,
+        messageId: summary.messageId,
+        reactionEligible: isHostedLinqMessageReactionEligible({
+          parts: messageEvent.data.message.parts,
+          service: messageEvent.data.service ?? null,
+        }),
+        threadIsDirect: false,
+        ...(messageEvent.data.message.reply_to?.message_id === undefined
+          ? {}
+          : { replyToMessageId: messageEvent.data.message.reply_to.message_id }),
+        ...(messageEvent.data.message.reply_to?.part_index === undefined
+          ? {}
+          : { replyToPartIndex: messageEvent.data.message.reply_to.part_index }),
+        ...(messageEvent.data.service === undefined ? {} : { service: messageEvent.data.service }),
+      },
+      occurredAt,
+      participantContact,
+      rawParts: messageEvent.data.message.parts,
+      routeAuthority,
+      userId: input.route.containerMemberId,
+    });
 
   const existingMailboxItem = await readHostedMailboxItemByDedupeKey({
     dedupeKey: input.event.event_id,
@@ -1143,7 +1147,7 @@ async function planHostedLinqExplicitThreadRouteWebhook(input: {
 
   if (input.sourceMailboxConsumedAt) {
     const mailboxItem = existingMailboxItem ?? (await appendHostedMailboxEnvelopeTx({
-      envelope: mailboxWake,
+      envelope: buildMailboxWake(),
       tx: input.prisma,
     })).item;
     await input.prisma.hostedMailboxItem.updateMany({
@@ -1232,10 +1236,32 @@ async function planHostedLinqExplicitThreadRouteWebhook(input: {
     return admissionPlan;
   }
 
+  const groupParticipantAdded = isHostedLinqDirectChatAttested(messageEvent)
+    ? false
+    : await consumeHostedLinqThreadRouteParticipantAdditionPendingTx({
+        containerMemberId: input.route.containerMemberId,
+        prisma: input.prisma,
+        threadId: summary.chatId,
+      });
+  const mailboxEnvelope = buildMailboxWake(
+    groupParticipantAdded ? true : undefined,
+  );
+
   const mailboxAppend = await appendHostedMailboxEnvelopeTx({
-    envelope: mailboxWake,
+    envelope: mailboxEnvelope,
     tx: input.prisma,
   });
+  if (groupParticipantAdded && mailboxAppend.duplicate) {
+    // Escaping the transaction restores the consumed context bit. The
+    // concurrent delivery already owns the mailbox item, so its retry takes
+    // the early dedupe path without stealing context from the next message.
+    throw hostedOnboardingError({
+      code: "LINQ_MAILBOX_APPEND_RACE",
+      httpStatus: 503,
+      message: "Hosted Linq mailbox append raced with another delivery.",
+      retryable: true,
+    });
+  }
 
   return logHostedLinqWebhookPlannerDecisionAndReturn(
     buildActiveMemberDirectPlan({
@@ -1653,6 +1679,7 @@ function sanitizeHostedOnboardingPlannerLogValue(
 function buildHostedLinqConversationWakeForMailbox(input: {
   accountLookupKey?: string | null;
   eventId: string;
+  groupParticipantAdded?: true;
   linqMessage: Omit<HostedExecutionLinqConversationMessage, "parts">;
   occurredAt: string;
   participantContact: HostedLinqParticipantIdentity;
@@ -1665,6 +1692,7 @@ function buildHostedLinqConversationWakeForMailbox(input: {
       ? {}
       : { accountLookupKey: input.accountLookupKey }),
     eventId: input.eventId,
+    ...(input.groupParticipantAdded ? { groupParticipantAdded: true } : {}),
     linqMessage: {
       ...input.linqMessage,
       parts: buildHostedLinqMailboxParts(input.rawParts, "normal"),
@@ -1687,6 +1715,7 @@ function buildHostedLinqConversationWakeForMailbox(input: {
       ? {}
       : { accountLookupKey: input.accountLookupKey }),
     eventId: input.eventId,
+    ...(input.groupParticipantAdded ? { groupParticipantAdded: true } : {}),
     linqMessage: {
       ...input.linqMessage,
       parts: buildHostedLinqMailboxParts(input.rawParts, "compact"),
@@ -1709,6 +1738,7 @@ function buildHostedLinqConversationWakeForMailbox(input: {
       ? {}
       : { accountLookupKey: input.accountLookupKey }),
     eventId: input.eventId,
+    ...(input.groupParticipantAdded ? { groupParticipantAdded: true } : {}),
     linqMessage: {
       ...input.linqMessage,
       parts: buildMinimalHostedLinqMailboxParts(input.rawParts),
