@@ -4603,7 +4603,7 @@ describe('assistant auto-reply runtime', () => {
       vault: vault.vaultRoot,
     })
 
-    expect(strictList).not.toHaveBeenCalled()
+    expect(strictList).toHaveBeenCalledTimes(1)
     expect(result.lastInputCursor).toEqual(initialInput.event.cursor)
   })
 
@@ -6067,7 +6067,10 @@ describe('assistant auto-reply runtime', () => {
         vault: '/tmp/assistant-automation-vault',
       })
 
-      expect(shouldDeferCron).toHaveBeenCalledOnce()
+      expect(shouldDeferCron).toHaveBeenCalledTimes(2)
+      expect(shouldDeferCron.mock.invocationCallOrder[1]).toBeLessThan(
+        runLoopMocks.processDueAssistantCronJobs.mock.invocationCallOrder[0] ?? 0,
+      )
       expect(runLoopMocks.processDueAssistantCronJobs).toHaveBeenCalledWith(
         expect.objectContaining({
           shouldYield: shouldDeferCron,
@@ -7107,7 +7110,7 @@ describe('assistant auto-reply runtime', () => {
     })
 
     expect(result.replied).toBe(1)
-    expect(listNewConversationInputs).not.toHaveBeenCalled()
+    expect(listNewConversationInputs).toHaveBeenCalledTimes(1)
     expect(listInputCandidates).toHaveBeenCalledTimes(1)
     expect(replyMocks.sendAssistantMessage).toHaveBeenCalledWith(
       expect.objectContaining({
@@ -7376,7 +7379,7 @@ describe('assistant auto-reply runtime', () => {
       replied: 1,
       skipped: 0,
     })
-    expect(listNewConversationInputs).not.toHaveBeenCalled()
+    expect(listNewConversationInputs).toHaveBeenCalledTimes(1)
     expect(listInputCandidates).toHaveBeenCalledTimes(1)
     expect(checkpointAcceptedInput).toHaveBeenCalledWith(
       expect.objectContaining({
@@ -7731,7 +7734,7 @@ describe('assistant auto-reply runtime', () => {
       vault: '/tmp/assistant-automation-vault',
     })
 
-    expect(listNewConversationInputs).not.toHaveBeenCalled()
+    expect(listNewConversationInputs).toHaveBeenCalledTimes(1)
     expect(listInputCandidates).toHaveBeenCalledOnce()
     expect(admittedInputIds).toEqual(
       currentSenderPage.map((candidate) => candidate.event.inputId),
@@ -7739,6 +7742,135 @@ describe('assistant auto-reply runtime', () => {
     expect(admittedInputIds).not.toContain(barrier.event.inputId)
     expect(admittedInputIds).not.toContain(laterStrict.event.inputId)
     expect(result.lastInputCursor).toEqual(currentSenderPage.at(-1)!.event.cursor)
+  })
+
+  it('does not admit delivery-route late input across an audience boundary', async () => {
+    const initialCapture = createCaptureSummary({
+      captureId: 'capture-audience-initial',
+      occurredAt: '2026-04-08T00:03:00.000Z',
+      receivedAt: '2026-04-08T00:03:01.000Z',
+      source: 'linq',
+      text: 'private direct initial text',
+      threadId: 'real_thread_audience',
+      threadIsDirect: true,
+    })
+    const projectedInitialCandidate = assistantInputCandidateFromInboxCapture(
+      initialCapture,
+    )
+    const initialInput: AssistantInputCandidate = {
+      ...projectedInitialCandidate,
+      event: {
+        ...projectedInitialCandidate.event,
+        replyTarget: {
+          channel: 'linq',
+          messageId: 'real_msg_audience_initial',
+          threadId: 'real_thread_audience',
+        },
+      },
+    }
+    const routeCandidates = ([false, null] as const).map((threadIsDirect, index) => {
+      const candidate = createCapturelessAssistantInputCandidate({
+        conversationThreadId: `hid_thread_audience_${index}`,
+        inputId: index === 0
+          ? 'ain_cdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcd'
+          : 'ain_efefefefefefefefefefefefefefefef',
+        occurredAt: `2026-04-08T00:04:0${index}.000Z`,
+        receivedAt: `2026-04-08T00:04:0${index}.500Z`,
+        replyTarget: {
+          channel: 'linq',
+          messageId: `real_msg_audience_${index}`,
+          threadId: 'real_thread_audience',
+        },
+        source: 'linq',
+        text: `non-direct late input ${index}`,
+      })
+      return {
+        ...candidate,
+        event: {
+          ...candidate.event,
+          conversation: {
+            ...candidate.event.conversation!,
+            threadIsDirect,
+          },
+        },
+      }
+    })
+    const listNewConversationInputs = vi.fn(async () => ({
+      inputs: [],
+      nextCursor: initialInput.event.cursor,
+    }))
+    const listInputCandidates = vi.fn(async () => ({
+      inputs: routeCandidates,
+      nextCursor: routeCandidates[routeCandidates.length - 1]!.event.cursor,
+    }))
+    const checkpointAcceptedInput = vi.fn(async () => undefined)
+    const inputSource = {
+      checkpointAcceptedInput,
+      listInputCandidates,
+      listNewConversationInputs,
+      async refresh() {
+        return {
+          progressed: true,
+          reason: 'ingested_input' as const,
+        }
+      },
+    }
+    replyMocks.sendAssistantMessage.mockImplementation(async (input: {
+      activeTurnInput?: (admission: {
+        sessionId: string
+        turnId: string
+        vault: string
+      }) => Promise<unknown>
+    }) => {
+      await expect(input.activeTurnInput?.({
+        sessionId: 'session-1',
+        turnId: 'turn-1',
+        vault: '/tmp/assistant-automation-vault',
+      })).resolves.toEqual({ kind: 'no-new-input' })
+      return {
+        delivery: {
+          channel: 'linq',
+          target: 'real_thread_audience',
+          sentAt: '2026-04-08T00:10:00.000Z',
+        },
+        deliveryDeferred: false,
+        deliveryError: null,
+        deliveryIntentId: 'intent-1',
+        response: 'response text',
+        session: { sessionId: 'session-1' },
+      }
+    })
+    const reply = await vi.importActual<typeof import('../src/assistant/automation/reply.ts')>(
+      '../src/assistant/automation/reply.ts',
+    )
+    const initialItem = createReplyGroupItem(initialCapture)
+    const context = reply.createAssistantAutoReplyGroupContext([{
+      ...initialItem,
+      inputCandidate: initialInput,
+    }])
+    if (!context) {
+      throw new Error('expected reply context')
+    }
+
+    const result = await reply.processAssistantAutoReplyGroup({
+      allowSelfAuthored: false,
+      context,
+      enabledChannels: ['linq'],
+      inboxServices: createInboxServices({ show: vi.fn() }),
+      inputSource,
+      requestId: null,
+      sessionMaxAgeMs: null,
+      vault: '/tmp/assistant-automation-vault',
+    })
+
+    expect(result.replied).toBe(1)
+    expect(listNewConversationInputs).toHaveBeenCalledTimes(1)
+    expect(listInputCandidates).toHaveBeenCalledTimes(1)
+    expect(checkpointAcceptedInput).not.toHaveBeenCalled()
+    expect(evidenceMocks.writeAssistantAutoReplyReplyIntentEvidence)
+      .toHaveBeenCalledWith(expect.objectContaining({
+        inputIds: [initialInput.event.inputId],
+      }))
   })
 
   it('ignores captureless assistant input reply targets from another channel', async () => {
@@ -8649,7 +8781,77 @@ describe('assistant auto-reply runtime', () => {
       )
   })
 
-  it('sends degraded captureless hosted email auto-reply when body text is unavailable', async () => {
+  it('auto-replies to a validated hosted group email route', async () => {
+    const hostedEmailThreadTarget = serializeHostedEmailThreadTarget({
+      groupId: 'hgrp_AAAAAAAAAAAAAAAA',
+      lastMessageId: '<group-email-message@example.test>',
+      references: ['<group-email-root@example.test>'],
+      subject: 'Group email reply',
+      targetKind: 'group',
+    })
+    const directInput = createCapturelessAssistantInputCandidate({
+      conversationThreadId: 'safe_group_email_thread',
+      inputId: 'ain_89898989898989898989898989898989',
+      occurredAt: '2026-04-08T00:06:00.000Z',
+      receivedAt: '2026-04-08T00:06:01.000Z',
+      replyTarget: {
+        channel: 'email',
+        messageId: '<group-email-message@example.test>',
+        threadId: hostedEmailThreadTarget,
+      },
+      source: 'email',
+      text: 'captureless group email text',
+    })
+    const hostedInput: AssistantInputCandidate = {
+      ...directInput,
+      event: {
+        ...directInput.event,
+        conversation: {
+          ...directInput.event.conversation!,
+          threadIsDirect: false,
+        },
+      },
+    }
+    const reply = await vi.importActual<typeof import('../src/assistant/automation/reply.ts')>(
+      '../src/assistant/automation/reply.ts',
+    )
+    const context = reply.createAssistantAutoReplyGroupContext([
+      createCapturelessReplyGroupItem(hostedInput),
+    ])
+
+    if (!context) {
+      throw new Error('expected reply context')
+    }
+
+    const result = await reply.processAssistantAutoReplyGroup({
+      allowSelfAuthored: false,
+      context,
+      enabledChannels: ['email'],
+      inboxServices: createInboxServices({ show: vi.fn() }),
+      requestId: null,
+      sessionMaxAgeMs: null,
+      vault: '/tmp/assistant-automation-vault',
+    })
+
+    expect(result).toMatchObject({
+      advanceCursor: true,
+      failed: 0,
+      replied: 1,
+      skipped: 0,
+      stopScanning: false,
+    })
+    expect(replyMocks.sendAssistantMessage).toHaveBeenCalledWith(
+      expect.objectContaining({
+        conversation: expect.objectContaining({
+          directness: 'group',
+        }),
+        deliveryReplyToMessageId: '<group-email-message@example.test>',
+        deliveryTarget: hostedEmailThreadTarget,
+      }),
+    )
+  })
+
+  it('withholds email style authority from a mixed-authority captureless group', async () => {
     const hostedEmailThreadTarget = serializeHostedEmailThreadTarget({
       lastMessageId: '<real-email-msg-placeholder@example.test>',
       references: ['<real-email-msg-root@example.test>'],
@@ -8668,11 +8870,30 @@ describe('assistant auto-reply runtime', () => {
       },
       source: 'email',
       sourceMetadata: {
+        assistantStyleSettingsAuthorized: true,
         kind: 'email',
         promptReady: false,
         promptUnavailableReason: 'email.body_unavailable',
       },
       text: 'Received an email message.',
+    })
+    const unauthorizedInput = createCapturelessAssistantInputCandidate({
+      conversationThreadId: 'safe_email_thread_placeholder',
+      inputId: 'ain_99999999999999999999999999999998',
+      occurredAt: '2026-04-08T00:06:02.000Z',
+      receivedAt: '2026-04-08T00:06:03.000Z',
+      replyTarget: {
+        channel: 'email',
+        messageId: '<real-email-msg-follow-up@example.test>',
+        threadId: hostedEmailThreadTarget,
+      },
+      source: 'email',
+      sourceMetadata: {
+        kind: 'email',
+        promptReady: false,
+        promptUnavailableReason: 'email.body_unavailable',
+      },
+      text: 'Received another email message.',
     })
     const inboxServices = createInboxServices({
       show: vi.fn(),
@@ -8682,6 +8903,7 @@ describe('assistant auto-reply runtime', () => {
     )
     const context = reply.createAssistantAutoReplyGroupContext([
       createCapturelessReplyGroupItem(hostedInput),
+      createCapturelessReplyGroupItem(unauthorizedInput),
     ])
 
     if (!context) {
@@ -8708,6 +8930,7 @@ describe('assistant auto-reply runtime', () => {
     expect(inboxServices.show).not.toHaveBeenCalled()
     expect(replyMocks.sendAssistantMessage).toHaveBeenCalledWith(
       expect.objectContaining({
+        assistantStyleSettingsAuthorized: false,
         prompt: 'reply prompt',
       }),
     )
@@ -8715,7 +8938,21 @@ describe('assistant auto-reply runtime', () => {
       .not.toHaveBeenCalled()
   })
 
-  it('admits degraded hosted email from active-turn late input admission', async () => {
+  it.each([
+    {
+      expectedAdmissionKind: 'accepted',
+      label: 'admits authenticated',
+      lateStyleAuthority: true,
+    },
+    {
+      expectedAdmissionKind: 'no-new-input',
+      label: 'defers unauthenticated',
+      lateStyleAuthority: false,
+    },
+  ])('$label hosted email during an authenticated active turn', async ({
+    expectedAdmissionKind,
+    lateStyleAuthority,
+  }) => {
     const initialThreadTarget = serializeHostedEmailThreadTarget({
       lastMessageId: '<real-email-msg-initial@example.test>',
       references: ['<real-email-msg-root@example.test>'],
@@ -8741,6 +8978,7 @@ describe('assistant auto-reply runtime', () => {
       },
       source: 'email',
       sourceMetadata: {
+        assistantStyleSettingsAuthorized: true,
         kind: 'email',
         promptReady: true,
         promptUnavailableReason: null,
@@ -8760,6 +8998,7 @@ describe('assistant auto-reply runtime', () => {
       },
       source: 'email',
       sourceMetadata: {
+        assistantStyleSettingsAuthorized: true,
         kind: 'email',
         promptReady: true,
         promptUnavailableReason: null,
@@ -8779,6 +9018,9 @@ describe('assistant auto-reply runtime', () => {
       },
       source: 'email',
       sourceMetadata: {
+        ...(lateStyleAuthority
+          ? { assistantStyleSettingsAuthorized: true }
+          : {}),
         kind: 'email',
         promptReady: false,
         promptUnavailableReason: 'email.body_unavailable',
@@ -8802,6 +9044,7 @@ describe('assistant auto-reply runtime', () => {
         }
       },
     }
+    let admissionResult: unknown = null
     replyMocks.sendAssistantMessage.mockImplementation(async (input: {
       activeTurnInput?: (admission: {
         sessionId: string
@@ -8809,19 +9052,22 @@ describe('assistant auto-reply runtime', () => {
         vault: string
       }) => Promise<unknown>
     }) => {
-      await expect(input.activeTurnInput?.({
+      admissionResult = await input.activeTurnInput?.({
         sessionId: 'session-1',
         turnId: 'turn-1',
         vault: '/tmp/assistant-automation-vault',
-      })).resolves.toMatchObject({
-        acceptedInputs: [
-          expect.objectContaining({ id: routeFallbackInput.event.inputId }),
-          expect.objectContaining({ id: lateInput.event.inputId }),
-        ],
-        deliveryReplyToMessageId: '<real-email-msg-late@example.test>',
-        deliveryTarget: lateThreadTarget,
-        kind: 'accepted',
       })
+      if (expectedAdmissionKind === 'accepted') {
+        expect(admissionResult).toMatchObject({
+          acceptedInputs: [
+            expect.objectContaining({ id: routeFallbackInput.event.inputId }),
+            expect.objectContaining({ id: lateInput.event.inputId }),
+          ],
+          deliveryReplyToMessageId: '<real-email-msg-late@example.test>',
+          deliveryTarget: lateThreadTarget,
+          kind: 'accepted',
+        })
+      }
       return {
         delivery: {
           channel: 'email',
@@ -8872,9 +9118,13 @@ describe('assistant auto-reply runtime', () => {
     expect(replyMocks.sendAssistantMessage.mock.calls[0]?.[0])
       .toEqual(expect.objectContaining({
         activeTurnInput: expect.any(Function),
+        assistantStyleSettingsAuthorized: true,
       }))
+    expect(admissionResult).toEqual(expect.objectContaining({
+      kind: expectedAdmissionKind,
+    }))
     expect(inputSource.checkpointAcceptedInput).not.toHaveBeenCalled()
-    expect(inputSource.listNewConversationInputs).not.toHaveBeenCalled()
+    expect(inputSource.listNewConversationInputs).toHaveBeenCalledTimes(1)
     expect(replyMocks.sendAssistantMessage).toHaveBeenCalledTimes(1)
   })
 
@@ -10076,6 +10326,158 @@ describe('assistant automation run loop', () => {
     )
   })
 
+  it('runs the pre-cron barrier after the scanner and before due cron jobs', async () => {
+    runLoopMocks.scanAssistantAutomationOnce.mockResolvedValueOnce({
+      currentTurnDeliveryIntentIds: [],
+      routing: {
+        considered: 0,
+        failed: 0,
+        nextWakeAt: null,
+        noAction: 0,
+        routed: 0,
+        skipped: 0,
+      },
+      replies: {
+        considered: 0,
+        failed: 0,
+        nextWakeAt: null,
+        replied: 0,
+        skipped: 0,
+      },
+    })
+    const beforeCronProcessing = vi.fn(async () => undefined)
+    const runLoop = await vi.importActual<
+      typeof import('../src/assistant/automation/run-loop.ts')
+    >('../src/assistant/automation/run-loop.ts')
+
+    await runLoop.runAssistantAutomationPass({
+      beforeCronProcessing,
+      requestId: 'request-pre-cron-barrier',
+      vault: '/tmp/assistant-automation-vault',
+    })
+
+    expect(beforeCronProcessing).toHaveBeenCalledOnce()
+    expect(
+      runLoopMocks.scanAssistantAutomationOnce.mock.invocationCallOrder[0],
+    ).toBeLessThan(beforeCronProcessing.mock.invocationCallOrder[0] ?? 0)
+    expect(beforeCronProcessing.mock.invocationCallOrder[0]).toBeLessThan(
+      runLoopMocks.processDueAssistantCronJobs.mock.invocationCallOrder[0] ?? 0,
+    )
+  })
+
+  it('stops before cron and status when the pre-cron barrier fails', async () => {
+    const failure = new Error('synthetic pre-cron failure')
+    runLoopMocks.scanAssistantAutomationOnce.mockResolvedValueOnce({
+      currentTurnDeliveryIntentIds: [],
+      routing: {
+        considered: 0,
+        failed: 0,
+        nextWakeAt: null,
+        noAction: 0,
+        routed: 0,
+        skipped: 0,
+      },
+      replies: {
+        considered: 0,
+        failed: 0,
+        nextWakeAt: null,
+        replied: 0,
+        skipped: 0,
+      },
+    })
+    const runLoop = await vi.importActual<
+      typeof import('../src/assistant/automation/run-loop.ts')
+    >('../src/assistant/automation/run-loop.ts')
+
+    await expect(runLoop.runAssistantAutomationPass({
+      beforeCronProcessing: vi.fn(async () => {
+        throw failure
+      }),
+      deliveryDispatchMode: 'queue-only',
+      executionContext: {
+        hosted: {
+          memberId: 'member-test',
+          userEnvKeys: [],
+        },
+      },
+      requestId: 'request-pre-cron-barrier-failure',
+      vault: '/tmp/assistant-automation-vault',
+    })).rejects.toBe(failure)
+
+    expect(runLoopMocks.scanAssistantAutomationOnce).toHaveBeenCalledOnce()
+    expect(runLoopMocks.processDueAssistantCronJobs).not.toHaveBeenCalled()
+    expect(runLoopMocks.getAssistantCronStatus).not.toHaveBeenCalled()
+  })
+
+  it('rechecks hosted cron deferral after the pre-cron barrier', async () => {
+    let shouldDeferCron = false
+    runLoopMocks.scanAssistantAutomationOnce.mockResolvedValueOnce({
+      currentTurnDeliveryIntentIds: [],
+      routing: {
+        considered: 0,
+        failed: 0,
+        nextWakeAt: null,
+        noAction: 0,
+        routed: 0,
+        skipped: 0,
+      },
+      replies: {
+        considered: 0,
+        failed: 0,
+        nextWakeAt: null,
+        replied: 0,
+        skipped: 0,
+      },
+    })
+    const runLoop = await vi.importActual<
+      typeof import('../src/assistant/automation/run-loop.ts')
+    >('../src/assistant/automation/run-loop.ts')
+
+    await runLoop.runAssistantAutomationPass({
+      beforeCronProcessing: vi.fn(async () => {
+        shouldDeferCron = true
+      }),
+      deliveryDispatchMode: 'queue-only',
+      executionContext: {
+        hosted: {
+          memberId: 'member-test',
+          userEnvKeys: [],
+        },
+      },
+      requestId: 'request-pre-cron-deferral-recheck',
+      shouldDeferCron: () => shouldDeferCron,
+      vault: '/tmp/assistant-automation-vault',
+    })
+
+    expect(runLoopMocks.processDueAssistantCronJobs).not.toHaveBeenCalled()
+  })
+
+  it('skips the pre-cron barrier when the caller already deferred hosted cron', async () => {
+    const beforeCronProcessing = vi.fn(async () => {
+      throw new Error('deferred cron must not await background repair')
+    })
+    const runLoop = await vi.importActual<
+      typeof import('../src/assistant/automation/run-loop.ts')
+    >('../src/assistant/automation/run-loop.ts')
+
+    await runLoop.runAssistantAutomationPass({
+      beforeCronProcessing,
+      deliveryDispatchMode: 'queue-only',
+      executionContext: {
+        hosted: {
+          memberId: 'member-test',
+          userEnvKeys: [],
+        },
+      },
+      requestId: 'request-deferred-pre-cron-barrier',
+      shouldDeferCron: () => true,
+      vault: '/tmp/assistant-automation-vault',
+    })
+
+    expect(beforeCronProcessing).not.toHaveBeenCalled()
+    expect(runLoopMocks.processDueAssistantCronJobs).not.toHaveBeenCalled()
+  })
+
   it('skips idle maintenance when foreground work asks background tasks to yield', async () => {
     const inboxServices = createInboxServices({
       run: vi.fn().mockResolvedValue(undefined),
@@ -10681,6 +11083,7 @@ describe('assistant automation run loop', () => {
     expect(stagedInputs[0]?.event.sourceMetadata).toEqual({
       kind: 'linq',
       partCount: 1,
+      previousHomeThreadId: null,
       reactionEligible: true,
       replyToMessageId: null,
       service: 'iMessage',

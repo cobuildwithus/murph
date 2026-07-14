@@ -381,7 +381,7 @@ test('deliverAssistantMessage persists canonical Telegram thread targets returne
   assert.equal(result.session.binding.delivery?.target, '-1009876543210:topic:42')
   assert.equal(
     result.session.binding.conversationKey,
-    'channel:telegram|thread:-1009876543210%3Atopic%3A42',
+    'channel:telegram|audience:group|thread:-1009876543210%3Atopic%3A42',
   )
 })
 

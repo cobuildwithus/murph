@@ -55,6 +55,7 @@ import {
 import {
   executeMurphDynamicToolRequest,
   isComputerDynamicToolRequest,
+  MURPH_ASSISTANT_STYLE_TOOL,
   type MurphDynamicToolFinalActionPatch,
   type MurphDynamicToolReactionPatch,
   type MurphDynamicToolRequest,
@@ -641,6 +642,24 @@ export async function executeCodexAppServerTurn(
 
   try {
     const processInstance = await getOrStartWarmCodexProcess(preparedInput)
+    const resumeThreadId = normalizeNullableString(preparedInput.resumeSessionId)
+    const styleToolRequired = preparedInput.dynamicTools.some(
+      (tool) =>
+        tool.namespace === MURPH_ASSISTANT_STYLE_TOOL.namespace &&
+        tool.name === MURPH_ASSISTANT_STYLE_TOOL.name,
+    )
+    if (
+      resumeThreadId &&
+      styleToolRequired &&
+      processInstance.lastBoundThreadId !== resumeThreadId
+    ) {
+      processInstance.releaseReservation()
+      throw new VaultCliError(
+        'ASSISTANT_CODEX_RESUME_STALE',
+        'Codex app-server cannot restore required assistant tools on an unowned resumed thread.',
+        { retryable: true },
+      )
+    }
     return await runCodexAppServerTurnOnProcess(processInstance, preparedInput)
   } finally {
     await rm(tempRoot, {
@@ -3238,6 +3257,11 @@ async function runCodexAppServerTurnOnProcess(
     const runDynamicTool = () => withHostedCanonicalWritePort(
       hostedCanonicalWritePort,
       async () => await executeMurphDynamicToolRequest({
+        assistantStyleSettingsAvailable: input.dynamicTools.some(
+          (tool) =>
+            tool.namespace === MURPH_ASSISTANT_STYLE_TOOL.namespace &&
+            tool.name === MURPH_ASSISTANT_STYLE_TOOL.name,
+        ),
         abortSignal: input.abortSignal
           ? AbortSignal.any([input.abortSignal, dynamicToolAbortController.signal])
           : dynamicToolAbortController.signal,
@@ -4221,6 +4245,7 @@ function isInvalidDynamicToolRequest(
   {
     kind:
       | 'invalid-generate-image-arguments'
+      | 'invalid-assistant-style-arguments'
       | 'invalid-computer-arguments'
       | 'invalid-generate-voice-memo-arguments'
       | 'invalid-finish-without-reply-arguments'
@@ -4232,6 +4257,7 @@ function isInvalidDynamicToolRequest(
 > {
   return (
     request.kind === 'invalid-generate-image-arguments' ||
+    request.kind === 'invalid-assistant-style-arguments' ||
     request.kind === 'invalid-computer-arguments' ||
     request.kind === 'invalid-generate-voice-memo-arguments' ||
     request.kind === 'invalid-finish-without-reply-arguments' ||

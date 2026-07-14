@@ -709,6 +709,12 @@ export async function sendAssistantMessageLocal(
               groupTool: hostedExecutionContext.groupTool ?? null,
               newsletterTool: hostedExecutionContext.newsletterTool ?? null,
               phoneCalls: hostedExecutionContext.phoneCalls ?? null,
+              ...(hostedExecutionContext.currentAssistantPreferenceCausalSeq
+                ? {
+                    getAssistantPreferenceCausalSeq:
+                      hostedExecutionContext.currentAssistantPreferenceCausalSeq,
+                  }
+                : {}),
               getDeliveryContext: () => ({
                 messageInput: currentInput,
                 session: currentSession,

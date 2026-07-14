@@ -1692,6 +1692,8 @@ export async function runHostedWorkspaceRuntimeJobInProcess(
                     options.runAssistantPhase ?? runHostedWorkspaceAssistantPhase
                   )({
                     ...phaseInput,
+                    currentAssistantPreferenceCausalSeq: () =>
+                      currentPreferenceCausalSeq,
                     currentDeliveryRouteScope,
                     deviceSyncWorkspaceWakeHandled: deviceSyncWorkspaceWakeHandledUntilCheckpoint,
                     request: input.request,

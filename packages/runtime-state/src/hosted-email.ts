@@ -5,6 +5,7 @@ export const HOSTED_EMAIL_THREAD_TARGET_MESSAGE_ID_MAX_LENGTH = 256;
 export const HOSTED_EMAIL_THREAD_TARGET_REFERENCE_MAX_COUNT = 12;
 export const HOSTED_EMAIL_THREAD_TARGET_RECIPIENT_MAX_COUNT = 8;
 export const HOSTED_EMAIL_THREAD_TARGET_GROUP_ID_MAX_LENGTH = 128;
+export const HOSTED_EMAIL_THREAD_TARGET_RECIPIENT_MEMBER_ID_MAX_LENGTH = 128;
 export const HOSTED_EMAIL_THREAD_TARGET_SUBJECT_MAX_LENGTH = 256;
 export const HOSTED_EMAIL_ADDRESS_MAX_LENGTH = 254;
 export const hostedEmailThreadTargetKindValues = ["explicit", "group"] as const;
@@ -16,6 +17,7 @@ export interface HostedEmailThreadTarget {
   cc: string[];
   groupId: string | null;
   lastMessageId: string | null;
+  recipientMemberId: string | null;
   references: string[];
   schema: typeof HOSTED_EMAIL_THREAD_TARGET_SCHEMA;
   subject: string | null;
@@ -27,6 +29,7 @@ interface HostedEmailThreadTargetPayload {
   cc?: unknown;
   groupId?: unknown;
   lastMessageId?: unknown;
+  recipientMemberId?: unknown;
   references?: unknown;
   schema?: unknown;
   subject?: unknown;
@@ -38,6 +41,7 @@ export function createHostedEmailThreadTarget(input: {
   cc?: ReadonlyArray<string> | null;
   groupId?: string | null;
   lastMessageId?: string | null;
+  recipientMemberId?: string | null;
   references?: ReadonlyArray<string> | null;
   subject?: string | null;
   targetKind?: string | null;
@@ -63,6 +67,9 @@ export function createHostedEmailThreadTarget(input: {
         ),
     groupId: targetKind === "group" ? groupId : null,
     lastMessageId,
+    recipientMemberId: targetKind === "group"
+      ? normalizeHostedEmailThreadTargetRecipientMemberId(input.recipientMemberId)
+      : null,
     references,
     schema: HOSTED_EMAIL_THREAD_TARGET_SCHEMA,
     subject: normalizeHostedEmailSubject(input.subject),
@@ -107,6 +114,7 @@ export function parseHostedEmailThreadTarget(
       cc: readHostedEmailThreadTargetList(record.cc),
       groupId: readHostedEmailThreadTargetString(record.groupId),
       lastMessageId: readHostedEmailThreadTargetString(record.lastMessageId),
+      recipientMemberId: readHostedEmailThreadTargetString(record.recipientMemberId),
       references: readHostedEmailThreadTargetList(record.references),
       subject: readHostedEmailThreadTargetString(record.subject),
       targetKind: readHostedEmailThreadTargetString(record.targetKind),
@@ -204,6 +212,15 @@ function normalizeHostedEmailThreadTargetGroupId(
   });
 }
 
+function normalizeHostedEmailThreadTargetRecipientMemberId(
+  value: string | null | undefined,
+): string | null {
+  return normalizeHostedEmailOptionalText(value, {
+    maxLength: HOSTED_EMAIL_THREAD_TARGET_RECIPIENT_MEMBER_ID_MAX_LENGTH,
+    overLimit: "drop",
+  });
+}
+
 function normalizeHostedEmailThreadTargetKind(input: {
   groupId: string | null;
   targetKind?: string | null;
@@ -229,7 +246,15 @@ export function appendHostedEmailReferenceChain(input: {
     references.add(lastMessageId);
   }
 
-  return [...references].slice(-HOSTED_EMAIL_THREAD_TARGET_REFERENCE_MAX_COUNT);
+  const normalizedReferences = [...references];
+  if (normalizedReferences.length <= HOSTED_EMAIL_THREAD_TARGET_REFERENCE_MAX_COUNT) {
+    return normalizedReferences;
+  }
+
+  return [
+    normalizedReferences[0]!,
+    ...normalizedReferences.slice(-(HOSTED_EMAIL_THREAD_TARGET_REFERENCE_MAX_COUNT - 1)),
+  ];
 }
 
 export function ensureHostedEmailReplySubject(

@@ -62,6 +62,9 @@ import {
 import {
   filterHostedAssistantInputBatchByLinqRouteAuthority,
 } from "./linq-input-authority.ts";
+import {
+  repairHostedPendingAssistantRouteProofBatch,
+} from "./pending-input-index.ts";
 
 const HOSTED_ASSISTANT_BACKGROUND_AUTOMATION_SCAN_LIMIT = 1;
 
@@ -147,6 +150,7 @@ export async function runHostedAssistantAutomationLane(input: {
     "commitTimeoutMs" | "forwardedEnv" | "platform" | "platformEnv" | "resolvedConfig"
   >;
   freshAssistantInputIds?: readonly string[] | null;
+  now?: Date | null;
   operatorHomeRoot?: string | null;
   runtimeAttemptId?: string | null;
   preProviderPhase?: HostedRuntimeLatencyPhaseBreakdown["preProvider"] | null;
@@ -160,6 +164,20 @@ export async function runHostedAssistantAutomationLane(input: {
   vaultRoot: string;
 }): Promise<HostedAssistantAutomationLaneMetrics> {
   const startedAt = Date.now();
+  const freshAssistantInputIds = input.freshAssistantInputIds ?? [];
+  const initialRouteProofRepair = freshAssistantInputIds.length === 0
+    ? await repairHostedPendingAssistantRouteProofBatch({
+        now: input.now ?? new Date(),
+        shouldYield: input.shouldYieldBackgroundMaintenance ?? null,
+        signal: input.signal,
+        vaultRoot: input.vaultRoot,
+      })
+    : {
+        pending: false,
+        processedInputIds: [],
+        repaired: 0,
+        yielded: false,
+      };
   const readinessStartedAt = Date.now();
   const assistantAutomation = await resolveHostedAssistantAutomationReadiness({
     assistantRuntimeState: input.assistantRuntimeState ?? null,
@@ -176,13 +194,15 @@ export async function runHostedAssistantAutomationLane(input: {
   }
 
   const assistantStartedAt = Date.now();
-  const assistantResult = assistantAutomation.shouldRun
+  const shouldRunAssistant = assistantAutomation.shouldRun
+    && !initialRouteProofRepair.pending;
+  const assistantResult = shouldRunAssistant
     ? await runHostedAssistantAutomation(
         input.vaultRoot,
         input.requestId,
         input.executionContext,
         input.wake,
-        input.freshAssistantInputIds ?? [],
+        freshAssistantInputIds,
         input.signal,
         createHostedAssistantTurnEnvironment({
           operatorHomeRoot: input.operatorHomeRoot ?? null,
@@ -194,6 +214,8 @@ export async function runHostedAssistantAutomationLane(input: {
           buildBackgroundDynamicContextPrompt:
             input.buildBackgroundDynamicContextPrompt,
           latencyTracePort: input.runtime.platform.latencyTracePort ?? null,
+          initialLegacyRoutesRepaired: initialRouteProofRepair.repaired,
+          now: input.now ?? null,
           effectsPort: input.runtime.platform.effectsPort,
           preProviderPhase: input.preProviderPhase ?? null,
           runtimeAttemptId: input.runtimeAttemptId ?? null,
@@ -211,10 +233,13 @@ export async function runHostedAssistantAutomationLane(input: {
     : {
         currentTurnDeliveryIntentIds: [],
         cronProcessed: 0,
-        nextWakeAt: null,
-        progressed: false,
+        nextWakeAt: initialRouteProofRepair.pending
+          ? new Date(resolveHostedMaintenanceWakeNowMs(input.wake)).toISOString()
+          : null,
+        progressed: initialRouteProofRepair.processedInputIds.length > 0,
         redactedLogEntries: [],
         replyFailed: 0,
+        selectedInputIds: [],
         terminalLinqCleanup: null,
         timings: undefined,
       };
@@ -238,6 +263,7 @@ export async function runHostedAssistantAutomationLane(input: {
     assistantAutomationProgressed: assistantResult.progressed,
     assistantAutomationReplyFailed: assistantResult.replyFailed,
     assistantAutomationScanElapsedMs: assistantResult.timings?.scanElapsedMs ?? null,
+    assistantAutomationSelectedInputIds: assistantResult.selectedInputIds,
     assistantAutomationTerminalLinqCleanup: assistantResult.terminalLinqCleanup,
     assistantAutomationTotalElapsedMs: assistantResult.timings?.totalElapsedMs ?? null,
     assistantInputCandidateListed:
@@ -267,6 +293,8 @@ export async function runHostedAssistantAutomation(
       "assertLinqRecentInboundEngagement"
     > | null;
     latencyTracePort?: HostedRuntimePlatform["latencyTracePort"] | null;
+    initialLegacyRoutesRepaired?: number;
+    now?: Date | null;
     preProviderPhase?: HostedRuntimeLatencyPhaseBreakdown["preProvider"] | null;
     runtimeAttemptId?: string | null;
     beforeProviderAcceptedInputs?: AssistantBeforeProviderAcceptedInputsHook | null;
@@ -279,6 +307,7 @@ export async function runHostedAssistantAutomation(
   progressed: boolean;
   redactedLogEntries: HostedExecutionRedactedLogEntry[];
   replyFailed: number;
+  selectedInputIds: string[];
   terminalLinqCleanup: string[] | null;
   timings?: {
     activeTurnInputIngested?: boolean | null;
@@ -305,6 +334,8 @@ export async function runHostedAssistantAutomation(
   let activeProviderMilestoneTraceContext: HostedAssistantMilestoneTraceContext | null = null;
   const recordedProviderMilestones = new Set<string>();
   const freshAssistantInputIdCount = new Set(freshAssistantInputIds).size;
+  let legacyRoutesRepaired = options?.initialLegacyRoutesRepaired ?? 0;
+  let routeProofBacklogPending = false;
   const selectedInputIds = await selectHostedAssistantInputIds(
     freshAssistantInputIdCount > 0
       ? {
@@ -320,6 +351,7 @@ export async function runHostedAssistantAutomation(
   );
   const baseInputSource = createHostedAssistantInputSource({
     initialActiveTurnInputIds: selectedInputIds.activeTurnInputIds,
+    initialPendingInputIds: selectedInputIds.pendingInputIds,
     pendingInputRefreshMode:
       selectedInputIds.mode === "foreground" ? "existing" : "compact",
     selectedInputIds: selectedInputIds.inputIds,
@@ -327,9 +359,10 @@ export async function runHostedAssistantAutomation(
   });
   const shouldDeferCronForSelectedForegroundInput =
     selectedInputIds.mode === "foreground" && selectedInputIds.inputIds.length > 0;
-  const shouldDeferCron = shouldDeferCronForSelectedForegroundInput
-    ? () => true
-    : options?.shouldYieldBackgroundMaintenance;
+  const shouldDeferCron = () =>
+    shouldDeferCronForSelectedForegroundInput
+    || routeProofBacklogPending
+    || options?.shouldYieldBackgroundMaintenance?.() === true;
   const inputSource: AssistantInputSource = {
     ...baseInputSource,
     async listInputCandidates(query) {
@@ -436,6 +469,16 @@ export async function runHostedAssistantAutomation(
         : {}),
       deliveryDispatchMode: "queue-only",
       drainOutbox: false,
+      beforeCronProcessing: async () => {
+        const repair = await repairHostedPendingAssistantRouteProofBatch({
+          now: options?.now ?? new Date(),
+          shouldYield: options?.shouldYieldBackgroundMaintenance ?? null,
+          signal,
+          vaultRoot,
+        });
+        legacyRoutesRepaired += repair.repaired;
+        routeProofBacklogPending = repair.pending;
+      },
       ...(options?.beforeProviderAcceptedInputs
         ? { beforeProviderAcceptedInputs: options.beforeProviderAcceptedInputs }
         : {}),
@@ -547,7 +590,7 @@ export async function runHostedAssistantAutomation(
       vaultServices,
       maxPerScan,
       requestId,
-      ...(shouldDeferCron ? { shouldDeferCron } : {}),
+      shouldDeferCron,
       signal,
       shouldYieldBackgroundMaintenance: options?.shouldYieldBackgroundMaintenance ?? null,
       inputSource,
@@ -586,7 +629,8 @@ export async function runHostedAssistantAutomation(
         cronProcessed: result.cronProcessed,
         nextWakeAt,
         outboxAttempted: result.outboxAttempted,
-        progressed: result.progressed,
+        legacyRoutesRepaired,
+        progressed: result.progressed || legacyRoutesRepaired > 0,
         inputCandidateListed,
         inputCandidateQueryCount,
         requestId,
@@ -608,9 +652,10 @@ export async function runHostedAssistantAutomation(
       currentTurnDeliveryIntentIds,
       cronProcessed: result.cronProcessed,
       nextWakeAt,
-      progressed: result.progressed,
+      progressed: result.progressed || legacyRoutesRepaired > 0,
       redactedLogEntries,
       replyFailed: replies.failed,
+      selectedInputIds: baseInputSource.readSelectedInputIds(),
       terminalLinqCleanup: replies.terminalLinqCleanup ?? null,
       timings: {
         activeTurnInputIngested,
@@ -649,6 +694,7 @@ export async function runHostedAssistantAutomation(
         progressed: true,
         redactedLogEntries,
         replyFailed: 0,
+        selectedInputIds: baseInputSource.readSelectedInputIds(),
         terminalLinqCleanup: null,
       };
     }

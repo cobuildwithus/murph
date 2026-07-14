@@ -26,6 +26,7 @@ const mocks = vi.hoisted(() => ({
   readConfiguredJunctionDeviceSyncProviderConfig: vi.fn(),
   readHostedAssistantRuntimeState: vi.fn(),
   reconcileHostedDeviceSyncControlPlaneState: vi.fn(),
+  repairHostedPendingAssistantRouteProofBatch: vi.fn(),
   runAssistantAutomationPass: vi.fn(),
   selectHostedAssistantInputIds: vi.fn(),
   pruneWearableDenseRawTimeseries: vi.fn(),
@@ -87,6 +88,11 @@ vi.mock("../src/hosted-runtime/turn-input.ts", () => ({
   selectHostedAssistantInputIds: mocks.selectHostedAssistantInputIds,
 }));
 
+vi.mock("../src/hosted-runtime/pending-input-index.ts", () => ({
+  repairHostedPendingAssistantRouteProofBatch:
+    mocks.repairHostedPendingAssistantRouteProofBatch,
+}));
+
 vi.mock("@murphai/hosted-execution", async () => {
   const actual = await vi.importActual<typeof import("@murphai/hosted-execution")>(
     "@murphai/hosted-execution",
@@ -143,6 +149,8 @@ type InboxServices = import("@murphai/inbox-services").InboxServices;
 type RunAssistantAutomationPassInput = Parameters<
   typeof import("@murphai/assistant-engine").runAssistantAutomationPass
 >[0];
+type AssistantAutomationOperationScope =
+  import("@murphai/assistant-engine").AssistantAutomationOperationScope;
 type HostedTimerRuntime = Parameters<typeof runHostedAssistantAutomationLane>[0]["runtime"];
 
 const DEVICE_SYNC_CONFIG = {
@@ -235,7 +243,7 @@ beforeEach(async () => {
   mocks.createIntegratedInboxServices.mockReturnValue({
     init: mocks.initInboxRuntime,
   });
-  mocks.createHostedAssistantInputSource.mockReturnValue({
+  mocks.createHostedAssistantInputSource.mockImplementation((input) => ({
     listInputCandidates: vi.fn(async (query) => ({
       inputs: [],
       nextCursor: query.afterCursor ?? null,
@@ -244,11 +252,18 @@ beforeEach(async () => {
       inputs: [],
       nextCursor: query.afterCursor ?? null,
     })),
+    readObservedInputIds: vi.fn(() => [
+      ...new Set([
+        ...(input.initialPendingInputIds ?? []),
+        ...(input.selectedInputIds ?? []),
+      ]),
+    ]),
+    readSelectedInputIds: vi.fn(() => [...(input.selectedInputIds ?? [])]),
     refresh: vi.fn(async () => ({
       progressed: false,
       reason: "no_new_input",
     })),
-  });
+  }));
   mocks.selectHostedAssistantInputIds.mockImplementation(async (input) => {
     if (input.mode === "foreground") {
       const freshInputIds = [...new Set(input.freshAssistantInputIds ?? [])];
@@ -275,6 +290,12 @@ beforeEach(async () => {
     assistantConfigStatus: "saved",
     assistantConfigured: true,
     assistantProvider: "codex-cli",
+  });
+  mocks.repairHostedPendingAssistantRouteProofBatch.mockResolvedValue({
+    pending: false,
+    processedInputIds: [],
+    repaired: 0,
+    yielded: false,
   });
   mocks.runAssistantAutomationPass.mockResolvedValue({
     nextWakeAt: "2026-04-08T01:00:00.000Z",
@@ -545,6 +566,8 @@ describe("runHostedAssistantAutomation", () => {
         nextCursor: query.afterCursor ?? null,
       })),
       listNewConversationInputs,
+      readObservedInputIds: vi.fn(() => []),
+      readSelectedInputIds: vi.fn(() => []),
       refresh: vi.fn(async () => ({
         progressed: false,
         reason: "no_new_input",
@@ -632,6 +655,148 @@ describe("runHostedAssistantAutomation", () => {
     expect(mocks.initInboxRuntime).not.toHaveBeenCalled();
   });
 
+  it("runs the bounded proof consumer at the pre-cron boundary", async () => {
+    const now = new Date("2026-04-23T00:00:00.000Z");
+    mocks.repairHostedPendingAssistantRouteProofBatch.mockResolvedValueOnce({
+      pending: false,
+      processedInputIds: ["input_late_proof"],
+      repaired: 1,
+      yielded: false,
+    });
+    mocks.runAssistantAutomationPass.mockImplementationOnce(async (input) => {
+      await input.beforeCronProcessing?.();
+      return { nextWakeAt: null, progressed: false };
+    });
+
+    const result = await runHostedAssistantAutomation(
+      "/tmp/vault-root",
+      "req_late_proof",
+      { hosted: { issueDeviceConnectLink: vi.fn(), memberId: "member_123", userEnvKeys: [] } },
+      {
+        eventId: "evt_late_proof",
+        kind: "runtime.timer",
+        occurredAt: now.toISOString(),
+        triggerKind: "runtime_timer",
+        userId: "member_123",
+      },
+      undefined,
+      undefined,
+      undefined,
+      { now },
+    );
+
+    expect(result.progressed).toBe(true);
+    expect(mocks.repairHostedPendingAssistantRouteProofBatch).toHaveBeenCalledWith({
+      now,
+      shouldYield: null,
+      signal: undefined,
+      vaultRoot: "/tmp/vault-root",
+    });
+  });
+
+  it("propagates bounded route-repair failure before the mocked cron boundary", async () => {
+    const failure = new Error("synthetic route repair failure");
+    let cronBoundaryReached = false;
+    mocks.selectHostedAssistantInputIds.mockResolvedValueOnce({
+      inputIds: ["input_route_repair_failure"],
+      mode: "background",
+      pendingInputIds: ["input_route_repair_failure"],
+    });
+    mocks.repairHostedPendingAssistantRouteProofBatch.mockRejectedValueOnce(failure);
+    mocks.runAssistantAutomationPass.mockImplementationOnce(async (input) => {
+      await input.beforeCronProcessing?.();
+      cronBoundaryReached = true;
+      return {
+        nextWakeAt: null,
+        progressed: false,
+      };
+    });
+
+    await expect(runHostedAssistantAutomation(
+      "/tmp/vault-root",
+      "req_route_repair_failure",
+      {
+        hosted: {
+          issueDeviceConnectLink: vi.fn(),
+          memberId: "member_123",
+          userEnvKeys: [],
+        },
+      },
+      {
+        eventId: "evt_route_repair_failure",
+        kind: "runtime.timer",
+        occurredAt: "2026-04-23T00:00:00.000Z",
+        triggerKind: "runtime_timer",
+        userId: "member_123",
+      },
+    )).rejects.toBe(failure);
+
+    expect(cronBoundaryReached).toBe(false);
+  });
+
+  it("repairs raw pending proof before background selection can compact it", async () => {
+    const failure = new Error("synthetic retained route repair failure");
+    mocks.repairHostedPendingAssistantRouteProofBatch.mockRejectedValueOnce(failure);
+
+    await expect(runHostedAssistantAutomationLane({
+      executionContext: {
+        hosted: {
+          issueDeviceConnectLink: vi.fn(),
+          memberId: "member_123",
+          userEnvKeys: [],
+        },
+      },
+      requestId: "req_retained_route_repair_failure",
+      runtime: createHostedAutomationRuntime(),
+      vaultRoot: "/tmp/vault-root",
+      wake: {
+        eventId: "evt_retained_route_repair_failure",
+        kind: "runtime.timer",
+        occurredAt: "2026-04-23T00:00:00.000Z",
+        triggerKind: "runtime_timer",
+        userId: "member_123",
+      },
+    })).rejects.toBe(failure);
+
+    expect(mocks.readHostedAssistantRuntimeState).not.toHaveBeenCalled();
+    expect(mocks.selectHostedAssistantInputIds).not.toHaveBeenCalled();
+    expect(mocks.runAssistantAutomationPass).not.toHaveBeenCalled();
+  });
+
+  it("schedules another bounded proof batch before assistant selection", async () => {
+    mocks.repairHostedPendingAssistantRouteProofBatch.mockResolvedValueOnce({
+      pending: true,
+      processedInputIds: ["input_route_proof_1"],
+      repaired: 1,
+      yielded: false,
+    });
+
+    const result = await runHostedAssistantAutomationLane({
+      executionContext: {
+        hosted: {
+          issueDeviceConnectLink: vi.fn(),
+          memberId: "member_123",
+          userEnvKeys: [],
+        },
+      },
+      requestId: "req_retained_route_repair_success",
+      runtime: createHostedAutomationRuntime(),
+      vaultRoot: "/tmp/vault-root",
+      wake: {
+        eventId: "evt_retained_route_repair_success",
+        kind: "runtime.timer",
+        occurredAt: "2026-04-23T00:00:00.000Z",
+        triggerKind: "runtime_timer",
+        userId: "member_123",
+      },
+    });
+
+    expect(result.nextWakeAt).toBe("2026-04-23T00:00:00.000Z");
+    expect(result.assistantAutomationProgressed).toBe(true);
+    expect(mocks.selectHostedAssistantInputIds).not.toHaveBeenCalled();
+    expect(mocks.runAssistantAutomationPass).not.toHaveBeenCalled();
+  });
+
   it("binds input acquired after background selection at the provider boundary", async () => {
     const callOrder: string[] = [];
     const beforeProviderAcceptedInputs = vi.fn(async ({ acceptedInputs }) => {
@@ -657,6 +822,8 @@ describe("runHostedAssistantAutomation", () => {
         inputs: [],
         nextCursor: query.afterCursor ?? null,
       })),
+      readObservedInputIds: vi.fn(() => ["input_after_selection"]),
+      readSelectedInputIds: vi.fn(() => ["input_after_selection"]),
       refresh: vi.fn(async () => {
         callOrder.push("refreshed-input");
         return {
@@ -884,6 +1051,8 @@ describe("runHostedAssistantAutomation", () => {
         inputs: [],
         nextCursor: query.afterCursor ?? null,
       })),
+      readObservedInputIds: vi.fn(() => []),
+      readSelectedInputIds: vi.fn(() => []),
       refresh: vi.fn(async () => ({
         progressed: false,
         reason: "no_new_input",
@@ -3196,6 +3365,7 @@ describe("runHostedAssistantAutomationLane", () => {
     expect(result).not.toHaveProperty("deviceSyncSkipped");
     expect(result).not.toHaveProperty("parserProcessed");
     expect(mocks.runAssistantAutomationPass).toHaveBeenCalledWith({
+      beforeCronProcessing: expect.any(Function),
       deliveryDispatchMode: "queue-only",
       drainOutbox: false,
       executionContext: {
@@ -3213,6 +3383,7 @@ describe("runHostedAssistantAutomationLane", () => {
       onProviderRequestStarted: expect.any(Function),
       onTraceEvent: expect.any(Function),
       requestId: "req_123",
+      shouldDeferCron: expect.any(Function),
       shouldYieldBackgroundMaintenance: null,
       signal: undefined,
       turnEnvironment: {
@@ -3373,17 +3544,97 @@ describe("runHostedAssistantAutomationLane", () => {
       vaultRoot: "/tmp/vault-root",
     });
 
+    const automationPassInput =
+      mocks.runAssistantAutomationPass.mock.calls[0]?.[0] as RunAssistantAutomationPassInput;
+    expect(automationPassInput.requestId).toBe("req_yield");
+    expect(automationPassInput.shouldDeferCron?.()).toBe(true);
+    expect(automationPassInput.shouldYieldBackgroundMaintenance)
+      .toBe(shouldYieldBackgroundMaintenance);
+  });
+
+  it("forwards provider-bound input, operation scope, and the route-repair clock through the lane", async () => {
+    const now = new Date("2026-04-08T00:00:00.000Z");
+    const beforeProviderAcceptedInputs = vi.fn(async () => undefined);
+    const operationScope: AssistantAutomationOperationScope = {
+      async runAutoReplyGroup({ executionContext, operation, turnEnvironment }) {
+        return await operation(executionContext, turnEnvironment);
+      },
+      async runCronJob({ executionContext, operation, turnEnvironment }) {
+        return await operation(executionContext, turnEnvironment);
+      },
+    };
+    mocks.repairHostedPendingAssistantRouteProofBatch.mockResolvedValueOnce({
+      pending: false,
+      processedInputIds: ["input_route_proof"],
+      repaired: 1,
+      yielded: false,
+    });
+
+    await runHostedAssistantAutomationLane({
+      assistantRuntimeState: {
+        assistantActiveProfileId: "platform-default",
+        assistantActiveProfileManagedBy: "platform",
+        assistantActiveProfileReady: true,
+        assistantConfigInvalid: false,
+        assistantConfigPresent: true,
+        assistantConfigStatus: "hosted-env",
+        assistantConfigured: true,
+        assistantProvider: "codex-cli",
+      },
+      beforeProviderAcceptedInputs,
+      executionContext: {
+        hosted: {
+          issueDeviceConnectLink: vi.fn(),
+          memberId: "member_123",
+          userEnvKeys: [],
+        },
+      },
+      now,
+      operationScope,
+      requestId: "req_integrated_lane_bindings",
+      runtime: createHostedAutomationRuntime(),
+      vaultRoot: "/tmp/vault-root",
+      wake: {
+        eventId: "evt_integrated_lane_bindings",
+        kind: "runtime.timer",
+        occurredAt: now.toISOString(),
+        triggerKind: "runtime_timer",
+        userId: "member_123",
+      },
+    });
+
+    expect(mocks.repairHostedPendingAssistantRouteProofBatch).toHaveBeenCalledWith({
+      now,
+      shouldYield: null,
+      signal: undefined,
+      vaultRoot: "/tmp/vault-root",
+    });
     expect(mocks.runAssistantAutomationPass).toHaveBeenCalledWith(
       expect.objectContaining({
-        requestId: "req_yield",
-        shouldDeferCron: shouldYieldBackgroundMaintenance,
+        beforeProviderAcceptedInputs,
+        operationScope,
       }),
     );
   });
 
   it("defers hosted cron when the current pass selected fresh foreground input", async () => {
+    const callOrder: string[] = [];
     let shouldDeferCronDuringPass: boolean | null = null;
+    mocks.selectHostedAssistantInputIds.mockResolvedValueOnce({
+      freshInputIds: ["ain_current_foreground"],
+      inputIds: ["ain_current_foreground"],
+      mode: "foreground",
+      pendingInputIds: ["ain_transition_proof"],
+    });
     mocks.runAssistantAutomationPass.mockImplementationOnce(async (input) => {
+      callOrder.push("provider");
+      input.onProviderRequestStarted?.({
+        assistantInputIds: ["ain_current_foreground"],
+        providerRequestOrdinal: 0,
+        source: "linq",
+        startedAt: "2026-04-08T00:00:01.000Z",
+      });
+      callOrder.push("cron-check");
       shouldDeferCronDuringPass = input.shouldDeferCron?.() ?? null;
       return {
         cronProcessed: shouldDeferCronDuringPass ? 0 : 1,
@@ -3426,12 +3677,15 @@ describe("runHostedAssistantAutomationLane", () => {
         },
       },
       freshAssistantInputIds: ["ain_current_foreground"],
+      now: new Date("2026-04-08T00:00:00.000Z"),
       requestId: "req_current_foreground",
       runtime: createHostedAutomationRuntime(),
       vaultRoot: "/tmp/vault-root",
     });
 
     expect(shouldDeferCronDuringPass).toBe(true);
+    expect(callOrder).toEqual(["provider", "cron-check"]);
+    expect(mocks.repairHostedPendingAssistantRouteProofBatch).not.toHaveBeenCalled();
     expect(result.assistantAutomationCronProcessed).toBe(0);
     expect(result.assistantAutomationCronStatusDeferred).toBe(true);
     expect(result.assistantAutomationCronStatusElapsedMs).toBeNull();
@@ -3752,6 +4006,7 @@ describe("runHostedAssistantAutomationLane", () => {
 
     expect(mocks.createHostedAssistantInputSource).toHaveBeenCalledWith({
       initialActiveTurnInputIds: selectedInputIds,
+      initialPendingInputIds: staleInputIds,
       pendingInputRefreshMode: "existing",
       selectedInputIds,
       vaultRoot: "/tmp/vault-root",

@@ -535,6 +535,7 @@ model HostedComputerRun {
   awaitingMessage            String?                        @map("awaiting_message")
   suggestedReply             String?                        @map("suggested_reply")
   pausedAt                   DateTime?                      @map("paused_at")
+  resumeAfterMailboxLaneSeq  BigInt?                        @map("resume_after_mailbox_lane_seq")
   pendingHandoffId           String?                        @map("pending_handoff_id")
   metadataJson               Json?                          @map("metadata_json")
   expiresAt                  DateTime                       @map("expires_at")

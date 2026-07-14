@@ -27,6 +27,7 @@ import type {
   AssistantProviderUsage,
 } from '../src/assistant/providers/types.ts'
 import { upsertAssistantInputEvent } from '../src/assistant/input-store.ts'
+import { resolveAssistantConversationKey } from '../src/assistant/bindings.ts'
 import { readAssistantTranscriptEntries } from '../src/assistant/store/persistence.ts'
 import { resolveAssistantStatePaths } from '../src/assistant/store/paths.ts'
 import { createTempVaultContext } from './test-helpers.ts'
@@ -842,6 +843,7 @@ test('sendAssistantMessageLocal resolves preceding and retained final delivery c
       channel: 'telegram',
       identityId: 'identity-1',
       threadId: 'thread-1',
+      directness: 'group',
     },
     deliveryDispatchMode: 'immediate',
     deliveryIdempotencyKey: 'delivery-two',
@@ -871,6 +873,7 @@ test('sendAssistantMessageLocal resolves preceding and retained final delivery c
       channel: 'telegram',
       identityId: 'identity-1',
       threadId: 'thread-1',
+      directness: 'group',
     },
     deliveryDispatchMode: 'queue-only',
     deliveryIdempotencyKey: 'delivery-three',
@@ -1379,6 +1382,7 @@ test('sendAssistantMessageLocal stops typing when only a different-target preced
       channel: 'telegram',
       identityId: 'identity-1',
       threadId: 'thread-1',
+      directness: 'group',
     },
     deliveryDispatchMode: 'queue-only',
     deliveryTarget: 'thread-two',
@@ -1776,6 +1780,7 @@ test('sendAssistantMessageLocal live-steers same-conversation input without prov
       channel: 'telegram',
       identityId: 'identity-1',
       threadId: 'thread-1',
+      directness: 'group',
     },
     expectedActiveTurnId: 'turn-1',
     prompt: 'Late follow up',
@@ -2012,6 +2017,7 @@ test('sendAssistantMessageLocal admits a live-steered sender before an immediate
   const steeredResultPromise = sendAssistantMessageLocal({
     conversation: {
       channel: 'telegram',
+      directness: 'group',
       identityId: 'identity-1',
       threadId: 'thread-1',
     },
@@ -2366,6 +2372,7 @@ test('sendAssistantMessageLocal live-steers event-backed input without provider 
       channel: 'telegram',
       identityId: 'identity-1',
       threadId: 'thread-1',
+      directness: 'group',
     },
     vault: context.vaultRoot,
   })
@@ -2472,6 +2479,7 @@ test('sendAssistantMessageLocal persists late manual accepted-input transcript r
       channel: 'telegram',
       identityId: 'identity-1',
       threadId: 'thread-1',
+      directness: 'group',
     },
     expectedActiveTurnId: 'turn-1',
     prompt: 'Late follow up',
@@ -2702,6 +2710,7 @@ test('sendAssistantMessageLocal rejects initial assistant-input refs before manu
         channel: 'telegram',
         identityId: 'identity-1',
         threadId: 'thread-1',
+        directness: 'group',
       },
       expectedActiveTurnId: 'turn-1',
       prompt: 'Follow-up while running',
@@ -2851,6 +2860,7 @@ test('sendAssistantMessageLocal steers same-conversation input into an active ma
       channel: 'telegram',
       identityId: 'identity-1',
       threadId: 'thread-1',
+      directness: 'group',
     },
     expectedActiveTurnId: 'turn-1',
     prompt: 'Follow-up while running',
@@ -2943,6 +2953,7 @@ test('sendAssistantMessageLocal live-steers same-conversation input without a se
       channel: 'telegram',
       identityId: 'identity-1',
       threadId: 'thread-1',
+      directness: 'group',
     },
     expectedActiveTurnId: 'turn-1',
     prompt: 'Follow-up while running',
@@ -3055,6 +3066,7 @@ test('sendAssistantMessageLocal keeps provider success when live steer misses pr
       channel: 'telegram',
       identityId: 'identity-1',
       threadId: 'thread-1',
+      directness: 'group',
     },
     expectedActiveTurnId: 'turn-1',
     prompt: 'Misses provider close',
@@ -3164,6 +3176,7 @@ test('sendAssistantMessageLocal resolves an admitted manual input and rejects a 
       channel: 'telegram',
       identityId: 'identity-1',
       threadId: 'thread-1',
+      directness: 'group',
     },
     expectedActiveTurnId: 'turn-1',
     prompt: 'First admitted',
@@ -3178,6 +3191,7 @@ test('sendAssistantMessageLocal resolves an admitted manual input and rejects a 
       channel: 'telegram',
       identityId: 'identity-1',
       threadId: 'thread-1',
+      directness: 'group',
     },
     expectedActiveTurnId: 'turn-1',
     prompt: 'Second misses close',
@@ -3294,6 +3308,7 @@ test('sendAssistantMessageLocal rejects queued targeted input when provider neve
       channel: 'telegram',
       identityId: 'identity-1',
       threadId: 'thread-1',
+      directness: 'group',
     },
     expectedActiveTurnId: 'turn-1',
     prompt: 'Cannot be live-steered',
@@ -3392,6 +3407,7 @@ test('sendAssistantMessageLocal fails closed when live steering fails', async ()
       channel: 'telegram',
       identityId: 'identity-1',
       threadId: 'thread-1',
+      directness: 'group',
     },
     expectedActiveTurnId: 'turn-1',
     prompt: 'First follow-up',
@@ -3406,6 +3422,7 @@ test('sendAssistantMessageLocal fails closed when live steering fails', async ()
       channel: 'telegram',
       identityId: 'identity-1',
       threadId: 'thread-1',
+      directness: 'group',
     },
     expectedActiveTurnId: 'turn-1',
     prompt: 'Second follow-up',
@@ -3532,6 +3549,7 @@ test('sendAssistantMessageLocal journals live-steered input before terminal prov
       channel: 'telegram',
       identityId: 'identity-1',
       threadId: 'thread-1',
+      directness: 'group',
     },
     expectedActiveTurnId: 'turn-1',
     prompt: 'Failure-path follow-up',
@@ -3634,6 +3652,7 @@ test('sendAssistantMessageLocal registers manual steering before prompt persiste
       channel: 'telegram',
       identityId: 'identity-1',
       threadId: 'thread-1',
+      directness: 'group',
     },
     expectedActiveTurnId: 'turn-1',
     prompt: 'Follow-up while prompt persistence is blocked',
@@ -3747,6 +3766,7 @@ test('sendAssistantMessageLocal starts a new turn when same-conversation input l
         channel: 'telegram',
         identityId: 'identity-1',
         threadId: 'thread-1',
+        directness: 'group',
       },
       expectedActiveTurnId: 'turn-stale',
       prompt: 'Same conversation with stale expected turn id',
@@ -3762,6 +3782,7 @@ test('sendAssistantMessageLocal starts a new turn when same-conversation input l
       channel: 'telegram',
       identityId: 'identity-1',
       threadId: 'thread-1',
+      directness: 'group',
     },
     prompt: 'Same conversation without expected turn id',
     vault: '/vaults/test',
@@ -3801,6 +3822,7 @@ test('sendAssistantMessageLocal rejects targeted active-turn input when no activ
         channel: 'telegram',
         identityId: 'identity-1',
         threadId: 'thread-1',
+        directness: 'group',
       },
       expectedActiveTurnId: 'turn-missing',
       prompt: 'Targeted stale turn',
@@ -3893,6 +3915,7 @@ test('sendAssistantMessageLocal treats input after provider close as a normal ne
       channel: 'telegram',
       identityId: 'identity-1',
       threadId: 'thread-1',
+      directness: 'group',
     },
     prompt: 'Arrived after provider close',
     vault: '/vaults/test',
@@ -5670,6 +5693,7 @@ test('sendAssistantMessageLocal recovers reaction no-reply before draining later
       channel: 'telegram',
       identityId: 'identity-1',
       threadId: 'thread-1',
+      directness: 'group',
     },
     expectedActiveTurnId: 'turn-1',
     prompt: 'Later follow up',
@@ -6718,6 +6742,7 @@ test('sendAssistantMessageLocal persists live-steered input before its no-reply 
       channel: 'telegram',
       identityId: 'identity-1',
       threadId: 'thread-1',
+      directness: 'group',
     },
     expectedActiveTurnId: 'turn-1',
     prompt: 'Live no-reply follow up',
@@ -6866,6 +6891,7 @@ test('sendAssistantMessageLocal completes terminal provider failures after live-
       channel: 'telegram',
       identityId: 'identity-1',
       threadId: 'thread-1',
+      directness: 'group',
     },
     expectedActiveTurnId: 'turn-1',
     prompt: 'Live no-reply follow up',
@@ -7986,22 +8012,32 @@ function createAssistantSession(input?: {
   sessionId?: string
   target?: AssistantSession['target']
 }): AssistantSession {
+  const binding = input?.binding ?? {
+    actorId: null,
+    channel: 'telegram',
+    conversationKey: null,
+    delivery: {
+      kind: 'thread' as const,
+      target: 'thread-1',
+    },
+    identityId: 'identity-1',
+    threadId: 'thread-1',
+    threadIsDirect: false,
+  }
   return {
     alias: null,
-    binding:
-      input?.binding ??
-      {
-        actorId: null,
-        channel: 'telegram',
-        conversationKey: null,
-        delivery: {
-          kind: 'thread',
-          target: 'thread-1',
+    binding: binding.conversationKey === null
+      ? binding
+      : {
+          ...binding,
+          conversationKey: resolveAssistantConversationKey({
+            actorId: binding.actorId,
+            channel: binding.channel,
+            identityId: binding.identityId,
+            threadId: binding.threadId,
+            threadIsDirect: binding.threadIsDirect,
+          }),
         },
-        identityId: 'identity-1',
-        threadId: 'thread-1',
-        threadIsDirect: false,
-      },
     createdAt: '2026-04-08T00:00:00.000Z',
     codexResume: input?.resumeState ?? null,
     codexTarget:

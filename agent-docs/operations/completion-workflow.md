@@ -9,10 +9,10 @@ When the routed task class requires local audit passes such as `prompt-review`, 
 Those required local audit passes are local audit subagent passes (see the model routing in `Audit Worker Rules`), not `review:gpt`, not external ChatGPT autosends, and not `thread wake` workflows.
 This completion workflow is standing user approval to spawn the required local Codex audit subagents for routed repo tasks. Do not skip or downgrade a required audit pass because generic agent instructions say subagents need an explicit user request; this document and `AGENTS.md` are that explicit repo-level request for the required completion passes.
 
-**Worktree/PR-lane final-review consolidation.** A separate worktree/PR lane still runs every specialist pass triggered by the change: `prompt-review`, `security-privacy-review`, `frontend-review`, and `coverage-write`. These passes require current external guidance, rendered UI evidence, trust-boundary tracing, or write-capable test proof that the static PR review artifacts cannot provide. The PR-lane ReviewGPT loop in `agent-docs/operations/pr-reviewgpt-loop.md` replaces only the default local `deep-review` pass and acts as the final cross-cutting merge-readiness gate; run local `deep-review` too only when the user explicitly asks for that specific pass. Step 11's parent-owned local final review still runs. Current-checkout work follows the same specialist routing and uses local `deep-review` when its normal trigger applies because there is no PR gate.
+**Worktree/PR-lane final-review consolidation.** A separate worktree/PR lane still runs every specialist pass triggered by the change: `prompt-review`, `security-privacy-review`, `frontend-review`, and `coverage-write`. These passes require current external guidance, rendered UI evidence, trust-boundary tracing, or write-capable test proof that the static PR review artifacts cannot provide. For ReviewGPT-eligible work, the PR-lane loop in `agent-docs/operations/pr-reviewgpt-loop.md` replaces only the default local `deep-review` pass and acts as the final cross-cutting merge-readiness gate. The low-risk exemptions are defined in `ReviewGPT Eligibility` below. Run local `deep-review` too only when the user explicitly asks for that specific pass. Step 11's parent-owned local final review still runs. Current-checkout work follows the same specialist routing and uses local `deep-review` when its normal trigger applies because there is no PR gate.
 Required workflow audit subagents default to high reasoning. Use xhigh reasoning instead when the change is large, complex, high-risk/cross-cutting, or spans multiple owners, architecture decisions, or trust-boundary decisions. If the current subagent tooling cannot honor the required reasoning effort, report that limitation explicitly instead of silently downgrading the pass.
 
-Final review is not a spawned subagent pass. The parent agent runs an explicit local final review (step 11), and for PR-lane work the ReviewGPT loop in `agent-docs/operations/pr-reviewgpt-loop.md` is the required final review gate before merge-readiness (rounds fire on push, in parallel with PR CI).
+Final review is not a spawned subagent pass. The parent agent runs an explicit local final review (step 11). For ReviewGPT-eligible PR-lane work, the loop in `agent-docs/operations/pr-reviewgpt-loop.md` is the required final review gate before merge-readiness (rounds fire on push, in parallel with PR CI).
 Removed 2026-06-12: the `simplify` and `task-finish-review` subagent passes. June 2026 transcript mining across Codex/Claude sessions and `audit-packages/` artifacts showed `simplify` produced no accepted findings, and `task-finish-review` produced mostly low-severity polish while the specialized passes caught the real local bugs and the post-completion PR ReviewGPT loop caught what the entire local stack missed. The parent-owned scope-and-shape check (step 2) owns simplification; `/simplify` remains available on demand.
 
 ## Outcome and Completion Bar
@@ -21,13 +21,38 @@ The outcome is the requested behavior or documentation change, landed at the
 smallest correct ownership boundary with truthful proof and no unresolved
 accepted review finding. Completion requires the routed verification, required
 specialist audits, parent final review, plan/ledger closure, and scoped commit;
-PR-lane work additionally requires the pushed-head ReviewGPT and CI gates.
+PR-lane work additionally requires green CI and, when the change is eligible,
+the pushed-head ReviewGPT gate.
 
 Keep the current layer explicit: implementation, local completion, or PR/external
 gate. Do not let a later layer repeat policy owned by an earlier one, and do not
 silently advance when its prerequisites or authority are missing. A blocked
 check or audit ends with the exact gap and best available evidence, not a claim
 that the task fully completed.
+
+## ReviewGPT Eligibility
+
+ReviewGPT is a proportional risk gate, not a requirement for every PR. Skip it
+when the meaningful diff is low-risk and limited to one or more of:
+
+- docs or process text;
+- prompt-primary changes covered by the required local `prompt-review` pass;
+- tests, fixtures, or developer tooling that do not change production behavior;
+- static copy or content; or
+- minor frontend presentation polish such as spacing, typography, color,
+  icons, imagery, or responsive containment that does not change the user
+  workflow, UI state model, data flow, or authority boundary.
+
+The exemption applies only when the change does not affect a product-critical
+flow; auth, privacy, security, billing, or health-safety behavior or claims;
+persisted state or schemas; public APIs; runtime or deploy boundaries; or
+ordering, retries, concurrency, or idempotency. It also does not apply to broad
+refactors or cross-owner changes. When any of those conditions are present, or
+the user explicitly requests ReviewGPT, run the normal PR loop.
+
+Skipping ReviewGPT does not skip applicable specialist audits, the parent final
+review, scoped verification, CI, merge-conflict proof, or the normal commit and
+PR requirements.
 
 ## Sequence
 
@@ -54,7 +79,7 @@ that the task fully completed.
 12. Enter the review-resolution loop below for every required audit output. Completion means there are no unresolved accepted/actionable findings, not merely that the audit pass ran.
 13. Run or re-run the required checks after the implementation is stable, after any review-driven fixes, and after any required coverage pass lands.
 14. Close any active execution plan and use the commit path chosen by the routing doc and `AGENTS.md` before handoff. For plan-bearing work, the final scoped commit must go through `scripts/finish-task <active-plan-path> "summary" <path>...` so the matching ledger row is removed and the plan moves to `agent-docs/exec-plans/completed/`. Do not use `scripts/committer` or `git commit` as the final task commit for plan-bearing work; that commits code while leaving stale active-plan state behind. If overlapping dirty work blocks a safe `finish-task` commit, clear the exact ledger row, archive the plan with `scripts/close-exec-plan.sh`, and report the scoped-commit blocker before handoff.
-15. For non-trivial PR-lane work, follow `agent-docs/operations/pr-reviewgpt-loop.md` to zero accepted findings before calling the PR merge-ready. That doc owns pushed-head proof, browser-lane selection, model/response validation, CI concurrency, rerun rules, and the base-update-only exception. This gate does not replace the specialist passes required above.
+15. For ReviewGPT-eligible PR-lane work, follow `agent-docs/operations/pr-reviewgpt-loop.md` to zero accepted findings before calling the PR merge-ready. Use `ReviewGPT Eligibility` above for the proportional low-risk exemption. The loop doc owns pushed-head proof, browser-lane selection, model/response validation, CI concurrency, rerun rules, and the base-update-only exception. This gate does not replace the specialist passes required above.
 16. For PR-lane work, the task is not complete until the PR branch has no merge conflicts with `main` or its configured base branch. Before final handoff, fetch the latest `main`/base branch and prove the PR head can merge cleanly, or update the branch by a normal merge/rebase, resolve any conflicts, rerun the required checks for the touched surfaces, and push the resolved head. Follow the ReviewGPT loop's base-update and patch-change rerun rules.
 17. An open PR remains active, so preserve its task worktree. If the current turn includes confirmed PR merge or closure, apply the task-worktree retirement gate in `agent-docs/operations/agent-workflow-routing.md` before final handoff; preserve and report the checkout when any retirement gate fails.
 18. Final handoff must report required-check results, direct scenario evidence, and audit findings accepted, fixed, or rejected with reasons. Green required checks remain the default completion bar; if a required check failed for a credibly unrelated pre-existing reason, handoff must name the failing command, failing target, and why the current diff did not cause it.
