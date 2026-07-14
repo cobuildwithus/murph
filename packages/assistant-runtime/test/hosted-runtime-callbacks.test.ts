@@ -8777,6 +8777,7 @@ describe("hosted runtime callbacks", () => {
     expect(recordDeliveryOutcome).toHaveBeenCalledWith(
       expect.objectContaining({
         idempotencyKey: "legacy-current-inbound:evt_linq_current",
+        lineLookupKey: "hbidx:phone:v1:account_a",
       }),
       expect.any(Object),
     );
@@ -10031,6 +10032,14 @@ describe("hosted runtime callbacks", () => {
         signal: null,
       },
     );
+    expect(assertRecentInbound).toHaveBeenCalledTimes(1);
+    expect(assertRecentInbound.mock.calls.map(([request]) =>
+      request.authorityCheckOnly
+    )).toEqual([false]);
+    expect(assertRecentInbound.mock.invocationCallOrder[0] ?? 0)
+      .toBeLessThan(
+        mocks.sendLinqVoiceMemoMessage.mock.invocationCallOrder[0] ?? 0,
+      );
     expect(mocks.sendLinqVoiceMemoMessage).toHaveBeenCalledWith({
       attachmentId: "attachment_voice_1",
       target: "linq_chat_stale",
