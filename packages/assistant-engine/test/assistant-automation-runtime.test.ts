@@ -35,6 +35,7 @@ import {
 import {
   createAssistantInputEventId,
   compareAssistantInputCursors,
+  isAssistantInputEventDeferredContextCausalForActionable,
   type AssistantInputAttachmentDescriptor,
   upsertAssistantInputEvent,
 } from '../src/assistant/input-store.ts'
@@ -758,19 +759,62 @@ function createAssistantInputSourceForCandidates(
       reason: 'no_new_input' as const,
     })),
     listInputCandidates: vi.fn(async (input) => {
-      const selected = candidates
+      const isDeferredContextCandidate = (candidate: AssistantInputCandidate) =>
+        candidate.event.sourceMetadata?.kind === 'linq' &&
+        candidate.event.sourceMetadata.contextOnly === true
+      const eligible = candidates
         .filter((candidate) =>
           input.sourceId ? candidate.event.source === input.sourceId : true,
         )
         .filter((candidate) =>
           input.afterCursor
-            ? compareAssistantInputCursors(candidate.event.cursor, input.afterCursor) > 0
+            ? (
+                input.actionableLimit !== undefined &&
+                isDeferredContextCandidate(candidate)
+              ) || compareAssistantInputCursors(
+                candidate.event.cursor,
+                input.afterCursor,
+              ) > 0
             : true,
         )
         .sort((left, right) =>
           compareAssistantInputCursors(left.event.cursor, right.event.cursor),
         )
-        .slice(0, input.limit ?? candidates.length)
+      const limit = input.limit ?? candidates.length
+      const selected = input.actionableLimit === undefined
+        ? eligible.slice(0, limit)
+        : (() => {
+            const allActionable = eligible.filter((candidate) =>
+              !isDeferredContextCandidate(candidate),
+            )
+            const actionable = allActionable.slice(
+              0,
+              Math.min(limit, input.actionableLimit),
+            )
+            const nextActionable = allActionable[actionable.length] ?? null
+            const contextBudget = Math.max(0, limit - actionable.length)
+            const context = contextBudget === 0
+              ? []
+              : eligible
+                  .filter(isDeferredContextCandidate)
+                  .filter((candidate) =>
+                    nextActionable === null ||
+                    compareAssistantInputCursors(
+                      candidate.event.cursor,
+                      nextActionable.event.cursor,
+                    ) < 0,
+                  )
+                  .filter((candidate) => actionable.some((actionableCandidate) =>
+                    isAssistantInputEventDeferredContextCausalForActionable({
+                      actionable: actionableCandidate.event,
+                      context: candidate.event,
+                    }),
+                  ))
+                  .slice(-contextBudget)
+            return [...context, ...actionable].sort((left, right) =>
+              compareAssistantInputCursors(left.event.cursor, right.event.cursor),
+            )
+          })()
       return {
         inputs: selected,
         nextCursor: selected.at(-1)?.event.cursor ?? input.afterCursor ?? null,
@@ -1932,7 +1976,7 @@ describe('assistant automation scanner', () => {
     )
   })
 
-  it('keeps interleaved group context behind the cursor until its group becomes actionable', async () => {
+  it('keeps interleaved group context available after the cursor advances', async () => {
     const reactionA = createCapturelessAssistantInputCandidate({
       actorId: 'safe_actor_alice',
       conversationThreadId: 'safe_group_a',
@@ -2018,7 +2062,10 @@ describe('assistant automation scanner', () => {
       vault: '/tmp/assistant-automation-vault',
     })
 
-    expect(firstStateUpdates).toEqual([])
+    expect(readAutoReplyCursor(
+      firstStateUpdates.at(-1) ?? createAutomationState(),
+      'linq',
+    )).toEqual(messageB.event.cursor)
     expect(scannerReplyMocks.processAssistantAutoReplyGroup.mock.calls[0]?.[0])
       .toEqual(expect.objectContaining({
         context: expect.objectContaining({ inputIds: [messageB.event.inputId] }),
@@ -2050,7 +2097,10 @@ describe('assistant automation scanner', () => {
           autoReply: [...next.autoReply],
         })
       },
-      state: createAutomationState({ autoReplyChannels: ['linq'] }),
+      state: createAutomationState({
+        autoReplyChannels: ['linq'],
+        autoReplyEligibleAfter: messageB.event.cursor,
+      }),
       vault: '/tmp/assistant-automation-vault',
     })
 

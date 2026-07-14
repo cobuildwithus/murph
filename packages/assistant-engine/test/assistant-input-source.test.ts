@@ -593,6 +593,58 @@ describe('store-backed assistant input source', () => {
     })).rejects.toBe(abortReason)
   })
 
+  it('keeps older deferred context eligible after the actionable cursor advances', async () => {
+    const { vaultRoot } = await createAssistantInputSourceVault(
+      'assistant-input-source-context-after-cursor-',
+    )
+    const context = await upsertAssistantInputEvent({
+      vault: vaultRoot,
+      event: createStoredHostedMailboxInput({
+        contextOnly: true,
+        eventId: 'evt_context_before_other_group',
+        laneSeq: '1',
+        occurredAt: '2026-04-22T10:00:01.000Z',
+        replyTarget: null,
+        threadId: 'hidden_group_a',
+        threadIsDirect: false,
+      }),
+    })
+    const otherGroup = await upsertAssistantInputEvent({
+      vault: vaultRoot,
+      event: createStoredHostedMailboxInput({
+        eventId: 'evt_other_group_cursor',
+        laneSeq: '2',
+        occurredAt: '2026-04-22T10:00:02.000Z',
+        threadId: 'hidden_group_b',
+        threadIsDirect: false,
+      }),
+    })
+    const actionable = await upsertAssistantInputEvent({
+      vault: vaultRoot,
+      event: createStoredHostedMailboxInput({
+        eventId: 'evt_group_a_after_cursor',
+        laneSeq: '3',
+        occurredAt: '2026-04-22T10:00:03.000Z',
+        threadId: 'hidden_group_a',
+        threadIsDirect: false,
+      }),
+    })
+    const source = createStoreBackedAssistantInputSource({ vault: vaultRoot })
+
+    const listed = await source.listInputCandidates({
+      actionableLimit: 1,
+      afterCursor: otherGroup.cursor,
+      limit: 33,
+      sourceId: 'linq',
+    })
+
+    expect(listed.inputs.map((candidate) => candidate.event.inputId)).toEqual([
+      context.inputId,
+      actionable.inputId,
+    ])
+    expect(listed.nextCursor).toEqual(actionable.cursor)
+  })
+
   it('retains only causal newest deferred context within route and global bounds', async () => {
     const { vaultRoot } = await createAssistantInputSourceVault(
       'assistant-input-source-context-bounds-',

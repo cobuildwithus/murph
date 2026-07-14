@@ -452,7 +452,13 @@ function buildHostedAssistantInputCandidateBatch(input: {
   const candidates = input.candidates
     .filter((candidate) =>
       input.afterCursor
-        ? compareAssistantInputCursors(candidate.event.cursor, input.afterCursor) > 0
+        ? (
+            input.actionableLimit !== undefined &&
+            isHostedDeferredContextCandidate(candidate)
+          ) || compareAssistantInputCursors(
+            candidate.event.cursor,
+            input.afterCursor,
+          ) > 0
         : true
     )
     .sort((left, right) =>

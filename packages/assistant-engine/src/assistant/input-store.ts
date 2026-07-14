@@ -667,7 +667,10 @@ export async function listAssistantInputEvents(input: {
       )
       .filter((record) =>
         input.afterCursor
-          ? compareAssistantInputCursors(record.cursor, input.afterCursor) > 0
+          ? (
+              input.actionableLimit !== undefined &&
+              isAssistantInputEventDeferredContext(record)
+            ) || compareAssistantInputCursors(record.cursor, input.afterCursor) > 0
           : true,
       )
       .filter((record) => !excludedInputIds.has(record.inputId))
@@ -692,9 +695,7 @@ export async function listAssistantInputEvents(input: {
     })
     const nextCursor = events[0]
       ? events[events.length - 1]!.cursor
-      : filtered.length > 0
-        ? filtered[Math.min(filtered.length, limit) - 1]!.cursor
-        : input.afterCursor ?? null
+      : input.afterCursor ?? null
 
     return {
       events,

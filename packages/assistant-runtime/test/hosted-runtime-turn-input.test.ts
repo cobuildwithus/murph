@@ -181,6 +181,77 @@ describe("createHostedAssistantInputSource", () => {
     ]);
   });
 
+  it("keeps older deferred context eligible after the actionable cursor advances", async () => {
+    const vaultRoot = await createTempVault();
+    const context = await upsertAssistantInputEvent({
+      vault: vaultRoot,
+      event: createAssistantInputEvent({
+        contextOnly: true,
+        dedupeKey: "dedupe_context_before_other_group",
+        eventId: "evt_context_before_other_group",
+        itemId: "item_context_before_other_group",
+        laneSeq: "1",
+        occurredAt: "2026-04-23T00:00:01.000Z",
+        receivedAt: "2026-04-23T00:00:01.500Z",
+        replyTarget: null,
+        threadId: "group_a",
+        threadIsDirect: false,
+      }),
+    });
+    const otherGroup = await upsertAssistantInputEvent({
+      vault: vaultRoot,
+      event: createAssistantInputEvent({
+        dedupeKey: "dedupe_other_group_cursor",
+        eventId: "evt_other_group_cursor",
+        itemId: "item_other_group_cursor",
+        laneSeq: "2",
+        occurredAt: "2026-04-23T00:00:02.000Z",
+        receivedAt: "2026-04-23T00:00:02.500Z",
+        threadId: "group_b",
+        threadIsDirect: false,
+      }),
+    });
+    const actionable = await upsertAssistantInputEvent({
+      vault: vaultRoot,
+      event: createAssistantInputEvent({
+        dedupeKey: "dedupe_group_a_after_cursor",
+        eventId: "evt_group_a_after_cursor",
+        itemId: "item_group_a_after_cursor",
+        laneSeq: "3",
+        occurredAt: "2026-04-23T00:00:03.000Z",
+        receivedAt: "2026-04-23T00:00:03.500Z",
+        threadId: "group_a",
+        threadIsDirect: false,
+      }),
+    });
+    const source = createHostedAssistantInputSource({
+      selectedInputIds: [context.inputId, otherGroup.inputId, actionable.inputId],
+      vaultRoot,
+    });
+
+    const firstListed = await source.listInputCandidates({
+      actionableLimit: 1,
+      limit: 33,
+      sourceId: "linq",
+    });
+    expect(firstListed.inputs.map((candidate) => candidate.event.inputId)).toEqual([
+      otherGroup.inputId,
+    ]);
+
+    const listed = await source.listInputCandidates({
+      actionableLimit: 1,
+      afterCursor: otherGroup.cursor,
+      limit: 33,
+      sourceId: "linq",
+    });
+
+    expect(listed.inputs.map((candidate) => candidate.event.inputId)).toEqual([
+      context.inputId,
+      actionable.inputId,
+    ]);
+    expect(listed.nextCursor).toEqual(actionable.cursor);
+  });
+
   it("retains only causal newest selected context within route and global bounds", async () => {
     const vaultRoot = await createTempVault();
     const baseOccurredAt = Date.parse("2026-04-23T00:00:00.000Z");
