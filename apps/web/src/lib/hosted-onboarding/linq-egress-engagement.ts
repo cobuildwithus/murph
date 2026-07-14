@@ -4,6 +4,7 @@ import type {
   HostedExecutionExternalThreadRouteAuthority,
   HostedExecutionLinqExternalThreadRouteAuthority,
 } from "@murphai/hosted-execution";
+import { parseHostedExecutionWake } from "@murphai/hosted-execution/parsers";
 
 import {
   createHostedLinqChatLookupKeyReadCandidates,
@@ -20,6 +21,11 @@ import {
   assertActiveHostedThreadRouteContainerAccess,
   readHostedThreadRouteByThreadIdentity,
 } from "../hosted-routing/thread-route-store";
+import {
+  decodeHostedMailboxStoredPayload,
+  readHostedMailboxLiveItemById,
+  readHostedMailboxPayload,
+} from "../hosted-mailbox/store";
 
 type HostedLinqEngagementClient = PrismaClient | Prisma.TransactionClient;
 type HostedLinqLegacyCurrentInboundProof = {
@@ -112,6 +118,16 @@ export async function assertHostedLinqRecentInboundEngagementForRuntime(input: {
     return { targetOverride: null };
   }
 
+  if (await matchesPersistedHostedLinqDirectInbound({
+    currentInbound: input.currentInbound ?? null,
+    memberId: input.memberId,
+    prisma: input.prisma,
+    replyToMessageId: input.replyToMessageId,
+    target: input.target,
+  })) {
+    return { targetOverride: null };
+  }
+
   return await assertHostedMemberLinqRouteMatchesEgressTarget({
     chatId: input.target,
     memberId: input.memberId,
@@ -121,6 +137,85 @@ export async function assertHostedLinqRecentInboundEngagementForRuntime(input: {
     targetKind: input.targetKind,
     homeRouteFallbackAllowed: input.homeRouteFallbackAllowed === true,
   });
+}
+
+async function matchesPersistedHostedLinqDirectInbound(input: {
+  currentInbound: HostedLinqLegacyCurrentInboundProof | null;
+  memberId: string;
+  prisma: HostedLinqEngagementClient;
+  replyToMessageId?: string | null;
+  target: string | null;
+}): Promise<boolean> {
+  const proof = input.currentInbound;
+  const target = normalizeNullable(input.target);
+  const requestReplyToMessageId = normalizeNullable(input.replyToMessageId);
+  if (
+    !proof
+    || !target
+    || normalizeNullable(proof.target) !== target
+    || normalizeNullable(proof.eventId) !== normalizeNullable(proof.dedupeKey)
+    || (
+      requestReplyToMessageId !== null
+      && normalizeNullable(proof.replyToMessageId) !== requestReplyToMessageId
+    )
+  ) {
+    return false;
+  }
+
+  const item = await readHostedMailboxLiveItemById({
+    availableAt: new Date(),
+    mailboxItemId: proof.mailboxItemId,
+    prisma: input.prisma,
+  });
+  if (
+    !item
+    || item.userId !== input.memberId
+    || item.dedupeKey !== proof.dedupeKey
+    || item.kind !== "conversation.message"
+    || item.lane !== "conversation"
+    || item.occurredAt !== proof.occurredAt
+  ) {
+    return false;
+  }
+
+  const payload = item.payloadRef
+    ? await readHostedMailboxPayload({
+        dedupeKey: item.dedupeKey,
+        mailboxItemId: item.id,
+        payloadRef: item.payloadRef,
+        prisma: input.prisma,
+        userId: item.userId,
+      })
+    : null;
+  const decoded = await decodeHostedMailboxStoredPayload({
+    dedupeKey: item.dedupeKey,
+    kind: item.kind,
+    lane: item.lane,
+    laneSeq: item.laneSeq,
+    mailboxItemId: item.id,
+    occurredAt: item.occurredAt,
+    payloadCiphertext: payload?.payloadCiphertext ?? null,
+    payloadInlineCiphertext: item.payloadInlineCiphertext,
+    payloadSchema: item.payloadSchema,
+    prisma: input.prisma,
+    userId: item.userId,
+  });
+  if (!decoded) {
+    return false;
+  }
+
+  const wake = parseHostedExecutionWake(decoded);
+  return (
+    wake.kind === "conversation.message"
+    && wake.userId === input.memberId
+    && wake.eventId === proof.eventId
+    && wake.occurredAt === proof.occurredAt
+    && wake.message.channel === "linq"
+    && wake.message.linqMessage.isFromMe === false
+    && wake.message.linqMessage.threadIsDirect === true
+    && wake.message.linqMessage.chatId === target
+    && wake.message.linqMessage.messageId === proof.replyToMessageId
+  );
 }
 
 async function assertHostedMemberLinqRouteMatchesEgressTarget(input: {

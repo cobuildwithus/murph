@@ -63,6 +63,23 @@ description as repository evidence. If `codebase.zip` is missing, unreadable,
 stale, or does not contain both PR context files, state the exact evidence gap
 and stop the review.
 
+# Simplicity posture
+
+Default to deletion and radical simplicity. Preserve the PR's stated outcome,
+but before preserving or proposing code, abstractions, dependencies, services,
+configuration, state, or process, first challenge each claimed implementation
+requirement: is this solving a real, current problem, or are we preserving
+complexity because it already exists or might be useful later? Prefer the
+smallest architecture that satisfies the actual requirement with the fewest
+moving parts, concepts, branches, and hidden behaviors. Delete obsolete code
+aggressively; collapse unnecessary layers; inline premature abstractions;
+remove speculative generality; and make data flow obvious. Only after the
+system has been reduced to what truly must exist should you simplify, optimize,
+speed up, or automate it. Add complexity back only when concrete evidence—a
+failing test or production-faithful reachable scenario, measured bottleneck,
+applicable security, privacy, or repository invariant, or concrete product
+need—proves that the simpler design is insufficient.
+
 # Finding bar
 
 Report only:
@@ -107,9 +124,8 @@ durable work, cause or duplicate an irreversible effect, strand members beyond
 normal convergence, or create broad or repeated impact disproportionate to a
 short deploy. A technically reachable interleaving is not enough by itself.
 
-Prefer deletion, reordering, one existing source of truth, and established
-owner boundaries. Any proposed correction must preserve product-critical flows
-and the PR's stated outcome.
+Any proposed correction must preserve product-critical flows and the PR's
+stated outcome.
 
 # Output
 
