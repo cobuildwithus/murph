@@ -96,39 +96,39 @@ test("hosted web tsconfig resolves Temporal orchestration-control from source", 
 
   assert.deepEqual(
     tsconfig.compilerOptions?.paths?.["@murphai/hosted-execution/orchestration-control"],
-    ["packages/hosted-execution/src/orchestration-control.ts"],
+    ["../../packages/hosted-execution/src/orchestration-control.ts"],
   );
   assert.deepEqual(
     tsconfig.compilerOptions?.paths?.["@murphai/hosted-execution/connected-apps"],
-    ["packages/hosted-execution/src/connected-apps.ts"],
+    ["../../packages/hosted-execution/src/connected-apps.ts"],
   );
   assert.deepEqual(
     tsconfig.compilerOptions?.paths?.["@murphai/hosted-execution/routes"],
-    ["packages/hosted-execution/src/routes.ts"],
+    ["../../packages/hosted-execution/src/routes.ts"],
   );
   assert.deepEqual(
     tsconfig.compilerOptions?.paths?.["@murphai/hosted-execution/phone-calls"],
-    ["packages/hosted-execution/src/phone-calls.ts"],
+    ["../../packages/hosted-execution/src/phone-calls.ts"],
   );
   assert.deepEqual(
     tsconfig.compilerOptions?.paths?.["@murphai/hosted-execution/plan-usage"],
-    ["packages/hosted-execution/src/plan-usage.ts"],
+    ["../../packages/hosted-execution/src/plan-usage.ts"],
   );
   assert.deepEqual(
     tsconfig.compilerOptions?.paths?.["@murphai/device-syncd/providers/junction-client"],
-    ["packages/device-syncd/src/providers/junction-client.ts"],
+    ["../../packages/device-syncd/src/providers/junction-client.ts"],
   );
   assert.deepEqual(
     tsconfig.compilerOptions?.paths?.["@murphai/device-syncd/provider-credential-policy"],
-    ["packages/device-syncd/src/provider-credential-policy.ts"],
+    ["../../packages/device-syncd/src/provider-credential-policy.ts"],
   );
   assert.deepEqual(
     tsconfig.compilerOptions?.paths?.["@murphai/device-syncd/provider-match"],
-    ["packages/device-syncd/src/provider-match.ts"],
+    ["../../packages/device-syncd/src/provider-match.ts"],
   );
   assert.deepEqual(
     tsconfig.compilerOptions?.paths?.["@murphai/device-syncd/providers/junction-config"],
-    ["packages/device-syncd/src/providers/junction-config.ts"],
+    ["../../packages/device-syncd/src/providers/junction-config.ts"],
   );
 });
 
@@ -152,6 +152,27 @@ test("hosted web build tsconfig keeps tests out of Next production checks", () =
   assert.ok(!tsconfig.include?.includes("test/**/*.ts"));
   assert.ok(!tsconfig.include?.includes("test/**/*.tsx"));
   assert.ok(tsconfig.exclude?.includes("test"));
+});
+
+test("hosted web keeps Next on TypeScript 5 while workspace checks use TypeScript 7", () => {
+  const rootRequire = createRequire(path.join(repoRoot, "package.json"));
+  const hostedWebRequire = createRequire(path.join(repoRoot, "apps/web/package.json"));
+
+  const readTypeScriptVersion = (packageRequire: NodeJS.Require): string => {
+    const packageMetadata: unknown = JSON.parse(
+      readFileSync(packageRequire.resolve("typescript/package.json"), "utf8"),
+    );
+
+    assert.ok(packageMetadata && typeof packageMetadata === "object");
+    const version = "version" in packageMetadata ? packageMetadata.version : undefined;
+    if (typeof version !== "string") {
+      throw new TypeError("Resolved TypeScript package does not declare a string version.");
+    }
+    return version;
+  };
+
+  assert.match(readTypeScriptVersion(rootRequire), /^7\./u);
+  assert.match(readTypeScriptVersion(hostedWebRequire), /^5\./u);
 });
 
 test("hosted web dist-dir selection reserves a dedicated artifact directory for interactive dev", () => {

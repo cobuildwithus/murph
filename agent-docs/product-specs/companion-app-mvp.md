@@ -42,6 +42,56 @@ desired categories and tap **Allow** before connecting Apple Health in Murph.
 WHOOP does not document a supported settings deep link, so Murph must not
 fabricate one.
 
+### Time-boxed Messages extension proof (explicit scope exception)
+
+The 2026-07-10 Linq iMessage mini-app proof is a deliberate, isolated
+exception to the two-screen Health sync MVP above. It may add one settings
+control to the containing app and one Messages extension target, but it does
+not make chat, polls, or mobile account state a new responsibility of the
+companion app.
+
+The proof has one question: can an installed Murph Messages extension perform
+a Murph-account action whose authority originates from the containing app's
+current Privy session? The smallest honest implementation is:
+
+1. Linq delivers a single `imessage_app` card associated with the exact signed
+   Murph Messages extension Team ID and bundle ID. Linq does not host the UI or
+   receive button-tap webhooks.
+2. The card URL is a capability-less first-party HTTPS locator containing only
+   a public card identifier. It never contains a Privy token, derived
+   credential, member ID, participant UUID, or health data.
+3. The containing app, while Privy-authenticated, calls `POST
+   /api/device-sync/companion/imessage-mini-app/enrollment`. The server verifies
+   the bounded request body, verifies the identity token, then serializes with
+   account deletion on the hosted-member lock while re-checking active access
+   and launch consent. It returns a random 24-hour Messages-only bearer only
+   after atomically rotating one deterministic Messages-owned session row in
+   that same transaction. Repeated enrollment replaces the lookup hash and
+   invalidates the prior bearer while keeping storage bounded to one Messages
+   row per member and leaving ordinary device-agent rows untouched.
+4. The containing app writes only that derived bearer to an explicitly
+   addressed shared Keychain access group. Privy's own access, refresh, and
+   identity tokens remain in Privy's host-app-private storage.
+5. The extension calls `POST
+   /api/device-sync/companion/imessage-mini-app/proof-action` with the derived
+   bearer and a closed, versioned choice envelope. The server re-checks active
+   access and launch consent and returns the accepted choice. This spike does
+   not persist a poll or imply durable product truth.
+6. Disabling the feature or signing out calls `DELETE
+   /api/device-sync/companion/imessage-mini-app/enrollment` best-effort and
+   always clears the local derived bearer, even if the network revoke fails.
+
+Privy Swift 2.12.0 is intentionally absent from the extension target: its
+binary references app-only lifecycle APIs, is not marked app-extension-safe,
+and provides no supported shared-storage adapter. Adding Keychain entitlements
+does not make that SDK safe to link and must not expose its raw session.
+
+The Linq development-build path remains an empirical gate. Apple supports
+developer-signed containing apps and extensions, and Linq identifies an app
+card by Team ID plus extension bundle ID with an optional App Store ID, but a
+physical-device send is still required to prove Linq renders a directly
+installed build rather than the static fallback.
+
 ### Login methods: verified constraint
 
 Privy's Swift SDK natively supports **email OTP and SMS OTP**. Its native

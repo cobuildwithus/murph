@@ -20,7 +20,8 @@ const ASSISTANT_INPUT_EVENT_ID_PATTERN = /^ain_[0-9a-f]{32}$/u
 const ASSISTANT_HOSTED_MAILBOX_ITEM_ID_PATTERN =
   /^[A-Za-z0-9][A-Za-z0-9_.:+-]{0,191}$/u
 
-interface HostedMailboxAssistantInputItem {
+export interface HostedMailboxAssistantInputItem {
+  groupParticipantAdded?: true
   inputId: string
   mailboxItemId: string
 }
@@ -36,6 +37,7 @@ export interface HostedMailboxAssistantInputItemInventory {
 }
 
 export async function recordHostedMailboxAssistantInputItem(input: {
+  groupParticipantAdded?: true
   inputId: string
   mailboxItemId: string
   vault: string
@@ -59,15 +61,15 @@ export async function recordHostedMailboxAssistantInputItem(input: {
   })
 }
 
-export async function readHostedMailboxAssistantInputItems(input: {
+export async function readHostedMailboxAssistantInputItemDetails(input: {
   inputIds: readonly string[]
   vault: string
-}): Promise<ReadonlyMap<string, string>> {
+}): Promise<ReadonlyMap<string, HostedMailboxAssistantInputItem>> {
   if (input.inputIds.length === 0) {
     return new Map()
   }
   const paths = resolveAssistantStatePaths(input.vault)
-  const items = new Map<string, string>()
+  const items = new Map<string, HostedMailboxAssistantInputItem>()
 
   for (const inputId of new Set(input.inputIds)) {
     const normalizedInputId = normalizeAssistantInputEventId(inputId, 'inputId')
@@ -76,7 +78,7 @@ export async function readHostedMailboxAssistantInputItems(input: {
       paths,
     })
     if (item) {
-      items.set(item.inputId, item.mailboxItemId)
+      items.set(item.inputId, item)
     }
   }
 
@@ -194,10 +196,22 @@ function normalizeHostedMailboxAssistantInputItem(
     throw new TypeError('hosted mailbox assistant input item must be an object.')
   }
   const record = value as {
+    groupParticipantAdded?: unknown
     inputId?: unknown
     mailboxItemId?: unknown
   }
+  if (
+    record.groupParticipantAdded !== undefined &&
+    record.groupParticipantAdded !== true
+  ) {
+    throw new TypeError(
+      'groupParticipantAdded must be true when present.',
+    )
+  }
   return {
+    ...(record.groupParticipantAdded === true
+      ? { groupParticipantAdded: record.groupParticipantAdded }
+      : {}),
     inputId: normalizeAssistantInputEventId(record.inputId, 'inputId'),
     mailboxItemId: normalizeHostedMailboxItemId(
       record.mailboxItemId,

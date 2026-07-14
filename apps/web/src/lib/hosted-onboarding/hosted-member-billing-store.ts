@@ -50,7 +50,7 @@ export interface HostedMemberStripeBillingRefSnapshot {
   stripeSubscriptionScheduleId?: string | null;
 }
 
-export interface HostedMemberHomeTrialBillingState {
+export interface HostedMemberBillingEligibilityState {
   currentBillingPhase: string | null;
   currentBillingPlanCode: string | null;
   currentCheckoutOffer: string | null;
@@ -251,10 +251,10 @@ export async function readHostedMemberStripeBillingRef(input: {
   return billingRef ? await projectHostedMemberStripeBillingRefSnapshot(billingRef, input.prisma) : null;
 }
 
-export async function readHostedMemberHomeTrialBillingState(input: {
+export async function readHostedMemberBillingEligibilityState(input: {
   memberId: string;
   prisma: HostedOnboardingReadClient;
-}): Promise<HostedMemberHomeTrialBillingState | null> {
+}): Promise<HostedMemberBillingEligibilityState | null> {
   const billingRef = await input.prisma.hostedMemberBillingRef.findUnique({
     where: {
       memberId: input.memberId,
