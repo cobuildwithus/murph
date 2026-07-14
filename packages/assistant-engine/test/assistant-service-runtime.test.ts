@@ -518,6 +518,7 @@ describe("assistant usage recording seam", () => {
           userEnvKeys: [" CODEX_API_KEY ", "", "CUSTOM_KEY"],
         },
       },
+      providerRequestAcceptedInputIds: ["assistant_input_a"],
       providerResult: createProviderResult({
         attemptCount: 3,
         codexThreadId: "provider-session-42",
@@ -604,7 +605,7 @@ describe("assistant usage recording seam", () => {
         usageId: "turn-usage:0:3",
         usageExtractionSourcePath: "params.usage",
         usageExtractionVersion: "codex-usage-v1",
-    });
+    }, ["assistant_input_a"]);
   });
 
   it("records each additional usage draft with its own provider, ordinal, and credential source", async () => {
