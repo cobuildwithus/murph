@@ -819,6 +819,75 @@ describe("importHostedConversationMessageWakeIntoLocalInbox", () => {
     expect(mocks.markLinqChatRead).not.toHaveBeenCalled();
   });
 
+  it("returns persisted capture before a deferred parser drain completes", async () => {
+    const inboxRuntime = mockOpenInboxRuntimeWithParseJobs();
+    mocks.openInboxRuntime.mockResolvedValueOnce(inboxRuntime);
+    let resolveParserDrain!: (results: RunAttachmentParseJobResult[]) => void;
+    let markParserDrainStarted!: () => void;
+    const parserDrainStarted = new Promise<void>((resolve) => {
+      markParserDrainStarted = resolve;
+    });
+    const parserDrain = vi.fn(async () => {
+      markParserDrainStarted();
+      return await new Promise<RunAttachmentParseJobResult[]>((resolve) => {
+        resolveParserDrain = resolve;
+      });
+    });
+    mocks.createInboxParserService.mockReturnValueOnce({
+      drain: parserDrain,
+    });
+    mocks.normalizeHostedLinqConversationCapture.mockResolvedValueOnce({
+      source: "linq",
+    });
+
+    const importResult = await importHostedConversationMessageWakeIntoLocalInbox({
+      deferParserDrain: true,
+      runtime: createRuntime(),
+      vaultRoot: "/tmp/assistant-runtime-conversation",
+      wake: buildHostedExecutionLinqConversationMessageWake({
+        eventId: "evt_linq_deferred_parser",
+        linqMessage: {
+          chatId: "chat_deferred_parser",
+          from: "+15551234567",
+          isFromMe: false,
+          messageId: "msg_deferred_parser",
+          parts: [],
+        },
+        occurredAt: "2026-04-08T00:00:00.000Z",
+        phoneLookupKey: "15551234567",
+        userId: "member_123",
+      }),
+    });
+
+    expect(importResult.capture?.captureId).toBe("capture_123");
+    expect(importResult.metrics).toEqual({
+      nextWakeAt: null,
+      parserProcessed: 0,
+    });
+    expect(importResult.deferredParserDrain).toEqual(expect.any(Function));
+    expect(parserDrain).not.toHaveBeenCalled();
+
+    let deferredDrainFinished = false;
+    const deferredDrain = importResult.deferredParserDrain?.().then((metrics) => {
+      deferredDrainFinished = true;
+      return metrics;
+    });
+    expect(deferredDrain).toBeDefined();
+    await parserDrainStarted;
+    expect(deferredDrainFinished).toBe(false);
+    resolveParserDrain([
+      createParseJobResult({
+        status: "succeeded",
+      }),
+    ]);
+
+    await expect(deferredDrain).resolves.toEqual({
+      nextWakeAt: null,
+      parserProcessed: 1,
+    });
+    expect(inboxRuntime.close).toHaveBeenCalledTimes(1);
+  });
+
   it("keeps persisted conversation import successful when post-persistence parser setup fails", async () => {
     vi.useFakeTimers();
     vi.setSystemTime(new Date("2026-04-08T00:00:00.000Z"));

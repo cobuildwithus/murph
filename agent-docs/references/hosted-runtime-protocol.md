@@ -786,6 +786,21 @@ reason to take another workspace checkpoint, so failed or slow projection does
 not block assistant admission and does not imply a durable retry queue.
 Successful projection may make raw attachment paths, image evidence, or
 audio/video transcript evidence available to the same assistant turn.
+Hosted conversation projection persists the plain inbox capture and records
+best-effort initial attachment evidence locally before the importer returns.
+When pending audio/video parser work exists, its drain is post-assistant
+enrichment. The runner keeps that background mutation separate from
+prompt-preparation effects, tracks its
+real completion without a timeout race during normal idle, and refreshes the
+owning assistant input evidence from the capture so later turns can use the
+transcript or terminal parse state. Replay-budget returns and failed assistant
+passes discard parser effects that have not started. Once parser enrichment
+starts, runtime ownership waits for its real completion before snapshotting the
+workspace or releasing it after an error, including during graceful shutdown.
+A process-fatal termination may still abandon this best-effort
+enrichment, but the runtime must not intentionally snapshot or release the
+workspace while it is writing. The plain capture and best-effort initial
+attachment evidence are already local before parser work begins.
 Assistant prompt preparation reads derived attachment evidence sequentially
 under one 32 MiB budget for the current turn and a 16 MiB per-file limit. Hosted
 artifact materialization rejects an external artifact whose declared size is

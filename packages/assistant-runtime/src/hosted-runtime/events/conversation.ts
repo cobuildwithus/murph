@@ -60,6 +60,7 @@ const HOSTED_CONVERSATION_PARSER_RETRY_DELAY_MS = 60_000;
 
 export interface HostedConversationWakeLocalImportResult {
   capture: PersistedCapture | null;
+  deferredParserDrain?: () => Promise<HostedConversationWakeMetrics>;
   metrics: HostedConversationWakeMetrics;
 }
 
@@ -71,6 +72,7 @@ export class HostedConversationInboxProjectionError extends Error {
 }
 
 export async function importHostedConversationMessageWakeIntoLocalInbox(input: {
+  deferParserDrain?: boolean;
   wake: HostedExecutionConversationMessageWake;
   runtime: Pick<NormalizedHostedAssistantRuntimeConfig, "forwardedEnv" | "platform" | "platformEnv" | "userEnv">
     & Partial<Pick<NormalizedHostedAssistantRuntimeConfig, "parserToolchain">>;
@@ -110,6 +112,25 @@ export async function importHostedConversationMessageWakeIntoLocalInbox(input: {
       );
     }
     assertHostedConversationProjectionLive(input.signal ?? null);
+    if (
+      input.deferParserDrain === true
+      && hasPendingHostedConversationMediaParserWork({
+        captureId: persistedCapture.captureId,
+        runtime,
+      })
+    ) {
+      return {
+        capture: persistedCapture,
+        deferredParserDrain: async () =>
+          await drainHostedConversationParsersAfterCheckpoint({
+            captureId: persistedCapture.captureId,
+            parserToolchain: input.runtime.parserToolchain ?? null,
+            platform: input.runtime.platform,
+            vaultRoot: input.vaultRoot,
+          }),
+        metrics: createHostedConversationParserMetrics(),
+      };
+    }
     const metrics = await drainHostedConversationParsers({
       captureId: persistedCapture.captureId,
       parserToolchain: input.runtime.parserToolchain ?? null,
@@ -132,6 +153,26 @@ export async function importHostedConversationMessageWakeIntoLocalInbox(input: {
   }
 }
 
+async function drainHostedConversationParsersAfterCheckpoint(input: {
+  captureId: string;
+  parserToolchain: NormalizedHostedAssistantRuntimeConfig["parserToolchain"];
+  platform: Pick<NormalizedHostedAssistantRuntimeConfig["platform"], "logPort">;
+  vaultRoot: string;
+}): Promise<HostedConversationWakeMetrics> {
+  const runtime = await openInboxRuntime({
+    vaultRoot: input.vaultRoot,
+  });
+  try {
+    return await drainHostedConversationParsers({
+      ...input,
+      runtime,
+      signal: null,
+    });
+  } finally {
+    runtime.close();
+  }
+}
+
 async function drainHostedConversationParsers(input: {
   captureId: string;
   parserToolchain: NormalizedHostedAssistantRuntimeConfig["parserToolchain"];
@@ -140,14 +181,8 @@ async function drainHostedConversationParsers(input: {
   signal?: AbortSignal | null;
   vaultRoot: string;
 }): Promise<HostedConversationWakeMetrics> {
-  const hasPendingJob = input.runtime.listAttachmentParseJobs({
-    captureId: input.captureId,
-    limit: 1,
-    state: "pending",
-  }).length > 0;
   if (
-    !hasPendingJob ||
-    !hasPendingHostedConversationMediaParseJob({
+    !hasPendingHostedConversationMediaParserWork({
       captureId: input.captureId,
       runtime: input.runtime,
     })
@@ -245,6 +280,18 @@ async function drainHostedConversationParsers(input: {
     nextWakeAt: null,
     parserProcessed: results.length,
   });
+}
+
+function hasPendingHostedConversationMediaParserWork(input: {
+  captureId: string;
+  runtime: Awaited<ReturnType<typeof openInboxRuntime>>;
+}): boolean {
+  const hasPendingJob = input.runtime.listAttachmentParseJobs({
+    captureId: input.captureId,
+    limit: 1,
+    state: "pending",
+  }).length > 0;
+  return hasPendingJob && hasPendingHostedConversationMediaParseJob(input);
 }
 
 async function logHostedConversationParserRetryFailure(input: {

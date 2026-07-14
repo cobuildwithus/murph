@@ -69,6 +69,7 @@ import {
 } from "../src/hosted-runtime/events/conversation.ts";
 import {
   fetchAndProcessHostedMailboxPrefix,
+  type HostedMailboxPostCheckpointEffect,
   type HostedMailboxResolvedImportItem,
 } from "../src/hosted-runtime/mailbox-import.ts";
 import type {
@@ -1969,7 +1970,7 @@ describe("hosted mailbox conversation import adapter", () => {
     ]);
   });
 
-  test("continues past degraded parser work to a later reply-eligible mailbox item", async () => {
+  test("continues past deferred parser work to a later reply-eligible mailbox item", async () => {
     const parentRoot = await mkdtemp(path.join(tmpdir(), "murph-hosted-parser-lane-"));
     tempRoots.push(parentRoot);
     const operatorHomeRoot = path.join(parentRoot, "home");
@@ -2046,6 +2047,18 @@ describe("hosted mailbox conversation import adapter", () => {
     const runtime = createRuntime({
       userEnv: HOSTED_ASSISTANT_SEED_ENV,
     });
+    const backgroundParserEffect: {
+      current: HostedMailboxPostCheckpointEffect | null;
+    } = { current: null };
+    let evidenceLoadCount = 0;
+    let markParserDrainStarted!: () => void;
+    const parserDrainStarted = new Promise<void>((resolve) => {
+      markParserDrainStarted = resolve;
+    });
+    let releaseParserDrain!: () => void;
+    const parserDrainReleased = new Promise<void>((resolve) => {
+      releaseParserDrain = resolve;
+    });
     const importItem = createHostedConversationMailboxImportItem({
       decodePayload: {
         async decode(input) {
@@ -2060,11 +2073,20 @@ describe("hosted mailbox conversation import adapter", () => {
         },
       },
       async importConversationWake(input) {
+        assert.equal(input.deferParserDrain, true);
         if (input.wake.eventId === parserRetryWake.eventId) {
           return {
             captureId: "cap_parser_retry_before_reply",
+            deferredParserDrain: async () => {
+              markParserDrainStarted();
+              await parserDrainReleased;
+              return {
+                nextWakeAt: null,
+                parserProcessed: 1,
+              };
+            },
             metrics: {
-              nextWakeAt: "2026-04-26T00:01:00.000Z",
+              nextWakeAt: null,
               parserProcessed: 0,
             },
           };
@@ -2078,6 +2100,7 @@ describe("hosted mailbox conversation import adapter", () => {
         };
       },
       async loadAttachmentEvidenceCapture(input) {
+        evidenceLoadCount += 1;
         return {
           attachments: [],
           captureId: input.captureId,
@@ -2104,7 +2127,16 @@ describe("hosted mailbox conversation import adapter", () => {
     const result = await withOperatorHomeRoot(operatorHomeRoot, () =>
       fetchAndProcessHostedMailboxPrefix({
         expectedUserId: TEST_USER_ID,
-        importItem,
+        importItem: async (item) => {
+          const outcome = await importItem(item);
+          if (
+            (outcome.status === "imported" || outcome.status === "skipped")
+            && outcome.backgroundAfterCheckpoint
+          ) {
+            backgroundParserEffect.current = outcome.backgroundAfterCheckpoint;
+          }
+          return outcome;
+        },
         lanes: ["conversation"],
         limitPerLane: 10,
         mailboxPort,
@@ -2139,6 +2171,25 @@ describe("hosted mailbox conversation import adapter", () => {
     assert.deepEqual(await readHostedPendingAssistantInputIds({ vaultRoot }), [
       replyableInput.inputId,
     ]);
+    assert.equal(evidenceLoadCount, 1);
+    assert.ok(backgroundParserEffect.current);
+
+    let parserEffectFinished = false;
+    const parserEffect = backgroundParserEffect.current().then((effect) => {
+      parserEffectFinished = true;
+      return effect;
+    });
+    await parserDrainStarted;
+    assert.equal(parserEffectFinished, false);
+    releaseParserDrain();
+    assert.deepEqual(await parserEffect, {
+      attachmentEvidenceUpdated: true,
+      kind: "inbox_parser_enrichment",
+      projectionUpdated: null,
+      reasonCode: null,
+      status: "succeeded",
+    });
+    assert.equal(evidenceLoadCount, 2);
   });
 
   test("records inbox runtime unavailable as a specific projection and evidence reason", async () => {

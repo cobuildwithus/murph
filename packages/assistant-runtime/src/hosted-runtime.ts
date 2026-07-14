@@ -926,7 +926,9 @@ export async function runHostedWorkspaceRuntimeJobInProcess(
     );
   };
   const drainLocalWorkspaceMutationsBestEffort = async (): Promise<void> => {
-    await Promise.allSettled([...pendingLocalWorkspaceMutationCompletions]);
+    while (pendingLocalWorkspaceMutationCompletions.size > 0) {
+      await Promise.allSettled([...pendingLocalWorkspaceMutationCompletions]);
+    }
   };
 
   try {
@@ -2776,6 +2778,7 @@ export async function runHostedWorkspaceRuntimeJobInProcess(
         });
         let checkpoint: HostedWorkspaceCheckpointResponse;
         try {
+          await drainLocalWorkspaceMutationsBestEffort();
           latestCheckpointSnapshotCleanForWarmReuse = false;
           checkpoint = await checkpointHostedRuntimeDirtyWorkspace({
             assertRuntimeNotAborted,
@@ -3159,8 +3162,8 @@ export async function runHostedWorkspaceRuntimeJobInProcess(
       stage: "runtime",
       status: "fail",
     });
+    await drainLocalWorkspaceMutationsBestEffort();
     if (hostAbortObserved) {
-      await drainLocalWorkspaceMutationsBestEffort();
       throw hostAbortReason;
     }
     await drainDeferredUsageBestEffort();

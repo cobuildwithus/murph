@@ -202,6 +202,13 @@ describe("hosted mailbox import checkpoint wrapper", () => {
               order.push("afterCheckpoint");
               return createInboxProjectionEffectResult();
             },
+            backgroundAfterCheckpoint: async () => {
+              order.push("backgroundAfterCheckpoint");
+              return {
+                ...createInboxProjectionEffectResult(),
+                kind: "inbox_parser_enrichment" as const,
+              };
+            },
             status: "imported",
           };
         },
@@ -220,6 +227,16 @@ describe("hosted mailbox import checkpoint wrapper", () => {
       const effectResult = await result.afterCheckpointEffects[0]?.();
       assert.deepEqual(effectResult, createInboxProjectionEffectResult());
       assert.deepEqual(order, ["import", "checkpoint", "afterCheckpoint"]);
+      assert.equal(result.backgroundAfterCheckpointEffects.length, 1);
+      const backgroundEffectResult =
+        await result.backgroundAfterCheckpointEffects[0]?.();
+      assert.equal(backgroundEffectResult?.kind, "inbox_parser_enrichment");
+      assert.deepEqual(order, [
+        "import",
+        "checkpoint",
+        "afterCheckpoint",
+        "backgroundAfterCheckpoint",
+      ]);
     } finally {
       await rm(vaultRoot, {
         force: true,

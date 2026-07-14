@@ -51,6 +51,7 @@ import {
 import type {
   HostedMailboxConversationImportTiming,
   HostedMailboxItemImportOutcome,
+  HostedMailboxPostCheckpointEffect,
   HostedMailboxPostCheckpointEffectResult,
   HostedMailboxResolvedImportItem,
 } from "./mailbox-import.ts";
@@ -93,6 +94,8 @@ const CONVERSATION_ATTACHMENT_EVIDENCE_UPDATE_FAILED_REASON =
   "conversation-import.attachment-evidence-update-failed";
 const CONVERSATION_INBOX_RUNTIME_UNAVAILABLE_REASON =
   "conversation-import.inbox-runtime-unavailable";
+const CONVERSATION_PARSER_ENRICHMENT_FAILED_REASON =
+  "conversation-import.parser-enrichment-failed";
 const CONVERSATION_RAW_EMAIL_MISSING_REASON =
   "conversation-import.raw-email-missing";
 const ATTACHMENT_EVIDENCE_PARTIAL_REASON =
@@ -151,6 +154,7 @@ export interface HostedConversationMailboxPayloadDecodeInput {
 
 export interface HostedConversationMailboxLocalImportResult {
   captureId: string | null;
+  deferredParserDrain?: () => Promise<HostedConversationWakeMetrics>;
   metrics: HostedConversationWakeMetrics;
 }
 
@@ -165,6 +169,7 @@ type HostedConversationMailboxRuntime = Pick<
 >;
 
 export type HostedConversationMailboxLocalImporter = (input: {
+  deferParserDrain: boolean;
   runtime: HostedConversationMailboxRuntime;
   signal?: AbortSignal | null;
   vaultRoot: string;
@@ -219,6 +224,7 @@ export type HostedConversationMailboxWakeContextPreparer = (input: {
 
 export type HostedConversationMailboxImportOutcome =
   | {
+      backgroundAfterCheckpoint?: HostedMailboxPostCheckpointEffect | null;
       assistantInputId?: string;
       captureId: string | null;
       conversationImportTiming?: HostedMailboxConversationImportTiming | null;
@@ -426,6 +432,9 @@ export async function importHostedConversationMailboxItem(input: {
     wake: decoded.wake,
   });
   return {
+    ...(projectionEffect.backgroundAfterCheckpoint
+      ? { backgroundAfterCheckpoint: projectionEffect.backgroundAfterCheckpoint }
+      : {}),
     ...(pendingReplyEligible ? { assistantInputId: stagedInput.inputId } : {}),
     captureId: null,
     ...(emailDeliveryContext ? { emailDeliveryContext } : {}),
@@ -615,6 +624,7 @@ async function projectHostedConversationAssistantInputBestEffort(input: {
   vaultRoot: string;
   wake: HostedExecutionConversationMessageWake;
 }): Promise<{
+  backgroundAfterCheckpoint?: HostedMailboxPostCheckpointEffect | null;
   effect: HostedMailboxPostCheckpointEffectResult;
   timing: HostedMailboxConversationImportTiming;
 }> {
@@ -634,6 +644,7 @@ async function projectHostedConversationAssistantInputBestEffort(input: {
     assertHostedConversationMailboxImportLive(input.signal ?? null);
     importStartedAt = Date.now();
     imported = await input.importConversationWake({
+      deferParserDrain: true,
       runtime: input.runtime,
       signal: input.signal ?? null,
       vaultRoot: input.vaultRoot,
@@ -707,11 +718,62 @@ async function projectHostedConversationAssistantInputBestEffort(input: {
   timing.attachmentEvidenceMs = elapsedHostedConversationImportMs(attachmentEvidenceStartedAt);
   timing.projectionTotalMs = elapsedHostedConversationImportMs(projectionStartedAt);
   return {
+    ...(imported.deferredParserDrain
+      ? {
+          backgroundAfterCheckpoint:
+            createHostedConversationParserEnrichmentEffect({
+              captureId: imported.captureId,
+              deferredParserDrain: imported.deferredParserDrain,
+              loadAttachmentEvidenceCapture: input.loadAttachmentEvidenceCapture,
+              requestId: input.wake.eventId,
+              stagedInput: input.stagedInput,
+              vaultRoot: input.vaultRoot,
+            }),
+        }
+      : {}),
     effect: buildHostedConversationProjectionEffectResult({
       attachmentEvidenceResult,
       projectionUpdated,
     }),
     timing,
+  };
+}
+
+function createHostedConversationParserEnrichmentEffect(input: {
+  captureId: string;
+  deferredParserDrain: () => Promise<HostedConversationWakeMetrics>;
+  loadAttachmentEvidenceCapture: HostedConversationMailboxAttachmentEvidenceCaptureLoader;
+  requestId: string | null;
+  stagedInput: HostedConversationMailboxAssistantInputStageResult;
+  vaultRoot: string;
+}): HostedMailboxPostCheckpointEffect {
+  return async () => {
+    const metrics = await input.deferredParserDrain();
+    const attachmentEvidenceResult =
+      await recordHostedConversationAttachmentEvidenceFromProjectionBestEffort({
+        captureId: input.captureId,
+        loadAttachmentEvidenceCapture: input.loadAttachmentEvidenceCapture,
+        requestId: input.requestId,
+        stagedInput: input.stagedInput,
+        vaultRoot: input.vaultRoot,
+      });
+    const parserEnrichmentFailed = typeof metrics.nextWakeAt === "string"
+      && metrics.nextWakeAt.trim().length > 0;
+    const reasonCode = parserEnrichmentFailed
+      ? CONVERSATION_PARSER_ENRICHMENT_FAILED_REASON
+      : attachmentEvidenceResult.reasonCode;
+    return {
+      attachmentEvidenceUpdated: attachmentEvidenceResult.updated,
+      kind: "inbox_parser_enrichment",
+      projectionUpdated: null,
+      reasonCode,
+      status:
+        parserEnrichmentFailed
+        || attachmentEvidenceResult.updated === false
+        || attachmentEvidenceResult.reasonCode !== null
+          ? "partial"
+          : "succeeded",
+    };
   };
 }
 
@@ -847,6 +909,7 @@ function createHostedConversationAttachmentEvidenceFromCapture(input: {
 }
 
 async function importHostedConversationWakeWithLocalInbox(input: {
+  deferParserDrain: boolean;
   runtime: HostedConversationMailboxRuntime;
   signal?: AbortSignal | null;
   vaultRoot: string;
@@ -858,6 +921,9 @@ async function importHostedConversationWakeWithLocalInbox(input: {
   const result = await importHostedConversationMessageWakeIntoLocalInbox(input);
   return {
     captureId: result.capture?.captureId ?? null,
+    ...(result.deferredParserDrain
+      ? { deferredParserDrain: result.deferredParserDrain }
+      : {}),
     metrics: result.metrics,
   };
 }

@@ -534,6 +534,7 @@ function createPhaseInput(input: {
   return {
     initialMailboxImport: {
       afterCheckpointEffects: [],
+      backgroundAfterCheckpointEffects: [],
       checkpoint: null,
       checkpointDeferred: false,
       importResult: {

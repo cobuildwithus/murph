@@ -12801,6 +12801,7 @@ function createPhaseInput(input: {
     latestAssistantInputBatch: input.latestAssistantInputBatch,
     initialMailboxImport: {
       afterCheckpointEffects: [],
+      backgroundAfterCheckpointEffects: [],
       checkpoint: null,
       checkpointDeferred: false,
       importResult: {

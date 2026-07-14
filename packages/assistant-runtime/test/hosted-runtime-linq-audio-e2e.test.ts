@@ -33,6 +33,7 @@ import {
 } from "../src/hosted-runtime/mailbox-conversation-import.ts";
 import {
   fetchAndProcessHostedMailboxPrefix,
+  type HostedMailboxPostCheckpointEffect,
 } from "../src/hosted-runtime/mailbox-import.ts";
 import {
   createEmptyHostedMailboxImportState,
@@ -74,7 +75,7 @@ import {
 } from "../src/hosted-runtime/events/conversation.ts";
 
 describe("hosted Linq audio conversation ingestion", () => {
-  it("finishes parser drain before propagating stop abort at the post-drain boundary", async () => {
+  it("keeps mailbox admission ahead of parser drain when stop arrives during parsing", async () => {
     const workspaceRoot = await mkdtemp(path.join(tmpdir(), "murph-hosted-linq-audio-abort-"));
     const vaultRoot = path.join(workspaceRoot, "vault");
     const fakeFfmpeg = path.join(workspaceRoot, "fake-ffmpeg");
@@ -182,45 +183,46 @@ describe("hosted Linq audio conversation ingestion", () => {
         vaultRoot,
       });
       let state = createEmptyHostedMailboxImportState();
+      const backgroundEffect: {
+        current: HostedMailboxPostCheckpointEffect | null;
+      } = { current: null };
 
-      await assert.rejects(
-        fetchAndProcessHostedMailboxPrefix({
-          expectedUserId: "member_linq_audio",
-          importItem: (item) => importItem(item, { signal: controller.signal }),
-          lanes: ["conversation"],
-          limitPerLane: 10,
-          mailboxPort: mailboxPort.port,
-          requestId: "linq-audio-abort-first",
-          state,
-        }),
-        (error) => error === abortReason,
-      );
-
-      assert.deepEqual(providerSignals, [undefined]);
-      assert.equal(state.watermarks.conversation, "0");
-      assert.equal(mailboxPort.fetchRequests.length, 1);
-      assert.equal(mailboxPort.fetchRequests[0]?.lanes[0]?.importedSeq, "0");
-      await assertSingleLinqAudioCapture({
-        parseState: "succeeded",
-        transcript,
-        vaultRoot,
-      });
-
-      const retry = await fetchAndProcessHostedMailboxPrefix({
+      const first = await fetchAndProcessHostedMailboxPrefix({
         expectedUserId: "member_linq_audio",
-        importItem,
+        importItem: async (item) => {
+          const outcome = await importItem(item, { signal: controller.signal });
+          if (
+            (outcome.status === "imported" || outcome.status === "skipped")
+            && outcome.backgroundAfterCheckpoint
+          ) {
+            backgroundEffect.current = outcome.backgroundAfterCheckpoint;
+          }
+          return outcome;
+        },
         lanes: ["conversation"],
         limitPerLane: 10,
         mailboxPort: mailboxPort.port,
-        requestId: "linq-audio-abort-retry",
+        requestId: "linq-audio-abort-first",
         state,
       });
-      state = retry.state;
-      assert.equal(retry.importedCount, 1);
-      assert.equal(retry.blocked.length, 0);
+      state = first.state;
+
+      assert.equal(first.importedCount, 1);
+      assert.equal(first.blocked.length, 0);
+      assert.deepEqual(providerSignals, []);
       assert.equal(state.watermarks.conversation, "1");
-      assert.equal(mailboxPort.fetchRequests.length, 2);
-      assert.equal(mailboxPort.fetchRequests[1]?.lanes[0]?.importedSeq, "0");
+      assert.equal(mailboxPort.fetchRequests.length, 1);
+      assert.equal(mailboxPort.fetchRequests[0]?.lanes[0]?.importedSeq, "0");
+      await assertSingleLinqAudioCapture({
+        parseState: "pending",
+        transcript: null,
+        vaultRoot,
+      });
+
+      assert.ok(backgroundEffect.current);
+      const effectResult = await backgroundEffect.current();
+      assert.equal(effectResult.kind, "inbox_parser_enrichment");
+      assert.equal(effectResult.status, "succeeded");
       await assertSingleLinqAudioCapture({
         parseState: "succeeded",
         transcript,

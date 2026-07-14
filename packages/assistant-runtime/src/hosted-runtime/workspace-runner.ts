@@ -188,6 +188,7 @@ interface HostedWorkspaceCheckpointRequestSession
     },
   ): void;
   recordStatusCheckpoint(response: HostedWorkspaceCheckpointResponse): void;
+  takeMailboxBackgroundPostCheckpointEffects(): readonly HostedMailboxPostCheckpointEffect[];
   takeMailboxPostCheckpointEffects(): readonly HostedMailboxPostCheckpointEffect[];
 }
 
@@ -1062,6 +1063,7 @@ export async function runHostedWorkspaceUntilIdleOrBudget(
   } catch (error) {
     runnerError = error;
     await stopForegroundMailboxImportLoop();
+    checkpointRequestSession.takeMailboxBackgroundPostCheckpointEffects();
     scheduleHostedMailboxPostCheckpointEffectsAndLogBestEffort({
       checkpointRequestBuilder: checkpointRequestSession,
       input,
@@ -2386,6 +2388,7 @@ function createHostedWorkspaceCheckpointRequestSession(
     ),
   );
   let expectedWorkspaceVersion: string | null = null;
+  const mailboxBackgroundPostCheckpointEffects: HostedMailboxPostCheckpointEffect[] = [];
   const mailboxPostCheckpointEffects: HostedMailboxPostCheckpointEffect[] = [];
   let latestAssistantInputBatch: HostedWorkspaceRunnerAssistantInputBatch | null = null;
   let latestMailboxImport: HostedMailboxImportCheckpointResult | null = null;
@@ -2430,6 +2433,7 @@ function createHostedWorkspaceCheckpointRequestSession(
       });
     },
     discardMailboxPostCheckpointEffects() {
+      mailboxBackgroundPostCheckpointEffects.splice(0);
       mailboxPostCheckpointEffects.splice(0);
     },
     hasRuntimeStateDirty() {
@@ -2470,6 +2474,9 @@ function createHostedWorkspaceCheckpointRequestSession(
           "mailbox",
         ),
       ]).at;
+      mailboxBackgroundPostCheckpointEffects.push(
+        ...result.backgroundAfterCheckpointEffects,
+      );
       mailboxPostCheckpointEffects.push(...result.afterCheckpointEffects);
       if (result.checkpoint?.checkpointed === true) {
         checkpointRequestBuilder.recordCheckpoint?.(result.checkpoint);
@@ -2484,6 +2491,9 @@ function createHostedWorkspaceCheckpointRequestSession(
         expectedWorkspaceVersion = response.workspace.version;
         latestWorkspace = response.workspace;
       }
+    },
+    takeMailboxBackgroundPostCheckpointEffects() {
+      return mailboxBackgroundPostCheckpointEffects.splice(0);
     },
     takeMailboxPostCheckpointEffects() {
       return mailboxPostCheckpointEffects.splice(0);
@@ -2691,6 +2701,17 @@ async function runHostedMailboxPostCheckpointEffectsAndLogBestEffort(input: {
     phase: "import",
     timeoutMs: HOSTED_MAILBOX_POST_CHECKPOINT_EFFECT_TIMEOUT_MS,
   });
+  const backgroundEffects =
+    input.checkpointRequestBuilder.takeMailboxBackgroundPostCheckpointEffects();
+  const backgroundEffectsFinished =
+    startHostedMailboxBackgroundPostCheckpointEffectsAndLogBestEffort({
+      effects: backgroundEffects,
+      input: input.input,
+      phase: "import",
+    });
+  if (backgroundEffectsFinished) {
+    await backgroundEffectsFinished;
+  }
 }
 
 function scheduleHostedMailboxPostCheckpointEffectsAndLogBestEffort(input: {
@@ -2699,20 +2720,60 @@ function scheduleHostedMailboxPostCheckpointEffectsAndLogBestEffort(input: {
   phase: "active_turn_input" | "import";
 }): Promise<void> | null {
   const effects = input.checkpointRequestBuilder.takeMailboxPostCheckpointEffects();
-  if (effects.length === 0) {
+  const backgroundEffects =
+    input.checkpointRequestBuilder.takeMailboxBackgroundPostCheckpointEffects();
+  if (effects.length === 0 && backgroundEffects.length === 0) {
     return null;
   }
-  const effectsFinished = runHostedMailboxPostCheckpointEffectsAndWriteLogBestEffort({
-    effects,
-    input: input.input,
-    phase: input.phase,
-    timeoutMs: HOSTED_MAILBOX_POST_CHECKPOINT_EFFECT_TIMEOUT_MS,
-  }).catch((error: unknown) => {
+  const foregroundEffectsFinished =
+    runHostedMailboxPostCheckpointEffectsAndWriteLogBestEffort({
+      effects,
+      input: input.input,
+      phase: input.phase,
+      timeoutMs: HOSTED_MAILBOX_POST_CHECKPOINT_EFFECT_TIMEOUT_MS,
+    });
+  const backgroundEffectsFinished =
+    startHostedMailboxBackgroundPostCheckpointEffectsAndLogBestEffort({
+      effects: backgroundEffects,
+      input: input.input,
+      phase: input.phase,
+    });
+  const effectsFinished = Promise.all([
+    foregroundEffectsFinished,
+    ...(backgroundEffectsFinished ? [backgroundEffectsFinished] : []),
+  ]).then(() => undefined).catch((error: unknown) => {
     warnAssistantBestEffortFailure({
       error,
       operation: "hosted mailbox post-checkpoint effects",
     });
   });
+  void effectsFinished;
+  return effectsFinished;
+}
+
+function startHostedMailboxBackgroundPostCheckpointEffectsAndLogBestEffort(input: {
+  effects: readonly HostedMailboxPostCheckpointEffect[];
+  input: HostedWorkspaceRunnerInput;
+  phase: "active_turn_input" | "import";
+}): Promise<void> | null {
+  if (input.effects.length === 0) {
+    return null;
+  }
+
+  const effectsFinished = Promise.resolve()
+    .then(async () =>
+      await runHostedMailboxPostCheckpointEffectsAndWriteLogBestEffort({
+        effects: input.effects,
+        input: input.input,
+        phase: input.phase,
+      }))
+    .catch((error: unknown) => {
+      warnAssistantBestEffortFailure({
+        error,
+        operation: "hosted mailbox background post-checkpoint effects",
+      });
+    });
+  input.input.trackLocalWorkspaceMutationCompletion?.(effectsFinished);
   void effectsFinished;
   return effectsFinished;
 }
