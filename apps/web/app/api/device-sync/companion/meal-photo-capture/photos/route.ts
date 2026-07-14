@@ -3,14 +3,19 @@ import {
 } from "@murphai/hosted-execution";
 
 import {
+  assertCurrentMealPhotoCaptureEnrollmentTx,
   readAndValidateMealPhotoUpload,
   requireActiveMealPhotoCaptureEnrollment,
 } from "@/src/lib/device-sync/meal-photo-capture";
 import { jsonOk, withJsonError } from "@/src/lib/device-sync/settings-http";
 import { readHostedExecutionControlClientIfConfigured } from "@/src/lib/hosted-execution/control";
-import { appendHostedMailboxEnvelopeTx } from "@/src/lib/hosted-mailbox/store";
+import {
+  appendHostedMealPhotoMailboxEnvelopeTx,
+  readHostedMailboxWakeAfterDedupeLockTx,
+} from "@/src/lib/hosted-mailbox/store";
 import { signalHostedMailboxAppendRuntime } from "@/src/lib/hosted-orchestration/signal-runtime";
 import { hostedOnboardingError } from "@/src/lib/hosted-onboarding/errors";
+import { HOSTED_ONBOARDING_TRANSACTION_OPTIONS } from "@/src/lib/hosted-onboarding/shared";
 import { getPrisma } from "@/src/lib/prisma";
 
 export const POST = withJsonError(async (request: Request) => {
@@ -46,18 +51,45 @@ export const POST = withJsonError(async (request: Request) => {
     occurredAt: upload.capturedAt,
     sha256: staged.sha256,
   });
-  const appended = await prisma.$transaction((tx) =>
-    appendHostedMailboxEnvelopeTx({
-      envelope,
-      tx,
-    })
-  );
-  if (appended.dedupeConflict) {
-    throw hostedOnboardingError({
-      code: "MEAL_PHOTO_DEDUPE_CONFLICT",
-      httpStatus: 422,
-      message: "Meal photo upload conflicts with an earlier capture.",
+  let appended: Awaited<ReturnType<typeof appendHostedMealPhotoMailboxEnvelopeTx>>;
+  try {
+    appended = await prisma.$transaction(async (tx) => {
+      await assertCurrentMealPhotoCaptureEnrollmentTx({
+        enrollment,
+        prisma: tx,
+        request,
+      });
+      return await appendHostedMealPhotoMailboxEnvelopeTx({
+        envelope,
+        tx,
+      });
+    }, HOSTED_ONBOARDING_TRANSACTION_OPTIONS);
+    if (appended.dedupeConflict) {
+      throw hostedOnboardingError({
+        code: "MEAL_PHOTO_DEDUPE_CONFLICT",
+        httpStatus: 422,
+        message: "Meal photo upload conflicts with an earlier capture.",
+      });
+    }
+  } catch (error) {
+    await deleteUnclaimedStaging({
+      deleteMealPhoto: () => control.deleteMealPhoto({
+        mealPhotoKey: staged.mealPhotoKey,
+        userId: enrollment.memberId,
+      }),
+      eventId,
+      mealPhotoKey: staged.mealPhotoKey,
+      prisma,
+      userId: enrollment.memberId,
     });
+    throw error;
+  }
+
+  if (appended.claimedMealPhotoKey !== staged.mealPhotoKey) {
+    await deleteStagingOrRetain(() => control.deleteMealPhoto({
+      mealPhotoKey: staged.mealPhotoKey,
+      userId: enrollment.memberId,
+    }));
   }
 
   // Re-signal exact duplicates too: an earlier request may have committed the
@@ -72,3 +104,40 @@ export const POST = withJsonError(async (request: Request) => {
     duplicate: appended.duplicate,
   }, 202);
 });
+
+async function deleteUnclaimedStaging(input: {
+  deleteMealPhoto: () => Promise<void>;
+  eventId: string;
+  mealPhotoKey: string;
+  prisma: ReturnType<typeof getPrisma>;
+  userId: string;
+}): Promise<void> {
+  try {
+    const claimed = await input.prisma.$transaction(
+      async (tx) => await readHostedMailboxWakeAfterDedupeLockTx({
+        dedupeKey: input.eventId,
+        tx,
+        userId: input.userId,
+      }),
+      HOSTED_ONBOARDING_TRANSACTION_OPTIONS,
+    );
+    if (
+      claimed?.kind === "meal-photo.captured"
+      && claimed.mealPhoto.mealPhotoKey === input.mealPhotoKey
+    ) {
+      return;
+    }
+  } catch {
+    console.warn("Meal photo staging ownership was ambiguous; lifecycle cleanup retained it.");
+    return;
+  }
+  await deleteStagingOrRetain(input.deleteMealPhoto);
+}
+
+async function deleteStagingOrRetain(deleteMealPhoto: () => Promise<void>): Promise<void> {
+  try {
+    await deleteMealPhoto();
+  } catch {
+    console.warn("Meal photo staging cleanup failed; lifecycle cleanup retained it.");
+  }
+}

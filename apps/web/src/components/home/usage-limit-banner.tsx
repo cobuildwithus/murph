@@ -18,7 +18,7 @@ const resettableMonthlyNoticeCodes = new Set<HostedAiUsageGateNoticeCode>([
 const MS_PER_DAY = 24 * 60 * 60 * 1000;
 
 const usageLimitBannerCopy: Record<
-  HostedAiUsageGateNoticeCode,
+  Exclude<HostedAiUsageGateNoticeCode, "thread_usage_limit_reached">,
   {
     action: string;
     body: string;
@@ -28,17 +28,17 @@ const usageLimitBannerCopy: Record<
   edge_usage_limit_reached: {
     action: "Review settings",
     body: "Murph keeps replying. Switch to Luna in Settings to use less AI on future turns.",
-    title: "You've used this month's included Edge usage",
+    title: "You've used 100% of this month's included Edge usage",
   },
   family_usage_limit_reached: {
     action: "Review settings",
     body: "Murph keeps replying. Switch to Luna in Settings to use less AI on future turns.",
-    title: "Your Family has used this month's included usage",
+    title: "Your Family has used 100% of this month's included usage",
   },
   pulse_upgrade_edge: {
     action: "Review settings",
     body: "Murph keeps replying. Switch to Luna in Settings to use less AI, or review Edge for more included usage.",
-    title: "You've used this month's included Pulse usage",
+    title: "You've used 100% of this month's included Pulse usage",
   },
   trial_conversion_pending: {
     action: "Open billing",
@@ -48,11 +48,15 @@ const usageLimitBannerCopy: Record<
   trial_usage_limit_reached: {
     action: "Review settings",
     body: "Murph keeps replying. Switch to Luna in Settings to use less AI, or review plan options when you're ready.",
-    title: "You've used your included trial usage",
+    title: "You've used 100% of your included trial usage",
   },
 };
 
 export function UsageLimitBanner({ noticeCode, now, resetAt }: UsageLimitBannerProps) {
+  if (noticeCode === "thread_usage_limit_reached") {
+    return null;
+  }
+
   const copy = usageLimitBannerCopy[noticeCode] ?? usageLimitBannerCopy.pulse_upgrade_edge;
   const resetLabel = formatUsageResetCountdown({ noticeCode, now, resetAt });
 
