@@ -79,7 +79,7 @@ PR requirements.
 12. Enter the review-resolution loop below for every required audit output. Completion means there are no unresolved accepted/actionable findings, not merely that the audit pass ran.
 13. Run or re-run the required checks after the implementation is stable, after any review-driven fixes, and after any required coverage pass lands.
 14. Close any active execution plan and use the commit path chosen by the routing doc and `AGENTS.md` before handoff. For plan-bearing work, the final scoped commit must go through `scripts/finish-task <active-plan-path> "summary" <path>...` so the matching ledger row is removed and the plan moves to `agent-docs/exec-plans/completed/`. Do not use `scripts/committer` or `git commit` as the final task commit for plan-bearing work; that commits code while leaving stale active-plan state behind. If overlapping dirty work blocks a safe `finish-task` commit, clear the exact ledger row, archive the plan with `scripts/close-exec-plan.sh`, and report the scoped-commit blocker before handoff.
-15. For ReviewGPT-eligible PR-lane work, follow `agent-docs/operations/pr-reviewgpt-loop.md` to zero accepted findings before calling the PR merge-ready. Use `ReviewGPT Eligibility` above for the proportional low-risk exemption. The loop doc owns pushed-head proof, browser-lane selection, model/response validation, CI concurrency, rerun rules, and the base-update-only exception. This gate does not replace the specialist passes required above.
+15. For ReviewGPT-eligible PR-lane work, follow `agent-docs/operations/pr-reviewgpt-loop.md` until the exact patch returns `ROUND_OUTCOME: PASS` with zero accepted findings before calling the PR merge-ready. A required anomaly retrospective may justify continuing, shrinking, splitting, redesigning, or abandoning the patch, but it does not substitute for a later `PASS`. Use `ReviewGPT Eligibility` above for the proportional low-risk exemption. The loop doc owns pushed-head proof, browser-lane selection, model/response validation, CI concurrency, rerun rules, and the base-update-only exception. This gate does not replace the specialist passes required above.
 16. For PR-lane work, the task is not complete until the PR branch has no merge conflicts with `main` or its configured base branch. Before final handoff, fetch the latest `main`/base branch and prove the PR head can merge cleanly, or update the branch by a normal merge/rebase, resolve any conflicts, rerun the required checks for the touched surfaces, and push the resolved head. Follow the ReviewGPT loop's base-update and patch-change rerun rules.
 17. An open PR remains active, so preserve its task worktree. If the current turn includes confirmed PR merge or closure, apply the task-worktree retirement gate in `agent-docs/operations/agent-workflow-routing.md` before final handoff; preserve and report the checkout when any retirement gate fails.
 18. Final handoff must report required-check results, direct scenario evidence, and audit findings accepted, fixed, or rejected with reasons. Green required checks remain the default completion bar; if a required check failed for a credibly unrelated pre-existing reason, handoff must name the failing command, failing target, and why the current diff did not cause it.
@@ -102,14 +102,20 @@ Required:
   classified as source, tests/fixtures, docs, config/tooling, and
   generated/other. State the classification rule, note binary files, and keep
   generated code separate from authored source. Use a five-row
-  `Category | Added | Deleted` table plus a total. This is reviewer orientation,
-  not a quality target; moves and generated churn may distort raw counts.
+  `Category | Added | Deleted` table plus a total. This is reviewer orientation
+  and a scope-anomaly signal, not a quality target or an automatic merge or
+  architecture verdict; moves and generated churn may distort raw counts.
 
 Optional when relevant: the rollout plan or follow-up PR that flips the gate, and any deliberately deferred work.
 
 Also required when relevant:
 
 - **Deployment skew / compatibility.** If the PR changes both sides of a deploy boundary, or changes an assumption shared by web, Cloudflare Worker code, runner container code, runner bundle contents, provider egress credentials, runtime env, or persisted runtime state, state what happens while deployed pieces disagree. For Cloudflare hosted execution, do not assume a Worker deploy instantly replaces every active runner container or child process. Call out whether gradual container rollout can leave warm containers on the old bundle/env/credential shape, whether the change is backward compatible during that window, whether `container_rollout=immediate` is required, and which smoke/log checks prove convergence.
+  Include the expected rollout duration, evidenced current member/event volume,
+  maximum realistically exposed operations, reversibility, and available
+  monitoring or bounded manual repair. Use current scale rather than hypothetical
+  future scale so a rare reversible rollout miss is not used to justify replay,
+  migration, reconciliation, or persistent compatibility machinery.
 
 This block is the load-bearing input for the PR-lane ReviewGPT loop and any human reviewer; without it, the reviewer may misread a deliberately-disabled wiring state as evidence the functionality should be deleted, or rank a Critical correctness gap as a complexity-collapse opportunity.
 
