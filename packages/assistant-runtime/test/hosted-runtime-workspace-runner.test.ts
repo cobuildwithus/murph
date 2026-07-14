@@ -5307,20 +5307,22 @@ describe("runHostedWorkspaceUntilIdleOrBudget", () => {
     }
   });
 
-  test("resolves the latest reply target from older and fresh accepted inputs in one group", async () => {
+  test("resolves the latest reply target by canonical mailbox order when provider time goes backward", async () => {
     const vaultRoot = await mkdtemp(path.join(tmpdir(), "murph-workspace-runner-"));
     try {
       const older = await stageHostedUsageNoticeAssistantInput({
         itemId: "mailbox_item_usage_notice_same_group_older",
+        laneSeq: "41",
         messageId: "linq_message_older",
-        occurredAt: "2026-04-26T00:00:01.000Z",
+        occurredAt: "2026-04-26T00:00:02.000Z",
         threadId: "linq_thread_same_group",
         vaultRoot,
       });
       const fresh = await stageHostedUsageNoticeAssistantInput({
         itemId: "mailbox_item_usage_notice_same_group_fresh",
+        laneSeq: "42",
         messageId: "linq_message_fresh",
-        occurredAt: "2026-04-26T00:00:02.000Z",
+        occurredAt: "2026-04-26T00:00:01.000Z",
         threadId: "linq_thread_same_group",
         vaultRoot,
       });
@@ -5386,6 +5388,7 @@ describe("runHostedWorkspaceUntilIdleOrBudget", () => {
       const older = await stageHostedUsageNoticeAssistantInput({
         externalThreadRouteAuthorityPresent: false,
         itemId: "mailbox_item_usage_notice_direct_older",
+        laneSeq: "41",
         messageId: "linq_message_direct_older",
         occurredAt: "2026-04-26T00:00:01.000Z",
         threadId: "linq_thread_direct",
@@ -5395,6 +5398,7 @@ describe("runHostedWorkspaceUntilIdleOrBudget", () => {
       const fresh = await stageHostedUsageNoticeAssistantInput({
         externalThreadRouteAuthorityPresent: false,
         itemId: "mailbox_item_usage_notice_direct_fresh",
+        laneSeq: "42",
         messageId: "linq_message_direct_fresh",
         occurredAt: "2026-04-26T00:00:02.000Z",
         threadId: "linq_thread_direct",
@@ -5426,6 +5430,7 @@ describe("runHostedWorkspaceUntilIdleOrBudget", () => {
       const older = await stageHostedUsageNoticeAssistantInput({
         channel: "telegram",
         itemId: "mailbox_item_usage_notice_telegram_older",
+        laneSeq: "41",
         messageId: "telegram_message_older",
         occurredAt: "2026-04-26T00:00:01.000Z",
         threadId: "telegram_thread",
@@ -5435,6 +5440,7 @@ describe("runHostedWorkspaceUntilIdleOrBudget", () => {
       const fresh = await stageHostedUsageNoticeAssistantInput({
         channel: "telegram",
         itemId: "mailbox_item_usage_notice_telegram_fresh",
+        laneSeq: "42",
         messageId: "telegram_message_fresh",
         occurredAt: "2026-04-26T00:00:02.000Z",
         threadId: "telegram_thread",
@@ -8486,6 +8492,7 @@ async function stageHostedUsageNoticeAssistantInput(input: {
   channel?: "email" | "linq" | "telegram" | "whatsapp";
   externalThreadRouteAuthorityPresent?: boolean;
   itemId: string;
+  laneSeq?: string;
   messageId: string;
   occurredAt: string;
   threadId: string;
@@ -8513,6 +8520,7 @@ async function stageHostedUsageNoticeAssistantInput(input: {
   const storedInput = createStoredAssistantInputEventForMailboxItem(
     createMailboxItem({
       id: input.itemId,
+      laneSeq: input.laneSeq ?? "1",
       occurredAt: input.occurredAt,
     }),
     "accepted usage notice input",

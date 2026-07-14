@@ -25,6 +25,7 @@ import type {
   HostedWorkspaceState,
 } from "@murphai/hosted-execution/runtime-control";
 import {
+  compareAssistantInputCursors,
   isAssistantContextSnapshotRefreshPending,
   listAssistantContextSnapshotDirtyDomainsForCanonicalWrite,
   markAssistantContextSnapshotDirty,
@@ -1966,7 +1967,7 @@ export async function resolveHostedUsageNoticeDeliveryTargetFromAcceptedInputs(i
 
   let resolved:
     | {
-      occurredAtEpochMs: number;
+      cursor: AssistantInputEventRecord["cursor"];
       target: HostedRuntimeUsageNoticeDeliveryTarget;
     }
     | undefined;
@@ -1998,13 +1999,12 @@ export async function resolveHostedUsageNoticeDeliveryTargetFromAcceptedInputs(i
       return null;
     }
 
-    const occurredAtEpochMs = Date.parse(event.occurredAt);
     if (
       !resolved
-      || occurredAtEpochMs >= resolved.occurredAtEpochMs
+      || compareAssistantInputCursors(event.cursor, resolved.cursor) > 0
     ) {
       resolved = {
-        occurredAtEpochMs,
+        cursor: event.cursor,
         target,
       };
     }
