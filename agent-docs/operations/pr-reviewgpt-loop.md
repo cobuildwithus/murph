@@ -39,10 +39,19 @@ the prepared draft or conversation is the user-facing result. Never implement
 this cleanup as a profile-wide tab sweep or close a target that the current run
 did not create.
 
-This ownership rule is required because the managed browser lanes disable
-background throttling and ReviewGPT pins the capture page lifecycle active.
-Leaving completed waited targets open accumulates active renderers across
+This ownership rule is required because the managed browser lanes keep
+background response-polling timers reliable and ReviewGPT pins only the owned
+capture page lifecycle active, then releases emulated focus before retaining or
+closing that target. The Murph lanes use balanced background mode so Chromium
+can still deprioritize unrelated renderers and occluded windows; use the fully
+unthrottled fallback only for a browser version with a proven capture stall.
+Leaving completed waited targets open still accumulates active renderers across
 rounds even when ordinary browser history and site data have been cleared.
+
+Changing the launch mode does not reconfigure a browser process that is already
+running. Never restart a shared lane merely to apply this setting while it has
+pending reviews; let the new flags take effect on the lane's next normal
+restart.
 
 ## When It Runs
 
