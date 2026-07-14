@@ -29,6 +29,12 @@ payment-authority, actor-ordering, retry, and deletion boundaries.
   decision is durable.
 - Issued Checkout Sessions can outlive account deletion and create an ownerless
   subscription after local billing and crypto state is gone.
+- Background route repair can continue provider assertions after fresh input or
+  abort, and marker strengthening can stale a device occurrence queued just
+  before the repair.
+- A persisted open Family Checkout can outlive direct-paid conversion, and a
+  generic hosted local Linq cron row has no authenticated parent route to prove
+  its saved audience before provider admission.
 
 ## Implementation
 
@@ -71,7 +77,7 @@ payment-authority, actor-ordering, retry, and deletion boundaries.
   inside the existing member/group deletion fences, rechecking suspension and
   payment authority before each charge-capable mutation.
 - Discover pre-migration open Checkout Sessions and completed sessions from the
-  bounded deployment-compatibility window, plus unfinalized
+  finite 2026-07-01 through 2026-07-31 deployment-compatibility window, plus unfinalized
   subscriptions with bounded, fail-closed Stripe pagination before deleting
   local state.
 - Before account deletion removes personal or owned thread-container crypto
@@ -95,6 +101,13 @@ payment-authority, actor-ordering, retry, and deletion boundaries.
   execution, and propagate that acknowledgement through the Cloudflare runtime
   adapter. A pending repair blocks only its own cron attempt, not unrelated
   due work.
+- Yield or abort route repair before further provider assertions or canonical
+  writes. Preserve a queued device occurrence only across the exact
+  marker-strengthening repair; every other parent-route edit remains stale.
+- Settle a persisted Family Checkout under the existing group/member fence
+  before direct-paid conversion: expire an open session and fail closed if it
+  already completed. Reject hosted local Linq jobs that have no authenticated
+  canonical or device parent route, keeping the occurrence retryable.
 - Anchor hosted preference causality to the first accepted input even when the
   same actor contributes additional inputs to the active turn.
 
@@ -132,10 +145,32 @@ payment-authority, actor-ordering, retry, and deletion boundaries.
   hourly retry, both direct and group-shaped unmarked Linq routes remain pending
   before provider execution, and the Cloudflare adapter preserves the signed
   `member-home` acknowledgement.
+- Prove repair yield/abort performs no partial write, queue→real repair→execute
+  preserves one device occurrence, and unparented hosted local Linq stays
+  failed with a scheduled retry before any provider call.
+- Prove direct-paid conversion expires a persisted open Family Checkout before
+  subscription mutation and makes no billing mutation when that session is
+  already complete.
 - Prove supported same-actor input folding retains the first accepted input as
   the preference causal anchor.
 - Run focused Family/Stripe tests, web typecheck/verification, required audits,
   exact-head ReviewGPT, and CI before merge.
 
-Status: active
-Updated: 2026-07-13
+## Completion Evidence
+
+- Family plan tests: 106 passed; account-deletion tests: 63 passed.
+- Assistant route-repair core tests: 25 passed; hosted maintenance tests: 77
+  passed; full assistant cron runtime file: 108 passed.
+- Focused device authority, queue→repair→execute, and unparented local Linq
+  admission proofs: 4 passed; the exact retry proof also passed independently.
+- Assistant engine, assistant runtime, hosted web, and Cloudflare typechecks
+  passed on the rebased patch.
+- The broad hosted-web run passed 5,034 tests with one unrelated timeout under
+  concurrent load; that exact page test passed in isolation.
+- Coverage-write, security/privacy, and final deep-review audits report zero
+  remaining actionable findings. The pushed-head ReviewGPT and CI loops remain
+  the external merge gates after this local plan is archived.
+
+Status: completed
+Updated: 2026-07-14
+Completed: 2026-07-14
