@@ -26,6 +26,7 @@ import {
   type AssistantActiveTurnInputCheckpointInput,
 } from '../src/assistant/turn-input.ts'
 import {
+  assistantInputCandidateMatchesDeliveryRoute,
   createStoreBackedAssistantInputSource,
   type AssistantInputCandidate,
   type AssistantInputCandidateQuery,
@@ -7495,10 +7496,18 @@ describe('assistant auto-reply runtime', () => {
         }
       },
     )
-    const listInputCandidates = vi.fn(async () => ({
-      inputs: [hostedInput],
-      nextCursor: hostedInput.event.cursor,
-    }))
+    const listInputCandidates = vi.fn(
+      async (input: AssistantInputCandidateQuery) => {
+        const knownInputIds = new Set(input.knownInputIds ?? [])
+        const inputs = [hostedInput].filter(
+          (candidate) => !knownInputIds.has(candidate.event.inputId),
+        )
+        return {
+          inputs,
+          nextCursor: inputs.at(-1)?.event.cursor ?? input.afterCursor ?? null,
+        }
+      },
+    )
     const inputSource = {
       async refresh() {
         return {
@@ -8018,10 +8027,23 @@ describe('assistant auto-reply runtime', () => {
       inputs: [],
       nextCursor: initialInput.event.cursor,
     }))
-    const listInputCandidates = vi.fn(async () => ({
-      inputs: routeCandidates,
-      nextCursor: routeCandidates[routeCandidates.length - 1]!.event.cursor,
-    }))
+    const listInputCandidates = vi.fn(
+      async (input: AssistantInputCandidateQuery) => {
+        const deliveryRoute = input.deliveryRoute
+        const inputs = deliveryRoute
+          ? routeCandidates.filter((candidate) =>
+              assistantInputCandidateMatchesDeliveryRoute({
+                candidate,
+                deliveryRoute,
+              }),
+            )
+          : routeCandidates
+        return {
+          inputs,
+          nextCursor: inputs.at(-1)?.event.cursor ?? input.afterCursor ?? null,
+        }
+      },
+    )
     const checkpointAcceptedInput = vi.fn(async () => undefined)
     const inputSource = {
       checkpointAcceptedInput,
