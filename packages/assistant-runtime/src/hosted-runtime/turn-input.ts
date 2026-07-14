@@ -129,11 +129,25 @@ export function createHostedAssistantInputSource(input: {
         observedInputIds.add(inputId);
         newPendingInputIds.push(inputId);
       }
+      const appendablePendingEvents = input.pendingInputRefreshMode === "existing"
+        ? await readHostedReplyablePendingAssistantInputEvents({
+            inputIds: newPendingInputIds,
+            missingInput: "skip",
+            vaultRoot: input.vaultRoot,
+          })
+        : await readHostedAssistantInputEventsById({
+            inputIds: newPendingInputIds,
+            missingInput: "skip",
+            vaultRoot: input.vaultRoot,
+          });
+      const appendablePendingInputIds = selectedInputIds.length === 0
+        ? selectHostedAssistantInputEventBatch({
+            events: appendablePendingEvents,
+            limit: DEFAULT_ASSISTANT_AUTOMATION_SCAN_LIMIT,
+          }).map((event) => event.inputId)
+        : [];
       const added = appendSelectedHostedAssistantInputIds({
-        inputIds: newPendingInputIds.slice(
-          0,
-          Math.max(0, 1 - selectedInputIds.length),
-        ),
+        inputIds: appendablePendingInputIds,
         selectedInputIdSet,
         selectedInputIds,
       });
