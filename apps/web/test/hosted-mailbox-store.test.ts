@@ -15,6 +15,7 @@ import {
   HOSTED_MAILBOX_ITEM_PAYLOAD_SCHEMA,
   HOSTED_MAILBOX_PAYLOAD_SCHEMA,
   readHostedMailboxConsumedSeqByLane,
+  readHostedMailboxLiveItemById,
   readHostedMailboxLatestPendingConversationItem,
   readHostedMailboxLatestPendingSystemItem,
   readHostedMailboxItemCheckpointById,
@@ -50,6 +51,33 @@ function expectLiveHostedMailboxWhere(fields: Record<string, unknown>) {
     ],
   });
 }
+
+describe("readHostedMailboxLiveItemById", () => {
+  it("applies the canonical explicit and retention expiry boundary", async () => {
+    const findFirst = vi.fn().mockResolvedValue(null);
+
+    await expect(readHostedMailboxLiveItemById({
+      availableAt: FIXED_NOW,
+      mailboxItemId: "mailbox-live-1",
+      prisma: {
+        hostedMailboxItem: { findFirst },
+      } as never,
+    })).resolves.toBeNull();
+
+    expect(findFirst).toHaveBeenCalledWith({
+      where: {
+        createdAt: {
+          gte: new Date(FIXED_NOW.getTime() - HOSTED_MAILBOX_TEST_RETENTION_MS),
+        },
+        id: "mailbox-live-1",
+        OR: [
+          { expiresAt: null },
+          { expiresAt: { gt: FIXED_NOW } },
+        ],
+      },
+    });
+  });
+});
 
 describe("appendHostedMailboxItemTx", () => {
   it("allocates a lane sequence and stores small opaque payload ciphertext inline", async () => {
