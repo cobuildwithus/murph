@@ -94,11 +94,12 @@ Updated: 2026-07-14
 
 - Checkpoint batch 2 is landed on `main` at 1,505 imaged movements, 243 image-less movements, and 4,522 unique public images.
 - Batch 3 is landed on `main` at 1,555 imaged movements, 193 image-less movements, and 4,677 unique public images. Its 155 images passed originating and independent review, idempotent upload, hosted-byte verification, public delivery checks, package verification on TypeScript 7, and zero-finding security/privacy and coverage-write audits.
-- Batch 4 is the exact next 50 still-empty movements with 184 planned slides after independent review restored a required fourth phase to ST491. All 50 independently approved carousels and 184 square canonical images are uploaded, idempotently byte-verified, cataloged, regenerated, and package-verified at 1,605 imaged / 143 image-less / 4,861 unique images. Coverage-write returned zero findings; deep review's sole cosmetic ST491 annotation finding was removed, targeted re-approved, re-uploaded, and re-verified with no unresolved finding. Superseded ST491 objects remain unreferenced; landing is pending.
+- Batch 4 is landed on `main` at 1,605 imaged movements, 143 image-less movements, and 4,861 unique public images. Its 184 square canonical images passed originating and independent review, idempotent hosted-byte/public-delivery verification, TypeScript 7 package verification, zero-finding coverage-write, and local deep review; the sole cosmetic ST491 annotation finding was removed and targeted re-approved before landing. Superseded ST491 objects remain unreferenced.
+- Batch 5 is the exact next 50 still-empty movements at manifest sequences 271–320 with 172 planned slides. Its five generation lanes are starting from the prevalidated collision-free assignment.
 
 ## Next
 
-- Verify and land batch 4 as the next 50-movement checkpoint, then start the preplanned 50-movement / 172-slide batch 5 at manifest sequences 271–320.
+- Generate, independently review, upload, catalog, verify, and land batch 5 as the next 50-movement / 172-slide checkpoint.
 - Continue the deterministic checkpoints to 1,748 imaged / zero image-less, then run aggregate completion verification and close the active plan with `scripts/finish-task`.
 
 ## Verification
