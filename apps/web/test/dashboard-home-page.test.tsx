@@ -256,19 +256,31 @@ test("HomePage shows an advisory while Pulse replies continue after included usa
     userNotice: {
       code: "pulse_upgrade_edge",
       message:
-        "You've used this month's included Pulse usage. Murph keeps replying.",
+        "You've used 100% of this month's included Pulse usage. Murph keeps replying.",
     },
   });
 
   const { default: HomePage } = await import("../app/(dashboard)/home/page");
   const markup = renderToStaticMarkup(await HomePage());
 
-  assert.match(markup, /used this month(?:&#x27;|')s included Pulse usage/u);
+  assert.match(markup, /used 100% of this month(?:&#x27;|')s included Pulse usage/u);
   assert.match(markup, /Resets in 6 days/);
   assert.match(markup, /Murph keeps replying/);
   assert.match(markup, /Switch to Luna in Settings/);
   assert.match(markup, /Review settings/);
   assert.match(markup, /href="\/settings"/);
+});
+
+test("UsageLimitBanner omits thread-container notices from the personal dashboard", async () => {
+  const { UsageLimitBanner } = await import(
+    "../src/components/home/usage-limit-banner"
+  );
+
+  const markup = renderToStaticMarkup(createElement(UsageLimitBanner, {
+    noticeCode: "thread_usage_limit_reached",
+  }));
+
+  assert.equal(markup, "");
 });
 
 test("HomePage shows a monthly reset advisory while Edge replies continue", async () => {
@@ -286,14 +298,14 @@ test("HomePage shows a monthly reset advisory while Edge replies continue", asyn
     userNotice: {
       code: "edge_usage_limit_reached",
       message:
-        "You've used this month's included Edge usage. Murph keeps replying.",
+        "You've used 100% of this month's included Edge usage. Murph keeps replying.",
     },
   });
 
   const { default: HomePage } = await import("../app/(dashboard)/home/page");
   const markup = renderToStaticMarkup(await HomePage());
 
-  assert.match(markup, /included Edge usage/);
+  assert.match(markup, /used 100% of this month(?:&#x27;|')s included Edge usage/u);
   assert.match(markup, /Resets in 6 days/);
   assert.match(markup, /Murph keeps replying/);
   assert.match(markup, /Switch to Luna in Settings/);
@@ -313,14 +325,14 @@ test("HomePage shows an advisory while Family replies continue", async () => {
     spentUsdMicros: 10_000_000n,
     userNotice: {
       code: "family_usage_limit_reached",
-      message: "Your Family has used this month's included usage. Murph keeps replying.",
+      message: "Your Family has used 100% of this month's included usage. Murph keeps replying.",
     },
   });
 
   const { default: HomePage } = await import("../app/(dashboard)/home/page");
   const markup = renderToStaticMarkup(await HomePage());
 
-  assert.match(markup, /Family has used this month(?:&#x27;|')s included usage/u);
+  assert.match(markup, /Family has used 100% of this month(?:&#x27;|')s included usage/u);
   assert.match(markup, /Murph keeps replying/);
   assert.match(markup, /Switch to Luna in Settings/);
   assert.match(markup, /Resets in 6 days/);
@@ -340,7 +352,7 @@ test("HomePage shows an advisory while trial replies continue after included usa
     spentUsdMicros: 4_500_000n,
     userNotice: {
       code: "trial_usage_limit_reached",
-      message: "You've used your included trial usage. Murph keeps replying.",
+      message: "You've used 100% of your included trial usage. Murph keeps replying.",
     },
   });
   mocks.readHostedMemberHomeTrialBillingState.mockResolvedValueOnce(PULSE_TRIAL_BILLING_STATE);
@@ -348,7 +360,7 @@ test("HomePage shows an advisory while trial replies continue after included usa
   const { default: HomePage } = await import("../app/(dashboard)/home/page");
   const markup = renderToStaticMarkup(await HomePage());
 
-  assert.match(markup, /included trial usage/);
+  assert.match(markup, /used 100% of your included trial usage/u);
   assert.match(markup, /Murph keeps replying/);
   assert.match(markup, /Switch to Luna in Settings/);
   assert.match(markup, /review plan options/);

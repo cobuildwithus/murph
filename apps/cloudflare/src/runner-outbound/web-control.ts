@@ -161,6 +161,8 @@ export async function handleRunnerWebControlRequest(input: {
     && input.request.method === "POST";
   const isNewsletterToolRequest = policy.operation === "newsletter_tool"
     && input.request.method === "POST";
+  const isPlanUsageToolRequest = policy.operation === "plan_usage_tool"
+    && input.request.method === "POST";
   const isComputerUseRequest = policy.operation === "computer_use"
     && input.request.method === "POST";
   const isConnectedAppsRequest = policy.operation === "connected_apps"
@@ -186,6 +188,7 @@ export async function handleRunnerWebControlRequest(input: {
     || isVaultShareDeliverRequest
     || isGroupToolRequest
     || isNewsletterToolRequest
+    || isPlanUsageToolRequest
     || isComputerUseRequest
     || isConnectedAppsRequest
     || isCodexAuthUpdateRequest

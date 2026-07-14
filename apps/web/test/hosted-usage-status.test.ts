@@ -1,0 +1,486 @@
+import { beforeEach, describe, expect, it, vi } from "vitest";
+
+const mocks = vi.hoisted(() => ({
+  readHostedAiUsageGate: vi.fn(),
+  readHostedMemberCoreState: vi.fn(),
+  readHostedMemberStripeBillingRef: vi.fn(),
+}));
+
+vi.mock("@/src/lib/hosted-execution/usage-allowance", () => ({
+  readHostedAiUsageGate: mocks.readHostedAiUsageGate,
+}));
+
+vi.mock("@/src/lib/hosted-web/public-url", () => ({
+  resolveHostedPublicBaseUrl: () => "https://example.test",
+}));
+
+vi.mock("@/src/lib/hosted-onboarding/hosted-member-billing-store", () => ({
+  readHostedMemberStripeBillingRef: mocks.readHostedMemberStripeBillingRef,
+}));
+
+vi.mock("@/src/lib/hosted-onboarding/hosted-member-store", () => ({
+  readHostedMemberCoreState: mocks.readHostedMemberCoreState,
+}));
+
+import {
+  formatHostedPersonalAiUsageStatusForConversation,
+  projectHostedPersonalAiUsageStatus,
+  readHostedPersonalAiUsageStatus,
+} from "@/src/lib/hosted-execution/usage-status";
+import type {
+  HostedAiUsageGateDecisionWithSource,
+} from "@/src/lib/hosted-execution/usage-allowance";
+
+const NOW = new Date("2026-07-03T12:00:00.000Z");
+const PERIOD_START = new Date("2026-07-01T00:00:00.000Z");
+const PERIOD_END = new Date("2026-07-11T00:00:00.000Z");
+
+describe("readHostedPersonalAiUsageStatus", () => {
+  beforeEach(() => {
+    vi.clearAllMocks();
+    mocks.readHostedMemberCoreState.mockResolvedValue({
+      billingStatus: "active",
+      suspendedAt: null,
+    });
+    mocks.readHostedMemberStripeBillingRef.mockResolvedValue({
+      currentBillingPhase: "paid",
+      currentBillingPlanCode: "launch_monthly",
+      currentCheckoutOffer: "standard",
+      memberId: "member_usage",
+      stripeCustomerId: "cus_usage",
+      stripeSubscriptionId: "sub_usage",
+    });
+  });
+
+  it("returns an evidence-backed trial forecast and server-selected Pulse action", async () => {
+    mocks.readHostedMemberStripeBillingRef.mockResolvedValue({
+      currentBillingPhase: "trial",
+      currentBillingPlanCode: "launch_monthly",
+      currentCheckoutOffer: "pulse_trial_7d",
+      memberId: "member_usage_1",
+      stripeCustomerId: "cus_usage",
+      stripeSubscriptionId: "sub_usage",
+    });
+    mocks.readHostedAiUsageGate.mockResolvedValue(buildDecision({
+      allowanceSource: "direct_trial",
+      limitUsdMicros: 4_500_000n,
+      remainingUsdMicros: 2_250_000n,
+      spentUsdMicros: 2_250_000n,
+    }));
+    const prisma = buildPrisma(new Date("2026-07-01T12:00:00.000Z"));
+
+    await expect(readHostedPersonalAiUsageStatus({
+      memberId: "member_usage_1",
+      now: NOW,
+      prisma: prisma as never,
+      publicBaseUrl: "https://example.test",
+    })).resolves.toEqual({
+      accessKind: "trial",
+      forecast: {
+        estimatedDaysRemaining: 2,
+        estimatedExhaustionAt: "2026-07-05T12:00:00.000Z",
+      },
+      generatedAt: NOW.toISOString(),
+      periodEnd: PERIOD_END.toISOString(),
+      periodKind: "trial",
+      periodStart: PERIOD_START.toISOString(),
+      planCode: "launch_monthly",
+      planName: "Pulse Trial",
+      recommendedAction: {
+        kind: "start_pulse",
+        label: "Start Pulse",
+        url: "https://example.test/settings#subscription",
+      },
+      remainingPercent: 50,
+      status: "active",
+      usedPercent: 50,
+    });
+  });
+
+  it("recommends Edge for a paid Pulse member only after the usage threshold", async () => {
+    mocks.readHostedAiUsageGate.mockResolvedValue(buildDecision({
+      allowanceSource: "direct_paid_member_plan",
+      limitUsdMicros: 10_000_000n,
+      remainingUsdMicros: 1_500_000n,
+      spentUsdMicros: 8_500_000n,
+    }));
+
+    const result = await readHostedPersonalAiUsageStatus({
+      memberId: "member_usage_2",
+      now: NOW,
+      prisma: buildPrisma(null) as never,
+      publicBaseUrl: "https://example.test",
+    });
+
+    expect(result).toMatchObject({
+      accessKind: "paid",
+      planName: "Pulse",
+      recommendedAction: {
+        kind: "upgrade_edge",
+      },
+      remainingPercent: 15,
+      status: "active",
+      usedPercent: 85,
+    });
+    expect(JSON.stringify(result)).not.toMatch(/UsdMicros|token|dollar/iu);
+  });
+
+  it("does not recommend an upgrade when the billing action is ineligible", async () => {
+    mocks.readHostedMemberStripeBillingRef.mockResolvedValue({
+      currentBillingPhase: null,
+      currentBillingPlanCode: "launch_monthly",
+      currentCheckoutOffer: null,
+      memberId: "member_legacy",
+      stripeCustomerId: "cus_usage",
+      stripeSubscriptionId: "sub_usage",
+    });
+    mocks.readHostedAiUsageGate.mockResolvedValue(buildDecision({
+      allowanceSource: "direct_paid_member_plan",
+      limitUsdMicros: 10_000_000n,
+      remainingUsdMicros: 1_500_000n,
+      spentUsdMicros: 8_500_000n,
+    }));
+
+    await expect(readHostedPersonalAiUsageStatus({
+      memberId: "member_legacy",
+      now: NOW,
+      prisma: buildPrisma(null) as never,
+      publicBaseUrl: "https://example.test",
+    })).resolves.toMatchObject({
+      recommendedAction: null,
+      status: "active",
+    });
+  });
+
+  it("does not invent a higher-plan action for Edge or a personal action for Family", async () => {
+    const prisma = buildPrisma(null);
+    mocks.readHostedAiUsageGate.mockResolvedValue(buildDecision({
+      allowanceSource: "direct_paid_member_plan",
+      billingPlanCode: "launch_edge_monthly",
+      limitUsdMicros: 25_000_000n,
+      remainingUsdMicros: 1_000_000n,
+      spentUsdMicros: 24_000_000n,
+    }));
+
+    await expect(readHostedPersonalAiUsageStatus({
+      memberId: "member_edge",
+      now: NOW,
+      prisma: prisma as never,
+      publicBaseUrl: "https://example.test",
+    })).resolves.toMatchObject({
+      accessKind: "paid",
+      planName: "Edge",
+      recommendedAction: null,
+    });
+
+    mocks.readHostedAiUsageGate.mockResolvedValue(buildDecision({
+      allowanceSource: "family_sponsored_pulse",
+      limitUsdMicros: 10_000_000n,
+      remainingUsdMicros: 500_000n,
+      spentUsdMicros: 9_500_000n,
+    }));
+
+    await expect(readHostedPersonalAiUsageStatus({
+      memberId: "member_family",
+      now: NOW,
+      prisma: prisma as never,
+      publicBaseUrl: "https://example.test",
+    })).resolves.toMatchObject({
+      accessKind: "family_sponsored",
+      planName: "Family",
+      recommendedAction: null,
+    });
+  });
+
+  it("represents zero and exhausted usage without percentage overflow", async () => {
+    const prisma = buildPrisma(null);
+    mocks.readHostedAiUsageGate.mockResolvedValue(buildDecision({
+      remainingUsdMicros: 10_000_000n,
+      spentUsdMicros: 0n,
+    }));
+
+    await expect(readHostedPersonalAiUsageStatus({
+      memberId: "member_zero",
+      now: NOW,
+      prisma: prisma as never,
+    })).resolves.toMatchObject({
+      forecast: null,
+      remainingPercent: 100,
+      status: "active",
+      usedPercent: 0,
+    });
+
+    mocks.readHostedAiUsageGate.mockResolvedValue(buildDecision({
+      remainingUsdMicros: 0n,
+      spentUsdMicros: 12_000_000n,
+    }));
+
+    await expect(readHostedPersonalAiUsageStatus({
+      memberId: "member_exhausted",
+      now: NOW,
+      prisma: prisma as never,
+    })).resolves.toMatchObject({
+      forecast: null,
+      remainingPercent: 0,
+      status: "exhausted",
+      usedPercent: 100,
+    });
+  });
+
+  it("omits a forecast until at least one full day of usage is observed", async () => {
+    mocks.readHostedAiUsageGate.mockResolvedValue(buildDecision({
+      remainingUsdMicros: 5_000_000n,
+      spentUsdMicros: 5_000_000n,
+    }));
+
+    await expect(readHostedPersonalAiUsageStatus({
+      memberId: "member_early",
+      now: NOW,
+      prisma: buildPrisma(new Date("2026-07-03T00:00:00.000Z")) as never,
+    })).resolves.toMatchObject({
+      forecast: null,
+      recommendedAction: null,
+    });
+  });
+
+  it("omits a forecast when the projected date is outside the JavaScript date range", async () => {
+    mocks.readHostedAiUsageGate.mockResolvedValue(buildDecision({
+      billingPlanCode: "launch_edge_monthly",
+      limitUsdMicros: 25_000_000n,
+      remainingUsdMicros: 24_999_999n,
+      spentUsdMicros: 1n,
+    }));
+
+    await expect(readHostedPersonalAiUsageStatus({
+      memberId: "member_low_spend",
+      now: NOW,
+      prisma: buildPrisma(new Date(NOW.getTime() - (4 * 24 * 60 * 60 * 1_000))) as never,
+    })).resolves.toMatchObject({
+      forecast: null,
+      status: "active",
+    });
+  });
+
+  it("keeps personal billing details unavailable to thread-container runtimes", async () => {
+    const prisma = buildPrisma(null);
+    mocks.readHostedAiUsageGate.mockResolvedValue(buildDecision({
+      allowanceSource: "thread_container",
+    }));
+
+    await expect(readHostedPersonalAiUsageStatus({
+      memberId: "thread_runtime",
+      now: NOW,
+      prisma: prisma as never,
+    })).resolves.toEqual({
+      generatedAt: NOW.toISOString(),
+      reason: "group_not_supported",
+      recommendedAction: null,
+      status: "unavailable",
+    });
+    expect(prisma.hostedAiUsage.findFirst).not.toHaveBeenCalled();
+  });
+
+  it("returns a conversion path for an ended trial without inventing usage", async () => {
+    mocks.readHostedMemberCoreState.mockResolvedValue({
+      billingStatus: "paused",
+      suspendedAt: null,
+    });
+    mocks.readHostedMemberStripeBillingRef.mockResolvedValue({
+      currentBillingPhase: null,
+      currentBillingPlanCode: "launch_monthly",
+      currentCheckoutOffer: "pulse_trial_7d",
+      memberId: "member_trial_ended",
+      stripeCustomerId: "cus_usage",
+      stripeSubscriptionId: "sub_usage",
+    });
+    mocks.readHostedAiUsageGate.mockResolvedValue(buildDecision({
+      allowed: false,
+      allowanceSource: "direct_trial",
+      reason: "trial_expired_pending_billing",
+      spentUsdMicros: 0n,
+    }));
+
+    await expect(readHostedPersonalAiUsageStatus({
+      memberId: "member_trial_ended",
+      now: NOW,
+      prisma: buildPrisma(null) as never,
+      publicBaseUrl: "https://example.test",
+    })).resolves.toEqual({
+      generatedAt: NOW.toISOString(),
+      reason: "trial_conversion_pending",
+      recommendedAction: {
+        kind: "start_pulse",
+        label: "Start Pulse",
+        url: "https://example.test/settings#subscription",
+      },
+      status: "unavailable",
+    });
+  });
+
+  it("does not recommend trial conversion without complete billing references", async () => {
+    mocks.readHostedMemberCoreState.mockResolvedValue({
+      billingStatus: "paused",
+      suspendedAt: null,
+    });
+    mocks.readHostedMemberStripeBillingRef.mockResolvedValue({
+      currentBillingPhase: null,
+      currentBillingPlanCode: "launch_monthly",
+      currentCheckoutOffer: "pulse_trial_7d",
+      memberId: "member_trial_incomplete",
+      stripeCustomerId: "cus_usage",
+      stripeSubscriptionId: null,
+    });
+    mocks.readHostedAiUsageGate.mockResolvedValue(buildDecision({
+      allowed: false,
+      allowanceSource: "direct_trial",
+      reason: "trial_expired_pending_billing",
+      spentUsdMicros: 0n,
+    }));
+
+    await expect(readHostedPersonalAiUsageStatus({
+      memberId: "member_trial_incomplete",
+      now: NOW,
+      prisma: buildPrisma(null) as never,
+      publicBaseUrl: "https://example.test",
+    })).resolves.toEqual({
+      generatedAt: NOW.toISOString(),
+      reason: "trial_conversion_pending",
+      recommendedAction: null,
+      status: "unavailable",
+    });
+  });
+
+  it("projects an already-resolved exhausted allowance without re-reading it", async () => {
+    const decision = buildDecision({
+      remainingUsdMicros: 0n,
+      spentUsdMicros: 10_000_000n,
+    });
+
+    await expect(projectHostedPersonalAiUsageStatus({
+      decision,
+      memberId: "member_usage",
+      now: NOW,
+      prisma: buildPrisma(null) as never,
+      publicBaseUrl: "https://example.test",
+    })).resolves.toMatchObject({
+      recommendedAction: {
+        kind: "upgrade_edge",
+        label: "Upgrade to Edge",
+        url: "https://example.test/settings#subscription",
+      },
+      remainingPercent: 0,
+      status: "exhausted",
+      usedPercent: 100,
+    });
+    expect(mocks.readHostedAiUsageGate).not.toHaveBeenCalled();
+  });
+
+  it("formats advisory exhaustion with only the projected action", () => {
+    const exhausted = formatHostedPersonalAiUsageStatusForConversation({
+      accessKind: "paid",
+      forecast: null,
+      generatedAt: NOW.toISOString(),
+      periodEnd: PERIOD_END.toISOString(),
+      periodKind: "monthly",
+      periodStart: PERIOD_START.toISOString(),
+      planCode: "launch_monthly",
+      planName: "Pulse",
+      recommendedAction: {
+        kind: "upgrade_edge",
+        label: "Upgrade to Edge",
+        url: "https://example.test/settings#subscription",
+      },
+      remainingPercent: 0,
+      status: "exhausted",
+      usedPercent: 100,
+    });
+    expect(exhausted).toBe(
+      "You've used approximately 100% of the included Pulse AI usage, with 0% remaining. "
+        + "The included allowance resets on July 11, 2026. Replies continue. "
+        + "Upgrade to Edge: https://example.test/settings#subscription",
+    );
+
+    const legacy = formatHostedPersonalAiUsageStatusForConversation({
+      accessKind: "paid",
+      forecast: null,
+      generatedAt: NOW.toISOString(),
+      periodEnd: PERIOD_END.toISOString(),
+      periodKind: "monthly",
+      periodStart: PERIOD_START.toISOString(),
+      planCode: "launch_monthly",
+      planName: "Pulse",
+      recommendedAction: null,
+      remainingPercent: 0,
+      status: "exhausted",
+      usedPercent: 100,
+    });
+    expect(legacy).toContain("The included allowance resets on July 11, 2026.");
+    expect(legacy).toContain("Replies continue.");
+    expect(legacy).not.toMatch(/upgrade|start pulse|settings#subscription/iu);
+  });
+
+  it("keeps unavailable and group conversation projections neutral without an action", () => {
+    expect(formatHostedPersonalAiUsageStatusForConversation({
+      generatedAt: NOW.toISOString(),
+      reason: "trial_conversion_pending",
+      recommendedAction: null,
+      status: "unavailable",
+    })).toBe("Your Pulse Trial has ended, so hosted replies are paused.");
+    expect(formatHostedPersonalAiUsageStatusForConversation({
+      generatedAt: NOW.toISOString(),
+      reason: "group_not_supported",
+      recommendedAction: null,
+      status: "unavailable",
+    })).toBe("Personal plan usage is not available in a group conversation.");
+  });
+});
+
+function buildPrisma(firstUsageAt: Date | null) {
+  return {
+    hostedAiUsage: {
+      findFirst: vi.fn(async () => firstUsageAt
+        ? { occurredAt: firstUsageAt }
+        : null),
+    },
+  };
+}
+
+function buildDecision(input: {
+  allowed?: boolean;
+  allowanceSource?:
+    | "direct_paid_member_plan"
+    | "direct_trial"
+    | "family_sponsored_pulse"
+    | "thread_container";
+  billingPlanCode?: "launch_edge_monthly" | "launch_monthly";
+  limitUsdMicros?: bigint;
+  reason?:
+    | "hosted_access_inactive"
+    | "trial_expired_pending_billing";
+  remainingUsdMicros?: bigint;
+  spentUsdMicros?: bigint;
+} = {}): HostedAiUsageGateDecisionWithSource {
+  const allowed = input.allowed ?? true;
+  const common = {
+    allowanceSource: input.allowanceSource ?? "direct_paid_member_plan",
+    billingPlanCode: input.billingPlanCode ?? "launch_monthly",
+    limitUsdMicros: input.limitUsdMicros ?? 10_000_000n,
+    memberId: "member_usage",
+    periodEnd: PERIOD_END,
+    periodStart: PERIOD_START,
+    remainingUsdMicros: input.remainingUsdMicros ?? 5_000_000n,
+    spentUsdMicros: input.spentUsdMicros ?? 5_000_000n,
+  };
+  return allowed
+    ? {
+        ...common,
+        allowed: true,
+      }
+    : {
+        ...common,
+        allowed: false,
+        reason: input.reason ?? "hosted_access_inactive",
+        retryAfter: PERIOD_END,
+        userNotice: null,
+      };
+}

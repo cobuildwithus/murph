@@ -22,6 +22,7 @@ import type {
   AssistantHostedAssistantConfigurationTool,
   AssistantHostedGroupTool,
   AssistantHostedNewsletterTool,
+  AssistantHostedPlanUsageTool,
   AssistantPhoneCallPort,
 } from './execution-context.js'
 import {
@@ -68,6 +69,7 @@ export interface AssistantHostedToolContext {
   readonly familyPlanTool?: AssistantHostedFamilyPlanTool | null
   readonly groupTool?: AssistantHostedGroupTool | null
   readonly newsletterTool?: AssistantHostedNewsletterTool | null
+  readonly planUsageTool?: AssistantHostedPlanUsageTool | null
   readonly phoneCalls?: AssistantPhoneCallPort | null
   currentHostedDeliveryContext(): AssistantHostedDeliveryContext | null
   currentAssistantTarget?(): {
@@ -100,6 +102,7 @@ export function createAssistantHostedToolContext(input: {
   familyPlanTool?: AssistantHostedFamilyPlanTool | null
   groupTool?: AssistantHostedGroupTool | null
   newsletterTool?: AssistantHostedNewsletterTool | null
+  planUsageTool?: AssistantHostedPlanUsageTool | null
   computerToolsAvailable?: boolean
   getAssistantPreferenceCausalSeq?: () => string | null
   getDeliveryContext?: () => AssistantHostedToolDeliveryContext
@@ -136,6 +139,7 @@ export function createAssistantHostedToolContext(input: {
     familyPlanTool: input.familyPlanTool ?? null,
     groupTool: input.groupTool ?? null,
     newsletterTool: input.newsletterTool ?? null,
+    planUsageTool: input.planUsageTool ?? null,
     phoneCalls: input.phoneCalls ?? null,
     computerToolsAvailable: input.computerToolsAvailable === true,
     currentAssistantPreferenceCausalSeq: () =>

@@ -66,6 +66,9 @@ import type {
   HostedPhoneCallStartResponse,
 } from "@murphai/hosted-execution/phone-calls";
 import type {
+  HostedPlanUsageStatus,
+} from "@murphai/hosted-execution/plan-usage";
+import type {
   HostedExecutionDeviceSyncAccountActionRequest,
   HostedExecutionDeviceSyncAccountActionResponse,
   HostedExecutionDeviceSyncConnectLinkResponse,
@@ -373,6 +376,10 @@ export interface HostedRuntimeFamilyPlanToolPort {
   ): Promise<HostedRuntimeFamilyPlanToolResponse>;
 }
 
+export interface HostedRuntimePlanUsageToolPort {
+  read(): Promise<HostedPlanUsageStatus>;
+}
+
 export interface HostedRuntimeGroupToolPort {
   request(
     request: HostedRuntimeGroupToolRequest,
@@ -531,6 +538,7 @@ export interface HostedRuntimePlatform {
   logPort?: HostedRuntimeLogPort | null;
   mailboxPort?: HostedRuntimeMailboxPort | null;
   newsletterToolPort?: HostedRuntimeNewsletterToolPort | null;
+  planUsageToolPort?: HostedRuntimePlanUsageToolPort | null;
   phoneCalls?: HostedRuntimePhoneCallPort | null;
   productFeedbackPort?: HostedRuntimeProductFeedbackPort | null;
   runtimeLivenessIntervalMs?: number | null;
