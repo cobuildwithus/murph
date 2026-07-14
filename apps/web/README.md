@@ -996,6 +996,7 @@ Hosted settings-authenticated wearable routes:
 - `GET /api/settings/device-sync/connections/:connectionId/status`
 - `POST /api/settings/device-sync/connections/:connectionId/disconnect`
 - `POST /api/settings/email/sync`
+- `POST /api/settings/email/link-intent`
 
 Assertion-authenticated browser-to-agent bridge routes:
 
@@ -1098,6 +1099,10 @@ The onboarding lane is intentionally thin:
   runtime checkpoints it.
 - Verified email sync updates canonical hosted email-authorization facts in web
   storage; it does not write hosted execution env.
+- Settings issues a ten-minute, HttpOnly, member- and Privy-principal-bound
+  email-link intent before opening Privy's first-email modal. If Privy's
+  callback omits the address, sync re-reads the authoritative provider user and
+  accepts only the uniquely newest email verified during that intent window.
 
 Current hosted billing assumptions:
 

@@ -3,10 +3,16 @@ import { describe, expect, it } from "vitest";
 import {
   buildHostedPrivyAuthIntentClearCookie,
   buildHostedPrivyAuthIntentCookie,
+  buildHostedPrivyEmailLinkIntentClearCookie,
+  buildHostedPrivyEmailLinkIntentCookie,
   issueHostedPrivyAuthIntent,
+  issueHostedPrivyEmailLinkIntent,
   readHostedPrivyAuthIntentFromRequest,
+  readHostedPrivyEmailLinkIntentFromRequest,
   verifyHostedPrivyAuthenticationProof as verifyHostedPrivyProviderProof,
   verifyHostedPrivyAuthIntent,
+  verifyHostedPrivyEmailLinkAuthenticationProof,
+  verifyHostedPrivyEmailLinkIntent,
   verifyHostedPrivyLegacyAuthContext,
   verifyHostedPrivyLegacyAuthenticationProof,
 } from "@/src/lib/hosted-onboarding/privy-auth-intent";
@@ -832,6 +838,130 @@ describe("hosted Privy authentication intents", () => {
       })).toThrow(expect.objectContaining({ code: "PRIVY_EMAIL_REQUIRED" }));
     },
   );
+});
+
+describe("hosted Privy settings email-link intents", () => {
+  it("binds the signed intent to the active member and Privy principal", () => {
+    const signedIntent = issueHostedPrivyEmailLinkIntent({
+      memberId: "member_123",
+      now: NOW,
+      privyUserId: "did:privy:test-member",
+      secret: SECRET,
+    });
+
+    expect(verifyHostedPrivyEmailLinkIntent({
+      intent: signedIntent,
+      memberId: "member_123",
+      now: NOW,
+      privyUserId: "did:privy:test-member",
+      secret: SECRET,
+    })).toEqual({
+      expiresAt: NOW_SECONDS + 600,
+      issuedAt: NOW_SECONDS,
+      memberId: "member_123",
+      method: "email",
+      privyUserId: "did:privy:test-member",
+    });
+
+    expect(() => verifyHostedPrivyEmailLinkIntent({
+      intent: signedIntent,
+      memberId: "member_other",
+      now: NOW,
+      privyUserId: "did:privy:test-member",
+      secret: SECRET,
+    })).toThrow(expect.objectContaining({ code: "HOSTED_EMAIL_LINK_PROOF_INVALID" }));
+    expect(() => verifyHostedPrivyEmailLinkIntent({
+      intent: signedIntent,
+      memberId: "member_123",
+      now: NOW,
+      privyUserId: "did:privy:other",
+      secret: SECRET,
+    })).toThrow(expect.objectContaining({ code: "HOSTED_EMAIL_LINK_PROOF_INVALID" }));
+  });
+
+  it("proves only a uniquely newest email verified during the link window", () => {
+    const intent = verifyHostedPrivyEmailLinkIntent({
+      intent: issueHostedPrivyEmailLinkIntent({
+        memberId: "member_123",
+        now: NOW,
+        privyUserId: "did:privy:test-member",
+        secret: SECRET,
+      }),
+      memberId: "member_123",
+      now: NOW,
+      privyUserId: "did:privy:test-member",
+      secret: SECRET,
+    });
+
+    expect(verifyHostedPrivyEmailLinkAuthenticationProof({
+      intent,
+      now: new Date(NOW.getTime() + 2_000),
+      verifiedPrivyUser: makeVerifiedPrivyUser({
+        linkedAccounts: [
+          emailAccount(NOW_SECONDS + 1),
+          phoneAccount(NOW_SECONDS - 60),
+        ],
+      }),
+    })).toEqual({
+      credential: {
+        address: "member@example.test",
+        verifiedAt: NOW_SECONDS + 1,
+      },
+      method: "email",
+      privyUserId: "did:privy:test-member",
+    });
+  });
+
+  it("does not promote an email that predates the current link attempt", () => {
+    const intent = verifyHostedPrivyEmailLinkIntent({
+      intent: issueHostedPrivyEmailLinkIntent({
+        memberId: "member_123",
+        now: NOW,
+        privyUserId: "did:privy:test-member",
+        secret: SECRET,
+      }),
+      memberId: "member_123",
+      now: NOW,
+      privyUserId: "did:privy:test-member",
+      secret: SECRET,
+    });
+
+    expect(() => verifyHostedPrivyEmailLinkAuthenticationProof({
+      intent,
+      now: NOW,
+      verifiedPrivyUser: makeVerifiedPrivyUser({
+        linkedAccounts: [emailAccount(NOW_SECONDS - 60)],
+      }),
+    })).toThrow(expect.objectContaining({
+      code: "PRIVY_EMAIL_NOT_READY",
+      retryable: true,
+    }));
+  });
+
+  it("expires and clears the dedicated HttpOnly link-intent cookie", () => {
+    const signedIntent = issueHostedPrivyEmailLinkIntent({
+      memberId: "member_123",
+      now: NOW,
+      privyUserId: "did:privy:test-member",
+      secret: SECRET,
+    });
+    const cookie = buildHostedPrivyEmailLinkIntentCookie(signedIntent);
+    const cookiePair = cookie.split(";", 1)[0] ?? "";
+
+    expect(cookie).toContain("HttpOnly");
+    expect(cookie).toContain("SameSite=Strict");
+    expect(readHostedPrivyEmailLinkIntentFromRequest(new Request("https://example.test", {
+      headers: { cookie: cookiePair },
+    }))).toBe(signedIntent);
+    expect(buildHostedPrivyEmailLinkIntentClearCookie()).toContain("Max-Age=0");
+    expect(() => verifyHostedPrivyEmailLinkIntent({
+      intent: signedIntent,
+      memberId: "member_123",
+      now: new Date(NOW.getTime() + 601_000),
+      privyUserId: "did:privy:test-member",
+      secret: SECRET,
+    })).toThrow(expect.objectContaining({ code: "HOSTED_EMAIL_LINK_PROOF_EXPIRED" }));
+  });
 });
 
 function makeIdentity(input: {

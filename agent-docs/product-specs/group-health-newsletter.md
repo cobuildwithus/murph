@@ -170,8 +170,11 @@ Privy's client-side link callback is provisional, not the success boundary.
 Settings reports success and updates its verified-email display only after the
 authenticated `/api/settings/email/sync` route returns the canonical address it
 verified and persisted. If the callback omits an address, Settings asks that
-route to resolve the member's server-side verified Privy email; it never falls
-back to an initial unverified Stripe billing-contact hint.
+route to resolve the member's authoritative server-side Privy email under a
+short-lived link intent bound to that member and Privy principal. Only a
+uniquely newest email verified during the link window can satisfy the request;
+it never falls back to an earlier provider email or an initial unverified
+Stripe billing-contact hint.
 
 ## Opt-out
 

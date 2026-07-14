@@ -36,6 +36,12 @@ Last verified: 2026-07-12
   must not promote a linked secondary email into canonical member email
   authorization. Canonical email writes require selected email authentication
   or the explicit fresh-session `/api/settings/email/sync` boundary. Hosted
+  Settings must issue a short-lived HttpOnly email-link intent bound to the
+  active member and Privy principal before opening the first-email provider
+  modal. An addressless link callback must re-read the authoritative Privy
+  user and accept only a uniquely newest email verified during that intent;
+  stale browser snapshots and pre-existing provider emails are not proof of
+  the current link attempt. Hosted
   onboarding must issue a short-lived, invite-bound HttpOnly authentication
   intent immediately before Privy verification, re-read the authoritative
   Privy user at completion, and require the intended phone, email, or Telegram

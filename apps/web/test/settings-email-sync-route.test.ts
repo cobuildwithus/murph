@@ -1,6 +1,10 @@
 import { afterAll, beforeAll, beforeEach, describe, expect, it, vi } from "vitest";
 
 import { hostedOnboardingError } from "../src/lib/hosted-onboarding/errors";
+import {
+  buildHostedPrivyEmailLinkIntentCookie,
+  issueHostedPrivyEmailLinkIntent,
+} from "../src/lib/hosted-onboarding/privy-auth-intent";
 
 const mocks = vi.hoisted(() => ({
   enqueueHostedMemberChannelsUpdatedTx: vi.fn(),
@@ -12,6 +16,7 @@ const mocks = vi.hoisted(() => ({
     $transaction: vi.fn(),
   },
   readHostedMemberEmailAuthorization: vi.fn(),
+  readHostedPrivyUserById: vi.fn(),
   requireFreshActivePrivyMemberAuthForHostedAppSession: vi.fn(),
   requireActivePrivyMemberAuth: vi.fn(),
   sendHostedSignupWelcomeEmailForRecentMember: vi.fn(),
@@ -28,6 +33,16 @@ vi.mock("@/src/lib/hosted-onboarding/hosted-member-store", () => ({
   readHostedMemberEmailAuthorization: mocks.readHostedMemberEmailAuthorization,
   upsertHostedMemberEmailAuthorization: mocks.upsertHostedMemberEmailAuthorization,
 }));
+
+vi.mock("@/src/lib/hosted-onboarding/privy", async () => {
+  const actual = await vi.importActual<typeof import("@/src/lib/hosted-onboarding/privy")>(
+    "@/src/lib/hosted-onboarding/privy",
+  );
+  return {
+    ...actual,
+    readHostedPrivyUserById: mocks.readHostedPrivyUserById,
+  };
+});
 
 vi.mock("@/src/lib/hosted-onboarding/hosted-email-reply-alias", () => ({
   createHostedMemberReplyAliasRoute: mocks.createHostedMemberReplyAliasRoute,
@@ -74,6 +89,7 @@ vi.mock("@/src/lib/hosted-onboarding/shared", async () => {
 
 vi.mock("@/src/lib/hosted-onboarding/runtime", () => ({
   getHostedOnboardingEnvironment: () => ({
+    privyAppSecret: "test-only-privy-app-secret",
     publicBaseUrl: "https://join.example.test",
   }),
 }));
@@ -115,6 +131,15 @@ describe("settings email sync route", () => {
       };
     });
     mocks.requireActivePrivyMemberAuth.mockResolvedValue({
+      identity: {
+        email: {
+          address: "user@example.com",
+          verifiedAt: 1743064200,
+        },
+        phone: null,
+        telegram: null,
+        userId: "did:privy:user_123",
+      },
       linkedAccounts: [
         {
           address: "user@example.com",
@@ -130,8 +155,25 @@ describe("settings email sync route", () => {
       },
       verifiedPrivyUser: {
         id: "did:privy:user_123",
+        linkedAccounts: [
+          {
+            address: "user@example.com",
+            latest_verified_at: 1743064200,
+            type: "email",
+          },
+        ],
       },
     });
+    mocks.readHostedPrivyUserById.mockImplementation(async (privyUserId: string) => ({
+      id: privyUserId,
+      linkedAccounts: [
+        {
+          address: "user@example.com",
+          latest_verified_at: 1743064200,
+          type: "email",
+        },
+      ],
+    }));
     mocks.lockHostedMemberRow.mockResolvedValue(undefined);
     mocks.readHostedMemberEmailAuthorization.mockResolvedValue(null);
     mocks.createHostedMemberReplyAliasRoute.mockResolvedValue({
@@ -237,6 +279,7 @@ describe("settings email sync route", () => {
 
     const response = await settingsEmailSyncRoute.POST(
       new Request("https://join.example.test/api/settings/email/sync", {
+        body: JSON.stringify({ expectedEmailAddress: "user@example.com" }),
         headers: SAME_ORIGIN_HEADERS,
         method: "POST",
       }),
@@ -264,7 +307,155 @@ describe("settings email sync route", () => {
     });
   });
 
-  it("accepts an empty POST body when the server-side Privy cookie session already has the verified email", async () => {
+  it("uses a bound link intent to resolve an addressless callback from fresh server proof", async () => {
+    const verifiedAt = Math.floor(Date.now() / 1000);
+    mocks.requireActivePrivyMemberAuth.mockResolvedValueOnce({
+      identity: {
+        email: {
+          address: "new-link@example.com",
+          verifiedAt,
+        },
+        phone: null,
+        telegram: null,
+        userId: "did:privy:user_123",
+      },
+      linkedAccounts: [
+        {
+          address: "new-link@example.com",
+          latest_verified_at: verifiedAt,
+          type: "email",
+        },
+      ],
+      member: {
+        billingStatus: "active",
+        id: "member_123",
+        privyUserId: "did:privy:user_123",
+        suspendedAt: null,
+      },
+      verifiedPrivyUser: {
+        id: "did:privy:user_123",
+        linkedAccounts: [
+          {
+            address: "new-link@example.com",
+            latest_verified_at: verifiedAt,
+            type: "email",
+          },
+        ],
+      },
+    });
+    const intent = issueHostedPrivyEmailLinkIntent({
+      memberId: "member_123",
+      now: new Date(Date.now() - 1_000),
+      privyUserId: "did:privy:user_123",
+      secret: "test-only-privy-app-secret",
+    });
+    const cookie = buildHostedPrivyEmailLinkIntentCookie(intent).split(";", 1)[0] ?? "";
+    mocks.readHostedPrivyUserById.mockResolvedValueOnce({
+      id: "did:privy:user_123",
+      linkedAccounts: [
+        {
+          address: "new-link@example.com",
+          latest_verified_at: verifiedAt,
+          type: "email",
+        },
+      ],
+    });
+
+    const response = await settingsEmailSyncRoute.POST(
+      new Request("https://join.example.test/api/settings/email/sync", {
+        headers: {
+          ...SAME_ORIGIN_HEADERS,
+          cookie,
+        },
+        method: "POST",
+      }),
+    );
+
+    expect(response.status).toBe(200);
+    expect(mocks.readHostedPrivyUserById).toHaveBeenCalledWith("did:privy:user_123");
+    expect(response.headers.get("set-cookie")).toContain("Max-Age=0");
+    await expect(response.json()).resolves.toMatchObject({
+      emailAddress: "new-link@example.com",
+      ok: true,
+    });
+  });
+
+  it("does not let an addressless link intent promote a pre-existing provider email", async () => {
+    const oldVerifiedAt = Math.floor(Date.now() / 1000) - 60;
+    mocks.requireActivePrivyMemberAuth.mockResolvedValueOnce({
+      identity: {
+        email: {
+          address: "pre-existing@example.com",
+          verifiedAt: oldVerifiedAt,
+        },
+        phone: null,
+        telegram: null,
+        userId: "did:privy:user_123",
+      },
+      linkedAccounts: [
+        {
+          address: "pre-existing@example.com",
+          latest_verified_at: oldVerifiedAt,
+          type: "email",
+        },
+      ],
+      member: {
+        billingStatus: "active",
+        id: "member_123",
+        privyUserId: "did:privy:user_123",
+        suspendedAt: null,
+      },
+      verifiedPrivyUser: {
+        id: "did:privy:user_123",
+        linkedAccounts: [
+          {
+            address: "pre-existing@example.com",
+            latest_verified_at: oldVerifiedAt,
+            type: "email",
+          },
+        ],
+      },
+    });
+    const intent = issueHostedPrivyEmailLinkIntent({
+      memberId: "member_123",
+      now: new Date(),
+      privyUserId: "did:privy:user_123",
+      secret: "test-only-privy-app-secret",
+    });
+    const cookie = buildHostedPrivyEmailLinkIntentCookie(intent).split(";", 1)[0] ?? "";
+    mocks.readHostedPrivyUserById.mockResolvedValueOnce({
+      id: "did:privy:user_123",
+      linkedAccounts: [
+        {
+          address: "pre-existing@example.com",
+          latest_verified_at: oldVerifiedAt,
+          type: "email",
+        },
+      ],
+    });
+
+    const response = await settingsEmailSyncRoute.POST(
+      new Request("https://join.example.test/api/settings/email/sync", {
+        headers: {
+          ...SAME_ORIGIN_HEADERS,
+          cookie,
+        },
+        method: "POST",
+      }),
+    );
+
+    expect(response.status).toBe(409);
+    expect(response.headers.get("set-cookie")).toBeNull();
+    expect(mocks.upsertHostedMemberEmailAuthorization).not.toHaveBeenCalled();
+    await expect(response.json()).resolves.toMatchObject({
+      error: {
+        code: "PRIVY_EMAIL_NOT_READY",
+        retryable: true,
+      },
+    });
+  });
+
+  it("rejects addressless sync when the link intent cookie is missing", async () => {
     const response = await settingsEmailSyncRoute.POST(
       new Request("https://join.example.test/api/settings/email/sync", {
         headers: SAME_ORIGIN_HEADERS,
@@ -272,23 +463,13 @@ describe("settings email sync route", () => {
       }),
     );
 
-    expect(response.status).toBe(200);
-    expect(mocks.upsertHostedMemberEmailAuthorization).toHaveBeenCalledWith({
-      directPublicSender: {
-        address: "user@example.com",
-        authorizedAt: new Date("2025-03-27T08:30:00.000Z"),
+    expect(response.status).toBe(401);
+    expect(mocks.readHostedPrivyUserById).not.toHaveBeenCalled();
+    expect(mocks.upsertHostedMemberEmailAuthorization).not.toHaveBeenCalled();
+    await expect(response.json()).resolves.toMatchObject({
+      error: {
+        code: "HOSTED_EMAIL_LINK_PROOF_INVALID",
       },
-      memberId: "member_123",
-      prisma: mocks.prismaClient,
-      verifiedEmail: {
-        address: "user@example.com",
-        verifiedAt: new Date("2025-03-27T08:30:00.000Z"),
-      },
-    });
-    expect(mocks.upsertHostedMemberReplyAliasLookupKeyTx).toHaveBeenCalledWith({
-      memberId: "member_123",
-      prisma: mocks.prismaClient,
-      replyAliasLookupKey: "0123456789abcdef0123456789abcdef",
     });
   });
 
@@ -300,6 +481,7 @@ describe("settings email sync route", () => {
 
     const response = await settingsEmailSyncRoute.POST(
       new Request("https://join.example.test/api/settings/email/sync", {
+        body: JSON.stringify({ expectedEmailAddress: "user@example.com" }),
         headers: SAME_ORIGIN_HEADERS,
         method: "POST",
       }),

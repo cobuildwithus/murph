@@ -160,7 +160,12 @@ provider link/update flows only when the current Privy client user matches the
 first-party Murph app session. Phone or Telegram authentication does not
 promote secondary Privy email credentials into canonical member email
 authorization; canonical email writes require selected email authentication
-or explicit Settings email sync. Hosted onboarding proves the selected Privy
+or explicit Settings email sync. Before Settings opens Privy's first-email
+link modal, web issues a ten-minute HttpOnly intent bound to the active member
+and Privy principal. An addressless callback is resolved from a fresh
+authoritative Privy user only when the uniquely newest email was verified
+during that intent window; the browser snapshot remains an accelerator and an
+older provider email cannot satisfy the new link attempt. Hosted onboarding proves the selected Privy
 credential with a short-lived, server-signed, invite-bound HttpOnly intent
 issued immediately before provider verification. Completion re-reads the
 authoritative Privy user and accepts only a fresh, uniquely newest phone,

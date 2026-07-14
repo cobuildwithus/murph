@@ -1,9 +1,9 @@
 import "server-only";
 
-import { createHmac, timingSafeEqual } from "node:crypto";
+import { createHash, createHmac, timingSafeEqual } from "node:crypto";
 
 import { normalizeHostedEmailAddress } from "./contact-normalization";
-import { hostedOnboardingError } from "./errors";
+import { hostedOnboardingError, isHostedOnboardingError } from "./errors";
 import type { HostedPrivyUser } from "./privy";
 import {
   coerceHostedPrivyPhoneAccount,
@@ -29,6 +29,9 @@ const HOSTED_PRIVY_LEGACY_CREDENTIAL_PRE_TOKEN_WINDOW_SECONDS = 60;
 const HOSTED_PRIVY_AUTH_INTENT_COOKIE_NAME = process.env.NODE_ENV === "production"
   ? "__Host-murph-privy-auth-intent"
   : "murph-privy-auth-intent";
+const HOSTED_PRIVY_EMAIL_LINK_INTENT_COOKIE_NAME = process.env.NODE_ENV === "production"
+  ? "__Host-murph-privy-email-link-intent"
+  : "murph-privy-email-link-intent";
 
 interface HostedPrivyAuthIntentPayload {
   expiresAt: number;
@@ -66,6 +69,14 @@ export interface VerifiedHostedPrivyLegacyAuthContext {
   method: HostedPrivyAuthMethod;
 }
 
+export interface VerifiedHostedPrivyEmailLinkIntent {
+  expiresAt: number;
+  issuedAt: number;
+  memberId: string;
+  method: "email";
+  privyUserId: string;
+}
+
 export function buildHostedPrivyAuthIntentCookie(intent: string): string {
   return buildHostedPrivyAuthIntentCookieValue({
     maxAgeSeconds: HOSTED_PRIVY_AUTH_INTENT_TTL_SECONDS,
@@ -81,23 +92,27 @@ export function buildHostedPrivyAuthIntentClearCookie(): string {
 }
 
 export function readHostedPrivyAuthIntentFromRequest(request: Request): string | null {
-  const cookieHeader = request.headers.get("cookie");
-  if (!cookieHeader) return null;
+  return readCookieValue(request, HOSTED_PRIVY_AUTH_INTENT_COOKIE_NAME);
+}
 
-  for (const entry of cookieHeader.split(/;\s*/u)) {
-    const separatorIndex = entry.indexOf("=");
-    if (separatorIndex <= 0) continue;
-    if (entry.slice(0, separatorIndex).trim() !== HOSTED_PRIVY_AUTH_INTENT_COOKIE_NAME) continue;
+export function buildHostedPrivyEmailLinkIntentCookie(intent: string): string {
+  return buildCookieValue({
+    cookieName: HOSTED_PRIVY_EMAIL_LINK_INTENT_COOKIE_NAME,
+    maxAgeSeconds: HOSTED_PRIVY_AUTH_INTENT_TTL_SECONDS,
+    value: intent,
+  });
+}
 
-    const value = entry.slice(separatorIndex + 1);
-    try {
-      return decodeURIComponent(value) || null;
-    } catch {
-      return value || null;
-    }
-  }
+export function buildHostedPrivyEmailLinkIntentClearCookie(): string {
+  return buildCookieValue({
+    cookieName: HOSTED_PRIVY_EMAIL_LINK_INTENT_COOKIE_NAME,
+    maxAgeSeconds: 0,
+    value: "",
+  });
+}
 
-  return null;
+export function readHostedPrivyEmailLinkIntentFromRequest(request: Request): string | null {
+  return readCookieValue(request, HOSTED_PRIVY_EMAIL_LINK_INTENT_COOKIE_NAME);
 }
 
 export function issueHostedPrivyAuthIntent(input: {
@@ -156,6 +171,90 @@ export function verifyHostedPrivyAuthIntent(input: {
     issuedAt: payload.issuedAt,
     method: payload.method,
   };
+}
+
+export function issueHostedPrivyEmailLinkIntent(input: {
+  memberId: string;
+  now?: Date;
+  privyUserId: string;
+  secret?: string;
+}): string {
+  const binding = buildHostedPrivyEmailLinkIntentBinding(input);
+  if (!binding) {
+    throw invalidHostedPrivyEmailLinkProof();
+  }
+  return issueHostedPrivyAuthIntent({
+    inviteCode: binding,
+    method: "email",
+    now: input.now,
+    secret: input.secret,
+  });
+}
+
+export function verifyHostedPrivyEmailLinkIntent(input: {
+  intent: string | null | undefined;
+  memberId: string;
+  now?: Date;
+  privyUserId: string;
+  secret?: string;
+}): VerifiedHostedPrivyEmailLinkIntent {
+  const binding = buildHostedPrivyEmailLinkIntentBinding(input);
+  if (!binding) {
+    throw invalidHostedPrivyEmailLinkProof();
+  }
+
+  try {
+    const intent = verifyHostedPrivyAuthIntent({
+      intent: input.intent,
+      inviteCode: binding,
+      now: input.now,
+      secret: input.secret,
+    });
+    if (intent.method !== "email") {
+      throw invalidHostedPrivyEmailLinkProof();
+    }
+    return {
+      ...intent,
+      memberId: input.memberId,
+      method: "email",
+      privyUserId: input.privyUserId,
+    };
+  } catch (error) {
+    if (isHostedOnboardingError(error) && error.code === "HOSTED_AUTH_PROOF_EXPIRED") {
+      throw hostedOnboardingError({
+        code: "HOSTED_EMAIL_LINK_PROOF_EXPIRED",
+        message: "Open the secure email window again to finish linking your email.",
+        httpStatus: 401,
+      });
+    }
+    if (isHostedOnboardingError(error) && error.code === "HOSTED_AUTH_PROOF_INVALID") {
+      throw invalidHostedPrivyEmailLinkProof();
+    }
+    throw error;
+  }
+}
+
+export function verifyHostedPrivyEmailLinkAuthenticationProof(input: {
+  intent: VerifiedHostedPrivyEmailLinkIntent;
+  now?: Date;
+  verifiedPrivyUser: HostedPrivyUser;
+}): Extract<HostedPrivyAuthenticationProof, { method: "email" }> {
+  if (input.verifiedPrivyUser.id !== input.intent.privyUserId) {
+    throw invalidHostedPrivyEmailLinkProof();
+  }
+
+  try {
+    const proof = verifyHostedPrivyAuthenticationProof(input);
+    if (proof.method !== "email") {
+      throw hostedPrivyEmailLinkNotReady();
+    }
+    return proof;
+  } catch (error) {
+    if (isHostedOnboardingError(error) && error.code === "PRIVY_EMAIL_REQUIRED") {
+      throw hostedPrivyEmailLinkNotReady();
+    }
+    throw error;
+  }
 }
 
 export function verifyHostedPrivyAuthenticationProof(input: {
@@ -458,8 +557,19 @@ function buildHostedPrivyAuthIntentCookieValue(input: {
   maxAgeSeconds: number;
   value: string;
 }): string {
+  return buildCookieValue({
+    cookieName: HOSTED_PRIVY_AUTH_INTENT_COOKIE_NAME,
+    ...input,
+  });
+}
+
+function buildCookieValue(input: {
+  cookieName: string;
+  maxAgeSeconds: number;
+  value: string;
+}): string {
   return [
-    `${HOSTED_PRIVY_AUTH_INTENT_COOKIE_NAME}=${encodeURIComponent(input.value)}`,
+    `${input.cookieName}=${encodeURIComponent(input.value)}`,
     "Path=/",
     `Max-Age=${input.maxAgeSeconds}`,
     "HttpOnly",
@@ -472,6 +582,26 @@ function signHostedPrivyAuthIntent(encodedPayload: string, secret: string): stri
   return createHmac("sha256", secret)
     .update(`${HOSTED_PRIVY_AUTH_INTENT_DOMAIN}.${encodedPayload}`)
     .digest("base64url");
+}
+
+function readCookieValue(request: Request, cookieName: string): string | null {
+  const cookieHeader = request.headers.get("cookie");
+  if (!cookieHeader) return null;
+
+  for (const entry of cookieHeader.split(/;\s*/u)) {
+    const separatorIndex = entry.indexOf("=");
+    if (separatorIndex <= 0) continue;
+    if (entry.slice(0, separatorIndex).trim() !== cookieName) continue;
+
+    const value = entry.slice(separatorIndex + 1);
+    try {
+      return decodeURIComponent(value) || null;
+    } catch {
+      return value || null;
+    }
+  }
+
+  return null;
 }
 
 function requireIntentSecret(override: string | undefined): string {
@@ -496,6 +626,25 @@ function normalizeInviteCode(value: string | null | undefined): string | null {
   }
   const normalized = value.trim();
   return normalized || null;
+}
+
+function normalizeRequiredIntentSubject(value: string): string | null {
+  const normalized = value.trim();
+  return normalized || null;
+}
+
+function buildHostedPrivyEmailLinkIntentBinding(input: {
+  memberId: string;
+  privyUserId: string;
+}): string | null {
+  const memberId = normalizeRequiredIntentSubject(input.memberId);
+  const privyUserId = normalizeRequiredIntentSubject(input.privyUserId);
+  if (!memberId || !privyUserId) {
+    return null;
+  }
+  return `settings-email-link:${createHash("sha256")
+    .update(JSON.stringify({ memberId, privyUserId }))
+    .digest("base64url")}`;
 }
 
 function normalizeTimestamp(value: number | null | undefined): number | null {
@@ -530,6 +679,24 @@ function invalidHostedPrivyAuthProof() {
     code: "HOSTED_AUTH_PROOF_INVALID",
     message: "Request a fresh verification code and try again.",
     httpStatus: 401,
+  });
+}
+
+function invalidHostedPrivyEmailLinkProof() {
+  return hostedOnboardingError({
+    code: "HOSTED_EMAIL_LINK_PROOF_INVALID",
+    message: "Open the secure email window again to finish linking your email.",
+    httpStatus: 401,
+  });
+}
+
+function hostedPrivyEmailLinkNotReady() {
+  return hostedOnboardingError({
+    code: "PRIVY_EMAIL_NOT_READY",
+    message:
+      "Your verified email has not reached the server-side Privy session yet. Wait a moment and try again.",
+    httpStatus: 409,
+    retryable: true,
   });
 }
 

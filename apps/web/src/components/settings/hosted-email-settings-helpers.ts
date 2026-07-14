@@ -33,6 +33,7 @@ export interface HostedEmailSettingsDisplayState {
 export type HostedEmailSyncMode = "resync" | "verify";
 
 export interface HostedEmailSyncPresentation {
+  errorCode: string | null;
   errorMessage: string | null;
   successMessage: string | null;
   syncResult: HostedEmailSyncResult | null;
@@ -67,16 +68,28 @@ export async function syncHostedVerifiedEmailAddress(input: {
     });
 
     return {
+      errorCode: null,
       errorMessage: null,
       successMessage: formatHostedEmailSyncSuccessMessage(syncResult, input.mode),
       syncResult,
     };
   } catch (error) {
     return {
+      errorCode: error instanceof HostedEmailSyncError ? error.code : null,
       errorMessage: toHostedEmailSyncErrorMessage(error),
       successMessage: null,
       syncResult: null,
     };
+  }
+}
+
+export async function requestHostedEmailLinkIntent(): Promise<void> {
+  const payload = await requestHostedOnboardingJson<unknown>({
+    payload: {},
+    url: "/api/settings/email/link-intent",
+  });
+  if (!isRecord(payload) || payload.ok !== true) {
+    throw new Error("Murph could not open the secure email window. Try again.");
   }
 }
 

@@ -17,6 +17,13 @@ import { enqueueHostedMemberChannelsUpdatedTx } from "@/src/lib/hosted-onboardin
 import {
   extractHostedPrivyVerifiedEmailAccount,
 } from "@/src/lib/hosted-onboarding/privy-shared";
+import { readHostedPrivyUserById } from "@/src/lib/hosted-onboarding/privy";
+import {
+  buildHostedPrivyEmailLinkIntentClearCookie,
+  readHostedPrivyEmailLinkIntentFromRequest,
+  verifyHostedPrivyEmailLinkAuthenticationProof,
+  verifyHostedPrivyEmailLinkIntent,
+} from "@/src/lib/hosted-onboarding/privy-auth-intent";
 import { requireFreshActivePrivyMemberAuthForHostedAppSession } from "@/src/lib/hosted-onboarding/request-auth";
 import {
   HOSTED_ONBOARDING_TRANSACTION_OPTIONS,
@@ -34,7 +41,21 @@ export const POST = withJsonError(async (request: Request) => {
   const expectedEmailAddress = normalizeComparableEmail(
     typeof body.expectedEmailAddress === "string" ? body.expectedEmailAddress : null,
   );
-  const verifiedEmail = extractHostedPrivyVerifiedEmailAccount(auth.linkedAccounts);
+  const verifiedEmailLinkIntent = expectedEmailAddress === null
+    ? verifyHostedPrivyEmailLinkIntent({
+        intent: readHostedPrivyEmailLinkIntentFromRequest(request),
+        memberId: auth.member.id,
+        privyUserId: auth.identity.userId,
+      })
+    : null;
+  const emailLinkProof = verifiedEmailLinkIntent
+    ? verifyHostedPrivyEmailLinkAuthenticationProof({
+        intent: verifiedEmailLinkIntent,
+        verifiedPrivyUser: await readHostedPrivyUserById(auth.identity.userId),
+      })
+    : null;
+  const verifiedEmail = emailLinkProof?.credential
+    ?? extractHostedPrivyVerifiedEmailAccount(auth.linkedAccounts);
   const comparableVerifiedEmail = normalizeComparableEmail(verifiedEmail?.address ?? null);
 
   if (!verifiedEmail || (expectedEmailAddress && expectedEmailAddress !== comparableVerifiedEmail)) {
@@ -113,12 +134,16 @@ export const POST = withJsonError(async (request: Request) => {
     });
   }
 
-  return jsonOk({
+  const response = jsonOk({
     emailAddress: verifiedEmail.address,
     ok: true,
     runTriggered: channelSyncDispatch !== null,
     verifiedAt,
   });
+  if (emailLinkProof) {
+    response.headers.append("Set-Cookie", buildHostedPrivyEmailLinkIntentClearCookie());
+  }
+  return response;
 });
 
 async function signalHostedMailboxAppendBestEffort(input: {
