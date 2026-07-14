@@ -7345,6 +7345,7 @@ async function loadLocalServiceModule(input?: {
     intentId: string
     kind: 'failed' | 'not-requested' | 'queued' | 'sent'
     media?: AssistantDeliveryOutcome['media']
+    queuedIntentIds?: AssistantDeliveryOutcome['queuedIntentIds']
     session: AssistantSession
   }
   reactionOutcome?: AssistantDeliveryOutcome
