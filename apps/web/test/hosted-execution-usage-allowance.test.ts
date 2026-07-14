@@ -1089,6 +1089,27 @@ describe("accountHostedAiUsageForAllowanceTx", () => {
     });
   });
 
+  it("returns a neutral retryable notice for a thread-container crossing", async () => {
+    const tx = createAllowanceTx({
+      executeRaw: vi.fn<AllowanceExecuteRaw>(async () => 1),
+      hostedAiUsageUpdateMany: vi.fn(async () => ({ count: 1 })),
+      spentUsdMicros: 4_499_000n,
+      threadContainerLimitUsdMicros: 4_500_000n,
+    });
+
+    await expect(accountHostedAiUsageForAllowanceTx({
+      memberId: "member_123",
+      now: new Date("2026-03-29T12:00:05.000Z"),
+      record: BASE_USAGE_RECORD,
+      tx: tx as never,
+    })).resolves.toMatchObject({
+      userNotice: {
+        code: "thread_usage_limit_reached",
+        message: expect.not.stringContaining("https://"),
+      },
+    });
+  });
+
   it("returns a crossing candidate when the marker exists so the delivery claim resolves ownership", async () => {
     const tx = createAllowanceTx({
       executeRaw: vi.fn<AllowanceExecuteRaw>(async () => 1),
@@ -3243,6 +3264,27 @@ describe("readHostedAiUsageGate", () => {
     expect(prisma.hostedAiUsagePeriod.update).not.toHaveBeenCalled();
   });
 
+  it("keeps exhausted thread-container usage advisory and its notice neutral", async () => {
+    const prisma = createGatePrisma({
+      spentUsdMicros: 4_500_000n,
+      threadContainerLimitUsdMicros: 4_500_000n,
+    });
+
+    await expect(readHostedAiUsageGate({
+      memberId: "member_123",
+      now: "2026-03-29T12:00:00.000Z",
+      prisma: prisma as never,
+    })).resolves.toMatchObject({
+      allowed: true,
+      allowanceSource: "thread_container",
+      reason: "ai_usage_limit_exceeded",
+      userNotice: {
+        code: "thread_usage_limit_reached",
+        message: expect.not.stringContaining("https://"),
+      },
+    });
+  });
+
   it("allows a not_started container member through its active owner", async () => {
     // Containers are created not_started; their own billing must never be an
     // early denial — the container branch decides via the owner.
@@ -3557,6 +3599,7 @@ function createAllowanceTx(input: {
   pulseTrialPolicyVersion?: string | null;
   pulseTrialRedeemedAt?: Date | null;
   spentUsdMicros?: bigint;
+  threadContainerLimitUsdMicros?: bigint | null;
   trialEndsAt?: Date | null;
   trialStartedAt?: Date | null;
 }) {
@@ -3681,6 +3724,16 @@ function createAllowanceTx(input: {
         billingStatus: HostedBillingStatus.active,
         id: "member_123",
         suspendedAt: null,
+        threadContainer: input.threadContainerLimitUsdMicros == null
+          ? null
+          : {
+              monthlyUsageLimitUsdMicros: input.threadContainerLimitUsdMicros,
+              owner: {
+                accountGroupMemberships: [],
+                billingStatus: HostedBillingStatus.active,
+                suspendedAt: null,
+              },
+            },
       })),
     },
   };

@@ -1,7 +1,4 @@
 import type {
-  HostedExecutionLinqExternalThreadRouteAuthority,
-} from "@murphai/hosted-execution";
-import type {
   HostedActionApprovalConsumeRequest,
   HostedActionApprovalObservation,
   HostedActionApprovalRequest,
@@ -65,6 +62,9 @@ import type {
   HostedPhoneCallStartRequest,
   HostedPhoneCallStartResponse,
 } from "@murphai/hosted-execution/phone-calls";
+import type {
+  HostedPlanUsageStatus,
+} from "@murphai/hosted-execution/plan-usage";
 import type {
   HostedExecutionDeviceSyncConnectLinkResponse,
   HostedExecutionDeviceSyncDirtyAckRequest,
@@ -211,6 +211,7 @@ export interface HostedRuntimeLinqCurrentInboundProof {
 }
 
 export interface HostedRuntimeLinqRecentInboundEngagementRequest {
+  answeredMailboxItemIds?: readonly string[] | null;
   authorityCheckOnly?: boolean | null;
   currentInbound?: HostedRuntimeLinqCurrentInboundProof | null;
   directRecipientPhoneNumber?: string | null;
@@ -219,7 +220,6 @@ export interface HostedRuntimeLinqRecentInboundEngagementRequest {
   idempotencyKey?: string | null;
   intentId?: string | null;
   replyToMessageId?: string | null;
-  routeAuthority?: HostedExecutionLinqExternalThreadRouteAuthority | null;
   target: string | null;
   targetKind?: HostedRuntimeProviderTargetKind | null;
 }
@@ -244,10 +244,10 @@ export interface HostedRuntimeLinqDeliveryOutcomeRequest {
   fromPhoneNumber?: string | null;
   idempotencyKey?: string | null;
   intentId?: string | null;
+  lineLookupKey?: string | null;
   providerMessageId?: string | null;
   providerTarget?: string | null;
   providerThreadId?: string | null;
-  routeAuthority?: HostedExecutionLinqExternalThreadRouteAuthority | null;
   target: string | null;
   targetKind?: HostedRuntimeProviderTargetKind | null;
   threadIsDirect?: boolean | null;
@@ -363,6 +363,10 @@ export interface HostedRuntimeFamilyPlanToolPort {
   request(
     request: HostedRuntimeFamilyPlanToolRequest,
   ): Promise<HostedRuntimeFamilyPlanToolResponse>;
+}
+
+export interface HostedRuntimePlanUsageToolPort {
+  read(): Promise<HostedPlanUsageStatus>;
 }
 
 export interface HostedRuntimeGroupToolPort {
@@ -523,6 +527,7 @@ export interface HostedRuntimePlatform {
   logPort?: HostedRuntimeLogPort | null;
   mailboxPort?: HostedRuntimeMailboxPort | null;
   newsletterToolPort?: HostedRuntimeNewsletterToolPort | null;
+  planUsageToolPort?: HostedRuntimePlanUsageToolPort | null;
   phoneCalls?: HostedRuntimePhoneCallPort | null;
   productFeedbackPort?: HostedRuntimeProductFeedbackPort | null;
   runtimeLivenessIntervalMs?: number | null;

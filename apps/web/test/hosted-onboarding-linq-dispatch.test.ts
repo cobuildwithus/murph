@@ -7198,7 +7198,7 @@ describe("handleHostedOnboardingLinqWebhook", () => {
       routeProofEnabled: true,
     },
     {
-      label: "defers the home mutation but still admits inbound before consumer activation",
+      label: "commits the home while withholding proof before consumer activation",
       overQuota: false,
       routeProofEnabled: false,
     },
@@ -7332,7 +7332,7 @@ describe("handleHostedOnboardingLinqWebhook", () => {
       expectHostedLinqPointerSignalAccepted("evt_ai_usage_limit_current_chat");
       expectHostedLinqReadReceiptSent("chat_current_inbound");
     } else {
-      expect(readHostedMemberRoutingUpsertMock(prisma)).not.toHaveBeenCalled();
+      expect(readHostedMemberRoutingUpsertMock(prisma)).toHaveBeenCalledTimes(1);
       expect(mocks.enqueueHostedExecutionOutbox).toHaveBeenCalledWith(
         expect.objectContaining({
           envelope: expect.objectContaining({

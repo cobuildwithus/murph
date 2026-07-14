@@ -79,7 +79,7 @@ Current non-goals:
 - owning shared hosted execution contracts, worker topology, child-process launch policy, or side-effect codecs that belong in `@murphai/hosted-execution` or the host app
 - replacing the canonical vault or hosted bundle model
 
-`HostedRuntimePlatform` is the only hosted transport seam this package expects. Runtime code talks to semantic capabilities such as `artifactStore`, `effectsPort`, `deviceSyncPort`, `issueExportPort`, and `usageRecordPort`; it does not reconstruct internal URLs, inspect hostnames, or default Cloudflare worker topology.
+`HostedRuntimePlatform` is the only hosted transport seam this package expects. Runtime code talks to semantic capabilities such as `artifactStore`, `effectsPort`, `deviceSyncPort`, `issueExportPort`, `usageRecordPort`, and the read-only `planUsageToolPort`; it does not reconstruct internal URLs, inspect hostnames, default Cloudflare worker topology, or interpret billing state. The plan-usage port passes through to assistant context without mutation authority.
 
 The current implementation imports its local-only assistant runtime plus the canonical vault/inbox app surfaces directly from `@murphai/assistant-engine`, and explicit operator/setup owner subpaths such as `@murphai/operator-config/operator-config`, `@murphai/operator-config/hosted-assistant-config`, and `@murphai/operator-config/text/shared`. Shared hosted execution contracts remain owned by `@murphai/hosted-execution`; this package should not re-export that surface.
 
@@ -90,6 +90,11 @@ membership is owned by `@murphai/hosted-execution/assistant-capabilities`, so
 runtime launch/profile contracts do not re-export lower owner packages through
 legacy shims. Concrete Codex app-server process lifecycle hooks remain owned by
 `@murphai/assistant-engine/codex-lifecycle`.
+Hosted Codex keeps WebSockets enabled for the first provider attempt and sets
+`stream_max_retries = 0`, so a retryable stream failure activates Codex's native
+HTTPS fallback instead of spending another full stream-idle window on the same
+transport. The stream idle timeout remains 90 seconds, and HTTPS requests retain
+their separate request retry budget.
 Host apps may still decide which env profiles are enabled and how
 transport-specific URL rewriting works, but the profile key sets and runtime
 manifest shape come from this package.

@@ -33,6 +33,13 @@ wearable that writes to Apple Health (Apple Watch included — no OAuth
 integration exists for it today), and keeps members on their normal
 WHOOP-app-plus-Bluetooth flow.
 
+WHOOP does not document a supported deep link to its Apple Health integration
+screen. Product guidance must use the documented in-app path instead: **More →
+App Settings → Integrations → Apple Health → Connect**, then enable all desired
+categories and tap **Allow**. Do not invent a `whoop://` settings URL. After
+that step, members download Murph, sign in, and connect Apple Health in the
+Murph app.
+
 ## Strategic Posture (Hybrid)
 
 1. **Companion app is the backbone.** Baselines and challenge scoring use

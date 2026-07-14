@@ -73,8 +73,10 @@ describe("meal photo capture validation", () => {
   });
 
   it.each([
-    { label: "EXIF/XMP", marker: 0xe1 },
-    { label: "IPTC", marker: 0xed },
+    ...Array.from({ length: 16 }, (_, index) => ({
+      label: `APP${index}`,
+      marker: 0xe0 + index,
+    })),
     { label: "comment", marker: 0xfe },
   ])("rejects $label metadata before and between JPEG scans", async ({ marker }) => {
     const metadataSegment = Buffer.from([0xff, marker, 0x00, 0x04, 0x00, 0x00]);
@@ -181,7 +183,7 @@ function createMinimalJpeg(input: {
   const width = input.width ?? 3;
   return Buffer.from([
     0xff, 0xd8,
-    ...(input.headerSegment ?? Buffer.from([0xff, 0xe0, 0x00, 0x04, 0x00, 0x00])),
+    ...(input.headerSegment ?? Buffer.alloc(0)),
     0xff, 0xc0, 0x00, 0x0b, 0x08,
     (height >> 8) & 0xff, height & 0xff,
     (width >> 8) & 0xff, width & 0xff,

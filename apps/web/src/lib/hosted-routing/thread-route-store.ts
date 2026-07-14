@@ -264,12 +264,25 @@ export async function assertHostedThreadRouteEgressAuthority(input: {
   });
 
   if (route && route.containerMemberId === input.authority.containerMemberId) {
-    if (await readActiveHostedMemberAccess({
-      memberId: route.containerMemberId,
+    await assertActiveHostedThreadRouteContainerAccess({
+      containerMemberId: route.containerMemberId,
       prisma: input.prisma,
-    })) {
-      return route;
-    }
+    });
+    return route;
+  }
+
+  throw buildHostedThreadRouteEgressUnauthorizedError();
+}
+
+export async function assertActiveHostedThreadRouteContainerAccess(input: {
+  containerMemberId: string;
+  prisma: HostedOnboardingReadClient;
+}): Promise<void> {
+  if (await readActiveHostedMemberAccess({
+    memberId: input.containerMemberId,
+    prisma: input.prisma,
+  })) {
+    return;
   }
 
   throw buildHostedThreadRouteEgressUnauthorizedError();

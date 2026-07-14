@@ -997,35 +997,46 @@ export async function runHostedWorkspaceUntilIdleOrBudget(
   }
   const runnerStartedAtEpochMs = Date.now();
   let foregroundConversationWorkObserved = false;
-  const foregroundMailboxImportLoop = await withHostedCanonicalWritePort(
-    hostedCanonicalMailboxWritePort,
-    async () => startHostedForegroundConversationMailboxImportLoop({
-      checkpointRequestBuilder: checkpointRequestSession,
-      input,
-      onForegroundConversationWorkObserved: () => {
-        foregroundConversationWorkObserved = true;
-      },
-      checkpointCanonicalMailboxImportProgress,
-    }),
-  );
-  input.trackLocalWorkspaceMutationCompletion?.(foregroundMailboxImportLoop.completion);
-  let foregroundMailboxImportLoopStopped = false;
-  const stopForegroundMailboxImportLoop = async (): Promise<void> => {
-    if (foregroundMailboxImportLoopStopped) {
+  let foregroundRuntimeWakeObservedAfterStop = false;
+  let foregroundMailboxImportLoop:
+    ReturnType<typeof startHostedForegroundConversationMailboxImportLoop> | null = null;
+  const startForegroundMailboxImportLoop = async (): Promise<void> => {
+    if (foregroundMailboxImportLoop) {
       return;
     }
-    await foregroundMailboxImportLoop.stop({
+    foregroundRuntimeWakeObservedAfterStop = false;
+    foregroundMailboxImportLoop = await withHostedCanonicalWritePort(
+      hostedCanonicalMailboxWritePort,
+      async () => startHostedForegroundConversationMailboxImportLoop({
+        checkpointRequestBuilder: checkpointRequestSession,
+        input,
+        onForegroundConversationWorkObserved: () => {
+          foregroundConversationWorkObserved = true;
+        },
+        checkpointCanonicalMailboxImportProgress,
+      }),
+    );
+    input.trackLocalWorkspaceMutationCompletion?.(foregroundMailboxImportLoop.completion);
+  };
+  await startForegroundMailboxImportLoop();
+  const stopForegroundMailboxImportLoop = async (): Promise<void> => {
+    const activeLoop = foregroundMailboxImportLoop;
+    if (!activeLoop) {
+      return;
+    }
+    await activeLoop.stop({
       shouldAbortInFlightImport: () => foregroundConversationWorkObserved,
     });
-    foregroundMailboxImportLoopStopped = true;
+    if (foregroundMailboxImportLoop === activeLoop) {
+      foregroundMailboxImportLoop = null;
+    }
   };
-  let foregroundRuntimeWakeObservedAfterStop = false;
   const shouldYieldBackgroundMaintenance = (): boolean => {
     if (foregroundConversationWorkObserved || foregroundRuntimeWakeObservedAfterStop) {
       return true;
     }
 
-    if (!foregroundMailboxImportLoopStopped) {
+    if (foregroundMailboxImportLoop) {
       return false;
     }
 
@@ -1078,14 +1089,24 @@ export async function runHostedWorkspaceUntilIdleOrBudget(
     materializeWorkspaceArtifacts: input.materializeWorkspaceArtifacts ?? null,
     now: input.now,
     platform: input.platform,
-    prepareAutoReplyDelivery: async () =>
-      await prepareHostedAutoReplyDeliveryForWorkspaceRunner({
+    prepareAutoReplyDelivery: async () => {
+      const barrier = await prepareHostedAutoReplyDeliveryForWorkspaceRunner({
         checkpointRequestBuilder: checkpointRequestSession,
         checkpointCanonicalMailboxImportProgress,
         hostedCanonicalMailboxWritePort,
         input,
         stopForegroundMailboxImportLoop,
-      }),
+      });
+      if (!foregroundConversationWorkObserved && !input.signal?.aborted) {
+        // The delivery barrier needs a stable system-mailbox prefix, but it is
+        // not the end of foreground admission. Resume the existing
+        // conversation watcher so source-less system nudges are classified by
+        // actual mailbox progress instead of starving later maintenance.
+        await startForegroundMailboxImportLoop();
+        await foregroundMailboxImportLoop?.drainPendingWake();
+      }
+      return barrier;
+    },
     recordDeferredUsage(
       record: AssistantUsageRecord,
       noticeDeliveryTarget?: HostedRuntimeUsageNoticeDeliveryTarget | null,
@@ -1281,6 +1302,7 @@ function startHostedForegroundConversationMailboxImportLoop(input: {
   onForegroundConversationWorkObserved?: (() => void) | null;
 }): {
   completion: Promise<void>;
+  drainPendingWake(): Promise<void>;
   stop(options?: {
     shouldAbortInFlightImport?: (() => boolean) | null;
   }): Promise<void>;
@@ -1289,6 +1311,7 @@ function startHostedForegroundConversationMailboxImportLoop(input: {
   if (!runtimeWakeSignal) {
     return {
       completion: Promise.resolve(),
+      drainPendingWake: async () => undefined,
       stop: async () => undefined,
     };
   }
@@ -1305,6 +1328,7 @@ function startHostedForegroundConversationMailboxImportLoop(input: {
   }
   let wakeOrdinal = 0;
   let stopRequested = false;
+  let activeWakeCompletion: Promise<void> | null = null;
   let shouldAbortInFlightImportOnStop: (() => boolean) | null = null;
   const inFlightImportController = new AbortController();
   const abortInFlightImportAfterObservedWork = (): void => {
@@ -1346,6 +1370,11 @@ function startHostedForegroundConversationMailboxImportLoop(input: {
         continue;
       }
       wakeOrdinal += 1;
+      let resolveActiveWake = (): void => undefined;
+      const currentWakeCompletion = new Promise<void>((resolve) => {
+        resolveActiveWake = resolve;
+      });
+      activeWakeCompletion = currentWakeCompletion;
       const requestId = `${input.input.requestId}:runtime-wake:${wakeOrdinal}`;
       const waitResolvedAtEpochMs = Date.now();
       const latencyMilestones = createHostedForegroundMailboxImportLatencyMilestones({
@@ -1459,21 +1488,38 @@ function startHostedForegroundConversationMailboxImportLoop(input: {
           error,
           input: input.input,
         });
+      } finally {
+        resolveActiveWake();
+        if (activeWakeCompletion === currentWakeCompletion) {
+          activeWakeCompletion = null;
+        }
+      }
+      if (stopRequested) {
+        break;
       }
     }
   })();
   const completion = loop.catch(() => undefined);
+  const drainPendingWake = async (): Promise<void> => {
+    // A coalesced notification is delivered on a microtask. Let a wake that
+    // already exists enter the import loop before deciding whether there is
+    // anything to drain.
+    await new Promise<void>((resolve) => queueMicrotask(resolve));
+    await activeWakeCompletion;
+  };
 
   return {
     completion,
+    drainPendingWake,
     async stop(options) {
       stopRequested = true;
       shouldAbortInFlightImportOnStop = options?.shouldAbortInFlightImport ?? null;
       outerSignal?.removeEventListener("abort", abort);
+      abortInFlightImportAfterObservedWork();
+      await drainPendingWake();
       if (!waitController.signal.aborted) {
         waitController.abort(new DOMException("Foreground mailbox import loop stopped.", "AbortError"));
       }
-      abortInFlightImportAfterObservedWork();
       await completion;
     },
   };

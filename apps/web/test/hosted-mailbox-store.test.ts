@@ -6,6 +6,7 @@ import { describe, expect, it, vi } from "vitest";
 import {
   advanceHostedMailboxConsumedSeqByLane,
   appendHostedMailboxEnvelopeTx,
+  appendHostedMealPhotoMailboxEnvelopeTx,
   appendHostedMailboxItemTx,
   decodeHostedMailboxStoredPayload,
   fetchHostedMailboxPayload,
@@ -16,10 +17,13 @@ import {
   HOSTED_MAILBOX_PAYLOAD_SCHEMA,
   readHostedMailboxConsumedSeqByLane,
   readHostedMailboxEarliestConversationItem,
+  readHostedMailboxLiveItemById,
+  readHostedMailboxRecentLiveConversationItemIds,
   readHostedMailboxLatestPendingConversationItem,
   readHostedMailboxItemCheckpointById,
   readHostedMailboxMaxSeqByLane,
   readHostedMailboxPendingSystemItemsNeedAiUsageGate,
+  readHostedMailboxWakeAfterDedupeLockTx,
   resolveHostedMailboxRuntimeFetchLaneCursors,
   type HostedMailboxItemRow,
   type HostedMailboxPayloadRow,
@@ -66,6 +70,88 @@ function expectReadableConversationMailboxWhere(
     ]),
   });
 }
+
+describe("readHostedMailboxLiveItemById", () => {
+  it("applies the canonical explicit and retention expiry boundary", async () => {
+    const findFirst = vi.fn().mockResolvedValue(null);
+
+    await expect(readHostedMailboxLiveItemById({
+      availableAt: FIXED_NOW,
+      mailboxItemId: "mailbox-live-1",
+      prisma: {
+        hostedMailboxItem: { findFirst },
+      } as never,
+    })).resolves.toBeNull();
+
+    expect(findFirst).toHaveBeenCalledWith({
+      where: {
+        createdAt: {
+          gte: new Date(FIXED_NOW.getTime() - HOSTED_MAILBOX_TEST_RETENTION_MS),
+        },
+        id: "mailbox-live-1",
+        OR: [
+          { expiresAt: null },
+          { expiresAt: { gt: FIXED_NOW } },
+        ],
+      },
+    });
+  });
+});
+
+describe("readHostedMailboxRecentLiveConversationItemIds", () => {
+  it("returns only the member's recent live conversation rows newest first", async () => {
+    const findMany = vi.fn().mockResolvedValue([
+      { id: "mailbox-newer" },
+      { id: "mailbox-older" },
+    ]);
+
+    await expect(readHostedMailboxRecentLiveConversationItemIds({
+      availableAt: FIXED_NOW,
+      limit: 100,
+      prisma: {
+        hostedMailboxItem: { findMany },
+      } as never,
+      userId: "member_mailbox_1",
+    })).resolves.toEqual(["mailbox-newer", "mailbox-older"]);
+
+    expect(findMany).toHaveBeenCalledWith({
+      orderBy: {
+        laneSeq: "desc",
+      },
+      select: {
+        id: true,
+      },
+      take: 100,
+      where: {
+        createdAt: {
+          gte: new Date(FIXED_NOW.getTime() - HOSTED_MAILBOX_TEST_RETENTION_MS),
+        },
+        kind: "conversation.message",
+        lane: "conversation",
+        OR: [
+          { expiresAt: null },
+          { expiresAt: { gt: FIXED_NOW } },
+        ],
+        userId: "member_mailbox_1",
+      },
+    });
+  });
+
+  it.each([0, 101, 1.5])("rejects an invalid scan limit of %s", async (limit) => {
+    const findMany = vi.fn();
+
+    await expect(readHostedMailboxRecentLiveConversationItemIds({
+      availableAt: FIXED_NOW,
+      limit,
+      prisma: {
+        hostedMailboxItem: { findMany },
+      } as never,
+      userId: "member_mailbox_1",
+    })).rejects.toThrow(TypeError);
+
+    expect(findMany).not.toHaveBeenCalled();
+  });
+});
 
 describe("appendHostedMailboxItemTx", () => {
   it("allocates a lane sequence and stores small opaque payload ciphertext inline", async () => {
@@ -511,6 +597,24 @@ describe("appendHostedMailboxItemTx", () => {
 });
 
 describe("appendHostedMailboxEnvelopeTx", () => {
+  it("serializes post-append reconciliation before reading the mailbox claim", async () => {
+    const findUnique = vi.fn<HostedMailboxFindUnique>(async () => null);
+    const tx = createHostedMailboxTx({
+      hostedMailboxItem: createHostedMailboxItemDelegate({ findUnique }),
+      hostedMailboxPayload: createHostedMailboxPayloadDelegate(),
+    });
+
+    await expect(readHostedMailboxWakeAfterDedupeLockTx({
+      dedupeKey: "meal-photo:enrollment:capture",
+      tx,
+      userId: "member_mailbox_1",
+    })).resolves.toBeNull();
+
+    expect(vi.mocked(tx.$executeRaw).mock.invocationCallOrder[0]).toBeLessThan(
+      findUnique.mock.invocationCallOrder[0] ?? Number.MAX_SAFE_INTEGER,
+    );
+  });
+
   it("rejects a non-direct Linq envelope whose authority names another workspace", async () => {
     const hostedMailboxItem = createHostedMailboxItemDelegate();
     const hostedMailboxPayload = createHostedMailboxPayloadDelegate();
@@ -856,6 +960,99 @@ describe("appendHostedMailboxEnvelopeTx", () => {
     });
     expect(hostedMailboxItem.create).toHaveBeenCalledTimes(1);
     expect(hostedMailboxPayload.create).not.toHaveBeenCalled();
+  });
+
+  it("keeps the first staged object as the canonical exact-duplicate meal photo", async () => {
+    const rows: HostedMailboxItemRow[] = [];
+    const findUnique = vi.fn<HostedMailboxFindUnique>(async (args) => {
+      const where = readHostedMailboxFindUniqueWhere(args);
+      return rows.find((row) => (
+        row.userId === where.userId && row.dedupeKey === where.dedupeKey
+      )) ?? null;
+    });
+    const hostedMailboxItem = createHostedMailboxItemDelegate({
+      create: vi.fn<HostedMailboxCreate>(async (args) => {
+        const row = buildHostedMailboxItemRow(args.data);
+        rows.push(row);
+        return row;
+      }),
+      findUnique,
+    });
+    const tx = createHostedMailboxTx({
+      hostedMailboxItem,
+      hostedMailboxPayload: createHostedMailboxPayloadDelegate(),
+    });
+
+    const first = await appendHostedMealPhotoMailboxEnvelopeTx({
+      envelope: buildHostedMealPhotoEnvelope("meal-photo-attempt-a"),
+      tx,
+    });
+    const duplicate = await appendHostedMealPhotoMailboxEnvelopeTx({
+      envelope: buildHostedMealPhotoEnvelope("meal-photo-attempt-b"),
+      tx,
+    });
+
+    expect(first).toMatchObject({
+      claimedMealPhotoKey: "meal-photo-attempt-a",
+      dedupeConflict: false,
+      duplicate: false,
+      inserted: true,
+    });
+    expect(duplicate).toMatchObject({
+      claimedMealPhotoKey: "meal-photo-attempt-a",
+      dedupeConflict: false,
+      duplicate: true,
+      inserted: false,
+      item: { id: first.item.id },
+    });
+    expect(hostedMailboxItem.create).toHaveBeenCalledTimes(1);
+    expect(vi.mocked(tx.$executeRaw).mock.invocationCallOrder[0]).toBeLessThan(
+      findUnique.mock.invocationCallOrder[0] ?? Number.MAX_SAFE_INTEGER,
+    );
+  });
+
+  it("still rejects conflicting reuse of a meal-photo capture event", async () => {
+    const rows: HostedMailboxItemRow[] = [];
+    const hostedMailboxItem = createHostedMailboxItemDelegate({
+      create: vi.fn<HostedMailboxCreate>(async (args) => {
+        const row = buildHostedMailboxItemRow(args.data);
+        rows.push(row);
+        return row;
+      }),
+      findUnique: vi.fn<HostedMailboxFindUnique>(async (args) => {
+        const where = readHostedMailboxFindUniqueWhere(args);
+        return rows.find((row) => (
+          row.userId === where.userId && row.dedupeKey === where.dedupeKey
+        )) ?? null;
+      }),
+    });
+    const tx = createHostedMailboxTx({
+      hostedMailboxItem,
+      hostedMailboxPayload: createHostedMailboxPayloadDelegate(),
+    });
+
+    await appendHostedMealPhotoMailboxEnvelopeTx({
+      envelope: buildHostedMealPhotoEnvelope("meal-photo-attempt-a"),
+      tx,
+    });
+    const conflict = await appendHostedMealPhotoMailboxEnvelopeTx({
+      envelope: {
+        ...buildHostedMealPhotoEnvelope("meal-photo-attempt-b"),
+        mealPhoto: {
+          ...buildHostedMealPhotoEnvelope("meal-photo-attempt-b").mealPhoto,
+          sha256: "c".repeat(64),
+        },
+      },
+      tx,
+    });
+
+    expect(conflict).toMatchObject({
+      claimedMealPhotoKey: "meal-photo-attempt-b",
+      dedupeConflict: true,
+      duplicate: true,
+      inserted: false,
+    });
+    expect(hostedMailboxItem.create).toHaveBeenCalledTimes(1);
   });
 });
 
@@ -2396,6 +2593,22 @@ function buildHostedGroupEmailEnvelope(userId: string) {
     },
     occurredAt: "2026-04-26T00:00:00.000Z",
     userId,
+  };
+}
+
+function buildHostedMealPhotoEnvelope(mealPhotoKey: string) {
+  return {
+    eventId: `meal-photo:hmp_enrollment:${"a".repeat(64)}`,
+    kind: "meal-photo.captured" as const,
+    mealPhoto: {
+      byteLength: 4,
+      captureId: "a".repeat(64),
+      capturedAt: "2026-07-12T16:30:45.000Z",
+      mealPhotoKey,
+      sha256: "b".repeat(64),
+    },
+    occurredAt: "2026-07-12T16:30:45.000Z",
+    userId: "member_mailbox_1",
   };
 }
 

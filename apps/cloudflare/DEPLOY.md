@@ -115,10 +115,16 @@ exercise one inactive conversation replay and confirm mailbox metadata,
 sidecar fetch, the consumed-sequence acknowledgement, and provider usage all
 use the row's stored period key.
 
-## Linq Provider-Claim Protocol Rollout
+## Linq Provider-Claim Protocol
 
-The Linq provider-entry callback is an additive two-phase protocol. Roll it out
-in this order:
+Every Linq provider entry uses one Web-owned authorization and atomic dispatch
+claim immediately before the provider request. A separate authority-only
+preflight is limited to proactive home-route fallback and approved vault-file
+delivery, where Web may resolve or validate the concrete target before media
+work. Anchored replies, reactions, and voice memos do not make that redundant
+round trip.
+
+The original provider-claim rollout used this order:
 
 1. Deploy `apps/web` first. An old runner may omit `authorityCheckOnly`; Web
    keeps treating that legacy call as its provider-start claim for the bounded
@@ -137,6 +143,13 @@ the old fingerprint, then roll Web back. The old-runner/new-Web interval is
 supported only during the Web-first rollout: old runners ignore the additive
 response marker and retain their existing early-claim behavior.
 
+After that rollout has converged, removing obsolete runner authority hints from
+the engagement and post-send outcome payloads is independently deployable: Web
+ignores unknown legacy JSON fields, and both old and new runners use the same
+final provider claim. New runners may send an optional `lineLookupKey` solely
+for post-send line-health attribution; old Web ignores it, and new Web retains
+its existing fallback when an old runner omits it.
+
 ## One-Time Cloudflare Setup
 
 Before the first deploy:
@@ -145,7 +158,7 @@ Before the first deploy:
 2. Apply `apps/cloudflare/r2-bundles-lifecycle.json` to the real bundles buckets, or run the normal worker deploy path, which reapplies it before deploying the Worker.
 3. Decide the public Worker URL, either `*.workers.dev` or a custom domain.
 
-The checked-in lifecycle file now contains one narrow backstop rule for `hosted-email/messages/`: raw hosted-email blobs and their encrypted recovery refs become deletion-eligible after 24 hours, and R2 deletes eligible objects asynchronously. Current writes use the root-independent `hosted-email/messages/{storageNamespaceId}/` shape; recovery uses the append-failure structured log's user id plus the `.recovery.json` object under that prefix, without exposing raw message ids in object paths. Removed pre-launch root-derived raw-email paths are not read during this greenfield hard cut and are bounded by the same lifecycle prefix. Raw email cleanup is lifecycle-backed plus account-deletion cleanup; the rest of the encrypted objects in `BUNDLES` remain owner-cleaned or durable by design.
+The checked-in lifecycle file contains two narrow backstops. Raw hosted-email blobs and their encrypted recovery refs under `hosted-email/messages/` become deletion-eligible after 24 hours. Encrypted automatic meal-photo staging under `hosted-meal-photos/images/` becomes deletion-eligible after 31 days, one day beyond canonical mailbox recovery retention; successful imports still delete those objects immediately after checkpoint. R2 deletes eligible objects asynchronously. Raw email cleanup is lifecycle-backed plus account-deletion cleanup, and meal-photo staging is post-checkpoint deleted plus lifecycle- and account-deletion-backed; the rest of the encrypted objects in `BUNDLES` remain owner-cleaned or durable by design.
 
 ## Required GitHub Environment Vars
 
@@ -478,6 +491,8 @@ That command:
 The gradual container rollout keeps `rollout_active_grace_period` at 300 seconds and rolls runner instances through `10`, `25`, `50`, then `100` percent. The manual workflow exposes a `container_rollout` input; its production default is currently `immediate` because selector-scoped vault-share deliveries are unsafe under gradual runner rollout. Selecting `immediate` passes Wrangler's `--containers-rollout=immediate` flag and can interrupt active runner containers.
 During gradual rollout, Worker code and runner container state may disagree for the rollout window. A newly deployed Worker version can handle provider egress or internal-host traffic from an already-running warm runner process whose bundle, process env, or provider-credential shape was created before the deploy. Treat this as expected rollout behavior, not proof that traffic is reaching an old Worker version. Any PR that changes a Worker/container contract, runner env shape, hosted provider credential, internal host route, parser/toolchain path, or bundle-owned runtime assumption must document the compatibility window in its PR description and final `DEPLOYMENT CONCERNS:` handoff: whether old containers can safely talk to new Worker code, whether new containers can safely talk to old web/control-plane code, whether `container_rollout=immediate` is required, and which deploy-smoke or Workers Observability checks prove the fleet has converged.
 
+The first automatic meal-photo release must deploy Cloudflare Worker and runner support with `container_rollout=immediate` and pass managed-container smoke before enabling or deploying the web producer that appends `meal-photo.captured`. The first runner bundle that parses and imports that mailbox kind is the rollback floor while any meal-photo item can remain retained; do not roll below it independently. The web-to-Worker staging/deletion routes are additive, so the new Worker may safely precede web. After deployment, verify the runner-bundle fingerprint and absence of hosted mailbox parse failures before exercising the physical-device opt-in/upload smoke.
+
 The first shared preference-causal-sequence release uses an expand/switch rollout. Vercel predeploy first adds the nullable `causal_seq` column and unique index, then deploys the sequence-producing web build with `MURPH_ASSISTANT_PERSONALITY_CAUSAL_WRITES_ENABLED=0`. While that web gate is off, tone/voice events keep the legacy complete snapshot shape, so the old Cloudflare coalescing consumer remains safe. The post-deploy contract lane checks legacy work against the system-lane `consumed_seq` and adds the new-write constraint `NOT VALID`, allowing handled retained history. Deploy this Cloudflare worker and runner bundle with `container_rollout=immediate` and prove fleet convergence; its accepted-input causal binding is always installed, so no Cloudflare feature gate is required. Then enable the Vercel gate to switch Settings to sparse deltas and expose personality controls. After the new runtime can accept conversational personality writes or the web gate is enabled, do not roll either plane back independently.
 
 The first production release that writes `murph.inbox-capture.v2` records or
@@ -509,7 +524,7 @@ separate migration or forward runtime that removes the read-route dependency.
 
 Archived integration-ingest amendment receipts are a runner-bundle restore format change. The first production deploy that can emit `allowArchivedIntegrationIngestAmendment` hosted canonical write receipts must deploy Cloudflare/runner with `container_rollout=immediate`; Vercel/web has no ordering dependency for that change. Gradual container rollout is unsafe for the first deploy because warm old runner bundles can still restore a workspace checkpoint that carries a legacy or interrupted receipt-log ref without preserving the archived-amendment flag. New idle checkpoints snapshot the canonical vault state and omit pending receipt-log refs from committed workspace status, so the rollback floor only applies if a production workspace already has a committed archived-amendment receipt-log ref. After deployed managed-container smoke reports the new runner-bundle fingerprint, later ordinary deploys may return to gradual rollout. Post-deploy checks: run managed-container smoke and inspect hosted runtime restore logs for archived-ingest append-base mismatch or `INTEGRATION_INGEST_SHARD_ARCHIVED` errors.
 
-Personal-home Linq route-transition proof is also a producer/consumer contract change and requires consumer-first activation. Keep `HOSTED_ONBOARDING_LINQ_ROUTE_TRANSITION_PROOF_ENABLED=0` while deploying this Cloudflare/runner consumer with `container_rollout=immediate`, then require managed-container smoke to report the new runner-bundle fingerprint. While the flag is off, an inbound message on a replacement direct chat is still admitted and remains reply-anchored to that chat, but the prior home binding is retained so an old consumer cannot erase the only former-home proof. Use audited production evidence to identify exact retained direct-Linq input IDs whose reply targets are each former personal route, and run `pnpm --dir packages/assistant-engine repair:legacy-personal-home-routes -- --vault-root <vault-root> --input-id <audited-input-id> --apply` for the affected vaults. The command is idempotent, uses the existing atomic canonical repair, does not scan input history, and exits nonzero on failure. Enable `HOSTED_ONBOARDING_LINQ_ROUTE_TRANSITION_PROOF_ENABLED=1` only after the consumer fingerprint and migration are verified; subsequent admitted transitions atomically bind the current home and carry exact former/current proof. Disable the producer flag before any rollback below this consumer version. Quota-rejected inputs remain ahead of both binding and mailbox append and therefore cannot consume a transition.
+Personal-home Linq route-transition proof is also a producer/consumer contract change and requires consumer-first activation. Keep `HOSTED_ONBOARDING_LINQ_ROUTE_TRANSITION_PROOF_ENABLED=0` while deploying this Cloudflare/runner consumer with `container_rollout=immediate`, then require managed-container smoke to report the new runner-bundle fingerprint. While the flag is off, an admitted inbound message on a replacement direct chat immediately becomes the durable home and remains reply-anchored to that chat, but its mailbox event omits the former-home proof so an old consumer cannot silently consume that proof. Existing legacy automation routes on the former chat therefore require the bounded migration before producer activation: use audited production evidence to identify an exact retained direct-Linq input whose reply target is each former personal route, and run `pnpm --dir packages/assistant-engine repair:legacy-personal-home-routes -- --vault-root <vault-root> --input-id <audited-input-id> --apply` for the affected vaults. The command is idempotent, uses the existing atomic canonical repair and current durable home snapshot, does not scan input history, and exits nonzero on failure. Enable `HOSTED_ONBOARDING_LINQ_ROUTE_TRANSITION_PROOF_ENABLED=1` only after the consumer fingerprint and migration are verified; subsequent admitted transitions atomically bind the current home and carry exact former/current proof. Disable the producer flag before any rollback below this consumer version. Quota-rejected inputs remain ahead of both binding and mailbox append and therefore cannot consume a transition.
 
 Once Vercel/web can persist transition-proof inputs or current-route snapshots, this consumer commit is the hard Cloudflare/runner rollback floor. Do not roll Worker/runner below the floor while those records can exist. Post-deploy checks must prove a scheduled personal reminder resolves the current home route and a reply-anchored send remains on its matching inbound route.
 

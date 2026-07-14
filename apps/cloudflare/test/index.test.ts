@@ -334,6 +334,7 @@ describe("cloudflare worker routes", () => {
       "user-data-delete",
       "telegram-usage-limit-notice",
       "meal-photo-stage",
+      "meal-photo-delete",
       "browser-vault-session",
       "user-status",
     ]);
@@ -353,6 +354,7 @@ describe("cloudflare worker routes", () => {
       "user-data-delete",
       "telegram-usage-limit-notice",
       "meal-photo-stage",
+      "meal-photo-delete",
       "browser-vault-session",
       "user-status",
     ]);
