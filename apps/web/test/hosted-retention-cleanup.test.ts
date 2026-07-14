@@ -1,3 +1,4 @@
+import { Prisma } from "@prisma/client";
 import { describe, expect, it, vi } from "vitest";
 
 import {
@@ -178,6 +179,10 @@ describe("hosted retention cleanup", () => {
       ],
       take: 100,
       where: {
+        AND: [{
+          resultEncrypted: null,
+          resultJson: { equals: Prisma.DbNull },
+        }],
         analyzedAt: null,
         endedAt: null,
         OR: [
@@ -201,7 +206,6 @@ describe("hosted retention cleanup", () => {
           },
         ],
         provider: "retell",
-        resultJson: { equals: expect.anything() },
         updatedAt: {
           lt: new Date("2026-04-25T10:00:00.000Z"),
         },
@@ -214,9 +218,12 @@ describe("hosted retention cleanup", () => {
       ],
       take: 100,
       where: {
+        AND: [{
+          resultEncrypted: null,
+          resultJson: { equals: Prisma.DbNull },
+        }],
         endedAt: { lt: new Date("2026-04-25T10:00:00.000Z") },
         provider: "retell",
-        resultJson: { equals: expect.anything() },
         status: { in: ["ended", "failed"] },
       },
     });

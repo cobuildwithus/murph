@@ -27,10 +27,14 @@ const HOSTED_PHONE_CALL_FIELD_CLASSIFICATION = {
   memberId: operational("Opaque member ownership key used for authority and AAD."),
   provider: operational("Bounded provider discriminator."),
   providerCallId: operational("Opaque provider correlation identity."),
+  providerStartAttemptedAt: operational(
+    "Provider-start authority timestamp; contains no call content.",
+  ),
   requestKey: operational("Opaque idempotency identity."),
   resultEncrypted: encrypted("Member-private bounded final call analysis."),
   resultJson: legacyDebt(),
   status: operational("Bounded call lifecycle enum."),
+  transferOutcome: operational("Bounded provider transfer outcome."),
   updatedAt: operational("Row concurrency timestamp; contains no call content."),
 } satisfies Record<string, PrivateStorageClassification>;
 
@@ -100,13 +104,20 @@ function readHostedPhoneCallScalarFields(schema: string): string[] {
   if (!model) {
     throw new Error("Expected HostedPhoneCall Prisma model.");
   }
+  const modelNames = new Set(
+    [...schema.matchAll(/^model\s+(\w+)\s+\{/gmu)]
+      .map((match) => match[1])
+      .filter((name): name is string => Boolean(name)),
+  );
 
   return model
     .split("\n")
     .map((line) => line.trim())
     .filter((line) => line.length > 0 && !line.startsWith("//") && !line.startsWith("@@"))
-    .filter((line) => !line.includes("@relation"))
     .map((line) => line.split(/\s+/u))
+    .filter(([, type]) =>
+      type !== undefined
+      && !modelNames.has(type.replace(/[\[\]?]/gu, "")))
     .map(([field]) => field)
     .filter((field): field is string => Boolean(field));
 }
