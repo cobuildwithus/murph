@@ -324,10 +324,12 @@ can upload companion metadata.
 
    Receipt cardinality is connection plus `nightDate`; canonical cardinality is
    vault plus source (`whoop`) plus `nightDate`. Runtime import writes one
-   immutable summary-grain `hrv-rmssd` observation with a synthetic 12:00Z
-   `occurredAt`, no event `timeZone`, and no fabricated capture timestamp. This
-   beta wellness PRV estimate remains distinct from Apple HealthKit
-   `hrv-sdnn`, WHOOP's proprietary overnight HRV, and WHOOP API Recovery data.
+   immutable summary-grain `whoop-ble-overnight-prv-rmssd` observation with a
+   synthetic 12:00Z `occurredAt`, no event `timeZone`, and no fabricated
+   capture timestamp. It has no generic `hrv` or biomarker alias. This beta
+   wellness PRV estimate remains distinct from Apple HealthKit `hrv-sdnn` and
+   the existing selected daily provider `hrv-rmssd` series containing WHOOP
+   Recovery, Oura, or other provider evidence.
 
 ### Direct overnight PRV deployment order and rollback floor
 
