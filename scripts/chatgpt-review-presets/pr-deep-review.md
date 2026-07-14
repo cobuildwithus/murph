@@ -20,7 +20,7 @@ behavior with less complexity.
 - Simplification findings produce net deletion or remove meaningful concepts,
   branches, state, or ownership paths without replacement machinery.
 - Every material behavior or ownership change is necessary for the stated PR
-  outcome. Every non-obvious affected surface is disclosed under
+  outcome. Every non-obvious affected surface is also disclosed under
   `Non-obvious affected surfaces` with a concrete reason and regression proof.
 - The review stops after every issue in the current round's scope has an
   evidence-backed disposition. Zero findings is valid.
@@ -30,6 +30,7 @@ behavior with less complexity.
 Use `codebase.zip` as the sole repository-content source. It is a guarded
 snapshot of the pushed PR head and contains:
 
+- `review-gpt-pr-context/pr-body.md`, the PR description and intent contract
 - `review-gpt-pr-context/pr.diff`, the full current PR diff
 - `review-gpt-pr-context/changed-files.txt`, the current touched-file list
 - `review-gpt-pr-context/review-round.json`, the round number and exact reviewed
@@ -74,7 +75,8 @@ not actually resolve counts as `REVIEW_INDUCED`. Verify every claimed correction
 against its production path; a later round cannot return `PASS` while any prior
 accepted finding remains unresolved.
 
-Use the PR description as the intent contract, not as a source-code substitute.
+Use `review-gpt-pr-context/pr-body.md` as the intent contract, not as a
+source-code substitute.
 Treat the intended user-visible outcome as the requirement even when the diff
 temporarily gates, disables, fail-closes, scrubs, or stubs part of its wiring.
 If the converged implementation still prevents the stated outcome from
