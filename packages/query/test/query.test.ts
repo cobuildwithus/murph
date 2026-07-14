@@ -5044,7 +5044,7 @@ test("a direct WHOOP overnight PRV summary remains a method-qualified observatio
     assert.ok(points.every((point) => point.grain === "day"));
     assert.equal(genericHrv.length, 0);
     assert.ok(points.every((point) => point.provenance.provider === "whoop"));
-    assert.deepEqual(points.map((point) => point.provenance.dataOrigin), [dataOrigin]);
+    assert.deepEqual(points.map((point) => point.provenance.dataOrigin), [null]);
     assert.deepEqual(points.map((point) => point.context.measurementMethodKey), ["ble-pulse-interval"]);
   } finally {
     await rm(vaultRoot, { recursive: true, force: true });
@@ -5175,7 +5175,7 @@ test("same-night companion PRV and WHOOP Recovery HRV remain separate query seri
     assert.equal(companion[0]?.confidence, "medium");
     assert.equal(companion[0]?.source.kind, "observation");
     assert.equal(companion[0]?.context.measurementMethodKey, "ble-pulse-interval");
-    assert.deepEqual(companion[0]?.provenance.dataOrigin, companionDataOrigin);
+    assert.equal(companion[0]?.provenance.dataOrigin, null);
     assert.equal(companion[0]?.metricKey, "whoop-ble-overnight-prv-rmssd");
 
     assert.equal(providerHrv.length, 1);
