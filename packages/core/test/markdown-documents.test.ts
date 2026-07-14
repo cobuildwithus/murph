@@ -23,6 +23,7 @@ import {
   type AutomationRoute,
   type AutomationStatus,
 } from "../src/automation.ts";
+import { withHostedCanonicalWritePort } from "../src/operations/write-batch.ts";
 
 async function createTempVaultRoot(): Promise<string> {
   return fs.mkdtemp(path.join(os.tmpdir(), "murph-core-markdown-"));
