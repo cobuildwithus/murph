@@ -3,6 +3,7 @@ import { rm } from "node:fs/promises";
 import path from "node:path";
 
 import { test } from "vitest";
+import { COMPANION_HRV_RMSSD_RESOURCE } from "@murphai/contracts";
 import { openSqliteRuntimeDatabase } from "@murphai/runtime-state/node";
 
 import { SqliteDeviceSyncStore } from "../src/store.ts";
@@ -2578,6 +2579,56 @@ test("device sync store wakes expired final-attempt leases and dead-letters them
     assert.equal(deadJob?.status, "dead");
     assert.equal(deadJob?.lastErrorCode, "LEASE_EXPIRED");
     assert.equal(deadJob?.lastErrorMessage, "Device sync job lease expired before completion.");
+  } finally {
+    store.close();
+    await rm(tempDir, {
+      force: true,
+      recursive: true,
+    });
+  }
+});
+
+test("device sync store reclaims an expired retained companion lease on the same row past its attempt fence", async () => {
+  const tempDir = await makeTempDirectory("murph-device-syncd-store-expired-companion-lease");
+  const store = new SqliteDeviceSyncStore(path.join(tempDir, "state.sqlite"));
+
+  try {
+    const account = store.upsertAccount({
+      provider: "junction",
+      externalAccountId: "junction-expired-companion-lease",
+      displayName: "Junction",
+      scopes: [],
+      credential: {
+        credentialMetadata: {},
+        kind: "provider_config",
+        providerConfigKey: "junction",
+      },
+      connectedAt: "2026-04-07T00:00:00.000Z",
+    });
+    const job = store.enqueueJob({
+      accountId: account.id,
+      availableAt: "2026-04-07T00:00:00.000Z",
+      kind: "resource",
+      maxAttempts: 1,
+      payload: {
+        resource: COMPANION_HRV_RMSSD_RESOURCE,
+      },
+      provider: "junction",
+    });
+
+    const firstClaim = store.claimDueJob("worker-a", "2026-04-07T00:00:00.000Z", 60_000);
+    assert.equal(firstClaim?.id, job.id);
+    assert.equal(firstClaim?.attempts, 1);
+    assert.equal(firstClaim?.maxAttempts, 1);
+
+    const reclaimed = store.claimDueJob("worker-b", "2026-04-07T00:01:01.000Z", 60_000);
+    assert.equal(reclaimed?.id, job.id);
+    assert.equal(reclaimed?.status, "running");
+    assert.equal(reclaimed?.leaseOwner, "worker-b");
+    assert.equal(reclaimed?.attempts, 2);
+    assert.equal(reclaimed?.maxAttempts, 2);
+    assert.equal(store.completeJobIfOwned(job.id, "worker-b", "2026-04-07T00:01:02.000Z"), true);
+    assert.equal(store.getJobById(job.id)?.status, "succeeded");
   } finally {
     store.close();
     await rm(tempDir, {

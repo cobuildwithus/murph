@@ -61,12 +61,18 @@ function deadLetterExpiredExhaustedDeviceSyncJobs(database: DatabaseSync, now: s
       and lease_expires_at is not null
       and lease_expires_at <= ?
       and attempts >= max_attempts
+      and not (
+        provider = 'junction'
+        and kind = 'resource'
+        and coalesce(json_extract(payload_json, '$.resource'), '') = ?
+      )
   `).run(
     EXPIRED_JOB_LEASE_ERROR_CODE,
     EXPIRED_JOB_LEASE_ERROR_MESSAGE,
     now,
     now,
     now,
+    COMPANION_HRV_RMSSD_RESOURCE,
   );
 }
 
@@ -162,7 +168,14 @@ export function claimDueDeviceSyncJob(
           candidate.status = 'running'
           and candidate.lease_expires_at is not null
           and candidate.lease_expires_at <= ?
-          and candidate.attempts < candidate.max_attempts
+          and (
+            candidate.attempts < candidate.max_attempts
+            or (
+              candidate.provider = 'junction'
+              and candidate.kind = 'resource'
+              and coalesce(json_extract(candidate.payload_json, '$.resource'), '') = ?
+            )
+          )
         )
       )
       and not exists (
@@ -176,23 +189,28 @@ export function claimDueDeviceSyncJob(
       )
       order by candidate.priority desc, candidate.available_at asc, candidate.created_at asc, candidate.id asc
       limit 1
-    `).get(now, now, now) as StoredJobRow | undefined;
+    `).get(now, now, COMPANION_HRV_RMSSD_RESOURCE, now) as StoredJobRow | undefined;
 
     if (!row) {
       return null;
     }
 
     const leaseExpiresAt = new Date(Date.parse(now) + leaseMs).toISOString();
+    const isExpiredRetainedCompanionHrv = row.status === "running"
+      && row.provider === "junction"
+      && row.kind === "resource"
+      && maybeParseJsonObject(row.payload_json)?.resource === COMPANION_HRV_RMSSD_RESOURCE;
     database.prepare(`
       update device_job
       set status = 'running',
           lease_owner = ?,
           lease_expires_at = ?,
+          max_attempts = case when ? = 1 then max(max_attempts, attempts + 1) else max_attempts end,
           attempts = attempts + 1,
           started_at = coalesce(started_at, ?),
           updated_at = ?
       where id = ?
-    `).run(workerId, leaseExpiresAt, now, now, row.id);
+    `).run(workerId, leaseExpiresAt, isExpiredRetainedCompanionHrv ? 1 : 0, now, now, row.id);
 
     return getDeviceSyncJobById(database, row.id);
   });
