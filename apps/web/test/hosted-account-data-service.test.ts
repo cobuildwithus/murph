@@ -1210,6 +1210,65 @@ describe("deleteHostedAccountData", () => {
       .toBeLessThan(operationOrder.indexOf("executeRaw"));
   });
 
+  it.each(["paid", "void", "uncollectible"] as const)(
+    "settles cancel-only Family compensation with a zero-paid terminal %s invoice",
+    async (invoiceStatus) => {
+      const receipt = await makeHostedFamilyCompensationReceiptForDeletionTest({
+        effectId: `evt_family_delete_zero_paid_${invoiceStatus}`,
+        encryptionMemberId: "member_123",
+        invoiceId: null,
+        subscriptionId: `sub_family_delete_zero_paid_${invoiceStatus}`,
+      });
+      const stripe = {
+        customers: { del: vi.fn() },
+        invoices: {
+          list: vi.fn(async () => ({
+            data: [{
+              amount_paid: 0,
+              id: `in_family_delete_zero_paid_${invoiceStatus}`,
+              status: invoiceStatus,
+            }],
+            has_more: false,
+          })),
+        },
+        subscriptions: {
+          cancel: vi.fn(async () => ({ status: "canceled" })),
+          retrieve: vi.fn(async () => ({ status: "active" })),
+        },
+      };
+      serviceMocks.getHostedOnboardingStripe.mockReturnValue(
+        withStripeDeletionDiscovery(stripe),
+      );
+      const prisma = createHostedAccountDeletionPrismaForTest({
+        onTransaction: () => undefined,
+        stripeEventRows: [receipt],
+      });
+
+      const result = await deleteHostedAccountData({
+        memberId: "member_123",
+        prisma,
+        request: new Request("https://join.example.test/settings"),
+      });
+
+      expect(stripe.subscriptions.cancel).toHaveBeenCalledWith(
+        `sub_family_delete_zero_paid_${invoiceStatus}`,
+        {},
+        {
+          idempotencyKey:
+            `hosted-family-payment-conflict-cancel:evt_family_delete_zero_paid_${invoiceStatus}`,
+        },
+      );
+      expect(receipt).toMatchObject({
+        familyPaymentConflictCompensationAcceptedAt: null,
+        familyPaymentConflictCompensationSubscriptionIdEncrypted: null,
+        familyPaymentConflictCompensationSubscriptionLookupKey: null,
+        status: "completed",
+      });
+      expect(result.deletedCounts["prisma.hosted_stripe_event_family_compensation"])
+        .toBe(1);
+    },
+  );
+
   it("preserves local rows when accepted Family compensation settlement fails", async () => {
     const deleteCalls: HostedAccountDeletionPrismaDeleteCall[] = [];
     const receipt = await makeHostedFamilyCompensationReceiptForDeletionTest({

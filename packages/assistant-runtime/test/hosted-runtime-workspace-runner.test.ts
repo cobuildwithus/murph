@@ -181,6 +181,7 @@ describe("runHostedWorkspaceUntilIdleOrBudget", () => {
         event: createStoredAssistantInputEventForMailboxItem(
           createMailboxItem({ id: "mailbox_folded_causal_first", laneSeq: "1" }),
           "first preference request",
+          "10",
         ),
         vault: vaultRoot,
       });
@@ -188,6 +189,7 @@ describe("runHostedWorkspaceUntilIdleOrBudget", () => {
         event: createStoredAssistantInputEventForMailboxItem(
           createMailboxItem({ id: "mailbox_folded_causal_second", laneSeq: "2" }),
           "folded same-actor follow-up",
+          "20",
         ),
         vault: vaultRoot,
       });
@@ -197,7 +199,7 @@ describe("runHostedWorkspaceUntilIdleOrBudget", () => {
           assistantInputIds: [first.inputId, folded.inputId],
           vaultRoot,
         }),
-        "0",
+        "10",
       );
     } finally {
       await rm(vaultRoot, { force: true, recursive: true });
@@ -8478,7 +8480,11 @@ function createAssistantUsageRecord(
   };
 }
 
-function createStoredAssistantInputEventForMailboxItem(item: HostedMailboxItem, text: string) {
+function createStoredAssistantInputEventForMailboxItem(
+  item: HostedMailboxItem,
+  text: string,
+  causalSeq?: string,
+) {
   return {
     content: {
       text,
@@ -8506,6 +8512,7 @@ function createStoredAssistantInputEventForMailboxItem(item: HostedMailboxItem, 
       threadId: "thread_1",
     },
     sourceRef: {
+      ...(causalSeq === undefined ? {} : { causalSeq }),
       dedupeKey: item.dedupeKey,
       eventId: item.dedupeKey,
       itemId: item.id,

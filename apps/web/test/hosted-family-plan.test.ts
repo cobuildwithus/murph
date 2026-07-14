@@ -3225,6 +3225,70 @@ describe("hosted Family plan", () => {
     }));
   });
 
+  it("leaves direct billing unchanged when the atomic Family subscription update fails", async () => {
+    const group = {
+      billingStatus: HostedBillingStatus.not_started,
+      id: "hbag_family",
+      ownerMemberId: "member_owner",
+      suspendedAt: null,
+    };
+    const tx = createTxMock({
+      billedSeatCount: null,
+      group,
+    });
+    tx.hostedAccountGroupBillingRef.findUnique.mockResolvedValueOnce(null);
+    tx.hostedMember.findUnique.mockResolvedValue({
+      billingStatus: HostedBillingStatus.active,
+      suspendedAt: null,
+    });
+    tx.hostedMemberBillingRef.findUnique.mockResolvedValue(createMemberBillingRefMock());
+
+    const prisma = tx as FamilyPlanTxMock & {
+      $transaction: ReturnType<typeof vi.fn>;
+    };
+    prisma.$transaction = vi.fn((callback) => callback(tx));
+    const directSubscription = makeFamilyStripeSubscription({
+      customerId: "cus_direct",
+      itemQuantity: 1,
+      metadata: {
+        billingPlanCode: "launch_monthly",
+        checkoutOffer: "standard",
+        memberId: "member_owner",
+      },
+      priceId: "price_pulse",
+      subscriptionId: "sub_direct",
+    });
+    const subscriptionUpdate = vi.fn().mockRejectedValue(
+      new Error("Stripe unavailable"),
+    );
+    runtimeMocks.requireHostedStripeApi.mockReturnValue({
+      checkout: {
+        sessions: {
+          create: vi.fn(),
+        },
+      },
+      subscriptions: {
+        retrieve: vi.fn().mockResolvedValue(directSubscription),
+        update: subscriptionUpdate,
+      },
+    });
+
+    await expect(createHostedFamilyBillingCheckout({
+      groupId: "hbag_family",
+      ownerMemberId: "member_owner",
+      prisma: prisma as never,
+      seatCount: 2,
+    })).rejects.toMatchObject({
+      code: "HOSTED_FAMILY_DIRECT_PAID_STRIPE_UNAVAILABLE",
+      retryable: true,
+    });
+
+    expect(subscriptionUpdate).toHaveBeenCalledOnce();
+    expect(tx.hostedAccountGroupBillingRef.upsert).not.toHaveBeenCalled();
+    expect(tx.hostedMember.update).not.toHaveBeenCalled();
+    expect(tx.hostedMemberBillingRef.updateMany).not.toHaveBeenCalled();
+  });
+
   it("rechecks owner suspension under the upgrade lock before mutating Stripe", async () => {
     const group = {
       billingStatus: HostedBillingStatus.not_started,

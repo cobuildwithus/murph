@@ -1812,6 +1812,46 @@ describe("hosted Stripe event reconciliation", () => {
     expect(mocks.applyStripeCheckoutCompleted).not.toHaveBeenCalled();
   });
 
+  it("promotes a pre-existing cancel-only owner from the sibling paid invoice", async () => {
+    const prisma = createStripeEventPrismaHarness();
+    const ownerEvent = makeSubscriptionEvent("customer.subscription.created");
+    ownerEvent.id = "evt_family_invoice_compensation_owner";
+    await recordHostedStripeEvent({ event: ownerEvent, prisma: prisma.client });
+    await acceptTestFamilyPaymentConflictCompensation({
+      compensation: {
+        effectId: ownerEvent.id,
+        invoiceId: null,
+        subscriptionId: "sub_123",
+      },
+      prisma: prisma.client,
+    });
+    prisma.rows[0]!.processedAt = new Date();
+    prisma.rows[0]!.status = HostedStripeEventStatus.completed;
+
+    const invoiceEvent = makeInvoicePaidEvent({
+      id: "evt_family_sibling_invoice_paid",
+      invoiceId: "in_family_sibling_exact",
+    });
+    mocks.stripe.events.retrieve.mockResolvedValue(invoiceEvent);
+    await recordHostedStripeEvent({ event: invoiceEvent, prisma: prisma.client });
+
+    await expect(reconcileHostedStripeEventById({
+      eventId: invoiceEvent.id,
+      prisma: prisma.client,
+    })).resolves.toMatchObject({ status: "completed" });
+
+    expect(mocks.executeHostedFamilyPaymentConflictCompensation).toHaveBeenCalledWith({
+      effectId: ownerEvent.id,
+      invoiceId: "in_family_sibling_exact",
+      subscriptionId: "sub_123",
+    });
+    expect(prisma.rows[0]).toEqual(expect.objectContaining({
+      familyPaymentConflictCompensationInvoiceIdEncrypted: expect.any(String),
+      familyPaymentConflictCompensationInvoiceLookupKey: expect.any(String),
+    }));
+    expect(mocks.applyStripeInvoicePaid).not.toHaveBeenCalled();
+  });
+
   it("keeps attempt-six invoice discovery failures pending after matching an accepted owner", async () => {
     const prisma = createStripeEventPrismaHarness();
     const ownerEvent = makeSubscriptionEvent("customer.subscription.created");
