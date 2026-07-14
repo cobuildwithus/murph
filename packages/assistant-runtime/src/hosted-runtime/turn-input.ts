@@ -15,14 +15,10 @@ import {
 import {
   readAssistantAutomationState,
 } from "@murphai/assistant-engine/assistant-state";
-import {
-  hasCompleteAssistantAutoReplyTerminalEvidence,
-} from "@murphai/assistant-engine/assistant-automation";
 import { assistantPreferenceCausalSeqSchema } from "@murphai/contracts";
 
 import {
   compactHostedPendingAssistantInputIds,
-  hasHostedPendingAssistantInputRouteProof,
   isHostedPendingAssistantInputStillReplyable,
   readExistingHostedPendingAssistantInputIds,
 } from "./pending-input-index.ts";
@@ -305,21 +301,7 @@ async function readHostedReplyablePendingAssistantInputEvents(input: {
       event,
     })
   );
-  const terminalRouteProofInputIds = new Set(
-    (await Promise.all(replyableEvents.map(async (event) =>
-      hasHostedPendingAssistantInputRouteProof(event)
-      && await hasCompleteAssistantAutoReplyTerminalEvidence({
-        captureId: event.projection.captureId,
-        inputId: event.inputId,
-        vault: input.vaultRoot,
-      })
-        ? event.inputId
-        : null
-    ))).filter((inputId): inputId is string => inputId !== null),
-  );
-  return replyableEvents.filter((event) =>
-    !terminalRouteProofInputIds.has(event.inputId)
-  );
+  return replyableEvents;
 }
 
 function filterHostedAssistantInputCandidates(input: {
