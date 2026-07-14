@@ -91,9 +91,6 @@ import {
   resolveHostedPendingAssistantInputStatePath,
 } from "../src/hosted-runtime/pending-input-index.ts";
 import {
-  resolveHostedPreferenceCausalSeqForSelectedInput,
-} from "../src/hosted-runtime/turn-input.ts";
-import {
   restoreHostedWorkspaceRuntimeJobWorkspace,
 } from "../src/hosted-runtime/workspace-restore.ts";
 import {
@@ -143,35 +140,6 @@ const TEST_BROWSER_VAULT_REPLICA_REF = {
 } as const;
 
 describe("runHostedWorkspaceUntilIdleOrBudget", () => {
-  test("withholds causal authority from a stored input without a normalized sequence", async () => {
-    const vaultRoot = await mkdtemp(path.join(tmpdir(), "murph-runner-legacy-causal-seq-"));
-
-    try {
-      await initializeVault({ createdAt: TEST_NOW, vaultRoot });
-      const mailboxItem = createMailboxItem({
-        id: "mailbox_legacy_causal_seq",
-        laneSeq: "1",
-      });
-      const stored = await upsertAssistantInputEvent({
-        event: createStoredAssistantInputEventForMailboxItem(
-          mailboxItem,
-          "legacy preference request",
-        ),
-        vault: vaultRoot,
-      });
-
-      assert.equal(
-        await resolveHostedPreferenceCausalSeqForSelectedInput({
-          assistantInputIds: [stored.inputId],
-          vaultRoot,
-        }),
-        null,
-      );
-    } finally {
-      await rm(vaultRoot, { force: true, recursive: true });
-    }
-  });
-
   test("coalesced runtime wakes preserve first and latest pending notify timestamps", () => {
     vi.useFakeTimers();
     const firstNotifyAt = new Date("2026-04-26T00:00:01.000Z");

@@ -169,9 +169,6 @@ import {
   collectHostedPendingAssistantInputMediaRetentionProtections,
 } from "./hosted-runtime/pending-input-index.ts";
 import {
-  resolveHostedPreferenceCausalSeqForSelectedInput,
-} from "./hosted-runtime/turn-input.ts";
-import {
   computeHostedRuntimeElapsedMs,
 } from "./hosted-runtime/utils.ts";
 import {
@@ -1663,7 +1660,6 @@ export async function runHostedWorkspaceRuntimeJobInProcess(
       });
       try {
         let currentAssistantPersonalizationInputId: string | null = null;
-        let currentPreferenceCausalSeq: string | null = null;
         const passResult = await hostedCliBridge.runWithInvocation(
           {
             currentDeliveryRoute: () => currentOperationDeliveryRoute,
@@ -1694,7 +1690,6 @@ export async function runHostedWorkspaceRuntimeJobInProcess(
               },
               runAssistantPhase: async (phaseInput) => {
                 currentAssistantPersonalizationInputId = null;
-                currentPreferenceCausalSeq = null;
                 try {
                   return await (
                     options.runAssistantPhase ?? runHostedWorkspaceAssistantPhase
@@ -1702,8 +1697,6 @@ export async function runHostedWorkspaceRuntimeJobInProcess(
                     ...phaseInput,
                     currentAssistantPersonalizationInputId: () =>
                       currentAssistantPersonalizationInputId,
-                    currentAssistantPreferenceCausalSeq: () =>
-                      currentPreferenceCausalSeq,
                     currentDeliveryRouteScope,
                     deviceSyncWorkspaceWakeHandled: deviceSyncWorkspaceWakeHandledUntilCheckpoint,
                     request: input.request,
@@ -1715,16 +1708,10 @@ export async function runHostedWorkspaceRuntimeJobInProcess(
                         acceptedInputs.length === 1
                           ? acceptedInputs[0]?.id ?? null
                           : null;
-                      currentPreferenceCausalSeq =
-                        await resolveHostedPreferenceCausalSeqForSelectedInput({
-                          assistantInputIds: acceptedInputs.map((item) => item.id),
-                          vaultRoot: restored.vaultRoot,
-                        });
                       currentAssistantPersonalizationInputId =
                         assistantPersonalizationInputId;
                       return () => {
                         currentAssistantPersonalizationInputId = null;
-                        currentPreferenceCausalSeq = null;
                       };
                     },
                     stagedDirtyAcks: stagedDeviceSyncDirtyAcks,
@@ -1733,7 +1720,6 @@ export async function runHostedWorkspaceRuntimeJobInProcess(
                   });
                 } finally {
                   currentAssistantPersonalizationInputId = null;
-                  currentPreferenceCausalSeq = null;
                 }
               },
               signal: passSignal,

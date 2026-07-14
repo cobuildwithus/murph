@@ -1,10 +1,12 @@
 import "server-only";
 
-import type {
-  HostedRuntimeAssistantPersonalizationToolAuthority,
-  HostedRuntimeAssistantPersonalizationSnapshot,
-  HostedRuntimeAssistantPersonalizationToolRequest,
-  HostedRuntimeAssistantPersonalizationToolResponse,
+import {
+  HOSTED_RUNTIME_ASSISTANT_PREFERENCE_CAUSAL_SEQ_ACTION,
+  type HostedRuntimeAssistantPreferenceCausalSeqResponse,
+  type HostedRuntimeAssistantPersonalizationToolAuthority,
+  type HostedRuntimeAssistantPersonalizationSnapshot,
+  type HostedRuntimeAssistantPersonalizationToolRequest,
+  type HostedRuntimeAssistantPersonalizationToolResponse,
 } from "@murphai/hosted-execution/assistant-personalization";
 import {
   assistantPersonalityCausalWritesEnabled,
@@ -29,6 +31,7 @@ import {
 } from "@/src/lib/hosted-onboarding/shared";
 import {
   readHostedMailboxPreferenceCausalSeqByAssistantInputIdTx,
+  type HostedMailboxStoreClient,
 } from "@/src/lib/hosted-mailbox/store";
 
 type HostedRuntimeAssistantPersonalizationUpdateResponse = Extract<
@@ -39,6 +42,23 @@ type HostedRuntimeAssistantPersonalizationUpdateResponse = Extract<
 interface HostedRuntimeAssistantPersonalizationTransactionResult {
   dispatch: { mailboxItemId: string } | null;
   response: HostedRuntimeAssistantPersonalizationUpdateResponse;
+}
+
+export async function resolveHostedRuntimeAssistantPreferenceCausalSeq(input: {
+  authority: HostedRuntimeAssistantPersonalizationToolAuthority;
+  memberId: string;
+}): Promise<HostedRuntimeAssistantPreferenceCausalSeqResponse> {
+  const prisma = getPrisma();
+  return prisma.$transaction(async (tx) => ({
+    action: HOSTED_RUNTIME_ASSISTANT_PREFERENCE_CAUSAL_SEQ_ACTION,
+    result: {
+      causalSeq: await requireHostedRuntimeAssistantPreferenceCausalSeq({
+        assistantInputId: input.authority.assistantInputId,
+        memberId: input.memberId,
+        prisma: tx,
+      }),
+    },
+  }), HOSTED_ONBOARDING_TRANSACTION_OPTIONS);
 }
 
 export async function handleHostedRuntimeAssistantPersonalizationTool(input: {
@@ -72,25 +92,12 @@ export async function handleHostedRuntimeAssistantPersonalizationTool(input: {
   }
   const prisma = getPrisma();
   const transactionResult = await prisma.$transaction(async (tx) => {
-    await lockHostedMemberRow(tx, input.memberId);
-    await lockHostedMemberSponsoredAccessRows(tx, input.memberId);
-    await assertActiveHostedMemberAccessAllowed({
-      memberId: input.memberId,
-      prisma: tx,
-    });
-    await assertHostedMemberAssistantPersonalizationEligible({
-      memberId: input.memberId,
-      prisma: tx,
-    });
     const preferenceCausalSeq =
-      await readHostedMailboxPreferenceCausalSeqByAssistantInputIdTx({
+      await requireHostedRuntimeAssistantPreferenceCausalSeq({
         assistantInputId: authority.assistantInputId,
         memberId: input.memberId,
         prisma: tx,
       });
-    if (preferenceCausalSeq === null) {
-      throw new TypeError("Assistant personalization input authority is invalid.");
-    }
     const styleResult = request.tone !== undefined || request.voice !== undefined
       ? await upsertHostedMemberAssistantPreferencesTx({
           causalOrigin: "turn",
@@ -149,6 +156,32 @@ export async function handleHostedRuntimeAssistantPersonalizationTool(input: {
   }
 
   return transactionResult.response;
+}
+
+async function requireHostedRuntimeAssistantPreferenceCausalSeq(input: {
+  assistantInputId: string;
+  memberId: string;
+  prisma: HostedMailboxStoreClient;
+}): Promise<string> {
+  await lockHostedMemberRow(input.prisma, input.memberId);
+  await lockHostedMemberSponsoredAccessRows(input.prisma, input.memberId);
+  await assertActiveHostedMemberAccessAllowed({
+    memberId: input.memberId,
+    prisma: input.prisma,
+  });
+  await assertHostedMemberAssistantPersonalizationEligible({
+    memberId: input.memberId,
+    prisma: input.prisma,
+  });
+  const causalSeq = await readHostedMailboxPreferenceCausalSeqByAssistantInputIdTx({
+    assistantInputId: input.assistantInputId,
+    memberId: input.memberId,
+    prisma: input.prisma,
+  });
+  if (causalSeq === null) {
+    throw new TypeError("Assistant personalization input authority is invalid.");
+  }
+  return causalSeq;
 }
 
 async function readHostedAssistantPersonalization(

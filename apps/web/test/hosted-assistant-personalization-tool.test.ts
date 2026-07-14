@@ -47,6 +47,7 @@ vi.mock("@/src/lib/hosted-mailbox/store", () => ({
 import { hostedOnboardingError } from "@/src/lib/hosted-onboarding/errors";
 import {
   handleHostedRuntimeAssistantPersonalizationTool,
+  resolveHostedRuntimeAssistantPreferenceCausalSeq,
 } from "@/src/lib/hosted-execution/assistant-personalization-tool";
 
 describe("hosted assistant personalization tool owner adapter", () => {
@@ -142,6 +143,61 @@ describe("hosted assistant personalization tool owner adapter", () => {
     });
     expect(mocks.transaction).not.toHaveBeenCalled();
     expect(mocks.upsertHostedMemberAssistantPreferencesTx).not.toHaveBeenCalled();
+  });
+
+  it("resolves a member-bound causal sequence under the canonical access locks", async () => {
+    await expect(resolveHostedRuntimeAssistantPreferenceCausalSeq({
+      authority: { assistantInputId: "ain_66666666666666666666666666666666" },
+      memberId: "member_personalization_1",
+    })).resolves.toEqual({
+      action: "resolve_preference_causal_seq",
+      result: { causalSeq: "42" },
+    });
+
+    expect(mocks.lockHostedMemberRow).toHaveBeenCalledWith(
+      { tx: true },
+      "member_personalization_1",
+    );
+    expect(mocks.lockHostedMemberSponsoredAccessRows).toHaveBeenCalledWith(
+      { tx: true },
+      "member_personalization_1",
+    );
+    expect(mocks.lockHostedMemberRow.mock.invocationCallOrder[0]).toBeLessThan(
+      mocks.lockHostedMemberSponsoredAccessRows.mock.invocationCallOrder[0]!,
+    );
+    expect(
+      mocks.lockHostedMemberSponsoredAccessRows.mock.invocationCallOrder[0],
+    ).toBeLessThan(
+      mocks.assertActiveHostedMemberAccessAllowed.mock.invocationCallOrder[0]!,
+    );
+    expect(
+      mocks.assertActiveHostedMemberAccessAllowed.mock.invocationCallOrder[0],
+    ).toBeLessThan(
+      mocks.assertHostedMemberAssistantPersonalizationEligible
+        .mock.invocationCallOrder[0]!,
+    );
+    expect(
+      mocks.readHostedMailboxPreferenceCausalSeqByAssistantInputIdTx,
+    ).toHaveBeenCalledWith({
+      assistantInputId: "ain_66666666666666666666666666666666",
+      memberId: "member_personalization_1",
+      prisma: { tx: true },
+    });
+    expect(mocks.upsertHostedMemberAssistantPreferencesTx).not.toHaveBeenCalled();
+    expect(mocks.scheduleMailboxWake).not.toHaveBeenCalled();
+  });
+
+  it("rejects causal-sequence resolution without canonical mailbox authority", async () => {
+    mocks.readHostedMailboxPreferenceCausalSeqByAssistantInputIdTx
+      .mockResolvedValue(null);
+
+    await expect(resolveHostedRuntimeAssistantPreferenceCausalSeq({
+      authority: { assistantInputId: "ain_77777777777777777777777777777777" },
+      memberId: "member_personalization_1",
+    })).rejects.toThrow("input authority is invalid");
+
+    expect(mocks.upsertHostedMemberAssistantPreferencesTx).not.toHaveBeenCalled();
+    expect(mocks.scheduleMailboxWake).not.toHaveBeenCalled();
   });
 
   it("rejects updates inside the transaction when canonical hosted access is inactive", async () => {

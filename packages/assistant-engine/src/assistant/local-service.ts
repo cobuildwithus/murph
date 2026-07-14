@@ -708,12 +708,6 @@ export async function sendAssistantMessageLocal(
                       hostedExecutionContext.currentAssistantPersonalizationInputId,
                   }
                 : {}),
-              ...(hostedExecutionContext.currentAssistantPreferenceCausalSeq
-                ? {
-                    getAssistantPreferenceCausalSeq:
-                      hostedExecutionContext.currentAssistantPreferenceCausalSeq,
-                  }
-                : {}),
               getDeliveryContext: () => ({
                 messageInput: currentInput,
                 session: currentSession,

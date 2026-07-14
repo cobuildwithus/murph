@@ -1,6 +1,9 @@
 import { describe, expect, it } from "vitest";
 
 import {
+  HOSTED_RUNTIME_ASSISTANT_PREFERENCE_CAUSAL_SEQ_ACTION,
+  parseHostedRuntimeAssistantPreferenceCausalSeqRequest,
+  parseHostedRuntimeAssistantPreferenceCausalSeqResponse,
   parseHostedRuntimeAssistantPersonalizationToolAuthority,
   parseHostedRuntimeAssistantPersonalizationToolRequest,
   parseHostedRuntimeAssistantPersonalizationToolResponse,
@@ -42,6 +45,32 @@ describe("hosted assistant personalization contract", () => {
       tone: "casual",
       voice: "warm",
     });
+  });
+
+  it("keeps causal-sequence resolution private to its strict transport contract", () => {
+    const request = {
+      action: HOSTED_RUNTIME_ASSISTANT_PREFERENCE_CAUSAL_SEQ_ACTION,
+    } as const;
+    expect(parseHostedRuntimeAssistantPreferenceCausalSeqRequest(request))
+      .toEqual(request);
+    expect(() => parseHostedRuntimeAssistantPersonalizationToolRequest(request))
+      .toThrow();
+    expect(() => parseHostedRuntimeAssistantPreferenceCausalSeqRequest({
+      ...request,
+      causalSeq: "42",
+    })).toThrow();
+
+    expect(parseHostedRuntimeAssistantPreferenceCausalSeqResponse({
+      action: HOSTED_RUNTIME_ASSISTANT_PREFERENCE_CAUSAL_SEQ_ACTION,
+      result: { causalSeq: "42" },
+    })).toEqual({
+      action: HOSTED_RUNTIME_ASSISTANT_PREFERENCE_CAUSAL_SEQ_ACTION,
+      result: { causalSeq: "42" },
+    });
+    expect(() => parseHostedRuntimeAssistantPreferenceCausalSeqResponse({
+      action: HOSTED_RUNTIME_ASSISTANT_PREFERENCE_CAUSAL_SEQ_ACTION,
+      result: { causalSeq: "not-a-sequence" },
+    })).toThrow();
   });
 
   it("rejects empty, unknown, and out-of-domain updates", () => {

@@ -2154,14 +2154,18 @@ export async function executeMurphDynamicToolRequest(input: {
         progressDelivery: input.progressDelivery,
         text: input.request.text,
       })
-    case 'assistant-style':
+    case 'assistant-style': {
+      const hostedToolContext = input.hostedToolContext ?? null
       return await executeAssistantStyleDynamicTool({
         available: input.assistantStyleSettingsAvailable === true,
-        causalSeq:
-          input.hostedToolContext?.currentAssistantPreferenceCausalSeq?.() ?? null,
+        causalSeqRequired: hostedToolContext != null,
         request: input.request,
+        resolveCausalSeq: hostedToolContext
+          ? () => resolveHostedAssistantStyleCausalSeq(hostedToolContext)
+          : null,
         vaultRoot: input.vaultRoot ?? null,
       })
+    }
     case 'send-vault-file': {
       const hostedToolContext = input.hostedToolContext ?? null
       const sendVaultFile = hostedToolContext?.sendVaultFile
@@ -2563,6 +2567,28 @@ async function executePersonalizationTool(input: {
     return toolTextResult(true, safeToolPayloadText(result))
   } catch {
     return toolTextResult(false, 'personalization request failed')
+  }
+}
+
+async function resolveHostedAssistantStyleCausalSeq(
+  hostedToolContext: AssistantHostedToolContext | null,
+): Promise<string | null> {
+  if (!hostedToolContext) {
+    return null
+  }
+  const assistantInputId =
+    hostedToolContext.currentAssistantPersonalizationInputId?.() ?? null
+  const personalizationTool = hostedToolContext.personalizationTool ?? null
+  if (!assistantInputId || !personalizationTool?.resolvePreferenceCausalSeq) {
+    return null
+  }
+
+  try {
+    return await personalizationTool.resolvePreferenceCausalSeq({
+      assistantInputId,
+    })
+  } catch {
+    return null
   }
 }
 

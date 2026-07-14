@@ -4,6 +4,7 @@ const mocks = vi.hoisted(() => ({
   after: vi.fn(),
   handleHostedRuntimeAssistantPersonalizationTool: vi.fn(),
   requireHostedCloudflareCallbackRequest: vi.fn(),
+  resolveHostedRuntimeAssistantPreferenceCausalSeq: vi.fn(),
   signalHostedMailboxAppendRuntime: vi.fn(),
 }));
 
@@ -19,6 +20,8 @@ vi.mock("@/src/lib/hosted-execution/cloudflare-callback-auth", () => ({
 vi.mock("@/src/lib/hosted-execution/assistant-personalization-tool", () => ({
   handleHostedRuntimeAssistantPersonalizationTool:
     mocks.handleHostedRuntimeAssistantPersonalizationTool,
+  resolveHostedRuntimeAssistantPreferenceCausalSeq:
+    mocks.resolveHostedRuntimeAssistantPreferenceCausalSeq,
 }));
 vi.mock("@/src/lib/hosted-orchestration/signal-runtime", () => ({
   signalHostedMailboxAppendRuntime: mocks.signalHostedMailboxAppendRuntime,
@@ -50,6 +53,10 @@ describe("hosted assistant personalization internal route", () => {
         tone: "formal",
         voice: "warm",
       },
+    });
+    mocks.resolveHostedRuntimeAssistantPreferenceCausalSeq.mockResolvedValue({
+      action: "resolve_preference_causal_seq",
+      result: { causalSeq: "42" },
     });
   });
 
@@ -120,6 +127,50 @@ describe("hosted assistant personalization internal route", () => {
       request: { action: "update", tone: "casual" },
       scheduleMailboxWake: expect.any(Function),
     });
+  });
+
+  it("binds private causal-sequence resolution to the signed callback member", async () => {
+    const payload = JSON.stringify({ action: "resolve_preference_causal_seq" });
+    const request = new Request(
+      "https://join.example.test/api/internal/hosted-execution/assistant-personalization/tool?assistantInputId=ain_0123456789abcdef0123456789abcdef",
+      {
+        body: payload,
+        headers: { "content-type": "application/json" },
+        method: "POST",
+      },
+    );
+
+    const response = await route.POST(request);
+
+    expect(response.status).toBe(200);
+    expect(mocks.resolveHostedRuntimeAssistantPreferenceCausalSeq)
+      .toHaveBeenCalledWith({
+        authority: {
+          assistantInputId: "ain_0123456789abcdef0123456789abcdef",
+        },
+        memberId: "member_personalization_route",
+      });
+    expect(mocks.handleHostedRuntimeAssistantPersonalizationTool)
+      .not.toHaveBeenCalled();
+  });
+
+  it("rejects private causal-sequence resolution without input authority", async () => {
+    const payload = JSON.stringify({ action: "resolve_preference_causal_seq" });
+    const request = new Request(
+      "https://join.example.test/api/internal/hosted-execution/assistant-personalization/tool",
+      {
+        body: payload,
+        headers: { "content-type": "application/json" },
+        method: "POST",
+      },
+    );
+
+    const response = await route.POST(request);
+
+    expect(response.status).toBe(400);
+    expect(mocks.requireHostedCloudflareCallbackRequest).toHaveBeenCalledOnce();
+    expect(mocks.resolveHostedRuntimeAssistantPreferenceCausalSeq)
+      .not.toHaveBeenCalled();
   });
 
   it("rejects malformed assistant input authority after callback authentication", async () => {

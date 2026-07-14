@@ -15,8 +15,6 @@ import {
 import {
   readAssistantAutomationState,
 } from "@murphai/assistant-engine/assistant-state";
-import { assistantPreferenceCausalSeqSchema } from "@murphai/contracts";
-
 import {
   compactHostedPendingAssistantInputIds,
   isHostedPendingAssistantInputStillReplyable,
@@ -43,27 +41,6 @@ export type HostedAssistantInputSelection =
 export interface HostedAssistantInputSource extends AssistantInputSource {
   readObservedInputIds(): string[];
   readSelectedInputIds(): string[];
-}
-
-export async function resolveHostedPreferenceCausalSeqForSelectedInput(input: {
-  assistantInputIds: readonly string[];
-  vaultRoot: string;
-}): Promise<string | null> {
-  const inputIds = uniqueStrings(input.assistantInputIds);
-  if (inputIds.length !== 1) {
-    return null;
-  }
-
-  const event = await readAssistantInputEvent({
-    inputId: inputIds[0]!,
-    vault: input.vaultRoot,
-  });
-  if (event?.sourceRef.kind !== "hosted-mailbox") {
-    return null;
-  }
-  return event.sourceRef.causalSeq == null
-    ? null
-    : assistantPreferenceCausalSeqSchema.parse(event.sourceRef.causalSeq);
 }
 
 export function createHostedAssistantInputSource(input: {

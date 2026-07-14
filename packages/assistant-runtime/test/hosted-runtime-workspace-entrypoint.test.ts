@@ -20351,7 +20351,7 @@ describe("hosted workspace runtime entrypoint", () => {
     }
   });
 
-  test("binds exactly one provider input for personalization and clears it after the attempt", async () => {
+  test("binds exactly one stored provider input id and clears it after the attempt", async () => {
     const vaultRoot = await mkdtemp(path.join(tmpdir(), "murph-workspace-entrypoint-"));
 
     try {
@@ -20373,13 +20373,12 @@ describe("hosted workspace runtime entrypoint", () => {
         async runAssistantPhase(input) {
           assert.equal(typeof input.beforeProviderAcceptedInputs, "function");
           assert.equal(input.currentAssistantPersonalizationInputId?.(), null);
-          assert.equal(input.currentAssistantPreferenceCausalSeq?.(), null);
           const item = createMailboxItem({
             id: "mailbox_item_preference_causal_binding",
             laneSeq: "41",
           });
           const assistantInputId = await stageAssistantInputEventForMailboxItem({
-            causalSeq: "41",
+            causalSeq: "999",
             item,
             vaultRoot,
           });
@@ -20387,7 +20386,6 @@ describe("hosted workspace runtime entrypoint", () => {
             acceptedInputs: [],
           });
           assert.equal(input.currentAssistantPersonalizationInputId?.(), null);
-          assert.equal(input.currentAssistantPreferenceCausalSeq?.(), null);
           await emptyRelease?.();
           const ambiguousRelease = await input.beforeProviderAcceptedInputs?.({
             acceptedInputs: [
@@ -20402,7 +20400,6 @@ describe("hosted workspace runtime entrypoint", () => {
             ],
           });
           assert.equal(input.currentAssistantPersonalizationInputId?.(), null);
-          assert.equal(input.currentAssistantPreferenceCausalSeq?.(), null);
           await ambiguousRelease?.();
           const release = await input.beforeProviderAcceptedInputs?.({
             acceptedInputs: [{
@@ -20414,10 +20411,8 @@ describe("hosted workspace runtime entrypoint", () => {
             input.currentAssistantPersonalizationInputId?.(),
             assistantInputId,
           );
-          assert.equal(input.currentAssistantPreferenceCausalSeq?.(), "41");
           await release?.();
           assert.equal(input.currentAssistantPersonalizationInputId?.(), null);
-          assert.equal(input.currentAssistantPreferenceCausalSeq?.(), null);
           return { progressed: false };
         },
         vaultRoot,

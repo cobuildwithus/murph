@@ -103,9 +103,16 @@ Updated: 2026-07-14
 - Lock the hosted member and sponsored-access rows before rechecking mutation
   eligibility so billing suspension and sponsorship removal serialize with the
   preference write.
-- Preserve the current dirty scope in a checkpoint commit, then adopt PR #640's
-  shared-host verification changes through the user-requested rebase before
-  resuming verification.
+- Preserve the conflict-resolution scope in a checkpoint commit. The requested
+  rebase reproduced conflicts after PR #640 landed, so leave that conflicted
+  audit worktree untouched and adopt the same `origin/main` head through a
+  normal merge in the clean task worktree. This preserves reviewed history,
+  avoids a force-push, and includes the shared-host verification profile.
+- Keep only the sole provider-accepted assistant input id in invocation state.
+  At hosted `murph.assistant_style` set/reset time, resolve its canonical causal
+  sequence through the existing signed personalization Web port; Web reuses the
+  keyed member-bound live-mailbox lookup and canonical access-lock order. Do not
+  copy numeric authority into mailbox-import or persisted assistant-input state.
 
 ## Verification
 
@@ -125,18 +132,17 @@ Updated: 2026-07-14
   privacy hardening, exact-one ambiguity check, access-lock ordering, and
   regression coverage are implemented.
 - Focused owner-bound correction checks passed: all five owning package
-  typechecks, 13 hosted-execution tests, 129 assistant-engine tests, 104 web
-  tests, and 304 Cloudflare tests. The assistant-runtime integration slice is in
-  flight.
-- The exact `ffefbb...` conflict regression passed. The broader CLI release audit
-  passed 34 tests with 1 skip but its unrelated archive-packaging case exceeded
-  the 120-second timeout; the targeted merged assertion passes independently.
+  typechecks plus 7 hosted-execution, 11 assistant-engine, 17 web, 426
+  assistant-runtime, and 119 Cloudflare tests. The runner-bundle regression
+  passed 28 tests.
+- The exact `ffefbb...` conflict regression passed 6 tests. After the PR #640
+  merge, the broader CLI release audit passed 35 tests with 1 skip.
 - The keyed lookup focused Web slice passed 70 tests, its latest schema/store
   rerun passed 52 tests, and Web typecheck passed.
-- The fresh security/privacy rerun found one remaining accepted Medium issue:
-  local `murph.assistant_style` still trusts persisted numeric sequence metadata.
-  The owner-bound correction and its rerun remain pending after the PR #640
-  shared-host rebase.
-- The final security/privacy and coverage-write passes, post-correction
-  diff-aware verification, conflict-marker/privacy scans, mergeability proof,
-  CI, and ReviewGPT remain pending.
+- The fresh security/privacy rerun after the replay-safe Web resolver found zero
+  evidence-backed medium-or-higher findings. Persisted numeric authority and
+  fresh-import-only transient authority were both removed.
+- All verification above used the PR #640 shared-host profile with host
+  concurrency unset. No process from another session was signalled or stopped.
+- The coverage-write pass, final scans, push/mergeability proof, CI, and the
+  ReviewGPT hard-cap disposition remain pending.

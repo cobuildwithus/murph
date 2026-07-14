@@ -331,9 +331,12 @@ causal anchor. For web-owned tone and voice, the runtime forwards the selected
 provider-accepted input id through the dedicated personalization port. The
 model cannot provide or replace that id or a numeric sequence. The id is
 invocation-local transport only; web's mailbox row remains the ordering
-authority. The local `murph.assistant_style` operation continues to receive the
-selected turn's canonical sequence through its authenticated invocation-local
-bridge for Humor, Push, and Detail ordering.
+authority. At local `murph.assistant_style` mutation time, the signed Web
+personalization port binds that sole provider-accepted input id to the callback
+member and one live mailbox row, then returns the canonical sequence for Humor,
+Push, and Detail ordering. Persisted assistant-input files are never numeric
+authority; missing or ambiguous authority fails the hosted write closed without
+blocking the ordinary reply.
 
 Tokenless pending items restored from the legacy v1 local mailbox state are
 treated as sequence zero. They drain through the same terminal path. A legacy

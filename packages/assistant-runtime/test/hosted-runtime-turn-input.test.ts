@@ -21,7 +21,6 @@ import {
 } from "../src/hosted-runtime/pending-input-index.ts";
 import {
   createHostedAssistantInputSource,
-  resolveHostedPreferenceCausalSeqForSelectedInput,
   selectHostedAssistantInputIds,
 } from "../src/hosted-runtime/turn-input.ts";
 
@@ -833,74 +832,6 @@ describe("selectHostedAssistantInputIds", () => {
     ]);
   });
 
-});
-
-describe("resolveHostedPreferenceCausalSeqForSelectedInput", () => {
-  it("uses the selected input's exact causal preference sequence", async () => {
-    const vaultRoot = await createTempVault();
-    const first = await upsertAssistantInputEvent({
-      vault: vaultRoot,
-      event: createAssistantInputEvent({
-        causalSeq: "7",
-        dedupeKey: "dedupe_causal_group_first",
-        eventId: "evt_causal_group_first",
-        itemId: "item_causal_group_first",
-        laneSeq: "41",
-        messageId: "msg_causal_group_first",
-      }),
-    });
-    const second = await upsertAssistantInputEvent({
-      vault: vaultRoot,
-      event: createAssistantInputEvent({
-        causalSeq: "12",
-        dedupeKey: "dedupe_causal_group_second",
-        eventId: "evt_causal_group_second",
-        itemId: "item_causal_group_second",
-        laneSeq: "42",
-        messageId: "msg_causal_group_second",
-      }),
-    });
-
-    await expect(resolveHostedPreferenceCausalSeqForSelectedInput({
-      assistantInputIds: [first.inputId],
-      vaultRoot,
-    })).resolves.toBe("7");
-    await expect(resolveHostedPreferenceCausalSeqForSelectedInput({
-      assistantInputIds: [second.inputId],
-      vaultRoot,
-    })).resolves.toBe("12");
-  });
-
-  it("fails closed instead of aggregating distinct causal inputs", async () => {
-    const vaultRoot = await createTempVault();
-    const first = await upsertAssistantInputEvent({
-      vault: vaultRoot,
-      event: createAssistantInputEvent({
-        causalSeq: "7",
-        dedupeKey: "dedupe_causal_multiple_first",
-        eventId: "evt_causal_multiple_first",
-        itemId: "item_causal_multiple_first",
-        laneSeq: "41",
-        messageId: "msg_causal_multiple_first",
-      }),
-    });
-    const second = await upsertAssistantInputEvent({
-      vault: vaultRoot,
-      event: createAssistantInputEvent({
-        causalSeq: "12",
-        dedupeKey: "dedupe_causal_multiple_second",
-        eventId: "evt_causal_multiple_second",
-        itemId: "item_causal_multiple_second",
-        laneSeq: "42",
-        messageId: "msg_causal_multiple_second",
-      }),
-    });
-
-    await expect(resolveHostedPreferenceCausalSeqForSelectedInput({
-      assistantInputIds: [first.inputId, second.inputId],
-      vaultRoot,
-    })).resolves.toBeNull();
-  });
 });
 
 async function createTempVault(): Promise<string> {

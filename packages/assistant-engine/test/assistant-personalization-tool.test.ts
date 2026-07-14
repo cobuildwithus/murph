@@ -66,7 +66,6 @@ describe('assistant personalization tool', () => {
       currentHostedMailboxItemIds: () => [],
       currentAssistantPersonalizationInputId: () =>
         'ain_11111111111111111111111111111111',
-      currentAssistantPreferenceCausalSeq: () => 'untrusted-local-sequence',
       personalizationTool,
       sendVaultFile: vi.fn(async () => ({
         approvalUrl: 'https://murph.test/approve/unused',

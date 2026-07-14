@@ -1,4 +1,5 @@
 import {
+  assistantPreferenceCausalSeqSchema,
   assistantTonePreferenceValues,
   assistantVoiceOptionIdValues,
   type AssistantTonePreference,
@@ -13,6 +14,9 @@ import {
 
 export const HOSTED_RUNTIME_ASSISTANT_PERSONALIZATION_TOOL_PATH =
   "/api/internal/hosted-execution/assistant-personalization/tool";
+
+export const HOSTED_RUNTIME_ASSISTANT_PREFERENCE_CAUSAL_SEQ_ACTION =
+  "resolve_preference_causal_seq";
 
 export type HostedRuntimeAssistantPersonalizationToolRequest =
   | { action: "read" }
@@ -54,6 +58,17 @@ export type HostedRuntimeAssistantPersonalizationToolResponse =
       action: "update";
       result: HostedRuntimeAssistantPersonalizationUpdateResult;
     };
+
+export type HostedRuntimeAssistantPreferenceCausalSeqRequest = {
+  action: typeof HOSTED_RUNTIME_ASSISTANT_PREFERENCE_CAUSAL_SEQ_ACTION;
+};
+
+export interface HostedRuntimeAssistantPreferenceCausalSeqResponse {
+  action: typeof HOSTED_RUNTIME_ASSISTANT_PREFERENCE_CAUSAL_SEQ_ACTION;
+  result: {
+    causalSeq: string;
+  };
+}
 
 export const hostedRuntimeAssistantPersonalizationToolRequestSchema = z
   .discriminatedUnion("action", [
@@ -101,6 +116,17 @@ export const hostedRuntimeAssistantPersonalizationToolResponseSchema =
     }).strict(),
   ]);
 
+const hostedRuntimeAssistantPreferenceCausalSeqRequestSchema = z.object({
+  action: z.literal(HOSTED_RUNTIME_ASSISTANT_PREFERENCE_CAUSAL_SEQ_ACTION),
+}).strict();
+
+const hostedRuntimeAssistantPreferenceCausalSeqResponseSchema = z.object({
+  action: z.literal(HOSTED_RUNTIME_ASSISTANT_PREFERENCE_CAUSAL_SEQ_ACTION),
+  result: z.object({
+    causalSeq: assistantPreferenceCausalSeqSchema,
+  }).strict(),
+}).strict();
+
 export function parseHostedRuntimeAssistantPersonalizationToolRequest(
   value: unknown,
 ): HostedRuntimeAssistantPersonalizationToolRequest {
@@ -123,4 +149,16 @@ export function parseHostedRuntimeAssistantPersonalizationToolResponse(
   value: unknown,
 ): HostedRuntimeAssistantPersonalizationToolResponse {
   return hostedRuntimeAssistantPersonalizationToolResponseSchema.parse(value);
+}
+
+export function parseHostedRuntimeAssistantPreferenceCausalSeqRequest(
+  value: unknown,
+): HostedRuntimeAssistantPreferenceCausalSeqRequest {
+  return hostedRuntimeAssistantPreferenceCausalSeqRequestSchema.parse(value);
+}
+
+export function parseHostedRuntimeAssistantPreferenceCausalSeqResponse(
+  value: unknown,
+): HostedRuntimeAssistantPreferenceCausalSeqResponse {
+  return hostedRuntimeAssistantPreferenceCausalSeqResponseSchema.parse(value);
 }

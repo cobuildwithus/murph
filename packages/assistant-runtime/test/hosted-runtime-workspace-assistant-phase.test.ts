@@ -751,6 +751,7 @@ describe("runHostedWorkspaceAssistantPhase runtime logs", () => {
   it("exposes hosted personalization through the native dynamic-tool context", async () => {
     const assistantPersonalizationToolPort = {
       request: vi.fn(),
+      resolvePreferenceCausalSeq: vi.fn(),
     };
     const currentAssistantPersonalizationInputId = () =>
       "ain_33333333333333333333333333333333";
