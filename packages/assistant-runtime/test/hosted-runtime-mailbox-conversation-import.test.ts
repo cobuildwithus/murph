@@ -1606,7 +1606,7 @@ describe("hosted mailbox conversation import adapter", () => {
     );
   });
 
-  test("admits capability-ready WhatsApp only to the foreground without persisting auto-reply", async () => {
+  test("does not self-heal consent-gated WhatsApp auto-reply during mailbox import", async () => {
     const parentRoot = await mkdtemp(path.join(tmpdir(), "murph-hosted-input-whatsapp-admission-"));
     tempRoots.push(parentRoot);
     const operatorHomeRoot = path.join(parentRoot, "home");
@@ -1654,67 +1654,6 @@ describe("hosted mailbox conversation import adapter", () => {
     );
 
     assert.equal(outcome.status, "imported");
-    assert.equal(typeof outcome.assistantInputId, "string");
-    const state = await readAssistantAutomationState(vaultRoot);
-    assert.equal(
-      state.autoReply.some((entry) => entry.channel === "whatsapp"),
-      false,
-    );
-    assert.deepEqual(await readHostedPendingAssistantInputIds({ vaultRoot }), []);
-  });
-
-  test("keeps WhatsApp out of the foreground when the delivery capability is unavailable", async () => {
-    const parentRoot = await mkdtemp(path.join(
-      tmpdir(),
-      "murph-hosted-input-whatsapp-unavailable-",
-    ));
-    tempRoots.push(parentRoot);
-    const operatorHomeRoot = path.join(parentRoot, "home");
-    const vaultRoot = path.join(parentRoot, "vault");
-    await writeVaultFile(vaultRoot, VAULT_LAYOUT.metadata, Buffer.from("{}\n"));
-    const item = createResolvedConversationMailboxItem();
-    const decodedWake = createConversationWake({
-      message: {
-        channel: "whatsapp",
-        whatsappMessage: {
-          fromWaId: "15550100001",
-          messageId: "wamid.unavailable",
-          phoneNumberId: "phone-number-id",
-          schema: "murph.hosted-whatsapp-message.v1",
-          text: "quick ack",
-          threadId: "15550100001",
-        },
-      },
-    });
-
-    const outcome = await withOperatorHomeRoot(operatorHomeRoot, () =>
-      importHostedConversationMailboxItem({
-        decodePayload: createDecodedPayloadDecoder(decodedWake),
-        item,
-        runtime: createRuntime({
-          resolvedConfig: {
-            channelCapabilities: {
-              emailSendReady: false,
-              telegramBotConfigured: false,
-              whatsappCloudApiConfigured: false,
-            },
-            deviceSync: null,
-            managedAutoReplyChannels: [
-              {
-                capabilityReady: false,
-                channel: "whatsapp",
-                memberChannel: "whatsapp",
-              },
-            ],
-          },
-          userEnv: HOSTED_ASSISTANT_SEED_ENV,
-        }),
-        vaultRoot,
-      })
-    );
-
-    assert.equal(outcome.status, "imported");
-    assert.equal(outcome.assistantInputId, undefined);
     const state = await readAssistantAutomationState(vaultRoot);
     assert.equal(
       state.autoReply.some((entry) => entry.channel === "whatsapp"),

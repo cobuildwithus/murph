@@ -51,17 +51,15 @@ export async function readHostedConversationParserContinuationWakeAt(input: {
       limit: 1,
       state: "pending",
     }).length > 0;
-    if (hasPendingParserJob) {
-      return new Date().toISOString();
-    }
     const pendingEvents = await readHostedPendingParserEvidenceEvents({
       vaultRoot: input.vaultRoot,
     });
-    return pendingEvents.some(({ event }) =>
+    if (pendingEvents.some(({ event }) =>
       classifyHostedAssistantInputMediaSemanticState(event) === "pending"
-    )
-      ? new Date().toISOString()
-      : null;
+    )) {
+      return new Date().toISOString();
+    }
+    return hasPendingParserJob ? parserRetryAt() : null;
   } catch (error) {
     emitHostedParserMaintenanceFailure({
       error,
@@ -148,10 +146,25 @@ export async function runHostedConversationParserMaintenance(input: {
         state: "pending",
       }).length > 0
     )?.event ?? null;
-    const captureId = targetedEvent?.projection.captureId ?? null;
+    if (!targetedEvent) {
+      const hasPendingParserJob = runtime.listAttachmentParseJobs({
+        limit: 1,
+        state: "pending",
+      }).length > 0;
+      return {
+        evidenceUpdated: 0,
+        nextWakeAt: hasPendingParserJob ? parserRetryAt() : null,
+        parserProcessed: 0,
+        progressed,
+      };
+    }
+    const captureId = targetedEvent.projection.captureId;
+    if (captureId === null) {
+      return parserRetryResult(progressed);
+    }
     if (
       runtime.listAttachmentParseJobs({
-        ...(captureId ? { captureId } : {}),
+        captureId,
         limit: 1,
         state: "pending",
       }).length === 0
@@ -199,7 +212,7 @@ export async function runHostedConversationParserMaintenance(input: {
     let results: Awaited<ReturnType<typeof parserService.drain>>;
     try {
       results = await parserService.drain({
-        ...(captureId ? { captureId } : {}),
+        captureId,
         maxJobs: 1,
         ...(input.signal ? { signal: input.signal } : {}),
       });

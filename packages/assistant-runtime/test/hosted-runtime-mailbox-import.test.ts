@@ -266,23 +266,23 @@ describe("hosted mailbox import loop", () => {
     assert.equal(result.state.watermarks.system, "0");
   });
 
-  test("leaves a second fresh WhatsApp row in the mailbox for an immediate second pass", async () => {
+  test("leaves a second fresh conversation row in the mailbox for an immediate second pass", async () => {
     const first = createMailboxItem({
-      id: "mailbox_item_whatsapp_fresh_001",
+      id: "mailbox_item_conversation_fresh_001",
       laneSeq: "1",
     });
     const second = createMailboxItem({
-      id: "mailbox_item_whatsapp_fresh_002",
+      id: "mailbox_item_conversation_fresh_002",
       laneSeq: "2",
     });
     const firstSystem = createMailboxItem({
-      id: "mailbox_item_system_alongside_whatsapp_001",
+      id: "mailbox_item_system_alongside_conversation_001",
       kind: "member.activated",
       lane: "system",
       laneSeq: "1",
     });
     const secondSystem = createMailboxItem({
-      id: "mailbox_item_system_alongside_whatsapp_002",
+      id: "mailbox_item_system_alongside_conversation_002",
       kind: "member.activated",
       lane: "system",
       laneSeq: "2",
@@ -308,7 +308,7 @@ describe("hosted mailbox import loop", () => {
       limitPerLane: 10,
       mailboxPort,
       now: () => TEST_NOW,
-      requestId: "request_whatsapp_fresh_first_pass",
+      requestId: "request_conversation_fresh_first_pass",
       state: createEmptyHostedMailboxImportState(),
     });
 
@@ -327,7 +327,7 @@ describe("hosted mailbox import loop", () => {
       limitPerLane: 10,
       mailboxPort,
       now: () => TEST_NOW,
-      requestId: "request_whatsapp_fresh_second_pass",
+      requestId: "request_conversation_fresh_second_pass",
       state: firstResult.state,
     });
 
@@ -344,18 +344,18 @@ describe("hosted mailbox import loop", () => {
   });
 
   test.each(["linq", "email"] as const)(
-    "leaves fresh WhatsApp behind an earlier %s input for the next pass",
+    "leaves a later fresh input behind an earlier %s input for the next pass",
     async (earlierChannel) => {
       const earlier = createMailboxItem({
         id: `mailbox_item_${earlierChannel}_fresh_001`,
         laneSeq: "1",
       });
-      const whatsapp = createMailboxItem({
-        id: "mailbox_item_whatsapp_after_mixed_channel_002",
+      const later = createMailboxItem({
+        id: "mailbox_item_later_after_mixed_channel_002",
         laneSeq: "2",
       });
       const { mailboxPort } = createMailboxPort({
-        items: [earlier, whatsapp],
+        items: [earlier, later],
       });
       const imported: string[] = [];
       const importItem = async (input: { item: HostedMailboxItem }) => {
@@ -373,7 +373,7 @@ describe("hosted mailbox import loop", () => {
         limitPerLane: 10,
         mailboxPort,
         now: () => TEST_NOW,
-        requestId: `request_${earlierChannel}_before_whatsapp_first_pass`,
+        requestId: `request_${earlierChannel}_before_later_first_pass`,
         state: createEmptyHostedMailboxImportState(),
       });
 
@@ -388,13 +388,13 @@ describe("hosted mailbox import loop", () => {
         limitPerLane: 10,
         mailboxPort,
         now: () => TEST_NOW,
-        requestId: `request_${earlierChannel}_before_whatsapp_second_pass`,
+        requestId: `request_${earlierChannel}_before_later_second_pass`,
         state: firstResult.state,
       });
 
-      assert.deepEqual(imported, [earlier.id, whatsapp.id]);
+      assert.deepEqual(imported, [earlier.id, later.id]);
       assert.deepEqual(secondResult.assistantInputIds, [
-        `assistant_input_${whatsapp.id}`,
+        `assistant_input_${later.id}`,
       ]);
       assert.equal(secondResult.state.watermarks.conversation, "2");
     },

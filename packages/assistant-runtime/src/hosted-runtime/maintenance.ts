@@ -10,7 +10,6 @@ import {
   type AssistantRunEvent,
   type AssistantTurnEnvironment,
   type AssistantTurnConversationInputQuery,
-  readAssistantInputEvent,
   runAssistantAutomationPass,
 } from "@murphai/assistant-engine";
 import { createIntegratedInboxServices } from "@murphai/inbox-services";
@@ -219,9 +218,6 @@ export async function runHostedAssistantAutomationLane(input: {
           now: input.now ?? null,
           preProviderPhase: input.preProviderPhase ?? null,
           runtimeAttemptId: input.runtimeAttemptId ?? null,
-          whatsappCloudApiConfigured:
-            input.runtime.resolvedConfig.channelCapabilities
-              .whatsappCloudApiConfigured === true,
           ...(input.beforeProviderAcceptedInputs
             ? { beforeProviderAcceptedInputs: input.beforeProviderAcceptedInputs }
             : {}),
@@ -294,7 +290,6 @@ export async function runHostedAssistantAutomation(
     now?: Date | null;
     preProviderPhase?: HostedRuntimeLatencyPhaseBreakdown["preProvider"] | null;
     runtimeAttemptId?: string | null;
-    whatsappCloudApiConfigured?: boolean;
     beforeProviderAcceptedInputs?: AssistantBeforeProviderAcceptedInputsHook | null;
     shouldYieldBackgroundMaintenance?: (() => boolean) | null;
   },
@@ -357,13 +352,6 @@ export async function runHostedAssistantAutomation(
   const shouldDeferCron = () =>
     shouldDeferCronForSelectedInput
     || options?.shouldYieldBackgroundMaintenance?.() === true;
-  const foregroundAutoReplyChannels =
-    await resolveHostedForegroundAutoReplyChannels({
-      selectedInputIds,
-      vaultRoot,
-      whatsappCloudApiConfigured:
-        options?.whatsappCloudApiConfigured === true,
-    });
   const inputSource: AssistantInputSource = {
     ...baseInputSource,
     async listInputCandidates(query) {
@@ -462,9 +450,6 @@ export async function runHostedAssistantAutomation(
         ? { beforeProviderAcceptedInputs: options.beforeProviderAcceptedInputs }
         : {}),
       executionContext,
-      ...(foregroundAutoReplyChannels.length > 0
-        ? { foregroundAutoReplyChannels }
-        : {}),
       ...(options?.operationScope ? { operationScope: options.operationScope } : {}),
       inboxServices,
       onEvent: (event) => {
@@ -694,45 +679,6 @@ export async function runHostedAssistantAutomation(
     attachHostedAssistantAutomationFailureLogEntries(error, redactedLogEntries);
     throw error;
   }
-}
-
-async function resolveHostedForegroundAutoReplyChannels(input: {
-  selectedInputIds: HostedAssistantInputSelection;
-  vaultRoot: string;
-  whatsappCloudApiConfigured: boolean;
-}): Promise<string[]> {
-  if (
-    !input.whatsappCloudApiConfigured
-    || input.selectedInputIds.mode !== "foreground"
-    || input.selectedInputIds.inputIds.length !== 1
-  ) {
-    return [];
-  }
-
-  const [selectedInputId] = input.selectedInputIds.inputIds;
-  if (
-    !selectedInputId
-    || !input.selectedInputIds.freshInputIds.includes(selectedInputId)
-  ) {
-    return [];
-  }
-
-  const event = await readAssistantInputEvent({
-    inputId: selectedInputId,
-    vault: input.vaultRoot,
-  });
-  if (
-    event?.sourceRef.kind !== "hosted-mailbox"
-    || event.sourceRef.lane !== "conversation"
-    || event.conversation?.source !== "whatsapp"
-    || event.conversation.threadIsDirect !== true
-    || event.conversation.actorIsSelf
-    || event.replyTarget?.channel !== "whatsapp"
-  ) {
-    return [];
-  }
-
-  return ["whatsapp"];
 }
 
 function attachHostedAssistantAutomationFailureLogEntries(

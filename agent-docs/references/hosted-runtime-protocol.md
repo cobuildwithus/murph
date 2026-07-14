@@ -878,15 +878,6 @@ present. The Linq HTTP layer may retry those POST sends on transient transport,
 408, or 5xx failures, and the hosted outbox must keep such failures retryable
 instead of terminal. Non-idempotent POST sends still fail closed unless the
 provider confirms a safe retry contract.
-WhatsApp can receive narrowly scoped foreground auto-reply authority from one
-accepted direct inbound even when the channel is not durably enabled. Before
-the foreground pass completes, the scanner records that authority on each
-exact auto-reply intent provenance record. Foreground and background delivery
-may use the marker only when intent ID, turn ID, and channel all match and the
-current WhatsApp credentials remain configured. The marker never enables the
-channel globally, and unmarked intents continue through ordinary durable
-channel-state revocation checks.
-
 This is the deploy/reset recovery contract. If a Cloudflare Durable Object,
 worker isolate, or runner container resets after local mailbox staging but
 before the final runtime-owned idle or scheduled-wake checkpoint succeeds, the next

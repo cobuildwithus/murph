@@ -11,6 +11,12 @@ import {
   updateAssistantInputProjection,
   upsertAssistantInputEvent,
 } from "@murphai/assistant-engine";
+import {
+  writeAssistantAutoReplySuppressionEvidence,
+} from "@murphai/assistant-engine/assistant-automation";
+import {
+  saveAssistantAutomationState,
+} from "@murphai/assistant-engine/assistant-state";
 import { initializeVault } from "@murphai/core";
 import { createIntegratedInboxServices } from "@murphai/inbox-services";
 import {
@@ -32,6 +38,7 @@ import {
   runHostedConversationParserMaintenance,
 } from "../src/hosted-runtime/parser-maintenance.ts";
 import {
+  compactHostedPendingAssistantInputIds,
   enqueueHostedPendingAssistantInputId,
 } from "../src/hosted-runtime/pending-input-index.ts";
 
@@ -142,6 +149,119 @@ describe("hosted conversation parser maintenance", () => {
     } finally {
       runtime.close();
     }
+  });
+
+  it("does not drain a parser job beyond the bounded assistant-evidence owner window", async () => {
+    const context = await createTestContext("bounded-owner-window");
+    await saveAssistantAutomationState(context.vaultRoot, {
+      autoReply: [{
+        channel: "linq",
+        eligibleAfter: null,
+        enabledAt: "2026-04-29T17:20:00.000Z",
+      }],
+      updatedAt: "2026-04-29T17:20:00.000Z",
+      version: 1,
+    });
+    let providerRuns = 0;
+    configureParser({
+      fakeFfmpeg: context.fakeFfmpeg,
+      provider: createAudioProvider(async () => {
+        providerRuns += 1;
+        return `Transcript ${providerRuns}`;
+      }),
+    });
+    const earlierReadyInputs = [];
+    for (let index = 1; index <= 4; index += 1) {
+      earlierReadyInputs.push(await createReadyTextInput({
+        index,
+        vaultRoot: context.vaultRoot,
+      }));
+    }
+    const media = await createPendingAudioInput({
+      index: 5,
+      vaultRoot: context.vaultRoot,
+      workspaceRoot: context.workspaceRoot,
+    });
+
+    const startedAt = Date.now();
+    const blocked = await runHostedConversationParserMaintenance({
+      memberId: "member_parser_maintenance",
+      parserToolchain: null,
+      vaultRoot: context.vaultRoot,
+    });
+    const finishedAt = Date.now();
+
+    expect(blocked).toMatchObject({
+      evidenceUpdated: 0,
+      parserProcessed: 0,
+      progressed: false,
+    });
+    expectDelayedRetry(blocked.nextWakeAt, { finishedAt, startedAt });
+    expect(providerRuns).toBe(0);
+    const blockedEvent = await readAssistantInputEvent({
+      inputId: media.inputId,
+      vault: context.vaultRoot,
+    });
+    expect(classifyHostedAssistantInputMediaSemanticState(blockedEvent!)).toBe("pending");
+    const blockedRuntime = await openInboxRuntime({ vaultRoot: context.vaultRoot });
+    try {
+      expect(
+        blockedRuntime.listAttachmentParseJobs({
+          captureId: media.captureId,
+          state: "pending",
+        }),
+      ).toHaveLength(1);
+      expect(blockedRuntime.listAttachmentParseJobs({ state: "succeeded" }))
+        .toHaveLength(0);
+    } finally {
+      blockedRuntime.close();
+    }
+    const continuationStartedAt = Date.now();
+    const continuationWakeAt =
+      await readHostedConversationParserContinuationWakeAt({
+        memberId: "member_parser_maintenance",
+        vaultRoot: context.vaultRoot,
+      });
+    const continuationFinishedAt = Date.now();
+    expectDelayedRetry(continuationWakeAt, {
+      finishedAt: continuationFinishedAt,
+      startedAt: continuationStartedAt,
+    });
+
+    for (const ready of earlierReadyInputs) {
+      await writeAssistantAutoReplySuppressionEvidence({
+        captureIds: [],
+        inputIds: [ready.inputId],
+        reason: "synthetic earlier reply completed",
+        vault: context.vaultRoot,
+      });
+    }
+    await expect(
+      compactHostedPendingAssistantInputIds({ vaultRoot: context.vaultRoot }),
+    ).resolves.toEqual([media.inputId]);
+
+    const resumed = await runHostedConversationParserMaintenance({
+      memberId: "member_parser_maintenance",
+      parserToolchain: null,
+      vaultRoot: context.vaultRoot,
+    });
+
+    expect(resumed).toMatchObject({
+      evidenceUpdated: 1,
+      parserProcessed: 1,
+      progressed: true,
+    });
+    expect(providerRuns).toBe(1);
+    const resumedEvent = await readAssistantInputEvent({
+      inputId: media.inputId,
+      vault: context.vaultRoot,
+    });
+    expect(classifyHostedAssistantInputMediaSemanticState(resumedEvent!)).toBe("ready");
+    expect(
+      resumedEvent?.attachmentEvidence.attachments.flatMap((attachment) =>
+        attachment.inlineFragments.map((fragment) => fragment.text)
+      ),
+    ).toContain("Transcript 1");
   });
 
   it("requeues an orphaned running job when a later continuation opens the durable inbox", async () => {
@@ -613,6 +733,57 @@ async function createPendingAudioInput(input: {
     inputId: event.inputId,
     occurredAt,
   };
+}
+
+async function createReadyTextInput(input: {
+  index: number;
+  vaultRoot: string;
+}): Promise<{ inputId: string }> {
+  const occurredAt = `2026-04-29T17:22:${String(input.index).padStart(2, "0")}.000Z`;
+  const event = await upsertAssistantInputEvent({
+    event: {
+      content: {
+        attachmentDescriptors: [],
+        userMessageContent: [{
+          text: `Earlier ready input ${input.index}`,
+          type: "text",
+        }],
+      },
+      conversation: {
+        accountId: "acct_parser_maintenance",
+        actorId: "actor_parser_maintenance",
+        actorIsSelf: false,
+        source: "linq",
+        threadId: "chat_parser_maintenance",
+        threadIsDirect: true,
+      },
+      occurredAt,
+      receivedAt: `2026-04-29T17:23:${String(input.index).padStart(2, "0")}.000Z`,
+      replyTarget: {
+        channel: "linq",
+        messageId: `message_parser_maintenance_${input.index}`,
+        threadId: "chat_parser_maintenance",
+      },
+      sourceRef: {
+        dedupeKey: `dedupe_parser_maintenance_${input.index}`,
+        eventId: `event_parser_maintenance_${input.index}`,
+        itemId: `item_parser_maintenance_${input.index}`,
+        kind: "hosted-mailbox" as const,
+        lane: "conversation" as const,
+        laneSeq: String(input.index),
+        payloadSchema: "murph.hosted-mailbox-payload.v1",
+        payloadSource: "inline" as const,
+        source: "hosted-mailbox" as const,
+        wakeSchema: "murph.hosted-execution-wake.v1",
+      },
+    },
+    vault: input.vaultRoot,
+  });
+  await enqueueHostedPendingAssistantInputId({
+    inputId: event.inputId,
+    vaultRoot: input.vaultRoot,
+  });
+  return { inputId: event.inputId };
 }
 
 function configureParser(input: {

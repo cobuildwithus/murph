@@ -346,7 +346,6 @@ export async function importHostedConversationMailboxItem(input: {
   const prepareWakeContext =
     input.prepareWakeContext ?? prepareHostedConversationMailboxWakeContext;
   let pendingReplyEligible = true;
-  let foregroundReplyEligible = true;
   let autoReplyPreparedAtEpochMs: number | null = null;
   let pendingIndexEnsuredAtEpochMs: number | null = null;
   assertHostedConversationMailboxImportLive(input.signal ?? null);
@@ -364,11 +363,6 @@ export async function importHostedConversationMailboxItem(input: {
     autoReplyPreparedAtEpochMs = Date.now();
     pendingReplyEligible = isHostedConversationMailboxPendingReplyEligible({
       assistantRuntimeState,
-      wake: decoded.wake,
-    });
-    foregroundReplyEligible = isHostedConversationMailboxForegroundReplyEligible({
-      assistantRuntimeState,
-      runtime: input.runtime,
       wake: decoded.wake,
     });
   }
@@ -440,7 +434,7 @@ export async function importHostedConversationMailboxItem(input: {
   const replyReady = !projectionEffect.requiresTerminalMediaParserEvidence;
   if (
     replyReady
-    && foregroundReplyEligible
+    && pendingReplyEligible
     && input.item.durablyConsumed !== true
   ) {
     await notifyAssistantActiveTurnInputAvailableForInputIds({
@@ -451,7 +445,7 @@ export async function importHostedConversationMailboxItem(input: {
   }
   return {
     ...(replyReady
-      && foregroundReplyEligible
+      && pendingReplyEligible
       && input.item.durablyConsumed !== true
       ? { assistantInputId: stagedInput.inputId }
       : {}),
@@ -1042,19 +1036,6 @@ function isHostedConversationMailboxPendingReplyEligible(input: {
     default:
       return false;
   }
-}
-
-function isHostedConversationMailboxForegroundReplyEligible(input: {
-  assistantRuntimeState: HostedAssistantAutoReplyReadinessState;
-  runtime: HostedConversationMailboxRuntime;
-  wake: HostedExecutionConversationMessageWake;
-}): boolean {
-  if (isHostedConversationMailboxPendingReplyEligible(input)) {
-    return true;
-  }
-  return input.assistantRuntimeState.assistantConfigured
-    && isHostedWhatsAppConversationMessageWake(input.wake)
-    && input.runtime.resolvedConfig.channelCapabilities.whatsappCloudApiConfigured === true;
 }
 
 function readHostedConversationProjectionFailureReason(
