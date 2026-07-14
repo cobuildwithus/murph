@@ -28,10 +28,11 @@ the detailed five-stage sleep breakdown; sleep exports as in-bed/asleep/awake
 fragments without WHOOP's stage detail.
 
 Apple HealthKit's standard HRV quantity is SDNN, so Apple Health observations
-remain canonical `hrv-sdnn`. WHOOP API Recovery remains a separate provider
-metric. The direct WHOOP 5/MG path below produces a beta overnight
-pulse-rate-variability RMSSD estimate in canonical `hrv-rmssd`; these series
-must never alias or aggregate together.
+remain canonical `hrv-sdnn`. The existing provider resolver selects at most
+one daily `hrv-rmssd` point across WHOOP Recovery, Oura, and other provider
+evidence. The direct WHOOP 5/MG path below produces a beta overnight
+pulse-rate-variability estimate under `whoop-ble-overnight-prv-rmssd`, with no
+generic `hrv` or biomarker alias. These series must never aggregate together.
 
 An internal 2026-07-10 hardware spike proved the private WHOOP 5/MG BLE
 pulse-interval transport with Heart Rate Broadcast off. The beta calculator
