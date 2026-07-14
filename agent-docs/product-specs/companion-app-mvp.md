@@ -33,6 +33,12 @@ Nothing else. No settings, no data browsing, no chat, no vault. The app is now
 approved for public App Store distribution at
 `https://apps.apple.com/us/app/murph-ai/id6786145859`.
 
+For WHOOP members, the relay handoff uses WHOOP's documented menu path: **More
+→ App Settings → Integrations → Apple Health → Connect**, then enable all
+desired categories and tap **Allow** before connecting Apple Health in Murph.
+WHOOP does not document a supported settings deep link, so Murph must not
+fabricate one.
+
 ### Time-boxed Messages extension proof (explicit scope exception)
 
 The 2026-07-10 Linq iMessage mini-app proof is a deliberate, isolated

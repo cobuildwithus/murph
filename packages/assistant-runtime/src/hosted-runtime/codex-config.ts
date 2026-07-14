@@ -68,8 +68,10 @@ const DEFAULT_HOSTED_CODEX_SANDBOX = "danger-full-access";
 const DEFAULT_HOSTED_CODEX_AUTO_COMPACT_TOKEN_LIMIT = 164_000;
 const DEFAULT_HOSTED_CODEX_LOG_DIR = "/tmp/murph-codex-log";
 const HOSTED_CODEX_PROVIDER_REQUEST_MAX_RETRIES = 4;
-// Match Codex's native default so hosted runs keep provider stream reconnects.
-const HOSTED_CODEX_PROVIDER_STREAM_MAX_RETRIES = 5;
+// Hosted runs get one WebSocket attempt, then Codex replays the request over
+// HTTPS. Repeating the full idle window here can outlive the enclosing hosted
+// attempt and make Codex's native transport fallback unreachable.
+const HOSTED_CODEX_PROVIDER_STREAM_MAX_RETRIES = 0;
 const HOSTED_CODEX_PROVIDER_STREAM_IDLE_TIMEOUT_MS = 90_000;
 const HOSTED_CODEX_OPERATOR_MEMORY_CONFIG = {
   disableOnExternalContext: false,
