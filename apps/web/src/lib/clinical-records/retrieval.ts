@@ -32,6 +32,7 @@ import {
 } from "../hosted-orchestration/signal-runtime";
 import { getPrisma } from "../prisma";
 import {
+  openClinicalConnectionFhirBaseUrl,
   openClinicalConnectionSecret,
   openClinicalPageCursor,
   sealClinicalConnectionSecret,
@@ -82,7 +83,7 @@ interface RunnableClinicalRun {
     accessTokenExpiresAt: Date | null;
     clientId: string;
     fhirBaseHash: string;
-    fhirBaseUrl: string;
+    fhirBaseUrlEncrypted: string;
     grantedScopesJson: Prisma.JsonValue;
     id: string;
     memberId: string;
@@ -125,14 +126,15 @@ export async function readClinicalRetrievalRun(input: {
   const requestedScopes = parseStoredStringArray(run.connection.requestedScopesJson, "requested scopes");
   const grantedScopes = parseStoredStringArray(run.grantedScopesJson, "granted scopes");
   let patientIdHash: string;
+  const openedPatientId = await openClinicalConnectionSecret({
+    connectionId: run.connection.id,
+    encrypted: run.connection.patientIdEncrypted,
+    field: "patientId",
+    memberId: input.memberId,
+    tokenVersion: run.connection.tokenVersion,
+  });
   try {
-    const patientId = requireFhirPatientId(await openClinicalConnectionSecret({
-      connectionId: run.connection.id,
-      encrypted: run.connection.patientIdEncrypted,
-      field: "patientId",
-      memberId: input.memberId,
-      tokenVersion: run.connection.tokenVersion,
-    }));
+    const patientId = requireFhirPatientId(openedPatientId);
     patientIdHash = hashClinicalFhirPatientId(patientId);
   } catch {
     return unavailable("patient-context-unavailable", false);
@@ -178,27 +180,35 @@ export async function fetchClinicalRetrievalPage(input: {
     return unavailable("retrieval-bound-reached", false);
   }
 
+  const openedPatientId = await openClinicalConnectionSecret({
+    connectionId: run.connection.id,
+    encrypted: run.connection.patientIdEncrypted,
+    field: "patientId",
+    memberId: input.memberId,
+    tokenVersion: run.connection.tokenVersion,
+  });
+  const fhirBaseUrl = await openClinicalConnectionFhirBaseUrl({
+    connectionId: run.connection.id,
+    encrypted: run.connection.fhirBaseUrlEncrypted,
+    memberId: input.memberId,
+  });
+  const openedCursor = input.request.cursor
+    ? await openClinicalPageCursor({
+        generation: run.generation,
+        memberId: input.memberId,
+        resourceType: input.request.resourceType,
+        runId: run.id,
+        value: input.request.cursor,
+      })
+    : null;
   let pageUrl: ValidatedFhirPageUrl;
-  let patientId: string;
   try {
-    patientId = requireFhirPatientId(await openClinicalConnectionSecret({
-      connectionId: run.connection.id,
-      encrypted: run.connection.patientIdEncrypted,
-      field: "patientId",
-      memberId: input.memberId,
-      tokenVersion: run.connection.tokenVersion,
-    }));
-    pageUrl = input.request.cursor
-      ? await openPageCursor({
-          cursor: input.request.cursor,
-          generation: run.generation,
-          memberId: input.memberId,
-          resourceType: input.request.resourceType,
-          runId: run.id,
-        })
+    const patientId = requireFhirPatientId(openedPatientId);
+    pageUrl = openedCursor
+      ? parsePageCursor(openedCursor)
       : (() => {
           const url = buildInitialFhirPageUrl({
-            fhirBaseUrl: run.connection.fhirBaseUrl,
+            fhirBaseUrl,
             patientId,
             resourceType: input.request.resourceType,
           });
@@ -206,7 +216,7 @@ export async function fetchClinicalRetrievalPage(input: {
         })();
     assertFhirPageUrlAllowed({
       candidate: pageUrl.url,
-      fhirBaseUrl: run.connection.fhirBaseUrl,
+      fhirBaseUrl,
       initialPatientRead: input.request.cursor === null && input.request.resourceType === "Patient",
       resourceType: input.request.resourceType,
     });
@@ -241,11 +251,22 @@ export async function fetchClinicalRetrievalPage(input: {
       fetchImpl: input.fetchImpl,
       pageUrl: pageUrl.url,
     });
-    const sanitized = await readSanitizedFhirPage({
-      fhirBaseUrl: run.connection.fhirBaseUrl,
-      resourceType: input.request.resourceType,
-      response,
-    });
+    let sanitized: Awaited<ReturnType<typeof readSanitizedFhirPage>>;
+    try {
+      sanitized = await readSanitizedFhirPage({
+        fhirBaseUrl,
+        resourceType: input.request.resourceType,
+        response,
+      });
+    } catch (error) {
+      if (!(error instanceof TypeError)) throw error;
+      throw clinicalRecordsError({
+        cause: error,
+        code: "CLINICAL_RECORD_FHIR_RESPONSE_INVALID",
+        httpStatus: 502,
+        message: "The provider returned an invalid FHIR response.",
+      });
+    }
     const nextCursor = sanitized.nextUrl
       ? await sealClinicalPageCursor({
           generation: run.generation,
@@ -318,7 +339,7 @@ export async function fetchClinicalRetrievalPage(input: {
         error.retryable,
       );
     }
-    return unavailable("provider-response-invalid", false);
+    throw error;
   }
 }
 
@@ -518,17 +539,17 @@ async function loadRunnableClinicalRun(input: {
   if (record.connection.retrievalGeneration !== record.generation) {
     return { retryable: false, unavailable: "run-generation-stale" };
   }
-  if (TERMINAL_RUN_STATUSES.has(record.status)) {
-    return { retryable: false, unavailable: "run-already-terminal" };
-  }
-  if (!ACTIVE_RUN_STATUSES.has(record.status)) {
-    return { retryable: false, unavailable: "run-status-invalid" };
-  }
   if (record.connection.status === "needs_reauth") {
     return {
       retryable: false,
       unavailable: HOSTED_CLINICAL_RECORDS_AUTHORIZATION_REQUIRED_ERROR_CODE,
     };
+  }
+  if (TERMINAL_RUN_STATUSES.has(record.status)) {
+    return { retryable: false, unavailable: "run-already-terminal" };
+  }
+  if (!ACTIVE_RUN_STATUSES.has(record.status)) {
+    return { retryable: false, unavailable: "run-status-invalid" };
   }
   if (record.connection.status !== "active" && record.connection.status !== "error") {
     return { retryable: false, unavailable: "connection-inactive" };
@@ -580,20 +601,7 @@ function buildInitialFhirPageUrl(input: {
   return url;
 }
 
-async function openPageCursor(input: {
-  cursor: string;
-  generation: number;
-  memberId: string;
-  resourceType: string;
-  runId: string;
-}): Promise<ValidatedFhirPageUrl> {
-  const plaintext = await openClinicalPageCursor({
-    generation: input.generation,
-    memberId: input.memberId,
-    resourceType: input.resourceType,
-    runId: input.runId,
-    value: input.cursor,
-  });
+function parsePageCursor(plaintext: string): ValidatedFhirPageUrl {
   const parsed: unknown = JSON.parse(plaintext);
   if (!parsed || typeof parsed !== "object" || Array.isArray(parsed)) throw new TypeError("Invalid cursor.");
   const record = parsed as Record<string, unknown>;

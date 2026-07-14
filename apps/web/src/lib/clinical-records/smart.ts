@@ -223,15 +223,16 @@ export async function refreshSmartAccessToken(input: {
     redirect: "manual",
   }, SMART_TOKEN_TIMEOUT_MS, "CLINICAL_RECORD_SMART_TOKEN_REFRESH_FAILED");
   if (!response.ok) {
+    const authorizationRequired = await isSmartRefreshAuthorizationFailure(response);
     throw clinicalRecordsError({
-      code: response.status === 400 || response.status === 401
+      code: authorizationRequired
         ? "CLINICAL_RECORD_SMART_REAUTH_REQUIRED"
         : "CLINICAL_RECORD_SMART_TOKEN_REFRESH_FAILED",
-      httpStatus: response.status === 400 || response.status === 401 ? 401 : 503,
-      message: response.status === 400 || response.status === 401
+      httpStatus: authorizationRequired ? 401 : 503,
+      message: authorizationRequired
         ? "The Clinical Records connection needs authorization again."
         : "The provider token refresh is temporarily unavailable.",
-      retryable: response.status !== 400 && response.status !== 401,
+      retryable: !authorizationRequired,
     });
   }
   const body = requireRecord(await readBoundedJson(response), "SMART refresh response");
@@ -249,6 +250,17 @@ export async function refreshSmartAccessToken(input: {
     grantedScopes,
     refreshToken: optionalBoundedString(body.refresh_token, "SMART refresh token", 65_536),
   };
+}
+
+async function isSmartRefreshAuthorizationFailure(response: Response): Promise<boolean> {
+  if (response.status === 401) return true;
+  if (response.status !== 400) return false;
+  try {
+    const body = requireRecord(await readBoundedJson(response), "SMART refresh error response");
+    return body.error === "invalid_grant";
+  } catch {
+    return false;
+  }
 }
 
 async function fetchWithTimeout(

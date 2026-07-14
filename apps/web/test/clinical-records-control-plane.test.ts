@@ -1,3 +1,5 @@
+import { createHash } from "node:crypto";
+
 import { beforeEach, describe, expect, it, vi } from "vitest";
 
 const mocks = vi.hoisted(() => ({
@@ -10,6 +12,7 @@ const mocks = vi.hoisted(() => ({
   openClinicalOauthVerifier: vi.fn(),
   readGrantedSmartResourceTypes: vi.fn(),
   requireActiveHostedAppSessionFromRequest: vi.fn(),
+  sealClinicalConnectionFhirBaseUrl: vi.fn(),
   sealClinicalConnectionSecret: vi.fn(),
   signalClinicalRetrievalWake: vi.fn(),
 }));
@@ -29,6 +32,7 @@ vi.mock("@/src/lib/clinical-records/provider-directory-store", () => ({
 }));
 vi.mock("@/src/lib/clinical-records/secrets", () => ({
   openClinicalOauthVerifier: mocks.openClinicalOauthVerifier,
+  sealClinicalConnectionFhirBaseUrl: mocks.sealClinicalConnectionFhirBaseUrl,
   sealClinicalConnectionSecret: mocks.sealClinicalConnectionSecret,
   sealClinicalOauthVerifier: vi.fn(),
   toClinicalJsonArray: (values: readonly string[]) => [...values],
@@ -82,6 +86,7 @@ describe("Clinical Records authorization persistence", () => {
       refreshToken: null,
     });
     mocks.readGrantedSmartResourceTypes.mockReturnValue(["Patient", "Observation"]);
+    mocks.sealClinicalConnectionFhirBaseUrl.mockResolvedValue("sealed-fhir-base-url");
     mocks.sealClinicalConnectionSecret.mockImplementation(async (input: { field: string }) =>
       input.field === "refreshToken" ? null : `sealed-${input.field}`
     );
@@ -101,7 +106,9 @@ describe("Clinical Records authorization persistence", () => {
 
     const created = harness.connectionCreate.mock.calls[0]?.[0]?.data as Record<string, unknown>;
     expect(created.patientIdEncrypted).toBe("sealed-patientId");
+    expect(created.fhirBaseUrlEncrypted).toBe("sealed-fhir-base-url");
     expect(created.retrievalGeneration).toBe(1);
+    expect(created).not.toHaveProperty("fhirBaseUrl");
     expect(created).not.toHaveProperty("patientIdHash");
     expect(harness.retrievalRunCreate).toHaveBeenCalledWith({
       data: expect.objectContaining({
@@ -227,7 +234,7 @@ function oauthSession() {
     consumedAt: null as Date | null,
     createdAt: new Date("2026-07-10T12:00:00.000Z"),
     expiresAt: new Date("2099-07-10T12:10:00.000Z"),
-    fhirBaseUrl: provider.fhirBaseUrl,
+    fhirBaseHash: createHash("sha256").update(provider.fhirBaseUrl).digest("hex"),
     memberId: MEMBER_ID,
     providerDirectoryEntryId: PROVIDER_ID,
     redirectUri: "https://join.example.test/api/clinical-records/oauth/callback",

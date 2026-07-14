@@ -378,7 +378,11 @@ async function runHostedClinicalRecordsSyncWakeLaneWithCancellation(input: {
   try {
     result = await importSnapshot({
       assertCurrent: async () => {
-        await assertClinicalRecordsRunCurrent({ input, port });
+        await assertClinicalRecordsRunCurrent({
+          allowAuthorizationRequired: checkpoint.authorizationRequired,
+          input,
+          port,
+        });
       },
       completedResourceTypes: checkpoint.completedResourceTypes,
       connectionId: run.connectionId,
@@ -518,6 +522,7 @@ async function terminalFailureAfterClearingCheckpoint(input: {
 }
 
 async function assertClinicalRecordsRunCurrent(input: {
+  allowAuthorizationRequired: boolean;
   input: {
     signal: AbortSignal | null;
     shouldYieldClinicalRecords?: (() => boolean) | null;
@@ -535,6 +540,13 @@ async function assertClinicalRecordsRunCurrent(input: {
   );
   const response = parseHostedClinicalRecordsReadRunResponse(payload);
   if (response.status === "unavailable") {
+    if (
+      input.allowAuthorizationRequired
+      && response.errorCode === HOSTED_CLINICAL_RECORDS_AUTHORIZATION_REQUIRED_ERROR_CODE
+    ) {
+      throwIfPreempted(input.input);
+      return;
+    }
     if (response.retryable) {
       throw new HostedClinicalRecordsRuntimeError(
         "CLINICAL_RECORDS_RUN_RETRYABLE",

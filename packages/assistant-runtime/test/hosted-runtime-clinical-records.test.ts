@@ -254,22 +254,31 @@ describe("hosted clinical records maintenance", () => {
         retryable: false,
         status: "unavailable",
       });
-    const port = createPort({
-      fetchPage,
-      readRun: vi.fn().mockResolvedValue({ run: multiFamilyRun, status: "ready" }),
-    });
-    const importSnapshot = vi.fn().mockResolvedValue({
-      canonical: {
-        applied: false,
-        createdCount: 0,
-        retractedCount: 0,
-        skippedExistingCount: 0,
-        supersededCount: 0,
-      },
-      executableDecisionCount: 0,
-      manifestPath: "raw/clinical/fhir/connection_1/clinical_run_1/manifest.json",
-      rawFileCount: 3,
-      reviewDecisionCount: 0,
+    const readRun = vi.fn()
+      .mockResolvedValueOnce({ run: multiFamilyRun, status: "ready" })
+      .mockResolvedValueOnce({
+        errorCode: HOSTED_CLINICAL_RECORDS_AUTHORIZATION_REQUIRED_ERROR_CODE,
+        retryable: false,
+        status: "unavailable",
+      });
+    const port = createPort({ fetchPage, readRun });
+    const importSnapshot = vi.fn<
+      NonNullable<Parameters<typeof runHostedClinicalRecordsSyncWakeLane>[0]["importSnapshot"]>
+    >(async (snapshot) => {
+      await snapshot.assertCurrent?.();
+      return {
+        canonical: {
+          applied: false,
+          createdCount: 0,
+          retractedCount: 0,
+          skippedExistingCount: 0,
+          supersededCount: 0,
+        },
+        executableDecisionCount: 0,
+        manifestPath: "raw/clinical/fhir/connection_1/clinical_run_1/manifest.json",
+        rawFileCount: 3,
+        reviewDecisionCount: 0,
+      };
     });
 
     const result = await runHostedClinicalRecordsSyncWakeLane({
@@ -280,6 +289,7 @@ describe("hosted clinical records maintenance", () => {
     });
 
     expect(fetchPage).toHaveBeenCalledTimes(2);
+    expect(readRun).toHaveBeenCalledTimes(2);
     expect(importSnapshot).toHaveBeenCalledWith(expect.objectContaining({
       completedResourceTypes: ["Observation"],
       errors: [

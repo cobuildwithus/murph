@@ -24,6 +24,7 @@ import {
 import { resolveClinicalProviderDirectoryEntry } from "./provider-directory-store";
 import {
   openClinicalOauthVerifier,
+  sealClinicalConnectionFhirBaseUrl,
   sealClinicalConnectionSecret,
   sealClinicalOauthVerifier,
   toClinicalJsonArray,
@@ -96,7 +97,7 @@ export async function startClinicalRecordConnection(input: {
           connectIntentClaimHash: intent.claimHash,
           createdAt: now,
           expiresAt,
-          fhirBaseUrl: provider.fhirBaseUrl,
+          fhirBaseHash: createHash("sha256").update(provider.fhirBaseUrl).digest("hex"),
           memberId: auth.member.id,
           providerDirectoryEntryId: provider.id,
           redirectUri,
@@ -154,7 +155,7 @@ export async function finishClinicalRecordAuthorization(input: {
   }
 
   const provider = requireProviderEntry(session.providerDirectoryEntryId);
-  if (provider.fhirBaseUrl !== session.fhirBaseUrl) {
+  if (createHash("sha256").update(provider.fhirBaseUrl).digest("hex") !== session.fhirBaseHash) {
     throw clinicalRecordsError({
       code: "CLINICAL_RECORD_PROVIDER_CONFIGURATION_CHANGED",
       httpStatus: 409,
@@ -275,6 +276,12 @@ async function persistClinicalConnection(input: {
       const connectionId = generateOpaqueId(CLINICAL_CONNECTION_ID_PREFIX);
       const tokenVersion = 1;
       const retrievalGeneration = 1;
+      const fhirBaseUrlEncrypted = await sealClinicalConnectionFhirBaseUrl({
+        connectionId,
+        memberId: input.memberId,
+        prisma: tx,
+        value: input.provider.fhirBaseUrl,
+      });
       const patientIdEncrypted = await sealClinicalConnectionSecret({
         connectionId,
         field: "patientId",
@@ -312,7 +319,7 @@ async function persistClinicalConnection(input: {
         disconnectedAt: null,
         displayName: input.provider.brandName,
         fhirBaseHash: createHash("sha256").update(input.provider.fhirBaseUrl).digest("hex"),
-        fhirBaseUrl: input.provider.fhirBaseUrl,
+        fhirBaseUrlEncrypted,
         grantedScopesJson: toClinicalJsonArray(input.token.grantedScopes),
         id: connectionId,
         lastErrorCode: null,

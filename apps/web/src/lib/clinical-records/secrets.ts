@@ -8,6 +8,52 @@ import {
 type ClinicalSecretPrismaClient = Parameters<typeof sealHostedUserSecureBoxString>[0]["prisma"];
 type ClinicalConnectionSecretField = "accessToken" | "patientId" | "refreshToken";
 
+export async function sealClinicalConnectionFhirBaseUrl(input: {
+  connectionId: string;
+  memberId: string;
+  prisma?: ClinicalSecretPrismaClient;
+  value: string;
+}): Promise<string> {
+  const sealed = await sealHostedUserSecureBoxString({
+    aad: {
+      field: "fhirBaseUrl",
+      purpose: "clinical-records-provider-endpoint",
+      rowId: input.connectionId,
+      table: "clinical_record_connection",
+    },
+    lane: "clinical-records-oauth",
+    prisma: input.prisma,
+    scope: `clinical-records:${input.connectionId}:fhirBaseUrl`,
+    userId: input.memberId,
+    value: input.value,
+  });
+  if (!sealed) throw new TypeError("Clinical Records provider endpoint encryption failed.");
+  return sealed;
+}
+
+export async function openClinicalConnectionFhirBaseUrl(input: {
+  connectionId: string;
+  encrypted: string;
+  memberId: string;
+  prisma?: ClinicalSecretPrismaClient;
+}): Promise<string> {
+  const opened = await openHostedUserSecureBoxString({
+    aad: {
+      field: "fhirBaseUrl",
+      purpose: "clinical-records-provider-endpoint",
+      rowId: input.connectionId,
+      table: "clinical_record_connection",
+    },
+    lane: "clinical-records-oauth",
+    prisma: input.prisma,
+    scope: `clinical-records:${input.connectionId}:fhirBaseUrl`,
+    userId: input.memberId,
+    value: input.encrypted,
+  });
+  if (!opened) throw new TypeError("Clinical Records provider endpoint decryption failed.");
+  return opened;
+}
+
 export async function sealClinicalPageCursor(input: {
   generation: number;
   memberId: string;

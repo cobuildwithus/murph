@@ -11,6 +11,7 @@ import type { HostedClinicalRecordsFetchPageRequest } from "@murphai/hosted-exec
 
 const mocks = vi.hoisted(() => ({
   getPrisma: vi.fn(),
+  openClinicalConnectionFhirBaseUrl: vi.fn(),
   openClinicalConnectionSecret: vi.fn(),
   openClinicalPageCursor: vi.fn(),
   refreshSmartAccessToken: vi.fn(),
@@ -20,6 +21,7 @@ const mocks = vi.hoisted(() => ({
 
 vi.mock("@/src/lib/prisma", () => ({ getPrisma: mocks.getPrisma }));
 vi.mock("@/src/lib/clinical-records/secrets", () => ({
+  openClinicalConnectionFhirBaseUrl: mocks.openClinicalConnectionFhirBaseUrl,
   openClinicalConnectionSecret: mocks.openClinicalConnectionSecret,
   openClinicalPageCursor: mocks.openClinicalPageCursor,
   sealClinicalConnectionSecret: mocks.sealClinicalConnectionSecret,
@@ -65,6 +67,63 @@ describe("Clinical Records retrieval control plane", () => {
     expect(result.status).toBe("ready");
     if (result.status !== "ready") throw new Error("Expected a ready Clinical Records run.");
     expect(result.run.patientIdHash).toBe(hashClinicalFhirPatientId("patient-1"));
+  });
+
+  it("lets transient patient-context decryption failures remain retryable", async () => {
+    createHarness(["Patient", "Observation"]);
+    mocks.openClinicalConnectionSecret.mockRejectedValueOnce(
+      new Error("Transient secure-box failure."),
+    );
+
+    await expect(readClinicalRetrievalRun({
+      generation: 1,
+      memberId: MEMBER_ID,
+      runId: RUN_ID,
+    })).rejects.toThrow("Transient secure-box failure.");
+  });
+
+  it("lets transient cursor decryption failures remain retryable", async () => {
+    createHarness(["Patient", "Observation"]);
+    mocks.openClinicalPageCursor.mockRejectedValueOnce(
+      new Error("Transient cursor decryption failure."),
+    );
+    const fetchImpl = vi.fn();
+
+    await expect(fetchClinicalRetrievalPage({
+      fetchImpl,
+      memberId: MEMBER_ID,
+      request: pageRequest({
+        cursor: "encrypted-cursor",
+        requestId: "request_transient_cursor",
+        resourceType: "Observation",
+      }),
+    })).rejects.toThrow("Transient cursor decryption failure.");
+    expect(fetchImpl).not.toHaveBeenCalled();
+  });
+
+  it("lets transient cursor encryption failures remain retryable", async () => {
+    const harness = createHarness(["Patient", "Observation"]);
+    mocks.sealClinicalPageCursor.mockRejectedValueOnce(
+      new Error("Transient cursor encryption failure."),
+    );
+
+    await expect(fetchClinicalRetrievalPage({
+      fetchImpl: vi.fn().mockResolvedValue(fhirResponse({
+        entry: [],
+        link: [{
+          relation: "next",
+          url: "https://fhir.example.test/FHIR/R4/Observation?page=2",
+        }],
+        resourceType: "Bundle",
+        type: "searchset",
+      })),
+      memberId: MEMBER_ID,
+      request: pageRequest({
+        requestId: "request_transient_cursor_seal",
+        resourceType: "Observation",
+      }),
+    })).rejects.toThrow("Transient cursor encryption failure.");
+    expect(harness.state.run.pageCount).toBe(0);
   });
 
   it("preserves an Epic Bundle next link and returns a hash only for the continuation page", async () => {
@@ -455,6 +514,15 @@ describe("Clinical Records retrieval control plane", () => {
       status: "needs_reauth",
     });
     expect(unauthorized.state.run.status).toBe("needs_reauth");
+    await expect(readClinicalRetrievalRun({
+      generation: 1,
+      memberId: MEMBER_ID,
+      runId: RUN_ID,
+    })).resolves.toEqual({
+      errorCode: "authorization-required",
+      retryable: false,
+      status: "unavailable",
+    });
   });
 
   it("cancels an oversized FHIR stream even when Content-Length is underreported", async () => {
@@ -933,6 +1001,9 @@ function createHarness(resourceTypes: string[]) {
     clinicalRecordRetrievalRun: runApi,
   };
   mocks.getPrisma.mockReturnValue(prisma);
+  mocks.openClinicalConnectionFhirBaseUrl.mockResolvedValue(
+    "https://fhir.example.test/FHIR/R4",
+  );
   mocks.openClinicalConnectionSecret.mockImplementation(async (input: { field: string }) => {
     if (input.field === "patientId") return "patient-1";
     if (input.field === "accessToken") return "access-token";
@@ -1041,7 +1112,7 @@ function buildRun(resourceTypes: string[]) {
       accessTokenExpiresAt: null as Date | null,
       clientId: "epic-client-id",
       fhirBaseHash: sha256Hex("https://fhir.example.test/FHIR/R4"),
-      fhirBaseUrl: "https://fhir.example.test/FHIR/R4",
+      fhirBaseUrlEncrypted: "encrypted-fhir-base-url",
       grantedScopesJson: ["patient/Patient.rs", "patient/Observation.rs"],
       id: CONNECTION_ID,
       memberId: MEMBER_ID,
