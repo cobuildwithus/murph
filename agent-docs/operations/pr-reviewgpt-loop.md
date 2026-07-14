@@ -10,12 +10,12 @@ across signed-in browser profiles without selecting a profile that is already
 locked without remote debugging. It does **not** run the local Codex
 `deep-review` pass.
 
-For PR-lane patch implementation, this loop is the final cross-cutting audit
-gate and replaces the default local `deep-review` pass. It does not replace the
-specialist `prompt-review`, `security-privacy-review`, `frontend-review`, or
-write-capable `coverage-write` passes triggered by
-`agent-docs/operations/completion-workflow.md`. For current-checkout work it is
-additive and does not satisfy, replace, or reorder any required local pass.
+For PR-lane patch implementation, this loop is the sole cross-cutting audit
+gate and replaces local `deep-review`. Never run both for the same completed
+change, including when the change is complex, sensitive, or the user asks for a
+final bug hunt. This loop does not replace the specialist `prompt-review`,
+`frontend-review`, or write-capable `coverage-write` passes triggered by
+`agent-docs/operations/completion-workflow.md`.
 
 For ReviewGPT-eligible PR-lane work, do not call the PR good to merge until the
 latest substantive round returns `ROUND_OUTCOME: PASS`, local triage has zero
@@ -96,9 +96,11 @@ final head remains a separate merge-readiness gate.
 Skip it for docs/process-only PRs, prompt-primary PRs, trivial copy-only
 changes, other low-risk changes that satisfy
 `agent-docs/operations/completion-workflow.md` § ReviewGPT Eligibility, or
-explicit current-task user opt-out. Prompt-primary PRs use the local
-`prompt-review` pass instead; run ReviewGPT only when non-prompt scope
-independently requires it or the current user explicitly asks for the loop.
+explicit current-task user opt-out. If ReviewGPT is opted out and the
+cross-cutting trigger still applies, route to local `deep-review` instead;
+never run both. Prompt-primary PRs use the local `prompt-review` pass instead;
+run ReviewGPT only when non-prompt scope independently requires it or the
+current user explicitly asks for the loop.
 
 ## One Round
 
@@ -338,10 +340,12 @@ the touched surface, push it, and use the ordinary review-loop rules.
 
 - For current-checkout work, never use this loop to satisfy local required
   completion audits; see `agent-docs/operations/completion-workflow.md`.
-- Do not use local Codex `deep-review`, Codex subagents, pasted text, connector
-  context, dirty-worktree context, ad hoc archives, or an unmanaged/non-ReviewGPT
-  browser profile for this PR gate unless the current user task explicitly
-  changes the route.
+- Do not run local Codex `deep-review` for a completed change that uses this PR
+  gate. An explicit request for deep review or a final bug hunt is fulfilled by
+  this cross-cutting ReviewGPT review and does not create a second pass.
+- Do not use other Codex subagents, pasted text, connector context,
+  dirty-worktree context, ad hoc archives, or an unmanaged/non-ReviewGPT browser
+  profile for this PR gate.
 - Do not commit each ReviewGPT round as a Markdown document. Response files
   under `audit-packages/` are local working artifacts and stay uncommitted.
   Agents may instead post a concise PR comment as each round is resolved,

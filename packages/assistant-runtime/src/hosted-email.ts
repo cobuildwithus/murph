@@ -1,3 +1,5 @@
+import { isHostedRuntimeNewsletterAuthorizationProof } from "@murphai/hosted-execution/runtime-control";
+
 export const hostedEmailSendTargetKindValues = ["explicit", "group", "thread"] as const;
 
 export type HostedEmailSendTargetKind = (typeof hostedEmailSendTargetKindValues)[number];
@@ -6,6 +8,7 @@ export interface HostedEmailSendRequest {
   html?: string | null;
   idempotencyKey?: string | null;
   message: string;
+  newsletterAuthorizationProof?: string | null;
   planGroupFanout?: boolean | null;
   replyToMessageId?: string | null;
   subject?: string | null;
@@ -32,6 +35,10 @@ export function parseHostedEmailSendRequest(value: unknown): HostedEmailSendRequ
     record.planGroupFanout ?? null,
     "Hosted email send request planGroupFanout",
   );
+  const newsletterAuthorizationProof =
+    readOptionalHostedEmailNewsletterAuthorizationProof(
+      record.newsletterAuthorizationProof ?? null,
+    );
 
   return {
     html: readOptionalHostedEmailSendRequestString(
@@ -46,6 +53,9 @@ export function parseHostedEmailSendRequest(value: unknown): HostedEmailSendRequ
       record.message,
       "Hosted email send request message",
     ),
+    ...(newsletterAuthorizationProof === null
+      ? {}
+      : { newsletterAuthorizationProof }),
     ...(planGroupFanout === null ? {} : { planGroupFanout }),
     replyToMessageId: readOptionalHostedEmailSendRequestString(
       record.replyToMessageId ?? null,
@@ -64,6 +74,20 @@ export function parseHostedEmailSendRequest(value: unknown): HostedEmailSendRequ
       "Hosted email send request targetKind",
     ),
   };
+}
+
+function readOptionalHostedEmailNewsletterAuthorizationProof(
+  value: unknown,
+): string | null {
+  if (value === null || value === undefined) {
+    return null;
+  }
+  if (!isHostedRuntimeNewsletterAuthorizationProof(value)) {
+    throw new TypeError(
+      "Hosted email send request newsletterAuthorizationProof must be a SHA-256 hex digest.",
+    );
+  }
+  return value;
 }
 
 function readOptionalHostedEmailSendRequestBoolean(

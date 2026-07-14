@@ -17,8 +17,6 @@ import {
   type HostedRuntimeGroupToolRequest,
   type HostedRuntimeGroupToolResponse,
   type HostedRuntimeGroupToolSelfOptOutContext,
-  type HostedRuntimeNewsletterScheduledAuthority,
-  type HostedRuntimeNewsletterToolRequest,
   type HostedWorkspaceCheckpointReason,
   type HostedRuntimeRedactedJson,
   type HostedRuntimeRedactedObject,
@@ -351,146 +349,6 @@ function resolveHostedGroupToolSelfOptOutContext(input: {
   }
 
   return eligible.size === 1 ? [...eligible.values()][0] ?? null : null;
-}
-
-export function createHostedNewsletterToolWithEmailSend(input: {
-  effectsPort: Pick<HostedRuntimePlatform["effectsPort"], "sendEmail">;
-  newsletterToolPort: NonNullable<HostedRuntimePlatform["newsletterToolPort"]>;
-  scheduledAutomationAuthority?: HostedRuntimeNewsletterScheduledAuthority | null;
-}): NonNullable<HostedRuntimePlatform["newsletterToolPort"]> {
-  return {
-    async request(request) {
-      if (request.action === "prepare") {
-        return await input.newsletterToolPort.request(request);
-      }
-
-      const scheduledAutomationAuthority =
-        input.scheduledAutomationAuthority ??
-        request.scheduledAutomationAuthority ??
-        null;
-      if (!scheduledAutomationAuthority) {
-        return {
-          action: "send",
-          result: {
-            status: "unavailable",
-            unavailableReason: "scheduled_automation_required",
-          },
-        };
-      }
-
-      const participants = await input.newsletterToolPort.request({
-        action: "prepare",
-        groupId: request.groupId,
-      });
-      if (participants.action !== "prepare") {
-        return {
-          action: "send",
-          result: {
-            status: "unavailable",
-            unavailableReason: "newsletter_preparation_unavailable",
-          },
-        };
-      }
-      if (participants.result.status !== "ok") {
-        return {
-          action: "send",
-          result: {
-            status: "unavailable",
-            unavailableReason: participants.result.unavailableReason,
-          },
-        };
-      }
-
-      const participantCount = participants.result.participants
-        .filter((participant) => participant.hasEmail)
-        .length;
-      const skippedNoEmailMemberIds = participants.result.participants
-        .filter((participant) => !participant.hasEmail)
-        .map((participant) => participant.memberId);
-      if (participantCount === 0) {
-        return {
-          action: "send",
-          result: {
-            participantCount: 0,
-            skippedNoEmailMemberIds,
-            status: "no_recipients",
-          },
-        };
-      }
-
-      let emailResult: Awaited<ReturnType<typeof input.effectsPort.sendEmail>>;
-      try {
-        emailResult = await input.effectsPort.sendEmail({
-          html: request.html,
-          idempotencyKey: buildHostedNewsletterEmailIdempotencyKey({
-            request,
-            scheduledAutomationAuthority,
-          }),
-          message: request.text ?? "Open this email in an HTML-capable mail client.",
-          subject: request.subject,
-          target: request.groupId,
-          targetKind: "group",
-        });
-      } catch {
-        return {
-          action: "send",
-          result: {
-            status: "unavailable",
-            unavailableReason: "send_failed",
-          },
-        };
-      }
-
-      if (emailResult?.delivery?.failedCount && emailResult.delivery.failedCount > 0) {
-        if (
-          emailResult.delivery.sentCount === 0 ||
-          emailResult.delivery.status === "failed"
-        ) {
-          return {
-            action: "send",
-            result: {
-              status: "unavailable",
-              unavailableReason: "send_failed",
-            },
-          };
-        }
-
-        return {
-          action: "send",
-          result: {
-            failedRecipientCount: emailResult.delivery.failedCount,
-            participantCount,
-            sentRecipientCount: emailResult.delivery.sentCount,
-            skippedNoEmailMemberIds,
-            status: "partial_failure",
-          },
-        };
-      }
-
-      return {
-        action: "send",
-        result: {
-          participantCount,
-          skippedNoEmailMemberIds,
-          status: "sent",
-        },
-      };
-    },
-  };
-}
-
-function buildHostedNewsletterEmailIdempotencyKey(
-  input: {
-    request: Extract<HostedRuntimeNewsletterToolRequest, { action: "send" }>;
-    scheduledAutomationAuthority: HostedRuntimeNewsletterScheduledAuthority;
-  },
-): string {
-  return [
-    "group-newsletter",
-    input.scheduledAutomationAuthority.automationId,
-    input.scheduledAutomationAuthority.occurrenceAt,
-    input.request.groupId,
-  ].join(":");
 }
 
 function resolveHostedGroupToolLinqThreadContext(
@@ -849,10 +707,7 @@ export async function runHostedWorkspaceAssistantPhase(
           : {}),
         ...(input.runtime.platform.newsletterToolPort
           ? {
-              newsletterTool: createHostedNewsletterToolWithEmailSend({
-                effectsPort: input.runtime.platform.effectsPort,
-                newsletterToolPort: input.runtime.platform.newsletterToolPort,
-              }),
+              newsletterTool: input.runtime.platform.newsletterToolPort,
             }
           : {}),
         ...(input.runtime.platform.planUsageToolPort

@@ -113,8 +113,8 @@ const ASSISTANT_CRON_BACKGROUND_MAINTENANCE_NON_REPLAYABLE_WORK_ERROR =
   'Assistant background maintenance stopped after provider work; occurrence consumed to avoid replay.'
 const ASSISTANT_CRON_FOREGROUND_YIELDED_ERROR =
   'Assistant cron yielded to fresh foreground input.'
-const ASSISTANT_CRON_NEWSLETTER_SEND_FAILED_ERROR =
-  'Group health newsletter email send failed for every recipient.'
+const ASSISTANT_CRON_NEWSLETTER_DELIVERY_FAILED_ERROR =
+  'Group health newsletter delivery did not complete.'
 const GROUP_HEALTH_NEWSLETTER_AUTOMATION_SLUG = 'group-health-newsletter'
 const GROUP_HEALTH_NEWSLETTER_FIRST_SEND_MINIMUM_OPT_OUT_WINDOW_MS =
   2 * 60 * 60 * 1000
@@ -782,6 +782,7 @@ async function executePreparedClaimedAssistantCronJob(
           const postTurnDeliveryFailure =
             resolveAssistantCronPostTurnDeliveryFailure({
               job: input.job,
+              occurrenceAt,
               result,
               trigger: input.trigger,
             })
@@ -1156,24 +1157,24 @@ function resolveAssistantCronScheduledNewsletterAuthority(input: {
 
 function resolveAssistantCronPostTurnDeliveryFailure(input: {
   job: ResolvedAssistantCronJob
+  occurrenceAt: string
   result: Awaited<ReturnType<typeof sendAssistantNotificationLocal>>
   trigger: AssistantCronTrigger
 }): string | null {
-  if (
-    input.trigger !== 'scheduled' ||
-    input.job.kind !== 'canonical' ||
-    input.job.source.kind !== 'automation' ||
-    input.job.source.schedule.kind !== 'cron' ||
-    input.job.source.slug !== GROUP_HEALTH_NEWSLETTER_AUTOMATION_SLUG
-  ) {
+  if (!resolveAssistantCronScheduledNewsletterAuthority({
+    job: input.job,
+    occurrenceAt: input.occurrenceAt,
+    trigger: input.trigger,
+  })) {
     return null
   }
 
   const newsletterSendResult =
     input.result.postTurnDeliveryExpectations?.newsletterSendResult ?? null
-  return newsletterSendResult?.status === 'unavailable' &&
-    newsletterSendResult.unavailableReason === 'send_failed'
-    ? ASSISTANT_CRON_NEWSLETTER_SEND_FAILED_ERROR
+  return !newsletterSendResult
+    || newsletterSendResult.status === 'unavailable'
+    || newsletterSendResult.status === 'accepted'
+    ? ASSISTANT_CRON_NEWSLETTER_DELIVERY_FAILED_ERROR
     : null
 }
 

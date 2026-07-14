@@ -187,37 +187,106 @@ describe('buildGroupSharedResult', () => {
     expect(result.members.find((member) => member.memberId === 'member-a')?.weeklyStats)
       .toContainEqual({
         currentWeekAvg: 12000,
-        deltaPercent: expect.closeTo((12000 - 8241) / 8241 * 100),
-        previousWeekAvg: 8241,
         stream: 'steps',
         unit: 'count',
       })
+    expect(result.members.find((member) => member.memberId === 'member-a')?.weeklyStats)
+      .not.toEqual(expect.arrayContaining([
+        expect.objectContaining({ previousWeekAvg: expect.anything() }),
+      ]))
   })
 
   it('summarizes selector-scoped activity records without newsletter-specific logic', async () => {
     await writeStore(fixtureStore())
 
     const result = await buildGroupWeeklyResult({
-      asOf: '2026-07-06T13:00:00.000Z',
+      asOf: '2026-07-05T13:00:00.000Z',
       vault,
     })
 
     expect(result.members.find((member) => member.memberId === 'member-a')?.weeklyStats)
       .toContainEqual({
-        currentWeekAvg: null,
-        deltaPercent: null,
-        previousWeekAvg: 8400,
+        currentWeekAvg: 8400,
         stream: RUNNING_DISTANCE_SCOPE_KEY,
         unit: 'meters',
       })
     expect(result.members.find((member) => member.memberId === 'member-b')?.weeklyStats)
       .toContainEqual({
-        currentWeekAvg: null,
-        deltaPercent: null,
-        previousWeekAvg: 2,
+        currentWeekAvg: 2,
         stream: RUNNING_SESSION_COUNT_SCOPE_KEY,
         unit: 'count',
       })
+  })
+
+  it('keeps broad activity and workout minutes as separate weekly streams', async () => {
+    const base = fixtureStore()
+    await writeStore({
+      ...base,
+      projections: {
+        ...base.projections,
+        'activity-days.v0': {
+          grantors: {
+            'member-a': grantor({
+              grantorMemberId: 'member-a',
+              projectionKind: 'activity-days.v0',
+              records: [
+                record({
+                  data: {
+                    date: '2026-07-06',
+                    metricKey: 'activity-minutes',
+                    unit: 'minutes',
+                    value: 60,
+                  },
+                  occurredAt: '2026-07-06T00:00:00.000Z',
+                  recordKey: '2026-07-06',
+                }),
+                record({
+                  data: {
+                    date: '2026-07-07',
+                    metricKey: 'activity-minutes',
+                    unit: 'minutes',
+                    value: 0,
+                  },
+                  occurredAt: '2026-07-07T00:00:00.000Z',
+                  recordKey: '2026-07-07',
+                }),
+              ],
+            }),
+          },
+        },
+        'workout-days.v0': {
+          grantors: {
+            'member-a': grantor({
+              grantorMemberId: 'member-a',
+              projectionKind: 'workout-days.v0',
+              records: [
+                record({
+                  data: {
+                    date: '2026-07-06',
+                    workoutCount: 1,
+                    workoutMinutes: 60,
+                  },
+                  occurredAt: '2026-07-06T00:00:00.000Z',
+                  recordKey: '2026-07-06',
+                }),
+              ],
+            }),
+          },
+        },
+      },
+    })
+
+    const result = await buildGroupWeeklyResult({
+      asOf: '2026-07-12T13:00:00.000Z',
+      vault,
+    })
+
+    expect(result.members.find((member) => member.memberId === 'member-a')?.weeklyStats)
+      .toEqual(expect.arrayContaining([
+        { currentWeekAvg: 30, stream: 'activity-minutes', unit: 'minutes' },
+        { currentWeekAvg: 60, stream: 'workout-minutes', unit: 'minutes' },
+        { currentWeekAvg: 1, stream: 'workout-count', unit: 'count' },
+      ]))
   })
 
   afterEach(async () => {
