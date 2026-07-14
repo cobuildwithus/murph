@@ -4821,19 +4821,10 @@ export async function importDeviceBatch({
         );
       }
       if (currentEventOwners.incomingNewerPreparedIds.has(preparedId)) {
-        const currentMaxRevision = eventIdentityContext.index.maxRevisionById.get(repairId)
-          ?? eventSpineRevision(current);
-        const repairRevision = currentMaxRevision + 1;
-        if (
-          !eventSpineRevisionsAreComplete(eventIdentityContext.index, repairId)
-          || repairRevision <= eventSpineRevision(baselineRecord)
-        ) {
-          throw new VaultError(
-            "INTEGRATION_INGEST_EVENT_MAPPING_AMBIGUOUS",
-            "Accepted device event revision has no unique historical placement.",
-          );
-        }
-        return repairRevision;
+        throw new VaultError(
+          "INTEGRATION_INGEST_EVENT_MAPPING_AMBIGUOUS",
+          "Accepted device event revision has no owner-issued historical placement proof.",
+        );
       }
       let candidateOffsets: Set<number> | undefined;
       for (const anchorPreparedId of owner.preparedIds) {
@@ -4884,13 +4875,10 @@ export async function importDeviceBatch({
         continue;
       }
       const repairRevision = historicalRepairRevision(entry.record.id, owner, repairId);
-      const incomingIsNewer = currentEventOwners.incomingNewerPreparedIds.has(entry.record.id);
       if (
         !Number.isSafeInteger(repairRevision)
         || repairRevision < 1
-        || (incomingIsNewer
-          ? repairRevision <= eventSpineRevision(current)
-          : repairRevision >= eventSpineRevision(current))
+        || repairRevision >= eventSpineRevision(current)
         || eventIdentityContext.index.revisionsById.get(repairId)?.has(repairRevision)
       ) {
         throw new VaultError(

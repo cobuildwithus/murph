@@ -2820,7 +2820,7 @@ test("exact repair rejects its prepared id when unrelated content occupies it", 
   );
 });
 
-test("exact corrected replay restores from a surviving anchor and rejects complete spine loss", async () => {
+test("exact corrected replay rejects an unproven surviving prefix and complete spine loss", async () => {
   const vaultRoot = await makeTempDirectory("murph-device-import-corrected-owner-repair");
   await initializeVault({ vaultRoot, createdAt: "2026-06-01T12:00:00.000Z" });
   const buildInput = (input: {
@@ -2864,40 +2864,38 @@ test("exact corrected replay restores from a surviving anchor and rejects comple
   assert.equal(v2.events[0]?.id, canonicalId);
   const [v1Row] = (await readJsonlRecords({ vaultRoot, relativePath: eventPath })) as EventRecord[];
   assert.ok(v1Row);
+  assert.ok(v2.ingestShardPath);
+  assert.ok(v2.auditPath);
+  const completeEventBytes = await fs.readFile(path.join(vaultRoot, eventPath));
+  const watchedPaths = [eventPath, v2.ingestShardPath, v2.auditPath];
 
   await fs.writeFile(path.join(vaultRoot, eventPath), `${JSON.stringify(v1Row)}\n`, "utf8");
-  const repaired = await importDeviceBatch(v2Input);
-  assert.ok(repaired.applied);
-  assert.ok(repaired.ingestShardPath);
-  assert.ok(repaired.auditPath);
-  assert.equal(repaired.events[0]?.id, canonicalId);
-  const repairedRows = (await readJsonlRecords({ vaultRoot, relativePath: eventPath })) as EventRecord[];
-  assert.deepEqual([...new Set(repairedRows.map((record) => record.id))], [canonicalId]);
-  const repairedLatest = repairedRows.at(-1);
-  assert.equal(
-    repairedLatest?.kind === "activity_session"
-      ? repairedLatest.durationMinutes
-      : undefined,
-    35,
+  const beforeRejectedPrefixRepair = await snapshotVaultFiles(vaultRoot);
+  await assert.rejects(
+    importDeviceBatch(v2Input),
+    (error) =>
+      error instanceof VaultError
+      && error.code === "INTEGRATION_INGEST_EVENT_MAPPING_AMBIGUOUS",
   );
-  assert.equal(repairedLatest?.externalRef?.version, "2026-06-04T20:30:00.000Z");
-  const repairedPaths = [...new Set([eventPath, repaired.ingestShardPath, repaired.auditPath])];
+  assert.deepEqual(await snapshotVaultFiles(vaultRoot), beforeRejectedPrefixRepair);
+
+  await fs.writeFile(path.join(vaultRoot, eventPath), completeEventBytes);
   const beforeConvergedReplay = await Promise.all(
-    repairedPaths.map((relativePath) => fs.readFile(path.join(vaultRoot, relativePath))),
+    watchedPaths.map((relativePath) => fs.readFile(path.join(vaultRoot, relativePath))),
   );
   const convergedReplay = await importDeviceBatch(v2Input);
   assert.equal(convergedReplay.applied, false);
   assert.equal(convergedReplay.auditPath, null);
   assert.deepEqual(
     await Promise.all(
-      repairedPaths.map((relativePath) => fs.readFile(path.join(vaultRoot, relativePath))),
+      watchedPaths.map((relativePath) => fs.readFile(path.join(vaultRoot, relativePath))),
     ),
     beforeConvergedReplay,
   );
 
   await fs.rm(path.join(vaultRoot, eventPath));
   const beforeRejectedRecreation = await Promise.all(
-    repairedPaths.slice(1).map((relativePath) =>
+    watchedPaths.slice(1).map((relativePath) =>
       fs.readFile(path.join(vaultRoot, relativePath))
     ),
   );
@@ -2910,7 +2908,7 @@ test("exact corrected replay restores from a surviving anchor and rejects comple
   await assert.rejects(fs.access(path.join(vaultRoot, eventPath)));
   assert.deepEqual(
     await Promise.all(
-      repairedPaths.slice(1).map((relativePath) =>
+      watchedPaths.slice(1).map((relativePath) =>
         fs.readFile(path.join(vaultRoot, relativePath))
       ),
     ),
@@ -8991,7 +8989,6 @@ test("importDeviceBatch replays stale-then-new, shared-role, and empty-role deli
     beforeReplay,
   );
 
-  const acceptedIngest = await readRequiredIntegrationIngest(vaultRoot, accepted.ingestId);
   const completeEventBytes = await fs.readFile(path.join(vaultRoot, eventShardPath));
   const survivingPrefixRows = (await readJsonlRecords({
     vaultRoot,
@@ -9019,22 +9016,15 @@ test("importDeviceBatch replays stale-then-new, shared-role, and empty-role deli
     `${survivingRows.map((record) => JSON.stringify(record)).join("\n")}\n`,
     "utf8",
   );
-  const repaired = await importDeviceBatch(input);
-  assert.equal(repaired.applied, true);
-  assert.equal(repaired.events[0]?.id, canonicalEventId);
-  assert.equal(repaired.events[0]?.lifecycle?.revision, 3);
-  assert.deepEqual(
-    await readRequiredIntegrationIngest(vaultRoot, accepted.ingestId),
-    acceptedIngest,
+  const beforeRejectedTailRepair = await snapshotVaultFiles(vaultRoot);
+  await assert.rejects(
+    importDeviceBatch(input),
+    (error) =>
+      error instanceof VaultError
+      && error.code === "INTEGRATION_INGEST_EVENT_MAPPING_AMBIGUOUS",
   );
-  const repairedRows = (await readJsonlRecords({
-    vaultRoot,
-    relativePath: eventShardPath,
-  })) as EventRecord[];
-  assert.deepEqual(
-    repairedRows.map((record) => record.lifecycle?.revision ?? 1),
-    [1, 2, 3],
-  );
+  assert.deepEqual(await snapshotVaultFiles(vaultRoot), beforeRejectedTailRepair);
+  await fs.writeFile(path.join(vaultRoot, eventShardPath), completeEventBytes);
 
   const ambiguousInput = {
     ...input,
@@ -9202,6 +9192,202 @@ test("importDeviceBatch replays stale-then-new, shared-role, and empty-role deli
   assert.equal(protectedReplay.auditPath, null);
   assert.deepEqual(protectedReplay.events, []);
   assert.deepEqual(await snapshotVaultFiles(vaultRoot), beforeProtectedReplay);
+});
+
+test.each(["edit", "delete"] as const)(
+  "exact replay rejects incoming-newer repair after a lost %s suffix",
+  async (terminalMutation) => {
+    const vaultRoot = await makeTempDirectory(
+      `murph-device-import-lost-${terminalMutation}-suffix`,
+    );
+    await initializeVault({ vaultRoot, createdAt: "2026-01-01T12:00:00.000Z" });
+    const buildInput = (input: {
+      importedAt: string;
+      occurredAt: string;
+      role: string;
+      value: number;
+      version: string;
+    }) => ({
+      vaultRoot,
+      provider: "whoop",
+      accountId: `whoop_lost_${terminalMutation}_suffix`,
+      importedAt: input.importedAt,
+      events: [{
+        kind: "observation" as const,
+        occurredAt: input.occurredAt,
+        recordedAt: input.occurredAt,
+        title: "WHOOP recovery score",
+        externalRef: {
+          system: "whoop",
+          resourceType: "recovery",
+          resourceId: `lost-${terminalMutation}-suffix`,
+          version: input.version,
+          facet: "recovery-score",
+        },
+        evidenceRoles: [input.role],
+        fields: { metric: "recovery-score", value: input.value, unit: "%" },
+      }],
+      evidenceParts: [{
+        role: input.role,
+        fileName: `${input.role}.json`,
+        content: { value: input.value },
+      }],
+    });
+    const revisionOne = await importDeviceBatch(buildInput({
+      importedAt: "2026-01-31T20:00:00.000Z",
+      occurredAt: "2026-01-31T19:30:00.000Z",
+      role: `whoop-lost-${terminalMutation}-v1`,
+      value: 61,
+      version: "2026-01-31T20:00:00.000Z",
+    }));
+    const revisionTwoInput = buildInput({
+      importedAt: "2026-02-01T20:00:00.000Z",
+      occurredAt: "2026-02-01T19:30:00.000Z",
+      role: `whoop-lost-${terminalMutation}-v2`,
+      value: 72,
+      version: "2026-02-01T20:00:00.000Z",
+    });
+    const revisionTwo = await importDeviceBatch(revisionTwoInput);
+    const canonicalEvent = revisionTwo.events[0];
+    const januaryShardPath = revisionOne.eventShardPaths[0];
+    const februaryShardPath = revisionTwo.eventShardPaths[0];
+    assert.ok(canonicalEvent);
+    assert.ok(januaryShardPath?.includes("2026-01"));
+    assert.ok(februaryShardPath?.includes("2026-02"));
+    assert.equal(canonicalEvent.lifecycle?.revision, 2);
+
+    if (terminalMutation === "edit") {
+      await upsertEvent({
+        vaultRoot,
+        payload: {
+          ...canonicalEvent,
+          note: "Member correction after provider acceptance",
+          source: "manual",
+        },
+      });
+    } else {
+      await deleteEvent({ vaultRoot, eventId: canonicalEvent.id });
+    }
+    const februaryRows = (await readJsonlRecords({
+      vaultRoot,
+      relativePath: februaryShardPath,
+    })) as EventRecord[];
+    assert.deepEqual(
+      februaryRows.map((record) => record.lifecycle?.revision ?? 1),
+      [2, 3],
+    );
+
+    await fs.unlink(path.join(vaultRoot, februaryShardPath));
+    const beforeReplay = await snapshotVaultFiles(vaultRoot);
+    await assert.rejects(
+      importDeviceBatch(revisionTwoInput),
+      (error) => error instanceof VaultError
+        && error.code === "INTEGRATION_INGEST_EVENT_MAPPING_AMBIGUOUS",
+    );
+    assert.deepEqual(await snapshotVaultFiles(vaultRoot), beforeReplay);
+  },
+);
+
+test("exact replay rejects sibling incoming-newer members that would share a revision", async () => {
+  const vaultRoot = await makeTempDirectory("murph-device-import-sibling-repair-revision");
+  await initializeVault({ vaultRoot, createdAt: "2026-06-01T12:00:00.000Z" });
+  const buildEvent = (input: { role: string; value: number; version: string }) => ({
+    kind: "observation" as const,
+    occurredAt: "2026-06-03T07:30:00.000Z",
+    recordedAt: "2026-06-03T07:30:00.000Z",
+    title: "WHOOP recovery score",
+    externalRef: {
+      system: "whoop",
+      resourceType: "recovery",
+      resourceId: "sibling-repair-revision",
+      version: input.version,
+      facet: "recovery-score",
+    },
+    evidenceRoles: [input.role],
+    fields: { metric: "recovery-score", value: input.value, unit: "%" },
+  });
+  const importSingle = (input: {
+    importedAt: string;
+    role: string;
+    value: number;
+    version: string;
+  }) => importDeviceBatch({
+    vaultRoot,
+    provider: "whoop",
+    accountId: "whoop_sibling_repair_revision",
+    importedAt: input.importedAt,
+    events: [buildEvent(input)],
+    evidenceParts: [{
+      role: input.role,
+      fileName: `${input.role}.json`,
+      content: { value: input.value },
+    }],
+  });
+  await importSingle({
+    importedAt: "2026-06-03T08:00:00.000Z",
+    role: "whoop-sibling-repair-v1",
+    value: 61,
+    version: "2026-06-03T08:00:00.000Z",
+  });
+  await importSingle({
+    importedAt: "2026-06-03T09:00:00.000Z",
+    role: "whoop-sibling-repair-v2",
+    value: 72,
+    version: "2026-06-03T09:00:00.000Z",
+  });
+  const replayInput = {
+    vaultRoot,
+    provider: "whoop",
+    accountId: "whoop_sibling_repair_revision",
+    importedAt: "2026-06-03T11:00:00.000Z",
+    events: [
+      buildEvent({
+        role: "whoop-sibling-repair-v3",
+        value: 83,
+        version: "2026-06-03T10:00:00.000Z",
+      }),
+      buildEvent({
+        role: "whoop-sibling-repair-v4",
+        value: 91,
+        version: "2026-06-03T11:00:00.000Z",
+      }),
+    ],
+    evidenceParts: [
+      {
+        role: "whoop-sibling-repair-v3",
+        fileName: "whoop-sibling-repair-v3.json",
+        content: { value: 83 },
+      },
+      {
+        role: "whoop-sibling-repair-v4",
+        fileName: "whoop-sibling-repair-v4.json",
+        content: { value: 91 },
+      },
+    ],
+  } as const;
+  const accepted = await importDeviceBatch(replayInput);
+  const eventShardPath = accepted.eventShardPaths[0];
+  assert.ok(eventShardPath);
+  assert.deepEqual(
+    accepted.events.map((event) => event.lifecycle?.revision),
+    [3, 4],
+  );
+  const survivingRows = (await readJsonlRecords({
+    vaultRoot,
+    relativePath: eventShardPath,
+  }) as EventRecord[]).filter((record) => (record.lifecycle?.revision ?? 1) <= 2);
+  await fs.writeFile(
+    path.join(vaultRoot, eventShardPath),
+    `${survivingRows.map((record) => JSON.stringify(record)).join("\n")}\n`,
+    "utf8",
+  );
+  const beforeReplay = await snapshotVaultFiles(vaultRoot);
+  await assert.rejects(
+    importDeviceBatch(replayInput),
+    (error) => error instanceof VaultError
+      && error.code === "INTEGRATION_INGEST_EVENT_MAPPING_AMBIGUOUS",
+  );
+  assert.deepEqual(await snapshotVaultFiles(vaultRoot), beforeReplay);
 });
 
 test("exact replay rejects a missing accepted middle revision without a stored-proven anchor", async () => {
