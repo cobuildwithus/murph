@@ -5517,9 +5517,9 @@ describe("hostedRunnerIntercept", () => {
     const validateRuntimeWriteFence = vi.fn(async () => true);
 
     const response = await hostedRunnerIntercept(
-      new Request("http://127.0.0.1:4011/bot__cloudflare_injected__/sendMessage", {
+      new Request("http://127.0.0.1:4011/bot__cloudflare_injected__/getFile?file_id=file_1", {
         headers: BOUND_USER_WRITE_FENCE_HEADERS,
-        method: "POST",
+        method: "GET",
       }),
       createInterceptEnv({
         TELEGRAM_API_BASE_URL: "http://127.0.0.1:4011",
@@ -5531,7 +5531,9 @@ describe("hostedRunnerIntercept", () => {
 
     expect(response.status).toBe(200);
     const forwarded = readForwardedRequest(fetchMock);
-    expect(forwarded.url).toBe("http://127.0.0.1:4011/bottelegram-worker-secret/sendMessage");
+    expect(forwarded.url).toBe(
+      "http://127.0.0.1:4011/bottelegram-worker-secret/getFile?file_id=file_1",
+    );
   });
 
   it("preserves the hosted-local container host alias for configured Telegram origins", async () => {
@@ -5540,9 +5542,9 @@ describe("hostedRunnerIntercept", () => {
     const validateRuntimeWriteFence = vi.fn(async () => true);
 
     const response = await hostedRunnerIntercept(
-      new Request("http://host.docker.internal:4011/bot__cloudflare_injected__/sendMessage", {
+      new Request("http://host.docker.internal:4011/bot__cloudflare_injected__/getFile?file_id=file_1", {
         headers: BOUND_USER_WRITE_FENCE_HEADERS,
-        method: "POST",
+        method: "GET",
       }),
       createInterceptEnv({
         HOSTED_EXECUTION_RUNNER_HOST_ALIAS: "host.docker.internal",
@@ -5561,7 +5563,7 @@ describe("hostedRunnerIntercept", () => {
     });
     const forwarded = readForwardedRequest(fetchMock);
     expect(forwarded.url).toBe(
-      "http://host.docker.internal:4011/bottelegram-worker-secret/sendMessage",
+      "http://host.docker.internal:4011/bottelegram-worker-secret/getFile?file_id=file_1",
     );
     expect(forwarded.headers.has("x-hosted-runtime-attempt-id")).toBe(false);
     expect(forwarded.headers.has(HOSTED_RUNNER_BOUND_USER_ID_HEADER)).toBe(false);
@@ -5596,9 +5598,9 @@ describe("hostedRunnerIntercept", () => {
     const validateRuntimeWriteFence = vi.fn(async () => true);
 
     const response = await hostedRunnerIntercept(
-      new Request("https://telegram.example.test/proxy/tenant/bot__cloudflare_injected__/sendMessage", {
+      new Request("https://telegram.example.test/proxy/tenant/bot__cloudflare_injected__/getFile?file_id=file_1", {
         headers: BOUND_USER_WRITE_FENCE_HEADERS,
-        method: "POST",
+        method: "GET",
       }),
       createInterceptEnv({
         TELEGRAM_API_BASE_URL: "https://telegram.example.test/proxy/tenant/",
@@ -5616,7 +5618,7 @@ describe("hostedRunnerIntercept", () => {
     });
     const forwarded = readForwardedRequest(fetchMock);
     expect(forwarded.url).toBe(
-      "https://telegram.example.test/proxy/tenant/bottelegram-worker-secret/sendMessage",
+      "https://telegram.example.test/proxy/tenant/bottelegram-worker-secret/getFile?file_id=file_1",
     );
   });
 
@@ -5649,7 +5651,7 @@ describe("hostedRunnerIntercept", () => {
     const validateRuntimeWriteFence = vi.fn(async () => true);
 
     const response = await hostedRunnerIntercept(
-      new Request("https://api.telegram.org/bot__cloudflare_injected__/sendMessage", {
+      new Request("https://api.telegram.org/bot__cloudflare_injected__/getFile?file_id=file_1", {
         headers: {
           ...BOUND_USER_WRITE_FENCE_HEADERS,
           authorization: "Bearer user-supplied-telegram-token",
@@ -5657,7 +5659,7 @@ describe("hostedRunnerIntercept", () => {
           "proxy-authorization": "Bearer user-supplied-proxy-token",
           "x-api-key": "user-supplied-api-key",
         },
-        method: "POST",
+        method: "GET",
       }),
       createInterceptEnv({
         TELEGRAM_BOT_TOKEN: "telegram-worker-secret",
@@ -5673,7 +5675,9 @@ describe("hostedRunnerIntercept", () => {
       userId: "member_123",
     });
     const forwarded = readForwardedRequest(fetchMock);
-    expect(forwarded.url).toBe("https://api.telegram.org/bottelegram-worker-secret/sendMessage");
+    expect(forwarded.url).toBe(
+      "https://api.telegram.org/bottelegram-worker-secret/getFile?file_id=file_1",
+    );
     expect(forwarded.headers.has("x-hosted-runtime-attempt-id")).toBe(false);
     expect(forwarded.headers.has(HOSTED_RUNNER_BOUND_USER_ID_HEADER)).toBe(false);
     expect(forwarded.headers.has("authorization")).toBe(false);
@@ -5730,9 +5734,14 @@ describe("hostedRunnerIntercept", () => {
   });
 
   it.each([
-    ["former target", new Response(JSON.stringify({ authorized: false }))],
-    ["unavailable authority", new Response(null, { status: 503 })],
-  ])("rejects bot-bound Telegram egress for a %s", async (_scenario, authorityResponse) => {
+    ["former target", new Response(JSON.stringify({ authorized: false })), 403],
+    ["unavailable authority", new Response(null, { status: 503 }), 503],
+    ["malformed authority response", new Response("not-json"), 503],
+  ])("rejects bot-bound Telegram egress for a %s", async (
+    _scenario,
+    authorityResponse,
+    expectedStatus,
+  ) => {
     const fetchMock = vi.fn<typeof fetch>(async () => authorityResponse.clone());
     vi.stubGlobal("fetch", fetchMock);
     const validateRuntimeWriteFence = vi.fn(async () => true);
@@ -5755,7 +5764,7 @@ describe("hostedRunnerIntercept", () => {
       { containerId: "opaque-container-id" },
     );
 
-    expect(response.status).toBe(403);
+    expect(response.status).toBe(expectedStatus);
     expect(fetchMock).toHaveBeenCalledTimes(1);
     expect(findFetchCall(fetchMock, "api.telegram.org")).toBeUndefined();
   });
@@ -5895,7 +5904,7 @@ describe("hostedRunnerIntercept", () => {
     expect(findFetchCall(fetchMock, "api.telegram.org")).toBeDefined();
   });
 
-  it("fails closed when current-route authorization cannot be reached", async () => {
+  it("returns a retryable failure when current-route authorization cannot be reached", async () => {
     const fetchMock = vi.fn<typeof fetch>(async () => {
       throw new Error("control plane unavailable");
     });
@@ -5919,7 +5928,7 @@ describe("hostedRunnerIntercept", () => {
       { containerId: "opaque-container-id" },
     );
 
-    expect(response.status).toBe(403);
+    expect(response.status).toBe(503);
     expect(fetchMock).toHaveBeenCalledTimes(1);
     expect(findFetchCall(fetchMock, "api.telegram.org")).toBeUndefined();
   });
@@ -6031,14 +6040,14 @@ describe("hostedRunnerIntercept", () => {
     }) => createProviderEgressTokenValidationResult(input));
 
     const response = await hostedRunnerIntercept(
-      new Request("https://api.telegram.org/bot__cloudflare_injected__/sendMessage", {
+      new Request("https://api.telegram.org/bot__cloudflare_injected__/getFile?file_id=file_1", {
         headers: {
           ...BOUND_USER_PROVIDER_EGRESS_HEADERS,
           authorization: "Bearer user-supplied-telegram-token",
           cookie: "session=user-supplied-cookie",
           "x-api-key": "user-supplied-api-key",
         },
-        method: "POST",
+        method: "GET",
       }),
       createInterceptEnv({
         TELEGRAM_BOT_TOKEN: "telegram-worker-secret",
@@ -6055,7 +6064,9 @@ describe("hostedRunnerIntercept", () => {
       userId: "member_123",
     });
     const forwarded = readForwardedRequest(fetchMock);
-    expect(forwarded.url).toBe("https://api.telegram.org/bottelegram-worker-secret/sendMessage");
+    expect(forwarded.url).toBe(
+      "https://api.telegram.org/bottelegram-worker-secret/getFile?file_id=file_1",
+    );
     expect(forwarded.headers.has("authorization")).toBe(false);
     expect(forwarded.headers.has(HOSTED_PROVIDER_EGRESS_TOKEN_HEADER)).toBe(false);
     expect(forwarded.headers.has("cookie")).toBe(false);
@@ -6072,41 +6083,6 @@ describe("hostedRunnerIntercept", () => {
   });
 
   it.each([
-    {
-      method: "POST",
-      operation: "sendMessage",
-      query: "",
-    },
-    {
-      method: "POST",
-      operation: "sendPhoto",
-      query: "",
-    },
-    {
-      method: "POST",
-      operation: "sendVoice",
-      query: "",
-    },
-    {
-      method: "POST",
-      operation: "sendChatAction",
-      query: "",
-    },
-    {
-      method: "POST",
-      operation: "deleteMessages",
-      query: "",
-    },
-    {
-      method: "POST",
-      operation: "deleteBusinessMessages",
-      query: "",
-    },
-    {
-      method: "POST",
-      operation: "setMessageReaction",
-      query: "",
-    },
     {
       method: "GET",
       operation: "getFile",
@@ -6147,15 +6123,109 @@ describe("hostedRunnerIntercept", () => {
     },
   );
 
+  it.each([
+    [
+      "query-only routing",
+      () => new Request(
+        "https://api.telegram.org/bot__cloudflare_injected__/sendMessage?chat_id=789",
+        { headers: BOUND_USER_WRITE_FENCE_HEADERS, method: "POST" },
+      ),
+    ],
+    [
+      "bodyless mutation",
+      () => new Request(
+        "https://api.telegram.org/bot__cloudflare_injected__/sendMessage",
+        { headers: BOUND_USER_WRITE_FENCE_HEADERS, method: "POST" },
+      ),
+    ],
+    [
+      "wrong mutation method",
+      () => new Request(
+        "https://api.telegram.org/bot__cloudflare_injected__/sendMessage",
+        { headers: BOUND_USER_WRITE_FENCE_HEADERS, method: "GET" },
+      ),
+    ],
+    [
+      "wrong getFile method",
+      () => new Request(
+        "https://api.telegram.org/bot__cloudflare_injected__/getFile?file_id=file_1",
+        { headers: BOUND_USER_WRITE_FENCE_HEADERS, method: "POST" },
+      ),
+    ],
+    [
+      "unsupported content type",
+      () => new Request(
+        "https://api.telegram.org/bot__cloudflare_injected__/sendMessage",
+        {
+          body: "chat_id=789",
+          headers: {
+            ...BOUND_USER_WRITE_FENCE_HEADERS,
+            "content-type": "text/plain",
+            [HOSTED_TELEGRAM_DELIVERY_TARGET_HEADER]: "789",
+          },
+          method: "POST",
+        },
+      ),
+    ],
+    [
+      "malformed body",
+      () => new Request(
+        "https://api.telegram.org/bot__cloudflare_injected__/sendMessage",
+        {
+          body: "{",
+          headers: {
+            ...BOUND_USER_WRITE_FENCE_HEADERS,
+            "content-type": "application/json",
+            [HOSTED_TELEGRAM_DELIVERY_TARGET_HEADER]: "789",
+          },
+          method: "POST",
+        },
+      ),
+    ],
+    [
+      "duplicate routing field",
+      () => new Request(
+        "https://api.telegram.org/bot__cloudflare_injected__/sendMessage",
+        {
+          body: new URLSearchParams([
+            ["chat_id", "789"],
+            ["chat_id", "former-chat"],
+            ["text", "hello"],
+          ]),
+          headers: {
+            ...BOUND_USER_WRITE_FENCE_HEADERS,
+            [HOSTED_TELEGRAM_DELIVERY_TARGET_HEADER]: "789",
+          },
+          method: "POST",
+        },
+      ),
+    ],
+  ])("rejects Telegram mutation with %s", async (_scenario, createRequest) => {
+    const fetchMock = vi.fn<typeof fetch>(async () => new Response("unexpected"));
+    vi.stubGlobal("fetch", fetchMock);
+
+    const response = await hostedRunnerIntercept(
+      createRequest(),
+      createInterceptEnv({
+        TELEGRAM_BOT_TOKEN: "telegram-worker-secret",
+        validateRuntimeWriteFence: vi.fn(async () => true),
+      }),
+      { containerId: "opaque-container-id" },
+    );
+
+    expect(response.status).toBe(403);
+    expect(fetchMock).not.toHaveBeenCalled();
+  });
+
   it("maps default Telegram provider host egress to the configured upstream base", async () => {
     const fetchMock = vi.fn<typeof fetch>(async () => new Response("ok"));
     vi.stubGlobal("fetch", fetchMock);
     const validateRuntimeWriteFence = vi.fn(async () => true);
 
     const response = await hostedRunnerIntercept(
-      new Request("https://api.telegram.org/bot__cloudflare_injected__/sendMessage", {
+      new Request("https://api.telegram.org/bot__cloudflare_injected__/getFile?file_id=file_1", {
         headers: BOUND_USER_WRITE_FENCE_HEADERS,
-        method: "POST",
+        method: "GET",
       }),
       createInterceptEnv({
         TELEGRAM_API_BASE_URL: "https://telegram.example.test",
@@ -6172,7 +6242,9 @@ describe("hostedRunnerIntercept", () => {
       userId: "member_123",
     });
     const forwarded = readForwardedRequest(fetchMock);
-    expect(forwarded.url).toBe("https://telegram.example.test/bottelegram-worker-secret/sendMessage");
+    expect(forwarded.url).toBe(
+      "https://telegram.example.test/bottelegram-worker-secret/getFile?file_id=file_1",
+    );
   });
 
   it("requires the active write fence before rewriting Telegram getFile", async () => {
@@ -6354,9 +6426,9 @@ describe("hostedRunnerIntercept", () => {
     const validateRuntimeWriteFence = vi.fn(async () => true);
 
     const response = await hostedRunnerIntercept(
-      new Request("https://api.telegram.org/bot__cloudflare_injected__/sendMessage", {
+      new Request("https://api.telegram.org/bot__cloudflare_injected__/getFile?file_id=file_1", {
         headers: BOUND_USER_WRITE_FENCE_HEADERS,
-        method: "POST",
+        method: "GET",
       }),
       createInterceptEnv({
         LINQ_API_BASE_URL: "https://[",
@@ -6373,7 +6445,9 @@ describe("hostedRunnerIntercept", () => {
       userId: "member_123",
     });
     const forwarded = readForwardedRequest(fetchMock);
-    expect(forwarded.url).toBe("https://api.telegram.org/bottelegram-worker-secret/sendMessage");
+    expect(forwarded.url).toBe(
+      "https://api.telegram.org/bottelegram-worker-secret/getFile?file_id=file_1",
+    );
     expect(forwarded.headers.has("x-hosted-runtime-attempt-id")).toBe(false);
     expect(forwarded.headers.has(HOSTED_RUNNER_BOUND_USER_ID_HEADER)).toBe(false);
   });

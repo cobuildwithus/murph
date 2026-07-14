@@ -17,6 +17,10 @@ import {
 } from "./family-plan";
 import { readActiveHostedMemberAccess } from "./member-access";
 import {
+  buildHostedMemberChannelsUpdatedEventId,
+  enqueueHostedMemberChannelsUpdatedForActiveMemberTx,
+} from "./member-channel-sync";
+import {
   buildHostedTelegramMessagePayload,
   buildHostedTelegramWebhookEventId,
   parseHostedTelegramWebhookUpdate,
@@ -164,12 +168,21 @@ export async function planHostedOnboardingTelegramWebhook(input: {
     return buildIgnoredTelegramWebhookPlan("unsupported-update");
   }
 
-  await upsertHostedMemberTelegramRoutingBindingTx({
+  const routingUpdate = await upsertHostedMemberTelegramRoutingBindingTx({
     memberId: existingMember.id,
     prisma: input.prisma,
     telegramThreadId: telegramMessage.threadId,
     telegramUserId: summary.senderTelegramUserId,
   });
+  const channelUpdateSourceType = `telegram.webhook.route-change.${eventId}`;
+  const channelUpdateDispatch = routingUpdate.telegramThreadIdChanged
+    ? await enqueueHostedMemberChannelsUpdatedForActiveMemberTx({
+      memberId: existingMember.id,
+      occurredAt: summary.occurredAt,
+      prisma: input.prisma,
+      sourceType: channelUpdateSourceType,
+    })
+    : null;
   const mailboxAppend = await appendHostedMailboxEnvelopeTx({
     envelope: buildHostedExecutionTelegramConversationMessageWake({
       eventId,
@@ -187,10 +200,24 @@ export async function planHostedOnboardingTelegramWebhook(input: {
       ok: true,
       reason: "wake-appended-active-member",
     },
-    wakeHandoffs: [{
-      eventId, mailboxItemId: mailboxAppend.item.id, source: "telegram", userId: existingMember.id,
-      wakeMailboxCheckpoint: { lane: mailboxAppend.item.lane, laneSeq: mailboxAppend.item.laneSeq },
-    }],
+    wakeHandoffs: [
+      {
+        eventId, mailboxItemId: mailboxAppend.item.id, source: "telegram", userId: existingMember.id,
+        wakeMailboxCheckpoint: { lane: mailboxAppend.item.lane, laneSeq: mailboxAppend.item.laneSeq },
+      },
+      ...(channelUpdateDispatch
+        ? [{
+            eventId: buildHostedMemberChannelsUpdatedEventId({
+              memberId: existingMember.id,
+              occurredAt: summary.occurredAt,
+              sourceType: channelUpdateSourceType,
+            }),
+            mailboxItemId: channelUpdateDispatch.mailboxItemId,
+            source: "telegram" as const,
+            userId: existingMember.id,
+          }]
+        : []),
+    ],
   };
 }
 

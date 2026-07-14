@@ -2814,6 +2814,7 @@ describe("hosted-member-store", () => {
 
   it.each([
     {
+      expectedTelegramThreadIdChanged: false,
       expectedTelegramThreadId: "456:bot:123456",
       existingTelegramUserId: "456",
       existingTelegramThreadId: "456:bot:123456",
@@ -2822,6 +2823,7 @@ describe("hosted-member-store", () => {
       scenario: "preserves bot authority when direct authorization was not attempted",
     },
     {
+      expectedTelegramThreadIdChanged: true,
       expectedTelegramThreadId: null,
       existingTelegramUserId: "456",
       existingTelegramThreadId: "456:bot:123456",
@@ -2830,6 +2832,7 @@ describe("hosted-member-store", () => {
       scenario: "clears a rejected bot-authorized direct target",
     },
     {
+      expectedTelegramThreadIdChanged: false,
       expectedTelegramThreadId: "456:business:biz-42:dm-topic:9",
       existingTelegramUserId: "456",
       existingTelegramThreadId: "456:business:biz-42:dm-topic:9",
@@ -2838,6 +2841,7 @@ describe("hosted-member-store", () => {
       scenario: "preserves an inbound-observed target",
     },
     {
+      expectedTelegramThreadIdChanged: false,
       expectedTelegramThreadId: "456",
       existingTelegramUserId: "456",
       existingTelegramThreadId: "456",
@@ -2846,6 +2850,16 @@ describe("hosted-member-store", () => {
       scenario: "does not replace an inbound-observed target with direct authority",
     },
     {
+      expectedTelegramThreadIdChanged: true,
+      expectedTelegramThreadId: "456",
+      existingTelegramUserId: "456",
+      existingTelegramThreadId: "456:bot:123456",
+      incomingTelegramThreadId: "456",
+      incomingTelegramUserId: "456",
+      scenario: "promotes an inbound-observed route over bot-bound direct authority",
+    },
+    {
+      expectedTelegramThreadIdChanged: true,
       expectedTelegramThreadId: null,
       existingTelegramUserId: "456",
       existingTelegramThreadId: "456:bot:123456",
@@ -2854,6 +2868,7 @@ describe("hosted-member-store", () => {
       scenario: "does not preserve unavailable authority from a different Telegram identity",
     },
   ])("$scenario", async ({
+    expectedTelegramThreadIdChanged,
     expectedTelegramThreadId,
     existingTelegramUserId,
     existingTelegramThreadId,
@@ -2883,11 +2898,15 @@ describe("hosted-member-store", () => {
       },
     } as never;
 
-    await upsertHostedMemberTelegramRoutingBindingTx({
+    const result = await upsertHostedMemberTelegramRoutingBindingTx({
       memberId: "member_123",
       prisma,
       telegramThreadId: incomingTelegramThreadId,
       telegramUserId: incomingTelegramUserId,
+    });
+
+    expect(result).toEqual({
+      telegramThreadIdChanged: expectedTelegramThreadIdChanged,
     });
 
     const upsertCall = upsert.mock.calls[0]?.[0] as {

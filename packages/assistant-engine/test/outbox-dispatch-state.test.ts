@@ -144,8 +144,12 @@ describe('assistant outbox dispatch-state', () => {
       const failed = await updateAssistantOutboxAfterDispatchFailure({
         deliveryMayHaveSucceeded: false,
         deliveryTransportIdempotent: false,
-        error: Object.assign(new Error('network timeout'), {
-          retryable: true,
+        error: Object.assign(new Error('Telegram current-route authority unavailable'), {
+          code: 'ASSISTANT_TELEGRAM_DELIVERY_FAILED',
+          context: {
+            assistantDeliveryFailureClass: 'transient',
+            status: 503,
+          },
         }),
         failedAt,
         intentPath: resolveAssistantOutboxIntentPath(paths.outboxDirectory, sending.intentId),
@@ -164,6 +168,39 @@ describe('assistant outbox dispatch-state', () => {
       const diagnostics = await readAssistantDiagnosticsSnapshot(vault)
       expect(diagnostics.updatedAt).toBe(failed.updatedAt)
       expect(diagnostics.lastEventAt).toBe(failed.updatedAt)
+    })
+  })
+
+  it('does not retry Telegram current-route authority denials', async () => {
+    await withTempVault(async (vault) => {
+      const sending = await createSendingIntent({
+        attemptCount: 1,
+        channel: 'telegram',
+        vault,
+      })
+      const paths = resolveAssistantStatePaths(vault)
+
+      const failed = await updateAssistantOutboxAfterDispatchFailure({
+        deliveryMayHaveSucceeded: false,
+        deliveryTransportIdempotent: false,
+        error: Object.assign(new Error('Telegram current-route authority denied'), {
+          code: 'ASSISTANT_TELEGRAM_DELIVERY_FAILED',
+          context: {
+            status: 403,
+          },
+        }),
+        failedAt: new Date('2030-04-13T00:00:50.000Z'),
+        intentPath: resolveAssistantOutboxIntentPath(paths.outboxDirectory, sending.intentId),
+        sending,
+        vault,
+      })
+
+      expect(failed.status).toBe('failed')
+      expect(failed.nextAttemptAt).toBeNull()
+
+      const persisted = await readAssistantOutboxIntent(vault, sending.intentId)
+      expect(persisted?.status).toBe('failed')
+      expect(persisted?.nextAttemptAt).toBeNull()
     })
   })
 

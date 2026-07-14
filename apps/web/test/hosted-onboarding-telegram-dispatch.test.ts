@@ -818,7 +818,104 @@ describe("handleHostedOnboardingTelegramWebhook", () => {
         }),
       }),
     );
+    expect(mocks.enqueueHostedExecutionOutbox).toHaveBeenCalledWith(
+      expect.objectContaining({
+        envelope: expect.objectContaining({
+          eventId: expect.stringContaining(
+            "member.channels.updated:telegram.webhook.route-change.telegram:update:654:member_telegram_123:",
+          ),
+          kind: "member.channels.updated",
+        }),
+      }),
+    );
     expect(hostedMemberRoutingUpsert).toHaveBeenCalledTimes(1);
+  });
+
+  it("publishes a channel update when inbound Telegram authority replaces a bot-bound route", async () => {
+    mocks.runtimeEnv.telegramWebhookSecret = "telegram-secret";
+    const existingTelegramPrivateColumns = await buildHostedMemberRoutingPrivateColumns({
+      linqChatId: null,
+      linqRecipientPhone: null,
+      memberId: "member_telegram_123",
+      pendingLinqChatId: null,
+      pendingLinqRecipientPhone: null,
+      telegramThreadId: "123:bot:123456",
+      telegramUserId: "456",
+    });
+    const hostedMemberRoutingUpsert = vi.fn().mockResolvedValue({});
+    const prisma = withPrismaTransaction({
+      hostedWebhookReceipt: {
+        create: vi.fn().mockResolvedValue({}),
+        findUnique: vi.fn().mockResolvedValue({
+          payloadJson: {
+            eventPayload: {
+              updateId: 656,
+            },
+            receiptState: {
+              attemptCount: 1,
+              status: "processing",
+            },
+          },
+        }),
+        updateMany: vi.fn().mockResolvedValue({ count: 1 }),
+      },
+      hostedMemberRouting: {
+        findUnique: vi.fn().mockResolvedValue({
+          member: {
+            billingStatus: HostedBillingStatus.active,
+            id: "member_telegram_123",
+            suspendedAt: null,
+          },
+          memberId: "member_telegram_123",
+          telegramUserIdEncrypted: existingTelegramPrivateColumns.telegramUserIdEncrypted,
+        }),
+        upsert: hostedMemberRoutingUpsert,
+      },
+    });
+
+    await expect(handleHostedOnboardingTelegramWebhook({
+      prisma,
+      rawBody: JSON.stringify({
+        message: {
+          chat: {
+            id: 123,
+            type: "private",
+          },
+          date: 1_774_522_602,
+          from: {
+            first_name: "Alice",
+            id: 456,
+          },
+          message_id: 3,
+          text: "inbound authority",
+        },
+        update_id: 656,
+      }),
+      secretToken: "telegram-secret",
+    })).resolves.toMatchObject({
+      ok: true,
+      reason: "wake-appended-active-member",
+    });
+
+    const upsertCall = hostedMemberRoutingUpsert.mock.calls[0]?.[0] as {
+      update: {
+        telegramUserIdEncrypted: string;
+      };
+    };
+    await expect(readHostedMemberRoutingTelegramPrivateState({
+      memberId: "member_telegram_123",
+      telegramUserIdEncrypted: upsertCall.update.telegramUserIdEncrypted,
+    })).resolves.toEqual({
+      telegramThreadId: "123",
+      telegramUserId: "456",
+    });
+    expect(mocks.enqueueHostedExecutionOutbox).toHaveBeenCalledWith(
+      expect.objectContaining({
+        envelope: expect.objectContaining({
+          kind: "member.channels.updated",
+        }),
+      }),
+    );
   });
 
   it("preserves a richer persisted Telegram thread target when a later webhook only carries a plain DM thread", async () => {
@@ -902,6 +999,13 @@ describe("handleHostedOnboardingTelegramWebhook", () => {
       telegramThreadId: "123:business:biz-42:dm-topic:9",
       telegramUserId: "456",
     });
+    expect(mocks.enqueueHostedExecutionOutbox).not.toHaveBeenCalledWith(
+      expect.objectContaining({
+        envelope: expect.objectContaining({
+          kind: "member.channels.updated",
+        }),
+      }),
+    );
   });
 
   it("fails closed when Telegram lookup resolves to multiple members across rotated blind-index candidates", async () => {
@@ -1966,6 +2070,11 @@ function withPrismaTransaction<T extends Record<string, unknown>>(
         suspendedAt: null,
         threadContainer: null,
       })),
+    };
+  }
+  if (prismaWithTransaction.hostedMemberEmailAuthorization?.findUnique === undefined) {
+    prismaWithTransaction.hostedMemberEmailAuthorization = {
+      findUnique: vi.fn(async () => null),
     };
   }
   if (!prismaWithTransaction.hostedWebhookReceiptSideEffect?.deleteMany || !prismaWithTransaction.hostedWebhookReceiptSideEffect?.upsert) {

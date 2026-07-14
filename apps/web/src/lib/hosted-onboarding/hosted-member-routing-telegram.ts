@@ -24,7 +24,7 @@ export async function upsertHostedMemberTelegramRoutingBindingTx(input: {
   prisma: Prisma.TransactionClient;
   telegramThreadId?: string | null;
   telegramUserId: string;
-}): Promise<void> {
+}): Promise<{ telegramThreadIdChanged: boolean }> {
   const telegramUserLookupKey = createHostedTelegramUserLookupKey(input.telegramUserId);
 
   if (!telegramUserLookupKey) {
@@ -57,6 +57,7 @@ export async function upsertHostedMemberTelegramRoutingBindingTx(input: {
       })
       : null;
 
+  const nextTelegramThreadId = preferredTelegramThreadId ?? input.telegramThreadId ?? null;
   const routingPrivateColumns = await buildHostedMemberRoutingPrivateColumns({
     linqChatId: null,
     linqRecipientPhone: null,
@@ -65,7 +66,7 @@ export async function upsertHostedMemberTelegramRoutingBindingTx(input: {
     pendingLinqParticipantContact: null,
     pendingLinqRecipientPhone: null,
     prisma: input.prisma,
-    telegramThreadId: preferredTelegramThreadId ?? input.telegramThreadId ?? null,
+    telegramThreadId: nextTelegramThreadId,
     telegramUserId: input.telegramUserId,
   });
 
@@ -95,6 +96,11 @@ export async function upsertHostedMemberTelegramRoutingBindingTx(input: {
 
     throw error;
   }
+
+  return {
+    telegramThreadIdChanged:
+      (existingTelegramRouting?.telegramThreadId ?? null) !== nextTelegramThreadId,
+  };
 }
 
 export async function syncHostedMemberTelegramRoutingBinding(input: {

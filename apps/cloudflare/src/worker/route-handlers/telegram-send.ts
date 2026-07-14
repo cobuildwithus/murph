@@ -158,11 +158,30 @@ function readTelegramDirectAuthorizationFailureStatus(
   const record = readRecord(error);
   const context = readRecord(record?.context);
   const status = readHttpStatus(context?.status) ?? readHttpStatus(record?.status);
-  if (status === null || status === 408 || status === 429 || status >= 500) {
-    return "unavailable";
+  return isDefinitiveTelegramRecipientDenial({
+    message: normalizeErrorString(record?.message),
+    status,
+  })
+    ? "denied"
+    : "unavailable";
+}
+
+function isDefinitiveTelegramRecipientDenial(input: {
+  message: string | null;
+  status: number | null;
+}): boolean {
+  if ((input.status !== 400 && input.status !== 403) || !input.message) {
+    return false;
   }
 
-  return "denied";
+  const message = input.message.toLowerCase();
+  return message.includes("bot was blocked by the user")
+    || message.includes("bot can't initiate conversation with a user")
+    || message.includes("user is deactivated")
+    || message.includes("bot was kicked from the")
+    || message.includes("bot is not a member of the")
+    || message.includes("not enough rights to send")
+    || message.includes("chat not found");
 }
 
 async function handleTelegramUsageLimitNoticeRoute(

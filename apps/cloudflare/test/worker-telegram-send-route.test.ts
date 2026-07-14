@@ -292,6 +292,18 @@ describe("worker Telegram direct authorization route", () => {
 
   it.each([
     ["transport failure", new Error("Telegram transport unavailable")],
+    ["bot credential failure", Object.assign(new Error("Unauthorized"), {
+      context: { status: 401 },
+    })],
+    ["endpoint failure", Object.assign(new Error("Not Found"), {
+      context: { status: 404 },
+    })],
+    ["generic client failure", Object.assign(new Error("Bad Request"), {
+      context: { status: 400 },
+    })],
+    ["generic forbidden failure", Object.assign(new Error("Forbidden"), {
+      context: { status: 403 },
+    })],
     ["rate limit", Object.assign(new Error("Telegram rate limited"), {
       context: { status: 429 },
     })],
@@ -310,10 +322,13 @@ describe("worker Telegram direct authorization route", () => {
     await expect(response.json()).resolves.toEqual({ status: "unavailable" });
   });
 
-  it("returns denied only for a definitive provider rejection", async () => {
+  it.each([
+    ["blocked recipient", "Forbidden: bot was blocked by the user", 403],
+    ["missing recipient chat", "Bad Request: chat not found", 400],
+  ])("returns denied only for a definitive %s", async (_scenario, message, status) => {
     mocks.sendHostedProviderTelegramChatAction.mockRejectedValueOnce(
-      Object.assign(new Error("Telegram rejected the recipient"), {
-        context: { status: 403 },
+      Object.assign(new Error(message), {
+        context: { status },
       }),
     );
 

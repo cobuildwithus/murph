@@ -2818,13 +2818,22 @@ async function maybeHandleTelegramRequest(input: {
   if (apiPathMatch) {
     const operation = readTelegramSentinelOperation(apiPathMatch.pathnameSuffix);
     if (operation) {
-      if (!isAllowedTelegramOperation(operation)) {
+      const targetlessOperation = operation === "getFile";
+      if (
+        !isAllowedTelegramOperation(operation)
+        || targetlessOperation && input.request.method !== "GET"
+        || !targetlessOperation && (
+          input.request.method !== "POST"
+          || input.url.search.length > 0
+          || input.url.hash.length > 0
+        )
+      ) {
         return disallowedProviderEgress();
       }
       return await handleTelegramTokenRewrite(
         input,
         apiPathMatch,
-        operation !== "getFile",
+        !targetlessOperation,
         (token) => `/bot${token}/${operation}`,
       );
     }
@@ -2888,18 +2897,19 @@ async function handleTelegramTokenRewrite(
   }
   if (requiresDeliveryAuthorization) {
     const deliveryTarget = await readTelegramDeliveryTarget(input.request);
-    if (
-      deliveryTarget === null
-      || deliveryTarget !== undefined && (
-        !input.userId
-        || !await authorizeHostedTelegramDeliveryTarget({
-          deliveryTarget,
-          env: input.env,
-          userId: input.userId,
-        })
-      )
-    ) {
+    if (!deliveryTarget || !input.userId) {
       return disallowedProviderEgress();
+    }
+    const deliveryAuthorization = await authorizeHostedTelegramDeliveryTarget({
+      deliveryTarget,
+      env: input.env,
+      userId: input.userId,
+    });
+    if (deliveryAuthorization === "denied") {
+      return disallowedProviderEgress();
+    }
+    if (deliveryAuthorization === "unavailable") {
+      return unavailableProviderEgress();
     }
   }
   const upstreamUrl = createProviderUpstreamUrl(input.url, pathMatch);
@@ -3819,7 +3829,7 @@ async function authorizeHostedTelegramDeliveryTarget(input: {
   deliveryTarget: string;
   env: RunnerOutboundEnvironmentSource;
   userId: string;
-}): Promise<boolean> {
+}): Promise<"authorized" | "denied" | "unavailable"> {
   try {
     const environment = readHostedExecutionEnvironment(
       asWorkerStringEnvironment(input.env),
@@ -3834,12 +3844,17 @@ async function authorizeHostedTelegramDeliveryTarget(input: {
       timeoutMs: Math.min(environment.webControlTimeoutMs, 2_000),
     });
     if (!response.ok) {
-      return false;
+      return "unavailable";
     }
     const payload = await response.json().catch(() => null);
-    return readTelegramProviderRecord(payload)?.authorized === true;
+    const authorized = readTelegramProviderRecord(payload)?.authorized;
+    return authorized === true
+      ? "authorized"
+      : authorized === false
+        ? "denied"
+        : "unavailable";
   } catch {
-    return false;
+    return "unavailable";
   }
 }
 
@@ -3938,34 +3953,60 @@ async function readTelegramProviderRequestRouting(request: Request): Promise<{
   try {
     const contentType = request.headers.get("content-type")?.toLowerCase() ?? "";
     let readField: (name: string) => unknown;
+    let hasField: (name: string) => boolean;
     if (contentType.includes("application/json")) {
       const record = readTelegramProviderRecord(await request.clone().json());
       if (!record) {
         return null;
       }
       readField = (name) => record[name];
+      hasField = (name) => Object.hasOwn(record, name);
     } else if (
       contentType.includes("multipart/form-data")
       || contentType.includes("application/x-www-form-urlencoded")
     ) {
       const form = await request.clone().formData();
+      const routingFieldNames = [
+        "business_connection_id",
+        "chat_id",
+        "direct_messages_topic_id",
+        "message_thread_id",
+      ] as const;
+      if (routingFieldNames.some((name) => form.getAll(name).length > 1)) {
+        return null;
+      }
       readField = (name) => form.get(name);
+      hasField = (name) => form.has(name);
     } else {
       return null;
     }
 
+    const rawRouting = {
+      businessConnectionId: readField("business_connection_id"),
+      chatId: readField("chat_id"),
+      directMessagesTopicId: readField("direct_messages_topic_id"),
+      messageThreadId: readField("message_thread_id"),
+    };
     const routing = {
       businessConnectionId: normalizeTelegramProviderRoutingScalar(
-        readField("business_connection_id"),
+        rawRouting.businessConnectionId,
       ),
-      chatId: normalizeTelegramProviderRoutingScalar(readField("chat_id")),
+      chatId: normalizeTelegramProviderRoutingScalar(rawRouting.chatId),
       directMessagesTopicId: normalizeTelegramProviderRoutingScalar(
-        readField("direct_messages_topic_id"),
+        rawRouting.directMessagesTopicId,
       ),
       messageThreadId: normalizeTelegramProviderRoutingScalar(
-        readField("message_thread_id"),
+        rawRouting.messageThreadId,
       ),
     };
+    if (
+      hasField("business_connection_id") && routing.businessConnectionId === null
+      || hasField("chat_id") && routing.chatId === null
+      || hasField("direct_messages_topic_id") && routing.directMessagesTopicId === null
+      || hasField("message_thread_id") && routing.messageThreadId === null
+    ) {
+      return null;
+    }
     return routing.chatId || routing.businessConnectionId ? routing : null;
   } catch {
     return null;
@@ -4103,6 +4144,10 @@ function readRequiredInterceptSecret(value: unknown, label: string): string {
 
 function disallowedProviderEgress(): Response {
   return new Response("Forbidden", { status: 403 });
+}
+
+function unavailableProviderEgress(): Response {
+  return new Response("Service Unavailable", { status: 503 });
 }
 
 function readHostedDataApiUpstreamBaseUrl(
