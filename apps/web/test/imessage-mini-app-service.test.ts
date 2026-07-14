@@ -149,6 +149,38 @@ describe("iMessage mini-app service", () => {
     await expect(proofAction.requireCredential()).resolves.toEqual(ACTIVE_SESSION);
   });
 
+  it("fails closed for a branch-era Messages row stored under the historical unscoped hash", async () => {
+    const token = validMessagesToken();
+    const historicalTokenHash = createHash("sha256").update(token).digest("hex");
+    const store = createStore({
+      authenticateAgentSessionByTokenHash: vi.fn(async (candidateHash) => (
+        candidateHash === historicalTokenHash
+          ? {
+              status: "active" as const,
+              session: ACTIVE_SESSION,
+            }
+          : {
+              status: "missing" as const,
+              session: null,
+            }
+      )),
+    });
+    const proofAction = new IMessageMiniAppService({
+      request: createRequest(token),
+      store,
+    });
+
+    await expect(proofAction.requireCredential()).rejects.toMatchObject({
+      code: "IMESSAGE_MINI_APP_AUTH_INVALID",
+      httpStatus: 401,
+    });
+    expect(store.authenticateAgentSessionByTokenHash).toHaveBeenCalledTimes(1);
+    expect(store.authenticateAgentSessionByTokenHash).not.toHaveBeenCalledWith(
+      historicalTokenHash,
+      expect.any(String),
+    );
+  });
+
   it("accepts only an active Messages-scoped credential", async () => {
     const store = createStore();
     const service = new IMessageMiniAppService({
