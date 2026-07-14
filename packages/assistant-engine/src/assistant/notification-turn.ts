@@ -126,19 +126,9 @@ const ASSISTANT_NOTIFICATION_MAINTENANCE_TURN_PROFILE: Required<
   threadScope: 'isolated-thread',
   toolProfile: 'maintenance-turn',
 }
-const ASSISTANT_NOTIFICATION_NEWSLETTER_TURN_PROFILE: Required<
-  AssistantCodexTurnThreadScopeProfile
-> = {
-  nativeResumePolicy: 'disabled',
-  promptProfile: 'notification-decision',
-  threadScope: 'isolated-thread',
-  toolProfile: 'notification-turn',
-}
-const ASSISTANT_NOTIFICATION_MEMORY_ISOLATION_CODEX_CONFIG_OVERRIDES =
-  ['memories.use_memories=false', 'memories.generate_memories=false'] as const
-const ASSISTANT_NOTIFICATION_NEWSLETTER_CODEX_CONFIG_OVERRIDES = [
-  ...ASSISTANT_NOTIFICATION_MEMORY_ISOLATION_CODEX_CONFIG_OVERRIDES,
-  'features.shell_tool=false',
+const ASSISTANT_NOTIFICATION_MAINTENANCE_CODEX_CONFIG_OVERRIDES = [
+  'memories.use_memories=false',
+  'memories.generate_memories=false',
 ] as const
 
 export type AssistantNotificationDecision = z.infer<
@@ -1179,18 +1169,12 @@ function buildAssistantNotificationMessageInput(
   const maintenanceOverlay = isAssistantNotificationMaintenanceExactSkip(input)
     ? {
         codexConfigOverrides:
-          ASSISTANT_NOTIFICATION_MEMORY_ISOLATION_CODEX_CONFIG_OVERRIDES,
+          ASSISTANT_NOTIFICATION_MAINTENANCE_CODEX_CONFIG_OVERRIDES,
         suppressProviderFailureTranscriptAudit: true,
-      }
-    : {}
-  const newsletterOverlay = input.scheduledAutomationAuthority
-    ? {
-        codexConfigOverrides: ASSISTANT_NOTIFICATION_NEWSLETTER_CODEX_CONFIG_OVERRIDES,
       }
     : {}
   return {
     ...maintenanceOverlay,
-    ...newsletterOverlay,
     abortSignal: input.abortSignal,
     actorId: input.actorId,
     alias: input.alias,
@@ -1350,10 +1334,7 @@ function resolveAssistantNotificationProviderResumeStateAction(input: {
   input: AssistantNotificationInput
   providerResult: { codexThreadId?: string | null }
 }): AssistantProviderResumeStateAction {
-  if (
-    isAssistantNotificationMaintenanceExactSkip(input.input)
-    || input.input.scheduledAutomationAuthority
-  ) {
+  if (isAssistantNotificationMaintenanceExactSkip(input.input)) {
     return 'preserve-existing'
   }
 

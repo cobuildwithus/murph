@@ -96,14 +96,16 @@ share id no longer matches the final canonical grant result. The model never
 performs the authorization join and receives neither the grant snapshot nor its
 proof.
 
-Authorized newsletter cron turns use an isolated thread with native resume
-disabled, run without the Codex shell tool, and receive the newsletter skill
-in trusted system context. They therefore cannot inherit old group facts from
-committed transcript replay or bypass the filtered result with the unfiltered
-generic CLI reader. Ordinary group-chat turns retain their normal conversation
-thread and generic reader.
+Authorized newsletter cron turns keep the normal group conversation thread,
+native resume behavior, and shell/tool access. The automation instructions tell
+the assistant to read the newsletter skill and to use only the filtered
+`prepare.result.members` facts when writing that edition. This is an assistant
+instruction, not a provenance guarantee: conversation or tool context can still
+be visible to the model. The hard boundary is the late authorization proof,
+which constrains current preparation and recipients but does not prove that
+every model-authored sentence came only from the latest preparation.
 
-Each isolated scheduled turn owns a one-shot capability: exactly one preparation
+Each scheduled turn owns a one-shot capability: exactly one preparation
 attempt and at most one send attempt. Any failure or send closes it, so a model
 cannot compose from one snapshot, refresh the proof, and reuse the older body.
 Send persists the HTML body and address-free proof on a parent intent in the
@@ -121,9 +123,9 @@ occurrence identity are the immutable manifest for the occurrence. Safe
 pre-provider recipient failures may create new child intents, but those children
 copy the sent parent manifest instead of re-planning from a fresh model body.
 The sent parent manifest and terminal recipient evidence for the occurrence are
-retained outside normal terminal outbox pruning because canonical cron
-completion may need to replay after long downtime before it can mark the
-occurrence terminal. Sent and ambiguous children are never replayed, and a
+protected from normal terminal outbox pruning only while the canonical cron
+occurrence remains unresolved. Once it resolves, ordinary bounded retention
+applies. Sent and ambiguous children are never replayed, and a
 changed proof after a sent parent is terminal for that occurrence instead of
 authorizing a second payload under the same message identity. Missing
 prepare/send results and unavailable preparation are explicit retryable
@@ -227,14 +229,16 @@ Individual and self-service. A member says "take me off the newsletter" **in the
 - **Address visibility is by design** (shared reply-all thread) and authorized by the grant; consent copy must say plainly that the email is shared *with the group*. If in-group address privacy is ever required, the listserv/group-alias model hides addresses behind one group address (bigger build — see Open Items).
 - **Group-thread reply sender identity** uses the same web-owned `From`-address matching as the existing public-sender email lane; `From` spoofing is a shared, accepted residual of that model, with platform-level DKIM verification deferred because Cloudflare does not reliably expose `Authentication-Results` to Workers today.
 - **Health-data posture.** The disclosed reaction offer or join page is the health-sharing consent checkpoint. The announce + opt-out window is an additional protection before the first irreversible email exposure, not a substitute for grant disclosure. Review consent copy against `apps/web/src/lib/legal/consent.ts` and the FTC HBNR compliance docs before launch.
-- **Newsletter composition boundary.** Scheduled newsletter composition has no
-  prior conversation thread or shell capability and receives health facts only
-  through the trusted `prepare.result.members` result, filtered by current
-  email eligibility and exact live data-grant ids resolved after local
-  projection/timezone loading. Send requires a matching same-occurrence
-  preparation and carries its address-free proof to the final web callback,
-  which rechecks the complete authorization snapshot before provider entry, so
-  revoked facts cannot remain in an already-composed email. Before a sent parent
+- **Newsletter composition boundary.** Scheduled newsletter composition keeps
+  the normal group conversation and tools, while its instructions restrict the
+  edition's health facts to `prepare.result.members`. The runtime filters that
+  result by current email eligibility and exact live data-grant ids resolved
+  after local projection/timezone loading. Send requires a matching
+  same-occurrence preparation and carries its address-free proof to the final
+  web callback, which rechecks the complete authorization snapshot before
+  provider entry, so
+  revoked recipients cannot receive the already-composed email. This proof does
+  not establish model-content provenance. Before a sent parent
   exists, a proof mismatch prevents provider entry and the occurrence remains
   retryable through the outbox lifecycle. After a parent is sent, a later proof
   mismatch is terminal for that occurrence, and safe recipient retries copy the
@@ -265,7 +269,7 @@ the automation and grants.
    with destination-side ingestion and the newsletter send guard. The reusable
    current-week summary builder lives in `packages/query`; both the CLI and the
    trusted newsletter preparation path call it.
-4. `group-newsletter` skill + the automation it authors (group-chosen name as title, schedule as cron, tone in instruction text), including setup questions, announce-before-first-send + opt-out window, shell-disabled scheduled composition with the skill preloaded, and Murph taking part in email-thread replies via the existing inbound ingress.
+4. `group-newsletter` skill + the automation it authors (group-chosen name as title, schedule as cron, tone in instruction text), including setup questions, announce-before-first-send + opt-out window, normal group conversation/tool continuity during scheduled composition, and Murph taking part in email-thread replies via the existing inbound ingress.
 5. Latest-7-record vault-share projection delivery for weekly newsletter stats, still bounded by existing per-kind receiver retention.
 6. `?addEmail=true` settings deep-link + private missing-email reminder through the member's own Murph.
 

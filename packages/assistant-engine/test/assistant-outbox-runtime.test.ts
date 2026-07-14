@@ -36,6 +36,10 @@ import {
   saveAssistantOutboxIntent,
 } from '../src/assistant/outbox.ts'
 import { pruneAssistantTerminalOutboxIntents } from '../src/assistant/outbox/store.ts'
+import {
+  createAssistantCronCanonicalRuntimeRecord,
+  writeAssistantCronCanonicalRuntimeStore,
+} from '../src/assistant/cron/runtime-state.ts'
 import { ensureAssistantState } from '../src/assistant/store/persistence.ts'
 import { resolveAssistantStatePaths } from '../src/assistant/store/paths.ts'
 import {
@@ -1072,6 +1076,16 @@ describe('assistant outbox runtime', () => {
       updatedAt: '2026-03-01T00:07:00.000Z',
     })
 
+    const cronRecord = createAssistantCronCanonicalRuntimeRecord({
+      jobId: 'automation_newsletter',
+      now: '2026-03-01T00:00:00.000Z',
+    })
+    cronRecord.state.pendingOccurrenceAt = '2026-07-12T13:00:00.000Z'
+    await writeAssistantCronCanonicalRuntimeStore(paths, {
+      jobs: [cronRecord],
+      version: 1,
+    })
+
     await expect(
       pruneAssistantTerminalOutboxIntents({
         now: new Date('2026-04-20T12:00:00.000Z'),
@@ -1103,6 +1117,20 @@ describe('assistant outbox runtime', () => {
         }),
       ]),
     )
+
+    cronRecord.state.pendingOccurrenceAt = null
+    await writeAssistantCronCanonicalRuntimeStore(paths, {
+      jobs: [cronRecord],
+      version: 1,
+    })
+    await expect(
+      pruneAssistantTerminalOutboxIntents({
+        now: new Date('2026-04-20T12:00:00.000Z'),
+        paths,
+        vault: vaultRoot,
+      }),
+    ).resolves.toBe(3)
+    await expect(listAssistantOutboxIntentsLocal(vaultRoot)).resolves.toEqual([])
   })
 
   it('prunes terminal outbox intents by instant when timestamp offsets differ', async () => {

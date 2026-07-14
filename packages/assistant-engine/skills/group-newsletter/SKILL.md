@@ -40,8 +40,9 @@ turns may not have read the setup conversation or `group-chat`. Include:
 ## Compose each edition
 
 1. Use the current scheduled automation instructions so their exact name, tone,
-   and custom note govern this edition. Newsletter execution has no shell access;
-   do not try to read the vault or reload the automation.
+   and custom note govern this edition. Normal conversation and shell/tool
+   access remain available, but do not use them as alternate health-data sources
+   for the edition.
 2. Call `murph.newsletter` with `action="prepare"`. This returns recipient
    eligibility, the scheduled `referenceAt`, and `members` containing current-
    week facts only for currently eligible email recipients. The trusted runtime

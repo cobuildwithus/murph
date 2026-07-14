@@ -264,7 +264,7 @@ describe('assistant protocol index planning', () => {
       preferenceContext,
       profile: {
         promptProfile: 'notification-decision',
-        threadScope: 'isolated-thread',
+        threadScope: 'session-thread',
         toolProfile: 'notification-turn',
       },
       promptTimeContext,
@@ -272,16 +272,15 @@ describe('assistant protocol index planning', () => {
       session: createSession(),
       sharedPlan: createSharedPlan(),
     })
-    expect(scheduledNewsletterPlan.systemPrompt).toContain(
+    expect(scheduledNewsletterPlan.systemPrompt).not.toContain(
       'Trusted scheduled newsletter instructions',
     )
-    expect(scheduledNewsletterPlan.systemPrompt).toContain(
+    expect(scheduledNewsletterPlan.systemPrompt).not.toContain(
       '## Compose each edition',
     )
     expect(scheduledNewsletterPlan.systemPrompt).toContain(
-      'Newsletter execution has no shell access',
+      'same full read and write tools as an interactive Murph turn',
     )
-    expect(scheduledNewsletterPlan.systemPrompt).toMatch(/Use only\s+`members`/u)
 
     const conversationNotificationPlan = await resolveAssistantRouteTurnPlan({
       executionContext,

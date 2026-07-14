@@ -2175,23 +2175,18 @@ test('sendAssistantNotificationLocal returns skip decisions without delivering',
 
   expect(mocks.executeCodexTurnWithRecovery).toHaveBeenCalledWith(
     expect.objectContaining({
-      input: expect.objectContaining({
-        codexConfigOverrides: [
-          'memories.use_memories=false',
-          'memories.generate_memories=false',
-          'features.shell_tool=false',
-        ],
+      input: expect.not.objectContaining({
+        codexConfigOverrides: expect.anything(),
       }),
       profile: expect.objectContaining({
-        nativeResumePolicy: 'disabled',
-        threadScope: 'isolated-thread',
+        threadScope: 'session-thread',
         toolProfile: 'notification-turn',
       }),
     }),
   )
   expect(mocks.persistAssistantTurnAndSession).toHaveBeenCalledWith(
     expect.objectContaining({
-      providerResumeStateAction: 'preserve-existing',
+      providerResumeStateAction: 'persist-from-provider-turn',
     }),
   )
 

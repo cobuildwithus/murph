@@ -3745,6 +3745,142 @@ describe("hosted runtime callbacks", () => {
     ]);
   });
 
+  it("does not select newsletter recipients until their parent manifest is sent", async () => {
+    mocks.shouldDispatchAssistantOutboxIntent.mockImplementation((intent) =>
+      intent.status === "pending"
+      || intent.status === "retryable"
+      || intent.status === "sending"
+    );
+    const deliveryIdempotencyKey =
+      "group-newsletter:automation_123:2026-07-12T13:00:00.000Z:group_123";
+    const parentTarget = serializeHostedEmailThreadTarget({
+      groupId: "group_123",
+      subject: "Weekly health note",
+      targetKind: "group",
+    });
+    const childTarget = serializeHostedEmailThreadTarget({
+      groupId: "group_123",
+      recipientMemberId: "member_one",
+      subject: "Weekly health note",
+      targetKind: "group",
+    });
+    const shared = {
+      actorId: null,
+      bindingDelivery: null,
+      channel: "email",
+      deliveryIdempotencyKey,
+      deliveryTransportIdempotent: true,
+      identityId: null,
+      lastError: null,
+      media: [],
+      nextAttemptAt: "2026-07-12T13:00:00.000Z",
+      replyToMessageId: null,
+      sessionId: "session_newsletter",
+      subject: null,
+      threadId: null,
+      threadIsDirect: false,
+      turnId: "turn_newsletter",
+    } satisfies Partial<AssistantOutboxIntent>;
+    const parent = {
+      ...shared,
+      createdAt: "2026-07-12T13:00:00.000Z",
+      dedupeKey: "dedupe_newsletter_parent",
+      explicitTarget: parentTarget,
+      intentId: "intent_newsletter_parent",
+      message: "Weekly",
+      status: "retryable",
+    };
+    const child = {
+      ...shared,
+      createdAt: "2026-07-12T13:00:01.000Z",
+      dedupeKey: "dedupe_newsletter_child",
+      deliveryTransportIdempotent: false,
+      explicitTarget: childTarget,
+      intentId: "intent_newsletter_child",
+      message: "Weekly",
+      status: "pending",
+    };
+    mocks.listAssistantOutboxIntents.mockResolvedValue([parent, child]);
+
+    const sideEffects = await collectHostedAssistantDeliverySideEffects({
+      includeBackgroundDueIntents: true,
+      preferredIntentIds: [],
+      vaultRoot: "/tmp/vault",
+    });
+
+    expect(sideEffects.map((effect) => effect.effectId)).toEqual([
+      "intent_newsletter_parent",
+    ]);
+
+    mocks.listAssistantOutboxIntents.mockResolvedValue([
+      { ...parent, status: "sent" },
+      child,
+    ]);
+    const afterParentSent = await collectHostedAssistantDeliverySideEffects({
+      includeBackgroundDueIntents: true,
+      preferredIntentIds: [],
+      vaultRoot: "/tmp/vault",
+    });
+    expect(afterParentSent.map((effect) => effect.effectId)).toEqual([
+      "intent_newsletter_child",
+    ]);
+  });
+
+  it("abandons newsletter recipients whose parent manifest was not sent", async () => {
+    mocks.shouldDispatchAssistantOutboxIntent.mockImplementation((intent) =>
+      intent.status === "pending"
+      || intent.status === "retryable"
+      || intent.status === "sending"
+    );
+    const childTarget = serializeHostedEmailThreadTarget({
+      groupId: "group_123",
+      recipientMemberId: "member_one",
+      subject: "Weekly health note",
+      targetKind: "group",
+    });
+    mocks.listAssistantOutboxIntents.mockResolvedValue([
+      {
+        actorId: null,
+        bindingDelivery: null,
+        channel: "email",
+        createdAt: "2026-07-12T13:00:01.000Z",
+        dedupeKey: "dedupe_newsletter_child",
+        deliveryIdempotencyKey:
+          "group-newsletter:automation_123:2026-07-12T13:00:00.000Z:group_123",
+        deliveryTransportIdempotent: false,
+        explicitTarget: childTarget,
+        identityId: null,
+        intentId: "intent_newsletter_child",
+        lastError: null,
+        media: [],
+        message: "Weekly",
+        nextAttemptAt: "2026-07-12T13:00:00.000Z",
+        replyToMessageId: null,
+        sessionId: "session_newsletter",
+        status: "pending",
+        subject: null,
+        threadId: null,
+        threadIsDirect: false,
+        turnId: "turn_newsletter",
+      },
+    ]);
+
+    await expect(collectHostedAssistantDeliverySideEffects({
+      includeBackgroundDueIntents: true,
+      preferredIntentIds: [],
+      vaultRoot: "/tmp/vault",
+    })).resolves.toEqual([]);
+    expect(mocks.markAssistantOutboxIntentMirrorTerminalById).toHaveBeenCalledWith({
+      error: expect.objectContaining({
+        code: "ASSISTANT_NEWSLETTER_PARENT_UNAVAILABLE",
+      }),
+      intentId: "intent_newsletter_child",
+      onlyCurrentStatuses: ["awaiting_approval", "pending", "retryable", "sending"],
+      status: "abandoned",
+      vault: "/tmp/vault",
+    });
+  });
+
   it("collects stale non-idempotent sending intents for outbox reconciliation", async () => {
     mocks.listAssistantOutboxIntents.mockResolvedValue([
       {
@@ -10689,7 +10825,7 @@ describe("hosted runtime callbacks", () => {
     )).toEqual(["member_one", "member_two"]);
   });
 
-  it("does not recreate sent or ambiguous newsletter recipient children", async () => {
+  it("does not recreate sent or ambiguous newsletter recipient children from the same parent attempt", async () => {
     const fanoutTarget = serializeHostedEmailThreadTarget({
       groupId: "group_123",
       subject: "Group subject",
@@ -10719,6 +10855,7 @@ describe("hosted runtime callbacks", () => {
       }),
       lastError: errorCode ? { code: errorCode, message: "terminal" } : null,
       status,
+      turnId: "turn_123",
     }) as AssistantOutboxIntent;
     mocks.listAssistantOutboxIntents.mockResolvedValueOnce([
       existingRecipient("member_one", "sent", null),
@@ -10728,7 +10865,7 @@ describe("hosted runtime callbacks", () => {
         "ASSISTANT_DELIVERY_AMBIGUOUS",
       ),
     ]);
-    mocks.dispatchAssistantOutboxIntent.mockImplementationOnce(async ({ dependencies }) => {
+    mocks.dispatchAssistantOutboxIntent.mockImplementation(async ({ dependencies }) => {
       const delivery = await dependencies.sendEmail({
         message: "Group reply",
         target: fanoutTarget,
@@ -10754,6 +10891,29 @@ describe("hosted runtime callbacks", () => {
     });
 
     expect(mocks.createAssistantOutboxIntent).not.toHaveBeenCalled();
+
+    mocks.listAssistantOutboxIntents.mockResolvedValueOnce([
+      existingRecipient("member_one", "sent", null),
+      existingRecipient(
+        "member_two",
+        "abandoned",
+        "ASSISTANT_DELIVERY_AMBIGUOUS",
+      ),
+    ].map((intent) => ({ ...intent, turnId: "turn_previous" })));
+
+    await drainHostedPreparedAssistantDeliveries({
+      assistantDeliveryEffects: [effect],
+      wake: HOSTED_WAKE.wake,
+      effectsPort: createHostedRuntimeEffectsPortStub({
+        sendEmail: vi.fn(async () => ({
+          fanoutRecipientMemberIds: ["member_one", "member_two"],
+          target: fanoutTarget,
+        })),
+      }),
+      vaultRoot: HOSTED_WAKE.vaultRoot,
+    });
+
+    expect(mocks.createAssistantOutboxIntent).toHaveBeenCalledTimes(2);
   });
 
   it("keeps partial group fanout intent persistence replayable", async () => {
