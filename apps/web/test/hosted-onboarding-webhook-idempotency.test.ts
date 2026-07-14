@@ -342,6 +342,140 @@ describe("hosted onboarding Linq webhook hard-cut flows", () => {
     expect(mocks.claimHostedLinqOnboardingLinkNotice).not.toHaveBeenCalled();
   });
 
+  it("coalesces routed participant additions without scheduling, sending, or waking", async () => {
+    const prisma = createPrismaStub();
+    const scheduleAfterResponse = vi.fn();
+    prisma.hostedThreadRoute.findMany.mockResolvedValue([
+      buildHostedThreadRouteRow("member_group_runtime_123"),
+    ]);
+    mocks.getPrisma.mockReturnValue(prisma);
+
+    for (const [eventId, addedAt] of [
+      ["evt_participant_added_123", "2026-03-26T12:00:00.000Z"],
+      ["evt_participant_added_456", "2026-03-26T12:00:15.000Z"],
+    ] as const) {
+      await expect(handleHostedOnboardingLinqWebhook({
+        rawBody: buildLinqProviderWebhookBody({
+          data: {
+            added_at: addedAt,
+            chat_id: "chat_group_1",
+            handle: "+15551234567",
+          },
+          eventId,
+          eventType: "participant.added",
+        }),
+        scheduleAfterResponse,
+        signature: null,
+        timestamp: null,
+      })).resolves.toMatchObject({
+        ignored: true,
+        ok: true,
+        reason: "recorded-linq-provider-event:participant.added",
+      });
+    }
+
+    expect(prisma.hostedThreadRoute.updateMany).toHaveBeenCalledTimes(2);
+    expect(prisma.hostedThreadRoute.updateMany).toHaveBeenLastCalledWith({
+      data: { pendingParticipantAddition: true },
+      where: expect.objectContaining({
+        channel: "linq",
+        containerMemberId: "member_group_runtime_123",
+      }),
+    });
+    expect(scheduleAfterResponse).not.toHaveBeenCalled();
+    expect(mocks.appendHostedMailboxEnvelopeTx).not.toHaveBeenCalled();
+    expect(mocks.sendHostedLinqChatMessage).not.toHaveBeenCalled();
+    expect(mocks.signalHostedMailboxAppendRuntime).not.toHaveBeenCalled();
+  });
+
+  it("does not arm participant context for removals or duplicate additions", async () => {
+    const prisma = createPrismaStub();
+    const scheduleAfterResponse = vi.fn();
+    mocks.getPrisma.mockReturnValue(prisma);
+
+    await handleHostedOnboardingLinqWebhook({
+      rawBody: buildLinqProviderWebhookBody({
+        data: {
+          chat_id: "chat_group_1",
+          handle: "+15551234567",
+          removed_at: "2026-03-26T12:00:00.000Z",
+        },
+        eventId: "evt_participant_removed_123",
+        eventType: "participant.removed",
+      }),
+      scheduleAfterResponse,
+      signature: null,
+      timestamp: null,
+    });
+
+    prisma.hostedLinqProviderEvent.createMany.mockResolvedValueOnce({ count: 0 });
+    await expect(handleHostedOnboardingLinqWebhook({
+      rawBody: buildLinqProviderWebhookBody({
+        data: {
+          chat_id: "chat_group_1",
+          handle: "+15551234567",
+        },
+        eventId: "evt_participant_added_duplicate",
+        eventType: "participant.added",
+      }),
+      scheduleAfterResponse,
+      signature: null,
+      timestamp: null,
+    })).resolves.toMatchObject({
+      duplicate: true,
+      reason: "duplicate-linq-provider-event",
+    });
+
+    expect(prisma.hostedThreadRoute.findMany).not.toHaveBeenCalled();
+    expect(prisma.hostedThreadRoute.updateMany).not.toHaveBeenCalled();
+    expect(scheduleAfterResponse).not.toHaveBeenCalled();
+    expect(mocks.appendHostedMailboxEnvelopeTx).not.toHaveBeenCalled();
+    expect(mocks.sendHostedLinqChatMessage).not.toHaveBeenCalled();
+    expect(mocks.signalHostedMailboxAppendRuntime).not.toHaveBeenCalled();
+  });
+
+  it("records unbound and chatless additions without provisioning or scheduling", async () => {
+    const prisma = createPrismaStub();
+    const scheduleAfterResponse = vi.fn();
+    mocks.getPrisma.mockReturnValue(prisma);
+
+    await handleHostedOnboardingLinqWebhook({
+      rawBody: buildLinqProviderWebhookBody({
+        data: {
+          chat_id: "chat_unbound_1",
+          handle: "+15551234567",
+        },
+        eventId: "evt_participant_unbound",
+        eventType: "participant.added",
+      }),
+      scheduleAfterResponse,
+      signature: null,
+      timestamp: null,
+    });
+    await handleHostedOnboardingLinqWebhook({
+      rawBody: buildLinqProviderWebhookBody({
+        data: {
+          handle: "+15557654321",
+        },
+        eventId: "evt_participant_chatless",
+        eventType: "participant.added",
+      }),
+      scheduleAfterResponse,
+      signature: null,
+      timestamp: null,
+    });
+
+    expect(prisma.hostedLinqProviderEvent.createMany).toHaveBeenCalledTimes(2);
+    expect(prisma.hostedThreadRoute.findMany).toHaveBeenCalledTimes(1);
+    expect(prisma.hostedThreadRoute.updateMany).not.toHaveBeenCalled();
+    expect(scheduleAfterResponse).not.toHaveBeenCalled();
+    expect(mocks.appendHostedMailboxEnvelopeTx).not.toHaveBeenCalled();
+    expect(mocks.ensureHostedMemberForPhoneTx).not.toHaveBeenCalled();
+    expect(mocks.issueHostedInviteTx).not.toHaveBeenCalled();
+    expect(mocks.sendHostedLinqChatMessage).not.toHaveBeenCalled();
+    expect(mocks.signalHostedMailboxAppendRuntime).not.toHaveBeenCalled();
+  });
+
   it("dispatches Linq reaction.added events to the hosted group join-offer handler", async () => {
     const prisma = createPrismaStub();
     mocks.getPrisma.mockReturnValue(prisma);
@@ -1330,6 +1464,28 @@ function createPrismaStub() {
   } as const;
 
   return prisma;
+}
+
+function buildHostedThreadRouteRow(containerMemberId: string) {
+  const memberCore = {
+    billingStatus: HostedBillingStatus.active,
+    createdAt: new Date("2026-03-26T00:00:00.000Z"),
+    id: containerMemberId,
+    suspendedAt: null,
+    updatedAt: new Date("2026-03-26T00:00:00.000Z"),
+  };
+  return {
+    channel: "linq",
+    container: {
+      member: memberCore,
+      owner: {
+        accountGroupMemberships: [],
+        ...memberCore,
+        id: "member_owner_123",
+      },
+    },
+    containerMemberId,
+  };
 }
 
 function restoreEnvValue(key: string, value: string | undefined): void {

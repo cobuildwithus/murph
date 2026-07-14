@@ -76,6 +76,26 @@ After both deploys, confirm there is no extra metadata-only handoff checkpoint
 for the same shutdown and actionable late input causes the existing Temporal
 recheck after owner release.
 
+## Linq Participant-Context Rollout
+
+The participant-addition hint uses an additive database column, an additive
+conversation-wake field, and an optional field in the existing tolerant
+mailbox-to-input sidecar. Roll it out in this order to preserve the one-shot
+context through the mixed-version window:
+
+1. Deploy the Cloudflare Worker and runner bundle with
+   `container_rollout=immediate`, then require managed-container smoke to report
+   the new runner-bundle fingerprint.
+2. Apply the hosted-web database migration.
+3. Deploy `apps/web` only after the runner fleet has converged.
+
+Both mixed-version states remain correctness-compatible. New runners accept an
+old web payload with no hint. Old runners ignore the optional sidecar field and
+continue processing ordinary messages, but cannot render that one context hint
+after a new web producer consumes it. Runner-first deployment avoids that
+feature-only loss. Either side may otherwise roll back independently because
+the strict persisted assistant-input schema is unchanged.
+
 ## Linq Provider-Claim Protocol
 
 Every Linq provider entry uses one Web-owned authorization and atomic dispatch

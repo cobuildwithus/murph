@@ -219,10 +219,12 @@ export async function requireActivePrivyMemberAuthFromBearerToken(
 
 /**
  * Native bearer-token member auth without an entitlement check. Keep this
- * narrower variant for authority-reducing operations such as revoking a
- * scoped credential: a suspended or inactive member must still be able to
- * turn access off. Data reads and authority issuance must use the active
- * wrapper above.
+ * narrower variant directly for authority-reducing operations such as
+ * revoking a scoped credential: a suspended or inactive member must still be
+ * able to turn access off. Data reads and authority issuance must use the
+ * active wrapper above by default. A caller may use this identity-only variant
+ * only when it re-checks active access and any required consent inside a
+ * stronger owning transaction before the protected read or write.
  */
 export async function requirePrivyMemberAuthFromBearerToken(
   request: Request,
