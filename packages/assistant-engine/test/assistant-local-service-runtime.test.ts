@@ -7180,6 +7180,45 @@ async function loadLocalServiceModule(input?: {
         >[0],
       ) => finalizeInput.session,
     ),
+    applyAssistantSessionCodexResumeStateAction: vi.fn(
+      async (
+        actionInput: Parameters<
+          typeof import('../src/assistant/turn-finalizer.js').applyAssistantSessionCodexResumeStateAction
+        >[0],
+      ) => {
+        if (actionInput.action === 'preserve-existing') {
+          return actionInput.session
+        }
+        if (actionInput.action === 'clear') {
+          return await mocks.clearAssistantSessionCodexResumeState({
+            session: actionInput.session,
+            vault: actionInput.vault,
+          })
+        }
+        if (!actionInput.codexThreadId || !actionInput.routeFingerprint) {
+          return actionInput.session
+        }
+        const resumeState = {
+          ...(actionInput.assistantContractFingerprint
+            ? {
+                assistantContractFingerprint:
+                  actionInput.assistantContractFingerprint,
+              }
+            : {}),
+          ...(actionInput.codexRolloutRelativePath
+            ? { rolloutRelativePath: actionInput.codexRolloutRelativePath }
+            : {}),
+          routeFingerprint: actionInput.routeFingerprint,
+          threadId: actionInput.codexThreadId,
+        }
+        return await mocks.saveAssistantSession(actionInput.vault, {
+          ...actionInput.session,
+          codexResume: resumeState,
+          resumeState,
+          updatedAt: new Date().toISOString(),
+        })
+      },
+    ),
     clearAssistantSessionCodexResumeState: vi.fn(
       async (
         clearInput: Parameters<
@@ -7523,11 +7562,21 @@ async function loadLocalServiceModule(input?: {
     supportsAssistantCurrentAudienceMessageReaction: vi.fn(() => false),
   }))
   vi.doMock('../src/assistant/turn-finalizer.js', () => ({
+    applyAssistantSessionCodexResumeStateAction:
+      mocks.applyAssistantSessionCodexResumeStateAction,
     clearAssistantSessionCodexResumeState:
       mocks.clearAssistantSessionCodexResumeState,
     persistAssistantNoReplyTranscriptMarkers:
       mocks.persistAssistantNoReplyTranscriptMarkers,
     persistAssistantTurnAndSession: mocks.finalizeAssistantTurnArtifacts,
+    resolveAssistantProviderResumeStateAction: (actionInput: {
+      codexThreadId: string | null
+      threadScope: 'isolated-thread' | 'session-thread'
+    }) => actionInput.threadScope === 'isolated-thread'
+      ? 'preserve-existing'
+      : actionInput.codexThreadId
+        ? 'persist-from-provider-turn'
+        : 'clear',
     resolveAssistantResumeStateFromProviderTurn: (input: {
       assistantContractFingerprint?: string | null
       codexRolloutRelativePath?: string | null

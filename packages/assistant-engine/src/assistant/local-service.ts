@@ -56,10 +56,11 @@ import {
   type AssistantReplyDeliveryContext,
 } from './reply-delivery-context.js'
 import {
+  applyAssistantSessionCodexResumeStateAction,
   clearAssistantSessionCodexResumeState,
   persistAssistantNoReplyTranscriptMarkers,
   persistAssistantTurnAndSession as finalizeAssistantTurnArtifacts,
-  resolveAssistantResumeStateFromProviderTurn,
+  resolveAssistantProviderResumeStateAction,
 } from './turn-finalizer.js'
 import {
   readAssistantCodexResume,
@@ -84,7 +85,6 @@ import { resolveAssistantExecutionOperatorDefaults } from './execution-context.j
 import {
   executeCodexTurnWithRecovery,
   resolveAssistantCodexThreadScope,
-  type AssistantCodexThreadScope,
 } from './codex-turn-runner.js'
 import { readCodexThreadRouteFingerprint } from './codex-thread-route.js'
 import {
@@ -1217,10 +1217,11 @@ export async function sendAssistantMessageLocal(
             providerResult: failedProviderResult,
             turnId: currentUserTurn.turnId,
           })
-          const failedProviderResumeStateAction = resolveProviderResumeStateAction({
-            codexThreadId: providerOutcome.codexThreadId ?? null,
-            threadScope,
-          })
+          const failedProviderResumeStateAction =
+            resolveAssistantProviderResumeStateAction({
+              codexThreadId: providerOutcome.codexThreadId ?? null,
+              threadScope,
+            })
           if (progressDeliveredSessionRef.value) {
             currentSession = applyAssistantProgressDeliveredSession({
               progressDeliveredSession: progressDeliveredSessionRef.value,
@@ -1525,10 +1526,11 @@ export async function sendAssistantMessageLocal(
             sharedPlan,
           })
         )
-        const providerResumeStateAction = resolveProviderResumeStateAction({
-          codexThreadId: providerResult.codexThreadId ?? null,
-          threadScope,
-        })
+        const providerResumeStateAction =
+          resolveAssistantProviderResumeStateAction({
+            codexThreadId: providerResult.codexThreadId ?? null,
+            threadScope,
+          })
         if (providerResumeStateAction === 'clear') {
           currentSession = await clearAssistantSessionCodexResumeState({
             session: currentSession,
@@ -1998,57 +2000,6 @@ async function runAssistantTurnBestEffort(
   } catch {
     // Preserve the original turn failure; these cleanup writes are best-effort.
   }
-}
-
-async function applyAssistantSessionCodexResumeStateAction(input: {
-  action: ReturnType<typeof resolveProviderResumeStateAction>
-  assistantContractFingerprint: string
-  codexRolloutRelativePath: string | null
-  codexThreadId: string | null
-  routeFingerprint: string
-  session: AssistantSession
-  vault: string
-}): Promise<AssistantSession> {
-  switch (input.action) {
-    case 'preserve-existing':
-      return input.session
-    case 'clear':
-      return await clearAssistantSessionCodexResumeState({
-        session: input.session,
-        vault: input.vault,
-      })
-    case 'persist-from-provider-turn': {
-      const resumeState = resolveAssistantResumeStateFromProviderTurn({
-        assistantContractFingerprint: input.assistantContractFingerprint,
-        codexRolloutRelativePath: input.codexRolloutRelativePath,
-        codexThreadId: input.codexThreadId,
-        routeFingerprint: input.routeFingerprint,
-      })
-      if (!resumeState) {
-        return input.session
-      }
-      const updatedAt = new Date().toISOString()
-      return await saveAssistantSession(input.vault, {
-        ...input.session,
-        codexResume: resumeState,
-        resumeState,
-        updatedAt,
-      })
-    }
-  }
-}
-
-function resolveProviderResumeStateAction(input: {
-  codexThreadId: string | null
-  threadScope: AssistantCodexThreadScope
-}): 'clear' | 'persist-from-provider-turn' | 'preserve-existing' {
-  if (input.threadScope === 'isolated-thread') {
-    return 'preserve-existing'
-  }
-
-  return normalizeNullableString(input.codexThreadId)
-    ? 'persist-from-provider-turn'
-    : 'clear'
 }
 
 function resolveInitialAcceptedTurnInputItems(input: {
