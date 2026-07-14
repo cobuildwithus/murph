@@ -227,8 +227,8 @@ export function canStartHostedPulseTrialPaidPlan(input: {
   currentBillingPhase?: unknown;
   currentBillingPlanCode?: unknown;
   currentCheckoutOffer?: unknown;
-  stripeCustomerId?: unknown;
-  stripeSubscriptionId?: unknown;
+  hasStripeCustomerId?: unknown;
+  hasStripeSubscriptionId?: unknown;
   suspendedAt?: unknown;
 }): boolean {
   const phase = parseHostedBillingPhase(input.currentBillingPhase);
@@ -243,10 +243,8 @@ export function canStartHostedPulseTrialPaidPlan(input: {
     parseHostedBillingCheckoutOffer(input.currentCheckoutOffer) === HOSTED_PULSE_TRIAL_OFFER &&
     (canStartActiveTrial || canRecoverPausedTrial) &&
     !(input.suspendedAt instanceof Date) &&
-    typeof input.stripeCustomerId === "string" &&
-    input.stripeCustomerId.length > 0 &&
-    typeof input.stripeSubscriptionId === "string" &&
-    input.stripeSubscriptionId.length > 0;
+    input.hasStripeCustomerId === true &&
+    input.hasStripeSubscriptionId === true;
 }
 
 export function requireHostedPulseTrialPolicy(

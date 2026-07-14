@@ -32,7 +32,7 @@ import {
   bindHostedMemberStripeCustomerIdIfMissingTx,
   lookupHostedMemberStripeBillingRefByStripeCustomerId,
   lookupHostedMemberStripeBillingRefByStripeSubscriptionId,
-  readHostedMemberHomeTrialBillingState,
+  readHostedMemberBillingEligibilityState,
   readHostedMemberStripeBillingRef,
   type HostedMemberStripeBillingRefSnapshot,
   writeHostedMemberStripeBillingRefTx,
@@ -3169,7 +3169,7 @@ describe("hosted-member-store", () => {
     });
   });
 
-  it("reads the home trial billing decision without loading private Stripe identifiers", async () => {
+  it("reads billing eligibility without loading private Stripe identifiers", async () => {
     const findUnique = vi.fn().mockResolvedValue({
       currentBillingPhase: "pulse_trial",
       currentBillingPlanCode: "launch_monthly",
@@ -3184,7 +3184,7 @@ describe("hosted-member-store", () => {
     } as never;
 
     await expect(
-      readHostedMemberHomeTrialBillingState({
+      readHostedMemberBillingEligibilityState({
         memberId: "member_123",
         prisma,
       }),

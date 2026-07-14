@@ -2,6 +2,7 @@ import { deviceSyncError } from "@murphai/device-syncd/errors";
 
 import type { AuthenticatedHostedUser } from "./device-sync/auth";
 import {
+  HOSTED_AGENT_BEARER_TOKEN_PREFIX,
   generateHostedAgentBearerToken,
   type HostedAgentSessionAuthResult,
   type HostedAgentSessionRecord,
@@ -80,6 +81,13 @@ export class HostedAgentSessionService {
 
     if (scheme !== "bearer" || !token) {
       throw createHostedAgentAuthRequiredError(this.pairPath, this.messages.required);
+    }
+
+    // Device-agent sessions can export provider credentials. Never let another
+    // scoped bearer that happens to share the backing session table cross this
+    // authority boundary.
+    if (!token.startsWith(HOSTED_AGENT_BEARER_TOKEN_PREFIX)) {
+      throw createHostedAgentAuthInvalidError(this.messages.invalid);
     }
 
     const auth = await this.store.authenticateAgentSessionByTokenHash(
