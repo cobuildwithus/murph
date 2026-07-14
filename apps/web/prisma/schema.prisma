@@ -340,6 +340,7 @@ model ClinicalRecordRetrievalRun {
   generation           Int
   status               String                           @default("queued")
   resourceTypesJson    Json                             @map("resource_types_json")
+  grantedScopesJson    Json                             @map("granted_scopes_json")
   pageCount            Int                              @default(0) @map("page_count")
   fetchedBytes         Int                              @default(0) @map("fetched_bytes")
   egressBytes          Int                              @default(0) @map("egress_bytes")

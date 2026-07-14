@@ -65,6 +65,7 @@ CREATE TABLE "clinical_record_retrieval_run" (
     "generation" INTEGER NOT NULL,
     "status" TEXT NOT NULL DEFAULT 'queued',
     "resource_types_json" JSONB NOT NULL,
+    "granted_scopes_json" JSONB NOT NULL,
     "page_count" INTEGER NOT NULL DEFAULT 0,
     "fetched_bytes" INTEGER NOT NULL DEFAULT 0,
     "egress_bytes" INTEGER NOT NULL DEFAULT 0,

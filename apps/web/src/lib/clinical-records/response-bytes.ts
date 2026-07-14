@@ -5,6 +5,13 @@ export class ClinicalResponseBodyLimitError extends Error {
   }
 }
 
+const CLINICAL_UTF8_DECODER = new TextDecoder("utf-8", { fatal: true });
+
+/** Decodes provider bytes without silently replacing malformed UTF-8. */
+export function decodeClinicalResponseUtf8(bytes: Uint8Array): string {
+  return CLINICAL_UTF8_DECODER.decode(bytes);
+}
+
 /** Reads at most limitBytes and cancels the provider stream before retaining an
  * over-limit body. Content-Length is only an early rejection hint; the stream
  * remains authoritative when the header is missing or underreported. */

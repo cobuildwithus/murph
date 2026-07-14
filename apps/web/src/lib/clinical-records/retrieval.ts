@@ -45,6 +45,7 @@ import {
 import { refreshSmartAccessToken } from "./smart";
 import {
   ClinicalResponseBodyLimitError,
+  decodeClinicalResponseUtf8,
   readClinicalResponseBytes,
 } from "./response-bytes";
 
@@ -99,6 +100,7 @@ interface RunnableClinicalRun {
   egressBytes: number;
   fetchedBytes: number;
   generation: number;
+  grantedScopesJson: Prisma.JsonValue;
   id: string;
   memberId: string;
   pageCount: number;
@@ -121,7 +123,7 @@ export async function readClinicalRetrievalRun(input: {
   if ("unavailable" in loaded) return unavailable(loaded.unavailable, loaded.retryable);
   const run = loaded.run;
   const requestedScopes = parseStoredStringArray(run.connection.requestedScopesJson, "requested scopes");
-  const grantedScopes = parseStoredStringArray(run.connection.grantedScopesJson, "granted scopes");
+  const grantedScopes = parseStoredStringArray(run.grantedScopesJson, "granted scopes");
   let patientIdHash: string;
   try {
     const patientId = requireFhirPatientId(await openClinicalConnectionSecret({
@@ -552,6 +554,7 @@ async function loadRunnableClinicalRun(input: {
       egressBytes: record.egressBytes,
       fetchedBytes: record.fetchedBytes,
       generation: record.generation,
+      grantedScopesJson: record.grantedScopesJson,
       id: record.id,
       memberId: record.memberId,
       pageCount: record.pageCount,
@@ -598,6 +601,7 @@ async function openPageCursor(input: {
     Object.keys(record).sort().join(",") !== "schema,url"
     || record.schema !== "murph.clinical-page-cursor.v2"
     || typeof record.url !== "string"
+    || hasSurroundingAsciiWhitespace(record.url)
     || record.url.length > FHIR_NEXT_URL_MAX_CHARS
   ) throw new TypeError("Invalid cursor.");
   return { raw: record.url, url: new URL(record.url) };
@@ -795,7 +799,7 @@ async function readSanitizedFhirPage(input: {
   }
   let raw: unknown;
   try {
-    raw = JSON.parse(new TextDecoder().decode(bytes));
+    raw = JSON.parse(decodeClinicalResponseUtf8(bytes));
   } catch (cause) {
     throw clinicalRecordsError({
       cause,
@@ -840,7 +844,12 @@ function readNextFhirUrl(
   for (const link of links) {
     const record = requireRecord(link);
     if (record.relation !== "next") continue;
-    if (next || typeof record.url !== "string" || record.url.length > FHIR_NEXT_URL_MAX_CHARS) {
+    if (
+      next
+      || typeof record.url !== "string"
+      || hasSurroundingAsciiWhitespace(record.url)
+      || record.url.length > FHIR_NEXT_URL_MAX_CHARS
+    ) {
       throw invalidFhirResponseError();
     }
     const url = new URL(record.url);
@@ -852,6 +861,10 @@ function readNextFhirUrl(
     next = { raw: record.url, url };
   }
   return next;
+}
+
+function hasSurroundingAsciiWhitespace(value: string): boolean {
+  return /^[\u0009-\u000D\u0020]|[\u0009-\u000D\u0020]$/u.test(value);
 }
 
 async function claimRetrievalPageRequest(input: {

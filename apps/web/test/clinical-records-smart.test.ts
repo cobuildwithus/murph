@@ -119,6 +119,28 @@ describe("Clinical Records SMART negotiation", () => {
     })).rejects.toMatchObject({ code: "CLINICAL_RECORD_SMART_RESPONSE_TOO_LARGE" });
     expect(streamed.wasCanceled()).toBe(true);
   });
+
+  it("rejects malformed UTF-8 in a SMART response", async () => {
+    const prefix = new TextEncoder().encode(
+      '{"authorization_endpoint":"https://fhir.example.test/oauth2/authorize","capabilities":["permission-v2","context-standalone-patient"],"code_challenge_methods_supported":["S256"],"id":"',
+    );
+    const suffix = new TextEncoder().encode(
+      '","token_endpoint":"https://fhir.example.test/oauth2/token"}',
+    );
+    const body = new Uint8Array(prefix.length + 1 + suffix.length);
+    body.set(prefix);
+    body[prefix.length] = 0xff;
+    body.set(suffix, prefix.length + 1);
+
+    await expect(discoverSmartConfiguration({
+      fetchImpl: vi.fn<typeof fetch>().mockResolvedValue(new Response(body, {
+        headers: { "Content-Type": "application/json" },
+      })),
+      fhirBaseUrl: "https://fhir.example.test/FHIR/R4",
+      requestedBaseScopes: baseScopes,
+      resourceTypes,
+    })).rejects.toMatchObject({ code: "CLINICAL_RECORD_SMART_RESPONSE_INVALID" });
+  });
 });
 
 function jsonResponse(body: unknown): Response {

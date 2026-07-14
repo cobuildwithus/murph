@@ -104,7 +104,11 @@ describe("Clinical Records authorization persistence", () => {
     expect(created.retrievalGeneration).toBe(1);
     expect(created).not.toHaveProperty("patientIdHash");
     expect(harness.retrievalRunCreate).toHaveBeenCalledWith({
-      data: expect.objectContaining({ generation: 1, status: "queued" }),
+      data: expect.objectContaining({
+        generation: 1,
+        grantedScopesJson: ["patient/Patient.rs", "patient/Observation.rs"],
+        status: "queued",
+      }),
     });
   });
 
