@@ -4099,7 +4099,7 @@ test("exact repair replans when a partial current row hides full legacy member p
   };
   const conflictingPartialCurrentRecord: IntegrationIngestRecord = {
     ...partialCurrentRecord,
-    parts: fullRecord.parts.filter((part) => part.role === roleV1),
+    parts: fullRecord.parts,
     outputs: {
       ...fullRecord.outputs,
       events: [{ id: preparedV2Id, roles: [roleV1] }],

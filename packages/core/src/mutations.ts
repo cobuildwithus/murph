@@ -4374,6 +4374,7 @@ function buildStoredEventRepairIds(input: {
     byOutputId: repairOwnerByOutputId,
     byPreparedId: input.preparedEventOutputOwners.byPreparedId,
   };
+  const storedOutputIdByPreparedId = new Map<string, string>();
   for (const storedDelivery of input.storedDeliveries) {
     for (const output of storedDelivery.outputs.events) {
       const owner = repairOwners.byOutputId.get(output.id);
@@ -4389,6 +4390,16 @@ function buildStoredEventRepairIds(input: {
           "INTEGRATION_INGEST_EVENT_MAPPING_AMBIGUOUS",
           `Stored canonical event "${output.id}" is not owned by the prepared device event.`,
         );
+      }
+      for (const preparedId of retainedPreparedIds) {
+        const storedOutputId = storedOutputIdByPreparedId.get(preparedId);
+        if (storedOutputId && storedOutputId !== output.id) {
+          throw new VaultError(
+            "INTEGRATION_INGEST_EVENT_MAPPING_AMBIGUOUS",
+            `Prepared device event "${preparedId}" maps to conflicting stored canonical events.`,
+          );
+        }
+        storedOutputIdByPreparedId.set(preparedId, output.id);
       }
     }
   }
@@ -5098,6 +5109,15 @@ export async function importDeviceBatch({
     persistence = await preparePersistence(authoritativeExactState);
   }
   if (!persistence.shouldPersistDelivery) {
+    if (
+      unresolvedBaselineMember
+      && (!ingestIdInspection.historyComplete || ingestIdInspection.unsafe)
+    ) {
+      throw new VaultError(
+        "INTEGRATION_INGEST_EVENT_MAPPING_AMBIGUOUS",
+        "Unresolved device event member has no authoritative exact-delivery inspection.",
+      );
+    }
     return persistence.buildNoopResult();
   }
 
