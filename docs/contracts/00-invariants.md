@@ -188,7 +188,12 @@ executable tests.
   handling progress.
 - Explicit owner or provider causal identifiers take precedence over
   positional, "latest," grouping, watermark, and time-window heuristics. Work
-  with distinct causal anchors must not be merged into one turn.
+  with distinct causal anchors must not be merged into one turn. The mailbox
+  owner may certify one compound turn anchor only for a bounded, cursor-ordered
+  prefix from the same conversation and provider-native reply anchor whose
+  positive per-member causal sequences are exact successors. The terminal
+  sequence is that batch's frontier; any gap, missing or legacy sequence,
+  conversation change, reply-anchor change, or bound ends the batch.
 - Progress never advances past accepted work without terminal or durable
   pending evidence. A checkpoint cannot make an unhandled obligation disappear.
 - Commit durable work before signaling. A wake is a droppable, replayable

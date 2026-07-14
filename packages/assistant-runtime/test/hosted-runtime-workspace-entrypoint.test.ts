@@ -20439,7 +20439,7 @@ describe("hosted workspace runtime entrypoint", () => {
     }
   });
 
-  test("binds exactly one stored provider input id and clears it after the attempt", async () => {
+  test("binds a gap-free provider batch to its terminal stored input id", async () => {
     const vaultRoot = await mkdtemp(path.join(tmpdir(), "murph-workspace-entrypoint-"));
 
     try {
@@ -20461,44 +20461,36 @@ describe("hosted workspace runtime entrypoint", () => {
         async runAssistantPhase(input) {
           assert.equal(typeof input.beforeProviderAcceptedInputs, "function");
           assert.equal(input.currentAssistantPersonalizationInputId?.(), null);
-          const item = createMailboxItem({
-            id: "mailbox_item_preference_causal_binding",
-            laneSeq: "41",
-          });
-          const assistantInputId = await stageAssistantInputEventForMailboxItem({
-            causalSeq: "999",
-            item,
+          const firstInputId = await stageAssistantInputEventForMailboxItem({
+            causalSeq: "41",
+            item: createMailboxItem({
+              id: "mailbox_item_preference_batch_1",
+              laneSeq: "41",
+              occurredAt: "2026-04-26T00:00:01.000Z",
+            }),
             vaultRoot,
           });
-          const emptyRelease = await input.beforeProviderAcceptedInputs?.({
-            acceptedInputs: [],
+          const secondInputId = await stageAssistantInputEventForMailboxItem({
+            causalSeq: "42",
+            item: createMailboxItem({
+              id: "mailbox_item_preference_batch_2",
+              laneSeq: "42",
+              occurredAt: "2026-04-26T00:00:02.000Z",
+            }),
+            vaultRoot,
           });
-          assert.equal(input.currentAssistantPersonalizationInputId?.(), null);
-          await emptyRelease?.();
-          const ambiguousRelease = await input.beforeProviderAcceptedInputs?.({
-            acceptedInputs: [
-              {
-                id: assistantInputId,
-                source: "assistant-input",
-              },
-              {
-                id: "ain_22222222222222222222222222222222",
-                source: "assistant-input",
-              },
-            ],
-          });
-          assert.equal(input.currentAssistantPersonalizationInputId?.(), null);
-          await ambiguousRelease?.();
+
           const release = await input.beforeProviderAcceptedInputs?.({
-            acceptedInputs: [{
-              id: assistantInputId,
-              source: "assistant-input",
-            }],
+            acceptedInputs: [
+              { id: secondInputId, source: "assistant-input" },
+              { id: firstInputId, source: "assistant-input" },
+            ],
           });
           assert.equal(
             input.currentAssistantPersonalizationInputId?.(),
-            assistantInputId,
+            secondInputId,
           );
+          assert.equal(typeof release, "function");
           await release?.();
           assert.equal(input.currentAssistantPersonalizationInputId?.(), null);
           return { progressed: false };
