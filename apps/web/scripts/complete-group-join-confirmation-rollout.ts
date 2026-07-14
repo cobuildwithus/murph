@@ -63,20 +63,28 @@ export async function completeHostedGroupJoinConfirmationRollout(
   assertExpectedProduction(productionSha, expectedSha);
   const status = await readRolloutStatus(environment, fetchImpl, rolloutToken);
 
-  if (!status.enabled || !status.authorized) {
-    await upsertProductionEnvironmentVariable({
-      environment,
-      fetchImpl,
-      key: PRODUCER_ENV,
-      type: "plain",
-      value: "1",
-    });
+  if (!status.authorized) {
     await upsertProductionEnvironmentVariable({
       environment,
       fetchImpl,
       key: ROLLOUT_TOKEN_ENV,
       type: "sensitive",
       value: rolloutToken,
+    });
+    if (status.enabled) {
+      throw new Error(
+        "Group join confirmation rollout is enabled without current route authority; the token was repaired for the next normal production release.",
+      );
+    }
+  }
+
+  if (!status.enabled) {
+    await upsertProductionEnvironmentVariable({
+      environment,
+      fetchImpl,
+      key: PRODUCER_ENV,
+      type: "plain",
+      value: "1",
     });
 
     // Vercel does not expose a conditional production promotion operation.

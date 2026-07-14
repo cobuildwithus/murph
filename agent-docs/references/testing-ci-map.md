@@ -103,7 +103,7 @@ Last verified: 2026-07-13
   mutation to the normal release path, and
   drains the authenticated server-side cursor route to completion. Focused
   hosted-web coverage proves route authorization, enablement probing,
-  configuration update, overlapping workflow setup, absence of rollout-owned
+  authority-first configuration and partial-write failure, overlapping workflow setup, absence of rollout-owned
   deployment mutation, provider response parsing, pagination, and
   the documented one-time retirement condition without calling live Vercel or
   production Postgres.

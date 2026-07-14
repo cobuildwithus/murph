@@ -785,8 +785,10 @@ GitHub Actions; `HOSTED_WEB_CONTRACT_MIGRATION_DRAIN_SECONDS` defaults to
 `300` and is capped at `600` unless the workflow timeout is raised. After the
 contract migration succeeds, the workflow also completes the group-join
 confirmation transition: it derives a rollout credential in memory from the
-existing Vercel credential and upserts that sensitive value plus the production
-producer flag. It never creates or promotes a deployment. The next normal
+existing Vercel credential and upserts that sensitive value before the production
+producer flag. If an already-enabled deployment lacks matching authority, the
+workflow repairs the credential and fails rather than claiming a completed
+rollout. It never creates or promotes a deployment. The next normal
 production release is the sole production-alias owner, captures the new
 configuration, and runs the same post-deploy workflow; that invocation verifies
 the exact enabled deployment and drains eligible rows through a private server

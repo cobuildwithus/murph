@@ -924,7 +924,7 @@ describe("hosted web production migration guard", () => {
             deploymentMutationRequested = true;
           }
           if (url.includes("/api/internal/hosted-groups/join-confirmations/rollout")) {
-            return webJsonResponse({ authorized: false, enabled: true });
+            return webJsonResponse({ authorized: false, enabled: false });
           }
           throw new Error(`Unexpected rollout URL: ${url}`);
         },
@@ -950,19 +950,98 @@ describe("hosted web production migration guard", () => {
       })),
       [
         {
-          key: "HOSTED_GROUP_JOIN_CONFIRMATION_PRODUCER_ENABLED",
-          target: ["production"],
-          type: "plain",
-          value: "1",
-        },
-        {
           key: "HOSTED_GROUP_JOIN_CONFIRMATION_ROLLOUT_TOKEN",
           target: ["production"],
           type: "sensitive",
           value: "string",
         },
+        {
+          key: "HOSTED_GROUP_JOIN_CONFIRMATION_PRODUCER_ENABLED",
+          target: ["production"],
+          type: "plain",
+          value: "1",
+        },
       ],
     );
+  });
+
+  test("does not enable the producer when the rollout-token write fails", async () => {
+    const environment = {
+      DEPLOYED_SHA: "deployed-sha",
+      HOSTED_WEB_PRODUCTION_BASE_URL: "https://www.withmurph.ai",
+      HOSTED_WEB_VERCEL_PROJECT_ID: "project-id",
+      HOSTED_WEB_VERCEL_TOKEN: "vercel-token",
+    };
+    const environmentKeys: string[] = [];
+
+    await assert.rejects(
+      () => completeHostedGroupJoinConfirmationRollout(environment, {
+        fetchImpl: async (url, init) => {
+          if (url.includes("/v4/aliases/")) {
+            return webJsonResponse({ deploymentId: "dpl_current" });
+          }
+          if (url.includes("/v13/deployments/dpl_current")) {
+            return webJsonResponse({
+              gitSource: { sha: "deployed-sha" },
+              projectId: "project-id",
+            });
+          }
+          if (url.includes("/api/internal/hosted-groups/join-confirmations/rollout")) {
+            return webJsonResponse({ authorized: false, enabled: false });
+          }
+          if (url.includes("/v10/projects/project-id/env") && init?.method === "POST") {
+            const body = JSON.parse(init.body as string) as { key: string };
+            environmentKeys.push(body.key);
+            return new Response("provider unavailable", { status: 503 });
+          }
+          throw new Error(`Unexpected rollout URL: ${url}`);
+        },
+      }),
+      /ROLLOUT_TOKEN environment update failed with HTTP 503/u,
+    );
+
+    assert.deepEqual(environmentKeys, ["HOSTED_GROUP_JOIN_CONFIRMATION_ROLLOUT_TOKEN"]);
+  });
+
+  test("repairs authority but fails an already-enabled rollout before draining", async () => {
+    const environment = {
+      DEPLOYED_SHA: "deployed-sha",
+      HOSTED_WEB_PRODUCTION_BASE_URL: "https://www.withmurph.ai",
+      HOSTED_WEB_VERCEL_PROJECT_ID: "project-id",
+      HOSTED_WEB_VERCEL_TOKEN: "vercel-token",
+    };
+    const environmentKeys: string[] = [];
+    let drainRequested = false;
+
+    await assert.rejects(
+      () => completeHostedGroupJoinConfirmationRollout(environment, {
+        fetchImpl: async (url, init) => {
+          if (url.includes("/v4/aliases/")) {
+            return webJsonResponse({ deploymentId: "dpl_current" });
+          }
+          if (url.includes("/v13/deployments/dpl_current")) {
+            return webJsonResponse({
+              gitSource: { sha: "deployed-sha" },
+              projectId: "project-id",
+            });
+          }
+          if (url.includes("/api/internal/hosted-groups/join-confirmations/rollout")) {
+            if (init?.method === "POST") drainRequested = true;
+            return webJsonResponse({ authorized: false, enabled: true });
+          }
+          if (url.includes("/v10/projects/project-id/env") && init?.method === "POST") {
+            const body = JSON.parse(init.body as string) as { key: string };
+            environmentKeys.push(body.key);
+            return webJsonResponse({ updated: true });
+          }
+          throw new Error(`Unexpected rollout URL: ${url}`);
+        },
+      }),
+      /enabled without current route authority/u,
+    );
+
+    assert.deepEqual(environmentKeys, ["HOSTED_GROUP_JOIN_CONFIRMATION_ROLLOUT_TOKEN"]);
+    assert.equal(drainRequested, false);
   });
 
   test("overlapping rollout setup never becomes a second production alias owner", async () => {

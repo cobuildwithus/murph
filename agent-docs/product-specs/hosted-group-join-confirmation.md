@@ -196,8 +196,11 @@ recorded eligibility without also running the materializer:
    alias proof and drain.
 3. After contract migration succeeds, the same repository workflow derives a
    rollout credential in memory from its existing Vercel credential and upserts
-   the producer flag plus the sensitive credential in Vercel production. It
-   does not create, assign, or promote a deployment.
+   the sensitive credential before the producer flag in Vercel production. A
+   failed credential write never enables the producer. An enabled deployment
+   without matching authority repairs the credential and then fails so another
+   normal release must capture it. The workflow does not create, assign, or
+   promote a deployment.
 4. The next normal production release is the sole production-alias owner and
    captures that configuration. Its post-deploy workflow verifies both
    enablement and credential authority, then calls the private internal drain
