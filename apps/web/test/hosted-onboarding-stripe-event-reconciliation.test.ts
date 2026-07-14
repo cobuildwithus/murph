@@ -522,7 +522,7 @@ describe("hosted Stripe event reconciliation", () => {
     );
   });
 
-  it("keeps legacy Family cleanup retryable after the ordinary poison limit", async () => {
+  it("keeps a transient legacy Family cleanup failure within the ordinary poison bound", async () => {
     const prisma = createStripeEventPrismaHarness();
     const event = makeSubscriptionUpdatedEvent();
     const errorSpy = vi.spyOn(console, "error").mockImplementation(() => {});
@@ -534,15 +534,23 @@ describe("hosted Stripe event reconciliation", () => {
       .mockResolvedValueOnce(makeCanonicalSubscription({ status: "canceled" }));
 
     await recordHostedStripeEvent({ event, prisma: prisma.client });
-    prisma.rows[0]!.attemptCount = 5;
     await expect(reconcileHostedStripeEventById({
       eventId: event.id,
       prisma: prisma.client,
     })).resolves.toMatchObject({ status: "failed" });
     expect(prisma.rows[0]).toEqual(expect.objectContaining({
-      attemptCount: 6,
+      attemptCount: 1,
+      lastErrorCode: "Error",
+      lastErrorMessage: "[redacted]",
       status: HostedStripeEventStatus.failed,
     }));
+    expect(errorSpy).toHaveBeenCalledWith(
+      "Hosted Stripe event reconciliation failed.",
+      expect.objectContaining({
+        errorMessage: "Stripe unavailable",
+        poisoned: false,
+      }),
+    );
 
     prisma.rows[0]!.nextAttemptAt = new Date(0);
     await expect(reconcileHostedStripeEventById({
@@ -592,10 +600,17 @@ describe("hosted Stripe event reconciliation", () => {
     mocks.stripe.refunds.create.mockResolvedValue({ status: "pending" });
 
     await recordHostedStripeEvent({ event, prisma: prisma.client });
+    prisma.rows[0]!.attemptCount = 5;
     await expect(reconcileHostedStripeEventById({
       eventId: event.id,
       prisma: prisma.client,
     })).resolves.toMatchObject({ status: "failed" });
+    expect(prisma.rows[0]).toEqual(expect.objectContaining({
+      attemptCount: 6,
+      lastErrorCode: "HOSTED_LEGACY_FAMILY_CLEANUP_PENDING",
+      lastErrorMessage: "[redacted]",
+      status: HostedStripeEventStatus.failed,
+    }));
     prisma.rows[0]!.nextAttemptAt = new Date(0);
     await expect(reconcileHostedStripeEventById({
       eventId: event.id,
@@ -613,6 +628,54 @@ describe("hosted Stripe event reconciliation", () => {
     }, {
       idempotencyKey: "hosted-family-legacy-refund:in_123",
     });
+    errorSpy.mockRestore();
+  });
+
+  it("poisons a terminal legacy Family refund without issuing another refund", async () => {
+    const prisma = createStripeEventPrismaHarness();
+    const event = makeInvoicePaidEvent();
+    const errorSpy = vi.spyOn(console, "error").mockImplementation(() => {});
+    mocks.stripe.events.retrieve.mockResolvedValue(event);
+    mocks.findMemberForStripeInvoice.mockResolvedValue(null);
+    mocks.prepareHostedLegacySyntheticFamilyCleanupTx.mockResolvedValue("sub_123");
+    mocks.stripe.subscriptions.retrieve.mockResolvedValue(makeCanonicalSubscription({
+      status: "canceled",
+    }));
+    mocks.stripe.refunds.list.mockResolvedValue({
+      data: [{
+        id: "re_failed",
+        metadata: { hosted_family_legacy_invoice_id: "in_123" },
+        status: "failed",
+      }],
+    });
+
+    await recordHostedStripeEvent({ event, prisma: prisma.client });
+    prisma.rows[0]!.attemptCount = 5;
+    await expect(reconcileHostedStripeEventById({
+      eventId: event.id,
+      prisma: prisma.client,
+    })).resolves.toMatchObject({ status: "failed" });
+
+    expect(prisma.rows[0]).toEqual(expect.objectContaining({
+      attemptCount: 6,
+      lastErrorCode: "Error",
+      lastErrorMessage: "[redacted]",
+      status: HostedStripeEventStatus.poisoned,
+    }));
+    expect(errorSpy).toHaveBeenCalledWith(
+      "Hosted Stripe event reconciliation failed.",
+      expect.objectContaining({
+        errorMessage: "Legacy Family refund previously failed.",
+        poisoned: true,
+      }),
+    );
+    expect(mocks.stripe.refunds.create).not.toHaveBeenCalled();
+    prisma.rows[0]!.nextAttemptAt = new Date(0);
+    await expect(reconcileHostedStripeEventById({
+      eventId: event.id,
+      prisma: prisma.client,
+    })).resolves.toBeNull();
+    expect(mocks.stripe.refunds.list).toHaveBeenCalledOnce();
     errorSpy.mockRestore();
   });
 
