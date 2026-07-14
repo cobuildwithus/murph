@@ -21059,6 +21059,7 @@ describe("hosted workspace runtime entrypoint", () => {
               inputId: pendingInputId,
               vaultRoot,
             });
+            shutdownController.abort();
             firstPhaseFinished.resolve();
             return {
               checkpointReason: "assistant_runtime_commit" as const,
@@ -21082,7 +21083,6 @@ describe("hosted workspace runtime entrypoint", () => {
       );
       assert.equal(assistantPhaseCalls, 1);
       assert.equal(checkpointRequests.length, 0);
-      shutdownController.abort();
 
       const result = await withRealTimeout(
         resultPromise,
