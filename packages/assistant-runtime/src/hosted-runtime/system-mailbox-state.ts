@@ -7,6 +7,9 @@ import {
   parseHostedExecutionWake,
 } from "@murphai/hosted-execution/parsers";
 import {
+  parseHostedClinicalRecordsRecordOutcomeRequest,
+} from "@murphai/hosted-execution/clinical-records-boundary";
+import {
   withAssistantRuntimeWriteLock,
 } from "@murphai/assistant-engine/assistant-state";
 import {
@@ -489,6 +492,24 @@ function parseHostedSystemMailboxRecordRequest(
     throw new TypeError("hosted system mailbox postCheckpointRecord must be an object.");
   }
   const record = value as Record<string, unknown>;
+
+  if (record.kind === "clinical-records.outcome-recorded") {
+    assertHostedSystemMailboxRecordKeys(
+      record,
+      ["kind", "nextWakeAt", "request"],
+      "hosted system mailbox Clinical Records postCheckpointRecord",
+    );
+    if (record.nextWakeAt !== undefined && record.nextWakeAt !== null) {
+      throw new TypeError(
+        "hosted system mailbox Clinical Records postCheckpointRecord nextWakeAt must be null.",
+      );
+    }
+    return {
+      kind: "clinical-records.outcome-recorded",
+      ...(record.nextWakeAt === null ? { nextWakeAt: null } : {}),
+      request: parseHostedClinicalRecordsRecordOutcomeRequest(record.request),
+    };
+  }
 
   if (record.kind === "device-sync.dirty-processed") {
     return {

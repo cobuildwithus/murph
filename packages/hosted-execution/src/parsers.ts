@@ -22,9 +22,8 @@ import {
   isHostedLinqConversationContactKind,
 } from "./contracts.ts";
 import {
-  buildHostedExecutionClinicalRecordsSyncRequestedWake,
   parseHostedClinicalRecordsIdentifier,
-} from "./clinical-records.ts";
+} from "./clinical-records-boundary.ts";
 
 import type {
   HostedExecutionAssistantNotificationDelivery,
@@ -275,16 +274,17 @@ export function parseHostedExecutionWake(value: unknown): HostedExecutionWake {
         ["eventId", "generation", "kind", "occurredAt", "runId", "userId"],
         "Hosted execution wake clinical-records.sync-requested",
       );
-      return buildHostedExecutionClinicalRecordsSyncRequestedWake({
+      return {
         eventId,
         generation: parseHostedExecutionPositiveGeneration(
           record.generation,
           "Hosted execution wake clinical-records.sync-requested generation",
         ),
         occurredAt,
+        kind,
         runId: parseHostedClinicalRecordsIdentifier(record.runId),
         userId: wireUserId,
-      });
+      };
     case "device-sync.wake":
       return buildHostedExecutionDeviceSyncWake({
         ...(record.connectionId === undefined

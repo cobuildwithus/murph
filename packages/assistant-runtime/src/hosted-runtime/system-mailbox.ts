@@ -145,6 +145,7 @@ export async function prepareHostedSystemMailboxItemForCheckpoint(input: {
   operatorHomeRoot?: string | null;
   runtime: HostedSystemMailboxRuntime;
   runtimeEnv: Readonly<Record<string, string>>;
+  signal?: AbortSignal | null;
   shouldYieldBackgroundMaintenance?: (() => boolean) | null;
   vaultRoot: string;
 }): Promise<HostedSystemMailboxCheckpointPreparation | null> {
@@ -202,6 +203,7 @@ export async function prepareHostedSystemMailboxItemForCheckpoint(input: {
       pendingItem: prepared,
       runtime: input.runtime,
       runtimeEnv: input.runtimeEnv,
+      signal: input.signal ?? null,
       shouldYieldBackgroundMaintenance: input.shouldYieldBackgroundMaintenance ?? null,
       vaultRoot: input.vaultRoot,
     });
@@ -400,6 +402,7 @@ async function executePendingHostedSystemMailboxItem(input: {
   pendingItem: HostedSystemMailboxPendingItem;
   runtime: HostedSystemMailboxRuntime;
   runtimeEnv: Readonly<Record<string, string>>;
+  signal: AbortSignal | null;
   shouldYieldBackgroundMaintenance?: (() => boolean) | null;
   vaultRoot: string;
 }): Promise<HostedMailboxExecutionMetrics> {
@@ -418,6 +421,7 @@ async function executePendingHostedSystemMailboxItem(input: {
     preferenceCausalSeq: input.pendingItem.preferenceCausalSeq ?? "0",
     runtime: input.runtime,
     runtimeEnv: input.runtimeEnv,
+    signal: input.signal,
     ...(input.shouldYieldBackgroundMaintenance
       ? {
           shouldYieldClinicalRecords: input.shouldYieldBackgroundMaintenance,
@@ -482,6 +486,20 @@ async function recordHostedSystemMailboxPostCheckpointRecord(input: {
   runtime: HostedSystemMailboxRuntime;
 }): Promise<HostedSystemMailboxPostCheckpointRecordResult> {
   switch (input.record.kind) {
+    case "clinical-records.outcome-recorded": {
+      const port = input.runtime.platform.clinicalRecordsPort;
+      if (!port) {
+        throw new Error(
+          "Hosted clinical records outcome checkpoint requires a configured clinical records port.",
+        );
+      }
+      await port.recordOutcome(input.record.request);
+      return {
+        nextWakeAt: null,
+        recorded: 1,
+        stillDirty: false,
+      };
+    }
     case "codex-auth.updated": {
       const port = input.runtime.platform.codexAuthPort;
       if (!port) {

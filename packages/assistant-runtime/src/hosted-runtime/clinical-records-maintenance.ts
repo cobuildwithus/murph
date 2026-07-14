@@ -16,6 +16,7 @@ import {
   parseHostedClinicalRecordsFetchPageResponse,
   parseHostedClinicalRecordsReadRunResponse,
   type HostedClinicalRecordsOutcomeCounts,
+  type HostedClinicalRecordsRecordOutcomeRequest,
   type HostedClinicalRecordsRunDescriptor,
 } from "@murphai/hosted-execution/clinical-records";
 import type {
@@ -26,6 +27,9 @@ import type {
 import type {
   HostedRuntimeClinicalRecordsPort,
 } from "./platform.ts";
+import {
+  createHostedBackgroundMaintenanceCancellation,
+} from "./background-maintenance-cancellation.ts";
 
 const CLINICAL_RECORDS_VAULT_MODULE_SPECIFIER =
   "@murphai/vault-usecases/clinical-records";
@@ -38,12 +42,38 @@ type ClinicalRecordsVaultModule = {
 
 export interface HostedClinicalRecordsSyncMetrics {
   counts: HostedClinicalRecordsOutcomeCounts;
+  outcome: HostedClinicalRecordsRecordOutcomeRequest | null;
   status: "completed" | "failed" | "partial" | "unavailable";
 }
 
 export async function runHostedClinicalRecordsSyncWakeLane(input: {
   clinicalRecordsPort?: HostedRuntimeClinicalRecordsPort | null;
   importSnapshot?: ClinicalRecordsVaultModule["importClinicalFhirSnapshot"];
+  signal?: AbortSignal | null;
+  shouldYieldClinicalRecords?: (() => boolean) | null;
+  timeoutMs?: number | null;
+  vaultRoot: string;
+  wake: HostedExecutionClinicalRecordsSyncRequestedWake;
+}): Promise<HostedClinicalRecordsSyncMetrics> {
+  const cancellation = createHostedBackgroundMaintenanceCancellation({
+    signal: input.signal ?? null,
+    shouldYield: input.shouldYieldClinicalRecords ?? null,
+    timeoutMs: input.timeoutMs ?? null,
+  });
+  try {
+    return await runHostedClinicalRecordsSyncWakeLaneWithCancellation({
+      ...input,
+      signal: cancellation.signal,
+    });
+  } finally {
+    cancellation.dispose();
+  }
+}
+
+async function runHostedClinicalRecordsSyncWakeLaneWithCancellation(input: {
+  clinicalRecordsPort?: HostedRuntimeClinicalRecordsPort | null;
+  importSnapshot?: ClinicalRecordsVaultModule["importClinicalFhirSnapshot"];
+  signal: AbortSignal | null;
   shouldYieldClinicalRecords?: (() => boolean) | null;
   vaultRoot: string;
   wake: HostedExecutionClinicalRecordsSyncRequestedWake;
@@ -56,10 +86,16 @@ export async function runHostedClinicalRecordsSyncWakeLane(input: {
     );
   }
 
-  const readResponse = parseHostedClinicalRecordsReadRunResponse(await port.readRun({
-    generation: input.wake.generation,
-    runId: input.wake.runId,
-  }));
+  throwIfPreempted(input);
+  const readResponsePayload = await port.readRun(
+    {
+      generation: input.wake.generation,
+      runId: input.wake.runId,
+    },
+    { signal: input.signal },
+  );
+  throwIfPreempted(input);
+  const readResponse = parseHostedClinicalRecordsReadRunResponse(readResponsePayload);
   if (readResponse.status === "unavailable") {
     if (readResponse.retryable) {
       throw new HostedClinicalRecordsRuntimeError(
@@ -69,18 +105,14 @@ export async function runHostedClinicalRecordsSyncWakeLane(input: {
     }
     return {
       counts: emptyCounts(),
+      outcome: null,
       status: "unavailable",
     };
   }
 
   const run = readResponse.run;
   assertRunMatchesWake(run, input.wake);
-  await preemptIfRequested({
-    counts: emptyCounts(),
-    port,
-    shouldYield: input.shouldYieldClinicalRecords ?? null,
-    wake: input.wake,
-  });
+  throwIfPreempted(input);
   const retrievalScopes = run.retrievalScopes.map((scope) =>
     clinicalFhirRetrievalScopeSchema.parse(scope)
   );
@@ -94,39 +126,25 @@ export async function runHostedClinicalRecordsSyncWakeLane(input: {
   let authorizationRequired = false;
 
   for (const [resourceIndex, scope] of retrievalScopes.entries()) {
-    await preemptIfRequested({
-      counts: fetchCounts(successfulPageCount, completedResourceTypes.length),
-      port,
-      shouldYield: input.shouldYieldClinicalRecords ?? null,
-      wake: input.wake,
-    });
+    throwIfPreempted(input);
     let cursor: string | null = null;
     const seenCursors = new Set<string>();
     let completed = false;
-    let resourceBodyBytes = 0;
-    let resourceRecordCount = 0;
     const resourcePageStartIndex = pages.length;
 
     while (!completed) {
-      await preemptIfRequested({
-        counts: fetchCounts(successfulPageCount, completedResourceTypes.length),
-        port,
-        shouldYield: input.shouldYieldClinicalRecords ?? null,
-        wake: input.wake,
-      });
+      throwIfPreempted(input);
       if (pageFetchCount >= HOSTED_CLINICAL_RECORDS_MAX_PAGES) {
-        return await recordTerminalFailure({
+        return terminalFailure({
           counts: fetchCounts(successfulPageCount, completedResourceTypes.length),
           errorCode: "page_limit_exceeded",
-          port,
           wake: input.wake,
         });
       }
       if (cursor && seenCursors.has(cursor)) {
-        return await recordTerminalFailure({
+        return terminalFailure({
           counts: fetchCounts(successfulPageCount, completedResourceTypes.length),
           errorCode: "cursor_cycle",
-          port,
           wake: input.wake,
         });
       }
@@ -134,13 +152,18 @@ export async function runHostedClinicalRecordsSyncWakeLane(input: {
         seenCursors.add(cursor);
       }
 
-      const response = parseHostedClinicalRecordsFetchPageResponse(await port.fetchPage({
-        cursor,
-        generation: run.generation,
-        requestId: `cr-${run.generation}-${resourceIndex + 1}-${seenCursors.size + 1}`,
-        resourceType: scope.resourceType,
-        runId: run.runId,
-      }));
+      const responsePayload = await port.fetchPage(
+        {
+          cursor,
+          generation: run.generation,
+          requestId: `cr-${run.generation}-${resourceIndex + 1}-${seenCursors.size + 1}`,
+          resourceType: scope.resourceType,
+          runId: run.runId,
+        },
+        { signal: input.signal },
+      );
+      throwIfPreempted(input);
+      const response = parseHostedClinicalRecordsFetchPageResponse(responsePayload);
       pageFetchCount += 1;
       if (response.status === "unavailable") {
         if (response.retryable) {
@@ -157,18 +180,15 @@ export async function runHostedClinicalRecordsSyncWakeLane(input: {
         authorizationRequired = response.errorCode
           === HOSTED_CLINICAL_RECORDS_AUTHORIZATION_REQUIRED_ERROR_CODE;
         pages.splice(resourcePageStartIndex);
-        totalBodyBytes -= resourceBodyBytes;
-        totalResourceCount -= resourceRecordCount;
         break;
       }
       successfulPageCount += 1;
 
       const pageBodyBytes = Buffer.byteLength(response.body, "utf8");
       if (pageBodyBytes > CLINICAL_RAW_RESOURCE_FILE_MAX_BYTES) {
-        return await recordTerminalFailure({
+        return terminalFailure({
           counts: fetchCounts(successfulPageCount, completedResourceTypes.length),
           errorCode: "page_size_exceeded",
-          port,
           wake: input.wake,
         });
       }
@@ -176,18 +196,16 @@ export async function runHostedClinicalRecordsSyncWakeLane(input: {
       try {
         pageResourceCount = countClinicalFhirPageResources(response.body);
       } catch {
-        return await recordTerminalFailure({
+        return terminalFailure({
           counts: fetchCounts(successfulPageCount, completedResourceTypes.length),
           errorCode: "invalid_fhir_page",
-          port,
           wake: input.wake,
         });
       }
       if (pageResourceCount > CLINICAL_RAW_MANIFEST_MAX_RESOURCES_PER_FILE) {
-        return await recordTerminalFailure({
+        return terminalFailure({
           counts: fetchCounts(successfulPageCount, completedResourceTypes.length),
           errorCode: "page_resource_limit_exceeded",
-          port,
           wake: input.wake,
         });
       }
@@ -195,22 +213,18 @@ export async function runHostedClinicalRecordsSyncWakeLane(input: {
         totalResourceCount + pageResourceCount
         > CLINICAL_RAW_MANIFEST_MAX_TOTAL_RESOURCES
       ) {
-        return await recordTerminalFailure({
+        return terminalFailure({
           counts: fetchCounts(successfulPageCount, completedResourceTypes.length),
           errorCode: "snapshot_resource_limit_exceeded",
-          port,
           wake: input.wake,
         });
       }
       totalResourceCount += pageResourceCount;
-      resourceRecordCount += pageResourceCount;
-      resourceBodyBytes += pageBodyBytes;
       totalBodyBytes += pageBodyBytes;
       if (totalBodyBytes > HOSTED_CLINICAL_RECORDS_MAX_TOTAL_BODY_BYTES) {
-        return await recordTerminalFailure({
+        return terminalFailure({
           counts: fetchCounts(successfulPageCount, completedResourceTypes.length),
           errorCode: "snapshot_size_exceeded",
-          port,
           wake: input.wake,
         });
       }
@@ -241,28 +255,42 @@ export async function runHostedClinicalRecordsSyncWakeLane(input: {
     }
   }
 
+  throwIfPreempted(input);
   const importSnapshot = input.importSnapshot
     ?? (await loadRuntimeModule<ClinicalRecordsVaultModule>(
       CLINICAL_RECORDS_VAULT_MODULE_SPECIFIER,
     )).importClinicalFhirSnapshot;
-  const result = await importSnapshot({
-    completedResourceTypes,
-    connectionId: run.connectionId,
-    ...(errors.length > 0 ? { errors } : {}),
-    fetchedAt: run.fetchedAt,
-    fhirBaseUrlHash: run.fhirBaseUrlHash,
-    grantedScopes: run.grantedScopes,
-    pages,
-    patientIdHash: run.patientIdHash,
-    ...(run.providerDirectoryEntryId
-      ? { providerDirectoryEntryId: run.providerDirectoryEntryId }
-      : {}),
-    requestedScopes: run.requestedScopes,
-    retrievalJobId: run.retrievalJobId,
-    retrievalScopes,
-    sourceSystem: clinicalSourceSystemSchema.parse(run.sourceSystem),
-    vaultRoot: input.vaultRoot,
-  });
+  let result: ClinicalFhirSnapshotImportResult;
+  try {
+    result = await importSnapshot({
+      completedResourceTypes,
+      connectionId: run.connectionId,
+      ...(errors.length > 0 ? { errors } : {}),
+      fetchedAt: run.fetchedAt,
+      fhirBaseUrlHash: run.fhirBaseUrlHash,
+      grantedScopes: run.grantedScopes,
+      pages,
+      patientIdHash: run.patientIdHash,
+      ...(run.providerDirectoryEntryId
+        ? { providerDirectoryEntryId: run.providerDirectoryEntryId }
+        : {}),
+      requestedScopes: run.requestedScopes,
+      retrievalJobId: run.retrievalJobId,
+      retrievalScopes,
+      sourceSystem: clinicalSourceSystemSchema.parse(run.sourceSystem),
+      vaultRoot: input.vaultRoot,
+    });
+  } catch (error) {
+    if (isClinicalFhirSnapshotRejectedError(error)) {
+      return terminalFailure({
+        counts: fetchCounts(successfulPageCount, completedResourceTypes.length),
+        errorCode: "snapshot_rejected",
+        wake: input.wake,
+      });
+    }
+    throw error;
+  }
+  throwIfPreempted(input);
   const counts: HostedClinicalRecordsOutcomeCounts = {
     createdCount: result.canonical.createdCount,
     executableDecisionCount: result.executableDecisionCount,
@@ -275,16 +303,16 @@ export async function runHostedClinicalRecordsSyncWakeLane(input: {
     supersededCount: result.canonical.supersededCount,
   };
   const status = errors.length > 0 ? "partial" : "completed";
-  if (!authorizationRequired) {
-    await port.recordOutcome({
+  const outcome = authorizationRequired
+    ? null
+    : {
       counts,
       ...(errors[0] ? { errorCode: errors[0].code } : {}),
       generation: run.generation,
       runId: run.runId,
       status,
-    });
-  }
-  return { counts, status };
+    } satisfies HostedClinicalRecordsRecordOutcomeRequest;
+  return { counts, outcome, status };
 }
 
 function assertRunMatchesWake(
@@ -299,45 +327,44 @@ function assertRunMatchesWake(
   }
 }
 
-async function preemptIfRequested(input: {
-  counts: HostedClinicalRecordsOutcomeCounts;
-  port: HostedRuntimeClinicalRecordsPort;
-  shouldYield: (() => boolean) | null;
-  wake: HostedExecutionClinicalRecordsSyncRequestedWake;
-}): Promise<void> {
-  if (input.shouldYield?.() !== true) {
+function throwIfPreempted(input: {
+  signal: AbortSignal | null;
+  shouldYieldClinicalRecords?: (() => boolean) | null;
+}): void {
+  input.signal?.throwIfAborted();
+  if (input.shouldYieldClinicalRecords?.() !== true) {
     return;
   }
-  await input.port.recordOutcome({
-    counts: input.counts,
-    errorCode: "foreground_preempted",
-    generation: input.wake.generation,
-    runId: input.wake.runId,
-    status: "preempted",
-  });
   throw new HostedClinicalRecordsRuntimeError(
     "CLINICAL_RECORDS_FOREGROUND_PREEMPTED",
     "Hosted clinical records sync yielded to foreground work.",
   );
 }
 
-async function recordTerminalFailure(input: {
+function terminalFailure(input: {
   counts: HostedClinicalRecordsOutcomeCounts;
   errorCode: string;
-  port: HostedRuntimeClinicalRecordsPort;
   wake: HostedExecutionClinicalRecordsSyncRequestedWake;
-}): Promise<HostedClinicalRecordsSyncMetrics> {
-  await input.port.recordOutcome({
-    counts: input.counts,
-    errorCode: input.errorCode,
-    generation: input.wake.generation,
-    runId: input.wake.runId,
-    status: "failed",
-  });
+}): HostedClinicalRecordsSyncMetrics {
   return {
     counts: input.counts,
+    outcome: {
+      counts: input.counts,
+      errorCode: input.errorCode,
+      generation: input.wake.generation,
+      runId: input.wake.runId,
+      status: "failed",
+    },
     status: "failed",
   };
+}
+
+function isClinicalFhirSnapshotRejectedError(error: unknown): error is Error & {
+  code: "CLINICAL_FHIR_SNAPSHOT_REJECTED";
+} {
+  return error instanceof Error
+    && "code" in error
+    && error.code === "CLINICAL_FHIR_SNAPSHOT_REJECTED";
 }
 
 function fetchCounts(

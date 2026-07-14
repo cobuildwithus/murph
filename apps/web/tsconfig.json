@@ -27,6 +27,9 @@
       "@/*": [
         "./*"
       ],
+      "@murphai/clinical-records": [
+        "packages/clinical-records/src/index.ts"
+      ],
       "@murphai/contracts": [
         "../../packages/contracts/src/index.ts"
       ],

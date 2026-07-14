@@ -431,6 +431,107 @@ describe("hosted system mailbox notification execution context", () => {
     });
   });
 
+  it("records a clinical outcome only after its vault checkpoint is durable", async () => {
+    const workspace = await createHostedRuntimeWorkspace("murph-hosted-system-mailbox-");
+    const recordOutcome = vi.fn(async () => undefined);
+    const wake = buildHostedExecutionAssistantNotificationRequestedWake({
+      eventId: "assistant.notification.requested:clinical-outcome",
+      memberId: "member_123",
+      notification: {
+        instructions: "Reconcile the prepared clinical outcome.",
+        route: {
+          actorId: "+15550001111",
+          channel: "linq",
+          delivery: {
+            kind: "thread",
+            target: "linq_thread_123",
+          },
+          identityId: "hbidx:phone:v1:test",
+          threadId: "linq_thread_123",
+          threadIsDirect: true,
+        },
+      },
+      occurredAt: FIXED_NOW,
+    });
+    const request = {
+      counts: {
+        createdCount: 1,
+        executableDecisionCount: 1,
+        fetchedPageCount: 1,
+        fetchedResourceFamilyCount: 1,
+        rawFileCount: 2,
+        retractedCount: 0,
+        reviewDecisionCount: 0,
+        skippedExistingCount: 0,
+        supersededCount: 0,
+      },
+      generation: 1,
+      runId: "clinical_run_1",
+      status: "completed" as const,
+    };
+    mocks.executeHostedMailboxEvent.mockResolvedValueOnce({
+      bootstrapResult: null,
+      conversationMetrics: null,
+      mailboxLane: "clinical-records",
+      nextWakeAt: null,
+      postCheckpointRecord: {
+        kind: "clinical-records.outcome-recorded",
+        request,
+      },
+      redactedLogEntries: [],
+    });
+
+    try {
+      await enqueueHostedSystemMailboxItem({
+        item: createResolvedNotificationItem({
+          id: "mailbox_item_system_clinical_outcome",
+        }),
+        vaultRoot: workspace.vaultRoot,
+        wake,
+      });
+      const runtime = createRuntime({
+        clinicalRecordsPort: {
+          async fetchPage() {
+            throw new Error("fetchPage should not be called");
+          },
+          async readRun() {
+            throw new Error("readRun should not be called");
+          },
+          recordOutcome,
+        },
+      });
+
+      const prepared = await prepareHostedSystemMailboxItemForCheckpoint({
+        executionContext: null,
+        now: () => FIXED_NOW,
+        runtime,
+        runtimeEnv: {},
+        vaultRoot: workspace.vaultRoot,
+      });
+
+      assert.equal(prepared?.status, "processed");
+      expect(recordOutcome).not.toHaveBeenCalled();
+      assert.equal(
+        prepared.item.postCheckpointRecord?.kind,
+        "clinical-records.outcome-recorded",
+      );
+
+      await expect(recordHostedSystemMailboxItemAfterCheckpoint({
+        item: prepared.item,
+        runtime,
+        vaultRoot: workspace.vaultRoot,
+      })).resolves.toEqual({
+        failed: 0,
+        nextWakeAt: null,
+        recorded: 1,
+      });
+      expect(recordOutcome).toHaveBeenCalledOnce();
+      expect(recordOutcome).toHaveBeenCalledWith(request);
+    } finally {
+      await workspace.cleanup();
+    }
+  });
+
   it("records batched device-sync dirty processed revisions after the checkpoint boundary", async () => {
     const workspace = await createHostedRuntimeWorkspace("murph-hosted-system-mailbox-");
     const ackDirtyStateProcessed = vi.fn()

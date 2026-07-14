@@ -10,6 +10,7 @@ import {
   hostedClinicalRecordsRetrievalScopeSchema,
   parseHostedClinicalRecordsFetchPageResponse,
   parseHostedClinicalRecordsReadRunResponse,
+  parseHostedClinicalRecordsRecordOutcomeRequest,
   parseHostedClinicalRecordsRunDescriptor,
   parseHostedClinicalRecordsSyncRequestedWake,
 } from "../src/clinical-records.ts";
@@ -204,5 +205,37 @@ describe("clinical records hosted execution contracts", () => {
       retryable: true,
       status: "unavailable",
     })).toThrow();
+  });
+
+  it("parses a bounded durable outcome and rejects extra or oversized fields", () => {
+    const request = {
+      counts: {
+        createdCount: 1,
+        executableDecisionCount: 1,
+        fetchedPageCount: 2,
+        fetchedResourceFamilyCount: 1,
+        rawFileCount: 3,
+        retractedCount: 0,
+        reviewDecisionCount: 0,
+        skippedExistingCount: 0,
+        supersededCount: 0,
+      },
+      generation: 1,
+      runId: "clinical_run_1",
+      status: "completed",
+    };
+
+    expect(parseHostedClinicalRecordsRecordOutcomeRequest(request)).toEqual(request);
+    expect(() => parseHostedClinicalRecordsRecordOutcomeRequest({
+      ...request,
+      rawClinicalData: "not-allowed",
+    })).toThrow("unsupported field");
+    expect(() => parseHostedClinicalRecordsRecordOutcomeRequest({
+      ...request,
+      counts: {
+        ...request.counts,
+        rawFileCount: 1_000_001,
+      },
+    })).toThrow("count is invalid");
   });
 });

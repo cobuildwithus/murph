@@ -6,10 +6,7 @@ import {
   HOSTED_CLINICAL_RECORDS_RUNTIME_READ_RUN_PATH,
   HOSTED_CLINICAL_RECORDS_RUNTIME_RECORD_OUTCOME_PATH,
   HOSTED_CLINICAL_RECORDS_MAX_PAGE_BODY_CHARS,
-  parseHostedClinicalRecordsFetchPageResponse,
-  parseHostedClinicalRecordsReadRunResponse,
-  parseHostedClinicalRecordsRecordOutcomeResponse,
-} from "@murphai/hosted-execution/clinical-records";
+} from "@murphai/hosted-execution/clinical-records-boundary";
 
 import {
   fetchHostedWebControlPlaneJson,
@@ -33,7 +30,10 @@ export function createHostedWebClinicalRecordsPort(input: {
   }
 
   return {
-    async fetchPage(request) {
+    async fetchPage(request, options) {
+      const {
+        parseHostedClinicalRecordsFetchPageResponse,
+      } = await import("@murphai/hosted-execution/clinical-records");
       const payload = await fetchHostedWebControlPlaneJson({
         body: request,
         boundUserId: input.boundUserId,
@@ -43,13 +43,17 @@ export function createHostedWebClinicalRecordsPort(input: {
         sensitiveResponseBody: {
           maxBytes: HOSTED_CLINICAL_RECORDS_FETCH_PAGE_RESPONSE_MAX_BYTES,
         },
+        signal: options?.signal ?? null,
         timeoutMs: input.timeoutMs,
         transport: input.transport,
       });
 
       return parseHostedClinicalRecordsFetchPageResponse(payload);
     },
-    async readRun(request) {
+    async readRun(request, options) {
+      const {
+        parseHostedClinicalRecordsReadRunResponse,
+      } = await import("@murphai/hosted-execution/clinical-records");
       const payload = await fetchHostedWebControlPlaneJson({
         body: request,
         boundUserId: input.boundUserId,
@@ -59,6 +63,7 @@ export function createHostedWebClinicalRecordsPort(input: {
         sensitiveResponseBody: {
           maxBytes: HOSTED_CLINICAL_RECORDS_METADATA_RESPONSE_MAX_BYTES,
         },
+        signal: options?.signal ?? null,
         timeoutMs: input.timeoutMs,
         transport: input.transport,
       });
@@ -66,6 +71,9 @@ export function createHostedWebClinicalRecordsPort(input: {
       return parseHostedClinicalRecordsReadRunResponse(payload);
     },
     async recordOutcome(request) {
+      const {
+        parseHostedClinicalRecordsRecordOutcomeResponse,
+      } = await import("@murphai/hosted-execution/clinical-records");
       const payload = await fetchHostedWebControlPlaneJson({
         body: request,
         boundUserId: input.boundUserId,

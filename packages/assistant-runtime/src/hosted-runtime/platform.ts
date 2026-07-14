@@ -341,11 +341,12 @@ export interface HostedRuntimeDeviceSyncPort {
 export interface HostedRuntimeClinicalRecordsPort {
   fetchPage(
     request: HostedClinicalRecordsFetchPageRequest,
+    options?: { signal?: AbortSignal | null },
   ): Promise<HostedClinicalRecordsFetchPageResponse>;
   readRun(request: {
     generation: number;
     runId: string;
-  }): Promise<HostedClinicalRecordsReadRunResponse>;
+  }, options?: { signal?: AbortSignal | null }): Promise<HostedClinicalRecordsReadRunResponse>;
   recordOutcome(request: HostedClinicalRecordsRecordOutcomeRequest): Promise<void>;
 }
 

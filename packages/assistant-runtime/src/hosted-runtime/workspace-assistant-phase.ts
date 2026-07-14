@@ -78,6 +78,9 @@ import {
   createHostedAssistantTurnEnvironment,
 } from "./environment.ts";
 import {
+  createHostedBackgroundMaintenanceCancellation,
+} from "./background-maintenance-cancellation.ts";
+import {
   hydrateHostedExecutionDefaultTarget,
   prepareHostedAssistantAutomationForWake,
 } from "./context.ts";
@@ -203,7 +206,6 @@ const HOSTED_ASSISTANT_CRON_STATUS_YIELD_POLL_MS = 100;
 const HOSTED_MANAGED_AUTOMATION_SETUP_RETRY_DELAY_MS = 30_000;
 const HOSTED_SKIPPED_DEVICE_SYNC_RETRY_DELAY_MS = 30_000;
 const HOSTED_DEFERRED_PENDING_ASSISTANT_INPUT_RETRY_DELAY_MS = 30_000;
-const HOSTED_IDLE_DEVICE_SYNC_PREEMPTION_POLL_MS = 25;
 const HOSTED_DEVICE_SYNC_STATUS_PROMPT_TIMEOUT_MS = 1_000;
 const HOSTED_MEMBER_CHANNEL_UPDATE_ROUTE_ACTIONS = ["apply-member-channels-update"] as const;
 const HOSTED_MEMBER_PREFERENCE_PRE_PLANNING_ROUTE_ACTIONS = [
@@ -874,7 +876,7 @@ export async function runHostedWorkspaceAssistantPhase(
         return null;
       }
 
-      const cancellation = createHostedIdleDeviceSyncMaintenanceCancellation({
+      const cancellation = createHostedBackgroundMaintenanceCancellation({
         signal: channelAbortController.signal,
         shouldYield: input.shouldYieldBackgroundMaintenance ?? null,
         timeoutMs: HOSTED_DEVICE_SYNC_STATUS_PROMPT_TIMEOUT_MS,
@@ -2629,7 +2631,7 @@ async function runIdleDeviceSyncWakeLaneBestEffort(input: {
   phaseInput: HostedWorkspaceRuntimeAssistantPhaseInput;
   wake: ReturnType<typeof buildHostedExecutionRuntimeTimerWake>;
 }): Promise<HostedDeviceSyncWakeMetrics> {
-  const cancellation = createHostedIdleDeviceSyncMaintenanceCancellation({
+  const cancellation = createHostedBackgroundMaintenanceCancellation({
     signal: input.phaseInput.signal ?? null,
     shouldYield: input.phaseInput.shouldYieldBackgroundMaintenance ?? null,
     timeoutMs: input.phaseInput.runtime.commitTimeoutMs,
@@ -2695,76 +2697,6 @@ async function scheduleDeviceActivityAutomationsAfterDeviceSyncBestEffort(input:
     });
     return emptyHostedDeviceActivityAutomationScheduleResult();
   }
-}
-
-function createHostedIdleDeviceSyncMaintenanceCancellation(input: {
-  signal: AbortSignal | null;
-  shouldYield: (() => boolean) | null;
-  timeoutMs: number | null;
-}): {
-  dispose(): void;
-  signal: AbortSignal | null;
-} {
-  if (!input.signal && !input.shouldYield && !input.timeoutMs) {
-    return {
-      dispose: () => undefined,
-      signal: null,
-    };
-  }
-
-  const controller = new AbortController();
-  const abort = (reason: unknown) => {
-    if (!controller.signal.aborted) {
-      controller.abort(reason);
-    }
-  };
-  const abortForOuterSignal = () => {
-    abort(readHostedIdleDeviceSyncAbortReason(input.signal));
-  };
-  const abortForForeground = () => {
-    abort(new DOMException("Idle device sync yielded to foreground input.", "AbortError"));
-  };
-  const abortForTimeout = () => {
-    abort(new DOMException("Idle device sync exceeded its maintenance budget.", "AbortError"));
-  };
-
-  input.signal?.addEventListener("abort", abortForOuterSignal, { once: true });
-  if (input.signal?.aborted) {
-    abortForOuterSignal();
-  }
-
-  const pollTimer = input.shouldYield
-    ? setInterval(() => {
-        if (input.shouldYield?.() === true) {
-          abortForForeground();
-        }
-      }, HOSTED_IDLE_DEVICE_SYNC_PREEMPTION_POLL_MS)
-    : null;
-  pollTimer?.unref?.();
-
-  const timeoutTimer = input.timeoutMs && input.timeoutMs > 0
-    ? setTimeout(abortForTimeout, input.timeoutMs)
-    : null;
-  timeoutTimer?.unref?.();
-
-  return {
-    dispose() {
-      input.signal?.removeEventListener("abort", abortForOuterSignal);
-      if (pollTimer) {
-        clearInterval(pollTimer);
-      }
-      if (timeoutTimer) {
-        clearTimeout(timeoutTimer);
-      }
-    },
-    signal: controller.signal,
-  };
-}
-
-function readHostedIdleDeviceSyncAbortReason(signal: AbortSignal | null): unknown {
-  return signal?.reason instanceof Error
-    ? signal.reason
-    : new DOMException("Idle device sync was aborted.", "AbortError");
 }
 
 async function writeHostedIdleDeviceSyncFailureRuntimeLog(input: {
@@ -3327,6 +3259,7 @@ async function runSystemMailboxMaintenancePhase(input: {
     operatorHomeRoot: phaseInput.restored.operatorHomeRoot,
     runtime: phaseInput.runtime,
     runtimeEnv: phaseInput.runtimeEnv,
+    signal: phaseInput.signal ?? null,
     shouldYieldBackgroundMaintenance: phaseInput.shouldYieldBackgroundMaintenance ?? null,
     vaultRoot: phaseInput.restored.vaultRoot,
   });

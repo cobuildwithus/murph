@@ -5,7 +5,7 @@ import {
   HOSTED_CLINICAL_RECORDS_RUNTIME_FETCH_PAGE_PATH,
   HOSTED_CLINICAL_RECORDS_RUNTIME_READ_RUN_PATH,
   HOSTED_CLINICAL_RECORDS_RUNTIME_RECORD_OUTCOME_PATH,
-} from "@murphai/hosted-execution/clinical-records";
+} from "@murphai/hosted-execution/clinical-records-boundary";
 import {
   HOSTED_PHONE_CALLS_PATH,
 } from "@murphai/hosted-execution/phone-calls";

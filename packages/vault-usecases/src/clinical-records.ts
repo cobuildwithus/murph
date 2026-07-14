@@ -81,22 +81,42 @@ export interface ClinicalFhirSnapshotImportResult {
   reviewDecisionCount: number;
 }
 
+export class ClinicalFhirSnapshotRejectedError extends Error {
+  readonly code = "CLINICAL_FHIR_SNAPSHOT_REJECTED" as const;
+
+  constructor(cause: unknown) {
+    super("Clinical FHIR snapshot failed semantic validation.", { cause });
+    this.name = "ClinicalFhirSnapshotRejectedError";
+  }
+}
+
 export async function importClinicalFhirSnapshot(
   input: ClinicalFhirSnapshotImportInput,
 ): Promise<ClinicalFhirSnapshotImportResult> {
-  const prepared = prepareClinicalFhirSnapshot(input);
+  let prepared: ReturnType<typeof prepareClinicalFhirSnapshot>;
+  try {
+    prepared = prepareClinicalFhirSnapshot(input);
+  } catch (error) {
+    throw new ClinicalFhirSnapshotRejectedError(error);
+  }
   const importer = await loadRuntimeModule<ClinicalImporterModule>(
     CLINICAL_IMPORTER_MODULE_SPECIFIER,
   );
-  const plan = importer.buildClinicalImportPlanFromSnapshot({
-    manifest: prepared.manifest,
-    manifestPath: prepared.manifestPath,
-    pages: prepared.pages.map((page) => ({
-      content: page.content,
-      relativePath: page.relativePath,
-    })),
-  });
-  const executableDecisions = importer.clinicalPlanToEventImportDecisions(plan);
+  let plan: ClinicalImportPlan;
+  let executableDecisions: EventImportDecision[];
+  try {
+    plan = importer.buildClinicalImportPlanFromSnapshot({
+      manifest: prepared.manifest,
+      manifestPath: prepared.manifestPath,
+      pages: prepared.pages.map((page) => ({
+        content: page.content,
+        relativePath: page.relativePath,
+      })),
+    });
+    executableDecisions = importer.clinicalPlanToEventImportDecisions(plan);
+  } catch (error) {
+    throw new ClinicalFhirSnapshotRejectedError(error);
+  }
   const reviewDecisionCount = plan.decisions.filter(
     (decision) => decision.action === "review",
   ).length;

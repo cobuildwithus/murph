@@ -184,6 +184,40 @@ describe("hosted clinical records runtime port", () => {
     })).resolves.toMatchObject({ body, status: "page" });
   });
 
+  it("forwards caller cancellation to an in-flight clinical control-plane read", async () => {
+    const observed: { signal: AbortSignal | null } = { signal: null };
+    const fetchMock = vi.fn(async (input: RequestInfo | URL, init?: RequestInit) => {
+      const request = input instanceof Request ? input : new Request(input, init);
+      observed.signal = request.signal;
+      return await new Promise<Response>((_resolve, reject) => {
+        request.signal.addEventListener(
+          "abort",
+          () => reject(request.signal.reason),
+          { once: true },
+        );
+      });
+    });
+    const port = createHostedWebClinicalRecordsPort({
+      boundUserId: "member_1",
+      fetchImpl: fetchMock as typeof fetch,
+      timeoutMs: 5_000,
+      transport: { mode: "proxy" },
+    });
+    const controller = new AbortController();
+
+    const read = port.readRun(
+      { generation: 1, runId: "run_1" },
+      { signal: controller.signal },
+    );
+    await vi.waitFor(() => expect(fetchMock).toHaveBeenCalledOnce());
+    controller.abort(new DOMException("foreground work arrived", "AbortError"));
+
+    await expect(read).rejects.toThrow(
+      "Hosted clinical records read run request failed.",
+    );
+    expect(observed.signal?.aborted).toBe(true);
+  });
+
   it("cancels a fetch-page response at exactly one byte beyond its envelope limit", async () => {
     let cancelled = false;
     const fetchMock = vi.fn(async () => new Response(new ReadableStream<Uint8Array>({

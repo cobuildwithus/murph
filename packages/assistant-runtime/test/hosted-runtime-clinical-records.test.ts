@@ -98,10 +98,10 @@ describe("hosted clinical records maintenance", () => {
       generation: 1,
       resourceType: "Observation",
       runId: "clinical_run_1",
-    }));
+    }), expect.objectContaining({ signal: null }));
     expect(fetchPage).toHaveBeenNthCalledWith(2, expect.objectContaining({
       cursor: "opaque-cursor-2",
-    }));
+    }), expect.objectContaining({ signal: null }));
     expect(importSnapshot).toHaveBeenCalledWith(expect.objectContaining({
       completedResourceTypes: ["Observation"],
       pages: [
@@ -109,7 +109,7 @@ describe("hosted clinical records maintenance", () => {
         expect.objectContaining({ pageUrlHash: nextPageUrlHash, resourceType: "Observation" }),
       ],
     }));
-    expect(port.recordOutcome).toHaveBeenCalledWith(expect.objectContaining({
+    expect(result.outcome).toEqual(expect.objectContaining({
       counts: expect.objectContaining({
         createdCount: 2,
         fetchedPageCount: 2,
@@ -118,6 +118,7 @@ describe("hosted clinical records maintenance", () => {
       }),
       status: "completed",
     }));
+    expect(port.recordOutcome).not.toHaveBeenCalled();
     expect(result.status).toBe("completed");
   });
 
@@ -159,10 +160,11 @@ describe("hosted clinical records maintenance", () => {
       }],
       pages: [],
     }));
-    expect(port.recordOutcome).toHaveBeenCalledWith(expect.objectContaining({
+    expect(result.outcome).toEqual(expect.objectContaining({
       errorCode: "provider_denied",
       status: "partial",
     }));
+    expect(port.recordOutcome).not.toHaveBeenCalled();
     expect(result.status).toBe("partial");
   });
 
@@ -366,11 +368,12 @@ describe("hosted clinical records maintenance", () => {
 
     expect(fetchPage).toHaveBeenCalledTimes(2);
     expect(importSnapshot).not.toHaveBeenCalled();
-    expect(port.recordOutcome).toHaveBeenCalledWith(expect.objectContaining({
+    expect(result.outcome).toEqual(expect.objectContaining({
       counts: expect.objectContaining({ fetchedPageCount: 2 }),
       errorCode: "cursor_cycle",
       status: "failed",
     }));
+    expect(port.recordOutcome).not.toHaveBeenCalled();
     expect(result.status).toBe("failed");
   });
 
@@ -393,7 +396,7 @@ describe("hosted clinical records maintenance", () => {
 
     expect(result.status).toBe("failed");
     expect(importSnapshot).not.toHaveBeenCalled();
-    expect(port.recordOutcome).toHaveBeenCalledWith(expect.objectContaining({
+    expect(result.outcome).toEqual(expect.objectContaining({
       errorCode: "page_size_exceeded",
       status: "failed",
     }));
@@ -434,7 +437,7 @@ describe("hosted clinical records maintenance", () => {
 
     expect(fetchPage).toHaveBeenCalledTimes(pageCount);
     expect(importSnapshot).not.toHaveBeenCalled();
-    expect(port.recordOutcome).toHaveBeenCalledWith(expect.objectContaining({
+    expect(result.outcome).toEqual(expect.objectContaining({
       counts: expect.objectContaining({ fetchedPageCount: pageCount }),
       errorCode: "snapshot_size_exceeded",
       status: "failed",
@@ -471,7 +474,7 @@ describe("hosted clinical records maintenance", () => {
     });
 
     expect(importSnapshot).not.toHaveBeenCalled();
-    expect(port.recordOutcome).toHaveBeenCalledWith(expect.objectContaining({
+    expect(result.outcome).toEqual(expect.objectContaining({
       counts: expect.objectContaining({ fetchedPageCount: 1 }),
       errorCode,
       status: "failed",
@@ -526,7 +529,7 @@ describe("hosted clinical records maintenance", () => {
         expect.objectContaining({ resourceType: "Observation" })
       ),
     }));
-    expect(port.recordOutcome).toHaveBeenCalledWith(expect.objectContaining({
+    expect(result.outcome).toEqual(expect.objectContaining({
       counts: expect.objectContaining({ fetchedPageCount: pageCount }),
       status: "completed",
     }));
@@ -566,7 +569,7 @@ describe("hosted clinical records maintenance", () => {
 
     expect(fetchPage).toHaveBeenCalledTimes(pageCountAtLimit + 1);
     expect(importSnapshot).not.toHaveBeenCalled();
-    expect(port.recordOutcome).toHaveBeenCalledWith(expect.objectContaining({
+    expect(result.outcome).toEqual(expect.objectContaining({
       counts: expect.objectContaining({ fetchedPageCount: pageCountAtLimit + 1 }),
       errorCode: "snapshot_resource_limit_exceeded",
       status: "failed",
@@ -574,7 +577,7 @@ describe("hosted clinical records maintenance", () => {
     expect(result.status).toBe("failed");
   });
 
-  it("reclaims discarded family resources while preserving successful-page reconciliation counts", async () => {
+  it("keeps discarded family resources charged to the run-wide resource cap", async () => {
     const conditionScope = {
       coverage: "whole-family",
       queryFingerprint: "b".repeat(64),
@@ -624,19 +627,7 @@ describe("hosted clinical records maintenance", () => {
       fetchPage,
       readRun: vi.fn().mockResolvedValue({ run: multiFamilyRun, status: "ready" }),
     });
-    const importSnapshot = vi.fn().mockResolvedValue({
-      canonical: {
-        applied: false,
-        createdCount: 0,
-        retractedCount: 0,
-        skippedExistingCount: 0,
-        supersededCount: 0,
-      },
-      executableDecisionCount: 0,
-      manifestPath: "raw/clinical/fhir/connection_1/clinical_run_1/manifest.json",
-      rawFileCount: conditionPageCount + 1,
-      reviewDecisionCount: 0,
-    });
+    const importSnapshot = vi.fn();
 
     const result = await runHostedClinicalRecordsSyncWakeLane({
       clinicalRecordsPort: port,
@@ -645,25 +636,16 @@ describe("hosted clinical records maintenance", () => {
       wake: WAKE,
     });
 
-    expect(importSnapshot).toHaveBeenCalledOnce();
-    expect(importSnapshot).toHaveBeenCalledWith(expect.objectContaining({
-      completedResourceTypes: ["Condition"],
-      errors: [expect.objectContaining({
-        code: "provider_denied",
-        resourceType: "Observation",
-      })],
-      pages: Array.from({ length: conditionPageCount }, () =>
-        expect.objectContaining({ resourceType: "Condition" })
-      ),
-    }));
-    expect(port.recordOutcome).toHaveBeenCalledWith(expect.objectContaining({
+    expect(importSnapshot).not.toHaveBeenCalled();
+    expect(result.outcome).toEqual(expect.objectContaining({
       counts: expect.objectContaining({
-        fetchedPageCount: conditionPageCount + 2,
+        fetchedPageCount: conditionPageCount + 1,
       }),
-      errorCode: "provider_denied",
-      status: "partial",
+      errorCode: "snapshot_resource_limit_exceeded",
+      status: "failed",
     }));
-    expect(result.status).toBe("partial");
+    expect(port.recordOutcome).not.toHaveBeenCalled();
+    expect(result.status).toBe("failed");
   });
 
   it("does not reset the absolute page-fetch cap when a partial family is discarded", async () => {
@@ -714,7 +696,7 @@ describe("hosted clinical records maintenance", () => {
 
     expect(fetchPage).toHaveBeenCalledTimes(HOSTED_CLINICAL_RECORDS_MAX_PAGES);
     expect(importSnapshot).not.toHaveBeenCalled();
-    expect(port.recordOutcome).toHaveBeenCalledWith(expect.objectContaining({
+    expect(result.outcome).toEqual(expect.objectContaining({
       counts: expect.objectContaining({
         fetchedPageCount: HOSTED_CLINICAL_RECORDS_MAX_PAGES - 1,
       }),
@@ -745,6 +727,33 @@ describe("hosted clinical records maintenance", () => {
     expect(port.recordOutcome).not.toHaveBeenCalled();
   });
 
+  it("turns deterministic importer rejection into one checkpointed terminal outcome", async () => {
+    const port = createPort();
+    const importSnapshot = vi.fn().mockRejectedValue(
+      Object.assign(new Error("safe semantic rejection"), {
+        code: "CLINICAL_FHIR_SNAPSHOT_REJECTED",
+      }),
+    );
+
+    const result = await runHostedClinicalRecordsSyncWakeLane({
+      clinicalRecordsPort: port,
+      importSnapshot,
+      vaultRoot: "/tmp/clinical-vault",
+      wake: WAKE,
+    });
+
+    expect(result).toMatchObject({
+      outcome: {
+        errorCode: "snapshot_rejected",
+        generation: 1,
+        runId: "clinical_run_1",
+        status: "failed",
+      },
+      status: "failed",
+    });
+    expect(port.recordOutcome).not.toHaveBeenCalled();
+  });
+
   it("does not overwrite a web-terminalized authorization-required read", async () => {
     const port = createPort({
       readRun: vi.fn().mockResolvedValue({
@@ -766,7 +775,7 @@ describe("hosted clinical records maintenance", () => {
     expect(port.recordOutcome).not.toHaveBeenCalled();
   });
 
-  it("records foreground preemption and throws so the durable mailbox retries", async () => {
+  it("preempts before reading and leaves the durable mailbox item retryable", async () => {
     const port = createPort();
 
     await expect(runHostedClinicalRecordsSyncWakeLane({
@@ -776,11 +785,37 @@ describe("hosted clinical records maintenance", () => {
       vaultRoot: "/tmp/clinical-vault",
       wake: WAKE,
     })).rejects.toMatchObject({ code: "CLINICAL_RECORDS_FOREGROUND_PREEMPTED" });
-    expect(port.readRun).toHaveBeenCalledWith({ generation: 1, runId: "clinical_run_1" });
-    expect(port.recordOutcome).toHaveBeenCalledWith(expect.objectContaining({
-      errorCode: "foreground_preempted",
-      status: "preempted",
-    }));
+    expect(port.readRun).not.toHaveBeenCalled();
+    expect(port.recordOutcome).not.toHaveBeenCalled();
+  });
+
+  it("aborts an in-flight control-plane read when foreground work arrives", async () => {
+    let shouldYield = false;
+    const readRun = vi.fn<HostedRuntimeClinicalRecordsPort["readRun"]>(
+      async (_request, options) => await new Promise<never>((_resolve, reject) => {
+        const signal = options?.signal;
+        if (!signal) {
+          reject(new Error("Expected a Clinical Records cancellation signal."));
+          return;
+        }
+        signal.addEventListener("abort", () => reject(signal.reason), { once: true });
+      }),
+    );
+    const port = createPort({ readRun });
+
+    const sync = runHostedClinicalRecordsSyncWakeLane({
+      clinicalRecordsPort: port,
+      importSnapshot: vi.fn(),
+      shouldYieldClinicalRecords: () => shouldYield,
+      vaultRoot: "/tmp/clinical-vault",
+      wake: WAKE,
+    });
+    await vi.waitFor(() => expect(readRun).toHaveBeenCalledOnce());
+    shouldYield = true;
+
+    await expect(sync).rejects.toMatchObject({ name: "AbortError" });
+    expect(port.fetchPage).not.toHaveBeenCalled();
+    expect(port.recordOutcome).not.toHaveBeenCalled();
   });
 
   it("reuses the same generation after preemption and then completes", async () => {
@@ -821,41 +856,38 @@ describe("hosted clinical records maintenance", () => {
       importSnapshot,
       shouldYieldClinicalRecords: () => {
         preemptionChecks += 1;
-        return preemptionChecks === 4;
+        return preemptionChecks === 7;
       },
       vaultRoot: "/tmp/clinical-vault",
       wake: WAKE,
     })).rejects.toMatchObject({ code: "CLINICAL_RECORDS_FOREGROUND_PREEMPTED" });
-    await expect(runHostedClinicalRecordsSyncWakeLane({
+    const completed = await runHostedClinicalRecordsSyncWakeLane({
       clinicalRecordsPort: port,
       importSnapshot,
       shouldYieldClinicalRecords: () => false,
       vaultRoot: "/tmp/clinical-vault",
       wake: WAKE,
-    })).resolves.toMatchObject({ status: "completed" });
+    });
 
-    expect(port.readRun).toHaveBeenCalledWith({ generation: 1, runId: "clinical_run_1" });
-    expect(port.recordOutcome).toHaveBeenNthCalledWith(1, expect.objectContaining({
-      counts: expect.objectContaining({ fetchedPageCount: 1 }),
-      generation: 1,
-      status: "preempted",
-    }));
-    expect(port.recordOutcome).toHaveBeenNthCalledWith(2, expect.objectContaining({
+    expect(completed.status).toBe("completed");
+    expect(port.readRun).toHaveBeenCalledTimes(2);
+    expect(port.recordOutcome).not.toHaveBeenCalled();
+    expect(completed.outcome).toEqual(expect.objectContaining({
       generation: 1,
       status: "completed",
     }));
     expect(fetchPage).toHaveBeenNthCalledWith(1, expect.objectContaining({
       cursor: null,
       requestId: "cr-1-1-1",
-    }));
+    }), expect.objectContaining({ signal: expect.any(AbortSignal) }));
     expect(fetchPage).toHaveBeenNthCalledWith(2, expect.objectContaining({
       cursor: null,
       requestId: "cr-1-1-1",
-    }));
+    }), expect.objectContaining({ signal: expect.any(AbortSignal) }));
     expect(fetchPage).toHaveBeenNthCalledWith(3, expect.objectContaining({
       cursor: "opaque-cursor-2",
       requestId: "cr-1-1-2",
-    }));
+    }), expect.objectContaining({ signal: expect.any(AbortSignal) }));
   });
 
   it("keeps raw FHIR and the clinical importer out of the static mailbox path", async () => {

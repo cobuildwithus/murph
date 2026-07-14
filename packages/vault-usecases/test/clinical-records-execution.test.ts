@@ -13,6 +13,7 @@ import {
   initializeVault,
 } from "@murphai/core";
 import {
+  ClinicalFhirSnapshotRejectedError,
   importClinicalFhirSnapshot,
   type ClinicalFhirSnapshotImportInput,
 } from "@murphai/vault-usecases/clinical-records";
@@ -114,13 +115,17 @@ describe("importClinicalFhirSnapshot", () => {
     });
     await importClinicalFhirSnapshot(input);
 
-    await expect(importClinicalFhirSnapshot({
+    const conflictingReplay = importClinicalFhirSnapshot({
       ...input,
       pages: [{
         content: fhirBundle([heartRateObservation("heart-rate-conflict", 99)]),
         resourceType: "Observation",
       }],
-    })).rejects.toThrow();
+    });
+    await expect(conflictingReplay).rejects.toThrow();
+    await expect(conflictingReplay).rejects.not.toBeInstanceOf(
+      ClinicalFhirSnapshotRejectedError,
+    );
   });
 
   it("applies importer-owned review holds across delayed clinical revisions", async () => {
@@ -220,7 +225,12 @@ describe("importClinicalFhirSnapshot", () => {
     });
 
     await expect(importClinicalFhirSnapshot(input))
-      .rejects.toThrow("has no comparable source revision");
+      .rejects.toMatchObject({
+        cause: expect.objectContaining({
+          message: expect.stringContaining("has no comparable source revision"),
+        }),
+        code: "CLINICAL_FHIR_SNAPSHOT_REJECTED",
+      });
     await expectClinicalRawSnapshotAbsent(input);
   });
 
@@ -235,7 +245,12 @@ describe("importClinicalFhirSnapshot", () => {
       resourceTypes: ["Observation"],
     });
 
-    await expect(importClinicalFhirSnapshot(input)).rejects.toThrow("does not match manifest patient");
+    await expect(importClinicalFhirSnapshot(input)).rejects.toMatchObject({
+      cause: expect.objectContaining({
+        message: expect.stringContaining("does not match manifest patient"),
+      }),
+      code: "CLINICAL_FHIR_SNAPSHOT_REJECTED",
+    });
     await expectClinicalRawSnapshotAbsent(input);
   });
 
@@ -248,7 +263,12 @@ describe("importClinicalFhirSnapshot", () => {
       resourceTypes: ["Condition"],
     });
 
-    await expect(importClinicalFhirSnapshot(input)).rejects.toThrow("declared resource type");
+    await expect(importClinicalFhirSnapshot(input)).rejects.toMatchObject({
+      cause: expect.objectContaining({
+        message: expect.stringContaining("declared resource type"),
+      }),
+      code: "CLINICAL_FHIR_SNAPSHOT_REJECTED",
+    });
     await expectClinicalRawSnapshotAbsent(input);
   });
 
@@ -267,7 +287,12 @@ describe("importClinicalFhirSnapshot", () => {
       resourceTypes: ["Observation"],
     });
 
-    await expect(importClinicalFhirSnapshot(input)).rejects.toThrow("invalid manifest patient reference");
+    await expect(importClinicalFhirSnapshot(input)).rejects.toMatchObject({
+      cause: expect.objectContaining({
+        message: expect.stringContaining("invalid manifest patient reference"),
+      }),
+      code: "CLINICAL_FHIR_SNAPSHOT_REJECTED",
+    });
     await expectClinicalRawSnapshotAbsent(input);
   });
 
@@ -281,7 +306,12 @@ describe("importClinicalFhirSnapshot", () => {
       resourceTypes: ["Observation"],
     });
 
-    await expect(importClinicalFhirSnapshot(input)).rejects.toThrow("unresolved pagination");
+    await expect(importClinicalFhirSnapshot(input)).rejects.toMatchObject({
+      cause: expect.objectContaining({
+        message: expect.stringContaining("unresolved pagination"),
+      }),
+      code: "CLINICAL_FHIR_SNAPSHOT_REJECTED",
+    });
     await expectClinicalRawSnapshotAbsent(input);
   });
 
