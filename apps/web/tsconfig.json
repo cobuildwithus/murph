@@ -91,7 +91,7 @@
         "../../packages/hosted-execution/src/connected-apps.ts"
       ],
       "@murphai/hosted-execution/clinical-records": [
-        "packages/hosted-execution/src/clinical-records.ts"
+        "../../packages/hosted-execution/src/clinical-records.ts"
       ],
       "@murphai/hosted-execution/contracts": [
         "../../packages/hosted-execution/src/contracts.ts"
