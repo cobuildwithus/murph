@@ -140,6 +140,44 @@ export type HostedGroupMemberLeaveTxResult =
       vaultShareCleanupSignals: [];
     };
 
+export type HostedGroupMemberLeaveReplayOutcome =
+  | "already_left"
+  | "group_not_found"
+  | "owner_cannot_leave"
+  | "stale_active_member";
+
+export async function readHostedGroupMemberLeaveReplayOutcome(input: {
+  groupRuntimeMemberId: string;
+  memberId: string;
+  prisma?: HostedGroupsReadClient;
+}): Promise<HostedGroupMemberLeaveReplayOutcome> {
+  const prisma = input.prisma ?? getPrisma();
+  const group = await prisma.hostedGroup.findUnique({
+    where: { runtimeMemberId: input.groupRuntimeMemberId },
+    select: { id: true, ownerMemberId: true },
+  });
+  if (!group) {
+    return "group_not_found";
+  }
+
+  const membership = await prisma.hostedGroupMember.findUnique({
+    where: {
+      groupId_memberId: {
+        groupId: group.id,
+        memberId: input.memberId,
+      },
+    },
+    select: { leftAt: true },
+  });
+  if (!membership || membership.leftAt) {
+    return "already_left";
+  }
+  if (group.ownerMemberId === input.memberId) {
+    return "owner_cannot_leave";
+  }
+  return "stale_active_member";
+}
+
 export const HOSTED_GROUP_VAULT_SHARE_GRANT_LIMIT_PER_GRANTOR_PROJECTION = 25;
 export const HOSTED_GROUP_VAULT_SHARE_DESTINATION_LIMIT_PER_PROJECTION = 100;
 const DEFAULT_HOSTED_GROUP_REQUESTED_VAULT_SHARE_PROJECTION_KINDS = [

@@ -57,6 +57,7 @@ import {
   HOSTED_GROUP_VAULT_SHARE_DESTINATION_LIMIT_PER_PROJECTION,
   HOSTED_GROUP_VAULT_SHARE_GRANT_LIMIT_PER_GRANTOR_PROJECTION,
   leaveHostedGroupMemberTx,
+  readHostedGroupMemberLeaveReplayOutcome,
   readHostedGroupJoinView,
   recordHostedGroupJoinOfferTx,
 } from "@/src/lib/hosted-groups/group-store";
@@ -1309,6 +1310,64 @@ describe("leaveHostedGroupMemberTx", () => {
     })).rejects.toThrow("active share projection metadata is invalid");
 
     expect(tx.hostedGroupMember.update).not.toHaveBeenCalled();
+  });
+});
+
+describe("readHostedGroupMemberLeaveReplayOutcome", () => {
+  beforeEach(() => {
+    vi.clearAllMocks();
+  });
+
+  it.each([
+    {
+      expected: "already_left",
+      input: {
+        existingMembershipId: "membership_existing",
+        existingMembershipLeftAt: new Date("2026-07-09T00:00:00.000Z"),
+      },
+      memberId: "member_grantor",
+    },
+    {
+      expected: "already_left",
+      input: {},
+      memberId: "member_outside_group",
+    },
+    {
+      expected: "owner_cannot_leave",
+      input: { existingMembershipId: "membership_owner", ownerMemberId: "member_owner" },
+      memberId: "member_owner",
+    },
+    {
+      expected: "stale_active_member",
+      input: { existingMembershipId: "membership_existing" },
+      memberId: "member_grantor",
+    },
+  ] as const)("returns $expected without mutating group state", async ({ expected, input, memberId }) => {
+    const prisma = buildTx(input);
+
+    await expect(readHostedGroupMemberLeaveReplayOutcome({
+      groupRuntimeMemberId: "member_group_runtime",
+      memberId,
+      prisma,
+    })).resolves.toBe(expected);
+
+    expect(prisma.$queryRaw).not.toHaveBeenCalled();
+    expect(prisma.hostedGroupMember.update).not.toHaveBeenCalled();
+    expect(mocks.revokeHostedVaultSharesWithCleanupTx).not.toHaveBeenCalled();
+  });
+
+  it("reports a missing group without reading membership state", async () => {
+    const prisma = buildTx();
+    prisma.hostedGroup.findUnique.mockResolvedValueOnce(null);
+
+    await expect(readHostedGroupMemberLeaveReplayOutcome({
+      groupRuntimeMemberId: "member_missing_runtime",
+      memberId: "member_grantor",
+      prisma,
+    })).resolves.toBe("group_not_found");
+
+    expect(prisma.hostedGroupMember.findUnique).not.toHaveBeenCalled();
+    expect(prisma.$queryRaw).not.toHaveBeenCalled();
   });
 });
 

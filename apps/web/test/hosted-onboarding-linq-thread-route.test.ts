@@ -91,6 +91,7 @@ vi.mock("../src/lib/hosted-groups/group-store", async (importOriginal) => {
   return {
     ...actual,
     leaveHostedGroupMemberTx: vi.fn(),
+    readHostedGroupMemberLeaveReplayOutcome: vi.fn(),
   };
 });
 
@@ -209,6 +210,9 @@ beforeEach(() => {
     revokedCount: 2,
     vaultShareCleanupSignals: [],
   });
+  vi.mocked(groupStore.readHostedGroupMemberLeaveReplayOutcome).mockResolvedValue(
+    "already_left",
+  );
   vi.mocked(linqDailyState.incrementHostedLinqInboundDailyState).mockResolvedValue({
     dayUtc: new Date("2026-06-24T00:00:00.000Z"),
     inboundCount: 1,
@@ -1278,6 +1282,9 @@ describe("Linq explicit external-thread routing", () => {
         userId: "member_thread_container_123",
       }),
     );
+    vi.mocked(groupStore.readHostedGroupMemberLeaveReplayOutcome).mockResolvedValueOnce(
+      "stale_active_member",
+    );
 
     const plan = await planHostedOnboardingLinqWebhook({
       event: buildLinqMessageReceivedEvent({
@@ -1286,22 +1293,60 @@ describe("Linq explicit external-thread routing", () => {
       prisma: prisma as never,
     });
 
-    expect(plan.response.reason).toBe("inactive-group-leave:already_left");
+    expect(plan.response.reason).toBe("inactive-group-leave:stale-rejoin");
     expect(groupStore.leaveHostedGroupMemberTx).not.toHaveBeenCalled();
     expect(prisma.hostedMailboxItem.updateMany).not.toHaveBeenCalled();
     expect(plan.wakeHandoffs).toEqual([expect.objectContaining({
       mailboxItemId: "mailbox_cleanup_pending_123",
       processingMode: "inactive_system_maintenance",
     })]);
-    expect(plan.postHandoffSideEffects).toEqual([expect.objectContaining({
-      effectId: "linq-message:evt_group_123",
-      payload: expect.objectContaining({
-        participantMemberId: "member_departing_123",
-        result: "already_left",
-        template: "group_leave_result",
-      }),
-    })]);
+    expect(plan.postHandoffSideEffects).toEqual([]);
   });
+
+  it.each(["already_left", "group_not_found", "owner_cannot_leave"] as const)(
+    "preserves the current %s result for consumed leave evidence",
+    async (replayOutcome) => {
+      const prisma = createPrisma({
+        routeContainerActive: false,
+        routeContainerMemberId: "member_thread_container_123",
+      });
+      vi.mocked(memberIdentityStore.lookupHostedMemberIdentityByPhoneNumber).mockResolvedValue({
+        core: {
+          billingStatus: HostedBillingStatus.active,
+          createdAt: new Date("2026-06-01T00:00:00.000Z"),
+          id: "member_departing_123",
+          suspendedAt: null,
+          updatedAt: new Date("2026-06-24T00:00:00.000Z"),
+        },
+        identity: {},
+        matchedBy: "phoneNumber",
+      } as Awaited<ReturnType<typeof memberIdentityStore.lookupHostedMemberIdentityByPhoneNumber>>);
+      vi.mocked(mailboxStore.appendHostedMailboxEnvelopeTx).mockResolvedValueOnce({
+        dedupeConflict: false,
+        duplicate: true,
+        inserted: false,
+        item: buildHostedMailboxItem({
+          consumedAt: "2026-06-24T12:00:01.000Z",
+          id: "mailbox_inactive_leave_123",
+          userId: "member_thread_container_123",
+        }),
+      });
+      vi.mocked(groupStore.readHostedGroupMemberLeaveReplayOutcome).mockResolvedValueOnce(
+        replayOutcome,
+      );
+
+      const plan = await planHostedOnboardingLinqWebhook({
+        event: buildLinqMessageReceivedEvent({ text: "remove me from this group" }),
+        prisma: prisma as never,
+      });
+
+      expect(plan.response.reason).toBe(`inactive-group-leave:${replayOutcome}`);
+      expect(groupStore.leaveHostedGroupMemberTx).not.toHaveBeenCalled();
+      expect(plan.postHandoffSideEffects).toEqual([expect.objectContaining({
+        payload: expect.objectContaining({ result: replayOutcome }),
+      })]);
+    },
+  );
 
   it("completes an accepted duplicate whose evidence is still unconsumed", async () => {
     const prisma = createPrisma({

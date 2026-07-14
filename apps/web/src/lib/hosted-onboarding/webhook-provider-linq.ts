@@ -57,7 +57,10 @@ import {
   readHostedMailboxItemByDedupeKey,
   readHostedMailboxLatestPendingSystemItem,
 } from "../hosted-mailbox/store";
-import { leaveHostedGroupMemberTx } from "../hosted-groups/group-store";
+import {
+  leaveHostedGroupMemberTx,
+  readHostedGroupMemberLeaveReplayOutcome,
+} from "../hosted-groups/group-store";
 import {
   bindHostedMemberHomeLinqChat,
   bindHostedMemberHomeLinqChatAndTrackInbound,
@@ -1378,6 +1381,11 @@ async function planHostedLinqInactiveGroupLeaveWebhook(input: {
     });
   }
   if (evidence.item.consumedAt) {
+    const replayOutcome = await readHostedGroupMemberLeaveReplayOutcome({
+      groupRuntimeMemberId: input.route.containerMemberId,
+      memberId: participant.core.id,
+      prisma: input.prisma,
+    });
     const pendingSystemItem = await readHostedMailboxLatestPendingSystemItem({
       prisma: input.prisma,
       userId: input.route.containerMemberId,
@@ -1393,7 +1401,7 @@ async function planHostedLinqInactiveGroupLeaveWebhook(input: {
           }
         : {}),
       participantMemberId: participant.core.id,
-      result: "already_left",
+      result: replayOutcome === "stale_active_member" ? null : replayOutcome,
       routeAuthority,
     });
   }
@@ -1448,7 +1456,7 @@ function buildHostedLinqInactiveGroupLeaveDecision(
     context: ReturnType<typeof resolveHostedOnboardingLinqMessageContext>;
     event: HostedLinqWebhookEvent;
     participantMemberId: string | null;
-    result: HostedLinqGroupLeaveResult;
+    result: HostedLinqGroupLeaveResult | null;
     route: HostedThreadRouteSnapshot;
     routeAuthority: HostedLinqThreadRouteEgressAuthority;
   },
@@ -1456,8 +1464,9 @@ function buildHostedLinqInactiveGroupLeaveDecision(
   return logHostedLinqWebhookPlannerDecisionAndReturn(
     buildActiveMemberDirectPlan({
       desiredSideEffects: [],
-      postHandoffSideEffects: [
-        createHostedWebhookLinqMessageSideEffect({
+      postHandoffSideEffects: input.result === null
+        ? []
+        : [createHostedWebhookLinqMessageSideEffect({
           chatId: input.context.summary.chatId,
           groupRuntimeMemberId: input.route.containerMemberId,
           memberId: input.route.containerMemberId,
@@ -1468,12 +1477,13 @@ function buildHostedLinqInactiveGroupLeaveDecision(
           routeAuthority: input.routeAuthority,
           sourceEventId: input.event.event_id,
           template: "group_leave_result",
-        }),
-      ],
+        })],
       response: {
         ignored: false,
         ok: true,
-        reason: `inactive-group-leave:${input.result}`,
+        reason: input.result === null
+          ? "inactive-group-leave:stale-rejoin"
+          : `inactive-group-leave:${input.result}`,
       },
       ...(input.cleanupSignal
         ? {
@@ -1490,7 +1500,9 @@ function buildHostedLinqInactiveGroupLeaveDecision(
     buildHostedLinqWebhookPlannerDetails(input.event, input.context, {
       existingMemberActive: false,
       existingMemberMatch: "none",
-      reason: `inactive-group-leave:${input.result}`,
+      reason: input.result === null
+        ? "inactive-group-leave:stale-rejoin"
+        : `inactive-group-leave:${input.result}`,
       routeStage: "thread-route-inactive-group-leave",
     }),
   );

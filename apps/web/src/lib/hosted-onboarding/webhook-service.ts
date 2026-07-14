@@ -416,6 +416,7 @@ export async function handleHostedOnboardingLinqWebhook(input: {
     responseReason = plan.response.reason ?? null;
     const wakeHandoff = plan.wakeHandoffs?.[0];
     const confirmationDeadlineMs = createHostedPostCommitDeadline(undefined);
+    let wakeHandoffError: unknown;
     const wakeHandoffResult = await (async () => {
       try {
         return await maybeHandoffHostedExecutionWebhookWake({
@@ -425,6 +426,9 @@ export async function handleHostedOnboardingLinqWebhook(input: {
           timeoutMs: readHostedPostCommitRemainingMs(confirmationDeadlineMs),
           wakeHandoff,
         });
+      } catch (error) {
+        wakeHandoffError = error;
+        return null;
       } finally {
         await reconcileHostedGroupJoinConfirmationsAfterCommitBestEffort({
           deadlineMs: confirmationDeadlineMs,
@@ -442,6 +446,9 @@ export async function handleHostedOnboardingLinqWebhook(input: {
         sideEffects: plan.postHandoffSideEffects ?? [],
         signal: input.signal,
       });
+    }
+    if (wakeHandoffError !== undefined) {
+      throw wakeHandoffError;
     }
     const sendReadReceipt = () => maybeSendHostedLinqIngressReadReceipt({
       currentInboundReply,

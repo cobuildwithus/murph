@@ -236,4 +236,43 @@ describe("hosted Linq read receipt route authority", () => {
     });
     expect(mocks.sendHostedLinqReadReceipt).not.toHaveBeenCalled();
   });
+
+  it("attempts the leave result before rethrowing a cleanup handoff failure", async () => {
+    const order: string[] = [];
+    const signalError = new Error("cleanup signal failed");
+    mocks.maybeHandoffHostedExecutionWebhookWake.mockImplementationOnce(async () => {
+      order.push("handoff");
+      throw signalError;
+    });
+    mocks.drainHostedLinqSideEffectsDirect.mockImplementationOnce(async () => {
+      order.push("result");
+      return { sentCount: 1, skipped: [] };
+    });
+    const resultEffect = {
+      effectId: "linq-message:evt_read_receipt_mismatch",
+      payload: { template: "group_leave_result" },
+    };
+    mocks.planHostedOnboardingLinqWebhook.mockResolvedValue({
+      desiredSideEffects: [],
+      postHandoffSideEffects: [resultEffect],
+      response: { ignored: false, ok: true, reason: "inactive-group-leave:left" },
+      wakeHandoffs: [{
+        eventId: "evt_read_receipt_mismatch",
+        mailboxItemId: "mailbox_cleanup_123",
+        processingMode: "inactive_system_maintenance",
+        source: "linq",
+        userId: "member_group_runtime",
+      }],
+    });
+
+    await expect(handleHostedOnboardingLinqWebhook({
+      prisma: {} as never,
+      rawBody: "{}",
+      signature: null,
+      timestamp: null,
+    })).rejects.toBe(signalError);
+
+    expect(order).toEqual(["handoff", "result"]);
+    expect(mocks.sendHostedLinqReadReceipt).not.toHaveBeenCalled();
+  });
 });
