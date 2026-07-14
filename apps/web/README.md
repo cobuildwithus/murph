@@ -518,18 +518,18 @@ Hosted managed crypto:
 Hosted AI usage metering:
 
 - Hosted AI usage rows are recorded locally for allowance, audit, and future billing analysis. The hosted app no longer attaches Stripe usage prices at checkout or posts Stripe meter events.
-- Hosted AI included-allowance gating is app-owned: web prices recorded `HostedAiUsage` rows into allowance columns, maintains `HostedAiUsagePeriod` spend snapshots from current hosted billing state, preserves inbound conversation mailbox input before usage gating, and gates hosted runtime work that strongly implies foreground model work. It is a post-task hard stop, not an exact prepaid cap.
-- Homepage reset countdowns come from the same usage-gate period end/retry-after value; a fresh monthly period is created by the next mutating gate resolution after the prior billing or calendar period ends (turn admission owns usage-period bookkeeping; webhook ingress preserves user-authored conversation input and runtime admission owns usage denials), with no separate reset cron. Spend accounting also ensure-creates the period inside the spend transaction as a backstop.
-- Temporal does not fetch or forward signed usage decisions to Cloudflare ensure-processing, and webhook wake handoff signals Temporal by mailbox pointer only. Runtime/provider code still enforces spend before actual model calls and records usage rows through the hosted runtime platform.
-- Pulse Trial uses the same allowance system with a phase-aware 4.50 USD trial cap. Paid phase is authoritative for the normal Pulse allowance, and stale or malformed trial phase denies before calendar fallback or fallback-usage carryover.
+- Hosted AI included-allowance accounting is app-owned: web prices recorded `HostedAiUsage` rows into allowance columns and maintains `HostedAiUsagePeriod` spend snapshots from current hosted billing state. The allowance is an advisory product and billing signal, not a runtime gate for an otherwise active member.
+- Web derives one read-only member plan-usage projection from that same allowance resolver and usage ledger for Settings and `murph.plan_usage`. It persists no forecast, performs no Stripe read, and returns only bounded percentages, period facts, an optional conservative forecast, and a server-selected action.
+- Homepage period facts come from the same allowance owner. Spend accounting ensure-creates a fresh billing or calendar period inside the spend transaction, with no reset cron.
+- Temporal does not fetch or forward signed usage decisions to Cloudflare ensure-processing, and webhook wake handoff signals Temporal by mailbox pointer only. Model-work admission reads the hosted member-access owner; runtime usage is recorded through the hosted platform after it exists.
+- Pulse Trial uses the same allowance system with a phase-aware 4.50 USD advisory threshold. Paid phase is authoritative for the normal Pulse allowance, while stale or malformed trial entitlement still fails member-access admission before any calendar fallback.
 - Included-allowance accounting starts from the deployment that enables allowance accounting on imports. Existing current-period usage rows are not backfilled by default.
 
 `apps/web` records every hosted assistant usage row by member in `HostedAiUsage`.
 Hosted execution accepts Murph-owned usage rows with `stripeMeterSource=murph`.
 Recorded rows keep `stripeMeterStatus=skipped` so they cannot be backbilled by
-the removed Stripe meter path. The hosted allowance gate reads web-owned spend,
-and the runtime/provider layer enforces spend before actual model calls instead
-of relying on a Cloudflare-start signed decision.
+the removed Stripe meter path. The hosted allowance owner reads web-owned spend
+for projection and notices; it does not deny otherwise-authorized model calls.
 
 Hosted pages assume the hosted Privy phone-auth setup is present and fail fast
 when it is missing instead of carrying fallback branches in page code.
@@ -1045,6 +1045,7 @@ Internal hosted maintenance and Cloudflare callback routes:
 - `POST /api/internal/device-sync/runtime/dirty-pending`
 - `POST /api/internal/device-sync/runtime/dirty-ack`
 - `POST /api/internal/hosted-execution/usage/record`
+- `POST /api/internal/hosted-execution/plan-usage/tool`
 - `POST /api/internal/hosted-mailbox/fetch`
 - `POST /api/internal/hosted-mailbox/payload/fetch`
 - `POST /api/internal/hosted-mailbox/email-ingress`
@@ -1065,8 +1066,8 @@ are gone. Cloudflare no longer round-trips through broad mirror CRUD routes,
 deleted sharing CRUD, local-vault import callbacks, or an outbox drain route. It
 still uses narrow signed hosted-web callbacks for execution-time device-sync
 runtime snapshot/apply, device connect-link starts, direct hosted usage
-recording, mailbox/workspace runtime status plus log callbacks, and the
-payload-free runtime owner-release recheck handoff.
+recording, member-bound plan-usage reads, mailbox/workspace runtime status plus
+log callbacks, and the payload-free runtime owner-release recheck handoff.
 
 ## Hosted onboarding routes
 
