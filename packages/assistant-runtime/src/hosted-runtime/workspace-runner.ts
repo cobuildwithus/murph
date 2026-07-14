@@ -965,12 +965,6 @@ export async function runHostedWorkspaceUntilIdleOrBudget(
           ...initialAssistantContextBatch.linqDeliveryContexts,
           ...latest.linqDeliveryContexts,
         ],
-        usageNoticeDeliveryTargets: [
-          ...(initialAssistantContextBatch.usageNoticeDeliveryTargets
-            ?? initialAssistantContextBatch.assistantInputIds.map(() => null)),
-          ...(latest.usageNoticeDeliveryTargets
-            ?? latest.assistantInputIds.map(() => null)),
-        ],
       };
     },
     recordDeferredUsage(
