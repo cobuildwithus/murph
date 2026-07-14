@@ -9,6 +9,7 @@ import {
   type HostedRuntimeAssistantPersonalizationToolRequest,
 } from '@murphai/hosted-execution/assistant-personalization'
 import {
+  HOSTED_PLAN_CODES,
   HOSTED_PRODUCT_FEEDBACK_KINDS,
   HOSTED_PRODUCT_FEEDBACK_SUMMARY_MAX_LENGTH,
   HOSTED_RUNTIME_GROUP_DISPLAY_NAME_MAX_LENGTH,
@@ -324,7 +325,7 @@ export const MURPH_FAMILY_PLAN_TOOL = {
   namespace: 'murph',
   name: 'family_plan',
   description:
-    'Read or manage the current hosted user\'s Murph Family plan. Use for Murph Family plan questions, seat/status checks, starting Family checkout, and requests to invite a family member. Do not use for family medical history.',
+    'Read or manage the current hosted user\'s Murph Family plan. Use for Murph Family plan questions, tier/seat status checks, starting Family checkout, and requests to invite a family member on Pulse or Edge. Do not use for family medical history.',
   inputSchema: {
     type: 'object',
     additionalProperties: false,
@@ -344,6 +345,11 @@ export const MURPH_FAMILY_PLAN_TOOL = {
             ],
             default: null,
             description: 'Email address for an email-bound web invite when the user provided one.',
+          },
+          planCode: {
+            type: 'string',
+            enum: [...HOSTED_PLAN_CODES],
+            description: 'Pulse or Edge tier requested for this Family member. Omit for Pulse.',
           },
           targetLabel: {
             anyOf: [
@@ -1267,6 +1273,7 @@ const familyPlanArgumentsSchema = z
     z.object({
       action: z.literal('start_checkout'),
       invite: z.object({
+        planCode: z.enum(HOSTED_PLAN_CODES).optional(),
         targetEmail: z.string().trim().email().max(320).nullable().default(null),
         targetLabel: z.string().trim().min(1).max(80).nullable().default(null),
         targetPhoneNumber: z.string().trim().min(1).max(40).nullable().default(null),
@@ -1276,6 +1283,7 @@ const familyPlanArgumentsSchema = z
     z.object({
       action: z.literal('create_invite'),
       invite: z.object({
+        planCode: z.enum(HOSTED_PLAN_CODES).optional(),
         targetEmail: z.string().trim().email().max(320).nullable().default(null),
         targetLabel: z.string().trim().min(1).max(80).nullable().default(null),
         targetPhoneNumber: z.string().trim().min(1).max(40).nullable().default(null),
@@ -3933,6 +3941,9 @@ function parseFamilyPlanArguments(
         ? {
             action: 'start_checkout',
             invite: {
+              ...(parsed.data.invite.planCode
+                ? { planCode: parsed.data.invite.planCode }
+                : {}),
               ...(parsed.data.invite.targetEmail
                 ? { targetEmail: parsed.data.invite.targetEmail }
                 : {}),
@@ -3952,6 +3963,9 @@ function parseFamilyPlanArguments(
     request: {
       action: 'create_invite',
       invite: {
+        ...(parsed.data.invite.planCode
+          ? { planCode: parsed.data.invite.planCode }
+          : {}),
         ...(parsed.data.invite.targetEmail
           ? { targetEmail: parsed.data.invite.targetEmail }
           : {}),

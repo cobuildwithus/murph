@@ -23,6 +23,7 @@ import { Input } from "@/src/components/ui/input";
 import { Label } from "@/src/components/ui/label";
 import { PhoneNumberInput } from "@/src/components/ui/phone-number-input";
 import { SegmentedControl } from "@/src/components/ui/segmented-control";
+import type { HostedPlanCode } from "@/src/lib/hosted-onboarding/billing-plans";
 import {
   normalizeHostedEmailAddress,
   normalizeHostedTelegramUsernameForLookup,
@@ -32,11 +33,9 @@ import { cn } from "@/src/lib/utils";
 
 import { toErrorMessage } from "./hosted-settings-sync-helpers";
 
-type FamilyPlanCode = "edge" | "pulse";
-
 export interface FamilyManagerTier {
   name: string;
-  planCode: FamilyPlanCode;
+  planCode: HostedPlanCode;
   priceLabel: string;
 }
 
@@ -45,7 +44,7 @@ export interface FamilyManagerMember {
   joinedAtIso: string | null;
   label: string | null;
   memberId: string;
-  planCode: FamilyPlanCode;
+  planCode: HostedPlanCode;
 }
 
 export interface FamilyManagerInvite {
@@ -53,7 +52,7 @@ export interface FamilyManagerInvite {
   channel: string;
   expiresAtIso: string;
   id: string;
-  planCode: FamilyPlanCode;
+  planCode: HostedPlanCode;
   targetEmail: string | null;
   targetLabel: string | null;
   targetPhoneHint: string | null;
@@ -64,7 +63,7 @@ export interface FamilyManagerInvite {
 interface CreatedFamilyInvite {
   acceptUrl: string | null;
   id: string;
-  planCode: FamilyPlanCode;
+  planCode: HostedPlanCode;
   targetEmail?: string | null;
   targetLabel: string | null;
   targetPhoneHint: string | null;
@@ -99,11 +98,16 @@ type PendingAction =
   | { id: string; kind: "cancel-invite"; label: string }
   | { id: string; kind: "remove-member"; label: string }
   | {
-      from: FamilyPlanCode;
+      delta: -1 | 1;
+      kind: "change-capacity";
+      planCode: HostedPlanCode;
+    }
+  | {
+      from: HostedPlanCode;
       id: string;
       kind: "change-plan";
       label: string;
-      to: FamilyPlanCode;
+      to: HostedPlanCode;
     };
 
 type InviteChannel = "imessage" | "email" | "telegram";
@@ -143,9 +147,11 @@ export function HostedFamilyStartButton(props: {
 }) {
   const [isSubmitting, setIsSubmitting] = useState(false);
   const [errorMessage, setErrorMessage] = useState<string | null>(null);
+  const [statusMessage, setStatusMessage] = useState<string | null>(null);
 
   async function startCheckout() {
     setErrorMessage(null);
+    setStatusMessage(null);
     setIsSubmitting(true);
     try {
       const response = await requestHostedOnboardingJson<{
@@ -164,6 +170,7 @@ export function HostedFamilyStartButton(props: {
         return;
       }
       setIsSubmitting(false);
+      setStatusMessage("Your Family plan is syncing with Stripe. Refresh in a moment.");
     } catch (error) {
       setIsSubmitting(false);
       setErrorMessage(toErrorMessage(error, "Could not start the Family plan right now."));
@@ -186,6 +193,11 @@ export function HostedFamilyStartButton(props: {
           {errorMessage}
         </p>
       ) : null}
+      {statusMessage ? (
+        <p role="status" className="max-w-xs text-xs leading-tight text-muted-foreground">
+          {statusMessage}
+        </p>
+      ) : null}
     </div>
   );
 }
@@ -194,7 +206,7 @@ export function HostedFamilyManager(props: {
   billingActive: boolean;
   invites: FamilyManagerInvite[];
   members: FamilyManagerMember[];
-  plans: Record<FamilyPlanCode, {
+  plans: Record<HostedPlanCode, {
     active: number;
     billed: number;
     invited: number;
@@ -219,7 +231,7 @@ export function HostedFamilyManager(props: {
     resolveInvitePhoneCountryOption(phoneCountryCodeHint).code
   );
   const [inviteChannel, setInviteChannel] = useState<InviteChannel>("imessage");
-  const [invitePlanCode, setInvitePlanCode] = useState<FamilyPlanCode>("pulse");
+  const [invitePlanCode, setInvitePlanCode] = useState<HostedPlanCode>("pulse");
   const [label, setLabel] = useState("");
   const [phone, setPhone] = useState("");
   const [telegram, setTelegram] = useState("");
@@ -230,10 +242,9 @@ export function HostedFamilyManager(props: {
   const [createdInviteCopied, setCreatedInviteCopied] = useState(false);
   const [pendingAction, setPendingAction] = useState<PendingAction | null>(null);
   const [actionError, setActionError] = useState<string | null>(null);
+  const [actionNotice, setActionNotice] = useState<string | null>(null);
   const [isActing, setIsActing] = useState(false);
   const [copiedId, setCopiedId] = useState<string | null>(null);
-  const [capacityBusyKey, setCapacityBusyKey] = useState<string | null>(null);
-  const [seatError, setSeatError] = useState<string | null>(null);
 
   const invitePlan = props.tiers.find((tier) => tier.planCode === invitePlanCode)
     ?? props.tiers[0];
@@ -281,7 +292,9 @@ export function HostedFamilyManager(props: {
         : "Telegram username";
   const inviteWillAddSeat = planCanGrow && hasStableTarget;
   const inviteNeedsStableTargetForSeat = planCanGrow && !hasStableTarget;
-  const inviteSubmitDisabled = isInviting || inviteNeedsStableTargetForSeat;
+  const selectedTierUnavailable = seatsFull && !planCanGrow;
+  const inviteSubmitDisabled =
+    isInviting || inviteNeedsStableTargetForSeat || selectedTierUnavailable;
   const inviteDisabled = !props.billingActive || props.seats.used >= props.seats.max;
   const createdInviteHasContact = Boolean(
     createdInvite?.targetEmail ||
@@ -290,6 +303,9 @@ export function HostedFamilyManager(props: {
   );
   const pendingTargetTier = pendingAction?.kind === "change-plan"
     ? props.tiers.find((tier) => tier.planCode === pendingAction.to) ?? null
+    : null;
+  const pendingCapacityTier = pendingAction?.kind === "change-capacity"
+    ? props.tiers.find((tier) => tier.planCode === pendingAction.planCode) ?? null
     : null;
   const pendingTargetHasCapacity = pendingAction?.kind !== "change-plan" ||
     props.plans[pendingAction.to].remaining > 0;
@@ -355,7 +371,6 @@ export function HostedFamilyManager(props: {
       });
       setCreatedInvite({
         ...response.invite,
-        planCode: invitePlan.planCode,
         targetEmail: inviteChannel === "email" ? normalizedEmail : null,
         targetPhoneHint:
           inviteChannel === "imessage" && normalizedPhone ? response.invite.targetPhoneHint : null,
@@ -382,16 +397,50 @@ export function HostedFamilyManager(props: {
       return;
     }
     setActionError(null);
+    setActionNotice(null);
     setIsActing(true);
     try {
-      const url = pendingAction.kind === "cancel-invite"
-        ? `/api/settings/billing/family/invite/${encodeURIComponent(pendingAction.id)}`
-        : `/api/settings/billing/family/members/${encodeURIComponent(pendingAction.id)}`;
-      await requestHostedOnboardingJson(
-        pendingAction.kind === "change-plan"
-          ? { method: "PATCH", payload: { planCode: pendingAction.to }, url }
-          : { method: "DELETE", url },
-      );
+      if (pendingAction.kind === "change-capacity") {
+        const status = props.plans[pendingAction.planCode];
+        const targetQuantity = status.billed + pendingAction.delta;
+        const targetTotal = props.seats.billed + pendingAction.delta;
+        if (
+          targetQuantity < status.used ||
+          targetQuantity < 0 ||
+          targetTotal < props.seats.min ||
+          targetTotal > props.seats.max
+        ) {
+          setActionError("Family capacity changed. Refresh and try again.");
+          return;
+        }
+        const response = await requestHostedOnboardingJson<{ syncing: boolean }>({
+          method: "PATCH",
+          payload: {
+            capacities: {
+              edge: props.plans.edge.billed,
+              pulse: props.plans.pulse.billed,
+              [pendingAction.planCode]: targetQuantity,
+            },
+          },
+          url: "/api/settings/billing/family/capacity",
+        });
+        setActionNotice(
+          response.syncing
+            ? `${pendingCapacityTier?.name ?? "Family"} capacity change submitted. Stripe is still syncing; refresh in a moment.`
+            : pendingAction.delta > 0
+              ? `${pendingCapacityTier?.name ?? "Family"} capacity added.`
+              : `${pendingCapacityTier?.name ?? "Family"} capacity removed.`,
+        );
+      } else {
+        const url = pendingAction.kind === "cancel-invite"
+          ? `/api/settings/billing/family/invite/${encodeURIComponent(pendingAction.id)}`
+          : `/api/settings/billing/family/members/${encodeURIComponent(pendingAction.id)}`;
+        await requestHostedOnboardingJson(
+          pendingAction.kind === "change-plan"
+            ? { method: "PATCH", payload: { planCode: pendingAction.to }, url }
+            : { method: "DELETE", url },
+        );
+      }
       setPendingAction(null);
       router.refresh();
     } catch (error) {
@@ -402,45 +451,13 @@ export function HostedFamilyManager(props: {
             ? "Could not cancel that invite right now."
             : pendingAction.kind === "remove-member"
               ? "Could not remove that member right now."
-              : "Could not change that member's tier right now.",
+              : pendingAction.kind === "change-plan"
+                ? "Could not change that member's tier right now."
+                : "Could not change Family capacity right now.",
         ),
       );
     } finally {
       setIsActing(false);
-    }
-  }
-
-  async function changeCapacity(planCode: FamilyPlanCode, delta: -1 | 1) {
-    const status = props.plans[planCode];
-    const targetQuantity = status.billed + delta;
-    const targetTotal = props.seats.billed + delta;
-    if (
-      targetQuantity < status.used ||
-      targetQuantity < 0 ||
-      targetTotal < props.seats.min ||
-      targetTotal > props.seats.max
-    ) {
-      return;
-    }
-    setSeatError(null);
-    setCapacityBusyKey(`${planCode}:${delta}`);
-    try {
-      await requestHostedOnboardingJson({
-        method: "PATCH",
-        payload: {
-          capacities: {
-            edge: props.plans.edge.billed,
-            pulse: props.plans.pulse.billed,
-            [planCode]: targetQuantity,
-          },
-        },
-        url: "/api/settings/billing/family/capacity",
-      });
-      router.refresh();
-    } catch (error) {
-      setSeatError(toErrorMessage(error, "Could not change Family capacity right now."));
-    } finally {
-      setCapacityBusyKey(null);
     }
   }
 
@@ -531,12 +548,18 @@ export function HostedFamilyManager(props: {
                     variant="ghost"
                     size="icon"
                     aria-label={`Remove an empty ${tier.name} seat`}
-                    disabled={!canRemove || capacityBusyKey !== null}
-                    onClick={() => void changeCapacity(tier.planCode, -1)}
+                    disabled={!canRemove}
+                    onClick={() => {
+                      setActionError(null);
+                      setActionNotice(null);
+                      setPendingAction({
+                        delta: -1,
+                        kind: "change-capacity",
+                        planCode: tier.planCode,
+                      });
+                    }}
                   >
-                    {capacityBusyKey === `${tier.planCode}:-1`
-                      ? <Loader2 className="size-4 animate-spin" aria-hidden="true" />
-                      : <Minus className="size-4" aria-hidden="true" />}
+                    <Minus className="size-4" aria-hidden="true" />
                   </Button>
                   <span className="w-5 text-center text-sm tabular-nums">{status.billed}</span>
                   <Button
@@ -544,24 +567,33 @@ export function HostedFamilyManager(props: {
                     variant="ghost"
                     size="icon"
                     aria-label={`Add ${tier.name} seat at ${tier.priceLabel}`}
-                    disabled={!canAdd || capacityBusyKey !== null}
-                    onClick={() => void changeCapacity(tier.planCode, 1)}
+                    disabled={!canAdd}
+                    onClick={() => {
+                      setActionError(null);
+                      setActionNotice(null);
+                      setPendingAction({
+                        delta: 1,
+                        kind: "change-capacity",
+                        planCode: tier.planCode,
+                      });
+                    }}
                   >
-                    {capacityBusyKey === `${tier.planCode}:1`
-                      ? <Loader2 className="size-4 animate-spin" aria-hidden="true" />
-                      : <Plus className="size-4" aria-hidden="true" />}
+                    <Plus className="size-4" aria-hidden="true" />
                   </Button>
                 </div>
               </div>
             );
           })}
         </div>
-        {seatError ? (
-          <p role="alert" className="text-xs leading-tight text-destructive">{seatError}</p>
+        {actionNotice ? (
+          <p role="status" className="text-xs leading-tight text-muted-foreground">
+            {actionNotice}
+          </p>
         ) : null}
       </div>
 
-      <table className="w-full text-sm">
+      <div className="overflow-x-auto">
+      <table className="w-full min-w-[44rem] text-sm">
         <thead className="sr-only">
           <tr>
             <th>Member</th>
@@ -697,6 +729,7 @@ export function HostedFamilyManager(props: {
         })}
         </tbody>
       </table>
+      </div>
 
       {!props.billingActive ? (
         <p
@@ -841,7 +874,11 @@ export function HostedFamilyManager(props: {
                     />
                   </div>
                 ) : null}
-                {inviteNeedsStableTargetForSeat ? (
+                {selectedTierUnavailable ? (
+                  <p role="status" className="text-xs leading-5 text-[#736a58]">
+                    No open {invitePlan.name} seats. Choose a tier with an open seat or free one first.
+                  </p>
+                ) : inviteNeedsStableTargetForSeat ? (
                   <p role="status" className="text-xs leading-5 text-[#736a58]">
                     {activeContactInput
                       ? `Enter a valid ${activeContactInputNoun} to invite. It adds a paid ${invitePlan.name} seat at ${invitePlan.priceLabel}.`
@@ -903,7 +940,9 @@ export function HostedFamilyManager(props: {
                 ? "Remove family member"
                 : pendingAction?.kind === "change-plan"
                   ? `Move to ${props.tiers.find((tier) => tier.planCode === pendingAction.to)?.name}`
-                  : "Cancel invite"}
+                  : pendingAction?.kind === "change-capacity"
+                    ? `${pendingAction.delta > 0 ? "Add" : "Remove"} ${pendingCapacityTier?.name} seat`
+                    : "Cancel invite"}
             </DialogTitle>
             <DialogDescription className="text-sm leading-6 text-[#736a58]">
               {pendingAction?.kind === "remove-member"
@@ -911,8 +950,12 @@ export function HostedFamilyManager(props: {
                 : pendingAction?.kind === "change-plan"
                   ? pendingTargetHasCapacity
                     ? `Change ${pendingAction.label} from ${props.tiers.find((tier) => tier.planCode === pendingAction.from)?.name} to ${pendingTargetTier?.name}?`
-                    : `Add a paid ${pendingTargetTier?.name} seat above before moving ${pendingAction.label}.`
-                  : `Cancel the invite for ${pendingAction?.label ?? "this person"}? The invite link stops working.`}
+                    : `Add a paid ${pendingTargetTier?.name} seat above, move ${pendingAction.label}, then remove the empty ${props.tiers.find((tier) => tier.planCode === pendingAction.from)?.name} seat if you no longer need it.`
+                  : pendingAction?.kind === "change-capacity"
+                    ? pendingAction.delta > 0
+                      ? `Add one ${pendingCapacityTier?.name} seat at ${pendingCapacityTier?.priceLabel}? Stripe updates immediately and may invoice the prorated amount now.`
+                      : `Remove one empty ${pendingCapacityTier?.name} seat? This lowers your charge at the next renewal; it does not issue an immediate credit.`
+                    : `Cancel the invite for ${pendingAction?.label ?? "this person"}? The invite link stops working.`}
             </DialogDescription>
           </DialogHeader>
 
@@ -929,7 +972,9 @@ export function HostedFamilyManager(props: {
             <Button
               type="button"
               size="xl"
-              variant={pendingAction?.kind === "change-plan" ? "default" : "destructive"}
+              variant={pendingAction?.kind === "remove-member" || pendingAction?.kind === "cancel-invite"
+                ? "destructive"
+                : "default"}
               onClick={() => void confirmPendingAction()}
               disabled={isActing || !pendingTargetHasCapacity}
               className="w-full"
@@ -940,7 +985,9 @@ export function HostedFamilyManager(props: {
                   ? "Remove member"
                   : pendingAction?.kind === "change-plan"
                     ? pendingTargetHasCapacity ? "Change tier" : `Add ${pendingTargetTier?.name} seat first`
-                    : "Cancel invite"}
+                    : pendingAction?.kind === "change-capacity"
+                      ? pendingAction.delta > 0 ? "Add paid seat" : "Remove empty seat"
+                      : "Cancel invite"}
             </Button>
             <Button
               type="button"
@@ -950,7 +997,9 @@ export function HostedFamilyManager(props: {
               disabled={isActing}
               className="w-full"
             >
-              Keep
+              {pendingAction?.kind === "change-plan" || pendingAction?.kind === "change-capacity"
+                ? "Not now"
+                : "Keep"}
             </Button>
           </div>
         </DialogContent>

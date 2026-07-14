@@ -157,21 +157,19 @@ const HOSTED_FAMILY_BILLING_OFFERS = {
 
 export const HOSTED_FAMILY_MIN_SEATS = 2;
 export const HOSTED_FAMILY_MAX_SEATS = 6;
-export const HOSTED_FAMILY_SEAT_RECURRING_AMOUNT_USD_CENTS = 700;
-export const HOSTED_FAMILY_SPONSORED_USAGE_ALLOWANCE_USD_MICROS = 10_000_000n;
 
 export const HOSTED_FAMILY_PLAN_DISPLAY = {
   displayName: "Family",
   maxSeats: HOSTED_FAMILY_MAX_SEATS,
   minSeats: HOSTED_FAMILY_MIN_SEATS,
-  recurringAmountUsdCentsPerSeat: HOSTED_FAMILY_SEAT_RECURRING_AMOUNT_USD_CENTS,
+  recurringAmountUsdCentsPerSeat:
+    HOSTED_FAMILY_BILLING_OFFERS.pulse.recurringAmountUsdCents,
   plans: HOSTED_PLAN_CODES.map((code) => ({
     code,
     displayName: HOSTED_PLAN_DEFINITIONS[code].displayName,
     recurringAmountUsdCents:
       HOSTED_FAMILY_BILLING_OFFERS[code].recurringAmountUsdCents,
   })),
-  sponsoredUsageAllowanceUsdMicros: HOSTED_FAMILY_SPONSORED_USAGE_ALLOWANCE_USD_MICROS,
 } as const;
 
 export function getHostedPlanDefinition(code: HostedPlanCode): HostedPlanDefinition {
@@ -199,9 +197,13 @@ export function getHostedPlanCodeForBillingPlan(
 export function getHostedBillingPlanCodeForPlan(
   planCode: HostedPlanCode,
 ): HostedBillingPlanCode {
-  return HOSTED_BILLING_PLAN_CODES.find(
+  const billingPlanCode = HOSTED_BILLING_PLAN_CODES.find(
     (code) => HOSTED_BILLING_PLAN_DEFINITIONS[code].planCode === planCode,
-  ) ?? getHostedDefaultBillingPlanCode();
+  );
+  if (!billingPlanCode) {
+    throw new TypeError(`No direct billing plan is configured for ${planCode}.`);
+  }
+  return billingPlanCode;
 }
 
 export function parseHostedPlanCode(value: unknown): HostedPlanCode | null {

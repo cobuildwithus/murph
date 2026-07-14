@@ -69,11 +69,21 @@ id, current billing phase/period, a per-tier capacity projection, and the
 legacy total/item fields needed while existing Pulse-only subscriptions roll
 forward.
 
+Internal Family MRR derives from the same per-tier projection and each tier's
+Family offer price. Do not multiply the aggregate seat count by the Pulse
+price once mixed-tier subscriptions exist.
+
 Do not introduce generic plan-transition machinery or a second durable billing
 operation owner. Family checkout and explicit owner-confirmed capacity changes
 update the exact Stripe item composition. Webhook reconciliation remains the
 only writer of the local paid-capacity projection. Direct Pulse and Edge
 billing continue to use the existing member billing path.
+
+When an owner converts an existing direct-paid subscription, the request only
+updates Stripe and reports that Family billing is syncing. The Family
+subscription webhook writes the paid projection and clears the old direct
+billing reference in the same transaction, so entitlement ownership changes
+once and never advances Stripe's event watermark from local wall time.
 
 Changing a member's tier is a local assignment change under the Family owner
 lock and requires an already-open paid seat in the destination tier. If none is
@@ -87,6 +97,22 @@ Core invariant:
 ```ts
 activeMembershipCount[tier] + pendingInviteCount[tier] <= billedQuantity[tier]
 ```
+
+## Deployment Order
+
+The hosted-execution response parser is backward compatible with the old
+Pulse-only web response, but the old parser rejects the new `plans` and
+`planCode` fields. Deploy Cloudflare hosted execution first with immediate
+runner-container rollout, verify the new bundle is serving, and then deploy
+hosted web. Hosted web predeploy applies the nullable/defaulted assignment
+columns, capacity table, and Pulse backfill before the new web build; the
+post-deploy contract lane adds the assignment constraints only after the prior
+web-function window drains.
+
+Configure both Family Stripe price ids before exposing Edge capacity. After
+web deploy, reconcile one Pulse-only subscription and one mixed Pulse/Edge
+subscription, then verify settings quantities, member allowances, and Family
+MRR match the Stripe items.
 
 ## Data Ownership
 
@@ -140,6 +166,14 @@ Sponsored access must fail closed when:
 
 Privacy access for export and deletion must remain available under the existing
 privacy rules even after sponsored access is revoked.
+
+An actively sponsored member cannot start a separate direct checkout. If a
+direct checkout opened before Family acceptance completes afterward, checkout
+and subscription reconciliation must leave it unbound and cancel that
+superseded subscription after the database transaction. A Family conversion
+may clear an owner's prior direct billing reference only when it names the same
+Stripe subscription that became the Family subscription; never erase a
+different subscription reference.
 
 ## Invite Issuance
 

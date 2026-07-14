@@ -294,6 +294,7 @@ test("HostedFamilyManager adds exact Edge capacity without changing Pulse", asyn
     createElement(HostedFamilyManager, baseFamilyManagerProps()),
     { requireButton: false },
   );
+  mocks.requestHostedOnboardingJson.mockResolvedValueOnce({ syncing: false });
 
   try {
     const addEdge = container.querySelector<HTMLButtonElement>(
@@ -304,12 +305,50 @@ test("HostedFamilyManager adds exact Edge capacity without changing Pulse", asyn
       addEdge.dispatchEvent(new window.Event("click", { bubbles: true }));
     });
 
+    assert.match(
+      container.textContent ?? "",
+      /Add one Edge seat at \$19\/mo\? Stripe updates immediately and may invoice the prorated amount now\./,
+    );
+    expect(mocks.requestHostedOnboardingJson).not.toHaveBeenCalled();
+    await clickButton(container, window, "Add paid seat");
+
     expect(mocks.requestHostedOnboardingJson).toHaveBeenCalledWith({
       method: "PATCH",
       payload: { capacities: { edge: 1, pulse: 2 } },
       url: "/api/settings/billing/family/capacity",
     });
     expect(mocks.refresh).toHaveBeenCalledTimes(1);
+    assert.match(container.textContent ?? "", /Edge capacity added\./);
+  } finally {
+    await cleanup();
+  }
+});
+
+test("HostedFamilyManager reports a capacity change still syncing with Stripe", async () => {
+  const { HostedFamilyManager } = await import(
+    "@/src/components/settings/hosted-family-settings-actions"
+  );
+  const { cleanup, container, window } = await renderClientComponent(
+    createElement(HostedFamilyManager, baseFamilyManagerProps()),
+    { requireButton: false },
+  );
+  mocks.requestHostedOnboardingJson.mockResolvedValueOnce({ syncing: true });
+
+  try {
+    const addEdge = container.querySelector<HTMLButtonElement>(
+      'button[aria-label="Add Edge seat at $19/mo"]',
+    );
+    assert.ok(addEdge);
+    await act(async () => {
+      addEdge.dispatchEvent(new window.Event("click", { bubbles: true }));
+    });
+    await clickButton(container, window, "Add paid seat");
+
+    assert.match(
+      container.textContent ?? "",
+      /Edge capacity change submitted\. Stripe is still syncing; refresh in a moment\./,
+    );
+    assert.doesNotMatch(container.textContent ?? "", /Edge capacity added\./);
   } finally {
     await cleanup();
   }
@@ -342,6 +381,46 @@ test("HostedFamilyManager adds the selected Edge seat while creating an invite",
         url: "/api/settings/billing/family/invite",
       }),
     );
+  } finally {
+    await cleanup();
+  }
+});
+
+test("HostedFamilyManager requires an open seat in the selected tier at maximum capacity", async () => {
+  const { HostedFamilyManager } = await import(
+    "@/src/components/settings/hosted-family-settings-actions"
+  );
+  const { cleanup, container, window } = await renderClientComponent(
+    createElement(HostedFamilyManager, {
+      ...baseFamilyManagerProps(),
+      plans: {
+        edge: { active: 0, billed: 1, invited: 0, remaining: 1, used: 0 },
+        pulse: { active: 1, billed: 5, invited: 4, remaining: 0, used: 5 },
+      },
+      seats: {
+        active: 1,
+        billed: 6,
+        invited: 4,
+        max: 6,
+        min: 2,
+        remaining: 1,
+        used: 5,
+      },
+    }),
+    { requireButton: false },
+  );
+
+  try {
+    await clickButton(container, window, "Invite member");
+    assert.match(
+      container.textContent ?? "",
+      /No open Pulse seats\. Choose a tier with an open seat or free one first\./,
+    );
+    assert.equal(buttonByText(container, "Create invite").disabled, true);
+
+    await clickButton(container, window, "Edge · $19/mo");
+    assert.doesNotMatch(container.textContent ?? "", /No open Edge seats\./);
+    assert.equal(buttonByText(container, "Create invite").disabled, false);
   } finally {
     await cleanup();
   }
@@ -407,7 +486,10 @@ test("HostedFamilyManager requires paid destination capacity before a member mov
 
   try {
     await clickButton(container, window, "Move to Edge");
-    assert.match(container.textContent ?? "", /Add a paid Edge seat above before moving yourself\./);
+    assert.match(
+      container.textContent ?? "",
+      /Add a paid Edge seat above, move yourself, then remove the empty Pulse seat if you no longer need it\./,
+    );
     assert.equal(buttonByText(container, "Add Edge seat first").disabled, true);
     expect(mocks.requestHostedOnboardingJson).not.toHaveBeenCalled();
   } finally {
