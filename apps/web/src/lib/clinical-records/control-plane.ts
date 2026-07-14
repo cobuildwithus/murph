@@ -337,6 +337,7 @@ async function persistClinicalConnection(input: {
           generation: retrievalGeneration,
           id: retrievalRunId,
           memberId: input.memberId,
+          grantedScopesJson: toClinicalJsonArray(input.token.grantedScopes),
           resourceTypesJson: toClinicalJsonArray(input.resourceTypes),
           status: "queued",
         },

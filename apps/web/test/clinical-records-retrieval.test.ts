@@ -323,6 +323,33 @@ describe("Clinical Records retrieval control plane", () => {
     expect(fetchImpl).not.toHaveBeenCalled();
   });
 
+  it.each([" ", "\t", "\n"])(
+    "rejects a continuation cursor with surrounding ASCII whitespace: %j",
+    async (whitespace) => {
+      const harness = createHarness(["Patient", "Observation"]);
+      harness.cursorPlaintexts.set("spaced-cursor", JSON.stringify({
+        schema: "murph.clinical-page-cursor.v2",
+        url: `${whitespace}https://fhir.example.test/FHIR/R4/Observation?_count=100&patient=patient-1`,
+      }));
+      const fetchImpl = vi.fn();
+
+      await expect(fetchClinicalRetrievalPage({
+        fetchImpl,
+        memberId: MEMBER_ID,
+        request: pageRequest({
+          cursor: "spaced-cursor",
+          requestId: `request_spaced_cursor_${whitespace.charCodeAt(0)}`,
+          resourceType: "Observation",
+        }),
+      })).resolves.toEqual({
+        errorCode: "page-cursor-invalid",
+        retryable: false,
+        status: "unavailable",
+      });
+      expect(fetchImpl).not.toHaveBeenCalled();
+    },
+  );
+
   it.each([
     "https://foreign.example.test/FHIR/R4/Observation?_count=100&patient=patient-1&page=2",
     "https://fhir.example.test/FHIR/R4/Observation%2FCondition?_count=100&patient=patient-1",
@@ -339,6 +366,31 @@ describe("Clinical Records retrieval control plane", () => {
       fetchImpl,
       memberId: MEMBER_ID,
       request: pageRequest({ requestId: "request_escaped_next", resourceType: "Observation" }),
+    });
+
+    expect(result).toEqual({
+      errorCode: "provider-response-invalid",
+      retryable: false,
+      status: "unavailable",
+    });
+    expect(mocks.sealClinicalPageCursor).not.toHaveBeenCalled();
+    expect(harness.state.run.pageCount).toBe(0);
+  });
+
+  it.each([
+    " https://fhir.example.test/FHIR/R4/Observation?_count=100&patient=patient-1&page=2",
+    "https://fhir.example.test/FHIR/R4/Observation?_count=100&patient=patient-1&page=2 ",
+  ])("rejects a provider next link with surrounding ASCII whitespace: %j", async (nextUrl) => {
+    const harness = createHarness(["Patient", "Observation"]);
+    const result = await fetchClinicalRetrievalPage({
+      fetchImpl: vi.fn().mockResolvedValue(fhirResponse({
+        entry: [],
+        link: [{ relation: "next", url: nextUrl }],
+        resourceType: "Bundle",
+        type: "searchset",
+      })),
+      memberId: MEMBER_ID,
+      request: pageRequest({ requestId: "request_spaced_next", resourceType: "Observation" }),
     });
 
     expect(result).toEqual({
@@ -424,6 +476,31 @@ describe("Clinical Records retrieval control plane", () => {
     expect(harness.state.run.pageCount).toBe(0);
     expect(harness.state.run.providerRequestCount).toBe(1);
     expect(harness.state.run.egressBytes).toBeGreaterThan(0);
+  });
+
+  it("rejects malformed UTF-8 instead of persisting replacement characters", async () => {
+    const harness = createHarness(["Patient", "Observation"]);
+    const prefix = new TextEncoder().encode('{"entry":[],"id":"');
+    const suffix = new TextEncoder().encode('","resourceType":"Bundle","type":"searchset"}');
+    const body = new Uint8Array(prefix.length + 1 + suffix.length);
+    body.set(prefix);
+    body[prefix.length] = 0xff;
+    body.set(suffix, prefix.length + 1);
+
+    const result = await fetchClinicalRetrievalPage({
+      fetchImpl: vi.fn().mockResolvedValue(new Response(body, {
+        headers: { "content-type": "application/fhir+json" },
+      })),
+      memberId: MEMBER_ID,
+      request: pageRequest({ requestId: "request_invalid_utf8", resourceType: "Observation" }),
+    });
+
+    expect(result).toEqual({
+      errorCode: "provider-response-invalid",
+      retryable: false,
+      status: "unavailable",
+    });
+    expect(harness.state.run.pageCount).toBe(0);
   });
 
   it("deduplicates concurrent claims for the same page across distinct caller request ids", async () => {
@@ -601,6 +678,44 @@ describe("Clinical Records retrieval control plane", () => {
       tokenVersion: 2,
     });
     expect(harness.state.run.status).not.toBe("needs_reauth");
+  });
+
+  it.each([
+    [["patient/Observation.rs", "patient/Patient.rs"]],
+    [["patient/Patient.rs"]],
+  ])("keeps the run scope snapshot immutable when refresh changes connection scopes: %j", async (
+    refreshedScopes,
+  ) => {
+    const harness = createHarness(["Patient", "Observation"]);
+    const originalScopes = ["patient/Patient.rs", "patient/Observation.rs"];
+    harness.state.run.grantedScopesJson = [...originalScopes];
+    harness.state.run.connection.accessTokenExpiresAt = new Date(Date.now() - 1_000);
+    mocks.refreshSmartAccessToken.mockResolvedValue({
+      accessToken: "rotated-access-token",
+      expiresInSeconds: 3_600,
+      grantedScopes: refreshedScopes,
+      refreshToken: "rotated-refresh-token",
+    });
+
+    await expect(fetchClinicalRetrievalPage({
+      fetchImpl: vi.fn().mockResolvedValue(fhirResponse({
+        entry: [],
+        resourceType: "Bundle",
+        type: "searchset",
+      })),
+      memberId: MEMBER_ID,
+      request: pageRequest({ requestId: "request_scope_snapshot", resourceType: "Observation" }),
+    })).resolves.toMatchObject({ status: "page" });
+    expect(harness.state.run.connection.grantedScopesJson).toEqual(refreshedScopes);
+
+    await expect(readClinicalRetrievalRun({
+      generation: 1,
+      memberId: MEMBER_ID,
+      runId: RUN_ID,
+    })).resolves.toMatchObject({
+      run: { grantedScopes: originalScopes },
+      status: "ready",
+    });
   });
 
   it("requeues a preempted run and accepts a reordered idempotent completion", async () => {
@@ -944,6 +1059,7 @@ function buildRun(resourceTypes: string[]) {
     egressBytes: 0,
     fetchedBytes: 0,
     generation: 1,
+    grantedScopesJson: ["patient/Patient.rs", "patient/Observation.rs"],
     id: RUN_ID,
     importedCount: 0,
     lastErrorCode: null as string | null,

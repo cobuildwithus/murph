@@ -3,6 +3,7 @@ import { createHash, randomBytes } from "node:crypto";
 import { clinicalRecordsError } from "./errors";
 import {
   ClinicalResponseBodyLimitError,
+  decodeClinicalResponseUtf8,
   readClinicalResponseBytes,
 } from "./response-bytes";
 
@@ -290,7 +291,7 @@ async function readBoundedJson(response: Response): Promise<unknown> {
     });
   }
   try {
-    return JSON.parse(new TextDecoder().decode(bytes));
+    return JSON.parse(decodeClinicalResponseUtf8(bytes));
   } catch (cause) {
     throw clinicalRecordsError({
       cause,
