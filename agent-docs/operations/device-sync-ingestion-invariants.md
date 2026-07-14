@@ -208,7 +208,13 @@ drain/batch service seam in `packages/device-syncd/src/service.ts`.
    failure acknowledges the row. Work skipped after a machine-local disconnect
    remains hosted until the next control-plane snapshot either restores the
    active account and replays it or explicitly terminally dispositions it;
-   companion RMSSD acknowledges only canonical success.
+   companion RMSSD acknowledges only canonical success. Canonical-owner
+   failures retain the same local job row, extend its attempt fence, and use
+   the existing bounded retry delay even after ordinary job attempts are
+   exhausted; they never create replacement dead rows or an immediate hosted
+   replay loop. While provider revocation is in flight, the web-owned
+   `DISCONNECT_IN_PROGRESS` sentinel rejects every runtime connection, local
+   state, credential, and source mutation under the connection lock.
    A replay after mutable vault-timezone metadata changes preserves the first
    canonical `dayKey` and `timeZone`; that placement drift alone is duplicate
    content, while every other same-admission content difference remains an

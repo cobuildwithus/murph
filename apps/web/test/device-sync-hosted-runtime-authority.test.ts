@@ -633,6 +633,47 @@ describe("applyHostedDeviceSyncRuntimeResult", () => {
     expect(harness.storedAccount?.tokenVersion).toBe(3);
   });
 
+  it("preserves the web-owned disconnect sentinel against an exact-revision local-state callback", async () => {
+    const harness = createAuthorityHarness({
+      record: buildHostedRecord({
+        lastErrorCode: "DISCONNECT_IN_PROGRESS",
+        status: "reauthorization_required",
+      }),
+    });
+    const { applyHostedDeviceSyncRuntimeResult } = await import(
+      "@/src/lib/device-sync/hosted-runtime-authority"
+    );
+
+    const response = await applyHostedDeviceSyncRuntimeResult({
+      request: new Request("https://example.test/device-sync/runtime/apply", {
+        body: JSON.stringify({
+          updates: [
+            {
+              connectionId: "conn_123",
+              localState: { clearError: true },
+              observedUpdatedAt: "2026-04-06T10:00:00.000Z",
+            },
+          ],
+          userId: "user_123",
+        }),
+        method: "POST",
+      }),
+      trustedUserId: "user_123",
+    });
+
+    expect(response.updates[0]).toMatchObject({
+      connectionId: "conn_123",
+      tokenUpdate: "missing",
+      writeUpdate: "skipped_version_mismatch",
+    });
+    expect(harness.record).toMatchObject({
+      lastErrorCode: "DISCONNECT_IN_PROGRESS",
+      status: "reauthorization_required",
+    });
+    expect(harness.syncDurableConnectionState).not.toHaveBeenCalled();
+    expect(harness.persistStoredConnectionTokenBundle).not.toHaveBeenCalled();
+  });
+
   it("persists runtime source availability updates without rewriting connection state", async () => {
     const harness = createAuthorityHarness();
     const { applyHostedDeviceSyncRuntimeResult } = await import(

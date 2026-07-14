@@ -1462,6 +1462,107 @@ test("device sync service imports accepted companion RMSSD jobs after terminal a
   }
 });
 
+test("device sync service retains one accepted companion RMSSD job until canonical import succeeds", async () => {
+  const vaultRoot = await makeTempDirectory("murph-device-syncd-companion-retained-import");
+  let now = new Date("2026-07-10T13:46:00.000Z");
+  let importAttempts = 0;
+  const { service, store, close } = createServiceFixture({
+    secret: "secret-for-tests",
+    clock: {
+      now: () => now,
+    },
+    config: {
+      vaultRoot,
+      publicBaseUrl: "https://sync.example.test/device-sync",
+      stateDatabasePath: path.join(vaultRoot, ".runtime", "device-syncd.sqlite"),
+    },
+    importer: {
+      async importDeviceProviderSnapshot() {
+        importAttempts += 1;
+        if (importAttempts < 3) {
+          throw new Error("Synthetic canonical import failure.");
+        }
+        return { events: [{ kind: "observation" }] };
+      },
+    },
+    providers: [
+      createJunctionDeviceSyncProvider({
+        apiKey: "sk_us_test_123",
+        clientUserIdSecret: "junction-client-user-id-secret",
+        environment: "sandbox",
+        region: "us",
+        summaryBackfillDays: 2,
+        summaryResources: [],
+        timeseriesResources: [],
+        webhookSecret: "whsec_d2ViaG9vay10ZXN0LXNlY3JldA==",
+        fetchImpl: async (input) => {
+          throw new Error(`Unexpected Junction request for companion RMSSD import: ${readUrl(input)}`);
+        },
+      }),
+    ],
+  });
+
+  try {
+    const account = store.upsertAccount({
+      provider: "junction",
+      externalAccountId: "junction-companion-retained-import",
+      displayName: "Junction",
+      scopes: [],
+      status: "disconnected",
+      credential: {
+        kind: "provider_config",
+        providerConfigKey: "junction",
+        credentialMetadata: {},
+      },
+      connectedAt: "2026-07-10T13:00:00.000Z",
+    });
+    const job = store.enqueueJob({
+      accountId: account.id,
+      provider: "junction",
+      kind: "resource",
+      payload: {
+        ...buildCompanionHrvRmssdJobPayload({
+          schema: COMPANION_HRV_RMSSD_SCHEMA,
+          captureId: "123e4567-e89b-42d3-a456-426614174000",
+          observedAt: "2026-07-10T13:45:00.000Z",
+          durationMs: 60_000,
+          rmssdMs: 48.25,
+          intervalCount: 72,
+          acceptedIntervalCount: 68,
+          successivePairCount: 63,
+          quality: "good",
+          methodVersion: COMPANION_HRV_RMSSD_METHOD_VERSION,
+        }),
+        resource: COMPANION_HRV_RMSSD_RESOURCE,
+        resourceCategory: "derived",
+        sourceProviderSlug: "whoop",
+      },
+      availableAt: now.toISOString(),
+      dedupeKey: "companion-hrv-retained-import",
+      maxAttempts: 1,
+    });
+
+    for (let expectedAttempts = 1; expectedAttempts <= 2; expectedAttempts += 1) {
+      await service.runWorkerOnce();
+      const retained = store.getJobById(job.id);
+      assert.equal(retained?.status, "queued");
+      assert.equal(retained?.attempts, expectedAttempts);
+      assert.ok(retained?.availableAt);
+      assert.ok(Date.parse(retained.availableAt) > now.getTime());
+      assert.equal(readJobsForAccountForTesting(store, account.id).length, 1);
+      now = new Date(retained.availableAt);
+    }
+
+    await service.runWorkerOnce();
+
+    assert.equal(store.getJobById(job.id)?.status, "succeeded");
+    assert.equal(readJobsForAccountForTesting(store, account.id).length, 1);
+    assert.equal(importAttempts, 3);
+  } finally {
+    close();
+  }
+});
+
 test("device sync service finishes a claimed companion RMSSD import across disconnect", async () => {
   const vaultRoot = await makeTempDirectory("murph-device-syncd-companion-disconnect-race");
   const imports: unknown[] = [];

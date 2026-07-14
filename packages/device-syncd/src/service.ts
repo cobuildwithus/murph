@@ -1052,6 +1052,7 @@ class DeviceSyncServiceController {
       }
 
       const failure = normalizeExecutionError(error);
+      const retainedFailureRetryable = failure.retryable || preservesAcceptedCompanionHrv;
       const failureNow = currentNow();
       if (!isAccountExecutionCurrent()) {
         const released = releaseActiveJobsIfCurrentAccountActive(failureNow);
@@ -1067,7 +1068,7 @@ class DeviceSyncServiceController {
 
       const failed = activeJobs
         .map((activeJob) => {
-          const retryAt = failure.retryable
+          const retryAt = retainedFailureRetryable
             ? addMilliseconds(failureNow, computeRetryDelayMs(activeJob.attempts))
             : null;
           return this.store.failJobIfOwned(
@@ -1077,7 +1078,8 @@ class DeviceSyncServiceController {
             failure.code,
             failure.message,
             retryAt,
-            failure.retryable,
+            retainedFailureRetryable,
+            preservesAcceptedCompanionHrv,
           );
         })
         .some(Boolean);
@@ -1097,7 +1099,7 @@ class DeviceSyncServiceController {
         jobKind: job.kind,
         provider: provider.provider,
         ...(failedJobResource ? { resource: failedJobResource } : {}),
-        retryable: failure.retryable,
+        retryable: retainedFailureRetryable,
         summary: failure.message,
       });
       if (preservesAcceptedCompanionHrv && !isOriginalActiveAccountExecutionCurrent()) {

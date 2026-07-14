@@ -225,11 +225,18 @@ The current hosted runtime strategy is:
 2. A hosted job running through `apps/cloudflare` requests the current runtime snapshot from the signed internal web route only when execution needs device-sync access.
 3. The hosted runner fetches pending dirty device-sync rows from web-owned Postgres as a normal work source; webhook freshness does not depend on immutable per-webhook mailbox payloads.
 4. The hosted job sends narrow runtime updates back through the signed internal web apply route.
-5. Dirty revisions are acknowledged through the dirty-ack route only after the dirty state has been converted into local runtime work and that local work has crossed the checkpoint boundary. Exact payload rows stay hosted while their machine-local jobs are queued so a cold restore can reconstruct them, but the checkpoint result carries the local scheduler's future wake instead of immediately replaying retained work. Generic rows acknowledge on executed local success or terminal failure. Work marked complete only because of a machine-local disconnect remains hosted until the next authoritative control-plane snapshot either restores the active account and replays it or explicitly terminally dispositions it. The companion RMSSD row acknowledges only after its verified local job reaches canonical import success.
+5. Dirty revisions are acknowledged through the dirty-ack route only after the dirty state has been converted into local runtime work and that local work has crossed the checkpoint boundary. Exact payload rows stay hosted while their machine-local jobs are queued so a cold restore can reconstruct them, but the checkpoint result carries the local scheduler's future wake instead of immediately replaying retained work. Generic rows acknowledge on executed local success or terminal failure. Work marked complete only because of a machine-local disconnect remains hosted until the next authoritative control-plane snapshot either restores the active account and replays it or explicitly terminally dispositions it. The companion RMSSD row acknowledges only after its verified local job reaches canonical import success; canonical-owner failures retain that same job beyond the ordinary attempt fence and follow the local scheduler's bounded future retry instead of creating dead replacement rows.
 6. Local-agent token export and refresh flows stay on the hosted web boundary.
 7. Cloudflare does not keep a second durable token-escrow source of truth for device sync.
 
 This keeps control-plane truth in web while still allowing hosted execution to consume the runtime state it needs during a job.
+
+Disconnect intent is also web-owned control-plane truth. Once the connection
+mutation lock commits `DISCONNECT_IN_PROGRESS`, the signed runtime apply route
+rejects every connection, local-state, credential, and source write for that
+connection until the provider revoke finalizes. Dirty-payload acknowledgement
+remains a separate path, so a companion import that already reached canonical
+success may still acknowledge its exact hosted payload.
 
 ## Webhook Dirty Coalescing
 

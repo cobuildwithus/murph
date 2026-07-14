@@ -547,6 +547,7 @@ export function failDeviceSyncJobIfOwned(
     now: string;
     retryAt: string | null;
     retryable: boolean;
+    retainUntilSuccess?: boolean;
     workerId: string;
   },
 ): boolean {
@@ -555,6 +556,7 @@ export function failDeviceSyncJobIfOwned(
       update device_job
       set status = 'queued',
           available_at = ?,
+          max_attempts = case when ? = 1 then max(max_attempts, attempts + 1) else max_attempts end,
           lease_owner = null,
           lease_expires_at = null,
           last_error_code = ?,
@@ -565,15 +567,17 @@ export function failDeviceSyncJobIfOwned(
         and lease_owner = ?
         and lease_expires_at is not null
         and lease_expires_at > ?
-        and attempts < max_attempts
+        and (attempts < max_attempts or ? = 1)
     `).run(
       input.retryAt ?? input.now,
+      input.retainUntilSuccess ? 1 : 0,
       input.code,
       input.message,
       input.now,
       input.jobId,
       input.workerId,
       input.now,
+      input.retainUntilSuccess ? 1 : 0,
     ) as { changes: number };
 
     if ((retryResult.changes ?? 0) > 0) {

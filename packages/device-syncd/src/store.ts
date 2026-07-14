@@ -583,6 +583,7 @@ export class SqliteDeviceSyncStore {
     message: string,
     retryAt: string | null,
     retryable: boolean,
+    retainUntilSuccess = false,
   ): boolean {
     return failDeviceSyncJobIfOwned(this.database, {
       code,
@@ -591,6 +592,7 @@ export class SqliteDeviceSyncStore {
       now,
       retryAt,
       retryable,
+      retainUntilSuccess,
       workerId,
     });
   }
