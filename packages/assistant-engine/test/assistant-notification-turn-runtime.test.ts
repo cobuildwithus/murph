@@ -3120,6 +3120,9 @@ test('sendAssistantNotificationLocal annotates terminal provider failures with r
     },
   })
   const mocks = {
+    applyAssistantSessionCodexResumeStateAction: vi.fn(
+      async () => providerSession,
+    ),
     executeCodexTurnWithRecovery: vi.fn(async () => ({
       error: providerError,
       kind: 'failed_terminal',
@@ -3171,6 +3174,16 @@ test('sendAssistantNotificationLocal annotates terminal provider failures with r
   vi.doMock('../src/assistant/codex-turn-runner.js', () => ({
     executeCodexTurnWithRecovery: mocks.executeCodexTurnWithRecovery,
   }))
+  vi.doMock('../src/assistant/turn-finalizer.js', async (importOriginal) => {
+    const actual = await importOriginal<
+      typeof import('../src/assistant/turn-finalizer.js')
+    >()
+    return {
+      ...actual,
+      applyAssistantSessionCodexResumeStateAction:
+        mocks.applyAssistantSessionCodexResumeStateAction,
+    }
+  })
   vi.doMock('../src/assistant/service-turn-routes.js', () => ({
     resolveAssistantTurnRoute: mocks.resolveAssistantTurnRoute,
   }))
@@ -3204,6 +3217,123 @@ test('sendAssistantNotificationLocal annotates terminal provider failures with r
     assistantNotificationProviderNonReplayableWork: false,
     assistantNotificationRouteId: 'route-provider-failure',
     assistantNotificationStage: 'provider',
+  })
+})
+
+test('sendAssistantNotificationLocal clears rejected resume state before surfacing a terminal provider failure', async () => {
+  const providerError = new Error('provider rejected stale notification resume')
+  const providerSession = createAssistantSession({
+    resumeState: {
+      routeFingerprint: 'route-stale-notification-resume',
+      threadId: 'stale-notification-thread',
+    },
+  })
+  const providerResult = createProviderResult({
+    codexThreadId: null,
+    session: providerSession,
+  })
+  const { mocks, sendAssistantNotificationLocal } =
+    await loadNotificationTurnHarness({
+      providerOutcome: {
+        acceptedNoReplyDeliveryContextOrdinals: [],
+        additionalUsages: [],
+        assistantContractFingerprint:
+          providerResult.assistantContractFingerprint,
+        attemptCount: 1,
+        codexContinuation: providerResult.codexContinuation,
+        codexRolloutRelativePath: null,
+        codexThreadId: null,
+        error: providerError,
+        kind: 'failed_terminal',
+        providerRequestOutcome: 'failed',
+        providerTurnId: null,
+        rawEvents: [],
+        reactions: [],
+        route: providerResult.route,
+        session: providerSession,
+        usage: null,
+        usageAttribution: null,
+      },
+      providerResult,
+      turnId: 'turn-notification-rejected-resume',
+    })
+
+  await expect(
+    sendAssistantNotificationLocal({
+      executionContext: { hosted: null },
+      instructions: 'Evaluate the scheduled notification',
+      vault: '/vaults/notification-rejected-resume',
+    }),
+  ).rejects.toBe(providerError)
+
+  expect(
+    mocks.applyAssistantSessionCodexResumeStateAction,
+  ).toHaveBeenCalledWith({
+    action: 'clear',
+    assistantContractFingerprint:
+      providerResult.assistantContractFingerprint,
+    codexRolloutRelativePath: null,
+    codexThreadId: null,
+    routeFingerprint: 'route-primary',
+    session: providerSession,
+    vault: '/vaults/notification-rejected-resume',
+  })
+})
+
+test('sendAssistantNotificationLocal persists accepted resume state before surfacing a terminal provider failure', async () => {
+  const providerError = new Error('notification failed after provider start')
+  const providerSession = createAssistantSession()
+  const providerResult = createProviderResult({
+    codexThreadId: 'accepted-notification-thread',
+    session: providerSession,
+  })
+  const { mocks, sendAssistantNotificationLocal } =
+    await loadNotificationTurnHarness({
+      providerOutcome: {
+        acceptedNoReplyDeliveryContextOrdinals: [],
+        additionalUsages: [],
+        assistantContractFingerprint:
+          providerResult.assistantContractFingerprint,
+        attemptCount: 1,
+        codexContinuation: providerResult.codexContinuation,
+        codexRolloutRelativePath:
+          'sessions/2026/07/14/accepted-notification-thread.jsonl',
+        codexThreadId: 'accepted-notification-thread',
+        error: providerError,
+        kind: 'failed_terminal',
+        providerRequestOutcome: 'failed',
+        providerTurnId: 'accepted-notification-turn',
+        rawEvents: [],
+        reactions: [],
+        route: providerResult.route,
+        session: providerSession,
+        usage: null,
+        usageAttribution: null,
+      },
+      providerResult,
+      turnId: 'turn-notification-accepted-resume',
+    })
+
+  await expect(
+    sendAssistantNotificationLocal({
+      executionContext: { hosted: null },
+      instructions: 'Evaluate the scheduled notification',
+      vault: '/vaults/notification-accepted-resume',
+    }),
+  ).rejects.toBe(providerError)
+
+  expect(
+    mocks.applyAssistantSessionCodexResumeStateAction,
+  ).toHaveBeenCalledWith({
+    action: 'persist-from-provider-turn',
+    assistantContractFingerprint:
+      providerResult.assistantContractFingerprint,
+    codexRolloutRelativePath:
+      'sessions/2026/07/14/accepted-notification-thread.jsonl',
+    codexThreadId: 'accepted-notification-thread',
+    routeFingerprint: 'route-primary',
+    session: providerSession,
+    vault: '/vaults/notification-accepted-resume',
   })
 })
 
@@ -3569,6 +3699,20 @@ async function loadNotificationTurnHarness(input: {
   }))
   const sharedPlan = input.sharedPlan ?? createSharedPlan()
   const mocks = {
+    applyAssistantSessionCodexResumeStateAction: vi.fn(
+      async (actionInput: { session: AssistantSession }) => actionInput.session,
+    ),
+    resolveAssistantProviderResumeStateAction: vi.fn((actionInput: {
+      codexThreadId: string | null
+      threadScope: 'isolated-thread' | 'session-thread'
+    }) => {
+      if (actionInput.threadScope === 'isolated-thread') {
+        return 'preserve-existing' as const
+      }
+      return actionInput.codexThreadId
+        ? 'persist-from-provider-turn' as const
+        : 'clear' as const
+    }),
     createAssistantRuntimeStateService: vi.fn(() => ({
       outbox: {
         deliverMessage,
@@ -3669,9 +3813,13 @@ async function loadNotificationTurnHarness(input: {
     recordAssistantUsageEvent: mocks.recordAssistantUsageEvent,
   }))
   vi.doMock('../src/assistant/turn-finalizer.js', () => ({
+    applyAssistantSessionCodexResumeStateAction:
+      mocks.applyAssistantSessionCodexResumeStateAction,
     clearAssistantSessionCodexResumeState:
       mocks.clearAssistantSessionCodexResumeState,
     persistAssistantTurnAndSession: mocks.persistAssistantTurnAndSession,
+    resolveAssistantProviderResumeStateAction:
+      mocks.resolveAssistantProviderResumeStateAction,
   }))
   vi.doMock('../src/assistant/service-turn-routes.js', () => ({
     resolveAssistantTurnRoute: mocks.resolveAssistantTurnRoute,
@@ -3714,7 +3862,6 @@ async function loadNotificationTurnHarness(input: {
 }
 
 function createProviderResult(input?: {
-  codexThreadHistoryUnsafe?: boolean | null
   providerOptions?: AssistantProviderSessionOptions
   codexThreadId?: string | null
   rawEvents?: readonly unknown[]
@@ -3751,9 +3898,6 @@ function createProviderResult(input?: {
       kind: 'explicit-structured-history',
     },
     providerOptions: input?.providerOptions ?? createProviderOptions(),
-    ...(input?.codexThreadHistoryUnsafe !== undefined
-      ? { codexThreadHistoryUnsafe: input.codexThreadHistoryUnsafe }
-      : {}),
     codexThreadId: input?.codexThreadId ?? 'provider-session-1',
     rawEvents: [...(input?.rawEvents ?? [])],
     response: input?.response ?? 'provider response',

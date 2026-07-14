@@ -356,6 +356,8 @@ describe("executeHostedMailboxEvent", () => {
           codexInvalidOutputErrorMessageLength: 96,
           codexInvalidOutputErrorPreview: "raw HbA1c 9.1 should not persist",
           codexInvalidOutputFallbackAttempted: true,
+          codexInvalidOutputFallbackErrorCode: "ASSISTANT_CODEX_FAILED",
+          codexInvalidOutputFallbackResult: "succeeded",
           codexInvalidOutputResumeSessionPresent: true,
           codexInvalidOutputFailureSessionPresent: true,
           codexInvalidOutputFailureTurnPresent: true,
@@ -402,7 +404,6 @@ describe("executeHostedMailboxEvent", () => {
           codexInvalidOutputErrorField: "input.193.output",
           codexInvalidOutputErrorKind: "invalid-input-output",
           codexInvalidOutputErrorMessageLength: 96,
-          codexInvalidOutputFallbackAttempted: true,
           codexInvalidOutputFailureEventMethods: [
             "turn/started",
             "turn/completed",
@@ -427,6 +428,9 @@ describe("executeHostedMailboxEvent", () => {
     );
     expect(entry?.redacted).not.toHaveProperty("codexThreadId");
     expect(entry?.redacted).not.toHaveProperty("codexInvalidOutputErrorPreview");
+    expect(entry?.redacted).not.toHaveProperty("codexInvalidOutputFallbackAttempted");
+    expect(entry?.redacted).not.toHaveProperty("codexInvalidOutputFallbackErrorCode");
+    expect(entry?.redacted).not.toHaveProperty("codexInvalidOutputFallbackResult");
     expect(JSON.stringify(entry?.redacted)).not.toContain("raw-provider-session-id");
     expect(JSON.stringify(entry?.redacted)).not.toContain("HbA1c");
     expect(JSON.stringify(entry?.redacted)).not.toContain("patientName");
@@ -613,111 +617,6 @@ describe("executeHostedMailboxEvent", () => {
         wake,
       }),
     );
-  });
-
-  it("captures hosted Codex fresh-thread fallback diagnostics without raw identifiers", () => {
-    const wake = buildHostedExecutionAssistantNotificationRequestedWake({
-      eventId: "evt_codex_fresh_thread_fallback",
-      memberId: "member_123",
-      notification: {
-        instructions: "Reply in chat.",
-        route: {
-          actorId: "actor_codex_fallback",
-          channel: "linq",
-          delivery: {
-            kind: "thread",
-            target: "thread_123",
-          },
-          identityId: "hbidx:phone:v1:test",
-          threadId: "thread_123",
-          threadIsDirect: true,
-        },
-      },
-      occurredAt: "2026-04-08T00:00:00.000Z",
-    });
-
-    const entry = emitHostedAssistantProviderTraceLog({
-      details: {
-        requestId: "req_123",
-      },
-      event: {
-        codexThreadId: "raw-provider-session-id",
-        rawEvent: {
-          schema: "murph.assistant-codex-fresh-thread-fallback-diagnostics.v1",
-          type: "assistant.codex.fresh_thread_fallback",
-          providerTraceKind: "codex.fresh_thread_fallback",
-          codexFreshThreadFallbackTraceType: "fallback",
-          codexFreshThreadFallbackPhase: "fallback-succeeded",
-          codexFreshThreadFallbackReason: "resume-transport-failure",
-          codexFreshThreadFallbackResult: "succeeded",
-          codexFreshThreadFallbackErrorCode: "ASSISTANT_CODEX_FAILED",
-          codexFreshThreadFallbackErrorKind: "turn-failed",
-          codexFreshThreadFallbackErrorMessageLength: 177,
-          codexFreshThreadFallbackErrorMessagePresent: true,
-          codexFreshThreadFallbackErrorPhrases: [
-            "codex-turn-failed",
-            "status-failed",
-            "raw private phrase",
-          ],
-          codexFreshThreadFallbackFailureEventCount: 2,
-          codexFreshThreadFallbackFailureProviderActionCount: 1,
-          codexFreshThreadFallbackFailureSessionPresent: true,
-          codexFreshThreadFallbackFailureTurnPresent: true,
-          codexFreshThreadFallbackEventCount: 4,
-          codexFreshThreadFallbackProviderActionCount: 0,
-          codexFreshThreadFallbackResumeMatchesFailureSession: true,
-          codexFreshThreadFallbackResumeSessionPresent: true,
-          codexFreshThreadFallbackSessionChanged: true,
-          codexFreshThreadFallbackSessionPresent: true,
-          codexFreshThreadFallbackTurnPresent: true,
-          codexFreshThreadFallbackThreadId: "raw-fresh-thread-id",
-          codexFreshThreadFallbackUrl: "https://api.openai.com/v1/responses",
-        },
-      },
-      wake,
-    });
-
-    expect(entry).toEqual({
-      component: "runtime.provider",
-      eventId: "evt_codex_fresh_thread_fallback",
-      level: "info",
-      message: "Hosted assistant Codex fresh-thread fallback diagnostics captured.",
-      phase: "wake.running",
-      redacted: expect.objectContaining({
-        codexFreshThreadFallbackErrorCode: "ASSISTANT_CODEX_FAILED",
-        codexFreshThreadFallbackErrorKind: "turn-failed",
-        codexFreshThreadFallbackErrorMessageLength: 177,
-        codexFreshThreadFallbackErrorMessagePresent: true,
-        codexFreshThreadFallbackErrorPhrases: [
-          "codex-turn-failed",
-          "status-failed",
-        ],
-        codexFreshThreadFallbackEventCount: 4,
-        codexFreshThreadFallbackFailureEventCount: 2,
-        codexFreshThreadFallbackFailureProviderActionCount: 1,
-        codexFreshThreadFallbackFailureSessionPresent: true,
-        codexFreshThreadFallbackFailureTurnPresent: true,
-        codexFreshThreadFallbackPhase: "fallback-succeeded",
-        codexFreshThreadFallbackProviderActionCount: 0,
-        codexFreshThreadFallbackReason: "resume-transport-failure",
-        codexFreshThreadFallbackResult: "succeeded",
-        codexFreshThreadFallbackResumeMatchesFailureSession: true,
-        codexFreshThreadFallbackResumeSessionPresent: true,
-        codexFreshThreadFallbackSessionChanged: true,
-        codexFreshThreadFallbackSessionPresent: true,
-        codexFreshThreadFallbackTraceType: "fallback",
-        codexFreshThreadFallbackTurnPresent: true,
-        providerTraceKind: "codex.fresh_thread_fallback",
-        requestId: "req_123",
-        schema: "murph.assistant-codex-fresh-thread-fallback-diagnostics.v1",
-      }),
-    });
-    expect(entry?.redacted).not.toHaveProperty("codexFreshThreadFallbackThreadId");
-    expect(entry?.redacted).not.toHaveProperty("codexFreshThreadFallbackUrl");
-    expect(JSON.stringify(entry?.redacted)).not.toContain("raw-provider-session-id");
-    expect(JSON.stringify(entry?.redacted)).not.toContain("raw-fresh-thread-id");
-    expect(JSON.stringify(entry?.redacted)).not.toContain("api.openai.com");
-    expect(JSON.stringify(entry?.redacted)).not.toContain("raw private phrase");
   });
 
   it("captures hosted Codex app-server timing without raw identifiers", () => {
@@ -1209,8 +1108,6 @@ describe("executeHostedMailboxEvent", () => {
         routePlanningBootstrapContextPrepared: false,
         routePlanningElapsedMs: 7000,
         routePlanningFallbackInstructionsElapsedMs: 80,
-        routePlanningFreshThreadFallbackPrepared: true,
-        routePlanningFreshThreadFallbackPromptElapsedMs: 80,
         routePlanningMemoryOverviewElapsedMs: 900,
         routePlanningMeasuredElapsedMs: 6988,
         routePlanningPrimaryInstructionsElapsedMs: 70,
@@ -1228,6 +1125,12 @@ describe("executeHostedMailboxEvent", () => {
     expect(entry?.redacted).not.toHaveProperty("codexThreadId");
     expect(entry?.redacted).not.toHaveProperty("providerContinuation");
     expect(entry?.redacted).not.toHaveProperty("resumeProviderSessionIdPresent");
+    expect(entry?.redacted).not.toHaveProperty(
+      "routePlanningFreshThreadFallbackPrepared",
+    );
+    expect(entry?.redacted).not.toHaveProperty(
+      "routePlanningFreshThreadFallbackPromptElapsedMs",
+    );
     expect(entry?.redacted).not.toHaveProperty("routePlanningRawPath");
     expect(JSON.stringify(entry?.redacted)).not.toContain("raw-provider-session-id");
     expect(JSON.stringify(entry?.redacted)).not.toContain("/tmp/raw-path");

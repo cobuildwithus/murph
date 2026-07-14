@@ -112,7 +112,7 @@ type AssistantCodexAttemptOutcome =
       error: unknown
       providerRequestOutcome: Exclude<AssistantProviderRequestOutcome, 'succeeded'>
       codexContinuation: AssistantCodexContinuation
-      codexThreadHistoryUnsafe: boolean
+      codexRolloutRelativePath: string | null
       codexThreadId: string | null
       acceptedNoReplyDeliveryContextOrdinals: readonly number[]
       reactions: NonNullable<ExecutedAssistantProviderTurnResult['reactions']>
@@ -134,8 +134,9 @@ export type AssistantCodexTurnRecoveryOutcome =
       attemptCount: number
       error: unknown
       providerRequestOutcome: Exclude<AssistantProviderRequestOutcome, 'succeeded'>
+      assistantContractFingerprint: string
       codexContinuation: AssistantCodexContinuation
-      codexThreadHistoryUnsafe: boolean
+      codexRolloutRelativePath: string | null
       codexThreadId: string | null
       acceptedNoReplyDeliveryContextOrdinals: readonly number[]
       reactions: NonNullable<ExecutedAssistantProviderTurnResult['reactions']>
@@ -157,10 +158,10 @@ export async function executeCodexTurnWithRecovery(input: {
   activeTurnSteering?: AssistantActiveTurnLiveProviderSteering | null
   allowFinishWithoutReply?: boolean | null
   input: AssistantMessageInput
-  onCodexThreadHistoryUnsafe?: ((event?: {
-    deliveryContextOrdinal?: number
-  }) => Promise<void> | void) | null
   onFinishWithoutReplyAccepted?: ((event: {
+    deliveryContextOrdinal: number
+  }) => Promise<void> | void) | null
+  onFinishWithoutReplyRecorded?: ((event: {
     deliveryContextOrdinal: number
   }) => Promise<void> | void) | null
   onProviderRequestPlanned?: (event: {
@@ -217,8 +218,10 @@ export async function executeCodexTurnWithRecovery(input: {
         attemptCount: attemptOutcome.attemptCount,
         error: attemptOutcome.error,
         providerRequestOutcome: attemptOutcome.providerRequestOutcome,
+        assistantContractFingerprint:
+          attemptPlan.routePlan.assistantContractFingerprint,
         codexContinuation: attemptOutcome.codexContinuation,
-        codexThreadHistoryUnsafe: attemptOutcome.codexThreadHistoryUnsafe,
+        codexRolloutRelativePath: attemptOutcome.codexRolloutRelativePath,
         codexThreadId: attemptOutcome.codexThreadId,
         acceptedNoReplyDeliveryContextOrdinals:
           attemptOutcome.acceptedNoReplyDeliveryContextOrdinals,
@@ -309,9 +312,7 @@ function emitCodexPlanTraceEvent(input: {
           input.routePlanningDiagnostics.shouldPrepareBootstrapContext,
         routePlanningBootstrapContextPrepared:
           input.routePlanningDiagnostics.shouldPrepareBootstrapContext,
-        routePlanningFreshThreadFallbackPrepared: false,
         routePlanningFallbackInstructionsElapsedMs: null,
-        routePlanningFreshThreadFallbackPromptElapsedMs: null,
         routePlanningMeasuredElapsedMs:
           input.routePlanningDiagnostics.routePlanningMeasuredElapsedMs,
         routePlanningPrimaryInstructionsElapsedMs:
@@ -369,8 +370,8 @@ async function executeAssistantCodexAttempt(input: {
     resumeCodexThreadIdPresent: attemptPlan.routePlan.resume !== null,
     workingDirectory: attemptPlan.routePlan.workingDirectory,
   })
-  let effectiveCodexContinuation = attemptPlan.routePlan.codexContinuation
   let usageAttribution: AssistantUsageAttribution | null = null
+  let failedAttemptCodexRolloutRelativePath: string | null = null
   let failedAttemptCodexThreadId: string | null = null
   let failedAttemptProviderTurnId: string | null = null
   let failedAttemptRawEvents: unknown[] = []
@@ -378,7 +379,6 @@ async function executeAssistantCodexAttempt(input: {
   let failedAttemptAdditionalUsages: readonly AssistantProviderUsageDraft[] = []
   let failedAttemptAcceptedNoReplyDeliveryContextOrdinals: readonly number[] = []
   let failedAttemptReactions: NonNullable<ExecutedAssistantProviderTurnResult['reactions']> = []
-  let failedAttemptCodexThreadHistoryUnsafe = false
   let failedAttemptOutcome: Exclude<AssistantProviderRequestOutcome, 'succeeded'> | null =
     null
 
@@ -446,11 +446,11 @@ async function executeAssistantCodexAttempt(input: {
         hostedToolContext: executionPlan.hostedToolContext ?? null,
         materializeWorkspaceArtifacts:
           executionPlan.executionContext?.hosted?.materializeWorkspaceArtifacts ?? null,
-        onCodexThreadHistoryUnsafe:
-          executionPlan.onCodexThreadHistoryUnsafe ?? null,
         onEvent: executionPlan.input.onProviderEvent ?? undefined,
         onFinishWithoutReplyAccepted:
           executionPlan.onFinishWithoutReplyAccepted ?? null,
+        onFinishWithoutReplyRecorded:
+          executionPlan.onFinishWithoutReplyRecorded ?? null,
         onProviderRequestStarted: (event) => {
           notifyProviderRequestStartedBestEffort({
             event: {
@@ -503,6 +503,8 @@ async function executeAssistantCodexAttempt(input: {
       vault: executionPlan.input.vault,
     })
     if (!attemptResult.ok) {
+      failedAttemptCodexRolloutRelativePath =
+        attemptResult.codexRolloutRelativePath ?? null
       failedAttemptCodexThreadId = attemptResult.codexThreadId ?? null
       failedAttemptProviderTurnId = attemptResult.providerTurnId ?? null
       failedAttemptRawEvents = [...(attemptResult.rawEvents ?? [])]
@@ -512,8 +514,6 @@ async function executeAssistantCodexAttempt(input: {
         ...(attemptResult.acceptedNoReplyDeliveryContextOrdinals ?? []),
       ]
       failedAttemptReactions = [...(attemptResult.reactions ?? [])]
-      failedAttemptCodexThreadHistoryUnsafe =
-        attemptResult.codexThreadHistoryUnsafe === true
       failedAttemptOutcome =
         attemptResult.providerRequestOutcome ??
         resolveFailedAssistantProviderRequestOutcome({
@@ -521,8 +521,6 @@ async function executeAssistantCodexAttempt(input: {
           rawEvents: failedAttemptRawEvents,
           usage: failedAttemptUsage,
         })
-      effectiveCodexContinuation =
-        attemptResult.codexContinuation ?? attemptPlan.routePlan.codexContinuation
       throw attemptResult.error
     }
     const result = attemptResult.result
@@ -534,8 +532,7 @@ async function executeAssistantCodexAttempt(input: {
           attemptPlan.routePlan.assistantContractFingerprint,
         attemptCount: attemptPlan.attemptCount,
         onboardingGuidanceInjected: attemptPlan.routePlan.onboardingGuidanceInjected,
-        codexContinuation:
-          result.codexContinuation ?? effectiveCodexContinuation,
+        codexContinuation: attemptPlan.routePlan.codexContinuation,
         providerOptions: attemptPlan.route.providerOptions,
         route: attemptPlan.route,
         responseMedia: result.responseMedia ?? [],
@@ -610,8 +607,8 @@ async function executeAssistantCodexAttempt(input: {
           rawEvents: failedAttemptRawEvents,
           usage: failedAttemptUsage,
         }),
-      codexContinuation: effectiveCodexContinuation,
-      codexThreadHistoryUnsafe: failedAttemptCodexThreadHistoryUnsafe,
+      codexContinuation: attemptPlan.routePlan.codexContinuation,
+      codexRolloutRelativePath: failedAttemptCodexRolloutRelativePath,
       codexThreadId: failedAttemptCodexThreadId,
       acceptedNoReplyDeliveryContextOrdinals:
         failedAttemptAcceptedNoReplyDeliveryContextOrdinals,

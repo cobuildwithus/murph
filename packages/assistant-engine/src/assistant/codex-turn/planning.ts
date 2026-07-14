@@ -196,16 +196,6 @@ const assistantConversationHistoryTextEncoder = new TextEncoder()
 
 export interface AssistantRouteCodexResumePlan {
   codexThreadId: string
-  prepareFreshThreadFallback: () => Promise<AssistantRouteFreshThreadFallbackPlan>
-}
-
-export interface AssistantRouteFreshThreadFallbackPlan {
-  conversationHistoryMessages?: readonly AssistantProviderConversationMessage[]
-  developerInstructions: string | null
-  sessionContext?: {
-    binding: AssistantSession['binding']
-  }
-  turnContextPrompt: string | null
 }
 
 export interface AssistantPromptCapabilityAvailability {
@@ -255,10 +245,10 @@ export interface AssistantCodexTurnExecutionPlan {
   allowFinishWithoutReply?: boolean | null
   executionContext: ReturnType<typeof normalizeAssistantExecutionContext>
   input: AssistantMessageInput
-  onCodexThreadHistoryUnsafe?: ((event?: {
-    deliveryContextOrdinal?: number
-  }) => Promise<void> | void) | null
   onFinishWithoutReplyAccepted?: ((event: {
+    deliveryContextOrdinal: number
+  }) => Promise<void> | void) | null
+  onFinishWithoutReplyRecorded?: ((event: {
     deliveryContextOrdinal: number
   }) => Promise<void> | void) | null
   profile: AssistantCodexTurnResolvedExecutionProfile
@@ -339,10 +329,10 @@ export async function buildCodexTurnExecutionPlan(input: {
   activeTurnSteering?: AssistantActiveTurnLiveProviderSteering | null
   allowFinishWithoutReply?: boolean | null
   input: AssistantMessageInput
-  onCodexThreadHistoryUnsafe?: ((event?: {
-    deliveryContextOrdinal?: number
-  }) => Promise<void> | void) | null
   onFinishWithoutReplyAccepted?: ((event: {
+    deliveryContextOrdinal: number
+  }) => Promise<void> | void) | null
+  onFinishWithoutReplyRecorded?: ((event: {
     deliveryContextOrdinal: number
   }) => Promise<void> | void) | null
   plan: AssistantTurnSharedPlan
@@ -369,8 +359,8 @@ export async function buildCodexTurnExecutionPlan(input: {
       input.allowFinishWithoutReply ?? profile.toolProfile === 'provider-turn',
     executionContext,
     input: input.input,
-    onCodexThreadHistoryUnsafe: input.onCodexThreadHistoryUnsafe ?? null,
     onFinishWithoutReplyAccepted: input.onFinishWithoutReplyAccepted ?? null,
+    onFinishWithoutReplyRecorded: input.onFinishWithoutReplyRecorded ?? null,
     profile,
     preferenceContext,
     promptTimeContext,
@@ -718,31 +708,9 @@ export async function resolveAssistantRouteTurnPlan(input: {
       normalizeNullableString(input.input.turnContext),
     ].filter((section): section is string => section !== null).join('\n\n'),
   )
-  const buildFreshThreadFallbackPlan = async () => {
-    const fallbackConversationHistoryMessages =
-      await resolveCommittedTranscriptHistoryMessages()
-
-    return {
-      conversationHistoryMessages:
-        fallbackConversationHistoryMessages.length > 0
-          ? fallbackConversationHistoryMessages
-          : undefined,
-      developerInstructions: threadStartDeveloperInstructions,
-      // Maintenance turns must not receive binding context: the provider
-      // prepends it to the prompt as identity/actor/thread/delivery lines,
-      // which are forbidden source material for canonical memory writes.
-      sessionContext: maintenanceTurn
-        ? undefined
-        : {
-            binding: input.session.binding,
-          },
-      turnContextPrompt,
-    }
-  }
   const resume = resumeCodexThreadId !== null
     ? {
         codexThreadId: resumeCodexThreadId,
-        prepareFreshThreadFallback: buildFreshThreadFallbackPlan,
       }
     : null
   const systemPromptResult = threadStartPromptResult
