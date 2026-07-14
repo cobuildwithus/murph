@@ -4271,6 +4271,18 @@ function createAbortGuardedHostedRuntimePlatform(
           },
         }
       : {}),
+    ...(platform.clinicalRecordsPort
+      ? {
+          clinicalRecordsPort: {
+            fetchPage: (fetchInput, options) =>
+              guard(() => platform.clinicalRecordsPort!.fetchPage(fetchInput, options)),
+            readRun: (readInput, options) =>
+              guard(() => platform.clinicalRecordsPort!.readRun(readInput, options)),
+            recordOutcome: (outcomeInput, options) =>
+              guard(() => platform.clinicalRecordsPort!.recordOutcome(outcomeInput, options)),
+          },
+        }
+      : {}),
     effectsPort: {
       ...platform.effectsPort,
       ...(platform.effectsPort.deletePreparedAssistantDelivery

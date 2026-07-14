@@ -13,6 +13,7 @@ import { createHostedWebActionApprovalPort } from "./action-approval-port.ts";
 import { createHostedRuntimeAssistantPersonalizationToolPort } from "./assistant-personalization-tool-port.ts";
 import { createHostedRuntimeAssistantConfigurationToolPort } from "./assistant-configuration-tool-port.ts";
 import { createCloudflareBrowserVaultReplicaPort } from "./browser-vault-replica-port.ts";
+import { createHostedWebClinicalRecordsPort } from "./clinical-records-port.ts";
 import { createHostedRuntimeCodexAuthPort } from "./codex-auth-port.ts";
 import { createHostedWebConnectedAppsPort } from "./connected-apps-port.ts";
 import { createHostedWebDeviceSyncPort } from "./device-sync-port.ts";
@@ -76,6 +77,15 @@ export function buildHostedExecutionRuntimePlatform(input: {
   });
   const deviceSyncPort = transport
     ? createHostedWebDeviceSyncPort({
+        boundUserId: input.boundUserId,
+        fetchImpl,
+        timeoutMs,
+        transport,
+      })
+    : null;
+  const clinicalRecordsPort = transport
+    && (transport.mode === "proxy" || transport.workspaceCheckpointBridge)
+    ? createHostedWebClinicalRecordsPort({
         boundUserId: input.boundUserId,
         fetchImpl,
         timeoutMs,
@@ -194,6 +204,7 @@ export function buildHostedExecutionRuntimePlatform(input: {
         }
       : {}),
     ...(deviceSyncPort ? { deviceSyncPort } : {}),
+    ...(clinicalRecordsPort ? { clinicalRecordsPort } : {}),
     ...(input.workspaceCheckpointBridge
       ? {
           browserVaultReplicaPort: createCloudflareBrowserVaultReplicaPort({

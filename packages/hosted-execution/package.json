@@ -62,6 +62,10 @@
       "types": "./dist/clinical-records.d.ts",
       "default": "./dist/clinical-records.js"
     },
+    "./clinical-records-boundary": {
+      "types": "./dist/clinical-records-boundary.d.ts",
+      "default": "./dist/clinical-records-boundary.js"
+    },
     "./computer-use": {
       "types": "./dist/computer-use.d.ts",
       "default": "./dist/computer-use.js"

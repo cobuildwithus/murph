@@ -7,34 +7,58 @@ import {
   clinicalSourceSystemSchema,
 } from "@murphai/clinical-records";
 import { z } from "zod";
+import {
+  HOSTED_CLINICAL_RECORDS_AUTHORIZATION_REQUIRED_ERROR_CODE,
+  HOSTED_CLINICAL_RECORDS_ERROR_CODE_MAX_CHARS,
+  HOSTED_CLINICAL_RECORDS_ERROR_CODE_PATTERN,
+  HOSTED_CLINICAL_RECORDS_IDENTIFIER_MAX_CHARS,
+  HOSTED_CLINICAL_RECORDS_IDENTIFIER_PATTERN,
+  HOSTED_CLINICAL_RECORDS_MAX_CURSOR_CHARS,
+  HOSTED_CLINICAL_RECORDS_MAX_PAGE_BODY_CHARS,
+  HOSTED_CLINICAL_RECORDS_MAX_PAGES,
+  HOSTED_CLINICAL_RECORDS_MAX_TOTAL_BODY_BYTES,
+  HOSTED_CLINICAL_RECORDS_RUNTIME_FETCH_PAGE_PATH,
+  HOSTED_CLINICAL_RECORDS_RUNTIME_READ_RUN_PATH,
+  HOSTED_CLINICAL_RECORDS_RUNTIME_RECORD_OUTCOME_PATH,
+  parseHostedClinicalRecordsIdentifier,
+  parseHostedClinicalRecordsRecordOutcomeRequest,
+  type HostedClinicalRecordsOutcomeCounts,
+  type HostedClinicalRecordsRecordOutcomeRequest,
+} from "./clinical-records-boundary.ts";
 
-export const HOSTED_CLINICAL_RECORDS_MAX_PAGE_BODY_CHARS = 5 * 1024 * 1024;
-export const HOSTED_CLINICAL_RECORDS_MAX_TOTAL_BODY_BYTES = 32 * 1024 * 1024;
-export const HOSTED_CLINICAL_RECORDS_MAX_PAGES = 500;
+export {
+  HOSTED_CLINICAL_RECORDS_AUTHORIZATION_REQUIRED_ERROR_CODE,
+  HOSTED_CLINICAL_RECORDS_ERROR_CODE_MAX_CHARS,
+  HOSTED_CLINICAL_RECORDS_ERROR_CODE_PATTERN,
+  HOSTED_CLINICAL_RECORDS_IDENTIFIER_MAX_CHARS,
+  HOSTED_CLINICAL_RECORDS_IDENTIFIER_PATTERN,
+  HOSTED_CLINICAL_RECORDS_MAX_CURSOR_CHARS,
+  HOSTED_CLINICAL_RECORDS_MAX_PAGE_BODY_CHARS,
+  HOSTED_CLINICAL_RECORDS_MAX_PAGES,
+  HOSTED_CLINICAL_RECORDS_MAX_TOTAL_BODY_BYTES,
+  HOSTED_CLINICAL_RECORDS_RUNTIME_FETCH_PAGE_PATH,
+  HOSTED_CLINICAL_RECORDS_RUNTIME_READ_RUN_PATH,
+  HOSTED_CLINICAL_RECORDS_RUNTIME_RECORD_OUTCOME_PATH,
+  parseHostedClinicalRecordsIdentifier,
+  parseHostedClinicalRecordsRecordOutcomeRequest,
+  type HostedClinicalRecordsOutcomeCounts,
+  type HostedClinicalRecordsRecordOutcomeRequest,
+};
+
 export const HOSTED_CLINICAL_RECORDS_MAX_RESOURCE_FAMILIES =
   CLINICAL_FHIR_RESOURCE_TYPES.length;
-export const HOSTED_CLINICAL_RECORDS_MAX_CURSOR_CHARS = 2_048;
-export const HOSTED_CLINICAL_RECORDS_AUTHORIZATION_REQUIRED_ERROR_CODE =
-  "authorization-required";
-export const HOSTED_CLINICAL_RECORDS_RUNTIME_READ_RUN_PATH =
-  "/api/internal/clinical-records/runtime/read-run";
-export const HOSTED_CLINICAL_RECORDS_RUNTIME_FETCH_PAGE_PATH =
-  "/api/internal/clinical-records/runtime/fetch-page";
-export const HOSTED_CLINICAL_RECORDS_RUNTIME_RECORD_OUTCOME_PATH =
-  "/api/internal/clinical-records/runtime/record-outcome";
 
 const identifierSchema = z
   .string()
   .min(1)
-  .max(120)
-  .regex(/^[A-Za-z0-9._-]+$/u);
+  .max(HOSTED_CLINICAL_RECORDS_IDENTIFIER_MAX_CHARS)
+  .regex(HOSTED_CLINICAL_RECORDS_IDENTIFIER_PATTERN);
 const sha256Schema = z.string().regex(/^[a-f0-9]{64}$/u);
 const errorCodeSchema = z
   .string()
   .min(1)
-  .max(80)
-  .regex(/^[a-z0-9]+(?:[._-][a-z0-9]+)*$/u);
-const nonNegativeCountSchema = z.number().int().min(0).max(1_000_000);
+  .max(HOSTED_CLINICAL_RECORDS_ERROR_CODE_MAX_CHARS)
+  .regex(HOSTED_CLINICAL_RECORDS_ERROR_CODE_PATTERN);
 
 export const hostedClinicalRecordsSyncRequestedWakeSchema = z.object({
   eventId: z.string().min(1),
@@ -103,26 +127,6 @@ export const hostedClinicalRecordsFetchPageResponseSchema = z.discriminatedUnion
   }).strict(),
 ]);
 
-export const hostedClinicalRecordsOutcomeCountsSchema = z.object({
-  createdCount: nonNegativeCountSchema,
-  executableDecisionCount: nonNegativeCountSchema,
-  fetchedPageCount: nonNegativeCountSchema,
-  fetchedResourceFamilyCount: nonNegativeCountSchema,
-  rawFileCount: nonNegativeCountSchema,
-  retractedCount: nonNegativeCountSchema,
-  reviewDecisionCount: nonNegativeCountSchema,
-  skippedExistingCount: nonNegativeCountSchema,
-  supersededCount: nonNegativeCountSchema,
-}).strict();
-
-export const hostedClinicalRecordsRecordOutcomeRequestSchema = z.object({
-  counts: hostedClinicalRecordsOutcomeCountsSchema,
-  errorCode: errorCodeSchema.optional(),
-  generation: z.number().int().min(1),
-  runId: identifierSchema,
-  status: z.enum(["completed", "partial", "failed", "preempted"]),
-}).strict();
-
 export const hostedClinicalRecordsRecordOutcomeResponseSchema = z.object({
   ok: z.literal(true),
 }).strict();
@@ -141,12 +145,6 @@ export type HostedClinicalRecordsFetchPageRequest = z.infer<
 >;
 export type HostedClinicalRecordsFetchPageResponse = z.infer<
   typeof hostedClinicalRecordsFetchPageResponseSchema
->;
-export type HostedClinicalRecordsOutcomeCounts = z.infer<
-  typeof hostedClinicalRecordsOutcomeCountsSchema
->;
-export type HostedClinicalRecordsRecordOutcomeRequest = z.infer<
-  typeof hostedClinicalRecordsRecordOutcomeRequestSchema
 >;
 export type HostedExecutionClinicalRecordsSyncRequestedWake = z.infer<
   typeof hostedClinicalRecordsSyncRequestedWakeSchema

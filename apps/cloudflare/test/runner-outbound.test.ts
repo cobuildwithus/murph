@@ -55,6 +55,11 @@ import {
   isHostedComputerWebControlRequest,
 } from "@murphai/hosted-execution/computer-use";
 import {
+  HOSTED_CLINICAL_RECORDS_RUNTIME_FETCH_PAGE_PATH,
+  HOSTED_CLINICAL_RECORDS_RUNTIME_READ_RUN_PATH,
+  HOSTED_CLINICAL_RECORDS_RUNTIME_RECORD_OUTCOME_PATH,
+} from "@murphai/hosted-execution/clinical-records";
+import {
   buildHostedWorkspaceSnapshotV2Aad,
   createHostedWorkspaceSnapshotV2DataKey,
   HOSTED_WORKSPACE_SNAPSHOT_MAX_SINGLE_PART_BYTES,
@@ -171,6 +176,42 @@ const ALLOWLISTED_WEB_CONTROL_CASES = [
     body: {},
     name: "hosted plan usage tool",
     path: HOSTED_RUNTIME_PLAN_USAGE_TOOL_PATH,
+  },
+  {
+    body: { generation: 1, runId: "clinical_run_1" },
+    name: "clinical records read run",
+    path: HOSTED_CLINICAL_RECORDS_RUNTIME_READ_RUN_PATH,
+  },
+  {
+    body: {
+      cursor: null,
+      generation: 1,
+      requestId: "clinical_request_1",
+      resourceType: "Observation",
+      runId: "clinical_run_1",
+    },
+    name: "clinical records fetch page",
+    path: HOSTED_CLINICAL_RECORDS_RUNTIME_FETCH_PAGE_PATH,
+  },
+  {
+    body: {
+      counts: {
+        createdCount: 0,
+        executableDecisionCount: 0,
+        fetchedPageCount: 1,
+        fetchedResourceFamilyCount: 1,
+        rawFileCount: 2,
+        retractedCount: 0,
+        reviewDecisionCount: 0,
+        skippedExistingCount: 0,
+        supersededCount: 0,
+      },
+      generation: 1,
+      runId: "clinical_run_1",
+      status: "completed",
+    },
+    name: "clinical records record outcome",
+    path: HOSTED_CLINICAL_RECORDS_RUNTIME_RECORD_OUTCOME_PATH,
   },
   {
     body: {
@@ -666,6 +707,9 @@ describe("handleRunnerOutboundRequest", () => {
                     || path === HOSTED_RUNTIME_CODEX_AUTH_PATH
                     || path === HOSTED_RUNTIME_ASSISTANT_PERSONALIZATION_TOOL_PATH
                     || path === HOSTED_RUNTIME_PLAN_USAGE_TOOL_PATH
+                    || path === HOSTED_CLINICAL_RECORDS_RUNTIME_READ_RUN_PATH
+                    || path === HOSTED_CLINICAL_RECORDS_RUNTIME_FETCH_PAGE_PATH
+                    || path === HOSTED_CLINICAL_RECORDS_RUNTIME_RECORD_OUTCOME_PATH
                     || isHostedComputerWebControlRequest({ method: "POST", path })
                     ? {
                         "x-hosted-runtime-attempt-id": "attempt_1",
@@ -734,6 +778,14 @@ describe("handleRunnerOutboundRequest", () => {
       expect(headers.get("x-hosted-execution-signature")).toBeTruthy();
       expect(headers.get("x-hosted-execution-signature")).not.toBe("child-signature");
       expect(headers.get("x-hosted-runner-bound-user-id")).toBeNull();
+      if (
+        path === HOSTED_CLINICAL_RECORDS_RUNTIME_READ_RUN_PATH
+        || path === HOSTED_CLINICAL_RECORDS_RUNTIME_FETCH_PAGE_PATH
+        || path === HOSTED_CLINICAL_RECORDS_RUNTIME_RECORD_OUTCOME_PATH
+      ) {
+        expect(headers.get("x-hosted-runtime-attempt-id")).toBe("attempt_1");
+        expect(headers.get("x-hosted-runtime-lease-generation")).toBe("9");
+      }
       expect(timeoutSpy).toHaveBeenCalledWith(45_000);
     },
   );
@@ -953,6 +1005,74 @@ describe("handleRunnerOutboundRequest", () => {
     expect(nonceStore.consume).toHaveBeenCalledWith(
       expect.objectContaining({ userId: boundUserId }),
     );
+  });
+
+  it.each([
+    HOSTED_CLINICAL_RECORDS_RUNTIME_READ_RUN_PATH,
+    HOSTED_CLINICAL_RECORDS_RUNTIME_FETCH_PAGE_PATH,
+    HOSTED_CLINICAL_RECORDS_RUNTIME_RECORD_OUTCOME_PATH,
+  ])("rejects clinical web-control requests without the active runtime fence: %s", async (path) => {
+    const fetchMock = vi.fn();
+    vi.stubGlobal("fetch", fetchMock);
+
+    const response = await handleRunnerOutboundRequest(
+      new Request(`http://web-control.worker${path}`, {
+        body: JSON.stringify({ generation: 1, runId: "clinical_run_1" }),
+        headers: createRunnerProxyHeaders({
+          "content-type": "application/json; charset=utf-8",
+        }),
+        method: "POST",
+      }),
+      createRunnerOutboundEnv({
+        HOSTED_WEB_BASE_URL: "https://web.example.test",
+      }),
+      "member_123",
+    );
+
+    expect(response.status).toBe(401);
+    expect(fetchMock).not.toHaveBeenCalled();
+  });
+
+  it("does not inspect sensitive clinical response bodies in proxy diagnostics", async () => {
+    const sensitiveDetail = "Private provider response must remain opaque.";
+    const upstreamResponse = new Response(new ReadableStream<Uint8Array>({
+      start(controller) {
+        controller.enqueue(new TextEncoder().encode(sensitiveDetail));
+        controller.close();
+      },
+    }), {
+      headers: {
+        "content-type": "text/plain; charset=utf-8",
+      },
+      status: 503,
+    });
+    const cloneSpy = vi.spyOn(upstreamResponse, "clone");
+    const fetchMock = vi.fn(async () => upstreamResponse);
+    vi.stubGlobal("fetch", fetchMock);
+
+    const response = await handleRunnerOutboundRequest(
+      new Request(
+        `http://web-control.worker${HOSTED_CLINICAL_RECORDS_RUNTIME_READ_RUN_PATH}`,
+        {
+          body: JSON.stringify({ generation: 1, runId: "clinical_run_1" }),
+          headers: createRunnerProxyHeaders({
+            "content-type": "application/json; charset=utf-8",
+            "x-hosted-runtime-attempt-id": "attempt_1",
+            "x-hosted-runtime-lease-generation": "9",
+          }),
+          method: "POST",
+        },
+      ),
+      createRunnerOutboundEnv({
+        HOSTED_WEB_BASE_URL: "https://web.example.test",
+      }),
+      "member_123",
+    );
+
+    expect(response.status).toBe(503);
+    expect(cloneSpy).not.toHaveBeenCalled();
+    expect(JSON.stringify(hostedExecutionMocks.emitHostedExecutionStructuredLog.mock.calls))
+      .not.toContain(sensitiveDetail);
   });
 
   it("rejects device-sync runtime snapshots without the active runtime fence", async () => {

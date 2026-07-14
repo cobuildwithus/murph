@@ -163,6 +163,11 @@ export async function handleRunnerWebControlRequest(input: {
     && input.request.method === "POST";
   const isConnectedAppsRequest = policy.operation === "connected_apps"
     && input.request.method === "POST";
+  const isClinicalRecordsRequest = (
+    policy.operation === "clinical_records_fetch_page"
+    || policy.operation === "clinical_records_read_run"
+    || policy.operation === "clinical_records_record_outcome"
+  ) && input.request.method === "POST";
   const isCodexAuthUpdateRequest = policy.operation === "codex_auth_update"
     && input.request.method === "POST";
   const isPhoneCallStartRequest = policy.operation === "phone_call_start"
@@ -189,6 +194,7 @@ export async function handleRunnerWebControlRequest(input: {
     || isPlanUsageToolRequest
     || isComputerUseRequest
     || isConnectedAppsRequest
+    || isClinicalRecordsRequest
     || isCodexAuthUpdateRequest
     || isPhoneCallStartRequest
     || isAssistantPersonalizationToolRequest
@@ -286,7 +292,7 @@ export async function handleRunnerWebControlRequest(input: {
       : undefined,
     timeoutMs: input.environment.webControlTimeoutMs,
   });
-  const responseBodyMetadata = response.ok
+  const responseBodyMetadata = response.ok || isClinicalRecordsRequest
     ? {}
     : await readHostedRunnerSafeResponseBodyMetadata(response.clone());
   emitHostedExecutionStructuredLog({

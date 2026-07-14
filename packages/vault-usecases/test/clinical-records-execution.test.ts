@@ -5,6 +5,7 @@ import path from "node:path";
 import {
   type ClinicalFhirRetrievalScope,
   hashClinicalFhirBaseUrl,
+  hashClinicalFhirPageUrl,
   hashClinicalFhirPatientId,
 } from "@murphai/clinical-records";
 import {
@@ -12,6 +13,7 @@ import {
   initializeVault,
 } from "@murphai/core";
 import {
+  ClinicalFhirSnapshotRejectedError,
   importClinicalFhirSnapshot,
   type ClinicalFhirSnapshotImportInput,
 } from "@murphai/vault-usecases/clinical-records";
@@ -67,6 +69,62 @@ describe("importClinicalFhirSnapshot", () => {
     expect(event?.kind).toBe("measurement");
   });
 
+  it("yields to cancellation before persisting a planned snapshot", async () => {
+    const input = await createSnapshotInput({
+      pages: [{
+        content: fhirBundle([heartRateObservation("cancelled-heart-rate")]),
+        resourceType: "Observation",
+      }],
+      resourceTypes: ["Observation"],
+    });
+    const controller = new AbortController();
+    setImmediate(() => controller.abort(
+      new DOMException("Foreground work arrived.", "AbortError"),
+    ));
+
+    await expect(importClinicalFhirSnapshot({
+      ...input,
+      signal: controller.signal,
+    })).rejects.toMatchObject({ name: "AbortError" });
+    await expectClinicalRawSnapshotAbsent(input);
+  });
+
+  it("persists and resolves a two-page FHIR continuation chain", async () => {
+    const nextPageUrl = `${FHIR_BASE_URL}/Observation?page=2`;
+    const nextPageUrlHash = hashClinicalFhirPageUrl(nextPageUrl);
+    const input = await createSnapshotInput({
+      pages: [
+        {
+          content: fhirBundle(
+            [heartRateObservation("page-1-heart-rate", 70)],
+            [{ relation: "next", url: nextPageUrl }],
+          ),
+          nextPageUrlHash,
+          resourceType: "Observation",
+        },
+        {
+          content: fhirBundle([heartRateObservation("page-2-heart-rate", 72)]),
+          pageUrlHash: nextPageUrlHash,
+          resourceType: "Observation",
+        },
+      ],
+      resourceTypes: ["Observation"],
+    });
+
+    const result = await importClinicalFhirSnapshot(input);
+    const manifest = JSON.parse(await readFile(
+      path.join(input.vaultRoot, result.manifestPath),
+      "utf8",
+    )) as { resourceFiles: Array<Record<string, unknown>> };
+
+    expect(result.canonical.createdCount).toBe(2);
+    expect(manifest.resourceFiles).toEqual([
+      expect.objectContaining({ nextPageUrlHash }),
+      expect.objectContaining({ pageUrlHash: nextPageUrlHash }),
+    ]);
+    expect(manifest.resourceFiles[0]).not.toHaveProperty("pageUrlHash");
+  });
+
   it("rejects conflicting raw replay at the stable retrieval identity", async () => {
     const input = await createSnapshotInput({
       pages: [{
@@ -83,7 +141,58 @@ describe("importClinicalFhirSnapshot", () => {
         content: fhirBundle([heartRateObservation("heart-rate-conflict", 99)]),
         resourceType: "Observation",
       }],
-    })).rejects.toThrow();
+    })).rejects.toMatchObject({
+      code: "CLINICAL_FHIR_SNAPSHOT_REJECTED",
+      message: "Clinical FHIR snapshot failed semantic validation.",
+    });
+  });
+
+  it("terminalizes a deterministic canonical conflict after preserving raw evidence", async () => {
+    const resourceId = "canonical-conflict-heart-rate";
+    const initial = await createSnapshotInput({
+      pages: [{
+        content: fhirBundle([heartRateObservation(resourceId, 70)]),
+        resourceType: "Observation",
+      }],
+      resourceTypes: ["Observation"],
+    });
+    await importClinicalFhirSnapshot(initial);
+
+    const conflicting = {
+      ...initial,
+      pages: [{
+        content: fhirBundle([heartRateObservation(resourceId, 99)]),
+        resourceType: "Observation",
+      }],
+      retrievalJobId: "retrieval-job-2",
+    } satisfies ClinicalFhirSnapshotImportInput;
+    let rejection: unknown;
+    try {
+      await importClinicalFhirSnapshot(conflicting);
+    } catch (error) {
+      rejection = error;
+    }
+
+    expect(rejection).toBeInstanceOf(ClinicalFhirSnapshotRejectedError);
+    if (!(rejection instanceof ClinicalFhirSnapshotRejectedError)) {
+      throw new Error("Expected a typed Clinical FHIR snapshot rejection.");
+    }
+    expect(rejection.message).toBe("Clinical FHIR snapshot failed semantic validation.");
+    expect(rejection.message).not.toContain(resourceId);
+    await expect(access(path.join(
+      conflicting.vaultRoot,
+      "raw/clinical/fhir",
+      conflicting.connectionId,
+      conflicting.retrievalJobId,
+      "manifest.json",
+    ))).resolves.toBeUndefined();
+    await expect(access(path.join(
+      conflicting.vaultRoot,
+      "raw/clinical/fhir",
+      conflicting.connectionId,
+      conflicting.retrievalJobId,
+      "Observation/page-0001.json",
+    ))).resolves.toBeUndefined();
   });
 
   it("applies importer-owned review holds across delayed clinical revisions", async () => {
@@ -183,7 +292,12 @@ describe("importClinicalFhirSnapshot", () => {
     });
 
     await expect(importClinicalFhirSnapshot(input))
-      .rejects.toThrow("has no comparable source revision");
+      .rejects.toMatchObject({
+        cause: expect.objectContaining({
+          message: expect.stringContaining("has no comparable source revision"),
+        }),
+        code: "CLINICAL_FHIR_SNAPSHOT_REJECTED",
+      });
     await expectClinicalRawSnapshotAbsent(input);
   });
 
@@ -198,7 +312,12 @@ describe("importClinicalFhirSnapshot", () => {
       resourceTypes: ["Observation"],
     });
 
-    await expect(importClinicalFhirSnapshot(input)).rejects.toThrow("does not match manifest patient");
+    await expect(importClinicalFhirSnapshot(input)).rejects.toMatchObject({
+      cause: expect.objectContaining({
+        message: expect.stringContaining("does not match manifest patient"),
+      }),
+      code: "CLINICAL_FHIR_SNAPSHOT_REJECTED",
+    });
     await expectClinicalRawSnapshotAbsent(input);
   });
 
@@ -211,7 +330,12 @@ describe("importClinicalFhirSnapshot", () => {
       resourceTypes: ["Condition"],
     });
 
-    await expect(importClinicalFhirSnapshot(input)).rejects.toThrow("declared resource type");
+    await expect(importClinicalFhirSnapshot(input)).rejects.toMatchObject({
+      cause: expect.objectContaining({
+        message: expect.stringContaining("declared resource type"),
+      }),
+      code: "CLINICAL_FHIR_SNAPSHOT_REJECTED",
+    });
     await expectClinicalRawSnapshotAbsent(input);
   });
 
@@ -230,7 +354,12 @@ describe("importClinicalFhirSnapshot", () => {
       resourceTypes: ["Observation"],
     });
 
-    await expect(importClinicalFhirSnapshot(input)).rejects.toThrow("invalid manifest patient reference");
+    await expect(importClinicalFhirSnapshot(input)).rejects.toMatchObject({
+      cause: expect.objectContaining({
+        message: expect.stringContaining("invalid manifest patient reference"),
+      }),
+      code: "CLINICAL_FHIR_SNAPSHOT_REJECTED",
+    });
     await expectClinicalRawSnapshotAbsent(input);
   });
 
@@ -244,7 +373,12 @@ describe("importClinicalFhirSnapshot", () => {
       resourceTypes: ["Observation"],
     });
 
-    await expect(importClinicalFhirSnapshot(input)).rejects.toThrow("unresolved pagination");
+    await expect(importClinicalFhirSnapshot(input)).rejects.toMatchObject({
+      cause: expect.objectContaining({
+        message: expect.stringContaining("unresolved pagination"),
+      }),
+      code: "CLINICAL_FHIR_SNAPSHOT_REJECTED",
+    });
     await expectClinicalRawSnapshotAbsent(input);
   });
 
@@ -296,6 +430,76 @@ describe("importClinicalFhirSnapshot", () => {
 
     expect(result.executableDecisionCount).toBe(0);
     expect(result.reviewDecisionCount).toBe(1);
+  });
+
+  it("uses a newer review hold to block a delayed older executable revision", async () => {
+    const first = await createSnapshotInput({
+      pages: [{
+        content: fhirBundle([heartRateObservation(
+          "review-held-heart-rate",
+          70,
+          `Patient/${PATIENT_ID}`,
+          "2026-07-10T12:01:00.000Z",
+        )]),
+        resourceType: "Observation",
+      }],
+      resourceTypes: ["Observation"],
+    });
+    const review = {
+      ...first,
+      fetchedAt: "2026-07-10T12:03:00.000Z",
+      pages: [{
+        content: fhirBundle([{
+          ...heartRateObservation(
+            "review-held-heart-rate",
+            73,
+            `Patient/${PATIENT_ID}`,
+            "2026-07-10T12:03:00.000Z",
+          ),
+          modifierExtension: [{
+            url: "https://ehr.example.test/fhir/StructureDefinition/negated",
+            valueBoolean: true,
+          }],
+        }]),
+        resourceType: "Observation",
+      }],
+      retrievalJobId: "retrieval-job-3",
+    } satisfies ClinicalFhirSnapshotImportInput;
+    const delayed = {
+      ...first,
+      fetchedAt: "2026-07-10T12:02:00.000Z",
+      pages: [{
+        content: fhirBundle([heartRateObservation(
+          "review-held-heart-rate",
+          72,
+          `Patient/${PATIENT_ID}`,
+          "2026-07-10T12:02:00.000Z",
+        )]),
+        resourceType: "Observation",
+      }],
+      retrievalJobId: "retrieval-job-2",
+    } satisfies ClinicalFhirSnapshotImportInput;
+
+    const firstResult = await importClinicalFhirSnapshot(first);
+    const reviewResult = await importClinicalFhirSnapshot(review);
+    const delayedResult = await importClinicalFhirSnapshot(delayed);
+
+    expect(firstResult.canonical.createdCount).toBe(1);
+    expect(reviewResult).toEqual(expect.objectContaining({
+      executableDecisionCount: 1,
+      reviewDecisionCount: 1,
+      canonical: expect.objectContaining({ retractedCount: 1 }),
+    }));
+    expect(delayedResult.canonical).toEqual(expect.objectContaining({
+      applied: false,
+      skippedExistingCount: 1,
+    }));
+    expect(await findEventByExternalRef({
+      vaultRoot: first.vaultRoot,
+      system: `epic-fhir-${FHIR_BASE_URL_HASH}-${PATIENT_ID_HASH}`,
+      resourceType: "observation",
+      resourceId: "review-held-heart-rate",
+    })).toBeNull();
   });
 });
 
@@ -365,10 +569,14 @@ async function expectClinicalRawSnapshotAbsent(
   }
 }
 
-function fhirBundle(resources: unknown[]): string {
+function fhirBundle(
+  resources: unknown[],
+  links?: Array<{ relation: string; url: string }>,
+): string {
   return `${JSON.stringify({
     resourceType: "Bundle",
     type: "searchset",
+    ...(links ? { link: links } : {}),
     entry: resources.map((resource) => ({ resource })),
   })}\n`;
 }
@@ -377,11 +585,12 @@ function heartRateObservation(
   resourceId: string,
   value = 70,
   patientReference = `Patient/${PATIENT_ID}`,
+  lastUpdated = "2026-07-10T12:00:00.000Z",
 ) {
   return {
     resourceType: "Observation",
     id: resourceId,
-    meta: { lastUpdated: "2026-07-10T12:00:00.000Z" },
+    meta: { lastUpdated },
     status: "final",
     subject: { reference: patientReference },
     effectiveDateTime: "2026-07-10T11:59:00.000Z",

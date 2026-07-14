@@ -149,6 +149,7 @@ export async function prepareHostedSystemMailboxItemForCheckpoint(input: {
   operatorHomeRoot?: string | null;
   runtime: HostedSystemMailboxRuntime;
   runtimeEnv: Readonly<Record<string, string>>;
+  signal?: AbortSignal | null;
   shouldYieldBackgroundMaintenance?: (() => boolean) | null;
   vaultRoot: string;
 }): Promise<HostedSystemMailboxCheckpointPreparation | null> {
@@ -206,6 +207,7 @@ export async function prepareHostedSystemMailboxItemForCheckpoint(input: {
       pendingItem: prepared,
       runtime: input.runtime,
       runtimeEnv: input.runtimeEnv,
+      signal: input.signal ?? null,
       shouldYieldBackgroundMaintenance: input.shouldYieldBackgroundMaintenance ?? null,
       vaultRoot: input.vaultRoot,
     });
@@ -305,6 +307,7 @@ export async function recordHostedSystemMailboxItemAfterCheckpoint(input: {
   item: HostedSystemMailboxPendingItem;
   operatorHomeRoot?: string | null;
   runtime: HostedSystemMailboxRuntime;
+  signal?: AbortSignal | null;
   vaultRoot: string;
 }): Promise<{
   failed: number;
@@ -325,6 +328,7 @@ export async function recordHostedSystemMailboxItemAfterCheckpoint(input: {
       operatorHomeRoot: input.operatorHomeRoot ?? null,
       record: input.item.postCheckpointRecord,
       runtime: input.runtime,
+      signal: input.signal ?? null,
     });
     await removeHostedSystemMailboxPendingItemIfCurrent({
       item: input.item,
@@ -404,6 +408,7 @@ async function executePendingHostedSystemMailboxItem(input: {
   pendingItem: HostedSystemMailboxPendingItem;
   runtime: HostedSystemMailboxRuntime;
   runtimeEnv: Readonly<Record<string, string>>;
+  signal: AbortSignal | null;
   shouldYieldBackgroundMaintenance?: (() => boolean) | null;
   vaultRoot: string;
 }): Promise<HostedMailboxExecutionMetrics> {
@@ -422,8 +427,12 @@ async function executePendingHostedSystemMailboxItem(input: {
     preferenceCausalSeq: input.pendingItem.preferenceCausalSeq ?? "0",
     runtime: input.runtime,
     runtimeEnv: input.runtimeEnv,
+    signal: input.signal,
     ...(input.shouldYieldBackgroundMaintenance
-      ? { shouldYieldDeviceSync: input.shouldYieldBackgroundMaintenance }
+      ? {
+          shouldYieldClinicalRecords: input.shouldYieldBackgroundMaintenance,
+          shouldYieldDeviceSync: input.shouldYieldBackgroundMaintenance,
+        }
       : {}),
     sourceMailboxItemId: input.pendingItem.itemId,
     vaultRoot: input.vaultRoot,
@@ -457,6 +466,7 @@ function readHostedSystemMailboxRouteAction(
     || item.route.action === "apply-member-channels-update"
     || item.route.action === "apply-member-preferences"
     || item.route.action === "dispatch-assistant-notification"
+    || item.route.action === "run-clinical-records-sync"
     || item.route.action === "run-device-sync-wake"
     || item.route.action === "apply-runtime-control-request"
   ) {
@@ -480,8 +490,27 @@ async function recordHostedSystemMailboxPostCheckpointRecord(input: {
   operatorHomeRoot: string | null;
   record: HostedSystemMailboxPostCheckpointRecord;
   runtime: HostedSystemMailboxRuntime;
+  signal?: AbortSignal | null;
 }): Promise<HostedSystemMailboxPostCheckpointRecordResult> {
   switch (input.record.kind) {
+    case "clinical-records.outcome-recorded": {
+      const port = input.runtime.platform.clinicalRecordsPort;
+      if (!port) {
+        throw new Error(
+          "Hosted clinical records outcome checkpoint requires a configured clinical records port.",
+        );
+      }
+      if (input.signal) {
+        await port.recordOutcome(input.record.request, { signal: input.signal });
+      } else {
+        await port.recordOutcome(input.record.request);
+      }
+      return {
+        nextWakeAt: null,
+        recorded: 1,
+        stillDirty: false,
+      };
+    }
     case "codex-auth.updated": {
       const port = input.runtime.platform.codexAuthPort;
       if (!port) {
