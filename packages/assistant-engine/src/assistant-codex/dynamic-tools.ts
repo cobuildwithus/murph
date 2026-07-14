@@ -1419,7 +1419,6 @@ type HostedComputerToolPayloadSanitizer =
   | 'open'
 
 export interface MurphDynamicToolExecutionResult {
-  codexThreadHistoryUnsafe?: boolean
   computerRunPausedForUser?: boolean
   finalActionPatch?: MurphDynamicToolFinalActionPatch
   reactionPatch?: MurphDynamicToolReactionPatch
@@ -2682,13 +2681,8 @@ async function executeGroupTool(input: {
     const payload = generatedAvatarCapture
       ? { ...result, generatedImage: generatedAvatarCapture }
       : result
-    const codexThreadHistoryUnsafe =
-      request.action === 'list_memberships' &&
-      result.action === 'list_memberships' &&
-      result.result.status === 'ok'
     return {
       ...toolTextResult(true, safeToolPayloadText(payload)),
-      ...(codexThreadHistoryUnsafe ? { codexThreadHistoryUnsafe: true } : {}),
       ...(usageDraft ? { usageDraft } : {}),
     }
   } catch {

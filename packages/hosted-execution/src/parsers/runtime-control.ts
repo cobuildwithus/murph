@@ -210,7 +210,6 @@ const SAFE_DIAGNOSTIC_TEXT_REDACTED_KEY_NAMES = new Set([
   "routePlanningAssistantContextSnapshotElapsedMs",
   "routePlanningAnyBootstrapContextPrepared",
   "routePlanningBootstrapContextPrepared",
-  "routePlanningFreshThreadFallbackPromptElapsedMs",
   "routePlanningPrimarySystemPromptElapsedMs",
   "safeErrorMessage",
   "tokenPreview",
@@ -231,7 +230,6 @@ const ROUTE_PLANNING_ELAPSED_MS_REDACTED_KEY_NAMES = new Set([
   "routePlanningCliBootstrapElapsedMs",
   "routePlanningElapsedMs",
   "routePlanningFallbackInstructionsElapsedMs",
-  "routePlanningFreshThreadFallbackPromptElapsedMs",
   "routePlanningMeasuredElapsedMs",
   "routePlanningMemoryOverviewElapsedMs",
   "routePlanningPrimaryInstructionsElapsedMs",
@@ -258,7 +256,6 @@ const ROUTE_PLANNING_REDACTED_KEY_NAMES = new Set([
   ...ROUTE_PLANNING_ELAPSED_MS_REDACTED_KEY_NAMES,
   "routePlanningAnyBootstrapContextPrepared",
   "routePlanningBootstrapContextPrepared",
-  "routePlanningFreshThreadFallbackPrepared",
   "routePlanningSlowestStage",
 ]);
 const SAFE_REDACTED_METADATA_KEY_SUFFIXES = [
