@@ -40,6 +40,19 @@ export async function filterHostedAssistantInputBatchByLinqRouteAuthority(input:
       );
     }
 
+    const hostedMailboxItemId = candidate.event.hostedMailboxItemId?.trim() ?? "";
+    if (!hostedMailboxItemId) {
+      await writeAssistantAutoReplySuppressionEvidence({
+        captureIds: candidate.projection.captureId
+          ? [candidate.projection.captureId]
+          : [],
+        inputIds: [candidate.event.inputId],
+        reason: "hosted-linq-route-authority-revoked",
+        vault: input.vaultRoot,
+      });
+      continue;
+    }
+
     const routeAuthority =
       candidate.event.sourceMetadata?.kind === "linq"
       && candidate.event.sourceMetadata.externalThreadRouteAuthorityPresent === true
@@ -49,13 +62,9 @@ export async function filterHostedAssistantInputBatchByLinqRouteAuthority(input:
             threadId,
           }
         : null;
-    const hostedMailboxItemId = candidate.event.hostedMailboxItemId?.trim() ?? "";
-
     try {
       await assertAuthority({
-        ...(hostedMailboxItemId
-          ? { answeredMailboxItemIds: [hostedMailboxItemId] }
-          : {}),
+        answeredMailboxItemIds: [hostedMailboxItemId],
         authorityCheckOnly: true,
         idempotencyKey: null,
         replyToMessageId: replyTarget.messageId,
@@ -88,9 +97,19 @@ export async function filterHostedAssistantInputBatchByLinqRouteAuthority(input:
 }
 
 function isRevokedHostedLinqInputAuthorityError(error: unknown): boolean {
-  if (typeof error !== "object" || error === null || !("code" in error)) {
+  if (typeof error !== "object" || error === null) {
     return false;
   }
-  return typeof error.code === "string"
-    && REVOKED_LINQ_INPUT_AUTHORITY_CODES.has(error.code);
+  if (
+    "code" in error
+    && typeof error.code === "string"
+    && REVOKED_LINQ_INPUT_AUTHORITY_CODES.has(error.code)
+  ) {
+    return true;
+  }
+
+  return "status" in error
+    && error.status === 403
+    && "retryable" in error
+    && error.retryable === false;
 }

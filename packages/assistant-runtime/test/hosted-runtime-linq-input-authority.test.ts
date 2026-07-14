@@ -190,6 +190,101 @@ describe("hosted Linq input authority", () => {
       vault: vaultRoot,
     })).resolves.toBe(false);
   });
+
+  it("suppresses a stale non-retryable 403 and continues to the fresh input", async () => {
+    const vaultRoot = await createTemporaryVault();
+    const staleEvent = await createStoredLinqInput({
+      identity: "stale",
+      vaultRoot,
+    });
+    const freshEvent = await createStoredLinqInput({
+      identity: "fresh",
+      vaultRoot,
+    });
+    const assertAuthority = vi.fn()
+      .mockRejectedValueOnce({
+        code: "authorization_error",
+        retryable: false,
+        status: 403,
+        statusCode: 403,
+      })
+      .mockResolvedValueOnce({});
+
+    const filtered = await filterHostedAssistantInputBatchByLinqRouteAuthority({
+      batch: {
+        inputs: [
+          assistantInputCandidateFromStoredEvent(staleEvent, {
+            hostedMailboxItemId: "mailbox_stale",
+          }),
+          assistantInputCandidateFromStoredEvent(freshEvent, {
+            hostedMailboxItemId: "mailbox_fresh",
+          }),
+        ],
+        nextCursor: freshEvent.cursor,
+      },
+      effectsPort: {
+        assertLinqRecentInboundEngagement: assertAuthority,
+      },
+      userId: "member_personal",
+      vaultRoot,
+    });
+
+    expect(filtered.inputs.map((candidate) => candidate.event.inputId)).toEqual([
+      freshEvent.inputId,
+    ]);
+    expect(assertAuthority).toHaveBeenCalledTimes(2);
+    await expect(hasCompleteAssistantAutoReplyTerminalEvidence({
+      inputId: staleEvent.inputId,
+      vault: vaultRoot,
+    })).resolves.toBe(true);
+    await expect(hasCompleteAssistantAutoReplyTerminalEvidence({
+      inputId: freshEvent.inputId,
+      vault: vaultRoot,
+    })).resolves.toBe(false);
+  });
+
+  it("suppresses a legacy input without canonical mailbox identity and continues", async () => {
+    const vaultRoot = await createTemporaryVault();
+    const staleEvent = await createStoredLinqInput({
+      identity: "legacy",
+      vaultRoot,
+    });
+    const freshEvent = await createStoredLinqInput({
+      identity: "current",
+      vaultRoot,
+    });
+    const assertAuthority = vi.fn().mockResolvedValue({});
+
+    const filtered = await filterHostedAssistantInputBatchByLinqRouteAuthority({
+      batch: {
+        inputs: [
+          assistantInputCandidateFromStoredEvent(staleEvent),
+          assistantInputCandidateFromStoredEvent(freshEvent, {
+            hostedMailboxItemId: "mailbox_current",
+          }),
+        ],
+        nextCursor: freshEvent.cursor,
+      },
+      effectsPort: {
+        assertLinqRecentInboundEngagement: assertAuthority,
+      },
+      userId: "member_personal",
+      vaultRoot,
+    });
+
+    expect(filtered.inputs.map((candidate) => candidate.event.inputId)).toEqual([
+      freshEvent.inputId,
+    ]);
+    expect(assertAuthority).toHaveBeenCalledTimes(1);
+    await expect(hasCompleteAssistantAutoReplyTerminalEvidence({
+      inputId: staleEvent.inputId,
+      vault: vaultRoot,
+    })).resolves.toBe(true);
+    await expect(hasCompleteAssistantAutoReplyTerminalEvidence({
+      inputId: freshEvent.inputId,
+      vault: vaultRoot,
+    })).resolves.toBe(false);
+  });
 });
 
 async function createTemporaryVault(): Promise<string> {
@@ -200,9 +295,11 @@ async function createTemporaryVault(): Promise<string> {
 
 async function createStoredLinqInput(input: {
   externalThreadRouteAuthorityPresent?: boolean;
+  identity?: string;
   threadIsDirect?: boolean;
   vaultRoot: string;
 }) {
+  const identity = input.identity ?? "group";
   return await upsertAssistantInputEvent({
     event: {
       content: {
@@ -219,7 +316,7 @@ async function createStoredLinqInput(input: {
       occurredAt: "2026-07-12T12:00:00.000Z",
       replyTarget: {
         channel: "linq",
-        messageId: "message_group",
+        messageId: `message_${identity}`,
         threadId: "chat_group",
       },
       sourceMetadata: {
@@ -232,9 +329,9 @@ async function createStoredLinqInput(input: {
         service: "iMessage",
       },
       sourceRef: {
-        dedupeKey: "blinded_event_group",
-        eventId: "blinded_event_group",
-        itemId: "blinded_mailbox_group",
+        dedupeKey: `blinded_event_${identity}`,
+        eventId: `blinded_event_${identity}`,
+        itemId: `blinded_mailbox_${identity}`,
         kind: "hosted-mailbox",
         lane: "conversation",
         laneSeq: "1",
