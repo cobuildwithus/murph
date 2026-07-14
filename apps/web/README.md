@@ -767,15 +767,19 @@ Deploy and verify that writer-guard release at the production alias, record its
 exact commit as the rollback floor, then wait the complete prior-function drain
 window used by the hosted-web deployment contract (currently 300 seconds).
 Recheck that the production alias still points at the recorded commit after the
-wait. Only a separate source release may remove the production source gate and
-activate lease claims. Once that activation release can create non-null lease
+wait. A later release must replace the source-only gate with a shared runtime
+gate, deploy the activation-capable code with that gate disabled, verify its
+exact production alias, drain lease-less invocations for another full 300
+seconds, and only then enable claims without changing the alias. Before rolling
+back activation-capable code, disable the same gate and drain active claimants
+before moving the alias. Once activation can create non-null lease
 rows, never roll web below the recorded writer-guard floor; use a forward fix
 or first prove that no durable lease evidence remains. This sequencing keeps
 warm pre-guard OAuth callbacks from resurrecting or changing a connection that
 a new disconnect owns.
 
-After those approval and recovery prerequisites exist, activate lease claims in
-a separate web source release and verify it before deploying any hosted
+After those approval and recovery prerequisites exist, activate lease claims
+through that shared runtime gate and verify it before deploying any hosted
 disconnect consumer. Until then, do not route hosted disconnect through the
 account-action endpoint.
 

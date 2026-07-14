@@ -147,6 +147,7 @@ describe("PrismaDeviceSyncControlPlaneStore hosted connection access", () => {
     };
 
     const tx = {
+      $executeRaw: async () => 0,
       deviceConnection: {
         findUnique: async ({ where }: { where: { id?: string } | { provider_providerAccountBlindIndex?: { provider: string; providerAccountBlindIndex: string } } }) => {
           if ("id" in where && where.id && createdArtifacts.connection?.id === where.id) {
@@ -225,6 +226,7 @@ describe("PrismaDeviceSyncControlPlaneStore hosted connection access", () => {
     };
 
     const tx = {
+      $executeRaw: async () => 0,
       deviceConnection: {
         findUnique: async ({ where }: { where: { id?: string } | { provider_providerAccountBlindIndex?: { provider: string; providerAccountBlindIndex: string } } }) => {
           if ("id" in where && where.id && createdArtifacts.connection?.id === where.id) {
@@ -292,6 +294,7 @@ describe("PrismaDeviceSyncControlPlaneStore hosted connection access", () => {
     };
 
     const tx = {
+      $executeRaw: async () => 0,
       deviceConnection: {
         findUnique: async () => null,
         create: async ({ data }: { data: Record<string, unknown> }) => {
@@ -535,6 +538,7 @@ describe("PrismaDeviceSyncControlPlaneStore hosted connection access", () => {
   it("rejects provider-config hosted connection credentials with unexpected provider profile keys", async () => {
     let createCalled = false;
     const tx = {
+      $executeRaw: async () => 0,
       deviceConnection: {
         findUnique: async () => null,
         create: async () => {
@@ -655,7 +659,7 @@ describe("PrismaDeviceSyncControlPlaneStore hosted connection access", () => {
       ["select pg_advisory_xact_lock(hashtext(", "))"],
       "dsc_123",
     );
-    expect(findConnection).toHaveBeenCalledTimes(2);
+    expect(findConnection).toHaveBeenCalledTimes(3);
     expect(lockConnectionMutation.mock.invocationCallOrder[0]).toBeLessThan(
       updateConnection.mock.invocationCallOrder[0] ?? Number.POSITIVE_INFINITY,
     );
@@ -1165,6 +1169,7 @@ describe("PrismaDeviceSyncControlPlaneStore hosted connection access", () => {
     const tx = {
       $executeRaw: vi.fn(async () => 0),
       deviceConnection: {
+        findFirst: vi.fn(async () => cloneConnection(existing)),
         findUnique: vi.fn(async () => cloneConnection(existing)),
         update: vi.fn(async () => {
           throw new Error("stale expected-absence upserts should not update");

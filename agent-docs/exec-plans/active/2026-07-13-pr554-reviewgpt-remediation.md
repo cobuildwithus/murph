@@ -76,3 +76,14 @@ documented two-release contract. Focused remediation evidence: device-syncd
 public ingress 61 tests; hosted runtime authority 42 tests; Prisma connection
 store 42 tests; hosted runtime terminal hydration 2 selected cases; affected
 device-syncd, assistant-runtime, and web typechecks pass.
+
+Round 3 accepted three additional findings. Prisma now serializes every
+owner/provider upsert and validates SDK guards against that row before resolving
+the provider-returned external identity, preserving reconnect after identity
+scrubbing and rejecting delayed expected-absence activation. Lease-less terminal
+writes raw-check for newly claimed evidence, while recovered terminal rows flow
+through the canonical transaction that consumes their lease. Credential-bearing
+snapshots use raw non-null lease evidence, including blank or malformed owners.
+The later activation contract now requires a shared runtime gate: deploy it off,
+verify and drain, enable without an alias change, then disable and drain before
+rollback. Focused web evidence: 157 tests and the prepared web typecheck pass.

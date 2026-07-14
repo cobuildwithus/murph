@@ -214,8 +214,11 @@ The disconnect lease is the connection mutation fence from provider revoke
 dispatch through the terminal transaction once the second web source release
 activates claims. The first release deploys its additive columns and all
 lease-aware writer guards while production disconnect remains on the compatible
-lease-less path; only after that exact alias is verified and the prior-function
-window drains may a separate source release activate claims. The first release
+lease-less path. A later release must deploy activation-capable code with a
+shared runtime gate disabled, verify that exact alias, drain lease-less
+invocations for at least 300 seconds, and only then enable claims without an
+alias change. Rollback disables the gate and drains active claimants before
+moving the alias. The first release
 is a prerequisite guard release, not the lease-activation release, and becomes
 the web rollback floor while any non-null lease evidence can exist. A
 credential-bearing runtime snapshot treats any disconnect evidence as a
@@ -241,7 +244,7 @@ the user-critical flow stays available. A later activation release must first
 add trusted later-turn member approval bound to the member, action, connection,
 shown connection epoch, and whole Junction source scope, plus a canonical
 pending/ambiguous failure envelope and one bounded no-provider-replay recovery.
-Only then may web activate claims before a later Cloudflare/runner release
+Only then may web activate claims through the shared runtime gate before a later Cloudflare/runner release
 exposes hosted disconnect.
 
 ## Runtime access strategy

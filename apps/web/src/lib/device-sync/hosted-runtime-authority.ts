@@ -604,7 +604,7 @@ function buildHostedRuntimeConnectionSnapshot(
       });
   const storedTokenBundle = buildStoredTokenBundle(storedAccount);
   const executionFencedByDisconnectLease = options.includeCredentialMaterial && (
-    normalizeNullableString(record.disconnectLeaseOwner) !== null
+    record.disconnectLeaseOwner !== null
     || record.disconnectLeaseExpiresAt !== null
   );
   const withholdRuntimeTokenMaterial = shouldWithholdHostedRuntimeTokenMaterial({

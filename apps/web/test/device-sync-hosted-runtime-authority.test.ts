@@ -2334,6 +2334,37 @@ describe("applyHostedDeviceSyncRuntimeResult", () => {
     expect(JSON.stringify(response)).not.toContain("stored-refresh-token");
   });
 
+  it.each(["", "   "])(
+    "fences credential-bearing snapshots for raw malformed disconnect owner %j",
+    async (disconnectLeaseOwner) => {
+      const harness = createAuthorityHarness({
+        record: buildHostedRecord({
+          disconnectLeaseExpiresAt: null,
+          disconnectLeaseOwner,
+        }),
+      });
+      const { readHostedDeviceSyncRuntimeState } = await import(
+        "@/src/lib/device-sync/hosted-runtime-authority"
+      );
+      harness.store.prisma.deviceConnection.findMany.mockResolvedValue([harness.record]);
+
+      const response = await readHostedDeviceSyncRuntimeState({
+        request: new Request("https://example.test/device-sync/runtime/snapshot", {
+          body: JSON.stringify({ includeCredentialMaterial: true, userId: "user_123" }),
+          method: "POST",
+        }),
+        trustedUserId: "user_123",
+      });
+
+      expect(response.connections[0]).toMatchObject({
+        connection: { status: "disconnected" },
+        credential: { kind: "none" },
+      });
+      expect(JSON.stringify(response)).not.toContain("stored-access-token");
+      expect(JSON.stringify(response)).not.toContain("stored-refresh-token");
+    },
+  );
+
   it("fences provider-config execution snapshots while disconnect evidence remains", async () => {
     const record = buildHostedRecord({
       credentialKind: "provider_config",

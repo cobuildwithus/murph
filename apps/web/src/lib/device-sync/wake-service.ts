@@ -192,7 +192,7 @@ export async function disconnectHostedDeviceSyncConnection(input: {
   const existing = target.connection;
   const storedAccount = target.storedAccount;
 
-  if (existing.status === "disconnected" && !storedAccount) {
+  if (existing.status === "disconnected" && !storedAccount && !target.disconnectLeaseOwner) {
     const warning = readPersistedDisconnectWarning(existing);
     return {
       connection: existing,
@@ -255,6 +255,14 @@ export async function disconnectHostedDeviceSyncConnection(input: {
       input.connectionId,
       tx,
     );
+    const freshConnectionRecord = await input.store.getConnectionRecordForUser(
+      input.userId,
+      input.connectionId,
+      tx,
+    );
+    if (!freshConnectionRecord) {
+      connectionChangedDuringDisconnectError();
+    }
 
     if (
       target.disconnectLeaseOwner
@@ -265,6 +273,15 @@ export async function disconnectHostedDeviceSyncConnection(input: {
         tx,
         userId: input.userId,
       }))
+    ) {
+      connectionChangedDuringDisconnectError();
+    }
+    if (
+      !target.disconnectLeaseOwner
+      && (
+        freshConnectionRecord.disconnectLeaseOwner !== null
+        || freshConnectionRecord.disconnectLeaseExpiresAt !== null
+      )
     ) {
       connectionChangedDuringDisconnectError();
     }

@@ -152,7 +152,38 @@ export class PrismaHostedConnectionStore {
     const setupWrite = buildHostedConnectionSetupWrite(input, connectedAt, "create");
 
     const result = await this.prisma.$transaction(async (tx) => {
-      let existing = await tx.deviceConnection.findUnique({
+      if (ownerId) {
+        await tx.$executeRaw`select pg_advisory_xact_lock(hashtext(${`device-sync-owner-provider:${ownerId}:${input.provider}`}))`;
+      }
+
+      const guard = input.existingAccountGuard ?? null;
+      let guardedOwnerProvider: HostedConnectionRecord | null = null;
+      if (guard && ownerId) {
+        guardedOwnerProvider = "expectedAbsent" in guard
+          ? await tx.deviceConnection.findFirst({
+              where: { provider: input.provider, userId: ownerId },
+              orderBy: [{ updatedAt: "desc" }, { id: "desc" }],
+              ...hostedConnectionRecordArgs,
+            })
+          : await tx.deviceConnection.findUnique({
+              where: {
+                id: guard.expectedAccountId,
+              },
+              ...hostedConnectionRecordArgs,
+            });
+        if (
+          guardedOwnerProvider
+          && (
+            guardedOwnerProvider.provider !== input.provider
+            || guardedOwnerProvider.userId !== ownerId
+          )
+        ) {
+          guardedOwnerProvider = null;
+        }
+        assertHostedUpsertExistingConnectionGuard(guardedOwnerProvider, guard);
+      }
+
+      const externalIdentityAccount = await tx.deviceConnection.findUnique({
         where: {
           provider_providerAccountBlindIndex: {
             provider: input.provider,
@@ -161,18 +192,36 @@ export class PrismaHostedConnectionStore {
         },
         ...hostedConnectionRecordArgs,
       });
+      if (
+        guardedOwnerProvider
+        && externalIdentityAccount
+        && externalIdentityAccount.id !== guardedOwnerProvider.id
+      ) {
+        throw deviceSyncError({
+          code: "CONNECTION_OWNERSHIP_CONFLICT",
+          message: "This provider account is already connected to a different Murph user.",
+          retryable: false,
+          httpStatus: 409,
+        });
+      }
+      let existing = guardedOwnerProvider ?? externalIdentityAccount;
 
       if (existing) {
         await tx.$executeRaw`select pg_advisory_xact_lock(hashtext(${existing.id}))`;
-        existing = await tx.deviceConnection.findUnique({
-          where: {
-            provider_providerAccountBlindIndex: {
-              provider: input.provider,
-              providerAccountBlindIndex,
-            },
-          },
-          ...hostedConnectionRecordArgs,
-        });
+        existing = guardedOwnerProvider
+          ? await tx.deviceConnection.findUnique({
+              where: { id: guardedOwnerProvider.id },
+              ...hostedConnectionRecordArgs,
+            })
+          : await tx.deviceConnection.findUnique({
+              where: {
+                provider_providerAccountBlindIndex: {
+                  provider: input.provider,
+                  providerAccountBlindIndex,
+                },
+              },
+              ...hostedConnectionRecordArgs,
+            });
       }
 
       if (existing) {
@@ -185,7 +234,7 @@ export class PrismaHostedConnectionStore {
           });
         }
 
-        assertHostedUpsertExistingConnectionGuard(existing, input.existingAccountGuard ?? null);
+        assertHostedUpsertExistingConnectionGuard(existing, guard);
 
         assertNoHostedConnectionDisconnectLease(existing);
 
@@ -263,7 +312,7 @@ export class PrismaHostedConnectionStore {
         };
       }
 
-      assertHostedUpsertExistingConnectionGuard(null, input.existingAccountGuard ?? null);
+      assertHostedUpsertExistingConnectionGuard(null, guard);
 
       if (!ownerId) {
         throw deviceSyncError({

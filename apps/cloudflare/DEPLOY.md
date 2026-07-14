@@ -46,8 +46,11 @@ Do not expose hosted disconnect or activate lease claims in this rollout. A
 later activation must first add trusted later-turn approval bound to the exact
 member, action, connection epoch, and whole Junction scope, plus canonical
 pending/ambiguous effect propagation and one bounded no-provider-replay
-recovery. Then deploy and verify a separate web activation release before any
-new Cloudflare/runner bundle can request hosted disconnect.
+recovery. Then deploy activation-capable web code with its shared runtime gate
+disabled, verify the exact alias, drain lease-less invocations for at least 300
+seconds, and enable the gate without another alias change before any new
+Cloudflare/runner bundle can request hosted disconnect. For rollback, disable
+the gate and drain active claimants before moving the web alias.
 
 Old runner bundles do not call the additive web route, so gradual container
 rollout remains safe after the first web release. During rollback, roll back
