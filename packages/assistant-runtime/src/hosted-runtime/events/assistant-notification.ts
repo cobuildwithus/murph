@@ -257,7 +257,7 @@ function wasAssistantNotificationSupersededByPriorFirstContact(
   return result?.decision.kind === "skip";
 }
 
-function buildOnboardingFollowupAutomationRoute(
+export function buildOnboardingFollowupAutomationRoute(
   route: HostedExecutionAssistantNotificationRoute,
 ): AutomationRoute {
   const delivery = route.delivery;
@@ -269,6 +269,19 @@ function buildOnboardingFollowupAutomationRoute(
       identityId: route.identityId,
       participantId: delivery.kind === "participant" ? delivery.target : null,
       threadId: null,
+      threadIsDirect: route.threadIsDirect,
+    };
+  }
+
+  if (route.channel === "telegram" && delivery.kind === "thread") {
+    return {
+      channel: route.channel,
+      currentRouteSnapshot: true,
+      deliverySource: delivery.source ?? null,
+      deliveryTarget: delivery.target,
+      identityId: route.identityId,
+      participantId: null,
+      threadId: route.threadId,
       threadIsDirect: route.threadIsDirect,
     };
   }

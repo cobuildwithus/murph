@@ -16,6 +16,15 @@ import {
 } from "@/src/lib/hosted-onboarding/member-private-codecs";
 import { encryptHostedWebNullableString } from "@/src/lib/hosted-web/encryption";
 
+const channelSyncMocks = vi.hoisted(() => ({
+  enqueueHostedMemberChannelsUpdatedForActiveMemberTx: vi.fn().mockResolvedValue(null),
+}));
+
+vi.mock("@/src/lib/hosted-onboarding/member-channel-sync", () => ({
+  enqueueHostedMemberChannelsUpdatedForActiveMemberTx:
+    channelSyncMocks.enqueueHostedMemberChannelsUpdatedForActiveMemberTx,
+}));
+
 vi.mock("@/src/lib/hosted-onboarding/runtime", () => ({
   getHostedOnboardingEnvironment: () => ({
     contactPrivacyKeyring: {
@@ -1052,14 +1061,19 @@ describe("completeHostedPrivyVerification", () => {
 
   it.each([
     {
-      authorization: undefined,
+      authorization: { status: "not_attempted" as const },
       expectedTelegramThreadId: "456:bot:123456",
       scenario: "preserves direct authority when production was not attempted",
     },
     {
-      authorization: null,
+      authorization: { status: "unavailable" as const },
+      expectedTelegramThreadId: "456:bot:123456",
+      scenario: "preserves direct authority when the probe is temporarily unavailable",
+    },
+    {
+      authorization: { status: "denied" as const },
       expectedTelegramThreadId: null,
-      scenario: "clears stale direct authority after an attempted probe is rejected",
+      scenario: "clears stale direct authority after a definitive probe denial",
     },
   ])("$scenario through the Privy service", async ({
     authorization,
@@ -1136,9 +1150,7 @@ describe("completeHostedPrivyVerification", () => {
       }),
       now: NOW,
       prisma,
-      ...(authorization === undefined
-        ? {}
-        : { telegramDirectAuthorization: authorization }),
+      telegramDirectAuthorization: authorization,
     });
 
     await expect(readHostedMemberRoutingTelegramPrivateState({
@@ -1151,6 +1163,14 @@ describe("completeHostedPrivyVerification", () => {
       telegramThreadId: expectedTelegramThreadId,
       telegramUserId: "456",
     });
+    expect(channelSyncMocks.enqueueHostedMemberChannelsUpdatedForActiveMemberTx)
+      .toHaveBeenCalledWith({
+        linkedAccounts: undefined,
+        memberId: existingMember.id,
+        occurredAt: NOW.toISOString(),
+        prisma,
+        sourceType: "hosted.privy.telegram.sync",
+      });
   });
 
   it("fails closed when Telegram auth resolves to multiple members across blind-index read candidates", async () => {
@@ -1331,6 +1351,7 @@ describe("completeHostedPrivyVerification", () => {
         now: NOW,
         prisma,
         telegramDirectAuthorization: {
+          status: "authorized",
           telegramThreadId: "456:bot:123456",
           telegramUserId: "456",
         },
@@ -1412,6 +1433,7 @@ describe("completeHostedPrivyVerification", () => {
         now: NOW,
         prisma,
         telegramDirectAuthorization: {
+          status: "authorized",
           telegramThreadId: "456:bot:123456",
           telegramUserId: "456",
         },
@@ -1882,6 +1904,61 @@ describe("completeHostedPrivyVerification", () => {
         walletAddressLookupKey: expect.anything(),
       }),
     }));
+  });
+
+  it("publishes a successfully linked secondary Telegram route in the Privy transaction", async () => {
+    const phoneMember = makeMember({ id: "member_phone_secondary_telegram" });
+    const activeInvite = makeInvite(phoneMember, {
+      channel: "web",
+      id: "invite_phone_secondary_telegram_success",
+      inviteCode: "invite-phone-secondary-telegram-success",
+      memberId: phoneMember.id,
+    });
+    const prisma = asCompleteHostedPrivyVerificationPrisma({
+      hostedInvite: {
+        create: vi.fn().mockResolvedValue(activeInvite),
+        findFirst: vi.fn().mockResolvedValue(null),
+        update: vi.fn(),
+      },
+      hostedMember: {
+        create: vi.fn(),
+        findUnique: vi.fn().mockImplementation(async ({ where }: { where: Record<string, unknown> }) => (
+          where.id === phoneMember.id || where.phoneLookupKey ? phoneMember : null
+        )),
+      },
+    });
+
+    await completeHostedPrivyVerification({
+      authMethod: "phone",
+      identity: makeIdentity({
+        telegram: {
+          firstName: "Alice",
+          lastName: null,
+          photoUrl: null,
+          telegramUserId: "456",
+          username: "alice",
+        },
+      }),
+      now: NOW,
+      prisma,
+    });
+
+    expect(prisma.hostedMemberRouting.upsert).toHaveBeenCalled();
+    expect(channelSyncMocks.enqueueHostedMemberChannelsUpdatedForActiveMemberTx)
+      .toHaveBeenCalledWith({
+        linkedAccounts: undefined,
+        memberId: phoneMember.id,
+        occurredAt: NOW.toISOString(),
+        prisma,
+        sourceType: "hosted.privy.telegram.sync",
+      });
+    expect(
+      prisma.hostedMemberRouting.upsert.mock.invocationCallOrder[0]
+        ?? Number.POSITIVE_INFINITY,
+    ).toBeLessThan(
+      channelSyncMocks.enqueueHostedMemberChannelsUpdatedForActiveMemberTx
+        .mock.invocationCallOrder[0] ?? Number.POSITIVE_INFINITY,
+    );
   });
 
   it("does not block phone auth when a linked Telegram route belongs to another member", async () => {

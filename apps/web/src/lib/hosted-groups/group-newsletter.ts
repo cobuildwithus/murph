@@ -3,6 +3,7 @@ import "server-only";
 import type { PrismaClient } from "@prisma/client";
 import {
   buildHostedExecutionGroupNewsletterEmailNeededWake,
+  type HostedExecutionAssistantNotificationRoute,
 } from "@murphai/hosted-execution";
 import { normalizeHostedEmailAddress } from "@murphai/runtime-state";
 
@@ -13,8 +14,13 @@ import {
 } from "../hosted-onboarding/hosted-member-store";
 import {
   readHostedMemberRoutingState,
-  type HostedMemberRoutingStateSnapshot,
 } from "../hosted-onboarding/hosted-member-routing-store";
+import { readHostedMemberIdentity } from "../hosted-onboarding/hosted-member-identity-store";
+import { readHostedLinqHomeLineAuthority } from "../hosted-onboarding/linq-home-routing";
+import {
+  resolveHostedMemberAssistantNotificationRoute,
+  resolveHostedMemberMessagingState,
+} from "../hosted-onboarding/messaging-state";
 import { readActiveHostedMemberAccess } from "../hosted-onboarding/member-access";
 import { signalHostedMailboxAppendRuntime } from "../hosted-orchestration/signal-runtime";
 import { getPrisma } from "../prisma";
@@ -42,11 +48,6 @@ export type HostedGroupNewsletterPreparationResult =
     };
 
 type ReadClient = PrismaClient;
-
-interface HostedGroupNewsletterDirectNudgeRoute {
-  channel: "linq" | "telegram";
-  threadId: string;
-}
 
 export async function enqueueHostedGroupNewsletterEmailNeededNudgeIfNeededBestEffort(input: {
   groupId: string;
@@ -338,31 +339,47 @@ async function appendGroupNewsletterEmailNeededWakeBestEffort(input: {
 async function readHostedMemberDirectNewsletterNudgeRoute(input: {
   memberId: string;
   prisma: ReadClient;
-}): Promise<HostedGroupNewsletterDirectNudgeRoute | null> {
-  const routing = await readHostedMemberRoutingState({
-    memberId: input.memberId,
-    prisma: input.prisma,
-  });
-
-  return readEstablishedDirectNewsletterNudgeRoute(routing);
-}
-
-function readEstablishedDirectNewsletterNudgeRoute(
-  routing: HostedMemberRoutingStateSnapshot | null,
-): HostedGroupNewsletterDirectNudgeRoute | null {
-  const linqThreadId = normalizeHostedRouteId(routing?.linqChatId);
-  if (linqThreadId) {
-    return { channel: "linq", threadId: linqThreadId };
-  }
-  const telegramThreadId = normalizeHostedRouteId(routing?.telegramThreadId);
-  return telegramThreadId
-    ? { channel: "telegram", threadId: telegramThreadId }
+}): Promise<HostedExecutionAssistantNotificationRoute | null> {
+  const [identity, routing] = await Promise.all([
+    readHostedMemberIdentity({
+      memberId: input.memberId,
+      prisma: input.prisma,
+    }),
+    readHostedMemberRoutingState({
+      memberId: input.memberId,
+      prisma: input.prisma,
+    }),
+  ]);
+  const linqAuthority = readHostedLinqHomeLineAuthority(routing);
+  const linqContactLookupKey = linqAuthority.kind === "home"
+    ? linqAuthority.participantContact?.lookupKey ?? identity?.phoneLookupKey ?? null
     : null;
-}
+  const linqRoute = linqAuthority.kind === "home" && linqContactLookupKey
+    ? {
+        chatId: linqAuthority.chatId,
+        contactLookupKey: linqContactLookupKey,
+      }
+    : null;
 
-function normalizeHostedRouteId(value: string | null | undefined): string | null {
-  const normalized = typeof value === "string" ? value.trim() : "";
-  return normalized.length > 0 ? normalized : null;
+  return resolveHostedMemberAssistantNotificationRoute({
+    linqChatId: linqRoute?.chatId ?? null,
+    linqContactLookupKey: linqRoute?.contactLookupKey ?? null,
+    linqRecipientPhone: null,
+    memberId: input.memberId,
+    memberPhoneNumber: identity?.phoneNumber ?? null,
+    messaging: resolveHostedMemberMessagingState({
+      identity: {
+        phoneLookupKey: identity?.phoneLookupKey ?? null,
+      },
+      routing: {
+        linqChatId: routing?.linqChatId ?? null,
+        pendingLinqChatId: routing?.pendingLinqChatId ?? null,
+        pendingLinqParticipantContact: routing?.pendingLinqParticipantContact ?? null,
+        telegramThreadId: routing?.telegramThreadId ?? null,
+        telegramUserId: routing?.telegramUserId ?? null,
+      },
+    }),
+  });
 }
 
 function buildGroupNewsletterEmailNeededEventId(input: {

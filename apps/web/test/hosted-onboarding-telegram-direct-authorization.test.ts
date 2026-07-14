@@ -18,7 +18,7 @@ describe("hosted Telegram direct authorization", () => {
         telegramUserId: "987654",
       },
       { controlClient: { authorizeTelegramDirectMessage }, env: {} },
-    )).resolves.toBeUndefined();
+    )).resolves.toEqual({ status: "not_attempted" });
     expect(authorizeTelegramDirectMessage).not.toHaveBeenCalled();
   });
 
@@ -35,6 +35,7 @@ describe("hosted Telegram direct authorization", () => {
       },
       { controlClient: { authorizeTelegramDirectMessage }, env: PRODUCER_ENABLED_ENV },
     )).resolves.toEqual({
+      status: "authorized",
       telegramThreadId: "987654:bot:123456",
       telegramUserId: "987654",
     });
@@ -55,7 +56,21 @@ describe("hosted Telegram direct authorization", () => {
         telegramUserId: "987654",
       },
       { controlClient: { authorizeTelegramDirectMessage }, env: PRODUCER_ENABLED_ENV },
-    )).resolves.toBeNull();
+    )).resolves.toEqual({ status: "unavailable" });
+  });
+
+  it("keeps definitive provider denial distinct from temporary unavailability", async () => {
+    const authorizeTelegramDirectMessage = vi.fn().mockResolvedValue({
+      status: "denied",
+    });
+
+    await expect(verifyHostedTelegramDirectAuthorization(
+      {
+        authorizationUserId: "member_123",
+        telegramUserId: "987654",
+      },
+      { controlClient: { authorizeTelegramDirectMessage }, env: PRODUCER_ENABLED_ENV },
+    )).resolves.toEqual({ status: "denied" });
   });
 
   it("fails closed when an authorized response lacks a valid bot identity", async () => {
@@ -70,7 +85,7 @@ describe("hosted Telegram direct authorization", () => {
         telegramUserId: "987654",
       },
       { controlClient: { authorizeTelegramDirectMessage }, env: PRODUCER_ENABLED_ENV },
-    )).resolves.toBeNull();
+    )).resolves.toEqual({ status: "unavailable" });
   });
 
   it("fails closed when the Worker control request fails", async () => {
@@ -84,7 +99,7 @@ describe("hosted Telegram direct authorization", () => {
         telegramUserId: "987654",
       },
       { controlClient: { authorizeTelegramDirectMessage }, env: PRODUCER_ENABLED_ENV },
-    )).resolves.toBeNull();
+    )).resolves.toEqual({ status: "unavailable" });
   });
 
   it("fails closed before control access for malformed identities or missing configuration", async () => {
@@ -96,21 +111,21 @@ describe("hosted Telegram direct authorization", () => {
         telegramUserId: "not-numeric",
       },
       { controlClient: { authorizeTelegramDirectMessage }, env: PRODUCER_ENABLED_ENV },
-    )).resolves.toBeNull();
+    )).resolves.toEqual({ status: "unavailable" });
     await expect(verifyHostedTelegramDirectAuthorization(
       {
         authorizationUserId: " ",
         telegramUserId: "987654",
       },
       { controlClient: { authorizeTelegramDirectMessage }, env: PRODUCER_ENABLED_ENV },
-    )).resolves.toBeNull();
+    )).resolves.toEqual({ status: "unavailable" });
     await expect(verifyHostedTelegramDirectAuthorization(
       {
         authorizationUserId: "member_123",
         telegramUserId: "987654",
       },
       { controlClient: null, env: PRODUCER_ENABLED_ENV },
-    )).resolves.toBeNull();
+    )).resolves.toEqual({ status: "unavailable" });
     expect(authorizeTelegramDirectMessage).not.toHaveBeenCalled();
   });
 });

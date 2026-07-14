@@ -104,24 +104,28 @@ function readGroupNewsletterWakeDirectAssistantRoute(
   if (!channel || !DELIVERY_CHANNELS.includes(channel)) {
     return null;
   }
-  const threadId = normalizeAssistantRouteString(wake.directRoute?.threadId);
-  if (!threadId) {
+  const route = wake.directRoute;
+  if (route?.threadIsDirect !== true || route.delivery.kind !== "thread") {
+    return null;
+  }
+  const deliveryTarget = normalizeAssistantRouteString(route.delivery.target);
+  if (!deliveryTarget) {
     return null;
   }
 
   return {
     conversation: {
-      accountId: null,
-      actorId: null,
+      accountId: normalizeAssistantRouteString(route.identityId),
+      actorId: normalizeAssistantRouteString(route.actorId),
       actorIsSelf: false,
       source: channel,
-      threadId,
+      threadId: normalizeAssistantRouteString(route.threadId),
       threadIsDirect: true,
     },
     replyTarget: {
       channel,
       messageId: null,
-      threadId,
+      threadId: deliveryTarget,
     },
   };
 }

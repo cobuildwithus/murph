@@ -290,10 +290,16 @@ describe("worker Telegram direct authorization route", () => {
     );
   });
 
-  it("fails closed when Telegram rejects the write probe", async () => {
-    mocks.sendHostedProviderTelegramChatAction.mockRejectedValueOnce(
-      new Error("Telegram rejected the write"),
-    );
+  it.each([
+    ["transport failure", new Error("Telegram transport unavailable")],
+    ["rate limit", Object.assign(new Error("Telegram rate limited"), {
+      context: { status: 429 },
+    })],
+    ["provider outage", Object.assign(new Error("Telegram unavailable"), {
+      context: { status: 503 },
+    })],
+  ])("returns unavailable for transient direct-authorization %s", async (_scenario, error) => {
+    mocks.sendHostedProviderTelegramChatAction.mockRejectedValueOnce(error);
 
     const response = await handleTelegramDirectAuthorizationRoute(
       createRouteContext({ telegramUserId: "987654" }),
@@ -302,6 +308,34 @@ describe("worker Telegram direct authorization route", () => {
 
     expect(response.status).toBe(200);
     await expect(response.json()).resolves.toEqual({ status: "unavailable" });
+  });
+
+  it("returns denied only for a definitive provider rejection", async () => {
+    mocks.sendHostedProviderTelegramChatAction.mockRejectedValueOnce(
+      Object.assign(new Error("Telegram rejected the recipient"), {
+        context: { status: 403 },
+      }),
+    );
+
+    const response = await handleTelegramDirectAuthorizationRoute(
+      createRouteContext({ telegramUserId: "987654" }),
+      "member_123",
+    );
+
+    expect(response.status).toBe(200);
+    await expect(response.json()).resolves.toEqual({ status: "denied" });
+  });
+
+  it("returns unavailable without probing when the Worker bot is not configured", async () => {
+    const context = createRouteContext({ telegramUserId: "987654" });
+    const response = await handleTelegramDirectAuthorizationRoute(
+      { ...context, env: {} } as never,
+      "member_123",
+    );
+
+    expect(response.status).toBe(200);
+    await expect(response.json()).resolves.toEqual({ status: "unavailable" });
+    expect(mocks.sendHostedProviderTelegramChatAction).not.toHaveBeenCalled();
   });
 
   it("rejects malformed direct-authorization bodies", async () => {

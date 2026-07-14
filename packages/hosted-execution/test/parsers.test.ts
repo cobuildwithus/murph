@@ -93,6 +93,17 @@ describe("parseHostedExecutionEvent", () => {
   it("parses explicit member channel sync events", () => {
     expect(
       parseHostedExecutionEvent({
+        assistantNotificationRoute: {
+          actorId: null,
+          channel: "telegram",
+          delivery: {
+            kind: "thread",
+            target: "789:bot:123456",
+          },
+          identityId: null,
+          threadId: "hid_telegram_thread_789",
+          threadIsDirect: true,
+        },
         kind: "member.channels.updated",
         memberChannels: {
           email: true,
@@ -102,12 +113,95 @@ describe("parseHostedExecutionEvent", () => {
         userId: "user-1",
       }),
     ).toEqual({
+      assistantNotificationRoute: {
+        actorId: null,
+        channel: "telegram",
+        delivery: {
+          kind: "thread",
+          target: "789:bot:123456",
+        },
+        identityId: null,
+        threadId: "hid_telegram_thread_789",
+        threadIsDirect: true,
+      },
       kind: "member.channels.updated",
       memberChannels: {
         email: true,
         linq: false,
         telegram: true,
       },
+      userId: "user-1",
+    });
+  });
+
+  it("preserves explicit member channel route revocation", () => {
+    expect(
+      parseHostedExecutionEvent({
+        assistantNotificationRoute: null,
+        kind: "member.channels.updated",
+        memberChannels: {
+          email: true,
+          linq: false,
+          telegram: false,
+        },
+        userId: "user-1",
+      }),
+    ).toEqual({
+      assistantNotificationRoute: null,
+      kind: "member.channels.updated",
+      memberChannels: {
+        email: true,
+        linq: false,
+        telegram: false,
+      },
+      userId: "user-1",
+    });
+  });
+
+  it.each([
+    {
+      assistantNotificationRoute: {
+        actorId: null,
+        channel: "telegram" as const,
+        delivery: {
+          kind: "thread" as const,
+          target: "789:bot:123456",
+        },
+        identityId: null,
+        threadId: "hid_telegram_thread_789",
+        threadIsDirect: true,
+      },
+      telegram: true,
+    },
+    {
+      assistantNotificationRoute: null,
+      telegram: false,
+    },
+  ])("preserves member channel route publication in mailbox wakes", ({
+    assistantNotificationRoute,
+    telegram,
+  }) => {
+    expect(parseHostedExecutionWake({
+      assistantNotificationRoute,
+      eventId: "member.channels.updated:member_1:route",
+      kind: "member.channels.updated",
+      memberChannels: {
+        email: true,
+        linq: false,
+        telegram,
+      },
+      occurredAt: "2026-04-08T00:16:00.000Z",
+      userId: "user-1",
+    })).toEqual({
+      assistantNotificationRoute,
+      eventId: "member.channels.updated:member_1:route",
+      kind: "member.channels.updated",
+      memberChannels: {
+        email: true,
+        linq: false,
+        telegram,
+      },
+      occurredAt: "2026-04-08T00:16:00.000Z",
       userId: "user-1",
     });
   });
@@ -437,22 +531,38 @@ describe("parseHostedExecutionEvent", () => {
   });
 
   it("parses group newsletter email-needed events and wakes", () => {
+    const linqRoute = {
+      actorId: "hid_linq_actor_123",
+      channel: "linq",
+      delivery: { kind: "thread", target: "linq_home_thread_123" },
+      identityId: "hid_linq_identity_123",
+      threadId: "hid_linq_thread_123",
+      threadIsDirect: true,
+    } as const;
     expect(parseHostedExecutionEvent({
-      directRoute: { channel: "linq", threadId: "linq_home_thread_123" },
+      directRoute: linqRoute,
       groupDisplayName: "Tempo Crew",
       groupId: "hgrp_123",
       kind: "group-newsletter.email-needed",
       userId: "member_123",
     })).toEqual({
-      directRoute: { channel: "linq", threadId: "linq_home_thread_123" },
+      directRoute: linqRoute,
       groupDisplayName: "Tempo Crew",
       groupId: "hgrp_123",
       kind: "group-newsletter.email-needed",
       userId: "member_123",
     });
 
+    const telegramRoute = {
+      actorId: null,
+      channel: "telegram",
+      delivery: { kind: "thread", target: "456:bot:123456" },
+      identityId: null,
+      threadId: "hid_telegram_thread_123",
+      threadIsDirect: true,
+    } as const;
     expect(parseHostedExecutionWake({
-      directRoute: { channel: "telegram", threadId: "telegram_thread_123" },
+      directRoute: telegramRoute,
       eventId: "group-newsletter.email-needed:member_123:hgrp_123",
       groupDisplayName: "Tempo Crew",
       groupId: "hgrp_123",
@@ -460,13 +570,28 @@ describe("parseHostedExecutionEvent", () => {
       occurredAt: "2026-04-26T00:00:00.000Z",
       userId: "member_123",
     })).toEqual({
-      directRoute: { channel: "telegram", threadId: "telegram_thread_123" },
+      directRoute: telegramRoute,
       eventId: "group-newsletter.email-needed:member_123:hgrp_123",
       groupDisplayName: "Tempo Crew",
       groupId: "hgrp_123",
       kind: "group-newsletter.email-needed",
       occurredAt: "2026-04-26T00:00:00.000Z",
       userId: "member_123",
+    });
+
+    expect(parseHostedExecutionEvent({
+      directRoute: { channel: "linq", threadId: "linq_legacy_thread" },
+      groupDisplayName: null,
+      groupId: "hgrp_legacy",
+      kind: "group-newsletter.email-needed",
+      userId: "member_legacy",
+    })).toMatchObject({
+      directRoute: {
+        channel: "linq",
+        delivery: { kind: "thread", target: "linq_legacy_thread" },
+        threadId: "linq_legacy_thread",
+        threadIsDirect: true,
+      },
     });
   });
 

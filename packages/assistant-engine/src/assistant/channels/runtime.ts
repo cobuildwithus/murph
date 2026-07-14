@@ -1,5 +1,6 @@
 import {
   HOSTED_TELEGRAM_BOT_ID_HEADER,
+  HOSTED_TELEGRAM_DELIVERY_TARGET_HEADER,
   HOSTED_TELEGRAM_BOT_PUBLIC_ID_ENV,
 } from '@murphai/contracts'
 import {
@@ -1629,6 +1630,7 @@ async function sendTelegramBotApiRequest(input: {
   baseUrl: string
   botId?: string | null
   body?: string | Blob | FormData
+  deliveryTarget?: string | null
   fetchImplementation: TelegramFetchImplementation
   operation: TelegramSendOperation
   payload?: Record<string, unknown>
@@ -1650,8 +1652,15 @@ async function sendTelegramBotApiRequest(input: {
         method: 'POST',
         headers: {
           ...(input.payload ? { 'content-type': 'application/json' } : {}),
+          ...(!resolveTelegramBotIdFromToken(input.token) && input.deliveryTarget
+            ? {
+                [HOSTED_TELEGRAM_DELIVERY_TARGET_HEADER]: input.deliveryTarget,
+              }
+            : {}),
           ...(input.botId && !resolveTelegramBotIdFromToken(input.token)
-            ? { [HOSTED_TELEGRAM_BOT_ID_HEADER]: input.botId }
+            ? {
+                [HOSTED_TELEGRAM_BOT_ID_HEADER]: input.botId,
+              }
             : {}),
         },
         body: input.body ?? (input.payload ? JSON.stringify(input.payload) : undefined),
@@ -1917,6 +1926,7 @@ async function sendTelegramTextChunkOnce(input: {
     const result = await sendTelegramBotApiRequest({
       baseUrl: input.baseUrl,
       botId: input.target.botId,
+      deliveryTarget: input.targetLabel,
       fetchImplementation: input.fetchImplementation,
       operation: 'sendMessage',
       payload: {
@@ -2007,6 +2017,7 @@ async function sendTelegramPhotoOnce(input: {
     const result = await sendTelegramBotApiRequest({
       baseUrl: input.baseUrl,
       botId: input.target.botId,
+      deliveryTarget: input.targetLabel,
       fetchImplementation: input.fetchImplementation,
       operation: 'sendPhoto',
       payload: {
@@ -2071,6 +2082,7 @@ async function sendTelegramVoiceMemoOnce(input: {
     const result = await sendTelegramBotApiRequest({
       baseUrl: input.baseUrl,
       botId: input.target.botId,
+      deliveryTarget: input.targetLabel,
       body: buildTelegramVoiceMemoFormData({
         bytes: input.bytes,
         contentType: input.contentType,

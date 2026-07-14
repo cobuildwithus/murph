@@ -46,6 +46,12 @@ export const MURPH_PRODUCT_ORIGIN = "https://www.withmurph.ai" as const;
  * The Cloudflare Worker strips it before forwarding the request to Telegram.
  */
 export const HOSTED_TELEGRAM_BOT_ID_HEADER = "x-hosted-telegram-bot-id" as const;
+/**
+ * Internal canonical target used to bind a bot-authorized provider request to
+ * the active member's current persisted route. The Worker strips it upstream.
+ */
+export const HOSTED_TELEGRAM_DELIVERY_TARGET_HEADER =
+  "x-hosted-telegram-delivery-target" as const;
 
 /**
  * Nonsecret public bot identity injected beside the hosted Telegram token

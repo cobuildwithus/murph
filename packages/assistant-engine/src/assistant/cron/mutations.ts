@@ -44,6 +44,9 @@ import {
   buildCanonicalAutomationRoute,
   validateAssistantCronDeliveryTarget,
 } from './targets.js'
+import {
+  MANAGED_ASSISTANT_CRON_AUTOMATION_ROUTE_AUTO_RESUME_TAG,
+} from './authoring.js'
 
 export type ResolvedAssistantCronJobMutation =
   | ResolvedLocalAssistantCronJobMutation
@@ -323,6 +326,14 @@ export async function setResolvedCanonicalAssistantCronSourceEnabled(input: {
         schedule: input.resolved.source.schedule,
         route,
         instructions: input.resolved.source.instructions,
+        ...(input.enabled
+          ? {}
+          : {
+              tags: input.resolved.source.tags.filter(
+                (tag) =>
+                  tag !== MANAGED_ASSISTANT_CRON_AUTOMATION_ROUTE_AUTO_RESUME_TAG,
+              ),
+            }),
       }),
     )
     source = requireCanonicalAssistantCronRecord(

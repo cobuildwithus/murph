@@ -78,7 +78,7 @@ describe("hosted onboarding Privy completion route", () => {
     mocks.readHostedConsentStatus.mockResolvedValue({
       launchGranted: false,
     });
-    mocks.verifyHostedTelegramDirectAuthorization.mockResolvedValue(null);
+    mocks.verifyHostedTelegramDirectAuthorization.mockResolvedValue({ status: "denied" });
     mocks.requirePrivyCompletionSession.mockResolvedValue({
       identity: {
         phone: {
@@ -286,6 +286,7 @@ describe("hosted onboarding Privy completion route", () => {
 
   it("passes the selected Telegram auth method and identity to completion", async () => {
     mocks.verifyHostedTelegramDirectAuthorization.mockResolvedValueOnce({
+      status: "authorized",
       telegramThreadId: "456:bot:123456",
       telegramUserId: "456",
     });
@@ -330,6 +331,7 @@ describe("hosted onboarding Privy completion route", () => {
         userId: "did:privy:user_telegram",
       }),
       telegramDirectAuthorization: {
+        status: "authorized",
         telegramThreadId: "456:bot:123456",
         telegramUserId: "456",
       },
@@ -367,12 +369,14 @@ describe("hosted onboarding Privy completion route", () => {
     ));
 
     expect(mocks.completeHostedPrivyVerification).toHaveBeenCalledWith(
-      expect.objectContaining({ telegramDirectAuthorization: null }),
+      expect.objectContaining({ telegramDirectAuthorization: { status: "denied" } }),
     );
   });
 
   it("omits direct authority when bot-bound target production is disabled", async () => {
-    mocks.verifyHostedTelegramDirectAuthorization.mockResolvedValueOnce(undefined);
+    mocks.verifyHostedTelegramDirectAuthorization.mockResolvedValueOnce({
+      status: "not_attempted",
+    });
     mocks.requirePrivyCompletionSession.mockResolvedValueOnce({
       identity: {
         phone: null,
@@ -399,7 +403,7 @@ describe("hosted onboarding Privy completion route", () => {
     ));
 
     expect(mocks.completeHostedPrivyVerification).toHaveBeenCalledWith(
-      expect.not.objectContaining({ telegramDirectAuthorization: expect.anything() }),
+      expect.objectContaining({ telegramDirectAuthorization: { status: "not_attempted" } }),
     );
   });
 

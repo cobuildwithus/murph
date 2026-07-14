@@ -3,6 +3,9 @@ import type {
   HostedExecutionWake,
 } from "@murphai/hosted-execution";
 import {
+  MURPH_ONBOARDING_FOLLOWUP_AUTOMATION,
+  MURPH_ONBOARDING_FOLLOWUP_AUTOMATION_TAG,
+  reconcileManagedAssistantCronAutomationRoute,
   scheduleDeviceActivityTriggeredAutomations,
   type AssistantExecutionContext,
 } from "@murphai/assistant-engine";
@@ -17,6 +20,7 @@ import {
 } from "./context.ts";
 import { createHostedAssistantTurnEnvironment } from "./environment.ts";
 import {
+  buildOnboardingFollowupAutomationRoute,
   executeHostedAssistantNotificationWake,
   executeHostedMemberActivatedWake,
 } from "./events/assistant-notification.ts";
@@ -176,11 +180,24 @@ async function executeHostedSystemWake(input: {
         }),
         vaultRoot: input.vaultRoot,
       });
-    case "member.channels.updated":
+    case "member.channels.updated": {
+      if (input.wake.assistantNotificationRoute !== undefined) {
+        await reconcileManagedAssistantCronAutomationRoute({
+          managedTag: MURPH_ONBOARDING_FOLLOWUP_AUTOMATION_TAG,
+          route: input.wake.assistantNotificationRoute === null
+            ? null
+            : buildOnboardingFollowupAutomationRoute(
+                input.wake.assistantNotificationRoute,
+              ),
+          slug: MURPH_ONBOARDING_FOLLOWUP_AUTOMATION.slug,
+          vault: input.vaultRoot,
+        });
+      }
       return createNoopMailboxEffect({
         conversationMetrics: null,
         mailboxLane: "member-channels-updated",
       });
+    }
     case "member.preferences.updated":
       await applyHostedMemberPreferences(
         input.vaultRoot,

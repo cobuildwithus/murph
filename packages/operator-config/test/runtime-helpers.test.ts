@@ -1,7 +1,10 @@
 import assert from 'node:assert/strict'
 
 import { afterEach, expect, test, vi } from 'vitest'
-import { HOSTED_TELEGRAM_BOT_ID_HEADER } from '@murphai/contracts'
+import {
+  HOSTED_TELEGRAM_BOT_ID_HEADER,
+  HOSTED_TELEGRAM_DELIVERY_TARGET_HEADER,
+} from '@murphai/contracts'
 
 import {
   resolveDeviceSyncBaseUrl,
@@ -364,6 +367,7 @@ test('deleteTelegramMessages batches ids and uses deleteMessages for non-busines
 test('deleteTelegramMessages batches ids and uses deleteBusinessMessages for business targets', async () => {
   const seenRequests: Array<{
     body: Record<string, unknown> | null
+    headers?: Record<string, string>
     url: string
   }> = []
   const fetchImplementation = vi.fn(async (url: string, init: {
@@ -376,6 +380,7 @@ test('deleteTelegramMessages batches ids and uses deleteBusinessMessages for bus
       body: typeof init.body === 'string'
         ? JSON.parse(init.body) as Record<string, unknown>
         : null,
+      headers: init.headers,
       url,
     })
     return createTelegramResponse({ ok: true })
@@ -384,12 +389,12 @@ test('deleteTelegramMessages batches ids and uses deleteBusinessMessages for bus
   await deleteTelegramMessages(
     {
       messageIds: Array.from({ length: 101 }, (_, index) => String(index + 1)),
-      target: '123:business:biz-123:topic:456',
+      target: '123:bot:654321:business:biz-123:topic:456',
     },
     {
       env: {
         TELEGRAM_API_BASE_URL: 'https://api.telegram.example',
-        TELEGRAM_BOT_TOKEN: 'bot-token',
+        TELEGRAM_BOT_TOKEN: '__cloudflare_injected__',
       },
       fetchImplementation,
     },
@@ -397,8 +402,13 @@ test('deleteTelegramMessages batches ids and uses deleteBusinessMessages for bus
 
   expect(fetchImplementation).toHaveBeenCalledTimes(2)
   expect(seenRequests[0]?.url).toBe(
-    'https://api.telegram.example/botbot-token/deleteBusinessMessages',
+    'https://api.telegram.example/bot__cloudflare_injected__/deleteBusinessMessages',
   )
+  expect(seenRequests[0]?.headers).toMatchObject({
+    [HOSTED_TELEGRAM_BOT_ID_HEADER]: '654321',
+    [HOSTED_TELEGRAM_DELIVERY_TARGET_HEADER]:
+      '123:bot:654321:business:biz-123:topic:456',
+  })
   expect(seenRequests[0]?.body).toMatchObject({
     business_connection_id: 'biz-123',
     message_ids: expect.any(Array),
@@ -406,7 +416,7 @@ test('deleteTelegramMessages batches ids and uses deleteBusinessMessages for bus
   expect(seenRequests[0]?.body).not.toHaveProperty('chat_id')
   expect((seenRequests[0]?.body?.message_ids as unknown[])?.length).toBe(100)
   expect(seenRequests[1]?.url).toBe(
-    'https://api.telegram.example/botbot-token/deleteBusinessMessages',
+    'https://api.telegram.example/bot__cloudflare_injected__/deleteBusinessMessages',
   )
   expect(seenRequests[1]?.body).toMatchObject({
     business_connection_id: 'biz-123',
@@ -928,6 +938,28 @@ test('startTelegramTypingSession defers bot validation for injected hosted crede
     expect.objectContaining({
       headers: expect.objectContaining({
         [HOSTED_TELEGRAM_BOT_ID_HEADER]: '654321',
+        [HOSTED_TELEGRAM_DELIVERY_TARGET_HEADER]: '123:bot:654321',
+      }),
+    }),
+  )
+})
+
+test('startTelegramTypingSession carries inbound-observed targets to hosted egress', async () => {
+  const fetchImplementation = vi.fn(async () => createTelegramResponse({ ok: true }))
+  const handle = await startTelegramTypingSession(
+    { target: '123:topic:9' },
+    {
+      env: { TELEGRAM_BOT_TOKEN: '__cloudflare_injected__' },
+      fetchImplementation,
+    },
+  )
+  await handle.stop()
+
+  expect(fetchImplementation).toHaveBeenCalledWith(
+    'https://api.telegram.org/bot__cloudflare_injected__/sendChatAction',
+    expect.objectContaining({
+      headers: expect.objectContaining({
+        [HOSTED_TELEGRAM_DELIVERY_TARGET_HEADER]: '123:topic:9',
       }),
     }),
   )
@@ -956,6 +988,7 @@ test('startTelegramTypingSession keeps the internal bot constraint off direct pr
 
   const headers = fetchImplementation.mock.calls[0]?.[1]?.headers
   expect(headers).not.toHaveProperty(HOSTED_TELEGRAM_BOT_ID_HEADER)
+  expect(headers).not.toHaveProperty(HOSTED_TELEGRAM_DELIVERY_TARGET_HEADER)
 })
 
 test('startTelegramTypingSession aborts instead of resolving a handle when the initial Telegram request is cancelled', async () => {

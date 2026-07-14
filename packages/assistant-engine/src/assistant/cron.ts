@@ -59,10 +59,13 @@ import type { AssistantExecutionContext } from './execution-context.ts'
 import {
   addAssistantCronJob,
   installAssistantCronPreset,
+  MANAGED_ASSISTANT_CRON_AUTOMATION_ROUTE_SUSPENDED_TAG,
+  reconcileManagedAssistantCronAutomationRoute,
   upsertAssistantCronAutomation,
   type AddAssistantCronJobInput,
   type InstallAssistantCronPresetInput,
   type InstallAssistantCronPresetResult,
+  type ReconcileManagedAssistantCronAutomationRouteInput,
   type UpsertAssistantCronAutomationInput,
 } from './cron/authoring.ts'
 import {
@@ -95,11 +98,17 @@ export {
   reconcileAssistantCronDeliveryIntent,
   repairPendingAssistantCronDeliveries,
 }
-export { addAssistantCronJob, installAssistantCronPreset, upsertAssistantCronAutomation }
+export {
+  addAssistantCronJob,
+  installAssistantCronPreset,
+  reconcileManagedAssistantCronAutomationRoute,
+  upsertAssistantCronAutomation,
+}
 export type {
   AddAssistantCronJobInput,
   InstallAssistantCronPresetInput,
   InstallAssistantCronPresetResult,
+  ReconcileManagedAssistantCronAutomationRouteInput,
   UpsertAssistantCronAutomationInput,
 }
 
@@ -290,6 +299,19 @@ export async function setAssistantCronJobEnabled(
       paths,
       vault,
     })
+    if (
+      enabled
+      && resolved.kind === 'canonical'
+      && resolved.source.kind === 'automation'
+      && resolved.source.tags.includes(
+        MANAGED_ASSISTANT_CRON_AUTOMATION_ROUTE_SUSPENDED_TAG,
+      )
+    ) {
+      throw new VaultCliError(
+        'ASSISTANT_CRON_DELIVERY_REQUIRED',
+        `Assistant cron job "${resolved.job.name}" cannot resume until its managed delivery route is restored.`,
+      )
+    }
     if (resolved.job.state.pendingDeliveryIntentId) {
       throw new VaultCliError(
         'ASSISTANT_CRON_DELIVERY_PENDING',
@@ -533,6 +555,18 @@ export async function runAssistantCronJobNow(
       paths,
       vault: input.vault,
     })
+    if (
+      resolved.kind === 'canonical'
+      && resolved.source.kind === 'automation'
+      && resolved.source.tags.includes(
+        MANAGED_ASSISTANT_CRON_AUTOMATION_ROUTE_SUSPENDED_TAG,
+      )
+    ) {
+      throw new VaultCliError(
+        'ASSISTANT_CRON_DELIVERY_REQUIRED',
+        `Assistant cron job "${resolved.job.name}" cannot resume until its managed delivery route is restored.`,
+      )
+    }
     const job =
       resolved.kind === 'local'
         ? {

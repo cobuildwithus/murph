@@ -23,9 +23,11 @@ import {
 import { createHostedMemberReplyAliasRoute } from "./hosted-email-reply-alias";
 import {
   projectHostedMemberRoutingState,
-  syncHostedMemberTelegramRoutingBinding,
   upsertHostedMemberTelegramRoutingBindingTx,
 } from "./hosted-member-routing-store";
+import {
+  enqueueHostedMemberChannelsUpdatedForActiveMemberTx,
+} from "./member-channel-sync";
 import {
   isHostedMemberMessagingSetupRequired,
 } from "./messaging-state";
@@ -57,7 +59,11 @@ import {
   hostedOnboardingError,
   isHostedOnboardingError,
 } from "./errors";
-import type { HostedTelegramDirectAuthorization } from "./telegram-direct-authorization";
+import {
+  resolveHostedTelegramDirectAuthorizationThreadId,
+  type HostedTelegramDirectAuthorization,
+} from "./telegram-direct-authorization";
+import { resolveHostedPrivyLinkedAccounts } from "./privy-shared";
 
 type HostedPrivyCompletionMemberResolution = {
   bindingAuthMethod: HostedPrivyAuthMethod;
@@ -72,7 +78,7 @@ export async function completeHostedPrivyVerification(input: {
   inviteCode?: string | null;
   now?: Date;
   prisma?: PrismaClient;
-  telegramDirectAuthorization?: HostedTelegramDirectAuthorization | null;
+  telegramDirectAuthorization?: HostedTelegramDirectAuthorization;
   timeZone?: string | null;
   verifiedPrivyUser?: HostedPrivyUser | null;
 }): Promise<{
@@ -145,7 +151,15 @@ export async function completeHostedPrivyVerification(input: {
               identity: input.identity,
               memberId: reconciledMember.id,
               prisma: tx,
+            });
+            await syncHostedPrivyTelegramBindingAndChannelsTx({
+              authMethod: inviteAuthMethod,
+              identity: input.identity,
+              memberId: reconciledMember.id,
+              now,
+              prisma: tx,
               telegramDirectAuthorization: input.telegramDirectAuthorization,
+              verifiedPrivyUser: input.verifiedPrivyUser ?? null,
             });
             await syncHostedMemberPendingActivationTimeZoneTx({
               memberId: reconciledMember.id,
@@ -177,7 +191,15 @@ export async function completeHostedPrivyVerification(input: {
               identity: input.identity,
               memberId: memberResolution.member.id,
               prisma: tx,
+            });
+            await syncHostedPrivyTelegramBindingAndChannelsTx({
+              authMethod,
+              identity: input.identity,
+              memberId: memberResolution.member.id,
+              now,
+              prisma: tx,
               telegramDirectAuthorization: input.telegramDirectAuthorization,
+              verifiedPrivyUser: input.verifiedPrivyUser ?? null,
             });
             await syncHostedMemberPendingActivationTimeZoneTx({
               memberId: memberResolution.member.id,
@@ -306,25 +328,7 @@ async function syncHostedPrivyBindings(input: {
     if (input.authMethod === "email") {
       await syncEmailBinding().catch(mapHostedPrivyPrimaryEmailBindingError);
     } else {
-      await syncHostedPrivySecondaryBindingBestEffort("email", syncEmailBinding);
-    }
-  }
-
-  if (
-    input.identity.telegram?.telegramUserId &&
-    !(input.authMethod === "telegram" && input.primaryBindingSynced)
-  ) {
-    const telegramUserId = input.identity.telegram.telegramUserId;
-    const syncTelegramBinding = () => syncHostedMemberTelegramRoutingBinding({
-      memberId: input.memberId,
-      prisma: input.prisma,
-      telegramUserId,
-    });
-
-    if (input.authMethod === "telegram") {
-      await syncTelegramBinding();
-    } else {
-      await syncHostedPrivySecondaryBindingBestEffort("telegram", syncTelegramBinding);
+      await syncHostedPrivySecondaryEmailBindingBestEffort(syncEmailBinding);
     }
   }
 
@@ -335,8 +339,7 @@ async function syncHostedPrivyBindings(input: {
   });
 }
 
-async function syncHostedPrivySecondaryBindingBestEffort(
-  binding: "email" | "telegram",
+async function syncHostedPrivySecondaryEmailBindingBestEffort(
   syncBinding: () => Promise<void>,
 ): Promise<void> {
   try {
@@ -346,7 +349,7 @@ async function syncHostedPrivySecondaryBindingBestEffort(
       throw error;
     }
 
-    console.warn(`Hosted Privy secondary ${binding} binding sync failed.`);
+    console.warn("Hosted Privy secondary email binding sync failed.");
   }
 }
 
@@ -400,7 +403,6 @@ async function syncHostedPrivyPrimaryBindingTx(input: {
   identity: HostedPrivyIdentity;
   memberId: string;
   prisma: Prisma.TransactionClient;
-  telegramDirectAuthorization: HostedTelegramDirectAuthorization | null | undefined;
 }): Promise<void> {
   if (input.authMethod === "email" && input.identity.email?.verifiedAt) {
     const replyAlias = await createHostedMemberReplyAliasRoute({
@@ -415,27 +417,54 @@ async function syncHostedPrivyPrimaryBindingTx(input: {
     }).catch(mapHostedPrivyPrimaryEmailBindingError);
     return;
   }
+}
 
-  if (input.authMethod === "telegram" && input.identity.telegram?.telegramUserId) {
-    let telegramThreadId: string | null | undefined;
-    if (input.telegramDirectAuthorization === undefined) {
-      telegramThreadId = undefined;
-    } else if (
-      input.telegramDirectAuthorization?.telegramUserId
-        === input.identity.telegram.telegramUserId
-    ) {
-      telegramThreadId = input.telegramDirectAuthorization.telegramThreadId;
-    } else {
-      telegramThreadId = null;
-    }
+async function syncHostedPrivyTelegramBindingAndChannelsTx(input: {
+  authMethod: HostedPrivyAuthMethod;
+  identity: HostedPrivyIdentity;
+  memberId: string;
+  now: Date;
+  prisma: Prisma.TransactionClient;
+  telegramDirectAuthorization: HostedTelegramDirectAuthorization | undefined;
+  verifiedPrivyUser: HostedPrivyUser | null;
+}): Promise<void> {
+  const telegramUserId = input.identity.telegram?.telegramUserId;
+  if (!telegramUserId) {
+    return;
+  }
 
+  const telegramThreadId = input.authMethod === "telegram"
+    && input.telegramDirectAuthorization !== undefined
+    ? resolveHostedTelegramDirectAuthorizationThreadId(
+        input.telegramDirectAuthorization,
+        telegramUserId,
+      )
+    : undefined;
+  try {
     await upsertHostedMemberTelegramRoutingBindingTx({
       memberId: input.memberId,
       prisma: input.prisma,
       telegramThreadId,
-      telegramUserId: input.identity.telegram.telegramUserId,
+      telegramUserId,
     });
+  } catch (error) {
+    if (input.authMethod === "telegram" || !isExpectedHostedPrivySecondaryBindingConflict(error)) {
+      throw error;
+    }
+
+    console.warn("Hosted Privy secondary telegram binding sync failed.");
+    return;
   }
+
+  await enqueueHostedMemberChannelsUpdatedForActiveMemberTx({
+    linkedAccounts: input.verifiedPrivyUser
+      ? resolveHostedPrivyLinkedAccounts(input.verifiedPrivyUser)
+      : undefined,
+    memberId: input.memberId,
+    occurredAt: input.now.toISOString(),
+    prisma: input.prisma,
+    sourceType: "hosted.privy.telegram.sync",
+  });
 }
 
 function isExpectedHostedPrivySecondaryBindingConflict(error: unknown): boolean {

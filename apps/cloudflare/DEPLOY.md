@@ -475,14 +475,19 @@ Personal-home Linq route-transition proof is also a producer/consumer contract c
 Once Vercel/web can persist transition-proof inputs or current-route snapshots, this consumer commit is the hard Cloudflare/runner rollback floor. Do not roll Worker/runner below the floor while those records can exist. Post-deploy checks must prove a scheduled personal reminder resolves the current home route and a reply-anchored send remains on its matching inbound route.
 
 Bot-bound Telegram signup routes also require a consumer-first rollout. First
-deploy the compatible Cloudflare Worker/runner with
-`container_rollout=immediate`; require managed-container smoke to prove the new
-runner-bundle fingerprint and verify Telegram provider egress. Next deploy the
-compatible Vercel/web readers with
-`HOSTED_TELEGRAM_BOT_BOUND_TARGET_PRODUCER_ENABLED=0`, then wait for prior
-Vercel functions to drain. Enable the producer in a second web deploy only
-after both planes are converged. For rollback, disable the producer first. Once
+deploy the compatible Vercel/web readers and signed current-route authorization
+callback with `HOSTED_TELEGRAM_BOT_BOUND_TARGET_PRODUCER_ENABLED=0`, then wait
+for prior Vercel functions to drain. Next deploy the compatible Cloudflare
+Worker/runner with `container_rollout=immediate`; require managed-container
+smoke to prove the new runner-bundle fingerprint and verify that a current
+target reaches Telegram while a former target fails before provider entry.
+Enable the producer in a second web deploy only after both planes are
+converged. For rollback, disable the producer first. Once
 disabled, compatible web syncs preserve already stored direct authority. Once a
+probe is enabled, the Worker returns `authorized`, `denied`, or `unavailable`:
+only a definitive provider denial may revoke same-identity direct authority;
+timeouts, transport failures, rate limits, provider 5xx responses, and missing
+bot configuration remain non-destructive `unavailable` results. Once a
 bot-bound route or its pending signup welcome work can exist, the first
 compatible web reader and Cloudflare Worker/runner are rollback floors; do not
 roll either plane below its floor without first proving that no persisted route,

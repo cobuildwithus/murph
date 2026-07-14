@@ -463,6 +463,17 @@ Hosted onboarding extras:
   immediate container rollout, the compatible web readers have deployed with
   the flag still off, and prior Vercel functions have drained. Disable the flag
   before rollback; gate-off syncs preserve already stored direct authority.
+  Direct-authorization results stay typed across the control boundary:
+  temporary `unavailable` and gate-off `not_attempted` results preserve a
+  same-identity bot-bound route, while only definitive `denied` clears it; a
+  newly verified Telegram identity never inherits the prior identity's route.
+  The encrypted channel-update mailbox fact carries the current assistant
+  route or revocation so managed onboarding follow-ups cannot retain a former
+  Telegram identity after settings or Privy relinking changes the binding;
+  Privy routing writes and that fact commit in one transaction. Immediately
+  before bot-bound provider entry, Cloudflare also asks the signed web callback
+  to authorize only the active member's exact current persisted target and
+  fails closed if the request target, persisted route, or callback disagrees.
   Once bot-bound Telegram routes or pending welcome work can exist, do not roll
   web below the compatible reader floor or Worker/runner below the compatible
   sender floor.

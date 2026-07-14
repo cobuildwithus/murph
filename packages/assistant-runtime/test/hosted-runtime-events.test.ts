@@ -20,6 +20,7 @@ const mocks = vi.hoisted(() => ({
   emitHostedExecutionStructuredLog: vi.fn(),
   hydrateHostedExecutionDefaultTarget: vi.fn(async (value) => value),
   prepareHostedWakeContext: vi.fn(),
+  reconcileManagedAssistantCronAutomationRoute: vi.fn(),
   sendAssistantNotification: vi.fn(),
   upsertAssistantCronAutomation: vi.fn(),
 }));
@@ -36,6 +37,8 @@ vi.mock("@murphai/assistant-engine", async () => {
 
   return {
     ...actual,
+    reconcileManagedAssistantCronAutomationRoute:
+      mocks.reconcileManagedAssistantCronAutomationRoute,
     sendAssistantNotification: mocks.sendAssistantNotification,
     upsertAssistantCronAutomation: mocks.upsertAssistantCronAutomation,
   };
@@ -2061,10 +2064,10 @@ describe("executeHostedMailboxEvent", () => {
           channel: "telegram",
           delivery: {
             kind: "thread",
-            target: "telegram_thread_123",
+            target: "456:bot:123456",
           },
           identityId: null,
-          threadId: null,
+          threadId: "hid_telegram_thread_123",
           threadIsDirect: true,
         },
       },
@@ -2083,11 +2086,12 @@ describe("executeHostedMailboxEvent", () => {
       expect.objectContaining({
         route: {
           channel: "telegram",
+          currentRouteSnapshot: true,
           deliverySource: null,
-          deliveryTarget: null,
+          deliveryTarget: "456:bot:123456",
           identityId: null,
           participantId: null,
-          threadId: "telegram_thread_123",
+          threadId: "hid_telegram_thread_123",
           threadIsDirect: true,
         },
         slug: "finish-onboarding-followup",
@@ -2789,6 +2793,7 @@ describe("executeHostedMailboxEvent", () => {
     });
 
     expect(mocks.sendAssistantNotification).not.toHaveBeenCalled();
+    expect(mocks.reconcileManagedAssistantCronAutomationRoute).not.toHaveBeenCalled();
     assert.deepEqual(result, {
       bootstrapResult: null,
       conversationMetrics: null,
@@ -2796,6 +2801,83 @@ describe("executeHostedMailboxEvent", () => {
       nextWakeAt: null,
       postCheckpointRecord: null,
       redactedLogEntries: [],
+    });
+  });
+
+  it("refreshes the managed onboarding route from an explicit member channel snapshot", async () => {
+    const wake = buildHostedExecutionMemberChannelsUpdatedWake({
+      assistantNotificationRoute: {
+        actorId: null,
+        channel: "telegram",
+        delivery: {
+          kind: "thread",
+          target: "789:bot:123456",
+        },
+        identityId: null,
+        threadId: "hid_telegram_thread_789",
+        threadIsDirect: true,
+      },
+      eventId: "evt_member_channels_updated_relink",
+      memberChannels: {
+        email: true,
+        linq: false,
+        telegram: true,
+      },
+      memberId: "member_123",
+      occurredAt: "2026-04-08T00:04:00.000Z",
+    });
+
+    await executeHostedMailboxEvent({
+      wake,
+      executionContext,
+      runtime: createRuntime(),
+      runtimeEnv: {},
+      vaultRoot: "/tmp/assistant-runtime-events",
+    });
+
+    expect(mocks.reconcileManagedAssistantCronAutomationRoute).toHaveBeenCalledWith({
+      managedTag: "murph-managed:onboarding-followup",
+      route: {
+        channel: "telegram",
+        currentRouteSnapshot: true,
+        deliverySource: null,
+        deliveryTarget: "789:bot:123456",
+        identityId: null,
+        participantId: null,
+        threadId: "hid_telegram_thread_789",
+        threadIsDirect: true,
+      },
+      slug: "finish-onboarding-followup",
+      vault: "/tmp/assistant-runtime-events",
+    });
+  });
+
+  it("suspends the managed onboarding route after an explicit channel revocation", async () => {
+    const wake = buildHostedExecutionMemberChannelsUpdatedWake({
+      assistantNotificationRoute: null,
+      eventId: "evt_member_channels_updated_revoke",
+      memberChannels: {
+        email: true,
+        linq: false,
+        telegram: false,
+      },
+      memberId: "member_123",
+      occurredAt: "2026-04-08T00:05:00.000Z",
+    });
+
+    await executeHostedMailboxEvent({
+      wake,
+      executionContext,
+      runtime: createRuntime(),
+      runtimeEnv: {},
+      vaultRoot: "/tmp/assistant-runtime-events",
+    });
+
+    expect(mocks.reconcileManagedAssistantCronAutomationRoute).toHaveBeenCalledWith({
+      managedTag: "murph-managed:onboarding-followup",
+      route: null,
+      slug: "finish-onboarding-followup",
+      vault: "/tmp/assistant-runtime-events",
     });
   });
 

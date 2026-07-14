@@ -18,6 +18,7 @@ import {
   extractHostedPrivyVerifiedEmailAccount,
   type PrivyLinkedAccountLike,
 } from "./privy-shared";
+import { buildHostedMemberActivationWelcomeRoute } from "./member-activation";
 import { lockHostedMemberRow } from "./shared";
 
 type HostedMemberEmailLinkedClient = PrismaClient | Prisma.TransactionClient;
@@ -90,7 +91,25 @@ async function appendHostedMemberChannelsUpdatedForSnapshotTx(input: {
     emailLinked: input.emailLinked,
     member: input.member,
   });
+  const assistantNotificationRoute = buildHostedMemberActivationWelcomeRoute({
+    linqChatId: input.member.routing?.linqChatId ?? null,
+    linqContactLookupKey:
+      input.member.routing?.linqParticipantContact?.lookupKey
+      ?? input.member.identity?.phoneLookupKey
+      ?? input.member.emailAuthorization?.verifiedEmail?.lookupKey
+      ?? null,
+    linqRecipientPhone: input.member.routing?.linqRecipientPhone ?? null,
+    memberId: input.memberId,
+    memberPhoneNumber: input.member.identity?.phoneNumber ?? null,
+    phoneLookupKey: input.member.identity?.phoneLookupKey ?? null,
+    pendingLinqChatId: input.member.routing?.pendingLinqChatId ?? null,
+    pendingLinqParticipantContact:
+      input.member.routing?.pendingLinqParticipantContact ?? null,
+    telegramThreadId: input.member.routing?.telegramThreadId ?? null,
+    telegramUserId: input.member.routing?.telegramUserId ?? null,
+  });
   const wake = buildHostedExecutionMemberChannelsUpdatedWake({
+    assistantNotificationRoute,
     eventId: buildHostedMemberChannelsUpdatedEventId({
       memberId: input.memberId,
       occurredAt: input.occurredAt,

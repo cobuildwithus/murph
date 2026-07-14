@@ -135,6 +135,7 @@ async function handleTelegramDirectAuthorizationRoute(
     });
     return json({ botId, status: "authorized" });
   } catch (error) {
+    const status = readTelegramDirectAuthorizationFailureStatus(error);
     emitHostedExecutionStructuredLog({
       component: "worker",
       details: buildWorkerRouteLogDetails({
@@ -147,8 +148,21 @@ async function handleTelegramDirectAuthorizationRoute(
       phase: "failed",
       userId,
     });
-    return json({ status: "unavailable" });
+    return json({ status });
   }
+}
+
+function readTelegramDirectAuthorizationFailureStatus(
+  error: unknown,
+): "denied" | "unavailable" {
+  const record = readRecord(error);
+  const context = readRecord(record?.context);
+  const status = readHttpStatus(context?.status) ?? readHttpStatus(record?.status);
+  if (status === null || status === 408 || status === 429 || status >= 500) {
+    return "unavailable";
+  }
+
+  return "denied";
 }
 
 async function handleTelegramUsageLimitNoticeRoute(

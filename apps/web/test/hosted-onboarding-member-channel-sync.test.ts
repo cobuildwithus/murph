@@ -152,6 +152,15 @@ describe("hosted onboarding member channel sync", () => {
     expect(mocks.appendHostedMailboxEnvelopeTx).toHaveBeenCalledTimes(1);
     expect(mocks.appendHostedMailboxEnvelopeTx).toHaveBeenCalledWith({
       envelope: {
+        assistantNotificationRoute: expect.objectContaining({
+          channel: "telegram",
+          delivery: {
+            kind: "thread",
+            target: "telegram_user_123:business:biz-42:dm-topic:9",
+          },
+          threadId: expect.stringMatching(/^hid_[0-9a-f]+$/u),
+          threadIsDirect: true,
+        }),
         eventId: "member.channels.updated:settings.phone.sync:member_123:2026-04-15T00:00:00.000Z",
         kind: "member.channels.updated",
         memberChannels: {
@@ -165,6 +174,40 @@ describe("hosted onboarding member channel sync", () => {
       tx,
     });
     expect(mocks.lockHostedMemberRow).toHaveBeenCalledWith(tx, "member_123");
+  });
+
+  it("appends an explicit assistant-route revocation when no direct route remains", async () => {
+    const member = makeMemberSnapshot();
+    mocks.readHostedMemberSnapshot.mockResolvedValueOnce({
+      ...member,
+      routing: member.routing
+        ? {
+            ...member.routing,
+            telegramThreadId: null,
+            telegramUserId: "telegram_user_789",
+          }
+        : null,
+    });
+    const tx = {
+      label: "route-revocation-tx",
+    };
+
+    await enqueueHostedMemberChannelsUpdatedTx({
+      emailLinked: true,
+      memberId: "member_123",
+      occurredAt: "2026-04-15T00:01:00.000Z",
+      prisma: tx as never,
+      sourceType: "settings.telegram.sync",
+    });
+
+    expect(mocks.appendHostedMailboxEnvelopeTx).toHaveBeenCalledWith({
+      envelope: expect.objectContaining({
+        assistantNotificationRoute: null,
+        kind: "member.channels.updated",
+        memberChannels: expect.objectContaining({ telegram: false }),
+      }),
+      tx,
+    });
   });
 
   it("derives active channel snapshots under the caller transaction lock", async () => {

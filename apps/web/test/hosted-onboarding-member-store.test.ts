@@ -2815,32 +2815,50 @@ describe("hosted-member-store", () => {
   it.each([
     {
       expectedTelegramThreadId: "456:bot:123456",
+      existingTelegramUserId: "456",
       existingTelegramThreadId: "456:bot:123456",
       incomingTelegramThreadId: undefined,
+      incomingTelegramUserId: "456",
       scenario: "preserves bot authority when direct authorization was not attempted",
     },
     {
       expectedTelegramThreadId: null,
+      existingTelegramUserId: "456",
       existingTelegramThreadId: "456:bot:123456",
       incomingTelegramThreadId: null,
+      incomingTelegramUserId: "456",
       scenario: "clears a rejected bot-authorized direct target",
     },
     {
       expectedTelegramThreadId: "456:business:biz-42:dm-topic:9",
+      existingTelegramUserId: "456",
       existingTelegramThreadId: "456:business:biz-42:dm-topic:9",
       incomingTelegramThreadId: null,
+      incomingTelegramUserId: "456",
       scenario: "preserves an inbound-observed target",
     },
     {
       expectedTelegramThreadId: "456",
+      existingTelegramUserId: "456",
       existingTelegramThreadId: "456",
       incomingTelegramThreadId: "456:bot:123456",
+      incomingTelegramUserId: "456",
       scenario: "does not replace an inbound-observed target with direct authority",
+    },
+    {
+      expectedTelegramThreadId: null,
+      existingTelegramUserId: "456",
+      existingTelegramThreadId: "456:bot:123456",
+      incomingTelegramThreadId: undefined,
+      incomingTelegramUserId: "789",
+      scenario: "does not preserve unavailable authority from a different Telegram identity",
     },
   ])("$scenario", async ({
     expectedTelegramThreadId,
+    existingTelegramUserId,
     existingTelegramThreadId,
     incomingTelegramThreadId,
+    incomingTelegramUserId,
   }) => {
     const existingTelegramPrivateColumns = await buildHostedMemberRoutingPrivateColumns({
       linqChatId: null,
@@ -2849,7 +2867,7 @@ describe("hosted-member-store", () => {
       pendingLinqChatId: null,
       pendingLinqRecipientPhone: null,
       telegramThreadId: existingTelegramThreadId,
-      telegramUserId: "456",
+      telegramUserId: existingTelegramUserId,
     });
     const upsert = vi.fn().mockResolvedValue({});
     const prisma = {
@@ -2869,7 +2887,7 @@ describe("hosted-member-store", () => {
       memberId: "member_123",
       prisma,
       telegramThreadId: incomingTelegramThreadId,
-      telegramUserId: "456",
+      telegramUserId: incomingTelegramUserId,
     });
 
     const upsertCall = upsert.mock.calls[0]?.[0] as {
@@ -2880,7 +2898,7 @@ describe("hosted-member-store", () => {
       telegramUserIdEncrypted: upsertCall.update.telegramUserIdEncrypted,
     })).resolves.toEqual({
       telegramThreadId: expectedTelegramThreadId,
-      telegramUserId: "456",
+      telegramUserId: incomingTelegramUserId,
     });
   });
 

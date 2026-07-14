@@ -176,7 +176,17 @@ describe("hosted group newsletter email-needed mailbox import", () => {
       item: createResolvedGroupNewsletterEmailNeededMailboxItem(),
       vaultRoot,
       wake: createGroupNewsletterEmailNeededWake({
-        directRoute: { channel: "telegram", threadId: "telegram_direct_thread" },
+        directRoute: {
+          actorId: null,
+          channel: "telegram",
+          delivery: {
+            kind: "thread",
+            target: "456:bot:123456",
+          },
+          identityId: null,
+          threadId: "hid_telegram_direct_thread",
+          threadIsDirect: true,
+        },
       }),
     });
 
@@ -194,13 +204,13 @@ describe("hosted group newsletter email-needed mailbox import", () => {
       actorId: null,
       actorIsSelf: false,
       source: "telegram",
-      threadId: "telegram_direct_thread",
+      threadId: "hid_telegram_direct_thread",
       threadIsDirect: true,
     });
     assert.deepEqual(staged.replyTarget, {
       channel: "telegram",
       messageId: null,
-      threadId: "telegram_direct_thread",
+      threadId: "456:bot:123456",
     });
     assert.deepEqual(await readHostedPendingAssistantInputIds({ vaultRoot }), [
       staged.inputId,
@@ -220,7 +230,17 @@ describe("hosted group newsletter email-needed mailbox import", () => {
       item: createResolvedGroupNewsletterEmailNeededMailboxItem(),
       vaultRoot,
       wake: createGroupNewsletterEmailNeededWake({
-        directRoute: { channel: "linq", threadId: "linq_fresh_thread" },
+        directRoute: {
+          actorId: null,
+          channel: "linq",
+          delivery: {
+            kind: "thread",
+            target: "linq_fresh_thread",
+          },
+          identityId: null,
+          threadId: "linq_fresh_thread",
+          threadIsDirect: true,
+        },
       }),
     });
 

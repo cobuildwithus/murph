@@ -143,6 +143,7 @@ export interface HostedExecutionMemberActivatedEvent extends HostedExecutionBase
 }
 
 export interface HostedExecutionMemberChannelsUpdatedEvent extends HostedExecutionBaseEvent {
+  assistantNotificationRoute?: HostedExecutionAssistantNotificationRoute | null;
   kind: "member.channels.updated";
   memberChannels: HostedExecutionMemberChannels;
 }
@@ -256,14 +257,8 @@ export interface HostedExecutionDeviceSyncWakeEvent extends HostedExecutionBaseE
     | "reconcile_due";
 }
 
-export type HostedExecutionGroupNewsletterEmailNeededDirectRouteChannel =
-  | "linq"
-  | "telegram";
-
-export interface HostedExecutionGroupNewsletterEmailNeededDirectRoute {
-  channel: HostedExecutionGroupNewsletterEmailNeededDirectRouteChannel;
-  threadId: string;
-}
+export type HostedExecutionGroupNewsletterEmailNeededDirectRoute =
+  HostedExecutionAssistantNotificationRoute;
 
 export interface HostedExecutionGroupNewsletterEmailNeededEvent extends HostedExecutionBaseEvent {
   directRoute?: HostedExecutionGroupNewsletterEmailNeededDirectRoute | null;
@@ -484,6 +479,7 @@ export interface HostedExecutionAssistantNotificationRequestedWake
 }
 
 export interface HostedExecutionMemberChannelsUpdatedWake extends HostedExecutionBaseWake {
+  assistantNotificationRoute?: HostedExecutionAssistantNotificationRoute | null;
   kind: "member.channels.updated";
   memberChannels: HostedExecutionMemberChannels;
 }

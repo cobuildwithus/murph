@@ -314,6 +314,22 @@ describe("createCloudflareHostedControlClient", () => {
     expect(request.init?.body).toBe(JSON.stringify({ telegramUserId: "987654" }));
   });
 
+  it.each(["denied", "unavailable"] as const)(
+    "preserves the Telegram direct-authorization %s result",
+    async (status) => {
+      const client = createCloudflareHostedControlClient({
+        baseUrl: "https://runner.example.test",
+        fetchImpl: vi.fn(async () => createJsonResponse({ status })) as typeof fetch,
+        getBearerToken: async () => "token-123",
+      });
+
+      await expect(client.authorizeTelegramDirectMessage({
+        request: { telegramUserId: "987654" },
+        userId: "member_123",
+      })).resolves.toEqual({ status });
+    },
+  );
+
   it("rejects malformed Telegram direct-authorization identities before fetch", () => {
     const fetchImpl = vi.fn<typeof fetch>();
     const client = createCloudflareHostedControlClient({

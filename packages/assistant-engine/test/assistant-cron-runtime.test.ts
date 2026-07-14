@@ -119,6 +119,7 @@ import {
   listAssistantCronJobs,
   listAssistantCronRuns,
   processDueAssistantCronJobsLocal,
+  reconcileManagedAssistantCronAutomationRoute,
   reconcileAssistantCronDeliveryIntent,
   repairPendingAssistantCronDeliveries,
   runAssistantCronJobNow,
@@ -5263,6 +5264,250 @@ describe('assistant cron runtime orchestration', () => {
         threadIsDirect: true,
       }),
     )
+  })
+
+  it('keeps Telegram conversation identity separate from bot-bound cron delivery', async () => {
+    vi.useFakeTimers()
+    vi.setSystemTime(new Date('2026-04-08T10:20:00.000Z'))
+    const { vaultRoot } = await createRuntimeContext(
+      'assistant-cron-runtime-telegram-current-route-binding-',
+    )
+    const paths = resolveAssistantStatePaths(vaultRoot)
+    await upsertAssistantCronAutomation({
+      instructions: 'Send the onboarding follow-up.',
+      now: new Date('2026-04-08T08:00:00.000Z'),
+      route: {
+        channel: 'telegram',
+        currentRouteSnapshot: true,
+        deliverySource: null,
+        deliveryTarget: '456:bot:123456',
+        identityId: null,
+        participantId: null,
+        threadId: 'hid_telegram_conversation_456',
+        threadIsDirect: true,
+      },
+      schedule: {
+        kind: 'dailyLocal',
+        localTime: '10:00',
+      },
+      slug: 'finish-onboarding-followup',
+      tags: [
+        'assistant',
+        'scheduled',
+        'murph-managed:onboarding-followup',
+      ],
+      title: 'Telegram current route binding reminder',
+      vault: vaultRoot,
+    })
+
+    const suspended = await reconcileManagedAssistantCronAutomationRoute({
+      managedTag: 'murph-managed:onboarding-followup',
+      now: new Date('2026-04-08T09:00:00.000Z'),
+      route: null,
+      slug: 'finish-onboarding-followup',
+      vault: vaultRoot,
+    })
+    expect(suspended?.enabled).toBe(false)
+    expect(findCanonicalAutomation(vaultRoot, 'finish-onboarding-followup')).toMatchObject({
+      route: {
+        channel: 'telegram',
+        deliveryTarget: '456:bot:123456',
+        identityId: null,
+        participantId: null,
+        threadId: 'hid_telegram_conversation_456',
+      },
+      status: 'paused',
+      tags: expect.arrayContaining([
+        'murph-managed:delivery-route-auto-resume',
+        'murph-managed:delivery-route-suspended',
+      ]),
+    })
+    await expect(setAssistantCronJobEnabled(
+      vaultRoot,
+      'finish-onboarding-followup',
+      true,
+    )).rejects.toThrow('cannot resume until its managed delivery route is restored')
+    await expect(runAssistantCronJobNow({
+      job: 'finish-onboarding-followup',
+      vault: vaultRoot,
+    })).rejects.toThrow('cannot resume until its managed delivery route is restored')
+
+    const rebound = await reconcileManagedAssistantCronAutomationRoute({
+      managedTag: 'murph-managed:onboarding-followup',
+      now: new Date('2026-04-08T09:30:00.000Z'),
+      route: {
+        channel: 'telegram',
+        currentRouteSnapshot: true,
+        deliverySource: null,
+        deliveryTarget: '789:bot:123456',
+        identityId: null,
+        participantId: null,
+        threadId: 'hid_telegram_conversation_789',
+        threadIsDirect: true,
+      },
+      slug: 'finish-onboarding-followup',
+      vault: vaultRoot,
+    })
+    expect(rebound?.enabled).toBe(true)
+    expect(findCanonicalAutomation(vaultRoot, 'finish-onboarding-followup')).toMatchObject({
+      route: {
+        deliveryTarget: '789:bot:123456',
+        threadId: 'hid_telegram_conversation_789',
+      },
+      status: 'active',
+    })
+    expect(
+      findCanonicalAutomation(vaultRoot, 'finish-onboarding-followup')?.tags,
+    ).not.toContain('murph-managed:delivery-route-suspended')
+
+    const source = (await listCanonicalAssistantCronRecords(vaultRoot))[0]
+    if (!source) {
+      throw new Error('Expected canonical source to exist.')
+    }
+
+    const runtimeStore = await readAssistantCronCanonicalRuntimeStore(paths)
+    const runtimeState = resolveCanonicalRuntimeState(source, runtimeStore)
+    const claimed = await claimResolvedAssistantCronJob({
+      job: {
+        kind: 'canonical',
+        source,
+        runtimeState,
+        job: projectCanonicalAssistantCronJob({ source, runtimeState }),
+      },
+      paths,
+    })
+    const result = await executeClaimedAssistantCronJob({
+      job: claimed,
+      paths,
+      trigger: 'scheduled',
+      vault: vaultRoot,
+    })
+
+    expect(result.run.status).toBe('succeeded')
+    expect(cronMocks.sendAssistantMessageLocal).toHaveBeenCalledWith(
+      expect.objectContaining({
+        bindingDeliveryTarget: '789:bot:123456',
+        channel: 'telegram',
+        deliveryKind: 'thread',
+        deliveryTarget: null,
+        threadId: 'hid_telegram_conversation_789',
+        threadIsDirect: true,
+      }),
+    )
+    expect(cronMocks.sendAssistantMessageLocal).not.toHaveBeenCalledWith(
+      expect.objectContaining({
+        bindingDeliveryTarget: '456:bot:123456',
+      }),
+    )
+  })
+
+  it('preserves an explicit member pause after managed route suspension', async () => {
+    vi.useFakeTimers()
+    vi.setSystemTime(new Date('2026-04-08T10:20:00.000Z'))
+    const { vaultRoot } = await createRuntimeContext(
+      'assistant-cron-runtime-paused-managed-route-refresh-',
+    )
+    getVaultAutomationStore(vaultRoot).push({
+      automationId: 'automation-paused-managed-route',
+      continuityPolicy: 'fresh',
+      createdAt: '2026-04-08T08:00:00.000Z',
+      instructions: 'Send the onboarding follow-up.',
+      route: {
+        channel: 'telegram',
+        currentRouteSnapshot: true,
+        deliverySource: null,
+        deliveryTarget: '456:bot:123456',
+        identityId: null,
+        participantId: null,
+        threadId: 'hid_telegram_conversation_456',
+        threadIsDirect: true,
+      },
+      schedule: {
+        kind: 'dailyLocal',
+        localTime: '10:00',
+      },
+      slug: 'telegram-current-route-binding-reminder',
+      status: 'active',
+      summary: null,
+      tags: ['assistant', 'scheduled', 'murph-managed:onboarding-followup'],
+      title: 'Telegram current route binding reminder',
+      updatedAt: '2026-04-08T08:00:00.000Z',
+    })
+
+    await reconcileManagedAssistantCronAutomationRoute({
+      managedTag: 'murph-managed:onboarding-followup',
+      route: null,
+      slug: 'telegram-current-route-binding-reminder',
+      vault: vaultRoot,
+    })
+    expect(
+      findCanonicalAutomation(vaultRoot, 'telegram-current-route-binding-reminder')?.tags,
+    ).toEqual(expect.arrayContaining(['murph-managed:delivery-route-suspended']))
+    expect(
+      findCanonicalAutomation(vaultRoot, 'telegram-current-route-binding-reminder')?.tags,
+    ).toContain('murph-managed:delivery-route-auto-resume')
+
+    await setAssistantCronJobEnabled(
+      vaultRoot,
+      'telegram-current-route-binding-reminder',
+      false,
+    )
+    expect(
+      findCanonicalAutomation(vaultRoot, 'telegram-current-route-binding-reminder')?.tags,
+    ).not.toContain('murph-managed:delivery-route-auto-resume')
+
+    const refreshed = await reconcileManagedAssistantCronAutomationRoute({
+      managedTag: 'murph-managed:onboarding-followup',
+      route: {
+        channel: 'telegram',
+        currentRouteSnapshot: true,
+        deliverySource: null,
+        deliveryTarget: '789:bot:123456',
+        identityId: null,
+        participantId: null,
+        threadId: 'hid_telegram_conversation_789',
+        threadIsDirect: true,
+      },
+      slug: 'telegram-current-route-binding-reminder',
+      vault: vaultRoot,
+    })
+
+    expect(refreshed?.enabled).toBe(false)
+    expect(
+      findCanonicalAutomation(vaultRoot, 'telegram-current-route-binding-reminder'),
+    ).toMatchObject({
+      route: {
+        deliveryTarget: '789:bot:123456',
+      },
+      status: 'paused',
+    })
+
+    await reconcileManagedAssistantCronAutomationRoute({
+      managedTag: 'murph-managed:onboarding-followup',
+      route: null,
+      slug: 'telegram-current-route-binding-reminder',
+      vault: vaultRoot,
+    })
+    expect(
+      findCanonicalAutomation(vaultRoot, 'telegram-current-route-binding-reminder')?.tags,
+    ).not.toContain('murph-managed:delivery-route-auto-resume')
+
+    const restoredAfterPreexistingPause = await reconcileManagedAssistantCronAutomationRoute({
+      managedTag: 'murph-managed:onboarding-followup',
+      route: {
+        channel: 'telegram',
+        currentRouteSnapshot: true,
+        deliverySource: null,
+        deliveryTarget: '999:bot:123456',
+        identityId: null,
+        participantId: null,
+        threadId: 'hid_telegram_conversation_999',
+        threadIsDirect: true,
+      },
+      slug: 'telegram-current-route-binding-reminder',
+      vault: vaultRoot,
+    })
+    expect(restoredAfterPreexistingPause?.enabled).toBe(false)
   })
 
   it('executes hosted email current-route snapshots through their trusted reply envelope binding', async () => {

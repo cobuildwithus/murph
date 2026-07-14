@@ -19,10 +19,15 @@ type HostedTelegramAuthorizationControlClient = Pick<
   "authorizeTelegramDirectMessage"
 >;
 
-export interface HostedTelegramDirectAuthorization {
-  telegramThreadId: string;
-  telegramUserId: string;
-}
+export type HostedTelegramDirectAuthorization =
+  | {
+      status: "authorized";
+      telegramThreadId: string;
+      telegramUserId: string;
+    }
+  | {
+      status: "denied" | "not_attempted" | "unavailable";
+    };
 
 export async function verifyHostedTelegramDirectAuthorization(
   input: {
@@ -33,22 +38,22 @@ export async function verifyHostedTelegramDirectAuthorization(
     controlClient?: HostedTelegramAuthorizationControlClient | null;
     env?: HostedTelegramAuthorizationEnv;
   } = {},
-): Promise<HostedTelegramDirectAuthorization | null | undefined> {
+): Promise<HostedTelegramDirectAuthorization> {
   if (!hostedTelegramBotBoundTargetProducerEnabled(dependencies.env ?? process.env)) {
-    return undefined;
+    return { status: "not_attempted" };
   }
 
   const authorizationUserId = normalizeString(input.authorizationUserId);
   const telegramUserId = normalizeTelegramBotId(input.telegramUserId);
   if (!authorizationUserId || !telegramUserId) {
-    return null;
+    return { status: "unavailable" };
   }
 
   const controlClient = dependencies.controlClient === undefined
     ? readHostedExecutionControlClientIfConfigured(TELEGRAM_AUTHORIZATION_TIMEOUT_MS)
     : dependencies.controlClient;
   if (!controlClient) {
-    return null;
+    return { status: "unavailable" };
   }
 
   try {
@@ -57,14 +62,15 @@ export async function verifyHostedTelegramDirectAuthorization(
       userId: authorizationUserId,
     });
     if (response.status !== "authorized") {
-      return null;
+      return { status: response.status };
     }
     const botId = normalizeTelegramBotId(response.botId);
     if (!botId) {
-      return null;
+      return { status: "unavailable" };
     }
 
     return {
+      status: "authorized",
       telegramThreadId: serializeTelegramThreadTarget({
         botId,
         chatId: telegramUserId,
@@ -72,8 +78,24 @@ export async function verifyHostedTelegramDirectAuthorization(
       telegramUserId,
     };
   } catch {
+    return { status: "unavailable" };
+  }
+}
+
+export function resolveHostedTelegramDirectAuthorizationThreadId(
+  authorization: HostedTelegramDirectAuthorization,
+  expectedTelegramUserId: string,
+): string | null | undefined {
+  if (authorization.status === "denied") {
     return null;
   }
+  if (authorization.status !== "authorized") {
+    return undefined;
+  }
+
+  return authorization.telegramUserId === expectedTelegramUserId
+    ? authorization.telegramThreadId
+    : null;
 }
 
 export function hostedTelegramBotBoundTargetProducerEnabled(

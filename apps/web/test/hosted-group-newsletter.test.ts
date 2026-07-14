@@ -120,7 +120,12 @@ describe("hosted group newsletter participants", () => {
     expect(mocks.appendHostedMailboxEnvelopeTx).toHaveBeenCalledTimes(1);
     expect(mocks.appendHostedMailboxEnvelopeTx).toHaveBeenCalledWith({
       envelope: expect.objectContaining({
-        directRoute: { channel: "telegram", threadId: "telegram_thread_123" },
+        directRoute: expect.objectContaining({
+          channel: "telegram",
+          delivery: { kind: "thread", target: "456:bot:123456" },
+          threadId: expect.stringMatching(/^hid_[0-9a-f]+$/u),
+          threadIsDirect: true,
+        }),
         eventId: "group-newsletter.email-needed:member_active_missing_email:hgrp_123",
         groupDisplayName: "Sunday group",
         groupId: "hgrp_123",
@@ -208,7 +213,12 @@ describe("hosted group newsletter participants", () => {
     expect(mocks.appendHostedMailboxEnvelopeTx).toHaveBeenCalledTimes(1);
     expect(mocks.appendHostedMailboxEnvelopeTx).toHaveBeenCalledWith({
       envelope: expect.objectContaining({
-        directRoute: { channel: "linq", threadId: "linq_home_thread_123" },
+        directRoute: expect.objectContaining({
+          channel: "linq",
+          delivery: { kind: "thread", target: "linq_home_thread_123" },
+          threadId: expect.stringMatching(/^hid_[0-9a-f]+$/u),
+          threadIsDirect: true,
+        }),
         eventId: "group-newsletter.email-needed:member_active_missing_email:hgrp_123",
         kind: "group-newsletter.email-needed",
         userId: "member_active_missing_email",
@@ -232,7 +242,12 @@ describe("hosted group newsletter participants", () => {
     expect(mocks.appendHostedMailboxEnvelopeTx).toHaveBeenCalledTimes(1);
     expect(mocks.appendHostedMailboxEnvelopeTx).toHaveBeenCalledWith({
       envelope: expect.objectContaining({
-        directRoute: { channel: "telegram", threadId: "telegram_thread_123" },
+        directRoute: expect.objectContaining({
+          channel: "telegram",
+          delivery: { kind: "thread", target: "456:bot:123456" },
+          threadId: expect.stringMatching(/^hid_[0-9a-f]+$/u),
+          threadIsDirect: true,
+        }),
         eventId: "group-newsletter.email-needed:member_active_missing_email:hgrp_123",
         kind: "group-newsletter.email-needed",
         userId: "member_active_missing_email",
@@ -389,7 +404,12 @@ describe("hosted group newsletter participants", () => {
     expect(mocks.appendHostedMailboxEnvelopeTx).toHaveBeenCalledTimes(1);
     expect(mocks.appendHostedMailboxEnvelopeTx).toHaveBeenCalledWith({
       envelope: expect.objectContaining({
-        directRoute: { channel: "telegram", threadId: "telegram_thread_123" },
+        directRoute: expect.objectContaining({
+          channel: "telegram",
+          delivery: { kind: "thread", target: "456:bot:123456" },
+          threadId: expect.stringMatching(/^hid_[0-9a-f]+$/u),
+          threadIsDirect: true,
+        }),
         eventId: "group-newsletter.email-needed:member_active_missing_email:hgrp_123",
         groupDisplayName: "Sunday group",
         groupId: "hgrp_123",
@@ -538,8 +558,8 @@ function createTelegramRoutingState() {
     pendingLinqChatId: null,
     pendingLinqParticipantContact: null,
     pendingLinqRecipientPhone: null,
-    telegramThreadId: "telegram_thread_123",
-    telegramUserId: null,
+    telegramThreadId: "456:bot:123456",
+    telegramUserId: "456",
     telegramUserLookupKey: null,
   };
 }

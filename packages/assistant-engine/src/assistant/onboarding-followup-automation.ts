@@ -18,6 +18,9 @@ export interface MurphOnboardingFollowupAutomationDefinition {
   title: string
 }
 
+export const MURPH_ONBOARDING_FOLLOWUP_AUTOMATION_TAG =
+  'murph-managed:onboarding-followup'
+
 export const MURPH_ONBOARDING_FOLLOWUP_AUTOMATION =
   {
     slug: 'finish-onboarding-followup',
@@ -33,7 +36,7 @@ export const MURPH_ONBOARDING_FOLLOWUP_AUTOMATION =
       'scheduled',
       'murph-managed',
       'onboarding',
-      'murph-managed:onboarding-followup',
+      MURPH_ONBOARDING_FOLLOWUP_AUTOMATION_TAG,
     ],
     instructions: [
       'Goal: advance Murph onboarding through useful support and a finite health-context foundation without turning it into a drip questionnaire. Ordinary health help remains available while onboarding is open. The first scheduled occurrence is intentionally deferred until the next local day after the relationship begins.',

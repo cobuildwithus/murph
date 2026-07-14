@@ -235,6 +235,17 @@ export function parseHostedExecutionWake(value: unknown): HostedExecutionWake {
       });
     case "member.channels.updated":
       return buildHostedExecutionMemberChannelsUpdatedWake({
+        ...(record.assistantNotificationRoute === undefined
+          ? {}
+          : {
+              assistantNotificationRoute:
+                record.assistantNotificationRoute === null
+                  ? null
+                  : parseHostedExecutionAssistantNotificationRoute(
+                      record.assistantNotificationRoute,
+                      "Hosted execution wake member.channels.updated assistantNotificationRoute",
+                    ),
+            }),
         eventId,
         memberChannels: parseHostedExecutionMemberChannels(
           record.memberChannels,
@@ -1012,6 +1023,17 @@ export function parseHostedExecutionEvent(value: unknown): HostedExecutionEvent 
     }
     case "member.channels.updated":
       return {
+        ...(record.assistantNotificationRoute === undefined
+          ? {}
+          : {
+              assistantNotificationRoute:
+                record.assistantNotificationRoute === null
+                  ? null
+                  : parseHostedExecutionAssistantNotificationRoute(
+                      record.assistantNotificationRoute,
+                      "Hosted execution member.channels.updated assistantNotificationRoute",
+                    ),
+            }),
         kind,
         memberChannels: parseHostedExecutionMemberChannels(
           record.memberChannels,
@@ -1273,14 +1295,29 @@ function parseHostedExecutionGroupNewsletterEmailNeededDirectRoute(
   label: string,
 ): HostedExecutionGroupNewsletterEmailNeededDirectRoute {
   const record = requireObject(value, label);
+  if ("delivery" in record) {
+    return parseHostedExecutionAssistantNotificationRoute(record, label);
+  }
+
+  // Legacy wakes used one thread id for both conversation identity and
+  // delivery. Normalize those already-persisted envelopes into the route
+  // owner while new producers retain the separate values.
   const channel = requireString(record.channel, `${label}.channel`);
   if (channel !== "linq" && channel !== "telegram") {
     throw new TypeError(`${label}.channel is invalid.`);
   }
+  const threadId = requireString(record.threadId, `${label}.threadId`);
 
   return {
+    actorId: null,
     channel,
-    threadId: requireString(record.threadId, `${label}.threadId`),
+    delivery: {
+      kind: "thread",
+      target: threadId,
+    },
+    identityId: null,
+    threadId,
+    threadIsDirect: true,
   };
 }
 

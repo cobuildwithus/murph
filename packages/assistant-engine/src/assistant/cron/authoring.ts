@@ -76,6 +76,19 @@ export interface UpsertAssistantCronAutomationInput {
   vault: string
 }
 
+export interface ReconcileManagedAssistantCronAutomationRouteInput {
+  managedTag: string
+  now?: Date
+  route: AutomationRoute | null
+  slug: string
+  vault: string
+}
+
+export const MANAGED_ASSISTANT_CRON_AUTOMATION_ROUTE_SUSPENDED_TAG =
+  'murph-managed:delivery-route-suspended'
+export const MANAGED_ASSISTANT_CRON_AUTOMATION_ROUTE_AUTO_RESUME_TAG =
+  'murph-managed:delivery-route-auto-resume'
+
 export interface InstallAssistantCronPresetInput extends AssistantCronTargetInput {
   additionalInstructions?: string | null
   enabled?: boolean
@@ -288,6 +301,113 @@ export async function upsertAssistantCronAutomation(
     return projectCanonicalAssistantCronJob({
       source,
       runtimeState: persistedRuntimeState,
+    })
+  })
+}
+
+export async function reconcileManagedAssistantCronAutomationRoute(
+  input: ReconcileManagedAssistantCronAutomationRouteInput,
+): Promise<AssistantCronJob | null> {
+  const paths = resolveAssistantStatePaths(input.vault)
+  await ensureAssistantCronState(paths)
+
+  return withAssistantCronWriteLock(paths, async () => {
+    const existingAutomation = await showCanonicalAutomation(input.vault, input.slug)
+    if (
+      !existingAutomation ||
+      existingAutomation.status === 'archived' ||
+      !existingAutomation.tags.includes(input.managedTag)
+    ) {
+      return null
+    }
+
+    const now = input.now ?? new Date()
+    const nowIso = now.toISOString()
+    const routeWasSuspended = existingAutomation.tags.includes(
+      MANAGED_ASSISTANT_CRON_AUTOMATION_ROUTE_SUSPENDED_TAG,
+    )
+    const shouldAutoResume = existingAutomation.tags.includes(
+      MANAGED_ASSISTANT_CRON_AUTOMATION_ROUTE_AUTO_RESUME_TAG,
+    )
+    const nextTarget = input.route === null
+      ? null
+      : validateAssistantCronDeliveryTarget(input.route)
+    const schedule = assistantCronScheduleSchema.parse(existingAutomation.schedule)
+    const status = nextTarget === null
+      ? 'paused'
+      : shouldAutoResume
+        ? 'active'
+        : existingAutomation.status
+    const tags = nextTarget === null
+      ? Array.from(new Set([
+          ...existingAutomation.tags,
+          MANAGED_ASSISTANT_CRON_AUTOMATION_ROUTE_SUSPENDED_TAG,
+          ...(existingAutomation.status === 'active' || shouldAutoResume
+            ? [MANAGED_ASSISTANT_CRON_AUTOMATION_ROUTE_AUTO_RESUME_TAG]
+            : []),
+        ]))
+      : existingAutomation.tags.filter(
+          (tag) =>
+            tag !== MANAGED_ASSISTANT_CRON_AUTOMATION_ROUTE_SUSPENDED_TAG
+            && tag !== MANAGED_ASSISTANT_CRON_AUTOMATION_ROUTE_AUTO_RESUME_TAG,
+        )
+    const updatedAutomation = await upsertAutomation(
+      buildCanonicalAutomationUpsertInput({
+        vault: input.vault,
+        automationId: existingAutomation.automationId,
+        automation: existingAutomation,
+        title: existingAutomation.title,
+        status,
+        schedule,
+        route: nextTarget === null
+          ? existingAutomation.route
+          : buildCanonicalAutomationRoute(nextTarget),
+        instructions: existingAutomation.instructions,
+        tags,
+      }),
+    )
+    const source = requireCanonicalAssistantCronRecord(
+      updatedAutomation.record,
+      await resolveAssistantCronDefaultTimeZone(input.vault),
+    )
+    if (source.kind !== 'automation') {
+      throw new VaultCliError(
+        'ASSISTANT_CRON_INVALID_STATE',
+        `Managed automation "${input.slug}" resolved to a non-automation cron source.`,
+      )
+    }
+    const runtimeStore = await readAssistantCronCanonicalRuntimeStore(paths)
+    const currentRuntimeState = findAssistantCronCanonicalRuntimeRecord(
+      runtimeStore,
+      source.automationId,
+    ) ?? createAssistantCronCanonicalRuntimeRecord({
+      jobId: source.automationId,
+      now: nowIso,
+    })
+    const runtimeState = {
+      ...currentRuntimeState,
+      alias: nextTarget?.alias ?? null,
+      sessionId: nextTarget?.sessionId ?? null,
+      updatedAt: nowIso,
+      state: {
+        ...currentRuntimeState.state,
+        ...(shouldAutoResume && nextTarget !== null
+          ? { activatedAt: nowIso }
+          : {}),
+        ...(nextTarget === null || routeWasSuspended
+          ? {
+              pendingOccurrenceAt: null,
+              retryAfterAt: null,
+            }
+          : {}),
+      },
+    }
+    upsertAssistantCronCanonicalRuntimeRecord(runtimeStore, runtimeState)
+    await writeAssistantCronCanonicalRuntimeStore(paths, runtimeStore)
+
+    return projectCanonicalAssistantCronJob({
+      source,
+      runtimeState,
     })
   })
 }

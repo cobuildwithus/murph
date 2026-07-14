@@ -93,7 +93,7 @@ export type CloudflareHostedControlTelegramDirectAuthorizationResponse =
     status: "authorized";
   }
   | {
-    status: "unavailable";
+    status: "denied" | "unavailable";
   };
 
 export interface CloudflareHostedControlMealPhotoStageResult {
@@ -795,12 +795,12 @@ function parseCloudflareHostedControlTelegramDirectAuthorizationResponse(
     "Cloudflare Telegram direct authorization response status",
   );
 
-  if (status === "unavailable") {
+  if (status === "denied" || status === "unavailable") {
     return { status };
   }
   if (status !== "authorized") {
     throw new TypeError(
-      "Cloudflare Telegram direct authorization response status must be authorized or unavailable.",
+      "Cloudflare Telegram direct authorization response status must be authorized, denied, or unavailable.",
     );
   }
 

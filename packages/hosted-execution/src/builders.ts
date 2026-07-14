@@ -2,6 +2,7 @@ import type {
   HostedExecutionConversationMessagePayload,
   HostedExecutionConversationMessageWake,
   HostedExecutionAssistantNotificationRequestedPayload,
+  HostedExecutionAssistantNotificationRoute,
   HostedExecutionAssistantNotificationRequestedWake,
   HostedExecutionDeviceSyncWake,
   HostedExecutionDeviceSyncWakeEvent,
@@ -494,6 +495,7 @@ export function buildHostedExecutionVaultShareRevokeWake(input: {
 }
 
 export function buildHostedExecutionMemberChannelsUpdatedWake(input: {
+  assistantNotificationRoute?: HostedExecutionAssistantNotificationRoute | null;
   eventId: string;
   memberChannels: HostedExecutionMemberChannels;
   memberId: string;
@@ -506,6 +508,9 @@ export function buildHostedExecutionMemberChannelsUpdatedWake(input: {
       memberId: input.memberId,
       occurredAt: input.occurredAt,
     }),
+    ...(input.assistantNotificationRoute === undefined
+      ? {}
+      : { assistantNotificationRoute: input.assistantNotificationRoute }),
     memberChannels: { ...input.memberChannels },
   };
 }

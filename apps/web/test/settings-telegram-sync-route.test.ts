@@ -39,9 +39,15 @@ vi.mock("@/src/lib/hosted-onboarding/member-channel-sync", () => ({
     mocks.enqueueHostedMemberChannelsUpdatedForActiveMemberTx,
 }));
 
-vi.mock("@/src/lib/hosted-onboarding/telegram-direct-authorization", () => ({
-  verifyHostedTelegramDirectAuthorization: mocks.verifyHostedTelegramDirectAuthorization,
-}));
+vi.mock("@/src/lib/hosted-onboarding/telegram-direct-authorization", async () => {
+  const actual = await vi.importActual<typeof import(
+    "@/src/lib/hosted-onboarding/telegram-direct-authorization"
+  )>("@/src/lib/hosted-onboarding/telegram-direct-authorization");
+  return {
+    ...actual,
+    verifyHostedTelegramDirectAuthorization: mocks.verifyHostedTelegramDirectAuthorization,
+  };
+});
 
 vi.mock("@/src/lib/hosted-orchestration/signal-runtime", () => ({
   signalHostedMailboxAppendRuntime: mocks.signalHostedMailboxAppendRuntime,
@@ -73,6 +79,7 @@ describe("settings telegram sync route", () => {
     );
     mocks.upsertHostedMemberTelegramRoutingBindingTx.mockResolvedValue(undefined);
     mocks.verifyHostedTelegramDirectAuthorization.mockResolvedValue({
+      status: "authorized",
       telegramThreadId: "456:bot:123456",
       telegramUserId: "456",
     });
@@ -168,7 +175,7 @@ describe("settings telegram sync route", () => {
   });
 
   it("keeps Telegram identity linked without a direct route when the bot write is rejected", async () => {
-    mocks.verifyHostedTelegramDirectAuthorization.mockResolvedValueOnce(null);
+    mocks.verifyHostedTelegramDirectAuthorization.mockResolvedValueOnce({ status: "denied" });
 
     const response = await settingsTelegramSyncRoute.POST(
       new Request("https://join.example.test/api/settings/telegram/sync", {
@@ -190,8 +197,12 @@ describe("settings telegram sync route", () => {
     });
   });
 
-  it("preserves existing direct authority while bot-bound target production is disabled", async () => {
-    mocks.verifyHostedTelegramDirectAuthorization.mockResolvedValueOnce(undefined);
+  it.each(["not_attempted", "unavailable"] as const)(
+    "preserves existing direct authority when direct authorization is %s",
+    async (status) => {
+    mocks.verifyHostedTelegramDirectAuthorization.mockResolvedValueOnce({
+      status,
+    });
 
     const response = await settingsTelegramSyncRoute.POST(
       new Request("https://join.example.test/api/settings/telegram/sync", {
@@ -211,7 +222,8 @@ describe("settings telegram sync route", () => {
       telegramThreadId: undefined,
       telegramUserId: "456",
     });
-  });
+    },
+  );
 
   it("skips the hosted channel dispatch when hosted access is not active yet", async () => {
     mocks.requirePrivyMemberAuth.mockResolvedValue({

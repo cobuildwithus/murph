@@ -1,5 +1,6 @@
 import {
   HOSTED_TELEGRAM_BOT_ID_HEADER,
+  HOSTED_TELEGRAM_DELIVERY_TARGET_HEADER,
 } from '@murphai/contracts'
 import {
   isTelegramThreadTargetAuthorizedForBotToken,
@@ -124,6 +125,7 @@ export async function setTelegramMessageReaction(
     await sendTelegramBotApiRequest({
       baseUrl,
       botId: target.botId,
+      deliveryTarget: serializeTelegramThreadTarget(target),
       fetchImplementation,
       method: 'POST',
       operation: 'setMessageReaction',
@@ -340,6 +342,7 @@ export async function deleteTelegramMessages(
     const response = await sendTelegramBotApiRequest({
       baseUrl,
       botId: target.botId,
+      deliveryTarget: serializeTelegramThreadTarget(target),
       fetchImplementation,
       method: 'POST',
       operation: request.operation,
@@ -464,6 +467,7 @@ async function sendTelegramTypingIndicatorOnce(input: {
     response = await sendTelegramBotApiRequest({
       baseUrl: input.baseUrl,
       botId: input.target.botId,
+      deliveryTarget: serializeTelegramThreadTarget(input.target),
       fetchImplementation: input.fetchImplementation,
       method: 'POST',
       operation: 'sendChatAction',
@@ -613,6 +617,7 @@ function buildTelegramDeleteRequest(
 async function sendTelegramBotApiRequest(input: {
   baseUrl: string
   botId?: string | null
+  deliveryTarget?: string | null
   fetchImplementation: TelegramFetchImplementation
   method: 'POST'
   operation:
@@ -636,8 +641,15 @@ async function sendTelegramBotApiRequest(input: {
         method: input.method,
         headers: {
           'content-type': 'application/json',
+          ...(!resolveTelegramBotIdFromToken(input.token) && input.deliveryTarget
+            ? {
+                [HOSTED_TELEGRAM_DELIVERY_TARGET_HEADER]: input.deliveryTarget,
+              }
+            : {}),
           ...(input.botId && !resolveTelegramBotIdFromToken(input.token)
-            ? { [HOSTED_TELEGRAM_BOT_ID_HEADER]: input.botId }
+            ? {
+                [HOSTED_TELEGRAM_BOT_ID_HEADER]: input.botId,
+              }
             : {}),
         },
         body: JSON.stringify(input.payload),
