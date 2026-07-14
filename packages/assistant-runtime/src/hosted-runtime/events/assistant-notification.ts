@@ -150,6 +150,10 @@ export async function executeHostedAssistantNotificationWake(input: {
     );
     const groupMembershipEpoch = input.wake.notification.groupMembershipEpoch;
     if (groupMembershipEpoch) {
+      notificationInput.deliveryValidity = {
+        kind: "hosted_group_membership_epoch",
+        ...groupMembershipEpoch,
+      };
       notificationInput.beforeDelivery = async () => {
         const assertEpoch = input.effectsPort?.assertHostedGroupMembershipEpoch;
         if (!assertEpoch) {

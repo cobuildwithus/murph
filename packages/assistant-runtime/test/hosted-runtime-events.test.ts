@@ -161,6 +161,11 @@ describe("executeHostedMailboxEvent", () => {
     });
     const providerDeliveryStarted = vi.fn();
     mocks.sendAssistantNotification.mockImplementationOnce(async (input) => {
+      expect(input.deliveryValidity).toEqual({
+        kind: "hosted_group_membership_epoch",
+        joinedAt: "2026-04-08T00:00:00.000Z",
+        membershipId: "membership_123",
+      });
       await input.beforeDelivery?.();
       providerDeliveryStarted();
       return createQueuedNotificationResult();

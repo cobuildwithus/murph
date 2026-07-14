@@ -1,5 +1,6 @@
 import * as z from 'zod'
 import type {
+  AssistantOutboxIntent,
   AssistantResponseMedia,
   AssistantSession,
 } from '@murphai/operator-config/assistant-cli-contracts'
@@ -196,6 +197,7 @@ export interface AssistantNotificationInput
       | 'workingDirectory'
     > {
   deliveryDedupeToken?: string | null
+  deliveryValidity?: AssistantOutboxIntent['deliveryValidity']
   beforeDelivery?: (() => Promise<void> | void) | null
   beforeCommit?: ((context: AssistantNotificationCommitContext) => Promise<void> | void) | null
   deferCommitUntilDeliveryAccepted?: boolean | null
@@ -551,6 +553,7 @@ export async function sendAssistantNotificationLocal(
           await input.beforeDelivery?.()
           const deliveryOutcome = await deliverAssistantNotificationMessage({
             dedupeToken: input.deliveryDedupeToken ?? null,
+            deliveryValidity: input.deliveryValidity,
             decisionSubject: decision.subject ?? null,
             input: messageInput,
             media: providerResult.responseMedia ?? [],
@@ -616,6 +619,7 @@ export async function sendAssistantNotificationLocal(
         await input.beforeDelivery?.()
         const deliveryOutcome = await deliverAssistantNotificationMessage({
           dedupeToken: input.deliveryDedupeToken ?? null,
+          deliveryValidity: input.deliveryValidity,
           decisionSubject: decision.subject ?? null,
           input: messageInput,
           media: providerResult.responseMedia ?? [],
@@ -761,6 +765,7 @@ async function sendAssistantExactTextNotificationLocal(input: {
 
   const deliveryOutcome = await deliverAssistantNotificationMessage({
     dedupeToken: input.input.deliveryDedupeToken ?? null,
+    deliveryValidity: input.input.deliveryValidity,
     decisionSubject: null,
     input: input.messageInput,
     media: [],
@@ -1216,6 +1221,7 @@ function buildAssistantNotificationMessageInput(
 
 async function deliverAssistantNotificationMessage(input: {
   dedupeToken: string | null
+  deliveryValidity?: AssistantOutboxIntent['deliveryValidity']
   decisionSubject: string | null
   input: AssistantMessageInput
   media?: readonly AssistantResponseMedia[] | null
@@ -1260,6 +1266,7 @@ async function deliverAssistantNotificationMessage(input: {
     dedupeToken: input.dedupeToken,
     deliveryIdempotencyKey: hostedDelivery.deliveryIdempotencyKey,
     deliveryTransportIdempotent: hostedDelivery.deliveryTransportIdempotent,
+    deliveryValidity: input.deliveryValidity,
     signal: input.input.abortSignal,
     ...deliveryFields,
     media,

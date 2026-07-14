@@ -1879,6 +1879,12 @@ async function claimExistingHostedLinqDeliveryProviderDispatchTx(input: {
               template: "ai_usage_quota",
             }]
           : []),
+        ...(input.data.template === "group_leave_result"
+          ? [{
+              status: HOSTED_LINQ_DELIVERY_PROVIDER_DISPATCH_STARTED_STATUS,
+              template: "group_leave_result",
+            }]
+          : []),
       ]
     : [];
   const reclaimPredicates = [

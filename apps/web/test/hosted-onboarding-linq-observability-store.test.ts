@@ -1415,6 +1415,50 @@ describe("hosted Linq observability stores", () => {
     );
   });
 
+  it("reclaims an unresolved group leave provider claim through stable Linq idempotency", async () => {
+    const fixture = createObservabilityPrismaFixture();
+    const attemptedAt = new Date("2026-03-26T12:00:01.000Z");
+    fixture.hostedLinqDeliveryFindUnique.mockResolvedValueOnce({
+      acceptedAt: null,
+      attemptedAt: new Date("2026-03-26T12:00:00.000Z"),
+      deliveredAt: null,
+      failedAt: null,
+      id: "hld_started_group_leave",
+      lastReceiptAt: null,
+      messageLookupKey: null,
+      phoneNumberLookupKey: null,
+      skippedAt: null,
+      source: "hosted_webhook_side_effect",
+      status: "provider_dispatch_started",
+    });
+    fixture.hostedLinqDeliveryUpdateMany.mockResolvedValueOnce({ count: 1 });
+
+    await expect(claimHostedLinqDeliveryProviderDispatchTx({
+      attemptedAt,
+      idempotencyKey: "linq-message:event-leave-1",
+      linqChatId: "chat_123",
+      prisma: fixture.prisma as never,
+      source: "hosted_webhook_side_effect",
+      sourceRef: "linq-message:event-leave-1",
+      targetKind: "thread",
+      template: "group_leave_result",
+    })).resolves.toEqual({
+      claimed: true,
+      id: "hld_started_group_leave",
+    });
+
+    expect(fixture.hostedLinqDeliveryUpdateMany).toHaveBeenCalledWith(
+      expect.objectContaining({
+        where: expect.objectContaining({
+          OR: expect.arrayContaining([{
+            status: "provider_dispatch_started",
+            template: "group_leave_result",
+          }]),
+        }),
+      }),
+    );
+  });
+
   it("does not let Telegram usage notices reclaim stale webhook dispatch-started rows", async () => {
     const fixture = createObservabilityPrismaFixture();
     const attemptedAt = new Date("2026-03-26T12:30:00.000Z");

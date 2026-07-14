@@ -871,6 +871,13 @@ export const assistantOutboxIntentSchema = z
     deliveryConfirmationPending: z.boolean().default(false),
     deliveryIdempotencyKey: z.string().min(1).nullable().default(null),
     deliveryTransportIdempotent: z.boolean().default(false),
+    deliveryValidity: z.discriminatedUnion('kind', [
+      z.object({
+        kind: z.literal('hosted_group_membership_epoch'),
+        joinedAt: isoTimestampSchema,
+        membershipId: z.string().trim().min(1),
+      }).strict(),
+    ]).nullable().optional(),
     answeredMailboxItemIds: z.array(z.string().trim().min(1))
       .max(ASSISTANT_ANSWERED_MAILBOX_ITEM_ID_LIMIT)
       .default([]),

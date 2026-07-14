@@ -22,6 +22,7 @@ import {
   buildHostedActionApprovalOutcomeEffectId,
 } from "@murphai/hosted-execution/action-approval";
 import { VaultCliError } from "@murphai/operator-config/vault-cli-errors";
+import { assistantOutboxIntentSchema } from "@murphai/operator-config/assistant-cli-contracts";
 import {
   parseHostedEmailThreadTarget,
   serializeHostedEmailThreadTarget,
@@ -6509,6 +6510,63 @@ describe("hosted runtime callbacks", () => {
       }),
     );
     vi.useRealTimers();
+  });
+
+  it("abandons a queued group confirmation when its membership epoch is stale at dispatch", async () => {
+    const effect = createEffect({ transportIdempotent: true });
+    const intent = assistantOutboxIntentSchema.parse(createPendingHostedDeliveryIntent({
+      answeredMailboxItemIds: [],
+      attemptCount: 0,
+      delivery: null,
+      deliveryConfirmationPending: false,
+      deliverySource: null,
+      deliveryValidity: {
+        kind: "hosted_group_membership_epoch",
+        joinedAt: "2026-04-08T00:00:00.000Z",
+        membershipId: "membership_123",
+      },
+      intentId: effect.effectId,
+      lastAttemptAt: null,
+      media: [],
+      operation: null,
+      preparedDispatchToken: null,
+      schema: "murph.assistant-outbox-intent.v1",
+      sentAt: null,
+      updatedAt: "2026-04-08T00:01:00.000Z",
+    }));
+    const abandoned = { ...intent, status: "abandoned" };
+    mocks.markAssistantOutboxIntentMirrorTerminalById.mockResolvedValueOnce(abandoned);
+    mocks.dispatchAssistantOutboxIntent.mockImplementationOnce(async (request) => {
+      const preflight = await request.dispatchHooks?.preflightDispatchIntent?.({
+        intent,
+        now: new Date("2026-04-08T00:10:00.000Z"),
+        vault: HOSTED_WAKE.vaultRoot,
+      });
+      expect(preflight).toEqual({ action: "stop", intent: abandoned });
+      return createDispatchResult({ status: "abandoned" });
+    });
+    const assertHostedGroupMembershipEpoch = vi.fn().mockResolvedValue({ active: false });
+
+    await drainHostedPreparedAssistantDeliveries({
+      assistantDeliveryEffects: [effect],
+      effectsPort: {
+        ...createHostedRuntimeEffectsPortStub(),
+        assertHostedGroupMembershipEpoch,
+      },
+      vaultRoot: HOSTED_WAKE.vaultRoot,
+      wake: HOSTED_WAKE.wake,
+    });
+
+    expect(assertHostedGroupMembershipEpoch).toHaveBeenCalledWith({
+      joinedAt: "2026-04-08T00:00:00.000Z",
+      membershipId: "membership_123",
+    });
+    expect(mocks.markAssistantOutboxIntentMirrorTerminalById).toHaveBeenCalledWith(
+      expect.objectContaining({
+        intentId: effect.effectId,
+        status: "abandoned",
+      }),
+    );
   });
 
   it("retries a stale idempotent sending intent without prepared ownership", async () => {

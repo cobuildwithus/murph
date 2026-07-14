@@ -53,9 +53,8 @@ export function buildHostedLinqGroupLeaveResultReply(
 ): string {
   switch (result) {
     case "left":
-      return "You're out of this group. Your active membership and shares are off, and cleanup of the group's shared copy is queued.";
     case "already_left":
-      return "You're already out of this group. Any remaining cleanup of the group's shared copy will keep running.";
+      return "You're out of this group. Your active membership and shares are off, and any remaining cleanup of the group's shared copy will keep running.";
     case "owner_cannot_leave":
       return "I couldn't remove you because you're the group owner. The group needs a different owner or must be dissolved first; that control isn't available in this chat yet.";
     case "evidence_conflict":

@@ -2043,13 +2043,44 @@ async function deliverHostedPreparedAssistantDelivery(input: {
     assertHostedBackgroundDeliveryNotYielded(input);
     const dispatched = await dispatchAssistantOutboxIntent({
       dispatchHooks: {
-        preflightDispatchIntent: async ({ intent, now: preflightNow, vault }) =>
-          preflightHostedAssistantVaultFileDispatch({
+        preflightDispatchIntent: async ({ intent, now: preflightNow, vault }) => {
+          const vaultFilePreflight = await preflightHostedAssistantVaultFileDispatch({
             actionApprovalPort: input.actionApprovalPort,
             intent,
             now: preflightNow,
             vaultRoot: vault,
-          }),
+          });
+          if (vaultFilePreflight.action !== "continue") {
+            return vaultFilePreflight;
+          }
+          if (intent.deliveryValidity?.kind !== "hosted_group_membership_epoch") {
+            return { action: "continue" };
+          }
+          const assertEpoch = input.effectsPort.assertHostedGroupMembershipEpoch;
+          const epoch = assertEpoch
+            ? await assertEpoch({
+                joinedAt: intent.deliveryValidity.joinedAt,
+                membershipId: intent.deliveryValidity.membershipId,
+              })
+            : { active: false };
+          if (epoch.active) {
+            return { action: "continue" };
+          }
+          const stopped = await markAssistantOutboxIntentMirrorTerminalById({
+            error: new Error("Hosted group membership epoch is superseded."),
+            failedAt: preflightNow,
+            intentId: intent.intentId,
+            onlyCurrentStatuses: [intent.status],
+            status: "abandoned",
+            vault,
+          });
+          if (!stopped) {
+            throw new Error(
+              "Hosted group membership epoch could not be durably superseded.",
+            );
+          }
+          return { action: "stop", intent: stopped };
+        },
         shouldRethrowDispatchError: ({ error }) =>
           input.preparedDispatch !== null
           && isHostedBackgroundDeliveryYieldedError(error),

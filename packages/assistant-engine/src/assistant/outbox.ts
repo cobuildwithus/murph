@@ -236,6 +236,7 @@ export type AssistantOutboxCreateIntentInput = {
   deliveryIdempotencyKey?: string | null
   deliverySource?: AssistantDeliverySource | null
   deliveryTransportIdempotent?: boolean
+  deliveryValidity?: AssistantOutboxIntent['deliveryValidity']
   explicitTarget?: string | null
   identityId?: string | null
   initialState?:
@@ -334,17 +335,24 @@ export async function createAssistantOutboxIntent(
         answeredMailboxItemIds,
         intent: idempotencyUpgradedExisting,
       })
+      const validityUpgradedExisting = input.deliveryValidity && !answeredItemsUpgradedExisting.deliveryValidity
+        ? assistantOutboxIntentSchema.parse({
+            ...answeredItemsUpgradedExisting,
+            deliveryValidity: input.deliveryValidity,
+            updatedAt: createdAt,
+          })
+        : answeredItemsUpgradedExisting
       const upgradedExisting = operation
         ? maybeUpgradeAssistantOutboxIntentReactionOperation({
             deliveryTransportIdempotent,
-            intent: answeredItemsUpgradedExisting,
+            intent: validityUpgradedExisting,
             operation,
             persistedTarget,
             rawTargetIdentity,
             updatedAt: createdAt,
           })
         : maybeUpgradeAssistantOutboxIntentPreDispatchTarget({
-            intent: answeredItemsUpgradedExisting,
+            intent: validityUpgradedExisting,
             persistedTarget,
             rawTargetIdentity,
             updatedAt: createdAt,
@@ -399,6 +407,7 @@ export async function createAssistantOutboxIntent(
       deliveryConfirmationPending: false,
       deliveryIdempotencyKey,
       deliveryTransportIdempotent,
+      deliveryValidity: input.deliveryValidity ?? null,
       answeredMailboxItemIds,
       lastError: null,
     })
@@ -1023,6 +1032,7 @@ export async function deliverAssistantOutboxMessage(input: {
   deliveryIdempotencyKey?: string | null
   deliverySource?: AssistantDeliverySource | null
   deliveryTransportIdempotent?: boolean
+  deliveryValidity?: AssistantOutboxIntent['deliveryValidity']
   dependencies?: AssistantChannelDependencies
   dispatchHooks?: AssistantOutboxDispatchHooks
   dispatchMode?: AssistantOutboxDispatchMode
@@ -1050,6 +1060,7 @@ export async function deliverAssistantOutboxMessage(input: {
     deliveryIdempotencyKey: input.deliveryIdempotencyKey,
     deliverySource: input.deliverySource ?? null,
     deliveryTransportIdempotent: input.deliveryTransportIdempotent,
+    deliveryValidity: input.deliveryValidity,
     explicitTarget: input.explicitTarget,
     identityId: input.identityId,
     media: input.media,
