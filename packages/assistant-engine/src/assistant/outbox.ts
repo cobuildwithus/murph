@@ -47,6 +47,7 @@ import {
 import {
   createAssistantDeliveryAmbiguousError,
   createAssistantDeliveryConfirmationPendingError,
+  isAssistantHostedControlPlaneResponseUnavailable,
   isAssistantOutboxRetryableError,
   normalizeAssistantDeliveryError,
   shouldBeginAssistantOutboxDispatch,
@@ -108,6 +109,7 @@ export {
 export {
   createAssistantDeliveryAmbiguousError,
   errorImpliesAssistantDeliveryMayHaveSucceeded,
+  isAssistantHostedControlPlaneResponseUnavailable,
   isAssistantOutboxRetryableError,
   normalizeAssistantDeliveryError,
   shouldDispatchAssistantOutboxIntent,

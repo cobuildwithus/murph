@@ -191,7 +191,7 @@ export function createCloudflareEffectsPort(input: {
             return parseHostedRuntimeLinqRecentInboundEngagementResult(payload);
           },
           async recordLinqDeliveryOutcome(request, context) {
-            await fetchHostedWebControlPlaneJson({
+            const payload = await fetchHostedWebControlPlaneJson({
               body: request,
               boundUserId: input.boundUserId,
               description: "Hosted Linq delivery outcome recording",
@@ -205,6 +205,7 @@ export function createCloudflareEffectsPort(input: {
               timeoutMs: input.timeoutMs,
               transport: webControlTransport,
             });
+            return parseHostedRuntimeLinqDeliveryOutcomeResult(payload);
           },
         }
       : {}),
@@ -276,6 +277,38 @@ function parseHostedRuntimeLinqRecentInboundEngagementResult(
     };
   }
   return result;
+}
+
+function parseHostedRuntimeLinqDeliveryOutcomeResult(value: unknown): {
+  providerDispatchClaimReleased?: boolean | null;
+  recorded: boolean;
+} {
+  if (!value || typeof value !== "object" || Array.isArray(value)) {
+    throw new TypeError("Hosted Linq delivery outcome result must be an object.");
+  }
+
+  const response = value as Record<string, unknown>;
+  if (typeof response.recorded !== "boolean") {
+    throw new TypeError("Hosted Linq delivery outcome result recorded must be a boolean.");
+  }
+
+  const providerDispatchClaimReleased = response.providerDispatchClaimReleased;
+  if (
+    providerDispatchClaimReleased !== undefined
+    && providerDispatchClaimReleased !== null
+    && typeof providerDispatchClaimReleased !== "boolean"
+  ) {
+    throw new TypeError(
+      "Hosted Linq delivery outcome result providerDispatchClaimReleased must be a boolean or null.",
+    );
+  }
+
+  return {
+    recorded: response.recorded,
+    ...(providerDispatchClaimReleased === undefined
+      ? {}
+      : { providerDispatchClaimReleased }),
+  };
 }
 
 function readOptionalHostedEmailDeliverySummary(

@@ -42,6 +42,10 @@ export const POST = withJsonError(async (request: Request) => {
   const idempotencyKey = readOptionalBodyString(body.idempotencyKey);
   const authorityCheckOnly = body.authorityCheckOnly === true;
   const intentId = readOptionalBodyString(body.intentId);
+  const providerDispatchClaimAttemptedAt =
+    parseOptionalProviderDispatchClaimAttemptedAt(
+      body.providerDispatchClaimAttemptedAt,
+    );
   const replyToMessageId = readOptionalBodyString(body.replyToMessageId);
   const target = readOptionalBodyString(body.target);
   const targetKind = readOptionalBodyString(body.targetKind);
@@ -115,6 +119,9 @@ export const POST = withJsonError(async (request: Request) => {
         });
       }
       const claim = await recordHostedLinqRuntimeProviderDispatchFenceTx({
+        ...(providerDispatchClaimAttemptedAt
+          ? { attemptedAt: providerDispatchClaimAttemptedAt }
+          : {}),
         idempotencyKey: providerDispatchIdempotencyKey,
         linqChatId: providerTargetKind === "participant" ? null : providerTarget,
         phoneNumber: fromPhoneNumber,
@@ -152,6 +159,25 @@ export const POST = withJsonError(async (request: Request) => {
 function readOptionalBodyString(value: unknown): string | null {
   const normalized = typeof value === "string" ? value.trim() : "";
   return normalized.length > 0 ? normalized : null;
+}
+
+function parseOptionalProviderDispatchClaimAttemptedAt(
+  value: unknown,
+): Date | null {
+  if (value === undefined || value === null) {
+    return null;
+  }
+  const raw = readOptionalBodyString(value);
+  const attemptedAt = raw ? new Date(raw) : null;
+  if (!attemptedAt || !Number.isFinite(attemptedAt.getTime())) {
+    throw hostedOnboardingError({
+      code: "HOSTED_LINQ_PROVIDER_DISPATCH_CLAIM_ATTEMPTED_AT_INVALID",
+      httpStatus: 400,
+      message: "Hosted Linq provider dispatch claim timestamp is invalid.",
+      retryable: false,
+    });
+  }
+  return attemptedAt;
 }
 
 function parseAnsweredMailboxItemIds(value: unknown): string[] {

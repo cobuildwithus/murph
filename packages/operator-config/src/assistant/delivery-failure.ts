@@ -95,6 +95,13 @@ export function readAssistantDeliveryFailureClass(
   )
 }
 
+export function readAssistantDeliveryMayHaveSucceeded(
+  error: unknown,
+): boolean | null {
+  const value = readRecord(error)?.deliveryMayHaveSucceeded
+  return typeof value === 'boolean' ? value : null
+}
+
 function readAssistantDeliveryFailureClassValue(
   value: unknown,
 ): AssistantDeliveryFailureClass | null {

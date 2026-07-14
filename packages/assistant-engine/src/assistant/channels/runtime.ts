@@ -41,6 +41,7 @@ import {
 import { VaultCliError } from '@murphai/operator-config/vault-cli-errors'
 import {
   createAssistantDeliveryTransientError,
+  readAssistantDeliveryMayHaveSucceeded,
 } from '@murphai/operator-config/assistant/delivery-failure'
 import {
   renderMarkdownMessageText,
@@ -1894,6 +1895,9 @@ async function sendTelegramTextChunkOnce(input: {
       ...result,
     }
   } catch (error) {
+    if (readAssistantDeliveryMayHaveSucceeded(error) === false) {
+      throw error
+    }
     return {
       kind: 'request-error',
       failure: Object.assign(
@@ -1988,6 +1992,9 @@ async function sendTelegramPhotoOnce(input: {
       ...result,
     }
   } catch (error) {
+    if (readAssistantDeliveryMayHaveSucceeded(error) === false) {
+      throw error
+    }
     return {
       kind: 'request-error',
       failure: Object.assign(
@@ -2043,6 +2050,9 @@ async function sendTelegramVoiceMemoOnce(input: {
       ...result,
     }
   } catch (error) {
+    if (readAssistantDeliveryMayHaveSucceeded(error) === false) {
+      throw error
+    }
     return {
       kind: 'request-error',
       failure: createTelegramVoiceMemoAmbiguousDeliveryFailure({

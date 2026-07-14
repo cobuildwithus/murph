@@ -205,6 +205,78 @@ describe('assistant outbox dispatch-state', () => {
     })
   })
 
+  it('abandons every non-idempotent delivery that may already have reached its provider', async () => {
+    await withTempVault(async (vault) => {
+      const sending = await createSendingIntent({
+        attemptCount: 1,
+        channel: 'whatsapp',
+        vault,
+      })
+      const paths = resolveAssistantStatePaths(vault)
+
+      const abandoned = await updateAssistantOutboxAfterDispatchFailure({
+        deliveryMayHaveSucceeded: true,
+        deliveryTransportIdempotent: false,
+        error: Object.assign(new Error('WhatsApp provider response was lost'), {
+          code: 'ASSISTANT_WHATSAPP_REQUEST_FAILED',
+          deliveryMayHaveSucceeded: true,
+          retryable: false,
+        }),
+        failedAt: new Date('2030-04-13T00:01:30.000Z'),
+        intentPath: resolveAssistantOutboxIntentPath(paths.outboxDirectory, sending.intentId),
+        sending,
+        vault,
+      })
+
+      expect(abandoned.status).toBe('abandoned')
+      expect(abandoned.delivery).toBeNull()
+      expect(abandoned.deliveryConfirmationPending).toBe(false)
+      expect(abandoned.deliveryTransportIdempotent).toBe(false)
+      expect(abandoned.nextAttemptAt).toBeNull()
+      expect(abandoned.lastError?.code).toBe('ASSISTANT_DELIVERY_AMBIGUOUS')
+
+      const diagnostics = await readAssistantDiagnosticsSnapshot(vault)
+      expect(diagnostics.counters.deliveriesFailed).toBe(1)
+      expect(diagnostics.counters.deliveriesRetryable).toBe(0)
+      expect(diagnostics.counters.outboxRetries).toBe(0)
+    })
+  })
+
+  it('keeps equivalent may-have-succeeded idempotent delivery retryable for confirmation', async () => {
+    await withTempVault(async (vault) => {
+      const sending = await createSendingIntent({
+        attemptCount: 1,
+        channel: 'whatsapp',
+        deliveryTransportIdempotent: true,
+        vault,
+      })
+      const paths = resolveAssistantStatePaths(vault)
+
+      const retryable = await updateAssistantOutboxAfterDispatchFailure({
+        deliveryMayHaveSucceeded: true,
+        deliveryTransportIdempotent: true,
+        error: Object.assign(new Error('idempotent provider response was lost'), {
+          deliveryMayHaveSucceeded: true,
+          retryable: false,
+        }),
+        failedAt: new Date('2030-04-13T00:01:45.000Z'),
+        intentPath: resolveAssistantOutboxIntentPath(paths.outboxDirectory, sending.intentId),
+        sending,
+        vault,
+      })
+
+      expect(retryable.status).toBe('retryable')
+      expect(retryable.deliveryConfirmationPending).toBe(true)
+      expect(retryable.deliveryTransportIdempotent).toBe(true)
+      expect(retryable.nextAttemptAt).not.toBeNull()
+      expect(retryable.lastError?.code).toBe('ASSISTANT_DELIVERY_CONFIRMATION_PENDING')
+
+      const diagnostics = await readAssistantDiagnosticsSnapshot(vault)
+      expect(diagnostics.counters.deliveriesRetryable).toBe(1)
+      expect(diagnostics.counters.outboxRetries).toBe(1)
+    })
+  })
+
   it('abandons a superseded email group recipient without claiming provider ambiguity', async () => {
     await withTempVault(async (vault) => {
       const sending = await createSendingIntent({

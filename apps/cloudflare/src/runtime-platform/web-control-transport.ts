@@ -32,6 +32,9 @@ import {
   type HostedWorkspaceCheckpointBridgeAuthority,
 } from "./authority-headers.ts";
 
+const HOSTED_RUNTIME_CONTROL_PLANE_RESPONSE_UNAVAILABLE_MARKER =
+  "hostedRuntimeControlPlaneResponseUnavailable";
+
 export type HostedWebControlTransport =
   | {
     callbackSigning: HostedWebCallbackSigningEnvironment;
@@ -314,7 +317,15 @@ export async function fetchHostedWebControlPlaneJson(input: {
     throw error;
   }
 
-  const text = await response.text();
+  let text: string;
+  try {
+    text = await response.text();
+  } catch (error) {
+    throw createHostedWebControlPlaneResponseUnreadableError({
+      cause: error,
+      description: input.description,
+    });
+  }
   if (!text.trim()) {
     return null;
   }
@@ -338,8 +349,25 @@ export async function fetchHostedWebControlPlaneJson(input: {
       phase: "runtime.starting",
       userId: input.boundUserId,
     });
-    throw new Error(`${input.description} returned invalid JSON.`, { cause: error });
+    throw createHostedWebControlPlaneResponseUnreadableError({
+      cause: error,
+      description: input.description,
+    });
   }
+}
+
+function createHostedWebControlPlaneResponseUnreadableError(input: {
+  cause: unknown;
+  description: string;
+}): Error & { hostedRuntimeControlPlaneResponseUnavailable: true } {
+  return Object.assign(
+    new Error(`${input.description} response could not be read.`, {
+      cause: input.cause,
+    }),
+    {
+      [HOSTED_RUNTIME_CONTROL_PLANE_RESPONSE_UNAVAILABLE_MARKER]: true as const,
+    },
+  );
 }
 
 function createHostedWebControlPlaneResponseError(input: {

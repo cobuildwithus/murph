@@ -11,6 +11,7 @@ import {
 } from "@/src/lib/hosted-onboarding/contact-privacy";
 import {
   recordHostedLinqRuntimeDeliveryOutcomeTx,
+  releaseHostedLinqRuntimeProviderDispatchFenceTx,
 } from "@/src/lib/hosted-onboarding/linq-delivery-store";
 import {
   hostedOnboardingError,
@@ -38,6 +39,7 @@ export const POST = withJsonError(async (request: Request) => {
   const runtimeAttemptId = request.headers.get(HOSTED_RUNTIME_ATTEMPT_ID_HEADER)?.trim() ?? "";
   const body = await readOptionalJsonObject(request);
   const prisma = getPrisma();
+  const providerDispatchClaimRelease = body.providerDispatchClaimRelease === true;
   const targetKind = parseHostedLinqDeliveryTargetKind(body.targetKind);
   const acceptedAt = parseOptionalHostedLinqDeliveryDate(
     body.acceptedAt,
@@ -65,11 +67,43 @@ export const POST = withJsonError(async (request: Request) => {
       retryable: false,
     });
   }
+  if (providerDispatchClaimRelease && (!failedAt || acceptedAt)) {
+    throw hostedOnboardingError({
+      code: "HOSTED_LINQ_PROVIDER_DISPATCH_CLAIM_RELEASE_OUTCOME_INVALID",
+      httpStatus: 400,
+      message: "Hosted Linq provider dispatch claim release requires failed proof only.",
+      retryable: false,
+    });
+  }
 
   const attemptedAt = parseRequiredHostedLinqDeliveryDate(
     body.attemptedAt,
     "attemptedAt",
   );
+  const idempotencyKey = readOptionalBodyString(body.idempotencyKey);
+  const sourceRef = readOptionalBodyString(body.intentId) ?? idempotencyKey;
+  if (providerDispatchClaimRelease && failedAt) {
+    const release = await releaseHostedLinqRuntimeProviderDispatchFenceTx({
+      attemptedAt,
+      failedAt,
+      idempotencyKey: idempotencyKey ?? "",
+      prisma,
+      sourceRef: sourceRef ?? "",
+    });
+    if (!release.released) {
+      throw hostedOnboardingError({
+        code: "HOSTED_LINQ_PROVIDER_DISPATCH_CLAIM_RELEASE_CONFLICT",
+        httpStatus: 409,
+        message: "Hosted Linq provider dispatch claim could not be released.",
+        retryable: false,
+      });
+    }
+    return jsonOk({
+      ok: true,
+      providerDispatchClaimReleased: true,
+      recorded: true,
+    });
+  }
   const answeredMailboxItemIds = acceptedAt
     ? parseAnsweredMailboxItemIds(body.answeredMailboxItemIds)
     : [];
@@ -95,14 +129,13 @@ export const POST = withJsonError(async (request: Request) => {
     failedAt,
     failureCode: readOptionalBodyString(body.failureCode),
     failureReason: readOptionalBodyString(body.failureReason),
-    idempotencyKey: readOptionalBodyString(body.idempotencyKey),
+    idempotencyKey,
     linqChatId,
     messageId: readOptionalBodyString(body.providerMessageId),
     phoneNumber: routeLineLookupKey ? null : fromPhoneNumber,
     phoneNumberLookupKey: routeLineLookupKey,
     prisma,
-    sourceRef: readOptionalBodyString(body.intentId)
-      ?? readOptionalBodyString(body.idempotencyKey),
+    sourceRef,
     targetKind,
     threadIsDirect,
     userId,

@@ -1,6 +1,6 @@
 # Hosted Mailbox Runtime Protocol
 
-Last verified: 2026-07-12
+Last verified: 2026-07-14
 
 ## Decision
 
@@ -876,6 +876,30 @@ present. The Linq HTTP layer may retry those POST sends on transient transport,
 408, or 5xx failures, and the hosted outbox must keep such failures retryable
 instead of terminal. Non-idempotent POST sends still fail closed unless the
 provider confirms a safe retry contract.
+For a non-idempotent Linq reaction or voice-memo send, a web-owned
+`provider_dispatch_started` claim is part of the same pre-egress state as the
+local outbox claim. If the final authority check yields after an acknowledged
+claim, or the claim response becomes unavailable before provider entry, the
+runtime must synchronously release that exact unused provider-dispatch claim
+through the existing Linq delivery-outcome boundary before it restores or
+retries the local outbox state. Definitive web rejections and a known existing
+claim are not releasable. The release compare-and-set must match the exact
+claim-attempt timestamp supplied when the runtime acquired the claim, so a
+lost response cannot release a pre-existing claim from another attempt. Only
+an exact release acknowledgement permits local retry. Missing, conflicting,
+timed-out, or failed release proof remains terminally ambiguous and must not
+trigger an automatic resend.
+
+WhatsApp sends are non-idempotent. A raw transport failure after provider entry,
+including one concurrent with caller abort, is terminally ambiguous and must
+not trigger an automatic resend. An explicit HTTP response keeps its
+response-specific retry semantics, and exact proof that egress never began
+keeps the existing safe pre-provider retry path.
+
+Deploy the Linq claim-release contract web first, then deploy the Cloudflare
+runner that sends the optional release marker and requires the exact
+acknowledgement. Older runners omit the marker and remain compatible with the
+new web endpoint during the rollout window.
 
 This is the deploy/reset recovery contract. If a Cloudflare Durable Object,
 worker isolate, or runner container resets after local mailbox staging but

@@ -449,6 +449,37 @@ describe('assistant channels runtime seam', () => {
     expect(fetchImplementation).toHaveBeenCalledTimes(1)
   })
 
+  it('preserves explicit no-egress proof across Telegram text delivery', async () => {
+    const preProviderError = Object.assign(
+      new Error('provider entry rejected before sendMessage'),
+      {
+        deliveryMayHaveSucceeded: false as const,
+        retryable: true as const,
+      },
+    )
+    const fetchImplementation = vi.fn(async () => {
+      throw preProviderError
+    })
+
+    await expect(
+      sendTelegramMessage(
+        {
+          message: 'hello',
+          target: '123',
+        },
+        {
+          env: {
+            TELEGRAM_API_BASE_URL: 'https://telegram.test/',
+            TELEGRAM_BOT_TOKEN: 'bot-token',
+          },
+          fetchImplementation,
+        },
+      ),
+    ).rejects.toBe(preProviderError)
+
+    expect(fetchImplementation).toHaveBeenCalledTimes(1)
+  })
+
   it('keeps the Telegram provider deadline active through response body consumption', async () => {
     vi.useFakeTimers()
     const fetchImplementation = vi.fn<typeof fetch>((_input, init) => {
@@ -722,6 +753,83 @@ describe('assistant channels runtime seam', () => {
     })
   })
 
+  it('keeps ordinary Telegram image transport failures ambiguous', async () => {
+    const fetchImplementation = vi.fn(async () => {
+      throw new Error('socket closed after sendPhoto request')
+    })
+
+    await expect(
+      sendTelegramImageMessage(
+        {
+          media: [
+            {
+              alt: 'Example image',
+              kind: 'image',
+              source: 'test',
+              url: 'https://cdn.example.test/example.png',
+            },
+          ],
+          message: 'Here is an image.',
+          target: '123',
+        },
+        {
+          env: {
+            TELEGRAM_API_BASE_URL: 'https://telegram.test/',
+            TELEGRAM_BOT_TOKEN: 'bot-token',
+          },
+          fetchImplementation,
+        },
+      ),
+    ).rejects.toMatchObject({
+      code: 'ASSISTANT_TELEGRAM_DELIVERY_AMBIGUOUS',
+      deliveryMayHaveSucceeded: true,
+      providerMessageId: null,
+      providerMessageIds: [],
+      target: '123',
+    })
+
+    expect(fetchImplementation).toHaveBeenCalledTimes(1)
+  })
+
+  it('preserves explicit no-egress proof across Telegram image delivery', async () => {
+    const preProviderError = Object.assign(
+      new Error('provider entry rejected before sendPhoto'),
+      {
+        deliveryMayHaveSucceeded: false as const,
+        retryable: true as const,
+      },
+    )
+    const fetchImplementation = vi.fn(async () => {
+      throw preProviderError
+    })
+
+    await expect(
+      sendTelegramImageMessage(
+        {
+          media: [
+            {
+              alt: 'Example image',
+              kind: 'image',
+              source: 'test',
+              url: 'https://cdn.example.test/example.png',
+            },
+          ],
+          message: 'Here is an image.',
+          target: '123',
+        },
+        {
+          env: {
+            TELEGRAM_API_BASE_URL: 'https://telegram.test/',
+            TELEGRAM_BOT_TOKEN: 'bot-token',
+          },
+          fetchImplementation,
+        },
+      ),
+    ).rejects.toBe(preProviderError)
+
+    expect(fetchImplementation).toHaveBeenCalledTimes(1)
+  })
+
   it('generates and sends Telegram voice memos with multipart sendVoice', async () => {
     const fetchImplementation = createQueuedFetch([
       createAudioResponse(mp3Bytes),
@@ -879,6 +987,50 @@ describe('assistant channels runtime seam', () => {
       providerMessageIds: [],
       target: '123',
     })
+
+    expect(fetchImplementation).toHaveBeenCalledTimes(2)
+    expect(fetchImplementation.mock.calls[1]?.[0]).toBe(
+      'https://telegram.test/botbot-token/sendVoice',
+    )
+  })
+
+  it('preserves explicit no-egress proof across Telegram voice memo delivery', async () => {
+    const preProviderError = Object.assign(
+      new Error('provider entry rejected before sendVoice'),
+      {
+        deliveryMayHaveSucceeded: false as const,
+        retryable: true as const,
+      },
+    )
+    const fetchImplementation = createQueuedFetch([
+      createAudioResponse(mp3Bytes),
+      preProviderError,
+    ])
+
+    await expect(
+      sendTelegramVoiceMemoMessage(
+        {
+          filename: 'memo',
+          generation: {
+            kind: 'elevenlabs_speech',
+            modelId: 'eleven_multilingual_v2',
+            outputFormat: 'mp3_44100_128',
+            text: 'Short memo.',
+            voiceId: 'voice_murph',
+          },
+          replyToMessageId: null,
+          target: '123',
+        },
+        {
+          env: {
+            ELEVENLABS_API_KEY: 'elevenlabs-key',
+            TELEGRAM_API_BASE_URL: 'https://telegram.test/',
+            TELEGRAM_BOT_TOKEN: 'bot-token',
+          },
+          fetchImplementation,
+        },
+      ),
+    ).rejects.toBe(preProviderError)
 
     expect(fetchImplementation).toHaveBeenCalledTimes(2)
     expect(fetchImplementation.mock.calls[1]?.[0]).toBe(

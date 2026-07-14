@@ -129,16 +129,22 @@ export async function sendWhatsAppTextMessage(
       },
     }),
     createTransportError: ({ error, timedOut }) =>
-      new VaultCliError(
-        'ASSISTANT_WHATSAPP_REQUEST_FAILED',
-        'WhatsApp Cloud API send request failed before a response was received.',
+      Object.assign(
+        new VaultCliError(
+          'ASSISTANT_WHATSAPP_REQUEST_FAILED',
+          'WhatsApp Cloud API send request failed before a response was received.',
+          {
+            failureStage: 'transport',
+            operation: 'send_text',
+            provider: 'whatsapp',
+            retryable: false,
+            timedOut,
+            transportError: describeWhatsAppUnknownError(error),
+          },
+        ),
         {
-          failureStage: 'transport',
-          operation: 'send_text',
-          provider: 'whatsapp',
-          retryable: true,
-          timedOut,
-          transportError: describeWhatsAppUnknownError(error),
+          deliveryMayHaveSucceeded: true as const,
+          retryable: false as const,
         },
       ),
     fetchImplementation,
@@ -148,6 +154,7 @@ export async function sendWhatsAppTextMessage(
     },
     method: 'POST',
     signal: dependencies.signal,
+    treatCallerAbortAsTransportAmbiguity: true,
     timeoutMs: WHATSAPP_SEND_TIMEOUT_MS,
     url,
   })

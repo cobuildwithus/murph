@@ -209,6 +209,7 @@ export interface HostedRuntimeLinqRecentInboundEngagementRequest {
   homeRouteFallbackAllowed?: boolean | null;
   idempotencyKey?: string | null;
   intentId?: string | null;
+  providerDispatchClaimAttemptedAt?: string | null;
   replyToMessageId?: string | null;
   target: string | null;
   targetKind?: HostedRuntimeProviderTargetKind | null;
@@ -235,12 +236,18 @@ export interface HostedRuntimeLinqDeliveryOutcomeRequest {
   idempotencyKey?: string | null;
   intentId?: string | null;
   lineLookupKey?: string | null;
+  providerDispatchClaimRelease?: boolean | null;
   providerMessageId?: string | null;
   providerTarget?: string | null;
   providerThreadId?: string | null;
   target: string | null;
   targetKind?: HostedRuntimeProviderTargetKind | null;
   threadIsDirect?: boolean | null;
+}
+
+export interface HostedRuntimeLinqDeliveryOutcomeResult {
+  providerDispatchClaimReleased?: boolean | null;
+  recorded: boolean;
 }
 
 export interface HostedRuntimeWhatsAppSendRequest {
@@ -306,7 +313,7 @@ type HostedRuntimeEffectsPortBase = {
   recordLinqDeliveryOutcome?(
     request: HostedRuntimeLinqDeliveryOutcomeRequest,
     context?: { signal?: AbortSignal | null },
-  ): Promise<void>;
+  ): Promise<HostedRuntimeLinqDeliveryOutcomeResult | void>;
   sendEmail(
     request: HostedEmailSendRequest,
     context?: {

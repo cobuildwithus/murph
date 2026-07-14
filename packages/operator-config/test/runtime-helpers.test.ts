@@ -1334,6 +1334,36 @@ test('fetchJsonResponse forwards the timeout signal and wraps transport failures
   )
 })
 
+test('fetchJsonResponse preserves explicit no-egress proof by identity', async () => {
+  const preProviderError = Object.assign(
+    new Error('provider entry rejected before transport'),
+    {
+      deliveryMayHaveSucceeded: false as const,
+      retryable: true as const,
+    },
+  )
+  let createTransportErrorCalled = false
+
+  await assert.rejects(
+    () =>
+      fetchJsonResponse({
+        createTransportError: () => {
+          createTransportErrorCalled = true
+          return new Error('explicit no-egress proof should not be wrapped')
+        },
+        fetchImplementation: async () => {
+          throw preProviderError
+        },
+        headers: {},
+        method: 'GET',
+        timeoutMs: 1_000,
+        url: 'https://example.test/resource',
+      }),
+    (error) => error === preProviderError,
+  )
+  assert.equal(createTransportErrorCalled, false)
+})
+
 test('runtime unavailable helpers preserve the public operator-config error contract', () => {
   assert.deepEqual([...RUNTIME_PACKAGES], [
     '@murphai/core',

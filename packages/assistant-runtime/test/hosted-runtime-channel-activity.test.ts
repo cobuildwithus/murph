@@ -3,7 +3,13 @@ import assert from "node:assert/strict";
 import { beforeEach, expect, test, vi } from "vitest";
 
 import {
+  createAssistantOutboxIntent,
+  readAssistantOutboxIntent,
+  saveAssistantOutboxIntent,
+} from "@murphai/assistant-engine";
+import {
   buildHostedExecutionLinqConversationMessageWake,
+  buildHostedExecutionRuntimeTimerWake,
 } from "@murphai/hosted-execution";
 import type {
   HostedRuntimeLatencyTraceRequest,
@@ -45,7 +51,10 @@ vi.mock("../src/hosted-provider-effects.ts", () => ({
 }));
 
 import {
+  collectHostedAssistantDeliverySideEffects,
   createHostedAssistantProgressDeliveryDependencies,
+  drainHostedPreparedAssistantDeliveries,
+  prepareHostedAssistantDeliveryEffectsForDispatch,
 } from "../src/hosted-runtime/callbacks.ts";
 import {
   recordHostedAssistantMilestonesBestEffort,
@@ -55,6 +64,10 @@ import {
   buildHostedTelegramChannelEnv,
   createHostedAssistantChannelTypingDependencies,
 } from "../src/hosted-runtime/channel-activity.ts";
+import {
+  createHostedRuntimeEffectsPortStub,
+  createHostedRuntimeWorkspace,
+} from "./hosted-runtime-test-helpers.ts";
 
 beforeEach(() => {
   vi.useRealTimers();
@@ -745,7 +758,7 @@ test("hosted progress delivery dependencies use the hosted Linq provider effect"
   });
 });
 
-test("hosted progress Telegram delivery rechecks authority after async provider preparation", async () => {
+test("hosted progress Telegram delivery preserves a proven pre-provider authority yield", async () => {
   const rawProviderFetch = vi.fn<typeof fetch>(async () =>
     new Response(null, { status: 204 })
   );
@@ -801,15 +814,567 @@ test("hosted progress Telegram delivery rechecks authority after async provider 
   finishAsyncPreparation();
 
   await assert.rejects(sendPromise, {
-    code: "ASSISTANT_TELEGRAM_DELIVERY_AMBIGUOUS",
-    context: {
-      error: "Hosted background delivery yielded to fresh foreground input.",
-      target: "123",
-    },
+    code: "HOSTED_BACKGROUND_DELIVERY_YIELDED",
+    deliveryMayHaveSucceeded: false,
+    retryable: true,
   });
   assert.equal(dispatchWithProviderEntryCurrentCheck.mock.calls.length, 1);
   assert.equal(providerDispatchEntered, false);
   assert.equal(rawProviderFetch.mock.calls.length, 0);
+});
+
+test("hosted background Telegram delivery restores retry state before a later single send", async () => {
+  const workspace = await createHostedRuntimeWorkspace(
+    "murph-hosted-telegram-authority-",
+  );
+  try {
+    const createdIntent = await createAssistantOutboxIntent({
+      channel: "telegram",
+      createdAt: "2026-07-14T00:00:00.000Z",
+      deliveryIdempotencyKey: "telegram-authority-retry",
+      deliveryTransportIdempotent: false,
+      explicitTarget: "123",
+      identityId: "telegram-authority-identity",
+      message: "Retry after the current reply.",
+      sessionId: "telegram-authority-session",
+      threadId: "123",
+      threadIsDirect: true,
+      turnId: "telegram-authority-turn",
+      vault: workspace.vaultRoot,
+    });
+    const retryableIntent = await saveAssistantOutboxIntent(
+      workspace.vaultRoot,
+      {
+        ...createdIntent,
+        attemptCount: 2,
+        lastAttemptAt: "2026-07-14T00:01:00.000Z",
+        lastError: {
+          code: "TELEGRAM_TEMPORARY_FAILURE",
+          message: "Temporary Telegram failure.",
+        },
+        nextAttemptAt: "2026-07-14T00:02:00.000Z",
+        status: "retryable",
+        updatedAt: "2026-07-14T00:01:00.000Z",
+      },
+    );
+    const wake = buildHostedExecutionRuntimeTimerWake({
+      eventId: "telegram-authority-wake",
+      occurredAt: "2026-07-14T00:03:00.000Z",
+      triggerKind: "runtime_timer",
+      userId: "telegram-authority-member",
+    });
+    const rawProviderFetch = vi.fn<typeof fetch>(async () =>
+      Response.json({
+        ok: true,
+        result: {
+          chat: { id: 123 },
+          message_id: 77,
+        },
+      })
+    );
+    let asyncPreparationStartedResolve!: () => void;
+    const asyncPreparationStarted = new Promise<void>((resolve) => {
+      asyncPreparationStartedResolve = resolve;
+    });
+    let finishAsyncPreparation!: () => void;
+    const asyncPreparation = new Promise<void>((resolve) => {
+      finishAsyncPreparation = resolve;
+    });
+    let providerBoundaryCallCount = 0;
+    let providerDispatchEnteredCount = 0;
+    let shouldYield = false;
+    const dispatchWithProviderEntryCurrentCheck = vi.fn(async (
+      request: Parameters<typeof fetch>[0],
+      init: Parameters<typeof fetch>[1],
+      context: {
+        assertProviderEntryCurrent: () => void;
+        onProviderDispatchEntered: () => void;
+      },
+    ) => {
+      providerBoundaryCallCount += 1;
+      if (providerBoundaryCallCount === 1) {
+        asyncPreparationStartedResolve();
+        await asyncPreparation;
+      }
+      context.assertProviderEntryCurrent();
+      context.onProviderDispatchEntered();
+      providerDispatchEnteredCount += 1;
+      return await rawProviderFetch(request, init);
+    });
+    const providerFetch = Object.assign(rawProviderFetch, {
+      dispatchWithProviderEntryCurrentCheck,
+    });
+    const effectsPort = createHostedRuntimeEffectsPortStub();
+    const firstEffects = await collectHostedAssistantDeliverySideEffects({
+      includeBackgroundDueIntents: true,
+      vaultRoot: workspace.vaultRoot,
+    });
+    assert.equal(firstEffects.length, 1);
+    assert.equal(firstEffects[0]?.deliveryPhase, "background_retry");
+
+    const yieldedCounts: number[] = [];
+    const firstDrain = drainHostedPreparedAssistantDeliveries({
+      assistantDeliveryEffects: firstEffects,
+      effectsPort,
+      forwardedEnv: {
+        TELEGRAM_API_BASE_URL: "https://api.telegram.example",
+      },
+      onBackgroundDeliveryYield: ({ yieldedEffectCount }) => {
+        yieldedCounts.push(yieldedEffectCount);
+      },
+      platformEnv: {
+        TELEGRAM_BOT_TOKEN: "platform-telegram-token",
+      },
+      providerFetch,
+      shouldYieldBackgroundDelivery: () => shouldYield,
+      vaultRoot: workspace.vaultRoot,
+      wake,
+    });
+    await asyncPreparationStarted;
+    shouldYield = true;
+    finishAsyncPreparation();
+
+    await expect(firstDrain).resolves.toEqual([]);
+    expect(yieldedCounts).toEqual([1]);
+    expect(providerDispatchEnteredCount).toBe(0);
+    expect(rawProviderFetch).not.toHaveBeenCalled();
+    const restoredIntent = await readAssistantOutboxIntent(
+      workspace.vaultRoot,
+      retryableIntent.intentId,
+    );
+    expect(restoredIntent).not.toBeNull();
+    expect({
+      attemptCount: restoredIntent?.attemptCount,
+      deliveryConfirmationPending:
+        restoredIntent?.deliveryConfirmationPending,
+      deliveryIdempotencyKey: restoredIntent?.deliveryIdempotencyKey,
+      deliveryTransportIdempotent:
+        restoredIntent?.deliveryTransportIdempotent,
+      lastAttemptAt: restoredIntent?.lastAttemptAt,
+      lastError: restoredIntent?.lastError,
+      nextAttemptAt: restoredIntent?.nextAttemptAt,
+      preparedDispatchToken: restoredIntent?.preparedDispatchToken,
+      status: restoredIntent?.status,
+    }).toEqual({
+      attemptCount: retryableIntent.attemptCount,
+      deliveryConfirmationPending:
+        retryableIntent.deliveryConfirmationPending,
+      deliveryIdempotencyKey: retryableIntent.deliveryIdempotencyKey,
+      deliveryTransportIdempotent:
+        retryableIntent.deliveryTransportIdempotent,
+      lastAttemptAt: retryableIntent.lastAttemptAt,
+      lastError: retryableIntent.lastError,
+      nextAttemptAt: retryableIntent.nextAttemptAt,
+      preparedDispatchToken: retryableIntent.preparedDispatchToken,
+      status: retryableIntent.status,
+    });
+
+    shouldYield = false;
+    const secondEffects = await collectHostedAssistantDeliverySideEffects({
+      includeBackgroundDueIntents: true,
+      vaultRoot: workspace.vaultRoot,
+    });
+    const secondOutcomes = await drainHostedPreparedAssistantDeliveries({
+      assistantDeliveryEffects: secondEffects,
+      effectsPort,
+      forwardedEnv: {
+        TELEGRAM_API_BASE_URL: "https://api.telegram.example",
+      },
+      platformEnv: {
+        TELEGRAM_BOT_TOKEN: "platform-telegram-token",
+      },
+      providerFetch,
+      shouldYieldBackgroundDelivery: () => shouldYield,
+      vaultRoot: workspace.vaultRoot,
+      wake,
+    });
+
+    expect(secondOutcomes).toEqual([
+      expect.objectContaining({
+        deliveryChannel: "telegram",
+        deliveryStatus: "sent",
+        providerMessageId: "77",
+      }),
+    ]);
+    expect(dispatchWithProviderEntryCurrentCheck).toHaveBeenCalledTimes(2);
+    expect(providerDispatchEnteredCount).toBe(1);
+    expect(rawProviderFetch).toHaveBeenCalledTimes(1);
+    await expect(
+      readAssistantOutboxIntent(workspace.vaultRoot, retryableIntent.intentId),
+    ).resolves.toMatchObject({
+      attemptCount: retryableIntent.attemptCount + 1,
+      delivery: expect.objectContaining({
+        providerMessageId: "77",
+        target: "123",
+      }),
+      status: "sent",
+    });
+  } finally {
+    await workspace.cleanup();
+  }
+});
+
+test("hosted Telegram voice memo preparation stays before delivery entry", async () => {
+  const workspace = await createHostedRuntimeWorkspace(
+    "murph-hosted-telegram-voice-authority-",
+  );
+  try {
+    const intent = await createAssistantOutboxIntent({
+      channel: "telegram",
+      createdAt: "2026-07-14T00:00:00.000Z",
+      deliveryIdempotencyKey: "telegram-voice-authority",
+      deliveryTransportIdempotent: false,
+      explicitTarget: "123",
+      identityId: "telegram-voice-authority-identity",
+      media: [
+        {
+          filename: "memo.mp3",
+          kind: "voice_memo",
+          transcript: null,
+          transport: {
+            generation: {
+              kind: "elevenlabs_speech",
+              modelId: "eleven_multilingual_v2",
+              outputFormat: "mp3_44100_128",
+              text: "Short memo.",
+              voiceId: "voice_murph",
+            },
+            kind: "telegram_generation",
+          },
+        },
+      ],
+      message: "",
+      sessionId: "telegram-voice-authority-session",
+      threadId: "123",
+      threadIsDirect: true,
+      turnId: "telegram-voice-authority-turn",
+      vault: workspace.vaultRoot,
+    });
+    const effects = await collectHostedAssistantDeliverySideEffects({
+      includeBackgroundDueIntents: true,
+      vaultRoot: workspace.vaultRoot,
+    });
+    const preparation = await prepareHostedAssistantDeliveryEffectsForDispatch({
+      assistantDeliveryEffects: effects,
+      now: () => "2026-07-14T00:03:00.000Z",
+      vaultRoot: workspace.vaultRoot,
+    });
+    assert.equal(effects.length, 1);
+    assert.equal(preparation.preparedDispatches.length, 1);
+
+    const rawProviderFetch = vi.fn<typeof fetch>(async (request) => {
+      const url = String(request);
+      if (url.includes("api.elevenlabs.io/v1/text-to-speech/")) {
+        return new Response(new Uint8Array([1, 2, 3]), {
+          headers: {
+            "content-type": "audio/mpeg",
+          },
+          status: 200,
+        });
+      }
+      throw new Error("Telegram sendVoice crossed the authority fence.");
+    });
+    let shouldYield = false;
+    let yieldedError: unknown = null;
+    const dispatchWithProviderEntryCurrentCheck = vi.fn(async (
+      request: Parameters<typeof fetch>[0],
+      init: Parameters<typeof fetch>[1],
+      context: {
+        assertProviderEntryCurrent: () => void;
+        onProviderDispatchEntered: () => void;
+      },
+    ) => {
+      if (String(request).endsWith("/sendVoice")) {
+        shouldYield = true;
+      }
+      try {
+        context.assertProviderEntryCurrent();
+      } catch (error) {
+        yieldedError = error;
+        throw error;
+      }
+      context.onProviderDispatchEntered();
+      return await rawProviderFetch(request, init);
+    });
+    const yieldedCounts: number[] = [];
+    const outcomes = await drainHostedPreparedAssistantDeliveries({
+      allowPreparedSending: true,
+      assistantDeliveryEffects: effects,
+      effectsPort: createHostedRuntimeEffectsPortStub(),
+      forwardedEnv: {
+        ELEVENLABS_API_KEY: "elevenlabs-key",
+        TELEGRAM_API_BASE_URL: "https://api.telegram.example",
+      },
+      onBackgroundDeliveryYield: ({ yieldedEffectCount }) => {
+        yieldedCounts.push(yieldedEffectCount);
+      },
+      platformEnv: {
+        TELEGRAM_BOT_TOKEN: "platform-telegram-token",
+      },
+      preparedDispatches: preparation.preparedDispatches,
+      providerFetch: Object.assign(rawProviderFetch, {
+        dispatchWithProviderEntryCurrentCheck,
+      }),
+      shouldYieldBackgroundDelivery: () => shouldYield,
+      vaultRoot: workspace.vaultRoot,
+      wake: buildHostedExecutionRuntimeTimerWake({
+        eventId: "telegram-voice-authority-wake",
+        occurredAt: "2026-07-14T00:03:00.000Z",
+        triggerKind: "runtime_timer",
+        userId: "telegram-voice-authority-member",
+      }),
+    });
+
+    expect(outcomes).toEqual([]);
+    expect(yieldedCounts).toEqual([1]);
+    expect(yieldedError).toMatchObject({
+      code: "HOSTED_BACKGROUND_DELIVERY_YIELDED",
+      deliveryMayHaveSucceeded: false,
+      retryable: true,
+    });
+    expect(dispatchWithProviderEntryCurrentCheck).toHaveBeenCalledTimes(2);
+    expect(rawProviderFetch).toHaveBeenCalledTimes(1);
+    expect(String(rawProviderFetch.mock.calls[0]?.[0])).toContain(
+      "api.elevenlabs.io/v1/text-to-speech/voice_murph",
+    );
+    await expect(
+      readAssistantOutboxIntent(workspace.vaultRoot, intent.intentId),
+    ).resolves.toMatchObject({
+      attemptCount: intent.attemptCount,
+      lastAttemptAt: intent.lastAttemptAt,
+      lastError: intent.lastError,
+      nextAttemptAt: intent.nextAttemptAt,
+      preparedDispatchToken: intent.preparedDispatchToken,
+      status: intent.status,
+    });
+  } finally {
+    await workspace.cleanup();
+  }
+});
+
+test("hosted WhatsApp restores a pre-entry yield but abandons caller-aborted post-entry loss", async () => {
+  const workspace = await createHostedRuntimeWorkspace(
+    "murph-hosted-whatsapp-authority-",
+  );
+  try {
+    const createdIntent = await createAssistantOutboxIntent({
+      channel: "whatsapp",
+      createdAt: "2026-07-14T00:00:00.000Z",
+      deliveryIdempotencyKey: "whatsapp-authority-retry",
+      deliveryTransportIdempotent: false,
+      explicitTarget: "15550100001",
+      identityId: "whatsapp-authority-identity",
+      message: "Retry only when provider entry did not happen.",
+      sessionId: "whatsapp-authority-session",
+      threadId: "15550100001",
+      threadIsDirect: true,
+      turnId: "whatsapp-authority-turn",
+      vault: workspace.vaultRoot,
+    });
+    const retryableIntent = await saveAssistantOutboxIntent(
+      workspace.vaultRoot,
+      {
+        ...createdIntent,
+        attemptCount: 1,
+        lastAttemptAt: "2026-07-14T00:01:00.000Z",
+        lastError: {
+          code: "ASSISTANT_WHATSAPP_REQUEST_FAILED",
+          message: "Temporary WhatsApp failure.",
+        },
+        nextAttemptAt: "2026-07-14T00:02:00.000Z",
+        status: "retryable",
+        updatedAt: "2026-07-14T00:01:00.000Z",
+      },
+    );
+    const wake = buildHostedExecutionRuntimeTimerWake({
+      eventId: "whatsapp-authority-wake",
+      occurredAt: "2026-07-14T00:03:00.000Z",
+      triggerKind: "runtime_timer",
+      userId: "whatsapp-authority-member",
+    });
+    const transportFailure = new Error(
+      "socket closed after WhatsApp provider entry",
+    );
+    const abortController = new AbortController();
+    const rawProviderFetch = vi.fn<typeof fetch>(async () => {
+      abortController.abort(new Error("hosted invocation ended after provider entry"));
+      throw transportFailure;
+    });
+    let providerBoundaryMode: "yield" | "transport_failure" = "yield";
+    let shouldYield = false;
+    let providerDispatchEnteredCount = 0;
+    const dispatchWithProviderEntryCurrentCheck = vi.fn(async (
+      request: Parameters<typeof fetch>[0],
+      init: Parameters<typeof fetch>[1],
+      context: {
+        assertProviderEntryCurrent: () => void;
+        onProviderDispatchEntered: () => void;
+      },
+    ) => {
+      if (providerBoundaryMode === "yield") {
+        shouldYield = true;
+      }
+      context.assertProviderEntryCurrent();
+      context.onProviderDispatchEntered();
+      providerDispatchEnteredCount += 1;
+      return await rawProviderFetch(request, init);
+    });
+    const providerFetch = Object.assign(rawProviderFetch, {
+      dispatchWithProviderEntryCurrentCheck,
+    });
+    const effectsPort = createHostedRuntimeEffectsPortStub();
+    const firstEffects = await collectHostedAssistantDeliverySideEffects({
+      includeBackgroundDueIntents: true,
+      vaultRoot: workspace.vaultRoot,
+    });
+    assert.equal(firstEffects.length, 1);
+    assert.equal(firstEffects[0]?.deliveryPhase, "background_retry");
+    const yieldedCounts: number[] = [];
+
+    await expect(drainHostedPreparedAssistantDeliveries({
+      assistantDeliveryEffects: firstEffects,
+      effectsPort,
+      onBackgroundDeliveryYield: ({ yieldedEffectCount }) => {
+        yieldedCounts.push(yieldedEffectCount);
+      },
+      platformEnv: {
+        WHATSAPP_ACCESS_TOKEN: "platform-whatsapp-token",
+        WHATSAPP_API_BASE_URL: "https://graph.whatsapp.example",
+        WHATSAPP_GRAPH_VERSION: "v25.0",
+        WHATSAPP_PHONE_NUMBER_ID: "phone-number-id-1",
+      },
+      providerFetch,
+      signal: abortController.signal,
+      shouldYieldBackgroundDelivery: () => shouldYield,
+      vaultRoot: workspace.vaultRoot,
+      wake,
+    })).resolves.toEqual([]);
+
+    expect(yieldedCounts).toEqual([1]);
+    expect(providerDispatchEnteredCount).toBe(0);
+    expect(rawProviderFetch).not.toHaveBeenCalled();
+    await expect(
+      readAssistantOutboxIntent(workspace.vaultRoot, retryableIntent.intentId),
+    ).resolves.toMatchObject({
+      attemptCount: retryableIntent.attemptCount,
+      lastAttemptAt: retryableIntent.lastAttemptAt,
+      lastError: retryableIntent.lastError,
+      nextAttemptAt: retryableIntent.nextAttemptAt,
+      status: retryableIntent.status,
+    });
+
+    providerBoundaryMode = "transport_failure";
+    shouldYield = false;
+    const secondEffects = await collectHostedAssistantDeliverySideEffects({
+      includeBackgroundDueIntents: true,
+      vaultRoot: workspace.vaultRoot,
+    });
+    await expect(drainHostedPreparedAssistantDeliveries({
+      assistantDeliveryEffects: secondEffects,
+      effectsPort,
+      platformEnv: {
+        WHATSAPP_ACCESS_TOKEN: "platform-whatsapp-token",
+        WHATSAPP_API_BASE_URL: "https://graph.whatsapp.example",
+        WHATSAPP_GRAPH_VERSION: "v25.0",
+        WHATSAPP_PHONE_NUMBER_ID: "phone-number-id-1",
+      },
+      providerFetch,
+      signal: abortController.signal,
+      shouldYieldBackgroundDelivery: () => shouldYield,
+      vaultRoot: workspace.vaultRoot,
+      wake,
+    })).rejects.toThrow("hosted invocation ended after provider entry");
+    expect(dispatchWithProviderEntryCurrentCheck).toHaveBeenCalledTimes(2);
+    expect(providerDispatchEnteredCount).toBe(1);
+    expect(rawProviderFetch).toHaveBeenCalledTimes(1);
+    await expect(
+      readAssistantOutboxIntent(workspace.vaultRoot, retryableIntent.intentId),
+    ).resolves.toMatchObject({
+      deliveryConfirmationPending: false,
+      lastError: expect.objectContaining({
+        code: "ASSISTANT_DELIVERY_AMBIGUOUS",
+      }),
+      nextAttemptAt: null,
+      status: "abandoned",
+    });
+  } finally {
+    await workspace.cleanup();
+  }
+});
+
+test("hosted WhatsApp keeps an explicit provider HTTP failure retryable", async () => {
+  const workspace = await createHostedRuntimeWorkspace(
+    "murph-hosted-whatsapp-http-failure-",
+  );
+  try {
+    const intent = await createAssistantOutboxIntent({
+      channel: "whatsapp",
+      createdAt: "2026-07-14T00:00:00.000Z",
+      deliveryIdempotencyKey: "whatsapp-http-failure",
+      deliveryTransportIdempotent: false,
+      explicitTarget: "15550100001",
+      identityId: "whatsapp-http-identity",
+      message: "Retry the explicit provider failure.",
+      sessionId: "whatsapp-http-session",
+      threadId: "15550100001",
+      threadIsDirect: true,
+      turnId: "whatsapp-http-turn",
+      vault: workspace.vaultRoot,
+    });
+    const providerFetch = vi.fn<typeof fetch>(async () =>
+      Response.json({
+        error: {
+          code: 2,
+          message: "Temporary provider failure",
+          type: "OAuthException",
+        },
+      }, { status: 503 })
+    );
+    const effects = await collectHostedAssistantDeliverySideEffects({
+      includeBackgroundDueIntents: true,
+      vaultRoot: workspace.vaultRoot,
+    });
+
+    const outcomes = await drainHostedPreparedAssistantDeliveries({
+      assistantDeliveryEffects: effects,
+      effectsPort: createHostedRuntimeEffectsPortStub(),
+      platformEnv: {
+        WHATSAPP_ACCESS_TOKEN: "platform-whatsapp-token",
+        WHATSAPP_API_BASE_URL: "https://graph.whatsapp.example",
+        WHATSAPP_GRAPH_VERSION: "v25.0",
+        WHATSAPP_PHONE_NUMBER_ID: "phone-number-id-1",
+      },
+      providerFetch,
+      vaultRoot: workspace.vaultRoot,
+      wake: buildHostedExecutionRuntimeTimerWake({
+        eventId: "whatsapp-http-wake",
+        occurredAt: "2026-07-14T00:03:00.000Z",
+        triggerKind: "runtime_timer",
+        userId: "whatsapp-http-member",
+      }),
+    });
+
+    expect(outcomes).toEqual([
+      expect.objectContaining({
+        deliveryChannel: "whatsapp",
+        deliveryErrorCode: "ASSISTANT_WHATSAPP_REQUEST_FAILED",
+        deliveryStatus: "retryable",
+        retryable: true,
+      }),
+    ]);
+    expect(providerFetch).toHaveBeenCalledTimes(1);
+    await expect(
+      readAssistantOutboxIntent(workspace.vaultRoot, intent.intentId),
+    ).resolves.toMatchObject({
+      deliveryConfirmationPending: false,
+      lastError: expect.objectContaining({
+        code: "ASSISTANT_WHATSAPP_REQUEST_FAILED",
+      }),
+      status: "retryable",
+    });
+  } finally {
+    await workspace.cleanup();
+  }
 });
 
 test("hosted progress email delivery rechecks authority after async effects preparation", async () => {

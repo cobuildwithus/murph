@@ -100,7 +100,7 @@ export function isAssistantOutboxRetryableError(error: unknown): boolean {
   if (statusRetryable !== null) {
     return statusRetryable
   }
-  if (assistantOutboxErrorLooksHostedControlPlaneFetchFailure(error)) {
+  if (isAssistantHostedControlPlaneResponseUnavailable(error)) {
     return true
   }
   if (assistantOutboxErrorCodeIsInternal(code)) {
@@ -339,7 +339,7 @@ function readAssistantOutboxHttpStatus(error: unknown): number | null {
   return null
 }
 
-function assistantOutboxErrorLooksHostedControlPlaneFetchFailure(error: unknown): boolean {
+export function isAssistantHostedControlPlaneResponseUnavailable(error: unknown): boolean {
   const queue: unknown[] = [error]
   const seen = new Set<unknown>()
   while (queue.length > 0) {
@@ -353,7 +353,10 @@ function assistantOutboxErrorLooksHostedControlPlaneFetchFailure(error: unknown)
     if (!record) {
       continue
     }
-    if (record.hostedRuntimeControlPlaneFetchFailure === true) {
+    if (
+      record.hostedRuntimeControlPlaneFetchFailure === true
+      || record.hostedRuntimeControlPlaneResponseUnavailable === true
+    ) {
       return true
     }
 

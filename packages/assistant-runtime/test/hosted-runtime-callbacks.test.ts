@@ -6074,6 +6074,384 @@ describe("hosted runtime callbacks", () => {
     expect(mocks.resetAssistantOutboxPreparedDispatchById).toHaveBeenCalledTimes(1);
   });
 
+  it.each([
+    { kind: "reaction", releaseResult: "confirmed" },
+    { kind: "voice", releaseResult: "confirmed" },
+    { kind: "reaction", releaseResult: "conflict" },
+    { kind: "voice", releaseResult: "missing-marker" },
+    { kind: "reaction", releaseResult: "throws" },
+    { kind: "voice", releaseResult: "times-out" },
+    { kind: "reaction", releaseResult: "abort-conflict" },
+    { kind: "reaction", releaseResult: "abort-response-lost-confirmed" },
+    { kind: "voice", releaseResult: "abort-response-lost-confirmed" },
+    { kind: "reaction", releaseResult: "abort-response-lost-conflict" },
+    { kind: "reaction", releaseResult: "control-response-lost-confirmed" },
+    { kind: "voice", releaseResult: "control-response-lost-confirmed" },
+    { kind: "voice", releaseResult: "control-response-lost-conflict" },
+    { kind: "reaction", releaseResult: "missing-claim-marker-confirmed" },
+    { kind: "voice", releaseResult: "missing-claim-marker-conflict" },
+  ] as const)(
+    "requires exact durable release proof for an unused non-idempotent Linq $kind claim ($releaseResult)",
+    async ({ kind, releaseResult }) => {
+      const effectId = `intent_linq_${kind}_claim_release_${
+        releaseResult.replace("-", "_")
+      }`;
+      const deliveryIdempotencyKey = `assistant-outbox:${effectId}`;
+      const effect = buildHostedAssistantDeliveryEffect({
+        dedupeKey: `dedupe_${effectId}`,
+        deliveryPhase: "background_retry",
+        effectId,
+        payload: createPayload({
+          bindingDeliveryKind: "thread",
+          bindingDeliveryTarget: "linq_chat_123",
+          channel: "linq",
+          explicitTarget: "linq_chat_123",
+          idempotencyKey: deliveryIdempotencyKey,
+          media: kind === "voice" ? [createHostedVoiceMemoMedia()] : [],
+          message: kind === "reaction" ? "" : "voice reply",
+          replyToMessageId: "linq_message_1",
+          transportIdempotent: false,
+        }),
+      });
+      const preparedDispatchToken = `prepared-dispatch-token-${effectId}`;
+      const previousDispatchState = createPreparedPreviousDispatchState({
+        deliveryIdempotencyKey,
+        deliveryTransportIdempotent: false,
+        status: "retryable",
+      });
+      const abortController = new AbortController();
+      let shouldBlockProviderEntry = false;
+      let providerDispatchClaimAttemptedAt: string | null = null;
+      const assertRecentInbound = vi.fn(async (request) => {
+        if (request.authorityCheckOnly !== true) {
+          providerDispatchClaimAttemptedAt =
+            typeof request.providerDispatchClaimAttemptedAt === "string"
+              ? request.providerDispatchClaimAttemptedAt
+              : null;
+        }
+        if (
+          request.authorityCheckOnly !== true
+          && (
+            releaseResult === "missing-claim-marker-confirmed"
+            || releaseResult === "missing-claim-marker-conflict"
+          )
+        ) {
+          return {};
+        }
+        const result = buildClaimedLinqEngagementResult(request);
+        if (request.authorityCheckOnly !== true) {
+          if (
+            releaseResult === "abort-conflict"
+            || releaseResult === "abort-response-lost-confirmed"
+            || releaseResult === "abort-response-lost-conflict"
+          ) {
+            abortController.abort(new Error("aborted after exact Linq claim"));
+            if (releaseResult !== "abort-conflict") {
+              throw Object.assign(
+                new Error("Linq provider-dispatch claim response was lost"),
+                { hostedRuntimeControlPlaneFetchFailure: true },
+              );
+            }
+          } else if (
+            releaseResult === "control-response-lost-confirmed"
+            || releaseResult === "control-response-lost-conflict"
+          ) {
+            throw Object.assign(
+              new Error("Linq provider-dispatch control response was lost"),
+              kind === "reaction"
+                ? { hostedRuntimeControlPlaneFetchFailure: true }
+                : { hostedRuntimeControlPlaneResponseUnavailable: true },
+            );
+          } else {
+            shouldBlockProviderEntry = true;
+          }
+        }
+        return result;
+      });
+      const releaseFailure = new Error("Linq claim release write failed");
+      let providerDispatchClaimReleaseAttemptedAt: string | null = null;
+      let markReleaseWriteStarted: (() => void) | null = null;
+      const releaseWriteStarted = new Promise<void>((resolve) => {
+        markReleaseWriteStarted = resolve;
+      });
+      const recordDeliveryOutcome = vi.fn(async (outcome: {
+        attemptedAt: string;
+        providerDispatchClaimRelease?: boolean | null;
+      }) => {
+        if (outcome.providerDispatchClaimRelease === true) {
+          providerDispatchClaimReleaseAttemptedAt = outcome.attemptedAt;
+        }
+        switch (releaseResult) {
+          case "confirmed":
+          case "abort-response-lost-confirmed":
+          case "control-response-lost-confirmed":
+          case "missing-claim-marker-confirmed":
+            return {
+              providerDispatchClaimReleased: true,
+              recorded: true,
+            };
+          case "conflict":
+          case "abort-conflict":
+          case "abort-response-lost-conflict":
+          case "control-response-lost-conflict":
+          case "missing-claim-marker-conflict":
+            return {
+              providerDispatchClaimReleased: false,
+              recorded: true,
+            };
+          case "missing-marker":
+            return { recorded: true };
+          case "throws":
+            throw releaseFailure;
+          case "times-out":
+            markReleaseWriteStarted?.();
+            return await new Promise<never>(() => {});
+        }
+      });
+      const rawProviderFetch = vi.fn<typeof fetch>();
+      const yieldedCounts: number[] = [];
+      mocks.readAssistantOutboxIntentMirrorState.mockResolvedValueOnce(
+        createMirrorState(
+          {
+            delivery: null,
+            deliveryIdempotencyKey,
+            deliveryTransportIdempotent: false,
+            intentId: effectId,
+            lastError: null,
+            status: "sending",
+          },
+          {
+            sendingStartedAt: "2026-04-08T00:00:05.000Z",
+          },
+        ),
+      );
+      mocks.dispatchAssistantOutboxIntent.mockImplementationOnce(
+        async ({ dependencies }) => {
+          if (kind === "reaction") {
+            await dependencies.setLinqMessageReaction({
+              reaction: "heart",
+              target: "linq_chat_123",
+              targetMessageId: "linq_message_1",
+            });
+          } else {
+            await dependencies.sendLinqVoiceMemo({
+              attachmentId: "attachment_voice_1",
+              replyToMessageId: "linq_message_1",
+              target: "linq_chat_123",
+              targetKind: "thread",
+            });
+          }
+          throw new Error("provider dispatch unexpectedly remained reachable");
+        },
+      );
+
+      if (releaseResult === "times-out") {
+        vi.useFakeTimers();
+      }
+      try {
+        const drain = drainHostedPreparedAssistantDeliveries({
+          allowPreparedSending: true,
+          assistantDeliveryEffects: [effect],
+          effectsPort: createHostedRuntimeEffectsPortStub({
+            assertLinqRecentInboundEngagement: assertRecentInbound,
+            recordLinqDeliveryOutcome: recordDeliveryOutcome,
+          }),
+          onBackgroundDeliveryYield: ({ yieldedEffectCount }) => {
+            yieldedCounts.push(yieldedEffectCount);
+          },
+          preparedDispatches: [{
+            intentId: effectId,
+            preparedDispatchToken,
+            previousDispatchState,
+          }],
+          providerFetch: rawProviderFetch,
+          ...(
+            releaseResult === "abort-conflict"
+            || releaseResult === "abort-response-lost-confirmed"
+            || releaseResult === "abort-response-lost-conflict"
+            ? { signal: abortController.signal }
+            : {}),
+          shouldBlockProviderEntry: () => shouldBlockProviderEntry,
+          vaultRoot: HOSTED_WAKE.vaultRoot,
+          wake: HOSTED_WAKE.wake,
+        });
+
+        if (releaseResult === "times-out") {
+          const releaseStartedBeforeDrainSettled = await Promise.race([
+            releaseWriteStarted.then(() => true),
+            drain.then(() => false, () => false),
+          ]);
+          expect(releaseStartedBeforeDrainSettled).toBe(true);
+          await vi.advanceTimersByTimeAsync(2_001);
+        }
+
+        if (releaseResult === "confirmed") {
+          await expect(drain).resolves.toEqual([]);
+          expect(yieldedCounts).toEqual([1]);
+          expect(mocks.resetAssistantOutboxPreparedDispatchById).toHaveBeenCalledWith({
+            deliveryIdempotencyKey,
+            deliveryTransportIdempotent: false,
+            intentId: effectId,
+            preparedDispatchToken,
+            resetAt: expect.any(Date),
+            restoreDispatchState: previousDispatchState,
+            vault: HOSTED_WAKE.vaultRoot,
+          });
+          expect(recordDeliveryOutcome.mock.invocationCallOrder[0] ?? 0)
+            .toBeLessThan(
+              mocks.resetAssistantOutboxPreparedDispatchById
+                .mock.invocationCallOrder[0] ?? 0,
+            );
+        } else if (
+          releaseResult === "abort-response-lost-confirmed"
+          || releaseResult === "control-response-lost-confirmed"
+          || releaseResult === "missing-claim-marker-confirmed"
+        ) {
+          await expect(drain).rejects.toMatchObject({
+            deliveryMayHaveSucceeded: false,
+            retryable: true,
+          });
+          expect(yieldedCounts).toEqual([]);
+          if (releaseResult === "abort-response-lost-confirmed") {
+            expect(mocks.resetAssistantOutboxPreparedDispatchById).toHaveBeenCalledWith({
+              deliveryIdempotencyKey,
+              deliveryTransportIdempotent: false,
+              intentId: effectId,
+              preparedDispatchToken,
+              resetAt: expect.any(Date),
+              restoreDispatchState: previousDispatchState,
+              vault: HOSTED_WAKE.vaultRoot,
+            });
+            expect(recordDeliveryOutcome.mock.invocationCallOrder[0] ?? 0)
+              .toBeLessThan(
+                mocks.resetAssistantOutboxPreparedDispatchById
+                  .mock.invocationCallOrder[0] ?? 0,
+              );
+          } else {
+            expect(mocks.resetAssistantOutboxPreparedDispatchById).not.toHaveBeenCalled();
+          }
+        } else {
+          await expect(drain).rejects.toMatchObject({
+            code: "ASSISTANT_LINQ_PROVIDER_DISPATCH_CLAIM_RELEASE_UNCONFIRMED",
+            deliveryMayHaveSucceeded: true,
+            retryable: false,
+          });
+          expect(yieldedCounts).toEqual([]);
+          expect(mocks.resetAssistantOutboxPreparedDispatchById).not.toHaveBeenCalled();
+        }
+
+        expect(assertRecentInbound).toHaveBeenCalledTimes(1);
+        expect(providerDispatchClaimAttemptedAt).toMatch(
+          /^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}\.\d{3}Z$/u,
+        );
+        expect(providerDispatchClaimReleaseAttemptedAt).toBe(
+          providerDispatchClaimAttemptedAt,
+        );
+        expect(recordDeliveryOutcome).toHaveBeenCalledWith(
+          expect.objectContaining({
+            attemptedAt: expect.any(String),
+            failedAt: expect.any(String),
+            failureCode: "HOSTED_LINQ_PROVIDER_DISPATCH_RELEASED_PRE_PROVIDER",
+            idempotencyKey: kind === "reaction"
+              ? deliveryIdempotencyKey
+              : `linq-voice-memo:${effectId}`,
+            intentId: effectId,
+            providerDispatchClaimRelease: true,
+            providerTarget: "linq_chat_123",
+            target: "linq_chat_123",
+            targetKind: "thread",
+          }),
+          { signal: expect.any(AbortSignal) },
+        );
+        expect(rawProviderFetch).not.toHaveBeenCalled();
+        expect(mocks.setLinqMessageReaction).not.toHaveBeenCalled();
+        expect(mocks.sendLinqVoiceMemoMessage).not.toHaveBeenCalled();
+      } finally {
+        vi.useRealTimers();
+      }
+    },
+  );
+
+  it("does not release a known pre-existing non-idempotent Linq claim during abort", async () => {
+    const effectId = "intent_linq_existing_claim_abort";
+    const deliveryIdempotencyKey = `assistant-outbox:${effectId}`;
+    const effect = buildHostedAssistantDeliveryEffect({
+      dedupeKey: `dedupe_${effectId}`,
+      deliveryPhase: "background_retry",
+      effectId,
+      payload: createPayload({
+        bindingDeliveryKind: "thread",
+        bindingDeliveryTarget: "linq_chat_123",
+        channel: "linq",
+        explicitTarget: "linq_chat_123",
+        idempotencyKey: deliveryIdempotencyKey,
+        message: "",
+        replyToMessageId: "linq_message_1",
+        transportIdempotent: false,
+      }),
+    });
+    const abortController = new AbortController();
+    const assertRecentInbound = vi.fn(async () => {
+      abortController.abort(new Error("aborted after existing claim response"));
+      throw Object.assign(new Error("provider dispatch already started"), {
+        code: "HOSTED_LINQ_PROVIDER_DISPATCH_ALREADY_STARTED",
+      });
+    });
+    const recordDeliveryOutcome = vi.fn();
+    mocks.readAssistantOutboxIntentMirrorState.mockResolvedValueOnce(
+      createMirrorState(
+        {
+          delivery: null,
+          deliveryIdempotencyKey,
+          deliveryTransportIdempotent: false,
+          intentId: effectId,
+          lastError: null,
+          status: "sending",
+        },
+        { sendingStartedAt: "2026-04-08T00:00:05.000Z" },
+      ),
+    );
+    mocks.dispatchAssistantOutboxIntent.mockImplementationOnce(
+      async ({ dependencies }) => {
+        await dependencies.setLinqMessageReaction({
+          reaction: "heart",
+          target: "linq_chat_123",
+          targetMessageId: "linq_message_1",
+        });
+        throw new Error("provider dispatch unexpectedly remained reachable");
+      },
+    );
+
+    await expect(drainHostedPreparedAssistantDeliveries({
+      allowPreparedSending: true,
+      assistantDeliveryEffects: [effect],
+      effectsPort: createHostedRuntimeEffectsPortStub({
+        assertLinqRecentInboundEngagement: assertRecentInbound,
+        recordLinqDeliveryOutcome: recordDeliveryOutcome,
+      }),
+      preparedDispatches: [{
+        intentId: effectId,
+        preparedDispatchToken: `prepared-dispatch-token-${effectId}`,
+        previousDispatchState: createPreparedPreviousDispatchState({
+          deliveryIdempotencyKey,
+          deliveryTransportIdempotent: false,
+          status: "retryable",
+        }),
+      }],
+      providerFetch: vi.fn<typeof fetch>(),
+      signal: abortController.signal,
+      vaultRoot: HOSTED_WAKE.vaultRoot,
+      wake: HOSTED_WAKE.wake,
+    })).rejects.toMatchObject({
+      code: "ASSISTANT_DELIVERY_CONFIRMATION_PENDING",
+      deliveryMayHaveSucceeded: true,
+    });
+
+    expect(recordDeliveryOutcome).not.toHaveBeenCalled();
+    expect(mocks.resetAssistantOutboxPreparedDispatchById).not.toHaveBeenCalled();
+    expect(mocks.setLinqMessageReaction).not.toHaveBeenCalled();
+  });
+
   it("uses the deep provider dispatch boundary for repeated Linq provider attempts", async () => {
     const effect = buildHostedAssistantDeliveryEffect({
       dedupeKey: "dedupe_linq_deep_provider_dispatch",
@@ -9057,6 +9435,7 @@ describe("hosted runtime callbacks", () => {
       homeRouteFallbackAllowed: false,
       idempotencyKey: "assistant-outbox:intent_123",
       intentId: "intent_123",
+      providerDispatchClaimAttemptedAt: expect.any(String),
       replyToMessageId: "linq_message_other",
       target: "linq_chat_other",
       targetKind: "thread",
@@ -11045,6 +11424,78 @@ describe("hosted runtime callbacks", () => {
         providerMessageId: "whatsapp_message_123",
         providerThreadId: "whatsapp_thread_123",
         target: "whatsapp_thread_123",
+      }),
+    ]);
+  });
+
+  it("marks post-success WhatsApp liveness loss as possibly committed", async () => {
+    const effect = createEffect({
+      bindingDeliveryTarget: "whatsapp_thread_123",
+      channel: "whatsapp",
+      explicitTarget: "whatsapp_thread_123",
+      transportIdempotent: false,
+    });
+    let capturedError: unknown = null;
+    const assertLiveness = vi.fn()
+      .mockResolvedValueOnce(undefined)
+      .mockResolvedValueOnce(undefined)
+      .mockRejectedValueOnce(new Error("aborted after WhatsApp response"));
+    mocks.sendWhatsAppMessage.mockResolvedValueOnce({
+      providerMessageId: "whatsapp_message_123",
+      providerThreadId: "whatsapp_thread_123",
+      target: "whatsapp_thread_123",
+      targetKind: "thread" as const,
+    });
+    mocks.dispatchAssistantOutboxIntent.mockImplementationOnce(async ({ dependencies }) => {
+      try {
+        await dependencies.sendWhatsApp({
+          message: "hello from hosted",
+          replyToMessageId: "whatsapp_inbound_123",
+          target: "whatsapp_thread_123",
+        });
+      } catch (error) {
+        capturedError = error;
+        return createDispatchResult(
+          {
+            intentId: effect.effectId,
+            lastError: {
+              code: "ASSISTANT_DELIVERY_AMBIGUOUS",
+              message: "Ambiguous WhatsApp delivery.",
+            },
+            status: "abandoned",
+          },
+          {
+            code: "ASSISTANT_DELIVERY_AMBIGUOUS",
+            message: "Ambiguous WhatsApp delivery.",
+          },
+        );
+      }
+
+      throw new Error("expected post-success WhatsApp liveness failure");
+    });
+
+    const outcomes = await drainHostedPreparedAssistantDeliveries({
+      assistantDeliveryEffects: [effect],
+      assertLiveness,
+      effectsPort: createHostedRuntimeEffectsPortStub(),
+      platformEnv: {
+        WHATSAPP_ACCESS_TOKEN: "platform-whatsapp-token",
+        WHATSAPP_PHONE_NUMBER_ID: "phone_number_123",
+      },
+      providerFetch: vi.fn<typeof fetch>(),
+      vaultRoot: HOSTED_WAKE.vaultRoot,
+      wake: HOSTED_WAKE.wake,
+    });
+
+    expect(assertLiveness).toHaveBeenCalledTimes(4);
+    expect(capturedError).toMatchObject({
+      deliveryMayHaveSucceeded: true,
+      message: "aborted after WhatsApp response",
+    });
+    expect(outcomes).toEqual([
+      expect.objectContaining({
+        deliveryStatus: "failed_ambiguous",
+        retryable: false,
       }),
     ]);
   });

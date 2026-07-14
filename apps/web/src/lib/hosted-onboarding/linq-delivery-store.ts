@@ -382,6 +382,57 @@ export async function recordHostedLinqRuntimeProviderDispatchFenceTx(input: {
   });
 }
 
+export async function releaseHostedLinqRuntimeProviderDispatchFenceTx(input: {
+  attemptedAt: Date;
+  failedAt: Date;
+  idempotencyKey: string;
+  prisma: HostedLinqDeliveryClient;
+  sourceRef: string;
+}): Promise<{ released: boolean }> {
+  const idempotencyKey = createHostedLinqDeliveryIdempotencyLookupKey(
+    normalizeNullable(input.idempotencyKey),
+  );
+  const sourceRef = createHostedLinqDeliverySourceRefLookupKey(
+    normalizeNullable(input.sourceRef),
+  );
+  if (!idempotencyKey || !sourceRef) {
+    return { released: false };
+  }
+
+  const updated = await input.prisma.hostedLinqDelivery.updateMany({
+    where: {
+      acceptedAt: null,
+      deliveredAt: null,
+      failedAt: null,
+      failureCode: null,
+      failureReason: null,
+      id: buildHostedLinqDeliveryId(idempotencyKey),
+      idempotencyKey,
+      lastProviderEventId: null,
+      lastReceiptAt: null,
+      messageIdSuffix: null,
+      messageLookupKey: null,
+      retryAfterAt: null,
+      service: null,
+      skippedAt: null,
+      skipReason: null,
+      source: "hosted_runtime_linq_delivery",
+      sourceRef,
+      status: HOSTED_LINQ_DELIVERY_PROVIDER_DISPATCH_STARTED_STATUS,
+      attemptedAt: input.attemptedAt,
+    },
+    data: {
+      failedAt: input.failedAt,
+      failureCode: "HOSTED_LINQ_PROVIDER_DISPATCH_RELEASED_PRE_PROVIDER",
+      failureReason: null,
+      retryAfterAt: null,
+      status: "failed",
+    },
+  });
+
+  return { released: updated.count === 1 };
+}
+
 export async function hasUnresolvedHostedLinqProviderDispatchForChatTx(input: {
   linqChatId: string;
   prisma: HostedLinqDeliveryClient;

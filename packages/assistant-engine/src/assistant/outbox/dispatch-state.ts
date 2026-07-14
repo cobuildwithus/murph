@@ -262,11 +262,7 @@ export async function updateAssistantOutboxAfterDispatchFailure(input: {
     sending: input.sending,
   })
   const abandonedAmbiguousDelivery = Boolean(ambiguousDelivery) ||
-    isAmbiguousDeliveryWithoutProviderIds({
-      deliveryMayHaveSucceeded: input.deliveryMayHaveSucceeded,
-      error: input.error,
-      sending: input.sending,
-    })
+    (input.deliveryMayHaveSucceeded && !input.deliveryTransportIdempotent)
   const abandonedDelivery = abandonedAmbiguousDelivery ||
     isEmailGroupRecipientAuthoritySuperseded({
       error: input.error,
@@ -428,37 +424,6 @@ function readAmbiguousDeliveryFromError(input: {
     readLinqPartialDeliveryFromError(input)
 }
 
-function isAmbiguousDeliveryWithoutProviderIds(input: {
-  deliveryMayHaveSucceeded: boolean
-  error: unknown
-  sending: AssistantOutboxIntent
-}): boolean {
-  return isTelegramAmbiguousDeliveryWithoutProviderIds(input) ||
-    isLinqMessageReactionAmbiguityWithoutProviderIds(input) ||
-    isLinqPartialDeliveryWithoutProviderIds(input) ||
-    isEmailAmbiguityWithoutProviderIds(input)
-}
-
-function isEmailAmbiguityWithoutProviderIds(input: {
-  deliveryMayHaveSucceeded: boolean
-  error: unknown
-  sending: AssistantOutboxIntent
-}): boolean {
-  if (!input.deliveryMayHaveSucceeded || input.sending.channel !== 'email') {
-    return false
-  }
-
-  const errorRecord = readRecord(input.error)
-  const context = readRecord(errorRecord?.context)
-  const code =
-    readNonEmptyString(errorRecord?.code) ??
-    readNonEmptyString(context?.code) ??
-    null
-
-  return code === 'ASSISTANT_EMAIL_DELIVERY_AMBIGUOUS' ||
-    code === 'ASSISTANT_EMAIL_GROUP_FANOUT_INCOMPLETE'
-}
-
 function isEmailGroupRecipientAuthoritySuperseded(input: {
   error: unknown
   sending: AssistantOutboxIntent
@@ -475,69 +440,6 @@ function isEmailGroupRecipientAuthoritySuperseded(input: {
     null
 
   return code === 'ASSISTANT_EMAIL_GROUP_RECIPIENT_AUTHORITY_SUPERSEDED'
-}
-
-function isTelegramAmbiguousDeliveryWithoutProviderIds(input: {
-  deliveryMayHaveSucceeded: boolean
-  error: unknown
-  sending: AssistantOutboxIntent
-}): boolean {
-  if (!input.deliveryMayHaveSucceeded || input.sending.channel !== 'telegram') {
-    return false
-  }
-
-  const errorRecord = readRecord(input.error)
-  const context = readRecord(errorRecord?.context)
-  const code =
-    readNonEmptyString(errorRecord?.code) ??
-    readNonEmptyString(context?.code) ??
-    null
-  if (
-    code !== 'ASSISTANT_TELEGRAM_DELIVERY_AMBIGUOUS' &&
-    code !== 'ASSISTANT_TELEGRAM_VOICE_MEMO_DELIVERY_AMBIGUOUS'
-  ) {
-    return false
-  }
-
-  const providerMessageIds =
-    readNonEmptyStringArray(errorRecord?.providerMessageIds) ??
-    readNonEmptyStringArray(context?.providerMessageIds) ??
-    null
-
-  return providerMessageIds === null
-}
-
-function isLinqPartialDeliveryWithoutProviderIds(input: {
-  deliveryMayHaveSucceeded: boolean
-  error: unknown
-  sending: AssistantOutboxIntent
-}): boolean {
-  if (!input.deliveryMayHaveSucceeded || input.sending.channel !== 'linq') {
-    return false
-  }
-
-  const errorRecord = readRecord(input.error)
-  const context = readRecord(errorRecord?.context)
-  const code =
-    readNonEmptyString(errorRecord?.code) ??
-    readNonEmptyString(context?.code) ??
-    null
-  if (code !== 'ASSISTANT_LINQ_VOICE_MEMO_PARTIAL_DELIVERY') {
-    return false
-  }
-
-  const providerMessageIds = readProviderMessageIdsFromErrorRecord(errorRecord, context)
-  return providerMessageIds === null
-}
-
-function isLinqMessageReactionAmbiguityWithoutProviderIds(input: {
-  deliveryMayHaveSucceeded: boolean
-  sending: AssistantOutboxIntent
-}): boolean {
-  return input.deliveryMayHaveSucceeded &&
-    input.sending.channel === 'linq' &&
-    input.sending.operation?.kind === 'message-reaction' &&
-    input.sending.deliveryTransportIdempotent === false
 }
 
 function readTelegramAmbiguousDeliveryFromError(input: {

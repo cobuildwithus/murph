@@ -18,6 +18,7 @@ import {
   recordHostedLinqDeliveryAttemptTx,
   recordHostedLinqRuntimeProviderDispatchFenceTx,
   recordHostedLinqRuntimeDeliveryOutcomeTx,
+  releaseHostedLinqRuntimeProviderDispatchFenceTx,
   resolveHostedLinqInviteSignupDispatchEffectIdTx,
 } from "@/src/lib/hosted-onboarding/linq-delivery-store";
 import {
@@ -2676,6 +2677,133 @@ describe("hosted Linq observability stores", () => {
       }),
     );
     expect(fixture.hostedMailboxItemUpdateMany).not.toHaveBeenCalled();
+  });
+
+  it("releases the exact unused runtime provider claim and lets the same key be claimed once", async () => {
+    const fixture = createObservabilityPrismaFixture();
+    const idempotencyKey = "assistant-outbox:intent_claim_release";
+    const idempotencyLookupKey = createHostedLinqDeliveryIdempotencyLookupKey(idempotencyKey);
+    const sourceRefLookupKey = createHostedLinqDeliverySourceRefLookupKey(
+      "intent_claim_release",
+    );
+    const claimedAt = new Date("2026-03-26T12:00:00.000Z");
+    const failedAt = new Date("2026-03-26T12:00:01.000Z");
+    const retryAt = new Date("2026-03-26T12:00:02.000Z");
+    const claimedRow = {
+      acceptedAt: null,
+      attemptedAt: claimedAt,
+      deliveredAt: null,
+      failedAt: null,
+      id: "hld_claim_release",
+      lastReceiptAt: null,
+      messageLookupKey: null,
+      phoneNumberLookupKey: null,
+      skippedAt: null,
+      source: "hosted_runtime_linq_delivery",
+      status: "provider_dispatch_started",
+    };
+    fixture.hostedLinqDeliveryFindUnique
+      .mockResolvedValueOnce({
+        ...claimedRow,
+        failedAt,
+        status: "failed",
+      })
+      .mockResolvedValueOnce({
+        ...claimedRow,
+        attemptedAt: retryAt,
+      });
+    fixture.hostedLinqDeliveryUpdateMany
+      .mockResolvedValueOnce({ count: 1 })
+      .mockResolvedValueOnce({ count: 1 })
+      .mockResolvedValueOnce({ count: 0 });
+
+    await expect(releaseHostedLinqRuntimeProviderDispatchFenceTx({
+      attemptedAt: claimedAt,
+      failedAt,
+      idempotencyKey,
+      prisma: fixture.prisma as never,
+      sourceRef: "intent_claim_release",
+    })).resolves.toEqual({
+      released: true,
+    });
+
+    expect(fixture.hostedLinqDeliveryUpdateMany).toHaveBeenNthCalledWith(1, {
+      data: {
+        failedAt,
+        failureCode: "HOSTED_LINQ_PROVIDER_DISPATCH_RELEASED_PRE_PROVIDER",
+        failureReason: null,
+        retryAfterAt: null,
+        status: "failed",
+      },
+      where: {
+        acceptedAt: null,
+        deliveredAt: null,
+        failedAt: null,
+        failureCode: null,
+        failureReason: null,
+        id: expect.stringMatching(/^hld_[a-f0-9]{32}$/u),
+        idempotencyKey: idempotencyLookupKey,
+        lastProviderEventId: null,
+        lastReceiptAt: null,
+        messageIdSuffix: null,
+        messageLookupKey: null,
+        retryAfterAt: null,
+        service: null,
+        skippedAt: null,
+        skipReason: null,
+        source: "hosted_runtime_linq_delivery",
+        sourceRef: sourceRefLookupKey,
+        status: "provider_dispatch_started",
+        attemptedAt: claimedAt,
+      },
+    });
+
+    await expect(recordHostedLinqRuntimeProviderDispatchFenceTx({
+      attemptedAt: retryAt,
+      idempotencyKey,
+      linqChatId: "linq_chat_123",
+      prisma: fixture.prisma as never,
+      sourceRef: "intent_claim_release",
+      targetKind: "thread",
+    })).resolves.toEqual({
+      claimed: true,
+      id: "hld_claim_release",
+    });
+    await expect(recordHostedLinqRuntimeProviderDispatchFenceTx({
+      attemptedAt: new Date("2026-03-26T12:00:03.000Z"),
+      idempotencyKey,
+      linqChatId: "linq_chat_123",
+      prisma: fixture.prisma as never,
+      sourceRef: "intent_claim_release",
+      targetKind: "thread",
+    })).resolves.toEqual({
+      claimed: false,
+      id: "hld_claim_release",
+    });
+  });
+
+  it("reports a provider claim-release conflict when the claim timestamp does not match", async () => {
+    const fixture = createObservabilityPrismaFixture();
+    const mismatchedAttemptedAt = new Date("2026-03-26T12:00:02.000Z");
+    fixture.hostedLinqDeliveryUpdateMany.mockResolvedValueOnce({ count: 0 });
+
+    await expect(releaseHostedLinqRuntimeProviderDispatchFenceTx({
+      attemptedAt: mismatchedAttemptedAt,
+      failedAt: new Date("2026-03-26T12:00:01.000Z"),
+      idempotencyKey: "assistant-outbox:intent_claim_release_conflict",
+      prisma: fixture.prisma as never,
+      sourceRef: "intent_claim_release_conflict",
+    })).resolves.toEqual({
+      released: false,
+    });
+    expect(fixture.hostedLinqDeliveryUpdateMany).toHaveBeenCalledWith(
+      expect.objectContaining({
+        where: expect.objectContaining({
+          attemptedAt: mismatchedAttemptedAt,
+          status: "provider_dispatch_started",
+        }),
+      }),
+    );
   });
 
   it("does not double-count outbound totals when the provider echo lands before runtime acceptance", async () => {

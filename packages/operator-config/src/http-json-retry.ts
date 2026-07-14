@@ -2,6 +2,7 @@ import {
   createTimeoutAbortController,
   type ResponseHeadersLike,
 } from './http-retry.js'
+import { readAssistantDeliveryMayHaveSucceeded } from './assistant/delivery-failure.js'
 
 export interface JsonFetchResponse {
   headers?: ResponseHeadersLike | null
@@ -30,6 +31,7 @@ export async function fetchJsonResponse<TResponse extends JsonFetchResponse>(inp
   fetchImplementation: JsonFetch<TResponse>
   headers: Record<string, string>
   method: string
+  treatCallerAbortAsTransportAmbiguity?: boolean
   signal?: AbortSignal
   timeoutMs: number
   url: string
@@ -44,7 +46,13 @@ export async function fetchJsonResponse<TResponse extends JsonFetchResponse>(inp
       signal: timeout.signal,
     })
   } catch (error) {
-    if (input.signal?.aborted) {
+    if (readAssistantDeliveryMayHaveSucceeded(error) === false) {
+      throw error
+    }
+    if (
+      input.signal?.aborted
+      && input.treatCallerAbortAsTransportAmbiguity !== true
+    ) {
       throw error
     }
 

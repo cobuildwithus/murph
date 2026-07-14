@@ -7,6 +7,7 @@ import {
 import {
   createAssistantDeliveryAmbiguousError,
   createAssistantDeliveryConfirmationPendingError,
+  isAssistantHostedControlPlaneResponseUnavailable,
   isAssistantOutboxRetryableError,
   normalizeAssistantDeliveryError,
   resolveAssistantOutboxRetryDelayMs,
@@ -186,6 +187,28 @@ describe('assistant outbox retry policy', () => {
         'Assistant outbound delivery could not be confirmed safely and will not be resent automatically. hosted journal stale',
       retryable: false,
     })
+  })
+
+  it('recognizes unavailable hosted control-plane responses through nested causes', () => {
+    expect(
+      isAssistantHostedControlPlaneResponseUnavailable({
+        cause: {
+          hostedRuntimeControlPlaneResponseUnavailable: true,
+        },
+      }),
+    ).toBe(true)
+    expect(
+      isAssistantHostedControlPlaneResponseUnavailable({
+        cause: {
+          hostedRuntimeControlPlaneFetchFailure: true,
+        },
+      }),
+    ).toBe(true)
+    expect(
+      isAssistantHostedControlPlaneResponseUnavailable({
+        hostedRuntimeControlPlaneResponseUnavailable: false,
+      }),
+    ).toBe(false)
   })
 
   it('keeps message text from error-like objects', () => {

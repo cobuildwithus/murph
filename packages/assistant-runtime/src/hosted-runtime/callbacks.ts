@@ -35,6 +35,7 @@ import {
   dispatchAssistantOutboxIntent,
   findAssistantAutoReplyDeliveryIntentIds,
   hasAssistantAutoReplyChannel,
+  isAssistantHostedControlPlaneResponseUnavailable,
   listAssistantOutboxIntents,
   markAssistantOutboxIntentMirrorTerminalById,
   normalizeAssistantDeliveryError,
@@ -87,6 +88,7 @@ import type {
   HostedRuntimeActionApprovalPort,
   HostedRuntimeEffectsPort,
   HostedRuntimeLinqDeliveryOutcomeRequest,
+  HostedRuntimeLinqDeliveryOutcomeResult,
   HostedRuntimeLinqRecentInboundEngagementResult,
   HostedRuntimeLinqSendResponse,
   HostedRuntimeProviderFetch,
@@ -1951,6 +1953,30 @@ function createHostedEmailDeliveryAmbiguityError(): VaultCliError & {
   });
 }
 
+function createHostedAssistantLinqProviderDispatchClaimReleaseUnconfirmedError(): VaultCliError & {
+  deliveryMayHaveSucceeded: true;
+  retryable: false;
+} {
+  const error = new VaultCliError(
+    "ASSISTANT_LINQ_PROVIDER_DISPATCH_CLAIM_RELEASE_UNCONFIRMED",
+    "Hosted Linq provider-dispatch claim release could not be confirmed; automatic retry is disabled.",
+    { retryable: false },
+  );
+
+  return Object.assign(error, {
+    deliveryMayHaveSucceeded: true as const,
+    retryable: false as const,
+  });
+}
+
+function markHostedAssistantLinqProviderDispatchClaimResponseUnavailable(
+  error: VaultCliError,
+): VaultCliError & { hostedRuntimeControlPlaneResponseUnavailable: true } {
+  return Object.assign(error, {
+    hostedRuntimeControlPlaneResponseUnavailable: true as const,
+  });
+}
+
 function hostedEmailResultProvesProviderWasSkipped(
   result: Awaited<ReturnType<HostedRuntimeEffectsPort["sendEmail"]>>,
 ): boolean {
@@ -1969,6 +1995,15 @@ function hostedDeliveryErrorProvesProviderWasSkipped(error: unknown): boolean {
     && typeof error === "object"
     && "deliveryMayHaveSucceeded" in error
     && error.deliveryMayHaveSucceeded === false,
+  );
+}
+
+function hostedDeliveryErrorMayHaveSucceeded(error: unknown): boolean {
+  return Boolean(
+    error
+    && typeof error === "object"
+    && "deliveryMayHaveSucceeded" in error
+    && error.deliveryMayHaveSucceeded === true,
   );
 }
 
@@ -2288,6 +2323,7 @@ async function deliverHostedPreparedAssistantDelivery(input: {
     ? [input.preparedDispatch.linqDeliveryContext, ...input.linqDeliveryContexts]
     : input.linqDeliveryContexts;
   let providerDispatchEntered = false;
+  let providerDispatchStateAmbiguous = false;
   try {
     assertHostedDeliveryLiveness(input.signal);
     const mirrorOutcome = await maybeResolveHostedAssistantDeliveryFromMirror({
@@ -2540,6 +2576,9 @@ async function deliverHostedPreparedAssistantDelivery(input: {
           linqDeliveryContexts,
           threadIsDirect: input.assistantDeliveryEffect.payload.threadIsDirect ?? null,
           shouldYieldBackgroundDelivery: input.shouldYieldBackgroundDelivery,
+          onProviderDispatchStateAmbiguous: () => {
+            providerDispatchStateAmbiguous = true;
+          },
           onProviderDispatchEntered: () => {
             providerDispatchEntered = true;
           },
@@ -2556,6 +2595,8 @@ async function deliverHostedPreparedAssistantDelivery(input: {
           const idempotencyKey =
             input.assistantDeliveryEffect.payload.idempotencyKey?.trim() || null;
           const providerTarget = deliveryContext?.target ?? request.target;
+          let providerDispatchClaimAttemptedAt: Date | null = null;
+          let providerDispatchClaimedAt: Date | null = null;
           let attemptedAt: Date | null = null;
           let result: Awaited<ReturnType<typeof setHostedProviderLinqMessageReaction>>;
           try {
@@ -2569,7 +2610,9 @@ async function deliverHostedPreparedAssistantDelivery(input: {
                 assertProviderEntryCurrent: () =>
                   assertHostedProviderEntryCurrent(input),
                 beforeProviderDispatch: async () => {
-                  await assertHostedAssistantLinqRecentInboundEngagementForDelivery({
+                  const claimStartedAt = new Date();
+                  providerDispatchClaimAttemptedAt = claimStartedAt;
+                  const engagement = await assertHostedAssistantLinqRecentInboundEngagementForDelivery({
                     answeredMailboxItemIds:
                       input.assistantDeliveryEffect.payload.answeredMailboxItemIds,
                     directRecipientPhoneNumber:
@@ -2579,12 +2622,16 @@ async function deliverHostedPreparedAssistantDelivery(input: {
                     homeRouteFallbackAllowed: false,
                     idempotencyKey,
                     intentId: input.assistantDeliveryEffect.effectId,
+                    providerDispatchClaimAttemptedAt: claimStartedAt,
                     replyToMessageId: request.targetMessageId,
                     providerDispatchRetrySafe: false,
                     signal: input.signal,
                     target: providerTarget,
                     targetKind: "thread",
                   });
+                  if (engagement.providerDispatchClaimed === true) {
+                    providerDispatchClaimedAt = claimStartedAt;
+                  }
                 },
                 onProviderDispatchEntered: () => {
                   attemptedAt = new Date();
@@ -2596,8 +2643,46 @@ async function deliverHostedPreparedAssistantDelivery(input: {
               ...(input.signal ? { signal: input.signal } : {}),
             });
           } catch (error) {
+            const providerDispatchClaimReleaseAt =
+              resolveHostedAssistantLinqProviderDispatchClaimReleaseAt({
+                error,
+                providerDispatchClaimAttemptedAt,
+                providerDispatchClaimedAt,
+              });
+            let providerDispatchClaimReleased = false;
+            if (
+              providerDispatchClaimReleaseAt
+              && !attemptedAt
+              && shouldReleaseHostedAssistantLinqProviderDispatchClaim({
+                error,
+                signal: input.signal,
+              })
+            ) {
+              try {
+                await releaseHostedAssistantLinqProviderDispatchClaimRequired({
+                  answeredMailboxItemIds:
+                    input.assistantDeliveryEffect.payload.answeredMailboxItemIds,
+                  attemptedAt: providerDispatchClaimReleaseAt,
+                  deliveryContext,
+                  effectsPort: input.effectsPort,
+                  fromPhoneNumber: deliveryContext?.fromPhoneNumber ?? null,
+                  idempotencyKey,
+                  intentId: input.assistantDeliveryEffect.effectId,
+                  providerTarget,
+                  target: providerTarget,
+                  targetKind: "thread",
+                  threadIsDirect: deliveryContext?.threadIsDirect ?? null,
+                });
+                providerDispatchClaimReleased = true;
+              } catch (releaseError) {
+                providerDispatchStateAmbiguous = true;
+                throw releaseError;
+              }
+            }
             if (!attemptedAt) {
-              throw error;
+              throw providerDispatchClaimReleased
+                ? markHostedDeliveryPreProviderRetryable(error)
+                : error;
             }
             if (isHostedLinqProviderOutcomeAmbiguous(error)) {
               throw markHostedDeliveryMayHaveSucceeded(error);
@@ -2668,7 +2753,11 @@ async function deliverHostedPreparedAssistantDelivery(input: {
             ...(input.signal ? { signal: input.signal } : {}),
           }, "Hosted assistant WhatsApp delivery");
           const result = await sendWhatsAppMessage(request, dependencies);
-          await assertHostedDeliveryLiveNow(input);
+          try {
+            await assertHostedDeliveryLiveNow(input);
+          } catch (error) {
+            throw markHostedDeliveryMayHaveSucceeded(error);
+          }
           return result;
         },
       },
@@ -2694,7 +2783,8 @@ async function deliverHostedPreparedAssistantDelivery(input: {
       preparedDispatchToken: input.preparedDispatch?.preparedDispatchToken ?? null,
       previousPreparedDispatchState:
         input.preparedDispatch?.previousDispatchState ?? null,
-      providerDispatchEntered,
+      providerDispatchEntered:
+        providerDispatchEntered || providerDispatchStateAmbiguous,
       signal: input.signal,
       vaultRoot: input.vaultRoot,
     });
@@ -2722,7 +2812,8 @@ async function deliverHostedPreparedAssistantDelivery(input: {
         assistantDeliveryEffect: input.assistantDeliveryEffect,
         error,
         mirrorState,
-        providerDispatchEntered,
+        providerDispatchEntered:
+          providerDispatchEntered || providerDispatchStateAmbiguous,
         signal: input.signal,
       });
     if (input.preparedDispatch && resetPreparedDelivery) {
@@ -2921,10 +3012,33 @@ function shouldResetHostedPreparedDeliveryOnPreProviderAbort(input: {
   signal: AbortSignal | null;
 }): boolean {
   return (input.signal?.aborted === true || isHostedBackgroundDeliveryYieldedError(input.error))
+    && !hostedDeliveryErrorMayHaveSucceeded(input.error)
     && input.mirrorState.sendingStartedAt !== null
     && !input.mirrorState.intent?.delivery
     && input.mirrorState.intent?.deliveryConfirmationPending !== true
     && !input.providerDispatchEntered;
+}
+
+function shouldReleaseHostedAssistantLinqProviderDispatchClaim(input: {
+  error: unknown;
+  signal: AbortSignal | null;
+}): boolean {
+  return input.signal?.aborted === true
+    || isHostedBackgroundDeliveryYieldedError(input.error)
+    || isAssistantHostedControlPlaneResponseUnavailable(input.error);
+}
+
+function resolveHostedAssistantLinqProviderDispatchClaimReleaseAt(input: {
+  error: unknown;
+  providerDispatchClaimAttemptedAt: Date | null;
+  providerDispatchClaimedAt: Date | null;
+}): Date | null {
+  if (input.providerDispatchClaimedAt) {
+    return input.providerDispatchClaimedAt;
+  }
+  return isAssistantHostedControlPlaneResponseUnavailable(input.error)
+    ? input.providerDispatchClaimAttemptedAt
+    : null;
 }
 
 function createHostedProviderFetchBoundary(input: {
@@ -2951,48 +3065,61 @@ function createHostedProviderFetchBoundary(input: {
   };
 
   return (async (request, init) => {
-    const fetchImplementation = requireHostedProviderFetch(
-      input.providerFetch,
-      input.operation,
-    );
-    if (
-      input.allowTelegramCleanupWithoutProviderEntry === true
-      && isTelegramCleanupProviderFetchRequest(request)
-    ) {
-      return await fetchImplementation(request, init);
-    }
-    await (input.assertProviderEntryLive ?? input.assertLive)?.();
-    await prepareProviderDispatch();
-    await (input.assertProviderEntryLive ?? input.assertLive)?.();
-    input.assertProviderEntryCurrent?.();
-    const markProviderDispatchEntered = () => {
-      if (!providerDispatchEntered) {
-        input.onProviderDispatchEntered?.();
-        providerDispatchEntered = true;
-      }
+    try {
+      const fetchImplementation = requireHostedProviderFetch(
+        input.providerFetch,
+        input.operation,
+      );
       if (
-        input.onTelegramVoiceMemoDispatchEntered
-        && isTelegramSendVoiceProviderFetchRequest(request)
+        input.allowTelegramCleanupWithoutProviderEntry === true
+        && isTelegramCleanupProviderFetchRequest(request)
       ) {
-        input.onTelegramVoiceMemoDispatchEntered();
+        return await fetchImplementation(request, init);
       }
-    };
-    const response = input.assertProviderEntryCurrent
-      && input.providerFetch?.dispatchWithProviderEntryCurrentCheck
-      ? await input.providerFetch.dispatchWithProviderEntryCurrentCheck(
-          request,
-          init,
-          {
-            assertProviderEntryCurrent: input.assertProviderEntryCurrent,
-            onProviderDispatchEntered: markProviderDispatchEntered,
-          },
-        )
-      : await (async () => {
-          markProviderDispatchEntered();
-          return await fetchImplementation(request, init);
-        })();
-    await input.assertLive?.();
-    return response;
+      await (input.assertProviderEntryLive ?? input.assertLive)?.();
+      await prepareProviderDispatch();
+      await (input.assertProviderEntryLive ?? input.assertLive)?.();
+      input.assertProviderEntryCurrent?.();
+      const markProviderDispatchEntered = () => {
+        const entersAssistantDelivery =
+          !input.onTelegramVoiceMemoDispatchEntered
+          || isTelegramSendVoiceProviderFetchRequest(request);
+        if (entersAssistantDelivery && !providerDispatchEntered) {
+          input.onProviderDispatchEntered?.();
+          providerDispatchEntered = true;
+        }
+        if (
+          input.onTelegramVoiceMemoDispatchEntered
+          && isTelegramSendVoiceProviderFetchRequest(request)
+        ) {
+          input.onTelegramVoiceMemoDispatchEntered();
+        }
+      };
+      const response = input.assertProviderEntryCurrent
+        && input.providerFetch?.dispatchWithProviderEntryCurrentCheck
+        ? await input.providerFetch.dispatchWithProviderEntryCurrentCheck(
+            request,
+            init,
+            {
+              assertProviderEntryCurrent: input.assertProviderEntryCurrent,
+              onProviderDispatchEntered: markProviderDispatchEntered,
+            },
+          )
+        : await (async () => {
+            markProviderDispatchEntered();
+            return await fetchImplementation(request, init);
+          })();
+      await input.assertLive?.();
+      return response;
+    } catch (error) {
+      if (
+        !providerDispatchEntered
+        && isHostedBackgroundDeliveryYieldedError(error)
+      ) {
+        throw markHostedDeliveryPreProviderRetryable(error);
+      }
+      throw error;
+    }
   }) as typeof fetch;
 }
 
@@ -3380,6 +3507,7 @@ function createHostedAssistantLinqVoiceMemoSendDependency(input: {
   linqDeliveryContexts?: readonly HostedAssistantLinqDeliveryContext[] | null;
   linqEnv: NodeJS.ProcessEnv;
   onProviderDispatchEntered?: () => void;
+  onProviderDispatchStateAmbiguous?: () => void;
   providerFetch: typeof fetch | null;
   shouldYieldBackgroundDelivery?: (() => boolean) | null;
   signal: AbortSignal | null;
@@ -3425,6 +3553,8 @@ function createHostedAssistantLinqVoiceMemoSendDependency(input: {
       : {};
     const providerTarget =
       engagement.targetOverride?.target ?? deliveryContext?.target ?? request.target;
+    let providerDispatchClaimAttemptedAt: Date | null = null;
+    let providerDispatchClaimedAt: Date | null = null;
     let attemptedAt: Date | null = null;
     const dependencies = requireHostedProviderFetchDependencies({
       env: input.linqEnv,
@@ -3433,7 +3563,9 @@ function createHostedAssistantLinqVoiceMemoSendDependency(input: {
         assertProviderEntryCurrent: () =>
           assertHostedProviderEntryCurrent(input),
         beforeProviderDispatch: async () => {
-          await assertHostedAssistantLinqRecentInboundEngagementForDelivery({
+          const claimStartedAt = new Date();
+          providerDispatchClaimAttemptedAt = claimStartedAt;
+          const providerDispatchClaim = await assertHostedAssistantLinqRecentInboundEngagementForDelivery({
             answeredMailboxItemIds: request.answeredMailboxItemIds,
             directRecipientPhoneNumber:
               deliveryContext?.directRecipientPhoneNumber ?? null,
@@ -3442,12 +3574,16 @@ function createHostedAssistantLinqVoiceMemoSendDependency(input: {
             homeRouteFallbackAllowed: false,
             idempotencyKey,
             intentId: input.intentId ?? null,
+            providerDispatchClaimAttemptedAt: claimStartedAt,
             replyToMessageId,
             providerDispatchRetrySafe: false,
             signal: signal ?? null,
             target: providerTarget,
             targetKind: "thread",
           });
+          if (providerDispatchClaim.providerDispatchClaimed === true) {
+            providerDispatchClaimedAt = claimStartedAt;
+          }
         },
         onProviderDispatchEntered: () => {
           attemptedAt = new Date();
@@ -3465,8 +3601,46 @@ function createHostedAssistantLinqVoiceMemoSendDependency(input: {
         target: providerTarget,
       }, dependencies);
     } catch (error) {
+      const providerDispatchClaimReleaseAt =
+        resolveHostedAssistantLinqProviderDispatchClaimReleaseAt({
+          error,
+          providerDispatchClaimAttemptedAt,
+          providerDispatchClaimedAt,
+        });
+      let providerDispatchClaimReleased = false;
+      if (
+        providerDispatchClaimReleaseAt
+        && !attemptedAt
+        && shouldReleaseHostedAssistantLinqProviderDispatchClaim({
+          error,
+          signal: signal ?? null,
+        })
+      ) {
+        try {
+          await releaseHostedAssistantLinqProviderDispatchClaimRequired({
+            answeredMailboxItemIds: request.answeredMailboxItemIds,
+            attemptedAt: providerDispatchClaimReleaseAt,
+            deliveryContext,
+            effectsPort: input.effectsPort ?? null,
+            fromPhoneNumber: deliveryContext?.fromPhoneNumber ?? null,
+            idempotencyKey,
+            intentId: input.intentId ?? null,
+            providerTarget,
+            target: providerTarget,
+            targetKind: "thread",
+            threadIsDirect:
+              input.threadIsDirect ?? deliveryContext?.threadIsDirect ?? null,
+          });
+          providerDispatchClaimReleased = true;
+        } catch (releaseError) {
+          input.onProviderDispatchStateAmbiguous?.();
+          throw releaseError;
+        }
+      }
       if (!attemptedAt) {
-        throw error;
+        throw providerDispatchClaimReleased
+          ? markHostedDeliveryPreProviderRetryable(error)
+          : error;
       }
       if (isHostedLinqProviderOutcomeAmbiguous(error)) {
         throw markHostedDeliveryMayHaveSucceeded(error);
@@ -3528,6 +3702,7 @@ function buildHostedAssistantLinqDeliveryOutcomeRequest(input: {
   idempotencyKey: string | null;
   intentId: string | null;
   providerTarget: string | null;
+  providerDispatchClaimRelease?: boolean;
   providerThreadId: string | null;
   result: HostedRuntimeLinqSendResponse | null;
   target: string | null;
@@ -3548,6 +3723,9 @@ function buildHostedAssistantLinqDeliveryOutcomeRequest(input: {
     intentId: input.intentId,
     lineLookupKey: input.deliveryContext?.routeAuthority?.accountLookupKey ?? null,
     providerMessageId: input.result?.providerMessageId ?? null,
+    ...(input.providerDispatchClaimRelease === true
+      ? { providerDispatchClaimRelease: true }
+      : {}),
     providerTarget: input.targetKind === "participant" ? null : input.providerTarget,
     providerThreadId: input.result?.providerThreadId ?? input.providerThreadId,
     target: input.targetKind === "participant" ? null : input.target,
@@ -3579,7 +3757,7 @@ function shouldRequireHostedAssistantLinqDeliveryOutcomeWrite(
 async function recordHostedAssistantLinqDeliveryOutcomeRequired(input: {
   effectsPort?: Pick<HostedRuntimeEffectsPort, "recordLinqDeliveryOutcome"> | null;
   outcome: HostedRuntimeLinqDeliveryOutcomeRequest;
-}): Promise<void> {
+}): Promise<HostedRuntimeLinqDeliveryOutcomeResult | void> {
   const recordOutcome = input.effectsPort?.recordLinqDeliveryOutcome;
   if (!recordOutcome) {
     throw new VaultCliError(
@@ -3602,10 +3780,13 @@ async function recordHostedAssistantLinqDeliveryOutcomeRequired(input: {
       timer.unref?.();
     });
     const result = await Promise.race([
-      record.then(() => "recorded" as const),
-      timeout,
+      record.then((outcomeResult) => ({
+        outcomeResult,
+        status: "recorded" as const,
+      })),
+      timeout.then(() => ({ status: "timed_out" as const })),
     ]);
-    if (result === "timed_out") {
+    if (result.status === "timed_out") {
       throw new VaultCliError(
         "ASSISTANT_LINQ_DELIVERY_OUTCOME_RECORD_TIMED_OUT",
         "Accepted Linq delivery outcome recording timed out before consume state could be stored.",
@@ -3615,6 +3796,7 @@ async function recordHostedAssistantLinqDeliveryOutcomeRequired(input: {
         },
       );
     }
+    return result.outcomeResult;
   } catch (error) {
     if (
       error instanceof VaultCliError &&
@@ -3635,6 +3817,54 @@ async function recordHostedAssistantLinqDeliveryOutcomeRequired(input: {
       clearTimeout(timer);
     }
   }
+}
+
+async function releaseHostedAssistantLinqProviderDispatchClaimRequired(input: {
+  answeredMailboxItemIds?: readonly string[] | null;
+  attemptedAt: Date;
+  deliveryContext: HostedAssistantLinqDeliveryContext | null;
+  effectsPort?: Pick<HostedRuntimeEffectsPort, "recordLinqDeliveryOutcome"> | null;
+  fromPhoneNumber: string | null;
+  idempotencyKey: string | null;
+  intentId: string | null;
+  providerTarget: string | null;
+  target: string | null;
+  targetKind: HostedRuntimeProviderTargetKind | null;
+  threadIsDirect: boolean | null;
+}): Promise<void> {
+  try {
+    const result = await recordHostedAssistantLinqDeliveryOutcomeRequired({
+      effectsPort: input.effectsPort,
+      outcome: buildHostedAssistantLinqDeliveryOutcomeRequest({
+        answeredMailboxItemIds: input.answeredMailboxItemIds,
+        attemptedAt: input.attemptedAt,
+        deliveryContext: input.deliveryContext,
+        failedAt: new Date(),
+        failureCode: "HOSTED_LINQ_PROVIDER_DISPATCH_RELEASED_PRE_PROVIDER",
+        failureReason: null,
+        fromPhoneNumber: input.fromPhoneNumber,
+        idempotencyKey: input.idempotencyKey,
+        intentId: input.intentId,
+        providerDispatchClaimRelease: true,
+        providerTarget: input.providerTarget,
+        providerThreadId: null,
+        result: null,
+        target: input.target,
+        targetKind: input.targetKind,
+        threadIsDirect: input.threadIsDirect,
+      }),
+    });
+    if (
+      result?.recorded === true
+      && result.providerDispatchClaimReleased === true
+    ) {
+      return;
+    }
+  } catch {
+    // Missing exact release proof is handled uniformly below.
+  }
+
+  throw createHostedAssistantLinqProviderDispatchClaimReleaseUnconfirmedError();
 }
 
 function queueHostedAssistantLinqDeliveryOutcomeWrite(input: {
@@ -3760,6 +3990,7 @@ async function assertHostedAssistantLinqRecentInboundEngagementForDelivery(input
   homeRouteFallbackAllowed: boolean;
   idempotencyKey: string | null;
   intentId: string | null;
+  providerDispatchClaimAttemptedAt?: Date | null;
   providerDispatchRetrySafe?: boolean;
   replyToMessageId: string | null;
   signal: AbortSignal | null;
@@ -3787,6 +4018,12 @@ async function assertHostedAssistantLinqRecentInboundEngagementForDelivery(input
       homeRouteFallbackAllowed: input.homeRouteFallbackAllowed,
       idempotencyKey: input.idempotencyKey,
       intentId: input.intentId,
+      ...(input.providerDispatchClaimAttemptedAt
+        ? {
+            providerDispatchClaimAttemptedAt:
+              input.providerDispatchClaimAttemptedAt.toISOString(),
+          }
+        : {}),
       replyToMessageId: input.replyToMessageId,
       target: input.target,
       targetKind,
@@ -3829,11 +4066,14 @@ function assertHostedAssistantLinqProviderDispatchClaim(input: {
   result: HostedRuntimeLinqRecentInboundEngagementResult;
 }): void {
   if (typeof input.result.providerDispatchClaimed !== "boolean") {
-    throw new VaultCliError(
+    const error = new VaultCliError(
       "ASSISTANT_LINQ_PROVIDER_DISPATCH_PROTOCOL_UNAVAILABLE",
       "Hosted Linq delivery requires provider-dispatch claim confirmation before provider entry.",
       { retryable: true },
     );
+    throw input.providerDispatchRetrySafe
+      ? error
+      : markHostedAssistantLinqProviderDispatchClaimResponseUnavailable(error);
   }
   if (
     input.result.providerDispatchClaimed === false

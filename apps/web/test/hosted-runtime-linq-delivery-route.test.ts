@@ -9,6 +9,7 @@ const mocks = vi.hoisted(() => ({
   getPrisma: vi.fn(),
   linkHostedIngressLatencyTracesToAcceptedLinqDelivery: vi.fn(),
   recordHostedLinqRuntimeDeliveryOutcomeTx: vi.fn(),
+  releaseHostedLinqRuntimeProviderDispatchFenceTx: vi.fn(),
   requireHostedCloudflareCallbackRequest: vi.fn(),
 }));
 
@@ -23,6 +24,8 @@ vi.mock("@/src/lib/hosted-execution/cloudflare-callback-auth", () => ({
 
 vi.mock("@/src/lib/hosted-onboarding/linq-delivery-store", () => ({
   recordHostedLinqRuntimeDeliveryOutcomeTx: mocks.recordHostedLinqRuntimeDeliveryOutcomeTx,
+  releaseHostedLinqRuntimeProviderDispatchFenceTx:
+    mocks.releaseHostedLinqRuntimeProviderDispatchFenceTx,
 }));
 
 vi.mock("@/src/lib/hosted-runtime-latency/store", () => ({
@@ -68,6 +71,9 @@ describe("hosted runtime Linq delivery route", () => {
     mocks.recordHostedLinqRuntimeDeliveryOutcomeTx.mockResolvedValue({
       deliveryId: "hld_123",
       recorded: true,
+    });
+    mocks.releaseHostedLinqRuntimeProviderDispatchFenceTx.mockResolvedValue({
+      released: true,
     });
   });
 
@@ -464,6 +470,63 @@ describe("hosted runtime Linq delivery route", () => {
         userId: "member_123",
       }),
     );
+  });
+
+  it("returns the exact successful provider-dispatch claim-release marker", async () => {
+    const response = await route.POST(buildDeliveryRequest({
+      attemptedAt: "2026-04-26T00:00:03.000Z",
+      failedAt: "2026-04-26T00:00:05.000Z",
+      failureCode: "HOSTED_LINQ_PROVIDER_DISPATCH_RELEASED_PRE_PROVIDER",
+      idempotencyKey: "assistant-outbox:intent_claim_release",
+      intentId: "intent_claim_release",
+      providerDispatchClaimRelease: true,
+      providerThreadId: "linq_chat_123",
+      target: "linq_chat_123",
+      targetKind: "thread",
+    }));
+
+    expect(response.status).toBe(200);
+    expect(mocks.releaseHostedLinqRuntimeProviderDispatchFenceTx).toHaveBeenCalledWith(
+      {
+        attemptedAt: new Date("2026-04-26T00:00:03.000Z"),
+        failedAt: new Date("2026-04-26T00:00:05.000Z"),
+        idempotencyKey: "assistant-outbox:intent_claim_release",
+        prisma,
+        sourceRef: "intent_claim_release",
+      },
+    );
+    expect(mocks.recordHostedLinqRuntimeDeliveryOutcomeTx).not.toHaveBeenCalled();
+    await expect(response.json()).resolves.toEqual({
+      ok: true,
+      providerDispatchClaimReleased: true,
+      recorded: true,
+    });
+  });
+
+  it("returns a conflict when the exact provider-dispatch claim was not released", async () => {
+    mocks.releaseHostedLinqRuntimeProviderDispatchFenceTx.mockResolvedValueOnce({
+      released: false,
+    });
+
+    const response = await route.POST(buildDeliveryRequest({
+      attemptedAt: "2026-04-26T00:00:03.000Z",
+      failedAt: "2026-04-26T00:00:05.000Z",
+      failureCode: "HOSTED_LINQ_PROVIDER_DISPATCH_RELEASED_PRE_PROVIDER",
+      idempotencyKey: "assistant-outbox:intent_claim_release",
+      intentId: "intent_claim_release",
+      providerDispatchClaimRelease: true,
+      providerThreadId: "linq_chat_123",
+      target: "linq_chat_123",
+      targetKind: "thread",
+    }));
+
+    expect(response.status).toBe(409);
+    await expect(response.json()).resolves.toEqual({
+      error: expect.objectContaining({
+        code: "HOSTED_LINQ_PROVIDER_DISPATCH_CLAIM_RELEASE_CONFLICT",
+      }),
+    });
+    expect(mocks.recordHostedLinqRuntimeDeliveryOutcomeTx).not.toHaveBeenCalled();
   });
 });
 

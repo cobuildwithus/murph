@@ -2682,9 +2682,9 @@ describe("buildHostedExecutionRuntimePlatform", () => {
       webControlBaseUrl: "https://web.example.test",
     });
 
-    await expect(platform.workspacePort!.read!()).rejects.toThrow(
-      "Hosted workspace read returned invalid JSON.",
-    );
+    await expect(platform.workspacePort!.read!()).rejects.toMatchObject({
+      hostedRuntimeControlPlaneResponseUnavailable: true,
+    });
 
     expect(mocks.emitHostedExecutionStructuredLog).toHaveBeenCalledWith(
       expect.objectContaining({
@@ -4031,6 +4031,7 @@ describe("buildHostedExecutionRuntimePlatform", () => {
   });
 
   it("write-fences Linq egress authority assertions through direct web-control", async () => {
+    const providerDispatchClaimAttemptedAt = "2026-07-14T20:00:00.000Z";
     const fetchMock = vi.fn(async (input: RequestInfo | URL, init?: RequestInit) => {
       const request = input instanceof Request ? input : new Request(input, init);
       expect(new URL(request.url).pathname).toBe(HOSTED_RUNTIME_LINQ_EGRESS_ENGAGEMENT_PATH);
@@ -4059,6 +4060,7 @@ describe("buildHostedExecutionRuntimePlatform", () => {
     }
 
     await expect(assertLinqRecentInboundEngagement({
+      providerDispatchClaimAttemptedAt,
       target: "chat_123",
       targetKind: "thread",
     })).resolves.toEqual({
@@ -4071,6 +4073,71 @@ describe("buildHostedExecutionRuntimePlatform", () => {
     expectDefaultRuntimeWriteFenceHeaders(request);
     expect(request.headers.get("x-hosted-execution-user-id")).toBe("member_123");
     expect(request.headers.get("x-hosted-execution-signature")).toMatch(/^[A-Za-z0-9\-_]+$/u);
+    await expect(request.json()).resolves.toMatchObject({
+      providerDispatchClaimAttemptedAt,
+    });
+  });
+
+  it("marks an unreadable Linq provider-claim response as uncertain", async () => {
+    const fetchMock = vi.fn(async () =>
+      new Response("not-json", {
+        headers: { "content-type": "application/json; charset=utf-8" },
+        status: 200,
+      })
+    );
+    const environment = readHostedExecutionEnvironment(createHostedExecutionTestEnv({
+      HOSTED_WEB_BASE_URL: "https://web.example.test",
+    }));
+    const platform = buildTestHostedExecutionRuntimePlatform({
+      boundUserId: "member_123",
+      fetchImpl: fetchMock as typeof fetch,
+      webCallbackSigning: environment.webCallbackSigning,
+      webControlBaseUrl: "https://web.example.test",
+    });
+    const assertLinqRecentInboundEngagement =
+      platform.effectsPort.assertLinqRecentInboundEngagement;
+    if (!assertLinqRecentInboundEngagement) {
+      throw new Error("Expected hosted Linq egress authority assertion effect.");
+    }
+
+    await expect(assertLinqRecentInboundEngagement({
+      target: "chat_123",
+      targetKind: "thread",
+    })).rejects.toMatchObject({
+      hostedRuntimeControlPlaneResponseUnavailable: true,
+    });
+  });
+
+  it("marks a Linq provider-claim response body read failure as uncertain", async () => {
+    const response = new Response(null, {
+      headers: { "content-type": "application/json; charset=utf-8" },
+      status: 200,
+    });
+    vi.spyOn(response, "text").mockRejectedValueOnce(
+      new Error("response stream ended before the body was readable"),
+    );
+    const fetchMock = vi.fn(async () => response);
+    const environment = readHostedExecutionEnvironment(createHostedExecutionTestEnv({
+      HOSTED_WEB_BASE_URL: "https://web.example.test",
+    }));
+    const platform = buildTestHostedExecutionRuntimePlatform({
+      boundUserId: "member_123",
+      fetchImpl: fetchMock as typeof fetch,
+      webCallbackSigning: environment.webCallbackSigning,
+      webControlBaseUrl: "https://web.example.test",
+    });
+    const assertLinqRecentInboundEngagement =
+      platform.effectsPort.assertLinqRecentInboundEngagement;
+    if (!assertLinqRecentInboundEngagement) {
+      throw new Error("Expected hosted Linq egress authority assertion effect.");
+    }
+
+    await expect(assertLinqRecentInboundEngagement({
+      target: "chat_123",
+      targetKind: "thread",
+    })).rejects.toMatchObject({
+      hostedRuntimeControlPlaneResponseUnavailable: true,
+    });
   });
 
   it("write-fences Linq delivery outcomes through direct web-control", async () => {
@@ -4097,7 +4164,7 @@ describe("buildHostedExecutionRuntimePlatform", () => {
       throw new Error("Expected hosted Linq delivery outcome effect.");
     }
 
-    await recordLinqDeliveryOutcome({
+    await expect(recordLinqDeliveryOutcome({
       acceptedAt: "2026-04-26T00:00:04.000Z",
       attemptedAt: "2026-04-26T00:00:03.000Z",
       fromPhoneNumber: "+15550100099",
@@ -4107,7 +4174,7 @@ describe("buildHostedExecutionRuntimePlatform", () => {
       providerThreadId: "linq_chat_123",
       target: "linq_chat_123",
       targetKind: "thread",
-    });
+    })).resolves.toEqual({ recorded: true });
 
     expect(fetchMock).toHaveBeenCalledTimes(1);
     const request = requireFetchRequest(fetchMock.mock.calls[0], "direct Linq delivery request");
@@ -4115,12 +4182,70 @@ describe("buildHostedExecutionRuntimePlatform", () => {
     expectDefaultRuntimeWriteFenceHeaders(request);
     expect(request.headers.get("x-hosted-execution-user-id")).toBe("member_123");
     expect(request.headers.get("x-hosted-execution-signature")).toMatch(/^[A-Za-z0-9\-_]+$/u);
-    await expect(request.clone().json()).resolves.toEqual(
+    const body = await request.clone().json();
+    expect(body).toEqual(
       expect.objectContaining({
         acceptedAt: "2026-04-26T00:00:04.000Z",
         attemptedAt: "2026-04-26T00:00:03.000Z",
         idempotencyKey: "assistant-outbox:intent_123",
         providerMessageId: "linq_message_sent",
+      }),
+    );
+    expect(body).not.toHaveProperty("providerDispatchClaimRelease");
+  });
+
+  it("forwards Linq provider claim release proof through direct web-control", async () => {
+    const fetchMock = vi.fn(async (input: RequestInfo | URL, init?: RequestInit) => {
+      const request = input instanceof Request ? input : new Request(input, init);
+      expect(new URL(request.url).pathname).toBe(HOSTED_RUNTIME_LINQ_EGRESS_DELIVERY_PATH);
+      return new Response(JSON.stringify({
+        ok: true,
+        providerDispatchClaimReleased: true,
+        recorded: true,
+      }), {
+        headers: { "content-type": "application/json; charset=utf-8" },
+        status: 200,
+      });
+    });
+    const environment = readHostedExecutionEnvironment(createHostedExecutionTestEnv({
+      HOSTED_WEB_BASE_URL: "https://web.example.test",
+    }));
+    const platform = buildTestHostedExecutionRuntimePlatform({
+      boundUserId: "member_123",
+      fetchImpl: fetchMock as typeof fetch,
+      webCallbackSigning: environment.webCallbackSigning,
+      webControlBaseUrl: "https://web.example.test",
+    });
+
+    const recordLinqDeliveryOutcome = platform.effectsPort.recordLinqDeliveryOutcome;
+    if (!recordLinqDeliveryOutcome) {
+      throw new Error("Expected hosted Linq delivery outcome effect.");
+    }
+
+    await expect(recordLinqDeliveryOutcome({
+      attemptedAt: "2026-04-26T00:00:03.000Z",
+      failedAt: "2026-04-26T00:00:04.000Z",
+      failureCode: "HOSTED_LINQ_PROVIDER_DISPATCH_RELEASED_PRE_PROVIDER",
+      idempotencyKey: "assistant-outbox:intent_123",
+      intentId: "intent_123",
+      providerDispatchClaimRelease: true,
+      target: "linq_chat_123",
+      targetKind: "thread",
+    })).resolves.toEqual({
+      providerDispatchClaimReleased: true,
+      recorded: true,
+    });
+
+    expect(fetchMock).toHaveBeenCalledTimes(1);
+    const request = requireFetchRequest(fetchMock.mock.calls[0], "direct Linq claim release request");
+    expect(request.url).toBe(`https://web.example.test${HOSTED_RUNTIME_LINQ_EGRESS_DELIVERY_PATH}`);
+    expectDefaultRuntimeWriteFenceHeaders(request);
+    expect(request.headers.get("x-hosted-execution-user-id")).toBe("member_123");
+    expect(request.headers.get("x-hosted-execution-signature")).toMatch(/^[A-Za-z0-9\-_]+$/u);
+    await expect(request.clone().json()).resolves.toEqual(
+      expect.objectContaining({
+        failureCode: "HOSTED_LINQ_PROVIDER_DISPATCH_RELEASED_PRE_PROVIDER",
+        providerDispatchClaimRelease: true,
       }),
     );
   });

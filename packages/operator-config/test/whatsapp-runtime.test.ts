@@ -79,6 +79,84 @@ describe('whatsapp runtime', () => {
     expect(fetchMock).not.toHaveBeenCalled()
   })
 
+  it('preserves explicit no-egress proof before WhatsApp provider entry', async () => {
+    const preProviderError = Object.assign(
+      new Error('WhatsApp provider entry was rejected'),
+      {
+        deliveryMayHaveSucceeded: false as const,
+        retryable: true as const,
+      },
+    )
+    const fetchMock = vi.fn(async () => {
+      throw preProviderError
+    })
+
+    await expect(sendWhatsAppTextMessage({
+      message: 'hello',
+      target: '15550100001',
+    }, {
+      env: {
+        WHATSAPP_ACCESS_TOKEN: 'test-access-token',
+        WHATSAPP_PHONE_NUMBER_ID: 'phone-number-id-1',
+      },
+      fetchImplementation: fetchMock,
+    })).rejects.toBe(preProviderError)
+
+    expect(fetchMock).toHaveBeenCalledOnce()
+  })
+
+  it('marks a lost WhatsApp transport response as terminally ambiguous', async () => {
+    const fetchMock = vi.fn(async () => {
+      throw new Error('socket closed after WhatsApp request entry')
+    })
+
+    await expect(sendWhatsAppTextMessage({
+      message: 'hello',
+      target: '15550100001',
+    }, {
+      env: {
+        WHATSAPP_ACCESS_TOKEN: 'test-access-token',
+        WHATSAPP_PHONE_NUMBER_ID: 'phone-number-id-1',
+      },
+      fetchImplementation: fetchMock,
+    })).rejects.toMatchObject({
+      code: 'ASSISTANT_WHATSAPP_REQUEST_FAILED',
+      context: expect.objectContaining({
+        retryable: false,
+      }),
+      deliveryMayHaveSucceeded: true,
+      retryable: false,
+    })
+
+    expect(fetchMock).toHaveBeenCalledOnce()
+  })
+
+  it('keeps caller-aborted WhatsApp transport loss terminally ambiguous', async () => {
+    const abortController = new AbortController()
+    const fetchMock = vi.fn(async () => {
+      abortController.abort(new Error('hosted invocation ended after provider entry'))
+      throw new Error('network connection lost')
+    })
+
+    await expect(sendWhatsAppTextMessage({
+      message: 'hello',
+      target: '15550100001',
+    }, {
+      env: {
+        WHATSAPP_ACCESS_TOKEN: 'test-access-token',
+        WHATSAPP_PHONE_NUMBER_ID: 'phone-number-id-1',
+      },
+      fetchImplementation: fetchMock,
+      signal: abortController.signal,
+    })).rejects.toMatchObject({
+      code: 'ASSISTANT_WHATSAPP_REQUEST_FAILED',
+      deliveryMayHaveSucceeded: true,
+      retryable: false,
+    })
+
+    expect(fetchMock).toHaveBeenCalledOnce()
+  })
+
   it('keeps Cloud API failure context metadata-only', async () => {
     const fetchMock = vi.fn(async (
       ..._args: Parameters<typeof fetch>

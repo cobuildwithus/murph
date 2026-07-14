@@ -861,6 +861,7 @@ describe("hosted Linq egress authority", () => {
 
   it("holds member-home authority before the chat and provider dispatch fence", async () => {
     const observedOrder: string[] = [];
+    const providerDispatchClaimAttemptedAt = "2026-07-14T20:00:00.000Z";
     const prisma = createPrismaStub({
       homeChatId: "chat-home",
     });
@@ -880,6 +881,7 @@ describe("hosted Linq egress authority", () => {
       new Request("https://internal.example.test/engagement", {
         body: JSON.stringify({
           idempotencyKey: "assistant-outbox:intent-home",
+          providerDispatchClaimAttemptedAt,
           target: "chat-home",
           targetKind: "thread",
         }),
@@ -896,6 +898,37 @@ describe("hosted Linq egress authority", () => {
       "chat",
       "provider-dispatch",
     ]);
+    expect(prisma.hostedLinqDelivery.createMany).toHaveBeenCalledWith({
+      data: [expect.objectContaining({
+        attemptedAt: new Date(providerDispatchClaimAttemptedAt),
+      })],
+      skipDuplicates: true,
+    });
+  });
+
+  it("rejects an invalid provider-dispatch claim timestamp before persistence", async () => {
+    const response = await postHostedLinqEgressEngagement(
+      new Request("https://internal.example.test/engagement", {
+        body: JSON.stringify({
+          idempotencyKey: "assistant-outbox:intent-invalid-claim-time",
+          providerDispatchClaimAttemptedAt: "not-a-timestamp",
+          target: "chat-home",
+          targetKind: "thread",
+        }),
+        headers: {
+          "content-type": "application/json",
+        },
+        method: "POST",
+      }),
+    );
+
+    expect(response.status).toBe(400);
+    await expect(response.json()).resolves.toMatchObject({
+      error: {
+        code: "HOSTED_LINQ_PROVIDER_DISPATCH_CLAIM_ATTEMPTED_AT_INVALID",
+      },
+    });
+    expect(mocks.getPrisma).not.toHaveBeenCalled();
   });
 
   it("checks route authority without claiming provider dispatch", async () => {
