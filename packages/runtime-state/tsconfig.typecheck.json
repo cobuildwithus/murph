@@ -1,46 +1,7 @@
 {
   "extends": "../../tsconfig.base.json",
   "compilerOptions": {
-    "baseUrl": ".",
     "noEmit": true,
-    "paths": {
-      "@murphai/runtime-state": [
-        "./src/index.ts"
-      ],
-      "@murphai/runtime-state/assistant-ids": [
-        "./src/assistant-ids.ts"
-      ],
-      "@murphai/runtime-state/hosted-codex-subscription-auth": [
-        "./src/hosted-codex-subscription-auth.ts"
-      ],
-      "@murphai/runtime-state/node": [
-        "./src/node/index.ts"
-      ],
-      "@murphai/runtime-state/node/assistant-runtime-issues": [
-        "./src/node/assistant-runtime-issues.ts"
-      ],
-      "@murphai/runtime-state/node/assistant-state-fs": [
-        "./src/node/assistant-state-fs.ts"
-      ],
-      "@murphai/runtime-state/node/hosted-bundle-codec": [
-        "./src/node/hosted-bundle-codec.ts"
-      ],
-      "@murphai/runtime-state/node/loopback-control-plane-auth": [
-        "./src/node/loopback-control-plane-auth.ts"
-      ],
-      "@murphai/runtime-state/node/runtime-paths": [
-        "./src/node/runtime-paths.ts"
-      ],
-      "@murphai/runtime-state/node/sqlite-warning-filter": [
-        "./src/node/sqlite-warning-filter.ts"
-      ],
-      "@murphai/runtime-state/node/ulid": [
-        "./src/node/ulid.ts"
-      ],
-      "@murphai/runtime-state/*": [
-        "./src/*"
-      ]
-    },
     "rootDir": "../..",
     "composite": false,
     "incremental": true,
