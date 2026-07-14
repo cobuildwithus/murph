@@ -73,6 +73,7 @@ import {
   assistantOutboxIntentMatchesDispatchOwner,
   persistAssistantOutboxIntentDeliveryPendingConfirmation,
   resetAssistantOutboxPreparedDispatch,
+  restoreAssistantOutboxPreDispatchState,
   rescheduleAssistantOutboxConfirmationRetry,
   sameAssistantChannelDelivery,
   updateAssistantOutboxAfterDispatchFailure,
@@ -197,6 +198,16 @@ export interface AssistantOutboxDispatchHooks {
     vault: string
   }) => Promise<AssistantChannelDelivery | null>
   shouldRethrowDispatchError?: (input: {
+    error: unknown
+    intent: AssistantOutboxIntent
+    vault: string
+  }) => boolean
+  /**
+   * Selects control-flow errors that prove provider dispatch never began.
+   * The outbox restores the exact prior dispatch fields while the sending
+   * owner still matches, then rethrows so the runtime can resume its own work.
+   */
+  shouldRestorePreDispatchStateAndRethrow?: (input: {
     error: unknown
     intent: AssistantOutboxIntent
     vault: string
@@ -919,6 +930,20 @@ async function dispatchAssistantOutboxIntentInternal(input: DispatchAssistantOut
       session: delivered.session ?? null,
     }
   } catch (error) {
+    if (input.dispatchHooks?.shouldRestorePreDispatchStateAndRethrow?.({
+      error,
+      intent: dispatchIntent,
+      vault: input.vault,
+    }) === true) {
+      await restoreAssistantOutboxPreDispatchState({
+        intentPath: dispatchIntentPath,
+        previous: prepared.intent,
+        restoredAt: new Date(),
+        sending: dispatchIntent,
+        vault: input.vault,
+      })
+      throw error
+    }
     if (input.dispatchHooks?.shouldRethrowDispatchError?.({
       error,
       intent: dispatchIntent,

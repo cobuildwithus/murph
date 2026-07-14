@@ -842,6 +842,11 @@ contrast, later conversation work or incomplete conversation classification
 yields background retries and maintenance without canceling an already
 prepared current-turn reply. The permit is checked again after asynchronous
 provider authority preparation and immediately before egress.
+When that final check rejects an unprepared outbox claim before provider entry,
+the outbox restores the exact prior dispatch fields only while the same sending
+owner still holds the intent, then yields to the existing durable continuation.
+After provider entry, the claim remains fail-closed in sending state instead of
+being restored or converted into a blind non-idempotent retry.
 The assistant engine then admits the persisted input through live steering or
 pre-provider admission without using hosted-specific mailbox
 refresh/checkpoint ports. While a Codex turn is live, same-conversation input is

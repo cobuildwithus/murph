@@ -19,7 +19,9 @@ import {
   markAssistantOutboxIntentSent,
   markAssistantOutboxIntentMirrorRetryable,
   markAssistantOutboxIntentMirrorTerminal,
+  persistAssistantOutboxIntentDeliveryPendingConfirmation,
   resetAssistantOutboxPreparedDispatch,
+  restoreAssistantOutboxPreDispatchState,
   updateAssistantOutboxAfterDispatchFailure,
 } from '../src/assistant/outbox/dispatch-state.ts'
 import { resolveAssistantOutboxIntentPath } from '../src/assistant/outbox/intents.ts'
@@ -345,6 +347,150 @@ describe('assistant outbox dispatch-state', () => {
       expect(
         receipt?.timeline.filter((event) => event.kind === 'delivery.attempt.started'),
       ).toHaveLength(1)
+    })
+  })
+
+  it('does not restore prior state over accepted delivery evidence from the same owner', async () => {
+    await withTempVault(async (vault) => {
+      await createAssistantTurnReceipt({
+        deliveryRequested: true,
+        prompt: 'preserve accepted provider evidence',
+        provider: 'codex-cli',
+        providerModel: 'gpt-5.4',
+        sessionId: 'asst_outbox_restore_evidence',
+        turnId: 'turn_outbox_restore_evidence',
+        vault,
+      })
+      const created = await createAssistantOutboxIntent({
+        channel: 'telegram',
+        message: 'preserve accepted provider evidence',
+        sessionId: 'asst_outbox_restore_evidence',
+        turnId: 'turn_outbox_restore_evidence',
+        vault,
+      })
+      const sending = await beginAssistantOutboxIntentMirrorDispatch({
+        deliveryIdempotencyKey: 'assistant-outbox:restore-evidence',
+        deliveryTransportIdempotent: true,
+        intentId: created.intentId,
+        startedAt: '2030-04-13T00:12:00.000Z',
+        vault,
+      })
+      if (!sending) {
+        throw new Error('Expected the test intent to enter sending state.')
+      }
+      const paths = resolveAssistantStatePaths(vault)
+      const intentPath = resolveAssistantOutboxIntentPath(
+        paths.outboxDirectory,
+        created.intentId,
+      )
+      const delivery = {
+        channel: 'telegram',
+        idempotencyKey: 'assistant-outbox:restore-evidence',
+        messageLength: created.message.length,
+        providerMessageId: 'provider-restore-evidence',
+        providerThreadId: null,
+        sentAt: '2030-04-13T00:12:05.000Z',
+        target: 'chat-restore-evidence',
+        targetKind: 'thread',
+      } as const
+      const accepted = await persistAssistantOutboxIntentDeliveryPendingConfirmation({
+        delivery,
+        deliveryTransportIdempotent: true,
+        intent: sending,
+        intentPath,
+        vault,
+      })
+
+      const restored = await restoreAssistantOutboxPreDispatchState({
+        intentPath,
+        previous: created,
+        restoredAt: new Date('2030-04-13T00:12:10.000Z'),
+        sending,
+        vault,
+      })
+
+      expect(restored).toEqual(accepted)
+      expect(restored).toMatchObject({
+        delivery,
+        deliveryConfirmationPending: true,
+        status: 'sending',
+      })
+      await expect(readAssistantOutboxIntent(vault, created.intentId)).resolves.toEqual(
+        accepted,
+      )
+    })
+  })
+
+  it('does not restore prior state over a successor dispatch owner', async () => {
+    await withTempVault(async (vault) => {
+      await createAssistantTurnReceipt({
+        deliveryRequested: true,
+        prompt: 'preserve successor dispatch owner',
+        provider: 'codex-cli',
+        providerModel: 'gpt-5.4',
+        sessionId: 'asst_outbox_restore_successor',
+        turnId: 'turn_outbox_restore_successor',
+        vault,
+      })
+      const created = await createAssistantOutboxIntent({
+        channel: 'telegram',
+        message: 'preserve successor dispatch owner',
+        sessionId: 'asst_outbox_restore_successor',
+        turnId: 'turn_outbox_restore_successor',
+        vault,
+      })
+      const firstSending = await beginAssistantOutboxIntentMirrorDispatch({
+        deliveryIdempotencyKey: 'assistant-outbox:restore-successor',
+        deliveryTransportIdempotent: false,
+        intentId: created.intentId,
+        startedAt: '2030-04-13T00:13:00.000Z',
+        vault,
+      })
+      if (!firstSending) {
+        throw new Error('Expected the first test dispatch to enter sending state.')
+      }
+      const paths = resolveAssistantStatePaths(vault)
+      const intentPath = resolveAssistantOutboxIntentPath(
+        paths.outboxDirectory,
+        created.intentId,
+      )
+      await markAssistantOutboxIntentMirrorRetryable({
+        error: Object.assign(new Error('retry after first owner'), {
+          retryable: true,
+        }),
+        failedAt: new Date('2030-04-13T00:13:05.000Z'),
+        intent: firstSending,
+        intentPath,
+        vault,
+      })
+      const successor = await beginAssistantOutboxIntentMirrorDispatch({
+        deliveryIdempotencyKey: 'assistant-outbox:restore-successor',
+        deliveryTransportIdempotent: false,
+        intentId: created.intentId,
+        startedAt: '2030-04-13T00:14:00.000Z',
+        vault,
+      })
+      if (!successor) {
+        throw new Error('Expected the successor test dispatch to enter sending state.')
+      }
+
+      const restored = await restoreAssistantOutboxPreDispatchState({
+        intentPath,
+        previous: created,
+        restoredAt: new Date('2030-04-13T00:14:05.000Z'),
+        sending: firstSending,
+        vault,
+      })
+
+      expect(restored).toEqual(successor)
+      expect(restored).toMatchObject({
+        attemptCount: 2,
+        lastAttemptAt: '2030-04-13T00:14:00.000Z',
+        status: 'sending',
+      })
+      await expect(readAssistantOutboxIntent(vault, created.intentId)).resolves.toEqual(
+        successor,
+      )
     })
   })
 
