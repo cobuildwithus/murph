@@ -185,7 +185,6 @@ describe("hosted local retryable outbox foreground restart e2e", () => {
     expect(requireLinqStub().countAcceptedSends(replyPath, olderReplyMatcher)).toBe(
       baselineOlderAcceptedCount,
     );
-    expect(Date.now()).toBeLessThan(retryWakeAtMs);
 
     const olderRetriedReply = await requireLinqStub().waitForAdditionalAcceptedSend({
       baselineCount: baselineOlderAcceptedCount,

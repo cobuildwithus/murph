@@ -89,10 +89,6 @@ describe('Codex thread instructions', () => {
       developerInstructions: 'Stable Murph instructions.',
       resume: {
         codexThreadId: 'thread-resume',
-        prepareFreshThreadFallback: async () => ({
-          developerInstructions: 'Stable Murph instructions.',
-          turnContextPrompt: 'Current Murph runtime context.',
-        }),
       },
       systemPrompt: 'Stable Murph instructions.',
       turnContextPrompt: 'Current Murph runtime context.',
@@ -113,7 +109,7 @@ describe('Codex thread instructions', () => {
     expect(appServerInput.resumeSessionId).toBe('thread-resume')
   })
 
-  it('runs native resume without preparing a fresh-thread fallback when primary succeeds', async () => {
+  it('runs native resume without a second provider request when primary succeeds', async () => {
     codexAppServerMocks.executeCodexAppServerTurn.mockResolvedValue({
       finalMessage: 'done',
       jsonEvents: [],
@@ -125,10 +121,6 @@ describe('Codex thread instructions', () => {
       turnId: 'turn-resume',
     })
 
-    const prepareFreshThreadFallback = vi.fn(async () => ({
-      developerInstructions: 'Stable Murph instructions.',
-    }))
-
     await expect(
       executeCodexAssistantTurnAttemptUnchecked({
         providerConfig: normalizeAssistantProviderConfig({
@@ -139,7 +131,6 @@ describe('Codex thread instructions', () => {
         developerInstructions: 'Stable Murph instructions.',
         resume: {
           codexThreadId: 'thread-resume',
-          prepareFreshThreadFallback,
         },
         userPrompt: 'Continue.',
         workingDirectory: '/tmp/provider-tests',
@@ -148,7 +139,6 @@ describe('Codex thread instructions', () => {
       ok: true,
     })
 
-    expect(prepareFreshThreadFallback).not.toHaveBeenCalled()
     expect(codexAppServerMocks.executeCodexAppServerTurn).toHaveBeenCalledTimes(1)
     expect(codexAppServerMocks.executeCodexAppServerTurn.mock.calls[0]?.[0])
       .toMatchObject({
@@ -171,21 +161,6 @@ describe('Codex thread instructions', () => {
     const dynamicTools = resolveMurphDynamicTools({
       personalizationAvailable: true,
     })
-    const prepareFreshThreadFallback = vi.fn(async () => ({
-      developerInstructions: 'Fresh personalization instructions.',
-      sessionContext: {
-        binding: {
-          actorId: 'actor-1',
-          channel: 'telegram',
-          conversationKey: null,
-          delivery: null,
-          identityId: 'identity-1',
-          threadId: 'thread-telegram',
-          threadIsDirect: true,
-        },
-      },
-      turnContextPrompt: 'Current Murph runtime context.',
-    }))
 
     const attempt = await executeCodexAssistantTurnAttemptUnchecked({
       providerConfig: normalizeAssistantProviderConfig({
@@ -196,13 +171,11 @@ describe('Codex thread instructions', () => {
       developerInstructions: null,
       resume: {
         codexThreadId: 'thread-cold-old',
-        prepareFreshThreadFallback,
       },
       userPrompt: 'Continue.',
       workingDirectory: '/tmp/provider-tests',
     })
 
-    expect(prepareFreshThreadFallback).not.toHaveBeenCalled()
     expect(codexAppServerMocks.executeCodexAppServerTurn).toHaveBeenCalledTimes(1)
     expect(codexAppServerMocks.executeCodexAppServerTurn.mock.calls[0]?.[0])
       .toMatchObject({
@@ -215,7 +188,7 @@ describe('Codex thread instructions', () => {
     })
   })
 
-  it('starts stale-resume fallback with fresh thread instructions', async () => {
+  it('returns stale native-resume failure without starting a fresh thread', async () => {
     const dynamicTools = resolveMurphDynamicTools({})
     codexAppServerMocks.executeCodexAppServerTurn
       .mockRejectedValueOnce(
@@ -228,32 +201,6 @@ describe('Codex thread instructions', () => {
           },
         ),
       )
-      .mockResolvedValueOnce({
-        finalMessage: 'done',
-        jsonEvents: [],
-        providerActionCount: 0,
-        sessionId: 'thread-fresh',
-        stderr: '',
-        stdout: '',
-        threadId: 'thread-fresh',
-        turnId: 'turn-fresh',
-      })
-
-    const prepareFreshThreadFallback = vi.fn(async () => ({
-      developerInstructions: 'Stable Murph instructions.',
-      sessionContext: {
-        binding: {
-          actorId: 'actor-1',
-          channel: 'telegram',
-          conversationKey: null,
-          delivery: null,
-          identityId: 'identity-1',
-          threadId: 'thread-telegram',
-          threadIsDirect: true,
-        },
-      },
-      turnContextPrompt: 'Current Murph runtime context.',
-    }))
 
     await expect(
       executeCodexAssistantTurnAttempt({
@@ -265,35 +212,21 @@ describe('Codex thread instructions', () => {
         developerInstructions: null,
         resume: {
           codexThreadId: 'stale-thread',
-          prepareFreshThreadFallback,
         },
         userPrompt: 'Continue.',
         workingDirectory: '/tmp/provider-tests',
       }),
     ).resolves.toMatchObject({
-      ok: true,
+      ok: false,
     })
 
-    expect(prepareFreshThreadFallback).toHaveBeenCalledTimes(1)
-    expect(codexAppServerMocks.executeCodexAppServerTurn).toHaveBeenCalledTimes(2)
+    expect(codexAppServerMocks.executeCodexAppServerTurn).toHaveBeenCalledTimes(1)
     expect(codexAppServerMocks.executeCodexAppServerTurn.mock.calls[0]?.[0])
       .toMatchObject({
         developerInstructions: null,
         dynamicTools,
         resumeSessionId: 'stale-thread',
       })
-    const fallbackInput = codexAppServerMocks.executeCodexAppServerTurn.mock
-      .calls[1]?.[0]
-    expect(fallbackInput).toMatchObject({
-      developerInstructions: 'Stable Murph instructions.',
-      dynamicTools,
-      resumeSessionId: undefined,
-    })
-    expect(fallbackInput.prompt).toContain('Current Murph runtime context.')
-    expect(fallbackInput.prompt).toContain('Conversation context:')
-    expect(fallbackInput.prompt).toContain('thread: thread-telegram')
-    expect(fallbackInput.prompt).toContain('User message:\nContinue.')
-    expect(fallbackInput.prompt).not.toContain('Stable Murph instructions.')
   })
 
   it('does not promote or replay legacy system prompts', async () => {

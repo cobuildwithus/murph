@@ -4179,6 +4179,90 @@ describe('assistant cron runtime orchestration', () => {
     expect(runtimeRecord?.state.consecutiveFailures).toBe(1)
   })
 
+  it('retries the same scheduled occurrence and session after a provider-stage failure', async () => {
+    vi.useFakeTimers()
+    vi.setSystemTime(new Date('2026-04-08T10:00:00.000Z'))
+    const { vaultRoot } = await createRuntimeContext(
+      'assistant-cron-runtime-provider-resume-retry-',
+    )
+    const paths = resolveAssistantStatePaths(vaultRoot)
+    const canonicalJob = await createCanonicalJob(
+      vaultRoot,
+      'provider resume retry reminder',
+    )
+    await updateCanonicalRuntimeState(vaultRoot, canonicalJob.jobId, (record) => ({
+      ...record,
+      sessionId: 'session-provider-resume-retry',
+    }))
+    const providerError = Object.assign(
+      new Error('Provider turn failed after resume-state finalization.'),
+      {
+        details: {
+          assistantNotificationStage: 'provider',
+        },
+      },
+    )
+    cronMocks.sendAssistantMessageLocal
+      .mockRejectedValueOnce(providerError)
+      .mockResolvedValueOnce({
+        decision: {
+          kind: 'skip',
+          privateSummary: 'Retry completed without delivery.',
+        },
+        response: null,
+        session: {
+          sessionId: 'session-provider-resume-retry',
+        },
+      })
+
+    await expect(
+      processDueAssistantCronJobsLocal({
+        limit: 1,
+        vault: vaultRoot,
+      }),
+    ).resolves.toEqual({
+      failed: 1,
+      processed: 1,
+      succeeded: 0,
+    })
+    const failedStore = await readAssistantCronCanonicalRuntimeStore(paths)
+    const failedRecord = failedStore.jobs.find((record) =>
+      record.jobId === canonicalJob.jobId
+    )
+    expect(failedRecord?.state.pendingOccurrenceAt).toBe(
+      '2026-04-08T10:00:00.000Z',
+    )
+    expect(failedRecord?.state.retryAfterAt).toBe(
+      '2026-04-08T10:00:30.000Z',
+    )
+
+    vi.setSystemTime(new Date('2026-04-08T10:00:30.000Z'))
+    await expect(
+      processDueAssistantCronJobsLocal({
+        limit: 1,
+        vault: vaultRoot,
+      }),
+    ).resolves.toEqual({
+      failed: 0,
+      processed: 1,
+      succeeded: 1,
+    })
+    const recoveredStore = await readAssistantCronCanonicalRuntimeStore(paths)
+    const recoveredRecord = recoveredStore.jobs.find((record) =>
+      record.jobId === canonicalJob.jobId
+    )
+    expect(recoveredRecord?.state.pendingOccurrenceAt).toBeNull()
+    expect(recoveredRecord?.state.retryAfterAt).toBeNull()
+    expect(recoveredRecord?.state.consecutiveFailures).toBe(0)
+    expect(cronMocks.sendAssistantMessageLocal).toHaveBeenCalledTimes(2)
+    for (const [notificationInput] of
+      cronMocks.sendAssistantMessageLocal.mock.calls) {
+      expect(notificationInput.sessionId).toBe(
+        'session-provider-resume-retry',
+      )
+    }
+  })
+
   it('advances consumed canonical delivery failures after an older success', async () => {
     vi.useFakeTimers()
     vi.setSystemTime(new Date('2026-04-09T10:00:00.000Z'))

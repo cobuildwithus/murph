@@ -2,7 +2,22 @@ import { readFile, readdir } from "node:fs/promises";
 import path from "node:path";
 import { fileURLToPath, pathToFileURL } from "node:url";
 
-import * as ts from "@typescript/typescript6";
+import { parse, type ParserPlugin } from "@babel/parser";
+import {
+  isCallExpression,
+  isIdentifier,
+  isMemberExpression,
+  isObjectProperty,
+  isOptionalCallExpression,
+  isOptionalMemberExpression,
+  isStringLiteral,
+  isTemplateLiteral,
+  traverseFast,
+  type Identifier,
+  type MemberExpression,
+  type Node,
+  type OptionalMemberExpression,
+} from "@babel/types";
 
 const repoRoot = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "..");
 const scanRoots = ["apps", "packages", "scripts"] as const;
@@ -67,6 +82,11 @@ const safeInputWrapperPropertyPaths = new Set([
 ]);
 const safeHelperNamePattern =
   /(?:ErrorName|ForLog|SafeLog|mask|redact|sanitize|scrub|summarize|summary)/u;
+const possibleSensitiveVariablePattern = new RegExp(
+  `\\b(?:${[...sensitiveVariableNames].join("|")})\\b`,
+  "u",
+);
+const possibleLogSinkPattern = /\b(?:console|logger|log)\b|\b[A-Za-z_$][\w$]*Logger\b/u;
 
 export interface RawHealthLogPayloadMatch {
   readonly callee: string;
@@ -77,9 +97,11 @@ export interface RawHealthLogPayloadMatch {
 }
 
 interface SensitiveReference {
-  readonly node: ts.Node;
+  readonly node: Identifier;
   readonly variableName: string;
 }
+
+type MemberLikeExpression = MemberExpression | OptionalMemberExpression;
 
 export async function collectRawHealthLogPayloadMatches(): Promise<RawHealthLogPayloadMatch[]> {
   const matches: RawHealthLogPayloadMatch[] = [];
@@ -95,36 +117,44 @@ export function findRawHealthLogPayloadMatches(
   relativePath: string,
   contents: string,
 ): RawHealthLogPayloadMatch[] {
-  const sourceFile = ts.createSourceFile(
-    relativePath,
-    contents,
-    ts.ScriptTarget.Latest,
-    true,
-    resolveScriptKind(relativePath),
-  );
+  if (
+    !possibleSensitiveVariablePattern.test(contents) ||
+    !possibleLogSinkPattern.test(contents)
+  ) {
+    return [];
+  }
+
+  const sourceFile = parse(contents, {
+    allowAwaitOutsideFunction: true,
+    allowReturnOutsideFunction: true,
+    allowUndeclaredExports: true,
+    attachComment: false,
+    plugins: parserPlugins(relativePath),
+    sourceFilename: relativePath,
+    sourceType: "unambiguous",
+  });
   const matches: RawHealthLogPayloadMatch[] = [];
 
-  function visit(node: ts.Node): void {
-    if (ts.isCallExpression(node) && isLogCallExpression(node.expression)) {
-      const callee = node.expression.getText(sourceFile);
+  traverseFast(sourceFile, (node) => {
+    if (
+      (isCallExpression(node) || isOptionalCallExpression(node)) &&
+      isLogCallExpression(node.callee)
+    ) {
+      const callee = readNodeText(node.callee, contents);
       for (const argument of node.arguments) {
-        for (const reference of findUnsafeSensitiveReferences(argument, sourceFile)) {
-          const position = sourceFile.getLineAndCharacterOfPosition(reference.node.getStart(sourceFile));
+        for (const reference of findUnsafeSensitiveReferences(argument, contents)) {
+          const position = readLineAndColumn(contents, reference.node.start);
           matches.push({
             callee,
-            column: position.character + 1,
+            column: position.column,
             filePath: normalizeRepoPath(relativePath),
-            line: position.line + 1,
+            line: position.line,
             variableName: reference.variableName,
           });
         }
       }
     }
-
-    ts.forEachChild(node, visit);
-  }
-
-  visit(sourceFile);
+  });
   return matches;
 }
 
@@ -179,169 +209,198 @@ async function scanDirectory(
 }
 
 function findUnsafeSensitiveReferences(
-  node: ts.Node,
-  sourceFile: ts.SourceFile,
+  node: Node,
+  sourceText: string,
 ): SensitiveReference[] {
-  if (isSafeExpression(node, sourceFile)) {
+  if (isSafeExpression(node, sourceText)) {
     return [];
   }
 
-  if (ts.isIdentifier(node) && sensitiveVariableNames.has(node.text)) {
-    return [{ node, variableName: node.text }];
+  if (isIdentifier(node) && sensitiveVariableNames.has(node.name)) {
+    return [{ node, variableName: node.name }];
   }
 
-  if (ts.isShorthandPropertyAssignment(node) && sensitiveVariableNames.has(node.name.text)) {
-    return [{ node: node.name, variableName: node.name.text }];
+  if (isObjectProperty(node)) {
+    return findUnsafeSensitiveReferences(node.value, sourceText);
   }
 
-  if (ts.isPropertyAssignment(node)) {
-    return findUnsafeSensitiveReferences(node.initializer, sourceFile);
-  }
-
-  const propertyAccessReference = readUnsafePropertyAccessReference(node, sourceFile);
+  const propertyAccessReference = readUnsafePropertyAccessReference(node, sourceText);
   if (propertyAccessReference) {
     return [propertyAccessReference];
   }
 
   const references: SensitiveReference[] = [];
-  ts.forEachChild(node, (child) => {
-    references.push(...findUnsafeSensitiveReferences(child, sourceFile));
+  traverseFast(node, (child) => {
+    if (child !== node) {
+      references.push(...findUnsafeSensitiveReferences(child, sourceText));
+      return traverseFast.skip;
+    }
   });
   return references;
 }
 
 function readUnsafePropertyAccessReference(
-  node: ts.Node,
-  sourceFile: ts.SourceFile,
+  node: Node,
+  sourceText: string,
 ): SensitiveReference | null {
-  if (ts.isPropertyAccessExpression(node)) {
+  if (!isMemberLikeExpression(node)) {
+    return null;
+  }
+
+  if (!node.computed) {
     const root = readPropertyAccessRootIdentifier(node);
-    if (!root || !sensitiveVariableNames.has(root.text)) {
+    if (!root || !sensitiveVariableNames.has(root.name)) {
       return null;
     }
 
     const propertyNames = readPropertyAccessNames(node);
-    if (isMetadataOnlyPropertyAccess(root.text, propertyNames)) {
+    if (isMetadataOnlyPropertyAccess(root.name, propertyNames)) {
       return null;
     }
 
-    return { node: root, variableName: root.text };
+    return { node: root, variableName: root.name };
   }
 
-  if (ts.isElementAccessExpression(node)) {
-    const root = readPropertyAccessRootIdentifier(node.expression);
-    if (!root || !sensitiveVariableNames.has(root.text)) {
-      return null;
-    }
-
-    const keyName = readStaticElementAccessName(node.argumentExpression, sourceFile);
-    if (keyName && isMetadataOnlyPropertyAccess(root.text, [keyName])) {
-      return null;
-    }
-
-    return { node: root, variableName: root.text };
+  const root = readPropertyAccessRootIdentifier(node.object);
+  if (!root || !sensitiveVariableNames.has(root.name)) {
+    return null;
   }
 
-  return null;
+  const keyName = readStaticElementAccessName(node.property, sourceText);
+  if (keyName && isMetadataOnlyPropertyAccess(root.name, [keyName])) {
+    return null;
+  }
+
+  return { node: root, variableName: root.name };
 }
 
-function isSafeExpression(node: ts.Node, sourceFile: ts.SourceFile): boolean {
-  if (ts.isCallExpression(node)) {
-    return isSafeHelperCallee(node.expression, sourceFile);
+function isSafeExpression(node: Node, sourceText: string): boolean {
+  if (isCallExpression(node) || isOptionalCallExpression(node)) {
+    return isSafeHelperCallee(node.callee, sourceText);
   }
 
-  if (ts.isPropertyAccessExpression(node)) {
+  if (isMemberLikeExpression(node) && !node.computed) {
     const root = readPropertyAccessRootIdentifier(node);
-    return !!root && isMetadataOnlyPropertyAccess(root.text, readPropertyAccessNames(node));
+    return !!root && isMetadataOnlyPropertyAccess(root.name, readPropertyAccessNames(node));
   }
 
   return false;
 }
 
-function isSafeHelperCallee(expression: ts.Expression, sourceFile: ts.SourceFile): boolean {
-  return safeHelperNamePattern.test(expression.getText(sourceFile));
+function isSafeHelperCallee(expression: Node, sourceText: string): boolean {
+  return safeHelperNamePattern.test(readNodeText(expression, sourceText));
 }
 
-function isLogCallExpression(expression: ts.Expression): boolean {
-  if (ts.isIdentifier(expression)) {
-    return expression.text === "log";
+function isLogCallExpression(expression: Node): boolean {
+  if (isIdentifier(expression)) {
+    return expression.name === "log";
   }
 
-  if (!ts.isPropertyAccessExpression(expression) || !logMethodNames.has(expression.name.text)) {
+  if (!isMemberLikeExpression(expression)) {
     return false;
   }
 
-  const root = readPropertyAccessRootIdentifier(expression.expression);
+  const methodName = readMemberPropertyName(expression);
+  if (!methodName || !logMethodNames.has(methodName)) {
+    return false;
+  }
+
+  const root = readPropertyAccessRootIdentifier(expression.object);
   if (!root) {
-    return isLoggerPropertyAccessReceiver(expression.expression);
+    return isLoggerPropertyAccessReceiver(expression.object);
   }
 
-  return root.text === "console" || root.text === "logger" || isLoggerLikeName(root.text);
+  return root.name === "console" || root.name === "logger" || isLoggerLikeName(root.name);
 }
 
-function isLoggerPropertyAccessReceiver(expression: ts.Expression): boolean {
-  if (!ts.isPropertyAccessExpression(expression)) {
+function isLoggerPropertyAccessReceiver(expression: Node): boolean {
+  if (!isMemberLikeExpression(expression)) {
     return false;
   }
 
-  return isLoggerLikeName(expression.name.text);
+  const propertyName = readMemberPropertyName(expression);
+  return propertyName ? isLoggerLikeName(propertyName) : false;
 }
 
 function isLoggerLikeName(name: string): boolean {
   return name === "logger" || /Logger$/u.test(name);
 }
 
-function readPropertyAccessRootIdentifier(node: ts.Node): ts.Identifier | null {
-  if (ts.isIdentifier(node)) {
+function readPropertyAccessRootIdentifier(node: Node): Identifier | null {
+  if (isIdentifier(node)) {
     return node;
   }
 
-  if (node.kind === ts.SyntaxKind.ThisKeyword) {
+  if (node.type === "ThisExpression") {
     return null;
   }
 
-  if (ts.isPropertyAccessExpression(node)) {
-    const root = readPropertyAccessRootIdentifier(node.expression);
-    return root ?? (ts.isIdentifier(node.name) && node.name.text === "logger" ? node.name : null);
-  }
-
-  if (ts.isElementAccessExpression(node)) {
-    return readPropertyAccessRootIdentifier(node.expression);
+  if (isMemberLikeExpression(node)) {
+    const root = readPropertyAccessRootIdentifier(node.object);
+    return root ?? (isIdentifier(node.property) && node.property.name === "logger" ? node.property : null);
   }
 
   return null;
 }
 
-function readPropertyAccessNames(node: ts.PropertyAccessExpression): string[] {
-  const names: string[] = [node.name.text];
-  let current: ts.Expression = node.expression;
+function readPropertyAccessNames(node: MemberLikeExpression): string[] {
+  const propertyName = readMemberPropertyName(node);
+  const names: string[] = propertyName ? [propertyName] : [];
+  let current: Node = node.object;
 
-  while (ts.isPropertyAccessExpression(current)) {
-    names.unshift(current.name.text);
-    current = current.expression;
+  while (isMemberLikeExpression(current) && !current.computed) {
+    const currentPropertyName = readMemberPropertyName(current);
+    if (currentPropertyName) {
+      names.unshift(currentPropertyName);
+    }
+    current = current.object;
   }
 
   return names;
 }
 
 function readStaticElementAccessName(
-  node: ts.Expression | undefined,
-  sourceFile: ts.SourceFile,
+  node: Node,
+  sourceText: string,
 ): string | null {
-  if (!node) {
-    return null;
+  if (isStringLiteral(node)) {
+    return node.value;
   }
 
-  if (ts.isStringLiteralLike(node)) {
-    return node.text;
+  if (isTemplateLiteral(node) && node.expressions.length === 0) {
+    return node.quasis[0]?.value.cooked ?? node.quasis[0]?.value.raw ?? null;
   }
 
-  if (ts.isNoSubstitutionTemplateLiteral(node)) {
-    return node.text;
-  }
-
-  const text = node.getText(sourceFile);
+  const text = readNodeText(node, sourceText);
   return /^[A-Za-z_$][\w$]*$/u.test(text) ? text : null;
+}
+
+function isMemberLikeExpression(node: Node): node is MemberLikeExpression {
+  return isMemberExpression(node) || isOptionalMemberExpression(node);
+}
+
+function readMemberPropertyName(node: MemberLikeExpression): string | null {
+  if (isIdentifier(node.property)) {
+    return node.property.name;
+  }
+
+  return isStringLiteral(node.property) ? node.property.value : null;
+}
+
+function readNodeText(node: Node, sourceText: string): string {
+  return sourceText.slice(node.start ?? 0, node.end ?? 0);
+}
+
+function readLineAndColumn(
+  sourceText: string,
+  position: number | null | undefined,
+): { readonly column: number; readonly line: number } {
+  const prefix = sourceText.slice(0, position ?? 0);
+  const lineStart = prefix.lastIndexOf("\n") + 1;
+  return {
+    column: prefix.length - lineStart + 1,
+    line: prefix.split("\n").length,
+  };
 }
 
 function isMetadataOnlyPropertyAccess(rootName: string, propertyNames: readonly string[]): boolean {
@@ -374,16 +433,15 @@ function shouldSkipDirectory(name: string): boolean {
   return skippedDirectoryNames.has(name) || name.startsWith(".next");
 }
 
-function resolveScriptKind(relativePath: string): ts.ScriptKind {
-  if (relativePath.endsWith(".tsx") || relativePath.endsWith(".jsx")) {
-    return ts.ScriptKind.TSX;
+function parserPlugins(relativePath: string): ParserPlugin[] {
+  const plugins: ParserPlugin[] = [["decorators", { decoratorsBeforeExport: true }]];
+  if (/\.[cm]?tsx?$/u.test(relativePath)) {
+    plugins.push("typescript");
   }
-
-  if (relativePath.endsWith(".js") || relativePath.endsWith(".mjs") || relativePath.endsWith(".cjs")) {
-    return ts.ScriptKind.JS;
+  if (/\.[jt]sx$/u.test(relativePath)) {
+    plugins.push("jsx");
   }
-
-  return ts.ScriptKind.TS;
+  return plugins;
 }
 
 function normalizeRepoPath(filePath: string): string {

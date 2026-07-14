@@ -34,7 +34,9 @@ import {
   recordAssistantUsageEvent,
 } from './service-usage.js'
 import {
+  applyAssistantSessionCodexResumeStateAction,
   persistAssistantTurnAndSession,
+  resolveAssistantProviderResumeStateAction,
   type AssistantProviderResumeStateAction,
 } from './turn-finalizer.js'
 import { resolveAssistantTurnRoute } from './service-turn-routes.js'
@@ -363,6 +365,8 @@ export async function sendAssistantNotificationLocal(
       try {
         const notificationProviderRequestStarted =
           messageInput.onProviderRequestStarted ?? null
+        const notificationTurnProfile =
+          resolveAssistantNotificationTurnProfile(input)
         const providerOutcome = await executeCodexTurnWithRecovery({
           allowFinishWithoutReply: false,
           input: messageInput,
@@ -378,7 +382,7 @@ export async function sendAssistantNotificationLocal(
             : undefined,
           plan: sharedPlan,
           progressDelivery,
-          profile: resolveAssistantNotificationTurnProfile(input),
+          profile: notificationTurnProfile,
           resolvedSession: resolved.session,
           route,
           turnCreatedAt,
@@ -391,12 +395,28 @@ export async function sendAssistantNotificationLocal(
               input,
               rawEvents: providerOutcome.rawEvents ?? [],
             })
+          const failedSession =
+            await applyAssistantSessionCodexResumeStateAction({
+              action: resolveAssistantProviderResumeStateAction({
+                codexThreadId: providerOutcome.codexThreadId,
+                threadScope: notificationTurnProfile.threadScope,
+              }),
+              assistantContractFingerprint:
+                providerOutcome.assistantContractFingerprint,
+              codexRolloutRelativePath:
+                providerOutcome.codexRolloutRelativePath,
+              codexThreadId: providerOutcome.codexThreadId,
+              routeFingerprint:
+                readCodexThreadRouteFingerprint(providerOutcome.route),
+              session: providerOutcome.session,
+              vault: input.vault,
+            })
           const failedProviderResult = {
             attemptCount: providerOutcome.attemptCount,
             provider: providerOutcome.route.provider,
             providerOptions: providerOutcome.route.providerOptions,
             route: providerOutcome.route,
-            session: providerOutcome.session ?? resolved.session,
+            session: failedSession,
             usage: providerOutcome.usage,
             usageAttribution: providerOutcome.usageAttribution,
           }
@@ -420,7 +440,7 @@ export async function sendAssistantNotificationLocal(
                 stage: 'provider',
                 input: messageInput,
                 route: providerOutcome.route,
-                session: resolved.session,
+                session: failedSession,
               }),
               assistantNotificationProviderNonReplayableWork:
                 nonReplayableProviderWork,
@@ -1304,7 +1324,7 @@ async function deliverAssistantNotificationMessage(input: {
 
 function resolveAssistantNotificationTurnProfile(
   input: AssistantNotificationInput,
-): AssistantCodexTurnThreadScopeProfile {
+) {
   return isAssistantNotificationMaintenanceExactSkip(input)
     ? ASSISTANT_NOTIFICATION_MAINTENANCE_TURN_PROFILE
     : ASSISTANT_NOTIFICATION_TURN_PROFILE

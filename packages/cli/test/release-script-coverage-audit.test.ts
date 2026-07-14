@@ -1169,8 +1169,8 @@ describe('monorepo release flow coverage audit', () => {
     expect(prReviewGptLoop).toContain('It does **not** run the local Codex')
     expect(prReviewGptLoop).toContain('scripts/review-gpt-pr-head-preflight.sh')
     expect(prReviewGptLoop).toContain('REVIEW_COMPLETE')
-    expect(prReviewGptLoop).toContain('Hard cap: 15 rounds per PR')
-    expect(prReviewGptLoop).not.toContain('Hard cap: 10 rounds per PR')
+    expect(prReviewGptLoop).toContain('Hard cap: 5 rounds per PR')
+    expect(prReviewGptLoop).not.toContain('Hard cap: 15 rounds per PR')
     expect(prReviewGptLoop).toContain('Prompt-primary PRs use the local')
     expect(agentsGuide).toContain('Prompt-primary PRs do not run ReviewGPT')
     expect(agentWorkflowRouting).toContain(
