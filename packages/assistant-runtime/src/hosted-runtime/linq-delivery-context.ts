@@ -75,11 +75,13 @@ export function resolveHostedAssistantLinqDeliveryContextForRequest(input: {
   }
 
   const target = normalizeHostedLinqDeliveryContextText(input.target);
+  const replyToMessageId = normalizeHostedLinqDeliveryContextText(input.replyToMessageId);
   if (target && target === input.context.target) {
-    return input.context;
+    return !replyToMessageId || replyToMessageId === input.context.replyToMessageId
+      ? input.context
+      : null;
   }
 
-  const replyToMessageId = normalizeHostedLinqDeliveryContextText(input.replyToMessageId);
   if (!replyToMessageId || replyToMessageId !== input.context.replyToMessageId) {
     return null;
   }
