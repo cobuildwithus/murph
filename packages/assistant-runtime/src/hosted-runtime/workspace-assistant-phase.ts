@@ -1250,7 +1250,6 @@ export async function runHostedWorkspaceAssistantPhase(
         input,
         providerCleanupPlan,
         redactedStatus: null,
-        shouldYieldBackgroundDrain: input.shouldYieldBackgroundMaintenance ?? null,
         wake,
       });
       const nextWakeAt = postDelivery.nextWakeAt ?? null;
@@ -1420,7 +1419,6 @@ export async function runHostedWorkspaceAssistantPhase(
                 input,
                 providerCleanupPlan,
                 redactedStatus: null,
-                shouldYieldBackgroundDrain: input.shouldYieldBackgroundMaintenance ?? null,
                 wake,
               });
             },
@@ -1987,7 +1985,6 @@ async function finalizeHostedBackgroundMaintenanceResult(input: {
       input: input.input,
       providerCleanupPlan,
       redactedStatus: null,
-      shouldYieldBackgroundDrain: input.input.shouldYieldBackgroundMaintenance ?? null,
       wake: input.wake,
     });
   };
@@ -3818,7 +3815,6 @@ async function runSystemMailboxPostCheckpointPhase(input: {
           hostedSystemMailboxRecordFailed: statusCallback.failed,
           hostedSystemMailboxRecorded: statusCallback.recorded,
         },
-        shouldYieldBackgroundDrain: input.input.shouldYieldBackgroundMaintenance ?? null,
         wake: input.systemMailboxPreparation.item.wake,
       });
     }
@@ -4190,15 +4186,16 @@ async function runHostedProviderCleanupPostCheckpointStep(input: {
   assistantDeliveryOutcomes: readonly HostedAssistantDeliveryOutcome[];
   phaseInput: HostedWorkspaceRuntimeAssistantPhaseInput;
   providerCleanupPlan: HostedProviderCleanupPlan;
-  shouldYieldBackgroundDrain?: (() => boolean) | null;
   wake: HostedProviderCleanupPostCheckpointWake;
 }): Promise<{
   redactedStatus: HostedRuntimeRedactedJson;
   wake: HostedRuntimeWakeCandidate | null;
 }> {
+  const shouldYieldBackgroundDrain =
+    input.phaseInput.shouldYieldBackgroundMaintenance ?? null;
   const providerCleanupDrainDeferred =
     !input.providerCleanupPlan.deferred
-    && input.shouldYieldBackgroundDrain?.() === true;
+    && shouldYieldBackgroundDrain?.() === true;
   // Hot drains are reserved for cleanup state already due from an existing
   // durable checkpoint; ids queued in this pass wait for their scheduled wake
   // so provider deletion never precedes the durable snapshot.
@@ -4219,7 +4216,7 @@ async function runHostedProviderCleanupPostCheckpointStep(input: {
       checkpoint: input.providerCleanupPlan.checkpoint ?? {
         nextWakeAt: null,
       },
-      shouldYield: input.shouldYieldBackgroundDrain ?? null,
+      shouldYield: shouldYieldBackgroundDrain,
       env: buildHostedLinqChannelEnv({
         forwardedEnv: input.phaseInput.runtime.forwardedEnv,
         userEnv: input.phaseInput.runtime.userEnv,
@@ -4287,17 +4284,18 @@ async function drainHostedPostCheckpointDelivery(input: {
   linqDeliveryContexts?: readonly HostedAssistantLinqDeliveryContext[] | null;
   providerCleanupPlan: HostedProviderCleanupPlan;
   redactedStatus: HostedRuntimeRedactedJson | null;
-  shouldYieldBackgroundDrain?: (() => boolean) | null;
   wake: Parameters<typeof drainHostedPreparedAssistantDeliveries>[0]["wake"];
 }): Promise<HostedWorkspaceRunnerAssistantPhasePostCheckpoint> {
   const hasDeliveryEffects = input.assistantDeliveryEffects.length > 0;
-  if (hasDeliveryEffects && input.shouldYieldBackgroundDrain?.() === true) {
+  const shouldYieldBackgroundDrain =
+    input.input.shouldYieldBackgroundMaintenance ?? null;
+  if (hasDeliveryEffects && shouldYieldBackgroundDrain?.() === true) {
     return await yieldHostedBackgroundPostCheckpointDrain(input);
   }
 
   let memberChannelBarrier: HostedWorkspaceRunnerAssistantPhasePostCheckpoint | null = null;
   try {
-    if (hasDeliveryEffects && input.shouldYieldBackgroundDrain?.() === true) {
+    if (hasDeliveryEffects && shouldYieldBackgroundDrain?.() === true) {
       return await yieldHostedBackgroundPostCheckpointDrain(input);
     }
     memberChannelBarrier = hasDeliveryEffects
@@ -4331,7 +4329,7 @@ async function drainHostedPostCheckpointDelivery(input: {
     });
     return memberChannelBarrier;
   }
-  if (hasDeliveryEffects && input.shouldYieldBackgroundDrain?.() === true) {
+  if (hasDeliveryEffects && shouldYieldBackgroundDrain?.() === true) {
     return await yieldHostedBackgroundPostCheckpointDrain(input);
   }
 
@@ -4359,7 +4357,7 @@ async function drainHostedPostCheckpointDelivery(input: {
         preparedDispatches: input.assistantDeliveryPreparation?.preparedDispatches ?? null,
         providerFetch: input.input.runtime.platform.providerFetch ?? null,
         publicInternetFetch: input.input.runtime.platform.publicInternetFetch ?? null,
-        shouldYieldBackgroundDelivery: input.shouldYieldBackgroundDrain ?? null,
+        shouldYieldBackgroundDelivery: shouldYieldBackgroundDrain,
         signal: input.input.signal ?? null,
         userEnv: input.input.runtime.userEnv,
         vaultRoot: input.input.restored.vaultRoot,
@@ -4389,7 +4387,6 @@ async function drainHostedPostCheckpointDelivery(input: {
     assistantDeliveryOutcomes: outcomes,
     phaseInput: input.input,
     providerCleanupPlan: input.providerCleanupPlan,
-    shouldYieldBackgroundDrain: input.shouldYieldBackgroundDrain ?? null,
     wake: input.wake,
   });
   const stagedTerminalFailureInputCount =
@@ -4986,7 +4983,6 @@ async function buildHostedMemberChannelDeliveryBarrierResult(input: {
     assistantDeliveryOutcomes: [],
     phaseInput: input.input.input,
     providerCleanupPlan: input.input.providerCleanupPlan,
-    shouldYieldBackgroundDrain: input.input.input.shouldYieldBackgroundMaintenance ?? null,
     wake: input.input.wake,
   });
   const baseNextWake = dropConsumedPostDeliveryWorkspaceAssistantWake({
