@@ -30,7 +30,10 @@ import {
   VaultError,
   stableStringifyWearableRawPayload,
 } from "../src/index.ts";
-import { selectNovelIntegrationIngestEvidence } from "../src/integration-ingests.ts";
+import {
+  listIntegrationIngestsForEvents,
+  selectNovelIntegrationIngestEvidence,
+} from "../src/integration-ingests.ts";
 import { prepareInlineRawArtifact, prepareRawArtifact } from "../src/raw.ts";
 
 async function makeTempDirectory(name: string): Promise<string> {
@@ -733,6 +736,10 @@ test("listIntegrationIngestsForEvent streams provenance lookup without rehashing
         ...buildJunctionStyleWorkoutEvent({ resourceId: "workouts-stream-event-provenance" }),
         evidenceRoles: ["junction-summary-workouts"],
       },
+      {
+        ...buildJunctionStyleWorkoutEvent({ resourceId: "workouts-stream-event-provenance-2" }),
+        evidenceRoles: ["junction-summary-workouts"],
+      },
     ],
     evidenceParts: [
       {
@@ -748,6 +755,15 @@ test("listIntegrationIngestsForEvent streams provenance lookup without rehashing
     result.events[0]?.id ?? "missing",
   );
   assert.deepEqual(entries.map((entry) => entry.record.id), [result.ingestId]);
+  const eventIds = new Set(result.events.map((event) => event.id));
+  const entriesByEventId = await listIntegrationIngestsForEvents(vaultRoot, eventIds);
+  assert.equal(entriesByEventId.size, 2);
+  for (const eventId of eventIds) {
+    assert.deepEqual(
+      entriesByEventId.get(eventId)?.map((entry) => entry.record.id),
+      [result.ingestId],
+    );
+  }
 });
 
 test("importDeviceBatch fails closed on malformed target ingest shards while streaming", async () => {
@@ -2273,10 +2289,26 @@ test("importDeviceBatch repairs an exact retry when a canonical output is missin
   );
 
   await fs.rm(path.join(vaultRoot, eventShardPath));
-  const repeatedRepair = await importDeviceBatch(input);
-  assert.ok(repeatedRepair.applied);
-  assert.equal(repeatedRepair.ingestId, repair.ingestId);
-  assert.ok(await fs.stat(path.join(vaultRoot, eventShardPath)));
+  const beforeRejectedRepeatedRepair = await Promise.all(
+    persistedPaths.slice(0, 2).map((relativePath) =>
+      fs.readFile(path.join(vaultRoot, relativePath))
+    ),
+  );
+  await assert.rejects(
+    importDeviceBatch(input),
+    (error) =>
+      error instanceof VaultError
+      && error.code === "INTEGRATION_INGEST_EVENT_MAPPING_AMBIGUOUS",
+  );
+  await assert.rejects(fs.access(path.join(vaultRoot, eventShardPath)));
+  assert.deepEqual(
+    await Promise.all(
+      persistedPaths.slice(0, 2).map((relativePath) =>
+        fs.readFile(path.join(vaultRoot, relativePath))
+      ),
+    ),
+    beforeRejectedRepeatedRepair,
+  );
   assert.equal(
     (await readJsonlRecords({ vaultRoot, relativePath: repair.ingestShardPath })).length,
     67,
@@ -2601,7 +2633,7 @@ test("exact repair rejects its prepared id when unrelated content occupies it", 
   );
 });
 
-test("exact corrected replay restores its canonical event id after ledger loss", async () => {
+test("exact corrected replay restores from a surviving anchor and rejects complete spine loss", async () => {
   const vaultRoot = await makeTempDirectory("murph-device-import-corrected-owner-repair");
   await initializeVault({ vaultRoot, createdAt: "2026-06-01T12:00:00.000Z" });
   const buildInput = (input: {
@@ -2652,7 +2684,7 @@ test("exact corrected replay restores its canonical event id after ledger loss",
   assert.ok(repaired.ingestShardPath);
   assert.ok(repaired.auditPath);
   assert.equal(repaired.events[0]?.id, canonicalId);
-  let repairedRows = (await readJsonlRecords({ vaultRoot, relativePath: eventPath })) as EventRecord[];
+  const repairedRows = (await readJsonlRecords({ vaultRoot, relativePath: eventPath })) as EventRecord[];
   assert.deepEqual([...new Set(repairedRows.map((record) => record.id))], [canonicalId]);
   const repairedLatest = repairedRows.at(-1);
   assert.equal(
@@ -2677,17 +2709,26 @@ test("exact corrected replay restores its canonical event id after ledger loss",
   );
 
   await fs.rm(path.join(vaultRoot, eventPath));
-  const recreated = await importDeviceBatch(v2Input);
-  assert.ok(recreated.applied);
-  assert.equal(recreated.events[0]?.id, canonicalId);
-  repairedRows = (await readJsonlRecords({ vaultRoot, relativePath: eventPath })) as EventRecord[];
-  assert.deepEqual([...new Set(repairedRows.map((record) => record.id))], [canonicalId]);
-  assert.equal(repairedRows.at(-1)?.externalRef?.version, "2026-06-04T20:30:00.000Z");
-  const beforeRecreatedReplay = await fs.readFile(path.join(vaultRoot, eventPath));
-  const recreatedReplay = await importDeviceBatch(v2Input);
-  assert.equal(recreatedReplay.applied, false);
-  assert.equal(recreatedReplay.auditPath, null);
-  assert.deepEqual(await fs.readFile(path.join(vaultRoot, eventPath)), beforeRecreatedReplay);
+  const beforeRejectedRecreation = await Promise.all(
+    repairedPaths.slice(1).map((relativePath) =>
+      fs.readFile(path.join(vaultRoot, relativePath))
+    ),
+  );
+  await assert.rejects(
+    importDeviceBatch(v2Input),
+    (error) =>
+      error instanceof VaultError
+      && error.code === "INTEGRATION_INGEST_EVENT_MAPPING_AMBIGUOUS",
+  );
+  await assert.rejects(fs.access(path.join(vaultRoot, eventPath)));
+  assert.deepEqual(
+    await Promise.all(
+      repairedPaths.slice(1).map((relativePath) =>
+        fs.readFile(path.join(vaultRoot, relativePath))
+      ),
+    ),
+    beforeRejectedRecreation,
+  );
 });
 
 test("delayed v1 evidence does not expose or associate an unappended draft after A moves to B", async () => {
@@ -7276,7 +7317,7 @@ test("importDeviceBatch replays one retained duplicate role from equivalent same
   );
 });
 
-test("importDeviceBatch persists only retained duplicate roles for a preexisting event", async () => {
+test("importDeviceBatch rejects full-spine repair after multiple same-content deliveries", async () => {
   const vaultRoot = await makeTempDirectory("murph-device-import-existing-duplicate-roles");
   await initializeVault({ vaultRoot, createdAt: "2026-06-01T12:00:00.000Z" });
   const primaryEvent = {
@@ -7350,18 +7391,26 @@ test("importDeviceBatch persists only retained duplicate roles for a preexisting
   );
 
   await fs.unlink(path.join(vaultRoot, eventShardPath));
-  const repair = await importDeviceBatch(input);
-  assert.equal(repair.applied, true);
-  const repairedRecords = (await readJsonlRecords({
-    vaultRoot,
-    relativePath: eventShardPath,
-  })) as EventRecord[];
-  assert.equal(repairedRecords.length, 1);
-  assert.equal(repairedRecords[0]?.id, canonicalEventId);
-  const repairedBytes = await fs.readFile(path.join(vaultRoot, eventShardPath));
-  const repairedReplay = await importDeviceBatch(input);
-  assert.equal(repairedReplay.applied, false);
-  assert.deepEqual(await fs.readFile(path.join(vaultRoot, eventShardPath)), repairedBytes);
+  const beforeRejectedRepair = await Promise.all(
+    watchedPaths.slice(1).map((relativePath) =>
+      fs.readFile(path.join(vaultRoot, relativePath))
+    ),
+  );
+  await assert.rejects(
+    importDeviceBatch(input),
+    (error) =>
+      error instanceof VaultError
+      && error.code === "INTEGRATION_INGEST_EVENT_MAPPING_AMBIGUOUS",
+  );
+  await assert.rejects(fs.access(path.join(vaultRoot, eventShardPath)));
+  assert.deepEqual(
+    await Promise.all(
+      watchedPaths.slice(1).map((relativePath) =>
+        fs.readFile(path.join(vaultRoot, relativePath))
+      ),
+    ),
+    beforeRejectedRepair,
+  );
 });
 
 test("importDeviceBatch replays and repairs a transitive in-batch legacy-ref migration", async () => {
@@ -7878,6 +7927,339 @@ test("importDeviceBatch restores an earlier shard after a later delivery advance
       ),
     ),
     beforeAmbiguousRepair,
+  );
+});
+
+test("importDeviceBatch rejects unprovable revision repair after complete spine loss", async () => {
+  const vaultRoot = await makeTempDirectory("murph-device-import-complete-spine-loss");
+  await initializeVault({ vaultRoot, createdAt: "2026-06-01T12:00:00.000Z" });
+  const buildInput = (input: {
+    evidenceRole: string;
+    importedAt: string;
+    value: number;
+    version: string;
+  }) => ({
+    vaultRoot,
+    provider: "whoop" as const,
+    accountId: "whoop-user-1",
+    importedAt: input.importedAt,
+    events: [{
+      kind: "observation" as const,
+      occurredAt: "2026-06-03T07:30:00.000Z",
+      recordedAt: "2026-06-03T07:30:00.000Z",
+      title: "WHOOP recovery score",
+      externalRef: {
+        system: "whoop",
+        resourceType: "recovery",
+        resourceId: "complete-spine-loss",
+        version: input.version,
+        facet: "recovery-score",
+      },
+      evidenceRoles: [input.evidenceRole],
+      fields: {
+        metric: "recovery-score",
+        value: input.value,
+        unit: "%",
+      },
+    }],
+    evidenceParts: [{
+      role: input.evidenceRole,
+      fileName: `${input.evidenceRole}.json`,
+      content: { source: "shared-recovery-evidence" },
+    }],
+  });
+
+  const revisionOne = await importDeviceBatch(buildInput({
+    evidenceRole: "whoop-recovery-shared",
+    importedAt: "2026-06-03T08:00:00.000Z",
+    value: 61,
+    version: "2026-06-03T08:00:00.000Z",
+  }));
+  const canonicalEventId = revisionOne.events[0]?.id;
+  assert.ok(canonicalEventId);
+  const revisionTwo = await importDeviceBatch(buildInput({
+    evidenceRole: "whoop-recovery-shared",
+    importedAt: "2026-06-03T09:00:00.000Z",
+    value: 72,
+    version: "2026-06-03T09:00:00.000Z",
+  }));
+  assert.equal(revisionTwo.events[0]?.id, canonicalEventId);
+  assert.equal(revisionTwo.events[0]?.lifecycle?.revision, 2);
+  const revisionThreeInput = buildInput({
+    evidenceRole: "whoop-recovery-shared",
+    importedAt: "2026-06-03T10:00:00.000Z",
+    value: 83,
+    version: "2026-06-03T10:00:00.000Z",
+  });
+  const revisionThree = await importDeviceBatch(revisionThreeInput);
+  assert.equal(revisionThree.events[0]?.id, canonicalEventId);
+  assert.equal(revisionThree.events[0]?.lifecycle?.revision, 3);
+  assert.ok(revisionThree.ingestShardPath);
+  assert.ok(revisionThree.auditPath);
+
+  const eventShardPath = revisionThree.eventShardPaths[0] as string;
+  await fs.unlink(path.join(vaultRoot, eventShardPath));
+  const watchedPaths = [revisionThree.ingestShardPath, revisionThree.auditPath];
+  const beforeRepair = await Promise.all(
+    watchedPaths.map((relativePath) => fs.readFile(path.join(vaultRoot, relativePath))),
+  );
+  await assert.rejects(
+    importDeviceBatch(revisionThreeInput),
+    (error) =>
+      error instanceof VaultError
+      && error.code === "INTEGRATION_INGEST_EVENT_MAPPING_AMBIGUOUS",
+  );
+  await assert.rejects(fs.access(path.join(vaultRoot, eventShardPath)));
+  assert.deepEqual(
+    await Promise.all(
+      watchedPaths.map((relativePath) => fs.readFile(path.join(vaultRoot, relativePath))),
+    ),
+    beforeRepair,
+  );
+});
+
+test("importDeviceBatch replays distinct stale-then-new roles and rejects shared-role ambiguity", async () => {
+  const vaultRoot = await makeTempDirectory("murph-device-import-stale-then-new-spine");
+  await initializeVault({ vaultRoot, createdAt: "2026-06-01T12:00:00.000Z" });
+  const buildEvent = (input: {
+    evidenceRole: string;
+    value: number;
+    version: string;
+  }) => ({
+    kind: "observation" as const,
+    occurredAt: "2026-06-03T07:30:00.000Z",
+    recordedAt: "2026-06-03T07:30:00.000Z",
+    title: "WHOOP recovery score",
+    externalRef: {
+      system: "whoop",
+      resourceType: "recovery",
+      resourceId: "stale-then-new-spine",
+      version: input.version,
+      facet: "recovery-score",
+    },
+    evidenceRoles: [input.evidenceRole],
+    fields: {
+      metric: "recovery-score",
+      value: input.value,
+      unit: "%",
+    },
+  });
+  const importSingle = async (input: {
+    evidenceRole: string;
+    importedAt: string;
+    value: number;
+    version: string;
+  }) =>
+    importDeviceBatch({
+      vaultRoot,
+      provider: "whoop",
+      accountId: "whoop-user-1",
+      importedAt: input.importedAt,
+      events: [buildEvent(input)],
+      evidenceParts: [{
+        role: input.evidenceRole,
+        fileName: `${input.evidenceRole}.json`,
+        content: { value: input.value },
+      }],
+    });
+
+  const v1 = {
+    evidenceRole: "whoop-recovery-v1-seed",
+    importedAt: "2026-06-03T08:00:00.000Z",
+    value: 61,
+    version: "2026-06-03T08:00:00.000Z",
+  } as const;
+  const v2 = {
+    evidenceRole: "whoop-recovery-v2-seed",
+    importedAt: "2026-06-03T09:00:00.000Z",
+    value: 72,
+    version: "2026-06-03T09:00:00.000Z",
+  } as const;
+  const first = await importSingle(v1);
+  const canonicalEventId = first.events[0]?.id;
+  assert.ok(canonicalEventId);
+  const second = await importSingle(v2);
+  assert.equal(second.events[0]?.id, canonicalEventId);
+  assert.equal(second.events[0]?.lifecycle?.revision, 2);
+
+  const input = {
+    vaultRoot,
+    provider: "whoop",
+    accountId: "whoop-user-1",
+    importedAt: "2026-06-03T10:00:00.000Z",
+    events: [
+      buildEvent({
+        evidenceRole: "whoop-recovery-stale-v1",
+        value: v1.value,
+        version: v1.version,
+      }),
+      buildEvent({
+        evidenceRole: "whoop-recovery-new-v3",
+        value: 83,
+        version: "2026-06-03T10:00:00.000Z",
+      }),
+    ],
+    evidenceParts: [
+      {
+        role: "whoop-recovery-stale-v1",
+        fileName: "whoop-recovery-stale-v1.json",
+        content: { value: v1.value },
+      },
+      {
+        role: "whoop-recovery-new-v3",
+        fileName: "whoop-recovery-new-v3.json",
+        content: { value: 83 },
+      },
+    ],
+  } as const;
+
+  const accepted = await importDeviceBatch(input);
+  assert.ok(accepted.ingestId);
+  assert.ok(accepted.ingestShardPath);
+  assert.ok(accepted.auditPath);
+  assert.equal(accepted.events[0]?.id, canonicalEventId);
+  assert.equal(accepted.events[0]?.lifecycle?.revision, 3);
+  assert.deepEqual(
+    (await readRequiredIntegrationIngest(vaultRoot, accepted.ingestId)).outputs.events,
+    [{ id: canonicalEventId, roles: ["whoop-recovery-new-v3"] }],
+  );
+
+  const eventShardPath = accepted.eventShardPaths[0] as string;
+  const watchedPaths = [eventShardPath, accepted.ingestShardPath, accepted.auditPath];
+  const beforeReplay = await Promise.all(
+    watchedPaths.map((relativePath) => fs.readFile(path.join(vaultRoot, relativePath))),
+  );
+  const replay = await importDeviceBatch(input);
+  assert.equal(replay.applied, false);
+  assert.equal(replay.auditPath, null);
+  assert.deepEqual(replay.events.map((event) => event.id), [canonicalEventId]);
+  assert.deepEqual(
+    await Promise.all(
+      watchedPaths.map((relativePath) => fs.readFile(path.join(vaultRoot, relativePath))),
+    ),
+    beforeReplay,
+  );
+
+  const ambiguousInput = {
+    ...input,
+    importedAt: "2026-06-03T11:00:00.000Z",
+    events: [
+      buildEvent({
+        evidenceRole: "whoop-recovery-shared",
+        value: v1.value,
+        version: v1.version,
+      }),
+      buildEvent({
+        evidenceRole: "whoop-recovery-shared",
+        value: 91,
+        version: "2026-06-03T11:00:00.000Z",
+      }),
+    ],
+    evidenceParts: [{
+      role: "whoop-recovery-shared",
+      fileName: "whoop-recovery-shared.json",
+      content: { values: [v1.value, 91] },
+    }],
+  } as const;
+  const ambiguousAccepted = await importDeviceBatch(ambiguousInput);
+  assert.ok(ambiguousAccepted.ingestId);
+  assert.ok(ambiguousAccepted.ingestShardPath);
+  assert.ok(ambiguousAccepted.auditPath);
+  assert.equal(ambiguousAccepted.events[0]?.id, canonicalEventId);
+  assert.equal(ambiguousAccepted.events[0]?.lifecycle?.revision, 4);
+  assert.deepEqual(
+    (await readRequiredIntegrationIngest(
+      vaultRoot,
+      ambiguousAccepted.ingestId,
+    )).outputs.events,
+    [{ id: canonicalEventId, roles: ["whoop-recovery-shared"] }],
+  );
+  const ambiguousWatchedPaths = [
+    ambiguousAccepted.eventShardPaths[0] as string,
+    ambiguousAccepted.ingestShardPath,
+    ambiguousAccepted.auditPath,
+  ];
+  const beforeAmbiguousReplay = await Promise.all(
+    ambiguousWatchedPaths.map((relativePath) =>
+      fs.readFile(path.join(vaultRoot, relativePath))
+    ),
+  );
+  await assert.rejects(
+    importDeviceBatch(ambiguousInput),
+    (error) =>
+      error instanceof VaultError
+      && error.code === "INTEGRATION_INGEST_EVENT_MAPPING_AMBIGUOUS",
+  );
+  assert.deepEqual(
+    await Promise.all(
+      ambiguousWatchedPaths.map((relativePath) =>
+        fs.readFile(path.join(vaultRoot, relativePath))
+      ),
+    ),
+    beforeAmbiguousReplay,
+  );
+
+  const emptyRoleInput = {
+    vaultRoot,
+    provider: "whoop",
+    accountId: "whoop-user-1",
+    importedAt: "2026-06-03T12:00:00.000Z",
+    events: [
+      {
+        ...buildEvent({
+          evidenceRole: "unused-stale-role",
+          value: v1.value,
+          version: v1.version,
+        }),
+        evidenceRoles: [],
+      },
+      {
+        ...buildEvent({
+          evidenceRole: "unused-new-role",
+          value: 94,
+          version: "2026-06-03T12:00:00.000Z",
+        }),
+        evidenceRoles: [],
+      },
+    ],
+    evidenceParts: [],
+  } as const;
+  const emptyRoleAccepted = await importDeviceBatch(emptyRoleInput);
+  assert.ok(emptyRoleAccepted.ingestId);
+  assert.ok(emptyRoleAccepted.ingestShardPath);
+  assert.ok(emptyRoleAccepted.auditPath);
+  assert.equal(emptyRoleAccepted.events[0]?.id, canonicalEventId);
+  assert.equal(emptyRoleAccepted.events[0]?.lifecycle?.revision, 5);
+  assert.deepEqual(
+    (await readRequiredIntegrationIngest(
+      vaultRoot,
+      emptyRoleAccepted.ingestId,
+    )).outputs.events,
+    [{ id: canonicalEventId, roles: [] }],
+  );
+  const emptyRoleWatchedPaths = [
+    emptyRoleAccepted.eventShardPaths[0] as string,
+    emptyRoleAccepted.ingestShardPath,
+    emptyRoleAccepted.auditPath,
+  ];
+  const beforeEmptyRoleReplay = await Promise.all(
+    emptyRoleWatchedPaths.map((relativePath) =>
+      fs.readFile(path.join(vaultRoot, relativePath))
+    ),
+  );
+  await assert.rejects(
+    importDeviceBatch(emptyRoleInput),
+    (error) =>
+      error instanceof VaultError
+      && error.code === "INTEGRATION_INGEST_EVENT_MAPPING_AMBIGUOUS",
+  );
+  assert.deepEqual(
+    await Promise.all(
+      emptyRoleWatchedPaths.map((relativePath) =>
+        fs.readFile(path.join(vaultRoot, relativePath))
+      ),
+    ),
+    beforeEmptyRoleReplay,
   );
 });
 
