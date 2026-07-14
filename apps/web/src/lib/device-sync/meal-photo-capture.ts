@@ -14,7 +14,9 @@ import { hostedOnboardingError } from "../hosted-onboarding/errors";
 import { assertActiveHostedMemberAccessAllowed } from "../hosted-onboarding/member-access";
 import {
   HOSTED_ONBOARDING_TRANSACTION_OPTIONS,
+  type HostedOnboardingReadClient,
   lockHostedMemberRow,
+  lockHostedMemberSponsoredAccessRows,
 } from "../hosted-onboarding/shared";
 import { assertHostedLaunchRequiredConsentGranted } from "../legal/consent";
 
@@ -61,11 +63,9 @@ const JPEG_START_OF_FRAME_MARKERS = new Set([
   0xce,
   0xcf,
 ]);
-const JPEG_METADATA_MARKERS = new Set([
-  0xe1, // EXIF/XMP
-  0xed, // Photoshop/IPTC
-  0xfe, // comment
-]);
+const JPEG_APPLICATION_MARKER_MIN = 0xe0;
+const JPEG_APPLICATION_MARKER_MAX = 0xef;
+const JPEG_COMMENT_MARKER = 0xfe;
 
 export interface MealPhotoCaptureEnrollmentRequest {
   appInstallationId: string;
@@ -265,7 +265,7 @@ export async function revokeMealPhotoCaptureEnrollmentForScopedToken(input: {
 
 export async function requireActiveMealPhotoCaptureEnrollment(input: {
   now?: Date;
-  prisma: PrismaClient;
+  prisma: HostedOnboardingReadClient;
   request: Request;
 }): Promise<ActiveMealPhotoCaptureEnrollment> {
   const token = normalizeMealPhotoCaptureToken(readBearerToken(input.request));
@@ -296,6 +296,27 @@ export async function requireActiveMealPhotoCaptureEnrollment(input: {
     expiresAt: enrollment.expiresAt,
     memberId: enrollment.memberId,
   };
+}
+
+export async function assertCurrentMealPhotoCaptureEnrollmentTx(input: {
+  enrollment: ActiveMealPhotoCaptureEnrollment;
+  now?: Date;
+  prisma: Prisma.TransactionClient;
+  request: Request;
+}): Promise<void> {
+  await lockHostedMemberRow(input.prisma, input.enrollment.memberId);
+  await lockHostedMemberSponsoredAccessRows(input.prisma, input.enrollment.memberId);
+  const current = await requireActiveMealPhotoCaptureEnrollment({
+    now: input.now,
+    prisma: input.prisma,
+    request: input.request,
+  });
+  if (
+    current.enrollmentId !== input.enrollment.enrollmentId
+    || current.memberId !== input.enrollment.memberId
+  ) {
+    throw mealPhotoCaptureAuthRequired();
+  }
 }
 
 export function isMealPhotoCaptureScopedAuthorization(request: Request): boolean {
@@ -502,7 +523,10 @@ function validateJpegStructure(bytes: Buffer): { height: number; width: number }
     if (segmentLength < 2 || segmentEnd > bytes.byteLength) {
       throw mealPhotoCaptureUploadInvalid("Meal photo JPEG structure is invalid.");
     }
-    if (JPEG_METADATA_MARKERS.has(marker)) {
+    if (marker === JPEG_COMMENT_MARKER || (
+      marker >= JPEG_APPLICATION_MARKER_MIN
+      && marker <= JPEG_APPLICATION_MARKER_MAX
+    )) {
       throw mealPhotoCaptureUploadInvalid("Meal photo JPEG contains disallowed metadata.");
     }
     if (JPEG_START_OF_FRAME_MARKERS.has(marker)) {

@@ -21046,7 +21046,7 @@ describe("hosted workspace runtime entrypoint", () => {
       vi.setSystemTime(new Date(firstNow));
       await initializeVault({ createdAt: TEST_NOW, vaultRoot });
 
-      const rerunPhaseFinished = createDeferred<void>();
+      const firstPhaseFinished = createDeferred<void>();
       let assistantPhaseCalls = 0;
       const platform = createPlatform({
         deviceSyncPort,
@@ -21104,33 +21104,35 @@ describe("hosted workspace runtime entrypoint", () => {
           async runAssistantPhase(input) {
             assistantPhaseCalls += 1;
             events.push(`assistant.phase:${assistantPhaseCalls}`);
-            if (assistantPhaseCalls === 2) {
+            if (assistantPhaseCalls === 1) {
+              await deviceSyncPort.fetchSnapshot();
               assert.ok(pendingInputId);
-              assert.deepEqual(
-                input.initialAssistantInputBatch?.assistantInputIds,
-                [pendingInputId],
-              );
-              rerunPhaseFinished.resolve();
               return {
                 checkpointReason: "assistant_runtime_commit" as const,
-                progressed: false,
+                nextWakeAt: yieldedRetryWakeAt,
+                nextWakeReason: "device-sync.reconcile",
+                progressed: true,
+                redactedStatus: {
+                  deviceSyncRetryYielded: true,
+                },
               };
             }
-            assert.equal(assistantPhaseCalls, 1);
-            await deviceSyncPort.fetchSnapshot();
+
+            assert.equal(assistantPhaseCalls, 2);
             assert.ok(pendingInputId);
+            assert.deepEqual(
+              input.initialAssistantInputBatch?.assistantInputIds,
+              [pendingInputId],
+            );
             await writeSyntheticAssistantAutoReplyTerminalEvidence({
               inputId: pendingInputId,
               vaultRoot,
             });
+            shutdownController.abort();
+            firstPhaseFinished.resolve();
             return {
               checkpointReason: "assistant_runtime_commit" as const,
-              nextWakeAt: yieldedRetryWakeAt,
-              nextWakeReason: "device-sync.reconcile",
               progressed: true,
-              redactedStatus: {
-                deviceSyncRetryYielded: true,
-              },
             };
           },
           shutdownSignal: shutdownController.signal,
@@ -21139,13 +21141,12 @@ describe("hosted workspace runtime entrypoint", () => {
       );
 
       await withRealTimeout(
-        rerunPhaseFinished.promise,
+        firstPhaseFinished.promise,
         runtimeTransitionTimeoutMs,
         () => events.join(","),
       );
       assert.equal(assistantPhaseCalls, 2);
       assert.equal(checkpointRequests.length, 0);
-      shutdownController.abort();
 
       const result = await withRealTimeout(
         resultPromise,

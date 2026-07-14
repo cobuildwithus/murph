@@ -18,6 +18,7 @@ import {
 } from "../hosted-email.ts";
 import {
   createHostedMealPhotoStore,
+  deleteHostedMealPhotoObject,
   HOSTED_MEAL_PHOTO_CONTENT_TYPE,
 } from "../meal-photo-store.ts";
 import {
@@ -125,6 +126,15 @@ async function handleRunnerMealPhotoRequest(input: {
     return unauthorized();
   }
 
+  if (input.request.method === "DELETE") {
+    await deleteHostedMealPhotoObject({
+      bucket: input.bucket,
+      mealPhotoKey: input.mealPhotoKey,
+      userId: input.userId,
+    });
+    return new Response(null, { status: 204 });
+  }
+
   const crypto = await resolveRunnerOutboundUserCryptoContext({
     bucket: input.bucket,
     domain: "ingress",
@@ -140,11 +150,6 @@ async function handleRunnerMealPhotoRequest(input: {
     rootKeyId: crypto.rootKeyId,
     userId: input.userId,
   });
-
-  if (input.request.method === "DELETE") {
-    await store.deleteMealPhoto(input.mealPhotoKey);
-    return new Response(null, { status: 204 });
-  }
 
   const payload = await store.readMealPhoto(input.mealPhotoKey);
   if (!payload) {

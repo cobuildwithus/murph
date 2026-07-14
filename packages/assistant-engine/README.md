@@ -62,3 +62,9 @@ again when invoked. Adding a tool therefore requires only:
 3. including the tool in the planning-time `resolveMurphDynamicTools` call.
 
 Do not add per-tool availability booleans to provider or app-server inputs.
+
+`murph.plan_usage` follows this default-off rule. It is advertised only when a
+hosted plan-usage service exists, accepts no arguments, and returns only the
+web-authorized read projection. Assistant policy limits it to explicit member
+questions or one trusted manual private check; it is not an onboarding or
+recurring usage watcher.

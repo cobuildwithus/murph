@@ -860,6 +860,9 @@ export async function runHostedWorkspaceAssistantPhase(
               }),
             }
           : {}),
+        ...(input.runtime.platform.planUsageToolPort
+          ? { planUsageTool: input.runtime.platform.planUsageToolPort }
+          : {}),
         ...(issueDeviceConnectLink ? { issueDeviceConnectLink } : {}),
         ...(input.materializeWorkspaceArtifacts
           ? { materializeWorkspaceArtifacts: input.materializeWorkspaceArtifacts }

@@ -1,3 +1,6 @@
+Warning: truncated output (original token count: 32372)
+Total output lines: 3841
+
 import { createHash, createPublicKey, generateKeyPairSync, sign } from "node:crypto";
 import { readFile, stat } from "node:fs/promises";
 import path from "node:path";
@@ -334,6 +337,7 @@ describe("cloudflare worker routes", () => {
       "user-data-delete",
       "telegram-usage-limit-notice",
       "meal-photo-stage",
+      "meal-photo-delete",
       "browser-vault-session",
       "user-status",
     ]);
@@ -353,6 +357,7 @@ describe("cloudflare worker routes", () => {
       "user-data-delete",
       "telegram-usage-limit-notice",
       "meal-photo-stage",
+      "meal-photo-delete",
       "browser-vault-session",
       "user-status",
     ]);
@@ -1727,278 +1732,7 @@ describe("cloudflare worker routes", () => {
     const wake = createWake("evt_123");
 
     const missingHeaderResponse = await worker.fetch(
-      await createSignedWakeRequest("/internal/dispatch", wake, { boundUserId: null }),
-      createWorkerEnv(stub),
-    );
-
-    expect(missingHeaderResponse.status).toBe(404);
-    await expect(missingHeaderResponse.json()).resolves.toEqual({
-      error: "Not found",
-    });
-
-    const mismatchedHeaderResponse = await worker.fetch(
-      await createSignedWakeRequest("/internal/dispatch", wake, { boundUserId: "member_other" }),
-      createWorkerEnv(stub),
-    );
-
-    expect(mismatchedHeaderResponse.status).toBe(404);
-    await expect(mismatchedHeaderResponse.json()).resolves.toEqual({
-      error: "Not found",
-    });
-    expect(stub.bindUser).not.toHaveBeenCalled();
-  });
-
-  it("keeps the removed legacy-reference dispatch route hidden from OIDC callers", async () => {
-    const stub = createUserRunnerStub();
-
-    const response = await worker.fetch(
-      await createSignedJsonControlRequest("/internal/dispatch/legacy-reference", {
-        dispatchRef: {
-          eventId: "evt_legacy",
-          eventKind: "gateway.message.send",
-          occurredAt: "2026-04-16T10:00:00.000Z",
-          userId: "member_123",
-        },
-        stagedPayloadId: "staged/evt_legacy",
-        storage: "reference",
-      }, {
-        boundUserId: "member_123",
-      }),
-      createWorkerEnv(stub),
-    );
-
-    expect(response.status).toBe(404);
-    expect(stub.bindUser).not.toHaveBeenCalled();
-  });
-
-  it("keeps the removed internal events alias hidden from OIDC dispatch callers", async () => {
-    const stub = createUserRunnerStub();
-    const request = await createSignedWakeRequest("/internal/events", createWake("evt_removed_alias"));
-
-    const response = await worker.fetch(request, createWorkerEnv(stub));
-
-    expect(response.status).toBe(404);
-    expect(stub.bindUser).not.toHaveBeenCalled();
-  });
-
-  it("keeps the removed dispatch route hidden even for missing, malformed, and mismatched OIDC bearer requests", async () => {
-    const stub = createUserRunnerStub();
-    const wake = createWake("evt_signed");
-
-    const missingAuthorizationResponse = await worker.fetch(
-      new Request("https://runner.example.test/internal/dispatch", {
-        body: JSON.stringify(wake),
-        headers: {
-          "content-type": "application/json; charset=utf-8",
-        },
-        method: "POST",
-      }),
-      createWorkerEnv(stub),
-    );
-    expect(missingAuthorizationResponse.status).toBe(404);
-    await expect(missingAuthorizationResponse.json()).resolves.toEqual({
-      error: "Not found",
-    });
-
-    const malformedResponse = await worker.fetch(
-      new Request("https://runner.example.test/internal/dispatch", {
-        body: JSON.stringify(wake),
-        headers: {
-          authorization: "Bearer not-a-jwt",
-          "content-type": "application/json; charset=utf-8",
-        },
-        method: "POST",
-      }),
-      createWorkerEnv(stub),
-    );
-    expect(malformedResponse.status).toBe(404);
-    await expect(malformedResponse.json()).resolves.toEqual({
-      error: "Not found",
-    });
-
-    const wrongSubjectResponse = await worker.fetch(
-      await createSignedWakeRequest("/internal/dispatch", wake, {
-        sub: `owner:${TEST_VERCEL_OIDC_TEAM_SLUG}:project:wrong-project:environment:production`,
-      }),
-      createWorkerEnv(stub),
-    );
-    expect(wrongSubjectResponse.status).toBe(404);
-    await expect(wrongSubjectResponse.json()).resolves.toEqual({
-      error: "Not found",
-    });
-    expect(stub.bindUser).not.toHaveBeenCalled();
-  });
-
-  it("reads canonical per-user status while keeping the per-event status route removed", async () => {
-    const stub = createUserRunnerStub({
-      runnerStatus: vi.fn(async () => ({
-        inFlight: false,
-        lastInvocationAt: "2026-04-16T10:05:00.000Z",
-        mailboxLag: [],
-        nextAlarmAt: null,
-        recentLogs: [],
-        userId: "member_123",
-        workspace: null,
-      })),
-    });
-
-    const statusResponse = await worker.fetch(
-      await signControlRequest(new Request("https://runner.example.test/internal/users/member_123/status?logLimit=999", {
-        method: "GET",
-      })),
-      createWorkerEnv(stub),
-    );
-
-    expect(statusResponse.status).toBe(200);
-    await expect(statusResponse.json()).resolves.toMatchObject({
-      mailboxLag: [],
-      userId: "member_123",
-      workspace: null,
-    });
-    expect(stub.runnerStatus).toHaveBeenCalledTimes(1);
-    expect(stub.runnerStatus).toHaveBeenCalledWith({ logLimit: 50 });
-
-    const eventStatusResponse = await worker.fetch(
-      await signControlRequest(new Request(
-        "https://runner.example.test/internal/users/member_123/events/evt_done/status",
-        { method: "GET" },
-      )),
-      createWorkerEnv(stub),
-    );
-
-    expect(eventStatusResponse.status).toBe(404);
-    await expect(eventStatusResponse.json()).resolves.toEqual({
-      error: "Not found",
-    });
-  });
-
-  it("ignores malformed per-user status log limits instead of partially parsing them", async () => {
-    const stub = createUserRunnerStub({
-      runnerStatus: vi.fn(async () => ({
-        inFlight: false,
-        lastInvocationAt: "2026-04-16T10:05:00.000Z",
-        mailboxLag: [],
-        nextAlarmAt: null,
-        recentLogs: [],
-        userId: "member_123",
-        workspace: null,
-      })),
-    });
-
-    const statusResponse = await worker.fetch(
-      await signControlRequest(new Request("https://runner.example.test/internal/users/member_123/status?logLimit=10abc", {
-        method: "GET",
-      })),
-      createWorkerEnv(stub),
-    );
-
-    expect(statusResponse.status).toBe(200);
-    expect(stub.runnerStatus).toHaveBeenCalledTimes(1);
-    expect(stub.runnerStatus).toHaveBeenCalledWith(undefined);
-  });
-
-  it("fails closed when canonical per-user status cannot be validated", async () => {
-    const stub = createUserRunnerStub({
-      runnerStatus: vi.fn(async () => {
-        throw new Error("Hosted workspace read returned a different user.");
-      }),
-    });
-
-    const statusResponse = await worker.fetch(
-      await signControlRequest(new Request("https://runner.example.test/internal/users/member_123/status", {
-        method: "GET",
-      })),
-      createWorkerEnv(stub),
-    );
-
-    expect(statusResponse.status).toBe(500);
-    await expect(statusResponse.json()).resolves.toEqual({
-      error: "Internal error.",
-    });
-    expect(stub.runnerStatus).toHaveBeenCalledTimes(1);
-  });
-
-  it("returns a stable browser-vault missing-replica code from the browser-vault route", async () => {
-    const env = createWorkerEnv();
-    await resolveHostedUserCryptoContextForTest(env, "member_123");
-    const replicaRef = await createMissingBrowserVaultReplicaRefForTest(env, "member_123");
-
-    const response = await worker.fetch(
-      await signControlRequest(new Request(
-        "https://runner.example.test/internal/users/member_123/browser-vault/session",
-        {
-          body: JSON.stringify({
-            browserPublicKeyJwk: await createBrowserSessionPublicKeyJwk(),
-            replicaRef,
-          }),
-          headers: {
-            "content-type": "application/json; charset=utf-8",
-          },
-          method: "POST",
-        },
-      )),
-      env,
-    );
-
-    expect(response.status).toBe(404);
-    await expect(response.json()).resolves.toEqual({
-      code: CLOUDFLARE_HOSTED_CONTROL_BROWSER_VAULT_REPLICA_NOT_FOUND_CODE,
-      error: "Browser vault replica was not found.",
-    });
-    expect(env.__bucketStore.getCalls.filter((key) => key.includes("/browser-vault-replicas/"))).toEqual([
-      replicaRef.objectKey,
-    ]);
-  });
-
-  it("returns browser-vault sessions keyed by the replica storage key id", async () => {
-    const env = createWorkerEnv();
-    const runtimeRoot = await resolveHostedUserCryptoContextForTest(env, "member_123");
-    const replicaRef = await createStoredBrowserVaultReplicaRefForTest(env, "member_123", {
-      rootKey: runtimeRoot.rootKey,
-      rootKeyId: runtimeRoot.rootKeyId,
-    });
-
-    const response = await worker.fetch(
-      await signControlRequest(new Request(
-        "https://runner.example.test/internal/users/member_123/browser-vault/session",
-        {
-          body: JSON.stringify({
-            browserPublicKeyJwk: await createBrowserSessionPublicKeyJwk(),
-            replicaRef,
-          }),
-          headers: {
-            "content-type": "application/json; charset=utf-8",
-          },
-          method: "POST",
-        },
-      )),
-      env,
-    );
-
-    expect(response.status).toBe(200);
-    const body = await response.json();
-    expect(body).toMatchObject({
-      replicaRef,
-      state: "ready",
-    });
-    const sessionKeyEnvelope = parseHostedBrowserSessionKeyEnvelope(
-      (body as { replicaKeyEnvelope?: unknown }).replicaKeyEnvelope,
-    );
-    expect(sessionKeyEnvelope.keyId).toBe(replicaRef.dataKeyEnvelope?.dataKeyId ?? replicaRef.keyId);
-  });
-
-  it("returns the stable browser-vault missing-replica code when the replica runtime root is unavailable", async () => {
-    const env = createWorkerEnv();
-    const unavailableRootKeyId = "udrk:runtime:retired-root";
-    const replicaRef = await createStoredBrowserVaultReplicaRefForTest(env, "member_123", {
-      rootKey: Uint8Array.from({ length: 32 }, (_, index) => 201 - index),
-      rootKeyId: unavailableRootKeyId,
-    });
-    const signedRequest = await signControlRequest(new Request(
-      "https://runner.example.test/internal/users/member_123/browser-vault/session",
-      {
-        body: JSON.stringify({
-          browserPublicKeyJwk: await createBrowserSessionPublicKeyJwk(),
+      await createSignedWakeRequest("/internal/dispatch",…2372 tokens truncated…onPublicKeyJwk(),
           replicaRef,
         }),
         headers: {

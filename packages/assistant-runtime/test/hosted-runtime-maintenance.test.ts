@@ -31,7 +31,6 @@ const mocks = vi.hoisted(() => ({
   selectHostedAssistantInputIds: vi.fn(),
   pruneWearableDenseRawTimeseries: vi.fn(),
   syncHostedDeviceSyncControlPlaneState: vi.fn(),
-  writeAssistantAutoReplySuppressionEvidence: vi.fn(),
 }));
 
 vi.mock("@murphai/device-syncd/config", () => ({
@@ -58,8 +57,6 @@ vi.mock("@murphai/assistant-engine", () => ({
   HOSTED_ASSISTANT_TURN_TIMING_SCHEMA: "murph.assistant-turn-timing.v1",
   HOSTED_ASSISTANT_TURN_TIMING_TYPE: "assistant.turn.timing",
   runAssistantAutomationPass: mocks.runAssistantAutomationPass,
-  writeAssistantAutoReplySuppressionEvidence:
-    mocks.writeAssistantAutoReplySuppressionEvidence,
 }));
 
 vi.mock("@murphai/inbox-services", () => ({
@@ -1183,7 +1180,6 @@ describe("runHostedAssistantAutomation", () => {
           sourceKind: "hosted-mailbox",
           sourcePosition: "conversation:00000000000000000042:input_candidate",
         },
-        hostedMailboxItemId: "mailbox_item_candidate",
         inputId: "input_candidate",
         occurredAt: "2026-05-18T15:10:38.000Z",
         receivedAt: "2026-05-18T15:10:39.000Z",
@@ -1193,14 +1189,7 @@ describe("runHostedAssistantAutomation", () => {
           threadId: "thread_1",
         },
         source: "linq",
-        sourceMetadata: {
-          externalThreadRouteAuthorityPresent: true,
-          kind: "linq",
-          partCount: 1,
-          reactionEligible: true,
-          replyToMessageId: null,
-          service: "iMessage",
-        },
+        sourceMetadata: null,
         sourceRef: {
           kind: "hosted-mailbox",
           lane: "conversation",
@@ -1248,8 +1237,6 @@ describe("runHostedAssistantAutomation", () => {
         progressed: false,
       };
     });
-    const assertLinqRecentInboundEngagement = vi.fn(async () => ({}));
-
     const result = await runHostedAssistantAutomation(
       "/tmp/vault-root",
       "req_candidate_query",
@@ -1268,13 +1255,6 @@ describe("runHostedAssistantAutomation", () => {
         userId: "member_123",
       },
       [],
-      undefined,
-      undefined,
-      {
-        effectsPort: {
-          assertLinqRecentInboundEngagement,
-        },
-      },
     );
 
     expect(result.timings).toEqual(expect.objectContaining({
@@ -1303,13 +1283,6 @@ describe("runHostedAssistantAutomation", () => {
       entry.message === "Hosted assistant input candidate query finished."
     );
     expect(candidateLog?.redacted).not.toHaveProperty("requestId");
-    expect(assertLinqRecentInboundEngagement).toHaveBeenCalledWith(
-      expect.objectContaining({
-        authorityCheckOnly: true,
-        target: "thread_1",
-      }),
-      { signal: undefined },
-    );
   });
 
   it("runs hosted assistant automation through the queue-only scanner path", async () => {
