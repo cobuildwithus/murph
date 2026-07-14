@@ -95,6 +95,40 @@ export async function readExistingHostedPendingAssistantInputIds(input: {
   return existing.missing ? [] : [...existing.state.inputIds];
 }
 
+export async function retainHostedPendingAssistantInputEvents(input: {
+  events: readonly AssistantInputEventRecord[];
+  vaultRoot: string;
+}): Promise<AssistantInputEventRecord[]> {
+  if (input.events.length === 0) {
+    return [];
+  }
+
+  const enabledAutoReplyChannels = new Set(
+    (await readAssistantAutomationState(input.vaultRoot)).autoReply
+      .map((entry) => entry.channel),
+  );
+  const pending: AssistantInputEventRecord[] = [];
+  for (const event of input.events) {
+    if (
+      !isHostedPendingAssistantInputStillReplyable({
+        enabledAutoReplyChannels,
+        event,
+      })
+    ) {
+      continue;
+    }
+    const complete = await hasCompleteAssistantAutoReplyTerminalEvidence({
+      captureId: event.projection.captureId,
+      inputId: event.inputId,
+      vault: input.vaultRoot,
+    });
+    if (!complete) {
+      pending.push(event);
+    }
+  }
+  return pending;
+}
+
 export async function collectHostedPendingAssistantInputMediaRetentionProtections(input: {
   now?: Date | string;
   vaultRoot: string;

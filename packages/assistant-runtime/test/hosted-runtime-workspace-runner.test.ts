@@ -11,9 +11,11 @@ import {
 } from "@murphai/runtime-state/node";
 import {
   resolveAssistantStatePaths,
+  writeAssistantStateVersionedJson,
 } from "@murphai/runtime-state/node/assistant-state-fs";
 import {
   AssistantActiveTurnInputCheckpointRejectedError,
+  createAssistantInputEventId,
   createAssistantActiveTurnInputController,
   createAssistantOutboxIntent,
   createStoreBackedAssistantInputSource,
@@ -87,8 +89,11 @@ import {
   writeHostedMailboxImportState,
 } from "../src/hosted-runtime/mailbox-state.ts";
 import {
+  HOSTED_PENDING_ASSISTANT_INPUT_STATE_SCHEMA,
+  HOSTED_PENDING_ASSISTANT_INPUT_STATE_SCHEMA_VERSION,
   enqueueHostedPendingAssistantInputId,
   ensureHostedPendingAssistantInputIndex,
+  readHostedPendingAssistantInputIds,
   resolveHostedPendingAssistantInputStatePath,
 } from "../src/hosted-runtime/pending-input-index.ts";
 import {
@@ -1307,27 +1312,83 @@ describe("runHostedWorkspaceUntilIdleOrBudget", () => {
     const cases = [
       {
         expectedBarrier: true,
+        importMode: "pre_auto",
+        includeReactionAsCurrent: false,
         label: "causal",
         reactionOccurredAt: "2026-04-25T23:59:59.000Z",
+        terminalReaction: false,
       },
       {
         expectedBarrier: false,
+        importMode: "pre_auto",
+        includeReactionAsCurrent: false,
         label: "future",
         reactionOccurredAt: "2026-04-26T00:00:01.000Z",
+        terminalReaction: false,
+      },
+      {
+        expectedBarrier: true,
+        importMode: "initial",
+        includeReactionAsCurrent: false,
+        label: "initial_causal",
+        reactionOccurredAt: "2026-04-25T23:59:59.000Z",
+        terminalReaction: false,
+      },
+      {
+        expectedBarrier: true,
+        importMode: "foreground",
+        includeReactionAsCurrent: false,
+        label: "foreground_causal",
+        reactionOccurredAt: "2026-04-25T23:59:59.000Z",
+        terminalReaction: false,
+      },
+      {
+        expectedBarrier: false,
+        importMode: "pre_auto",
+        includeReactionAsCurrent: true,
+        label: "current_causal",
+        reactionOccurredAt: "2026-04-25T23:59:59.000Z",
+        terminalReaction: false,
+      },
+      {
+        expectedBarrier: false,
+        importMode: "pre_auto",
+        includeReactionAsCurrent: false,
+        label: "terminal_causal",
+        reactionOccurredAt: "2026-04-25T23:59:59.000Z",
+        terminalReaction: true,
       },
     ] as const;
 
     for (const testCase of cases) {
       const vaultRoot = await mkdtemp(path.join(tmpdir(), "murph-workspace-runner-"));
       const fetchRequests: HostedMailboxFetchRequest[] = [];
-      const items = [createMailboxItem({
+      const currentItem = createMailboxItem({
         id: `mailbox_item_runner_message_before_${testCase.label}_reaction`,
         laneSeq: "1",
-      })];
+      });
+      const reactionItem = createMailboxItem({
+        id: `mailbox_item_runner_${testCase.label}_reaction`,
+        kind: "conversation.reaction",
+        laneSeq: "2",
+        occurredAt: testCase.reactionOccurredAt,
+      });
+      const reactionInputId = createAssistantInputEventId({
+        sourceRef: createStoredAssistantInputEventForMailboxItem(
+          reactionItem,
+          `${testCase.label} reaction barrier input ${reactionItem.laneSeq}`,
+          { threadIsDirect: false },
+        ).sourceRef,
+      });
+      const items = [
+        currentItem,
+        ...(testCase.importMode === "initial" ? [reactionItem] : []),
+      ];
       const { mailboxPort } = createMailboxPort({ fetchRequests, items });
       const importedKinds: string[] = [];
       let currentAssistantInputId: string | null = null;
       let deliveryBarrier: unknown = null;
+      const runtimeWakeSignal = createCoalescingRuntimeWakeSignal();
 
       try {
         await saveAssistantAutomationState(vaultRoot, {
@@ -1362,27 +1423,39 @@ describe("runHostedWorkspaceUntilIdleOrBudget", () => {
             if (item.item.kind === "conversation.message") {
               currentAssistantInputId = staged.inputId;
             }
+            if (item.item.kind === "conversation.reaction" && testCase.terminalReaction) {
+              await writeTerminalEvidence({
+                evidenceId: staged.inputId,
+                groupInputIds: [staged.inputId],
+                vaultRoot,
+              });
+            }
             return {
               assistantInputId: staged.inputId,
               status: "imported",
             };
           },
-          limitPerLane: 1,
+          limitPerLane: testCase.importMode === "initial" ? 10 : 1,
           platform: createPlatform({
             mailboxPort,
             workspacePort: createWorkspacePort({ checkpointRequests: [] }),
           }),
           requestId: `request_synthetic_runner_${testCase.label}_reaction_barrier`,
+          runtimeWakeSignal,
           async runAssistantPhase(input) {
-            items.push(createMailboxItem({
-              id: `mailbox_item_runner_${testCase.label}_reaction`,
-              kind: "conversation.reaction",
-              laneSeq: "2",
-              occurredAt: testCase.reactionOccurredAt,
-            }));
+            if (testCase.importMode !== "initial") {
+              items.push(reactionItem);
+            }
+            if (testCase.importMode === "foreground") {
+              runtimeWakeSignal.notify();
+              await waitForCondition(() => importedKinds.includes("conversation.reaction"));
+            }
             assert.ok(currentAssistantInputId);
             deliveryBarrier = await input.prepareAutoReplyDelivery?.({
-              currentAssistantInputIds: [currentAssistantInputId],
+              currentAssistantInputIds: [
+                currentAssistantInputId,
+                ...(testCase.includeReactionAsCurrent ? [reactionInputId] : []),
+              ],
             }) ?? null;
             return { progressed: false };
           },
@@ -1401,7 +1474,8 @@ describe("runHostedWorkspaceUntilIdleOrBudget", () => {
             nextWakeReason: "mailbox",
             redactedStatus: {
               hostedConversationPreDispatchImportBlocked: 0,
-              hostedConversationPreDispatchImported: 1,
+              hostedConversationPreDispatchImported:
+                testCase.importMode === "pre_auto" ? 1 : 0,
               hostedConversationPreDispatchReplyInvalidated: 1,
             },
           });
@@ -1410,20 +1484,31 @@ describe("runHostedWorkspaceUntilIdleOrBudget", () => {
         }
         assert.equal(result.latestMailboxImport.state.watermarks.conversation, "2");
         assert.equal(result.mailboxRetryAt, null);
-        assert.deepEqual(fetchRequests.map((request) => request.lanes), [
-          [{ importedSeq: "0", lane: "conversation" }],
-          [{ importedSeq: "0", lane: "system" }],
-          [{ importedSeq: "1", lane: "conversation" }],
-          ...(testCase.expectedBarrier
-            ? []
-            : [[{ importedSeq: "0", lane: "system" }] as const]),
-        ]);
-        assert.deepEqual(fetchRequests.map((request) => request.limitPerLane), [
-          1,
-          1,
-          1 + HOSTED_DEFERRED_GROUP_CONTEXT_MAX_TOTAL + 1,
-          ...(testCase.expectedBarrier ? [] : [1]),
-        ]);
+        if (testCase.importMode === "pre_auto") {
+          assert.deepEqual(fetchRequests.map((request) => request.lanes), [
+            [{ importedSeq: "0", lane: "conversation" }],
+            [{ importedSeq: "0", lane: "system" }],
+            [{ importedSeq: "1", lane: "conversation" }],
+            ...(testCase.expectedBarrier
+              ? []
+              : [[{ importedSeq: "0", lane: "system" }] as const]),
+          ]);
+          assert.deepEqual(fetchRequests.map((request) => request.limitPerLane), [
+            1,
+            1,
+            1 + HOSTED_DEFERRED_GROUP_CONTEXT_MAX_TOTAL + 1,
+            ...(testCase.expectedBarrier ? [] : [1]),
+          ]);
+        } else {
+          assert.ok(fetchRequests.some((request) =>
+            request.requestId.endsWith(":pre-auto-reply-conversation")
+            && request.limitPerLane === (
+              (testCase.importMode === "initial" ? 10 : 1)
+              + HOSTED_DEFERRED_GROUP_CONTEXT_MAX_TOTAL
+              + 1
+            )
+          ));
+        }
       } finally {
         await rm(vaultRoot, { force: true, recursive: true });
       }
@@ -1433,23 +1518,125 @@ describe("runHostedWorkspaceUntilIdleOrBudget", () => {
   test("pre-auto-reply delivery preparation schedules same-route late messages as a new turn", async () => {
     const cases = [
       {
+        currentThreadId: "thread_group_a",
         expectedBarrier: true,
+        expectedInvalidation: false,
+        includeLateAsCurrent: false,
         importedThreadId: "thread_group_a",
+        initiallyImported: false,
         label: "same_route",
+        missingCurrentEvent: false,
+        missingLateEvent: false,
+        terminalLateInput: false,
+        threadIsDirect: false,
       },
       {
+        currentThreadId: "thread_group_a",
+        expectedBarrier: true,
+        expectedInvalidation: false,
+        includeLateAsCurrent: false,
+        importedThreadId: "thread_group_a",
+        initiallyImported: true,
+        label: "same_route_initial",
+        missingCurrentEvent: false,
+        missingLateEvent: false,
+        terminalLateInput: false,
+        threadIsDirect: false,
+      },
+      {
+        currentThreadId: "thread_group_a",
         expectedBarrier: false,
+        expectedInvalidation: false,
+        includeLateAsCurrent: false,
         importedThreadId: "thread_group_b",
+        initiallyImported: false,
         label: "unrelated_route",
+        missingCurrentEvent: false,
+        missingLateEvent: false,
+        terminalLateInput: false,
+        threadIsDirect: false,
+      },
+      {
+        currentThreadId: "thread_group_a",
+        expectedBarrier: false,
+        expectedInvalidation: false,
+        includeLateAsCurrent: true,
+        importedThreadId: "thread_group_a",
+        initiallyImported: false,
+        label: "current_input",
+        missingCurrentEvent: false,
+        missingLateEvent: false,
+        terminalLateInput: false,
+        threadIsDirect: false,
+      },
+      {
+        currentThreadId: "thread_group_a",
+        expectedBarrier: false,
+        expectedInvalidation: false,
+        includeLateAsCurrent: false,
+        importedThreadId: "thread_group_a",
+        initiallyImported: false,
+        label: "terminal_input",
+        missingCurrentEvent: false,
+        missingLateEvent: false,
+        terminalLateInput: true,
+        threadIsDirect: false,
+      },
+      {
+        currentThreadId: "thread_group_a",
+        expectedBarrier: true,
+        expectedInvalidation: true,
+        includeLateAsCurrent: false,
+        importedThreadId: "thread_group_a",
+        initiallyImported: false,
+        label: "missing_event",
+        missingCurrentEvent: false,
+        missingLateEvent: true,
+        terminalLateInput: false,
+        threadIsDirect: false,
+      },
+      {
+        currentThreadId: "thread_group_a",
+        expectedBarrier: true,
+        expectedInvalidation: true,
+        includeLateAsCurrent: false,
+        importedThreadId: "thread_group_a",
+        initiallyImported: false,
+        label: "missing_current_event",
+        missingCurrentEvent: true,
+        missingLateEvent: false,
+        terminalLateInput: false,
+        threadIsDirect: false,
+      },
+      {
+        currentThreadId: "thread_direct_before_chat_materialized",
+        expectedBarrier: true,
+        expectedInvalidation: false,
+        includeLateAsCurrent: false,
+        importedThreadId: "thread_direct_after_chat_materialized",
+        initiallyImported: false,
+        label: "direct_route_rekey",
+        missingCurrentEvent: false,
+        missingLateEvent: false,
+        terminalLateInput: false,
+        threadIsDirect: true,
       },
     ] as const;
 
     for (const testCase of cases) {
       const vaultRoot = await mkdtemp(path.join(tmpdir(), "murph-workspace-runner-"));
-      const items = [createMailboxItem({
+      const currentItem = createMailboxItem({
         id: `mailbox_item_runner_message_${testCase.label}_current`,
         laneSeq: "1",
-      })];
+      });
+      const lateItem = createMailboxItem({
+        id: `mailbox_item_runner_message_${testCase.label}_imported`,
+        laneSeq: "2",
+      });
+      const items = [
+        currentItem,
+        ...(testCase.initiallyImported ? [lateItem] : []),
+      ];
       const { mailboxPort } = createMailboxPort({ items });
       let currentAssistantInputId: string | null = null;
       let deliveryBarrier: unknown = null;
@@ -1475,21 +1662,46 @@ describe("runHostedWorkspaceUntilIdleOrBudget", () => {
           }),
           expectedUserId: TEST_USER_ID,
           async importItem(item) {
+            const event = createStoredAssistantInputEventForMailboxItem(
+              item.item,
+              `${testCase.label} message barrier input ${item.item.laneSeq}`,
+              {
+                threadId: item.item.laneSeq === "1"
+                  ? testCase.currentThreadId
+                  : testCase.importedThreadId,
+                threadIsDirect: testCase.threadIsDirect,
+              },
+            );
+            if (item.item.laneSeq === "1" && testCase.missingCurrentEvent) {
+              currentAssistantInputId = createAssistantInputEventId({
+                sourceRef: event.sourceRef,
+              });
+              return {
+                assistantInputId: currentAssistantInputId,
+                status: "imported",
+              };
+            }
+            if (item.item.laneSeq === "2" && testCase.missingLateEvent) {
+              return {
+                assistantInputId: createAssistantInputEventId({
+                  sourceRef: event.sourceRef,
+                }),
+                status: "imported",
+              };
+            }
             const staged = await upsertAssistantInputEvent({
-              event: createStoredAssistantInputEventForMailboxItem(
-                item.item,
-                `${testCase.label} message barrier input ${item.item.laneSeq}`,
-                {
-                  threadId: item.item.laneSeq === "1"
-                    ? "thread_group_a"
-                    : testCase.importedThreadId,
-                  threadIsDirect: false,
-                },
-              ),
+              event,
               vault: vaultRoot,
             });
             if (item.item.laneSeq === "1") {
               currentAssistantInputId = staged.inputId;
+            }
+            if (item.item.laneSeq === "2" && testCase.terminalLateInput) {
+              await writeTerminalEvidence({
+                evidenceId: staged.inputId,
+                groupInputIds: [staged.inputId],
+                vaultRoot,
+              });
             }
             return {
               assistantInputId: staged.inputId,
@@ -1503,13 +1715,25 @@ describe("runHostedWorkspaceUntilIdleOrBudget", () => {
           }),
           requestId: `request_synthetic_runner_${testCase.label}_message_barrier`,
           async runAssistantPhase(input) {
-            items.push(createMailboxItem({
-              id: `mailbox_item_runner_message_${testCase.label}_imported`,
-              laneSeq: "2",
-            }));
+            if (!testCase.initiallyImported) {
+              items.push(lateItem);
+            }
+            const lateInputId = createAssistantInputEventId({
+              sourceRef: createStoredAssistantInputEventForMailboxItem(
+                lateItem,
+                `${testCase.label} message barrier input ${lateItem.laneSeq}`,
+                {
+                  threadId: testCase.importedThreadId,
+                  threadIsDirect: testCase.threadIsDirect,
+                },
+              ).sourceRef,
+            });
             assert.ok(currentAssistantInputId);
             deliveryBarrier = await input.prepareAutoReplyDelivery?.({
-              currentAssistantInputIds: [currentAssistantInputId],
+              currentAssistantInputIds: [
+                currentAssistantInputId,
+                ...(testCase.includeLateAsCurrent ? [lateInputId] : []),
+              ],
             }) ?? null;
             return { progressed: false };
           },
@@ -1518,13 +1742,24 @@ describe("runHostedWorkspaceUntilIdleOrBudget", () => {
           now: () => TEST_NOW,
         });
 
-        if (testCase.expectedBarrier) {
+        if (testCase.expectedInvalidation) {
+          assert.deepEqual(deliveryBarrier, {
+            nextWakeAt: TEST_NOW,
+            nextWakeReason: "mailbox",
+            redactedStatus: {
+              hostedConversationPreDispatchImportBlocked: 0,
+              hostedConversationPreDispatchImported: 1,
+              hostedConversationPreDispatchReplyInvalidated: 1,
+            },
+          });
+        } else if (testCase.expectedBarrier) {
           assert.deepEqual(deliveryBarrier, {
             invalidateReply: false,
             nextWakeAt: TEST_NOW,
             nextWakeReason: "mailbox",
             redactedStatus: {
-              hostedConversationPreDispatchImported: 1,
+              hostedConversationPreDispatchImported:
+                testCase.initiallyImported ? 0 : 1,
               hostedConversationPreDispatchNextTurnRequired: 1,
               hostedConversationPreDispatchReplyInvalidated: 0,
             },
@@ -1535,6 +1770,143 @@ describe("runHostedWorkspaceUntilIdleOrBudget", () => {
       } finally {
         await rm(vaultRoot, { force: true, recursive: true });
       }
+    }
+  });
+
+  test("pre-auto-reply delivery preparation ignores a large unrelated pending backlog", async () => {
+    const vaultRoot = await mkdtemp(path.join(tmpdir(), "murph-workspace-runner-"));
+    const items = [createMailboxItem({
+      id: "mailbox_item_runner_bounded_route_current",
+      laneSeq: "1",
+    })];
+    const { mailboxPort } = createMailboxPort({ items });
+    let currentAssistantInputId: string | null = null;
+    let deliveryBarrier: unknown = null;
+
+    try {
+      await saveAssistantAutomationState(vaultRoot, {
+        autoReply: [{
+          channel: "linq",
+          eligibleAfter: null,
+          enabledAt: TEST_NOW,
+        }],
+        updatedAt: TEST_NOW,
+        version: 1,
+      });
+      const unrelatedBacklogEvent = await upsertAssistantInputEvent({
+        event: createStoredAssistantInputEventForMailboxItem(
+          createMailboxItem({
+            id: "mailbox_item_runner_unrelated_backlog_probe",
+            laneSeq: "900",
+          }),
+          "unrelated backlog probe",
+          {
+            threadId: "thread_unrelated_backlog",
+            threadIsDirect: false,
+          },
+        ),
+        vault: vaultRoot,
+      });
+      const unrelatedPendingInputIds = [
+        unrelatedBacklogEvent.inputId,
+        ...Array.from({ length: 512 }, (_, index) =>
+          `ain_${(index + 1).toString(16).padStart(32, "0")}`
+        ),
+      ];
+      await writeAssistantStateVersionedJson({
+        filePath: resolveHostedPendingAssistantInputStatePath(vaultRoot),
+        schema: HOSTED_PENDING_ASSISTANT_INPUT_STATE_SCHEMA,
+        schemaVersion: HOSTED_PENDING_ASSISTANT_INPUT_STATE_SCHEMA_VERSION,
+        value: {
+          backfilled: true,
+          inputIds: unrelatedPendingInputIds,
+        },
+      });
+      const unrelatedInputEventProbeId = unrelatedPendingInputIds[1];
+      assert.ok(unrelatedInputEventProbeId);
+      // A global pending-index scan would direct-read this unrelated event id
+      // and fail because its event path is intentionally a directory.
+      await mkdir(path.join(
+        resolveAssistantStatePaths(vaultRoot).assistantStateRoot,
+        "input-events",
+        `${encodeURIComponent(unrelatedInputEventProbeId)}.json`,
+      ), { recursive: true });
+      // A global pending-index compaction would read this unrelated event's
+      // terminal-evidence path and fail because it is intentionally a directory.
+      // The pre-intent barrier must stay on its bounded fresh-route candidates.
+      await mkdir(path.join(
+        resolveAssistantStatePaths(vaultRoot).assistantStateRoot,
+        "auto-reply",
+        "evidence",
+        `${encodeURIComponent(unrelatedBacklogEvent.inputId)}.json`,
+      ), { recursive: true });
+
+      const result = await runHostedWorkspaceUntilIdleOrBudget({
+        checkpointRequestBuilder: createHostedWorkspaceCheckpointRequestBuilder({
+          attemptId: "attempt_synthetic_runner_bounded_route_backlog",
+          expectedWorkspaceVersion: "0",
+          leaseGeneration: "1",
+          nextWakeAt: null,
+          nextWakeReason: null,
+          snapshotRef: null,
+        }),
+        expectedUserId: TEST_USER_ID,
+        async importItem(item) {
+          const staged = await upsertAssistantInputEvent({
+            event: createStoredAssistantInputEventForMailboxItem(
+              item.item,
+              `bounded route input ${item.item.laneSeq}`,
+              {
+                threadId: item.item.laneSeq === "1"
+                  ? "thread_group_a"
+                  : "thread_group_b",
+                threadIsDirect: false,
+              },
+            ),
+            vault: vaultRoot,
+          });
+          if (item.item.laneSeq === "1") {
+            currentAssistantInputId = staged.inputId;
+          }
+          return {
+            assistantInputId: staged.inputId,
+            status: "imported",
+          };
+        },
+        limitPerLane: 10,
+        platform: createPlatform({
+          mailboxPort,
+          workspacePort: createWorkspacePort({ checkpointRequests: [] }),
+        }),
+        requestId: "request_synthetic_runner_bounded_route_backlog",
+        async runAssistantPhase(input) {
+          items.push(createMailboxItem({
+            id: "mailbox_item_runner_bounded_route_late_unrelated",
+            laneSeq: "2",
+          }));
+          assert.ok(currentAssistantInputId);
+          deliveryBarrier = await input.prepareAutoReplyDelivery?.({
+            currentAssistantInputIds: [currentAssistantInputId],
+          }) ?? null;
+          return {
+            nextWakeAt: "2026-04-26T00:05:00.000Z",
+            nextWakeReason: "mailbox",
+            progressed: false,
+          };
+        },
+        vaultRoot,
+        workspace: null,
+        now: () => TEST_NOW,
+      });
+
+      assert.equal(deliveryBarrier, null);
+      assert.equal(result.assistantPhaseResult?.nextWakeReason, "mailbox");
+      assert.deepEqual(
+        await readHostedPendingAssistantInputIds({ vaultRoot }),
+        unrelatedPendingInputIds,
+      );
+    } finally {
+      await rm(vaultRoot, { force: true, recursive: true });
     }
   });
 

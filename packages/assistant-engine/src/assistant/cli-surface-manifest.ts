@@ -110,6 +110,7 @@ export async function readAssistantCliLlmsManifest(input: {
 export async function readAssistantCliLlmsFullManifest(input: {
   cliEnv?: NodeJS.ProcessEnv
   executionContext?: AssistantExecutionContext | null
+  timeoutMs?: number
   workingDirectory?: string | null
 }): Promise<AssistantCliLlmsManifest> {
   const result = await executeAssistantCliManifestCommand({
@@ -117,6 +118,7 @@ export async function readAssistantCliLlmsFullManifest(input: {
     cliEnv: input.cliEnv,
     executionContext: input.executionContext,
     maxOutputChars: assistantCliFullManifestMaxOutputChars,
+    timeoutMs: input.timeoutMs,
     workingDirectory: input.workingDirectory,
   })
 
@@ -155,6 +157,7 @@ async function executeAssistantCliManifestCommand(input: {
   cliEnv?: NodeJS.ProcessEnv
   executionContext?: AssistantExecutionContext | null
   maxOutputChars?: number
+  timeoutMs?: number
   workingDirectory?: string | null
 }): Promise<{
   argv: string[]
@@ -171,6 +174,7 @@ async function executeAssistantCliManifestCommand(input: {
     cliEnv: input.cliEnv,
   })
   const launcher = await resolveAssistantCliLauncher(env)
+  const timeoutMs = input.timeoutMs ?? assistantCliManifestTimeoutMs
 
   return await new Promise((resolve, reject) => {
     const child = spawn(launcher.command, [...launcher.argvPrefix, ...argv], {
@@ -195,12 +199,12 @@ async function executeAssistantCliManifestCommand(input: {
             `vault-cli ${argv.join(' ')} timed out while loading the CLI manifest.`,
             {
               argv,
-              timeoutMs: assistantCliManifestTimeoutMs,
+              timeoutMs,
             },
           ),
         )
       })
-    }, assistantCliManifestTimeoutMs)
+    }, timeoutMs)
 
     const settle = (handler: () => void) => {
       if (settled) {

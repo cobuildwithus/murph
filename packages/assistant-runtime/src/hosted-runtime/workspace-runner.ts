@@ -15,6 +15,9 @@ import {
   type HostedCanonicalWritePort,
 } from "@murphai/core";
 import {
+  assistantDeliveryRoutesBelongToSameConversation,
+} from "@murphai/operator-config/assistant/current-delivery-route";
+import {
   HOSTED_DEFERRED_GROUP_CONTEXT_MAX_TOTAL,
 } from "@murphai/hosted-execution/runtime-control";
 import type {
@@ -31,7 +34,6 @@ import {
   compareAssistantInputCursors,
   isAssistantInputEventDeferredContextCausalForActionable,
   isAssistantContextSnapshotRefreshPending,
-  isSameAssistantConversationRef,
   listAssistantContextSnapshotDirtyDomainsForCanonicalWrite,
   markAssistantContextSnapshotDirty,
   notifyAssistantActiveTurnInputAvailableForInputIds,
@@ -88,7 +90,7 @@ import {
   resolveHostedPendingAssistantInputWakeAt,
 } from "./pending-assistant-input.ts";
 import {
-  compactHostedPendingAssistantInputIds,
+  retainHostedPendingAssistantInputEvents,
   resolveHostedPendingAssistantInputStatePath,
 } from "./pending-input-index.ts";
 import {
@@ -187,6 +189,7 @@ interface HostedWorkspaceCheckpointRequestSession
   assistantInputBatchFull(): boolean;
   assistantInputBatchRemaining(): number;
   discardMailboxPostCheckpointEffects(): void;
+  freshAssistantInputIds(): readonly string[];
   hasRuntimeStateDirty(): boolean;
   latestAssistantInputBatch(): HostedWorkspaceRunnerAssistantInputBatch | null;
   latestMailboxImport(): HostedMailboxImportCheckpointResult | null;
@@ -673,6 +676,11 @@ export async function runHostedWorkspaceUntilIdleOrBudget(
   checkpointRequestSession.recordCheckpointResult(initialMailboxImport, {
     captureAssistantInputBatch: false,
   });
+  const initialConversationAssistantInputIds = [
+    ...(initialAssistantInputBatch?.assistantInputIds ?? []),
+    ...(initialMailboxImport.importResult.assistantInputIds ?? []),
+    ...(initialMailboxImport.importResult.importedConversationContextInputIds ?? []),
+  ];
   markHostedMailboxImportDirtyIfNeeded(checkpointRequestSession, initialMailboxImport);
 
   const initialAssistantInputBatchHasWork =
@@ -935,6 +943,7 @@ export async function runHostedWorkspaceUntilIdleOrBudget(
         hostedCanonicalMailboxWritePort,
         input,
         currentAssistantInputIds: prepareInput?.currentAssistantInputIds ?? [],
+        initialConversationAssistantInputIds,
         stopForegroundMailboxImportLoop,
       });
       if (!foregroundConversationWorkObserved && !input.signal?.aborted) {
@@ -1426,6 +1435,7 @@ async function prepareHostedAutoReplyDeliveryForWorkspaceRunner(input: {
   hostedCanonicalMailboxWritePort: HostedCanonicalWritePort;
   input: HostedWorkspaceRunnerInput;
   currentAssistantInputIds: readonly string[];
+  initialConversationAssistantInputIds: readonly string[];
   stopForegroundMailboxImportLoop: () => Promise<void>;
 }): Promise<HostedWorkspaceRunnerAssistantPhaseDeliveryBarrier | null> {
   await input.stopForegroundMailboxImportLoop();
@@ -1463,6 +1473,10 @@ async function prepareHostedAutoReplyDeliveryForWorkspaceRunner(input: {
     : input.checkpointRequestBuilder.latestAssistantInputBatch()?.assistantInputIds ?? [];
   const pendingConversationDisposition = await classifyPendingConversationInputsForCurrentReply({
     currentAssistantInputIds,
+    freshAssistantInputIds: [
+      ...input.initialConversationAssistantInputIds,
+      ...input.checkpointRequestBuilder.freshAssistantInputIds(),
+    ],
     vaultRoot: input.input.vaultRoot,
   });
   if (conversationRetryAt || pendingConversationDisposition === "invalidate") {
@@ -1552,55 +1566,74 @@ type PendingConversationReplyDisposition = "invalidate" | "next_turn" | "none";
 
 async function classifyPendingConversationInputsForCurrentReply(input: {
   currentAssistantInputIds: readonly string[];
+  freshAssistantInputIds: readonly string[];
   vaultRoot: string;
 }): Promise<PendingConversationReplyDisposition> {
   const currentAssistantInputIds = new Set(input.currentAssistantInputIds);
-  const pendingInputIds = (await compactHostedPendingAssistantInputIds({
-    vaultRoot: input.vaultRoot,
-  })).filter((inputId) => !currentAssistantInputIds.has(inputId));
-  if (pendingInputIds.length === 0) {
+  const freshInputIds = [...new Set(input.freshAssistantInputIds)]
+    .filter((inputId) => !currentAssistantInputIds.has(inputId));
+  if (freshInputIds.length === 0) {
     return "none";
   }
-  if (input.currentAssistantInputIds.length === 0) {
+
+  const freshEvents = await Promise.all(freshInputIds.map((inputId) =>
+    readAssistantInputEvent({ inputId, vault: input.vaultRoot })
+  ));
+  if (freshEvents.some((event) => event === null)) {
     return "invalidate";
+  }
+  const availableFreshEvents = freshEvents.filter((event) => event !== null);
+  if (input.currentAssistantInputIds.length === 0) {
+    return (await retainHostedPendingAssistantInputEvents({
+      events: availableFreshEvents,
+      vaultRoot: input.vaultRoot,
+    })).length > 0
+      ? "invalidate"
+      : "none";
   }
 
   const currentEvents = await Promise.all(input.currentAssistantInputIds.map((inputId) =>
     readAssistantInputEvent({ inputId, vault: input.vaultRoot })
   ));
-  const pendingEvents = await Promise.all(pendingInputIds.map((inputId) =>
-    readAssistantInputEvent({ inputId, vault: input.vaultRoot })
-  ));
-  if (currentEvents.some((event) => event === null) || pendingEvents.some((event) => event === null)) {
+  if (currentEvents.some((event) => event === null)) {
     return "invalidate";
   }
 
-  const replyRelevantPairs = pendingEvents.flatMap((pending) =>
-    currentEvents.map((actionable) => ({ actionable, pending })),
-  );
-  if (replyRelevantPairs.some(({ actionable, pending }) =>
-    pending !== null
-    && actionable !== null
-    && pending.sourceMetadata?.kind === "linq"
+  const actionableEvents = currentEvents.filter((event) => event !== null);
+  const invalidatingContextEvents = availableFreshEvents.filter((pending) =>
+    pending.sourceMetadata?.kind === "linq"
     && pending.sourceMetadata.contextOnly === true
-    && isAssistantInputEventDeferredContextCausalForActionable({
-      actionable,
-      context: pending,
-    })
+    && actionableEvents.some((actionable) =>
+      isAssistantInputEventDeferredContextCausalForActionable({
+        actionable,
+        context: pending,
+      })
+    )
+  );
+  const nextTurnEvents = availableFreshEvents.filter((pending) =>
+    !(
+      pending.sourceMetadata?.kind === "linq"
+      && pending.sourceMetadata.contextOnly === true
+    )
+    && actionableEvents.some((actionable) =>
+      compareAssistantInputCursors(pending.cursor, actionable.cursor) > 0
+      && isSameHostedAssistantReplyRoute(actionable, pending)
+    )
+  );
+  const relevantPendingEvents = await retainHostedPendingAssistantInputEvents({
+    events: [...invalidatingContextEvents, ...nextTurnEvents],
+    vaultRoot: input.vaultRoot,
+  });
+  const relevantPendingInputIds = new Set(
+    relevantPendingEvents.map((event) => event.inputId),
+  );
+  if (invalidatingContextEvents.some((event) =>
+    relevantPendingInputIds.has(event.inputId)
   )) {
     return "invalidate";
   }
 
-  return replyRelevantPairs.some(({ actionable, pending }) =>
-    pending !== null
-    && actionable !== null
-    && !(
-      pending.sourceMetadata?.kind === "linq"
-      && pending.sourceMetadata.contextOnly === true
-    )
-    && compareAssistantInputCursors(pending.cursor, actionable.cursor) > 0
-    && isSameHostedAssistantReplyRoute(actionable, pending)
-  )
+  return nextTurnEvents.some((event) => relevantPendingInputIds.has(event.inputId))
     ? "next_turn"
     : "none";
 }
@@ -1609,15 +1642,17 @@ function isSameHostedAssistantReplyRoute(
   left: NonNullable<Awaited<ReturnType<typeof readAssistantInputEvent>>>,
   right: NonNullable<Awaited<ReturnType<typeof readAssistantInputEvent>>>,
 ): boolean {
-  if (
-    left.conversation?.source === "linq"
-    && right.conversation?.source === "linq"
-  ) {
-    return left.conversation.accountId === right.conversation.accountId
-      && left.conversation.threadId === right.conversation.threadId
-      && left.conversation.threadIsDirect === right.conversation.threadIsDirect;
-  }
-  return isSameAssistantConversationRef(left.conversation, right.conversation);
+  const leftRoute = readHostedAssistantInputCurrentDeliveryRoute({
+    conversation: left.conversation,
+    replyTarget: left.replyTarget,
+  });
+  const rightRoute = readHostedAssistantInputCurrentDeliveryRoute({
+    conversation: right.conversation,
+    replyTarget: right.replyTarget,
+  });
+  return leftRoute !== null
+    && rightRoute !== null
+    && assistantDeliveryRoutesBelongToSameConversation(leftRoute, rightRoute);
 }
 
 function hostedWorkspaceRunnerWakeIsImmediate(
@@ -2685,6 +2720,7 @@ function createHostedWorkspaceCheckpointRequestSession(
     ),
   );
   let expectedWorkspaceVersion: string | null = null;
+  const freshAssistantInputIds = new Set<string>();
   const mailboxPostCheckpointEffects: HostedMailboxPostCheckpointEffect[] = [];
   let latestAssistantInputBatch: HostedWorkspaceRunnerAssistantInputBatch | null = null;
   let latestMailboxImport: HostedMailboxImportCheckpointResult | null = null;
@@ -2731,6 +2767,9 @@ function createHostedWorkspaceCheckpointRequestSession(
     discardMailboxPostCheckpointEffects() {
       mailboxPostCheckpointEffects.splice(0);
     },
+    freshAssistantInputIds() {
+      return [...freshAssistantInputIds];
+    },
     hasRuntimeStateDirty() {
       return runtimeStateDirty;
     },
@@ -2752,15 +2791,20 @@ function createHostedWorkspaceCheckpointRequestSession(
     recordCheckpointResult(result, recordOptions) {
       latestMailboxImport = result;
       const freshBatchLimit = assistantInputFreshBatchLimit();
-      if (
-        recordOptions?.captureAssistantInputBatch !== false
-        && freshBatchLimit > 0
-      ) {
-        latestAssistantInputBatch = accumulateHostedWorkspaceRunnerAssistantInputBatch({
-          assistantInputBatchLimit: freshBatchLimit,
-          current: latestAssistantInputBatch,
-          result,
-        });
+      if (recordOptions?.captureAssistantInputBatch !== false) {
+        for (const inputId of [
+          ...(result.importResult.assistantInputIds ?? []),
+          ...(result.importResult.importedConversationContextInputIds ?? []),
+        ]) {
+          freshAssistantInputIds.add(inputId);
+        }
+        if (freshBatchLimit > 0) {
+          latestAssistantInputBatch = accumulateHostedWorkspaceRunnerAssistantInputBatch({
+            assistantInputBatchLimit: freshBatchLimit,
+            current: latestAssistantInputBatch,
+            result,
+          });
+        }
       }
       mailboxRetryAt = selectHostedRuntimeWakeCandidate([
         createHostedRuntimeWakeCandidate(mailboxRetryAt, "mailbox"),

@@ -635,7 +635,10 @@ test('generate-cli-surface-contract builds the prebuilt artifact from the full m
     },
   )
   const readAssistantCliLlmsFullManifest = vi.fn(
-    async (_input: { workingDirectory?: string | null }) => ({
+    async (_input: {
+      timeoutMs?: number
+      workingDirectory?: string | null
+    }) => ({
       commands: [
         {
           description: 'Create or update one goal from typed command fields.',
@@ -676,6 +679,10 @@ test('generate-cli-surface-contract builds the prebuilt artifact from the full m
 
   assert.equal(readAssistantCliLlmsManifest.mock.calls.length, 0)
   assert.equal(readAssistantCliLlmsFullManifest.mock.calls.length, 1)
+  assert.equal(
+    readAssistantCliLlmsFullManifest.mock.calls[0]?.[0]?.timeoutMs,
+    120_000,
+  )
   assert.equal(
     path.resolve(
       readAssistantCliLlmsFullManifest.mock.calls[0]?.[0]?.workingDirectory ?? '',

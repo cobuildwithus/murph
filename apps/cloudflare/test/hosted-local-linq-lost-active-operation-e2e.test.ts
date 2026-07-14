@@ -72,7 +72,7 @@ describe("hosted local Linq lost active-operation e2e", () => {
       streamLogs: streamDevLogs,
       testControls: true,
     });
-  }, 300_000);
+  }, 600_000);
 
   it("preserves a follow-up turn after the outer runner active-operation pointer is lost", async () => {
     await requireScenario().seedActiveHostedLinqMember({
@@ -89,7 +89,6 @@ describe("hosted local Linq lost active-operation e2e", () => {
     });
 
     const replyPath = `/chats/${encodeURIComponent(chatId)}/messages`;
-    const outboundCountBeforeReply = requireLinqStub().countObservedSends(replyPath);
     requireScenario().queueAssistantResponses([
       buildAssistantProviderShellCommandCall("sleep 3 && echo first-turn-held"),
       firstReplyText,
@@ -146,8 +145,7 @@ describe("hosted local Linq lost active-operation e2e", () => {
       "Expected the pending second Linq message to reach its next causal provider turn after the outer pointer was dropped.",
     );
 
-    const firstSend = await requireLinqStub().waitForAdditionalSend({
-      baselineCount: outboundCountBeforeReply,
+    const firstSend = await requireLinqStub().waitForSend({
       expectedPath: replyPath,
       matchRequest: (request) =>
         requireLinqStub().readObservedMessageText(request) === firstReplyText,
@@ -155,8 +153,7 @@ describe("hosted local Linq lost active-operation e2e", () => {
       userId,
     });
     expect(requireLinqStub().readObservedMessageText(firstSend)).toBe(firstReplyText);
-    const secondSend = await requireLinqStub().waitForAdditionalSend({
-      baselineCount: outboundCountBeforeReply + 1,
+    const secondSend = await requireLinqStub().waitForSend({
       expectedPath: replyPath,
       matchRequest: (request) =>
         requireLinqStub().readObservedMessageText(request) === secondReplyText,

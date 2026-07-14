@@ -12,12 +12,14 @@ import { readAssistantCliLlmsFullManifest } from './cli-surface-manifest.js'
 
 const moduleDirectory = path.dirname(fileURLToPath(import.meta.url))
 const workspaceRoot = path.resolve(moduleDirectory, '../../../..')
+const cliSurfaceGenerationTimeoutMs = 120_000
 const artifactPath = path.join(
   moduleDirectory,
   assistantCliSurfacePrebuiltArtifactFileName,
 )
 
 const manifest = await readAssistantCliLlmsFullManifest({
+  timeoutMs: cliSurfaceGenerationTimeoutMs,
   workingDirectory: workspaceRoot,
 })
 const contract = buildAssistantCliSurfaceContract(manifest)
