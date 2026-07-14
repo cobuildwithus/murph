@@ -76,10 +76,16 @@ After both deploys, confirm there is no extra metadata-only handoff checkpoint
 for the same shutdown and actionable late input causes the existing Temporal
 recheck after owner release.
 
-## Linq Provider-Claim Protocol Rollout
+## Linq Provider-Claim Protocol
 
-The Linq provider-entry callback is an additive two-phase protocol. Roll it out
-in this order:
+Every Linq provider entry uses one Web-owned authorization and atomic dispatch
+claim immediately before the provider request. A separate authority-only
+preflight is limited to proactive home-route fallback and approved vault-file
+delivery, where Web may resolve or validate the concrete target before media
+work. Anchored replies, reactions, and voice memos do not make that redundant
+round trip.
+
+The original provider-claim rollout used this order:
 
 1. Deploy `apps/web` first. An old runner may omit `authorityCheckOnly`; Web
    keeps treating that legacy call as its provider-start claim for the bounded
@@ -98,6 +104,47 @@ the old fingerprint, then roll Web back. The old-runner/new-Web interval is
 supported only during the Web-first rollout: old runners ignore the additive
 response marker and retain their existing early-claim behavior.
 
+After that rollout has converged, removing obsolete runner authority hints from
+the engagement and post-send outcome payloads is independently deployable: Web
+ignores unknown legacy JSON fields, and both old and new runners use the same
+final provider claim. New runners may send an optional `lineLookupKey` solely
+for post-send line-health attribution; old Web ignores it, and new Web retains
+its existing fallback when an old runner omits it.
+
+## Thread Usage Crossing Notice Rollout
+
+The assistant runtime usage-record request has an additive, optional Linq group
+delivery target. Deploy the Cloudflare Worker and runner bundle first with
+`container_rollout=immediate`, then require managed-container smoke to report
+the new bundle fingerprint before deploying `apps/web`. An old web deployment
+ignores the additive target and keeps the next-inbound thread notice. A new web
+deployment receiving an old or ambiguous request refuses personal-home fallback
+for `thread_usage_limit_reached`, so the opposite skew is also safe but may
+defer the notice until the next inbound.
+
+After both deploys, send one group-thread turn that crosses a test allowance and
+confirm the neutral thread notice replies in that same thread, the usage period
+is claimed once, and no `home_route_missing` crossing warning is emitted.
+
+## Usage-Notice Provider-Claim Rollout
+
+Denied Telegram, WhatsApp, and email replies use versioned Worker routes plus a
+signed provider-entry callback to Web. Keep the feature-level Web-first order:
+
+1. Deploy `apps/web`. Until the Worker deploys, the new versioned control route
+   returns not-found before provider dispatch and the prepared event claim
+   remains retryable.
+2. Deploy the Cloudflare Worker. It must persist the exact prepared-attempt
+   fence through the signed Web callback immediately before the provider fetch
+   or email binding send, and abort provider delivery when that callback fails.
+
+The opposite mixed version is also correctness-safe: an old Web deployment
+uses the removed legacy route, and the new Worker rejects it before provider
+dispatch. Both mixed states can delay a deterministic denied reply, but neither
+can silently send without the matching fence or blindly retry an ambiguous
+provider call. After both deploys, exercise one denied reply on each enabled
+channel and confirm the prepared row advances at provider entry.
+
 ## One-Time Cloudflare Setup
 
 Before the first deploy:
@@ -106,7 +153,7 @@ Before the first deploy:
 2. Apply `apps/cloudflare/r2-bundles-lifecycle.json` to the real bundles buckets, or run the normal worker deploy path, which reapplies it before deploying the Worker.
 3. Decide the public Worker URL, either `*.workers.dev` or a custom domain.
 
-The checked-in lifecycle file now contains one narrow backstop rule for `hosted-email/messages/`: raw hosted-email blobs and their encrypted recovery refs become deletion-eligible after 24 hours, and R2 deletes eligible objects asynchronously. Current writes use the root-independent `hosted-email/messages/{storageNamespaceId}/` shape; recovery uses the append-failure structured log's user id plus the `.recovery.json` object under that prefix, without exposing raw message ids in object paths. Removed pre-launch root-derived raw-email paths are not read during this greenfield hard cut and are bounded by the same lifecycle prefix. Raw email cleanup is lifecycle-backed plus account-deletion cleanup; the rest of the encrypted objects in `BUNDLES` remain owner-cleaned or durable by design.
+The checked-in lifecycle file contains two narrow backstops. Raw hosted-email blobs and their encrypted recovery refs under `hosted-email/messages/` become deletion-eligible after 24 hours. Encrypted automatic meal-photo staging under `hosted-meal-photos/images/` becomes deletion-eligible after 31 days, one day beyond canonical mailbox recovery retention; successful imports still delete those objects immediately after checkpoint. R2 deletes eligible objects asynchronously. Raw email cleanup is lifecycle-backed plus account-deletion cleanup, and meal-photo staging is post-checkpoint deleted plus lifecycle- and account-deletion-backed; the rest of the encrypted objects in `BUNDLES` remain owner-cleaned or durable by design.
 
 ## Required GitHub Environment Vars
 
@@ -438,6 +485,8 @@ That command:
 
 The gradual container rollout keeps `rollout_active_grace_period` at 300 seconds and rolls runner instances through `10`, `25`, `50`, then `100` percent. The manual workflow exposes a `container_rollout` input; its production default is currently `immediate` because selector-scoped vault-share deliveries are unsafe under gradual runner rollout. Selecting `immediate` passes Wrangler's `--containers-rollout=immediate` flag and can interrupt active runner containers.
 During gradual rollout, Worker code and runner container state may disagree for the rollout window. A newly deployed Worker version can handle provider egress or internal-host traffic from an already-running warm runner process whose bundle, process env, or provider-credential shape was created before the deploy. Treat this as expected rollout behavior, not proof that traffic is reaching an old Worker version. Any PR that changes a Worker/container contract, runner env shape, hosted provider credential, internal host route, parser/toolchain path, or bundle-owned runtime assumption must document the compatibility window in its PR description and final `DEPLOYMENT CONCERNS:` handoff: whether old containers can safely talk to new Worker code, whether new containers can safely talk to old web/control-plane code, whether `container_rollout=immediate` is required, and which deploy-smoke or Workers Observability checks prove the fleet has converged.
+
+The first automatic meal-photo release must deploy Cloudflare Worker and runner support with `container_rollout=immediate` and pass managed-container smoke before enabling or deploying the web producer that appends `meal-photo.captured`. The first runner bundle that parses and imports that mailbox kind is the rollback floor while any meal-photo item can remain retained; do not roll below it independently. The web-to-Worker staging/deletion routes are additive, so the new Worker may safely precede web. After deployment, verify the runner-bundle fingerprint and absence of hosted mailbox parse failures before exercising the physical-device opt-in/upload smoke.
 
 The first shared preference-causal-sequence release uses an expand/switch rollout. Vercel predeploy first adds the nullable `causal_seq` column and unique index, then deploys the sequence-producing web build with `MURPH_ASSISTANT_PERSONALITY_CAUSAL_WRITES_ENABLED=0`. While that web gate is off, tone/voice events keep the legacy complete snapshot shape, so the old Cloudflare coalescing consumer remains safe. The post-deploy contract lane checks legacy work against the system-lane `consumed_seq` and adds the new-write constraint `NOT VALID`, allowing handled retained history. Deploy this Cloudflare worker and runner bundle with `container_rollout=immediate` and prove fleet convergence; its accepted-input causal binding is always installed, so no Cloudflare feature gate is required. Then enable the Vercel gate to switch Settings to sparse deltas and expose personality controls. After the new runtime can accept conversational personality writes or the web gate is enabled, do not roll either plane back independently.
 

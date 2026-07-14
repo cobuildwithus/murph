@@ -7085,7 +7085,6 @@ describe("hosted runtime callbacks", () => {
       transportIdempotent: false,
     });
     const assertRecentInbound = vi.fn()
-      .mockResolvedValueOnce({})
       .mockRejectedValueOnce(new Error("route revoked"));
     mocks.dispatchAssistantOutboxIntent.mockImplementationOnce(async ({ dependencies }) => {
       await dependencies.setLinqMessageReaction({
@@ -7111,12 +7110,12 @@ describe("hosted runtime callbacks", () => {
       wake,
     })).rejects.toThrow("route revoked");
 
-    expect(assertRecentInbound).toHaveBeenCalledTimes(2);
+    expect(assertRecentInbound).toHaveBeenCalledTimes(1);
     expect(assertRecentInbound.mock.calls.map(([request]) =>
       request.authorityCheckOnly
-    )).toEqual([true, false]);
+    )).toEqual([false]);
     expect(assertRecentInbound).toHaveBeenLastCalledWith(
-      expect.objectContaining({ routeAuthority }),
+      expect.objectContaining({ target: routeAuthority.threadId }),
       { signal: null },
     );
     expect(mocks.setLinqMessageReaction).not.toHaveBeenCalled();
@@ -7153,7 +7152,7 @@ describe("hosted runtime callbacks", () => {
       code: "ASSISTANT_LINQ_PROVIDER_DISPATCH_PROTOCOL_UNAVAILABLE",
     });
 
-    expect(assertRecentInbound).toHaveBeenCalledTimes(2);
+    expect(assertRecentInbound).toHaveBeenCalledTimes(1);
     expect(mocks.sendLinqMessage).not.toHaveBeenCalled();
   });
 
@@ -7457,7 +7456,6 @@ describe("hosted runtime callbacks", () => {
         providerMessageId: "linq_message_sent",
         providerTarget: null,
         providerThreadId: "linq_chat_123",
-        routeAuthority: null,
         target: null,
         targetKind: "participant",
         threadIsDirect: true,
@@ -7566,7 +7564,6 @@ describe("hosted runtime callbacks", () => {
     expect(assertRecentInbound).toHaveBeenCalledWith(
       expect.objectContaining({
         homeRouteFallbackAllowed: true,
-        routeAuthority: null,
         target: "linq_chat_stale",
         targetKind: "thread",
       }),
@@ -8165,14 +8162,13 @@ describe("hosted runtime callbacks", () => {
     });
 
     expect(assertRecentInbound).toHaveBeenCalledWith({
-      authorityCheckOnly: expect.any(Boolean),
+      authorityCheckOnly: false,
       directRecipientPhoneNumber: null,
       fromPhoneNumber: null,
       homeRouteFallbackAllowed: false,
       idempotencyKey: "assistant-outbox:intent_123",
       intentId: "intent_123",
       replyToMessageId: "linq_message_other",
-      routeAuthority: null,
       target: "linq_chat_other",
       targetKind: "thread",
     }, {
@@ -8562,7 +8558,6 @@ describe("hosted runtime callbacks", () => {
     expect(assertRecentInbound).toHaveBeenCalledWith(
       expect.objectContaining({
         directRecipientPhoneNumber: "+15550001",
-        routeAuthority: null,
         target: "linq_chat_current",
         targetKind: "thread",
       }),
@@ -8683,14 +8678,13 @@ describe("hosted runtime callbacks", () => {
     });
 
     expect(assertRecentInbound).toHaveBeenCalledWith({
-      authorityCheckOnly: expect.any(Boolean),
+      authorityCheckOnly: false,
       directRecipientPhoneNumber: "+15550001",
       fromPhoneNumber: null,
       homeRouteFallbackAllowed: false,
       idempotencyKey: "assistant-outbox:intent_hashed_target",
       intentId: "intent_123",
       replyToMessageId: "linq_message_current",
-      routeAuthority,
       target: "linq_chat_current",
       targetKind: "thread",
     }, {
@@ -8698,7 +8692,7 @@ describe("hosted runtime callbacks", () => {
     });
     expect(assertRecentInbound.mock.calls.map(([request]) =>
       request.authorityCheckOnly
-    )).toEqual([true, false]);
+    )).toEqual([false]);
     expect(assertRecentInbound.mock.invocationCallOrder[0] ?? 0)
       .toBeLessThan(mocks.sendLinqMessage.mock.invocationCallOrder[0] ?? 0);
     expect(outcomes).toEqual([
@@ -8805,7 +8799,7 @@ describe("hosted runtime callbacks", () => {
     await drainHostedAssistantLinqDeliveryOutcomeWritesBestEffort();
 
     expect(assertRecentInbound).toHaveBeenCalledWith({
-      authorityCheckOnly: expect.any(Boolean),
+      authorityCheckOnly: false,
       currentInbound: {
         dedupeKey: "evt_linq_current",
         eventId: "evt_linq_current",
@@ -8820,7 +8814,6 @@ describe("hosted runtime callbacks", () => {
       idempotencyKey: "legacy-current-inbound:evt_linq_current",
       intentId: "intent_123",
       replyToMessageId: "linq_message_a",
-      routeAuthority: matchingRouteAuthority,
       target: "linq_chat_a",
       targetKind: "thread",
     }, {
@@ -8838,6 +8831,7 @@ describe("hosted runtime callbacks", () => {
     expect(recordDeliveryOutcome).toHaveBeenCalledWith(
       expect.objectContaining({
         idempotencyKey: "legacy-current-inbound:evt_linq_current",
+        lineLookupKey: "hbidx:phone:v1:account_a",
       }),
       expect.any(Object),
     );
@@ -8948,7 +8942,7 @@ describe("hosted runtime callbacks", () => {
       wake: HOSTED_WAKE.wake,
     });
 
-    expect(assertRecentInbound).toHaveBeenCalledTimes(2);
+    expect(assertRecentInbound).toHaveBeenCalledTimes(1);
     for (const [request] of assertRecentInbound.mock.calls) {
       expect(request).toMatchObject({
         answeredMailboxItemIds: [
@@ -9024,12 +9018,11 @@ describe("hosted runtime callbacks", () => {
       wake: HOSTED_WAKE.wake,
     });
 
-    expect(assertRecentInbound).toHaveBeenCalledTimes(2);
+    expect(assertRecentInbound).toHaveBeenCalledTimes(1);
     for (const [request] of assertRecentInbound.mock.calls) {
       expect(request).toMatchObject({
         answeredMailboxItemIds,
         replyToMessageId: "linq_message_retry_current",
-        routeAuthority: null,
         target: "linq_chat_retry",
         targetKind: "thread",
       });
@@ -9114,14 +9107,13 @@ describe("hosted runtime callbacks", () => {
     });
 
     expect(assertRecentInbound).toHaveBeenCalledWith({
-      authorityCheckOnly: expect.any(Boolean),
+      authorityCheckOnly: false,
       directRecipientPhoneNumber: null,
       fromPhoneNumber: null,
       homeRouteFallbackAllowed: false,
       idempotencyKey: "assistant-outbox:intent_hashed_target",
       intentId: "intent_123",
       replyToMessageId: "linq_message_current",
-      routeAuthority: null,
       target: "linq_chat_other",
       targetKind: "thread",
     }, {
@@ -9213,14 +9205,13 @@ describe("hosted runtime callbacks", () => {
     });
 
     expect(assertRecentInbound).toHaveBeenCalledWith({
-      authorityCheckOnly: expect.any(Boolean),
+      authorityCheckOnly: false,
       directRecipientPhoneNumber: "+15550001",
       fromPhoneNumber: null,
       homeRouteFallbackAllowed: false,
       idempotencyKey: "assistant-outbox:intent_hashed_target",
       intentId: "intent_123",
       replyToMessageId: "linq_message_current",
-      routeAuthority: null,
       target: "linq_chat_current",
       targetKind: "thread",
     }, {
@@ -9310,7 +9301,7 @@ describe("hosted runtime callbacks", () => {
     })).rejects.toThrow("route revoked");
 
     expect(assertRecentInbound).toHaveBeenCalledWith(
-      expect.objectContaining({ routeAuthority }),
+      expect.objectContaining({ target: routeAuthority.threadId }),
       { signal: null },
     );
     expect(mocks.sendLinqMessage).not.toHaveBeenCalled();
@@ -9400,7 +9391,7 @@ describe("hosted runtime callbacks", () => {
     })).rejects.toThrow("route revoked before media work");
 
     expect(assertRecentInbound).toHaveBeenCalledWith(
-      expect.objectContaining({ routeAuthority }),
+      expect.objectContaining({ target: routeAuthority.threadId }),
       { signal: null },
     );
     expect(actionApprovalPort.request).not.toHaveBeenCalled();
@@ -9908,7 +9899,6 @@ describe("hosted runtime callbacks", () => {
     expect(assertRecentInbound).toHaveBeenCalledWith(
       expect.objectContaining({
         directRecipientPhoneNumber: "+15550001",
-        routeAuthority: null,
         target: "linq_chat_current",
         targetKind: "thread",
       }),
@@ -10015,7 +10005,6 @@ describe("hosted runtime callbacks", () => {
       expect.objectContaining({
         homeRouteFallbackAllowed: true,
         replyToMessageId: null,
-        routeAuthority: null,
         target: "linq_chat_stale",
         targetKind: "thread",
       }),
@@ -10088,9 +10077,8 @@ describe("hosted runtime callbacks", () => {
 
     expect(assertRecentInbound).toHaveBeenCalledWith(
       expect.objectContaining({
-        homeRouteFallbackAllowed: true,
+        homeRouteFallbackAllowed: false,
         replyToMessageId: "linq_message_reply",
-        routeAuthority: null,
         target: "linq_chat_stale",
         targetKind: "thread",
       }),
@@ -10098,6 +10086,14 @@ describe("hosted runtime callbacks", () => {
         signal: null,
       },
     );
+    expect(assertRecentInbound).toHaveBeenCalledTimes(1);
+    expect(assertRecentInbound.mock.calls.map(([request]) =>
+      request.authorityCheckOnly
+    )).toEqual([false]);
+    expect(assertRecentInbound.mock.invocationCallOrder[0] ?? 0)
+      .toBeLessThan(
+        mocks.sendLinqVoiceMemoMessage.mock.invocationCallOrder[0] ?? 0,
+      );
     expect(mocks.sendLinqVoiceMemoMessage).toHaveBeenCalledWith({
       attachmentId: "attachment_voice_1",
       target: "linq_chat_stale",
@@ -10265,7 +10261,6 @@ describe("hosted runtime callbacks", () => {
     expect(assertRecentInbound).toHaveBeenCalledWith(
       expect.objectContaining({
         directRecipientPhoneNumber: "+15550001",
-        routeAuthority: null,
         target: "linq_chat_123",
         targetKind: "thread",
       }),
@@ -10367,7 +10362,6 @@ describe("hosted runtime callbacks", () => {
     expect(assertRecentInbound).toHaveBeenCalledWith(
       expect.objectContaining({
         directRecipientPhoneNumber: "+15550001",
-        routeAuthority: null,
         target: "linq_chat_current",
         targetKind: "thread",
       }),
@@ -10471,7 +10465,6 @@ describe("hosted runtime callbacks", () => {
       expect.objectContaining({
         directRecipientPhoneNumber: "+15550001",
         fromPhoneNumber: "+15550002",
-        routeAuthority: null,
         target: "linq_chat_current",
         targetKind: "thread",
       }),
@@ -10569,14 +10562,13 @@ describe("hosted runtime callbacks", () => {
     });
 
     expect(assertRecentInbound).toHaveBeenCalledWith({
-      authorityCheckOnly: expect.any(Boolean),
+      authorityCheckOnly: false,
       directRecipientPhoneNumber: null,
       fromPhoneNumber: null,
       homeRouteFallbackAllowed: false,
       idempotencyKey: "assistant-outbox:intent_123",
       intentId: "intent_123",
       replyToMessageId: "linq_message_current",
-      routeAuthority: null,
       target: "linq_chat_current",
       targetKind: "thread",
     }, {
