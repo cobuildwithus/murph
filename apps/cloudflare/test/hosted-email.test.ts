@@ -83,6 +83,7 @@ const AUTHENTICATED_SENDER = {
 afterEach(() => {
   vi.restoreAllMocks();
   vi.unstubAllGlobals();
+  vi.useRealTimers();
 });
 
 describe("hosted email routing and transport", () => {
@@ -494,6 +495,7 @@ describe("hosted email routing and transport", () => {
         html: "<p>Weekly</p>",
         idempotencyKey: "group-newsletter:test",
         message: "Plain body",
+        newsletterAuthorizationProof: "a".repeat(64),
         subject: "Weekly health note",
         target: "group_123",
         targetKind: "group",
@@ -505,6 +507,10 @@ describe("hosted email routing and transport", () => {
 
     expect(webControlPlane.fetchHostedExecutionWebControlPlaneResponse.mock.calls[0]?.[0])
       .toMatchObject({
+        body: JSON.stringify({
+          expectedNewsletterAuthorizationProof: "a".repeat(64),
+          groupId: "group_123",
+        }),
         boundUserId: "member_runtime",
         path: HOSTED_EMAIL_GROUP_RECIPIENTS_CALLBACK_PATH,
       });
@@ -535,6 +541,32 @@ describe("hosted email routing and transport", () => {
     expect((threadTarget as typeof threadTarget & { groupId?: string | null } | null)?.groupId)
       .toBe("group_123");
     expect(threadTarget?.to).toEqual([]);
+  });
+
+  it("fails newsletter delivery before provider entry when its proof is missing", async () => {
+    const emailBinding = {
+      send: vi.fn(async (_message: unknown) => undefined),
+    };
+
+    await expect(sendHostedEmailMessage({
+      config: TEST_CONFIG,
+      emailBinding,
+      request: {
+        idempotencyKey: "group-newsletter:automation_123:occurrence_123:group_123",
+        message: "Plain body",
+        subject: "Weekly health note",
+        target: "group_123",
+        targetKind: "group",
+      },
+      userId: "member_runtime",
+      webCallbackSigning: TEST_CALLBACK_SIGNING,
+      webControlBaseUrl: "https://web.example.test",
+    })).rejects.toMatchObject({
+      deliveryMayHaveSucceeded: false,
+      retryable: true,
+    });
+    expect(webControlPlane.fetchHostedExecutionWebControlPlaneResponse).not.toHaveBeenCalled();
+    expect(emailBinding.send).not.toHaveBeenCalled();
   });
 
   it("re-resolves group thread replies to the current authorized recipients", async () => {
@@ -656,6 +688,7 @@ describe("hosted email routing and transport", () => {
       html: "<p>Weekly</p>",
       idempotencyKey: "group-newsletter:automation_123:2026-07-12T13:00:00.000Z:group_123",
       message: "Plain body",
+      newsletterAuthorizationProof: "a".repeat(64),
       subject: "Weekly health note",
       target: "group_123",
       targetKind: "group" as const,
@@ -722,6 +755,68 @@ describe("hosted email routing and transport", () => {
     expect(firstMessageId).toBe(secondMessageId);
     expect(parseHostedEmailThreadTarget(first.target)?.lastMessageId).toBe(firstMessageId);
     expect(parseHostedEmailThreadTarget(second.target)?.lastMessageId).toBe(firstMessageId);
+  });
+
+  it("uses the newsletter occurrence time as a stable MIME Date seed", async () => {
+    vi.useFakeTimers();
+    vi.setSystemTime(new Date("2026-07-14T15:00:00.000Z"));
+    const emailBinding = {
+      send: vi.fn(async (_message: { raw: string; to: string }) => undefined),
+    };
+    const recipientsResponse = () => new Response(
+      JSON.stringify({
+        recipients: [
+          { address: "one@example.test", memberId: "member_one" },
+        ],
+      }),
+      {
+        headers: {
+          "content-type": "application/json; charset=utf-8",
+        },
+        status: 200,
+      },
+    );
+    webControlPlane.fetchHostedExecutionWebControlPlaneResponse
+      .mockResolvedValueOnce(recipientsResponse())
+      .mockResolvedValueOnce(recipientsResponse());
+
+    const request = {
+      html: "<p>Weekly</p>",
+      idempotencyKey: "group-newsletter:automation_123:2026-07-12T13:00:00.000Z:group_123",
+      message: "Plain body",
+      newsletterAuthorizationProof: "a".repeat(64),
+      subject: "Weekly health note",
+      target: "group_123",
+      targetKind: "group" as const,
+    };
+
+    await sendHostedEmailMessage({
+      config: TEST_CONFIG,
+      emailBinding,
+      request,
+      userId: "member_runtime",
+      webCallbackSigning: TEST_CALLBACK_SIGNING,
+      webControlBaseUrl: "https://web.example.test",
+    });
+    vi.setSystemTime(new Date("2026-07-15T15:00:00.000Z"));
+    await sendHostedEmailMessage({
+      config: TEST_CONFIG,
+      emailBinding,
+      request,
+      userId: "member_runtime",
+      webCallbackSigning: TEST_CALLBACK_SIGNING,
+      webControlBaseUrl: "https://web.example.test",
+    });
+
+    expect(emailBinding.send).toHaveBeenCalledTimes(2);
+    const firstRaw = emailBinding.send.mock.calls[0]?.[0].raw;
+    const secondRaw = emailBinding.send.mock.calls[1]?.[0].raw;
+    if (!firstRaw || !secondRaw) {
+      throw new Error("Expected sent MIME messages.");
+    }
+    expect(firstRaw).toBe(secondRaw);
+    expect(firstRaw.match(/^Date: (.+)$/mu)?.[1])
+      .toBe("Sun, 12 Jul 2026 13:00:00 GMT");
   });
 
   it("plans assistant group fanout durably and sends one selected member per child target", async () => {
@@ -797,6 +892,9 @@ describe("hosted email routing and transport", () => {
     expect(emailBinding.send).toHaveBeenCalledTimes(1);
     expect(emailBinding.send.mock.calls[0]?.[0].to).toBe("two@example.test");
     expect(emailBinding.send.mock.calls[0]?.[0].raw).toContain("Subject: Weekly health note");
+    expect(emailBinding.send.mock.calls[0]?.[0].raw).toContain(
+      "To: one@example.test, two@example.test",
+    );
     expect(parseHostedEmailThreadTarget(child.target)?.recipientMemberId).toBe("member_two");
 
     webControlPlane.fetchHostedExecutionWebControlPlaneResponse
@@ -1194,8 +1292,9 @@ describe("hosted email routing and transport", () => {
       config: TEST_CONFIG,
       emailBinding,
       request: {
-        idempotencyKey: "assistant-outbox:intent_group",
+        idempotencyKey: "group-newsletter:automation_123:occurrence_123:group_123",
         message: "Group reply",
+        newsletterAuthorizationProof: "a".repeat(64),
         planGroupFanout: true,
         subject: "Weekly health note",
         target: "group_123",

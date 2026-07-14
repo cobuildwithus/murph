@@ -2153,6 +2153,45 @@ test('sendAssistantNotificationLocal returns skip decisions without delivering',
 
   vi.clearAllMocks()
 
+  const scheduledNewsletterResult = await sendAssistantNotificationLocal({
+    executionContext: {
+      hosted: null,
+    },
+    instructions: 'Compose the scheduled group newsletter.',
+    scheduledAutomationAuthority: {
+      automationId: 'automation_newsletter',
+      occurrenceAt: '2026-07-12T13:00:00.000Z',
+    },
+    serviceTier: 'flex',
+    vault: '/vaults/skip',
+  })
+
+  expect(scheduledNewsletterResult.postTurnDeliveryExpectations).toEqual({
+    newsletterSendResult: {
+      status: 'unavailable',
+      unavailableReason: 'newsletter_send_not_observed',
+    },
+  })
+
+  expect(mocks.executeCodexTurnWithRecovery).toHaveBeenCalledWith(
+    expect.objectContaining({
+      input: expect.not.objectContaining({
+        codexConfigOverrides: expect.anything(),
+      }),
+      profile: expect.objectContaining({
+        threadScope: 'session-thread',
+        toolProfile: 'notification-turn',
+      }),
+    }),
+  )
+  expect(mocks.persistAssistantTurnAndSession).toHaveBeenCalledWith(
+    expect.objectContaining({
+      providerResumeStateAction: 'persist-from-provider-turn',
+    }),
+  )
+
+  vi.clearAllMocks()
+
   const maintenanceProviderStartHook = vi.fn()
   const maintenanceResult = await sendAssistantNotificationLocal({
     executionContext: {

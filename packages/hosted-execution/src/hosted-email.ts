@@ -3,6 +3,7 @@ import {
   readNullableStringValue,
 } from "./parsers/assertions.ts";
 import { normalizeHostedExecutionString } from "./env.ts";
+import { isHostedRuntimeNewsletterAuthorizationProof } from "./runtime-control.ts";
 
 type EnvSource = Readonly<Record<string, unknown>>;
 
@@ -73,6 +74,7 @@ export interface HostedEmailRouteResolutionCallbackResponse {
 }
 
 export interface HostedEmailGroupRecipientsCallbackRequest {
+  expectedNewsletterAuthorizationProof?: string | null;
   groupId: string;
 }
 
@@ -435,7 +437,23 @@ export function parseHostedEmailGroupRecipientsCallbackRequest(
     throw new TypeError("Hosted email group recipients callback request groupId must be present.");
   }
 
-  return { groupId };
+  const expectedNewsletterAuthorizationProof =
+    record.expectedNewsletterAuthorizationProof ?? null;
+  if (
+    expectedNewsletterAuthorizationProof !== null
+    && !isHostedRuntimeNewsletterAuthorizationProof(expectedNewsletterAuthorizationProof)
+  ) {
+    throw new TypeError(
+      "Hosted email group recipients callback request expectedNewsletterAuthorizationProof must be a SHA-256 hex digest.",
+    );
+  }
+
+  return {
+    ...(expectedNewsletterAuthorizationProof === null
+      ? {}
+      : { expectedNewsletterAuthorizationProof }),
+    groupId,
+  };
 }
 
 export function parseHostedEmailGroupRecipientsCallbackResponse(

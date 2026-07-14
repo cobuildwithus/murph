@@ -30,6 +30,12 @@ export const POST = withJsonError(async (request: Request) => {
     payloadText.trim() ? JSON.parse(payloadText) : {},
   );
   const resolved = await readHostedGroupNewsletterEmailRecipients({
+    ...(body.expectedNewsletterAuthorizationProof
+      ? {
+          expectedNewsletterAuthorizationProof:
+            body.expectedNewsletterAuthorizationProof,
+        }
+      : {}),
     groupId: body.groupId,
     runtimeMemberId: memberId,
   });
@@ -40,6 +46,13 @@ export const POST = withJsonError(async (request: Request) => {
         code: "HOSTED_GROUP_NEWSLETTER_GROUP_NOT_FOUND",
         httpStatus: 410,
         message: "Hosted group newsletter no longer exists.",
+      });
+    }
+    if (resolved.unavailableReason === "newsletter_authorization_changed") {
+      throw hostedOnboardingError({
+        code: "HOSTED_GROUP_NEWSLETTER_AUTHORIZATION_CHANGED",
+        httpStatus: 410,
+        message: "Hosted group newsletter authorization changed.",
       });
     }
     throw hostedOnboardingError({

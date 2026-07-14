@@ -442,6 +442,7 @@ describe("hosted email worker ingress", () => {
       request: {
         idempotencyKey: "group-newsletter:test-edition",
         message: "weekly note",
+        newsletterAuthorizationProof: "a".repeat(64),
         subject: "Weekly health note",
         target: groupId,
         targetKind: "group",
