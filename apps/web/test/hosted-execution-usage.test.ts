@@ -172,13 +172,28 @@ describe("recordHostedAiUsageRecords", () => {
       });
   });
 
-  it("does not claim or reroute a crossing notice with an unavailable origin", async () => {
+  it.each([
+    {
+      noticeCode: "edge_usage_limit_reached" as const,
+      noticeMessage: "You hit your monthly Murph AI limit.",
+    },
+    {
+      noticeCode: "thread_usage_limit_reached" as const,
+      noticeMessage: "This thread has reached its Murph AI limit for now.",
+    },
+  ])("never falls back from explicit-null provenance for $noticeCode", async ({
+    noticeCode,
+    noticeMessage,
+  }) => {
     const hostedAiUsageUpsert = vi.fn(
       async (args: { create: Record<string, unknown> }) => args.create,
     );
     const prisma = makeUsagePrisma(hostedAiUsageUpsert);
     allowanceMocks.accountHostedAiUsageForAllowanceTx.mockResolvedValue(
-      buildUsageLimitNoticeCandidate(),
+      buildUsageLimitNoticeCandidate({
+        noticeCode,
+        noticeMessage,
+      }),
     );
 
     await recordHostedAiUsageRecordsAndSendLimitNotices({
@@ -196,7 +211,7 @@ describe("recordHostedAiUsageRecords", () => {
       .not.toHaveBeenCalled();
   });
 
-  it("sends a crossing notice back to the originating Linq thread", async () => {
+  it("sends a neutral thread crossing notice to the exact originating Linq route", async () => {
     const hostedAiUsageUpsert = vi.fn(
       async (args: { create: Record<string, unknown> }) => args.create,
     );
@@ -212,7 +227,10 @@ describe("recordHostedAiUsageRecords", () => {
       target: "linq_chat_usage_origin",
     };
     allowanceMocks.accountHostedAiUsageForAllowanceTx.mockResolvedValue(
-      buildUsageLimitNoticeCandidate(),
+      buildUsageLimitNoticeCandidate({
+        noticeCode: "thread_usage_limit_reached",
+        noticeMessage: "This thread has reached its Murph AI limit for now.",
+      }),
     );
 
     await recordHostedAiUsageRecordsAndSendLimitNotices({

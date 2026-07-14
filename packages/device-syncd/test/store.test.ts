@@ -3,6 +3,7 @@ import { rm } from "node:fs/promises";
 import path from "node:path";
 
 import { test } from "vitest";
+import { COMPANION_HRV_RMSSD_RESOURCE } from "@murphai/contracts";
 import { openSqliteRuntimeDatabase } from "@murphai/runtime-state/node";
 
 import { SqliteDeviceSyncStore } from "../src/store.ts";
@@ -27,6 +28,16 @@ const UNSUPPORTED_SCHEMA_VERSION_RE = new RegExp(
   `device sync runtime database schema version ${UNSUPPORTED_SCHEMA_VERSION} is newer than supported version ${DEVICE_SYNC_STORE_SQLITE_SCHEMA_VERSION}`,
   "u",
 );
+
+function downgradeDeviceSyncStoreToV7(databasePath: string): void {
+  const database = openSqliteRuntimeDatabase(databasePath);
+  database.exec(`
+    drop index device_connection_hosted_connection_id_idx;
+    alter table device_connection drop column hosted_connection_id;
+    pragma user_version = 7;
+  `);
+  database.close();
+}
 
 function requireStoredOAuthCredential(
   account: StoredDeviceSyncAccount | null | undefined,
@@ -385,6 +396,248 @@ test("device sync store hosted hydration preserves existing tokens until disconn
     assert.equal(reconnectedOAuthCredential.accessTokenEncrypted, "enc:reconnected-access-token");
     assert.equal(reconnectedOAuthCredential.refreshTokenEncrypted, "enc:reconnected-refresh-token");
     assert.equal(reconnected?.hostedObservedTokenVersion, 1);
+  } finally {
+    store.close();
+    await rm(tempDir, {
+      force: true,
+      recursive: true,
+    });
+  }
+});
+
+test("device sync store keeps one hosted account when terminal privacy scrubbing changes provider identity", async () => {
+  const tempDir = await makeTempDirectory("murph-device-syncd-hosted-identity-scrub");
+  const store = new SqliteDeviceSyncStore(path.join(tempDir, "state.sqlite"));
+
+  try {
+    const account = store.upsertAccount({
+      connectedAt: "2026-07-13T01:00:00.000Z",
+      credential: {
+        credentialMetadata: {},
+        kind: "provider_config",
+        providerConfigKey: "junction",
+      },
+      displayName: "Junction",
+      externalAccountId: "junction-account-before-scrub",
+      provider: "junction",
+      scopes: [],
+      status: "active",
+    });
+    const localState = {
+      lastErrorCode: null,
+      lastErrorMessage: null,
+      lastSyncCompletedAt: null,
+      lastSyncErrorAt: null,
+      lastSyncStartedAt: null,
+      lastWebhookAt: null,
+      nextReconcileAt: null,
+    };
+
+    const active = store.hydrateHostedAccount({
+      credential: {
+        credentialMetadata: {},
+        kind: "provider_config",
+        providerConfigKey: "junction",
+      },
+      connection: {
+        connectedAt: "2026-07-13T01:00:00.000Z",
+        displayName: "Junction",
+        externalAccountId: "junction-account-before-scrub",
+        metadata: {},
+        provider: "junction",
+        scopes: [],
+        status: "active",
+        updatedAt: "2026-07-13T01:01:00.000Z",
+      },
+      hostedConnectionId: "hosted-connection-stable-1",
+      hostedObservedTokenVersion: null,
+      hostedObservedUpdatedAt: "2026-07-13T01:01:00.000Z",
+      localState,
+    });
+    const disconnected = store.hydrateHostedAccount({
+      credential: {
+        credentialMetadata: {},
+        kind: "none",
+      },
+      connection: {
+        connectedAt: "2026-07-13T01:00:00.000Z",
+        displayName: "Junction",
+        externalAccountId: "opaque:hosted-connection-stable-1",
+        metadata: {},
+        provider: "junction",
+        scopes: [],
+        status: "disconnected",
+        updatedAt: "2026-07-13T01:02:00.000Z",
+      },
+      hostedConnectionId: "hosted-connection-stable-1",
+      hostedObservedTokenVersion: null,
+      hostedObservedUpdatedAt: "2026-07-13T01:02:00.000Z",
+      localState,
+    });
+
+    assert.equal(active?.id, account.id);
+    assert.equal(disconnected?.id, account.id);
+    assert.equal(disconnected?.externalAccountId, "opaque:hosted-connection-stable-1");
+    assert.equal(disconnected?.status, "disconnected");
+    assert.equal(store.listAccounts().length, 1);
+  } finally {
+    store.close();
+    await rm(tempDir, {
+      force: true,
+      recursive: true,
+    });
+  }
+});
+
+test("device sync store rejects ambiguous legacy and bound hosted identity collisions", async () => {
+  const tempDir = await makeTempDirectory("murph-device-syncd-hosted-identity-collision");
+  const store = new SqliteDeviceSyncStore(path.join(tempDir, "state.sqlite"));
+
+  try {
+    const createAccount = (externalAccountId: string) => store.upsertAccount({
+      connectedAt: "2026-07-13T01:00:00.000Z",
+      credential: {
+        credentialMetadata: {},
+        kind: "provider_config" as const,
+        providerConfigKey: "junction",
+      },
+      displayName: "Junction",
+      externalAccountId,
+      provider: "junction",
+      scopes: [],
+      status: "active",
+    });
+    const first = createAccount("junction-account-first");
+    const second = createAccount("junction-account-second");
+    const localState = {
+      lastErrorCode: null,
+      lastErrorMessage: null,
+      lastSyncCompletedAt: null,
+      lastSyncErrorAt: null,
+      lastSyncStartedAt: null,
+      lastWebhookAt: null,
+      nextReconcileAt: null,
+    };
+    const credential = {
+      credentialMetadata: {},
+      kind: "provider_config" as const,
+      providerConfigKey: "junction",
+    };
+
+    assert.throws(
+      () => store.hydrateHostedAccount({
+        credential: {
+          credentialMetadata: {},
+          kind: "none",
+        },
+        connection: {
+          connectedAt: "2026-07-13T01:00:00.000Z",
+          displayName: "Junction",
+          externalAccountId: "opaque:hosted-connection-ambiguous",
+          metadata: {},
+          provider: "junction",
+          scopes: [],
+          status: "disconnected",
+          updatedAt: "2026-07-13T01:00:30.000Z",
+        },
+        hostedConnectionId: "hosted-connection-ambiguous",
+        hostedObservedTokenVersion: null,
+        hostedObservedUpdatedAt: "2026-07-13T01:00:30.000Z",
+        localState,
+      }),
+      /legacy connection identity is ambiguous/u,
+    );
+    assert.equal(store.getAccountByHostedConnectionId("hosted-connection-ambiguous"), null);
+
+    store.hydrateHostedAccount({
+      credential,
+      connection: {
+        connectedAt: "2026-07-13T01:00:00.000Z",
+        displayName: "Junction",
+        externalAccountId: first.externalAccountId,
+        metadata: {},
+        provider: "junction",
+        scopes: [],
+        status: "active",
+        updatedAt: "2026-07-13T01:01:00.000Z",
+      },
+      hostedConnectionId: "hosted-connection-collision",
+      hostedObservedTokenVersion: null,
+      hostedObservedUpdatedAt: "2026-07-13T01:01:00.000Z",
+      localState,
+    });
+
+    assert.throws(
+      () => store.hydrateHostedAccount({
+        credential,
+        connection: {
+          connectedAt: "2026-07-13T02:00:00.000Z",
+          displayName: "Wrong reconnect",
+          externalAccountId: first.externalAccountId,
+          metadata: {},
+          provider: "junction",
+          scopes: [],
+          status: "active",
+          updatedAt: "2026-07-13T02:01:00.000Z",
+        },
+        hostedConnectionId: "hosted-connection-reconnect-collision",
+        hostedObservedTokenVersion: null,
+        hostedObservedUpdatedAt: "2026-07-13T02:01:00.000Z",
+        localState,
+      }),
+      /bound to another hosted connection/u,
+    );
+    assert.equal(store.getAccountById(first.id)?.displayName, "Junction");
+    assert.equal(store.getAccountById(first.id)?.connectedAt, "2026-07-13T01:00:00.000Z");
+
+    const unbound = createAccount("junction-account-unbound-epoch");
+    const adopted = store.hydrateHostedAccount({
+      credential,
+      connection: {
+        connectedAt: "2026-07-13T03:00:00.000Z",
+        displayName: "Hosted unbound account",
+        externalAccountId: unbound.externalAccountId,
+        metadata: {},
+        provider: "junction",
+        scopes: [],
+        status: "active",
+        updatedAt: "2026-07-13T03:01:00.000Z",
+      },
+      hostedConnectionId: "hosted-connection-unbound",
+      hostedObservedTokenVersion: null,
+      hostedObservedUpdatedAt: "2026-07-13T03:01:00.000Z",
+      localState,
+    });
+    assert.equal(adopted?.id, unbound.id);
+    assert.equal(adopted?.connectedAt, "2026-07-13T03:00:00.000Z");
+    assert.equal(store.getAccountByHostedConnectionId("hosted-connection-unbound")?.id, unbound.id);
+
+    assert.throws(
+      () => store.hydrateHostedAccount({
+        credential,
+        connection: {
+          connectedAt: "2026-07-13T01:00:00.000Z",
+          displayName: "Junction",
+          externalAccountId: second.externalAccountId,
+          metadata: {},
+          provider: "junction",
+          scopes: [],
+          status: "active",
+          updatedAt: "2026-07-13T01:02:00.000Z",
+        },
+        hostedConnectionId: "hosted-connection-collision",
+        hostedObservedTokenVersion: null,
+        hostedObservedUpdatedAt: "2026-07-13T01:02:00.000Z",
+        localState,
+      }),
+      /identity conflicts with another local account/u,
+    );
+
+    assert.equal(
+      store.getAccountByHostedConnectionId("hosted-connection-collision")?.id,
+      first.id,
+    );
+    assert.equal(store.getAccountById(second.id)?.externalAccountId, second.externalAccountId);
   } finally {
     store.close();
     await rm(tempDir, {
@@ -2335,6 +2588,70 @@ test("device sync store wakes expired final-attempt leases and dead-letters them
   }
 });
 
+test("device sync store reclaims an expired retained companion lease on the same row past its attempt fence", async () => {
+  const tempDir = await makeTempDirectory("murph-device-syncd-store-expired-companion-lease");
+  const store = new SqliteDeviceSyncStore(path.join(tempDir, "state.sqlite"));
+
+  try {
+    const account = store.upsertAccount({
+      provider: "junction",
+      externalAccountId: "junction-expired-companion-lease",
+      displayName: "Junction",
+      scopes: [],
+      credential: {
+        credentialMetadata: {},
+        kind: "provider_config",
+        providerConfigKey: "junction",
+      },
+      connectedAt: "2026-04-07T00:00:00.000Z",
+    });
+    const job = store.enqueueJob({
+      accountId: account.id,
+      availableAt: "2026-04-07T00:00:00.000Z",
+      dedupeKey: "companion-expired-final-attempt",
+      kind: "resource",
+      maxAttempts: 1,
+      payload: {
+        resource: COMPANION_HRV_RMSSD_RESOURCE,
+      },
+      provider: "junction",
+    });
+
+    const firstClaim = store.claimDueJob("worker-a", "2026-04-07T00:00:00.000Z", 60_000);
+    assert.equal(firstClaim?.id, job.id);
+    assert.equal(firstClaim?.attempts, 1);
+    assert.equal(firstClaim?.maxAttempts, 1);
+
+    const refetched = store.enqueueJob({
+      accountId: account.id,
+      availableAt: "2026-04-07T00:01:01.000Z",
+      dedupeKey: "companion-expired-final-attempt",
+      kind: "resource",
+      maxAttempts: 1,
+      payload: {
+        resource: COMPANION_HRV_RMSSD_RESOURCE,
+      },
+      provider: "junction",
+    });
+    assert.equal(refetched.id, job.id);
+
+    const reclaimed = store.claimDueJob("worker-b", "2026-04-07T00:01:01.000Z", 60_000);
+    assert.equal(reclaimed?.id, job.id);
+    assert.equal(reclaimed?.status, "running");
+    assert.equal(reclaimed?.leaseOwner, "worker-b");
+    assert.equal(reclaimed?.attempts, 2);
+    assert.equal(reclaimed?.maxAttempts, 2);
+    assert.equal(store.completeJobIfOwned(job.id, "worker-b", "2026-04-07T00:01:02.000Z"), true);
+    assert.equal(store.getJobById(job.id)?.status, "succeeded");
+  } finally {
+    store.close();
+    await rm(tempDir, {
+      force: true,
+      recursive: true,
+    });
+  }
+});
+
 test("device sync store ignores expired exhausted running rows for dedupe and reaps them before lower-priority follow-up claims", async () => {
   const tempDir = await makeTempDirectory("murph-device-syncd-store-expired-final-attempt-dedupe");
   const store = new SqliteDeviceSyncStore(path.join(tempDir, "state.sqlite"));
@@ -2578,6 +2895,202 @@ test("device sync store adds consumed_at when reopening a v6 database", async ()
     assert.equal(
       store.consumeOAuthState("v6-state", "2026-04-07T00:02:00.000Z", "demo").status,
       "replayed",
+    );
+  } finally {
+    store.close();
+    await rm(tempDir, {
+      force: true,
+      recursive: true,
+    });
+  }
+});
+
+test("device sync store binds a first terminal hosted snapshot when reopening a v7 database", async () => {
+  const tempDir = await makeTempDirectory("murph-device-syncd-store-v7-reopen");
+  const databasePath = path.join(tempDir, "state.sqlite");
+  const legacyStore = new SqliteDeviceSyncStore(databasePath);
+  const existing = legacyStore.upsertAccount({
+    connectedAt: "2026-07-13T01:00:00.000Z",
+    credential: {
+      credentialMetadata: {},
+      kind: "provider_config",
+      providerConfigKey: "junction",
+    },
+    displayName: "Junction",
+    externalAccountId: "junction-v7-account",
+    provider: "junction",
+    scopes: [],
+    status: "active",
+  });
+  legacyStore.close();
+
+  downgradeDeviceSyncStoreToV7(databasePath);
+
+  const store = new SqliteDeviceSyncStore(databasePath);
+
+  try {
+    const hydrated = store.hydrateHostedAccount({
+      credential: {
+        credentialMetadata: {},
+        kind: "none",
+      },
+      connection: {
+        connectedAt: "2026-07-13T01:00:00.000Z",
+        displayName: "Junction",
+        externalAccountId: "opaque:hosted-connection-v7",
+        metadata: {},
+        provider: "junction",
+        scopes: [],
+        status: "disconnected",
+        updatedAt: "2026-07-13T01:01:00.000Z",
+      },
+      hostedConnectionId: "hosted-connection-v7",
+      hostedObservedTokenVersion: null,
+      hostedObservedUpdatedAt: "2026-07-13T01:01:00.000Z",
+      localState: {
+        lastErrorCode: null,
+        lastErrorMessage: null,
+        lastSyncCompletedAt: null,
+        lastSyncErrorAt: null,
+        lastSyncStartedAt: null,
+        lastWebhookAt: null,
+        nextReconcileAt: null,
+      },
+    });
+
+    assert.equal(hydrated?.id, existing.id);
+    assert.equal(hydrated?.externalAccountId, "opaque:hosted-connection-v7");
+    assert.equal(hydrated?.status, "disconnected");
+    assert.equal(hydrated?.credential.kind, "none");
+    assert.equal(store.listAccounts().length, 1);
+    assert.equal(
+      store.getAccountByHostedConnectionId("hosted-connection-v7")?.id,
+      existing.id,
+    );
+  } finally {
+    store.close();
+    await rm(tempDir, {
+      force: true,
+      recursive: true,
+    });
+  }
+});
+
+test("device sync store consolidates a pre-v8 terminal identity fork", async () => {
+  const tempDir = await makeTempDirectory("murph-device-syncd-store-v7-fork");
+  const databasePath = path.join(tempDir, "state.sqlite");
+  const legacyStore = new SqliteDeviceSyncStore(databasePath);
+  const original = legacyStore.upsertAccount({
+    connectedAt: "2026-07-13T01:00:00.000Z",
+    credential: {
+      credentialMetadata: {},
+      kind: "provider_config",
+      providerConfigKey: "junction",
+    },
+    displayName: "Junction",
+    externalAccountId: "junction-v7-original",
+    provider: "junction",
+    scopes: [],
+    status: "active",
+  });
+  const fork = legacyStore.upsertAccount({
+    connectedAt: "2026-07-13T01:00:00.000Z",
+    credential: {
+      credentialMetadata: {},
+      kind: "none",
+    },
+    displayName: "Junction",
+    externalAccountId: "opaque:hosted-connection-v7-fork",
+    provider: "junction",
+    scopes: [],
+    status: "disconnected",
+  });
+  const providerJob = legacyStore.enqueueJob({
+    accountId: original.id,
+    availableAt: "2026-07-13T01:01:00.000Z",
+    kind: "resource-sync",
+    payload: {},
+    provider: "junction",
+  });
+  legacyStore.upsertConnectionSource({
+    connectionId: original.id,
+    displayName: "Original Garmin",
+    lastSeenAt: "2026-07-13T01:01:00.000Z",
+    sourceInstanceKey: "src_original_garmin",
+    sourceProviderSlug: "garmin",
+    status: "connected",
+  });
+  legacyStore.upsertConnectionSource({
+    connectionId: original.id,
+    displayName: "Original WHOOP",
+    lastSeenAt: "2026-07-13T01:01:00.000Z",
+    sourceInstanceKey: "src_shared_whoop",
+    sourceProviderSlug: "whoop",
+    status: "connected",
+  });
+  legacyStore.upsertConnectionSource({
+    connectionId: fork.id,
+    displayName: "Canonical WHOOP",
+    lastSeenAt: "2026-07-13T01:01:30.000Z",
+    sourceInstanceKey: "src_shared_whoop",
+    sourceProviderSlug: "whoop",
+    status: "disconnected",
+  });
+  legacyStore.close();
+  downgradeDeviceSyncStoreToV7(databasePath);
+
+  const store = new SqliteDeviceSyncStore(databasePath);
+
+  try {
+    const hydrated = store.hydrateHostedAccount({
+      credential: {
+        credentialMetadata: {},
+        kind: "none",
+      },
+      connection: {
+        connectedAt: "2026-07-13T01:00:00.000Z",
+        displayName: "Junction",
+        externalAccountId: "opaque:hosted-connection-v7-fork",
+        metadata: {},
+        provider: "junction",
+        scopes: [],
+        status: "disconnected",
+        updatedAt: "2026-07-13T01:02:00.000Z",
+      },
+      hostedConnectionId: "hosted-connection-v7-fork",
+      hostedObservedTokenVersion: null,
+      hostedObservedUpdatedAt: "2026-07-13T01:02:00.000Z",
+      localState: {
+        lastErrorCode: null,
+        lastErrorMessage: null,
+        lastSyncCompletedAt: null,
+        lastSyncErrorAt: null,
+        lastSyncStartedAt: null,
+        lastWebhookAt: null,
+        nextReconcileAt: null,
+      },
+    });
+
+    assert.equal(hydrated?.id, fork.id);
+    assert.equal(store.getAccountById(original.id), null);
+    assert.equal(store.listAccounts().length, 1);
+    assert.equal(store.getJobById(providerJob.id)?.accountId, fork.id);
+    assert.equal(store.getAccountByHostedConnectionId("hosted-connection-v7-fork")?.id, fork.id);
+    assert.deepEqual(
+      store.listConnectionSources({ connectionId: fork.id }).map((source) => ({
+        displayName: source.displayName,
+        sourceInstanceKey: source.sourceInstanceKey,
+        status: source.status,
+      })),
+      [{
+        displayName: "Canonical WHOOP",
+        sourceInstanceKey: "src_shared_whoop",
+        status: "disconnected",
+      }, {
+        displayName: "Original Garmin",
+        sourceInstanceKey: "src_original_garmin",
+        status: "connected",
+      }],
     );
   } finally {
     store.close();

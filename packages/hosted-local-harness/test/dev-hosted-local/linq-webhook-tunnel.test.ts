@@ -20,6 +20,8 @@ type LinqWebhookSubscriptionResult = {
 
 const HOSTED_LOCAL_LINQ_WEBHOOK_EVENTS = [
   "message.received",
+  "participant.added",
+  "participant.removed",
   "reaction.added",
   "reaction.removed",
 ] as const;
@@ -319,7 +321,7 @@ describe("resolveHostedLocalLinqWebhookSetup", () => {
 });
 
 describe("registerHostedLocalLinqWebhookSubscription", () => {
-  it("registers messages and reactions against the resolved target", async () => {
+  it("registers messages, participant changes, and reactions against the resolved target", async () => {
     const { registerHostedLocalLinqWebhookSubscription } = await import(
       "../../src/dev-hosted-local/linq-webhook-tunnel.ts"
     );

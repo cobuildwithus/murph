@@ -4,8 +4,11 @@ import { mkdtemp, rm } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import {
+  COMPANION_HRV_RMSSD_METHOD_VERSION,
+  COMPANION_HRV_RMSSD_SCHEMA,
   eventRevisionFromLifecycle,
   isDeletedEventLifecycle,
+  serializeCompanionHrvRmssdObservation,
   workoutSessionSchema,
 } from "@murphai/contracts";
 import * as coreRuntime from "@murphai/core";
@@ -28,6 +31,17 @@ import {
 } from "../src/index.ts";
 
 type StoredJsonlRecord = Awaited<ReturnType<typeof coreRuntime.readJsonlRecords>>[number];
+
+function buildCompanionHrvRmssdSnapshotEntry(
+  observation: Parameters<typeof serializeCompanionHrvRmssdObservation>[0],
+) {
+  return {
+    admissionId: createHash("sha256")
+      .update(serializeCompanionHrvRmssdObservation(observation))
+      .digest("hex"),
+    observation,
+  };
+}
 
 function assertWorkoutSessionsMatchContract(events: readonly { fields?: { workout?: unknown } }[]): void {
   for (const event of events) {
@@ -2675,6 +2689,279 @@ test("Junction normalizer compacts HRV timeseries into daily average facts", () 
   assert.equal(dayOne?.dataOrigin?.sourceProviderSlug, "garmin");
   // 1200 is out of plausible range and must not skew the day-two average.
   assert.equal(dayTwo?.fields?.value, 61);
+});
+
+test("Junction normalizer keeps Apple Health SDNN separate from companion WHOOP RMSSD", () => {
+  const payload = normalizeJunctionSnapshot({
+    importedAt: "2026-07-13T12:00:00.000Z",
+    summaries: {
+      sleep: [{
+        average_hrv: 64,
+        bedtime_start: "2026-07-13T02:00:00.000Z",
+        bedtime_stop: "2026-07-13T09:00:00.000Z",
+        id: "apple-health-sleep-hrv",
+        sourceProviderSlug: "apple_health_kit",
+      }],
+    },
+    timeseries: {
+      hrv: {
+        groups: {
+          apple_health_kit: [{
+            data: [
+              { timestamp: "2026-07-13T08:30:00.000Z", unit: "ms", value: 66 },
+            ],
+            source: { provider: "apple-health-kit", type: "healthkit" },
+          }],
+        },
+      },
+    },
+    companionHrvRmssd: [buildCompanionHrvRmssdSnapshotEntry({
+      schema: COMPANION_HRV_RMSSD_SCHEMA,
+      captureId: "323e4567-e89b-42d3-a456-426614174000",
+      observedAt: "2026-07-13T10:00:00.000Z",
+      durationMs: 60_000,
+      rmssdMs: 48.25,
+      intervalCount: 72,
+      acceptedIntervalCount: 68,
+      successivePairCount: 63,
+      quality: "good",
+      methodVersion: COMPANION_HRV_RMSSD_METHOD_VERSION,
+    })],
+  });
+
+  const observations = payload.events?.filter((event) => event.kind === "observation") ?? [];
+  const sdnn = observations.filter((event) => event.fields?.metric === "hrv-sdnn");
+  const rmssd = observations.filter((event) => event.fields?.metric === "hrv-rmssd");
+
+  assert.equal(sdnn.length, 2);
+  assert.deepEqual(sdnn.map((event) => event.fields?.value).sort((left, right) =>
+    Number(left) - Number(right)
+  ), [64, 66]);
+  assert.ok(sdnn.every((event) => event.dataOrigin?.sourceProviderSlug === "apple-health-kit"));
+  assert.ok(sdnn.every((event) => event.externalRef?.facet === "hrv"));
+  assert.equal(rmssd.length, 1);
+  assert.equal(rmssd[0]?.fields?.value, 48.25);
+  assert.equal(rmssd[0]?.dataOrigin?.sourceProviderSlug, "whoop");
+  assert.equal(observations.some((event) => event.fields?.metric === "hrv"), false);
+});
+
+test("Junction normalizer maps companion WHOOP spot RMSSD with direct provenance", () => {
+  const payload = normalizeJunctionSnapshot({
+    accountId: "junction-account-hash-1",
+    importedAt: "2026-07-10T13:46:00.000Z",
+    companionHrvRmssd: [buildCompanionHrvRmssdSnapshotEntry({
+      schema: COMPANION_HRV_RMSSD_SCHEMA,
+      captureId: "123e4567-e89b-42d3-a456-426614174000",
+      observedAt: "2026-07-10T13:45:00.000Z",
+      durationMs: 60_000,
+      rmssdMs: 48.25,
+      intervalCount: 72,
+      acceptedIntervalCount: 68,
+      successivePairCount: 63,
+      quality: "good",
+      methodVersion: COMPANION_HRV_RMSSD_METHOD_VERSION,
+    })],
+  });
+
+  const event = payload.events?.find((entry) => entry.fields?.metric === "hrv-rmssd");
+  assert.equal(event?.title, "WHOOP BLE spot RMSSD");
+  assert.equal(event?.occurredAt, "2026-07-10T13:45:00.000Z");
+  assert.equal(event?.fields?.value, 48.25);
+  assert.equal(event?.fields?.unit, "ms");
+  assert.equal(event?.fields?.observationGrain, "derived_fact");
+  assert.equal(event?.externalRef?.system, "whoop");
+  assert.equal(event?.externalRef?.resourceType, "ble-hrv-rmssd");
+  assert.match(
+    event?.externalRef?.version ?? "",
+    /^rmssd-pulse-interval-v1:[a-f0-9]{64}$/u,
+  );
+  assert.equal(event?.externalRefUpdatePolicy, "immutable");
+  assert.equal(event?.dataOrigin?.aggregatorProvider, "murph-companion");
+  assert.equal(event?.dataOrigin?.sourceProviderSlug, "whoop");
+  assert.equal(event?.dataOrigin?.sourceType, "ble-pulse-interval");
+  assert.equal(payload.provenance?.companionHrvRmssdObservations, 1);
+  assert.equal(payload.samples?.length ?? 0, 0);
+});
+
+test("companion WHOOP spot RMSSD imports idempotently into the canonical vault", async () => {
+  const vaultRoot = await makeTempDirectory("murph-companion-hrv-rmssd");
+
+  try {
+    await coreRuntime.initializeVault({
+      createdAt: "2026-07-10T13:44:00.000Z",
+      timezone: "America/New_York",
+      vaultRoot,
+    });
+    const observation = {
+      schema: COMPANION_HRV_RMSSD_SCHEMA,
+      captureId: "123e4567-e89b-42d3-a456-426614174000",
+      observedAt: "2026-07-10T02:30:00.000Z",
+      durationMs: 60_000,
+      rmssdMs: 48.25,
+      intervalCount: 72,
+      acceptedIntervalCount: 68,
+      successivePairCount: 63,
+      quality: "good" as const,
+      methodVersion: COMPANION_HRV_RMSSD_METHOD_VERSION,
+    } satisfies Parameters<typeof serializeCompanionHrvRmssdObservation>[0];
+    const input = {
+      provider: "junction" as const,
+      vaultRoot,
+      connectionId: "conn-junction-companion",
+      sourceKind: "webhook" as const,
+      deliveryMode: "full_payload" as const,
+      normalizerVersion: "junction-normalizer.v1",
+      snapshot: {
+        accountId: "junction-account-hash-1",
+        importedAt: "2026-07-10T13:46:00.000Z",
+        companionHrvRmssd: [buildCompanionHrvRmssdSnapshotEntry(observation)],
+      },
+    };
+    const admissionId = input.snapshot.companionHrvRmssd[0].admissionId;
+
+    const first = await importDeviceProviderSnapshot<Awaited<ReturnType<typeof coreRuntime.importDeviceBatch>>>(
+      input,
+      { corePort: coreRuntime },
+    );
+    await coreRuntime.updateVaultSummary({
+      vaultRoot,
+      timezone: "UTC",
+    });
+    const replay = await importDeviceProviderSnapshot<Awaited<ReturnType<typeof coreRuntime.importDeviceBatch>>>(
+      input,
+      { corePort: coreRuntime },
+    );
+
+    for (const changedObservation of [
+      { ...observation, rmssdMs: 49 },
+      { ...observation, intervalCount: 73 },
+    ]) {
+      await assert.rejects(
+        () => importDeviceProviderSnapshot<Awaited<ReturnType<typeof coreRuntime.importDeviceBatch>>>(
+          {
+            ...input,
+            snapshot: {
+              ...input.snapshot,
+              companionHrvRmssd: [{
+                admissionId,
+                observation: changedObservation,
+              }],
+            },
+          },
+          { corePort: coreRuntime },
+        ),
+        (error: unknown) =>
+          error instanceof TypeError
+          && /admission identity did not match/u.test(error.message),
+      );
+    }
+
+    const records = latestLiveRecords((await Promise.all(
+      [...new Set([...first.eventShardPaths, ...replay.eventShardPaths])].map((relativePath) =>
+        coreRuntime.readJsonlRecords({ vaultRoot, relativePath })
+      ),
+    )).flat());
+    const hrvRecords = records.filter((record) =>
+      storedExternalRefResourceType(record) === "ble-hrv-rmssd"
+    );
+
+    assert.equal(hrvRecords.length, 1);
+    assert.equal(replay.applied, false);
+    assert.deepEqual(replay.events, []);
+    assert.equal(hrvRecords[0]?.id, first.events[0]?.id);
+    assert.equal(storedObservationValue(hrvRecords[0]), 48.25);
+    assert.equal(hrvRecords[0]?.dayKey, "2026-07-09");
+    assert.equal(hrvRecords[0]?.timeZone, "America/New_York");
+    assert.equal(
+      storedExternalRefResourceId(hrvRecords[0]),
+      admissionId,
+    );
+  } finally {
+    await rm(vaultRoot, { force: true, recursive: true });
+  }
+});
+
+test("companion WHOOP spot RMSSD keeps post-retention admissions with a reused capture id distinct", async () => {
+  const vaultRoot = await makeTempDirectory("murph-companion-hrv-rmssd-readmission");
+
+  try {
+    await coreRuntime.initializeVault({
+      createdAt: "2026-07-10T13:44:00.000Z",
+      timezone: "UTC",
+      vaultRoot,
+    });
+    const firstObservation = {
+      schema: COMPANION_HRV_RMSSD_SCHEMA,
+      captureId: "223e4567-e89b-42d3-a456-426614174000",
+      observedAt: "2026-07-10T13:45:00.000Z",
+      durationMs: 60_000 as const,
+      rmssdMs: 48.25,
+      intervalCount: 72,
+      acceptedIntervalCount: 68,
+      successivePairCount: 63,
+      quality: "good" as const,
+      methodVersion: COMPANION_HRV_RMSSD_METHOD_VERSION,
+    } satisfies Parameters<typeof serializeCompanionHrvRmssdObservation>[0];
+    const changedObservation = {
+      ...firstObservation,
+      observedAt: "2026-08-11T13:45:00.000Z",
+      rmssdMs: 51.5,
+    };
+    const admissionIdFor = (observation: typeof firstObservation) => createHash("sha256")
+      .update(serializeCompanionHrvRmssdObservation(observation))
+      .digest("hex");
+    const firstAdmissionId = admissionIdFor(firstObservation);
+    const changedAdmissionId = admissionIdFor(changedObservation);
+    const inputFor = (observation: typeof firstObservation, admissionId: string) => ({
+      provider: "junction" as const,
+      vaultRoot,
+      connectionId: "conn-junction-companion-readmission",
+      sourceKind: "webhook" as const,
+      deliveryMode: "full_payload" as const,
+      normalizerVersion: "junction-normalizer.v1",
+      snapshot: {
+        accountId: "junction-account-hash-readmission",
+        importedAt: observation.observedAt,
+        companionHrvRmssd: [{ admissionId, observation }],
+      },
+    });
+
+    const first = await importDeviceProviderSnapshot<Awaited<ReturnType<typeof coreRuntime.importDeviceBatch>>>(
+      inputFor(firstObservation, firstAdmissionId),
+      { corePort: coreRuntime },
+    );
+    const replay = await importDeviceProviderSnapshot<Awaited<ReturnType<typeof coreRuntime.importDeviceBatch>>>(
+      inputFor(firstObservation, firstAdmissionId),
+      { corePort: coreRuntime },
+    );
+    const changed = await importDeviceProviderSnapshot<Awaited<ReturnType<typeof coreRuntime.importDeviceBatch>>>(
+      inputFor(changedObservation, changedAdmissionId),
+      { corePort: coreRuntime },
+    );
+
+    const records = latestLiveRecords((await Promise.all(
+      [...new Set([
+        ...first.eventShardPaths,
+        ...replay.eventShardPaths,
+        ...changed.eventShardPaths,
+      ])].map((relativePath) => coreRuntime.readJsonlRecords({ vaultRoot, relativePath })),
+    )).flat());
+    const hrvRecords = records.filter((record) =>
+      storedExternalRefResourceType(record) === "ble-hrv-rmssd"
+    );
+
+    assert.equal(hrvRecords.length, 2);
+    assert.deepEqual(
+      hrvRecords.map(storedObservationValue).sort((left, right) => Number(left) - Number(right)),
+      [48.25, 51.5],
+    );
+    assert.deepEqual(
+      hrvRecords.map(storedExternalRefResourceId).sort(),
+      [firstAdmissionId, changedAdmissionId].sort(),
+    );
+  } finally {
+    await rm(vaultRoot, { force: true, recursive: true });
+  }
 });
 
 test("Junction normalizer uses vault timezone for UTC-only daily aggregate days", () => {

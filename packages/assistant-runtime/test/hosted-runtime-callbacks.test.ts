@@ -8850,7 +8850,7 @@ describe("hosted runtime callbacks", () => {
       const delivery = await dependencies.sendLinq({
         directRecipientPhoneNumber: null,
         fromPhoneNumber: null,
-        idempotencyKey: null,
+        idempotencyKey: "assistant-outbox:intent_123",
         message: "hello from hosted",
         replyToMessageId: "linq_message_a",
         target: "linq_chat_a",
@@ -8886,14 +8886,6 @@ describe("hosted runtime callbacks", () => {
           threadIsDirect: true,
         },
         {
-          currentInbound: {
-            dedupeKey: "evt_linq_current",
-            eventId: "evt_linq_current",
-            mailboxItemId: "mailbox_item_linq_current",
-            occurredAt: "2026-04-08T00:00:00.000Z",
-            replyToMessageId: "linq_message_a",
-            target: "linq_chat_a",
-          },
           directRecipientPhoneNumber: "+15550000001",
           fromPhoneNumber: "+15559990000",
           replyToMessageId: "linq_message_a",
@@ -8911,18 +8903,10 @@ describe("hosted runtime callbacks", () => {
 
     expect(assertRecentInbound).toHaveBeenCalledWith({
       authorityCheckOnly: false,
-      currentInbound: {
-        dedupeKey: "evt_linq_current",
-        eventId: "evt_linq_current",
-        mailboxItemId: "mailbox_item_linq_current",
-        occurredAt: "2026-04-08T00:00:00.000Z",
-        replyToMessageId: "linq_message_a",
-        target: "linq_chat_a",
-      },
       directRecipientPhoneNumber: "+15550000001",
       fromPhoneNumber: "+15559990000",
       homeRouteFallbackAllowed: false,
-      idempotencyKey: "legacy-current-inbound:evt_linq_current",
+      idempotencyKey: "assistant-outbox:intent_123",
       intentId: "intent_123",
       replyToMessageId: "linq_message_a",
       target: "linq_chat_a",
@@ -8933,7 +8917,7 @@ describe("hosted runtime callbacks", () => {
     expect(mocks.sendLinqMessage).toHaveBeenCalledWith(
       expect.objectContaining({
         fromPhoneNumber: "+15559990000",
-        idempotencyKey: "legacy-current-inbound:evt_linq_current",
+        idempotencyKey: "assistant-outbox:intent_123",
         target: "linq_chat_a",
         targetKind: "thread",
       }),
@@ -8941,7 +8925,7 @@ describe("hosted runtime callbacks", () => {
     );
     expect(recordDeliveryOutcome).toHaveBeenCalledWith(
       expect.objectContaining({
-        idempotencyKey: "legacy-current-inbound:evt_linq_current",
+        idempotencyKey: "assistant-outbox:intent_123",
         lineLookupKey: "hbidx:phone:v1:account_a",
       }),
       expect.any(Object),
@@ -9014,14 +8998,6 @@ describe("hosted runtime callbacks", () => {
       }),
       linqDeliveryContexts: [
         {
-          currentInbound: {
-            dedupeKey: "evt_linq_old",
-            eventId: "evt_linq_old",
-            mailboxItemId: "mailbox_item_linq_old",
-            occurredAt: "2026-04-08T00:00:00.000Z",
-            replyToMessageId: "linq_message_old",
-            target: "linq_chat_shared",
-          },
           directRecipientPhoneNumber: "+15550000001",
           fromPhoneNumber: "+15559990000",
           replyToMessageId: "linq_message_old",
@@ -9031,14 +9007,6 @@ describe("hosted runtime callbacks", () => {
           threadIsDirect: true,
         },
         {
-          currentInbound: {
-            dedupeKey: "evt_linq_new",
-            eventId: "evt_linq_new",
-            mailboxItemId: "mailbox_item_linq_new",
-            occurredAt: "2026-04-08T00:00:01.000Z",
-            replyToMessageId: "linq_message_new",
-            target: "linq_chat_shared",
-          },
           directRecipientPhoneNumber: "+15550000001",
           fromPhoneNumber: "+15559990000",
           replyToMessageId: "linq_message_new",
@@ -9060,10 +9028,6 @@ describe("hosted runtime callbacks", () => {
           "mailbox_item_linq_old",
           "mailbox_item_linq_new",
         ],
-        currentInbound: {
-          mailboxItemId: "mailbox_item_linq_new",
-          replyToMessageId: "linq_message_new",
-        },
         replyToMessageId: "linq_message_new",
         target: "linq_chat_shared",
       });
@@ -9137,7 +9101,6 @@ describe("hosted runtime callbacks", () => {
         target: "linq_chat_retry",
         targetKind: "thread",
       });
-      expect(request).not.toHaveProperty("currentInbound");
     }
   });
 

@@ -23,7 +23,7 @@ const mocks = vi.hoisted(() => ({
   buildHostedDeviceSyncSettingsResponse: vi.fn(),
   getHostedPageAuthSnapshot: vi.fn(),
   getPrisma: vi.fn(),
-  readHostedMemberHomeTrialBillingState: vi.fn(),
+  readHostedMemberBillingEligibilityState: vi.fn(),
   readHostedMemberRoutingState: vi.fn(),
   redirect: vi.fn((href: string) => {
     throw new Error(`NEXT_REDIRECT:${href}`);
@@ -135,7 +135,7 @@ vi.mock("@/src/lib/hosted-onboarding/hosted-member-routing-store", () => ({
 }));
 
 vi.mock("@/src/lib/hosted-onboarding/hosted-member-billing-store", () => ({
-  readHostedMemberHomeTrialBillingState: mocks.readHostedMemberHomeTrialBillingState,
+  readHostedMemberBillingEligibilityState: mocks.readHostedMemberBillingEligibilityState,
 }));
 
 // The dashboard-layout provider owns the browser vault; stub it since this test
@@ -180,7 +180,7 @@ beforeEach(() => {
     session: null,
   });
   mocks.getPrisma.mockReturnValue({ hostedMemberRouting: {} });
-  mocks.readHostedMemberHomeTrialBillingState.mockResolvedValue(null);
+  mocks.readHostedMemberBillingEligibilityState.mockResolvedValue(null);
   mocks.buildHostedDeviceSyncSettingsResponse.mockResolvedValue({
     generatedAt: "2026-05-03T22:05:48.000Z",
     ok: true,

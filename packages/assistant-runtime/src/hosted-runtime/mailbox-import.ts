@@ -2,7 +2,6 @@ import type {
   HostedMailboxFetchResponse,
   HostedMailboxItem,
   HostedMailboxLane,
-  HostedRuntimeUsageNoticeDeliveryTarget,
 } from "@murphai/hosted-execution/runtime-control";
 import {
   HOSTED_MAILBOX_LANES,
@@ -50,7 +49,6 @@ export type HostedMailboxItemImportOutcome =
       assistantInputId?: string;
       emailDeliveryContext?: HostedAssistantEmailDeliveryContext | null;
       linqDeliveryContext?: HostedAssistantLinqDeliveryContext | null;
-      usageNoticeDeliveryTarget?: HostedRuntimeUsageNoticeDeliveryTarget | null;
       reasonCode?: string | null;
       afterCheckpoint?: HostedMailboxPostCheckpointEffect | null;
       conversationImportTiming?: HostedMailboxConversationImportTiming | null;
@@ -106,7 +104,6 @@ export interface HostedMailboxAssistantInputRecord {
   assistantInputId: string;
   emailDeliveryContext?: HostedAssistantEmailDeliveryContext;
   linqDeliveryContext?: HostedAssistantLinqDeliveryContext;
-  usageNoticeDeliveryTarget?: HostedRuntimeUsageNoticeDeliveryTarget;
 }
 
 export interface HostedMailboxImportLoopBlockedItem {
@@ -496,9 +493,6 @@ export async function fetchAndProcessHostedMailboxPrefix(input: {
             : {}),
           ...(outcome.linqDeliveryContext
             ? { linqDeliveryContext: outcome.linqDeliveryContext }
-            : {}),
-          ...(outcome.usageNoticeDeliveryTarget
-            ? { usageNoticeDeliveryTarget: outcome.usageNoticeDeliveryTarget }
             : {}),
         });
       }

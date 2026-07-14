@@ -31,7 +31,8 @@ import {
 import { shouldShowHomeDeviceSyncStep } from "@/src/lib/device-sync/home-onboarding";
 import { listHealthCommonsExperimentBrowseProtocols } from "@/src/lib/health-commons/experiment-browse";
 import { resolveHostedAiUsageGate } from "@/src/lib/hosted-execution/usage-allowance";
-import { readHostedMemberHomeTrialBillingState } from "@/src/lib/hosted-onboarding/hosted-member-billing-store";
+import { projectHostedPersonalAiUsageStatus } from "@/src/lib/hosted-execution/usage-status";
+import { readHostedMemberBillingEligibilityState } from "@/src/lib/hosted-onboarding/hosted-member-billing-store";
 import { getHostedDashboardPageAuthSnapshot } from "@/src/lib/hosted-onboarding/page-auth";
 import { getPrisma } from "@/src/lib/prisma";
 import { createMurphPageMetadata } from "@/src/lib/site-metadata";
@@ -66,7 +67,6 @@ export default async function HomePage({
     usageGate,
     deviceSyncCompletionDialog,
     connectedAppCompletionDialog,
-    trialBillingState,
     initialVisitContactAction,
   ] = await Promise.all([
     shouldShowHomeDeviceSyncStep({
@@ -88,12 +88,6 @@ export default async function HomePage({
       member,
       searchParams: resolvedSearchParams,
     }),
-    member
-      ? readHostedMemberHomeTrialBillingState({
-          memberId: member.id,
-          prisma,
-        })
-      : Promise.resolve(null),
     showInitialVisitDialog
       ? resolveHomeInitialVisitContactAction()
       : Promise.resolve(null),
@@ -111,6 +105,20 @@ export default async function HomePage({
     && "reason" in usageGate
     && usageGate.reason === "ai_usage_limit_exceeded"
     ? usageGate.retryAfter
+    : null;
+  const projectedUsageStatus = member && usageGate && usageLimitNotice
+    ? await projectHostedPersonalAiUsageStatus({
+        decision: usageGate,
+        memberId: member.id,
+        now: usageGateCheckedAt,
+        prisma,
+      })
+    : null;
+  const trialBillingState = !usageLimitNotice && member
+    ? await readHostedMemberBillingEligibilityState({
+        memberId: member.id,
+        prisma,
+      })
     : null;
   const trialBillingBannerVariant = usageLimitNotice
     ? null
@@ -140,6 +148,7 @@ export default async function HomePage({
         <UsageLimitBanner
           noticeCode={usageLimitNotice.code}
           now={usageGateCheckedAt}
+          recommendedAction={projectedUsageStatus?.recommendedAction ?? null}
           resetAt={usageLimitResetAt}
         />
       ) : null}

@@ -135,6 +135,7 @@
   },
   "dependencies": {
     "@junction-api/sdk": "1.2.0",
+    "@murphai/contracts": "workspace:*",
     "@murphai/importers": "workspace:*",
     "@murphai/runtime-state": "workspace:*"
   },

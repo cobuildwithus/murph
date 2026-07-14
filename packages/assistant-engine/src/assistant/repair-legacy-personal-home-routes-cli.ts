@@ -1,9 +1,9 @@
 import path from "node:path";
 import { pathToFileURL } from "node:url";
 
-import {
-  repairLegacyPersonalHomeAutomationRoutesFromInputs,
-} from "./managed-automations.js";
+import { repairLegacyPersonalHomeAutomationRoutes } from "@murphai/core";
+
+import { readAssistantInputEvent } from "./input-store.js";
 
 export interface LegacyPersonalHomeRouteRepairCliOptions {
   apply: boolean;
@@ -81,6 +81,46 @@ export function parseLegacyPersonalHomeRouteRepairArgs(
     inputIds: uniqueInputIds,
     vaultRoot,
   };
+}
+
+export async function repairLegacyPersonalHomeAutomationRoutesFromInputs(input: {
+  inputIds: readonly string[];
+  now?: Date;
+  vaultRoot: string;
+}): Promise<number> {
+  const uniqueInputIds = [...new Set(input.inputIds)];
+  if (uniqueInputIds.length === 0) {
+    throw new Error("At least one exact retained input is required.");
+  }
+
+  const confirmedDirectDeliveryTargets = new Set<string>();
+  for (const inputId of uniqueInputIds) {
+    const event = await readAssistantInputEvent({
+      inputId,
+      vault: input.vaultRoot,
+    });
+    const conversation = event?.conversation;
+    const replyTarget = event?.replyTarget;
+    const deliveryTarget = replyTarget?.threadId?.trim() ?? "";
+    if (
+      event?.sourceMetadata?.kind !== "linq"
+      || conversation?.actorIsSelf !== false
+      || conversation.source !== "linq"
+      || conversation.threadIsDirect !== true
+      || replyTarget?.channel !== "linq"
+      || deliveryTarget.length === 0
+    ) {
+      throw new Error("Every supplied input must be retained direct-Linq route evidence.");
+    }
+    confirmedDirectDeliveryTargets.add(deliveryTarget);
+  }
+
+  const result = await repairLegacyPersonalHomeAutomationRoutes({
+    confirmedDirectDeliveryTargets: [...confirmedDirectDeliveryTargets],
+    now: input.now ?? new Date(),
+    vaultRoot: input.vaultRoot,
+  });
+  return result.updated;
 }
 
 export async function runLegacyPersonalHomeRouteRepairCli(

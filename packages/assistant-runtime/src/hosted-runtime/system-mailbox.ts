@@ -556,7 +556,13 @@ async function recordHostedDeviceSyncDirtyProcessedRecords(input: {
     }
     stillDirty = stillDirty || response.stillDirty;
     if (shouldUseHostedDirtyAckWake(index, input.records.length, response.stillDirty)) {
-      nextWakeAt = earliestHostedSystemMailboxWakeAt(nextWakeAt, response.nextWakeAt);
+      const onlyRetainedPayloadsRemain = response.stillDirty
+        && response.dirtyRevision !== null
+        && response.dirtyRevision === response.processedRevision;
+      const responseWakeAt = onlyRetainedPayloadsRemain && record.nextWakeAt
+        ? record.nextWakeAt
+        : response.nextWakeAt;
+      nextWakeAt = earliestHostedSystemMailboxWakeAt(nextWakeAt, responseWakeAt);
     }
   }
 

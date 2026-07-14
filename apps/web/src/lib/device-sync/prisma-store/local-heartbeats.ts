@@ -1,5 +1,7 @@
 import { PrismaClient } from "@prisma/client";
 
+import { deviceSyncError } from "@murphai/device-syncd/errors";
+import { isDeviceSyncDisconnectInProgress } from "@murphai/device-syncd/public-account";
 import type { PublicDeviceSyncAccount } from "@murphai/device-syncd/types";
 
 import {
@@ -29,6 +31,15 @@ export class PrismaHostedLocalHeartbeatStore {
 
     if (!existing) {
       return null;
+    }
+
+    if (isDeviceSyncDisconnectInProgress(existing)) {
+      throw deviceSyncError({
+        code: "CONNECTION_DISCONNECT_IN_PROGRESS",
+        message: "Device sync disconnect is still in progress. Retry later.",
+        retryable: true,
+        httpStatus: 409,
+      });
     }
 
     const localState = buildHostedLocalHeartbeatRuntimeLocalStateUpdate(existing, patch);

@@ -2223,11 +2223,8 @@ async function deliverHostedPreparedAssistantDelivery(input: {
             target: request.target,
             targetMessageId: request.targetMessageId,
           });
-          const idempotencyKey = resolveHostedAssistantLinqProviderDispatchIdempotencyKey({
-            deliveryContext,
-            explicitIdempotencyKey:
-              input.assistantDeliveryEffect.payload.idempotencyKey ?? null,
-          });
+          const idempotencyKey =
+            input.assistantDeliveryEffect.payload.idempotencyKey?.trim() || null;
           const providerTarget = deliveryContext?.target ?? request.target;
           let attemptedAt: Date | null = null;
           let result: Awaited<ReturnType<typeof setHostedProviderLinqMessageReaction>>;
@@ -2243,7 +2240,6 @@ async function deliverHostedPreparedAssistantDelivery(input: {
                   await assertHostedAssistantLinqRecentInboundEngagementForDelivery({
                     answeredMailboxItemIds:
                       input.assistantDeliveryEffect.payload.answeredMailboxItemIds,
-                    deliveryContext,
                     directRecipientPhoneNumber:
                       deliveryContext?.directRecipientPhoneNumber ?? null,
                     effectsPort: input.effectsPort,
@@ -2654,10 +2650,7 @@ function createHostedAssistantLinqSendDependency(input: {
       normalizeHostedLinqDirectRecipient(request.fromPhoneNumber)
       ?? normalizeHostedLinqDirectRecipient(deliveryContext?.fromPhoneNumber);
     const signal = mergeHostedAssistantLinqSignals(input.signal, request.signal);
-    const idempotencyKey = resolveHostedAssistantLinqProviderDispatchIdempotencyKey({
-      deliveryContext,
-      explicitIdempotencyKey: request.idempotencyKey ?? null,
-    });
+    const idempotencyKey = request.idempotencyKey?.trim() || null;
     const includesVaultFile =
       request.media?.some((media) => media.kind === "vault_file") === true;
     const engagement = includesVaultFile || shouldBypassHostedLinqDeliveryContextForHomeFallback({
@@ -2667,7 +2660,6 @@ function createHostedAssistantLinqSendDependency(input: {
       ? await assertHostedAssistantLinqRecentInboundEngagementForDelivery({
           answeredMailboxItemIds: request.answeredMailboxItemIds,
           authorityCheckOnly: true,
-          deliveryContext,
           directRecipientPhoneNumber,
           effectsPort: input.effectsPort ?? null,
           fromPhoneNumber,
@@ -2715,7 +2707,6 @@ function createHostedAssistantLinqSendDependency(input: {
         onProviderDispatchEntered: async () => {
           await assertHostedAssistantLinqRecentInboundEngagementForDelivery({
             answeredMailboxItemIds: request.answeredMailboxItemIds,
-            deliveryContext,
             directRecipientPhoneNumber,
             effectsPort: input.effectsPort ?? null,
             fromPhoneNumber,
@@ -2968,12 +2959,9 @@ function createHostedAssistantLinqVoiceMemoSendDependency(input: {
           targetKind: request.targetKind ?? null,
         });
     const signal = mergeHostedAssistantLinqSignals(input.signal, request.signal);
-    const idempotencyKey = resolveHostedAssistantLinqProviderDispatchIdempotencyKey({
-      deliveryContext,
-      explicitIdempotencyKey: input.intentId
-        ? `linq-voice-memo:${input.intentId}`
-        : null,
-    });
+    const idempotencyKey = input.intentId
+      ? `linq-voice-memo:${input.intentId}`
+      : null;
     const replyToMessageId =
       request.replyToMessageId ?? deliveryContext?.replyToMessageId ?? null;
     const engagement = shouldBypassHostedLinqDeliveryContextForHomeFallback({
@@ -2983,7 +2971,6 @@ function createHostedAssistantLinqVoiceMemoSendDependency(input: {
       ? await assertHostedAssistantLinqRecentInboundEngagementForDelivery({
           answeredMailboxItemIds: request.answeredMailboxItemIds,
           authorityCheckOnly: true,
-          deliveryContext,
           directRecipientPhoneNumber: deliveryContext?.directRecipientPhoneNumber ?? null,
           effectsPort: input.effectsPort ?? null,
           fromPhoneNumber: deliveryContext?.fromPhoneNumber ?? null,
@@ -3006,7 +2993,6 @@ function createHostedAssistantLinqVoiceMemoSendDependency(input: {
         onProviderDispatchEntered: async () => {
           await assertHostedAssistantLinqRecentInboundEngagementForDelivery({
             answeredMailboxItemIds: request.answeredMailboxItemIds,
-            deliveryContext,
             directRecipientPhoneNumber:
               deliveryContext?.directRecipientPhoneNumber ?? null,
             effectsPort: input.effectsPort ?? null,
@@ -3311,22 +3297,6 @@ function requireHostedLinqProviderAttemptedAt(value: Date | null): Date {
   return value;
 }
 
-function resolveHostedAssistantLinqProviderDispatchIdempotencyKey(input: {
-  deliveryContext: HostedAssistantLinqDeliveryContext | null;
-  explicitIdempotencyKey: string | null;
-}): string | null {
-  const explicitIdempotencyKey = input.explicitIdempotencyKey?.trim() ?? "";
-  if (explicitIdempotencyKey) {
-    return explicitIdempotencyKey;
-  }
-
-  const currentInboundDedupeKey =
-    input.deliveryContext?.currentInbound?.dedupeKey.trim() ?? "";
-  return currentInboundDedupeKey
-    ? `legacy-current-inbound:${currentInboundDedupeKey}`
-    : null;
-}
-
 function readTrustedHostedAssistantLinqDeliveryFailureReason(
   error: unknown,
 ): string | null {
@@ -3340,7 +3310,6 @@ function readTrustedHostedAssistantLinqDeliveryFailureReason(
 async function assertHostedAssistantLinqRecentInboundEngagementForDelivery(input: {
   answeredMailboxItemIds?: readonly string[] | null;
   authorityCheckOnly?: boolean;
-  deliveryContext: HostedAssistantLinqDeliveryContext | null;
   directRecipientPhoneNumber: string | null;
   effectsPort?: Pick<HostedRuntimeEffectsPort, "assertLinqRecentInboundEngagement"> | null;
   fromPhoneNumber: string | null;
@@ -3362,7 +3331,6 @@ async function assertHostedAssistantLinqRecentInboundEngagementForDelivery(input
     );
   }
   const targetKind = normalizeHostedAssistantLinqTargetKind(input.targetKind);
-  const currentInbound = input.deliveryContext?.currentInbound ?? null;
   let result: HostedRuntimeLinqRecentInboundEngagementResult | void;
   try {
     result = await assertRecentInbound({
@@ -3370,7 +3338,6 @@ async function assertHostedAssistantLinqRecentInboundEngagementForDelivery(input
         ? { answeredMailboxItemIds: [...input.answeredMailboxItemIds] }
         : {}),
       authorityCheckOnly: input.authorityCheckOnly === true,
-      ...(currentInbound ? { currentInbound } : {}),
       directRecipientPhoneNumber: input.directRecipientPhoneNumber,
       fromPhoneNumber: input.fromPhoneNumber,
       homeRouteFallbackAllowed: input.homeRouteFallbackAllowed,

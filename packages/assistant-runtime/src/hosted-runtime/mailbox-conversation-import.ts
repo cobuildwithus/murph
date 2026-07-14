@@ -17,7 +17,6 @@ import {
 } from "@murphai/runtime-state";
 import type {
   HostedRuntimeLatencyTraceStagedMilestones,
-  HostedRuntimeUsageNoticeDeliveryTarget,
 } from "@murphai/hosted-execution/runtime-control";
 import {
   readHostedIngressLatencySource,
@@ -69,7 +68,6 @@ import type {
 import {
   ensureHostedPendingAssistantInputIndex,
   enqueueHostedPendingAssistantInputId,
-  hasHostedPendingAssistantInputRouteProof,
 } from "./pending-input-index.ts";
 import {
   prepareHostedInboxProjectionRuntime,
@@ -228,7 +226,6 @@ export type HostedConversationMailboxImportOutcome =
       conversationImportTiming?: HostedMailboxConversationImportTiming | null;
       emailDeliveryContext?: HostedAssistantEmailDeliveryContext | null;
       linqDeliveryContext?: HostedAssistantLinqDeliveryContext | null;
-      usageNoticeDeliveryTarget?: HostedRuntimeUsageNoticeDeliveryTarget | null;
       metrics: HostedConversationWakeMetrics;
       reasonCode?: string | null;
       status: "imported";
@@ -409,14 +406,8 @@ export async function importHostedConversationMailboxItem(input: {
     });
   }
 
-  const linqDeliveryContext = buildHostedAssistantLinqDeliveryContextFromWake(
-    decoded.wake,
-    input.item.item,
-  );
+  const linqDeliveryContext = buildHostedAssistantLinqDeliveryContextFromWake(decoded.wake);
   const emailDeliveryContext = buildHostedAssistantEmailDeliveryContextFromWake(decoded.wake);
-  const usageNoticeDeliveryTarget = buildHostedRuntimeUsageNoticeDeliveryTargetFromWake(
-    decoded.wake,
-  );
   assertHostedConversationMailboxImportLive(input.signal ?? null);
   const projectionEffect = await projectHostedConversationAssistantInputBestEffort({
     importConversationWake,
@@ -465,7 +456,6 @@ export async function importHostedConversationMailboxItem(input: {
     captureId: null,
     ...(emailDeliveryContext ? { emailDeliveryContext } : {}),
     ...(linqDeliveryContext ? { linqDeliveryContext } : {}),
-    ...(usageNoticeDeliveryTarget ? { usageNoticeDeliveryTarget } : {}),
     conversationImportTiming: projectionEffect.timing,
     metrics: createEmptyHostedConversationWakeMetrics(),
     ...(projectionEffect.requiresTerminalMediaParserEvidence
@@ -475,29 +465,6 @@ export async function importHostedConversationMailboxItem(input: {
         : {}),
     status: "imported",
   };
-}
-
-function buildHostedRuntimeUsageNoticeDeliveryTargetFromWake(
-  wake: HostedExecutionConversationMessageWake,
-): HostedRuntimeUsageNoticeDeliveryTarget | null {
-  if (isHostedLinqConversationMessageWake(wake)) {
-    return {
-      channel: "linq",
-      replyToMessageId: wake.message.linqMessage.messageId,
-      routeAuthority: wake.message.routeAuthority ?? null,
-      target: wake.message.linqMessage.chatId,
-    };
-  }
-
-  if (isHostedTelegramConversationMessageWake(wake)) {
-    return {
-      channel: "telegram",
-      replyToMessageId: wake.message.telegramMessage.messageId,
-      target: wake.message.telegramMessage.threadId,
-    };
-  }
-
-  return null;
 }
 
 function withHostedConversationImportLatencyMilestones(input: {
@@ -933,6 +900,11 @@ async function stageHostedConversationAssistantInputEvent(input: {
   vaultRoot: string;
   wake: HostedExecutionConversationMessageWake;
 }): Promise<HostedConversationMailboxAssistantInputStageResult> {
+  const groupParticipantAdded = isHostedLinqConversationMessageWake(input.wake)
+    && input.wake.message.groupParticipantAdded === true
+    && input.wake.message.routeAuthority !== null
+    && input.wake.message.routeAuthority !== undefined
+    && input.wake.message.linqMessage.threadIsDirect === false;
   const event = await upsertAssistantInputEvent({
     event: createHostedConversationAssistantInputEvent({
       item: input.item,
@@ -941,6 +913,7 @@ async function stageHostedConversationAssistantInputEvent(input: {
     vault: input.vaultRoot,
   });
   await recordHostedMailboxAssistantInputItem({
+    ...(groupParticipantAdded ? { groupParticipantAdded } : {}),
     inputId: event.inputId,
     mailboxItemId: input.item.item.id,
     vault: input.vaultRoot,
@@ -954,22 +927,12 @@ async function stageHostedConversationAssistantInputEvent(input: {
       vault: input.vaultRoot,
     });
   }
-  const routeProof = hasHostedPendingAssistantInputRouteProof(event);
-  if (routeProof) {
-    await enqueueHostedPendingAssistantInputId({
-      inputId: event.inputId,
-      routeProof: true,
-      vaultRoot: input.vaultRoot,
-    });
-  }
-
   return {
     ...(input.pendingReplyEligible && event.replyTarget
       ? {
           async admitPendingReply() {
             await enqueueHostedPendingAssistantInputId({
               inputId: event.inputId,
-              routeProof,
               vaultRoot: input.vaultRoot,
             });
           },
@@ -1729,14 +1692,10 @@ function createHostedConversationAssistantInputSourceMetadata(
   if (isHostedLinqConversationMessageWake(wake)) {
     const externalThreadRouteAuthorityPresent = wake.message.routeAuthority !== undefined
       && wake.message.routeAuthority !== null;
-    const previousHomeThreadId = normalizeHostedAssistantInputReplyTargetIdentifier(
-      wake.message.linqMessage.previousHomeChatId,
-    );
     return {
       externalThreadRouteAuthorityPresent,
       kind: "linq",
       partCount: wake.message.linqMessage.parts.length,
-      ...(previousHomeThreadId ? { previousHomeThreadId } : {}),
       reactionEligible: wake.message.linqMessage.reactionEligible === true,
       replyToMessageId: normalizeHostedAssistantInputSourceMetadataToken(
         wake.message.linqMessage.replyToMessageId ?? null,

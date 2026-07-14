@@ -2,7 +2,6 @@ import { createHash } from 'node:crypto'
 import {
   loadVault,
   patchAutomation,
-  repairLegacyPersonalHomeAutomationRoutes,
   showAutomation,
   upsertAutomation,
   type AutomationRecord,
@@ -29,7 +28,6 @@ import {
   type AssistantCronDeliveryRouteValidationProfile,
 } from './cron/targets.js'
 import { buildExperimentFinalResultsSeeds } from './experiment-support-automations.js'
-import { readAssistantInputEvent } from './input-store.js'
 import { MURPH_ONBOARDING_FOLLOWUP_AUTOMATION } from './onboarding-followup-automation.js'
 
 export { MURPH_ONBOARDING_FOLLOWUP_AUTOMATION }
@@ -745,52 +743,6 @@ export async function applyMurphManagedAutomations(
   }
 
   return result
-}
-
-export async function repairLegacyPersonalHomeAutomationRoutesFromInputs(input: {
-  inputIds: readonly string[]
-  now?: Date
-  vaultRoot: string
-}): Promise<number> {
-  const confirmedDirectDeliveryTargets = new Set<string>()
-
-  for (const inputId of new Set(input.inputIds)) {
-    const event = await readAssistantInputEvent({
-      inputId,
-      vault: input.vaultRoot,
-    })
-    if (!event) {
-      continue
-    }
-
-    const conversation = event.conversation
-    const replyTarget = event.replyTarget
-    const currentTarget = replyTarget?.threadId?.trim() ?? ''
-    if (
-      event.sourceMetadata?.kind !== 'linq' ||
-      conversation?.actorIsSelf !== false ||
-      conversation.source !== 'linq' ||
-      conversation.threadIsDirect !== true ||
-      replyTarget?.channel !== 'linq' ||
-      currentTarget.length === 0
-    ) {
-      continue
-    }
-
-    confirmedDirectDeliveryTargets.add(currentTarget)
-    const previousTarget = event.sourceMetadata.previousHomeThreadId?.trim() ?? ''
-    if (previousTarget.length > 0) {
-      confirmedDirectDeliveryTargets.add(previousTarget)
-    }
-  }
-
-  const result = await repairLegacyPersonalHomeAutomationRoutes({
-    confirmedDirectDeliveryTargets: [...confirmedDirectDeliveryTargets],
-    now: input.now ?? new Date(),
-    vaultRoot: input.vaultRoot,
-  })
-
-  return result.updated
 }
 
 function markPersonalMurphManagedAutomationSeeds(
