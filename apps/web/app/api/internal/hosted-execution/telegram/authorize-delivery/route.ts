@@ -8,11 +8,11 @@ import {
 } from "@/src/lib/hosted-execution/cloudflare-callback-auth";
 import { readOptionalJsonObject } from "@/src/lib/http";
 import { getPrisma } from "@/src/lib/prisma";
-import {
-  readHostedMemberRoutingState,
-} from "@/src/lib/hosted-onboarding/hosted-member-routing-store";
 import { jsonOk, withJsonError } from "@/src/lib/hosted-onboarding/http";
-import { readActiveHostedMemberAccess } from "@/src/lib/hosted-onboarding/member-access";
+import { lockHostedMemberRow } from "@/src/lib/hosted-onboarding/shared";
+import {
+  isHostedTelegramDeliveryTargetAuthorizedTx,
+} from "@/src/lib/hosted-onboarding/telegram-egress-authorization";
 
 const HOSTED_TELEGRAM_DELIVERY_AUTHORIZATION_BODY_LIMIT_BYTES = 2 * 1024;
 
@@ -28,16 +28,22 @@ export const POST = withJsonError(async (request: Request) => {
   if (!target) {
     return jsonOk({ authorized: false });
   }
+  const replyToMessageId = typeof body.replyToMessageId === "string"
+    ? body.replyToMessageId.trim()
+    : "";
 
   const prisma = getPrisma();
-  const [access, routing] = await Promise.all([
-    readActiveHostedMemberAccess({ memberId, prisma }),
-    readHostedMemberRoutingState({ memberId, prisma }),
-  ]);
+  const deliveryTarget = serializeTelegramThreadTarget(target);
+  const authorized = await prisma.$transaction(async (tx) => {
+    await lockHostedMemberRow(tx, memberId);
+    return await isHostedTelegramDeliveryTargetAuthorizedTx({
+      deliveryTarget,
+      memberId,
+      prisma: tx,
+      replyToMessageId: replyToMessageId || null,
+    });
+  });
   return jsonOk({
-    authorized: Boolean(
-      access
-      && routing?.telegramThreadId === serializeTelegramThreadTarget(target),
-    ),
+    authorized,
   });
 });

@@ -1,4 +1,5 @@
 import {
+  HOSTED_TELEGRAM_CLEANUP_PROOF_HEADER,
   HOSTED_TELEGRAM_DELIVERY_TARGET_HEADER,
 } from '@murphai/contracts'
 import {
@@ -22,6 +23,7 @@ import { VaultCliError } from './vault-cli-errors.js'
 const TELEGRAM_SEND_TIMEOUT_MS = 30_000
 const TELEGRAM_TYPING_REFRESH_MS = 4_000
 const TELEGRAM_DELETE_BATCH_LIMIT = 100
+const TELEGRAM_DELETE_PROOF_BATCH_LIMIT = 32
 
 export type TelegramFetchResponse = {
   arrayBuffer?: () => Promise<ArrayBuffer>
@@ -296,6 +298,7 @@ export async function startTelegramTypingSession(
 
 export async function deleteTelegramMessages(
   input: {
+    cleanupProofs?: readonly string[]
     messageIds: readonly string[]
     target: TelegramThreadTarget | string
   },
@@ -329,16 +332,28 @@ export async function deleteTelegramMessages(
       : input.target
   assertTelegramTargetBotAuthorized(target, token)
   const messageIds = normalizeTelegramMessageIds(input.messageIds)
+  const cleanupProofs = normalizeTelegramCleanupProofs(input.cleanupProofs ?? [])
+  if (cleanupProofs.length > 0 && cleanupProofs.length !== messageIds.length) {
+    throw new VaultCliError(
+      'ASSISTANT_TELEGRAM_CLEANUP_PROOF_MISMATCH',
+      'Telegram cleanup proofs must match the requested provider message ids.',
+    )
+  }
   const baseUrl = (resolveTelegramApiBaseUrl(env) ?? 'https://api.telegram.org').replace(
     /\/$/u,
     '',
   )
 
-  for (let index = 0; index < messageIds.length; index += TELEGRAM_DELETE_BATCH_LIMIT) {
-    const batch = messageIds.slice(index, index + TELEGRAM_DELETE_BATCH_LIMIT)
+  const batchLimit = cleanupProofs.length > 0
+    ? TELEGRAM_DELETE_PROOF_BATCH_LIMIT
+    : TELEGRAM_DELETE_BATCH_LIMIT
+  for (let index = 0; index < messageIds.length; index += batchLimit) {
+    const batch = messageIds.slice(index, index + batchLimit)
+    const proofBatch = cleanupProofs.slice(index, index + batchLimit)
     const request = buildTelegramDeleteRequest(target, batch)
     const response = await sendTelegramBotApiRequest({
       baseUrl,
+      cleanupProofs: proofBatch,
       deliveryTarget: serializeTelegramThreadTarget(target),
       fetchImplementation,
       method: 'POST',
@@ -612,6 +627,7 @@ function buildTelegramDeleteRequest(
 
 async function sendTelegramBotApiRequest(input: {
   baseUrl: string
+  cleanupProofs?: readonly string[]
   deliveryTarget?: string | null
   fetchImplementation: TelegramFetchImplementation
   method: 'POST'
@@ -628,6 +644,7 @@ async function sendTelegramBotApiRequest(input: {
     input.signal,
     TELEGRAM_SEND_TIMEOUT_MS,
   )
+  const usesHostedCredentialSentinel = !resolveTelegramBotIdFromToken(input.token)
 
   try {
     return await input.fetchImplementation(
@@ -636,7 +653,14 @@ async function sendTelegramBotApiRequest(input: {
         method: input.method,
         headers: {
           'content-type': 'application/json',
-          ...(!resolveTelegramBotIdFromToken(input.token) && input.deliveryTarget
+          ...(usesHostedCredentialSentinel && input.cleanupProofs?.length
+            ? {
+                [HOSTED_TELEGRAM_CLEANUP_PROOF_HEADER]: JSON.stringify(
+                  input.cleanupProofs,
+                ),
+              }
+            : {}),
+          ...(usesHostedCredentialSentinel && input.deliveryTarget
             ? {
                 [HOSTED_TELEGRAM_DELIVERY_TARGET_HEADER]: input.deliveryTarget,
               }
@@ -649,6 +673,10 @@ async function sendTelegramBotApiRequest(input: {
   } finally {
     timeout.cleanup()
   }
+}
+
+function normalizeTelegramCleanupProofs(proofs: readonly string[]): string[] {
+  return proofs.map((proof) => proof.trim()).filter(Boolean)
 }
 
 async function readTelegramResponsePayload(

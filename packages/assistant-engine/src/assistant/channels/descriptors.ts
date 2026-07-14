@@ -164,7 +164,11 @@ async function sendTelegramImageDelivery(input: {
   message: string
   replyToMessageId?: string | null
 }): Promise<{
-  cleanupMessages?: Array<{ messageId: string; target: string }> | null
+  cleanupMessages?: Array<{
+    cleanupProof?: string
+    messageId: string
+    target: string
+  }> | null
   cleanupTargetAliases?: string[] | null
   providerMessageId?: string | null
   providerMessageIds?: string[] | null

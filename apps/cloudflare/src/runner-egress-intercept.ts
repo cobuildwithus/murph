@@ -5,6 +5,7 @@ import {
   clampExaResearchScoutPublishedWindow,
   EXA_RESEARCH_SCOUT_METHOD,
   EXA_RESEARCH_SCOUT_PATH,
+  HOSTED_TELEGRAM_CLEANUP_PROOF_HEADER,
   HOSTED_TELEGRAM_DELIVERY_TARGET_HEADER,
   parseExaResearchScoutRequestBody,
   type ExaResearchScoutRequestBody,
@@ -82,6 +83,10 @@ import {
   isHostedProviderEgressCredential,
   verifyHostedProviderEgressCredential,
 } from "./hosted-provider-egress-credential.ts";
+import {
+  createHostedTelegramCleanupProof,
+  verifyHostedTelegramCleanupProof,
+} from "./hosted-telegram-cleanup-proof.ts";
 import {
   readHostedProviderCredentialDiagnosticKind,
 } from "./hosted-provider-credential-diagnostics.ts";
@@ -2831,7 +2836,7 @@ async function maybeHandleTelegramRequest(input: {
       return await handleTelegramTokenRewrite(
         input,
         apiPathMatch,
-        !targetlessOperation,
+        operation,
         (token) => `/bot${token}/${operation}`,
       );
     }
@@ -2847,7 +2852,7 @@ async function maybeHandleTelegramRequest(input: {
       return await handleTelegramTokenRewrite(
         input,
         filePathMatch,
-        false,
+        null,
         (token) => `/bot${token}/${filePath}`,
       );
     }
@@ -2872,7 +2877,7 @@ async function handleTelegramTokenRewrite(
     userId: string | null;
   },
   pathMatch: ProviderPathMatch,
-  requiresDeliveryAuthorization: boolean,
+  operation: string | null,
   createPathnameSuffix: (token: string) => string,
 ): Promise<Response> {
   const startedAt = Date.now();
@@ -2890,30 +2895,46 @@ async function handleTelegramTokenRewrite(
     });
   }
   const token = readRequiredInterceptSecret(input.env.TELEGRAM_BOT_TOKEN, "TELEGRAM_BOT_TOKEN");
-  if (requiresDeliveryAuthorization) {
-    const deliveryTarget = await readTelegramDeliveryTarget(input.request);
-    if (!deliveryTarget || !input.userId) {
+  let authorizedDeliveryTarget: string | null = null;
+  if (operation !== null && operation !== "getFile") {
+    if (!input.userId) {
       return disallowedProviderEgress();
     }
-    if (!isTelegramBotBindingAuthorized(deliveryTarget, token)) {
-      return disallowedProviderEgress();
-    }
-    const deliveryAuthorization = await authorizeHostedTelegramDeliveryTarget({
-      deliveryTarget,
-      env: input.env,
-      userId: input.userId,
-    });
-    if (deliveryAuthorization === "denied") {
-      return disallowedProviderEgress();
-    }
-    if (deliveryAuthorization === "unavailable") {
-      return unavailableProviderEgress();
+    if (isTelegramCleanupOperation(operation)) {
+      authorizedDeliveryTarget = await authorizeHostedTelegramCleanup({
+        env: input.env,
+        operation,
+        request: input.request,
+        token,
+        userId: input.userId,
+      });
+      if (!authorizedDeliveryTarget) {
+        return disallowedProviderEgress();
+      }
+    } else {
+      const delivery = await readTelegramDeliveryAuthorization(input.request);
+      if (!delivery || !isTelegramBotBindingAuthorized(delivery.target, token)) {
+        return disallowedProviderEgress();
+      }
+      const deliveryAuthorization = await authorizeHostedTelegramDeliveryTarget({
+        deliveryTarget: delivery.target,
+        env: input.env,
+        replyToMessageId: delivery.replyToMessageId,
+        userId: input.userId,
+      });
+      if (deliveryAuthorization === "denied") {
+        return disallowedProviderEgress();
+      }
+      if (deliveryAuthorization === "unavailable") {
+        return unavailableProviderEgress();
+      }
+      authorizedDeliveryTarget = delivery.target;
     }
   }
   const upstreamUrl = createProviderUpstreamUrl(input.url, pathMatch);
   const prefix = normalizedProviderBasePath(pathMatch.upstreamBaseUrl);
   upstreamUrl.pathname = `${prefix}${createPathnameSuffix(token)}`;
-  return await fetchAuthorizedProviderUpstream({
+  const response = await fetchAuthorizedProviderUpstream({
     authorization,
     providerKind: "telegram",
     request: input.request,
@@ -2924,6 +2945,34 @@ async function handleTelegramTokenRewrite(
       stripHostedProviderUpstreamHeaders(input.request.headers),
     ),
     url: input.url,
+  });
+  if (
+    !authorizedDeliveryTarget
+    || !operation
+    || !isTelegramMessageCreatingOperation(operation)
+    || !response.ok
+    || !input.userId
+  ) {
+    return response;
+  }
+  const messageId = await readTelegramProviderResponseMessageId(response);
+  const botId = resolveTelegramBotIdFromToken(token);
+  if (!messageId || !botId) {
+    return response;
+  }
+  const cleanupProof = await createHostedTelegramCleanupProof({
+    botId,
+    deliveryTarget: authorizedDeliveryTarget,
+    messageId,
+    source: input.env,
+    userId: input.userId,
+  });
+  const headers = new Headers(response.headers);
+  headers.set(HOSTED_TELEGRAM_CLEANUP_PROOF_HEADER, cleanupProof);
+  return new Response(response.body, {
+    headers,
+    status: response.status,
+    statusText: response.statusText,
   });
 }
 
@@ -3119,9 +3168,145 @@ function isAllowedTelegramOperation(operation: string): boolean {
     || operation === "sendPhoto"
     || operation === "sendVoice"
     || operation === "sendChatAction"
+    || operation === "deleteBusinessMessages"
     || operation === "deleteMessages"
     || operation === "setMessageReaction"
     || operation === "getFile";
+}
+
+function isTelegramCleanupOperation(operation: string): operation is
+  | "deleteBusinessMessages"
+  | "deleteMessages" {
+  return operation === "deleteBusinessMessages" || operation === "deleteMessages";
+}
+
+function isTelegramMessageCreatingOperation(operation: string): boolean {
+  return operation === "sendMessage"
+    || operation === "sendPhoto"
+    || operation === "sendVoice";
+}
+
+async function authorizeHostedTelegramCleanup(input: {
+  env: RunnerOutboundEnvironmentSource;
+  operation: "deleteBusinessMessages" | "deleteMessages";
+  request: Request;
+  token: string;
+  userId: string;
+}): Promise<string | null> {
+  const serializedTarget = input.request.headers
+    .get(HOSTED_TELEGRAM_DELIVERY_TARGET_HEADER)
+    ?.trim() ?? "";
+  const target = parseTelegramThreadTarget(serializedTarget);
+  const botId = resolveTelegramBotIdFromToken(input.token);
+  const proofs = readHostedTelegramCleanupProofHeader(input.request.headers);
+  const requestBody = await readTelegramCleanupRequestBody(input.request);
+  if (
+    !target
+    || !botId
+    || (target.botId != null && target.botId !== botId)
+    || !proofs
+    || !requestBody
+    || proofs.length !== requestBody.messageIds.length
+    || input.operation === "deleteBusinessMessages" && (
+      !target.businessConnectionId
+      || requestBody.businessConnectionId !== target.businessConnectionId
+    )
+    || input.operation === "deleteMessages" && (
+      Boolean(target.businessConnectionId)
+      || requestBody.chatId !== target.chatId
+    )
+  ) {
+    return null;
+  }
+
+  const expectedMessageIds = new Set(requestBody.messageIds);
+  const provedMessageIds = new Set<string>();
+  for (const proof of proofs) {
+    const claims = await verifyHostedTelegramCleanupProof({
+      proof,
+      source: input.env,
+    });
+    if (
+      !claims
+      || claims.userId !== input.userId
+      || claims.botId !== botId
+      || claims.deliveryTarget !== serializedTarget
+      || !expectedMessageIds.has(claims.messageId)
+      || provedMessageIds.has(claims.messageId)
+    ) {
+      return null;
+    }
+    provedMessageIds.add(claims.messageId);
+  }
+  return provedMessageIds.size === expectedMessageIds.size
+    ? serializedTarget
+    : null;
+}
+
+function readHostedTelegramCleanupProofHeader(headers: Headers): string[] | null {
+  const serialized = headers.get(HOSTED_TELEGRAM_CLEANUP_PROOF_HEADER)?.trim() ?? "";
+  if (!serialized || serialized.length > 32 * 1024) {
+    return null;
+  }
+  try {
+    const parsed = JSON.parse(serialized) as unknown;
+    if (!Array.isArray(parsed) || parsed.length === 0 || parsed.length > 100) {
+      return null;
+    }
+    const proofs = parsed.map((proof) => typeof proof === "string" ? proof.trim() : "");
+    return proofs.every(Boolean) ? proofs : null;
+  } catch {
+    return null;
+  }
+}
+
+async function readTelegramCleanupRequestBody(request: Request): Promise<{
+  businessConnectionId: string | null;
+  chatId: string | null;
+  messageIds: string[];
+} | null> {
+  try {
+    const body = readTelegramProviderRecord(await request.clone().json());
+    if (!body || !Array.isArray(body.message_ids) || body.message_ids.length === 0) {
+      return null;
+    }
+    const messageIds = body.message_ids.map((messageId) =>
+      normalizeTelegramProviderRoutingScalar(messageId)
+    );
+    if (
+      messageIds.some((messageId) =>
+        messageId === null
+        || parseTelegramProviderRoutingPositiveInteger(messageId) === null
+      )
+      || new Set(messageIds).size !== messageIds.length
+    ) {
+      return null;
+    }
+    return {
+      businessConnectionId: normalizeTelegramProviderRoutingScalar(
+        body.business_connection_id,
+      ),
+      chatId: normalizeTelegramProviderRoutingScalar(body.chat_id),
+      messageIds: messageIds as string[],
+    };
+  } catch {
+    return null;
+  }
+}
+
+async function readTelegramProviderResponseMessageId(
+  response: Response,
+): Promise<string | null> {
+  try {
+    const payload = readTelegramProviderRecord(await response.clone().json());
+    const result = readTelegramProviderRecord(payload?.result);
+    const messageId = normalizeTelegramProviderRoutingScalar(result?.message_id);
+    return messageId && parseTelegramProviderRoutingPositiveInteger(messageId) !== null
+      ? messageId
+      : null;
+  } catch {
+    return null;
+  }
 }
 
 async function authorizeHostedProviderEgress(input: {
@@ -3818,12 +4003,14 @@ function stripHostedProviderUpstreamHeaders(headers: Headers): Headers {
   stripped.delete("openai-organization");
   stripped.delete("openai-project");
   stripped.delete(HOSTED_TELEGRAM_DELIVERY_TARGET_HEADER);
+  stripped.delete(HOSTED_TELEGRAM_CLEANUP_PROOF_HEADER);
   return stripped;
 }
 
 async function authorizeHostedTelegramDeliveryTarget(input: {
   deliveryTarget: string;
   env: RunnerOutboundEnvironmentSource;
+  replyToMessageId: string | null;
   userId: string;
 }): Promise<"authorized" | "denied" | "unavailable"> {
   try {
@@ -3832,7 +4019,10 @@ async function authorizeHostedTelegramDeliveryTarget(input: {
     );
     const response = await fetchHostedExecutionWebControlPlaneResponse({
       baseUrl: environment.hostedWebBaseUrl,
-      body: JSON.stringify({ deliveryTarget: input.deliveryTarget }),
+      body: JSON.stringify({
+        deliveryTarget: input.deliveryTarget,
+        replyToMessageId: input.replyToMessageId,
+      }),
       boundUserId: input.userId,
       callbackSigning: environment.webCallbackSigning,
       method: "POST",
@@ -3854,9 +4044,9 @@ async function authorizeHostedTelegramDeliveryTarget(input: {
   }
 }
 
-async function readTelegramDeliveryTarget(
+async function readTelegramDeliveryAuthorization(
   request: Request,
-): Promise<string | null | undefined> {
+): Promise<{ replyToMessageId: string | null; target: string } | null> {
   const serializedTarget = request.headers
     .get(HOSTED_TELEGRAM_DELIVERY_TARGET_HEADER)
     ?.trim() ?? "";
@@ -3867,7 +4057,7 @@ async function readTelegramDeliveryTarget(
 
   const routing = await readTelegramProviderRequestRouting(request);
   if (!routing) {
-    return serializedTarget ? null : undefined;
+    return null;
   }
   const target = headerTarget ?? buildTelegramProviderRequestTarget(routing);
   if (!target) {
@@ -3887,7 +4077,10 @@ async function readTelegramDeliveryTarget(
     return null;
   }
 
-  return serializeTelegramThreadTarget(target);
+  return {
+    replyToMessageId: routing.replyToMessageId,
+    target: serializeTelegramThreadTarget(target),
+  };
 }
 
 function buildTelegramProviderRequestTarget(routing: {
@@ -3925,6 +4118,7 @@ async function readTelegramProviderRequestRouting(request: Request): Promise<{
   chatId: string | null;
   directMessagesTopicId: string | null;
   messageThreadId: string | null;
+  replyToMessageId: string | null;
 } | null> {
   try {
     const contentType = request.headers.get("content-type")?.toLowerCase() ?? "";
@@ -3947,6 +4141,7 @@ async function readTelegramProviderRequestRouting(request: Request): Promise<{
         "chat_id",
         "direct_messages_topic_id",
         "message_thread_id",
+        "reply_to_message_id",
       ] as const;
       if (routingFieldNames.some((name) => form.getAll(name).length > 1)) {
         return null;
@@ -3962,6 +4157,7 @@ async function readTelegramProviderRequestRouting(request: Request): Promise<{
       chatId: readField("chat_id"),
       directMessagesTopicId: readField("direct_messages_topic_id"),
       messageThreadId: readField("message_thread_id"),
+      replyToMessageId: readField("reply_to_message_id"),
     };
     const routing = {
       businessConnectionId: normalizeTelegramProviderRoutingScalar(
@@ -3974,12 +4170,19 @@ async function readTelegramProviderRequestRouting(request: Request): Promise<{
       messageThreadId: normalizeTelegramProviderRoutingScalar(
         rawRouting.messageThreadId,
       ),
+      replyToMessageId: normalizeTelegramProviderRoutingScalar(
+        rawRouting.replyToMessageId,
+      ),
     };
     if (
       hasField("business_connection_id") && routing.businessConnectionId === null
       || hasField("chat_id") && routing.chatId === null
       || hasField("direct_messages_topic_id") && routing.directMessagesTopicId === null
       || hasField("message_thread_id") && routing.messageThreadId === null
+      || hasField("reply_to_message_id") && (
+        routing.replyToMessageId === null
+        || parseTelegramProviderRoutingPositiveInteger(routing.replyToMessageId) === null
+      )
     ) {
       return null;
     }

@@ -87,7 +87,11 @@ export interface AssistantChannelDependencies {
     target: string
   }) => Promise<
     | {
-        cleanupMessages?: Array<{ messageId: string; target: string }> | null
+        cleanupMessages?: Array<{
+          cleanupProof?: string
+          messageId: string
+          target: string
+        }> | null
         cleanupTargetAliases?: string[] | null
         providerMessageId?: string | null
         providerMessageIds?: string[] | null
@@ -106,7 +110,11 @@ export interface AssistantChannelDependencies {
     target: string
   }) => Promise<
     | {
-        cleanupMessages?: Array<{ messageId: string; target: string }> | null
+        cleanupMessages?: Array<{
+          cleanupProof?: string
+          messageId: string
+          target: string
+        }> | null
         cleanupTargetAliases?: string[] | null
         providerMessageId?: string | null
         providerMessageIds?: string[] | null

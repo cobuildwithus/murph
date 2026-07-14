@@ -701,6 +701,7 @@ export const assistantTranscriptEntrySchema = z.object({
 
 const assistantChannelCleanupMessageSchema = z
   .object({
+    cleanupProof: z.string().min(1).optional(),
     messageId: z.string().min(1),
     target: z.string().min(1),
   })

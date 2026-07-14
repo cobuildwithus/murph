@@ -47,6 +47,8 @@ export const MURPH_PRODUCT_ORIGIN = "https://www.withmurph.ai" as const;
  */
 export const HOSTED_TELEGRAM_DELIVERY_TARGET_HEADER =
   "x-hosted-telegram-delivery-target" as const;
+export const HOSTED_TELEGRAM_CLEANUP_PROOF_HEADER =
+  "x-hosted-telegram-cleanup-proof" as const;
 
 /**
  * Nonsecret public bot identity injected beside the hosted Telegram token

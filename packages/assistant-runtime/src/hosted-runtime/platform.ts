@@ -132,6 +132,7 @@ export interface HostedRuntimeTelegramSendRequest {
 }
 
 export interface HostedRuntimeTelegramCleanupMessage {
+  cleanupProof?: string;
   messageId: string;
   target: string;
 }

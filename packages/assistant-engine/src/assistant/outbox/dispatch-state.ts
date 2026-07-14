@@ -779,8 +779,16 @@ function sameAssistantDeliveryCleanupTargetAliases(
 }
 
 function sameAssistantDeliveryCleanupMessages(
-  left: ReadonlyArray<{ messageId: string; target: string }> | undefined,
-  right: ReadonlyArray<{ messageId: string; target: string }> | undefined,
+  left: ReadonlyArray<{
+    cleanupProof?: string
+    messageId: string
+    target: string
+  }> | undefined,
+  right: ReadonlyArray<{
+    cleanupProof?: string
+    messageId: string
+    target: string
+  }> | undefined,
 ): boolean {
   const normalizedLeft = left ?? []
   const normalizedRight = right ?? []
@@ -796,13 +804,18 @@ function sameAssistantDeliveryCleanupMessages(
   return normalizedLeft.every(
     (value, index) =>
       value.messageId === normalizedRight[index]?.messageId &&
-      value.target === normalizedRight[index]?.target,
+      value.target === normalizedRight[index]?.target &&
+      value.cleanupProof === normalizedRight[index]?.cleanupProof,
   )
 }
 
 function readAssistantDeliveryCleanupMessages(
   delivery: AssistantChannelDelivery,
-): ReadonlyArray<{ messageId: string; target: string }> | undefined {
+): ReadonlyArray<{
+  cleanupProof?: string
+  messageId: string
+  target: string
+}> | undefined {
   if (!('cleanupMessages' in delivery)) {
     return undefined
   }
@@ -822,7 +835,7 @@ function readAssistantDeliveryCleanupTargetAliases(
 
 function readAssistantDeliveryCleanupMessagesValue(
   value: unknown,
-): Array<{ messageId: string; target: string }> | null {
+): Array<{ cleanupProof?: string; messageId: string; target: string }> | null {
   if (!Array.isArray(value)) {
     return null
   }
@@ -833,11 +846,19 @@ function readAssistantDeliveryCleanupMessagesValue(
         const record = readRecord(entry)
         const messageId = readNonEmptyString(record?.messageId)
         const target = readNonEmptyString(record?.target)
+        const cleanupProof = readNonEmptyString(record?.cleanupProof)
         if (!messageId || !target) {
           return []
         }
 
-        return [[`${target}\u0000${messageId}`, { messageId, target }] as const]
+        return [[
+          `${target}\u0000${messageId}`,
+          {
+            ...(cleanupProof ? { cleanupProof } : {}),
+            messageId,
+            target,
+          },
+        ] as const]
       }),
     ).values(),
   )

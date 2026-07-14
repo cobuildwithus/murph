@@ -6746,7 +6746,11 @@ describe("buildHostedExecutionRuntimePlatform", () => {
     const platform = buildTestHostedExecutionRuntimePlatform({
       boundUserId: "member_123",
       fetchImpl: vi.fn(async () => new Response(JSON.stringify({
-        cleanupMessages: [{ messageId: "1001", target: "telegram_chat_123" }],
+        cleanupMessages: [{
+          cleanupProof: "cleanup-proof-1001",
+          messageId: "1001",
+          target: "telegram_chat_123",
+        }],
         code: "ASSISTANT_TELEGRAM_DELIVERY_AMBIGUOUS",
         error: "Telegram delivery outcome is ambiguous.",
         providerMessageIds: ["1001"],
@@ -6770,7 +6774,11 @@ describe("buildHostedExecutionRuntimePlatform", () => {
     await expect(platform.effectsPort.getTelegramFile!({
       fileId: "telegram_file_123",
     })).rejects.toMatchObject({
-      cleanupMessages: [{ messageId: "1001", target: "telegram_chat_123" }],
+      cleanupMessages: [{
+        cleanupProof: "cleanup-proof-1001",
+        messageId: "1001",
+        target: "telegram_chat_123",
+      }],
       code: "ASSISTANT_TELEGRAM_DELIVERY_AMBIGUOUS",
       providerMessageId: "1001",
       providerMessageIds: ["1001"],

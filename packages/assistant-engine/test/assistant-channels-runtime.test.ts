@@ -1,5 +1,6 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import {
+  HOSTED_TELEGRAM_CLEANUP_PROOF_HEADER,
   HOSTED_TELEGRAM_DELIVERY_TARGET_HEADER,
   HOSTED_TELEGRAM_BOT_PUBLIC_ID_ENV,
 } from '@murphai/contracts'
@@ -253,8 +254,9 @@ describe('assistant channels runtime seam', () => {
     expect(readJsonBody(fetchImplementation.mock.calls[3][1]?.body)).not.toHaveProperty(
       'entities',
     )
-    expect(readJsonBody(fetchImplementation.mock.calls[3][1]?.body)).not.toHaveProperty(
+    expect(readJsonBody(fetchImplementation.mock.calls[3][1]?.body)).toHaveProperty(
       'reply_to_message_id',
+      42,
     )
   })
 
@@ -423,22 +425,19 @@ describe('assistant channels runtime seam', () => {
     })
   })
 
-  it('keeps hosted business partial delivery ambiguous when cleanup is rejected', async () => {
+  it('rolls back hosted business partial delivery with the sent-message cleanup proof', async () => {
     const fetchImplementation = createQueuedFetch([
       createTelegramResponse(200, {
         ok: true,
         result: {
           message_id: 1001,
         },
-      }),
+      }, 'proof-for-1001'),
       createTelegramResponse(400, {
         description: 'later chunk failed',
         error_code: 400,
       }),
-      createTelegramResponse(403, {
-        description: 'hosted business cleanup is not authorized',
-        error_code: 403,
-      }),
+      createTelegramResponse(200, { ok: true }),
     ])
 
     const target = '123:bot:654321:business:biz-123:dm-topic:9'
@@ -457,12 +456,7 @@ describe('assistant channels runtime seam', () => {
         },
       ),
     ).rejects.toMatchObject({
-      cleanupMessages: [{ messageId: '1001', target }],
-      code: 'ASSISTANT_TELEGRAM_DELIVERY_AMBIGUOUS',
-      deliveryMayHaveSucceeded: true,
-      providerMessageId: '1001',
-      providerMessageIds: ['1001'],
-      target,
+      code: 'ASSISTANT_TELEGRAM_DELIVERY_FAILED',
     })
 
     expect(fetchImplementation).toHaveBeenCalledTimes(3)
@@ -472,6 +466,9 @@ describe('assistant channels runtime seam', () => {
     expect(readJsonBody(fetchImplementation.mock.calls[2]?.[1]?.body)).toMatchObject({
       business_connection_id: 'biz-123',
       message_ids: [1001],
+    })
+    expect(fetchImplementation.mock.calls[2]?.[1]?.headers).toMatchObject({
+      [HOSTED_TELEGRAM_CLEANUP_PROOF_HEADER]: JSON.stringify(['proof-for-1001']),
     })
   })
 
@@ -775,6 +772,74 @@ describe('assistant channels runtime seam', () => {
       message_thread_id: 9,
       photo: 'https://cdn.example.test/example.png',
       reply_to_message_id: 42,
+    })
+  })
+
+  it('retains reply authority and proof-backed rollback across multi-image delivery', async () => {
+    const fetchImplementation = createQueuedFetch([
+      createTelegramResponse(200, {
+        ok: true,
+        result: {
+          message_id: 3001,
+        },
+      }, 'proof-for-3001'),
+      createTelegramResponse(400, {
+        description: 'later photo failed',
+        error_code: 400,
+      }),
+      createTelegramResponse(200, { ok: true }),
+    ])
+    const target = '123:bot:654321:business:biz-123:dm-topic:9'
+
+    await expect(sendTelegramImageMessage(
+      {
+        media: [
+          {
+            alt: 'First image',
+            kind: 'image',
+            source: 'test',
+            url: 'https://cdn.example.test/first.png',
+          },
+          {
+            alt: 'Second image',
+            kind: 'image',
+            source: 'test',
+            url: 'https://cdn.example.test/second.png',
+          },
+        ],
+        message: 'Two images.',
+        replyToMessageId: '42',
+        target,
+      },
+      {
+        env: {
+          TELEGRAM_API_BASE_URL: 'https://telegram.test/',
+          TELEGRAM_BOT_TOKEN: '__cloudflare_injected__',
+        },
+        fetchImplementation,
+      },
+    )).rejects.toMatchObject({
+      code: 'ASSISTANT_TELEGRAM_DELIVERY_FAILED',
+    })
+
+    expect(fetchImplementation).toHaveBeenCalledTimes(3)
+    expect(readJsonBody(fetchImplementation.mock.calls[0]?.[1]?.body)).toMatchObject({
+      photo: 'https://cdn.example.test/first.png',
+      reply_to_message_id: 42,
+    })
+    expect(readJsonBody(fetchImplementation.mock.calls[1]?.[1]?.body)).toMatchObject({
+      photo: 'https://cdn.example.test/second.png',
+      reply_to_message_id: 42,
+    })
+    expect(fetchImplementation.mock.calls[2]?.[0]).toContain(
+      '/deleteBusinessMessages',
+    )
+    expect(readJsonBody(fetchImplementation.mock.calls[2]?.[1]?.body)).toMatchObject({
+      business_connection_id: 'biz-123',
+      message_ids: [3001],
+    })
+    expect(fetchImplementation.mock.calls[2]?.[1]?.headers).toMatchObject({
+      [HOSTED_TELEGRAM_CLEANUP_PROOF_HEADER]: JSON.stringify(['proof-for-3001']),
     })
   })
 
@@ -2644,12 +2709,19 @@ function createAgentmailClient(
 function createTelegramResponse(
   status: number,
   payload: unknown,
+  cleanupProof?: string,
 ): {
+  headers: Headers
   json: () => Promise<unknown>
   ok: boolean
   status: number
 } {
   return {
+    headers: new Headers(
+      cleanupProof
+        ? { [HOSTED_TELEGRAM_CLEANUP_PROOF_HEADER]: cleanupProof }
+        : {},
+    ),
     json: async () => payload,
     ok: status >= 200 && status < 300,
     status,

@@ -524,7 +524,11 @@ describe('channel helper seams', () => {
   it('routes descriptor sends through channel-specific helpers and enforces email identity requirements', async () => {
     const sendTelegram = vi.fn().mockResolvedValue({
       cleanupMessages: [
-        { messageId: '  telegram-message-1  ', target: '  telegram-chat  ' },
+        {
+          cleanupProof: '  cleanup-proof-1  ',
+          messageId: '  telegram-message-1  ',
+          target: '  telegram-chat  ',
+        },
         { messageId: 'telegram-message-2', target: ' delivered-chat ' },
       ],
       cleanupTargetAliases: ['  telegram-chat  '],
@@ -564,7 +568,11 @@ describe('channel helper seams', () => {
     expect(telegramDelivery).toMatchObject({
       channel: 'telegram',
       cleanupMessages: [
-        { messageId: 'telegram-message-1', target: 'telegram-chat' },
+        {
+          cleanupProof: 'cleanup-proof-1',
+          messageId: 'telegram-message-1',
+          target: 'telegram-chat',
+        },
         { messageId: 'telegram-message-2', target: 'delivered-chat' },
       ],
       cleanupTargetAliases: ['telegram-chat'],

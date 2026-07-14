@@ -484,6 +484,18 @@ produce a bot-bound target before the same flag is enabled. Next deploy the
 compatible Cloudflare Worker/runner with `container_rollout=immediate`; require managed-container
 smoke to prove the new runner-bundle fingerprint and verify that a current
 target reaches Telegram while a former target fails before provider entry.
+The retained-inbound reply callback and cleanup-proof extension are additive but
+must converge Web before Worker/runner for the repaired behavior. Deploy Web
+first and wait for prior functions to drain, then deploy Cloudflare/runner with
+`container_rollout=immediate`. An old Worker against the new Web callback keeps
+current-route-only behavior; a new Worker against old Web remains fail-closed
+for a non-current inbound reply, so neither skew grants new recipient or delete
+authority, but the reply repair is incomplete until both planes converge. Once
+the new runner has persisted Worker-HMAC cleanup metadata, do not roll
+Cloudflare/runner below this proof-aware reader and delete boundary; forward-fix
+instead. Post-deploy proof must cover a reply to an authenticated inbound target
+that differs from the richer proactive route, business-message partial-delivery
+cleanup, and rejection of a mismatched cleanup proof before provider entry.
 Enable the producer in a second web deploy only after both planes are
 converged. For rollback, disable the producer first. Once
 disabled, compatible web syncs preserve already stored direct authority. Once a

@@ -210,6 +210,9 @@ function parseCleanupMessages(value: readonly unknown[]): HostedRuntimeTelegramC
   return value.map((entry) => {
     const record = requireRecord(entry, "Hosted Telegram cleanup message");
     return {
+      ...(record.cleanupProof === undefined
+        ? {}
+        : { cleanupProof: readRequiredString(record.cleanupProof, "cleanup proof") }),
       messageId: readRequiredString(record.messageId, "cleanup messageId"),
       target: readRequiredString(record.target, "cleanup target"),
     };

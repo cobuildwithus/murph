@@ -1,10 +1,13 @@
 import { beforeEach, describe, expect, it, vi } from "vitest";
 
 const mocks = vi.hoisted(() => ({
-  prisma: {},
-  readActiveHostedMemberAccess: vi.fn(),
-  readHostedMemberRoutingState: vi.fn(),
+  isHostedTelegramDeliveryTargetAuthorizedTx: vi.fn(),
+  lockHostedMemberRow: vi.fn(),
+  prisma: {
+    $transaction: vi.fn(),
+  },
   requireHostedCloudflareCallbackRequest: vi.fn(),
+  tx: {},
 }));
 
 vi.mock("@/src/lib/prisma", () => ({
@@ -16,25 +19,14 @@ vi.mock("@/src/lib/hosted-execution/cloudflare-callback-auth", () => ({
     mocks.requireHostedCloudflareCallbackRequest,
 }));
 
-vi.mock("@/src/lib/hosted-onboarding/hosted-member-routing-store", async () => {
-  const actual = await vi.importActual<typeof import(
-    "@/src/lib/hosted-onboarding/hosted-member-routing-store"
-  )>("@/src/lib/hosted-onboarding/hosted-member-routing-store");
-  return {
-    ...actual,
-    readHostedMemberRoutingState: mocks.readHostedMemberRoutingState,
-  };
-});
+vi.mock("@/src/lib/hosted-onboarding/shared", () => ({
+  lockHostedMemberRow: mocks.lockHostedMemberRow,
+}));
 
-vi.mock("@/src/lib/hosted-onboarding/member-access", async () => {
-  const actual = await vi.importActual<typeof import(
-    "@/src/lib/hosted-onboarding/member-access"
-  )>("@/src/lib/hosted-onboarding/member-access");
-  return {
-    ...actual,
-    readActiveHostedMemberAccess: mocks.readActiveHostedMemberAccess,
-  };
-});
+vi.mock("@/src/lib/hosted-onboarding/telegram-egress-authorization", () => ({
+  isHostedTelegramDeliveryTargetAuthorizedTx:
+    mocks.isHostedTelegramDeliveryTargetAuthorizedTx,
+}));
 
 import { POST } from "@/app/api/internal/hosted-execution/telegram/authorize-delivery/route";
 
@@ -42,14 +34,15 @@ describe("hosted Telegram delivery authorization route", () => {
   beforeEach(() => {
     vi.clearAllMocks();
     mocks.requireHostedCloudflareCallbackRequest.mockResolvedValue("member_123");
-    mocks.readActiveHostedMemberAccess.mockResolvedValue({ kind: "personal" });
-    mocks.readHostedMemberRoutingState.mockResolvedValue({
-      telegramThreadId: "789:bot:123456",
-    });
+    mocks.prisma.$transaction.mockImplementation(async (callback) => callback(mocks.tx));
+    mocks.isHostedTelegramDeliveryTargetAuthorizedTx.mockImplementation(
+      async ({ deliveryTarget }: { deliveryTarget: string }) =>
+        deliveryTarget === "789:bot:123456" || deliveryTarget === "789:topic:9",
+    );
   });
 
   it("authorizes only the member's current bot-bound target", async () => {
-    const response = await POST(createRequest("789:bot:123456"));
+    const response = await POST(createRequest("789:bot:123456", "42"));
 
     expect(response.status).toBe(200);
     await expect(response.json()).resolves.toEqual({ authorized: true });
@@ -57,10 +50,16 @@ describe("hosted Telegram delivery authorization route", () => {
       expect.any(Request),
       { maxBodyBytes: 2 * 1024 },
     );
-    expect(mocks.readHostedMemberRoutingState).toHaveBeenCalledWith({
+    expect(mocks.lockHostedMemberRow).toHaveBeenCalledWith(mocks.tx, "member_123");
+    expect(mocks.isHostedTelegramDeliveryTargetAuthorizedTx).toHaveBeenCalledWith({
+      deliveryTarget: "789:bot:123456",
       memberId: "member_123",
-      prisma: mocks.prisma,
+      prisma: mocks.tx,
+      replyToMessageId: "42",
     });
+    expect(mocks.lockHostedMemberRow.mock.invocationCallOrder[0]).toBeLessThan(
+      mocks.isHostedTelegramDeliveryTargetAuthorizedTx.mock.invocationCallOrder[0]!,
+    );
   });
 
   it.each([
@@ -75,7 +74,7 @@ describe("hosted Telegram delivery authorization route", () => {
   });
 
   it("rejects the current target when hosted access is inactive", async () => {
-    mocks.readActiveHostedMemberAccess.mockResolvedValueOnce(null);
+    mocks.isHostedTelegramDeliveryTargetAuthorizedTx.mockResolvedValueOnce(false);
 
     const response = await POST(createRequest("789:bot:123456"));
 
@@ -83,21 +82,20 @@ describe("hosted Telegram delivery authorization route", () => {
   });
 
   it("authorizes an exact current inbound-observed target without bot authority", async () => {
-    mocks.readHostedMemberRoutingState.mockResolvedValueOnce({
-      telegramThreadId: "789:topic:9",
-    });
-
     const response = await POST(createRequest("789:topic:9"));
 
     await expect(response.json()).resolves.toEqual({ authorized: true });
   });
 });
 
-function createRequest(deliveryTarget: string): Request {
+function createRequest(
+  deliveryTarget: string,
+  replyToMessageId: string | null = null,
+): Request {
   return new Request(
     "https://join.example.test/api/internal/hosted-execution/telegram/authorize-delivery",
     {
-      body: JSON.stringify({ deliveryTarget }),
+      body: JSON.stringify({ deliveryTarget, replyToMessageId }),
       headers: { "content-type": "application/json" },
       method: "POST",
     },

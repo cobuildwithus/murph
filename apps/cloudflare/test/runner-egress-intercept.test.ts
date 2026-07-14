@@ -2,6 +2,7 @@ import { describe, expect, it, vi, afterEach } from "vitest";
 import {
   buildExaResearchScoutOutputSchema,
   buildExaResearchScoutRequest,
+  HOSTED_TELEGRAM_CLEANUP_PROOF_HEADER,
   HOSTED_TELEGRAM_DELIVERY_TARGET_HEADER,
   MAX_RESEARCH_SCOUT_CANDIDATES,
 } from "@murphai/contracts";
@@ -73,6 +74,9 @@ import {
 import {
   createHostedProviderEgressCredential,
 } from "../src/hosted-provider-egress-credential.ts";
+import {
+  createHostedTelegramCleanupProof,
+} from "../src/hosted-telegram-cleanup-proof.ts";
 
 const WRITE_FENCE_HEADERS = {
   [HOSTED_RUNTIME_ATTEMPT_ID_HEADER]: "attempt_1",
@@ -5699,7 +5703,7 @@ describe("hostedRunnerIntercept", () => {
 
     const response = await hostedRunnerIntercept(
       new Request("https://api.telegram.org/bot__cloudflare_injected__/sendMessage", {
-        body: JSON.stringify({ chat_id: "789", text: "hello" }),
+        body: JSON.stringify({ chat_id: "789", reply_to_message_id: 42, text: "hello" }),
         headers: {
           ...BOUND_USER_WRITE_FENCE_HEADERS,
           "content-type": "application/json",
@@ -5720,6 +5724,7 @@ describe("hostedRunnerIntercept", () => {
     expect(authorizationCall).toBeDefined();
     expect(JSON.parse(String(authorizationCall?.[1]?.body))).toEqual({
       deliveryTarget: "789:bot:123456",
+      replyToMessageId: "42",
     });
     const providerCall = findFetchCall(fetchMock, "api.telegram.org");
     expect(providerCall).toBeDefined();
@@ -5860,14 +5865,47 @@ describe("hostedRunnerIntercept", () => {
     );
   });
 
-  it("rejects hosted business-only Telegram cleanup before authority or provider entry", async () => {
-    const fetchMock = vi.fn<typeof fetch>(async (target) => (
-      new URL(readFetchTargetUrl(target)).hostname === "web.example.test"
-        ? new Response(JSON.stringify({ authorized: true }))
-        : new Response("ok")
-    ));
+  it("authorizes hosted business cleanup only with the proof minted for that sent message", async () => {
+    const fetchMock = vi.fn<typeof fetch>(async (target) => {
+      const url = new URL(readFetchTargetUrl(target));
+      if (url.hostname === "web.example.test") {
+        return new Response(JSON.stringify({ authorized: true }));
+      }
+      if (url.pathname.endsWith("/sendMessage")) {
+        return new Response(JSON.stringify({
+          ok: true,
+          result: { message_id: 42 },
+        }), { headers: { "content-type": "application/json" } });
+      }
+      return new Response(JSON.stringify({ ok: true }));
+    });
     vi.stubGlobal("fetch", fetchMock);
     const validateRuntimeWriteFence = vi.fn(async () => true);
+    const deliveryTarget = "789:bot:123456:business:biz-current:dm-topic:9";
+
+    const sent = await hostedRunnerIntercept(
+      new Request("https://api.telegram.org/bot__cloudflare_injected__/sendMessage", {
+        body: JSON.stringify({
+          business_connection_id: "biz-current",
+          chat_id: "789",
+          direct_messages_topic_id: 9,
+          text: "first chunk",
+        }),
+        headers: {
+          ...BOUND_USER_WRITE_FENCE_HEADERS,
+          "content-type": "application/json",
+          [HOSTED_TELEGRAM_DELIVERY_TARGET_HEADER]: deliveryTarget,
+        },
+        method: "POST",
+      }),
+      createInterceptEnv({
+        TELEGRAM_BOT_TOKEN: "123456:test-token",
+        validateRuntimeWriteFence,
+      }),
+      { containerId: "opaque-container-id" },
+    );
+    const cleanupProof = sent.headers.get(HOSTED_TELEGRAM_CLEANUP_PROOF_HEADER);
+    expect(cleanupProof).toEqual(expect.stringMatching(/^murph_telegram_cleanup_v1\./u));
 
     const response = await hostedRunnerIntercept(
       new Request(
@@ -5880,8 +5918,8 @@ describe("hostedRunnerIntercept", () => {
           headers: {
             ...BOUND_USER_WRITE_FENCE_HEADERS,
             "content-type": "application/json",
-            [HOSTED_TELEGRAM_DELIVERY_TARGET_HEADER]:
-              "789:bot:123456:business:biz-current:dm-topic:9",
+            [HOSTED_TELEGRAM_CLEANUP_PROOF_HEADER]: JSON.stringify([cleanupProof]),
+            [HOSTED_TELEGRAM_DELIVERY_TARGET_HEADER]: deliveryTarget,
           },
           method: "POST",
         },
@@ -5893,8 +5931,185 @@ describe("hostedRunnerIntercept", () => {
       { containerId: "opaque-container-id" },
     );
 
-    expect(response.status).toBe(403);
-    expect(validateRuntimeWriteFence).not.toHaveBeenCalled();
+    expect(response.status).toBe(200);
+    expect(validateRuntimeWriteFence).toHaveBeenCalledTimes(2);
+    const providerRequests = fetchMock.mock.calls
+      .map(([target]) => target)
+      .filter((target) => new URL(readFetchTargetUrl(target)).hostname === "api.telegram.org")
+      .map((target) => target instanceof Request ? target : new Request(target));
+    expect(providerRequests.map((request) => new URL(request.url).pathname)).toEqual([
+      "/bot123456:test-token/sendMessage",
+      "/bot123456:test-token/deleteBusinessMessages",
+    ]);
+    expect(providerRequests[1]?.headers.has(HOSTED_TELEGRAM_CLEANUP_PROOF_HEADER)).toBe(false);
+    expect(providerRequests[1]?.headers.has(HOSTED_TELEGRAM_DELIVERY_TARGET_HEADER)).toBe(false);
+  });
+
+  it("mints cleanup proof for an authorized Telegram photo send", async () => {
+    const fetchMock = vi.fn<typeof fetch>(async (target) => {
+      const url = new URL(readFetchTargetUrl(target));
+      if (url.hostname === "web.example.test") {
+        return new Response(JSON.stringify({ authorized: true }));
+      }
+      return new Response(JSON.stringify({
+        ok: true,
+        result: { message_id: 84 },
+      }), { headers: { "content-type": "application/json" } });
+    });
+    vi.stubGlobal("fetch", fetchMock);
+
+    const response = await hostedRunnerIntercept(
+      new Request("https://api.telegram.org/bot__cloudflare_injected__/sendPhoto", {
+        body: JSON.stringify({
+          chat_id: "789",
+          photo: "https://cdn.example.test/photo.png",
+          reply_to_message_id: 42,
+        }),
+        headers: {
+          ...BOUND_USER_WRITE_FENCE_HEADERS,
+          "content-type": "application/json",
+          [HOSTED_TELEGRAM_DELIVERY_TARGET_HEADER]: "789:bot:123456",
+        },
+        method: "POST",
+      }),
+      createInterceptEnv({
+        TELEGRAM_BOT_TOKEN: "123456:test-token",
+        validateRuntimeWriteFence: vi.fn(async () => true),
+      }),
+      { containerId: "opaque-container-id" },
+    );
+
+    expect(response.status).toBe(200);
+    expect(response.headers.get(HOSTED_TELEGRAM_CLEANUP_PROOF_HEADER)).toEqual(
+      expect.stringMatching(/^murph_telegram_cleanup_v1\./u),
+    );
+    const providerRequest = findFetchCall(fetchMock, "api.telegram.org")?.[0] as Request;
+    expect(providerRequest.headers.has(HOSTED_TELEGRAM_CLEANUP_PROOF_HEADER)).toBe(false);
+    expect(providerRequest.headers.has(HOSTED_TELEGRAM_DELIVERY_TARGET_HEADER)).toBe(false);
+  });
+
+  it("authorizes cleanup for an inbound-observed target without a persisted bot binding", async () => {
+    const fetchMock = vi.fn<typeof fetch>(async () => new Response(JSON.stringify({ ok: true })));
+    vi.stubGlobal("fetch", fetchMock);
+    const cleanupProof = await createHostedTelegramCleanupProof({
+      botId: "123456",
+      deliveryTarget: "789",
+      messageId: "42",
+      source: {
+        HOSTED_PROVIDER_EGRESS_CREDENTIAL_SIGNING_SECRET:
+          PROVIDER_EGRESS_CREDENTIAL_SIGNING_SECRET,
+      },
+      userId: "member_123",
+    });
+
+    const response = await hostedRunnerIntercept(
+      new Request("https://api.telegram.org/bot__cloudflare_injected__/deleteMessages", {
+        body: JSON.stringify({ chat_id: "789", message_ids: [42] }),
+        headers: {
+          ...BOUND_USER_WRITE_FENCE_HEADERS,
+          "content-type": "application/json",
+          [HOSTED_TELEGRAM_CLEANUP_PROOF_HEADER]: JSON.stringify([cleanupProof]),
+          [HOSTED_TELEGRAM_DELIVERY_TARGET_HEADER]: "789",
+        },
+        method: "POST",
+      }),
+      createInterceptEnv({
+        TELEGRAM_BOT_TOKEN: "123456:test-token",
+        validateRuntimeWriteFence: vi.fn(async () => true),
+      }),
+      { containerId: "opaque-container-id" },
+    );
+
+    expect(response.status).toBe(200);
+    expect(findFetchCall(fetchMock, "api.telegram.org")).toBeDefined();
+  });
+
+  it("rejects mismatched and mixed Telegram cleanup proofs before provider entry", async () => {
+    const fetchMock = vi.fn<typeof fetch>(async () => new Response("unexpected"));
+    vi.stubGlobal("fetch", fetchMock);
+    const source = {
+      HOSTED_PROVIDER_EGRESS_CREDENTIAL_SIGNING_SECRET:
+        PROVIDER_EGRESS_CREDENTIAL_SIGNING_SECRET,
+    };
+    const createProof = async (overrides: {
+      botId?: string;
+      deliveryTarget?: string;
+      messageId?: string;
+      userId?: string;
+    } = {}) => await createHostedTelegramCleanupProof({
+      botId: overrides.botId ?? "123456",
+      deliveryTarget: overrides.deliveryTarget ?? "789:bot:123456",
+      messageId: overrides.messageId ?? "42",
+      source,
+      userId: overrides.userId ?? "member_123",
+    });
+    const cases = [
+      {
+        messageIds: [42],
+        proofs: [await createProof({ userId: "member_other" })],
+      },
+      {
+        messageIds: [42],
+        proofs: [await createProof({ deliveryTarget: "790:bot:123456" })],
+      },
+      {
+        messageIds: [42],
+        proofs: [await createProof({ messageId: "43" })],
+      },
+      {
+        messageIds: [42, 43],
+        proofs: [await createProof(), await createProof({ messageId: "44" })],
+      },
+      {
+        messageIds: [42],
+        proofs: [`${await createProof()}tampered`],
+      },
+      {
+        messageIds: [42],
+        proofs: [await createProof({
+          botId: "654321",
+          deliveryTarget: "789",
+        })],
+        requestDeliveryTarget: "789",
+      },
+      {
+        messageIds: [42, 43],
+        proofs: [await createProof(), await createProof()],
+      },
+      {
+        messageIds: [42],
+        proofs: null,
+      },
+    ];
+
+    for (const testCase of cases) {
+      const response = await hostedRunnerIntercept(
+        new Request("https://api.telegram.org/bot__cloudflare_injected__/deleteMessages", {
+          body: JSON.stringify({ chat_id: "789", message_ids: testCase.messageIds }),
+          headers: {
+            ...BOUND_USER_WRITE_FENCE_HEADERS,
+            "content-type": "application/json",
+            ...(testCase.proofs
+              ? {
+                  [HOSTED_TELEGRAM_CLEANUP_PROOF_HEADER]: JSON.stringify(testCase.proofs),
+                }
+              : {}),
+            [HOSTED_TELEGRAM_DELIVERY_TARGET_HEADER]:
+              "requestDeliveryTarget" in testCase
+                ? testCase.requestDeliveryTarget ?? "789:bot:123456"
+                : "789:bot:123456",
+          },
+          method: "POST",
+        }),
+        createInterceptEnv({
+          TELEGRAM_BOT_TOKEN: "123456:test-token",
+          validateRuntimeWriteFence: vi.fn(async () => true),
+        }),
+        { containerId: "opaque-container-id" },
+      );
+      expect(response.status).toBe(403);
+    }
+
     expect(fetchMock).not.toHaveBeenCalled();
   });
 
@@ -5919,6 +6134,16 @@ describe("hostedRunnerIntercept", () => {
         : new Response("ok")
     ));
     vi.stubGlobal("fetch", fetchMock);
+    const cleanupProof = await createHostedTelegramCleanupProof({
+      botId: "123456",
+      deliveryTarget: "789:bot:123456",
+      messageId: "42",
+      source: {
+        HOSTED_PROVIDER_EGRESS_CREDENTIAL_SIGNING_SECRET:
+          PROVIDER_EGRESS_CREDENTIAL_SIGNING_SECRET,
+      },
+      userId: "member_123",
+    });
 
     const response = await hostedRunnerIntercept(
       new Request(
@@ -5931,6 +6156,7 @@ describe("hostedRunnerIntercept", () => {
           headers: {
             ...BOUND_USER_WRITE_FENCE_HEADERS,
             "content-type": "application/json",
+            [HOSTED_TELEGRAM_CLEANUP_PROOF_HEADER]: JSON.stringify([cleanupProof]),
             [HOSTED_TELEGRAM_DELIVERY_TARGET_HEADER]: "789:bot:123456",
           },
           method: "POST",
@@ -5945,7 +6171,7 @@ describe("hostedRunnerIntercept", () => {
 
     expect(response.status).toBe(expectedStatus);
     expect(findFetchCall(fetchMock, "web.example.test") !== undefined).toBe(
-      expectedStatus === 200,
+      false,
     );
     expect(findFetchCall(fetchMock, "api.telegram.org") !== undefined).toBe(
       expectedStatus === 200,
@@ -5981,11 +6207,15 @@ describe("hostedRunnerIntercept", () => {
   });
 
   it("proves multipart Telegram routing before bot-bound provider entry", async () => {
-    const fetchMock = vi.fn<typeof fetch>(async (target) => (
-      new URL(readFetchTargetUrl(target)).hostname === "web.example.test"
-        ? new Response(JSON.stringify({ authorized: true }))
-        : new Response("ok")
-    ));
+    const fetchMock = vi.fn<typeof fetch>(async (target) => {
+      if (new URL(readFetchTargetUrl(target)).hostname === "web.example.test") {
+        return new Response(JSON.stringify({ authorized: true }));
+      }
+      return new Response(JSON.stringify({
+        ok: true,
+        result: { message_id: 85 },
+      }), { headers: { "content-type": "application/json" } });
+    });
     vi.stubGlobal("fetch", fetchMock);
     const body = new FormData();
     body.set("chat_id", "789");
@@ -6009,6 +6239,9 @@ describe("hostedRunnerIntercept", () => {
     );
 
     expect(response.status).toBe(200);
+    expect(response.headers.get(HOSTED_TELEGRAM_CLEANUP_PROOF_HEADER)).toEqual(
+      expect.stringMatching(/^murph_telegram_cleanup_v1\./u),
+    );
     expect(findFetchCall(fetchMock, "api.telegram.org")).toBeDefined();
   });
 
@@ -6046,6 +6279,7 @@ describe("hostedRunnerIntercept", () => {
     const authorizationCall = findFetchCall(fetchMock, "web.example.test");
     expect(JSON.parse(String(authorizationCall?.[1]?.body))).toEqual({
       deliveryTarget: "789:topic:9",
+      replyToMessageId: null,
     });
     expect(findFetchCall(fetchMock, "api.telegram.org") !== undefined).toBe(authorized);
   });

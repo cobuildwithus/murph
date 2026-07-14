@@ -2,6 +2,7 @@ import assert from 'node:assert/strict'
 
 import { afterEach, expect, test, vi } from 'vitest'
 import {
+  HOSTED_TELEGRAM_CLEANUP_PROOF_HEADER,
   HOSTED_TELEGRAM_DELIVERY_TARGET_HEADER,
 } from '@murphai/contracts'
 
@@ -420,6 +421,92 @@ test('deleteTelegramMessages batches ids and uses deleteBusinessMessages for bus
     message_ids: [101],
   })
   expect(seenRequests[1]?.body).not.toHaveProperty('chat_id')
+})
+
+test('deleteTelegramMessages keeps hosted cleanup proofs off direct provider requests', async () => {
+  const fetchImplementation = vi.fn(async (_url: string, init: {
+    body?: string | Blob | FormData
+    headers?: Record<string, string>
+    method: string
+    signal?: AbortSignal
+  }) => {
+    expect(init.headers).not.toHaveProperty(HOSTED_TELEGRAM_CLEANUP_PROOF_HEADER)
+    return createTelegramResponse({ ok: true })
+  })
+
+  await deleteTelegramMessages(
+    {
+      cleanupProofs: ['internal-proof'],
+      messageIds: ['42'],
+      target: '123:bot:654321',
+    },
+    {
+      env: { TELEGRAM_BOT_TOKEN: '654321:test-token' },
+      fetchImplementation,
+    },
+  )
+
+  expect(fetchImplementation).toHaveBeenCalledTimes(1)
+})
+
+test('deleteTelegramMessages bounds hosted proof headers to 32 messages per request', async () => {
+  const seenProofBatches: string[][] = []
+  const seenMessageIdBatches: number[][] = []
+  const fetchImplementation = vi.fn(async (_url: string, init: {
+    body?: string | Blob | FormData
+    headers?: Record<string, string>
+    method: string
+    signal?: AbortSignal
+  }) => {
+    seenProofBatches.push(JSON.parse(
+      init.headers?.[HOSTED_TELEGRAM_CLEANUP_PROOF_HEADER] ?? '[]',
+    ) as string[])
+    seenMessageIdBatches.push((JSON.parse(String(init.body)) as {
+      message_ids: number[]
+    }).message_ids)
+    return createTelegramResponse({ ok: true })
+  })
+  const cleanupProofs = Array.from({ length: 33 }, (_, index) => `proof-${index + 1}`)
+
+  await deleteTelegramMessages(
+    {
+      cleanupProofs,
+      messageIds: Array.from({ length: 33 }, (_, index) => String(index + 1)),
+      target: '123',
+    },
+    {
+      env: { TELEGRAM_BOT_TOKEN: '__cloudflare_injected__' },
+      fetchImplementation,
+    },
+  )
+
+  expect(seenProofBatches).toEqual([
+    cleanupProofs.slice(0, 32),
+    cleanupProofs.slice(32),
+  ])
+  expect(seenMessageIdBatches).toEqual([
+    Array.from({ length: 32 }, (_, index) => index + 1),
+    [33],
+  ])
+})
+
+test('deleteTelegramMessages rejects cleanup proof count mismatch before provider entry', async () => {
+  const fetchImplementation = vi.fn()
+
+  await expect(deleteTelegramMessages(
+    {
+      cleanupProofs: ['proof-1'],
+      messageIds: ['42', '43'],
+      target: '123',
+    },
+    {
+      env: { TELEGRAM_BOT_TOKEN: '__cloudflare_injected__' },
+      fetchImplementation,
+    },
+  )).rejects.toMatchObject({
+    code: 'ASSISTANT_TELEGRAM_CLEANUP_PROOF_MISMATCH',
+  })
+  expect(fetchImplementation).not.toHaveBeenCalled()
 })
 
 test('setTelegramMessageReaction posts a single emoji reaction to the target message', async () => {

@@ -1,4 +1,5 @@
 import {
+  HOSTED_TELEGRAM_CLEANUP_PROOF_HEADER,
   HOSTED_TELEGRAM_DELIVERY_TARGET_HEADER,
   HOSTED_TELEGRAM_BOT_PUBLIC_ID_ENV,
 } from '@murphai/contracts'
@@ -98,6 +99,7 @@ type DecoratedTelegramPhotoCaption = {
 }
 
 interface TelegramCleanupMessage {
+  cleanupProof?: string
   messageId: string
   target: string
 }
@@ -127,6 +129,7 @@ type TelegramSendAttemptResult =
 
 type TelegramSendAttemptOutcome =
   | {
+      cleanupProof: string | null
       kind: 'delivered'
       providerMessageId: string | null
     }
@@ -251,7 +254,6 @@ export async function sendTelegramImageMessage(
     lastProviderMessageId = deliveredText.providerMessageId
     target = parseTelegramTargetOrThrow(deliveredText.target, token)
     targetLabel = deliveredText.target
-    replyToMessageId = null
   }
 
   for (let index = 0; index < media.length; index += 1) {
@@ -276,12 +278,14 @@ export async function sendTelegramImageMessage(
       }
       if (delivered.providerMessageId) {
         cleanupMessages.push({
+          ...(delivered.cleanupProof
+            ? { cleanupProof: delivered.cleanupProof }
+            : {}),
           messageId: delivered.providerMessageId,
           target: delivered.targetLabel,
         })
         providerMessageIds.push(delivered.providerMessageId)
       }
-      replyToMessageId = null
     } catch (error) {
       if (providerMessageIds.length === 0) {
         throw error
@@ -1158,12 +1162,14 @@ async function sendTelegramMessageDetailed(
       }
       if (delivered.providerMessageId) {
         cleanupMessages.push({
+          ...(delivered.cleanupProof
+            ? { cleanupProof: delivered.cleanupProof }
+            : {}),
           messageId: delivered.providerMessageId,
           target: delivered.targetLabel,
         })
         providerMessageIds.push(delivered.providerMessageId)
       }
-      replyToMessageId = null
     } catch (error) {
       if (providerMessageIds.length === 0) {
         throw error
@@ -1212,10 +1218,15 @@ async function rollbackTelegramPartialDelivery(input: {
   fetchImplementation: TelegramFetchImplementation
 }): Promise<unknown | null> {
   try {
-    for (const [target, messageIds] of groupTelegramCleanupMessagesByTarget(input.cleanupMessages)) {
+    for (const [target, cleanupMessages] of groupTelegramCleanupMessagesByTarget(
+      input.cleanupMessages,
+    )) {
       await deleteTelegramMessages(
         {
-          messageIds,
+          cleanupProofs: cleanupMessages.flatMap((message) =>
+            message.cleanupProof ? [message.cleanupProof] : []
+          ),
+          messageIds: cleanupMessages.map((message) => message.messageId),
           target,
         },
         {
@@ -1284,6 +1295,7 @@ function normalizeTelegramCleanupMessages(
   for (const cleanupMessage of cleanupMessages) {
     const messageId = cleanupMessage.messageId.trim()
     const target = cleanupMessage.target.trim()
+    const cleanupProof = cleanupMessage.cleanupProof?.trim() ?? ''
     if (messageId.length === 0 || target.length === 0) {
       continue
     }
@@ -1295,6 +1307,7 @@ function normalizeTelegramCleanupMessages(
 
     seen.add(key)
     normalized.push({
+      ...(cleanupProof ? { cleanupProof } : {}),
       messageId,
       target,
     })
@@ -1305,12 +1318,12 @@ function normalizeTelegramCleanupMessages(
 
 function groupTelegramCleanupMessagesByTarget(
   cleanupMessages: readonly TelegramCleanupMessage[],
-): Map<string, string[]> {
-  const grouped = new Map<string, string[]>()
+): Map<string, TelegramCleanupMessage[]> {
+  const grouped = new Map<string, TelegramCleanupMessage[]>()
 
   for (const cleanupMessage of normalizeTelegramCleanupMessages(cleanupMessages)) {
     const bucket = grouped.get(cleanupMessage.target) ?? []
-    bucket.push(cleanupMessage.messageId)
+    bucket.push(cleanupMessage)
     grouped.set(cleanupMessage.target, bucket)
   }
 
@@ -1351,6 +1364,7 @@ async function sendTelegramTextChunk(input: {
   text: string
   token: string
 }): Promise<{
+  cleanupProof?: string
   cleanupTargetAliases?: string[]
   providerMessageId: string | null
   target: TelegramParsedTarget
@@ -1381,6 +1395,7 @@ async function sendTelegramTextChunk(input: {
 
     if (outcome.kind === 'delivered') {
       return {
+        ...(outcome.cleanupProof ? { cleanupProof: outcome.cleanupProof } : {}),
         ...(cleanupTargetAliases.size > 0
           ? {
               cleanupTargetAliases: [...cleanupTargetAliases],
@@ -1429,6 +1444,7 @@ async function sendTelegramPhoto(input: {
   targetLabel: string
   token: string
 }): Promise<{
+  cleanupProof?: string
   cleanupTargetAliases?: string[]
   providerMessageId: string | null
   target: TelegramParsedTarget
@@ -1459,6 +1475,7 @@ async function sendTelegramPhoto(input: {
 
     if (outcome.kind === 'delivered') {
       return {
+        ...(outcome.cleanupProof ? { cleanupProof: outcome.cleanupProof } : {}),
         ...(cleanupTargetAliases.size > 0
           ? {
               cleanupTargetAliases: [...cleanupTargetAliases],
@@ -2148,6 +2165,7 @@ function resolveTelegramSendAttemptOutcome(input: {
     isTelegramSuccessResponse(input.result.payload)
   ) {
     return {
+      cleanupProof: readTelegramCleanupProof(input.result.response),
       kind: 'delivered',
       providerMessageId: extractTelegramProviderMessageId(input.result.payload),
     }
@@ -2208,6 +2226,19 @@ function resolveTelegramSendAttemptOutcome(input: {
     kind: 'failed',
     failure,
   }
+}
+
+function readTelegramCleanupProof(response: TelegramFetchResponse): string | null {
+  const headers = response.headers
+  if (!headers || typeof headers !== 'object' || !('get' in headers)) {
+    return null
+  }
+  const get = (headers as { get(name: string): string | null }).get
+  if (typeof get !== 'function') {
+    return null
+  }
+  const proof = get.call(headers, HOSTED_TELEGRAM_CLEANUP_PROOF_HEADER)?.trim() ?? ''
+  return proof || null
 }
 
 function normalizeTelegramReplyToMessageId(value: string | null | undefined): string | null {

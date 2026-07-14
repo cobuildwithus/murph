@@ -427,7 +427,7 @@ export function readDeliveredCleanupTargetAliases(
 
 export function readDeliveredCleanupMessages(
   delivered: unknown,
-): Array<{ messageId: string; target: string }> | null {
+): Array<{ cleanupProof?: string; messageId: string; target: string }> | null {
   if (
     !delivered ||
     typeof delivered !== 'object' ||
@@ -450,11 +450,22 @@ export function readDeliveredCleanupMessages(
         const target = 'target' in entry && typeof entry.target === 'string'
           ? normalizeOptionalText(entry.target)
           : null
+        const cleanupProof =
+          'cleanupProof' in entry && typeof entry.cleanupProof === 'string'
+            ? normalizeOptionalText(entry.cleanupProof)
+            : null
         if (!messageId || !target) {
           return []
         }
 
-        return [[`${target}\u0000${messageId}`, { messageId, target }] as const]
+        return [[
+          `${target}\u0000${messageId}`,
+          {
+            ...(cleanupProof ? { cleanupProof } : {}),
+            messageId,
+            target,
+          },
+        ] as const]
       }),
     ).values(),
   )

@@ -4332,7 +4332,7 @@ function appendHostedAssistantDeliveryPayloadTarget(
 
 function readAssistantDeliveryCleanupMessages(
   delivery: AssistantChannelDelivery | null,
-): Array<{ messageId: string; target: string }> | null {
+): Array<{ cleanupProof?: string; messageId: string; target: string }> | null {
   if (!delivery || !("cleanupMessages" in delivery) || !Array.isArray(delivery.cleanupMessages)) {
     return null;
   }
@@ -4352,11 +4352,22 @@ function readAssistantDeliveryCleanupMessages(
           "target" in entry && typeof entry.target === "string"
             ? entry.target.trim()
             : "";
+        const cleanupProof =
+          "cleanupProof" in entry && typeof entry.cleanupProof === "string"
+            ? entry.cleanupProof.trim()
+            : "";
         if (messageId.length === 0 || target.length === 0) {
           return [];
         }
 
-        return [[`${target}\u0000${messageId}`, { messageId, target }] as const];
+        return [[
+          `${target}\u0000${messageId}`,
+          {
+            ...(cleanupProof ? { cleanupProof } : {}),
+            messageId,
+            target,
+          },
+        ] as const];
       }),
     ).values(),
   );
