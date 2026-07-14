@@ -3,6 +3,7 @@ import {
 } from "@murphai/hosted-execution";
 
 import {
+  assertCurrentMealPhotoCaptureEnrollmentTx,
   readAndValidateMealPhotoUpload,
   requireActiveMealPhotoCaptureEnrollment,
 } from "@/src/lib/device-sync/meal-photo-capture";
@@ -11,6 +12,7 @@ import { readHostedExecutionControlClientIfConfigured } from "@/src/lib/hosted-e
 import { appendHostedMailboxEnvelopeTx } from "@/src/lib/hosted-mailbox/store";
 import { signalHostedMailboxAppendRuntime } from "@/src/lib/hosted-orchestration/signal-runtime";
 import { hostedOnboardingError } from "@/src/lib/hosted-onboarding/errors";
+import { HOSTED_ONBOARDING_TRANSACTION_OPTIONS } from "@/src/lib/hosted-onboarding/shared";
 import { getPrisma } from "@/src/lib/prisma";
 
 export const POST = withJsonError(async (request: Request) => {
@@ -35,29 +37,43 @@ export const POST = withJsonError(async (request: Request) => {
     sha256: upload.sha256,
     userId: enrollment.memberId,
   });
-  const eventId = `meal-photo:${enrollment.enrollmentId}:${upload.captureId}`;
-  const envelope = buildHostedExecutionMealPhotoCapturedWake({
-    byteLength: staged.byteLength,
-    captureId: upload.captureId,
-    capturedAt: upload.capturedAt,
-    eventId,
-    mealPhotoKey: staged.mealPhotoKey,
-    memberId: enrollment.memberId,
-    occurredAt: upload.capturedAt,
-    sha256: staged.sha256,
-  });
-  const appended = await prisma.$transaction((tx) =>
-    appendHostedMailboxEnvelopeTx({
-      envelope,
-      tx,
-    })
-  );
-  if (appended.dedupeConflict) {
-    throw hostedOnboardingError({
-      code: "MEAL_PHOTO_DEDUPE_CONFLICT",
-      httpStatus: 422,
-      message: "Meal photo upload conflicts with an earlier capture.",
+  let appended: Awaited<ReturnType<typeof appendHostedMailboxEnvelopeTx>>;
+  try {
+    const eventId = `meal-photo:${enrollment.enrollmentId}:${upload.captureId}`;
+    const envelope = buildHostedExecutionMealPhotoCapturedWake({
+      byteLength: staged.byteLength,
+      captureId: upload.captureId,
+      capturedAt: upload.capturedAt,
+      eventId,
+      mealPhotoKey: staged.mealPhotoKey,
+      memberId: enrollment.memberId,
+      occurredAt: upload.capturedAt,
+      sha256: staged.sha256,
     });
+    appended = await prisma.$transaction(async (tx) => {
+      await assertCurrentMealPhotoCaptureEnrollmentTx({
+        enrollment,
+        prisma: tx,
+        request,
+      });
+      return await appendHostedMailboxEnvelopeTx({
+        envelope,
+        tx,
+      });
+    }, HOSTED_ONBOARDING_TRANSACTION_OPTIONS);
+    if (appended.dedupeConflict) {
+      throw hostedOnboardingError({
+        code: "MEAL_PHOTO_DEDUPE_CONFLICT",
+        httpStatus: 422,
+        message: "Meal photo upload conflicts with an earlier capture.",
+      });
+    }
+  } catch (error) {
+    await control.deleteMealPhoto({
+      mealPhotoKey: staged.mealPhotoKey,
+      userId: enrollment.memberId,
+    });
+    throw error;
   }
 
   // Re-signal exact duplicates too: an earlier request may have committed the

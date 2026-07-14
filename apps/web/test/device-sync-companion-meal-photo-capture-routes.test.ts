@@ -6,9 +6,11 @@ vi.mock("server-only", () => ({}));
 
 const mocks = vi.hoisted(() => ({
   appendHostedMailboxEnvelopeTx: vi.fn(),
+  assertCurrentMealPhotoCaptureEnrollmentTx: vi.fn(),
   assertHostedLaunchRequiredConsentGranted: vi.fn(),
   assertMealPhotoCaptureRequestHasNoBody: vi.fn(),
   buildHostedExecutionMealPhotoCapturedWake: vi.fn(),
+  deleteMealPhoto: vi.fn(),
   getPrisma: vi.fn(),
   isMealPhotoCaptureScopedAuthorization: vi.fn(),
   issueMealPhotoCaptureEnrollment: vi.fn(),
@@ -33,6 +35,8 @@ vi.mock("@murphai/hosted-execution", () => ({
 }));
 
 vi.mock("@/src/lib/device-sync/meal-photo-capture", () => ({
+  assertCurrentMealPhotoCaptureEnrollmentTx:
+    mocks.assertCurrentMealPhotoCaptureEnrollmentTx,
   assertMealPhotoCaptureRequestHasNoBody: mocks.assertMealPhotoCaptureRequestHasNoBody,
   isMealPhotoCaptureScopedAuthorization: mocks.isMealPhotoCaptureScopedAuthorization,
   issueMealPhotoCaptureEnrollment: mocks.issueMealPhotoCaptureEnrollment,
@@ -132,6 +136,7 @@ describe("meal photo companion routes", () => {
       enrollmentId: ENROLLMENT_ID,
       memberId: MEMBER_ID,
     });
+    mocks.assertCurrentMealPhotoCaptureEnrollmentTx.mockResolvedValue(undefined);
     mocks.readAndValidateMealPhotoUpload.mockResolvedValue({
       bytes: JPEG,
       captureId: CAPTURE_ID,
@@ -146,8 +151,10 @@ describe("meal photo companion routes", () => {
       sha256: "b".repeat(64),
     });
     mocks.readHostedExecutionControlClientIfConfigured.mockReturnValue({
+      deleteMealPhoto: mocks.deleteMealPhoto,
       stageMealPhoto: mocks.stageMealPhoto,
     });
+    mocks.deleteMealPhoto.mockResolvedValue(undefined);
     mocks.buildHostedExecutionMealPhotoCapturedWake.mockReturnValue({
       kind: "meal-photo.captured",
     });
@@ -255,6 +262,20 @@ describe("meal photo companion routes", () => {
       envelope: { kind: "meal-photo.captured" },
       tx: { label: "tx" },
     });
+    expect(
+      mocks.assertCurrentMealPhotoCaptureEnrollmentTx.mock.invocationCallOrder[0],
+    ).toBeLessThan(
+      mocks.appendHostedMailboxEnvelopeTx.mock.invocationCallOrder[0] ?? Number.MAX_SAFE_INTEGER,
+    );
+    expect(mocks.assertCurrentMealPhotoCaptureEnrollmentTx).toHaveBeenCalledWith({
+      enrollment: {
+        enrollmentId: ENROLLMENT_ID,
+        memberId: MEMBER_ID,
+      },
+      prisma: { label: "tx" },
+      request,
+    });
+    expect(mocks.deleteMealPhoto).not.toHaveBeenCalled();
     expect(mocks.signalHostedMailboxAppendRuntime).toHaveBeenCalledWith({
       expectedUserId: MEMBER_ID,
       mailboxItemId: "mailbox_1",
@@ -291,7 +312,44 @@ describe("meal photo companion routes", () => {
       { body: requestBody(JPEG), method: "POST" },
     ));
     expect(conflictResponse.status).toBe(422);
+    expect(mocks.deleteMealPhoto).toHaveBeenCalledWith({
+      mealPhotoKey: "meal-photo-key",
+      userId: MEMBER_ID,
+    });
     expect(mocks.signalHostedMailboxAppendRuntime).toHaveBeenCalledTimes(1);
+  });
+
+  it("deletes staging when final authority revalidation fails", async () => {
+    mocks.assertCurrentMealPhotoCaptureEnrollmentTx.mockRejectedValueOnce(
+      new Error("authorization changed"),
+    );
+    const response = await photosRoute.POST(new Request(
+      "https://app.example.test/photos",
+      { body: requestBody(JPEG), method: "POST" },
+    ));
+
+    expect(response.status).toBe(500);
+    expect(mocks.appendHostedMailboxEnvelopeTx).not.toHaveBeenCalled();
+    expect(mocks.deleteMealPhoto).toHaveBeenCalledWith({
+      mealPhotoKey: "meal-photo-key",
+      userId: MEMBER_ID,
+    });
+    expect(mocks.signalHostedMailboxAppendRuntime).not.toHaveBeenCalled();
+  });
+
+  it("deletes staging when the mailbox append fails", async () => {
+    mocks.appendHostedMailboxEnvelopeTx.mockRejectedValueOnce(new Error("append failed"));
+    const response = await photosRoute.POST(new Request(
+      "https://app.example.test/photos",
+      { body: requestBody(JPEG), method: "POST" },
+    ));
+
+    expect(response.status).toBe(500);
+    expect(mocks.deleteMealPhoto).toHaveBeenCalledWith({
+      mealPhotoKey: "meal-photo-key",
+      userId: MEMBER_ID,
+    });
+    expect(mocks.signalHostedMailboxAppendRuntime).not.toHaveBeenCalled();
   });
 
   it("fails closed before mailbox append when private storage is unavailable", async () => {
