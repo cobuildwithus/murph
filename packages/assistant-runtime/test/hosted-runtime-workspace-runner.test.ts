@@ -4797,6 +4797,17 @@ describe("runHostedWorkspaceUntilIdleOrBudget", () => {
       eventId: "evt_synthetic_runner_staging_yield_late",
       occurredAt: lateOccurredAt,
     };
+    if (lateWake.message.channel !== "linq") {
+      throw new Error("Projection-stall fixture requires a Linq wake.");
+    }
+    lateWake.message.linqMessage.parts.push({
+      attachmentId: "att_synthetic_runner_staging_yield_late",
+      fileName: "projection-stall.pdf",
+      mimeType: "application/pdf",
+      size: 1,
+      type: "media",
+      url: "https://cdn.example.test/projection-stall.pdf",
+    });
     const items: HostedMailboxItem[] = [];
     const importedSeqs: string[] = [];
     const fetchRequests: HostedMailboxFetchRequest[] = [];
@@ -4912,6 +4923,17 @@ describe("runHostedWorkspaceUntilIdleOrBudget", () => {
       eventId: "evt_synthetic_runner_stop_aborts_projection",
       occurredAt: lateOccurredAt,
     };
+    if (lateWake.message.channel !== "linq") {
+      throw new Error("Projection-stall fixture requires a Linq wake.");
+    }
+    lateWake.message.linqMessage.parts.push({
+      attachmentId: "att_synthetic_runner_stop_aborts_projection",
+      fileName: "projection-stall.pdf",
+      mimeType: "application/pdf",
+      size: 1,
+      type: "media",
+      url: "https://cdn.example.test/projection-stall.pdf",
+    });
     const items: HostedMailboxItem[] = [];
     const importedSeqs: string[] = [];
     const fetchRequests: HostedMailboxFetchRequest[] = [];

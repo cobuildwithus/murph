@@ -15,7 +15,7 @@ import {
   applyCanonicalWriteBatch,
   type CanonicalRawContentInput,
   loadVault,
-  listWriteOperationMetadataPaths,
+  listWriteOperationMetadataPathsWithStageDirectories,
   readJsonlRecords,
   readStoredWriteOperation,
   readStoredWriteOperationJsonlAppendPayload,
@@ -1142,7 +1142,7 @@ async function readRecoverableStoredCaptureSnapshot(input: {
 async function listRecoverableInboxCaptureOperations(
   vaultRoot: string,
 ): Promise<Map<string, RecoverableInboxCaptureOperation>> {
-  const relativePaths = await listWriteOperationMetadataPaths(vaultRoot);
+  const relativePaths = await listWriteOperationMetadataPathsWithStageDirectories(vaultRoot);
   const selected = new Map<string, RecoverableInboxCaptureOperation>();
 
   for (const relativePath of relativePaths) {

@@ -73,13 +73,21 @@ describe("shared-host verification slots", () => {
     );
   });
 
-  it("serializes commands when one slot is configured", async () => {
+  it("waits without a deadline when one slot is configured", async () => {
     const stateRoot = makeTempRoot();
     const first = startHolder("first", stateRoot, 1);
     await waitForLine(first, "ready");
 
-    const second = startCommand("second", stateRoot, 1, "process.stdout.write('started\\n')");
+    const second = startCommand(
+      "second",
+      stateRoot,
+      1,
+      "process.stdout.write('started\\n')",
+      { MURPH_VERIFY_SHARED_HOST_TIMEOUT_MS: "40" },
+    );
+    await waitForStderrLine(second, "Waiting continues until a slot is available");
     await expectNoLine(second, "started", 120);
+    expect(second.exitCode).toBeNull();
 
     first.stdin?.end();
     await waitForExit(first);
@@ -131,32 +139,12 @@ describe("shared-host verification slots", () => {
     expect(readdirSync(stateRoot)).toEqual([]);
   });
 
-  it("times out cleanly without exposing absolute working paths", async () => {
+  it("does not expose absolute working paths in owner metadata", async () => {
     const stateRoot = makeTempRoot();
-    const privateCwd = path.join(makeTempRoot(), "private-cwd");
-    mkdirSync(privateCwd);
-    const holder = startHolder("holder", stateRoot, 1);
+    const holder = startHolder(repoRoot, stateRoot, 1);
     await waitForLine(holder, "ready");
 
-    const result = spawnSync(
-      process.execPath,
-      [wrapperPath, "waiting command", "--", process.execPath, "-e", ""],
-      {
-        cwd: privateCwd,
-        encoding: "utf8",
-        env: slotEnv(stateRoot, 1, {
-          MURPH_VERIFY_SHARED_HOST_TIMEOUT_MS: "80",
-        }),
-      },
-    );
-
-    expect(result.status).toBe(1);
-    expect(result.stderr).toContain("Timed out after 80ms");
-    expect(result.stderr).not.toContain(privateCwd);
-    expect(result.stderr).not.toContain(os.homedir());
-
     const ownerText = readFileSync(path.join(stateRoot, "slot-1", "owner.json"), "utf8");
-    expect(ownerText).not.toContain(privateCwd);
     expect(ownerText).not.toContain(repoRoot);
     expect(ownerText).not.toContain(os.homedir());
 
@@ -312,7 +300,6 @@ function slotEnv(
     MURPH_VERIFY_HOST_CONCURRENCY: String(slots),
     MURPH_VERIFY_SHARED_HOST_STALE_METADATA_GRACE_MS: "0",
     MURPH_VERIFY_SHARED_HOST_TEST_STATE_ROOT: stateRoot,
-    MURPH_VERIFY_SHARED_HOST_TIMEOUT_MS: "2000",
     ...overrides,
   };
 }
@@ -339,6 +326,7 @@ function startCommand(
   stateRoot: string,
   slots: number,
   source: string,
+  overrides: NodeJS.ProcessEnv = {},
 ): ChildProcess {
   const child = spawn(
     process.execPath,
@@ -353,7 +341,7 @@ function startCommand(
     ],
     {
       cwd: repoRoot,
-      env: slotEnv(stateRoot, slots),
+      env: slotEnv(stateRoot, slots, overrides),
       stdio: ["pipe", "pipe", "pipe"],
     },
   );

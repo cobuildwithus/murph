@@ -73,7 +73,7 @@ signal Temporal hosted orchestration
 restore hosted workspace
 import mailbox prefix into local runtime state and stage AssistantInputEvent rows
 pull pending device-sync dirty rows
-run best-effort local inbox projection plus audio/video transcript enrichment without checkpointing it
+for Linq input with link parts, attachment-bearing non-email input, and direct raw email, run best-effort local inbox projection plus audio/video transcript enrichment without checkpointing it
 run local runtime work until idle or budget
 while dirty and before the idle floor, service fresh foreground input and at
   most one exact assistant wake projected by the current foreground phase
@@ -98,10 +98,15 @@ The hosted adapter is the mailbox importer. It decodes a conversation mailbox
 row into a bounded `AssistantInputEvent`, stages it in local runtime state,
 marks the active invocation dirty, and checkpoints that dirty state only at the
 runtime-owned idle-floor—or last-chance shutdown—`idle_shutdown` checkpoint.
-Best-effort inbox projection may run while the decoded wake is still in memory.
-Projection status is logged and
-local inbox artifacts may help the same invocation, but hosted runtime must not
-take a separate workspace checkpoint just to persist projection/cache cleanup.
+Plain-text Linq plus
+attachment-free Telegram and WhatsApp input does not initialize or import inbox
+projection. Linq input with link parts retains the existing projection path.
+Direct email retains raw-message projection because its staged preview is
+bounded; group-routed email remains intentionally raw-free.
+Attachment-bearing non-email input may run best-effort inbox projection while
+the decoded wake is still in memory so local attachment artifacts can help the
+same invocation, but hosted runtime must not take a separate workspace
+checkpoint just to persist projection/cache cleanup.
 Failed projection is not durably retried by hosted runtime unless a future
 executor adds enough typed remote projection reference data to reconstruct the
 work without raw payload duplication. Inbox capture state, raw attachment
@@ -719,13 +724,17 @@ caller sends its existing ensure-processing HTTP timeout as an internal header.
 Cloudflare treats that value as an operational hint only: the foreground
 pre-accept budget is clamped by Cloudflare's configured web-control timeout, and
 workspace read/readiness steps are capped by the remaining budget. Accepted
-background invocations are registered with the Durable Object lifetime.
+background invocations begin their pending I/O before acceptance; Durable Object
+`waitUntil()` is not a lifecycle mechanism and is not used.
 Accepted starts and wakes return an owner recheck aligned to the
 expected idle checkpoint horizon rather than a short durable-lag polling loop. A
-runtime fence whose child is missing is replaced after the startup grace window
-when a later ensure command observes it. A wake-unconfirmed active child is not
-replaced; the caller retries until the child finishes, becomes wakeable, or is no
-longer active.
+same-version runtime fence whose child is missing remains protected by the
+startup grace window. When an identity-aware direct wake proves that the exact
+stored prior-version container has no active child, UserRunner immediately
+compare-and-swap replaces that fence. Concurrent replacement callers converge
+on the authoritative current fence record returned by the same compare-and-swap.
+A wake-unconfirmed active child is not replaced; the caller retries until the
+child finishes, becomes wakeable, or is no longer active.
 A failed transport call to an accepted invocation does not prove the invocation
 died. Before clearing the write fence after an invoke transport failure, the
 UserRunner probes the RunnerContainer for the exact fence identity
@@ -807,10 +816,14 @@ idle-floor—or last-chance shutdown—`idle_shutdown` checkpoint succeeds.
 RunnerContainer never records
 pending checkpoint intent. Activity expiry is cleanup-only. Projection status
 is logged and artifacts remain rebuildable best-effort state rather than a
-reason to take another workspace checkpoint, so failed or slow projection does
-not block assistant admission and does not imply a durable retry queue.
-Successful projection may make raw attachment paths, image evidence, or
-audio/video transcript evidence available to the same assistant turn.
+reason to take another workspace checkpoint. Plain-text Linq plus
+attachment-free Telegram and WhatsApp input skips projection and cannot be
+delayed by projection initialization or history scans. Linq links, direct email,
+and attachment projection status are logged, and their artifacts remain
+rebuildable best-effort state rather than a reason to take another workspace
+checkpoint or create a durable retry queue. Successful attachment projection
+may make raw paths, image evidence, or audio/video transcript evidence
+available to the same assistant turn.
 Assistant prompt preparation reads derived attachment evidence sequentially
 under one 32 MiB budget for the current turn and a 16 MiB per-file limit. Hosted
 artifact materialization rejects an external artifact whose declared size is
@@ -883,11 +896,15 @@ terminal auto-reply evidence, not from mailbox import progress.
 
 Mailbox import has no provider-visible pre-assistant side-effect phase.
 Provider-visible cleanup and read acknowledgement must not run between local
-mailbox staging and assistant admission. Local inbox projection and audio/video
-transcript enrichment may run after local staging and before assistant admission because
-they only update rebuildable local projection artifacts and `AssistantInputEvent`
-projection metadata. These projection updates must not request an additional
-workspace checkpoint. Linq inbound message deletion is still eventual, but it is
+mailbox staging and assistant admission. For Linq input with link parts,
+attachment-bearing non-email input, and direct raw email, local inbox projection
+and audio/video transcript enrichment may run after local staging and before
+assistant admission because they update rebuildable local projection artifacts
+and `AssistantInputEvent` projection metadata. Plain-text Linq plus
+attachment-free Telegram and WhatsApp input proceeds from staging to admission
+without that work.
+Projection updates must not request an additional workspace checkpoint. Linq
+inbound message deletion is still eventual, but it is
 queued only after terminal handling evidence is durable under
 `.runtime/operations/assistant/auto-reply/evidence/<captureId>.json` and is
 drained through hosted provider-cleanup after the next successful runtime-owned
