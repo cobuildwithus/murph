@@ -879,6 +879,59 @@ describe("runHostedAssistantAutomation", () => {
     ]);
   });
 
+  it("repairs retained proof when a recovered reply is skipped", async () => {
+    const callOrder: string[] = [];
+    mocks.selectHostedAssistantInputIds.mockImplementationOnce(async () => {
+      callOrder.push("select");
+      return {
+        inputIds: ["input_recovered_but_skipped"],
+        mode: "background",
+        pendingInputIds: [
+          "input_terminal_route_proof",
+          "input_recovered_but_skipped",
+        ],
+      };
+    });
+    mocks.repairHostedPendingAssistantRouteProofBatch.mockImplementationOnce(async () => {
+      callOrder.push("repair");
+      return {
+        pending: false,
+        processedInputIds: ["input_terminal_route_proof"],
+        repaired: 1,
+        yielded: false,
+      };
+    });
+
+    const result = await runHostedAssistantAutomationLane({
+      executionContext: {
+        hosted: {
+          issueDeviceConnectLink: vi.fn(),
+          memberId: "member_123",
+          userEnvKeys: [],
+        },
+      },
+      requestId: "req_recovered_reply_skipped_route_repair",
+      runtime: createHostedAutomationRuntime(),
+      skipAssistantAutomation: true,
+      vaultRoot: "/tmp/vault-root",
+      wake: {
+        eventId: "evt_recovered_reply_skipped_route_repair",
+        kind: "runtime.timer",
+        occurredAt: "2026-04-23T00:00:00.000Z",
+        triggerKind: "runtime_timer",
+        userId: "member_123",
+      },
+    });
+
+    expect(callOrder).toEqual(["select", "repair"]);
+    expect(mocks.runAssistantAutomationPass).not.toHaveBeenCalled();
+    expect(result).toMatchObject({
+      assistantAutomationProgressed: true,
+      assistantAutomationSelectedInputIds: [],
+      nextWakeAt: null,
+    });
+  });
+
   it("schedules another bounded proof batch before assistant selection", async () => {
     mocks.repairHostedPendingAssistantRouteProofBatch.mockResolvedValueOnce({
       pending: true,

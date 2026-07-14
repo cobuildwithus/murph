@@ -33,3 +33,22 @@ Resolve the two accepted ReviewGPT findings on the exact pushed PR head:
 - Scoped `pnpm test:diff` across the changed runtime, web, and rollout documentation.
 - Required coverage and security completion audits.
 - Rerun ReviewGPT on the pushed PR head and continue until zero accepted findings.
+
+## Completion Evidence
+
+- Focused assistant-runtime selection and maintenance suites passed with 85 tests.
+- Focused web Linq dispatch suite passed with 123 tests.
+- The diff-aware lane passed repository guards, affected typecheck, and 1,606
+  assistant-runtime tests. Its concurrent web build exhausted the unchanged
+  OpenGraph route timeout under host contention after web smoke, lint, and
+  4,884 web tests had passed.
+- The unchanged web production build passed in isolation, including all 188
+  static pages and trace hygiene.
+- Isolated Cloudflare verification passed its typecheck, Workers test, and
+  1,770 Node tests.
+- The coverage audit added a regression proving retained route repair still
+  runs when a recovered reply is selected but assistant execution is skipped.
+- The security/privacy audit reported no critical, high, or medium findings.
+Status: completed
+Updated: 2026-07-13
+Completed: 2026-07-13
