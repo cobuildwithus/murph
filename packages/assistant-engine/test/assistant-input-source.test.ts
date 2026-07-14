@@ -180,7 +180,7 @@ describe('store-backed assistant input source', () => {
     ]))
   })
 
-  it('projects literal participant context from the sidecar without persisting it in the input event', async () => {
+  it('projects literal group context from the sidecar without persisting it in the input event', async () => {
     const { vaultRoot } = await createAssistantInputSourceVault(
       'assistant-input-source-participant-context-',
     )
@@ -209,6 +209,7 @@ describe('store-backed assistant input source', () => {
     })
     await recordHostedMailboxAssistantInputItem({
       groupParticipantAdded: true,
+      groupReactionContext: 'A participant liked: previous group message',
       inputId: stored.inputId,
       mailboxItemId: 'raw_mailbox_item_participant_context',
       vault: vaultRoot,
@@ -218,12 +219,22 @@ describe('store-backed assistant input source', () => {
     const result = await source.listInputCandidates({})
 
     expect(result.inputs[0]?.event.groupParticipantAdded).toBe(true)
+    expect(result.inputs[0]?.event.groupReactionContext).toBe(
+      'A participant liked: previous group message',
+    )
+    expect(
+      Object.hasOwn(
+        result.inputs[0]?.event.sourceMetadata ?? {},
+        'groupReactionContext',
+      ),
+    ).toBe(false)
     expect(await readHostedMailboxAssistantInputItemDetails({
       inputIds: [stored.inputId],
       vault: vaultRoot,
     })).toEqual(new Map([
       [stored.inputId, {
         groupParticipantAdded: true,
+        groupReactionContext: 'A participant liked: previous group message',
         inputId: stored.inputId,
         mailboxItemId: 'raw_mailbox_item_participant_context',
       }],
@@ -236,6 +247,10 @@ describe('store-backed assistant input source', () => {
       'utf8',
     )
     expect(storedEventFile).not.toContain('groupParticipantAdded')
+    expect(storedEventFile).not.toContain('groupReactionContext')
+    expect(storedEventFile).not.toContain(
+      'A participant liked: previous group message',
+    )
   })
 
   it('filters stored input events by conversation and known input id', async () => {

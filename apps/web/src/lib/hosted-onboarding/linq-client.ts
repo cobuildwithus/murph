@@ -198,6 +198,19 @@ export type HostedLinqChatSummary = {
   isGroup: boolean | null;
 };
 
+export type HostedLinqReactionTargetPart =
+  | { type: "text"; value: string }
+  | { type: "descriptor"; value: "[attachment]" | "[iMessage app]" | "[link]" | "[unsupported content]" };
+
+export type HostedLinqReactionTargetMessage = {
+  chatId: string;
+  id: string;
+  parts: HostedLinqReactionTargetPart[];
+};
+
+const HOSTED_LINQ_REACTION_TARGET_MAX_PARTS = 32;
+const HOSTED_LINQ_REACTION_TARGET_TEXT_MAX_CHARS = 512;
+
 export async function getHostedLinqChatSummary(input: {
   chatId: string;
   signal?: AbortSignal;
@@ -229,6 +242,88 @@ export async function getHostedLinqChatSummary(input: {
       .filter((handle): handle is HostedLinqChatHandleSummary => handle !== null),
     isGroup,
   };
+}
+
+export async function getHostedLinqReactionTargetMessage(input: {
+  messageId: string;
+  signal?: AbortSignal;
+}): Promise<HostedLinqReactionTargetMessage> {
+  const response = await fetchHostedLinqJsonApiOrThrow({
+    method: "GET",
+    path: `messages/${encodeURIComponent(normalizeRequiredString(input.messageId, "message id"))}`,
+    signal: input.signal,
+    timeoutMessage: "Linq message read timed out.",
+  });
+  if (!response.ok) {
+    throw buildHostedLinqRequestFailedError({
+      operation: "message read",
+      retryable: isRetryableHostedLinqStatus(response.status),
+      status: response.status,
+    });
+  }
+
+  const message = parseHostedLinqReactionTargetMessage(response.payload);
+  if (!message) {
+    throw hostedOnboardingError({
+      code: "LINQ_MESSAGE_READ_INVALID",
+      httpStatus: 502,
+      message: "Linq message read returned an invalid canonical response.",
+      retryable: false,
+    });
+  }
+  return message;
+}
+
+function parseHostedLinqReactionTargetMessage(
+  value: unknown,
+): HostedLinqReactionTargetMessage | null {
+  if (!value || typeof value !== "object" || Array.isArray(value)) {
+    return null;
+  }
+  const record = value as Record<string, unknown>;
+  const id = normalizeNullableString(record.id);
+  const chatId = normalizeNullableString(record.chat_id);
+  if (
+    !id
+    || !chatId
+    || !(record.parts === null || record.parts === undefined || Array.isArray(record.parts))
+  ) {
+    return null;
+  }
+  const parts = Array.isArray(record.parts) ? record.parts : [];
+  return {
+    chatId,
+    id,
+    parts: parts
+      .slice(0, HOSTED_LINQ_REACTION_TARGET_MAX_PARTS)
+      .map(parseHostedLinqReactionTargetPart),
+  };
+}
+
+function parseHostedLinqReactionTargetPart(value: unknown): HostedLinqReactionTargetPart {
+  if (!value || typeof value !== "object" || Array.isArray(value)) {
+    return { type: "descriptor", value: "[unsupported content]" };
+  }
+  const record = value as Record<string, unknown>;
+  if (record.type === "text" && typeof record.value === "string") {
+    const text = normalizeNullableString(record.value)?.slice(
+      0,
+      HOSTED_LINQ_REACTION_TARGET_TEXT_MAX_CHARS,
+    );
+    return text
+      ? { type: "text", value: text }
+      : { type: "descriptor", value: "[unsupported content]" };
+  }
+  if (record.type === "link") {
+    return { type: "descriptor", value: "[link]" };
+  }
+  if (record.type === "media") {
+    return { type: "descriptor", value: "[attachment]" };
+  }
+  if (record.type === "imessage_app") {
+    return { type: "descriptor", value: "[iMessage app]" };
+  }
+  return { type: "descriptor", value: "[unsupported content]" };
 }
 
 function readHostedLinqCanonicalChat(

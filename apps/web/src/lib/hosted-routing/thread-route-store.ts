@@ -7,9 +7,13 @@ import type {
   HostedExecutionExternalThreadRouteAuthority,
   HostedExecutionLinqExternalThreadRouteAuthority,
 } from "@murphai/hosted-execution";
+import {
+  HOSTED_EXECUTION_LINQ_GROUP_REACTION_CONTEXT_MAX_CHARS,
+} from "@murphai/hosted-execution/contracts";
 
 import {
   createHostedExternalThreadIdentityLookupKeyReadCandidates,
+  createHostedExternalThreadLookupKeyReadCandidates,
   isHostedExternalThreadChannel,
 } from "../hosted-onboarding/contact-privacy";
 import {
@@ -29,6 +33,18 @@ import type {
 import {
   acquireHostedLinqChatOwnershipLockTx,
 } from "./linq-chat-ownership-lock";
+import {
+  openHostedUserSecureBoxString,
+  sealHostedUserSecureBoxString,
+} from "../hosted-crypto/secure-box";
+
+const HOSTED_LINQ_GROUP_REACTION_CONTEXT_FIELD =
+  "pending-group-reaction-context";
+
+export interface HostedLinqThreadRoutePendingContext {
+  groupParticipantAdded: boolean;
+  groupReactionContext: string | null;
+}
 
 export type HostedThreadRouteChannel = Extract<
   HostedExecutionConversationMessageChannel,
@@ -49,6 +65,7 @@ export type HostedLinqThreadRouteEgressAuthority =
   HostedExecutionLinqExternalThreadRouteAuthority;
 
 export async function readHostedThreadRouteByThreadIdentity(input: {
+  accountLookupKey?: string | null;
   channel: HostedThreadRouteChannel;
   prisma: HostedOnboardingReadClient;
   threadId: string | number | null | undefined;
@@ -60,6 +77,16 @@ export async function readHostedThreadRouteByThreadIdentity(input: {
     });
 
   if (threadIdentityLookupKeys.length === 0) {
+    return null;
+  }
+  const threadLookupKeys = input.accountLookupKey === undefined
+    ? null
+    : createHostedExternalThreadLookupKeyReadCandidates({
+        accountLookupKey: input.accountLookupKey,
+        channel: input.channel,
+        threadId: input.threadId,
+      });
+  if (threadLookupKeys?.length === 0) {
     return null;
   }
 
@@ -92,6 +119,9 @@ export async function readHostedThreadRouteByThreadIdentity(input: {
     },
     where: {
       channel: input.channel,
+      ...(threadLookupKeys
+        ? { threadLookupKey: { in: threadLookupKeys } }
+        : {}),
       threadIdentityLookupKey: {
         in: threadIdentityLookupKeys,
       },
@@ -195,13 +225,12 @@ export async function consumeHostedLinqThreadRouteParticipantAdditionPendingTx(i
     chatId: input.threadId,
     tx: input.prisma,
   });
-  const authority: HostedLinqThreadRouteEgressAuthority = {
-    channel: "linq",
-    containerMemberId: input.containerMemberId,
-    threadId: input.threadId,
-  };
   await lockHostedThreadRouteByThreadIdentityTx({
-    authority,
+    authority: {
+      channel: "linq",
+      containerMemberId: input.containerMemberId,
+      threadId: input.threadId,
+    },
     prisma: input.prisma,
   });
 
@@ -227,8 +256,220 @@ export async function consumeHostedLinqThreadRouteParticipantAdditionPendingTx(i
       },
     },
   });
-
   return result.count > 0;
+}
+
+export async function consumeHostedLinqThreadRoutePendingContextTx(input: {
+  accountLookupKey: string;
+  containerMemberId: string;
+  prisma: Prisma.TransactionClient;
+  threadId: string;
+}): Promise<HostedLinqThreadRoutePendingContext> {
+  // Linq operations that need both locks always take chat ownership before the
+  // route row. Mailbox append and usage-limit dispatch use the same order.
+  await acquireHostedLinqChatOwnershipLockTx({
+    chatId: input.threadId,
+    tx: input.prisma,
+  });
+  await lockHostedThreadRouteByThreadIdentityTx({
+    authority: {
+      accountLookupKey: input.accountLookupKey,
+      channel: "linq",
+      containerMemberId: input.containerMemberId,
+      threadId: input.threadId,
+    },
+    prisma: input.prisma,
+  });
+
+  const threadIdentityLookupKeys =
+    createHostedExternalThreadIdentityLookupKeyReadCandidates({
+      channel: "linq",
+      threadId: input.threadId,
+    });
+  if (threadIdentityLookupKeys.length === 0) {
+    return emptyHostedLinqThreadRoutePendingContext();
+  }
+  const route = await readHostedLinqThreadRoutePendingContextRowTx(input);
+  if (!route) {
+    return emptyHostedLinqThreadRoutePendingContext();
+  }
+  const groupReactionContext = await openHostedLinqGroupReactionContextBestEffort({
+    route,
+    tx: input.prisma,
+  });
+  const result = await input.prisma.hostedThreadRoute.updateMany({
+    data: {
+      pendingGroupReactionContextEncrypted: null,
+      pendingParticipantAddition: false,
+    },
+    where: {
+      channel: "linq",
+      containerMemberId: input.containerMemberId,
+      threadIdentityLookupKey: route.threadIdentityLookupKey,
+      threadLookupKey: route.threadLookupKey,
+    },
+  });
+  return result.count === 1
+    ? {
+        groupParticipantAdded: route.pendingParticipantAddition === true,
+        groupReactionContext,
+      }
+    : emptyHostedLinqThreadRoutePendingContext();
+}
+
+export async function appendHostedLinqThreadRouteReactionContextTx(input: {
+  accountLookupKey: string;
+  containerMemberId: string;
+  prisma: Prisma.TransactionClient;
+  text: string;
+  threadId: string;
+}): Promise<"appended" | "route_unavailable"> {
+  await acquireHostedLinqChatOwnershipLockTx({
+    chatId: input.threadId,
+    tx: input.prisma,
+  });
+  await lockHostedThreadRouteByThreadIdentityTx({
+    authority: {
+      accountLookupKey: input.accountLookupKey,
+      channel: "linq",
+      containerMemberId: input.containerMemberId,
+      threadId: input.threadId,
+    },
+    prisma: input.prisma,
+  });
+  const route = await readHostedLinqThreadRoutePendingContextRowTx(input);
+  if (
+    !route
+    || !(await readActiveHostedMemberAccess({
+      memberId: route.containerMemberId,
+      prisma: input.prisma,
+    }))
+  ) {
+    return "route_unavailable";
+  }
+  const encrypted = await sealHostedLinqGroupReactionContext({
+    route,
+    text: requireHostedLinqGroupReactionContextText(input.text),
+    tx: input.prisma,
+  });
+  const updated = await input.prisma.hostedThreadRoute.updateMany({
+    data: {
+      pendingGroupReactionContextEncrypted: encrypted,
+    },
+    where: {
+      channel: "linq",
+      containerMemberId: input.containerMemberId,
+      threadIdentityLookupKey: route.threadIdentityLookupKey,
+      threadLookupKey: route.threadLookupKey,
+    },
+  });
+  return updated.count === 1 ? "appended" : "route_unavailable";
+}
+
+function emptyHostedLinqThreadRoutePendingContext(): HostedLinqThreadRoutePendingContext {
+  return {
+    groupParticipantAdded: false,
+    groupReactionContext: null,
+  };
+}
+
+async function readHostedLinqThreadRoutePendingContextRowTx(input: {
+  accountLookupKey: string;
+  containerMemberId: string;
+  prisma: Prisma.TransactionClient;
+  threadId: string;
+}) {
+  const threadIdentityLookupKeys =
+    createHostedExternalThreadIdentityLookupKeyReadCandidates({
+      channel: "linq",
+      threadId: input.threadId,
+    });
+  const threadLookupKeys = createHostedExternalThreadLookupKeyReadCandidates({
+    accountLookupKey: input.accountLookupKey,
+    channel: "linq",
+    threadId: input.threadId,
+  });
+  if (threadIdentityLookupKeys.length === 0 || threadLookupKeys.length === 0) {
+    return null;
+  }
+  return input.prisma.hostedThreadRoute.findFirst({
+    select: {
+      containerMemberId: true,
+      pendingGroupReactionContextEncrypted: true,
+      pendingParticipantAddition: true,
+      threadIdentityLookupKey: true,
+      threadLookupKey: true,
+    },
+    where: {
+      channel: "linq",
+      containerMemberId: input.containerMemberId,
+      threadLookupKey: { in: threadLookupKeys },
+      threadIdentityLookupKey: { in: threadIdentityLookupKeys },
+    },
+  });
+}
+
+async function openHostedLinqGroupReactionContextBestEffort(input: {
+  route: NonNullable<Awaited<ReturnType<typeof readHostedLinqThreadRoutePendingContextRowTx>>>;
+  tx: Prisma.TransactionClient;
+}): Promise<string | null> {
+  try {
+    const serialized = await openHostedUserSecureBoxString({
+      aad: buildHostedLinqGroupReactionContextAad(input.route.threadLookupKey),
+      lane: "hosted-member-private-field",
+      prisma: input.tx,
+      scope: `hosted-thread-route:${HOSTED_LINQ_GROUP_REACTION_CONTEXT_FIELD}:v1`,
+      userId: input.route.containerMemberId,
+      value: input.route.pendingGroupReactionContextEncrypted,
+    });
+    if (!serialized) {
+      return null;
+    }
+    return requireHostedLinqGroupReactionContextText(serialized);
+  } catch {
+    // This is optional, lossy context. Corrupt or unavailable ciphertext must
+    // never block the ordinary inbound message that consumes the route hint.
+    return null;
+  }
+}
+
+async function sealHostedLinqGroupReactionContext(input: {
+  route: NonNullable<Awaited<ReturnType<typeof readHostedLinqThreadRoutePendingContextRowTx>>>;
+  text: string;
+  tx: Prisma.TransactionClient;
+}): Promise<string> {
+  const encrypted = await sealHostedUserSecureBoxString({
+    aad: buildHostedLinqGroupReactionContextAad(input.route.threadLookupKey),
+    lane: "hosted-member-private-field",
+    prisma: input.tx,
+    scope: `hosted-thread-route:${HOSTED_LINQ_GROUP_REACTION_CONTEXT_FIELD}:v1`,
+    userId: input.route.containerMemberId,
+    value: input.text,
+  });
+  if (!encrypted) {
+    throw new Error("Hosted Linq group reaction context encryption returned no value.");
+  }
+  return encrypted;
+}
+
+function buildHostedLinqGroupReactionContextAad(threadLookupKey: string) {
+  return {
+    field: HOSTED_LINQ_GROUP_REACTION_CONTEXT_FIELD,
+    purpose: "hosted-thread-route-private-state",
+    rowId: threadLookupKey,
+    table: "hosted_thread_route",
+  } as const;
+}
+
+function requireHostedLinqGroupReactionContextText(value: unknown): string {
+  const normalized = typeof value === "string" ? value.trim() : "";
+  if (
+    !normalized
+    || normalized.length > HOSTED_EXECUTION_LINQ_GROUP_REACTION_CONTEXT_MAX_CHARS
+  ) {
+    throw new TypeError("Hosted Linq group reaction context text is invalid.");
+  }
+  return normalized;
 }
 
 export async function hasHostedMemberEstablishedLinqThreadRoute(input: {

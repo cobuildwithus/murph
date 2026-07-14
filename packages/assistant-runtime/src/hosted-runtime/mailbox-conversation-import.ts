@@ -863,11 +863,18 @@ async function stageHostedConversationAssistantInputEvent(input: {
   vaultRoot: string;
   wake: HostedExecutionConversationMessageWake;
 }): Promise<HostedConversationMailboxAssistantInputStageResult> {
-  const groupParticipantAdded = isHostedLinqConversationMessageWake(input.wake)
-    && input.wake.message.groupParticipantAdded === true
-    && input.wake.message.routeAuthority !== null
-    && input.wake.message.routeAuthority !== undefined
-    && input.wake.message.linqMessage.threadIsDirect === false;
+  const linqWake = isHostedLinqConversationMessageWake(input.wake)
+    ? input.wake
+    : null;
+  const groupContextAuthorized = linqWake
+    && linqWake.message.routeAuthority !== null
+    && linqWake.message.routeAuthority !== undefined
+    && linqWake.message.linqMessage.threadIsDirect === false;
+  const groupParticipantAdded = groupContextAuthorized
+    && linqWake?.message.groupParticipantAdded === true;
+  const groupReactionContext = groupContextAuthorized
+    ? linqWake?.message.groupReactionContext
+    : undefined;
   const event = await upsertAssistantInputEvent({
     event: createHostedConversationAssistantInputEvent({
       item: input.item,
@@ -877,6 +884,7 @@ async function stageHostedConversationAssistantInputEvent(input: {
   });
   await recordHostedMailboxAssistantInputItem({
     ...(groupParticipantAdded ? { groupParticipantAdded } : {}),
+    ...(groupReactionContext ? { groupReactionContext } : {}),
     inputId: event.inputId,
     mailboxItemId: input.item.item.id,
     vault: input.vaultRoot,

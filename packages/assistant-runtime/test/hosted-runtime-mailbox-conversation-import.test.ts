@@ -1466,12 +1466,14 @@ describe("hosted mailbox conversation import adapter", () => {
     tempRoots.push(parentRoot);
     const vaultRoot = path.join(parentRoot, "vault");
     const contactLookupKey = "hbidx:email:v1:mailbox";
+    const groupReactionContext = "unauthorized group reaction context sentinel";
     const decodedWake = createConversationWake({
       message: {
         channel: "linq",
         contactKind: "email",
         contactLookupKey,
         groupParticipantAdded: true,
+        groupReactionContext,
         linqMessage: {
           chatId: "chat_email_identity",
           from: "buddy@example.test",
@@ -1485,6 +1487,7 @@ describe("hosted mailbox conversation import adapter", () => {
           ],
           reactionEligible: true,
           service: "iMessage",
+          threadIsDirect: false,
         },
         phoneLookupKey: null,
       },
@@ -1542,6 +1545,15 @@ describe("hosted mailbox conversation import adapter", () => {
       replyToMessageId: null,
       service: "iMessage",
     });
+    assert.equal(JSON.stringify(event).includes(groupReactionContext), false);
+
+    const source = createHostedAssistantInputSource({
+      selectedInputIds: [event.inputId],
+      vaultRoot,
+    });
+    const candidates = await source.listInputCandidates({ sourceId: "linq" });
+    assert.equal(candidates.inputs[0]?.event.groupParticipantAdded, undefined);
+    assert.equal(candidates.inputs[0]?.event.groupReactionContext, undefined);
   });
 
   test("uses Linq route account lookup and group directness for assistant conversation identity", async () => {
@@ -1550,6 +1562,8 @@ describe("hosted mailbox conversation import adapter", () => {
     const vaultRoot = path.join(parentRoot, "vault");
     const accountLookupKey = "hbidx:phone:v1:route-account";
     const contactLookupKey = "hbidx:phone:v1:participant";
+    const groupReactionContext =
+      "A participant liked: earlier group message";
     const decodedWake = createConversationWake({
       message: {
         accountLookupKey,
@@ -1557,6 +1571,7 @@ describe("hosted mailbox conversation import adapter", () => {
         contactKind: "phone",
         contactLookupKey,
         groupParticipantAdded: true,
+        groupReactionContext,
         linqMessage: {
           chatId: "chat_group_identity",
           from: "+15551110000",
@@ -1641,6 +1656,11 @@ describe("hosted mailbox conversation import adapter", () => {
       Object.hasOwn(event.sourceMetadata ?? {}, "groupParticipantAdded"),
       false,
     );
+    assert.equal(
+      Object.hasOwn(event.sourceMetadata ?? {}, "groupReactionContext"),
+      false,
+    );
+    assert.equal(JSON.stringify(event).includes(groupReactionContext), false);
     assert.equal(event.replyTarget?.threadId, "chat_group_identity");
 
     const source = createHostedAssistantInputSource({
@@ -1649,6 +1669,10 @@ describe("hosted mailbox conversation import adapter", () => {
     });
     const candidates = await source.listInputCandidates({ sourceId: "linq" });
     assert.equal(candidates.inputs[0]?.event.groupParticipantAdded, true);
+    assert.equal(
+      candidates.inputs[0]?.event.groupReactionContext,
+      groupReactionContext,
+    );
   });
 
   test("does not project participant-addition context for a route-authorized direct chat", async () => {
@@ -1657,6 +1681,7 @@ describe("hosted mailbox conversation import adapter", () => {
     const vaultRoot = path.join(parentRoot, "vault");
     const accountLookupKey = "hbidx:phone:v1:route-account";
     const contactLookupKey = "hbidx:phone:v1:participant";
+    const groupReactionContext = "direct group reaction context sentinel";
     const decodedWake = createConversationWake({
       message: {
         accountLookupKey,
@@ -1664,6 +1689,7 @@ describe("hosted mailbox conversation import adapter", () => {
         contactKind: "phone",
         contactLookupKey,
         groupParticipantAdded: true,
+        groupReactionContext,
         linqMessage: {
           chatId: "chat_direct_identity",
           from: "+15551110000",
@@ -1714,6 +1740,11 @@ describe("hosted mailbox conversation import adapter", () => {
       Object.hasOwn(event.sourceMetadata ?? {}, "groupParticipantAdded"),
       false,
     );
+    assert.equal(
+      Object.hasOwn(event.sourceMetadata ?? {}, "groupReactionContext"),
+      false,
+    );
+    assert.equal(JSON.stringify(event).includes(groupReactionContext), false);
 
     const source = createHostedAssistantInputSource({
       selectedInputIds: [event.inputId],
@@ -1721,6 +1752,7 @@ describe("hosted mailbox conversation import adapter", () => {
     });
     const candidates = await source.listInputCandidates({ sourceId: "linq" });
     assert.equal(candidates.inputs[0]?.event.groupParticipantAdded, undefined);
+    assert.equal(candidates.inputs[0]?.event.groupReactionContext, undefined);
   });
 
   test("stages WhatsApp input with hashed conversation metadata and private reply target", async () => {

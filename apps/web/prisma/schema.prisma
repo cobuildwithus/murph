@@ -1206,6 +1206,7 @@ model HostedThreadRoute {
   threadIdentityLookupKey String                @map("thread_identity_lookup_key")
   containerMemberId       String                @map("container_member_id")
   pendingParticipantAddition Boolean? @default(false) @map("pending_participant_addition")
+  pendingGroupReactionContextEncrypted String? @map("pending_group_reaction_context_encrypted")
   createdAt               DateTime              @default(now()) @map("created_at")
   updatedAt               DateTime              @default(now()) @updatedAt @map("updated_at")
   container               HostedThreadContainer @relation(fields: [containerMemberId], references: [memberId], onDelete: Cascade)

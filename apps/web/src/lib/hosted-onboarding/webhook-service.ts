@@ -90,6 +90,9 @@ import {
   handleHostedGroupJoinOfferReaction,
 } from "../hosted-groups/join-offer-reaction";
 import {
+  stageHostedLinqGroupReactionContext,
+} from "./webhook-provider-linq-reaction-context";
+import {
   materializePendingHostedGroupJoinConfirmationsBestEffort,
 } from "../hosted-groups/group-join-confirmation";
 import type {
@@ -188,13 +191,25 @@ export async function handleHostedOnboardingLinqWebhook(input: {
         prisma,
         signal: input.signal,
       });
+      const contextResult = providerResult.duplicate
+        ? null
+        : await stageHostedLinqGroupReactionContext({
+            event: providerEvent,
+            prisma,
+            ...(input.signal ? { signal: input.signal } : {}),
+          });
+      const contextStaged = contextResult?.status === "staged";
       const response: HostedOnboardingLinqWebhookResponse = {
         duplicate: providerResult.duplicate || undefined,
-        ignored: reactionResult.status !== "accepted",
+        ignored: reactionResult.status !== "accepted" && !contextStaged,
         ok: true,
         reason: reactionResult.status === "accepted"
           ? "accepted-linq-group-join-offer-reaction"
-          : `skipped-linq-group-join-offer-reaction:${reactionResult.reason}`,
+          : contextStaged
+            ? "staged-linq-group-reaction-context"
+            : `skipped-linq-group-reaction-context:${
+                contextResult?.reason ?? "duplicate"
+              }`,
       };
       responseReason = response.reason ?? null;
       finishHostedOnboardingTiming(timing, "completed", {
