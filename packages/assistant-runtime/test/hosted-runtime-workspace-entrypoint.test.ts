@@ -3661,6 +3661,7 @@ describe("hosted workspace runtime entrypoint", () => {
 
     try {
       await initializeVault({ createdAt: TEST_NOW, vaultRoot });
+      await ensureHostedBootstrapMetadataForSystemMailboxTest(vaultRoot);
       const result = await runHostedWorkspaceRuntimeJobInProcess(
         createWorkspaceRuntimeJobInput({
           request: {
@@ -3687,6 +3688,12 @@ describe("hosted workspace runtime entrypoint", () => {
           },
           async importItem(item) {
             importedKinds.push(item.item.kind);
+            if (item.item.kind === "runtime.manual-requested") {
+              return await importRuntimeControlSystemMailboxItemForTest({
+                item: item.item,
+                vaultRoot,
+              });
+            }
             return { status: "imported" };
           },
           platform: createPlatform({
@@ -3749,10 +3756,13 @@ describe("hosted workspace runtime entrypoint", () => {
         "import",
         "idle_shutdown",
       ]);
+      expect(checkpointRequests[0]?.nextWakeReason).toBe("assistant");
+      expect(checkpointRequests[0]?.nextWakeAt).not.toBeNull();
       expect(checkpointRequests.at(-1)?.redactedStatus).toMatchObject({
         hostedMailboxSystemImportedSeq: "2",
       });
-      expect(result.status).toBe("idle");
+      expect(result.status).toBe("scheduled");
+      expect(result.nextWakeReason).toBe("assistant");
     } finally {
       await removeTempRoot(vaultRoot);
     }
@@ -3824,6 +3834,82 @@ describe("hosted workspace runtime entrypoint", () => {
       expect(result.status).toBe("scheduled");
       expect(result.nextWakeReason).toBe("mailbox");
       expect(result.nextWakeAt).toBeTruthy();
+    } finally {
+      await removeTempRoot(vaultRoot);
+    }
+  });
+
+  test("retention-only system import checkpoints staged assistant input with an immediate wake", async () => {
+    const vaultRoot = await mkdtemp(path.join(tmpdir(), "murph-workspace-entrypoint-"));
+    const checkpointRequests: HostedWorkspaceCheckpointRequest[] = [];
+    const events: string[] = [];
+
+    try {
+      await initializeVault({ createdAt: TEST_NOW, vaultRoot });
+      const result = await runHostedWorkspaceRuntimeJobInProcess(
+        createWorkspaceRuntimeJobInput({
+          request: {
+            attemptId: "attempt_synthetic_inactive_staged_assistant",
+            budget: { maxMailboxItems: 10 },
+            idleCheckpointDelayMs: 1,
+            leaseGeneration: "7",
+            processingMode: "inbox_media_retention",
+            userId: TEST_USER_ID,
+            workspaceVersion: "0",
+          },
+        }),
+        {
+          async createCheckpointSnapshot(snapshotInput) {
+            return {
+              snapshotRef: createBundleRef({
+                hash: snapshotInput.reason === "import"
+                  ? "6".repeat(64)
+                  : "7".repeat(64),
+                key: `users/bundles/member-synthetic/${snapshotInput.reason}.bundle.json`,
+                size: 512,
+              }),
+            };
+          },
+          async importItem(item) {
+            expect(item.item.kind).toBe("group-newsletter.email-needed");
+            return {
+              assistantInputId: "assistant_input_group_newsletter_retention",
+              status: "imported" as const,
+            };
+          },
+          platform: createPlatform({
+            mailboxPort: createMailboxPort({
+              events,
+              items: [createMailboxItem({
+                id: "mailbox_group_newsletter_retention_1",
+                kind: "group-newsletter.email-needed",
+                lane: "system",
+                laneSeq: "1",
+              })],
+            }),
+            workspacePort: createWorkspacePort({
+              checkpointRequests,
+              events,
+              workspace: createWorkspaceState({
+                inboxMediaRetentionWakeAt: "2026-04-15T00:00:00.000Z",
+                version: "0",
+              }),
+            }),
+          }),
+          async runAssistantPhase() {
+            throw new Error("No-AI maintenance must not enter assistant phase.");
+          },
+          vaultRoot,
+        },
+      );
+
+      expect(checkpointRequests[0]).toMatchObject({
+        nextWakeReason: "assistant",
+        reason: "import",
+      });
+      expect(checkpointRequests[0]?.nextWakeAt).not.toBeNull();
+      expect(result.status).toBe("scheduled");
+      expect(result.nextWakeReason).toBe("assistant");
     } finally {
       await removeTempRoot(vaultRoot);
     }

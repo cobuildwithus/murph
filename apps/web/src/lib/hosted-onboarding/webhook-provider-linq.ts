@@ -1048,21 +1048,22 @@ async function planHostedLinqExplicitThreadRouteWebhook(input: {
     summary,
   } = input.context;
 
+  const leavePlan = await planHostedLinqExactRoutedGroupLeaveWebhook({
+    context: input.context,
+    event: input.event,
+    prisma: input.prisma,
+    route: input.route,
+  });
+  if (leavePlan) {
+    return leavePlan;
+  }
+
   const containerAccessActive = await readActiveHostedMemberAccess({
     memberId: input.route.containerMemberId,
     prisma: input.prisma,
   });
 
   if (!containerAccessActive) {
-    const leavePlan = await planHostedLinqInactiveGroupLeaveWebhook({
-      context: input.context,
-      event: input.event,
-      prisma: input.prisma,
-      route: input.route,
-    });
-    if (leavePlan) {
-      return leavePlan;
-    }
     return logHostedLinqWebhookPlannerDecisionAndReturn(
       buildIgnoredLinqWebhookPlan("thread-container-inactive"),
       buildHostedLinqWebhookPlannerDetails(input.event, input.context, {
@@ -1291,7 +1292,7 @@ async function planHostedLinqExplicitThreadRouteWebhook(input: {
   );
 }
 
-async function planHostedLinqInactiveGroupLeaveWebhook(input: {
+async function planHostedLinqExactRoutedGroupLeaveWebhook(input: {
   context: ReturnType<typeof resolveHostedOnboardingLinqMessageContext>;
   event: HostedLinqWebhookEvent;
   prisma: Prisma.TransactionClient;

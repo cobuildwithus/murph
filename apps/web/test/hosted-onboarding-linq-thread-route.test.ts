@@ -1717,6 +1717,54 @@ describe("Linq explicit external-thread routing", () => {
     });
   });
 
+  it("services an exact self-leave before active-route quota and AI admission", async () => {
+    const prisma = createPrisma({
+      routeContainerActive: true,
+      routeContainerMemberId: "member_thread_container_123",
+      routeParticipantActive: true,
+    });
+    vi.mocked(memberIdentityStore.lookupHostedMemberIdentityByPhoneNumber).mockResolvedValue({
+      core: {
+        billingStatus: HostedBillingStatus.active,
+        createdAt: new Date("2026-06-01T00:00:00.000Z"),
+        id: "member_departing_123",
+        suspendedAt: null,
+        updatedAt: new Date("2026-06-24T00:00:00.000Z"),
+      },
+      identity: {},
+      matchedBy: "phoneNumber",
+    } as Awaited<ReturnType<typeof memberIdentityStore.lookupHostedMemberIdentityByPhoneNumber>>);
+    vi.mocked(linqDailyState.incrementHostedLinqInboundDailyState).mockRejectedValueOnce(
+      new Error("exact leave must not reach quota admission"),
+    );
+    vi.mocked(usageAllowance.checkHostedAiUsageGate).mockRejectedValueOnce(
+      new Error("exact leave must not reach AI admission"),
+    );
+    vi.mocked(mailboxStore.appendHostedMailboxEnvelopeTx).mockResolvedValueOnce({
+      dedupeConflict: false,
+      duplicate: false,
+      inserted: true,
+      item: buildHostedMailboxItem({
+        id: "mailbox_active_leave_123",
+        userId: "member_thread_container_123",
+      }),
+    });
+
+    const plan = await planHostedOnboardingLinqWebhook({
+      event: buildLinqMessageReceivedEvent({ text: "remove me from this group" }),
+      prisma: prisma as never,
+    });
+
+    expect(plan.response.reason).toBe("inactive-group-leave:left");
+    expect(groupStore.leaveHostedGroupMemberTx).toHaveBeenCalledWith({
+      groupRuntimeMemberId: "member_thread_container_123",
+      memberId: "member_departing_123",
+      tx: prisma,
+    });
+    expect(linqDailyState.incrementHostedLinqInboundDailyState).not.toHaveBeenCalled();
+    expect(usageAllowance.checkHostedAiUsageGate).not.toHaveBeenCalled();
+  });
+
   it.each([
     "leave this group when you are done",
     "could you remove me from this group",

@@ -3403,11 +3403,42 @@ async function runHostedInboxMediaRetentionOnlyCheckpoint(input: {
     ? null
     : await importHostedMailboxPrefixAndCheckpoint({
         checkpointReason: "import",
-        createCheckpointRequest: (requestInput) =>
-          input.checkpointRequestBuilder.createRequest({
+        createCheckpointRequest: async (requestInput) => {
+          const checkpointRequest = await input.checkpointRequestBuilder.createRequest({
             ...requestInput,
             reason: "import",
-          }),
+          });
+          const systemMailboxWake = await resolveDeferredMailboxImportSystemMailboxWake(
+            requestInput.importResult,
+            input.vaultRoot,
+          );
+          const stagedAssistantInput =
+            (requestInput.importResult.assistantInputIds?.length ?? 0) > 0
+            || (requestInput.importResult.conversationImportedCount ?? 0) > 0;
+          const nextWake = selectEarliestHostedRuntimeWake([
+            {
+              at: checkpointRequest.nextWakeAt ?? null,
+              reason: checkpointRequest.nextWakeReason ?? null,
+            },
+            {
+              at: requestInput.importResult.nextRetryAt ?? null,
+              reason: requestInput.importResult.nextRetryAt ? "mailbox" : null,
+            },
+            {
+              at: systemMailboxWake.at,
+              reason: systemMailboxWake.reason,
+            },
+            {
+              at: stagedAssistantInput ? new Date().toISOString() : null,
+              reason: stagedAssistantInput ? "assistant" : null,
+            },
+          ]);
+          return {
+            ...checkpointRequest,
+            nextWakeAt: nextWake.nextWakeAt,
+            nextWakeReason: nextWake.nextWakeReason,
+          };
+        },
         expectedUserId: input.expectedUserId,
         importItem: (item) => input.importItem(item),
         lanes: ["system"],
