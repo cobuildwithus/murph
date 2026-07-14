@@ -1,6 +1,6 @@
 import assert from "node:assert/strict";
 import { createHash } from "node:crypto";
-import { mkdtemp, rm } from "node:fs/promises";
+import { appendFile, mkdtemp, readFile, rm } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import {
@@ -3102,6 +3102,91 @@ test("historical lower-confidence companion RMSSD replay resolves to its upgrade
       relativePath: ingestPath,
     });
     assert.deepEqual(ingestsAfterReplay, ingestsBeforeReplay);
+  } finally {
+    await rm(vaultRoot, { force: true, recursive: true });
+  }
+});
+
+test("companion RMSSD replay does not associate when one source version has multiple owners", async () => {
+  const vaultRoot = await makeTempDirectory("murph-companion-hrv-rmssd-ambiguous-owner");
+
+  try {
+    await coreRuntime.initializeVault({
+      createdAt: "2026-07-10T01:00:00.000Z",
+      timezone: "America/New_York",
+      vaultRoot,
+    });
+    const observation = {
+      schema: COMPANION_HRV_RMSSD_SCHEMA,
+      captureId: "623e4567-e89b-42d3-a456-426614174001",
+      observedAt: "2026-07-10T02:30:00.000Z",
+      durationMs: 60_000 as const,
+      rmssdMs: 48,
+      intervalCount: 72,
+      acceptedIntervalCount: 68,
+      successivePairCount: 63,
+      quality: "good" as const,
+      methodVersion: COMPANION_HRV_RMSSD_METHOD_VERSION,
+    } satisfies CompanionHrvRmssdObservation;
+    const first = await importCompanionHrvRmssdObservation(
+      vaultRoot,
+      observation,
+      "ambiguous-owner",
+    );
+    const firstEvent = first.events[0];
+    const eventShardPath = first.eventShardPaths[0];
+    assert.ok(firstEvent?.externalRef);
+    assert.ok(eventShardPath);
+    assert.ok(first.ingestShardPath);
+
+    // Model a pre-existing identity fork: the immutable admission digest is
+    // retained by two live owners with different daily keys. Replay must not
+    // guess which owner is canonical or mutate either event.
+    const conflictingOwner = {
+      ...firstEvent,
+      id: coreRuntime.deterministicContractId("evt", "companion-rmssd-ambiguous-owner"),
+      occurredAt: "2026-07-10T15:00:00.000Z",
+      recordedAt: "2026-07-10T15:00:00.000Z",
+      dayKey: "2026-07-10",
+      externalRef: {
+        ...firstEvent.externalRef,
+        resourceId: `${COMPANION_HRV_RMSSD_METHOD_VERSION}:2026-07-10`,
+      },
+    };
+    await appendFile(
+      join(vaultRoot, eventShardPath),
+      `${JSON.stringify(conflictingOwner)}\n`,
+      "utf8",
+    );
+    await coreRuntime.updateVaultSummary({ vaultRoot, timezone: "UTC" });
+    const watchedPaths = [eventShardPath, first.ingestShardPath];
+    const bytesBeforeReplay = await Promise.all(
+      watchedPaths.map((relativePath) => readFile(join(vaultRoot, relativePath))),
+    );
+
+    await assert.rejects(
+      () => importCompanionHrvRmssdObservation(
+        vaultRoot,
+        observation,
+        "ambiguous-owner",
+      ),
+      (error: unknown) =>
+        coreRuntime.isVaultError(error)
+        && error.code === "EVENT_EXTERNAL_REF_ALIAS_CONFLICT",
+    );
+    assert.deepEqual(
+      await Promise.all(
+        watchedPaths.map((relativePath) => readFile(join(vaultRoot, relativePath))),
+      ),
+      bytesBeforeReplay,
+    );
+    const retainedOwners = latestLiveRecords(
+      await coreRuntime.readJsonlRecords({ vaultRoot, relativePath: eventShardPath }),
+    );
+    assert.deepEqual(
+      retainedOwners.map((record) => record.id).sort(),
+      [firstEvent.id, conflictingOwner.id].sort(),
+    );
   } finally {
     await rm(vaultRoot, { force: true, recursive: true });
   }
