@@ -817,6 +817,11 @@ supported by the hosted foreground mailbox import loop plus the store-backed
 assistant input spine: a payloadless runtime wake causes the active child to
 import conversation mailbox rows, stage any new `AssistantInputEvent` records,
 run prompt-preparation effects best-effort, and notify active-turn admission.
+The pre-delivery system-mailbox consistency barrier may pause that loop, but it
+must resume before post-checkpoint delivery or background drains continue. A
+source-less wake preempts those drains only after the resumed import proves new
+conversation work; a no-progress or system-only nudge must not starve bounded
+maintenance or the idle checkpoint.
 The assistant engine then admits the persisted input through live steering or
 pre-provider admission without using hosted-specific mailbox
 refresh/checkpoint ports. While a Codex turn is live, same-conversation input is
