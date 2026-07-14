@@ -272,13 +272,21 @@ describe("getHostedLinqReactionTargetMessage", () => {
   it("reads the exact canonical message and keeps only bounded reaction context", async () => {
     const privateUrl = "https://media.example.test/private-attachment";
     const privateTextUrl = "https://example.test/private-token";
+    const otherUrlForms = [
+      "mailto:person@example.test?body=secret",
+      "data:text/plain,private",
+      "custom+app://private/path",
+      "www.example.test/private-token",
+      "example.test/private-token",
+      "192.0.2.1/private-token",
+    ];
     const fetchMock = vi.fn(async () => createJsonResponse({
       chat_id: "chat_123",
       id: "msg_123",
       parts: [
         {
           type: "text",
-          value: `See ${privateTextUrl} ${"x".repeat(600)}`,
+          value: `See ${privateTextUrl} ${otherUrlForms.join(" ")} ${"x".repeat(600)}`,
         },
         {
           file_name: "private-name.pdf",
@@ -320,6 +328,9 @@ describe("getHostedLinqReactionTargetMessage", () => {
     ]);
     expect(JSON.stringify(message)).not.toContain(privateUrl);
     expect(JSON.stringify(message)).not.toContain(privateTextUrl);
+    for (const url of otherUrlForms) {
+      expect(JSON.stringify(message)).not.toContain(url);
+    }
     expect(JSON.stringify(message)).not.toContain("private-name.pdf");
     expect(JSON.stringify(message)).not.toContain("application/pdf");
     expect(fetchMock).toHaveBeenCalledWith(

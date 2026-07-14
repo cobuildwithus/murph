@@ -124,7 +124,7 @@ export async function stageHostedLinqGroupReactionContext(input: {
 function isHostedLinqRosterHandleActive(
   status: string | null | undefined,
 ): boolean {
-  return !status || status.trim().toLowerCase() === "active";
+  return status?.trim().toLowerCase() === "active";
 }
 
 function readHostedLinqReactionEventContext(

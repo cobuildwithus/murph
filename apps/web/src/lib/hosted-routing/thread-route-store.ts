@@ -40,6 +40,7 @@ import {
 
 const HOSTED_LINQ_GROUP_REACTION_CONTEXT_FIELD =
   "pending-group-reaction-context";
+const HOSTED_LINQ_GROUP_REACTION_CRYPTO_TIMEOUT_MS = 500;
 
 interface HostedLinqThreadRoutePendingContext {
   groupParticipantAdded: boolean;
@@ -411,6 +412,7 @@ async function openHostedLinqGroupReactionContextBestEffort(input: {
       lane: "hosted-member-private-field",
       prisma: input.tx,
       scope: `hosted-thread-route:${HOSTED_LINQ_GROUP_REACTION_CONTEXT_FIELD}:v1`,
+      signal: AbortSignal.timeout(HOSTED_LINQ_GROUP_REACTION_CRYPTO_TIMEOUT_MS),
       userId: input.route.containerMemberId,
       value: input.route.pendingGroupReactionContextEncrypted,
     });
@@ -435,6 +437,7 @@ async function sealHostedLinqGroupReactionContext(input: {
     lane: "hosted-member-private-field",
     prisma: input.tx,
     scope: `hosted-thread-route:${HOSTED_LINQ_GROUP_REACTION_CONTEXT_FIELD}:v1`,
+    signal: AbortSignal.timeout(HOSTED_LINQ_GROUP_REACTION_CRYPTO_TIMEOUT_MS),
     userId: input.route.containerMemberId,
     value: input.text,
   });
