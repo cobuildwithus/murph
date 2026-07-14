@@ -146,6 +146,8 @@ app-server anchored there would hold a dead cwd inode and fail its next
 thread-start config load. Threads receive the current workspace through the
 explicit per-thread `cwd` param instead.
 
+- Proactive hosted usage-limit notice targets are derived after the foreground checkpoint from durable provider-accepted assistant input events. Direct Linq and Telegram inputs retain their exact origin; group Linq inputs additionally require exact external-thread route authority. Every accepted input must resolve to the same route, the newest accepted message supplies the reply target, and missing, mixed, or invalid provenance fails closed. The runtime does not keep a parallel mailbox route projection, and a thread-container crossing never falls back to a member home route.
+
 ## Control Flow
 
 1. Operators, automations, and future agent layers call `vault-cli` or package APIs.

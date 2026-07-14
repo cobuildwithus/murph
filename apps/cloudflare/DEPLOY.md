@@ -149,6 +149,40 @@ final provider claim. New runners may send an optional `lineLookupKey` solely
 for post-send line-health attribution; old Web ignores it, and new Web retains
 its existing fallback when an old runner omits it.
 
+## Thread Usage Crossing Notice Rollout
+
+The assistant runtime usage-record request has an additive, optional Linq group
+delivery target. Deploy the Cloudflare Worker and runner bundle first with
+`container_rollout=immediate`, then require managed-container smoke to report
+the new bundle fingerprint before deploying `apps/web`. An old web deployment
+ignores the additive target and keeps the next-inbound thread notice. A new web
+deployment receiving an old or ambiguous request refuses personal-home fallback
+for `thread_usage_limit_reached`, so the opposite skew is also safe but may
+defer the notice until the next inbound.
+
+After both deploys, send one group-thread turn that crosses a test allowance and
+confirm the neutral thread notice replies in that same thread, the usage period
+is claimed once, and no `home_route_missing` crossing warning is emitted.
+
+## Usage-Notice Provider-Claim Rollout
+
+Denied Telegram, WhatsApp, and email replies use versioned Worker routes plus a
+signed provider-entry callback to Web. Keep the feature-level Web-first order:
+
+1. Deploy `apps/web`. Until the Worker deploys, the new versioned control route
+   returns not-found before provider dispatch and the prepared event claim
+   remains retryable.
+2. Deploy the Cloudflare Worker. It must persist the exact prepared-attempt
+   fence through the signed Web callback immediately before the provider fetch
+   or email binding send, and abort provider delivery when that callback fails.
+
+The opposite mixed version is also correctness-safe: an old Web deployment
+uses the removed legacy route, and the new Worker rejects it before provider
+dispatch. Both mixed states can delay a deterministic denied reply, but neither
+can silently send without the matching fence or blindly retry an ambiguous
+provider call. After both deploys, exercise one denied reply on each enabled
+channel and confirm the prepared row advances at provider entry.
+
 ## One-Time Cloudflare Setup
 
 Before the first deploy:
