@@ -24,7 +24,6 @@ import type {
 import {
   assertContractId,
   compareIsoTimestampsAscending,
-  COMPANION_HRV_RMSSD_METHOD_VERSION,
   deviceDataOriginSchema,
   experimentFrontmatterSchema,
   externalRefSchema,
@@ -360,7 +359,7 @@ export type ImportDeviceBatchResult =
 interface NormalizedDeviceEvent {
   seed: NormalizedEventSeed<EventKind>;
   evidenceRoles: string[];
-  externalRefUpdatePolicy?: "immutable" | "prefer-higher-confidence";
+  externalRefUpdatePolicy?: "immutable";
   legacyExternalRefs: ExternalRef[];
   recordId: string;
 }
@@ -400,7 +399,7 @@ interface PreparedJsonlEntry<RecordType extends { id: string }> {
 }
 
 interface PreparedDeviceEventEntry extends PreparedJsonlEntry<EventRecord> {
-  externalRefUpdatePolicy?: "immutable" | "prefer-higher-confidence";
+  externalRefUpdatePolicy?: "immutable";
   legacyExternalRefs: ExternalRef[];
 }
 
@@ -655,6 +654,25 @@ function normalizeDayKeyInput(value: unknown): string | undefined {
   return typeof value === "string" && /^\d{4}-\d{2}-\d{2}$/.test(value.trim())
     ? value.trim()
     : undefined;
+}
+
+function isDateOnlyFloatingProviderDayInput(
+  dayKey: string | undefined,
+  dataOrigin: unknown,
+): boolean {
+  const normalizedDayKey = normalizeDayKeyInput(dayKey);
+  if (
+    !normalizedDayKey
+    || !dataOrigin
+    || typeof dataOrigin !== "object"
+    || Array.isArray(dataOrigin)
+  ) {
+    return false;
+  }
+
+  const origin = dataOrigin as UnknownRecord;
+  return origin.timestampSemantics === "floating"
+    && origin.observedAtRaw === normalizedDayKey;
 }
 
 function normalizeRequiredRole(value: unknown, label: string): string {
@@ -1263,15 +1281,10 @@ function normalizeDeviceEventInputs(
     });
     const normalizedLegacyExternalRefs = normalizeLegacyExternalRefs(eventInput.legacyExternalRefs, index);
     const externalRefUpdatePolicy = eventInput.externalRefUpdatePolicy;
-    if (
-      externalRefUpdatePolicy !== undefined
-      && externalRefUpdatePolicy !== "immutable"
-      && externalRefUpdatePolicy !== "prefer-higher-confidence"
-    ) {
+    if (externalRefUpdatePolicy !== undefined && externalRefUpdatePolicy !== "immutable") {
       throw new VaultError(
         "VAULT_INVALID_EXTERNAL_REF",
-        `Device event ${index + 1} externalRefUpdatePolicy must be "immutable" or `
-          + `"prefer-higher-confidence" when provided.`,
+        `Device event ${index + 1} externalRefUpdatePolicy must be "immutable" when provided.`,
       );
     }
     const inputDayKey = typeof eventInput.dayKey === "string" ? eventInput.dayKey : undefined;
@@ -1279,7 +1292,10 @@ function normalizeDeviceEventInputs(
     const preservesProviderDayWithoutTimeZone = Boolean(
       inputDayKey &&
         !inputTimeZone &&
-        isJunctionSleepStageExternalRefInput(eventInput.externalRef),
+        (
+          isJunctionSleepStageExternalRefInput(eventInput.externalRef)
+          || isDateOnlyFloatingProviderDayInput(inputDayKey, eventInput.dataOrigin)
+        ),
     );
     const seed = buildNormalizedEventSeed({
       kind,
@@ -1310,17 +1326,17 @@ function normalizeDeviceEventInputs(
       );
     }
 
-    if (externalRefUpdatePolicy !== undefined && !seed.externalRef) {
+    if (externalRefUpdatePolicy === "immutable" && !seed.externalRef) {
       throw new VaultError(
         "VAULT_INVALID_EXTERNAL_REF",
-        `Device event ${index + 1} externalRefUpdatePolicy requires externalRef.`,
+        `Device event ${index + 1} immutable externalRefUpdatePolicy requires externalRef.`,
       );
     }
 
     return {
       seed,
       evidenceRoles,
-      ...(externalRefUpdatePolicy ? { externalRefUpdatePolicy } : {}),
+      ...(externalRefUpdatePolicy === "immutable" ? { externalRefUpdatePolicy } : {}),
       legacyExternalRefs,
       recordId: deterministicContractId(
         ID_PREFIXES.event,
@@ -1631,7 +1647,6 @@ interface EventExternalRefReconciliation {
   records: EventRecord[];
   forceAppendIds: ReadonlySet<string>;
   retainedPreparedIds: ReadonlySet<string>;
-  retentionRejectedPreparedIds: ReadonlySet<string>;
   skippedDuplicateCount: number;
   supersededCount: number;
 }
@@ -1681,84 +1696,6 @@ function deviceEventContentKey(record: EventRecord): string {
     ...content
   } = record;
   return stableStringify(content);
-}
-
-function deviceOriginConfidenceRank(record: EventRecord): number {
-  switch (record.dataOrigin?.originConfidence) {
-    case "high":
-      return 3;
-    case "medium":
-      return 2;
-    case "low":
-      return 1;
-    default:
-      return 0;
-  }
-}
-
-function isWhoopCompanionHrvRmssdDailyRetentionExternalRef(
-  externalRef: ExternalRef,
-): boolean {
-  const methodPrefix = `${COMPANION_HRV_RMSSD_METHOD_VERSION}:`;
-  const version = externalRef.version;
-  return externalRef.system === "whoop"
-    && externalRef.resourceType === "ble-hrv-rmssd"
-    && externalRef.facet === "hrv-rmssd"
-    && externalRef.resourceId.startsWith(methodPrefix)
-    && /^\d{4}-\d{2}-\d{2}$/u.test(externalRef.resourceId.slice(methodPrefix.length))
-    && typeof version === "string"
-    && version.startsWith(methodPrefix)
-    && /^[a-f0-9]{64}$/u.test(version.slice(methodPrefix.length));
-}
-
-function isWhoopCompanionHrvRmssdAdmissionEvent(record: EventRecord): boolean {
-  const externalRef = record.externalRef;
-  const admissionId = externalRef?.resourceId;
-
-  return record.kind === "observation"
-    && externalRef?.system === "whoop"
-    && externalRef.resourceType === "ble-hrv-rmssd"
-    && externalRef.facet === "hrv-rmssd"
-    && typeof admissionId === "string"
-    && /^[a-f0-9]{64}$/u.test(admissionId)
-    && externalRef.version === `${COMPANION_HRV_RMSSD_METHOD_VERSION}:${admissionId}`
-    && record.dataOrigin?.aggregatorProvider === "murph-companion"
-    && record.dataOrigin.sourceProviderSlug === "whoop"
-    && record.dataOrigin.sourceType === "ble-pulse-interval"
-    && record.dataOrigin.normalizerVersion === "companion-hrv-rmssd-normalizer.v1";
-}
-
-function isWhoopCompanionHrvRmssdTemporalReplay(
-  existing: EventRecord,
-  incoming: EventRecord,
-): boolean {
-  if (
-    !isWhoopCompanionHrvRmssdAdmissionEvent(existing)
-    || !isWhoopCompanionHrvRmssdAdmissionEvent(incoming)
-  ) {
-    return false;
-  }
-
-  const {
-    id: _existingId,
-    rawRefs: _existingRawRefs,
-    lifecycle: _existingLifecycle,
-    recordedAt: _existingRecordedAt,
-    dayKey: _existingDayKey,
-    timeZone: _existingTimeZone,
-    ...existingContent
-  } = existing;
-  const {
-    id: _incomingId,
-    rawRefs: _incomingRawRefs,
-    lifecycle: _incomingLifecycle,
-    recordedAt: _incomingRecordedAt,
-    dayKey: _incomingDayKey,
-    timeZone: _incomingTimeZone,
-    ...incomingContent
-  } = incoming;
-
-  return stableStringify(existingContent) === stableStringify(incomingContent);
 }
 
 function deviceEventContentFingerprint(record: EventRecord): string {
@@ -1909,10 +1846,6 @@ interface EventExternalRefIndex {
     string,
     Map<string, Map<string, Set<number>>>
   >;
-  whoopCompanionHrvRevisionBySourceVersionAndOwner: Map<
-    string,
-    Map<string, EventSpineEntry<EventRecord>>
-  >;
   latestByRefKey: Map<string, IndexedEventExternalRefMatch>;
   latestById: Map<string, EventRecord>;
   maxRevisionById: Map<string, number>;
@@ -1940,10 +1873,6 @@ async function indexLatestEventsByExternalRef(
   const deviceOwnerRevisionsByRefKeyAndFingerprint = new Map<
     string,
     Map<string, Map<string, Set<number>>>
-  >();
-  const whoopCompanionHrvRevisionBySourceVersionAndOwner = new Map<
-    string,
-    Map<string, EventSpineEntry<EventRecord>>
   >();
   const latestByRefKey = new Map<string, IndexedEventExternalRefMatch>();
   const latestById = new Map<string, EventRecord>();
@@ -1998,19 +1927,6 @@ async function indexLatestEventsByExternalRef(
           const latestDeviceExternalRefEntry = latestDeviceExternalRefEntryByRefKey.get(refKey);
           if (!latestDeviceExternalRefEntry || compareEventSpineEntries(latestDeviceExternalRefEntry, entry) < 0) {
             latestDeviceExternalRefEntryByRefKey.set(refKey, entry);
-          }
-          const sourceVersion = entry.record.externalRef.version;
-          if (
-            sourceVersion
-            && isWhoopCompanionHrvRmssdDailyRetentionExternalRef(entry.record.externalRef)
-          ) {
-            const entriesByOwner = whoopCompanionHrvRevisionBySourceVersionAndOwner.get(sourceVersion)
-              ?? new Map<string, EventSpineEntry<EventRecord>>();
-            const indexedForOwner = entriesByOwner.get(entry.record.id);
-            if (!indexedForOwner || compareEventSpineEntries(indexedForOwner, entry) < 0) {
-              entriesByOwner.set(entry.record.id, entry);
-            }
-            whoopCompanionHrvRevisionBySourceVersionAndOwner.set(sourceVersion, entriesByOwner);
           }
         }
 
@@ -2073,7 +1989,6 @@ async function indexLatestEventsByExternalRef(
 
   return {
     deviceOwnerRevisionsByRefKeyAndFingerprint,
-    whoopCompanionHrvRevisionBySourceVersionAndOwner,
     latestByRefKey,
     latestById,
     maxRevisionById,
@@ -2373,25 +2288,6 @@ function toIndexedExternalRefMatch(
   };
 }
 
-function indexWhoopCompanionHrvSourceVersionOwner(
-  index: EventExternalRefIndex,
-  entry: EventSpineEntry<EventRecord>,
-): void {
-  const externalRef = entry.record.externalRef;
-  if (!externalRef || !isWhoopCompanionHrvRmssdDailyRetentionExternalRef(externalRef)) {
-    return;
-  }
-
-  const sourceVersion = externalRef.version;
-  if (!sourceVersion) {
-    return;
-  }
-  const revisionsByOwner = index.whoopCompanionHrvRevisionBySourceVersionAndOwner.get(sourceVersion)
-    ?? new Map<string, EventSpineEntry<EventRecord>>();
-  revisionsByOwner.set(entry.record.id, entry);
-  index.whoopCompanionHrvRevisionBySourceVersionAndOwner.set(sourceVersion, revisionsByOwner);
-}
-
 interface LegacyExternalRefReservation {
   entry: PreparedDeviceEventEntry;
   indexedMatch: IndexedEventExternalRefMatch;
@@ -2485,7 +2381,6 @@ async function buildDeviceEventIdentityContext(
     return {
       index: {
         deviceOwnerRevisionsByRefKeyAndFingerprint: new Map(),
-        whoopCompanionHrvRevisionBySourceVersionAndOwner: new Map(),
         latestByRefKey: new Map(),
         latestById: new Map(),
         maxRevisionById: new Map(),
@@ -2511,15 +2406,6 @@ function cloneDeviceEventIdentityContext(
     index: {
       deviceOwnerRevisionsByRefKeyAndFingerprint:
         context.index.deviceOwnerRevisionsByRefKeyAndFingerprint,
-      whoopCompanionHrvRevisionBySourceVersionAndOwner: new Map(
-        [...context.index.whoopCompanionHrvRevisionBySourceVersionAndOwner].map(([
-          sourceVersion,
-          revisionsByOwner,
-        ]) => [
-          sourceVersion,
-          new Map(revisionsByOwner),
-        ]),
-      ),
       latestByRefKey: new Map(context.index.latestByRefKey),
       latestById: new Map(context.index.latestById),
       maxRevisionById: new Map(context.index.maxRevisionById),
@@ -2534,7 +2420,6 @@ function buildEmptyDeviceEventIdentityContext(
 ): DeviceEventIdentityContext {
   const index: EventExternalRefIndex = {
     deviceOwnerRevisionsByRefKeyAndFingerprint: new Map(),
-    whoopCompanionHrvRevisionBySourceVersionAndOwner: new Map(),
     latestByRefKey: new Map(),
     latestById: new Map(),
     maxRevisionById: new Map(),
@@ -2602,38 +2487,10 @@ function resolveDeviceEventIdentity(
       return (!reservation || reservation.entry === entry)
         && isCompatibleLegacyExternalRefMatch(match.indexedMatch, entry.record, match.legacyExternalRef);
     });
-  const exactSourceVersionMatches =
-    entry.externalRefUpdatePolicy === "prefer-higher-confidence"
-    && isWhoopCompanionHrvRmssdDailyRetentionExternalRef(externalRef)
-    && externalRef.version
-      ? [...(
-          index.whoopCompanionHrvRevisionBySourceVersionAndOwner.get(externalRef.version)?.entries()
-            ?? []
-        )].flatMap(([ownerId, indexedEntry]) => {
-          const currentRecord = index.latestById.get(ownerId);
-          const indexedExternalRef = indexedEntry.record.externalRef;
-          return currentRecord && indexedExternalRef
-            ? [{
-                refKey: eventExternalRefKey(indexedExternalRef),
-                indexedMatch: {
-                  indexedExternalRef,
-                  indexedRecord: indexedEntry.record,
-                  relativePath: indexedEntry.relativePath,
-                  record: currentRecord,
-                },
-              }]
-            : [];
-        })
-      : [];
-  // The immutable admission digest is the stable replay identity. Resolve it
-  // before the vault-timezone-derived daily key so a timezone change cannot
-  // select and overwrite a neighboring day's retained event.
-  const matchedEntries = exactSourceVersionMatches.length > 0
-    ? exactSourceVersionMatches
-    : [
-        ...(primaryMatch ? [{ refKey, indexedMatch: primaryMatch }] : []),
-        ...legacyMatchedEntries,
-      ];
+  const matchedEntries = [
+    ...(primaryMatch ? [{ refKey, indexedMatch: primaryMatch }] : []),
+    ...legacyMatchedEntries,
+  ];
   const selectedPrimaryMatch = matchedEntries.find((match) => match.refKey === refKey);
   const latest = selectedPrimaryMatch?.indexedMatch.record ?? matchedEntries[0]?.indexedMatch.record;
   let associationSafe = true;
@@ -2660,7 +2517,7 @@ function resolveDeviceEventIdentity(
         "EVENT_EXTERNAL_REF_ALIAS_CONFLICT",
         `Event externalRef "${externalRef.system}/${externalRef.resourceType}/${externalRef.resourceId}` +
           `${externalRef.facet ? `#${externalRef.facet}` : ""}" matched multiple live event IDs; ` +
-          "ambiguous device identity must be repaired explicitly.",
+          "ambiguous legacy cleanup must be repaired explicitly.",
       );
     }
   }
@@ -2819,7 +2676,6 @@ async function reconcileDeviceEventEntriesByExternalRef(
   const records: EventRecord[] = [];
   const forceAppendIds = new Set<string>();
   const retainedPreparedIds = new Set<string>();
-  const retentionRejectedPreparedIds = new Set<string>();
   let skippedDuplicateCount = 0;
   let supersededCount = 0;
 
@@ -2861,11 +2717,6 @@ async function reconcileDeviceEventEntriesByExternalRef(
         ? entry.record
         : { ...entry.record, id: canonicalRecordId };
       index.latestByRefKey.set(refKey, toIndexedExternalRefMatch(canonicalRecord, externalRef));
-      index.latestById.set(canonicalRecord.id, canonicalRecord);
-      indexWhoopCompanionHrvSourceVersionOwner(index, {
-        relativePath: entry.relativePath,
-        record: canonicalRecord,
-      });
       appendEntries.push({ relativePath: entry.relativePath, record: canonicalRecord });
       appendRecordIdByPreparedRecordId.set(entry.record.id, canonicalRecord.id);
       records.push(canonicalRecord);
@@ -2906,21 +2757,6 @@ async function reconcileDeviceEventEntriesByExternalRef(
     }
 
     if (entry.externalRefUpdatePolicy === "immutable") {
-      // The admission digest owns this observation's immutable identity. Vault
-      // timezone metadata is mutable, so an at-least-once replay must preserve
-      // the first canonical placement rather than turning the retained payload
-      // into a permanent immutable-reference conflict. Compare with the stored
-      // provider delivery when available so later user-authored revisions stay
-      // intact while an exact provider replay remains a no-op.
-      if (isWhoopCompanionHrvRmssdTemporalReplay(
-        indexedProviderMatch?.indexedRecord ?? latest,
-        entry.record,
-      )) {
-        skippedDuplicateCount += 1;
-        records.push(latest);
-        continue;
-      }
-
       throw new VaultError(
         "EVENT_IMMUTABLE_EXTERNAL_REF_CONFLICT",
         "Immutable device event externalRef already exists with different content; nothing was imported.",
@@ -2967,8 +2803,6 @@ async function reconcileDeviceEventEntriesByExternalRef(
 
     if (isDeletedEventSpineRecord(latest)) {
       index.latestByRefKey.set(refKey, toIndexedExternalRefMatch(entry.record, externalRef));
-      index.latestById.set(entry.record.id, entry.record);
-      indexWhoopCompanionHrvSourceVersionOwner(index, entry);
       appendEntries.push(entry);
       appendRecordIdByPreparedRecordId.set(entry.record.id, entry.record.id);
       records.push(entry.record);
@@ -2979,16 +2813,6 @@ async function reconcileDeviceEventEntriesByExternalRef(
       if (eventSpineRevisionsAreComplete(index, latest.id)) {
         retainedPreparedIds.add(entry.record.id);
       }
-      records.push(latest);
-      continue;
-    }
-
-    if (
-      entry.externalRefUpdatePolicy === "prefer-higher-confidence"
-      && deviceOriginConfidenceRank(entry.record) <= deviceOriginConfidenceRank(latest)
-    ) {
-      retentionRejectedPreparedIds.add(entry.record.id);
-      skippedDuplicateCount += 1;
       records.push(latest);
       continue;
     }
@@ -3009,29 +2833,14 @@ async function reconcileDeviceEventEntriesByExternalRef(
       eventSpineRevision(latest),
       index.maxRevisionById.get(latest.id) ?? 0,
     ) + 1;
-    const memberOwnedAnnotations = entry.externalRefUpdatePolicy === "prefer-higher-confidence"
-      ? {
-          // The confidence policy supersedes only the provider measurement and
-          // provenance; the live envelope continues to own member annotations.
-          note: latest.note,
-          tags: latest.tags,
-          links: latest.links,
-        }
-      : {};
-    const superseding = eventRecordSchema.parse({
+    const superseding: EventRecord = {
       ...entry.record,
       id: latest.id,
-      ...memberOwnedAnnotations,
       lifecycle: buildEventSpineLifecycle(revision),
-    });
+    };
 
     forceAppendIds.add(latest.id);
     index.latestByRefKey.set(refKey, toIndexedExternalRefMatch(superseding, externalRef));
-    index.latestById.set(superseding.id, superseding);
-    indexWhoopCompanionHrvSourceVersionOwner(index, {
-      relativePath: entry.relativePath,
-      record: superseding,
-    });
     for (const { refKey: matchedRefKey, indexedMatch } of matchedEntries) {
       const currentMatch = index.latestByRefKey.get(matchedRefKey);
       if (
@@ -3055,7 +2864,6 @@ async function reconcileDeviceEventEntriesByExternalRef(
     records,
     forceAppendIds,
     retainedPreparedIds,
-    retentionRejectedPreparedIds,
     skippedDuplicateCount,
     supersededCount,
   };
@@ -5190,27 +4998,6 @@ export async function importDeviceBatch({
       associablePreparedEventIds.has(entry.record.id)
       && persistenceEvidenceRolesByPreparedRecordId.has(entry.record.id)
     );
-    const retentionRejectedEvidenceRoles = new Set(
-      deviceBatchPlan.preparedEvents
-        .filter((entry) =>
-          eventReconciliation.retentionRejectedPreparedIds.has(entry.record.id)
-        )
-        .flatMap((entry) =>
-          deviceBatchPlan.evidenceRolesByPreparedRecordId.get(entry.record.id) ?? []
-        ),
-    );
-    const nonRejectedEvidenceRoles = new Set(
-      deviceBatchPlan.preparedEvents
-        .filter((entry) =>
-          !eventReconciliation.retentionRejectedPreparedIds.has(entry.record.id)
-        )
-        .flatMap((entry) =>
-          deviceBatchPlan.evidenceRolesByPreparedRecordId.get(entry.record.id) ?? []
-        ),
-    );
-    const retainableEvidenceParts = deviceBatchPlan.preparedEvidenceParts.filter((part) =>
-      !retentionRejectedEvidenceRoles.has(part.role) || nonRejectedEvidenceRoles.has(part.role)
-    );
     const hasAppendedOutputs = appendedPreparedEventIds.size > 0
       || sampleAppendPlan.appendedRecordIds.length > 0;
     const eventIdsByEvidenceRole = new Map<string, Set<string>>();
@@ -5225,14 +5012,8 @@ export async function importDeviceBatch({
         eventIdsByEvidenceRole.set(role, eventIds);
       }
     }
-    const fullyRejectedByRetentionPolicy = deviceBatchPlan.preparedEvents.length > 0
-      && deviceBatchPlan.preparedEvents.every((entry) =>
-        eventReconciliation.retentionRejectedPreparedIds.has(entry.record.id)
-      )
-      && deviceBatchPlan.preparedSamples.length === 0
-      && retainableEvidenceParts.length === 0;
-    const shouldCheckReceiptNovelty = !hasAppendedOutputs && !fullyRejectedByRetentionPolicy;
-    const novelty = retainableEvidenceParts.length > 0 || (
+    const shouldCheckReceiptNovelty = !hasAppendedOutputs;
+    const novelty = deviceBatchPlan.preparedEvidenceParts.length > 0 || (
         shouldCheckReceiptNovelty && deviceBatchPlan.ingestReceipt
       )
       ? await selectNovelIntegrationIngestEvidence({
@@ -5240,7 +5021,7 @@ export async function importDeviceBatch({
           provider: deviceBatchPlan.provider,
           accountId: deviceBatchPlan.accountId,
           importedAt: deviceBatchPlan.importedAt,
-          parts: retainableEvidenceParts,
+          parts: deviceBatchPlan.preparedEvidenceParts,
           receipt: shouldCheckReceiptNovelty ? deviceBatchPlan.ingestReceipt : undefined,
           eventIdsByRole: eventIdsByEvidenceRole,
           sampleIds: new Set(sampleRecords.map((record) => record.id)),
@@ -5251,7 +5032,7 @@ export async function importDeviceBatch({
       || novelty.receiptIsNovel
       || evidenceRepairRequired;
     const retainedEvidenceParts = shouldPersistDelivery
-      ? retainableEvidenceParts
+      ? deviceBatchPlan.preparedEvidenceParts
       : [];
     const retainedEvidenceRoles = new Set(retainedEvidenceParts.map((part) => part.role));
     const retainedEvidenceRolesByPreparedRecordId = new Map<string, readonly string[]>();

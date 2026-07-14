@@ -13,8 +13,8 @@ export type DatabaseSync = import("node:sqlite").DatabaseSync;
 export type SqliteRow = Record<string, unknown>;
 
 export const QUERY_PROJECTION_SCHEMA_ID = "murph.query-projection";
-// 15: Junction Apple HealthKit zero sleep summary repair.
-export const QUERY_PROJECTION_SQLITE_VERSION = 15;
+// 16: Make recovery the sole daily HRV MetricPoint owner.
+export const QUERY_PROJECTION_SQLITE_VERSION = 16;
 
 export interface QueryProjectionLocation {
   absolutePath: string;

@@ -126,7 +126,7 @@ export interface JunctionSnapshotInput {
   connections?: unknown[];
   summaries?: Record<string, unknown>;
   timeseries?: Record<string, unknown>;
-  companionHrvRmssd?: JunctionCompanionHrvRmssdSnapshotEntry[];
+  companionHrvRmssd?: JunctionCompanionHrvRmssdSnapshotEntry;
 }
 
 export type JunctionSummaryResource =
@@ -199,7 +199,7 @@ const junctionSnapshotSchema = z.object({
   connections: z.array(z.unknown()).optional(),
   summaries: z.record(z.string(), z.unknown()).optional(),
   timeseries: z.record(z.string(), z.unknown()).optional(),
-  companionHrvRmssd: z.array(z.unknown()).max(100).optional(),
+  companionHrvRmssd: z.unknown().optional(),
 }).catchall(z.unknown());
 
 const junctionCompanionHrvRmssdSnapshotEntrySchema = z.object({
@@ -846,9 +846,9 @@ function parseJunctionSnapshot(snapshot: unknown): JunctionSnapshotInput {
   const parsed = junctionSnapshotSchema.parse(snapshot);
   return {
     ...parsed,
-    companionHrvRmssd: parsed.companionHrvRmssd?.map((entry) =>
-      parseJunctionCompanionHrvRmssdSnapshotEntry(entry)
-    ),
+    companionHrvRmssd: parsed.companionHrvRmssd === undefined
+      ? undefined
+      : parseJunctionCompanionHrvRmssdSnapshotEntry(parsed.companionHrvRmssd),
   };
 }
 
@@ -878,9 +878,9 @@ export function normalizeJunctionSnapshot(
   const evidenceParts: DeviceEvidencePartPayload[] = [];
   const events: DeviceEventPayload[] = [];
   const samples: DeviceSamplePayload[] = [];
-  const companionHrvRmssd = snapshot.companionHrvRmssd?.map((entry) =>
-    parseJunctionCompanionHrvRmssdSnapshotEntry(entry)
-  );
+  const companionHrvRmssd = snapshot.companionHrvRmssd === undefined
+    ? undefined
+    : parseJunctionCompanionHrvRmssdSnapshotEntry(snapshot.companionHrvRmssd);
   const connections = asArray(snapshot.connections).flatMap((connection) => {
     const normalized = asPlainObject(connection);
     return normalized ? [normalized] : [];
@@ -915,7 +915,7 @@ export function normalizeJunctionSnapshot(
       connections: connections.length,
       summaryResources: listAllowedResourceKeys(snapshot.summaries, SUMMARY_RESOURCE_ALLOWLIST),
       timeseriesResources: listAllowedResourceKeys(snapshot.timeseries, TIMESERIES_RESOURCE_ALLOWLIST),
-      companionHrvRmssdObservations: companionHrvRmssd?.length ?? 0,
+      companionHrvRmssdObservations: companionHrvRmssd ? 1 : 0,
     }),
   });
 }
@@ -1014,73 +1014,62 @@ function isJunctionSummaryEvidenceEventInRange(
 }
 
 function normalizeCompanionHrvRmssd(
-  entries: readonly JunctionCompanionHrvRmssdSnapshotEntry[] | undefined,
+  entry: JunctionCompanionHrvRmssdSnapshotEntry | undefined,
   context: NormalizationContext,
 ): void {
-  for (const { admissionId, observation } of entries ?? []) {
-    const dayKey =
-      resolveVaultLocalDayKey(observation.observedAt, context.defaultTimeZone)
-      ?? extractIsoDatePrefix(observation.observedAt)
-      ?? observation.observedAt.slice(0, 10);
-    const contentVersion = `${observation.methodVersion}:${
-      createHash("sha256")
-        .update(serializeCompanionHrvRmssdObservation(observation))
-        .digest("hex")
-    }`;
-    const identity = createHash("sha256")
-      .update(admissionId)
-      .digest("hex")
-      .slice(0, 16);
-    const evidenceRole = `companion-hrv-rmssd:${identity}`;
-
-    pushEvidencePart(
-      context.evidenceParts,
-      createEvidencePart(
-        evidenceRole,
-        `companion-hrv-rmssd-${identity}.json`,
-        observation,
-      ),
-    );
-    context.events.push({
-      kind: "observation",
-      occurredAt: observation.observedAt,
-      dayKey,
-      source: "device",
-      title: "WHOOP BLE spot RMSSD",
-      evidenceRoles: [evidenceRole],
-      externalRef: makeProviderExternalRef(
-        "whoop",
-        "ble-hrv-rmssd",
-        `${observation.methodVersion}:${dayKey}`,
-        contentVersion,
-        HRV_RMSSD_METRIC,
-      ),
-      externalRefUpdatePolicy: "prefer-higher-confidence",
-      legacyExternalRefs: [makeProviderExternalRef(
-        "whoop",
-        "ble-hrv-rmssd",
-        admissionId,
-        contentVersion,
-        HRV_RMSSD_METRIC,
-      )],
-      dataOrigin: {
-        version: 1,
-        aggregatorProvider: "murph-companion",
-        sourceProviderSlug: "whoop",
-        sourceType: "ble-pulse-interval",
-        observedAtRaw: observation.observedAt,
-        timestampSemantics: "utc",
-        originConfidence: observation.quality === "good" ? "medium" : "low",
-        normalizerVersion: "companion-hrv-rmssd-normalizer.v1",
-      },
-      fields: {
-        metric: HRV_RMSSD_METRIC,
-        observationGrain: "derived_fact",
-        value: observation.rmssdMs,
-        unit: "ms",
-      },
-    });
+  if (!entry) {
+    return;
   }
+
+  const { admissionId, observation } = entry;
+  const occurredAt = `${observation.nightDate}T12:00:00.000Z`;
+  const contentVersion = `${observation.methodVersion}:${admissionId}`;
+  const identity = createHash("sha256")
+    .update(admissionId)
+    .digest("hex")
+    .slice(0, 16);
+  const evidenceRole = `companion-hrv-rmssd:${identity}`;
+
+  pushEvidencePart(
+    context.evidenceParts,
+    createEvidencePart(
+      evidenceRole,
+      `companion-hrv-rmssd-${identity}.json`,
+      observation,
+    ),
+  );
+  context.events.push({
+    kind: "observation",
+    occurredAt,
+    dayKey: observation.nightDate,
+    source: "device",
+    title: "Estimated WHOOP BLE overnight PRV (RMSSD)",
+    evidenceRoles: [evidenceRole],
+    externalRef: makeProviderExternalRef(
+      "whoop",
+      "companion-overnight-hrv-rmssd",
+      observation.nightDate,
+      contentVersion,
+      HRV_RMSSD_METRIC,
+    ),
+    externalRefUpdatePolicy: "immutable",
+    dataOrigin: {
+      version: 1,
+      aggregatorProvider: "murph-companion",
+      sourceProviderSlug: "whoop",
+      sourceType: "ble-pulse-interval",
+      observedAtRaw: observation.nightDate,
+      timestampSemantics: "floating",
+      originConfidence: "medium",
+      normalizerVersion: "companion-overnight-hrv-rmssd-normalizer.v1",
+    },
+    fields: {
+      metric: HRV_RMSSD_METRIC,
+      observationGrain: "summary",
+      value: observation.rmssdMs,
+      unit: "ms",
+    },
+  });
 }
 
 export function canNormalizeJunctionSleepCycleRecordToCompactStages(

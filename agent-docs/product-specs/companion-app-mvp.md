@@ -1,6 +1,6 @@
 # iOS Companion App — MVP Build Spec
 
-Last verified: 2026-07-13
+Last verified: 2026-07-14
 
 Parent spec: `agent-docs/product-specs/companion-app.md` (strategy, phases,
 review posture). This doc is the concrete build plan for the first shippable
@@ -13,9 +13,10 @@ narrow native exception reads WHOOP's `WHOOP Recovery` and `WHOOP Strain`
 custom metadata because Junction and normal HealthKit quantity/category
 mapping omit those values. The exception is closed to those two keys and does
 not create a general native HealthKit ingestion engine. A separately gated
-internal path also supports a direct WHOOP spot-RMSSD reading; it does not
-change the source-agnostic Apple Health sync or claim parity with WHOOP's
-proprietary overnight metrics.
+internal beta path derives one overnight PRV RMSSD estimate from a WHOOP 5/MG
+BLE pulse-interval stream; it does not change the source-agnostic Apple Health
+sync or claim parity with clinical ECG HRV, WHOOP's proprietary overnight HRV,
+or WHOOP Recovery.
 
 Growth framing: the nearest payoff is not WHOOP — it is **Apple Watch and
 iPhone-health members**. Apple Health remains a native-only authorization flow;
@@ -231,7 +232,7 @@ Apple HealthKit with an explicit unverified WHOOP-metadata hint. Therefore:
 
 ## Backend Work
 
-Three small endpoints in `apps/web`, all authenticated via Privy token
+Four small endpoints in `apps/web`, all authenticated via Privy token
 verification (existing `@privy-io/node`):
 
 1. `POST /api/device-sync/companion/sign-in-token`
@@ -280,70 +281,66 @@ release paths, verify both, and release the iOS app last. After the iOS release,
 keep both backend surfaces on feature-aware versions while supported clients
 can upload companion metadata.
 4. `POST /api/device-sync/companion/hrv-rmssd`
-   — validate a strict, sub-512-byte `murph.companion.hrv-rmssd.v1`
-   observation for exactly 60,000 milliseconds, reuse the single active
-   member-owned Junction device
-   connection established by the explicit sign-in-token flow, stage one
-   encrypted compact dirty job, and wake the existing hosted device-sync
-   runtime. Missing, terminal, or ambiguous connection state fails closed;
-   data upload never establishes or reconnects a Junction account. The
-   established-lane requirement is rechecked under the connection mutation
-   lock. Disconnect commits a durable fail-closed intent before provider
-   revocation, so companion uploads and reconnect writes cannot enter the lane
-   until disconnect finalizes or a retry completes the interrupted operation.
-   Ordinary companion metadata continues to require the active member-owned
-   lane described above; it does not inherit HRV's source-confirmation gate. The
-   contract has no field for raw R-R
-   intervals, BLE packets, device identity, heart-rate samples, or Apple
-   Health values; unknown fields are rejected. Structural parsing happens at
-   the route, while the replay-aware service checks retained receipt identity
-   before applying freshness or connection-liveness gates to first admission.
-   The first accepted envelope owns its client capture id during the retained
-   replay window: a web-owned Postgres receipt containing only connection-scoped
-   capture-key and strict-envelope hashes plus `created_at` keeps exact replay
-   idempotent after pending work is acknowledged or the connection disconnects;
-   changed content conflicts. Receipts are excluded from hosted workspace
-   snapshots, lazily expire after 30 days through the indexed
-   `(user_id, connection_id, created_at)` path, and are capped at 1,024 retained
-   rows per connection. After expiry, a replay is new admission and must pass
-   the normal freshness and live-connection gates. Each accepted canonical
-   envelope receives a verified SHA-256 admission identity over the strict
-   derived payload. That identity owns the dirty payload, local job, and exact
-   replay source version. Canonical event identity is method plus vault-local
-   day: the first confidence-tier reading wins, medium confidence may upgrade
-   low confidence, and other same-day captures retain no event revision,
-   evidence, or ingest receipt. The accepted
-   companion RMSSD encrypted dirty payload remains the durable retry authority
-   until its mapped local job completes the canonical importer write. A
-   revision-only checkpoint may advance while the payload remains pending, but
-   the payload id is acknowledged only after import success; yield, retryable failure, or loss of
-   the machine-local queue therefore causes a safe refetch instead of data loss.
-   A later disconnect does not cancel an already accepted credential-free local
-   import. Runtime hydration keys the local account by
-   the opaque hosted connection id before provider identity, so terminal
-   privacy scrubbing cannot fork the lane into a stale runnable account. An
-   unbound legacy row with unsanitized identity may be adopted through its
-   unique provider-plus-external-account match. Once a terminal scrub leaves
-   only opaque identity, fallback adoption requires a unique candidate with the
-   same provider and connection epoch. A recognized original-plus-opaque fork
-   from an older runtime is consolidated transactionally with its jobs and
-   sources preserved on the hosted-bound row; additional or opaque siblings
-   fail closed.
-   Runtime import writes one live canonical `hrv-rmssd` spot fact per
-   vault-local day and method with direct-WHOOP provenance. Apple HealthKit HRV
-   is canonical `hrv-sdnn`; it never aliases to or aggregates with the direct
-   WHOOP RMSSD series. Overnight WHOOP/Oura summaries keep their summary grain
-   and source provenance rather than becoming spot-capture revisions.
+   — accept only the strict, sub-512-byte
+   `murph.companion.overnight-prv-rmssd.v1` summary. The phone processes the
+   WHOOP 5/MG pulse-interval stream in constant memory as non-overlapping
+   five-minute windows, requires 240–300 seconds of pair-supported interval
+   coverage inside each accepted window, and computes the equal-weight mean of
+   accepted window RMSSDs. It uploads exactly `schema`, `methodVersion`, `nightDate`, `rmssdMs`,
+   `completedWindowCount`, and `acceptedWindowCount`; the completed count covers
+   full attempted five-minute windows. The sole accepted method is
+   `prv-rmssd-5m-mean-v1`. At least 48 windows must be accepted and at least
+   half of completed windows must qualify; completed windows are capped at 192.
+   Per-window duration is
+   phone algorithm policy; the backend does not reconstruct or falsely
+   revalidate it. A BLE disconnect hard-breaks interval adjacency and the
+   current window segment. Reconnect may continue
+   the same user-started session, but no interval or window crosses the gap;
+   the final coverage gates decide whether the night qualifies. The only
+   process-restorable state allowed is one non-health band-stream cleanup-intent
+   boolean. Intervals, window state, and calculated values remain memory-only.
 
-### Direct spot-HRV deployment order and rollback floor
+   The contract has no exact capture timestamp, capture duration, timezone
+   offset, coverage milliseconds, raw R-R interval, BLE packet, packet
+   timestamp, heart-rate sample, per-window value, device identity, Apple
+   Health value, or WHOOP account field; unknown fields fail. Reuse the one
+   active member-owned Junction connection established by the explicit sign-in
+   flow, stage one compact encrypted dirty payload, and wake the existing hosted runtime.
+   Missing, terminal, disconnecting, or ambiguous connection state fails
+   closed; data ingress never establishes or reactivates an account.
+
+   The first accepted strict envelope owns `(connection, nightDate)` for 30
+   days. A sparse web receipt containing only member/connection binding, hashed
+   receipt id, strict-envelope hash, and creation time makes exact replay a
+   no-op before first-admission freshness and connection gates; changed content
+   conflicts. Receipts are excluded from workspace snapshots, lazily expire
+   through the indexed owner/connection/time path, and are capped at 64 per
+   connection. Each accepted envelope carries a verified SHA-256 admission
+   identity through encrypted staging, the same local retry row, Junction
+   normalization, and canonical external identity. Yield, lease expiry,
+   retryable failure, hosted refetch, cold restore, or later disconnect retains
+   that payload and row. Only canonical success or the exact structurally
+   invalid terminal result acknowledges the hosted payload.
+
+   Receipt cardinality is connection plus `nightDate`; canonical cardinality is
+   vault plus source (`whoop`) plus `nightDate`. Runtime import writes one
+   immutable summary-grain `hrv-rmssd` observation with a synthetic 12:00Z
+   `occurredAt`, no event `timeZone`, and no fabricated capture timestamp. This
+   beta wellness PRV estimate remains distinct from Apple HealthKit
+   `hrv-sdnn`, WHOOP's proprietary overnight HRV, and WHOOP API Recovery data.
+
+### Direct overnight PRV deployment order and rollback floor
 
 Deploy the Cloudflare runtime first with `container_rollout=immediate`, require
 managed-container smoke to report the new runner-bundle fingerprint, and pass a
 functional compact-observation import smoke. Then deploy web acceptance and
-release iOS last. Do not probe runtime availability on each request for this
-low-volume, release-gated lane. Roll back web acceptance first, let
-already-staged jobs drain, and only then remove runtime support. This explicit
-order does not change the metadata lane's iOS-last rollout above.
+release iOS last. Before iOS distribution, a signed physical iPhone must pass
+an overnight WHOOP 5/MG capture-to-query test, network/log inspection must prove
+the forbidden raw data is absent, and paired-ECG validation must support the
+beta method. Do not probe runtime availability on each request. Roll back in
+reverse order: stop iOS distribution, remove web acceptance, drain staged work,
+then remove runtime support. This explicit order does not change the metadata
+lane's iOS-last rollout above.
 
 ### Why the account-ensure step is load-bearing (verified in repo)
 

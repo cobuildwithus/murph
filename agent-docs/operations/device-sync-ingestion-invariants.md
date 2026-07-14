@@ -12,7 +12,7 @@ quietly completed without importing or fetching anything.
 
 The ingestion model is now additive: push and pull are complementary, neither
 gates the other, and no branch can complete without import-or-fetch. Treat the
-six invariants below as constraints that any change to webhook construction,
+seven invariants below as constraints that any change to webhook construction,
 resource-job execution, or scheduled reconcile must preserve.
 
 These are durable behavioral invariants. The current owning code lives in
@@ -208,43 +208,41 @@ drain/batch service seam in `packages/device-syncd/src/service.ts`.
    collisions with a second account fail closed.
 
 7. **HRV method semantics survive import and reprojection.** HealthKit's
-   standard HRV quantity is SDNN (`hrv-sdnn`); direct WHOOP spot RMSSD is
-   `hrv-rmssd`. Every admitted direct-WHOOP envelope carries a verified SHA-256
-   admission identity from web staging through local dedupe and importer source
-   versioning. The admission identity, not the reusable client capture id, owns
-   exact-envelope idempotency after receipt retention expires. Canonical event
-   identity is instead method plus vault-local day: the first reading in a
-   confidence tier wins, medium confidence may upgrade low confidence, and all
-   other same-day captures are no-ops that retain no extra evidence or ingest
-   receipt. This bounds the append-only path to one live event and at most two
-   revisions per day and method.
-   Its encrypted hosted payload remains authoritative until canonical import
-   succeeds, including across runtime yield or cold restore. That success gate
-   is companion-specific. Generic provider payload rows remain available to
-   reconstruct a lost machine-local queue while work is queued, but the
-   checkpoint handoff carries the local scheduler's future wake instead of
-   immediately replaying the hosted row. Generic execution success or terminal
-   failure acknowledges the row. Work skipped after a machine-local disconnect
-   remains hosted until the next control-plane snapshot either restores the
-   active account and replays it or explicitly terminally dispositions it;
-   companion RMSSD acknowledges only canonical success. Canonical-owner
-   failures retain the same local job row, extend its attempt fence, and use
-   the existing bounded retry delay even after ordinary job attempts are
-   exhausted. An expired worker lease on that fenced row is reclaimed on the
-   same row rather than dead-lettered, and a hosted refetch dedupes to that row
-   before reclaim; these paths never create replacement dead rows or an immediate hosted
-   replay loop. A structurally invalid companion payload terminalizes its one
-   local job and acknowledges the exact encrypted hosted payload so it cannot
-   replay into replacement dead rows. While provider revocation is in flight, the web-owned
-   `DISCONNECT_IN_PROGRESS` sentinel rejects every runtime connection, local
-   state, credential, source, and local-heartbeat mutation under the connection lock.
-   An exact admission replay after mutable vault-timezone metadata changes
-   matches its verified source version and preserves the first canonical
-   `dayKey` and `timeZone`; that placement drift alone is duplicate content.
-   Re-import preserves the provider external identity while correcting the
-   metric, and query reprojection classifies unreimported generic Apple HRV
-   facts from source provenance as SDNN without promoting them into RMSSD
-   summaries.
+   standard HRV quantity is SDNN (`hrv-sdnn`); the direct WHOOP 5/MG BLE result
+   is a beta overnight pulse-rate-variability RMSSD estimate (`hrv-rmssd`).
+   WHOOP API Recovery remains a separate provider metric. None of these series
+   alias or aggregate together.
+
+   The phone reduces pulse intervals in constant memory into non-overlapping
+   five-minute windows and uploads only the strict six-field nightly envelope:
+   `schema`, `methodVersion`, `nightDate`, `rmssdMs`, `completedWindowCount`,
+   and `acceptedWindowCount`. Exact capture timestamps, duration, timezone offset,
+   coverage milliseconds, raw packets, intervals, packet timestamps, device
+   identifiers, and per-window values never enter ingestion. The phone owns the
+   per-window accepted-duration policy; web verifies the closed summary shape,
+   at least 48 accepted windows, and at least 50% accepted completed windows.
+
+   The first strict envelope owns `(connection, nightDate)` in a 30-day,
+   64-row-per-connection receipt window. Exact replay is a no-op and changed
+   content conflicts. Every accepted envelope carries a verified SHA-256
+   admission identity from encrypted web staging through local dedupe and
+   importer external identity. Receipt cardinality is connection plus
+   `nightDate`; canonical cardinality is vault plus source (`whoop`) plus
+   `nightDate`. That produces one immutable summary-grain event with a
+   synthetic 12:00Z `occurredAt`, no event `timeZone`, and no reconstructed
+   capture time.
+
+   The encrypted hosted payload remains authoritative until canonical import
+   succeeds, including across runtime yield, cold restore, lease expiry,
+   disconnect, and hosted refetch. Canonical-owner failures retain and reclaim
+   the same local retry row beyond the ordinary attempt fence; they never mint
+   replacement dead rows or a tight hosted replay loop. Only canonical success
+   or the exact structurally invalid terminal result acknowledges the hosted
+   payload. Generic provider rows keep their existing executed-success or
+   terminal-failure acknowledgement policy. While provider revocation is in
+   flight, `DISCONNECT_IN_PROGRESS` still rejects runtime connection, local
+   state, credential, source, and heartbeat mutations under the connection
+   lock, without cancelling already accepted credential-free import work.
 
 ## Consequences for changes
 
