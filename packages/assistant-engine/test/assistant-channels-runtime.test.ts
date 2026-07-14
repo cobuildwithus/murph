@@ -424,6 +424,58 @@ describe('assistant channels runtime seam', () => {
     })
   })
 
+  it('keeps hosted business partial delivery ambiguous when cleanup is rejected', async () => {
+    const fetchImplementation = createQueuedFetch([
+      createTelegramResponse(200, {
+        ok: true,
+        result: {
+          message_id: 1001,
+        },
+      }),
+      createTelegramResponse(400, {
+        description: 'later chunk failed',
+        error_code: 400,
+      }),
+      createTelegramResponse(403, {
+        description: 'hosted business cleanup is not authorized',
+        error_code: 403,
+      }),
+    ])
+
+    const target = '123:bot:654321:business:biz-123:dm-topic:9'
+    await expect(
+      sendTelegramMessage(
+        {
+          message: `${'a'.repeat(4096)}b`,
+          target,
+        },
+        {
+          env: {
+            TELEGRAM_API_BASE_URL: 'https://telegram.test/',
+            TELEGRAM_BOT_TOKEN: '__cloudflare_injected__',
+          },
+          fetchImplementation,
+        },
+      ),
+    ).rejects.toMatchObject({
+      cleanupMessages: [{ messageId: '1001', target }],
+      code: 'ASSISTANT_TELEGRAM_DELIVERY_AMBIGUOUS',
+      deliveryMayHaveSucceeded: true,
+      providerMessageId: '1001',
+      providerMessageIds: ['1001'],
+      target,
+    })
+
+    expect(fetchImplementation).toHaveBeenCalledTimes(3)
+    expect(fetchImplementation.mock.calls[2]?.[0]).toContain(
+      '/deleteBusinessMessages',
+    )
+    expect(readJsonBody(fetchImplementation.mock.calls[2]?.[1]?.body)).toMatchObject({
+      business_connection_id: 'biz-123',
+      message_ids: [1001],
+    })
+  })
+
   it('does not retry ambiguous Telegram transport failures', async () => {
     const fetchImplementation = vi.fn(async () => {
       throw new Error('socket closed after request')

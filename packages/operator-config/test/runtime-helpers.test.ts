@@ -394,7 +394,7 @@ test('deleteTelegramMessages batches ids and uses deleteBusinessMessages for bus
     {
       env: {
         TELEGRAM_API_BASE_URL: 'https://api.telegram.example',
-        TELEGRAM_BOT_TOKEN: '__cloudflare_injected__',
+        TELEGRAM_BOT_TOKEN: '654321:test-token',
       },
       fetchImplementation,
     },
@@ -402,13 +402,12 @@ test('deleteTelegramMessages batches ids and uses deleteBusinessMessages for bus
 
   expect(fetchImplementation).toHaveBeenCalledTimes(2)
   expect(seenRequests[0]?.url).toBe(
-    'https://api.telegram.example/bot__cloudflare_injected__/deleteBusinessMessages',
+    'https://api.telegram.example/bot654321:test-token/deleteBusinessMessages',
   )
-  expect(seenRequests[0]?.headers).toMatchObject({
-    [HOSTED_TELEGRAM_BOT_ID_HEADER]: '654321',
-    [HOSTED_TELEGRAM_DELIVERY_TARGET_HEADER]:
-      '123:bot:654321:business:biz-123:topic:456',
-  })
+  expect(seenRequests[0]?.headers).not.toHaveProperty(HOSTED_TELEGRAM_BOT_ID_HEADER)
+  expect(seenRequests[0]?.headers).not.toHaveProperty(
+    HOSTED_TELEGRAM_DELIVERY_TARGET_HEADER,
+  )
   expect(seenRequests[0]?.body).toMatchObject({
     business_connection_id: 'biz-123',
     message_ids: expect.any(Array),
@@ -416,7 +415,7 @@ test('deleteTelegramMessages batches ids and uses deleteBusinessMessages for bus
   expect(seenRequests[0]?.body).not.toHaveProperty('chat_id')
   expect((seenRequests[0]?.body?.message_ids as unknown[])?.length).toBe(100)
   expect(seenRequests[1]?.url).toBe(
-    'https://api.telegram.example/bot__cloudflare_injected__/deleteBusinessMessages',
+    'https://api.telegram.example/bot654321:test-token/deleteBusinessMessages',
   )
   expect(seenRequests[1]?.body).toMatchObject({
     business_connection_id: 'biz-123',

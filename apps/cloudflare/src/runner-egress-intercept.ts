@@ -3122,7 +3122,6 @@ function isAllowedTelegramOperation(operation: string): boolean {
     || operation === "sendVoice"
     || operation === "sendChatAction"
     || operation === "deleteMessages"
-    || operation === "deleteBusinessMessages"
     || operation === "setMessageReaction"
     || operation === "getFile";
 }
@@ -3888,22 +3887,16 @@ async function readTelegramDeliveryTarget(
   if (!target) {
     return null;
   }
-  if (routing.chatId !== null) {
-    if (
-      routing.chatId !== target.chatId
-      || routing.businessConnectionId !== (target.businessConnectionId ?? null)
-      || routing.directMessagesTopicId
-        !== (target.directMessagesTopicId == null
-          ? null
-          : String(target.directMessagesTopicId))
-      || routing.messageThreadId
-        !== (target.messageThreadId == null ? null : String(target.messageThreadId))
-    ) {
-      return null;
-    }
-  } else if (
-    !routing.businessConnectionId
+  if (
+    routing.chatId === null
+    || routing.chatId !== target.chatId
     || routing.businessConnectionId !== (target.businessConnectionId ?? null)
+    || routing.directMessagesTopicId
+      !== (target.directMessagesTopicId == null
+        ? null
+        : String(target.directMessagesTopicId))
+    || routing.messageThreadId
+      !== (target.messageThreadId == null ? null : String(target.messageThreadId))
   ) {
     return null;
   }
