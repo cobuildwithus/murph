@@ -79,6 +79,7 @@ export function assertHostedLinqRouteAuthorityMatchesTarget(input: {
 
 export async function assertHostedLinqRecentInboundEngagementForRuntime(input: {
   answeredMailboxItemIds?: readonly string[] | null;
+  authorityCheckOnly?: boolean | null;
   currentInbound?: HostedLinqLegacyCurrentInboundProof | null;
   directRecipientPhoneNumber?: string | null;
   fromPhoneNumber?: string | null;
@@ -114,7 +115,10 @@ export async function assertHostedLinqRecentInboundEngagementForRuntime(input: {
     threadId: input.target,
   });
   if (targetThreadRoute) {
-    if (targetThreadRoute.containerMemberId !== input.memberId) {
+    if (
+      isHostedLinqCurrentHomeOnlyAssertion(input)
+      || targetThreadRoute.containerMemberId !== input.memberId
+    ) {
       throwHostedLinqRouteAuthorityMismatch();
     }
 
@@ -139,8 +143,19 @@ export async function assertHostedLinqRecentInboundEngagementForRuntime(input: {
     recipientPhone: input.directRecipientPhoneNumber,
     replyToMessageId: input.replyToMessageId,
     targetKind: input.targetKind,
-    homeRouteFallbackAllowed: input.homeRouteFallbackAllowed === true,
+    homeRouteFallbackAllowed:
+      input.homeRouteFallbackAllowed === true && input.authorityCheckOnly === true,
   });
+}
+
+function isHostedLinqCurrentHomeOnlyAssertion(input: {
+  answeredMailboxItemIds?: readonly string[] | null;
+  homeRouteFallbackAllowed?: boolean | null;
+  replyToMessageId?: string | null;
+}): boolean {
+  return input.homeRouteFallbackAllowed === true
+    && normalizeNullable(input.replyToMessageId) === null
+    && (input.answeredMailboxItemIds?.length ?? 0) === 0;
 }
 
 async function matchesPersistedHostedLinqDirectInbound(input: {
