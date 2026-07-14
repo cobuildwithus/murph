@@ -2,6 +2,9 @@ import "server-only";
 
 import { Prisma, type PrismaClient } from "@prisma/client";
 import {
+  HOSTED_RUNTIME_GROUP_MEMBERSHIPS_MAX,
+} from "@murphai/hosted-execution/runtime-control";
+import {
   buildHostedVaultShareProjectionScopeKey,
   hostedVaultShareProjectionKindToScope,
   isHostedVaultShareFixedProjectionKind,
@@ -68,6 +71,21 @@ export interface HostedGroupSummary {
   requestedVaultShareProjectionKinds: HostedVaultShareProjectionKind[];
   requestedVaultShareProjectionScopes: HostedVaultShareProjectionScope[];
   status: string;
+}
+
+export interface HostedGroupMembershipReadSummary {
+  displayName: string | null;
+  grantedVaultShareProjectionScopes: HostedVaultShareProjectionScope[];
+  kind: string;
+  memberCount: number;
+  ownerJoinCode: string | null;
+  requestedVaultShareProjectionScopes: HostedVaultShareProjectionScope[];
+  role: string;
+}
+
+export interface HostedGroupMembershipReadResult {
+  memberships: HostedGroupMembershipReadSummary[];
+  truncated: boolean;
 }
 
 export interface HostedGroupJoinView {
@@ -320,6 +338,84 @@ export async function readHostedGroupByRuntimeMemberId(input: {
     select: { id: true },
   });
   return group ? readHostedGroupSummaryById(prisma, group.id) : null;
+}
+
+export async function readHostedGroupMembershipsForMember(input: {
+  memberId: string;
+  prisma?: HostedGroupsReadClient;
+}): Promise<HostedGroupMembershipReadResult> {
+  const prisma = input.prisma ?? getPrisma();
+  const rows = await prisma.hostedGroupMember.findMany({
+    where: { memberId: input.memberId },
+    orderBy: [{ createdAt: "asc" }, { id: "asc" }],
+    take: HOSTED_RUNTIME_GROUP_MEMBERSHIPS_MAX + 1,
+    select: {
+      id: true,
+      role: true,
+      group: {
+        select: {
+          displayName: true,
+          joinCode: true,
+          joinPolicyJson: true,
+          kind: true,
+          runtimeMemberId: true,
+          _count: { select: { members: true } },
+        },
+      },
+    },
+  });
+  const selectedRows = rows.slice(0, HOSTED_RUNTIME_GROUP_MEMBERSHIPS_MAX);
+  const runtimeMemberIds = selectedRows
+    .map((row) => row.group.runtimeMemberId)
+    .filter((runtimeMemberId): runtimeMemberId is string => Boolean(runtimeMemberId));
+  const grantRows = runtimeMemberIds.length === 0
+    ? []
+    : await prisma.hostedVaultShare.findMany({
+        where: {
+          destinationMemberId: { in: runtimeMemberIds },
+          grantorMemberId: input.memberId,
+          status: "granted",
+        },
+        orderBy: [
+          { destinationMemberId: "asc" },
+          { projectionScopeKey: "asc" },
+        ],
+        select: {
+          destinationMemberId: true,
+          projectionKind: true,
+          projectionScopeJson: true,
+          projectionScopeKey: true,
+        },
+      });
+  const scopesByRuntimeMemberId = new Map<string, HostedVaultShareProjectionScope[]>();
+  for (const grantRow of grantRows) {
+    const scope = parseHostedGroupVaultShareRowProjectionScope(grantRow);
+    if (!scope) {
+      continue;
+    }
+    const scopes = scopesByRuntimeMemberId.get(grantRow.destinationMemberId) ?? [];
+    scopes.push(scope);
+    scopesByRuntimeMemberId.set(grantRow.destinationMemberId, scopes);
+  }
+
+  return {
+    memberships: selectedRows.map((row) => {
+      const policy = readHostedGroupJoinPolicy(row.group.joinPolicyJson);
+      const grantedVaultShareProjectionScopes = row.group.runtimeMemberId
+        ? scopesByRuntimeMemberId.get(row.group.runtimeMemberId) ?? []
+        : [];
+      return {
+        displayName: row.group.displayName,
+        grantedVaultShareProjectionScopes,
+        kind: row.group.kind,
+        memberCount: row.group._count.members,
+        ownerJoinCode: row.role === "owner" ? row.group.joinCode : null,
+        requestedVaultShareProjectionScopes: policy.requestedVaultShareProjectionScopes,
+        role: row.role,
+      };
+    }),
+    truncated: rows.length > HOSTED_RUNTIME_GROUP_MEMBERSHIPS_MAX,
+  };
 }
 
 export async function updateHostedGroupDisplayNameByRuntimeMemberIdTx(input: {

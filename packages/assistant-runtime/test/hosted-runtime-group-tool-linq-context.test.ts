@@ -293,7 +293,7 @@ describe("createHostedGroupToolWithLinqThreadContext", () => {
     expect(request).toHaveBeenLastCalledWith({ action: "read_current" });
   });
 
-  it("rejects durable group mutations whenever email ingress is present", async () => {
+  it("rejects personal membership reads and durable group mutations whenever email ingress is present", async () => {
     const request = vi.fn();
     const groupTool = createHostedGroupToolWithLinqThreadContext({
       emailDeliveryContexts: [buildEmailDeliveryContext({})],
@@ -302,6 +302,16 @@ describe("createHostedGroupToolWithLinqThreadContext", () => {
         buildLinqDeliveryContext({ routeAuthority: ROUTE_AUTHORITY }),
       ],
     });
+
+    await expect(groupTool.request({ action: "list_memberships" })).resolves.toEqual({
+      action: "list_memberships",
+      result: {
+        memberships: null,
+        status: "unavailable",
+        unavailableReason: "authenticated_sender_required",
+      },
+    });
+    expect(request).not.toHaveBeenCalled();
 
     await expect(groupTool.request({ action: "create_join_link" })).resolves.toEqual({
       action: "create_join_link",

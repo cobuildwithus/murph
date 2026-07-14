@@ -21382,7 +21382,7 @@ describe("hosted workspace runtime entrypoint", () => {
           },
           platform,
           runtimeWakeSignal,
-          async runAssistantPhase() {
+          async runAssistantPhase(input) {
             assistantPhaseCalls += 1;
             events.push(`assistant.phase:${assistantPhaseCalls}`);
             if (assistantPhaseCalls === 1) {
@@ -21401,6 +21401,10 @@ describe("hosted workspace runtime entrypoint", () => {
 
             assert.equal(assistantPhaseCalls, 2);
             assert.ok(pendingInputId);
+            assert.deepEqual(
+              input.initialAssistantInputBatch?.assistantInputIds,
+              [pendingInputId],
+            );
             await writeSyntheticAssistantAutoReplyTerminalEvidence({
               inputId: pendingInputId,
               vaultRoot,
