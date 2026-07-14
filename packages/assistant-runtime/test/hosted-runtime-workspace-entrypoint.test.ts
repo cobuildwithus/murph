@@ -21391,7 +21391,9 @@ describe("hosted workspace runtime entrypoint", () => {
           async runAssistantPhase() {
             assistantPhaseCalls += 1;
             events.push(`assistant.phase:${assistantPhaseCalls}`);
-            assert.equal(assistantPhaseCalls, 1);
+            if (assistantPhaseCalls > 1) {
+              return { progressed: false };
+            }
             await deviceSyncPort.fetchSnapshot();
             assert.ok(pendingInputId);
             await writeSyntheticAssistantAutoReplyTerminalEvidence({
@@ -21419,7 +21421,7 @@ describe("hosted workspace runtime entrypoint", () => {
         runtimeTransitionTimeoutMs,
         () => events.join(","),
       );
-      assert.equal(assistantPhaseCalls, 1);
+      assert.ok(assistantPhaseCalls >= 1);
       assert.equal(checkpointRequests.length, 0);
       shutdownController.abort();
 
@@ -21430,6 +21432,7 @@ describe("hosted workspace runtime entrypoint", () => {
       );
       const checkpoint = checkpointRequests.at(-1);
       assert.ok(checkpoint);
+      assert.equal(assistantPhaseCalls, 2);
       assert.equal(deviceSyncPort.fetchSnapshotCalls, 1);
       assert.equal(result.status, "scheduled");
       assert.equal(result.nextWakeAt, yieldedRetryWakeAt);
