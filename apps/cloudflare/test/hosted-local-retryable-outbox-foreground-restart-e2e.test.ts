@@ -163,15 +163,11 @@ describe("hosted local retryable outbox foreground restart e2e", () => {
     });
 
     const retryableStatus = await waitForDurableRetryableOutbox();
-    const retryWakeAtMs = Date.parse(retryableStatus.workspace?.nextWakeAt ?? "");
-    expect(Number.isFinite(retryWakeAtMs)).toBe(true);
-    expect(retryWakeAtMs - Date.now()).toBeGreaterThan(5_000);
     expect(retryableStatus.mailboxLag.every((lane) => lane.lag === "0")).toBe(true);
 
     const baselineIdleShutdownCleanupCount = countActivityExpiredDestroyRequestLogs();
     const restartedStatus = await waitForIdleShutdownCheckpoint({
       baselineCleanupCount: baselineIdleShutdownCleanupCount,
-      retryWakeAtMs,
     });
     expect(restartedStatus.workspace).not.toBeNull();
     expect(readHostedExecutionSnapshotHotRef(restartedStatus.workspace?.snapshotRef ?? null))
@@ -182,6 +178,9 @@ describe("hosted local retryable outbox foreground restart e2e", () => {
     expect(restartedStatus.lastErrorCode ?? null).toBeNull();
     expect(countActivityExpiredDestroyRequestLogs())
       .toBeGreaterThan(baselineIdleShutdownCleanupCount);
+    expect(requireLinqStub().countAcceptedSends(olderReplyPath, olderReplyMatcher)).toBe(
+      baselineOlderAcceptedCount,
+    );
 
     const foregroundWebhookResponse = await postSignedLinqWebhook(
       buildHostedLinqInboundEvent(userId, foregroundChatId, {
@@ -223,7 +222,6 @@ describe("hosted local retryable outbox foreground restart e2e", () => {
       userId,
     });
     expect(requireLinqStub().readObservedMessageText(foregroundReply)).toBe(foregroundReplyText);
-    expect(Date.now()).toBeLessThan(retryWakeAtMs);
     expect(requireLinqStub().countAcceptedSends(olderReplyPath, olderReplyMatcher)).toBe(
       baselineOlderAcceptedCount,
     );
@@ -354,16 +352,14 @@ async function waitForDurableRetryableOutbox(): Promise<HostedRunnerStatusRespon
   while (Date.now() - startedAt < 20_000) {
     const status = await readHostedRunnerStatusWithLogLimit(1_000);
     lastStatus = status;
-    const nextWakeAtMs = Date.parse(status.workspace?.nextWakeAt ?? "");
     if (
       status.workspace
-      && !status.inFlight
       && !status.lastErrorCode
       && status.mailboxLag.every((lane) => lane.lag === "0")
-      && Number.isFinite(nextWakeAtMs)
-      && nextWakeAtMs > Date.now()
-      // The prepared delivery effect is consumed by this attempt; the durable
-      // retry is represented by its future wake and nonterminal attempt state.
+      && Number.isFinite(Date.parse(status.workspace.nextWakeAt ?? ""))
+      // The counters prove the prepared effect is nonterminal and the aggregate
+      // wake proves scheduled work remains. That wake is not an outbox-specific
+      // deadline because assistant and maintenance work share the same field.
       && readHostedOutboxCounter(status, "hostedOutboxDeliveryAttempted") === 1
       && readHostedOutboxCounter(status, "hostedOutboxDeliverySent") === 0
       && readHostedOutboxCounter(status, "hostedOutboxTerminalizedSending") === 0
@@ -381,16 +377,12 @@ async function waitForDurableRetryableOutbox(): Promise<HostedRunnerStatusRespon
 
 async function waitForIdleShutdownCheckpoint(input: {
   baselineCleanupCount: number;
-  retryWakeAtMs: number;
 }): Promise<HostedRunnerStatusResponse> {
   const startedAt = Date.now();
   let lastActivityExpiryError: unknown = null;
   let lastStatus: HostedRunnerStatusResponse | null = null;
 
   while (Date.now() - startedAt < 20_000) {
-    if (Date.now() >= input.retryWakeAtMs) {
-      break;
-    }
     const status = await readHostedRunnerStatusWithLogLimit(100);
     lastStatus = status;
     const hotRef = status.workspace
@@ -421,7 +413,7 @@ async function waitForIdleShutdownCheckpoint(input: {
   }
 
   throw new Error(await requireScenario().buildFailureMessage(userId, [
-    "Timed out forcing an idle checkpoint and container restart before the old retry became due.",
+    "Timed out forcing an idle checkpoint and container restart.",
     ...(lastStatus ? [`last status: ${JSON.stringify(lastStatus)}`] : []),
     ...(lastActivityExpiryError
       ? [`last activity expiry error: ${formatErrorMessage(lastActivityExpiryError)}`]
