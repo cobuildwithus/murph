@@ -37,6 +37,11 @@ export interface HostedGroupNewsletterParticipant {
   memberId: string;
 }
 
+interface HostedGroupNewsletterAuthorizationParticipant
+  extends HostedGroupNewsletterParticipant {
+  emailIdentity: string | null;
+}
+
 export interface HostedGroupNewsletterAuthorizedShare {
   projectionScopeKey: string;
   shareId: string;
@@ -180,6 +185,7 @@ export async function prepareHostedGroupNewsletterParticipants(input: {
   }
   const nudgeParticipants = nudgeSnapshot.participants.map((participant) => ({
     authorizedShares: participant.authorizedShares,
+    emailIdentity: participant.emailIdentity,
     hasEmail: participant.address !== null,
     memberId: participant.memberId,
   }));
@@ -207,16 +213,20 @@ export async function prepareHostedGroupNewsletterParticipants(input: {
       unavailableReason: "authorization_snapshot_too_large",
     };
   }
-  const participants = resolved.participants.map((participant) => ({
+  const authorizationParticipants = resolved.participants.map((participant) => ({
     authorizedShares: participant.authorizedShares,
+    emailIdentity: participant.emailIdentity,
     hasEmail: participant.address !== null,
     memberId: participant.memberId,
   }));
+  const participants = authorizationParticipants.map(
+    toHostedGroupNewsletterParticipant,
+  );
 
   return {
     authorizationProof: buildHostedGroupNewsletterAuthorizationProof({
       groupId: resolved.groupId,
-      participants,
+      participants: authorizationParticipants,
     }),
     groupId: resolved.groupId,
     missingEmailParticipants: participants.filter((participant) => !participant.hasEmail),
@@ -252,6 +262,7 @@ export async function readHostedGroupNewsletterEmailRecipients(input: {
         groupId: resolved.groupId,
         participants: resolved.participants.map((participant) => ({
           authorizedShares: participant.authorizedShares,
+          emailIdentity: participant.emailIdentity,
           hasEmail: participant.address !== null,
           memberId: participant.memberId,
         })),
@@ -290,6 +301,7 @@ async function readHostedGroupNewsletterParticipantEmailFacts(input: {
       participants: Array<{
         address: string | null;
         authorizedShares: HostedGroupNewsletterAuthorizedShare[];
+        emailIdentity: string | null;
         memberId: string;
       }>;
       status: "ok";
@@ -407,6 +419,7 @@ async function readHostedGroupNewsletterParticipantEmailFacts(input: {
   const participants: Array<{
     address: string | null;
     authorizedShares: HostedGroupNewsletterAuthorizedShare[];
+    emailIdentity: string | null;
     memberId: string;
   }> = [];
   for (const { member } of canonicalGroup.members) {
@@ -421,22 +434,30 @@ async function readHostedGroupNewsletterParticipantEmailFacts(input: {
 
     const candidate = candidates.get(member.id) ?? null;
     const verifiedEmail = member.emailAuthorization;
-    const emailUnchanged = Boolean(
+    const emailUnchanged =
       candidate?.address
       && candidate.verifiedEmailLookupKey
       && candidate.verifiedEmailVerifiedAt
       && verifiedEmail?.verifiedEmailLookupKey === candidate.verifiedEmailLookupKey
       && verifiedEmail.verifiedEmailVerifiedAt?.getTime()
-        === candidate.verifiedEmailVerifiedAt.getTime(),
-    );
+        === candidate.verifiedEmailVerifiedAt.getTime()
+        ? {
+            address: candidate.address,
+            identity: buildHostedGroupNewsletterEmailIdentity({
+              lookupKey: candidate.verifiedEmailLookupKey,
+              verifiedAt: candidate.verifiedEmailVerifiedAt,
+            }),
+          }
+        : null;
     participants.push({
-      address: emailUnchanged ? candidate?.address ?? null : null,
+      address: emailUnchanged?.address ?? null,
       authorizedShares: member.vaultSharesGranted
         .filter((grant) => grant.projectionKind !== "group-email.v0")
         .map((grant) => ({
           projectionScopeKey: grant.projectionScopeKey,
           shareId: grant.id,
         })),
+      emailIdentity: emailUnchanged?.identity ?? null,
       memberId: member.id,
     });
   }
@@ -461,7 +482,7 @@ function hasHostedGroupNewsletterMemberActiveAccess(
 
 function buildHostedGroupNewsletterAuthorizationProof(input: {
   groupId: string;
-  participants: readonly HostedGroupNewsletterParticipant[];
+  participants: readonly HostedGroupNewsletterAuthorizationParticipant[];
 }): string {
   const canonical = {
     groupId: input.groupId,
@@ -473,12 +494,35 @@ function buildHostedGroupNewsletterAuthorizationProof(input: {
             left.projectionScopeKey.localeCompare(right.projectionScopeKey)
             || left.shareId.localeCompare(right.shareId)
           ),
+        emailIdentity: participant.emailIdentity,
         hasEmail: participant.hasEmail,
         memberId: participant.memberId,
       }))
       .sort((left, right) => left.memberId.localeCompare(right.memberId)),
   };
   return createHash("sha256").update(JSON.stringify(canonical)).digest("hex");
+}
+
+function toHostedGroupNewsletterParticipant(
+  participant: HostedGroupNewsletterAuthorizationParticipant,
+): HostedGroupNewsletterParticipant {
+  return {
+    authorizedShares: participant.authorizedShares,
+    hasEmail: participant.hasEmail,
+    memberId: participant.memberId,
+  };
+}
+
+function buildHostedGroupNewsletterEmailIdentity(input: {
+  lookupKey: string;
+  verifiedAt: Date;
+}): string {
+  return createHash("sha256")
+    .update(JSON.stringify({
+      lookupKey: input.lookupKey,
+      verifiedAt: input.verifiedAt.toISOString(),
+    }))
+    .digest("hex");
 }
 
 async function enqueueMissingNewsletterEmailWakesBestEffort(input: {

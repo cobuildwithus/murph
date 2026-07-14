@@ -381,6 +381,42 @@ describe("hosted group newsletter participants", () => {
     );
   });
 
+  it("rejects final recipients after verified-email identity rotates with email still present", async () => {
+    const prepared = await prepareHostedGroupNewsletterParticipants({
+      groupId: "hgrp_123",
+      runtimeMemberId: "group_runtime_member",
+    });
+    if (prepared.status !== "ok") {
+      throw new Error("Expected newsletter preparation.");
+    }
+
+    mocks.readHostedMemberEmailAuthorization.mockImplementation(async (input: { memberId: string }) => {
+      if (input.memberId === "member_active_missing_email") {
+        return null;
+      }
+
+      return {
+        verifiedEmail: verifiedEmailFact(`${input.memberId}@example.com`, {
+          lookupKey: "rotated-verified-email-lookup",
+        }),
+      };
+    });
+    mocks.getPrisma.mockReturnValue(createPrismaMock({
+      newsletterEmailLookupKeyByMember: {
+        member_active_with_email: "rotated-verified-email-lookup",
+      },
+    }));
+
+    await expect(readHostedGroupNewsletterEmailRecipients({
+      expectedNewsletterAuthorizationProof: prepared.authorizationProof,
+      groupId: "hgrp_123",
+      runtimeMemberId: "group_runtime_member",
+    })).resolves.toEqual({
+      status: "unavailable",
+      unavailableReason: "newsletter_authorization_changed",
+    });
+  });
+
   it("reuses the member plus group idempotency key on repeat stats reads without a second signal", async () => {
     mocks.appendHostedMailboxEnvelopeTx
       .mockResolvedValueOnce({
@@ -724,11 +760,14 @@ describe("hosted group newsletter participants", () => {
   });
 });
 
-function verifiedEmailFact(address: string) {
+function verifiedEmailFact(address: string, input?: {
+  lookupKey?: string;
+  verifiedAt?: Date;
+}) {
   return {
     address,
-    lookupKey: "verified-email-lookup",
-    verifiedAt: new Date("2026-07-01T12:00:00.000Z"),
+    lookupKey: input?.lookupKey ?? "verified-email-lookup",
+    verifiedAt: input?.verifiedAt ?? new Date("2026-07-01T12:00:00.000Z"),
   };
 }
 

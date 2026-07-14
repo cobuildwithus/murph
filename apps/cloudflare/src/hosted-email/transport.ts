@@ -536,6 +536,7 @@ async function prepareHostedEmailSend(input: {
       fromAddress,
       inReplyTo: replyToMessageId,
       messageId,
+      mimeDate: resolveHostedEmailMimeDate(input.idempotencyKey),
       references: previousReferences,
       replyToAddress: input.replyAddress,
       subject,
@@ -569,6 +570,7 @@ function buildRawMimeMessage(input: {
   fromAddress: string;
   inReplyTo: string | null;
   messageId: string;
+  mimeDate: string;
   references: string[];
   replyToAddress: string | null;
   subject: string;
@@ -580,7 +582,7 @@ function buildRawMimeMessage(input: {
     input.cc.length > 0 ? formatMimeHeaderLine("Cc", input.cc.join(", ")) : null,
     formatMimeHeaderLine("Subject", encodeMimeHeader(input.subject)),
     formatMimeHeaderLine("Message-ID", input.messageId),
-    formatMimeHeaderLine("Date", new Date().toUTCString()),
+    formatMimeHeaderLine("Date", input.mimeDate),
     input.replyToAddress ? formatMimeHeaderLine("Reply-To", input.replyToAddress) : null,
     input.inReplyTo ? formatMimeHeaderLine("In-Reply-To", input.inReplyTo) : null,
     input.references.length > 0
@@ -615,6 +617,23 @@ function buildRawMimeMessage(input: {
   return `${headers.join("\r\n")}\r\n\r\n${wrapMimeBase64(
     encodeUtf8Base64(input.bodyText),
   )}\r\n`;
+}
+
+function resolveHostedEmailMimeDate(idempotencyKey: string | null): string {
+  const newsletterOccurrenceAt = parseHostedNewsletterOccurrenceAt(idempotencyKey);
+  return (newsletterOccurrenceAt ?? new Date()).toUTCString();
+}
+
+function parseHostedNewsletterOccurrenceAt(idempotencyKey: string | null): Date | null {
+  const trimmed = idempotencyKey?.trim() ?? "";
+  const match = /^group-newsletter:[^:]+:(.+):[^:]+$/u.exec(trimmed);
+  const occurrenceAt = match?.[1] ?? "";
+  if (!occurrenceAt) {
+    return null;
+  }
+
+  const parsed = new Date(occurrenceAt);
+  return Number.isNaN(parsed.getTime()) ? null : parsed;
 }
 
 async function createHostedEmailMessageId(input: {

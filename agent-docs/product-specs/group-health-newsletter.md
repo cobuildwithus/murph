@@ -1,6 +1,6 @@
 # Group Health Newsletter
 
-Last verified: 2026-07-13
+Last verified: 2026-07-14
 Status: Implemented
 
 ## Current State
@@ -82,7 +82,8 @@ addresses). Its body uses health data only from the **featured** members plus
 eligible group comparisons. The trusted web-side newsletter `prepare` call
 returns member ids, email eligibility, and an address-free snapshot of each
 member's current data grants as exact projection-scope/share-id pairs, plus a
-SHA-256 proof of the complete address-free participant snapshot. Trusted
+SHA-256 proof of the complete private participant snapshot, including a hashed
+verified-email lookup identity that is never shown to the model. Trusted
 assistant code loads the same generic group weekly projection and vault timezone
 used by `vault-cli group weekly` **before** the final web authorization request.
 That final web resolution derives group binding, membership, active access,
@@ -114,14 +115,23 @@ in the shared MIME. No new queue, table, route, scheduler, or state owner exists
 
 The parent and children share the occurrence-scoped delivery key. A later fresh
 cron turn reads their durable states: active work returns `accepted` and retains
-the occurrence; all-sent or durably classified partial work is terminal; safe
-pre-provider failures may create a fresh planner; sent and ambiguous children
-are never replayed. Missing prepare/send results and unavailable preparation are
-explicit retryable failures. The first-run opt-out window remains separate and
-supplies no scheduled send authority, so it can still consume its intentional
-no-send occurrence. Immediately before MIME construction and each recipient
-provider entry, the web callback resolves the complete canonical snapshot again
-and returns addresses only when its proof matches.
+the occurrence; all-sent or durably classified partial work is terminal. Once a
+parent intent has been sent, that parent's subject, text, HTML, proof, and
+occurrence identity are the immutable manifest for the occurrence. Safe
+pre-provider recipient failures may create new child intents, but those children
+copy the sent parent manifest instead of re-planning from a fresh model body.
+The sent parent manifest and terminal recipient evidence for the occurrence are
+retained outside normal terminal outbox pruning because canonical cron
+completion may need to replay after long downtime before it can mark the
+occurrence terminal. Sent and ambiguous children are never replayed, and a
+changed proof after a sent parent is terminal for that occurrence instead of
+authorizing a second payload under the same message identity. Missing
+prepare/send results and unavailable preparation are explicit retryable
+failures. The first-run opt-out window remains separate and supplies no
+scheduled send authority, so it can still consume its intentional no-send
+occurrence. Immediately before MIME construction and each recipient provider
+entry, the web callback resolves the complete canonical snapshot again and
+returns addresses only when its proof matches.
 
 ## Content and Tone
 
@@ -183,7 +193,7 @@ Outbound goes through the existing Cloudflare `send_email` binding `HOSTED_EMAIL
 
 The newsletter is one message the whole group is on:
 
-- The MIME `To` header lists **all participant addresses**; the message carries a stable `Message-ID` (and `References` for replies) so it threads.
+- The MIME `To` header lists **all participant addresses**; the message carries a stable `Message-ID`, an occurrence-seeded `Date`, and `References` for replies so it threads.
 - The binding sends one envelope copy per participant (per-recipient RCPT) with identical MIME. Each recipient sees the same thread; **reply-all** reaches the other members via `To` and the group's Murph via `Reply-To`.
 - HTML body (add an HTML alternative part to the outbound builder, which is text-only today).
 - **`From`** = the configured hosted sender address (main's existing convention); **`Reply-To`** = the group runtime's signed reply alias, so replies land back in the group's Murph. **Murph participates in the thread** — inbound replies route through the existing hosted-email ingress (`apps/cloudflare/src/hosted-email/worker-ingress.ts`) into the group runtime, so Murph reacts/answers like it does in the group chat.
@@ -224,9 +234,12 @@ Individual and self-service. A member says "take me off the newsletter" **in the
   projection/timezone loading. Send requires a matching same-occurrence
   preparation and carries its address-free proof to the final web callback,
   which rechecks the complete authorization snapshot before provider entry, so
-  revoked facts cannot remain in an already-composed email. A proof mismatch is
-  terminally superseded before provider entry so current-proof work can replace
-  it; transient runtime unavailability remains retryable. When preparation
+  revoked facts cannot remain in an already-composed email. Before a sent parent
+  exists, a proof mismatch prevents provider entry and the occurrence remains
+  retryable through the outbox lifecycle. After a parent is sent, a later proof
+  mismatch is terminal for that occurrence, and safe recipient retries copy the
+  sent parent payload rather than composing a second body under the same message
+  identity. Transient runtime unavailability remains retryable. When preparation
   finds no email-eligible participant, trusted runtime code records the
   terminal `no_recipients` result and closes send authority while the model
   returns the documented group settings reminder.

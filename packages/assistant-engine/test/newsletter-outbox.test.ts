@@ -25,6 +25,7 @@ const AUTHORITY = {
   occurrenceAt: '2026-07-12T13:00:00.000Z',
 }
 const AUTHORIZATION_PROOF = 'a'.repeat(64)
+const CHANGED_AUTHORIZATION_PROOF = 'b'.repeat(64)
 const DELIVERY_KEY =
   'group-newsletter:automation_newsletter:2026-07-12T13:00:00.000Z:group_123'
 const tempRoots: string[] = []
@@ -204,8 +205,73 @@ describe('newsletter durable outbox capability', () => {
     expect(await listAssistantOutboxIntents(vault)).toHaveLength(2)
   })
 
-  it('queues a fresh planner after a proven pre-provider recipient failure', async () => {
+  it('retries a proven pre-provider recipient failure from the sent parent payload', async () => {
     const vault = await createVault('newsletter-outbox-safe-retry-')
+    const firstTool = createTool({
+      request: vi.fn(async () => preparationResponse({ participantIds: ['member_one'] })),
+      turnId: 'turn_first',
+      vault,
+    })
+    await prepare(firstTool)
+    await send(firstTool, {
+      html: '<p>Original weekly note</p>',
+      subject: 'Original weekly note',
+      text: 'Original weekly note',
+    })
+    await markOnlyIntentSent(vault)
+    await createRecipientIntent({
+      emailHtml: '<p>Original weekly note</p>',
+      errorCode: 'ASSISTANT_EMAIL_GROUP_RECIPIENT_AUTHORITY_SUPERSEDED',
+      message: 'Original weekly note',
+      memberId: 'member_one',
+      status: 'abandoned',
+      vault,
+    })
+
+    const retryTool = createTool({
+      request: vi.fn(async () => preparationResponse({ participantIds: ['member_one'] })),
+      turnId: 'turn_retry',
+      vault,
+    })
+    await prepare(retryTool)
+    await expect(send(retryTool, {
+      html: '<p>Recomposed weekly note</p>',
+      subject: 'Recomposed weekly note',
+      text: 'Recomposed weekly note',
+    })).resolves.toMatchObject({
+      action: 'send',
+      result: { status: 'accepted' },
+    })
+    const intents = await listAssistantOutboxIntents(vault)
+    const parents = intents.filter((intent) =>
+      parseHostedEmailThreadTarget(intent.explicitTarget)?.recipientMemberId === null
+    )
+    expect(parents).toHaveLength(1)
+
+    const memberIntents = intents
+      .filter((intent) =>
+        parseHostedEmailThreadTarget(intent.explicitTarget)?.recipientMemberId
+        === 'member_one'
+      )
+      .sort((left, right) => left.createdAt.localeCompare(right.createdAt))
+    expect(memberIntents).toHaveLength(2)
+    const retryIntent = memberIntents[1]
+    expect(retryIntent).toMatchObject({
+      emailHtml: '<p>Original weekly note</p>',
+      message: 'Original weekly note',
+      newsletterAuthorizationProof: AUTHORIZATION_PROOF,
+      status: 'pending',
+      turnId: 'turn_first',
+    })
+    expect(parseHostedEmailThreadTarget(retryIntent?.explicitTarget ?? null))
+      .toMatchObject({
+        recipientMemberId: 'member_one',
+        subject: 'Original weekly note',
+      })
+  })
+
+  it('treats proof changes as terminal without re-planning a sent occurrence', async () => {
+    const vault = await createVault('newsletter-outbox-proof-change-')
     const firstTool = createTool({
       request: vi.fn(async () => preparationResponse({ participantIds: ['member_one'] })),
       turnId: 'turn_first',
@@ -222,19 +288,32 @@ describe('newsletter durable outbox capability', () => {
     })
 
     const retryTool = createTool({
-      request: vi.fn(async () => preparationResponse({ participantIds: ['member_one'] })),
+      request: vi.fn(async () => preparationResponse({
+        authorizationProof: CHANGED_AUTHORIZATION_PROOF,
+        participantIds: ['member_one'],
+      })),
       turnId: 'turn_retry',
       vault,
     })
     await prepare(retryTool)
-    await expect(send(retryTool)).resolves.toMatchObject({
+    await expect(send(retryTool, {
+      html: '<p>Changed proof note</p>',
+      subject: 'Changed proof note',
+      text: 'Changed proof note',
+    })).resolves.toMatchObject({
       action: 'send',
-      result: { status: 'accepted' },
+      result: {
+        failedRecipientCount: 1,
+        sentRecipientCount: 0,
+        status: 'partial_failure',
+      },
     })
-    const parents = (await listAssistantOutboxIntents(vault)).filter((intent) =>
+
+    const intents = await listAssistantOutboxIntents(vault)
+    expect(intents).toHaveLength(2)
+    expect(intents.filter((intent) =>
       parseHostedEmailThreadTarget(intent.explicitTarget)?.recipientMemberId === null
-    )
-    expect(parents).toHaveLength(2)
+    )).toHaveLength(1)
   })
 })
 
@@ -255,13 +334,14 @@ function createTool(input: {
 }
 
 function preparationResponse(input?: {
+  authorizationProof?: string
   participantIds?: string[]
 }): HostedRuntimeNewsletterToolResponse {
   const participantIds = input?.participantIds ?? ['member_one', 'member_two']
   return {
     action: 'prepare',
     result: {
-      authorizationProof: AUTHORIZATION_PROOF,
+      authorizationProof: input?.authorizationProof ?? AUTHORIZATION_PROOF,
       groupId: 'group_123',
       missingEmailParticipants: [
         { authorizedShares: [], hasEmail: false, memberId: 'member_no_email' },
@@ -283,13 +363,20 @@ async function prepare(tool: ReturnType<typeof createTool>) {
   return await tool.request({ action: 'prepare', groupId: 'group_123' })
 }
 
-async function send(tool: ReturnType<typeof createTool>) {
+async function send(
+  tool: ReturnType<typeof createTool>,
+  input?: {
+    html?: string
+    subject?: string
+    text?: string
+  },
+) {
   return await tool.request({
     action: 'send',
     groupId: 'group_123',
-    html: '<p>Weekly</p>',
-    subject: 'Weekly health note',
-    text: 'Weekly',
+    html: input?.html ?? '<p>Weekly</p>',
+    subject: input?.subject ?? 'Weekly health note',
+    text: input?.text ?? 'Weekly',
   })
 }
 
@@ -315,8 +402,11 @@ async function markOnlyIntentSent(vault: string): Promise<void> {
 }
 
 async function createRecipientIntent(input: {
+  authorizationProof?: string
+  emailHtml?: string
   errorCode?: string
   memberId: string
+  message?: string
   status: 'abandoned' | 'sent'
   vault: string
 }): Promise<void> {
@@ -324,15 +414,15 @@ async function createRecipientIntent(input: {
     channel: 'email',
     dedupeToken: `recipient:${input.memberId}`,
     deliveryIdempotencyKey: DELIVERY_KEY,
-    emailHtml: '<p>Weekly</p>',
+    emailHtml: input.emailHtml ?? '<p>Weekly</p>',
     explicitTarget: serializeHostedEmailThreadTarget({
       groupId: 'group_123',
       recipientMemberId: input.memberId,
       subject: 'Weekly health note',
       targetKind: 'group',
     }),
-    message: 'Weekly',
-    newsletterAuthorizationProof: AUTHORIZATION_PROOF,
+    message: input.message ?? 'Weekly',
+    newsletterAuthorizationProof: input.authorizationProof ?? AUTHORIZATION_PROOF,
     sessionId: 'session_newsletter',
     threadIsDirect: false,
     turnId: `turn_recipient_${input.memberId}`,

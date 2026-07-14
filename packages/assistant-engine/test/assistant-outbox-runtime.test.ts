@@ -996,6 +996,115 @@ describe('assistant outbox runtime', () => {
     expect(retained.filter((intent) => intent.status !== 'retryable')).toHaveLength(100)
   })
 
+  it('retains group newsletter terminal occurrence evidence during outbox pruning', async () => {
+    const { paths, vaultRoot } = await createAssistantVault(
+      'assistant-outbox-newsletter-retention-',
+    )
+    const deliveryIdempotencyKey =
+      'group-newsletter:automation_newsletter:2026-07-12T13:00:00.000Z:group_123'
+    const parentTarget = serializeHostedEmailThreadTarget({
+      groupId: 'group_123',
+      subject: 'Weekly health note',
+      targetKind: 'group',
+    })
+    const childTarget = serializeHostedEmailThreadTarget({
+      groupId: 'group_123',
+      recipientMemberId: 'member_one',
+      subject: 'Weekly health note',
+      targetKind: 'group',
+    })
+
+    const parent = await createIntent(vaultRoot, {
+      channel: 'email',
+      createdAt: '2026-03-01T00:00:00.000Z',
+      deliveryIdempotencyKey,
+      explicitTarget: parentTarget,
+      message: 'newsletter parent manifest',
+      sessionId: 'session-newsletter-parent',
+      threadIsDirect: false,
+      turnId: 'turn-newsletter-parent',
+    })
+    await saveAssistantOutboxIntent(vaultRoot, {
+      ...parent,
+      sentAt: '2026-03-01T00:05:00.000Z',
+      status: 'sent',
+      updatedAt: '2026-03-01T00:05:00.000Z',
+    })
+
+    const sentChild = await createIntent(vaultRoot, {
+      channel: 'email',
+      createdAt: '2026-03-01T00:01:00.000Z',
+      deliveryIdempotencyKey,
+      explicitTarget: childTarget,
+      message: 'newsletter sent recipient child',
+      sessionId: 'session-newsletter-sent-child',
+      threadIsDirect: false,
+      turnId: 'turn-newsletter-sent-child',
+    })
+    await saveAssistantOutboxIntent(vaultRoot, {
+      ...sentChild,
+      sentAt: '2026-03-01T00:06:00.000Z',
+      status: 'sent',
+      updatedAt: '2026-03-01T00:06:00.000Z',
+    })
+    const failedChild = await createIntent(vaultRoot, {
+      channel: 'email',
+      createdAt: '2026-03-01T00:02:00.000Z',
+      deliveryIdempotencyKey,
+      explicitTarget: serializeHostedEmailThreadTarget({
+        groupId: 'group_123',
+        recipientMemberId: 'member_two',
+        subject: 'Weekly health note',
+        targetKind: 'group',
+      }),
+      message: 'newsletter failed recipient child',
+      sessionId: 'session-newsletter-failed-child',
+      threadIsDirect: false,
+      turnId: 'turn-newsletter-failed-child',
+    })
+    await saveAssistantOutboxIntent(vaultRoot, {
+      ...failedChild,
+      lastError: {
+        code: 'ASSISTANT_EMAIL_GROUP_RECIPIENT_AUTHORITY_SUPERSEDED',
+        message: 'pre-provider recipient authority changed',
+      },
+      status: 'abandoned',
+      updatedAt: '2026-03-01T00:07:00.000Z',
+    })
+
+    await expect(
+      pruneAssistantTerminalOutboxIntents({
+        now: new Date('2026-04-20T12:00:00.000Z'),
+        paths,
+        vault: vaultRoot,
+      }),
+    ).resolves.toBe(0)
+
+    const retained = await listAssistantOutboxIntentsLocal(vaultRoot)
+    expect(retained.map((intent) => intent.intentId).sort()).toEqual(
+      [failedChild.intentId, parent.intentId, sentChild.intentId].sort(),
+    )
+    expect(retained).toEqual(
+      expect.arrayContaining([
+        expect.objectContaining({
+          intentId: parent.intentId,
+          message: 'newsletter parent manifest',
+          status: 'sent',
+        }),
+        expect.objectContaining({
+          intentId: sentChild.intentId,
+          message: 'newsletter sent recipient child',
+          status: 'sent',
+        }),
+        expect.objectContaining({
+          intentId: failedChild.intentId,
+          message: 'newsletter failed recipient child',
+          status: 'abandoned',
+        }),
+      ]),
+    )
+  })
+
   it('prunes terminal outbox intents by instant when timestamp offsets differ', async () => {
     const { paths, vaultRoot } = await createAssistantVault(
       'assistant-outbox-retention-offsets-',

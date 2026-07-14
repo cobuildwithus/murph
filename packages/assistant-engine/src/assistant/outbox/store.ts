@@ -4,6 +4,7 @@ import {
   assistantOutboxIntentSchema,
   type AssistantOutboxIntent,
 } from '@murphai/operator-config/assistant-cli-contracts'
+import { parseHostedEmailThreadTarget } from '@murphai/runtime-state'
 import { recordAssistantDiagnosticEvent } from '../diagnostics.js'
 import { withAssistantRuntimeWriteLock } from '../runtime-write-lock.js'
 import { ensureAssistantState } from '../store/persistence.js'
@@ -112,7 +113,11 @@ export async function pruneAssistantTerminalOutboxIntents(input: {
 
     const intentPath = path.join(input.paths.outboxDirectory, entry.name)
     const intent = await readAssistantOutboxIntentInventoryEntry(input.vault, intentPath)
-    if (!intent || !isTerminalAssistantOutboxIntent(intent)) {
+    if (
+      !intent
+      || !isTerminalAssistantOutboxIntent(intent)
+      || isPruneProtectedAssistantOutboxIntent(intent)
+    ) {
       continue
     }
 
@@ -267,6 +272,16 @@ function isTerminalAssistantOutboxIntent(intent: AssistantOutboxIntent): boolean
     intent.status === 'failed' ||
     intent.status === 'abandoned'
   )
+}
+
+function isPruneProtectedAssistantOutboxIntent(
+  intent: AssistantOutboxIntent,
+): boolean {
+  if (!intent.deliveryIdempotencyKey?.startsWith('group-newsletter:')) {
+    return false
+  }
+  const target = parseHostedEmailThreadTarget(intent.explicitTarget)
+  return target?.targetKind === 'group'
 }
 
 function isActiveAssistantOutboxIntent(intent: AssistantOutboxIntent): boolean {
