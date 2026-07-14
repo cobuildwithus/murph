@@ -12,6 +12,7 @@ import {
 import {
   normalizeAssistantRouteString,
 } from "@murphai/operator-config/assistant/current-delivery-route";
+import { assistantPreferenceCausalSeqSchema } from "@murphai/contracts";
 
 import type {
   HostedMailboxItemImportOutcome,
@@ -145,6 +146,7 @@ function createGroupNewsletterEmailNeededAssistantInputEvent(input: {
     replyTarget: input.route.replyTarget,
     sourceMetadata: null,
     sourceRef: {
+      causalSeq: assistantPreferenceCausalSeqSchema.parse(input.item.item.causalSeq),
       dedupeKey: safeHostedAssistantInputTokenOrHash(input.item.item.dedupeKey),
       eventId: safeHostedAssistantInputTokenOrHash(input.wake.eventId),
       itemId: safeHostedAssistantInputTokenOrHash(input.item.item.id),

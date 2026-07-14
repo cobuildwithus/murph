@@ -1639,79 +1639,6 @@ describe('assistant automation scanner', () => {
     )
   })
 
-  it('yields at a complete group boundary after queuing current-turn delivery', async () => {
-    vi.useFakeTimers()
-    vi.setSystemTime(new Date('2026-04-08T00:10:00.000Z'))
-    const first = createCaptureSummary({
-      captureId: 'capture-group-first',
-      occurredAt: '2026-04-08T00:01:00.000Z',
-    })
-    const second = createCaptureSummary({
-      captureId: 'capture-group-second',
-      occurredAt: '2026-04-08T00:02:00.000Z',
-    })
-    const remaining = createCaptureSummary({
-      captureId: 'capture-next-group',
-      occurredAt: '2026-04-08T00:03:00.000Z',
-    })
-    groupingMocks.collectAssistantAutoReplyGroup.mockImplementationOnce(
-      async () => ({
-        endIndex: 1,
-        items: [
-          createReplyGroupItem(first),
-          createReplyGroupItem(second),
-        ],
-      }),
-    )
-    scannerReplyMocks.processAssistantAutoReplyGroup.mockResolvedValueOnce({
-      advanceCursor: true,
-      currentTurnDeliveryIntentIds: ['intent-current-group'],
-      failed: 0,
-      replied: 1,
-      skipped: 0,
-      stopScanning: false,
-    })
-    const stateUpdates: AssistantAutomationState[] = []
-    const scanner = await vi.importActual<typeof import('../src/assistant/automation/scanner.ts')>(
-      '../src/assistant/automation/scanner.ts',
-    )
-
-    const result = await scanner.scanAssistantAutomationOnce({
-      inboxServices: createInboxServices(),
-      inputSource: createAssistantInputSourceForCaptures([first, second, remaining]),
-      onStateProgress: async (next) => {
-        stateUpdates.push({
-          ...createAutomationState(),
-          autoReply: [...next.autoReply],
-        })
-      },
-      state: createAutomationState({
-        autoReplyChannels: ['telegram'],
-      }),
-      stopAfterCurrentTurnDeliveryIntent: true,
-      vault: '/tmp/assistant-automation-vault',
-    })
-
-    expect(result).toMatchObject({
-      currentTurnDeliveryIntentIds: ['intent-current-group'],
-      replies: {
-        considered: 2,
-        nextWakeAt: '2026-04-08T00:10:00.001Z',
-        replied: 1,
-      },
-    })
-    expect(scannerReplyMocks.processAssistantAutoReplyGroup).toHaveBeenCalledTimes(1)
-    expect(scannerReplyMocks.processAssistantAutoReplyGroup).toHaveBeenCalledWith(
-      expect.objectContaining({
-        context: expect.objectContaining({ inputCount: 2 }),
-      }),
-    )
-    expect(readAutoReplyCursor(
-      stateUpdates.at(-1) ?? createAutomationState(),
-      'telegram',
-    )).toEqual(createReplyGroupItem(second).inputCandidate.event.cursor)
-  })
-
   it('clears reply backlog state once the backlog is drained', async () => {
     const inboxServices = createInboxServices()
     const scanner = await vi.importActual<typeof import('../src/assistant/automation/scanner.ts')>(
@@ -8446,6 +8373,46 @@ describe('assistant auto-reply runtime', () => {
     )
     expect(evidenceMocks.writeAssistantAutoReplySuppressionEvidence)
       .not.toHaveBeenCalled()
+  })
+
+  it('withholds style authority from a hosted synthetic input without a causal sequence', async () => {
+    const hostedInput = createCapturelessAssistantInputCandidate({
+      inputId: 'ain_88888888888888888888888888888888',
+      occurredAt: '2026-04-08T00:07:00.000Z',
+      replyTarget: {
+        channel: 'linq',
+        messageId: null,
+        threadId: 'linq_chat_direct',
+      },
+      source: 'linq',
+      text: 'System note: a prior delivery failed.',
+    })
+    const reply = await vi.importActual<typeof import('../src/assistant/automation/reply.ts')>(
+      '../src/assistant/automation/reply.ts',
+    )
+    const context = reply.createAssistantAutoReplyGroupContext([
+      createCapturelessReplyGroupItem(hostedInput),
+    ])
+
+    if (!context) {
+      throw new Error('expected reply context')
+    }
+
+    await reply.processAssistantAutoReplyGroup({
+      allowSelfAuthored: false,
+      context,
+      enabledChannels: ['linq'],
+      inboxServices: createInboxServices(),
+      requestId: null,
+      sessionMaxAgeMs: null,
+      vault: '/tmp/assistant-automation-vault',
+    })
+
+    expect(replyMocks.sendAssistantMessage).toHaveBeenCalledWith(
+      expect.objectContaining({
+        assistantStyleSettingsAuthorized: false,
+      }),
+    )
   })
 
   it.each([

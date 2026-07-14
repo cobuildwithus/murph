@@ -61,9 +61,9 @@ export async function resolveHostedPreferenceCausalSeqForSelectedInput(input: {
   if (event?.sourceRef.kind !== "hosted-mailbox") {
     return null;
   }
-  return assistantPreferenceCausalSeqSchema.parse(
-    event.sourceRef.causalSeq ?? "0",
-  );
+  return event.sourceRef.causalSeq == null
+    ? null
+    : assistantPreferenceCausalSeqSchema.parse(event.sourceRef.causalSeq);
 }
 
 export function createHostedAssistantInputSource(input: {

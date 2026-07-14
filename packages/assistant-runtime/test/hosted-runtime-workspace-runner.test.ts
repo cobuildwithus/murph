@@ -140,7 +140,7 @@ const TEST_BROWSER_VAULT_REPLICA_REF = {
 } as const;
 
 describe("runHostedWorkspaceUntilIdleOrBudget", () => {
-  test("maps a legacy hosted mailbox input without causal sequence to zero", async () => {
+  test("withholds causal authority from a stored input without a normalized sequence", async () => {
     const vaultRoot = await mkdtemp(path.join(tmpdir(), "murph-runner-legacy-causal-seq-"));
 
     try {
@@ -162,7 +162,7 @@ describe("runHostedWorkspaceUntilIdleOrBudget", () => {
           assistantInputIds: [stored.inputId],
           vaultRoot,
         }),
-        "0",
+        null,
       );
     } finally {
       await rm(vaultRoot, { force: true, recursive: true });

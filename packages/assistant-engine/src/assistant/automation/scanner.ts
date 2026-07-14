@@ -33,7 +33,6 @@ import {
   type AssistantAutoReplyProviderRequestStartHook,
 } from './reply.js'
 import {
-  computeAssistantAutomationRetryAt,
   createEmptyAutoReplyScanResult,
   createEmptyInboxScanResult,
   normalizeScanLimit,
@@ -68,7 +67,6 @@ export async function scanAssistantAutomationOnce(input: {
   providerStallTimeoutMs?: number | null
   requestId?: string | null
   signal?: AbortSignal
-  stopAfterCurrentTurnDeliveryIntent?: boolean
   sessionMaxAgeMs?: number | null
   state: Pick<AssistantAutomationState, 'autoReply'>
   turnEnvironment?: AssistantTurnEnvironment | null
@@ -212,8 +210,6 @@ export async function scanAssistantAutomationOnce(input: {
       result: replyResult,
       summary: replies,
     })
-    const currentTurnDeliveryIntentCountBeforeGroup =
-      currentTurnDeliveryIntentIds.length
     currentTurnDeliveryIntentIds.push(
       ...(replyResult.currentTurnDeliveryIntentIds ?? []),
     )
@@ -238,15 +234,6 @@ export async function scanAssistantAutomationOnce(input: {
     })
 
     if (stopReplyScan) {
-      break
-    }
-    if (
-      input.stopAfterCurrentTurnDeliveryIntent
-      && currentTurnDeliveryIntentIds.length
-        > currentTurnDeliveryIntentCountBeforeGroup
-      && index < candidates.length - 1
-    ) {
-      replies.nextWakeAt = computeAssistantAutomationRetryAt(1)
       break
     }
   }

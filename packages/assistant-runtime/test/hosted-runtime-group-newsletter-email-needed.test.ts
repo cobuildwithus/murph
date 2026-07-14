@@ -78,6 +78,7 @@ describe("hosted group newsletter email-needed mailbox import", () => {
     assert.deepEqual(staged.replyTarget, currentRoute.replyTarget);
     assert.equal(staged.sourceRef.kind, "hosted-mailbox");
     assert.equal(staged.sourceRef.lane, "system");
+    assert.equal(staged.sourceRef.causalSeq, "42");
     assert.equal(staged.content.text, "System note: The group Tempo Crew set up an email newsletter. This member granted email sharing for that group but has no verified email. If appropriate, mention once in the normal 1:1 conversation that they can add an email at /settings?addEmail=true. Keep it casual, private, and non-shaming.");
     assert.equal(staged.content.text.includes(TEST_USER_ID), false);
     assert.equal(staged.content.text.includes("example.com"), false);
@@ -414,6 +415,7 @@ function createResolvedGroupNewsletterEmailNeededMailboxItem(input: {
   durablyConsumed?: boolean;
 } = {}): HostedMailboxResolvedImportItem {
   const item: HostedMailboxItem = {
+    causalSeq: "42",
     createdAt: TEST_NOW,
     dedupeKey: "group-newsletter.email-needed:member_private_missing_email:hgrp_private",
     expiresAt: null,

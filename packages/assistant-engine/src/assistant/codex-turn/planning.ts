@@ -466,6 +466,7 @@ export async function resolveAssistantRouteTurnPlan(input: {
       : []
   const assistantStyleSettingsAvailable =
     privateInteractiveAudience &&
+    input.input.assistantStyleSettingsAuthorized !== false &&
     (resolvedChannel !== 'email' || input.input.assistantStyleSettingsAuthorized === true) &&
     input.profile.promptProfile === 'conversation' &&
     input.profile.toolProfile === 'provider-turn'
@@ -655,7 +656,7 @@ export async function resolveAssistantRouteTurnPlan(input: {
         newsletterAvailable:
           input.hostedToolContext?.newsletterTool != null,
         personalizationAvailable:
-          privateInteractiveAudience &&
+          assistantStyleSettingsAvailable &&
           input.hostedToolContext?.personalizationTool != null,
         productFeedbackAvailable:
           productFeedbackAcceptedInputIds.length > 0 &&

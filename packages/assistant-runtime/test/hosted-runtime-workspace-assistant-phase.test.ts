@@ -6238,6 +6238,7 @@ describe("runHostedWorkspaceAssistantPhase runtime logs", () => {
       if (event?.sourceRef.kind !== "hosted-mailbox") {
         throw new Error("Expected hosted-mailbox terminal failure input.");
       }
+      expect(event.sourceRef.causalSeq).toBeUndefined();
       expect(event.sourceRef.eventId).toBe(
         `outbox-delivery-failed:${firstDeliveryEffect.effectId}`,
       );
