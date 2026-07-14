@@ -101,11 +101,11 @@ Last verified: 2026-07-13
   production deployment, updates the project-bound sensitive rollout bearer
   and producer flag through Vercel, re-proves the alias before staging the same
   production commit without domain assignment, abandons stale work on alias
-  drift, promotes once only while the original deployment remains current, and
+  drift, leaves all production alias mutation to the normal release path, and
   drains the authenticated server-side cursor route to completion. Focused
   hosted-web coverage proves route authorization, enablement probing,
-  configuration update, drift during the staged build, absence of stale
-  promotion/drain, exact promotion, provider response parsing, pagination, and
+  configuration update, overlapping workflow setup, absence of rollout-owned
+  deployment mutation, provider response parsing, pagination, and
   the documented one-time retirement condition without calling live Vercel or
   production Postgres.
   After contract cleanup applies, the rollback floor is the first deployed Vercel

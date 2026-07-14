@@ -195,21 +195,17 @@ recorded eligibility without also running the materializer:
    Migrations lane remove both compatibility bridges only after that same
    alias proof and drain.
 3. After contract migration succeeds, the same repository workflow derives a
-   rollout credential in memory from its existing Vercel credential, upserts
-   the producer flag plus the sensitive credential in Vercel production, and
-   re-proves the production alias before building that exact commit as a staged
-   production deployment with automatic domain assignment disabled.
-4. While the staged build runs and immediately before promotion, the workflow
-   requires production to remain on the original proven deployment. If a newer
-   deployment becomes current, the old workflow leaves the staged build
-   unpromoted and performs no rollout drain. Otherwise it requests one staged
-   promotion, waits for that exact commit to become current, verifies both
+   rollout credential in memory from its existing Vercel credential and upserts
+   the producer flag plus the sensitive credential in Vercel production. It
+   does not create, assign, or promote a deployment.
+4. The next normal production release is the sole production-alias owner and
+   captures that configuration. Its post-deploy workflow verifies both
    enablement and credential authority, then calls the private internal drain
    in bounded pages until `nextCursor` is `null`. Rows that still lack crypto
    roots or a safe private route remain eligible for a later activation,
    private inbound, or join retry.
 
-Environment update, alias drift, staged build, promotion, authority,
+Environment update, alias drift, authority,
 response-validation, and incomplete-pagination failures all stop the workflow.
 Secret values are never downloaded or printed, and group content never crosses
 this control path.

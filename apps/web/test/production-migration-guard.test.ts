@@ -849,7 +849,7 @@ describe("hosted web production migration guard", () => {
     assert.deepEqual(result, {
       appended: 3,
       deferred: 1,
-      redeployed: false,
+      configured: false,
       scanned: 4,
       terminalSkipped: 0,
     });
@@ -891,7 +891,7 @@ describe("hosted web production migration guard", () => {
     );
   });
 
-  test("stages the exact proven deployment before one promotion and drain", async () => {
+  test("configures the next normal production release without mutating the alias", async () => {
     const environment = {
       DEPLOYED_SHA: "deployed-sha",
       HOSTED_WEB_PRODUCTION_BASE_URL: "https://www.withmurph.ai",
@@ -899,11 +899,8 @@ describe("hosted web production migration guard", () => {
       HOSTED_WEB_VERCEL_TEAM_ID: "team-id",
       HOSTED_WEB_VERCEL_TOKEN: "vercel-token",
     };
-    let aliasDeploymentId = "dpl_current";
-    let rolloutStatusReads = 0;
     const environmentUpdates: Array<Record<string, unknown>> = [];
-    let redeployBody: Record<string, unknown> | null = null;
-    let promotionRequests = 0;
+    let deploymentMutationRequested = false;
 
     const result = await completeHostedGroupJoinConfirmationRollout(
       environment,
@@ -911,7 +908,7 @@ describe("hosted web production migration guard", () => {
         fetchImpl: async (url, init) => {
           const method = init?.method ?? "GET";
           if (url.includes("/v4/aliases/")) {
-            return webJsonResponse({ deploymentId: aliasDeploymentId });
+            return webJsonResponse({ deploymentId: "dpl_current" });
           }
           if (url.includes("/v13/deployments/dpl_current?")) {
             return webJsonResponse({
@@ -921,65 +918,29 @@ describe("hosted web production migration guard", () => {
               projectId: "project-id",
             });
           }
-          if (
-            url.includes("/v13/deployments/dpl_rollout?")
-            && url.includes("withGitRepoInfo=true")
-          ) {
-            return webJsonResponse({
-              gitSource: { sha: "deployed-sha" },
-              id: "dpl_rollout",
-              name: "hosted-web",
-              projectId: "project-id",
-            });
-          }
-          if (url.includes("/v13/deployments/dpl_rollout") && method === "GET") {
-            return webJsonResponse({ readyState: "READY" });
-          }
           if (url.includes("/v10/projects/project-id/env") && method === "POST") {
             environmentUpdates.push(JSON.parse(init?.body as string) as Record<string, unknown>);
             return webJsonResponse({ created: true });
           }
-          if (url.includes("/v13/deployments?forceNew=1") && method === "POST") {
-            redeployBody = JSON.parse(init?.body as string) as Record<string, unknown>;
-            return webJsonResponse({ id: "dpl_rollout" });
-          }
-          if (
-            url.includes("/v10/projects/project-id/promote/dpl_rollout")
-            && method === "POST"
-          ) {
-            promotionRequests += 1;
-            aliasDeploymentId = "dpl_rollout";
-            return new Response(null, { status: 202 });
+          if (url.includes("/deployments") || url.includes("/promote/")) {
+            deploymentMutationRequested = true;
           }
           if (url.includes("/api/internal/hosted-groups/join-confirmations/rollout")) {
-            if (method === "GET") {
-              rolloutStatusReads += 1;
-              return rolloutStatusReads === 1
-                ? webJsonResponse({ authorized: false, enabled: true })
-                : webJsonResponse({ authorized: true, enabled: true });
-            }
-            return webJsonResponse({
-              appended: 1,
-              deferred: 0,
-              nextCursor: null,
-              scanned: 1,
-              terminalSkipped: 0,
-            });
+            return webJsonResponse({ authorized: false, enabled: true });
           }
           throw new Error(`Unexpected rollout URL: ${url}`);
         },
-        sleep: async () => undefined,
       },
     );
 
-    assert.equal(result.redeployed, true);
-    assert.equal(promotionRequests, 1);
-    assert.deepEqual(redeployBody, {
-      autoAssignCustomDomains: false,
-      deploymentId: "dpl_current",
-      name: "hosted-web",
-      target: "production",
+    assert.deepEqual(result, {
+      appended: 0,
+      configured: true,
+      deferred: 0,
+      scanned: 0,
+      terminalSkipped: 0,
     });
+    assert.equal(deploymentMutationRequested, false);
     assert.deepEqual(
       environmentUpdates.map(({ key, target, type, value }) => ({
         key,
@@ -1006,30 +967,23 @@ describe("hosted web production migration guard", () => {
     );
   });
 
-  test("stops before redeploying if the production alias changes during rollout setup", async () => {
+  test("overlapping rollout setup never becomes a second production alias owner", async () => {
     const environment = {
       DEPLOYED_SHA: "deployed-sha",
       HOSTED_WEB_PRODUCTION_BASE_URL: "https://www.withmurph.ai",
       HOSTED_WEB_VERCEL_PROJECT_ID: "project-id",
       HOSTED_WEB_VERCEL_TOKEN: "vercel-token",
     };
-    let aliasReads = 0;
-    let redeployRequested = false;
-
-    await assert.rejects(
-      () => completeHostedGroupJoinConfirmationRollout(environment, {
+    let deploymentMutationRequested = false;
+    const run = () => completeHostedGroupJoinConfirmationRollout(environment, {
         fetchImpl: async (url, init) => {
           if (url.includes("/v4/aliases/")) {
-            aliasReads += 1;
-            return webJsonResponse({
-              deploymentId: aliasReads === 1 ? "dpl_current" : "dpl_changed",
-            });
+            return webJsonResponse({ deploymentId: "dpl_current" });
           }
-          if (url.includes("/v13/deployments/dpl_")) {
-            const id = url.includes("dpl_changed") ? "dpl_changed" : "dpl_current";
+          if (url.includes("/v13/deployments/dpl_current")) {
             return webJsonResponse({
               gitSource: { sha: "deployed-sha" },
-              id,
+              id: "dpl_current",
               name: "hosted-web",
               projectId: "project-id",
             });
@@ -1040,89 +994,16 @@ describe("hosted web production migration guard", () => {
           if (url.includes("/v10/projects/project-id/env")) {
             return webJsonResponse({ created: true });
           }
-          if (url.includes("/v13/deployments") && init?.method === "POST") {
-            redeployRequested = true;
+          if (url.includes("/deployments") || url.includes("/promote/")) {
+            deploymentMutationRequested = true;
           }
           throw new Error(`Unexpected rollout URL: ${url}`);
         },
-      }),
-      /production alias changed/u,
-    );
-    assert.equal(redeployRequested, false);
-  });
+      });
 
-  test("does not promote or drain if production changes while the staged redeploy builds", async () => {
-    const environment = {
-      DEPLOYED_SHA: "deployed-sha",
-      HOSTED_WEB_PRODUCTION_BASE_URL: "https://www.withmurph.ai",
-      HOSTED_WEB_VERCEL_PROJECT_ID: "project-id",
-      HOSTED_WEB_VERCEL_TOKEN: "vercel-token",
-    };
-    let aliasReads = 0;
-    let promoteRequested = false;
-    let drainRequested = false;
-
-    const result = await completeHostedGroupJoinConfirmationRollout(
-      environment,
-      {
-        fetchImpl: async (url, init) => {
-          const method = init?.method ?? "GET";
-          if (url.includes("/v4/aliases/")) {
-            aliasReads += 1;
-            return webJsonResponse({
-              deploymentId: aliasReads < 4 ? "dpl_current" : "dpl_newer",
-            });
-          }
-          if (url.includes("/v13/deployments/dpl_current?")) {
-            return webJsonResponse({
-              gitSource: { sha: "deployed-sha" },
-              id: "dpl_current",
-              name: "hosted-web",
-              projectId: "project-id",
-            });
-          }
-          if (url.includes("/v13/deployments/dpl_newer?")) {
-            return webJsonResponse({
-              gitSource: { sha: "newer-sha" },
-              id: "dpl_newer",
-              name: "hosted-web",
-              projectId: "project-id",
-            });
-          }
-          if (url.includes("/v13/deployments/dpl_rollout") && method === "GET") {
-            return webJsonResponse({ readyState: "BUILDING" });
-          }
-          if (url.includes("/v10/projects/project-id/env") && method === "POST") {
-            return webJsonResponse({ created: true });
-          }
-          if (url.includes("/v13/deployments?forceNew=1") && method === "POST") {
-            return webJsonResponse({ id: "dpl_rollout" });
-          }
-          if (url.includes("/v10/projects/project-id/promote/") && method === "POST") {
-            promoteRequested = true;
-            return new Response(null, { status: 202 });
-          }
-          if (url.includes("/api/internal/hosted-groups/join-confirmations/rollout")) {
-            if (method === "GET") {
-              return webJsonResponse({ authorized: false, enabled: false });
-            }
-            drainRequested = true;
-          }
-          throw new Error(`Unexpected rollout URL: ${url}`);
-        },
-        sleep: async () => undefined,
-      },
-    );
-
-    assert.deepEqual(result, {
-      appended: 0,
-      deferred: 0,
-      redeployed: false,
-      scanned: 0,
-      terminalSkipped: 0,
-    });
-    assert.equal(promoteRequested, false);
-    assert.equal(drainRequested, false);
+    const results = await Promise.all([run(), run()]);
+    assert.equal(results.every((result) => result.configured), true);
+    assert.equal(deploymentMutationRequested, false);
   });
 
   test("keeps package build non-mutating and keeps Vercel deploy migrations automatic", async () => {

@@ -35,7 +35,7 @@ with the named owner coverage or verification command.
 For the hosted group-join-confirmation production transition, focused iteration
 must cover the materializer batch/replay/deadline tests, the authenticated
 internal rollout route, and the Vercel workflow helper's exact-alias,
-configuration, staged redeploy, alias-drift interleaving, single promotion,
+configuration handoff to the next normal production release, absence of any rollout-owned deployment mutation,
 response-validation, pagination, and explicit retirement behavior. The
 final lane remains truthful `pnpm test:diff <touched path ...>` or the full
 acceptance fallback from the `apps/web` matrix row; focused Vitest plus a direct
