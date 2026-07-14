@@ -281,8 +281,15 @@ export class HostedUserRunner {
 
   async createHostedWorkspaceSnapshotUploadSession(
     input: HostedWorkspaceSnapshotUploadSession,
-  ): Promise<HostedWorkspaceSnapshotUploadSession> {
+  ): Promise<HostedWorkspaceSnapshotUploadSession | null> {
     return await this.workspaceSnapshotSessions.create(input);
+  }
+
+  async rememberHostedWorkspaceSnapshotReplacedRef(input: {
+    expectedSession: HostedWorkspaceSnapshotUploadSession;
+    replacedSnapshotRef: NonNullable<HostedWorkspaceSnapshotUploadSession["replacedSnapshotRef"]>;
+  }): Promise<boolean> {
+    return await this.workspaceSnapshotSessions.rememberReplacedSnapshotRef(input);
   }
 
   async recordHostedWorkspaceSnapshotOrphanCandidate(

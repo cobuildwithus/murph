@@ -277,6 +277,11 @@ function createDeletionStateStore(): {
 function createBindOnlyStateStore(): {
   bindUser(userId: string): Promise<string>;
   boundUsers: string[];
+  validateWriteFenceToken(input: {
+    attemptId: string;
+    generation: string;
+    userId: string;
+  }): Promise<{ owns: false; record: null }>;
 } {
   const boundUsers: string[] = [];
   return {
@@ -285,6 +290,12 @@ function createBindOnlyStateStore(): {
       return userId;
     },
     boundUsers,
+    async validateWriteFenceToken() {
+      return {
+        owns: false,
+        record: null,
+      };
+    },
   };
 }
 

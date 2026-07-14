@@ -45,7 +45,11 @@ export interface UserRunnerDurableObjectStubLike extends WorkerUserRunnerStubLik
   }): Promise<boolean>;
   createHostedWorkspaceSnapshotUploadSession?(
     input: HostedWorkspaceSnapshotUploadSession,
-  ): Promise<HostedWorkspaceSnapshotUploadSession>;
+  ): Promise<HostedWorkspaceSnapshotUploadSession | null>;
+  rememberHostedWorkspaceSnapshotReplacedRef?(input: {
+    expectedSession: HostedWorkspaceSnapshotUploadSession;
+    replacedSnapshotRef: NonNullable<HostedWorkspaceSnapshotUploadSession["replacedSnapshotRef"]>;
+  }): Promise<boolean>;
   deleteHostedWorkspaceSnapshotUploadSession?(input: {
     snapshotId: string;
     userId: string;

@@ -569,11 +569,14 @@ async function handleRunnerWorkspaceSnapshotStartRequest(input: {
     userId: input.userId,
     workspaceVersion: writeFence.workspaceVersion,
   };
-  await createWorkspaceSnapshotUploadSession({
+  const createdSession = await createWorkspaceSnapshotUploadSession({
     env: input.env,
     session,
     userId: input.userId,
   });
+  if (!createdSession) {
+    return jsonError("Hosted workspace snapshot upload session is stale.", 409);
+  }
 
   return json({
     encryption: {
@@ -1169,16 +1172,12 @@ async function handleRunnerWorkspaceSnapshotAbortRequest(input: {
   snapshotId: string;
   userId: string;
 }): Promise<Response> {
-  let writeFence;
-  try {
-    writeFence = requireRunnerRuntimeWriteFenceHeaders(input.request);
-  } catch (error) {
-    if (error instanceof RunnerRuntimeWriteFenceError) {
-      return unauthorized();
-    }
-    throw error;
-  }
-  if (!writeFence.workspaceVersion) {
+  const writeFence = await requireWorkspaceSnapshotWriteFence({
+    env: input.env,
+    request: input.request,
+    userId: input.userId,
+  });
+  if (!writeFence) {
     return unauthorized();
   }
 
@@ -1244,16 +1243,12 @@ async function handleRunnerWorkspaceSnapshotCompleteRequest(input: {
   snapshotId: string;
   userId: string;
 }): Promise<Response> {
-  let writeFence;
-  try {
-    writeFence = requireRunnerRuntimeWriteFenceHeaders(input.request);
-  } catch (error) {
-    if (error instanceof RunnerRuntimeWriteFenceError) {
-      return unauthorized();
-    }
-    throw error;
-  }
-  if (!writeFence.workspaceVersion) {
+  const writeFence = await requireWorkspaceSnapshotWriteFence({
+    env: input.env,
+    request: input.request,
+    userId: input.userId,
+  });
+  if (!writeFence) {
     return unauthorized();
   }
   const body = await readJsonObject(input.request, {
@@ -1471,19 +1466,6 @@ async function handleRunnerWorkspaceSnapshotCompleteRequest(input: {
     }
   };
 
-  const currentWriteFence = await requireWorkspaceSnapshotWriteFence({
-    env: input.env,
-    request: input.request,
-    userId: input.userId,
-  });
-  if (!currentWriteFence) {
-    const cleanupResponse = await retireAfterAmbiguousCheckpoint();
-    if (cleanupResponse) {
-      return cleanupResponse;
-    }
-    return jsonError("Hosted workspace snapshot upload session is stale.", 409);
-  }
-
   let preCheckpointReplacedSnapshotRef: HostedExecutionSnapshotRefValue | null = null;
   try {
     const preCheckpointWorkspace = await readCurrentHostedWorkspace({
@@ -1501,16 +1483,28 @@ async function handleRunnerWorkspaceSnapshotCompleteRequest(input: {
     && !session.replacedSnapshotRef
   ) {
     try {
-      await rememberReplacedWorkspaceSnapshotCleanupInUploadSession({
+      const remembered = await rememberReplacedWorkspaceSnapshotCleanupInUploadSession({
         env: input.env,
         replacedSnapshotRef: preCheckpointReplacedSnapshotRef,
         session,
         userId: input.userId,
       });
+      if (!remembered) {
+        return jsonError("Hosted workspace snapshot upload session is stale.", 409);
+      }
       session.replacedSnapshotRef = preCheckpointReplacedSnapshotRef;
     } catch {
       return jsonError("Hosted workspace replaced snapshot cleanup state is unavailable.", 503);
     }
+  }
+
+  const currentWriteFence = await requireWorkspaceSnapshotWriteFence({
+    env: input.env,
+    request: input.request,
+    userId: input.userId,
+  });
+  if (!currentWriteFence) {
+    return jsonError("Hosted workspace snapshot upload session is stale.", 409);
   }
 
   let checkpointResponse: Response;
@@ -1966,14 +1960,15 @@ async function rememberReplacedWorkspaceSnapshotCleanupInUploadSession(input: {
   replacedSnapshotRef: HostedExecutionSnapshotRefValue;
   session: HostedWorkspaceSnapshotUploadSession;
   userId: string;
-}): Promise<void> {
-  await createWorkspaceSnapshotUploadSession({
-    env: input.env,
-    session: {
-      ...input.session,
-      replacedSnapshotRef: input.replacedSnapshotRef,
-    },
-    userId: input.userId,
+}): Promise<boolean> {
+  const stub = await resolveRunnerOutboundUserRunnerStub(input.env, input.userId);
+  const rememberReplacedSnapshotRef = requireRunnerOutboundUserStubMethod(
+    stub,
+    "rememberHostedWorkspaceSnapshotReplacedRef",
+  );
+  return await rememberReplacedSnapshotRef({
+    expectedSession: input.session,
+    replacedSnapshotRef: input.replacedSnapshotRef,
   });
 }
 
@@ -2490,7 +2485,7 @@ async function createWorkspaceSnapshotUploadSession(input: {
   env: RunnerOutboundEnvironmentSource;
   session: HostedWorkspaceSnapshotUploadSession;
   userId: string;
-}): Promise<HostedWorkspaceSnapshotUploadSession> {
+}): Promise<HostedWorkspaceSnapshotUploadSession | null> {
   const stub = await resolveRunnerOutboundUserRunnerStub(input.env, input.userId);
   const createSession = requireRunnerOutboundUserStubMethod(
     stub,
