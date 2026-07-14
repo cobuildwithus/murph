@@ -1,6 +1,6 @@
 # Delete Cron Route Reverification
 
-Status: active
+Status: completed
 Updated: 2026-07-14
 
 ## Why
@@ -51,9 +51,9 @@ guard.
    conversation turns; inbound accepted input keeps same-conversation mutation
    authority, while the existing managed-automation and experiment lifecycle
    owners perform deterministic cleanup.
-8. Rebase onto the TypeScript 7 mainline. Keep the hosted assistant phase out
-   of the runner's static boot closure with one native dynamic import at the
-   existing phase boundary, rather than raising the bundle budget.
+8. Rebase onto the TypeScript 7 mainline and keep the ordinary static assistant
+   phase import. The current mainline bundle ratchet has room for the truthful
+   dependency graph, so no lazy-import workaround or budget increase is needed.
 
 ## Invariants
 
@@ -73,22 +73,30 @@ guard.
 
 - Focused red/green regression proof for the real cron-to-notification path.
 - `pnpm test:diff` for every touched owner.
-- Required security/privacy review and write-capable coverage audit.
+- Security/privacy review and write-capable coverage audit.
 - Parent full-diff and call-path review.
 - Scoped commit through `scripts/finish-task`.
 - PR CI plus the pushed-head ReviewGPT loop to zero accepted findings.
 
 Completed evidence so far:
 
-- Rebased cleanly onto `origin/main` with TypeScript 7.
-- Main independently exceeded the runner static-closure ratchet; the branch was
-  already smaller. The existing phase boundary's native dynamic import brings
-  the branch to a 6,807,750-byte static closure (7,057,087-byte gate) and an
-  8,717,369-byte total bundle (9,300,000-byte gate).
-- Focused engine/runtime/typecheck coverage passes, including 288 cron and
-  automation checks plus deterministic onboarding archival.
+- Rebased cleanly onto `origin/main` with TypeScript 7 and the later clinical
+  records runtime changes.
+- `pnpm test:diff` passes all affected typechecks and 6,984 tests. The final
+  coverage seam test also passes in the assistant-engine suite: 2,166 tests
+  passed and four were skipped.
+- The write-capable coverage audit found and added one execution-context
+  normalization seam test; its final verdict has no unresolved findings. The
+  security/privacy audit found no evidence-backed medium-or-higher findings.
+- `pnpm --dir apps/cloudflare runner:bundle:hosted-local` passes with the normal
+  static assistant-phase import: 1,461,235-byte entrypoint, 7,117,380-byte
+  static boot closure, and 8,806,958-byte total bundle. No bundle-budget or
+  lazy-import exception was added.
+- Focused engine/runtime coverage passes, including 288 cron and automation
+  checks plus deterministic onboarding archival.
 - `pnpm hosted-local e2e linq-scheduled-reminder` passes both personal legacy
   route variants through the assembled runner and isolated hosted stack.
+- `pnpm test:scenario-integrity` passes all 204 scenarios.
 
 ## Deployment
 
@@ -106,3 +114,4 @@ forward fix. After convergence, prove one personal scheduled reminder, one
 group scheduled turn, and zero new
 `ASSISTANT_LINQ_ENGAGEMENT_ASSERT_UNAVAILABLE` or
 `ASSISTANT_LINQ_AUDIENCE_AUTHORITY_UNAVAILABLE` failures.
+Completed: 2026-07-14
