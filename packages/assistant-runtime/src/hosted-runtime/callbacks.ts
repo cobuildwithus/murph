@@ -2227,6 +2227,8 @@ async function deliverHostedPreparedAssistantDelivery(input: {
               input.assistantDeliveryEffect.payload.idempotencyKey ?? null,
           });
           const engagement = await assertHostedAssistantLinqRecentInboundEngagementForDelivery({
+            answeredMailboxItemIds:
+              input.assistantDeliveryEffect.payload.answeredMailboxItemIds,
             authorityCheckOnly: true,
             deliveryContext,
             directRecipientPhoneNumber: deliveryContext?.directRecipientPhoneNumber ?? null,
@@ -2254,6 +2256,8 @@ async function deliverHostedPreparedAssistantDelivery(input: {
                 assertProviderEntryLive: () => assertHostedDeliveryCanEnterProvider(input),
                 onProviderDispatchEntered: async () => {
                   await assertHostedAssistantLinqRecentInboundEngagementForDelivery({
+                    answeredMailboxItemIds:
+                      input.assistantDeliveryEffect.payload.answeredMailboxItemIds,
                     authorityCheckOnly: false,
                     deliveryContext,
                     directRecipientPhoneNumber:
@@ -2671,6 +2675,7 @@ function createHostedAssistantLinqSendDependency(input: {
       explicitIdempotencyKey: request.idempotencyKey ?? null,
     });
     const engagement = await assertHostedAssistantLinqRecentInboundEngagementForDelivery({
+      answeredMailboxItemIds: request.answeredMailboxItemIds,
       authorityCheckOnly: true,
       deliveryContext,
       directRecipientPhoneNumber,
@@ -2720,6 +2725,7 @@ function createHostedAssistantLinqSendDependency(input: {
         assertProviderEntryLive: () => assertHostedDeliveryCanEnterProvider(input),
         onProviderDispatchEntered: async () => {
           await assertHostedAssistantLinqRecentInboundEngagementForDelivery({
+            answeredMailboxItemIds: request.answeredMailboxItemIds,
             authorityCheckOnly: false,
             deliveryContext,
             directRecipientPhoneNumber,
@@ -2981,6 +2987,7 @@ function createHostedAssistantLinqVoiceMemoSendDependency(input: {
         : null,
     });
     const engagement = await assertHostedAssistantLinqRecentInboundEngagementForDelivery({
+      answeredMailboxItemIds: request.answeredMailboxItemIds,
       authorityCheckOnly: true,
       deliveryContext,
       directRecipientPhoneNumber: deliveryContext?.directRecipientPhoneNumber ?? null,
@@ -3004,6 +3011,7 @@ function createHostedAssistantLinqVoiceMemoSendDependency(input: {
         assertProviderEntryLive: () => assertHostedDeliveryCanEnterProvider(input),
         onProviderDispatchEntered: async () => {
           await assertHostedAssistantLinqRecentInboundEngagementForDelivery({
+            answeredMailboxItemIds: request.answeredMailboxItemIds,
             authorityCheckOnly: false,
             deliveryContext,
             directRecipientPhoneNumber:
@@ -3338,6 +3346,7 @@ function readTrustedHostedAssistantLinqDeliveryFailureReason(
 }
 
 async function assertHostedAssistantLinqRecentInboundEngagementForDelivery(input: {
+  answeredMailboxItemIds?: readonly string[] | null;
   authorityCheckOnly?: boolean;
   deliveryContext: HostedAssistantLinqDeliveryContext | null;
   directRecipientPhoneNumber: string | null;
@@ -3365,6 +3374,9 @@ async function assertHostedAssistantLinqRecentInboundEngagementForDelivery(input
   let result: HostedRuntimeLinqRecentInboundEngagementResult | void;
   try {
     result = await assertRecentInbound({
+      ...(input.answeredMailboxItemIds?.length
+        ? { answeredMailboxItemIds: [...input.answeredMailboxItemIds] }
+        : {}),
       authorityCheckOnly: input.authorityCheckOnly === true,
       ...(currentInbound ? { currentInbound } : {}),
       directRecipientPhoneNumber: input.directRecipientPhoneNumber,

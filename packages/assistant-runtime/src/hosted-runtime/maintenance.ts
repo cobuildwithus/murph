@@ -43,6 +43,7 @@ import type {
 import {
   createHostedAssistantInputSource,
   selectHostedAssistantInputIds,
+  type HostedAssistantInputSelection,
 } from "./turn-input.ts";
 import {
   createHostedAssistantTurnEnvironment,
@@ -64,6 +65,7 @@ import {
 } from "./linq-input-authority.ts";
 import {
   repairHostedPendingAssistantRouteProofBatch,
+  type HostedPendingRouteProofRepairResult,
 } from "./pending-input-index.ts";
 
 const HOSTED_ASSISTANT_BACKGROUND_AUTOMATION_SCAN_LIMIT = 1;
@@ -165,26 +167,59 @@ export async function runHostedAssistantAutomationLane(input: {
 }): Promise<HostedAssistantAutomationLaneMetrics> {
   const startedAt = Date.now();
   const freshAssistantInputIds = input.freshAssistantInputIds ?? [];
-  const initialRouteProofRepair = freshAssistantInputIds.length === 0
-    ? await repairHostedPendingAssistantRouteProofBatch({
-        now: input.now ?? new Date(),
-        shouldYield: input.shouldYieldBackgroundMaintenance ?? null,
-        signal: input.signal,
+  const initialBackgroundSelection = freshAssistantInputIds.length === 0
+    ? await selectHostedAssistantInputIds({
+        limit: DEFAULT_ASSISTANT_AUTOMATION_SCAN_LIMIT,
+        mode: "background",
         vaultRoot: input.vaultRoot,
       })
-    : {
-        pending: false,
-        processedInputIds: [],
-        repaired: 0,
-        yielded: false,
-      };
-  const readinessStartedAt = Date.now();
-  const assistantAutomation = await resolveHostedAssistantAutomationReadiness({
-    assistantRuntimeState: input.assistantRuntimeState ?? null,
-    operatorHomeRoot: input.operatorHomeRoot ?? null,
-    skipAssistantAutomation: input.skipAssistantAutomation ?? false,
-  });
-  const readinessElapsedMs = elapsedSince(readinessStartedAt);
+    : null;
+  const hasRecoveredReplyableInput =
+    (initialBackgroundSelection?.inputIds.length ?? 0) > 0;
+  const resolveReadiness = async () => {
+    const readinessStartedAt = Date.now();
+    const readiness = await resolveHostedAssistantAutomationReadiness({
+      assistantRuntimeState: input.assistantRuntimeState ?? null,
+      operatorHomeRoot: input.operatorHomeRoot ?? null,
+      skipAssistantAutomation: input.skipAssistantAutomation ?? false,
+    });
+    return {
+      readiness,
+      readinessElapsedMs: elapsedSince(readinessStartedAt),
+    };
+  };
+  const repairInitialRouteProof = async () =>
+    await repairHostedPendingAssistantRouteProofBatch({
+      now: input.now ?? new Date(),
+      shouldYield: input.shouldYieldBackgroundMaintenance ?? null,
+      signal: input.signal,
+      vaultRoot: input.vaultRoot,
+    });
+  const emptyInitialRouteProofRepair: HostedPendingRouteProofRepairResult = {
+    pending: false,
+    processedInputIds: [],
+    repaired: 0,
+    yielded: false,
+  };
+
+  let assistantAutomation: HostedAssistantAutomationReadiness;
+  let readinessElapsedMs: number;
+  let initialRouteProofRepair: HostedPendingRouteProofRepairResult;
+  if (hasRecoveredReplyableInput) {
+    const readinessResolution = await resolveReadiness();
+    assistantAutomation = readinessResolution.readiness;
+    readinessElapsedMs = readinessResolution.readinessElapsedMs;
+    initialRouteProofRepair = assistantAutomation.shouldRun
+      ? emptyInitialRouteProofRepair
+      : await repairInitialRouteProof();
+  } else {
+    initialRouteProofRepair = freshAssistantInputIds.length === 0
+      ? await repairInitialRouteProof()
+      : emptyInitialRouteProofRepair;
+    const readinessResolution = await resolveReadiness();
+    assistantAutomation = readinessResolution.readiness;
+    readinessElapsedMs = readinessResolution.readinessElapsedMs;
+  }
   const redactedLogEntries: HostedExecutionRedactedLogEntry[] = [];
 
   if (!assistantAutomation.configured) {
@@ -215,6 +250,9 @@ export async function runHostedAssistantAutomationLane(input: {
             input.buildBackgroundDynamicContextPrompt,
           latencyTracePort: input.runtime.platform.latencyTracePort ?? null,
           initialLegacyRoutesRepaired: initialRouteProofRepair.repaired,
+          ...(hasRecoveredReplyableInput && initialBackgroundSelection
+            ? { initialInputSelection: initialBackgroundSelection }
+            : {}),
           now: input.now ?? null,
           effectsPort: input.runtime.platform.effectsPort,
           preProviderPhase: input.preProviderPhase ?? null,
@@ -294,6 +332,7 @@ export async function runHostedAssistantAutomation(
     > | null;
     latencyTracePort?: HostedRuntimePlatform["latencyTracePort"] | null;
     initialLegacyRoutesRepaired?: number;
+    initialInputSelection?: HostedAssistantInputSelection;
     now?: Date | null;
     preProviderPhase?: HostedRuntimeLatencyPhaseBreakdown["preProvider"] | null;
     runtimeAttemptId?: string | null;
@@ -336,19 +375,20 @@ export async function runHostedAssistantAutomation(
   const freshAssistantInputIdCount = new Set(freshAssistantInputIds).size;
   let legacyRoutesRepaired = options?.initialLegacyRoutesRepaired ?? 0;
   let routeProofBacklogPending = false;
-  const selectedInputIds = await selectHostedAssistantInputIds(
-    freshAssistantInputIdCount > 0
-      ? {
-          freshAssistantInputIds,
-          mode: "foreground",
-          vaultRoot,
-        }
-      : {
-          limit: DEFAULT_ASSISTANT_AUTOMATION_SCAN_LIMIT,
-          mode: "background",
-          vaultRoot,
-        },
-  );
+  const selectedInputIds = options?.initialInputSelection
+    ?? await selectHostedAssistantInputIds(
+      freshAssistantInputIdCount > 0
+        ? {
+            freshAssistantInputIds,
+            mode: "foreground",
+            vaultRoot,
+          }
+        : {
+            limit: DEFAULT_ASSISTANT_AUTOMATION_SCAN_LIMIT,
+            mode: "background",
+            vaultRoot,
+          },
+    );
   const baseInputSource = createHostedAssistantInputSource({
     initialPendingInputIds: selectedInputIds.pendingInputIds,
     pendingInputRefreshMode:
@@ -356,10 +396,9 @@ export async function runHostedAssistantAutomation(
     selectedInputIds: selectedInputIds.inputIds,
     vaultRoot,
   });
-  const shouldDeferCronForSelectedForegroundInput =
-    selectedInputIds.mode === "foreground" && selectedInputIds.inputIds.length > 0;
+  const shouldDeferCronForSelectedInput = selectedInputIds.inputIds.length > 0;
   const shouldDeferCron = () =>
-    shouldDeferCronForSelectedForegroundInput
+    shouldDeferCronForSelectedInput
     || routeProofBacklogPending
     || options?.shouldYieldBackgroundMaintenance?.() === true;
   const inputSource: AssistantInputSource = {
@@ -998,6 +1037,20 @@ function emitHostedRuntimeRedactedLog(
   const record = emitHostedExecutionStructuredLog(input) as
     | ReturnType<typeof emitHostedExecutionStructuredLog>
     | undefined;
+  const redacted = record?.details ?? input.details ?? null;
+  const errorCode = record?.errorCode ?? null;
+  const safeErrorMessage = record?.errorMessage ?? null;
+  const redactedWithFailure = errorCode || safeErrorMessage
+    ? {
+        ...(redacted ?? {}),
+        ...(typeof redacted?.errorCode === "string" || !errorCode
+          ? {}
+          : { errorCode }),
+        ...(typeof redacted?.safeErrorMessage === "string" || !safeErrorMessage
+          ? {}
+          : { safeErrorMessage }),
+      }
+    : redacted;
 
   return {
     component: record?.component ?? input.component,
@@ -1005,7 +1058,7 @@ function emitHostedRuntimeRedactedLog(
     level: record?.level ?? input.level ?? (input.error === undefined ? "info" : "error"),
     message: record?.message ?? input.message,
     phase: record?.phase ?? input.phase,
-    ...((record?.details ?? input.details) ? { redacted: record?.details ?? input.details } : {}),
+    ...(redactedWithFailure ? { redacted: redactedWithFailure } : {}),
   };
 }
 
