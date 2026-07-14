@@ -2811,6 +2811,7 @@ describe("hosted device-sync runtime", () => {
       },
     };
     const service = createDeviceSyncServiceForVault(vaultRoot, [junctionProvider]);
+    const store = getStore(service);
 
     try {
       const account = getStore(service).upsertAccount({
@@ -2858,9 +2859,47 @@ describe("hosted device-sync runtime", () => {
       };
 
       assert.equal(await service.drainWorker(1), 1);
-      const terminalJob = getStore(service).getJobById(job.id);
+      const terminalJob = store.getJobById(job.id);
       assert.equal(terminalJob?.lastErrorCode, JUNCTION_COMPANION_HRV_OBSERVATION_INVALID_CODE);
       assert.equal(terminalJob?.status, "dead");
+
+      const retainedJob = store.enqueueJob({
+        accountId: account.id,
+        availableAt: "2026-04-04T10:00:00.000Z",
+        kind: "resource",
+        maxAttempts: 1,
+        payload: {
+          companionAdmissionId: "e".repeat(64),
+          companionObservationJson: "{}",
+          resource: COMPANION_HRV_RMSSD_RESOURCE,
+          resourceCategory: "derived",
+          sourceProviderSlug: "whoop",
+        },
+        provider: "junction",
+      });
+      assert.equal(
+        store.claimDueJob("lease-expired-worker", "2026-04-04T10:00:00.000Z", 60_000)?.id,
+        retainedJob.id,
+      );
+      assert.equal(
+        store.failJobIfOwned(
+          retainedJob.id,
+          "lease-expired-worker",
+          "2026-04-04T10:00:01.000Z",
+          "LEASE_EXPIRED",
+          "Companion worker lease expired before completion.",
+          null,
+          false,
+        ),
+        true,
+      );
+      assert.equal(store.getJobById(retainedJob.id)?.status, "dead");
+      state.pendingDirtyPayloadJobs.push({
+        connectionId: "hosted_invalid",
+        dirtyPayloadId: "dsp_lease_expired",
+        jobId: retainedJob.id,
+        processedRevision: "8",
+      });
 
       promoteHostedCompletedDirtyPayloadAcks({ service, state });
       promoteHostedCompletedDirtyPayloadAcks({ service, state });
@@ -2871,8 +2910,13 @@ describe("hosted device-sync runtime", () => {
         processedDirtyPayloadIds: ["dsp_invalid"],
         processedRevision: "8",
       }]);
-      assert.deepEqual(state.pendingDirtyPayloadJobs, []);
-      assert.equal(readJobsForAccount(service, account.id).length, 1);
+      assert.deepEqual(state.pendingDirtyPayloadJobs, [{
+        connectionId: "hosted_invalid",
+        dirtyPayloadId: "dsp_lease_expired",
+        jobId: retainedJob.id,
+        processedRevision: "8",
+      }]);
+      assert.equal(readJobsForAccount(service, account.id).length, 2);
     } finally {
       closeHostedRuntimeDeviceSyncService(service);
       await cleanup();
