@@ -946,6 +946,46 @@ describe("hosted Privy settings email-link intents", () => {
     }));
   });
 
+  it.each([
+    ["ties", NOW_SECONDS + 1],
+    ["is newer than", NOW_SECONDS + 2],
+  ])("accepts the sole new email when a baseline email %s it", (_label, baselineVerifiedAt) => {
+    const intent = verifyHostedPrivyEmailLinkIntent({
+      intent: issueHostedPrivyEmailLinkIntent({
+        memberId: "member_123",
+        now: NOW,
+        privyUserId: "did:privy:test-member",
+        secret: SECRET,
+        verifiedPrivyUser: makeVerifiedPrivyUser({
+          linkedAccounts: [emailAccount(NOW_SECONDS - 1, "baseline@example.test")],
+        }),
+      }),
+      memberId: "member_123",
+      now: NOW,
+      privyUserId: "did:privy:test-member",
+      secret: SECRET,
+    });
+
+    expect(verifyHostedPrivyEmailLinkAuthenticationProof({
+      intent,
+      now: new Date(NOW.getTime() + 3_000),
+      secret: SECRET,
+      verifiedPrivyUser: makeVerifiedPrivyUser({
+        linkedAccounts: [
+          emailAccount(baselineVerifiedAt, "baseline@example.test"),
+          emailAccount(NOW_SECONDS + 1, "new-link@example.test"),
+        ],
+      }),
+    })).toEqual({
+      credential: {
+        address: "new-link@example.test",
+        verifiedAt: NOW_SECONDS + 1,
+      },
+      method: "email",
+      privyUserId: "did:privy:test-member",
+    });
+  });
+
   it("expires and clears the dedicated HttpOnly link-intent cookie", () => {
     const signedIntent = issueHostedPrivyEmailLinkIntent({
       memberId: "member_123",
@@ -999,9 +1039,9 @@ function makeIdentity(input: {
   };
 }
 
-function emailAccount(verifiedAt: number) {
+function emailAccount(verifiedAt: number, address = "member@example.test") {
   return {
-    address: "member@example.test",
+    address,
     latest_verified_at: verifiedAt,
     type: "email",
   };

@@ -240,15 +240,41 @@ export function verifyHostedPrivyEmailLinkAuthenticationProof(input: {
   }
 
   try {
-    const proof = verifyHostedPrivyAuthenticationProof(input);
-    if (proof.method !== "email") {
-      throw hostedPrivyEmailLinkNotReady();
+    const nowSeconds = Math.floor((input.now ?? new Date()).getTime() / 1000);
+    if (input.intent.expiresAt < nowSeconds) {
+      throw hostedOnboardingError({
+        code: "HOSTED_AUTH_PROOF_EXPIRED",
+        message: "Request a fresh verification code and try again.",
+        httpStatus: 401,
+      });
     }
-    const fingerprint = fingerprintHostedPrivyEmailLinkAddress(
-      proof.credential.address,
-      requireIntentSecret(input.secret),
-    );
-    if (input.intent.preexistingEmailFingerprints.includes(fingerprint)) {
+    const secret = requireIntentSecret(input.secret);
+    const candidates = resolveHostedPrivyLinkedAccounts(input.verifiedPrivyUser)
+      .filter((account) => account.type === "email")
+      .map((account) => buildHostedPrivyAuthenticationCandidate({
+        account,
+        privyUserId: input.verifiedPrivyUser.id,
+      }))
+      .filter((candidate): candidate is HostedPrivyAuthenticationCandidate => candidate !== null)
+      .filter((candidate) => {
+        const proof = candidate.proof;
+        if (proof?.method !== "email") {
+          return true;
+        }
+        const fingerprint = fingerprintHostedPrivyEmailLinkAddress(
+          proof.credential.address,
+          secret,
+        );
+        return !input.intent.preexistingEmailFingerprints.includes(fingerprint);
+      });
+    const proof = resolveUniqueNewestHostedPrivyAuthenticationCandidate(candidates);
+    const verifiedAt = proof?.credential.verifiedAt ?? null;
+    if (
+      verifiedAt === null
+      || verifiedAt < input.intent.issuedAt - HOSTED_PRIVY_AUTH_INTENT_CLOCK_SKEW_SECONDS
+      || verifiedAt > nowSeconds + HOSTED_PRIVY_AUTH_INTENT_CLOCK_SKEW_SECONDS
+      || proof?.method !== "email"
+    ) {
       throw hostedPrivyEmailLinkNotReady();
     }
     return proof;
@@ -370,6 +396,16 @@ function resolveUniqueNewestHostedPrivyAuthenticationProof(
     }
   }
 
+  if (candidates.length === 0) {
+    return null;
+  }
+
+  return resolveUniqueNewestHostedPrivyAuthenticationCandidate(candidates);
+}
+
+function resolveUniqueNewestHostedPrivyAuthenticationCandidate(
+  candidates: readonly HostedPrivyAuthenticationCandidate[],
+): HostedPrivyAuthenticationProof | null {
   if (candidates.length === 0) {
     return null;
   }
