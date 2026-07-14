@@ -37,7 +37,7 @@ export const MURPH_CREATE_PHONE_CALL_TOOL = {
     'Start one outbound phone call on the user\'s behalf.',
     'Use only when the user asked Murph to call or clearly approved this call.',
     'Resolve relative dates and times before creating the brief.',
-    'For appointment calls, collect the user-approved first name and likely required booking facts such as patient name or date of birth before calling.',
+    'Before a real appointment booking, rescheduling, cancellation, or waitlist call, read $MURPH_ASSISTANT_SKILLS_ROOT/appointment-scheduling/SKILL.md and satisfy its ready-to-act gate with a completed, user-approved readiness brief; an information-only or connectivity-test call must stay non-mutating, remain separate, and never count as appointment readiness.',
     'Set callerName to the user-approved first name or name the callee may hear in the opening line unless the name does not make sense for this call.',
     'Put only user-approved, call-relevant, disclosable facts in shareableFacts.',
     'Set allowTransferToUser=true for calls likely to require live user identity verification, personal consent, or in-the-moment judgment unless the user says not to transfer.',

@@ -170,6 +170,12 @@ export const ASSISTANT_SKILLS = [
       'Use when the user needs an acute readiness decision: whether to train hard, modify, train easy, rest, deload, or start a short recovery block based on recent sleep, fatigue, soreness, illness context, low motivation, load, function, or wearable context. Use sleep-improvement for sleep mechanics, circadian-rhythm for clock timing, hrv-resting-heart-rate for HRV/RHR interpretation, and energy-fatigue for persistent tiredness.',
   },
   {
+    slug: 'appointment-scheduling',
+    name: 'appointment-scheduling',
+    triggerHint:
+      'Use for booking, rescheduling, canceling, or joining a waitlist for medical, dental, vision, therapy, lab, imaging, vaccination, or rehabilitation care by phone, browser, portal, or structured integration. Owns intake completeness, availability and fallback bounds, canonical-memory reuse, durable scheduling-preference persistence, and the ready-to-act gate; transport skills own execution.',
+  },
+  {
     slug: 'computer-use',
     name: 'computer-use',
     triggerHint:
