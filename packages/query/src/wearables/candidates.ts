@@ -844,16 +844,6 @@ function buildObservationMetricCandidates(
     return [];
   }
 
-  if (
-    externalRef?.system === "whoop"
-    && externalRef.resourceType === "companion-overnight-hrv-rmssd"
-  ) {
-    // This summary is Murph's versioned BLE PRV calculation, not a provider
-    // Recovery candidate. Its canonical observation owns a method-qualified
-    // point and must never compete with provider HRV.
-    return [];
-  }
-
   const mapped = mapScalarMetric(rawMetric, rawValue, normalizeUnit(entity.attributes.unit));
   if (!mapped) {
     return [];
