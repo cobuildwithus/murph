@@ -962,13 +962,6 @@ describe("hosted runtime control contracts", () => {
       usage,
     });
     expect(parseHostedRuntimeUsageRecordRequest({
-      noticeDeliveryTarget: null,
-      usage,
-    })).toEqual({
-      noticeDeliveryTarget: null,
-      usage,
-    });
-    expect(parseHostedRuntimeUsageRecordRequest({
       noticeDeliveryTarget: {
         channel: "linq",
         replyToMessageId: "linq_message_1",
@@ -1027,13 +1020,19 @@ describe("hosted runtime control contracts", () => {
       issueIds: [issue.issueId],
       recorded: 1,
     });
-    expect(() => parseHostedRuntimeUsageRecordRequest({
+    expect(parseHostedRuntimeUsageRecordRequest({
       noticeDeliveryTarget: {
         ...noticeDeliveryTarget,
         routeAuthority: null,
       },
       usage,
-    })).toThrow(/routeAuthority/u);
+    })).toEqual({
+      noticeDeliveryTarget: {
+        ...noticeDeliveryTarget,
+        routeAuthority: null,
+      },
+      usage,
+    });
     expect(() => parseHostedRuntimeUsageRecordRequest({
       unexpected: true,
       usage,

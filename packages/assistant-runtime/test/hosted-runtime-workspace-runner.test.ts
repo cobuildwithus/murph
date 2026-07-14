@@ -5514,6 +5514,46 @@ describe("runHostedWorkspaceUntilIdleOrBudget", () => {
     }
   });
 
+  test("fails closed when an accepted input event cannot be read", async () => {
+    const vaultRoot = await mkdtemp(path.join(tmpdir(), "murph-workspace-runner-"));
+    try {
+      const readable = await stageHostedUsageNoticeAssistantInput({
+        itemId: "mailbox_item_usage_notice_readable",
+        messageId: "linq_message_readable",
+        occurredAt: "2026-04-26T00:00:01.000Z",
+        threadId: "linq_thread_read_failure",
+        vaultRoot,
+      });
+      const unreadable = await stageHostedUsageNoticeAssistantInput({
+        itemId: "mailbox_item_usage_notice_unreadable",
+        messageId: "linq_message_unreadable",
+        occurredAt: "2026-04-26T00:00:02.000Z",
+        threadId: "linq_thread_read_failure",
+        vaultRoot,
+      });
+      await writeFile(
+        path.join(
+          resolveAssistantStatePaths(vaultRoot).assistantStateRoot,
+          "input-events",
+          `${unreadable.inputId}.json`,
+        ),
+        "{invalid-json",
+        "utf8",
+      );
+
+      assert.equal(
+        await resolveHostedUsageNoticeDeliveryTargetFromAcceptedInputs({
+          inputIds: [readable.inputId, unreadable.inputId],
+          memberId: TEST_USER_ID,
+          vaultRoot,
+        }),
+        null,
+      );
+    } finally {
+      await rm(vaultRoot, { force: true, recursive: true });
+    }
+  });
+
   test("does not block normal post-checkpoint delivery on deferred usage flushing", async () => {
     const vaultRoot = await mkdtemp(path.join(tmpdir(), "murph-workspace-runner-"));
     const events: string[] = [];
