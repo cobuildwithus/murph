@@ -91,6 +91,12 @@ export interface AssistantHostedPlanUsageTool {
   read(): Promise<HostedPlanUsageStatus>
 }
 
+export interface AssistantHostedPersonalizationTool {
+  request(
+    request: HostedRuntimeAssistantPersonalizationToolRequest,
+  ): Promise<HostedRuntimeAssistantPersonalizationToolResponse>
+}
+
 export interface AssistantHostedAssistantConfigurationTool {
   request(
     request: HostedRuntimeAssistantConfigurationControlRequest,
@@ -382,6 +388,18 @@ function normalizeAssistantPlanUsageTool(
 
   return {
     read: input.read.bind(input),
+  }
+}
+
+function normalizeAssistantPersonalizationTool(
+  input: AssistantHostedExecutionContext['personalizationTool'] | undefined,
+): AssistantHostedPersonalizationTool | undefined {
+  if (!input || typeof input.request !== 'function') {
+    return undefined
+  }
+
+  return {
+    request: input.request.bind(input),
   }
 }
 

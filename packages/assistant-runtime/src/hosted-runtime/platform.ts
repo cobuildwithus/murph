@@ -377,6 +377,12 @@ export interface HostedRuntimePlanUsageToolPort {
   read(): Promise<HostedPlanUsageStatus>;
 }
 
+export interface HostedRuntimeAssistantPersonalizationToolPort {
+  request(
+    request: HostedRuntimeAssistantPersonalizationToolRequest,
+  ): Promise<HostedRuntimeAssistantPersonalizationToolResponse>;
+}
+
 export interface HostedRuntimeGroupToolPort {
   request(
     request: HostedRuntimeGroupToolRequest,
