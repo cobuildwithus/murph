@@ -172,7 +172,7 @@ describe("createHostedAssistantInputSource", () => {
       .toBe("mailbox_item_runtime_resume_001");
   });
 
-  it("defers newly enqueued pending ids once the turn has a causal input", async () => {
+  it("exposes newly enqueued same-route input without broad store listing", async () => {
     const listSpy = vi.spyOn(assistantEngine, "listAssistantInputEvents");
     const vaultRoot = await createTempVault();
     await enableLinqAutoReply(vaultRoot);
@@ -246,16 +246,21 @@ describe("createHostedAssistantInputSource", () => {
     const allSelected = await source.listInputCandidates({
       sourceId: "linq",
     });
-    const lateConversationInputs = await source.listNewConversationInputs({
+    const lateConversationInputs = await source.listNewConversationActorInputs?.({
       afterCursor: fresh.cursor,
       conversation: fresh.conversation!,
+      deliveryRoute: {
+        channel: "linq",
+        threadId: "thread_1",
+      },
     });
 
     expect(allSelected.inputs.map((candidate) => candidate.event.inputId)).toEqual([
       fresh.inputId,
     ]);
-    expect(lateConversationInputs.inputs.map((candidate) => candidate.event.inputId))
-      .toEqual([]);
+    expect(lateConversationInputs?.inputs.map((candidate) => candidate.event.inputId))
+      .toEqual([late.inputId]);
+    expect(source.readSelectedInputIds()).toEqual([fresh.inputId, late.inputId]);
     await expect(readHostedPendingAssistantInputIds({ vaultRoot })).resolves.toEqual([
       oldUnrelated.inputId,
       fresh.inputId,
@@ -265,8 +270,111 @@ describe("createHostedAssistantInputSource", () => {
       progressed: false,
       reason: "no_new_input",
     });
-    expect(source.readSelectedInputIds()).toEqual([fresh.inputId]);
+    expect(source.readSelectedInputIds()).toEqual([fresh.inputId, late.inputId]);
     expect(listSpy).not.toHaveBeenCalled();
+  });
+
+  it("keeps a different group actor and every later route input pending across restart", async () => {
+    const vaultRoot = await createTempVault();
+    await enableLinqAutoReply(vaultRoot);
+    const stage = async (input: {
+      actorId: string;
+      laneSeq: string;
+      occurredAt: string;
+      text: string;
+    }) => {
+      const event = await upsertAssistantInputEvent({
+        vault: vaultRoot,
+        event: createAssistantInputEvent({
+          actorId: input.actorId,
+          dedupeKey: `dedupe_group_${input.laneSeq}`,
+          eventId: `evt_group_${input.laneSeq}`,
+          itemId: `item_group_${input.laneSeq}`,
+          laneSeq: input.laneSeq,
+          messageId: `msg_group_${input.laneSeq}`,
+          occurredAt: input.occurredAt,
+          receivedAt: input.occurredAt,
+          text: input.text,
+          threadId: "thread_group",
+          threadIsDirect: false,
+        }),
+      });
+      await enqueueHostedPendingAssistantInputId({
+        inputId: event.inputId,
+        vaultRoot,
+      });
+      return event;
+    };
+    const actorAFirst = await stage({
+      actorId: "actor_a",
+      laneSeq: "10",
+      occurredAt: "2026-04-23T00:00:01.000Z",
+      text: "A1",
+    });
+    const actorASecond = await stage({
+      actorId: "actor_a",
+      laneSeq: "20",
+      occurredAt: "2026-04-23T00:00:02.000Z",
+      text: "A2",
+    });
+    const actorB = await stage({
+      actorId: "actor_b",
+      laneSeq: "30",
+      occurredAt: "2026-04-23T00:00:03.000Z",
+      text: "B",
+    });
+    const actorAThird = await stage({
+      actorId: "actor_a",
+      laneSeq: "40",
+      occurredAt: "2026-04-23T00:00:04.000Z",
+      text: "A3",
+    });
+    const route = {
+      channel: "linq",
+      threadId: "thread_group",
+    };
+    const firstSource = createHostedAssistantInputSource({
+      initialPendingInputIds: [
+        actorAFirst.inputId,
+        actorASecond.inputId,
+        actorB.inputId,
+        actorAThird.inputId,
+      ],
+      selectedInputIds: [actorAFirst.inputId],
+      vaultRoot,
+    });
+
+    await expect(firstSource.listNewConversationActorInputs?.({
+      afterCursor: actorAFirst.cursor,
+      conversation: actorAFirst.conversation!,
+      deliveryRoute: route,
+    })).resolves.toEqual(expect.objectContaining({
+      inputs: [expect.objectContaining({
+        event: expect.objectContaining({ inputId: actorASecond.inputId }),
+      })],
+      nextCursor: actorASecond.cursor,
+    }));
+
+    const restartedSource = createHostedAssistantInputSource({
+      selectedInputIds: [actorB.inputId],
+      vaultRoot,
+    });
+    await expect(restartedSource.listNewConversationActorInputs?.({
+      afterCursor: actorASecond.cursor,
+      conversation: actorB.conversation!,
+      deliveryRoute: route,
+    })).resolves.toEqual(expect.objectContaining({
+      inputs: [expect.objectContaining({
+        event: expect.objectContaining({ inputId: actorB.inputId }),
+      })],
+      nextCursor: actorB.cursor,
+    }));
+    await expect(readHostedPendingAssistantInputIds({ vaultRoot })).resolves.toEqual([
+      actorAFirst.inputId,
+      actorASecond.inputId,
+      actorB.inputId,
+      actorAThird.inputId,
+    ]);
   });
 
   it("does not fold late existing pending ids into an active causal turn", async () => {
@@ -902,6 +1010,7 @@ async function writeTerminalEvidence(input: {
 }
 
 function createAssistantInputEvent(input: {
+  actorId?: string;
   dedupeKey?: string;
   eventId?: string;
   itemId?: string;
@@ -914,6 +1023,7 @@ function createAssistantInputEvent(input: {
   source?: string;
   text?: string;
   threadId?: string;
+  threadIsDirect?: boolean;
 } = {}) {
   const source = input.source ?? "linq";
   const threadId = input.threadId ?? "thread_1";
@@ -931,11 +1041,11 @@ function createAssistantInputEvent(input: {
     },
     conversation: {
       accountId: "acct_1",
-      actorId: "actor_1",
+      actorId: input.actorId ?? "actor_1",
       actorIsSelf: false,
       source,
       threadId,
-      threadIsDirect: true,
+      threadIsDirect: input.threadIsDirect ?? true,
     },
     occurredAt: input.occurredAt ?? "2026-04-23T00:00:02.000Z",
     receivedAt: input.receivedAt ?? "2026-04-23T00:00:03.000Z",

@@ -214,6 +214,7 @@ export interface HostedRuntimeLinqRecentInboundEngagementRequest {
   answeredMailboxItemIds?: readonly string[] | null;
   authorityCheckOnly?: boolean | null;
   currentInbound?: HostedRuntimeLinqCurrentInboundProof | null;
+  directHomeRouteOnly?: boolean | null;
   directRecipientPhoneNumber?: string | null;
   fromPhoneNumber?: string | null;
   homeRouteFallbackAllowed?: boolean | null;
@@ -231,6 +232,7 @@ export interface HostedRuntimeLinqTargetOverride {
 
 export interface HostedRuntimeLinqRecentInboundEngagementResult {
   providerDispatchClaimed?: boolean | null;
+  routeAuthorityKind?: "member-home" | null;
   targetOverride?: HostedRuntimeLinqTargetOverride | null;
 }
 

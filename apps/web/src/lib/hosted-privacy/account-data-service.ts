@@ -23,6 +23,7 @@ import {
 } from "../device-sync/provider-label";
 import { acquireHostedWebhookTraceOwnerLockTx } from "../device-sync/webhook-trace-owner-lock";
 import { hostedOnboardingError } from "../hosted-onboarding/errors";
+import { coerceStripeObjectId, coerceStripeSubscriptionId } from "../hosted-onboarding/billing";
 import {
   readHostedMemberSnapshot,
   type HostedMemberSnapshot,
@@ -30,9 +31,29 @@ import {
 import { readHostedMemberStripeBillingRef } from "../hosted-onboarding/hosted-member-billing-store";
 import { readHostedMemberIdentity } from "../hosted-onboarding/hosted-member-identity-store";
 import { readHostedAccountGroupStripeBillingRef } from "../hosted-onboarding/family-plan";
+import { createHostedStripeSubscriptionLookupKeyReadCandidates } from "../hosted-onboarding/contact-privacy";
 import { deleteHostedPrivyUser } from "../hosted-onboarding/privy";
 import { getHostedOnboardingStripe } from "../hosted-onboarding/runtime";
-import { HOSTED_ONBOARDING_TRANSACTION_OPTIONS } from "../hosted-onboarding/shared";
+import {
+  HOSTED_ONBOARDING_TRANSACTION_OPTIONS,
+  lockHostedAccountGroupRow,
+} from "../hosted-onboarding/shared";
+import {
+  cancelHostedPulseTrialCheckoutLoserSubscription,
+  executeHostedFamilyPaymentConflictCompensation,
+} from "../hosted-onboarding/stripe-billing-events";
+import {
+  completeAndScrubHostedFamilyPaymentConflictCompensationReceiptsTx,
+  listHostedFamilyPaymentConflictCompensationsByEncryptionMembers,
+  lockHostedFamilyPaymentConflictCompensationReceiptsTx,
+  type HostedFamilyPaymentConflictCompensation,
+} from "../hosted-onboarding/stripe-family-compensation";
+import {
+  completeAndScrubHostedPulseTrialCleanupReceiptsTx,
+  listHostedPulseTrialCleanupsByEncryptionMembers,
+  lockHostedPulseTrialCleanupReceiptsTx,
+  type HostedPulseTrialCleanup,
+} from "../hosted-onboarding/stripe-pulse-trial-cleanup";
 import {
   deleteHostedRunnerUserDataBestEffort,
   type HostedRunnerUserDataDeletionBestEffortResult,
@@ -61,6 +82,13 @@ export type HostedAccountStoreDeletionMode =
   | "best-effort-delete"
   | "local-reference-delete"
   | "documented-retention";
+
+// Completed sessions are immutable compatibility evidence only for the
+// checkout-session persistence rollout. Keep that global scan bounded to the
+// deployment window instead of walking Stripe's permanent session history.
+const HOSTED_CHECKOUT_SESSION_PERSISTENCE_ROLLOUT_STARTED_AT = Math.floor(
+  Date.parse("2026-07-01T00:00:00.000Z") / 1_000,
+);
 
 export interface HostedAccountDataStoreCoverageEntry {
   readonly slug: string;
@@ -134,7 +162,19 @@ export const HOSTED_ACCOUNT_DATA_STORE_COVERAGE = [
     slug: "prisma.hosted_account_group_billing_ref",
     label: "Hosted Family plan Stripe references",
     deletion: "local-reference-delete",
-    note: "Deletes local Family Stripe references for groups owned by the member. Family billing cancellation runs before local deletion so sponsored access cannot keep billing after owner deletion.",
+    note: "Deletes local Family Stripe references for groups owned by the member or an owned runtime. Family billing cancellation runs before local deletion so sponsored access cannot keep billing after owner deletion.",
+  },
+  {
+    slug: "prisma.hosted_stripe_event_family_compensation",
+    label: "Accepted Family payment-conflict compensation receipts",
+    deletion: "live-delete",
+    note: "Settles accepted cancellation and refund obligations before deleting crypto roots, then completes the receipt and scrubs its encrypted identifiers and related subscription lookup keys.",
+  },
+  {
+    slug: "prisma.hosted_stripe_event_pulse_trial_cleanup",
+    label: "Accepted Pulse Trial loser-cleanup receipts",
+    deletion: "live-delete",
+    note: "Cancels every accepted loser subscription before local deletion, then completes the receipt and scrubs its encrypted subscription identifier before deleting crypto roots.",
   },
   {
     slug: "prisma.hosted_group",
@@ -478,6 +518,7 @@ const HOSTED_ACCOUNT_RETENTION_NOTES = [
   "Stripe retains records it is legally required to keep, such as invoices, under its documented processes.",
   "Infrastructure backups age out automatically under documented retention and are never restored into live systems.",
 ] as const;
+const HOSTED_ACCOUNT_DELETION_STRIPE_MAX_PAGES = 100;
 
 export function parseHostedAccountDeletionRequest(
   body: Record<string, unknown>,
@@ -513,26 +554,10 @@ export async function deleteHostedAccountData(input: {
     });
   }
 
-  // Decrypt vendor account ids before their rows are deleted below.
-  const billingRef = await readHostedMemberStripeBillingRef({
-    memberId: input.memberId,
-    prisma: input.prisma,
-  });
   const identity = await readHostedMemberIdentity({
     memberId: input.memberId,
     prisma: input.prisma,
   });
-  const familyBillingRefs = await listHostedFamilyBillingRefsOwnedByMember({
-    memberId: input.memberId,
-    prisma: input.prisma,
-  });
-  const stripeCustomerId = billingRef?.stripeCustomerId ?? null;
-  const stripeSubscriptionId = billingRef?.stripeSubscriptionId ?? null;
-  const stripeCustomerIds = dedupeNullableStrings([
-    stripeCustomerId,
-    ...familyBillingRefs.map((familyBillingRef) => familyBillingRef.stripeCustomerId),
-  ]);
-  const privyUserId = identity?.privyUserId ?? null;
   const ownedThreadContainerMemberIds = await listOwnedHostedThreadContainerMemberIds({
     ownerMemberId: input.memberId,
     prisma: input.prisma,
@@ -541,6 +566,17 @@ export async function deleteHostedAccountData(input: {
     input.memberId,
     ...ownedThreadContainerMemberIds,
   ]);
+  let acceptedFamilyCompensations =
+    await listHostedFamilyCompensationsForAccountDeletion({
+      memberIds: deletionMemberIds,
+      prisma: input.prisma,
+    });
+  let acceptedPulseTrialCleanups =
+    await listHostedPulseTrialCleanupsForAccountDeletion({
+      memberIds: deletionMemberIds,
+      prisma: input.prisma,
+    });
+  const privyUserId = identity?.privyUserId ?? null;
 
   const deletionStartedAt = new Date();
   await markHostedMembersSuspendedForAccountDeletion({
@@ -548,6 +584,54 @@ export async function deleteHostedAccountData(input: {
     now: deletionStartedAt,
     prisma: input.prisma,
   });
+  // Checkout creators bind their session while holding the same member lock
+  // and reject suspended members. Re-reading after suspension therefore
+  // captures every session whose URL could have escaped before this fence.
+  const directBillingRefs = (await Promise.all(deletionMemberIds.map((memberId) =>
+    readHostedMemberStripeBillingRef({
+      memberId,
+      prisma: input.prisma,
+    })
+  ))).filter((billingRef): billingRef is NonNullable<typeof billingRef> => billingRef !== null);
+  const familyBillingRefs = await listHostedFamilyBillingRefsOwnedByMembers({
+    memberIds: deletionMemberIds,
+    prisma: input.prisma,
+  });
+  const legacyCheckoutSessionIds =
+    await listHostedLegacyCheckoutSessionsForAccountDeletion({
+      familyGroupIds: familyBillingRefs.map((billingRef) => billingRef.groupId),
+      memberId: input.memberId,
+      memberIds: deletionMemberIds,
+    });
+  const checkoutSettlement = await settleHostedCheckoutSessionsForAccountDeletion({
+    memberId: input.memberId,
+    sessionIds: dedupeNullableStrings([
+      ...directBillingRefs.map((billingRef) => billingRef.stripeCheckoutSessionId ?? null),
+      ...familyBillingRefs.map((billingRef) => billingRef.stripeCheckoutSessionId),
+      ...legacyCheckoutSessionIds,
+    ]),
+  });
+  const stripeSubscriptionId = directBillingRefs
+    .find((billingRef) => billingRef.memberId === input.memberId)
+    ?.stripeSubscriptionId ?? null;
+  const stripeCustomerIds = dedupeNullableStrings([
+    ...directBillingRefs.map((billingRef) => billingRef.stripeCustomerId),
+    ...familyBillingRefs.map((billingRef) => billingRef.stripeCustomerId),
+    ...checkoutSettlement.stripeCustomerIds,
+  ]);
+  const discoveredStripeSubscriptionIds =
+    await listHostedStripeCustomerSubscriptionsForAccountDeletion({
+      customerIds: stripeCustomerIds,
+      memberId: input.memberId,
+    });
+  const familyStripeSubscriptionIds = dedupeNullableStrings([
+    ...directBillingRefs
+      .filter((billingRef) => billingRef.memberId !== input.memberId)
+      .map((billingRef) => billingRef.stripeSubscriptionId),
+    ...familyBillingRefs.map((familyBillingRef) => familyBillingRef.stripeSubscriptionId),
+    ...checkoutSettlement.stripeSubscriptionIds,
+    ...discoveredStripeSubscriptionIds,
+  ]).filter((subscriptionId) => subscriptionId !== stripeSubscriptionId);
   await stopHostedPhoneCallsForAccountDeletion({
     memberIds: deletionMemberIds,
     prisma: input.prisma,
@@ -578,12 +662,24 @@ export async function deleteHostedAccountData(input: {
     ...connectedAppRevocations,
   ];
   assertProviderRevocationsAllowDeletion(providerRevocations);
+  acceptedFamilyCompensations =
+    await settleHostedFamilyCompensationsForAccountDeletion({
+      compensations: acceptedFamilyCompensations,
+      prisma: input.prisma,
+    });
+  acceptedPulseTrialCleanups =
+    await settleHostedPulseTrialCleanupsForAccountDeletion({
+      cleanups: acceptedPulseTrialCleanups,
+      prisma: input.prisma,
+    });
+  const acceptedFamilyCompensationSnapshot =
+    serializeHostedFamilyCompensationSnapshot(acceptedFamilyCompensations);
+  const acceptedPulseTrialCleanupSnapshot =
+    serializeHostedPulseTrialCleanupSnapshot(acceptedPulseTrialCleanups);
   // Cancel the subscription before local rows are deleted and fail closed:
   // a deleted account must never keep an active Stripe subscription billing it.
   const stripeSubscription = await cancelHostedStripeSubscriptionsForAccountDeletion({
-    familyStripeSubscriptionIds: familyBillingRefs
-      .map((familyBillingRef) => familyBillingRef.stripeSubscriptionId)
-      .filter((id): id is string => typeof id === "string" && id.length > 0),
+    familyStripeSubscriptionIds,
     memberId: input.memberId,
     stripeSubscriptionId,
   });
@@ -601,6 +697,19 @@ export async function deleteHostedAccountData(input: {
         prisma: tx,
       }),
     ]);
+    assertHostedAccountDeletionSnapshotUnchanged({
+      current: transactionDeletionMemberIds,
+      expected: deletionMemberIds,
+      state: "runtime ownership",
+    });
+
+    const transactionFamilyGroupIds = await listHostedFamilyGroupIdsOwnedByMembers({
+      memberIds: transactionDeletionMemberIds,
+      prisma: tx,
+    });
+    for (const groupId of transactionFamilyGroupIds) {
+      await lockHostedAccountGroupRow(tx, groupId);
+    }
 
     for (const memberId of transactionDeletionMemberIds) {
       await lockHostedMemberForAccountDeletionTx({
@@ -608,6 +717,57 @@ export async function deleteHostedAccountData(input: {
         prisma: tx,
       });
     }
+    assertHostedAccountDeletionSnapshotUnchanged({
+      current: uniqueStrings([
+        input.memberId,
+        ...await listOwnedHostedThreadContainerMemberIds({
+          ownerMemberId: input.memberId,
+          prisma: tx,
+        }),
+      ]),
+      expected: transactionDeletionMemberIds,
+      state: "runtime ownership",
+    });
+    assertHostedAccountDeletionSnapshotUnchanged({
+      current: await listHostedFamilyGroupIdsOwnedByMembers({
+        memberIds: transactionDeletionMemberIds,
+        prisma: tx,
+      }),
+      expected: transactionFamilyGroupIds,
+      state: "Family group ownership",
+    });
+    await lockHostedFamilyPaymentConflictCompensationReceiptsTx({
+      encryptionMemberIds: transactionDeletionMemberIds,
+      tx,
+    });
+    await lockHostedPulseTrialCleanupReceiptsTx({
+      encryptionMemberIds: transactionDeletionMemberIds,
+      tx,
+    });
+    const transactionFamilyCompensations =
+      await listHostedFamilyCompensationsForAccountDeletion({
+        memberIds: transactionDeletionMemberIds,
+        prisma: tx,
+      });
+    assertHostedAccountDeletionSnapshotUnchanged({
+      current: serializeHostedFamilyCompensationSnapshot(
+        transactionFamilyCompensations,
+      ),
+      expected: acceptedFamilyCompensationSnapshot,
+      state: "Family compensation",
+    });
+    const transactionPulseTrialCleanups =
+      await listHostedPulseTrialCleanupsForAccountDeletion({
+        memberIds: transactionDeletionMemberIds,
+        prisma: tx,
+      });
+    assertHostedAccountDeletionSnapshotUnchanged({
+      current: serializeHostedPulseTrialCleanupSnapshot(
+        transactionPulseTrialCleanups,
+      ),
+      expected: acceptedPulseTrialCleanupSnapshot,
+      state: "Pulse Trial cleanup",
+    });
     await refreshHostedMembersAccountDeletionFenceTx({
       memberIds: transactionDeletionMemberIds,
       now: deletionStartedAt,
@@ -642,6 +802,14 @@ export async function deleteHostedAccountData(input: {
       tx,
     });
     const deletedCounts = await deleteHostedAccountPrismaRows({
+      familyCompensations: transactionFamilyCompensations,
+      stripeSubscriptionIds: dedupeNullableStrings([
+        stripeSubscriptionId,
+        ...familyStripeSubscriptionIds,
+        ...transactionFamilyCompensations.map(
+          (compensation) => compensation.subscriptionId,
+        ),
+      ]),
       connectionIdentities: deviceConnectionIdentities,
       memberIds: transactionDeletionMemberIds,
       prisma: tx,
@@ -905,16 +1073,21 @@ async function cancelHostedStripeSubscriptionsForAccountDeletion(input: {
   return input.stripeSubscriptionId ? directResult : familyResult ?? directResult;
 }
 
-async function listHostedFamilyBillingRefsOwnedByMember(input: {
-  memberId: string;
+async function listHostedFamilyBillingRefsOwnedByMembers(input: {
+  memberIds: readonly string[];
   prisma: HostedAccountDataPrisma;
-}): Promise<Array<{ stripeCustomerId: string | null; stripeSubscriptionId: string | null }>> {
+}): Promise<Array<{
+  groupId: string;
+  stripeCheckoutSessionId: string | null;
+  stripeCustomerId: string | null;
+  stripeSubscriptionId: string | null;
+}>> {
   const groups = await input.prisma.hostedAccountGroup.findMany({
     select: {
       id: true,
     },
     where: {
-      ownerMemberId: input.memberId,
+      ownerMemberId: buildStringInFilter(input.memberIds),
     },
   });
 
@@ -930,9 +1103,408 @@ async function listHostedFamilyBillingRefsOwnedByMember(input: {
   return billingRefs
     .filter((billingRef): billingRef is NonNullable<typeof billingRef> => billingRef !== null)
     .map((billingRef) => ({
+      groupId: billingRef.groupId,
+      stripeCheckoutSessionId: billingRef.stripeCheckoutSessionId,
       stripeCustomerId: billingRef.stripeCustomerId,
       stripeSubscriptionId: billingRef.stripeSubscriptionId,
     }));
+}
+
+async function settleHostedCheckoutSessionsForAccountDeletion(input: {
+  memberId: string;
+  sessionIds: readonly string[];
+}): Promise<{
+  stripeCustomerIds: string[];
+  stripeSubscriptionIds: string[];
+}> {
+  if (input.sessionIds.length === 0) {
+    return {
+      stripeCustomerIds: [],
+      stripeSubscriptionIds: [],
+    };
+  }
+  const stripe = getHostedOnboardingStripe();
+  if (!stripe) {
+    throw hostedOnboardingError({
+      code: "ACCOUNT_DELETION_STRIPE_NOT_CONFIGURED",
+      httpStatus: 500,
+      message: "Billing is not configured, so active checkout could not be closed. Contact support to delete your account.",
+    });
+  }
+
+  const stripeCustomerIds: string[] = [];
+  const stripeSubscriptionIds: string[] = [];
+  for (const sessionId of input.sessionIds) {
+    let session;
+    try {
+      session = await stripe.checkout.sessions.retrieve(sessionId);
+      if (session.status === "open") {
+        try {
+          session = await stripe.checkout.sessions.expire(sessionId);
+        } catch {
+          session = await stripe.checkout.sessions.retrieve(sessionId);
+        }
+      }
+    } catch (error) {
+      if (isStripeResourceMissingError(error)) {
+        continue;
+      }
+      throw buildHostedCheckoutSessionDeletionError(input.memberId, error);
+    }
+
+    if (session.status === "complete") {
+      const customerId = coerceStripeObjectId(session.customer);
+      const subscriptionId = coerceStripeSubscriptionId(session.subscription);
+      if (customerId) {
+        stripeCustomerIds.push(customerId);
+      }
+      if (subscriptionId) {
+        stripeSubscriptionIds.push(subscriptionId);
+      }
+      continue;
+    }
+    if (session.status !== "expired") {
+      throw buildHostedCheckoutSessionDeletionError(
+        input.memberId,
+        new Error("Stripe Checkout session remained open after expiration."),
+      );
+    }
+  }
+  return {
+    stripeCustomerIds: uniqueStrings(stripeCustomerIds),
+    stripeSubscriptionIds: uniqueStrings(stripeSubscriptionIds),
+  };
+}
+
+async function listHostedStripeCustomerSubscriptionsForAccountDeletion(input: {
+  customerIds: readonly string[];
+  memberId: string;
+}): Promise<string[]> {
+  if (input.customerIds.length === 0) {
+    return [];
+  }
+  const stripe = getHostedOnboardingStripe();
+  if (!stripe) {
+    throw hostedOnboardingError({
+      code: "ACCOUNT_DELETION_STRIPE_NOT_CONFIGURED",
+      httpStatus: 500,
+      message: "Billing is not configured, so pending subscriptions could not be verified. Contact support to delete your account.",
+    });
+  }
+  try {
+    const subscriptionIds: string[] = [];
+    for (const customerId of input.customerIds) {
+      let startingAfter: string | undefined;
+      for (let pageNumber = 0; pageNumber < HOSTED_ACCOUNT_DELETION_STRIPE_MAX_PAGES; pageNumber += 1) {
+        const page = await stripe.subscriptions.list({
+          customer: customerId,
+          limit: 100,
+          ...(startingAfter ? { starting_after: startingAfter } : {}),
+          status: "all",
+        });
+        subscriptionIds.push(...page.data.map((subscription) => subscription.id));
+        if (!page.has_more) {
+          break;
+        }
+        if (pageNumber === HOSTED_ACCOUNT_DELETION_STRIPE_MAX_PAGES - 1) {
+          throw new Error("Stripe subscription pagination exceeded the deletion bound.");
+        }
+        const next = page.data.at(-1)?.id;
+        if (!next || next === startingAfter) {
+          throw new Error("Stripe subscription pagination did not advance.");
+        }
+        startingAfter = next;
+      }
+    }
+    return uniqueStrings(subscriptionIds);
+  } catch (error) {
+    console.error(
+      `[hosted-privacy] Stripe subscription discovery failed during account deletion (memberId=${input.memberId}, errorCode=${safeErrorCode(error)}).`,
+    );
+    throw hostedOnboardingError({
+      code: "ACCOUNT_DELETION_STRIPE_SUBSCRIPTION_DISCOVERY_FAILED",
+      httpStatus: 503,
+      message: "We could not verify pending billing subscriptions. Retry account deletion, or contact support if it keeps failing.",
+      retryable: true,
+    });
+  }
+}
+
+async function listHostedLegacyCheckoutSessionsForAccountDeletion(input: {
+  familyGroupIds: readonly string[];
+  memberId: string;
+  memberIds: readonly string[];
+}): Promise<string[]> {
+  const stripe = getHostedOnboardingStripe();
+  if (!stripe) {
+    return [];
+  }
+  const familyGroupIds = new Set(input.familyGroupIds);
+  const memberIds = new Set(input.memberIds);
+  try {
+    const sessionIds: string[] = [];
+    for (const status of ["open", "complete"] as const) {
+      let startingAfter: string | undefined;
+      for (let pageNumber = 0; pageNumber < HOSTED_ACCOUNT_DELETION_STRIPE_MAX_PAGES; pageNumber += 1) {
+        const page = await stripe.checkout.sessions.list({
+          ...(status === "complete"
+            ? {
+                created: {
+                  gte: HOSTED_CHECKOUT_SESSION_PERSISTENCE_ROLLOUT_STARTED_AT,
+                },
+              }
+            : {}),
+          limit: 100,
+          ...(startingAfter ? { starting_after: startingAfter } : {}),
+          status,
+        });
+        for (const session of page.data) {
+          if (
+            memberIds.has(session.client_reference_id ?? "") ||
+            memberIds.has(session.metadata?.memberId ?? "") ||
+            memberIds.has(session.metadata?.ownerMemberId ?? "") ||
+            familyGroupIds.has(session.client_reference_id ?? "") ||
+            familyGroupIds.has(session.metadata?.accountGroupId ?? "")
+          ) {
+            sessionIds.push(session.id);
+          }
+        }
+        if (!page.has_more) {
+          break;
+        }
+        if (pageNumber === HOSTED_ACCOUNT_DELETION_STRIPE_MAX_PAGES - 1) {
+          throw new Error("Stripe Checkout pagination exceeded the deletion bound.");
+        }
+        const next = page.data.at(-1)?.id;
+        if (!next || next === startingAfter) {
+          throw new Error("Stripe Checkout pagination did not advance.");
+        }
+        startingAfter = next;
+      }
+    }
+    return uniqueStrings(sessionIds);
+  } catch (error) {
+    console.error(
+      `[hosted-privacy] Legacy Stripe Checkout discovery failed during account deletion (memberId=${input.memberId}, errorCode=${safeErrorCode(error)}).`,
+    );
+    throw hostedOnboardingError({
+      code: "ACCOUNT_DELETION_STRIPE_CHECKOUT_DISCOVERY_FAILED",
+      httpStatus: 503,
+      message: "We could not verify open billing checkout. Retry account deletion, or contact support if it keeps failing.",
+      retryable: true,
+    });
+  }
+}
+
+function buildHostedCheckoutSessionDeletionError(memberId: string, error: unknown): Error {
+  console.error(
+    `[hosted-privacy] Stripe Checkout cleanup failed during account deletion (memberId=${memberId}, errorCode=${safeErrorCode(error)}).`,
+  );
+  return hostedOnboardingError({
+    code: "ACCOUNT_DELETION_STRIPE_CHECKOUT_CLEANUP_FAILED",
+    httpStatus: 502,
+    message: "We could not close active billing checkout. Retry account deletion, or contact support if it keeps failing.",
+    retryable: true,
+  });
+}
+
+async function listHostedFamilyGroupIdsOwnedByMembers(input: {
+  memberIds: readonly string[];
+  prisma: HostedAccountDataPrisma;
+}): Promise<string[]> {
+  const groups = await input.prisma.hostedAccountGroup.findMany({
+    orderBy: { id: "asc" },
+    select: { id: true },
+    where: {
+      ownerMemberId: buildStringInFilter(input.memberIds),
+    },
+  });
+  return uniqueStrings(groups.map((group) => group.id)).sort();
+}
+
+async function listHostedFamilyCompensationsForAccountDeletion(input: {
+  memberIds: readonly string[];
+  prisma: HostedAccountDataPrisma;
+}): Promise<HostedFamilyPaymentConflictCompensation[]> {
+  try {
+    return await listHostedFamilyPaymentConflictCompensationsByEncryptionMembers({
+      encryptionMemberIds: input.memberIds,
+      prisma: input.prisma,
+    });
+  } catch {
+    throw hostedOnboardingError({
+      code: "ACCOUNT_DELETION_FAMILY_COMPENSATION_STATE_UNAVAILABLE",
+      httpStatus: 503,
+      message: "We could not verify your pending Family billing cleanup. Retry account deletion, or contact support if it keeps failing.",
+      retryable: true,
+    });
+  }
+}
+
+async function settleHostedFamilyCompensationsForAccountDeletion(input: {
+  compensations: readonly HostedFamilyPaymentConflictCompensation[];
+  prisma: PrismaClient;
+}): Promise<HostedFamilyPaymentConflictCompensation[]> {
+  try {
+    const stripe = input.compensations.length > 0
+      ? getHostedOnboardingStripe()
+      : null;
+    if (input.compensations.length > 0 && !stripe) {
+      throw new Error("Hosted Stripe is not configured.");
+    }
+    const settledCompensations: HostedFamilyPaymentConflictCompensation[] = [];
+    for (const compensation of input.compensations) {
+      await executeHostedFamilyPaymentConflictCompensation(
+        compensation,
+        stripe ?? undefined,
+      );
+      if (!compensation.invoiceId) {
+        if (!stripe) {
+          throw new Error("Hosted Stripe is not configured.");
+        }
+        await assertHostedFamilyCompensationHasNoUnresolvedPaidInvoice({
+          compensation,
+          stripe,
+        });
+      }
+      settledCompensations.push(compensation);
+    }
+    return settledCompensations;
+  } catch {
+    throw hostedOnboardingError({
+      code: "ACCOUNT_DELETION_FAMILY_COMPENSATION_FAILED",
+      httpStatus: 503,
+      message: "We could not finish your pending Family billing cleanup. Retry account deletion, or contact support if it keeps failing.",
+      retryable: true,
+    });
+  }
+}
+
+async function assertHostedFamilyCompensationHasNoUnresolvedPaidInvoice(input: {
+  compensation: HostedFamilyPaymentConflictCompensation;
+  stripe: NonNullable<ReturnType<typeof getHostedOnboardingStripe>>;
+}): Promise<void> {
+  let startingAfter: string | undefined;
+  for (
+    let pageNumber = 0;
+    pageNumber < HOSTED_ACCOUNT_DELETION_STRIPE_MAX_PAGES;
+    pageNumber += 1
+  ) {
+    const page = await input.stripe.invoices.list({
+      limit: 100,
+      ...(startingAfter ? { starting_after: startingAfter } : {}),
+      subscription: input.compensation.subscriptionId,
+    });
+    for (const invoice of page.data) {
+      if (
+        invoice.amount_paid > 0 ||
+        !invoice.status ||
+        !["paid", "uncollectible", "void"].includes(invoice.status)
+      ) {
+        throw new Error(
+          "Family payment-conflict compensation is waiting for exact invoice ownership.",
+        );
+      }
+    }
+    if (!page.has_more) {
+      return;
+    }
+    if (pageNumber === HOSTED_ACCOUNT_DELETION_STRIPE_MAX_PAGES - 1) {
+      throw new Error("Stripe invoice pagination exceeded the deletion bound.");
+    }
+    const next = page.data.at(-1)?.id;
+    if (!next || next === startingAfter) {
+      throw new Error("Stripe invoice pagination did not advance.");
+    }
+    startingAfter = next;
+  }
+}
+
+function serializeHostedFamilyCompensationSnapshot(
+  compensations: readonly HostedFamilyPaymentConflictCompensation[],
+): string[] {
+  return compensations
+    .map((compensation) => JSON.stringify([
+      compensation.effectId,
+      compensation.invoiceId,
+      compensation.subscriptionId,
+    ]))
+    .sort();
+}
+
+async function listHostedPulseTrialCleanupsForAccountDeletion(input: {
+  memberIds: readonly string[];
+  prisma: HostedAccountDataPrisma;
+}): Promise<HostedPulseTrialCleanup[]> {
+  try {
+    return await listHostedPulseTrialCleanupsByEncryptionMembers({
+      encryptionMemberIds: input.memberIds,
+      prisma: input.prisma,
+    });
+  } catch {
+    throw hostedOnboardingError({
+      code: "ACCOUNT_DELETION_PULSE_TRIAL_CLEANUP_STATE_UNAVAILABLE",
+      httpStatus: 503,
+      message: "We could not verify pending trial cleanup. Retry account deletion, or contact support if it keeps failing.",
+      retryable: true,
+    });
+  }
+}
+
+async function settleHostedPulseTrialCleanupsForAccountDeletion(input: {
+  cleanups: readonly HostedPulseTrialCleanup[];
+  prisma: PrismaClient;
+}): Promise<HostedPulseTrialCleanup[]> {
+  try {
+    for (const cleanup of input.cleanups) {
+      await cancelHostedPulseTrialCheckoutLoserSubscription({
+        memberId: cleanup.memberId,
+        prisma: input.prisma,
+        subscriptionId: cleanup.subscriptionId,
+      });
+    }
+    return [...input.cleanups];
+  } catch {
+    throw hostedOnboardingError({
+      code: "ACCOUNT_DELETION_PULSE_TRIAL_CLEANUP_FAILED",
+      httpStatus: 503,
+      message: "We could not finish pending trial cleanup. Retry account deletion, or contact support if it keeps failing.",
+      retryable: true,
+    });
+  }
+}
+
+function serializeHostedPulseTrialCleanupSnapshot(
+  cleanups: readonly HostedPulseTrialCleanup[],
+): string[] {
+  return cleanups
+    .map((cleanup) => JSON.stringify([
+      cleanup.effectId,
+      cleanup.memberId,
+      cleanup.subscriptionId,
+    ]))
+    .sort();
+}
+
+function assertHostedAccountDeletionSnapshotUnchanged(input: {
+  current: readonly string[];
+  expected: readonly string[];
+  state: string;
+}): void {
+  const current = [...input.current].sort();
+  const expected = [...input.expected].sort();
+  if (
+    current.length === expected.length &&
+    current.every((value, index) => value === expected[index])
+  ) {
+    return;
+  }
+  throw hostedOnboardingError({
+    code: "ACCOUNT_DELETION_STATE_CHANGED",
+    httpStatus: 503,
+    message: `${input.state} changed during account deletion. Retry before local account records are removed.`,
+    retryable: true,
+  });
 }
 
 async function cancelHostedStripeSubscriptionForAccountDeletion(input: {
@@ -1095,6 +1667,29 @@ async function countHostedAccountData(input: {
     }),
   ]);
   const memberIdFilter = buildStringInFilter(memberIds);
+  const [billingRef, familyBillingRefs, familyCompensations] = await Promise.all([
+    readHostedMemberStripeBillingRef({
+      memberId,
+      prisma: input.prisma,
+    }),
+    listHostedFamilyBillingRefsOwnedByMembers({
+      memberIds,
+      prisma: input.prisma,
+    }),
+    listHostedFamilyPaymentConflictCompensationsByEncryptionMembers({
+      encryptionMemberIds: memberIds,
+      prisma: input.prisma,
+    }),
+  ]);
+  const stripeSubscriptionLookupKeys = uniqueStrings(
+    dedupeNullableStrings([
+      billingRef?.stripeSubscriptionId ?? null,
+      ...familyBillingRefs.map((ref) => ref.stripeSubscriptionId),
+      ...familyCompensations.map((compensation) => compensation.subscriptionId),
+    ]).flatMap((subscriptionId) =>
+      createHostedStripeSubscriptionLookupKeyReadCandidates(subscriptionId)
+    ),
+  );
   const [
     hostedMember,
     hostedWebSession,
@@ -1105,6 +1700,8 @@ async function countHostedAccountData(input: {
     hostedAccountGroupMembership,
     hostedAccountGroupInvite,
     hostedAccountGroupBillingRef,
+    hostedStripeEventFamilyCompensation,
+    hostedStripeEventPulseTrialCleanup,
     hostedGroup,
     hostedGroupMember,
     hostedMemberEmailAuthorization,
@@ -1169,6 +1766,25 @@ async function countHostedAccountData(input: {
         group: {
           ownerMemberId: memberIdFilter,
         },
+      },
+    }),
+    input.prisma.hostedStripeEvent.count({
+      where: {
+        OR: [
+          { familyPaymentConflictCompensationEncryptionMemberId: memberIdFilter },
+          ...(stripeSubscriptionLookupKeys.length > 0
+            ? [{
+                familyPaymentConflictCompensationCandidateSubscriptionLookupKey: {
+                  in: stripeSubscriptionLookupKeys,
+                },
+              }]
+            : []),
+        ],
+      },
+    }),
+    input.prisma.hostedStripeEvent.count({
+      where: {
+        pulseTrialCleanupEncryptionMemberId: memberIdFilter,
       },
     }),
     input.prisma.hostedGroup.count({
@@ -1274,6 +1890,8 @@ async function countHostedAccountData(input: {
     "prisma.hosted_web_session": hostedWebSession,
     "prisma.hosted_account_group": hostedAccountGroup,
     "prisma.hosted_account_group_billing_ref": hostedAccountGroupBillingRef,
+    "prisma.hosted_stripe_event_family_compensation": hostedStripeEventFamilyCompensation,
+    "prisma.hosted_stripe_event_pulse_trial_cleanup": hostedStripeEventPulseTrialCleanup,
     "prisma.hosted_account_group_invite": hostedAccountGroupInvite,
     "prisma.hosted_account_group_membership": hostedAccountGroupMembership,
     "prisma.hosted_group": hostedGroup,
@@ -1293,9 +1911,11 @@ async function countHostedAccountData(input: {
 }
 
 async function deleteHostedAccountPrismaRows(input: {
+  familyCompensations: readonly HostedFamilyPaymentConflictCompensation[];
   connectionIdentities: readonly DeviceConnectionIdentity[];
   memberIds: readonly string[];
   prisma: Prisma.TransactionClient;
+  stripeSubscriptionIds: readonly string[];
 }): Promise<HostedAccountDataCounts> {
   const memberIdFilter = buildStringInFilter(input.memberIds);
   const counts: HostedAccountDataCounts = {};
@@ -1305,6 +1925,24 @@ async function deleteHostedAccountPrismaRows(input: {
   const recordCount = (key: string, count: number) => {
     counts[key] = count;
   };
+  record(
+    "prisma.hosted_stripe_event_family_compensation",
+    await completeAndScrubHostedFamilyPaymentConflictCompensationReceiptsTx({
+      completedAt: new Date(),
+      compensations: input.familyCompensations,
+      encryptionMemberIds: input.memberIds,
+      subscriptionIds: input.stripeSubscriptionIds,
+      tx: input.prisma,
+    }),
+  );
+  record(
+    "prisma.hosted_stripe_event_pulse_trial_cleanup",
+    await completeAndScrubHostedPulseTrialCleanupReceiptsTx({
+      completedAt: new Date(),
+      encryptionMemberIds: input.memberIds,
+      tx: input.prisma,
+    }),
+  );
   recordCount("prisma.hosted_vault_share", await input.prisma.hostedVaultShare.count({
     where: {
       OR: [

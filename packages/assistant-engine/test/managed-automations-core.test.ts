@@ -23,6 +23,7 @@ import {
   MURPH_WEEKLY_PRODUCT_UPDATES_AUTOMATION_ID,
   applyMurphManagedAutomations,
   repairLegacyPersonalHomeAutomationRoutesFromInputs,
+  repairServerConfirmedPersonalHomeAutomationRoutes,
 } from '../src/assistant/managed-automations.ts'
 import { upsertAssistantInputEvent } from '../src/assistant/automation.ts'
 import { ASSISTANT_REQUIRE_SEND_AUTOMATION_TAG } from '../src/assistant/automation-tags.ts'
@@ -132,6 +133,150 @@ async function stageDirectLinqRouteEvidence(input: {
 }
 
 describe('applyMurphManagedAutomations core integration', () => {
+  it('reauthorizes an exact server-confirmed pre-marker direct route only', async () => {
+    const vaultRoot = await createVaultRoot()
+    const directRoute = {
+      channel: 'linq',
+      deliverySource: null,
+      deliveryTarget: 'confirmed-home-chat',
+      identityId: 'h1_111111111111111111111111',
+      participantId: 'h1_222222222222222222222222',
+      threadId: 'h1_333333333333333333333333',
+      threadIsDirect: true,
+    } as const
+    await upsertAutomation({
+      automationId: 'automation_01KZ0000000000000000000081',
+      continuityPolicy: 'fresh',
+      instructions: 'Send the saved reminder.',
+      route: directRoute,
+      schedule: { at: '2026-07-13T15:00:00.000Z', kind: 'at' },
+      slug: 'confirmed-home-reminder',
+      status: 'active',
+      summary: null,
+      tags: ['assistant', 'scheduled'],
+      title: 'Confirmed home reminder',
+      vaultRoot,
+    })
+    await upsertAutomation({
+      automationId: 'automation_01KZ0000000000000000000082',
+      continuityPolicy: 'fresh',
+      instructions: 'Send the group reminder.',
+      route: { ...directRoute, threadIsDirect: false },
+      schedule: { at: '2026-07-13T15:00:00.000Z', kind: 'at' },
+      slug: 'unconfirmed-group-reminder',
+      status: 'active',
+      summary: null,
+      tags: ['assistant', 'scheduled'],
+      title: 'Unconfirmed group reminder',
+      vaultRoot,
+    })
+    await upsertAutomation({
+      automationId: 'automation_01KZ0000000000000000000083',
+      continuityPolicy: 'fresh',
+      instructions: 'Send the older saved reminder.',
+      route: {
+        channel: 'linq',
+        deliverySource: null,
+        deliveryTarget: 'confirmed-legacy-home-chat',
+        identityId: null,
+        participantId: null,
+        threadId: null,
+        threadIsDirect: null,
+      },
+      schedule: { at: '2026-07-13T15:00:00.000Z', kind: 'at' },
+      slug: 'confirmed-legacy-home-reminder',
+      status: 'active',
+      summary: null,
+      tags: ['assistant', 'scheduled'],
+      title: 'Confirmed legacy home reminder',
+      vaultRoot,
+    })
+    const confirmedTargets: string[] = []
+
+    await expect(repairServerConfirmedPersonalHomeAutomationRoutes({
+      confirmDirectHomeTarget: async (target) => {
+        confirmedTargets.push(target)
+        return target === 'confirmed-home-chat' ||
+          target === 'confirmed-legacy-home-chat'
+      },
+      now: new Date('2026-07-13T14:59:00.000Z'),
+      vaultRoot,
+    })).resolves.toEqual({ pending: false, repaired: 2, verified: 2 })
+    expect(confirmedTargets).toEqual([
+      'confirmed-home-chat',
+      'confirmed-legacy-home-chat',
+    ])
+    await expect(showAutomation({
+      automationId: 'automation_01KZ0000000000000000000081',
+      vaultRoot,
+    })).resolves.toMatchObject({
+      route: { currentRouteSnapshot: true, threadIsDirect: true },
+    })
+    await expect(showAutomation({
+      automationId: 'automation_01KZ0000000000000000000082',
+      vaultRoot,
+    })).resolves.not.toHaveProperty('route.currentRouteSnapshot')
+    await expect(showAutomation({
+      automationId: 'automation_01KZ0000000000000000000083',
+      vaultRoot,
+    })).resolves.toMatchObject({
+      route: { currentRouteSnapshot: true, threadIsDirect: true },
+    })
+  })
+
+  it('rotates bounded server-confirmation batches past permanent rejects', async () => {
+    const vaultRoot = await createVaultRoot()
+    for (let index = 0; index < 26; index += 1) {
+      const suffix = String(index).padStart(2, '0')
+      await upsertAutomation({
+        automationId: `automation_01KZ00000000000000000000${suffix}`,
+        continuityPolicy: 'fresh',
+        instructions: 'Send the saved reminder.',
+        route: {
+          channel: 'linq',
+          deliverySource: null,
+          deliveryTarget: `legacy-home-${suffix}`,
+          identityId: null,
+          participantId: null,
+          threadId: null,
+          threadIsDirect: true,
+        },
+        schedule: { at: '2026-07-13T15:00:00.000Z', kind: 'at' },
+        slug: `legacy-home-reminder-${suffix}`,
+        status: 'active',
+        summary: null,
+        tags: ['assistant', 'scheduled'],
+        title: `Legacy home reminder ${suffix}`,
+        vaultRoot,
+      })
+    }
+    const checkedTargets = new Set<string>()
+    const firstNow = new Date('2026-07-13T14:59:00.000Z')
+    const confirmDirectHomeTarget = async (target: string) => {
+      checkedTargets.add(target)
+      return target === 'legacy-home-25'
+    }
+
+    await repairServerConfirmedPersonalHomeAutomationRoutes({
+      confirmDirectHomeTarget,
+      now: firstNow,
+      vaultRoot,
+    })
+    await repairServerConfirmedPersonalHomeAutomationRoutes({
+      confirmDirectHomeTarget,
+      now: new Date(firstNow.getTime() + 3_600_000),
+      vaultRoot,
+    })
+
+    expect(checkedTargets).toContain('legacy-home-25')
+    await expect(showAutomation({
+      automationId: 'automation_01KZ0000000000000000000025',
+      vaultRoot,
+    })).resolves.toMatchObject({
+      route: { currentRouteSnapshot: true, threadIsDirect: true },
+    })
+  })
+
   it('creates managed health automations through the canonical automation registry', async () => {
     const vaultRoot = await createVaultRoot()
 

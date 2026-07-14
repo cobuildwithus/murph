@@ -8,6 +8,7 @@ const mocks = vi.hoisted(() => ({
   activateHostedMemberForPositiveSourceTx: vi.fn(),
   applyHostedFamilyStripeCheckoutCompletedTx: vi.fn(),
   applyHostedFamilyStripeSubscriptionUpdatedTx: vi.fn(),
+  clearHostedMemberBillingCheckoutSessionIfMatchesTx: vi.fn(),
   findMemberForStripeCheckoutSession: vi.fn(),
   findMemberForStripeInvoice: vi.fn(),
   findMemberForStripeReversal: vi.fn(),
@@ -19,6 +20,18 @@ const mocks = vi.hoisted(() => ({
   writeHostedMemberStripeBillingRefIfFreshTx: vi.fn(),
   writeHostedMemberStripeBillingTx: vi.fn(),
 }));
+
+vi.mock("@/src/lib/hosted-onboarding/hosted-member-billing-store", async () => {
+  const actual = await vi.importActual<
+    typeof import("@/src/lib/hosted-onboarding/hosted-member-billing-store")
+  >("@/src/lib/hosted-onboarding/hosted-member-billing-store");
+
+  return {
+    ...actual,
+    clearHostedMemberBillingCheckoutSessionIfMatchesTx:
+      mocks.clearHostedMemberBillingCheckoutSessionIfMatchesTx,
+  };
+});
 
 vi.mock("@/src/lib/hosted-onboarding/member-activation", () => ({
   activateHostedMemberForPositiveSourceTx: mocks.activateHostedMemberForPositiveSourceTx,
@@ -97,8 +110,7 @@ import {
   applyStripeInvoicePaymentFailed,
   applyStripeRefundCreated,
   applyStripeSubscriptionUpdated,
-  cancelAndRefundHostedLegacySyntheticFamilyCheckoutSubscription,
-  cancelHostedLegacySyntheticFamilySubscription,
+  executeHostedFamilyPaymentConflictCompensation,
 } from "@/src/lib/hosted-onboarding/stripe-billing-events";
 
 describe("hosted onboarding stripe billing events", () => {
@@ -179,6 +191,13 @@ describe("hosted onboarding stripe billing events", () => {
       stripeCustomerId: "cus_123",
       stripeSubscriptionId: "sub_123",
     }));
+    expect(
+      mocks.clearHostedMemberBillingCheckoutSessionIfMatchesTx,
+    ).toHaveBeenCalledWith({
+      memberId: "member_123",
+      sessionId: "cs_standard_123",
+      tx: {},
+    });
     expect(mocks.upsertHostedMemberStripeCheckoutEmailIfFreshTx).toHaveBeenCalledWith({
       address: "payer@example.com",
       collectedAt: new Date("2024-05-03T01:46:40.000Z"),
@@ -216,7 +235,7 @@ describe("hosted onboarding stripe billing events", () => {
   it("propagates completed legacy Family checkout refund compensation", async () => {
     mocks.applyHostedFamilyStripeCheckoutCompletedTx.mockResolvedValueOnce({
       groupId: "hbag_family",
-      legacySyntheticFamilyCheckoutCompensation: {
+      familyPaymentConflictCompensation: {
         effectId: "evt_family_checkout",
         invoiceId: "in_family",
         subscriptionId: "sub_family",
@@ -236,7 +255,7 @@ describe("hosted onboarding stripe billing events", () => {
     ).resolves.toEqual({
       activatedMemberId: null,
       hostedExecutionEventId: null,
-      legacySyntheticFamilyCheckoutCompensation: {
+      familyPaymentConflictCompensation: {
         effectId: "evt_family_checkout",
         invoiceId: "in_family",
         subscriptionId: "sub_family",
@@ -255,7 +274,9 @@ describe("hosted onboarding stripe billing events", () => {
       },
     });
 
-    await expect(cancelHostedLegacySyntheticFamilySubscription({
+    await expect(executeHostedFamilyPaymentConflictCompensation({
+      effectId: "evt_family_subscription",
+      invoiceId: null,
       subscriptionId: "sub_family",
     })).resolves.toBeUndefined();
 
@@ -264,7 +285,7 @@ describe("hosted onboarding stripe billing events", () => {
       "sub_family",
       {},
       {
-        idempotencyKey: "hosted-family-legacy-synthetic-cancel:sub_family",
+        idempotencyKey: "hosted-family-payment-conflict-cancel:evt_family_subscription",
       },
     );
   });
@@ -279,7 +300,9 @@ describe("hosted onboarding stripe billing events", () => {
       },
     });
 
-    await expect(cancelHostedLegacySyntheticFamilySubscription({
+    await expect(executeHostedFamilyPaymentConflictCompensation({
+      effectId: "evt_family_subscription",
+      invoiceId: null,
       subscriptionId: "sub_family",
     })).resolves.toBeUndefined();
 
@@ -317,7 +340,7 @@ describe("hosted onboarding stripe billing events", () => {
       },
     });
 
-    await expect(cancelAndRefundHostedLegacySyntheticFamilyCheckoutSubscription({
+    await expect(executeHostedFamilyPaymentConflictCompensation({
       effectId: "evt_family_checkout",
       invoiceId: "in_family",
       subscriptionId: "sub_family",
@@ -334,18 +357,18 @@ describe("hosted onboarding stripe billing events", () => {
       "sub_family",
       {},
       {
-        idempotencyKey: "hosted-family-legacy-synthetic-cancel:evt_family_checkout",
+        idempotencyKey: "hosted-family-payment-conflict-cancel:evt_family_checkout",
       },
     );
     expect(createRefund).toHaveBeenCalledWith(
       {
         metadata: {
-          hosted_family_legacy_compensation_event_id: "evt_family_checkout",
+          hosted_family_payment_conflict_event_id: "evt_family_checkout",
         },
         payment_intent: "pi_family",
       },
       {
-        idempotencyKey: "hosted-family-legacy-synthetic-refund:evt_family_checkout",
+        idempotencyKey: "hosted-family-payment-conflict-refund:evt_family_checkout",
       },
     );
   });
@@ -379,7 +402,7 @@ describe("hosted onboarding stripe billing events", () => {
       },
     });
 
-    await expect(cancelAndRefundHostedLegacySyntheticFamilyCheckoutSubscription({
+    await expect(executeHostedFamilyPaymentConflictCompensation({
       effectId: "evt_family_checkout",
       invoiceId: "in_family",
       subscriptionId: "sub_family",
@@ -390,11 +413,11 @@ describe("hosted onboarding stripe billing events", () => {
       {
         charge: "ch_family",
         metadata: {
-          hosted_family_legacy_compensation_event_id: "evt_family_checkout",
+          hosted_family_payment_conflict_event_id: "evt_family_checkout",
         },
       },
       {
-        idempotencyKey: "hosted-family-legacy-synthetic-refund:evt_family_checkout",
+        idempotencyKey: "hosted-family-payment-conflict-refund:evt_family_checkout",
       },
     );
   });
@@ -425,11 +448,11 @@ describe("hosted onboarding stripe billing events", () => {
       },
     });
 
-    await expect(cancelAndRefundHostedLegacySyntheticFamilyCheckoutSubscription({
+    await expect(executeHostedFamilyPaymentConflictCompensation({
       effectId: "evt_family_checkout",
       invoiceId: "in_family",
       subscriptionId: "sub_family",
-    })).rejects.toThrow("Legacy synthetic Family checkout invoice ownership changed.");
+    })).rejects.toThrow("Family payment-conflict invoice ownership changed.");
 
     expect(cancel).toHaveBeenCalledOnce();
     expect(listRefunds).not.toHaveBeenCalled();
@@ -466,12 +489,12 @@ describe("hosted onboarding stripe billing events", () => {
       },
     });
 
-    await expect(cancelAndRefundHostedLegacySyntheticFamilyCheckoutSubscription({
+    await expect(executeHostedFamilyPaymentConflictCompensation({
       effectId: "evt_family_checkout",
       invoiceId: "in_family",
       subscriptionId: "sub_family",
     })).rejects.toThrow("temporary refund failure");
-    await expect(cancelAndRefundHostedLegacySyntheticFamilyCheckoutSubscription({
+    await expect(executeHostedFamilyPaymentConflictCompensation({
       effectId: "evt_family_checkout",
       invoiceId: "in_family",
       subscriptionId: "sub_family",
@@ -480,17 +503,17 @@ describe("hosted onboarding stripe billing events", () => {
     expect(cancel).toHaveBeenCalledOnce();
     expect(createRefund).toHaveBeenCalledTimes(2);
     expect(createRefund.mock.calls[0]?.[1]).toEqual({
-      idempotencyKey: "hosted-family-legacy-synthetic-refund:evt_family_checkout",
+      idempotencyKey: "hosted-family-payment-conflict-refund:evt_family_checkout",
     });
     expect(createRefund.mock.calls[1]?.[1]).toEqual({
-      idempotencyKey: "hosted-family-legacy-synthetic-refund:evt_family_checkout",
+      idempotencyKey: "hosted-family-payment-conflict-refund:evt_family_checkout",
     });
   });
 
   it("recovers a pending legacy Family checkout refund from Stripe before completing", async () => {
     const cancel = vi.fn(async () => makeStripeSubscription({ status: "canceled" }));
     const refundMetadata = {
-      hosted_family_legacy_compensation_event_id: "evt_family_checkout",
+      hosted_family_payment_conflict_event_id: "evt_family_checkout",
     };
     const pendingRefund = makeStripeRefund({
       id: "re_pending",
@@ -531,14 +554,14 @@ describe("hosted onboarding stripe billing events", () => {
       },
     });
 
-    await expect(cancelAndRefundHostedLegacySyntheticFamilyCheckoutSubscription({
+    await expect(executeHostedFamilyPaymentConflictCompensation({
       effectId: "evt_family_checkout",
       invoiceId: "in_family",
       subscriptionId: "sub_family",
     })).rejects.toMatchObject({
-      code: "HOSTED_LEGACY_FAMILY_REFUND_PENDING",
+      code: "HOSTED_FAMILY_PAYMENT_CONFLICT_REFUND_PENDING",
     });
-    await expect(cancelAndRefundHostedLegacySyntheticFamilyCheckoutSubscription({
+    await expect(executeHostedFamilyPaymentConflictCompensation({
       effectId: "evt_family_checkout",
       invoiceId: "in_family",
       subscriptionId: "sub_family",
@@ -552,7 +575,7 @@ describe("hosted onboarding stripe billing events", () => {
   it("replaces a failed pending legacy Family refund with a new idempotent attempt", async () => {
     const cancel = vi.fn(async () => makeStripeSubscription({ status: "canceled" }));
     const refundMetadata = {
-      hosted_family_legacy_compensation_event_id: "evt_family_checkout",
+      hosted_family_payment_conflict_event_id: "evt_family_checkout",
     };
     const pendingRefund = makeStripeRefund({
       id: "re_pending",
@@ -599,14 +622,14 @@ describe("hosted onboarding stripe billing events", () => {
       },
     });
 
-    await expect(cancelAndRefundHostedLegacySyntheticFamilyCheckoutSubscription({
+    await expect(executeHostedFamilyPaymentConflictCompensation({
       effectId: "evt_family_checkout",
       invoiceId: "in_family",
       subscriptionId: "sub_family",
     })).rejects.toMatchObject({
-      code: "HOSTED_LEGACY_FAMILY_REFUND_PENDING",
+      code: "HOSTED_FAMILY_PAYMENT_CONFLICT_REFUND_PENDING",
     });
-    await expect(cancelAndRefundHostedLegacySyntheticFamilyCheckoutSubscription({
+    await expect(executeHostedFamilyPaymentConflictCompensation({
       effectId: "evt_family_checkout",
       invoiceId: "in_family",
       subscriptionId: "sub_family",
@@ -616,7 +639,7 @@ describe("hosted onboarding stripe billing events", () => {
     expect(createRefund).toHaveBeenCalledTimes(2);
     expect(createRefund.mock.calls[1]?.[1]).toEqual({
       idempotencyKey:
-        "hosted-family-legacy-synthetic-refund:evt_family_checkout:after:re_pending",
+        "hosted-family-payment-conflict-refund:evt_family_checkout:after:re_pending",
     });
   });
 
@@ -971,7 +994,11 @@ describe("hosted onboarding stripe billing events", () => {
   it("propagates legacy synthetic Family cancellation from subscription updates", async () => {
     mocks.applyHostedFamilyStripeSubscriptionUpdatedTx.mockResolvedValueOnce({
       activations: [],
-      cancelLegacySyntheticFamilySubscriptionId: "sub_family",
+      familyPaymentConflictCompensation: {
+        effectId: "evt_family_compensation",
+        invoiceId: null,
+        subscriptionId: "sub_family",
+      },
       groupId: "hbag_family",
     });
 
@@ -993,7 +1020,11 @@ describe("hosted onboarding stripe billing events", () => {
     )).resolves.toEqual({
       activatedMemberId: null,
       activatedMembers: [],
-      cancelLegacySyntheticFamilySubscriptionId: "sub_family",
+      familyPaymentConflictCompensation: {
+        effectId: "evt_family_compensation",
+        invoiceId: null,
+        subscriptionId: "sub_family",
+      },
       hostedExecutionEventId: null,
       subscriptionCancellationEmail: null,
       welcomeEmailMemberId: null,
@@ -1006,7 +1037,11 @@ describe("hosted onboarding stripe billing events", () => {
   it("propagates legacy synthetic Family cancellation from paid invoices", async () => {
     mocks.applyHostedFamilyStripeSubscriptionUpdatedTx.mockResolvedValueOnce({
       activations: [],
-      cancelLegacySyntheticFamilySubscriptionId: "sub_family",
+      familyPaymentConflictCompensation: {
+        effectId: "evt_family_compensation",
+        invoiceId: null,
+        subscriptionId: "sub_family",
+      },
       groupId: "hbag_family",
     });
 
@@ -1033,7 +1068,11 @@ describe("hosted onboarding stripe billing events", () => {
     )).resolves.toEqual({
       activatedMemberId: null,
       activatedMembers: [],
-      cancelLegacySyntheticFamilySubscriptionId: "sub_family",
+      familyPaymentConflictCompensation: {
+        effectId: "evt_family_compensation",
+        invoiceId: null,
+        subscriptionId: "sub_family",
+      },
       hostedExecutionEventId: null,
       welcomeEmailMemberId: null,
     });
@@ -1045,7 +1084,11 @@ describe("hosted onboarding stripe billing events", () => {
   it("propagates legacy synthetic Family cancellation from invoice payment failure", async () => {
     mocks.applyHostedFamilyStripeSubscriptionUpdatedTx.mockResolvedValueOnce({
       activations: [],
-      cancelLegacySyntheticFamilySubscriptionId: "sub_family",
+      familyPaymentConflictCompensation: {
+        effectId: "evt_family_compensation",
+        invoiceId: null,
+        subscriptionId: "sub_family",
+      },
       groupId: "hbag_family",
     });
 
@@ -1073,7 +1116,11 @@ describe("hosted onboarding stripe billing events", () => {
     )).resolves.toEqual({
       activatedMemberId: null,
       activatedMembers: [],
-      cancelLegacySyntheticFamilySubscriptionId: "sub_family",
+      familyPaymentConflictCompensation: {
+        effectId: "evt_family_compensation",
+        invoiceId: null,
+        subscriptionId: "sub_family",
+      },
       hostedExecutionEventId: null,
       welcomeEmailMemberId: null,
     });

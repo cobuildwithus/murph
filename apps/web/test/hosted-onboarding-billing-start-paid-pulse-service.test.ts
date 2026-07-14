@@ -11,6 +11,7 @@ import {
 
 const mocks = vi.hoisted(() => ({
   applyStripeInvoicePaid: vi.fn(),
+  assertHostedMemberCanOwnDirectBilling: vi.fn(),
   getPrisma: vi.fn(),
   signalHostedRuntimeManualWakeBestEffort: vi.fn(),
   prismaClient: {
@@ -37,6 +38,11 @@ const mocks = vi.hoisted(() => ({
 
 vi.mock("@/src/lib/prisma", () => ({
   getPrisma: mocks.getPrisma,
+}));
+
+vi.mock("@/src/lib/hosted-onboarding/billing-authority", () => ({
+  assertHostedMemberCanOwnDirectBilling:
+    mocks.assertHostedMemberCanOwnDirectBilling,
 }));
 
 vi.mock("@/src/lib/hosted-orchestration/manual-wake", () => ({
@@ -68,6 +74,21 @@ import {
 describe("startHostedPulseTrialPaidPlan", () => {
   beforeEach(() => {
     vi.clearAllMocks();
+    mocks.applyStripeInvoicePaid.mockReset();
+    mocks.assertHostedMemberCanOwnDirectBilling.mockReset();
+    mocks.getPrisma.mockReset();
+    mocks.prismaClient.$transaction.mockReset();
+    mocks.readHostedMemberCoreState.mockReset();
+    mocks.readHostedMemberStripeBillingRef.mockReset();
+    mocks.requireHostedOnboardingPublicBaseUrl.mockReset();
+    mocks.requireHostedStripeBillingPlanConfig.mockReset();
+    mocks.signalHostedRuntimeManualWakeBestEffort.mockReset();
+    mocks.stripe.billingPortal.sessions.create.mockReset();
+    mocks.stripe.subscriptions.retrieve.mockReset();
+    mocks.stripe.subscriptions.resume.mockReset();
+    mocks.stripe.subscriptions.update.mockReset();
+    mocks.withHostedMemberStripeMutationLock.mockReset();
+    mocks.assertHostedMemberCanOwnDirectBilling.mockResolvedValue(undefined);
     mocks.getPrisma.mockReturnValue(mocks.prismaClient);
     mocks.prismaClient.$transaction.mockImplementation(async (callback: (tx: unknown) => Promise<unknown>) =>
       callback(mocks.prismaClient)
@@ -81,7 +102,8 @@ describe("startHostedPulseTrialPaidPlan", () => {
     });
     mocks.readHostedMemberStripeBillingRef.mockResolvedValue(makeBillingRef());
     mocks.withHostedMemberStripeMutationLock.mockImplementation(
-      async (input: { run: () => Promise<unknown> }) => input.run(),
+      async (input: { run: (tx: typeof mocks.prismaClient) => Promise<unknown> }) =>
+        input.run(mocks.prismaClient),
     );
     mocks.requireHostedOnboardingPublicBaseUrl.mockReturnValue("https://join.example.test");
     mocks.requireHostedStripeBillingPlanConfig.mockReturnValue({
@@ -139,6 +161,56 @@ describe("startHostedPulseTrialPaidPlan", () => {
     });
     expect(mocks.applyStripeInvoicePaid).not.toHaveBeenCalled();
     expect(mocks.signalHostedRuntimeManualWakeBestEffort).not.toHaveBeenCalled();
+  });
+
+  test("rejects before Stripe reads when Family billing owns access", async () => {
+    mocks.assertHostedMemberCanOwnDirectBilling.mockRejectedValueOnce(
+      Object.assign(new Error("Family billing already owns access."), {
+        code: "HOSTED_BILLING_FAMILY_AUTHORITY_ACTIVE",
+        httpStatus: 409,
+      }),
+    );
+
+    await expect(startHostedPulseTrialPaidPlan({
+      memberId: "member_123",
+      now: new Date("2026-05-06T00:00:00.000Z"),
+    })).rejects.toMatchObject({
+      code: "HOSTED_BILLING_FAMILY_AUTHORITY_ACTIVE",
+      httpStatus: 409,
+    });
+
+    expect(mocks.readHostedMemberStripeBillingRef).not.toHaveBeenCalled();
+    expect(mocks.stripe.subscriptions.retrieve).not.toHaveBeenCalled();
+    expect(mocks.stripe.subscriptions.update).not.toHaveBeenCalled();
+  });
+
+  test("rechecks suspension inside the member lock before mutating Stripe", async () => {
+    mocks.readHostedMemberCoreState
+      .mockResolvedValueOnce({
+        billingStatus: HostedBillingStatus.active,
+        createdAt: new Date("2026-05-01T00:00:00.000Z"),
+        id: "member_123",
+        suspendedAt: null,
+        updatedAt: new Date("2026-05-01T00:00:00.000Z"),
+      })
+      .mockResolvedValueOnce({
+        billingStatus: HostedBillingStatus.active,
+        createdAt: new Date("2026-05-01T00:00:00.000Z"),
+        id: "member_123",
+        suspendedAt: new Date("2026-05-06T00:00:00.000Z"),
+        updatedAt: new Date("2026-05-06T00:00:00.000Z"),
+      });
+
+    await expect(startHostedPulseTrialPaidPlan({
+      memberId: "member_123",
+      now: new Date("2026-05-06T00:00:00.000Z"),
+    })).rejects.toMatchObject({
+      code: "HOSTED_MEMBER_SUSPENDED",
+      httpStatus: 403,
+    });
+
+    expect(mocks.stripe.subscriptions.retrieve).toHaveBeenCalledOnce();
+    expect(mocks.stripe.subscriptions.update).not.toHaveBeenCalled();
   });
 
   test("routes no-card trials through Stripe payment-method setup before ending the trial", async () => {
@@ -310,7 +382,7 @@ describe("startHostedPulseTrialPaidPlan", () => {
       .mockResolvedValueOnce(undefined);
     mocks.readHostedMemberStripeBillingRef
       .mockResolvedValueOnce(makeBillingRef())
-      .mockResolvedValueOnce(makeBillingRef({
+      .mockResolvedValue(makeBillingRef({
         currentBillingPhase: "paid",
       }));
 
@@ -492,7 +564,7 @@ describe("startHostedPulseTrialPaidPlan", () => {
     });
     mocks.readHostedMemberStripeBillingRef
       .mockResolvedValueOnce(makeBillingRef())
-      .mockResolvedValueOnce(makeBillingRef({
+      .mockResolvedValue(makeBillingRef({
         currentBillingPhase: "paid",
       }));
     mocks.stripe.subscriptions.retrieve
@@ -630,7 +702,7 @@ describe("startHostedPulseTrialPaidPlan", () => {
       .mockResolvedValueOnce(makeBillingRef({
         currentBillingPhase: null,
       }))
-      .mockResolvedValueOnce(makeBillingRef({
+      .mockResolvedValue(makeBillingRef({
         currentBillingPhase: "paid",
       }));
     mocks.stripe.subscriptions.retrieve
@@ -676,7 +748,7 @@ describe("startHostedPulseTrialPaidPlan", () => {
     expect(mocks.stripe.subscriptions.retrieve).toHaveBeenCalledTimes(2);
     expect(mocks.stripe.subscriptions.update).not.toHaveBeenCalled();
     expect(mocks.stripe.subscriptions.resume).toHaveBeenCalledTimes(1);
-    expect(mocks.withHostedMemberStripeMutationLock).toHaveBeenCalledTimes(1);
+    expect(mocks.withHostedMemberStripeMutationLock).toHaveBeenCalledTimes(2);
     expect(mocks.applyStripeInvoicePaid).toHaveBeenCalledWith(
       canonicalInvoice,
       expect.objectContaining({
@@ -709,7 +781,7 @@ describe("startHostedPulseTrialPaidPlan", () => {
       .mockResolvedValueOnce(makeBillingRef({
         currentBillingPhase: null,
       }))
-      .mockResolvedValueOnce(makeBillingRef({
+      .mockResolvedValue(makeBillingRef({
         currentBillingPhase: "paid",
       }));
     mocks.stripe.subscriptions.retrieve
@@ -1396,7 +1468,7 @@ describe("startHostedPulseTrialPaidPlan", () => {
     mocks.stripe.subscriptions.update.mockResolvedValueOnce(subscription);
     mocks.readHostedMemberStripeBillingRef
       .mockResolvedValueOnce(makeBillingRef())
-      .mockResolvedValueOnce(makeBillingRef({
+      .mockResolvedValue(makeBillingRef({
         currentBillingPhase: "paid",
       }));
 

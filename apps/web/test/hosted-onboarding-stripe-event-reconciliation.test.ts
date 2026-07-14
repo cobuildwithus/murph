@@ -12,21 +12,12 @@ const mocks = vi.hoisted(() => ({
   applyStripeInvoicePaymentFailed: vi.fn(),
   applyStripeRefundCreated: vi.fn(),
   applyStripeSubscriptionUpdated: vi.fn(),
-  cancelAndRefundHostedLegacySyntheticFamilyCheckoutSubscription: vi.fn(),
-  cancelHostedLegacySyntheticFamilySubscription: vi.fn(),
   cancelHostedPulseTrialCheckoutLoserSubscription: vi.fn(),
   clearHostedBillingPlanSwitchToPulsePendingFieldsForScheduleTx: vi.fn(),
   findMemberForStripeCheckoutSession: vi.fn(),
   findMemberForStripeInvoice: vi.fn(),
   findMemberForStripeSubscription: vi.fn(),
-  isHostedLegacyFamilyRefundPendingError: vi.fn(
-    (error: unknown) => Boolean(
-      error &&
-      typeof error === "object" &&
-      "code" in error &&
-      error.code === "HOSTED_LEGACY_FAMILY_REFUND_PENDING",
-    ),
-  ),
+  executeHostedFamilyPaymentConflictCompensation: vi.fn(),
   listHostedStripeCheckoutSessionMemberIds: vi.fn(),
   readHostedMemberBillingSnapshot: vi.fn(),
   refreshHostedBillingPlanSwitchToPulsePendingFieldsFromScheduleTx: vi.fn(),
@@ -104,14 +95,10 @@ vi.mock("@/src/lib/hosted-onboarding/stripe-billing-events", () => ({
   applyStripeInvoicePaymentFailed: mocks.applyStripeInvoicePaymentFailed,
   applyStripeRefundCreated: mocks.applyStripeRefundCreated,
   applyStripeSubscriptionUpdated: mocks.applyStripeSubscriptionUpdated,
-  cancelAndRefundHostedLegacySyntheticFamilyCheckoutSubscription:
-    mocks.cancelAndRefundHostedLegacySyntheticFamilyCheckoutSubscription,
-  cancelHostedLegacySyntheticFamilySubscription:
-    mocks.cancelHostedLegacySyntheticFamilySubscription,
   cancelHostedPulseTrialCheckoutLoserSubscription:
     mocks.cancelHostedPulseTrialCheckoutLoserSubscription,
-  isHostedLegacyFamilyRefundPendingError:
-    mocks.isHostedLegacyFamilyRefundPendingError,
+  executeHostedFamilyPaymentConflictCompensation:
+    mocks.executeHostedFamilyPaymentConflictCompensation,
 }));
 
 vi.mock("@/src/lib/hosted-onboarding/stripe-billing-lookup", async () => {
@@ -173,6 +160,10 @@ import {
   reconcileHostedStripeEventById as reconcileHostedStripeEventByIdImpl,
   recordHostedStripeEvent as recordHostedStripeEventImpl,
 } from "@/src/lib/hosted-onboarding/stripe-event-reconciliation";
+import {
+  acceptHostedFamilyPaymentConflictCompensationTx,
+  type HostedFamilyPaymentConflictCompensation,
+} from "@/src/lib/hosted-onboarding/stripe-family-compensation";
 
 type HostedStripeEventRecordInput = Parameters<typeof recordHostedStripeEventImpl>[0];
 type HostedStripeEventReconcileInput = Parameters<typeof reconcileHostedStripeEventByIdImpl>[0];
@@ -180,9 +171,20 @@ type HostedStripeEventReconcileInput = Parameters<typeof reconcileHostedStripeEv
 type StripeEventPrismaHarnessClient = {
   $queryRaw: (...args: unknown[]) => Promise<unknown>;
   $transaction: <T>(callback: (tx: StripeEventPrismaHarnessClient) => Promise<T>) => Promise<T>;
+  hostedAccountGroupMembership: {
+    findFirst: () => Promise<{ id: string } | null>;
+  };
+  hostedMemberBillingRef: {
+    updateMany: () => Promise<{ count: number }>;
+  };
   hostedStripeEvent: {
     create: ({ data }: { data: Record<string, unknown> }) => Promise<MutableStripeEventRow>;
-    findMany: () => Promise<MutableStripeEventRow[]>;
+    findMany: (input?: {
+      where?: {
+        familyPaymentConflictCompensationAcceptedAt?: { not: null };
+        familyPaymentConflictCompensationSubscriptionLookupKey?: string | { in: string[] };
+      };
+    }) => Promise<MutableStripeEventRow[]>;
     findUnique: ({ where }: { where: { eventId: string } }) => Promise<MutableStripeEventRow | null>;
     updateMany: ({ data, where }: { data: Record<string, unknown>; where: StripeEventWhere }) => Promise<{ count: number }>;
   };
@@ -219,9 +221,25 @@ async function reconcileHostedStripeEventById(
   return reconcileHostedStripeEventByIdImpl(input);
 }
 
+async function acceptTestFamilyPaymentConflictCompensation(input: {
+  compensation: HostedFamilyPaymentConflictCompensation;
+  prisma: StripeEventPrismaHarnessClient;
+}): Promise<HostedFamilyPaymentConflictCompensation> {
+  return acceptHostedFamilyPaymentConflictCompensationTx({
+    compensation: input.compensation,
+    encryptionMemberId: "member_family_owner",
+    // @ts-expect-error - the Prisma harness implements the receipt methods used here.
+    tx: input.prisma,
+  });
+}
+
 describe("hosted Stripe event reconciliation", () => {
   beforeEach(() => {
     vi.clearAllMocks();
+    mocks.cancelHostedPulseTrialCheckoutLoserSubscription.mockReset();
+    mocks.executeHostedFamilyPaymentConflictCompensation.mockReset();
+    mocks.stripe.events.retrieve.mockReset();
+    mocks.stripe.subscriptions.cancel.mockReset();
     vi.spyOn(console, "info").mockImplementation(() => {});
     mocks.applyStripeCheckoutCompleted.mockResolvedValue({
       activatedMemberId: null,
@@ -247,9 +265,8 @@ describe("hosted Stripe event reconciliation", () => {
       hostedExecutionEventId: null,
       welcomeEmailMemberId: null,
     });
-    mocks.cancelAndRefundHostedLegacySyntheticFamilyCheckoutSubscription.mockResolvedValue(undefined);
-    mocks.cancelHostedLegacySyntheticFamilySubscription.mockResolvedValue(undefined);
     mocks.cancelHostedPulseTrialCheckoutLoserSubscription.mockResolvedValue(undefined);
+    mocks.executeHostedFamilyPaymentConflictCompensation.mockResolvedValue(undefined);
     mocks.clearHostedBillingPlanSwitchToPulsePendingFieldsForScheduleTx.mockResolvedValue(undefined);
     mocks.findMemberForStripeCheckoutSession.mockResolvedValue({
       core: { id: "member_123" },
@@ -302,6 +319,8 @@ describe("hosted Stripe event reconciliation", () => {
     expect(prisma.rows[0]).not.toHaveProperty("payloadJson");
     expect(prisma.rows[0]).not.toHaveProperty("customerId");
     expect(prisma.rows[0]).not.toHaveProperty("subscriptionId");
+    expect(prisma.rows[0]?.familyPaymentConflictCompensationCandidateSubscriptionLookupKey)
+      .toEqual(expect.any(String));
   });
 
   it("retrieves the live Stripe event during reconciliation and marks the receipt completed", async () => {
@@ -442,6 +461,7 @@ describe("hosted Stripe event reconciliation", () => {
     ]);
     expect(mocks.applyStripeCheckoutCompleted).not.toHaveBeenCalled();
     expect(prisma.rows[0]).toEqual(expect.objectContaining({
+      attemptCount: 1,
       processedAt: null,
       status: HostedStripeEventStatus.failed,
     }));
@@ -529,6 +549,54 @@ describe("hosted Stripe event reconciliation", () => {
       HostedBillingStatus.active,
       canonicalSubscription,
     );
+  });
+
+  it("binds a newly accepted Family conflict to the exact paid invoice before compensation", async () => {
+    const prisma = createStripeEventPrismaHarness();
+    const event = makeInvoicePaidEvent({
+      id: "evt_family_invoice_conflict",
+      invoiceId: "in_family_conflict_exact",
+    });
+    const compensation = {
+      effectId: event.id,
+      invoiceId: null,
+      subscriptionId: "sub_123",
+    };
+    mocks.stripe.events.retrieve.mockResolvedValue(event);
+    mocks.applyStripeInvoicePaid.mockImplementationOnce(async (
+      _invoice,
+      _dispatchContext,
+      tx,
+    ) => {
+      await acceptHostedFamilyPaymentConflictCompensationTx({
+        compensation,
+        encryptionMemberId: "member_family_owner",
+        tx,
+      });
+      return {
+        activatedMemberId: null,
+        familyPaymentConflictCompensation: compensation,
+        hostedExecutionEventId: null,
+        welcomeEmailMemberId: null,
+      };
+    });
+
+    await recordHostedStripeEvent({ event, prisma: prisma.client });
+
+    await expect(reconcileHostedStripeEventById({
+      eventId: event.id,
+      prisma: prisma.client,
+    })).resolves.toMatchObject({ status: "completed" });
+
+    expect(mocks.executeHostedFamilyPaymentConflictCompensation).toHaveBeenCalledWith({
+      effectId: event.id,
+      invoiceId: "in_family_conflict_exact",
+      subscriptionId: "sub_123",
+    });
+    expect(prisma.rows[0]).toEqual(expect.objectContaining({
+      familyPaymentConflictCompensationInvoiceIdEncrypted: expect.any(String),
+      familyPaymentConflictCompensationInvoiceLookupKey: expect.any(String),
+    }));
   });
 
   it("does not send the Resend welcome when a later paid invoice has no new activation", async () => {
@@ -671,9 +739,11 @@ describe("hosted Stripe event reconciliation", () => {
       prisma: prisma.client,
     })).resolves.toMatchObject({ status: "failed" });
     expect(prisma.rows[0]).toEqual(expect.objectContaining({
+      attemptCount: 0,
       processedAt: null,
-      status: HostedStripeEventStatus.failed,
+      status: HostedStripeEventStatus.pending,
     }));
+    expect(prisma.client.hostedMemberBillingRef.updateMany).toHaveBeenCalledOnce();
 
     prisma.rows[0].nextAttemptAt = new Date(0);
     await expect(reconcileHostedStripeEventById({
@@ -689,7 +759,7 @@ describe("hosted Stripe event reconciliation", () => {
     errorSpy.mockRestore();
   });
 
-  it("retries legacy synthetic Family checkout cancellation and refund before completing the receipt", async () => {
+  it("retries an accepted legacy Family checkout effect without reloading mutable event state", async () => {
     const prisma = createStripeEventPrismaHarness();
     const event = makeCheckoutCompletedEvent();
     const session = event.data.object as Stripe.Checkout.Session;
@@ -699,39 +769,32 @@ describe("hosted Stripe event reconciliation", () => {
       kind: "hosted_family_plan",
     };
     const errorSpy = vi.spyOn(console, "error").mockImplementation(() => {});
-    mocks.stripe.events.retrieve.mockResolvedValue(event);
-    mocks.stripe.invoices.list.mockResolvedValue({
-      data: [{
-        billing_reason: "subscription_create",
-        id: "in_checkout_123",
-        subscription: "sub_checkout_123",
-      }],
-    });
-    mocks.applyStripeCheckoutCompleted.mockResolvedValue({
-      activatedMemberId: null,
-      hostedExecutionEventId: null,
-      legacySyntheticFamilyCheckoutCompensation: {
-        effectId: event.id,
-        invoiceId: "in_checkout_123",
-        subscriptionId: "sub_checkout_123",
-      },
-      welcomeEmailMemberId: null,
-    });
-    mocks.cancelAndRefundHostedLegacySyntheticFamilyCheckoutSubscription
+    mocks.executeHostedFamilyPaymentConflictCompensation
       .mockRejectedValueOnce(new Error("temporary Stripe refund failure"))
       .mockResolvedValueOnce(undefined);
 
     await recordHostedStripeEvent({ event, prisma: prisma.client });
+    await acceptTestFamilyPaymentConflictCompensation({
+      compensation: {
+        effectId: event.id,
+        invoiceId: "in_checkout_123",
+        subscriptionId: "sub_checkout_123",
+      },
+      prisma: prisma.client,
+    });
     await expect(reconcileHostedStripeEventById({
       eventId: event.id,
       prisma: prisma.client,
     })).resolves.toMatchObject({ status: "failed" });
     expect(prisma.rows[0]).toEqual(expect.objectContaining({
-      legacyFamilyCheckoutCompensationAcceptedAt: expect.any(Date),
-      legacyFamilyCheckoutCompensationInvoiceLookupKey: expect.any(String),
-      legacyFamilyCheckoutCompensationSubscriptionLookupKey: expect.any(String),
+      familyPaymentConflictCompensationAcceptedAt: expect.any(Date),
+      familyPaymentConflictCompensationEncryptionMemberId: "member_family_owner",
+      familyPaymentConflictCompensationInvoiceIdEncrypted: expect.any(String),
+      familyPaymentConflictCompensationInvoiceLookupKey: expect.any(String),
+      familyPaymentConflictCompensationSubscriptionIdEncrypted: expect.any(String),
+      familyPaymentConflictCompensationSubscriptionLookupKey: expect.any(String),
       processedAt: null,
-      status: HostedStripeEventStatus.failed,
+      status: HostedStripeEventStatus.pending,
     }));
 
     prisma.rows[0]!.nextAttemptAt = new Date(0);
@@ -741,28 +804,18 @@ describe("hosted Stripe event reconciliation", () => {
     })).resolves.toMatchObject({ status: "completed" });
 
     expect(
-      mocks.cancelAndRefundHostedLegacySyntheticFamilyCheckoutSubscription,
+      mocks.executeHostedFamilyPaymentConflictCompensation,
     ).toHaveBeenCalledTimes(2);
-    expect(mocks.applyStripeCheckoutCompleted).toHaveBeenCalledOnce();
-    expect(mocks.applyStripeCheckoutCompleted).toHaveBeenCalledWith(
-      expect.objectContaining({ invoice: "in_checkout_123" }),
-      expect.anything(),
-      expect.anything(),
-    );
-    expect(mocks.stripe.invoices.list).toHaveBeenCalledTimes(2);
-    expect(mocks.stripe.invoices.list).toHaveBeenCalledWith({
-      created: { lte: event.created },
-      limit: 100,
-      subscription: "sub_checkout_123",
-    });
+    expect(mocks.applyStripeCheckoutCompleted).not.toHaveBeenCalled();
+    expect(mocks.stripe.events.retrieve).not.toHaveBeenCalled();
+    expect(mocks.stripe.invoices.list).not.toHaveBeenCalled();
     expect(
-      mocks.cancelAndRefundHostedLegacySyntheticFamilyCheckoutSubscription,
+      mocks.executeHostedFamilyPaymentConflictCompensation,
     ).toHaveBeenCalledWith({
       effectId: event.id,
       invoiceId: "in_checkout_123",
       subscriptionId: "sub_checkout_123",
     });
-    expect(mocks.cancelHostedLegacySyntheticFamilySubscription).not.toHaveBeenCalled();
     expect(prisma.rows[0]).toEqual(expect.objectContaining({
       processedAt: expect.any(Date),
       status: HostedStripeEventStatus.completed,
@@ -770,28 +823,23 @@ describe("hosted Stripe event reconciliation", () => {
     errorSpy.mockRestore();
   });
 
-  it("keeps a pending legacy Family checkout refund under a non-poisoning receipt retry owner", async () => {
+  it("keeps an attempt-six legacy Family provider failure pending without poisoning", async () => {
     const prisma = createStripeEventPrismaHarness();
     const event = makeCheckoutCompletedEvent();
     const errorSpy = vi.spyOn(console, "error").mockImplementation(() => {});
-    mocks.stripe.events.retrieve.mockResolvedValue(event);
-    mocks.applyStripeCheckoutCompleted.mockResolvedValue({
-      activatedMemberId: null,
-      hostedExecutionEventId: null,
-      legacySyntheticFamilyCheckoutCompensation: {
+    mocks.executeHostedFamilyPaymentConflictCompensation
+      .mockRejectedValueOnce(new Error("temporary Stripe provider failure"))
+      .mockResolvedValueOnce(undefined);
+
+    await recordHostedStripeEvent({ event, prisma: prisma.client });
+    await acceptTestFamilyPaymentConflictCompensation({
+      compensation: {
         effectId: event.id,
         invoiceId: "in_checkout_123",
         subscriptionId: "sub_checkout_123",
       },
-      welcomeEmailMemberId: null,
+      prisma: prisma.client,
     });
-    mocks.cancelAndRefundHostedLegacySyntheticFamilyCheckoutSubscription
-      .mockRejectedValueOnce(Object.assign(new Error("refund pending"), {
-        code: "HOSTED_LEGACY_FAMILY_REFUND_PENDING",
-      }))
-      .mockResolvedValueOnce(undefined);
-
-    await recordHostedStripeEvent({ event, prisma: prisma.client });
     prisma.rows[0]!.attemptCount = 5;
     await expect(reconcileHostedStripeEventById({
       eventId: event.id,
@@ -810,8 +858,9 @@ describe("hosted Stripe event reconciliation", () => {
     })).resolves.toMatchObject({ status: "completed" });
 
     expect(
-      mocks.cancelAndRefundHostedLegacySyntheticFamilyCheckoutSubscription,
+      mocks.executeHostedFamilyPaymentConflictCompensation,
     ).toHaveBeenCalledTimes(2);
+    expect(mocks.stripe.events.retrieve).not.toHaveBeenCalled();
     expect(prisma.rows[0]).toEqual(expect.objectContaining({
       processedAt: expect.any(Date),
       status: HostedStripeEventStatus.completed,
@@ -819,29 +868,26 @@ describe("hosted Stripe event reconciliation", () => {
     errorSpy.mockRestore();
   });
 
-  it("turns a pending then failed legacy Family refund into an explicit retry before success", async () => {
+  it("keeps every accepted legacy Family provider failure pending before success", async () => {
     const prisma = createStripeEventPrismaHarness();
     const event = makeCheckoutCompletedEvent();
     const errorSpy = vi.spyOn(console, "error").mockImplementation(() => {});
-    mocks.stripe.events.retrieve.mockResolvedValue(event);
-    mocks.applyStripeCheckoutCompleted.mockResolvedValue({
-      activatedMemberId: null,
-      hostedExecutionEventId: null,
-      legacySyntheticFamilyCheckoutCompensation: {
-        effectId: event.id,
-        invoiceId: "in_checkout_123",
-        subscriptionId: "sub_checkout_123",
-      },
-      welcomeEmailMemberId: null,
-    });
-    mocks.cancelAndRefundHostedLegacySyntheticFamilyCheckoutSubscription
+    mocks.executeHostedFamilyPaymentConflictCompensation
       .mockRejectedValueOnce(Object.assign(new Error("refund pending"), {
-        code: "HOSTED_LEGACY_FAMILY_REFUND_PENDING",
+        code: "HOSTED_FAMILY_PAYMENT_CONFLICT_REFUND_PENDING",
       }))
       .mockRejectedValueOnce(new Error("refund failed"))
       .mockResolvedValueOnce(undefined);
 
     await recordHostedStripeEvent({ event, prisma: prisma.client });
+    await acceptTestFamilyPaymentConflictCompensation({
+      compensation: {
+        effectId: event.id,
+        invoiceId: "in_checkout_123",
+        subscriptionId: "sub_checkout_123",
+      },
+      prisma: prisma.client,
+    });
     await reconcileHostedStripeEventById({
       eventId: event.id,
       prisma: prisma.client,
@@ -857,9 +903,9 @@ describe("hosted Stripe event reconciliation", () => {
       prisma: prisma.client,
     });
     expect(prisma.rows[0]).toEqual(expect.objectContaining({
-      attemptCount: 1,
+      attemptCount: 0,
       processedAt: null,
-      status: HostedStripeEventStatus.failed,
+      status: HostedStripeEventStatus.pending,
     }));
 
     prisma.rows[0]!.nextAttemptAt = new Date(0);
@@ -868,8 +914,9 @@ describe("hosted Stripe event reconciliation", () => {
       prisma: prisma.client,
     })).resolves.toMatchObject({ status: "completed" });
     expect(
-      mocks.cancelAndRefundHostedLegacySyntheticFamilyCheckoutSubscription,
+      mocks.executeHostedFamilyPaymentConflictCompensation,
     ).toHaveBeenCalledTimes(3);
+    expect(mocks.stripe.events.retrieve).not.toHaveBeenCalled();
     errorSpy.mockRestore();
   });
 
@@ -897,10 +944,21 @@ describe("hosted Stripe event reconciliation", () => {
       .mockResolvedValueOnce(undefined);
 
     await recordHostedStripeEvent({ event, prisma: prisma.client });
+    prisma.rows[0]!.attemptCount = 5;
     await expect(reconcileHostedStripeEventById({
       eventId: event.id,
       prisma: prisma.client,
     })).resolves.toMatchObject({ status: "failed" });
+    expect(prisma.rows[0]).toEqual(expect.objectContaining({
+      attemptCount: 5,
+      pulseTrialCleanupAcceptedAt: expect.any(Date),
+      pulseTrialCleanupEncryptionMemberId: "member_123",
+      pulseTrialCleanupSubscriptionIdEncrypted: expect.any(String),
+      status: HostedStripeEventStatus.pending,
+    }));
+    mocks.stripe.events.retrieve.mockRejectedValueOnce(
+      new Error("Stripe event retrieval unavailable"),
+    );
     prisma.rows[0].nextAttemptAt = new Date(0);
     await expect(reconcileHostedStripeEventById({
       eventId: event.id,
@@ -908,6 +966,79 @@ describe("hosted Stripe event reconciliation", () => {
     })).resolves.toMatchObject({ status: "completed" });
 
     expect(mocks.cancelHostedPulseTrialCheckoutLoserSubscription).toHaveBeenCalledTimes(2);
+    expect(mocks.stripe.events.retrieve).toHaveBeenCalledOnce();
+    expect(mocks.applyStripeSubscriptionUpdated).toHaveBeenCalledOnce();
+    expect(prisma.rows[0]).toEqual(expect.objectContaining({
+      processedAt: expect.any(Date),
+      pulseTrialCleanupAcceptedAt: null,
+      pulseTrialCleanupEncryptionMemberId: null,
+      pulseTrialCleanupSubscriptionIdEncrypted: null,
+      status: HostedStripeEventStatus.completed,
+    }));
+    errorSpy.mockRestore();
+  });
+
+  it("keeps an accepted attempt-six Pulse cleanup pending when final receipt completion fails", async () => {
+    const prisma = createStripeEventPrismaHarness();
+    const event = makeSubscriptionEvent("customer.subscription.created");
+    const errorSpy = vi.spyOn(console, "error").mockImplementation(() => {});
+    mocks.stripe.events.retrieve.mockResolvedValue(event);
+    mocks.stripe.subscriptions.retrieve.mockResolvedValue(makeCanonicalSubscription({
+      id: "sub_123",
+      status: "trialing",
+    }));
+    mocks.findMemberForStripeSubscription.mockResolvedValue({
+      core: { id: "member_123" },
+    });
+    mocks.applyStripeSubscriptionUpdated.mockResolvedValue({
+      activatedMemberId: null,
+      cleanupPulseTrialStripeSubscriptionId: "sub_123",
+      hostedExecutionEventId: null,
+      subscriptionCancellationEmail: null,
+      welcomeEmailMemberId: null,
+    });
+    mocks.cancelHostedPulseTrialCheckoutLoserSubscription.mockResolvedValue(undefined);
+
+    await recordHostedStripeEvent({ event, prisma: prisma.client });
+    prisma.rows[0]!.attemptCount = 5;
+    const updateMany = vi.mocked(prisma.client.hostedStripeEvent.updateMany);
+    const applyUpdate = updateMany.getMockImplementation();
+    if (!applyUpdate) {
+      throw new Error("expected hosted Stripe event update implementation");
+    }
+    let failReceiptCompletion = true;
+    updateMany.mockImplementation(async (input) => {
+      if (
+        failReceiptCompletion &&
+        input.data.status === HostedStripeEventStatus.completed
+      ) {
+        failReceiptCompletion = false;
+        throw new Error("final receipt completion unavailable");
+      }
+      return applyUpdate(input);
+    });
+
+    await expect(reconcileHostedStripeEventById({
+      eventId: event.id,
+      prisma: prisma.client,
+    })).resolves.toMatchObject({ status: "failed" });
+    expect(prisma.rows[0]).toEqual(expect.objectContaining({
+      attemptCount: 5,
+      pulseTrialCleanupAcceptedAt: expect.any(Date),
+      status: HostedStripeEventStatus.pending,
+    }));
+
+    prisma.rows[0]!.nextAttemptAt = new Date(0);
+    await expect(reconcileHostedStripeEventById({
+      eventId: event.id,
+      prisma: prisma.client,
+    })).resolves.toMatchObject({ status: "completed" });
+    expect(mocks.stripe.events.retrieve).toHaveBeenCalledOnce();
+    expect(prisma.rows[0]).toEqual(expect.objectContaining({
+      processedAt: expect.any(Date),
+      pulseTrialCleanupAcceptedAt: null,
+      status: HostedStripeEventStatus.completed,
+    }));
     errorSpy.mockRestore();
   });
 
@@ -1019,7 +1150,10 @@ describe("hosted Stripe event reconciliation", () => {
       eventId: event.id,
       prisma: prisma.client,
     })).resolves.toMatchObject({ status: "failed" });
-    expect(prisma.rows[0]?.status).toBe(HostedStripeEventStatus.failed);
+    expect(prisma.rows[0]).toEqual(expect.objectContaining({
+      attemptCount: 0,
+      status: HostedStripeEventStatus.pending,
+    }));
 
     prisma.rows[0]!.nextAttemptAt = new Date(0);
     await expect(reconcileHostedStripeEventById({
@@ -1516,7 +1650,7 @@ describe("hosted Stripe event reconciliation", () => {
     expect(mocks.stripe.subscriptions.retrieve).toHaveBeenCalledWith("sub_123");
   });
 
-  it("keeps a legacy synthetic Family invoice failure retryable until Stripe cancellation succeeds", async () => {
+  it("retries accepted legacy Family cancellation without recomputing owner eligibility", async () => {
     const prisma = createStripeEventPrismaHarness();
     const event = makeInvoicePaymentFailedEvent();
     const canonicalSubscription = makeCanonicalSubscription({
@@ -1528,27 +1662,26 @@ describe("hosted Stripe event reconciliation", () => {
       status: "past_due",
     });
     const errorSpy = vi.spyOn(console, "error").mockImplementation(() => {});
-    mocks.stripe.events.retrieve.mockResolvedValue(event);
-    mocks.stripe.subscriptions.retrieve.mockResolvedValue(canonicalSubscription);
-    mocks.applyStripeInvoicePaymentFailed.mockResolvedValue({
-      activatedMemberId: null,
-      activatedMembers: [],
-      cancelLegacySyntheticFamilySubscriptionId: "sub_123",
-      hostedExecutionEventId: null,
-      welcomeEmailMemberId: null,
-    });
-    mocks.cancelHostedLegacySyntheticFamilySubscription
+    mocks.executeHostedFamilyPaymentConflictCompensation
       .mockRejectedValueOnce(new Error("temporary Stripe cancellation failure"))
       .mockResolvedValueOnce(undefined);
 
     await recordHostedStripeEvent({ event, prisma: prisma.client });
+    await acceptTestFamilyPaymentConflictCompensation({
+      compensation: {
+        effectId: event.id,
+        invoiceId: null,
+        subscriptionId: canonicalSubscription.id,
+      },
+      prisma: prisma.client,
+    });
     await expect(reconcileHostedStripeEventById({
       eventId: event.id,
       prisma: prisma.client,
     })).resolves.toMatchObject({ status: "failed" });
     expect(prisma.rows[0]).toEqual(expect.objectContaining({
       processedAt: null,
-      status: HostedStripeEventStatus.failed,
+      status: HostedStripeEventStatus.pending,
     }));
 
     prisma.rows[0]!.nextAttemptAt = new Date(0);
@@ -1557,11 +1690,422 @@ describe("hosted Stripe event reconciliation", () => {
       prisma: prisma.client,
     })).resolves.toMatchObject({ status: "completed" });
 
-    expect(mocks.cancelHostedLegacySyntheticFamilySubscription).toHaveBeenCalledTimes(2);
+    expect(mocks.executeHostedFamilyPaymentConflictCompensation).toHaveBeenCalledTimes(2);
+    expect(mocks.executeHostedFamilyPaymentConflictCompensation).toHaveBeenCalledWith({
+      effectId: event.id,
+      invoiceId: null,
+      subscriptionId: "sub_123",
+    });
+    expect(mocks.applyStripeInvoicePaymentFailed).not.toHaveBeenCalled();
+    expect(mocks.stripe.events.retrieve).not.toHaveBeenCalled();
     expect(prisma.rows[0]).toEqual(expect.objectContaining({
       processedAt: expect.any(Date),
       status: HostedStripeEventStatus.completed,
     }));
+    errorSpy.mockRestore();
+  });
+
+  it("routes sibling subscription events through the existing Family compensation owner", async () => {
+    const prisma = createStripeEventPrismaHarness();
+    const ownerEvent = makeInvoicePaymentFailedEvent();
+    await recordHostedStripeEvent({ event: ownerEvent, prisma: prisma.client });
+    await acceptTestFamilyPaymentConflictCompensation({
+      compensation: {
+        effectId: ownerEvent.id,
+        invoiceId: null,
+        subscriptionId: "sub_123",
+      },
+      prisma: prisma.client,
+    });
+    prisma.rows[0]!.processedAt = new Date();
+    prisma.rows[0]!.status = HostedStripeEventStatus.completed;
+
+    const siblingEvent = makeSubscriptionEvent("customer.subscription.created");
+    siblingEvent.id = "evt_family_sibling";
+    mocks.stripe.events.retrieve.mockResolvedValue(siblingEvent);
+    await recordHostedStripeEvent({ event: siblingEvent, prisma: prisma.client });
+
+    await expect(reconcileHostedStripeEventById({
+      eventId: siblingEvent.id,
+      prisma: prisma.client,
+    })).resolves.toMatchObject({ status: "completed" });
+
+    expect(mocks.executeHostedFamilyPaymentConflictCompensation).toHaveBeenCalledWith({
+      effectId: ownerEvent.id,
+      invoiceId: null,
+      subscriptionId: "sub_123",
+    });
+    expect(mocks.applyStripeSubscriptionUpdated).not.toHaveBeenCalled();
+    expect(mocks.stripe.subscriptions.retrieve).not.toHaveBeenCalled();
+  });
+
+  it("routes a pre-backfill sibling event through the existing Family compensation owner", async () => {
+    const prisma = createStripeEventPrismaHarness();
+    const ownerEvent = makeInvoicePaymentFailedEvent();
+    await recordHostedStripeEvent({ event: ownerEvent, prisma: prisma.client });
+    await acceptTestFamilyPaymentConflictCompensation({
+      compensation: {
+        effectId: ownerEvent.id,
+        invoiceId: null,
+        subscriptionId: "sub_123",
+      },
+      prisma: prisma.client,
+    });
+    prisma.rows[0]!.processedAt = new Date();
+    prisma.rows[0]!.status = HostedStripeEventStatus.completed;
+
+    const siblingEvent = makeSubscriptionEvent("customer.subscription.created");
+    siblingEvent.id = "evt_family_legacy_sibling";
+    mocks.stripe.events.retrieve.mockResolvedValue(siblingEvent);
+    await recordHostedStripeEvent({ event: siblingEvent, prisma: prisma.client });
+    prisma.rows[1]!.familyPaymentConflictCompensationCandidateSubscriptionLookupKey = null;
+
+    await expect(reconcileHostedStripeEventById({
+      eventId: siblingEvent.id,
+      prisma: prisma.client,
+    })).resolves.toMatchObject({ status: "completed" });
+
+    expect(mocks.stripe.events.retrieve).toHaveBeenCalledWith(siblingEvent.id);
+    expect(mocks.executeHostedFamilyPaymentConflictCompensation).toHaveBeenCalledWith({
+      effectId: ownerEvent.id,
+      invoiceId: null,
+      subscriptionId: "sub_123",
+    });
+    expect(mocks.applyStripeSubscriptionUpdated).not.toHaveBeenCalled();
+    expect(mocks.stripe.subscriptions.retrieve).not.toHaveBeenCalled();
+  });
+
+  it("promotes a cancel-only owner when the sibling checkout supplies the exact invoice", async () => {
+    const prisma = createStripeEventPrismaHarness();
+    const ownerEvent = makeSubscriptionEvent("customer.subscription.created");
+    ownerEvent.id = "evt_family_compensation_owner";
+    await recordHostedStripeEvent({ event: ownerEvent, prisma: prisma.client });
+    await acceptTestFamilyPaymentConflictCompensation({
+      compensation: {
+        effectId: ownerEvent.id,
+        invoiceId: null,
+        subscriptionId: "sub_checkout_123",
+      },
+      prisma: prisma.client,
+    });
+    prisma.rows[0]!.processedAt = new Date();
+    prisma.rows[0]!.status = HostedStripeEventStatus.completed;
+
+    const checkoutEvent = makeCheckoutCompletedEvent();
+    mocks.stripe.events.retrieve.mockResolvedValue(checkoutEvent);
+    await recordHostedStripeEvent({ event: checkoutEvent, prisma: prisma.client });
+
+    await expect(reconcileHostedStripeEventById({
+      eventId: checkoutEvent.id,
+      prisma: prisma.client,
+    })).resolves.toMatchObject({ status: "completed" });
+
+    expect(mocks.executeHostedFamilyPaymentConflictCompensation).toHaveBeenCalledWith({
+      effectId: ownerEvent.id,
+      invoiceId: "in_checkout_123",
+      subscriptionId: "sub_checkout_123",
+    });
+    expect(prisma.rows[0]).toEqual(expect.objectContaining({
+      familyPaymentConflictCompensationInvoiceIdEncrypted: expect.any(String),
+      familyPaymentConflictCompensationInvoiceLookupKey: expect.any(String),
+    }));
+    expect(mocks.applyStripeCheckoutCompleted).not.toHaveBeenCalled();
+  });
+
+  it("keeps attempt-six invoice discovery failures pending after matching an accepted owner", async () => {
+    const prisma = createStripeEventPrismaHarness();
+    const ownerEvent = makeSubscriptionEvent("customer.subscription.created");
+    ownerEvent.id = "evt_family_compensation_owner";
+    await recordHostedStripeEvent({ event: ownerEvent, prisma: prisma.client });
+    await acceptTestFamilyPaymentConflictCompensation({
+      compensation: {
+        effectId: ownerEvent.id,
+        invoiceId: null,
+        subscriptionId: "sub_checkout_123",
+      },
+      prisma: prisma.client,
+    });
+    prisma.rows[0]!.processedAt = new Date();
+    prisma.rows[0]!.status = HostedStripeEventStatus.completed;
+
+    const checkoutEvent = makeCheckoutCompletedEvent();
+    (checkoutEvent.data.object as Stripe.Checkout.Session).invoice = null;
+    await recordHostedStripeEvent({ event: checkoutEvent, prisma: prisma.client });
+    prisma.rows[1]!.attemptCount = 5;
+    mocks.stripe.events.retrieve.mockResolvedValue(checkoutEvent);
+    mocks.stripe.invoices.list.mockRejectedValueOnce(new Error("Stripe unavailable"));
+    const errorSpy = vi.spyOn(console, "error").mockImplementation(() => {});
+
+    await expect(reconcileHostedStripeEventById({
+      eventId: checkoutEvent.id,
+      prisma: prisma.client,
+    })).resolves.toMatchObject({ status: "failed" });
+
+    expect(prisma.rows[1]).toEqual(expect.objectContaining({
+      attemptCount: 5,
+      processedAt: null,
+      status: HostedStripeEventStatus.pending,
+    }));
+    expect(mocks.executeHostedFamilyPaymentConflictCompensation).not.toHaveBeenCalled();
+
+    prisma.rows[1]!.nextAttemptAt = new Date(0);
+    mocks.stripe.invoices.list.mockResolvedValueOnce({
+      data: [{
+        billing_reason: "subscription_create",
+        id: "in_checkout_123",
+      }],
+      has_more: false,
+    });
+    await expect(reconcileHostedStripeEventById({
+      eventId: checkoutEvent.id,
+      prisma: prisma.client,
+    })).resolves.toMatchObject({ status: "completed" });
+    expect(mocks.executeHostedFamilyPaymentConflictCompensation).toHaveBeenCalledWith({
+      effectId: ownerEvent.id,
+      invoiceId: "in_checkout_123",
+      subscriptionId: "sub_checkout_123",
+    });
+    errorSpy.mockRestore();
+  });
+
+  it("keeps attempt-six event retrieval failures pending for a candidate-linked owner", async () => {
+    const prisma = createStripeEventPrismaHarness();
+    const ownerEvent = makeSubscriptionEvent("customer.subscription.created");
+    ownerEvent.id = "evt_family_compensation_owner";
+    await recordHostedStripeEvent({ event: ownerEvent, prisma: prisma.client });
+    await acceptTestFamilyPaymentConflictCompensation({
+      compensation: {
+        effectId: ownerEvent.id,
+        invoiceId: null,
+        subscriptionId: "sub_checkout_123",
+      },
+      prisma: prisma.client,
+    });
+    prisma.rows[0]!.processedAt = new Date();
+    prisma.rows[0]!.status = HostedStripeEventStatus.completed;
+
+    const checkoutEvent = makeCheckoutCompletedEvent();
+    await recordHostedStripeEvent({ event: checkoutEvent, prisma: prisma.client });
+    prisma.rows[1]!.attemptCount = 5;
+    mocks.stripe.events.retrieve.mockRejectedValueOnce(new Error("Stripe unavailable"));
+    const errorSpy = vi.spyOn(console, "error").mockImplementation(() => {});
+
+    await expect(reconcileHostedStripeEventById({
+      eventId: checkoutEvent.id,
+      prisma: prisma.client,
+    })).resolves.toMatchObject({ status: "failed" });
+    expect(prisma.rows[1]).toEqual(expect.objectContaining({
+      attemptCount: 5,
+      processedAt: null,
+      status: HostedStripeEventStatus.pending,
+    }));
+    errorSpy.mockRestore();
+  });
+
+  it("uses the ordinary poison budget when no compensation receipt was accepted", async () => {
+    const prisma = createStripeEventPrismaHarness();
+    const checkoutEvent = makeCheckoutCompletedEvent();
+    await recordHostedStripeEvent({ event: checkoutEvent, prisma: prisma.client });
+    prisma.rows[0]!.attemptCount = 5;
+    prisma.rows[0]!.familyPaymentConflictCompensationCandidateSubscriptionLookupKey = null;
+    mocks.stripe.events.retrieve.mockRejectedValueOnce(new Error("Stripe unavailable"));
+    const errorSpy = vi.spyOn(console, "error").mockImplementation(() => {});
+
+    await expect(reconcileHostedStripeEventById({
+      eventId: checkoutEvent.id,
+      prisma: prisma.client,
+    })).resolves.toMatchObject({ status: "failed" });
+    expect(prisma.rows[0]).toEqual(expect.objectContaining({
+      attemptCount: 6,
+      processedAt: null,
+      status: HostedStripeEventStatus.poisoned,
+    }));
+    errorSpy.mockRestore();
+  });
+
+  it("poisons an attempt-six Pulse checkout failure after Family classification", async () => {
+    const prisma = createStripeEventPrismaHarness();
+    const checkoutEvent = makePulseTrialCheckoutCompletedEvent();
+    await recordHostedStripeEvent({ event: checkoutEvent, prisma: prisma.client });
+    prisma.rows[0]!.attemptCount = 5;
+    mocks.stripe.events.retrieve.mockResolvedValueOnce(checkoutEvent);
+    mocks.applyStripeCheckoutCompleted.mockRejectedValueOnce(
+      new Error("deterministic Pulse checkout failure"),
+    );
+    const errorSpy = vi.spyOn(console, "error").mockImplementation(() => {});
+
+    await expect(reconcileHostedStripeEventById({
+      eventId: checkoutEvent.id,
+      prisma: prisma.client,
+    })).resolves.toMatchObject({ status: "failed" });
+
+    expect(prisma.rows[0]).toEqual(expect.objectContaining({
+      attemptCount: 6,
+      processedAt: null,
+      status: HostedStripeEventStatus.poisoned,
+    }));
+    errorSpy.mockRestore();
+  });
+
+  it("rechecks candidate ownership when acceptance commits during failed event retrieval", async () => {
+    const prisma = createStripeEventPrismaHarness();
+    const ownerEvent = makeSubscriptionEvent("customer.subscription.created");
+    ownerEvent.id = "evt_family_compensation_owner";
+    await recordHostedStripeEvent({ event: ownerEvent, prisma: prisma.client });
+
+    const siblingEvent = makeSubscriptionUpdatedEvent();
+    siblingEvent.id = "evt_family_compensation_racing_sibling";
+    await recordHostedStripeEvent({ event: siblingEvent, prisma: prisma.client });
+    prisma.rows[1]!.attemptCount = 5;
+    const retrieval = makeDeferred<Stripe.Event>();
+    mocks.stripe.events.retrieve.mockReturnValueOnce(retrieval.promise);
+    const errorSpy = vi.spyOn(console, "error").mockImplementation(() => {});
+
+    const reconciliation = reconcileHostedStripeEventById({
+      eventId: siblingEvent.id,
+      prisma: prisma.client,
+    });
+    await vi.waitFor(() => {
+      expect(mocks.stripe.events.retrieve).toHaveBeenCalledWith(siblingEvent.id);
+    });
+    await acceptTestFamilyPaymentConflictCompensation({
+      compensation: {
+        effectId: ownerEvent.id,
+        invoiceId: null,
+        subscriptionId: "sub_123",
+      },
+      prisma: prisma.client,
+    });
+    retrieval.reject(new Error("Stripe unavailable"));
+
+    await expect(reconciliation).resolves.toMatchObject({ status: "failed" });
+    expect(prisma.rows[1]).toEqual(expect.objectContaining({
+      attemptCount: 5,
+      processedAt: null,
+      status: HostedStripeEventStatus.pending,
+    }));
+    errorSpy.mockRestore();
+  });
+
+  it("keeps invoice discovery pending when acceptance commits during the provider read", async () => {
+    const prisma = createStripeEventPrismaHarness();
+    const ownerEvent = makeExactPulseTrialSubscriptionCreatedEvent();
+    ownerEvent.id = "evt_family_compensation_owner";
+    await recordHostedStripeEvent({ event: ownerEvent, prisma: prisma.client });
+
+    const checkoutEvent = makeCheckoutCompletedEvent();
+    const checkoutSession = checkoutEvent.data.object as Stripe.Checkout.Session;
+    checkoutSession.invoice = null;
+    checkoutSession.metadata = {
+      accountGroupId: "hbag_family",
+      kind: "hosted_family_plan",
+    };
+    await recordHostedStripeEvent({ event: checkoutEvent, prisma: prisma.client });
+    prisma.rows[1]!.attemptCount = 5;
+    mocks.stripe.events.retrieve.mockResolvedValueOnce(checkoutEvent);
+    const invoiceDiscovery = makeDeferred<{ data: Stripe.Invoice[]; has_more: boolean }>();
+    mocks.stripe.invoices.list.mockReturnValueOnce(invoiceDiscovery.promise);
+    const errorSpy = vi.spyOn(console, "error").mockImplementation(() => {});
+
+    const reconciliation = reconcileHostedStripeEventById({
+      eventId: checkoutEvent.id,
+      prisma: prisma.client,
+    });
+    await vi.waitFor(() => {
+      expect(mocks.stripe.invoices.list).toHaveBeenCalled();
+    });
+    await acceptTestFamilyPaymentConflictCompensation({
+      compensation: {
+        effectId: ownerEvent.id,
+        invoiceId: null,
+        subscriptionId: "sub_checkout_123",
+      },
+      prisma: prisma.client,
+    });
+    invoiceDiscovery.reject(new Error("Stripe unavailable"));
+
+    await expect(reconciliation).resolves.toMatchObject({ status: "failed" });
+    expect(prisma.rows[1]).toEqual(expect.objectContaining({
+      attemptCount: 5,
+      processedAt: null,
+      status: HostedStripeEventStatus.pending,
+    }));
+    errorSpy.mockRestore();
+  });
+
+  it("keeps the first accepted receipt as sole owner when a later event promotes its invoice", async () => {
+    const prisma = createStripeEventPrismaHarness();
+    const ownerEvent = makeSubscriptionEvent("customer.subscription.created");
+    ownerEvent.id = "evt_family_compensation_owner";
+    const laterEvent = makeCheckoutCompletedEvent();
+    await recordHostedStripeEvent({ event: ownerEvent, prisma: prisma.client });
+    await recordHostedStripeEvent({ event: laterEvent, prisma: prisma.client });
+
+    await acceptTestFamilyPaymentConflictCompensation({
+      compensation: {
+        effectId: ownerEvent.id,
+        invoiceId: null,
+        subscriptionId: "sub_checkout_123",
+      },
+      prisma: prisma.client,
+    });
+    await expect(acceptTestFamilyPaymentConflictCompensation({
+      compensation: {
+        effectId: laterEvent.id,
+        invoiceId: "in_checkout_123",
+        subscriptionId: "sub_checkout_123",
+      },
+      prisma: prisma.client,
+    })).resolves.toEqual({
+      effectId: ownerEvent.id,
+      invoiceId: "in_checkout_123",
+      subscriptionId: "sub_checkout_123",
+    });
+
+    expect(prisma.rows[0]).toEqual(expect.objectContaining({
+      familyPaymentConflictCompensationAcceptedAt: expect.any(Date),
+      familyPaymentConflictCompensationInvoiceIdEncrypted: expect.any(String),
+      familyPaymentConflictCompensationInvoiceLookupKey: expect.any(String),
+    }));
+    expect(prisma.rows[1]).toEqual(expect.objectContaining({
+      familyPaymentConflictCompensationAcceptedAt: null,
+      familyPaymentConflictCompensationEncryptionMemberId: null,
+      familyPaymentConflictCompensationInvoiceIdEncrypted: null,
+      familyPaymentConflictCompensationInvoiceLookupKey: null,
+      familyPaymentConflictCompensationSubscriptionIdEncrypted: null,
+      familyPaymentConflictCompensationSubscriptionLookupKey: null,
+    }));
+  });
+
+  it("keeps an accepted receipt pending when ciphertext cannot be opened", async () => {
+    const prisma = createStripeEventPrismaHarness();
+    const event = makeCheckoutCompletedEvent();
+    const errorSpy = vi.spyOn(console, "error").mockImplementation(() => {});
+    await recordHostedStripeEvent({ event, prisma: prisma.client });
+    await acceptTestFamilyPaymentConflictCompensation({
+      compensation: {
+        effectId: event.id,
+        invoiceId: "in_checkout_123",
+        subscriptionId: "sub_checkout_123",
+      },
+      prisma: prisma.client,
+    });
+    prisma.rows[0]!.attemptCount = 5;
+    prisma.rows[0]!.familyPaymentConflictCompensationSubscriptionIdEncrypted =
+      prisma.rows[0]!.familyPaymentConflictCompensationInvoiceIdEncrypted;
+
+    await expect(reconcileHostedStripeEventById({
+      eventId: event.id,
+      prisma: prisma.client,
+    })).resolves.toMatchObject({ status: "failed" });
+
+    expect(prisma.rows[0]).toEqual(expect.objectContaining({
+      attemptCount: 5,
+      processedAt: null,
+      status: HostedStripeEventStatus.pending,
+    }));
+    expect(mocks.executeHostedFamilyPaymentConflictCompensation).not.toHaveBeenCalled();
+    expect(mocks.stripe.events.retrieve).not.toHaveBeenCalled();
     errorSpy.mockRestore();
   });
 
@@ -1765,6 +2309,160 @@ describe("hosted Stripe event reconciliation", () => {
       }),
       expect.anything(),
     );
+  });
+
+  it("compensates a direct subscription event when Family billing already owns access", async () => {
+    const prisma = createStripeEventPrismaHarness({ familyAuthorityActive: true });
+    const event = makeSubscriptionEvent("customer.subscription.created");
+    const canonicalSubscription = makeCanonicalSubscription({
+      customer: "cus_subscription",
+      id: "sub_123",
+      metadata: {
+        memberId: "member_123",
+      },
+      status: "active",
+    });
+    mocks.stripe.events.retrieve.mockResolvedValue(event);
+    mocks.stripe.subscriptions.retrieve.mockResolvedValue(canonicalSubscription);
+
+    await recordHostedStripeEvent({ event, prisma: prisma.client });
+
+    await expect(reconcileHostedStripeEventById({
+      eventId: event.id,
+      prisma: prisma.client,
+    })).resolves.toMatchObject({ status: "completed" });
+
+    expect(mocks.applyStripeSubscriptionUpdated).not.toHaveBeenCalled();
+    expect(mocks.executeHostedFamilyPaymentConflictCompensation).toHaveBeenCalledWith({
+      effectId: event.id,
+      invoiceId: null,
+      subscriptionId: "sub_123",
+    });
+    expect(prisma.rows[0]).toEqual(expect.objectContaining({
+      familyPaymentConflictCompensationAcceptedAt: expect.any(Date),
+      familyPaymentConflictCompensationSubscriptionIdEncrypted: expect.any(String),
+      familyPaymentConflictCompensationSubscriptionLookupKey: expect.any(String),
+      processedAt: expect.any(Date),
+      status: HostedStripeEventStatus.completed,
+    }));
+  });
+
+  it("refunds a paid direct invoice when Family billing already owns access", async () => {
+    const prisma = createStripeEventPrismaHarness({ familyAuthorityActive: true });
+    const event = makeInvoicePaidEvent();
+    const canonicalSubscription = makeCanonicalSubscription({
+      customer: "cus_subscription",
+      id: "sub_123",
+      metadata: {
+        memberId: "member_123",
+      },
+      status: "active",
+    });
+    mocks.stripe.events.retrieve.mockResolvedValue(event);
+    mocks.stripe.subscriptions.retrieve.mockResolvedValue(canonicalSubscription);
+
+    await recordHostedStripeEvent({ event, prisma: prisma.client });
+
+    await expect(reconcileHostedStripeEventById({
+      eventId: event.id,
+      prisma: prisma.client,
+    })).resolves.toMatchObject({ status: "completed" });
+
+    expect(mocks.applyStripeInvoicePaid).not.toHaveBeenCalled();
+    expect(mocks.executeHostedFamilyPaymentConflictCompensation).toHaveBeenCalledWith({
+      effectId: event.id,
+      invoiceId: "in_123",
+      subscriptionId: "sub_123",
+    });
+    expect(prisma.rows[0]).toEqual(expect.objectContaining({
+      familyPaymentConflictCompensationAcceptedAt: expect.any(Date),
+      familyPaymentConflictCompensationInvoiceIdEncrypted: expect.any(String),
+      familyPaymentConflictCompensationInvoiceLookupKey: expect.any(String),
+      processedAt: expect.any(Date),
+      status: HostedStripeEventStatus.completed,
+    }));
+  });
+
+  it("clears the exact direct Checkout session after Family compensation is durable", async () => {
+    const prisma = createStripeEventPrismaHarness({ familyAuthorityActive: true });
+    const event = makeCheckoutCompletedEvent();
+    mocks.stripe.events.retrieve.mockResolvedValue(event);
+    mocks.stripe.subscriptions.retrieve.mockResolvedValue(makeCanonicalSubscription({
+      customer: "cus_checkout_123",
+      id: "sub_checkout_123",
+      metadata: { memberId: "member_123" },
+      status: "active",
+    }));
+
+    await recordHostedStripeEvent({ event, prisma: prisma.client });
+    await expect(reconcileHostedStripeEventById({
+      eventId: event.id,
+      prisma: prisma.client,
+    })).resolves.toMatchObject({ status: "completed" });
+
+    expect(mocks.applyStripeCheckoutCompleted).not.toHaveBeenCalled();
+    expect(mocks.executeHostedFamilyPaymentConflictCompensation).toHaveBeenCalledWith({
+      effectId: event.id,
+      invoiceId: "in_checkout_123",
+      subscriptionId: "sub_checkout_123",
+    });
+    expect(prisma.client.hostedMemberBillingRef.updateMany).toHaveBeenCalledWith({
+      data: {
+        checkoutAttemptId: null,
+        stripeCheckoutSessionIdEncrypted: null,
+        stripeCheckoutSessionLookupKey: null,
+      },
+      where: {
+        memberId: "member_123",
+        stripeCheckoutSessionLookupKey: expect.any(String),
+      },
+    });
+  });
+
+  it("retries a newly accepted Family-authority compensation from its stored receipt", async () => {
+    const prisma = createStripeEventPrismaHarness({ familyAuthorityActive: true });
+    const event = makeSubscriptionEvent("customer.subscription.created");
+    const canonicalSubscription = makeCanonicalSubscription({
+      customer: "cus_subscription",
+      id: "sub_123",
+      metadata: {
+        memberId: "member_123",
+      },
+      status: "active",
+    });
+    const errorSpy = vi.spyOn(console, "error").mockImplementation(() => {});
+    mocks.stripe.events.retrieve.mockResolvedValue(event);
+    mocks.stripe.subscriptions.retrieve.mockResolvedValue(canonicalSubscription);
+    mocks.executeHostedFamilyPaymentConflictCompensation
+      .mockRejectedValueOnce(new Error("temporary provider failure"))
+      .mockResolvedValueOnce(undefined);
+
+    await recordHostedStripeEvent({ event, prisma: prisma.client });
+    await expect(reconcileHostedStripeEventById({
+      eventId: event.id,
+      prisma: prisma.client,
+    })).resolves.toMatchObject({ status: "failed" });
+    expect(prisma.rows[0]).toEqual(expect.objectContaining({
+      attemptCount: 0,
+      familyPaymentConflictCompensationAcceptedAt: expect.any(Date),
+      processedAt: null,
+      status: HostedStripeEventStatus.pending,
+    }));
+
+    prisma.rows[0]!.nextAttemptAt = new Date(0);
+    await expect(reconcileHostedStripeEventById({
+      eventId: event.id,
+      prisma: prisma.client,
+    })).resolves.toMatchObject({ status: "completed" });
+
+    expect(mocks.executeHostedFamilyPaymentConflictCompensation).toHaveBeenCalledTimes(2);
+    expect(mocks.stripe.events.retrieve).toHaveBeenCalledOnce();
+    expect(mocks.applyStripeSubscriptionUpdated).not.toHaveBeenCalled();
+    expect(prisma.rows[0]).toEqual(expect.objectContaining({
+      processedAt: expect.any(Date),
+      status: HostedStripeEventStatus.completed,
+    }));
+    errorSpy.mockRestore();
   });
 
   it("sends the cancellation feedback email after a cancellation billing write", async () => {
@@ -2093,9 +2791,9 @@ describe("hosted Stripe event reconciliation", () => {
     );
   });
 
-  it("marks the receipt failed when Stripe event retrieval fails", async () => {
+  it("marks an unrelated receipt failed when Stripe event retrieval fails", async () => {
     const prisma = createStripeEventPrismaHarness();
-    const event = makeInvoicePaidEvent();
+    const event = makeRefundCreatedEvent();
     const errorSpy = vi.spyOn(console, "error").mockImplementation(() => {});
     mocks.stripe.events.retrieve.mockRejectedValue(new Error("Stripe unavailable"));
 
@@ -2111,13 +2809,13 @@ describe("hosted Stripe event reconciliation", () => {
       }),
     ).resolves.toEqual({
       activatedMemberId: null,
-      eventId: "evt_invoice_paid_123",
+      eventId: "evt_refund_created_123",
       hostedExecutionEventId: null,
       status: "failed",
     });
 
     expect(prisma.rows[0]).toEqual(expect.objectContaining({
-      eventId: "evt_invoice_paid_123",
+      eventId: "evt_refund_created_123",
       lastErrorCode: "Error",
       lastErrorMessage: "[redacted]",
       status: HostedStripeEventStatus.failed,
@@ -2126,8 +2824,8 @@ describe("hosted Stripe event reconciliation", () => {
       attemptCount: 1,
       errorMessage: "Stripe unavailable",
       errorName: "Error",
-      eventIdSuffix: "id_123",
-      eventType: "invoice.paid",
+      eventIdSuffix: "ed_123",
+      eventType: "refund.created",
       poisoned: false,
     });
   });
@@ -2574,7 +3272,9 @@ function makeStripeEvent<
   return event as Stripe.Event;
 }
 
-function createStripeEventPrismaHarness() {
+function createStripeEventPrismaHarness(input: {
+  familyAuthorityActive?: boolean;
+} = {}) {
   const rows: MutableStripeEventRow[] = [];
   const transaction = vi.fn(
     async <T>(callback: (tx: StripeEventPrismaHarnessClient) => Promise<T>) => callback(client),
@@ -2583,6 +3283,14 @@ function createStripeEventPrismaHarness() {
   const client: StripeEventPrismaHarnessClient = {
     $queryRaw: vi.fn(async () => []),
     $transaction: transaction,
+    hostedAccountGroupMembership: {
+      findFirst: vi.fn(async () =>
+        input.familyAuthorityActive ? { id: "membership_family" } : null
+      ),
+    },
+    hostedMemberBillingRef: {
+      updateMany: vi.fn(async () => ({ count: 1 })),
+    },
     hostedStripeEvent: {
       create: vi.fn(async ({ data }: { data: Record<string, unknown> }) => {
         const row: MutableStripeEventRow = {
@@ -2590,13 +3298,21 @@ function createStripeEventPrismaHarness() {
           claimExpiresAt: null,
           createdAt: new Date(),
           eventId: data.eventId as string,
-          legacyFamilyCheckoutCompensationAcceptedAt: null,
-          legacyFamilyCheckoutCompensationInvoiceLookupKey: null,
-          legacyFamilyCheckoutCompensationSubscriptionLookupKey: null,
+          familyPaymentConflictCompensationAcceptedAt: null,
+          familyPaymentConflictCompensationCandidateSubscriptionLookupKey:
+            data.familyPaymentConflictCompensationCandidateSubscriptionLookupKey as string | null,
+          familyPaymentConflictCompensationEncryptionMemberId: null,
+          familyPaymentConflictCompensationInvoiceIdEncrypted: null,
+          familyPaymentConflictCompensationInvoiceLookupKey: null,
+          familyPaymentConflictCompensationSubscriptionIdEncrypted: null,
+          familyPaymentConflictCompensationSubscriptionLookupKey: null,
           lastErrorCode: null,
           lastErrorMessage: null,
           nextAttemptAt: data.nextAttemptAt as Date,
           processedAt: null,
+          pulseTrialCleanupAcceptedAt: null,
+          pulseTrialCleanupEncryptionMemberId: null,
+          pulseTrialCleanupSubscriptionIdEncrypted: null,
           receivedAt: data.receivedAt as Date,
           status: data.status as HostedStripeEventStatus,
           stripeCreatedAt: data.stripeCreatedAt as Date,
@@ -2607,7 +3323,24 @@ function createStripeEventPrismaHarness() {
         rows.push(row);
         return row;
       }),
-      findMany: vi.fn(async () => rows),
+      findMany: vi.fn(async (input?: {
+        where?: {
+          familyPaymentConflictCompensationAcceptedAt?: { not: null };
+          familyPaymentConflictCompensationSubscriptionLookupKey?: string | { in: string[] };
+        };
+      }) => {
+        const lookup =
+          input?.where?.familyPaymentConflictCompensationSubscriptionLookupKey;
+        if (!lookup) {
+          return rows;
+        }
+        const lookupKeys = typeof lookup === "string" ? [lookup] : lookup.in;
+        return rows.filter((row) =>
+          row.familyPaymentConflictCompensationAcceptedAt !== null &&
+          row.familyPaymentConflictCompensationSubscriptionLookupKey !== null &&
+          lookupKeys.includes(row.familyPaymentConflictCompensationSubscriptionLookupKey)
+        );
+      }),
       findUnique: vi.fn(async ({ where }: { where: { eventId: string } }) => {
         const row = rows.find((candidate) => candidate.eventId === where.eventId);
         return row ? { ...row } : null;
@@ -2669,8 +3402,15 @@ function matchesStripeEventWhere(row: MutableStripeEventRow, where: StripeEventW
   }
 
   if (
-    where.legacyFamilyCheckoutCompensationAcceptedAt === null &&
-    row.legacyFamilyCheckoutCompensationAcceptedAt !== null
+    where.familyPaymentConflictCompensationAcceptedAt === null &&
+    row.familyPaymentConflictCompensationAcceptedAt !== null
+  ) {
+    return false;
+  }
+
+  if (
+    where.pulseTrialCleanupAcceptedAt === null &&
+    row.pulseTrialCleanupAcceptedAt !== null
   ) {
     return false;
   }
@@ -2724,13 +3464,20 @@ type MutableStripeEventRow = {
   claimExpiresAt: Date | null;
   createdAt: Date;
   eventId: string;
-  legacyFamilyCheckoutCompensationAcceptedAt: Date | null;
-  legacyFamilyCheckoutCompensationInvoiceLookupKey: string | null;
-  legacyFamilyCheckoutCompensationSubscriptionLookupKey: string | null;
+  familyPaymentConflictCompensationAcceptedAt: Date | null;
+  familyPaymentConflictCompensationCandidateSubscriptionLookupKey: string | null;
+  familyPaymentConflictCompensationEncryptionMemberId: string | null;
+  familyPaymentConflictCompensationInvoiceIdEncrypted: string | null;
+  familyPaymentConflictCompensationInvoiceLookupKey: string | null;
+  familyPaymentConflictCompensationSubscriptionIdEncrypted: string | null;
+  familyPaymentConflictCompensationSubscriptionLookupKey: string | null;
   lastErrorCode: string | null;
   lastErrorMessage: string | null;
   nextAttemptAt: Date;
   processedAt: Date | null;
+  pulseTrialCleanupAcceptedAt: Date | null;
+  pulseTrialCleanupEncryptionMemberId: string | null;
+  pulseTrialCleanupSubscriptionIdEncrypted: string | null;
   receivedAt: Date;
   status: HostedStripeEventStatus;
   stripeCreatedAt: Date;
@@ -2742,7 +3489,8 @@ type MutableStripeEventRow = {
 type StripeEventWhere = {
   attemptCount?: number;
   eventId?: string;
-  legacyFamilyCheckoutCompensationAcceptedAt?: null;
+  familyPaymentConflictCompensationAcceptedAt?: null;
+  pulseTrialCleanupAcceptedAt?: null;
   status?: HostedStripeEventStatus;
   subscriptionCancellationEmailSentAt?: null;
   updatedAt?: Date;

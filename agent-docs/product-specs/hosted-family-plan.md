@@ -16,11 +16,42 @@ receives an individual Pulse-equivalent monthly usage cap.
 ## Product Contract
 
 - One owner pays for the hosted Family plan.
-- A Family owner is a real hosted member. A synthetic group-chat thread container cannot create or manage new Family account state, begin a new checkout, or issue invites; those operations belong in a participant's private Murph conversation. This invariant is enforced at canonical group creation and before any new Stripe object is issued; assistant-tool guards are only an earlier user-facing rejection. Reconciliation recognizes a legacy object only through its existing synthetic-owned Family-group binding. The group row serializes reconciliation with invite issuance and acceptance; after locking, the transaction reloads current group, billing, and invite state and revalidates that the event still owns the current checkout/subscription binding before moving an eligible group to the thread container's canonical personal owner, including membership roles and re-encryption of owner-scoped billing and invite fields. If that personal owner is synthetic, already owns or is sponsored by another Family group, or is already direct paid, reconciliation records the legacy group canceled and idempotently cancels the Stripe subscription after commit. When that incompatibility is discovered from a completed legacy checkout, the same transaction records an event-owned compensation descriptor with blind indexes for the immutable checkout event's subscription and initial invoice. Retries must finish that accepted obligation regardless of later owner eligibility and refund only the recorded checkout invoice, even if an earlier attempt already canceled the subscription. Refund metadata and idempotency use the Stripe event id as the stable effect identity; a nonterminal refund keeps the receipt pending without consuming its poison-event attempt budget, and a terminal failed refund receives a new idempotent replacement attempt. Stale or concurrently rebound events terminate under the group lock before migration or enforcement, and legacy checkout redirects remain valid across the owner move.
+- A Family owner is a real hosted member. A synthetic group-chat thread container cannot create or manage new Family account state, begin a new checkout, or issue invites; those operations belong in a participant's private Murph conversation. This invariant is enforced at canonical group creation and before any new Stripe object is issued; assistant-tool guards are only an earlier user-facing rejection. Reconciliation recognizes a legacy object only through its existing synthetic-owned Family-group binding. The group row serializes reconciliation with invite issuance and acceptance; after locking, the transaction reloads current group, billing, and invite state and revalidates that the event still owns the current checkout/subscription binding before moving an eligible group to the thread container's canonical personal owner, including membership roles and re-encryption of owner-scoped billing and invite fields. If that personal owner is synthetic, already owns or is sponsored by another Family group, or is already direct paid, the same transaction records the legacy group canceled and accepts one event-owned compensation descriptor for the exact subscription and optional initial checkout invoice. The executable ids are encrypted under the group owner and checked against blind indexes; a unique subscription lookup makes the accepting event the sole durable owner, and sibling events execute that descriptor before any later eligibility or billing mutation. Retries must finish the accepted cancellation and, when present, refund only the recorded checkout invoice even if an earlier attempt already canceled the subscription. Refund metadata and provider idempotency use the owner event id as the stable effect identity. Every provider failure after acceptance keeps the receipt pending without consuming its poison-event attempt budget; incomplete or mismatched encrypted descriptors fail closed before external mutation. Stale or concurrently rebound events terminate under the group lock before migration or enforcement, and legacy checkout redirects remain valid across the owner move.
 - The owner buys 2-6 reserved sponsored seats. Active members and pending
   invites consume those seats.
 - Family members receive sponsored hosted access while the plan and their
   membership are active.
+- A member has exactly one payment authority. Active Family sponsorship blocks
+  direct Checkout, automatic trial, Start Paid, browser-success activation, and
+  direct webhook writes under the existing member lock. If direct billing wins
+  while Family is pending, later Family activation removes a direct-paid
+  non-owner from that membership. A direct-paid owner keeps direct authority;
+  the Family event is canceled locally and its Stripe-event receipt owns the
+  idempotent subscription cancellation and exact initial-invoice refund. The
+  sole conversion path is an explicit owner upgrade, which performs one atomic
+  Stripe price change while holding the group and owner-member locks. A webhook
+  heals provider-success/local-rollback only when the incoming Family object is
+  that exact direct subscription; a different subscription is compensated.
+  Direct state clears only after active Family billing fits the paid seats.
+- Direct and Family Checkout persist the current attempt and encrypted session
+  id. Replacement expires the previous open session, post-provider binding
+  revalidates authority and suspension, and account deletion expires every
+  persisted open session after its suspension fence. Pulse Trial customer
+  creation and binding happen under that same member fence, so deletion cannot
+  pass between the provider mutation and its local owner reference; the Stripe
+  Customer itself carries only a source label, not member identity metadata.
+  Reconciliation clears only the exact completed session after canonical billing
+  is stored or loser cleanup is durably accepted. A concurrent completion is
+  folded into the subscriptions and customers that deletion must settle before
+  removing local state. During
+  rollout, deletion also discovers pre-migration open sessions and completed
+  sessions created in the bounded deployment-compatibility window from Stripe's
+  member/Family metadata, plus subscriptions attached to reserved customers
+  with no local subscription reference.
+- A Pulse Trial loser is accepted as an event-owned encrypted cleanup receipt
+  before Stripe cancellation. Retry reads that receipt without fetching or
+  reclassifying the event, and account deletion settles then scrubs it before
+  deleting the member's encryption root.
 - Every sponsored member gets their own member-level Pulse-equivalent usage
   allowance. There is no shared Family usage pool in v1.
 - Every family member remains a separate `HostedMember` with their own routing,
@@ -272,12 +303,18 @@ Exports must not include other members' contact lookup keys, raw phone numbers,
 Telegram ids, private routing ids, mailbox payloads, health data, or runtime
 state.
 
-Deleting a member removes their membership row by cascade or explicit cleanup
-but must not delete the family group unless they are the owner and the product
-has a documented owner-deletion policy. The MVP should fail closed and direct
-owner deletion through the existing account deletion flow plus explicit family
-billing cancellation/transfer policy rather than silently orphaning sponsored
-access.
+Deleting a member removes their membership row by cascade or explicit cleanup.
+Owner deletion discovers Family billing owned by the personal member and owned
+thread runtimes, settles every accepted legacy cancellation/refund descriptor,
+and cancels current Family subscriptions before local deletion. The final
+transaction locks the owned groups and compensation receipts, revalidates that
+no obligation changed, then completes and scrubs the receipts before deleting
+their encryption roots. A cancel-only receipt is scrubbed only after a bounded
+post-cancellation invoice scan proves there is no paid or still-payable invoice;
+otherwise deletion waits for the exact invoice event to promote the receipt.
+Any provider or ownership race fails closed and leaves
+the local rows available for retry rather than orphaning sponsored access or a
+refund.
 
 ## Privacy And Security Invariants
 

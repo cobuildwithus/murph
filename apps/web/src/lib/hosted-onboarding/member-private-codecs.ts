@@ -34,6 +34,8 @@ const HOSTED_MEMBER_ROUTING_TELEGRAM_PRIVATE_STATE_CURRENT_SCHEMA =
 const HOSTED_MEMBER_ROUTING_TELEGRAM_PRIVATE_STATE_LEGACY_SCHEMA =
   "murph.hosted-member-routing.telegram.v1";
 const HOSTED_MEMBER_BILLING_STRIPE_CUSTOMER_FIELD = "hosted-member-billing-ref.stripe-customer-id";
+const HOSTED_MEMBER_BILLING_STRIPE_CHECKOUT_SESSION_FIELD =
+  "hosted-member-billing-ref.stripe-checkout-session-id";
 const HOSTED_MEMBER_BILLING_STRIPE_SUBSCRIPTION_FIELD =
   "hosted-member-billing-ref.stripe-subscription-id";
 const HOSTED_MEMBER_BILLING_STRIPE_SUBSCRIPTION_SCHEDULE_FIELD =
@@ -61,6 +63,7 @@ export interface HostedMemberRoutingPrivateState {
 
 
 export interface HostedMemberBillingPrivateState {
+  stripeCheckoutSessionId: string | null;
   stripeCustomerId: string | null;
   stripeSubscriptionId: string | null;
   stripeSubscriptionScheduleId: string | null;
@@ -474,6 +477,7 @@ function normalizeHostedTelegramLegacyDirectThreadTarget(
 export async function buildHostedMemberBillingPrivateColumns(input: {
   memberId: string;
   prisma?: HostedWebEncryptionPrismaClient;
+  stripeCheckoutSessionId?: string | null;
   stripeCustomerId: string | null;
   stripeSubscriptionId: string | null;
   stripeSubscriptionScheduleId?: string | null;
@@ -486,6 +490,10 @@ export async function buildHostedMemberBillingPrivateColumns(input: {
       value,
     });
 
+  const stripeCheckoutSessionIdEncrypted = await encryptPrivateField(
+    HOSTED_MEMBER_BILLING_STRIPE_CHECKOUT_SESSION_FIELD,
+    input.stripeCheckoutSessionId,
+  );
   const stripeCustomerIdEncrypted = await encryptPrivateField(
     HOSTED_MEMBER_BILLING_STRIPE_CUSTOMER_FIELD,
     input.stripeCustomerId,
@@ -500,6 +508,7 @@ export async function buildHostedMemberBillingPrivateColumns(input: {
   );
 
   return {
+    stripeCheckoutSessionIdEncrypted,
     stripeCustomerIdEncrypted,
     stripeSubscriptionIdEncrypted,
     stripeSubscriptionScheduleIdEncrypted,
@@ -513,11 +522,23 @@ export async function readHostedMemberBillingPrivateState(
     | "stripeCustomerIdEncrypted"
     | "stripeSubscriptionIdEncrypted"
   > & {
+    stripeCheckoutSessionIdEncrypted?: string | null;
     stripeSubscriptionScheduleIdEncrypted?: string | null;
   },
   prisma?: HostedWebEncryptionPrismaClient,
 ): Promise<HostedMemberBillingPrivateState> {
-  const [stripeCustomerId, stripeSubscriptionId, stripeSubscriptionScheduleId] = await Promise.all([
+  const [
+    stripeCheckoutSessionId,
+    stripeCustomerId,
+    stripeSubscriptionId,
+    stripeSubscriptionScheduleId,
+  ] = await Promise.all([
+    decryptHostedWebNullableString({
+      field: HOSTED_MEMBER_BILLING_STRIPE_CHECKOUT_SESSION_FIELD,
+      memberId: billingRef.memberId,
+      prisma,
+      value: billingRef.stripeCheckoutSessionIdEncrypted,
+    }),
     decryptHostedWebNullableString({
       field: HOSTED_MEMBER_BILLING_STRIPE_CUSTOMER_FIELD,
       memberId: billingRef.memberId,
@@ -539,6 +560,7 @@ export async function readHostedMemberBillingPrivateState(
   ]);
 
   return {
+    stripeCheckoutSessionId,
     stripeCustomerId,
     stripeSubscriptionId,
     stripeSubscriptionScheduleId,

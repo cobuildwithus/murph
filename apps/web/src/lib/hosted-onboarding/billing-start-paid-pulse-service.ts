@@ -1,5 +1,6 @@
 import {
   HostedBillingStatus,
+  type Prisma,
   type PrismaClient,
 } from "@prisma/client";
 import type Stripe from "stripe";
@@ -18,6 +19,7 @@ import {
   parseHostedBillingPhase,
   parseHostedBillingPlanCode,
 } from "./billing-plans";
+import { assertHostedMemberCanOwnDirectBilling } from "./billing-authority";
 import {
   assertHostedMemberOwnActiveBillingAllowed,
   assertHostedMemberNotSuspended,
@@ -37,7 +39,6 @@ import {
   requireHostedOnboardingPublicBaseUrl,
   requireHostedStripeBillingPlanConfig,
 } from "./runtime";
-import { HOSTED_ONBOARDING_TRANSACTION_OPTIONS } from "./shared";
 import { applyStripeInvoicePaid } from "./stripe-billing-events";
 import type { HostedStripeDispatchContext } from "./stripe-dispatch";
 
@@ -117,6 +118,10 @@ export async function startHostedPulseTrialPaidPlan(input: {
   }
 
   assertHostedMemberNotSuspended(member);
+  await assertHostedMemberCanOwnDirectBilling({
+    memberId: input.memberId,
+    prisma,
+  });
 
   const billingRef = await readHostedMemberStripeBillingRef({
     memberId: input.memberId,
@@ -663,7 +668,13 @@ async function updateHostedPulseTrialStartPaidSubscription(input: {
     const updatedSubscription = await withHostedMemberStripeMutationLock({
       memberId: input.memberId,
       prisma: input.prisma,
-      run: async () => {
+      run: async (tx) => {
+        await assertHostedPulseTrialStartPaidMutationAllowedTx({
+          memberId: input.memberId,
+          stripeCustomerId: input.stripeCustomerId,
+          stripeSubscriptionId: input.stripeSubscriptionId,
+          tx,
+        });
         const subscription = await callHostedStripeStartPaidPulseOperation(
           "subscription.update.trial-end-now",
           () => input.stripe.subscriptions.update(input.stripeSubscriptionId, {
@@ -798,7 +809,13 @@ async function resumeHostedPulseTrialStartPaidPausedSubscription(input: {
       const cleanedSubscription = await withHostedMemberStripeMutationLock({
         memberId: input.memberId,
         prisma: input.prisma,
-        run: async () => {
+        run: async (tx) => {
+          await assertHostedPulseTrialStartPaidMutationAllowedTx({
+            memberId: input.memberId,
+            stripeCustomerId: input.stripeCustomerId,
+            stripeSubscriptionId: input.stripeSubscriptionId,
+            tx,
+          });
           const subscription = await callHostedStripeStartPaidPulseOperation(
             "subscription.update.paused-legacy-metered-cleanup",
             () => input.stripe.subscriptions.update(input.stripeSubscriptionId, {
@@ -842,7 +859,13 @@ async function resumeHostedPulseTrialStartPaidPausedSubscription(input: {
     const resumedSubscription = await withHostedMemberStripeMutationLock({
       memberId: input.memberId,
       prisma: input.prisma,
-      run: async () => {
+      run: async (tx) => {
+        await assertHostedPulseTrialStartPaidMutationAllowedTx({
+          memberId: input.memberId,
+          stripeCustomerId: input.stripeCustomerId,
+          stripeSubscriptionId: input.stripeSubscriptionId,
+          tx,
+        });
         const subscription = await callHostedStripeStartPaidPulseOperation(
           "subscription.resume.paused-trial",
           () => input.stripe.subscriptions.resume(input.stripeSubscriptionId, {
@@ -906,6 +929,44 @@ async function hasHostedPulseTrialStartPaidLocallyStarted(input: {
     parseHostedBillingPhase(billingRef?.currentBillingPhase) === "paid";
 }
 
+async function assertHostedPulseTrialStartPaidMutationAllowedTx(input: {
+  memberId: string;
+  stripeCustomerId: string;
+  stripeSubscriptionId: string;
+  tx: Prisma.TransactionClient;
+}): Promise<void> {
+  const member = await readHostedMemberCoreState({
+    memberId: input.memberId,
+    prisma: input.tx,
+  });
+  if (!member) {
+    throw hostedOnboardingError({
+      code: "HOSTED_MEMBER_NOT_FOUND",
+      httpStatus: 403,
+      message: "Finish signup from your latest Murph link before continuing.",
+    });
+  }
+  assertHostedMemberNotSuspended(member);
+  await assertHostedMemberCanOwnDirectBilling({
+    memberId: input.memberId,
+    prisma: input.tx,
+  });
+  const billingRef = await readHostedMemberStripeBillingRef({
+    memberId: input.memberId,
+    prisma: input.tx,
+  });
+  if (
+    billingRef?.stripeCustomerId !== input.stripeCustomerId ||
+    billingRef.stripeSubscriptionId !== input.stripeSubscriptionId
+  ) {
+    throw hostedOnboardingError({
+      code: "HOSTED_BILLING_STRIPE_SUBSCRIPTION_CHANGED",
+      httpStatus: 409,
+      message: "Your billing subscription changed. Refresh and try again.",
+    });
+  }
+}
+
 async function reconcileHostedPulseTrialStartPaidInvoice(input: {
   invoice: Stripe.Invoice;
   memberId: string;
@@ -913,15 +974,25 @@ async function reconcileHostedPulseTrialStartPaidInvoice(input: {
   prisma: PrismaClient;
   subscription: Stripe.Subscription;
 }): Promise<void> {
-  await input.prisma.$transaction(async (tx) => {
-    await applyStripeInvoicePaid(
-      input.invoice,
-      buildHostedPulseTrialStartPaidDispatchContext(input),
-      tx,
-      HostedBillingStatus.active,
-      input.subscription,
-    );
-  }, HOSTED_ONBOARDING_TRANSACTION_OPTIONS);
+  await withHostedMemberStripeMutationLock({
+    memberId: input.memberId,
+    prisma: input.prisma,
+    run: async (tx) => {
+      await assertHostedPulseTrialStartPaidMutationAllowedTx({
+        memberId: input.memberId,
+        stripeCustomerId: coerceStripeObjectId(input.subscription.customer) ?? "",
+        stripeSubscriptionId: input.subscription.id,
+        tx,
+      });
+      await applyStripeInvoicePaid(
+        input.invoice,
+        buildHostedPulseTrialStartPaidDispatchContext(input),
+        tx,
+        HostedBillingStatus.active,
+        input.subscription,
+      );
+    },
+  });
 
   await signalHostedRuntimeManualWakeBestEffort({
     userId: input.memberId,

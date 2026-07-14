@@ -660,6 +660,21 @@ async function executePreparedClaimedAssistantCronJob(
         const deliveryRoute = resolveAssistantCronNotificationDeliveryRoute(
           claimedJob.target,
         )
+        const hostedAutomationRoute =
+          input.job.kind === 'canonical' && input.job.source.kind === 'automation'
+            ? input.job.source.route
+            : deviceActivityAuthority.route
+        if (
+          assistantCronExecutionDeliveryTargetProfile(input) === 'hosted' &&
+          hostedAutomationRoute !== null &&
+          hostedAutomationRoute.channel === 'linq' &&
+          hostedAutomationRoute.currentRouteSnapshot !== true
+        ) {
+          throw new VaultCliError(
+            'ASSISTANT_CRON_AUDIENCE_UNVERIFIED',
+            'This hosted automation could not verify its saved audience. Edit or reactivate it from the intended conversation before it can run.',
+          )
+        }
         // Run lifecycle-owned deterministic eligibility + persistence BEFORE
         // the LLM turn. The precondition reads canonical experiment state
         // once and decides:

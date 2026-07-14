@@ -118,6 +118,9 @@ const HOSTED_MEMBER_SCHEMA_GUARD = {
   ],
   HostedMemberBillingRef: [
     'memberId String @unique @map("member_id")',
+    'checkoutAttemptId String? @map("checkout_attempt_id")',
+    'stripeCheckoutSessionLookupKey String? @unique @map("stripe_checkout_session_lookup_key")',
+    'stripeCheckoutSessionIdEncrypted String? @map("stripe_checkout_session_id_encrypted")',
     'stripeCustomerLookupKey String? @unique @map("stripe_customer_lookup_key")',
     'stripeCustomerIdEncrypted String? @map("stripe_customer_id_encrypted")',
     'stripeSubscriptionLookupKey String? @unique @map("stripe_subscription_lookup_key")',
@@ -614,6 +617,20 @@ describe("hosted Prisma baseline migration", () => {
       ),
       "utf8",
     );
+    const hostedStripeEventFamilyCompensationMigrationSql = readFileSync(
+      new URL(
+        "../prisma/migrations/20260713200000_hosted_stripe_event_family_compensation/migration.sql",
+        import.meta.url,
+      ),
+      "utf8",
+    );
+    const hostedMemberCheckoutDeletionFenceMigrationSql = readFileSync(
+      new URL(
+        "../prisma/migrations/20260713210000_hosted_member_checkout_deletion_fence/migration.sql",
+        import.meta.url,
+      ),
+      "utf8",
+    );
     const hostedMailboxCausalSeqMigrationSql = readFileSync(
       new URL(
         "../prisma/migrations/20260712180000_hosted_mailbox_causal_seq/migration.sql",
@@ -734,6 +751,7 @@ describe("hosted Prisma baseline migration", () => {
       "20260712190000_hosted_meal_photo_capture_enrollment",
       "20260713190000_hosted_group_join_confirmation_drain_index",
       "20260713200000_hosted_stripe_event_family_compensation",
+      "20260713210000_hosted_member_checkout_deletion_fence",
       "migration_lock.toml",
     ]);
     expect(hostedGroupJoinConfirmationEligibilityMigrationSql).toContain(
@@ -744,6 +762,57 @@ describe("hosted Prisma baseline migration", () => {
     );
     expect(hostedGroupJoinConfirmationOriginMigrationSql).toContain(
       'ALTER TABLE "hosted_group_member"',
+    );
+    expect(schema).toMatch(
+      /familyPaymentConflictCompensationSubscriptionLookupKey\s+String\?\s+@unique\(map: "hosted_stripe_event_family_payment_conflict_subscription_key"\)/u,
+    );
+    expect(schema).toMatch(
+      /familyPaymentConflictCompensationCandidateSubscriptionLookupKey\s+String\?\s+@map\("family_payment_conflict_compensation_candidate_subscription_lookup_key"\)/u,
+    );
+    expect(hostedStripeEventFamilyCompensationMigrationSql).toContain(
+      'ADD COLUMN "family_payment_conflict_compensation_subscription_id_encrypted" TEXT',
+    );
+    expect(hostedStripeEventFamilyCompensationMigrationSql).toContain(
+      'CREATE UNIQUE INDEX "hosted_stripe_event_family_payment_conflict_subscription_key"',
+    );
+    expect(hostedStripeEventFamilyCompensationMigrationSql).toContain(
+      'CREATE INDEX "hosted_stripe_event_family_conflict_candidate_key"',
+    );
+    expect(schema).toMatch(
+      /checkoutAttemptId\s+String\?\s+@map\("checkout_attempt_id"\)/u,
+    );
+    expect(schema).toMatch(
+      /stripeCheckoutSessionLookupKey\s+String\?\s+@unique\s+@map\("stripe_checkout_session_lookup_key"\)/u,
+    );
+    expect(schema).toMatch(
+      /stripeCheckoutSessionIdEncrypted\s+String\?\s+@map\("stripe_checkout_session_id_encrypted"\)/u,
+    );
+    expect(hostedMemberCheckoutDeletionFenceMigrationSql).toContain(
+      'ADD COLUMN "checkout_attempt_id" TEXT',
+    );
+    expect(hostedMemberCheckoutDeletionFenceMigrationSql).toContain(
+      'ADD COLUMN "stripe_checkout_session_id_encrypted" TEXT',
+    );
+    expect(hostedMemberCheckoutDeletionFenceMigrationSql).toContain(
+      'CREATE UNIQUE INDEX "hosted_member_billing_ref_stripe_checkout_session_lookup_key_key"',
+    );
+    expect(schema).toMatch(
+      /pulseTrialCleanupAcceptedAt\s+DateTime\?\s+@map\("pulse_trial_cleanup_accepted_at"\)/u,
+    );
+    expect(schema).toMatch(
+      /pulseTrialCleanupEncryptionMemberId\s+String\?\s+@map\("pulse_trial_cleanup_encryption_member_id"\)/u,
+    );
+    expect(schema).toMatch(
+      /pulseTrialCleanupSubscriptionIdEncrypted\s+String\?\s+@map\("pulse_trial_cleanup_subscription_id_encrypted"\)/u,
+    );
+    expect(hostedMemberCheckoutDeletionFenceMigrationSql).toContain(
+      'ADD COLUMN "pulse_trial_cleanup_accepted_at" TIMESTAMP(3)',
+    );
+    expect(hostedMemberCheckoutDeletionFenceMigrationSql).toContain(
+      'ADD COLUMN "pulse_trial_cleanup_subscription_id_encrypted" TEXT',
+    );
+    expect(hostedMemberCheckoutDeletionFenceMigrationSql).toContain(
+      'CREATE INDEX "hosted_stripe_event_pulse_cleanup_member"',
     );
     expect(hostedGroupJoinConfirmationOriginMigrationSql).toContain(
       'ADD COLUMN "join_confirmation_origin" TEXT',

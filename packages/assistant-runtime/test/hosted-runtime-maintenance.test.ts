@@ -27,6 +27,7 @@ const mocks = vi.hoisted(() => ({
   readHostedAssistantRuntimeState: vi.fn(),
   reconcileHostedDeviceSyncControlPlaneState: vi.fn(),
   repairHostedPendingAssistantRouteProofBatch: vi.fn(),
+  repairServerConfirmedPersonalHomeAutomationRoutes: vi.fn(),
   runAssistantAutomationPass: vi.fn(),
   selectHostedAssistantInputIds: vi.fn(),
   pruneWearableDenseRawTimeseries: vi.fn(),
@@ -56,6 +57,8 @@ vi.mock("@murphai/assistant-engine", () => ({
   HOSTED_ASSISTANT_CONTEXT_DIAGNOSTICS_TYPE: "assistant.context.diagnostics",
   HOSTED_ASSISTANT_TURN_TIMING_SCHEMA: "murph.assistant-turn-timing.v1",
   HOSTED_ASSISTANT_TURN_TIMING_TYPE: "assistant.turn.timing",
+  repairServerConfirmedPersonalHomeAutomationRoutes:
+    mocks.repairServerConfirmedPersonalHomeAutomationRoutes,
   runAssistantAutomationPass: mocks.runAssistantAutomationPass,
 }));
 
@@ -248,6 +251,10 @@ beforeEach(async () => {
       inputs: [],
       nextCursor: query.afterCursor ?? null,
     })),
+    listNewConversationActorInputs: vi.fn(async (query) => ({
+      inputs: [],
+      nextCursor: query.afterCursor ?? null,
+    })),
     listNewConversationInputs: vi.fn(async (query) => ({
       inputs: [],
       nextCursor: query.afterCursor ?? null,
@@ -296,6 +303,11 @@ beforeEach(async () => {
     processedInputIds: [],
     repaired: 0,
     yielded: false,
+  });
+  mocks.repairServerConfirmedPersonalHomeAutomationRoutes.mockResolvedValue({
+    pending: false,
+    repaired: 0,
+    verified: 0,
   });
   mocks.runAssistantAutomationPass.mockResolvedValue({
     nextWakeAt: "2026-04-08T01:00:00.000Z",
@@ -748,6 +760,134 @@ describe("runHostedAssistantAutomation", () => {
       signal: undefined,
       vaultRoot: "/tmp/vault-root",
     });
+  });
+
+  it("reauthorizes pre-marker direct routes from the server-owned home binding before cron", async () => {
+    const now = new Date("2026-04-23T00:00:00.000Z");
+    const assertLinqRecentInboundEngagement = vi.fn(async () => ({
+      routeAuthorityKind: "member-home" as const,
+    }));
+    mocks.repairServerConfirmedPersonalHomeAutomationRoutes.mockImplementationOnce(
+      async (input) => ({
+        pending: false,
+        repaired: await input.confirmDirectHomeTarget("saved-home-chat") ? 1 : 0,
+        verified: 1,
+      }),
+    );
+    mocks.runAssistantAutomationPass.mockImplementationOnce(async (input) => {
+      await input.beforeCronProcessing?.();
+      return { nextWakeAt: null, progressed: false };
+    });
+
+    const result = await runHostedAssistantAutomation(
+      "/tmp/vault-root",
+      "req_server_route_proof",
+      { hosted: { issueDeviceConnectLink: vi.fn(), memberId: "member_123", userEnvKeys: [] } },
+      {
+        eventId: "evt_server_route_proof",
+        kind: "runtime.timer",
+        occurredAt: now.toISOString(),
+        triggerKind: "runtime_timer",
+        userId: "member_123",
+      },
+      undefined,
+      undefined,
+      undefined,
+      {
+        effectsPort: { assertLinqRecentInboundEngagement },
+        now,
+      },
+    );
+
+    expect(result.progressed).toBe(true);
+    expect(assertLinqRecentInboundEngagement).toHaveBeenCalledWith({
+      authorityCheckOnly: true,
+      directHomeRouteOnly: true,
+      target: "saved-home-chat",
+      targetKind: "thread",
+    }, { signal: undefined });
+  });
+
+  it("does not defer cron for an opportunistic server-route repair backlog", async () => {
+    const now = new Date("2026-04-23T00:00:00.000Z");
+    let cronDeferred: boolean | null = null;
+    mocks.repairServerConfirmedPersonalHomeAutomationRoutes.mockResolvedValueOnce({
+      pending: true,
+      repaired: 0,
+      verified: 0,
+    });
+    mocks.runAssistantAutomationPass.mockImplementationOnce(async (input) => {
+      await input.beforeCronProcessing?.();
+      cronDeferred = input.shouldDeferCron?.() ?? null;
+      return {
+        cronProcessed: cronDeferred ? 0 : 1,
+        nextWakeAt: null,
+        progressed: false,
+      };
+    });
+
+    await runHostedAssistantAutomation(
+      "/tmp/vault-root",
+      "req_server_route_backlog",
+      { hosted: { issueDeviceConnectLink: vi.fn(), memberId: "member_123", userEnvKeys: [] } },
+      {
+        eventId: "evt_server_route_backlog",
+        kind: "runtime.timer",
+        occurredAt: now.toISOString(),
+        triggerKind: "runtime_timer",
+        userId: "member_123",
+      },
+      undefined,
+      undefined,
+      undefined,
+      { now },
+    );
+
+    expect(cronDeferred).toBe(false);
+  });
+
+  it("leaves pre-marker routes untrusted when an older server omits the home-route acknowledgement", async () => {
+    const now = new Date("2026-04-23T00:00:00.000Z");
+    const assertLinqRecentInboundEngagement = vi.fn(async () => ({}));
+    mocks.repairServerConfirmedPersonalHomeAutomationRoutes.mockImplementationOnce(
+      async (input) => ({
+        pending: false,
+        repaired: await input.confirmDirectHomeTarget("saved-home-chat") ? 1 : 0,
+        verified: 0,
+      }),
+    );
+    mocks.runAssistantAutomationPass.mockImplementationOnce(async (input) => {
+      await input.beforeCronProcessing?.();
+      return { nextWakeAt: null, progressed: false };
+    });
+
+    const result = await runHostedAssistantAutomation(
+      "/tmp/vault-root",
+      "req_old_server_route_proof",
+      { hosted: { issueDeviceConnectLink: vi.fn(), memberId: "member_123", userEnvKeys: [] } },
+      {
+        eventId: "evt_old_server_route_proof",
+        kind: "runtime.timer",
+        occurredAt: now.toISOString(),
+        triggerKind: "runtime_timer",
+        userId: "member_123",
+      },
+      undefined,
+      undefined,
+      undefined,
+      {
+        effectsPort: { assertLinqRecentInboundEngagement },
+        now,
+      },
+    );
+
+    expect(result.progressed).toBe(false);
+    expect(assertLinqRecentInboundEngagement).toHaveBeenCalledWith({
+      authorityCheckOnly: true,
+      directHomeRouteOnly: true,
+      target: "saved-home-chat",
+      targetKind: "thread",
+    }, { signal: undefined });
   });
 
   it("propagates bounded route-repair failure before the mocked cron boundary", async () => {

@@ -23,6 +23,7 @@ const mocks = vi.hoisted(() => {
   cancelHostedPulseTrialCheckoutLoserSubscription: vi.fn(),
     findMemberForStripeObject: vi.fn(),
     getHostedInviteStatus: vi.fn(),
+    hasActiveHostedFamilyBillingAuthority: vi.fn(),
     listHostedStripeCheckoutSessionMemberIds: vi.fn(),
     signalHostedMemberActivationRuntimeWakeBestEffortResult: vi.fn(),
     sendHostedSignupWelcomeEmailForMemberBestEffort: vi.fn(),
@@ -45,6 +46,11 @@ vi.mock("@/src/lib/hosted-onboarding/hosted-member-store", async () => {
     readHostedMemberCoreState: mocks.readHostedMemberCoreState,
   };
 });
+
+vi.mock("@/src/lib/hosted-onboarding/billing-authority", () => ({
+  hasActiveHostedFamilyBillingAuthority:
+    mocks.hasActiveHostedFamilyBillingAuthority,
+}));
 
 vi.mock("@/src/lib/hosted-onboarding/invite-service", async () => {
   const actual = await vi.importActual<typeof import("@/src/lib/hosted-onboarding/invite-service")>(
@@ -118,6 +124,7 @@ describe("reconcileHostedBillingCheckoutSuccess", () => {
     mocks.readHostedMemberCoreState.mockResolvedValue(createMemberSnapshot().core);
     mocks.findMemberForStripeObject.mockResolvedValue(createMemberSnapshot());
     mocks.listHostedStripeCheckoutSessionMemberIds.mockResolvedValue(["member_123"]);
+    mocks.hasActiveHostedFamilyBillingAuthority.mockResolvedValue(false);
     mocks.stripe.checkout.sessions.retrieve.mockResolvedValue({
       client_reference_id: "member_123",
       customer: "cus_123",
@@ -247,6 +254,34 @@ describe("reconcileHostedBillingCheckoutSuccess", () => {
     );
     expect(mocks.activateHostedMemberForPositiveSourceTx).not.toHaveBeenCalled();
     expect(mocks.signalHostedMemberActivationRuntimeWakeBestEffortResult).not.toHaveBeenCalled();
+    expect(mocks.sendHostedSignupWelcomeEmailForMemberBestEffort).not.toHaveBeenCalled();
+  });
+
+  it("leaves direct checkout reconciliation to the webhook when Family billing owns access", async () => {
+    const tx = {
+      __tag: "tx",
+      $queryRaw: vi.fn(async () => []),
+    };
+    const prisma = {
+      $transaction: vi.fn(async (callback: (innerTx: typeof tx) => Promise<unknown>) => callback(tx)),
+    };
+    mocks.hasActiveHostedFamilyBillingAuthority.mockResolvedValueOnce(true);
+
+    await expect(reconcileHostedBillingCheckoutSuccess({
+      inviteCode: "invite-code",
+      member: createAuthenticatedMember(),
+      prisma: prisma as never,
+      sessionId: "cs_123",
+    })).resolves.toEqual(createStatus({
+      stage: "activating",
+    }));
+
+    expect(mocks.hasActiveHostedFamilyBillingAuthority).toHaveBeenCalledWith({
+      memberId: "member_123",
+      prisma: tx,
+    });
+    expect(mocks.applyStripeCheckoutCompleted).not.toHaveBeenCalled();
+    expect(mocks.cancelHostedPulseTrialCheckoutLoserSubscription).not.toHaveBeenCalled();
     expect(mocks.sendHostedSignupWelcomeEmailForMemberBestEffort).not.toHaveBeenCalled();
   });
 

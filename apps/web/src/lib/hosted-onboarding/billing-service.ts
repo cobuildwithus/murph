@@ -18,11 +18,15 @@ import {
   type HostedPublicBillingCheckoutOffer,
 } from "./billing-plans";
 import { buildHostedBillingOfferMetadata } from "./billing-offer-metadata";
+import { assertHostedMemberCanOwnDirectBilling } from "./billing-authority";
 import { isHostedMemberSuspended } from "./entitlement";
 import { hostedOnboardingError } from "./errors";
 import {
+  bindHostedMemberBillingCheckoutSessionTx,
   bindHostedMemberStripeCustomerIdIfMissingTx,
   readHostedMemberStripeBillingRef,
+  reserveHostedMemberBillingCheckoutAttemptTx,
+  withHostedMemberStripeMutationLock,
 } from "./hosted-member-billing-store";
 import { assertHostedMemberBillingStartMessagingReady } from "./billing-start-preconditions";
 import { requireHostedInviteForBillingCheckout } from "./invite-service";
@@ -43,6 +47,7 @@ import {
 } from "./runtime";
 import {
   HOSTED_ONBOARDING_TRANSACTION_OPTIONS,
+  generateHostedMemberCheckoutAttemptId,
   lockHostedMemberRow,
   normalizeNullableString,
 } from "./shared";
@@ -136,21 +141,94 @@ export async function createHostedBillingCheckout(
       routing: invite.member.routing,
     });
 
-    const currentBillingRef = await readHostedMemberStripeBillingRef({
-      memberId: invite.member.id,
-      prisma,
-    });
-    const resolvedOffer = resolveHostedBillingCheckoutOffer({
-      billingPlanCode,
-      checkoutOffer,
-      currentBillingRef,
-    });
     const { priceId, stripe } = requireHostedStripeCheckoutConfig({
       billingPlanCode,
     });
     const publicBaseUrl = requireHostedOnboardingPublicBaseUrl();
     const verifiedEmailAddress =
       extractHostedPrivyVerifiedEmailAccount(input.linkedAccounts ?? [])?.address ?? null;
+    const reservation = await prisma.$transaction(async (tx) => {
+      await lockHostedMemberRow(tx, invite.member.id);
+      const currentMember = await tx.hostedMember.findUnique({
+        select: {
+          billingStatus: true,
+          suspendedAt: true,
+        },
+        where: {
+          id: invite.member.id,
+        },
+      });
+      if (!currentMember) {
+        throw hostedOnboardingError({
+          code: "HOSTED_MEMBER_NOT_FOUND",
+          message: "Finish signup from your latest Murph link before continuing.",
+          httpStatus: 403,
+        });
+      }
+      if (isHostedMemberSuspended(currentMember.suspendedAt)) {
+        throw hostedOnboardingError({
+          code: "HOSTED_MEMBER_SUSPENDED",
+          message: "This hosted account is suspended. Contact support to restore access.",
+          httpStatus: 403,
+        });
+      }
+      if (currentMember.billingStatus === HostedBillingStatus.active) {
+        return {
+          alreadyActive: true as const,
+        };
+      }
+      if (!requiresHostedBillingCheckout(currentMember.billingStatus)) {
+        throw hostedOnboardingError({
+          code: "HOSTED_BILLING_CHECKOUT_BLOCKED",
+          message: "This hosted account cannot start a new checkout right now. Contact support to restore access.",
+          httpStatus: 403,
+        });
+      }
+      await assertHostedMemberCanOwnDirectBilling({
+        memberId: invite.member.id,
+        prisma: tx,
+      });
+      const currentBillingRef = await readHostedMemberStripeBillingRef({
+        memberId: invite.member.id,
+        prisma: tx,
+      });
+      const resolvedOffer = resolveHostedBillingCheckoutOffer({
+        billingPlanCode,
+        checkoutOffer,
+        currentBillingRef,
+      });
+      const checkout = await reserveHostedMemberBillingCheckoutAttemptTx({
+        memberId: invite.member.id,
+        proposedAttemptId: generateHostedMemberCheckoutAttemptId(),
+        tx,
+      });
+      return {
+        alreadyActive: false as const,
+        currentBillingRef,
+        resolvedOffer,
+        ...checkout,
+      };
+    }, HOSTED_ONBOARDING_TRANSACTION_OPTIONS);
+
+    if (reservation.alreadyActive) {
+      finishHostedOnboardingTiming(timing, "completed", {
+        alreadyActive: true,
+      });
+      return {
+        alreadyActive: true,
+        url: null,
+      };
+    }
+
+    if (reservation.previousSessionId) {
+      await retireHostedBillingCheckoutSessionBeforeReplacement({
+        sessionId: reservation.previousSessionId,
+        stripe,
+      });
+    }
+
+    const currentBillingRef = reservation.currentBillingRef;
+    const resolvedOffer = reservation.resolvedOffer;
     const customerId = currentBillingRef?.stripeCustomerId ??
       (resolvedOffer === HOSTED_PULSE_TRIAL_OFFER
         ? await reserveHostedPulseTrialCheckoutCustomer({
@@ -167,6 +245,7 @@ export async function createHostedBillingCheckout(
     });
     const checkoutIdempotencyKey = buildHostedBillingCheckoutIdempotencyKey({
       billingPlanCode,
+      checkoutAttemptId: reservation.attemptId,
       checkoutOffer: resolvedOffer,
       inviteCode: invite.inviteCode,
       memberId: invite.member.id,
@@ -195,11 +274,60 @@ export async function createHostedBillingCheckout(
     });
 
     if (!checkoutSession.url) {
+      await expireHostedBillingCheckoutSessionFailClosed({
+        sessionId: checkoutSession.id,
+        stripe,
+      });
       throw hostedOnboardingError({
         code: "CHECKOUT_URL_MISSING",
         message: "Stripe Checkout did not return a redirect URL.",
         httpStatus: 502,
       });
+    }
+
+    try {
+      await prisma.$transaction(async (tx) => {
+        await lockHostedMemberRow(tx, invite.member.id);
+        const currentMember = await tx.hostedMember.findUnique({
+          select: {
+            suspendedAt: true,
+          },
+          where: {
+            id: invite.member.id,
+          },
+        });
+        if (!currentMember || isHostedMemberSuspended(currentMember.suspendedAt)) {
+          throw hostedOnboardingError({
+            code: "HOSTED_MEMBER_SUSPENDED",
+            message: "This hosted account is suspended. Contact support to restore access.",
+            httpStatus: 403,
+          });
+        }
+        await assertHostedMemberCanOwnDirectBilling({
+          memberId: invite.member.id,
+          prisma: tx,
+        });
+        const bound = await bindHostedMemberBillingCheckoutSessionTx({
+          attemptId: reservation.attemptId,
+          memberId: invite.member.id,
+          previousSessionId: reservation.previousSessionId,
+          sessionId: checkoutSession.id,
+          tx,
+        });
+        if (!bound) {
+          throw hostedOnboardingError({
+            code: "HOSTED_BILLING_CHECKOUT_ATTEMPT_STALE",
+            message: "Billing checkout changed before Stripe returned a session. Start checkout again.",
+            httpStatus: 409,
+          });
+        }
+      }, HOSTED_ONBOARDING_TRANSACTION_OPTIONS);
+    } catch (error) {
+      await expireHostedBillingCheckoutSessionFailClosed({
+        sessionId: checkoutSession.id,
+        stripe,
+      });
+      throw error;
     }
 
     finishHostedOnboardingTiming(timing, "completed", {
@@ -223,33 +351,50 @@ async function reserveHostedPulseTrialCheckoutCustomer(input: {
   prisma: PrismaClient;
   stripe: ReturnType<typeof requireHostedStripeCheckoutConfig>["stripe"];
 }): Promise<string> {
-  const candidateStripeCustomerId = await createHostedPulseTrialStripeCustomer({
+  return withHostedMemberStripeMutationLock({
     memberId: input.memberId,
-    stripe: input.stripe,
-  });
-  return input.prisma.$transaction(async (tx) => {
-    await lockHostedMemberRow(tx, input.memberId);
-    const currentBillingRef = await readHostedMemberStripeBillingRef({
-      memberId: input.memberId,
-      prisma: tx,
-    });
-    const billingRef = currentBillingRef?.stripeCustomerId
-      ? currentBillingRef
-      : await bindHostedMemberStripeCustomerIdIfMissingTx({
-          memberId: input.memberId,
-          stripeCustomerId: candidateStripeCustomerId,
-          tx,
-        });
-    if (!billingRef?.stripeCustomerId) {
-      throw hostedOnboardingError({
-        code: "HOSTED_AUTO_PULSE_TRIAL_CUSTOMER_BIND_FAILED",
-        httpStatus: 409,
-        message: "Murph could not reserve Stripe billing for trial activation. Try again.",
-        retryable: true,
+    prisma: input.prisma,
+    run: async (tx) => {
+      const currentMember = await tx.hostedMember.findUnique({
+        select: { suspendedAt: true },
+        where: { id: input.memberId },
       });
-    }
-    return billingRef.stripeCustomerId;
-  }, HOSTED_ONBOARDING_TRANSACTION_OPTIONS);
+      if (!currentMember || isHostedMemberSuspended(currentMember.suspendedAt)) {
+        throw hostedOnboardingError({
+          code: "HOSTED_MEMBER_SUSPENDED",
+          message: "This hosted account is suspended. Contact support to restore access.",
+          httpStatus: 403,
+        });
+      }
+      await assertHostedMemberCanOwnDirectBilling({
+        memberId: input.memberId,
+        prisma: tx,
+      });
+      const currentBillingRef = await readHostedMemberStripeBillingRef({
+        memberId: input.memberId,
+        prisma: tx,
+      });
+      const billingRef = currentBillingRef?.stripeCustomerId
+        ? currentBillingRef
+        : await bindHostedMemberStripeCustomerIdIfMissingTx({
+            memberId: input.memberId,
+            stripeCustomerId: await createHostedPulseTrialStripeCustomer({
+              memberId: input.memberId,
+              stripe: input.stripe,
+            }),
+            tx,
+          });
+      if (!billingRef?.stripeCustomerId) {
+        throw hostedOnboardingError({
+          code: "HOSTED_AUTO_PULSE_TRIAL_CUSTOMER_BIND_FAILED",
+          httpStatus: 409,
+          message: "Murph could not reserve Stripe billing for trial activation. Try again.",
+          retryable: true,
+        });
+      }
+      return billingRef.stripeCustomerId;
+    },
+  });
 }
 
 async function resolveHostedBillingCheckoutAuth(
@@ -264,6 +409,7 @@ async function resolveHostedBillingCheckoutAuth(
 
 export function buildHostedBillingCheckoutIdempotencyKey(input: {
   billingPlanCode: HostedBillingPlanCode;
+  checkoutAttemptId?: string;
   checkoutOffer?: HostedBillingCheckoutOffer;
   inviteCode: string;
   memberId: string;
@@ -283,11 +429,52 @@ export function buildHostedBillingCheckoutIdempotencyKey(input: {
     "hosted-billing-checkout",
     input.memberId,
     input.inviteCode,
+    ...(input.checkoutAttemptId ? [input.checkoutAttemptId] : []),
     input.billingPlanCode,
     offerBindingKey,
     lineItemBindingKey,
     customerBindingKey,
   ].join(":");
+}
+
+async function retireHostedBillingCheckoutSessionBeforeReplacement(input: {
+  sessionId: string;
+  stripe: ReturnType<typeof requireHostedStripeCheckoutConfig>["stripe"];
+}): Promise<void> {
+  const session = await input.stripe.checkout.sessions.retrieve(input.sessionId);
+  if (session.status === "expired") {
+    return;
+  }
+  if (session.status === "open") {
+    await input.stripe.checkout.sessions.expire(input.sessionId);
+    return;
+  }
+  throw hostedOnboardingError({
+    code: "HOSTED_BILLING_CHECKOUT_ALREADY_COMPLETED",
+    message: "Your prior checkout is already complete and billing is still syncing. Try again shortly.",
+    httpStatus: 409,
+    retryable: true,
+  });
+}
+
+async function expireHostedBillingCheckoutSessionFailClosed(input: {
+  sessionId: string;
+  stripe: ReturnType<typeof requireHostedStripeCheckoutConfig>["stripe"];
+}): Promise<void> {
+  const session = await input.stripe.checkout.sessions.retrieve(input.sessionId);
+  if (session.status === "expired") {
+    return;
+  }
+  if (session.status === "open") {
+    await input.stripe.checkout.sessions.expire(input.sessionId);
+    return;
+  }
+  throw hostedOnboardingError({
+    code: "HOSTED_BILLING_CHECKOUT_CLEANUP_REQUIRED",
+    message: "Billing changed while checkout was starting. Contact support before retrying.",
+    httpStatus: 409,
+    retryable: true,
+  });
 }
 
 export function deriveHostedBillingCheckoutOfferBindingKey(input: {

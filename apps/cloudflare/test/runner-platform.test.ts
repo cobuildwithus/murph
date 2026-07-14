@@ -3919,6 +3919,7 @@ describe("buildHostedExecutionRuntimePlatform", () => {
       return new Response(JSON.stringify({
         ok: true,
         providerDispatchClaimed: true,
+        routeAuthorityKind: "member-home",
       }), {
         headers: { "content-type": "application/json; charset=utf-8" },
         status: 200,
@@ -3945,6 +3946,7 @@ describe("buildHostedExecutionRuntimePlatform", () => {
       targetKind: "thread",
     })).resolves.toEqual({
       providerDispatchClaimed: true,
+      routeAuthorityKind: "member-home",
     });
 
     expect(fetchMock).toHaveBeenCalledTimes(1);

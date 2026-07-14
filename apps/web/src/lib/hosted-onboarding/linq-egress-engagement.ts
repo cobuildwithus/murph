@@ -42,6 +42,7 @@ export type HostedLinqRuntimeEgressTargetOverride = {
   targetKind: "thread";
 };
 export type HostedLinqRuntimeEgressAssertionResult = {
+  routeAuthorityKind?: "member-home";
   targetOverride: HostedLinqRuntimeEgressTargetOverride | null;
 };
 
@@ -80,6 +81,7 @@ export function assertHostedLinqRouteAuthorityMatchesTarget(input: {
 export async function assertHostedLinqRecentInboundEngagementForRuntime(input: {
   answeredMailboxItemIds?: readonly string[] | null;
   currentInbound?: HostedLinqLegacyCurrentInboundProof | null;
+  directHomeRouteOnly?: boolean | null;
   directRecipientPhoneNumber?: string | null;
   fromPhoneNumber?: string | null;
   homeRouteFallbackAllowed?: boolean | null;
@@ -107,6 +109,22 @@ export async function assertHostedLinqRecentInboundEngagementForRuntime(input: {
     containerMemberId: input.memberId,
     prisma: input.prisma,
   });
+
+  if (input.directHomeRouteOnly === true) {
+    const asserted = await assertHostedMemberLinqRouteMatchesEgressTarget({
+      chatId: input.target,
+      homeRouteFallbackAllowed: false,
+      memberId: input.memberId,
+      prisma: input.prisma,
+      recipientPhone: null,
+      replyToMessageId: null,
+      targetKind: input.targetKind,
+    });
+    return {
+      ...asserted,
+      routeAuthorityKind: "member-home",
+    };
+  }
 
   const targetThreadRoute = await readHostedThreadRouteByThreadIdentity({
     channel: "linq",

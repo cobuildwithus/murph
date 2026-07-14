@@ -33,6 +33,9 @@ import {
   upsertHostedMemberStripeCheckoutEmailIfFreshTx,
 } from "./hosted-member-store";
 import {
+  clearHostedMemberBillingCheckoutSessionIfMatchesTx,
+} from "./hosted-member-billing-store";
+import {
   findMemberForStripeCheckoutSession,
   findMemberForStripeInvoice,
   findMemberForStripeSubscription,
@@ -60,9 +63,11 @@ import {
 import {
   applyHostedFamilyStripeCheckoutCompletedTx,
   applyHostedFamilyStripeSubscriptionUpdatedTx,
-  type HostedLegacySyntheticFamilyCheckoutCompensation,
   type HostedFamilyStripeSubscriptionResult,
 } from "./family-plan";
+import type {
+  HostedFamilyPaymentConflictCompensation,
+} from "./stripe-family-compensation";
 
 export type HostedStripeActivatedMemberOutcome = {
   activatedMemberId: string | null;
@@ -71,10 +76,9 @@ export type HostedStripeActivatedMemberOutcome = {
 
 type HostedStripeActivationOutcome = HostedStripeActivatedMemberOutcome & {
   activatedMembers?: HostedStripeActivatedMemberOutcome[];
-  cancelLegacySyntheticFamilySubscriptionId?: string | null;
   cleanupPulseTrialStripeSubscriptionId?: string | null;
-  legacySyntheticFamilyCheckoutCompensation?:
-    HostedLegacySyntheticFamilyCheckoutCompensation | null;
+  familyPaymentConflictCompensation?:
+    HostedFamilyPaymentConflictCompensation | null;
   welcomeEmailMemberId: string | null;
 };
 
@@ -87,29 +91,18 @@ export type HostedSubscriptionCancellationEmailCandidate = {
   stripeSubscriptionId: string;
 };
 
-const HOSTED_LEGACY_FAMILY_REFUND_EFFECT_METADATA_KEY =
-  "hosted_family_legacy_compensation_event_id";
-const HOSTED_LEGACY_FAMILY_REFUND_PENDING_CODE =
-  "HOSTED_LEGACY_FAMILY_REFUND_PENDING";
+const HOSTED_FAMILY_PAYMENT_CONFLICT_REFUND_EFFECT_METADATA_KEY =
+  "hosted_family_payment_conflict_event_id";
+const HOSTED_FAMILY_PAYMENT_CONFLICT_REFUND_PENDING_CODE =
+  "HOSTED_FAMILY_PAYMENT_CONFLICT_REFUND_PENDING";
 
-class HostedLegacyFamilyRefundPendingError extends Error {
-  readonly code = HOSTED_LEGACY_FAMILY_REFUND_PENDING_CODE;
+class HostedFamilyPaymentConflictRefundPendingError extends Error {
+  readonly code = HOSTED_FAMILY_PAYMENT_CONFLICT_REFUND_PENDING_CODE;
 
   constructor() {
-    super("Legacy synthetic Family checkout refund is still pending.");
-    this.name = "HostedLegacyFamilyRefundPendingError";
+    super("Family payment-conflict refund is still pending.");
+    this.name = "HostedFamilyPaymentConflictRefundPendingError";
   }
-}
-
-export function isHostedLegacyFamilyRefundPendingError(
-  error: unknown,
-): boolean {
-  return error instanceof HostedLegacyFamilyRefundPendingError || Boolean(
-    error &&
-    typeof error === "object" &&
-    "code" in error &&
-    error.code === HOSTED_LEGACY_FAMILY_REFUND_PENDING_CODE,
-  );
 }
 
 export async function applyStripeCheckoutCompleted(
@@ -125,10 +118,10 @@ export async function applyStripeCheckoutCompleted(
   if (familyCheckout.groupId) {
     return {
       activatedMemberId: null,
-      ...(familyCheckout.legacySyntheticFamilyCheckoutCompensation
+      ...(familyCheckout.familyPaymentConflictCompensation
         ? {
-            legacySyntheticFamilyCheckoutCompensation:
-              familyCheckout.legacySyntheticFamilyCheckoutCompensation,
+            familyPaymentConflictCompensation:
+              familyCheckout.familyPaymentConflictCompensation,
           }
         : {}),
       hostedExecutionEventId: null,
@@ -188,6 +181,14 @@ export async function bindHostedStripeBillingRefsFromCheckoutSessionTx(input: {
     tx: input.tx,
   });
 
+  if (billingSnapshot) {
+    await clearHostedMemberBillingCheckoutSessionIfMatchesTx({
+      memberId: input.memberId,
+      sessionId: input.session.id,
+      tx: input.tx,
+    });
+  }
+
   await writeHostedStripeCheckoutEmailIfPresentTx({
     collectedAt: dispatchContext.eventCreatedAt,
     memberId: input.memberId,
@@ -230,6 +231,11 @@ export async function applyPulseTrialCheckoutCompletedTx(input: {
     session: input.session,
   });
   if (input.member.billingRef?.pulseTrialRedeemedAt && isCurrentPulseTrialSubscription) {
+    await clearHostedMemberBillingCheckoutSessionIfMatchesTx({
+      memberId: input.member.core.id,
+      sessionId: input.session.id,
+      tx: input.tx,
+    });
     return {
       activatedMemberId: null,
       hostedExecutionEventId: null,
@@ -334,6 +340,14 @@ export async function applyPulseTrialCheckoutCompletedTx(input: {
     stripeSubscriptionId: subscription.id,
     tx: input.tx,
   });
+
+  if (updatedMember) {
+    await clearHostedMemberBillingCheckoutSessionIfMatchesTx({
+      memberId: updatedMember.core.id,
+      sessionId: input.session.id,
+      tx: input.tx,
+    });
+  }
 
   if (!updatedMember || hadActiveBilling) {
     if (updatedMember) {
@@ -451,39 +465,24 @@ export function cancelHostedPulseTrialCheckoutLoserSubscription(input: {
   });
 }
 
-export async function cancelHostedLegacySyntheticFamilySubscription(input: {
-  subscriptionId: string;
-}): Promise<void> {
-  const stripe = requireHostedStripeApi();
-  const subscription = await stripe.subscriptions.retrieve(input.subscriptionId);
-  if (subscription.status === "canceled" || subscription.status === "incomplete_expired") {
-    return;
-  }
-
-  await stripe.subscriptions.cancel(
-    input.subscriptionId,
-    {},
-    {
-      idempotencyKey: `hosted-family-legacy-synthetic-cancel:${input.subscriptionId}`,
-    },
-  );
-}
-
-export async function cancelAndRefundHostedLegacySyntheticFamilyCheckoutSubscription(input: {
+export async function executeHostedFamilyPaymentConflictCompensation(input: {
   effectId: string;
-  invoiceId: string;
+  invoiceId: string | null;
   subscriptionId: string;
-}): Promise<void> {
-  const stripe = requireHostedStripeApi();
+}, stripe: Stripe = requireHostedStripeApi()): Promise<void> {
   const subscription = await stripe.subscriptions.retrieve(input.subscriptionId);
   if (subscription.status !== "canceled" && subscription.status !== "incomplete_expired") {
     await stripe.subscriptions.cancel(
       input.subscriptionId,
       {},
       {
-        idempotencyKey: `hosted-family-legacy-synthetic-cancel:${input.effectId}`,
+        idempotencyKey: `hosted-family-payment-conflict-cancel:${input.effectId}`,
       },
     );
+  }
+
+  if (!input.invoiceId) {
+    return;
   }
 
   const invoice = await stripe.invoices.retrieve(input.invoiceId, {
@@ -493,18 +492,18 @@ export async function cancelAndRefundHostedLegacySyntheticFamilyCheckoutSubscrip
     ],
   });
   if (coerceStripeInvoiceSubscriptionId(invoice) !== input.subscriptionId) {
-    throw new Error("Legacy synthetic Family checkout invoice ownership changed.");
+    throw new Error("Family payment-conflict invoice ownership changed.");
   }
   const rawAmountPaid = (invoice as Stripe.Invoice & { amount_paid?: unknown }).amount_paid;
   if (rawAmountPaid === 0) {
     return;
   }
   if (readHostedStripePositiveAmount(rawAmountPaid) === null) {
-    throw new Error("Legacy synthetic Family checkout compensation requires a paid invoice amount.");
+    throw new Error("Family payment-conflict compensation requires a paid invoice amount.");
   }
   const payment = await resolveHostedStripePaidInvoicePaymentReference(invoice, stripe);
   if (!payment) {
-    throw new Error("Legacy synthetic Family checkout compensation could not resolve the paid invoice payment.");
+    throw new Error("Family payment-conflict compensation could not resolve the paid invoice payment.");
   }
 
   const existingRefunds = await stripe.refunds.list({
@@ -513,7 +512,7 @@ export async function cancelAndRefundHostedLegacySyntheticFamilyCheckoutSubscrip
   });
   const matchingRefunds = existingRefunds.data.filter(
     (refund) =>
-      refund.metadata?.[HOSTED_LEGACY_FAMILY_REFUND_EFFECT_METADATA_KEY] ===
+      refund.metadata?.[HOSTED_FAMILY_PAYMENT_CONFLICT_REFUND_EFFECT_METADATA_KEY] ===
       input.effectId,
   );
   if (matchingRefunds.some((refund) => refund.status === "succeeded")) {
@@ -522,7 +521,7 @@ export async function cancelAndRefundHostedLegacySyntheticFamilyCheckoutSubscrip
   if (matchingRefunds.some((refund) =>
     refund.status === "pending" || refund.status === "requires_action"
   )) {
-    throw new HostedLegacyFamilyRefundPendingError();
+    throw new HostedFamilyPaymentConflictRefundPendingError();
   }
 
   const previousTerminalRefund = matchingRefunds[0] ?? null;
@@ -530,12 +529,12 @@ export async function cancelAndRefundHostedLegacySyntheticFamilyCheckoutSubscrip
     {
       ...payment,
       metadata: {
-        [HOSTED_LEGACY_FAMILY_REFUND_EFFECT_METADATA_KEY]: input.effectId,
+        [HOSTED_FAMILY_PAYMENT_CONFLICT_REFUND_EFFECT_METADATA_KEY]: input.effectId,
       },
     },
     {
       idempotencyKey: [
-        `hosted-family-legacy-synthetic-refund:${input.effectId}`,
+        `hosted-family-payment-conflict-refund:${input.effectId}`,
         ...(previousTerminalRefund ? [`after:${previousTerminalRefund.id}`] : []),
       ].join(":"),
     },
@@ -544,9 +543,9 @@ export async function cancelAndRefundHostedLegacySyntheticFamilyCheckoutSubscrip
     return;
   }
   if (refund.status === "pending" || refund.status === "requires_action") {
-    throw new HostedLegacyFamilyRefundPendingError();
+    throw new HostedFamilyPaymentConflictRefundPendingError();
   }
-  throw new Error("Legacy synthetic Family checkout refund did not succeed.");
+  throw new Error("Family payment-conflict refund did not succeed.");
 }
 
 export async function applyStripeCheckoutExpired(
@@ -853,10 +852,10 @@ function buildHostedStripeActivationOutcomeFromFamilySubscription(
   return {
     activatedMemberId: firstActivation?.activatedMemberId ?? null,
     activatedMembers,
-    ...(familySubscription.cancelLegacySyntheticFamilySubscriptionId
+    ...(familySubscription.familyPaymentConflictCompensation
       ? {
-          cancelLegacySyntheticFamilySubscriptionId:
-            familySubscription.cancelLegacySyntheticFamilySubscriptionId,
+          familyPaymentConflictCompensation:
+            familySubscription.familyPaymentConflictCompensation,
         }
       : {}),
     hostedExecutionEventId: firstActivation?.hostedExecutionEventId ?? null,

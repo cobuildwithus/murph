@@ -10,6 +10,7 @@ import {
 
 import { getPrisma } from "../prisma";
 import {
+  createHostedStripeCheckoutSessionLookupKey,
   createHostedStripeCustomerLookupKey,
   createHostedStripeCustomerLookupKeyReadCandidates,
   createHostedStripeSubscriptionLookupKey,
@@ -29,6 +30,7 @@ import {
 } from "./shared";
 
 export interface HostedMemberStripeBillingRefSnapshot {
+  checkoutAttemptId?: string | null;
   currentBillingPhase?: string | null;
   currentBillingPlanCode?: string | null;
   currentCheckoutOffer?: string | null;
@@ -42,6 +44,7 @@ export interface HostedMemberStripeBillingRefSnapshot {
   pulseTrialRedeemedAt?: Date | null;
   scheduledBillingEffectiveAt?: Date | null;
   scheduledBillingPlanCode?: string | null;
+  stripeCheckoutSessionId?: string | null;
   stripeCustomerId: string | null;
   stripeSubscriptionId: string | null;
   stripeSubscriptionScheduleId?: string | null;
@@ -90,7 +93,7 @@ export interface HostedMemberStripeBillingRefWriteInput {
 // waits of up to 60 seconds per call. Extension performs one retrieve and one
 // update under this lock, so 13 minutes covers both 6-minute provider budgets
 // plus one minute for lock acquisition and local database reconciliation.
-const HOSTED_MEMBER_STRIPE_MUTATION_TRANSACTION_OPTIONS = {
+export const HOSTED_MEMBER_STRIPE_MUTATION_TRANSACTION_OPTIONS = {
   ...HOSTED_ONBOARDING_TRANSACTION_OPTIONS,
   timeout: 780_000,
 } as const;
@@ -392,6 +395,103 @@ export async function bindHostedMemberStripeCustomerIdIfMissing(input: {
   }), HOSTED_ONBOARDING_TRANSACTION_OPTIONS);
 }
 
+export async function reserveHostedMemberBillingCheckoutAttemptTx(input: {
+  proposedAttemptId: string;
+  memberId: string;
+  tx: Prisma.TransactionClient;
+}): Promise<{ attemptId: string; previousSessionId: string | null }> {
+  await lockHostedMemberRow(input.tx, input.memberId);
+  const current = await input.tx.hostedMemberBillingRef.findUnique({
+    where: { memberId: input.memberId },
+  });
+  const previousSessionId = current
+    ? (await readHostedMemberBillingPrivateState(current, input.tx)).stripeCheckoutSessionId
+    : null;
+  const attemptId = previousSessionId
+    ? input.proposedAttemptId
+    : current?.checkoutAttemptId ?? input.proposedAttemptId;
+
+  await input.tx.hostedMemberBillingRef.upsert({
+    create: {
+      checkoutAttemptId: attemptId,
+      memberId: input.memberId,
+    },
+    update: {
+      checkoutAttemptId: attemptId,
+    },
+    where: { memberId: input.memberId },
+  });
+
+  return { attemptId, previousSessionId };
+}
+
+export async function bindHostedMemberBillingCheckoutSessionTx(input: {
+  attemptId: string;
+  memberId: string;
+  previousSessionId: string | null;
+  sessionId: string;
+  tx: Prisma.TransactionClient;
+}): Promise<boolean> {
+  const current = await input.tx.hostedMemberBillingRef.findUnique({
+    where: { memberId: input.memberId },
+  });
+  if (!current || current.checkoutAttemptId !== input.attemptId) {
+    return false;
+  }
+  const currentSessionId = (
+    await readHostedMemberBillingPrivateState(current, input.tx)
+  ).stripeCheckoutSessionId;
+  if (currentSessionId === input.sessionId) {
+    return true;
+  }
+  if (currentSessionId !== input.previousSessionId) {
+    return false;
+  }
+
+  const { stripeCheckoutSessionIdEncrypted } =
+    await buildHostedMemberBillingPrivateColumns({
+      memberId: input.memberId,
+      prisma: input.tx,
+      stripeCheckoutSessionId: input.sessionId,
+      stripeCustomerId: null,
+      stripeSubscriptionId: null,
+    });
+  const updated = await input.tx.hostedMemberBillingRef.updateMany({
+    data: {
+      stripeCheckoutSessionIdEncrypted,
+      stripeCheckoutSessionLookupKey:
+        createHostedStripeCheckoutSessionLookupKey(input.sessionId),
+    },
+    where: {
+      checkoutAttemptId: input.attemptId,
+      memberId: input.memberId,
+      stripeCheckoutSessionLookupKey: input.previousSessionId
+        ? createHostedStripeCheckoutSessionLookupKey(input.previousSessionId)
+        : null,
+    },
+  });
+  return updated.count === 1;
+}
+
+export async function clearHostedMemberBillingCheckoutSessionIfMatchesTx(input: {
+  memberId: string;
+  sessionId: string;
+  tx: Prisma.TransactionClient;
+}): Promise<void> {
+  await input.tx.hostedMemberBillingRef.updateMany({
+    data: {
+      checkoutAttemptId: null,
+      stripeCheckoutSessionIdEncrypted: null,
+      stripeCheckoutSessionLookupKey: null,
+    },
+    where: {
+      memberId: input.memberId,
+      stripeCheckoutSessionLookupKey:
+        createHostedStripeCheckoutSessionLookupKey(input.sessionId),
+    },
+  });
+}
+
 export async function projectHostedMemberStripeBillingRefSnapshot(
   billingRef: HostedMemberBillingRef,
   prisma?: HostedOnboardingReadClient,
@@ -399,6 +499,9 @@ export async function projectHostedMemberStripeBillingRefSnapshot(
   const privateState = await readHostedMemberBillingPrivateState(billingRef, prisma);
 
   return {
+    ...(billingRef.checkoutAttemptId
+      ? { checkoutAttemptId: billingRef.checkoutAttemptId }
+      : {}),
     ...(billingRef.lastStripeEventCreatedAt !== undefined
       ? {
           lastStripeEventCreatedAt: billingRef.lastStripeEventCreatedAt,
@@ -419,6 +522,9 @@ export async function projectHostedMemberStripeBillingRefSnapshot(
       : {}),
     ...(billingRef.scheduledBillingPlanCode
       ? { scheduledBillingPlanCode: billingRef.scheduledBillingPlanCode }
+      : {}),
+    ...(privateState.stripeCheckoutSessionId
+      ? { stripeCheckoutSessionId: privateState.stripeCheckoutSessionId }
       : {}),
     stripeCustomerId: privateState.stripeCustomerId,
     stripeSubscriptionId: privateState.stripeSubscriptionId,

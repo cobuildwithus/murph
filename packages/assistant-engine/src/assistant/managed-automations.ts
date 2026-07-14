@@ -1,6 +1,7 @@
 import { createHash } from 'node:crypto'
 import {
   loadVault,
+  listAutomations,
   patchAutomation,
   repairLegacyPersonalHomeAutomationRoutes,
   showAutomation,
@@ -791,6 +792,68 @@ export async function repairLegacyPersonalHomeAutomationRoutesFromInputs(input: 
   })
 
   return result.updated
+}
+
+const HOSTED_SERVER_ROUTE_REPAIR_BATCH_LIMIT = 25
+
+export async function repairServerConfirmedPersonalHomeAutomationRoutes(input: {
+  confirmDirectHomeTarget: (deliveryTarget: string) => Promise<boolean>
+  now?: Date
+  vaultRoot: string
+}): Promise<{
+  pending: boolean
+  repaired: number
+  verified: number
+}> {
+  const records = await listAutomations({ vaultRoot: input.vaultRoot })
+  const targets = [...new Set(records.items.flatMap((record) => {
+    const target = record.route.deliveryTarget?.trim() ?? ''
+    return record.status !== 'archived' &&
+        record.route.channel === 'linq' &&
+        record.route.currentRouteSnapshot !== true &&
+        record.route.deliverySource === null &&
+        (
+          record.route.threadIsDirect === true ||
+          (
+            record.route.threadIsDirect == null &&
+            record.route.identityId === null &&
+            record.route.participantId === null &&
+            record.route.threadId === null
+          )
+        ) &&
+        target.length > 0
+      ? [target]
+      : []
+  }))].sort()
+  const now = input.now ?? new Date()
+  const batchCount = Math.max(
+    1,
+    Math.ceil(targets.length / HOSTED_SERVER_ROUTE_REPAIR_BATCH_LIMIT),
+  )
+  // Failed automation retries settle at an hourly cadence, so an hour bucket
+  // advances exactly one batch per retry without a minute/backoff alias.
+  const batchIndex = Math.floor(now.getTime() / 3_600_000) % batchCount
+  const batchStart = batchIndex * HOSTED_SERVER_ROUTE_REPAIR_BATCH_LIMIT
+  const batch = targets.slice(
+    batchStart,
+    batchStart + HOSTED_SERVER_ROUTE_REPAIR_BATCH_LIMIT,
+  )
+  const confirmed: string[] = []
+  for (const target of batch) {
+    if (await input.confirmDirectHomeTarget(target)) {
+      confirmed.push(target)
+    }
+  }
+  const result = await repairLegacyPersonalHomeAutomationRoutes({
+    confirmedDirectDeliveryTargets: confirmed,
+    now,
+    vaultRoot: input.vaultRoot,
+  })
+  return {
+    pending: targets.length > batch.length,
+    repaired: result.updated,
+    verified: confirmed.length,
+  }
 }
 
 function markPersonalMurphManagedAutomationSeeds(

@@ -1686,16 +1686,6 @@ describe('assistant cron runtime orchestration', () => {
       version: 1,
       jobs: [localJob],
     })
-    cronMocks.sendAssistantMessageLocal.mockResolvedValueOnce({
-      audienceVerification: 'unverified',
-      decision: {
-        kind: 'skip',
-        privateSummary: 'Audience was not verified.',
-      },
-      response: null,
-      session: { sessionId: 'session-unverified-device-activity' },
-    })
-
     await expect(processDueAssistantCronJobsLocal({
       executionContext: {
         hosted: {
@@ -1711,13 +1701,7 @@ describe('assistant cron runtime orchestration', () => {
       succeeded: 0,
     })
 
-    expect(cronMocks.sendAssistantMessageLocal).toHaveBeenCalledWith(
-      expect.objectContaining({
-        bindingDeliveryTarget: undefined,
-        deliveryTarget: 'saved-linq-chat',
-        threadIsDirect: true,
-      }),
-    )
+    expect(cronMocks.sendAssistantMessageLocal).not.toHaveBeenCalled()
     expect(parentAutomation.route.currentRouteSnapshot).toBeUndefined()
     await expect(listAssistantCronRuns({
       job: localJob.jobId,
@@ -5729,109 +5713,112 @@ describe('assistant cron runtime orchestration', () => {
     )
   })
 
-  it('keeps unmarked hosted legacy automations pending even with known directness', async () => {
-    vi.useFakeTimers()
-    vi.setSystemTime(new Date('2026-07-13T15:20:00.000Z'))
-    const { vaultRoot } = await createRuntimeContext(
-      'assistant-cron-runtime-linq-untagged-private-target-',
-    )
-    cronMocks.sendAssistantMessageLocal.mockResolvedValueOnce({
-      audienceVerification: 'unverified',
-      decision: {
-        kind: 'skip',
-        privateSummary: 'Audience was not verified.',
-      },
-      response: null,
-      session: { sessionId: 'session-unverified-legacy-route' },
-    })
-    getVaultAutomationStore(vaultRoot).push({
-      automationId: 'automation-linq-untagged-private-target',
-      continuityPolicy: 'fresh',
-      createdAt: '2026-07-13T14:40:00.000Z',
-      instructions: 'Send the morning reminder.',
-      route: {
-        channel: 'linq',
-        deliverySource: null,
-        deliveryTarget: 'old-home-chat',
-        identityId: 'h1_111111111111111111111111',
-        participantId: 'h1_222222222222222222222222',
-        threadId: 'h1_333333333333333333333333',
-        threadIsDirect: true,
-      },
-      schedule: {
-        at: '2026-07-13T15:00:00.000Z',
-        kind: 'at',
-      },
-      slug: 'linq-untagged-private-target-reminder',
-      status: 'active',
-      summary: null,
-      tags: ['assistant', 'scheduled'],
-      title: 'Untagged private Linq target reminder',
-      updatedAt: '2026-07-13T14:40:00.000Z',
-    })
-    const paths = resolveAssistantStatePaths(vaultRoot)
-    const source = (await listCanonicalAssistantCronRecords(vaultRoot))[0]
+  it.each([true, false])(
+    'keeps unmarked hosted legacy automations pending before provider execution (direct=%s)',
+    async (threadIsDirect) => {
+      vi.useFakeTimers()
+      vi.setSystemTime(new Date('2026-07-13T15:20:00.000Z'))
+      const { vaultRoot } = await createRuntimeContext(
+        'assistant-cron-runtime-linq-untagged-private-target-',
+      )
+      getVaultAutomationStore(vaultRoot).push({
+        automationId: 'automation-linq-untagged-private-target',
+        continuityPolicy: 'fresh',
+        createdAt: '2026-07-13T14:40:00.000Z',
+        instructions: 'Send the morning reminder.',
+        route: {
+          channel: 'linq',
+          deliverySource: null,
+          deliveryTarget: 'old-home-chat',
+          identityId: 'h1_111111111111111111111111',
+          participantId: 'h1_222222222222222222222222',
+          threadId: 'h1_333333333333333333333333',
+          threadIsDirect,
+        },
+        schedule: {
+          at: '2026-07-13T15:00:00.000Z',
+          kind: 'at',
+        },
+        slug: 'linq-untagged-private-target-reminder',
+        status: 'active',
+        summary: null,
+        tags: ['assistant', 'scheduled'],
+        title: 'Untagged private Linq target reminder',
+        updatedAt: '2026-07-13T14:40:00.000Z',
+      })
+      const paths = resolveAssistantStatePaths(vaultRoot)
+      const source = (await listCanonicalAssistantCronRecords(vaultRoot))[0]
 
-    if (!source) {
-      throw new Error('Expected canonical source to exist.')
-    }
+      if (!source) {
+        throw new Error('Expected canonical source to exist.')
+      }
 
-    const runtimeStore = await readAssistantCronCanonicalRuntimeStore(paths)
-    const runtimeState = resolveCanonicalRuntimeState(source, runtimeStore)
-    const claimed = await claimResolvedAssistantCronJob({
-      job: {
-        kind: 'canonical',
-        source,
-        runtimeState,
-        job: projectCanonicalAssistantCronJob({
+      const runtimeStore = await readAssistantCronCanonicalRuntimeStore(paths)
+      const runtimeState = resolveCanonicalRuntimeState(source, runtimeStore)
+      const claimed = await claimResolvedAssistantCronJob({
+        job: {
+          kind: 'canonical',
           source,
           runtimeState,
-        }),
-      },
-      paths,
-    })
-    const result = await executeClaimedAssistantCronJob({
-      executionContext: {
-        hosted: {
-          memberId: 'member-legacy-audience',
-          userEnvKeys: [],
+          job: projectCanonicalAssistantCronJob({
+            source,
+            runtimeState,
+          }),
         },
-      },
-      job: claimed,
-      paths,
-      trigger: 'scheduled',
-      vault: vaultRoot,
-    })
+        paths,
+      })
+      const result = await executeClaimedAssistantCronJob({
+        executionContext: {
+          hosted: {
+            memberId: 'member-legacy-audience',
+            userEnvKeys: [],
+          },
+        },
+        job: claimed,
+        paths,
+        trigger: 'scheduled',
+        vault: vaultRoot,
+      })
 
-    expect(result.removedAfterRun).toBe(false)
-    expect(result.run).toMatchObject({
-      error: expect.stringContaining('could not verify its saved audience'),
-      outcome: 'failed',
-      reason: 'ASSISTANT_CRON_AUDIENCE_UNVERIFIED',
-      status: 'failed',
-    })
-    expect(result.runErrorCode).toBe('ASSISTANT_CRON_AUDIENCE_UNVERIFIED')
-    expect(cronMocks.sendAssistantMessageLocal).toHaveBeenCalledOnce()
-    expect(
-      findCanonicalAutomation(
-        vaultRoot,
-        'automation-linq-untagged-private-target',
-      )?.route.currentRouteSnapshot,
-    ).toBeUndefined()
-    const finalizedRuntimeStore = await readAssistantCronCanonicalRuntimeStore(paths, {
-      reclaimStaleRunningClaims: false,
-    })
-    expect(finalizedRuntimeStore.jobs).toEqual([
-      expect.objectContaining({
-        jobId: claimed.job.jobId,
-        state: expect.objectContaining({
-          consecutiveFailures: 1,
-          pendingOccurrenceAt: '2026-07-13T15:00:00.000Z',
-          retryAfterAt: '2026-07-13T15:20:30.000Z',
+      expect(result.removedAfterRun).toBe(false)
+      expect(result.run).toMatchObject({
+        error: expect.stringContaining('could not verify its saved audience'),
+        outcome: 'failed',
+        reason: 'ASSISTANT_CRON_AUDIENCE_UNVERIFIED',
+        status: 'failed',
+      })
+      expect(result.runErrorCode).toBe('ASSISTANT_CRON_AUDIENCE_UNVERIFIED')
+      expect(cronMocks.sendAssistantMessageLocal).not.toHaveBeenCalled()
+      expect(
+        findCanonicalAutomation(
+          vaultRoot,
+          'automation-linq-untagged-private-target',
+        )?.route.threadIsDirect,
+      ).toBe(threadIsDirect)
+      expect(
+        findCanonicalAutomation(
+          vaultRoot,
+          'automation-linq-untagged-private-target',
+        )?.route.currentRouteSnapshot,
+      ).toBeUndefined()
+      const finalizedRuntimeStore = await readAssistantCronCanonicalRuntimeStore(
+        paths,
+        {
+          reclaimStaleRunningClaims: false,
+        },
+      )
+      expect(finalizedRuntimeStore.jobs).toEqual([
+        expect.objectContaining({
+          jobId: claimed.job.jobId,
+          state: expect.objectContaining({
+            consecutiveFailures: 1,
+            pendingOccurrenceAt: '2026-07-13T15:00:00.000Z',
+            retryAfterAt: '2026-07-13T15:20:30.000Z',
+          }),
         }),
-      }),
-    ])
-  })
+      ])
+    },
+  )
 
   it('executes canonical Telegram cron jobs with a thread-only route', async () => {
     vi.useFakeTimers()

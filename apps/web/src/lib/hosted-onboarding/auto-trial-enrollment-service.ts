@@ -5,6 +5,7 @@ import { getPrisma } from "../prisma";
 import { assertHostedLaunchRequiredConsentGranted } from "../legal/consent";
 import { HOSTED_APP_INITIAL_VISIT_HOME_PATH } from "./app-routes";
 import { buildHostedBillingOfferMetadata } from "./billing-offer-metadata";
+import { assertHostedMemberCanOwnDirectBilling } from "./billing-authority";
 import {
   HOSTED_PULSE_TRIAL_DAYS,
   HOSTED_PULSE_TRIAL_OFFER,
@@ -38,7 +39,6 @@ import {
 } from "./member-activation-runtime-wake";
 import { requireHostedStripeBillingPlanConfig } from "./runtime";
 import {
-  HOSTED_ONBOARDING_TRANSACTION_OPTIONS,
   lockHostedMemberRow,
 } from "./shared";
 import {
@@ -223,6 +223,11 @@ export async function ensureHostedAutoPulseTrialEnrollment(
     routing: invite.member.routing,
   });
 
+  await assertHostedMemberCanOwnDirectBilling({
+    memberId: invite.member.id,
+    prisma,
+  });
+
   const initialMember = await readHostedAutoPulseTrialEnrollmentMember({
     memberId: invite.member.id,
     prisma,
@@ -245,49 +250,53 @@ export async function ensureHostedAutoPulseTrialEnrollment(
   assertHostedAutoPulseTrialEligible(initialMember);
 
   const metadata = buildHostedAutoPulseTrialMetadata(invite.member.id);
-  const candidateStripeCustomerId = initialMember.billingRef?.stripeCustomerId ??
-    await createHostedPulseTrialStripeCustomer({
-      memberId: invite.member.id,
-      stripe,
-    });
-
-  const reservation = await prisma.$transaction(async (tx): Promise<HostedAutoPulseTrialReservationOutcome> => {
-    await lockHostedMemberRow(tx, invite.member.id);
-    const currentMember = await readHostedAutoPulseTrialEnrollmentMember({
-      memberId: invite.member.id,
-      prisma: tx,
-    });
-    const currentStatus = resolveHostedAutoPulseTrialExistingStatus(currentMember);
-    if (currentStatus) {
-      return {
-        kind: "existing",
-        result: buildHostedAutoPulseTrialEnrollmentResult(currentStatus),
-      };
-    }
-
-    assertHostedAutoPulseTrialEligible(currentMember);
-    const reservedBillingRef = currentMember.billingRef?.stripeCustomerId
-      ? currentMember.billingRef
-      : await bindHostedMemberStripeCustomerIdIfMissingTx({
-          memberId: invite.member.id,
-          stripeCustomerId: candidateStripeCustomerId,
-          tx,
-        });
-    const stripeCustomerId = reservedBillingRef?.stripeCustomerId;
-    if (!stripeCustomerId) {
-      throw hostedOnboardingError({
-        code: "HOSTED_AUTO_PULSE_TRIAL_CUSTOMER_BIND_FAILED",
-        httpStatus: 409,
-        message: "Murph could not reserve Stripe billing for trial activation. Try again.",
-        retryable: true,
+  const reservation = await withHostedMemberStripeMutationLock({
+    memberId: invite.member.id,
+    prisma,
+    run: async (tx): Promise<HostedAutoPulseTrialReservationOutcome> => {
+      const currentMember = await readHostedAutoPulseTrialEnrollmentMember({
+        memberId: invite.member.id,
+        prisma: tx,
       });
-    }
+      const currentStatus = resolveHostedAutoPulseTrialExistingStatus(currentMember);
+      if (currentStatus) {
+        return {
+          kind: "existing",
+          result: buildHostedAutoPulseTrialEnrollmentResult(currentStatus),
+        };
+      }
 
-    return {
-      kind: "reserved",
-      stripeCustomerId,
-    };
-  }, HOSTED_ONBOARDING_TRANSACTION_OPTIONS);
+      assertHostedAutoPulseTrialEligible(currentMember);
+      await assertHostedMemberCanOwnDirectBilling({
+        memberId: invite.member.id,
+        prisma: tx,
+      });
+      const reservedBillingRef = currentMember.billingRef?.stripeCustomerId
+        ? currentMember.billingRef
+        : await bindHostedMemberStripeCustomerIdIfMissingTx({
+            memberId: invite.member.id,
+            stripeCustomerId: await createHostedPulseTrialStripeCustomer({
+              memberId: invite.member.id,
+              stripe,
+            }),
+            tx,
+          });
+      const stripeCustomerId = reservedBillingRef?.stripeCustomerId;
+      if (!stripeCustomerId) {
+        throw hostedOnboardingError({
+          code: "HOSTED_AUTO_PULSE_TRIAL_CUSTOMER_BIND_FAILED",
+          httpStatus: 409,
+          message: "Murph could not reserve Stripe billing for trial activation. Try again.",
+          retryable: true,
+        });
+      }
+
+      return {
+        kind: "reserved",
+        stripeCustomerId,
+      };
+    },
+  });
 
   if (reservation.kind === "existing") {
     const currentMember = await readHostedAutoPulseTrialEnrollmentMember({
@@ -304,21 +313,14 @@ export async function ensureHostedAutoPulseTrialEnrollment(
     return reservation.result;
   }
 
-  const subscription = await resolveHostedAutoPulseTrialStripeSubscription({
-    memberId: invite.member.id,
-    metadata,
-    priceId,
-    stripe,
-    stripeCustomerId: reservation.stripeCustomerId,
-  });
   return finalizeHostedAutoPulseTrialEnrollment({
     memberId: invite.member.id,
+    metadata,
     now,
     priceId,
     prisma,
     stripe,
     stripeCustomerId: reservation.stripeCustomerId,
-    subscriptionId: subscription.id,
   });
 }
 
@@ -463,6 +465,11 @@ export async function applyHostedAutoPulseTrialCampaignDispositionTx(input: {
     tx: input.tx,
   });
   if (outcome.kind === "failed") {
+    await cancelHostedAutoPulseTrialStripeSubscriptionIfNeeded({
+      requestOptions: input.requestOptions,
+      stripe: input.stripe,
+      subscriptionId: outcome.cleanupStripeSubscriptionId,
+    });
     throw outcome.error;
   }
   await cancelHostedAutoPulseTrialStripeSubscriptionIfNeeded({
@@ -549,19 +556,44 @@ export async function runHostedAutoPulseTrialCampaignPostCommitEffects(input: {
 
 async function finalizeHostedAutoPulseTrialEnrollment(input: {
   memberId: string;
+  metadata: Record<string, string>;
   now: Date;
   priceId: string;
   prisma: PrismaClient;
   stripe: Stripe;
   stripeCustomerId: string;
-  subscriptionId: string;
 }): Promise<HostedAutoPulseTrialEnrollmentResult> {
   const outcome = await withHostedMemberStripeMutationLock({
     memberId: input.memberId,
     prisma: input.prisma,
     run: async (tx): Promise<HostedAutoPulseTrialFinalizationOutcome> => {
+      const reservedMember = await readHostedAutoPulseTrialEnrollmentMember({
+        memberId: input.memberId,
+        prisma: tx,
+      });
+      const reservedStatus = resolveHostedAutoPulseTrialExistingStatus(reservedMember);
+      if (reservedStatus) {
+        return {
+          kind: "completed",
+          cleanupStripeSubscriptionId: null,
+          postCommitEffects: EMPTY_AUTO_TRIAL_POST_COMMIT_EFFECTS,
+          result: buildHostedAutoPulseTrialEnrollmentResult(reservedStatus),
+        };
+      }
+      assertHostedAutoPulseTrialEligible(reservedMember);
+      await assertHostedMemberCanOwnDirectBilling({
+        memberId: input.memberId,
+        prisma: tx,
+      });
+      const resolvedSubscription = await resolveHostedAutoPulseTrialStripeSubscription({
+        memberId: input.memberId,
+        metadata: input.metadata,
+        priceId: input.priceId,
+        stripe: input.stripe,
+        stripeCustomerId: input.stripeCustomerId,
+      });
       const subscription = await input.stripe.subscriptions.retrieve(
-        input.subscriptionId,
+        resolvedSubscription.id,
       );
       const decisionNow = new Date();
       assertHostedAutoPulseTrialFinalizationSubscriptionEligible({
@@ -647,6 +679,18 @@ async function finalizeHostedAutoPulseTrialEnrollmentTx(input: {
   trialSnapshot: ReturnType<typeof readHostedAutoPulseTrialSubscriptionSnapshot>;
   tx: Prisma.TransactionClient;
 }): Promise<HostedAutoPulseTrialFinalizationOutcome> {
+  try {
+    await assertHostedMemberCanOwnDirectBilling({
+      memberId: input.memberId,
+      prisma: input.tx,
+    });
+  } catch (error) {
+    return {
+      kind: "failed",
+      cleanupStripeSubscriptionId: input.subscription.id,
+      error: error instanceof Error ? error : new Error(String(error)),
+    };
+  }
   const currentStatus = resolveHostedAutoPulseTrialExistingStatus(input.currentMember);
   const isIncompleteSameTrial = currentStatus === "already_enrolled" &&
     input.currentMember.billingRef?.pulseTrialRedeemedAt === null &&

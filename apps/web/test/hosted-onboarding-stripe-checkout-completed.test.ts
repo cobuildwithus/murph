@@ -5,6 +5,7 @@ import type { HostedMemberBillingSnapshot } from "@/src/lib/hosted-onboarding/ho
 
 const mocks = vi.hoisted(() => ({
   activateHostedMemberForPositiveSourceTx: vi.fn(),
+  clearHostedMemberBillingCheckoutSessionIfMatchesTx: vi.fn(),
   findMemberForStripeCheckoutSession: vi.fn(),
   findMemberForStripeSubscription: vi.fn(),
   listHostedStripeCheckoutSessionMemberIds: vi.fn(),
@@ -29,6 +30,8 @@ vi.mock("@/src/lib/hosted-onboarding/hosted-member-billing-store", async () => {
 
   return {
     ...actual,
+    clearHostedMemberBillingCheckoutSessionIfMatchesTx:
+      mocks.clearHostedMemberBillingCheckoutSessionIfMatchesTx,
     writeHostedMemberStripeBillingRefTx: mocks.writeHostedMemberStripeBillingRef,
   };
 });
@@ -100,6 +103,7 @@ describe("applyStripeCheckoutCompleted", () => {
   beforeEach(() => {
     vi.clearAllMocks();
     mocks.retrieveStripeSubscription.mockReset();
+    mocks.clearHostedMemberBillingCheckoutSessionIfMatchesTx.mockResolvedValue(undefined);
     vi.setSystemTime(new Date("2025-04-12T00:00:00.000Z"));
     vi.stubEnv(
       "HOSTED_ONBOARDING_STRIPE_PRICE_ID_LAUNCH_MONTHLY",
@@ -265,6 +269,13 @@ describe("applyStripeCheckoutCompleted", () => {
       stripeCustomerId: "cus_123",
       stripeSubscriptionId: "sub_123",
     }));
+    expect(
+      mocks.clearHostedMemberBillingCheckoutSessionIfMatchesTx,
+    ).toHaveBeenCalledWith({
+      memberId: "member_123",
+      sessionId: "cs_trial_123",
+      tx: {},
+    });
     expect(mocks.activateHostedMemberForPositiveSourceTx).toHaveBeenCalledWith({
       dispatchContext: expect.objectContaining({
         sourceEventId: "checkout.session:cs_trial_123",
@@ -587,6 +598,13 @@ describe("applyStripeCheckoutCompleted", () => {
 
     expect(mocks.writeHostedMemberStripeBillingTx).not.toHaveBeenCalled();
     expect(mocks.activateHostedMemberForPositiveSourceTx).not.toHaveBeenCalled();
+    expect(
+      mocks.clearHostedMemberBillingCheckoutSessionIfMatchesTx,
+    ).toHaveBeenCalledWith({
+      memberId: "member_123",
+      sessionId: "cs_trial_123",
+      tx: {},
+    });
   });
 
   it("returns a valid delayed Pulse Trial checkout subscription for loser cleanup", async () => {

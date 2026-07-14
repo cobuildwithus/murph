@@ -46,6 +46,16 @@ The encrypted owner-table fields already preserve the raw values needed to re-de
 - `HostedMemberRouting.telegramUserLookupKey`
 - `HostedMemberBillingRef.stripeCustomerLookupKey`
 - `HostedMemberBillingRef.stripeSubscriptionLookupKey`
+- `HostedStripeEvent.familyPaymentConflictCompensationInvoiceLookupKey`
+- `HostedStripeEvent.familyPaymentConflictCompensationSubscriptionLookupKey`
+
+`HostedStripeEvent.familyPaymentConflictCompensationCandidateSubscriptionLookupKey`
+does not retain its raw subscription id on every event row. Before retiring an
+old read key, a rotation must let pending Stripe receipts drain or re-key their
+candidate subscription indexes from the provider event while the old key is
+still readable. Accepted compensation owners retain an encrypted subscription
+and optional invoice source of truth and must be re-keyed before their old read
+key is retired.
 
 ## Current Guidance
 

@@ -10,7 +10,6 @@ export async function createHostedPulseTrialStripeCustomer(input: {
 }): Promise<string> {
   const customer = await input.stripe.customers.create({
     metadata: {
-      memberId: input.memberId,
       source: "hosted.auto_pulse_trial",
     },
   }, {

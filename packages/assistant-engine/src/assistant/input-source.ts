@@ -3,6 +3,7 @@ import {
   readHostedMailboxAssistantInputItems,
 } from './hosted-mailbox-input-items.js'
 import {
+  compareAssistantInputCursors,
   listAssistantInputEvents,
   type AssistantInputAttachmentEvidence,
   type AssistantInputAttachmentDescriptor,
@@ -78,6 +79,22 @@ export interface AssistantTurnConversationInputQuery {
   signal?: AbortSignal
 }
 
+/**
+ * Lists the contiguous same-actor prefix for one concrete delivery route.
+ *
+ * Group-chat cursors are shared by every actor on the route. Implementations
+ * must therefore page through unrelated routes, stop before the first input
+ * from another actor on this route, and never return a progress cursor beyond
+ * that barrier.
+ */
+export interface AssistantTurnRouteActorInputQuery
+  extends AssistantTurnConversationInputQuery {
+  deliveryRoute: {
+    channel: string
+    threadId: string
+  }
+}
+
 export interface AssistantInputCandidateBatch {
   inputs: AssistantInputCandidate[]
   nextCursor: AssistantInputCursor | null
@@ -89,6 +106,9 @@ export interface AssistantInputSource {
   ): Promise<void>
   listInputCandidates(
     input: AssistantInputCandidateQuery,
+  ): Promise<AssistantInputCandidateBatch>
+  listNewConversationActorInputs?(
+    input: AssistantTurnRouteActorInputQuery,
   ): Promise<AssistantInputCandidateBatch>
   listNewConversationInputs(
     input: AssistantTurnConversationInputQuery,
@@ -122,6 +142,13 @@ export function createStoreBackedAssistantInputSource(input: {
         vault: input.vault,
       })
     },
+    async listNewConversationActorInputs(query) {
+      return listStoredAssistantRouteActorInputs({
+        ...query,
+        afterCursor: query.afterCursor ?? null,
+        vault: input.vault,
+      })
+    },
     async listNewConversationInputs(query) {
       return listStoredAssistantInputCandidates({
         afterCursor: query.afterCursor ?? null,
@@ -135,6 +162,198 @@ export function createStoreBackedAssistantInputSource(input: {
       })
     },
   }
+}
+
+async function listStoredAssistantRouteActorInputs(input: {
+  afterCursor: AssistantInputCursor | null
+  conversation: AssistantInputConversationRef
+  deliveryRoute: AssistantTurnRouteActorInputQuery['deliveryRoute']
+  knownProjectionCaptureIds?: readonly string[]
+  knownInputIds?: readonly string[]
+  limit?: number
+  signal?: AbortSignal
+  vault: string
+}): Promise<AssistantInputCandidateBatch> {
+  assertAssistantInputSignalNotAborted(input.signal)
+  const knownInputIds = new Set(input.knownInputIds ?? [])
+  const knownProjectionCaptureIds = new Set(input.knownProjectionCaptureIds ?? [])
+  const candidateLimit = normalizeAssistantInputQueryLimit(input.limit)
+  const selected: AssistantInputEventRecord[] = []
+  let pageCursor = input.afterCursor
+  let progressCursor = input.afterCursor
+  let stopped = false
+
+  while (!stopped && selected.length < candidateLimit) {
+    const listed = await listAssistantInputEvents({
+      afterCursor: pageCursor,
+      limit: DEFAULT_ASSISTANT_INPUT_QUERY_LIMIT,
+      source: null,
+      vault: input.vault,
+    })
+    assertAssistantInputSignalNotAborted(input.signal)
+    if (listed.events.length === 0) {
+      break
+    }
+
+    for (const event of listed.events) {
+      if (!assistantInputEventMatchesDeliveryRoute({
+        conversation: event.conversation,
+        deliveryRoute: input.deliveryRoute,
+        replyTarget: event.replyTarget,
+        source: event.conversation?.source ?? event.sourceRef.source,
+        threadIsDirect: input.conversation.threadIsDirect,
+      })) {
+        continue
+      }
+      if (!assistantInputEventMatchesConversationActor({
+        candidate: event.conversation,
+        expected: input.conversation,
+      })) {
+        stopped = true
+        break
+      }
+
+      progressCursor = event.cursor
+      if (
+        knownInputIds.has(event.inputId) ||
+        (event.projection.captureId &&
+          knownProjectionCaptureIds.has(event.projection.captureId))
+      ) {
+        continue
+      }
+      selected.push(event)
+      if (selected.length >= candidateLimit) {
+        stopped = true
+        break
+      }
+    }
+
+    if (stopped || listed.events.length < DEFAULT_ASSISTANT_INPUT_QUERY_LIMIT) {
+      break
+    }
+    const nextPageCursor = listed.nextCursor
+    if (!nextPageCursor) {
+      break
+    }
+    if (
+      !pageCursor ||
+      compareAssistantInputCursors(nextPageCursor, pageCursor) > 0
+    ) {
+      pageCursor = nextPageCursor
+      continue
+    }
+    break
+  }
+
+  const hostedMailboxItems = await readHostedMailboxAssistantInputItems({
+    inputIds: selected.map((event) => event.inputId),
+    vault: input.vault,
+  })
+  return {
+    inputs: selected.map((event) =>
+      assistantInputCandidateFromStoredEventWithHostedMailboxItem({
+        event,
+        hostedMailboxItemId: hostedMailboxItems.get(event.inputId) ?? null,
+      }),
+    ),
+    nextCursor: progressCursor,
+  }
+}
+
+export function selectContiguousAssistantRouteActorInputBatch(input: {
+  candidates: readonly AssistantInputCandidate[]
+  query: AssistantTurnRouteActorInputQuery
+}): AssistantInputCandidateBatch {
+  const knownInputIds = new Set(input.query.knownInputIds ?? [])
+  const knownProjectionCaptureIds = new Set(
+    input.query.knownProjectionCaptureIds ?? [],
+  )
+  const limit = normalizeAssistantInputQueryLimit(input.query.limit)
+  const selected: AssistantInputCandidate[] = []
+  let nextCursor = input.query.afterCursor ?? null
+
+  for (const candidate of [...input.candidates].sort((left, right) =>
+    compareAssistantInputCursors(left.event.cursor, right.event.cursor),
+  )) {
+    if (
+      input.query.afterCursor &&
+      compareAssistantInputCursors(candidate.event.cursor, input.query.afterCursor) <= 0
+    ) {
+      continue
+    }
+    if (!assistantInputEventMatchesDeliveryRoute({
+      conversation: candidate.event.conversation,
+      deliveryRoute: input.query.deliveryRoute,
+      replyTarget: candidate.event.replyTarget,
+      source: candidate.event.source,
+      threadIsDirect: input.query.conversation.threadIsDirect,
+    })) {
+      continue
+    }
+    if (!assistantInputEventMatchesConversationActor({
+      candidate: candidate.event.conversation,
+      expected: input.query.conversation,
+    })) {
+      break
+    }
+
+    nextCursor = candidate.event.cursor
+    if (
+      knownInputIds.has(candidate.event.inputId) ||
+      (candidate.projection.captureId &&
+        knownProjectionCaptureIds.has(candidate.projection.captureId))
+    ) {
+      continue
+    }
+    selected.push(candidate)
+    if (selected.length >= limit) {
+      break
+    }
+  }
+
+  return { inputs: selected, nextCursor }
+}
+
+function assistantInputEventMatchesDeliveryRoute(input: {
+  conversation: AssistantInputConversationRef | null
+  deliveryRoute: AssistantTurnRouteActorInputQuery['deliveryRoute']
+  replyTarget: AssistantInputEventRecord['replyTarget']
+  source: string
+  threadIsDirect: boolean | null
+}): boolean {
+  return typeof input.threadIsDirect === 'boolean' &&
+    input.conversation?.threadIsDirect === input.threadIsDirect &&
+    normalizeAssistantInputRouteScalar(input.source) ===
+      normalizeAssistantInputRouteScalar(input.deliveryRoute.channel) &&
+    normalizeAssistantInputRouteScalar(input.replyTarget?.channel) ===
+      normalizeAssistantInputRouteScalar(input.deliveryRoute.channel) &&
+    normalizeAssistantInputRouteScalar(input.replyTarget?.threadId) ===
+      normalizeAssistantInputRouteScalar(input.deliveryRoute.threadId)
+}
+
+function assistantInputEventMatchesConversationActor(input: {
+  candidate: AssistantInputConversationRef | null
+  expected: AssistantInputConversationRef
+}): boolean {
+  if (input.expected.threadIsDirect !== false) {
+    return true
+  }
+  return Boolean(
+    input.expected.actorId &&
+    input.candidate?.actorId &&
+    input.candidate.threadIsDirect === false &&
+    input.candidate.accountId === input.expected.accountId &&
+    input.candidate.actorId === input.expected.actorId &&
+    input.candidate.actorIsSelf === input.expected.actorIsSelf &&
+    input.candidate.source === input.expected.source,
+  )
+}
+
+function normalizeAssistantInputRouteScalar(
+  value: string | null | undefined,
+): string | null {
+  const normalized = value?.trim() ?? ''
+  return normalized.length > 0 ? normalized : null
 }
 
 async function listStoredAssistantInputCandidates(input: {

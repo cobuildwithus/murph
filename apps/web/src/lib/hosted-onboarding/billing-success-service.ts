@@ -3,6 +3,7 @@ import type Stripe from "stripe";
 
 import { getPrisma } from "../prisma";
 import { hostedOnboardingError } from "./errors";
+import { hasActiveHostedFamilyBillingAuthority } from "./billing-authority";
 import {
   signalHostedMemberActivationRuntimeWakeBestEffortResult,
 } from "./member-activation-runtime-wake";
@@ -122,6 +123,18 @@ async function applyHostedCheckoutSessionSuccess(input: {
           message: "Finish signup from your latest Murph link before continuing.",
           httpStatus: 403,
         });
+      }
+
+      if (await hasActiveHostedFamilyBillingAuthority({
+        memberId: input.memberId,
+        prisma: tx,
+      })) {
+        return {
+          activatedMemberId: null,
+          cleanupPulseTrialStripeSubscriptionId: null,
+          hostedExecutionEventId: null,
+          welcomeEmailMemberId: null,
+        };
       }
 
       return applyStripeCheckoutCompleted(input.session, tx);

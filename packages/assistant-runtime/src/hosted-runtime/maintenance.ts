@@ -10,6 +10,7 @@ import {
   type AssistantRunEvent,
   type AssistantTurnEnvironment,
   type AssistantTurnConversationInputQuery,
+  repairServerConfirmedPersonalHomeAutomationRoutes,
   runAssistantAutomationPass,
 } from "@murphai/assistant-engine";
 import { createIntegratedInboxServices } from "@murphai/inbox-services";
@@ -421,6 +422,41 @@ export async function runHostedAssistantAutomation(
       }
       return result;
     },
+    async listNewConversationActorInputs(query) {
+      const startedAt = Date.now();
+      const baseBatch = await baseInputSource.listNewConversationActorInputs?.(query);
+      if (!baseBatch) {
+        return {
+          inputs: [],
+          nextCursor: query.afterCursor ?? null,
+        };
+      }
+      const result = await filterHostedAssistantInputBatchByLinqRouteAuthority({
+        batch: baseBatch,
+        effectsPort: options?.effectsPort ?? null,
+        signal: query.signal,
+        userId: wake.userId,
+        vaultRoot,
+      });
+      if (result.inputs.length > 0) {
+        activeTurnInputIngested = true;
+      }
+      if (redactedInputQueryLogCount < HOSTED_ASSISTANT_INPUT_QUERY_REDACTED_LOG_LIMIT) {
+        redactedLogEntries.push(emitHostedRuntimeRedactedLog({
+          component: "runtime",
+          details: buildHostedAssistantNewConversationInputQueryLogDetails({
+            elapsedMs: elapsedSince(startedAt),
+            query,
+            result,
+          }),
+          wake,
+          message: "Hosted assistant route-actor input query finished.",
+          phase: "wake.running",
+        }));
+        redactedInputQueryLogCount += 1;
+      }
+      return result;
+    },
     async listNewConversationInputs(query) {
       const startedAt = Date.now();
       const result = await baseInputSource.listNewConversationInputs(query);
@@ -495,6 +531,30 @@ export async function runHostedAssistantAutomation(
           vaultRoot,
         });
         legacyRoutesRepaired += repair.repaired;
+        const serverRepair = await repairServerConfirmedPersonalHomeAutomationRoutes({
+          confirmDirectHomeTarget: async (deliveryTarget) => {
+            const assertRoute = options?.effectsPort?.assertLinqRecentInboundEngagement;
+            if (!assertRoute) {
+              return false;
+            }
+            try {
+              const result = await assertRoute({
+                authorityCheckOnly: true,
+                directHomeRouteOnly: true,
+                target: deliveryTarget,
+                targetKind: "thread",
+              }, { signal });
+              return result?.routeAuthorityKind === "member-home";
+            } catch {
+              return false;
+            }
+          },
+          now: options?.now ?? new Date(),
+          vaultRoot,
+        });
+        legacyRoutesRepaired += serverRepair.repaired;
+        // Server-confirmed repair is opportunistic compatibility work. A
+        // permanently unconfirmable legacy target must not defer unrelated cron.
         routeProofBacklogPending = repair.pending;
       },
       ...(options?.beforeProviderAcceptedInputs

@@ -207,7 +207,7 @@ type AssistantAutoReplyDecision =
 type AssistantActiveTurnInputSource = Pick<
   AssistantInputSource,
   'checkpointAcceptedInput' | 'listNewConversationInputs' | 'refresh'
-> & Partial<Pick<AssistantInputSource, 'listInputCandidates'>>
+> & Partial<Pick<AssistantInputSource, 'listNewConversationActorInputs'>>
 
 type AssistantAutoReplySendResult = Awaited<
   ReturnType<typeof sendAssistantMessage>
@@ -2001,169 +2001,43 @@ async function listAutoReplyActiveTurnInputs(input: {
   knownInputIds: readonly string[]
   signal?: AbortSignal
 }): Promise<AssistantInputCandidateBatch> {
-  const strict = await input.inputSource.listNewConversationInputs({
-    afterCursor: input.afterCursor,
-    conversation: input.conversation,
-    knownProjectionCaptureIds: input.knownProjectionCaptureIds,
-    knownInputIds: input.knownInputIds,
-    signal: input.signal,
-  })
   const expectedChannel = normalizeNullableString(input.context.firstItem.summary.source)
   const deliveryTarget = readAutoReplyDeliveryTarget(input.context)
-  if (!input.inputSource.listInputCandidates || !expectedChannel || !deliveryTarget) {
-    return strict
-  }
-
-  const routeListed = await input.inputSource.listInputCandidates({
-    afterCursor: input.afterCursor,
-    knownInputIds: [
-      ...input.knownInputIds,
-      ...strict.inputs.map((candidate) => candidate.event.inputId),
-    ],
-    limit: 100,
-    signal: input.signal,
-    sourceId: expectedChannel,
-  })
-  const knownInputIds = new Set(input.knownInputIds)
-  const knownProjectionCaptureIds = new Set(input.knownProjectionCaptureIds)
-  const sameRouteInputs = routeListed.inputs
-    .filter((candidate) => !knownInputIds.has(candidate.event.inputId))
-    .filter((candidate) =>
-      candidate.projection.captureId
-        ? !knownProjectionCaptureIds.has(candidate.projection.captureId)
-        : true,
-    )
-    .filter((candidate) =>
-      isSameAutoReplyDeliveryRoute({
-        candidate,
-        expectedChannel,
-        threadIsDirect: input.conversation.threadIsDirect,
+  if (
+    input.inputSource.listNewConversationActorInputs &&
+    expectedChannel &&
+    deliveryTarget
+  ) {
+    return input.inputSource.listNewConversationActorInputs({
+      afterCursor: input.afterCursor,
+      conversation: input.conversation,
+      deliveryRoute: {
+        channel: expectedChannel,
         threadId: deliveryTarget,
-      }),
-    )
-    .sort((left, right) =>
-      compareAssistantInputCursors(left.event.cursor, right.event.cursor),
-    )
-  const actorBarrier = sameRouteInputs.find((candidate) =>
-    !isSameAutoReplyGroupActor({
-      candidate,
-      conversation: input.conversation,
-    }),
-  )
-  const isBeforeActorBarrier = (candidate: AssistantInputCandidate) =>
-    !actorBarrier ||
-    compareAssistantInputCursors(
-      candidate.event.cursor,
-      actorBarrier.event.cursor,
-    ) < 0
-  const routeInputs = sameRouteInputs.filter((candidate) =>
-    isBeforeActorBarrier(candidate) &&
-    isSameAutoReplyGroupActor({
-      candidate,
-      conversation: input.conversation,
-    }),
-  )
+      },
+      knownProjectionCaptureIds: input.knownProjectionCaptureIds,
+      knownInputIds: input.knownInputIds,
+      signal: input.signal,
+    })
+  }
 
-  if (actorBarrier) {
-    // Input cursors are channel-wide. A different member's message owns the
-    // next actor-scoped turn, so do not admit or advance past it even when a
-    // later strict-conversation query already returned this actor's message.
-    const admitted = mergeAssistantInputCandidateBatches([
-      {
-        inputs: strict.inputs.filter(isBeforeActorBarrier),
-        nextCursor: null,
-      },
-      {
-        inputs: routeInputs,
-        nextCursor: null,
-      },
-    ])
+  // A strict conversation query cannot observe a different actor on a shared
+  // group route. Without an authoritative route query, admitting a later
+  // same-actor input could advance across that unseen barrier.
+  if (input.conversation.threadIsDirect === false) {
     return {
-      inputs: admitted.inputs,
-      nextCursor:
-        admitted.inputs[admitted.inputs.length - 1]?.event.cursor ?? input.afterCursor,
+      inputs: [],
+      nextCursor: input.afterCursor,
     }
   }
 
-  return mergeAssistantInputCandidateBatches([
-    strict,
-    {
-      inputs: routeInputs,
-      nextCursor: routeInputs[0]
-        ? routeInputs[routeInputs.length - 1]!.event.cursor
-        : strict.nextCursor,
-    },
-  ])
-}
-
-function mergeAssistantInputCandidateBatches(
-  batches: readonly AssistantInputCandidateBatch[],
-): AssistantInputCandidateBatch {
-  const byInputId = new Map<string, AssistantInputCandidate>()
-  for (const batch of batches) {
-    for (const candidate of batch.inputs) {
-      byInputId.set(candidate.event.inputId, candidate)
-    }
-  }
-  const inputs = [...byInputId.values()].sort((left, right) =>
-    compareAssistantInputCursors(left.event.cursor, right.event.cursor),
-  )
-  const cursorCandidates = [
-    ...batches.map((batch) => batch.nextCursor).filter(
-      (cursor): cursor is AssistantInputCandidate['event']['cursor'] =>
-        cursor !== null,
-    ),
-    ...inputs.map((candidate) => candidate.event.cursor),
-  ]
-  const nextCursor = cursorCandidates.reduce<
-    AssistantInputCandidate['event']['cursor'] | null
-  >(
-    (latest, cursor) =>
-      !latest || compareAssistantInputCursors(cursor, latest) > 0
-        ? cursor
-        : latest,
-    null,
-  )
-  return {
-    inputs,
-    nextCursor,
-  }
-}
-
-function isSameAutoReplyDeliveryRoute(input: {
-  candidate: AssistantInputCandidate
-  expectedChannel: string
-  threadIsDirect: boolean | null
-  threadId: string
-}): boolean {
-  const replyTarget = input.candidate.event.replyTarget
-  return (
-    typeof input.threadIsDirect === 'boolean' &&
-    input.candidate.event.conversation?.threadIsDirect === input.threadIsDirect &&
-    normalizeNullableString(replyTarget?.channel) === input.expectedChannel &&
-    normalizeNullableString(input.candidate.event.source) === input.expectedChannel &&
-    readProviderRouteScalar(replyTarget?.threadId) === input.threadId
-  )
-}
-
-function isSameAutoReplyGroupActor(input: {
-  candidate: AssistantInputCandidate
-  conversation: AssistantInputConversationRef
-}): boolean {
-  if (input.conversation.threadIsDirect !== false) {
-    return true
-  }
-
-  const candidateConversation = input.candidate.event.conversation
-  return Boolean(
-    input.conversation.actorId &&
-    candidateConversation?.actorId &&
-    candidateConversation.threadIsDirect === false &&
-    candidateConversation.accountId === input.conversation.accountId &&
-    candidateConversation.actorId === input.conversation.actorId &&
-    candidateConversation.actorIsSelf === input.conversation.actorIsSelf &&
-    candidateConversation.source === input.conversation.source,
-  )
+  return input.inputSource.listNewConversationInputs({
+    afterCursor: input.afterCursor,
+    conversation: input.conversation,
+    knownInputIds: input.knownInputIds,
+    knownProjectionCaptureIds: input.knownProjectionCaptureIds,
+    signal: input.signal,
+  })
 }
 
 function loadAssistantInputCandidateSummaries(input: {

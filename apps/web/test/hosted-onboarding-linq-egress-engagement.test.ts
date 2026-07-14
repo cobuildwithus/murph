@@ -186,7 +186,36 @@ describe("hosted Linq egress authority", () => {
     });
   });
 
-  it("uses the live same-member route without trusting runner authority", async () => {
+  it("confirms legacy automation migration only against the member home route", async () => {
+    const prisma = createPrismaStub({
+      homeChatId: "chat-home",
+      threadRouteContainerMemberId: "member-1",
+    });
+
+    await expect(assertHostedLinqRecentInboundEngagementForRuntime({
+      directHomeRouteOnly: true,
+      memberId: "member-1",
+      prisma: asRuntimeEngagementPrisma(prisma),
+      target: "chat-home",
+      targetKind: "thread",
+    })).resolves.toEqual({
+      routeAuthorityKind: "member-home",
+      targetOverride: null,
+    });
+
+    await expect(assertHostedLinqRecentInboundEngagementForRuntime({
+      directHomeRouteOnly: true,
+      memberId: "member-1",
+      prisma: asRuntimeEngagementPrisma(prisma),
+      target: "group-thread",
+      targetKind: "thread",
+    })).rejects.toMatchObject({
+      code: "HOSTED_LINQ_EGRESS_ROUTE_AUTHORITY_MISMATCH",
+      httpStatus: 403,
+    });
+  });
+
+  it("uses the live same-member route even when runner authority is stale", async () => {
     const prisma = createPrismaStub({
       threadRouteContainerMemberId: "member-1",
     });
@@ -920,6 +949,37 @@ describe("hosted Linq egress authority", () => {
 
     expect(response.status).toBe(200);
     await expect(response.json()).resolves.toEqual({ ok: true });
+    expect(prisma.hostedLinqDelivery.create).not.toHaveBeenCalled();
+    expect(prisma.hostedLinqDelivery.createMany).not.toHaveBeenCalled();
+    expect(prisma.hostedLinqDelivery.updateMany).not.toHaveBeenCalled();
+  });
+
+  it("acknowledges an exact member-home authority check without claiming provider dispatch", async () => {
+    const prisma = createPrismaStub({
+      homeChatId: "chat-home",
+    });
+    mocks.getPrisma.mockReturnValue(prisma);
+
+    const response = await postHostedLinqEgressEngagement(
+      new Request("https://internal.example.test/engagement", {
+        body: JSON.stringify({
+          authorityCheckOnly: true,
+          directHomeRouteOnly: true,
+          target: "chat-home",
+          targetKind: "thread",
+        }),
+        headers: {
+          "content-type": "application/json",
+        },
+        method: "POST",
+      }),
+    );
+
+    expect(response.status).toBe(200);
+    await expect(response.json()).resolves.toEqual({
+      ok: true,
+      routeAuthorityKind: "member-home",
+    });
     expect(prisma.hostedLinqDelivery.create).not.toHaveBeenCalled();
     expect(prisma.hostedLinqDelivery.createMany).not.toHaveBeenCalled();
     expect(prisma.hostedLinqDelivery.updateMany).not.toHaveBeenCalled();

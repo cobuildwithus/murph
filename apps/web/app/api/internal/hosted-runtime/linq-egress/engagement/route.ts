@@ -68,6 +68,7 @@ export const POST = withJsonError(async (request: Request) => {
     const asserted = await assertHostedLinqRecentInboundEngagementForRuntime({
       answeredMailboxItemIds,
       currentInbound,
+      directHomeRouteOnly: body.directHomeRouteOnly === true,
       directRecipientPhoneNumber,
       fromPhoneNumber,
       homeRouteFallbackAllowed: body.homeRouteFallbackAllowed === true,
@@ -140,6 +141,9 @@ export const POST = withJsonError(async (request: Request) => {
 
   return jsonOk({
     ok: true,
+    ...(assertion.asserted.routeAuthorityKind
+      ? { routeAuthorityKind: assertion.asserted.routeAuthorityKind }
+      : {}),
     ...(assertion.asserted.targetOverride
       ? { targetOverride: assertion.asserted.targetOverride }
       : {}),

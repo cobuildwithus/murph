@@ -904,10 +904,15 @@ function isLegacyBareLinqPersonalHomeRoute(route: AutomationRoute): boolean {
     && route.currentRouteSnapshot !== true
     && route.deliverySource === null
     && Boolean(route.deliveryTarget)
-    && route.identityId === null
-    && route.participantId === null
-    && route.threadId === null
-    && route.threadIsDirect == null;
+    && (
+      route.threadIsDirect === true
+      || (
+        route.threadIsDirect == null
+        && route.identityId === null
+        && route.participantId === null
+        && route.threadId === null
+      )
+    );
 }
 
 export async function advanceAutomationDeviceActivityCursor(

@@ -1,4 +1,14 @@
 ALTER TABLE "hosted_stripe_event"
-ADD COLUMN "legacy_family_checkout_compensation_accepted_at" TIMESTAMP(3),
-ADD COLUMN "legacy_family_checkout_compensation_invoice_lookup_key" TEXT,
-ADD COLUMN "legacy_family_checkout_compensation_subscription_lookup_key" TEXT;
+ADD COLUMN "family_payment_conflict_compensation_candidate_subscription_lookup_key" TEXT,
+ADD COLUMN "family_payment_conflict_compensation_accepted_at" TIMESTAMP(3),
+ADD COLUMN "family_payment_conflict_compensation_encryption_member_id" TEXT,
+ADD COLUMN "family_payment_conflict_compensation_invoice_id_encrypted" TEXT,
+ADD COLUMN "family_payment_conflict_compensation_invoice_lookup_key" TEXT,
+ADD COLUMN "family_payment_conflict_compensation_subscription_id_encrypted" TEXT,
+ADD COLUMN "family_payment_conflict_compensation_subscription_lookup_key" TEXT;
+
+CREATE UNIQUE INDEX "hosted_stripe_event_family_payment_conflict_subscription_key"
+ON "hosted_stripe_event"("family_payment_conflict_compensation_subscription_lookup_key");
+
+CREATE INDEX "hosted_stripe_event_family_conflict_candidate_key"
+ON "hosted_stripe_event"("family_payment_conflict_compensation_candidate_subscription_lookup_key");

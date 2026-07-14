@@ -4,6 +4,7 @@ import {
   isSameAssistantConversationRef,
   readAssistantInputEvent,
   readHostedMailboxAssistantInputItems,
+  selectContiguousAssistantRouteActorInputBatch,
   type AssistantInputCandidate,
   type AssistantInputCandidateBatch,
   type AssistantInputCandidateQuery,
@@ -53,11 +54,12 @@ export async function resolveHostedPreferenceCausalSeqForSelectedInput(input: {
   assistantInputIds: readonly string[];
   vaultRoot: string;
 }): Promise<string | null> {
-  if (input.assistantInputIds.length !== 1 || !input.assistantInputIds[0]) {
+  const causalInputId = input.assistantInputIds[0];
+  if (!causalInputId) {
     return null;
   }
   const event = await readAssistantInputEvent({
-    inputId: input.assistantInputIds[0],
+    inputId: causalInputId,
     vault: input.vaultRoot,
   });
   if (event?.sourceRef.kind !== "hosted-mailbox") {
@@ -146,6 +148,42 @@ export function createHostedAssistantInputSource(input: {
         emittedCursorKeys: emittedListInputCandidateCursorKeys,
         query,
       });
+    },
+    async listNewConversationActorInputs(query) {
+      assertHostedAssistantInputQueryNotAborted(query.signal);
+      const pendingInputIds = await readExistingHostedPendingAssistantInputIds({
+        vaultRoot: input.vaultRoot,
+      });
+      const pendingEvents = await readHostedReplyablePendingAssistantInputEvents({
+        inputIds: pendingInputIds,
+        missingInput: "skip",
+        vaultRoot: input.vaultRoot,
+      });
+      const hostedMailboxItems = await readHostedMailboxAssistantInputItems({
+        inputIds: pendingEvents.map((event) => event.inputId),
+        vault: input.vaultRoot,
+      });
+      assertHostedAssistantInputQueryNotAborted(query.signal);
+      const batch = selectContiguousAssistantRouteActorInputBatch({
+        candidates: pendingEvents.map((event) =>
+          assistantInputCandidateFromStoredEvent(event, {
+            hostedMailboxItemId: hostedMailboxItems.get(event.inputId) ?? null,
+          })
+        ),
+        query,
+      });
+      const added = appendSelectedHostedAssistantInputIds({
+        inputIds: batch.inputs.map((candidate) => candidate.event.inputId),
+        selectedInputIdSet,
+        selectedInputIds,
+      });
+      for (const candidate of batch.inputs) {
+        observedInputIds.add(candidate.event.inputId);
+      }
+      if (added > 0) {
+        selectedCandidatesPromise = null;
+      }
+      return batch;
     },
     async listNewConversationInputs(query) {
       assertHostedAssistantInputQueryNotAborted(query.signal);

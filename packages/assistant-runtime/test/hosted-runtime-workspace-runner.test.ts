@@ -172,6 +172,38 @@ describe("runHostedWorkspaceUntilIdleOrBudget", () => {
     }
   });
 
+  test("keeps the first selected input as the preference causal anchor when same-actor inputs are folded in", async () => {
+    const vaultRoot = await mkdtemp(path.join(tmpdir(), "murph-runner-folded-causal-seq-"));
+
+    try {
+      await initializeVault({ createdAt: TEST_NOW, vaultRoot });
+      const first = await upsertAssistantInputEvent({
+        event: createStoredAssistantInputEventForMailboxItem(
+          createMailboxItem({ id: "mailbox_folded_causal_first", laneSeq: "1" }),
+          "first preference request",
+        ),
+        vault: vaultRoot,
+      });
+      const folded = await upsertAssistantInputEvent({
+        event: createStoredAssistantInputEventForMailboxItem(
+          createMailboxItem({ id: "mailbox_folded_causal_second", laneSeq: "2" }),
+          "folded same-actor follow-up",
+        ),
+        vault: vaultRoot,
+      });
+
+      assert.equal(
+        await resolveHostedPreferenceCausalSeqForSelectedInput({
+          assistantInputIds: [first.inputId, folded.inputId],
+          vaultRoot,
+        }),
+        "0",
+      );
+    } finally {
+      await rm(vaultRoot, { force: true, recursive: true });
+    }
+  });
+
   test("coalesced runtime wakes preserve first and latest pending notify timestamps", () => {
     vi.useFakeTimers();
     const firstNotifyAt = new Date("2026-04-26T00:00:01.000Z");

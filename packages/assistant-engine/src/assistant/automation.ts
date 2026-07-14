@@ -59,6 +59,7 @@ export {
   assistantInputCandidateFromStoredEvent,
   assistantInputIdFromInboxCaptureId,
   createStoreBackedAssistantInputSource,
+  selectContiguousAssistantRouteActorInputBatch,
   type AssistantInputCandidate,
   type AssistantInputCandidateBatch,
   type AssistantInputCandidateQuery,
@@ -69,6 +70,7 @@ export {
   type AssistantInputSource,
   type AssistantInputSourceRef,
   type AssistantTurnConversationInputQuery,
+  type AssistantTurnRouteActorInputQuery,
 } from './input-source.js'
 export {
   AssistantActiveTurnInputCheckpointRejectedError,

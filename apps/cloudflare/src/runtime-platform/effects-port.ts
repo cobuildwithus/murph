@@ -249,10 +249,14 @@ function parseHostedRuntimeLinqRecentInboundEngagementResult(
   const result: HostedRuntimeLinqRecentInboundEngagementResult = {};
   const response = value as {
     providerDispatchClaimed?: unknown;
+    routeAuthorityKind?: unknown;
     targetOverride?: unknown;
   };
   if (typeof response.providerDispatchClaimed === "boolean") {
     result.providerDispatchClaimed = response.providerDispatchClaimed;
+  }
+  if (response.routeAuthorityKind === "member-home") {
+    result.routeAuthorityKind = "member-home";
   }
 
   const targetOverride = response.targetOverride;
