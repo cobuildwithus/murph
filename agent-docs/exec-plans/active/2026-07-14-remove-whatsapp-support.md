@@ -103,6 +103,35 @@ Updated: 2026-07-14
 - Neither review introduced a compatibility parser, migration, feature flag,
   queue, state owner, or other support-preserving machinery.
 
+## ReviewGPT size retrospective
+
+- Trigger: round 1 measured 2,509 authored-source lines at the immutable
+  first-reviewed head `d8d9af7453fd65a4cae9c5523f0b69d9f6cc98e7` (17 added,
+  2,492 deleted). Review-driven source growth is zero.
+- Original requirement: remove WhatsApp support entirely while preserving
+  Telegram, Linq, email, current launch consent, and inert historical consent
+  records.
+- Removed concepts and owners: Web ingress/signature parsing/mailbox append;
+  WhatsApp consent and family acceptance; operator config and assistant channel
+  dispatch; mailbox payload decoding and inbox normalization; hosted runtime
+  import, capabilities, callbacks, and provider delivery; Cloudflare provider
+  egress, credential forwarding, deploy bindings, and public package exports.
+- Intentionally retained paths: historical consent rows remain inert; historical
+  plans, release records, and research stay truthful records; the existing
+  runner-secret policy retains one `WHATSAPP_` deny prefix as a security
+  tombstone; the deploy runbook retains the retirement sequence.
+- Added-source accounting: three lines are the deny-prefix entry and its
+  explanation. The other 14 lines are mechanical replacements that narrow
+  unions/arrays/conditions to surviving channels, remove WhatsApp from current
+  user-facing copy, or simplify comments after deletion. None creates a new
+  owner, behavior surface, compatibility path, or abstraction.
+- Decision: continue the deletion as one deploy-coordinated change. Splitting
+  by file or package owner would leave partial support contracts alive or
+  require temporary flags/shims across the Web-producer, mailbox-consumer,
+  Worker, warm-runner, and provider-credential boundary. One patch plus the
+  Web-first, zero-backlog, immediate-runner rollout preserves a single end
+  state with less code and no temporary architecture.
+
 ## Verification
 
 - Commands to run: targeted owner tests during implementation; final
