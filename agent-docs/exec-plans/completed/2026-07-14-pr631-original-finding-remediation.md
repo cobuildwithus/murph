@@ -1,6 +1,6 @@
 # PR 631 original-finding remediation
 
-Status: active
+Status: completed
 Created: 2026-07-14
 Updated: 2026-07-14
 
@@ -62,6 +62,9 @@ Updated: 2026-07-14
   retrospective; the current user instruction is the explicit continuation decision.
 - Treat the invalid recovered response as adversarial evidence, not a counted
   substantive ReviewGPT round; do not automatically launch round six.
+- PR #610 landed first. GitHub closed stacked PR #631 when its deleted base
+  branch could not be retargeted, so the preserved child branch was rebased
+  directly onto `main` and reopened as replacement PR #642.
 
 ## Verification
 
@@ -69,3 +72,13 @@ Updated: 2026-07-14
   then shared-host `pnpm test:diff` for the touched owners.
 - Expected outcomes: all focused checks and required audits pass with zero
   unresolved accepted findings; CI is green on the pushed head.
+- Completed focused proof: assistant-runtime tests passed 1,641 tests with two
+  skips; the three changed web suites passed 44 tests; assistant-runtime and web
+  TypeScript 7 typechecks passed after Prisma generation.
+- Completed scoped diff proof: dependency/boundary/Temporal/crypto/log guards,
+  assistant-runtime typecheck and 1,641 tests, web Prisma generation/typecheck,
+  5,118 tests, lint with zero errors, dev smoke and production build, plus
+  Cloudflare typecheck and 1,801 tests all passed.
+- Required coverage-write audit added one test-only OAuth-start proof that the
+  session persists only the FHIR base hash; the full web bucket passed with it.
+Completed: 2026-07-14

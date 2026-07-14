@@ -1,11 +1,14 @@
 import { createHash } from "node:crypto";
 
-import { beforeEach, describe, expect, it, vi } from "vitest";
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
 const mocks = vi.hoisted(() => ({
   appendClinicalRetrievalWakeTx: vi.fn(),
   assertHostedLaunchRequiredConsentGranted: vi.fn(),
   assertHostedOnboardingMutationOrigin: vi.fn(),
+  buildSmartAuthorizationUrl: vi.fn(),
+  createSmartPkce: vi.fn(),
+  createSmartState: vi.fn(),
   discoverSmartConfiguration: vi.fn(),
   exchangeSmartAuthorizationCode: vi.fn(),
   getPrisma: vi.fn(),
@@ -14,6 +17,7 @@ const mocks = vi.hoisted(() => ({
   requireActiveHostedAppSessionFromRequest: vi.fn(),
   sealClinicalConnectionFhirBaseUrl: vi.fn(),
   sealClinicalConnectionSecret: vi.fn(),
+  sealClinicalOauthVerifier: vi.fn(),
   signalClinicalRetrievalWake: vi.fn(),
 }));
 
@@ -34,13 +38,13 @@ vi.mock("@/src/lib/clinical-records/secrets", () => ({
   openClinicalOauthVerifier: mocks.openClinicalOauthVerifier,
   sealClinicalConnectionFhirBaseUrl: mocks.sealClinicalConnectionFhirBaseUrl,
   sealClinicalConnectionSecret: mocks.sealClinicalConnectionSecret,
-  sealClinicalOauthVerifier: vi.fn(),
+  sealClinicalOauthVerifier: mocks.sealClinicalOauthVerifier,
   toClinicalJsonArray: (values: readonly string[]) => [...values],
 }));
 vi.mock("@/src/lib/clinical-records/smart", () => ({
-  buildSmartAuthorizationUrl: vi.fn(),
-  createSmartPkce: vi.fn(),
-  createSmartState: vi.fn(),
+  buildSmartAuthorizationUrl: mocks.buildSmartAuthorizationUrl,
+  createSmartPkce: mocks.createSmartPkce,
+  createSmartState: mocks.createSmartState,
   discoverSmartConfiguration: mocks.discoverSmartConfiguration,
   exchangeSmartAuthorizationCode: mocks.exchangeSmartAuthorizationCode,
   normalizeSmartStateHash: () => "state-hash",
@@ -58,6 +62,7 @@ import {
 
 const MEMBER_ID = "member_clinical_1";
 const PROVIDER_ID = "epic-example";
+const CONNECT_CLAIM = `cr_${"a".repeat(32)}`;
 const provider = {
   aliases: [],
   brandName: "Example Health",
@@ -77,6 +82,25 @@ describe("Clinical Records authorization persistence", () => {
       member: { id: MEMBER_ID },
       sessionId: "hws_clinical_1",
     });
+    mocks.buildSmartAuthorizationUrl.mockReturnValue(
+      "https://fhir.example.test/oauth2/authorize",
+    );
+    mocks.createSmartPkce.mockReturnValue({
+      challenge: "pkce-challenge",
+      verifier: "pkce-verifier",
+    });
+    mocks.createSmartState.mockReturnValue({ state: "opaque-state", stateHash: "state-hash" });
+    mocks.discoverSmartConfiguration.mockResolvedValue({
+      authorizationEndpoint: "https://fhir.example.test/oauth2/authorize",
+      requestedScopes: [
+        "openid",
+        "fhirUser",
+        "launch/patient",
+        "patient/Patient.rs",
+        "patient/Observation.rs",
+      ],
+      tokenEndpoint: "https://fhir.example.test/oauth2/token",
+    });
     mocks.openClinicalOauthVerifier.mockResolvedValue("pkce-verifier");
     mocks.exchangeSmartAuthorizationCode.mockResolvedValue({
       accessToken: "access-token",
@@ -87,6 +111,7 @@ describe("Clinical Records authorization persistence", () => {
     });
     mocks.readGrantedSmartResourceTypes.mockReturnValue(["Patient", "Observation"]);
     mocks.sealClinicalConnectionFhirBaseUrl.mockResolvedValue("sealed-fhir-base-url");
+    mocks.sealClinicalOauthVerifier.mockResolvedValue("sealed-verifier");
     mocks.sealClinicalConnectionSecret.mockImplementation(async (input: { field: string }) =>
       input.field === "refreshToken" ? null : `sealed-${input.field}`
     );
@@ -96,6 +121,31 @@ describe("Clinical Records authorization persistence", () => {
       laneSeq: "1",
       userId: MEMBER_ID,
     });
+    vi.stubEnv("EPIC_SMART_CLIENT_ID", "epic-client-id");
+  });
+
+  afterEach(() => {
+    vi.unstubAllEnvs();
+  });
+
+  it("persists only the provider base hash in the OAuth session", async () => {
+    const harness = createHarness(null);
+    mocks.getPrisma.mockReturnValue(harness.prisma);
+
+    await startClinicalRecordConnection({
+      claim: CONNECT_CLAIM,
+      providerDirectoryEntryId: PROVIDER_ID,
+      request: new Request(
+        "https://join.example.test/api/clinical-records/connect-intents/start",
+        { headers: { origin: "https://join.example.test" }, method: "POST" },
+      ),
+    });
+
+    const created = harness.oauthSessionCreate.mock.calls[0]?.[0]?.data as Record<string, unknown>;
+    expect(created.fhirBaseHash).toBe(
+      createHash("sha256").update(provider.fhirBaseUrl).digest("hex"),
+    );
+    expect(created).not.toHaveProperty("fhirBaseUrl");
   });
 
   it("persists only encrypted patient context, not a patient-id derivative", async () => {
@@ -136,7 +186,7 @@ describe("Clinical Records authorization persistence", () => {
     mocks.getPrisma.mockReturnValue(harness.prisma);
 
     await expect(startClinicalRecordConnection({
-      claim: `cr_${"a".repeat(32)}`,
+      claim: CONNECT_CLAIM,
       providerDirectoryEntryId: PROVIDER_ID,
       request: new Request(
         "https://join.example.test/api/clinical-records/connect-intents/start",
@@ -197,19 +247,34 @@ function createHarness(
   oauthOverrides: Partial<ReturnType<typeof oauthSession>> = {},
 ) {
   const connectionCreate = vi.fn();
+  const oauthSessionCreate = vi.fn();
   const retrievalRunCreate = vi.fn();
   const harness = {
     connectionCreate,
+    oauthSessionCreate,
     retrievalRunCreate,
     prisma: {} as Record<string, unknown>,
   };
   const tx = {
-    clinicalRecordConnectIntent: { updateMany: vi.fn().mockResolvedValue({ count: 1 }) },
+    clinicalRecordConnectIntent: {
+      deleteMany: vi.fn().mockResolvedValue({ count: 0 }),
+      findUnique: vi.fn().mockResolvedValue({
+        claimHash: createHash("sha256").update(CONNECT_CLAIM).digest("hex"),
+        completedAt: null,
+        createdAt: new Date("2026-07-10T12:00:00.000Z"),
+        expiresAt: new Date("2099-07-10T12:10:00.000Z"),
+        memberId: MEMBER_ID,
+        providerDirectoryEntryId: null,
+        startedAt: null,
+      }),
+      updateMany: vi.fn().mockResolvedValue({ count: 1 }),
+    },
     clinicalRecordConnection: {
       create: connectionCreate,
       findUnique: vi.fn(async () => existing ? { ...existing } : null),
     },
     clinicalRecordOauthSession: {
+      create: oauthSessionCreate,
       deleteMany: vi.fn().mockResolvedValue({ count: 0 }),
       findUnique: vi.fn().mockResolvedValue({ ...oauthSession(), ...oauthOverrides }),
       updateMany: vi.fn().mockResolvedValue({ count: 1 }),
