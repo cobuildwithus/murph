@@ -424,9 +424,6 @@ export interface CodexAppServerTurnInput {
   modelProvider?: string | null
   onLiveTurn?: ((turn: CodexAppServerLiveTurn) => void | (() => void)) | null
   onProgress?: ((event: CodexProgressEvent) => void) | null
-  onCodexThreadHistoryUnsafe?: ((event?: {
-    deliveryContextOrdinal?: number
-  }) => Promise<void> | void) | null
   onFinishWithoutReplyAccepted?: ((event: {
     deliveryContextOrdinal: number
   }) => Promise<void> | void) | null
@@ -465,7 +462,6 @@ export interface CodexAppServerTurnFailureContext {
     deliveryContextOrdinal: number
     reaction: MurphDynamicToolReactionPatch['reaction']
   }[]
-  codexThreadHistoryUnsafe: boolean
   codexThreadId: string | null
   providerTurnId: string | null
 }
@@ -503,7 +499,6 @@ export function readCodexAppServerTurnFailureContext(
       ...context.acceptedNoReplyDeliveryContextOrdinals,
     ],
     reactions: (context.reactions ?? []).map((entry) => ({ ...entry })),
-    codexThreadHistoryUnsafe: context.codexThreadHistoryUnsafe,
     codexThreadId: context.codexThreadId,
     providerTurnId: context.providerTurnId,
   }
@@ -512,7 +507,6 @@ export function readCodexAppServerTurnFailureContext(
 export interface CodexAppServerTurnResult {
   finalMessage: string
   acceptedNoReplyDeliveryContextOrdinals: readonly number[]
-  codexThreadHistoryUnsafe: boolean
   finalAction: AssistantNoReplyDisposition | null
   finalActionExplicit: boolean
   reactions: readonly {
@@ -2351,7 +2345,6 @@ async function runCodexAppServerTurnOnProcess(
   let lastEventError: string | null = null
   let lastEventErrorInfo: CodexStructuredErrorInfo | null = null
   let responseMedia: AssistantResponseMedia[] = []
-  let dynamicToolCodexThreadHistoryUnsafe = false
   let finalActionPatches: Array<{
     deliveryContextOrdinal: number
     patch: MurphDynamicToolFinalActionPatch
@@ -2493,8 +2486,6 @@ async function runCodexAppServerTurnOnProcess(
         deliveryContextOrdinal: entry.deliveryContextOrdinal,
         reaction: entry.patch.reaction,
       })),
-      codexThreadHistoryUnsafe:
-        dynamicToolCodexThreadHistoryUnsafe || hasNoReplyFinalActionPatch(),
       codexThreadId,
       providerTurnId: turnId,
     } satisfies CodexAppServerTurnFailureContext
@@ -3046,9 +3037,6 @@ async function runCodexAppServerTurnOnProcess(
       ]
       if (patch.kind === 'none') {
         reservedNoReplyDeliveryContextOrdinals.delete(deliveryContextOrdinal)
-        await input.onCodexThreadHistoryUnsafe?.({
-          deliveryContextOrdinal,
-        })
       }
       return true
     } catch (error) {
@@ -3303,10 +3291,6 @@ async function runCodexAppServerTurnOnProcess(
       }
       if (result.requiredComputerHandoffUrl) {
         requiredComputerHandoffUrl = result.requiredComputerHandoffUrl
-      }
-      if (result.codexThreadHistoryUnsafe) {
-        await input.onCodexThreadHistoryUnsafe?.()
-        dynamicToolCodexThreadHistoryUnsafe = true
       }
       if (result.responseMediaPatch) {
         try {
@@ -4153,12 +4137,6 @@ async function runCodexAppServerTurnOnProcess(
     .filter((segment) => !shouldSuppressDeliveryContext(
       segment.deliveryContextOrdinal,
     ))
-  const codexThreadHistoryUnsafe =
-    dynamicToolCodexThreadHistoryUnsafe ||
-    finalActionPatches.some((entry) => entry.patch.kind === 'none') ||
-    suppressTrailingSteerCandidateForEarlierNoReply ||
-    filteredPrecedingAgentMessageSegments.length !==
-      precedingAgentMessageSegments.length
   const finalHasDeliverableOutput =
     normalizeNullableString(finalMessage) !== null ||
     (!noReplySelected && finalResponseMedia.length > 0)
@@ -4166,7 +4144,6 @@ async function runCodexAppServerTurnOnProcess(
   return {
     acceptedNoReplyDeliveryContextOrdinals:
       requiredComputerHandoffUrl ? [] : listNoReplyFinalActionPatchOrdinals(),
-    codexThreadHistoryUnsafe,
     finalAction,
     finalActionExplicit:
       finalActionPatch !== null && !requiredComputerHandoffUrl,

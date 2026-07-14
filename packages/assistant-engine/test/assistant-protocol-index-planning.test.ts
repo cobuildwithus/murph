@@ -111,14 +111,12 @@ describe('assistant protocol index planning', () => {
     expect(plan).not.toHaveProperty(removedRouteEnvProperty)
   })
 
-  it('preserves no-reply execution hooks in Codex execution plans', async () => {
-    const onCodexThreadHistoryUnsafe = vi.fn()
+  it('preserves the no-reply acceptance hook in Codex execution plans', async () => {
     const onFinishWithoutReplyAccepted = vi.fn()
 
     const plan = await buildCodexTurnExecutionPlan({
       allowFinishWithoutReply: true,
       input: createMessageInput(),
-      onCodexThreadHistoryUnsafe,
       onFinishWithoutReplyAccepted,
       plan: createSharedPlan(),
       resolvedSession: createSession(),
@@ -128,7 +126,6 @@ describe('assistant protocol index planning', () => {
     })
 
     expect(plan.allowFinishWithoutReply).toBe(true)
-    expect(plan.onCodexThreadHistoryUnsafe).toBe(onCodexThreadHistoryUnsafe)
     expect(plan.onFinishWithoutReplyAccepted).toBe(onFinishWithoutReplyAccepted)
   })
 

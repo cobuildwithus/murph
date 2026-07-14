@@ -221,7 +221,6 @@ export async function executeCodexAssistantTurnAttempt(
     materializeWorkspaceArtifacts: input.materializeWorkspaceArtifacts ?? null,
     model: providerConfig.target.model ?? undefined,
     modelProvider: providerConfig.target.modelProvider ?? undefined,
-    onCodexThreadHistoryUnsafe: input.onCodexThreadHistoryUnsafe ?? null,
     onFinishWithoutReplyAccepted: input.onFinishWithoutReplyAccepted ?? null,
     publicInternetFetch: input.publicInternetFetch ?? null,
     onLiveTurn:

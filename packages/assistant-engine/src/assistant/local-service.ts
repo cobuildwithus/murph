@@ -952,8 +952,6 @@ export async function sendAssistantMessageLocal(
         let providerRequestJournal: Awaited<
           ReturnType<typeof runtimeState.turns.acceptedInputs.recordProviderRequest>
         > = null
-        let codexUnsafeResumeStateInvalidated = false
-        const noReplyTranscriptMarkerDeliveryContextOrdinals = new Set<number>()
         let providerRequestContinuation:
           ExecutedAssistantProviderTurnResult['codexContinuation'] | null = null
         let providerRequestAcceptedInputIds: readonly string[] =
@@ -1030,39 +1028,6 @@ export async function sendAssistantMessageLocal(
           acceptedInputItems: providerRequestAcceptedInputItems,
           activeTurnSteering: turnInputController,
           input: currentInput,
-          onCodexThreadHistoryUnsafe: async (event) => {
-            if (!codexUnsafeResumeStateInvalidated) {
-              currentSession = await clearAssistantSessionCodexResumeStateIfNeeded({
-                action: resolveProviderResumeStateAction({
-                  codexThreadHistoryUnsafe: true,
-                  codexThreadId: null,
-                  threadScope,
-                }),
-                session: currentSession,
-                vault: input.vault,
-              })
-              codexUnsafeResumeStateInvalidated = true
-            }
-            const deliveryContextOrdinal = event?.deliveryContextOrdinal
-            if (
-              typeof deliveryContextOrdinal !== 'number' ||
-              noReplyTranscriptMarkerDeliveryContextOrdinals.has(
-                deliveryContextOrdinal,
-              )
-            ) {
-              return
-            }
-            await persistAssistantNoReplyTranscriptMarkers({
-              deliveryContextOrdinals: [deliveryContextOrdinal],
-              sessionId: currentSession.sessionId,
-              turnCreatedAt: currentUserTurn.turnCreatedAt,
-              turnId: currentUserTurn.turnId,
-              vault: input.vault,
-            })
-            noReplyTranscriptMarkerDeliveryContextOrdinals.add(
-              deliveryContextOrdinal,
-            )
-          },
           onFinishWithoutReplyAccepted: async (event) => {
             await drainLiveSteeredActiveTurnInputs({
               continuation: providerRequestContinuation,
@@ -1098,6 +1063,13 @@ export async function sendAssistantMessageLocal(
                   session: currentSession,
                   sharedPlan,
                 }),
+            })
+            await persistAssistantNoReplyTranscriptMarkers({
+              deliveryContextOrdinals: [event.deliveryContextOrdinal],
+              sessionId: currentSession.sessionId,
+              turnCreatedAt: currentUserTurn.turnCreatedAt,
+              turnId: currentUserTurn.turnId,
+              vault: input.vault,
             })
           },
           onProviderRequestPlanned: async (event) => {
@@ -1242,26 +1214,20 @@ export async function sendAssistantMessageLocal(
             turnId: currentUserTurn.turnId,
           })
           const failedProviderResumeStateAction = resolveProviderResumeStateAction({
-            codexThreadHistoryUnsafe:
-              providerOutcome.codexThreadHistoryUnsafe === true ||
-              acceptedNoReplyOrdinals.length > 0,
             codexThreadId: providerOutcome.codexThreadId ?? null,
             threadScope,
           })
-          if (
-            !codexUnsafeResumeStateInvalidated &&
-            failedProviderResumeStateAction === 'clear'
-          ) {
+          if (progressDeliveredSessionRef.value) {
             currentSession = applyAssistantProgressDeliveredSession({
               progressDeliveredSession: progressDeliveredSessionRef.value,
               session: providerOutcome.session,
             })
-            currentSession = await clearAssistantSessionCodexResumeStateIfNeeded({
-              action: failedProviderResumeStateAction,
-              session: currentSession,
-              vault: input.vault,
-            })
           }
+          currentSession = await clearAssistantSessionCodexResumeStateIfNeeded({
+            action: failedProviderResumeStateAction,
+            session: currentSession,
+            vault: input.vault,
+          })
           if (recoverableNoReplyDeliveryContextOrdinal !== null) {
             turnInputController.close()
             await runtimeState.turns.acceptedInputs.updateAdmissionState({
@@ -1278,7 +1244,6 @@ export async function sendAssistantMessageLocal(
               assistantContractFingerprint: '',
               attemptCount: providerOutcome.attemptCount,
               codexContinuation: providerOutcome.codexContinuation,
-              codexThreadHistoryUnsafe: true,
               codexThreadId: providerOutcome.codexThreadId,
               finalAction: {
                 kind: 'none',
@@ -1547,19 +1512,14 @@ export async function sendAssistantMessageLocal(
           })
         )
         const providerResumeStateAction = resolveProviderResumeStateAction({
-          codexThreadHistoryUnsafe:
-            providerResult.codexThreadHistoryUnsafe === true ||
-            providerResult.finalAction?.kind === 'none',
           codexThreadId: providerResult.codexThreadId ?? null,
           threadScope,
         })
-        if (!codexUnsafeResumeStateInvalidated) {
-          currentSession = await clearAssistantSessionCodexResumeStateIfNeeded({
-            action: providerResumeStateAction,
-            session: currentSession,
-            vault: input.vault,
-          })
-        }
+        currentSession = await clearAssistantSessionCodexResumeStateIfNeeded({
+          action: providerResumeStateAction,
+          session: currentSession,
+          vault: input.vault,
+        })
         const noReplySelected = providerResult.finalAction?.kind === 'none'
         const rawFinalResponseText = noReplySelected
           ? null
@@ -2041,16 +2001,11 @@ async function clearAssistantSessionCodexResumeStateIfNeeded(input: {
 }
 
 function resolveProviderResumeStateAction(input: {
-  codexThreadHistoryUnsafe: boolean
   codexThreadId: string | null
   threadScope: AssistantCodexThreadScope
 }): 'clear' | 'persist-from-provider-turn' | 'preserve-existing' {
   if (input.threadScope === 'isolated-thread') {
     return 'preserve-existing'
-  }
-
-  if (input.codexThreadHistoryUnsafe) {
-    return 'clear'
   }
 
   return normalizeNullableString(input.codexThreadId)

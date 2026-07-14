@@ -37,7 +37,7 @@ The same link supports both initial join and later sharing changes. It is reusab
 
 The personal tool is read-only and derives its member id from the signed hosted callback. The model cannot choose another member. The result omits the group roster, other member ids, handles, emails, names, and sharing state.
 
-The hosted runner does not persist a copy in the personal vault or assistant runtime. Each call reads current web-owned truth.
+The hosted runner does not create a canonical membership copy in the personal vault or assistant runtime. Each call reads current web-owned truth. The response may remain in normal provider-native thread continuity and its referenced encrypted workspace snapshot; do not clear the provider session merely because the read is private.
 
 ## Interface choice
 

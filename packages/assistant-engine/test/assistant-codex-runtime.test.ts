@@ -14629,7 +14629,6 @@ describe('steered final segments', () => {
     steps: Array<Record<string, unknown> | ScriptedSteeredFinalStep>,
     input: {
       hostedToolContext?: CodexAppServerTurnInput['hostedToolContext']
-      onCodexThreadHistoryUnsafe?: CodexAppServerTurnInput['onCodexThreadHistoryUnsafe']
       onProgress?: CodexAppServerTurnInput['onProgress']
       onTraceEvent?: CodexAppServerTurnInput['onTraceEvent']
       progressDelivery?: CodexAppServerTurnInput['progressDelivery']
@@ -14779,7 +14778,6 @@ describe('steered final segments', () => {
       codexCommand: 'codex',
       codexHome,
       hostedToolContext: input.hostedToolContext,
-      onCodexThreadHistoryUnsafe: input.onCodexThreadHistoryUnsafe,
       onProgress: input.onProgress,
       onTraceEvent: input.onTraceEvent,
       progressDelivery: input.progressDelivery,
@@ -14798,7 +14796,7 @@ describe('steered final segments', () => {
     }
   }
 
-  it('marks successful membership reads history-unsafe before preserving Codex continuity', async () => {
+  it('returns successful membership reads while preserving Codex continuity', async () => {
     const response = {
       action: 'list_memberships' as const,
       result: {
@@ -14819,7 +14817,6 @@ describe('steered final segments', () => {
         truncated: false,
       },
     }
-    const onCodexThreadHistoryUnsafe = vi.fn()
     const groupTool = {
       request: vi.fn(async () => response),
     }
@@ -14837,59 +14834,10 @@ describe('steered final segments', () => {
       }),
     ], {
       hostedToolContext: createHostedToolContext({ groupTool }),
-      onCodexThreadHistoryUnsafe,
     })
 
     expect(groupTool.request).toHaveBeenCalledWith({ action: 'list_memberships' })
-    expect(onCodexThreadHistoryUnsafe).toHaveBeenCalledOnce()
-    expect(result.codexThreadHistoryUnsafe).toBe(true)
     expect(result.finalMessage).toBe('You belong to Sunday runners.')
-  })
-
-  it('retains the history-unsafe signal when the provider fails after a membership read', async () => {
-    const response = {
-      action: 'list_memberships' as const,
-      result: {
-        memberships: [{
-          displayName: 'Private membership failure sentinel',
-          grantedVaultShareProjectionScopes: [],
-          kind: 'family',
-          memberCount: 2,
-          permissionsUrl: null,
-          requestedVaultShareProjectionScopes: [],
-          role: 'member',
-        }],
-        status: 'ok' as const,
-        truncated: false,
-      },
-    }
-    const onCodexThreadHistoryUnsafe = vi.fn()
-    const groupTool = {
-      request: vi.fn(async () => response),
-    }
-
-    let error: unknown
-    try {
-      await runScriptedSteeredFinalSegmentsTurn([
-        {
-          expectedText: JSON.stringify(response),
-          id: 84,
-          kind: 'list-memberships',
-        },
-      ], {
-        hostedToolContext: createHostedToolContext({ groupTool }),
-        onCodexThreadHistoryUnsafe,
-        turnStatus: 'failed',
-      })
-    } catch (caught) {
-      error = caught
-    }
-
-    expect(error).toBeInstanceOf(Error)
-    expect(onCodexThreadHistoryUnsafe).toHaveBeenCalledOnce()
-    expect(readCodexAppServerTurnFailureContext(error)).toMatchObject({
-      codexThreadHistoryUnsafe: true,
-    })
   })
 
   it('returns no final text or outbound progress for a commentary-only turn', async () => {
@@ -15358,7 +15306,6 @@ describe('steered final segments', () => {
     ])
 
     expect(result.finalAction).toBeNull()
-    expect(result.codexThreadHistoryUnsafe).toBe(true)
     expect(result.acceptedNoReplyDeliveryContextOrdinals).toEqual([0])
     expect(result.finalMessage).toBe('Visible answer.')
     expect(result.precedingAgentMessageSegments).toEqual([])
@@ -15394,7 +15341,6 @@ describe('steered final segments', () => {
     expect(result.finalAction).toBeNull()
     expect(result.finalActionExplicit).toBe(false)
     expect(result.acceptedNoReplyDeliveryContextOrdinals).toEqual([])
-    expect(result.codexThreadHistoryUnsafe).toBe(false)
     expect(result.finalMessage).toBe('This final text should be delivered.')
     expect(result.responseMedia).toEqual([media])
     expect(result.precedingAgentMessageSegments).toEqual([])
@@ -15431,7 +15377,6 @@ describe('steered final segments', () => {
     expect(result.finalAction).toEqual({ kind: 'none' })
     expect(result.finalActionExplicit).toBe(true)
     expect(result.acceptedNoReplyDeliveryContextOrdinals).toEqual([0])
-    expect(result.codexThreadHistoryUnsafe).toBe(true)
     expect(result.finalMessage).toBe('')
     expect(result.responseMedia).toEqual([])
     expect(result.precedingAgentMessageSegments).toEqual([])
@@ -15481,7 +15426,6 @@ describe('steered final segments', () => {
     expect(result.finalAction).toBeNull()
     expect(result.finalActionExplicit).toBe(false)
     expect(result.acceptedNoReplyDeliveryContextOrdinals).toEqual([0])
-    expect(result.codexThreadHistoryUnsafe).toBe(true)
     expect(result.finalMessage).toBe('Visible answer with media.')
     expect(result.responseMedia).toEqual([media])
     expect(result.precedingAgentMessageSegments).toEqual([])
@@ -15512,7 +15456,6 @@ describe('steered final segments', () => {
       },
     ])
 
-    expect(result.codexThreadHistoryUnsafe).toBe(false)
     expect(result.acceptedNoReplyDeliveryContextOrdinals).toEqual([])
     expect(result.finalMessage).toBe('Answer one.')
     expect(result.finalAction).toBeNull()
@@ -15550,7 +15493,6 @@ describe('steered final segments', () => {
       },
     ])
 
-    expect(result.codexThreadHistoryUnsafe).toBe(false)
     expect(result.acceptedNoReplyDeliveryContextOrdinals).toEqual([])
     expect(result.finalMessage).toBe('Answer two.')
     expect(result.finalAction).toBeNull()

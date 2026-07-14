@@ -112,7 +112,6 @@ type AssistantCodexAttemptOutcome =
       error: unknown
       providerRequestOutcome: Exclude<AssistantProviderRequestOutcome, 'succeeded'>
       codexContinuation: AssistantCodexContinuation
-      codexThreadHistoryUnsafe: boolean
       codexThreadId: string | null
       acceptedNoReplyDeliveryContextOrdinals: readonly number[]
       reactions: NonNullable<ExecutedAssistantProviderTurnResult['reactions']>
@@ -135,7 +134,6 @@ export type AssistantCodexTurnRecoveryOutcome =
       error: unknown
       providerRequestOutcome: Exclude<AssistantProviderRequestOutcome, 'succeeded'>
       codexContinuation: AssistantCodexContinuation
-      codexThreadHistoryUnsafe: boolean
       codexThreadId: string | null
       acceptedNoReplyDeliveryContextOrdinals: readonly number[]
       reactions: NonNullable<ExecutedAssistantProviderTurnResult['reactions']>
@@ -157,9 +155,6 @@ export async function executeCodexTurnWithRecovery(input: {
   activeTurnSteering?: AssistantActiveTurnLiveProviderSteering | null
   allowFinishWithoutReply?: boolean | null
   input: AssistantMessageInput
-  onCodexThreadHistoryUnsafe?: ((event?: {
-    deliveryContextOrdinal?: number
-  }) => Promise<void> | void) | null
   onFinishWithoutReplyAccepted?: ((event: {
     deliveryContextOrdinal: number
   }) => Promise<void> | void) | null
@@ -218,7 +213,6 @@ export async function executeCodexTurnWithRecovery(input: {
         error: attemptOutcome.error,
         providerRequestOutcome: attemptOutcome.providerRequestOutcome,
         codexContinuation: attemptOutcome.codexContinuation,
-        codexThreadHistoryUnsafe: attemptOutcome.codexThreadHistoryUnsafe,
         codexThreadId: attemptOutcome.codexThreadId,
         acceptedNoReplyDeliveryContextOrdinals:
           attemptOutcome.acceptedNoReplyDeliveryContextOrdinals,
@@ -378,7 +372,6 @@ async function executeAssistantCodexAttempt(input: {
   let failedAttemptAdditionalUsages: readonly AssistantProviderUsageDraft[] = []
   let failedAttemptAcceptedNoReplyDeliveryContextOrdinals: readonly number[] = []
   let failedAttemptReactions: NonNullable<ExecutedAssistantProviderTurnResult['reactions']> = []
-  let failedAttemptCodexThreadHistoryUnsafe = false
   let failedAttemptOutcome: Exclude<AssistantProviderRequestOutcome, 'succeeded'> | null =
     null
 
@@ -446,8 +439,6 @@ async function executeAssistantCodexAttempt(input: {
         hostedToolContext: executionPlan.hostedToolContext ?? null,
         materializeWorkspaceArtifacts:
           executionPlan.executionContext?.hosted?.materializeWorkspaceArtifacts ?? null,
-        onCodexThreadHistoryUnsafe:
-          executionPlan.onCodexThreadHistoryUnsafe ?? null,
         onEvent: executionPlan.input.onProviderEvent ?? undefined,
         onFinishWithoutReplyAccepted:
           executionPlan.onFinishWithoutReplyAccepted ?? null,
@@ -512,8 +503,6 @@ async function executeAssistantCodexAttempt(input: {
         ...(attemptResult.acceptedNoReplyDeliveryContextOrdinals ?? []),
       ]
       failedAttemptReactions = [...(attemptResult.reactions ?? [])]
-      failedAttemptCodexThreadHistoryUnsafe =
-        attemptResult.codexThreadHistoryUnsafe === true
       failedAttemptOutcome =
         attemptResult.providerRequestOutcome ??
         resolveFailedAssistantProviderRequestOutcome({
@@ -611,7 +600,6 @@ async function executeAssistantCodexAttempt(input: {
           usage: failedAttemptUsage,
         }),
       codexContinuation: effectiveCodexContinuation,
-      codexThreadHistoryUnsafe: failedAttemptCodexThreadHistoryUnsafe,
       codexThreadId: failedAttemptCodexThreadId,
       acceptedNoReplyDeliveryContextOrdinals:
         failedAttemptAcceptedNoReplyDeliveryContextOrdinals,

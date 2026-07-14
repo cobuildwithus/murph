@@ -116,9 +116,6 @@ export interface AssistantProviderTurn {
   dynamicTools: readonly AssistantProviderDynamicTool[]
   env?: NodeJS.ProcessEnv
   generatedImageUploader?: AssistantHostedGeneratedImageUploader | null
-  onCodexThreadHistoryUnsafe?: ((event?: {
-    deliveryContextOrdinal?: number
-  }) => Promise<void> | void) | null
   onFinishWithoutReplyAccepted?: ((event: {
     deliveryContextOrdinal: number
   }) => Promise<void> | void) | null
@@ -226,7 +223,6 @@ export interface AssistantProviderTurnExecutionResult {
   additionalUsages?: readonly AssistantProviderUsageDraft[] | null
   provider: AssistantChatProvider
   codexContinuation?: AssistantCodexContinuation
-  codexThreadHistoryUnsafe?: boolean | null
   codexThreadId: string | null
   rawEvents: unknown[]
   acceptedNoReplyDeliveryContextOrdinals?: readonly number[] | null
@@ -273,7 +269,6 @@ export type AssistantProviderTurnAttemptResult =
       ok: false
       providerRequestOutcome?: Exclude<AssistantProviderRequestOutcome, 'succeeded'>
       codexContinuation?: AssistantCodexContinuation
-      codexThreadHistoryUnsafe?: boolean | null
       codexThreadId?: string | null
       acceptedNoReplyDeliveryContextOrdinals?: readonly number[] | null
       reactions?: readonly AssistantCurrentMessageReactionAction[] | null
