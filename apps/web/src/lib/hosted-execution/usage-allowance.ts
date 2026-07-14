@@ -58,6 +58,7 @@ export type HostedAiUsageGateNoticeCode =
   | "edge_usage_limit_reached"
   | "family_usage_limit_reached"
   | "pulse_upgrade_edge"
+  | "thread_usage_limit_reached"
   | "trial_usage_limit_reached"
   | "trial_conversion_pending";
 
@@ -104,6 +105,14 @@ export type HostedAiUsageGateDecision =
     userNotice: HostedAiUsageGateUserNotice | null;
   };
 
+export type HostedAiUsageGateDecisionWithSource =
+  | (Extract<HostedAiUsageGateDecision, { allowed: true }> & {
+    allowanceSource: HostedAiUsageAllowanceSourceKind;
+  })
+  | (Extract<HostedAiUsageGateDecision, { allowed: false }> & {
+    allowanceSource: HostedAiUsageAllowanceSourceKind;
+  });
+
 export interface HostedAiUsageGateUserNotice {
   code: HostedAiUsageGateNoticeCode;
   message: string;
@@ -140,10 +149,11 @@ interface HostedAiUsageAllowancePricingModelResolution {
   source: HostedAiUsageAllowancePricingModelSource | null;
 }
 
-type HostedAiUsageAllowanceSourceKind =
+export type HostedAiUsageAllowanceSourceKind =
   | "direct_paid_member_plan"
   | "direct_trial"
-  | "family_sponsored_pulse";
+  | "family_sponsored_pulse"
+  | "thread_container";
 
 interface HostedAiUsageAllowanceTokenPricingBasisConfig {
   multiplierDenominator: bigint;
@@ -202,6 +212,7 @@ type HostedAiUsageAllowancePeriodResolution =
     source: "billing" | "calendar" | "trial";
   } & Omit<HostedAiUsageAllowancePeriod, "blockedAt" | "spentUsdMicros">)
   | {
+    allowanceSource: HostedAiUsageAllowanceSourceKind;
     billingPlanCode: HostedBillingPlanCode;
     kind: "denied";
     limitUsdMicros: bigint;
@@ -956,7 +967,7 @@ export async function resolveHostedAiUsageGate(input: {
   memberId: string;
   now?: Date | string;
   prisma?: HostedAiUsageAllowanceClient;
-}): Promise<HostedAiUsageGateDecision> {
+}): Promise<HostedAiUsageGateDecisionWithSource> {
   const prisma = input.prisma ?? getPrisma();
   const now = normalizeHostedAiUsageAllowanceDate(input.now ?? new Date());
 
@@ -1032,7 +1043,9 @@ export async function resolveHostedAiUsageGate(input: {
       return resolveHostedAiUsageInactiveGateDecision({
         at: now,
         billingRef: allowanceBillingRef,
+        billingStatus: memberState.billingStatus,
         memberId: input.memberId,
+        suspendedAt: memberState.suspendedAt,
         threadContainer: memberState.threadContainer,
         threadContainerAccessActive,
       });
@@ -1065,7 +1078,7 @@ export async function readHostedAiUsageGate(input: {
   memberId: string;
   now?: Date | string;
   prisma?: HostedAiUsageAllowanceClient;
-}): Promise<HostedAiUsageGateDecision> {
+}): Promise<HostedAiUsageGateDecisionWithSource> {
   const prisma = input.prisma ?? getPrisma();
   const now = normalizeHostedAiUsageAllowanceDate(input.now ?? new Date());
 
@@ -1141,7 +1154,9 @@ export async function readHostedAiUsageGate(input: {
       return resolveHostedAiUsageInactiveGateDecision({
         at: now,
         billingRef: allowanceBillingRef,
+        billingStatus: memberState.billingStatus,
         memberId: input.memberId,
+        suspendedAt: memberState.suspendedAt,
         threadContainer: memberState.threadContainer,
         threadContainerAccessActive,
       });
@@ -1163,20 +1178,16 @@ export async function readHostedAiUsageGate(input: {
   });
 }
 
-// Read-first gate for hot-path checks: serve allow decisions from the
-// write-free read gate and only run the mutating period-bookkeeping
-// transaction when the read decision would block AI work, so steady-state
-// gate checks stay off the usage-period create/lock path. Denials are always
-// confirmed by the mutating gate before callers act on them. The read path
-// cannot materialize period rows, plan-change limit updates, or blocked notice
-// metadata. The guaranteed mutating resolve on the reply path is turn
-// admission (runtime reconciliation facts); spend accounting also
+// Read-first gate for hot-path checks: usage exhaustion is advisory and stays
+// allowed, while access denials are confirmed by the mutating gate before
+// callers act on them. The read path cannot materialize period rows,
+// plan-change limit updates, or notice metadata; spend accounting
 // ensure-creates the period inside the spend transaction as the backstop.
 export async function checkHostedAiUsageGate(input: {
   memberId: string;
   now?: Date | string;
   prisma?: HostedAiUsageAllowanceClient;
-}): Promise<HostedAiUsageGateDecision> {
+}): Promise<HostedAiUsageGateDecisionWithSource> {
   const decision = await readHostedAiUsageGate(input);
   if (decision.allowed) {
     return decision;
@@ -1188,10 +1199,12 @@ export async function checkHostedAiUsageGate(input: {
 function resolveHostedAiUsageInactiveGateDecision(input: {
   at: Date;
   billingRef: HostedAiUsageAllowanceBillingRef | null;
+  billingStatus: HostedBillingStatus;
   memberId: string;
+  suspendedAt: Date | null;
   threadContainer?: HostedAiUsageAllowanceThreadContainerRef | null;
   threadContainerAccessActive?: boolean | null;
-}): HostedAiUsageGateDecision {
+}): HostedAiUsageGateDecisionWithSource {
   const resolved = resolveHostedAiUsageAllowancePeriod({
     at: input.at,
     billingRef: input.billingRef,
@@ -1199,9 +1212,25 @@ function resolveHostedAiUsageInactiveGateDecision(input: {
     threadContainer: input.threadContainer ?? null,
     threadContainerAccessActive: input.threadContainerAccessActive ?? null,
   });
+  if (
+    input.suspendedAt === null
+    && input.billingStatus === HostedBillingStatus.paused
+    && resolved.kind === "denied"
+    && resolved.reason === "trial_expired_pending_billing"
+  ) {
+    return buildHostedAiUsageGateDecision({
+      memberId: input.memberId,
+      period: {
+        ...resolved,
+        spentUsdMicros: 0n,
+      },
+    });
+  }
+
   const period = resolved.kind === "denied"
     ? resolved
     : {
+        allowanceSource: resolved.allowanceSource,
         billingPlanCode: resolved.billingPlanCode,
         limitUsdMicros: resolved.limitUsdMicros,
         periodEnd: resolved.periodEnd,
@@ -1213,6 +1242,7 @@ function resolveHostedAiUsageInactiveGateDecision(input: {
 
   return {
     allowed: false,
+    allowanceSource: period.allowanceSource,
     billingPlanCode: period.billingPlanCode,
     limitUsdMicros: period.limitUsdMicros,
     memberId: input.memberId,
@@ -1229,11 +1259,12 @@ function resolveHostedAiUsageInactiveGateDecision(input: {
 function buildHostedAiUsageGateDecision(input: {
   memberId: string;
   period: HostedAiUsageAllowancePeriodResult;
-}): HostedAiUsageGateDecision {
+}): HostedAiUsageGateDecisionWithSource {
   const period = input.period;
   if (period.kind === "denied") {
     return {
       allowed: false,
+      allowanceSource: period.allowanceSource,
       billingPlanCode: period.billingPlanCode,
       limitUsdMicros: period.limitUsdMicros,
       memberId: input.memberId,
@@ -1254,6 +1285,7 @@ function buildHostedAiUsageGateDecision(input: {
   if (period.spentUsdMicros >= period.limitUsdMicros) {
     return {
       allowed: true,
+      allowanceSource: period.allowanceSource,
       billingPlanCode: period.billingPlanCode,
       limitUsdMicros: period.limitUsdMicros,
       memberId: input.memberId,
@@ -1275,6 +1307,7 @@ function buildHostedAiUsageGateDecision(input: {
 
   return {
     allowed: true,
+    allowanceSource: period.allowanceSource,
     billingPlanCode: period.billingPlanCode,
     limitUsdMicros: period.limitUsdMicros,
     memberId: input.memberId,
@@ -1350,6 +1383,7 @@ async function ensureHostedAiUsageAllowancePeriodTx(input: {
   });
   if (resolved.kind === "denied") {
     return {
+      allowanceSource: resolved.allowanceSource,
       kind: "denied",
       billingPlanCode: resolved.billingPlanCode,
       limitUsdMicros: resolved.limitUsdMicros,
@@ -1499,6 +1533,7 @@ async function readHostedAiUsageAllowancePeriodTx(input: {
   });
   if (resolved.kind === "denied") {
     return {
+      allowanceSource: resolved.allowanceSource,
       kind: "denied",
       billingPlanCode: resolved.billingPlanCode,
       limitUsdMicros: resolved.limitUsdMicros,
@@ -1645,6 +1680,7 @@ function resolveHostedAiUsageAllowancePeriod(input: {
       || input.threadContainerAccessActive !== true
     ) {
       return {
+        allowanceSource: "thread_container",
         billingPlanCode,
         kind: "denied",
         limitUsdMicros: threadContainerLimitUsdMicros ?? 0n,
@@ -1660,7 +1696,7 @@ function resolveHostedAiUsageAllowancePeriod(input: {
     }
 
     return {
-      allowanceSource: "direct_paid_member_plan",
+      allowanceSource: "thread_container",
       billingPlanCode,
       kind: "period",
       limitUsdMicros: threadContainerLimitUsdMicros,
@@ -1815,6 +1851,7 @@ function buildHostedPulseTrialPendingBillingDeniedPeriod(input: {
   const noticePeriodStart = input.periodStart ?? null;
 
   return {
+    allowanceSource: "direct_trial",
     billingPlanCode: input.billingPlanCode,
     kind: "denied",
     limitUsdMicros: input.trialPolicy?.usageLimitUsdMicros ?? 0n,
@@ -2576,6 +2613,21 @@ function buildHostedAiUsageGateLimitNotice(input: {
   memberId: string;
   periodStart: Date;
 }): HostedAiUsageLimitNotice {
+  if (input.allowanceSource === "thread_container") {
+    return {
+      code: "thread_usage_limit_reached",
+      message: renderUserFacingMessage({
+        context: {},
+        key: "linq.ai_usage.thread_limit_reached",
+        seed: buildHostedAiUsageNoticeSeed({
+          memberId: input.memberId,
+          noticeCode: "thread_usage_limit_reached",
+          periodStart: input.periodStart,
+        }),
+      }).text,
+    };
+  }
+
   if (
     input.billingPlanCode === "launch_monthly" &&
     input.limitUsdMicros === HOSTED_PULSE_TRIAL_USAGE_LIMIT_USD_MICROS

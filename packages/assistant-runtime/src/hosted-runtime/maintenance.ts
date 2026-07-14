@@ -61,9 +61,6 @@ import {
   type HostedAssistantMilestoneTraceContext,
 } from "./assistant-latency-trace.ts";
 import {
-  filterHostedAssistantInputBatchByLinqRouteAuthority,
-} from "./linq-input-authority.ts";
-import {
   repairHostedPendingAssistantRouteProofBatch,
   type HostedPendingRouteProofRepairResult,
 } from "./pending-input-index.ts";
@@ -254,7 +251,6 @@ export async function runHostedAssistantAutomationLane(input: {
             ? { initialInputSelection: initialBackgroundSelection }
             : {}),
           now: input.now ?? null,
-          effectsPort: input.runtime.platform.effectsPort,
           preProviderPhase: input.preProviderPhase ?? null,
           runtimeAttemptId: input.runtimeAttemptId ?? null,
           ...(input.beforeProviderAcceptedInputs
@@ -326,10 +322,6 @@ export async function runHostedAssistantAutomation(
   options?: {
     operationScope?: AssistantAutomationOperationScope | null;
     buildBackgroundDynamicContextPrompt?: HostedBackgroundDynamicContextPromptBuilder;
-    effectsPort?: Pick<
-      HostedRuntimePlatform["effectsPort"],
-      "assertLinqRecentInboundEngagement"
-    > | null;
     latencyTracePort?: HostedRuntimePlatform["latencyTracePort"] | null;
     initialLegacyRoutesRepaired?: number;
     initialInputSelection?: HostedAssistantInputSelection;
@@ -408,13 +400,7 @@ export async function runHostedAssistantAutomation(
       const queryIndex = inputCandidateQueryCount;
       inputCandidateQueryCount += 1;
       const startedAt = Date.now();
-      const result = await filterHostedAssistantInputBatchByLinqRouteAuthority({
-        batch: await baseInputSource.listInputCandidates(query),
-        effectsPort: options?.effectsPort ?? null,
-        signal: query.signal,
-        userId: wake.userId,
-        vaultRoot,
-      });
+      const result = await baseInputSource.listInputCandidates(query);
       if (result.inputs.length > 0) {
         inputCandidateListed = true;
       }
@@ -438,13 +424,7 @@ export async function runHostedAssistantAutomation(
     },
     async listNewConversationInputs(query) {
       const startedAt = Date.now();
-      const result = await filterHostedAssistantInputBatchByLinqRouteAuthority({
-        batch: await baseInputSource.listNewConversationInputs(query),
-        effectsPort: options?.effectsPort ?? null,
-        signal: query.signal,
-        userId: wake.userId,
-        vaultRoot,
-      });
+      const result = await baseInputSource.listNewConversationInputs(query);
       if (result.inputs.length > 0) {
         activeTurnInputIngested = true;
       }

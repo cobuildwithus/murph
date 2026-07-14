@@ -708,6 +708,7 @@ export async function sendAssistantMessageLocal(
               familyPlanTool: hostedExecutionContext.familyPlanTool ?? null,
               groupTool: hostedExecutionContext.groupTool ?? null,
               newsletterTool: hostedExecutionContext.newsletterTool ?? null,
+              planUsageTool: hostedExecutionContext.planUsageTool ?? null,
               phoneCalls: hostedExecutionContext.phoneCalls ?? null,
               ...(hostedExecutionContext.currentAssistantPreferenceCausalSeq
                 ? {
