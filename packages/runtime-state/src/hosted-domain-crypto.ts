@@ -23,6 +23,10 @@ export type HostedCryptoDomain = (typeof HOSTED_CRYPTO_DOMAINS)[number];
 
 export const HOSTED_CRYPTO_LANES = [
   "hosted-member-private-field",
+  "clinical-records-oauth",
+  "clinical-records-page-cursor",
+  "clinical-records-patient-id",
+  "clinical-records-token",
   "device-sync-token",
   "device-sync-external-account-id",
   "device-sync-payload",
@@ -45,6 +49,10 @@ export const HOSTED_CRYPTO_LANE_DOMAINS: Record<
   artifact: "runtime",
   "browser-vault-replica": "runtime",
   bundle: "runtime",
+  "clinical-records-oauth": "control",
+  "clinical-records-page-cursor": "device",
+  "clinical-records-patient-id": "device",
+  "clinical-records-token": "device",
   "device-sync-external-account-id": "device",
   "device-sync-payload": "device",
   "device-sync-token": "device",

@@ -299,6 +299,36 @@ export const HOSTED_ACCOUNT_DATA_STORE_COVERAGE = [
     note: "Deletes short-lived connected-app connection claims and account ids after provider revocation has been attempted.",
   },
   {
+    slug: "prisma.clinical_record_connect_intent",
+    label: "Clinical Records connection intents",
+    deletion: "live-delete",
+    note: "Deletes short-lived hash-only Clinical Records connection claims.",
+  },
+  {
+    slug: "prisma.clinical_record_oauth_session",
+    label: "Clinical Records OAuth sessions",
+    deletion: "live-delete",
+    note: "Deletes pending SMART state, encrypted PKCE verifiers, and pinned authorization metadata.",
+  },
+  {
+    slug: "prisma.clinical_record_connection",
+    label: "Clinical Records provider connections",
+    deletion: "live-delete",
+    note: "Deletes member-scoped provider metadata, encrypted SMART tokens, and encrypted patient context. Export reports counts only and omits credentials and patient identifiers.",
+  },
+  {
+    slug: "prisma.clinical_record_retrieval_run",
+    label: "Clinical Records retrieval runs",
+    deletion: "live-delete",
+    note: "Deletes bounded retrieval status and aggregate outcome metadata. Raw FHIR records remain vault-owned and are covered by encrypted vault deletion.",
+  },
+  {
+    slug: "prisma.clinical_record_retrieval_request",
+    label: "Clinical Records page request guards",
+    deletion: "live-delete",
+    note: "Deletes hash-only request idempotency and page accounting rows; raw FHIR pages are never stored in these rows.",
+  },
+  {
     slug: "prisma.device_sync_dirty_connection",
     label: "Device sync dirty state",
     deletion: "live-delete",
@@ -1116,6 +1146,11 @@ async function countHostedAccountData(input: {
     hostedMemberEmailAuthorization,
     hostedConnectedAppsSession,
     hostedConnectedAppConnectIntent,
+    clinicalRecordConnectIntent,
+    clinicalRecordOauthSession,
+    clinicalRecordConnection,
+    clinicalRecordRetrievalRun,
+    clinicalRecordRetrievalRequest,
     hostedMailboxItem,
     hostedMailboxPayload,
     hostedMailboxLaneCounter,
@@ -1198,6 +1233,11 @@ async function countHostedAccountData(input: {
     input.prisma.hostedMemberEmailAuthorization.count({ where: { memberId: memberIdFilter } }),
     input.prisma.hostedConnectedAppsSession.count({ where: { memberId: memberIdFilter } }),
     input.prisma.hostedConnectedAppConnectIntent.count({ where: { memberId: memberIdFilter } }),
+    input.prisma.clinicalRecordConnectIntent.count({ where: { memberId: memberIdFilter } }),
+    input.prisma.clinicalRecordOauthSession.count({ where: { memberId: memberIdFilter } }),
+    input.prisma.clinicalRecordConnection.count({ where: { memberId: memberIdFilter } }),
+    input.prisma.clinicalRecordRetrievalRun.count({ where: { memberId: memberIdFilter } }),
+    input.prisma.clinicalRecordRetrievalRequest.count({ where: { memberId: memberIdFilter } }),
     input.prisma.hostedMailboxItem.count({ where: { userId: memberIdFilter } }),
     input.prisma.hostedMailboxPayload.count({ where: { userId: memberIdFilter } }),
     input.prisma.hostedMailboxLaneCounter.count({ where: { userId: memberIdFilter } }),
@@ -1263,6 +1303,11 @@ async function countHostedAccountData(input: {
     "prisma.device_sync_dirty_payload": deviceSyncDirtyPayload,
     "prisma.device_sync_signal": deviceSyncSignal,
     "prisma.device_token_audit": deviceTokenAudit,
+    "prisma.clinical_record_connect_intent": clinicalRecordConnectIntent,
+    "prisma.clinical_record_oauth_session": clinicalRecordOauthSession,
+    "prisma.clinical_record_connection": clinicalRecordConnection,
+    "prisma.clinical_record_retrieval_run": clinicalRecordRetrievalRun,
+    "prisma.clinical_record_retrieval_request": clinicalRecordRetrievalRequest,
     "prisma.hosted_ai_usage": hostedAiUsage,
     "prisma.hosted_ai_usage_period": hostedAiUsagePeriod,
     "prisma.hosted_product_feedback": hostedProductFeedback,
@@ -1408,6 +1453,11 @@ async function deleteHostedAccountPrismaRows(input: {
   }));
   record("prisma.hosted_connected_app_connect_intent", await input.prisma.hostedConnectedAppConnectIntent.deleteMany({ where: { memberId: memberIdFilter } }));
   record("prisma.hosted_connected_apps_session", await input.prisma.hostedConnectedAppsSession.deleteMany({ where: { memberId: memberIdFilter } }));
+  record("prisma.clinical_record_retrieval_request", await input.prisma.clinicalRecordRetrievalRequest.deleteMany({ where: { memberId: memberIdFilter } }));
+  record("prisma.clinical_record_retrieval_run", await input.prisma.clinicalRecordRetrievalRun.deleteMany({ where: { memberId: memberIdFilter } }));
+  record("prisma.clinical_record_oauth_session", await input.prisma.clinicalRecordOauthSession.deleteMany({ where: { memberId: memberIdFilter } }));
+  record("prisma.clinical_record_connect_intent", await input.prisma.clinicalRecordConnectIntent.deleteMany({ where: { memberId: memberIdFilter } }));
+  record("prisma.clinical_record_connection", await input.prisma.clinicalRecordConnection.deleteMany({ where: { memberId: memberIdFilter } }));
 
   const webhookTraceWhere = buildDeviceWebhookTraceWhere(input.connectionIdentities);
   counts["prisma.device_webhook_trace"] = webhookTraceWhere
