@@ -171,6 +171,13 @@ export class PrismaDeviceSyncControlPlaneStore
     return this.connections.getConnectionById(accountId);
   }
 
+  async getConnectionForOwnerProvider(
+    ownerId: string,
+    provider: string,
+  ): Promise<PublicDeviceSyncAccount | null> {
+    return this.connections.getConnectionForOwnerProvider(ownerId, provider);
+  }
+
   async claimWebhookTrace(input: ClaimDeviceSyncWebhookTraceInput): Promise<DeviceSyncWebhookTraceClaimResult> {
     return this.webhookTraces.claimWebhookTrace(input);
   }
