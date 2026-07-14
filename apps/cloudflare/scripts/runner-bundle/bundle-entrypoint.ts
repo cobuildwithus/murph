@@ -61,7 +61,9 @@ export const RUNNER_ENTRYPOINT_BUNDLE_DIRECTORY_NAME = "dist-bundled";
 // too if total creep becomes the concern. Investigate the listed largest
 // inputs before raising either.
 const RUNNER_ENTRYPOINT_BUNDLE_TOTAL_BYTES_BUDGET = 9_300_000;
-const RUNNER_ENTRYPOINT_BUNDLE_ENTRY_BASELINE_BYTES = 1_423_217;
+// The checkpoint foreground-preemption path adds reviewed boot-critical logic;
+// advance only by the CI-measured 6,328B overage and preserve the noise band.
+const RUNNER_ENTRYPOINT_BUNDLE_ENTRY_BASELINE_BYTES = 1_429_545;
 const RUNNER_ENTRYPOINT_BUNDLE_STATIC_CLOSURE_BASELINE_BYTES = 7_059_427;
 // Noise band above the baseline before the ratchet trips (~2%): absorbs
 // content-hash and minifier jitter without letting real boot-path weight land

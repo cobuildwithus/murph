@@ -5236,7 +5236,10 @@ describe("hosted workspace runtime entrypoint", () => {
 
             assert.equal(bootstrapImported, true);
             return {
-              assistantInputId: "ain_00000000000000000000000000000000",
+              assistantInputId: await stageAssistantInputEventForMailboxItem({
+                item: item.item,
+                vaultRoot,
+              }),
               status: "imported",
             };
           },
@@ -9105,7 +9108,10 @@ describe("hosted workspace runtime entrypoint", () => {
             events.push(`import:${item.item.lane}:${item.item.laneSeq}`);
             return item.item.lane === "conversation"
               ? {
-                  assistantInputId: "assistant_input_foreground_system_churn",
+                  assistantInputId: await stageAssistantInputEventForMailboxItem({
+                    item: item.item,
+                    vaultRoot,
+                  }),
                   status: "imported",
                 }
               : await importRuntimeControlSystemMailboxItemForTest({
@@ -9206,7 +9212,10 @@ describe("hosted workspace runtime entrypoint", () => {
             imported.push(`${item.item.lane}:${item.item.laneSeq}`);
             events.push(`import:${item.item.lane}:${item.item.laneSeq}`);
             return {
-              assistantInputId: "assistant_input_foreground_system_failure",
+              assistantInputId: await stageAssistantInputEventForMailboxItem({
+                item: item.item,
+                vaultRoot,
+              }),
               status: "imported",
             };
           },
@@ -9465,7 +9474,10 @@ describe("hosted workspace runtime entrypoint", () => {
               return item.durablyConsumed === true
                 ? { status: "imported" }
                 : {
-                    assistantInputId: "assistant_input_replay_budget_fresh_tail",
+                    assistantInputId: await stageAssistantInputEventForMailboxItem({
+                      item: item.item,
+                      vaultRoot,
+                    }),
                     status: "imported",
                   };
             },
@@ -9780,7 +9792,10 @@ describe("hosted workspace runtime entrypoint", () => {
           async importItem(item) {
             events.push(`mailbox.importItem:${item.item.laneSeq}`);
             return {
-              assistantInputId: `assistant_input_checkpoint_wake_${item.item.laneSeq}`,
+              assistantInputId: await stageAssistantInputEventForMailboxItem({
+                item: item.item,
+                vaultRoot,
+              }),
               status: "imported",
             };
           },
@@ -12617,7 +12632,10 @@ describe("hosted workspace runtime entrypoint", () => {
             if (item.item.lane === "conversation") {
               imported.push(`${item.item.lane}:${item.item.laneSeq}`);
               return {
-                assistantInputId: "assistant_input_post_checkpoint_system_failure",
+                assistantInputId: await stageAssistantInputEventForMailboxItem({
+                  item: item.item,
+                  vaultRoot,
+                }),
                 status: "imported",
               };
             }
@@ -13813,8 +13831,10 @@ describe("hosted workspace runtime entrypoint", () => {
       assert.deepEqual(assistantPhaseInputIds[1], importedInputIds.slice(0, 2));
       assert.deepEqual(assistantPhaseLinqContextTargets[1], ["thread_1", "thread_2"]);
       assert.equal(assistantPhaseInputIds[2]?.length, 1);
-      assert.deepEqual(assistantPhaseInputIds[2], [importedInputIds[2]]);
-      assert.deepEqual(assistantPhaseLinqContextTargets[2], ["thread_3"]);
+      // The real foreground selector consumes only the first accepted input;
+      // the second stays ahead of the later third input in the next batch.
+      assert.deepEqual(assistantPhaseInputIds[2], [importedInputIds[1]]);
+      assert.deepEqual(assistantPhaseLinqContextTargets[2], ["thread_2"]);
       assert.ok(
         requireEventIndex(events, "assistant.phase:2")
           < requireEventIndex(
@@ -24701,7 +24721,10 @@ describe("hosted runtime shutdown signal", () => {
           async importItem(item) {
             events.push(`mailbox.importItem:${item.item.id}`);
             return {
-              assistantInputId: "assistant_input_shutdown_during_pre_checkpoint_pass",
+              assistantInputId: await stageAssistantInputEventForMailboxItem({
+                item: item.item,
+                vaultRoot,
+              }),
               status: "imported",
             };
           },
@@ -25329,7 +25352,10 @@ describe("hosted runtime shutdown signal", () => {
           async importItem(item) {
             events.push(`mailbox.importItem:${item.item.id}`);
             return {
-              assistantInputId: `assistant_input_${item.item.id}`,
+              assistantInputId: await stageAssistantInputEventForMailboxItem({
+                item: item.item,
+                vaultRoot,
+              }),
               status: "imported",
             };
           },
@@ -25451,7 +25477,10 @@ describe("hosted runtime shutdown signal", () => {
           async importItem(item) {
             events.push(`mailbox.importItem:${item.item.id}`);
             return {
-              assistantInputId: `assistant_input_${item.item.id}`,
+              assistantInputId: await stageAssistantInputEventForMailboxItem({
+                item: item.item,
+                vaultRoot,
+              }),
               status: "imported",
             };
           },
