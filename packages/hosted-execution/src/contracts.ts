@@ -366,10 +366,13 @@ export const HOSTED_EXECUTION_LINQ_CONVERSATION_CONTACT_KINDS = [
 export type HostedExecutionLinqConversationContactKind =
   (typeof HOSTED_EXECUTION_LINQ_CONVERSATION_CONTACT_KINDS)[number];
 
+export const HOSTED_EXECUTION_LINQ_GROUP_REACTION_CONTEXT_MAX_CHARS = 512;
+
 interface HostedExecutionLinqConversationMessagePayloadBase {
   accountLookupKey?: string | null;
   channel: "linq";
   groupParticipantAdded?: true;
+  groupReactionContext?: string;
   linqMessage: HostedExecutionLinqConversationMessage;
   routeAuthority?: HostedExecutionLinqExternalThreadRouteAuthority | null;
 }

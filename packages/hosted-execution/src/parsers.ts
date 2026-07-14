@@ -17,6 +17,7 @@ import {
 
 import {
   HOSTED_EXECUTION_MEAL_PHOTO_MAX_BYTES,
+  HOSTED_EXECUTION_LINQ_GROUP_REACTION_CONTEXT_MAX_CHARS,
   isHostedConversationMessageChannel,
   isHostedExecutionWakeKind,
   isHostedLinqConversationContactKind,
@@ -667,6 +668,23 @@ function parseHostedExecutionLinqConversationMessagePayload(
     }
     groupParticipantAdded = true;
   }
+  const groupReactionContext = record.groupReactionContext === undefined
+    ? undefined
+    : requireString(
+        record.groupReactionContext,
+        "Hosted execution conversation.message wake payload groupReactionContext",
+      ).trim();
+  if (
+    groupReactionContext !== undefined
+    && (
+      groupReactionContext.length === 0
+      || groupReactionContext.length > HOSTED_EXECUTION_LINQ_GROUP_REACTION_CONTEXT_MAX_CHARS
+    )
+  ) {
+    throw new TypeError(
+      "Hosted execution conversation.message wake payload groupReactionContext is invalid.",
+    );
+  }
 
   if (record.contactLookupKey !== undefined || record.contactKind !== undefined) {
     const contactKind = parseHostedExecutionLinqConversationContactKind(
@@ -690,6 +708,7 @@ function parseHostedExecutionLinqConversationMessagePayload(
       contactKind,
       contactLookupKey,
       ...(groupParticipantAdded === undefined ? {} : { groupParticipantAdded }),
+      ...(groupReactionContext === undefined ? {} : { groupReactionContext }),
       linqMessage,
       ...(record.phoneLookupKey === undefined
         ? {}
@@ -720,6 +739,7 @@ function parseHostedExecutionLinqConversationMessagePayload(
     contactKind: "phone",
     contactLookupKey: phoneLookupKey,
     ...(groupParticipantAdded === undefined ? {} : { groupParticipantAdded }),
+    ...(groupReactionContext === undefined ? {} : { groupReactionContext }),
     linqMessage,
     phoneLookupKey,
     ...(routeAuthority === undefined ? {} : { routeAuthority }),

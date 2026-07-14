@@ -343,6 +343,10 @@ async function updateHostedThreadRouteAuthorityRowTx(input: {
   try {
     await input.prisma.hostedThreadRoute.update({
       data: {
+        // Reaction context is optional and account-bound through the route's
+        // lookup key. Drop it when that authority key rotates rather than
+        // carrying ciphertext into a different AAD binding.
+        pendingGroupReactionContextEncrypted: null,
         threadIdentityLookupKey: input.threadIdentityLookupKey,
         threadLookupKey: input.threadLookupKey,
       },

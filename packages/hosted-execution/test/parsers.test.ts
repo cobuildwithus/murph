@@ -126,6 +126,7 @@ describe("parseHostedExecutionEvent", () => {
             version: 2,
           },
           groupParticipantAdded: true,
+          groupReactionContext: "Someone reacted ❤️ to “morning walk”.",
           linqMessage: {
             chatId: "chat_123",
             from: "+15550001111",
@@ -153,6 +154,7 @@ describe("parseHostedExecutionEvent", () => {
     ).toMatchObject({
       message: {
         groupParticipantAdded: true,
+        groupReactionContext: "Someone reacted ❤️ to “morning walk”.",
         routeAuthority: {
           accountLookupKey: "hbidx:phone:v1:account",
           channel: "linq",
@@ -193,6 +195,38 @@ describe("parseHostedExecutionEvent", () => {
       })).toThrow(/groupParticipantAdded must be true when present/u);
     },
   );
+
+  it.each([
+    ["blank", "   "],
+    ["non-string", 42],
+    ["over 512 characters", "x".repeat(513)],
+  ])("rejects %s Linq group reaction context", (_label, groupReactionContext) => {
+    expect(() => parseHostedExecutionWake({
+      eventId: "linq-group-reaction-context-1",
+      kind: "conversation.message",
+      message: {
+        channel: "linq",
+        contactKind: "phone",
+        contactLookupKey: "hbidx:phone:v1:sender",
+        groupReactionContext,
+        linqMessage: {
+          chatId: "chat_123",
+          from: "+15550001111",
+          isFromMe: false,
+          messageId: "msg_123",
+          parts: [{ type: "text", value: "hello" }],
+          threadIsDirect: false,
+        },
+        routeAuthority: {
+          channel: "linq",
+          containerMemberId: "member_container_123",
+          threadId: "chat_123",
+        },
+      },
+      occurredAt: "2026-04-08T00:15:00.000Z",
+      userId: "member_container_123",
+    })).toThrow(/groupReactionContext/u);
+  });
 
   it("preserves participant context on legacy phone-only Linq payloads", () => {
     expect(parseHostedExecutionWake({
