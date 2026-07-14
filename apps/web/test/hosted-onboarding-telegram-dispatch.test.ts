@@ -470,6 +470,9 @@ describe("handleHostedOnboardingTelegramWebhook", () => {
     const hostedAccountGroupInviteFindUnique = vi.fn(async () => invite);
     const hostedAccountGroupMembershipFindFirst = vi.fn().mockResolvedValue(null);
     const prisma = withPrismaTransaction({
+      hostedAccountGroup: {
+        findUnique: vi.fn().mockResolvedValue(invite.group),
+      },
       hostedAccountGroupBillingRef: {
         findUnique: vi.fn().mockResolvedValue({
           billedSeatCount: 2,
