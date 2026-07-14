@@ -208,11 +208,10 @@ thread container may import its exact activation record only to initialize the
 vault; that record remains queued, and no other system, cron, device, cleanup,
 or background-delivery work enters replay. The final successful workspace
 checkpoint advances the conversation consumed floor in the same transaction
-only after the accepted row has a terminal disposition. The runner still accepts
-the provider-free `conversation_replay_usage_limit` mode during the deployment
-compatibility window for older web producers, but current web reconciliation
-does not emit it because allowance exhaustion is advisory. This adds no replay
-queue, timer, consume port, or second processing authority.
+only after the accepted row has a terminal disposition. The runner still
+executes that exact row when its persisted allowance period is closed or
+exhausted because allowance exhaustion is advisory. This adds no replay queue,
+timer, consume port, or second processing authority.
 
 Hosted Linq participant-added and participant-removed events are sanitized and
 deduplicated in the existing provider-event ledger, and only an existing Linq

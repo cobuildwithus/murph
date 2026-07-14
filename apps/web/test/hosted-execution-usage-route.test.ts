@@ -225,36 +225,6 @@ describe("hosted execution usage record route", () => {
     expect(mocks.recordHostedAiUsageRecordsAndSendLimitNotices).not.toHaveBeenCalled();
   });
 
-  it("rejects provider usage from the provider-free usage-limit replay mode", async () => {
-    const response = await hostedExecutionUsageRecordRoute.POST(
-      new Request("https://join.example.test/api/internal/hosted-execution/usage/record", {
-        body: JSON.stringify({
-          processingMode: "conversation_replay_usage_limit",
-          usage: {
-            attemptCount: 1,
-            credentialSource: "platform",
-            occurredAt: "2026-03-29T12:00:00.000Z",
-            provider: "codex-cli",
-            schema: ASSISTANT_USAGE_SCHEMA,
-            sessionId: "asst_123",
-            stripeMeterSource: "murph",
-            turnId: "turn_123",
-            usageId: "turn_123.attempt-1",
-            usageExtractionVersion: "legacy",
-          },
-        }),
-        headers: {
-          "content-type": "application/json",
-        },
-        method: "POST",
-      }),
-    );
-
-    expect(response.status).toBe(400);
-    expect(mocks.readHostedMailboxItemByLaneSeq).not.toHaveBeenCalled();
-    expect(mocks.recordHostedAiUsageRecordsAndSendLimitNotices).not.toHaveBeenCalled();
-  });
-
   it.each([
     ["an omitted target", {}, undefined],
     ["an explicit unavailable target", { noticeDeliveryTarget: null }, null],

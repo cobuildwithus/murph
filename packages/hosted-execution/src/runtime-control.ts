@@ -713,12 +713,12 @@ export type HostedMailboxFetchCursorMode =
   (typeof HOSTED_MAILBOX_FETCH_CURSOR_MODES)[number];
 
 export interface HostedMailboxReplayAuthority {
-  acceptedConversationAt: string | null;
+  acceptedConversationAt: string;
   acceptedConversationSeq: string;
   bootstrapActivationAllowed: boolean;
   processingMode: Extract<
     HostedWorkspaceInvocationProcessingMode,
-    "conversation_replay" | "conversation_replay_usage_limit"
+    "conversation_replay"
   >;
 }
 
@@ -2197,7 +2197,6 @@ export interface HostedWorkspaceInvocationBudget {
 export const HOSTED_WORKSPACE_INVOCATION_PROCESSING_MODES = [
   "default",
   "conversation_replay",
-  "conversation_replay_usage_limit",
   "inbox_media_retention",
 ] as const;
 

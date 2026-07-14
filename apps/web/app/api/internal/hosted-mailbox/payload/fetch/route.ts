@@ -119,9 +119,6 @@ async function requireHostedRuntimeMailboxPayloadAiUsageAccess(input: {
   })) {
     return;
   }
-  if (input.replayAuthority?.processingMode === "conversation_replay_usage_limit") {
-    return;
-  }
   const replayPeriodStart = input.replayAuthority
     ? input.item.acceptedAllowancePeriodStart ?? null
     : null;

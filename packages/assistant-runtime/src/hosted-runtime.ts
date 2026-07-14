@@ -45,9 +45,6 @@ import {
   findAssistantSessionIdByCodexThreadId,
 } from "@murphai/assistant-engine";
 import {
-  writeAssistantAutoReplyUsageLimitSuppressionEvidence,
-} from "@murphai/assistant-engine/assistant-automation";
-import {
   type AssistantCurrentDeliveryRoute,
 } from "@murphai/operator-config/assistant/current-delivery-route";
 import {
@@ -606,7 +603,6 @@ export interface HostedWorkspaceRuntimeJobImportContext {
   latencyMilestones?: HostedRuntimeLatencyTraceStagedMilestones | null;
   runtimeAttemptId?: string | null;
   signal?: AbortSignal | null;
-  skipConversationProjection?: boolean;
 }
 
 interface HostedRuntimeWakeLatencySeed {
@@ -1069,7 +1065,6 @@ export async function runHostedWorkspaceRuntimeJobInProcess(
       onConversationInputStaged: context?.onConversationInputStaged ?? null,
       runtimeAttemptId: input.request.attemptId,
       signal: context?.signal ?? runtimeAbortController.signal,
-      skipConversationProjection: context?.skipConversationProjection === true,
     });
     const importMailboxItem: HostedWorkspaceRunnerInput["importItem"] = (item, context) =>
       mailboxBudget.importItem(
@@ -1411,45 +1406,21 @@ export async function runHostedWorkspaceRuntimeJobInProcess(
             bootstrapActivationAllowed: false,
             processingMode: input.request.processingMode,
           }
-        : input.request.processingMode === "conversation_replay_usage_limit"
-          ? {
-              acceptedConversationAt: null,
-              acceptedConversationSeq: requireHostedConversationReplaySeq(
-                input.request.acceptedConversationSeq,
-              ),
-              bootstrapActivationAllowed: false,
-              processingMode: input.request.processingMode,
-            }
-          : null;
+        : null;
     const conversationReplay = mailboxReplayAuthority !== null;
-    const conversationReplayUsageLimit =
-      input.request.processingMode === "conversation_replay_usage_limit";
     const acceptedConversationSeq = mailboxReplayAuthority?.acceptedConversationSeq ?? null;
-    if (
-      conversationReplayUsageLimit
-      && input.request.acceptedConversationAt != null
-    ) {
-      throw new TypeError(
-        "Hosted usage-limit replay must not carry provider allowance authority.",
-      );
-    }
     const initialMailboxImportPlan = resolveHostedInitialMailboxImportPlan({
       vaultRoot: restored.vaultRoot,
     });
-    const initialMailboxImportContext = {
-      ...(createHostedRuntimeWakeInitialImportContext(
-        mergeHostedRuntimeWakeLatencySeeds(
-          invocationOrchestrationLatencySeed,
-          consumePendingHostedRuntimeWake(
-            options.runtimeWakeSignal ?? null,
-            options.shutdownSignal ?? null,
-          ),
+    const initialMailboxImportContext = createHostedRuntimeWakeInitialImportContext(
+      mergeHostedRuntimeWakeLatencySeeds(
+        invocationOrchestrationLatencySeed,
+        consumePendingHostedRuntimeWake(
+          options.runtimeWakeSignal ?? null,
+          options.shutdownSignal ?? null,
         ),
-      ) ?? {}),
-      ...(conversationReplayUsageLimit
-        ? { skipConversationProjection: true }
-        : {}),
-    };
+      ),
+    ) ?? {};
     emitPhaseLog({
       details: {
         initialMailboxImportLanes: [...initialMailboxImportPlan.lanes],
@@ -1727,7 +1698,6 @@ export async function runHostedWorkspaceRuntimeJobInProcess(
         vaultRoot: restored.vaultRoot,
       });
       let replayPassResult: HostedWorkspaceRunnerResult | null = null;
-      let terminalUsageLimitApplied = false;
       if (
         replaySelection.inputIds.length > 0
         || replaySelection.deliveryIntentIds.length > 0
@@ -1737,58 +1707,46 @@ export async function runHostedWorkspaceRuntimeJobInProcess(
           emailDeliveryContexts: [],
           linqDeliveryContexts: replaySelection.linqDeliveryContexts,
         };
-        if (
-          conversationReplayUsageLimit
-          && replaySelection.inputIds.length > 0
-        ) {
-          await writeAssistantAutoReplyUsageLimitSuppressionEvidence({
-            captureIds: [],
-            inputIds: replaySelection.inputIds,
-            vault: restored.vaultRoot,
-          });
-          terminalUsageLimitApplied = true;
-        } else {
-          replayPassResult = await hostedCliBridge.runWithInvocation(
-            {
-              currentDeliveryRoute: () => currentOperationDeliveryRoute,
-              currentRouteGrant: () => currentOperationRouteGrant,
-              deviceSyncPort: guardedRuntime.platform.deviceSyncPort ?? null,
-              messagingReturnTarget: () => hostedCliBridgeMessagingReturnTarget,
-              signal: runtimeAbortController.signal,
-            },
-            async () => await raceHostedRuntimeCancellation(
-              runHostedConversationReplayWorkspacePass({
-                ...baseRunnerInput,
-                initialAssistantInputBatch: replayBatch,
-                initialMailboxImport,
-                requestId: `${requestId}:conversation-replay`,
-                runAssistantPhase: async (phaseInput) => {
-                  const replayPhaseInput = {
-                    ...phaseInput,
-                    currentDeliveryRouteScope,
-                    request: input.request,
-                    restored,
-                    runtime: foregroundRuntime,
-                    runtimeEnv: hostedCodexRuntime.runtimeEnv,
-                    signal: runtimeAbortController.signal,
-                  };
-                  return options.runAssistantPhase
-                    ? await options.runAssistantPhase(replayPhaseInput)
-                    : await runHostedConversationReplayAssistantPhase(
-                      replayPhaseInput,
-                      {
-                        deliveryIntentIds: replaySelection.deliveryIntentIds,
-                      },
-                    );
-                },
-              }),
-              runtimeAbortController.signal,
-            ),
-          );
-          trackMailboxPostCheckpointEffects(
-            replayPassResult.mailboxPostCheckpointEffectsFinished,
-          );
-        }
+        replayPassResult = await hostedCliBridge.runWithInvocation(
+          {
+            currentDeliveryRoute: () => currentOperationDeliveryRoute,
+            currentRouteGrant: () => currentOperationRouteGrant,
+            deviceSyncPort: guardedRuntime.platform.deviceSyncPort ?? null,
+            messagingReturnTarget: () => hostedCliBridgeMessagingReturnTarget,
+            signal: runtimeAbortController.signal,
+          },
+          async () => await raceHostedRuntimeCancellation(
+            runHostedConversationReplayWorkspacePass({
+              ...baseRunnerInput,
+              initialAssistantInputBatch: replayBatch,
+              initialMailboxImport,
+              requestId: `${requestId}:conversation-replay`,
+              runAssistantPhase: async (phaseInput) => {
+                const replayPhaseInput = {
+                  ...phaseInput,
+                  currentDeliveryRouteScope,
+                  request: input.request,
+                  restored,
+                  runtime: foregroundRuntime,
+                  runtimeEnv: hostedCodexRuntime.runtimeEnv,
+                  signal: runtimeAbortController.signal,
+                };
+                return options.runAssistantPhase
+                  ? await options.runAssistantPhase(replayPhaseInput)
+                  : await runHostedConversationReplayAssistantPhase(
+                    replayPhaseInput,
+                    {
+                      deliveryIntentIds: replaySelection.deliveryIntentIds,
+                    },
+                  );
+              },
+            }),
+            runtimeAbortController.signal,
+          ),
+        );
+        trackMailboxPostCheckpointEffects(
+          replayPassResult.mailboxPostCheckpointEffectsFinished,
+        );
       }
 
       const remainingAnchoredConversationInputs = await selectHostedConversationReplayInputs({
@@ -1827,7 +1785,6 @@ export async function runHostedWorkspaceRuntimeJobInProcess(
       const runtimeStateDirty =
         initialMailboxImport.checkpointDeferred && initialMailboxImport.stateChanged
         || hostedVaultFormatMigration.mutated
-        || terminalUsageLimitApplied
         || durablyConsumedPendingInputRetired
         || replayPassResult?.runtimeStateDirty === true;
       const replayNextWakeAt = replayPassResult?.assistantPhaseResult?.nextWakeAt ?? null;

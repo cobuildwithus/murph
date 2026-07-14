@@ -581,14 +581,6 @@ export class RunnerStateStore {
         record: this.readStateFromMetaSync(meta),
       };
     }
-    if (token.processingMode === "conversation_replay_usage_limit") {
-      return {
-        owns: false,
-        reason: "provider_egress_not_allowed",
-        record: this.readStateFromMetaSync(meta),
-      };
-    }
-
     return {
       acceptedConversationAt: token.acceptedConversationAt,
       acceptedConversationSeq: token.acceptedConversationSeq,
@@ -657,14 +649,6 @@ export class RunnerStateStore {
         record: this.readStateFromMetaSync(meta),
       };
     }
-    if (token.processingMode === "conversation_replay_usage_limit") {
-      return {
-        owns: false,
-        reason: "provider_egress_not_allowed",
-        record: this.readStateFromMetaSync(meta),
-      };
-    }
-
     return {
       acceptedConversationAt: token.acceptedConversationAt,
       acceptedConversationSeq: token.acceptedConversationSeq,
@@ -909,9 +893,7 @@ function resolveRunnerAcceptedConversationSeq(input: {
   acceptedConversationSeq: string | null;
   processingMode: RunnerRuntimeProcessingMode;
 }): string | null {
-  const replay = input.processingMode === "conversation_replay"
-    || input.processingMode === "conversation_replay_usage_limit";
-  if (!replay) {
+  if (input.processingMode !== "conversation_replay") {
     return null;
   }
   if (!input.acceptedConversationSeq || !/^[1-9][0-9]*$/u.test(input.acceptedConversationSeq)) {

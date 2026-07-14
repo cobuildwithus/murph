@@ -590,15 +590,13 @@ describe("hosted runtime control contracts", () => {
       acceptedConversationSeq: "42",
       processingMode: "conversation_replay",
     });
-    expect(parseHostedWorkspaceInvocationRequest({
+    expect(() => parseHostedWorkspaceInvocationRequest({
       ...workspaceInvocationRequest,
       acceptedConversationSeq: "42",
-      processingMode: "conversation_replay_usage_limit",
-    })).toEqual({
-      ...workspaceInvocationRequest,
-      acceptedConversationSeq: "42",
-      processingMode: "conversation_replay_usage_limit",
-    });
+      processingMode: "conversation_replay_" + "usage_limit",
+    })).toThrow(
+      "Hosted workspace invocation request processingMode is not supported.",
+    );
     expect(parseHostedWorkspaceInvocationRequest({
       ...workspaceInvocationRequest,
       processingMode: "inbox_media_retention",
@@ -878,40 +876,18 @@ describe("hosted runtime control contracts", () => {
       userId: "member_123",
     };
 
-    expect(parseHostedMailboxPayloadFetchRequest({
-      dedupeKey: "dedupe_1",
-      mailboxItemId: "mailbox_system_1",
-      payloadRef: "payload_ref_1",
-      replayAuthority: {
-        acceptedConversationAt: null,
-        acceptedConversationSeq: "11",
-        bootstrapActivationAllowed: false,
-        processingMode: "conversation_replay_usage_limit",
-      },
-      requestId: "payload-fetch-1",
-    })).toEqual({
-      dedupeKey: "dedupe_1",
-      mailboxItemId: "mailbox_system_1",
-      payloadRef: "payload_ref_1",
-      replayAuthority: {
-        acceptedConversationAt: null,
-        acceptedConversationSeq: "11",
-        bootstrapActivationAllowed: false,
-        processingMode: "conversation_replay_usage_limit",
-      },
-      requestId: "payload-fetch-1",
-    });
     expect(() => parseHostedMailboxPayloadFetchRequest({
       dedupeKey: "dedupe_1",
       mailboxItemId: "mailbox_system_1",
+      payloadRef: "payload_ref_1",
       replayAuthority: {
-        acceptedConversationAt: "2026-04-26T00:00:01.000Z",
+        acceptedConversationAt: null,
         acceptedConversationSeq: "11",
         bootstrapActivationAllowed: false,
-        processingMode: "conversation_replay_usage_limit",
+        processingMode: "conversation_replay_" + "usage_limit",
       },
-      requestId: "payload-fetch-invalid-replay",
-    })).toThrow(/usage-limit mode forbids acceptedConversationAt/u);
+      requestId: "payload-fetch-1",
+    })).toThrow(/processingMode is not supported/u);
     expect(parseHostedMailboxPayloadFetchResponse({
       fetchedAt: "2026-04-26T00:00:02.000Z",
       payload,
@@ -1045,6 +1021,10 @@ describe("hosted runtime control contracts", () => {
       processingMode: "conversation_replay",
       usage,
     });
+    expect(() => parseHostedRuntimeUsageRecordRequest({
+      processingMode: "conversation_replay_" + "usage_limit",
+      usage,
+    })).toThrow(/processingMode is not supported/u);
     expect(parseHostedRuntimeUsageRecordRequest({
       noticeDeliveryTarget: null,
       usage,

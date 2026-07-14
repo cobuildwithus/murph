@@ -743,10 +743,10 @@ describe("handleRunnerOutboundRequest", () => {
           lanes: [{ importedSeq: "7", lane: "conversation" }],
           limitPerLane: 1,
           replayAuthority: {
-            acceptedConversationAt: null,
+            acceptedConversationAt: "2026-04-26T00:00:02.000Z",
             acceptedConversationSeq: "9",
             bootstrapActivationAllowed: false,
-            processingMode: "conversation_replay_usage_limit",
+            processingMode: "conversation_replay",
           },
           requestId: "request_wrong_replay_authority",
         }),

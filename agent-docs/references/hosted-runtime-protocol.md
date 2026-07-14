@@ -420,12 +420,9 @@ context. A terminal non-retryable delivery failure is a completed
 disposition; pending or retryable delivery is not. When the accepted row's
 historical allowance period is already closed and exhausted, current web
 reconciliation still emits `conversation_replay`; exhaustion is advisory and
-usage remains charged to the exact stored period. During the deployment
-compatibility window, the runner continues to accept the older provider-free
-`conversation_replay_usage_limit` mode from a pre-policy web producer. Both
-opaque token and native-credential egress validation reject that legacy
-terminal mode at the Worker-owned provider boundary. There is no
-replay queue, timer, consume endpoint, consume port, or post-checkpoint
+usage remains charged to the exact stored period. Provider egress stays bound
+to that exact accepted-conversation authority at the Worker boundary. There is
+no replay queue, timer, consume endpoint, consume port, or post-checkpoint
 acknowledgment lifecycle.
 
 Ordinary/default mailbox metadata and payload fetches always re-prove current

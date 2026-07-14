@@ -110,7 +110,7 @@ function assertRuntimeProcessingConversationAuthority(input: RuntimeProcessingIn
   const mode = readRunnerRuntimeProcessingMode(input.processingMode);
   const acceptedConversationSeq = input.acceptedConversationSeq ?? null;
   if (
-    (mode === "conversation_replay" || mode === "conversation_replay_usage_limit")
+    mode === "conversation_replay"
     && (
       acceptedConversationSeq === null
       || !/^[1-9][0-9]*$/u.test(acceptedConversationSeq)
@@ -126,16 +126,7 @@ function assertRuntimeProcessingConversationAuthority(input: RuntimeProcessingIn
     );
   }
   if (
-    mode === "conversation_replay_usage_limit"
-    && input.acceptedConversationAt != null
-  ) {
-    throw new TypeError(
-      "Hosted usage-limit replay must not carry provider allowance authority.",
-    );
-  }
-  if (
     mode !== "conversation_replay"
-    && mode !== "conversation_replay_usage_limit"
     && (input.acceptedConversationAt != null || acceptedConversationSeq !== null)
   ) {
     throw new TypeError(
@@ -245,10 +236,7 @@ export class RuntimeProcessingController {
         )
         || (
           activeFence.processingMode === "default"
-          && (
-            requestedProcessingMode === "conversation_replay"
-            || requestedProcessingMode === "conversation_replay_usage_limit"
-          )
+          && requestedProcessingMode === "conversation_replay"
         )
       ) {
         return await this.preemptActiveRuntimeForModeTransition({

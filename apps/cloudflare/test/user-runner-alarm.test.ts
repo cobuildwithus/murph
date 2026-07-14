@@ -1871,11 +1871,6 @@ describe("HostedUserRunner execution coordination", () => {
       processingMode: "conversation_replay" as const,
     },
     {
-      activeProcessingMode: "default" as const,
-      label: "terminal usage-limit replay after default processing",
-      processingMode: "conversation_replay_usage_limit" as const,
-    },
-    {
       activeProcessingMode: "inbox_media_retention" as const,
       label: "default processing after retention-only processing",
       processingMode: undefined,
@@ -1922,11 +1917,9 @@ describe("HostedUserRunner execution coordination", () => {
       activeGeneration = String(token.generation);
 
       await expect(runner.ensureRuntimeProcessingForUser({
-        ...(processingMode?.startsWith("conversation_replay")
+        ...(processingMode === "conversation_replay"
           ? {
-              ...(processingMode === "conversation_replay"
-                ? { acceptedConversationAt: FIXED_NOW }
-                : {}),
+              acceptedConversationAt: FIXED_NOW,
               acceptedConversationSeq: "1",
             }
           : {}),
@@ -1952,7 +1945,7 @@ describe("HostedUserRunner execution coordination", () => {
         processingMode === "conversation_replay" ? FIXED_NOW : undefined,
       );
       expect(invoke.mock.calls[0]?.[0].job.request.acceptedConversationSeq).toBe(
-        processingMode?.startsWith("conversation_replay") ? "1" : undefined,
+        processingMode === "conversation_replay" ? "1" : undefined,
       );
       expect(invoke.mock.calls[0]?.[0].job.request.processingMode).toBe(processingMode);
       expect(readRunnerMeta(sql)).toMatchObject({

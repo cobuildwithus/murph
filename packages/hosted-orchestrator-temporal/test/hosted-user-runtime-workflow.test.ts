@@ -76,33 +76,6 @@ describe("hostedUserRuntimeWorkflow loop", () => {
     ]);
   });
 
-  it("dispatches terminal usage-limit replay without accepted provider authority", async () => {
-    const runtime = new FakeWorkflowRuntime();
-    runtime.facts.push(reconciliationFacts({
-      acceptedConversationAt: null,
-      mailboxLag: [mailboxLag({ lane: "conversation" })],
-      processingMode: "conversation_replay_usage_limit",
-    }));
-    runtime.executions.push(processingAccepted());
-
-    const machine = createMachine(runtime, {
-      options: { continueAsNewAfterIterations: 1 },
-      userId: "member_test",
-    });
-    machine.applySignal(mailboxSignal());
-
-    await runUntilContinueAsNew(machine);
-
-    expect(runtime.executionRequests).toEqual([
-      {
-        acceptedConversationSeq: "1",
-        orchestrationAttemptId: "orchestration-attempt-1",
-        processingMode: "conversation_replay_usage_limit",
-        userId: "member_test",
-      },
-    ]);
-  });
-
   it("reads reconciliation facts before executing fresh system mailbox signals", async () => {
     const runtime = new FakeWorkflowRuntime();
     runtime.facts.push(reconciliationFacts({

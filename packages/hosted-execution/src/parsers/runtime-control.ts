@@ -589,20 +589,14 @@ function parseHostedMailboxReplayAuthority(
   const processingMode = parseAllowedString(
     record.processingMode,
     `${label} processingMode`,
-    ["conversation_replay", "conversation_replay_usage_limit"] as const,
+    ["conversation_replay"] as const,
   );
   const acceptedConversationAt = readNullableCanonicalIsoTimestamp(
     record.acceptedConversationAt,
     `${label} acceptedConversationAt`,
   );
-  if (processingMode === "conversation_replay" && acceptedConversationAt === null) {
+  if (acceptedConversationAt === null) {
     throw new TypeError(`${label} requires acceptedConversationAt.`);
-  }
-  if (
-    processingMode === "conversation_replay_usage_limit"
-    && acceptedConversationAt !== null
-  ) {
-    throw new TypeError(`${label} usage-limit mode forbids acceptedConversationAt.`);
   }
 
   return {

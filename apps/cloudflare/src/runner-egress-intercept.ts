@@ -3713,9 +3713,6 @@ function readProviderEgressProcessingAuthority(record: Record<string, unknown>):
   if (!processingMode) {
     return null;
   }
-  if (processingMode === "conversation_replay_usage_limit") {
-    return null;
-  }
   if (processingMode !== "conversation_replay") {
     return record.acceptedConversationAt === null || record.acceptedConversationAt === undefined
       ? record.acceptedConversationSeq === null || record.acceptedConversationSeq === undefined

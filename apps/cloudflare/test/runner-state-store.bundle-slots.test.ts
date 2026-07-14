@@ -545,33 +545,6 @@ describe("RunnerStateStore schema guard", () => {
     });
   });
 
-  it("rejects every provider boundary for terminal usage-limit replay", async () => {
-    const { store } = createRunnerStateStoreHarness();
-    const lease = await store.beginWriteFence({
-      acceptedConversationAt: null,
-      acceptedConversationSeq: "12",
-      processingMode: "conversation_replay_usage_limit",
-      runnerContainerName: "user-write--v-worker-current",
-      userId: "user-write",
-    });
-
-    await expect(store.validateProviderEgressToken({
-      providerEgressToken: lease.providerEgressToken ?? "",
-      userId: "user-write",
-    })).resolves.toMatchObject({
-      owns: false,
-      reason: "provider_egress_not_allowed",
-    });
-    await expect(store.validateProviderEgressCredential({
-      providerKind: "openai",
-      runnerContainerName: "user-write--v-worker-current",
-      userId: "user-write",
-    })).resolves.toMatchObject({
-      owns: false,
-      reason: "provider_egress_not_allowed",
-    });
-  });
-
   it("fails closed without initializing state when provider egress validation reaches an unbound runner", async () => {
     const { db, store } = createRunnerStateStoreHarness();
 

@@ -358,8 +358,7 @@ function hostedMailboxReplayAuthorityMatchesFence(input: {
   authority: Awaited<ReturnType<typeof requireRunnerRuntimeMailboxReplayAuthority>>;
   replayAuthority: ReturnType<typeof parseHostedMailboxFetchRequest>["replayAuthority"] | null;
 }): boolean {
-  const replayMode = input.authority.processingMode === "conversation_replay"
-    || input.authority.processingMode === "conversation_replay_usage_limit";
+  const replayMode = input.authority.processingMode === "conversation_replay";
   if (!replayMode) {
     return input.replayAuthority === null;
   }

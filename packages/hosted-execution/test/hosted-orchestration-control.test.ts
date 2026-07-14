@@ -277,15 +277,11 @@ describe("hosted orchestration control contracts", () => {
       orchestrationAttemptId: "orchestration_attempt_test",
       processingMode: "conversation_replay",
     });
-    expect(parseHostedRuntimeEnsureProcessingRequest({
+    expect(() => parseHostedRuntimeEnsureProcessingRequest({
       acceptedConversationSeq: "42",
       orchestrationAttemptId: "orchestration_attempt_test",
-      processingMode: "conversation_replay_usage_limit",
-    })).toEqual({
-      acceptedConversationSeq: "42",
-      orchestrationAttemptId: "orchestration_attempt_test",
-      processingMode: "conversation_replay_usage_limit",
-    });
+      processingMode: "conversation_replay_" + "usage_limit",
+    })).toThrow("Hosted runtime ensure-processing request processingMode is not supported.");
     expect(parseHostedRuntimeEnsureProcessingRequest({
       orchestrationAttemptId: "orchestration_attempt_test",
       processingMode: "inbox_media_retention",

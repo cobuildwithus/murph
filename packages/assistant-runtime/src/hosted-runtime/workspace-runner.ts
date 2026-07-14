@@ -303,7 +303,6 @@ export interface HostedWorkspaceRunnerMailboxImportContext {
   onConversationInputStaged?: (() => void) | null;
   runtimeAttemptId?: string | null;
   signal?: AbortSignal | null;
-  skipConversationProjection?: boolean;
 }
 
 export interface HostedWorkspaceRunnerRuntimePassDiagnostics {

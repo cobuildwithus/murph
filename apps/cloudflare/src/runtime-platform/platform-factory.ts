@@ -284,19 +284,16 @@ function resolveHostedMailboxReplayAuthority(input: {
   bootstrapActivationAllowed: boolean;
   processingMode: HostedWorkspaceInvocationProcessingMode | null;
 }): HostedMailboxReplayAuthority | null {
-  if (
-    input.processingMode !== "conversation_replay"
-    && input.processingMode !== "conversation_replay_usage_limit"
-  ) {
+  if (input.processingMode !== "conversation_replay") {
     return null;
   }
-  if (!input.acceptedConversationSeq) {
-    throw new TypeError("Hosted mailbox replay requires an accepted conversation seq.");
+  if (!input.acceptedConversationAt || !input.acceptedConversationSeq) {
+    throw new TypeError(
+      "Hosted mailbox replay requires an accepted conversation timestamp and seq.",
+    );
   }
   return {
-    acceptedConversationAt: input.processingMode === "conversation_replay"
-      ? input.acceptedConversationAt
-      : null,
+    acceptedConversationAt: input.acceptedConversationAt,
     acceptedConversationSeq: input.acceptedConversationSeq,
     bootstrapActivationAllowed: input.bootstrapActivationAllowed,
     processingMode: input.processingMode,

@@ -201,10 +201,8 @@ export class RuntimeInvocationService {
       workspace: workspaceRead.workspace,
       workspaceVersion,
     });
-    const replayBootstrapAllowed = (
-      input.input.processingMode === "conversation_replay"
-      || input.input.processingMode === "conversation_replay_usage_limit"
-    ) && workspaceRunnerInvocation.job.preparedSnapshotRestore === undefined;
+    const replayBootstrapAllowed = input.input.processingMode === "conversation_replay"
+      && workspaceRunnerInvocation.job.preparedSnapshotRestore === undefined;
     const replayBoundToken = replayBootstrapAllowed
       ? await this.input.stateStore.bindWriteFenceReplayBootstrapAllowed({
           allowed: true,

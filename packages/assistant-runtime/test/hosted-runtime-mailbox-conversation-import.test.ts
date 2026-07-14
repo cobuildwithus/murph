@@ -252,34 +252,6 @@ describe("hosted mailbox conversation import adapter", () => {
     assert.equal(afterProjection.events[0]?.attachmentEvidence.attachments.length, 0);
   });
 
-  test("stages terminal-policy input without invoking projection providers", async () => {
-    const parentRoot = await mkdtemp(path.join(tmpdir(), "murph-hosted-input-policy-"));
-    tempRoots.push(parentRoot);
-    const vaultRoot = path.join(parentRoot, "vault");
-    const item = createResolvedConversationMailboxItem();
-    const decodedWake = createConversationWake();
-
-    const outcome = await importHostedConversationMailboxItem({
-      decodePayload: createDecodedPayloadDecoder(decodedWake),
-      async importConversationWake() {
-        throw new Error("Terminal policy import must not invoke inbox projection.");
-      },
-      item,
-      async prepareWakeContext() {
-        throw new Error("Terminal policy import must not prepare projection context.");
-      },
-      runtime: createRuntime(),
-      skipProjection: true,
-      vaultRoot,
-    });
-
-    assert.equal(outcome.status, "imported");
-    assert.equal(outcome.captureId, null);
-    const listed = await listAssistantInputEvents({ vault: vaultRoot });
-    assert.equal(listed.events.length, 1);
-    assert.equal(listed.events[0]?.projection.status, "pending");
-  });
-
   test("notifies active turn input after staging and before inbox projection completes", async () => {
     const parentRoot = await mkdtemp(path.join(tmpdir(), "murph-hosted-input-early-notify-"));
     tempRoots.push(parentRoot);

@@ -1239,10 +1239,10 @@ describe("hosted runtime internal web routes", () => {
         lanes: [{ importedSeq: "0", lane: "conversation" }],
         limitPerLane: 1,
         replayAuthority: {
-          acceptedConversationAt: null,
+          acceptedConversationAt: FIXED_NOW,
           acceptedConversationSeq: "1",
           bootstrapActivationAllowed: false,
-          processingMode: "conversation_replay_usage_limit",
+          processingMode: "conversation_replay",
         },
         requestId: "request_mailbox_replay_suspended",
       },

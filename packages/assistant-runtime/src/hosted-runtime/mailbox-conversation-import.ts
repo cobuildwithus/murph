@@ -255,7 +255,6 @@ export function createHostedConversationMailboxImportItem(input: {
     onConversationInputStaged?: (() => void) | null;
     runtimeAttemptId?: string | null;
     signal?: AbortSignal | null;
-    skipConversationProjection?: boolean;
   },
 ) => Promise<HostedMailboxItemImportOutcome> {
   return (item, context) =>
@@ -266,7 +265,6 @@ export function createHostedConversationMailboxImportItem(input: {
       onConversationInputStaged: context?.onConversationInputStaged ?? null,
       runtimeAttemptId: context?.runtimeAttemptId ?? null,
       signal: context?.signal ?? null,
-      skipProjection: context?.skipConversationProjection === true,
     });
 }
 
@@ -282,7 +280,6 @@ export async function importHostedConversationMailboxItem(input: {
   runtime: HostedConversationMailboxRuntime;
   runtimeAttemptId?: string | null;
   signal?: AbortSignal | null;
-  skipProjection?: boolean;
   stageAssistantInputEvent?: HostedConversationMailboxAssistantInputStager;
   vaultRoot: string;
 }): Promise<HostedConversationMailboxImportOutcome> {
@@ -412,7 +409,7 @@ export async function importHostedConversationMailboxItem(input: {
     input.item.item,
   );
   const emailDeliveryContext = buildHostedAssistantEmailDeliveryContextFromWake(decoded.wake);
-  if (input.skipProjection === true || input.item.durablyConsumed === true) {
+  if (input.item.durablyConsumed === true) {
     return {
       assistantInputId: stagedInput.inputId,
       captureId: null,

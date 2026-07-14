@@ -1088,40 +1088,6 @@ describe("hostedRunnerIntercept", () => {
     expect(findFetchCall(fetchMock, "api.openai.com")).toBeUndefined();
   });
 
-  it("rejects provider egress when validation reports terminal usage-limit replay", async () => {
-    const fetchMock = vi.fn<typeof fetch>(async () => new Response("ok"));
-    vi.stubGlobal("fetch", fetchMock);
-    const validateRuntimeProviderEgressToken = vi.fn(async (input: {
-      providerEgressToken: string;
-      userId: string;
-    }) => ({
-      ...createProviderEgressTokenValidationResult(input),
-      acceptedConversationAt: null,
-      processingMode: "conversation_replay_usage_limit" as const,
-    }));
-
-    const response = await hostedRunnerIntercept(
-      new Request("https://api.elevenlabs.io/v1/text-to-speech/voice_123?output_format=mp3_44100_128", {
-        body: JSON.stringify({ text: "Must not leave the worker." }),
-        headers: {
-          ...BOUND_USER_PROVIDER_EGRESS_HEADERS,
-          "content-type": "application/json",
-          "xi-api-key": HOSTED_CLOUDFLARE_INJECTED_CREDENTIAL,
-        },
-        method: "POST",
-      }),
-      createInterceptEnv({
-        ELEVENLABS_API_KEY: "elevenlabs-worker-secret",
-        validateRuntimeProviderEgressToken,
-      }),
-      { containerId: "member_123--v-version_1" },
-    );
-
-    expect(response.status).toBe(401);
-    expect(validateRuntimeProviderEgressToken).toHaveBeenCalledOnce();
-    expect(findFetchCall(fetchMock, "api.elevenlabs.io")).toBeUndefined();
-  });
-
   it("injects ElevenLabs speech credentials and records successful TTS usage", async () => {
     const fetchMock = vi.fn<typeof fetch>(async (target) => {
       if (new URL(readFetchTargetUrl(target)).hostname === "web.example.test") {

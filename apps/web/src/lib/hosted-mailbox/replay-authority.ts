@@ -27,13 +27,10 @@ export async function requireHostedMailboxReplayAuthority(input: {
     laneSeq: input.authority.acceptedConversationSeq,
     userId: input.userId,
   });
-  const acceptedAtMatches = input.authority.processingMode
-      === "conversation_replay_usage_limit"
-    || accepted?.createdAt === input.authority.acceptedConversationAt;
   if (
     !accepted
     || accepted.kind !== "conversation.message"
-    || !acceptedAtMatches
+    || accepted.createdAt !== input.authority.acceptedConversationAt
   ) {
     throw invalidHostedMailboxReplayAuthority();
   }

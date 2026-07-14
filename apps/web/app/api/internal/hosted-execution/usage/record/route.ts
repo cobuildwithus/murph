@@ -24,9 +24,6 @@ export const POST = withJsonError(async (request: Request) => {
   const body = parseHostedRuntimeUsageRecordRequest(
     payloadText.trim() ? JSON.parse(payloadText) : {},
   );
-  if (body.processingMode === "conversation_replay_usage_limit") {
-    throw new TypeError("Usage-limit replay cannot record provider usage.");
-  }
   if (
     body.processingMode !== "conversation_replay"
     && (body.acceptedConversationAt || body.acceptedConversationSeq)
