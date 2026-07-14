@@ -2608,6 +2608,7 @@ test("device sync store reclaims an expired retained companion lease on the same
     const job = store.enqueueJob({
       accountId: account.id,
       availableAt: "2026-04-07T00:00:00.000Z",
+      dedupeKey: "companion-expired-final-attempt",
       kind: "resource",
       maxAttempts: 1,
       payload: {
@@ -2620,6 +2621,19 @@ test("device sync store reclaims an expired retained companion lease on the same
     assert.equal(firstClaim?.id, job.id);
     assert.equal(firstClaim?.attempts, 1);
     assert.equal(firstClaim?.maxAttempts, 1);
+
+    const refetched = store.enqueueJob({
+      accountId: account.id,
+      availableAt: "2026-04-07T00:01:01.000Z",
+      dedupeKey: "companion-expired-final-attempt",
+      kind: "resource",
+      maxAttempts: 1,
+      payload: {
+        resource: COMPANION_HRV_RMSSD_RESOURCE,
+      },
+      provider: "junction",
+    });
+    assert.equal(refetched.id, job.id);
 
     const reclaimed = store.claimDueJob("worker-b", "2026-04-07T00:01:01.000Z", 60_000);
     assert.equal(reclaimed?.id, job.id);

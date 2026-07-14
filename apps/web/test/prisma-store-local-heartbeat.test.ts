@@ -361,7 +361,7 @@ describe("PrismaDeviceSyncControlPlaneStore local heartbeat updates", () => {
     }));
   });
 
-  it("keeps the server-owned disconnect intent across a late heartbeat", async () => {
+  it("rejects a late heartbeat while server-owned disconnect is in progress", async () => {
     const { store, updateConnection } = createHeartbeatStore({
       lastErrorCode: DEVICE_SYNC_DISCONNECT_IN_PROGRESS_ERROR_CODE,
       lastErrorMessage: null,
@@ -369,24 +369,14 @@ describe("PrismaDeviceSyncControlPlaneStore local heartbeat updates", () => {
       status: "reauthorization_required",
     });
 
-    const updated = await store.updateConnectionFromLocalHeartbeat("user-123", "dsc_123", {
+    await expect(store.updateConnectionFromLocalHeartbeat("user-123", "dsc_123", {
       lastSyncStartedAt: "2026-03-25T01:10:00.000Z",
+    })).rejects.toMatchObject({
+      code: "CONNECTION_DISCONNECT_IN_PROGRESS",
+      httpStatus: 409,
+      retryable: true,
     });
-
-    expect(updated).toMatchObject({
-      id: "dsc_123",
-      lastErrorCode: DEVICE_SYNC_DISCONNECT_IN_PROGRESS_ERROR_CODE,
-      lastErrorMessage: null,
-      lastSyncStartedAt: "2026-03-25T01:10:00.000Z",
-      status: "reauthorization_required",
-    });
-    expect(updateConnection).toHaveBeenCalledWith(expect.objectContaining({
-      data: expect.objectContaining({
-        lastErrorCode: DEVICE_SYNC_DISCONNECT_IN_PROGRESS_ERROR_CODE,
-        lastErrorMessage: null,
-        lastSyncStartedAt: expect.any(Date),
-      }),
-    }));
+    expect(updateConnection).not.toHaveBeenCalled();
   });
 
   it("preserves concurrent non-heartbeat connection updates across a later heartbeat write", async () => {

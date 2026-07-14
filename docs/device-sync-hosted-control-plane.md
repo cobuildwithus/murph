@@ -234,7 +234,8 @@ This keeps control-plane truth in web while still allowing hosted execution to c
 Disconnect intent is also web-owned control-plane truth. Once the connection
 mutation lock commits `DISCONNECT_IN_PROGRESS`, the signed runtime apply route
 rejects every connection, local-state, credential, and source write for that
-connection until the provider revoke finalizes. Dirty-payload acknowledgement
+connection until the provider revoke finalizes; authenticated local heartbeats
+receive the same retryable conflict without persisting sync timestamps. Dirty-payload acknowledgement
 remains a separate path, so a companion import that already reached canonical
 success may still acknowledge its exact hosted payload.
 

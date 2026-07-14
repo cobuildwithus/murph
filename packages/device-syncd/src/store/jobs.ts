@@ -736,10 +736,21 @@ export function enqueueDeviceSyncJobInTransaction(
           and lease_expires_at is not null
           and lease_expires_at <= ?
           and attempts >= max_attempts
+          and not (
+            provider = 'junction'
+            and kind = 'resource'
+            and coalesce(json_extract(payload_json, '$.resource'), '') = ?
+          )
         )
       order by created_at desc, id desc
       limit 1
-    `).get(input.accountId, input.provider, input.dedupeKey, now) as StoredJobRow | undefined;
+    `).get(
+      input.accountId,
+      input.provider,
+      input.dedupeKey,
+      now,
+      COMPANION_HRV_RMSSD_RESOURCE,
+    ) as StoredJobRow | undefined;
 
     if (existing) {
       return mapJobRow(existing)!;

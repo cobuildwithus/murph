@@ -212,12 +212,13 @@ drain/batch service seam in `packages/device-syncd/src/service.ts`.
    failures retain the same local job row, extend its attempt fence, and use
    the existing bounded retry delay even after ordinary job attempts are
    exhausted. An expired worker lease on that fenced row is reclaimed on the
-   same row rather than dead-lettered; these paths never create replacement dead rows or an immediate hosted
+   same row rather than dead-lettered, and a hosted refetch dedupes to that row
+   before reclaim; these paths never create replacement dead rows or an immediate hosted
    replay loop. A structurally invalid companion payload terminalizes its one
    local job and acknowledges the exact encrypted hosted payload so it cannot
    replay into replacement dead rows. While provider revocation is in flight, the web-owned
    `DISCONNECT_IN_PROGRESS` sentinel rejects every runtime connection, local
-   state, credential, and source mutation under the connection lock.
+   state, credential, source, and local-heartbeat mutation under the connection lock.
    A replay after mutable vault-timezone metadata changes preserves the first
    canonical `dayKey` and `timeZone`; that placement drift alone is duplicate
    content, while every other same-admission content difference remains an
