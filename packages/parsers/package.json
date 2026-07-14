@@ -25,8 +25,8 @@
     "README.md"
   ],
   "scripts": {
-    "build": "node ../../scripts/rm-paths.mjs dist .tsbuildinfo && tsc -b tsconfig.json",
-    "typecheck": "tsc -b tsconfig.typecheck.json --pretty false",
+    "build": "node ../../scripts/rm-paths.mjs dist .tsbuildinfo && node ../../scripts/run-typescript.mjs package -b tsconfig.json",
+    "typecheck": "node ../../scripts/run-typescript.mjs package -b tsconfig.typecheck.json --pretty false",
     "test": "pnpm exec vitest run --config vitest.config.ts --no-coverage",
     "test:coverage": "pnpm exec vitest run --config vitest.config.ts --coverage"
   },

@@ -21,6 +21,7 @@ const REMOVE_OPTIONS = {
 
 const currentModulePath = fileURLToPath(import.meta.url);
 const defaultPackageRoot = path.resolve(path.dirname(currentModulePath), "..");
+const repoRoot = path.resolve(defaultPackageRoot, "../..");
 const legacyTempConfigName = ".tsconfig.build-next.json";
 const publishTempPrefix = ".dist-publish-";
 const backupTempPrefix = ".dist-backup-";
@@ -202,8 +203,15 @@ function replaceDistDirectory(distPath: string, publishTempRoot: string): void {
 function runTypeScriptBuild(context: BuildCommandContext): BuildCommandResult {
   const relativeConfigPath = path.relative(context.packageRoot, context.safeBuildConfigPath);
   const result = spawnSync(
-    "pnpm",
-    ["exec", "tsc", "-b", relativeConfigPath, "--pretty", "false"],
+    process.execPath,
+    [
+      path.join(repoRoot, "scripts", "run-typescript.mjs"),
+      "package",
+      "-b",
+      relativeConfigPath,
+      "--pretty",
+      "false",
+    ],
     {
       cwd: context.packageRoot,
       stdio: "inherit",
