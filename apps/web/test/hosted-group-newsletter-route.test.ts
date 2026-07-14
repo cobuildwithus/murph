@@ -74,8 +74,8 @@ describe("hosted group newsletter route", () => {
   });
 
   it.each([
-    { includeAuthorizationSnapshot: true },
-    { includeAuthorizationProof: true },
+    { includeAuthorizationSnapshot: true as const },
+    { includeAuthorizationProof: true as const },
   ])("rejects one-sided authorization opt-ins without reading participant state", async (
     authorization,
   ) => {
