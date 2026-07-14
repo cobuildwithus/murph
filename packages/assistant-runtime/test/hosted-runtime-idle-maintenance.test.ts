@@ -428,6 +428,7 @@ describe("runHostedIdleCheckpointMaintenance", () => {
       expect(compactWarmCodexThread).not.toHaveBeenCalled();
       expect(wakeSignal.consumePending()).toEqual({
         notifiedAtEpochMs: wakeAt.getTime(),
+        revision: 1,
       });
     } finally {
       vi.useRealTimers();
@@ -603,6 +604,7 @@ describe("runHostedIdleCheckpointMaintenance", () => {
       // must still observe it afterwards with the original notification time.
       expect(wakeSignal.consumePending()).toEqual({
         notifiedAtEpochMs: firstWakeAt.getTime(),
+        revision: 1,
       });
     } finally {
       vi.useRealTimers();

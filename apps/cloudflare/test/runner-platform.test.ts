@@ -3269,6 +3269,124 @@ describe("buildHostedExecutionRuntimePlatform", () => {
     expect(request.headers.has(HOSTED_PROVIDER_EGRESS_TOKEN_HEADER)).toBe(false);
   });
 
+  it("rechecks provider-entry authority after async provider lease preparation", async () => {
+    const fetchMock = vi.fn<typeof fetch>();
+    const authorityRevoked = new Error("provider authority revoked");
+    const lease = {
+      attemptId: "runtime_write_123",
+      leaseGeneration: "7",
+      providerEgressToken: "provider-egress-token-platform",
+      userId: "member_123",
+      workspaceVersion: "6",
+    };
+    let resolveLease!: (value: typeof lease) => void;
+    const leasePromise = new Promise<typeof lease>((resolve) => {
+      resolveLease = resolve;
+    });
+    const hostedFetch = createCloudflareHostedProviderFetch(
+      "member_123",
+      fetchMock,
+      {
+        readCurrentLease: () => leasePromise,
+      },
+    );
+    let current = true;
+    let providerDispatchEntered = false;
+
+    const dispatchPromise =
+      hostedFetch.dispatchWithProviderEntryCurrentCheck!(
+        "https://api.telegram.org/bot/sendMessage",
+        { body: "{}", method: "POST" },
+        {
+          assertProviderEntryCurrent: () => {
+            if (!current) {
+              throw authorityRevoked;
+            }
+          },
+          onProviderDispatchEntered: () => {
+            providerDispatchEntered = true;
+          },
+        },
+      );
+    current = false;
+    resolveLease(lease);
+
+    await expect(dispatchPromise).rejects.toBe(authorityRevoked);
+    expect(providerDispatchEntered).toBe(false);
+    expect(fetchMock).not.toHaveBeenCalled();
+  });
+
+  it("rechecks provider-entry authority after async internal fence preparation", async () => {
+    const events: string[] = [];
+    const fetchMock = vi.fn<typeof fetch>(async () => {
+      events.push("fetch");
+      return new Response(null, { status: 204 });
+    });
+    const readCurrentLease = vi.fn();
+    const authorityRevoked = new Error("internal provider authority revoked");
+    const lease = {
+      attemptId: "runtime_write_123",
+      leaseGeneration: "7",
+      userId: "member_123",
+      workspaceVersion: "6",
+    };
+    let resolveLease!: (value: typeof lease) => void;
+    const leasePromise = new Promise<typeof lease>((resolve) => {
+      resolveLease = resolve;
+    });
+    readCurrentLease.mockImplementation(() => {
+      events.push("lease");
+      return leasePromise;
+    });
+    const hostedFetch = createCloudflareHostedProviderFetch(
+      "member_123",
+      fetchMock,
+      { readCurrentLease },
+    );
+    let current = true;
+    let providerDispatchEntered = false;
+    const providerEntryContext = {
+      assertProviderEntryCurrent: () => {
+        events.push("assert");
+        if (!current) {
+          throw authorityRevoked;
+        }
+      },
+      onProviderDispatchEntered: () => {
+        events.push("entered");
+        providerDispatchEntered = true;
+      },
+    };
+
+    const dispatchPromise = hostedFetch.dispatchWithProviderEntryCurrentCheck!(
+      "http://results.worker/messages/raw_123",
+      undefined,
+      providerEntryContext,
+    );
+    current = false;
+    resolveLease(lease);
+
+    await expect(dispatchPromise).rejects.toBe(authorityRevoked);
+    expect(events).toEqual(["lease", "assert"]);
+    expect(readCurrentLease).toHaveBeenCalledOnce();
+    expect(providerDispatchEntered).toBe(false);
+    expect(fetchMock).not.toHaveBeenCalled();
+
+    events.length = 0;
+    current = true;
+    const response = await hostedFetch.dispatchWithProviderEntryCurrentCheck!(
+      "http://results.worker/messages/raw_123",
+      undefined,
+      providerEntryContext,
+    );
+
+    expect(response.status).toBe(204);
+    expect(events).toEqual(["lease", "assert", "entered", "fetch"]);
+    expect(readCurrentLease).toHaveBeenCalledTimes(2);
+    expect(providerDispatchEntered).toBe(true);
+    expect(fetchMock).toHaveBeenCalledOnce();
+  });
+
   it("passes platform providerFetch without exact write-fence headers", async () => {
     const fetchMock = vi.fn(async () => new Response(null, { status: 204 }));
     const platform = buildHostedExecutionRuntimePlatform({
@@ -6604,6 +6722,54 @@ describe("buildHostedExecutionRuntimePlatform", () => {
       statusCode: 503,
     });
     expect(fetchMock).toHaveBeenCalledOnce();
+  });
+
+  it("rechecks hosted email provider-entry authority after async fence preparation", async () => {
+    const fetchMock = vi.fn<typeof fetch>();
+    const authorityRevoked = new Error("hosted email provider authority revoked");
+    const lease = {
+      attemptId: "runtime_write_123",
+      leaseGeneration: "7",
+      userId: "member_123",
+      workspaceVersion: "6",
+    };
+    let resolveLease!: (value: typeof lease) => void;
+    const leasePromise = new Promise<typeof lease>((resolve) => {
+      resolveLease = resolve;
+    });
+    let current = true;
+    let providerDispatchEntered = false;
+    const platform = buildHostedExecutionRuntimePlatform({
+      boundUserId: "member_123",
+      fetchImpl: fetchMock,
+      workspaceCheckpointBridge: {
+        readCurrentLease: () => leasePromise,
+      },
+    });
+
+    const sendPromise = platform.effectsPort.sendEmail(
+      {
+        message: "group reply",
+        target: "hosted-group-recipient-target",
+        targetKind: "thread",
+      },
+      {
+        assertProviderEntryCurrent: () => {
+          if (!current) {
+            throw authorityRevoked;
+          }
+        },
+        onProviderDispatchEntered: () => {
+          providerDispatchEntered = true;
+        },
+      },
+    );
+    current = false;
+    resolveLease(lease);
+
+    await expect(sendPromise).rejects.toBe(authorityRevoked);
+    expect(providerDispatchEntered).toBe(false);
+    expect(fetchMock).not.toHaveBeenCalled();
   });
 
   it("bounds and cancels stalled hosted email response bodies", async () => {

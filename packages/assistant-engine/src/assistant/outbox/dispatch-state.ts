@@ -379,10 +379,10 @@ function isAmbiguousDeliveryWithoutProviderIds(input: {
   return isTelegramAmbiguousDeliveryWithoutProviderIds(input) ||
     isLinqMessageReactionAmbiguityWithoutProviderIds(input) ||
     isLinqPartialDeliveryWithoutProviderIds(input) ||
-    isEmailGroupFanoutAmbiguityWithoutProviderIds(input)
+    isEmailAmbiguityWithoutProviderIds(input)
 }
 
-function isEmailGroupFanoutAmbiguityWithoutProviderIds(input: {
+function isEmailAmbiguityWithoutProviderIds(input: {
   deliveryMayHaveSucceeded: boolean
   error: unknown
   sending: AssistantOutboxIntent
@@ -398,7 +398,8 @@ function isEmailGroupFanoutAmbiguityWithoutProviderIds(input: {
     readNonEmptyString(context?.code) ??
     null
 
-  return code === 'ASSISTANT_EMAIL_GROUP_FANOUT_INCOMPLETE'
+  return code === 'ASSISTANT_EMAIL_DELIVERY_AMBIGUOUS' ||
+    code === 'ASSISTANT_EMAIL_GROUP_FANOUT_INCOMPLETE'
 }
 
 function isEmailGroupRecipientAuthoritySuperseded(input: {

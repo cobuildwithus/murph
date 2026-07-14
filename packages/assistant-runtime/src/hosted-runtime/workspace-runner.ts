@@ -212,6 +212,7 @@ export interface HostedWorkspaceRunnerAssistantPhaseInput {
   now?: () => string;
   platform: HostedRuntimePlatform;
   prepareAutoReplyDelivery?: (() => Promise<HostedWorkspaceRunnerAssistantPhaseDeliveryBarrier | null>) | null;
+  prepareAutoReplyProviderEntry?: (() => Promise<HostedWorkspaceRunnerAssistantPhaseProviderEntryPermit>) | null;
   recordDeferredUsage?: ((
     record: AssistantUsageRecord,
     providerRequestAcceptedInputIds?: readonly string[],
@@ -241,6 +242,11 @@ export interface HostedWorkspaceRunnerAssistantPhaseDeliveryBarrier {
   nextWakeAt?: string | null;
   nextWakeReason?: string | null;
   redactedStatus?: HostedRuntimeRedactedJson | null;
+}
+
+export interface HostedWorkspaceRunnerAssistantPhaseProviderEntryPermit {
+  barrier: HostedWorkspaceRunnerAssistantPhaseDeliveryBarrier | null;
+  isCurrent(): boolean;
 }
 
 interface HostedWorkspaceRunnerAssistantPhaseResultBase {
@@ -823,6 +829,7 @@ export async function runHostedWorkspaceUntilIdleOrBudget(
   }
   const runnerStartedAtEpochMs = Date.now();
   let foregroundConversationWorkObserved = false;
+  let foregroundConversationClassificationIncomplete = false;
   let foregroundRuntimeWakeObservedAfterStop = false;
   let foregroundMailboxImportLoop:
     ReturnType<typeof startHostedForegroundConversationMailboxImportLoop> | null = null;
@@ -838,6 +845,9 @@ export async function runHostedWorkspaceUntilIdleOrBudget(
         input,
         onForegroundConversationWorkObserved: () => {
           foregroundConversationWorkObserved = true;
+        },
+        onForegroundConversationClassificationIncomplete: () => {
+          foregroundConversationClassificationIncomplete = true;
         },
         checkpointCanonicalMailboxImportProgress,
       }),
@@ -858,7 +868,11 @@ export async function runHostedWorkspaceUntilIdleOrBudget(
     }
   };
   const shouldYieldBackgroundMaintenance = (): boolean => {
-    if (foregroundConversationWorkObserved || foregroundRuntimeWakeObservedAfterStop) {
+    if (
+      foregroundConversationWorkObserved
+      || foregroundConversationClassificationIncomplete
+      || foregroundRuntimeWakeObservedAfterStop
+    ) {
       return true;
     }
 
@@ -899,6 +913,51 @@ export async function runHostedWorkspaceUntilIdleOrBudget(
       vaultRoot: input.vaultRoot,
     });
   };
+  const prepareAutoReplyDeliveryBarrier = async () =>
+    await prepareHostedAutoReplyDeliveryForWorkspaceRunner({
+      checkpointRequestBuilder: checkpointRequestSession,
+      checkpointCanonicalMailboxImportProgress,
+      hostedCanonicalMailboxWritePort,
+      input,
+      stopForegroundMailboxImportLoop,
+    });
+  const prepareAutoReplyDeliveryWithCoverage = async () => {
+    const runtimeWakeSignal = input.runtimeWakeSignal ?? null;
+    let coveredRevision = runtimeWakeSignal?.currentRevision() ?? null;
+    let barrier = await prepareAutoReplyDeliveryBarrier();
+    if (!foregroundConversationWorkObserved && !input.signal?.aborted) {
+      // The delivery barrier needs a stable system-mailbox prefix, but it is
+      // not the end of foreground admission. Resume the existing conversation
+      // watcher so source-less system nudges are classified by actual mailbox
+      // progress instead of starving later maintenance.
+      await startForegroundMailboxImportLoop();
+      const resumedWake =
+        (await foregroundMailboxImportLoop?.drainPendingWake()) ?? null;
+      if (resumedWake?.kind === "system_classified") {
+        coveredRevision = resumedWake.revision;
+      }
+      if (resumedWake?.kind === "import_failed") {
+        throw resumedWake.error;
+      }
+      if (
+        !barrier
+        && resumedWake?.kind === "system_classified"
+        && resumedWake.nextRetryAt
+      ) {
+        barrier = {
+          nextWakeAt: resumedWake.nextRetryAt,
+          nextWakeReason: "mailbox",
+          redactedStatus: {
+            hostedMemberChannelPreDispatchImportBlocked: 1,
+            hostedMemberChannelPreDispatchImportPages: 1,
+          },
+        };
+      }
+    }
+    return { barrier, coveredRevision };
+  };
+  const prepareAutoReplyDelivery = async () =>
+    (await prepareAutoReplyDeliveryWithCoverage()).barrier;
   const assistantPhaseInput = {
     initialAssistantInputBatch,
     initialMailboxImport,
@@ -907,41 +966,19 @@ export async function runHostedWorkspaceUntilIdleOrBudget(
     materializeWorkspaceArtifacts: input.materializeWorkspaceArtifacts ?? null,
     now: input.now,
     platform: input.platform,
-    prepareAutoReplyDelivery: async () => {
-      const barrier = await prepareHostedAutoReplyDeliveryForWorkspaceRunner({
-        checkpointRequestBuilder: checkpointRequestSession,
-        checkpointCanonicalMailboxImportProgress,
-        hostedCanonicalMailboxWritePort,
-        input,
-        stopForegroundMailboxImportLoop,
-      });
-      if (!foregroundConversationWorkObserved && !input.signal?.aborted) {
-        // The delivery barrier needs a stable system-mailbox prefix, but it is
-        // not the end of foreground admission. Resume the existing
-        // conversation watcher so source-less system nudges are classified by
-        // actual mailbox progress instead of starving later maintenance.
-        await startForegroundMailboxImportLoop();
-        const resumedWake =
-          (await foregroundMailboxImportLoop?.drainPendingWake()) ?? null;
-        if (resumedWake?.kind === "import_failed") {
-          throw resumedWake.error;
-        }
-        if (
-          !barrier
-          && resumedWake?.kind === "system_classified"
-          && resumedWake.nextRetryAt
-        ) {
-          return {
-            nextWakeAt: resumedWake.nextRetryAt,
-            nextWakeReason: "mailbox",
-            redactedStatus: {
-              hostedMemberChannelPreDispatchImportBlocked: 1,
-              hostedMemberChannelPreDispatchImportPages: 1,
-            },
-          };
-        }
-      }
-      return barrier;
+    prepareAutoReplyDelivery,
+    prepareAutoReplyProviderEntry: async () => {
+      const runtimeWakeSignal = input.runtimeWakeSignal ?? null;
+      const preparation = await prepareAutoReplyDeliveryWithCoverage();
+      return {
+        barrier: preparation.barrier,
+        isCurrent: () =>
+          runtimeWakeSignal === null
+          || (
+            preparation.coveredRevision !== null
+            && runtimeWakeSignal.currentRevision() === preparation.coveredRevision
+          ),
+      };
     },
     recordDeferredUsage(
       record: AssistantUsageRecord,
@@ -1134,20 +1171,24 @@ function assertHostedWorkspaceRunnerUser(input: HostedWorkspaceRunnerInput): voi
 type HostedForegroundMailboxWakeClassification =
   | {
     kind: "conversation_observed";
+    revision: number;
   }
   | {
     kind: "import_failed";
     error: unknown;
+    revision: number;
   }
   | {
     kind: "system_classified";
     nextRetryAt: string | null;
+    revision: number;
   };
 
 function startHostedForegroundConversationMailboxImportLoop(input: {
   checkpointRequestBuilder: HostedWorkspaceCheckpointRequestSession;
   checkpointCanonicalMailboxImportProgress: HostedCanonicalMailboxImportProgressCheckpoint;
   input: HostedWorkspaceRunnerInput;
+  onForegroundConversationClassificationIncomplete?: (() => void) | null;
   onForegroundConversationWorkObserved?: (() => void) | null;
 }): {
   completion: Promise<void>;
@@ -1209,9 +1250,9 @@ function startHostedForegroundConversationMailboxImportLoop(input: {
     resolveFirstWakeClassification = null;
     resolve(classification);
   };
-  const observeForegroundConversationWork = (): void => {
+  const observeForegroundConversationWork = (revision: number): void => {
     input.onForegroundConversationWorkObserved?.();
-    classifyFirstWake({ kind: "conversation_observed" });
+    classifyFirstWake({ kind: "conversation_observed", revision });
     abortInFlightImportAfterObservedWork();
   };
 
@@ -1233,6 +1274,9 @@ function startHostedForegroundConversationMailboxImportLoop(input: {
       wakeOrdinal += 1;
       const preserveWakeForNextPass =
         input.checkpointRequestBuilder.assistantInputBatchFull();
+      if (preserveWakeForNextPass) {
+        input.onForegroundConversationClassificationIncomplete?.();
+      }
       if (!firstWakeClassification) {
         firstWakeClassification = new Promise((resolve) => {
           resolveFirstWakeClassification = resolve;
@@ -1271,7 +1315,7 @@ function startHostedForegroundConversationMailboxImportLoop(input: {
               phase: "active_turn_input",
               signal: outerSignal,
             });
-            observeForegroundConversationWork();
+            observeForegroundConversationWork(notification.revision);
           }
           await notifyHostedActiveTurnInputForMailboxImport({
             input: input.input,
@@ -1281,42 +1325,57 @@ function startHostedForegroundConversationMailboxImportLoop(input: {
           return input.checkpointRequestBuilder.assistantInputBatchFull();
         };
         if (!preserveWakeForNextPass) {
-          const conversationImportSignal =
-            composeHostedForegroundMailboxImportSignal(
-              outerSignal,
-              inFlightImportController.signal,
-            );
-          const conversationResult = await (async () => {
-            try {
-              return await importHostedMailboxForWorkspaceRunner({
-                checkpointRequestBuilder: input.checkpointRequestBuilder,
-                checkpointReason: "active_turn_input",
-                deferCheckpoint: true,
-                importItem: foregroundConversationImportItem,
-                importItemContext: {
-                  latencyMilestones,
-                  onConversationInputStaged: observeForegroundConversationWork,
-                  runtimeAttemptId: input.input.runtimeLogContext?.attemptId ?? null,
-                },
-                input: input.input,
-                lanes: ["conversation"],
-                limitPerLane: input.checkpointRequestBuilder.assistantInputBatchRemaining(),
-                requestId: `${requestId}:conversation`,
-                signal: conversationImportSignal.signal,
-                checkpointCanonicalMailboxImportProgress:
-                  input.checkpointCanonicalMailboxImportProgress,
-              });
-            } finally {
-              conversationImportSignal.dispose();
+          try {
+            const conversationImportSignal =
+              composeHostedForegroundMailboxImportSignal(
+                outerSignal,
+                inFlightImportController.signal,
+              );
+            const conversationResult = await (async () => {
+              try {
+                return await importHostedMailboxForWorkspaceRunner({
+                  checkpointRequestBuilder: input.checkpointRequestBuilder,
+                  checkpointReason: "active_turn_input",
+                  deferCheckpoint: true,
+                  importItem: foregroundConversationImportItem,
+                  importItemContext: {
+                    latencyMilestones,
+                    onConversationInputStaged: () =>
+                      observeForegroundConversationWork(notification.revision),
+                    runtimeAttemptId: input.input.runtimeLogContext?.attemptId ?? null,
+                  },
+                  input: input.input,
+                  lanes: ["conversation"],
+                  limitPerLane: input.checkpointRequestBuilder.assistantInputBatchRemaining(),
+                  requestId: `${requestId}:conversation`,
+                  signal: conversationImportSignal.signal,
+                  checkpointCanonicalMailboxImportProgress:
+                    input.checkpointCanonicalMailboxImportProgress,
+                });
+              } finally {
+                conversationImportSignal.dispose();
+              }
+            })();
+            const conversationBatchFull =
+              await handleForegroundImportResult(conversationResult);
+            if (conversationResult.importResult.nextRetryAt) {
+              input.onForegroundConversationClassificationIncomplete?.();
             }
-          })();
-          const conversationBatchFull =
-            await handleForegroundImportResult(conversationResult);
-          if (hasHostedMailboxImportForegroundConversationWork(conversationResult)) {
-            if (conversationBatchFull) {
-              break;
+            if (hasHostedMailboxImportForegroundConversationWork(conversationResult)) {
+              if (conversationBatchFull) {
+                break;
+              }
+              continue;
             }
-            continue;
+          } catch (error) {
+            if (outerSignal?.aborted || inFlightImportController.signal.aborted) {
+              throw error;
+            }
+            input.onForegroundConversationClassificationIncomplete?.();
+            await writeHostedForegroundMailboxImportFailureRuntimeLog({
+              error,
+              input: input.input,
+            });
           }
         }
 
@@ -1352,6 +1411,7 @@ function startHostedForegroundConversationMailboxImportLoop(input: {
         classifyFirstWake({
           kind: "system_classified",
           nextRetryAt: systemResult.importResult.nextRetryAt ?? null,
+          revision: notification.revision,
         });
         if (systemBatchFull) {
           break;
@@ -1360,6 +1420,7 @@ function startHostedForegroundConversationMailboxImportLoop(input: {
         classifyFirstWake({
           error,
           kind: "import_failed",
+          revision: notification.revision,
         });
         if (outerSignal?.aborted || inFlightImportController.signal.aborted) {
           break;
@@ -1415,18 +1476,7 @@ function requeueHostedRuntimeWakeNotification(
   runtimeWakeSignal: RuntimeWakeSignal | null | undefined,
   notification: RuntimeWakeNotification,
 ): void {
-  runtimeWakeSignal?.notify({
-    ...(notification.orchestration
-      ? { orchestration: notification.orchestration }
-      : {}),
-    notifiedAtEpochMs: notification.notifiedAtEpochMs,
-  });
-  if (
-    notification.latestNotifiedAtEpochMs !== undefined
-    && notification.latestNotifiedAtEpochMs !== notification.notifiedAtEpochMs
-  ) {
-    runtimeWakeSignal?.notify(notification.latestNotifiedAtEpochMs);
-  }
+  runtimeWakeSignal?.requeue(notification);
 }
 
 function composeHostedForegroundMailboxImportSignal(

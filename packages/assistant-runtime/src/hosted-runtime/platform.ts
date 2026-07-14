@@ -270,6 +270,17 @@ export interface HostedRuntimeLinqDeleteMessagesRequest {
   messageIds: readonly string[];
 }
 
+export type HostedRuntimeProviderFetch = typeof fetch & {
+  dispatchWithProviderEntryCurrentCheck?: (
+    request: Parameters<typeof fetch>[0],
+    init: Parameters<typeof fetch>[1],
+    context: {
+      assertProviderEntryCurrent: () => void;
+      onProviderDispatchEntered: () => void;
+    },
+  ) => Promise<Response>;
+};
+
 type HostedRuntimeEffectsPortBase = {
   deletePreparedAssistantDelivery?(
     input: Pick<HostedAssistantDeliverySideEffect, "effectId" | "fingerprint">,
@@ -296,7 +307,13 @@ type HostedRuntimeEffectsPortBase = {
     request: HostedRuntimeLinqDeliveryOutcomeRequest,
     context?: { signal?: AbortSignal | null },
   ): Promise<void>;
-  sendEmail(request: HostedEmailSendRequest): Promise<HostedEmailSendResult | void>;
+  sendEmail(
+    request: HostedEmailSendRequest,
+    context?: {
+      assertProviderEntryCurrent?: (() => void) | null;
+      onProviderDispatchEntered?: (() => void) | null;
+    },
+  ): Promise<HostedEmailSendResult | void>;
   writeAssistantDeliveryRecord?(
     record: HostedAssistantDeliveryRecord,
   ): Promise<HostedAssistantDeliveryRecord>;
@@ -510,7 +527,7 @@ export interface HostedRuntimePlatform {
   familyPlanToolPort?: HostedRuntimeFamilyPlanToolPort | null;
   groupToolPort?: HostedRuntimeGroupToolPort | null;
   generatedImageUploader?: AssistantHostedGeneratedImageUploader | null;
-  providerFetch?: typeof fetch | null;
+  providerFetch?: HostedRuntimeProviderFetch | null;
   publicInternetFetch?: typeof fetch | null;
   issueExportPort?: HostedRuntimeIssueExportPort | null;
   latencyTracePort?: HostedRuntimeLatencyTracePort | null;

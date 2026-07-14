@@ -236,6 +236,43 @@ describe('assistant outbox dispatch-state', () => {
     })
   })
 
+  it('abandons ambiguous direct email sends without provider ids', async () => {
+    await withTempVault(async (vault) => {
+      const sending = await createSendingIntent({
+        attemptCount: 1,
+        channel: 'email',
+        vault,
+      })
+      const paths = resolveAssistantStatePaths(vault)
+
+      const abandoned = await updateAssistantOutboxAfterDispatchFailure({
+        deliveryMayHaveSucceeded: true,
+        deliveryTransportIdempotent: false,
+        error: Object.assign(new Error('direct email response could not be confirmed'), {
+          code: 'ASSISTANT_EMAIL_DELIVERY_AMBIGUOUS',
+          deliveryMayHaveSucceeded: true,
+          retryable: false,
+        }),
+        failedAt: new Date('2030-04-13T00:03:00.000Z'),
+        intentPath: resolveAssistantOutboxIntentPath(paths.outboxDirectory, sending.intentId),
+        sending,
+        vault,
+      })
+
+      expect(abandoned.status).toBe('abandoned')
+      expect(abandoned.delivery).toBeNull()
+      expect(abandoned.deliveryConfirmationPending).toBe(false)
+      expect(abandoned.deliveryTransportIdempotent).toBe(false)
+      expect(abandoned.nextAttemptAt).toBeNull()
+      expect(abandoned.lastError?.code).toBe('ASSISTANT_DELIVERY_AMBIGUOUS')
+
+      const diagnostics = await readAssistantDiagnosticsSnapshot(vault)
+      expect(diagnostics.counters.deliveriesFailed).toBe(1)
+      expect(diagnostics.counters.deliveriesRetryable).toBe(0)
+      expect(diagnostics.counters.outboxRetries).toBe(0)
+    })
+  })
+
   it('reschedules confirmation retries from the reconciliation time', async () => {
     await withTempVault(async (vault) => {
       const sending = await createSendingIntent({

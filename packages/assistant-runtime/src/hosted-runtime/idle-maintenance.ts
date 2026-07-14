@@ -96,9 +96,9 @@ export async function runHostedIdleCheckpointMaintenance(input: {
     .then((notification) => {
       wakeInterrupted = true;
       abortController.abort();
-      // Waiting consumed the wake notification; re-notify so the idle loop's
+      // Waiting consumed the wake notification; requeue it so the idle loop's
       // pending-wake check after maintenance still observes it.
-      input.wakeSignal?.notify(notification.notifiedAtEpochMs);
+      input.wakeSignal?.requeue(notification);
     })
     .catch(() => undefined);
 

@@ -150,6 +150,7 @@ import type {
   HostedWorkspaceDurableCheckpointEffect,
   HostedWorkspaceRunnerAssistantPhaseInput,
   HostedWorkspaceRunnerAssistantPhaseDeliveryBarrier,
+  HostedWorkspaceRunnerAssistantPhaseProviderEntryPermit,
   HostedWorkspaceRunnerAssistantPhasePostCheckpoint,
   HostedWorkspaceRunnerAssistantPhaseResult,
 } from "./workspace-runner.ts";
@@ -212,6 +213,7 @@ const HOSTED_MEMBER_PREFERENCE_PRE_PLANNING_ROUTE_ACTIONS = [
   "apply-member-preferences",
 ] as const;
 const HOSTED_MEMBER_PREFERENCE_PRE_PLANNING_MAX_ITEMS = 10;
+const HOSTED_PROVIDER_ENTRY_AUTHORITY_MAX_ATTEMPTS = 3;
 
 export interface HostedWorkspaceRuntimeAssistantPhaseInput
   extends HostedWorkspaceRunnerAssistantPhaseInput {
@@ -794,6 +796,101 @@ export async function runHostedWorkspaceAssistantPhase(
     );
     return Promise.resolve();
   };
+  const prepareProgressProviderEntry =
+    input.prepareAutoReplyProviderEntry ?? null;
+  let progressProviderEntryBarrier:
+    HostedWorkspaceRunnerAssistantPhaseDeliveryBarrier | null = null;
+  let progressProviderEntryPermit:
+    HostedWorkspaceRunnerAssistantPhaseProviderEntryPermit | null = null;
+  let progressProviderEntryPreparation: Promise<void> | null = null;
+  const assertProgressProviderEntryAuthority = async (): Promise<void> => {
+    assertHostedAssistantPhaseLiveness(input.signal);
+    if (
+      !prepareProgressProviderEntry
+      || progressProviderEntryBarrier
+      || progressProviderEntryPermit?.isCurrent() === true
+    ) {
+      return;
+    }
+
+    const acquireProgressProviderEntryAuthority = async (): Promise<void> => {
+      try {
+        for (
+          let attempt = 1;
+          attempt <= HOSTED_PROVIDER_ENTRY_AUTHORITY_MAX_ATTEMPTS;
+          attempt += 1
+        ) {
+          const permit = await prepareProgressProviderEntry();
+          if (permit.barrier) {
+            progressProviderEntryBarrier = permit.barrier;
+            progressProviderEntryPermit = null;
+            return;
+          }
+          const localBarrier =
+            await flushKnownHostedMemberChannelUpdatesBeforeAutoReplyDelivery({
+              phaseInput: input,
+            });
+          if (localBarrier) {
+            progressProviderEntryBarrier = localBarrier;
+            progressProviderEntryPermit = null;
+            return;
+          }
+          if (permit.isCurrent()) {
+            progressProviderEntryPermit = permit;
+            return;
+          }
+        }
+        progressProviderEntryBarrier = {
+          nextWakeAt: new Date(
+            resolveHostedAssistantPhaseNowMs(input),
+          ).toISOString(),
+          nextWakeReason: "assistant",
+          redactedStatus: {
+            hostedMemberChannelPreDispatchPermitStale: 1,
+          },
+        };
+        progressProviderEntryPermit = null;
+      } catch (error) {
+        const failure = buildHostedRuntimeFailureDiagnostics(
+          error,
+          "Hosted progress provider-entry barrier failed.",
+        );
+        progressProviderEntryBarrier = {
+          nextWakeAt: new Date(
+            resolveHostedAssistantPhaseNowMs(input),
+          ).toISOString(),
+          nextWakeReason: "assistant",
+          redactedStatus: {
+            hostedMemberChannelPreDispatchBarrierFailed: 1,
+            hostedMemberChannelPreDispatchBarrierErrorCode: failure.errorCode,
+          },
+        };
+        progressProviderEntryPermit = null;
+        throw error;
+      }
+    };
+
+    if (!progressProviderEntryPreparation) {
+      const preparation = acquireProgressProviderEntryAuthority();
+      progressProviderEntryPreparation = preparation;
+      try {
+        await preparation;
+      } finally {
+        if (progressProviderEntryPreparation === preparation) {
+          progressProviderEntryPreparation = null;
+        }
+      }
+    } else {
+      await progressProviderEntryPreparation;
+    }
+    assertHostedAssistantPhaseLiveness(input.signal);
+  };
+  const shouldBlockProgressProviderEntry = (): boolean =>
+    progressProviderEntryBarrier !== null
+    || (
+      progressProviderEntryPermit !== null
+      && progressProviderEntryPermit.isCurrent() !== true
+    );
   if (shouldWriteHostedDeviceConnectContextLog({ deviceConnectProviders, input })) {
     void writeHostedDeviceConnectRuntimeLog({
       deviceConnectProviders,
@@ -819,6 +916,7 @@ export async function runHostedWorkspaceAssistantPhase(
         connectedApps: input.runtime.platform.connectedApps ?? null,
         phoneCalls: input.runtime.platform.phoneCalls ?? null,
         progressDeliveryDependencies: createHostedAssistantProgressDeliveryDependencies({
+          assertLiveness: assertProgressProviderEntryAuthority,
           effectsPort: input.runtime.platform.effectsPort,
           forwardedEnv: input.runtime.forwardedEnv,
           linqDeliveryContexts: initialLinqDeliveryContexts,
@@ -826,6 +924,7 @@ export async function runHostedWorkspaceAssistantPhase(
           providerFetch: input.runtime.platform.providerFetch ?? null,
           publicInternetFetch: input.runtime.platform.publicInternetFetch ?? null,
           signal: channelAbortController.signal,
+          shouldBlockProviderEntry: shouldBlockProgressProviderEntry,
           userEnv: input.runtime.userEnv,
           wake,
         }),
@@ -1298,6 +1397,7 @@ export async function runHostedWorkspaceAssistantPhase(
         foregroundWorkspaceWake: createFutureExistingHostedAssistantWorkspaceWakeCandidate(input),
         input,
         linqDeliveryContexts: initialLinqDeliveryContexts,
+        memberChannelBarrierBeforeDrain: progressProviderEntryBarrier,
         providerCleanupPlan,
         skippedDeviceSyncWake: deviceSyncFollowUpWake,
         systemMailboxWake,
@@ -1393,6 +1493,7 @@ export async function runHostedWorkspaceAssistantPhase(
         checkpointReason: "outbox_receipt",
         canConsumeWorkspaceAssistantWake: true,
         input,
+        memberChannelBarrierBeforeDrain: progressProviderEntryBarrier,
         providerCleanupPlan,
         redactedStatus: null,
         wake,
@@ -1562,6 +1663,7 @@ export async function runHostedWorkspaceAssistantPhase(
                 checkpointReason: deliveryEffects.length > 0 ? "outbox_receipt" : "provider_cleanup",
                 canConsumeWorkspaceAssistantWake: true,
                 input,
+                memberChannelBarrierBeforeDrain: progressProviderEntryBarrier,
                 providerCleanupPlan,
                 redactedStatus: null,
                 wake,
@@ -4100,6 +4202,8 @@ async function runForegroundAssistantReplyPhase(input: {
   foregroundWorkspaceWake: HostedRuntimeWakeCandidate | null;
   input: HostedWorkspaceRuntimeAssistantPhaseInput;
   providerCleanupPlan: HostedProviderCleanupPlan;
+  memberChannelBarrierBeforeDrain:
+    HostedWorkspaceRunnerAssistantPhaseDeliveryBarrier | null;
   skippedDeviceSyncWake: HostedRuntimeWakeCandidate | null;
   systemMailboxWake: HostedRuntimeWakeCandidate | null;
   systemMailboxWakeAt: string | null;
@@ -4139,6 +4243,7 @@ async function runForegroundAssistantReplyPhase(input: {
       canConsumeWorkspaceAssistantWake: true,
       input: input.input,
       linqDeliveryContexts: input.linqDeliveryContexts,
+      memberChannelBarrierBeforeDrain: input.memberChannelBarrierBeforeDrain,
       providerCleanupPlan: input.providerCleanupPlan,
       redactedStatus: null,
       wake: input.wake,
@@ -4295,6 +4400,8 @@ async function runForegroundAssistantReplyPhase(input: {
               canConsumeWorkspaceAssistantWake: true,
               input: input.input,
               linqDeliveryContexts: input.linqDeliveryContexts,
+              memberChannelBarrierBeforeDrain:
+                input.memberChannelBarrierBeforeDrain,
               providerCleanupPlan: input.providerCleanupPlan,
               redactedStatus: null,
               wake: input.wake,
@@ -4427,6 +4534,7 @@ async function drainHostedPostCheckpointDelivery(input: {
   canConsumeWorkspaceAssistantWake: boolean;
   input: HostedWorkspaceRuntimeAssistantPhaseInput;
   linqDeliveryContexts?: readonly HostedAssistantLinqDeliveryContext[] | null;
+  memberChannelBarrierBeforeDrain?: HostedWorkspaceRunnerAssistantPhaseDeliveryBarrier | null;
   providerCleanupPlan: HostedProviderCleanupPlan;
   redactedStatus: HostedRuntimeRedactedJson | null;
   wake: Parameters<typeof drainHostedPreparedAssistantDeliveries>[0]["wake"];
@@ -4434,17 +4542,31 @@ async function drainHostedPostCheckpointDelivery(input: {
   const hasDeliveryEffects = input.assistantDeliveryEffects.length > 0;
   const shouldYieldBackgroundDrain =
     input.input.shouldYieldBackgroundMaintenance ?? null;
-  if (hasDeliveryEffects && shouldYieldBackgroundDrain?.() === true) {
+  const hasOnlyBackgroundDeliveryEffects =
+    hasDeliveryEffects
+    && input.assistantDeliveryEffects.every((effect) =>
+      effect.deliveryPhase === "background_retry"
+    );
+  if (
+    hasOnlyBackgroundDeliveryEffects
+    && shouldYieldBackgroundDrain?.() === true
+  ) {
     return await yieldHostedBackgroundPostCheckpointDrain(input);
   }
 
-  let memberChannelBarrier: HostedWorkspaceRunnerAssistantPhasePostCheckpoint | null = null;
+  let memberChannelBarrier: HostedWorkspaceRunnerAssistantPhaseDeliveryBarrier | null = null;
+  let hasAutoReplyDelivery = false;
   try {
-    if (hasDeliveryEffects && shouldYieldBackgroundDrain?.() === true) {
-      return await yieldHostedBackgroundPostCheckpointDrain(input);
-    }
-    memberChannelBarrier = hasDeliveryEffects
-      ? await flushHostedMemberChannelUpdatesBeforeAutoReplyDelivery(input)
+    hasAutoReplyDelivery = hasDeliveryEffects
+      && await hostedDeliveryEffectsContainAutoReply({
+        effects: input.assistantDeliveryEffects,
+        vaultRoot: input.input.restored.vaultRoot,
+      });
+    memberChannelBarrier = hasAutoReplyDelivery
+      ? input.memberChannelBarrierBeforeDrain
+        ?? await flushHostedMemberChannelUpdatesBeforeAutoReplyDelivery(input, {
+          autoReplyDeliveryKnown: true,
+        })
       : null;
   } catch (error) {
     await resetHostedPreparedDeliveryForBarrier({
@@ -4472,22 +4594,125 @@ async function drainHostedPostCheckpointDelivery(input: {
       assistantDeliveryPreparation: input.assistantDeliveryPreparation ?? null,
       input: input.input,
     });
-    return memberChannelBarrier;
+    return await buildHostedMemberChannelDeliveryBarrierResult({
+      input,
+      nextWakeAt: memberChannelBarrier.nextWakeAt ?? null,
+      nextWakeReason: memberChannelBarrier.nextWakeReason ?? null,
+      redactedStatus: {
+        ...(memberChannelBarrier.redactedStatus ?? {}),
+      },
+    });
   }
-  if (hasDeliveryEffects && shouldYieldBackgroundDrain?.() === true) {
+  if (
+    hasOnlyBackgroundDeliveryEffects
+    && shouldYieldBackgroundDrain?.() === true
+  ) {
     return await yieldHostedBackgroundPostCheckpointDrain(input);
   }
 
   let backgroundDeliveryDrainYielded = false;
   let backgroundDeliveryDrainYieldedCount = 0;
+  let providerEntryMemberChannelBarrier:
+    HostedWorkspaceRunnerAssistantPhaseDeliveryBarrier | null = null;
+  let providerEntryPermit:
+    HostedWorkspaceRunnerAssistantPhaseProviderEntryPermit | null = null;
+  let providerEntryAuthorityPreparation: Promise<void> | null = null;
+  const prepareAutoReplyProviderEntry =
+    input.input.prepareAutoReplyProviderEntry ?? null;
+  const assertProviderEntryAuthority = async (): Promise<void> => {
+    assertHostedAssistantPhaseLiveness(input.input.signal);
+    if (!prepareAutoReplyProviderEntry || !hasAutoReplyDelivery) {
+      return;
+    }
+    if (
+      providerEntryMemberChannelBarrier
+      || providerEntryPermit?.isCurrent() === true
+    ) {
+      return;
+    }
+    const acquireProviderEntryAuthority = async (): Promise<void> => {
+      try {
+        for (
+          let attempt = 1;
+          attempt <= HOSTED_PROVIDER_ENTRY_AUTHORITY_MAX_ATTEMPTS;
+          attempt += 1
+        ) {
+          const permit = await prepareAutoReplyProviderEntry();
+          if (permit.barrier) {
+            providerEntryMemberChannelBarrier = permit.barrier;
+            providerEntryPermit = null;
+            return;
+          }
+          const localBarrier =
+            await flushHostedMemberChannelUpdatesBeforeAutoReplyDelivery(input, {
+              autoReplyDeliveryKnown: true,
+              prepareAutoReplyDelivery: async () => null,
+            });
+          if (localBarrier) {
+            providerEntryMemberChannelBarrier = localBarrier;
+            providerEntryPermit = null;
+            return;
+          }
+          if (permit.isCurrent()) {
+            providerEntryPermit = permit;
+            return;
+          }
+        }
+        providerEntryMemberChannelBarrier = {
+          nextWakeAt: new Date(
+            resolveHostedAssistantPhaseNowMs(input.input),
+          ).toISOString(),
+          nextWakeReason: "assistant",
+          redactedStatus: {
+            hostedMemberChannelPreDispatchPermitStale: 1,
+          },
+        };
+        providerEntryPermit = null;
+      } catch (error) {
+        const failure = buildHostedRuntimeFailureDiagnostics(
+          error,
+          "Hosted member-channel provider-entry barrier failed.",
+        );
+        providerEntryMemberChannelBarrier = {
+          nextWakeAt: new Date(
+            resolveHostedAssistantPhaseNowMs(input.input),
+          ).toISOString(),
+          nextWakeReason: "assistant",
+          redactedStatus: {
+            hostedMemberChannelPreDispatchBarrierFailed: 1,
+            hostedMemberChannelPreDispatchBarrierErrorCode: failure.errorCode,
+          },
+        };
+        providerEntryPermit = null;
+      }
+    };
+    if (!providerEntryAuthorityPreparation) {
+      const preparation = acquireProviderEntryAuthority();
+      providerEntryAuthorityPreparation = preparation;
+      try {
+        await preparation;
+      } finally {
+        if (providerEntryAuthorityPreparation === preparation) {
+          providerEntryAuthorityPreparation = null;
+        }
+      }
+    } else {
+      await providerEntryAuthorityPreparation;
+    }
+    assertHostedAssistantPhaseLiveness(input.input.signal);
+  };
+  const shouldBlockProviderEntry = (): boolean =>
+    providerEntryMemberChannelBarrier !== null
+    || (
+      providerEntryPermit !== null
+      && providerEntryPermit.isCurrent() !== true
+    );
   const outcomes = input.assistantDeliveryEffects.length > 0
     ? await drainHostedPreparedAssistantDeliveries({
         actionApprovalPort: input.input.runtime.platform.actionApprovalPort ?? null,
         allowPreparedSending: true,
         assistantDeliveryEffects: input.assistantDeliveryEffects,
-        assertLiveness: async () => {
-          assertHostedAssistantPhaseLiveness(input.input.signal);
-        },
+        assertLiveness: assertProviderEntryAuthority,
         effectsPort: input.input.platform.effectsPort,
         forwardedEnv: input.input.runtime.forwardedEnv,
         linqDeliveryContexts: input.linqDeliveryContexts ?? null,
@@ -4502,6 +4727,7 @@ async function drainHostedPostCheckpointDelivery(input: {
         preparedDispatches: input.assistantDeliveryPreparation?.preparedDispatches ?? null,
         providerFetch: input.input.runtime.platform.providerFetch ?? null,
         publicInternetFetch: input.input.runtime.platform.publicInternetFetch ?? null,
+        shouldBlockProviderEntry,
         shouldYieldBackgroundDelivery: shouldYieldBackgroundDrain,
         signal: input.input.signal ?? null,
         userEnv: input.input.runtime.userEnv,
@@ -4510,6 +4736,55 @@ async function drainHostedPostCheckpointDelivery(input: {
       })
     : [];
   if (backgroundDeliveryDrainYielded) {
+    const providerEntryBarrier = (
+      (): HostedWorkspaceRunnerAssistantPhaseDeliveryBarrier | null =>
+        providerEntryMemberChannelBarrier
+    )();
+    if (providerEntryBarrier) {
+      const barrierResult = await buildHostedMemberChannelDeliveryBarrierResult({
+        assistantDeliveryOutcomes: outcomes,
+        input,
+        nextWakeAt: providerEntryBarrier.nextWakeAt ?? null,
+        nextWakeReason:
+          providerEntryBarrier.nextWakeReason ?? null,
+        redactedStatus: {
+          ...(providerEntryBarrier.redactedStatus ?? {}),
+          hostedOutboxDeliveryAttempted: outcomes.length,
+          hostedOutboxDeliverySent: outcomes.filter((outcome) =>
+            outcome.deliveryStatus === "sent"
+          ).length,
+        },
+      });
+      const stagedTerminalFailureInputCount =
+        await stageHostedTerminalOutboxFailureInputs({
+          deliveryEffects: input.assistantDeliveryEffects,
+          outcomes,
+          vaultRoot: input.input.restored.vaultRoot,
+        });
+      const postStagingWake = selectHostedRuntimeWakeCandidate([
+        createHostedRuntimeWakeCandidate(
+          barrierResult.nextWakeAt,
+          barrierResult.nextWakeReason ?? null,
+        ),
+        createHostedRuntimeWakeCandidate(
+          stagedTerminalFailureInputCount > 0
+            ? await resolvePendingAssistantInputWakeAt(input.input)
+            : null,
+          HOSTED_ASSISTANT_WAKE_REASON,
+        ),
+      ]);
+      return {
+        ...barrierResult,
+        nextWakeAt: postStagingWake.at,
+        nextWakeReason: postStagingWake.reason,
+        redactedStatus: {
+          ...(barrierResult.redactedStatus ?? {}),
+          hostedOutboxTerminalFailureInputsStaged:
+            stagedTerminalFailureInputCount,
+          nextWakeAt: postStagingWake.at,
+        },
+      };
+    }
     await recordHostedProviderCleanupAfterDelivery({
       idleCheckpointDelayMs: input.input.request.idleCheckpointDelayMs,
       nowMs: resolveHostedAssistantPhaseNowMs(input.input),
@@ -5012,88 +5287,113 @@ function isUnsafeHostedAssistantInputToken(value: string): boolean {
 
 async function flushHostedMemberChannelUpdatesBeforeAutoReplyDelivery(
   input: Parameters<typeof drainHostedPostCheckpointDelivery>[0],
-): Promise<HostedWorkspaceRunnerAssistantPhasePostCheckpoint | null> {
-  if (!await hostedDeliveryEffectsContainAutoReply({
-    effects: input.assistantDeliveryEffects,
-    vaultRoot: input.input.restored.vaultRoot,
-  })) {
+  options?: {
+    autoReplyDeliveryKnown?: boolean;
+    prepareAutoReplyDelivery?: HostedWorkspaceRuntimeAssistantPhaseInput["prepareAutoReplyDelivery"];
+  },
+): Promise<HostedWorkspaceRunnerAssistantPhaseDeliveryBarrier | null> {
+  if (
+    options?.autoReplyDeliveryKnown !== true
+    && !await hostedDeliveryEffectsContainAutoReply({
+      effects: input.assistantDeliveryEffects,
+      vaultRoot: input.input.restored.vaultRoot,
+    })
+  ) {
     return null;
   }
 
-  const remoteBarrier = await input.input.prepareAutoReplyDelivery?.();
+  const prepareAutoReplyDelivery =
+    options?.prepareAutoReplyDelivery ?? input.input.prepareAutoReplyDelivery;
+  const remoteBarrier = await prepareAutoReplyDelivery?.();
   if (remoteBarrier) {
-    return await buildHostedMemberChannelDeliveryBarrierResult({
-      input,
+    return {
       nextWakeAt: remoteBarrier.nextWakeAt ?? null,
       nextWakeReason: remoteBarrier.nextWakeReason ?? null,
       redactedStatus: {
         ...(remoteBarrier.redactedStatus ?? {}),
       },
-    });
+    };
   }
 
+  return await flushKnownHostedMemberChannelUpdatesBeforeAutoReplyDelivery({
+    phaseInput: input.input,
+  });
+}
+
+async function flushKnownHostedMemberChannelUpdatesBeforeAutoReplyDelivery(input: {
+  phaseInput: HostedWorkspaceRuntimeAssistantPhaseInput;
+}): Promise<HostedWorkspaceRunnerAssistantPhaseDeliveryBarrier | null> {
   let processed = 0;
   while (true) {
-    assertHostedAssistantPhaseLiveness(input.input.signal);
+    assertHostedAssistantPhaseLiveness(input.phaseInput.signal);
     const preparation = await prepareHostedSystemMailboxItemForCheckpoint({
       allowedRouteActions: HOSTED_MEMBER_CHANNEL_UPDATE_ROUTE_ACTIONS,
-      operatorHomeRoot: input.input.restored.operatorHomeRoot,
-      runtime: input.input.runtime,
-      runtimeEnv: input.input.runtimeEnv,
-      vaultRoot: input.input.restored.vaultRoot,
+      operatorHomeRoot: input.phaseInput.restored.operatorHomeRoot,
+      runtime: input.phaseInput.runtime,
+      runtimeEnv: input.phaseInput.runtimeEnv,
+      vaultRoot: input.phaseInput.restored.vaultRoot,
     });
     if (!preparation) {
       break;
     }
     if (preparation.status === "retryable_failed") {
-      return await buildHostedMemberChannelDeliveryBarrierResult({
-        input,
+      return {
         nextWakeAt: preparation.nextWakeAt,
         nextWakeReason: "assistant",
         redactedStatus: {
           hostedMemberChannelPreDispatchBlocked: 1,
           hostedMemberChannelPreDispatchErrorCode: preparation.errorCode,
         },
-      });
+      };
     }
     if (preparation.status === "recording") {
       const record = await recordHostedSystemMailboxItemAfterCheckpoint({
         item: preparation.item,
-        operatorHomeRoot: input.input.restored.operatorHomeRoot,
-        runtime: input.input.runtime,
-        vaultRoot: input.input.restored.vaultRoot,
+        operatorHomeRoot: input.phaseInput.restored.operatorHomeRoot,
+        runtime: input.phaseInput.runtime,
+        vaultRoot: input.phaseInput.restored.vaultRoot,
       });
       if (record.failed > 0) {
-        return await buildHostedMemberChannelDeliveryBarrierResult({
-          input,
+        return {
           nextWakeAt: record.nextWakeAt,
           nextWakeReason: record.nextWakeReason ?? "assistant",
           redactedStatus: {
             hostedMemberChannelPreDispatchRecordFailed: record.failed,
           },
-        });
+        };
       }
     }
     processed += 1;
   }
 
+  if (processed > 0) {
+    return {
+      nextWakeAt: new Date(
+        resolveHostedAssistantPhaseNowMs(input.phaseInput),
+      ).toISOString(),
+      nextWakeReason: "assistant",
+      redactedStatus: {
+        hostedMemberChannelPreDispatchReconciled: processed,
+      },
+    };
+  }
+
   const pendingWakeAt = await resolveHostedSystemMailboxNextWakeAt({
     allowedRouteActions: HOSTED_MEMBER_CHANNEL_UPDATE_ROUTE_ACTIONS,
-    vaultRoot: input.input.restored.vaultRoot,
+    vaultRoot: input.phaseInput.restored.vaultRoot,
   });
   if (!pendingWakeAt) {
     return null;
   }
 
-  return await buildHostedMemberChannelDeliveryBarrierResult({
-    input,
+  return {
     nextWakeAt: pendingWakeAt,
     nextWakeReason: "assistant",
     redactedStatus: {
       hostedMemberChannelPreDispatchPending: 1,
       hostedMemberChannelPreDispatchProcessed: processed,
     },
-  });
+  };
 }
 
 async function hostedDeliveryEffectsContainAutoReply(input: {
@@ -5119,13 +5419,14 @@ async function hostedDeliveryEffectsContainAutoReply(input: {
 }
 
 async function buildHostedMemberChannelDeliveryBarrierResult(input: {
+  assistantDeliveryOutcomes?: HostedAssistantDeliveryOutcome[];
   input: Parameters<typeof drainHostedPostCheckpointDelivery>[0];
   nextWakeAt: string | null;
   nextWakeReason?: string | null;
   redactedStatus: HostedRuntimeRedactedJson;
 }): Promise<HostedWorkspaceRunnerAssistantPhasePostCheckpoint> {
   const providerCleanup = await runHostedProviderCleanupPostCheckpointStep({
-    assistantDeliveryOutcomes: [],
+    assistantDeliveryOutcomes: input.assistantDeliveryOutcomes ?? [],
     phaseInput: input.input.input,
     providerCleanupPlan: input.input.providerCleanupPlan,
     wake: input.input.wake,

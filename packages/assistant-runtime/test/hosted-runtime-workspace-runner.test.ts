@@ -180,19 +180,45 @@ describe("runHostedWorkspaceUntilIdleOrBudget", () => {
 
     try {
       const runtimeWakeSignal = createCoalescingRuntimeWakeSignal();
+      assert.equal(runtimeWakeSignal.currentRevision(), 0);
       vi.setSystemTime(firstNotifyAt);
       runtimeWakeSignal.notify();
       vi.setSystemTime(secondNotifyAt);
       runtimeWakeSignal.notify();
       runtimeWakeSignal.notify(firstNotifyAt.getTime() + 2_000);
 
-      assert.deepEqual(runtimeWakeSignal.consumePending(), {
+      assert.equal(runtimeWakeSignal.currentRevision(), 3);
+      const notification = runtimeWakeSignal.consumePending();
+      assert.deepEqual(notification, {
         latestNotifiedAtEpochMs: secondNotifyAt.getTime(),
         notifiedAtEpochMs: firstNotifyAt.getTime(),
+        revision: 3,
       });
+      assert.ok(notification);
+      runtimeWakeSignal.requeue(notification);
+      assert.equal(runtimeWakeSignal.currentRevision(), 3);
+      assert.deepEqual(runtimeWakeSignal.consumePending(), notification);
     } finally {
       vi.useRealTimers();
     }
+  });
+
+  test("coalesced runtime wake remains pending when its waiter aborts before the flush", async () => {
+    const runtimeWakeSignal = createCoalescingRuntimeWakeSignal();
+    const abortController = new AbortController();
+    const abortReason = new Error("synthetic wake waiter stopped");
+    const wakeAtEpochMs = Date.parse("2026-04-26T00:00:01.000Z");
+    const waiting = runtimeWakeSignal.wait(abortController.signal);
+
+    runtimeWakeSignal.notify(wakeAtEpochMs);
+    abortController.abort(abortReason);
+
+    await assert.rejects(waiting, (error) => error === abortReason);
+    await Promise.resolve();
+    assert.deepEqual(runtimeWakeSignal.consumePending(), {
+      notifiedAtEpochMs: wakeAtEpochMs,
+      revision: 1,
+    });
   });
 
   test("delivery barrier drains repeated no-progress wakes without yielding background maintenance", async () => {
@@ -256,6 +282,482 @@ describe("runHostedWorkspaceUntilIdleOrBudget", () => {
       assert.equal(runtimeWakeSignal.consumePending(), null);
     } finally {
       vi.useRealTimers();
+      await rm(vaultRoot, { force: true, recursive: true });
+    }
+  });
+
+  test("provider-entry authority surfaces a blocked system update sharing a source-less wake with conversation work after a prior clean wake", async () => {
+    const vaultRoot = await mkdtemp(path.join(tmpdir(), "murph-runner-provider-entry-rearm-"));
+    const runtimeWakeSignal = createCoalescingRuntimeWakeSignal();
+    const checkpointRequests: HostedWorkspaceCheckpointRequest[] = [];
+    const fetchRequests: HostedMailboxFetchRequest[] = [];
+    const importedItemIds: string[] = [];
+    const items: HostedMailboxItem[] = [];
+    const providerEntries: string[] = [];
+    let providerEntryBarrier: unknown = "not-called";
+
+    try {
+      await initializeVault({ createdAt: TEST_NOW, vaultRoot });
+      const result = await runHostedWorkspaceUntilIdleOrBudget({
+        checkpointRequestBuilder: createHostedWorkspaceCheckpointRequestBuilder({
+          attemptId: "attempt_synthetic_runner_provider_entry_rearm",
+          expectedWorkspaceVersion: "0",
+          leaseGeneration: "1",
+          nextWakeAt: null,
+          nextWakeReason: null,
+          snapshotRef: null,
+        }),
+        expectedUserId: TEST_USER_ID,
+        initialAssistantInputBatch: {
+          assistantInputIds: ["assistant_input_runner_provider_entry_rearm"],
+          emailDeliveryContexts: [],
+          linqDeliveryContexts: [],
+        },
+        async importItem(item) {
+          importedItemIds.push(item.item.id);
+          if (item.item.id === "mailbox_item_runner_provider_entry_rearm") {
+            return {
+              reasonCode: "payload.decode_unavailable",
+              retryable: true,
+              status: "blocked",
+            };
+          }
+          return { status: "imported" };
+        },
+        limitPerLane: 10,
+        platform: createPlatform({
+          mailboxPort: createMailboxPort({ fetchRequests, items }).mailboxPort,
+          workspacePort: createWorkspacePort({ checkpointRequests }),
+        }),
+        requestId: "request_synthetic_runner_provider_entry_rearm",
+        runtimeWakeSignal,
+        async runAssistantPhase(input) {
+          assert.equal(await input.prepareAutoReplyDelivery?.(), null);
+
+          runtimeWakeSignal.notify();
+          await waitForCondition(() =>
+            fetchRequests.filter((request) =>
+              request.requestId.includes(":runtime-wake:")
+              && request.lanes.some((lane) => lane.lane === "system")
+            ).length >= 1
+          );
+
+          items.push(
+            createMailboxItem({
+              id: "mailbox_item_runner_provider_entry_rearm_conversation",
+              lane: "conversation",
+              laneSeq: "1",
+            }),
+            createMailboxItem({
+              id: "mailbox_item_runner_provider_entry_rearm",
+              kind: "member.channels.updated",
+              lane: "system",
+              laneSeq: "1",
+            }),
+          );
+          runtimeWakeSignal.notify();
+          await waitForCondition(() =>
+            importedItemIds.includes(
+              "mailbox_item_runner_provider_entry_rearm_conversation",
+            )
+          );
+
+          const permit = await input.prepareAutoReplyProviderEntry?.();
+          assert.ok(permit);
+          providerEntryBarrier = permit.barrier;
+          if (
+            !permit.barrier
+            && permit.isCurrent()
+            && input.shouldYieldBackgroundMaintenance?.() !== true
+          ) {
+            providerEntries.push("provider-entry");
+          }
+          return { progressed: false };
+        },
+        vaultRoot,
+        workspace: createWorkspaceState({ version: "0" }),
+        now: () => TEST_NOW,
+      });
+
+      assert.deepEqual(providerEntries, []);
+      assert.equal(
+        importedItemIds.includes(
+          "mailbox_item_runner_provider_entry_rearm_conversation",
+        ),
+        true,
+      );
+      assert.equal(
+        importedItemIds.includes("mailbox_item_runner_provider_entry_rearm"),
+        true,
+      );
+      assert.deepEqual(providerEntryBarrier, {
+        nextWakeAt: result.mailboxRetryAt,
+        nextWakeReason: "mailbox",
+        redactedStatus: {
+          hostedMemberChannelPreDispatchImportBlocked: 1,
+          hostedMemberChannelPreDispatchImportPages: 1,
+        },
+      });
+      assert.ok(result.mailboxRetryAt);
+    } finally {
+      await rm(vaultRoot, { force: true, recursive: true });
+    }
+  });
+
+  test("conversation import failure yields background maintenance without revoking a clean provider-entry permit", async () => {
+    const vaultRoot = await mkdtemp(path.join(tmpdir(), "murph-runner-conversation-failure-clean-permit-"));
+    const runtimeWakeSignal = createCoalescingRuntimeWakeSignal();
+    const checkpointRequests: HostedWorkspaceCheckpointRequest[] = [];
+    const fetchRequests: HostedMailboxFetchRequest[] = [];
+    const items: HostedMailboxItem[] = [];
+    const conversationImportError = new Error("synthetic conversation classification failure");
+    const conversationImportAttempts: string[] = [];
+    const providerEntries: string[] = [];
+
+    try {
+      await initializeVault({ createdAt: TEST_NOW, vaultRoot });
+      const result = await runHostedWorkspaceUntilIdleOrBudget({
+        checkpointRequestBuilder: createHostedWorkspaceCheckpointRequestBuilder({
+          attemptId: "attempt_synthetic_runner_conversation_failure_clean_permit",
+          expectedWorkspaceVersion: "0",
+          leaseGeneration: "1",
+          nextWakeAt: null,
+          nextWakeReason: null,
+          snapshotRef: null,
+        }),
+        expectedUserId: TEST_USER_ID,
+        async foregroundImportItem(item) {
+          conversationImportAttempts.push(item.item.id);
+          throw conversationImportError;
+        },
+        async importItem() {
+          return { status: "imported" };
+        },
+        limitPerLane: 10,
+        platform: createPlatform({
+          mailboxPort: createMailboxPort({ fetchRequests, items }).mailboxPort,
+          workspacePort: createWorkspacePort({ checkpointRequests }),
+        }),
+        requestId: "request_synthetic_runner_conversation_failure_clean_permit",
+        runtimeWakeSignal,
+        async runAssistantPhase(input) {
+          items.push(createMailboxItem({
+            id: "mailbox_item_runner_conversation_failure_clean_permit",
+            lane: "conversation",
+            laneSeq: "1",
+          }));
+          runtimeWakeSignal.notify();
+
+          const prepareProviderEntry = input.prepareAutoReplyProviderEntry;
+          assert.ok(prepareProviderEntry);
+          const permit = await prepareProviderEntry();
+          assert.equal(permit.barrier, null);
+          assert.equal(permit.isCurrent(), true);
+          assert.equal(input.shouldYieldBackgroundMaintenance?.(), true);
+          if (!permit.barrier && permit.isCurrent()) {
+            providerEntries.push("provider-entry");
+          }
+          return { progressed: false };
+        },
+        vaultRoot,
+        workspace: createWorkspaceState({ version: "0" }),
+        now: () => TEST_NOW,
+      });
+
+      assert.deepEqual(conversationImportAttempts, [
+        "mailbox_item_runner_conversation_failure_clean_permit",
+      ]);
+      assert.deepEqual(providerEntries, ["provider-entry"]);
+      assert.equal(result.latestMailboxImport.state.watermarks.conversation, "0");
+      assert.equal(
+        fetchRequests.some((request) =>
+          request.requestId.includes(":runtime-wake:")
+          && request.lanes.some((lane) => lane.lane === "system")
+        ),
+        true,
+      );
+    } finally {
+      await rm(vaultRoot, { force: true, recursive: true });
+    }
+  });
+
+  test("conversation import failure cannot mask a system import failure at provider entry", async () => {
+    const vaultRoot = await mkdtemp(path.join(tmpdir(), "murph-runner-conversation-system-failure-"));
+    const runtimeWakeSignal = createCoalescingRuntimeWakeSignal();
+    const checkpointRequests: HostedWorkspaceCheckpointRequest[] = [];
+    const items: HostedMailboxItem[] = [];
+    const conversationImportError = new Error("synthetic conversation classification failure");
+    const systemImportError = new Error("synthetic system classification failure");
+    const conversationImportAttempts: string[] = [];
+    const systemImportAttempts: string[] = [];
+    const providerEntries: string[] = [];
+
+    try {
+      await initializeVault({ createdAt: TEST_NOW, vaultRoot });
+      await runHostedWorkspaceUntilIdleOrBudget({
+        checkpointRequestBuilder: createHostedWorkspaceCheckpointRequestBuilder({
+          attemptId: "attempt_synthetic_runner_conversation_system_failure",
+          expectedWorkspaceVersion: "0",
+          leaseGeneration: "1",
+          nextWakeAt: null,
+          nextWakeReason: null,
+          snapshotRef: null,
+        }),
+        expectedUserId: TEST_USER_ID,
+        async foregroundImportItem(item) {
+          conversationImportAttempts.push(item.item.id);
+          throw conversationImportError;
+        },
+        async importItem(item) {
+          systemImportAttempts.push(item.item.id);
+          throw systemImportError;
+        },
+        limitPerLane: 10,
+        platform: createPlatform({
+          mailboxPort: createMailboxPort({ items }).mailboxPort,
+          workspacePort: createWorkspacePort({ checkpointRequests }),
+        }),
+        requestId: "request_synthetic_runner_conversation_system_failure",
+        runtimeWakeSignal,
+        async runAssistantPhase(input) {
+          items.push(
+            createMailboxItem({
+              id: "mailbox_item_runner_conversation_system_failure_conversation",
+              lane: "conversation",
+              laneSeq: "1",
+            }),
+            createMailboxItem({
+              id: "mailbox_item_runner_conversation_system_failure_system",
+              kind: "member.channels.updated",
+              lane: "system",
+              laneSeq: "1",
+            }),
+          );
+          runtimeWakeSignal.notify();
+
+          const prepareProviderEntry = input.prepareAutoReplyProviderEntry;
+          assert.ok(prepareProviderEntry);
+          await assert.rejects(
+            async () => {
+              const permit = await prepareProviderEntry();
+              if (!permit.barrier && permit.isCurrent()) {
+                providerEntries.push("provider-entry");
+              }
+            },
+            (error) => error === systemImportError,
+          );
+          return { progressed: false };
+        },
+        vaultRoot,
+        workspace: createWorkspaceState({ version: "0" }),
+        now: () => TEST_NOW,
+      });
+
+      assert.deepEqual(conversationImportAttempts, [
+        "mailbox_item_runner_conversation_system_failure_conversation",
+      ]);
+      assert.deepEqual(systemImportAttempts, [
+        "mailbox_item_runner_conversation_system_failure_system",
+        "mailbox_item_runner_conversation_system_failure_system",
+      ]);
+      assert.deepEqual(providerEntries, []);
+    } finally {
+      await rm(vaultRoot, { force: true, recursive: true });
+    }
+  });
+
+  test("full input batch keeps clean provider authority while requeueing the conversation wake at the same revision", async () => {
+    const vaultRoot = await mkdtemp(path.join(tmpdir(), "murph-runner-full-batch-clean-requeue-"));
+    const runtimeWakeSignal = createCoalescingRuntimeWakeSignal();
+    const checkpointRequests: HostedWorkspaceCheckpointRequest[] = [];
+    const fetchRequests: HostedMailboxFetchRequest[] = [];
+    const items: HostedMailboxItem[] = [];
+    const conversationImportAttempts: string[] = [];
+    const wakeAtEpochMs = Date.parse(TEST_NOW) + 1_000;
+    let providerEntryBarrier: unknown = "not-called";
+    let providerEntryCurrent: boolean | null = null;
+    let yieldedBackgroundMaintenance: boolean | null = null;
+
+    try {
+      await initializeVault({ createdAt: TEST_NOW, vaultRoot });
+      const result = await runHostedWorkspaceUntilIdleOrBudget({
+        checkpointRequestBuilder: createHostedWorkspaceCheckpointRequestBuilder({
+          attemptId: "attempt_synthetic_runner_full_batch_clean_requeue",
+          expectedWorkspaceVersion: "0",
+          leaseGeneration: "1",
+          nextWakeAt: null,
+          nextWakeReason: null,
+          snapshotRef: null,
+        }),
+        expectedUserId: TEST_USER_ID,
+        async foregroundImportItem(item) {
+          conversationImportAttempts.push(item.item.id);
+          return { status: "imported" };
+        },
+        initialAssistantInputBatch: {
+          assistantInputIds: ["assistant_input_runner_full_batch_clean_requeue"],
+          emailDeliveryContexts: [],
+          linqDeliveryContexts: [],
+        },
+        async importItem() {
+          return { status: "imported" };
+        },
+        limitPerLane: 1,
+        platform: createPlatform({
+          mailboxPort: createMailboxPort({ fetchRequests, items }).mailboxPort,
+          workspacePort: createWorkspacePort({ checkpointRequests }),
+        }),
+        requestId: "request_synthetic_runner_full_batch_clean_requeue",
+        runtimeWakeSignal,
+        async runAssistantPhase(input) {
+          items.push(createMailboxItem({
+            id: "mailbox_item_runner_full_batch_clean_requeue",
+            lane: "conversation",
+            laneSeq: "1",
+          }));
+          runtimeWakeSignal.notify(wakeAtEpochMs);
+
+          const prepareProviderEntry = input.prepareAutoReplyProviderEntry;
+          assert.ok(prepareProviderEntry);
+          const permit = await prepareProviderEntry();
+          providerEntryBarrier = permit.barrier;
+          providerEntryCurrent = permit.isCurrent();
+          yieldedBackgroundMaintenance =
+            input.shouldYieldBackgroundMaintenance?.() ?? false;
+          return { progressed: false };
+        },
+        vaultRoot,
+        workspace: createWorkspaceState({ version: "0" }),
+        now: () => TEST_NOW,
+      });
+
+      assert.equal(providerEntryBarrier, null);
+      assert.equal(providerEntryCurrent, true);
+      assert.equal(yieldedBackgroundMaintenance, true);
+      assert.deepEqual(conversationImportAttempts, []);
+      assert.equal(result.latestMailboxImport.state.watermarks.conversation, "0");
+      assert.equal(result.mailboxRetryAt, null);
+      assert.equal(runtimeWakeSignal.currentRevision(), 1);
+      assert.deepEqual(runtimeWakeSignal.consumePending(), {
+        notifiedAtEpochMs: wakeAtEpochMs,
+        revision: 1,
+      });
+      assert.equal(
+        fetchRequests.some((request) =>
+          request.requestId.includes(":runtime-wake:")
+          && request.lanes.some((lane) => lane.lane === "system")
+        ),
+        true,
+      );
+    } finally {
+      await rm(vaultRoot, { force: true, recursive: true });
+    }
+  });
+
+  test("late conversation continuation yields background maintenance without revoking a clean provider-entry permit", async () => {
+    const vaultRoot = await mkdtemp(path.join(tmpdir(), "murph-runner-conversation-continuation-clean-permit-"));
+    const runtimeWakeSignal = createCoalescingRuntimeWakeSignal();
+    const checkpointRequests: HostedWorkspaceCheckpointRequest[] = [];
+    const fetchRequests: HostedMailboxFetchRequest[] = [];
+    const items: HostedMailboxItem[] = [];
+    const skippedConversationItemIds: string[] = [];
+    let providerEntryBarrier: unknown = "not-called";
+    let providerEntryCurrent: boolean | null = null;
+    let yieldedBackgroundMaintenance: boolean | null = null;
+
+    try {
+      await initializeVault({ createdAt: TEST_NOW, vaultRoot });
+      const result = await runHostedWorkspaceUntilIdleOrBudget({
+        checkpointRequestBuilder: createHostedWorkspaceCheckpointRequestBuilder({
+          attemptId: "attempt_synthetic_runner_conversation_continuation_clean_permit",
+          expectedWorkspaceVersion: "0",
+          leaseGeneration: "1",
+          nextWakeAt: null,
+          nextWakeReason: null,
+          snapshotRef: null,
+        }),
+        expectedUserId: TEST_USER_ID,
+        async foregroundImportItem(item) {
+          skippedConversationItemIds.push(item.item.id);
+          return {
+            reasonCode: "synthetic.non_replyable",
+            status: "skipped",
+          };
+        },
+        initialAssistantInputBatch: {
+          assistantInputIds: [
+            "assistant_input_runner_conversation_continuation_clean_permit",
+          ],
+          emailDeliveryContexts: [],
+          linqDeliveryContexts: [],
+        },
+        async importItem() {
+          return { status: "imported" };
+        },
+        limitPerLane: 2,
+        platform: createPlatform({
+          mailboxPort: createMailboxPort({ fetchRequests, items }).mailboxPort,
+          workspacePort: createWorkspacePort({ checkpointRequests }),
+        }),
+        requestId: "request_synthetic_runner_conversation_continuation_clean_permit",
+        runtimeWakeSignal,
+        async runAssistantPhase(input) {
+          items.push(
+            createMailboxItem({
+              id: "mailbox_item_runner_conversation_continuation_first",
+              lane: "conversation",
+              laneSeq: "1",
+            }),
+            createMailboxItem({
+              id: "mailbox_item_runner_conversation_continuation_second",
+              lane: "conversation",
+              laneSeq: "2",
+            }),
+          );
+          runtimeWakeSignal.notify();
+
+          const prepareProviderEntry = input.prepareAutoReplyProviderEntry;
+          assert.ok(prepareProviderEntry);
+          const permit = await prepareProviderEntry();
+          providerEntryBarrier = permit.barrier;
+          providerEntryCurrent = permit.isCurrent();
+          yieldedBackgroundMaintenance =
+            input.shouldYieldBackgroundMaintenance?.() ?? false;
+          return { progressed: false };
+        },
+        vaultRoot,
+        workspace: createWorkspaceState({ version: "0" }),
+        now: () => TEST_NOW,
+      });
+
+      assert.equal(providerEntryBarrier, null);
+      assert.equal(providerEntryCurrent, true);
+      assert.equal(yieldedBackgroundMaintenance, true);
+      assert.deepEqual(skippedConversationItemIds, [
+        "mailbox_item_runner_conversation_continuation_first",
+      ]);
+      assert.equal(result.latestAssistantInputBatch, null);
+      assert.equal(result.latestMailboxImport.state.watermarks.conversation, "1");
+      assert.equal(result.mailboxRetryAt, TEST_NOW);
+      assert.equal(runtimeWakeSignal.consumePending(), null);
+      const continuationFetch = fetchRequests.find((request) =>
+        request.requestId.includes(":runtime-wake:")
+        && request.lanes.length === 1
+        && request.lanes[0]?.lane === "conversation"
+      );
+      assert.ok(continuationFetch);
+      assert.equal(continuationFetch.limitPerLane, 1);
+      assert.deepEqual(continuationFetch.lanes, [
+        { importedSeq: "0", lane: "conversation" },
+      ]);
+      assert.equal(
+        fetchRequests.some((request) =>
+          request.requestId.includes(":runtime-wake:")
+          && request.lanes.some((lane) => lane.lane === "system")
+        ),
+        true,
+      );
+    } finally {
       await rm(vaultRoot, { force: true, recursive: true });
     }
   });

@@ -328,6 +328,11 @@ describe("runner bundle container-entrypoint esbuild step", () => {
 
   it.each([
     [
+      "hosted workspace assistant turn phase",
+      ".deploy/runner-bundle/node_modules/@murphai/assistant-runtime/dist/hosted-runtime/workspace-assistant-phase.js",
+      /node_modules\/@murphai\/assistant-runtime\/dist\/hosted-runtime\/workspace-assistant-phase\.js/,
+    ],
+    [
       "staged device-sync service",
       ".deploy/runner-bundle/node_modules/@murphai/device-syncd/dist/service.js",
       /node_modules\/@murphai\/device-syncd\/dist\/service\.js/,
