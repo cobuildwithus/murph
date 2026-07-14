@@ -350,7 +350,7 @@ describe("hosted Linq webhook transport", () => {
     const hostedMailboxItem = {
       findUnique: vi.fn().mockResolvedValue({
         consumedAt: new Date("2026-03-26T12:00:00.000Z"),
-        kind: "group.leave.member-unresolved",
+        payloadSchema: "murph.group-leave-member-unresolved.v1",
         userId: "member-group-runtime",
       }),
     };
@@ -361,6 +361,7 @@ describe("hosted Linq webhook transport", () => {
       groupRuntimeMemberId: "member-group-runtime",
       memberId: "member-group-runtime",
       occurredAt: "2026-03-26T12:00:00.000Z",
+      participantMemberId: null,
       result: "member_unresolved",
       routeAuthority: route.authority,
       sourceEventId: "event-unresolved-leave-1",
@@ -373,7 +374,7 @@ describe("hosted Linq webhook transport", () => {
     })).resolves.toMatchObject({ sentCount: 1 });
 
     expect(hostedMailboxItem.findUnique).toHaveBeenCalledWith({
-      select: { consumedAt: true, kind: true, userId: true },
+      select: { consumedAt: true, payloadSchema: true, userId: true },
       where: { id: "mailbox-unresolved-1" },
     });
     expect(sendHostedLinqChatMessage).toHaveBeenCalledOnce();

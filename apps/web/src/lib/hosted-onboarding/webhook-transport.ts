@@ -799,11 +799,11 @@ async function isHostedLinqGroupLeaveResultCurrent(
     }
     const evidence = await prisma.hostedMailboxItem.findUnique({
       where: { id: payload.evidenceMailboxItemId },
-      select: { consumedAt: true, kind: true, userId: true },
+      select: { consumedAt: true, payloadSchema: true, userId: true },
     });
     return evidence?.userId === payload.groupRuntimeMemberId
       && evidence.consumedAt !== null
-      && evidence.kind === "group.leave.member-unresolved";
+      && evidence.payloadSchema === "murph.group-leave-member-unresolved.v1";
   }
 
   const group = await prisma.hostedGroup.findUnique({
