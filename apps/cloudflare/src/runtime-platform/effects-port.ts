@@ -250,9 +250,13 @@ function parseHostedRuntimeLinqRecentInboundEngagementResult(
   const response = value as {
     providerDispatchClaimed?: unknown;
     targetOverride?: unknown;
+    threadIsDirect?: unknown;
   };
   if (typeof response.providerDispatchClaimed === "boolean") {
     result.providerDispatchClaimed = response.providerDispatchClaimed;
+  }
+  if (typeof response.threadIsDirect === "boolean") {
+    result.threadIsDirect = response.threadIsDirect;
   }
 
   const targetOverride = response.targetOverride;

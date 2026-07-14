@@ -506,6 +506,22 @@ That command:
 The gradual container rollout keeps `rollout_active_grace_period` at 300 seconds and rolls runner instances through `10`, `25`, `50`, then `100` percent. The manual workflow exposes a `container_rollout` input; its production default is currently `immediate` because selector-scoped vault-share deliveries are unsafe under gradual runner rollout. Selecting `immediate` passes Wrangler's `--containers-rollout=immediate` flag and can interrupt active runner containers.
 During gradual rollout, Worker code and runner container state may disagree for the rollout window. A newly deployed Worker version can handle provider egress or internal-host traffic from an already-running warm runner process whose bundle, process env, or provider-credential shape was created before the deploy. Treat this as expected rollout behavior, not proof that traffic is reaching an old Worker version. Any PR that changes a Worker/container contract, runner env shape, hosted provider credential, internal host route, parser/toolchain path, or bundle-owned runtime assumption must document the compatibility window in its PR description and final `DEPLOYMENT CONCERNS:` handoff: whether old containers can safely talk to new Worker code, whether new containers can safely talk to old web/control-plane code, whether `container_rollout=immediate` is required, and which deploy-smoke or Workers Observability checks prove the fleet has converged.
 
+The scheduled Linq authority release has a Web-first hard gate. Deploy and
+verify Web's concrete-target/directness response before deploying Cloudflare
+with `container_rollout=immediate`. After that deploy, runner admission rejects
+and restarts a warm runner whose bundle fingerprint is stale; require managed
+container smoke to report the expected new fingerprint before considering the
+fleet converged. A new runner against old Web fails closed and retries before
+model or provider work, but a misordered or slow rollout can exhaust the bounded
+retry window and let an occurrence expire. Keep the new Web response as the
+rollback floor while the new runner is active. If rollback is unavoidable,
+roll back Cloudflare first, prove the old runner fingerprint, and only then roll
+back Web; this restores the prior cron failure risk, so a forward fix is
+preferred. After convergence, smoke one personal scheduled reminder and one
+group automation, and confirm there are no new
+`ASSISTANT_LINQ_ENGAGEMENT_ASSERT_UNAVAILABLE` or
+`ASSISTANT_LINQ_AUDIENCE_AUTHORITY_UNAVAILABLE` failures.
+
 The first automatic meal-photo release must deploy Cloudflare Worker and runner support with `container_rollout=immediate` and pass managed-container smoke before enabling or deploying the web producer that appends `meal-photo.captured`. The first runner bundle that parses and imports that mailbox kind is the rollback floor while any meal-photo item can remain retained; do not roll below it independently. The web-to-Worker staging/deletion routes are additive, so the new Worker may safely precede web. After deployment, verify the runner-bundle fingerprint and absence of hosted mailbox parse failures before exercising the physical-device opt-in/upload smoke.
 
 The first shared preference-causal-sequence release uses an expand/switch rollout. Vercel predeploy first adds the nullable `causal_seq` column and unique index, then deploys the sequence-producing web build with `MURPH_ASSISTANT_PERSONALITY_CAUSAL_WRITES_ENABLED=0`. While that web gate is off, tone/voice events keep the legacy complete snapshot shape, so the old Cloudflare coalescing consumer remains safe. The post-deploy contract lane checks legacy work against the system-lane `consumed_seq` and adds the new-write constraint `NOT VALID`, allowing handled retained history. Deploy this Cloudflare worker and runner bundle with `container_rollout=immediate` and prove fleet convergence; its accepted-input causal binding is always installed, so no Cloudflare feature gate is required. Then enable the Vercel gate to switch Settings to sparse deltas and expose personality controls. After the new runtime can accept conversational personality writes or the web gate is enabled, do not roll either plane back independently.

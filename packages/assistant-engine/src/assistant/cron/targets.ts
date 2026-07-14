@@ -8,7 +8,6 @@ import type { AutomationRoute } from '@murphai/contracts'
 import {
   type AssistantAutomationRouteValidationProfile,
   getAssistantAutomationRouteDeliverabilityIssue,
-  looksLikePrivateAssistantRoutePlaceholder,
   resolveAssistantDeliveryRouteWithCurrentRoute,
   stripPrivateAssistantRoutePlaceholders,
 } from '@murphai/operator-config/assistant/current-delivery-route'
@@ -44,7 +43,6 @@ export async function resolveAssistantCronTargetDefaults<
   return {
     ...input,
     channel: resolvedRoute.channel ?? undefined,
-    currentRouteSnapshot: input.currentRouteSnapshot === true ? true : undefined,
     deliverySource: input.deliverySource ?? undefined,
     identityId: resolvedRoute.identityId ?? undefined,
     participantId: resolvedRoute.participantId ?? undefined,
@@ -75,7 +73,6 @@ export function validateAssistantCronDeliveryTarget(
 
   const normalizedRoute = stripPrivateAssistantRoutePlaceholders({
     channel,
-    currentRouteSnapshot: input.currentRouteSnapshot === true ? true : undefined,
     identityId: normalizeNullableString(input.identityId),
     participantId: normalizeNullableString(input.participantId),
     threadId: normalizeNullableString(input.threadId),
@@ -122,19 +119,17 @@ export function validateAssistantCronDeliveryTarget(
   }
 
   return buildAssistantCronTarget({
-    ...input,
+    alias: input.alias,
     channel,
-    currentRouteSnapshot: normalizedRoute.currentRouteSnapshot === true
-      ? true
-      : undefined,
     deliverySource,
+    deliveryTarget,
     identityId,
     participantId,
+    sessionId: input.sessionId,
     threadId,
     ...(typeof normalizedRoute.threadIsDirect === 'boolean'
       ? { threadIsDirect: normalizedRoute.threadIsDirect }
       : {}),
-    deliveryTarget,
   })
 }
 
@@ -153,9 +148,6 @@ export function buildCanonicalAutomationRoute(
 ): AutomationRoute {
   return {
     channel: target.channel ?? '',
-    ...(target.currentRouteSnapshot === true
-      ? { currentRouteSnapshot: true }
-      : {}),
     deliverySource: target.deliverySource,
     deliveryTarget: target.deliveryTarget,
     identityId: target.identityId,
@@ -201,14 +193,6 @@ export function buildAssistantCronTargetSnapshot(
 export function resolveAssistantCronTargetBindingDelivery(
   target: AssistantCronTarget,
 ): AssistantBindingDelivery | null {
-  const currentRouteTarget = resolveAssistantCronCurrentRouteBindingTarget(target)
-  if (currentRouteTarget) {
-    return {
-      kind: 'thread',
-      target: currentRouteTarget,
-    }
-  }
-
   if (normalizeNullableString(target.deliveryTarget) !== null) {
     return null
   }
@@ -236,12 +220,9 @@ export function resolveAssistantCronNotificationDeliveryRoute(
   threadIsDirect: boolean | null
 } {
   const bindingDelivery = resolveAssistantCronTargetBindingDelivery(target)
-  const currentRouteTarget = resolveAssistantCronCurrentRouteBindingTarget(target)
   return {
     bindingDelivery,
-    deliveryTarget: currentRouteTarget
-      ? null
-      : normalizeNullableString(target.deliveryTarget),
+    deliveryTarget: normalizeNullableString(target.deliveryTarget),
     threadIsDirect: resolveAssistantCronNotificationThreadIsDirect(target),
   }
 }
@@ -252,33 +233,6 @@ function resolveAssistantCronNotificationThreadIsDirect(
   return typeof target.threadIsDirect === 'boolean'
     ? target.threadIsDirect
     : null
-}
-
-function resolveAssistantCronCurrentRouteBindingTarget(
-  target: AssistantCronTarget,
-): string | null {
-  const deliveryTarget = normalizeNullableString(target.deliveryTarget)
-  if (
-    !deliveryTarget ||
-    target.currentRouteSnapshot !== true
-  ) {
-    return null
-  }
-
-  if (typeof target.threadIsDirect === 'boolean') {
-    return deliveryTarget
-  }
-
-  if (
-    target.channel !== 'linq' ||
-    !looksLikePrivateAssistantRoutePlaceholder(target.identityId) &&
-    !looksLikePrivateAssistantRoutePlaceholder(target.participantId) &&
-    !looksLikePrivateAssistantRoutePlaceholder(target.threadId)
-  ) {
-    return null
-  }
-
-  return deliveryTarget
 }
 
 function isLinqParticipantMaterializationTarget(

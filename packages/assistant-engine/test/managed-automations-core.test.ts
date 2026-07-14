@@ -371,7 +371,6 @@ describe('applyMurphManagedAutomations core integration', () => {
     await expect(applyMurphManagedAutomations({
       defaultRoute: {
         ...legacyGroupRoute,
-        currentRouteSnapshot: true,
         threadIsDirect: false,
       },
       now: new Date('2026-07-10T12:05:00.000Z'),
@@ -384,7 +383,6 @@ describe('applyMurphManagedAutomations core integration', () => {
     ]) {
       const record = await showAutomation({ automationId, vaultRoot })
       expect(record?.route).toMatchObject(legacyGroupRoute)
-      expect(record?.route).not.toHaveProperty('currentRouteSnapshot')
       expect(record?.route).not.toHaveProperty('threadIsDirect')
     }
   })
@@ -426,7 +424,6 @@ describe('applyMurphManagedAutomations core integration', () => {
     await expect(applyMurphManagedAutomations({
       defaultRoute: {
         ...originalRoute,
-        currentRouteSnapshot: true,
         deliveryTarget: 'current-home-chat',
         threadIsDirect: true,
       },
@@ -513,7 +510,6 @@ describe('applyMurphManagedAutomations core integration', () => {
     await applyMurphManagedAutomations({
       defaultRoute: {
         ...liveLegacyRoute,
-        currentRouteSnapshot: true,
         deliveryTarget: 'current-home-chat',
         threadIsDirect: true,
       },
@@ -527,7 +523,6 @@ describe('applyMurphManagedAutomations core integration', () => {
     ]) {
       const record = await showAutomation({ automationId, vaultRoot })
       expect(record?.route).toMatchObject(liveLegacyRoute)
-      expect(record?.route).not.toHaveProperty('currentRouteSnapshot')
       expect(record?.route).not.toHaveProperty('threadIsDirect')
     }
     for (const automationId of [
@@ -536,7 +531,6 @@ describe('applyMurphManagedAutomations core integration', () => {
     ]) {
       const record = await showAutomation({ automationId, vaultRoot })
       expect(record?.route).toMatchObject(archivedLegacyRoute)
-      expect(record?.route).not.toHaveProperty('currentRouteSnapshot')
       expect(record?.route).not.toHaveProperty('threadIsDirect')
     }
     await expect(showAutomation({
@@ -578,7 +572,6 @@ describe('applyMurphManagedAutomations core integration', () => {
       now: new Date('2026-07-10T12:01:00.000Z'),
       route: {
         ...legacyHomeRoute,
-        currentRouteSnapshot: true,
         threadIsDirect: true,
       },
       schedule: { kind: 'dailyLocal', localTime: '09:00' },
@@ -592,7 +585,6 @@ describe('applyMurphManagedAutomations core integration', () => {
 
     const currentHomeRoute = {
       ...legacyHomeRoute,
-      currentRouteSnapshot: true,
       deliveryTarget: 'current-home-chat',
       threadIsDirect: true,
     }
@@ -620,14 +612,6 @@ describe('applyMurphManagedAutomations core integration', () => {
         deliveryTarget: 'legacy-home-chat',
       },
     })
-    expect((await showAutomation({
-      automationId: MURPH_WEEKLY_HEALTH_DIGEST_AUTOMATION_ID,
-      vaultRoot,
-    }))?.route).not.toHaveProperty('currentRouteSnapshot')
-    expect((await showAutomation({
-      automationId: MURPH_WEEKLY_HEALTH_INSIGHT_AUTOMATION_ID,
-      vaultRoot,
-    }))?.route).not.toHaveProperty('currentRouteSnapshot')
     await expect(applyMurphManagedAutomations({
       defaultRoute: currentHomeRoute,
       now: new Date('2026-07-10T12:10:00.000Z'),

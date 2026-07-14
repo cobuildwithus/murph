@@ -228,6 +228,7 @@ export interface HostedRuntimeLinqTargetOverride {
 export interface HostedRuntimeLinqRecentInboundEngagementResult {
   providerDispatchClaimed?: boolean | null;
   targetOverride?: HostedRuntimeLinqTargetOverride | null;
+  threadIsDirect?: boolean | null;
 }
 
 export interface HostedRuntimeLinqDeliveryOutcomeRequest {

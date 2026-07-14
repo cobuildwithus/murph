@@ -156,7 +156,7 @@ describe('device activity triggered automations', () => {
     )
   })
 
-  it('preserves verified current-conversation authority on generated activity notifications', async () => {
+  it('preserves the saved conversation route on generated activity notifications', async () => {
     const automation = createDeviceActivityAutomation({
       activityKind: 'running',
       after: '2026-06-07T11:00:00.000Z',
@@ -164,7 +164,6 @@ describe('device activity triggered automations', () => {
     })
     automation.route = {
       channel: 'linq',
-      currentRouteSnapshot: true,
       deliverySource: null,
       deliveryTarget: 'linq-hosted-group',
       identityId: 'hosted-identity',
@@ -199,7 +198,6 @@ describe('device activity triggered automations', () => {
     expect(jobs).toHaveLength(1)
     expect(jobs[0]?.target).toMatchObject({
       channel: 'linq',
-      currentRouteSnapshot: true,
       deliveryTarget: 'linq-hosted-group',
       identityId: 'hosted-identity',
       participantId: 'hosted-participant',

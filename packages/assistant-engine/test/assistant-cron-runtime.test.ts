@@ -1228,7 +1228,6 @@ describe('assistant cron runtime orchestration', () => {
       relativePath: 'bank/automations/renamed-device-activity-listener.md',
       route: {
         channel: 'linq',
-        currentRouteSnapshot: true,
         deliverySource: null,
         deliveryTarget: 'linq_chat_device_activity',
         identityId: null,
@@ -1299,6 +1298,10 @@ describe('assistant cron runtime orchestration', () => {
 
     cronMocks.listCanonicalAutomations.mockClear()
     cronMocks.readAutomationByRelativePath.mockClear()
+    const resolveScheduledLinqRoute = vi.fn().mockResolvedValue({
+      target: 'linq_chat_device_activity',
+      threadIsDirect: false,
+    })
     const scopedTargets: AssistantCronJob['target'][] = []
     const operationScope: AssistantAutomationOperationScope = {
       async runAutoReplyGroup({ executionContext, operation, turnEnvironment }) {
@@ -1314,6 +1317,7 @@ describe('assistant cron runtime orchestration', () => {
         executionContext: {
           hosted: {
             memberId: 'member-device-activity-group',
+            resolveScheduledLinqRoute,
             userEnvKeys: [],
           },
         },
@@ -1336,7 +1340,6 @@ describe('assistant cron runtime orchestration', () => {
     })
     expect(scopedTargets).toEqual([
       expect.objectContaining({
-        currentRouteSnapshot: true,
         deliveryTarget: 'linq_chat_device_activity',
         threadIsDirect: false,
       }),
@@ -1348,6 +1351,13 @@ describe('assistant cron runtime orchestration', () => {
         },
         threadIsDirect: false,
         instructions: 'Ask about the imported run.',
+      }),
+    )
+    expect(resolveScheduledLinqRoute).toHaveBeenCalledWith(
+      expect.objectContaining({
+        homeRouteFallbackAllowed: false,
+        target: 'linq_chat_device_activity',
+        targetKind: 'explicit',
       }),
     )
   })
@@ -5307,79 +5317,7 @@ describe('assistant cron runtime orchestration', () => {
     expect(runtimeRecord?.sessionId).toBeNull()
   })
 
-  it('executes hosted Linq current-route snapshots as direct thread binding deliveries', async () => {
-    vi.useFakeTimers()
-    vi.setSystemTime(new Date('2026-04-08T10:20:00.000Z'))
-    const { vaultRoot } = await createRuntimeContext(
-      'assistant-cron-runtime-linq-current-route-binding-',
-    )
-    getVaultAutomationStore(vaultRoot).push({
-      automationId: 'automation-linq-current-route-binding',
-      continuityPolicy: 'fresh',
-      createdAt: '2026-04-08T08:00:00.000Z',
-      instructions: 'Send the morning reminder.',
-      route: {
-        channel: 'linq',
-        currentRouteSnapshot: true,
-        deliverySource: null,
-        deliveryTarget: 'old-home-chat',
-        identityId: null,
-        participantId: null,
-        threadId: null,
-        threadIsDirect: true,
-      },
-      schedule: {
-        kind: 'dailyLocal',
-        localTime: '10:00',
-      },
-      slug: 'linq-current-route-binding-reminder',
-      status: 'active',
-      summary: null,
-      tags: ['assistant', 'scheduled'],
-      title: 'Linq current route binding reminder',
-      updatedAt: '2026-04-08T08:00:00.000Z',
-    })
-    const paths = resolveAssistantStatePaths(vaultRoot)
-    const source = (await listCanonicalAssistantCronRecords(vaultRoot))[0]
-
-    if (!source) {
-      throw new Error('Expected canonical source to exist.')
-    }
-
-    const runtimeStore = await readAssistantCronCanonicalRuntimeStore(paths)
-    const runtimeState = resolveCanonicalRuntimeState(source, runtimeStore)
-    const claimed = await claimResolvedAssistantCronJob({
-      job: {
-        kind: 'canonical',
-        source,
-        runtimeState,
-        job: projectCanonicalAssistantCronJob({
-          source,
-          runtimeState,
-        }),
-      },
-      paths,
-    })
-    const result = await executeClaimedAssistantCronJob({
-      job: claimed,
-      paths,
-      trigger: 'scheduled',
-      vault: vaultRoot,
-    })
-
-    expect(result.run.status).toBe('succeeded')
-    expect(cronMocks.sendAssistantMessageLocal).toHaveBeenCalledWith(
-      expect.objectContaining({
-        bindingDeliveryTarget: 'old-home-chat',
-        deliveryKind: 'thread',
-        deliveryTarget: null,
-        threadId: null,
-        threadIsDirect: true,
-      }),
-    )
-  })
-
-  it('executes hosted email current-route snapshots through their trusted reply envelope binding', async () => {
+  it('executes hosted email targets through their trusted reply envelope binding', async () => {
     vi.useFakeTimers()
     vi.setSystemTime(new Date('2026-04-08T10:20:00.000Z'))
     const { vaultRoot } = await createRuntimeContext(
@@ -5399,7 +5337,6 @@ describe('assistant cron runtime orchestration', () => {
       instructions: 'Send the group check-in reminder.',
       route: {
         channel: 'email',
-        currentRouteSnapshot: true,
         deliverySource: null,
         deliveryTarget,
         identityId: 'email-sender-identity',
@@ -5455,8 +5392,8 @@ describe('assistant cron runtime orchestration', () => {
       expect.objectContaining({
         bindingDeliveryTarget: deliveryTarget,
         channel: 'email',
-        deliveryKind: 'thread',
-        deliveryTarget: null,
+        deliveryKind: undefined,
+        deliveryTarget,
         identityId: 'email-sender-identity',
         threadId: 'stable-email-thread',
         threadIsDirect: false,
@@ -5464,46 +5401,51 @@ describe('assistant cron runtime orchestration', () => {
     )
   })
 
-  it('keeps a hosted one-shot pending when notification audience verification fails', async () => {
+  it.each([
+    {
+      currentRouteSnapshot: undefined,
+      label: 'without the retired route marker',
+    },
+    {
+      currentRouteSnapshot: true,
+      label: 'with the retired route marker',
+    },
+  ] as const)('authorizes a legacy bare Linq target $label and records a successful cron run', async ({
+    currentRouteSnapshot,
+  }) => {
     vi.useFakeTimers()
     vi.setSystemTime(new Date('2026-04-08T10:20:00.000Z'))
     const { vaultRoot } = await createRuntimeContext(
-      'assistant-cron-runtime-unverified-notification-',
+      'assistant-cron-runtime-legacy-linq-authorized-',
     )
     getVaultAutomationStore(vaultRoot).push({
-      automationId: 'automation-unverified-notification',
+      automationId: 'automation-legacy-linq-authorized',
       continuityPolicy: 'fresh',
       createdAt: '2026-04-08T08:00:00.000Z',
       instructions: 'Send the reminder.',
       route: {
-        channel: 'telegram',
-        currentRouteSnapshot: true,
+        channel: 'linq',
+        ...(currentRouteSnapshot === true ? { currentRouteSnapshot } : {}),
         deliverySource: null,
-        deliveryTarget: 'telegram-group',
-        identityId: 'telegram-identity',
+        deliveryTarget: 'saved-home-chat',
+        identityId: null,
         participantId: null,
-        threadId: 'telegram-group',
-        threadIsDirect: false,
+        threadId: null,
       },
       schedule: {
         at: '2026-04-08T10:00:00.000Z',
         kind: 'at',
       },
-      slug: 'unverified-notification-reminder',
+      slug: 'legacy-linq-authorized-reminder',
       status: 'active',
       summary: null,
       tags: ['assistant', 'scheduled'],
-      title: 'Unverified notification reminder',
+      title: 'Legacy Linq authorized reminder',
       updatedAt: '2026-04-08T08:00:00.000Z',
     })
-    cronMocks.sendAssistantMessageLocal.mockResolvedValueOnce({
-      audienceVerification: 'unverified',
-      decision: {
-        kind: 'skip',
-        privateSummary: 'Audience was not verified.',
-      },
-      response: null,
-      session: { sessionId: 'session-unverified' },
+    const resolveScheduledLinqRoute = vi.fn().mockResolvedValue({
+      target: 'current-home-chat',
+      threadIsDirect: true,
     })
     const paths = resolveAssistantStatePaths(vaultRoot)
     const source = (await listCanonicalAssistantCronRecords(vaultRoot))[0]
@@ -5526,7 +5468,8 @@ describe('assistant cron runtime orchestration', () => {
     const result = await executeClaimedAssistantCronJob({
       executionContext: {
         hosted: {
-          memberId: 'member-unverified-notification',
+          memberId: 'member-legacy-linq-authorized',
+          resolveScheduledLinqRoute,
           userEnvKeys: [],
         },
       },
@@ -5536,162 +5479,75 @@ describe('assistant cron runtime orchestration', () => {
       vault: vaultRoot,
     })
 
-    expect(result.removedAfterRun).toBe(false)
+    expect(result.removedAfterRun).toBe(true)
     expect(result.run).toMatchObject({
-      outcome: 'failed',
-      reason: 'ASSISTANT_CRON_AUDIENCE_UNVERIFIED',
-      status: 'failed',
+      outcome: 'no_op',
+      status: 'succeeded',
     })
-    expect(result.runErrorCode).toBe('ASSISTANT_CRON_AUDIENCE_UNVERIFIED')
-    expect(cronMocks.sendAssistantMessageLocal).toHaveBeenCalledOnce()
-  })
-
-  it('keeps hosted Linq current-route snapshots pending without stored directness', async () => {
-    vi.useFakeTimers()
-    vi.setSystemTime(new Date('2026-04-08T10:20:00.000Z'))
-    const { vaultRoot } = await createRuntimeContext(
-      'assistant-cron-runtime-linq-current-route-binding-without-directness-',
+    expect(result.runErrorCode).toBeNull()
+    expect(resolveScheduledLinqRoute).toHaveBeenCalledWith(
+      expect.objectContaining({
+        homeRouteFallbackAllowed: true,
+        target: 'saved-home-chat',
+        targetKind: 'explicit',
+      }),
     )
-    cronMocks.sendAssistantMessageLocal.mockResolvedValueOnce({
-      audienceVerification: 'unverified',
-      decision: {
-        kind: 'skip',
-        privateSummary: 'Audience was not verified.',
-      },
-      response: null,
-      session: { sessionId: 'session-unverified-current-route' },
-    })
-    getVaultAutomationStore(vaultRoot).push({
-      automationId: 'automation-linq-current-route-without-directness',
-      continuityPolicy: 'fresh',
-      createdAt: '2026-04-08T08:00:00.000Z',
-      instructions: 'Send the morning reminder.',
-      route: {
-        channel: 'linq',
-        currentRouteSnapshot: true,
-        deliverySource: null,
-        deliveryTarget: 'old-home-chat',
-        identityId: 'h1_111111111111111111111111',
-        participantId: 'h1_222222222222222222222222',
-        threadId: 'h1_333333333333333333333333',
-      },
-      schedule: {
-        kind: 'dailyLocal',
-        localTime: '10:00',
-      },
-      slug: 'linq-current-route-without-directness-reminder',
-      status: 'active',
-      summary: null,
-      tags: ['assistant', 'scheduled'],
-      title: 'Linq current route without directness reminder',
-      updatedAt: '2026-04-08T08:00:00.000Z',
-    })
-    const paths = resolveAssistantStatePaths(vaultRoot)
-    const source = (await listCanonicalAssistantCronRecords(vaultRoot))[0]
-
-    if (!source) {
-      throw new Error('Expected canonical source to exist.')
-    }
-
-    const runtimeStore = await readAssistantCronCanonicalRuntimeStore(paths)
-    const runtimeState = resolveCanonicalRuntimeState(source, runtimeStore)
-    const claimed = await claimResolvedAssistantCronJob({
-      job: {
-        kind: 'canonical',
-        source,
-        runtimeState,
-        job: projectCanonicalAssistantCronJob({
-          source,
-          runtimeState,
-        }),
-      },
-      paths,
-    })
-    const result = await executeClaimedAssistantCronJob({
-      executionContext: {
-        hosted: {
-          memberId: 'member-current-route-without-directness',
-          userEnvKeys: [],
-        },
-      },
-      job: claimed,
-      paths,
-      trigger: 'scheduled',
-      vault: vaultRoot,
-    })
-
-    expect(result.removedAfterRun).toBe(false)
-    expect(result.run).toMatchObject({
-      error: expect.stringContaining('could not verify its saved audience'),
-      outcome: 'failed',
-      reason: 'ASSISTANT_CRON_AUDIENCE_UNVERIFIED',
-      status: 'failed',
-    })
-    expect(result.runErrorCode).toBe('ASSISTANT_CRON_AUDIENCE_UNVERIFIED')
     expect(cronMocks.sendAssistantMessageLocal).toHaveBeenCalledWith(
       expect.objectContaining({
-        bindingDeliveryTarget: 'old-home-chat',
-        deliveryKind: 'thread',
-        deliveryTarget: null,
-        threadIsDirect: null,
+        bindingDeliveryTarget: 'current-home-chat',
+        deliveryTarget: 'current-home-chat',
+        threadIsDirect: true,
       }),
     )
   })
 
-  it('executes hosted Linq current-route snapshots with concrete locators as thread binding deliveries', async () => {
+  it('resolves hosted Linq participant automations to the current home thread', async () => {
     vi.useFakeTimers()
     vi.setSystemTime(new Date('2026-04-08T10:20:00.000Z'))
     const { vaultRoot } = await createRuntimeContext(
-      'assistant-cron-runtime-linq-current-route-concrete-locators-',
+      'assistant-cron-runtime-linq-participant-authority-',
     )
     getVaultAutomationStore(vaultRoot).push({
-      automationId: 'automation-linq-current-route-concrete-locators',
+      automationId: 'automation-linq-participant-authority',
       continuityPolicy: 'fresh',
       createdAt: '2026-04-08T08:00:00.000Z',
-      instructions: 'Send the morning reminder.',
+      instructions: 'Send the reminder.',
       route: {
         channel: 'linq',
-        currentRouteSnapshot: true,
-        deliverySource: null,
-        deliveryTarget: 'old-home-chat',
-        identityId: 'identity-concrete',
-        participantId: 'participant-concrete',
-        threadId: 'thread-concrete',
-        threadIsDirect: true,
+        deliverySource: {
+          fromPhoneNumber: '+15550001111',
+          kind: 'linq',
+        },
+        deliveryTarget: null,
+        identityId: 'hid_linq_identity_participant',
+        participantId: '+15550002222',
+        threadId: null,
       },
       schedule: {
-        kind: 'dailyLocal',
-        localTime: '10:00',
+        at: '2026-04-08T10:00:00.000Z',
+        kind: 'at',
       },
-      slug: 'linq-current-route-concrete-locators-reminder',
+      slug: 'linq-participant-authority-reminder',
       status: 'active',
       summary: null,
       tags: ['assistant', 'scheduled'],
-      title: 'Linq current route concrete locators reminder',
+      title: 'Linq participant authority reminder',
       updatedAt: '2026-04-08T08:00:00.000Z',
     })
-    const paths = resolveAssistantStatePaths(vaultRoot)
-    const source = (await listCanonicalAssistantCronRecords(vaultRoot))[0]
-
-    if (!source) {
-      throw new Error('Expected canonical source to exist.')
-    }
-
-    const runtimeStore = await readAssistantCronCanonicalRuntimeStore(paths)
-    const runtimeState = resolveCanonicalRuntimeState(source, runtimeStore)
-    const claimed = await claimResolvedAssistantCronJob({
-      job: {
-        kind: 'canonical',
-        source,
-        runtimeState,
-        job: projectCanonicalAssistantCronJob({
-          source,
-          runtimeState,
-        }),
-      },
-      paths,
+    const resolveScheduledLinqRoute = vi.fn().mockResolvedValue({
+      target: 'current-home-chat',
+      threadIsDirect: true,
     })
+    const { claimed, paths } = await claimFirstCanonicalCronJob(vaultRoot)
+
     const result = await executeClaimedAssistantCronJob({
+      executionContext: {
+        hosted: {
+          memberId: 'member-linq-participant-authority',
+          resolveScheduledLinqRoute,
+          userEnvKeys: [],
+        },
+      },
       job: claimed,
       paths,
       trigger: 'scheduled',
@@ -5699,54 +5555,127 @@ describe('assistant cron runtime orchestration', () => {
     })
 
     expect(result.run.status).toBe('succeeded')
+    expect(resolveScheduledLinqRoute).toHaveBeenCalledWith(
+      expect.objectContaining({
+        homeRouteFallbackAllowed: true,
+        target: '+15550002222',
+        targetKind: 'explicit',
+      }),
+    )
     expect(cronMocks.sendAssistantMessageLocal).toHaveBeenCalledWith(
       expect.objectContaining({
-        bindingDeliveryTarget: 'old-home-chat',
+        bindingDeliveryTarget: 'current-home-chat',
         deliveryKind: 'thread',
         deliveryTarget: null,
-        threadId: 'thread-concrete',
         threadIsDirect: true,
       }),
     )
   })
 
-  it('keeps hosted legacy automations pending when audience directness is unknown', async () => {
+  it('does not fall back from a known Linq group route to the personal home chat', async () => {
     vi.useFakeTimers()
     vi.setSystemTime(new Date('2026-04-08T10:20:00.000Z'))
     const { vaultRoot } = await createRuntimeContext(
-      'assistant-cron-runtime-linq-untagged-private-target-',
+      'assistant-cron-runtime-linq-group-authority-',
     )
-    cronMocks.sendAssistantMessageLocal.mockResolvedValueOnce({
-      audienceVerification: 'unverified',
-      decision: {
-        kind: 'skip',
-        privateSummary: 'Audience was not verified.',
-      },
-      response: null,
-      session: { sessionId: 'session-unverified-legacy-route' },
-    })
     getVaultAutomationStore(vaultRoot).push({
-      automationId: 'automation-linq-untagged-private-target',
+      automationId: 'automation-linq-group-authority',
+      continuityPolicy: 'fresh',
+      createdAt: '2026-04-08T08:00:00.000Z',
+      instructions: 'Send the group reminder.',
+      route: {
+        channel: 'linq',
+        deliverySource: null,
+        deliveryTarget: null,
+        identityId: null,
+        participantId: null,
+        threadId: 'saved-group-chat',
+        threadIsDirect: false,
+      },
+      schedule: {
+        at: '2026-04-08T10:00:00.000Z',
+        kind: 'at',
+      },
+      slug: 'linq-group-authority-reminder',
+      status: 'active',
+      summary: null,
+      tags: ['assistant', 'scheduled'],
+      title: 'Linq group authority reminder',
+      updatedAt: '2026-04-08T08:00:00.000Z',
+    })
+    const resolveScheduledLinqRoute = vi.fn().mockResolvedValue({
+      target: 'saved-group-chat',
+      threadIsDirect: false,
+    })
+    const { claimed, paths } = await claimFirstCanonicalCronJob(vaultRoot)
+
+    const result = await executeClaimedAssistantCronJob({
+      executionContext: {
+        hosted: {
+          memberId: 'member-linq-group-authority',
+          resolveScheduledLinqRoute,
+          userEnvKeys: [],
+        },
+      },
+      job: claimed,
+      paths,
+      trigger: 'scheduled',
+      vault: vaultRoot,
+    })
+
+    expect(result.run.status).toBe('succeeded')
+    expect(resolveScheduledLinqRoute).toHaveBeenCalledWith(
+      expect.objectContaining({
+        homeRouteFallbackAllowed: false,
+        target: 'saved-group-chat',
+        targetKind: 'thread',
+      }),
+    )
+    expect(cronMocks.sendAssistantMessageLocal).toHaveBeenCalledWith(
+      expect.objectContaining({
+        bindingDeliveryTarget: 'saved-group-chat',
+        deliveryKind: 'thread',
+        deliveryTarget: null,
+        threadIsDirect: false,
+      }),
+    )
+  })
+
+  it('records a retryable cron failure when Linq route authority fails before notification', async () => {
+    vi.useFakeTimers()
+    vi.setSystemTime(new Date('2026-04-08T10:20:00.000Z'))
+    const { vaultRoot } = await createRuntimeContext(
+      'assistant-cron-runtime-linq-authority-failure-',
+    )
+    const resolveScheduledLinqRoute = vi.fn().mockRejectedValue(
+      new VaultCliError(
+        'ASSISTANT_LINQ_AUDIENCE_AUTHORITY_UNAVAILABLE',
+        'Linq route authority is temporarily unavailable.',
+        { retryable: true },
+      ),
+    )
+    getVaultAutomationStore(vaultRoot).push({
+      automationId: 'automation-linq-authority-failure',
       continuityPolicy: 'fresh',
       createdAt: '2026-04-08T08:00:00.000Z',
       instructions: 'Send the morning reminder.',
       route: {
         channel: 'linq',
         deliverySource: null,
-        deliveryTarget: 'old-home-chat',
-        identityId: 'h1_111111111111111111111111',
-        participantId: 'h1_222222222222222222222222',
-        threadId: 'h1_333333333333333333333333',
+        deliveryTarget: 'saved-home-chat',
+        identityId: null,
+        participantId: null,
+        threadId: null,
       },
       schedule: {
         at: '2026-04-08T10:00:00.000Z',
         kind: 'at',
       },
-      slug: 'linq-untagged-private-target-reminder',
+      slug: 'linq-authority-failure-reminder',
       status: 'active',
       summary: null,
       tags: ['assistant', 'scheduled'],
-      title: 'Untagged private Linq target reminder',
+      title: 'Linq authority failure reminder',
       updatedAt: '2026-04-08T08:00:00.000Z',
     })
     const paths = resolveAssistantStatePaths(vaultRoot)
@@ -5773,7 +5702,8 @@ describe('assistant cron runtime orchestration', () => {
     const result = await executeClaimedAssistantCronJob({
       executionContext: {
         hosted: {
-          memberId: 'member-legacy-audience',
+          memberId: 'member-linq-authority-failure',
+          resolveScheduledLinqRoute,
           userEnvKeys: [],
         },
       },
@@ -5785,13 +5715,22 @@ describe('assistant cron runtime orchestration', () => {
 
     expect(result.removedAfterRun).toBe(false)
     expect(result.run).toMatchObject({
-      error: expect.stringContaining('could not verify its saved audience'),
+      error: 'Linq route authority is temporarily unavailable.',
       outcome: 'failed',
-      reason: 'ASSISTANT_CRON_AUDIENCE_UNVERIFIED',
+      reason: 'ASSISTANT_LINQ_AUDIENCE_AUTHORITY_UNAVAILABLE',
       status: 'failed',
     })
-    expect(result.runErrorCode).toBe('ASSISTANT_CRON_AUDIENCE_UNVERIFIED')
-    expect(cronMocks.sendAssistantMessageLocal).toHaveBeenCalledOnce()
+    expect(result.runErrorCode).toBe(
+      'ASSISTANT_LINQ_AUDIENCE_AUTHORITY_UNAVAILABLE',
+    )
+    expect(resolveScheduledLinqRoute).toHaveBeenCalledWith(
+      expect.objectContaining({
+        homeRouteFallbackAllowed: true,
+        target: 'saved-home-chat',
+        targetKind: 'explicit',
+      }),
+    )
+    expect(cronMocks.sendAssistantMessageLocal).not.toHaveBeenCalled()
     const finalizedRuntimeStore = await readAssistantCronCanonicalRuntimeStore(paths, {
       reclaimStaleRunningClaims: false,
     })
@@ -6329,7 +6268,7 @@ describe('assistant cron runtime orchestration', () => {
     })
     expect(cronMocks.sendAssistantMessageLocal).toHaveBeenCalledWith(
       expect.objectContaining({
-        bindingDeliveryTarget: undefined,
+        bindingDeliveryTarget: 'team@example.com',
         channel: 'email',
         deliveryKind: undefined,
         deliveryTarget: 'team@example.com',

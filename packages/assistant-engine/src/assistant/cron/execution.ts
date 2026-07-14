@@ -657,9 +657,6 @@ async function executePreparedClaimedAssistantCronJob(
           turnEnvironment: input.turnEnvironment ?? null,
           turnTrigger: 'automation-cron',
         })
-        const deliveryRoute = resolveAssistantCronNotificationDeliveryRoute(
-          claimedJob.target,
-        )
         // Run lifecycle-owned deterministic eligibility + persistence BEFORE
         // the LLM turn. The precondition reads canonical experiment state
         // once and decides:
@@ -703,6 +700,13 @@ async function executePreparedClaimedAssistantCronJob(
               shouldYield: input.shouldYield ?? null,
             })
           }
+          const deliveryRoute = maintenanceJob
+            ? resolveAssistantCronNotificationDeliveryRoute(claimedJob.target)
+            : await resolveAssistantCronAuthorizedNotificationDeliveryRoute({
+                executionContext: input.executionContext ?? null,
+                signal: yieldCancellation.signal,
+                target: claimedJob.target,
+              })
           const result = await sendAssistantNotificationLocal({
             vault: input.vault,
             ...automationTurn,
@@ -755,7 +759,10 @@ async function executePreparedClaimedAssistantCronJob(
             turnPolicy: resolveAssistantCronNotificationTurnPolicy(input.job),
             responsePolicy: resolveAssistantCronNotificationResponsePolicy(input.job),
             threadId: claimedJob.target.threadId,
-            bindingDeliveryTarget: deliveryRoute.bindingDelivery?.target ?? undefined,
+            bindingDeliveryTarget:
+              deliveryRoute.bindingDelivery?.target ??
+              deliveryRoute.deliveryTarget ??
+              undefined,
             deferCommitUntilDeliveryAccepted:
               input.deliveryDispatchMode === 'queue-only',
             deliveryKind: deliveryRoute.bindingDelivery?.kind ?? undefined,
@@ -765,17 +772,6 @@ async function executePreparedClaimedAssistantCronJob(
             operatorAuthority: 'direct-operator',
             workingDirectory: input.vault,
           })
-
-          if (
-            !maintenanceJob &&
-            assistantCronExecutionDeliveryTargetProfile(input) === 'hosted' &&
-            result.audienceVerification === 'unverified'
-          ) {
-            throw new VaultCliError(
-              'ASSISTANT_CRON_AUDIENCE_UNVERIFIED',
-              'This hosted automation could not verify its saved audience. Edit or reactivate it from the intended conversation before it can run.',
-            )
-          }
 
           sessionId = result.session.sessionId
           response = result.response ?? result.decision.privateSummary
@@ -1619,13 +1615,6 @@ function assistantCronTargetMatchesAutomationRoute(
   route: AutomationQueryRecord['route'],
 ): boolean {
   return target.channel === route.channel &&
-    (
-      (target.currentRouteSnapshot === true) === (route.currentRouteSnapshot === true) ||
-      (
-        !Object.hasOwn(target, 'currentRouteSnapshot') &&
-        route.currentRouteSnapshot === true
-      )
-    ) &&
     JSON.stringify(target.deliverySource) === JSON.stringify(route.deliverySource) &&
     target.deliveryTarget === route.deliveryTarget &&
     target.identityId === route.identityId &&
@@ -1751,6 +1740,74 @@ function assistantCronExecutionDeliveryTargetProfile(input: {
   const isHostedExecution =
     normalizeNullableString(input.executionContext?.hosted?.memberId) !== null
   return isHostedExecution ? 'hosted' : 'local'
+}
+
+async function resolveAssistantCronAuthorizedNotificationDeliveryRoute(input: {
+  executionContext: AssistantExecutionContext | null
+  signal: AbortSignal
+  target: AssistantCronJob['target']
+}): Promise<ReturnType<typeof resolveAssistantCronNotificationDeliveryRoute>> {
+  const route = resolveAssistantCronNotificationDeliveryRoute(input.target)
+  if (
+    assistantCronExecutionDeliveryTargetProfile(input) !== 'hosted' ||
+    input.target.channel !== 'linq'
+  ) {
+    return route
+  }
+
+  const target = normalizeNullableString(
+    route.deliveryTarget ?? route.bindingDelivery?.target,
+  )
+  const targetKind = route.deliveryTarget || route.bindingDelivery?.kind === 'participant'
+    ? 'explicit' as const
+    : route.bindingDelivery?.kind === 'thread'
+      ? 'thread' as const
+      : null
+  if (!target || !targetKind) {
+    throw new VaultCliError(
+      'ASSISTANT_CRON_DELIVERY_REQUIRED',
+      'Assistant cron jobs must bind one concrete Linq destination.',
+    )
+  }
+
+  const resolveScheduledLinqRoute =
+    input.executionContext?.hosted?.resolveScheduledLinqRoute
+  if (!resolveScheduledLinqRoute) {
+    throw new VaultCliError(
+      'ASSISTANT_LINQ_AUDIENCE_AUTHORITY_UNAVAILABLE',
+      'Hosted Linq delivery requires direct or group authority before provider work.',
+      { retryable: true },
+    )
+  }
+  const authority = await resolveScheduledLinqRoute({
+    homeRouteFallbackAllowed: route.threadIsDirect !== false,
+    signal: input.signal,
+    target,
+    targetKind,
+  })
+  const authorizedTarget = normalizeNullableString(authority.target)
+  if (!authorizedTarget || typeof authority.threadIsDirect !== 'boolean') {
+    throw new VaultCliError(
+      'ASSISTANT_LINQ_AUDIENCE_AUTHORITY_UNAVAILABLE',
+      'Hosted Linq delivery requires direct or group authority before provider work.',
+      { retryable: true },
+    )
+  }
+
+  const bindingDelivery = route.bindingDelivery
+    ? {
+        kind: route.bindingDelivery.kind === 'participant'
+          ? 'thread' as const
+          : route.bindingDelivery.kind,
+        target: authorizedTarget,
+      }
+    : null
+
+  return {
+    bindingDelivery,
+    deliveryTarget: route.deliveryTarget === null ? null : authorizedTarget,
+    threadIsDirect: authority.threadIsDirect,
+  }
 }
 
 class AssistantCronForegroundYieldedError extends VaultCliError {

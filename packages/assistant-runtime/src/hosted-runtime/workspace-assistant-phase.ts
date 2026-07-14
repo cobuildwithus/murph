@@ -45,6 +45,7 @@ import {
 import type {
   AssistantCronTarget,
 } from "@murphai/operator-config/assistant-cli-contracts";
+import { VaultCliError } from "@murphai/operator-config/vault-cli-errors";
 import type { AutomationRoute } from "@murphai/contracts";
 import {
   findAssistantAutoReplyDeliveryIntentIds,
@@ -727,6 +728,39 @@ export async function runHostedWorkspaceAssistantPhase(
         memberId: input.request.userId,
         providerFetch: input.runtime.platform.providerFetch ?? null,
         publicInternetFetch: input.runtime.platform.publicInternetFetch ?? null,
+        resolveScheduledLinqRoute: async ({
+          homeRouteFallbackAllowed,
+          signal,
+          target,
+          targetKind,
+        }) => {
+          const assertEngagement =
+            input.runtime.platform.effectsPort.assertLinqRecentInboundEngagement;
+          if (!assertEngagement) {
+            throw new VaultCliError(
+              "ASSISTANT_LINQ_ENGAGEMENT_ASSERT_UNAVAILABLE",
+              "Hosted Linq delivery requires an egress authority assertion before provider work.",
+              { retryable: true },
+            );
+          }
+          const authority = await assertEngagement({
+            authorityCheckOnly: true,
+            homeRouteFallbackAllowed,
+            target,
+            targetKind,
+          }, { signal });
+          if (typeof authority?.threadIsDirect !== "boolean") {
+            throw new VaultCliError(
+              "ASSISTANT_LINQ_AUDIENCE_AUTHORITY_UNAVAILABLE",
+              "Hosted Linq delivery requires direct or group authority before provider work.",
+              { retryable: true },
+            );
+          }
+          return {
+            target: authority.targetOverride?.target ?? target,
+            threadIsDirect: authority.threadIsDirect,
+          };
+        },
         ...(input.runtime.platform.usageRecordPort && input.recordDeferredUsage
           ? {
               usageRecorder: {
@@ -1765,7 +1799,6 @@ async function resolveHostedManagedAutomationDefaultRouteBestEffort(input: {
 
   return {
     channel: route.channel,
-    currentRouteSnapshot: true,
     deliverySource: null,
     deliveryTarget: route.deliveryTarget,
     identityId: route.identityId ?? null,

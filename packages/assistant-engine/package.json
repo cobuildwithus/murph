@@ -103,7 +103,6 @@
   ],
   "scripts": {
     "build": "node ../../scripts/rm-paths.mjs dist .tsbuildinfo && node ../../scripts/run-typescript.mjs package -b tsconfig.json && node dist/assistant/generate-cli-surface-contract.js",
-    "repair:legacy-personal-home-routes": "tsx src/assistant/repair-legacy-personal-home-routes-cli.ts",
     "typecheck": "node ../../scripts/run-typescript.mjs package -p tsconfig.typecheck.json --pretty false",
     "test": "pnpm exec vitest run --config vitest.config.ts --no-coverage",
     "test:coverage": "pnpm exec vitest run --config vitest.config.ts --coverage"
