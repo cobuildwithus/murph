@@ -4,6 +4,7 @@ import type {
   HostedExecutionExternalThreadRouteAuthority,
   HostedExecutionLinqExternalThreadRouteAuthority,
 } from "@murphai/hosted-execution";
+import { parseHostedExecutionWake } from "@murphai/hosted-execution/parsers";
 
 import {
   createHostedLinqChatLookupKeyReadCandidates,
@@ -18,9 +19,13 @@ import {
 import { normalizePhoneNumber } from "./phone";
 import {
   assertActiveHostedThreadRouteContainerAccess,
-  assertHostedThreadRouteEgressAuthority,
   readHostedThreadRouteByThreadIdentity,
 } from "../hosted-routing/thread-route-store";
+import {
+  decodeHostedMailboxStoredPayload,
+  readHostedMailboxLiveItemById,
+  readHostedMailboxPayload,
+} from "../hosted-mailbox/store";
 
 type HostedLinqEngagementClient = PrismaClient | Prisma.TransactionClient;
 type HostedLinqLegacyCurrentInboundProof = {
@@ -83,24 +88,6 @@ export async function assertHostedLinqRecentInboundEngagementForRuntime(input: {
   target: string | null;
   targetKind?: string | null;
 }): Promise<HostedLinqRuntimeEgressAssertionResult> {
-  const routeAuthority = normalizeHostedLinqRouteAuthorityForEgress({
-    memberId: input.memberId,
-    routeAuthority: input.routeAuthority ?? null,
-    target: input.target,
-    targetKind: input.targetKind,
-  });
-  if (routeAuthority && routeAuthority.containerMemberId !== input.memberId) {
-    throw hostedOnboardingError({
-      code: "HOSTED_LINQ_EGRESS_BOUND_USER_MISMATCH",
-      httpStatus: 403,
-      message: "Linq egress authority does not match the runtime user.",
-      retryable: false,
-    });
-  }
-  if (input.routeAuthority && !routeAuthority) {
-    throwHostedLinqRouteAuthorityMismatch();
-  }
-
   if (normalizeNullable(input.targetKind) === "participant") {
     await assertHostedLinqSignupWelcomeParticipantEgressAuthority({
       directRecipientPhoneNumber: input.directRecipientPhoneNumber,
@@ -114,27 +101,13 @@ export async function assertHostedLinqRecentInboundEngagementForRuntime(input: {
     return { targetOverride: null };
   }
 
-  if (routeAuthority) {
-    await assertHostedThreadRouteEgressAuthority({
-      authority: routeAuthority,
-      prisma: input.prisma,
-    });
-    return { targetOverride: null };
-  }
-
   const targetThreadRoute = await readHostedThreadRouteByThreadIdentity({
     channel: "linq",
     prisma: input.prisma,
     threadId: input.target,
   });
   if (targetThreadRoute) {
-    if (
-      targetThreadRoute.containerMemberId !== input.memberId
-      || !legacyCurrentInboundMatchesRequestedTarget({
-        currentInbound: input.currentInbound ?? null,
-        target: input.target,
-      })
-    ) {
+    if (targetThreadRoute.containerMemberId !== input.memberId) {
       throwHostedLinqRouteAuthorityMismatch();
     }
 
@@ -145,19 +118,18 @@ export async function assertHostedLinqRecentInboundEngagementForRuntime(input: {
     return { targetOverride: null };
   }
 
-  if (legacyCurrentInboundMatchesRequestedTarget({
+  if (await matchesPersistedHostedLinqDirectInbound({
     currentInbound: input.currentInbound ?? null,
+    memberId: input.memberId,
+    prisma: input.prisma,
+    replyToMessageId: input.replyToMessageId,
     target: input.target,
   })) {
-    // Temporary CF-rollout follow-up compatibility: old warm runner bundles
-    // sent currentInbound before external thread routeAuthority existed. Delete
-    // this with the egress authority callback route after that rollout window is gone.
     return { targetOverride: null };
   }
 
   return await assertHostedMemberLinqRouteMatchesEgressTarget({
     chatId: input.target,
-    currentInbound: input.currentInbound ?? null,
     memberId: input.memberId,
     prisma: input.prisma,
     recipientPhone: input.directRecipientPhoneNumber,
@@ -167,9 +139,87 @@ export async function assertHostedLinqRecentInboundEngagementForRuntime(input: {
   });
 }
 
+async function matchesPersistedHostedLinqDirectInbound(input: {
+  currentInbound: HostedLinqLegacyCurrentInboundProof | null;
+  memberId: string;
+  prisma: HostedLinqEngagementClient;
+  replyToMessageId?: string | null;
+  target: string | null;
+}): Promise<boolean> {
+  const proof = input.currentInbound;
+  const target = normalizeNullable(input.target);
+  const requestReplyToMessageId = normalizeNullable(input.replyToMessageId);
+  if (
+    !proof
+    || !target
+    || normalizeNullable(proof.target) !== target
+    || normalizeNullable(proof.eventId) !== normalizeNullable(proof.dedupeKey)
+    || (
+      requestReplyToMessageId !== null
+      && normalizeNullable(proof.replyToMessageId) !== requestReplyToMessageId
+    )
+  ) {
+    return false;
+  }
+
+  const item = await readHostedMailboxLiveItemById({
+    availableAt: new Date(),
+    mailboxItemId: proof.mailboxItemId,
+    prisma: input.prisma,
+  });
+  if (
+    !item
+    || item.userId !== input.memberId
+    || item.dedupeKey !== proof.dedupeKey
+    || item.kind !== "conversation.message"
+    || item.lane !== "conversation"
+    || item.occurredAt !== proof.occurredAt
+  ) {
+    return false;
+  }
+
+  const payload = item.payloadRef
+    ? await readHostedMailboxPayload({
+        dedupeKey: item.dedupeKey,
+        mailboxItemId: item.id,
+        payloadRef: item.payloadRef,
+        prisma: input.prisma,
+        userId: item.userId,
+      })
+    : null;
+  const decoded = await decodeHostedMailboxStoredPayload({
+    dedupeKey: item.dedupeKey,
+    kind: item.kind,
+    lane: item.lane,
+    laneSeq: item.laneSeq,
+    mailboxItemId: item.id,
+    occurredAt: item.occurredAt,
+    payloadCiphertext: payload?.payloadCiphertext ?? null,
+    payloadInlineCiphertext: item.payloadInlineCiphertext,
+    payloadSchema: item.payloadSchema,
+    prisma: input.prisma,
+    userId: item.userId,
+  });
+  if (!decoded) {
+    return false;
+  }
+
+  const wake = parseHostedExecutionWake(decoded);
+  return (
+    wake.kind === "conversation.message"
+    && wake.userId === input.memberId
+    && wake.eventId === proof.eventId
+    && wake.occurredAt === proof.occurredAt
+    && wake.message.channel === "linq"
+    && wake.message.linqMessage.isFromMe === false
+    && wake.message.linqMessage.threadIsDirect === true
+    && wake.message.linqMessage.chatId === target
+    && wake.message.linqMessage.messageId === proof.replyToMessageId
+  );
+}
+
 async function assertHostedMemberLinqRouteMatchesEgressTarget(input: {
   chatId?: string | null;
-  currentInbound?: HostedLinqLegacyCurrentInboundProof | null;
   homeRouteFallbackAllowed: boolean;
   memberId: string;
   prisma: HostedLinqEngagementClient;
@@ -247,7 +297,6 @@ async function assertHostedMemberLinqRouteMatchesEgressTarget(input: {
 
 function canResolveHostedLinqHomeRouteOverride(input: {
   chatId?: string | null;
-  currentInbound?: HostedLinqLegacyCurrentInboundProof | null;
   homeRouteFallbackAllowed?: boolean | null;
   recipientPhone?: string | null;
   replyToMessageId?: string | null;
@@ -257,23 +306,10 @@ function canResolveHostedLinqHomeRouteOverride(input: {
   return (
     input.homeRouteFallbackAllowed === true
     && normalizeNullable(input.chatId) !== null
-    && input.currentInbound === null
     && normalizeNullable(input.recipientPhone) === null
     && normalizeNullable(input.replyToMessageId) === null
     && (targetKind === null || targetKind === "explicit" || targetKind === "thread")
   );
-}
-
-function legacyCurrentInboundMatchesRequestedTarget(input: {
-  currentInbound: HostedLinqLegacyCurrentInboundProof | null;
-  target: string | null;
-}): boolean {
-  if (!input.currentInbound) {
-    return false;
-  }
-
-  const target = normalizeNullable(input.target);
-  return Boolean(target && normalizeNullable(input.currentInbound.target) === target);
 }
 
 function throwHostedLinqRouteAuthorityMismatch(): never {
@@ -351,43 +387,6 @@ function isHostedLinqSignupWelcomeFirstContact(input: {
 }): boolean {
   return normalizeNullable(input.idempotencyKey)
     === `${HOSTED_LINQ_SIGNUP_WELCOME_IDEMPOTENCY_PREFIX}${input.memberId}`;
-}
-
-function normalizeHostedLinqRouteAuthorityForEgress(input: {
-  memberId: string;
-  routeAuthority: HostedExecutionExternalThreadRouteAuthority | null;
-  target: string | null;
-  targetKind?: string | null;
-}): HostedExecutionLinqExternalThreadRouteAuthority | null {
-  const authority = input.routeAuthority;
-  if (!authority) {
-    return null;
-  }
-  const targetKind = normalizeNullable(input.targetKind);
-  const target = normalizeNullable(input.target);
-  if (authority.channel !== "linq") {
-    throw hostedOnboardingError({
-      code: "HOSTED_LINQ_EGRESS_ROUTE_AUTHORITY_MISMATCH",
-      httpStatus: 403,
-      message: "Linq egress route authority must be for a Linq thread.",
-      retryable: false,
-    });
-  }
-  const linqAuthority: HostedExecutionLinqExternalThreadRouteAuthority = {
-    ...authority,
-    channel: "linq",
-  };
-  if (linqAuthority.containerMemberId !== input.memberId) {
-    return linqAuthority;
-  }
-  if (targetKind !== "thread" && targetKind !== "explicit") {
-    return null;
-  }
-  if (!target || target !== linqAuthority.threadId) {
-    return null;
-  }
-
-  return linqAuthority;
 }
 
 function normalizeNullable(value: string | null | undefined): string | null {

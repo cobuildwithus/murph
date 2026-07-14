@@ -768,7 +768,7 @@ describe("hosted workspace runtime entrypoint", () => {
       expect(codexPrepareDoneLog?.details).toEqual(expect.objectContaining({
         codexProviderRequestMaxRetries: 4,
         codexProviderStreamIdleTimeoutMs: 90_000,
-        codexProviderStreamMaxRetries: 5,
+        codexProviderStreamMaxRetries: 0,
         codexProviderTransportMode: "codex-native-provider-transport",
       }));
       expect(phaseLogs.every((entry) =>
@@ -8667,7 +8667,7 @@ describe("hosted workspace runtime entrypoint", () => {
     }
   });
 
-  test("late runtime wake imports conversation input after foreground loop stop", async () => {
+  test("late runtime wake imports conversation input after the delivery barrier", async () => {
     const vaultRoot = await mkdtemp(
       path.join(tmpdir(), "murph-runtime-late-foreground-direct-"),
     );
@@ -8757,7 +8757,7 @@ describe("hosted workspace runtime entrypoint", () => {
         },
       );
 
-      assert.equal(assistantPhaseCalls, 2);
+      assert.equal(assistantPhaseCalls, 1);
       assert.deepEqual(
         importedSeqs,
         Array.from({ length: 14 }, (_, index) => String(index + 1)),
@@ -8768,7 +8768,7 @@ describe("hosted workspace runtime entrypoint", () => {
           && request.limitPerLane === 13
         ),
       );
-      assert.ok(events.includes("assistant:2:14"));
+      assert.ok(events.includes("assistant:1:12"));
       assert.ok(events.includes("snapshot:idle_shutdown:14"));
       assert.equal(
         checkpointRequests[0]?.redactedStatus?.hostedMailboxConversationImportedSeq,
