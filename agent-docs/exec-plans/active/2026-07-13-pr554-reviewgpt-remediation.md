@@ -87,3 +87,12 @@ snapshots use raw non-null lease evidence, including blank or malformed owners.
 The later activation contract now requires a shared runtime gate: deploy it off,
 verify and drain, enable without an alias change, then disable and drain before
 rollback. Focused web evidence: 157 tests and the prepared web typecheck pass.
+
+The first exact-head round after Round 3 was discarded because its attached PR
+manifest was stale and belonged to another lane. A fresh repo-wrapper round with
+an independently hash-verified PR #554 manifest accepted one finding: guarded
+Junction reconnect restored the encrypted external identity on a scrubbed row
+without restoring its durable routing blind index. The existing-row update now
+writes both representations atomically, and focused coverage proves the same row
+is reused and immediately resolves through the real external identity. Focused
+Prisma-store evidence: 43 tests pass.

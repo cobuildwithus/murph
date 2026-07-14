@@ -754,6 +754,100 @@ describe("PrismaDeviceSyncControlPlaneStore hosted connection access", () => {
     expect(tx.deviceConnection.update).not.toHaveBeenCalled();
   });
 
+  it("restores the real provider blind index when guarded SDK reconnect reuses a scrubbed row", async () => {
+    const realExternalAccountId = "junction-user-123";
+    const realBlindIndex = buildHostedProviderAccountBlindIndex({
+      key: BLIND_INDEX_KEY,
+      provider: "junction",
+      externalAccountId: realExternalAccountId,
+    });
+    let stored = createConnection({
+      credentialKind: "none",
+      connectedAt: new Date("2026-03-25T00:00:00.000Z"),
+      externalAccountIdEncrypted: null,
+      id: "dsc_123",
+      provider: "junction",
+      providerAccountBlindIndex: buildHostedProviderAccountBlindIndex({
+        key: BLIND_INDEX_KEY,
+        provider: "junction",
+        externalAccountId: "opaque:dsc_123",
+      }),
+      providerConfigKey: null,
+      status: "disconnected",
+      userId: "user-123",
+    });
+    const updateConnection = vi.fn(async ({ data }: { data: Partial<MutableConnectionRecord> }) => {
+      stored = {
+        ...stored,
+        ...data,
+        updatedAt: new Date("2026-03-26T04:00:00.000Z"),
+      };
+      return cloneConnection(stored);
+    });
+    const tx = {
+      $executeRaw: vi.fn(async () => 0),
+      deviceConnection: {
+        findUnique: vi.fn(async ({ where }: {
+          where: { id?: string } | {
+            provider_providerAccountBlindIndex?: {
+              provider: string;
+              providerAccountBlindIndex: string;
+            };
+          };
+        }) => {
+          if ("id" in where) {
+            return where.id === stored.id ? cloneConnection(stored) : null;
+          }
+          const externalIdentity = "provider_providerAccountBlindIndex" in where
+            ? where.provider_providerAccountBlindIndex
+            : null;
+          return externalIdentity?.provider === stored.provider
+            && externalIdentity.providerAccountBlindIndex === stored.providerAccountBlindIndex
+            ? cloneConnection(stored)
+            : null;
+        }),
+        update: updateConnection,
+      },
+    };
+    const store = new PrismaDeviceSyncControlPlaneStore({
+      codec: TEST_CODEC,
+      prisma: {
+        $transaction: async <TResult>(callback: (transaction: typeof tx) => Promise<TResult>) => callback(tx),
+        deviceConnection: tx.deviceConnection,
+      } as never,
+      providerAccountBlindIndexKey: BLIND_INDEX_KEY,
+    });
+
+    await expect(store.upsertConnection({
+      connectedAt: "2026-03-26T04:00:00.000Z",
+      credential: { kind: "provider_config", providerConfigKey: "junction" },
+      existingAccountGuard: {
+        expectedAccountId: "dsc_123",
+        expectedConnectedAt: "2026-03-25T00:00:00.000Z",
+        rejectIfDisconnected: false,
+      },
+      externalAccountId: realExternalAccountId,
+      ownerId: "user-123",
+      provider: "junction",
+      scopes: [],
+      status: "active",
+    })).resolves.toEqual(expect.objectContaining({
+      externalAccountId: realExternalAccountId,
+      id: "dsc_123",
+      status: "active",
+    }));
+
+    expect(updateConnection).toHaveBeenCalledWith(expect.objectContaining({
+      data: expect.objectContaining({
+        providerAccountBlindIndex: realBlindIndex,
+      }),
+    }));
+    expect(stored.providerAccountBlindIndex).toBe(realBlindIndex);
+    await expect(store.getConnectionByExternalAccount("junction", realExternalAccountId)).resolves.toEqual(
+      expect.objectContaining({ id: "dsc_123" }),
+    );
+  });
+
   it("reactivates a disconnected hosted connection on successful OAuth reconnect", async () => {
     let stored = createConnection({
       accessTokenEncrypted: null,

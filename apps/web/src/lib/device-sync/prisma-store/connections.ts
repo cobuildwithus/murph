@@ -291,6 +291,7 @@ export class PrismaHostedConnectionStore {
               userId: existing.userId,
               value: input.externalAccountId,
             }),
+            providerAccountBlindIndex,
             lastErrorCode: null,
             lastErrorMessage: null,
             lastSyncErrorAt: null,
