@@ -111,10 +111,16 @@ After both deploys, confirm there is no extra metadata-only handoff checkpoint
 for the same shutdown and actionable late input causes the existing Temporal
 recheck after owner release.
 
-## Linq Provider-Claim Protocol Rollout
+## Linq Provider-Claim Protocol
 
-The Linq provider-entry callback is an additive two-phase protocol. Roll it out
-in this order:
+Every Linq provider entry uses one Web-owned authorization and atomic dispatch
+claim immediately before the provider request. A separate authority-only
+preflight is limited to proactive home-route fallback and approved vault-file
+delivery, where Web may resolve or validate the concrete target before media
+work. Anchored replies, reactions, and voice memos do not make that redundant
+round trip.
+
+The original provider-claim rollout used this order:
 
 1. Deploy `apps/web` first. An old runner may omit `authorityCheckOnly`; Web
    keeps treating that legacy call as its provider-start claim for the bounded
@@ -132,6 +138,11 @@ back, first roll the runner bundle back with an immediate rollout and confirm
 the old fingerprint, then roll Web back. The old-runner/new-Web interval is
 supported only during the Web-first rollout: old runners ignore the additive
 response marker and retain their existing early-claim behavior.
+
+After that rollout has converged, removing obsolete runner authority hints from
+the engagement and post-send outcome payloads is independently deployable: Web
+ignores unknown legacy JSON fields, and both old and new runners use the same
+final provider claim.
 
 ## One-Time Cloudflare Setup
 
