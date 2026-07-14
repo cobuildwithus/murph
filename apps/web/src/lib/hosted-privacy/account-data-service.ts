@@ -1222,7 +1222,7 @@ async function listHostedStripeCustomerSubscriptionsForAccountDeletion(input: {
     return uniqueStrings(subscriptionIds);
   } catch (error) {
     console.error(
-      `[hosted-privacy] Stripe subscription discovery failed during account deletion (memberId=${input.memberId}, errorCode=${safeErrorCode(error)}).`,
+      `[hosted-privacy] Stripe subscription discovery failed during account deletion (errorCode=${safeErrorCode(error)}).`,
     );
     throw hostedOnboardingError({
       code: "ACCOUNT_DELETION_STRIPE_SUBSCRIPTION_DISCOVERY_FAILED",
@@ -1289,7 +1289,7 @@ async function listHostedLegacyCheckoutSessionsForAccountDeletion(input: {
     return uniqueStrings(sessionIds);
   } catch (error) {
     console.error(
-      `[hosted-privacy] Legacy Stripe Checkout discovery failed during account deletion (memberId=${input.memberId}, errorCode=${safeErrorCode(error)}).`,
+      `[hosted-privacy] Legacy Stripe Checkout discovery failed during account deletion (errorCode=${safeErrorCode(error)}).`,
     );
     throw hostedOnboardingError({
       code: "ACCOUNT_DELETION_STRIPE_CHECKOUT_DISCOVERY_FAILED",
