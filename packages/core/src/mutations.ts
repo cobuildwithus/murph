@@ -4425,6 +4425,11 @@ export async function importDeviceBatch({
     ...protectedPreparedEventIds,
     ...currentEventReconciliation.retainedPreparedIds,
   ]);
+  const unresolvedBaselinePreparedIds = new Set(
+    [...baselineRetainedPreparedIds].filter((preparedId) =>
+      !replayRetainedPreparedIds.has(preparedId)
+    ),
+  );
   const associationEvidenceRolesByPreparedRecordId = new Map(
     deviceBatchPlan.preparedEvents
       .filter((entry) => baselineRetainedPreparedIds.has(entry.record.id) && (
@@ -4621,6 +4626,16 @@ export async function importDeviceBatch({
       preparedEventOutputOwners,
       storedDeliveries: exactStoredDeliveries,
     });
+    const unresolvedPreparedIdWithoutStoredProof =
+      [...unresolvedBaselinePreparedIds].find((preparedId) =>
+        !storedOutputProof.outputIdByPreparedId.has(preparedId)
+      );
+    if (evidenceRepairRequired && unresolvedPreparedIdWithoutStoredProof !== undefined) {
+      throw new VaultError(
+        "INTEGRATION_INGEST_EVENT_MAPPING_AMBIGUOUS",
+        `Unresolved device event member "${unresolvedPreparedIdWithoutStoredProof}" has no exact stored-output proof.`,
+      );
+    }
     const retainedStoredEvidenceRoles = new Map(
       [...storedOutputProof.outputIdByPreparedId.keys()].map((preparedId) => [
         preparedId,
@@ -4652,7 +4667,7 @@ export async function importDeviceBatch({
           || acceptedEvidenceRolesByPreparedRecordId.has(entry.record.id)
         ),
     );
-    const storedEventOutputs = matchingStoredDeliveries().flatMap((storedDelivery) =>
+    const storedEventOutputs = exactStoredDeliveries.flatMap((storedDelivery) =>
       storedDelivery.outputs.events
     );
     const eventRepairRequired = evidenceRepairRequired
@@ -4661,10 +4676,7 @@ export async function importDeviceBatch({
         storedEventOutputs.some((output) =>
           !storedOutputProof.ownedOutputIds.has(output.id)
         )
-        || deviceBatchPlan.preparedEvents.some((entry) =>
-          baselineRetainedPreparedIds.has(entry.record.id)
-          && !replayRetainedPreparedIds.has(entry.record.id)
-        )
+        || unresolvedBaselinePreparedIds.size > 0
       );
     const unresolvedStoredOutputId = storedOutputProof.unresolvedOutputIds.values().next().value;
     if (eventRepairRequired && unresolvedStoredOutputId !== undefined) {
@@ -4699,26 +4711,53 @@ export async function importDeviceBatch({
       string,
       PreparedJsonlEntry<EventRecord>
     >();
-    const historicalRepairRevisionOffset = (
+    const historicalRepairRevision = (
+      preparedId: string,
       owner: PreparedDeviceEventOutputOwner,
       repairId: string,
     ): number => {
+      const baselineRecord = baselineRecordByPreparedId.get(preparedId);
+      const current = currentEventOwners.currentRecordByPreparedId.get(preparedId);
+      if (!baselineRecord || !current) {
+        throw new VaultError(
+          "INTEGRATION_INGEST_EVENT_MAPPING_AMBIGUOUS",
+          "Missing historical device event revision has no surviving delivery anchor.",
+        );
+      }
+      if (currentEventOwners.incomingNewerPreparedIds.has(preparedId)) {
+        const currentMaxRevision = eventIdentityContext.index.maxRevisionById.get(repairId)
+          ?? eventSpineRevision(current);
+        const repairRevision = currentMaxRevision + 1;
+        if (
+          !eventSpineRevisionsAreComplete(eventIdentityContext.index, repairId)
+          || repairRevision <= eventSpineRevision(baselineRecord)
+        ) {
+          throw new VaultError(
+            "INTEGRATION_INGEST_EVENT_MAPPING_AMBIGUOUS",
+            "Accepted device event revision has no unique historical placement.",
+          );
+        }
+        return repairRevision;
+      }
       let candidateOffsets: Set<number> | undefined;
-      for (const preparedId of owner.preparedIds) {
-        if (!baselineRetainedPreparedIds.has(preparedId)) {
+      for (const anchorPreparedId of owner.preparedIds) {
+        if (
+          !baselineRetainedPreparedIds.has(anchorPreparedId)
+          || storedOutputProof.outputIdByPreparedId.get(anchorPreparedId) !== repairId
+        ) {
           continue;
         }
-        const baselineRecord = baselineRecordByPreparedId.get(preparedId);
+        const anchorBaselineRecord = baselineRecordByPreparedId.get(anchorPreparedId);
         const matchedRevisions =
           currentEventOwners.historicalContentOwnerRevisionsByPreparedId
-            .get(preparedId)
+            .get(anchorPreparedId)
             ?.get(repairId);
-        if (!baselineRecord || !matchedRevisions || matchedRevisions.size === 0) {
+        if (!anchorBaselineRecord || !matchedRevisions || matchedRevisions.size === 0) {
           continue;
         }
         const offsets = new Set(
           [...matchedRevisions]
-            .map((revision) => revision - eventSpineRevision(baselineRecord))
+            .map((revision) => revision - eventSpineRevision(anchorBaselineRecord))
             .filter((offset) => offset >= 0),
         );
         candidateOffsets = candidateOffsets === undefined
@@ -4731,7 +4770,7 @@ export async function importDeviceBatch({
           "Missing historical device event revision has no unique surviving delivery anchor.",
         );
       }
-      return [...candidateOffsets][0]!;
+      return eventSpineRevision(baselineRecord) + [...candidateOffsets][0]!;
     };
     for (const entry of deviceBatchPlan.preparedEvents) {
       const repairId = storedEventRepairIds.get(entry.record.id);
@@ -4745,15 +4784,17 @@ export async function importDeviceBatch({
         || isDeletedEventSpineRecord(current)
         || !owner
         || !baselineRecord
-        || currentEventOwners.incomingNewerPreparedIds.has(entry.record.id)
       ) {
         continue;
       }
-      const revisionOffset = historicalRepairRevisionOffset(owner, repairId);
-      const repairRevision = eventSpineRevision(baselineRecord) + revisionOffset;
+      const repairRevision = historicalRepairRevision(entry.record.id, owner, repairId);
+      const incomingIsNewer = currentEventOwners.incomingNewerPreparedIds.has(entry.record.id);
       if (
-        repairRevision < 1
-        || repairRevision >= eventSpineRevision(current)
+        !Number.isSafeInteger(repairRevision)
+        || repairRevision < 1
+        || (incomingIsNewer
+          ? repairRevision <= eventSpineRevision(current)
+          : repairRevision >= eventSpineRevision(current))
         || eventIdentityContext.index.revisionsById.get(repairId)?.has(repairRevision)
       ) {
         throw new VaultError(
@@ -4772,27 +4813,29 @@ export async function importDeviceBatch({
       });
     }
     for (const preparedId of storedEventRepairIds.keys()) {
-      if (
-        currentEventOwners.currentRecordByPreparedId.has(preparedId)
-        && !currentEventOwners.incomingNewerPreparedIds.has(preparedId)
-        && !historicalRepairEntryByPreparedId.has(preparedId)
-      ) {
+      if (!historicalRepairEntryByPreparedId.has(preparedId)) {
         throw new VaultError(
           "INTEGRATION_INGEST_EVENT_MAPPING_AMBIGUOUS",
           "Missing historical device event revision could not be restored safely.",
         );
       }
     }
+    const persistenceReconciliationEntries = reconciliationEntries.filter((entry) =>
+      !storedEventRepairIds.has(entry.record.id)
+    );
+    const repairedProtectedPreparedEventCount =
+      [...historicalRepairEntryByPreparedId.keys()].filter((preparedId) =>
+        persistenceProtectedPreparedEventIds.has(preparedId)
+      ).length;
     const reconciled = evidenceRepairRequired
       ? await reconcileDeviceEventEntriesByExternalRef(
           vaultRoot,
-          reconciliationEntries,
+          persistenceReconciliationEntries,
           cloneDeviceEventIdentityContext(eventIdentityContext),
-          storedEventRepairIds,
         )
       : currentEventReconciliation;
     const reconciledRecordByPreparedId = new Map(
-      reconciliationEntries.map((entry, index) => [
+      persistenceReconciliationEntries.map((entry, index) => [
         entry.record.id,
         reconciled.records[index] ?? entry.record,
       ]),
@@ -4833,7 +4876,7 @@ export async function importDeviceBatch({
       ]),
       skippedDuplicateCount: reconciled.skippedDuplicateCount
         + persistenceProtectedPreparedEventIds.size
-        - historicalRepairEntryByPreparedId.size,
+        - repairedProtectedPreparedEventCount,
     };
     const eventAppendPlan = await buildJsonlAppendPlan(vaultRoot, eventReconciliation.appendEntries, {
       dedupeWithinPlan: true,
@@ -4978,9 +5021,7 @@ export async function importDeviceBatch({
     }
     persistence = await preparePersistence(exactState);
   }
-  const unresolvedBaselineMember = [...baselineRetainedPreparedIds].some((preparedId) =>
-    !replayRetainedPreparedIds.has(preparedId)
-  );
+  const unresolvedBaselineMember = unresolvedBaselinePreparedIds.size > 0;
   const assertInspectionCanAuthorizeNoop = (): void => {
     if (
       unresolvedBaselineMember

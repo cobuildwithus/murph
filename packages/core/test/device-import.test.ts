@@ -4145,6 +4145,21 @@ test("exact repair replans when a partial current row hides full legacy member p
 
   await fs.writeFile(
     path.join(vaultRoot, first.ingestShardPath),
+    [...unrelatedRows, partialCurrentRecord]
+      .map((record) => JSON.stringify(record))
+      .join("\n") + "\n",
+    "utf8",
+  );
+  const beforePartialOnlyReplay = await snapshotVaultFiles(vaultRoot);
+  await assert.rejects(
+    importDeviceBatch(input),
+    (error) => error instanceof VaultError
+      && error.code === "INTEGRATION_INGEST_EVENT_MAPPING_AMBIGUOUS",
+  );
+  assert.deepEqual(await snapshotVaultFiles(vaultRoot), beforePartialOnlyReplay);
+
+  await fs.writeFile(
+    path.join(vaultRoot, first.ingestShardPath),
     [splitLegacyRecord, ...unrelatedRows, partialCurrentRecord, strandedAssociationRecord]
       .map((record) => JSON.stringify(record))
       .join("\n") + "\n",
@@ -4191,7 +4206,7 @@ test("exact repair replans when a partial current row hides full legacy member p
   assert.deepEqual(await snapshotVaultFiles(vaultRoot), beforeConvergedReplay);
 });
 
-test("exact repair full-inspects before a bounded speculative no-op", async () => {
+test("exact repair rejects unresolved partial associations after full inspection", async () => {
   const vaultRoot = await makeTempDirectory("murph-device-import-bounded-noop-repair");
   await initializeVault({ vaultRoot, createdAt: "2026-01-01T12:00:00.000Z" });
   const roleV1 = "whoop-bounded-noop-repair-v1";
@@ -4327,8 +4342,11 @@ test("exact repair full-inspects before a bounded speculative no-op", async () =
   const februaryBytesBeforeRepair = await fs.readFile(path.join(vaultRoot, februaryShardPath));
 
   const beforeUnprovenReplay = await snapshotVaultFiles(vaultRoot);
-  const unprovenReplay = await importDeviceBatch(input);
-  assert.equal(unprovenReplay.applied, false);
+  await assert.rejects(
+    importDeviceBatch(input),
+    (error) => error instanceof VaultError
+      && error.code === "INTEGRATION_INGEST_EVENT_MAPPING_AMBIGUOUS",
+  );
   assert.deepEqual(await snapshotVaultFiles(vaultRoot), beforeUnprovenReplay);
 
   await fs.writeFile(
@@ -4346,8 +4364,7 @@ test("exact repair full-inspects before a bounded speculative no-op", async () =
   await assert.rejects(
     importDeviceBatch(input),
     (error) => error instanceof VaultError
-      && error.code === "INTEGRATION_INGEST_EVENT_MAPPING_AMBIGUOUS"
-      && error.message === "Unresolved device event member has no authoritative exact-delivery inspection.",
+      && error.code === "INTEGRATION_INGEST_EVENT_MAPPING_AMBIGUOUS",
   );
   assert.deepEqual(await snapshotVaultFiles(vaultRoot), beforeUnsafeReplay);
 
@@ -8805,6 +8822,24 @@ test("importDeviceBatch replays stale-then-new, shared-role, and empty-role deli
   );
 
   const acceptedIngest = await readRequiredIntegrationIngest(vaultRoot, accepted.ingestId);
+  const completeEventBytes = await fs.readFile(path.join(vaultRoot, eventShardPath));
+  const survivingPrefixRows = (await readJsonlRecords({
+    vaultRoot,
+    relativePath: eventShardPath,
+  }) as EventRecord[]).filter((record) => (record.lifecycle?.revision ?? 1) === 1);
+  await fs.writeFile(
+    path.join(vaultRoot, eventShardPath),
+    `${survivingPrefixRows.map((record) => JSON.stringify(record)).join("\n")}\n`,
+    "utf8",
+  );
+  const beforeAmbiguousPrefixRepair = await snapshotVaultFiles(vaultRoot);
+  await assert.rejects(
+    importDeviceBatch(input),
+    (error) => error instanceof VaultError
+      && error.code === "INTEGRATION_INGEST_EVENT_MAPPING_AMBIGUOUS",
+  );
+  assert.deepEqual(await snapshotVaultFiles(vaultRoot), beforeAmbiguousPrefixRepair);
+  await fs.writeFile(path.join(vaultRoot, eventShardPath), completeEventBytes);
   const survivingRows = (await readJsonlRecords({
     vaultRoot,
     relativePath: eventShardPath,
@@ -8997,6 +9032,115 @@ test("importDeviceBatch replays stale-then-new, shared-role, and empty-role deli
   assert.equal(protectedReplay.auditPath, null);
   assert.deepEqual(protectedReplay.events, []);
   assert.deepEqual(await snapshotVaultFiles(vaultRoot), beforeProtectedReplay);
+});
+
+test("exact replay rejects a missing accepted middle revision without a stored-proven anchor", async () => {
+  const vaultRoot = await makeTempDirectory("murph-device-import-missing-middle-anchor");
+  await initializeVault({ vaultRoot, createdAt: "2026-06-01T12:00:00.000Z" });
+  const buildEvent = (input: { role: string; value: number; version: string }) => ({
+    kind: "observation" as const,
+    occurredAt: "2026-06-03T07:30:00.000Z",
+    recordedAt: "2026-06-03T07:30:00.000Z",
+    title: "WHOOP recovery score",
+    externalRef: {
+      system: "whoop",
+      resourceType: "recovery",
+      resourceId: "missing-middle-anchor",
+      version: input.version,
+      facet: "recovery-score",
+    },
+    evidenceRoles: [input.role],
+    fields: { metric: "recovery-score", value: input.value, unit: "%" },
+  });
+  const importSingle = (input: {
+    importedAt: string;
+    role: string;
+    value: number;
+    version: string;
+  }) => importDeviceBatch({
+    vaultRoot,
+    provider: "whoop",
+    accountId: "whoop_missing_middle_anchor",
+    importedAt: input.importedAt,
+    events: [buildEvent(input)],
+    evidenceParts: [{
+      role: input.role,
+      fileName: `${input.role}.json`,
+      content: { value: input.value },
+    }],
+  });
+
+  const v1 = {
+    importedAt: "2026-06-03T08:00:00.000Z",
+    role: "whoop-missing-middle-v1",
+    value: 61,
+    version: "2026-06-03T08:00:00.000Z",
+  } as const;
+  await importSingle(v1);
+  await importSingle({
+    importedAt: "2026-06-03T09:00:00.000Z",
+    role: "whoop-missing-middle-v2",
+    value: 72,
+    version: "2026-06-03T09:00:00.000Z",
+  });
+  const replayInput = {
+    vaultRoot,
+    provider: "whoop",
+    accountId: "whoop_missing_middle_anchor",
+    importedAt: "2026-06-03T10:00:00.000Z",
+    events: [
+      buildEvent(v1),
+      buildEvent({
+        role: "whoop-missing-middle-v3",
+        value: 83,
+        version: "2026-06-03T10:00:00.000Z",
+      }),
+    ],
+    evidenceParts: [
+      {
+        role: v1.role,
+        fileName: `${v1.role}.json`,
+        content: { value: v1.value },
+      },
+      {
+        role: "whoop-missing-middle-v3",
+        fileName: "whoop-missing-middle-v3.json",
+        content: { value: 83 },
+      },
+    ],
+  } as const;
+  const accepted = await importDeviceBatch(replayInput);
+  const canonicalEventId = accepted.events[0]?.id;
+  const eventShardPath = accepted.eventShardPaths[0];
+  assert.ok(canonicalEventId);
+  assert.ok(eventShardPath);
+  const v4 = await importSingle({
+    importedAt: "2026-06-03T11:00:00.000Z",
+    role: "whoop-missing-middle-v4",
+    value: 91,
+    version: "2026-06-03T11:00:00.000Z",
+  });
+  assert.equal(v4.events[0]?.lifecycle?.revision, 4);
+
+  const survivingRows = (await readJsonlRecords({
+    vaultRoot,
+    relativePath: eventShardPath,
+  }) as EventRecord[]).filter((record) => {
+    const revision = record.lifecycle?.revision ?? 1;
+    return revision === 1 || revision === 4;
+  });
+  await fs.writeFile(
+    path.join(vaultRoot, eventShardPath),
+    `${survivingRows.map((record) => JSON.stringify(record)).join("\n")}\n`,
+    "utf8",
+  );
+  const beforeReplay = await snapshotVaultFiles(vaultRoot);
+  await assert.rejects(
+    importDeviceBatch(replayInput),
+    (error) => error instanceof VaultError
+      && error.code === "INTEGRATION_INGEST_EVENT_MAPPING_AMBIGUOUS",
+  );
+  assert.deepEqual(await snapshotVaultFiles(vaultRoot), beforeReplay);
 });
 
 test.each(["distinct", "shared", "roleless"] as const)(
