@@ -273,12 +273,15 @@ describe("getHostedLinqReactionTargetMessage", () => {
     const privateUrl = "https://media.example.test/private-attachment";
     const privateTextUrl = "https://example.test/private-token";
     const otherUrlForms = [
+      "cid:private-content@example.test",
+      "magnet:?xt=urn:btih:private-token",
       "mailto:person@example.test?body=secret",
       "data:text/plain,private",
       "custom+app://private/path",
       "www.example.test/private-token",
       "example.test/private-token",
       "192.0.2.1/private-token",
+      "xmpp:person@example.test?message",
     ];
     const fetchMock = vi.fn(async () => createJsonResponse({
       chat_id: "chat_123",

@@ -307,6 +307,9 @@ weak prompt hint. Corrupt context fails open, authority rotation clears it, and
 a failed or raced mailbox append rolls consumption back. Append decrypt and
 reseal share one 500 ms deadline, and consume decrypt has the same bound, so
 optional crypto cannot inherit the general KMS deadline while holding locks.
+When raising the consumed hint beyond the legacy 512-character contract, deploy
+the hosted runner bundle before the web producer so every parser accepts the
+new 5,129-character maximum before web can emit it.
 
 Hosted Linq unknown first-contact admission is a web-owned classifier gate on
 the signup-link path only. It runs after cheap deterministic ingress filters and
