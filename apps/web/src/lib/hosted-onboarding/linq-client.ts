@@ -198,18 +198,16 @@ export type HostedLinqChatSummary = {
   isGroup: boolean | null;
 };
 
-export type HostedLinqReactionTargetPart =
-  | { type: "text"; value: string }
-  | { type: "descriptor"; value: "[attachment]" | "[iMessage app]" | "[link]" | "[unsupported content]" };
-
 export type HostedLinqReactionTargetMessage = {
   chatId: string;
   id: string;
-  parts: HostedLinqReactionTargetPart[];
+  parts: string[];
 };
 
 const HOSTED_LINQ_REACTION_TARGET_MAX_PARTS = 32;
 const HOSTED_LINQ_REACTION_TARGET_TEXT_MAX_CHARS = 512;
+const HOSTED_LINQ_REACTION_TARGET_URL_PATTERN =
+  /(?:https?:\/\/|file:\/\/)[^\s)"'<>]+/giu;
 
 export async function getHostedLinqChatSummary(input: {
   chatId: string;
@@ -300,30 +298,27 @@ function parseHostedLinqReactionTargetMessage(
   };
 }
 
-function parseHostedLinqReactionTargetPart(value: unknown): HostedLinqReactionTargetPart {
+function parseHostedLinqReactionTargetPart(value: unknown): string {
   if (!value || typeof value !== "object" || Array.isArray(value)) {
-    return { type: "descriptor", value: "[unsupported content]" };
+    return "[unsupported content]";
   }
   const record = value as Record<string, unknown>;
   if (record.type === "text" && typeof record.value === "string") {
-    const text = normalizeNullableString(record.value)?.slice(
-      0,
-      HOSTED_LINQ_REACTION_TARGET_TEXT_MAX_CHARS,
-    );
-    return text
-      ? { type: "text", value: text }
-      : { type: "descriptor", value: "[unsupported content]" };
+    const text = normalizeNullableString(record.value)
+      ?.replace(HOSTED_LINQ_REACTION_TARGET_URL_PATTERN, "[link]")
+      .slice(0, HOSTED_LINQ_REACTION_TARGET_TEXT_MAX_CHARS);
+    return text || "[unsupported content]";
   }
   if (record.type === "link") {
-    return { type: "descriptor", value: "[link]" };
+    return "[link]";
   }
   if (record.type === "media") {
-    return { type: "descriptor", value: "[attachment]" };
+    return "[attachment]";
   }
   if (record.type === "imessage_app") {
-    return { type: "descriptor", value: "[iMessage app]" };
+    return "[iMessage app]";
   }
-  return { type: "descriptor", value: "[unsupported content]" };
+  return "[unsupported content]";
 }
 
 function readHostedLinqCanonicalChat(

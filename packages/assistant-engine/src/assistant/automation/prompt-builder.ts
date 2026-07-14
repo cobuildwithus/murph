@@ -341,7 +341,7 @@ export function renderAssistantInputGroupReactionContextPrompt(input: {
     : null
 }
 
-function renderAssistantInputGroupContextPrompt(input: {
+export function renderAssistantInputGroupContextPrompt(input: {
   conversation: AssistantInputConversationRef | null
   groupParticipantAdded?: true
   groupReactionContext?: string

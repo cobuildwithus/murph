@@ -19,34 +19,18 @@ import { HOSTED_ONBOARDING_TRANSACTION_OPTIONS } from "./shared";
 
 const HOSTED_LINQ_GROUP_REACTION_TARGET_MAX_CHARS = 320;
 
-type HostedLinqGroupReactionContextSkipReason =
-  | "context_unavailable"
-  | "invalid_actor"
-  | "invalid_group"
-  | "invalid_target"
-  | "missing_context"
-  | "route_unavailable";
-
-export type HostedLinqGroupReactionContextResult =
-  | { status: "staged" }
-  | {
-      reason: HostedLinqGroupReactionContextSkipReason;
-      status: "ignored";
-    };
-
 export async function stageHostedLinqGroupReactionContext(input: {
   event: ParsedHostedLinqProviderEvent;
   prisma: PrismaClient;
   signal?: AbortSignal;
-}): Promise<HostedLinqGroupReactionContextResult> {
+}): Promise<boolean> {
   const eventContext = readHostedLinqReactionEventContext(input.event);
-  if (eventContext.status === "ignored") {
-    return eventContext;
+  if (!eventContext) {
+    return false;
   }
 
   try {
     const route = await readHostedThreadRouteByThreadIdentity({
-      accountLookupKey: eventContext.accountLookupKey,
       channel: "linq",
       prisma: input.prisma,
       threadId: eventContext.chatId,
@@ -58,7 +42,7 @@ export async function stageHostedLinqGroupReactionContext(input: {
         prisma: input.prisma,
       }))
     ) {
-      return { reason: "route_unavailable", status: "ignored" };
+      return false;
     }
 
     const chat = await getHostedLinqChatSummary({
@@ -66,25 +50,30 @@ export async function stageHostedLinqGroupReactionContext(input: {
       ...(input.signal ? { signal: input.signal } : {}),
     });
     if (chat.isGroup !== true) {
-      return { reason: "invalid_group", status: "ignored" };
+      return false;
     }
     const canonicalAccountLookupKeys = new Set(
       chat.handles
-        .filter((handle) => handle.isMe)
+        .filter((handle) =>
+          handle.isMe && isHostedLinqRosterHandleActive(handle.status),
+        )
         .map((handle) => createHostedPhoneLookupKey(handle.handle))
         .filter((value): value is string => value !== null),
     );
     if (
       canonicalAccountLookupKeys.size !== 1
-      || !canonicalAccountLookupKeys.has(eventContext.accountLookupKey)
     ) {
-      return { reason: "invalid_group", status: "ignored" };
+      return false;
+    }
+    const accountLookupKey = canonicalAccountLookupKeys.values().next().value;
+    if (!accountLookupKey) {
+      return false;
     }
 
     const matchingActors = chat.handles.filter((handle) => {
       if (
         handle.isMe
-        || (handle.status && handle.status.trim().toLowerCase() !== "active")
+        || !isHostedLinqRosterHandleActive(handle.status)
       ) {
         return false;
       }
@@ -96,7 +85,7 @@ export async function stageHostedLinqGroupReactionContext(input: {
         && participant.lookupKey === eventContext.actor.lookupKey;
     });
     if (matchingActors.length !== 1) {
-      return { reason: "invalid_actor", status: "ignored" };
+      return false;
     }
 
     const target = await getHostedLinqReactionTargetMessage({
@@ -110,12 +99,12 @@ export async function stageHostedLinqGroupReactionContext(input: {
       target,
     });
     if (!targetText) {
-      return { reason: "invalid_target", status: "ignored" };
+      return false;
     }
 
     const append = await input.prisma.$transaction(
       (tx) => appendHostedLinqThreadRouteReactionContextTx({
-        accountLookupKey: eventContext.accountLookupKey,
+        accountLookupKey,
         containerMemberId: route.containerMemberId,
         prisma: tx,
         text: buildHostedLinqGroupReactionContextText({
@@ -126,55 +115,48 @@ export async function stageHostedLinqGroupReactionContext(input: {
       }),
       HOSTED_ONBOARDING_TRANSACTION_OPTIONS,
     );
-    return append === "appended"
-      ? { status: "staged" }
-      : { reason: "route_unavailable", status: "ignored" };
+    return append === "appended";
   } catch {
     // Reaction context is optional and lossy. Provider, crypto, or route-read
     // failure must not interfere with join offers or ordinary message ingress.
-    return { reason: "context_unavailable", status: "ignored" };
+    return false;
   }
+}
+
+function isHostedLinqRosterHandleActive(
+  status: string | null | undefined,
+): boolean {
+  return !status || status.trim().toLowerCase() === "active";
 }
 
 function readHostedLinqReactionEventContext(
   event: ParsedHostedLinqProviderEvent,
-):
-  | {
-      accountLookupKey: string;
-      actor: NonNullable<ReturnType<typeof createHostedLinqParticipantContact>>;
-      chatId: string;
-      messageId: string;
-      partIndex: number | null;
-      status: "ready";
-    }
-  | {
-      reason: "invalid_actor" | "missing_context";
-      status: "ignored";
-    } {
-  const accountLookupKey = createHostedPhoneLookupKey(event.phoneNumber);
+): {
+  actor: NonNullable<ReturnType<typeof createHostedLinqParticipantContact>>;
+  chatId: string;
+  messageId: string;
+  partIndex: number | null;
+} | null {
   if (
-    !accountLookupKey
-    || !event.linqChatId
+    !event.linqChatId
     || !event.linqMessageId
     || !event.reactionFromHandle
     || (!event.reactionType && !event.reactionCustomEmoji)
   ) {
-    return { reason: "missing_context", status: "ignored" };
+    return null;
   }
   const actor = createHostedLinqParticipantContact({
     kind: event.reactionFromHandle.includes("@") ? "email" : "phone",
     value: event.reactionFromHandle,
   });
   if (!actor) {
-    return { reason: "invalid_actor", status: "ignored" };
+    return null;
   }
   return {
-    accountLookupKey,
     actor,
     chatId: event.linqChatId,
     messageId: event.linqMessageId,
     partIndex: event.reactionPartIndex,
-    status: "ready",
   };
 }
 
@@ -196,7 +178,6 @@ function buildHostedLinqReactionTargetText(input: {
     return null;
   }
   const text = parts
-    .map((part) => part.value)
     .join(" ")
     .replace(/\s+/gu, " ")
     .trim() || "[message content unavailable]";

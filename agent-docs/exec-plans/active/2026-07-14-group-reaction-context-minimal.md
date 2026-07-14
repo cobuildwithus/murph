@@ -18,17 +18,23 @@ Key decisions:
 - Keep tests proportional: prove trust-boundary rejection, silence, same-group inclusion, and cross-group exclusion without duplicating broad assistant lifecycle suites.
 
 State:
-- In progress.
+- In progress: rebase the latest `main`, then shared-host verification.
 
 Done:
 - Reconstructed PR #560 growth and identified review-driven mid-turn invalidation as the main complexity ratchet.
 - Created an isolated branch from current `main`.
+- Implemented one encrypted, account-bound route snapshot that folds into the next ordinary group message without creating a reaction mailbox item or wake.
+- Carried the bounded context through the existing mailbox sidecar and rendered it only as a quoted weak/untrusted prompt hint.
+- Added focused ingress, privacy, route transaction, contract, sidecar, prompt, and captureless-turn proof; the coverage-write audit has no unresolved findings.
+- Rebased cleanly onto PR #640 and enabled its shared-host verification profile with host concurrency left at the default of one.
+- Corrected reaction account authority to derive the sole active self line from the canonical live roster instead of relying on an undocumented webhook field.
+- Deleted the speculative account filter on the generic route reader, unused ignored-reason taxonomy, and unnecessary reaction-target part wrappers identified by the simplification pass.
 
 Now:
-- Implement the route-snapshot-to-next-message fold without touching assistant-engine grouping or reply lifecycle code.
+- Checkpoint the preserved simplification fixes, rebase the one newer `main` commit, and restart the scoped diff-aware verification after the earlier slot wait timed out without running.
 
 Next:
-- Implement, verify, audit, commit, push, open the replacement PR, and run ReviewGPT with CI.
+- Run the parent final review, close the plan with the scoped commit, push, open the replacement PR, and run ReviewGPT concurrently with CI.
 
 Open questions (UNCONFIRMED if needed):
 - None. Snapshot semantics are the working product decision unless current code proves they cannot preserve the stated outcome.

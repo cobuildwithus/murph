@@ -271,13 +271,14 @@ describe("getHostedLinqReactionTargetMessage", () => {
 
   it("reads the exact canonical message and keeps only bounded reaction context", async () => {
     const privateUrl = "https://media.example.test/private-attachment";
+    const privateTextUrl = "https://example.test/private-token";
     const fetchMock = vi.fn(async () => createJsonResponse({
       chat_id: "chat_123",
       id: "msg_123",
       parts: [
         {
           type: "text",
-          value: "x".repeat(600),
+          value: `See ${privateTextUrl} ${"x".repeat(600)}`,
         },
         {
           file_name: "private-name.pdf",
@@ -310,13 +311,15 @@ describe("getHostedLinqReactionTargetMessage", () => {
       id: "msg_123",
     });
     expect(message.parts).toHaveLength(32);
-    expect(message.parts.slice(0, 4)).toEqual([
-      { type: "text", value: "x".repeat(512) },
-      { type: "descriptor", value: "[attachment]" },
-      { type: "descriptor", value: "[link]" },
-      { type: "descriptor", value: "[iMessage app]" },
+    expect(message.parts[0]).toMatch(/^See \[link\] /u);
+    expect(message.parts[0]).toHaveLength(512);
+    expect(message.parts.slice(1, 4)).toEqual([
+      "[attachment]",
+      "[link]",
+      "[iMessage app]",
     ]);
     expect(JSON.stringify(message)).not.toContain(privateUrl);
+    expect(JSON.stringify(message)).not.toContain(privateTextUrl);
     expect(JSON.stringify(message)).not.toContain("private-name.pdf");
     expect(JSON.stringify(message)).not.toContain("application/pdf");
     expect(fetchMock).toHaveBeenCalledWith(

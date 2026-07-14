@@ -63,7 +63,7 @@ describe("stageHostedLinqGroupReactionContext", () => {
     mocks.getHostedLinqReactionTargetMessage.mockResolvedValue({
       chatId: "chat_group_123",
       id: "message_target_123",
-      parts: [{ type: "text", value: "A useful group message" }],
+      parts: ["A useful group message"],
     });
     mocks.appendHostedLinqThreadRouteReactionContextTx.mockResolvedValue("appended");
   });
@@ -83,18 +83,17 @@ describe("stageHostedLinqGroupReactionContext", () => {
       chatId: "chat_group_123",
       id: "message_target_123",
       parts: [
-        { type: "text", value: "x".repeat(400) },
-        { type: "descriptor", value: "[link]" },
+        "x".repeat(400),
+        "[link]",
       ],
     });
 
     await expect(stageHostedLinqGroupReactionContext({
       event,
       prisma,
-    })).resolves.toEqual({ status: "staged" });
+    })).resolves.toBe(true);
 
     expect(mocks.readHostedThreadRouteByThreadIdentity).toHaveBeenCalledWith({
-      accountLookupKey: expect.stringMatching(/^hbidx:phone:/u),
       channel: "linq",
       prisma,
       threadId: "chat_group_123",
@@ -119,17 +118,14 @@ describe("stageHostedLinqGroupReactionContext", () => {
     expect(appendInput?.text).not.toContain("https://");
   });
 
-  it("ignores a missing or inactive account-bound route before provider reads", async () => {
+  it("ignores a missing or inactive route before provider reads", async () => {
     const prisma = createPrismaStub();
     mocks.readHostedThreadRouteByThreadIdentity.mockResolvedValueOnce(null);
 
     await expect(stageHostedLinqGroupReactionContext({
       event: buildReactionEvent(),
       prisma,
-    })).resolves.toEqual({
-      reason: "route_unavailable",
-      status: "ignored",
-    });
+    })).resolves.toBe(false);
 
     mocks.readHostedThreadRouteByThreadIdentity.mockResolvedValueOnce({
       containerMemberId: "member_group_123",
@@ -139,17 +135,14 @@ describe("stageHostedLinqGroupReactionContext", () => {
     await expect(stageHostedLinqGroupReactionContext({
       event: buildReactionEvent(),
       prisma,
-    })).resolves.toEqual({
-      reason: "route_unavailable",
-      status: "ignored",
-    });
+    })).resolves.toBe(false);
 
     expect(mocks.getHostedLinqChatSummary).not.toHaveBeenCalled();
     expect(mocks.getHostedLinqReactionTargetMessage).not.toHaveBeenCalled();
     expect(mocks.appendHostedLinqThreadRouteReactionContextTx).not.toHaveBeenCalled();
   });
 
-  it("ignores direct chats and actors absent from the current active roster", async () => {
+  it("ignores direct chats and stale self or actor roster entries", async () => {
     const prisma = createPrismaStub();
     mocks.getHostedLinqChatSummary.mockResolvedValueOnce({
       handles: [
@@ -162,10 +155,20 @@ describe("stageHostedLinqGroupReactionContext", () => {
     await expect(stageHostedLinqGroupReactionContext({
       event: buildReactionEvent(),
       prisma,
-    })).resolves.toEqual({
-      reason: "invalid_group",
-      status: "ignored",
+    })).resolves.toBe(false);
+
+    mocks.getHostedLinqChatSummary.mockResolvedValueOnce({
+      handles: [
+        { handle: "+15550000000", isMe: true, status: "removed" },
+        { handle: "+15551234567", isMe: false, status: "active" },
+      ],
+      isGroup: true,
     });
+
+    await expect(stageHostedLinqGroupReactionContext({
+      event: buildReactionEvent(),
+      prisma,
+    })).resolves.toBe(false);
 
     mocks.getHostedLinqChatSummary.mockResolvedValueOnce({
       handles: [
@@ -178,10 +181,7 @@ describe("stageHostedLinqGroupReactionContext", () => {
     await expect(stageHostedLinqGroupReactionContext({
       event: buildReactionEvent(),
       prisma,
-    })).resolves.toEqual({
-      reason: "invalid_actor",
-      status: "ignored",
-    });
+    })).resolves.toBe(false);
 
     expect(mocks.getHostedLinqReactionTargetMessage).not.toHaveBeenCalled();
     expect(mocks.appendHostedLinqThreadRouteReactionContextTx).not.toHaveBeenCalled();
@@ -192,16 +192,13 @@ describe("stageHostedLinqGroupReactionContext", () => {
     mocks.getHostedLinqReactionTargetMessage.mockResolvedValue({
       chatId: "chat_other_123",
       id: "message_target_123",
-      parts: [{ type: "text", value: "A message from another chat" }],
+      parts: ["A message from another chat"],
     });
 
     await expect(stageHostedLinqGroupReactionContext({
       event: buildReactionEvent(),
       prisma,
-    })).resolves.toEqual({
-      reason: "invalid_target",
-      status: "ignored",
-    });
+    })).resolves.toBe(false);
 
     expect(mocks.appendHostedLinqThreadRouteReactionContextTx).not.toHaveBeenCalled();
   });
@@ -219,7 +216,6 @@ function buildReactionEvent(input: {
         chat_id: "chat_group_123",
         custom_emoji: input.customEmoji,
         from: "+15551234567",
-        line: { phone_number: "+15550000000" },
         message_id: "message_target_123",
         reaction_type: input.reactionType ?? "like",
       },

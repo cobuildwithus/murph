@@ -222,10 +222,7 @@ describe("hosted onboarding Linq webhook hard-cut flows", () => {
       reason: "accepted",
       status: "accepted",
     });
-    mocks.stageHostedLinqGroupReactionContext.mockResolvedValue({
-      reason: "route_unavailable",
-      status: "ignored",
-    });
+    mocks.stageHostedLinqGroupReactionContext.mockResolvedValue(false);
     mocks.markHostedLinqOnboardingLinkNoticeSent.mockResolvedValue(true);
     mocks.releaseHostedLinqOnboardingLinkNoticeClaim.mockResolvedValue(undefined);
     mocks.releaseHostedLinqQuotaReplyNoticeClaim.mockResolvedValue(undefined);
@@ -545,9 +542,7 @@ describe("hosted onboarding Linq webhook hard-cut flows", () => {
       reason: "unsupported_reaction",
       status: "ignored",
     });
-    mocks.stageHostedLinqGroupReactionContext.mockResolvedValue({
-      status: "staged",
-    });
+    mocks.stageHostedLinqGroupReactionContext.mockResolvedValue(true);
 
     await expect(
       handleHostedOnboardingLinqWebhook({

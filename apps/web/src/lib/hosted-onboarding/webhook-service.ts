@@ -191,14 +191,13 @@ export async function handleHostedOnboardingLinqWebhook(input: {
         prisma,
         signal: input.signal,
       });
-      const contextResult = providerResult.duplicate
-        ? null
+      const contextStaged = providerResult.duplicate
+        ? false
         : await stageHostedLinqGroupReactionContext({
             event: providerEvent,
             prisma,
             ...(input.signal ? { signal: input.signal } : {}),
           });
-      const contextStaged = contextResult?.status === "staged";
       const response: HostedOnboardingLinqWebhookResponse = {
         duplicate: providerResult.duplicate || undefined,
         ignored: reactionResult.status !== "accepted" && !contextStaged,
@@ -207,9 +206,7 @@ export async function handleHostedOnboardingLinqWebhook(input: {
           ? "accepted-linq-group-join-offer-reaction"
           : contextStaged
             ? "staged-linq-group-reaction-context"
-            : `skipped-linq-group-reaction-context:${
-                contextResult?.reason ?? "duplicate"
-              }`,
+            : `skipped-linq-group-join-offer-reaction:${reactionResult.reason}`,
       };
       responseReason = response.reason ?? null;
       finishHostedOnboardingTiming(timing, "completed", {

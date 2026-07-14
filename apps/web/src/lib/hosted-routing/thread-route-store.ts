@@ -41,7 +41,7 @@ import {
 const HOSTED_LINQ_GROUP_REACTION_CONTEXT_FIELD =
   "pending-group-reaction-context";
 
-export interface HostedLinqThreadRoutePendingContext {
+interface HostedLinqThreadRoutePendingContext {
   groupParticipantAdded: boolean;
   groupReactionContext: string | null;
 }
@@ -65,7 +65,6 @@ export type HostedLinqThreadRouteEgressAuthority =
   HostedExecutionLinqExternalThreadRouteAuthority;
 
 export async function readHostedThreadRouteByThreadIdentity(input: {
-  accountLookupKey?: string | null;
   channel: HostedThreadRouteChannel;
   prisma: HostedOnboardingReadClient;
   threadId: string | number | null | undefined;
@@ -77,16 +76,6 @@ export async function readHostedThreadRouteByThreadIdentity(input: {
     });
 
   if (threadIdentityLookupKeys.length === 0) {
-    return null;
-  }
-  const threadLookupKeys = input.accountLookupKey === undefined
-    ? null
-    : createHostedExternalThreadLookupKeyReadCandidates({
-        accountLookupKey: input.accountLookupKey,
-        channel: input.channel,
-        threadId: input.threadId,
-      });
-  if (threadLookupKeys?.length === 0) {
     return null;
   }
 
@@ -119,9 +108,6 @@ export async function readHostedThreadRouteByThreadIdentity(input: {
     },
     where: {
       channel: input.channel,
-      ...(threadLookupKeys
-        ? { threadLookupKey: { in: threadLookupKeys } }
-        : {}),
       threadIdentityLookupKey: {
         in: threadIdentityLookupKeys,
       },
@@ -265,41 +251,26 @@ export async function consumeHostedLinqThreadRoutePendingContextTx(input: {
   prisma: Prisma.TransactionClient;
   threadId: string;
 }): Promise<HostedLinqThreadRoutePendingContext> {
-  // Linq operations that need both locks always take chat ownership before the
-  // route row. Mailbox append and usage-limit dispatch use the same order.
-  await acquireHostedLinqChatOwnershipLockTx({
-    chatId: input.threadId,
-    tx: input.prisma,
-  });
-  await lockHostedThreadRouteByThreadIdentityTx({
-    authority: {
-      accountLookupKey: input.accountLookupKey,
-      channel: "linq",
-      containerMemberId: input.containerMemberId,
-      threadId: input.threadId,
-    },
-    prisma: input.prisma,
-  });
-
-  const threadIdentityLookupKeys =
-    createHostedExternalThreadIdentityLookupKeyReadCandidates({
-      channel: "linq",
-      threadId: input.threadId,
-    });
-  if (threadIdentityLookupKeys.length === 0) {
-    return emptyHostedLinqThreadRoutePendingContext();
-  }
-  const route = await readHostedLinqThreadRoutePendingContextRowTx(input);
+  const route = await lockAndReadHostedLinqThreadRoutePendingContextRowTx(input);
   if (!route) {
     return emptyHostedLinqThreadRoutePendingContext();
   }
-  const groupReactionContext = await openHostedLinqGroupReactionContextBestEffort({
+  const reactionAccountMatches = doesHostedLinqRouteMatchAccount({
+    accountLookupKey: input.accountLookupKey,
     route,
-    tx: input.prisma,
+    threadId: input.threadId,
   });
+  const groupReactionContext = reactionAccountMatches
+    ? await openHostedLinqGroupReactionContextBestEffort({
+        route,
+        tx: input.prisma,
+      })
+    : null;
   const result = await input.prisma.hostedThreadRoute.updateMany({
     data: {
-      pendingGroupReactionContextEncrypted: null,
+      ...(reactionAccountMatches
+        ? { pendingGroupReactionContextEncrypted: null }
+        : {}),
       pendingParticipantAddition: false,
     },
     where: {
@@ -324,22 +295,14 @@ export async function appendHostedLinqThreadRouteReactionContextTx(input: {
   text: string;
   threadId: string;
 }): Promise<"appended" | "route_unavailable"> {
-  await acquireHostedLinqChatOwnershipLockTx({
-    chatId: input.threadId,
-    tx: input.prisma,
-  });
-  await lockHostedThreadRouteByThreadIdentityTx({
-    authority: {
-      accountLookupKey: input.accountLookupKey,
-      channel: "linq",
-      containerMemberId: input.containerMemberId,
-      threadId: input.threadId,
-    },
-    prisma: input.prisma,
-  });
-  const route = await readHostedLinqThreadRoutePendingContextRowTx(input);
+  const route = await lockAndReadHostedLinqThreadRoutePendingContextRowTx(input);
   if (
     !route
+    || !doesHostedLinqRouteMatchAccount({
+      accountLookupKey: input.accountLookupKey,
+      route,
+      threadId: input.threadId,
+    })
     || !(await readActiveHostedMemberAccess({
       memberId: route.containerMemberId,
       prisma: input.prisma,
@@ -366,6 +329,30 @@ export async function appendHostedLinqThreadRouteReactionContextTx(input: {
   return updated.count === 1 ? "appended" : "route_unavailable";
 }
 
+async function lockAndReadHostedLinqThreadRoutePendingContextRowTx(input: {
+  accountLookupKey: string;
+  containerMemberId: string;
+  prisma: Prisma.TransactionClient;
+  threadId: string;
+}) {
+  // Linq operations that need both locks always take chat ownership before the
+  // route row. Mailbox append and usage-limit dispatch use the same order.
+  await acquireHostedLinqChatOwnershipLockTx({
+    chatId: input.threadId,
+    tx: input.prisma,
+  });
+  await lockHostedThreadRouteByThreadIdentityTx({
+    authority: {
+      accountLookupKey: input.accountLookupKey,
+      channel: "linq",
+      containerMemberId: input.containerMemberId,
+      threadId: input.threadId,
+    },
+    prisma: input.prisma,
+  });
+  return readHostedLinqThreadRoutePendingContextRowTx(input);
+}
+
 function emptyHostedLinqThreadRoutePendingContext(): HostedLinqThreadRoutePendingContext {
   return {
     groupParticipantAdded: false,
@@ -374,7 +361,6 @@ function emptyHostedLinqThreadRoutePendingContext(): HostedLinqThreadRoutePendin
 }
 
 async function readHostedLinqThreadRoutePendingContextRowTx(input: {
-  accountLookupKey: string;
   containerMemberId: string;
   prisma: Prisma.TransactionClient;
   threadId: string;
@@ -384,12 +370,7 @@ async function readHostedLinqThreadRoutePendingContextRowTx(input: {
       channel: "linq",
       threadId: input.threadId,
     });
-  const threadLookupKeys = createHostedExternalThreadLookupKeyReadCandidates({
-    accountLookupKey: input.accountLookupKey,
-    channel: "linq",
-    threadId: input.threadId,
-  });
-  if (threadIdentityLookupKeys.length === 0 || threadLookupKeys.length === 0) {
+  if (threadIdentityLookupKeys.length === 0) {
     return null;
   }
   return input.prisma.hostedThreadRoute.findFirst({
@@ -403,10 +384,21 @@ async function readHostedLinqThreadRoutePendingContextRowTx(input: {
     where: {
       channel: "linq",
       containerMemberId: input.containerMemberId,
-      threadLookupKey: { in: threadLookupKeys },
       threadIdentityLookupKey: { in: threadIdentityLookupKeys },
     },
   });
+}
+
+function doesHostedLinqRouteMatchAccount(input: {
+  accountLookupKey: string;
+  route: NonNullable<Awaited<ReturnType<typeof readHostedLinqThreadRoutePendingContextRowTx>>>;
+  threadId: string;
+}): boolean {
+  return createHostedExternalThreadLookupKeyReadCandidates({
+    accountLookupKey: input.accountLookupKey,
+    channel: "linq",
+    threadId: input.threadId,
+  }).includes(input.route.threadLookupKey);
 }
 
 async function openHostedLinqGroupReactionContextBestEffort(input: {
