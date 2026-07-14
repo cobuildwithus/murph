@@ -15,6 +15,7 @@ import type {
 
 import {
   buildHostedRuntimeFamilyActionApprovalRequest,
+  consumeHostedRuntimeSensitiveActionApproval,
   requestHostedRuntimeSensitiveActionApproval,
 } from "./billing-family-action-approval";
 import { createHostedBillingPortalSession } from "../hosted-onboarding/billing-portal-service";
@@ -124,6 +125,15 @@ export async function handleHostedRuntimeFamilyPlanTool(input: {
       return { action: "cancel_invite", result: approval };
     }
     const canceled = await getPrisma().$transaction(async (tx) => {
+      const consumedApproval = await consumeHostedRuntimeSensitiveActionApproval({
+        approval,
+        memberId: input.memberId,
+        prisma: tx,
+        request: approvalRequest,
+      });
+      if (consumedApproval.status !== "approved") {
+        return consumedApproval;
+      }
       return await revokeHostedFamilyInviteTx({
         groupId: snapshot.groupId,
         inviteId: request.inviteId,
@@ -131,6 +141,9 @@ export async function handleHostedRuntimeFamilyPlanTool(input: {
         tx,
       });
     }, HOSTED_ONBOARDING_TRANSACTION_OPTIONS);
+    if (typeof canceled !== "boolean") {
+      return { action: "cancel_invite", result: canceled };
+    }
     if (!canceled) {
       const existing = await getPrisma().hostedAccountGroupInvite.findFirst({
         select: { status: true },
@@ -216,6 +229,15 @@ export async function handleHostedRuntimeFamilyPlanTool(input: {
       return { action: "remove_member", result: approval };
     }
     const removed = await getPrisma().$transaction(async (tx) => {
+      const consumedApproval = await consumeHostedRuntimeSensitiveActionApproval({
+        approval,
+        memberId: input.memberId,
+        prisma: tx,
+        request: approvalRequest,
+      });
+      if (consumedApproval.status !== "approved") {
+        return consumedApproval;
+      }
       return await removeHostedFamilyMemberTx({
         groupId: snapshot.groupId,
         memberId: request.memberId,
@@ -223,6 +245,9 @@ export async function handleHostedRuntimeFamilyPlanTool(input: {
         tx,
       });
     }, HOSTED_ONBOARDING_TRANSACTION_OPTIONS);
+    if (typeof removed !== "boolean") {
+      return { action: "remove_member", result: removed };
+    }
     if (!removed) {
       const existing = await getPrisma().hostedAccountGroupMembership.findFirst({
         select: { status: true },
@@ -310,6 +335,15 @@ export async function handleHostedRuntimeFamilyPlanTool(input: {
     });
     if (approval.status !== "approved") {
       return { action: "change_seat_count", result: approval };
+    }
+    const consumedApproval = await consumeHostedRuntimeSensitiveActionApproval({
+      approval,
+      memberId: input.memberId,
+      prisma,
+      request: approvalRequest,
+    });
+    if (consumedApproval.status !== "approved") {
+      return { action: "change_seat_count", result: consumedApproval };
     }
     const update = await updateHostedFamilySeatCount({
       expectedCurrentSeatCount: preparation.currentSeatCount,

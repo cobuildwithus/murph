@@ -14,6 +14,8 @@ import { jsonOk, withJsonError } from "@/src/lib/hosted-onboarding/http";
 
 const BODY_LIMIT_BYTES = 16_384;
 
+export const maxDuration = 800;
+
 export const POST = withJsonError(async (request: Request) => {
   const payloadText = (await readRawBodyBuffer(request, {
     limitBytes: BODY_LIMIT_BYTES,

@@ -285,12 +285,7 @@ describe("hosted runtime billing plan tool", () => {
     });
   });
 
-  it("confirms a projected paid Pulse no-op with the canonical service", async () => {
-    mocks.startHostedPulseTrialPaidPlan.mockResolvedValueOnce({
-      billingPlanCode: "launch_monthly",
-      status: "started",
-    });
-
+  it("returns projected paid Pulse unchanged without mutating", async () => {
     await expect(handleHostedRuntimeBillingPlanTool({
       memberId: "member_current",
       request: { action: "start_paid_pulse", confirmed: true },
@@ -301,9 +296,7 @@ describe("hosted runtime billing plan tool", () => {
         status: "unchanged",
       },
     });
-    expect(mocks.startHostedPulseTrialPaidPlan).toHaveBeenCalledWith({
-      memberId: "member_current",
-    });
+    expect(mocks.startHostedPulseTrialPaidPlan).not.toHaveBeenCalled();
   });
 
   it("does not trust a projected renewal switch before canonical scheduling", async () => {
@@ -475,7 +468,7 @@ describe("hosted runtime billing plan tool", () => {
     expect(mocks.upgradeHostedBillingPlan).not.toHaveBeenCalled();
   });
 
-  it("lets only one simultaneous execution consume approval and mutate", async () => {
+  it("uses one deterministic consumer identity for simultaneous execution", async () => {
     const approvalId = `haa_${"b".repeat(32)}`;
     const approved = {
       approvalGeneration: "a".repeat(64),
@@ -521,11 +514,11 @@ describe("hosted runtime billing plan tool", () => {
     const consumerIds = mocks.consumeHostedActionApproval.mock.calls.map(
       ([call]) => call.request.consumerId,
     );
-    expect(new Set(consumerIds).size).toBe(2);
+    expect(new Set(consumerIds).size).toBe(1);
     expect(mocks.upgradeHostedBillingPlan).toHaveBeenCalledTimes(1);
   });
 
-  it("repairs an already-applied Edge upgrade before returning unchanged", async () => {
+  it("returns an already-applied Edge upgrade unchanged without mutating", async () => {
     mocks.readHostedMemberStripeBillingRef.mockResolvedValueOnce({
       currentBillingPhase: "paid",
       currentBillingPlanCode: "launch_edge_monthly",
@@ -547,11 +540,23 @@ describe("hosted runtime billing plan tool", () => {
       request: { action: "upgrade_to_edge", confirmed: true },
     })).resolves.toMatchObject({ result: { status: "unchanged" } });
     expect(mocks.requestHostedActionApproval).not.toHaveBeenCalled();
-    expect(mocks.upgradeHostedBillingPlan).toHaveBeenCalledWith({
-      expectedCurrentPeriodEnd: new Date("2026-08-01T00:00:00.000Z"),
-      memberId: "member_current",
-      targetPlanCode: "launch_edge_monthly",
+    expect(mocks.upgradeHostedBillingPlan).not.toHaveBeenCalled();
+  });
+
+  it("keeps an already-applied Edge preview read-only", async () => {
+    mocks.prepareHostedBillingPlanUpgrade.mockResolvedValueOnce({
+      currentBillingPlanCode: "launch_edge_monthly",
+      currentPeriodEnd: new Date("2026-08-01T00:00:00.000Z"),
+      status: "already_on_plan",
     });
+
+    await expect(handleHostedRuntimeBillingPlanTool({
+      memberId: "member_current",
+      request: { action: "upgrade_to_edge", confirmed: false },
+    })).resolves.toMatchObject({ result: { status: "unchanged" } });
+    expect(mocks.requestHostedActionApproval).not.toHaveBeenCalled();
+    expect(mocks.consumeHostedActionApproval).not.toHaveBeenCalled();
+    expect(mocks.upgradeHostedBillingPlan).not.toHaveBeenCalled();
   });
 
   it("requires fresh Pulse terms when Stripe rolled over before the local projection", async () => {

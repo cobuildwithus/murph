@@ -1,8 +1,8 @@
 import "server-only";
 
-import { createHash, randomUUID } from "node:crypto";
+import { createHash } from "node:crypto";
 
-import type { PrismaClient } from "@prisma/client";
+import type { Prisma, PrismaClient } from "@prisma/client";
 import type {
   HostedActionApprovalRequest,
   HostedActionApprovalReturnContactKind,
@@ -12,6 +12,7 @@ import type {
   HostedRuntimeFamilyPlanToolStatusResponse,
   HostedRuntimeSensitiveActionApprovalResult,
 } from "@murphai/hosted-execution/runtime-control";
+import { serializeHostedActionApprovalRequest } from "@murphai/hosted-execution/action-approval";
 
 import {
   consumeHostedActionApproval,
@@ -22,7 +23,11 @@ const APPROVAL_FINGERPRINT_VERSION =
   "murph.hosted-billing-family-action-approval.v1";
 
 export type HostedRuntimeSensitiveActionApprovalGate =
-  | { status: "approved" }
+  | {
+      approvalGeneration: string;
+      approvalId: string;
+      status: "approved";
+    }
   | HostedRuntimeSensitiveActionApprovalResult;
 
 export async function requestHostedRuntimeSensitiveActionApproval(input: {
@@ -39,18 +44,49 @@ export async function requestHostedRuntimeSensitiveActionApproval(input: {
     return projectHostedRuntimeSensitiveActionApproval(approval);
   }
 
+  return {
+    approvalGeneration: approval.approvalGeneration,
+    approvalId: approval.approvalId,
+    status: "approved",
+  };
+}
+
+export async function consumeHostedRuntimeSensitiveActionApproval(input: {
+  approval: Extract<HostedRuntimeSensitiveActionApprovalGate, { status: "approved" }>;
+  memberId: string;
+  prisma: PrismaClient | Prisma.TransactionClient;
+  request: HostedActionApprovalRequest;
+}): Promise<HostedRuntimeSensitiveActionApprovalGate> {
   const consumed = await consumeHostedActionApproval({
     memberId: input.memberId,
     prisma: input.prisma,
     request: {
-      approvalGeneration: approval.approvalGeneration,
-      consumerId: `hosted-product-mutation:${randomUUID()}`,
+      approvalGeneration: input.approval.approvalGeneration,
+      consumerId: buildHostedRuntimeSensitiveActionConsumerId(input),
       request: input.request,
     },
   });
   return consumed.status === "approved"
-    ? { status: "approved" }
+    ? {
+        approvalGeneration: input.approval.approvalGeneration,
+        approvalId: input.approval.approvalId,
+        status: "approved",
+      }
     : projectHostedRuntimeSensitiveActionApproval(consumed);
+}
+
+function buildHostedRuntimeSensitiveActionConsumerId(input: {
+  approval: Extract<HostedRuntimeSensitiveActionApprovalGate, { status: "approved" }>;
+  memberId: string;
+  request: HostedActionApprovalRequest;
+}): string {
+  return `hosted-product-mutation:${createHash("sha256")
+    .update(input.memberId)
+    .update("\0")
+    .update(input.approval.approvalGeneration)
+    .update("\0")
+    .update(serializeHostedActionApprovalRequest(input.request))
+    .digest("hex")}`;
 }
 
 export function buildHostedRuntimeBillingPlanActionApprovalRequest(input: {
