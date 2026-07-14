@@ -282,7 +282,7 @@ describe("createHostedWorkspaceRuntimeBridgeJobOptions", () => {
     expect(calls.abortSnapshotSession).not.toHaveBeenCalled();
   });
 
-  it("prunes unreferenced Codex rollouts before publishing a snapshot", async () => {
+  it("excludes unreferenced Codex rollouts without deleting live local state", async () => {
     const vaultRoot = await createVaultRoot();
     const operatorHomeRoot = path.join(path.dirname(vaultRoot), "home");
     const rolloutRelativePath = path.join(
@@ -310,7 +310,7 @@ describe("createHostedWorkspaceRuntimeBridgeJobOptions", () => {
 
     await options.createCheckpointSnapshot(createCheckpointInput("idle_shutdown"));
 
-    await expectMissing(rolloutPath);
+    await expectPresent(rolloutPath);
     const archiveInput = vi.mocked(snapshotArchiveBuilder.buildEncryptedSnapshot)
       .mock.calls[0]?.[0];
     expect(archiveInput?.archiveEntries).not.toEqual(expect.arrayContaining([
