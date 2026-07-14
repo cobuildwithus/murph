@@ -95,11 +95,13 @@ Last verified: 2026-07-14
 
   Receipt cardinality is connection plus `nightDate`; canonical cardinality is
   vault plus source (`whoop`) plus `nightDate`. Import stores one immutable
-  summary-grain `hrv-rmssd` observation with a synthetic 12:00Z `occurredAt`
-  and no event `timeZone`. This is a beta wellness pulse-rate-variability
+  summary-grain `whoop-ble-overnight-prv-rmssd` observation with a synthetic
+  12:00Z `occurredAt` and no event `timeZone`. The metric has no generic `hrv`
+  or biomarker alias. This is a beta wellness pulse-rate-variability
   estimate, not clinical ECG HRV, WHOOP's proprietary overnight HRV, or WHOOP
   Recovery. Apple HealthKit SDNN remains
-  `hrv-sdnn`, and WHOOP API Recovery keeps its own metric/provenance. Deploy the
+  `hrv-sdnn`, and the existing provider resolver keeps WHOOP Recovery/Oura HRV
+  under its single selected daily `hrv-rmssd` owner. Deploy the
   runtime consumer first with immediate container rollout, runner-bundle
   fingerprint proof, and a compact import smoke; deploy web second and release
   iOS last. Before iOS distribution, require a signed physical-iPhone WHOOP

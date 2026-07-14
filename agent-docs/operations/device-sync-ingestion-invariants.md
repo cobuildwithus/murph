@@ -209,9 +209,11 @@ drain/batch service seam in `packages/device-syncd/src/service.ts`.
 
 7. **HRV method semantics survive import and reprojection.** HealthKit's
    standard HRV quantity is SDNN (`hrv-sdnn`); the direct WHOOP 5/MG BLE result
-   is a beta overnight pulse-rate-variability RMSSD estimate (`hrv-rmssd`).
-   WHOOP API Recovery remains a separate provider metric. None of these series
-   alias or aggregate together.
+   is a beta overnight pulse-rate-variability RMSSD estimate
+   (`whoop-ble-overnight-prv-rmssd`) with no generic `hrv` or biomarker alias.
+   The existing provider resolver continues to select at most one daily
+   `hrv-rmssd` point across WHOOP Recovery, Oura, and other provider evidence.
+   The beta companion series does not compete or aggregate with either series.
 
    The phone reduces pulse intervals in constant memory into non-overlapping
    five-minute windows and uploads only the strict six-field nightly envelope:

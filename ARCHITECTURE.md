@@ -303,14 +303,16 @@ identity, with the existing fail-closed legacy consolidation rules.
 
 The receipt's operational cardinality is connection plus `nightDate`; canonical
 cardinality is independently vault plus source (`whoop`) plus `nightDate`.
-Import writes one immutable summary-grain `hrv-rmssd` observation for that
+Import writes one immutable summary-grain
+`whoop-ble-overnight-prv-rmssd` observation for that
 canonical identity, using a synthetic 12:00Z `occurredAt` derived solely from
 `nightDate`, omitting event `timeZone`, and never reconstructing capture time.
 The value is a beta wellness pulse-rate-variability estimate, not clinical ECG
-HRV, WHOOP's proprietary overnight HRV, or WHOOP Recovery. Apple HealthKit SDNN
-remains `hrv-sdnn`, and WHOOP API Recovery data keeps its existing recovery
-provenance and metric family; none of the three series alias or aggregate
-together.
+HRV, WHOOP's proprietary overnight HRV, or WHOOP Recovery. It has no generic
+`hrv` or biomarker alias. Apple HealthKit SDNN remains `hrv-sdnn`; the existing
+provider resolver continues to emit at most one selected daily `hrv-rmssd`
+point across WHOOP Recovery, Oura, and other provider evidence. The beta
+companion series does not enter or alter that resolver.
 
 Deployment is runtime/Cloudflare first with immediate container rollout,
 runner-bundle fingerprint proof, and a compact import smoke; web is second and

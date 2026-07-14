@@ -27,14 +27,16 @@ Built-in providers now share one descriptor surface in `device-providers/provide
 The iOS companion's direct WHOOP overnight-HRV path is a deliberately narrower
 Junction-account ingress rather than a fourth transport provider. It accepts
 only the strict `murph.companion.overnight-prv-rmssd.v1` derived observation
-and maps it to one immutable `hrv-rmssd` millisecond summary per phone-owned
-sleep night. The canonical identity is the night date; the verified admission
+and maps it to one immutable `whoop-ble-overnight-prv-rmssd` millisecond
+summary per phone-owned sleep night. The canonical identity is the night date;
+the verified admission
 digest and versioned calculation method remain provenance, so retry cannot mint
 another nightly fact. Raw R-R intervals, BLE frames, exact capture timestamps,
 per-window values, device identity, and Apple Health comparison values are
 outside this package's contract. Apple HealthKit's generic HRV input maps
-separately to canonical `hrv-sdnn`; the importer never combines SDNN with the
-companion RMSSD series. Its provider external identity remains stable across
+separately to canonical `hrv-sdnn`; the importer never combines SDNN or generic
+provider `hrv-rmssd` with the companion PRV series. Its provider external
+identity remains stable across
 that metric correction so a re-import supersedes an older generic Apple HRV
 event instead of duplicating it.
 
