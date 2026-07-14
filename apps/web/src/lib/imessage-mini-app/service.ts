@@ -13,6 +13,7 @@ export const IMESSAGE_MINI_APP_CARD_ID = "privy-proof-v1";
 export const IMESSAGE_MINI_APP_CREDENTIAL_TTL_MS = 24 * 60 * 60_000;
 
 const IMESSAGE_MINI_APP_BEARER_TOKEN_PATTERN = /^hbds_imessage_[A-Za-z0-9_-]{43}$/u;
+const IMESSAGE_MINI_APP_TOKEN_HASH_SCOPE = "murph:imessage-mini-app:v1";
 const IMESSAGE_MINI_APP_PROOF_CHOICES = ["morning", "afternoon", "evening"] as const;
 const IMESSAGE_MINI_APP_PROOF_ACTION_KEYS = new Set([
   "schemaVersion",
@@ -78,7 +79,7 @@ export class IMessageMiniAppService {
     const session = await this.store.createAgentSession({
       user: { id: memberId },
       label: "Murph Messages mini app",
-      tokenHash: sha256Hex(token),
+      tokenHash: hashIMessageMiniAppBearerToken(token),
       now,
       expiresAt,
     });
@@ -110,7 +111,7 @@ export class IMessageMiniAppService {
     }
 
     const auth = await this.store.authenticateAgentSessionByTokenHash(
-      sha256Hex(token),
+      hashIMessageMiniAppBearerToken(token),
       toIsoTimestamp(new Date()),
     );
 
@@ -154,6 +155,10 @@ export class IMessageMiniAppService {
       ? parts[1] ?? null
       : null;
   }
+}
+
+function hashIMessageMiniAppBearerToken(token: string): string {
+  return sha256Hex(`${IMESSAGE_MINI_APP_TOKEN_HASH_SCOPE}\0${token}`);
 }
 
 export function validateIMessageMiniAppEnrollmentBody(

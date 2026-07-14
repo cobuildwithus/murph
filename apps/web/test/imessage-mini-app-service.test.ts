@@ -57,6 +57,46 @@ function validMessagesToken() {
   return `${IMESSAGE_MINI_APP_BEARER_TOKEN_PREFIX}${"a".repeat(43)}`;
 }
 
+function createHashIndexedStore() {
+  let tokenHash: string | null = null;
+  const store = createStore({
+    authenticateAgentSessionByTokenHash: vi.fn(async (candidateHash) => candidateHash === tokenHash
+      ? {
+          status: "active" as const,
+          session: ACTIVE_SESSION,
+        }
+      : {
+          status: "missing" as const,
+          session: null,
+        }),
+    createAgentSession: vi.fn(async (input) => {
+      tokenHash = input.tokenHash;
+      return {
+        ...ACTIVE_SESSION,
+        createdAt: input.now ?? ACTIVE_SESSION.createdAt,
+        updatedAt: input.now ?? ACTIVE_SESSION.updatedAt,
+        expiresAt: input.expiresAt,
+        userId: input.user.id,
+      };
+    }),
+  });
+
+  return {
+    store,
+    readTokenHash: () => tokenHash,
+  };
+}
+
+async function authenticateWithHistoricalUnscopedAgentReader(
+  token: string,
+  store: IMessageMiniAppSessionStore,
+) {
+  return store.authenticateAgentSessionByTokenHash(
+    createHash("sha256").update(token).digest("hex"),
+    "2026-07-10T12:00:00.000Z",
+  );
+}
+
 describe("iMessage mini-app service", () => {
   beforeEach(() => {
     vi.useRealTimers();
@@ -77,12 +117,36 @@ describe("iMessage mini-app service", () => {
     expect(store.createAgentSession).toHaveBeenNthCalledWith(1, expect.objectContaining({
       expiresAt: "2026-07-11T12:00:00.000Z",
       label: "Murph Messages mini app",
-      tokenHash: createHash("sha256").update(response.credential.token).digest("hex"),
+      tokenHash: createHash("sha256")
+        .update(`murph:imessage-mini-app:v1\0${response.credential.token}`)
+        .digest("hex"),
       user: { id: "member-1" },
     }));
     expect(JSON.stringify(vi.mocked(store.createAgentSession).mock.calls[0])).not.toContain(
       response.credential.token,
     );
+  });
+
+  it("keeps a newly stored Messages credential unreachable to the historical unscoped device-agent reader", async () => {
+    const { store, readTokenHash } = createHashIndexedStore();
+    const enrollment = new IMessageMiniAppService({ request: createRequest(), store });
+
+    const response = await enrollment.enroll("member-1");
+    const historicalAgentHash = createHash("sha256")
+      .update(response.credential.token)
+      .digest("hex");
+
+    expect(readTokenHash()).toMatch(/^[0-9a-f]{64}$/u);
+    expect(readTokenHash()).not.toBe(historicalAgentHash);
+    await expect(
+      authenticateWithHistoricalUnscopedAgentReader(response.credential.token, store),
+    ).resolves.toEqual({ status: "missing", session: null });
+
+    const proofAction = new IMessageMiniAppService({
+      request: createRequest(response.credential.token),
+      store,
+    });
+    await expect(proofAction.requireCredential()).resolves.toEqual(ACTIVE_SESSION);
   });
 
   it("accepts only an active Messages-scoped credential", async () => {
