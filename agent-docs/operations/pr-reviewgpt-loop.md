@@ -17,17 +17,23 @@ write-capable `coverage-write` passes triggered by
 `agent-docs/operations/completion-workflow.md`. For current-checkout work it is
 additive and does not satisfy, replace, or reorder any required local pass.
 
-For ReviewGPT-eligible PR-lane work, do not call the PR good to merge until this loop
-has reached zero accepted findings and PR CI is green on the final head.
+For ReviewGPT-eligible PR-lane work, do not call the PR good to merge until the
+latest substantive round returns `ROUND_OUTCOME: PASS`, local triage has zero
+accepted findings, and PR CI is green on the final head. A completed anomaly
+retrospective may justify continuing the same PR, but it never substitutes for
+a later `PASS` on the resulting patch.
 
 ## Outcome and Completion Bar
 
 Certify the exact pushed PR patch against its stated user outcome and repository
-invariants using the guarded repository snapshot. The gate completes when the
-current PR-specific patch has zero accepted findings after local triage and CI is
-green on the final head. Missing or stale evidence, an invalid model/response,
-unresolved accepted findings, or a merge conflict is a stop condition rather
-than permission to infer the answer.
+invariants using the guarded repository snapshot. Round 1 is the only full-patch
+audit. Later substantive rounds verify the remediation delta and its directly
+affected paths; they do not reopen unchanged code for novelty. The gate
+completes when the exact patch receives `ROUND_OUTCOME: PASS`, local triage has
+zero accepted findings, and CI is green on the final head. Missing or stale
+evidence, an invalid model/response, unresolved accepted findings, a required
+retrospective, or a merge conflict is a stop condition rather than permission
+to infer the answer.
 
 ## Managed Target Lifecycle
 
@@ -74,6 +80,15 @@ exists, the user-visible goal and flow it is meant to ship, invariants to
 preserve, and added/deleted lines by source, tests, docs, config/tooling, and generated/other.
 Before firing a round, confirm that block is present and current.
 
+At round 1, also record the exact first-reviewed head and its five-category
+change shape in the PR body. Include the exact machine-readable line
+`ReviewGPT first-reviewed head: <full-sha>`. Keep that line and baseline
+immutable. The packager fails if its supplied first head differs from this
+persisted PR-body value. On later substantive rounds, update a separate
+current-head table and state the authored-source growth caused by review
+remediation. Base movement, generated churn, and file moves may explain counts,
+but they do not erase or reset the first-reviewed baseline.
+
 Fire each round as soon as the head it reviews is pushed. Do not wait for PR CI
 to go green first. CI and the review round run in parallel; green CI on the
 final head remains a separate merge-readiness gate.
@@ -94,22 +109,51 @@ independently requires it or the current user explicitly asks for the loop.
    ```
 
 2. Run ReviewGPT with the PR preset and the default randomized usable managed
-   browser lane. Pass the PR ref through `REVIEW_GPT_PR_URL` so
-   `scripts/package-audit-context-full.sh` adds
-   `review-gpt-pr-context/pr.diff` and `changed-files.txt` to the guarded
-   `codebase.zip` source snapshot. Capture the response in an uncommitted
-   `audit-packages/` artifact and require the preset's `REVIEW_COMPLETE` marker
-   before treating the round as complete:
+   browser lane. Pass the PR ref and substantive round through
+   `REVIEW_GPT_PR_URL` and `REVIEW_GPT_ROUND_NUMBER`. The packager adds the full
+   current PR patch, exact round metadata, and the delta from the previous
+   reviewed head to the guarded `codebase.zip` source snapshot:
+
+   - `review-gpt-pr-context/pr.diff`
+   - `review-gpt-pr-context/changed-files.txt`
+   - `review-gpt-pr-context/review-round.json`
+   - `review-gpt-pr-context/since-first-reviewed-head.diff`
+   - `review-gpt-pr-context/since-previous-reviewed-head.diff`
+
+   Round 1 defaults `REVIEW_GPT_FIRST_REVIEWED_HEAD` to the current PR head and
+   leaves the remediation delta empty. For round 2 or later, preserve the
+   original first-reviewed head and provide both it and the immediately previous
+   reviewed head:
 
    ```bash
    REVIEW_GPT_PR_URL=<pr-url-or-number> \
+   REVIEW_GPT_ROUND_NUMBER=1 \
      pnpm review:gpt pr-review \
        --wait \
        --wait-timeout 120m \
        --response-marker REVIEW_COMPLETE \
        --response-file audit-packages/pr-<number>-round-<k>.md \
-       --prompt "Review target: <pr-url-or-number>. Checked commit: $(git rev-parse --short HEAD). Use the PR body as the intent contract."
+       --prompt "Review target: <pr-url-or-number>. Checked commit: $(git rev-parse --short HEAD). First-reviewed head: $(git rev-parse HEAD). Round 1 full-patch audit. Use the PR body as the intent contract and immutable first-review change-shape baseline."
    ```
+
+   ```bash
+   REVIEW_GPT_PR_URL=<pr-url-or-number> \
+   REVIEW_GPT_ROUND_NUMBER=<k> \
+   REVIEW_GPT_FIRST_REVIEWED_HEAD=<round-1-full-sha> \
+   REVIEW_GPT_PREVIOUS_REVIEWED_HEAD=<round-k-minus-1-full-sha> \
+     pnpm review:gpt pr-review \
+       --wait \
+       --wait-timeout 120m \
+       --response-marker REVIEW_COMPLETE \
+       --response-file audit-packages/pr-<number>-round-<k>.md \
+       --prompt "Review target: <pr-url-or-number>. Checked commit: $(git rev-parse --short HEAD). First-reviewed head: <round-1-full-sha>. Correction-verification round <k>. Prior findings, dispositions, landed fixes, and mechanisms: <compact-summary>. Retrospective status: <not-required-or-current-decision>."
+   ```
+
+   The later-round summary is required process metadata. Include each prior
+   finding's accepted/rejected/out-of-scope disposition, the landed correction,
+   and its underlying mechanism. Keep it compact and secret-safe; do not paste
+   repository contents. If a completed retrospective permits continuation, name
+   its decision and why the current delta stays inside it.
 
    The repo wrapper chooses one usable ReviewGPT browser lane per run:
    `Eragon.app` on CDP port `9448`, `Phlebas.app` on `9442`, or
@@ -143,13 +187,27 @@ independently requires it or the current user explicitly asks for the loop.
    relaunch the model audit. Fix a concrete pre-completion tooling/profile
    failure before considering another run against the same pushed head.
 
+   Verify `review-round.json` names the intended round, first-reviewed head,
+   previous reviewed head, and current pushed head. Round 1 must have `full`
+   scope and empty cumulative and immediate remediation deltas; later rounds
+   must have `correction` scope, a previous head different from the current
+   head, and `true` first/previous ancestry. The packaged first head must match
+   the immutable PR-body line and the invocation. Missing, mismatched,
+   unavailable, or non-ancestral baseline evidence invalidates the run; restore
+   or reconstruct the lineage before retrying the same substantive round.
+
+   A response with `ROUND_OUTCOME: INVALID` does not count as a substantive
+   round. Correct its evidence or invocation gap and retry the same round number
+   against the same pushed head.
+
    Treat a suspiciously fast turnaround as a warning that requires checking the
    exact-turn, completion-marker, attachment, and model evidence. Elapsed time
    alone does not invalidate a round. If those checks show a different or
    downgraded model, incomplete response, or missing snapshot, discard the round,
-   correct the profile or invocation, and rerun against the same pushed head. If
-   only one lane is healthy, pin it with `REVIEW_GPT_BROWSER_LANE` and note the
-   temporary override in handoff.
+   correct the profile or invocation, and retry the same substantive round
+   number against the same pushed head. Browser, model, capture, and attachment
+   retries never advance the round counter. If only one lane is healthy, pin it
+   with `REVIEW_GPT_BROWSER_LANE` and note the temporary override in handoff.
 
 4. Triage every finding locally before fixing:
    - **Accepted bug/edge case**: confirm the issue through a
@@ -164,6 +222,13 @@ independently requires it or the current user explicitly asks for the loop.
      invariants are preserved.
    - **Rejected**: wrong, already handled, speculative, not worth the added
      complexity, or missing the required reproduction/proof. Note the reason.
+
+   In round 2 or later, accept a reported bug only when the remediation delta
+   introduced it or made it materially worse. A serious issue in unchanged
+   original PR work triggers the retrospective path; a pre-existing or adjacent
+   issue belongs outside this PR unless the stated outcome cannot ship without
+   resolving it. A claimed correction that fails to resolve its prior accepted
+   finding counts as review-induced and must be corrected before `PASS`.
 
    ReviewGPT findings are adversarial signals, not implementation instructions.
    Before accepting a finding, identify the invariant it protects and any
@@ -184,20 +249,58 @@ independently requires it or the current user explicitly asks for the loop.
    adding compatibility machinery. Check whether the feature or producer has
    already shipped, whether old consumers/producers can still run during the
    proposed rollout or rollback window, and whether production data or external
-   clients already contain the legacy shape. If the answer is no, reject the
-   finding as speculative or handle it with a deployment note; do not add repair
-   paths, migrations, shims, queues, or reconciliation code for rows or deployed
-   versions that do not exist.
+   clients already contain the legacy shape. Quantify the actual rollout window,
+   current member/event volume, maximum exposed operations, reversibility, and
+   available monitoring or manual repair; do not assume future scale. If the
+   answer is no, or the only demonstrated risk is a rare reversible miss for one
+   or a few members during a short rollout, reject the finding as speculative or
+   handle it with a deployment note. First try deleting the rollout seam or
+   changing deployment order; do not add replay, backfill, repair paths,
+   migrations, shims, dual writes, queues, capability negotiation, or
+   reconciliation for a low-incidence temporary window.
 
-5. Fix only accepted findings after the reproduction/proof above is in place,
-   run the verification required by
+5. Before another tactical fix, run the anomaly retrospective when any of these
+   is true:
+
+   - authored-source churn reaches 2,000 lines; 3,000 lines is a strong red flag
+     that requires an explicit indivisible-large-feature rationale;
+   - review remediation has added at least 500 authored-source lines and grown
+     source additions by at least 25 percent from the first-reviewed head;
+   - the next run would be substantive round 3 or later;
+   - the same underlying mechanism produced an accepted finding in the previous
+     round; or
+   - the proposed cure adds a new owner, state machine, queue, lease, fence,
+     lifecycle, compatibility path, migration, repair pass, or reconciliation
+     mechanism.
+
+   Source churn means authored-source additions plus deletions; tests, fixtures,
+   docs, config/tooling, and generated files stay separate. The retrospective is
+   not an automatic merge rejection and does not presume structural rework.
+   Restate the original requirement, compare the first reviewed and current
+   shapes, attribute review-driven growth and repeated mechanisms, and choose
+   deletion, reverting review machinery, shrinking, splitting, redesigning, or
+   explicitly justified continuation. Record the decision in the PR body or a
+   concise PR comment and carry it in later-round metadata. Never reset the
+   first-reviewed baseline.
+
+6. Fix only accepted findings after the reproduction/proof or required
+   retrospective is in place. A Complexity Collapse correction must yield net
+   deletion or remove concrete concepts/owners without replacement machinery.
+   Run the verification required by
    `agent-docs/operations/verification-and-runtime.md` for the touched owners,
-   and push to the PR branch.
+   update the current change-shape table, and push to the PR branch.
 
-6. Fire the next round immediately after that push, in parallel with the new CI
-   run. If CI later fails on a head a round reviewed, the round's findings still
-   count. Fix CI and run a fresh round whenever the PR-specific patch changes,
-   including code, tests, config, durable docs, or manual conflict resolution.
+7. Fire a correction-verification round immediately after a pushed accepted fix
+   changes production source, runtime config, schema, behavior, or manual
+   conflict resolution. Run it in parallel with the new CI run. If CI later
+   fails on a reviewed head, the round's findings still count.
+
+   Isolated regression-test additions, PR-body updates, finding-disposition
+   comments, and explanatory durable-doc edits do not create a new substantive
+   ReviewGPT round when they do not change production behavior, runtime config,
+   schema, or the implemented contract. Run their focused verification and CI
+   instead. If such a change does alter the implemented contract or executable
+   behavior, use the ordinary next-round rule.
 
 ## Base-Update-Only Exception
 
@@ -217,12 +320,19 @@ the touched surface, push it, and use the ordinary review-loop rules.
 
 ## Stop Condition
 
-- Stop when a round produces zero accepted findings after local triage.
-- Hard cap: 5 rounds per PR. If the cap is hit with accepted findings still
-  landing each round, stop and report that the PR likely needs structural
-  rework rather than more review rounds.
+- Stop when the exact current patch returns `ROUND_OUTCOME: PASS` and local
+  triage produces zero accepted findings.
+- `ROUND_OUTCOME: INVALID` is an evidence/invocation failure. It does not advance
+  the round counter; correct the gap and retry the same substantive round.
+- `ROUND_OUTCOME: RETROSPECTIVE_REQUIRED` pauses tactical remediation until the
+  requirement-level retrospective is recorded. It is not a structural verdict.
+- Hard cap: 5 rounds per PR. There is no automatic sixth substantive round. If
+  accepted findings remain, revisit the original requirement and obtain an
+  explicit continuation decision after the retrospective; the answer may be
+  delete, revert, shrink, split, redesign, continue, or abandon.
 - Report a per-round summary at handoff: findings received, accepted, rejected
-  with reasons, and what landed.
+  with reasons, origin/mechanism, what landed, source-shape movement, and any
+  retrospective decision. Report tooling retries separately.
 
 ## Boundaries
 
