@@ -121,7 +121,10 @@ patient-scoped search with `_count=100`. Provider redirects are disabled. A
 continuation must remain on the same origin and family path; only its query may
 change. Root pages omit `pageUrlHash`; continuation pages include it, while the
 raw Bundle retains its provider `next` link for the importer to prove a
-root-reachable chain.
+root-reachable chain. The exact validated provider link text is the provenance
+and logical-page identity; URL parsing is used only for network policy and
+fetching, and randomized cursor ciphertext never defines page identity. Cursors
+remain valid only while their member-bound run and generation remain active.
 
 Limits are 5 MiB per page, 500 provider fetch attempts, 32 MiB of charged
 provider egress per run, 500 Bundle entries per page, and 14 resource families.
@@ -136,11 +139,19 @@ Each logical runtime page has one server-derived durable claim, so concurrent
 caller request ids for the same cursor cannot fan out provider traffic. A stale
 claim can be replaced after 30 seconds, but its late completion cannot increment
 logical page counts, settle charged egress, or release the replacement claim.
-A completed-page replay remains available for runtime recovery, but consumes
-the provider-request and charged-egress budgets without double-counting the
-logical page. Token refresh uses a credential-version CAS so a stale
+A completed-page replay remains available for ambiguous in-flight recovery, but
+consumes the provider-request and charged-egress budgets without double-counting
+the logical page. Normal foreground preemption does not replay completed pages:
+vault-usecases atomically records each accepted page and the next unfinished
+cursor in one private, portable `.runtime/operations/clinical-records/**`
+checkpoint before yielding, and removes it after terminal import or rejection.
+The checkpoint is non-canonical; full snapshot validation still happens before
+any final raw page or manifest is persisted. Token refresh uses a
+credential-version CAS so a stale
 invalid-grant response cannot erase a concurrently rotated token.
-Preemption requeues the same run without discarding page progress. Final
+Preemption requeues the same run without discarding or replaying completed page
+progress. Web current-run authority is checked immediately before raw evidence
+persistence and immediately before canonical mutation. Final
 outcomes are idempotent under JSON key reordering. The member/provider unique
 connection plus its single generation bound the retained raw-evidence family;
 no retry, reconnect, or refresh surface may create another retrieval job until

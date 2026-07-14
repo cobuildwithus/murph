@@ -73,6 +73,7 @@ function createPaths() {
   return {
     absoluteVaultRoot: '/vault',
     cacheRoot: '/vault/.runtime/cache',
+    clinicalRecordsRuntimeRoot: '/vault/.runtime/operations/clinical-records',
     deviceSyncDbPath: '/vault/.runtime/operations/device-sync/state.sqlite',
     deviceSyncLauncherStatePath: '/vault/.runtime/operations/device-sync/launcher.json',
     deviceSyncRuntimeRoot: '/vault/.runtime/operations/device-sync',

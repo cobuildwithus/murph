@@ -3,7 +3,10 @@ import { readFileSync } from "node:fs";
 
 import { beforeEach, describe, expect, it, vi } from "vitest";
 
-import { hashClinicalFhirPatientId } from "@murphai/clinical-records";
+import {
+  hashClinicalFhirPageUrl,
+  hashClinicalFhirPatientId,
+} from "@murphai/clinical-records";
 import type { HostedClinicalRecordsFetchPageRequest } from "@murphai/hosted-execution/clinical-records";
 
 const mocks = vi.hoisted(() => ({
@@ -113,6 +116,133 @@ describe("Clinical Records retrieval control plane", () => {
     expect(harness.state.run.fetchedBytes).toBeGreaterThan(0);
   });
 
+  it("uses the exact validated provider next-link text as pagination provenance", async () => {
+    const harness = createHarness(["Patient", "Observation"]);
+    const exactNextUrl =
+      "https://FHIR.EXAMPLE.TEST:443/FHIR/R4/Observation?_count=100&patient=patient-1&page=2";
+    const fetchImpl = vi.fn()
+      .mockResolvedValueOnce(fhirResponse({
+        entry: [{ resource: { id: "obs-exact-1", resourceType: "Observation", status: "final" } }],
+        link: [{ relation: "next", url: exactNextUrl }],
+        resourceType: "Bundle",
+        type: "searchset",
+      }))
+      .mockResolvedValueOnce(fhirResponse({
+        entry: [{ resource: { id: "obs-exact-2", resourceType: "Observation", status: "final" } }],
+        resourceType: "Bundle",
+        type: "searchset",
+      }));
+
+    const first = await fetchClinicalRetrievalPage({
+      fetchImpl,
+      memberId: MEMBER_ID,
+      request: pageRequest({ requestId: "request_exact_1", resourceType: "Observation" }),
+    });
+    expect(first.status).toBe("page");
+    if (first.status !== "page" || !first.nextCursor) {
+      throw new Error("Expected an exact-link continuation cursor.");
+    }
+    expect(JSON.parse(harness.cursorPlaintexts.get(first.nextCursor) ?? "null")).toEqual({
+      schema: "murph.clinical-page-cursor.v2",
+      url: exactNextUrl,
+    });
+
+    const second = await fetchClinicalRetrievalPage({
+      fetchImpl,
+      memberId: MEMBER_ID,
+      request: pageRequest({
+        cursor: first.nextCursor,
+        requestId: "request_exact_2",
+        resourceType: "Observation",
+      }),
+    });
+
+    expect(second).toEqual(expect.objectContaining({
+      pageUrlHash: hashClinicalFhirPageUrl(exactNextUrl),
+      status: "page",
+    }));
+    expect(JSON.parse(first.body)).toMatchObject({
+      link: [{ relation: "next", url: exactNextUrl }],
+    });
+    expect(fetchImpl).toHaveBeenNthCalledWith(
+      2,
+      new URL(exactNextUrl),
+      expect.objectContaining({ method: "GET" }),
+    );
+  });
+
+  it("deduplicates logical continuation pages across randomized cursor ciphertext", async () => {
+    const harness = createHarness(["Patient", "Observation"]);
+    const nextUrl =
+      "https://fhir.example.test/FHIR/R4/Observation?_count=100&patient=patient-1&page=2";
+    const rootBody = {
+      entry: [{ resource: { id: "obs-root", resourceType: "Observation", status: "final" } }],
+      link: [{ relation: "next", url: nextUrl }],
+      resourceType: "Bundle",
+      type: "searchset",
+    };
+    const continuationBody = {
+      entry: [{ resource: { id: "obs-next", resourceType: "Observation", status: "final" } }],
+      resourceType: "Bundle",
+      type: "searchset",
+    };
+    const fetchImpl = vi.fn()
+      .mockResolvedValueOnce(fhirResponse(rootBody))
+      .mockResolvedValueOnce(fhirResponse(rootBody))
+      .mockResolvedValueOnce(fhirResponse(continuationBody))
+      .mockResolvedValueOnce(fhirResponse(continuationBody));
+
+    const firstRoot = await fetchClinicalRetrievalPage({
+      fetchImpl,
+      memberId: MEMBER_ID,
+      request: pageRequest({ requestId: "request_random_root_1", resourceType: "Observation" }),
+    });
+    const replayedRoot = await fetchClinicalRetrievalPage({
+      fetchImpl,
+      memberId: MEMBER_ID,
+      request: pageRequest({ requestId: "request_random_root_2", resourceType: "Observation" }),
+    });
+    if (
+      firstRoot.status !== "page"
+      || replayedRoot.status !== "page"
+      || !firstRoot.nextCursor
+      || !replayedRoot.nextCursor
+    ) {
+      throw new Error("Expected two independently sealed continuation cursors.");
+    }
+    expect(replayedRoot.nextCursor).not.toBe(firstRoot.nextCursor);
+
+    const firstContinuation = await fetchClinicalRetrievalPage({
+      fetchImpl,
+      memberId: MEMBER_ID,
+      request: pageRequest({
+        cursor: firstRoot.nextCursor,
+        requestId: "request_random_next_1",
+        resourceType: "Observation",
+      }),
+    });
+    const replayedContinuation = await fetchClinicalRetrievalPage({
+      fetchImpl,
+      memberId: MEMBER_ID,
+      request: pageRequest({
+        cursor: replayedRoot.nextCursor,
+        requestId: "request_random_next_2",
+        resourceType: "Observation",
+      }),
+    });
+
+    expect(firstContinuation).toEqual(expect.objectContaining({
+      pageUrlHash: hashClinicalFhirPageUrl(nextUrl),
+      status: "page",
+    }));
+    expect(replayedContinuation).toEqual(expect.objectContaining({
+      pageUrlHash: hashClinicalFhirPageUrl(nextUrl),
+      status: "page",
+    }));
+    expect(harness.state.run.pageCount).toBe(2);
+    expect(harness.state.run.providerRequestCount).toBe(4);
+  });
+
   it("returns a direct Patient read without exposing a root page URL hash", async () => {
     createHarness(["Patient"]);
     const fetchImpl = vi.fn().mockResolvedValue(fhirResponse({
@@ -170,8 +300,7 @@ describe("Clinical Records retrieval control plane", () => {
   it("rejects a continuation that changes the resource-family path", async () => {
     const harness = createHarness(["Patient", "Observation"]);
     harness.cursorPlaintexts.set("bad-cursor", JSON.stringify({
-      expiresAt: new Date(Date.now() + 60_000).toISOString(),
-      schema: "murph.clinical-page-cursor.v1",
+      schema: "murph.clinical-page-cursor.v2",
       url: "https://fhir.example.test/FHIR/R4/Condition?_count=100&patient=patient-1",
     }));
     const fetchImpl = vi.fn();

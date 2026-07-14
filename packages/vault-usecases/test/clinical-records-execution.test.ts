@@ -1,4 +1,4 @@
-import { access, mkdtemp, readFile, rm } from "node:fs/promises";
+import { access, mkdtemp, readFile, readdir, rm, stat } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import path from "node:path";
 
@@ -13,9 +13,13 @@ import {
   initializeVault,
 } from "@murphai/core";
 import {
+  clearClinicalFhirRetrievalCheckpoint,
+  ClinicalFhirRetrievalCheckpointError,
   ClinicalFhirSnapshotRejectedError,
   importClinicalFhirSnapshot,
+  readClinicalFhirRetrievalCheckpoint,
   type ClinicalFhirSnapshotImportInput,
+  writeClinicalFhirRetrievalCheckpoint,
 } from "@murphai/vault-usecases/clinical-records";
 import { afterEach, describe, expect, it } from "vitest";
 
@@ -34,6 +38,78 @@ afterEach(async () => {
 });
 
 describe("importClinicalFhirSnapshot", () => {
+  it("keeps retrieval checkpoints private, run-bound, and terminally clearable", async () => {
+    const input = await createSnapshotInput({
+      pages: [],
+      resourceTypes: ["Observation"],
+    });
+    const identity = {
+      connectionId: input.connectionId,
+      fetchedAt: input.fetchedAt,
+      fhirBaseUrlHash: input.fhirBaseUrlHash,
+      generation: 1,
+      grantedScopes: input.grantedScopes,
+      patientIdHash: input.patientIdHash,
+      requestedScopes: input.requestedScopes,
+      retrievalJobId: input.retrievalJobId,
+      retrievalScopes: input.retrievalScopes,
+      runId: "clinical-run-1",
+      sourceSystem: input.sourceSystem,
+    };
+    const pageContent = "{\"resourceType\":\"Bundle\",\"entry\":[]}";
+    const checkpoint = {
+      authorizationRequired: false,
+      completedResourceTypes: [],
+      currentResourceIndex: 0,
+      cursor: "randomized-cursor-2",
+      errors: [],
+      pageFetchCount: 1,
+      pages: [{ content: pageContent, resourceType: "Observation" as const }],
+      resourcePageStartIndex: 0,
+      seenCursors: [],
+      seenPageUrlHashes: [],
+      successfulPageCount: 1,
+      totalBodyBytes: Buffer.byteLength(pageContent, "utf8"),
+      totalResourceCount: 0,
+    };
+
+    await writeClinicalFhirRetrievalCheckpoint({
+      checkpoint,
+      identity,
+      vaultRoot: input.vaultRoot,
+    });
+
+    const checkpointDirectory = path.join(
+      input.vaultRoot,
+      ".runtime",
+      "operations",
+      "clinical-records",
+    );
+    const checkpointFiles = await readdir(checkpointDirectory);
+    expect(checkpointFiles).toHaveLength(1);
+    expect((await stat(checkpointDirectory)).mode & 0o777).toBe(0o700);
+    expect((await stat(path.join(checkpointDirectory, checkpointFiles[0]!))).mode & 0o777)
+      .toBe(0o600);
+    await expect(readClinicalFhirRetrievalCheckpoint({
+      identity,
+      vaultRoot: input.vaultRoot,
+    })).resolves.toEqual(checkpoint);
+
+    await expect(readClinicalFhirRetrievalCheckpoint({
+      identity: { ...identity, connectionId: "different-clinical-connection" },
+      vaultRoot: input.vaultRoot,
+    })).rejects.toBeInstanceOf(ClinicalFhirRetrievalCheckpointError);
+
+    await clearClinicalFhirRetrievalCheckpoint({
+      identity,
+      vaultRoot: input.vaultRoot,
+    });
+    await expect(readClinicalFhirRetrievalCheckpoint({
+      identity,
+      vaultRoot: input.vaultRoot,
+    })).resolves.toBeNull();
+  });
+
   it("atomically persists raw evidence and idempotently applies executable decisions", async () => {
     const input = await createSnapshotInput({
       pages: [{
@@ -87,6 +163,76 @@ describe("importClinicalFhirSnapshot", () => {
       signal: controller.signal,
     })).rejects.toMatchObject({ name: "AbortError" });
     await expectClinicalRawSnapshotAbsent(input);
+  });
+
+  it("rechecks current run authority immediately before raw persistence", async () => {
+    const input = await createSnapshotInput({
+      pages: [{
+        content: fhirBundle([heartRateObservation("revoked-before-raw")]),
+        resourceType: "Observation",
+      }],
+      resourceTypes: ["Observation"],
+    });
+    const revoked = new Error("Clinical retrieval authority ended.");
+    let authorityChecks = 0;
+
+    await expect(importClinicalFhirSnapshot({
+      ...input,
+      assertCurrent: async () => {
+        authorityChecks += 1;
+        throw revoked;
+      },
+    })).rejects.toBe(revoked);
+
+    expect(authorityChecks).toBe(1);
+    await expectClinicalRawSnapshotAbsent(input);
+  });
+
+  it("rechecks authority between raw persistence and canonical mutation", async () => {
+    const resourceId = "revoked-before-canonical";
+    const input = await createSnapshotInput({
+      pages: [{
+        content: fhirBundle([heartRateObservation(resourceId)]),
+        resourceType: "Observation",
+      }],
+      resourceTypes: ["Observation"],
+    });
+    const revoked = new Error("Clinical retrieval authority ended.");
+    let authorityChecks = 0;
+
+    await expect(importClinicalFhirSnapshot({
+      ...input,
+      assertCurrent: async () => {
+        authorityChecks += 1;
+        if (authorityChecks === 2) {
+          throw revoked;
+        }
+      },
+    })).rejects.toBe(revoked);
+
+    expect(authorityChecks).toBe(2);
+    await expect(access(path.join(
+      input.vaultRoot,
+      "raw/clinical/fhir",
+      input.connectionId,
+      input.retrievalJobId,
+      "manifest.json",
+    ))).resolves.toBeUndefined();
+    expect(await findEventByExternalRef({
+      vaultRoot: input.vaultRoot,
+      system: `epic-fhir-${FHIR_BASE_URL_HASH}-${PATIENT_ID_HASH}`,
+      resourceType: "observation",
+      resourceId,
+    })).toBeNull();
+
+    const resumed = await importClinicalFhirSnapshot({
+      ...input,
+      assertCurrent: async () => undefined,
+    });
+    expect(resumed.canonical).toEqual(expect.objectContaining({
+      applied: true,
+      createdCount: 1,
+    }));
   });
 
   it("persists and resolves a two-page FHIR continuation chain", async () => {

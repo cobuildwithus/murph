@@ -5,6 +5,7 @@ import { createHash, randomBytes } from "node:crypto";
 import {
   CLINICAL_FHIR_RESOURCE_TYPES,
   clinicalSourceSystemSchema,
+  hashClinicalFhirPageUrl,
   hashClinicalFhirPatientId,
   type ClinicalSourceSystem,
 } from "@murphai/clinical-records";
@@ -52,7 +53,6 @@ const FHIR_PAGE_COUNT = "100";
 const FHIR_NEXT_URL_MAX_CHARS = 1_024;
 const PAGE_REQUEST_CLAIM_STALE_MS = 30_000;
 const PAGE_EGRESS_RESERVATION_BYTES = HOSTED_CLINICAL_RECORDS_MAX_PAGE_BODY_CHARS;
-const PAGE_CURSOR_TTL_MS = 60 * 60 * 1_000;
 const TOKEN_REFRESH_LEEWAY_MS = 60_000;
 const RETRIEVAL_REQUEST_ID_PREFIX = "crq_";
 const FHIR_PATIENT_ID_PATTERN = /^[A-Za-z0-9.-]{1,64}$/u;
@@ -105,6 +105,11 @@ interface RunnableClinicalRun {
   providerRequestCount: number;
   resourceTypes: HostedClinicalRecordsFetchPageRequest["resourceType"][];
   status: string;
+}
+
+interface ValidatedFhirPageUrl {
+  raw: string;
+  url: URL;
 }
 
 export async function readClinicalRetrievalRun(input: {
@@ -171,7 +176,7 @@ export async function fetchClinicalRetrievalPage(input: {
     return unavailable("retrieval-bound-reached", false);
   }
 
-  let pageUrl: URL;
+  let pageUrl: ValidatedFhirPageUrl;
   let patientId: string;
   try {
     patientId = requireFhirPatientId(await openClinicalConnectionSecret({
@@ -189,13 +194,16 @@ export async function fetchClinicalRetrievalPage(input: {
           resourceType: input.request.resourceType,
           runId: run.id,
         })
-      : buildInitialFhirPageUrl({
-          fhirBaseUrl: run.connection.fhirBaseUrl,
-          patientId,
-          resourceType: input.request.resourceType,
-        });
+      : (() => {
+          const url = buildInitialFhirPageUrl({
+            fhirBaseUrl: run.connection.fhirBaseUrl,
+            patientId,
+            resourceType: input.request.resourceType,
+          });
+          return { raw: url.toString(), url };
+        })();
     assertFhirPageUrlAllowed({
-      candidate: pageUrl,
+      candidate: pageUrl.url,
       fhirBaseUrl: run.connection.fhirBaseUrl,
       initialPatientRead: input.request.cursor === null && input.request.resourceType === "Patient",
       resourceType: input.request.resourceType,
@@ -207,7 +215,7 @@ export async function fetchClinicalRetrievalPage(input: {
   const requestFingerprint = sha256Hex([
     String(run.generation),
     input.request.resourceType,
-    input.request.cursor ? sha256Hex(input.request.cursor) : "initial",
+    hashClinicalFhirPageUrl(pageUrl.raw),
   ].join("\n"));
   const claimed = await claimRetrievalPageRequest({
     connectionId: run.connection.id,
@@ -229,7 +237,7 @@ export async function fetchClinicalRetrievalPage(input: {
     const response = await fetchFhirPage({
       accessToken,
       fetchImpl: input.fetchImpl,
-      pageUrl,
+      pageUrl: pageUrl.url,
     });
     const sanitized = await readSanitizedFhirPage({
       fhirBaseUrl: run.connection.fhirBaseUrl,
@@ -243,9 +251,8 @@ export async function fetchClinicalRetrievalPage(input: {
           resourceType: input.request.resourceType,
           runId: run.id,
           value: JSON.stringify({
-            expiresAt: new Date(Date.now() + PAGE_CURSOR_TTL_MS).toISOString(),
-            schema: "murph.clinical-page-cursor.v1",
-            url: sanitized.nextUrl.toString(),
+            schema: "murph.clinical-page-cursor.v2",
+            url: sanitized.nextUrl.raw,
           }),
         })
       : null;
@@ -267,7 +274,9 @@ export async function fetchClinicalRetrievalPage(input: {
     return {
       body: sanitized.body,
       nextCursor,
-      ...(input.request.cursor ? { pageUrlHash: sha256Hex(pageUrl.toString()) } : {}),
+      ...(input.request.cursor
+        ? { pageUrlHash: hashClinicalFhirPageUrl(pageUrl.raw) }
+        : {}),
       status: "page",
     };
   } catch (error) {
@@ -574,7 +583,7 @@ async function openPageCursor(input: {
   memberId: string;
   resourceType: string;
   runId: string;
-}): Promise<URL> {
+}): Promise<ValidatedFhirPageUrl> {
   const plaintext = await openClinicalPageCursor({
     generation: input.generation,
     memberId: input.memberId,
@@ -586,14 +595,12 @@ async function openPageCursor(input: {
   if (!parsed || typeof parsed !== "object" || Array.isArray(parsed)) throw new TypeError("Invalid cursor.");
   const record = parsed as Record<string, unknown>;
   if (
-    Object.keys(record).sort().join(",") !== "expiresAt,schema,url"
-    || record.schema !== "murph.clinical-page-cursor.v1"
-    || typeof record.expiresAt !== "string"
+    Object.keys(record).sort().join(",") !== "schema,url"
+    || record.schema !== "murph.clinical-page-cursor.v2"
     || typeof record.url !== "string"
     || record.url.length > FHIR_NEXT_URL_MAX_CHARS
-    || Date.parse(record.expiresAt) <= Date.now()
   ) throw new TypeError("Invalid cursor.");
-  return new URL(record.url);
+  return { raw: record.url, url: new URL(record.url) };
 }
 
 function assertFhirPageUrlAllowed(input: {
@@ -767,7 +774,7 @@ async function readSanitizedFhirPage(input: {
   fhirBaseUrl: string;
   resourceType: string;
   response: Response;
-}): Promise<{ body: string; bodyBytes: number; nextUrl: URL | null }> {
+}): Promise<{ body: string; bodyBytes: number; nextUrl: ValidatedFhirPageUrl | null }> {
   const contentType = input.response.headers.get("content-type")?.toLowerCase() ?? "";
   if (contentType && !contentType.includes("json")) throw invalidFhirResponseError();
   let bytes: Uint8Array;
@@ -799,7 +806,7 @@ async function readSanitizedFhirPage(input: {
   }
   const record = requireRecord(raw);
   let validated: Record<string, unknown>;
-  let nextUrl: URL | null = null;
+  let nextUrl: ValidatedFhirPageUrl | null = null;
   if (input.resourceType === "Patient") {
     if (record.resourceType !== "Patient") throw invalidFhirResponseError();
     validated = record;
@@ -822,22 +829,27 @@ async function readSanitizedFhirPage(input: {
   return { body, bodyBytes, nextUrl };
 }
 
-function readNextFhirUrl(value: unknown, fhirBaseUrl: string, resourceType: string): URL | null {
+function readNextFhirUrl(
+  value: unknown,
+  fhirBaseUrl: string,
+  resourceType: string,
+): ValidatedFhirPageUrl | null {
   if (value === undefined) return null;
   const links = requireBoundedArray(value, 16);
-  let next: URL | null = null;
+  let next: ValidatedFhirPageUrl | null = null;
   for (const link of links) {
     const record = requireRecord(link);
     if (record.relation !== "next") continue;
     if (next || typeof record.url !== "string" || record.url.length > FHIR_NEXT_URL_MAX_CHARS) {
       throw invalidFhirResponseError();
     }
-    next = new URL(record.url);
+    const url = new URL(record.url);
     assertFhirPageUrlAllowed({
-      candidate: next,
+      candidate: url,
       fhirBaseUrl,
       resourceType,
     });
+    next = { raw: record.url, url };
   }
   return next;
 }
