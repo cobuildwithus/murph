@@ -199,6 +199,10 @@ function createHostedOnboardingEnvironment(
     privyAppSecret: null,
     privyVerificationKey: null,
     publicBaseUrl: null,
+    stripeFamilyPriceIdsByPlan: {
+      edge: null,
+      pulse: null,
+    },
     stripePriceIdsByPlan: {
       launch_edge_monthly: null,
       launch_monthly: null,

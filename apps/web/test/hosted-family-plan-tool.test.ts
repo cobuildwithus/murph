@@ -57,6 +57,7 @@ describe("hosted runtime Family plan tool", () => {
       invite: {
         expiresAt: new Date("2026-06-25T00:00:00.000Z"),
         id: "hbagi_adam",
+        planCode: "pulse",
         status: "pending",
         targetLabel: "Adam",
         targetPhoneHint: null,
@@ -91,6 +92,10 @@ describe("hosted runtime Family plan tool", () => {
       .mockResolvedValueOnce({
         billingActive: false,
         billingStatus: "not_started",
+        plans: {
+          edge: { active: 0, billed: 0, invited: 0, remaining: 0, used: 0 },
+          pulse: { active: 1, billed: 2, invited: 0, remaining: 1, used: 1 },
+        },
         seats: {
           active: 1,
           billed: 2,
@@ -115,6 +120,10 @@ describe("hosted runtime Family plan tool", () => {
         billingStatus: "not_started",
         checkoutUrl: "https://checkout.stripe.test/family",
         owner: true,
+        plans: {
+          edge: { active: 0, billed: 0, invited: 0, remaining: 0, used: 0 },
+          pulse: { active: 1, billed: 2, invited: 0, remaining: 1, used: 1 },
+        },
         preparedInvite: null,
         preparedInviteReplyText: null,
         seats: {
@@ -154,6 +163,10 @@ describe("hosted runtime Family plan tool", () => {
       .mockResolvedValueOnce({
         billingActive: false,
         billingStatus: "not_started",
+        plans: {
+          edge: { active: 0, billed: 0, invited: 0, remaining: 0, used: 0 },
+          pulse: { active: 1, billed: 0, invited: 0, remaining: 0, used: 1 },
+        },
         seats: {
           active: 1,
           billed: 0,
@@ -183,6 +196,10 @@ describe("hosted runtime Family plan tool", () => {
         billingStatus: "not_started",
         checkoutUrl: "https://checkout.stripe.test/family",
         owner: true,
+        plans: {
+          edge: { active: 0, billed: 0, invited: 0, remaining: 0, used: 0 },
+          pulse: { active: 1, billed: 0, invited: 0, remaining: 0, used: 1 },
+        },
         preparedInvite: null,
         preparedInviteReplyText: null,
         seats: {
@@ -262,6 +279,7 @@ describe("hosted runtime Family plan tool", () => {
             acceptUrl: "https://local.withmurph.ai/family/accept/family_token",
             expiresAt: new Date("2026-06-25T00:00:00.000Z"),
             id: "hbagi_adam",
+            planCode: "pulse",
             status: "pending",
             targetLabel: "Adam",
             targetPhoneHint: null,
@@ -300,6 +318,7 @@ describe("hosted runtime Family plan tool", () => {
         preparedInvite: {
           acceptUrl: "https://local.withmurph.ai/family/accept/family_token",
           expiresAt: "2026-06-25T00:00:00.000Z",
+          planCode: "pulse",
           status: "pending",
           targetLabel: "Adam",
           targetPhoneHint: null,
@@ -322,6 +341,7 @@ describe("hosted runtime Family plan tool", () => {
     expect(mocks.createHostedFamilyBillingCheckout).not.toHaveBeenCalled();
     expect(mocks.issueHostedFamilyInviteFromOwnerTx).toHaveBeenCalledWith({
       ownerMemberId: "member_owner",
+      planCode: "pulse",
       targetEmail: null,
       targetLabel: "Adam",
       targetPhoneNumber: null,
@@ -341,6 +361,7 @@ describe("hosted runtime Family plan tool", () => {
           acceptUrl: "https://local.withmurph.ai/family/accept/family_token",
           expiresAt: new Date("2026-06-25T00:00:00.000Z"),
           id: "hbagi_adam",
+          planCode: "pulse",
           status: "pending",
           targetLabel: "Adam",
           targetPhoneHint: null,
@@ -382,6 +403,7 @@ describe("hosted runtime Family plan tool", () => {
 
     expect(mocks.issueHostedFamilyInviteFromOwnerTx).toHaveBeenCalledWith({
       ownerMemberId: "member_owner",
+      planCode: "pulse",
       targetEmail: "adam@example.com",
       targetLabel: "Adam",
       targetPhoneNumber: null,

@@ -8,9 +8,13 @@ import {
   issueHostedFamilyInviteTx,
   readHostedFamilyOwnerSnapshotForMember,
   resolveHostedFamilyTelegramInviteUrl,
-  updateHostedFamilySeatCount,
-  waitForHostedFamilyBilledSeatCount,
+  updateHostedFamilyPlanCapacities,
+  waitForHostedFamilyPlanCapacities,
 } from "@/src/lib/hosted-onboarding/family-plan";
+import {
+  parseHostedPlanCode,
+  type HostedPlanCode,
+} from "@/src/lib/hosted-onboarding/billing-plans";
 import { hostedOnboardingError, isHostedOnboardingError } from "@/src/lib/hosted-onboarding/errors";
 import { jsonOk, readOptionalJsonObject, withJsonError } from "@/src/lib/hosted-onboarding/http";
 import { requireHostedAppSessionFromRequest } from "@/src/lib/hosted-onboarding/app-session";
@@ -30,6 +34,14 @@ export const POST = withJsonError(async (request: Request) => {
     typeof body.targetPhoneNumber === "string" ? body.targetPhoneNumber : null;
   const targetTelegramUsername =
     typeof body.targetTelegramUsername === "string" ? body.targetTelegramUsername : null;
+  const planCode = parseHostedPlanCode(body.planCode ?? "pulse");
+  if (!planCode) {
+    throw hostedOnboardingError({
+      code: "HOSTED_FAMILY_PLAN_CODE_INVALID",
+      httpStatus: 400,
+      message: "Choose Pulse or Edge for this Family member.",
+    });
+  }
 
   if (!targetPhoneNumber && !targetTelegramUsername && !targetEmail && !targetLabel) {
     throw hostedOnboardingError({
@@ -55,6 +67,7 @@ export const POST = withJsonError(async (request: Request) => {
       return issueHostedFamilyInviteTx({
         groupId: group.id,
         invitedByMemberId: auth.member.id,
+        planCode,
         targetEmail,
         targetLabel,
         targetPhoneNumber,
@@ -72,7 +85,7 @@ export const POST = withJsonError(async (request: Request) => {
     if (!canAutoAddSeat || !isSeatLimitError(error)) {
       throw error;
     }
-    const seatResult = await addSeatThenInvite(prisma, auth.member.id, issueInvite);
+    const seatResult = await addSeatThenInvite(prisma, auth.member.id, planCode, issueInvite);
     if (seatResult === "unavailable") {
       throw error;
     }
@@ -99,6 +112,7 @@ export const POST = withJsonError(async (request: Request) => {
       channel: invite.channel,
       expiresAt: invite.expiresAt.toISOString(),
       id: invite.id,
+      planCode: invite.planCode,
       status: invite.status,
       targetLabel: invite.targetLabel,
       targetPhoneHint: invite.targetPhoneHint,
@@ -118,6 +132,7 @@ function isSeatLimitError(error: unknown): boolean {
 async function addSeatThenInvite<T>(
   prisma: ReturnType<typeof getPrisma>,
   ownerMemberId: string,
+  planCode: HostedPlanCode,
   issueInvite: () => Promise<T>,
 ): Promise<{ invite: T } | "syncing" | "unavailable"> {
   // Re-check before buying: a concurrent invite for the same target may have just
@@ -140,7 +155,7 @@ async function addSeatThenInvite<T>(
   }
   // A seat may have freed (invite expired/canceled, member removed) since the
   // re-check; take it instead of buying another.
-  if (snapshot.seats.remaining > 0) {
+  if (snapshot.plans[planCode].remaining > 0) {
     try {
       return { invite: await issueInvite() };
     } catch (error) {
@@ -152,21 +167,25 @@ async function addSeatThenInvite<T>(
   if (snapshot.seats.billed >= snapshot.seats.max) {
     return "unavailable";
   }
-  const targetSeatCount = snapshot.seats.billed + 1;
-  await updateHostedFamilySeatCount({
+  const targetCapacities = {
+    edge: snapshot.plans.edge.billed,
+    pulse: snapshot.plans.pulse.billed,
+    [planCode]: snapshot.plans[planCode].billed + 1,
+  };
+  await updateHostedFamilyPlanCapacities({
     groupId: snapshot.groupId,
     ownerMemberId,
     prisma,
-    targetSeatCount,
+    targetCapacities,
   });
   // Give the webhook a moment to reconcile the new count, then let the invite
   // itself be the test: if any seat is now open (even if a concurrent change
   // pushed the count past our target) it lands; only a still-full plan reports
   // syncing so the owner retries instead of seeing a bare seat-limit error.
-  await waitForHostedFamilyBilledSeatCount({
+  await waitForHostedFamilyPlanCapacities({
     groupId: snapshot.groupId,
     prisma,
-    targetSeatCount,
+    targetCapacities,
   });
   try {
     return { invite: await issueInvite() };

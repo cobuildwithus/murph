@@ -4,8 +4,11 @@ import { normalizeMurphTelegramUsername } from "../murph-contact-routing";
 import { normalizeNullableString, parseInteger } from "../primitives";
 import {
   getHostedBillingPlanDefinition,
+  getHostedFamilyBillingOfferDefinition,
   HOSTED_BILLING_PLAN_CODES,
+  HOSTED_PLAN_CODES,
   type HostedBillingPlanCode,
+  type HostedPlanCode,
 } from "./billing-plans";
 import { normalizePhoneNumber } from "./phone";
 
@@ -43,6 +46,7 @@ export interface HostedOnboardingEnvironment {
   privyVerificationKey: string | null;
   publicBaseUrl: string | null;
   stripePriceIdsByPlan: Readonly<Record<HostedBillingPlanCode, string | null>>;
+  stripeFamilyPriceIdsByPlan: Readonly<Record<HostedPlanCode, string | null>>;
   stripeSecretKey: string | null;
   stripeWebhookSecret: string | null;
   telegramBotUsername: string | null;
@@ -90,6 +94,7 @@ export function readHostedOnboardingEnvironment(
     privyAppSecret: readEnv(source, "PRIVY_APP_SECRET"),
     privyVerificationKey: readEnv(source, "PRIVY_VERIFICATION_KEY"),
     publicBaseUrl,
+    stripeFamilyPriceIdsByPlan: readHostedStripeFamilyPriceIdsByPlan(source),
     stripePriceIdsByPlan: readHostedStripePriceIdsByPlan(source),
     stripeSecretKey: readEnv(source, "STRIPE_SECRET_KEY"),
     stripeWebhookSecret: readEnv(source, "STRIPE_WEBHOOK_SECRET"),
@@ -420,6 +425,17 @@ function readHostedStripePriceIdsByPlan(
   source: HostedOnboardingEnvSource,
 ): Record<HostedBillingPlanCode, string | null> {
   return readHostedStripePriceIdsByEnvKey(source, (definition) => definition.priceIdEnvKey);
+}
+
+function readHostedStripeFamilyPriceIdsByPlan(
+  source: HostedOnboardingEnvSource,
+): Record<HostedPlanCode, string | null> {
+  return Object.fromEntries(
+    HOSTED_PLAN_CODES.map((planCode) => {
+      const offer = getHostedFamilyBillingOfferDefinition(planCode);
+      return [planCode, readEnv(source, offer.priceIdEnvKey)];
+    }),
+  ) as Record<HostedPlanCode, string | null>;
 }
 
 function readHostedStripePriceIdsByEnvKey(
