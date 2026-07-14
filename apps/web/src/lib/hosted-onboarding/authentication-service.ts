@@ -4,6 +4,7 @@ import {
   type PrismaClient,
 } from "@prisma/client";
 
+import { signalHostedMailboxAppendRuntime } from "../hosted-orchestration/signal-runtime";
 import { getPrisma } from "../prisma";
 import { readHostedPhoneHint } from "./contact-privacy";
 import { assertHostedMemberNotSuspended } from "./entitlement";
@@ -27,6 +28,7 @@ import {
 } from "./hosted-member-routing-store";
 import {
   enqueueHostedMemberChannelsUpdatedForActiveMemberTx,
+  type HostedMailboxAppendDispatch,
 } from "./member-channel-sync";
 import {
   isHostedMemberMessagingSetupRequired,
@@ -67,6 +69,7 @@ import { resolveHostedPrivyLinkedAccounts } from "./privy-shared";
 
 type HostedPrivyCompletionMemberResolution = {
   bindingAuthMethod: HostedPrivyAuthMethod;
+  channelSyncDispatch: HostedMailboxAppendDispatch | null;
   initialVisitEligible: boolean;
   member: HostedMemberCoreState;
   primaryBindingSynced: boolean;
@@ -131,7 +134,7 @@ export async function completeHostedPrivyVerification(input: {
             authMethod: inviteAuthMethod,
             identity: input.identity,
           });
-          const member = await prisma.$transaction(async (tx) => {
+          const { channelSyncDispatch, member } = await prisma.$transaction(async (tx) => {
             const reconciledMember = await reconcileHostedPrivyIdentityOnMemberTx({
               authMethod: inviteAuthMethod,
               expectedEmailLookupKey: pendingEmailContact?.lookupKey,
@@ -152,7 +155,7 @@ export async function completeHostedPrivyVerification(input: {
               memberId: reconciledMember.id,
               prisma: tx,
             });
-            await syncHostedPrivyTelegramBindingAndChannelsTx({
+            const channelSyncDispatch = await syncHostedPrivyTelegramBindingAndChannelsTx({
               authMethod: inviteAuthMethod,
               identity: input.identity,
               memberId: reconciledMember.id,
@@ -166,11 +169,15 @@ export async function completeHostedPrivyVerification(input: {
               prisma: tx,
               timeZone,
             });
-            return reconciledMember;
+            return {
+              channelSyncDispatch,
+              member: reconciledMember,
+            };
           }, HOSTED_ONBOARDING_TRANSACTION_OPTIONS);
 
           return {
             bindingAuthMethod: inviteAuthMethod,
+            channelSyncDispatch,
             initialVisitEligible: true,
             member,
             primaryBindingSynced:
@@ -192,7 +199,7 @@ export async function completeHostedPrivyVerification(input: {
               memberId: memberResolution.member.id,
               prisma: tx,
             });
-            await syncHostedPrivyTelegramBindingAndChannelsTx({
+            const channelSyncDispatch = await syncHostedPrivyTelegramBindingAndChannelsTx({
               authMethod,
               identity: input.identity,
               memberId: memberResolution.member.id,
@@ -208,6 +215,7 @@ export async function completeHostedPrivyVerification(input: {
             });
 
             return {
+              channelSyncDispatch,
               initialVisitEligible: memberResolution.created,
               member: memberResolution.member,
               primaryBindingSynced: authMethod === "email" || authMethod === "telegram",
@@ -215,6 +223,13 @@ export async function completeHostedPrivyVerification(input: {
           }, HOSTED_ONBOARDING_TRANSACTION_OPTIONS)),
         };
     const member = memberResolution.member;
+
+    if (memberResolution.channelSyncDispatch) {
+      await signalHostedMailboxAppendBestEffort({
+        expectedUserId: member.id,
+        mailboxItemId: memberResolution.channelSyncDispatch.mailboxItemId,
+      });
+    }
 
     assertHostedMemberNotSuspended(member);
 
@@ -427,10 +442,10 @@ async function syncHostedPrivyTelegramBindingAndChannelsTx(input: {
   prisma: Prisma.TransactionClient;
   telegramDirectAuthorization: HostedTelegramDirectAuthorization | undefined;
   verifiedPrivyUser: HostedPrivyUser | null;
-}): Promise<void> {
+}): Promise<HostedMailboxAppendDispatch | null> {
   const telegramUserId = input.identity.telegram?.telegramUserId;
   if (!telegramUserId) {
-    return;
+    return null;
   }
 
   const telegramThreadId = input.authMethod === "telegram"
@@ -453,10 +468,10 @@ async function syncHostedPrivyTelegramBindingAndChannelsTx(input: {
     }
 
     console.warn("Hosted Privy secondary telegram binding sync failed.");
-    return;
+    return null;
   }
 
-  await enqueueHostedMemberChannelsUpdatedForActiveMemberTx({
+  return enqueueHostedMemberChannelsUpdatedForActiveMemberTx({
     linkedAccounts: input.verifiedPrivyUser
       ? resolveHostedPrivyLinkedAccounts(input.verifiedPrivyUser)
       : undefined,
@@ -465,6 +480,17 @@ async function syncHostedPrivyTelegramBindingAndChannelsTx(input: {
     prisma: input.prisma,
     sourceType: "hosted.privy.telegram.sync",
   });
+}
+
+async function signalHostedMailboxAppendBestEffort(input: {
+  expectedUserId: string;
+  mailboxItemId: string;
+}): Promise<void> {
+  try {
+    await signalHostedMailboxAppendRuntime(input);
+  } catch {
+    // Authentication is committed even when the best-effort runtime wake is unavailable.
+  }
 }
 
 function isExpectedHostedPrivySecondaryBindingConflict(error: unknown): boolean {

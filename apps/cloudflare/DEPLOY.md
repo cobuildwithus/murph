@@ -477,8 +477,11 @@ Once Vercel/web can persist transition-proof inputs or current-route snapshots, 
 Bot-bound Telegram signup routes also require a consumer-first rollout. First
 deploy the compatible Vercel/web readers and signed current-route authorization
 callback with `HOSTED_TELEGRAM_BOT_BOUND_TARGET_PRODUCER_ENABLED=0`, then wait
-for prior Vercel functions to drain. Next deploy the compatible Cloudflare
-Worker/runner with `container_rollout=immediate`; require managed-container
+for prior Vercel functions to drain. While the flag is off, Web omits the
+additive assistant-route obligation from channel-update events, so an old runner
+cannot consume and discard it. No replay is required because Web also cannot
+produce a bot-bound target before the same flag is enabled. Next deploy the
+compatible Cloudflare Worker/runner with `container_rollout=immediate`; require managed-container
 smoke to prove the new runner-bundle fingerprint and verify that a current
 target reaches Telegram while a former target fails before provider entry.
 Enable the producer in a second web deploy only after both planes are

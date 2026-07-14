@@ -1,6 +1,6 @@
 import { readFileSync } from "node:fs";
 
-import { beforeEach, describe, expect, it, vi } from "vitest";
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
 import type { HostedMemberSnapshot } from "@/src/lib/hosted-onboarding/hosted-member-store";
 
@@ -47,6 +47,7 @@ import {
 describe("hosted onboarding member channel sync", () => {
   beforeEach(() => {
     vi.clearAllMocks();
+    vi.stubEnv("HOSTED_TELEGRAM_BOT_BOUND_TARGET_PRODUCER_ENABLED", "1");
     mocks.lockHostedMemberRow.mockResolvedValue(undefined);
     mocks.readHostedMemberEmailAuthorization.mockResolvedValue(null);
     mocks.readHostedMemberSnapshot.mockResolvedValue(makeMemberSnapshot());
@@ -71,6 +72,10 @@ describe("hosted onboarding member channel sync", () => {
         userId: "member_123",
       },
     });
+  });
+
+  afterEach(() => {
+    vi.unstubAllEnvs();
   });
 
   it("treats a verified Privy email as authoritative without consulting canonical email authorization", async () => {
@@ -174,6 +179,32 @@ describe("hosted onboarding member channel sync", () => {
       tx,
     });
     expect(mocks.lockHostedMemberRow).toHaveBeenCalledWith(tx, "member_123");
+  });
+
+  it("omits the assistant-route obligation until the bot-bound producer is enabled", async () => {
+    vi.stubEnv("HOSTED_TELEGRAM_BOT_BOUND_TARGET_PRODUCER_ENABLED", "0");
+    const tx = {
+      label: "producer-disabled-tx",
+    };
+
+    await enqueueHostedMemberChannelsUpdatedTx({
+      emailLinked: true,
+      memberId: "member_123",
+      occurredAt: "2026-04-15T00:00:30.000Z",
+      prisma: tx as never,
+      sourceType: "settings.telegram.sync",
+    });
+
+    const appendInput = mocks.appendHostedMailboxEnvelopeTx.mock.calls[0]?.[0] as {
+      envelope?: unknown;
+    } | undefined;
+    expect(appendInput?.envelope).not.toHaveProperty("assistantNotificationRoute");
+    expect(mocks.appendHostedMailboxEnvelopeTx).toHaveBeenCalledWith({
+      envelope: expect.objectContaining({
+        kind: "member.channels.updated",
+      }),
+      tx,
+    });
   });
 
   it("appends an explicit assistant-route revocation when no direct route remains", async () => {

@@ -1,5 +1,4 @@
 import {
-  HOSTED_TELEGRAM_BOT_ID_HEADER,
   HOSTED_TELEGRAM_DELIVERY_TARGET_HEADER,
 } from '@murphai/contracts'
 import {
@@ -124,7 +123,6 @@ export async function setTelegramMessageReaction(
   const sendReaction = async () =>
     await sendTelegramBotApiRequest({
       baseUrl,
-      botId: target.botId,
       deliveryTarget: serializeTelegramThreadTarget(target),
       fetchImplementation,
       method: 'POST',
@@ -341,7 +339,6 @@ export async function deleteTelegramMessages(
     const request = buildTelegramDeleteRequest(target, batch)
     const response = await sendTelegramBotApiRequest({
       baseUrl,
-      botId: target.botId,
       deliveryTarget: serializeTelegramThreadTarget(target),
       fetchImplementation,
       method: 'POST',
@@ -466,7 +463,6 @@ async function sendTelegramTypingIndicatorOnce(input: {
   try {
     response = await sendTelegramBotApiRequest({
       baseUrl: input.baseUrl,
-      botId: input.target.botId,
       deliveryTarget: serializeTelegramThreadTarget(input.target),
       fetchImplementation: input.fetchImplementation,
       method: 'POST',
@@ -616,7 +612,6 @@ function buildTelegramDeleteRequest(
 
 async function sendTelegramBotApiRequest(input: {
   baseUrl: string
-  botId?: string | null
   deliveryTarget?: string | null
   fetchImplementation: TelegramFetchImplementation
   method: 'POST'
@@ -644,11 +639,6 @@ async function sendTelegramBotApiRequest(input: {
           ...(!resolveTelegramBotIdFromToken(input.token) && input.deliveryTarget
             ? {
                 [HOSTED_TELEGRAM_DELIVERY_TARGET_HEADER]: input.deliveryTarget,
-              }
-            : {}),
-          ...(input.botId && !resolveTelegramBotIdFromToken(input.token)
-            ? {
-                [HOSTED_TELEGRAM_BOT_ID_HEADER]: input.botId,
               }
             : {}),
         },

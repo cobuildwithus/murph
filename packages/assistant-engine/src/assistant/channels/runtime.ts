@@ -1,5 +1,4 @@
 import {
-  HOSTED_TELEGRAM_BOT_ID_HEADER,
   HOSTED_TELEGRAM_DELIVERY_TARGET_HEADER,
   HOSTED_TELEGRAM_BOT_PUBLIC_ID_ENV,
 } from '@murphai/contracts'
@@ -1628,7 +1627,6 @@ function extractTelegramErrorContext(value: unknown): {
 
 async function sendTelegramBotApiRequest(input: {
   baseUrl: string
-  botId?: string | null
   body?: string | Blob | FormData
   deliveryTarget?: string | null
   fetchImplementation: TelegramFetchImplementation
@@ -1655,11 +1653,6 @@ async function sendTelegramBotApiRequest(input: {
           ...(!resolveTelegramBotIdFromToken(input.token) && input.deliveryTarget
             ? {
                 [HOSTED_TELEGRAM_DELIVERY_TARGET_HEADER]: input.deliveryTarget,
-              }
-            : {}),
-          ...(input.botId && !resolveTelegramBotIdFromToken(input.token)
-            ? {
-                [HOSTED_TELEGRAM_BOT_ID_HEADER]: input.botId,
               }
             : {}),
         },
@@ -1925,7 +1918,6 @@ async function sendTelegramTextChunkOnce(input: {
   try {
     const result = await sendTelegramBotApiRequest({
       baseUrl: input.baseUrl,
-      botId: input.target.botId,
       deliveryTarget: input.targetLabel,
       fetchImplementation: input.fetchImplementation,
       operation: 'sendMessage',
@@ -2016,7 +2008,6 @@ async function sendTelegramPhotoOnce(input: {
   try {
     const result = await sendTelegramBotApiRequest({
       baseUrl: input.baseUrl,
-      botId: input.target.botId,
       deliveryTarget: input.targetLabel,
       fetchImplementation: input.fetchImplementation,
       operation: 'sendPhoto',
@@ -2081,7 +2072,6 @@ async function sendTelegramVoiceMemoOnce(input: {
   try {
     const result = await sendTelegramBotApiRequest({
       baseUrl: input.baseUrl,
-      botId: input.target.botId,
       deliveryTarget: input.targetLabel,
       body: buildTelegramVoiceMemoFormData({
         bytes: input.bytes,

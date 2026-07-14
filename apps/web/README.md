@@ -467,10 +467,12 @@ Hosted onboarding extras:
   temporary `unavailable` and gate-off `not_attempted` results preserve a
   same-identity bot-bound route, while only definitive `denied` clears it; a
   newly verified Telegram identity never inherits the prior identity's route.
-  The encrypted channel-update mailbox fact carries the current assistant
-  route or revocation so managed onboarding follow-ups cannot retain a former
-  Telegram identity after settings or Privy relinking changes the binding;
-  Privy routing writes and that fact commit in one transaction. Immediately
+  Once the flag is enabled, the encrypted channel-update mailbox fact carries
+  the current assistant route or revocation so managed onboarding follow-ups
+  cannot retain a former Telegram identity after settings or Privy relinking
+  changes the binding; while the flag is off, Web omits that additive obligation
+  so an old runner cannot consume it. Privy routing writes and that fact commit
+  in one transaction, then Web signals the runtime best effort. Immediately
   before bot-bound provider entry, Cloudflare also asks the signed web callback
   to authorize only the active member's exact current persisted target and
   fails closed if the request target, persisted route, or callback disagrees.

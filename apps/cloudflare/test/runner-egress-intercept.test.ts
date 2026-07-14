@@ -2,7 +2,6 @@ import { describe, expect, it, vi, afterEach } from "vitest";
 import {
   buildExaResearchScoutOutputSchema,
   buildExaResearchScoutRequest,
-  HOSTED_TELEGRAM_BOT_ID_HEADER,
   HOSTED_TELEGRAM_DELIVERY_TARGET_HEADER,
   MAX_RESEARCH_SCOUT_CANDIDATES,
 } from "@murphai/contracts";
@@ -5704,7 +5703,6 @@ describe("hostedRunnerIntercept", () => {
         headers: {
           ...BOUND_USER_WRITE_FENCE_HEADERS,
           "content-type": "application/json",
-          [HOSTED_TELEGRAM_BOT_ID_HEADER]: "123456",
           [HOSTED_TELEGRAM_DELIVERY_TARGET_HEADER]: "789:bot:123456",
         },
         method: "POST",
@@ -5729,7 +5727,6 @@ describe("hostedRunnerIntercept", () => {
     expect(forwarded.url).toBe(
       "https://api.telegram.org/bot123456:test-token/sendMessage",
     );
-    expect(forwarded.headers.has(HOSTED_TELEGRAM_BOT_ID_HEADER)).toBe(false);
     expect(forwarded.headers.has(HOSTED_TELEGRAM_DELIVERY_TARGET_HEADER)).toBe(false);
   });
 
@@ -5752,7 +5749,6 @@ describe("hostedRunnerIntercept", () => {
         headers: {
           ...BOUND_USER_WRITE_FENCE_HEADERS,
           "content-type": "application/json",
-          [HOSTED_TELEGRAM_BOT_ID_HEADER]: "123456",
           [HOSTED_TELEGRAM_DELIVERY_TARGET_HEADER]: "789:bot:123456",
         },
         method: "POST",
@@ -5780,7 +5776,6 @@ describe("hostedRunnerIntercept", () => {
         headers: {
           ...BOUND_USER_WRITE_FENCE_HEADERS,
           "content-type": "application/json",
-          [HOSTED_TELEGRAM_BOT_ID_HEADER]: "123456",
           [HOSTED_TELEGRAM_DELIVERY_TARGET_HEADER]: "789:bot:123456",
         },
         method: "POST",
@@ -5844,7 +5839,6 @@ describe("hostedRunnerIntercept", () => {
         headers: {
           ...BOUND_USER_WRITE_FENCE_HEADERS,
           "content-type": "application/json",
-          [HOSTED_TELEGRAM_BOT_ID_HEADER]: "123456",
           [HOSTED_TELEGRAM_DELIVERY_TARGET_HEADER]:
             "789:bot:123456:business:biz-current:dm-topic:9",
         },
@@ -5886,7 +5880,6 @@ describe("hostedRunnerIntercept", () => {
           headers: {
             ...BOUND_USER_WRITE_FENCE_HEADERS,
             "content-type": "application/json",
-            [HOSTED_TELEGRAM_BOT_ID_HEADER]: "123456",
             [HOSTED_TELEGRAM_DELIVERY_TARGET_HEADER]:
               "789:bot:123456:business:biz-current:dm-topic:9",
           },
@@ -5938,7 +5931,6 @@ describe("hostedRunnerIntercept", () => {
           headers: {
             ...BOUND_USER_WRITE_FENCE_HEADERS,
             "content-type": "application/json",
-            [HOSTED_TELEGRAM_BOT_ID_HEADER]: "123456",
             [HOSTED_TELEGRAM_DELIVERY_TARGET_HEADER]: "789:bot:123456",
           },
           method: "POST",
@@ -5972,7 +5964,6 @@ describe("hostedRunnerIntercept", () => {
         headers: {
           ...BOUND_USER_WRITE_FENCE_HEADERS,
           "content-type": "application/json",
-          [HOSTED_TELEGRAM_BOT_ID_HEADER]: "123456",
           [HOSTED_TELEGRAM_DELIVERY_TARGET_HEADER]: "789:bot:123456",
         },
         method: "POST",
@@ -6006,7 +5997,6 @@ describe("hostedRunnerIntercept", () => {
         body,
         headers: {
           ...BOUND_USER_WRITE_FENCE_HEADERS,
-          [HOSTED_TELEGRAM_BOT_ID_HEADER]: "123456",
           [HOSTED_TELEGRAM_DELIVERY_TARGET_HEADER]: "789:bot:123456",
         },
         method: "POST",
@@ -6067,9 +6057,11 @@ describe("hostedRunnerIntercept", () => {
 
     const response = await hostedRunnerIntercept(
       new Request("https://api.telegram.org/bot__cloudflare_injected__/sendMessage", {
+        body: JSON.stringify({ chat_id: "789", text: "hello" }),
         headers: {
           ...BOUND_USER_WRITE_FENCE_HEADERS,
-          [HOSTED_TELEGRAM_BOT_ID_HEADER]: "654321",
+          "content-type": "application/json",
+          [HOSTED_TELEGRAM_DELIVERY_TARGET_HEADER]: "789:bot:654321",
         },
         method: "POST",
       }),

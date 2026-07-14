@@ -1,6 +1,5 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import {
-  HOSTED_TELEGRAM_BOT_ID_HEADER,
   HOSTED_TELEGRAM_DELIVERY_TARGET_HEADER,
   HOSTED_TELEGRAM_BOT_PUBLIC_ID_ENV,
 } from '@murphai/contracts'
@@ -1126,7 +1125,6 @@ describe('assistant channels runtime seam', () => {
       'https://api.telegram.org/bot__cloudflare_injected__/sendMessage',
       expect.objectContaining({
         headers: expect.objectContaining({
-          [HOSTED_TELEGRAM_BOT_ID_HEADER]: '654321',
           [HOSTED_TELEGRAM_DELIVERY_TARGET_HEADER]: '123:bot:654321',
         }),
       }),
@@ -1182,7 +1180,6 @@ describe('assistant channels runtime seam', () => {
     )
 
     const headers = fetchImplementation.mock.calls[0]?.[1]?.headers
-    expect(headers).not.toHaveProperty(HOSTED_TELEGRAM_BOT_ID_HEADER)
     expect(headers).not.toHaveProperty(HOSTED_TELEGRAM_DELIVERY_TARGET_HEADER)
     expect(JSON.parse(String(fetchImplementation.mock.calls[0]?.[1]?.body))).toMatchObject({
       chat_id: '123',

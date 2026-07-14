@@ -19,10 +19,17 @@ import { encryptHostedWebNullableString } from "@/src/lib/hosted-web/encryption"
 const channelSyncMocks = vi.hoisted(() => ({
   enqueueHostedMemberChannelsUpdatedForActiveMemberTx: vi.fn().mockResolvedValue(null),
 }));
+const runtimeSignalMocks = vi.hoisted(() => ({
+  signalHostedMailboxAppendRuntime: vi.fn().mockResolvedValue(undefined),
+}));
 
 vi.mock("@/src/lib/hosted-onboarding/member-channel-sync", () => ({
   enqueueHostedMemberChannelsUpdatedForActiveMemberTx:
     channelSyncMocks.enqueueHostedMemberChannelsUpdatedForActiveMemberTx,
+}));
+
+vi.mock("@/src/lib/hosted-orchestration/signal-runtime", () => ({
+  signalHostedMailboxAppendRuntime: runtimeSignalMocks.signalHostedMailboxAppendRuntime,
 }));
 
 vi.mock("@/src/lib/hosted-onboarding/runtime", () => ({
@@ -216,6 +223,8 @@ function makeInvite(member: ReturnType<typeof makeMember>, overrides: Record<str
 describe("completeHostedPrivyVerification", () => {
   beforeEach(() => {
     vi.clearAllMocks();
+    channelSyncMocks.enqueueHostedMemberChannelsUpdatedForActiveMemberTx.mockResolvedValue(null);
+    runtimeSignalMocks.signalHostedMailboxAppendRuntime.mockResolvedValue(undefined);
     vi.spyOn(console, "info").mockImplementation(() => {});
   });
 
@@ -1107,9 +1116,20 @@ describe("completeHostedPrivyVerification", () => {
       memberId: existingMember.id,
       telegramUserLookupKey: "hbidx:telegram-user:v1:telegram_lookup_456",
     };
+    let transactionCommitted = false;
+    const hostedInviteCreate = vi.fn().mockResolvedValue(activeInvite);
+    const transaction = vi.fn(async function (
+      this: CompleteHostedPrivyVerificationPrisma,
+      callback: (tx: CompleteHostedPrivyVerificationPrisma) => Promise<unknown>,
+    ) {
+      const result = await callback(this);
+      transactionCommitted = true;
+      return result;
+    });
     const prisma = asCompleteHostedPrivyVerificationPrisma({
+      $transaction: transaction,
       hostedInvite: {
-        create: vi.fn().mockResolvedValue(activeInvite),
+        create: hostedInviteCreate,
         findFirst: vi.fn().mockResolvedValue(null),
         update: vi.fn(),
       },
@@ -1133,6 +1153,13 @@ describe("completeHostedPrivyVerification", () => {
           return routingRecord;
         }),
       },
+    });
+    channelSyncMocks.enqueueHostedMemberChannelsUpdatedForActiveMemberTx.mockResolvedValueOnce({
+      mailboxItemId: "mailbox_privy_telegram_sync",
+    });
+    runtimeSignalMocks.signalHostedMailboxAppendRuntime.mockImplementationOnce(async () => {
+      expect(transactionCommitted).toBe(true);
+      throw new Error("runtime unavailable");
     });
 
     await completeHostedPrivyVerification({
@@ -1171,6 +1198,14 @@ describe("completeHostedPrivyVerification", () => {
         prisma,
         sourceType: "hosted.privy.telegram.sync",
       });
+    expect(runtimeSignalMocks.signalHostedMailboxAppendRuntime).toHaveBeenCalledWith({
+      expectedUserId: existingMember.id,
+      mailboxItemId: "mailbox_privy_telegram_sync",
+    });
+    expect(hostedInviteCreate).toHaveBeenCalledTimes(1);
+    expect(runtimeSignalMocks.signalHostedMailboxAppendRuntime.mock.invocationCallOrder[0]).toBeLessThan(
+      hostedInviteCreate.mock.invocationCallOrder[0] ?? 0,
+    );
   });
 
   it("fails closed when Telegram auth resolves to multiple members across blind-index read candidates", async () => {
@@ -1378,8 +1413,17 @@ describe("completeHostedPrivyVerification", () => {
     }));
   });
 
-  it("allows invite-bound Telegram-only verification with messaging ready", async () => {
+  it("allows sponsored invite-bound Telegram-only verification with messaging ready", async () => {
     const inviteMember = makeMember({
+      accountGroupMemberships: [
+        {
+          group: {
+            billingStatus: HostedBillingStatus.active,
+            suspendedAt: null,
+          },
+          status: "active",
+        },
+      ],
       maskedPhoneNumberHint: null,
       phoneLookupKey: null,
       phoneNumberVerifiedAt: null,
@@ -1415,6 +1459,9 @@ describe("completeHostedPrivyVerification", () => {
         })),
       },
     });
+    channelSyncMocks.enqueueHostedMemberChannelsUpdatedForActiveMemberTx.mockResolvedValueOnce({
+      mailboxItemId: "mailbox_invite_privy_telegram_sync",
+    });
 
     await expect(
       completeHostedPrivyVerification({
@@ -1443,11 +1490,15 @@ describe("completeHostedPrivyVerification", () => {
       joinUrl: "https://join.example.test/join/invite-code",
       memberId: inviteMember.id,
       messagingSetupRequired: false,
-      stage: "checkout",
+      stage: "active",
     });
 
     expect(prisma.hostedMember.update).not.toHaveBeenCalled();
     expect(prisma.hostedInvite.update).not.toHaveBeenCalled();
+    expect(runtimeSignalMocks.signalHostedMailboxAppendRuntime).toHaveBeenCalledWith({
+      expectedUserId: inviteMember.id,
+      mailboxItemId: "mailbox_invite_privy_telegram_sync",
+    });
   });
 
   it("requires Telegram state for invite-bound Telegram auth before mutating identity", async () => {

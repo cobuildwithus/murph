@@ -5,14 +5,12 @@ import {
   clampExaResearchScoutPublishedWindow,
   EXA_RESEARCH_SCOUT_METHOD,
   EXA_RESEARCH_SCOUT_PATH,
-  HOSTED_TELEGRAM_BOT_ID_HEADER,
   HOSTED_TELEGRAM_DELIVERY_TARGET_HEADER,
   parseExaResearchScoutRequestBody,
   type ExaResearchScoutRequestBody,
   type ExaResearchScoutParsedRequest,
 } from "@murphai/contracts";
 import {
-  normalizeTelegramBotId,
   parseTelegramThreadTarget,
   resolveTelegramBotIdFromToken,
   serializeTelegramThreadTarget,
@@ -2892,12 +2890,12 @@ async function handleTelegramTokenRewrite(
     });
   }
   const token = readRequiredInterceptSecret(input.env.TELEGRAM_BOT_TOKEN, "TELEGRAM_BOT_TOKEN");
-  if (!isTelegramBotBindingAuthorized(input.request.headers, token)) {
-    return disallowedProviderEgress();
-  }
   if (requiresDeliveryAuthorization) {
     const deliveryTarget = await readTelegramDeliveryTarget(input.request);
     if (!deliveryTarget || !input.userId) {
+      return disallowedProviderEgress();
+    }
+    if (!isTelegramBotBindingAuthorized(deliveryTarget, token)) {
       return disallowedProviderEgress();
     }
     const deliveryAuthorization = await authorizeHostedTelegramDeliveryTarget({
@@ -3819,7 +3817,6 @@ function stripHostedProviderUpstreamHeaders(headers: Headers): Headers {
   stripped.delete("x-murph-data-api-key");
   stripped.delete("openai-organization");
   stripped.delete("openai-project");
-  stripped.delete(HOSTED_TELEGRAM_BOT_ID_HEADER);
   stripped.delete(HOSTED_TELEGRAM_DELIVERY_TARGET_HEADER);
   return stripped;
 }
@@ -3864,26 +3861,15 @@ async function readTelegramDeliveryTarget(
     .get(HOSTED_TELEGRAM_DELIVERY_TARGET_HEADER)
     ?.trim() ?? "";
   const headerTarget = parseTelegramThreadTarget(serializedTarget);
-  const requestedBotId = normalizeTelegramBotId(
-    request.headers.get(HOSTED_TELEGRAM_BOT_ID_HEADER),
-  );
-  if (
-    serializedTarget && !headerTarget
-    || request.headers.has(HOSTED_TELEGRAM_BOT_ID_HEADER) && !requestedBotId
-    || requestedBotId && headerTarget?.botId !== requestedBotId
-    || !requestedBotId && headerTarget?.botId
-  ) {
+  if (serializedTarget && !headerTarget) {
     return null;
   }
 
   const routing = await readTelegramProviderRequestRouting(request);
   if (!routing) {
-    return serializedTarget || requestedBotId ? null : undefined;
+    return serializedTarget ? null : undefined;
   }
-  const target = headerTarget ?? buildTelegramProviderRequestTarget({
-    botId: requestedBotId,
-    routing,
-  });
+  const target = headerTarget ?? buildTelegramProviderRequestTarget(routing);
   if (!target) {
     return null;
   }
@@ -3904,34 +3890,31 @@ async function readTelegramDeliveryTarget(
   return serializeTelegramThreadTarget(target);
 }
 
-function buildTelegramProviderRequestTarget(input: {
-  botId: string | null;
-  routing: {
-    businessConnectionId: string | null;
-    chatId: string | null;
-    directMessagesTopicId: string | null;
-    messageThreadId: string | null;
-  };
+function buildTelegramProviderRequestTarget(routing: {
+  businessConnectionId: string | null;
+  chatId: string | null;
+  directMessagesTopicId: string | null;
+  messageThreadId: string | null;
 }): TelegramThreadTarget | null {
-  if (!input.routing.chatId) {
+  if (!routing.chatId) {
     return null;
   }
   const directMessagesTopicId = parseTelegramProviderRoutingPositiveInteger(
-    input.routing.directMessagesTopicId,
+    routing.directMessagesTopicId,
   );
   const messageThreadId = parseTelegramProviderRoutingPositiveInteger(
-    input.routing.messageThreadId,
+    routing.messageThreadId,
   );
   if (
-    input.routing.directMessagesTopicId !== null && directMessagesTopicId === null
-    || input.routing.messageThreadId !== null && messageThreadId === null
+    routing.directMessagesTopicId !== null && directMessagesTopicId === null
+    || routing.messageThreadId !== null && messageThreadId === null
   ) {
     return null;
   }
   return {
-    botId: input.botId,
-    businessConnectionId: input.routing.businessConnectionId,
-    chatId: input.routing.chatId,
+    botId: null,
+    businessConnectionId: routing.businessConnectionId,
+    chatId: routing.chatId,
     directMessagesTopicId,
     messageThreadId,
   };
@@ -4031,15 +4014,13 @@ function readTelegramProviderRecord(value: unknown): Record<string, unknown> | n
     : null;
 }
 
-function isTelegramBotBindingAuthorized(headers: Headers, token: string): boolean {
-  const requestedBotId = headers.get(HOSTED_TELEGRAM_BOT_ID_HEADER);
-  if (requestedBotId === null) {
+function isTelegramBotBindingAuthorized(deliveryTarget: string, token: string): boolean {
+  const requestedBotId = parseTelegramThreadTarget(deliveryTarget)?.botId ?? null;
+  if (!requestedBotId) {
     return true;
   }
 
-  const normalizedRequestedBotId = normalizeTelegramBotId(requestedBotId);
-  return normalizedRequestedBotId !== null
-    && normalizedRequestedBotId === resolveTelegramBotIdFromToken(token);
+  return requestedBotId === resolveTelegramBotIdFromToken(token);
 }
 
 function createHostedRunnerInternalRequest(source: Request): Request {

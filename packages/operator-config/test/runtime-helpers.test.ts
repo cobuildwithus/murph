@@ -2,7 +2,6 @@ import assert from 'node:assert/strict'
 
 import { afterEach, expect, test, vi } from 'vitest'
 import {
-  HOSTED_TELEGRAM_BOT_ID_HEADER,
   HOSTED_TELEGRAM_DELIVERY_TARGET_HEADER,
 } from '@murphai/contracts'
 
@@ -404,7 +403,6 @@ test('deleteTelegramMessages batches ids and uses deleteBusinessMessages for bus
   expect(seenRequests[0]?.url).toBe(
     'https://api.telegram.example/bot654321:test-token/deleteBusinessMessages',
   )
-  expect(seenRequests[0]?.headers).not.toHaveProperty(HOSTED_TELEGRAM_BOT_ID_HEADER)
   expect(seenRequests[0]?.headers).not.toHaveProperty(
     HOSTED_TELEGRAM_DELIVERY_TARGET_HEADER,
   )
@@ -936,7 +934,6 @@ test('startTelegramTypingSession defers bot validation for injected hosted crede
     'https://api.telegram.org/bot__cloudflare_injected__/sendChatAction',
     expect.objectContaining({
       headers: expect.objectContaining({
-        [HOSTED_TELEGRAM_BOT_ID_HEADER]: '654321',
         [HOSTED_TELEGRAM_DELIVERY_TARGET_HEADER]: '123:bot:654321',
       }),
     }),
@@ -986,7 +983,6 @@ test('startTelegramTypingSession keeps the internal bot constraint off direct pr
   await handle.stop()
 
   const headers = fetchImplementation.mock.calls[0]?.[1]?.headers
-  expect(headers).not.toHaveProperty(HOSTED_TELEGRAM_BOT_ID_HEADER)
   expect(headers).not.toHaveProperty(HOSTED_TELEGRAM_DELIVERY_TARGET_HEADER)
 })
 
