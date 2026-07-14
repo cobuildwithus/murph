@@ -1171,6 +1171,16 @@ function parseHostedExecutionAssistantNotificationRequestedPayload(
                 `${label}.firstContact`,
               ),
         }),
+    ...(record.groupMembershipEpoch === undefined
+      ? {}
+      : {
+          groupMembershipEpoch: record.groupMembershipEpoch === null
+            ? null
+            : parseHostedExecutionAssistantNotificationGroupMembershipEpoch(
+                record.groupMembershipEpoch,
+                `${label}.groupMembershipEpoch`,
+              ),
+        }),
     instructions: requireString(record.instructions, `${label}.instructions`),
     ...(record.responsePolicy === undefined
       ? {}
@@ -1183,6 +1193,17 @@ function parseHostedExecutionAssistantNotificationRequestedPayload(
               ),
         }),
     route: parseHostedExecutionAssistantNotificationRoute(record.route, `${label}.route`),
+  };
+}
+
+function parseHostedExecutionAssistantNotificationGroupMembershipEpoch(
+  value: unknown,
+  label: string,
+): { joinedAt: string; membershipId: string } {
+  const record = requireObject(value, label);
+  return {
+    joinedAt: requireString(record.joinedAt, `${label}.joinedAt`),
+    membershipId: requireString(record.membershipId, `${label}.membershipId`),
   };
 }
 

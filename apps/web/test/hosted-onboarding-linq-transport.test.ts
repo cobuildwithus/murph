@@ -339,6 +339,46 @@ describe("hosted Linq webhook transport", () => {
     });
   });
 
+  it("delivers unresolved leave results only with matching terminal evidence", async () => {
+    const route = buildAuthorizedLinqRouteFixture({
+      memberId: "member-group-runtime",
+      threadId: "chat-group-1",
+    });
+    transportBoundaryMocks.readHostedThreadRouteByThreadIdentity.mockResolvedValue({
+      containerMemberId: "member-group-runtime",
+    });
+    const hostedMailboxItem = {
+      findUnique: vi.fn().mockResolvedValue({
+        consumedAt: new Date("2026-03-26T12:00:00.000Z"),
+        kind: "group.leave.member-unresolved",
+        userId: "member-group-runtime",
+      }),
+    };
+    Object.assign(route.prisma, { hostedMailboxItem });
+    const effect = createHostedWebhookLinqMessageSideEffect({
+      chatId: "chat-group-1",
+      evidenceMailboxItemId: "mailbox-unresolved-1",
+      groupRuntimeMemberId: "member-group-runtime",
+      memberId: "member-group-runtime",
+      occurredAt: "2026-03-26T12:00:00.000Z",
+      result: "member_unresolved",
+      routeAuthority: route.authority,
+      sourceEventId: "event-unresolved-leave-1",
+      template: "group_leave_result",
+    });
+
+    await expect(drainHostedLinqSideEffectsDirect({
+      prisma: route.prisma as never,
+      sideEffects: [effect],
+    })).resolves.toMatchObject({ sentCount: 1 });
+
+    expect(hostedMailboxItem.findUnique).toHaveBeenCalledWith({
+      select: { consumedAt: true, kind: true, userId: true },
+      where: { id: "mailbox-unresolved-1" },
+    });
+    expect(sendHostedLinqChatMessage).toHaveBeenCalledOnce();
+  });
+
   it("suppresses a delayed leave result after the participant rejoins", async () => {
     const route = buildAuthorizedLinqRouteFixture({
       memberId: "member-group-runtime",

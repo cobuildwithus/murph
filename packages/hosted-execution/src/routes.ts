@@ -31,6 +31,8 @@ export const HOSTED_RUNTIME_ASSISTANT_CONFIGURATION_TOOL_PATH =
 
 export const HOSTED_RUNTIME_GROUP_TOOL_PATH =
   "/api/internal/hosted-execution/groups/tool";
+export const HOSTED_RUNTIME_GROUP_MEMBERSHIP_EPOCH_PATH =
+  "/api/internal/hosted-execution/groups/membership-epoch";
 export const HOSTED_RUNTIME_NEWSLETTER_TOOL_PATH =
   "/api/internal/hosted-execution/groups/newsletter-tool";
 export const HOSTED_RUNTIME_CODEX_AUTH_PATH =

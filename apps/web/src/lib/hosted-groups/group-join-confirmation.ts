@@ -121,6 +121,10 @@ export async function appendHostedGroupJoinConfirmationTx(input: {
         deliveryDedupeToken: notificationKey,
         deliveryDispatchMode: "queue-only",
         deliveryIdempotencyKey: notificationKey,
+        groupMembershipEpoch: {
+          joinedAt: input.occurredAt.toISOString(),
+          membershipId: input.membershipId,
+        },
         instructions: "Private group-join confirmation; exact user-facing text is in responsePolicy.",
         responsePolicy: {
           kind: "require_send_exact_text",
@@ -258,6 +262,7 @@ export async function drainPendingHostedGroupJoinConfirmations(input: {
     take: limit + 1,
     where: {
       joinConfirmationEligibleAt: { not: null },
+      leftAt: null,
       role: "member",
     },
     ...(cursor
@@ -316,6 +321,7 @@ export async function materializePendingHostedGroupJoinConfirmationsTx(input: {
     },
     where: {
       joinConfirmationEligibleAt: { not: null },
+      leftAt: null,
       memberId: input.memberId,
       role: "member",
       ...(input.membershipId ? { id: input.membershipId } : {}),

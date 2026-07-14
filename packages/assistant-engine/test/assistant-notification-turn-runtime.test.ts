@@ -763,6 +763,9 @@ test('sendAssistantNotificationLocal sends required exact text without a provide
   )
 
   const result = await sendAssistantNotificationLocal({
+    beforeDelivery: () => {
+      order.push('before-delivery')
+    },
     deliveryDedupeToken: 'signup-welcome:member_exact',
     deliveryIdempotencyKey: 'signup-welcome:member_exact',
     executionContext: {
@@ -786,7 +789,12 @@ test('sendAssistantNotificationLocal sends required exact text without a provide
   expect(mocks.resolveAssistantTurnRoute).not.toHaveBeenCalled()
   expect(mocks.recordAssistantUsageEvent).not.toHaveBeenCalled()
   expect(mocks.persistAssistantTurnAndSession).not.toHaveBeenCalled()
-  expect(order).toEqual(['deliver:Fixed welcome text', 'transcript', 'session'])
+  expect(order).toEqual([
+    'before-delivery',
+    'deliver:Fixed welcome text',
+    'transcript',
+    'session',
+  ])
   expect(runtimeState.turns.createReceipt).toHaveBeenCalledWith(
     expect.objectContaining({
       deliveryRequested: true,

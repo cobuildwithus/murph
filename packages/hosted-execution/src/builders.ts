@@ -412,6 +412,13 @@ function cloneAssistantNotificationPayload(
     ...(value.firstContact === undefined
       ? {}
       : { firstContact: value.firstContact ? { ...value.firstContact } : null }),
+    ...(value.groupMembershipEpoch === undefined
+      ? {}
+      : {
+          groupMembershipEpoch: value.groupMembershipEpoch
+            ? { ...value.groupMembershipEpoch }
+            : null,
+        }),
     ...(value.responsePolicy === undefined
       ? {}
       : { responsePolicy: value.responsePolicy ? { ...value.responsePolicy } : null }),

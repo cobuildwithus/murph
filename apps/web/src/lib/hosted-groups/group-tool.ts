@@ -82,6 +82,7 @@ import {
   revokeHostedGroupMemberEmailShareTx,
   updateHostedGroupDisplayNameByRuntimeMemberIdTx,
 } from "./group-store";
+import { isHostedGroupLeaveEnabled } from "./group-leave-activation";
 import {
   normalizeHostedVaultShareProjectionScopes,
   projectHostedVaultShareProjectionDisplays,
@@ -177,6 +178,15 @@ export async function handleHostedRuntimeGroupTool(input: {
   }
 
   if (input.request.action === "leave_current") {
+    if (!isHostedGroupLeaveEnabled()) {
+      return {
+        action: "leave_current",
+        result: {
+          status: "unavailable",
+          unavailableReason: "feature_disabled",
+        },
+      };
+    }
     return handleHostedRuntimeGroupLeaveCurrent({
       inboundMailboxItemIds: input.request.inboundMailboxItemIds ?? null,
       memberId: input.memberId,

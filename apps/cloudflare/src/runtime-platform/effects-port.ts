@@ -6,6 +6,7 @@ import type {
   HostedEmailDeliverySummary,
 } from "@murphai/assistant-runtime/hosted-email";
 import {
+  HOSTED_RUNTIME_GROUP_MEMBERSHIP_EPOCH_PATH,
   HOSTED_RUNTIME_LINQ_EGRESS_DELIVERY_PATH,
   HOSTED_RUNTIME_LINQ_EGRESS_ENGAGEMENT_PATH,
 } from "@murphai/hosted-execution/routes";
@@ -173,6 +174,29 @@ export function createCloudflareEffectsPort(input: {
     },
     ...(webControlTransport
       ? {
+          async assertHostedGroupMembershipEpoch(request) {
+            const payload = await fetchHostedWebControlPlaneJson({
+              body: request,
+              boundUserId: input.boundUserId,
+              description: "Hosted group membership epoch assertion",
+              fetchImpl: input.fetchImpl,
+              headers: await requireHostedEffectsRuntimeWriteFenceHeaders({
+                description: "Hosted group membership epoch assertion",
+                workspaceCheckpointBridge: input.workspaceCheckpointBridge ?? null,
+              }),
+              path: HOSTED_RUNTIME_GROUP_MEMBERSHIP_EPOCH_PATH,
+              timeoutMs: input.timeoutMs,
+              transport: webControlTransport,
+            });
+            if (!payload || typeof payload !== "object" || Array.isArray(payload)) {
+              throw new TypeError("Hosted group membership epoch assertion returned invalid JSON.");
+            }
+            const active = Reflect.get(payload, "active");
+            if (typeof active !== "boolean") {
+              throw new TypeError("Hosted group membership epoch assertion omitted active state.");
+            }
+            return { active };
+          },
           async assertLinqRecentInboundEngagement(request, context) {
             const payload = await fetchHostedWebControlPlaneJson({
               body: request,

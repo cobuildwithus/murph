@@ -194,6 +194,7 @@ async function executeHostedSystemWake(input: {
       });
     case "assistant.notification.requested":
       return executeHostedAssistantNotificationWake({
+        effectsPort: input.runtime.platform.effectsPort,
         wake: input.wake,
         executionContext: input.executionContext,
         forceQueueOnly: input.forceQueueOnlyAssistantNotification,

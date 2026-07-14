@@ -1191,7 +1191,11 @@ describe("leaveHostedGroupMemberTx", () => {
     });
     expect(tx.hostedGroupMember.update).toHaveBeenCalledWith({
       where: { id: "membership_existing" },
-      data: { leftAt: now },
+      data: {
+        joinConfirmationEligibleAt: null,
+        joinConfirmationOrigin: null,
+        leftAt: now,
+      },
       select: { id: true },
     });
     expect(

@@ -33,8 +33,11 @@ import {
   type HostedMailboxOutcome,
 } from "./mailbox-outcome.ts";
 import { emitHostedAssistantProviderTraceLog } from "./provider-trace-log.ts";
+import type { HostedRuntimeEffectsPort } from "../platform.ts";
 
 type AssistantNotificationInput = Parameters<typeof sendAssistantNotification>[0];
+
+class HostedGroupMembershipEpochSupersededError extends Error {}
 
 export async function executeHostedMemberActivatedWake(input: {
   wake: HostedExecutionMemberActivatedWake;
@@ -117,6 +120,7 @@ export async function executeHostedMemberActivatedWake(input: {
 export async function executeHostedAssistantNotificationWake(input: {
   wake: HostedExecutionAssistantNotificationRequestedWake;
   executionContext: AssistantExecutionContext;
+  effectsPort?: Pick<HostedRuntimeEffectsPort, "assertHostedGroupMembershipEpoch"> | null;
   forceQueueOnly?: boolean;
   sourceMailboxItemId?: string | null;
   turnEnvironment?: AssistantTurnEnvironment | null;
@@ -133,19 +137,33 @@ export async function executeHostedAssistantNotificationWake(input: {
   let notificationDecisionKind: string | null = null;
 
   try {
-    const notificationResult = await sendAssistantNotification(
-      buildAssistantNotificationInput(
-        input.wake,
-        input.executionContext,
-        input.forceQueueOnly === true,
-        input.vaultRoot,
-        input.sourceMailboxItemId ?? null,
-        input.turnEnvironment ?? null,
-        (entry) => {
-          redactedLogEntries.push(entry);
-        },
-      ),
+    const notificationInput = buildAssistantNotificationInput(
+      input.wake,
+      input.executionContext,
+      input.forceQueueOnly === true,
+      input.vaultRoot,
+      input.sourceMailboxItemId ?? null,
+      input.turnEnvironment ?? null,
+      (entry) => {
+        redactedLogEntries.push(entry);
+      },
     );
+    const groupMembershipEpoch = input.wake.notification.groupMembershipEpoch;
+    if (groupMembershipEpoch) {
+      notificationInput.beforeDelivery = async () => {
+        const assertEpoch = input.effectsPort?.assertHostedGroupMembershipEpoch;
+        if (!assertEpoch) {
+          throw new TypeError("Hosted group membership epoch assertion is unavailable.");
+        }
+        const epoch = await assertEpoch(groupMembershipEpoch);
+        if (!epoch.active) {
+          throw new HostedGroupMembershipEpochSupersededError(
+            "Hosted group membership epoch is superseded.",
+          );
+        }
+      };
+    }
+    const notificationResult = await sendAssistantNotification(notificationInput);
     notificationDecisionKind = notificationResult?.decision.kind ?? null;
     if (isHostedSignupWelcomeNotification(input.wake)) {
       seededOnboardingFollowupWakeAt = await maybeSeedOnboardingFollowupAutomation({
@@ -158,6 +176,18 @@ export async function executeHostedAssistantNotificationWake(input: {
       });
     }
   } catch (error) {
+    if (error instanceof HostedGroupMembershipEpochSupersededError) {
+      redactedLogEntries.push(emitHostedAssistantNotificationLifecycleLog({
+        message: "Hosted assistant notification superseded before delivery.",
+        phase: "wake.running",
+        wake: input.wake,
+      }));
+      return createNoopMailboxEffect({
+        conversationMetrics: null,
+        mailboxLane: "assistant-notification",
+        redactedLogEntries,
+      });
+    }
     if (!shouldSkipFailedHostedAssistantNotification(input.wake)) {
       redactedLogEntries.push(
         emitHostedAssistantNotificationLifecycleLog({

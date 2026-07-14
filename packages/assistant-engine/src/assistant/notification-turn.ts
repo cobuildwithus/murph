@@ -196,6 +196,7 @@ export interface AssistantNotificationInput
       | 'workingDirectory'
     > {
   deliveryDedupeToken?: string | null
+  beforeDelivery?: (() => Promise<void> | void) | null
   beforeCommit?: ((context: AssistantNotificationCommitContext) => Promise<void> | void) | null
   deferCommitUntilDeliveryAccepted?: boolean | null
   firstContactPolicy?: AssistantNotificationFirstContactPolicy | null
@@ -547,6 +548,7 @@ export async function sendAssistantNotificationLocal(
             turnCreatedAt,
             turnId,
           })
+          await input.beforeDelivery?.()
           const deliveryOutcome = await deliverAssistantNotificationMessage({
             dedupeToken: input.deliveryDedupeToken ?? null,
             decisionSubject: decision.subject ?? null,
@@ -611,6 +613,7 @@ export async function sendAssistantNotificationLocal(
           })
         }
 
+        await input.beforeDelivery?.()
         const deliveryOutcome = await deliverAssistantNotificationMessage({
           dedupeToken: input.deliveryDedupeToken ?? null,
           decisionSubject: decision.subject ?? null,
@@ -751,6 +754,7 @@ async function sendAssistantExactTextNotificationLocal(input: {
     })
   }
 
+  await input.input.beforeDelivery?.()
   if (input.input.deferCommitUntilDeliveryAccepted !== true) {
     await createExactTextReceipt(input.session)
   }

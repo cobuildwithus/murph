@@ -30,6 +30,7 @@ import {
 } from "@murphai/assistant-runtime/hosted-checkpoint-bridge";
 import {
   HOSTED_RUNTIME_GROUP_TOOL_PATH,
+  HOSTED_RUNTIME_GROUP_MEMBERSHIP_EPOCH_PATH,
   HOSTED_RUNTIME_CODEX_AUTH_PATH,
   HOSTED_RUNTIME_LINQ_EGRESS_DELIVERY_PATH,
   HOSTED_RUNTIME_LINQ_EGRESS_ENGAGEMENT_PATH,
@@ -3953,6 +3954,39 @@ describe("buildHostedExecutionRuntimePlatform", () => {
     expectDefaultRuntimeWriteFenceHeaders(request);
     expect(request.headers.get("x-hosted-execution-user-id")).toBe("member_123");
     expect(request.headers.get("x-hosted-execution-signature")).toMatch(/^[A-Za-z0-9\-_]+$/u);
+  });
+
+  it("checks group membership epochs through write-fenced direct web-control", async () => {
+    const fetchMock = vi.fn(async (input: RequestInfo | URL, init?: RequestInit) => {
+      const request = input instanceof Request ? input : new Request(input, init);
+      expect(new URL(request.url).pathname).toBe(HOSTED_RUNTIME_GROUP_MEMBERSHIP_EPOCH_PATH);
+      expect(await request.json()).toEqual({
+        joinedAt: "2026-07-10T14:00:00.000Z",
+        membershipId: "membership_123",
+      });
+      return new Response(JSON.stringify({ active: false, ok: true }), {
+        headers: { "content-type": "application/json; charset=utf-8" },
+        status: 200,
+      });
+    });
+    const environment = readHostedExecutionEnvironment(createHostedExecutionTestEnv({
+      HOSTED_WEB_BASE_URL: "https://web.example.test",
+    }));
+    const platform = buildTestHostedExecutionRuntimePlatform({
+      boundUserId: "member_123",
+      fetchImpl: fetchMock as typeof fetch,
+      webCallbackSigning: environment.webCallbackSigning,
+      webControlBaseUrl: "https://web.example.test",
+    });
+
+    await expect(platform.effectsPort.assertHostedGroupMembershipEpoch?.({
+      joinedAt: "2026-07-10T14:00:00.000Z",
+      membershipId: "membership_123",
+    })).resolves.toEqual({ active: false });
+
+    const request = requireFetchRequest(fetchMock.mock.calls[0], "group membership epoch request");
+    expectDefaultRuntimeWriteFenceHeaders(request);
+    expect(request.headers.get("x-hosted-execution-user-id")).toBe("member_123");
   });
 
   it("write-fences Linq delivery outcomes through direct web-control", async () => {

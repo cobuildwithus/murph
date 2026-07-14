@@ -272,15 +272,22 @@ Everything else is reuse: scheduling, health projections, rollup engine, roster,
 ## Deployment Concerns
 
 Hosted-group leave adds `HostedGroupMember.leftAt` and spans web readers plus
-the hosted runtime tool. Deploy the nullable schema migration first, then deploy
-the `leftAt`-aware web application and drain old web instances, and only then
-enable the hosted runtime action. After the first production leave, the
+the hosted runtime tool. `HOSTED_GROUP_LEAVE_ENABLED` is a shared, default-off
+Web gate for both exact routed leave and the runtime group tool. Deploy the
+nullable schema migration first. Deploy Cloudflare with
+`container_rollout=immediate` so queued join confirmations are checked against
+their canonical membership epoch, then deploy the `leftAt`-aware Web
+application and drain old Web instances. Only then set
+`HOSTED_GROUP_LEAVE_ENABLED=1` on Web. After the first production leave, the
 `leftAt`-aware web version is the rollback floor: an older web build could treat
 a former member as active and regrant data. Post-deploy, smoke-test one leave,
 replay its old reaction and confirm it remains inactive, then submit a newly
 received reaction and confirm explicit rejoin. Verify newsletter recipients and
-group email routing exclude the departed member before enabling broad runtime
-rollout.
+group email routing exclude the departed member. Also confirm a join
+confirmation queued before leave is recorded as a no-op and no provider send is
+attempted. If rollback is required, disable the Web gate first; do not roll the
+runner below membership-epoch enforcement while epoch-bearing notifications can
+remain queued.
 
 Newsletter self-opt-out predates hosted-group leave, but the old runtime request
 has no server-owned causal identifier and cannot safely bridge to the new

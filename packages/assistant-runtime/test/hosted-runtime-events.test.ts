@@ -135,6 +135,67 @@ afterEach(() => {
 });
 
 describe("executeHostedMailboxEvent", () => {
+  it("supersedes a queued group-join confirmation after its membership epoch ends", async () => {
+    const wake = buildHostedExecutionAssistantNotificationRequestedWake({
+      eventId: "assistant.notification.requested:group-join:membership_123",
+      memberId: "member_123",
+      notification: {
+        groupMembershipEpoch: {
+          joinedAt: "2026-04-08T00:00:00.000Z",
+          membershipId: "membership_123",
+        },
+        instructions: "Send the private group join confirmation.",
+        route: {
+          actorId: "actor_123",
+          channel: "linq",
+          delivery: { kind: "thread", target: "thread_123" },
+          identityId: "identity_123",
+          threadId: "thread_123",
+          threadIsDirect: true,
+        },
+      },
+      occurredAt: "2026-04-08T00:00:00.000Z",
+    });
+    const assertHostedGroupMembershipEpoch = vi.fn().mockResolvedValue({
+      active: false,
+    });
+    const providerDeliveryStarted = vi.fn();
+    mocks.sendAssistantNotification.mockImplementationOnce(async (input) => {
+      await input.beforeDelivery?.();
+      providerDeliveryStarted();
+      return createQueuedNotificationResult();
+    });
+    const runtime = createRuntime();
+
+    const result = await executeHostedMailboxEvent({
+      wake,
+      executionContext,
+      runtime: {
+        ...runtime,
+        platform: {
+          ...runtime.platform,
+          effectsPort: {
+            ...runtime.platform.effectsPort,
+            assertHostedGroupMembershipEpoch,
+          },
+        },
+      },
+      runtimeEnv: {},
+      vaultRoot: "/tmp/assistant-runtime-events",
+    });
+
+    expect(assertHostedGroupMembershipEpoch).toHaveBeenCalledWith({
+      joinedAt: "2026-04-08T00:00:00.000Z",
+      membershipId: "membership_123",
+    });
+    expect(mocks.sendAssistantNotification).toHaveBeenCalledOnce();
+    expect(providerDeliveryStarted).not.toHaveBeenCalled();
+    expect(result).toMatchObject({
+      conversationMetrics: null,
+      mailboxLane: "assistant-notification",
+    });
+  });
+
   it("drops spoofed raw-looking values from hosted context diagnostic traces", () => {
     const wake = buildHostedExecutionAssistantNotificationRequestedWake({
       eventId: "evt_context_spoof",

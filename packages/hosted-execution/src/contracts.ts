@@ -203,11 +203,17 @@ export interface HostedExecutionAssistantNotificationFirstContactPolicy {
   markSeenOnDeliveryAccepted: boolean;
 }
 
+export interface HostedExecutionAssistantNotificationGroupMembershipEpoch {
+  joinedAt: string;
+  membershipId: string;
+}
+
 export interface HostedExecutionAssistantNotificationRequestedPayload {
   deliveryDedupeToken?: string | null;
   deliveryDispatchMode?: HostedExecutionAssistantNotificationDeliveryDispatchMode | null;
   deliveryIdempotencyKey?: string | null;
   firstContact?: HostedExecutionAssistantNotificationFirstContactPolicy | null;
+  groupMembershipEpoch?: HostedExecutionAssistantNotificationGroupMembershipEpoch | null;
   instructions: string;
   responsePolicy?: HostedExecutionAssistantNotificationResponsePolicy | null;
   route: HostedExecutionAssistantNotificationRoute;

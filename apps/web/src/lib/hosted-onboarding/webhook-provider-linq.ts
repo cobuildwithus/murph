@@ -61,6 +61,7 @@ import {
   leaveHostedGroupMemberTx,
   readHostedGroupMemberLeaveReplayOutcome,
 } from "../hosted-groups/group-store";
+import { isHostedGroupLeaveEnabled } from "../hosted-groups/group-leave-activation";
 import {
   bindHostedMemberHomeLinqChat,
   bindHostedMemberPendingLinqChatAndTrackInbound,
@@ -133,6 +134,8 @@ const HOSTED_LINQ_INACTIVE_GROUP_LEAVE_COMMAND_PATTERN = new RegExp(
   `^(?:i (?:want|need) to leave ${HOSTED_LINQ_INACTIVE_GROUP_LEAVE_TARGET_PATTERN}|i(?:'d| would) like to leave ${HOSTED_LINQ_INACTIVE_GROUP_LEAVE_TARGET_PATTERN}|remove me from ${HOSTED_LINQ_INACTIVE_GROUP_LEAVE_TARGET_PATTERN}|withdraw my (?:shared )?data from ${HOSTED_LINQ_INACTIVE_GROUP_LEAVE_TARGET_PATTERN})$`,
   "u",
 );
+const HOSTED_GROUP_LEAVE_MEMBER_UNRESOLVED_MAILBOX_KIND =
+  "group.leave.member-unresolved";
 
 type HostedLinqExistingMemberMatch =
   | "home-linq-chat"
@@ -1292,6 +1295,9 @@ async function planHostedLinqExactRoutedGroupLeaveWebhook(input: {
   prisma: Prisma.TransactionClient;
   route: HostedThreadRouteSnapshot;
 }): Promise<HostedOnboardingLinqDirectPlan | null> {
+  if (!isHostedGroupLeaveEnabled()) {
+    return null;
+  }
   const {
     messageEvent,
     occurredAt,
@@ -1317,24 +1323,6 @@ async function planHostedLinqExactRoutedGroupLeaveWebhook(input: {
     route: input.route,
     threadId: summary.chatId,
   });
-
-  const participant = participantContact.kind === "phone"
-    ? await lookupHostedMemberIdentityByPhoneNumberForLinqWebhook({
-        phoneNumber: participantContact.value,
-        prisma: input.prisma,
-      })
-    : await lookupHostedMemberByVerifiedEmailAddress({
-        address: participantContact.value,
-        prisma: input.prisma,
-      });
-  if (!participant) {
-    return buildHostedLinqInactiveGroupLeaveDecision({
-      ...input,
-      participantMemberId: null,
-      result: "member_unresolved",
-      routeAuthority,
-    });
-  }
 
   const mailboxWake = buildHostedLinqConversationWakeForMailbox({
     ...(accountLookupKey ? { accountLookupKey } : {}),
@@ -1370,8 +1358,68 @@ async function planHostedLinqExactRoutedGroupLeaveWebhook(input: {
   if (evidence.dedupeConflict) {
     return buildHostedLinqInactiveGroupLeaveDecision({
       ...input,
-      participantMemberId: participant.core.id,
+      participantMemberId: null,
       result: "evidence_conflict",
+      routeAuthority,
+    });
+  }
+  if (
+    evidence.item.consumedAt
+    && evidence.item.kind === HOSTED_GROUP_LEAVE_MEMBER_UNRESOLVED_MAILBOX_KIND
+  ) {
+    return buildHostedLinqInactiveGroupLeaveDecision({
+      ...input,
+      evidenceMailboxItemId: evidence.item.id,
+      participantMemberId: null,
+      result: "member_unresolved",
+      routeAuthority,
+    });
+  }
+
+  const participant = participantContact.kind === "phone"
+    ? await lookupHostedMemberIdentityByPhoneNumberForLinqWebhook({
+        phoneNumber: participantContact.value,
+        prisma: input.prisma,
+      })
+    : await lookupHostedMemberByVerifiedEmailAddress({
+        address: participantContact.value,
+        prisma: input.prisma,
+      });
+  if (!participant) {
+    const consumedAt = await readHostedDatabaseClock(input.prisma);
+    const terminalized = await input.prisma.hostedMailboxItem.updateMany({
+      data: {
+        consumedAt,
+        kind: HOSTED_GROUP_LEAVE_MEMBER_UNRESOLVED_MAILBOX_KIND,
+      },
+      where: {
+        consumedAt: null,
+        id: evidence.item.id,
+        userId: input.route.containerMemberId,
+      },
+    });
+    if (terminalized.count !== 1) {
+      const currentEvidence = await input.prisma.hostedMailboxItem.findUnique({
+        select: { consumedAt: true, kind: true },
+        where: { id: evidence.item.id },
+      });
+      if (
+        !currentEvidence?.consumedAt
+        || currentEvidence.kind !== HOSTED_GROUP_LEAVE_MEMBER_UNRESOLVED_MAILBOX_KIND
+      ) {
+        return buildHostedLinqInactiveGroupLeaveDecision({
+          ...input,
+          participantMemberId: null,
+          result: "evidence_conflict",
+          routeAuthority,
+        });
+      }
+    }
+    return buildHostedLinqInactiveGroupLeaveDecision({
+      ...input,
+      evidenceMailboxItemId: evidence.item.id,
+      participantMemberId: null,
+      result: "member_unresolved",
       routeAuthority,
     });
   }
@@ -1450,6 +1498,7 @@ function buildHostedLinqInactiveGroupLeaveDecision(
     cleanupSignal?: { mailboxItemId: string; memberId: string };
     context: ReturnType<typeof resolveHostedOnboardingLinqMessageContext>;
     event: HostedLinqWebhookEvent;
+    evidenceMailboxItemId?: string;
     participantMemberId: string | null;
     result: HostedLinqGroupLeaveResult | null;
     route: HostedThreadRouteSnapshot;
@@ -1464,6 +1513,9 @@ function buildHostedLinqInactiveGroupLeaveDecision(
         : [createHostedWebhookLinqMessageSideEffect({
           chatId: input.context.summary.chatId,
           groupRuntimeMemberId: input.route.containerMemberId,
+          ...(input.evidenceMailboxItemId
+            ? { evidenceMailboxItemId: input.evidenceMailboxItemId }
+            : {}),
           memberId: input.route.containerMemberId,
           occurredAt: input.context.occurredAt,
           participantMemberId: input.participantMemberId,

@@ -173,6 +173,7 @@ const TEST_KEYRING_ENTRIES = {
 
 beforeEach(() => {
   vi.clearAllMocks();
+  vi.stubEnv("HOSTED_GROUP_LEAVE_ENABLED", "1");
   vi.mocked(prismaModule.getPrisma).mockReset();
   vi.mocked(linqModule.verifyAndParseHostedLinqWebhookRequest).mockReset();
   vi.mocked(linqClient.getHostedLinqChatHandles).mockReset();
@@ -681,6 +682,7 @@ function createStatefulThreadRoutePrisma() {
 function buildHostedMailboxItem(input: {
   consumedAt?: string | null;
   id: string;
+  kind?: string;
   lane?: "conversation" | "system";
   laneSeq?: string;
   userId: string;
@@ -693,7 +695,7 @@ function buildHostedMailboxItem(input: {
     dedupeKey: "evt_group_123",
     expiresAt: null,
     id: input.id,
-    kind: "conversation.message",
+    kind: input.kind ?? "conversation.message",
     lane: input.lane ?? "conversation",
     laneSeq: input.laneSeq ?? "1",
     occurredAt: now,
@@ -1769,6 +1771,100 @@ describe("Linq explicit external-thread routing", () => {
     });
     expect(linqDailyState.incrementHostedLinqInboundDailyState).not.toHaveBeenCalled();
     expect(usageAllowance.checkHostedAiUsageGate).not.toHaveBeenCalled();
+  });
+
+  it("keeps exact self-leave inactive until the coordinated Web drain completes", async () => {
+    vi.stubEnv("HOSTED_GROUP_LEAVE_ENABLED", "0");
+    const prisma = createPrisma({
+      routeContainerActive: false,
+      routeContainerMemberId: "member_thread_container_123",
+    });
+
+    const plan = await planHostedOnboardingLinqWebhook({
+      event: buildLinqMessageReceivedEvent({ text: "remove me from this group" }),
+      prisma: prisma as never,
+    });
+
+    expect(plan.response.reason).toBe("thread-container-inactive");
+    expect(groupStore.leaveHostedGroupMemberTx).not.toHaveBeenCalled();
+    expect(mailboxStore.appendHostedMailboxEnvelopeTx).not.toHaveBeenCalled();
+  });
+
+  it("keeps unresolved leave evidence terminal after the sender later links", async () => {
+    const prisma = createPrisma({
+      routeContainerActive: false,
+      routeContainerMemberId: "member_thread_container_123",
+    });
+    vi.mocked(memberIdentityStore.lookupHostedMemberIdentityByPhoneNumber)
+      .mockResolvedValueOnce(null)
+      .mockResolvedValue({
+        core: {
+          billingStatus: HostedBillingStatus.active,
+          createdAt: new Date("2026-06-01T00:00:00.000Z"),
+          id: "member_later_linked_123",
+          suspendedAt: null,
+          updatedAt: new Date("2026-06-24T00:00:00.000Z"),
+        },
+        identity: {},
+        matchedBy: "phoneNumber",
+      } as Awaited<ReturnType<
+        typeof memberIdentityStore.lookupHostedMemberIdentityByPhoneNumber
+      >>);
+    vi.mocked(mailboxStore.appendHostedMailboxEnvelopeTx)
+      .mockResolvedValueOnce({
+        dedupeConflict: false,
+        duplicate: false,
+        inserted: true,
+        item: buildHostedMailboxItem({
+          id: "mailbox_unresolved_leave_123",
+          userId: "member_thread_container_123",
+        }),
+      })
+      .mockResolvedValueOnce({
+        dedupeConflict: false,
+        duplicate: true,
+        inserted: false,
+        item: buildHostedMailboxItem({
+          consumedAt: "2026-06-24T12:00:01.000Z",
+          id: "mailbox_unresolved_leave_123",
+          kind: "group.leave.member-unresolved",
+          userId: "member_thread_container_123",
+        }),
+      });
+    const event = buildLinqMessageReceivedEvent({
+      text: "remove me from this group",
+    });
+
+    const first = await planHostedOnboardingLinqWebhook({
+      event,
+      prisma: prisma as never,
+    });
+    const replay = await planHostedOnboardingLinqWebhook({
+      event,
+      prisma: prisma as never,
+    });
+
+    expect(first.response.reason).toBe("inactive-group-leave:member_unresolved");
+    expect(replay.response.reason).toBe("inactive-group-leave:member_unresolved");
+    expect(prisma.hostedMailboxItem.updateMany).toHaveBeenCalledWith({
+      data: {
+        consumedAt: new Date("2026-06-24T12:00:01.000Z"),
+        kind: "group.leave.member-unresolved",
+      },
+      where: {
+        consumedAt: null,
+        id: "mailbox_unresolved_leave_123",
+        userId: "member_thread_container_123",
+      },
+    });
+    expect(memberIdentityStore.lookupHostedMemberIdentityByPhoneNumber).toHaveBeenCalledOnce();
+    expect(groupStore.leaveHostedGroupMemberTx).not.toHaveBeenCalled();
+    expect(replay.postHandoffSideEffects).toEqual([expect.objectContaining({
+      payload: expect.objectContaining({
+        evidenceMailboxItemId: "mailbox_unresolved_leave_123",
+        result: "member_unresolved",
+      }),
+    })]);
   });
 
   it.each([

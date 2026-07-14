@@ -253,6 +253,7 @@ function buildHostedGroupConversationWake(input: {
 describe("handleHostedRuntimeGroupTool", () => {
   beforeEach(() => {
     vi.clearAllMocks();
+    vi.stubEnv("HOSTED_GROUP_LEAVE_ENABLED", "1");
     mocks.hasHostedRuntimeActiveAccess.mockResolvedValue(true);
     mocks.leaveHostedGroupMemberTx.mockResolvedValue({
       groupId: "hgrp_123",
@@ -320,6 +321,23 @@ describe("handleHostedRuntimeGroupTool", () => {
       share_contact_card: "owner_active",
       update_display_name: "owner_active",
     });
+  });
+
+  it("keeps leave disabled before the coordinated Web drain", async () => {
+    vi.stubEnv("HOSTED_GROUP_LEAVE_ENABLED", "0");
+
+    await expect(handleHostedRuntimeGroupTool({
+      memberId: "member_group_runtime",
+      request: {
+        action: "leave_current",
+        inboundMailboxItemIds: ["mailbox_group_1"],
+      },
+    })).resolves.toEqual({
+      action: "leave_current",
+      result: { status: "unavailable", unavailableReason: "feature_disabled" },
+    });
+
+    expect(mocks.leaveHostedGroupMemberTx).not.toHaveBeenCalled();
   });
 
   it("reads the current group for the runtime member", async () => {

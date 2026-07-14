@@ -281,6 +281,10 @@ export interface HostedRuntimeLinqDeleteMessagesRequest {
 }
 
 type HostedRuntimeEffectsPortBase = {
+  assertHostedGroupMembershipEpoch?(request: {
+    joinedAt: string;
+    membershipId: string;
+  }): Promise<{ active: boolean }>;
   deletePreparedAssistantDelivery?(
     input: Pick<HostedAssistantDeliverySideEffect, "effectId" | "fingerprint">,
   ): Promise<void>;

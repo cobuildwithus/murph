@@ -136,6 +136,10 @@ describe("appendHostedGroupJoinConfirmationTx", () => {
           deliveryDedupeToken: "group-join:membership_1",
           deliveryDispatchMode: "queue-only",
           deliveryIdempotencyKey: "group-join:membership_1",
+          groupMembershipEpoch: {
+            joinedAt: "2026-07-10T14:00:00.000Z",
+            membershipId: "membership_1",
+          },
           instructions: "Private group-join confirmation; exact user-facing text is in responsePolicy.",
           responsePolicy: {
             kind: "require_send_exact_text",
@@ -629,6 +633,7 @@ describe("appendHostedGroupJoinConfirmationTx", () => {
       },
       where: {
         joinConfirmationEligibleAt: { not: null },
+        leftAt: null,
         memberId: "member_joiner",
         role: "member",
       },
@@ -1046,6 +1051,7 @@ describe("appendHostedGroupJoinConfirmationTx", () => {
       take: 3,
       where: {
         joinConfirmationEligibleAt: { not: null },
+        leftAt: null,
         role: "member",
       },
     });

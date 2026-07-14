@@ -1116,7 +1116,11 @@ export async function leaveHostedGroupMemberTx(input: {
   });
   await input.tx.hostedGroupMember.update({
     where: { id: membership.id },
-    data: { leftAt: now },
+    data: {
+      joinConfirmationEligibleAt: null,
+      joinConfirmationOrigin: null,
+      leftAt: now,
+    },
     select: { id: true },
   });
 
@@ -1126,6 +1130,25 @@ export async function leaveHostedGroupMemberTx(input: {
     revokedCount: revoked.revokedCount,
     vaultShareCleanupSignals: revoked.cleanupSignals,
   };
+}
+
+export async function isHostedGroupMembershipEpochActive(input: {
+  joinedAt: Date;
+  memberId: string;
+  membershipId: string;
+  prisma?: PrismaClient;
+}): Promise<boolean> {
+  const prisma = input.prisma ?? getPrisma();
+  const membership = await prisma.hostedGroupMember.findFirst({
+    select: { id: true },
+    where: {
+      id: input.membershipId,
+      joinedAt: input.joinedAt,
+      leftAt: null,
+      memberId: input.memberId,
+    },
+  });
+  return membership !== null;
 }
 
 async function ensureHostedGroupOwnerMembershipTx(

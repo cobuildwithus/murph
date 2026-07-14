@@ -159,6 +159,7 @@ export type HostedLinqFamilyInviteReplyPayload = {
 
 export type HostedLinqGroupLeaveResultPayload = {
   chatId: string;
+  evidenceMailboxItemId?: string;
   groupRuntimeMemberId: string;
   memberId: string;
   occurredAt: string;
@@ -236,6 +237,7 @@ export type CreateHostedWebhookLinqMessageSideEffectInput =
     }
   | {
       chatId: string;
+      evidenceMailboxItemId?: string;
       groupRuntimeMemberId: string;
       memberId: string;
       occurredAt: string;
@@ -788,8 +790,20 @@ async function isHostedLinqGroupLeaveResultCurrent(
   if (payload.template !== "group_leave_result") {
     return true;
   }
-  if (payload.result === "evidence_conflict" || payload.result === "member_unresolved") {
+  if (payload.result === "evidence_conflict") {
     return true;
+  }
+  if (payload.result === "member_unresolved") {
+    if (!payload.evidenceMailboxItemId) {
+      return false;
+    }
+    const evidence = await prisma.hostedMailboxItem.findUnique({
+      where: { id: payload.evidenceMailboxItemId },
+      select: { consumedAt: true, kind: true, userId: true },
+    });
+    return evidence?.userId === payload.groupRuntimeMemberId
+      && evidence.consumedAt !== null
+      && evidence.kind === "group.leave.member-unresolved";
   }
 
   const group = await prisma.hostedGroup.findUnique({
@@ -1160,6 +1174,9 @@ function buildHostedWebhookLinqMessagePayload(
     case "group_leave_result":
       return {
         chatId: input.chatId,
+        ...(input.evidenceMailboxItemId
+          ? { evidenceMailboxItemId: input.evidenceMailboxItemId }
+          : {}),
         groupRuntimeMemberId: input.groupRuntimeMemberId,
         memberId: input.memberId,
         occurredAt: input.occurredAt,
