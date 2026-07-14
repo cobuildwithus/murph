@@ -229,7 +229,8 @@ Stop it with `vault-cli automation set-status group-health-newsletter --status a
 When creating or materially editing the newsletter, post one clear group notice
 in the chat. Say what will be shared, that it goes only to members who granted
 group email sharing and have a verified email, how to add an email at
-`/settings?addEmail=true`, and that anyone can ask to be taken off. The first
+`https://www.withmurph.ai/settings?addEmail=true`, and that anyone can ask to be
+taken off. The first
 edition must wait for the next natural cron occurrence. Never create an
 immediate `at` automation and never call `murph.newsletter` `send` right after
 setup.

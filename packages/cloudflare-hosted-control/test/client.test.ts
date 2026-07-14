@@ -27,12 +27,51 @@ describe("createCloudflareHostedControlClient", () => {
 
     expect(Object.keys(client).sort()).toEqual([
       "createBrowserVaultSession",
+      "deleteMealPhoto",
       "deleteUserData",
       "ensureRuntimeProcessing",
       "getRunnerStatus",
       "sendTelegramUsageLimitNotice",
       "stageMealPhoto",
     ]);
+  });
+
+  it("deletes one staged meal photo through the bound user route", async () => {
+    const fetchImpl = vi.fn(async () => createJsonResponse({ deleted: true })) as typeof fetch;
+    const client = createCloudflareHostedControlClient({
+      baseUrl: "https://runner.example.test",
+      fetchImpl,
+      getBearerToken: async () => "token-123",
+    });
+
+    await expect(client.deleteMealPhoto({
+      mealPhotoKey: "a".repeat(40),
+      userId: "user_123",
+    })).resolves.toBeUndefined();
+
+    expect(fetchImpl).toHaveBeenCalledTimes(1);
+    const [url, init] = vi.mocked(fetchImpl).mock.calls[0] as [string, RequestInit];
+    expect(url).toBe("https://runner.example.test/internal/users/user_123/meal-photos/delete");
+    expect(init.method).toBe("DELETE");
+    const headers = new Headers(init.headers);
+    expect(headers.get("authorization")).toBe("Bearer token-123");
+    expect(headers.get("x-hosted-execution-user-id")).toBe("user_123");
+    expect(headers.get("x-murph-meal-photo-key")).toBe("a".repeat(40));
+  });
+
+  it("rejects invalid staged meal-photo keys before issuing a delete", async () => {
+    const fetchImpl = vi.fn<typeof fetch>();
+    const client = createCloudflareHostedControlClient({
+      baseUrl: "https://runner.example.test",
+      fetchImpl,
+      getBearerToken: async () => "token-123",
+    });
+
+    await expect(client.deleteMealPhoto({
+      mealPhotoKey: "not-a-key",
+      userId: "user_123",
+    })).rejects.toThrow("Cloudflare meal-photo key must be a 40-character lowercase hexadecimal string.");
+    expect(fetchImpl).not.toHaveBeenCalled();
   });
 
   it("stages meal-photo JPEG bytes with bound metadata and validates the result", async () => {

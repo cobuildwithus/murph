@@ -534,13 +534,9 @@ export async function fetchAndProcessHostedMailboxPrefix(input: {
         importedSystemMailboxItemIds.push(item.id);
       }
       const replyableConversationInput =
-        item.kind === "conversation.message" && !itemIsDurablyConsumedReplay;
-      const foregroundAssistantInput =
-        replyableConversationInput
-        || (
-          route.action === "import-group-newsletter-email-needed"
-          && !itemIsDurablyConsumedReplay
-        );
+        route.action === "import-conversation-message"
+        && item.kind === "conversation.message"
+        && !itemIsDurablyConsumedReplay;
       if (replyableConversationInput) {
         conversationImportedCount += 1;
       }
@@ -550,7 +546,7 @@ export async function fetchAndProcessHostedMailboxPrefix(input: {
       ) {
         importedConversationContextInputIds.push(outcome.assistantInputId);
       }
-      if (foregroundAssistantInput && outcome.assistantInputId) {
+      if (replyableConversationInput && outcome.assistantInputId) {
         assistantInputIds.push(outcome.assistantInputId);
         assistantInputRecords.push({
           assistantInputId: outcome.assistantInputId,

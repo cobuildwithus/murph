@@ -923,7 +923,7 @@ test("hosted progress Linq delivery sends recovered same-wake chat when request 
   });
 });
 
-test("hosted progress Linq delivery recovers redacted routed same-wake chat through egress authority", async () => {
+test("hosted progress Linq delivery recovers the redacted routed same-wake chat", async () => {
   const routeAuthority = buildLinqRouteAuthority("linq_chat_current");
   const wake = buildHostedExecutionLinqConversationMessageWake({
     eventId: "evt_linq_progress_blinded_routed_target",
@@ -968,7 +968,6 @@ test("hosted progress Linq delivery recovers redacted routed same-wake chat thro
 
   expect(assertRecentInbound).toHaveBeenCalledWith(
     expect.objectContaining({
-      routeAuthority,
       target: "linq_chat_current",
       targetKind: "thread",
     }),

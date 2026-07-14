@@ -1731,6 +1731,49 @@ describe("hosted mailbox import loop", () => {
     assert.equal(result.state.watermarks.system, "2");
   });
 
+  test("keeps newsletter notes out of the fresh conversation input list", async () => {
+    const newsletterNudge = createMailboxItem({
+      dedupeKey: "group-newsletter.email-needed:member_synthetic_import:hgrp_123",
+      id: "mailbox_item_system_newsletter_pending",
+      kind: "group-newsletter.email-needed",
+      lane: "system",
+      laneSeq: "1",
+    });
+    const conversation = createMailboxItem({
+      id: "mailbox_item_conversation_fresh",
+      laneSeq: "1",
+    });
+    const { mailboxPort } = createMailboxPort({
+      items: [newsletterNudge, conversation],
+    });
+
+    const result = await fetchAndProcessHostedMailboxPrefix({
+      expectedUserId: TEST_USER_ID,
+      async importItem(input) {
+        return {
+          assistantInputId: input.item.id === conversation.id
+            ? "assistant_input_conversation_fresh"
+            : "assistant_input_newsletter_pending",
+          status: "imported",
+        };
+      },
+      limitPerLane: 10,
+      mailboxPort,
+      now: () => TEST_NOW,
+      requestId: "request_newsletter_and_conversation_import",
+      state: createEmptyHostedMailboxImportState(),
+    });
+
+    assert.deepEqual(result.assistantInputIds, [
+      "assistant_input_conversation_fresh",
+    ]);
+    assert.deepEqual(result.assistantInputRecords, [{
+      assistantInputId: "assistant_input_conversation_fresh",
+    }]);
+    assert.equal(result.conversationImportedCount, 1);
+    assert.equal(result.importedCount, 2);
+  });
+
   test("interleaves mailbox lanes so conversation replies are not starved by system backlogs", async () => {
     const firstSystem = createMailboxItem({
       id: "mailbox_item_system_001",

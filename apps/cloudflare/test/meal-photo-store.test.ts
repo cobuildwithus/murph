@@ -7,7 +7,7 @@ import {
 import { MemoryEncryptedR2Bucket, createTestRootKey } from "./test-helpers.ts";
 
 describe("hosted meal photo store", () => {
-  it("round-trips ingress-encrypted JPEGs with stable per-capture keys", async () => {
+  it("round-trips ingress-encrypted JPEGs with attempt-owned keys", async () => {
     const bucket = new MemoryEncryptedR2Bucket();
     const store = createHostedMealPhotoStore({
       bucket,
@@ -39,9 +39,14 @@ describe("hosted meal photo store", () => {
       mealPhotoKey: expect.stringMatching(/^[a-f0-9]{40}$/u),
       sha256,
     });
-    expect(retry).toEqual(first);
+    expect(retry).toMatchObject({
+      byteLength: bytes.byteLength,
+      mealPhotoKey: expect.stringMatching(/^[a-f0-9]{40}$/u),
+      sha256,
+    });
+    expect(retry.mealPhotoKey).not.toBe(first.mealPhotoKey);
     expect(distinctCapture.mealPhotoKey).not.toBe(first.mealPhotoKey);
-    expect(bucket.objects.size).toBe(2);
+    expect(bucket.objects.size).toBe(3);
     const objectKeys = [...bucket.objects.keys()];
     expect(objectKeys).toEqual(
       expect.arrayContaining([
@@ -57,6 +62,7 @@ describe("hosted meal photo store", () => {
     await store.deleteMealPhoto(first.mealPhotoKey);
     await store.deleteMealPhoto(first.mealPhotoKey);
     await expect(store.readMealPhoto(first.mealPhotoKey)).resolves.toBeNull();
+    await expect(store.readMealPhoto(retry.mealPhotoKey)).resolves.toEqual(bytes);
     await expect(store.readMealPhoto(distinctCapture.mealPhotoKey)).resolves.toEqual(bytes);
   });
 
