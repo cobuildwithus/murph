@@ -26,6 +26,7 @@ import {
   updateAssistantPreferences,
 } from "@murphai/core";
 import type {
+  HostedRuntimeClinicalRecordsPort,
   HostedRuntimePlatform,
 } from "../src/hosted-runtime/platform.ts";
 import { beforeEach, describe, expect, it, vi } from "vitest";
@@ -527,6 +528,108 @@ describe("hosted system mailbox notification execution context", () => {
       });
       expect(recordOutcome).toHaveBeenCalledOnce();
       expect(recordOutcome).toHaveBeenCalledWith(request);
+    } finally {
+      await workspace.cleanup();
+    }
+  });
+
+  it("aborts a stalled clinical outcome record and preserves it for retry", async () => {
+    const workspace = await createHostedRuntimeWorkspace("murph-hosted-system-mailbox-");
+    const controller = new AbortController();
+    const request = {
+      counts: {
+        createdCount: 0,
+        executableDecisionCount: 0,
+        fetchedPageCount: 1,
+        fetchedResourceFamilyCount: 1,
+        rawFileCount: 2,
+        retractedCount: 0,
+        reviewDecisionCount: 0,
+        skippedExistingCount: 0,
+        supersededCount: 0,
+      },
+      generation: 1,
+      runId: "clinical_run_1",
+      status: "completed" as const,
+    };
+    const recordOutcome = vi.fn<HostedRuntimeClinicalRecordsPort["recordOutcome"]>(
+      async (_request, options) => await new Promise<never>((_resolve, reject) => {
+        const signal = options?.signal;
+        if (!signal) {
+          reject(new Error("Expected a Clinical Records cancellation signal."));
+          return;
+        }
+        signal.addEventListener("abort", () => reject(signal.reason), { once: true });
+      }),
+    );
+    const item: HostedSystemMailboxPendingItem = {
+      attemptCount: 1,
+      itemId: "mailbox_item_clinical_record_cancel",
+      lastAttemptAt: FIXED_NOW,
+      lastErrorCode: null,
+      lastErrorMessage: null,
+      mailboxDedupeKey: "clinical-record-cancel",
+      mailboxLaneSeq: "1",
+      nextAttemptAt: null,
+      occurredAt: FIXED_NOW,
+      postCheckpointRecord: {
+        kind: "clinical-records.outcome-recorded" as const,
+        request,
+      },
+      requestId: "clinical_record_cancel",
+      routeAction: "run-clinical-records-sync" as const,
+      status: "recording" as const,
+      wake: {
+        eventId: "clinical-records.sync-requested:cancel",
+        generation: 1,
+        kind: "clinical-records.sync-requested" as const,
+        occurredAt: FIXED_NOW,
+        runId: "clinical_run_1",
+        userId: "member_123",
+      },
+    };
+    const runtime = createRuntime({
+      clinicalRecordsPort: {
+        async fetchPage() {
+          throw new Error("fetchPage should not be called");
+        },
+        async readRun() {
+          throw new Error("readRun should not be called");
+        },
+        recordOutcome,
+      },
+    });
+
+    try {
+      await restoreHostedSystemMailboxCheckpointRollbackState({
+        state: { pending: [item] },
+        vaultRoot: workspace.vaultRoot,
+      });
+      const recording = recordHostedSystemMailboxItemAfterCheckpoint({
+        item,
+        runtime,
+        signal: controller.signal,
+        vaultRoot: workspace.vaultRoot,
+      });
+      await vi.waitFor(() => expect(recordOutcome).toHaveBeenCalledOnce());
+      controller.abort(new DOMException("Foreground work arrived.", "AbortError"));
+
+      await expect(recording).resolves.toEqual(expect.objectContaining({
+        failed: 1,
+        recorded: 0,
+      }));
+      expect(recordOutcome).toHaveBeenCalledWith(
+        request,
+        { signal: controller.signal },
+      );
+      await expect(readHostedSystemMailboxCheckpointRollbackState({
+        vaultRoot: workspace.vaultRoot,
+      })).resolves.toEqual({
+        pending: [expect.objectContaining({
+          itemId: item.itemId,
+          status: "recording",
+        })],
+      });
     } finally {
       await workspace.cleanup();
     }

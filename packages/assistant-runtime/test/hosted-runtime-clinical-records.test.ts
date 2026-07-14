@@ -289,6 +289,59 @@ describe("hosted clinical records maintenance", () => {
     expect(result.status).toBe("partial");
   });
 
+  it("does not overwrite authorization-required when retained evidence is rejected", async () => {
+    const multiFamilyRun: HostedClinicalRecordsRunDescriptor = {
+      ...RUN,
+      retrievalScopes: [
+        RUN.retrievalScopes[0]!,
+        {
+          coverage: "whole-family",
+          queryFingerprint: "b".repeat(64),
+          resourceType: "Condition",
+        },
+      ],
+    };
+    const port = createPort({
+      fetchPage: vi.fn()
+        .mockResolvedValueOnce({
+          body: "{\"resourceType\":\"Bundle\",\"entry\":[]}",
+          nextCursor: null,
+          status: "page",
+        })
+        .mockResolvedValueOnce({
+          errorCode: HOSTED_CLINICAL_RECORDS_AUTHORIZATION_REQUIRED_ERROR_CODE,
+          retryable: false,
+          status: "unavailable",
+        }),
+      readRun: vi.fn().mockResolvedValue({ run: multiFamilyRun, status: "ready" }),
+    });
+    const importSnapshot = vi.fn().mockRejectedValue(
+      Object.assign(new Error("safe semantic rejection"), {
+        code: "CLINICAL_FHIR_SNAPSHOT_REJECTED",
+      }),
+    );
+
+    const result = await runHostedClinicalRecordsSyncWakeLane({
+      clinicalRecordsPort: port,
+      importSnapshot,
+      vaultRoot: "/tmp/clinical-vault",
+      wake: WAKE,
+    });
+
+    expect(importSnapshot).toHaveBeenCalledWith(expect.objectContaining({
+      completedResourceTypes: ["Observation"],
+      errors: [expect.objectContaining({
+        code: HOSTED_CLINICAL_RECORDS_AUTHORIZATION_REQUIRED_ERROR_CODE,
+        resourceType: "Condition",
+      })],
+    }));
+    expect(result).toEqual(expect.objectContaining({
+      outcome: null,
+      status: "failed",
+    }));
+    expect(port.recordOutcome).not.toHaveBeenCalled();
+  });
+
   it("retries transient control-plane misses without recording a terminal outcome", async () => {
     const port = createPort({
       readRun: vi.fn().mockResolvedValue({
@@ -815,6 +868,34 @@ describe("hosted clinical records maintenance", () => {
 
     await expect(sync).rejects.toMatchObject({ name: "AbortError" });
     expect(port.fetchPage).not.toHaveBeenCalled();
+    expect(port.recordOutcome).not.toHaveBeenCalled();
+  });
+
+  it("aborts an in-flight vault import when foreground work arrives", async () => {
+    let shouldYield = false;
+    const importSnapshot = vi.fn<
+      NonNullable<Parameters<typeof runHostedClinicalRecordsSyncWakeLane>[0]["importSnapshot"]>
+    >(async (snapshot) => await new Promise<never>((_resolve, reject) => {
+      const signal = snapshot.signal;
+      if (!signal) {
+        reject(new Error("Expected a Clinical Records cancellation signal."));
+        return;
+      }
+      signal.addEventListener("abort", () => reject(signal.reason), { once: true });
+    }));
+    const port = createPort();
+
+    const sync = runHostedClinicalRecordsSyncWakeLane({
+      clinicalRecordsPort: port,
+      importSnapshot,
+      shouldYieldClinicalRecords: () => shouldYield,
+      vaultRoot: "/tmp/clinical-vault",
+      wake: WAKE,
+    });
+    await vi.waitFor(() => expect(importSnapshot).toHaveBeenCalledOnce());
+    shouldYield = true;
+
+    await expect(sync).rejects.toMatchObject({ name: "AbortError" });
     expect(port.recordOutcome).not.toHaveBeenCalled();
   });
 

@@ -69,6 +69,26 @@ describe("importClinicalFhirSnapshot", () => {
     expect(event?.kind).toBe("measurement");
   });
 
+  it("yields to cancellation before persisting a planned snapshot", async () => {
+    const input = await createSnapshotInput({
+      pages: [{
+        content: fhirBundle([heartRateObservation("cancelled-heart-rate")]),
+        resourceType: "Observation",
+      }],
+      resourceTypes: ["Observation"],
+    });
+    const controller = new AbortController();
+    setImmediate(() => controller.abort(
+      new DOMException("Foreground work arrived.", "AbortError"),
+    ));
+
+    await expect(importClinicalFhirSnapshot({
+      ...input,
+      signal: controller.signal,
+    })).rejects.toMatchObject({ name: "AbortError" });
+    await expectClinicalRawSnapshotAbsent(input);
+  });
+
   it("persists and resolves a two-page FHIR continuation chain", async () => {
     const nextPageUrl = `${FHIR_BASE_URL}/Observation?page=2`;
     const nextPageUrlHash = hashClinicalFhirPageUrl(nextPageUrl);

@@ -150,6 +150,51 @@ describe("hosted clinical records runtime port", () => {
     expect(JSON.stringify(received)).not.toContain("member_1");
   });
 
+  it("forwards cancellation through the outcome-record transport", async () => {
+    const controller = new AbortController();
+    const fetchMock = vi.fn(async (input: RequestInfo | URL, init?: RequestInit) => {
+      const request = input instanceof Request ? input : new Request(input, init);
+      return await new Promise<Response>((_resolve, reject) => {
+        request.signal.addEventListener(
+          "abort",
+          () => reject(request.signal.reason),
+          { once: true },
+        );
+      });
+    });
+    const port = createHostedWebClinicalRecordsPort({
+      boundUserId: "member_1",
+      fetchImpl: fetchMock as typeof fetch,
+      timeoutMs: 5_000,
+      transport: { mode: "proxy" },
+    });
+
+    const recording = port.recordOutcome({
+      counts: {
+        createdCount: 0,
+        executableDecisionCount: 0,
+        fetchedPageCount: 1,
+        fetchedResourceFamilyCount: 1,
+        rawFileCount: 2,
+        retractedCount: 0,
+        reviewDecisionCount: 0,
+        skippedExistingCount: 0,
+        supersededCount: 0,
+      },
+      generation: 1,
+      runId: "run_1",
+      status: "completed",
+    }, { signal: controller.signal });
+    await vi.waitFor(() => expect(fetchMock).toHaveBeenCalledOnce());
+    controller.abort(new DOMException("Foreground work arrived.", "AbortError"));
+
+    await expect(recording).rejects.toMatchObject({
+      hostedRuntimeFetchCallerSignalAborted: true,
+      hostedRuntimeFetchCauseKind: "abort",
+      hostedRuntimeFetchRequestSignalAborted: true,
+    });
+  });
+
   it("accepts a quote-dense valid page within the bounded response envelope", async () => {
     const body = createQuoteDenseClinicalBundleBody();
     const responseText = JSON.stringify({

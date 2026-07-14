@@ -303,6 +303,7 @@ export async function recordHostedSystemMailboxItemAfterCheckpoint(input: {
   item: HostedSystemMailboxPendingItem;
   operatorHomeRoot?: string | null;
   runtime: HostedSystemMailboxRuntime;
+  signal?: AbortSignal | null;
   vaultRoot: string;
 }): Promise<{
   failed: number;
@@ -323,6 +324,7 @@ export async function recordHostedSystemMailboxItemAfterCheckpoint(input: {
       operatorHomeRoot: input.operatorHomeRoot ?? null,
       record: input.item.postCheckpointRecord,
       runtime: input.runtime,
+      signal: input.signal ?? null,
     });
     await removeHostedSystemMailboxPendingItemIfCurrent({
       item: input.item,
@@ -484,6 +486,7 @@ async function recordHostedSystemMailboxPostCheckpointRecord(input: {
   operatorHomeRoot: string | null;
   record: HostedSystemMailboxPostCheckpointRecord;
   runtime: HostedSystemMailboxRuntime;
+  signal?: AbortSignal | null;
 }): Promise<HostedSystemMailboxPostCheckpointRecordResult> {
   switch (input.record.kind) {
     case "clinical-records.outcome-recorded": {
@@ -493,7 +496,11 @@ async function recordHostedSystemMailboxPostCheckpointRecord(input: {
           "Hosted clinical records outcome checkpoint requires a configured clinical records port.",
         );
       }
-      await port.recordOutcome(input.record.request);
+      if (input.signal) {
+        await port.recordOutcome(input.record.request, { signal: input.signal });
+      } else {
+        await port.recordOutcome(input.record.request);
+      }
       return {
         nextWakeAt: null,
         recorded: 1,

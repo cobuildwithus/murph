@@ -276,16 +276,20 @@ async function runHostedClinicalRecordsSyncWakeLaneWithCancellation(input: {
       requestedScopes: run.requestedScopes,
       retrievalJobId: run.retrievalJobId,
       retrievalScopes,
+      signal: input.signal,
       sourceSystem: clinicalSourceSystemSchema.parse(run.sourceSystem),
       vaultRoot: input.vaultRoot,
     });
   } catch (error) {
     if (isClinicalFhirSnapshotRejectedError(error)) {
-      return terminalFailure({
+      const failure = terminalFailure({
         counts: fetchCounts(successfulPageCount, completedResourceTypes.length),
         errorCode: "snapshot_rejected",
         wake: input.wake,
       });
+      return authorizationRequired
+        ? { ...failure, outcome: null }
+        : failure;
     }
     throw error;
   }

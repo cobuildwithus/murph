@@ -347,7 +347,10 @@ export interface HostedRuntimeClinicalRecordsPort {
     generation: number;
     runId: string;
   }, options?: { signal?: AbortSignal | null }): Promise<HostedClinicalRecordsReadRunResponse>;
-  recordOutcome(request: HostedClinicalRecordsRecordOutcomeRequest): Promise<void>;
+  recordOutcome(
+    request: HostedClinicalRecordsRecordOutcomeRequest,
+    options?: { signal?: AbortSignal | null },
+  ): Promise<void>;
 }
 
 export interface HostedRuntimeUsageRecordPort {

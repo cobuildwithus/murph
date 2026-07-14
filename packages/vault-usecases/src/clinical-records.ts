@@ -63,6 +63,7 @@ export interface ClinicalFhirSnapshotImportInput {
   requestedScopes: string[];
   retrievalJobId: string;
   retrievalScopes: ClinicalFhirRetrievalScope[];
+  signal?: AbortSignal | null;
   sourceSystem: ClinicalSourceSystem;
   vaultRoot: string;
 }
@@ -93,15 +94,18 @@ export class ClinicalFhirSnapshotRejectedError extends Error {
 export async function importClinicalFhirSnapshot(
   input: ClinicalFhirSnapshotImportInput,
 ): Promise<ClinicalFhirSnapshotImportResult> {
+  await yieldClinicalFhirImportControl(input.signal ?? null);
   let prepared: ReturnType<typeof prepareClinicalFhirSnapshot>;
   try {
     prepared = prepareClinicalFhirSnapshot(input);
   } catch (error) {
     throw new ClinicalFhirSnapshotRejectedError(error);
   }
+  await yieldClinicalFhirImportControl(input.signal ?? null);
   const importer = await loadRuntimeModule<ClinicalImporterModule>(
     CLINICAL_IMPORTER_MODULE_SPECIFIER,
   );
+  input.signal?.throwIfAborted();
   let plan: ClinicalImportPlan;
   let executableDecisions: EventImportDecision[];
   try {
@@ -117,6 +121,7 @@ export async function importClinicalFhirSnapshot(
   } catch (error) {
     throw new ClinicalFhirSnapshotRejectedError(error);
   }
+  await yieldClinicalFhirImportControl(input.signal ?? null);
   const reviewDecisionCount = plan.decisions.filter(
     (decision) => decision.action === "review",
   ).length;
@@ -149,6 +154,8 @@ export async function importClinicalFhirSnapshot(
     vaultRoot: input.vaultRoot,
   });
 
+  await yieldClinicalFhirImportControl(input.signal ?? null);
+
   const canonical = executableDecisions.length === 0
     ? {
         applied: false,
@@ -176,6 +183,15 @@ export async function importClinicalFhirSnapshot(
     rawFileCount: rawContents.length,
     reviewDecisionCount,
   };
+}
+
+async function yieldClinicalFhirImportControl(signal: AbortSignal | null): Promise<void> {
+  signal?.throwIfAborted();
+  if (!signal) {
+    return;
+  }
+  await new Promise<void>((resolve) => setImmediate(resolve));
+  signal.throwIfAborted();
 }
 
 function prepareClinicalFhirSnapshot(input: ClinicalFhirSnapshotImportInput): {

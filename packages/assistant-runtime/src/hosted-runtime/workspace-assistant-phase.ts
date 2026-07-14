@@ -3486,6 +3486,10 @@ async function runSystemMailboxMaintenancePhase(input: {
   const shouldRunPostSystemCheckpoint = shouldRecordSystemMailbox
     || cleanupPlan.requiresCheckpoint
     || (dirtyDeviceSyncMetrics?.postCheckpointRecord ?? null) !== null;
+  const clinicalOutcomeRecordPending =
+    "item" in systemMailboxPreparation
+    && systemMailboxPreparation.item.postCheckpointRecord?.kind
+      === "clinical-records.outcome-recorded";
   if ("metrics" in systemMailboxPreparation) {
     await writeHostedAssistantAutomationDetailRuntimeLogs({
       assistantMetrics: systemMailboxPreparation.metrics,
@@ -3527,7 +3531,7 @@ async function runSystemMailboxMaintenancePhase(input: {
         : {}),
       ...(shouldRunPostSystemCheckpoint
         ? {
-            ...(systemMailboxDeliveryEffects.length > 0
+            ...(systemMailboxDeliveryEffects.length > 0 || clinicalOutcomeRecordPending
               ? { afterCheckpointKeepsForegroundImportLoop: true }
               : {}),
             afterCheckpoint: async () => {
@@ -3674,9 +3678,30 @@ async function runSystemMailboxPostCheckpointPhase(input: {
             followUpWakeAt: new Date(resolveHostedAssistantPhaseNowMs(input.input)).toISOString(),
           })
         : null;
-    const statusCallback = deferredSystemMailboxRecord
-      ? deferredSystemMailboxRecord.statusCallback
-      : await recordHostedSystemMailboxItemAfterCheckpoint(statusCallbackInput);
+    const clinicalOutcomeCancellation =
+      input.systemMailboxPreparation.item.postCheckpointRecord?.kind
+        === "clinical-records.outcome-recorded"
+        ? createHostedBackgroundMaintenanceCancellation({
+            signal: input.input.signal ?? null,
+            shouldYield: input.input.shouldYieldBackgroundMaintenance ?? null,
+            timeoutMs: null,
+          })
+        : null;
+    let statusCallback: Awaited<
+      ReturnType<typeof recordHostedSystemMailboxItemAfterCheckpoint>
+    >;
+    try {
+      statusCallback = deferredSystemMailboxRecord
+        ? deferredSystemMailboxRecord.statusCallback
+        : await recordHostedSystemMailboxItemAfterCheckpoint({
+            ...statusCallbackInput,
+            ...(clinicalOutcomeCancellation?.signal
+              ? { signal: clinicalOutcomeCancellation.signal }
+              : {}),
+          });
+    } finally {
+      clinicalOutcomeCancellation?.dispose();
+    }
     const dirtyPostCheckpoint = input.dirtyDeviceSyncMetrics?.postCheckpointRecord
       ? deferHostedDeviceSyncDirtyPostCheckpointRecord({
           record: input.dirtyDeviceSyncMetrics.postCheckpointRecord,

@@ -70,7 +70,7 @@ export function createHostedWebClinicalRecordsPort(input: {
 
       return parseHostedClinicalRecordsReadRunResponse(payload);
     },
-    async recordOutcome(request) {
+    async recordOutcome(request, options) {
       const {
         parseHostedClinicalRecordsRecordOutcomeResponse,
       } = await import("@murphai/hosted-execution/clinical-records");
@@ -83,6 +83,7 @@ export function createHostedWebClinicalRecordsPort(input: {
         sensitiveResponseBody: {
           maxBytes: HOSTED_CLINICAL_RECORDS_METADATA_RESPONSE_MAX_BYTES,
         },
+        signal: options?.signal ?? null,
         timeoutMs: input.timeoutMs,
         transport: input.transport,
       });
