@@ -1,3 +1,5 @@
+import { createHash } from "node:crypto";
+
 import { beforeEach, describe, expect, it, vi } from "vitest";
 
 import { HostedAgentSessionService } from "../src/lib/hosted-agent-sessions";
@@ -67,13 +69,15 @@ describe("iMessage mini-app service", () => {
     const service = new IMessageMiniAppService({ request: createRequest(), store });
 
     const response = await service.enroll("member-1");
+    const secondResponse = await service.enroll("member-1");
 
     expect(response.credential.token).toMatch(/^hbds_imessage_[A-Za-z0-9_-]{43}$/u);
+    expect(secondResponse.credential.token).not.toBe(response.credential.token);
     expect(response.credential.expiresAt).toBe("2026-07-11T12:00:00.000Z");
-    expect(store.createAgentSession).toHaveBeenCalledWith(expect.objectContaining({
+    expect(store.createAgentSession).toHaveBeenNthCalledWith(1, expect.objectContaining({
       expiresAt: "2026-07-11T12:00:00.000Z",
       label: "Murph Messages mini app",
-      tokenHash: expect.stringMatching(/^[0-9a-f]{64}$/u),
+      tokenHash: createHash("sha256").update(response.credential.token).digest("hex"),
       user: { id: "member-1" },
     }));
     expect(JSON.stringify(vi.mocked(store.createAgentSession).mock.calls[0])).not.toContain(

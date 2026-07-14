@@ -9,18 +9,25 @@ Constraints/Assumptions:
 - This is high-risk auth/session and public-route work. Required completion passes are `security-privacy-review` and `coverage-write`; the PR-lane ReviewGPT loop is the final cross-cutting gate.
 
 State:
-- Active: inspecting current owners and reconciling the stale branch with current `main`.
+- Completed locally: reconciled with current `main`, verified, and cleared required local audits. Final PR gates continue on the pushed exact head.
 
 Done:
 - Reverified the isolated PR worktree is clean and exactly matches the pushed PR head.
 - Read the PR intent, original completion plan, relevant security/deliverability rules, and current workflow/verification requirements.
 - Fetched current `main`; the branch is one patch commit ahead and 493 commits behind.
+- Merged current `origin/main` twice as it advanced, preserving both the current WHOOP relay instructions and the Messages extension proof during the only semantic conflict.
+- Proved the derived credential can self-revoke after access or consent loss and corrected durable architecture/security wording that had overclaimed those gates applied to every action.
+- Ran focused route/service proof: 13/13 tests passed.
+- Ran the truthful scoped owner lane with `pnpm test:diff`: all hosted guards, dev smoke, 4,903 web tests, lint with zero errors, and the production Next build/type validation passed.
+- Ran required `security-privacy-review`: no evidence-backed medium-or-higher findings.
+- Ran required `coverage-write`: strengthened exact SHA-256 persistence and random-per-enrollment proof; focused 13/13 tests passed afterward with no unresolved coverage findings.
+- Completed parent final review of enrollment, proof, revocation, prefix isolation, privacy deletion/export coverage, and durable docs with no unresolved actionable findings.
 
 Now:
-- Merge current `main`, resolve conflicts semantically, and inspect the complete reconciled auth/session call path.
+- Close the plan in the scoped final commit, push the exact head, and update the PR intent/change-shape contract.
 
 Next:
-- Run focused proof and required verification, specialist audits, scoped finish commit/push, then CI and ReviewGPT concurrently through merge.
+- Start exact-head ReviewGPT concurrently with CI, resolve only locally proven findings, and stop when the PR is merge-ready without merging it.
 
 Open questions (UNCONFIRMED if needed):
 - Physical-device Keychain and installed Messages-extension acceptance remains a deployment/device proof unless the current repo now provides an automated equivalent.
@@ -33,5 +40,6 @@ Working set (files/ids/commands):
 - `ARCHITECTURE.md`, `agent-docs/SECURITY.md`, companion app product spec
 - `pnpm test:diff <touched paths>` and focused app test commands selected after reconciliation
 
-Status: active
+Status: completed
 Updated: 2026-07-13
+Completed: 2026-07-13
