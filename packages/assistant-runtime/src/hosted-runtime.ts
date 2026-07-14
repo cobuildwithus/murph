@@ -879,9 +879,9 @@ export async function runHostedWorkspaceRuntimeJobInProcess(
   const guardedWorkspacePort = guardedRuntime.platform.workspacePort ?? workspacePort;
   let latestCheckpointSnapshotCleanForWarmReuse = false;
   const createAbortGuardedCheckpointSnapshot: HostedWorkspaceSnapshotCheckpointBuilder =
-    async (snapshotInput) => {
+    async (snapshotInput, context) => {
       assertRuntimeNotAborted();
-      const snapshot = await options.createCheckpointSnapshot(snapshotInput);
+      const snapshot = await options.createCheckpointSnapshot(snapshotInput, context);
       assertRuntimeNotAborted();
       latestCheckpointSnapshotCleanForWarmReuse =
         snapshot.localWorkspaceCleanForWarmReuse === true;
@@ -2599,24 +2599,6 @@ export async function runHostedWorkspaceRuntimeJobInProcess(
         if (idleCheckpointStartByMs === null) {
           throw new Error("Dirty hosted runtime is missing an idle checkpoint timer.");
         }
-        const pendingAssistantWakeRepeatsDueService =
-          hostedRuntimeWakeReasonIsAssistant(committedWorkspace?.nextWakeReason ?? null)
-          && hostedRuntimeWakeIsDue(committedWorkspace?.nextWakeAt ?? null)
-          && hostedRuntimeWakeIsDue(pendingWake.nextWakeAt);
-        const pendingAssistantWakeAtMs =
-          pendingWake.nextWakeAt !== null
-            && hostedRuntimeWakeReasonIsAssistant(pendingWake.nextWakeReason)
-            && !pendingAssistantWakeRepeatsDueService
-            && buildHostedRuntimeWakeKey(pendingWake)
-              !== buildHostedRuntimeWakeKey({
-                nextWakeAt: committedWorkspace?.nextWakeAt ?? null,
-                nextWakeReason: committedWorkspace?.nextWakeReason ?? null,
-              })
-            ? Date.parse(pendingWake.nextWakeAt)
-            : Number.NaN;
-        const checkpointStartByMs = Number.isFinite(pendingAssistantWakeAtMs)
-          ? Math.min(idleCheckpointStartByMs, pendingAssistantWakeAtMs)
-          : idleCheckpointStartByMs;
         const queuedWakeLatencySeed = consumePendingHostedRuntimeWake(
           options.runtimeWakeSignal ?? null,
           options.shutdownSignal ?? null,
@@ -2628,7 +2610,7 @@ export async function runHostedWorkspaceRuntimeJobInProcess(
           checkpointWakeLatencySeed ??= queuedWakeLatencySeed;
         }
         const dirtyWaitResult = await waitForHostedRuntimeDirtyWindow({
-          idleCheckpointStartByMs: checkpointStartByMs,
+          idleCheckpointStartByMs,
           runtimeAbortSignal: runtimeAbortController.signal,
           runtimeWakeSignal: options.runtimeWakeSignal ?? null,
           shutdownSignal: options.shutdownSignal ?? null,
@@ -2759,7 +2741,7 @@ export async function runHostedWorkspaceRuntimeJobInProcess(
         });
         const idleCheckpointPhaseLogDetails =
           buildHostedRuntimeIdleCheckpointPhaseLogDetails({
-            idleCheckpointStartByMs: checkpointStartByMs,
+            idleCheckpointStartByMs,
             idleCheckpointTrigger,
             pendingWake,
             runtimeWakePendingAtCheckpoint,
@@ -2774,23 +2756,37 @@ export async function runHostedWorkspaceRuntimeJobInProcess(
           status: "start",
         });
         let checkpoint: HostedWorkspaceCheckpointResponse;
+        let checkpointWakeNotificationAfterCommit: RuntimeWakeNotification | null = null;
+        const checkpointWakeInterruption =
+          createHostedRuntimeCheckpointWakeInterruption({
+            enabled:
+              idleCheckpointPhaseLogDetails.idleCheckpointTrigger !== "shutdown_signal",
+            runtimeWakeSignal: options.runtimeWakeSignal ?? null,
+          });
         try {
           latestCheckpointSnapshotCleanForWarmReuse = false;
-          checkpoint = await checkpointHostedRuntimeDirtyWorkspace({
-            assertRuntimeNotAborted,
-            checkpointRequestBuilder,
-            expectedUserId: input.request.userId,
-            idleCheckpointTrigger: idleCheckpointPhaseLogDetails.idleCheckpointTrigger,
-            nextWakeAt: idleCheckpointWake.nextWakeAt,
-            nextWakeReason: idleCheckpointWake.nextWakeReason,
-            inboxMediaRetentionWakeAt: idleCheckpointWake.inboxMediaRetentionWakeAt,
-            issueExportPort: runtime.platform.issueExportPort ?? null,
-            redactedStatus,
-            runtimeWakePendingAtCheckpoint,
-            runtimeAbortSignal: runtimeAbortController.signal,
-            vaultRoot: restored.vaultRoot,
-            workspacePort: foregroundWorkspacePort,
-          });
+          try {
+            checkpoint = await checkpointHostedRuntimeDirtyWorkspace({
+              assertRuntimeNotAborted,
+              checkpointRequestBuilder,
+              checkpointSignal: checkpointWakeInterruption.signal,
+              expectedUserId: input.request.userId,
+              idleCheckpointTrigger: idleCheckpointPhaseLogDetails.idleCheckpointTrigger,
+              nextWakeAt: idleCheckpointWake.nextWakeAt,
+              nextWakeReason: idleCheckpointWake.nextWakeReason,
+              inboxMediaRetentionWakeAt: idleCheckpointWake.inboxMediaRetentionWakeAt,
+              issueExportPort: runtime.platform.issueExportPort ?? null,
+              redactedStatus,
+              runtimeWakePendingAtCheckpoint,
+              runtimeAbortSignal: runtimeAbortController.signal,
+              vaultRoot: restored.vaultRoot,
+              workspacePort: foregroundWorkspacePort,
+            });
+          } finally {
+            await checkpointWakeInterruption.dispose();
+            checkpointWakeNotificationAfterCommit =
+              checkpointWakeInterruption.takeNotification();
+          }
         } catch (error) {
           if (error instanceof HostedRuntimeCheckpointInterruptedByWakeError) {
             const shutdownWasSignaled = () => options.shutdownSignal?.aborted === true;
@@ -2804,7 +2800,9 @@ export async function runHostedWorkspaceRuntimeJobInProcess(
               };
               continue;
             }
-            const latencySeed = createHostedRuntimeWakeLatencySeed(error.notification);
+            const latencySeed = createHostedRuntimeWakeLatencySeed(
+              error.notification ?? checkpointWakeNotificationAfterCommit,
+            );
             if (shutdownWasSignaled()) {
               pendingCheckpointWakeLatencySeed ??= latencySeed;
               continue;
@@ -2841,6 +2839,11 @@ export async function runHostedWorkspaceRuntimeJobInProcess(
             continue;
           }
           throw error;
+        }
+        if (checkpointWakeNotificationAfterCommit) {
+          checkpointWakeLatencySeed ??= createHostedRuntimeWakeLatencySeed(
+            checkpointWakeNotificationAfterCommit,
+          );
         }
         emitPhaseLog({
           details: {
@@ -3920,6 +3923,61 @@ function resolveHostedRuntimeIdleCheckpointTrigger(input: {
   return "idle_window";
 }
 
+interface HostedRuntimeCheckpointWakeInterruption {
+  dispose(): Promise<void>;
+  readonly signal: AbortSignal | null;
+  takeNotification(): RuntimeWakeNotification | null;
+}
+
+function createHostedRuntimeCheckpointWakeInterruption(input: {
+  enabled: boolean;
+  runtimeWakeSignal: RuntimeWakeSignal | null;
+}): HostedRuntimeCheckpointWakeInterruption {
+  if (!input.enabled || !input.runtimeWakeSignal) {
+    return {
+      dispose: async () => undefined,
+      signal: null,
+      takeNotification: () => null,
+    };
+  }
+
+  const checkpointAbortController = new AbortController();
+  const waitAbortController = new AbortController();
+  let notification: RuntimeWakeNotification | null = null;
+  const waitCompletion = input.runtimeWakeSignal.wait(waitAbortController.signal).then(
+    (nextNotification) => {
+      notification = nextNotification;
+      checkpointAbortController.abort(
+        new HostedRuntimeCheckpointInterruptedByWakeError({
+          notification: nextNotification,
+        }),
+      );
+    },
+    (error: unknown) => {
+      if (!waitAbortController.signal.aborted) {
+        checkpointAbortController.abort(error);
+      }
+    },
+  );
+
+  return {
+    async dispose() {
+      if (!waitAbortController.signal.aborted) {
+        waitAbortController.abort(
+          new DOMException("Hosted runtime checkpoint wake wait finished.", "AbortError"),
+        );
+      }
+      await waitCompletion;
+    },
+    signal: checkpointAbortController.signal,
+    takeNotification() {
+      const current = notification;
+      notification = null;
+      return current;
+    },
+  };
+}
+
 async function waitForHostedRuntimeDirtyWindow(input: {
   idleCheckpointStartByMs: number;
   runtimeAbortSignal: AbortSignal;
@@ -4018,6 +4076,7 @@ function hostedRuntimeWakeIsDue(
 async function checkpointHostedRuntimeDirtyWorkspace(input: {
   assertRuntimeNotAborted: () => void;
   checkpointRequestBuilder: ReturnType<typeof createHostedWorkspaceSnapshotCheckpointRequestBuilder>;
+  checkpointSignal?: AbortSignal | null;
   expectedUserId: string;
   idleCheckpointTrigger?: HostedRuntimeIdleCheckpointTrigger;
   inboxMediaRetentionWakeAt: string | null;
@@ -4062,11 +4121,15 @@ async function checkpointHostedRuntimeDirtyWorkspace(input: {
       Promise.resolve(input.checkpointRequestBuilder.checkpoint(
         checkpointInput,
         input.workspacePort,
+        { signal: input.checkpointSignal ?? null },
       )),
       input.runtimeAbortSignal,
     )
     : await raceHostedRuntimeCancellation(
-      Promise.resolve(input.checkpointRequestBuilder.createRequest(checkpointInput))
+      Promise.resolve(input.checkpointRequestBuilder.createRequest(
+        checkpointInput,
+        { signal: input.checkpointSignal ?? null },
+      ))
         .then((checkpointRequest) => input.workspacePort!.checkpoint(checkpointRequest)),
       input.runtimeAbortSignal,
     );
@@ -4224,7 +4287,8 @@ function createAbortGuardedHostedRuntimePlatform(
   return {
     ...platform,
     artifactStore: {
-      get: platform.artifactStore.get,
+      get: (sha256, context) =>
+        guard(() => platform.artifactStore.get(sha256, context)),
       put: (putInput) => guard(() => platform.artifactStore.put(putInput)),
     },
     ...(platform.browserVaultReplicaPort
@@ -4315,7 +4379,8 @@ function createAbortGuardedHostedRuntimePlatform(
     ...(platform.logPort
       ? {
           logPort: {
-            write: (request) => guard(() => platform.logPort!.write(request)),
+            write: (request, context) =>
+              guard(() => platform.logPort!.write(request, context)),
           },
         }
       : {}),

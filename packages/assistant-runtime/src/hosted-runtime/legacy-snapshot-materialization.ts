@@ -43,32 +43,44 @@ export interface LegacyWorkspaceRefsForV2SnapshotMaterializationPlan {
 export async function prepareLegacyWorkspaceRefsForV2SnapshotMaterialization(input: {
   artifactStore: HostedRuntimeArtifactReader;
   platform: HostedWorkspaceRuntimeJobOptions["platform"];
+  signal?: AbortSignal | null;
   vaultRoot: string;
 }): Promise<LegacyWorkspaceRefsForV2SnapshotMaterializationPlan> {
-  const currentSnapshotRef = await readHostedWorkspaceCurrentSnapshotRef({
-    platform: input.platform,
-  });
-  const legacyBundleRef = readHostedExecutionSnapshotBaseRef(currentSnapshotRef);
-  const preservedState = legacyBundleRef
-    ? await readHostedWorkspaceEffectivePreservedState({
-        artifactStore: input.artifactStore,
-        snapshotRef: currentSnapshotRef,
-      })
-    : null;
-  const skippedInlineFiles = legacyBundleRef
-    ? await readHostedWorkspaceSkippedInlineFiles({
-        vaultRoot: input.vaultRoot,
-      })
-    : [];
+  assertHostedWorkspaceLegacySnapshotPreparationLive(input.signal);
+  try {
+    const currentSnapshotRef = await readHostedWorkspaceCurrentSnapshotRef({
+      platform: input.platform,
+      signal: input.signal,
+    });
+    assertHostedWorkspaceLegacySnapshotPreparationLive(input.signal);
+    const legacyBundleRef = readHostedExecutionSnapshotBaseRef(currentSnapshotRef);
+    const preservedState = legacyBundleRef
+      ? await readHostedWorkspaceEffectivePreservedState({
+          artifactStore: input.artifactStore,
+          signal: input.signal,
+          snapshotRef: currentSnapshotRef,
+        })
+      : null;
+    assertHostedWorkspaceLegacySnapshotPreparationLive(input.signal);
+    const skippedInlineFiles = legacyBundleRef
+      ? await readHostedWorkspaceSkippedInlineFiles({
+          vaultRoot: input.vaultRoot,
+        })
+      : [];
+    assertHostedWorkspaceLegacySnapshotPreparationLive(input.signal);
 
-  return {
-    currentSnapshotRefPresent: currentSnapshotRef !== null,
-    legacyBundleRefPresent: legacyBundleRef !== null,
-    preservedInlineFileCount: preservedState?.inlineFiles.length ?? 0,
-    preservedState,
-    skippedInlineFiles,
-    skippedInlineFileCount: skippedInlineFiles.length,
-  };
+    return {
+      currentSnapshotRefPresent: currentSnapshotRef !== null,
+      legacyBundleRefPresent: legacyBundleRef !== null,
+      preservedInlineFileCount: preservedState?.inlineFiles.length ?? 0,
+      preservedState,
+      skippedInlineFiles,
+      skippedInlineFileCount: skippedInlineFiles.length,
+    };
+  } catch (error) {
+    assertHostedWorkspaceLegacySnapshotPreparationLive(input.signal);
+    throw error;
+  }
 }
 
 export async function clearLegacyWorkspaceRefsForV2SnapshotMaterialization(input: {
@@ -99,6 +111,7 @@ export async function materializeLegacyWorkspaceRefsForV2Snapshot(input: {
   artifactStore: HostedRuntimeArtifactReader;
   operatorHomeRoot: string;
   plan: LegacyWorkspaceRefsForV2SnapshotMaterializationPlan;
+  signal?: AbortSignal | null;
   vaultRoot: string;
 }): Promise<void> {
   await materializeHostedWorkspaceSkippedInlineFilesForV2Snapshot({
@@ -106,19 +119,34 @@ export async function materializeLegacyWorkspaceRefsForV2Snapshot(input: {
     files: input.plan.skippedInlineFiles,
     operatorHomeRoot: input.operatorHomeRoot,
     preservedState: input.plan.preservedState,
+    signal: input.signal,
     vaultRoot: input.vaultRoot,
   });
 }
 
 async function readHostedWorkspaceCurrentSnapshotRef(input: {
   platform: HostedWorkspaceRuntimeJobOptions["platform"];
+  signal?: AbortSignal | null;
 }): Promise<HostedExecutionSnapshotRef | null> {
   if (!input.platform.workspacePort?.read) {
     return null;
   }
 
-  const currentWorkspace = await input.platform.workspacePort.read();
+  const currentWorkspace = await input.platform.workspacePort.read({
+    signal: input.signal,
+  });
   return currentWorkspace.workspace?.snapshotRef ?? null;
+}
+
+function assertHostedWorkspaceLegacySnapshotPreparationLive(
+  signal: AbortSignal | null | undefined,
+): void {
+  if (!signal?.aborted) {
+    return;
+  }
+  throw signal.reason instanceof Error
+    ? signal.reason
+    : new Error("Hosted workspace legacy snapshot preparation was interrupted.");
 }
 
 async function materializeHostedWorkspaceSkippedInlineFilesForV2Snapshot(input: {
@@ -126,8 +154,10 @@ async function materializeHostedWorkspaceSkippedInlineFilesForV2Snapshot(input: 
   files: readonly HostedWorkspaceSkippedInlineFile[];
   operatorHomeRoot: string;
   preservedState: HostedWorkspaceEffectivePreservedState | null;
+  signal?: AbortSignal | null;
   vaultRoot: string;
 }): Promise<void> {
+  assertHostedWorkspaceLegacySnapshotPreparationLive(input.signal);
   const preservedInlineFiles = new Map(
     (input.preservedState?.inlineFiles ?? []).map((file) => [`${file.root}:${file.path}`, file]),
   );
@@ -135,6 +165,7 @@ async function materializeHostedWorkspaceSkippedInlineFilesForV2Snapshot(input: 
     vaultRoot: input.vaultRoot,
   });
   for (const file of input.files) {
+    assertHostedWorkspaceLegacySnapshotPreparationLive(input.signal);
     const root = resolveHostedWorkspaceSkippedInlineFileRoot({
       operatorHomeRoot: input.operatorHomeRoot,
       root: file.root,
@@ -150,7 +181,8 @@ async function materializeHostedWorkspaceSkippedInlineFilesForV2Snapshot(input: 
     const inlineFile = preservedInlineFiles.get(`${file.root}:${file.path}`);
     const bytes = inlineFile?.sha256 === file.sha256 && inlineFile.size === file.size
       ? inlineFile.bytes
-      : await input.artifactStore.get(file.sha256);
+      : await input.artifactStore.get(file.sha256, { signal: input.signal });
+    assertHostedWorkspaceLegacySnapshotPreparationLive(input.signal);
     if (bytes === null) {
       throw new Error("Hosted workspace skipped-inline artifact is unavailable.");
     }
@@ -207,6 +239,7 @@ function resolveSafeHostedWorkspaceSnapshotPath(root: string, relativePath: stri
 
 async function readHostedWorkspaceEffectivePreservedState(input: {
   artifactStore: HostedRuntimeArtifactReader;
+  signal?: AbortSignal | null;
   snapshotRef: HostedExecutionSnapshotRef | null;
 }): Promise<HostedWorkspaceEffectivePreservedState> {
   const baseSnapshotRef = readHostedExecutionSnapshotBaseRef(input.snapshotRef);
@@ -214,7 +247,10 @@ async function readHostedWorkspaceEffectivePreservedState(input: {
     return createHostedWorkspaceEffectivePreservedState();
   }
 
-  const baseBundle = await input.artifactStore.get(baseSnapshotRef.hash);
+  const baseBundle = await input.artifactStore.get(baseSnapshotRef.hash, {
+    signal: input.signal,
+  });
+  assertHostedWorkspaceLegacySnapshotPreparationLive(input.signal);
   if (!baseBundle) {
     throw new HostedWorkspaceCommittedStateUnavailableError();
   }
@@ -229,7 +265,10 @@ async function readHostedWorkspaceEffectivePreservedState(input: {
   if (!deltaSnapshotRef) {
     const hotSnapshotRef = readHostedExecutionSnapshotHotRef(input.snapshotRef);
     if (hotSnapshotRef) {
-      const hotBundle = await input.artifactStore.get(hotSnapshotRef.hash);
+      const hotBundle = await input.artifactStore.get(hotSnapshotRef.hash, {
+        signal: input.signal,
+      });
+      assertHostedWorkspaceLegacySnapshotPreparationLive(input.signal);
       if (!hotBundle) {
         throw new HostedWorkspaceCommittedStateUnavailableError();
       }
@@ -247,7 +286,10 @@ async function readHostedWorkspaceEffectivePreservedState(input: {
     return createHostedWorkspaceEffectivePreservedState(baseInlineFiles);
   }
 
-  const deltaBundle = await input.artifactStore.get(deltaSnapshotRef.hash);
+  const deltaBundle = await input.artifactStore.get(deltaSnapshotRef.hash, {
+    signal: input.signal,
+  });
+  assertHostedWorkspaceLegacySnapshotPreparationLive(input.signal);
   if (!deltaBundle) {
     throw new HostedWorkspaceCommittedStateUnavailableError();
   }

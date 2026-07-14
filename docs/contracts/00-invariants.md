@@ -81,6 +81,11 @@ executable tests.
   waits, but never let background, replay, maintenance, or diagnostic budgets
   cap fresh accepted input.
 - Routine hosted workspace snapshot publication is idle-only and interruptible.
+  After the latest durably accepted conversation message, routine checkpoint
+  construction has a hard 180-second minimum quiet window. Internal assistant,
+  maintenance, retention, cleanup, projection, and scheduled wakes must not
+  shorten it. An actual host termination may use the separate last-chance
+  durability path, but durably staged foreground work still wins.
   Current-turn durability barriers may run only for facts the current reply or
   effect consumes. Before provider start, that is limited to accepted-input and
   turn-ownership proof; before an irreversible send, to the minimal outbox

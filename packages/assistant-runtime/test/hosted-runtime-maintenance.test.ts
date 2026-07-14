@@ -4049,6 +4049,56 @@ describe("runHostedAssistantAutomationLane", () => {
     }
   });
 
+  it("does not infer backlog when an exact foreground scan reaches its input count", async () => {
+    mocks.runAssistantAutomationPass.mockResolvedValueOnce({
+      nextWakeAt: null,
+      progressed: true,
+      replies: {
+        considered: 1,
+        failed: 0,
+        nextWakeAt: null,
+        replied: 1,
+        skipped: 0,
+      },
+      routing: {
+        considered: 0,
+        failed: 0,
+        nextWakeAt: null,
+        noAction: 0,
+        routed: 0,
+        skipped: 0,
+      },
+    });
+
+    const result = await runHostedAssistantAutomationLane({
+      wake: {
+        eventId: "evt_exact_foreground_scan",
+        kind: "runtime.timer",
+        occurredAt: "2026-04-08T00:00:00.000Z",
+        triggerKind: "runtime_timer",
+        userId: "member_123",
+      },
+      executionContext: {
+        hosted: {
+          issueDeviceConnectLink: vi.fn(),
+          memberId: "member_123",
+          userEnvKeys: [],
+        },
+      },
+      freshAssistantInputIds: ["ain_exact_foreground"],
+      requestId: "req_exact_foreground_scan",
+      runtime: createHostedAutomationRuntime(),
+      vaultRoot: "/tmp/vault-root",
+    });
+
+    expect(mocks.runAssistantAutomationPass.mock.calls[0]?.[0]).toEqual(
+      expect.objectContaining({
+        maxPerScan: 1,
+      }),
+    );
+    expect(result.nextWakeAt).toBeNull();
+  });
+
   it("schedules an immediate wake when the capped background scan saturates", async () => {
     vi.useFakeTimers();
 

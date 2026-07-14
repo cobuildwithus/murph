@@ -34,6 +34,7 @@ const HOSTED_EXECUTION_LOOPBACK_HOSTS = new Set([
   "::1",
   "[::1]",
 ]);
+const HOSTED_EXECUTION_MIN_PRODUCTION_IDLE_CHECKPOINT_DELAY_MS = 180_000;
 
 export interface HostedExecutionWorkerEnvironmentOptions {
   allowHostedWebHttpHosts?: readonly string[];
@@ -62,6 +63,14 @@ export function readHostedExecutionWorkerEnvironment(
     180_000,
     "HOSTED_EXECUTION_IDLE_CHECKPOINT_DELAY_MS",
   );
+  if (
+    isProduction
+    && idleCheckpointDelayMs < HOSTED_EXECUTION_MIN_PRODUCTION_IDLE_CHECKPOINT_DELAY_MS
+  ) {
+    throw new TypeError(
+      "HOSTED_EXECUTION_IDLE_CHECKPOINT_DELAY_MS must be at least 180000 in production.",
+    );
+  }
   const runnerCommitTimeoutMs = parsePositiveInteger(
     normalizeHostedExecutionString(source.HOSTED_EXECUTION_RUNNER_COMMIT_TIMEOUT_MS),
     30_000,

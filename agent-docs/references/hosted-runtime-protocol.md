@@ -1044,19 +1044,23 @@ old web deployment's `checkpointed: false` plus
 response remains a successful transport-level compatibility result and must not
 be collapsed into a generic HTTP conflict. Current web no longer produces it;
 post-upload local wake checks must not discard a valid snapshot on its behalf.
-Checkpoint-required wake metadata remains checkpoint-gated. A new due or
-projected assistant wake moves the next `idle_shutdown` no later than its own
-deadline, so the warm invocation persists and services it instead of waiting
-out the idle timer. If servicing an already-committed due assistant wake
-immediately produces another due wake, the continuation keeps the idle delay to
-bound repeated failing passes. Other pending work, including mailbox budget
-exhaustion and deferred durable checkpoint follow-ups, preserves its
-invocation-local wake candidate without pulling checkpointing earlier. A
-durable checkpoint-effect follow-up still carries its real typed wake.
-Conversation input actually imported and staged before a shutdown yield carries
-a due assistant wake on its real dirty-state checkpoint; a bare runtime wake or
-no-work mailbox notification observed during shutdown does not become a
+The configured idle checkpoint delay is a hard lower bound after the latest
+dirty foreground pass. Due or projected assistant wakes, mailbox budget
+exhaustion, and deferred durable checkpoint follow-ups preserve their
+invocation-local wake candidate for the next `idle_shutdown`, but they do not
+pull routine checkpointing earlier than that boundary. Once the boundary is
+reached, a due assistant wake is committed and serviced by the same warm
+invocation. A durable checkpoint-effect follow-up still carries its real typed
+wake. Conversation input actually imported and staged before a shutdown yield
+carries a due assistant wake on its real dirty-state checkpoint; a bare runtime
+wake or no-work mailbox notification observed during shutdown does not become a
 metadata-only assistant handoff.
+Routine snapshot planning, archive construction, and direct object upload remain
+interruptible until canonical checkpoint publication begins. A foreground wake
+aborts that pre-publication work, unwinds the snapshot session and temporary
+archive, and returns to foreground import. Once canonical publication begins,
+the checkpoint completes and the consumed wake is retained for immediate
+post-commit foreground handling.
 Retryable mailbox import blocks are mailbox-continuation checkpoints even when
 an earlier assistant or device wake wins the projected `nextWakeReason`; web
 uses the redacted `hostedMailboxRetryableBlockedCount` as the explicit signal.

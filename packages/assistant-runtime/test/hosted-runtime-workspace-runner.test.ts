@@ -194,6 +194,23 @@ describe("runHostedWorkspaceUntilIdleOrBudget", () => {
     }
   });
 
+  test("coalesced runtime wake stays pending when its queued waiter aborts", async () => {
+    const runtimeWakeSignal = createCoalescingRuntimeWakeSignal();
+    const waitAbortController = new AbortController();
+    const waitAbortReason = new Error("runtime wake waiter finished");
+    const notifiedAtEpochMs = Date.parse(TEST_NOW);
+    const wake = runtimeWakeSignal.wait(waitAbortController.signal);
+
+    runtimeWakeSignal.notify(notifiedAtEpochMs);
+    waitAbortController.abort(waitAbortReason);
+
+    await assert.rejects(wake, (error: unknown) => error === waitAbortReason);
+    await Promise.resolve();
+    assert.deepEqual(runtimeWakeSignal.consumePending(), {
+      notifiedAtEpochMs,
+    });
+  });
+
   test("delivery barrier drains repeated no-progress wakes without yielding background maintenance", async () => {
     vi.useFakeTimers({ toFake: ["Date"] });
     const vaultRoot = await mkdtemp(path.join(tmpdir(), "murph-runner-stale-runtime-wake-"));

@@ -235,6 +235,80 @@ describe("createHostedWorkspaceRuntimeBridgeJobOptions", () => {
     expect(calls.abortSnapshotSession).toHaveBeenCalledOnce();
   });
 
+  it("does not let snapshot-session abort cleanup block checkpoint interruption", async () => {
+    const vaultRoot = await createVaultRoot();
+    const { calls, platform } = createRuntimePlatform();
+    calls.abortSnapshotSession.mockImplementationOnce(async () => {
+      return await new Promise<never>(() => {});
+    });
+    const controller = new AbortController();
+    const interruption = new Error("Synthetic checkpoint interruption.");
+    let resolveArchiveStarted: (() => void) | undefined;
+    const archiveStarted = new Promise<void>((resolve) => {
+      resolveArchiveStarted = resolve;
+    });
+    const snapshotArchiveBuilder: HostedWorkspaceSnapshotArchiveBuilder = {
+      buildEncryptedSnapshot: vi.fn(async (input) => {
+        expect(input.signal).toBe(controller.signal);
+        resolveArchiveStarted?.();
+        const signal = input.signal;
+        if (!signal) {
+          throw new Error("Checkpoint signal was not propagated to archive construction.");
+        }
+        return await new Promise<never>((_resolve, reject) => {
+          const rejectWithInterruption = () => {
+            reject(signal.reason);
+          };
+          if (signal.aborted) {
+            rejectWithInterruption();
+            return;
+          }
+          signal.addEventListener("abort", rejectWithInterruption, {
+            once: true,
+          });
+        });
+      }),
+    };
+    const options = createBridgeOptions({
+      platform,
+      snapshotArchiveBuilder,
+      vaultRoot,
+    });
+
+    const snapshot = Promise.resolve(options.createCheckpointSnapshot(
+      createCheckpointInput("idle_shutdown"),
+      { signal: controller.signal },
+    ));
+    const snapshotOutcome = snapshot.then(
+      () => ({ status: "resolved" as const }),
+      (error: unknown) => ({ error, status: "rejected" as const }),
+    );
+    await archiveStarted;
+    controller.abort(interruption);
+    let promptRejectionTimeout: ReturnType<typeof setTimeout> | undefined;
+    const promptOutcome = await Promise.race([
+      snapshotOutcome,
+      new Promise<{ status: "timeout" }>((resolve) => {
+        promptRejectionTimeout = setTimeout(() => {
+          resolve({ status: "timeout" });
+        }, 250);
+      }),
+    ]);
+    if (promptRejectionTimeout) {
+      clearTimeout(promptRejectionTimeout);
+    }
+    expect(promptOutcome.status).toBe("rejected");
+    if (promptOutcome.status === "rejected") {
+      expect(promptOutcome.error).toBe(interruption);
+    }
+
+    expect(snapshotArchiveBuilder.buildEncryptedSnapshot).toHaveBeenCalledOnce();
+    expect(calls.startSnapshotSession).toHaveBeenCalledOnce();
+    expect(calls.abortSnapshotSession).toHaveBeenCalledOnce();
+    expect(calls.putSnapshotObjectDirect).not.toHaveBeenCalled();
+    expect(calls.completeSnapshotSession).not.toHaveBeenCalled();
+  });
+
   it("redacts snapshot lifecycle safe error messages before writing runtime logs", async () => {
     const vaultRoot = await createVaultRoot();
     const { calls, platform } = createRuntimePlatform();

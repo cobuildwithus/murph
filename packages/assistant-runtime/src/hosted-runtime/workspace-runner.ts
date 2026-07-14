@@ -154,6 +154,10 @@ export type HostedWorkspaceSnapshotCheckpointRequestBuilderInput =
     runtimeWakePendingAtCheckpoint?: boolean;
   };
 
+export interface HostedWorkspaceSnapshotCheckpointContext {
+  signal?: AbortSignal | null;
+}
+
 export interface HostedWorkspaceRunnerCheckpointRequestInput
   extends Omit<HostedMailboxImportCheckpointRequestInput, "reason"> {
   nextWakeAt?: string | null;
@@ -163,15 +167,18 @@ export interface HostedWorkspaceRunnerCheckpointRequestInput
 
 export type HostedWorkspaceSnapshotCheckpointBuilder = (
   input: HostedWorkspaceSnapshotCheckpointRequestBuilderInput,
+  context?: HostedWorkspaceSnapshotCheckpointContext,
 ) => Promise<HostedWorkspaceSnapshotCheckpointResult> | HostedWorkspaceSnapshotCheckpointResult;
 
 export interface HostedWorkspaceCheckpointRequestBuilder {
   checkpoint?(
     input: HostedWorkspaceSnapshotCheckpointRequestBuilderInput,
     workspacePort: HostedRuntimeWorkspacePort,
+    context?: HostedWorkspaceSnapshotCheckpointContext,
   ): Promise<HostedWorkspaceCheckpointResponse> | HostedWorkspaceCheckpointResponse;
   createRequest(
     input: HostedWorkspaceSnapshotCheckpointRequestBuilderInput,
+    context?: HostedWorkspaceSnapshotCheckpointContext,
   ): Promise<HostedWorkspaceCheckpointRequest> | HostedWorkspaceCheckpointRequest;
   recordCheckpoint?(response: HostedWorkspaceCheckpointResponse): void;
 }
@@ -465,13 +472,13 @@ export function createHostedWorkspaceSnapshotCheckpointRequestBuilder(input: {
   };
 
   return {
-    async checkpoint(requestInput, workspacePort) {
+    async checkpoint(requestInput, workspacePort, context) {
       const expectedWorkspaceVersion =
         requestInput.expectedWorkspaceVersion ?? input.metadata.expectedWorkspaceVersion;
       const snapshot = await input.createSnapshot({
         ...requestInput,
         expectedWorkspaceVersion,
-      });
+      }, context);
       if (snapshot.checkpoint) {
         recordCheckpoint(snapshot.checkpoint);
         return snapshot.checkpoint;
@@ -486,13 +493,13 @@ export function createHostedWorkspaceSnapshotCheckpointRequestBuilder(input: {
       recordCheckpoint(response);
       return response;
     },
-    async createRequest(requestInput) {
+    async createRequest(requestInput, context) {
       const expectedWorkspaceVersion =
         requestInput.expectedWorkspaceVersion ?? input.metadata.expectedWorkspaceVersion;
       const snapshot = await input.createSnapshot({
         ...requestInput,
         expectedWorkspaceVersion,
-      });
+      }, context);
       return buildHostedWorkspaceSnapshotCheckpointRequest({
         metadata: input.metadata,
         requestInput: {

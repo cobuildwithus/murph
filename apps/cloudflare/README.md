@@ -126,7 +126,8 @@ Defaulted worker vars:
 
 - `HOSTED_EXECUTION_MAX_EVENT_ATTEMPTS=3`
 - `HOSTED_EXECUTION_IDLE_CHECKPOINT_DELAY_MS=180000` for the runtime-owned idle
-  window before a dirty invocation checkpoints and returns
+  window before a dirty invocation checkpoints and returns; production rejects
+  lower values so routine checkpoints cannot bypass the three-minute quiet floor
 - `HOSTED_EXECUTION_RUNNER_IDLE_TTL_MS=1200000` for the native container shell
   activity-expiry cleanup lifecycle (code default is `300000` when unset)
 - `HOSTED_EXECUTION_RETRY_DELAY_MS=30000`

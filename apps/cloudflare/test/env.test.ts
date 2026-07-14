@@ -168,6 +168,24 @@ describe("readHostedExecutionEnvironment", () => {
     ).toThrow(/HOSTED_WEB_BASE_URL must not use HTTP in production/u);
   });
 
+  it("rejects a production idle checkpoint delay below 180 seconds", () => {
+    expect(() =>
+      readHostedExecutionWorkerEnvironment(createHostedExecutionTestEnv({
+        HOSTED_CRYPTO_ENV: "production",
+        HOSTED_EXECUTION_IDLE_CHECKPOINT_DELAY_MS: "179999",
+      })),
+    ).toThrow(
+      /HOSTED_EXECUTION_IDLE_CHECKPOINT_DELAY_MS must be at least 180000 in production/u,
+    );
+
+    expect(
+      readHostedExecutionWorkerEnvironment(createHostedExecutionTestEnv({
+        HOSTED_CRYPTO_ENV: "production",
+        HOSTED_EXECUTION_IDLE_CHECKPOINT_DELAY_MS: "180000",
+      })).idleCheckpointDelayMs,
+    ).toBe(180_000);
+  });
+
   it("reads the configured Vercel OIDC environment when provided", () => {
     const environment = readHostedExecutionEnvironment(createHostedExecutionTestEnv({
       HOSTED_EXECUTION_VERCEL_OIDC_ENVIRONMENT: "preview",
