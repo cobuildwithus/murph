@@ -439,7 +439,7 @@ describe('assistant outbox thresholds', () => {
     })
   })
 
-  it('marks delivery confirmation pending when session persistence fails after send', async () => {
+  it('abandons non-idempotent delivery when session persistence fails after send', async () => {
     const deliverAssistantMessageOverBinding = vi.fn(async () => ({
       delivery: createDelivery({
         providerMessageId: 'provider-session-warning',
@@ -472,11 +472,12 @@ describe('assistant outbox thresholds', () => {
       }),
     ).resolves.toMatchObject({
       deliveryError: {
-        code: 'ASSISTANT_DELIVERY_CONFIRMATION_PENDING',
+        code: 'ASSISTANT_DELIVERY_AMBIGUOUS',
       },
       intent: {
+        deliveryConfirmationPending: false,
         intentId: seeded.intentId,
-        status: 'retryable',
+        status: 'abandoned',
       },
     })
   })
@@ -614,7 +615,7 @@ describe('assistant outbox thresholds', () => {
     expect(rename).toHaveBeenCalledOnce()
   })
 
-  it('treats explicit delivery-may-have-succeeded errors as ambiguous retries', async () => {
+  it('abandons explicit delivery-may-have-succeeded errors on non-idempotent transports', async () => {
     const deliverAssistantMessageOverBinding = vi.fn(async () => {
       throw Object.assign(new Error('socket closed after send'), {
         deliveryMayHaveSucceeded: true,
@@ -642,11 +643,11 @@ describe('assistant outbox thresholds', () => {
       }),
     ).resolves.toMatchObject({
       deliveryError: {
-        code: 'ASSISTANT_DELIVERY_CONFIRMATION_PENDING',
+        code: 'ASSISTANT_DELIVERY_AMBIGUOUS',
       },
       intent: {
         deliveryConfirmationPending: false,
-        status: 'retryable',
+        status: 'abandoned',
       },
       session: null,
     })

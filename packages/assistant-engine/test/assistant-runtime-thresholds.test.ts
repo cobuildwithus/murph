@@ -817,7 +817,7 @@ describe('assistant runtime thresholds', () => {
     expect(recordAssistantDiagnosticEvent).not.toHaveBeenCalled()
   })
 
-  it('marks prepared dispatch failures without a clear hook as ambiguous retries', async () => {
+  it('abandons prepared non-idempotent dispatch failures without a clear hook', async () => {
     const { vaultRoot } = await createAssistantVault(
       'assistant-runtime-thresholds-outbox-ambiguous-',
     )
@@ -861,10 +861,10 @@ describe('assistant runtime thresholds', () => {
     })
 
     expect(deliverAssistantMessageOverBinding).toHaveBeenCalledOnce()
-    expect(result.intent.status).toBe('retryable')
+    expect(result.intent.status).toBe('abandoned')
     expect(result.intent.deliveryConfirmationPending).toBe(false)
     expect(result.deliveryError?.code).toBe(
-      'ASSISTANT_DELIVERY_CONFIRMATION_PENDING',
+      'ASSISTANT_DELIVERY_AMBIGUOUS',
     )
   })
 })

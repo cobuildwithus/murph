@@ -2432,7 +2432,7 @@ describe('assistant outbox runtime', () => {
     await expect(listAssistantOutboxIntentsLocal(vaultRoot)).resolves.toEqual([])
   })
 
-  it('clears prepared dispatches on definite failures and falls back to confirmation-pending retries when cleanup is ambiguous', async () => {
+  it('clears prepared dispatches on definite failures and abandons non-idempotent sends when cleanup is ambiguous', async () => {
     const { vaultRoot } = await createAssistantVault('assistant-outbox-failure-')
 
     const failedSeed = await createIntent(vaultRoot, {
@@ -2503,10 +2503,10 @@ describe('assistant outbox runtime', () => {
       now: new Date('2026-04-08T04:15:00.000Z'),
       vault: vaultRoot,
     })
-    expect(ambiguous.intent.status).toBe('retryable')
+    expect(ambiguous.intent.status).toBe('abandoned')
     expect(ambiguous.intent.deliveryConfirmationPending).toBe(false)
     expect(ambiguous.intent.lastError?.code).toBe(
-      'ASSISTANT_DELIVERY_CONFIRMATION_PENDING',
+      'ASSISTANT_DELIVERY_AMBIGUOUS',
     )
   })
 
