@@ -11,11 +11,15 @@ export interface RuntimeWakeNotification {
   latestNotifiedAtEpochMs?: number;
   notifiedAtEpochMs: number;
   orchestration?: HostedRuntimeOrchestrationLatencyDiagnostics | null;
+  revision: number;
 }
 
 export interface RuntimeWakeSignal {
   consumePending(): RuntimeWakeNotification | null;
+  currentRevision(): number;
   notify(input?: number | RuntimeWakeNotifyInput): void;
+  /** Re-enqueue an existing wake without advancing its notification revision. */
+  requeue(notification: RuntimeWakeNotification): void;
   wait(signal?: AbortSignal | null): Promise<RuntimeWakeNotification>;
 }
 
@@ -34,8 +38,10 @@ export function createCoalescingRuntimeWakeSignal(): RuntimeWakeSignal {
   let latestPendingNotifyAtEpochMs: number | null = null;
   let pendingNotifyAtEpochMs: number | null = null;
   let pendingOrchestration: HostedRuntimeOrchestrationLatencyDiagnostics | null = null;
+  let pendingRevision: number | null = null;
   let pending = false;
   let flushScheduled = false;
+  let revision = 0;
   const waiters = new Set<(notification: RuntimeWakeNotification) => void>();
   const consumePendingNotification = (): RuntimeWakeNotification => {
     const notifiedAtEpochMs = pendingNotifyAtEpochMs ?? Date.now();
@@ -47,15 +53,17 @@ export function createCoalescingRuntimeWakeSignal(): RuntimeWakeSignal {
         : {}),
       notifiedAtEpochMs,
       ...(pendingOrchestration ? { orchestration: pendingOrchestration } : {}),
+      revision: pendingRevision ?? revision,
     };
     latestPendingNotifyAtEpochMs = null;
     pendingNotifyAtEpochMs = null;
     pendingOrchestration = null;
+    pendingRevision = null;
     return notification;
   };
   const flushWaiters = () => {
     flushScheduled = false;
-    if (!pending) {
+    if (!pending || waiters.size === 0) {
       return;
     }
 
@@ -67,6 +75,37 @@ export function createCoalescingRuntimeWakeSignal(): RuntimeWakeSignal {
       wake(notification);
     }
   };
+  const enqueueNotification = (
+    notification: RuntimeWakeNotification,
+  ): void => {
+    if (!pending) {
+      latestPendingNotifyAtEpochMs =
+        notification.latestNotifiedAtEpochMs ?? notification.notifiedAtEpochMs;
+      pendingNotifyAtEpochMs = notification.notifiedAtEpochMs;
+      pendingOrchestration = notification.orchestration ?? null;
+      pendingRevision = notification.revision;
+    } else {
+      latestPendingNotifyAtEpochMs = Math.max(
+        latestPendingNotifyAtEpochMs
+          ?? pendingNotifyAtEpochMs
+          ?? notification.notifiedAtEpochMs,
+        notification.latestNotifiedAtEpochMs ?? notification.notifiedAtEpochMs,
+      );
+      if (!pendingOrchestration && notification.orchestration) {
+        pendingOrchestration = notification.orchestration;
+      }
+      pendingRevision = Math.max(
+        pendingRevision ?? notification.revision,
+        notification.revision,
+      );
+    }
+    pending = true;
+    if (waiters.size > 0 && !flushScheduled) {
+      flushScheduled = true;
+      // Collapse same-tick wake bursts into one foreground mailbox import.
+      queueMicrotask(flushWaiters);
+    }
+  };
 
   return {
     consumePending() {
@@ -76,29 +115,18 @@ export function createCoalescingRuntimeWakeSignal(): RuntimeWakeSignal {
       pending = false;
       return consumePendingNotification();
     },
+    currentRevision() {
+      return revision;
+    },
     notify(input?: number | RuntimeWakeNotifyInput) {
-      const notification = normalizeRuntimeWakeNotifyInput(input);
-      if (!pending) {
-        latestPendingNotifyAtEpochMs = notification.notifiedAtEpochMs;
-        pendingNotifyAtEpochMs = notification.notifiedAtEpochMs;
-        pendingOrchestration = notification.orchestration ?? null;
-      } else {
-        latestPendingNotifyAtEpochMs = Math.max(
-          latestPendingNotifyAtEpochMs
-            ?? pendingNotifyAtEpochMs
-            ?? notification.notifiedAtEpochMs,
-          notification.notifiedAtEpochMs,
-        );
-        if (!pendingOrchestration && notification.orchestration) {
-          pendingOrchestration = notification.orchestration;
-        }
-      }
-      pending = true;
-      if (waiters.size > 0 && !flushScheduled) {
-        flushScheduled = true;
-        // Collapse same-tick wake bursts into one foreground mailbox import.
-        queueMicrotask(flushWaiters);
-      }
+      revision += 1;
+      enqueueNotification({
+        ...normalizeRuntimeWakeNotifyInput(input),
+        revision,
+      });
+    },
+    requeue(notification: RuntimeWakeNotification) {
+      enqueueNotification(notification);
     },
     wait(signal?: AbortSignal | null) {
       if (signal?.aborted) {
@@ -139,7 +167,7 @@ export function createCoalescingRuntimeWakeSignal(): RuntimeWakeSignal {
 
 function normalizeRuntimeWakeNotifyInput(
   input: number | RuntimeWakeNotifyInput | undefined,
-): RuntimeWakeNotification {
+): Omit<RuntimeWakeNotification, "revision"> {
   if (typeof input === "number") {
     return { notifiedAtEpochMs: input };
   }

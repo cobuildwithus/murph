@@ -40,6 +40,7 @@ export type {
   HostedRuntimePhoneCallPort,
   HostedRuntimePlanUsageToolPort,
   HostedRuntimeProviderFileResponse,
+  HostedRuntimeProviderFetch,
   HostedRuntimeProviderTargetKind,
   HostedRuntimeTelegramChatActionRequest,
   HostedRuntimeTelegramCleanupMessage,

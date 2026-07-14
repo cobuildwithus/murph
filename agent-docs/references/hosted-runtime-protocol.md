@@ -818,16 +818,30 @@ assistant input spine: a payloadless runtime wake causes the active child to
 import conversation mailbox rows, stage any new `AssistantInputEvent` records,
 run prompt-preparation effects best-effort, and notify active-turn admission.
 The pre-delivery system-mailbox consistency barrier may pause that loop, but it
-must resume before post-checkpoint delivery or background drains continue. A
-source-less wake preempts those drains as soon as resumed import durably stages
-new conversation work; optional inbox projection and active-turn notification
-remain downstream and cannot delay that preemption. A resumed system import
-must fail delivery closed when it is retryably blocked or errors. Only a clean
-no-progress result or a successfully classified system wake may let bounded
-maintenance, delivery, and the idle checkpoint continue. When the current
+must resume before post-checkpoint provider authority or background drains
+continue. A source-less wake preempts background drains as soon as resumed
+import durably stages new conversation work; optional inbox projection and
+active-turn notification remain downstream and cannot delay that preemption. A
+resumed system import must fail auto-reply provider entry closed when it is
+retryably blocked or errors. Only a clean no-progress result or a successfully
+classified system wake may let bounded maintenance, background delivery, and
+the idle checkpoint continue. When the current
 assistant-input batch is full, the watcher classifies the system lane and
 requeues the notification so conversation work remains eligible for the next
 foreground pass instead of being imported beyond the batch boundary.
+Provider entry repeats that remote classification and local member-channel
+reconciliation, then carries an invocation-local wake-revision permit to the
+irreversible send boundary. A clean wake that invalidates the permit is
+reconciled in place within a bounded refresh loop; repeated invalidation yields
+to durable continuation instead of holding the invocation indefinitely.
+Blocked, failed, or still-unclassified system/member-channel authority prevents
+every auto-reply provider entry, including optional in-turn progress messages.
+A member-channel update reconciled after the prior eligibility read yields so
+the next pass rereads channel enablement. By
+contrast, later conversation work or incomplete conversation classification
+yields background retries and maintenance without canceling an already
+prepared current-turn reply. The permit is checked again after asynchronous
+provider authority preparation and immediately before egress.
 The assistant engine then admits the persisted input through live steering or
 pre-provider admission without using hosted-specific mailbox
 refresh/checkpoint ports. While a Codex turn is live, same-conversation input is
@@ -846,6 +860,12 @@ provider-request metadata, and outbox intent creation remain on the normal
 local assistant-service path. The same-reply coalescing window ends when the
 live provider turn ends, not at physical provider delivery; mailbox input that
 arrives after that boundary remains durable staged input for a later turn.
+Preferred later-turn mailbox replies cannot overtake an earlier pristine
+pending mailbox reply on the same conversation route when their provider-source
+boundaries match. Channels without a separate provider-source identity share
+the source-less boundary. Once the earlier reply has been attempted and becomes
+retryable, ordinary foreground priority applies instead of holding fresh
+replies behind retry backlog.
 Hosted Linq reply sends are idempotent when an outbox idempotency key is
 present. The Linq HTTP layer may retry those POST sends on transient transport,
 408, or 5xx failures, and the hosted outbox must keep such failures retryable

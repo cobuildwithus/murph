@@ -1,5 +1,6 @@
 import {
   HOSTED_RUNTIME_CODEX_MODEL_PROVIDER_BASE_URL_ENV,
+  type HostedRuntimeProviderFetch,
 } from "@murphai/assistant-runtime/hosted-runtime-contracts";
 import { emitHostedExecutionStructuredLog } from "@murphai/hosted-execution";
 import { HOSTED_RUNTIME_LATENCY_TRACE_PATH } from "@murphai/hosted-execution/routes";
@@ -38,60 +39,84 @@ import {
 import { buildHostedRuntimeSafeErrorMetadata } from "./diagnostics.ts";
 import { normalizeCloudflareWorkerFetch } from "../worker-fetch.ts";
 
+type HostedProviderEntryContext = {
+  assertProviderEntryCurrent: () => void;
+  onProviderDispatchEntered: () => void;
+};
+
+type CloudflareHostedInternalFetchOptions = {
+  injectBoundUserIdHeader?: boolean;
+  readCurrentLease?: HostedWorkspaceCheckpointBridgeAuthority["readCurrentLease"];
+};
+
 export function createCloudflareHostedInternalFetch(
   boundUserId: string,
   fetchImpl: typeof fetch,
-  options: {
-    injectBoundUserIdHeader?: boolean;
-    readCurrentLease?: HostedWorkspaceCheckpointBridgeAuthority["readCurrentLease"];
-  } = {},
+  options: CloudflareHostedInternalFetchOptions = {},
 ): typeof fetch {
   const normalizedFetchImpl = normalizeCloudflareWorkerFetch(fetchImpl);
-  return (async (input: RequestInfo | URL, init?: RequestInit) => {
-    const request = new Request(input, init);
-    const url = new URL(request.url);
+  return ((input: RequestInfo | URL, init?: RequestInit) =>
+    dispatchCloudflareHostedInternalFetch(
+      boundUserId,
+      normalizedFetchImpl,
+      options,
+      input,
+      init,
+    )) as typeof fetch;
+}
 
-    if (!CLOUDFLARE_HOSTED_RUNTIME_INTERNAL_HOSTNAMES.has(url.hostname)) {
-      return normalizedFetchImpl(request);
-    }
+async function dispatchCloudflareHostedInternalFetch(
+  boundUserId: string,
+  fetchImpl: typeof fetch,
+  options: CloudflareHostedInternalFetchOptions,
+  input: RequestInfo | URL,
+  init?: RequestInit,
+  providerEntryContext?: HostedProviderEntryContext | null,
+): Promise<Response> {
+  const request = new Request(input, init);
+  const url = new URL(request.url);
 
-    if (!options.readCurrentLease) {
+  if (!CLOUDFLARE_HOSTED_RUNTIME_INTERNAL_HOSTNAMES.has(url.hostname)) {
+    return fetchImpl(request);
+  }
+
+  if (!options.readCurrentLease) {
+    throw new Error(
+      `Hosted runtime internal request for ${url.hostname}${url.pathname} is missing a runtime write-fence authority.`,
+    );
+  }
+
+  const headers = new Headers(request.headers);
+  const hasSuppliedWorkspaceSnapshotWriteFence =
+    url.hostname === CLOUDFLARE_HOSTED_RUNTIME_HOSTS.workspaceSnapshotStore
+    && headers.has(HOSTED_RUNTIME_ATTEMPT_ID_HEADER)
+    && headers.has(HOSTED_RUNTIME_LEASE_GENERATION_HEADER)
+    && headers.has(HOSTED_RUNTIME_WORKSPACE_VERSION_HEADER);
+  const hasSuppliedLatencyTraceWriteFence =
+    url.hostname === CLOUDFLARE_HOSTED_RUNTIME_HOSTS.webControlPlane
+    && request.method === "POST"
+    && url.pathname === HOSTED_RUNTIME_LATENCY_TRACE_PATH
+    && headers.has(HOSTED_RUNTIME_ATTEMPT_ID_HEADER)
+    && headers.has(HOSTED_RUNTIME_LEASE_GENERATION_HEADER);
+  if (!hasSuppliedWorkspaceSnapshotWriteFence && !hasSuppliedLatencyTraceWriteFence) {
+    const lease = await options.readCurrentLease?.() ?? null;
+    if (!lease) {
       throw new Error(
-        `Hosted runtime internal request for ${url.hostname}${url.pathname} is missing a runtime write-fence authority.`,
+        `Hosted runtime internal request for ${url.hostname}${url.pathname} is missing a runtime write-fence lease.`,
       );
     }
+    writeRunnerRuntimeWriteFenceHeaders(headers, lease);
+  }
 
-    const headers = new Headers(request.headers);
-    const hasSuppliedWorkspaceSnapshotWriteFence =
-      url.hostname === CLOUDFLARE_HOSTED_RUNTIME_HOSTS.workspaceSnapshotStore
-      && headers.has(HOSTED_RUNTIME_ATTEMPT_ID_HEADER)
-      && headers.has(HOSTED_RUNTIME_LEASE_GENERATION_HEADER)
-      && headers.has(HOSTED_RUNTIME_WORKSPACE_VERSION_HEADER);
-    const hasSuppliedLatencyTraceWriteFence =
-      url.hostname === CLOUDFLARE_HOSTED_RUNTIME_HOSTS.webControlPlane
-      && request.method === "POST"
-      && url.pathname === HOSTED_RUNTIME_LATENCY_TRACE_PATH
-      && headers.has(HOSTED_RUNTIME_ATTEMPT_ID_HEADER)
-      && headers.has(HOSTED_RUNTIME_LEASE_GENERATION_HEADER);
-    if (!hasSuppliedWorkspaceSnapshotWriteFence && !hasSuppliedLatencyTraceWriteFence) {
-      const lease = await options.readCurrentLease?.() ?? null;
-      if (!lease) {
-        throw new Error(
-          `Hosted runtime internal request for ${url.hostname}${url.pathname} is missing a runtime write-fence lease.`,
-        );
-      }
-      writeRunnerRuntimeWriteFenceHeaders(headers, lease);
-    }
-
-    return await fetchCloudflareHostedInternalRequest({
-      boundUserId,
-      fetchImpl: normalizedFetchImpl,
-      headers,
-      injectBoundUserIdHeader: options.injectBoundUserIdHeader ?? false,
-      request,
-      url,
-    });
-  }) as typeof fetch;
+  return await fetchCloudflareHostedInternalRequest({
+    boundUserId,
+    fetchImpl,
+    headers,
+    injectBoundUserIdHeader: options.injectBoundUserIdHeader ?? false,
+    providerEntryContext,
+    request,
+    url,
+  });
 }
 
 export function createCloudflareHostedTrustedInternalFetch(
@@ -126,6 +151,7 @@ async function fetchCloudflareHostedInternalRequest(input: {
   fetchImpl: typeof fetch;
   headers: Headers;
   injectBoundUserIdHeader: boolean;
+  providerEntryContext?: HostedProviderEntryContext | null;
   request: Request;
   url: URL;
 }): Promise<Response> {
@@ -157,6 +183,8 @@ async function fetchCloudflareHostedInternalRequest(input: {
     userId: input.boundUserId,
   });
 
+  input.providerEntryContext?.assertProviderEntryCurrent();
+  input.providerEntryContext?.onProviderDispatchEntered();
   try {
     const response = await input.fetchImpl(internalRequest);
     emitHostedExecutionStructuredLog({
@@ -284,18 +312,31 @@ export function createCloudflareHostedProviderFetch(
     providerFetchBaseUrls?: readonly string[];
     readCurrentLease?: HostedWorkspaceCheckpointBridgeAuthority["readCurrentLease"];
   },
-): typeof fetch {
+): HostedRuntimeProviderFetch {
   const normalizedFetchImpl = normalizeCloudflareWorkerFetch(fetchImpl);
   const internalFetch = createCloudflareHostedInternalFetch(
     boundUserId,
     normalizedFetchImpl,
     options,
   );
-  return (async (input: RequestInfo | URL, init?: RequestInit) => {
+  const dispatch = async (
+    input: RequestInfo | URL,
+    init?: RequestInit,
+    providerEntryContext?: HostedProviderEntryContext | null,
+  ): Promise<Response> => {
     const request = new Request(input, init);
     const url = new URL(request.url);
     if (CLOUDFLARE_HOSTED_RUNTIME_INTERNAL_HOSTNAMES.has(url.hostname)) {
-      return await internalFetch(request);
+      return providerEntryContext
+        ? await dispatchCloudflareHostedInternalFetch(
+            boundUserId,
+            normalizedFetchImpl,
+            options,
+            request,
+            undefined,
+            providerEntryContext,
+          )
+        : await internalFetch(request);
     }
     assertCloudflareHostedProviderFetchUrl(
       url,
@@ -316,6 +357,8 @@ export function createCloudflareHostedProviderFetch(
     }
 
     const providerRequest = new Request(request, { headers });
+    providerEntryContext?.assertProviderEntryCurrent();
+    providerEntryContext?.onProviderDispatchEntered();
     try {
       return await normalizedFetchImpl(providerRequest);
     } catch (error) {
@@ -334,7 +377,17 @@ export function createCloudflareHostedProviderFetch(
       });
       throw error;
     }
-  }) as typeof fetch;
+  };
+  return Object.assign(
+    (input: RequestInfo | URL, init?: RequestInit) => dispatch(input, init),
+    {
+      dispatchWithProviderEntryCurrentCheck: (
+        input: RequestInfo | URL,
+        init: RequestInit | undefined,
+        context: HostedProviderEntryContext,
+      ) => dispatch(input, init, context),
+    },
+  );
 }
 
 const CLOUDFLARE_HOSTED_PROVIDER_FETCH_BASE_URL_ENV_KEYS = [

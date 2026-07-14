@@ -229,6 +229,55 @@ function createEffect(
   });
 }
 
+function createCrossTurnMailboxReplyIntent(input: {
+  answeredMailboxItemIds?: string[];
+  attemptCount?: number;
+  channel?: "linq" | "telegram";
+  createdAt: string;
+  deliverySourcePhone?: string | null;
+  explicitTarget: string;
+  intentId: string;
+  lastAttemptAt?: string | null;
+  lastError?: { code: string; message: string } | null;
+  status?: "pending" | "retryable";
+  turnId: string;
+}) {
+  return {
+    actorId: "actor_1",
+    answeredMailboxItemIds:
+      input.answeredMailboxItemIds ?? [`mailbox-${input.turnId}`],
+    attemptCount: input.attemptCount ?? 0,
+    bindingDelivery: null,
+    channel: input.channel ?? "linq",
+    createdAt: input.createdAt,
+    dedupeKey: `dedupe-${input.intentId}`,
+    deliveryIdempotencyKey: `delivery-${input.intentId}`,
+    deliverySource: input.deliverySourcePhone === null
+      ? null
+      : {
+          kind: "linq" as const,
+          fromPhoneNumber: input.deliverySourcePhone ?? "+15550000001",
+        },
+    deliveryTransportIdempotent: true,
+    explicitTarget: input.explicitTarget,
+    identityId: "identity_1",
+    intentId: input.intentId,
+    lastAttemptAt: input.lastAttemptAt ?? null,
+    lastError: input.lastError ?? null,
+    message: `${input.turnId} reply`,
+    nextAttemptAt: input.createdAt,
+    operation: null,
+    preparedDispatchToken: null,
+    replyToMessageId: `message-${input.turnId}`,
+    sessionId: "session_1",
+    status: input.status ?? "pending",
+    subject: null,
+    threadId: "linq-thread",
+    threadIsDirect: true,
+    turnId: input.turnId,
+  };
+}
+
 function createHostedVoiceMemoMedia(
   overrides: Partial<HostedVoiceMemoDeliveryMedia> = {},
 ): HostedVoiceMemoDeliveryMedia {
@@ -2334,6 +2383,158 @@ describe("hosted runtime callbacks", () => {
       "second current-turn reply",
       "fresh current-turn reply",
     ]);
+  });
+
+  it("holds a preferred mailbox reply behind an earlier pristine reply for the same conversation", async () => {
+    mocks.listAssistantOutboxIntents.mockResolvedValue([
+      createCrossTurnMailboxReplyIntent({
+        createdAt: "2026-04-08T00:00:00.000Z",
+        explicitTarget: "+15550009999",
+        intentId: "intent_first",
+        turnId: "turn_first",
+      }),
+      createCrossTurnMailboxReplyIntent({
+        createdAt: "2026-04-08T00:01:00.000Z",
+        explicitTarget: "linq-chat",
+        intentId: "intent_second",
+        turnId: "turn_second",
+      }),
+    ]);
+    const sideEffects = await collectHostedAssistantDeliverySideEffects({
+      includeBackgroundDueIntents: false,
+      preferredIntentIds: ["intent_second"],
+      vaultRoot: "/tmp/vault",
+    });
+
+    expect(sideEffects).toEqual([]);
+  });
+
+  it("holds a source-less mailbox reply behind an earlier pristine reply on the same route", async () => {
+    mocks.listAssistantOutboxIntents.mockResolvedValue([
+      createCrossTurnMailboxReplyIntent({
+        channel: "telegram",
+        createdAt: "2026-04-08T00:00:00.000Z",
+        deliverySourcePhone: null,
+        explicitTarget: "telegram-chat",
+        intentId: "intent_first",
+        turnId: "turn_first",
+      }),
+      createCrossTurnMailboxReplyIntent({
+        channel: "telegram",
+        createdAt: "2026-04-08T00:01:00.000Z",
+        deliverySourcePhone: null,
+        explicitTarget: "telegram-chat",
+        intentId: "intent_second",
+        turnId: "turn_second",
+      }),
+    ]);
+
+    const sideEffects = await collectHostedAssistantDeliverySideEffects({
+      includeBackgroundDueIntents: false,
+      preferredIntentIds: ["intent_second"],
+      vaultRoot: "/tmp/vault",
+    });
+
+    expect(sideEffects).toEqual([]);
+  });
+
+  it.each([
+    {
+      earlierTarget: "telegram-chat-one",
+      earlierTurnId: "turn_first",
+      expectedIntentIds: ["intent_second"],
+      label: "another source-less route",
+    },
+    {
+      earlierTarget: "telegram-chat",
+      earlierTurnId: "turn_second",
+      expectedIntentIds: ["intent_first", "intent_second"],
+      label: "another segment of the same turn",
+    },
+  ])("does not hold a source-less mailbox reply behind $label", async ({
+    earlierTarget,
+    earlierTurnId,
+    expectedIntentIds,
+  }) => {
+    mocks.listAssistantOutboxIntents.mockResolvedValue([
+      createCrossTurnMailboxReplyIntent({
+        channel: "telegram",
+        createdAt: "2026-04-08T00:00:00.000Z",
+        deliverySourcePhone: null,
+        explicitTarget: earlierTarget,
+        intentId: "intent_first",
+        turnId: earlierTurnId,
+      }),
+      createCrossTurnMailboxReplyIntent({
+        channel: "telegram",
+        createdAt: "2026-04-08T00:01:00.000Z",
+        deliverySourcePhone: null,
+        explicitTarget: "telegram-chat",
+        intentId: "intent_second",
+        turnId: "turn_second",
+      }),
+    ]);
+
+    const sideEffects = await collectHostedAssistantDeliverySideEffects({
+      includeBackgroundDueIntents: false,
+      preferredIntentIds: ["intent_second"],
+      vaultRoot: "/tmp/vault",
+    });
+
+    expect(sideEffects.map((effect) => effect.effectId)).toEqual(expectedIntentIds);
+  });
+
+  it.each([
+    {
+      earlierOverrides: {
+        attemptCount: 1,
+        lastAttemptAt: "2026-04-08T00:00:01.000Z",
+        lastError: {
+          code: "ASSISTANT_DELIVERY_RETRYABLE",
+          message: "retry later",
+        },
+        status: "retryable" as const,
+      },
+      label: "an attempted retry",
+    },
+    {
+      earlierOverrides: {
+        answeredMailboxItemIds: [],
+      },
+      label: "an unrelated pending delivery",
+    },
+    {
+      earlierOverrides: {
+        deliverySourcePhone: "+15550000002",
+      },
+      label: "another Linq source",
+    },
+  ])("does not hold a preferred mailbox reply behind $label", async ({
+    earlierOverrides,
+  }) => {
+    mocks.listAssistantOutboxIntents.mockResolvedValue([
+      createCrossTurnMailboxReplyIntent({
+        createdAt: "2026-04-08T00:00:00.000Z",
+        explicitTarget: "+15550009999",
+        intentId: "intent_first",
+        turnId: "turn_first",
+        ...earlierOverrides,
+      }),
+      createCrossTurnMailboxReplyIntent({
+        createdAt: "2026-04-08T00:01:00.000Z",
+        explicitTarget: "linq-chat",
+        intentId: "intent_second",
+        turnId: "turn_second",
+      }),
+    ]);
+
+    const sideEffects = await collectHostedAssistantDeliverySideEffects({
+      includeBackgroundDueIntents: false,
+      preferredIntentIds: ["intent_second"],
+      vaultRoot: "/tmp/vault",
+    });
+
+    expect(sideEffects.map((effect) => effect.effectId)).toEqual(["intent_second"]);
   });
 
   it("dispatches earlier same-turn steered segments before the preferred final reply", async () => {
@@ -5453,6 +5654,97 @@ describe("hosted runtime callbacks", () => {
     });
   });
 
+  it("delivers a prepared foreground reply before yielding remaining background work", async () => {
+    const foregroundEffect = buildHostedAssistantDeliveryEffect({
+      dedupeKey: "dedupe_foreground_first",
+      deliveryPhase: "foreground_current_turn",
+      effectId: "intent_foreground_first",
+      payload: createPayload({
+        idempotencyKey: "assistant-outbox:intent_foreground_first",
+        transportIdempotent: true,
+      }),
+    });
+    const backgroundEffect = buildHostedAssistantDeliveryEffect({
+      dedupeKey: "dedupe_background_second",
+      deliveryPhase: "background_retry",
+      effectId: "intent_background_second",
+      payload: createPayload({
+        idempotencyKey: "assistant-outbox:intent_background_second",
+        transportIdempotent: true,
+      }),
+    });
+    const yieldedCounts: number[] = [];
+    mocks.readAssistantOutboxIntentMirrorState.mockResolvedValueOnce(
+      createMirrorState(
+        {
+          delivery: null,
+          deliveryIdempotencyKey: "assistant-outbox:intent_foreground_first",
+          deliveryTransportIdempotent: true,
+          intentId: foregroundEffect.effectId,
+          lastError: null,
+          status: "sending",
+        },
+        { sendingStartedAt: "2026-04-08T00:00:05.000Z" },
+      ),
+    );
+    mocks.dispatchAssistantOutboxIntent.mockResolvedValueOnce(
+      createDispatchResult({
+        delivery: createDelivery({
+          idempotencyKey: "assistant-outbox:intent_foreground_first",
+        }),
+        intentId: foregroundEffect.effectId,
+        status: "sent",
+      }),
+    );
+
+    const outcomes = await drainHostedPreparedAssistantDeliveries({
+      allowPreparedSending: true,
+      assistantDeliveryEffects: [foregroundEffect, backgroundEffect],
+      effectsPort: createHostedRuntimeEffectsPortStub(),
+      onBackgroundDeliveryYield: ({ yieldedEffectCount }) => {
+        yieldedCounts.push(yieldedEffectCount);
+      },
+      preparedDispatches: [
+        {
+          intentId: foregroundEffect.effectId,
+          preparedDispatchToken: "prepared-dispatch-token-foreground-first",
+          previousDispatchState: createPreparedPreviousDispatchState({
+            deliveryIdempotencyKey: "assistant-outbox:intent_foreground_first",
+            deliveryTransportIdempotent: true,
+          }),
+        },
+        {
+          intentId: backgroundEffect.effectId,
+          preparedDispatchToken: "prepared-dispatch-token-background-second",
+          previousDispatchState: createPreparedPreviousDispatchState({
+            deliveryIdempotencyKey: "assistant-outbox:intent_background_second",
+            deliveryTransportIdempotent: true,
+          }),
+        },
+      ],
+      providerFetch: vi.fn<typeof fetch>(),
+      shouldBlockProviderEntry: () => false,
+      shouldYieldBackgroundDelivery: () => true,
+      vaultRoot: HOSTED_WAKE.vaultRoot,
+      wake: HOSTED_WAKE.wake,
+    });
+
+    expect(outcomes).toEqual([
+      expect.objectContaining({
+        deliveryStatus: "sent",
+        effectId: foregroundEffect.effectId,
+      }),
+    ]);
+    expect(yieldedCounts).toEqual([1]);
+    expect(mocks.dispatchAssistantOutboxIntent).toHaveBeenCalledTimes(1);
+    expect(mocks.resetAssistantOutboxPreparedDispatchById).toHaveBeenCalledOnce();
+    expect(mocks.resetAssistantOutboxPreparedDispatchById).toHaveBeenCalledWith(
+      expect.objectContaining({
+        intentId: backgroundEffect.effectId,
+      }),
+    );
+  });
+
   it("resets the current prepared background delivery when foreground work appears before outbox dispatch", async () => {
     const effect = buildHostedAssistantDeliveryEffect({
       dedupeKey: "dedupe_yield_before_dispatch",
@@ -5639,6 +5931,227 @@ describe("hosted runtime callbacks", () => {
       }),
       vault: HOSTED_WAKE.vaultRoot,
     });
+  });
+
+  it("rechecks foreground authority after asynchronous Linq provider preparation", async () => {
+    const effect = buildHostedAssistantDeliveryEffect({
+      dedupeKey: "dedupe_linq_yield_after_authority",
+      deliveryPhase: "foreground_current_turn",
+      effectId: "intent_linq_yield_after_authority",
+      payload: createPayload({
+        bindingDeliveryKind: "thread",
+        bindingDeliveryTarget: "linq_chat_123",
+        channel: "linq",
+        explicitTarget: "linq_chat_123",
+        idempotencyKey: "assistant-outbox:intent_linq_yield_after_authority",
+        transportIdempotent: true,
+      }),
+    });
+    let shouldYield = false;
+    let providerEntryYieldWasRethrown = false;
+    const providerFetch = vi.fn<typeof fetch>();
+    const assertRecentInbound = vi.fn(async (request) => {
+      shouldYield = true;
+      return buildClaimedLinqEngagementResult(request);
+    });
+    mocks.readAssistantOutboxIntentMirrorState.mockResolvedValueOnce(
+      createMirrorState(
+        {
+          delivery: null,
+          deliveryIdempotencyKey:
+            "assistant-outbox:intent_linq_yield_after_authority",
+          deliveryTransportIdempotent: true,
+          intentId: effect.effectId,
+          lastError: null,
+          status: "sending",
+        },
+        {
+          sendingStartedAt: "2026-04-08T00:00:05.000Z",
+        },
+      ),
+    );
+    mocks.dispatchAssistantOutboxIntent.mockImplementationOnce(async (request) => {
+      try {
+        await request.dependencies.sendLinq({
+          idempotencyKey: "assistant-outbox:intent_linq_yield_after_authority",
+          message: "hello from hosted",
+          replyToMessageId: "linq_message_1",
+          target: "linq_chat_123",
+          targetKind: "thread",
+        });
+      } catch (error) {
+        providerEntryYieldWasRethrown =
+          request.dispatchHooks?.shouldRethrowDispatchError?.({
+            error,
+            intent: { intentId: effect.effectId },
+            vault: HOSTED_WAKE.vaultRoot,
+          }) === true;
+        if (providerEntryYieldWasRethrown) {
+          throw error;
+        }
+      }
+      throw new Error("expected Linq provider-entry foreground yield");
+    });
+    const yieldedCounts: number[] = [];
+
+    const outcomes = await drainHostedPreparedAssistantDeliveries({
+      allowPreparedSending: true,
+      assistantDeliveryEffects: [effect],
+      assertLiveness: vi.fn(async () => undefined),
+      effectsPort: createHostedRuntimeEffectsPortStub({
+        assertLinqRecentInboundEngagement: assertRecentInbound,
+      }),
+      onBackgroundDeliveryYield: ({ yieldedEffectCount }) => {
+        yieldedCounts.push(yieldedEffectCount);
+      },
+      preparedDispatches: [{
+        intentId: effect.effectId,
+        preparedDispatchToken: "prepared-dispatch-token-linq-yield-after-authority",
+        previousDispatchState: createPreparedPreviousDispatchState({
+          deliveryIdempotencyKey:
+            "assistant-outbox:intent_linq_yield_after_authority",
+          deliveryTransportIdempotent: true,
+        }),
+      }],
+      providerFetch,
+      shouldBlockProviderEntry: () => shouldYield,
+      vaultRoot: HOSTED_WAKE.vaultRoot,
+      wake: HOSTED_WAKE.wake,
+    });
+
+    expect(outcomes).toEqual([]);
+    expect(providerEntryYieldWasRethrown).toBe(true);
+    expect(yieldedCounts).toEqual([1]);
+    expect(assertRecentInbound).toHaveBeenCalledTimes(1);
+    expect(providerFetch).not.toHaveBeenCalled();
+    expect(mocks.resetAssistantOutboxPreparedDispatchById).toHaveBeenCalledTimes(1);
+  });
+
+  it("uses the deep provider dispatch boundary for repeated Linq provider attempts", async () => {
+    const effect = buildHostedAssistantDeliveryEffect({
+      dedupeKey: "dedupe_linq_deep_provider_dispatch",
+      deliveryPhase: "foreground_current_turn",
+      effectId: "intent_linq_deep_provider_dispatch",
+      payload: createPayload({
+        bindingDeliveryKind: "thread",
+        bindingDeliveryTarget: "linq_chat_123",
+        channel: "linq",
+        explicitTarget: "linq_chat_123",
+        idempotencyKey: "assistant-outbox:intent_linq_deep_provider_dispatch",
+        transportIdempotent: true,
+      }),
+    });
+    const shallowProviderFetch = vi.fn<typeof fetch>(async () =>
+      new Response(null, { status: 204 })
+    );
+    const providerBoundaryEvents: string[] = [];
+    let deepDispatchCount = 0;
+    let shouldBlockProviderEntry = false;
+    const dispatchWithProviderEntryCurrentCheck = vi.fn(async (
+      _request: Parameters<typeof fetch>[0],
+      _init: Parameters<typeof fetch>[1],
+      context: {
+        assertProviderEntryCurrent: () => void;
+        onProviderDispatchEntered: () => void;
+      },
+    ) => {
+      deepDispatchCount += 1;
+      providerBoundaryEvents.push(`assert:${deepDispatchCount}`);
+      if (deepDispatchCount === 2) {
+        shouldBlockProviderEntry = true;
+      }
+      context.assertProviderEntryCurrent();
+      providerBoundaryEvents.push(`entered:${deepDispatchCount}`);
+      context.onProviderDispatchEntered();
+      return new Response(null, { status: 204 });
+    });
+    const providerFetch = Object.assign(shallowProviderFetch, {
+      dispatchWithProviderEntryCurrentCheck,
+    });
+    let providerEntryYieldWasRethrown = false;
+    mocks.readAssistantOutboxIntentMirrorState.mockResolvedValueOnce(
+      createMirrorState(
+        {
+          delivery: null,
+          deliveryIdempotencyKey:
+            "assistant-outbox:intent_linq_deep_provider_dispatch",
+          deliveryTransportIdempotent: true,
+          intentId: effect.effectId,
+          lastError: null,
+          status: "sending",
+        },
+        {
+          sendingStartedAt: "2026-04-08T00:00:05.000Z",
+        },
+      ),
+    );
+    mocks.sendLinqMessage.mockImplementationOnce(async (_request, dependencies) => {
+      await dependencies.fetchImplementation("https://api.linq.example/retry", {
+        method: "POST",
+      });
+      throw new Error("provider retry unexpectedly remained reachable");
+    });
+    mocks.dispatchAssistantOutboxIntent.mockImplementationOnce(async (request) => {
+      try {
+        await request.dependencies.sendLinq({
+          idempotencyKey: "assistant-outbox:intent_linq_deep_provider_dispatch",
+          message: "hello from hosted",
+          replyToMessageId: "linq_message_1",
+          target: "linq_chat_123",
+          targetKind: "thread",
+        });
+      } catch (error) {
+        providerEntryYieldWasRethrown =
+          request.dispatchHooks?.shouldRethrowDispatchError?.({
+            error,
+            intent: { intentId: effect.effectId },
+            vault: HOSTED_WAKE.vaultRoot,
+          }) === true;
+        if (providerEntryYieldWasRethrown) {
+          throw error;
+        }
+      }
+      throw new Error("expected the deep provider dispatch to lose authority");
+    });
+    const yieldedCounts: number[] = [];
+
+    const outcomes = await drainHostedPreparedAssistantDeliveries({
+      allowPreparedSending: true,
+      assistantDeliveryEffects: [effect],
+      effectsPort: createHostedRuntimeEffectsPortStub({
+        assertLinqRecentInboundEngagement: vi.fn(async (request) =>
+          buildClaimedLinqEngagementResult(request)
+        ),
+      }),
+      onBackgroundDeliveryYield: ({ yieldedEffectCount }) => {
+        yieldedCounts.push(yieldedEffectCount);
+      },
+      preparedDispatches: [{
+        intentId: effect.effectId,
+        preparedDispatchToken: "prepared-dispatch-token-linq-deep-provider-dispatch",
+        previousDispatchState: createPreparedPreviousDispatchState({
+          deliveryIdempotencyKey:
+            "assistant-outbox:intent_linq_deep_provider_dispatch",
+          deliveryTransportIdempotent: true,
+        }),
+      }],
+      providerFetch,
+      shouldBlockProviderEntry: () => shouldBlockProviderEntry,
+      vaultRoot: HOSTED_WAKE.vaultRoot,
+      wake: HOSTED_WAKE.wake,
+    });
+
+    expect(outcomes).toEqual([]);
+    expect(providerEntryYieldWasRethrown).toBe(true);
+    expect(yieldedCounts).toEqual([1]);
+    expect(dispatchWithProviderEntryCurrentCheck).toHaveBeenCalledTimes(2);
+    expect(shallowProviderFetch).not.toHaveBeenCalled();
+    expect(providerBoundaryEvents).toEqual([
+      "assert:1",
+      "entered:1",
+      "assert:2",
+    ]);
+    expect(mocks.resetAssistantOutboxPreparedDispatchById).not.toHaveBeenCalled();
   });
 
   it("leaves unprepared provider-entry foreground yield retryable in the outbox", async () => {
@@ -5850,7 +6363,11 @@ describe("hosted runtime callbacks", () => {
         },
       ),
     );
-    mocks.sendTelegramMessage.mockImplementationOnce(async () => {
+    mocks.sendTelegramMessage.mockImplementationOnce(async (_request, dependencies) => {
+      await dependencies.fetchImplementation(
+        "https://api.telegram.example/bot/sendMessage",
+        { method: "POST" },
+      );
       abortController.abort(new Error("lease expired after provider dispatch"));
       return createDelivery();
     });
@@ -7024,7 +7541,7 @@ describe("hosted runtime callbacks", () => {
       vaultRoot: HOSTED_WAKE.vaultRoot,
     });
 
-    expect(assertLiveness).toHaveBeenCalledTimes(2);
+    expect(assertLiveness).toHaveBeenCalledTimes(4);
     expect(mocks.sendTelegramMessage).toHaveBeenCalledWith({
       idempotencyKey: "assistant-outbox:intent_123",
       message: "hello from hosted",
@@ -7036,7 +7553,7 @@ describe("hosted runtime callbacks", () => {
         TELEGRAM_BOT_TOKEN: "telegram-token",
         TELEGRAM_FILE_BASE_URL: "https://files.telegram.example",
       },
-      fetchImplementation: providerFetch,
+      fetchImplementation: expect.any(Function),
       signal: undefined,
     });
     expect(outcomes).toEqual([
@@ -7109,7 +7626,7 @@ describe("hosted runtime callbacks", () => {
         TELEGRAM_BOT_TOKEN: "telegram-token",
         TELEGRAM_FILE_BASE_URL: "https://files.telegram.example",
       },
-      fetchImplementation: providerFetch,
+      fetchImplementation: expect.any(Function),
       signal: undefined,
     });
     expect(outcomes).toEqual([
@@ -8433,6 +8950,8 @@ describe("hosted runtime callbacks", () => {
     let capturedError: unknown = null;
     const assertLiveness = vi.fn()
       .mockResolvedValueOnce(undefined)
+      .mockResolvedValueOnce(undefined)
+      .mockResolvedValueOnce(undefined)
       .mockRejectedValueOnce(new Error("aborted after Linq reaction response"));
     mocks.setLinqMessageReaction.mockResolvedValueOnce({
       reaction: "heart",
@@ -8480,7 +8999,7 @@ describe("hosted runtime callbacks", () => {
       wake: HOSTED_WAKE.wake,
     });
 
-    expect(assertLiveness).toHaveBeenCalledTimes(2);
+    expect(assertLiveness).toHaveBeenCalledTimes(5);
     expect(capturedError).toMatchObject({
       deliveryMayHaveSucceeded: true,
       message: "aborted after Linq reaction response",
@@ -8584,6 +9103,12 @@ describe("hosted runtime callbacks", () => {
 
   it("fails closed instead of using ambient fetch when hosted outbox provider fetch is missing", async () => {
     const effect = createEffect();
+    mocks.sendTelegramMessage.mockImplementationOnce(async (_request, dependencies) =>
+      await dependencies.fetchImplementation(
+        "https://api.telegram.example/bot/sendMessage",
+        { method: "POST" },
+      )
+    );
     mocks.dispatchAssistantOutboxIntent.mockImplementationOnce(async ({ dependencies }) => {
       await dependencies.sendTelegram({
         idempotencyKey: "assistant-outbox:intent_123",
@@ -8606,7 +9131,7 @@ describe("hosted runtime callbacks", () => {
       code: HOSTED_PROVIDER_FETCH_UNAVAILABLE_CODE,
     });
 
-    expect(mocks.sendTelegramMessage).not.toHaveBeenCalled();
+    expect(mocks.sendTelegramMessage).toHaveBeenCalledTimes(1);
   });
 
   it("uses providerFetch for hosted Linq deliveries when the runtime can intercept egress", async () => {
@@ -10274,7 +10799,7 @@ describe("hosted runtime callbacks", () => {
         WHATSAPP_GRAPH_VERSION: "v20.0",
         WHATSAPP_PHONE_NUMBER_ID: "phone_number_123",
       },
-      fetchImplementation: providerFetch,
+      fetchImplementation: expect.any(Function),
       signal: undefined,
     });
     expect(outcomes).toEqual([
@@ -10731,17 +11256,23 @@ describe("hosted runtime callbacks", () => {
       vaultRoot: HOSTED_WAKE.vaultRoot,
     });
 
-    expect(sendEmail).toHaveBeenCalledWith({
-      html: null,
-      idempotencyKey: "assistant-outbox:intent_123",
-      message: "hello from hosted",
-      newsletterAuthorizationProof: null,
-      planGroupFanout: true,
-      replyToMessageId: "<message_parent_123@example.test>",
-      subject: "Hosted subject",
-      target: hostedEmailThreadTarget,
-      targetKind: "thread",
-    });
+    expect(sendEmail).toHaveBeenCalledWith(
+      {
+        html: null,
+        idempotencyKey: "assistant-outbox:intent_123",
+        message: "hello from hosted",
+        newsletterAuthorizationProof: null,
+        planGroupFanout: true,
+        replyToMessageId: "<message_parent_123@example.test>",
+        subject: "Hosted subject",
+        target: hostedEmailThreadTarget,
+        targetKind: "thread",
+      },
+      {
+        assertProviderEntryCurrent: expect.any(Function),
+        onProviderDispatchEntered: expect.any(Function),
+      },
+    );
     expect(outcomes).toEqual([
       expect.objectContaining({
         deliveryChannel: "email",
@@ -10998,7 +11529,11 @@ describe("hosted runtime callbacks", () => {
       explicitTarget: recipientTarget,
       threadIsDirect: false,
     });
-    const sendEmail = vi.fn(async () => {
+    const sendEmail = vi.fn(async (
+      _request: HostedEmailSendRequest,
+      context?: { onProviderDispatchEntered?: (() => void) | null },
+    ) => {
+      context?.onProviderDispatchEntered?.();
       throw new Error("hosted email response was lost");
     });
     mocks.dispatchAssistantOutboxIntent.mockImplementationOnce(async ({ dependencies }) => {
@@ -11019,6 +11554,106 @@ describe("hosted runtime callbacks", () => {
       code: "ASSISTANT_EMAIL_GROUP_FANOUT_INCOMPLETE",
       deliveryMayHaveSucceeded: true,
       retryable: false,
+    });
+    expect(sendEmail).toHaveBeenCalledTimes(1);
+  });
+
+  it("marks a lost direct email response as terminally ambiguous", async () => {
+    const directTarget = serializeHostedEmailThreadTarget({
+      lastMessageId: "<message_parent_123@example.test>",
+      references: ["<message_root_123@example.test>"],
+      subject: "Direct subject",
+      to: ["sender@example.test"],
+    });
+    const effect = createEffect({
+      bindingDeliveryKind: "thread",
+      bindingDeliveryTarget: directTarget,
+      channel: "email",
+      explicitTarget: directTarget,
+      threadIsDirect: true,
+    });
+    const sendEmail = vi.fn(async (
+      _request: HostedEmailSendRequest,
+      context?: { onProviderDispatchEntered?: (() => void) | null },
+    ) => {
+      context?.onProviderDispatchEntered?.();
+      throw new Error("hosted direct email response was lost");
+    });
+    mocks.dispatchAssistantOutboxIntent.mockImplementationOnce(async ({ dependencies }) => {
+      await dependencies.sendEmail({
+        message: "Direct reply",
+        target: directTarget,
+        targetKind: "thread",
+      });
+      throw new Error("expected direct-email ambiguity");
+    });
+
+    await expect(drainHostedPreparedAssistantDeliveries({
+      assistantDeliveryEffects: [effect],
+      effectsPort: createHostedRuntimeEffectsPortStub({ sendEmail }),
+      vaultRoot: HOSTED_WAKE.vaultRoot,
+      wake: HOSTED_WAKE.wake,
+    })).rejects.toMatchObject({
+      code: "ASSISTANT_EMAIL_DELIVERY_AMBIGUOUS",
+      deliveryMayHaveSucceeded: true,
+      retryable: false,
+    });
+    expect(sendEmail).toHaveBeenCalledTimes(1);
+  });
+
+  it("preserves a provider-skipped direct email failure after dispatch entry", async () => {
+    const directTarget = serializeHostedEmailThreadTarget({
+      lastMessageId: "<message_parent_123@example.test>",
+      references: ["<message_root_123@example.test>"],
+      subject: "Direct subject",
+      to: ["sender@example.test"],
+    });
+    const effect = createEffect({
+      bindingDeliveryKind: "thread",
+      bindingDeliveryTarget: directTarget,
+      channel: "email",
+      explicitTarget: directTarget,
+      threadIsDirect: true,
+    });
+    const providerSkippedError = Object.assign(
+      new Error("provider entry was skipped"),
+      {
+        deliveryMayHaveSucceeded: false as const,
+        retryable: true as const,
+      },
+    );
+    const sendEmail = vi.fn(async (
+      _request: HostedEmailSendRequest,
+      context?: { onProviderDispatchEntered?: (() => void) | null },
+    ) => {
+      context?.onProviderDispatchEntered?.();
+      throw providerSkippedError;
+    });
+    mocks.dispatchAssistantOutboxIntent.mockImplementationOnce(async ({ dependencies }) => {
+      await dependencies.sendEmail({
+        message: "Direct reply",
+        target: directTarget,
+        targetKind: "thread",
+      });
+      throw new Error("expected provider-skipped failure");
+    });
+
+    let capturedError: unknown = null;
+    try {
+      await drainHostedPreparedAssistantDeliveries({
+        assistantDeliveryEffects: [effect],
+        effectsPort: createHostedRuntimeEffectsPortStub({ sendEmail }),
+        vaultRoot: HOSTED_WAKE.vaultRoot,
+        wake: HOSTED_WAKE.wake,
+      });
+    } catch (error) {
+      capturedError = error;
+    }
+
+    expect(capturedError).toBe(providerSkippedError);
+    expect(capturedError).toMatchObject({
+      deliveryMayHaveSucceeded: false,
+      retryable: true,
     });
     expect(sendEmail).toHaveBeenCalledTimes(1);
   });
@@ -11135,16 +11770,23 @@ describe("hosted runtime callbacks", () => {
     });
     const assertLiveness = vi.fn()
       .mockResolvedValueOnce(undefined)
+      .mockResolvedValueOnce(undefined)
       .mockRejectedValueOnce(new Error("delivery authority expired after provider response"));
-    const sendEmail = vi.fn(async () => ({
-      delivery: {
-        failedCount: 0,
-        sentCount: 1,
-        skippedCount: 0,
-        status: "sent" as const,
-      },
-      target: recipientTarget,
-    }));
+    const sendEmail = vi.fn(async (
+      _request: HostedEmailSendRequest,
+      context?: { onProviderDispatchEntered?: (() => void) | null },
+    ) => {
+      context?.onProviderDispatchEntered?.();
+      return {
+        delivery: {
+          failedCount: 0,
+          sentCount: 1,
+          skippedCount: 0,
+          status: "sent" as const,
+        },
+        target: recipientTarget,
+      };
+    });
     mocks.dispatchAssistantOutboxIntent.mockImplementationOnce(async ({ dependencies }) => {
       await dependencies.sendEmail({
         message: "Group reply",
@@ -11165,7 +11807,7 @@ describe("hosted runtime callbacks", () => {
       deliveryMayHaveSucceeded: true,
       retryable: false,
     });
-    expect(assertLiveness).toHaveBeenCalledTimes(2);
+    expect(assertLiveness).toHaveBeenCalledTimes(3);
     expect(sendEmail).toHaveBeenCalledTimes(1);
   });
 
@@ -11186,16 +11828,23 @@ describe("hosted runtime callbacks", () => {
     const livenessError = new Error("delivery authority expired after recipient skip");
     const assertLiveness = vi.fn()
       .mockResolvedValueOnce(undefined)
+      .mockResolvedValueOnce(undefined)
       .mockRejectedValueOnce(livenessError);
-    const sendEmail = vi.fn(async () => ({
-      delivery: {
-        failedCount: 0,
-        sentCount: 0,
-        skippedCount: 1,
-        status: "failed" as const,
-      },
-      target: recipientTarget,
-    }));
+    const sendEmail = vi.fn(async (
+      _request: HostedEmailSendRequest,
+      context?: { onProviderDispatchEntered?: (() => void) | null },
+    ) => {
+      context?.onProviderDispatchEntered?.();
+      return {
+        delivery: {
+          failedCount: 0,
+          sentCount: 0,
+          skippedCount: 1,
+          status: "failed" as const,
+        },
+        target: recipientTarget,
+      };
+    });
     mocks.dispatchAssistantOutboxIntent.mockImplementationOnce(async ({ dependencies }) => {
       await dependencies.sendEmail({
         message: "Group reply",
@@ -11220,7 +11869,7 @@ describe("hosted runtime callbacks", () => {
 
     expect(capturedError).toBe(livenessError);
     expect(capturedError).not.toHaveProperty("deliveryMayHaveSucceeded");
-    expect(assertLiveness).toHaveBeenCalledTimes(2);
+    expect(assertLiveness).toHaveBeenCalledTimes(3);
     expect(sendEmail).toHaveBeenCalledTimes(1);
   });
 

@@ -745,6 +745,121 @@ test("hosted progress delivery dependencies use the hosted Linq provider effect"
   });
 });
 
+test("hosted progress Telegram delivery rechecks authority after async provider preparation", async () => {
+  const rawProviderFetch = vi.fn<typeof fetch>(async () =>
+    new Response(null, { status: 204 })
+  );
+  let asyncPreparationStartedResolve!: () => void;
+  const asyncPreparationStarted = new Promise<void>((resolve) => {
+    asyncPreparationStartedResolve = resolve;
+  });
+  let finishAsyncPreparation!: () => void;
+  const asyncPreparation = new Promise<void>((resolve) => {
+    finishAsyncPreparation = resolve;
+  });
+  let shouldBlockProviderEntry = false;
+  let providerDispatchEntered = false;
+  const dispatchWithProviderEntryCurrentCheck = vi.fn(async (
+    _request: Parameters<typeof fetch>[0],
+    _init: Parameters<typeof fetch>[1],
+    context: {
+      assertProviderEntryCurrent: () => void;
+      onProviderDispatchEntered: () => void;
+    },
+  ) => {
+    asyncPreparationStartedResolve();
+    await asyncPreparation;
+    context.assertProviderEntryCurrent();
+    context.onProviderDispatchEntered();
+    providerDispatchEntered = true;
+    return await rawProviderFetch(_request, _init);
+  });
+  const providerFetch = Object.assign(rawProviderFetch, {
+    dispatchWithProviderEntryCurrentCheck,
+  });
+  const delivery = createHostedAssistantProgressDeliveryDependencies({
+    forwardedEnv: {
+      TELEGRAM_API_BASE_URL: "https://api.telegram.example",
+    },
+    platformEnv: {
+      TELEGRAM_BOT_TOKEN: "platform-telegram-token",
+    },
+    providerFetch,
+    shouldBlockProviderEntry: () => shouldBlockProviderEntry,
+  });
+  const sendTelegram = delivery.sendTelegram;
+  assert.ok(sendTelegram);
+
+  const sendPromise = sendTelegram({
+    idempotencyKey: "telegram-progress-deep-authority",
+    message: "Checking the current Telegram thread.",
+    replyToMessageId: null,
+    target: "123",
+  });
+  await asyncPreparationStarted;
+  shouldBlockProviderEntry = true;
+  finishAsyncPreparation();
+
+  await assert.rejects(sendPromise, {
+    code: "ASSISTANT_TELEGRAM_DELIVERY_AMBIGUOUS",
+    context: {
+      error: "Hosted background delivery yielded to fresh foreground input.",
+      target: "123",
+    },
+  });
+  assert.equal(dispatchWithProviderEntryCurrentCheck.mock.calls.length, 1);
+  assert.equal(providerDispatchEntered, false);
+  assert.equal(rawProviderFetch.mock.calls.length, 0);
+});
+
+test("hosted progress email delivery rechecks authority after async effects preparation", async () => {
+  const rawEmailDispatch = vi.fn(async () => ({
+    providerMessageId: "email-message",
+    providerThreadId: "email-thread",
+    target: "email-thread",
+  }));
+  let asyncPreparationStartedResolve!: () => void;
+  const asyncPreparationStarted = new Promise<void>((resolve) => {
+    asyncPreparationStartedResolve = resolve;
+  });
+  let finishAsyncPreparation!: () => void;
+  const asyncPreparation = new Promise<void>((resolve) => {
+    finishAsyncPreparation = resolve;
+  });
+  let shouldBlockProviderEntry = false;
+  const delivery = createHostedAssistantProgressDeliveryDependencies({
+    effectsPort: {
+      async sendEmail(request, context) {
+        asyncPreparationStartedResolve();
+        await asyncPreparation;
+        context?.assertProviderEntryCurrent?.();
+        return await rawEmailDispatch();
+      },
+    },
+    shouldBlockProviderEntry: () => shouldBlockProviderEntry,
+  });
+  const sendEmail = delivery.sendEmail;
+  assert.ok(sendEmail);
+
+  const sendPromise = sendEmail({
+    idempotencyKey: "email-progress-deep-authority",
+    identityId: null,
+    message: "Checking the current email thread.",
+    replyToMessageId: "email-reply",
+    subject: "Murph update",
+    target: "email-thread",
+    targetKind: "thread",
+  });
+  await asyncPreparationStarted;
+  shouldBlockProviderEntry = true;
+  finishAsyncPreparation();
+
+  await assert.rejects(sendPromise, {
+    code: "HOSTED_BACKGROUND_DELIVERY_YIELDED",
+  });
+  assert.equal(rawEmailDispatch.mock.calls.length, 0);
+});
+
 test("hosted progress email delivery rejects participant targets", async () => {
   const delivery = createHostedAssistantProgressDeliveryDependencies({
     effectsPort: {

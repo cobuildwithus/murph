@@ -208,16 +208,19 @@ export function createCloudflareEffectsPort(input: {
           },
         }
       : {}),
-    async sendEmail(request) {
+    async sendEmail(request, context) {
+      const headers = await requireHostedEffectsRuntimeWriteFenceHeaders({
+        description: "Hosted email send",
+        workspaceCheckpointBridge: input.workspaceCheckpointBridge ?? null,
+      });
+      context?.assertProviderEntryCurrent?.();
+      context?.onProviderDispatchEntered?.();
       const payload = await fetchHostedProviderEffectJson({
         body: request,
         boundedResponseBody: true,
         description: "Hosted email send",
         fetchImpl: input.fetchImpl,
-        headers: await requireHostedEffectsRuntimeWriteFenceHeaders({
-          description: "Hosted email send",
-          workspaceCheckpointBridge: input.workspaceCheckpointBridge ?? null,
-        }),
+        headers,
         timeoutMs: input.timeoutMs,
         url: new URL(
           HOSTED_EXECUTION_RUNNER_EMAIL_SEND_PATH,

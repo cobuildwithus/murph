@@ -15,18 +15,24 @@ vi.mock("@murphai/assistant-runtime", async () => {
       mocks.clearHostedBrowserVaultWarmSourceStateHash,
     createCoalescingRuntimeWakeSignal: () => {
       let pending = false;
+      let revision = 0;
       return {
         consumePending: () => {
           if (!pending) {
             return null;
           }
           pending = false;
-          return { notifiedAtEpochMs: Date.now() };
+          return { notifiedAtEpochMs: Date.now(), revision };
         },
+        currentRevision: () => revision,
         notify: () => {
+          revision += 1;
           pending = true;
         },
-        wait: async () => ({ notifiedAtEpochMs: Date.now() }),
+        requeue: () => {
+          pending = true;
+        },
+        wait: async () => ({ notifiedAtEpochMs: Date.now(), revision }),
       };
     },
   };

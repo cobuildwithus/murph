@@ -197,6 +197,7 @@ import {
   readHostedCanonicalWriteReceiptRecoveryWake,
 } from "../src/hosted-runtime/canonical-write-receipt-log.ts";
 import type {
+  RuntimeWakeNotification,
   RuntimeWakeSignal,
 } from "../src/hosted-runtime/runtime-wake.ts";
 import {
@@ -4492,12 +4493,14 @@ describe("hosted workspace runtime entrypoint", () => {
     let queuedWakeConsumed = false;
     let wakeNotifiedAt = 0;
     const runtimeWakeSignal: RuntimeWakeSignal = {
+      currentRevision: () => 0,
+      requeue: vi.fn(),
       consumePending() {
         if (!queuedWakePending || queuedWakeConsumed) {
           return null;
         }
         queuedWakeConsumed = true;
-        return { notifiedAtEpochMs: Date.now() };
+        return { notifiedAtEpochMs: Date.now(), revision: 0 };
       },
       notify() {
         queuedWakePending = true;
@@ -4608,14 +4611,16 @@ describe("hosted workspace runtime entrypoint", () => {
     const checkpointRequests: HostedWorkspaceCheckpointRequest[] = [];
     const dirtyWaitStarted = createDeferred<void>();
     let assistantPhaseFinished = false;
-    let activeDirtyWake: ((notification: { notifiedAtEpochMs: number }) => void) | null = null;
+    let activeDirtyWake: ((notification: RuntimeWakeNotification) => void) | null = null;
     let snapshotCount = 0;
     const runtimeWakeSignal: RuntimeWakeSignal = {
+      currentRevision: () => 0,
+      requeue: vi.fn(),
       consumePending() {
         return null;
       },
       notify() {
-        activeDirtyWake?.({ notifiedAtEpochMs: Date.now() });
+        activeDirtyWake?.({ notifiedAtEpochMs: Date.now(), revision: 0 });
       },
       wait(signal) {
         if (signal?.aborted) {
@@ -4626,7 +4631,7 @@ describe("hosted workspace runtime entrypoint", () => {
           );
         }
         return new Promise((resolve, reject) => {
-          const resolveCurrent = (notification: { notifiedAtEpochMs: number }) => {
+          const resolveCurrent = (notification: RuntimeWakeNotification) => {
             cleanup();
             resolve(notification);
           };
@@ -11158,6 +11163,8 @@ describe("hosted workspace runtime entrypoint", () => {
     let checkpointSnapshotCreated = false;
     let postCheckpointWakeConsumed = false;
     const runtimeWakeSignal: RuntimeWakeSignal = {
+      currentRevision: () => 0,
+      requeue: vi.fn(),
       consumePending() {
         if (checkpointSnapshotCreated && !postCheckpointWakeConsumed) {
           postCheckpointWakeConsumed = true;
@@ -11166,7 +11173,7 @@ describe("hosted workspace runtime entrypoint", () => {
             id: "mailbox_item_post_checkpoint_consumed_replay",
             laneSeq: "1",
           }));
-          return { notifiedAtEpochMs: 1_777_000_000_105 };
+          return { notifiedAtEpochMs: 1_777_000_000_105, revision: 0 };
         }
         return null;
       },
@@ -23086,18 +23093,20 @@ describe("hosted runtime shutdown signal", () => {
     const firstDirtyWaitStarted = createDeferred<void>();
     const retainedDirtyWaitStarted = createDeferred<void>();
     const shutdownController = new AbortController();
-    let activeDirtyWake: ((notification: { notifiedAtEpochMs: number }) => void) | null = null;
+    let activeDirtyWake: ((notification: RuntimeWakeNotification) => void) | null = null;
     let assistantPhaseFinished = false;
     let assistantPhaseCalls = 0;
     let dirtyWaitCount = 0;
     const runtimeWakeSignal: RuntimeWakeSignal = {
+      currentRevision: () => 0,
+      requeue: vi.fn(),
       consumePending() {
         return null;
       },
       notify(input) {
         const notifiedAtEpochMs =
           typeof input === "number" ? input : input?.notifiedAtEpochMs ?? Date.now();
-        activeDirtyWake?.({ notifiedAtEpochMs });
+        activeDirtyWake?.({ notifiedAtEpochMs, revision: 0 });
       },
       wait(signal) {
         if (signal?.aborted) {
@@ -23108,7 +23117,7 @@ describe("hosted runtime shutdown signal", () => {
           );
         }
         return new Promise((resolve, reject) => {
-          const resolveCurrent = (notification: { notifiedAtEpochMs: number }) => {
+          const resolveCurrent = (notification: RuntimeWakeNotification) => {
             cleanup();
             resolve(notification);
           };
@@ -23264,7 +23273,7 @@ describe("hosted runtime shutdown signal", () => {
     const firstDirtyWaitStarted = createDeferred<void>();
     const retainedDirtyWaitStarted = createDeferred<void>();
     const shutdownController = new AbortController();
-    let activeDirtyWake: ((notification: { notifiedAtEpochMs: number }) => void) | null = null;
+    let activeDirtyWake: ((notification: RuntimeWakeNotification) => void) | null = null;
     let assistantPhaseFinished = false;
     let assistantPhaseCalls = 0;
     let dirtyWaitCount = 0;
@@ -23272,13 +23281,15 @@ describe("hosted runtime shutdown signal", () => {
       HostedWorkspaceCheckpointRequest["idleCheckpointTrigger"]
     > = [];
     const runtimeWakeSignal: RuntimeWakeSignal = {
+      currentRevision: () => 0,
+      requeue: vi.fn(),
       consumePending() {
         return null;
       },
       notify(input) {
         const notifiedAtEpochMs =
           typeof input === "number" ? input : input?.notifiedAtEpochMs ?? Date.now();
-        activeDirtyWake?.({ notifiedAtEpochMs });
+        activeDirtyWake?.({ notifiedAtEpochMs, revision: 0 });
       },
       wait(signal) {
         if (signal?.aborted) {
@@ -23289,7 +23300,7 @@ describe("hosted runtime shutdown signal", () => {
           );
         }
         return new Promise((resolve, reject) => {
-          const resolveCurrent = (notification: { notifiedAtEpochMs: number }) => {
+          const resolveCurrent = (notification: RuntimeWakeNotification) => {
             cleanup();
             resolve(notification);
           };
@@ -23434,6 +23445,8 @@ describe("hosted runtime shutdown signal", () => {
       HostedWorkspaceCheckpointRequest["idleCheckpointTrigger"]
     > = [];
     const runtimeWakeSignal: RuntimeWakeSignal = {
+      currentRevision: () => 0,
+      requeue: vi.fn(),
       consumePending() {
         if (checkpointSnapshotCreated && !postCheckpointWakeConsumed) {
           postCheckpointWakeConsumed = true;
@@ -23444,7 +23457,7 @@ describe("hosted runtime shutdown signal", () => {
           shutdownController.abort(
             new DOMException("Synthetic container SIGTERM.", "AbortError"),
           );
-          return { notifiedAtEpochMs: 1_777_000_000_105 };
+          return { notifiedAtEpochMs: 1_777_000_000_105, revision: 0 };
         }
         return null;
       },
@@ -23563,6 +23576,8 @@ describe("hosted runtime shutdown signal", () => {
       HostedWorkspaceCheckpointRequest["idleCheckpointTrigger"]
     > = [];
     const runtimeWakeSignal: RuntimeWakeSignal = {
+      currentRevision: () => 0,
+      requeue: vi.fn(),
       consumePending() {
         if (checkpointSnapshotCreated && !postCheckpointWakeConsumed) {
           postCheckpointWakeConsumed = true;
@@ -23572,7 +23587,7 @@ describe("hosted runtime shutdown signal", () => {
             lane: "system",
             laneSeq: "1",
           }));
-          return { notifiedAtEpochMs: 1_777_000_000_135 };
+          return { notifiedAtEpochMs: 1_777_000_000_135, revision: 0 };
         }
         return null;
       },
@@ -23711,6 +23726,8 @@ describe("hosted runtime shutdown signal", () => {
       HostedWorkspaceCheckpointRequest["idleCheckpointTrigger"]
     > = [];
     const runtimeWakeSignal: RuntimeWakeSignal = {
+      currentRevision: () => 0,
+      requeue: vi.fn(),
       consumePending() {
         if (checkpointSnapshotCreated && !postCheckpointWakeConsumed) {
           postCheckpointWakeConsumed = true;
@@ -23725,7 +23742,7 @@ describe("hosted runtime shutdown signal", () => {
             lane: "system",
             laneSeq: "1",
           }));
-          return { notifiedAtEpochMs: 1_777_000_000_145 };
+          return { notifiedAtEpochMs: 1_777_000_000_145, revision: 0 };
         }
         return null;
       },
@@ -23878,6 +23895,8 @@ describe("hosted runtime shutdown signal", () => {
       HostedWorkspaceCheckpointRequest["idleCheckpointTrigger"]
     > = [];
     const runtimeWakeSignal: RuntimeWakeSignal = {
+      currentRevision: () => 0,
+      requeue: vi.fn(),
       consumePending() {
         if (checkpointSnapshotCreated && !postCheckpointWakeConsumed) {
           postCheckpointWakeConsumed = true;
@@ -23885,7 +23904,7 @@ describe("hosted runtime shutdown signal", () => {
             id: "mailbox_item_shutdown_after_post_checkpoint_import",
             laneSeq: "1",
           }));
-          return { notifiedAtEpochMs: 1_777_000_000_105 };
+          return { notifiedAtEpochMs: 1_777_000_000_105, revision: 0 };
         }
         return null;
       },
@@ -24015,7 +24034,7 @@ describe("hosted runtime shutdown signal", () => {
     const firstDirtyWaitStarted = createDeferred<void>();
     const retainedDirtyWaitStarted = createDeferred<void>();
     const shutdownController = new AbortController();
-    let activeDirtyWake: ((notification: { notifiedAtEpochMs: number }) => void) | null = null;
+    let activeDirtyWake: ((notification: RuntimeWakeNotification) => void) | null = null;
     let assistantPhaseFinished = false;
     let assistantPhaseCalls = 0;
     let dirtyWaitCount = 0;
@@ -24023,13 +24042,15 @@ describe("hosted runtime shutdown signal", () => {
       HostedWorkspaceCheckpointRequest["idleCheckpointTrigger"]
     > = [];
     const runtimeWakeSignal: RuntimeWakeSignal = {
+      currentRevision: () => 0,
+      requeue: vi.fn(),
       consumePending() {
         return null;
       },
       notify(input) {
         const notifiedAtEpochMs =
           typeof input === "number" ? input : input?.notifiedAtEpochMs ?? Date.now();
-        activeDirtyWake?.({ notifiedAtEpochMs });
+        activeDirtyWake?.({ notifiedAtEpochMs, revision: 0 });
       },
       wait(signal) {
         if (signal?.aborted) {
@@ -24040,7 +24061,7 @@ describe("hosted runtime shutdown signal", () => {
           );
         }
         return new Promise((resolve, reject) => {
-          const resolveCurrent = (notification: { notifiedAtEpochMs: number }) => {
+          const resolveCurrent = (notification: RuntimeWakeNotification) => {
             cleanup();
             resolve(notification);
           };
@@ -24193,7 +24214,7 @@ describe("hosted runtime shutdown signal", () => {
     const firstDirtyWaitStarted = createDeferred<void>();
     const retainedDirtyWaitStarted = createDeferred<void>();
     const shutdownController = new AbortController();
-    let activeDirtyWake: ((notification: { notifiedAtEpochMs: number }) => void) | null = null;
+    let activeDirtyWake: ((notification: RuntimeWakeNotification) => void) | null = null;
     let assistantPhaseFinished = false;
     let assistantPhaseCalls = 0;
     let dirtyWaitCount = 0;
@@ -24201,13 +24222,15 @@ describe("hosted runtime shutdown signal", () => {
       HostedWorkspaceCheckpointRequest["idleCheckpointTrigger"]
     > = [];
     const runtimeWakeSignal: RuntimeWakeSignal = {
+      currentRevision: () => 0,
+      requeue: vi.fn(),
       consumePending() {
         return null;
       },
       notify(input) {
         const notifiedAtEpochMs =
           typeof input === "number" ? input : input?.notifiedAtEpochMs ?? Date.now();
-        activeDirtyWake?.({ notifiedAtEpochMs });
+        activeDirtyWake?.({ notifiedAtEpochMs, revision: 0 });
       },
       wait(signal) {
         if (signal?.aborted) {
@@ -24218,7 +24241,7 @@ describe("hosted runtime shutdown signal", () => {
           );
         }
         return new Promise((resolve, reject) => {
-          const resolveCurrent = (notification: { notifiedAtEpochMs: number }) => {
+          const resolveCurrent = (notification: RuntimeWakeNotification) => {
             cleanup();
             resolve(notification);
           };
@@ -24677,6 +24700,8 @@ describe("hosted runtime shutdown signal", () => {
     let resultPromise: Promise<Awaited<ReturnType<typeof runHostedWorkspaceRuntimeJobInProcess>>>
       | null = null;
     const runtimeWakeSignal: RuntimeWakeSignal = {
+      currentRevision: () => 0,
+      requeue: vi.fn(),
       consumePending() {
         return null;
       },

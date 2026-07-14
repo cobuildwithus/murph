@@ -29,6 +29,7 @@ export type {
   HostedRuntimeMailboxPort,
   HostedRuntimePlatform,
   HostedRuntimeProviderFileResponse,
+  HostedRuntimeProviderFetch,
   HostedRuntimeProviderTargetKind,
   HostedRuntimeTelegramChatActionRequest,
   HostedRuntimeTelegramCleanupMessage,

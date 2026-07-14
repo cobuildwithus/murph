@@ -146,10 +146,9 @@ import {
   refreshHostedBrowserVaultReplicaFromRuntime,
   type HostedBrowserVaultReplicaRefreshResult,
 } from "./hosted-runtime/browser-vault-replica.ts";
-import {
-  runHostedWorkspaceAssistantPhase,
-  type HostedAssistantCurrentDeliveryRouteScope,
-  type HostedWorkspaceRuntimeAssistantPhase,
+import type {
+  HostedAssistantCurrentDeliveryRouteScope,
+  HostedWorkspaceRuntimeAssistantPhase,
 } from "./hosted-runtime/workspace-assistant-phase.ts";
 import {
   createHostedConversationMailboxImportItem,
@@ -1683,9 +1682,11 @@ export async function runHostedWorkspaceRuntimeJobInProcess(
               runAssistantPhase: async (phaseInput) => {
                 currentPreferenceCausalSeq = null;
                 try {
-                  return await (
-                    options.runAssistantPhase ?? runHostedWorkspaceAssistantPhase
-                  )({
+                  const runAssistantPhase = options.runAssistantPhase
+                    ?? (await import(
+                      "./hosted-runtime/workspace-assistant-phase.ts"
+                    )).runHostedWorkspaceAssistantPhase;
+                  return await runAssistantPhase({
                     ...phaseInput,
                     currentAssistantPreferenceCausalSeq: () =>
                       currentPreferenceCausalSeq,
@@ -4220,6 +4221,31 @@ function createAbortGuardedHostedRuntimePlatform(
     assertLive();
     return result;
   };
+  const providerFetch = platform.providerFetch ?? null;
+  const guardedProviderFetch = providerFetch
+    ? Object.assign(
+        (request: RequestInfo | URL, init?: RequestInit) =>
+          guard(() => providerFetch(request, init)),
+        providerFetch.dispatchWithProviderEntryCurrentCheck
+          ? {
+              dispatchWithProviderEntryCurrentCheck: (
+                request: RequestInfo | URL,
+                init: RequestInit | undefined,
+                context: {
+                  assertProviderEntryCurrent: () => void;
+                  onProviderDispatchEntered: () => void;
+                },
+              ) => guard(() =>
+                providerFetch.dispatchWithProviderEntryCurrentCheck!(
+                  request,
+                  init,
+                  context,
+                )
+              ),
+            }
+          : {},
+      )
+    : null;
 
   return {
     ...platform,
@@ -4297,7 +4323,8 @@ function createAbortGuardedHostedRuntimePlatform(
         : {}),
       readRawEmailMessage: (rawMessageKey) =>
         guard(() => platform.effectsPort.readRawEmailMessage(rawMessageKey)),
-      sendEmail: (request) => guard(() => platform.effectsPort.sendEmail(request)),
+      sendEmail: (request, context) =>
+        guard(() => platform.effectsPort.sendEmail(request, context)),
       ...(platform.effectsPort.writeAssistantDeliveryRecord
         ? {
             writeAssistantDeliveryRecord: (record) =>
@@ -4340,10 +4367,9 @@ function createAbortGuardedHostedRuntimePlatform(
             guard(() => platform.publicInternetFetch!(request, init))) as typeof fetch,
         }
       : {}),
-    ...(platform.providerFetch
+    ...(guardedProviderFetch
       ? {
-          providerFetch: (async (request, init) =>
-            guard(() => platform.providerFetch!(request, init))) as typeof fetch,
+          providerFetch: guardedProviderFetch,
         }
       : {}),
     ...(platform.generatedImageUploader

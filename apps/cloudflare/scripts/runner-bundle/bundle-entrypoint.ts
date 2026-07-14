@@ -72,6 +72,7 @@ const RUNNER_ENTRYPOINT_BUNDLE_STATIC_CLOSURE_TOLERANCE_BYTES = 96_000;
 // the staged production assembly but as `packages/*/dist/...` when bundling
 // straight from the repo checkout, and the guard must bite in both shapes.
 const RUNNER_ENTRYPOINT_FORBIDDEN_BOOT_INPUT_MARKERS = [
+  "/assistant-runtime/dist/hosted-runtime/workspace-assistant-phase.js",
   "node_modules/grammy/",
   "node_modules/node-fetch/",
   "/inboxd/dist/connectors/hosted-conversation.js",

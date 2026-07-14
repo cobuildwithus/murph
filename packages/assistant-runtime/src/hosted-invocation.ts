@@ -125,7 +125,9 @@ function requireHostedInvocationRuntimeWakeSignal(
   if (
     !value
     || typeof value.consumePending !== "function"
+    || typeof value.currentRevision !== "function"
     || typeof value.notify !== "function"
+    || typeof value.requeue !== "function"
     || typeof value.wait !== "function"
   ) {
     throw new TypeError("runHostedWorkspaceInvocation requires runtimeWakeSignal.");
