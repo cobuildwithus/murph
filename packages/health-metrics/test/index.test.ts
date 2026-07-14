@@ -167,6 +167,9 @@ test("resolves metric aliases, biomarker primary metrics, and normalized metric 
   assert.equal(resolveMetricDefinition("sessionCount")?.key, "workout-count");
   assert.equal(resolveMetricDefinition("peakCadence")?.key, "peak-30-minute-cadence");
   assert.equal(resolveMetricDefinition("resting_hr")?.key, "resting-heart-rate");
+  assert.equal(resolveMetricDefinition("hrv")?.key, "hrv-rmssd");
+  assert.equal(resolveMetricDefinition("hrv_sdnn")?.key, "hrv-sdnn");
+  assert.equal(resolveMetricDefinition("sdnn")?.biomarkerKey, "biomarker:hrv-sdnn");
   assert.equal(resolveMetricDefinition("sleep_efficiency")?.key, "sleep-efficiency");
   assert.equal(resolveMetricDefinition("sleep_duration_hours")?.key, "total-sleep-minutes");
   assert.equal(resolveMetricDefinition("sleep_duration_variability")?.key, "sleep-duration-variability-minutes");

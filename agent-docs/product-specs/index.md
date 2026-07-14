@@ -18,9 +18,9 @@ Last verified: 2026-07-13
 | `agent-docs/product-specs/experiment-outcome-selection.md` | Experiment-only choice rules for member-valued outcomes, credible evidence, timeframe integrity, and setup handoff. | Active |
 | `agent-docs/product-specs/protocol-outcome-network.md` | Private outcome cards now, plus target-state sharing levels, contribution rules, cohort summaries, and social guardrails for the protocol outcome network. | Active |
 | `agent-docs/product-specs/captures.md` | Dated media-capture primitive for lightweight private evidence over time. | Active |
-| `agent-docs/product-specs/companion-app.md` | Native Swift iOS companion app for broad Apple Health sync plus closed WHOOP Recovery/Strain metadata enrichment. | Active |
+| `agent-docs/product-specs/companion-app.md` | Native Swift iOS companion for broad Apple Health sync, closed WHOOP Recovery/Strain metadata enrichment, and authorization-gated direct WHOOP spot HRV. | Active |
 | `agent-docs/product-specs/query-metric-universality.md` | Invariant that every metric-bearing canonical event yields a query metric point through one generic rule; summary pipeline becomes presentation + precedence, never a gatekeeper. | Specified |
-| `agent-docs/product-specs/companion-app-mvp.md` | Two-screen companion build spec: Privy login, Connect Apple Health, Junction sync, and bounded WHOOP metadata enrichment. | Active |
+| `agent-docs/product-specs/companion-app-mvp.md` | Two-screen companion build spec: Privy login, Connect Apple Health, Junction sync, bounded WHOOP metadata enrichment, and strict derived spot-RMSSD ingress over one active member-owned Junction connection. | Active |
 | `agent-docs/product-specs/habitat.md` | Habitat: progressive member life-context — domains, `habitat` bank family, domain catalog, coverage derivation, context-dividend collection rules, and environment/workspace v1 indicators. | Specified |
 | `agent-docs/product-specs/murph-contact-card-picker.md` | Post-signup add-Murph-to-contacts step where the member picks the avatar on Murph's vCard; picker components live on `/design`. | Implemented |
 | `agent-docs/product-specs/murph-tone-and-voice.md` | Five controls for how Murph talks: hosted tone and voice plus private conversation-first Humor, Push, and Detail dials. | Implemented |

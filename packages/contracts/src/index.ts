@@ -1,5 +1,6 @@
 export * from "./bank-entities.ts";
 export * from "./constants.ts";
+export * from "./companion-observation.ts";
 export * from "./event-lifecycle.ts";
 export * from "./event-raw-references.ts";
 export * from "./examples.ts";

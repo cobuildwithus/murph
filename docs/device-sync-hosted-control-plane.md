@@ -1,6 +1,6 @@
 # Device Sync Hosted Control Plane
 
-Last verified against repo layout: 2026-05-13
+Last verified against repo layout: 2026-07-12
 
 ## Current split
 
@@ -152,6 +152,14 @@ The local vault runtime keeps:
 - local token cache
 - reconcile and import history
 - schedule and job state
+- one opaque hosted-connection binding per local device account, used before
+  mutable provider identity during snapshot hydration so terminal privacy
+  scrubbing cannot fork an account; pre-binding legacy adoption requires one
+  exact provider-plus-connection-epoch candidate. A recognized pre-v8
+  original-plus-opaque fork is consolidated transactionally, preserving jobs
+  and sources on the hosted-bound row while deleting the credentialed orphan;
+  additional or opaque siblings, provider changes, and identity collisions
+  fail closed
 
 This local runtime remains the only place that writes wearable facts into the vault.
 
@@ -217,11 +225,19 @@ The current hosted runtime strategy is:
 2. A hosted job running through `apps/cloudflare` requests the current runtime snapshot from the signed internal web route only when execution needs device-sync access.
 3. The hosted runner fetches pending dirty device-sync rows from web-owned Postgres as a normal work source; webhook freshness does not depend on immutable per-webhook mailbox payloads.
 4. The hosted job sends narrow runtime updates back through the signed internal web apply route.
-5. Dirty revisions are acknowledged through the dirty-ack route only after the dirty state has been converted into local runtime work and that local work has crossed the checkpoint boundary. Provider jobs that remain queued continue through the local device-sync scheduler.
+5. Dirty revisions are acknowledged through the dirty-ack route only after the dirty state has been converted into local runtime work and that local work has crossed the checkpoint boundary. Exact payload rows stay hosted while their machine-local jobs are queued so a cold restore can reconstruct them, but the checkpoint result carries the local scheduler's future wake instead of immediately replaying retained work. Generic rows acknowledge on executed local success or terminal failure. Work marked complete only because of a machine-local disconnect remains hosted until the next authoritative control-plane snapshot either restores the active account and replays it or explicitly terminally dispositions it. A verified companion RMSSD row acknowledges only after canonical import success; canonical-owner failures and expired worker leases retain that same job beyond the ordinary attempt fence and follow the local scheduler's bounded future retry instead of creating dead replacement rows. A structurally invalid companion payload is different: its exact terminal code promotes the hosted payload acknowledgement after one dead local job so it cannot replay into unbounded replacement rows.
 6. Local-agent token export and refresh flows stay on the hosted web boundary.
 7. Cloudflare does not keep a second durable token-escrow source of truth for device sync.
 
 This keeps control-plane truth in web while still allowing hosted execution to consume the runtime state it needs during a job.
+
+Disconnect intent is also web-owned control-plane truth. Once the connection
+mutation lock commits `DISCONNECT_IN_PROGRESS`, the signed runtime apply route
+rejects every connection, local-state, credential, and source write for that
+connection until the provider revoke finalizes; authenticated local heartbeats
+receive the same retryable conflict without persisting sync timestamps. Dirty-payload acknowledgement
+remains a separate path, so a companion import that already reached canonical
+success may still acknowledge its exact hosted payload.
 
 ## Webhook Dirty Coalescing
 
@@ -229,7 +245,7 @@ Webhook ingress separates level-triggered dirty hints from event-triggered durab
 
 Provider webhook traces remain exact for side-effect-bearing accepted deliveries. Accepted level dirty hints write sparse audit signals and upsert `device_sync_dirty_connection` only when they create fresh dirty work; later level hints for an already-pending connection can be accepted before trace claim. Durable webhook work still passes through exact trace claim and durable acceptance so provider-owned event work is not lost. The steady-state architecture does not use per-webhook hosted mailbox items or Vercel Workflows for freshness.
 
-When a connection transitions from clean to dirty, webhook ingress commits the dirty state, appends one deterministic `device-sync.wake` mailbox handoff, and completes the trace in the same transaction. Additional level hints while already dirty are coalesced without another ingress wake. Durable webhook work appends independent encrypted payload rows under exact trace claim and is acknowledged by explicit payload row id, so concurrent durable deliveries do not need a connection-scoped acceptance lock. Dirty rows and remaining payload rows stay pending until hosted runtime device-sync work drains them through dirty-pending and dirty-ack callbacks; there is no dirty-row recovery sweep. Exact missed-wake recovery would need a future explicit pending-handoff ledger, not a dirty sweeper. Webhook and app paths do not send runner nudges directly to Cloudflare.
+When a connection transitions from clean to dirty, webhook ingress commits the dirty state, appends one deterministic `device-sync.wake` mailbox handoff, and completes the trace in the same transaction. Additional level hints while already dirty are coalesced without another ingress wake. Durable webhook work appends independent encrypted payload rows under exact trace claim and is acknowledged by explicit payload row id, so concurrent durable deliveries do not need a connection-scoped acceptance lock. A retained generic payload follows the local job's retry wake and is removed after executed success or terminal failure, preventing both tight replay loops and dead-job recreation while preserving cold-restore reconstruction. A machine-local disconnect cannot release it; the next authoritative hosted snapshot decides active replay versus terminal disposition. A companion RMSSD row stays pending through canonical local import so a yielded or restored runtime can refetch the authoritative encrypted observation. Dirty rows and remaining payload rows drain through dirty-pending and dirty-ack callbacks; there is no dirty-row recovery sweep. Exact missed-wake recovery would need a future explicit pending-handoff ledger, not a dirty sweeper. Webhook and app paths do not send runner nudges directly to Cloudflare.
 
 Temporal is the only normal wake orchestrator. When mailbox signals or reconciliation facts show durable work, it calls Cloudflare's signed `ensure-processing` adapter; Cloudflare returns `runtime_processing_accepted` or `retry_later` and owns runner start, wake, active-fence alarm cleanup, and execution cleanup.
 

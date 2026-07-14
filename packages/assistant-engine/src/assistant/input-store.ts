@@ -369,6 +369,8 @@ const assistantInputLinqSourceMetadataSchema = z
     externalThreadRouteAuthorityPresent: z.boolean().optional(),
     kind: z.literal('linq'),
     partCount: z.number().int().min(0).max(64),
+    // Restore-only compatibility for snapshots written before route-transition
+    // repair was removed. No current producer or consumer uses this value.
     previousHomeThreadId: privateNullableAssistantInputRouteScalarSchema(
       'sourceMetadata.previousHomeThreadId',
     ).optional(),
@@ -388,6 +390,10 @@ const assistantInputLinqSourceMetadataSchema = z
     service: safeNullableAssistantInputTokenSchema('sourceMetadata.service'),
   })
   .strict()
+  .transform(
+    ({ previousHomeThreadId: _retiredPreviousHomeThreadId, ...metadata }) =>
+      metadata,
+  )
 
 const assistantInputEmailSourceMetadataSchema = z
   .object({

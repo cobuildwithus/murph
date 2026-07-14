@@ -125,7 +125,6 @@ describe("hosted mailbox conversation import adapter", () => {
               url: "redacted-attachment-url-sentinel",
             },
           ],
-          previousHomeChatId: "chat_synthetic_previous",
           threadIsDirect: null,
         },
         phoneLookupKey: "redacted-contact-sentinel",
@@ -156,14 +155,6 @@ describe("hosted mailbox conversation import adapter", () => {
     assert.equal(outcome.status, "imported");
     assert.equal(outcome.reasonCode, "conversation-import.projection-failed");
     assert.deepEqual(outcome.linqDeliveryContext, {
-      currentInbound: {
-        dedupeKey: "evt_synthetic_conversation_001",
-        eventId: "evt_synthetic_conversation_001",
-        mailboxItemId: "mailbox_item_conversation_001",
-        occurredAt: TEST_NOW,
-        replyToMessageId: "msg_synthetic_projection_failure",
-        target: "chat_synthetic",
-      },
       directRecipientPhoneNumber: "redacted-contact-sentinel",
       fromPhoneNumber: null,
       replyToMessageId: "msg_synthetic_projection_failure",
@@ -199,7 +190,6 @@ describe("hosted mailbox conversation import adapter", () => {
       externalThreadRouteAuthorityPresent: false,
       kind: "linq",
       partCount: 2,
-      previousHomeThreadId: "chat_synthetic_previous",
       reactionEligible: false,
       replyToMessageId: null,
       service: null,
@@ -351,10 +341,6 @@ describe("hosted mailbox conversation import adapter", () => {
       assert.equal(typeof outcome.conversationImportTiming?.projectionImportMs, "number");
       assert.equal(typeof outcome.conversationImportTiming?.projectionTotalMs, "number");
       assert.equal("attachmentEvidenceMs" in (outcome.conversationImportTiming ?? {}), false);
-      const currentInbound = outcome.linqDeliveryContext?.currentInbound;
-      assert.ok(currentInbound);
-      assert.equal(currentInbound.mailboxItemId, item.item.id);
-      assert.equal(currentInbound.eventId, decodedWake.eventId);
       assert.equal(outcome.linqDeliveryContext?.replyToMessageId, "msg_early_notify");
       assert.equal("reasonCode" in outcome, false);
       assert.equal("afterCheckpoint" in outcome, false);
@@ -615,14 +601,6 @@ describe("hosted mailbox conversation import adapter", () => {
         assistantInputId: listed.events[0]?.inputId,
         captureId: null,
         linqDeliveryContext: {
-          currentInbound: {
-            dedupeKey: decodedWake.eventId,
-            eventId: decodedWake.eventId,
-            mailboxItemId: item.item.id,
-            occurredAt: TEST_NOW,
-            replyToMessageId: "msg_notify_failure",
-            target: "chat_notify_failure",
-          },
           directRecipientPhoneNumber: "redacted-contact-sentinel",
           fromPhoneNumber: null,
           replyToMessageId: "msg_notify_failure",
@@ -1334,7 +1312,7 @@ describe("hosted mailbox conversation import adapter", () => {
     ]);
   });
 
-  test("enqueues route-transition proof when the hosted assistant is unconfigured", async () => {
+  test("does not enqueue input when the hosted assistant is unconfigured", async () => {
     const parentRoot = await mkdtemp(path.join(tmpdir(), "murph-hosted-input-unconfigured-"));
     tempRoots.push(parentRoot);
     const operatorHomeRoot = path.join(parentRoot, "home");
@@ -1364,7 +1342,6 @@ describe("hosted mailbox conversation import adapter", () => {
               value: "assistant is unavailable",
             },
           ],
-          previousHomeChatId: "chat_previous_unconfigured",
         },
         phoneLookupKey: "redacted-contact-sentinel",
       },
@@ -1397,9 +1374,7 @@ describe("hosted mailbox conversation import adapter", () => {
       messageId: "msg_unconfigured",
       threadId: "chat_unconfigured",
     });
-    assert.deepEqual(await readHostedPendingAssistantInputIds({ vaultRoot }), [
-      listed.events[0]!.inputId,
-    ]);
+    assert.deepEqual(await readHostedPendingAssistantInputIds({ vaultRoot }), []);
   });
 
   test("does not enqueue pending email input when the assistant is configured but email is unavailable", async () => {
@@ -1667,7 +1642,6 @@ describe("hosted mailbox conversation import adapter", () => {
       externalThreadRouteAuthorityPresent: false,
       kind: "linq",
       partCount: 1,
-      previousHomeThreadId: null,
       reactionEligible: true,
       replyToMessageId: null,
       service: "iMessage",
