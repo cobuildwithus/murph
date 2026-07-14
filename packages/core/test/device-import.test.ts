@@ -5700,11 +5700,18 @@ test("importDeviceBatch keeps deterministic content identity for events without 
         occurredAt: "2026-06-03T19:55:00.000Z",
         recordedAt: "2026-06-03T20:30:00.000Z",
         note: "no external ref",
+        evidenceRoles: ["junction-note-without-external-ref"],
       },
     ],
+    evidenceParts: [{
+      role: "junction-note-without-external-ref",
+      fileName: "junction-note-without-external-ref.json",
+      content: { note: "no external ref" },
+    }],
   });
 
   const first = await importDeviceBatch(buildInput("jxn_acct_same"));
+  const beforeSecond = await snapshotVaultFiles(vaultRoot);
   const second = await importDeviceBatch(buildInput("jxn_acct_same"));
 
   const eventRecords = (await readJsonlRecords({
@@ -5713,7 +5720,11 @@ test("importDeviceBatch keeps deterministic content identity for events without 
   })) as EventRecord[];
 
   assert.equal(eventRecords.length, 1);
+  assert.equal(second.applied, false);
+  assert.equal(second.ingestId, null);
+  assert.equal(second.auditPath, null);
   assert.equal(second.events[0]?.id, first.events[0]?.id);
+  assert.deepEqual(await snapshotVaultFiles(vaultRoot), beforeSecond);
   const firstEvent = first.events[0];
   assert.ok(firstEvent);
   await upsertEvent({
@@ -7771,6 +7782,133 @@ test("importDeviceBatch restores an earlier retained revision from a missing mon
     beforeReplay,
   );
 });
+
+test.each(["distinct", "shared", "roleless"] as const)(
+  "combined cross-month WHOOP delivery does not hide a missing accepted revision with %s roles",
+  async (roleMode) => {
+    const vaultRoot = await makeTempDirectory(
+      `murph-device-import-combined-cross-month-${roleMode}`,
+    );
+    await initializeVault({ vaultRoot, createdAt: "2026-01-01T12:00:00.000Z" });
+    const staleRoles = roleMode === "distinct"
+      ? ["whoop-recovery-v1"]
+      : roleMode === "shared"
+        ? ["whoop-recovery-shared"]
+        : [];
+    const newRoles = roleMode === "distinct"
+      ? ["whoop-recovery-v3"]
+      : roleMode === "shared"
+        ? ["whoop-recovery-shared"]
+        : [];
+    const buildEvent = (
+      occurredAt: string,
+      value: number,
+      version: string,
+      evidenceRoles: readonly string[],
+    ) => ({
+      kind: "observation" as const,
+      occurredAt,
+      recordedAt: occurredAt,
+      title: "WHOOP recovery score",
+      externalRef: {
+        system: "whoop",
+        resourceType: "recovery",
+        resourceId: `combined-cross-month-${roleMode}`,
+        version,
+        facet: "recovery-score",
+      },
+      evidenceRoles: [...evidenceRoles],
+      fields: { metric: "recovery-score", value, unit: "%" },
+    });
+    const evidenceParts = roleMode === "distinct"
+      ? [
+          {
+            role: staleRoles[0]!,
+            fileName: "whoop-recovery-v1.json",
+            content: { value: 61 },
+          },
+          {
+            role: newRoles[0]!,
+            fileName: "whoop-recovery-v3.json",
+            content: { value: 83 },
+          },
+        ]
+      : roleMode === "shared"
+        ? [{
+            role: "whoop-recovery-shared",
+            fileName: "whoop-recovery-shared.json",
+            content: { values: [61, 83] },
+          }]
+        : [];
+    const input = {
+      vaultRoot,
+      provider: "whoop",
+      accountId: "whoop-user-1",
+      importedAt: "2026-02-02T11:00:00.000Z",
+      events: [
+        buildEvent(
+          "2026-01-31T23:30:00.000Z",
+          61,
+          "2026-01-31T23:30:00.000Z",
+          staleRoles,
+        ),
+        buildEvent(
+          "2026-02-01T00:30:00.000Z",
+          83,
+          "2026-02-01T00:30:00.000Z",
+          newRoles,
+        ),
+      ],
+      evidenceParts,
+    } as const;
+    const first = await importDeviceBatch(input);
+    assert.ok(first.ingestId);
+    assert.equal(first.eventShardPaths.length, 2);
+    const januaryShardPath = first.eventShardPaths.find((relativePath) =>
+      relativePath.includes("2026-01")
+    );
+    const februaryShardPath = first.eventShardPaths.find((relativePath) =>
+      relativePath.includes("2026-02")
+    );
+    assert.ok(januaryShardPath);
+    assert.ok(februaryShardPath);
+    const canonicalEventId = first.events[0]?.id;
+    assert.ok(canonicalEventId);
+    const februaryBytes = await fs.readFile(path.join(vaultRoot, februaryShardPath));
+    await fs.unlink(path.join(vaultRoot, januaryShardPath));
+
+    if (roleMode !== "distinct") {
+      const beforeRejectedRepair = await snapshotVaultFiles(vaultRoot);
+      await assert.rejects(
+        importDeviceBatch(input),
+        (error) =>
+          error instanceof VaultError
+          && error.code === "INTEGRATION_INGEST_EVENT_MAPPING_AMBIGUOUS",
+      );
+      await assert.rejects(fs.access(path.join(vaultRoot, januaryShardPath)));
+      assert.deepEqual(await snapshotVaultFiles(vaultRoot), beforeRejectedRepair);
+      return;
+    }
+
+    const repair = await importDeviceBatch(input);
+    assert.equal(repair.applied, true);
+    assert.ok(repair.ingestShardPath);
+    assert.ok(repair.auditPath);
+    assert.deepEqual(await fs.readFile(path.join(vaultRoot, februaryShardPath)), februaryBytes);
+    const repairedJanuaryRecords = (await readJsonlRecords({
+      vaultRoot,
+      relativePath: januaryShardPath,
+    })) as EventRecord[];
+    assert.equal(repairedJanuaryRecords.length, 1);
+    assert.equal(repairedJanuaryRecords[0]?.id, canonicalEventId);
+    assert.equal(repairedJanuaryRecords[0]?.lifecycle?.revision ?? 1, 1);
+    const beforeReplay = await snapshotVaultFiles(vaultRoot);
+    const replay = await importDeviceBatch(input);
+    assert.equal(replay.applied, false);
+    assert.equal(replay.auditPath, null);
+    assert.deepEqual(await snapshotVaultFiles(vaultRoot), beforeReplay);
+  },
+);
 
 test("importDeviceBatch rejects partial repair when the retained revision number is occupied", async () => {
   const vaultRoot = await makeTempDirectory("murph-device-import-partial-repair-revision-collision");

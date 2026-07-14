@@ -2363,6 +2363,23 @@ function buildEmptyDeviceEventIdentityContext(
   };
 }
 
+function eventSpineRevisionsAreComplete(
+  index: EventExternalRefIndex,
+  eventId: string,
+): boolean {
+  const maxRevision = index.maxRevisionById.get(eventId) ?? 0;
+  const revisions = index.revisionsById.get(eventId);
+  if (maxRevision < 1 || !revisions) {
+    return false;
+  }
+  for (let revision = 1; revision <= maxRevision; revision += 1) {
+    if (!revisions.has(revision)) {
+      return false;
+    }
+  }
+  return true;
+}
+
 function resolveDeviceEventIdentity(
   entry: PreparedDeviceEventEntry,
   context: DeviceEventIdentityContext,
@@ -2602,6 +2619,17 @@ async function reconcileDeviceEventEntriesByExternalRef(
     const externalRef = entry.record.externalRef;
 
     if (!externalRef) {
+      const current = index.latestById.get(entry.record.id);
+      if (
+        current
+        && !isDeletedEventSpineRecord(current)
+        && deviceEventContentKey(current) === deviceEventContentKey(entry.record)
+      ) {
+        skippedDuplicateCount += 1;
+        retainedPreparedIds.add(entry.record.id);
+        records.push(current);
+        continue;
+      }
       appendEntries.push(entry);
       appendRecordIdByPreparedRecordId.set(entry.record.id, entry.record.id);
       records.push(entry.record);
@@ -2674,7 +2702,9 @@ async function reconcileDeviceEventEntriesByExternalRef(
       );
       if (sourceVersionComparison !== null && sourceVersionComparison < 0) {
         skippedDuplicateCount += 1;
-        retainedPreparedIds.add(entry.record.id);
+        if (eventSpineRevisionsAreComplete(index, latest.id)) {
+          retainedPreparedIds.add(entry.record.id);
+        }
         records.push(latest);
         continue;
       }
@@ -2692,7 +2722,9 @@ async function reconcileDeviceEventEntriesByExternalRef(
     // Keep this comparison scoped to that closed source type: other providers
     // use timestamp-shaped versions whose ordering semantics are not universal.
     if (shouldKeepExistingJunctionCompanionHealthMetadata(latest, entry.record)) {
-      retainedPreparedIds.add(entry.record.id);
+      if (eventSpineRevisionsAreComplete(index, latest.id)) {
+        retainedPreparedIds.add(entry.record.id);
+      }
       records.push(latest);
       continue;
     }
@@ -2706,7 +2738,9 @@ async function reconcileDeviceEventEntriesByExternalRef(
     }
 
     if (shouldKeepExistingJunctionSleepStageSummaryObservation(latest, entry.record)) {
-      retainedPreparedIds.add(entry.record.id);
+      if (eventSpineRevisionsAreComplete(index, latest.id)) {
+        retainedPreparedIds.add(entry.record.id);
+      }
       records.push(latest);
       continue;
     }
