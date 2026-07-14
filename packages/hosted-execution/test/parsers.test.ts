@@ -2200,12 +2200,12 @@ describe("parseHostedExecutionWake", () => {
     });
   });
 
-  it("rejects removed conversation channels", () => {
+  it("rejects the removed WhatsApp conversation channel", () => {
     expect(() => parseHostedExecutionWake({
       eventId: "evt_removed_channel",
       kind: "conversation.message",
       message: {
-        channel: "signal",
+        channel: "whatsapp",
       },
       occurredAt: "2026-04-18T00:00:00.000Z",
       userId: "user-1",

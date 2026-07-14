@@ -241,6 +241,7 @@ describe("hostedRunnerIntercept", () => {
       .toBe(handleHostedRunnerLinqOutbound);
     expect(HOSTED_RUNNER_OUTBOUND_BY_HOST[HOSTED_RUNNER_DEFAULT_OUTBOUND_HOSTS.telegram])
       .toBe(handleHostedRunnerTelegramOutbound);
+    expect(HOSTED_RUNNER_OUTBOUND_BY_HOST["graph.facebook.com"]).toBeUndefined();
     expect(HOSTED_RUNNER_OUTBOUND_BY_HOST[HOSTED_RUNNER_DEFAULT_OUTBOUND_HOSTS.webControlPlane])
       .toBe(handleHostedRunnerInternalOutbound);
     expect(HOSTED_RUNNER_OUTBOUND_BY_HOST["host.docker.internal"])

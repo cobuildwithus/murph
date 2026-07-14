@@ -464,6 +464,12 @@ describe("buildHostedRunnerContainerEnv", () => {
       TELEGRAM_BOT_TOKEN: "telegram-user",
       TELEGRAM_FILE_BASE_URL: "https://evil-files.telegram.example",
       VENICE_API_KEY: "venice-user",
+      WHATSAPP_API_BASE_URL: "https://removed-whatsapp.example.test",
+      WHATSAPP_ACCESS_TOKEN: "removed-whatsapp-user",
+      WHATSAPP_APP_SECRET: "removed-whatsapp-app-secret",
+      WHATSAPP_GRAPH_VERSION: "v25.0",
+      WHATSAPP_PHONE_NUMBER_ID: "removed-whatsapp-phone-user",
+      WHATSAPP_VERIFY_TOKEN: "removed-whatsapp-verify-token",
       XAI_API_KEY: "xai-user",
     })).toEqual({});
   });
@@ -478,6 +484,12 @@ describe("buildHostedRunnerContainerEnv", () => {
         HOSTED_WEB_BASE_URL: "https://evil.example.test",
         OPENAI_API_KEY: "openai-user",
         TELEGRAM_BOT_TOKEN: "telegram-user",
+        WHATSAPP_API_BASE_URL: "https://removed-whatsapp.example.test",
+        WHATSAPP_ACCESS_TOKEN: "removed-whatsapp-user",
+        WHATSAPP_APP_SECRET: "removed-whatsapp-app-secret",
+        WHATSAPP_GRAPH_VERSION: "v25.0",
+        WHATSAPP_PHONE_NUMBER_ID: "removed-whatsapp-phone-user",
+        WHATSAPP_VERIFY_TOKEN: "removed-whatsapp-verify-token",
       },
       {
         HOSTED_EXECUTION_ALLOWED_RUNNER_SECRET_KEYS: [
@@ -488,6 +500,12 @@ describe("buildHostedRunnerContainerEnv", () => {
           "HOSTED_WEB_BASE_URL",
           "OPENAI_API_KEY",
           "TELEGRAM_BOT_TOKEN",
+          "WHATSAPP_API_BASE_URL",
+          "WHATSAPP_ACCESS_TOKEN",
+          "WHATSAPP_APP_SECRET",
+          "WHATSAPP_GRAPH_VERSION",
+          "WHATSAPP_PHONE_NUMBER_ID",
+          "WHATSAPP_VERIFY_TOKEN",
         ].join(","),
       },
     )).toEqual({});
@@ -1170,12 +1188,26 @@ describe("hosted deploy automation device-sync surface", () => {
     expect(HOSTED_WORKER_REQUIRED_SECRET_NAMES).toEqual(
       expect.arrayContaining(["MURPH_DATA_API_KEY", "OPENAI_API_KEY"]),
     );
+    for (const retiredWhatsAppSecret of [
+      "WHATSAPP_ACCESS_TOKEN",
+      "WHATSAPP_APP_SECRET",
+      "WHATSAPP_PHONE_NUMBER_ID",
+      "WHATSAPP_VERIFY_TOKEN",
+    ]) {
+      expect(HOSTED_WORKER_OPTIONAL_SECRET_NAMES).not.toContain(retiredWhatsAppSecret);
+    }
     expect(HOSTED_WORKER_OPTIONAL_VAR_NAMES).toEqual(
       expect.arrayContaining([
         "HOSTED_ASSISTANT_PROVIDER",
         "WHOOP_SCOPES",
       ]),
     );
+    for (const retiredWhatsAppVar of [
+      "WHATSAPP_API_BASE_URL",
+      "WHATSAPP_GRAPH_VERSION",
+    ]) {
+      expect(HOSTED_WORKER_OPTIONAL_VAR_NAMES).not.toContain(retiredWhatsAppVar);
+    }
     expect(HOSTED_WORKER_OPTIONAL_VAR_NAMES).not.toContain(
       "HOSTED_ASSISTANT_GATEWAY_ONLY_PROVIDERS",
     );

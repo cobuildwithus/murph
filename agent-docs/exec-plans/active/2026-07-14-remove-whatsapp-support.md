@@ -82,6 +82,26 @@ Updated: 2026-07-14
   evidence as historical records rather than live support claims.
 - Use hard deletion rather than a disabled WhatsApp feature flag or compatibility
   layer unless inspection proves current persisted data needs a narrow reader.
+- Keep historical consent events intact while removing the retired scope from
+  the active consent contract. Existing launch consent remains valid, and the
+  removed scope cannot be accepted again.
+- Keep a permanent `WHATSAPP_` runner-secret deny prefix as a security tombstone
+  so a stale custom allowlist cannot re-forward retired provider credentials.
+- Retire the provider operationally in this order: deploy Web first, prove the
+  legacy mailbox backlog is drained, roll the Worker and runners immediately,
+  then disable the upstream Meta integration and delete local configuration.
+
+## Audit outcomes
+
+- Security/privacy review found deployment-skew, upstream-provider retirement,
+  and stale custom-allowlist risks. All were accepted and resolved through the
+  deployment runbook plus the narrow permanent deny prefix; the re-audit found
+  no remaining issue.
+- Coverage review added only boundary tests for the surviving channels, deleted
+  package paths, removed Meta egress, stale-allowlist denial, and deploy payload
+  omission. It found no remaining material coverage gap.
+- Neither review introduced a compatibility parser, migration, feature flag,
+  queue, state owner, or other support-preserving machinery.
 
 ## Verification
 

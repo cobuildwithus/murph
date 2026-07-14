@@ -43,12 +43,16 @@ describe("@murphai/messaging-ingress package boundary", () => {
     expect(packageJson).not.toHaveProperty("main");
     expect(packageJson).not.toHaveProperty("types");
     await expect(access(new URL("../src/index.ts", import.meta.url))).rejects.toThrow();
+    await expect(access(new URL("../src/whatsapp-webhook.ts", import.meta.url))).rejects.toThrow();
   });
 
   it("rejects the package root while keeping the focused subpaths importable", async () => {
     const importBySpecifier = async (specifier: string) => import(specifier);
 
     await expect(importBySpecifier("@murphai/messaging-ingress")).rejects.toThrow();
+    await expect(
+      importBySpecifier("@murphai/messaging-ingress/whatsapp-webhook"),
+    ).rejects.toThrow();
     await expect(importBySpecifier("@murphai/messaging-ingress/linq-webhook")).resolves.toMatchObject({
       verifyAndParseLinqWebhookRequest: expect.any(Function),
     });

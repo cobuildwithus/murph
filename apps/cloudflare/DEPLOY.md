@@ -412,6 +412,31 @@ Opt-in execution integrations:
 - `WHOOP_CLIENT_SECRET`
 The documented deploy surface is intentionally limited to the vars and secrets above for the narrowed execution plane and its opt-in runtime integrations.
 
+### Retired WhatsApp configuration
+
+Removing WhatsApp bindings from the deploy workflow does not delete values that
+are already stored by Cloudflare or Vercel. Roll this removal out in this order:
+
+1. Deploy Web first so `/api/whatsapp/webhook` can no longer append new mailbox
+   rows.
+2. Before deploying the Worker or runner, prove there are zero unconsumed,
+   nonterminal hosted-mailbox rows whose dedupe key starts
+   `whatsapp:message:`. Let the old runner drain them; if zero-row proof cannot
+   be obtained, stop the rollout rather than making the new runtime decode old
+   payloads.
+3. Deploy the Worker and runner with `container_rollout=immediate`, prove runner
+   bundle convergence, and confirm there are no mailbox-payload decode failures.
+4. Revoke the upstream WhatsApp access token and disable the Meta webhook and
+   phone-number integration so the provider can no longer deliver messages or
+   accept API calls for Murph.
+5. Delete the retired `WHATSAPP_*` vars and secrets from every deployed
+   environment through the provider CLI or dashboard without downloading their
+   values.
+
+This operational cleanup must not delete or rewrite historical hosted-consent
+events: the removed consent scope is inert, and current launch consent remains
+valid without asking members to consent again.
+
 ## Local Validation And Artifact Render
 
 From the repo root:

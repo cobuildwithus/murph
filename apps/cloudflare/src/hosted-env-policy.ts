@@ -162,6 +162,9 @@ const DISALLOWED_RUNNER_SECRET_PREFIXES = [
   "HOSTED_EXECUTION_",
   "HOSTED_WEB_CALLBACK_SIGNING_",
   "NPM_CONFIG_",
+  // Retired provider configuration remains permanently non-forwardable so a
+  // stale deployed allowlist cannot expose old credentials to the runner.
+  "WHATSAPP_",
   "npm_config_",
   "WRANGLER_",
 ];

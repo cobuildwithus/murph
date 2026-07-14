@@ -987,6 +987,10 @@ describe("hosted deploy automation helpers", () => {
       STRAVA_CLIENT_SECRET: "strava-client-secret",
       TELEGRAM_BOT_TOKEN: "bot-token",
       TELEGRAM_WEBHOOK_SECRET: "telegram-webhook-secret",
+      WHATSAPP_ACCESS_TOKEN: "removed-whatsapp-token",
+      WHATSAPP_APP_SECRET: "removed-whatsapp-app-secret",
+      WHATSAPP_PHONE_NUMBER_ID: "removed-whatsapp-phone-number-id",
+      WHATSAPP_VERIFY_TOKEN: "removed-whatsapp-verify-token",
       OPENAI_API_KEY: "openai-key",
     })).toEqual({
       HOSTED_EMAIL_SIGNING_SECRET: "email-signing-secret",
