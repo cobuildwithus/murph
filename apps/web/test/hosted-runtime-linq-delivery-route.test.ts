@@ -284,6 +284,31 @@ describe("hosted runtime Linq delivery route", () => {
     );
   });
 
+  it("uses the optional post-send line lookup key only for outcome attribution", async () => {
+    const response = await route.POST(buildDeliveryRequest({
+      acceptedAt: "2026-04-26T00:00:04.000Z",
+      attemptedAt: "2026-04-26T00:00:03.000Z",
+      idempotencyKey: "assistant-outbox:intent_group",
+      lineLookupKey: "hbidx:phone:v1:account",
+      providerMessageId: "linq_message_group",
+      providerThreadId: "linq_chat_group",
+      target: "linq_chat_group",
+      targetKind: "thread",
+      threadIsDirect: false,
+    }));
+
+    expect(response.status).toBe(200);
+    expect(prisma.hostedMemberRouting.findUnique).not.toHaveBeenCalled();
+    expect(mocks.recordHostedLinqRuntimeDeliveryOutcomeTx).toHaveBeenCalledWith(
+      expect.objectContaining({
+        linqChatId: "linq_chat_group",
+        phoneNumber: null,
+        phoneNumberLookupKey: "hbidx:phone:v1:account",
+        threadIsDirect: false,
+      }),
+    );
+  });
+
   it("records outcomes even when an old runner sends stale route authority", async () => {
     const routeAuthority = {
       accountLookupKey: "hbidx:phone:v1:account",

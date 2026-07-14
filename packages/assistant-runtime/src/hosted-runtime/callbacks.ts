@@ -3114,6 +3114,7 @@ function buildHostedAssistantLinqDeliveryOutcomeRequest(input: {
     fromPhoneNumber: input.fromPhoneNumber,
     idempotencyKey: input.idempotencyKey,
     intentId: input.intentId,
+    lineLookupKey: input.deliveryContext?.routeAuthority?.accountLookupKey ?? null,
     providerMessageId: input.result?.providerMessageId ?? null,
     providerTarget: input.targetKind === "participant" ? null : input.providerTarget,
     providerThreadId: input.result?.providerThreadId ?? input.providerThreadId,

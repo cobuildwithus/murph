@@ -484,16 +484,10 @@ export async function fetchAndProcessHostedMailboxPrefix(input: {
       }
       const replyableConversationInput =
         route.action === "import-conversation-message" && !itemIsDurablyConsumedReplay;
-      const foregroundAssistantInput =
-        replyableConversationInput
-        || (
-          route.action === "import-group-newsletter-email-needed"
-          && !itemIsDurablyConsumedReplay
-        );
       if (replyableConversationInput) {
         conversationImportedCount += 1;
       }
-      if (foregroundAssistantInput && outcome.assistantInputId) {
+      if (replyableConversationInput && outcome.assistantInputId) {
         assistantInputIds.push(outcome.assistantInputId);
         assistantInputRecords.push({
           assistantInputId: outcome.assistantInputId,
