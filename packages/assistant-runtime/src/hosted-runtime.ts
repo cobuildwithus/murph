@@ -1827,7 +1827,8 @@ export async function runHostedWorkspaceRuntimeJobInProcess(
       nextWakeAt: committedWorkspace?.nextWakeAt ?? null,
       nextWakeReason: committedWorkspace?.nextWakeReason ?? null,
     };
-    // irreducible: "checkpoint-gated due projected wakes wait for the idle delay before service" fails without this.
+    // Hold a later durable wake while its earlier assistant predecessor is
+    // checkpointed and serviced.
     let pendingWakeAfterDueAssistantService: HostedRuntimeHeldDurableWake | null = null;
     let redactedStatus: NonNullable<HostedWorkspaceInvocationResult["redactedStatus"]> = {};
     let invocationStatus: HostedWorkspaceInvocationResult["status"] =
@@ -2024,7 +2025,6 @@ export async function runHostedWorkspaceRuntimeJobInProcess(
       }
       pendingWakeAfterDueAssistantService = durableWakeFollowsDueAssistant
         ? {
-            dueAssistantWake: copyHostedRuntimePendingWake(pendingWake),
             durableWake: copyHostedRuntimePendingWake(durableWake),
           }
         : null;
@@ -2045,7 +2045,18 @@ export async function runHostedWorkspaceRuntimeJobInProcess(
         idleCheckpointStartByMs ??= Date.now();
         return;
       }
-      if (hostedRuntimePendingWakeMatches(pendingWake, heldWake.dueAssistantWake)) {
+      const pendingAssistantWakeMs = pendingWake.nextWakeAt === null
+        ? Number.NaN
+        : Date.parse(pendingWake.nextWakeAt);
+      const heldDurableWakeMs = heldWake.durableWake.nextWakeAt === null
+        ? Number.NaN
+        : Date.parse(heldWake.durableWake.nextWakeAt);
+      if (
+        hostedRuntimeWakeReasonIsAssistant(pendingWake.nextWakeReason)
+        && Number.isFinite(pendingAssistantWakeMs)
+        && Number.isFinite(heldDurableWakeMs)
+        && pendingAssistantWakeMs <= heldDurableWakeMs
+      ) {
         return;
       }
 
@@ -2605,6 +2616,24 @@ export async function runHostedWorkspaceRuntimeJobInProcess(
         if (idleCheckpointStartByMs === null) {
           throw new Error("Dirty hosted runtime is missing an idle checkpoint timer.");
         }
+        const pendingAssistantWakeRepeatsDueService =
+          hostedRuntimeWakeReasonIsAssistant(committedWorkspace?.nextWakeReason ?? null)
+          && hostedRuntimeWakeIsDue(committedWorkspace?.nextWakeAt ?? null)
+          && hostedRuntimeWakeIsDue(pendingWake.nextWakeAt);
+        const pendingAssistantWakeAtMs =
+          pendingWake.nextWakeAt !== null
+            && hostedRuntimeWakeReasonIsAssistant(pendingWake.nextWakeReason)
+            && !pendingAssistantWakeRepeatsDueService
+            && buildHostedRuntimeWakeKey(pendingWake)
+              !== buildHostedRuntimeWakeKey({
+                nextWakeAt: committedWorkspace?.nextWakeAt ?? null,
+                nextWakeReason: committedWorkspace?.nextWakeReason ?? null,
+              })
+            ? Date.parse(pendingWake.nextWakeAt)
+            : Number.NaN;
+        const checkpointStartByMs = Number.isFinite(pendingAssistantWakeAtMs)
+          ? Math.min(idleCheckpointStartByMs, pendingAssistantWakeAtMs)
+          : idleCheckpointStartByMs;
         const queuedWakeLatencySeed = consumePendingHostedRuntimeWake(
           options.runtimeWakeSignal ?? null,
           options.shutdownSignal ?? null,
@@ -2616,7 +2645,7 @@ export async function runHostedWorkspaceRuntimeJobInProcess(
           checkpointWakeLatencySeed ??= queuedWakeLatencySeed;
         }
         const dirtyWaitResult = await waitForHostedRuntimeDirtyWindow({
-          idleCheckpointStartByMs,
+          idleCheckpointStartByMs: checkpointStartByMs,
           runtimeAbortSignal: runtimeAbortController.signal,
           runtimeWakeSignal: options.runtimeWakeSignal ?? null,
           shutdownSignal: options.shutdownSignal ?? null,
@@ -2747,7 +2776,7 @@ export async function runHostedWorkspaceRuntimeJobInProcess(
         });
         const idleCheckpointPhaseLogDetails =
           buildHostedRuntimeIdleCheckpointPhaseLogDetails({
-            idleCheckpointStartByMs,
+            idleCheckpointStartByMs: checkpointStartByMs,
             idleCheckpointTrigger,
             pendingWake,
             runtimeWakePendingAtCheckpoint,
@@ -3503,7 +3532,6 @@ interface HostedRuntimePendingWake {
 }
 
 interface HostedRuntimeHeldDurableWake {
-  dueAssistantWake: HostedRuntimePendingWake;
   durableWake: HostedRuntimePendingWake;
 }
 
