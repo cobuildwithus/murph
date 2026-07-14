@@ -1552,6 +1552,33 @@ describe("Linq explicit external-thread routing", () => {
     expect(prisma.readPendingGroupReactionContextEncrypted()).toBeNull();
   });
 
+  it("preserves queued reactions when append cannot decrypt them", async () => {
+    const encryptedContext = "encrypted queued reactions";
+    const prisma = createPrisma({
+      pendingGroupReactionContextEncrypted: encryptedContext,
+      routeContainerMemberId: "member_thread_container_123",
+    });
+    secureBoxMocks.openHostedUserSecureBoxString.mockRejectedValueOnce(
+      new Error("decrypt unavailable"),
+    );
+
+    await expect(
+      prisma.$transaction((transaction) =>
+        appendHostedLinqThreadRouteReactionContextTx({
+          accountLookupKey: requireTestPhoneLookupKey("+15550000000"),
+          containerMemberId: "member_thread_container_123",
+          prisma: transaction as never,
+          text: "A participant liked: group message",
+          threadId: "chat_group_123",
+        }),
+      ),
+    ).rejects.toThrow("decrypt unavailable");
+    expect(secureBoxMocks.sealHostedUserSecureBoxString).not.toHaveBeenCalled();
+    expect(prisma.readPendingGroupReactionContextEncrypted()).toBe(
+      encryptedContext,
+    );
+  });
+
   it("drops corrupt optional reaction context without blocking the next message", async () => {
     const prisma = createPrisma({
       pendingGroupReactionContextEncrypted: "invalid ciphertext",

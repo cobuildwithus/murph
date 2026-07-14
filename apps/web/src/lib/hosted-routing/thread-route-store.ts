@@ -315,7 +315,7 @@ export async function appendHostedLinqThreadRouteReactionContextTx(input: {
     return "route_unavailable";
   }
   const signal = AbortSignal.timeout(HOSTED_LINQ_GROUP_REACTION_CRYPTO_TIMEOUT_MS);
-  const current = await openHostedLinqGroupReactionContextBestEffort({
+  const current = await openHostedLinqGroupReactionContext({
     route,
     signal,
     tx: input.prisma,
@@ -422,24 +422,32 @@ async function openHostedLinqGroupReactionContextBestEffort(input: {
   tx: Prisma.TransactionClient;
 }): Promise<string[] | null> {
   try {
-    const serialized = await openHostedUserSecureBoxString({
-      aad: buildHostedLinqGroupReactionContextAad(input.route.threadLookupKey),
-      lane: "hosted-member-private-field",
-      prisma: input.tx,
-      scope: `hosted-thread-route:${HOSTED_LINQ_GROUP_REACTION_CONTEXT_FIELD}:v1`,
-      signal: input.signal,
-      userId: input.route.containerMemberId,
-      value: input.route.pendingGroupReactionContextEncrypted,
-    });
-    if (!serialized) {
-      return null;
-    }
-    return parseHostedLinqGroupReactionContextItems(serialized);
+    return await openHostedLinqGroupReactionContext(input);
   } catch {
     // This is optional, lossy context. Corrupt or unavailable ciphertext must
     // never block the ordinary inbound message that consumes the route hint.
     return null;
   }
+}
+
+async function openHostedLinqGroupReactionContext(input: {
+  route: NonNullable<Awaited<ReturnType<typeof readHostedLinqThreadRoutePendingContextRowTx>>>;
+  signal: AbortSignal;
+  tx: Prisma.TransactionClient;
+}): Promise<string[] | null> {
+  const serialized = await openHostedUserSecureBoxString({
+    aad: buildHostedLinqGroupReactionContextAad(input.route.threadLookupKey),
+    lane: "hosted-member-private-field",
+    prisma: input.tx,
+    scope: `hosted-thread-route:${HOSTED_LINQ_GROUP_REACTION_CONTEXT_FIELD}:v1`,
+    signal: input.signal,
+    userId: input.route.containerMemberId,
+    value: input.route.pendingGroupReactionContextEncrypted,
+  });
+  if (!serialized) {
+    return null;
+  }
+  return parseHostedLinqGroupReactionContextItems(serialized);
 }
 
 async function sealHostedLinqGroupReactionContext(input: {
