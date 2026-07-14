@@ -22,6 +22,7 @@ import {
 } from "@/src/lib/hosted-onboarding/linq";
 import {
   getHostedLinqChatSummary,
+  getHostedLinqReactionTargetMessage,
 } from "@/src/lib/hosted-onboarding/linq-client";
 
 const originalFetch = globalThis.fetch;
@@ -255,6 +256,95 @@ describe("getHostedLinqChatSummary", () => {
     } finally {
       await closeTestServer(server);
     }
+  });
+});
+
+describe("getHostedLinqReactionTargetMessage", () => {
+  afterEach(() => {
+    if (originalFetch) {
+      vi.stubGlobal("fetch", originalFetch);
+      return;
+    }
+
+    Reflect.deleteProperty(globalThis, "fetch");
+  });
+
+  it("reads the exact canonical message and keeps only bounded reaction context", async () => {
+    const privateUrl = "https://media.example.test/private-attachment";
+    const privateTextUrl = "https://example.test/private-token";
+    const fetchMock = vi.fn(async () => createJsonResponse({
+      chat_id: "chat_123",
+      id: "msg_123",
+      parts: [
+        {
+          type: "text",
+          value: `See ${privateTextUrl} ${"x".repeat(600)}`,
+        },
+        {
+          file_name: "private-name.pdf",
+          mime_type: "application/pdf",
+          type: "media",
+          url: privateUrl,
+        },
+        {
+          type: "link",
+          url: "https://example.test/private-path",
+        },
+        {
+          app_name: "Private app",
+          type: "imessage_app",
+        },
+        ...Array.from({ length: 36 }, (_, index) => ({
+          type: "text",
+          value: `part-${index}`,
+        })),
+      ],
+    }, 200));
+    vi.stubGlobal("fetch", fetchMock);
+
+    const message = await getHostedLinqReactionTargetMessage({
+      messageId: "msg_123",
+    });
+
+    expect(message).toMatchObject({
+      chatId: "chat_123",
+      id: "msg_123",
+    });
+    expect(message.parts).toHaveLength(32);
+    expect(message.parts[0]).toMatch(/^See \[link\] /u);
+    expect(message.parts[0]).toHaveLength(512);
+    expect(message.parts.slice(1, 4)).toEqual([
+      "[attachment]",
+      "[link]",
+      "[iMessage app]",
+    ]);
+    expect(JSON.stringify(message)).not.toContain(privateUrl);
+    expect(JSON.stringify(message)).not.toContain(privateTextUrl);
+    expect(JSON.stringify(message)).not.toContain("private-name.pdf");
+    expect(JSON.stringify(message)).not.toContain("application/pdf");
+    expect(fetchMock).toHaveBeenCalledWith(
+      new URL("messages/msg_123", "https://linq.example.test/api/partner/v3/"),
+      expect.objectContaining({
+        method: "GET",
+        signal: expect.any(AbortSignal),
+      }),
+    );
+  });
+
+  it("rejects malformed canonical message responses", async () => {
+    vi.stubGlobal("fetch", vi.fn(async () => createJsonResponse({
+      chat_id: "chat_123",
+      id: "msg_123",
+      parts: { type: "text", value: "not an array" },
+    }, 200)));
+
+    await expect(getHostedLinqReactionTargetMessage({
+      messageId: "msg_123",
+    })).rejects.toMatchObject({
+      code: "LINQ_MESSAGE_READ_INVALID",
+      httpStatus: 502,
+      retryable: false,
+    });
   });
 });
 

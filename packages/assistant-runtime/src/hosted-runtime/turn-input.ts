@@ -256,6 +256,9 @@ async function readHostedAssistantInputCandidatesById(input: {
         ...(hostedMailboxItem?.groupParticipantAdded === true
           ? { groupParticipantAdded: hostedMailboxItem.groupParticipantAdded }
           : {}),
+        ...(hostedMailboxItem?.groupReactionContext
+          ? { groupReactionContext: hostedMailboxItem.groupReactionContext }
+          : {}),
         hostedMailboxItemId: hostedMailboxItem?.mailboxItemId ?? null,
       });
     });
