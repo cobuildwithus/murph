@@ -111,6 +111,10 @@ describe("murph.group dynamic tool", () => {
       .toContain("{{share_scope}}");
     expect(MURPH_GROUP_TOOL.inputSchema.properties.messageTemplate.description)
       .toContain("Include {{join_url}} exactly once");
+    expect(MURPH_GROUP_TOOL.inputSchema.properties.messageTemplate.description)
+      .toContain('Lead with the exact words "Like this message"');
+    expect(MURPH_GROUP_TOOL.inputSchema.properties.messageTemplate.description)
+      .not.toContain("Lead with reacting to this message");
     expect(MURPH_GROUP_TOOL.description).toContain('action="list_memberships"');
     expect(MURPH_GROUP_TOOL.description).toContain("permission only");
     expect(MURPH_GROUP_TOOL.description)

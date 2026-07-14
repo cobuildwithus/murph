@@ -32,7 +32,7 @@ export interface HostedMemberMessagingState {
   linqContactLookupKey: string | null;
   linqThreadId: string | null;
   phoneLookupKey: string | null;
-  telegramThreadId: string | null;
+  telegramTarget: string | null;
 }
 
 export type HostedMemberAssistantNotificationRoute =
@@ -59,10 +59,12 @@ export function resolveHostedMemberMessagingState(input: {
   const linqContactLookupKey =
     phoneLookupKey
     ?? normalizeMessagingIdentity(input.routing?.pendingLinqParticipantContact?.lookupKey);
-  const telegramThreadId = normalizeMessagingIdentity(input.routing?.telegramThreadId);
+  const telegramTarget =
+    normalizeMessagingIdentity(input.routing?.telegramThreadId)
+    ?? normalizeMessagingIdentity(input.routing?.telegramUserId);
   const hasPhone = phoneLookupKey !== null;
   const hasLinq = hasPhone || (linqThreadId !== null && linqContactLookupKey !== null);
-  const hasTelegram = telegramThreadId !== null;
+  const hasTelegram = telegramTarget !== null;
 
   return {
     hasDirectMessagingChannel: hasLinq || hasTelegram,
@@ -72,7 +74,7 @@ export function resolveHostedMemberMessagingState(input: {
     linqContactLookupKey,
     linqThreadId,
     phoneLookupKey,
-    telegramThreadId,
+    telegramTarget,
   };
 }
 
@@ -166,9 +168,9 @@ export function resolveHostedMemberAssistantNotificationRoute(
     };
   }
 
-  if (input.messaging.telegramThreadId) {
+  if (input.messaging.telegramTarget) {
     const identifierBlind = createHostedAssistantConversationIdentifierBlind({
-      secret: input.messaging.telegramThreadId,
+      secret: input.messaging.telegramTarget,
       userId: input.memberId,
     });
     return {
@@ -176,12 +178,12 @@ export function resolveHostedMemberAssistantNotificationRoute(
       channel: "telegram",
       delivery: {
         kind: "thread",
-        target: input.messaging.telegramThreadId,
+        target: input.messaging.telegramTarget,
       },
       identityId: null,
       threadId: hashHostedAssistantConversationIdentifier(
         identifierBlind,
-        input.messaging.telegramThreadId,
+        input.messaging.telegramTarget,
       ),
       threadIsDirect: true,
     };
