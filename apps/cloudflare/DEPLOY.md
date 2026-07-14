@@ -145,7 +145,9 @@ response marker and retain their existing early-claim behavior.
 After that rollout has converged, removing obsolete runner authority hints from
 the engagement and post-send outcome payloads is independently deployable: Web
 ignores unknown legacy JSON fields, and both old and new runners use the same
-final provider claim.
+final provider claim. New runners may send an optional `lineLookupKey` solely
+for post-send line-health attribution; old Web ignores it, and new Web retains
+its existing fallback when an old runner omits it.
 
 ## One-Time Cloudflare Setup
 
