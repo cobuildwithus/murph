@@ -2965,12 +2965,25 @@ test("companion WHOOP spot RMSSD retains one daily representative with one quali
         { corePort: coreRuntime },
       );
 
-    const results: Awaited<ReturnType<typeof importObservation>>[] = [];
-    for (const observation of observations) {
+    const limitedCreated = await importObservation(observations[0]);
+    const limitedEvent = limitedCreated.events[0];
+    assert.ok(limitedEvent);
+    await coreRuntime.upsertEvent({
+      vaultRoot,
+      payload: {
+        ...limitedEvent,
+        note: "Felt calm after breathing practice.",
+        tags: ["breathing-practice"],
+        links: [{ type: "related_to", targetId: limitedEvent.id }],
+      },
+    });
+
+    const results: Awaited<ReturnType<typeof importObservation>>[] = [limitedCreated];
+    for (const observation of observations.slice(1)) {
       results.push(await importObservation(observation));
     }
     const [
-      limitedCreated,
+      limitedResult,
       limitedRejected,
       goodUpgrade,
       goodRejected,
@@ -2978,8 +2991,8 @@ test("companion WHOOP spot RMSSD retains one daily representative with one quali
       nextDayCreated,
     ] = results;
 
-    assert.equal(limitedCreated?.applied, true);
-    assert.equal(limitedCreated?.persistedEvidencePartCount, 1);
+    assert.equal(limitedResult?.applied, true);
+    assert.equal(limitedResult?.persistedEvidencePartCount, 1);
     assert.equal(limitedRejected?.applied, false);
     assert.equal(limitedRejected?.persistedEvidencePartCount, 0);
     assert.equal(goodUpgrade?.applied, true);
@@ -2997,11 +3010,21 @@ test("companion WHOOP spot RMSSD retains one daily representative with one quali
     ))).flat().filter((record) => storedExternalRefResourceType(record) === "ble-hrv-rmssd");
     const liveRecords = latestLiveRecords(physicalRecords);
 
-    assert.equal(physicalRecords.length, 3);
+    assert.equal(physicalRecords.length, 4);
     assert.equal(liveRecords.length, 2);
     assert.deepEqual(
       liveRecords.map(storedObservationValue).sort((left, right) => Number(left) - Number(right)),
       [48, 50],
+    );
+    const upgradedRecord = liveRecords.find((record) => record.id === limitedEvent.id);
+    assert.equal(upgradedRecord?.note, "Felt calm after breathing practice.");
+    assert.deepEqual(upgradedRecord?.tags, ["breathing-practice"]);
+    assert.deepEqual(upgradedRecord?.links, [{ type: "related_to", targetId: limitedEvent.id }]);
+    assert.deepEqual(
+      physicalRecords
+        .filter((record) => record.id === limitedEvent.id)
+        .map((record) => eventRevisionFromLifecycle(record.lifecycle)),
+      [1, 2, 3],
     );
     const ingestRecords = await coreRuntime.readJsonlRecords({
       vaultRoot,

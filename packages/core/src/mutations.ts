@@ -2874,11 +2874,21 @@ async function reconcileDeviceEventEntriesByExternalRef(
       eventSpineRevision(latest),
       index.maxRevisionById.get(latest.id) ?? 0,
     ) + 1;
-    const superseding: EventRecord = {
+    const memberOwnedAnnotations = entry.externalRefUpdatePolicy === "prefer-higher-confidence"
+      ? {
+          // The confidence policy supersedes only the provider measurement and
+          // provenance; the live envelope continues to own member annotations.
+          note: latest.note,
+          tags: latest.tags,
+          links: latest.links,
+        }
+      : {};
+    const superseding = eventRecordSchema.parse({
       ...entry.record,
       id: latest.id,
+      ...memberOwnedAnnotations,
       lifecycle: buildEventSpineLifecycle(revision),
-    };
+    });
 
     forceAppendIds.add(latest.id);
     index.latestByRefKey.set(refKey, toIndexedExternalRefMatch(superseding, externalRef));
