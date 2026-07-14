@@ -21046,7 +21046,7 @@ describe("hosted workspace runtime entrypoint", () => {
       vi.setSystemTime(new Date(firstNow));
       await initializeVault({ createdAt: TEST_NOW, vaultRoot });
 
-      const firstPhaseFinished = createDeferred<void>();
+      const rerunPhaseFinished = createDeferred<void>();
       let assistantPhaseCalls = 0;
       const platform = createPlatform({
         deviceSyncPort,
@@ -21101,9 +21101,21 @@ describe("hosted workspace runtime entrypoint", () => {
           },
           platform,
           runtimeWakeSignal,
-          async runAssistantPhase() {
+          async runAssistantPhase(input) {
             assistantPhaseCalls += 1;
             events.push(`assistant.phase:${assistantPhaseCalls}`);
+            if (assistantPhaseCalls === 2) {
+              assert.ok(pendingInputId);
+              assert.deepEqual(
+                input.initialAssistantInputBatch?.assistantInputIds,
+                [pendingInputId],
+              );
+              rerunPhaseFinished.resolve();
+              return {
+                checkpointReason: "assistant_runtime_commit" as const,
+                progressed: false,
+              };
+            }
             assert.equal(assistantPhaseCalls, 1);
             await deviceSyncPort.fetchSnapshot();
             assert.ok(pendingInputId);
@@ -21111,7 +21123,6 @@ describe("hosted workspace runtime entrypoint", () => {
               inputId: pendingInputId,
               vaultRoot,
             });
-            firstPhaseFinished.resolve();
             return {
               checkpointReason: "assistant_runtime_commit" as const,
               nextWakeAt: yieldedRetryWakeAt,
@@ -21128,11 +21139,11 @@ describe("hosted workspace runtime entrypoint", () => {
       );
 
       await withRealTimeout(
-        firstPhaseFinished.promise,
+        rerunPhaseFinished.promise,
         runtimeTransitionTimeoutMs,
         () => events.join(","),
       );
-      assert.equal(assistantPhaseCalls, 1);
+      assert.equal(assistantPhaseCalls, 2);
       assert.equal(checkpointRequests.length, 0);
       shutdownController.abort();
 
