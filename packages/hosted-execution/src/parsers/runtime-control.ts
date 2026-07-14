@@ -108,6 +108,7 @@ import {
   HOSTED_RUNTIME_GROUP_KINDS,
   HOSTED_RUNTIME_GROUP_CHAT_PARTICIPANTS_MAX,
   HOSTED_RUNTIME_NEWSLETTER_AUTHORIZED_SHARES_PER_PARTICIPANT_MAX,
+  isHostedRuntimeNewsletterAuthorizationProof,
   HOSTED_RUNTIME_NEWSLETTER_HTML_MAX_LENGTH,
   HOSTED_RUNTIME_NEWSLETTER_PARTICIPANTS_MAX,
   HOSTED_RUNTIME_NEWSLETTER_SUBJECT_MAX_LENGTH,
@@ -1375,9 +1376,22 @@ export function parseHostedRuntimeNewsletterToolRequest(
   if (action === "prepare") {
     assertAllowedObjectKeys(
       record,
-      new Set(["action", "groupId", "includeAuthorizationSnapshot"]),
+      new Set([
+        "action",
+        "groupId",
+        "includeAuthorizationProof",
+        "includeAuthorizationSnapshot",
+      ]),
       "Hosted runtime newsletter tool prepare request",
     );
+    if (
+      record.includeAuthorizationProof !== undefined
+      && record.includeAuthorizationProof !== true
+    ) {
+      throw new TypeError(
+        "Hosted runtime newsletter tool includeAuthorizationProof must be true when present.",
+      );
+    }
     if (
       record.includeAuthorizationSnapshot !== undefined
       && record.includeAuthorizationSnapshot !== true
@@ -1389,6 +1403,9 @@ export function parseHostedRuntimeNewsletterToolRequest(
     return {
       action,
       groupId: requireString(record.groupId, "Hosted runtime newsletter tool groupId"),
+      ...(record.includeAuthorizationProof === true
+        ? { includeAuthorizationProof: true as const }
+        : {}),
       ...(record.includeAuthorizationSnapshot === true
         ? { includeAuthorizationSnapshot: true as const }
         : {}),
@@ -1457,12 +1474,21 @@ export function parseHostedRuntimeNewsletterToolResponse(
     if (status === "ok") {
       assertAllowedObjectKeys(
         result,
-        new Set(["status", "groupId", "participants", "missingEmailParticipants"]),
+        new Set([
+          "authorizationProof",
+          "status",
+          "groupId",
+          "participants",
+          "missingEmailParticipants",
+        ]),
         "Hosted runtime newsletter tool prepare ok response result",
       );
       return {
         action,
         result: {
+          authorizationProof: requireHostedRuntimeNewsletterAuthorizationProof(
+            result.authorizationProof,
+          ),
           groupId: requireString(result.groupId, "Hosted runtime newsletter tool groupId"),
           missingEmailParticipants: parseHostedRuntimeNewsletterParticipants(
             result.missingEmailParticipants,
@@ -1627,6 +1653,15 @@ export function parseHostedRuntimeNewsletterToolResponse(
   }
 
   throw new TypeError("Hosted runtime newsletter tool response action/status is not supported.");
+}
+
+function requireHostedRuntimeNewsletterAuthorizationProof(value: unknown): string {
+  if (!isHostedRuntimeNewsletterAuthorizationProof(value)) {
+    throw new TypeError(
+      "Hosted runtime newsletter tool authorizationProof must be a SHA-256 hex digest.",
+    );
+  }
+  return value;
 }
 
 function parseHostedRuntimeNewsletterParticipants(

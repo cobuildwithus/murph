@@ -31,7 +31,13 @@ export const POST = withJsonError(async (request: Request) => {
 
   if (
     body.action === "read_stats"
-    || (body.action === "prepare" && body.includeAuthorizationSnapshot !== true)
+    || (
+      body.action === "prepare"
+      && (
+        body.includeAuthorizationProof !== true
+        || body.includeAuthorizationSnapshot !== true
+      )
+    )
   ) {
     return jsonOk({
       action: body.action,

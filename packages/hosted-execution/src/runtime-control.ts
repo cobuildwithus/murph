@@ -1043,6 +1043,18 @@ export const HOSTED_RUNTIME_NEWSLETTER_TEXT_MAX_LENGTH = 100_000;
 export const HOSTED_RUNTIME_NEWSLETTER_HTML_MAX_LENGTH = 500_000;
 export const HOSTED_RUNTIME_NEWSLETTER_PARTICIPANTS_MAX = 100;
 export const HOSTED_RUNTIME_NEWSLETTER_AUTHORIZED_SHARES_PER_PARTICIPANT_MAX = 100;
+export const HOSTED_RUNTIME_NEWSLETTER_AUTHORIZATION_PROOF_HEX_LENGTH = 64;
+const HOSTED_RUNTIME_NEWSLETTER_AUTHORIZATION_PROOF_PATTERN = new RegExp(
+  `^[0-9a-f]{${HOSTED_RUNTIME_NEWSLETTER_AUTHORIZATION_PROOF_HEX_LENGTH}}$`,
+  "u",
+);
+
+export function isHostedRuntimeNewsletterAuthorizationProof(
+  value: unknown,
+): value is string {
+  return typeof value === "string"
+    && HOSTED_RUNTIME_NEWSLETTER_AUTHORIZATION_PROOF_PATTERN.test(value);
+}
 
 export interface HostedRuntimeNewsletterAuthorizedShare {
   projectionScopeKey: string;
@@ -1073,6 +1085,8 @@ export interface HostedRuntimeNewsletterToolPrepareRequest {
   groupId: string;
   /** Required for successful preparation; older runners fail closed when they omit it. */
   includeAuthorizationSnapshot?: true;
+  /** Required for successful preparation; keeps the proof private from model-facing output. */
+  includeAuthorizationProof?: true;
   /** Trusted runtime context; stripped before the web callback request. */
   scheduledAutomationAuthority?: HostedRuntimeNewsletterScheduledAuthority | null;
 }
@@ -1087,6 +1101,7 @@ export type HostedRuntimeNewsletterToolResponse =
       action: "prepare";
       result:
         | {
+            authorizationProof: string;
             groupId: string;
             missingEmailParticipants: HostedRuntimeNewsletterParticipantSummary[];
             participants: HostedRuntimeNewsletterParticipantSummary[];

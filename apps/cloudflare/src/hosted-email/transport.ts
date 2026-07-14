@@ -96,6 +96,12 @@ export async function sendHostedEmailMessage(input: {
     }
 
     const preflight = assertSupportedHostedEmailSendRequest(input.request);
+    if (
+      input.request.idempotencyKey?.startsWith("group-newsletter:")
+      && !input.request.newsletterAuthorizationProof
+    ) {
+      throw new Error("Hosted newsletter delivery requires an authorization proof.");
+    }
     const groupId = resolveHostedEmailSendGroupId({
       existingThreadTarget: preflight.existingThreadTarget,
       target: input.request.target,
@@ -112,6 +118,8 @@ export async function sendHostedEmailMessage(input: {
     });
     const groupRecipientResolution = groupId
       ? await resolveHostedEmailGroupRecipients({
+          expectedNewsletterAuthorizationProof:
+            input.request.newsletterAuthorizationProof ?? null,
           fetchImpl: input.fetchImpl,
           groupId,
           userId: input.userId,
@@ -355,6 +363,7 @@ async function sendPreparedHostedEmailMimeMessages(input: {
 }
 
 async function resolveHostedEmailGroupRecipients(input: {
+  expectedNewsletterAuthorizationProof?: string | null;
   fetchImpl?: typeof fetch;
   groupId: string;
   userId: string;
@@ -370,6 +379,12 @@ async function resolveHostedEmailGroupRecipients(input: {
     ...(input.webControlAllowHttpHosts ? { allowHttpHosts: input.webControlAllowHttpHosts } : {}),
     baseUrl: input.webControlBaseUrl,
     body: JSON.stringify({
+      ...(input.expectedNewsletterAuthorizationProof
+        ? {
+            expectedNewsletterAuthorizationProof:
+              input.expectedNewsletterAuthorizationProof,
+          }
+        : {}),
       groupId: input.groupId,
     }),
     boundUserId: input.userId,

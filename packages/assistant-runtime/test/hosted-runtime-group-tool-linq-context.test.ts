@@ -5,7 +5,6 @@ import {
   createHostedNewsletterToolWithEmailSend,
 } from "../src/hosted-runtime/workspace-assistant-phase.ts";
 import type {
-  HostedRuntimeNewsletterToolRequest,
   HostedRuntimeNewsletterToolResponse,
 } from "@murphai/hosted-execution/runtime-control";
 import type { HostedAssistantLinqDeliveryContext } from "../src/hosted-runtime/linq-delivery-context.ts";
@@ -395,9 +394,11 @@ describe("createHostedGroupToolWithLinqThreadContext", () => {
 });
 
 describe("createHostedNewsletterToolWithEmailSend", () => {
+  const authorizationProof = "a".repeat(64);
   const preparationResponse = {
     action: "prepare" as const,
     result: {
+      authorizationProof,
       groupId: "group_123",
       missingEmailParticipants: [],
       participants: [
@@ -474,46 +475,6 @@ describe("createHostedNewsletterToolWithEmailSend", () => {
     expect(sendEmail).not.toHaveBeenCalled();
   });
 
-  it("fails closed when newsletter preparation returns a mismatched action", async () => {
-    const sendEmail = vi.fn(async () => ({ target: "thread_123" }));
-    const request = vi.fn<
-      (request: HostedRuntimeNewsletterToolRequest) => Promise<HostedRuntimeNewsletterToolResponse>
-    >()
-      .mockResolvedValueOnce(preparationResponse)
-      .mockResolvedValueOnce({
-        action: "send",
-        result: {
-          participantCount: 1,
-          skippedNoEmailMemberIds: [],
-          status: "sent",
-        },
-      });
-    const newsletterTool = createHostedNewsletterToolWithEmailSend({
-      effectsPort: { sendEmail },
-      newsletterToolPort: { request },
-      scheduledAutomationAuthority: {
-        automationId: "automation_newsletter",
-        occurrenceAt: "2026-07-12T13:00:00.000Z",
-      },
-    });
-
-    await prepareNewsletterTool(newsletterTool);
-    await expect(newsletterTool.request({
-      action: "send",
-      groupId: "group_123",
-      html: "<p>Weekly</p>",
-      subject: "Weekly health note",
-      text: "Weekly",
-    })).resolves.toEqual({
-      action: "send",
-      result: {
-        status: "unavailable",
-        unavailableReason: "newsletter_preparation_unavailable",
-      },
-    });
-    expect(sendEmail).not.toHaveBeenCalled();
-  });
-
   it("allows send when the runtime injected scheduled newsletter automation authority", async () => {
     const sendEmail = vi.fn(async () => ({ target: "thread_123" }));
     const request = vi.fn(async (toolRequest) =>
@@ -550,14 +511,17 @@ describe("createHostedNewsletterToolWithEmailSend", () => {
     });
     expect(sendEmail).toHaveBeenCalledWith(expect.objectContaining({
       idempotencyKey: expect.stringContaining("automation_newsletter"),
+      newsletterAuthorizationProof: authorizationProof,
       target: "group_123",
       targetKind: "group",
     }));
     expect(request).toHaveBeenCalledWith({
       action: "prepare",
       groupId: "group_123",
+      includeAuthorizationProof: true,
       includeAuthorizationSnapshot: true,
     });
+    expect(request).toHaveBeenCalledTimes(1);
   });
 
   it("uses the same send identity for same-occurrence retries with different content", async () => {
@@ -629,6 +593,7 @@ describe("createHostedNewsletterToolWithEmailSend", () => {
             ? {
                 action: "prepare" as const,
                 result: {
+                  authorizationProof,
                   groupId: "group_123",
                   missingEmailParticipants: [],
                   participants: [
@@ -680,6 +645,7 @@ describe("createHostedNewsletterToolWithEmailSend", () => {
             ? {
                 action: "prepare" as const,
                 result: {
+                  authorizationProof,
                   groupId: "group_123",
                   missingEmailParticipants: [],
                   participants: [
@@ -721,103 +687,6 @@ describe("createHostedNewsletterToolWithEmailSend", () => {
     expect(sendEmail).not.toHaveBeenCalled();
   });
 
-  it("fails closed when recipient eligibility changes after preparation", async () => {
-    const sendEmail = vi.fn(async () => ({ target: "thread_123" }));
-    const request = vi.fn<
-      (request: HostedRuntimeNewsletterToolRequest) => Promise<HostedRuntimeNewsletterToolResponse>
-    >()
-      .mockResolvedValueOnce(preparationResponse)
-      .mockResolvedValueOnce({
-        action: "prepare",
-        result: {
-          groupId: "group_123",
-          missingEmailParticipants: [
-            { authorizedShares: [], hasEmail: false, memberId: "member_one" },
-          ],
-          participants: [
-            { authorizedShares: [], hasEmail: false, memberId: "member_one" },
-          ],
-          status: "ok",
-        },
-      });
-    const newsletterTool = createHostedNewsletterToolWithEmailSend({
-      effectsPort: { sendEmail },
-      newsletterToolPort: { request },
-      scheduledAutomationAuthority: {
-        automationId: "automation_newsletter",
-        occurrenceAt: "2026-07-12T13:00:00.000Z",
-      },
-    });
-
-    await prepareNewsletterTool(newsletterTool);
-    await expect(newsletterTool.request({
-      action: "send",
-      groupId: "group_123",
-      html: "<p>Weekly</p>",
-      subject: "Weekly health note",
-      text: "Weekly",
-    })).resolves.toEqual({
-      action: "send",
-      result: {
-        status: "unavailable",
-        unavailableReason: "newsletter_authorization_changed",
-      },
-    });
-    expect(sendEmail).not.toHaveBeenCalled();
-  });
-
-  it("fails closed when a health-share grant changes after preparation", async () => {
-    const sendEmail = vi.fn(async () => ({ target: "thread_123" }));
-    const request = vi.fn<
-      (request: HostedRuntimeNewsletterToolRequest) => Promise<HostedRuntimeNewsletterToolResponse>
-    >()
-      .mockResolvedValueOnce(preparationResponse)
-      .mockResolvedValueOnce({
-        action: "prepare",
-        result: {
-          groupId: "group_123",
-          missingEmailParticipants: [],
-          participants: [
-            {
-              authorizedShares: [
-                {
-                  projectionScopeKey: "steps-days.v0",
-                  shareId: "share_steps_regranted",
-                },
-              ],
-              hasEmail: true,
-              memberId: "member_one",
-            },
-          ],
-          status: "ok",
-        },
-      });
-    const newsletterTool = createHostedNewsletterToolWithEmailSend({
-      effectsPort: { sendEmail },
-      newsletterToolPort: { request },
-      scheduledAutomationAuthority: {
-        automationId: "automation_newsletter",
-        occurrenceAt: "2026-07-12T13:00:00.000Z",
-      },
-    });
-
-    await prepareNewsletterTool(newsletterTool);
-    await expect(newsletterTool.request({
-      action: "send",
-      groupId: "group_123",
-      html: "<p>Weekly</p>",
-      subject: "Weekly health note",
-      text: "Weekly",
-    })).resolves.toEqual({
-      action: "send",
-      result: {
-        status: "unavailable",
-        unavailableReason: "newsletter_authorization_changed",
-      },
-    });
-    expect(sendEmail).not.toHaveBeenCalled();
-  });
-
   it("reports send_failed when every hosted email recipient fails", async () => {
     const sendEmail = vi.fn(async () => ({
       delivery: {
@@ -836,6 +705,7 @@ describe("createHostedNewsletterToolWithEmailSend", () => {
             ? {
                 action: "prepare" as const,
                 result: {
+                  authorizationProof,
                   groupId: "group_123",
                   missingEmailParticipants: [],
                   participants: [
@@ -851,6 +721,70 @@ describe("createHostedNewsletterToolWithEmailSend", () => {
                 result: { participantCount: 3, skippedNoEmailMemberIds: [], status: "sent" as const },
               }),
       },
+      scheduledAutomationAuthority: {
+        automationId: "automation_newsletter",
+        occurrenceAt: "2026-07-12T13:00:00.000Z",
+      },
+    });
+
+    await prepareNewsletterTool(newsletterTool);
+    await expect(newsletterTool.request({
+      action: "send",
+      groupId: "group_123",
+      html: "<p>Weekly</p>",
+      subject: "Weekly health note",
+      text: "Weekly",
+    })).resolves.toEqual({
+      action: "send",
+      result: {
+        status: "unavailable",
+        unavailableReason: "send_failed",
+      },
+    });
+  });
+
+  it("reports send_failed when hosted email fails before any recipient is sent", async () => {
+    const sendEmail = vi.fn(async () => ({
+      delivery: {
+        failedCount: 0,
+        sentCount: 0,
+        skippedCount: 1,
+        status: "failed" as const,
+      },
+      target: "group_123",
+    }));
+    const newsletterTool = createHostedNewsletterToolWithEmailSend({
+      effectsPort: { sendEmail },
+      newsletterToolPort: { request: vi.fn(async () => preparationResponse) },
+      scheduledAutomationAuthority: {
+        automationId: "automation_newsletter",
+        occurrenceAt: "2026-07-12T13:00:00.000Z",
+      },
+    });
+
+    await prepareNewsletterTool(newsletterTool);
+    await expect(newsletterTool.request({
+      action: "send",
+      groupId: "group_123",
+      html: "<p>Weekly</p>",
+      subject: "Weekly health note",
+      text: "Weekly",
+    })).resolves.toEqual({
+      action: "send",
+      result: {
+        status: "unavailable",
+        unavailableReason: "send_failed",
+      },
+    });
+  });
+
+  it("keeps a pre-provider authorization rejection retryable as send_failed", async () => {
+    const sendEmail = vi.fn(async () => {
+      throw new Error("authorization proof changed");
+    });
+    const newsletterTool = createHostedNewsletterToolWithEmailSend({
+      effectsPort: { sendEmail },
+      newsletterToolPort: { request: vi.fn(async () => preparationResponse) },
       scheduledAutomationAuthority: {
         automationId: "automation_newsletter",
         occurrenceAt: "2026-07-12T13:00:00.000Z",

@@ -94,6 +94,22 @@ test("hosted email send parsing preserves explicit group fanout planning", () =>
   }), /planGroupFanout must be a boolean/u);
 });
 
+test("hosted email send parsing validates the optional newsletter authorization proof", () => {
+  const authorizationProof = "a".repeat(64);
+  assert.equal(parseHostedEmailSendRequest({
+    message: "hello group",
+    newsletterAuthorizationProof: authorizationProof,
+    target: "group_123",
+    targetKind: "group",
+  }).newsletterAuthorizationProof, authorizationProof);
+  assert.throws(() => parseHostedEmailSendRequest({
+    message: "hello group",
+    newsletterAuthorizationProof: "not-a-proof",
+    target: "group_123",
+    targetKind: "group",
+  }), /SHA-256 hex digest/u);
+});
+
 test("hosted email send parsing rejects non-object payloads", () => {
   assert.throws(
     () => parseHostedEmailSendRequest(null),

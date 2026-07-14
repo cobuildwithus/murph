@@ -30,6 +30,12 @@ export const POST = withJsonError(async (request: Request) => {
     payloadText.trim() ? JSON.parse(payloadText) : {},
   );
   const resolved = await readHostedGroupNewsletterEmailRecipients({
+    ...(body.expectedNewsletterAuthorizationProof
+      ? {
+          expectedNewsletterAuthorizationProof:
+            body.expectedNewsletterAuthorizationProof,
+        }
+      : {}),
     groupId: body.groupId,
     runtimeMemberId: memberId,
   });

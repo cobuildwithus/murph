@@ -32,6 +32,7 @@ describe("hosted group newsletter route", () => {
     vi.clearAllMocks();
     mocks.requireHostedCloudflareCallbackRequest.mockResolvedValue("member_runtime");
     mocks.prepareHostedGroupNewsletterParticipants.mockResolvedValue({
+      authorizationProof: "a".repeat(64),
       groupId: "group_123",
       missingEmailParticipants: [
         {
@@ -72,6 +73,25 @@ describe("hosted group newsletter route", () => {
     expect(mocks.prepareHostedGroupNewsletterParticipants).not.toHaveBeenCalled();
   });
 
+  it.each([
+    { includeAuthorizationSnapshot: true },
+    { includeAuthorizationProof: true },
+  ])("rejects one-sided authorization opt-ins without reading participant state", async (
+    authorization,
+  ) => {
+    const response = await route.POST(buildRequest("prepare", authorization));
+
+    expect(response.status).toBe(200);
+    await expect(response.json()).resolves.toEqual({
+      action: "prepare",
+      result: {
+        status: "unavailable",
+        unavailableReason: "newsletter_runner_upgrade_required",
+      },
+    });
+    expect(mocks.prepareHostedGroupNewsletterParticipants).not.toHaveBeenCalled();
+  });
+
   it("rejects legacy read_stats without reading participant state", async () => {
     const response = await route.POST(buildRequest("read_stats"));
 
@@ -87,12 +107,16 @@ describe("hosted group newsletter route", () => {
   });
 
   it("returns the address-free current grant snapshot only when requested", async () => {
-    const response = await route.POST(buildRequest("prepare", true));
+    const response = await route.POST(buildRequest("prepare", {
+      includeAuthorizationProof: true,
+      includeAuthorizationSnapshot: true,
+    }));
 
     expect(response.status).toBe(200);
     await expect(response.json()).resolves.toEqual({
       action: "prepare",
       result: {
+        authorizationProof: "a".repeat(64),
         groupId: "group_123",
         missingEmailParticipants: [
           {
@@ -127,7 +151,10 @@ describe("hosted group newsletter route", () => {
 
 function buildRequest(
   action: "prepare" | "read_stats",
-  includeAuthorizationSnapshot = false,
+  authorization: {
+    includeAuthorizationProof?: true;
+    includeAuthorizationSnapshot?: true;
+  } = {},
 ): Request {
   return new Request(
     "https://web.test/api/internal/hosted-execution/groups/newsletter-tool",
@@ -135,7 +162,7 @@ function buildRequest(
       body: JSON.stringify({
         action,
         groupId: "group_123",
-        ...(includeAuthorizationSnapshot ? { includeAuthorizationSnapshot: true } : {}),
+        ...authorization,
       }),
       headers: { "content-type": "application/json" },
       method: "POST",

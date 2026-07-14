@@ -81,14 +81,19 @@ The single shared email is sent to all **recipients** (`To`: all recipient
 addresses). Its body uses health data only from the **featured** members plus
 eligible group comparisons. The trusted web-side newsletter `prepare` call
 returns member ids, email eligibility, and an address-free snapshot of each
-member's current data grants as exact projection-scope/share-id pairs. Trusted
-assistant runtime code reads the same generic group weekly data used by
-`vault-cli group weekly`, filters the landed projection by those exact pairs,
-and returns current-week facts only for email-eligible members. This remains
-safe while an asynchronous revoke cleanup is still in flight: a stale local
-record's old share id no longer matches the live control-plane grant. The model
-never performs the authorization join and never receives the grant snapshot or
-an unauthorized member's facts.
+member's current data grants as exact projection-scope/share-id pairs, plus a
+SHA-256 proof of the complete address-free participant snapshot. Trusted
+assistant code loads the same generic group weekly projection and vault timezone
+used by `vault-cli group weekly` **before** the final web authorization request.
+That final web resolution derives group binding, membership, active access,
+verified-email identity, and every grant from one late repeatable-read database
+snapshot. After it returns, assistant code synchronously filters the
+already-loaded projection by the exact live pairs and serializes current-week
+facts only for email-eligible members. This ordering remains safe while
+asynchronous revoke cleanup is still in flight: a stale local record's old
+share id no longer matches the final canonical grant result. The model never
+performs the authorization join and receives neither the grant snapshot nor its
+proof.
 
 Authorized newsletter cron turns use an isolated thread with native resume
 disabled, run without the Codex shell tool, and receive the newsletter skill
@@ -97,12 +102,16 @@ committed transcript replay or bypass the filtered result with the unfiltered
 generic CLI reader. Ordinary group-chat turns retain their normal conversation
 thread and generic reader.
 
-Preparation binds the complete participant authorization snapshot to the
-current automation occurrence in runtime memory. Immediately before email
-delivery, the web-side snapshot is resolved again and must match exactly. An
-email-eligibility or health-grant change fails closed without calling the email
-transport, and the cron occurrence remains pending for a fresh
-prepare-and-compose retry.
+Preparation binds the web-owned authorization proof, participant counts, group,
+and current automation occurrence in runtime memory. Send carries that proof
+through the existing hosted-email request to the existing web recipient
+callback. Immediately before MIME construction and provider entry, the callback
+resolves the complete canonical snapshot again and returns addresses only when
+its proof matches. The runtime does not perform a duplicate second preparation
+read. An email-eligibility or health-grant change fails before provider entry as
+`send_failed`, and the cron occurrence remains pending for a fresh
+prepare-and-compose retry. A failed or zero-sent provider result is also
+`send_failed`; `partial_failure` requires at least one successful recipient.
 
 ## Content and Tone
 
@@ -201,9 +210,11 @@ Individual and self-service. A member says "take me off the newsletter" **in the
 - **Newsletter composition boundary.** Scheduled newsletter composition has no
   prior conversation thread or shell capability and receives health facts only
   through the trusted `prepare.result.members` result, filtered by current
-  email eligibility and exact live data-grant ids. Send requires a matching
-  same-occurrence preparation and rechecks the complete authorization snapshot
-  before transport, so revoked facts cannot remain in an already-composed email.
+  email eligibility and exact live data-grant ids resolved after local
+  projection/timezone loading. Send requires a matching same-occurrence
+  preparation and carries its address-free proof to the final web callback,
+  which rechecks the complete authorization snapshot before provider entry, so
+  revoked facts cannot remain in an already-composed email.
 
 ## The Skill
 
@@ -243,22 +254,25 @@ Everything else is reuse: scheduling, health projections, rollup engine, roster,
 
 ## Deployment Concerns
 
-The hosted newsletter callback keeps old `read_stats` and snapshot-less
+The hosted newsletter callback keeps old `read_stats`, snapshot-less, and
+proof-less
 `prepare` requests wire-compatible only so they can fail closed with
 `newsletter_runner_upgrade_required`. A successful `prepare` requires
-`includeAuthorizationSnapshot: true` and returns the address-free live grant
-snapshot. The model-facing schema exposes only `prepare` and `send`; the legacy
-request parser exists only to prevent an ambiguous transport failure during
-rollout.
+both `includeAuthorizationSnapshot: true` and
+`includeAuthorizationProof: true`, and returns the address-free live grant
+snapshot plus its SHA-256 proof. The model-facing schema exposes only `prepare`
+and `send`; the proof stays in trusted runtime/effect state. The legacy request
+parser exists only to prevent an ambiguous transport failure during rollout.
 
 Deploy the fail-closed Vercel/web callback first and keep that version as the
 web rollback floor. Then deploy Cloudflare/runner with
 `container_rollout=immediate`, with no newsletter occurrence between those
-deploys. An old runner in that interval will not receive participant or health
-data, but its cron path predates the current retry contract, so the operational
-schedule gap is required to avoid spending an occurrence without a send. Do
-not roll web back below this authorization-snapshot floor while the current
-runner is active. After both are live, run one
+deploys. An old runner in that interval receives
+`newsletter_runner_upgrade_required`, not participant or health data, because
+it omits the new proof marker. Its cron path predates the current retry contract,
+so the operational schedule gap is required to avoid spending an occurrence
+without a send. Do not roll web back below this authorization-proof floor while
+the current runner is active. After both are live, run one
 preparation call and confirm the trusted web wire contains only member ids,
 email eligibility, and address-free share ids/scope keys, while the model-facing
 runner result contains only the authorized current-week facts and no raw email

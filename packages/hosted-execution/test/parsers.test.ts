@@ -1362,6 +1362,7 @@ describe("parseHostedRuntimeGroupTool", () => {
 });
 
 describe("parseHostedRuntimeNewsletterTool", () => {
+  const AUTHORIZATION_PROOF = "a".repeat(64);
   const PARTICIPANT = {
     authorizedShares: [],
     hasEmail: true,
@@ -1380,12 +1381,19 @@ describe("parseHostedRuntimeNewsletterTool", () => {
     expect(parseHostedRuntimeNewsletterToolRequest({
       action: "prepare",
       groupId: "group_123",
+      includeAuthorizationProof: true,
       includeAuthorizationSnapshot: true,
     })).toEqual({
       action: "prepare",
       groupId: "group_123",
+      includeAuthorizationProof: true,
       includeAuthorizationSnapshot: true,
     });
+    expect(() => parseHostedRuntimeNewsletterToolRequest({
+      action: "prepare",
+      groupId: "group_123",
+      includeAuthorizationProof: false,
+    })).toThrow(/must be true/u);
     expect(() => parseHostedRuntimeNewsletterToolRequest({
       action: "prepare",
       groupId: "group_123",
@@ -1462,6 +1470,17 @@ describe("parseHostedRuntimeNewsletterTool", () => {
       action: "prepare",
       result: {
         groupId: "group_123",
+        missingEmailParticipants: [],
+        participants: [],
+        status: "ok",
+      },
+    })).toThrow(/authorizationProof/u);
+
+    expect(() => parseHostedRuntimeNewsletterToolResponse({
+      action: "prepare",
+      result: {
+        authorizationProof: AUTHORIZATION_PROOF,
+        groupId: "group_123",
         missingEmailParticipants: [{ hasEmail: false, memberId: "member_missing" }],
         participants: [{ hasEmail: true, memberId: "member_123" }],
         status: "ok",
@@ -1477,6 +1496,7 @@ describe("parseHostedRuntimeNewsletterTool", () => {
     expect(parseHostedRuntimeNewsletterToolResponse({
       action: "prepare",
       result: {
+        authorizationProof: AUTHORIZATION_PROOF,
         groupId: "group_123",
         missingEmailParticipants: [],
         participants: [authorizedParticipant],
@@ -1485,6 +1505,7 @@ describe("parseHostedRuntimeNewsletterTool", () => {
     })).toEqual({
       action: "prepare",
       result: {
+        authorizationProof: AUTHORIZATION_PROOF,
         groupId: "group_123",
         missingEmailParticipants: [],
         participants: [authorizedParticipant],
@@ -1510,6 +1531,7 @@ describe("parseHostedRuntimeNewsletterTool", () => {
       parseHostedRuntimeNewsletterToolResponse({
         action: "prepare",
         result: {
+          authorizationProof: AUTHORIZATION_PROOF,
           groupId: "group_123",
           missingEmailParticipants: [],
           participants: [{ ...PARTICIPANT, email: "alex@example.test" }],
@@ -1530,6 +1552,7 @@ describe("parseHostedRuntimeNewsletterTool", () => {
     expect(() => parseHostedRuntimeNewsletterToolResponse({
       action: "prepare",
       result: {
+        authorizationProof: AUTHORIZATION_PROOF,
         groupId: "group_123",
         missingEmailParticipants: [],
         participants: [participant],
@@ -1540,6 +1563,7 @@ describe("parseHostedRuntimeNewsletterTool", () => {
     expect(() => parseHostedRuntimeNewsletterToolResponse({
       action: "prepare",
       result: {
+        authorizationProof: AUTHORIZATION_PROOF,
         groupId: "group_123",
         missingEmailParticipants: [],
         participants: Array.from({ length: 101 }, () => PARTICIPANT),

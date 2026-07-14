@@ -2901,12 +2901,25 @@ async function executeNewsletterTool(input: {
     const scheduledAutomationAuthority =
       input.hostedToolContext?.currentScheduledAutomationAuthority?.() ??
       null
+    let newsletterWeeklySource: NewsletterWeeklySource | null = null
+    if (input.request.action === 'prepare') {
+      newsletterWeeklySource = await readNewsletterWeeklySource({
+        referenceAt: scheduledAutomationAuthority?.occurrenceAt ?? null,
+        vaultRoot: input.vaultRoot,
+      })
+      if (newsletterWeeklySource === null) {
+        return groupSharedProjectionUnavailableResult(input.request.action)
+      }
+    }
     const request: HostedRuntimeNewsletterToolRequest =
       input.request.action === 'send' || input.request.action === 'prepare'
         ? {
             ...input.request,
             ...(input.request.action === 'prepare'
-              ? { includeAuthorizationSnapshot: true as const }
+              ? {
+                  includeAuthorizationProof: true as const,
+                  includeAuthorizationSnapshot: true as const,
+                }
               : {}),
             scheduledAutomationAuthority,
           }
@@ -2920,14 +2933,14 @@ async function executeNewsletterTool(input: {
       return toolTextResult(toolSucceeded, safeToolPayloadText(result))
     }
     const referenceAt = scheduledAutomationAuthority?.occurrenceAt ?? null
-    const members = await readEligibleNewsletterWeeklyMembers({
-      participants: result.result.participants,
-      referenceAt,
-      vaultRoot: input.vaultRoot,
-    })
-    if (members === null) {
+    if (newsletterWeeklySource === null) {
       return groupSharedProjectionUnavailableResult(input.request.action)
     }
+    const members = buildEligibleNewsletterWeeklyMembers({
+      participants: result.result.participants,
+      referenceAt,
+      source: newsletterWeeklySource,
+    })
 
     return toolTextResult(true, safeToolPayloadText({
       action: 'prepare',
@@ -2964,13 +2977,20 @@ async function isGroupSharedProjectionAvailable(vaultRoot: string): Promise<bool
   return read.status === 'loaded' || read.status === 'empty'
 }
 
-async function readEligibleNewsletterWeeklyMembers(input: {
-  participants: readonly HostedRuntimeNewsletterParticipantSummary[]
+type NewsletterWeeklySource =
+  | { status: 'empty' }
+  | {
+      status: 'loaded'
+      store: SharedVaultShareProjectionsFile
+      timeZone: string
+    }
+
+async function readNewsletterWeeklySource(input: {
   referenceAt: string | null
   vaultRoot: string | null
-}): Promise<SharedGroupWeeklyMember[] | null> {
+}): Promise<NewsletterWeeklySource | null> {
   if (!input.referenceAt || !input.vaultRoot) {
-    return []
+    return { status: 'empty' }
   }
 
   const read = await readSharedVaultShareProjectionStore(input.vaultRoot)
@@ -2978,7 +2998,7 @@ async function readEligibleNewsletterWeeklyMembers(input: {
     return null
   }
   if (read.status === 'empty') {
-    return []
+    return { status: 'empty' }
   }
 
   let timeZone: string
@@ -2989,14 +3009,26 @@ async function readEligibleNewsletterWeeklyMembers(input: {
     return null
   }
 
+  return { status: 'loaded', store: read.store, timeZone }
+}
+
+function buildEligibleNewsletterWeeklyMembers(input: {
+  participants: readonly HostedRuntimeNewsletterParticipantSummary[]
+  referenceAt: string | null
+  source: NewsletterWeeklySource
+}): SharedGroupWeeklyMember[] {
+  if (!input.referenceAt || input.source.status === 'empty') {
+    return []
+  }
+
   const authorizedStore = filterNewsletterAuthorizedProjectionStore({
     participants: input.participants,
-    store: read.store,
+    store: input.source.store,
   })
   return buildSharedGroupWeeklyMembers({
     members: flattenSharedVaultShareProjectionStore(authorizedStore),
     referenceAt: input.referenceAt,
-    timeZone,
+    timeZone: input.source.timeZone,
   })
 }
 

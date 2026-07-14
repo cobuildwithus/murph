@@ -23,7 +23,8 @@ vi.mock("@/src/lib/hosted-mailbox/runtime-access", () => ({
   hasHostedRuntimeActiveAccess: mocks.hasHostedRuntimeActiveAccess,
 }));
 
-vi.mock("@/src/lib/hosted-onboarding/member-access", () => ({
+vi.mock("@/src/lib/hosted-onboarding/member-access", async (importOriginal) => ({
+  ...await importOriginal<typeof import("@/src/lib/hosted-onboarding/member-access")>(),
   readActiveHostedMemberAccess: mocks.readActiveHostedMemberAccess,
 }));
 
@@ -71,9 +72,7 @@ describe("hosted group newsletter participants", () => {
       }
 
       return {
-        verifiedEmail: {
-          address: `${input.memberId}@example.com`,
-        },
+        verifiedEmail: verifiedEmailFact(`${input.memberId}@example.com`),
       };
     });
   });
@@ -89,6 +88,7 @@ describe("hosted group newsletter participants", () => {
     });
 
     expect(participants).toEqual({
+      authorizationProof: expect.stringMatching(/^[0-9a-f]{64}$/u),
       groupId: "hgrp_123",
       missingEmailParticipants: [
         {
@@ -176,6 +176,7 @@ describe("hosted group newsletter participants", () => {
     });
 
     expect(participants).toEqual({
+      authorizationProof: expect.stringMatching(/^[0-9a-f]{64}$/u),
       groupId: "hgrp_123",
       missingEmailParticipants: [],
       participants: [
@@ -192,6 +193,192 @@ describe("hosted group newsletter participants", () => {
       ],
       status: "ok",
     });
+  });
+
+  it.each([
+    {
+      expectedParticipants: [
+        {
+          authorizedShares: [],
+          hasEmail: true,
+          memberId: "member_active_with_email",
+        },
+      ],
+      finalGrants: [
+        {
+          grantorMemberId: "member_active_with_email",
+          id: "share_email_ready",
+          projectionKind: "group-email.v0",
+          projectionScopeKey: "group-email.v0",
+        },
+      ],
+      revokeKind: "health share",
+    },
+    {
+      expectedParticipants: [],
+      finalGrants: [
+        {
+          grantorMemberId: "member_active_with_email",
+          id: "share_steps_current",
+          projectionKind: "steps-days.v0",
+          projectionScopeKey: "steps-days.v0",
+        },
+      ],
+      revokeKind: "email grant",
+    },
+  ])("uses the final canonical snapshot after a $revokeKind revoke during preparation", async ({
+    expectedParticipants,
+    finalGrants,
+  }) => {
+    const prisma = createPrismaMock();
+    const initialGrants = [
+      {
+        grantorMemberId: "member_active_with_email",
+        id: "share_email_ready",
+        projectionKind: "group-email.v0",
+        projectionScopeKey: "group-email.v0",
+      },
+      {
+        grantorMemberId: "member_active_with_email",
+        id: "share_steps_current",
+        projectionKind: "steps-days.v0",
+        projectionScopeKey: "steps-days.v0",
+      },
+    ];
+    prisma.hostedVaultShare.findMany
+      .mockResolvedValueOnce(initialGrants)
+      .mockResolvedValueOnce(finalGrants);
+    mocks.getPrisma.mockReturnValue(prisma);
+    mocks.readHostedMemberEmailAuthorization.mockResolvedValue({
+      verifiedEmail: verifiedEmailFact("member@example.test"),
+    });
+
+    const result = await prepareHostedGroupNewsletterParticipants({
+      groupId: "hgrp_123",
+      runtimeMemberId: "group_runtime_member",
+    });
+
+    expect(result).toEqual({
+      authorizationProof: expect.stringMatching(/^[0-9a-f]{64}$/u),
+      groupId: "hgrp_123",
+      missingEmailParticipants: [],
+      participants: expectedParticipants,
+      status: "ok",
+    });
+    expect(prisma.hostedVaultShare.findMany).toHaveBeenCalledTimes(2);
+  });
+
+  it.each([
+    {
+      finalGrants: [
+        {
+          grantorMemberId: "member_active_with_email",
+          id: "share_email_ready",
+          projectionKind: "group-email.v0",
+          projectionScopeKey: "group-email.v0",
+        },
+      ],
+      revokeKind: "health share",
+    },
+    {
+      finalGrants: [
+        {
+          grantorMemberId: "member_active_with_email",
+          id: "share_steps_current",
+          projectionKind: "steps-days.v0",
+          projectionScopeKey: "steps-days.v0",
+        },
+      ],
+      revokeKind: "email grant",
+    },
+  ])("rejects final recipients after a $revokeKind revoke changes the prepared proof", async ({
+    finalGrants,
+  }) => {
+    const prisma = createPrismaMock();
+    const preparedGrants = [
+      {
+        grantorMemberId: "member_active_with_email",
+        id: "share_email_ready",
+        projectionKind: "group-email.v0",
+        projectionScopeKey: "group-email.v0",
+      },
+      {
+        grantorMemberId: "member_active_with_email",
+        id: "share_steps_current",
+        projectionKind: "steps-days.v0",
+        projectionScopeKey: "steps-days.v0",
+      },
+    ];
+    prisma.hostedVaultShare.findMany.mockResolvedValue(preparedGrants);
+    mocks.getPrisma.mockReturnValue(prisma);
+    const prepared = await prepareHostedGroupNewsletterParticipants({
+      groupId: "hgrp_123",
+      runtimeMemberId: "group_runtime_member",
+    });
+    if (prepared.status !== "ok") {
+      throw new Error("Expected newsletter preparation.");
+    }
+    prisma.hostedVaultShare.findMany.mockResolvedValue(finalGrants);
+
+    await expect(readHostedGroupNewsletterEmailRecipients({
+      expectedNewsletterAuthorizationProof: prepared.authorizationProof,
+      groupId: "hgrp_123",
+      runtimeMemberId: "group_runtime_member",
+    })).resolves.toEqual({
+      status: "unavailable",
+      unavailableReason: "newsletter_authorization_changed",
+    });
+  });
+
+  it.each([
+    {
+      changedSnapshot: {
+        newsletterSuspendedMemberIds: [
+          "member_active_with_email",
+          "member_suspended",
+        ],
+      },
+      changeKind: "member suspension",
+    },
+    {
+      changedSnapshot: {
+        newsletterEmailLookupKeyByMember: {
+          member_active_with_email: "changed-verified-email-lookup",
+        },
+      },
+      changeKind: "verified-email mutation",
+    },
+  ])("rejects final recipients after a $changeKind during snapshot assembly", async ({
+    changedSnapshot,
+  }) => {
+    const preparedPrisma = createPrismaMock();
+    mocks.getPrisma.mockReturnValue(preparedPrisma);
+    const prepared = await prepareHostedGroupNewsletterParticipants({
+      groupId: "hgrp_123",
+      runtimeMemberId: "group_runtime_member",
+    });
+    if (prepared.status !== "ok") {
+      throw new Error("Expected newsletter preparation.");
+    }
+
+    const changedPrisma = createPrismaMock(changedSnapshot);
+    mocks.getPrisma.mockReturnValue(changedPrisma);
+
+    await expect(readHostedGroupNewsletterEmailRecipients({
+      expectedNewsletterAuthorizationProof: prepared.authorizationProof,
+      groupId: "hgrp_123",
+      runtimeMemberId: "group_runtime_member",
+    })).resolves.toEqual({
+      status: "unavailable",
+      unavailableReason: "newsletter_authorization_changed",
+    });
+    expect(changedPrisma.$transaction).toHaveBeenCalledWith(
+      expect.any(Function),
+      {
+        isolationLevel: "RepeatableRead",
+        maxWait: 5_000,
+      },
+    );
   });
 
   it("reuses the member plus group idempotency key on repeat stats reads without a second signal", async () => {
@@ -369,8 +556,11 @@ describe("hosted group newsletter participants", () => {
   });
 
   it("does not enqueue private email nudges for participants with verified email", async () => {
+    mocks.getPrisma.mockReturnValue(createPrismaMock({
+      newsletterMissingEmailMemberIds: [],
+    }));
     mocks.readHostedMemberEmailAuthorization.mockResolvedValue({
-      verifiedEmail: { address: "member@example.test" },
+      verifiedEmail: verifiedEmailFact("member@example.test"),
     });
 
     const participants = await prepareHostedGroupNewsletterParticipants({
@@ -534,16 +724,44 @@ describe("hosted group newsletter participants", () => {
   });
 });
 
+function verifiedEmailFact(address: string) {
+  return {
+    address,
+    lookupKey: "verified-email-lookup",
+    verifiedAt: new Date("2026-07-01T12:00:00.000Z"),
+  };
+}
+
+function newsletterMemberAccessState(input: {
+  memberId: string;
+  suspended: boolean;
+}) {
+  return {
+    accountGroupMemberships: [],
+    billingStatus: "active" as const,
+    id: input.memberId,
+    suspendedAt: input.suspended
+      ? new Date("2026-07-13T12:00:00.000Z")
+      : null,
+    threadContainer: null,
+  };
+}
+
 function createPrismaMock(input?: {
   emailGrant?: boolean;
   groupRuntimeMemberId?: string | null;
+  newsletterEmailLookupKeyByMember?: Readonly<Record<string, string | null>>;
+  newsletterMissingEmailMemberIds?: readonly string[];
+  newsletterSuspendedMemberIds?: readonly string[];
 }) {
   const prisma = {
     $transaction: vi.fn(async (callback: (tx: unknown) => Promise<unknown>) =>
       callback(prisma)
     ),
     hostedGroup: {
-      findFirst: vi.fn(async (args?: { select?: { runtimeMemberId?: boolean } }) => {
+      findFirst: vi.fn(async (args?: {
+        select?: { runtimeMember?: unknown; runtimeMemberId?: boolean };
+      }) => {
         if (args?.select?.runtimeMemberId) {
           return {
             displayName: "Sunday group",
@@ -551,6 +769,48 @@ function createPrismaMock(input?: {
             runtimeMemberId: input?.groupRuntimeMemberId === undefined
               ? "group_runtime_member"
               : input.groupRuntimeMemberId,
+          };
+        }
+        if (args?.select?.runtimeMember) {
+          const grants = await prisma.hostedVaultShare.findMany();
+          const suspendedMemberIds = new Set(
+            input?.newsletterSuspendedMemberIds ?? ["member_suspended"],
+          );
+          const missingEmailMemberIds = new Set(
+            input?.newsletterMissingEmailMemberIds ?? ["member_active_missing_email"],
+          );
+          const memberIds = [
+            "member_active_with_email",
+            "member_suspended",
+            "member_active_missing_email",
+          ];
+          return {
+            displayName: "Sunday group",
+            id: "hgrp_123",
+            members: memberIds.map((memberId) => ({
+              member: {
+                ...newsletterMemberAccessState({
+                  memberId,
+                  suspended: suspendedMemberIds.has(memberId),
+                }),
+                emailAuthorization: missingEmailMemberIds.has(memberId)
+                  ? null
+                  : {
+                      verifiedEmailLookupKey:
+                        input?.newsletterEmailLookupKeyByMember?.[memberId]
+                        ?? verifiedEmailFact(`${memberId}@example.com`).lookupKey,
+                      verifiedEmailVerifiedAt:
+                        verifiedEmailFact(`${memberId}@example.com`).verifiedAt,
+                    },
+                vaultSharesGranted: grants.filter((grant) =>
+                  grant.grantorMemberId === memberId
+                ),
+              },
+            })),
+            runtimeMember: newsletterMemberAccessState({
+              memberId: "group_runtime_member",
+              suspended: false,
+            }),
           };
         }
 

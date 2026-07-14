@@ -355,9 +355,11 @@ export function createHostedNewsletterToolWithEmailSend(input: {
   scheduledAutomationAuthority?: HostedRuntimeNewsletterScheduledAuthority | null;
 }): NonNullable<HostedRuntimePlatform["newsletterToolPort"]> {
   let preparedAuthorization: {
+    authorizationProof: string;
     authority: HostedRuntimeNewsletterScheduledAuthority;
-    snapshot: string;
     groupId: string;
+    participantCount: number;
+    skippedNoEmailMemberIds: string[];
   } | null = null;
 
   return {
@@ -370,19 +372,23 @@ export function createHostedNewsletterToolWithEmailSend(input: {
         const result = await input.newsletterToolPort.request({
           action: "prepare",
           groupId: request.groupId,
+          includeAuthorizationProof: true,
           includeAuthorizationSnapshot: true,
         });
         const authority = input.scheduledAutomationAuthority
           ?? request.scheduledAutomationAuthority
           ?? null;
         if (authority && result.action === "prepare" && result.result.status === "ok") {
-          const snapshot = buildNewsletterAuthorizationSnapshot(
-            result.result.participants,
-          );
+          const emailParticipants = result.result.participants
+            .filter((participant) => participant.hasEmail);
           preparedAuthorization = {
+            authorizationProof: result.result.authorizationProof,
             authority,
             groupId: request.groupId,
-            snapshot,
+            participantCount: emailParticipants.length,
+            skippedNoEmailMemberIds: result.result.participants
+              .filter((participant) => !participant.hasEmail)
+              .map((participant) => participant.memberId),
           };
         }
         return result;
@@ -419,49 +425,8 @@ export function createHostedNewsletterToolWithEmailSend(input: {
         };
       }
 
-      const participants = await input.newsletterToolPort.request({
-        action: "prepare",
-        groupId: request.groupId,
-        includeAuthorizationSnapshot: true,
-      });
-      if (participants.action !== "prepare") {
-        return {
-          action: "send",
-          result: {
-            status: "unavailable",
-            unavailableReason: "newsletter_preparation_unavailable",
-          },
-        };
-      }
-      if (participants.result.status !== "ok") {
-        return {
-          action: "send",
-          result: {
-            status: "unavailable",
-            unavailableReason: participants.result.unavailableReason,
-          },
-        };
-      }
-
-      const currentAuthorizationSnapshot = buildNewsletterAuthorizationSnapshot(
-        participants.result.participants,
-      );
-      if (preparation.snapshot !== currentAuthorizationSnapshot) {
-        return {
-          action: "send",
-          result: {
-            status: "unavailable",
-            unavailableReason: "newsletter_authorization_changed",
-          },
-        };
-      }
-
-      const participantCount = participants.result.participants
-        .filter((participant) => participant.hasEmail)
-        .length;
-      const skippedNoEmailMemberIds = participants.result.participants
-        .filter((participant) => !participant.hasEmail)
-        .map((participant) => participant.memberId);
+      const participantCount = preparation.participantCount;
+      const skippedNoEmailMemberIds = preparation.skippedNoEmailMemberIds;
       if (participantCount === 0) {
         return {
           action: "send",
@@ -482,6 +447,7 @@ export function createHostedNewsletterToolWithEmailSend(input: {
             scheduledAutomationAuthority,
           }),
           message: request.text ?? "Open this email in an HTML-capable mail client.",
+          newsletterAuthorizationProof: preparation.authorizationProof,
           subject: request.subject,
           target: request.groupId,
           targetKind: "group",
@@ -496,26 +462,23 @@ export function createHostedNewsletterToolWithEmailSend(input: {
         };
       }
 
-      if (emailResult?.delivery?.failedCount && emailResult.delivery.failedCount > 0) {
-        if (
-          emailResult.delivery.sentCount === 0 ||
-          emailResult.delivery.status === "failed"
-        ) {
-          return {
-            action: "send",
-            result: {
-              status: "unavailable",
-              unavailableReason: "send_failed",
-            },
-          };
-        }
-
+      const delivery = emailResult?.delivery ?? null;
+      if (delivery && (delivery.status === "failed" || delivery.sentCount === 0)) {
         return {
           action: "send",
           result: {
-            failedRecipientCount: emailResult.delivery.failedCount,
+            status: "unavailable",
+            unavailableReason: "send_failed",
+          },
+        };
+      }
+      if (delivery && (delivery.status === "partial_failure" || delivery.failedCount > 0)) {
+        return {
+          action: "send",
+          result: {
+            failedRecipientCount: delivery.failedCount,
             participantCount,
-            sentRecipientCount: emailResult.delivery.sentCount,
+            sentRecipientCount: delivery.sentCount,
             skippedNoEmailMemberIds,
             status: "partial_failure",
           },
@@ -532,27 +495,6 @@ export function createHostedNewsletterToolWithEmailSend(input: {
       };
     },
   };
-}
-
-function buildNewsletterAuthorizationSnapshot(
-  participants: readonly {
-    authorizedShares: readonly { projectionScopeKey: string; shareId: string }[];
-    hasEmail: boolean;
-    memberId: string;
-  }[],
-): string {
-  return JSON.stringify(participants
-    .map((participant) => ({
-      authorizedShares: [...participant.authorizedShares]
-        .map(({ projectionScopeKey, shareId }) => ({ projectionScopeKey, shareId }))
-        .sort((left, right) =>
-          left.projectionScopeKey.localeCompare(right.projectionScopeKey)
-          || left.shareId.localeCompare(right.shareId),
-        ),
-      hasEmail: participant.hasEmail,
-      memberId: participant.memberId,
-    }))
-    .sort((left, right) => left.memberId.localeCompare(right.memberId)));
 }
 
 function buildHostedNewsletterEmailIdempotencyKey(
