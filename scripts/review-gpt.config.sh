@@ -122,6 +122,10 @@ fi
 managed_browser_user_data_dir="${managed_browser_user_data_dir:-$(review_gpt_browser_lane_data_dir "$review_gpt_selected_browser_lane")}"
 managed_browser_profile="${managed_browser_profile:-Default}"
 managed_browser_port="${managed_browser_port:-$review_gpt_selected_browser_port}"
+# Keep response-polling timers reliable without forcing every renderer and
+# occluded lane window to run at foreground priority. Set this to unthrottled
+# only when a specific browser version has a proven background-capture stall.
+managed_browser_background_mode="${managed_browser_background_mode:-balanced}"
 export REVIEW_GPT_SELECTED_BROWSER_LANE="$review_gpt_selected_browser_lane"
 
 name_prefix="murph-$review_gpt_selected_browser_lane-chatgpt-audit"
