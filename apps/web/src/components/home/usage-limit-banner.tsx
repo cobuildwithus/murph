@@ -1,11 +1,13 @@
 import { ArrowRight } from "lucide-react";
 import Link from "next/link";
+import type { HostedPlanUsageRecommendedAction } from "@murphai/hosted-execution/plan-usage";
 
 import type { HostedAiUsageGateNoticeCode } from "@/src/lib/hosted-execution/usage-allowance";
 
 interface UsageLimitBannerProps {
   noticeCode: HostedAiUsageGateNoticeCode;
   now?: Date | null;
+  recommendedAction?: HostedPlanUsageRecommendedAction | null;
   resetAt?: Date | null;
 }
 
@@ -20,45 +22,49 @@ const MS_PER_DAY = 24 * 60 * 60 * 1000;
 const usageLimitBannerCopy: Record<
   Exclude<HostedAiUsageGateNoticeCode, "thread_usage_limit_reached">,
   {
-    action: string;
     body: string;
     title: string;
   }
 > = {
   edge_usage_limit_reached: {
-    action: "Review settings",
     body: "Murph keeps replying. Switch to Luna in Settings to use less AI on future turns.",
     title: "You've used 100% of this month's included Edge usage",
   },
   family_usage_limit_reached: {
-    action: "Review settings",
     body: "Murph keeps replying. Switch to Luna in Settings to use less AI on future turns.",
     title: "Your Family has used 100% of this month's included usage",
   },
   pulse_upgrade_edge: {
-    action: "Review settings",
-    body: "Murph keeps replying. Switch to Luna in Settings to use less AI, or review Edge for more included usage.",
+    body: "Murph keeps replying. Switch to Luna in Settings to use less AI on future turns.",
     title: "You've used 100% of this month's included Pulse usage",
   },
   trial_conversion_pending: {
-    action: "Open billing",
-    body: "Start Pulse to keep Murph replying.",
+    body: "Your included trial access is no longer active.",
     title: "Your trial just ended",
   },
   trial_usage_limit_reached: {
-    action: "Review settings",
-    body: "Murph keeps replying. Switch to Luna in Settings to use less AI, or review plan options when you're ready.",
+    body: "Murph keeps replying. Switch to Luna in Settings to use less AI on future turns.",
     title: "You've used 100% of your included trial usage",
   },
 };
 
-export function UsageLimitBanner({ noticeCode, now, resetAt }: UsageLimitBannerProps) {
+export function UsageLimitBanner({
+  noticeCode,
+  now,
+  recommendedAction,
+  resetAt,
+}: UsageLimitBannerProps) {
   if (noticeCode === "thread_usage_limit_reached") {
     return null;
   }
 
   const copy = usageLimitBannerCopy[noticeCode] ?? usageLimitBannerCopy.pulse_upgrade_edge;
   const resetLabel = formatUsageResetCountdown({ noticeCode, now, resetAt });
+  const actionBody = recommendedAction?.kind === "start_pulse"
+    ? " You can start Pulse when you're ready."
+    : recommendedAction?.kind === "upgrade_edge"
+      ? " Edge offers more included usage."
+      : "";
 
   return (
     <section
@@ -75,17 +81,19 @@ export function UsageLimitBanner({ noticeCode, now, resetAt }: UsageLimitBannerP
           {copy.title}
         </h2>
         <p className="mt-1 max-w-xl text-sm leading-relaxed text-pretty text-muted-foreground">
-          {copy.body}
+          {copy.body}{actionBody}
         </p>
       </div>
 
-      <Link
-        href="/settings"
-        className="inline-flex shrink-0 items-center gap-2 self-start rounded-2xl bg-[#5a6e32] px-6 py-3 text-sm font-medium text-white transition-colors duration-200 hover:bg-[#7a8c6e] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[#7a8c6e] focus-visible:ring-offset-2 sm:self-center"
-      >
-        {copy.action}
-        <ArrowRight className="size-4" aria-hidden="true" />
-      </Link>
+      {recommendedAction ? (
+        <Link
+          href={recommendedAction.url}
+          className="inline-flex shrink-0 items-center gap-2 self-start rounded-2xl bg-[#5a6e32] px-6 py-3 text-sm font-medium text-white transition-colors duration-200 hover:bg-[#7a8c6e] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[#7a8c6e] focus-visible:ring-offset-2 sm:self-center"
+        >
+          {recommendedAction.label}
+          <ArrowRight className="size-4" aria-hidden="true" />
+        </Link>
+      ) : null}
     </section>
   );
 }

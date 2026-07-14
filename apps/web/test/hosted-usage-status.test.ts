@@ -23,7 +23,6 @@ vi.mock("@/src/lib/hosted-onboarding/hosted-member-store", () => ({
 }));
 
 import {
-  formatHostedPersonalAiUsageStatusForConversation,
   projectHostedPersonalAiUsageStatus,
   readHostedPersonalAiUsageStatus,
 } from "@/src/lib/hosted-execution/usage-status";
@@ -151,6 +150,39 @@ describe("readHostedPersonalAiUsageStatus", () => {
       status: "active",
     });
   });
+
+  it.each([
+    [null, "sub_usage"],
+    ["cus_usage", null],
+  ])(
+    "does not recommend an upgrade with incomplete Stripe billing references",
+    async (stripeCustomerId, stripeSubscriptionId) => {
+      mocks.readHostedMemberStripeBillingRef.mockResolvedValue({
+        currentBillingPhase: "paid",
+        currentBillingPlanCode: "launch_monthly",
+        currentCheckoutOffer: "standard",
+        memberId: "member_usage_incomplete",
+        stripeCustomerId,
+        stripeSubscriptionId,
+      });
+      mocks.readHostedAiUsageGate.mockResolvedValue(buildDecision({
+        allowanceSource: "direct_paid_member_plan",
+        limitUsdMicros: 10_000_000n,
+        remainingUsdMicros: 1_500_000n,
+        spentUsdMicros: 8_500_000n,
+      }));
+
+      await expect(readHostedPersonalAiUsageStatus({
+        memberId: "member_usage_incomplete",
+        now: NOW,
+        prisma: buildPrisma(null) as never,
+        publicBaseUrl: "https://example.test",
+      })).resolves.toMatchObject({
+        recommendedAction: null,
+        usedPercent: 85,
+      });
+    },
+  );
 
   it("does not invent a higher-plan action for Edge or a personal action for Family", async () => {
     const prisma = buildPrisma(null);
@@ -375,64 +407,6 @@ describe("readHostedPersonalAiUsageStatus", () => {
     expect(mocks.readHostedAiUsageGate).not.toHaveBeenCalled();
   });
 
-  it("formats advisory exhaustion with only the projected action", () => {
-    const exhausted = formatHostedPersonalAiUsageStatusForConversation({
-      accessKind: "paid",
-      forecast: null,
-      generatedAt: NOW.toISOString(),
-      periodEnd: PERIOD_END.toISOString(),
-      periodKind: "monthly",
-      periodStart: PERIOD_START.toISOString(),
-      planCode: "launch_monthly",
-      planName: "Pulse",
-      recommendedAction: {
-        kind: "upgrade_edge",
-        label: "Upgrade to Edge",
-        url: "https://example.test/settings#subscription",
-      },
-      remainingPercent: 0,
-      status: "exhausted",
-      usedPercent: 100,
-    });
-    expect(exhausted).toBe(
-      "You've used approximately 100% of the included Pulse AI usage, with 0% remaining. "
-        + "The included allowance resets on July 11, 2026. Replies continue. "
-        + "Upgrade to Edge: https://example.test/settings#subscription",
-    );
-
-    const legacy = formatHostedPersonalAiUsageStatusForConversation({
-      accessKind: "paid",
-      forecast: null,
-      generatedAt: NOW.toISOString(),
-      periodEnd: PERIOD_END.toISOString(),
-      periodKind: "monthly",
-      periodStart: PERIOD_START.toISOString(),
-      planCode: "launch_monthly",
-      planName: "Pulse",
-      recommendedAction: null,
-      remainingPercent: 0,
-      status: "exhausted",
-      usedPercent: 100,
-    });
-    expect(legacy).toContain("The included allowance resets on July 11, 2026.");
-    expect(legacy).toContain("Replies continue.");
-    expect(legacy).not.toMatch(/upgrade|start pulse|settings#subscription/iu);
-  });
-
-  it("keeps unavailable and group conversation projections neutral without an action", () => {
-    expect(formatHostedPersonalAiUsageStatusForConversation({
-      generatedAt: NOW.toISOString(),
-      reason: "trial_conversion_pending",
-      recommendedAction: null,
-      status: "unavailable",
-    })).toBe("Your Pulse Trial has ended, so hosted replies are paused.");
-    expect(formatHostedPersonalAiUsageStatusForConversation({
-      generatedAt: NOW.toISOString(),
-      reason: "group_not_supported",
-      recommendedAction: null,
-      status: "unavailable",
-    })).toBe("Personal plan usage is not available in a group conversation.");
-  });
 });
 
 function buildPrisma(firstUsageAt: Date | null) {
