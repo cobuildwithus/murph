@@ -98,7 +98,7 @@ export function createWorkspaceSnapshotSessionService(input: {
       if (!workspaceSnapshotUploadSessionsMatchExactly(currentSession, expectedSession)) {
         return false;
       }
-      if (!await ownsWorkspaceSnapshotSessionFence(input.stateStore, expectedSession)) {
+      if (!await ownsWorkspaceSnapshotSessionOwner(input.stateStore, expectedSession)) {
         return false;
       }
       await input.state.storage.put(
@@ -121,7 +121,7 @@ export function createWorkspaceSnapshotSessionService(input: {
       const previousCurrent = await input.state.storage.get<unknown>(
         workspaceSnapshotUploadSessionCurrentStorageKey(),
       );
-      if (!await ownsWorkspaceSnapshotSessionFence(input.stateStore, session)) {
+      if (!await ownsWorkspaceSnapshotSessionOwner(input.stateStore, session)) {
         return null;
       }
       if (previousCurrent !== undefined) {
@@ -147,7 +147,7 @@ export function createWorkspaceSnapshotSessionService(input: {
       }
       if (
         previousCurrent !== undefined
-        && !await ownsWorkspaceSnapshotSessionFence(input.stateStore, session)
+        && !await ownsWorkspaceSnapshotSessionOwner(input.stateStore, session)
       ) {
         return null;
       }
@@ -331,7 +331,7 @@ export function createWorkspaceSnapshotSessionService(input: {
   return service;
 }
 
-async function ownsWorkspaceSnapshotSessionFence(
+async function ownsWorkspaceSnapshotSessionOwner(
   stateStore: WorkspaceSnapshotSessionStateStore,
   session: HostedWorkspaceSnapshotUploadSession,
 ): Promise<boolean> {
@@ -340,8 +340,7 @@ async function ownsWorkspaceSnapshotSessionFence(
     generation: session.leaseGeneration,
     userId: session.userId,
   });
-  return writeFence.owns
-    && writeFence.record?.writeFence?.workspaceVersion === session.workspaceVersion;
+  return writeFence.owns;
 }
 
 function workspaceSnapshotUploadSessionsMatchExactly(
