@@ -1,5 +1,5 @@
 {
-  "catalogHash": "sha256:2fdd6520757fb19f9d8c68180137fdfe1c48b492ed77bec5cfd339f539e1b885",
+  "catalogHash": "sha256:f7060323221cc5cb7bbcfdbec4f12ec9be05ee959d65356b7fe552dd84c798f7",
   "generatedAt": null,
   "items": [
     {
@@ -1481,7 +1481,18 @@
       ],
       "equipment": [],
       "id": "EX780",
-      "images": [],
+      "images": [
+        {
+          "alt": "The exerciser holds a split squat with the front foot flat.",
+          "step": "Hold split squat",
+          "url": "https://imagedelivery.net/TDuhqfLDl0Fb8RGwGw6mYw/265f9131-1be9-4f6d-ef7f-c5ed958c4500/public"
+        },
+        {
+          "alt": "The exerciser lifts the front heel while holding a split squat.",
+          "step": "Lift front heel",
+          "url": "https://imagedelivery.net/TDuhqfLDl0Fb8RGwGw6mYw/f1a19ae3-ca31-4762-5b9c-dbc5bf695700/public"
+        }
+      ],
       "kind": "exercise",
       "level": "advanced",
       "modality": "Strength",
@@ -1517,7 +1528,18 @@
       ],
       "equipment": [],
       "id": "EX781",
-      "images": [],
+      "images": [
+        {
+          "alt": "The exerciser stands tall in a split stance.",
+          "step": "Set split stance",
+          "url": "https://imagedelivery.net/TDuhqfLDl0Fb8RGwGw6mYw/b66a5e63-5acf-4fa9-799a-e95d7f9aaa00/public"
+        },
+        {
+          "alt": "The exerciser lowers into a split squat with an upright torso.",
+          "step": "Lower for three seconds",
+          "url": "https://imagedelivery.net/TDuhqfLDl0Fb8RGwGw6mYw/477f24ec-895f-4473-de9f-ae809e26ee00/public"
+        }
+      ],
       "kind": "exercise",
       "level": "intermediate",
       "modality": "Strength",
@@ -1554,7 +1576,23 @@
         "Book or wedge"
       ],
       "id": "EX782",
-      "images": [],
+      "images": [
+        {
+          "alt": "The exerciser stands with heels elevated on a wedge and feet narrow.",
+          "step": "Elevate heels",
+          "url": "https://imagedelivery.net/TDuhqfLDl0Fb8RGwGw6mYw/0c1f235b-dd93-462a-1a23-ec4593972f00/public"
+        },
+        {
+          "alt": "The exerciser lowers halfway into a heel-elevated cyclist squat.",
+          "step": "Lower halfway",
+          "url": "https://imagedelivery.net/TDuhqfLDl0Fb8RGwGw6mYw/d0975b65-43db-4ab2-ea48-d0ee828d4e00/public"
+        },
+        {
+          "alt": "The exerciser holds the deep position of a cyclist squat.",
+          "step": "Reach squat depth",
+          "url": "https://imagedelivery.net/TDuhqfLDl0Fb8RGwGw6mYw/5f75b436-9844-4154-021b-a4067244a500/public"
+        }
+      ],
       "kind": "exercise",
       "level": "intermediate",
       "modality": "Strength",
@@ -1591,7 +1629,23 @@
         "Heavy resistance band and anchor"
       ],
       "id": "EX783",
-      "images": [],
+      "images": [
+        {
+          "alt": "The exerciser stands with a resistance band anchored behind both knees.",
+          "step": "Place band behind knees",
+          "url": "https://imagedelivery.net/TDuhqfLDl0Fb8RGwGw6mYw/ba648e0a-717b-4b2c-0088-c40341f37a00/public"
+        },
+        {
+          "alt": "The exerciser lowers halfway into a Spanish squat with an upright torso.",
+          "step": "Sit into band",
+          "url": "https://imagedelivery.net/TDuhqfLDl0Fb8RGwGw6mYw/04cbd8aa-5fcb-4ed4-8c4d-357279aef300/public"
+        },
+        {
+          "alt": "The exerciser pauses at the bottom of a Spanish squat with the band behind the knees.",
+          "step": "Pause at depth",
+          "url": "https://imagedelivery.net/TDuhqfLDl0Fb8RGwGw6mYw/15c40fb3-39af-4eb2-0e8d-99c5c754fc00/public"
+        }
+      ],
       "kind": "exercise",
       "level": "intermediate",
       "modality": "Strength",
@@ -1628,7 +1682,23 @@
         "Doorframe or sturdy support"
       ],
       "id": "EX784",
-      "images": [],
+      "images": [
+        {
+          "alt": "The exerciser stands beside a chair with light hand support.",
+          "step": "Take light support",
+          "url": "https://imagedelivery.net/TDuhqfLDl0Fb8RGwGw6mYw/77547236-4675-40df-3d9f-f934355ff600/public"
+        },
+        {
+          "alt": "The exerciser leans back with knees forward and heels raised during an assisted sissy squat.",
+          "step": "Send knees forward",
+          "url": "https://imagedelivery.net/TDuhqfLDl0Fb8RGwGw6mYw/4440e722-8396-45d0-73a2-4cdffb675700/public"
+        },
+        {
+          "alt": "The exerciser reaches the deep endpoint of an assisted sissy squat.",
+          "step": "Bend knees deeply",
+          "url": "https://imagedelivery.net/TDuhqfLDl0Fb8RGwGw6mYw/19842fad-94fe-486e-58c0-64b971c0c400/public"
+        }
+      ],
       "kind": "exercise",
       "level": "advanced",
       "modality": "Strength",
@@ -1664,7 +1734,18 @@
         "Mat"
       ],
       "id": "EX785",
-      "images": [],
+      "images": [
+        {
+          "alt": "The exerciser holds a tall-kneeling setup on a mat.",
+          "step": "Set tall kneeling",
+          "url": "https://imagedelivery.net/TDuhqfLDl0Fb8RGwGw6mYw/62de2c1a-10bd-41c7-f3bb-1e390ebed000/public"
+        },
+        {
+          "alt": "The exerciser leans backward from tall kneeling with the body in one line.",
+          "step": "Lean back as one line",
+          "url": "https://imagedelivery.net/TDuhqfLDl0Fb8RGwGw6mYw/ad30746e-bef7-45a0-2d3b-94258b42f400/public"
+        }
+      ],
       "kind": "exercise",
       "level": "intermediate",
       "modality": "Strength",
@@ -1701,7 +1782,18 @@
         "Wall"
       ],
       "id": "EX786",
-      "images": [],
+      "images": [
+        {
+          "alt": "The exerciser balances on the right leg with light wall support and the left foot lifted.",
+          "step": "Balance on one leg",
+          "url": "https://imagedelivery.net/TDuhqfLDl0Fb8RGwGw6mYw/705ca456-958e-4e39-6c9d-f44bb5b63100/public"
+        },
+        {
+          "alt": "The exerciser lowers into a wall-supported single-leg squat with the free foot lifted.",
+          "step": "Sit back and down",
+          "url": "https://imagedelivery.net/TDuhqfLDl0Fb8RGwGw6mYw/93436933-b412-4556-4c78-c616e5dd7b00/public"
+        }
+      ],
       "kind": "exercise",
       "level": "advanced",
       "modality": "Strength",
@@ -1739,7 +1831,18 @@
         "Towel or slider"
       ],
       "id": "EX787",
-      "images": [],
+      "images": [
+        {
+          "alt": "The exerciser stands with the right front foot on a round slider.",
+          "step": "Set front foot on slider",
+          "url": "https://imagedelivery.net/TDuhqfLDl0Fb8RGwGw6mYw/ed9ba529-b3b1-4b28-4eb4-47f15b404800/public"
+        },
+        {
+          "alt": "The exerciser slides the front foot forward and lowers into a lunge.",
+          "step": "Slide forward",
+          "url": "https://imagedelivery.net/TDuhqfLDl0Fb8RGwGw6mYw/c0cc6181-3416-4349-2b0b-4492cfd64900/public"
+        }
+      ],
       "kind": "exercise",
       "level": "intermediate",
       "modality": "Strength",
@@ -1777,7 +1880,18 @@
         "Towel or slider"
       ],
       "id": "EX788",
-      "images": [],
+      "images": [
+        {
+          "alt": "The exerciser sets up a skater lunge with the right foot on a slider.",
+          "step": "Set the slider foot",
+          "url": "https://imagedelivery.net/TDuhqfLDl0Fb8RGwGw6mYw/ce839e1c-ed43-48a5-8fe3-96cde39c3100/public"
+        },
+        {
+          "alt": "The exerciser loads the left hip while gliding the right slider foot diagonally back.",
+          "step": "Glide diagonally back",
+          "url": "https://imagedelivery.net/TDuhqfLDl0Fb8RGwGw6mYw/3691f854-9feb-4519-801c-87f0a29ebd00/public"
+        }
+      ],
       "kind": "exercise",
       "level": "intermediate",
       "modality": "Strength",
@@ -1916,7 +2030,18 @@
         "Dumbbell and chair"
       ],
       "id": "EX791",
-      "images": [],
+      "images": [
+        {
+          "alt": "The exerciser sits with a dumbbell over the right knee and the right foot flat.",
+          "step": "Set dumbbell over knee",
+          "url": "https://imagedelivery.net/TDuhqfLDl0Fb8RGwGw6mYw/3f2acebd-3f03-466f-3715-839c2e5ec800/public"
+        },
+        {
+          "alt": "The exerciser raises the right heel during a seated single-leg calf raise with a dumbbell.",
+          "step": "Lift working heel",
+          "url": "https://imagedelivery.net/TDuhqfLDl0Fb8RGwGw6mYw/80e2e635-961d-49af-57f1-d623c77e1400/public"
+        }
+      ],
       "kind": "exercise",
       "level": "intermediate",
       "modality": "Strength",
@@ -1953,7 +2078,23 @@
         "Wall"
       ],
       "id": "EX792",
-      "images": [],
+      "images": [
+        {
+          "alt": "The exerciser holds a shallow wall sit with both feet flat.",
+          "step": "Set shallow wall sit",
+          "url": "https://imagedelivery.net/TDuhqfLDl0Fb8RGwGw6mYw/8a763aa5-7365-4797-0e2a-ad9a4a7f8600/public"
+        },
+        {
+          "alt": "The exerciser lifts both toes while both heels remain planted.",
+          "step": "Lift both toes",
+          "url": "https://imagedelivery.net/TDuhqfLDl0Fb8RGwGw6mYw/66834293-e76b-4972-4636-fc0f0919a800/public"
+        },
+        {
+          "alt": "The exerciser lowers both toes under control from a wall sit.",
+          "step": "Lower with control",
+          "url": "https://imagedelivery.net/TDuhqfLDl0Fb8RGwGw6mYw/238d20b5-a36e-4490-b16d-83efaf5b1900/public"
+        }
+      ],
       "kind": "exercise",
       "level": "beginner",
       "modality": "Strength",
@@ -1990,7 +2131,18 @@
         "Long resistance band"
       ],
       "id": "EX793",
-      "images": [],
+      "images": [
+        {
+          "alt": "The exerciser stands on a long band with both ends held at shoulder height.",
+          "step": "Secure band",
+          "url": "https://imagedelivery.net/TDuhqfLDl0Fb8RGwGw6mYw/ff8561ea-2f67-4828-e6ec-829fc8283400/public"
+        },
+        {
+          "alt": "The exerciser squats while standing on a resistance band held at the shoulders.",
+          "step": "Squat against band",
+          "url": "https://imagedelivery.net/TDuhqfLDl0Fb8RGwGw6mYw/66de2276-0cfd-4da4-dfc9-c17d2233ae00/public"
+        }
+      ],
       "kind": "exercise",
       "level": "intermediate",
       "modality": "Strength",
@@ -2028,7 +2180,23 @@
         "Suspension trainer"
       ],
       "id": "EX794",
-      "images": [],
+      "images": [
+        {
+          "alt": "The exerciser stands tall holding taut suspension trainer handles.",
+          "step": "Set light tension",
+          "url": "https://imagedelivery.net/TDuhqfLDl0Fb8RGwGw6mYw/d59dd8d0-5d13-4658-2d3e-a2c8395b5800/public"
+        },
+        {
+          "alt": "The exerciser descends into a suspension trainer squat with straight arms.",
+          "step": "Sit back and down",
+          "url": "https://imagedelivery.net/TDuhqfLDl0Fb8RGwGw6mYw/8f7b8b33-f49b-4d84-4cbb-45f31fa04000/public"
+        },
+        {
+          "alt": "The exerciser holds the bottom of a suspension trainer squat with heels grounded.",
+          "step": "Hold assisted squat",
+          "url": "https://imagedelivery.net/TDuhqfLDl0Fb8RGwGw6mYw/51955362-cbe5-4880-8e07-f4527c1fc700/public"
+        }
+      ],
       "kind": "exercise",
       "level": "beginner",
       "modality": "Strength",
@@ -2375,7 +2543,18 @@
         "Mini band"
       ],
       "id": "EX801",
-      "images": [],
+      "images": [
+        {
+          "alt": "The exerciser lies in a frog position with a mini band above the knees.",
+          "step": "Set frog position",
+          "url": "https://imagedelivery.net/TDuhqfLDl0Fb8RGwGw6mYw/18efa949-ac86-4d31-db33-f476f1f36600/public"
+        },
+        {
+          "alt": "The exerciser performs a banded frog pump with hips lifted.",
+          "step": "Lift hips",
+          "url": "https://imagedelivery.net/TDuhqfLDl0Fb8RGwGw6mYw/07b6246a-f017-4f0f-f284-bf96dfb68800/public"
+        }
+      ],
       "kind": "exercise",
       "level": "beginner",
       "modality": "Strength",
@@ -2412,7 +2591,18 @@
         "Dumbbell"
       ],
       "id": "EX802",
-      "images": [],
+      "images": [
+        {
+          "alt": "The exerciser holds a dumbbell over the chest while maintaining a glute bridge.",
+          "step": "Bridge and stack weight",
+          "url": "https://imagedelivery.net/TDuhqfLDl0Fb8RGwGw6mYw/effa833b-7509-4e1c-ba84-0169cfce6900/public"
+        },
+        {
+          "alt": "The exerciser reaches a dumbbell behind the head while holding a glute bridge.",
+          "step": "Reach weight back",
+          "url": "https://imagedelivery.net/TDuhqfLDl0Fb8RGwGw6mYw/a569c001-b704-47be-29f2-8a4b99923500/public"
+        }
+      ],
       "kind": "exercise",
       "level": "intermediate",
       "modality": "Strength",
@@ -2450,7 +2640,18 @@
         "Mini band"
       ],
       "id": "EX803",
-      "images": [],
+      "images": [
+        {
+          "alt": "The exerciser stands beside a chair with a mini band around both ankles.",
+          "step": "Set supported stance",
+          "url": "https://imagedelivery.net/TDuhqfLDl0Fb8RGwGw6mYw/61df66f7-e643-4e26-9ee0-f5a704a3e500/public"
+        },
+        {
+          "alt": "The exerciser holds the right leg out to the side against a mini band.",
+          "step": "Hold leg out",
+          "url": "https://imagedelivery.net/TDuhqfLDl0Fb8RGwGw6mYw/4062dbf5-a994-4e5e-59a2-2ef39061f700/public"
+        }
+      ],
       "kind": "exercise",
       "level": "beginner",
       "modality": "Strength",
@@ -2487,7 +2688,18 @@
         "Mini band"
       ],
       "id": "EX804",
-      "images": [],
+      "images": [
+        {
+          "alt": "The exerciser stands facing a chair with a mini band around both ankles.",
+          "step": "Set neutral stance",
+          "url": "https://imagedelivery.net/TDuhqfLDl0Fb8RGwGw6mYw/dfed20cb-9872-4757-b0e2-523a9bf7b200/public"
+        },
+        {
+          "alt": "The exerciser presses the right leg backward against a mini band while holding a chair.",
+          "step": "Press leg back",
+          "url": "https://imagedelivery.net/TDuhqfLDl0Fb8RGwGw6mYw/056c9dc0-00e4-4a75-fbb1-241da2b8ad00/public"
+        }
+      ],
       "kind": "exercise",
       "level": "beginner",
       "modality": "Strength",
@@ -2524,7 +2736,28 @@
         "Mini band"
       ],
       "id": "EX805",
-      "images": [],
+      "images": [
+        {
+          "alt": "The exerciser stands beside a chair with a mini band around both feet.",
+          "step": "Set banded stance",
+          "url": "https://imagedelivery.net/TDuhqfLDl0Fb8RGwGw6mYw/b210958c-0205-45b0-9329-c2a2dfc8a500/public"
+        },
+        {
+          "alt": "The exerciser lifts the viewer-left knee against a band around both feet.",
+          "step": "Lift first knee",
+          "url": "https://imagedelivery.net/TDuhqfLDl0Fb8RGwGw6mYw/5726f557-632f-4a43-7d2c-dd4c8a7c7000/public"
+        },
+        {
+          "alt": "The exerciser returns both feet to the floor between banded marches.",
+          "step": "Return to center",
+          "url": "https://imagedelivery.net/TDuhqfLDl0Fb8RGwGw6mYw/fb4e450c-676b-4144-48d1-095b2793c100/public"
+        },
+        {
+          "alt": "The exerciser lifts the viewer-right knee against a band around both feet.",
+          "step": "Lift opposite knee",
+          "url": "https://imagedelivery.net/TDuhqfLDl0Fb8RGwGw6mYw/3748a28f-435e-4607-af52-261c57950b00/public"
+        }
+      ],
       "kind": "exercise",
       "level": "beginner",
       "modality": "Strength",
@@ -2610,7 +2843,18 @@
         "Chair or couch"
       ],
       "id": "EX807",
-      "images": [],
+      "images": [
+        {
+          "alt": "The exerciser side-lies with the top knee supported on a chair and the lower leg on the mat.",
+          "step": "Set knee support",
+          "url": "https://imagedelivery.net/TDuhqfLDl0Fb8RGwGw6mYw/35cc6a9e-2637-4c27-6a78-978305529700/public"
+        },
+        {
+          "alt": "The exerciser lifts the hips into a short Copenhagen side plank with the top knee on a chair.",
+          "step": "Lift hips",
+          "url": "https://imagedelivery.net/TDuhqfLDl0Fb8RGwGw6mYw/45d38112-9eb7-4aa5-d023-1620be686700/public"
+        }
+      ],
       "kind": "exercise",
       "level": "advanced",
       "modality": "Strength",
@@ -2647,7 +2891,18 @@
         "Chair or couch"
       ],
       "id": "EX808",
-      "images": [],
+      "images": [
+        {
+          "alt": "The exerciser holds an elevated Copenhagen side plank with the bottom leg hanging.",
+          "step": "Hold elevated plank",
+          "url": "https://imagedelivery.net/TDuhqfLDl0Fb8RGwGw6mYw/d12318ca-c8f9-437a-9a08-edae2bc1c700/public"
+        },
+        {
+          "alt": "The exerciser lifts the bottom leg toward the supported top leg in a Copenhagen side plank.",
+          "step": "Lift bottom leg",
+          "url": "https://imagedelivery.net/TDuhqfLDl0Fb8RGwGw6mYw/cf6f1042-b929-4af1-a7e1-4747fb194c00/public"
+        }
+      ],
       "kind": "exercise",
       "level": "advanced",
       "modality": "Strength",
@@ -2684,7 +2939,18 @@
         "Chair"
       ],
       "id": "EX809",
-      "images": [],
+      "images": [
+        {
+          "alt": "The exerciser balances beside a chair with one knee lifted.",
+          "step": "Set supported balance",
+          "url": "https://imagedelivery.net/TDuhqfLDl0Fb8RGwGw6mYw/48993b02-f547-4daa-0e36-7b304c857700/public"
+        },
+        {
+          "alt": "The exerciser performs a chair-supported hip airplane with the free leg extended behind.",
+          "step": "Open from the hip",
+          "url": "https://imagedelivery.net/TDuhqfLDl0Fb8RGwGw6mYw/0912a1cf-37af-42d4-7d04-4a1d29835c00/public"
+        }
+      ],
       "kind": "exercise",
       "level": "intermediate",
       "modality": "Strength",
@@ -2722,7 +2988,23 @@
         "Dumbbell"
       ],
       "id": "EX810",
-      "images": [],
+      "images": [
+        {
+          "alt": "The exerciser lies ready for a weighted bridge with both feet planted.",
+          "step": "Set the weighted bridge",
+          "url": "https://imagedelivery.net/TDuhqfLDl0Fb8RGwGw6mYw/253b9ffe-4c38-42ef-5f78-e7eec31b1900/public"
+        },
+        {
+          "alt": "The exerciser holds a dumbbell across the pelvis in a high glute bridge.",
+          "step": "Lift into bridge",
+          "url": "https://imagedelivery.net/TDuhqfLDl0Fb8RGwGw6mYw/c04ec681-0739-43ac-0986-6d75955cde00/public"
+        },
+        {
+          "alt": "The exerciser keeps a weighted bridge high while walking both heels away.",
+          "step": "Walk heels away",
+          "url": "https://imagedelivery.net/TDuhqfLDl0Fb8RGwGw6mYw/1a42a05e-3a9e-48a7-5e66-b1f628ec4900/public"
+        }
+      ],
       "kind": "exercise",
       "level": "intermediate",
       "modality": "Strength",
@@ -2808,7 +3090,18 @@
         "Stability ball"
       ],
       "id": "EX812",
-      "images": [],
+      "images": [
+        {
+          "alt": "The exerciser sits low with the upper back supported by a stability ball.",
+          "step": "Set upper-back support",
+          "url": "https://imagedelivery.net/TDuhqfLDl0Fb8RGwGw6mYw/6eecc7a1-d921-4d15-c390-1a71d8ec1700/public"
+        },
+        {
+          "alt": "The exerciser holds the top of a stability-ball hip thrust with hips level.",
+          "step": "Lift hips to level",
+          "url": "https://imagedelivery.net/TDuhqfLDl0Fb8RGwGw6mYw/ea8383ea-8e26-4a4d-036e-257bbb68c500/public"
+        }
+      ],
       "kind": "exercise",
       "level": "intermediate",
       "modality": "Strength",
@@ -2894,7 +3187,23 @@
         "Stability ball"
       ],
       "id": "EX814",
-      "images": [],
+      "images": [
+        {
+          "alt": "The exerciser lies with one heel on a stability ball and the other knee lifted.",
+          "step": "Set one heel on ball",
+          "url": "https://imagedelivery.net/TDuhqfLDl0Fb8RGwGw6mYw/038d207f-4bf4-4588-497d-fdc8519aa800/public"
+        },
+        {
+          "alt": "The exerciser holds a single-leg bridge with one heel on a stability ball.",
+          "step": "Lift into one line",
+          "url": "https://imagedelivery.net/TDuhqfLDl0Fb8RGwGw6mYw/1fc7f628-a80f-4279-c356-bdd3d62f8200/public"
+        },
+        {
+          "alt": "The exerciser curls a stability ball inward with one heel while holding the hips high.",
+          "step": "Curl ball inward",
+          "url": "https://imagedelivery.net/TDuhqfLDl0Fb8RGwGw6mYw/296ff18a-64a4-40ec-148d-b3f36176d200/public"
+        }
+      ],
       "kind": "exercise",
       "level": "advanced",
       "modality": "Strength",
@@ -2932,7 +3241,18 @@
         "Towels or sliders"
       ],
       "id": "EX815",
-      "images": [],
+      "images": [
+        {
+          "alt": "The exerciser holds an elevated long-lever bridge with each heel centered on a separate slider.",
+          "step": "Set the long lever",
+          "url": "https://imagedelivery.net/TDuhqfLDl0Fb8RGwGw6mYw/5486db94-5dc1-48f7-1149-44d2c5a34900/public"
+        },
+        {
+          "alt": "The exerciser holds a high bridge while pulling both heel sliders inward.",
+          "step": "Pull heels inward",
+          "url": "https://imagedelivery.net/TDuhqfLDl0Fb8RGwGw6mYw/993bae84-47bb-47be-1a2f-9dc897e0e900/public"
+        }
+      ],
       "kind": "exercise",
       "level": "intermediate",
       "modality": "Strength",
@@ -2969,7 +3289,18 @@
         "Couch or heavy anchor"
       ],
       "id": "EX816",
-      "images": [],
+      "images": [
+        {
+          "alt": "The exerciser kneels tall with both ankles secured beneath a couch.",
+          "step": "Secure ankles",
+          "url": "https://imagedelivery.net/TDuhqfLDl0Fb8RGwGw6mYw/5b5fad6e-b240-4d70-5352-c394b56fbf00/public"
+        },
+        {
+          "alt": "The exerciser lowers forward from the knees with both ankles secured beneath a couch and both palms assisting on the mat.",
+          "step": "Lower with hand assist",
+          "url": "https://imagedelivery.net/TDuhqfLDl0Fb8RGwGw6mYw/15c34512-81ae-48da-6a71-7efb4c5fdb00/public"
+        }
+      ],
       "kind": "exercise",
       "level": "advanced",
       "modality": "Strength",
@@ -3053,7 +3384,18 @@
         "Mini band"
       ],
       "id": "EX818",
-      "images": [],
+      "images": [
+        {
+          "alt": "The exerciser holds a modified side plank with a loop band above the knees.",
+          "step": "Set the side plank",
+          "url": "https://imagedelivery.net/TDuhqfLDl0Fb8RGwGw6mYw/64064d61-6849-4d8b-e5f6-3d7bbc64da00/public"
+        },
+        {
+          "alt": "The exerciser opens the top knee against a band while holding a side plank.",
+          "step": "Open the top knee",
+          "url": "https://imagedelivery.net/TDuhqfLDl0Fb8RGwGw6mYw/f2e54f64-4574-4642-0e91-40c92967cf00/public"
+        }
+      ],
       "kind": "exercise",
       "level": "advanced",
       "modality": "Strength",
@@ -3090,7 +3432,18 @@
         "Mini band"
       ],
       "id": "EX819",
-      "images": [],
+      "images": [
+        {
+          "alt": "The exerciser holds a rear-view quadruped setup with a loop band above the knees.",
+          "step": "Set neutral quadruped",
+          "url": "https://imagedelivery.net/TDuhqfLDl0Fb8RGwGw6mYw/fe437a73-746c-4e1c-9273-f7850a023d00/public"
+        },
+        {
+          "alt": "The exerciser lifts one bent knee laterally against a band from quadruped.",
+          "step": "Lift knee to the side",
+          "url": "https://imagedelivery.net/TDuhqfLDl0Fb8RGwGw6mYw/b6fd2beb-b640-4b86-6129-a988ec139700/public"
+        }
+      ],
       "kind": "exercise",
       "level": "intermediate",
       "modality": "Strength",
@@ -3127,7 +3480,18 @@
         "Mini band"
       ],
       "id": "EX820",
-      "images": [],
+      "images": [
+        {
+          "alt": "The exerciser holds a neutral quadruped setup with a loop band above the knees.",
+          "step": "Set neutral quadruped",
+          "url": "https://imagedelivery.net/TDuhqfLDl0Fb8RGwGw6mYw/c83af994-6cbe-4147-f483-25313d797300/public"
+        },
+        {
+          "alt": "The exerciser drives one bent leg upward against a band from quadruped.",
+          "step": "Drive heel upward",
+          "url": "https://imagedelivery.net/TDuhqfLDl0Fb8RGwGw6mYw/fd2c5bc3-36fe-4ee8-d661-3162739e5900/public"
+        }
+      ],
       "kind": "exercise",
       "level": "intermediate",
       "modality": "Strength",
@@ -3164,7 +3528,28 @@
         "Mini band"
       ],
       "id": "EX821",
-      "images": [],
+      "images": [
+        {
+          "alt": "The exerciser lies supine with knees bent and a loop band around both feet.",
+          "step": "Set both feet",
+          "url": "https://imagedelivery.net/TDuhqfLDl0Fb8RGwGw6mYw/5cd449ce-d1aa-4c83-3e10-404cdacca800/public"
+        },
+        {
+          "alt": "The exerciser lifts one knee against a loop band while the opposite foot stays planted.",
+          "step": "March first knee",
+          "url": "https://imagedelivery.net/TDuhqfLDl0Fb8RGwGw6mYw/09ede013-83d9-48eb-c2e0-b5e220faaa00/public"
+        },
+        {
+          "alt": "The exerciser returns the first foot to the floor with the band around both feet.",
+          "step": "Return with control",
+          "url": "https://imagedelivery.net/TDuhqfLDl0Fb8RGwGw6mYw/f7b7d8b5-8412-4a74-7007-09783266f900/public"
+        },
+        {
+          "alt": "The exerciser lifts the opposite knee against a loop band while the other foot stays planted.",
+          "step": "March opposite knee",
+          "url": "https://imagedelivery.net/TDuhqfLDl0Fb8RGwGw6mYw/78fd431f-e48b-4840-38c1-44ac3a9b1500/public"
+        }
+      ],
       "kind": "exercise",
       "level": "beginner",
       "modality": "Strength",
@@ -3199,7 +3584,18 @@
       ],
       "equipment": [],
       "id": "EX822",
-      "images": [],
+      "images": [
+        {
+          "alt": "The athlete lies on her right side with the top foot crossed in front and the bottom leg straight.",
+          "step": "Set the crossed-leg position",
+          "url": "https://imagedelivery.net/TDuhqfLDl0Fb8RGwGw6mYw/53a44356-36d8-4bb0-50d2-a62fdca9f500/public"
+        },
+        {
+          "alt": "The athlete lifts the straight bottom leg while the crossed top foot remains planted.",
+          "step": "Pulse the bottom leg",
+          "url": "https://imagedelivery.net/TDuhqfLDl0Fb8RGwGw6mYw/45a6d002-d81c-4227-5333-ad1860911400/public"
+        }
+      ],
       "kind": "exercise",
       "level": "beginner",
       "modality": "Strength",
@@ -3233,7 +3629,23 @@
       ],
       "equipment": [],
       "id": "EX823",
-      "images": [],
+      "images": [
+        {
+          "alt": "The athlete holds a high glute bridge with both feet under the knees.",
+          "step": "Lift into a bridge",
+          "url": "https://imagedelivery.net/TDuhqfLDl0Fb8RGwGw6mYw/b7b89153-3c5e-4a4e-a93b-5bfed0283e00/public"
+        },
+        {
+          "alt": "The athlete holds the bridge with both heels clearly farther from the hips and toes light.",
+          "step": "Walk heels farther",
+          "url": "https://imagedelivery.net/TDuhqfLDl0Fb8RGwGw6mYw/dfefa660-c953-434b-afa5-15f7f4d77a00/public"
+        },
+        {
+          "alt": "The athlete pauses in a long-lever hamstring bridge with almost-straight legs and hips off the mat.",
+          "step": "Pause at long range",
+          "url": "https://imagedelivery.net/TDuhqfLDl0Fb8RGwGw6mYw/d074b5f9-75fe-4c86-9a98-a4ba66bd6900/public"
+        }
+      ],
       "kind": "exercise",
       "level": "intermediate",
       "modality": "Strength",
@@ -3270,7 +3682,18 @@
         "Dumbbell and couch"
       ],
       "id": "EX824",
-      "images": [],
+      "images": [
+        {
+          "alt": "The athlete sets a staggered hip-thrust stance with one dumbbell across the hips.",
+          "step": "Set the stagger",
+          "url": "https://imagedelivery.net/TDuhqfLDl0Fb8RGwGw6mYw/5fe59af2-978d-44a4-d5e8-11954c111f00/public"
+        },
+        {
+          "alt": "The athlete finishes a staggered dumbbell hip thrust with the hips lifted.",
+          "step": "Drive hips tall",
+          "url": "https://imagedelivery.net/TDuhqfLDl0Fb8RGwGw6mYw/b5a02635-bb1d-473b-d6ce-075bb0d55900/public"
+        }
+      ],
       "kind": "exercise",
       "level": "intermediate",
       "modality": "Strength",
@@ -3307,7 +3730,18 @@
         "Kettlebell and couch"
       ],
       "id": "EX825",
-      "images": [],
+      "images": [
+        {
+          "alt": "The athlete sets a kettlebell hip thrust with hips lowered and both feet planted.",
+          "step": "Set the bell",
+          "url": "https://imagedelivery.net/TDuhqfLDl0Fb8RGwGw6mYw/c05d5c9a-f203-47dc-05ed-a12085490f00/public"
+        },
+        {
+          "alt": "The athlete holds the top of a kettlebell hip thrust with the bell centered at the hips.",
+          "step": "Drive hips up",
+          "url": "https://imagedelivery.net/TDuhqfLDl0Fb8RGwGw6mYw/a24372d1-a1c0-408f-1936-6206b6c2b600/public"
+        }
+      ],
       "kind": "exercise",
       "level": "intermediate",
       "modality": "Strength",
@@ -3344,7 +3778,18 @@
         "Mini band"
       ],
       "id": "EX826",
-      "images": [],
+      "images": [
+        {
+          "alt": "The athlete holds a neutral quadruped setup with a mini-band above the knees.",
+          "step": "Set quadruped",
+          "url": "https://imagedelivery.net/TDuhqfLDl0Fb8RGwGw6mYw/387a9329-c252-4cb7-c28b-310ba65a6400/public"
+        },
+        {
+          "alt": "The athlete pulses a bent leg upward against a mini-band from a quadruped position.",
+          "step": "Pulse from the hip",
+          "url": "https://imagedelivery.net/TDuhqfLDl0Fb8RGwGw6mYw/4dc2ba96-9ac2-4cb7-af31-fa2873c10500/public"
+        }
+      ],
       "kind": "exercise",
       "level": "beginner",
       "modality": "Strength",
@@ -3380,7 +3825,18 @@
         "Mini band and chair"
       ],
       "id": "EX827",
-      "images": [],
+      "images": [
+        {
+          "alt": "The athlete uses a chair for light support in a single-leg hinge with a mini-band above the knees.",
+          "step": "Set the chair-supported hinge",
+          "url": "https://imagedelivery.net/TDuhqfLDl0Fb8RGwGw6mYw/b6c3b944-1106-4e3f-1663-78b6705ef500/public"
+        },
+        {
+          "alt": "The athlete rotates slightly open during a chair-supported hip-airplane preparation with a mini-band above the knees.",
+          "step": "Rotate slightly open",
+          "url": "https://imagedelivery.net/TDuhqfLDl0Fb8RGwGw6mYw/8bf732f9-d2e3-409f-3dea-22bae5464500/public"
+        }
+      ],
       "kind": "exercise",
       "level": "intermediate",
       "modality": "Strength",
@@ -3418,7 +3874,18 @@
         "Mini band"
       ],
       "id": "EX828",
-      "images": [],
+      "images": [
+        {
+          "alt": "The athlete lies supine with a mini-band above the open knees and both soles pressed face-to-face.",
+          "step": "Set the banded frog position",
+          "url": "https://imagedelivery.net/TDuhqfLDl0Fb8RGwGw6mYw/982cfbc5-dc59-48be-03d2-70628f051100/public"
+        },
+        {
+          "alt": "The athlete holds a banded frog bridge with hips lifted, knees open, and soles together.",
+          "step": "Lift and hold",
+          "url": "https://imagedelivery.net/TDuhqfLDl0Fb8RGwGw6mYw/8d307aa7-b147-40a4-75c7-d7c2e3eeff00/public"
+        }
+      ],
       "kind": "exercise",
       "level": "beginner",
       "modality": "Isometric strength",
@@ -3455,7 +3922,28 @@
         "Couch"
       ],
       "id": "EX829",
-      "images": [],
+      "images": [
+        {
+          "alt": "The athlete holds a bilateral hip-thrust top position against a couch.",
+          "step": "Set a level top",
+          "url": "https://imagedelivery.net/TDuhqfLDl0Fb8RGwGw6mYw/43e2bcbf-0abc-49c3-22ca-3a309491b400/public"
+        },
+        {
+          "alt": "The athlete lifts one knee while the opposite foot supports a couch-supported hip thrust.",
+          "step": "Lift one knee",
+          "url": "https://imagedelivery.net/TDuhqfLDl0Fb8RGwGw6mYw/7adbe7cf-8aa2-4115-362e-3e87baf22000/public"
+        },
+        {
+          "alt": "The athlete resets both feet while keeping the hips lifted and level.",
+          "step": "Reset both feet",
+          "url": "https://imagedelivery.net/TDuhqfLDl0Fb8RGwGw6mYw/c611b829-7ac7-4c08-d391-02c99b483200/public"
+        },
+        {
+          "alt": "The athlete lifts the other knee while the opposite foot supports a couch-supported hip thrust.",
+          "step": "Lift the other knee",
+          "url": "https://imagedelivery.net/TDuhqfLDl0Fb8RGwGw6mYw/479a2e38-5ca2-4170-2a3a-b4527c358500/public"
+        }
+      ],
       "kind": "exercise",
       "level": "intermediate",
       "modality": "Strength",
@@ -4043,7 +4531,18 @@
         "Dumbbell"
       ],
       "id": "EX841",
-      "images": [],
+      "images": [
+        {
+          "alt": "The athlete holds a dumbbell at the left shoulder with the right knee down and left foot forward.",
+          "step": "Rack in half-kneeling",
+          "url": "https://imagedelivery.net/TDuhqfLDl0Fb8RGwGw6mYw/17f1c38f-e790-4f63-838b-f77768dbbc00/public"
+        },
+        {
+          "alt": "The athlete presses the left dumbbell overhead from a right-knee-down, left-foot-forward half-kneeling stance.",
+          "step": "Press overhead",
+          "url": "https://imagedelivery.net/TDuhqfLDl0Fb8RGwGw6mYw/35f03102-4ad3-4b55-b541-63dcb5826700/public"
+        }
+      ],
       "kind": "exercise",
       "level": "intermediate",
       "modality": "Strength",
@@ -4081,7 +4580,18 @@
         "Dumbbells"
       ],
       "id": "EX842",
-      "images": [],
+      "images": [
+        {
+          "alt": "The athlete sits tall with straight legs and two dumbbells at the shoulders.",
+          "step": "Sit tall and rack",
+          "url": "https://imagedelivery.net/TDuhqfLDl0Fb8RGwGw6mYw/b2f3187d-64de-4ec0-1bb9-e66b168ad800/public"
+        },
+        {
+          "alt": "The athlete presses two dumbbells overhead while seated with both legs straight.",
+          "step": "Press both weights overhead",
+          "url": "https://imagedelivery.net/TDuhqfLDl0Fb8RGwGw6mYw/5b67b156-8548-49d9-e99e-cc031d1a5900/public"
+        }
+      ],
       "kind": "exercise",
       "level": "advanced",
       "modality": "Strength",
@@ -4213,7 +4723,18 @@
         "Dumbbell and sturdy support"
       ],
       "id": "EX845",
-      "images": [],
+      "images": [
+        {
+          "alt": "Athlete leans away from a support while holding a dumbbell at the right thigh.",
+          "step": "Set the supported lean",
+          "url": "https://imagedelivery.net/TDuhqfLDl0Fb8RGwGw6mYw/f790ebcb-7ac6-4269-725a-c3a12dec6100/public"
+        },
+        {
+          "alt": "Athlete holds the supported lean while raising the right dumbbell to shoulder height.",
+          "step": "Raise to shoulder height",
+          "url": "https://imagedelivery.net/TDuhqfLDl0Fb8RGwGw6mYw/820d6172-0b8c-48a8-ea7f-fc695712c100/public"
+        }
+      ],
       "kind": "exercise",
       "level": "intermediate",
       "modality": "Strength",
@@ -4490,7 +5011,18 @@
         "Resistance band"
       ],
       "id": "EX851",
-      "images": [],
+      "images": [
+        {
+          "alt": "Athlete stands tall on a resistance band with both arms low.",
+          "step": "Stand on the band",
+          "url": "https://imagedelivery.net/TDuhqfLDl0Fb8RGwGw6mYw/760b2ece-43a0-434f-abfd-2c61c9111700/public"
+        },
+        {
+          "alt": "Athlete raises both resistance-band handles laterally to shoulder height.",
+          "step": "Lift both arms out",
+          "url": "https://imagedelivery.net/TDuhqfLDl0Fb8RGwGw6mYw/42679765-20fb-4eee-be09-5aff5a677c00/public"
+        }
+      ],
       "kind": "exercise",
       "level": "beginner",
       "modality": "Strength",
@@ -4526,7 +5058,18 @@
         "Resistance band"
       ],
       "id": "EX852",
-      "images": [],
+      "images": [
+        {
+          "alt": "Athlete anchors a resistance band under both feet with both hands low in front.",
+          "step": "Anchor and start low",
+          "url": "https://imagedelivery.net/TDuhqfLDl0Fb8RGwGw6mYw/d1eba2d3-3923-47ca-5c8f-c21773adb400/public"
+        },
+        {
+          "alt": "Athlete raises both resistance-band handles straight forward to shoulder height.",
+          "step": "Raise straight ahead",
+          "url": "https://imagedelivery.net/TDuhqfLDl0Fb8RGwGw6mYw/2be7cf95-cb1f-4758-cdb4-8da0b14e6000/public"
+        }
+      ],
       "kind": "exercise",
       "level": "beginner",
       "modality": "Strength",
@@ -4562,7 +5105,18 @@
         "Resistance band"
       ],
       "id": "EX853",
-      "images": [],
+      "images": [
+        {
+          "alt": "Athlete holds a band kickback setup with hips hinged and elbows bent.",
+          "step": "Hinge with elbows bent",
+          "url": "https://imagedelivery.net/TDuhqfLDl0Fb8RGwGw6mYw/ab6cf587-10d1-4389-1500-49ff6ec71800/public"
+        },
+        {
+          "alt": "Athlete extends both elbows behind the body during a resistance-band triceps kickback.",
+          "step": "Straighten the elbows",
+          "url": "https://imagedelivery.net/TDuhqfLDl0Fb8RGwGw6mYw/578e9ed2-a18c-4d4d-8221-f84f48d33b00/public"
+        }
+      ],
       "kind": "exercise",
       "level": "beginner",
       "modality": "Strength",
@@ -4598,7 +5152,18 @@
         "Resistance band and anchor"
       ],
       "id": "EX854",
-      "images": [],
+      "images": [
+        {
+          "alt": "Athlete holds a resistance band behind the back with hands close at the chest.",
+          "step": "Set the close grip",
+          "url": "https://imagedelivery.net/TDuhqfLDl0Fb8RGwGw6mYw/7b9555ea-62ae-44d2-0526-639ce58c8100/public"
+        },
+        {
+          "alt": "Athlete presses both hands forward together against a band around the upper back.",
+          "step": "Press hands forward",
+          "url": "https://imagedelivery.net/TDuhqfLDl0Fb8RGwGw6mYw/9d27bd40-3768-4ef7-7cbd-ba7a6de91900/public"
+        }
+      ],
       "kind": "exercise",
       "level": "intermediate",
       "modality": "Strength",
@@ -4635,7 +5200,18 @@
         "Suspension trainer"
       ],
       "id": "EX855",
-      "images": [],
+      "images": [
+        {
+          "alt": "Athlete holds a straight-arm plank while gripping two suspension handles.",
+          "step": "Set the suspended plank",
+          "url": "https://imagedelivery.net/TDuhqfLDl0Fb8RGwGw6mYw/9246ad95-e8a8-4212-a2cf-406e3591c400/public"
+        },
+        {
+          "alt": "Athlete lowers the chest between two suspension handles with elbows tracking back.",
+          "step": "Lower between the handles",
+          "url": "https://imagedelivery.net/TDuhqfLDl0Fb8RGwGw6mYw/d973fac8-4de0-4341-62a7-ae61129e5f00/public"
+        }
+      ],
       "kind": "exercise",
       "level": "advanced",
       "modality": "Strength",
@@ -4723,7 +5299,18 @@
         "Suspension trainer"
       ],
       "id": "EX857",
-      "images": [],
+      "images": [
+        {
+          "alt": "Athlete leans forward with straight arms while holding suspension handles.",
+          "step": "Lean with arms straight",
+          "url": "https://imagedelivery.net/TDuhqfLDl0Fb8RGwGw6mYw/c046d3d4-14b7-4c1f-0f02-9bec0b0e2a00/public"
+        },
+        {
+          "alt": "Athlete bends both elbows toward the temples during a suspension triceps extension.",
+          "step": "Bend at the elbows",
+          "url": "https://imagedelivery.net/TDuhqfLDl0Fb8RGwGw6mYw/10f3975a-c3f0-4a74-0cae-1ea041118200/public"
+        }
+      ],
       "kind": "exercise",
       "level": "intermediate",
       "modality": "Strength",
@@ -7316,7 +7903,18 @@
         "Dumbbell"
       ],
       "id": "EX909",
-      "images": [],
+      "images": [
+        {
+          "alt": "Athlete braces in a tucked hollow position while holding one dumbbell above the chest.",
+          "step": "Brace in a tuck",
+          "url": "https://imagedelivery.net/TDuhqfLDl0Fb8RGwGw6mYw/0a576d3f-1a6e-4f24-ce74-fa53f44fa900/public"
+        },
+        {
+          "alt": "Athlete holds a long hollow position with one dumbbell overhead and both legs hovering low.",
+          "step": "Reach long and hold",
+          "url": "https://imagedelivery.net/TDuhqfLDl0Fb8RGwGw6mYw/71cbc1f6-c0e2-480d-0b2d-2482e2a55a00/public"
+        }
+      ],
       "kind": "exercise",
       "level": "advanced",
       "modality": "Core strength",
@@ -7450,7 +8048,18 @@
         "Dumbbell"
       ],
       "id": "EX912",
-      "images": [],
+      "images": [
+        {
+          "alt": "Athlete lies on a mat with both legs vertical and one dumbbell held above the chest.",
+          "step": "Set legs vertical",
+          "url": "https://imagedelivery.net/TDuhqfLDl0Fb8RGwGw6mYw/9657434c-cb6c-4ad9-8f22-4c5109c16700/public"
+        },
+        {
+          "alt": "Athlete curls upward and reaches one dumbbell toward vertical feet.",
+          "step": "Reach toward the toes",
+          "url": "https://imagedelivery.net/TDuhqfLDl0Fb8RGwGw6mYw/269f107a-f8da-4e82-3a8c-2d9495bd1b00/public"
+        }
+      ],
       "kind": "exercise",
       "level": "beginner",
       "modality": "Core strength",
@@ -7638,7 +8247,23 @@
         "Kettlebell"
       ],
       "id": "EX916",
-      "images": [],
+      "images": [
+        {
+          "alt": "Athlete stands in a wide stance with one kettlebell racked at the right shoulder.",
+          "step": "Set the rack",
+          "url": "https://imagedelivery.net/TDuhqfLDl0Fb8RGwGw6mYw/17ecea94-a84d-4a58-06ad-b032a27af200/public"
+        },
+        {
+          "alt": "Athlete stands tall with one kettlebell locked overhead in the right hand.",
+          "step": "Lock the bell overhead",
+          "url": "https://imagedelivery.net/TDuhqfLDl0Fb8RGwGw6mYw/21b6dca3-c156-4292-761c-a65921102100/public"
+        },
+        {
+          "alt": "Athlete performs a kettlebell windmill hinge with the right arm stacked overhead.",
+          "step": "Hinge under the bell",
+          "url": "https://imagedelivery.net/TDuhqfLDl0Fb8RGwGw6mYw/de07101f-91d9-4edd-e6df-ffe55b60de00/public"
+        }
+      ],
       "kind": "exercise",
       "level": "advanced",
       "modality": "Core strength",
