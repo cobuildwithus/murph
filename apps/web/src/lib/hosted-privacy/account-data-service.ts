@@ -281,6 +281,12 @@ export const HOSTED_ACCOUNT_DATA_STORE_COVERAGE = [
     note: "Best-effort provider revocation runs first, then connection rows and encrypted tokens are deleted.",
   },
   {
+    slug: "prisma.device_sync_companion_capture_receipt",
+    label: "Companion capture replay receipts",
+    deletion: "live-delete",
+    note: "Deletes bounded operational replay metadata, including capture-key and envelope hashes, before device connection rows; receipts expire after 30 days and are capped at 1,024 per connection.",
+  },
+  {
     slug: "prisma.hosted_connected_apps_session",
     label: "Connected-app Tool Router sessions",
     deletion: "live-delete",

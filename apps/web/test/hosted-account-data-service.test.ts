@@ -122,6 +122,7 @@ const REQUIRED_STORE_SLUGS = [
   "prisma.hosted_consent_grant",
   "prisma.hosted_vault_share",
   "prisma.device_connection",
+  "prisma.device_sync_companion_capture_receipt",
   "prisma.device_sync_dirty_connection",
   "prisma.device_sync_dirty_payload",
   "prisma.device_token_audit",
