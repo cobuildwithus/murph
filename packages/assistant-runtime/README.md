@@ -20,6 +20,9 @@ Current responsibilities:
 - seed the hosted signup onboarding follow-up automation after successful signup welcome delivery; its first run is deferred until the next local day, then the scheduled assistant checks onboarding resume context and archives the automation once onboarding is complete
 - export sanitized pending assistant-runtime issue records through the injected host platform after commit instead of persisting raw hosted diagnostics in the worker
 - expose the method-based `HostedRuntimePlatform` seam that hosted apps inject at runtime
+- execute `clinical-records.sync-requested` as finite, preemptible background
+  work through the injected clinical-records port, keeping provider credentials
+  in web and loading the clinical importer only inside that maintenance lane
 - provide shared hosted runtime env sanitization so host apps can build their own launcher policy without forwarding control-plane secrets
 
 Hosted runtime is a thin containerized runner over the same local assistant input
@@ -83,6 +86,16 @@ Current non-goals:
 - replacing the canonical vault or hosted bundle model
 
 `HostedRuntimePlatform` is the only hosted transport seam this package expects. Runtime code talks to semantic capabilities such as `artifactStore`, `effectsPort`, `deviceSyncPort`, `issueExportPort`, `usageRecordPort`, and the read-only `planUsageToolPort`; it does not reconstruct internal URLs, inspect hostnames, default Cloudflare worker topology, or interpret billing state. The plan-usage port passes through to assistant context without mutation authority.
+
+Clinical retrieval follows the same system-mailbox ownership rule. The mailbox
+contains only `{runId, generation}`. The runtime reads a bounded descriptor,
+fetches one sanitized page at a time through an opaque cursor, keeps page bodies
+only in memory until the raw-first vault commit, and yields between pages when
+foreground input is pending. A yield records a nonterminal preemption hint and
+throws so the durable mailbox row remains retryable. Family/page/byte caps make
+the pass finite, and the runtime enforces the raw manifest's per-page and total
+resource-count caps before import; raw FHIR is never added to a model prompt or
+runtime log.
 
 The current implementation imports its local-only assistant runtime plus the canonical vault/inbox app surfaces directly from `@murphai/assistant-engine`, and explicit operator/setup owner subpaths such as `@murphai/operator-config/operator-config`, `@murphai/operator-config/hosted-assistant-config`, and `@murphai/operator-config/text/shared`. Shared hosted execution contracts remain owned by `@murphai/hosted-execution`; this package should not re-export that surface.
 

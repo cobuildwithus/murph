@@ -16,6 +16,7 @@ export type {
   HostedRuntimeArtifactReader,
   HostedRuntimeArtifactStore,
   HostedRuntimeArtifactWriter,
+  HostedRuntimeClinicalRecordsPort,
   HostedRuntimeCodexAuthPort,
   HostedRuntimeDeviceSyncMessagingReturnTarget,
   HostedRuntimeDeviceSyncPort,

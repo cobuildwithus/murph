@@ -8,6 +8,7 @@ import {
   clinicalFhirResourceTypeSchema,
   clinicalRawManifestSchema,
   clinicalRawPathSchema,
+  countClinicalFhirPageResources,
   type ClinicalFhirRetrievalScope,
   type ClinicalImportPlan,
   type ClinicalRawManifest,
@@ -17,12 +18,19 @@ import type { EventImportDecision } from "@murphai/contracts";
 import {
   applyCanonicalWriteBatch,
   importEventBatch,
+  isVaultError,
 } from "@murphai/core";
 
 import { loadRuntimeModule } from "./runtime-import.js";
 
 const CLINICAL_IMPORTER_MODULE_SPECIFIER = "@murphai/importers/clinical-records";
 const JSON_MEDIA_TYPE = "application/fhir+json";
+const TERMINAL_CLINICAL_IMPORT_ERROR_CODES = new Set([
+  "EVENT_KIND_MISMATCH",
+  "EVENT_SOURCE_REVISION_CONFLICT",
+  "EVENT_SOURCE_REVISION_UNORDERED",
+  "VAULT_RAW_IMMUTABLE",
+]);
 
 type ClinicalImporterModule = {
   buildClinicalImportPlanFromSnapshot(input: {
@@ -62,6 +70,7 @@ export interface ClinicalFhirSnapshotImportInput {
   requestedScopes: string[];
   retrievalJobId: string;
   retrievalScopes: ClinicalFhirRetrievalScope[];
+  signal?: AbortSignal | null;
   sourceSystem: ClinicalSourceSystem;
   vaultRoot: string;
 }
@@ -80,22 +89,46 @@ export interface ClinicalFhirSnapshotImportResult {
   reviewDecisionCount: number;
 }
 
+export class ClinicalFhirSnapshotRejectedError extends Error {
+  readonly code = "CLINICAL_FHIR_SNAPSHOT_REJECTED" as const;
+
+  constructor(cause: unknown) {
+    super("Clinical FHIR snapshot failed semantic validation.", { cause });
+    this.name = "ClinicalFhirSnapshotRejectedError";
+  }
+}
+
 export async function importClinicalFhirSnapshot(
   input: ClinicalFhirSnapshotImportInput,
 ): Promise<ClinicalFhirSnapshotImportResult> {
-  const prepared = prepareClinicalFhirSnapshot(input);
+  await yieldClinicalFhirImportControl(input.signal ?? null);
+  let prepared: ReturnType<typeof prepareClinicalFhirSnapshot>;
+  try {
+    prepared = prepareClinicalFhirSnapshot(input);
+  } catch (error) {
+    throw new ClinicalFhirSnapshotRejectedError(error);
+  }
+  await yieldClinicalFhirImportControl(input.signal ?? null);
   const importer = await loadRuntimeModule<ClinicalImporterModule>(
     CLINICAL_IMPORTER_MODULE_SPECIFIER,
   );
-  const plan = importer.buildClinicalImportPlanFromSnapshot({
-    manifest: prepared.manifest,
-    manifestPath: prepared.manifestPath,
-    pages: prepared.pages.map((page) => ({
-      content: page.content,
-      relativePath: page.relativePath,
-    })),
-  });
-  const executableDecisions = importer.clinicalPlanToEventImportDecisions(plan);
+  input.signal?.throwIfAborted();
+  let plan: ClinicalImportPlan;
+  let executableDecisions: EventImportDecision[];
+  try {
+    plan = importer.buildClinicalImportPlanFromSnapshot({
+      manifest: prepared.manifest,
+      manifestPath: prepared.manifestPath,
+      pages: prepared.pages.map((page) => ({
+        content: page.content,
+        relativePath: page.relativePath,
+      })),
+    });
+    executableDecisions = importer.clinicalPlanToEventImportDecisions(plan);
+  } catch (error) {
+    throw new ClinicalFhirSnapshotRejectedError(error);
+  }
+  await yieldClinicalFhirImportControl(input.signal ?? null);
   const reviewDecisionCount = plan.decisions.filter(
     (decision) => decision.action === "review",
   ).length;
@@ -116,17 +149,23 @@ export async function importClinicalFhirSnapshot(
     },
   ];
 
-  await applyCanonicalWriteBatch({
-    audit: {
-      action: "raw_copy",
-      commandName: "vault-usecases.importClinicalFhirSnapshot",
-      summary: "Persisted an immutable clinical FHIR retrieval snapshot.",
-    },
-    operationType: "clinical_fhir_snapshot",
-    rawContents,
-    summary: "Persist clinical FHIR retrieval snapshot",
-    vaultRoot: input.vaultRoot,
-  });
+  try {
+    await applyCanonicalWriteBatch({
+      audit: {
+        action: "raw_copy",
+        commandName: "vault-usecases.importClinicalFhirSnapshot",
+        summary: "Persisted an immutable clinical FHIR retrieval snapshot.",
+      },
+      operationType: "clinical_fhir_snapshot",
+      rawContents,
+      summary: "Persist clinical FHIR retrieval snapshot",
+      vaultRoot: input.vaultRoot,
+    });
+  } catch (error) {
+    rethrowClinicalFhirImportError(error);
+  }
+
+  await yieldClinicalFhirImportControl(input.signal ?? null);
 
   const canonical = executableDecisions.length === 0
     ? {
@@ -136,9 +175,9 @@ export async function importClinicalFhirSnapshot(
         skippedExistingCount: 0,
         supersededCount: 0,
       }
-    : await importEventBatch({
-        apply: true,
+    : await importClinicalEventDecisions({
         decisions: executableDecisions,
+        signal: input.signal,
         vaultRoot: input.vaultRoot,
       });
 
@@ -155,6 +194,39 @@ export async function importClinicalFhirSnapshot(
     rawFileCount: rawContents.length,
     reviewDecisionCount,
   };
+}
+
+async function importClinicalEventDecisions(input: {
+  decisions: EventImportDecision[];
+  signal?: AbortSignal | null;
+  vaultRoot: string;
+}) {
+  try {
+    return await importEventBatch({
+      apply: true,
+      decisions: input.decisions,
+      signal: input.signal,
+      vaultRoot: input.vaultRoot,
+    });
+  } catch (error) {
+    rethrowClinicalFhirImportError(error);
+  }
+}
+
+function rethrowClinicalFhirImportError(error: unknown): never {
+  if (isVaultError(error) && TERMINAL_CLINICAL_IMPORT_ERROR_CODES.has(error.code)) {
+    throw new ClinicalFhirSnapshotRejectedError(error);
+  }
+  throw error;
+}
+
+async function yieldClinicalFhirImportControl(signal: AbortSignal | null): Promise<void> {
+  signal?.throwIfAborted();
+  if (!signal) {
+    return;
+  }
+  await new Promise<void>((resolve) => setImmediate(resolve));
+  signal.throwIfAborted();
 }
 
 function prepareClinicalFhirSnapshot(input: ClinicalFhirSnapshotImportInput): {
@@ -236,34 +308,4 @@ function prepareClinicalFhirSnapshot(input: ClinicalFhirSnapshotImportInput): {
     manifestPath,
     pages,
   };
-}
-
-function countClinicalFhirPageResources(content: string): number {
-  let value: unknown;
-  try {
-    value = JSON.parse(content);
-  } catch {
-    throw new TypeError("Clinical FHIR raw page must be valid JSON.");
-  }
-
-  if (Array.isArray(value)) {
-    return value.length;
-  }
-  if (!isRecord(value) || typeof value.resourceType !== "string") {
-    throw new TypeError("Clinical FHIR raw page must contain a FHIR resource or Bundle.");
-  }
-  if (value.resourceType !== "Bundle") {
-    return 1;
-  }
-  if (value.entry === undefined) {
-    return 0;
-  }
-  if (!Array.isArray(value.entry)) {
-    throw new TypeError("Clinical FHIR Bundle entry must be an array.");
-  }
-  return value.entry.length;
-}
-
-function isRecord(value: unknown): value is Record<string, unknown> {
-  return typeof value === "object" && value !== null && !Array.isArray(value);
 }
