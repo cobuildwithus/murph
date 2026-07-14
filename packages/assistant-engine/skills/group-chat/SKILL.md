@@ -234,13 +234,13 @@ If a member never granted email sharing and expresses interest, or the group
 asks how someone can join the newsletter, post a join offer scoped to
 `group-email.v0`, `sleep-duration-days.v0`, `activity-days.v0`, `workout-days.v0`,
 `resting-heart-rate-days.v0`, and `hrv-days.v0` unless the group chose a
-different set. Every join offer must lead with "react to this message to join,"
-plainly say what reacting shares, include `{{share_scope}}` exactly once, and
+different set. Every join offer must lead with "Like this message," immediately
+say what liking it will do, include `{{share_scope}}` exactly once, and
 include `{{join_url}}` exactly once as the customize link so a member can share
 more or less. When this offer names the newsletter group, pass the group's
-chosen name as `displayName` on the `post_join_offer` call. Reacting grants the
-disclosed snapshot; the link lets a member pick a different set. Never silently
-share health data that the message did not disclose, never include any other
+chosen name as `displayName` on the `post_join_offer` call. Liking the message
+grants the disclosed snapshot; the link lets a member pick a different set.
+Never silently share health data that the message did not disclose, never include any other
 URL, and never repeatedly re-offer to someone who declined.
 
 If a member asks to be removed from the newsletter in the group chat, call
