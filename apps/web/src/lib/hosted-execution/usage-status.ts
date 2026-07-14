@@ -160,53 +160,6 @@ export async function projectHostedPersonalAiUsageStatus(input: {
   } satisfies HostedPlanUsageAvailableStatus;
 }
 
-export function formatHostedPersonalAiUsageStatusForConversation(
-  status: HostedPlanUsageStatus,
-): string {
-  if (status.status === "unavailable") {
-    const base = status.reason === "trial_conversion_pending"
-      ? "Your Pulse Trial has ended, so hosted replies are paused."
-      : status.reason === "group_not_supported"
-        ? "Personal plan usage is not available in a group conversation."
-        : "Hosted AI access is inactive right now.";
-    return appendHostedPlanUsageRecommendedAction(base, status.recommendedAction);
-  }
-
-  const periodEnd = formatHostedPlanUsageConversationDate(status.periodEnd);
-  const periodTiming = status.periodKind === "trial"
-    ? `The trial period ends on ${periodEnd}.`
-    : `The included allowance resets on ${periodEnd}.`;
-  const forecast = status.forecast
-    ? ` At the recent pace, it may run out in about ${status.forecast.estimatedDaysRemaining} ${
-        status.forecast.estimatedDaysRemaining === 1 ? "day" : "days"
-      }.`
-    : "";
-  const base = `You've used approximately ${status.usedPercent}% of the included ${
-    status.planName
-  } AI usage, with ${status.remainingPercent}% remaining. ${periodTiming}${forecast}${
-    status.status === "exhausted" ? " Replies continue." : ""
-  }`;
-  return appendHostedPlanUsageRecommendedAction(base, status.recommendedAction);
-}
-
-function appendHostedPlanUsageRecommendedAction(
-  message: string,
-  action: HostedPlanUsageRecommendedAction | null,
-): string {
-  return action
-    ? `${message} ${action.label}: ${action.url}`
-    : message;
-}
-
-function formatHostedPlanUsageConversationDate(value: string): string {
-  return new Intl.DateTimeFormat("en-US", {
-    day: "numeric",
-    month: "long",
-    timeZone: "UTC",
-    year: "numeric",
-  }).format(new Date(value));
-}
-
 function calculateUsedPercent(input: {
   exhausted: boolean;
   limit: bigint;
@@ -332,6 +285,8 @@ async function resolveRecommendedAction(input: {
 
   if (
     hasHostedMemberOwnActiveBilling(member)
+    && billingRef.stripeCustomerId !== null
+    && billingRef.stripeSubscriptionId !== null
     && canUpgradeHostedBillingPlanToEdge({
       currentBillingPhase: billingRef.currentBillingPhase,
       currentBillingPlanCode: billingRef.currentBillingPlanCode,
