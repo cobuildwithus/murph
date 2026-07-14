@@ -1,4 +1,4 @@
-import { mkdir, mkdtemp, rm, writeFile } from "node:fs/promises";
+import { mkdtemp, rm } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import path from "node:path";
 import { afterEach, describe, expect, it, vi } from "vitest";
@@ -13,7 +13,6 @@ import {
 import {
   saveAssistantAutomationState,
 } from "@murphai/assistant-engine/assistant-state";
-import { resolveAssistantStatePaths } from "@murphai/runtime-state/node/assistant-state-fs";
 
 import {
   enqueueHostedPendingAssistantInputId,
@@ -26,7 +25,6 @@ import {
 } from "../src/hosted-runtime/turn-input.ts";
 
 const tempRoots: string[] = [];
-const TERMINAL_EVIDENCE_SCHEMA = "murph.assistant-auto-reply-terminal-evidence.v1";
 
 afterEach(async () => {
   vi.restoreAllMocks();
@@ -957,66 +955,6 @@ describe("selectHostedAssistantInputIds", () => {
     ]);
   });
 
-  it("background mode skips terminal route proof without dropping it", async () => {
-    const vaultRoot = await createTempVault();
-    await enableLinqAutoReply(vaultRoot);
-    const terminalProof = await upsertAssistantInputEvent({
-      vault: vaultRoot,
-      event: createAssistantInputEvent({
-        dedupeKey: "dedupe_terminal_route_proof",
-        eventId: "evt_terminal_route_proof",
-        itemId: "item_terminal_route_proof",
-        laneSeq: "10",
-        messageId: "msg_terminal_route_proof",
-        occurredAt: "2026-04-23T00:00:01.000Z",
-        previousHomeThreadId: "thread_previous",
-        receivedAt: "2026-04-23T00:00:02.000Z",
-        text: "terminal route proof",
-      }),
-    });
-    const replyable = await upsertAssistantInputEvent({
-      vault: vaultRoot,
-      event: createAssistantInputEvent({
-        dedupeKey: "dedupe_replyable_after_proof",
-        eventId: "evt_replyable_after_proof",
-        itemId: "item_replyable_after_proof",
-        laneSeq: "20",
-        messageId: "msg_replyable_after_proof",
-        occurredAt: "2026-04-23T00:00:03.000Z",
-        receivedAt: "2026-04-23T00:00:04.000Z",
-        text: "replyable after terminal proof",
-      }),
-    });
-    await writeTerminalEvidence({
-      evidenceId: terminalProof.inputId,
-      groupInputIds: [terminalProof.inputId],
-      vaultRoot,
-    });
-    await enqueueHostedPendingAssistantInputId({
-      inputId: terminalProof.inputId,
-      routeProof: true,
-      vaultRoot,
-    });
-    await enqueueHostedPendingAssistantInputId({
-      inputId: replyable.inputId,
-      vaultRoot,
-    });
-
-    const selection = await selectHostedAssistantInputIds({
-      mode: "background",
-      vaultRoot,
-    });
-
-    expect(selection.inputIds).toEqual([replyable.inputId]);
-    expect(selection.pendingInputIds).toEqual([
-      terminalProof.inputId,
-      replyable.inputId,
-    ]);
-    await expect(readHostedPendingAssistantInputIds({ vaultRoot })).resolves.toEqual([
-      terminalProof.inputId,
-      replyable.inputId,
-    ]);
-  });
 });
 
 async function createTempVault(): Promise<string> {
@@ -1038,42 +976,6 @@ async function enableLinqAutoReply(vaultRoot: string): Promise<void> {
   await ensureHostedPendingAssistantInputIndex({ vaultRoot });
 }
 
-async function writeTerminalEvidence(input: {
-  evidenceId: string;
-  groupInputIds: readonly string[];
-  vaultRoot: string;
-}): Promise<void> {
-  const directory = path.join(
-    resolveAssistantStatePaths(input.vaultRoot).assistantStateRoot,
-    "auto-reply",
-    "evidence",
-  );
-  await mkdir(directory, { recursive: true });
-  await writeFile(
-    path.join(directory, `${encodeURIComponent(input.evidenceId)}.json`),
-    `${JSON.stringify({
-      captureId: input.evidenceId,
-      groupCaptureIds: input.groupInputIds,
-      groupId: `group_${input.groupInputIds.join("__")}`,
-      groupInputIds: input.groupInputIds,
-      inputId: input.evidenceId,
-      primaryCaptureId: input.groupInputIds[0] ?? input.evidenceId,
-      primaryInputId: input.groupInputIds[0] ?? input.evidenceId,
-      providerCleanup: {
-        linqMessageIds: [],
-        queuedAt: null,
-      },
-      recordedAt: "2026-04-23T00:05:00.000Z",
-      schema: TERMINAL_EVIDENCE_SCHEMA,
-      terminal: {
-        kind: "suppressed",
-        reason: "test",
-      },
-    }, null, 2)}\n`,
-    "utf8",
-  );
-}
-
 function createAssistantInputEvent(input: {
   accountId?: string;
   actorId?: string;
@@ -1085,7 +987,6 @@ function createAssistantInputEvent(input: {
   occurredAt?: string;
   receivedAt?: string;
   replyTarget?: string | null;
-  previousHomeThreadId?: string;
   source?: string;
   text?: string;
   threadId?: string;
@@ -1127,7 +1028,6 @@ function createAssistantInputEvent(input: {
           externalThreadRouteAuthorityPresent: false,
           kind: "linq" as const,
           partCount: 1,
-          previousHomeThreadId: input.previousHomeThreadId ?? null,
           reactionEligible: false,
           replyToMessageId: null,
           service: null,

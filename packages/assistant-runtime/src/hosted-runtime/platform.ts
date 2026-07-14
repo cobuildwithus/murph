@@ -201,19 +201,9 @@ export interface HostedRuntimeLinqSendResponse {
   targetKind?: HostedRuntimeProviderTargetKind | null;
 }
 
-export interface HostedRuntimeLinqCurrentInboundProof {
-  dedupeKey: string;
-  eventId: string;
-  mailboxItemId: string;
-  occurredAt: string;
-  replyToMessageId: string;
-  target: string;
-}
-
 export interface HostedRuntimeLinqRecentInboundEngagementRequest {
   answeredMailboxItemIds?: readonly string[] | null;
   authorityCheckOnly?: boolean | null;
-  currentInbound?: HostedRuntimeLinqCurrentInboundProof | null;
   directHomeRouteOnly?: boolean | null;
   directRecipientPhoneNumber?: string | null;
   fromPhoneNumber?: string | null;

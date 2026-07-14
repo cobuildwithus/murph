@@ -593,9 +593,8 @@ export async function planHostedOnboardingLinqWebhook(input: {
       prisma: input.prisma,
     });
 
-    // Daily quota suppression intentionally remains ahead of mailbox append.
-    // Keep the routing row unchanged on this return path too, so a later
-    // admitted message can reproduce and persist the former-home proof.
+    // Daily quota suppression intentionally remains ahead of both route
+    // binding and mailbox append, so a suppressed message changes neither.
     const admissionPlan = await planHostedLinqDailyQuotaAdmissionDenied({
       context,
       dailyState,
@@ -618,8 +617,6 @@ export async function planHostedOnboardingLinqWebhook(input: {
       };
     }
 
-    const routeTransitionProofEnabled =
-      getHostedOnboardingEnvironment().linqRouteTransitionProofEnabled;
     const mailboxParticipantIdentity = await bindHostedMemberHomeLinqChat({
       chatId: summary.chatId,
       homeLineAssignedAt: bindingResult.homeLineAssignedAt,
@@ -636,9 +633,6 @@ export async function planHostedOnboardingLinqWebhook(input: {
         from: participantContact.value,
         isFromMe: summary.isFromMe,
         messageId: summary.messageId,
-        ...(routeTransitionProofEnabled && bindingResult.previousHomeChatId
-          ? { previousHomeChatId: bindingResult.previousHomeChatId }
-          : {}),
         reactionEligible: isHostedLinqMessageReactionEligible({
           parts: messageEvent.data.message.parts,
           service: messageEvent.data.service ?? null,

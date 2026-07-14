@@ -1665,7 +1665,6 @@ export async function runHostedWorkspaceRuntimeJobInProcess(
             currentRouteGrant: () => currentOperationRouteGrant,
             deviceSyncPort: guardedRuntime.platform.deviceSyncPort ?? null,
             messagingReturnTarget: () => hostedCliBridgeMessagingReturnTarget,
-            preferenceCausalSeq: () => currentPreferenceCausalSeq,
             signal: passSignal,
           },
           async () => {

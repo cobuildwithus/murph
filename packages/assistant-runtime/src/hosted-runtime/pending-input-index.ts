@@ -8,7 +8,6 @@ import {
   createStoreBackedAssistantInputSource,
   DEFAULT_ASSISTANT_AUTOMATION_SCAN_LIMIT,
   readAssistantInputEvent,
-  repairLegacyPersonalHomeAutomationRoutesFromInputs,
   type AssistantInputCursor,
   type AssistantInputEventRecord,
 } from "@murphai/assistant-engine";
@@ -42,13 +41,6 @@ export interface HostedPendingAssistantInputMediaRetentionProtections {
   protectedStoredPaths: string[];
 }
 
-export interface HostedPendingRouteProofRepairResult {
-  pending: boolean;
-  processedInputIds: string[];
-  repaired: number;
-  yielded: boolean;
-}
-
 interface HostedPendingAssistantInputStateReadResult {
   missing: boolean;
   state: HostedPendingAssistantInputState;
@@ -58,8 +50,6 @@ const HOSTED_PENDING_ASSISTANT_INPUT_STATE_LABEL =
   "hosted pending assistant input state";
 const HOSTED_PENDING_ASSISTANT_INPUT_STATE_KEYS =
   new Set(["backfilled", "inputIds"]);
-export const HOSTED_PENDING_ROUTE_PROOF_REPAIR_BATCH_LIMIT = 4;
-
 type HostedPendingAssistantInputReplyabilityEvent = Pick<
   AssistantInputEventRecord,
   "conversation" | "replyTarget" | "sourceRef"
@@ -202,7 +192,6 @@ export async function hasHostedPendingAssistantInputWakeCandidate(input: {
 
 export async function enqueueHostedPendingAssistantInputId(input: {
   inputId: string;
-  routeProof?: boolean;
   vaultRoot: string;
 }): Promise<string[]> {
   const inputId = parseHostedPendingAssistantInputId(input.inputId);
@@ -217,7 +206,6 @@ export async function enqueueHostedPendingAssistantInputId(input: {
     });
     const nextState = appendHostedPendingAssistantInputId({
       inputId,
-      routeProof: input.routeProof ?? false,
       state,
     });
     if (sameHostedPendingAssistantInputState(nextState, state)) {
@@ -235,7 +223,6 @@ export async function enqueueHostedPendingAssistantInputId(input: {
 }
 
 export async function compactHostedPendingAssistantInputIds(input: {
-  repairedRouteProofInputIds?: readonly string[];
   vaultRoot: string;
 }): Promise<string[]> {
   const filePath = resolveHostedPendingAssistantInputStatePath(input.vaultRoot);
@@ -270,7 +257,6 @@ export async function compactHostedPendingAssistantInputIds(input: {
       backfilled: true,
       filePath,
       paths,
-      repairedRouteProofInputIds: input.repairedRouteProofInputIds ?? [],
       state,
       stateBeforeCompaction,
       vaultRoot: input.vaultRoot,
@@ -278,82 +264,10 @@ export async function compactHostedPendingAssistantInputIds(input: {
   });
 }
 
-export async function repairHostedPendingAssistantRouteProofBatch(input: {
-  batchLimit?: number;
-  now?: Date;
-  shouldYield?: (() => boolean) | null;
-  signal?: AbortSignal;
-  vaultRoot: string;
-}): Promise<HostedPendingRouteProofRepairResult> {
-  const batchLimit = normalizeHostedPendingRouteProofBatchLimit(input.batchLimit);
-  const pendingInputIds = await readExistingHostedPendingAssistantInputIds({
-    vaultRoot: input.vaultRoot,
-  });
-  const proofInputIds: string[] = [];
-
-  for (const inputId of pendingInputIds.slice(0, batchLimit)) {
-    throwIfHostedPendingRouteProofRepairAborted(input.signal);
-    if (input.shouldYield?.() === true) {
-      return {
-        pending: true,
-        processedInputIds: [],
-        repaired: 0,
-        yielded: true,
-      };
-    }
-    const event = await readAssistantInputEvent({
-      inputId,
-      vault: input.vaultRoot,
-    });
-    if (event && hasHostedPendingAssistantInputRouteProof(event)) {
-      proofInputIds.push(inputId);
-    }
-  }
-
-  if (proofInputIds.length === 0) {
-    return {
-      pending: false,
-      processedInputIds: [],
-      repaired: 0,
-      yielded: false,
-    };
-  }
-
-  throwIfHostedPendingRouteProofRepairAborted(input.signal);
-  const repaired = await repairLegacyPersonalHomeAutomationRoutesFromInputs({
-    inputIds: proofInputIds,
-    now: input.now ?? new Date(),
-    vaultRoot: input.vaultRoot,
-  });
-  const remainingInputIds = await compactHostedPendingAssistantInputIds({
-    repairedRouteProofInputIds: proofInputIds,
-    vaultRoot: input.vaultRoot,
-  });
-  const firstRemainingInputId = remainingInputIds[0] ?? null;
-  const firstRemainingEvent = firstRemainingInputId
-    ? await readAssistantInputEvent({
-        inputId: firstRemainingInputId,
-        vault: input.vaultRoot,
-      })
-    : null;
-
-  return {
-    pending: Boolean(
-      firstRemainingEvent
-      && !proofInputIds.includes(firstRemainingEvent.inputId)
-      && hasHostedPendingAssistantInputRouteProof(firstRemainingEvent)
-    ),
-    processedInputIds: proofInputIds,
-    repaired,
-    yielded: false,
-  };
-}
-
 async function compactHostedPendingAssistantInputStateForWrite(input: {
   backfilled: boolean;
   filePath: string;
   paths: Parameters<typeof readAssistantInputEvent>[0]["paths"];
-  repairedRouteProofInputIds: readonly string[];
   state: HostedPendingAssistantInputState;
   stateBeforeCompaction: HostedPendingAssistantInputState;
   vaultRoot: string;
@@ -375,24 +289,13 @@ async function compactHostedPendingAssistantInputStateForWrite(input: {
     (await readAssistantAutomationState(input.vaultRoot)).autoReply
       .map((entry) => entry.channel),
   );
-  const repairedRouteProofInputIds = new Set(input.repairedRouteProofInputIds);
-  const pendingRouteProofInputIds: string[] = [];
   const remaining: { cursor: AssistantInputCursor; inputId: string }[] = [];
-  const repairedReplyableRouteProofInputs: Array<{
-    cursor: AssistantInputCursor;
-    inputId: string;
-  }> = [];
   for (const inputId of input.state.inputIds) {
     const event = await readAssistantInputEvent({
       inputId,
       paths: input.paths,
     });
     if (!event) {
-      continue;
-    }
-    const hasRouteProof = hasHostedPendingAssistantInputRouteProof(event);
-    if (hasRouteProof && !repairedRouteProofInputIds.has(inputId)) {
-      pendingRouteProofInputIds.push(inputId);
       continue;
     }
     if (
@@ -409,10 +312,7 @@ async function compactHostedPendingAssistantInputStateForWrite(input: {
       vault: input.vaultRoot,
     });
     if (!complete) {
-      const destination = hasRouteProof
-        ? repairedReplyableRouteProofInputs
-        : remaining;
-      destination.push({
+      remaining.push({
         cursor: event.cursor,
         inputId,
       });
@@ -420,15 +320,9 @@ async function compactHostedPendingAssistantInputStateForWrite(input: {
   }
 
   const remainingState = createHostedPendingAssistantInputState(
-    [
-      ...pendingRouteProofInputIds,
-      ...remaining
-        .sort((left, right) => compareAssistantInputCursors(left.cursor, right.cursor))
-        .map((item) => item.inputId),
-      ...repairedReplyableRouteProofInputs
-        .sort((left, right) => compareAssistantInputCursors(left.cursor, right.cursor))
-        .map((item) => item.inputId),
-    ],
+    remaining
+      .sort((left, right) => compareAssistantInputCursors(left.cursor, right.cursor))
+      .map((item) => item.inputId),
     { backfilled: input.backfilled },
   );
 
@@ -678,19 +572,16 @@ function createHostedPendingAssistantInputState(
 
 function appendHostedPendingAssistantInputId(input: {
   inputId: string;
-  routeProof: boolean;
   state: HostedPendingAssistantInputState;
 }): HostedPendingAssistantInputState {
   const existingIndex = input.state.inputIds.indexOf(input.inputId);
-  if (existingIndex >= 0 && (!input.routeProof || existingIndex === 0)) {
+  if (existingIndex >= 0) {
     return input.state;
   }
-  const inputIds = existingIndex >= 0
-    ? input.state.inputIds.filter((inputId) => inputId !== input.inputId)
-    : input.state.inputIds;
-  return createHostedPendingAssistantInputState(input.routeProof
-    ? [input.inputId, ...inputIds]
-    : [...inputIds, input.inputId], {
+  return createHostedPendingAssistantInputState([
+    ...input.state.inputIds,
+    input.inputId,
+  ], {
     backfilled: input.state.backfilled,
   });
 }
@@ -706,38 +597,6 @@ function mergeHostedPendingAssistantInputBackfill(input: {
     ]),
     { backfilled: true },
   );
-}
-
-export function hasHostedPendingAssistantInputRouteProof(
-  event: Pick<AssistantInputEventRecord, "conversation" | "replyTarget" | "sourceMetadata">,
-): boolean {
-  const sourceMetadata = event.sourceMetadata;
-  return sourceMetadata?.kind === "linq"
-    && event.conversation?.actorIsSelf === false
-    && event.conversation.source === "linq"
-    && event.conversation.threadIsDirect === true
-    && event.replyTarget?.channel === "linq"
-    && Boolean(event.replyTarget.threadId?.trim())
-    && Boolean(sourceMetadata.previousHomeThreadId?.trim());
-}
-
-function normalizeHostedPendingRouteProofBatchLimit(value: number | undefined): number {
-  if (value === undefined) {
-    return HOSTED_PENDING_ROUTE_PROOF_REPAIR_BATCH_LIMIT;
-  }
-  if (!Number.isSafeInteger(value) || value <= 0) {
-    throw new TypeError("hosted pending route proof batch limit must be a positive integer");
-  }
-  return value;
-}
-
-function throwIfHostedPendingRouteProofRepairAborted(signal: AbortSignal | undefined): void {
-  if (!signal?.aborted) {
-    return;
-  }
-  throw signal.reason instanceof Error
-    ? signal.reason
-    : new Error("Hosted pending route proof repair was aborted.");
 }
 
 function parseHostedPendingAssistantInputIds(value: unknown): string[] {

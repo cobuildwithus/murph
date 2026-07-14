@@ -3,6 +3,12 @@ import { createHmac, createHash, timingSafeEqual } from "node:crypto";
 import type { Junction } from "@junction-api/sdk";
 import { HistoricalPullCompleted as JunctionHistoricalPullCompletedSchema } from "@junction-api/sdk/serialization";
 import type * as JunctionSerialization from "@junction-api/sdk/serialization";
+import {
+  COMPANION_HRV_RMSSD_RESOURCE,
+  parseCompanionHrvRmssdAdmissionId,
+  parseSerializedCompanionHrvRmssdObservation,
+  serializeCompanionHrvRmssdObservation,
+} from "@murphai/contracts";
 import { canNormalizeJunctionSleepCycleRecordToCompactStages } from "@murphai/importers";
 import { resolveJunctionOrigin } from "@murphai/importers/device-providers/junction-origin";
 import {
@@ -56,6 +62,7 @@ import {
   subtractDays,
 } from "../shared.ts";
 import {
+  JUNCTION_COMPANION_HRV_OBSERVATION_INVALID_CODE,
   JUNCTION_COMPANION_HEALTH_METADATA_EVENT_TYPE,
   JUNCTION_COMPANION_HEALTH_METADATA_MAX_BATCH_BYTES,
   JUNCTION_COMPANION_HEALTH_METADATA_RESOURCE,
@@ -1446,6 +1453,40 @@ export function createJunctionDeviceSyncProvider(
     job: DeviceSyncJobRecord,
     skippedOptionalResources: JunctionSkippedOptionalResource[],
   ): Promise<ProviderJobResult> {
+    if (normalizeString(job.payload.resource) === COMPANION_HRV_RMSSD_RESOURCE) {
+      let observation;
+      let admissionId;
+      try {
+        observation = parseSerializedCompanionHrvRmssdObservation(
+          job.payload.companionObservationJson,
+        );
+        admissionId = parseCompanionHrvRmssdAdmissionId(
+          job.payload.companionAdmissionId,
+        );
+        const expectedAdmissionId = createHash("sha256")
+          .update(serializeCompanionHrvRmssdObservation(observation))
+          .digest("hex");
+        if (admissionId !== expectedAdmissionId) {
+          throw new TypeError("Companion HRV admission identity did not match its observation.");
+        }
+      } catch {
+        throw deviceSyncError({
+          code: JUNCTION_COMPANION_HRV_OBSERVATION_INVALID_CODE,
+          message: "Companion HRV observation payload was invalid.",
+          retryable: false,
+        });
+      }
+
+      await context.importSnapshot({
+        provider: "junction",
+        accountId: buildJunctionImportAccountId(context.account.externalAccountId),
+        connectionId: context.account.id,
+        importedAt: context.now,
+        companionHrvRmssd: [{ admissionId, observation }],
+      });
+      return {};
+    }
+
     const window = resolveJobWindow(job, context.now, reconcileDays);
     if (normalizeString(job.payload.resource) === JUNCTION_COMPANION_HEALTH_METADATA_RESOURCE) {
       const records = parseJunctionCompanionHealthMetadataJob(job);
