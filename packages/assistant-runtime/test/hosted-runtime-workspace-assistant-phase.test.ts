@@ -5432,10 +5432,13 @@ describe("runHostedWorkspaceAssistantPhase runtime logs", () => {
       configurable: true,
       value: [{
         component: "runtime.provider",
-        level: "info",
-        message: "Hosted assistant turn timing milestone captured.",
-        phase: "wake.running",
+        level: "error",
+        message: "Hosted assistant automation pass failed.",
+        phase: "failed",
         redacted: {
+          errorCode: "authorization_error",
+          errorCodeDetail: "HOSTED_LINQ_EGRESS_ROUTE_AUTHORITY_MISMATCH",
+          safeErrorMessage: "Hosted execution authorization failed.",
           schema: "murph.assistant-turn-timing.v1",
           type: "assistant.turn.timing",
           turnTimingDeliveryIntentId: "intent_timing_failure",
@@ -5454,10 +5457,14 @@ describe("runHostedWorkspaceAssistantPhase runtime logs", () => {
 
     expect(logRequests[0]?.entries[0]).toEqual(expect.objectContaining({
       component: "assistant",
+      errorCode: "authorization_error",
       eventCode: "assistant.automation_detail",
       redactedJson: expect.objectContaining({
+        errorCode: "authorization_error",
+        errorCodeDetail: "HOSTED_LINQ_EGRESS_ROUTE_AUTHORITY_MISMATCH",
         detailComponent: "runtime.provider",
         schema: "murph.assistant-turn-timing.v1",
+        safeErrorMessage: "Hosted execution authorization failed.",
         turnTimingDeliveryIntentId: "intent_timing_failure",
         turnTimingElapsedMs: 41,
         turnTimingProviderRequestElapsedMs: 31,
@@ -5465,6 +5472,7 @@ describe("runHostedWorkspaceAssistantPhase runtime logs", () => {
         turnTimingStage: "reply-dispatched",
       }),
     }));
+    expect(() => parseHostedRuntimeLogRequest(logRequests[0])).not.toThrow();
   });
 
   it("persists redacted full Codex failure diagnostics in assistant detail logs", async () => {
