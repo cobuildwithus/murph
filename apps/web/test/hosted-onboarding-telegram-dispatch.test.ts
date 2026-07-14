@@ -195,6 +195,9 @@ type TelegramWebhookPrismaHarness = {
   hostedMember?: {
     findUnique?: ReturnType<typeof vi.fn>;
   };
+  hostedMemberEmailAuthorization?: {
+    findUnique?: ReturnType<typeof vi.fn>;
+  };
   hostedMemberRouting?: {
     findMany?: (...args: unknown[]) => Promise<unknown>;
     findFirst?: (...args: unknown[]) => Promise<unknown>;

@@ -1,6 +1,6 @@
 # PR 603 ReviewGPT Round 4 Remediation
 
-Status: active
+Status: completed
 Created: 2026-07-14
 Updated: 2026-07-14
 
@@ -46,3 +46,10 @@ Updated: 2026-07-14
 - Cloudflare, web, and assistant-engine typechecks passed; changed web files passed ESLint; `git diff --check` passed.
 - Coverage-write re-audit: clean after adding terminal-denial, route-promotion, and no-churn proofs.
 - Security/privacy re-audit: no validated Medium-or-higher findings; provider-entry authorization, retry classification, encrypted channel publication, sensitive logging, and deploy-skew behavior verified.
+- Merged `origin/main` at `b109a3b79d8`; resolved the coordination ledger additively and preserved the upstream closure of the completed reply-liveness lane.
+- Post-merge Cloudflare focused tests: 249 passed; web hosted-onboarding focused tests: 97 passed.
+- Post-merge assistant outbox and hosted-runtime workspace-entrypoint tests: 235 passed, including the previously inherited retry-stabilization failure.
+- Full workspace typecheck passed for every non-web owner, then exposed one missing optional delegate in the test-only Telegram Prisma harness; after adding that narrow type member, the web package typecheck passed.
+- `pnpm test:diff` passed after the harness correction: web dev smoke, production build, full lint with zero errors, and 4,968 tests passed with 135 intentional skips.
+- Implementation and local completion gates are closed; exact pushed-head ReviewGPT and CI remain PR-level merge gates rather than plan work.
+Completed: 2026-07-14
