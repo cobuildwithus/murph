@@ -1,6 +1,6 @@
 # PR ReviewGPT Loop
 
-Last verified: 2026-07-13
+Last verified: 2026-07-14
 
 Required post-completion ReviewGPT loop for ReviewGPT-eligible PR-lane work. It runs
 the repo-local `pr-review` preset through `pnpm review:gpt`, using one of the
@@ -62,7 +62,8 @@ changes, a dirty worktree, or a checkout that is not at the pushed head.
 The PR body must carry the intent contract, applicable UX outline, and change-shape breakdown from
 `agent-docs/operations/completion-workflow.md` § PR Description: why the PR
 exists, the user-visible goal and flow it is meant to ship, invariants to
-preserve, and added/deleted lines by source, tests, docs, config/tooling, and generated/other.
+preserve, non-obvious affected surfaces, and added/deleted lines by source,
+tests, docs, config/tooling, and generated/other.
 Before firing a round, confirm that block is present and current.
 
 Fire each round as soon as the head it reviews is pushed. Do not wait for PR CI
@@ -153,6 +154,11 @@ independently requires it or the current user explicitly asks for the loop.
    - **Accepted simplification**: accept only when the change removes more
      complexity than it adds and has direct proof that required behavior and
      invariants are preserved.
+   - **Accepted purpose drift**: first prove whether the non-obvious surface is
+     necessary for the PR outcome. Delete it or split it into a separate PR when
+     it is unnecessary. When it is necessary but undisclosed, update the PR
+     intent contract with the reason and regression proof before the next
+     review round. Disclosure alone does not cure unnecessary scope.
    - **Rejected**: wrong, already handled, speculative, not worth the added
      complexity, or missing the required reproduction/proof. Note the reason.
 

@@ -20397,7 +20397,7 @@ describe("hosted workspace runtime entrypoint", () => {
     }
   });
 
-  test("installs preference causal binding before the personality exposure gate is enabled", async () => {
+  test("binds a gap-free provider batch to its terminal preference causal sequence", async () => {
     const vaultRoot = await mkdtemp(path.join(tmpdir(), "murph-workspace-entrypoint-"));
 
     try {
@@ -20417,7 +20417,37 @@ describe("hosted workspace runtime entrypoint", () => {
           }),
         }),
         async runAssistantPhase(input) {
+          const firstInputId = await stageAssistantInputEventForMailboxItem({
+            item: createMailboxItem({
+              causalSeq: "41",
+              id: "mailbox_item_preference_batch_1",
+              laneSeq: "41",
+              occurredAt: "2026-04-26T00:00:01.000Z",
+            }),
+            vaultRoot,
+          });
+          const secondInputId = await stageAssistantInputEventForMailboxItem({
+            item: createMailboxItem({
+              causalSeq: "42",
+              id: "mailbox_item_preference_batch_2",
+              laneSeq: "42",
+              occurredAt: "2026-04-26T00:00:02.000Z",
+            }),
+            vaultRoot,
+          });
+
           assert.equal(typeof input.beforeProviderAcceptedInputs, "function");
+          assert.equal(input.currentAssistantPreferenceCausalSeq?.(), null);
+          const release = await input.beforeProviderAcceptedInputs?.({
+            acceptedInputs: [
+              { id: secondInputId, source: "assistant-input" },
+              { id: firstInputId, source: "assistant-input" },
+            ],
+          });
+          assert.equal(input.currentAssistantPreferenceCausalSeq?.(), "42");
+          assert.equal(typeof release, "function");
+          release?.();
+          assert.equal(input.currentAssistantPreferenceCausalSeq?.(), null);
           return { progressed: false };
         },
         vaultRoot,
@@ -22356,6 +22386,9 @@ async function stageAssistantInputEventForMailboxItem(input: {
         threadId,
       },
       sourceRef: {
+        ...(input.item.causalSeq === undefined
+          ? {}
+          : { causalSeq: input.item.causalSeq }),
         dedupeKey: input.item.dedupeKey,
         eventId: input.item.dedupeKey,
         itemId: input.item.id,

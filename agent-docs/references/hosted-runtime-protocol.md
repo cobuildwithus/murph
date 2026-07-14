@@ -1,6 +1,6 @@
 # Hosted Mailbox Runtime Protocol
 
-Last verified: 2026-07-12
+Last verified: 2026-07-14
 
 ## Decision
 
@@ -497,12 +497,17 @@ Tokenless v1 pending items map to sequence zero and drain; they cannot overwrite
 a field whose zero-or-newer watermark is already established.
 Those watermarks live in the bounded canonical companion document
 `bank/assistant-preference-mutations.json`, separate from the strict preference
-value document. The canonical selector admits at most one mailbox-backed input
-per provider turn; later inputs remain pending instead of being folded or
-steered across causal anchors. During that turn, the runtime exposes the exact
-selected sequence through the existing authenticated loopback CLI bridge. The
-model cannot supply the number, and the invocation-local bridge value is
-cleared at turn completion.
+value document. The canonical selector admits a bounded, cursor-ordered compound
+batch. Foreground begins with the oldest fresh input in the current wake and
+considers only later fresh siblings; background begins with the oldest replyable
+pending input. The batch continues only across the same canonical conversation,
+the same provider-native reply anchor, and exact-successor positive per-member
+causal sequences. A gap, missing or legacy sequence, boundary change, or the
+50-input bound ends the batch and leaves the remainder pending. During that turn,
+the runtime exposes the terminal sequence as the compound turn frontier through
+the existing authenticated loopback CLI bridge. Exact-successor proof prevents
+that frontier from crossing an intervening Settings row. The model cannot supply
+the number, and the invocation-local bridge value is cleared at turn completion.
 
 `runtime.pending-effects-reconcile-requested` is the pointer-only continuation
 for a trusted owner-state change that may unblock an already-persisted runtime
@@ -822,14 +827,16 @@ must resume before post-checkpoint delivery or background drains continue. A
 source-less wake preempts those drains only after the resumed import proves new
 conversation work; a no-progress or system-only nudge must not starve bounded
 maintenance or the idle checkpoint.
-The assistant engine then admits the persisted input through live steering or
-pre-provider admission without using hosted-specific mailbox
-refresh/checkpoint ports. While a Codex turn is live, same-conversation input is
-steered into that live provider turn. After the live provider turn ends,
-untargeted new input remains staged for a normal later assistant turn, while
-strict active-turn-targeted input fails closed instead of falling through; the
-assistant engine does not synthesize another provider request inside the same
-assistant turn.
+The assistant engine admits the frozen same-wake compound batch before provider
+start without using hosted-specific mailbox refresh/checkpoint ports. While a
+Codex turn is live, later mailbox input may still be imported and staged, but it
+does not join that provider batch; it remains pending for a normal later
+assistant turn. Strict active-turn-targeted input still fails closed instead of
+falling through, and the assistant engine does not synthesize another provider
+request inside the same assistant turn.
+Other assistant input owners may still use the generic pre-provider admission or
+live-steering paths when they prove the input shares the active turn's causal
+anchor; this mailbox-specific freeze does not change those owners.
 When mailbox import produces or reuses a canonical write receipt, the runner
 publishes the receipt-log fingerprint and the advanced imported watermark in
 the same status checkpoint. That progress checkpoint is still required when
@@ -837,9 +844,9 @@ the receipt fingerprint is already durable: receipt durability proves the
 canonical write, not the corresponding mailbox watermark.
 Accepted-input journaling, transcript updates, checkpoint bookkeeping,
 provider-request metadata, and outbox intent creation remain on the normal
-local assistant-service path. The same-reply coalescing window ends when the
-live provider turn ends, not at physical provider delivery; mailbox input that
-arrives after that boundary remains durable staged input for a later turn.
+local assistant-service path. The same-reply coalescing window closes when the
+bounded batch is selected before provider start; mailbox input that arrives
+after that boundary remains durable staged input for a later turn.
 Hosted Linq reply sends are idempotent when an outbox idempotency key is
 present. The Linq HTTP layer may retry those POST sends on transient transport,
 408, or 5xx failures, and the hosted outbox must keep such failures retryable
