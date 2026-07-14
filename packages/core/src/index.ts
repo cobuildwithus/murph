@@ -225,6 +225,7 @@ export {
   isProtectedCanonicalPath,
   listProtectedCanonicalPaths,
   listWriteOperationMetadataPaths,
+  listWriteOperationMetadataPathsWithStageDirectories,
   pruneTerminalWriteOperationRecords,
   readRecoverableStoredWriteOperation,
   readStoredWriteOperation,
