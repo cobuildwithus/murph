@@ -52,6 +52,7 @@ export interface AssistantAutoReplyPromptInput {
   attachmentDescriptors: readonly AssistantInputAttachmentDescriptor[]
   attachmentEvidence: AssistantInputAttachmentEvidence
   conversation: AssistantInputConversationRef
+  groupParticipantAdded?: true
   inputId: string
   occurredAt: string
   projection: AssistantAutoReplyPromptProjection | null
@@ -118,9 +119,8 @@ export function buildAssistantAutoReplyPrompt(
         hasAttachmentContext: hasAssistantInputAttachmentContext(entry),
         inputText: normalizeNullableString(entry.text),
         index,
-        groupParticipantAdded: readAssistantInputGroupParticipantAdded(
-          entry.sourceMetadata,
-        ),
+        groupParticipantContext:
+          renderAssistantInputGroupParticipantAddedPrompt(entry),
         promptUnavailableNote: renderAssistantInputPromptUnavailableNote(entry),
         projectionReasonCode: entry.projection?.reasonCode ?? null,
         projectionStatus: entry.projection?.status ?? null,
@@ -189,9 +189,8 @@ export async function prepareAssistantAutoReplyInput(
         hasAttachmentContext: hasAssistantInputAttachmentContext(entry),
         inputText: normalizeNullableString(entry.text),
         index,
-        groupParticipantAdded: readAssistantInputGroupParticipantAdded(
-          entry.sourceMetadata,
-        ),
+        groupParticipantContext:
+          renderAssistantInputGroupParticipantAddedPrompt(entry),
         promptUnavailableNote: renderAssistantInputPromptUnavailableNote(entry),
         projectionReasonCode: entry.projection?.reasonCode ?? null,
         projectionStatus: entry.projection?.status ?? null,
@@ -313,17 +312,24 @@ function readAssistantInputGroupSenderHandle(
     : null
 }
 
-function readAssistantInputGroupParticipantAdded(
-  metadata: AssistantInputSourceMetadata | null,
-): boolean {
-  return metadata?.kind === 'linq' && metadata.groupParticipantAdded === true
+export function renderAssistantInputGroupParticipantAddedPrompt(input: {
+  conversation: AssistantInputConversationRef | null
+  groupParticipantAdded?: true
+  sourceMetadata: AssistantInputSourceMetadata | null
+}): string | null {
+  return input.groupParticipantAdded === true &&
+      input.sourceMetadata?.kind === 'linq' &&
+      input.sourceMetadata.externalThreadRouteAuthorityPresent === true &&
+      input.conversation?.threadIsDirect === false
+    ? 'Group context:\nOne or more participants were recently added to this group chat. Treat this as context only; check the current roster before deciding whether any room-wide offer fits.'
+    : null
 }
 
 function renderAssistantAutoReplyInputSection(input: {
   attachmentSections: readonly string[]
   evidenceReasonCode: string | null
   evidenceStatus: AssistantInputAttachmentEvidence['status']
-  groupParticipantAdded: boolean
+  groupParticipantContext: string | null
   hasAttachmentContext: boolean
   inputText: string | null
   index: number
@@ -338,10 +344,8 @@ function renderAssistantAutoReplyInputSection(input: {
   if (input.senderHandle) {
     sections.push(`Sender: ${input.senderHandle}`)
   }
-  if (input.groupParticipantAdded) {
-    sections.push(
-      'Group context:\nOne or more participants were recently added to this group chat. Treat this as context only; check the current roster before deciding whether any room-wide offer fits.',
-    )
+  if (input.groupParticipantContext) {
+    sections.push(input.groupParticipantContext)
   }
   if (input.replyContext) {
     sections.push(`Reply context:\n${input.replyContext}`)

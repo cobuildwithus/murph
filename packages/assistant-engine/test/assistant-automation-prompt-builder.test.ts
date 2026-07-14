@@ -146,6 +146,7 @@ function createPromptInput(input: {
   attachmentDescriptors?: readonly AssistantInputAttachmentDescriptor[]
   attachments?: readonly InboxShowResult['capture']['attachments'][number][]
   captureOverrides?: Partial<InboxShowResult['capture']>
+  groupParticipantAdded?: true
   projectionReasonCode?: string | null
   projectionStatus?: AssistantInputProjectionStatus | null
   sourceMetadata?: AssistantInputSourceMetadata | null
@@ -206,6 +207,9 @@ function createPromptInput(input: {
       threadId: parsedCapture.threadId,
       threadIsDirect: parsedCapture.threadIsDirect,
     },
+    ...(input.groupParticipantAdded === true
+      ? { groupParticipantAdded: true as const }
+      : {}),
     inputId: parsedCapture.eventId,
     occurredAt: parsedCapture.occurredAt,
     projection: hasProjection
@@ -414,10 +418,10 @@ describe('buildAssistantAutoReplyPrompt', () => {
   it('renders the group sender handle for linq thread-container inbound', () => {
     const result = buildAssistantAutoReplyPrompt([
       createPromptInput({
-        captureOverrides: { text: 'morning crew' },
+        captureOverrides: { text: 'morning crew', threadIsDirect: false },
+        groupParticipantAdded: true,
         sourceMetadata: {
           externalThreadRouteAuthorityPresent: true,
-          groupParticipantAdded: true,
           kind: 'linq',
           partCount: 1,
           reactionEligible: true,
@@ -442,7 +446,8 @@ describe('buildAssistantAutoReplyPrompt', () => {
   it('renders no sender line when linq metadata has no sender handle', () => {
     const result = buildAssistantAutoReplyPrompt([
       createPromptInput({
-        captureOverrides: { text: 'morning' },
+        captureOverrides: { text: 'morning', threadIsDirect: false },
+        groupParticipantAdded: true,
         sourceMetadata: {
           externalThreadRouteAuthorityPresent: false,
           kind: 'linq',
@@ -459,6 +464,29 @@ describe('buildAssistantAutoReplyPrompt', () => {
       throw new Error('Expected a ready prompt result.')
     }
     expect(result.prompt).not.toContain('Sender:')
+    expect(result.prompt).not.toContain('Group context:')
+  })
+
+  it('does not render participant context for an authorized direct thread', () => {
+    const result = buildAssistantAutoReplyPrompt([
+      createPromptInput({
+        captureOverrides: { text: 'morning', threadIsDirect: true },
+        groupParticipantAdded: true,
+        sourceMetadata: {
+          externalThreadRouteAuthorityPresent: true,
+          kind: 'linq',
+          partCount: 1,
+          reactionEligible: false,
+          replyToMessageId: null,
+          service: 'iMessage',
+        },
+      }),
+    ])
+
+    expect(result.kind).toBe('ready')
+    if (result.kind !== 'ready') {
+      throw new Error('Expected a ready prompt result.')
+    }
     expect(result.prompt).not.toContain('Group context:')
   })
 

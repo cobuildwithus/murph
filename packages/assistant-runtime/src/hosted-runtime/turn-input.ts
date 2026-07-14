@@ -3,7 +3,7 @@ import {
   compareAssistantInputCursors,
   isSameAssistantConversationRef,
   readAssistantInputEvent,
-  readHostedMailboxAssistantInputItems,
+  readHostedMailboxAssistantInputItemDetails,
   type AssistantInputCandidate,
   type AssistantInputCandidateBatch,
   type AssistantInputCandidateQuery,
@@ -246,7 +246,7 @@ async function readHostedAssistantInputCandidatesById(input: {
   vaultRoot: string;
 }): Promise<AssistantInputCandidate[]> {
   const events = await readHostedAssistantInputEventsById(input);
-  const hostedMailboxItems = await readHostedMailboxAssistantInputItems({
+  const hostedMailboxItems = await readHostedMailboxAssistantInputItemDetails({
     inputIds: events.map((event) => event.inputId),
     vault: input.vaultRoot,
   });
@@ -254,11 +254,15 @@ async function readHostedAssistantInputCandidatesById(input: {
     .sort((left, right) =>
       compareAssistantInputCursors(left.cursor, right.cursor)
     )
-    .map((event) =>
-      assistantInputCandidateFromStoredEvent(event, {
-        hostedMailboxItemId: hostedMailboxItems.get(event.inputId) ?? null,
-      })
-    );
+    .map((event) => {
+      const hostedMailboxItem = hostedMailboxItems.get(event.inputId);
+      return assistantInputCandidateFromStoredEvent(event, {
+        ...(hostedMailboxItem?.groupParticipantAdded === true
+          ? { groupParticipantAdded: hostedMailboxItem.groupParticipantAdded }
+          : {}),
+        hostedMailboxItemId: hostedMailboxItem?.mailboxItemId ?? null,
+      });
+    });
 }
 
 async function readHostedAssistantInputEventsById(input: {

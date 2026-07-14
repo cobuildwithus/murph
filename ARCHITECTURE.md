@@ -187,10 +187,14 @@ participant identity, create authority, fetch the roster, append mailbox work,
 or wake a runtime. The next normally admitted non-direct message takes the
 canonical chat-ownership lock before the route row, consumes exact `true` in the
 same transaction as its ordinary mailbox append, and carries one typed context
-hint. The runtime exposes that hint only with route authority and explicit group
-attestation, while the existing live roster tool remains the sole decision-time
-participant source. Duplicate additions coalesce, removals remain ledger-only,
-and any failed or raced append rolls consumption back.
+hint. The runner records that hint in the existing tolerant mailbox-to-input
+sidecar rather than the strict persisted assistant-input event, projects it only
+onto the transient input candidate, and renders the same fixed context for both
+normal and captureless active-turn prompt paths. It exposes the hint only with
+route authority and explicit group attestation, while the existing live roster
+tool remains the sole decision-time participant source. Duplicate additions
+coalesce, removals remain ledger-only, and any failed or raced append rolls
+consumption back.
 
 Hosted Linq unknown first-contact admission is a web-owned classifier gate on
 the signup-link path only. It runs after cheap deterministic ingress filters and

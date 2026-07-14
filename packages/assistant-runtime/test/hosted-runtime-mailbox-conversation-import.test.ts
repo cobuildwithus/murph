@@ -1664,12 +1664,17 @@ describe("hosted mailbox conversation import adapter", () => {
       "+15551110000",
     );
     assert.equal(
-      event.sourceMetadata?.kind === "linq"
-        ? event.sourceMetadata.groupParticipantAdded
-        : undefined,
-      true,
+      Object.hasOwn(event.sourceMetadata ?? {}, "groupParticipantAdded"),
+      false,
     );
     assert.equal(event.replyTarget?.threadId, "chat_group_identity");
+
+    const source = createHostedAssistantInputSource({
+      selectedInputIds: [event.inputId],
+      vaultRoot,
+    });
+    const candidates = await source.listInputCandidates({ sourceId: "linq" });
+    assert.equal(candidates.inputs[0]?.event.groupParticipantAdded, true);
   });
 
   test("does not project participant-addition context for a route-authorized direct chat", async () => {
@@ -1732,11 +1737,16 @@ describe("hosted mailbox conversation import adapter", () => {
       true,
     );
     assert.equal(
-      event.sourceMetadata?.kind === "linq"
-        ? event.sourceMetadata.groupParticipantAdded
-        : undefined,
-      undefined,
+      Object.hasOwn(event.sourceMetadata ?? {}, "groupParticipantAdded"),
+      false,
     );
+
+    const source = createHostedAssistantInputSource({
+      selectedInputIds: [event.inputId],
+      vaultRoot,
+    });
+    const candidates = await source.listInputCandidates({ sourceId: "linq" });
+    assert.equal(candidates.inputs[0]?.event.groupParticipantAdded, undefined);
   });
 
   test("stages WhatsApp input with hashed conversation metadata and private reply target", async () => {
