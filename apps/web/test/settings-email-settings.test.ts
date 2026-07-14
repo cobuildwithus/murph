@@ -237,7 +237,7 @@ describe("HostedEmailSettings", () => {
     expect(container.textContent).not.toContain("We sent a code to");
   });
 
-  it("does not open the email link flow when the pre-link provider refresh fails", async () => {
+  it("does not depend on a browser provider refresh before opening secure email setup", async () => {
     mocks.refreshUser.mockRejectedValueOnce(new Error("provider unavailable"));
     const { HostedEmailSettings } = await import("@/src/components/settings/hosted-email-settings");
     const { cleanup, container } = await renderClientComponent(
@@ -255,13 +255,10 @@ describe("HostedEmailSettings", () => {
       linkButton?.dispatchEvent(new Event("click", { bubbles: true }));
     });
 
-    await vi.waitFor(() => {
-      expect(container.textContent).toContain(
-        "Murph could not confirm your current email links. Wait a moment and try again.",
-      );
-    });
-    expect(mocks.linkEmail).not.toHaveBeenCalled();
-    expect(mocks.requestHostedEmailLinkIntent).not.toHaveBeenCalled();
+    expect(mocks.refreshUser).not.toHaveBeenCalled();
+    expect(mocks.requestHostedEmailLinkIntent).toHaveBeenCalledTimes(1);
+    expect(mocks.linkEmail).toHaveBeenCalledTimes(1);
+    expect(container.textContent).not.toContain("Murph could not confirm your current email links.");
   });
 
   it("does not open Privy's link modal when the server cannot issue a bound link intent", async () => {
@@ -825,9 +822,7 @@ describe("HostedEmailSettings", () => {
         }),
       );
     });
-    expect(JSON.parse(String(syncFetch.mock.calls[0]?.[1]?.body))).toEqual({
-      expectedEmailAddress: "linked@example.com",
-    });
+    expect(JSON.parse(String(syncFetch.mock.calls[0]?.[1]?.body))).toEqual({});
     await vi.waitFor(() => {
       expect(onSynced).toHaveBeenCalledTimes(1);
     });
@@ -908,9 +903,7 @@ describe("HostedEmailSettings", () => {
         }),
       );
     });
-    expect(JSON.parse(String(syncFetch.mock.calls[0]?.[1]?.body))).toEqual({
-      expectedEmailAddress: "linked@example.com",
-    });
+    expect(JSON.parse(String(syncFetch.mock.calls[0]?.[1]?.body))).toEqual({});
     await vi.waitFor(() => {
       expect(container.textContent).not.toContain("Email linked: payer-hint@example.com");
       expect(container.textContent).not.toContain("payer-hint@example.com");
@@ -1163,22 +1156,6 @@ describe("HostedEmailSettings", () => {
   });
 
   it("keeps addressless provider-propagation retries server-resolved", async () => {
-    let resolveInitialRefresh: ((value: {
-      linkedAccounts: Array<{
-        address: string;
-        latestVerifiedAt: number;
-        type: string;
-      }>;
-    }) => void) | null = null;
-    const initialRefresh = new Promise<{
-      linkedAccounts: Array<{
-        address: string;
-        latestVerifiedAt: number;
-        type: string;
-      }>;
-    }>((resolve) => {
-      resolveInitialRefresh = resolve;
-    });
     mocks.useUser.mockReturnValue({
       refreshUser: mocks.refreshUser,
       user: {
@@ -1191,25 +1168,6 @@ describe("HostedEmailSettings", () => {
         ],
       },
     });
-    mocks.refreshUser
-      .mockResolvedValueOnce({
-        linkedAccounts: [
-          {
-            phoneNumber: "+15555550100",
-            type: "phone",
-          },
-        ],
-      })
-      .mockReturnValueOnce(initialRefresh)
-      .mockResolvedValueOnce({
-        linkedAccounts: [
-          {
-            address: "replacement@example.com",
-            latestVerifiedAt: 1771977600,
-            type: "email",
-          },
-        ],
-      });
     const notReadyResponse = () => new Response(JSON.stringify({
       error: {
         code: "PRIVY_EMAIL_NOT_READY",
@@ -1268,29 +1226,7 @@ describe("HostedEmailSettings", () => {
       });
     });
 
-    await vi.waitFor(() => {
-      expect(mocks.refreshUser).toHaveBeenCalledTimes(2);
-    });
-    await vi.waitFor(() => {
-      const resolvingButton = Array.from(container.querySelectorAll("button")).find(
-        (candidate) => candidate.textContent?.includes("Open secure email setup"),
-      );
-      expect(resolvingButton?.hasAttribute("disabled")).toBe(true);
-    });
-
-    await act(async () => {
-      resolveInitialRefresh?.({
-        linkedAccounts: [
-          {
-            address: "old@example.com",
-            latestVerifiedAt: 1771891200,
-            type: "email",
-          },
-        ],
-      });
-      await initialRefresh;
-      await Promise.resolve();
-    });
+    expect(mocks.refreshUser).not.toHaveBeenCalled();
     await vi.waitFor(() => {
       expect(onSynced).toHaveBeenCalledTimes(1);
     });
@@ -1391,6 +1327,10 @@ describe("HostedEmailSettings", () => {
     });
     expect(syncFetch).toHaveBeenCalledTimes(2);
     expect(mocks.linkEmail).toHaveBeenCalledTimes(1);
+    expect(syncFetch.mock.calls.map((call) => JSON.parse(String(call[1]?.body)))).toEqual([
+      {},
+      {},
+    ]);
   });
 
   it("sends an update-email code and verifies it from the inline code step", async () => {
