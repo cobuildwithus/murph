@@ -1116,37 +1116,102 @@ async function evaluateAssistantAutoReplyGroup(input: {
     return createAdvancingSkipDecision('input is self-authored')
   }
 
-  const existingTerminalEvidence = await Promise.all(
-    input.group.items.map((item) => {
+  const existingTerminalEvidenceEntries = await Promise.all(
+    input.group.items.map(async (item) => {
       const inputId = item.inputCandidate!.event.inputId
-      return readAssistantAutoReplyTerminalEvidenceByEvidenceId(input.vault, inputId).then(
-        (evidence) =>
-          evidence ??
-          readAssistantAutoReplyTerminalEvidenceByEvidenceId(
-            input.vault,
-            item.summary.optionalInboxCaptureId ?? inputId,
-          ),
-      )
+      const inputEvidence =
+        await readAssistantAutoReplyTerminalEvidenceByEvidenceId(input.vault, inputId)
+      if (inputEvidence) {
+        return {
+          evidence: inputEvidence,
+          lookup: 'input' as const,
+          ownerInputId: inputId,
+        }
+      }
+      const fallbackEvidenceId = item.summary.optionalInboxCaptureId ?? inputId
+      const fallbackEvidence =
+        await readAssistantAutoReplyTerminalEvidenceByEvidenceId(
+          input.vault,
+          fallbackEvidenceId,
+        )
+      return {
+        evidence: fallbackEvidence,
+        lookup: fallbackEvidence
+          ? fallbackEvidenceId === inputId
+            ? 'input' as const
+            : 'capture' as const
+          : null,
+        ownerInputId: inputId,
+      }
     }),
   )
-  const repairEvidence = input.group.optionalInboxCaptureIds.length === input.group.items.length
-    ? findRepairableTerminalEvidenceForGroup(
-      input.group.optionalInboxCaptureIds,
-      existingTerminalEvidence,
-    )
-    : null
-  if (repairEvidence) {
-    const repairCaptureIds = resolveTerminalEvidenceRepairCaptureIds({
-      captureIds: input.group.optionalInboxCaptureIds,
-      evidence: repairEvidence,
-    })
-    if (
-      !(await terminalEvidenceExistsForEveryCapture(input.vault, repairCaptureIds))
-    ) {
-      const terminalLinqCleanup =
+  const existingTerminalEvidence = existingTerminalEvidenceEntries.map(
+    (entry) => entry.evidence,
+  )
+  const hasInputKeyedTerminalEvidence = existingTerminalEvidenceEntries.some(
+    (entry) => entry.lookup === 'input',
+  )
+  const modernRepairPartitions = findRepairableTerminalEvidencePartitionsForGroup({
+    entries: existingTerminalEvidenceEntries,
+    inputIds: input.group.inputIds,
+  })
+  if (modernRepairPartitions) {
+    let checkpointRequired = false
+    let terminalLinqCleanup: string[] | null = null
+    for (const repairEvidence of modernRepairPartitions) {
+      const repairInputIds = [...repairEvidence.groupInputIds]
+      const repairCaptureIds = resolveTerminalEvidenceRepairCaptureIds({
+        group: input.group,
+        inputIds: repairInputIds,
+      })
+      if (
+        await terminalEvidenceExistsForEveryId(input.vault, repairInputIds)
+      ) {
+        continue
+      }
+      terminalLinqCleanup = mergeAssistantTerminalLinqCleanupMessageIds([
+        terminalLinqCleanup,
         await backfillAssistantAutoReplyTerminalEvidenceFromTerminalEvidence({
           captureIds: repairCaptureIds,
           evidence: repairEvidence,
+          inputIds: repairInputIds,
+          vault: input.vault,
+        }),
+      ])
+      checkpointRequired = true
+    }
+    return createAdvancingSkipDecision('assistant reply already handled', {
+      ...(checkpointRequired ? { checkpointRequired: true } : {}),
+      terminalLinqCleanup,
+      terminalSuppression: false,
+    })
+  }
+
+  if (hasInputKeyedTerminalEvidence) {
+    return createDeferredSkipDecision(
+      'assistant reply terminal evidence is incomplete; will retry this input after evidence is rebuilt.',
+    )
+  }
+
+  const legacyRepairEvidence = findLegacyRepairableTerminalEvidenceForGroup({
+    captureIds: input.group.optionalInboxCaptureIds,
+    evidence: existingTerminalEvidence,
+    inputIds: input.group.inputIds,
+  })
+  if (legacyRepairEvidence) {
+    const repairGroup = resolveTerminalEvidenceRepairGroup({
+      captureIds: input.group.optionalInboxCaptureIds,
+      evidence: legacyRepairEvidence,
+      inputIds: input.group.inputIds,
+    })
+    if (
+      !(await terminalEvidenceExistsForEveryId(input.vault, repairGroup.evidenceIds))
+    ) {
+      const terminalLinqCleanup =
+        await backfillAssistantAutoReplyTerminalEvidenceFromTerminalEvidence({
+          captureIds: repairGroup.captureIds,
+          evidence: legacyRepairEvidence,
+          inputIds: repairGroup.inputIds,
           vault: input.vault,
         })
       return createAdvancingSkipDecision('assistant reply already handled', {
@@ -3139,38 +3204,157 @@ function readLinqProviderMessageId(value: string | null | undefined): string | n
   return readProviderRouteScalar(value)
 }
 
-function findRepairableTerminalEvidenceForGroup(
-  captureIds: readonly string[],
-  evidence: readonly (AssistantAutoReplyTerminalEvidence | null)[],
-): AssistantAutoReplyTerminalEvidence | null {
-  if (captureIds.length === 0) {
+function findRepairableTerminalEvidencePartitionsForGroup(input: {
+  entries: readonly {
+    evidence: AssistantAutoReplyTerminalEvidence | null
+    lookup: 'capture' | 'input' | null
+    ownerInputId: string
+  }[]
+  inputIds: readonly string[]
+}): AssistantAutoReplyTerminalEvidence[] | null {
+  const currentInputIds = [...new Set(input.inputIds)]
+  if (currentInputIds.length !== input.inputIds.length) {
     return null
   }
-  return evidence.find((item) => {
-    if (!item) {
-      return false
+  const currentInputIdSet = new Set(currentInputIds)
+  const partitions: Array<{
+    evidence: AssistantAutoReplyTerminalEvidence
+    fingerprint: string
+    inputIds: string[]
+  }> = []
+  const partitionByKey = new Map<string, typeof partitions[number]>()
+
+  for (const entry of input.entries) {
+    if (entry.lookup !== 'input' || !entry.evidence) {
+      continue
     }
-    return captureIds.every((captureId) => item.groupCaptureIds.includes(captureId))
-  }) ?? null
+    const evidence = entry.evidence
+    const partitionInputIds = [...new Set(evidence.groupInputIds)]
+    if (
+      evidence.inputId !== entry.ownerInputId ||
+      partitionInputIds.length === 0 ||
+      partitionInputIds.length !== evidence.groupInputIds.length ||
+      !partitionInputIds.includes(entry.ownerInputId) ||
+      partitionInputIds.some((inputId) => !currentInputIdSet.has(inputId))
+    ) {
+      return null
+    }
+    const partitionKey = JSON.stringify(partitionInputIds)
+    const fingerprint = terminalEvidencePartitionFingerprint(evidence)
+    const existingPartition = partitionByKey.get(partitionKey)
+    if (existingPartition) {
+      if (existingPartition.fingerprint !== fingerprint) {
+        return null
+      }
+      continue
+    }
+    if (
+      partitions.some((partition) =>
+        partition.inputIds.some((inputId) => partitionInputIds.includes(inputId)),
+      )
+    ) {
+      return null
+    }
+    const partition = {
+      evidence,
+      fingerprint,
+      inputIds: partitionInputIds,
+    }
+    partitions.push(partition)
+    partitionByKey.set(partitionKey, partition)
+  }
+
+  const coveredInputIds = new Set(partitions.flatMap((partition) => partition.inputIds))
+  return partitions.length > 0 &&
+    currentInputIds.every((inputId) => coveredInputIds.has(inputId))
+    ? partitions.map((partition) => partition.evidence)
+    : null
+}
+
+function terminalEvidencePartitionFingerprint(
+  evidence: AssistantAutoReplyTerminalEvidence,
+): string {
+  return JSON.stringify({
+    groupCaptureIds: evidence.groupCaptureIds,
+    groupId: evidence.groupId,
+    groupInputIds: evidence.groupInputIds,
+    primaryCaptureId: evidence.primaryCaptureId,
+    primaryInputId: evidence.primaryInputId,
+    providerCleanupLinqMessageIds: evidence.providerCleanup.linqMessageIds,
+    recordedAt: evidence.recordedAt,
+    terminal: evidence.terminal,
+  })
 }
 
 function resolveTerminalEvidenceRepairCaptureIds(input: {
+  group: AssistantAutoReplyGroupContext
+  inputIds: readonly string[]
+}): string[] {
+  const inputIdSet = new Set(input.inputIds)
+  return [...new Set(input.group.items.flatMap((item) => {
+    const inputId = item.inputCandidate!.event.inputId
+    const captureId = item.summary.optionalInboxCaptureId
+    return inputIdSet.has(inputId) && captureId ? [captureId] : []
+  }))]
+}
+
+function findLegacyRepairableTerminalEvidenceForGroup(input: {
+  captureIds: readonly string[]
+  evidence: readonly (AssistantAutoReplyTerminalEvidence | null)[]
+  inputIds: readonly string[]
+}): AssistantAutoReplyTerminalEvidence | null {
+  return input.evidence.find((item) =>
+    item !== null &&
+    input.captureIds.length === input.inputIds.length &&
+    input.captureIds.length > 0 &&
+    input.captureIds.every((captureId) => item.groupCaptureIds.includes(captureId))
+  ) ?? null
+}
+
+function resolveTerminalEvidenceRepairGroup(input: {
   captureIds: readonly string[]
   evidence: AssistantAutoReplyTerminalEvidence
-}): string[] {
-  return [...new Set([
+  inputIds: readonly string[]
+}): {
+  captureIds: string[]
+  evidenceIds: string[]
+  inputIds: string[]
+} {
+  const captureIds = [...new Set([
     ...input.evidence.groupCaptureIds,
     ...input.captureIds,
   ])]
+  const inputIds = terminalEvidenceGroupCoversInputIds(
+    input.evidence,
+    input.inputIds,
+  )
+    ? [...new Set([
+        ...input.evidence.groupInputIds,
+        ...input.inputIds,
+      ])]
+    : []
+  return {
+    captureIds,
+    evidenceIds: inputIds.length > 0 ? inputIds : captureIds,
+    inputIds,
+  }
 }
 
-async function terminalEvidenceExistsForEveryCapture(
+function terminalEvidenceGroupCoversInputIds(
+  evidence: AssistantAutoReplyTerminalEvidence,
+  inputIds: readonly string[],
+): boolean {
+  return evidence.groupInputIds.length > 0
+    && inputIds.every((inputId) => evidence.groupInputIds.includes(inputId))
+}
+
+async function terminalEvidenceExistsForEveryId(
   vault: string,
-  captureIds: readonly string[],
+  evidenceIds: readonly string[],
 ): Promise<boolean> {
   const evidence = await Promise.all(
-    captureIds.map((captureId) =>
-      readAssistantAutoReplyTerminalEvidenceByEvidenceId(vault, captureId),
+    evidenceIds.map((evidenceId) =>
+      readAssistantAutoReplyTerminalEvidenceByEvidenceId(vault, evidenceId),
     ),
   )
   return evidence.every((item) => item !== null)
@@ -3179,6 +3363,7 @@ async function terminalEvidenceExistsForEveryCapture(
 async function backfillAssistantAutoReplyTerminalEvidenceFromTerminalEvidence(input: {
   captureIds: readonly string[]
   evidence: AssistantAutoReplyTerminalEvidence
+  inputIds: readonly string[]
   vault: string
 }): Promise<string[]> {
   if (
@@ -3187,6 +3372,7 @@ async function backfillAssistantAutoReplyTerminalEvidenceFromTerminalEvidence(in
   ) {
     return await writeAssistantAutoReplySuppressionEvidence({
       captureIds: input.captureIds,
+      ...(input.inputIds.length > 0 ? { inputIds: input.inputIds } : {}),
       linqMessageIds: input.evidence.providerCleanup.linqMessageIds,
       reason: input.evidence.terminal.reason,
       recordedAt: input.evidence.recordedAt,
@@ -3197,6 +3383,7 @@ async function backfillAssistantAutoReplyTerminalEvidenceFromTerminalEvidence(in
   return await writeAssistantAutoReplyReplyTerminalEvidence({
     captureIds: input.captureIds,
     deliveryIntentId: input.evidence.terminal.deliveryIntentId,
+    ...(input.inputIds.length > 0 ? { inputIds: input.inputIds } : {}),
     linqMessageIds: input.evidence.providerCleanup.linqMessageIds,
     outcome: input.evidence.terminal.kind === 'replied' ? 'result' : 'deferred',
     recordedAt: input.evidence.recordedAt,

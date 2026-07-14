@@ -93,6 +93,10 @@ describe("hosted-local harness", () => {
     expect(resolveHostedLocalE2eScenarios("linq-delivery")[0]?.name).toBe(
       "linq-first-contact",
     );
+    expect(resolveHostedLocalE2eScenarios("linq-same-wake-batching")[0]).toEqual({
+      file: "apps/cloudflare/test/hosted-local-linq-same-wake-batching-e2e.test.ts",
+      name: "linq-same-wake-batching",
+    });
     expect(resolveHostedLocalE2eScenarios("linq-group-route-drift")[0]?.file).toBe(
       "apps/cloudflare/test/hosted-local-linq-group-route-drift-e2e.test.ts",
     );
@@ -228,6 +232,10 @@ describe("hosted-local harness", () => {
     expect(scenarios.get("timezone-injection")).toEqual({
       file: "apps/cloudflare/test/hosted-local-timezone-injection-e2e.test.ts",
       name: "timezone-injection",
+    });
+    expect(scenarios.get("linq-same-wake-batching")).toEqual({
+      file: "apps/cloudflare/test/hosted-local-linq-same-wake-batching-e2e.test.ts",
+      name: "linq-same-wake-batching",
     });
   });
 
