@@ -114,9 +114,10 @@ current user explicitly asks for the loop.
 2. Run ReviewGPT with the PR preset and the default randomized usable managed
    browser lane. Pass the PR ref and substantive round through
    `REVIEW_GPT_PR_URL` and `REVIEW_GPT_ROUND_NUMBER`. The packager adds the full
-   current PR patch, exact round metadata, and the delta from the previous
+   PR body, current patch, exact round metadata, and the delta from the previous
    reviewed head to the guarded `codebase.zip` source snapshot:
 
+   - `review-gpt-pr-context/pr-body.md`
    - `review-gpt-pr-context/pr.diff`
    - `review-gpt-pr-context/changed-files.txt`
    - `review-gpt-pr-context/review-round.json`

@@ -138,3 +138,13 @@ export function shouldGroupAdjacentConversationInput(
   // gets its own turn with its own context.
   return first.replyToMessageId === candidate.replyToMessageId
 }
+
+export function shouldGroupAdjacentAssistantInputCandidates(
+  first: AssistantInputCandidate,
+  candidate: AssistantInputCandidate,
+): boolean {
+  return shouldGroupAdjacentConversationInput(
+    assistantAutomationInputSummaryFromCandidate(first),
+    assistantAutomationInputSummaryFromCandidate(candidate),
+  )
+}

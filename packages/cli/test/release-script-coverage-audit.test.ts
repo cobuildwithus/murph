@@ -1105,6 +1105,7 @@ describe('monorepo release flow coverage audit', () => {
     expect(prDeepReviewPrompt).toContain(
       'Do not use app connectors, memory, pasted repository context',
     )
+    expect(prDeepReviewPrompt).toContain('`review-gpt-pr-context/pr-body.md`')
     expect(prDeepReviewPrompt).toContain('`review-gpt-pr-context/pr.diff`')
     expect(prDeepReviewPrompt).toContain('`review-gpt-pr-context/changed-files.txt`')
     expect(prDeepReviewPrompt).toContain('`review-gpt-pr-context/review-round.json`')
@@ -1221,6 +1222,7 @@ describe('monorepo release flow coverage audit', () => {
     expect(prReviewGptLoop).toContain(
       'Disclosure alone does not cure unnecessary scope',
     )
+    expect(prReviewGptLoop).toContain('`review-gpt-pr-context/pr-body.md`')
     expect(prReviewGptLoop).toContain('`review-gpt-pr-context/pr.diff`')
     expect(prReviewGptLoop).toContain('`review-gpt-pr-context/review-round.json`')
     expect(prReviewGptLoop).toContain(
@@ -2389,6 +2391,10 @@ Updated: 2026-04-24
     expect(fullPackageScript).toContain('since-first-reviewed-head.diff')
     expect(fullPackageScript).toContain('since-previous-reviewed-head.diff')
     expect(fullPackageScript).toContain('git diff --no-ext-diff --no-textconv --patch')
+    expect(fullPackageScript).toContain(
+      'gh pr view "$review_gpt_pr_ref" --json body',
+    )
+    expect(fullPackageScript).toContain('$review_gpt_pr_context_dir/pr-body.md')
     expect(fullPackageScript).toContain(
       'export COBUILD_AUDIT_CONTEXT_EXCLUDE_GLOBS="${COBUILD_AUDIT_CONTEXT_BINARY_EXCLUDE_GLOBS:-}"',
     )
