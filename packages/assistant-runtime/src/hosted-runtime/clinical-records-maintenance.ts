@@ -51,14 +51,13 @@ export async function runHostedClinicalRecordsSyncWakeLane(input: {
   importSnapshot?: ClinicalRecordsVaultModule["importClinicalFhirSnapshot"];
   signal?: AbortSignal | null;
   shouldYieldClinicalRecords?: (() => boolean) | null;
-  timeoutMs?: number | null;
   vaultRoot: string;
   wake: HostedExecutionClinicalRecordsSyncRequestedWake;
 }): Promise<HostedClinicalRecordsSyncMetrics> {
   const cancellation = createHostedBackgroundMaintenanceCancellation({
     signal: input.signal ?? null,
     shouldYield: input.shouldYieldClinicalRecords ?? null,
-    timeoutMs: input.timeoutMs ?? null,
+    timeoutMs: null,
   });
   try {
     return await runHostedClinicalRecordsSyncWakeLaneWithCancellation({

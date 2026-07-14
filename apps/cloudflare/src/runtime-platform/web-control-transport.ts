@@ -26,6 +26,7 @@ import {
 } from "./control-plane-fetch.ts";
 import { buildHostedRuntimeSafeErrorMetadata } from "./diagnostics.ts";
 import { fetchHostedResponse } from "./hosted-http.ts";
+import { readHostedRuntimeResponseBodyChunks } from "./hosted-response-body.ts";
 import {
   isHostedRuntimeInternalAuthorityRejectedError,
   requireHostedRuntimeWriteFenceHeaders,
@@ -71,6 +72,15 @@ export class HostedWebControlPlaneResponseError extends Error {
       status: input.status,
       statusCode: input.status,
     };
+  }
+}
+
+class HostedWebControlPlaneSensitiveResponseInvalidJsonError extends Error {
+  readonly code = "HOSTED_WEB_CONTROL_SENSITIVE_RESPONSE_INVALID_JSON" as const;
+
+  constructor(description: string) {
+    super(`${description} returned invalid JSON.`);
+    this.name = "HostedWebControlPlaneSensitiveResponseInvalidJsonError";
   }
 }
 
@@ -301,6 +311,8 @@ export async function fetchHostedWebControlPlaneJson(input: {
     description: input.description,
     maxBytes: input.sensitiveResponseBody?.maxBytes,
     response,
+    signal: input.signal ?? null,
+    timeoutMs: input.timeoutMs,
   });
   const acceptedStatus = input.acceptedStatuses?.includes(response.status) ?? false;
   if (!response.ok && !acceptedStatus) {
@@ -354,6 +366,11 @@ export async function fetchHostedWebControlPlaneJson(input: {
       phase: "runtime.starting",
       userId: input.boundUserId,
     });
+    if (input.sensitiveResponseBody) {
+      throw new HostedWebControlPlaneSensitiveResponseInvalidJsonError(
+        input.description,
+      );
+    }
     throw new Error(`${input.description} returned invalid JSON.`, { cause: error });
   }
 }
@@ -362,6 +379,8 @@ async function readHostedWebControlPlaneResponseText(input: {
   description: string;
   maxBytes: number | undefined;
   response: Response;
+  signal: AbortSignal | null;
+  timeoutMs: number;
 }): Promise<string> {
   const maxBytes = input.maxBytes;
   if (maxBytes === undefined) {
@@ -392,31 +411,22 @@ async function readHostedWebControlPlaneResponseText(input: {
     return "";
   }
 
-  const reader = input.response.body.getReader();
   const chunks: Uint8Array[] = [];
   let totalBytes = 0;
-  try {
-    while (true) {
-      const chunk = await reader.read();
-      if (chunk.done) {
-        break;
-      }
-      totalBytes += chunk.value.byteLength;
-      if (totalBytes > maxBytes) {
-        try {
-          await reader.cancel();
-        } catch {
-          // The fixed-size rejection below is the authoritative failure.
-        }
-        throw createHostedWebControlPlaneResponseTooLargeError({
-          description: input.description,
-          maxBytes,
-        });
-      }
-      chunks.push(chunk.value);
+  for await (const chunk of readHostedRuntimeResponseBodyChunks({
+    body: input.response.body,
+    description: input.description,
+    signal: input.signal,
+    timeoutMs: input.timeoutMs,
+  })) {
+    totalBytes += chunk.byteLength;
+    if (totalBytes > maxBytes) {
+      throw createHostedWebControlPlaneResponseTooLargeError({
+        description: input.description,
+        maxBytes,
+      });
     }
-  } finally {
-    reader.releaseLock();
+    chunks.push(chunk);
   }
 
   const bytes = new Uint8Array(totalBytes);

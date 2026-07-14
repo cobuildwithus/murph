@@ -218,6 +218,72 @@ describe("hosted clinical records runtime port", () => {
     expect(observed.signal?.aborted).toBe(true);
   });
 
+  it("cancels a clinical response body that stalls after headers", async () => {
+    let cancelled = false;
+    const fetchMock = vi.fn(async () => new Response(new ReadableStream<Uint8Array>({
+      cancel() {
+        cancelled = true;
+      },
+    }), {
+      headers: {
+        "content-type": "application/json; charset=utf-8",
+      },
+      status: 200,
+    }));
+    const port = createHostedWebClinicalRecordsPort({
+      boundUserId: "member_1",
+      fetchImpl: fetchMock as typeof fetch,
+      timeoutMs: 5_000,
+      transport: { mode: "proxy" },
+    });
+    const controller = new AbortController();
+    const abortReason = new DOMException("foreground work arrived", "AbortError");
+
+    const read = port.readRun(
+      { generation: 1, runId: "run_1" },
+      { signal: controller.signal },
+    );
+    await vi.waitFor(() => expect(fetchMock).toHaveBeenCalledOnce());
+    controller.abort(abortReason);
+
+    await expect(read).rejects.toBe(abortReason);
+    expect(cancelled).toBe(true);
+  });
+
+  it("keeps malformed sensitive clinical JSON out of propagated errors", async () => {
+    const sensitiveText = "synthetic-clinical-sentinel";
+    const fetchMock = vi.fn(async () => new Response(
+      `{\"status\":\"ready\",\"detail\":${sensitiveText}}`,
+      {
+        headers: {
+          "content-type": "application/json; charset=utf-8",
+        },
+        status: 200,
+      },
+    ));
+    const port = createHostedWebClinicalRecordsPort({
+      boundUserId: "member_1",
+      fetchImpl: fetchMock as typeof fetch,
+      timeoutMs: 5_000,
+      transport: { mode: "proxy" },
+    });
+
+    try {
+      await port.readRun({ generation: 1, runId: "run_1" });
+      throw new Error("Expected malformed sensitive Clinical Records JSON to fail.");
+    } catch (error) {
+      if (!(error instanceof Error)) {
+        throw error;
+      }
+      expect(error.message).toBe("Hosted clinical records read run returned invalid JSON.");
+      expect(error.message).not.toContain(sensitiveText);
+      expect(Reflect.get(error, "code")).toBe(
+        "HOSTED_WEB_CONTROL_SENSITIVE_RESPONSE_INVALID_JSON",
+      );
+      expect(Reflect.has(error, "cause")).toBe(false);
+    }
+  });
+
   it("cancels a fetch-page response at exactly one byte beyond its envelope limit", async () => {
     let cancelled = false;
     const fetchMock = vi.fn(async () => new Response(new ReadableStream<Uint8Array>({
