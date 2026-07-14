@@ -56,7 +56,7 @@ overrides:
 
 patchedDependencies:
   '@cobuild/repo-tools@0.1.15':
-    hash: 495a2f2f039251b2c47022f4eba17b7a0c2fbbdc027f731948fc5dab72e17471
+    hash: 1bb6f46e87ffa3e712f0ba9bad95ca93fb6e118c4d5c2e64a7fc3fbce9825547
     path: patches/@cobuild__repo-tools@0.1.15.patch
   incur@0.4.5:
     hash: d02ac1808a7524a97aaea12822966726a31acaf4c5b5064d56ca03730c790b5e
@@ -68,7 +68,7 @@ importers:
     devDependencies:
       '@cobuild/repo-tools':
         specifier: ^0.1.15
-        version: 0.1.15(patch_hash=495a2f2f039251b2c47022f4eba17b7a0c2fbbdc027f731948fc5dab72e17471)
+        version: 0.1.15(patch_hash=1bb6f46e87ffa3e712f0ba9bad95ca93fb6e118c4d5c2e64a7fc3fbce9825547)
       '@cobuild/review-gpt':
         specifier: ^0.5.106
         version: 0.5.106(@cfworker/json-schema@4.1.1)(typescript@7.0.2)
@@ -10616,11 +10616,11 @@ snapshots:
 
   '@cloudflare/workers-types@4.20260511.1': {}
 
-  '@cobuild/repo-tools@0.1.15(patch_hash=495a2f2f039251b2c47022f4eba17b7a0c2fbbdc027f731948fc5dab72e17471)': {}
+  '@cobuild/repo-tools@0.1.15(patch_hash=1bb6f46e87ffa3e712f0ba9bad95ca93fb6e118c4d5c2e64a7fc3fbce9825547)': {}
 
   '@cobuild/review-gpt@0.5.106(@cfworker/json-schema@4.1.1)(typescript@7.0.2)':
     dependencies:
-      '@cobuild/repo-tools': 0.1.15(patch_hash=495a2f2f039251b2c47022f4eba17b7a0c2fbbdc027f731948fc5dab72e17471)
+      '@cobuild/repo-tools': 0.1.15(patch_hash=1bb6f46e87ffa3e712f0ba9bad95ca93fb6e118c4d5c2e64a7fc3fbce9825547)
       incur: 0.4.5(patch_hash=d02ac1808a7524a97aaea12822966726a31acaf4c5b5064d56ca03730c790b5e)
       repomix: 1.16.0(@cfworker/json-schema@4.1.1)(typescript@7.0.2)
     transitivePeerDependencies:
