@@ -231,14 +231,16 @@ function createEffect(
 function createCrossTurnMailboxReplyIntent(input: {
   answeredMailboxItemIds?: string[];
   attemptCount?: number;
-  channel?: "linq" | "telegram";
+  channel?: "email" | "linq" | "telegram";
   createdAt: string;
   deliverySourcePhone?: string | null;
   explicitTarget: string;
+  identityId?: string;
   intentId: string;
   lastAttemptAt?: string | null;
   lastError?: { code: string; message: string } | null;
   status?: "pending" | "retryable";
+  threadId?: string;
   turnId: string;
 }) {
   return {
@@ -259,7 +261,7 @@ function createCrossTurnMailboxReplyIntent(input: {
         },
     deliveryTransportIdempotent: true,
     explicitTarget: input.explicitTarget,
-    identityId: "identity_1",
+    identityId: input.identityId ?? "identity_1",
     intentId: input.intentId,
     lastAttemptAt: input.lastAttemptAt ?? null,
     lastError: input.lastError ?? null,
@@ -271,7 +273,7 @@ function createCrossTurnMailboxReplyIntent(input: {
     sessionId: "session_1",
     status: input.status ?? "pending",
     subject: null,
-    threadId: "linq-thread",
+    threadId: input.threadId ?? "linq-thread",
     threadIsDirect: true,
     turnId: input.turnId,
   };
@@ -2423,6 +2425,51 @@ describe("hosted runtime callbacks", () => {
         deliverySourcePhone: null,
         explicitTarget: "telegram-chat",
         intentId: "intent_second",
+        turnId: "turn_second",
+      }),
+    ]);
+
+    const sideEffects = await collectHostedAssistantDeliverySideEffects({
+      includeBackgroundDueIntents: false,
+      preferredIntentIds: ["intent_second"],
+      vaultRoot: "/tmp/vault",
+    });
+
+    expect(sideEffects).toEqual([]);
+  });
+
+  it("holds a later email reply behind the same stable sender thread", async () => {
+    mocks.listAssistantOutboxIntents.mockResolvedValue([
+      createCrossTurnMailboxReplyIntent({
+        channel: "email",
+        createdAt: "2026-04-08T00:00:00.000Z",
+        deliverySourcePhone: null,
+        explicitTarget: serializeHostedEmailThreadTarget({
+          cc: [],
+          lastMessageId: "<first@example.test>",
+          references: [],
+          subject: "Check-in",
+          to: ["group@example.test"],
+        }),
+        identityId: "email-sender",
+        intentId: "intent_first",
+        threadId: "stable-email-thread",
+        turnId: "turn_first",
+      }),
+      createCrossTurnMailboxReplyIntent({
+        channel: "email",
+        createdAt: "2026-04-08T00:01:00.000Z",
+        deliverySourcePhone: null,
+        explicitTarget: serializeHostedEmailThreadTarget({
+          cc: [],
+          lastMessageId: "<second@example.test>",
+          references: ["<first@example.test>"],
+          subject: "Re: Check-in",
+          to: ["group@example.test"],
+        }),
+        identityId: "email-sender",
+        intentId: "intent_second",
+        threadId: "stable-email-thread",
         turnId: "turn_second",
       }),
     ]);
@@ -5964,7 +6011,7 @@ describe("hosted runtime callbacks", () => {
     expect(mocks.resetAssistantOutboxPreparedDispatchById).not.toHaveBeenCalled();
   });
 
-  it("leaves unprepared provider-entry foreground yield retryable in the outbox", async () => {
+  it("restores and yields an unprepared reply rejected before Telegram provider entry", async () => {
     const effect = buildHostedAssistantDeliveryEffect({
       dedupeKey: "dedupe_unprepared_yield_at_provider_entry",
       deliveryPhase: "background_retry",
@@ -5975,7 +6022,7 @@ describe("hosted runtime callbacks", () => {
       }),
     });
     let yieldChecks = 0;
-    let providerEntryYieldWasRethrown = true;
+    let providerEntryYieldWasRestoredAndRethrown = false;
     mocks.readAssistantOutboxIntentMirrorState.mockResolvedValueOnce(
       createMirrorState(
         {
@@ -6005,15 +6052,17 @@ describe("hosted runtime callbacks", () => {
           target: "chat_123",
         });
       } catch (error) {
-        providerEntryYieldWasRethrown =
-          request.dispatchHooks?.shouldRethrowDispatchError?.({
+        providerEntryYieldWasRestoredAndRethrown =
+          request.dispatchHooks?.shouldRestorePreDispatchStateAndRethrow?.({
             error,
             intent: {
               intentId: "intent_unprepared_yield_at_provider_entry",
             },
             vault: HOSTED_WAKE.vaultRoot,
           }) === true;
-        expect(providerEntryYieldWasRethrown).toBe(false);
+        if (providerEntryYieldWasRestoredAndRethrown) {
+          throw error;
+        }
         return createDispatchResult(
           {
             intentId: "intent_unprepared_yield_at_provider_entry",
@@ -6038,11 +6087,15 @@ describe("hosted runtime callbacks", () => {
       }
       throw new Error("expected provider-entry foreground yield");
     });
+    const yieldedCounts: number[] = [];
 
     const outcomes = await drainHostedPreparedAssistantDeliveries({
       allowPreparedSending: true,
       assistantDeliveryEffects: [effect],
       effectsPort: createHostedRuntimeEffectsPortStub(),
+      onBackgroundDeliveryYield: ({ yieldedEffectCount }) => {
+        yieldedCounts.push(yieldedEffectCount);
+      },
       providerFetch: vi.fn<typeof fetch>(),
       shouldYieldBackgroundDelivery: () => {
         yieldChecks += 1;
@@ -6052,17 +6105,200 @@ describe("hosted runtime callbacks", () => {
       wake: HOSTED_WAKE.wake,
     });
 
-    expect(outcomes).toEqual([
-      expect.objectContaining({
-        deliveryErrorCode: "HOSTED_BACKGROUND_DELIVERY_YIELDED",
-        deliveryStatus: "retryable",
-        effectId: "intent_unprepared_yield_at_provider_entry",
-        retryable: true,
-      }),
-    ]);
-    expect(providerEntryYieldWasRethrown).toBe(false);
+    expect(outcomes).toEqual([]);
+    expect(providerEntryYieldWasRestoredAndRethrown).toBe(true);
+    expect(yieldedCounts).toEqual([1]);
     expect(mocks.dispatchAssistantOutboxIntent).toHaveBeenCalledTimes(1);
     expect(mocks.sendTelegramMessage).not.toHaveBeenCalled();
+    expect(mocks.resetAssistantOutboxPreparedDispatchById).not.toHaveBeenCalled();
+  });
+
+  it("restores and yields an unprepared reply rejected by the email provider-entry fence", async () => {
+    const hostedEmailThreadTarget = serializeHostedEmailThreadTarget({
+      lastMessageId: "<message_parent@example.test>",
+      references: [],
+      subject: "Check-in",
+      to: ["sender@example.test"],
+    });
+    const effect = buildHostedAssistantDeliveryEffect({
+      dedupeKey: "dedupe_unprepared_email_yield",
+      deliveryPhase: "background_retry",
+      effectId: "intent_unprepared_email_yield",
+      payload: createPayload({
+        bindingDeliveryKind: "thread",
+        bindingDeliveryTarget: hostedEmailThreadTarget,
+        channel: "email",
+        explicitTarget: hostedEmailThreadTarget,
+        idempotencyKey: "assistant-outbox:intent_unprepared_email_yield",
+        transportIdempotent: false,
+      }),
+    });
+    let shouldYield = false;
+    let providerEntryYieldWasRestoredAndRethrown = false;
+    const sendEmail = vi.fn(async (
+      _request: HostedEmailSendRequest,
+      context?: {
+        assertProviderEntryCurrent?: (() => void) | null;
+        onProviderDispatchEntered?: (() => void) | null;
+      },
+    ) => {
+      shouldYield = true;
+      context?.assertProviderEntryCurrent?.();
+      context?.onProviderDispatchEntered?.();
+      throw new Error("expected email provider-entry fence to yield");
+    });
+    mocks.readAssistantOutboxIntentMirrorState.mockResolvedValueOnce(
+      createMirrorState(
+        {
+          delivery: null,
+          deliveryIdempotencyKey:
+            "assistant-outbox:intent_unprepared_email_yield",
+          deliveryTransportIdempotent: false,
+          intentId: effect.effectId,
+          lastError: null,
+          status: "pending",
+        },
+        {
+          sendingStartedAt: null,
+        },
+      ),
+    );
+    mocks.dispatchAssistantOutboxIntent.mockImplementationOnce(async (request) => {
+      try {
+        await request.dependencies.sendEmail({
+          idempotencyKey: "assistant-outbox:intent_unprepared_email_yield",
+          identityId: null,
+          message: "hello from hosted",
+          replyToMessageId: "<message_parent@example.test>",
+          subject: "Check-in",
+          target: hostedEmailThreadTarget,
+          targetKind: "thread",
+        });
+      } catch (error) {
+        providerEntryYieldWasRestoredAndRethrown =
+          request.dispatchHooks?.shouldRestorePreDispatchStateAndRethrow?.({
+            error,
+            intent: { intentId: effect.effectId },
+            vault: HOSTED_WAKE.vaultRoot,
+          }) === true;
+        if (providerEntryYieldWasRestoredAndRethrown) {
+          throw error;
+        }
+      }
+      throw new Error("expected email provider-entry foreground yield");
+    });
+    const yieldedCounts: number[] = [];
+
+    const outcomes = await drainHostedPreparedAssistantDeliveries({
+      allowPreparedSending: true,
+      assistantDeliveryEffects: [effect],
+      effectsPort: createHostedRuntimeEffectsPortStub({ sendEmail }),
+      onBackgroundDeliveryYield: ({ yieldedEffectCount }) => {
+        yieldedCounts.push(yieldedEffectCount);
+      },
+      shouldYieldBackgroundDelivery: () => shouldYield,
+      vaultRoot: HOSTED_WAKE.vaultRoot,
+      wake: HOSTED_WAKE.wake,
+    });
+
+    expect(outcomes).toEqual([]);
+    expect(providerEntryYieldWasRestoredAndRethrown).toBe(true);
+    expect(yieldedCounts).toEqual([1]);
+    expect(sendEmail).toHaveBeenCalledTimes(1);
+    expect(mocks.resetAssistantOutboxPreparedDispatchById).not.toHaveBeenCalled();
+  });
+
+  it("keeps an unprepared reply fail-closed after Telegram provider entry", async () => {
+    const effect = buildHostedAssistantDeliveryEffect({
+      dedupeKey: "dedupe_unprepared_post_entry_yield",
+      deliveryPhase: "background_retry",
+      effectId: "intent_unprepared_post_entry_yield",
+      payload: createPayload({
+        idempotencyKey: "assistant-outbox:intent_unprepared_post_entry_yield",
+        transportIdempotent: false,
+      }),
+    });
+    let shouldYield = false;
+    let restoreWasSelected = true;
+    let rethrowWasSelected = false;
+    const providerFetch = vi.fn<typeof fetch>(async () =>
+      new Response(null, { status: 204 })
+    );
+    mocks.readAssistantOutboxIntentMirrorState.mockResolvedValueOnce(
+      createMirrorState(
+        {
+          delivery: null,
+          deliveryIdempotencyKey:
+            "assistant-outbox:intent_unprepared_post_entry_yield",
+          deliveryTransportIdempotent: false,
+          intentId: effect.effectId,
+          lastError: null,
+          status: "pending",
+        },
+        {
+          sendingStartedAt: null,
+        },
+      ),
+    );
+    mocks.sendTelegramMessage.mockImplementationOnce(async (_request, dependencies) => {
+      await dependencies.fetchImplementation(
+        "https://api.telegram.example/bot/sendMessage",
+        { method: "POST" },
+      );
+      shouldYield = true;
+      await dependencies.fetchImplementation(
+        "https://api.telegram.example/bot/sendMessage",
+        { method: "POST" },
+      );
+      throw new Error("expected repeated provider attempt to lose authority");
+    });
+    mocks.dispatchAssistantOutboxIntent.mockImplementationOnce(async (request) => {
+      try {
+        await request.dependencies.sendTelegram({
+          idempotencyKey: "assistant-outbox:intent_unprepared_post_entry_yield",
+          message: "hello from hosted",
+          replyToMessageId: null,
+          target: "chat_123",
+        });
+      } catch (error) {
+        const hookInput = {
+          error,
+          intent: { intentId: effect.effectId },
+          vault: HOSTED_WAKE.vaultRoot,
+        };
+        restoreWasSelected =
+          request.dispatchHooks?.shouldRestorePreDispatchStateAndRethrow?.(
+            hookInput,
+          ) === true;
+        rethrowWasSelected =
+          request.dispatchHooks?.shouldRethrowDispatchError?.(hookInput) === true;
+        if (rethrowWasSelected) {
+          throw error;
+        }
+      }
+      throw new Error("expected post-entry foreground yield");
+    });
+    const yieldedCounts: number[] = [];
+
+    const outcomes = await drainHostedPreparedAssistantDeliveries({
+      allowPreparedSending: true,
+      assistantDeliveryEffects: [effect],
+      effectsPort: createHostedRuntimeEffectsPortStub(),
+      onBackgroundDeliveryYield: ({ yieldedEffectCount }) => {
+        yieldedCounts.push(yieldedEffectCount);
+      },
+      providerFetch,
+      shouldYieldBackgroundDelivery: () => shouldYield,
+      vaultRoot: HOSTED_WAKE.vaultRoot,
+      wake: HOSTED_WAKE.wake,
+    });
+
+    expect(outcomes).toEqual([]);
+    expect(restoreWasSelected).toBe(false);
+    expect(rethrowWasSelected).toBe(true);
+    expect(yieldedCounts).toEqual([1]);
+    expect(providerFetch).toHaveBeenCalledTimes(1);
+    expect(mocks.sendTelegramMessage).toHaveBeenCalledTimes(1);
     expect(mocks.resetAssistantOutboxPreparedDispatchById).not.toHaveBeenCalled();
   });
 

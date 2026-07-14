@@ -2535,6 +2535,80 @@ describe('assistant outbox runtime', () => {
     expect(persisted?.lastError).toBeNull()
   })
 
+  it('restores the prior outbox state before rethrowing a proven pre-provider cancellation', async () => {
+    const { vaultRoot } = await createAssistantVault('assistant-outbox-restore-rethrow-')
+    const created = await createIntent(vaultRoot, {
+      message: 'restore before provider entry',
+      sessionId: 'session-restore-rethrow',
+      turnId: 'turn-restore-rethrow',
+    })
+    const seeded = await saveAssistantOutboxIntent(vaultRoot, {
+      ...created,
+      attemptCount: 3,
+      deliveryIdempotencyKey: null,
+      deliveryTransportIdempotent: true,
+      lastAttemptAt: '2026-04-08T04:00:00.000Z',
+      lastError: {
+        code: 'ASSISTANT_DELIVERY_RETRYABLE',
+        message: 'prior retry still belongs to the runtime',
+      },
+      nextAttemptAt: '2026-04-08T05:00:00.000Z',
+      status: 'retryable',
+      updatedAt: '2026-04-08T04:00:00.000Z',
+    })
+    const controlFlowError = new VaultCliError(
+      'HOSTED_BACKGROUND_DELIVERY_YIELDED',
+      'Hosted background delivery yielded before provider entry.',
+      { retryable: true },
+    )
+    const shouldRestorePreDispatchStateAndRethrow = vi.fn((input: {
+      error: unknown
+      intent: AssistantOutboxIntent
+      vault: string
+    }) => {
+      expect(input.error).toBe(controlFlowError)
+      expect(input.intent).toMatchObject({
+        attemptCount: seeded.attemptCount + 1,
+        intentId: seeded.intentId,
+        status: 'sending',
+      })
+      expect(input.vault).toBe(vaultRoot)
+      return true
+    })
+    mockedDeliverAssistantMessageOverBinding.mockRejectedValueOnce(controlFlowError)
+
+    await expect(
+      dispatchAssistantOutboxIntent({
+        dispatchHooks: {
+          shouldRestorePreDispatchStateAndRethrow,
+        },
+        force: true,
+        intentId: seeded.intentId,
+        now: new Date('2026-04-08T04:22:00.000Z'),
+        vault: vaultRoot,
+      }),
+    ).rejects.toBe(controlFlowError)
+
+    const persisted = await readAssistantOutboxIntent(vaultRoot, seeded.intentId)
+    expect(shouldRestorePreDispatchStateAndRethrow).toHaveBeenCalledTimes(1)
+    expect(mockedDeliverAssistantMessageOverBinding).toHaveBeenCalledTimes(1)
+    expect(persisted).toMatchObject({
+      attemptCount: 3,
+      delivery: seeded.delivery,
+      deliveryConfirmationPending: seeded.deliveryConfirmationPending,
+      deliveryIdempotencyKey: null,
+      deliveryTransportIdempotent: true,
+      lastAttemptAt: '2026-04-08T04:00:00.000Z',
+      lastError: {
+        code: 'ASSISTANT_DELIVERY_RETRYABLE',
+        message: 'prior retry still belongs to the runtime',
+      },
+      nextAttemptAt: '2026-04-08T05:00:00.000Z',
+      preparedDispatchToken: seeded.preparedDispatchToken,
+      status: 'retryable',
+    })
+  })
+
   it('persists non-rethrown hosted foreground yield as retryable', async () => {
     const { vaultRoot } = await createAssistantVault('assistant-outbox-yield-retryable-')
     const seeded = await createIntent(vaultRoot, {
@@ -2551,7 +2625,7 @@ describe('assistant outbox runtime', () => {
         retryable: true,
       },
     )
-    const shouldRethrowDispatchError = vi.fn((input: {
+    const shouldRestorePreDispatchStateAndRethrow = vi.fn((input: {
       error: unknown
       intent: AssistantOutboxIntent
       vault: string
@@ -2567,7 +2641,7 @@ describe('assistant outbox runtime', () => {
 
     const result = await dispatchAssistantOutboxIntent({
       dispatchHooks: {
-        shouldRethrowDispatchError,
+        shouldRestorePreDispatchStateAndRethrow,
       },
       force: true,
       intentId: seeded.intentId,
@@ -2575,7 +2649,7 @@ describe('assistant outbox runtime', () => {
       vault: vaultRoot,
     })
 
-    expect(shouldRethrowDispatchError).toHaveBeenCalledTimes(1)
+    expect(shouldRestorePreDispatchStateAndRethrow).toHaveBeenCalledTimes(1)
     expect(mockedDeliverAssistantMessageOverBinding).toHaveBeenCalledTimes(1)
     expect(result.intent.status).toBe('retryable')
     expect(result.intent.lastError).toMatchObject({

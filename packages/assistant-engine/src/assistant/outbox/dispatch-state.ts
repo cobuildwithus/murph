@@ -362,6 +362,63 @@ export async function updateAssistantOutboxAfterDispatchFailure(input: {
   return failedIntent
 }
 
+export async function restoreAssistantOutboxPreDispatchState(input: {
+  intentPath: string
+  previous: AssistantOutboxIntent
+  restoredAt: Date
+  sending: AssistantOutboxIntent
+  vault: string
+}): Promise<AssistantOutboxIntent | null> {
+  return withAssistantRuntimeWriteLock(input.vault, async (paths) => {
+    await ensureAssistantState(paths)
+    const current = await readAssistantOutboxIntentAtPath(input.intentPath, {
+      vault: input.vault,
+    })
+    if (
+      !current
+      || current.delivery !== null
+      || current.deliveryConfirmationPending
+      || !assistantOutboxIntentMatchesDispatchOwner(current, input.sending)
+    ) {
+      if (current) {
+        await repairAssistantOutboxReceiptForIntent({
+          at: current.updatedAt,
+          intent: current,
+          vault: input.vault,
+        })
+      }
+      return current
+    }
+
+    const restoredAt = input.restoredAt.toISOString()
+    const restored = assistantOutboxIntentSchema.parse(
+      sanitizeAssistantOutboxIntentForPersistence({
+        ...current,
+        attemptCount: input.previous.attemptCount,
+        deliveryConfirmationPending: input.previous.deliveryConfirmationPending,
+        deliveryIdempotencyKey: input.previous.deliveryIdempotencyKey,
+        deliveryTransportIdempotent: input.previous.deliveryTransportIdempotent,
+        lastAttemptAt: input.previous.lastAttemptAt,
+        lastError: input.previous.lastError,
+        nextAttemptAt: input.previous.nextAttemptAt,
+        preparedDispatchToken: input.previous.preparedDispatchToken,
+        status: input.previous.status,
+        updatedAt: restoredAt,
+      }),
+    )
+    await writeJsonFileAtomic(
+      input.intentPath,
+      sanitizeAssistantOutboxIntentForPersistence(restored),
+    )
+    await repairAssistantOutboxReceiptForIntent({
+      at: restoredAt,
+      intent: restored,
+      vault: input.vault,
+    })
+    return restored
+  })
+}
+
 function readAmbiguousDeliveryFromError(input: {
   error: unknown
   failedAt: Date

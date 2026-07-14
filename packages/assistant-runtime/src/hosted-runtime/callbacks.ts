@@ -72,8 +72,7 @@ import {
   assistantChannelDeliverySchema,
 } from "@murphai/operator-config/assistant-cli-contracts";
 import {
-  normalizeAssistantRouteString,
-  resolveAssistantDeliveryRouteConversationKey,
+  assistantDeliveryRoutesBelongToSameConversation,
 } from "@murphai/operator-config/assistant/current-delivery-route";
 import { VaultCliError } from "@murphai/operator-config/vault-cli-errors";
 import {
@@ -323,102 +322,38 @@ function findHostedAssistantCrossTurnMailboxReplyBlockedCandidateIds(
   // irreversible send. Keep later accepted-input replies out of the next drain
   // until that pristine predecessor gets its first attempt. Once it becomes a
   // retry, ordinary foreground priority applies again.
-  const pristinePendingReplies = candidates.flatMap((intent) => {
-    if (
-      !isHostedAssistantPristinePendingMessageIntent(intent)
-      || (intent.answeredMailboxItemIds?.length ?? 0) === 0
-    ) {
-      return [];
-    }
-    const conversationKeys = buildHostedAssistantMailboxReplyConversationKeys(intent);
-    return conversationKeys.length > 0 ? [{ conversationKeys, intent }] : [];
-  });
-  const earliestByConversationKey = new Map<string, AssistantOutboxIntent>();
-  for (const reply of pristinePendingReplies) {
-    for (const conversationKey of reply.conversationKeys) {
-      const earliest = earliestByConversationKey.get(conversationKey);
-      if (
-        !earliest
-        || compareHostedAssistantDeliveryCandidateIntents(reply.intent, earliest) < 0
-      ) {
-        earliestByConversationKey.set(conversationKey, reply.intent);
-      }
-    }
-  }
-  const earliestOtherTurnByConversationKey =
-    new Map<string, AssistantOutboxIntent>();
-  for (const reply of pristinePendingReplies) {
-    for (const conversationKey of reply.conversationKeys) {
-      const earliest = earliestByConversationKey.get(conversationKey);
-      if (!earliest || earliest.turnId === reply.intent.turnId) {
-        continue;
-      }
-      const earliestOtherTurn =
-        earliestOtherTurnByConversationKey.get(conversationKey);
-      if (
-        !earliestOtherTurn
-        || compareHostedAssistantDeliveryCandidateIntents(
-          reply.intent,
-          earliestOtherTurn,
-        ) < 0
-      ) {
-        earliestOtherTurnByConversationKey.set(conversationKey, reply.intent);
-      }
-    }
-  }
+  const pristinePendingReplies = candidates
+    .filter((intent) =>
+      isHostedAssistantPristinePendingMessageIntent(intent)
+      && (intent.answeredMailboxItemIds?.length ?? 0) > 0
+    )
+    .sort(compareHostedAssistantDeliveryCandidateIntents);
   const blockedIntentIds = new Set<string>();
-  for (const reply of pristinePendingReplies) {
-    const hasPredecessor = reply.conversationKeys.some((conversationKey) => {
-      const earliest = earliestByConversationKey.get(conversationKey);
-      if (!earliest) {
-        return false;
-      }
-      const predecessor = earliest.turnId === reply.intent.turnId
-        ? earliestOtherTurnByConversationKey.get(conversationKey)
-        : earliest;
-      return Boolean(
-        predecessor
-        && compareHostedAssistantDeliveryCandidateIntents(
-          predecessor,
-          reply.intent,
-        ) < 0,
+  for (let index = 0; index < pristinePendingReplies.length; index += 1) {
+    const reply = pristinePendingReplies[index];
+    if (!reply) {
+      continue;
+    }
+    const deliverySourceKey = readHostedAssistantDeliverySourceKey(
+      reply.deliverySource,
+    );
+    const route = buildHostedAssistantIntentDeliveryRoute(reply);
+    const hasPredecessor = pristinePendingReplies
+      .slice(0, index)
+      .some((predecessor) =>
+        predecessor.turnId !== reply.turnId
+        && readHostedAssistantDeliverySourceKey(predecessor.deliverySource)
+          === deliverySourceKey
+        && assistantDeliveryRoutesBelongToSameConversation(
+          buildHostedAssistantIntentDeliveryRoute(predecessor),
+          route,
+        )
       );
-    });
     if (hasPredecessor) {
-      blockedIntentIds.add(reply.intent.intentId);
+      blockedIntentIds.add(reply.intentId);
     }
   }
   return blockedIntentIds;
-}
-
-function buildHostedAssistantMailboxReplyConversationKeys(
-  intent: AssistantOutboxIntent,
-): string[] {
-  const route = buildHostedAssistantIntentDeliveryRoute(intent);
-  const routeKey = resolveAssistantDeliveryRouteConversationKey(route);
-  if (!routeKey) {
-    return [];
-  }
-  const deliverySourceKey = readHostedAssistantDeliverySourceKey(
-    intent.deliverySource,
-  );
-  const keys = [JSON.stringify(["route", deliverySourceKey, routeKey])];
-  if (
-    normalizeAssistantRouteString(route.channel) === "linq"
-    && route.threadIsDirect === true
-  ) {
-    const identityId = normalizeAssistantRouteString(route.identityId);
-    const participantId = normalizeAssistantRouteString(route.participantId);
-    if (identityId && participantId) {
-      keys.push(JSON.stringify([
-        "linq-direct",
-        deliverySourceKey,
-        identityId,
-        participantId,
-      ]));
-    }
-  }
-  return keys;
 }
 
 function isHostedAssistantPristinePendingMessageIntent(
@@ -2280,7 +2215,10 @@ async function deliverHostedPreparedAssistantDelivery(input: {
             vaultRoot: vault,
           }),
         shouldRethrowDispatchError: ({ error }) =>
-          input.preparedDispatch !== null
+          isHostedBackgroundDeliveryYieldedError(error),
+        shouldRestorePreDispatchStateAndRethrow: ({ error }) =>
+          input.preparedDispatch === null
+          && !providerDispatchEntered
           && isHostedBackgroundDeliveryYieldedError(error),
       },
       dependencies: {
