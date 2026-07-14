@@ -115,6 +115,7 @@ import {
   HOSTED_RUNTIME_GROUP_JOIN_OFFER_MESSAGE_TEMPLATE_MAX_LENGTH,
   HOSTED_RUNTIME_GROUP_KINDS,
   HOSTED_RUNTIME_GROUP_CHAT_PARTICIPANTS_MAX,
+  HOSTED_RUNTIME_GROUP_MEMBERSHIPS_MAX,
   HOSTED_RUNTIME_NEWSLETTER_HTML_MAX_LENGTH,
   HOSTED_RUNTIME_NEWSLETTER_PARTICIPANTS_MAX,
   HOSTED_RUNTIME_NEWSLETTER_SUBJECT_MAX_LENGTH,
@@ -125,6 +126,7 @@ import {
   type HostedRuntimeGroupPostJoinOfferRequest,
   type HostedRuntimeGroupUpdateDisplayNameRequest,
   type HostedRuntimeGroupToolLinqThreadContext,
+  type HostedRuntimeGroupMembershipSummary,
   type HostedRuntimeGroupMemberSummary,
   type HostedRuntimeGroupToolSelfOptOutContext,
   type HostedRuntimeGroupToolRequest,
@@ -813,11 +815,11 @@ export function parseHostedRuntimeGroupToolRequest(
 ): HostedRuntimeGroupToolRequest {
   const record = requireObject(value, "Hosted runtime group tool request");
   const action = requireString(record.action, "Hosted runtime group tool request action");
-  if (action === "read_current") {
+  if (action === "read_current" || action === "list_memberships") {
     assertAllowedObjectKeys(
       record,
       new Set(["action"]),
-      "Hosted runtime group tool read_current request",
+      `Hosted runtime group tool ${action} request`,
     );
     return { action };
   }
@@ -1173,6 +1175,58 @@ export function parseHostedRuntimeGroupToolResponse(
           status,
           unavailableReason: requireString(result.unavailableReason, "Hosted runtime group unavailableReason"),
           group: null,
+        },
+      };
+    }
+  }
+
+  if (action === "list_memberships") {
+    const result = requireObject(
+      record.result,
+      "Hosted runtime group tool list_memberships response result",
+    );
+    const status = requireString(
+      result.status,
+      "Hosted runtime group tool list_memberships response status",
+    );
+    if (status === "ok") {
+      assertAllowedObjectKeys(
+        result,
+        new Set(["status", "memberships", "truncated"]),
+        "Hosted runtime group tool list_memberships ok response result",
+      );
+      return {
+        action,
+        result: {
+          status,
+          memberships: parseHostedRuntimeGroupMembershipSummaries(result.memberships),
+          truncated: requireBoolean(
+            result.truncated,
+            "Hosted runtime group tool list_memberships truncated",
+          ),
+        },
+      };
+    }
+    if (status === "unavailable") {
+      assertAllowedObjectKeys(
+        result,
+        new Set(["status", "unavailableReason", "memberships"]),
+        "Hosted runtime group tool list_memberships unavailable response result",
+      );
+      if (result.memberships !== null) {
+        throw new TypeError(
+          "Hosted runtime group tool list_memberships unavailable memberships must be null.",
+        );
+      }
+      return {
+        action,
+        result: {
+          status,
+          unavailableReason: requireString(
+            result.unavailableReason,
+            "Hosted runtime group tool list_memberships unavailableReason",
+          ),
+          memberships: null,
         },
       };
     }
@@ -1634,6 +1688,75 @@ function parseHostedRuntimeGroupChatParticipants(
     return {
       handle: requireString(record.handle, `${label} entry handle`),
       hasOwnMurph: requireBoolean(record.hasOwnMurph, `${label} entry hasOwnMurph`),
+    };
+  });
+}
+
+function parseHostedRuntimeGroupMembershipSummaries(
+  value: unknown,
+): HostedRuntimeGroupMembershipSummary[] {
+  const label = "Hosted runtime group tool list_memberships memberships";
+  const entries = requireArray(value, label);
+  if (entries.length > HOSTED_RUNTIME_GROUP_MEMBERSHIPS_MAX) {
+    throw new TypeError(
+      `${label} must contain at most ${HOSTED_RUNTIME_GROUP_MEMBERSHIPS_MAX} entries.`,
+    );
+  }
+  return entries.map((entry) => {
+    const record = requireObject(entry, `${label} entry`);
+    assertAllowedObjectKeys(
+      record,
+      new Set([
+        "displayName",
+        "grantedVaultShareProjectionScopes",
+        "kind",
+        "memberCount",
+        "permissionsUrl",
+        "requestedVaultShareProjectionScopes",
+        "role",
+      ]),
+      `${label} entry`,
+    );
+    const grantedVaultShareProjectionScopes =
+      parseHostedRuntimeGroupProjectionScopeArray(
+        record.grantedVaultShareProjectionScopes,
+        `${label} entry grantedVaultShareProjectionScopes`,
+        HOSTED_RUNTIME_GROUP_SUMMARY_PROJECTION_SCOPES,
+      );
+    if (!grantedVaultShareProjectionScopes) {
+      throw new TypeError(
+        `${label} entry grantedVaultShareProjectionScopes must be an array.`,
+      );
+    }
+    const requestedVaultShareProjectionScopes =
+      parseHostedRuntimeGroupProjectionScopeArray(
+        record.requestedVaultShareProjectionScopes,
+        `${label} entry requestedVaultShareProjectionScopes`,
+        HOSTED_VAULT_SHARE_SELECTABLE_PROJECTION_SCOPES,
+      );
+    if (!requestedVaultShareProjectionScopes) {
+      throw new TypeError(
+        `${label} entry requestedVaultShareProjectionScopes must be an array.`,
+      );
+    }
+    const memberCount = requireNumber(
+      record.memberCount,
+      `${label} entry memberCount`,
+    );
+    if (!Number.isInteger(memberCount) || memberCount < 0) {
+      throw new TypeError(`${label} entry memberCount must be a non-negative integer.`);
+    }
+    return {
+      displayName: readNullableString(record.displayName, `${label} entry displayName`),
+      grantedVaultShareProjectionScopes,
+      kind: requireString(record.kind, `${label} entry kind`),
+      memberCount,
+      permissionsUrl: readNullableString(
+        record.permissionsUrl,
+        `${label} entry permissionsUrl`,
+      ),
+      requestedVaultShareProjectionScopes,
+      role: requireString(record.role, `${label} entry role`),
     };
   });
 }

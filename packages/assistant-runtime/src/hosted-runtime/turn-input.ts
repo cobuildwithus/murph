@@ -223,43 +223,14 @@ export async function selectHostedAssistantInputIds(
     };
   }
 
-  const selectedInputIds = new Set(freshInputIds);
-  const events = await readHostedAssistantInputEventsById({
+  const freshEvents = await readHostedAssistantInputEventsById({
     inputIds: freshInputIds,
     vaultRoot: input.vaultRoot,
   });
-  const eventsByInputId = new Map(events.map((event) => [event.inputId, event]));
-  const freshEvents = freshInputIds.map((inputId) =>
-    readRequiredHostedFreshAssistantInputEvent({
-      eventsByInputId,
-      inputId,
-    })
-  );
-  const latestFreshEventByConversation = selectLatestEventByConversation(freshEvents);
-  const pendingEvents = latestFreshEventByConversation.length === 0
-    ? []
-    : await readHostedReplyablePendingAssistantInputEvents({
-      inputIds: pendingInputIds.filter((inputId) => !selectedInputIds.has(inputId)),
-      missingInput: "skip",
-      vaultRoot: input.vaultRoot,
-    });
-
-  for (const event of pendingEvents) {
-    if (!isHostedPendingEventRelevantToFreshConversation({
-      event,
-      latestFreshEventByConversation,
-    })) {
-      continue;
-    }
-    selectedInputIds.add(event.inputId);
-    eventsByInputId.set(event.inputId, event);
-  }
 
   return {
     freshInputIds,
-    inputIds: [...selectedInputIds]
-      .map((inputId) => eventsByInputId.get(inputId))
-      .filter((event): event is AssistantInputEventRecord => event !== undefined)
+    inputIds: freshEvents
       .sort((left, right) =>
         compareAssistantInputCursors(left.cursor, right.cursor)
       )
@@ -268,36 +239,6 @@ export async function selectHostedAssistantInputIds(
     mode: "foreground",
     pendingInputIds,
   };
-}
-
-function readRequiredHostedFreshAssistantInputEvent(input: {
-  eventsByInputId: ReadonlyMap<string, AssistantInputEventRecord>;
-  inputId: string;
-}): AssistantInputEventRecord {
-  const event = input.eventsByInputId.get(input.inputId);
-  if (!event) {
-    throw new Error(
-      `Hosted fresh assistant input selection references a missing input event: ${input.inputId}`,
-    );
-  }
-  return event;
-}
-
-function isHostedPendingEventRelevantToFreshConversation(input: {
-  event: AssistantInputEventRecord;
-  latestFreshEventByConversation: readonly AssistantInputEventRecord[];
-}): boolean {
-  const { event } = input;
-  if (!event.conversation) {
-    return false;
-  }
-  return input.latestFreshEventByConversation.some((freshEvent) =>
-    freshEvent.conversation
-    && isSameAssistantConversationRef(
-      event.conversation!,
-      freshEvent.conversation,
-    )
-  );
 }
 
 async function readHostedAssistantInputCandidatesById(input: {
@@ -490,31 +431,6 @@ function hostedAssistantInputCursorKey(cursor: AssistantInputCursor): string {
     cursor.sourceKind,
     cursor.sourcePosition ?? "",
   ].join("\0");
-}
-
-function selectLatestEventByConversation(
-  events: readonly AssistantInputEventRecord[],
-): AssistantInputEventRecord[] {
-  const latestEvents: AssistantInputEventRecord[] = [];
-
-  for (const event of events) {
-    if (!event.conversation) {
-      continue;
-    }
-    const existingIndex = latestEvents.findIndex((candidate) =>
-      isSameAssistantConversationRef(candidate.conversation, event.conversation)
-    );
-    if (existingIndex === -1) {
-      latestEvents.push(event);
-      continue;
-    }
-    const existing = latestEvents[existingIndex]!;
-    if (compareAssistantInputCursors(event.cursor, existing.cursor) > 0) {
-      latestEvents[existingIndex] = event;
-    }
-  }
-
-  return latestEvents;
 }
 
 function normalizeHostedAssistantInputQueryLimit(value: number | undefined): number {

@@ -246,6 +246,7 @@ export interface HostedRuntimeLinqDeliveryOutcomeRequest {
   fromPhoneNumber?: string | null;
   idempotencyKey?: string | null;
   intentId?: string | null;
+  lineLookupKey?: string | null;
   providerMessageId?: string | null;
   providerTarget?: string | null;
   providerThreadId?: string | null;
