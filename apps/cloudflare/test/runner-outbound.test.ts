@@ -664,6 +664,7 @@ describe("handleRunnerOutboundRequest", () => {
                     || path === HOSTED_RUNTIME_LINQ_EGRESS_DELIVERY_PATH
                     || path === HOSTED_RUNTIME_LINQ_EGRESS_ENGAGEMENT_PATH
                     || path === HOSTED_RUNTIME_CODEX_AUTH_PATH
+                    || path === HOSTED_RUNTIME_ASSISTANT_PERSONALIZATION_TOOL_PATH
                     || path === HOSTED_RUNTIME_PLAN_USAGE_TOOL_PATH
                     || isHostedComputerWebControlRequest({ method: "POST", path })
                     ? {
