@@ -678,6 +678,17 @@ export class DeviceSyncPublicIngress {
 
     const now = toIsoTimestamp(new Date());
     const descriptor = this.describeProvider(provider);
+    const startingAccount = await this.store.getConnectionForOwnerProvider(
+      ownerId,
+      provider.provider,
+    );
+    const existingAccountGuard = startingAccount
+      ? {
+          expectedAccountId: startingAccount.id,
+          expectedConnectedAt: startingAccount.connectedAt,
+          rejectIfDisconnected: startingAccount.status !== "disconnected",
+        }
+      : { expectedAbsent: true as const };
     const connection = await handler.ensureConnection({ ownerId, now });
     const initialJobs = connection.initialJobs?.map((job) =>
       normalizeConfiguredDeviceSyncJobInput(provider.provider, job, "sdk sign-in")
@@ -699,6 +710,7 @@ export class DeviceSyncPublicIngress {
         ? [...connection.scopes]
         : [...descriptor.defaultScopes],
       credential: resolveAndValidateProviderConnectionCredential(provider, connection),
+      existingAccountGuard,
       metadata: connection.metadata ?? {},
       reuseEstablishedConnection: true,
       connectedAt: now,

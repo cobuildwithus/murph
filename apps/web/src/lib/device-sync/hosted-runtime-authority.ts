@@ -603,16 +603,27 @@ function buildHostedRuntimeConnectionSnapshot(
         },
       });
   const storedTokenBundle = buildStoredTokenBundle(storedAccount);
+  const executionFencedByDisconnectLease = options.includeCredentialMaterial && (
+    normalizeNullableString(record.disconnectLeaseOwner) !== null
+    || record.disconnectLeaseExpiresAt !== null
+  );
   const withholdRuntimeTokenMaterial = shouldWithholdHostedRuntimeTokenMaterial({
     record,
     tokenVersion: storedTokenBundle?.tokenVersion ?? null,
   });
-  const credential = buildHostedRuntimeCredentialSnapshot({
-    includeCredentialMaterial: options.includeCredentialMaterial && !withholdRuntimeTokenMaterial,
-    record: mappedRecord,
-    storedAccount,
-    withholdTokenMaterial: options.includeCredentialMaterial && withholdRuntimeTokenMaterial,
-  });
+  const credential: HostedExecutionDeviceSyncRuntimeCredentialSnapshot = executionFencedByDisconnectLease
+    ? {
+        credentialMetadata: sanitizeHostedExecutionDeviceSyncRuntimeCredentialMetadata(
+          mappedRecord.credentialMetadata,
+        ),
+        kind: "none",
+      }
+    : buildHostedRuntimeCredentialSnapshot({
+        includeCredentialMaterial: options.includeCredentialMaterial && !withholdRuntimeTokenMaterial,
+        record: mappedRecord,
+        storedAccount,
+        withholdTokenMaterial: options.includeCredentialMaterial && withholdRuntimeTokenMaterial,
+      });
   return {
     connection: {
       accessTokenExpiresAt: publicConnection.accessTokenExpiresAt ?? null,
@@ -626,7 +637,7 @@ function buildHostedRuntimeConnectionSnapshot(
       scopes: [...publicConnection.scopes],
       setupExpiresAt: publicConnection.setupExpiresAt ?? null,
       setupPhase: publicConnection.setupPhase ?? null,
-      status: publicConnection.status,
+      status: executionFencedByDisconnectLease ? "disconnected" : publicConnection.status,
       updatedAt: publicConnection.updatedAt,
     },
     localState: {

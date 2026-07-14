@@ -972,6 +972,18 @@ function assertAccountUpsertExistingGuard(
     return;
   }
 
+  if ("expectedAbsent" in guard) {
+    if (existing) {
+      throw deviceSyncError({
+        code: "CONNECTION_STARTED_ACCOUNT_CHANGED",
+        message: "Device sync connection state changed after this connection flow started.",
+        retryable: false,
+        httpStatus: 409,
+      });
+    }
+    return;
+  }
+
   if (!existing || existing.id !== guard.expectedAccountId) {
     throw deviceSyncError({
       code: "CONNECTION_SEEDED_ACCOUNT_MISMATCH",

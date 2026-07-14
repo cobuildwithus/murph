@@ -1,6 +1,6 @@
 # PR 554 ReviewGPT remediation
 
-Status: active
+Status: active — ReviewGPT round 2 remediation implemented
 Created: 2026-07-13
 Updated: 2026-07-13
 
@@ -40,6 +40,12 @@ safe account inspection/reconcile and every lease-aware writer guard.
 - Preserve the existing browser disconnect path for rollout compatibility;
   only the new hosted conversation consumer is removed.
 - Keep the expand-only lease columns and writer guards as the rollback floor.
+- Describe this head as the prerequisite writer-guard release, not as completed
+  production lease activation; activation still requires the documented alias
+  verification and prior-function drain.
+- Carry expected absence or the exact starting account epoch across companion
+  SDK provider work, and treat any disconnect evidence as a terminal fence for
+  credential-bearing runtime snapshots.
 - Treat trusted conversational approval and canonical ambiguous recovery as
   activation prerequisites, not speculative phase-one machinery.
 - The user explicitly prohibited subagents, so required review passes are
@@ -63,3 +69,10 @@ safe account inspection/reconcile and every lease-aware writer guard.
 - Affected package/app typechecks and canonical CLI schema generation.
 - `git diff --check`, privacy/identifier scan, exact-head CI, and ReviewGPT.
 
+Round 2 validation accepted the delayed companion ensure and credential export
+findings. The production-lease finding was narrowed to rollout labeling because
+enabling claims before the prerequisite deployment drain would violate the
+documented two-release contract. Focused remediation evidence: device-syncd
+public ingress 61 tests; hosted runtime authority 42 tests; Prisma connection
+store 42 tests; hosted runtime terminal hydration 2 selected cases; affected
+device-syncd, assistant-runtime, and web typechecks pass.

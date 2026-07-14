@@ -262,11 +262,15 @@ export interface ProviderConnectionSeed {
   nextReconcileAt?: string | null;
 }
 
-export interface UpsertPublicDeviceSyncExistingAccountGuard {
-  expectedAccountId: string;
-  expectedConnectedAt: string;
-  rejectIfDisconnected?: boolean;
-}
+export type UpsertPublicDeviceSyncExistingAccountGuard =
+  | {
+      expectedAbsent: true;
+    }
+  | {
+      expectedAccountId: string;
+      expectedConnectedAt: string;
+      rejectIfDisconnected?: boolean;
+    };
 
 export interface UpsertPublicDeviceSyncConnectionInput {
   ownerId?: string | null;
@@ -371,6 +375,10 @@ export interface DeviceSyncPublicIngressStore {
   getConnectionByExternalAccount(
     provider: string,
     externalAccountId: string,
+  ): PublicDeviceSyncAccount | null | Promise<PublicDeviceSyncAccount | null>;
+  getConnectionForOwnerProvider(
+    ownerId: string,
+    provider: string,
   ): PublicDeviceSyncAccount | null | Promise<PublicDeviceSyncAccount | null>;
   getConnectionOwnerId?(accountId: string): string | null | Promise<string | null>;
   claimWebhookTrace(input: ClaimDeviceSyncWebhookTraceInput): DeviceSyncWebhookTraceClaimResult | Promise<DeviceSyncWebhookTraceClaimResult>;

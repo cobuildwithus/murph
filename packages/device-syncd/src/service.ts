@@ -309,6 +309,12 @@ class DeviceSyncServiceController {
           const account = this.store.getAccountByExternalAccount(provider, externalAccountId);
           return account ? this.toPublicAccount(account) : null;
         },
+        getConnectionForOwnerProvider: (_ownerId, provider) => {
+          const account = this.store.listAccounts({ provider }).find((candidate) =>
+            candidate.provider === provider
+          ) ?? null;
+          return account ? this.toPublicAccount(account) : null;
+        },
         claimWebhookTrace: (record) => this.store.claimWebhookTrace(record),
         completeWebhookTrace: (provider, traceId, claimToken) =>
           this.store.completeWebhookTrace(provider, traceId, claimToken),

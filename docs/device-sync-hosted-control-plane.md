@@ -216,7 +216,14 @@ activates claims. The first release deploys its additive columns and all
 lease-aware writer guards while production disconnect remains on the compatible
 lease-less path; only after that exact alias is verified and the prior-function
 window drains may a separate source release activate claims. The first release
-is then the web rollback floor while any non-null lease evidence can exist.
+is a prerequisite guard release, not the lease-activation release, and becomes
+the web rollback floor while any non-null lease evidence can exist. A
+credential-bearing runtime snapshot treats any disconnect evidence as a
+terminal execution fence: it exports no OAuth or provider-config capability and
+forces warm runtimes to clear previously hydrated credentials. Companion SDK
+ensure carries either expected absence or the exact starting connection epoch
+across its provider call so a delayed ensure cannot reactivate a disconnected
+account.
 A live refresh lease prevents
 disconnect before provider work starts; once disconnect owns the epoch, token
 refresh, reconcile scheduling, reconnect, and runtime state/credential apply

@@ -2306,6 +2306,67 @@ describe("applyHostedDeviceSyncRuntimeResult", () => {
     expect(JSON.stringify(response)).not.toContain("stored-refresh-token");
   });
 
+  it("fences credential-bearing OAuth snapshots while disconnect evidence remains", async () => {
+    const harness = createAuthorityHarness({
+      record: buildHostedRecord({
+        disconnectLeaseExpiresAt: "2026-04-06T10:15:00.000Z",
+        disconnectLeaseOwner: "settings-disconnect:active",
+      }),
+    });
+    const { readHostedDeviceSyncRuntimeState } = await import(
+      "@/src/lib/device-sync/hosted-runtime-authority"
+    );
+    harness.store.prisma.deviceConnection.findMany.mockResolvedValue([harness.record]);
+
+    const response = await readHostedDeviceSyncRuntimeState({
+      request: new Request("https://example.test/device-sync/runtime/snapshot", {
+        body: JSON.stringify({ includeCredentialMaterial: true, userId: "user_123" }),
+        method: "POST",
+      }),
+      trustedUserId: "user_123",
+    });
+
+    expect(response.connections[0]).toMatchObject({
+      connection: { status: "disconnected" },
+      credential: { kind: "none" },
+    });
+    expect(JSON.stringify(response)).not.toContain("stored-access-token");
+    expect(JSON.stringify(response)).not.toContain("stored-refresh-token");
+  });
+
+  it("fences provider-config execution snapshots while disconnect evidence remains", async () => {
+    const record = buildHostedRecord({
+      credentialKind: "provider_config",
+      disconnectLeaseExpiresAt: "2026-04-06T10:15:00.000Z",
+      disconnectLeaseOwner: "settings-disconnect:active",
+      provider: "junction",
+      providerConfigKey: "junction",
+    });
+    const harness = createAuthorityHarness({ record, storedAccount: null });
+    const { readHostedDeviceSyncRuntimeState } = await import(
+      "@/src/lib/device-sync/hosted-runtime-authority"
+    );
+    harness.store.prisma.deviceConnection.findMany.mockResolvedValue([record]);
+    harness.store.getConnectionForUser.mockResolvedValue({
+      ...buildPublicConnection(record),
+      externalAccountId: "junction-user-123",
+    });
+
+    const response = await readHostedDeviceSyncRuntimeState({
+      request: new Request("https://example.test/device-sync/runtime/snapshot", {
+        body: JSON.stringify({ includeCredentialMaterial: true, userId: "user_123" }),
+        method: "POST",
+      }),
+      trustedUserId: "user_123",
+    });
+
+    expect(response.connections[0]).toMatchObject({
+      connection: { status: "disconnected" },
+      credential: { kind: "none" },
+    });
+    expect(JSON.stringify(response)).not.toContain("providerConfigKey");
+  });
+
   it("redacts runtime OAuth material for terminal hosted connection statuses", async () => {
     const harness = createAuthorityHarness({
       record: buildHostedRecord({

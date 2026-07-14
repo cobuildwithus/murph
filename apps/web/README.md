@@ -743,6 +743,11 @@ reconnect, reconcile, runtime-apply, and local-heartbeat writer reject non-null
 disconnect evidence. Production disconnects intentionally remain on the
 compatible lease-less target-compare path in that release; the source gate in
 `wake-service.ts` must not be enabled or removed in the same release.
+This is the prerequisite writer-guard release, not the completed lease
+activation release. Credential-bearing runtime snapshots additionally project
+leased accounts as terminal and export no executable credential, while
+companion SDK ensure carries expected absence or the exact starting account
+epoch across provider work.
 
 The signed hosted account-action route exposes reconcile only in this release,
 and the hosted CLI rejects disconnect before any web or provider request. The

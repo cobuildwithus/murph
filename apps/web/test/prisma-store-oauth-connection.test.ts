@@ -1155,6 +1155,45 @@ describe("PrismaDeviceSyncControlPlaneStore hosted connection access", () => {
     expect(tx.deviceConnection.update).not.toHaveBeenCalled();
   });
 
+  it("rejects an expected-absence upsert when a connection appeared during provider work", async () => {
+    const existing = createConnection({
+      id: "dsc_123",
+      provider: "junction",
+      status: "disconnected",
+      userId: "user-123",
+    });
+    const tx = {
+      $executeRaw: vi.fn(async () => 0),
+      deviceConnection: {
+        findUnique: vi.fn(async () => cloneConnection(existing)),
+        update: vi.fn(async () => {
+          throw new Error("stale expected-absence upserts should not update");
+        }),
+      },
+    };
+    const store = new PrismaDeviceSyncControlPlaneStore({
+      codec: TEST_CODEC,
+      prisma: {
+        $transaction: async <TResult>(callback: (transaction: typeof tx) => Promise<TResult>) => callback(tx),
+      } as never,
+      providerAccountBlindIndexKey: BLIND_INDEX_KEY,
+    });
+
+    await expect(store.upsertConnection({
+      connectedAt: "2026-03-26T04:00:00.000Z",
+      credential: { kind: "provider_config", providerConfigKey: "junction" },
+      existingAccountGuard: { expectedAbsent: true },
+      externalAccountId: "acct_456",
+      ownerId: "user-123",
+      provider: "junction",
+      status: "active",
+    })).rejects.toMatchObject({
+      code: "CONNECTION_STARTED_ACCOUNT_CHANGED",
+      httpStatus: 409,
+    });
+    expect(tx.deviceConnection.update).not.toHaveBeenCalled();
+  });
+
   it("clears hosted OAuth tokens when post-connect setup fails", async () => {
     let stored = createConnection({
       accessTokenEncrypted: "enc:access-token",

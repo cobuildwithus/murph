@@ -1001,6 +1001,10 @@ describe("hosted device-sync runtime", () => {
         service,
       });
 
+      const disconnectedAccount = getStore(service).getAccountById(connected.account.id);
+      assert.equal(disconnectedAccount?.status, "disconnected");
+      assert.equal(disconnectedAccount?.credential.kind, "none");
+
       const [disconnectedSource] = getStore(service).listConnectionSources({
         connectionId: connected.account.id,
       });

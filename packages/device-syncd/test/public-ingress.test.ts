@@ -131,7 +131,6 @@ class InMemoryPublicIngressStore implements DeviceSyncPublicIngressStore {
     const key = `${input.provider}:${input.externalAccountId}`;
     const existingId = this.accountsByProviderExternal.get(key) ?? null;
     const existing = existingId ? this.accounts.get(existingId) ?? null : null;
-    assertExistingAccountGuard(existing, input.existingAccountGuard ?? null);
     const existingOwnerId = existing ? this.accountOwners.get(existing.id) ?? null : null;
 
     if (existingOwnerId && input.ownerId && existingOwnerId !== input.ownerId) {
@@ -142,6 +141,8 @@ class InMemoryPublicIngressStore implements DeviceSyncPublicIngressStore {
         httpStatus: 409,
       });
     }
+
+    assertExistingAccountGuard(existing, input.existingAccountGuard ?? null);
 
     if (
       input.reuseEstablishedConnection === true
@@ -250,6 +251,12 @@ class InMemoryPublicIngressStore implements DeviceSyncPublicIngressStore {
 
   getConnectionById(accountId: string): PublicDeviceSyncAccount | null {
     return this.accounts.get(accountId) ?? null;
+  }
+
+  getConnectionForOwnerProvider(ownerId: string, provider: string): PublicDeviceSyncAccount | null {
+    return [...this.accounts.values()].find((account) =>
+      account.provider === provider && this.accountOwners.get(account.id) === ownerId
+    ) ?? null;
   }
 
   getConnectionOwnerId(accountId: string): string | null {
@@ -371,6 +378,18 @@ function assertExistingAccountGuard(
   guard: UpsertPublicDeviceSyncConnectionInput["existingAccountGuard"] | null,
 ): void {
   if (!guard) {
+    return;
+  }
+
+  if ("expectedAbsent" in guard) {
+    if (existing) {
+      throw deviceSyncError({
+        code: "CONNECTION_STARTED_ACCOUNT_CHANGED",
+        message: "Device sync connection state changed after this connection flow started.",
+        retryable: false,
+        httpStatus: 409,
+      });
+    }
     return;
   }
 
@@ -4124,6 +4143,112 @@ test("public ingress SDK sign-in session honors persistence guards before mintin
   );
 
   assert.equal(mintedTokens, 1);
+});
+
+test("public ingress SDK sign-in session rejects a connection created while provider ensure is pending", async () => {
+  const store = new InMemoryPublicIngressStore();
+  let releaseEnsure!: () => void;
+  let ensureStarted!: () => void;
+  const ensureStartedPromise = new Promise<void>((resolve) => {
+    ensureStarted = resolve;
+  });
+  const ensureReleasePromise = new Promise<void>((resolve) => {
+    releaseEnsure = resolve;
+  });
+  let mintedTokens = 0;
+  let establishedEvents = 0;
+  const ingress = createDeviceSyncPublicIngress({
+    publicBaseUrl: "https://sync.example.test/device-sync",
+    registry: createDeviceSyncRegistry([
+      createFakeProvider({
+        sdkConnectionHandler: {
+          async ensureConnection() {
+            ensureStarted();
+            await ensureReleasePromise;
+            return {
+              externalAccountId: "demo-sdk-user-pending",
+              tokens: { accessToken: "<REDACTED_ACCESS_TOKEN>" },
+            };
+          },
+          async createSignInToken() {
+            mintedTokens += 1;
+            return { environment: "sandbox", signInToken: "unexpected" };
+          },
+        },
+      }),
+    ]),
+    store,
+    hooks: {
+      onConnectionEstablished() {
+        establishedEvents += 1;
+      },
+    },
+  });
+
+  const pendingSession = ingress.createSdkSignInSession({
+    ownerId: "member-1",
+    provider: "demo",
+  });
+  await ensureStartedPromise;
+  store.upsertConnection({
+    connectedAt: "2026-04-07T00:00:00.000Z",
+    credential: { kind: "none" },
+    externalAccountId: "demo-sdk-user-pending",
+    ownerId: "member-1",
+    provider: "demo",
+    status: "disconnected",
+  });
+  releaseEnsure();
+
+  await assert.rejects(
+    () => pendingSession,
+    (error: unknown) =>
+      error instanceof DeviceSyncError
+      && error.code === "CONNECTION_STARTED_ACCOUNT_CHANGED"
+      && error.httpStatus === 409,
+  );
+  assert.equal(mintedTokens, 0);
+  assert.equal(establishedEvents, 0);
+});
+
+test("public ingress SDK sign-in session permits reconnect from the exact disconnected epoch", async () => {
+  const store = new InMemoryPublicIngressStore();
+  const disconnected = store.upsertConnection({
+    connectedAt: "2026-04-07T00:00:00.000Z",
+    credential: { kind: "none" },
+    externalAccountId: "demo-sdk-user-reconnect",
+    ownerId: "member-1",
+    provider: "demo",
+    status: "disconnected",
+  });
+  const ingress = createDeviceSyncPublicIngress({
+    publicBaseUrl: "https://sync.example.test/device-sync",
+    registry: createDeviceSyncRegistry([
+      createFakeProvider({
+        sdkConnectionHandler: {
+          async ensureConnection() {
+            return {
+              externalAccountId: "demo-sdk-user-reconnect",
+              tokens: { accessToken: "<REDACTED_ACCESS_TOKEN>" },
+            };
+          },
+          async createSignInToken() {
+            return { environment: "sandbox", signInToken: "reconnect-token" };
+          },
+        },
+      }),
+    ]),
+    store,
+  });
+
+  const session = await ingress.createSdkSignInSession({
+    ownerId: "member-1",
+    provider: "demo",
+  });
+
+  assert.equal(session.account.id, disconnected.id);
+  assert.equal(session.account.status, "active");
+  assert.equal(session.signInToken, "reconnect-token");
 });
 
 test("public ingress SDK sign-in session refuses to reuse an established account for a different owner", async () => {

@@ -176,8 +176,6 @@ export class PrismaHostedConnectionStore {
       }
 
       if (existing) {
-        assertHostedUpsertExistingConnectionGuard(existing, input.existingAccountGuard ?? null);
-
         if (ownerId && existing.userId !== ownerId) {
           throw deviceSyncError({
             code: "CONNECTION_OWNERSHIP_CONFLICT",
@@ -186,6 +184,8 @@ export class PrismaHostedConnectionStore {
             httpStatus: 409,
           });
         }
+
+        assertHostedUpsertExistingConnectionGuard(existing, input.existingAccountGuard ?? null);
 
         assertNoHostedConnectionDisconnectLease(existing);
 
@@ -378,6 +378,22 @@ export class PrismaHostedConnectionStore {
       where: {
         id: connectionId,
       },
+      ...hostedConnectionRecordArgs,
+    });
+
+    return record ? await this.buildDurableConnectionRecord(record) : null;
+  }
+
+  async getConnectionForOwnerProvider(
+    ownerId: string,
+    provider: string,
+  ): Promise<PublicDeviceSyncAccount | null> {
+    const record = await this.prisma.deviceConnection.findFirst({
+      where: {
+        provider,
+        userId: ownerId,
+      },
+      orderBy: [{ updatedAt: "desc" }, { id: "desc" }],
       ...hostedConnectionRecordArgs,
     });
 
@@ -1287,6 +1303,18 @@ function assertHostedUpsertExistingConnectionGuard(
   guard: UpsertPublicDeviceSyncConnectionInput["existingAccountGuard"] | null,
 ): void {
   if (!guard) {
+    return;
+  }
+
+  if ("expectedAbsent" in guard) {
+    if (existing) {
+      throw deviceSyncError({
+        code: "CONNECTION_STARTED_ACCOUNT_CHANGED",
+        message: "Device sync connection state changed after this connection flow started.",
+        retryable: false,
+        httpStatus: 409,
+      });
+    }
     return;
   }
 
