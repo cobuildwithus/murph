@@ -79,6 +79,7 @@ import {
   HOSTED_RUNTIME_LINQ_EGRESS_DELIVERY_PATH,
   HOSTED_RUNTIME_LINQ_EGRESS_ENGAGEMENT_PATH,
   HOSTED_RUNTIME_PRODUCT_FEEDBACK_RECORD_PATH,
+  HOSTED_RUNTIME_PLAN_USAGE_TOOL_PATH,
   HOSTED_RUNTIME_USAGE_RECORD_PATH,
   HOSTED_RUNTIME_VAULT_SHARE_DELIVER_PATH,
   HOSTED_RUNTIME_WORKSPACE_PATH,
@@ -166,6 +167,11 @@ const RUNNER_PROXY_TOKEN_HEADER = "x-hosted-execution-runner-proxy-token";
 const MISSING_ARTIFACT_URL = `http://artifacts.worker/objects/${"a".repeat(64)}`;
 const HEARTBEAT_URL = "http://runner-control.worker/internal/active-invocation/heartbeat";
 const ALLOWLISTED_WEB_CONTROL_CASES = [
+  {
+    body: {},
+    name: "hosted plan usage tool",
+    path: HOSTED_RUNTIME_PLAN_USAGE_TOOL_PATH,
+  },
   {
     body: {
       connectionId: "conn_123",
@@ -658,7 +664,7 @@ describe("handleRunnerOutboundRequest", () => {
                     || path === HOSTED_RUNTIME_LINQ_EGRESS_DELIVERY_PATH
                     || path === HOSTED_RUNTIME_LINQ_EGRESS_ENGAGEMENT_PATH
                     || path === HOSTED_RUNTIME_CODEX_AUTH_PATH
-                    || path === HOSTED_RUNTIME_ASSISTANT_PERSONALIZATION_TOOL_PATH
+                    || path === HOSTED_RUNTIME_PLAN_USAGE_TOOL_PATH
                     || isHostedComputerWebControlRequest({ method: "POST", path })
                     ? {
                         "x-hosted-runtime-attempt-id": "attempt_1",
@@ -1465,6 +1471,44 @@ describe("handleRunnerOutboundRequest", () => {
 
     expect(response.status).toBe(401);
     expect(validateRuntimeWriteFence).not.toHaveBeenCalled();
+    expect(fetchMock).not.toHaveBeenCalled();
+  });
+
+  it("rejects hosted plan usage reads when the caller fence does not belong to the target member", async () => {
+    const validateRuntimeWriteFence = vi.fn(async () => false);
+    const fetchMock = vi.fn();
+    vi.stubGlobal("fetch", fetchMock);
+
+    const response = await handleRunnerOutboundRequest(
+      new Request(`http://web-control.worker${HOSTED_RUNTIME_PLAN_USAGE_TOOL_PATH}`, {
+        body: JSON.stringify({}),
+        headers: createRunnerProxyHeaders({
+          "content-type": "application/json; charset=utf-8",
+          "x-hosted-runner-bound-user-id": "member_target",
+          "x-hosted-runtime-attempt-id": "caller_attempt",
+          "x-hosted-runtime-lease-generation": "3",
+        }),
+        method: "POST",
+      }),
+      createRunnerOutboundEnv({
+        HOSTED_WEB_BASE_URL: "https://web.example.test",
+        USER_RUNNER: {
+          getByName() {
+            return {
+              validateRuntimeWriteFence,
+            };
+          },
+        },
+      }),
+      "member_target",
+    );
+
+    expect(response.status).toBe(401);
+    expect(validateRuntimeWriteFence).toHaveBeenCalledWith({
+      attemptId: "caller_attempt",
+      generation: "3",
+      userId: "member_target",
+    });
     expect(fetchMock).not.toHaveBeenCalled();
   });
 

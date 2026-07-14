@@ -1168,6 +1168,7 @@ describe('assistant protocol index planning', () => {
       familyPlanTool: { request: vi.fn() },
       groupTool: { request: vi.fn() },
       newsletterTool: { request: vi.fn() },
+      planUsageTool: { read: vi.fn() },
       phoneCalls: { start: vi.fn() },
     }
     const plan = await resolveAssistantRouteTurnPlan({
@@ -1234,6 +1235,7 @@ describe('assistant protocol index planning', () => {
       'connected_apps_manage',
       'create_phone_call',
       'family_plan',
+      'plan_usage',
       'send_vault_file',
     ]) {
       expect(plan.dynamicTools.map((tool) => tool.name)).not.toContain(personalTool)

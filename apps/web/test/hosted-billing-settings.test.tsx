@@ -1,5 +1,6 @@
 import assert from "node:assert/strict";
 
+import type { HostedPlanUsageAvailableStatus } from "@murphai/hosted-execution/plan-usage";
 import { act, createElement } from "react";
 import { renderToStaticMarkup } from "react-dom/server";
 import { beforeEach, describe, test, vi } from "vitest";
@@ -12,6 +13,26 @@ const mocks = vi.hoisted(() => ({
   routerRefresh: vi.fn(),
   routerReplace: vi.fn(),
 }));
+
+function buildUsageStatus(
+  overrides: Partial<HostedPlanUsageAvailableStatus> = {},
+): HostedPlanUsageAvailableStatus {
+  return {
+    accessKind: "paid",
+    forecast: null,
+    generatedAt: "2026-07-10T12:00:00.000Z",
+    periodEnd: "2026-08-01T00:00:00.000Z",
+    periodKind: "monthly",
+    periodStart: "2026-07-01T00:00:00.000Z",
+    planCode: "launch_monthly",
+    planName: "Pulse",
+    recommendedAction: null,
+    remainingPercent: 65,
+    status: "active",
+    usedPercent: 35,
+    ...overrides,
+  };
+}
 
 vi.mock("@/src/components/hosted-onboarding/client-api", () => ({
   requestHostedOnboardingJson: mocks.requestHostedOnboardingJson,
@@ -108,6 +129,193 @@ describe("HostedBillingSettings", () => {
     assert.match(markup, /Current plan/);
     assert.match(markup, /Choose Edge/);
     assert.match(markup, /Manage billing/);
+  });
+
+  test("shows trial usage, timing, and a conservative forecast before the plan cards", async () => {
+    const { HostedBillingSettings } = await import("@/src/components/settings/hosted-billing-settings");
+
+    const markup = renderToStaticMarkup(createElement(HostedBillingSettings, {
+      authenticated: true,
+      currentBillingPhase: "trial",
+      currentBillingPlanCode: "launch_monthly",
+      currentCheckoutOffer: "pulse_trial_7d",
+      usageStatus: buildUsageStatus({
+        accessKind: "trial",
+        forecast: {
+          estimatedDaysRemaining: 3,
+          estimatedExhaustionAt: "2026-07-13T12:00:00.000Z",
+        },
+        periodEnd: "2026-07-17T00:00:00.000Z",
+        periodKind: "trial",
+        planName: "Pulse Trial",
+      }),
+    }));
+
+    assert.match(markup, /Included AI usage/);
+    assert.match(markup, /aria-label="Pulse Trial included AI usage"/);
+    assert.match(markup, /35% used/);
+    assert.match(markup, /65% remaining/);
+    assert.match(markup, /Trial ends Jul 17, 2026/);
+    assert.match(markup, /may run out in about 3 days/);
+    assert.ok(markup.indexOf("Included AI usage") < markup.indexOf("Run experiments"));
+  });
+
+  test.each([
+    {
+      accessKind: "paid",
+      planCode: "launch_monthly",
+      planName: "Pulse",
+    },
+    {
+      accessKind: "paid",
+      planCode: "launch_edge_monthly",
+      planName: "Edge",
+    },
+    {
+      accessKind: "family_sponsored",
+      planCode: "launch_monthly",
+      planName: "Family",
+    },
+  ] as const)("shows the $planName included usage state", async ({ accessKind, planCode, planName }) => {
+    const { HostedBillingSettings } = await import("@/src/components/settings/hosted-billing-settings");
+
+    const markup = renderToStaticMarkup(createElement(HostedBillingSettings, {
+      authenticated: true,
+      usageStatus: buildUsageStatus({ accessKind, planCode, planName }),
+    }));
+
+    assert.match(markup, new RegExp(`aria-label="${planName} included AI usage"`));
+    assert.match(markup, /Resets Aug 1, 2026/);
+  });
+
+  test("shows an exhausted state without inventing a forecast", async () => {
+    const { HostedBillingSettings } = await import("@/src/components/settings/hosted-billing-settings");
+
+    const markup = renderToStaticMarkup(createElement(HostedBillingSettings, {
+      authenticated: true,
+      usageStatus: buildUsageStatus({
+        remainingPercent: 0,
+        status: "exhausted",
+        usedPercent: 100,
+      }),
+    }));
+
+    assert.match(markup, /100% used/);
+    assert.match(markup, /0% remaining/);
+    assert.match(markup, /You&#x27;ve used 100% of this period&#x27;s included usage\. Murph remains available/);
+    assert.doesNotMatch(markup, /recent pace/);
+  });
+
+  test("keeps unavailable and forecast-free usage states honest", async () => {
+    const { HostedBillingSettings } = await import("@/src/components/settings/hosted-billing-settings");
+
+    const unavailableMarkup = renderToStaticMarkup(createElement(HostedBillingSettings, {
+      authenticated: true,
+      usageStatus: {
+        generatedAt: "2026-07-10T12:00:00.000Z",
+        reason: "group_not_supported",
+        recommendedAction: null,
+        status: "unavailable",
+      },
+    }));
+    const noForecastMarkup = renderToStaticMarkup(createElement(HostedBillingSettings, {
+      authenticated: true,
+      usageStatus: buildUsageStatus(),
+    }));
+
+    assert.doesNotMatch(unavailableMarkup, /Included AI usage/);
+    assert.doesNotMatch(noForecastMarkup, /recent pace/);
+  });
+
+  test("shows only the actionable unavailable trial conversion state", async () => {
+    const { HostedBillingSettings } = await import("@/src/components/settings/hosted-billing-settings");
+
+    const conversionMarkup = renderToStaticMarkup(createElement(HostedBillingSettings, {
+      authenticated: true,
+      canStartPaidPulse: true,
+      usageStatus: {
+        generatedAt: "2026-07-10T12:00:00.000Z",
+        reason: "trial_conversion_pending",
+        recommendedAction: {
+          kind: "start_pulse",
+          label: "Start Pulse from usage",
+          url: "https://example.test/settings#subscription",
+        },
+        status: "unavailable",
+      },
+    }));
+    const groupMarkup = renderToStaticMarkup(createElement(HostedBillingSettings, {
+      authenticated: true,
+      canStartPaidPulse: true,
+      usageStatus: {
+        generatedAt: "2026-07-10T12:00:00.000Z",
+        reason: "group_not_supported",
+        recommendedAction: null,
+        status: "unavailable",
+      },
+    }));
+    const actionFreeConversionMarkup = renderToStaticMarkup(createElement(HostedBillingSettings, {
+      authenticated: true,
+      canStartPaidPulse: true,
+      usageStatus: {
+        generatedAt: "2026-07-10T12:00:00.000Z",
+        reason: "trial_conversion_pending",
+        recommendedAction: null,
+        status: "unavailable",
+      },
+    }));
+
+    assert.match(conversionMarkup, /Trial ended/);
+    assert.match(conversionMarkup, /Start Pulse from usage/);
+    assert.match(actionFreeConversionMarkup, /Trial ended/);
+    assert.doesNotMatch(actionFreeConversionMarkup, /Start Pulse/);
+    assert.doesNotMatch(groupMarkup, /Included AI usage/);
+  });
+
+  test("shows usage actions only when server guidance and billing eligibility agree", async () => {
+    const { HostedBillingSettings } = await import("@/src/components/settings/hosted-billing-settings");
+    const startAction = buildUsageStatus({
+      accessKind: "trial",
+      planName: "Pulse Trial",
+      recommendedAction: {
+        kind: "start_pulse",
+        label: "Start Pulse from usage",
+        url: "https://example.test/settings#subscription",
+      },
+    });
+    const upgradeAction = buildUsageStatus({
+      recommendedAction: {
+        kind: "upgrade_edge",
+        label: "Upgrade from usage",
+        url: "https://example.test/settings#subscription",
+      },
+    });
+
+    const eligibleStartMarkup = renderToStaticMarkup(createElement(HostedBillingSettings, {
+      authenticated: true,
+      canStartPaidPulse: true,
+      usageStatus: startAction,
+    }));
+    const ineligibleStartMarkup = renderToStaticMarkup(createElement(HostedBillingSettings, {
+      authenticated: true,
+      canStartPaidPulse: false,
+      usageStatus: startAction,
+    }));
+    const eligibleUpgradeMarkup = renderToStaticMarkup(createElement(HostedBillingSettings, {
+      authenticated: true,
+      canUpgradeToEdge: true,
+      usageStatus: upgradeAction,
+    }));
+    const ineligibleUpgradeMarkup = renderToStaticMarkup(createElement(HostedBillingSettings, {
+      authenticated: true,
+      canUpgradeToEdge: false,
+      usageStatus: upgradeAction,
+    }));
+
+    assert.match(eligibleStartMarkup, /Start Pulse from usage/);
+    assert.doesNotMatch(ineligibleStartMarkup, /Start Pulse from usage/);
+    assert.match(eligibleUpgradeMarkup, /Upgrade from usage/);
+    assert.doesNotMatch(ineligibleUpgradeMarkup, /Upgrade from usage/);
   });
 
   test("shows the Pulse trial start action inline for Pulse trial members", async () => {

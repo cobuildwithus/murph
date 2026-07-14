@@ -371,51 +371,15 @@ export const MURPH_FAMILY_PLAN_TOOL = {
   },
 } as const
 
-export const MURPH_PERSONALIZATION_TOOL = {
+export const MURPH_PLAN_USAGE_TOOL = {
   namespace: 'murph',
-  name: 'personalization',
+  name: 'plan_usage',
   description:
-    'Read the current private hosted member\'s effective Murph tone, voice, and model context, or atomically update tone and voice. Use murph.assistant_configuration for model or reasoning changes because those require secure user approval.',
+    'Read the current hosted member\'s cost-weighted included usage, reset or trial-end date, and any server-authorized plan action. Use only for an explicit plan/included-usage question or manual 1:1 check. Never call it automatically during onboarding or as a watcher. Cost-weighted included usage is not a literal token count or cash balance. Communicate usage only through usedPercent and remainingPercent; never expose, infer, or format internal currency amounts as usage progress. Percentages, dates, and forecasts are approximate; if forecast is null, invent no estimate, precision, scarcity, or urgency. Never plead, imply Murph will die, use existential guilt, shame, or pressure. Mention actions only when recommendedAction is non-null; use its label and URL. This read-only tool does not change billing. It is not a group balance or top-up surface. Never ask a group for money, claim a shared balance, or name a payer.',
   inputSchema: {
-    oneOf: [
-      {
-        type: 'object',
-        additionalProperties: false,
-        properties: {
-          action: {
-            type: 'string',
-            enum: ['read'],
-          },
-        },
-        required: ['action'],
-      },
-      {
-        type: 'object',
-        additionalProperties: false,
-        properties: {
-          action: {
-            type: 'string',
-            enum: ['update'],
-          },
-          tone: {
-            type: 'string',
-            enum: assistantTonePreferenceValues,
-          },
-          voice: {
-            type: 'string',
-            enum: assistantVoiceOptionIdValues,
-            description: assistantVoiceOptions
-              .map((option) => `${option.label}=${option.id}`)
-              .join(', '),
-          },
-        },
-        required: ['action'],
-        anyOf: [
-          { required: ['tone'] },
-          { required: ['voice'] },
-        ],
-      },
-    ],
+    type: 'object',
+    additionalProperties: false,
+    properties: {},
   },
 } as const
 
@@ -908,6 +872,7 @@ const MURPH_BASE_DYNAMIC_TOOLS = [
   MURPH_ASSISTANT_CONFIGURATION_TOOL,
   MURPH_PERSONALIZATION_TOOL,
   MURPH_FAMILY_PLAN_TOOL,
+  MURPH_PLAN_USAGE_TOOL,
   MURPH_GROUP_TOOL,
   MURPH_NEWSLETTER_TOOL,
   MURPH_GENERATE_SONG_TOOL,
@@ -944,6 +909,7 @@ export interface MurphDynamicToolAvailability {
   connectedAppsAvailable?: boolean | null
   connectedAppsManageAvailable?: boolean | null
   familyPlanAvailable?: boolean | null
+  planUsageAvailable?: boolean | null
   groupAvailable?: boolean | null
   newsletterAvailable?: boolean | null
   personalizationAvailable?: boolean | null
@@ -978,6 +944,7 @@ const TOOL_AVAILABILITY: ReadonlyMap<MurphDynamicTool, AvailabilityPredicate> =
     [MURPH_SUBMIT_PRODUCT_FEEDBACK_TOOL, defaultOff((a) => a.productFeedbackAvailable)],
     [MURPH_ASSISTANT_CONFIGURATION_TOOL, defaultOff((a) => a.assistantConfigurationAvailable)],
     [MURPH_FAMILY_PLAN_TOOL, defaultOff((a) => a.familyPlanAvailable)],
+    [MURPH_PLAN_USAGE_TOOL, defaultOff((a) => a.planUsageAvailable)],
     [MURPH_GROUP_TOOL, defaultOff((a) => a.groupAvailable)],
     [MURPH_NEWSLETTER_TOOL, defaultOff((a) => a.newsletterAvailable)],
     [MURPH_PERSONALIZATION_TOOL, defaultOff((a) => a.personalizationAvailable)],
@@ -1213,6 +1180,7 @@ const sendVaultFileArgumentsSchema = z
   .strict()
 
 const finishWithoutReplyArgumentsSchema = z.object({}).strict()
+const planUsageArgumentsSchema = z.object({}).strict()
 
 const submitProductFeedbackArgumentsSchema = z
   .object({
@@ -1579,7 +1547,7 @@ export type MurphDynamicToolRequest =
       validationDigest: SafeToolCallValidationDigest
     }
   | {
-      kind: 'invalid-personalization-arguments'
+      kind: 'invalid-plan-usage-arguments'
       validationDigest: SafeToolCallValidationDigest
     }
   | {
@@ -1599,8 +1567,7 @@ export type MurphDynamicToolRequest =
       request: HostedRuntimeFamilyPlanToolRequest
     }
   | {
-      kind: 'personalization'
-      request: HostedRuntimeAssistantPersonalizationToolRequest
+      kind: 'plan-usage'
     }
   | {
       kind: 'assistant-configuration'
@@ -1791,17 +1758,16 @@ export function readMurphDynamicToolRequest(
         request: parsed.request,
       }
     }
-    case MURPH_PERSONALIZATION_TOOL.name: {
-      const parsed = parsePersonalizationArguments(request.arguments)
+    case MURPH_PLAN_USAGE_TOOL.name: {
+      const parsed = parsePlanUsageArguments(request.arguments)
       if (!parsed.ok) {
         return {
-          kind: 'invalid-personalization-arguments',
+          kind: 'invalid-plan-usage-arguments',
           validationDigest: parsed.validationDigest,
         }
       }
       return {
-        kind: 'personalization',
-        request: parsed.request,
+        kind: 'plan-usage',
       }
     }
     case MURPH_ASSISTANT_CONFIGURATION_TOOL.name: {
@@ -2061,8 +2027,8 @@ export async function executeMurphDynamicToolRequest(input: {
       return toolTextResult(false, 'invalid product feedback arguments')
     case 'invalid-family-plan-arguments':
       return toolTextResult(false, 'invalid family plan arguments')
-    case 'invalid-personalization-arguments':
-      return toolTextResult(false, 'invalid personalization arguments')
+    case 'invalid-plan-usage-arguments':
+      return toolTextResult(false, 'invalid plan usage arguments')
     case 'invalid-assistant-configuration-arguments':
       return toolTextResult(false, 'invalid assistant configuration arguments')
     case 'invalid-group-arguments':
@@ -2222,10 +2188,9 @@ export async function executeMurphDynamicToolRequest(input: {
         hostedToolContext: input.hostedToolContext ?? null,
         request: input.request.request,
       })
-    case 'personalization':
-      return await executePersonalizationTool({
+    case 'plan-usage':
+      return await executePlanUsageTool({
         hostedToolContext: input.hostedToolContext ?? null,
-        request: input.request.request,
       })
     case 'assistant-configuration':
       return await executeAssistantConfigurationTool({
@@ -2470,20 +2435,18 @@ async function executeFamilyPlanTool(input: {
   }
 }
 
-async function executePersonalizationTool(input: {
+async function executePlanUsageTool(input: {
   hostedToolContext: AssistantHostedToolContext | null
-  request: HostedRuntimeAssistantPersonalizationToolRequest
 }): Promise<MurphDynamicToolExecutionResult> {
-  const personalizationTool = input.hostedToolContext?.personalizationTool ?? null
-  if (!personalizationTool) {
-    return toolTextResult(false, 'personalization is unavailable for this turn')
+  const planUsageTool = input.hostedToolContext?.planUsageTool ?? null
+  if (!planUsageTool) {
+    return toolTextResult(false, 'plan usage is unavailable for this turn')
   }
 
   try {
-    const result = await personalizationTool.request(input.request)
-    return toolTextResult(true, safeToolPayloadText(result))
+    return toolTextResult(true, safeToolPayloadText(await planUsageTool.read()))
   } catch {
-    return toolTextResult(false, 'personalization request failed')
+    return toolTextResult(false, 'plan usage could not be read')
   }
 }
 
@@ -3674,32 +3637,25 @@ function parseFamilyPlanArguments(
   }
 }
 
-function parsePersonalizationArguments(
+function parsePlanUsageArguments(
   value: unknown,
 ):
-  | {
-      request: HostedRuntimeAssistantPersonalizationToolRequest
-      ok: true
-    }
+  | { ok: true }
   | { ok: false; validationDigest: SafeToolCallValidationDigest } {
-  const parsed = hostedRuntimeAssistantPersonalizationToolRequestSchema.safeParse(value)
+  const parsed = planUsageArgumentsSchema.safeParse(value)
   if (!parsed.success) {
     return {
       ok: false,
       validationDigest: buildDynamicToolValidationDigest({
         error: parsed.error,
         rawInput: value,
-        schemaName: 'murph.personalization.input',
-        schemaRootKeys: ['action', 'tone', 'voice'],
-        toolName: 'murph.personalization',
+        schemaName: 'murph.plan_usage.input',
+        schemaRootKeys: [],
+        toolName: 'murph.plan_usage',
       }),
     }
   }
-
-  return {
-    ok: true,
-    request: parsed.data,
-  }
+  return { ok: true }
 }
 
 function parseAssistantConfigurationArguments(
