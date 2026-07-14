@@ -86,6 +86,7 @@ describe("hosted runtime Family plan tool", () => {
     mocks.readHostedFamilyAccessForMember.mockResolvedValue(null);
     mocks.prepareHostedFamilySeatCountChange.mockResolvedValue({
       currentSeatCount: 3,
+      liveMutationRevision: 7,
     });
     mocks.issueHostedFamilyInviteFromOwnerTx.mockResolvedValue({
       group: {
@@ -565,6 +566,7 @@ describe("hosted runtime Family plan tool", () => {
       }],
       members: [{
         isOwner: false,
+        joinedAt: new Date("2026-07-01T00:00:00.000Z"),
         label: "Family member",
         memberId: "member_sponsored",
         role: "member",
@@ -709,6 +711,7 @@ describe("hosted runtime Family plan tool", () => {
       invites: [],
       members: [{
         isOwner: false,
+        joinedAt: new Date("2026-07-01T00:00:00.000Z"),
         label: "Family member",
         memberId: "member_sponsored",
         role: "member",
@@ -750,6 +753,7 @@ describe("hosted runtime Family plan tool", () => {
         mocks.removeHostedFamilyMemberTx.mock.invocationCallOrder[0] ?? 0,
       );
     expect(mocks.removeHostedFamilyMemberTx).toHaveBeenCalledWith({
+      expectedJoinedAt: new Date("2026-07-01T00:00:00.000Z"),
       groupId: "hbag_family",
       memberId: "member_sponsored",
       ownerMemberId: "member_owner",
@@ -820,7 +824,10 @@ describe("hosted runtime Family plan tool", () => {
       },
     };
     mocks.readHostedFamilyOwnerSnapshotForMember.mockResolvedValue(snapshot);
-    mocks.prepareHostedFamilySeatCountChange.mockResolvedValue({ currentSeatCount: 2 });
+    mocks.prepareHostedFamilySeatCountChange.mockResolvedValue({
+      currentSeatCount: 2,
+      liveMutationRevision: 7,
+    });
     mocks.updateHostedFamilySeatCount.mockResolvedValue({
       snapshot,
       status: "pending_payment",
@@ -931,8 +938,8 @@ describe("hosted runtime Family plan tool", () => {
         seats: { ...source.seats, billed: 2, remaining: 0 },
       });
     mocks.prepareHostedFamilySeatCountChange
-      .mockResolvedValueOnce({ currentSeatCount: 3 })
-      .mockResolvedValueOnce({ currentSeatCount: 2 });
+      .mockResolvedValueOnce({ currentSeatCount: 3, liveMutationRevision: 7 })
+      .mockResolvedValueOnce({ currentSeatCount: 2, liveMutationRevision: 8 });
 
     for (let index = 0; index < 2; index += 1) {
       await expect(handleHostedRuntimeFamilyPlanTool({
@@ -976,6 +983,7 @@ describe("hosted runtime Family plan tool", () => {
     mocks.readHostedFamilyOwnerSnapshotForMember.mockResolvedValueOnce(snapshot);
     mocks.prepareHostedFamilySeatCountChange.mockResolvedValueOnce({
       currentSeatCount: 4,
+      liveMutationRevision: 8,
     });
 
     await expect(handleHostedRuntimeFamilyPlanTool({
@@ -1017,6 +1025,7 @@ describe("hosted runtime Family plan tool", () => {
     mocks.readHostedFamilyOwnerSnapshotForMember.mockResolvedValueOnce(snapshot);
     mocks.prepareHostedFamilySeatCountChange.mockResolvedValueOnce({
       currentSeatCount: 3,
+      liveMutationRevision: 7,
     });
     mocks.updateHostedFamilySeatCount.mockResolvedValueOnce({
       snapshot,
@@ -1043,6 +1052,7 @@ describe("hosted runtime Family plan tool", () => {
     expect(mocks.updateHostedFamilySeatCount).toHaveBeenCalledWith(
       expect.objectContaining({
         expectedCurrentSeatCount: 3,
+        expectedMutationRevision: 7,
         targetSeatCount: 2,
       }),
     );
@@ -1184,6 +1194,54 @@ describe("hosted runtime Family plan tool", () => {
       action: "remove_member",
       result: { memberId: "member_removed", status: "unchanged" },
     });
+  });
+
+  it("requires fresh approval after a member rejoins", async () => {
+    const prisma = mocks.getPrisma();
+    mocks.readHostedFamilyOwnerSnapshotForMember.mockResolvedValue({
+      billingActive: true,
+      billingStatus: "active",
+      groupId: "hbag_family",
+      invites: [],
+      members: [{
+        isOwner: false,
+        joinedAt: new Date("2026-07-01T00:00:00.000Z"),
+        label: "Family member",
+        memberId: "member_sponsored",
+        role: "member",
+        status: "active",
+      }],
+      seats: {
+        active: 2,
+        billed: 3,
+        invited: 0,
+        max: 6,
+        min: 2,
+        remaining: 1,
+        used: 2,
+      },
+    });
+    mocks.removeHostedFamilyMemberTx.mockResolvedValueOnce(false);
+    prisma.hostedAccountGroupMembership.findFirst.mockResolvedValueOnce({
+      status: "active",
+    });
+
+    await expect(handleHostedRuntimeFamilyPlanTool({
+      memberId: "member_owner",
+      request: {
+        action: "remove_member",
+        confirmed: true,
+        memberId: "member_sponsored",
+      },
+    })).rejects.toMatchObject({
+      code: "HOSTED_FAMILY_MEMBER_CHANGED",
+      httpStatus: 409,
+    });
+    expect(mocks.removeHostedFamilyMemberTx).toHaveBeenCalledWith(
+      expect.objectContaining({
+        expectedJoinedAt: new Date("2026-07-01T00:00:00.000Z"),
+      }),
+    );
   });
 
   it("fails closed for a member id outside the owner group", async () => {

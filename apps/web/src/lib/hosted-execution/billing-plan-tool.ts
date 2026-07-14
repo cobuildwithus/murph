@@ -10,6 +10,7 @@ import { createHostedBillingPortalSession } from "../hosted-onboarding/billing-p
 import {
   buildHostedRuntimeBillingPlanActionApprovalRequest,
   consumeHostedRuntimeSensitiveActionApproval,
+  createHostedRuntimeSensitiveActionConsumerId,
   requestHostedRuntimeSensitiveActionApproval,
 } from "./billing-family-action-approval";
 import {
@@ -62,6 +63,7 @@ export async function handleHostedRuntimeBillingPlanTool(input: {
       },
     };
   }
+  const approvalConsumerId = createHostedRuntimeSensitiveActionConsumerId();
   const prisma = getPrisma();
   let status = await readHostedRuntimeBillingPlanStatus(input.memberId);
   if (status.sponsoredFamilyAccess) {
@@ -140,6 +142,7 @@ export async function handleHostedRuntimeBillingPlanTool(input: {
   }
   const consumedApproval = await consumeHostedRuntimeSensitiveActionApproval({
     approval,
+    consumerId: approvalConsumerId,
     memberId: input.memberId,
     prisma,
     request: approvalRequest,

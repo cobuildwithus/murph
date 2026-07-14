@@ -16,6 +16,7 @@ import type {
 import {
   buildHostedRuntimeFamilyActionApprovalRequest,
   consumeHostedRuntimeSensitiveActionApproval,
+  createHostedRuntimeSensitiveActionConsumerId,
   requestHostedRuntimeSensitiveActionApproval,
 } from "./billing-family-action-approval";
 import { createHostedBillingPortalSession } from "../hosted-onboarding/billing-portal-service";
@@ -73,6 +74,7 @@ export async function handleHostedRuntimeFamilyPlanTool(input: {
       ),
     };
   }
+  const approvalConsumerId = createHostedRuntimeSensitiveActionConsumerId();
   if (input.request.action === "cancel_invite") {
     const request = input.request;
     const snapshot = await requireHostedRuntimeFamilyOwnerSnapshot(input.memberId);
@@ -127,6 +129,7 @@ export async function handleHostedRuntimeFamilyPlanTool(input: {
     const canceled = await getPrisma().$transaction(async (tx) => {
       const consumedApproval = await consumeHostedRuntimeSensitiveActionApproval({
         approval,
+        consumerId: approvalConsumerId,
         memberId: input.memberId,
         prisma: tx,
         request: approvalRequest,
@@ -207,6 +210,7 @@ export async function handleHostedRuntimeFamilyPlanTool(input: {
     const approvalRequest = buildHostedRuntimeFamilyActionApprovalRequest({
       action: "remove_member",
       memberId: request.memberId,
+      membershipJoinedAt: member.joinedAt,
       returnContactKind: request.returnContactKind ?? null,
       status: projectHostedRuntimeFamilyPlanToolStatus(snapshot),
       targetLabel: member.label,
@@ -231,6 +235,7 @@ export async function handleHostedRuntimeFamilyPlanTool(input: {
     const removed = await getPrisma().$transaction(async (tx) => {
       const consumedApproval = await consumeHostedRuntimeSensitiveActionApproval({
         approval,
+        consumerId: approvalConsumerId,
         memberId: input.memberId,
         prisma: tx,
         request: approvalRequest,
@@ -242,6 +247,7 @@ export async function handleHostedRuntimeFamilyPlanTool(input: {
         groupId: snapshot.groupId,
         memberId: request.memberId,
         ownerMemberId: input.memberId,
+        expectedJoinedAt: member.joinedAt,
         tx,
       });
     }, HOSTED_ONBOARDING_TRANSACTION_OPTIONS);
@@ -264,6 +270,13 @@ export async function handleHostedRuntimeFamilyPlanTool(input: {
             status: "unchanged",
           },
         };
+      }
+      if (existing?.status === "active") {
+        throw hostedOnboardingError({
+          code: "HOSTED_FAMILY_MEMBER_CHANGED",
+          httpStatus: 409,
+          message: "Family membership changed after approval. Review the current member and try again.",
+        });
       }
       throw hostedOnboardingError({
         code: "HOSTED_FAMILY_MEMBER_NOT_FOUND",
@@ -316,6 +329,7 @@ export async function handleHostedRuntimeFamilyPlanTool(input: {
     const approvalRequest = buildHostedRuntimeFamilyActionApprovalRequest({
       action: "change_seat_count",
       returnContactKind: request.returnContactKind ?? null,
+      sourceMutationRevision: preparation.liveMutationRevision,
       status: authoritativeStatus,
       targetSeatCount: request.seatCount,
     });
@@ -338,6 +352,7 @@ export async function handleHostedRuntimeFamilyPlanTool(input: {
     }
     const consumedApproval = await consumeHostedRuntimeSensitiveActionApproval({
       approval,
+      consumerId: approvalConsumerId,
       memberId: input.memberId,
       prisma,
       request: approvalRequest,
@@ -347,6 +362,7 @@ export async function handleHostedRuntimeFamilyPlanTool(input: {
     }
     const update = await updateHostedFamilySeatCount({
       expectedCurrentSeatCount: preparation.currentSeatCount,
+      expectedMutationRevision: preparation.liveMutationRevision,
       groupId: snapshot.groupId,
       ownerMemberId: input.memberId,
       prisma,

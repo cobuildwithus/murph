@@ -109,12 +109,14 @@ describe("hosted billing and Family exact-action approvals", () => {
     const increase = buildHostedRuntimeFamilyActionApprovalRequest({
       action: "change_seat_count",
       returnContactKind: "telegram",
+      sourceMutationRevision: 7,
       status: FAMILY_STATUS,
       targetSeatCount: 4,
     });
     const decrease = buildHostedRuntimeFamilyActionApprovalRequest({
       action: "change_seat_count",
       returnContactKind: "telegram",
+      sourceMutationRevision: 8,
       status: {
         ...FAMILY_STATUS,
         pricing: {
@@ -131,5 +133,47 @@ describe("hosted billing and Family exact-action approvals", () => {
     expect(increase.presentation.body).toContain("immediately invoices");
     expect(decrease.presentation.body).toContain("without a prorated credit or refund");
     expect(decrease.presentation.body).toContain("next renewal");
+  });
+
+  it("binds Family approvals to the exact seat and membership generation", () => {
+    const firstSeatGeneration = buildHostedRuntimeFamilyActionApprovalRequest({
+      action: "change_seat_count",
+      returnContactKind: null,
+      sourceMutationRevision: 7,
+      status: FAMILY_STATUS,
+      targetSeatCount: 4,
+    });
+    const nextSeatGeneration = buildHostedRuntimeFamilyActionApprovalRequest({
+      action: "change_seat_count",
+      returnContactKind: null,
+      sourceMutationRevision: 9,
+      status: FAMILY_STATUS,
+      targetSeatCount: 4,
+    });
+    const firstMembership = buildHostedRuntimeFamilyActionApprovalRequest({
+      action: "remove_member",
+      memberId: "member_sponsored",
+      membershipJoinedAt: new Date("2026-07-01T00:00:00.000Z"),
+      returnContactKind: null,
+      status: FAMILY_STATUS,
+      targetLabel: "Family member",
+    });
+    const reacceptedMembership = buildHostedRuntimeFamilyActionApprovalRequest({
+      action: "remove_member",
+      memberId: "member_sponsored",
+      membershipJoinedAt: new Date("2026-07-08T00:00:00.000Z"),
+      returnContactKind: null,
+      status: FAMILY_STATUS,
+      targetLabel: "Family member",
+    });
+
+    expect(firstSeatGeneration.actionFingerprint)
+      .not.toBe(nextSeatGeneration.actionFingerprint);
+    expect(firstMembership.actionFingerprint)
+      .not.toBe(reacceptedMembership.actionFingerprint);
+    expect(firstSeatGeneration.presentation)
+      .toEqual(nextSeatGeneration.presentation);
+    expect(firstMembership.presentation)
+      .toEqual(reacceptedMembership.presentation);
   });
 });

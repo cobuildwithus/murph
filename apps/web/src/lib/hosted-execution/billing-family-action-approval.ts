@@ -1,6 +1,6 @@
 import "server-only";
 
-import { createHash } from "node:crypto";
+import { createHash, randomUUID } from "node:crypto";
 
 import type { Prisma, PrismaClient } from "@prisma/client";
 import type {
@@ -12,7 +12,6 @@ import type {
   HostedRuntimeFamilyPlanToolStatusResponse,
   HostedRuntimeSensitiveActionApprovalResult,
 } from "@murphai/hosted-execution/runtime-control";
-import { serializeHostedActionApprovalRequest } from "@murphai/hosted-execution/action-approval";
 
 import {
   consumeHostedActionApproval,
@@ -53,6 +52,7 @@ export async function requestHostedRuntimeSensitiveActionApproval(input: {
 
 export async function consumeHostedRuntimeSensitiveActionApproval(input: {
   approval: Extract<HostedRuntimeSensitiveActionApprovalGate, { status: "approved" }>;
+  consumerId: string;
   memberId: string;
   prisma: PrismaClient | Prisma.TransactionClient;
   request: HostedActionApprovalRequest;
@@ -62,7 +62,7 @@ export async function consumeHostedRuntimeSensitiveActionApproval(input: {
     prisma: input.prisma,
     request: {
       approvalGeneration: input.approval.approvalGeneration,
-      consumerId: buildHostedRuntimeSensitiveActionConsumerId(input),
+      consumerId: input.consumerId,
       request: input.request,
     },
   });
@@ -75,18 +75,8 @@ export async function consumeHostedRuntimeSensitiveActionApproval(input: {
     : projectHostedRuntimeSensitiveActionApproval(consumed);
 }
 
-function buildHostedRuntimeSensitiveActionConsumerId(input: {
-  approval: Extract<HostedRuntimeSensitiveActionApprovalGate, { status: "approved" }>;
-  memberId: string;
-  request: HostedActionApprovalRequest;
-}): string {
-  return `hosted-product-mutation:${createHash("sha256")
-    .update(input.memberId)
-    .update("\0")
-    .update(input.approval.approvalGeneration)
-    .update("\0")
-    .update(serializeHostedActionApprovalRequest(input.request))
-    .digest("hex")}`;
+export function createHostedRuntimeSensitiveActionConsumerId(): string {
+  return `hosted-product-mutation:${randomUUID()}`;
 }
 
 export function buildHostedRuntimeBillingPlanActionApprovalRequest(input: {
@@ -202,6 +192,7 @@ export function buildHostedRuntimeFamilyActionApprovalRequest(input:
   | {
       action: "remove_member";
       memberId: string;
+      membershipJoinedAt: Date | null;
       returnContactKind: HostedActionApprovalReturnContactKind | null;
       status: HostedRuntimeFamilyPlanToolStatusResponse;
       targetLabel: string | null;
@@ -209,6 +200,7 @@ export function buildHostedRuntimeFamilyActionApprovalRequest(input:
   | {
       action: "change_seat_count";
       returnContactKind: HostedActionApprovalReturnContactKind | null;
+      sourceMutationRevision: number;
       status: HostedRuntimeFamilyPlanToolStatusResponse;
       targetSeatCount: number;
     }
@@ -237,6 +229,7 @@ export function buildHostedRuntimeFamilyActionApprovalRequest(input:
     const fingerprintValue = fingerprintExactAction([
       input.action,
       input.memberId,
+      input.membershipJoinedAt?.toISOString() ?? null,
       input.targetLabel,
       input.status.seats.billed,
       pricing.currency,
@@ -268,6 +261,7 @@ export function buildHostedRuntimeFamilyActionApprovalRequest(input:
   const fingerprintValue = fingerprintExactAction([
     input.action,
     sourceSeatCount,
+    input.sourceMutationRevision,
     input.targetSeatCount,
     pricing.currency,
     pricing.recurringAmountUsdCentsPerSeat,

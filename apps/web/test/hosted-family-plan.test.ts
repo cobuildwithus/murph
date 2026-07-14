@@ -2133,8 +2133,10 @@ describe("hosted Family plan", () => {
 
   it("removes sponsored access without deleting the member", async () => {
     const tx = createTxMock();
+    const joinedAt = new Date("2026-06-01T00:00:00.000Z");
 
     await expect(removeHostedFamilyMemberTx({
+      expectedJoinedAt: joinedAt,
       groupId: "hbag_family",
       memberId: "member_child",
       ownerMemberId: "member_owner",
@@ -2147,6 +2149,7 @@ describe("hosted Family plan", () => {
       }),
       where: {
         groupId: "hbag_family",
+        joinedAt,
         memberId: "member_child",
         status: "active",
       },
@@ -3814,7 +3817,10 @@ describe("hosted Family plan", () => {
       ownerMemberId: "member_owner",
       prisma: prisma as never,
       targetSeatCount: 2,
-    })).resolves.toEqual({ currentSeatCount: 3 });
+    })).resolves.toEqual({
+      currentSeatCount: 3,
+      liveMutationRevision: 0,
+    });
 
     expect(update).not.toHaveBeenCalled();
   });
@@ -4042,6 +4048,41 @@ describe("hosted Family plan", () => {
       httpStatus: 409,
     });
 
+    expect(update).not.toHaveBeenCalled();
+  });
+
+  it("rejects a repeated seat source generation before calling Stripe update", async () => {
+    const tx = createTxMock({
+      activeMembershipCount: 2,
+      billedSeatCount: 2,
+      pendingInviteCount: 0,
+    });
+    const prisma = tx as FamilyPlanTxMock & {
+      $transaction: ReturnType<typeof vi.fn>;
+    };
+    prisma.$transaction = vi.fn((callback) => callback(tx));
+    const update = vi.fn();
+    runtimeMocks.requireHostedStripeApi.mockReturnValueOnce({
+      subscriptionItems: {
+        retrieve: vi.fn().mockResolvedValue(
+          makeFamilyStripeSubscriptionItem({ mutationRevision: 2, quantity: 2 }),
+        ),
+        update,
+      },
+    });
+
+    await expect(updateHostedFamilySeatCount({
+      expectedCurrentSeatCount: 2,
+      expectedMutationRevision: 0,
+      groupId: "hbag_family",
+      now: new Date("2026-06-18T12:00:00.000Z"),
+      ownerMemberId: "member_owner",
+      prisma: prisma as never,
+      targetSeatCount: 3,
+    })).rejects.toMatchObject({
+      code: "HOSTED_FAMILY_SEAT_COUNT_CHANGED",
+      httpStatus: 409,
+    });
     expect(update).not.toHaveBeenCalled();
   });
 

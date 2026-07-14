@@ -468,7 +468,7 @@ describe("hosted runtime billing plan tool", () => {
     expect(mocks.upgradeHostedBillingPlan).not.toHaveBeenCalled();
   });
 
-  it("uses one deterministic consumer identity for simultaneous execution", async () => {
+  it("uses a distinct consumer identity for each simultaneous invocation", async () => {
     const approvalId = `haa_${"b".repeat(32)}`;
     const approved = {
       approvalGeneration: "a".repeat(64),
@@ -514,7 +514,7 @@ describe("hosted runtime billing plan tool", () => {
     const consumerIds = mocks.consumeHostedActionApproval.mock.calls.map(
       ([call]) => call.request.consumerId,
     );
-    expect(new Set(consumerIds).size).toBe(1);
+    expect(new Set(consumerIds).size).toBe(2);
     expect(mocks.upgradeHostedBillingPlan).toHaveBeenCalledTimes(1);
   });
 

@@ -2028,7 +2028,7 @@ export async function prepareHostedFamilySeatCountChange(input: {
   ownerMemberId: string;
   prisma?: PrismaClient;
   targetSeatCount: unknown;
-}): Promise<{ currentSeatCount: number }> {
+}): Promise<{ currentSeatCount: number; liveMutationRevision: number }> {
   const prisma = input.prisma ?? getPrisma();
   const targetSeatCount = normalizeHostedFamilySeatCount(input.targetSeatCount);
   return withHostedMemberStripeMutationLock({
@@ -2042,13 +2042,17 @@ export async function prepareHostedFamilySeatCountChange(input: {
         targetSeatCount,
         tx,
       });
-      return { currentSeatCount: state.liveSeatCount };
+      return {
+        currentSeatCount: state.liveSeatCount,
+        liveMutationRevision: state.liveMutationRevision,
+      };
     },
   });
 }
 
 export async function updateHostedFamilySeatCount(input: {
   expectedCurrentSeatCount?: number;
+  expectedMutationRevision?: number;
   groupId: string;
   now?: Date;
   ownerMemberId: string;
@@ -2073,6 +2077,12 @@ export async function updateHostedFamilySeatCount(input: {
       const expectedCurrentSeatCount =
         input.expectedCurrentSeatCount ?? state.billingRef.billedSeatCount;
       const liveSeatCount = state.liveSeatCount;
+      if (
+        input.expectedMutationRevision !== undefined &&
+        state.liveMutationRevision !== input.expectedMutationRevision
+      ) {
+        throw buildHostedFamilySeatCountChangedError();
+      }
       if (liveSeatCount === targetSeatCount) {
         return "applied" as const;
       }
@@ -3540,6 +3550,7 @@ function buildHostedFamilyOwnerInviteAcceptedNotification(input: {
 }
 
 export async function removeHostedFamilyMemberTx(input: {
+  expectedJoinedAt?: Date | null;
   groupId: string;
   memberId: string;
   now?: Date;
@@ -3582,6 +3593,9 @@ export async function removeHostedFamilyMemberTx(input: {
     },
     where: {
       groupId: input.groupId,
+      ...(input.expectedJoinedAt === undefined
+        ? {}
+        : { joinedAt: input.expectedJoinedAt }),
       memberId: input.memberId,
       status: "active",
     },
