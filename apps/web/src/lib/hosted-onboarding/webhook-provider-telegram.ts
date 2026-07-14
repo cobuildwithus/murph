@@ -73,6 +73,8 @@ export async function planHostedOnboardingTelegramWebhook(input: {
   let familyInviteNotAccepted = false;
   let familyAcceptance: Awaited<ReturnType<typeof acceptHostedFamilyInviteFromTelegramTx>> = null;
   let familyActivationWake: HostedWebhookWakeHandoff | null = null;
+  let familyChannelUpdateWake: HostedWebhookWakeHandoff | null = null;
+  const channelUpdateSourceType = `telegram.webhook.route-change.${eventId}`;
   try {
     familyAcceptance = await acceptHostedFamilyInviteFromTelegramTx({
       now: new Date(summary.occurredAt),
@@ -83,6 +85,26 @@ export async function planHostedOnboardingTelegramWebhook(input: {
             mailboxItemId: activation.hostedExecutionMailboxItemId,
             source: "telegram",
             userId: activation.memberId,
+          };
+        }
+      },
+      onTelegramRoutingChanged: async ({ memberId }) => {
+        const dispatch = await enqueueHostedMemberChannelsUpdatedForActiveMemberTx({
+          memberId,
+          occurredAt: summary.occurredAt,
+          prisma: input.prisma,
+          sourceType: channelUpdateSourceType,
+        });
+        if (dispatch) {
+          familyChannelUpdateWake = {
+            eventId: buildHostedMemberChannelsUpdatedEventId({
+              memberId,
+              occurredAt: summary.occurredAt,
+              sourceType: channelUpdateSourceType,
+            }),
+            mailboxItemId: dispatch.mailboxItemId,
+            source: "telegram",
+            userId: memberId,
           };
         }
       },
@@ -128,12 +150,17 @@ export async function planHostedOnboardingTelegramWebhook(input: {
           }
         : familyActivationWake
           ? { wakeHandoffs: [familyActivationWake] }
+          : familyChannelUpdateWake
+            ? { wakeHandoffs: [familyChannelUpdateWake] }
           : {}),
     };
   }
 
   if (familyInviteTokenPresent || familyInviteNotAccepted) {
-    return buildIgnoredTelegramWebhookPlan("family-invite-not-accepted");
+    return buildIgnoredTelegramWebhookPlan(
+      "family-invite-not-accepted",
+      familyChannelUpdateWake,
+    );
   }
 
   const existingMemberLookup = await resolveHostedMemberRoutingByTelegramUserId({
@@ -174,7 +201,6 @@ export async function planHostedOnboardingTelegramWebhook(input: {
     telegramThreadId: telegramMessage.threadId,
     telegramUserId: summary.senderTelegramUserId,
   });
-  const channelUpdateSourceType = `telegram.webhook.route-change.${eventId}`;
   const channelUpdateDispatch = routingUpdate.telegramThreadIdChanged
     ? await enqueueHostedMemberChannelsUpdatedForActiveMemberTx({
       memberId: existingMember.id,
@@ -223,6 +249,7 @@ export async function planHostedOnboardingTelegramWebhook(input: {
 
 function buildIgnoredTelegramWebhookPlan(
   reason: string,
+  wakeHandoff: HostedWebhookWakeHandoff | null = null,
 ): HostedWebhookPlan<HostedOnboardingTelegramWebhookResponse> {
   return {
     desiredSideEffects: [],
@@ -231,6 +258,7 @@ function buildIgnoredTelegramWebhookPlan(
       ignored: true,
       reason,
     },
+    ...(wakeHandoff ? { wakeHandoffs: [wakeHandoff] } : {}),
   };
 }
 

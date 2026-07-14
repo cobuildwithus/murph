@@ -2656,6 +2656,7 @@ export async function resolveHostedFamilyInviteTokenForInbound(input: {
 export async function acceptHostedFamilyInviteFromTelegramTx(input: {
   now?: Date;
   onAcceptedMemberActivated?: (result: HostedMemberActivationResult) => Promise<void> | void;
+  onTelegramRoutingChanged?: (result: { memberId: string }) => Promise<void> | void;
   telegramThreadId?: string | null;
   telegramUsername?: string | null;
   telegramUserId: string;
@@ -2740,12 +2741,17 @@ export async function acceptHostedFamilyInviteFromTelegramTx(input: {
     reason: "hosted-family.telegram-routing",
     userId: member.id,
   });
-  await upsertHostedMemberTelegramRoutingBindingTx({
+  const routingUpdate = await upsertHostedMemberTelegramRoutingBindingTx({
     memberId: member.id,
     prisma: input.tx,
     telegramThreadId: input.telegramThreadId,
     telegramUserId: input.telegramUserId,
   });
+  if (routingUpdate.telegramThreadIdChanged) {
+    await input.onTelegramRoutingChanged?.({
+      memberId: member.id,
+    });
+  }
   return acceptHostedFamilyInviteTx({
     acceptedMemberId: member.id,
     inviteCode,
