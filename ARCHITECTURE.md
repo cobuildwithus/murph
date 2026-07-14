@@ -232,6 +232,22 @@ delivery-time `consumedAt` stamps make racing Linq ensures no-op on already
 answered input and the Durable Object write fence coalesces active runners.
 There is no other web-to-Cloudflare prewarm or nudge path.
 
+Hosted Linq participant-change webhooks are privacy-minimized provider-ledger
+facts, not runtime work. A unique participant addition may set one nullable
+coalescing bit only on an existing thread route; it does not retain the
+participant identity, create authority, fetch the roster, append mailbox work,
+or wake a runtime. The next normally admitted non-direct message takes the
+canonical chat-ownership lock before the route row, consumes exact `true` in the
+same transaction as its ordinary mailbox append, and carries one typed context
+hint. The runner records that hint in the existing tolerant mailbox-to-input
+sidecar rather than the strict persisted assistant-input event, projects it only
+onto the transient input candidate, and renders the same fixed context for both
+normal and captureless active-turn prompt paths. It exposes the hint only with
+route authority and explicit group attestation, while the existing live roster
+tool remains the sole decision-time participant source. Duplicate additions
+coalesce, removals remain ledger-only, and any failed or raced append rolls
+consumption back.
+
 Hosted Linq unknown first-contact admission is a web-owned classifier gate on
 the signup-link path only. It runs after cheap deterministic ingress filters and
 before member/invite mutation, calls OpenAI through an env-only key with bounded

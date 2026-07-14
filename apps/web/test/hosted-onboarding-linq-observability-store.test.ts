@@ -96,6 +96,58 @@ describe("hosted Linq observability stores", () => {
       .toMatch(/^hbid:linq\.delivery-source-ref:s1:[a-f0-9]{64}$/u);
   });
 
+  it.each([
+    "participant.added",
+    "participant.removed",
+  ] as const)(
+    "records %s without participant identifiers, alerts, or line projection",
+    async (eventType) => {
+      const fixture = createObservabilityPrismaFixture();
+      const event = requireParsedProviderEvent(buildProviderEvent({
+        data: {
+          chat_id: "chat_group_123",
+          participant: {
+            handle: "+15551234567",
+            id: "participant_private_123",
+            service: "iMessage",
+          },
+          [eventType === "participant.added" ? "added_at" : "removed_at"]:
+            "2026-03-26T12:01:00.000Z",
+        },
+        eventId: `evt_${eventType.replace(".", "_")}_123`,
+        eventType,
+      }));
+
+      await expect(ingestHostedLinqProviderEventTx({
+        event,
+        prisma: fixture.prisma as never,
+      })).resolves.toEqual({
+        alertIds: [],
+        duplicate: false,
+      });
+
+      expect(fixture.hostedLinqProviderEventCreateMany).toHaveBeenCalledWith(
+        expect.objectContaining({
+          data: expect.objectContaining({
+            eventType,
+            phoneNumberHint: null,
+            phoneNumberLookupKey: null,
+            phoneNumberRole: "unknown",
+          }),
+          skipDuplicates: true,
+        }),
+      );
+      expect(JSON.stringify(fixture.hostedLinqProviderEventCreateMany.mock.calls))
+        .not.toContain("+15551234567");
+      expect(JSON.stringify(fixture.hostedLinqProviderEventCreateMany.mock.calls))
+        .not.toContain("participant_private_123");
+      expect(fixture.hostedLinqAlertCreateMany).not.toHaveBeenCalled();
+      expect(fixture.hostedLinqLineUpsert).not.toHaveBeenCalled();
+      expect(fixture.hostedLinqLineUpdate).not.toHaveBeenCalled();
+      expect(fixture.hostedLinqLineUpdateMany).not.toHaveBeenCalled();
+    },
+  );
+
   it("records failed provider events, updates projections, and claims one event-scoped alert", async () => {
     const fixture = createObservabilityPrismaFixture();
     fixture.hostedLinqDeliveryFindFirst.mockResolvedValue({
