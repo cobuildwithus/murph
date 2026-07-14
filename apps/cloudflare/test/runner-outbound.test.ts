@@ -675,8 +675,8 @@ describe("handleRunnerOutboundRequest", () => {
               : {
                   ok: true,
                   path,
-                }),
-          }),
+                },
+          ),
           {
             headers: {
               "content-type": "application/json; charset=utf-8",
