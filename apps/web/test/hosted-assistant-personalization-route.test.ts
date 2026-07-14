@@ -93,4 +93,48 @@ describe("hosted assistant personalization internal route", () => {
       mailboxItemId: "mailbox_personalization_route",
     });
   });
+
+  it("binds a signed causal sequence to an update without changing the request body", async () => {
+    const payload = JSON.stringify({ action: "update", tone: "casual" });
+    const request = new Request(
+      "https://join.example.test/api/internal/hosted-execution/assistant-personalization/tool?preferenceCausalSeq=42",
+      {
+        body: payload,
+        headers: { "content-type": "application/json" },
+        method: "POST",
+      },
+    );
+
+    const response = await route.POST(request);
+
+    expect(response.status).toBe(200);
+    expect(mocks.requireHostedCloudflareCallbackRequest).toHaveBeenCalledWith(
+      request,
+      { maxBodyBytes: 2_048, payloadText: payload },
+    );
+    expect(mocks.handleHostedRuntimeAssistantPersonalizationTool).toHaveBeenCalledWith({
+      authority: { preferenceCausalSeq: "42" },
+      memberId: "member_personalization_route",
+      request: { action: "update", tone: "casual" },
+      scheduleMailboxWake: expect.any(Function),
+    });
+  });
+
+  it("rejects malformed causal authority after callback authentication", async () => {
+    const payload = JSON.stringify({ action: "update", tone: "casual" });
+    const request = new Request(
+      "https://join.example.test/api/internal/hosted-execution/assistant-personalization/tool?preferenceCausalSeq=-1",
+      {
+        body: payload,
+        headers: { "content-type": "application/json" },
+        method: "POST",
+      },
+    );
+
+    const response = await route.POST(request);
+
+    expect(response.status).toBe(400);
+    expect(mocks.requireHostedCloudflareCallbackRequest).toHaveBeenCalledOnce();
+    expect(mocks.handleHostedRuntimeAssistantPersonalizationTool).not.toHaveBeenCalled();
+  });
 });

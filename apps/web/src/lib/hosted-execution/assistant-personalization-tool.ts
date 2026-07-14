@@ -1,6 +1,7 @@
 import "server-only";
 
 import type {
+  HostedRuntimeAssistantPersonalizationToolAuthority,
   HostedRuntimeAssistantPersonalizationSnapshot,
   HostedRuntimeAssistantPersonalizationToolRequest,
   HostedRuntimeAssistantPersonalizationToolResponse,
@@ -34,6 +35,7 @@ interface HostedRuntimeAssistantPersonalizationTransactionResult {
 }
 
 export async function handleHostedRuntimeAssistantPersonalizationTool(input: {
+  authority?: HostedRuntimeAssistantPersonalizationToolAuthority;
   memberId: string;
   request: HostedRuntimeAssistantPersonalizationToolRequest;
   scheduleMailboxWake?: (input: {
@@ -57,6 +59,10 @@ export async function handleHostedRuntimeAssistantPersonalizationTool(input: {
   }
 
   const request = input.request;
+  const authority = input.authority;
+  if (!authority) {
+    throw new TypeError("Assistant personalization update requires turn causal authority.");
+  }
   const prisma = getPrisma();
   const transactionResult = await prisma.$transaction(async (tx) => {
     await assertActiveHostedMemberAccessAllowed({
@@ -69,11 +75,13 @@ export async function handleHostedRuntimeAssistantPersonalizationTool(input: {
     });
     const styleResult = request.tone !== undefined || request.voice !== undefined
       ? await upsertHostedMemberAssistantPreferencesTx({
+          causalOrigin: "turn",
           mailboxPayloadMode: assistantPersonalityCausalWritesEnabled(process.env)
             ? "sparse_delta"
             : "legacy_snapshot",
           memberId: input.memberId,
           occurredAt: new Date().toISOString(),
+          preferenceCausalSeq: authority.preferenceCausalSeq,
           preferences: {
             ...(request.tone === undefined ? {} : { tone: request.tone }),
             ...(request.voice === undefined ? {} : { voice: request.voice }),

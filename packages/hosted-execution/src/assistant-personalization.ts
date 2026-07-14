@@ -22,6 +22,11 @@ export type HostedRuntimeAssistantPersonalizationToolRequest =
       voice?: AssistantVoiceOptionId;
     };
 
+export interface HostedRuntimeAssistantPersonalizationToolAuthority {
+  preferenceCausalSeq: string;
+}
+
+
 export interface HostedRuntimeAssistantPersonalizationSnapshot {
   model: HostedAssistantProductModel;
   solAvailable: boolean;
@@ -67,6 +72,7 @@ export const hostedRuntimeAssistantPersonalizationToolRequestSchema = z
       });
     }
   });
+
 
 const hostedRuntimeAssistantPersonalizationSnapshotSchema = z.object({
   model: z.enum(HOSTED_ASSISTANT_PRODUCT_MODELS),

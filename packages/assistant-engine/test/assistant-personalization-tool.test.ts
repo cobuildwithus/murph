@@ -64,6 +64,7 @@ describe('assistant personalization tool', () => {
       computerToolsAvailable: false,
       currentHostedDeliveryContext: () => null,
       currentHostedMailboxItemIds: () => [],
+      currentAssistantPreferenceCausalSeq: () => '42',
       personalizationTool,
       sendVaultFile: vi.fn(async () => ({
         approvalUrl: 'https://murph.test/approve/unused',
@@ -82,11 +83,14 @@ describe('assistant personalization tool', () => {
       request,
     })
 
-    expect(personalizationTool.request).toHaveBeenCalledWith({
-      action: 'update',
-      tone: 'formal',
-      voice: 'upbeat',
-    })
+    expect(personalizationTool.request).toHaveBeenCalledWith(
+      {
+        action: 'update',
+        tone: 'formal',
+        voice: 'upbeat',
+      },
+      { preferenceCausalSeq: '42' },
+    )
     expect(result.rpcResult.success).toBe(true)
     expect(result.rpcResult.contentItems[0]?.text).toContain('"status":"saved"')
   })

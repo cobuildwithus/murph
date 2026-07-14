@@ -245,6 +245,7 @@ export function parseHostedExecutionWake(value: unknown): HostedExecutionWake {
       });
     case "member.preferences.updated":
       return buildHostedExecutionMemberPreferencesUpdatedWake({
+        ...parsePreferenceCausalMetadata(record),
         eventId,
         memberId: wireUserId,
         occurredAt,
@@ -1021,6 +1022,7 @@ export function parseHostedExecutionEvent(value: unknown): HostedExecutionEvent 
       } satisfies HostedExecutionMemberChannelsUpdatedEvent;
     case "member.preferences.updated":
       return {
+        ...parsePreferenceCausalMetadata(record),
         kind,
         preferences: parseHostedExecutionMemberPreferences(
           record.preferences,
@@ -1420,6 +1422,36 @@ function parseHostedExecutionAssistantVoicePreference(
     throw new TypeError(`${label} is invalid.`);
   }
   return voice;
+}
+
+function parsePreferenceCausalMetadata(
+  record: Record<string, unknown>,
+): Pick<
+  HostedExecutionMemberPreferencesUpdatedEvent,
+  "causalOrigin" | "preferenceCausalSeq"
+> {
+  const causalOrigin = record.causalOrigin;
+  if (
+    causalOrigin !== undefined
+    && causalOrigin !== "event"
+    && causalOrigin !== "turn"
+  ) {
+    throw new TypeError("Hosted preference causalOrigin is invalid.");
+  }
+  const preferenceCausalSeq = record.preferenceCausalSeq;
+  if (
+    preferenceCausalSeq !== undefined
+    && (
+      typeof preferenceCausalSeq !== "string"
+      || !/^(0|[1-9]\d*)$/u.test(preferenceCausalSeq)
+    )
+  ) {
+    throw new TypeError("Hosted preference preferenceCausalSeq is invalid.");
+  }
+  return {
+    ...(causalOrigin === undefined ? {} : { causalOrigin }),
+    ...(preferenceCausalSeq === undefined ? {} : { preferenceCausalSeq }),
+  };
 }
 
 function parseHostedExecutionWakeKind(value: unknown, label: string): HostedExecutionWakeKind {

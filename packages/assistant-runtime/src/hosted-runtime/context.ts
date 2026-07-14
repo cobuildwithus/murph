@@ -229,6 +229,7 @@ export async function applyHostedMemberPreferences(
   }
 
   await updateAssistantPreferences({
+    ...(wake.causalOrigin ? { causalOrigin: wake.causalOrigin } : {}),
     causalSeq,
     preferences: wake.preferences,
     updatedAt: appliedAt,

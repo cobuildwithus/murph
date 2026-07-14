@@ -44,6 +44,7 @@ import type {
   AssistantUsageRecord,
 } from "@murphai/hosted-execution/assistant-usage";
 import type {
+  HostedRuntimeAssistantPersonalizationToolAuthority,
   HostedRuntimeAssistantPersonalizationToolRequest,
   HostedRuntimeAssistantPersonalizationToolResponse,
 } from "@murphai/hosted-execution/assistant-personalization";
@@ -380,6 +381,7 @@ export interface HostedRuntimePlanUsageToolPort {
 export interface HostedRuntimeAssistantPersonalizationToolPort {
   request(
     request: HostedRuntimeAssistantPersonalizationToolRequest,
+    authority?: HostedRuntimeAssistantPersonalizationToolAuthority,
   ): Promise<HostedRuntimeAssistantPersonalizationToolResponse>;
 }
 

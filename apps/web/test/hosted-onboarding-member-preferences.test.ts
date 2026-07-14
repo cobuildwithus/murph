@@ -45,6 +45,7 @@ describe("hosted member assistant preferences", () => {
     mocks.appendHostedMailboxEnvelopeTx.mockResolvedValue({
       dedupeConflict: false,
       item: {
+        causalSeq: 1n,
         id: "mailbox_item_123",
       },
     });
@@ -114,6 +115,7 @@ describe("hosted member assistant preferences", () => {
     mocks.appendHostedMailboxEnvelopeTx.mockResolvedValue({
       dedupeConflict: false,
       item: {
+        causalSeq: 1n,
         id: "mailbox_item_123",
       },
     });
@@ -155,6 +157,53 @@ describe("hosted member assistant preferences", () => {
     expect(member.assistantVoice).toBe("deep-calm");
   });
 
+  it("stale conversation intent no-ops field-locally behind newer Settings state", async () => {
+    const member = {
+      assistantDetail: null as number | null,
+      assistantHumor: null as number | null,
+      assistantPush: null as number | null,
+      assistantTone: "formal" as string | null,
+      assistantToneCausalSeq: 101n as bigint | null,
+      assistantVoice: "warm" as string | null,
+      assistantVoiceCausalSeq: 99n as bigint | null,
+      id: "member_123",
+    };
+    const prisma = createPreferencesPrismaDouble(member);
+    mocks.appendHostedMailboxEnvelopeTx.mockResolvedValue({
+      dedupeConflict: false,
+      item: { causalSeq: 102n, id: "mailbox_item_123" },
+    });
+
+    await expect(upsertHostedMemberAssistantPreferencesTx({
+      causalOrigin: "turn",
+      mailboxPayloadMode: "sparse_delta",
+      memberId: "member_123",
+      occurredAt: "2026-07-08T12:00:00.000Z",
+      preferenceCausalSeq: "100",
+      preferences: { tone: "casual", voice: "deep-calm" },
+      prisma,
+    })).resolves.toMatchObject({
+      assistantTone: "formal",
+      assistantVoice: "deep-calm",
+      updated: true,
+    });
+
+    expect(member).toMatchObject({
+      assistantTone: "formal",
+      assistantToneCausalSeq: 101n,
+      assistantVoice: "deep-calm",
+      assistantVoiceCausalSeq: 100n,
+    });
+    expect(mocks.appendHostedMailboxEnvelopeTx).toHaveBeenCalledWith({
+      envelope: expect.objectContaining({
+        causalOrigin: "turn",
+        preferenceCausalSeq: "100",
+        preferences: { voice: "deep-calm" },
+      }),
+      tx: prisma,
+    });
+  });
+
   it("emits only the preference changed by the request", async () => {
     const member = {
       assistantDetail: 5 as number | null,
@@ -168,6 +217,7 @@ describe("hosted member assistant preferences", () => {
     mocks.appendHostedMailboxEnvelopeTx.mockResolvedValue({
       dedupeConflict: false,
       item: {
+        causalSeq: 1n,
         id: "mailbox_item_123",
       },
     });
@@ -210,6 +260,7 @@ describe("hosted member assistant preferences", () => {
     mocks.appendHostedMailboxEnvelopeTx.mockResolvedValue({
       dedupeConflict: false,
       item: {
+        causalSeq: 1n,
         id: "mailbox_item_123",
       },
     });
@@ -248,6 +299,7 @@ describe("hosted member assistant preferences", () => {
     mocks.appendHostedMailboxEnvelopeTx.mockResolvedValue({
       dedupeConflict: false,
       item: {
+        causalSeq: 1n,
         id: "mailbox_item_123",
       },
     });
@@ -391,7 +443,9 @@ function createPreferencesPrismaDouble(member: {
   assistantHumor: number | null;
   assistantPush: number | null;
   assistantTone: string | null;
+  assistantToneCausalSeq?: bigint | null;
   assistantVoice: string | null;
+  assistantVoiceCausalSeq?: bigint | null;
   id: string;
 }): Prisma.TransactionClient {
   return {
@@ -403,7 +457,9 @@ function createPreferencesPrismaDouble(member: {
           assistantHumor?: number;
           assistantPush?: number;
           assistantTone?: string;
+          assistantToneCausalSeq?: bigint;
           assistantVoice?: string;
+          assistantVoiceCausalSeq?: bigint;
         };
       }) => {
         if (input.data.assistantDetail !== undefined) {
@@ -418,8 +474,14 @@ function createPreferencesPrismaDouble(member: {
         if (input.data.assistantTone !== undefined) {
           member.assistantTone = input.data.assistantTone;
         }
+        if (input.data.assistantToneCausalSeq !== undefined) {
+          member.assistantToneCausalSeq = input.data.assistantToneCausalSeq;
+        }
         if (input.data.assistantVoice !== undefined) {
           member.assistantVoice = input.data.assistantVoice;
+        }
+        if (input.data.assistantVoiceCausalSeq !== undefined) {
+          member.assistantVoiceCausalSeq = input.data.assistantVoiceCausalSeq;
         }
         return {
           assistantDetail: member.assistantDetail,

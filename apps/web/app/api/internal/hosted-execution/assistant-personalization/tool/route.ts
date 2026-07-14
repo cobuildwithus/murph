@@ -29,10 +29,24 @@ export const POST = withJsonError(async (request: Request) => {
 
   return jsonOk(await handleHostedRuntimeAssistantPersonalizationTool({
     memberId,
+    ...(readPreferenceCausalAuthority(request) ?? {}),
     request: body,
     scheduleMailboxWake: scheduleMailboxWakeAfterResponse,
   }));
 });
+
+function readPreferenceCausalAuthority(request: Request): {
+  authority: { preferenceCausalSeq: string };
+} | null {
+  const value = new URL(request.url).searchParams.get("preferenceCausalSeq");
+  if (value === null) {
+    return null;
+  }
+  if (!/^(0|[1-9]\d*)$/u.test(value)) {
+    throw new TypeError("Assistant personalization causal authority is invalid.");
+  }
+  return { authority: { preferenceCausalSeq: value } };
+}
 
 function scheduleMailboxWakeAfterResponse(input: {
   expectedUserId: string;

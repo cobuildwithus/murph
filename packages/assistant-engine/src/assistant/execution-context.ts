@@ -6,6 +6,7 @@ import type {
 import { normalizeAssistantBackendTarget } from '@murphai/operator-config/assistant-backend'
 import type { AssistantUsageRecord } from '@murphai/hosted-execution/assistant-usage'
 import type {
+  HostedRuntimeAssistantPersonalizationToolAuthority,
   HostedRuntimeAssistantPersonalizationToolRequest,
   HostedRuntimeAssistantPersonalizationToolResponse,
 } from '@murphai/hosted-execution/assistant-personalization'
@@ -94,6 +95,7 @@ export interface AssistantHostedPlanUsageTool {
 export interface AssistantHostedPersonalizationTool {
   request(
     request: HostedRuntimeAssistantPersonalizationToolRequest,
+    authority?: HostedRuntimeAssistantPersonalizationToolAuthority,
   ): Promise<HostedRuntimeAssistantPersonalizationToolResponse>
 }
 

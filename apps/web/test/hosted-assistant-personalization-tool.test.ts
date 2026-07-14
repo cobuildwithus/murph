@@ -133,6 +133,7 @@ describe("hosted assistant personalization tool owner adapter", () => {
     mocks.assertActiveHostedMemberAccessAllowed.mockRejectedValue(accessError);
 
     await expect(handleHostedRuntimeAssistantPersonalizationTool({
+      authority: { preferenceCausalSeq: "41" },
       memberId: "member_personalization_inactive",
       request: { action: "update", tone: "casual" },
     })).rejects.toBe(accessError);
@@ -149,6 +150,7 @@ describe("hosted assistant personalization tool owner adapter", () => {
     vi.stubEnv("MURPH_ASSISTANT_PERSONALITY_CAUSAL_WRITES_ENABLED", "0");
 
     await expect(handleHostedRuntimeAssistantPersonalizationTool({
+      authority: { preferenceCausalSeq: "42" },
       memberId: "member_personalization_1",
       request: {
         action: "update",
@@ -174,7 +176,9 @@ describe("hosted assistant personalization tool owner adapter", () => {
     expect(mocks.upsertHostedMemberAssistantPreferencesTx).toHaveBeenCalledWith(
       expect.objectContaining({
         mailboxPayloadMode: "legacy_snapshot",
+        causalOrigin: "turn",
         memberId: "member_personalization_1",
+        preferenceCausalSeq: "42",
         preferences: { voice: "warm" },
         prisma: { tx: true },
       }),
@@ -194,6 +198,7 @@ describe("hosted assistant personalization tool owner adapter", () => {
     });
 
     await expect(handleHostedRuntimeAssistantPersonalizationTool({
+      authority: { preferenceCausalSeq: "43" },
       memberId: "member_personalization_1",
       request: {
         action: "update",

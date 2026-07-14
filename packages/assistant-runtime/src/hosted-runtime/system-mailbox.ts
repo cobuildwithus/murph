@@ -121,7 +121,11 @@ export async function enqueueHostedSystemMailboxItem(input: {
     occurredAt: input.item.item.occurredAt,
     postCheckpointRecord: null,
     preferenceCausalSeq: routeAction === "apply-member-preferences"
-      ? (input.item.item.causalSeq ?? null)
+      ? (
+        input.wake.kind === "member.preferences.updated"
+          ? (input.wake.preferenceCausalSeq ?? input.item.item.causalSeq ?? null)
+          : (input.item.item.causalSeq ?? null)
+      )
       : null,
     requestId: input.item.payload.requestId ?? null,
     routeAction,

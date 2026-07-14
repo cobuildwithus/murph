@@ -16,13 +16,15 @@ export function createHostedRuntimeAssistantPersonalizationToolPort(input: {
   transport: HostedWebControlTransport;
 }): NonNullable<HostedRuntimePlatform["assistantPersonalizationToolPort"]> {
   return {
-    async request(request) {
+    async request(request, authority) {
       const payload = await fetchHostedWebControlPlaneJson({
         body: request,
         boundUserId: input.boundUserId,
         description: "Hosted assistant personalization tool",
         fetchImpl: input.fetchImpl,
-        path: HOSTED_RUNTIME_ASSISTANT_PERSONALIZATION_TOOL_PATH,
+        path: authority
+          ? `${HOSTED_RUNTIME_ASSISTANT_PERSONALIZATION_TOOL_PATH}?preferenceCausalSeq=${encodeURIComponent(authority.preferenceCausalSeq)}`
+          : HOSTED_RUNTIME_ASSISTANT_PERSONALIZATION_TOOL_PATH,
         timeoutMs: input.timeoutMs,
         transport: input.transport,
       });

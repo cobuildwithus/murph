@@ -295,6 +295,16 @@ after the canonical commit is therefore an idempotent no-op without an event
 receipt, reservation lifecycle, cap, or mailbox-removal acknowledgment.
 Ordering never uses the web projection or wall-clock comparison.
 
+The conversation personalization callback carries that runtime-owned sequence
+as signed internal authority outside the model-visible request. The web
+projection stores nullable per-field tone and voice watermarks and stale-no-ops
+only requested fields whose later Settings or conversation intent already has
+a higher sequence. A conversation wake keeps its origin sequence and `turn`
+origin for canonical application even though the mailbox row receives a newer
+transport sequence; Settings wakes continue to use their row sequence. This
+keeps the display projection and canonical vault on the same field-local order
+without making the callback time a new intent.
+
 System-lane completion is acknowledged only with a successful workspace
 checkpoint. The runtime derives the contiguous handled prefix from the imported
 system watermark and the earliest real pending system item; local synthetic

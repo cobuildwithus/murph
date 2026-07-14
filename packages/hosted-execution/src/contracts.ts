@@ -166,7 +166,9 @@ export interface HostedExecutionMemberPreferences {
 
 export interface HostedExecutionMemberPreferencesUpdatedEvent
   extends HostedExecutionBaseEvent {
+  causalOrigin?: "event" | "turn";
   kind: "member.preferences.updated";
+  preferenceCausalSeq?: string;
   preferences: HostedExecutionMemberPreferences;
 }
 
@@ -490,7 +492,9 @@ export interface HostedExecutionMemberChannelsUpdatedWake extends HostedExecutio
 
 export interface HostedExecutionMemberPreferencesUpdatedWake
   extends HostedExecutionBaseWake {
+  causalOrigin?: "event" | "turn";
   kind: "member.preferences.updated";
+  preferenceCausalSeq?: string;
   preferences: HostedExecutionMemberPreferences;
 }
 

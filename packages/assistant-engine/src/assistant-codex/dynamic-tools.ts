@@ -2535,8 +2535,18 @@ async function executePersonalizationTool(input: {
     return toolTextResult(false, 'personalization is unavailable for this turn')
   }
 
+  const preferenceCausalSeq = input.request.action === 'update'
+    ? input.hostedToolContext?.currentAssistantPreferenceCausalSeq?.() ?? null
+    : null
+  if (input.request.action === 'update' && preferenceCausalSeq === null) {
+    return toolTextResult(false, 'personalization is unavailable for this turn')
+  }
+
   try {
-    const result = await personalizationTool.request(input.request)
+    const result = await personalizationTool.request(
+      input.request,
+      preferenceCausalSeq === null ? undefined : { preferenceCausalSeq },
+    )
     return toolTextResult(true, safeToolPayloadText(result))
   } catch {
     return toolTextResult(false, 'personalization request failed')

@@ -56,9 +56,11 @@ type HostedMemberPersonalityColumns = {
 };
 
 export async function upsertHostedMemberAssistantPreferencesTx(input: {
+  causalOrigin?: "event" | "turn";
   mailboxPayloadMode: HostedMemberAssistantPreferencesMailboxPayloadMode;
   memberId: string;
   occurredAt: string;
+  preferenceCausalSeq?: string;
   preferences: HostedMemberAssistantPreferencesUpdate;
   prisma: Prisma.TransactionClient;
 }): Promise<HostedMemberAssistantPreferencesResult> {
@@ -73,7 +75,9 @@ export async function upsertHostedMemberAssistantPreferencesTx(input: {
       assistantHumor: true,
       assistantPush: true,
       assistantTone: true,
+      assistantToneCausalSeq: true,
       assistantVoice: true,
+      assistantVoiceCausalSeq: true,
       id: true,
     },
   });
@@ -86,6 +90,9 @@ export async function upsertHostedMemberAssistantPreferencesTx(input: {
     });
   }
 
+  const requestedCausalSeq = input.preferenceCausalSeq === undefined
+    ? null
+    : BigInt(input.preferenceCausalSeq);
   const changedPreferences = resolveChangedAssistantPreferences({
     current: {
       personality: member,
@@ -93,6 +100,15 @@ export async function upsertHostedMemberAssistantPreferencesTx(input: {
       voice: member.assistantVoice,
     },
     preferences: input.preferences,
+    ...(requestedCausalSeq === null
+      ? {}
+      : {
+          causalSeq: requestedCausalSeq,
+          currentCausalSeq: {
+            tone: member.assistantToneCausalSeq,
+            voice: member.assistantVoiceCausalSeq,
+          },
+        }),
   });
 
   if (!changedPreferences) {
@@ -114,6 +130,37 @@ export async function upsertHostedMemberAssistantPreferencesTx(input: {
     );
   }
 
+  const wake = buildHostedExecutionMemberPreferencesUpdatedWake({
+    ...(input.causalOrigin ? { causalOrigin: input.causalOrigin } : {}),
+    eventId: buildHostedMemberPreferencesUpdatedEventId({
+      memberId: input.memberId,
+      updateId: randomUUID(),
+    }),
+    memberId: input.memberId,
+    occurredAt: input.occurredAt,
+    ...(input.preferenceCausalSeq
+      ? { preferenceCausalSeq: input.preferenceCausalSeq }
+      : {}),
+    preferences: input.mailboxPayloadMode === "sparse_delta"
+      ? changedPreferences
+      : buildHostedMemberAssistantPreferencesSnapshot({
+          tone: changedPreferences.tone ?? member.assistantTone,
+          voice: changedPreferences.voice ?? member.assistantVoice,
+        }),
+  });
+  const append = await appendHostedMailboxEnvelopeTx({
+    envelope: wake,
+    tx: input.prisma,
+  });
+  if (append.dedupeConflict) {
+    throw hostedOnboardingError({
+      code: "HOSTED_MEMBER_PREFERENCES_WAKE_DEDUPE_CONFLICT",
+      httpStatus: 503,
+      message: "Assistant preference update conflicted with an existing wake identity.",
+      retryable: true,
+    });
+  }
+  const effectiveCausalSeq = requestedCausalSeq ?? BigInt(append.item.causalSeq!);
   const updatedMember = await input.prisma.hostedMember.update({
     where: {
       id: input.memberId,
@@ -121,10 +168,16 @@ export async function upsertHostedMemberAssistantPreferencesTx(input: {
     data: {
       ...(changedPreferences.tone === undefined
         ? {}
-        : { assistantTone: changedPreferences.tone }),
+        : {
+            assistantTone: changedPreferences.tone,
+            assistantToneCausalSeq: effectiveCausalSeq,
+          }),
       ...(changedPreferences.voice === undefined
         ? {}
-        : { assistantVoice: changedPreferences.voice }),
+        : {
+            assistantVoice: changedPreferences.voice,
+            assistantVoiceCausalSeq: effectiveCausalSeq,
+          }),
       ...(changedPreferences.personality?.humor === undefined
         ? {}
         : { assistantHumor: changedPreferences.personality.humor }),
@@ -143,33 +196,6 @@ export async function upsertHostedMemberAssistantPreferencesTx(input: {
       assistantVoice: true,
     },
   });
-
-  const wake = buildHostedExecutionMemberPreferencesUpdatedWake({
-    eventId: buildHostedMemberPreferencesUpdatedEventId({
-      memberId: input.memberId,
-      updateId: randomUUID(),
-    }),
-    memberId: input.memberId,
-    occurredAt: input.occurredAt,
-    preferences: input.mailboxPayloadMode === "sparse_delta"
-      ? changedPreferences
-      : buildHostedMemberAssistantPreferencesSnapshot({
-          tone: updatedMember.assistantTone,
-          voice: updatedMember.assistantVoice,
-        }),
-  });
-  const append = await appendHostedMailboxEnvelopeTx({
-    envelope: wake,
-    tx: input.prisma,
-  });
-  if (append.dedupeConflict) {
-    throw hostedOnboardingError({
-      code: "HOSTED_MEMBER_PREFERENCES_WAKE_DEDUPE_CONFLICT",
-      httpStatus: 503,
-      message: "Assistant preference update conflicted with an existing wake identity.",
-      retryable: true,
-    });
-  }
 
   return {
     assistantPersonality: normalizeStoredAssistantPersonality(updatedMember),
@@ -222,18 +248,31 @@ export function buildHostedMemberPreferencesUpdatedEventId(input: {
 }
 
 function resolveChangedAssistantPreferences(input: {
+  causalSeq?: bigint;
   current: {
     personality: HostedMemberPersonalityColumns;
     tone: string | null;
     voice: string | null;
   };
+  currentCausalSeq?: {
+    tone: bigint | null;
+    voice: bigint | null;
+  };
   preferences: HostedMemberAssistantPreferencesUpdate;
 }): HostedExecutionMemberPreferences | null {
-  const tone = input.preferences.tone !== undefined
+  const toneApplicable = input.causalSeq === undefined
+    || input.currentCausalSeq?.tone === null
+    || input.currentCausalSeq?.tone === undefined
+    || input.causalSeq >= input.currentCausalSeq.tone;
+  const voiceApplicable = input.causalSeq === undefined
+    || input.currentCausalSeq?.voice === null
+    || input.currentCausalSeq?.voice === undefined
+    || input.causalSeq >= input.currentCausalSeq.voice;
+  const tone = toneApplicable && input.preferences.tone !== undefined
     && input.preferences.tone !== input.current.tone
     ? input.preferences.tone
     : undefined;
-  const voice = input.preferences.voice !== undefined
+  const voice = voiceApplicable && input.preferences.voice !== undefined
     && input.preferences.voice !== input.current.voice
     ? input.preferences.voice
     : undefined;
