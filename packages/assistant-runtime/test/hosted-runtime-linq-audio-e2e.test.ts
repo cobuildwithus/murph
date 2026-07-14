@@ -607,7 +607,6 @@ function createRuntimeConfig(): Pick<
       channelCapabilities: {
         emailSendReady: false,
         telegramBotConfigured: false,
-        whatsappCloudApiConfigured: false,
       },
       deviceSync: null,
       managedAutoReplyChannels: [

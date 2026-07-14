@@ -22520,7 +22520,6 @@ function createDeviceSyncResolvedConfig(): HostedAssistantRuntimeResolvedConfig 
     channelCapabilities: {
       emailSendReady: false,
       telegramBotConfigured: false,
-      whatsappCloudApiConfigured: false,
     },
     deviceSync: {
       providerConfigs: {

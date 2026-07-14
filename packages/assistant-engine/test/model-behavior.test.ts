@@ -563,15 +563,6 @@ describe('assistant execution prompt contract', () => {
       'Do not wrap text in `**`, `*`, `_`, `~~`, or `++` style markers',
     )
 
-    const whatsappPrompt = buildAssistantSystemPrompt(createCommonCodexPromptInput({
-      channel: 'whatsapp',
-    }))
-    expect(whatsappPrompt).toContain(
-      'Do not wrap text in `**`, `*`, `_`, `~~`, or `++` style markers',
-    )
-    expect(whatsappPrompt).not.toContain(
-      'For Linq/iMessage and Telegram, native text styles are supported by the delivery layer',
-    )
   })
 
   it('uses the hosted computer step guidance with handoff completion policy', () => {

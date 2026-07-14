@@ -29,7 +29,6 @@ import {
   handleHostedRunnerOpenAiOutbound,
   handleHostedRunnerOpenInternetOutbound,
   handleHostedRunnerTelegramOutbound,
-  handleHostedRunnerWhatsAppOutbound,
   HOSTED_CLOUDFLARE_INJECTED_CREDENTIAL,
   HOSTED_OPENAI_CACHE_DIAGNOSTIC_EVENT_CODE,
   HOSTED_RUNNER_DEFAULT_OUTBOUND_HOSTS,
@@ -242,8 +241,6 @@ describe("hostedRunnerIntercept", () => {
       .toBe(handleHostedRunnerLinqOutbound);
     expect(HOSTED_RUNNER_OUTBOUND_BY_HOST[HOSTED_RUNNER_DEFAULT_OUTBOUND_HOSTS.telegram])
       .toBe(handleHostedRunnerTelegramOutbound);
-    expect(HOSTED_RUNNER_OUTBOUND_BY_HOST[HOSTED_RUNNER_DEFAULT_OUTBOUND_HOSTS.whatsApp])
-      .toBe(handleHostedRunnerWhatsAppOutbound);
     expect(HOSTED_RUNNER_OUTBOUND_BY_HOST[HOSTED_RUNNER_DEFAULT_OUTBOUND_HOSTS.webControlPlane])
       .toBe(handleHostedRunnerInternalOutbound);
     expect(HOSTED_RUNNER_OUTBOUND_BY_HOST["host.docker.internal"])
@@ -2297,31 +2294,6 @@ describe("hostedRunnerIntercept", () => {
         },
       ),
       { TELEGRAM_BOT_TOKEN: "telegram-worker-secret" },
-    );
-  });
-
-  it("rejects tokenless WhatsApp provider egress", async () => {
-    await expectTokenlessDeliveryProviderRejected(
-      new Request(
-        `https://graph.facebook.com/v22.0/${HOSTED_CLOUDFLARE_INJECTED_CREDENTIAL}/messages`,
-        {
-          body: JSON.stringify({
-            messaging_product: "whatsapp",
-            to: "1",
-            text: { body: "spoof" },
-          }),
-          headers: {
-            [HOSTED_RUNNER_BOUND_USER_ID_HEADER]: "member_123",
-            authorization: `Bearer ${HOSTED_CLOUDFLARE_INJECTED_CREDENTIAL}`,
-            "content-type": "application/json; charset=utf-8",
-          },
-          method: "POST",
-        },
-      ),
-      {
-        WHATSAPP_ACCESS_TOKEN: "whatsapp-worker-secret",
-        WHATSAPP_PHONE_NUMBER_ID: "phone_id",
-      },
     );
   });
 
@@ -4700,8 +4672,6 @@ describe("hostedRunnerIntercept", () => {
         MAPBOX_ACCESS_TOKEN: "mapbox-worker-secret",
         OPENAI_API_KEY: "openai-worker-secret",
         TELEGRAM_BOT_TOKEN: "telegram-worker-secret",
-        WHATSAPP_ACCESS_TOKEN: "whatsapp-worker-secret",
-        WHATSAPP_PHONE_NUMBER_ID: "phone_123",
       }),
       { containerId: "opaque-container-id" },
     );
@@ -4724,8 +4694,6 @@ describe("hostedRunnerIntercept", () => {
     expect(forwardedSerialized).not.toContain("mapbox-worker-secret");
     expect(forwardedSerialized).not.toContain("openai-worker-secret");
     expect(forwardedSerialized).not.toContain("telegram-worker-secret");
-    expect(forwardedSerialized).not.toContain("whatsapp-worker-secret");
-    expect(forwardedSerialized).not.toContain("phone_123");
     expect(mocks.emitHostedExecutionStructuredLog).toHaveBeenCalledWith(
       expect.objectContaining({
         details: {
@@ -6206,336 +6174,6 @@ describe("hostedRunnerIntercept", () => {
     expect(fetchMock).not.toHaveBeenCalled();
   });
 
-  it("rewrites WhatsApp sentinel phone ids only for numeric graph versions", async () => {
-    const fetchMock = vi.fn<typeof fetch>(async () => new Response("ok"));
-    vi.stubGlobal("fetch", fetchMock);
-
-    const response = await hostedRunnerIntercept(
-      new Request("https://graph.facebook.com/v25.0/__cloudflare_injected__/messages", {
-        headers: BOUND_USER_WRITE_FENCE_WITH_BEARER_SENTINEL_HEADERS,
-        method: "POST",
-      }),
-      createInterceptEnv({
-        WHATSAPP_ACCESS_TOKEN: "whatsapp-worker-secret",
-        WHATSAPP_PHONE_NUMBER_ID: "phone_123",
-        validateRuntimeWriteFence: async () => true,
-      }),
-      { containerId: "opaque-container-id" },
-    );
-
-    expect(response.status).toBe(200);
-    const forwarded = readForwardedRequest(fetchMock);
-    expect(forwarded.url).toBe("https://graph.facebook.com/v25.0/phone_123/messages");
-    expect(forwarded.headers.get("authorization")).toBe("Bearer whatsapp-worker-secret");
-    expect(forwarded.headers.has("x-hosted-runtime-attempt-id")).toBe(false);
-    expect(forwarded.headers.has(HOSTED_RUNNER_BOUND_USER_ID_HEADER)).toBe(false);
-  });
-
-  it("injects WhatsApp credentials from a provider egress token without authority headers", async () => {
-    const fetchMock = vi.fn<typeof fetch>(async () => new Response("ok"));
-    vi.stubGlobal("fetch", fetchMock);
-    const validateRuntimeWriteFence = vi.fn(async () => {
-      throw new Error("WhatsApp without authority headers should use provider egress token validation.");
-    });
-    const validateRuntimeProviderEgressToken = vi.fn(async (input: {
-      providerEgressToken: string;
-      userId: string;
-    }) => createProviderEgressTokenValidationResult(input));
-
-    const response = await hostedRunnerIntercept(
-      new Request("https://graph.facebook.com/v25.0/__cloudflare_injected__/messages", {
-        headers: {
-          ...BOUND_USER_PROVIDER_EGRESS_HEADERS,
-          authorization: `Bearer ${HOSTED_CLOUDFLARE_INJECTED_CREDENTIAL}`,
-          cookie: "session=user-supplied-cookie",
-          "x-api-key": "user-supplied-api-key",
-        },
-        method: "POST",
-      }),
-      createInterceptEnv({
-        WHATSAPP_ACCESS_TOKEN: "whatsapp-worker-secret",
-        WHATSAPP_PHONE_NUMBER_ID: "phone_123",
-        validateRuntimeProviderEgressToken,
-        validateRuntimeWriteFence,
-      }),
-      { containerId: "opaque-container-id" },
-    );
-
-    expect(response.status).toBe(200);
-    expect(validateRuntimeWriteFence).not.toHaveBeenCalled();
-    expect(validateRuntimeProviderEgressToken).toHaveBeenCalledWith({
-      providerEgressToken: PROVIDER_EGRESS_TOKEN,
-      userId: "member_123",
-    });
-    const forwarded = readForwardedRequest(fetchMock);
-    expect(forwarded.url).toBe("https://graph.facebook.com/v25.0/phone_123/messages");
-    expect(forwarded.headers.get("authorization")).toBe("Bearer whatsapp-worker-secret");
-    expect(forwarded.headers.has(HOSTED_PROVIDER_EGRESS_TOKEN_HEADER)).toBe(false);
-    expect(forwarded.headers.has("cookie")).toBe(false);
-    expect(forwarded.headers.has("x-api-key")).toBe(false);
-    expect(mocks.emitHostedExecutionStructuredLog).toHaveBeenCalledWith(
-      expect.objectContaining({
-        details: expect.objectContaining({
-          providerKind: "whatsapp",
-          writeFenceValidationMode: "provider_egress_token",
-        }),
-        message: "Hosted runner provider egress completed.",
-      }),
-    );
-  });
-
-  it.each([
-    {
-      name: "missing",
-      headers: BOUND_USER_WRITE_FENCE_HEADERS,
-    },
-    {
-      name: "wrong",
-      headers: {
-        ...BOUND_USER_WRITE_FENCE_HEADERS,
-        authorization: "Bearer user-supplied-whatsapp-token",
-      },
-    },
-  ] as const)("rejects WhatsApp provider egress with a $name access-token sentinel", async ({ headers }) => {
-    const fetchMock = vi.fn<typeof fetch>(async () => new Response("unexpected"));
-    vi.stubGlobal("fetch", fetchMock);
-    const validateRuntimeWriteFence = vi.fn(async () => true);
-
-    const response = await hostedRunnerIntercept(
-      new Request("https://graph.facebook.com/v25.0/__cloudflare_injected__/messages", {
-        headers,
-        method: "POST",
-      }),
-      createInterceptEnv({
-        WHATSAPP_ACCESS_TOKEN: "whatsapp-worker-secret",
-        WHATSAPP_PHONE_NUMBER_ID: "phone_123",
-        validateRuntimeWriteFence,
-      }),
-      { containerId: "opaque-container-id" },
-    );
-
-    expect(response.status).toBe(403);
-    expect(validateRuntimeWriteFence).not.toHaveBeenCalled();
-    expect(fetchMock).not.toHaveBeenCalled();
-  });
-
-  it("rejects WhatsApp provider egress without the sentinel phone id", async () => {
-    const fetchMock = vi.fn<typeof fetch>(async () => new Response("unexpected"));
-    vi.stubGlobal("fetch", fetchMock);
-    const validateRuntimeWriteFence = vi.fn(async () => true);
-
-    const response = await hostedRunnerIntercept(
-      new Request("https://graph.facebook.com/v25.0/phone_123/messages", {
-        headers: BOUND_USER_WRITE_FENCE_WITH_BEARER_SENTINEL_HEADERS,
-        method: "POST",
-      }),
-      createInterceptEnv({
-        WHATSAPP_ACCESS_TOKEN: "whatsapp-worker-secret",
-        WHATSAPP_PHONE_NUMBER_ID: "phone_123",
-        validateRuntimeWriteFence,
-      }),
-      { containerId: "opaque-container-id" },
-    );
-
-    expect(response.status).toBe(403);
-    expect(validateRuntimeWriteFence).not.toHaveBeenCalled();
-    expect(fetchMock).not.toHaveBeenCalled();
-  });
-
-  it("rejects WhatsApp credential injection without an active runtime fence", async () => {
-    const fetchMock = vi.fn<typeof fetch>(async () => new Response("unexpected"));
-    vi.stubGlobal("fetch", fetchMock);
-
-    const response = await hostedRunnerIntercept(
-      new Request("https://graph.facebook.com/v25.0/__cloudflare_injected__/messages", {
-        headers: BOUND_USER_WRITE_FENCE_WITH_BEARER_SENTINEL_HEADERS,
-        method: "POST",
-      }),
-      createInterceptEnv({}),
-      { containerId: "opaque-container-id" },
-    );
-
-    expect(response.status).toBe(401);
-    expect(fetchMock).not.toHaveBeenCalled();
-  });
-
-  it("rejects WhatsApp credential injection outside the configured provider origin", async () => {
-    const fetchMock = vi.fn<typeof fetch>(async () => new Response("unexpected"));
-    vi.stubGlobal("fetch", fetchMock);
-    const validateRuntimeWriteFence = vi.fn(async () => true);
-
-    for (const url of [
-      "http://graph.facebook.com/v25.0/__cloudflare_injected__/messages",
-      "https://graph.facebook.com:444/v25.0/__cloudflare_injected__/messages",
-    ]) {
-      const response = await hostedRunnerIntercept(
-        new Request(url, {
-          headers: BOUND_USER_WRITE_FENCE_WITH_BEARER_SENTINEL_HEADERS,
-          method: "POST",
-        }),
-        createInterceptEnv({
-          WHATSAPP_ACCESS_TOKEN: "whatsapp-worker-secret",
-          WHATSAPP_PHONE_NUMBER_ID: "phone_123",
-          validateRuntimeWriteFence,
-        }),
-        { containerId: "opaque-container-id" },
-      );
-
-      expect(response.status).toBe(403);
-    }
-    expect(validateRuntimeWriteFence).not.toHaveBeenCalled();
-    expect(fetchMock).not.toHaveBeenCalled();
-  });
-
-  it("allows explicitly configured local HTTP WhatsApp origins", async () => {
-    const fetchMock = vi.fn<typeof fetch>(async () => new Response("ok"));
-    vi.stubGlobal("fetch", fetchMock);
-
-    const response = await hostedRunnerIntercept(
-      new Request("http://127.0.0.1:4012/v25.0/__cloudflare_injected__/messages", {
-        headers: BOUND_USER_WRITE_FENCE_WITH_BEARER_SENTINEL_HEADERS,
-        method: "POST",
-      }),
-      createInterceptEnv({
-        WHATSAPP_API_BASE_URL: "http://127.0.0.1:4012",
-        WHATSAPP_ACCESS_TOKEN: "whatsapp-worker-secret",
-        WHATSAPP_PHONE_NUMBER_ID: "phone_123",
-        validateRuntimeWriteFence: async () => true,
-      }),
-      { containerId: "opaque-container-id" },
-    );
-
-    expect(response.status).toBe(200);
-    const forwarded = readForwardedRequest(fetchMock);
-    expect(forwarded.url).toBe("http://127.0.0.1:4012/v25.0/phone_123/messages");
-  });
-
-  it("rejects invalid configured WhatsApp HTTP base hosts instead of passing them through", async () => {
-    const fetchMock = vi.fn<typeof fetch>(async () => new Response("unexpected"));
-    vi.stubGlobal("fetch", fetchMock);
-    const validateRuntimeWriteFence = vi.fn(async () => true);
-
-    const response = await hostedRunnerIntercept(
-      new Request("http://whatsapp.example.com/v25.0/__cloudflare_injected__/messages", {
-        headers: BOUND_USER_WRITE_FENCE_WITH_BEARER_SENTINEL_HEADERS,
-        method: "POST",
-      }),
-      createInterceptEnv({
-        WHATSAPP_API_BASE_URL: "http://whatsapp.example.com",
-        WHATSAPP_ACCESS_TOKEN: "whatsapp-worker-secret",
-        WHATSAPP_PHONE_NUMBER_ID: "phone_123",
-        validateRuntimeWriteFence,
-      }),
-      { containerId: "opaque-container-id" },
-    );
-
-    expect(response.status).toBe(403);
-    expect(validateRuntimeWriteFence).not.toHaveBeenCalled();
-    expect(fetchMock).not.toHaveBeenCalled();
-  });
-
-  it("maps default WhatsApp provider host egress to the configured upstream base", async () => {
-    const fetchMock = vi.fn<typeof fetch>(async () => new Response("ok"));
-    vi.stubGlobal("fetch", fetchMock);
-    const validateRuntimeWriteFence = vi.fn(async () => true);
-
-    const response = await hostedRunnerIntercept(
-      new Request("https://graph.facebook.com/v25.0/__cloudflare_injected__/messages", {
-        headers: BOUND_USER_WRITE_FENCE_WITH_BEARER_SENTINEL_HEADERS,
-        method: "POST",
-      }),
-      createInterceptEnv({
-        WHATSAPP_API_BASE_URL: "https://whatsapp.example.test",
-        WHATSAPP_ACCESS_TOKEN: "whatsapp-worker-secret",
-        WHATSAPP_PHONE_NUMBER_ID: "phone_123",
-        validateRuntimeWriteFence,
-      }),
-      { containerId: "opaque-container-id" },
-    );
-
-    expect(response.status).toBe(200);
-    expect(validateRuntimeWriteFence).toHaveBeenCalledWith({
-      attemptId: "attempt_1",
-      generation: "7",
-      userId: "member_123",
-    });
-    const forwarded = readForwardedRequest(fetchMock);
-    expect(forwarded.url).toBe("https://whatsapp.example.test/v25.0/phone_123/messages");
-  });
-
-  it("honors configured WhatsApp base URL pathname prefixes", async () => {
-    const fetchMock = vi.fn<typeof fetch>(async () => new Response("ok"));
-    vi.stubGlobal("fetch", fetchMock);
-    const validateRuntimeWriteFence = vi.fn(async () => true);
-
-    const response = await hostedRunnerIntercept(
-      new Request("https://whatsapp.example.test/meta/proxy/v25.0/__cloudflare_injected__/messages", {
-        headers: BOUND_USER_WRITE_FENCE_WITH_BEARER_SENTINEL_HEADERS,
-        method: "POST",
-      }),
-      createInterceptEnv({
-        WHATSAPP_API_BASE_URL: "https://whatsapp.example.test/meta/proxy/",
-        WHATSAPP_ACCESS_TOKEN: "whatsapp-worker-secret",
-        WHATSAPP_PHONE_NUMBER_ID: "phone_123",
-        validateRuntimeWriteFence,
-      }),
-      { containerId: "opaque-container-id" },
-    );
-
-    expect(response.status).toBe(200);
-    expect(validateRuntimeWriteFence).toHaveBeenCalledWith({
-      attemptId: "attempt_1",
-      generation: "7",
-      userId: "member_123",
-    });
-    const forwarded = readForwardedRequest(fetchMock);
-    expect(forwarded.url).toBe("https://whatsapp.example.test/meta/proxy/v25.0/phone_123/messages");
-  });
-
-  it("rejects WhatsApp provider egress outside the configured base URL prefix", async () => {
-    const fetchMock = vi.fn<typeof fetch>(async () => new Response("unexpected"));
-    vi.stubGlobal("fetch", fetchMock);
-    const validateRuntimeWriteFence = vi.fn(async () => true);
-
-    const response = await hostedRunnerIntercept(
-      new Request("https://whatsapp.example.test/v25.0/__cloudflare_injected__/messages", {
-        headers: BOUND_USER_WRITE_FENCE_WITH_BEARER_SENTINEL_HEADERS,
-        method: "POST",
-      }),
-      createInterceptEnv({
-        WHATSAPP_API_BASE_URL: "https://whatsapp.example.test/meta/proxy",
-        WHATSAPP_ACCESS_TOKEN: "whatsapp-worker-secret",
-        WHATSAPP_PHONE_NUMBER_ID: "phone_123",
-        validateRuntimeWriteFence,
-      }),
-      { containerId: "opaque-container-id" },
-    );
-
-    expect(response.status).toBe(403);
-    expect(validateRuntimeWriteFence).not.toHaveBeenCalled();
-    expect(fetchMock).not.toHaveBeenCalled();
-  });
-
-  it("rejects WhatsApp provider egress for malformed graph versions", async () => {
-    const fetchMock = vi.fn<typeof fetch>(async () => new Response("unexpected"));
-    vi.stubGlobal("fetch", fetchMock);
-
-    const response = await hostedRunnerIntercept(
-      new Request("https://graph.facebook.com/vbeta/__cloudflare_injected__/messages", {
-        headers: BOUND_USER_WRITE_FENCE_WITH_BEARER_SENTINEL_HEADERS,
-        method: "POST",
-      }),
-      createInterceptEnv({
-        WHATSAPP_ACCESS_TOKEN: "whatsapp-worker-secret",
-        WHATSAPP_PHONE_NUMBER_ID: "phone_123",
-        validateRuntimeWriteFence: async () => true,
-      }),
-      { containerId: "opaque-container-id" },
-    );
-
-    expect(response.status).toBe(403);
-    expect(fetchMock).not.toHaveBeenCalled();
-  });
 });
 
 describe("maybeHandleHostedTranscribeRequest", () => {
@@ -7119,9 +6757,6 @@ function createInterceptEnv(input: {
   TELEGRAM_API_BASE_URL?: string;
   TELEGRAM_BOT_TOKEN?: string;
   TELEGRAM_FILE_BASE_URL?: string;
-  WHATSAPP_API_BASE_URL?: string;
-  WHATSAPP_ACCESS_TOKEN?: string;
-  WHATSAPP_PHONE_NUMBER_ID?: string;
   validateRuntimeWriteFence?: (input: {
     attemptId: string;
     generation: string;
@@ -7192,9 +6827,6 @@ function createInterceptEnv(input: {
     TELEGRAM_API_BASE_URL: input.TELEGRAM_API_BASE_URL,
     TELEGRAM_BOT_TOKEN: input.TELEGRAM_BOT_TOKEN,
     TELEGRAM_FILE_BASE_URL: input.TELEGRAM_FILE_BASE_URL,
-    WHATSAPP_API_BASE_URL: input.WHATSAPP_API_BASE_URL,
-    WHATSAPP_ACCESS_TOKEN: input.WHATSAPP_ACCESS_TOKEN,
-    WHATSAPP_PHONE_NUMBER_ID: input.WHATSAPP_PHONE_NUMBER_ID,
     USER_RUNNER: {
       getByName: () => ({
         validateRuntimeProviderEgressCredential:

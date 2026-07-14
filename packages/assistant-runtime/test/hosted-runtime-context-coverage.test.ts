@@ -288,7 +288,6 @@ describe("hosted runtime context coverage", () => {
           channelCapabilities: {
             emailSendReady: false,
             telegramBotConfigured: true,
-            whatsappCloudApiConfigured: false,
           },
         }),
       );
@@ -391,7 +390,6 @@ describe("hosted runtime context coverage", () => {
           channelCapabilities: {
             emailSendReady: true,
             telegramBotConfigured: true,
-            whatsappCloudApiConfigured: false,
           },
         }),
       );
@@ -544,7 +542,6 @@ describe("hosted runtime context coverage", () => {
           {
             emailSendReady: true,
             telegramBotConfigured: true,
-            whatsappCloudApiConfigured: false,
           },
           true,
         ),
@@ -633,7 +630,6 @@ describe("hosted runtime context coverage", () => {
           {
             emailSendReady: true,
             telegramBotConfigured: false,
-            whatsappCloudApiConfigured: false,
           },
           true,
         ),

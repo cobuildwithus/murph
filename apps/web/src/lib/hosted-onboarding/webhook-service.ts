@@ -23,14 +23,6 @@ import {
   type HostedOnboardingTelegramWebhookResponse,
 } from "./webhook-provider-telegram";
 import {
-  planHostedOnboardingWhatsAppWebhook,
-  type HostedOnboardingWhatsAppWebhookResponse,
-} from "./webhook-provider-whatsapp";
-import {
-  parseHostedWhatsAppInboundTexts,
-  verifyAndParseHostedWhatsAppWebhookRequest,
-} from "./whatsapp";
-import {
   sendPendingHostedLinqAlertsBestEffort,
 } from "./linq-alert-email";
 import {
@@ -922,100 +914,6 @@ export async function handleHostedOnboardingTelegramWebhook(input: {
     });
   }
   return plan.response;
-}
-
-export async function handleHostedOnboardingWhatsAppWebhook(input: {
-  rawBody: string;
-  prisma?: PrismaClient;
-  scheduleAfterResponse?: HostedWebhookPostResponseScheduler;
-  signature: string | null;
-  signal?: AbortSignal;
-}): Promise<HostedOnboardingWhatsAppWebhookResponse> {
-  const timing = startHostedOnboardingTiming("hosted-onboarding.webhook.whatsapp", {
-    rawBodyBytes: new TextEncoder().encode(input.rawBody).byteLength,
-    signalAbortedAtStart: input.signal?.aborted ?? false,
-    signaturePresent: Boolean(input.signature),
-  });
-  let responseReason: string | null = null;
-
-  try {
-    const body = verifyAndParseHostedWhatsAppWebhookRequest({
-      rawBody: input.rawBody,
-      signature: input.signature,
-    });
-    const inboundTextCount = parseHostedWhatsAppInboundTexts(body).length;
-    if (inboundTextCount === 0) {
-      const plan = await planHostedOnboardingWhatsAppWebhook({
-        body,
-      });
-      responseReason = plan.response.reason ?? null;
-      finishHostedOnboardingTiming(timing, "completed", {
-        commandHandledCount: plan.response.commandHandledCount,
-        inboundTextCount: plan.response.inboundTextCount,
-        responseReason,
-        routedTextCount: plan.response.routedTextCount,
-        signalAbortedBeforeReturn: input.signal?.aborted ?? false,
-        wakeHandoffCount: 0,
-      });
-      return plan.response;
-    }
-
-    const prisma = input.prisma ?? getPrisma();
-    const plan = await runHostedOnboardingWebhookTransaction(
-      prisma,
-      (transaction) =>
-        planHostedOnboardingWhatsAppWebhook({
-          body,
-          prisma: transaction,
-        }),
-    );
-
-    if (plan.desiredSideEffects.length > 0) {
-      throw new Error(
-        "Hosted WhatsApp webhook planning unexpectedly requested legacy runtime side effects.",
-      );
-    }
-
-    const wakeHandoffs = plan.wakeHandoffs ?? [];
-    const confirmationDeadlineMs = createHostedPostCommitDeadline(undefined);
-    try {
-      for (const wakeHandoff of wakeHandoffs) {
-        await maybeHandoffHostedExecutionWebhookWake({
-          response: plan.response,
-          scheduleAfterResponse: input.scheduleAfterResponse,
-          signal: input.signal,
-          timeoutMs: readHostedPostCommitRemainingMs(confirmationDeadlineMs),
-          wakeHandoff,
-        });
-      }
-    } finally {
-      await reconcileHostedGroupJoinConfirmationsAfterCommitBestEffort({
-        deadlineMs: confirmationDeadlineMs,
-        memberIds: plan.postCommitGroupJoinConfirmationMemberIds ?? [],
-        prisma,
-        scheduleAfterResponse: input.scheduleAfterResponse,
-        signal: input.scheduleAfterResponse ? undefined : input.signal,
-      });
-    }
-
-    responseReason = plan.response.reason ?? null;
-    finishHostedOnboardingTiming(timing, "completed", {
-      commandHandledCount: plan.response.commandHandledCount,
-      inboundTextCount: plan.response.inboundTextCount,
-      responseReason,
-      routedTextCount: plan.response.routedTextCount,
-      signalAbortedBeforeReturn: input.signal?.aborted ?? false,
-      wakeHandoffCount: wakeHandoffs.length,
-    });
-    return plan.response;
-  } catch (error) {
-    finishHostedOnboardingTiming(timing, "failed", {
-      errorName: deriveHostedOnboardingTimingErrorName(error),
-      responseReason,
-      signalAbortedBeforeReturn: input.signal?.aborted ?? false,
-    });
-    throw error;
-  }
 }
 
 async function runHostedOnboardingWebhookTransaction<TResult>(

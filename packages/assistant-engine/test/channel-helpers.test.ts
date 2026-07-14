@@ -248,20 +248,6 @@ describe('channel helper seams', () => {
 
     expect(
       inferAssistantBindingDelivery({
-        channel: 'whatsapp',
-        conversation: createConversation({
-          channel: 'whatsapp',
-          participantId: 'wa-participant-1',
-          threadId: 'wa-thread-1',
-        }),
-      }),
-    ).toEqual({
-      kind: 'thread',
-      target: 'wa-thread-1',
-    })
-
-    expect(
-      inferAssistantBindingDelivery({
         channel: 'linq',
         conversation: participantOnlyConversation,
       }),
@@ -375,57 +361,6 @@ describe('channel helper seams', () => {
       sentAt: FIXED_NOW.toISOString(),
       target: 'participant-7',
       targetKind: 'participant',
-    })
-  })
-
-  it('registers WhatsApp as a direct-chat outbound adapter', async () => {
-    const sendWhatsApp = vi.fn().mockResolvedValue({
-      providerMessageId: 'wamid.MESSAGE_1',
-      providerThreadId: '15550100001',
-      target: '15550100001',
-      targetKind: 'thread',
-    })
-
-    expect(ASSISTANT_CHANNEL_ADAPTERS.whatsapp.canAutoReply({
-      source: null,
-      threadIsDirect: true,
-    })).toBeNull()
-    expect(ASSISTANT_CHANNEL_ADAPTERS.whatsapp.canAutoReply({
-      source: null,
-      threadIsDirect: false,
-    })).toBe('WhatsApp auto-reply only runs for direct chats')
-    expect(ASSISTANT_CHANNEL_ADAPTERS.whatsapp.isReadyForSetup({
-      WHATSAPP_ACCESS_TOKEN: 'token',
-      WHATSAPP_PHONE_NUMBER_ID: 'phone-number-id',
-    })).toBe(true)
-
-    const delivery = await ASSISTANT_CHANNEL_ADAPTERS.whatsapp.send(
-      {
-        actorId: null,
-        bindingDelivery: createAssistantBindingDelivery('thread', '15550100001'),
-        explicitTarget: null,
-        identityId: null,
-        message: 'hello over WhatsApp',
-        replyToMessageId: 'wamid.REPLY_1',
-      },
-      {
-        sendWhatsApp,
-      },
-    )
-
-    expect(sendWhatsApp).toHaveBeenCalledWith({
-      message: 'hello over WhatsApp',
-      replyToMessageId: 'wamid.REPLY_1',
-      signal: undefined,
-      target: '15550100001',
-    })
-    expect(delivery).toMatchObject({
-      channel: 'whatsapp',
-      messageLength: 19,
-      providerMessageId: 'wamid.MESSAGE_1',
-      providerThreadId: '15550100001',
-      target: '15550100001',
-      targetKind: 'thread',
     })
   })
 

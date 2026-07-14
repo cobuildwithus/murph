@@ -3037,7 +3037,7 @@ export async function acceptHostedFamilyInviteTx(input: {
     throw hostedOnboardingError({
       code: "HOSTED_FAMILY_WEB_ACCEPT_REQUIRES_CONTACT",
       httpStatus: 409,
-      message: "Open this invite from Telegram or WhatsApp to join.",
+      message: "Open this invite from Telegram to join.",
     });
   }
 
@@ -3505,9 +3505,7 @@ export function buildHostedFamilyInviteReplyText(input: {
       lines.push(
         `Invite token for ${input.invite.targetPhoneHint ?? "their phone"}: ${inviteToken}`,
       );
-      lines.push(
-        "They need to send this token to Murph from that phone number, for example on WhatsApp.",
-      );
+      lines.push("They need to send this token to Murph from that phone number.");
     }
   } else if (input.invite.targetEmail) {
     const acceptUrl = buildHostedFamilyInviteAcceptUrl({

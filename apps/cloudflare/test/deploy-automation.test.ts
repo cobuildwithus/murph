@@ -547,7 +547,7 @@ describe("hosted deploy automation helpers", () => {
       "CF_WEB_CONTROL_TIMEOUT_MS: ${{ vars.CF_WEB_CONTROL_TIMEOUT_MS }}",
       "HOSTED_EXECUTION_CONTAINER_ROLLOUT: ${{ inputs.container_rollout }}",
       "HOSTED_EXECUTION_DEPLOY_CONTEXT: ${{ inputs.environment }}",
-      "HOSTED_EXECUTION_RUNNER_ENV_PROFILES: ${{ vars.HOSTED_EXECUTION_RUNNER_ENV_PROFILES || 'exa,hosted-email,linq,mapbox,telegram,whatsapp' }}",
+      "HOSTED_EXECUTION_RUNNER_ENV_PROFILES: ${{ vars.HOSTED_EXECUTION_RUNNER_ENV_PROFILES || 'exa,hosted-email,linq,mapbox,telegram' }}",
       "HOSTED_EXECUTION_RUNNER_IDLE_TTL_MS: ${{ vars.HOSTED_EXECUTION_RUNNER_IDLE_TTL_MS }}",
       "HOSTED_EXECUTION_SMOKE_DIRECT_R2_PRESIGNED_PUT: ${{ inputs.container_rollout == 'immediate' && 'true' || 'false' }}",
       "HOSTED_EXECUTION_SMOKE_LIVE_MODEL_TURN: ${{ inputs.live_model_turn && 'true' || 'false' }}",
@@ -814,7 +814,7 @@ describe("hosted deploy automation helpers", () => {
 
     expect(environment.workerVars).toEqual({
       ...REQUIRED_HOSTED_CRYPTO_WORKER_VARS,
-      HOSTED_EXECUTION_RUNNER_ENV_PROFILES: "exa,hosted-email,linq,mapbox,telegram,whatsapp",
+      HOSTED_EXECUTION_RUNNER_ENV_PROFILES: "exa,hosted-email,linq,mapbox,telegram",
       HOSTED_EXECUTION_RUNNER_IDLE_TTL_MS: "1200000",
       HOSTED_EXECUTION_VERCEL_OIDC_ENVIRONMENT: "production",
     });
@@ -858,7 +858,7 @@ describe("hosted deploy automation helpers", () => {
     });
 
     expect(environment.workerVars.HOSTED_EXECUTION_RUNNER_ENV_PROFILES).toBe(
-      "exa,hosted-email,linq,mapbox,telegram,whatsapp",
+      "exa,hosted-email,linq,mapbox,telegram",
     );
   });
 
@@ -987,8 +987,6 @@ describe("hosted deploy automation helpers", () => {
       STRAVA_CLIENT_SECRET: "strava-client-secret",
       TELEGRAM_BOT_TOKEN: "bot-token",
       TELEGRAM_WEBHOOK_SECRET: "telegram-webhook-secret",
-      WHATSAPP_ACCESS_TOKEN: "whatsapp-token",
-      WHATSAPP_PHONE_NUMBER_ID: "whatsapp-phone-number-id",
       OPENAI_API_KEY: "openai-key",
     })).toEqual({
       HOSTED_EMAIL_SIGNING_SECRET: "email-signing-secret",
@@ -1006,8 +1004,6 @@ describe("hosted deploy automation helpers", () => {
       STRAVA_CLIENT_ID: "strava-client-id",
       STRAVA_CLIENT_SECRET: "strava-client-secret",
       TELEGRAM_BOT_TOKEN: "bot-token",
-      WHATSAPP_ACCESS_TOKEN: "whatsapp-token",
-      WHATSAPP_PHONE_NUMBER_ID: "whatsapp-phone-number-id",
       OPENAI_API_KEY: "openai-key",
     });
   });

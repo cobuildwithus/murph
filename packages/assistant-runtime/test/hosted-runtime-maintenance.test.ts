@@ -213,7 +213,6 @@ function createHostedAutomationRuntime(input: {
       channelCapabilities: {
         emailSendReady: false,
         telegramBotConfigured: false,
-        whatsappCloudApiConfigured: false,
       },
       deviceSync: input.deviceSync ?? null,
     },

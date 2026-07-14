@@ -16,11 +16,8 @@ updates. Use
 `@murphai/messaging-ingress/telegram-webhook-payload` for Telegram webhook
 secret-token verification, already-authenticated payload parsing, and sparse
 payload minimization.
-Use `@murphai/messaging-ingress/whatsapp-webhook` for WhatsApp Cloud API
-webhook signature verification, payload parsing, inbound text extraction, and
-sparse raw minimization.
 
-Linq, Telegram, and WhatsApp minimizers locally sanitize obvious token, cookie,
+Linq and Telegram minimizers locally sanitize obvious token, cookie,
 authorization-like, and user-home-path values, but callers still own any
 broader privacy redaction policy above that transport-level sanitization.
 
@@ -28,7 +25,6 @@ broader privacy redaction policy above that transport-level sanitization.
 
 - Linq: webhook signature verification, `message.received` parsing, summaries, and sparse raw minimization
 - Telegram: webhook secret-token verification, preverified update parsing, thread-target grammar, message extraction/summaries, and sparse raw minimization
-- WhatsApp: Cloud API webhook signature verification, text-message extraction, and sparse raw minimization
 
 ## Non-goals
 

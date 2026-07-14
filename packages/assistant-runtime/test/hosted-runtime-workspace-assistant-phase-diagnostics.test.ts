@@ -613,7 +613,6 @@ function createPhaseInput(input: {
         channelCapabilities: {
           emailSendReady: false,
           telegramBotConfigured: false,
-          whatsappCloudApiConfigured: false,
         },
         deviceSync: null,
       },

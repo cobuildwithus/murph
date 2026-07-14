@@ -209,7 +209,6 @@ function createRuntime(): MailboxConversationImportInput["runtime"] {
       channelCapabilities: {
         emailSendReady: false,
         telegramBotConfigured: false,
-        whatsappCloudApiConfigured: false,
       },
       deviceSync: null,
       managedAutoReplyChannels: [

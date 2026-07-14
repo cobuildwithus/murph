@@ -138,7 +138,7 @@ test('sendAssistantNotificationLocal persists the turn before outbound delivery 
     binding: {
       ...savedSession.binding,
       actorId: 'actor-delivered',
-      channel: 'whatsapp',
+      channel: 'signal',
     },
     sessionId: savedSession.sessionId,
     turnCount: savedSession.turnCount,

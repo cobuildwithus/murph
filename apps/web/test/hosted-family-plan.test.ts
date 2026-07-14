@@ -493,7 +493,6 @@ describe("hosted Family plan", () => {
     expect(replyText).toContain(
       "When they open it they can join by text right from their phone.",
     );
-    expect(replyText).not.toContain("for example on WhatsApp");
   });
 
   it("uses the web accept link for email-bound family invite replies", () => {
@@ -1426,7 +1425,7 @@ describe("hosted Family plan", () => {
     expect(tx.hostedAccountGroupMembership.upsert).toHaveBeenCalled();
   });
 
-  it("marks WhatsApp family invite phone acceptance as provider-verified", async () => {
+  it("marks family invite phone acceptance as provider-verified", async () => {
     const now = new Date("2026-06-18T12:30:00.000Z");
     const tx = createTxMock();
     tx.hostedAccountGroupInvite.findUnique.mockResolvedValueOnce(createPendingInvite({
@@ -1506,7 +1505,7 @@ describe("hosted Family plan", () => {
     expect(activationMocks.activateHostedMemberForFamilySponsorshipTx).not.toHaveBeenCalled();
   });
 
-  it("does not let WhatsApp claim a Telegram-bound invite", async () => {
+  it("does not let phone acceptance claim a Telegram-bound invite", async () => {
     const tx = createTxMock();
     tx.hostedAccountGroupInvite.findUnique.mockResolvedValueOnce(createPendingInvite({
       targetPhoneLookupKey: null,
@@ -1524,7 +1523,7 @@ describe("hosted Family plan", () => {
     expect(tx.hostedAccountGroupInvite.updateMany).not.toHaveBeenCalled();
   });
 
-  it("does not let WhatsApp claim an email-bound invite", async () => {
+  it("does not let phone acceptance claim an email-bound invite", async () => {
     const tx = createTxMock();
     tx.hostedAccountGroupInvite.findUnique.mockResolvedValueOnce(createPendingInvite({
       targetEmailLookupKey: createHostedEmailLookupKey("mom@example.com"),

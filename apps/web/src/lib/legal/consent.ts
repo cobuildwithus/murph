@@ -93,16 +93,6 @@ export const HOSTED_CONSENT_SCOPES = [
       "consumer-health-data-notice",
     ],
   },
-  {
-    scope: "feature.whatsapp-messaging",
-    label: "WhatsApp messaging consent",
-    revocable: true,
-    documentIds: [
-      "terms-of-service",
-      "privacy-policy",
-      "consumer-health-data-notice",
-    ],
-  },
 ] as const;
 
 export type HostedConsentDocumentId = typeof HOSTED_CONSENT_DOCUMENTS[number]["id"];

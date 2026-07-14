@@ -3,7 +3,6 @@ import type {
 } from '@murphai/operator-config/agentmail-runtime'
 import type { LinqFetch } from '@murphai/operator-config/linq-runtime'
 import type { TelegramFetchImplementation } from '@murphai/operator-config/telegram-runtime'
-import type { WhatsAppFetch } from '@murphai/operator-config/whatsapp-runtime'
 import {
   assistantChannelDeliverySchema,
   type AssistantBindingDelivery,
@@ -60,12 +59,6 @@ export interface LinqRuntimeDependencies {
   ) => Promise<Uint8Array>
   maxSessionMs?: number
   refreshMs?: number
-  signal?: AbortSignal
-}
-
-export interface WhatsAppRuntimeDependencies {
-  env?: NodeJS.ProcessEnv
-  fetchImplementation?: WhatsAppFetch
   signal?: AbortSignal
 }
 
@@ -204,21 +197,6 @@ export interface AssistantChannelDependencies {
       }
     | void
   >
-  sendWhatsApp?: (input: {
-    message: string
-    replyToMessageId?: string | null
-    signal?: AbortSignal
-    target: string
-  }) => Promise<
-    | {
-        providerMessageId?: string | null
-        providerMessageIds?: string[] | null
-        providerThreadId?: string | null
-        target?: string | null
-        targetKind?: AssistantChannelDeliveryTargetKind | null
-      }
-    | void
-  >
 }
 
 export interface AssistantDeliveryCandidate {
@@ -234,7 +212,7 @@ export interface AssistantChannelAutoReplyEligibility {
 }
 
 export interface AssistantChannelAdapter {
-  channel: 'telegram' | 'linq' | 'email' | 'whatsapp'
+  channel: 'telegram' | 'linq' | 'email'
   canAutoReply: (input: AssistantChannelAutoReplyEligibility) => string | null
   inferBindingDelivery: (input: {
     conversation: ConversationRef

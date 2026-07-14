@@ -249,20 +249,6 @@ export interface HostedRuntimeLinqDeliveryOutcomeRequest {
   threadIsDirect?: boolean | null;
 }
 
-export interface HostedRuntimeWhatsAppSendRequest {
-  message: string;
-  replyToMessageId?: string | null;
-  target: string;
-}
-
-export interface HostedRuntimeWhatsAppSendResponse {
-  providerMessageId?: string | null;
-  providerMessageIds?: string[] | null;
-  providerThreadId?: string | null;
-  target?: string | null;
-  targetKind?: HostedRuntimeProviderTargetKind | null;
-}
-
 export interface HostedRuntimeLinqChatActionRequest {
   action: "typing" | "typing_stop";
   target: string;

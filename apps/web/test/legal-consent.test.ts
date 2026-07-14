@@ -158,4 +158,54 @@ describe("hosted legal consent registry", () => {
       granted: false,
     });
   });
+
+  it("keeps current launch consent valid when a historical removed scope exists", () => {
+    const status = buildHostedConsentStatus({
+      grants: [
+        {
+          documentVersions: buildCurrentHostedConsentDocumentVersions("launch.legal"),
+          grantedAt: "2026-06-24T00:00:00.000Z",
+          lastEventId: "hbce_launch_legal",
+          revokedAt: null,
+          scope: "launch.legal",
+          source: "hosted onboarding",
+          status: "granted",
+          updatedAt: "2026-06-24T00:00:00.000Z",
+        },
+        {
+          documentVersions: buildCurrentHostedConsentDocumentVersions("launch.health-data"),
+          grantedAt: "2026-06-24T00:00:00.000Z",
+          lastEventId: "hbce_launch_health",
+          revokedAt: null,
+          scope: "launch.health-data",
+          source: "hosted onboarding",
+          status: "granted",
+          updatedAt: "2026-06-24T00:00:00.000Z",
+        },
+        {
+          documentVersions: {
+            "consumer-health-data-notice": "2026-04-29",
+            "privacy-policy": "2026-06-24",
+            "terms-of-service": "2026-04-29",
+          },
+          grantedAt: "2026-06-24T00:00:00.000Z",
+          lastEventId: "hbce_removed_scope",
+          revokedAt: null,
+          scope: "feature.whatsapp-messaging",
+          source: "whatsapp",
+          status: "granted",
+          updatedAt: "2026-06-24T00:00:00.000Z",
+        },
+      ],
+      now: new Date("2026-07-14T00:00:00.000Z"),
+    });
+
+    expect(status.launchGranted).toBe(true);
+    expect(status.launchScopes.every((scope) => scope.granted)).toBe(true);
+    expect(status.scopes.map((scope) => scope.scope)).not.toContain("feature.whatsapp-messaging");
+    expect(() => parseHostedConsentAcceptRequest({
+      acceptedDocumentVersions: {},
+      scope: "feature.whatsapp-messaging",
+    })).toThrowError(HostedOnboardingError);
+  });
 });
