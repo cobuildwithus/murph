@@ -368,6 +368,9 @@ const assistantInputLinqSourceMetadataSchema = z
     externalThreadRouteAuthorityPresent: z.boolean().optional(),
     kind: z.literal('linq'),
     partCount: z.number().int().min(0).max(64),
+    previousHomeThreadId: privateNullableAssistantInputRouteScalarSchema(
+      'sourceMetadata.previousHomeThreadId',
+    ).optional(),
     reactionEligible: z.boolean().optional().default(false),
     replyToMessageId: safeNullableAssistantInputTokenSchema(
       'sourceMetadata.replyToMessageId',

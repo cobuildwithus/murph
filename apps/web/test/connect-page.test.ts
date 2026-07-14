@@ -285,12 +285,15 @@ test("ConnectPage renders source search, source names, and logo marks", async ()
   assert.equal(markup.match(/data-connection-state="idle"/gu)?.length, sources.length);
   assert.equal(markup.match(/>Not available<\/button>/gu)?.length, sources.length - 1);
   assert.match(markup, /disabled=""/);
-  assert.match(markup, /Apple Health web setup is coming soon\. Connect from the Murph iOS app for now\./);
-  assert.match(markup, /aria-label="Apple Health web setup is not available yet"/);
+  assert.match(markup, /Download Murph on your iPhone, then connect Apple Health in the app\./);
+  assert.match(markup, /aria-label="Download app for Apple Health"/);
+  assert.match(markup, /href="https:\/\/apps\.apple\.com\/us\/app\/murph-ai\/id6786145859"/);
+  assert.match(markup, /target="_blank"/);
+  assert.match(markup, /rel="noopener noreferrer"/);
   assert.match(markup, /aria-label="Oura connection is not available yet"/);
   assert.match(markup, /Apple Health not connected/);
   assert.match(markup, /Oura not connected/);
-  assert.match(markup, />Coming soon<\/button>/u);
+  assert.match(markup, />Download app<\/a>/u);
   assert.doesNotMatch(markup, /Not connected/u);
   assert.doesNotMatch(markup, />Connected</u);
   assert.doesNotMatch(markup, />Health Connect</u);
@@ -498,8 +501,8 @@ test("ConnectPage enables every Link source exposed by the shared Junction defau
 
   assert.equal(markup.match(/>Connect<\/button>/gu)?.length, JUNCTION_DEFAULT_PROVIDER_FILTER.length);
   assert.equal(markup.match(/>Not available<\/button>/gu)?.length ?? 0, 0);
-  assert.match(markup, /Apple Health web setup is coming soon\. Connect from the Murph iOS app for now\./u);
-  assert.match(markup, /aria-label="Apple Health web setup is not available yet"/u);
+  assert.match(markup, /Download Murph on your iPhone, then connect Apple Health in the app\./u);
+  assert.match(markup, /aria-label="Download app for Apple Health"/u);
   assert.doesNotMatch(markup, />Accu-Chek</u);
   assert.doesNotMatch(markup, />Samsung Health</u);
 
@@ -872,8 +875,8 @@ test("ConnectPage does not apply parent Junction reauthorization to disconnected
   assert.match(markup, /Garmin needs reconnect/u);
   assert.match(markup, /aria-label="Reconnect Garmin"/u);
   assert.match(markup, /Apple Health not connected/u);
-  assert.match(markup, /Apple Health web setup is coming soon\. Connect from the Murph iOS app for now\./u);
-  assert.match(markup, /aria-label="Apple Health web setup is not available yet"/u);
+  assert.match(markup, /Download Murph on your iPhone, then connect Apple Health in the app\./u);
+  assert.match(markup, /aria-label="Download app for Apple Health"/u);
   assert.doesNotMatch(markup, /Apple Health needs reconnect/u);
   assert.doesNotMatch(markup, /aria-label="Reconnect Apple Health"/u);
   assert.doesNotMatch(markup, /aria-label="Disconnect Apple Health"/u);
@@ -911,6 +914,7 @@ test("ConnectPage shows mobile-managed guidance for Apple Health reconnect state
     /Apple Health needs attention from the connected app before Murph can keep syncing it\./u,
   );
   assert.match(markup, /aria-label="Disconnect Apple Health"/u);
+  assert.match(markup, /aria-label="Download app for Apple Health"/u);
   assert.match(markup, /data-connection-state="needs-access"/u);
   assert.doesNotMatch(markup, /aria-label="Apple Health connection is not available yet"/u);
   assert.doesNotMatch(markup, /Please reconnect Apple Health to resume syncing\./u);
@@ -1611,11 +1615,11 @@ test("SourceCard stacks connection-reset content vertically at the base breakpoi
   );
 });
 
-test("SourceCard stacks coming-soon content vertically at the base breakpoint", async () => {
+test("SourceCard stacks Apple Health app content vertically at the base breakpoint", async () => {
   const { SourceCard } = await import("../app/(dashboard)/connect/connect-source-card");
   const logo = { className: "size-11 object-contain", height: 44, src: "/logo.png", width: 44 };
 
-  const comingSoonMarkup = renderToStaticMarkup(createElement(SourceCard, {
+  const appDownloadMarkup = renderToStaticMarkup(createElement(SourceCard, {
     authenticated: true,
     errorMessage: null,
     onDisconnectTargetChange: () => {},
@@ -1627,22 +1631,23 @@ test("SourceCard stacks coming-soon content vertically at the base breakpoint", 
       id: "apple-health",
       logo,
       name: "Apple Health",
-      unavailableActionLabel: "Coming soon",
-      unavailableMessage:
-        "Apple Health web setup is coming soon. Connect from the Murph iOS app for now.",
+      unavailableActionLabel: "Download app",
+      unavailableActionUrl: "https://apps.apple.com/us/app/murph-ai/id6786145859",
+      unavailableMessage: "Download Murph on your iPhone, then connect Apple Health in the app.",
     },
   }));
 
   assert.match(
-    comingSoonMarkup,
-    /Apple Health web setup is coming soon\. Connect from the Murph iOS app for now\./u,
+    appDownloadMarkup,
+    /Download Murph on your iPhone, then connect Apple Health in the app\./u,
   );
-  assert.match(comingSoonMarkup, />Coming soon<\/button>/u);
-  // The coming-soon message can be up to 22rem wide, so the card content must
+  assert.match(appDownloadMarkup, />Download app<\/a>/u);
+  assert.match(appDownloadMarkup, /href="https:\/\/apps\.apple\.com\/us\/app\/murph-ai\/id6786145859"/u);
+  // The app-download message can be up to 22rem wide, so the card content must
   // stack at the base breakpoint instead of overlapping the source details in
   // the shared horizontal row under the card's overflow-hidden.
-  assert.match(comingSoonMarkup, /class="flex flex-1 flex-col items-stretch gap-3 sm:gap-0"/u);
-  assert.doesNotMatch(comingSoonMarkup, /items-center gap-4/u);
+  assert.match(appDownloadMarkup, /class="flex flex-1 flex-col items-stretch gap-3 sm:gap-0"/u);
+  assert.doesNotMatch(appDownloadMarkup, /items-center gap-4/u);
 });
 
 test("ConnectPage lets active reconnect rows win over stale reconnectable rows", async () => {
@@ -2574,8 +2579,9 @@ test("ConnectSourcesGrid keeps Apple Health mobile guidance after local disconne
           width: 48,
         },
         name: "Apple Health",
-        unavailableActionLabel: "Coming soon",
-        unavailableMessage: "Apple Health web setup is coming soon. Connect from the Murph iOS app for now.",
+        unavailableActionLabel: "Download app",
+        unavailableActionUrl: "https://apps.apple.com/us/app/murph-ai/id6786145859",
+        unavailableMessage: "Download Murph on your iPhone, then connect Apple Health in the app.",
       },
     ],
   }));
@@ -2602,8 +2608,10 @@ test("ConnectSourcesGrid keeps Apple Health mobile guidance after local disconne
 
   assert.equal(fetch.mock.calls[0]?.[0], "/api/settings/device-sync/connections/dsc_apple_health_123/disconnect");
   assert.match(rendered.container.textContent ?? "", /Apple Health not connected/);
-  assert.match(rendered.container.textContent ?? "", /Apple Health web setup is coming soon\. Connect from the Murph iOS app for now\./);
-  assert.equal(rendered.container.querySelector("button[aria-label='Apple Health web setup is not available yet']")?.textContent, "Coming soon");
+  assert.match(rendered.container.textContent ?? "", /Download Murph on your iPhone, then connect Apple Health in the app\./);
+  const appDownloadLink = rendered.container.querySelector("a[aria-label='Download app for Apple Health']");
+  assert.equal(appDownloadLink?.textContent, "Download app");
+  assert.equal(appDownloadLink?.getAttribute("href"), "https://apps.apple.com/us/app/murph-ai/id6786145859");
   assert.doesNotMatch(rendered.container.textContent ?? "", /Not available/u);
 
   await rendered.cleanup();

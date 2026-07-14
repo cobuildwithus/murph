@@ -69,6 +69,7 @@ import type {
 import {
   ensureHostedPendingAssistantInputIndex,
   enqueueHostedPendingAssistantInputId,
+  hasHostedPendingAssistantInputRouteProof,
 } from "./pending-input-index.ts";
 import {
   prepareHostedInboxProjectionRuntime,
@@ -916,9 +917,11 @@ async function stageHostedConversationAssistantInputEvent(input: {
       vault: input.vaultRoot,
     });
   }
-  if (input.pendingReplyEligible && event.replyTarget) {
+  const routeProof = hasHostedPendingAssistantInputRouteProof(event);
+  if ((input.pendingReplyEligible && event.replyTarget) || routeProof) {
     await enqueueHostedPendingAssistantInputId({
       inputId: event.inputId,
+      routeProof,
       vaultRoot: input.vaultRoot,
     });
   }
@@ -1583,10 +1586,14 @@ function createHostedConversationAssistantInputSourceMetadata(
   if (isHostedLinqConversationMessageWake(wake)) {
     const externalThreadRouteAuthorityPresent = wake.message.routeAuthority !== undefined
       && wake.message.routeAuthority !== null;
+    const previousHomeThreadId = normalizeHostedAssistantInputReplyTargetIdentifier(
+      wake.message.linqMessage.previousHomeChatId,
+    );
     return {
       externalThreadRouteAuthorityPresent,
       kind: "linq",
       partCount: wake.message.linqMessage.parts.length,
+      ...(previousHomeThreadId ? { previousHomeThreadId } : {}),
       reactionEligible: wake.message.linqMessage.reactionEligible === true,
       replyToMessageId: normalizeHostedAssistantInputSourceMetadataToken(
         wake.message.linqMessage.replyToMessageId ?? null,

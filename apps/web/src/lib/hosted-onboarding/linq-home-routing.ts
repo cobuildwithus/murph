@@ -54,6 +54,7 @@ export type HostedLinqHomeLineRouteBindingResult =
   | {
       homeLineAssignedAt: Date | null;
       kind: "bind";
+      previousHomeChatId?: string | null;
       recipientPhone: string | null;
     }
   | Exclude<HostedLinqActiveRouteDecision, { kind: "bind_home" }>
@@ -246,6 +247,9 @@ async function resolveHostedMemberLinqHomeLineRouteBindingDecision(input: {
       result: {
         homeLineAssignedAt: authority.assignedAt,
         kind: "bind",
+        ...(authority.chatId && authority.chatId !== input.incomingChatId
+          ? { previousHomeChatId: authority.chatId }
+          : {}),
         recipientPhone,
       },
     };

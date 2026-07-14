@@ -171,7 +171,7 @@ describe("hosted Linq egress authority", () => {
     });
   });
 
-  it("allows same-user route authority only while the durable route still matches", async () => {
+  it("uses the live same-member route even when runner authority is stale", async () => {
     const prisma = createPrismaStub({
       threadRouteContainerMemberId: "member-1",
     });
@@ -204,10 +204,7 @@ describe("hosted Linq egress authority", () => {
       },
       target: "chat-authorized",
       targetKind: "thread",
-    })).rejects.toMatchObject({
-      code: "HOSTED_LINQ_EGRESS_BOUND_USER_MISMATCH",
-      httpStatus: 403,
-    });
+    })).resolves.toEqual({ targetOverride: null });
   });
 
   it("rejects same-user route authority when hosted member access is inactive", async () => {
@@ -237,7 +234,7 @@ describe("hosted Linq egress authority", () => {
     expect(prisma.hostedMember.findUnique).toHaveBeenCalled();
   });
 
-  it("rejects stale same-user route authority before durable home-route fallback", async () => {
+  it("ignores stale runner authority when the live home route matches", async () => {
     const prisma = createPrismaStub({
       homeChatId: "chat-home",
     });
@@ -253,13 +250,10 @@ describe("hosted Linq egress authority", () => {
       },
       target: "chat-home",
       targetKind: "thread",
-    })).rejects.toMatchObject({
-      code: "HOSTED_LINQ_EGRESS_ROUTE_AUTHORITY_MISMATCH",
-      httpStatus: 403,
-    });
+    })).resolves.toEqual({ targetOverride: null });
 
-    expect(prisma.hostedThreadRoute.findMany).not.toHaveBeenCalled();
-    expect(prisma.hostedMemberRouting.findUnique).not.toHaveBeenCalled();
+    expect(prisma.hostedThreadRoute.findMany).toHaveBeenCalled();
+    expect(prisma.hostedMemberRouting.findUnique).toHaveBeenCalled();
   });
 
   it("returns a current home-route override for stale bare Linq home targets", async () => {
@@ -379,6 +373,7 @@ describe("hosted Linq egress authority", () => {
   it("accepts old-runner currentInbound payloads for external thread egress authority", async () => {
     const prisma = createPrismaStub({
       homeChatId: "chat-home",
+      threadRouteContainerMemberId: "member-1",
     });
     mocks.getPrisma.mockReturnValue(prisma);
 
@@ -419,6 +414,84 @@ describe("hosted Linq egress authority", () => {
         targetKind: "thread",
       })],
       skipDuplicates: true,
+    });
+  });
+
+  it("rejects old-runner currentInbound payloads for another member's external thread", async () => {
+    const prisma = createPrismaStub({
+      threadRouteContainerMemberId: "member-2",
+    });
+
+    await expect(assertHostedLinqRecentInboundEngagementForRuntime({
+      currentInbound: {
+        dedupeKey: "linq_external_event",
+        eventId: "linq_external_event",
+        mailboxItemId: "mailbox_external",
+        occurredAt: "2026-06-01T12:00:00.000Z",
+        replyToMessageId: "message_external",
+        target: "chat-external",
+      },
+      memberId: "member-1",
+      prisma: asRuntimeEngagementPrisma(prisma),
+      target: "chat-external",
+      targetKind: "thread",
+    })).rejects.toMatchObject({
+      code: "HOSTED_LINQ_EGRESS_ROUTE_AUTHORITY_MISMATCH",
+      httpStatus: 403,
+    });
+  });
+
+  it.each([
+    { currentInbound: null, label: "missing" },
+    {
+      currentInbound: {
+        dedupeKey: "linq_external_event",
+        eventId: "linq_external_event",
+        mailboxItemId: "mailbox_external",
+        occurredAt: "2026-06-01T12:00:00.000Z",
+        replyToMessageId: "message_external",
+        target: "chat-other",
+      },
+      label: "target-mismatched",
+    },
+  ])("uses the live route with $label old-runner inbound proof", async ({
+    currentInbound,
+  }) => {
+    const prisma = createPrismaStub({
+      threadRouteContainerMemberId: "member-1",
+    });
+
+    await expect(assertHostedLinqRecentInboundEngagementForRuntime({
+      currentInbound,
+      memberId: "member-1",
+      prisma: asRuntimeEngagementPrisma(prisma),
+      target: "chat-external",
+      targetKind: "thread",
+    })).resolves.toEqual({ targetOverride: null });
+  });
+
+  it("rejects old-runner currentInbound payloads when external thread access is inactive", async () => {
+    const prisma = createPrismaStub({
+      activeMemberAccess: false,
+      threadRouteContainerMemberId: "member-1",
+    });
+
+    await expect(assertHostedLinqRecentInboundEngagementForRuntime({
+      currentInbound: {
+        dedupeKey: "linq_external_event",
+        eventId: "linq_external_event",
+        mailboxItemId: "mailbox_external",
+        occurredAt: "2026-06-01T12:00:00.000Z",
+        replyToMessageId: "message_external",
+        target: "chat-external",
+      },
+      memberId: "member-1",
+      prisma: asRuntimeEngagementPrisma(prisma),
+      target: "chat-external",
+      targetKind: "thread",
+    })).rejects.toMatchObject({
+      code: "HOSTED_THREAD_ROUTE_EGRESS_UNAUTHORIZED",
+      httpStatus: 403,
     });
   });
 
