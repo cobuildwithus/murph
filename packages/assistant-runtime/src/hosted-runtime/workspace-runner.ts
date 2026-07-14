@@ -90,6 +90,9 @@ import {
   selectHostedRuntimeWakeCandidate,
 } from "./wake-candidates.ts";
 import {
+  readHostedAssistantInputCurrentDeliveryRoute,
+} from "./current-delivery-route.ts";
+import {
   appendHostedCanonicalWriteReceiptToArtifactLog,
   hostedCanonicalWriteReceiptLogStatusFields,
   readHostedCanonicalWriteReceiptLogStatusFingerprint,
@@ -2021,36 +2024,32 @@ function readHostedUsageNoticeDeliveryTargetFromAssistantInput(input: {
 }): HostedRuntimeUsageNoticeDeliveryTarget | null {
   const sourceMetadata = input.event.sourceMetadata;
   const replyTarget = input.event.replyTarget;
+  const route = readHostedAssistantInputCurrentDeliveryRoute({
+    conversation: input.event.conversation,
+    replyTarget,
+  });
+  const replyToMessageId = normalizeHostedUsageNoticeRouteString(replyTarget?.messageId);
 
-  if (
-    sourceMetadata?.kind === "telegram"
-    && replyTarget?.channel === "telegram"
-  ) {
-    const threadId = normalizeHostedUsageNoticeRouteString(replyTarget.threadId);
-    const replyToMessageId = normalizeHostedUsageNoticeRouteString(replyTarget.messageId);
-    if (!threadId || !replyToMessageId) {
+  if (route?.channel === "telegram") {
+    if (!replyToMessageId) {
       return null;
     }
     return {
       channel: "telegram",
       replyToMessageId,
-      target: threadId,
+      target: route.deliveryTarget,
     };
   }
 
   if (
-    sourceMetadata?.kind !== "linq"
-    || replyTarget?.channel !== "linq"
+    route?.channel !== "linq"
+    || sourceMetadata?.kind !== "linq"
   ) {
     return null;
   }
-  const threadId = normalizeHostedUsageNoticeRouteString(replyTarget.threadId);
-  const replyToMessageId = normalizeHostedUsageNoticeRouteString(replyTarget.messageId);
-  if (!threadId) {
-    return null;
-  }
+  const threadId = route.deliveryTarget;
 
-  if (input.event.conversation?.threadIsDirect === true) {
+  if (route.threadIsDirect === true) {
     return {
       channel: "linq",
       replyToMessageId,
@@ -2061,7 +2060,7 @@ function readHostedUsageNoticeDeliveryTargetFromAssistantInput(input: {
 
   if (
     sourceMetadata.externalThreadRouteAuthorityPresent !== true
-    || input.event.conversation?.threadIsDirect !== false
+    || route.threadIsDirect !== false
     || !replyToMessageId
   ) {
     return null;

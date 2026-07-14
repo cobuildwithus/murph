@@ -8478,11 +8478,7 @@ async function stageHostedUsageNoticeAssistantInput(input: {
         threadId: input.threadId,
       },
       sourceMetadata: channel === "telegram"
-        ? {
-            kind: "telegram",
-            mediaGroupId: null,
-            replyContext: null,
-          }
+        ? null
         : {
             externalThreadRouteAuthorityPresent:
               input.externalThreadRouteAuthorityPresent ?? true,

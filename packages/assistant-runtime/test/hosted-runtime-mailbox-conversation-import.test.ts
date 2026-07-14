@@ -67,6 +67,9 @@ import type {
 import type {
   NormalizedHostedAssistantRuntimeConfig,
 } from "../src/hosted-runtime/models.ts";
+import {
+  resolveHostedUsageNoticeDeliveryTargetFromAcceptedInputs,
+} from "../src/hosted-runtime/workspace-runner.ts";
 
 const TEST_NOW = "2026-04-26T00:00:00.000Z";
 const TEST_USER_ID = "member_synthetic_conversation_import";
@@ -1131,6 +1134,19 @@ describe("hosted mailbox conversation import adapter", () => {
       messageId: "777",
       threadId: "123456789",
     });
+    assert.equal(event.sourceMetadata, null);
+    assert.deepEqual(
+      await resolveHostedUsageNoticeDeliveryTargetFromAcceptedInputs({
+        inputIds: [event.inputId],
+        memberId: TEST_USER_ID,
+        vaultRoot,
+      }),
+      {
+        channel: "telegram",
+        replyToMessageId: "777",
+        target: "123456789",
+      },
+    );
     assert.deepEqual(await readHostedPendingAssistantInputIds({ vaultRoot }), [
       event.inputId,
     ]);
