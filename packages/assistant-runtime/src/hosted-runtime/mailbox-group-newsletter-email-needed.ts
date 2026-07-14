@@ -147,7 +147,13 @@ function createGroupNewsletterEmailNeededAssistantInputEvent(input: {
     replyTarget: input.route.replyTarget,
     sourceMetadata: null,
     sourceRef: {
-      causalSeq: assistantPreferenceCausalSeqSchema.parse(input.item.item.causalSeq),
+      ...(input.item.item.causalSeq === null
+        ? {}
+        : {
+            causalSeq: assistantPreferenceCausalSeqSchema.parse(
+              input.item.item.causalSeq,
+            ),
+          }),
       dedupeKey: safeHostedAssistantInputTokenOrHash(input.item.item.dedupeKey),
       eventId: safeHostedAssistantInputTokenOrHash(input.wake.eventId),
       itemId: safeHostedAssistantInputTokenOrHash(input.item.item.id),

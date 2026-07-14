@@ -147,6 +147,10 @@ export async function upsertHostedMemberAssistantPreferencesTx(input: {
           tone: applicablePreferences.tone ?? member.assistantTone,
           voice: applicablePreferences.voice ?? member.assistantVoice,
         }),
+    requestedFields: [
+      ...(applicablePreferences.tone === undefined ? [] : ["tone" as const]),
+      ...(applicablePreferences.voice === undefined ? [] : ["voice" as const]),
+    ],
   });
   const append = await appendHostedMailboxEnvelopeTx({
     envelope: wake,
@@ -161,6 +165,8 @@ export async function upsertHostedMemberAssistantPreferencesTx(input: {
     });
   }
   const effectiveCausalSeq = requestedCausalSeq ?? BigInt(append.item.causalSeq!);
+  const projectedTone = wake.preferences.tone;
+  const projectedVoice = wake.preferences.voice;
   const visibleValueChanged = applicablePreferences.personality !== undefined
     || (
       applicablePreferences.tone !== undefined
@@ -175,16 +181,16 @@ export async function upsertHostedMemberAssistantPreferencesTx(input: {
       id: input.memberId,
     },
     data: {
-      ...(applicablePreferences.tone === undefined
+      ...(projectedTone === undefined
         ? {}
         : {
-            assistantTone: applicablePreferences.tone,
+            assistantTone: projectedTone,
             assistantToneCausalSeq: effectiveCausalSeq,
           }),
-      ...(applicablePreferences.voice === undefined
+      ...(projectedVoice === undefined
         ? {}
         : {
-            assistantVoice: applicablePreferences.voice,
+            assistantVoice: projectedVoice,
             assistantVoiceCausalSeq: effectiveCausalSeq,
           }),
       ...(applicablePreferences.personality?.humor === undefined

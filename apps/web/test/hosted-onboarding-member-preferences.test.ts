@@ -338,8 +338,13 @@ describe("hosted member assistant preferences", () => {
           tone: "casual",
           voice: "deep-calm",
         },
+        requestedFields: ["voice"],
       }),
       tx: prisma,
+    });
+    expect(member).toMatchObject({
+      assistantToneCausalSeq: 1n,
+      assistantVoiceCausalSeq: 1n,
     });
   });
 

@@ -170,6 +170,7 @@ export interface HostedExecutionMemberPreferencesUpdatedEvent
   kind: "member.preferences.updated";
   preferenceCausalSeq?: string;
   preferences: HostedExecutionMemberPreferences;
+  requestedFields?: Array<"tone" | "voice">;
 }
 
 export type HostedExecutionAssistantNotificationDeliveryDispatchMode =
@@ -496,6 +497,7 @@ export interface HostedExecutionMemberPreferencesUpdatedWake
   kind: "member.preferences.updated";
   preferenceCausalSeq?: string;
   preferences: HostedExecutionMemberPreferences;
+  requestedFields?: Array<"tone" | "voice">;
 }
 
 export interface HostedExecutionVaultShareDeliveryWake extends HostedExecutionBaseWake {

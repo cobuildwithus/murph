@@ -304,6 +304,10 @@ origin for canonical application even though the mailbox row receives a newer
 transport sequence; Settings wakes continue to use their row sequence. This
 keeps the display projection and canonical vault on the same field-local order
 without making the callback time a new intent.
+During the legacy complete-snapshot rollout, additive `requestedFields`
+metadata preserves the caller's exact tone/voice field set for new runtimes;
+the web projection still advances every field visible to an old snapshot
+consumer so either runtime version stays causally consistent.
 
 System-lane completion is acknowledged only with a successful workspace
 checkpoint. The runtime derives the contiguous handled prefix from the imported

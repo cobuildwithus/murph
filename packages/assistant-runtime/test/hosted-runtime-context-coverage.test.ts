@@ -853,6 +853,52 @@ describe("hosted runtime context coverage", () => {
     }
   });
 
+  it("filters legacy snapshots to their exact requested fields", async () => {
+    const { cleanup, vaultRoot } = await createWorkspace();
+
+    try {
+      await writeFile(path.join(vaultRoot, "vault.json"), "{}", "utf8");
+      await applyHostedMemberPreferences(
+        vaultRoot,
+        buildHostedExecutionMemberPreferencesUpdatedWake({
+          eventId: "evt_preferences_initial",
+          memberId: "member_123",
+          occurredAt: "2026-04-08T00:25:00.000Z",
+          preferences: { tone: "formal", voice: "warm" },
+        }),
+        "1",
+      );
+      await applyHostedMemberPreferences(
+        vaultRoot,
+        buildHostedExecutionMemberPreferencesUpdatedWake({
+          eventId: "evt_preferences_masked_snapshot",
+          memberId: "member_123",
+          occurredAt: "2026-04-08T00:27:00.000Z",
+          preferences: { tone: "formal", voice: "deep-calm" },
+          requestedFields: ["voice"],
+        }),
+        "3",
+      );
+      await applyHostedMemberPreferences(
+        vaultRoot,
+        buildHostedExecutionMemberPreferencesUpdatedWake({
+          eventId: "evt_preferences_delayed_tone",
+          memberId: "member_123",
+          occurredAt: "2026-04-08T00:26:00.000Z",
+          preferences: { tone: "casual" },
+        }),
+        "2",
+      );
+
+      assert.deepEqual((await readPreferencesDocument(vaultRoot)).assistant, {
+        tone: "casual",
+        voice: "deep-calm",
+      });
+    } finally {
+      await cleanup();
+    }
+  });
+
   it("initializes cold current-message projection without a historical rebuild", async () => {
     const { cleanup, vaultRoot } = await createWorkspace();
 

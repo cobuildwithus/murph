@@ -253,6 +253,7 @@ export function parseHostedExecutionWake(value: unknown): HostedExecutionWake {
           record.preferences,
           "Hosted execution wake member.preferences.updated preferences",
         ),
+        ...parsePreferenceRequestedFields(record),
       });
     case "assistant.notification.requested":
       return buildHostedExecutionAssistantNotificationRequestedWake({
@@ -1028,6 +1029,7 @@ export function parseHostedExecutionEvent(value: unknown): HostedExecutionEvent 
           record.preferences,
           "Hosted execution member.preferences.updated preferences",
         ),
+        ...parsePreferenceRequestedFields(record),
         userId,
       } satisfies HostedExecutionMemberPreferencesUpdatedEvent;
     case "assistant.notification.requested":
@@ -1452,6 +1454,23 @@ function parsePreferenceCausalMetadata(
     ...(causalOrigin === undefined ? {} : { causalOrigin }),
     ...(preferenceCausalSeq === undefined ? {} : { preferenceCausalSeq }),
   };
+}
+
+function parsePreferenceRequestedFields(
+  record: Record<string, unknown>,
+): Pick<HostedExecutionMemberPreferencesUpdatedEvent, "requestedFields"> {
+  const value = record.requestedFields;
+  if (value === undefined) {
+    return {};
+  }
+  if (
+    !Array.isArray(value)
+    || value.some((field) => field !== "tone" && field !== "voice")
+    || new Set(value).size !== value.length
+  ) {
+    throw new TypeError("Hosted preference requestedFields is invalid.");
+  }
+  return { requestedFields: [...value] };
 }
 
 function parseHostedExecutionWakeKind(value: unknown, label: string): HostedExecutionWakeKind {

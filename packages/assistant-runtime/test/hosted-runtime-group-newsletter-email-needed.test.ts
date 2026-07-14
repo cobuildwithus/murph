@@ -52,6 +52,33 @@ afterEach(async () => {
 });
 
 describe("hosted group newsletter email-needed mailbox import", () => {
+  test("stages a legacy row with no preference causal authority", async () => {
+    const parentRoot = await mkdtemp(path.join(
+      tmpdir(),
+      "murph-group-newsletter-email-needed-legacy-",
+    ));
+    tempRoots.push(parentRoot);
+    const vaultRoot = path.join(parentRoot, "vault");
+    await seedCurrentDirectSessionRoute(vaultRoot, {
+      threadId: "thread_direct_legacy",
+    });
+
+    const outcome = await importHostedGroupNewsletterEmailNeededMailboxItem({
+      item: createResolvedGroupNewsletterEmailNeededMailboxItem({ causalSeq: null }),
+      vaultRoot,
+      wake: createGroupNewsletterEmailNeededWake(),
+    });
+
+    assert.equal(outcome.status, "imported");
+    assert.ok(outcome.assistantInputId);
+    const staged = await readAssistantInputEvent({
+      inputId: outcome.assistantInputId,
+      vault: vaultRoot,
+    });
+    assert.ok(staged);
+    assert.equal(staged.sourceRef.causalSeq, undefined);
+  });
+
   test("stages a redacted private system note on the current direct route without prior direct input", async () => {
     const parentRoot = await mkdtemp(path.join(tmpdir(), "murph-group-newsletter-email-needed-"));
     tempRoots.push(parentRoot);
@@ -453,10 +480,11 @@ function createGroupNewsletterEmailNeededWake(input: {
 }
 
 function createResolvedGroupNewsletterEmailNeededMailboxItem(input: {
+  causalSeq?: string | null;
   durablyConsumed?: boolean;
 } = {}): HostedMailboxResolvedImportItem {
   const item: HostedMailboxItem = {
-    causalSeq: "42",
+    causalSeq: input.causalSeq === undefined ? "42" : input.causalSeq,
     createdAt: TEST_NOW,
     dedupeKey: "group-newsletter.email-needed:member_private_missing_email:hgrp_private",
     expiresAt: null,
