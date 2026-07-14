@@ -956,8 +956,8 @@ describe("runHostedWorkspaceAssistantPhase runtime logs", () => {
     ]);
   });
 
-  it("associates deferred usage with exact accepted-input targets", async () => {
-    const deferredTargets: unknown[] = [];
+  it("forwards exact accepted input IDs for deferred route resolution", async () => {
+    const deferredAcceptedInputIds: unknown[] = [];
     mocks.runHostedAssistantAutomationLane.mockImplementationOnce(async (laneInput) => {
       await laneInput.executionContext.hosted?.usageRecorder?.recordUsage(
         createAssistantUsageRecord(),
@@ -1001,7 +1001,6 @@ describe("runHostedWorkspaceAssistantPhase runtime logs", () => {
         redactedLogEntries: [],
       };
     });
-
     await runHostedWorkspaceAssistantPhase(createPhaseInput({
       initialAssistantInputBatch: {
         assistantInputIds: [
@@ -1016,75 +1015,9 @@ describe("runHostedWorkspaceAssistantPhase runtime logs", () => {
         ],
         emailDeliveryContexts: [],
         linqDeliveryContexts: [],
-        usageNoticeDeliveryTargets: [
-          {
-            channel: "telegram",
-            replyToMessageId: "telegram_message_a",
-            target: "telegram_thread_a",
-          },
-          {
-            channel: "telegram",
-            replyToMessageId: "telegram_message_b",
-            target: "telegram_thread_b",
-          },
-          {
-            channel: "telegram",
-            replyToMessageId: "telegram_same_thread_message_a",
-            target: "telegram_same_thread",
-          },
-          {
-            channel: "telegram",
-            replyToMessageId: "telegram_same_thread_message_b",
-            target: "telegram_same_thread",
-          },
-          {
-            channel: "linq",
-            replyToMessageId: "personal_linq_message_a",
-            routeAuthority: null,
-            target: "personal_linq_chat",
-          },
-          {
-            channel: "linq",
-            replyToMessageId: "personal_linq_message_b",
-            routeAuthority: null,
-            target: "personal_linq_chat",
-          },
-          {
-            channel: "linq",
-            replyToMessageId: "external_linq_message_a",
-            routeAuthority: {
-              accountLookupKey: "account_lookup",
-              channel: "linq",
-              containerMemberId: "container_member",
-              threadId: "external_thread",
-            },
-            target: "external_linq_chat",
-          },
-          {
-            channel: "linq",
-            replyToMessageId: "external_linq_message_b",
-            routeAuthority: {
-              accountLookupKey: "account_lookup",
-              channel: "linq",
-              containerMemberId: "container_member",
-              threadId: "external_thread",
-            },
-            target: "external_linq_chat",
-          },
-        ],
       },
-      latestAssistantInputBatch: () => ({
-        assistantInputIds: ["assistant_input_late"],
-        emailDeliveryContexts: [],
-        linqDeliveryContexts: [],
-        usageNoticeDeliveryTargets: [{
-          channel: "telegram",
-          replyToMessageId: "telegram_message_late",
-          target: "telegram_thread_late",
-        }],
-      }),
-      recordDeferredUsage: (_record, noticeDeliveryTarget) => {
-        deferredTargets.push(noticeDeliveryTarget);
+      recordDeferredUsage: (_record, providerRequestAcceptedInputIds) => {
+        deferredAcceptedInputIds.push(providerRequestAcceptedInputIds);
       },
       runtimeUsageRecordPort: {
         async recordUsage(record) {
@@ -1096,46 +1029,15 @@ describe("runHostedWorkspaceAssistantPhase runtime logs", () => {
       },
     }));
 
-    expect(deferredTargets).toEqual([
-      {
-        channel: "telegram",
-        replyToMessageId: "telegram_message_a",
-        target: "telegram_thread_a",
-      },
-      {
-        channel: "telegram",
-        replyToMessageId: "telegram_message_b",
-        target: "telegram_thread_b",
-      },
-      null,
-      {
-        channel: "telegram",
-        replyToMessageId: "telegram_same_thread_message_b",
-        target: "telegram_same_thread",
-      },
-      {
-        channel: "linq",
-        replyToMessageId: "personal_linq_message_b",
-        routeAuthority: null,
-        target: "personal_linq_chat",
-      },
-      {
-        channel: "linq",
-        replyToMessageId: "external_linq_message_b",
-        routeAuthority: {
-          accountLookupKey: "account_lookup",
-          channel: "linq",
-          containerMemberId: "container_member",
-          threadId: "external_thread",
-        },
-        target: "external_linq_chat",
-      },
-      {
-        channel: "telegram",
-        replyToMessageId: "telegram_message_late",
-        target: "telegram_thread_late",
-      },
-      null,
+    expect(deferredAcceptedInputIds).toEqual([
+      ["assistant_input_a"],
+      ["assistant_input_b"],
+      ["assistant_input_a", "assistant_input_b"],
+      ["assistant_input_telegram_a", "assistant_input_telegram_b"],
+      ["assistant_input_personal_linq_a", "assistant_input_personal_linq_b"],
+      ["assistant_input_external_linq_a", "assistant_input_external_linq_b"],
+      ["assistant_input_late"],
+      ["assistant_input_unknown"],
       undefined,
     ]);
   });
@@ -1405,18 +1307,12 @@ describe("runHostedWorkspaceAssistantPhase runtime logs", () => {
     expect(mocks.resolveHostedProviderCleanupScheduledWakeAt).not.toHaveBeenCalled();
   });
 
-  it("keeps accepted replay usage targeting and configuration control in one execution context", async () => {
+  it("keeps accepted replay usage input binding and configuration control in one execution context", async () => {
     const assistantInputId = "ain_00000000000000000000000000000009";
     const assistantConfigurationToolPort: RuntimeAssistantConfigurationToolPort = {
       request: vi.fn(),
     };
-    const usageNoticeDeliveryTarget = {
-      channel: "linq" as const,
-      replyToMessageId: "msg_exact_replay_usage",
-      routeAuthority: null,
-      target: "chat_exact_replay_usage",
-    };
-    const deferredTargets: unknown[] = [];
+    const deferredInputIds: Array<readonly string[] | undefined> = [];
     mocks.runHostedAssistantAutomationLane.mockImplementationOnce(async (laneInput) => {
       await laneInput.executionContext.hosted?.usageRecorder?.recordUsage(
         createAssistantUsageRecord(),
@@ -1438,10 +1334,9 @@ describe("runHostedWorkspaceAssistantPhase runtime logs", () => {
         assistantInputIds: [assistantInputId],
         emailDeliveryContexts: [],
         linqDeliveryContexts: [],
-        usageNoticeDeliveryTargets: [usageNoticeDeliveryTarget],
       },
-      recordDeferredUsage: (_record, noticeDeliveryTarget) => {
-        deferredTargets.push(noticeDeliveryTarget);
+      recordDeferredUsage: (_record, providerRequestAcceptedInputIds) => {
+        deferredInputIds.push(providerRequestAcceptedInputIds);
       },
       runtimeAssistantConfigurationToolPort: assistantConfigurationToolPort,
       runtimeUsageRecordPort: {
@@ -1463,7 +1358,7 @@ describe("runHostedWorkspaceAssistantPhase runtime logs", () => {
       },
       expect.any(Object),
     );
-    expect(deferredTargets).toEqual([usageNoticeDeliveryTarget]);
+    expect(deferredInputIds).toEqual([[assistantInputId]]);
   });
 
   it("delivers a replayed reply without touching post-checkpoint system work", async () => {

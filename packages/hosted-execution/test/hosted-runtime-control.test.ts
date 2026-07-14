@@ -1024,11 +1024,24 @@ describe("hosted runtime control contracts", () => {
   it("parses usage records and issue exports through their contract owners", () => {
     const usage = createAssistantUsageRecord();
     const issue = createAssistantRuntimeIssueRecord();
+    const noticeDeliveryTarget = {
+      channel: "linq",
+      replyToMessageId: "linq_message_123",
+      routeAuthority: {
+        accountLookupKey: "hbidx:phone:v1:account",
+        channel: "linq",
+        containerMemberId: "member_thread_123",
+        threadId: "linq_chat_123",
+      },
+      target: "linq_chat_123",
+    } as const;
 
     expect(parseHostedRuntimeUsageRecordRequest({
+      noticeDeliveryTarget,
       processingMode: "conversation_replay",
       usage,
     })).toEqual({
+      noticeDeliveryTarget,
       processingMode: "conversation_replay",
       usage,
     });
@@ -1098,6 +1111,23 @@ describe("hosted runtime control contracts", () => {
       issueIds: [issue.issueId],
       recorded: 1,
     });
+    expect(parseHostedRuntimeUsageRecordRequest({
+      noticeDeliveryTarget: {
+        ...noticeDeliveryTarget,
+        routeAuthority: null,
+      },
+      usage,
+    })).toEqual({
+      noticeDeliveryTarget: {
+        ...noticeDeliveryTarget,
+        routeAuthority: null,
+      },
+      usage,
+    });
+    expect(() => parseHostedRuntimeUsageRecordRequest({
+      unexpected: true,
+      usage,
+    })).toThrow(/unexpected is not allowed/u);
     expect(() => parseHostedRuntimeUsageRecordRequest({
       usage: {
         ...usage,
