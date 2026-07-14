@@ -1436,20 +1436,7 @@ export async function listIntegrationIngestsForEvent(
   vaultRoot: string,
   eventId: string,
 ): Promise<StoredIntegrationIngestEntry[]> {
-  return (await listIntegrationIngestsForEvents(vaultRoot, new Set([eventId]))).get(eventId) ?? [];
-}
-
-export async function listIntegrationIngestsForEvents(
-  vaultRoot: string,
-  eventIds: ReadonlySet<string>,
-  options: { provider?: string } = {},
-): Promise<ReadonlyMap<string, StoredIntegrationIngestEntry[]>> {
-  const entriesByEventId = new Map(
-    [...eventIds].map((eventId) => [eventId, [] as StoredIntegrationIngestEntry[]]),
-  );
-  if (eventIds.size === 0) {
-    return entriesByEventId;
-  }
+  const entries: StoredIntegrationIngestEntry[] = [];
   const seen = new Map<string, string>();
   for await (const { raw, relativePath, sourcePath } of readIntegrationIngestJsonlRows(
     vaultRoot,
@@ -1457,25 +1444,14 @@ export async function listIntegrationIngestsForEvents(
   )) {
     const record = parseIntegrationIngestRecord(raw, sourcePath);
     assertIntegrationIngestShard(record.id, record.importedAt, relativePath);
-    if (options.provider !== undefined && record.provider !== options.provider) {
-      continue;
-    }
-    const matchedEventIds = new Set(
-      record.outputs.events
-        .map((output) => output.id)
-        .filter((eventId) => eventIds.has(eventId)),
-    );
-    if (matchedEventIds.size === 0) {
+    if (!record.outputs.events.some((output) => output.id === eventId)) {
       continue;
     }
     assertIntegrationIngestRecordIntegrity(record);
     assertUniqueIntegrationIngestId(seen, record.id, relativePath);
-    const entry = { relativePath, record };
-    for (const eventId of matchedEventIds) {
-      entriesByEventId.get(eventId)?.push(entry);
-    }
+    entries.push({ relativePath, record });
   }
-  return entriesByEventId;
+  return entries;
 }
 
 export async function readIntegrationIngestById(
