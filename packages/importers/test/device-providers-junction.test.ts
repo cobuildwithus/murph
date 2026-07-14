@@ -43,6 +43,33 @@ function buildCompanionHrvRmssdSnapshotEntry(
   };
 }
 
+type CompanionHrvRmssdObservation = Parameters<
+  typeof serializeCompanionHrvRmssdObservation
+>[0];
+
+function importCompanionHrvRmssdObservation(
+  vaultRoot: string,
+  observation: CompanionHrvRmssdObservation,
+  lane: string,
+) {
+  return importDeviceProviderSnapshot<Awaited<ReturnType<typeof coreRuntime.importDeviceBatch>>>(
+    {
+      provider: "junction",
+      vaultRoot,
+      connectionId: `conn-junction-companion-${lane}`,
+      sourceKind: "webhook",
+      deliveryMode: "full_payload",
+      normalizerVersion: "junction-normalizer.v1",
+      snapshot: {
+        accountId: `junction-account-hash-${lane}`,
+        importedAt: observation.observedAt,
+        companionHrvRmssd: [buildCompanionHrvRmssdSnapshotEntry(observation)],
+      },
+    },
+    { corePort: coreRuntime },
+  );
+}
+
 function assertWorkoutSessionsMatchContract(events: readonly { fields?: { workout?: unknown } }[]): void {
   for (const event of events) {
     if (event.fields?.workout === undefined) {
@@ -2879,6 +2906,201 @@ test("companion WHOOP spot RMSSD imports idempotently into the canonical vault",
       storedExternalRefResourceId(hrvRecords[0]),
       "rmssd-pulse-interval-v1:2026-07-09",
     );
+  } finally {
+    await rm(vaultRoot, { force: true, recursive: true });
+  }
+});
+
+test("exact companion RMSSD replay cannot replace a neighboring retained day after timezone change", async () => {
+  const vaultRoot = await makeTempDirectory("murph-companion-hrv-rmssd-adjacent-replay");
+
+  try {
+    await coreRuntime.initializeVault({
+      createdAt: "2026-07-10T01:00:00.000Z",
+      timezone: "America/New_York",
+      vaultRoot,
+    });
+    const observationA = {
+      schema: COMPANION_HRV_RMSSD_SCHEMA,
+      captureId: "423e4567-e89b-42d3-a456-426614174001",
+      observedAt: "2026-07-10T02:30:00.000Z",
+      durationMs: 60_000 as const,
+      rmssdMs: 48,
+      intervalCount: 72,
+      acceptedIntervalCount: 68,
+      successivePairCount: 63,
+      quality: "good" as const,
+      methodVersion: COMPANION_HRV_RMSSD_METHOD_VERSION,
+    } satisfies CompanionHrvRmssdObservation;
+    const observationB = {
+      ...observationA,
+      captureId: "423e4567-e89b-42d3-a456-426614174002",
+      observedAt: "2026-07-10T15:00:00.000Z",
+      rmssdMs: 35,
+      acceptedIntervalCount: 58,
+      successivePairCount: 50,
+      quality: "limited" as const,
+    } satisfies CompanionHrvRmssdObservation;
+
+    const firstA = await importCompanionHrvRmssdObservation(
+      vaultRoot,
+      observationA,
+      "adjacent-replay",
+    );
+    const firstB = await importCompanionHrvRmssdObservation(
+      vaultRoot,
+      observationB,
+      "adjacent-replay",
+    );
+    const eventA = firstA.events[0];
+    const eventB = firstB.events[0];
+    assert.ok(eventA);
+    assert.ok(eventB);
+    await coreRuntime.upsertEvent({
+      vaultRoot,
+      payload: {
+        ...eventB,
+        note: "Neighboring-day note.",
+        tags: ["neighboring-day"],
+        links: [{ type: "related_to", targetId: eventB.id }],
+      },
+    });
+
+    const ingestPath = firstA.ingestShardPath;
+    assert.ok(ingestPath);
+    const ingestsBeforeReplay = await coreRuntime.readJsonlRecords({
+      vaultRoot,
+      relativePath: ingestPath,
+    });
+    await coreRuntime.updateVaultSummary({ vaultRoot, timezone: "UTC" });
+    const replayA = await importCompanionHrvRmssdObservation(
+      vaultRoot,
+      observationA,
+      "adjacent-replay",
+    );
+
+    assert.equal(replayA.applied, false);
+    assert.deepEqual(replayA.events, []);
+    assert.equal(replayA.ingestId, null);
+    assert.equal(replayA.ingestShardPath, null);
+    assert.equal(replayA.auditPath, null);
+    assert.equal(replayA.persistedEvidencePartCount, 0);
+    const eventShardPaths = [...new Set([
+      ...firstA.eventShardPaths,
+      ...firstB.eventShardPaths,
+    ])];
+    const physicalRecords = (await Promise.all(eventShardPaths.map((relativePath) =>
+      coreRuntime.readJsonlRecords({ vaultRoot, relativePath })
+    ))).flat().filter((record) => storedExternalRefResourceType(record) === "ble-hrv-rmssd");
+    const liveRecords = latestLiveRecords(physicalRecords);
+    const retainedA = liveRecords.find((record) => record.id === eventA.id);
+    const retainedB = liveRecords.find((record) => record.id === eventB.id);
+
+    assert.equal(physicalRecords.length, 3);
+    assert.equal(liveRecords.length, 2);
+    assert.equal(retainedA?.dayKey, "2026-07-09");
+    assert.equal(retainedA?.timeZone, "America/New_York");
+    assert.equal(storedObservationValue(retainedA), 48);
+    assert.equal(retainedB?.dayKey, "2026-07-10");
+    assert.equal(retainedB?.timeZone, "America/New_York");
+    assert.equal(storedObservationValue(retainedB), 35);
+    assert.equal(retainedB?.note, "Neighboring-day note.");
+    assert.deepEqual(retainedB?.tags, ["neighboring-day"]);
+    assert.deepEqual(retainedB?.links, [{ type: "related_to", targetId: eventB.id }]);
+    const ingestsAfterReplay = await coreRuntime.readJsonlRecords({
+      vaultRoot,
+      relativePath: ingestPath,
+    });
+    assert.deepEqual(ingestsAfterReplay, ingestsBeforeReplay);
+  } finally {
+    await rm(vaultRoot, { force: true, recursive: true });
+  }
+});
+
+test("historical lower-confidence companion RMSSD replay resolves to its upgraded owner", async () => {
+  const vaultRoot = await makeTempDirectory("murph-companion-hrv-rmssd-historical-replay");
+
+  try {
+    await coreRuntime.initializeVault({
+      createdAt: "2026-07-10T01:00:00.000Z",
+      timezone: "America/New_York",
+      vaultRoot,
+    });
+    const limitedObservation = {
+      schema: COMPANION_HRV_RMSSD_SCHEMA,
+      captureId: "523e4567-e89b-42d3-a456-426614174001",
+      observedAt: "2026-07-10T02:30:00.000Z",
+      durationMs: 60_000 as const,
+      rmssdMs: 35,
+      intervalCount: 72,
+      acceptedIntervalCount: 58,
+      successivePairCount: 50,
+      quality: "limited" as const,
+      methodVersion: COMPANION_HRV_RMSSD_METHOD_VERSION,
+    } satisfies CompanionHrvRmssdObservation;
+    const goodObservation = {
+      ...limitedObservation,
+      captureId: "523e4567-e89b-42d3-a456-426614174002",
+      observedAt: "2026-07-10T03:00:00.000Z",
+      rmssdMs: 49,
+      acceptedIntervalCount: 68,
+      successivePairCount: 63,
+      quality: "good" as const,
+    } satisfies CompanionHrvRmssdObservation;
+
+    const limited = await importCompanionHrvRmssdObservation(
+      vaultRoot,
+      limitedObservation,
+      "historical-replay",
+    );
+    const upgraded = await importCompanionHrvRmssdObservation(
+      vaultRoot,
+      goodObservation,
+      "historical-replay",
+    );
+    const retainedEventId = limited.events[0]?.id;
+    assert.ok(retainedEventId);
+    assert.equal(upgraded.events[0]?.id, retainedEventId);
+    const ingestPath = limited.ingestShardPath;
+    assert.ok(ingestPath);
+    const ingestsBeforeReplay = await coreRuntime.readJsonlRecords({
+      vaultRoot,
+      relativePath: ingestPath,
+    });
+
+    await coreRuntime.updateVaultSummary({ vaultRoot, timezone: "UTC" });
+    const historicalReplay = await importCompanionHrvRmssdObservation(
+      vaultRoot,
+      limitedObservation,
+      "historical-replay",
+    );
+
+    assert.equal(historicalReplay.applied, false);
+    assert.deepEqual(historicalReplay.events, []);
+    assert.equal(historicalReplay.ingestId, null);
+    assert.equal(historicalReplay.ingestShardPath, null);
+    assert.equal(historicalReplay.auditPath, null);
+    assert.equal(historicalReplay.persistedEvidencePartCount, 0);
+    const eventShardPaths = [...new Set([
+      ...limited.eventShardPaths,
+      ...upgraded.eventShardPaths,
+    ])];
+    const physicalRecords = (await Promise.all(eventShardPaths.map((relativePath) =>
+      coreRuntime.readJsonlRecords({ vaultRoot, relativePath })
+    ))).flat().filter((record) => storedExternalRefResourceType(record) === "ble-hrv-rmssd");
+    const liveRecords = latestLiveRecords(physicalRecords);
+
+    assert.equal(physicalRecords.length, 2);
+    assert.equal(liveRecords.length, 1);
+    assert.equal(liveRecords[0]?.id, retainedEventId);
+    assert.equal(liveRecords[0]?.dayKey, "2026-07-09");
+    assert.equal(liveRecords[0]?.timeZone, "America/New_York");
+    assert.equal(storedObservationValue(liveRecords[0]), 49);
+    const ingestsAfterReplay = await coreRuntime.readJsonlRecords({
+      vaultRoot,
+      relativePath: ingestPath,
+    });
+    assert.deepEqual(ingestsAfterReplay, ingestsBeforeReplay);
   } finally {
     await rm(vaultRoot, { force: true, recursive: true });
   }
