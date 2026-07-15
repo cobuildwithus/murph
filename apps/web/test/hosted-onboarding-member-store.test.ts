@@ -24,6 +24,7 @@ import {
   composeHostedMemberSnapshot,
   lookupHostedMemberByVerifiedEmailAddress,
   readHostedMemberAssistantNotificationState,
+  readHostedMemberEmailSnapshots,
   readHostedMemberMessagingSetupState,
   readHostedMemberSnapshot,
   type HostedMemberCoreState,
@@ -232,6 +233,62 @@ describe("hosted-member-store", () => {
         },
         verifiedEmailVerifiedAt: {
           not: null,
+        },
+      },
+    }));
+  });
+
+  it("reads bounded member email snapshots in one query and decrypts recipients", async () => {
+    const member = createHostedMember({ id: "member_email_snapshot" });
+    const address = "member@example.test";
+    const findMany = vi.fn().mockResolvedValue([{
+      ...member,
+      emailAuthorization: {
+        directPublicSenderAddressEncrypted: null,
+        directPublicSenderAuthorizedAt: null,
+        directPublicSenderLookupKey: null,
+        memberId: member.id,
+        stripeCheckoutEmailAddressEncrypted: null,
+        stripeCheckoutEmailCollectedAt: null,
+        verifiedEmailAddressEncrypted: await encryptHostedWebNullableString({
+          field: "hosted-member-email-authorization.verified-email",
+          memberId: member.id,
+          value: address,
+        }),
+        verifiedEmailLookupKey: "hbidx:email:v1:snapshot",
+        verifiedEmailVerifiedAt: new Date("2026-07-15T12:00:00.000Z"),
+      },
+    }]);
+    const prisma = {
+      hostedMember: { findMany },
+    } as never;
+
+    await expect(readHostedMemberEmailSnapshots({
+      memberIds: [member.id, "member_missing"],
+      prisma,
+    })).resolves.toEqual([{
+      core: {
+        billingStatus: member.billingStatus,
+        createdAt: member.createdAt,
+        id: member.id,
+        suspendedAt: member.suspendedAt,
+        updatedAt: member.updatedAt,
+      },
+      emailAuthorization: {
+        directPublicSender: null,
+        memberId: member.id,
+        stripeCheckoutEmail: null,
+        verifiedEmail: {
+          address,
+          lookupKey: "hbidx:email:v1:snapshot",
+          verifiedAt: new Date("2026-07-15T12:00:00.000Z"),
+        },
+      },
+    }]);
+    expect(findMany).toHaveBeenCalledWith(expect.objectContaining({
+      where: {
+        id: {
+          in: [member.id, "member_missing"],
         },
       },
     }));
