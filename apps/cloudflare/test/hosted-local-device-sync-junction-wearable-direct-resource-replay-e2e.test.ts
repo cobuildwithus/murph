@@ -874,8 +874,9 @@ async function runSignedJunctionHistoricalCoverageReplay(input: {
     userId: input.userId,
   });
 
-  const drainStatus = await input.scenario.readJunctionDeviceSyncReplayDrainStatus({
+  const drainStatus = await waitForJunctionHistoricalCoverageDrain({
     connectionId: seed.connectionId,
+    scenario: input.scenario,
     memberId: input.userId,
   });
   const historicalState = await assertJunctionHistoricalCoverageDrained({
@@ -1310,6 +1311,43 @@ interface JunctionHistoricalCoverageDrainSummary {
   sleep: boolean;
   sleepCycle: boolean;
   status: string | null;
+}
+
+async function waitForJunctionHistoricalCoverageDrain(input: {
+  connectionId: string;
+  memberId: string;
+  scenario: HostedLocalFullStackScenario;
+}): Promise<Awaited<ReturnType<
+  HostedLocalFullStackScenario["readJunctionDeviceSyncReplayDrainStatus"]
+>>> {
+  const startedAt = Date.now();
+  let drainStatus = await input.scenario.readJunctionDeviceSyncReplayDrainStatus({
+    connectionId: input.connectionId,
+    memberId: input.memberId,
+  });
+
+  while ((Date.now() - startedAt) < 30_000) {
+    const coverageMask = readJunctionHistoricalCoverageMask(
+      drainStatus.historicalBackfillEvidence,
+      "garmin",
+    );
+    if (
+      !drainStatus.hasPendingDirtyConnection
+      && !drainStatus.hasPendingDirtyConnectionForUser
+      && coverageMask !== null
+      && (coverageMask & 7) === 7
+    ) {
+      return drainStatus;
+    }
+
+    await new Promise((resolve) => setTimeout(resolve, 250));
+    drainStatus = await input.scenario.readJunctionDeviceSyncReplayDrainStatus({
+      connectionId: input.connectionId,
+      memberId: input.memberId,
+    });
+  }
+
+  return drainStatus;
 }
 
 async function assertJunctionHistoricalCoverageDrained(input: {
