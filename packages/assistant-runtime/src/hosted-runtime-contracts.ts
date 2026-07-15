@@ -60,6 +60,9 @@ export type {
   HostedRuntimeWorkspaceSnapshotPort,
 } from "./hosted-runtime/platform.ts";
 export {
+  HostedRuntimeArtifactReadError,
+} from "./hosted-runtime/platform.ts";
+export {
   HOSTED_SHARED_CHANNEL_PLATFORM_ENV_NAMES,
   HOSTED_SHARED_DEVICE_SYNC_PLATFORM_ENV_NAMES,
   HOSTED_SHARED_FORWARDED_ENV_CATEGORY_KEYS,

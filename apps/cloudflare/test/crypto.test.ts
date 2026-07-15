@@ -9,6 +9,7 @@ import { writeHostedEmailRawMessage } from "../src/hosted-email.js";
 import { hostedRunnerSecretsObjectKey } from "../src/storage-paths.js";
 import {
   encryptHostedStorageEnvelope,
+  HostedEncryptedR2PayloadUnreadableError,
   readEncryptedR2Payload,
   writeEncryptedR2Payload,
 } from "../src/crypto.js";
@@ -73,7 +74,7 @@ describe("readEncryptedR2Payload", () => {
       scope: undefined,
     }));
 
-    await expect(readEncryptedR2Payload({
+    const read = readEncryptedR2Payload({
       bucket: {
         async get() {
           return {
@@ -94,7 +95,11 @@ describe("readEncryptedR2Payload", () => {
       expectedKeyId: "k-current",
       key: "bundles/vault/test.bundle.json",
       scope: "bundle",
-    })).rejects.toThrow("Hosted bundle envelope.scope must be a non-empty string.");
+    });
+    await expect(read).rejects.toBeInstanceOf(
+      HostedEncryptedR2PayloadUnreadableError,
+    );
+    await expect(read).rejects.toThrow("Hosted encrypted R2 payload is unreadable.");
   });
 
   it("fails closed when a stored payload is rebound without the expected AAD", async () => {
@@ -130,7 +135,7 @@ describe("readEncryptedR2Payload", () => {
       expectedKeyId: "k-current",
       key: "bundles/vault/test.bundle.json",
       scope: "bundle",
-    })).rejects.toThrow();
+    })).rejects.toBeInstanceOf(HostedEncryptedR2PayloadUnreadableError);
   });
 });
 

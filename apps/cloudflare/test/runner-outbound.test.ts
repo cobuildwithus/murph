@@ -3701,6 +3701,53 @@ describe("handleRunnerOutboundRequest", () => {
     expect(serializedLogs).not.toContain("a".repeat(64));
   });
 
+  it("reports a persistently unreadable encrypted artifact as terminal", async () => {
+    const fixture = await createHostedRuntimeCryptoContextFixture();
+    const baseEnv = createRunnerOutboundEnv(fixture.env);
+    const malformedEnvelope = new TextEncoder().encode('{"schema":"invalid"}');
+    const env = createRunnerOutboundEnv({
+      ...fixture.env,
+      BUNDLES: {
+        ...baseEnv.BUNDLES,
+        async get() {
+          return {
+            async arrayBuffer() {
+              return toArrayBuffer(malformedEnvelope);
+            },
+            key: "redacted-artifact-key",
+            size: malformedEnvelope.byteLength,
+          };
+        },
+      },
+    });
+    vi.stubGlobal("fetch", fixture.fetchMock);
+
+    const response = await handleRunnerOutboundRequest(
+      new Request(MISSING_ARTIFACT_URL, {
+        headers: createRunnerWriteFenceProxyHeaders(),
+        method: "GET",
+      }),
+      env,
+      "member_123",
+    );
+
+    expect(response.status).toBe(422);
+    await expect(response.json()).resolves.toEqual({
+      error: "Artifact is unreadable.",
+    });
+    expect(hostedExecutionMocks.emitHostedExecutionStructuredLog).toHaveBeenCalledWith(
+      expect.objectContaining({
+        component: "runner",
+        details: expect.objectContaining({
+          artifactReadable: false,
+          operation: "artifact_fetch",
+          responseStatus: 422,
+        }),
+        message: "Hosted runner artifact request completed.",
+      }),
+    );
+  });
+
   it("rejects artifact reads when the claimed member does not own the active fence", async () => {
     const validateRuntimeWriteFence = vi.fn(async () => false);
     const fetchMock = vi.fn();

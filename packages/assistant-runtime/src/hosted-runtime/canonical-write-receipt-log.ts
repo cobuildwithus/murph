@@ -41,13 +41,6 @@ export interface HostedCanonicalWriteReceiptRecoveryWake {
   nextWakeReason: string | null;
 }
 
-export class HostedCanonicalWriteReceiptArtifactReadError extends Error {
-  constructor(cause: unknown) {
-    super("Hosted canonical write receipt artifact read failed.", { cause });
-    this.name = "HostedCanonicalWriteReceiptArtifactReadError";
-  }
-}
-
 export async function appendHostedCanonicalWriteReceiptToArtifactLog(input: {
   artifactStore: HostedRuntimeArtifactStore;
   beforeReceiptUpload?: () => Promise<void>;
@@ -157,10 +150,7 @@ export async function readHostedCanonicalWriteReceiptLogEntries(input: {
   if (!ref) {
     return [];
   }
-  const bytes = await readHostedCanonicalWriteReceiptArtifact({
-    artifactStore: input.artifactStore,
-    sha256: ref.sha256,
-  });
+  const bytes = await input.artifactStore.get(ref.sha256);
   if (!bytes) {
     throw new Error("Hosted canonical write receipt log artifact is unavailable.");
   }
@@ -169,17 +159,6 @@ export async function readHostedCanonicalWriteReceiptLogEntries(input: {
   }
 
   return parseHostedCanonicalWriteReceiptLog(bytes).entries;
-}
-
-export async function readHostedCanonicalWriteReceiptArtifact(input: {
-  artifactStore: HostedRuntimeArtifactStore;
-  sha256: string;
-}): Promise<Uint8Array | null> {
-  try {
-    return await input.artifactStore.get(input.sha256);
-  } catch (error) {
-    throw new HostedCanonicalWriteReceiptArtifactReadError(error);
-  }
 }
 
 export function readHostedCanonicalWriteReceiptLogStatusFingerprint(

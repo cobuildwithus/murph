@@ -33,6 +33,9 @@ import {
   HostedRuntimeBridgeCheckpointLeaseError,
 } from "@murphai/assistant-runtime/hosted-checkpoint-bridge";
 import {
+  HostedRuntimeArtifactReadError,
+} from "@murphai/assistant-runtime/hosted-runtime-contracts";
+import {
   HOSTED_RUNTIME_GROUP_TOOL_PATH,
   HOSTED_RUNTIME_CODEX_AUTH_PATH,
   HOSTED_RUNTIME_LINQ_EGRESS_DELIVERY_PATH,
@@ -2430,7 +2433,8 @@ describe("buildHostedExecutionRuntimePlatform", () => {
       thrown = error;
     }
 
-    expect(thrown).toBeInstanceOf(Error);
+    expect(thrown).toBeInstanceOf(HostedRuntimeArtifactReadError);
+    expect(thrown).toMatchObject({ retryable: true });
     expect((thrown as Error).message).toBe(
       "Hosted artifact fetch request failed.",
     );
@@ -2488,6 +2492,29 @@ describe("buildHostedExecutionRuntimePlatform", () => {
     );
     expect(serializedLogs).toContain("hidden artifact transport detail");
     expect(serializedLogs).not.toContain("a".repeat(64));
+  });
+
+  it.each([
+    { retryable: false, status: 422 },
+    { retryable: true, status: 503 },
+  ])("maps artifact HTTP $status to retryable=$retryable", async ({
+    retryable,
+    status,
+  }) => {
+    const platform = buildTestHostedExecutionRuntimePlatform({
+      boundUserId: "member_123",
+      fetchImpl: vi.fn(async () => new Response(null, { status })) as typeof fetch,
+    });
+
+    let thrown: unknown;
+    try {
+      await platform.artifactStore.get("a".repeat(64));
+    } catch (error) {
+      thrown = error;
+    }
+
+    expect(thrown).toBeInstanceOf(HostedRuntimeArtifactReadError);
+    expect(thrown).toMatchObject({ retryable });
   });
 
   it("attaches the active runtime write fence to legacy artifact reads", async () => {

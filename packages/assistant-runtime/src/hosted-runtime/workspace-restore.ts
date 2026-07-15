@@ -59,9 +59,7 @@ import {
   type HostedRuntimeLogContext,
 } from "./runtime-logs.ts";
 import {
-  HostedCanonicalWriteReceiptArtifactReadError,
   omitHostedCanonicalWriteReceiptLogStatusFields,
-  readHostedCanonicalWriteReceiptArtifact,
   readHostedCanonicalWriteReceiptLogEntries,
   readHostedCanonicalWriteReceiptLogStatusFingerprint,
   type HostedCanonicalWriteReceiptLogStatusFingerprint,
@@ -78,9 +76,10 @@ import type {
 import {
   readHostedMaterializedArtifactPaths,
 } from "./materialized-artifact-state.ts";
-import type {
-  HostedRuntimePlatform,
-  HostedRuntimeWorkspaceSnapshotRestoreTimingDetails,
+import {
+  HostedRuntimeArtifactReadError,
+  type HostedRuntimePlatform,
+  type HostedRuntimeWorkspaceSnapshotRestoreTimingDetails,
 } from "./platform.ts";
 
 const HOSTED_OPERATOR_HOME_ROOT_KEY = "operator-home";
@@ -207,7 +206,10 @@ export async function restoreHostedWorkspaceRuntimeJobWorkspace(input: {
       if (input.signal?.aborted) {
         throw input.signal.reason ?? error;
       }
-      if (error instanceof HostedCanonicalWriteReceiptArtifactReadError) {
+      if (
+        error instanceof HostedRuntimeArtifactReadError
+        && error.retryable
+      ) {
         await clearHostedWorkspaceRuntimeLocalRoots(restored);
         await clearHostedWorkspaceRestoreCachesBestEffort(restored.vaultRoot);
         throw error.cause ?? error;
@@ -1052,10 +1054,7 @@ async function applyHostedCanonicalWriteReceiptsFromWorkspaceState(input: {
     }
     appliedReceiptRefs.add(receiptRefKey);
 
-    const bytes = await readHostedCanonicalWriteReceiptArtifact({
-      artifactStore: input.platform.artifactStore,
-      sha256: entry.sha256,
-    });
+    const bytes = await input.platform.artifactStore.get(entry.sha256);
     if (!bytes) {
       throw new Error("Hosted canonical write receipt artifact is unavailable.");
     }
@@ -1094,10 +1093,7 @@ async function readHostedCanonicalWritePayloadForRestore(input: {
   platform: HostedRuntimePlatform;
   ref: HostedCanonicalWriteReceiptContentRef;
 }): Promise<Uint8Array | ArrayBuffer | null> {
-  return await readHostedCanonicalWriteReceiptArtifact({
-    artifactStore: input.platform.artifactStore,
-    sha256: input.ref.sha256,
-  });
+  return await input.platform.artifactStore.get(input.ref.sha256);
 }
 
 function parseHostedCanonicalWriteReceiptForRestore(

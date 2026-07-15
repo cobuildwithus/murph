@@ -875,12 +875,17 @@ publishes the receipt-log fingerprint and the advanced imported watermark in
 the same status checkpoint. That progress checkpoint is still required when
 the receipt fingerprint is already durable: receipt durability proves the
 canonical write, not the corresponding mailbox watermark.
-Receipt replay is fail-stop for each restore attempt. If the artifact store
-throws while reading the receipt log, a receipt, or a payload, the runtime
-discards that local tree and fails the invocation without changing the durable
-receipt fingerprint; a later invocation retries the same input. If referenced
-content is missing, malformed, conflicting, or fails application, the runtime
-instead reloads the authoritative snapshot before admitting foreground work.
+Receipt replay is fail-stop for each restore attempt. The encrypted R2 reader
+owns artifact failure disposition: transport, object-read, key-resolution
+request, and service failures remain retryable, while a persisted object with
+a malformed envelope, unavailable key ID, or deterministic decryption failure
+is terminal. If a retryable read
+failure reaches receipt recovery, the runtime discards that local tree and
+fails the invocation without changing the durable receipt fingerprint; a later
+invocation retries the same input. If the artifact failure is terminal, or if
+referenced content is missing, malformed, conflicting, or fails application,
+the runtime instead reloads the authoritative snapshot before admitting
+foreground work.
 That failed receipt batch is rejected as unauthorized recovery input and its
 active fingerprint is removed; the runtime reports the degraded recovery but
 does not create a repair owner or claim the rejected batch remains repairable.

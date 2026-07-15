@@ -220,12 +220,13 @@ import {
 import {
   readHostedSystemMailboxState,
 } from "../src/hosted-runtime/system-mailbox-state.ts";
-import type {
-  HostedRuntimeDeviceSyncPort,
-  HostedRuntimeMailboxPort,
-  HostedRuntimePlatform,
-  RuntimeLivenessPort,
-  HostedRuntimeWorkspacePort,
+import {
+  HostedRuntimeArtifactReadError,
+  type HostedRuntimeDeviceSyncPort,
+  type HostedRuntimeMailboxPort,
+  type HostedRuntimePlatform,
+  type RuntimeLivenessPort,
+  type HostedRuntimeWorkspacePort,
 } from "../src/hosted-runtime-contracts.ts";
 import type {
   HostedAssistantRuntimeResolvedConfig,
@@ -16778,8 +16779,23 @@ describe("hosted workspace runtime entrypoint", () => {
     if (!baseLogPort) {
       throw new Error("Receipt recovery proof requires a hosted runtime log port.");
     }
+    const baseArtifactStore = basePlatform.artifactStore;
+    let terminalArtifactReadAttempts = 0;
     const platform: HostedRuntimePlatform = {
       ...basePlatform,
+      artifactStore: {
+        ...baseArtifactStore,
+        async get(sha256) {
+          if (sha256 === missingPayloadHash) {
+            terminalArtifactReadAttempts += 1;
+            throw new HostedRuntimeArtifactReadError({
+              cause: new Error("Hosted artifact is persistently unreadable."),
+              retryable: false,
+            });
+          }
+          return await baseArtifactStore.get(sha256);
+        },
+      },
       logPort: {
         async write(request) {
           const response = await baseLogPort.write(request);
@@ -16854,6 +16870,7 @@ describe("hosted workspace runtime entrypoint", () => {
         1,
       );
       assert.equal(restoreCallCount, 2);
+      assert.equal(terminalArtifactReadAttempts, 1);
       assert.equal(logWriteSettled, false);
       assert.equal(consoleWarn.mock.calls.length, 1);
       const recoveryLog = logRequests.flatMap((request) => request.entries).find(
@@ -17012,10 +17029,14 @@ describe("hosted workspace runtime entrypoint", () => {
         },
       },
     });
-    const transientReadError = Object.assign(
+    const transientReadCause = Object.assign(
       new Error("Hosted artifact fetch failed with HTTP 503."),
       { status: 503, statusCode: 503 },
     );
+    const transientReadError = new HostedRuntimeArtifactReadError({
+      cause: transientReadCause,
+      retryable: true,
+    });
     const baseArtifactStore = basePlatform.artifactStore;
     const failingArtifactHash = {
       "receipt-log": receiptLogHash,
@@ -17087,7 +17108,7 @@ describe("hosted workspace runtime entrypoint", () => {
           createWorkspaceRuntimeJobInput(),
           runtimeOptions,
         ),
-        (error) => error === transientReadError,
+        (error) => error === transientReadCause,
       );
       assert.equal(checkpointRequests.length, 0);
       assert.equal(assistantPhaseCalls, 0);
