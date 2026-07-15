@@ -83,6 +83,7 @@ import {
   resolveHostedPendingAssistantInputWakeAt,
 } from "./pending-assistant-input.ts";
 import {
+  compactHostedPendingAssistantInputIds,
   resolveHostedPendingAssistantInputStatePath,
 } from "./pending-input-index.ts";
 import {
@@ -1024,6 +1025,7 @@ export async function runHostedWorkspaceUntilIdleOrBudget(
   let mailboxPostCheckpointEffectsFinished: Promise<void> | null = null;
   let postCheckpointWakeMerged = false;
   let assistantPhaseResult: HostedWorkspaceRunnerAssistantPhaseResult;
+  let latestAssistantInputBatch: HostedWorkspaceRunnerAssistantInputBatch | null = null;
   let runnerError: unknown = null;
   try {
     assistantPhaseResult = await withHostedCanonicalWritePort(
@@ -1116,6 +1118,15 @@ export async function runHostedWorkspaceUntilIdleOrBudget(
         });
       }
     }
+    latestAssistantInputBatch =
+      await rebuildHostedWorkspaceRunnerAssistantInputBatchAfterCleanProgress({
+        acceptedInitialAssistantInputBatch,
+        assistantPhaseResult,
+        latestAssistantInputBatch:
+          checkpointRequestSession.latestAssistantInputBatch(),
+        signal: input.signal ?? null,
+        vaultRoot: input.vaultRoot,
+      });
     if (await reconcilePendingAssistantInputWake({
       foregroundConversationWorkObserved,
       now: input.now,
@@ -1164,8 +1175,7 @@ export async function runHostedWorkspaceUntilIdleOrBudget(
     initialMailboxImport,
     latestMailboxImport: checkpointRequestSession.latestMailboxImport()
       ?? initialMailboxImport,
-    latestAssistantInputBatch:
-      checkpointRequestSession.latestAssistantInputBatch(),
+    latestAssistantInputBatch,
     latestWorkspace: checkpointRequestSession.latestWorkspace()
       ?? initialMailboxImport.checkpoint?.workspace
       ?? input.workspace,
@@ -1774,6 +1784,49 @@ function filterHostedWorkspaceRunnerAssistantInputBatch(
       return !excludedInputIds.has(record.assistantInputId);
     }),
   );
+}
+
+async function rebuildHostedWorkspaceRunnerAssistantInputBatchAfterCleanProgress(input: {
+  acceptedInitialAssistantInputBatch: HostedWorkspaceRunnerAssistantInputBatch | null;
+  assistantPhaseResult: HostedWorkspaceRunnerAssistantPhaseResult;
+  latestAssistantInputBatch: HostedWorkspaceRunnerAssistantInputBatch | null;
+  signal: AbortSignal | null;
+  vaultRoot: string;
+}): Promise<HostedWorkspaceRunnerAssistantInputBatch | null> {
+  if (
+    input.acceptedInitialAssistantInputBatch === null
+    || input.assistantPhaseResult.progressed !== true
+    || input.assistantPhaseResult.foregroundReplyFailed !== 0
+  ) {
+    return input.latestAssistantInputBatch;
+  }
+
+  const pendingInputIds = new Set(await compactHostedPendingAssistantInputIds({
+    ...(input.signal ? { signal: input.signal } : {}),
+    vaultRoot: input.vaultRoot,
+  }));
+  const seenInputIds = new Set<string>();
+  const remainingRecords: HostedMailboxAssistantInputRecord[] = [];
+  for (const batch of [
+    input.acceptedInitialAssistantInputBatch,
+    input.latestAssistantInputBatch,
+  ]) {
+    if (!batch) {
+      continue;
+    }
+    for (const record of readHostedWorkspaceRunnerAssistantInputBatchRecords(batch)) {
+      if (
+        seenInputIds.has(record.assistantInputId)
+        || !pendingInputIds.has(record.assistantInputId)
+      ) {
+        continue;
+      }
+      seenInputIds.add(record.assistantInputId);
+      remainingRecords.push(record);
+    }
+  }
+
+  return buildHostedWorkspaceRunnerAssistantInputBatch(remainingRecords);
 }
 
 function readHostedWorkspaceRunnerAssistantInputBatchRecords(
