@@ -9,6 +9,7 @@ const mocks = vi.hoisted(() => {
   const state = {
     completeWebhookTrace: vi.fn(),
     createDeviceSyncPublicIngress: vi.fn(),
+    createSdkSignInSession: vi.fn(),
     createSignal: vi.fn(),
     ensureSdkConnection: vi.fn(),
     ensureWebhookSubscriptions: vi.fn(),
@@ -27,6 +28,7 @@ const mocks = vi.hoisted(() => {
     readHostedDeviceSyncEnvironment: vi.fn(),
     registryGet: vi.fn(),
     registryList: vi.fn(),
+    resumeSdkSignInSession: vi.fn(),
     sha256Hex: vi.fn(() => "a".repeat(64)),
     syncDurableConnectionState: vi.fn(),
     getDirtyConnection: vi.fn(),
@@ -133,7 +135,7 @@ function createHostedEnv(overrides: Partial<{
 function buildCompanionHrvRmssdObservation() {
   return {
     schema: "murph.companion.overnight-prv-rmssd.v1" as const,
-    methodVersion: "prv-rmssd-5m-mean-v1" as const,
+    methodVersion: "prv-rmssd-5m-mean-scheduled-0000-0800-local-v1" as const,
     nightDate: "2026-07-10",
     rmssdMs: 52.75,
     completedWindowCount: 96,
@@ -428,6 +430,7 @@ describe("hosted device-sync wakes", () => {
           },
         };
       }),
+      createSdkSignInSession: mocks.createSdkSignInSession,
       handleWebhook: vi.fn(async () => {
         await input.hooks?.onWebhookAccepted?.({
           account: {
@@ -460,9 +463,28 @@ describe("hosted device-sync wakes", () => {
         };
       }),
       ensureSdkConnection: mocks.ensureSdkConnection,
+      resumeSdkSignInSession: mocks.resumeSdkSignInSession,
       startConnection: vi.fn(),
     }));
     mocks.createSignal.mockResolvedValue({ id: 8 });
+    mocks.createSdkSignInSession.mockResolvedValue({
+      account: buildHostedConnection({
+        id: "dsc_junction_123",
+        provider: "junction",
+        setupPhase: "source_confirmed",
+      }),
+      environment: "sandbox",
+      signInToken: "junction-sign-in-token",
+    });
+    mocks.resumeSdkSignInSession.mockResolvedValue({
+      account: buildHostedConnection({
+        id: "dsc_junction_123",
+        provider: "junction",
+        setupPhase: "source_confirmed",
+      }),
+      environment: "sandbox",
+      signInToken: "junction-sign-in-token",
+    });
     mocks.prismaTx.deviceSyncSignal.create.mockResolvedValue({ id: 8 });
     mocks.completeWebhookTrace.mockResolvedValue(true);
     mocks.nudgeHostedRunnerUserBestEffortResult.mockResolvedValue({
@@ -547,6 +569,139 @@ describe("hosted device-sync wakes", () => {
 
     expect(controlPlane.publicIngressBaseUrl).toBe("http://localhost:3000/api/device-sync");
     expect(controlPlane.allowedReturnOrigins).toEqual(["http://localhost:3000"]);
+  });
+
+  it("uses explicit companion connect intent as the only lifecycle-changing SDK path", async () => {
+    const ingress = createHostedDeviceSyncPublicIngressService(
+      new Request("https://control.example.test/api/device-sync/companion/sign-in-token"),
+    );
+
+    await expect(
+      ingress.createSdkSignInSession("user-123", "junction", "connect"),
+    ).resolves.toMatchObject({ signInToken: "junction-sign-in-token" });
+
+    expect(mocks.createSdkSignInSession).toHaveBeenCalledWith({
+      ownerId: "user-123",
+      provider: "junction",
+    });
+    expect(mocks.resumeSdkSignInSession).not.toHaveBeenCalled();
+    expect(mocks.listConnectionsForUser).not.toHaveBeenCalled();
+  });
+
+  it.each(["resume", null] as const)(
+    "resumes the one active companion SDK connection for intent %s without ensuring it",
+    async (connectionIntent) => {
+      mocks.listConnectionsForUser.mockResolvedValueOnce([
+        buildHostedConnection({
+          id: "dsc_junction_active",
+          provider: "junction",
+          setupPhase: "source_confirmed",
+        }),
+      ]);
+      const ingress = createHostedDeviceSyncPublicIngressService(
+        new Request("https://control.example.test/api/device-sync/companion/sign-in-token"),
+      );
+
+      await expect(
+        ingress.createSdkSignInSession("user-123", "junction", connectionIntent),
+      ).resolves.toMatchObject({ signInToken: "junction-sign-in-token" });
+
+      expect(mocks.resumeSdkSignInSession).toHaveBeenCalledWith({
+        accountId: "dsc_junction_active",
+        ownerId: "user-123",
+        provider: "junction",
+      });
+      expect(mocks.createSdkSignInSession).not.toHaveBeenCalled();
+    },
+  );
+
+  it("preserves legacy first-connect behavior only when no provider row exists", async () => {
+    mocks.listConnectionsForUser.mockResolvedValueOnce([]);
+    const ingress = createHostedDeviceSyncPublicIngressService(
+      new Request("https://control.example.test/api/device-sync/companion/sign-in-token"),
+    );
+
+    await expect(
+      ingress.createSdkSignInSession("user-123", "junction", null),
+    ).resolves.toMatchObject({ signInToken: "junction-sign-in-token" });
+
+    expect(mocks.createSdkSignInSession).toHaveBeenCalledWith({
+      ownerId: "user-123",
+      provider: "junction",
+    });
+    expect(mocks.resumeSdkSignInSession).not.toHaveBeenCalled();
+  });
+
+  it("rejects explicit resume when no provider row exists without ensuring one", async () => {
+    mocks.listConnectionsForUser.mockResolvedValueOnce([]);
+    const ingress = createHostedDeviceSyncPublicIngressService(
+      new Request("https://control.example.test/api/device-sync/companion/sign-in-token"),
+    );
+
+    await expect(
+      ingress.createSdkSignInSession("user-123", "junction", "resume"),
+    ).rejects.toMatchObject({
+      code: "SDK_SIGN_IN_RECONNECT_REQUIRED",
+      httpStatus: 409,
+      retryable: false,
+    });
+    expect(mocks.createSdkSignInSession).not.toHaveBeenCalled();
+    expect(mocks.resumeSdkSignInSession).not.toHaveBeenCalled();
+  });
+
+  it.each(["resume", null] as const)(
+    "requires an explicit reconnect for terminal companion state with intent %s",
+    async (connectionIntent) => {
+      mocks.listConnectionsForUser.mockResolvedValueOnce([
+        buildHostedConnection({
+          id: "dsc_junction_terminal",
+          provider: "junction",
+          setupPhase: "source_confirmed",
+          status: "disconnected",
+        }),
+      ]);
+      const ingress = createHostedDeviceSyncPublicIngressService(
+        new Request("https://control.example.test/api/device-sync/companion/sign-in-token"),
+      );
+
+      await expect(
+        ingress.createSdkSignInSession("user-123", "junction", connectionIntent),
+      ).rejects.toMatchObject({
+        code: "SDK_SIGN_IN_RECONNECT_REQUIRED",
+        httpStatus: 409,
+        retryable: false,
+      });
+      expect(mocks.createSdkSignInSession).not.toHaveBeenCalled();
+      expect(mocks.resumeSdkSignInSession).not.toHaveBeenCalled();
+    },
+  );
+
+  it("rejects ambiguous active companion SDK connections without minting or ensuring", async () => {
+    mocks.listConnectionsForUser.mockResolvedValueOnce([
+      buildHostedConnection({
+        id: "dsc_junction_active_1",
+        provider: "junction",
+        setupPhase: "source_confirmed",
+      }),
+      buildHostedConnection({
+        id: "dsc_junction_active_2",
+        provider: "junction",
+        setupPhase: "source_confirmed",
+      }),
+    ]);
+    const ingress = createHostedDeviceSyncPublicIngressService(
+      new Request("https://control.example.test/api/device-sync/companion/sign-in-token"),
+    );
+
+    await expect(
+      ingress.createSdkSignInSession("user-123", "junction", "resume"),
+    ).rejects.toMatchObject({
+      code: "SDK_SIGN_IN_CONNECTION_AMBIGUOUS",
+      httpStatus: 409,
+      retryable: false,
+    });
+    expect(mocks.createSdkSignInSession).not.toHaveBeenCalled();
+    expect(mocks.resumeSdkSignInSession).not.toHaveBeenCalled();
   });
 
   it("uses explicit scheduled wake identity and created time for inserted due-reconcile signals", async () => {

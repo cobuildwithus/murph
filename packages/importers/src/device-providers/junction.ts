@@ -1043,7 +1043,7 @@ function normalizeCompanionHrvRmssd(
     occurredAt,
     dayKey: observation.nightDate,
     source: "device",
-    title: "Estimated WHOOP BLE overnight PRV (RMSSD)",
+    title: "Estimated WHOOP BLE scheduled overnight PRV (RMSSD)",
     evidenceRoles: [evidenceRole],
     externalRef: makeProviderExternalRef(
       "whoop",

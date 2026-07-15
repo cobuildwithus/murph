@@ -134,7 +134,12 @@ Postgres should keep only opaque ids, blind indexes, typed summaries, sparse sig
 
 The companion overnight PRV lane reuses that encrypted payload owner. Its only
 public health payload contains `schema`, `methodVersion`, `nightDate`,
-`rmssdMs`, `completedWindowCount`, and `acceptedWindowCount`.
+`rmssdMs`, `completedWindowCount`, and `acceptedWindowCount`, with method
+`prv-rmssd-5m-mean-scheduled-0000-0800-local-v1`. iOS owns the continuous BLE
+subscription and fixed local `00:00–08:00` schedule. A fully traversed frozen
+occurrence is bounded to 84...108 five-minute bins, typically 84/96/108 with
+intermediate counts such as 90/102 for half-hour shifts. The hosted control
+plane owns no capture scheduler, sleep detector, per-window rows, or phone checkpoint.
 `device_sync_companion_capture_receipt` owns one accepted strict envelope per
 `(connection, nightDate)` for exact replay; it retains only
 the member/connection binding, hashed receipt id, envelope hash, and creation
@@ -144,6 +149,20 @@ capture duration, timezone offset, coverage milliseconds, raw BLE packets,
 R-R intervals, packet timestamps, device identifiers, or per-window values.
 This receipt cardinality is operational only; canonical import independently
 owns one immutable summary per vault, `whoop` source, and `nightDate`.
+
+The companion sign-in route separates local band enrollment from hosted
+lifecycle authority. The direct-BLE Connect WHOOP control enrolls only the
+CoreBluetooth band and sends no hosted `connectionIntent: "connect"`. A known
+same-member passive SDK repair sends `connectionIntent: "resume"`. A fresh or
+unproven installation omits intent and lets durable server state decide:
+exactly one established row resumes, zero provider rows may establish the first
+lane, and terminal or ambiguous state rejects without mutation. Only a future
+visible hosted-health/Junction Reconnect action may send `connect` and create or
+reactivate the lane. Omitted intent can never reverse a durable disconnect.
+The iOS-only protected checkpoint, exact app-scoped CoreBluetooth peripheral
+UUID, and outbox bookkeeping never enter Postgres or the hosted workspace; only
+an individual strict six-field envelope is uploaded through the derived-data
+route. The UUID never uploads or enters logs.
 
 ### Cloudflare execution state
 
@@ -212,13 +231,16 @@ These are read/manage wearable routes for the hosted settings page. Ordinary rea
 
 These are browser-initiated but lower-level than the settings surface. They must use short-lived signed assertions with replay protection.
 
-### Hosted companion derived-data route
+### Hosted companion routes
 
+- `POST /api/device-sync/companion/sign-in-token`
 - `POST /api/device-sync/companion/hrv-rmssd`
 
-This Privy-bearer-authenticated, consent-gated route accepts only the closed
-overnight summary contract above. It reuses one active member-owned Junction
-connection and never establishes or reactivates a lane from data ingress.
+Both are Privy-bearer-authenticated and consent-gated. Sign-in honors the
+resume, omitted-intent inference, and future explicit-connect authority split
+above. The derived route accepts only the closed overnight summary contract,
+reuses one active member-owned Junction connection, and never establishes or
+reactivates a lane from data ingress.
 
 ### Hosted local-agent routes
 
@@ -266,10 +288,19 @@ success may still acknowledge its exact hosted payload.
 
 Deploy runtime/Cloudflare first with immediate container rollout, verify its
 runner-bundle fingerprint, and pass a compact import smoke. Deploy web second
-and distribute iOS last. Before distribution, require a signed physical-iPhone
-WHOOP 5/MG overnight capture-to-query test, network/log proof that forbidden raw
-data is absent, and paired-ECG validation of the beta PRV method. Roll back in
-reverse order and let already-staged work drain before removing runtime support.
+with scheduled-method admission plus resume/omitted-intent/future-connect
+authority, and distribute iOS last. The direct-BLE enrollment control sends no
+hosted `connect`; web owns
+known-member `resume`, fresh-install omitted-intent inference, and the future
+visible reconnect authority. Before distribution, require a signed physical
+iPhone WHOOP 5/MG continuous-subscription and overnight capture-to-query test
+covering
+background, reconnect, force-quit watchdog behavior, DST, and timezone changes;
+network/log proof that forbidden raw data is absent; and paired-ECG validation
+of the beta PRV method. Once scheduled-method clients ship, web and runtime
+support are the rollback floor until those clients and staged envelopes drain.
+Roll back in reverse order and let already-staged work drain before removing
+runtime support.
 
 ## Webhook Dirty Coalescing
 

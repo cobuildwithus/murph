@@ -215,14 +215,44 @@ drain/batch service seam in `packages/device-syncd/src/service.ts`.
    `hrv-rmssd` point across WHOOP Recovery, Oura, and other provider evidence.
    The beta companion series does not compete or aggregate with either series.
 
-   The phone reduces pulse intervals in constant memory into non-overlapping
-   five-minute windows and uploads only the strict six-field nightly envelope:
-   `schema`, `methodVersion`, `nightDate`, `rmssdMs`, `completedWindowCount`,
-   and `acceptedWindowCount`. Exact capture timestamps, duration, timezone offset,
-   coverage milliseconds, raw packets, intervals, packet timestamps, device
-   identifiers, and per-window values never enter ingestion. The phone owns the
-   per-window accepted-duration policy; web verifies the closed summary shape,
-   at least 48 accepted windows, and at least 50% accepted completed windows.
+   After one explicit enrollment, the phone continuously subscribes to the
+   WHOOP 5/MG pulse-interval stream and owns a fixed `00:00–08:00` local
+   civil-time schedule. It freezes the timezone rules for each night, so later
+   timezone changes cannot move a retained occurrence. A fully traversed night
+   is bounded to 84...108 completed five-minute windows: typically 84, 96, or
+   108, with intermediate counts such as 90 or 102 for half-hour transitions.
+   It reduces intervals into non-overlapping windows with
+   method `prv-rmssd-5m-mean-scheduled-0000-0800-local-v1` and uploads only the
+   strict six-field nightly envelope: `schema`, `methodVersion`, `nightDate`,
+   `rmssdMs`, `completedWindowCount`, and `acceptedWindowCount`. Exact capture
+   timestamps, duration, timezone details, coverage milliseconds, raw packets,
+   intervals, packet timestamps, device identifiers, and per-window values
+   never enter ingestion. The phone owns the per-window accepted-duration
+   policy; web verifies the closed summary shape, at least 48 accepted windows,
+   and at least 50% accepted completed windows.
+
+   The backend owns no capture scheduler. iOS may persist only one protected,
+   schema-versioned scalar checkpoint containing the frozen night/schedule
+   identity, next window position, completed/accepted counts, and accepted
+   RMSSD sum, plus an outbox of at most three already-derived strict envelopes.
+   The exact app-scoped CoreBluetooth peripheral UUID may persist in that
+   protected state solely to restore the enrolled band; it never enters
+   ingestion or logs. An incomplete window is discarded across a process gap;
+   raw intervals, partial-window state, per-window values, WHOOP account
+   identity, and every other band identifier remain memory-only. One continually
+   postponed local watchdog notification may remind the member to reopen Murph
+   when callbacks stop. Normal backgrounding needs no nightly action, but
+   force-quit prevents BLE relaunch until the app is opened again.
+
+   Local direct-BLE enrollment and hosted Junction authority are separate. The
+   Connect WHOOP control enrolls only the CoreBluetooth band and does not send
+   hosted `connect`. Known same-member passive SDK repair sends `resume`; a
+   fresh or unproven installation omits intent and lets durable server state
+   decide. Exactly one established provider row resumes, zero provider rows may
+   establish the first lane, and terminal or ambiguous state rejects without
+   mutation. Only a future visible hosted-health/Junction Reconnect action may
+   send `connect` and create/reactivate the lane. Data ingress and retry-outbox
+   drain likewise carry no connection lifecycle authority.
 
    The first strict envelope owns `(connection, nightDate)` in a 30-day,
    64-row-per-connection receipt window. Exact replay is a no-op and changed

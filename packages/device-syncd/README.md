@@ -114,6 +114,30 @@ Strava uses OAuth, polling, and optional app-global webhooks.
 
 Oura uses OAuth plus refresh tokens and works well in a polling-first mode, so the basic Murph setup does not require Oura webhooks. Once the operator configures the Oura client ID and secret, the end-user flow is just connect once and let scheduled sync keep the account fresh.
 
+The companion WHOOP 5/MG overnight-PRV lane is not another provider scheduler.
+After one explicit mobile enrollment, iOS continuously subscribes and owns the
+fixed local `00:00–08:00` reduction using
+`prv-rmssd-5m-mean-scheduled-0000-0800-local-v1`; `device-syncd` receives only
+one strict six-field summary for the resulting `nightDate`. A fully traversed
+frozen occurrence is bounded to 84...108 five-minute windows, typically
+84/96/108 with intermediate counts such as 90/102 for half-hour shifts. The
+phone's protected scalar checkpoint, exact app-scoped CoreBluetooth peripheral
+UUID, outbox bookkeeping, and local watchdog reminder never enter this runtime;
+only an individual strict six-field envelope does. The UUID never uploads or
+enters logs. The hosted encrypted payload
+remains the retry owner until
+canonical success or exact structural invalidity, and this package does not
+add a nightly job, per-window rows, or a sleep detector.
+
+Companion lifecycle intent is also closed. The local Connect WHOOP action
+enrolls only the CoreBluetooth band and sends no hosted `connect`. A known
+same-member passive SDK repair sends `resume`; a fresh or unproven installation
+omits intent so durable server state resumes exactly one established lane,
+establishes only when zero provider rows exist, and rejects terminal or
+ambiguous state. Only a future visible hosted-health/Junction Reconnect action
+may send `connect` and create/reactivate the shared lane. Resume, omitted intent,
+data ingress, and retry work cannot undo an explicit disconnect.
+
 The provider lifecycle metadata used here now comes from the shared `@murphai/importers/device-providers/provider-descriptors` surface, so callback paths, default scopes, webhook capabilities, sync windows, metric families, and source-priority hints stay aligned between connector code and snapshot normalization.
 The configured-provider assembly is derived from one shared, build-safe provider-manifest registry in `packages/device-syncd/src/config/provider-manifests.ts`, so env specs, config readers, provider-owned job definitions, descriptor projection, credential policy, serializable hosted-runtime config, and hosted wake hint shaping follow the same provider facts. Runtime provider factories and importer adapters stay in provider/runtime modules so hosted web can read provider facts without importing the provider implementation graph.
 

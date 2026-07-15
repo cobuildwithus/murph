@@ -21,6 +21,10 @@ const validObservation = {
 };
 
 test("companion HRV contract round-trips one bounded overnight summary", () => {
+  assert.equal(
+    COMPANION_HRV_RMSSD_METHOD_VERSION,
+    "prv-rmssd-5m-mean-scheduled-0000-0800-local-v1",
+  );
   const parsed = parseCompanionHrvRmssdObservation(validObservation);
   const serialized = serializeCompanionHrvRmssdObservation(parsed);
 
@@ -67,8 +71,8 @@ test("companion HRV contract rejects timestamps, raw data, identifiers, and per-
 
 test("companion HRV contract enforces completed and accepted window bounds", () => {
   for (const invalid of [
-    { completedWindowCount: 47 },
-    { completedWindowCount: 193 },
+    { completedWindowCount: 83 },
+    { completedWindowCount: 109 },
     { acceptedWindowCount: 47 },
     { acceptedWindowCount: 97 },
     { acceptedWindowCount: 48, completedWindowCount: 97 },
@@ -79,10 +83,25 @@ test("companion HRV contract enforces completed and accepted window bounds", () 
     }));
   }
 
-  assert.doesNotThrow(() => parseCompanionHrvRmssdObservation({
+  for (const [completedWindowCount, acceptedWindowCount] of [
+    [84, 48],
+    [90, 48],
+    [96, 48],
+    [102, 51],
+    [108, 54],
+  ] as const) {
+    assert.doesNotThrow(() => parseCompanionHrvRmssdObservation({
+      ...validObservation,
+      acceptedWindowCount,
+      completedWindowCount,
+    }));
+  }
+});
+
+test("companion HRV contract rejects the retired user-bounded method", () => {
+  assert.throws(() => parseCompanionHrvRmssdObservation({
     ...validObservation,
-    acceptedWindowCount: 48,
-    completedWindowCount: 96,
+    methodVersion: "prv-rmssd-5m-mean-v1",
   }));
 });
 
