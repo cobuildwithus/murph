@@ -504,10 +504,13 @@ export function buildHostedExecutionMemberChannelsUpdatedWake(input: {
 }
 
 export function buildHostedExecutionMemberPreferencesUpdatedWake(input: {
+  causalOrigin?: "event" | "turn";
   eventId: string;
   memberId: string;
   occurredAt: string;
+  preferenceCausalSeq?: string;
   preferences: HostedExecutionMemberPreferences;
+  requestedFields?: Array<"tone" | "voice">;
 }): HostedExecutionMemberPreferencesUpdatedWake {
   return {
     ...buildHostedExecutionMemberOwnedWakeBase({
@@ -516,7 +519,14 @@ export function buildHostedExecutionMemberPreferencesUpdatedWake(input: {
       memberId: input.memberId,
       occurredAt: input.occurredAt,
     }),
+    ...(input.causalOrigin ? { causalOrigin: input.causalOrigin } : {}),
+    ...(input.preferenceCausalSeq
+      ? { preferenceCausalSeq: input.preferenceCausalSeq }
+      : {}),
     preferences: { ...input.preferences },
+    ...(input.requestedFields
+      ? { requestedFields: [...input.requestedFields] }
+      : {}),
   };
 }
 

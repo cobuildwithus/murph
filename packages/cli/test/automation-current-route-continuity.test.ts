@@ -7,6 +7,7 @@ import path from "node:path";
 import { Cli } from "incur";
 import { afterEach, test, vi } from "vitest";
 
+import { MURPH_ONBOARDING_FOLLOWUP_AUTOMATION } from "@murphai/assistant-engine";
 import {
   HOSTED_CLI_BRIDGE_ASSISTANT_CURRENT_ROUTE_PATH,
   HOSTED_CLI_BRIDGE_TOKEN_ENV,
@@ -299,17 +300,17 @@ test("a verified direct Linq automation follows participant-to-chat materializat
   }
 });
 
-test("the managed onboarding follow-up materializes from its signup route into the current chat", async () => {
+test("the managed onboarding follow-up materializes its signup route into the current direct chat", async () => {
   const { parentRoot, vaultRoot } = await createTempVaultContext(
-    "murph-automation-direct-route-materialization-",
+    "murph-automation-onboarding-route-materialization-",
   );
   const bridge = await startAssistantCurrentRouteBridgeStub({
     response: {
       route: {
         channel: "linq",
         deliveryTarget: "linq_chat_real",
-        identityId: "hid_direct_identity",
-        participantId: "hid_direct_participant",
+        identityId: "hid_current_line_identity",
+        participantId: "hid_current_line_participant",
         threadId: "hid_materialized_thread",
         threadIsDirect: true,
       },
@@ -319,7 +320,7 @@ test("the managed onboarding follow-up materializes from its signup route into t
 
   try {
     const cli = Cli.create("vault-cli", {
-      description: "automation direct route materialization test cli",
+      description: "automation onboarding route materialization test cli",
       version: "0.0.0-test",
     });
     registerAutomationCommands(cli);
@@ -327,40 +328,34 @@ test("the managed onboarding follow-up materializes from its signup route into t
     vi.stubEnv(HOSTED_CLI_BRIDGE_TOKEN_ENV, "test-bridge-token");
     vi.stubEnv(HOSTED_CLI_BRIDGE_URL_ENV, bridge.url);
 
-    const seedOnboardingFollowup = (
-      tags: string[],
-      identityId = "hid_direct_identity",
-    ) => upsertAutomation({
-      continuityPolicy: "preserve",
-      instructions: "Send the onboarding follow-up.",
+    await upsertAutomation({
+      continuityPolicy: MURPH_ONBOARDING_FOLLOWUP_AUTOMATION.continuityPolicy,
+      instructions: MURPH_ONBOARDING_FOLLOWUP_AUTOMATION.instructions,
       route: {
         channel: "linq",
-        deliverySource: {
-          kind: "linq",
-          fromPhoneNumber: "+15550001111",
-        },
+        deliverySource: null,
         deliveryTarget: null,
-        identityId,
+        identityId: "hid_signup_contact_identity",
         participantId: "hid_signup_contact_participant",
         threadId: null,
-        threadIsDirect: true,
       },
-      schedule: { kind: "cron", expression: "0 7 * * *" },
-      slug: "finish-onboarding-followup",
+      schedule: MURPH_ONBOARDING_FOLLOWUP_AUTOMATION.schedule,
+      slug: MURPH_ONBOARDING_FOLLOWUP_AUTOMATION.slug,
       status: "active",
-      tags,
-      title: "Finish onboarding",
+      summary: MURPH_ONBOARDING_FOLLOWUP_AUTOMATION.summary,
+      tags: [...MURPH_ONBOARDING_FOLLOWUP_AUTOMATION.tags],
+      title: MURPH_ONBOARDING_FOLLOWUP_AUTOMATION.title,
       vaultRoot,
     });
 
-    const saveArgs = [
+    const saved = await runInProcessJsonCli(cli, [
       "automation",
       "save",
-      "Finish onboarding",
+      MURPH_ONBOARDING_FOLLOWUP_AUTOMATION.title,
       "--slug",
-      "finish-onboarding-followup",
+      MURPH_ONBOARDING_FOLLOWUP_AUTOMATION.slug,
       "--instructions",
-      "Send the onboarding follow-up soon.",
+      MURPH_ONBOARDING_FOLLOWUP_AUTOMATION.instructions,
       "--schedule-kind",
       "every",
       "--schedule-every-ms",
@@ -371,21 +366,7 @@ test("the managed onboarding follow-up materializes from its signup route into t
       "linq_chat_real",
       "--vault",
       vaultRoot,
-    ];
-    await seedOnboardingFollowup(["murph-managed"]);
-    const missingTag = await runInProcessJsonCli(cli, saveArgs);
-    assert.equal(missingTag.envelope.ok, false);
-
-    const managedTags = [
-      "murph-managed",
-      "murph-managed:onboarding-followup",
-    ];
-    await seedOnboardingFollowup(managedTags, "hid_other_line_identity");
-    const wrongIdentity = await runInProcessJsonCli(cli, saveArgs);
-    assert.equal(wrongIdentity.envelope.ok, false);
-
-    await seedOnboardingFollowup(managedTags);
-    const saved = await runInProcessJsonCli(cli, saveArgs);
+    ]);
     assert.equal(
       saved.envelope.ok,
       true,
@@ -393,19 +374,11 @@ test("the managed onboarding follow-up materializes from its signup route into t
     );
 
     const shown = await runInProcessJsonCli<{
-      automation: {
-        route: {
-          deliveryTarget: string | null;
-          identityId: string | null;
-          participantId: string | null;
-          threadId: string | null;
-          threadIsDirect?: boolean | null;
-        };
-      } | null;
+      automation: { route: Record<string, unknown> } | null;
     }>(cli, [
       "automation",
       "show",
-      "finish-onboarding-followup",
+      MURPH_ONBOARDING_FOLLOWUP_AUTOMATION.slug,
       "--vault",
       vaultRoot,
     ]);
@@ -414,8 +387,8 @@ test("the managed onboarding follow-up materializes from its signup route into t
       channel: "linq",
       deliverySource: null,
       deliveryTarget: "linq_chat_real",
-      identityId: "hid_direct_identity",
-      participantId: "hid_direct_participant",
+      identityId: "hid_current_line_identity",
+      participantId: "hid_current_line_participant",
       threadId: "hid_materialized_thread",
       threadIsDirect: true,
     });

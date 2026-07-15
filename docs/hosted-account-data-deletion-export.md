@@ -1,6 +1,6 @@
 # Hosted account data deletion and vault export
 
-Last verified: 2026-06-24
+Last verified: 2026-07-10
 
 ## Purpose
 
@@ -106,6 +106,11 @@ The Settings vault export does not include:
 | `prisma.device_oauth_session` | Live delete | Metadata/counts | Deletes pending provider OAuth state. |
 | `prisma.device_agent_session` | Live delete | Metadata/counts | Deletes local agent bearer-token hashes and agent session metadata. |
 | `prisma.device_browser_assertion_nonce` | Live delete | Metadata/counts | Deletes outstanding browser assertion nonces. |
+| `prisma.clinical_record_connect_intent` | Live delete | Metadata/counts | Deletes short-lived member-bound Clinical Records claims; raw claims are never stored or exported. |
+| `prisma.clinical_record_oauth_session` | Live delete | Not exported secret | Deletes SMART state rows and encrypted PKCE verifiers; state, verifier, endpoint, and scope details are omitted from export. |
+| `prisma.clinical_record_connection` | Live delete | Metadata/counts | Deletes encrypted patient context and access/refresh tokens. Canonical imported records remain governed by the vault export/deletion path. |
+| `prisma.clinical_record_retrieval_run` | Live delete | Metadata/counts | Deletes generation/status/count metadata; raw FHIR bodies are never stored in this table. |
+| `prisma.clinical_record_retrieval_request` | Live delete | Not exported secret | Deletes run-scoped request idempotency fingerprints and byte accounting before runs and connections; provider page URLs are not persisted here. |
 | `prisma.hosted_web_internal_request_nonce` | Live delete | Metadata/counts | Deletes per-user anti-replay nonces. |
 | `prisma.device_webhook_trace` | Live delete | Documented only | Deletes webhook traces for provider accounts linked to the member's device connections when linkage is available. User export omits trace rows and trace counts until the minimized webhook trace model has a safe user linkage. |
 | `kernel.managed_auth_connections` | Live delete | Not exported secret | Deletes durable domain connections, saved credentials, and active login workflows before the member profile. Murph does not persist connection ids or credential values locally. |

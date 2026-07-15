@@ -210,9 +210,10 @@ export type ExperimentLifecyclePreconditionResult =
  * no longer eligible for a final review (status, early stop, opt-out)
  * returns `skip` so the cron consumes the at-occurrence as skipped — no
  * outcome write, no LLM invocation, no retry. When the run is eligible,
- * persists the deterministic outcome before the LLM notification turn so a
- * transient storage failure throws (→ retryable cron failure) rather than
- * being swallowed by an LLM skip that would consume the one-shot.
+ * retires the activity nudge and persists the deterministic outcome before
+ * the LLM notification turn so a transient write failure throws (→ retryable
+ * cron failure) rather than being swallowed by an LLM skip that would consume
+ * the one-shot.
  *
  * Persistence is pinned to runPlan.interventionEnd as `asOf` so the
  * outcome's ID and filename are stable across cron retries that may cross a
@@ -316,13 +317,13 @@ export async function runExperimentLifecycleOutcomePrecondition(input: {
     }
   }
 
+  await archiveActivityNudge()
   await services.core.writeExperimentOutcome({
     vault: input.vault,
     lookup: experimentLookup,
     asOf: interventionEnd,
     requestId: null,
   })
-  await archiveActivityNudge()
 
   return { kind: 'continue' }
 }
@@ -380,9 +381,7 @@ async function archiveExperimentActivityNudgeAutomation(input: {
     if (isVaultError(error) && error.code === 'VAULT_AUTOMATION_MISSING') {
       return
     }
-    // Deliberate best-effort cleanup: final-results delivery outranks nudge
-    // cleanup, and the nudge's own due checks remain the later backstop.
-    void error
+    throw error
   }
 }
 

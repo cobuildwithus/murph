@@ -889,6 +889,10 @@ describe('assistant protocol index planning', () => {
     })
     const sharedInput = {
       executionContext: null,
+      hostedToolContext: {
+        ...createHostedToolContext(),
+        personalizationTool: { request: vi.fn() },
+      },
       profile: {
         promptProfile: 'conversation',
         threadScope: 'session-thread',
@@ -922,8 +926,14 @@ describe('assistant protocol index planning', () => {
     expect(unauthorized.dynamicTools.map((tool) => tool.name)).not.toContain(
       'assistant_style',
     )
+    expect(unauthorized.dynamicTools.map((tool) => tool.name)).not.toContain(
+      'personalization',
+    )
     expect(authorized.dynamicTools.map((tool) => tool.name)).toContain(
       'assistant_style',
+    )
+    expect(authorized.dynamicTools.map((tool) => tool.name)).toContain(
+      'personalization',
     )
   })
 

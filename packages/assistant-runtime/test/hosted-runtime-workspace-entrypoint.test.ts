@@ -72,8 +72,8 @@ import {
   HOSTED_CLI_BRIDGE_ASSISTANT_CURRENT_ROUTE_PATH,
   HOSTED_CLI_BRIDGE_ROUTE_GRANT_HEADER,
   HOSTED_CLI_BRIDGE_DEVICE_ACCOUNT_LIST_PATH,
-  HOSTED_CLI_BRIDGE_REQUEST_TIMEOUT_MS,
   HOSTED_CLI_BRIDGE_TOKEN_ENV,
+  HOSTED_CLI_BRIDGE_TIMEOUT_MS_ENV,
   HOSTED_CLI_BRIDGE_URL_ENV,
 } from "@murphai/hosted-execution/cli-runtime-bridge";
 import type {
@@ -10842,6 +10842,7 @@ describe("hosted workspace runtime entrypoint", () => {
     const releaseUsageRecord = createDeferred<void>();
     const deviceSnapshotStarted = createDeferred<void>();
     const releaseDeviceSnapshot = createDeferred<void>();
+    let bridgeRequestTimeoutMs: number | null = null;
     let resultPromise: ReturnType<typeof runHostedWorkspaceRuntimeJobInProcess> | null = null;
     let resultSettled = false;
 
@@ -10859,6 +10860,7 @@ describe("hosted workspace runtime entrypoint", () => {
       });
       resultPromise = runHostedWorkspaceRuntimeJobInProcess(
         createWorkspaceRuntimeJobInput({
+          commitTimeoutMs: 50,
           request: {
             attemptId: "attempt_synthetic_deferred_usage_bridge_drain_failure",
             idleCheckpointDelayMs: 1,
@@ -10926,8 +10928,12 @@ describe("hosted workspace runtime entrypoint", () => {
             events.push("assistant.phase");
             const bridgeUrl = phaseInput.runtimeEnv[HOSTED_CLI_BRIDGE_URL_ENV];
             const bridgeToken = phaseInput.runtimeEnv[HOSTED_CLI_BRIDGE_TOKEN_ENV];
+            bridgeRequestTimeoutMs = Number(
+              phaseInput.runtimeEnv[HOSTED_CLI_BRIDGE_TIMEOUT_MS_ENV],
+            );
             assert.ok(bridgeUrl);
             assert.ok(bridgeToken);
+            assert.equal(bridgeRequestTimeoutMs, 5_050);
             const bridgeRequest = fetch(
               new URL(HOSTED_CLI_BRIDGE_DEVICE_ACCOUNT_LIST_PATH, bridgeUrl),
               {
@@ -10971,8 +10977,9 @@ describe("hosted workspace runtime entrypoint", () => {
         1_000,
         () => "Deferred usage recording did not start before CLI bridge drain failure.",
       );
+      assert.notEqual(bridgeRequestTimeoutMs, null);
       await new Promise((resolve) =>
-        setTimeout(resolve, HOSTED_CLI_BRIDGE_REQUEST_TIMEOUT_MS + 50)
+        setTimeout(resolve, (bridgeRequestTimeoutMs ?? 0) + 50)
       );
       assert.equal(events.includes("usage.record:done"), false);
       assert.equal(resultSettled, false);
@@ -20432,7 +20439,7 @@ describe("hosted workspace runtime entrypoint", () => {
     }
   });
 
-  test("installs preference causal binding before the personality exposure gate is enabled", async () => {
+  test("binds exactly one stored provider input id and clears it after the attempt", async () => {
     const vaultRoot = await mkdtemp(path.join(tmpdir(), "murph-workspace-entrypoint-"));
 
     try {
@@ -20453,25 +20460,47 @@ describe("hosted workspace runtime entrypoint", () => {
         }),
         async runAssistantPhase(input) {
           assert.equal(typeof input.beforeProviderAcceptedInputs, "function");
-          assert.equal(input.currentAssistantPreferenceCausalSeq?.(), null);
+          assert.equal(input.currentAssistantPersonalizationInputId?.(), null);
           const item = createMailboxItem({
             id: "mailbox_item_preference_causal_binding",
             laneSeq: "41",
           });
           const assistantInputId = await stageAssistantInputEventForMailboxItem({
-            causalSeq: "41",
+            causalSeq: "999",
             item,
             vaultRoot,
           });
+          const emptyRelease = await input.beforeProviderAcceptedInputs?.({
+            acceptedInputs: [],
+          });
+          assert.equal(input.currentAssistantPersonalizationInputId?.(), null);
+          await emptyRelease?.();
+          const ambiguousRelease = await input.beforeProviderAcceptedInputs?.({
+            acceptedInputs: [
+              {
+                id: assistantInputId,
+                source: "assistant-input",
+              },
+              {
+                id: "ain_22222222222222222222222222222222",
+                source: "assistant-input",
+              },
+            ],
+          });
+          assert.equal(input.currentAssistantPersonalizationInputId?.(), null);
+          await ambiguousRelease?.();
           const release = await input.beforeProviderAcceptedInputs?.({
             acceptedInputs: [{
               id: assistantInputId,
               source: "assistant-input",
             }],
           });
-          assert.equal(input.currentAssistantPreferenceCausalSeq?.(), "41");
+          assert.equal(
+            input.currentAssistantPersonalizationInputId?.(),
+            assistantInputId,
+          );
           await release?.();
-          assert.equal(input.currentAssistantPreferenceCausalSeq?.(), null);
+          assert.equal(input.currentAssistantPersonalizationInputId?.(), null);
           return { progressed: false };
         },
         vaultRoot,
@@ -21095,6 +21124,7 @@ describe("hosted workspace runtime entrypoint", () => {
       await initializeVault({ createdAt: TEST_NOW, vaultRoot });
 
       const firstPhaseFinished = createDeferred<void>();
+      const secondPhaseFinished = createDeferred<void>();
       let assistantPhaseCalls = 0;
       const platform = createPlatform({
         deviceSyncPort,

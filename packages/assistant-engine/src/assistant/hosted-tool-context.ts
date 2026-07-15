@@ -22,6 +22,7 @@ import type {
   AssistantHostedAssistantConfigurationTool,
   AssistantHostedGroupTool,
   AssistantHostedNewsletterTool,
+  AssistantHostedPersonalizationTool,
   AssistantHostedPlanUsageTool,
   AssistantPhoneCallPort,
 } from './execution-context.js'
@@ -70,6 +71,7 @@ export interface AssistantHostedToolContext {
   readonly familyPlanTool?: AssistantHostedFamilyPlanTool | null
   readonly groupTool?: AssistantHostedGroupTool | null
   readonly newsletterTool?: AssistantHostedNewsletterTool | null
+  readonly personalizationTool?: AssistantHostedPersonalizationTool | null
   readonly planUsageTool?: AssistantHostedPlanUsageTool | null
   readonly phoneCalls?: AssistantPhoneCallPort | null
   currentHostedDeliveryContext(): AssistantHostedDeliveryContext | null
@@ -80,7 +82,7 @@ export interface AssistantHostedToolContext {
   currentAssistantConfigurationApprovalScope?():
     AssistantHostedAssistantConfigurationApprovalScope | null
   currentHostedMailboxItemIds(): readonly string[]
-  currentAssistantPreferenceCausalSeq?(): string | null
+  currentAssistantPersonalizationInputId?(): string | null
   currentScheduledAutomationAuthority?(): HostedRuntimeNewsletterScheduledAuthority | null
   closeNewsletterCapability?(): void
   recordNewsletterSendResult?(
@@ -104,9 +106,10 @@ export function createAssistantHostedToolContext(input: {
   familyPlanTool?: AssistantHostedFamilyPlanTool | null
   groupTool?: AssistantHostedGroupTool | null
   newsletterTool?: AssistantHostedNewsletterTool | null
+  personalizationTool?: AssistantHostedPersonalizationTool | null
   planUsageTool?: AssistantHostedPlanUsageTool | null
   computerToolsAvailable?: boolean
-  getAssistantPreferenceCausalSeq?: () => string | null
+  getAssistantPersonalizationInputId?: () => string | null
   getDeliveryContext?: () => AssistantHostedToolDeliveryContext
   getUserActionAcceptedInputIds?: () => readonly string[]
   messageInput: AssistantMessageInput
@@ -155,11 +158,12 @@ export function createAssistantHostedToolContext(input: {
     familyPlanTool: input.familyPlanTool ?? null,
     groupTool: input.groupTool ?? null,
     newsletterTool,
+    personalizationTool: input.personalizationTool ?? null,
     planUsageTool: input.planUsageTool ?? null,
     phoneCalls: input.phoneCalls ?? null,
     computerToolsAvailable: input.computerToolsAvailable === true,
-    currentAssistantPreferenceCausalSeq: () =>
-      input.getAssistantPreferenceCausalSeq?.() ?? null,
+    currentAssistantPersonalizationInputId: () =>
+      input.getAssistantPersonalizationInputId?.() ?? null,
     currentAssistantTarget: () => {
       const session = readDeliveryContext().session
       return {

@@ -9,6 +9,7 @@ import {
   HOSTED_CLI_BRIDGE_DEVICE_CONNECT_LINK_PATH,
   HOSTED_CLI_BRIDGE_REQUEST_TIMEOUT_MS,
   HOSTED_CLI_BRIDGE_TOKEN_ENV,
+  HOSTED_CLI_BRIDGE_TIMEOUT_MS_ENV,
   HOSTED_CLI_BRIDGE_URL_ENV,
   parseHostedCliAssistantCurrentRouteRequest,
   parseHostedCliDeviceAccountListRequest,
@@ -36,6 +37,13 @@ export type HostedCliRuntimeBridgeCurrentDeliveryRouteSource =
   | undefined
   | (() => HostedCliAssistantCurrentRoute | null | undefined);
 
+export type HostedCliRuntimeBridgeEnv = Record<
+  | typeof HOSTED_CLI_BRIDGE_TIMEOUT_MS_ENV
+  | typeof HOSTED_CLI_BRIDGE_TOKEN_ENV
+  | typeof HOSTED_CLI_BRIDGE_URL_ENV,
+  string
+>;
+
 export type HostedCliRuntimeBridgeCurrentRouteGrantSource =
   | string
   | null
@@ -44,12 +52,11 @@ export type HostedCliRuntimeBridgeCurrentRouteGrantSource =
 
 export interface HostedCliRuntimeBridge {
   consumeOffInvocationViolation(): boolean;
-  env: Record<typeof HOSTED_CLI_BRIDGE_URL_ENV | typeof HOSTED_CLI_BRIDGE_TOKEN_ENV, string>;
   readonly lastOffInvocationAuthenticatedRequestAt: string | null;
   readonly offInvocationAuthenticatedRequestCount: number;
   runWithInvocation<T>(
     input: HostedCliRuntimeBridgeInvocationInput,
-    operation: () => Promise<T>,
+    operation: (env: HostedCliRuntimeBridgeEnv) => Promise<T>,
   ): Promise<T>;
   stop(): Promise<void>;
 }
@@ -59,6 +66,7 @@ export interface HostedCliRuntimeBridgeInvocationInput {
   currentRouteGrant?: HostedCliRuntimeBridgeCurrentRouteGrantSource;
   deviceSyncPort?: HostedRuntimeDeviceSyncPort | null;
   messagingReturnTarget?: HostedCliRuntimeBridgeMessagingReturnTargetSource;
+  requestTimeoutMs?: number;
   signal?: AbortSignal | null;
 }
 
@@ -69,7 +77,9 @@ interface HostedCliRuntimeBridgeActiveInvocation {
   deviceSyncPort: HostedRuntimeDeviceSyncPort | null;
   inFlight: Set<Promise<unknown>>;
   messagingReturnTarget: HostedCliRuntimeBridgeMessagingReturnTargetSource;
+  requestTimeoutMs: number;
   signal: AbortSignal | null;
+  token: string;
 }
 
 let hostedCliRuntimeBridgePromise: Promise<HostedCliRuntimeBridge> | null = null;
@@ -110,7 +120,6 @@ export async function consumeHostedCliRuntimeBridgeOffInvocationViolation(): Pro
 }
 
 async function startHostedCliRuntimeBridgeServer(): Promise<HostedCliRuntimeBridge> {
-  const token = randomBytes(32).toString("base64url");
   const sockets = new Set<Socket>();
   let active: HostedCliRuntimeBridgeActiveInvocation | null = null;
   let offInvocationAuthenticatedRequestCount = 0;
@@ -124,14 +133,18 @@ async function startHostedCliRuntimeBridgeServer(): Promise<HostedCliRuntimeBrid
       },
       request,
       response,
-      token,
+      getExpectedTimeoutMs: () =>
+        active?.requestTimeoutMs ?? HOSTED_CLI_BRIDGE_REQUEST_TIMEOUT_MS,
     });
   });
   server.on("connection", (socket) => {
     sockets.add(socket);
-    socket.setTimeout(HOSTED_CLI_BRIDGE_REQUEST_TIMEOUT_MS, () => {
-      socket.destroy();
-    });
+    socket.setTimeout(
+      active?.requestTimeoutMs ?? HOSTED_CLI_BRIDGE_REQUEST_TIMEOUT_MS,
+      () => {
+        socket.destroy();
+      },
+    );
     socket.once("close", () => {
       sockets.delete(socket);
     });
@@ -158,10 +171,6 @@ async function startHostedCliRuntimeBridgeServer(): Promise<HostedCliRuntimeBrid
       lastOffInvocationAuthenticatedRequestAt = null;
       return pending;
     },
-    env: {
-      [HOSTED_CLI_BRIDGE_TOKEN_ENV]: token,
-      [HOSTED_CLI_BRIDGE_URL_ENV]: `http://127.0.0.1:${address.port}/`,
-    },
     get lastOffInvocationAuthenticatedRequestAt() {
       return lastOffInvocationAuthenticatedRequestAt;
     },
@@ -170,7 +179,7 @@ async function startHostedCliRuntimeBridgeServer(): Promise<HostedCliRuntimeBrid
     },
     async runWithInvocation<T>(
       input: HostedCliRuntimeBridgeInvocationInput,
-      operation: () => Promise<T>,
+      operation: (env: HostedCliRuntimeBridgeEnv) => Promise<T>,
     ): Promise<T> {
       if (active) {
         throw new TypeError("Hosted CLI bridge already has an active invocation.");
@@ -180,6 +189,10 @@ async function startHostedCliRuntimeBridgeServer(): Promise<HostedCliRuntimeBrid
           "Hosted CLI bridge has a pending authenticated off-invocation request.",
         );
       }
+      const requestTimeoutMs = resolveHostedCliBridgeRequestTimeoutMs(
+        input.requestTimeoutMs,
+      );
+      const token = randomBytes(32).toString("base64url");
       const invocation: HostedCliRuntimeBridgeActiveInvocation = {
         closing: false,
         currentDeliveryRoute: input.currentDeliveryRoute ?? null,
@@ -187,17 +200,23 @@ async function startHostedCliRuntimeBridgeServer(): Promise<HostedCliRuntimeBrid
         deviceSyncPort: input.deviceSyncPort ?? null,
         inFlight: new Set(),
         messagingReturnTarget: input.messagingReturnTarget,
+        requestTimeoutMs,
         signal: input.signal ?? null,
+        token,
       };
       active = invocation;
       try {
-        return await operation();
+        return await operation({
+          [HOSTED_CLI_BRIDGE_TOKEN_ENV]: token,
+          [HOSTED_CLI_BRIDGE_TIMEOUT_MS_ENV]: String(requestTimeoutMs),
+          [HOSTED_CLI_BRIDGE_URL_ENV]: `http://127.0.0.1:${address.port}/`,
+        });
       } finally {
         invocation.closing = true;
         try {
           await waitForInFlightBridgeRequests(
             invocation,
-            HOSTED_CLI_BRIDGE_REQUEST_TIMEOUT_MS,
+            requestTimeoutMs,
           );
         } finally {
           if (active === invocation) {
@@ -219,14 +238,14 @@ async function startHostedCliRuntimeBridgeServer(): Promise<HostedCliRuntimeBrid
 }
 
 async function handleHostedCliBridgeRequest(input: {
+  getExpectedTimeoutMs: () => number;
   getActive: () => HostedCliRuntimeBridgeActiveInvocation | null;
   recordOffInvocationAuthenticatedRequest: () => void;
   request: IncomingMessage;
   response: ServerResponse;
-  token: string;
 }): Promise<void> {
   let requestTimedOut = false;
-  input.request.setTimeout(HOSTED_CLI_BRIDGE_REQUEST_TIMEOUT_MS, () => {
+  input.request.setTimeout(input.getExpectedTimeoutMs(), () => {
     requestTimedOut = true;
     writeHostedCliBridgeError(
       input.response,
@@ -263,7 +282,8 @@ async function handleHostedCliBridgeRequest(input: {
       return;
     }
 
-    if (!isHostedCliBridgeAuthorized(input.request, input.token)) {
+    const active = input.getActive();
+    if (!active || !isHostedCliBridgeAuthorized(input.request, active.token)) {
       writeHostedCliBridgeError(
         input.response,
         401,
@@ -273,8 +293,11 @@ async function handleHostedCliBridgeRequest(input: {
       return;
     }
 
-    const active = input.getActive();
-    if (!active || active.closing || active.signal?.aborted) {
+    if (
+      active !== input.getActive()
+      || active.closing
+      || active.signal?.aborted
+    ) {
       input.recordOffInvocationAuthenticatedRequest();
       writeHostedCliBridgeError(
         input.response,
@@ -287,6 +310,10 @@ async function handleHostedCliBridgeRequest(input: {
 
     const requestWork = handleActiveHostedCliBridgeRequest({
       active,
+      isActive: () => {
+        const current = input.getActive();
+        return current === active && !current.closing && !current.signal?.aborted;
+      },
       path,
       request: input.request,
       response: input.response,
@@ -312,11 +339,21 @@ async function handleHostedCliBridgeRequest(input: {
 
 async function handleActiveHostedCliBridgeRequest(input: {
   active: HostedCliRuntimeBridgeActiveInvocation;
+  isActive: () => boolean;
   path: string;
   request: IncomingMessage;
   response: ServerResponse;
 }): Promise<void> {
   const body = await readHostedCliBridgeJsonBody(input.request);
+  if (!input.isActive()) {
+    writeHostedCliBridgeError(
+      input.response,
+      503,
+      "HOSTED_CLI_BRIDGE_UNAVAILABLE",
+      "Hosted CLI bridge has no active invocation.",
+    );
+    return;
+  }
 
   if (input.path === HOSTED_CLI_BRIDGE_ASSISTANT_CURRENT_ROUTE_PATH) {
     if (!isHostedCliBridgeCurrentRouteGrantAuthorized(
@@ -427,6 +464,16 @@ async function waitForInFlightBridgeRequests(
   if (result === "timed-out") {
     throw new Error("Hosted CLI bridge in-flight request drain timed out.");
   }
+}
+
+function resolveHostedCliBridgeRequestTimeoutMs(value: number | undefined): number {
+  if (value === undefined) {
+    return HOSTED_CLI_BRIDGE_REQUEST_TIMEOUT_MS;
+  }
+  if (!Number.isSafeInteger(value) || value <= 0) {
+    throw new TypeError("Hosted CLI bridge request timeout must be a positive integer.");
+  }
+  return value;
 }
 
 type HostedDeviceSyncSnapshotEntry =

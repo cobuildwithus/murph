@@ -748,6 +748,40 @@ describe("runHostedWorkspaceAssistantPhase runtime logs", () => {
     );
   });
 
+  it("exposes hosted personalization through the native dynamic-tool context", async () => {
+    const assistantPersonalizationToolPort = {
+      request: vi.fn(),
+      resolvePreferenceCausalSeq: vi.fn(),
+    };
+    const currentAssistantPersonalizationInputId = () =>
+      "ain_33333333333333333333333333333333";
+
+    await runHostedWorkspaceAssistantPhase(createPhaseInput({
+      currentAssistantPersonalizationInputId,
+      runtimeAssistantPersonalizationToolPort: assistantPersonalizationToolPort,
+    }));
+
+    expect(mocks.hydrateHostedExecutionDefaultTarget).toHaveBeenCalledWith(
+      {
+        hosted: expect.objectContaining({
+          currentAssistantPersonalizationInputId,
+          personalizationTool: assistantPersonalizationToolPort,
+        }),
+      },
+      expect.any(Object),
+    );
+    expect(mocks.runHostedAssistantAutomationLane).toHaveBeenCalledWith(
+      expect.objectContaining({
+        executionContext: expect.objectContaining({
+          hosted: expect.objectContaining({
+            currentAssistantPersonalizationInputId,
+            personalizationTool: assistantPersonalizationToolPort,
+          }),
+        }),
+      }),
+    );
+  });
+
   it("resolves scheduled Linq routes through egress authority and fails closed", async () => {
     const signal = new AbortController().signal;
     const assertLinqRecentInboundEngagement = vi.fn()
@@ -6234,6 +6268,7 @@ describe("runHostedWorkspaceAssistantPhase runtime logs", () => {
       if (event?.sourceRef.kind !== "hosted-mailbox") {
         throw new Error("Expected hosted-mailbox terminal failure input.");
       }
+      expect(event.sourceRef.causalSeq).toBeUndefined();
       expect(event.sourceRef.eventId).toBe(
         `outbox-delivery-failed:${firstDeliveryEffect.effectId}`,
       );
@@ -12753,6 +12788,8 @@ function createPhaseInput(input: {
     HostedWorkspaceRuntimeAssistantPhaseInput["initialMailboxImport"]["importResult"]["assistantInputRecords"]
   >;
   conversationImportedCount?: number;
+  currentAssistantPersonalizationInputId?:
+    HostedWorkspaceRuntimeAssistantPhaseInput["currentAssistantPersonalizationInputId"];
   currentDeliveryRouteScope?: HostedWorkspaceRuntimeAssistantPhaseInput["currentDeliveryRouteScope"];
   deviceSyncWorkspaceWakeHandled?: HostedWorkspaceRuntimeAssistantPhaseInput["deviceSyncWorkspaceWakeHandled"];
   importedCount?: number;
@@ -12784,6 +12821,9 @@ function createPhaseInput(input: {
   runtimeActionApprovalPort?: NonNullable<
     HostedWorkspaceRuntimeAssistantPhaseInput["runtime"]["platform"]["actionApprovalPort"]
   >;
+  runtimeAssistantPersonalizationToolPort?: NonNullable<
+    HostedWorkspaceRuntimeAssistantPhaseInput["runtime"]["platform"]["assistantPersonalizationToolPort"]
+  >;
   runtimeAssistantConfigurationToolPort?: RuntimeAssistantConfigurationToolPort;
   runtimeUsageRecordPort?: RuntimeUsageRecordPort;
   runtimeUserEnv?: Record<string, string>;
@@ -12793,6 +12833,8 @@ function createPhaseInput(input: {
   const assistantInputIds = input.assistantInputIds
     ?? (input.importedCount ? ["ain_00000000000000000000000000000001"] : []);
   return {
+    currentAssistantPersonalizationInputId:
+      input.currentAssistantPersonalizationInputId,
     deviceSyncWorkspaceWakeHandled: input.deviceSyncWorkspaceWakeHandled,
     initialAssistantInputBatch: input.initialAssistantInputBatch,
     latestAssistantInputBatch: input.latestAssistantInputBatch,
@@ -12905,6 +12947,12 @@ function createPhaseInput(input: {
         ...(input.runtimeDeviceSyncPort ? { deviceSyncPort: input.runtimeDeviceSyncPort } : {}),
         ...(input.runtimeActionApprovalPort
           ? { actionApprovalPort: input.runtimeActionApprovalPort }
+          : {}),
+        ...(input.runtimeAssistantPersonalizationToolPort
+          ? {
+              assistantPersonalizationToolPort:
+                input.runtimeAssistantPersonalizationToolPort,
+            }
           : {}),
         ...(input.runtimeAssistantConfigurationToolPort
           ? {

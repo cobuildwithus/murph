@@ -301,10 +301,6 @@ type HostedContainerRuntimeWakeNotification = {
   orchestration?: HostedRuntimeOrchestrationLatencyDiagnostics | null;
 };
 
-// The only remaining cleanup is the off-invocation warm-Codex stop, and it
-// reports only failure; success leaves the status untouched.
-type HostedContainerCleanupStatus = "not_run" | "failed";
-
 export async function startHostedContainerEntrypoint(input: {
   port?: number;
   runtime?: HostedContainerRuntimeOptions;
@@ -316,7 +312,6 @@ export async function startHostedContainerEntrypoint(input: {
   );
   let activeHostedRunnerJobCount = 0;
   let hostedContainerPoisoned = false;
-  let lastCleanupStatus: HostedContainerCleanupStatus = "not_run";
   let activeRuntimeWake: ((notification?: HostedContainerRuntimeWakeNotification) => boolean) | null = null;
   let activeRuntimeWakeAttemptId: string | null = null;
   let activeRuntimeWakeLeaseGeneration: string | null = null;
@@ -374,7 +369,6 @@ export async function startHostedContainerEntrypoint(input: {
           activeJobCount: activeHostedRunnerJobCount,
           hostedRuntimeArchitectureVersion:
             runtime.startupConfig.hostedRuntimeArchitectureVersion,
-          lastCleanupStatus,
           ok: true,
           poisoned: hostedContainerPoisoned || hostedContainerProcessFatalObserved,
           service: "cloudflare-hosted-runner-node",
@@ -856,6 +850,9 @@ export async function startHostedContainerEntrypoint(input: {
       });
 
       const result = await runHostedWorkspaceInvocationWithWarmCodexCleanup(job, runtime, {
+        onCleanupFailed() {
+          hostedContainerPoisoned = true;
+        },
         onRuntimeWakeReady(sendWake) {
           activeRuntimeWake = sendWake;
           activeRuntimeWakeAttemptId = job
@@ -893,10 +890,6 @@ export async function startHostedContainerEntrypoint(input: {
             phase: "wake.running",
             userId: null,
           });
-        },
-        onCleanupFailed() {
-          lastCleanupStatus = "failed";
-          hostedContainerPoisoned = true;
         },
         ...(coldNodeStartupMs === null ? {} : { nodeStartupMs: coldNodeStartupMs }),
         ...(dispatchMilestones ? { dispatch: dispatchMilestones } : {}),

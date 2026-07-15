@@ -1,5 +1,6 @@
 import { Cli, z } from "incur";
 
+import { MURPH_ONBOARDING_FOLLOWUP_AUTOMATION } from "@murphai/assistant-engine";
 import {
   HostedCliBridgeRequestError,
   isHostedRuntimeProcessEnv,
@@ -59,7 +60,6 @@ import {
 } from "@murphai/query";
 const automationSlugPattern = /^[a-z0-9]+(?:-[a-z0-9]+)*$/u;
 const dailyLocalTimePattern = /^(?:[01]\d|2[0-3]):[0-5]\d$/u;
-const managedOnboardingFollowupSlug = "finish-onboarding-followup";
 
 interface AutomationScheduleOptions {
   activityKind?: string;
@@ -338,8 +338,8 @@ async function authorizeExistingAutomationForUpsert(input: {
   for (const lookup of new Set(input.lookups.map((value) => value?.trim()).filter(Boolean))) {
     const existing = await showAutomation(input.vaultRoot, lookup as string);
     if (
-      existing &&
-      !isManagedOnboardingFollowupRouteMaterialization(
+      existing
+      && !isManagedOnboardingFollowupRouteMaterialization(
         existing,
         input.currentRouteContext,
       )
@@ -357,21 +357,19 @@ function isManagedOnboardingFollowupRouteMaterialization(
   currentRouteContext: AutomationCurrentRouteContext,
 ): boolean {
   const currentRoute = currentRouteContext.route;
-  const tags = new Set(existing.tags);
-  return currentRouteContext.hosted &&
-    currentRoute?.channel === "linq" &&
-    currentRoute.threadIsDirect === true &&
-    existing.slug === managedOnboardingFollowupSlug &&
-    tags.has("murph-managed") &&
-    tags.has("murph-managed:onboarding-followup") &&
-    existing.route.channel === "linq" &&
-    existing.route.deliverySource?.kind === "linq" &&
-    existing.route.deliveryTarget === null &&
-    existing.route.threadId === null &&
-    existing.route.threadIsDirect === true &&
-    typeof existing.route.identityId === "string" &&
-    existing.route.identityId === currentRoute.identityId &&
-    typeof existing.route.participantId === "string";
+  const existingTags = new Set(existing.tags);
+  return currentRouteContext.hosted
+    && currentRoute?.channel === "linq"
+    && currentRoute.threadIsDirect === true
+    && existing.slug === MURPH_ONBOARDING_FOLLOWUP_AUTOMATION.slug
+    && existingTags.has("murph-managed")
+    && existingTags.has("murph-managed:onboarding-followup")
+    && existing.route.channel === "linq"
+    && existing.route.deliveryTarget === null
+    && existing.route.threadId === null
+    && existing.route.threadIsDirect !== false
+    && typeof existing.route.identityId === "string"
+    && typeof existing.route.participantId === "string";
 }
 
 function assertAutomationRouteCanDeliver(
