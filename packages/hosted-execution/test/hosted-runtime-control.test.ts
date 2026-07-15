@@ -788,8 +788,14 @@ describe("hosted runtime control contracts", () => {
       userId: "member_123",
     };
 
-    expect(parseHostedMailboxItem(minimalItem)).toEqual(minimalItem);
-    expect(parseHostedMailboxItem(nullableItem)).toEqual(nullableItem);
+    expect(parseHostedMailboxItem(minimalItem)).toEqual({
+      ...minimalItem,
+      causalSeq: "0",
+    });
+    expect(parseHostedMailboxItem(nullableItem)).toEqual({
+      ...nullableItem,
+      causalSeq: "0",
+    });
     expect(parseHostedMailboxPayload(payload)).toEqual(payload);
     expect(parseHostedMailboxLaneCounterState({
       lane: "system",

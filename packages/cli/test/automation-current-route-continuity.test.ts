@@ -7,6 +7,7 @@ import path from "node:path";
 import { Cli } from "incur";
 import { afterEach, test, vi } from "vitest";
 
+import { MURPH_ONBOARDING_FOLLOWUP_AUTOMATION } from "@murphai/assistant-engine";
 import {
   HOSTED_CLI_BRIDGE_ASSISTANT_CURRENT_ROUTE_PATH,
   HOSTED_CLI_BRIDGE_TOKEN_ENV,
@@ -290,6 +291,104 @@ test("a verified direct Linq automation follows participant-to-chat materializat
       deliveryTarget: "linq_chat_real",
       identityId: "hid_direct_identity",
       participantId: "hid_direct_participant",
+      threadId: "hid_materialized_thread",
+      threadIsDirect: true,
+    });
+  } finally {
+    await bridge.stop();
+    await rm(parentRoot, { recursive: true, force: true });
+  }
+});
+
+test("the managed onboarding follow-up materializes its signup route into the current direct chat", async () => {
+  const { parentRoot, vaultRoot } = await createTempVaultContext(
+    "murph-automation-onboarding-route-materialization-",
+  );
+  const bridge = await startAssistantCurrentRouteBridgeStub({
+    response: {
+      route: {
+        channel: "linq",
+        deliveryTarget: "linq_chat_real",
+        identityId: "hid_current_line_identity",
+        participantId: "hid_current_line_participant",
+        threadId: "hid_materialized_thread",
+        threadIsDirect: true,
+      },
+    },
+    token: "test-bridge-token",
+  });
+
+  try {
+    const cli = Cli.create("vault-cli", {
+      description: "automation onboarding route materialization test cli",
+      version: "0.0.0-test",
+    });
+    registerAutomationCommands(cli);
+    vi.stubEnv(HOSTED_RUNTIME_PROCESS_ENV, "1");
+    vi.stubEnv(HOSTED_CLI_BRIDGE_TOKEN_ENV, "test-bridge-token");
+    vi.stubEnv(HOSTED_CLI_BRIDGE_URL_ENV, bridge.url);
+
+    await upsertAutomation({
+      continuityPolicy: MURPH_ONBOARDING_FOLLOWUP_AUTOMATION.continuityPolicy,
+      instructions: MURPH_ONBOARDING_FOLLOWUP_AUTOMATION.instructions,
+      route: {
+        channel: "linq",
+        deliverySource: null,
+        deliveryTarget: null,
+        identityId: "hid_signup_contact_identity",
+        participantId: "hid_signup_contact_participant",
+        threadId: null,
+      },
+      schedule: MURPH_ONBOARDING_FOLLOWUP_AUTOMATION.schedule,
+      slug: MURPH_ONBOARDING_FOLLOWUP_AUTOMATION.slug,
+      status: "active",
+      summary: MURPH_ONBOARDING_FOLLOWUP_AUTOMATION.summary,
+      tags: [...MURPH_ONBOARDING_FOLLOWUP_AUTOMATION.tags],
+      title: MURPH_ONBOARDING_FOLLOWUP_AUTOMATION.title,
+      vaultRoot,
+    });
+
+    const saved = await runInProcessJsonCli(cli, [
+      "automation",
+      "save",
+      MURPH_ONBOARDING_FOLLOWUP_AUTOMATION.title,
+      "--slug",
+      MURPH_ONBOARDING_FOLLOWUP_AUTOMATION.slug,
+      "--instructions",
+      MURPH_ONBOARDING_FOLLOWUP_AUTOMATION.instructions,
+      "--schedule-kind",
+      "every",
+      "--schedule-every-ms",
+      "150000",
+      "--channel",
+      "linq",
+      "--delivery-target",
+      "linq_chat_real",
+      "--vault",
+      vaultRoot,
+    ]);
+    assert.equal(
+      saved.envelope.ok,
+      true,
+      saved.envelope.ok ? undefined : JSON.stringify(saved.envelope.error),
+    );
+
+    const shown = await runInProcessJsonCli<{
+      automation: { route: Record<string, unknown> } | null;
+    }>(cli, [
+      "automation",
+      "show",
+      MURPH_ONBOARDING_FOLLOWUP_AUTOMATION.slug,
+      "--vault",
+      vaultRoot,
+    ]);
+    assert.equal(shown.envelope.ok, true);
+    assert.deepEqual(shown.envelope.data?.automation?.route, {
+      channel: "linq",
+      deliverySource: null,
+      deliveryTarget: "linq_chat_real",
+      identityId: "hid_current_line_identity",
+      participantId: "hid_current_line_participant",
       threadId: "hid_materialized_thread",
       threadIsDirect: true,
     });

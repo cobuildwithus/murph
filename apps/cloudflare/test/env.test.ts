@@ -28,7 +28,7 @@ describe("readHostedExecutionEnvironment", () => {
     expect(environment.maxEventAttempts).toBe(3);
     expect(environment.idleCheckpointDelayMs).toBe(180_000);
     expect(environment.retryDelayMs).toBe(30_000);
-    expect(environment.runnerCommitTimeoutMs).toBe(30_000);
+    expect(environment.runnerCommitTimeoutMs).toBe(45_000);
     expect(environment.runnerReadyTimeoutMs).toBe(20_000);
     expect(environment.webControlTimeoutMs).toBe(30_000);
     expect(environment.vercelOidcValidation.teamSlug).toBe("murph-team");
@@ -177,14 +177,25 @@ describe("readHostedExecutionEnvironment", () => {
     expect(environment.vercelOidcValidation.subject).toContain(":environment:preview");
   });
 
-  it("keeps hosted-web control timeout separate from commit timeout", () => {
+  it("keeps the runner commit timeout outside the hosted-web control timeout", () => {
     const environment = readHostedExecutionEnvironment(createHostedExecutionTestEnv({
-      HOSTED_EXECUTION_RUNNER_COMMIT_TIMEOUT_MS: "15000",
-      HOSTED_EXECUTION_WEB_CONTROL_TIMEOUT_MS: "45000",
+      HOSTED_EXECUTION_RUNNER_COMMIT_TIMEOUT_MS: "45000",
+      HOSTED_EXECUTION_WEB_CONTROL_TIMEOUT_MS: "30000",
     }));
 
-    expect(environment.runnerCommitTimeoutMs).toBe(15_000);
-    expect(environment.webControlTimeoutMs).toBe(45_000);
+    expect(environment.runnerCommitTimeoutMs).toBe(45_000);
+    expect(environment.webControlTimeoutMs).toBe(30_000);
+  });
+
+  it("rejects runner commit timeouts that do not contain the web-control request", () => {
+    expect(() =>
+      readHostedExecutionEnvironment(createHostedExecutionTestEnv({
+        HOSTED_EXECUTION_RUNNER_COMMIT_TIMEOUT_MS: "30000",
+        HOSTED_EXECUTION_WEB_CONTROL_TIMEOUT_MS: "30000",
+      })),
+    ).toThrow(
+      "HOSTED_EXECUTION_RUNNER_COMMIT_TIMEOUT_MS must be at least 5000ms greater than HOSTED_EXECUTION_WEB_CONTROL_TIMEOUT_MS.",
+    );
   });
 
   it("rejects hosted-web control timeouts that cannot leave the response margin", () => {

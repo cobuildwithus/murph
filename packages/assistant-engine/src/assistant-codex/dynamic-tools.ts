@@ -1,5 +1,14 @@
 import { z } from 'zod'
 import {
+  assistantTonePreferenceValues,
+  assistantVoiceOptionIdValues,
+  assistantVoiceOptions,
+} from '@murphai/contracts'
+import {
+  hostedRuntimeAssistantPersonalizationToolRequestSchema,
+  type HostedRuntimeAssistantPersonalizationToolRequest,
+} from '@murphai/hosted-execution/assistant-personalization'
+import {
   HOSTED_PRODUCT_FEEDBACK_KINDS,
   HOSTED_PRODUCT_FEEDBACK_SUMMARY_MAX_LENGTH,
   HOSTED_RUNTIME_GROUP_DISPLAY_NAME_MAX_LENGTH,
@@ -378,6 +387,54 @@ export const MURPH_PLAN_USAGE_TOOL = {
     type: 'object',
     additionalProperties: false,
     properties: {},
+  },
+} as const
+
+export const MURPH_PERSONALIZATION_TOOL = {
+  namespace: 'murph',
+  name: 'personalization',
+  description:
+    'Read the current private hosted member\'s effective Murph tone, voice, and model context, or atomically update tone and voice. Use murph.assistant_configuration for model or reasoning changes because those require secure user approval.',
+  inputSchema: {
+    oneOf: [
+      {
+        type: 'object',
+        additionalProperties: false,
+        properties: {
+          action: {
+            type: 'string',
+            enum: ['read'],
+          },
+        },
+        required: ['action'],
+      },
+      {
+        type: 'object',
+        additionalProperties: false,
+        properties: {
+          action: {
+            type: 'string',
+            enum: ['update'],
+          },
+          tone: {
+            type: 'string',
+            enum: assistantTonePreferenceValues,
+          },
+          voice: {
+            type: 'string',
+            enum: assistantVoiceOptionIdValues,
+            description: assistantVoiceOptions
+              .map((option) => `${option.label}=${option.id}`)
+              .join(', '),
+          },
+        },
+        required: ['action'],
+        anyOf: [
+          { required: ['tone'] },
+          { required: ['voice'] },
+        ],
+      },
+    ],
   },
 } as const
 
@@ -869,6 +926,7 @@ const MURPH_BASE_DYNAMIC_TOOLS = [
   MURPH_GENERATE_IMAGE_TOOL,
   MURPH_GENERATE_VOICE_MEMO_TOOL,
   MURPH_ASSISTANT_CONFIGURATION_TOOL,
+  MURPH_PERSONALIZATION_TOOL,
   MURPH_FAMILY_PLAN_TOOL,
   MURPH_PLAN_USAGE_TOOL,
   MURPH_GROUP_TOOL,
@@ -910,6 +968,7 @@ export interface MurphDynamicToolAvailability {
   planUsageAvailable?: boolean | null
   groupAvailable?: boolean | null
   newsletterAvailable?: boolean | null
+  personalizationAvailable?: boolean | null
   productFeedbackAvailable?: boolean | null
   phoneCallsAvailable?: boolean | null
   voiceMemoGenerationAvailable?: boolean | null
@@ -944,6 +1003,7 @@ const TOOL_AVAILABILITY: ReadonlyMap<MurphDynamicTool, AvailabilityPredicate> =
     [MURPH_PLAN_USAGE_TOOL, defaultOff((a) => a.planUsageAvailable)],
     [MURPH_GROUP_TOOL, defaultOff((a) => a.groupAvailable)],
     [MURPH_NEWSLETTER_TOOL, defaultOff((a) => a.newsletterAvailable)],
+    [MURPH_PERSONALIZATION_TOOL, defaultOff((a) => a.personalizationAvailable)],
     [MURPH_GENERATE_VOICE_MEMO_TOOL, defaultOff((a) => a.voiceMemoGenerationAvailable)],
     [MURPH_GENERATE_SONG_TOOL, defaultOff((a) => a.voiceMemoGenerationAvailable)],
     [MURPH_SEND_VAULT_FILE_TOOL, defaultOff((a) => a.vaultFileSendAvailable)],
@@ -1548,6 +1608,10 @@ export type MurphDynamicToolRequest =
       validationDigest: SafeToolCallValidationDigest
     }
   | {
+      kind: 'invalid-personalization-arguments'
+      validationDigest: SafeToolCallValidationDigest
+    }
+  | {
       kind: 'invalid-plan-usage-arguments'
       validationDigest: SafeToolCallValidationDigest
     }
@@ -1566,6 +1630,10 @@ export type MurphDynamicToolRequest =
   | {
       kind: 'family-plan'
       request: HostedRuntimeFamilyPlanToolRequest
+    }
+  | {
+      kind: 'personalization'
+      request: HostedRuntimeAssistantPersonalizationToolRequest
     }
   | {
       kind: 'plan-usage'
@@ -1769,6 +1837,19 @@ export function readMurphDynamicToolRequest(
       }
       return {
         kind: 'plan-usage',
+      }
+    }
+    case MURPH_PERSONALIZATION_TOOL.name: {
+      const parsed = parsePersonalizationArguments(request.arguments)
+      if (!parsed.ok) {
+        return {
+          kind: 'invalid-personalization-arguments',
+          validationDigest: parsed.validationDigest,
+        }
+      }
+      return {
+        kind: 'personalization',
+        request: parsed.request,
       }
     }
     case MURPH_ASSISTANT_CONFIGURATION_TOOL.name: {
@@ -2028,6 +2109,8 @@ export async function executeMurphDynamicToolRequest(input: {
       return toolTextResult(false, 'invalid product feedback arguments')
     case 'invalid-family-plan-arguments':
       return toolTextResult(false, 'invalid family plan arguments')
+    case 'invalid-personalization-arguments':
+      return toolTextResult(false, 'invalid personalization arguments')
     case 'invalid-plan-usage-arguments':
       return toolTextResult(false, 'invalid plan usage arguments')
     case 'invalid-assistant-configuration-arguments':
@@ -2071,14 +2154,18 @@ export async function executeMurphDynamicToolRequest(input: {
         progressDelivery: input.progressDelivery,
         text: input.request.text,
       })
-    case 'assistant-style':
+    case 'assistant-style': {
+      const hostedToolContext = input.hostedToolContext ?? null
       return await executeAssistantStyleDynamicTool({
         available: input.assistantStyleSettingsAvailable === true,
-        causalSeq:
-          input.hostedToolContext?.currentAssistantPreferenceCausalSeq?.() ?? null,
+        causalSeqRequired: hostedToolContext != null,
         request: input.request,
+        resolveCausalSeq: hostedToolContext
+          ? () => resolveHostedAssistantStyleCausalSeq(hostedToolContext)
+          : null,
         vaultRoot: input.vaultRoot ?? null,
       })
+    }
     case 'send-vault-file': {
       const hostedToolContext = input.hostedToolContext ?? null
       const sendVaultFile = hostedToolContext?.sendVaultFile
@@ -2192,6 +2279,11 @@ export async function executeMurphDynamicToolRequest(input: {
     case 'plan-usage':
       return await executePlanUsageTool({
         hostedToolContext: input.hostedToolContext ?? null,
+      })
+    case 'personalization':
+      return await executePersonalizationTool({
+        hostedToolContext: input.hostedToolContext ?? null,
+        request: input.request.request,
       })
     case 'assistant-configuration':
       return await executeAssistantConfigurationTool({
@@ -2448,6 +2540,55 @@ async function executePlanUsageTool(input: {
     return toolTextResult(true, safeToolPayloadText(await planUsageTool.read()))
   } catch {
     return toolTextResult(false, 'plan usage could not be read')
+  }
+}
+
+async function executePersonalizationTool(input: {
+  hostedToolContext: AssistantHostedToolContext | null
+  request: HostedRuntimeAssistantPersonalizationToolRequest
+}): Promise<MurphDynamicToolExecutionResult> {
+  const personalizationTool = input.hostedToolContext?.personalizationTool ?? null
+  if (!personalizationTool) {
+    return toolTextResult(false, 'personalization is unavailable for this turn')
+  }
+
+  const assistantInputId = input.request.action === 'update'
+    ? input.hostedToolContext?.currentAssistantPersonalizationInputId?.() ?? null
+    : null
+  if (input.request.action === 'update' && assistantInputId === null) {
+    return toolTextResult(false, 'personalization is unavailable for this turn')
+  }
+
+  try {
+    const result = await personalizationTool.request(
+      input.request,
+      assistantInputId === null ? undefined : { assistantInputId },
+    )
+    return toolTextResult(true, safeToolPayloadText(result))
+  } catch {
+    return toolTextResult(false, 'personalization request failed')
+  }
+}
+
+async function resolveHostedAssistantStyleCausalSeq(
+  hostedToolContext: AssistantHostedToolContext | null,
+): Promise<string | null> {
+  if (!hostedToolContext) {
+    return null
+  }
+  const assistantInputId =
+    hostedToolContext.currentAssistantPersonalizationInputId?.() ?? null
+  const personalizationTool = hostedToolContext.personalizationTool ?? null
+  if (!assistantInputId || !personalizationTool?.resolvePreferenceCausalSeq) {
+    return null
+  }
+
+  try {
+    return await personalizationTool.resolvePreferenceCausalSeq({
+      assistantInputId,
+    })
+  } catch {
+    return null
   }
 }
 
@@ -3841,6 +3982,34 @@ function parsePlanUsageArguments(
     }
   }
   return { ok: true }
+}
+
+function parsePersonalizationArguments(
+  value: unknown,
+):
+  | {
+      request: HostedRuntimeAssistantPersonalizationToolRequest
+      ok: true
+    }
+  | { ok: false; validationDigest: SafeToolCallValidationDigest } {
+  const parsed = hostedRuntimeAssistantPersonalizationToolRequestSchema.safeParse(value)
+  if (!parsed.success) {
+    return {
+      ok: false,
+      validationDigest: buildDynamicToolValidationDigest({
+        error: parsed.error,
+        rawInput: value,
+        schemaName: 'murph.personalization.input',
+        schemaRootKeys: ['action', 'tone', 'voice'],
+        toolName: 'murph.personalization',
+      }),
+    }
+  }
+
+  return {
+    ok: true,
+    request: parsed.data,
+  }
 }
 
 function parseAssistantConfigurationArguments(

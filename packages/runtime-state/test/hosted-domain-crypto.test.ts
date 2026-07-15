@@ -188,6 +188,34 @@ test("hosted meal-photo crypto is owned by the ingress domain", () => {
   ).toBeInstanceOf(Uint8Array);
 });
 
+test("clinical page cursors use the device domain and round-trip through their dedicated lane", async () => {
+  const rootKey = Uint8Array.from({ length: 32 }, (_, index) => index + 7);
+  const aad = buildHostedSecureBoxAad({
+    domain: "device",
+    lane: "clinical-records-page-cursor",
+    purpose: "clinical-records-fhir-page:Observation",
+    scope: "clinical-records:run-1:Observation:pageCursor",
+    userId: "user-1",
+  });
+  const envelope = await sealHostedSecureBox({
+    aad,
+    domain: "device",
+    lane: "clinical-records-page-cursor",
+    plaintext: new TextEncoder().encode("opaque-page-cursor"),
+    rootKey,
+    rootKeyId: "udrk:device:test-root",
+    scope: "clinical-records:run-1:Observation:pageCursor",
+  });
+
+  expect(new TextDecoder().decode(await openHostedSecureBox({
+    aad,
+    envelope,
+    expectedDomain: "device",
+    expectedLane: "clinical-records-page-cursor",
+    rootKey,
+  }))).toBe("opaque-page-cursor");
+});
+
 async function generateP256EcdhKeyPair(): Promise<{
   privateJwk: JsonWebKey;
   publicJwk: JsonWebKey;

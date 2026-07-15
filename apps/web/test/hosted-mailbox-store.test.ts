@@ -1,5 +1,9 @@
 import { Buffer } from "node:buffer";
 
+import {
+  createHostedMailboxAssistantInputId,
+  readHostedConversationAssistantIdentifierSecret,
+} from "@murphai/hosted-execution/assistant-identifiers";
 import { serializeHostedEmailThreadTarget } from "@murphai/runtime-state";
 import { describe, expect, it, vi } from "vitest";
 
@@ -22,17 +26,30 @@ import {
   readHostedMailboxItemCheckpointById,
   readHostedMailboxMaxSeqByLane,
   readHostedMailboxPendingSystemItemsNeedAiUsageGate,
+  readHostedMailboxPreferenceCausalSeqByAssistantInputIdTx,
   readHostedMailboxWakeAfterDedupeLockTx,
   resolveHostedMailboxRuntimeFetchLaneCursors,
   type HostedMailboxItemRow,
   type HostedMailboxPayloadRow,
 } from "@/src/lib/hosted-mailbox/store";
+import {
+  createHostedAssistantInputLookupKey,
+  createHostedAssistantInputLookupKeyReadCandidates,
+} from "@/src/lib/hosted-onboarding/contact-privacy";
 import { setHostedSecureBoxStringTestCodecForTests } from "../src/lib/hosted-crypto/secure-box";
 
 const FIXED_NOW = new Date("2026-04-26T00:00:00.000Z");
 const DAY_MS = 24 * 60 * 60 * 1000;
 const HOSTED_MAILBOX_TEST_RETENTION_MS = 30 * DAY_MS;
 const MAILBOX_REF_1_PAYLOAD_REF = "hosted-mailbox-payload:mailbox_ref_1";
+
+function requireAssistantInputLookupKey(assistantInputId: string): string {
+  const lookupKey = createHostedAssistantInputLookupKey(assistantInputId);
+  if (!lookupKey) {
+    throw new TypeError("Expected assistant input lookup key.");
+  }
+  return lookupKey;
+}
 
 function expectLiveHostedMailboxWhere(fields: Record<string, unknown>) {
   return expect.objectContaining({
@@ -135,6 +152,175 @@ describe("readHostedMailboxRecentLiveConversationItemIds", () => {
   });
 });
 
+describe("readHostedMailboxPreferenceCausalSeqByAssistantInputIdTx", () => {
+  it("returns only a live canonical conversation sequence owned by the member", async () => {
+    const now = new Date();
+    const rows = [
+      {
+        assistantInputLookupKey: requireAssistantInputLookupKey("ain_valid"),
+        causalSeq: 7n,
+        createdAt: now,
+        expiresAt: null,
+        kind: "conversation.message",
+        lane: "conversation",
+        userId: "member_mailbox_1",
+      },
+      {
+        assistantInputLookupKey: requireAssistantInputLookupKey("ain_system"),
+        causalSeq: 8n,
+        createdAt: now,
+        expiresAt: null,
+        kind: "assistant.notification.requested",
+        lane: "system",
+        userId: "member_mailbox_1",
+      },
+      {
+        assistantInputLookupKey: requireAssistantInputLookupKey("ain_without_sequence"),
+        causalSeq: null,
+        createdAt: now,
+        expiresAt: null,
+        kind: "conversation.message",
+        lane: "conversation",
+        userId: "member_mailbox_1",
+      },
+      {
+        assistantInputLookupKey: requireAssistantInputLookupKey("ain_expired"),
+        causalSeq: 9n,
+        createdAt: now,
+        expiresAt: new Date(now.getTime() - 1),
+        kind: "conversation.message",
+        lane: "conversation",
+        userId: "member_mailbox_1",
+      },
+      {
+        assistantInputLookupKey: null,
+        causalSeq: 10n,
+        createdAt: now,
+        expiresAt: null,
+        kind: "conversation.message",
+        lane: "conversation",
+        userId: "member_mailbox_1",
+      },
+    ];
+    const findMany = vi.fn(async (args: {
+      select: { causalSeq: true };
+      take: number;
+      where: {
+        assistantInputLookupKey: { in: string[] };
+        causalSeq: { not: null };
+        createdAt: { gte: Date };
+        kind: string;
+        lane: string;
+        OR: [{ expiresAt: null }, { expiresAt: { gt: Date } }];
+        userId: string;
+      };
+    }) => {
+      return rows
+        .filter((candidate) => (
+          candidate.assistantInputLookupKey !== null
+          && args.where.assistantInputLookupKey.in.includes(
+            candidate.assistantInputLookupKey,
+          )
+          && candidate.causalSeq !== null
+          && candidate.createdAt >= args.where.createdAt.gte
+          && candidate.kind === args.where.kind
+          && candidate.lane === args.where.lane
+          && candidate.userId === args.where.userId
+          && (
+            candidate.expiresAt === null
+            || candidate.expiresAt > args.where.OR[1].expiresAt.gt
+          )
+        ))
+        .slice(0, args.take)
+        .map((row) => ({ causalSeq: row.causalSeq }));
+    });
+    const prisma = {
+      hostedMailboxItem: { findMany },
+    } as never;
+
+    await expect(readHostedMailboxPreferenceCausalSeqByAssistantInputIdTx({
+      assistantInputId: "ain_valid",
+      memberId: "member_mailbox_1",
+      prisma,
+    })).resolves.toBe("7");
+    await expect(readHostedMailboxPreferenceCausalSeqByAssistantInputIdTx({
+      assistantInputId: "ain_valid",
+      memberId: "member_other",
+      prisma,
+    })).resolves.toBeNull();
+    for (const assistantInputId of [
+      "ain_unknown",
+      "ain_system",
+      "ain_without_sequence",
+      "ain_expired",
+      "ain_legacy",
+    ]) {
+      await expect(readHostedMailboxPreferenceCausalSeqByAssistantInputIdTx({
+        assistantInputId,
+        memberId: "member_mailbox_1",
+        prisma,
+      })).resolves.toBeNull();
+    }
+
+    expect(findMany).toHaveBeenNthCalledWith(1, {
+      select: {
+        causalSeq: true,
+      },
+      take: 2,
+      where: expectLiveHostedMailboxWhere({
+        assistantInputLookupKey: {
+          in: createHostedAssistantInputLookupKeyReadCandidates("ain_valid"),
+        },
+        causalSeq: { not: null },
+        kind: "conversation.message",
+        lane: "conversation",
+        userId: "member_mailbox_1",
+      }),
+    });
+  });
+
+  it("does not query for blank authority", async () => {
+    const findMany = vi.fn();
+    const prisma = {
+      hostedMailboxItem: { findMany },
+    } as never;
+
+    await expect(readHostedMailboxPreferenceCausalSeqByAssistantInputIdTx({
+      assistantInputId: "  ",
+      memberId: "member_mailbox_1",
+      prisma,
+    })).resolves.toBeNull();
+    await expect(readHostedMailboxPreferenceCausalSeqByAssistantInputIdTx({
+      assistantInputId: "ain_valid",
+      memberId: "  ",
+      prisma,
+    })).resolves.toBeNull();
+
+    expect(findMany).not.toHaveBeenCalled();
+  });
+
+  it("fails closed when more than one lookup-key version matches", async () => {
+    const findMany = vi.fn().mockResolvedValue([
+      { causalSeq: 7n },
+      { causalSeq: 8n },
+    ]);
+
+    await expect(readHostedMailboxPreferenceCausalSeqByAssistantInputIdTx({
+      assistantInputId: "ain_ambiguous",
+      memberId: "member_mailbox_1",
+      prisma: {
+        hostedMailboxItem: { findMany },
+      } as never,
+    })).resolves.toBeNull();
+
+    expect(findMany).toHaveBeenCalledWith(
+      expect.objectContaining({
+        take: 2,
+      }),
+    );
+  });
+});
+
 describe("appendHostedMailboxItemTx", () => {
   it("allocates a lane sequence and stores small opaque payload ciphertext inline", async () => {
     const hostedMailboxItem = createHostedMailboxItemDelegate();
@@ -188,6 +374,7 @@ describe("appendHostedMailboxItemTx", () => {
     );
     expect(hostedMailboxItem.create).toHaveBeenCalledWith({
       data: expect.objectContaining({
+        assistantInputLookupKey: null,
         dedupeKey: "dedupe_inline_1",
         kind: "conversation.message",
         lane: "conversation",
@@ -713,8 +900,20 @@ describe("appendHostedMailboxEnvelopeTx", () => {
       hostedThreadRoute,
     });
 
+    const envelope = buildHostedGroupLinqEnvelope("member_thread_container_123");
+    const expectedAssistantInputId = createHostedMailboxAssistantInputId({
+      dedupeKey: envelope.eventId,
+      eventId: envelope.eventId,
+      lane: "conversation",
+      secret: readHostedConversationAssistantIdentifierSecret(envelope),
+      userId: envelope.userId,
+    });
+    const expectedAssistantInputLookupKey = requireAssistantInputLookupKey(
+      expectedAssistantInputId,
+    );
+
     await expect(appendHostedMailboxEnvelopeTx({
-      envelope: buildHostedGroupLinqEnvelope("member_thread_container_123"),
+      envelope,
       tx,
     })).resolves.toMatchObject({
       inserted: true,
@@ -732,6 +931,56 @@ describe("appendHostedMailboxEnvelopeTx", () => {
         userId: "member_thread_container_123",
       },
     });
+    expect(hostedMailboxItem.create).toHaveBeenCalledWith({
+      data: expect.objectContaining({
+        assistantInputLookupKey: expectedAssistantInputLookupKey,
+      }),
+    });
+  });
+
+  it("preserves the first assistant input identity on an exact envelope replay", async () => {
+    const rows: HostedMailboxItemRow[] = [];
+    const hostedMailboxItem = createHostedMailboxItemDelegate({
+      create: vi.fn<HostedMailboxCreate>(async (args) => {
+        const row = buildHostedMailboxItemRow(args.data);
+        rows.push(row);
+        return row;
+      }),
+      findUnique: vi.fn<HostedMailboxFindUnique>(async (args) => {
+        const where = readHostedMailboxFindUniqueWhere(args);
+        return rows.find((row) => (
+          row.userId === where.userId && row.dedupeKey === where.dedupeKey
+        )) ?? null;
+      }),
+    });
+    const tx = createHostedMailboxTx({
+      hostedMailboxItem,
+      hostedMailboxPayload: createHostedMailboxPayloadDelegate(),
+      hostedThreadRoute: {
+        findFirst: vi.fn(async () => ({
+          containerMemberId: "member_thread_container_123",
+        })),
+      },
+    });
+    const envelope = buildHostedGroupLinqEnvelope("member_thread_container_123");
+
+    const first = await appendHostedMailboxEnvelopeTx({ envelope, tx });
+    const duplicate = await appendHostedMailboxEnvelopeTx({ envelope, tx });
+
+    expect(first.inserted).toBe(true);
+    expect(duplicate).toMatchObject({
+      dedupeConflict: false,
+      duplicate: true,
+      inserted: false,
+      item: {
+        id: first.item.id,
+      },
+    });
+    expect(rows).toHaveLength(1);
+    expect(rows[0]?.assistantInputLookupKey).toMatch(
+      /^hbidx:assistant-input:v[0-9]+:[a-f0-9]{64}$/u,
+    );
+    expect(hostedMailboxItem.create).toHaveBeenCalledTimes(1);
   });
 
   it("rejects group email when the target group names another runtime workspace", async () => {
@@ -865,6 +1114,7 @@ describe("appendHostedMailboxEnvelopeTx", () => {
     });
     expect(hostedMailboxItem.create).toHaveBeenCalledTimes(1);
     expect(createCall?.data).toMatchObject({
+      assistantInputLookupKey: null,
       dedupeKey: "member.channels.updated:settings.phone.sync:member_mailbox_1:2026-04-26T00:00:00.000Z",
       kind: "member.channels.updated",
       lane: "system",
@@ -2171,6 +2421,7 @@ describe("fetchHostedRuntimeMailboxProjection", () => {
 
 interface HostedMailboxCreateArgs {
   data: {
+    assistantInputLookupKey: string | null;
     causalSeq: bigint;
     dedupeKey: string;
     expiresAt: Date | null;
@@ -2224,6 +2475,7 @@ function buildHostedMailboxItemRow(
   overrides: Partial<HostedMailboxItemRow> = {},
 ): HostedMailboxItemRow {
   return {
+    assistantInputLookupKey: null,
     causalSeq: 1n,
     createdAt: FIXED_NOW,
     consumedAt: null,
@@ -2342,18 +2594,19 @@ function createHostedMailboxTx(input: {
           data: {
             id: String(values[0]),
             userId: String(values[1]),
-            causalSeq: values[2] as bigint,
-            lane: String(values[3]),
-            laneSeq: values[4] as bigint,
-            dedupeKey: String(values[5]),
-            kind: String(values[6]),
-            occurredAt: values[7] as Date,
-            payloadSchema: String(values[8]),
-            payloadInlineCiphertext: values[9] as string | null,
-            payloadRef: values[10] as string | null,
-            payloadBytes: values[11] as number,
-            payloadHash: values[12] as string | null,
-            expiresAt: values[13] as Date | null,
+            assistantInputLookupKey: values[2] as string | null,
+            causalSeq: values[3] as bigint,
+            lane: String(values[4]),
+            laneSeq: values[5] as bigint,
+            dedupeKey: String(values[6]),
+            kind: String(values[7]),
+            occurredAt: values[8] as Date,
+            payloadSchema: String(values[9]),
+            payloadInlineCiphertext: values[10] as string | null,
+            payloadRef: values[11] as string | null,
+            payloadBytes: values[12] as number,
+            payloadHash: values[13] as string | null,
+            expiresAt: values[14] as Date | null,
           },
         });
         return [row];

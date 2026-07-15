@@ -336,10 +336,12 @@ describe('experiment onboarding skill guidance', () => {
     expect(raw).toContain(
       'send a short celebratory progress line only when it earns a send',
     )
-    expect(raw).toContain(
+    expect(raw).not.toContain(
       'Archive this automation when the experiment is no longer active or today is past the intervention end date.',
     )
-    expect(raw).toContain('The final-results automation also archives it at experiment end')
+    expect(raw).not.toContain(
+      'The final-results automation also archives it at experiment end',
+    )
     expect(raw).toContain(
       'Nice run, that\'s 8 of 24 for your base block.',
     )

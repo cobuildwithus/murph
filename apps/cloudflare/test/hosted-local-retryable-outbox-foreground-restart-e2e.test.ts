@@ -356,10 +356,11 @@ async function waitForDurableRetryableOutbox(): Promise<HostedRunnerStatusRespon
       status.workspace
       && !status.lastErrorCode
       && status.mailboxLag.every((lane) => lane.lag === "0")
-      && Number.isFinite(Date.parse(status.workspace.nextWakeAt ?? ""))
-      // The counters prove the prepared effect is nonterminal and the aggregate
-      // wake proves scheduled work remains. That wake is not an outbox-specific
-      // deadline because assistant and maintenance work share the same field.
+      // These counters come from the committed workspace checkpoint. The
+      // prepared delivery effect is consumed, while the failed send remains
+      // nonterminal for a later retry. The outer invocation may still be
+      // draining unrelated runtime residue, so inFlight is not a durability
+      // boundary and the workspace's earliest wake may belong to that cleanup.
       && readHostedOutboxCounter(status, "hostedOutboxDeliveryAttempted") === 1
       && readHostedOutboxCounter(status, "hostedOutboxDeliverySent") === 0
       && readHostedOutboxCounter(status, "hostedOutboxTerminalizedSending") === 0
@@ -381,9 +382,21 @@ async function waitForIdleShutdownCheckpoint(input: {
   const startedAt = Date.now();
   let lastActivityExpiryError: unknown = null;
   let lastStatus: HostedRunnerStatusResponse | null = null;
+  let lastStatusReadError: unknown = null;
 
   while (Date.now() - startedAt < 20_000) {
-    const status = await readHostedRunnerStatusWithLogLimit(100);
+    let status: HostedRunnerStatusResponse;
+    try {
+      status = await readHostedRunnerStatusWithLogLimit(100);
+      lastStatusReadError = null;
+    } catch (error) {
+      // The status transport can briefly disappear while the forced idle
+      // shutdown replaces the runner container. Stay within the same bounded
+      // waiter and let the replacement expose its checkpointed status.
+      lastStatusReadError = error;
+      await sleep(100);
+      continue;
+    }
     lastStatus = status;
     const hotRef = status.workspace
       ? readHostedExecutionSnapshotHotRef(status.workspace.snapshotRef)
@@ -417,6 +430,9 @@ async function waitForIdleShutdownCheckpoint(input: {
     ...(lastStatus ? [`last status: ${JSON.stringify(lastStatus)}`] : []),
     ...(lastActivityExpiryError
       ? [`last activity expiry error: ${formatErrorMessage(lastActivityExpiryError)}`]
+      : []),
+    ...(lastStatusReadError
+      ? [`last status read error: ${formatErrorMessage(lastStatusReadError)}`]
       : []),
   ]));
 }

@@ -206,6 +206,12 @@ describe("clinical records contracts", () => {
       url: "https://ehr.example.test/fhir2/Observation?page=2",
     })).toBe(false);
     expect(hashClinicalFhirPageUrl(`${FHIR_BASE_URL}/Observation?page=2`)).toMatch(/^[a-f0-9]{64}$/u);
+    expect(hashClinicalFhirPageUrl(` ${FHIR_BASE_URL}/Observation?page=2`)).not.toBe(
+      hashClinicalFhirPageUrl(`${FHIR_BASE_URL}/Observation?page=2`),
+    );
+    expect(hashClinicalFhirPageUrl(`${FHIR_BASE_URL}/Observation?page=2 `)).not.toBe(
+      hashClinicalFhirPageUrl(`${FHIR_BASE_URL}/Observation?page=2`),
+    );
     expect(fhirResourceTypeToSlug("DiagnosticReport")).toBe("diagnostic-report");
     expect(clinicalFacetSlug("Systolic BP (mmHg)")).toBe("systolic-bp-mm-hg");
 
