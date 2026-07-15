@@ -7,6 +7,11 @@ import {
   GroupJoinSignInButton,
 } from "@/src/components/hosted-groups/group-join-client";
 import { Button } from "@/src/components/ui/button";
+import {
+  readGroupJoinPostAuthHandoff,
+  resolveGroupJoinPostJoinDestination,
+  type GroupJoinPostJoinDestination,
+} from "@/src/lib/hosted-groups/group-join-handoff";
 import { readHostedGroupJoinView } from "@/src/lib/hosted-groups/group-store";
 import { getHostedPageAuthSnapshot } from "@/src/lib/hosted-onboarding/page-auth";
 import { resolveDecodedRouteParam } from "@/src/lib/http";
@@ -20,6 +25,10 @@ import { createMurphPageMetadata } from "@/src/lib/site-metadata";
 export const dynamic = "force-dynamic";
 export const fetchCache = "force-no-store";
 export const revalidate = 0;
+
+type GroupJoinSearchParams = {
+  postJoin?: string | string[] | undefined;
+};
 
 export async function generateMetadata({
   params,
@@ -48,10 +57,18 @@ export async function generateMetadata({
 
 export default async function GroupJoinPage({
   params,
+  searchParams,
 }: {
   params: Promise<{ joinCode: string }>;
+  searchParams?: Promise<GroupJoinSearchParams>;
 }) {
-  const joinCode = await resolveDecodedRouteParam(params, "joinCode");
+  const [joinCode, resolvedSearchParams]: [string, GroupJoinSearchParams] = await Promise.all([
+    resolveDecodedRouteParam(params, "joinCode"),
+    searchParams ?? Promise.resolve<GroupJoinSearchParams>({}),
+  ]);
+  const postJoinDestination = resolveGroupJoinPostJoinDestination(
+    readGroupJoinPostAuthHandoff(resolvedSearchParams.postJoin),
+  );
   const auth = await getHostedPageAuthSnapshot();
   const prisma = getPrisma();
   const view = await readHostedGroupJoinView({
@@ -72,6 +89,7 @@ export default async function GroupJoinPage({
         authenticated: auth.authenticated,
         joinCode,
         launchConsentStatus,
+        postJoinDestination,
         view,
       })}
     </main>
@@ -82,6 +100,7 @@ function renderGroupJoin(input: {
   authenticated: boolean;
   joinCode: string;
   launchConsentStatus: HostedConsentStatus | null;
+  postJoinDestination: GroupJoinPostJoinDestination;
   view: Awaited<ReturnType<typeof readHostedGroupJoinView>>;
 }) {
   const { view } = input;
@@ -142,12 +161,13 @@ function renderGroupJoin(input: {
             groupName={groupName}
             joinCode={input.joinCode}
             permissions={view.requestedVaultShareProjections}
+            postJoinDestination={alreadyActiveMember ? "/home" : input.postJoinDestination}
           />
         ) : (
           <div className="flex flex-col gap-2">
             <GroupJoinSignInButton />
             <p className="text-center text-xs leading-5 text-muted-foreground">
-              Sign in or create a private Murph account, and we&apos;ll bring you back here.
+              Create or open your private Murph account, and we&apos;ll bring you back here.
             </p>
           </div>
         )}
