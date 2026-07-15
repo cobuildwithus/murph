@@ -643,7 +643,16 @@ describe('assistant execution prompt contract', () => {
       '`context.request` for secret transfer, `context.unroute()` to bypass routing, new browser contexts for policy bypass, or Node/network APIs to exfiltrate data',
     )
     expect(prompt).toContain(
-      'Use `murph.computer_os_control` only as a fallback when `murph.computer_act` cannot operate the page surface.',
+      'If a visible control fails after a safe Playwright alternative and state check',
+    )
+    expect(prompt).toContain(
+      'use `murph.computer_os_control` at a fresh bounding box with `numClicks: 1`',
+    )
+    expect(prompt).toContain(
+      'If a prior click may have acted, `murph.computer_open` must first show no effect',
+    )
+    expect(prompt).toContain(
+      'Verify afterward; hand off on ambiguity',
     )
     expect(prompt).toContain(
       'Complete the browser task end-to-end when the user has asked you to do it and the needed information is available.',

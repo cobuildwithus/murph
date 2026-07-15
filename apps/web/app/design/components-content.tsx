@@ -13,6 +13,10 @@ import {
   HostedEmailMurphContactDialog,
   WebmailIcon,
 } from "@/src/components/settings/hosted-email-murph-contact-dialog";
+import {
+  ASSISTANT_MODEL_CHOICE_CARD_CLASSES,
+  AssistantModelArtwork,
+} from "@/src/components/settings/assistant-model-artwork";
 import { HealthDomainCard } from "@/src/components/overview/health-domain-card";
 import { ActiveExperimentBanner } from "@/src/components/overview/active-experiment-banner";
 import { ProfileStats } from "@/src/components/overview/profile-stats";
@@ -22,6 +26,7 @@ import { ContactSupportAction } from "@/src/components/support/contact-support-a
 import { AuthButton } from "@/src/components/ui/auth-button";
 import { MurphPulseLoader } from "@/src/components/ui/murph-pulse-loader";
 import { Button } from "@/src/components/ui/button";
+import { ChoiceCard } from "@/src/components/ui/choice-card";
 import { PaymentButton } from "@/src/components/ui/payment-button";
 import { Badge } from "@/src/components/ui/badge";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/src/components/ui/tabs";
@@ -44,6 +49,8 @@ import { Avatar, AvatarFallback } from "@/src/components/ui/avatar";
 import { Alert, AlertTitle, AlertDescription } from "@/src/components/ui/alert";
 import { Toggle } from "@/src/components/ui/toggle";
 import { ToggleGroup, ToggleGroupItem } from "@/src/components/ui/toggle-group";
+import { RadioGroup } from "@/src/components/ui/radio-group";
+import { Spinner } from "@/src/components/ui/spinner";
 import {
   SegmentedControl,
   type SegmentedControlOption,
@@ -154,6 +161,7 @@ export function ComponentsContent() {
     useState<SegmentedControlDemoValue>("phone");
   const [warmSegmentedControlValue, setWarmSegmentedControlValue] =
     useState<SegmentedControlDemoValue>("email");
+  const [choiceCardValue, setChoiceCardValue] = useState("terra");
   const [addedContactAvatar, setAddedContactAvatar] =
     useState<MurphContactAvatarOption | null>(null);
   const [inlineContactAvatarId, setInlineContactAvatarId] = useState("hooded");
@@ -340,6 +348,64 @@ export function ComponentsContent() {
               <ToggleGroupItem value="21d">21d</ToggleGroupItem>
               <ToggleGroupItem value="all">All</ToggleGroupItem>
             </ToggleGroup>
+          </div>
+        </Section>
+
+        <Separator />
+
+        <Section title="Radio Group & Choice Cards">
+          <p className="max-w-2xl text-sm text-muted-foreground">
+            Choose the intelligence behind your personal health assistant.
+          </p>
+          <RadioGroup
+            className="grid gap-3 sm:grid-cols-3"
+            value={choiceCardValue}
+            onValueChange={setChoiceCardValue}
+          >
+            <ChoiceCard
+              artwork={<AssistantModelArtwork variant="luna" />}
+              className={ASSISTANT_MODEL_CHOICE_CARD_CLASSES.luna}
+              description="Fast health intelligence"
+              id="design-choice-luna"
+              meta="Low usage"
+              title="Luna"
+              value="luna"
+            />
+            <ChoiceCard
+              artwork={<AssistantModelArtwork variant="terra" />}
+              badge={<Badge variant="outline">Recommended</Badge>}
+              className={ASSISTANT_MODEL_CHOICE_CARD_CLASSES.terra}
+              description="Advanced health intelligence"
+              id="design-choice-terra"
+              meta="Balanced usage"
+              title="Terra"
+              value="terra"
+            />
+            <ChoiceCard
+              artwork={<AssistantModelArtwork variant="sol" />}
+              badge={<Badge variant="outline">Edge</Badge>}
+              className={ASSISTANT_MODEL_CHOICE_CARD_CLASSES.sol}
+              description="Highest health intelligence"
+              id="design-choice-sol"
+              meta="High usage · Edge plan"
+              title="Sol"
+              value="sol"
+            />
+          </RadioGroup>
+        </Section>
+
+        <Separator />
+
+        <Section title="Spinner">
+          <div className="flex flex-wrap items-center gap-5">
+            <div className="flex items-center gap-2 text-sm text-muted-foreground">
+              <Spinner aria-hidden="true" />
+              Loading
+            </div>
+            <Button disabled>
+              <Spinner aria-hidden="true" />
+              Saving
+            </Button>
           </div>
         </Section>
 

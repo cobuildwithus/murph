@@ -5,6 +5,7 @@ import { fileURLToPath } from "node:url";
 import { describe, expect, it } from "vitest";
 
 import {
+  createVitestAliasesFromTsconfigPaths,
   createVitestWorkspaceRuntimeAliases,
   resolveHostedWebWorkspaceSourceEntries,
 } from "../config/workspace-source-resolution.ts";
@@ -101,6 +102,35 @@ describe("workspace source resolution", () => {
       );
 
     expect(broadSourceAliases).toEqual([]);
+  });
+
+  it("derives non-web Vitest workspace aliases from the root tsconfig paths", () => {
+    const aliases = createVitestAliasesFromTsconfigPaths({
+      workspaceDir: path.join(repoRoot, "packages/core"),
+      specifierFilter: (specifier) =>
+        specifier === "#hosted-web-testing"
+        || specifier === "murph"
+        || specifier.startsWith("@murphai/"),
+    });
+
+    expect(resolveAliasReplacement(aliases, "@murphai/core")).toBe(
+      path.join(repoRoot, "packages/core/src/index.ts"),
+    );
+    expect(resolveAliasReplacement(aliases, "@murphai/vault-usecases/testing")).toBe(
+      path.join(repoRoot, "packages/vault-usecases/src/testing.ts"),
+    );
+    expect(resolveAliasReplacement(aliases, "@murphai/device-syncd/client")).toBe(
+      path.join(repoRoot, "packages/device-syncd/src/client.ts"),
+    );
+    expect(resolveAliasReplacement(aliases, "@murphai/importers/clinical-records")).toBe(
+      path.join(repoRoot, "packages/importers/src/clinical-records/index.ts"),
+    );
+    expect(resolveAliasReplacement(aliases, "#hosted-web-testing")).toBe(
+      path.join(repoRoot, "apps/web/test/support/hosted-web-testkit.ts"),
+    );
+    expect(resolveAliasReplacement(aliases, "murph")).toBe(
+      path.join(repoRoot, "packages/cli/src/index.ts"),
+    );
   });
 
   it("keeps shared public package aliases on explicit exported subpaths", () => {

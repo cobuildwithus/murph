@@ -493,6 +493,14 @@ async function applyHostedDeviceSyncWakeHint(input: {
     return;
   }
 
+  if (
+    input.wake.reason === "reconcile_due"
+    && wake.hint?.reason === "manual_reconcile"
+  ) {
+    input.service.queueManualReconcile(localAccountId);
+    return;
+  }
+
   const jobHints = normalizeHostedDeviceSyncJobHints(wake.hint);
 
   for (const hint of jobHints) {

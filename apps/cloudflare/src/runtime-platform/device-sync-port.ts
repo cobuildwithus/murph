@@ -4,12 +4,14 @@ import {
   HOSTED_EXECUTION_DEVICE_SYNC_RUNTIME_DIRTY_ACK_PATH,
   HOSTED_EXECUTION_DEVICE_SYNC_RUNTIME_DIRTY_PENDING_PATH,
   HOSTED_EXECUTION_DEVICE_SYNC_RUNTIME_SNAPSHOT_PATH,
+  HOSTED_EXECUTION_DEVICE_SYNC_RECONCILE_PATH,
   buildHostedExecutionDeviceSyncConnectLinkPath,
   parseHostedExecutionDeviceSyncConnectLinkResponse,
   parseHostedExecutionDeviceSyncDirtyAckResponse,
   parseHostedExecutionDeviceSyncDirtyPendingResponse,
   parseHostedExecutionDeviceSyncRuntimeApplyResponse,
   parseHostedExecutionDeviceSyncRuntimeSnapshotResponse,
+  parseHostedExecutionDeviceSyncReconcileResponse,
 } from "@murphai/device-syncd/hosted-runtime";
 
 import { fetchHostedWebControlPlaneJson, type HostedWebControlTransport } from "./web-control-transport.ts";
@@ -21,6 +23,25 @@ export function createHostedWebDeviceSyncPort(input: {
   transport: HostedWebControlTransport;
 }) {
   return {
+    async reconcileAccount(runtimeInput: {
+      connectionId: string;
+      signal?: AbortSignal | null;
+    }) {
+      const payload = await fetchHostedWebControlPlaneJson({
+        body: {
+          connectionId: runtimeInput.connectionId,
+        },
+        boundUserId: input.boundUserId,
+        description: "Hosted device-sync reconcile",
+        fetchImpl: input.fetchImpl,
+        path: HOSTED_EXECUTION_DEVICE_SYNC_RECONCILE_PATH,
+        signal: runtimeInput.signal ?? null,
+        timeoutMs: input.timeoutMs,
+        transport: input.transport,
+      });
+
+      return parseHostedExecutionDeviceSyncReconcileResponse(payload);
+    },
     async applyUpdates(runtimeInput: {
       occurredAt?: string | null;
       signal?: AbortSignal | null;

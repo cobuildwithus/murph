@@ -10,6 +10,7 @@ import {
   readHostedCliBridgeEnv,
   requestHostedCliAssistantCurrentRoute,
   requestHostedCliDeviceAccountList,
+  requestHostedCliDeviceAccountReconcile,
   requestHostedCliDeviceConnectLink,
 } from "../src/cli-runtime-bridge.ts";
 
@@ -298,6 +299,38 @@ describe("hosted CLI runtime bridge client", () => {
     assert.equal(result.accounts[0]?.provider, "whoop");
     assert.equal(result.accounts[0]?.status, "active");
     assert.equal(result.accounts[0]?.sources?.[0]?.sourceProviderSlug, "garmin");
+  });
+
+  it("requests hosted device account reconcile through the bridge", async () => {
+    let requestedPath = "";
+    let requestBody: unknown = null;
+    const fetchImpl: typeof fetch = async (url, init) => {
+      requestedPath = new URL(String(url)).pathname;
+      requestBody = JSON.parse(String(init?.body));
+      return new Response(JSON.stringify({
+        connectionId: "dsc_123",
+        occurredAt: "2026-07-15T12:00:00.000Z",
+        status: "queued",
+      }), {
+        headers: { "content-type": "application/json" },
+        status: 200,
+      });
+    };
+
+    assert.deepEqual(await requestHostedCliDeviceAccountReconcile({
+      accountId: "dsc_123",
+      bridge: {
+        token: "bridge-token",
+        url: "http://127.0.0.1:8787/",
+      },
+      fetchImpl,
+    }), {
+      connectionId: "dsc_123",
+      occurredAt: "2026-07-15T12:00:00.000Z",
+      status: "queued",
+    });
+    assert.equal(requestedPath, "/device/accounts/reconcile");
+    assert.deepEqual(requestBody, { accountId: "dsc_123" });
   });
 
   it("rejects hosted device account metadata in bridge responses", async () => {

@@ -386,7 +386,7 @@ function isValidDecorationContent(
     return false
   }
 
-  if (content.length > 160) {
+  if (content.length > 320) {
     return false
   }
 

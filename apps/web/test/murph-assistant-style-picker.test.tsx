@@ -1,11 +1,19 @@
 import assert from "node:assert/strict";
 
-import { act, createElement, type HTMLAttributes, type ReactNode } from "react";
+import {
+  act,
+  createElement,
+  forwardRef,
+  useImperativeHandle,
+  type HTMLAttributes,
+  type ReactNode,
+} from "react";
 import { afterEach, beforeEach, test, vi } from "vitest";
 
 import { renderClientComponent } from "./render-client-component";
 
 const componentMocks = vi.hoisted(() => ({
+  playerPlay: vi.fn(),
   useIsMobile: vi.fn(() => false),
 }));
 
@@ -62,9 +70,12 @@ vi.mock("@/src/components/ui/drawer", () => ({
 }));
 
 vi.mock("@/src/components/ui/voice-memo-player", () => ({
-  VoiceMemoPlayer({ src }: { src: string }) {
-    return createElement("div", { "data-voice-preview": src });
-  },
+  VoiceMemoPlayer: forwardRef<{ play: () => void }, { src: string }>(
+    function MockVoiceMemoPlayer({ src }, ref) {
+      useImperativeHandle(ref, () => ({ play: componentMocks.playerPlay }));
+      return createElement("div", { "data-voice-preview": src });
+    },
+  ),
 }));
 
 vi.mock("@/src/hooks/use-mobile", () => ({
@@ -72,6 +83,7 @@ vi.mock("@/src/hooks/use-mobile", () => ({
 }));
 
 beforeEach(() => {
+  componentMocks.playerPlay.mockReset();
   componentMocks.useIsMobile.mockReturnValue(false);
 });
 
@@ -222,8 +234,15 @@ test("MurphAssistantStylePicker shows each tone as a sample message rather than 
 
   try {
     const text = rendered.container.textContent ?? "";
-    assert.match(text, /you're up 3 lbs this week/u);
-    assert.match(text, /You are up 3 pounds this week/u);
+    assert.match(
+      text,
+      /Your sleep is down this week\. Want to work on sleep first\?/u,
+    );
+    assert.match(
+      text,
+      /sleep is way down this week\. wanna fix sleep first\?/u,
+    );
+    assert.doesNotMatch(text, /pounds|lbs|weight/iu);
     assert.equal(findRadioInput(rendered.container, "Formal")?.checked, true);
     assert.equal(findRadioInput(rendered.container, "Casual")?.checked, false);
     assert.match(
@@ -564,6 +583,93 @@ test("MurphAssistantStylePicker selects a voice when the row outside the label i
 
     assert.equal(findRadioInput(rendered.container, "Grandpa")?.checked, true);
     assert.equal(findRadioInput(rendered.container, "New York")?.checked, false);
+    assert.equal(componentMocks.playerPlay.mock.calls.length, 1);
+  } finally {
+    await rendered.cleanup();
+  }
+});
+
+test("MurphAssistantStylePicker selects a voice when its audio preview is clicked", async () => {
+  const { MurphAssistantStylePicker } = await import(
+    "@/src/components/murph/murph-assistant-style-picker"
+  );
+  const rendered = await renderClientComponent(
+    createElement(MurphAssistantStylePicker, {
+      initialStep: "voice",
+      initialVoice: "classic",
+      onOpenChange: () => {},
+      open: true,
+    }),
+    {
+      requireButton: false,
+    },
+  );
+
+  try {
+    const grandpaRow = findRadioInput(rendered.container, "Grandpa")?.closest("div");
+    assert.ok(grandpaRow, "Missing grandpa row");
+    const preview = grandpaRow.querySelector("[data-voice-preview]");
+    assert.ok(preview, "Missing grandpa audio preview");
+
+    await act(async () => {
+      preview.dispatchEvent(new rendered.window.Event("click", { bubbles: true }));
+    });
+
+    assert.equal(findRadioInput(rendered.container, "Grandpa")?.checked, true);
+    assert.equal(findRadioInput(rendered.container, "New York")?.checked, false);
+    assert.equal(componentMocks.playerPlay.mock.calls.length, 0);
+  } finally {
+    await rendered.cleanup();
+  }
+});
+
+test("MurphAssistantStylePicker keeps the voice selection frozen when a disabled preview is clicked", async () => {
+  let resolveSave: (() => void) | null = null;
+  const savePreference = vi.fn(
+    () =>
+      new Promise<{ tone: null; voice: "classic" }>((resolve) => {
+        resolveSave = () => resolve({ tone: null, voice: "classic" });
+      }),
+  );
+  const { MurphAssistantStylePicker } = await import(
+    "@/src/components/murph/murph-assistant-style-picker"
+  );
+  const rendered = await renderClientComponent(
+    createElement(MurphAssistantStylePicker, {
+      initialStep: "voice",
+      initialVoice: "classic",
+      onOpenChange: () => {},
+      open: true,
+      savePreference,
+      singleStep: true,
+    }),
+    {
+      requireButton: false,
+    },
+  );
+
+  try {
+    await clickButton(rendered, "Save");
+    assert.equal(savePreference.mock.calls.length, 1);
+
+    const grandpaInput = findRadioInput(rendered.container, "Grandpa");
+    assert.equal(grandpaInput?.disabled, true);
+    const grandpaRow = grandpaInput?.closest("div");
+    assert.ok(grandpaRow, "Missing grandpa row");
+    const preview = grandpaRow.querySelector("[data-voice-preview]");
+    assert.ok(preview, "Missing grandpa audio preview");
+
+    await act(async () => {
+      preview.dispatchEvent(new rendered.window.Event("click", { bubbles: true }));
+    });
+
+    assert.equal(findRadioInput(rendered.container, "New York")?.checked, true);
+    assert.equal(findRadioInput(rendered.container, "Grandpa")?.checked, false);
+    assert.equal(componentMocks.playerPlay.mock.calls.length, 0);
+
+    await act(async () => {
+      resolveSave?.();
+    });
   } finally {
     await rendered.cleanup();
   }

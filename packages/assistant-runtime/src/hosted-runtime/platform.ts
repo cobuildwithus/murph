@@ -84,6 +84,7 @@ import type {
   HostedExecutionDeviceSyncDirtyPendingResponse,
   HostedExecutionDeviceSyncRuntimeApplyRequest,
   HostedExecutionDeviceSyncRuntimeApplyResponse,
+  HostedExecutionDeviceSyncReconcileResponse,
   HostedExecutionDeviceSyncRuntimeSnapshotResponse,
 } from "@murphai/device-syncd/hosted-runtime";
 import type {
@@ -347,6 +348,10 @@ export interface HostedRuntimeDeviceSyncPort {
     connectTarget: string;
     messagingReturnTarget?: HostedRuntimeDeviceSyncMessagingReturnTarget | null;
   }): Promise<HostedExecutionDeviceSyncConnectLinkResponse>;
+  reconcileAccount?(input: {
+    connectionId: string;
+    signal?: AbortSignal | null;
+  }): Promise<HostedExecutionDeviceSyncReconcileResponse>;
   fetchSnapshot(input?: {
     connectionId?: string | null;
     includeCredentialMaterial?: boolean | null;

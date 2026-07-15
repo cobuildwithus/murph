@@ -71,14 +71,15 @@ test("eligible Pulse members can choose Luna or Terra and discover the Edge upgr
     }),
   );
 
-  assert.match(markup, /GPT-5\.6 Luna/);
-  assert.match(markup, /GPT-5\.6 Terra/);
-  assert.match(markup, /GPT-5\.6 Sol/);
-  assert.match(markup, /GPT-5\.6 Sol is available with an active Edge plan\./);
+  assert.match(markup, />Luna</);
+  assert.match(markup, />Terra</);
+  assert.match(markup, />Sol</);
+  assert.match(markup, /Sol requires an active Edge plan\./);
+  assert.match(markup, /High usage · Edge required/);
   assert.match(markup, />Upgrade to Edge<\/button>/);
-  assert.match(markup, /type="radio"/);
-  assert.match(markup, /Save model/);
-  assert.doesNotMatch(markup, new RegExp(`value="${HOSTED_ASSISTANT_SOL_MODEL}"`));
+  assert.match(markup, /role="radio"/);
+  assert.match(markup, /Save change/);
+  assert.match(markup, new RegExp(`value="${HOSTED_ASSISTANT_SOL_MODEL}"`));
 });
 
 test("other non-Edge members can still choose Luna or Terra without an invalid upgrade action", () => {
@@ -92,14 +93,14 @@ test("other non-Edge members can still choose Luna or Terra without an invalid u
     }),
   );
 
-  assert.match(markup, /GPT-5\.6 Luna/);
-  assert.match(markup, /GPT-5\.6 Terra/);
-  assert.match(markup, /GPT-5\.6 Sol/);
-  assert.match(markup, /available with an active Edge plan\./);
+  assert.match(markup, />Luna</);
+  assert.match(markup, />Terra</);
+  assert.match(markup, />Sol</);
+  assert.match(markup, /requires an active Edge plan\./);
   assert.doesNotMatch(markup, />Upgrade to Edge<\/button>/);
-  assert.match(markup, /type="radio"/);
-  assert.match(markup, /Save model/);
-  assert.doesNotMatch(markup, new RegExp(`value="${HOSTED_ASSISTANT_SOL_MODEL}"`));
+  assert.match(markup, /role="radio"/);
+  assert.match(markup, /Save change/);
+  assert.match(markup, new RegExp(`value="${HOSTED_ASSISTANT_SOL_MODEL}"`));
 });
 
 test("non-Edge members can explicitly save Luna as their default model", async () => {
@@ -119,14 +120,12 @@ test("non-Edge members can explicitly save Luna as their default model", async (
       solAvailable: false,
     }),
   );
-  const lunaInput = view.container.querySelector<HTMLInputElement>(
-    `input[value="${HOSTED_ASSISTANT_LUNA_MODEL}"]`,
+  const lunaInput = findModelRadio(
+    view.container,
+    HOSTED_ASSISTANT_LUNA_MODEL,
   );
 
-  assert.equal(
-    view.container.querySelector(`input[value="${HOSTED_ASSISTANT_SOL_MODEL}"]`),
-    null,
-  );
+  assert.ok(findModelRadio(view.container, HOSTED_ASSISTANT_SOL_MODEL).disabled);
   await act(async () => {
     lunaInput?.click();
   });
@@ -142,10 +141,10 @@ test("non-Edge members can explicitly save Luna as their default model", async (
   });
   assert.match(
     view.container.textContent ?? "",
-    /Default model updated to GPT-5\.6 Luna\./,
+    /GPT-5\.6 Luna is now Murph’s default\./,
   );
-  assert.ok(lunaInput?.checked);
-  assert.ok(findButton(view.container, "Save model").disabled);
+  assert.ok(isRadioChecked(lunaInput));
+  assert.ok(findButton(view.container, "Save change").disabled);
 
   view.cleanup();
 });
@@ -169,26 +168,33 @@ test("Edge members can explicitly save Sol as their default model", async () => 
   );
   assert.match(
     view.container.textContent ?? "",
-    /Changes apply to new work and can take a few minutes\./,
+    /Choose the intelligence behind your personal health assistant\./,
   );
-  const terraInput = view.container.querySelector<HTMLInputElement>(
-    `input[value="${HOSTED_ASSISTANT_TERRA_MODEL}"]`,
+  const terraInput = findModelRadio(
+    view.container,
+    HOSTED_ASSISTANT_TERRA_MODEL,
   );
-  const solInput = view.container.querySelector<HTMLInputElement>(
-    `input[value="${HOSTED_ASSISTANT_SOL_MODEL}"]`,
-  );
-  const saveButton = findButton(view.container, "Save model");
+  const solInput = findModelRadio(view.container, HOSTED_ASSISTANT_SOL_MODEL);
+  const saveButton = findButton(view.container, "Save change");
 
-  assert.ok(terraInput?.checked);
-  assert.equal(solInput?.checked, false);
+  assert.ok(isRadioChecked(terraInput));
+  assert.equal(isRadioChecked(solInput), false);
   assert.ok(saveButton.disabled);
 
   await act(async () => {
     solInput?.click();
   });
 
-  assert.equal(terraInput?.checked, false);
-  assert.ok(solInput?.checked);
+  assert.equal(isRadioChecked(terraInput), false);
+  assert.ok(isRadioChecked(solInput));
+  assert.match(
+    findModelLabel(view.container, HOSTED_ASSISTANT_TERRA_MODEL).textContent ?? "",
+    /Current/,
+  );
+  assert.match(
+    findModelLabel(view.container, HOSTED_ASSISTANT_SOL_MODEL).textContent ?? "",
+    /Selected/,
+  );
   assert.equal(saveButton.disabled, false);
 
   await act(async () => {
@@ -203,9 +209,9 @@ test("Edge members can explicitly save Sol as their default model", async () => 
   });
   assert.match(
     view.container.textContent ?? "",
-    /Default model updated to GPT-5\.6 Sol\./,
+    /GPT-5\.6 Sol is now Murph’s default\./,
   );
-  assert.ok(findButton(view.container, "Save model").disabled);
+  assert.ok(findButton(view.container, "Save change").disabled);
 
   view.cleanup();
 });
@@ -229,9 +235,7 @@ test("a generic save failure keeps the selected model available to retry", async
       solAvailable: true,
     }),
   );
-  const solInput = view.container.querySelector<HTMLInputElement>(
-    `input[value="${HOSTED_ASSISTANT_SOL_MODEL}"]`,
-  );
+  const solInput = findModelRadio(view.container, HOSTED_ASSISTANT_SOL_MODEL);
 
   await act(async () => {
     solInput?.click();
@@ -243,10 +247,10 @@ test("a generic save failure keeps the selected model available to retry", async
 
   assert.equal(
     view.container.querySelector('[role="alert"]')?.textContent,
-    "Could not update your default model. Try again.",
+    "We couldn’t save this change. Try again.",
   );
-  assert.ok(solInput?.checked);
-  assert.equal(findButton(view.container, "Save model").disabled, false);
+  assert.ok(isRadioChecked(solInput));
+  assert.equal(findButton(view.container, "Save change").disabled, false);
 
   await act(async () => {
     submitForm(view.container);
@@ -255,9 +259,9 @@ test("a generic save failure keeps the selected model available to retry", async
 
   assert.match(
     view.container.textContent ?? "",
-    /Default model updated to GPT-5\.6 Sol\./,
+    /GPT-5\.6 Sol is now Murph’s default\./,
   );
-  assert.ok(findButton(view.container, "Save model").disabled);
+  assert.ok(findButton(view.container, "Save change").disabled);
   expect(mocks.requestHostedOnboardingJson).toHaveBeenCalledTimes(2);
 
   view.cleanup();
@@ -292,45 +296,95 @@ test("model radios stay labeled and the form becomes busy while saving", async (
   );
   const options = [
     {
-      description:
-        "Efficient for quick, everyday work. Uses less of your plan’s AI usage.",
+      accent: "#777b7d",
+      artwork: "luna",
+      backgroundAccent: "#777b7d",
+      description: "Fast health intelligence",
       model: HOSTED_ASSISTANT_LUNA_MODEL,
-      name: "GPT-5.6 Luna",
+      name: "Luna",
+      usage: "Low usage",
     },
     {
-      description: "Everyday check-ins, questions, and planning.",
+      accent: "#557d78",
+      artwork: "terra",
+      backgroundAccent: "#4f7f97",
+      description: "Advanced health intelligence",
       model: HOSTED_ASSISTANT_TERRA_MODEL,
-      name: "GPT-5.6 Terra",
+      name: "Terra",
+      usage: "Balanced usage",
     },
     {
-      description: "Deeper research and harder tasks. Uses more of your Edge limit.",
+      accent: "#8f6817",
+      artwork: "sol",
+      backgroundAccent: "#d9ad35",
+      description: "Highest health intelligence",
       model: HOSTED_ASSISTANT_SOL_MODEL,
-      name: "GPT-5.6 Sol",
+      name: "Sol",
+      usage: "High usage",
     },
   ] as const;
+  const artworkRadii: number[] = [];
 
   for (const option of options) {
-    const input = view.container.querySelector<HTMLInputElement>(
-      `input[value="${option.model}"]`,
-    );
-    assert.ok(input);
-    const nameId = input.getAttribute("aria-labelledby");
-    const descriptionId = input.getAttribute("aria-describedby");
-    assert.ok(nameId);
-    assert.ok(descriptionId);
+    const input = findModelRadio(view.container, option.model);
+    const label = view.container.querySelector(`label[for="${input.id}"]`);
+    const visibleRadio = label?.querySelector('[role="radio"]');
     assert.equal(
-      view.container.querySelector(`[id="${nameId}"]`)?.textContent,
-      option.name,
+      visibleRadio?.getAttribute("aria-labelledby"),
+      `${input.id}-title`,
     );
     assert.equal(
-      view.container.querySelector(`[id="${descriptionId}"]`)?.textContent,
-      option.description,
+      visibleRadio?.getAttribute("aria-describedby"),
+      `${input.id}-description ${input.id}-meta`,
     );
+    const artwork = label?.querySelector(
+      `svg[data-model-artwork="${option.artwork}"][aria-hidden="true"]`,
+    );
+    assert.ok(artwork);
+    const artworkRadius = Number(
+      artwork.querySelector("circle")?.getAttribute("r"),
+    );
+    assert.ok(Number.isFinite(artworkRadius));
+    artworkRadii.push(artworkRadius);
+    assert.ok(
+      label?.className.includes(
+        `has-data-checked:border-[${option.accent}]`,
+      ),
+    );
+    assert.ok(
+      label?.className.includes(
+        `[&_[data-slot=radio-group-item][data-checked]]:bg-[${option.accent}]`,
+      ),
+    );
+    assert.ok(
+      label?.className.includes(`hover:border-[${option.accent}]/40`),
+    );
+    assert.ok(
+      label?.className.includes(
+        `hover:bg-[${option.backgroundAccent}]/5`,
+      ),
+    );
+    assert.ok(
+      label?.className.includes(
+        `has-data-checked:hover:border-[${option.accent}]`,
+      ),
+    );
+    assert.ok(
+      label?.className.includes(
+        `has-data-checked:hover:bg-[${option.backgroundAccent}]/10`,
+      ),
+    );
+    assert.ok(!label?.className.includes("hover:border-primary/35"));
+    assert.match(label?.textContent ?? "", new RegExp(option.name));
+    assert.match(label?.textContent ?? "", new RegExp(option.description));
+    assert.match(label?.textContent ?? "", new RegExp(option.usage));
   }
-
-  const solInput = view.container.querySelector<HTMLInputElement>(
-    `input[value="${HOSTED_ASSISTANT_SOL_MODEL}"]`,
+  assert.ok(
+    artworkRadii[0] < artworkRadii[1]
+      && artworkRadii[1] < artworkRadii[2],
   );
+
+  const solInput = findModelRadio(view.container, HOSTED_ASSISTANT_SOL_MODEL);
   await act(async () => {
     solInput?.click();
   });
@@ -360,7 +414,7 @@ test("model radios stay labeled and the form becomes busy while saving", async (
 
   assert.equal(form?.getAttribute("aria-busy"), "false");
   assert.equal(fieldset?.hasAttribute("disabled"), false);
-  assert.ok(findButton(view.container, "Save model").disabled);
+  assert.ok(findButton(view.container, "Save change").disabled);
 
   view.cleanup();
 });
@@ -384,9 +438,7 @@ test("a stale Edge page removes Sol without changing the saved model", async () 
       solAvailable: true,
     }),
   );
-  const solInput = view.container.querySelector<HTMLInputElement>(
-    `input[value="${HOSTED_ASSISTANT_SOL_MODEL}"]`,
-  );
+  const solInput = findModelRadio(view.container, HOSTED_ASSISTANT_SOL_MODEL);
 
   await act(async () => {
     solInput?.click();
@@ -398,17 +450,12 @@ test("a stale Edge page removes Sol without changing the saved model", async () 
 
   assert.match(
     view.container.textContent ?? "",
-    /Your Edge access changed\. GPT-5\.6 Luna is still your default\./,
+    /Your Edge access changed\. Murph will keep using GPT-5\.6 Luna\./,
   );
-  const lunaInput = view.container.querySelector<HTMLInputElement>(
-    `input[value="${HOSTED_ASSISTANT_LUNA_MODEL}"]`,
-  );
-  assert.ok(lunaInput?.checked);
-  assert.equal(
-    view.container.querySelector(`input[value="${HOSTED_ASSISTANT_SOL_MODEL}"]`),
-    null,
-  );
-  assert.ok(findButton(view.container, "Save model").disabled);
+  const lunaInput = findModelRadio(view.container, HOSTED_ASSISTANT_LUNA_MODEL);
+  assert.ok(isRadioChecked(lunaInput));
+  assert.ok(findModelRadio(view.container, HOSTED_ASSISTANT_SOL_MODEL).disabled);
+  assert.ok(findButton(view.container, "Save change").disabled);
 
   view.cleanup();
 });
@@ -424,16 +471,9 @@ test("refreshed eligibility resets the client state after an Edge upgrade", asyn
     }),
   );
 
-  assert.ok(
-    view.container.querySelector(`input[value="${HOSTED_ASSISTANT_LUNA_MODEL}"]`),
-  );
-  assert.ok(
-    view.container.querySelector(`input[value="${HOSTED_ASSISTANT_TERRA_MODEL}"]`),
-  );
-  assert.equal(
-    view.container.querySelector(`input[value="${HOSTED_ASSISTANT_SOL_MODEL}"]`),
-    null,
-  );
+  assert.ok(findModelRadio(view.container, HOSTED_ASSISTANT_LUNA_MODEL));
+  assert.ok(findModelRadio(view.container, HOSTED_ASSISTANT_TERRA_MODEL));
+  assert.ok(findModelRadio(view.container, HOSTED_ASSISTANT_SOL_MODEL).disabled);
 
   await view.rerender(
     createElement(HostedAssistantModelSettings, {
@@ -445,15 +485,15 @@ test("refreshed eligibility resets the client state after an Edge upgrade", asyn
     }),
   );
 
-  const terraInput = view.container.querySelector<HTMLInputElement>(
-    `input[value="${HOSTED_ASSISTANT_TERRA_MODEL}"]`,
+  const terraInput = findModelRadio(
+    view.container,
+    HOSTED_ASSISTANT_TERRA_MODEL,
   );
-  const solInput = view.container.querySelector<HTMLInputElement>(
-    `input[value="${HOSTED_ASSISTANT_SOL_MODEL}"]`,
-  );
-  assert.ok(terraInput?.checked);
-  assert.equal(solInput?.checked, false);
-  assert.ok(findButton(view.container, "Save model").disabled);
+  const solInput = findModelRadio(view.container, HOSTED_ASSISTANT_SOL_MODEL);
+  assert.ok(isRadioChecked(terraInput));
+  assert.equal(isRadioChecked(solInput), false);
+  assert.equal(solInput.disabled, false);
+  assert.ok(findButton(view.container, "Save change").disabled);
 
   view.cleanup();
 });
@@ -475,9 +515,7 @@ test("the canonical save response removes Sol after an Edge downgrade", async ()
       solAvailable: true,
     }),
   );
-  const lunaInput = view.container.querySelector<HTMLInputElement>(
-    `input[value="${HOSTED_ASSISTANT_LUNA_MODEL}"]`,
-  );
+  const lunaInput = findModelRadio(view.container, HOSTED_ASSISTANT_LUNA_MODEL);
 
   await act(async () => {
     lunaInput?.click();
@@ -487,17 +525,12 @@ test("the canonical save response removes Sol after an Edge downgrade", async ()
     await Promise.resolve();
   });
 
-  assert.equal(
-    view.container.querySelector(`input[value="${HOSTED_ASSISTANT_SOL_MODEL}"]`),
-    null,
-  );
-  assert.ok(
-    view.container.querySelector(`input[value="${HOSTED_ASSISTANT_TERRA_MODEL}"]`),
-  );
-  assert.ok(lunaInput?.checked);
+  assert.ok(findModelRadio(view.container, HOSTED_ASSISTANT_SOL_MODEL).disabled);
+  assert.ok(findModelRadio(view.container, HOSTED_ASSISTANT_TERRA_MODEL));
+  assert.ok(isRadioChecked(lunaInput));
   assert.match(
     view.container.textContent ?? "",
-    /Default model updated to GPT-5\.6 Luna\./,
+    /GPT-5\.6 Luna is now Murph’s default\./,
   );
 
   view.cleanup();
@@ -523,9 +556,9 @@ test("a dormant Sol preference is explained and can be replaced with Terra", asy
 
   assert.match(
     view.container.textContent ?? "",
-    /GPT-5\.6 Terra is in use now\. GPT-5\.6 Sol remains saved and will resume if Edge access returns\./,
+    /Terra is active while Edge is paused\. Sol is still saved and will return with Edge\./,
   );
-  assert.equal(findButton(view.container, "Save model").disabled, false);
+  assert.equal(findButton(view.container, "Save change").disabled, false);
 
   await act(async () => {
     submitForm(view.container);
@@ -539,9 +572,9 @@ test("a dormant Sol preference is explained and can be replaced with Terra", asy
   });
   assert.doesNotMatch(
     view.container.textContent ?? "",
-    /GPT-5\.6 Sol remains saved/,
+    /Sol is still saved/,
   );
-  assert.ok(findButton(view.container, "Save model").disabled);
+  assert.ok(findButton(view.container, "Save change").disabled);
 
   view.cleanup();
 });
@@ -559,12 +592,35 @@ test("members without active personal access see read-only model controls", () =
 
   assert.match(
     markup,
-    /Active personal Murph access is required to change assistant settings\./,
+    /Model choices are read-only until personal Murph access is active\./,
   );
   assert.match(markup, /<fieldset[^>]*disabled=""/);
-  assert.match(markup, /<button[^>]*disabled=""[^>]*>Save model<\/button>/);
-  assert.doesNotMatch(markup, /GPT-5\.6 Sol is available with an active Edge plan/);
+  assert.match(markup, /<button[^>]*disabled=""[^>]*>Save change<\/button>/);
+  assert.doesNotMatch(markup, /Sol requires an active Edge plan/);
 });
+
+function findModelRadio(
+  container: HTMLElement,
+  model: string,
+): HTMLInputElement {
+  const radio = container.querySelector<HTMLInputElement>(
+    `[id="assistant-model-${model}"]`,
+  );
+  assert.ok(radio);
+  return radio;
+}
+
+function isRadioChecked(radio: HTMLInputElement): boolean {
+  return radio.checked;
+}
+
+function findModelLabel(container: HTMLElement, model: string): HTMLLabelElement {
+  const label = container.querySelector<HTMLLabelElement>(
+    `label[for="assistant-model-${model}"]`,
+  );
+  assert.ok(label);
+  return label;
+}
 
 function findButton(container: HTMLElement, label: string): HTMLButtonElement {
   const button = [...container.querySelectorAll<HTMLButtonElement>("button")].find(

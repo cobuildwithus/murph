@@ -18,6 +18,8 @@ import {
   parseHostedExecutionDeviceSyncRuntimeApplyRequest,
   parseHostedExecutionDeviceSyncRuntimeApplyResponse,
   parseHostedExecutionDeviceSyncDirtyPendingRequest,
+  parseHostedExecutionDeviceSyncReconcileRequest,
+  parseHostedExecutionDeviceSyncReconcileResponse,
   parseHostedExecutionDeviceSyncRuntimeSnapshotRequest,
   parseHostedExecutionDeviceSyncRuntimeSnapshotResponse,
   resolveHostedDeviceSyncWakeContext,
@@ -25,6 +27,32 @@ import {
   sanitizeHostedRuntimeErrorText,
   serializeHostedExecutionDeviceSyncDirtyPayloadIdentity,
 } from "../src/hosted-runtime.ts";
+
+describe("hosted device-sync reconcile contract", () => {
+  it("accepts only the bounded request and queued response shapes", () => {
+    expect(parseHostedExecutionDeviceSyncReconcileRequest({
+      connectionId: "dsc_123",
+    })).toEqual({ connectionId: "dsc_123" });
+    expect(parseHostedExecutionDeviceSyncReconcileResponse({
+      connectionId: "dsc_123",
+      occurredAt: "2026-07-15T12:00:00.000Z",
+      status: "queued",
+    })).toEqual({
+      connectionId: "dsc_123",
+      occurredAt: "2026-07-15T12:00:00.000Z",
+      status: "queued",
+    });
+    expect(() => parseHostedExecutionDeviceSyncReconcileRequest({
+      action: "disconnect",
+      connectionId: "dsc_123",
+    })).toThrow(/action is not supported/u);
+    expect(() => parseHostedExecutionDeviceSyncReconcileResponse({
+      connectionId: "dsc_123",
+      occurredAt: "2026-07-15T12:00:00.000Z",
+      status: "disconnected",
+    })).toThrow(/status must be queued/u);
+  });
+});
 
 describe("serializeHostedExecutionDeviceSyncDirtyPayloadIdentity", () => {
   const companionPayload = {

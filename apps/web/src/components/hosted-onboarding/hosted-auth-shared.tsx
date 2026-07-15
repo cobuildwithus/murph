@@ -1,6 +1,6 @@
 "use client";
 
-import { cn } from "@/lib/utils";
+import { cn } from "@/src/lib/utils";
 import { MurphPulseLoader } from "@/src/components/ui/murph-pulse-loader";
 
 const HOSTED_TERMS_URL = "/legal/terms.pdf";

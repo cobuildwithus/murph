@@ -169,7 +169,7 @@ first.
    URL, title, and visible text. `startUrl` is only a first-page convenience.
 2. `murph.computer_act` runs bounded Playwright code against the current page.
 3. `murph.computer_os_control` is a fallback for one OS-level mouse or keyboard
-   action when `computer_act` cannot operate the page surface.
+   action when `computer_act` cannot reliably operate the page surface.
 4. `murph.computer_pause_for_user` creates a durable pause for confirmation,
    missing information, or secure user takeover.
 5. `murph.computer_finish_run` closes the run when the task is complete, failed,
@@ -205,11 +205,26 @@ For the checkout case with two identical submit buttons, choose explicitly:
 }
 ```
 
-Use `computer_os_control` only when Playwright cannot operate the page surface,
-such as a canvas, native picker, or focus trap. It can click, move, drag, scroll,
-type text, or press keys at the OS level. Do not use it for passwords, payment
-details, one-time codes, raw tokens, or other sensitive private input; pause for
-handoff instead. After OS-control, call `computer_open` when page state matters.
+Use `computer_os_control` as a bounded fallback when Playwright cannot reliably
+operate the page surface. This includes a canvas, native picker, focus trap, or
+a visible, enabled ordinary control that remains unresponsive after one safe
+Playwright locator or keyboard alternative and a specific current-state check.
+For coordinate actions, use `computer_act` to read the control's fresh bounding
+box immediately before the OS action; do not reuse coordinates after scrolling
+or navigation. For every fallback click, set `numClicks: 1`; a double- or
+triple-click can repeat a side effect inside one tool call. OS control can also
+move, drag, scroll, type text, or press keys. Do not use it for passwords,
+payment details, one-time codes, raw tokens, or other sensitive private input;
+pause for handoff instead.
+
+Never use OS-control as a blind second click when the Playwright attempt may
+already have caused a side effect. Inspect the current page first and proceed
+only when it clearly shows that the effect did not happen. Amazon's flaky
+"Place your order" control is one example: default to the Playwright selector
+above, use one coordinate click only after proving the order was not submitted,
+then call `computer_open` to verify confirmation before any further action. If
+the purchase outcome remains ambiguous, stop and hand off instead of clicking
+again.
 
 The service returns the current URL, title, and your returned `result`.
 Do not query or return cookies, local storage, storage state, hidden browser

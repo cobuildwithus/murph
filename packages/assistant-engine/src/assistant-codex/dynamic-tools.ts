@@ -869,7 +869,7 @@ export const MURPH_COMPUTER_OS_CONTROL_TOOL = {
   namespace: 'murph',
   name: 'computer_os_control',
   description:
-    'Fallback only: run one bounded OS-level mouse or keyboard action against the current Kernel browser when computer_act cannot operate the page. Prefer computer_act for normal browser automation. Do not use for passwords, payment details, one-time codes, tokens, or any sensitive private input. After an OS-level action with an unknown outcome, use computer_open once to confirm the resulting page state.',
+    'Fallback only: run one bounded OS-level mouse or keyboard action when computer_act cannot reliably operate the current Kernel page, including a visible enabled control that remains unresponsive after one safe Playwright alternative and a current-state check. Prefer computer_act for normal automation; obtain a fresh bounding box immediately before a coordinate action, and set numClicks to 1 for every fallback click. Never use OS control as a blind second click when a prior attempt may have caused a side effect: use computer_open to prove it did not happen first. After OS control, use computer_open to verify page state, and do not act again if a purchase, booking, submission, or other effect remains ambiguous. Do not use for passwords, payment details, one-time codes, tokens, or sensitive private input.',
   inputSchema: MURPH_COMPUTER_OS_CONTROL_INPUT_SCHEMA,
 } as const
 

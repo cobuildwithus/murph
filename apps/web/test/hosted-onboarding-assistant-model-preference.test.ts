@@ -4,6 +4,7 @@ import { beforeEach, describe, expect, it, vi } from "vitest";
 const mocks = vi.hoisted(() => ({
   findUniqueHostedMember: vi.fn(),
   lockHostedMemberRow: vi.fn(),
+  lockHostedMemberSponsoredAccessRows: vi.fn(),
   updateHostedMember: vi.fn(),
 }));
 
@@ -11,6 +12,7 @@ vi.mock("server-only", () => ({}));
 
 vi.mock("@/src/lib/hosted-onboarding/shared", () => ({
   lockHostedMemberRow: mocks.lockHostedMemberRow,
+  lockHostedMemberSponsoredAccessRows: mocks.lockHostedMemberSponsoredAccessRows,
 }));
 
 import {
@@ -25,11 +27,13 @@ describe("hosted member assistant model preference", () => {
   beforeEach(() => {
     vi.clearAllMocks();
     mocks.lockHostedMemberRow.mockResolvedValue(undefined);
+    mocks.lockHostedMemberSponsoredAccessRows.mockResolvedValue(undefined);
     mocks.updateHostedMember.mockResolvedValue({});
   });
 
-  it("limits Sol eligibility to unsuspended active paid Edge owners", () => {
+  it("limits Sol eligibility to direct paid Edge or active Family Edge personal members", () => {
     const eligible = {
+      accountGroupMemberships: [],
       billingStatus: HostedBillingStatus.active,
       currentBillingPhase: "paid",
       currentBillingPlanCode: "launch_edge_monthly",
@@ -58,6 +62,57 @@ describe("hosted member assistant model preference", () => {
       ...eligible,
       suspendedAt: new Date("2026-07-09T00:00:00.000Z"),
     })).toBe(false);
+
+    const familyEdgeMembership = {
+      group: {
+        billingStatus: HostedBillingStatus.active,
+        suspendedAt: null,
+      },
+      planCode: "edge",
+      status: "active",
+    };
+    const familyEdge = {
+      ...eligible,
+      accountGroupMemberships: [familyEdgeMembership],
+      billingStatus: HostedBillingStatus.not_started,
+      currentBillingPhase: null,
+      currentBillingPlanCode: null,
+    };
+    expect(isHostedMemberSolModelEligible(familyEdge)).toBe(true);
+    expect(isHostedMemberSolModelEligible({
+      ...familyEdge,
+      accountGroupMemberships: [{
+        ...familyEdgeMembership,
+        planCode: "pulse",
+      }],
+    })).toBe(false);
+    expect(isHostedMemberSolModelEligible({
+      ...familyEdge,
+      accountGroupMemberships: [{
+        ...familyEdgeMembership,
+        status: "removed",
+      }],
+    })).toBe(false);
+    expect(isHostedMemberSolModelEligible({
+      ...familyEdge,
+      accountGroupMemberships: [{
+        ...familyEdgeMembership,
+        group: {
+          billingStatus: HostedBillingStatus.unpaid,
+          suspendedAt: null,
+        },
+      }],
+    })).toBe(false);
+    expect(isHostedMemberSolModelEligible({
+      ...familyEdge,
+      accountGroupMemberships: [{
+        ...familyEdgeMembership,
+        group: {
+          billingStatus: HostedBillingStatus.active,
+          suspendedAt: new Date("2026-07-15T00:00:00.000Z"),
+        },
+      }],
+    })).toBe(false);
   });
 
   it("resolves an eligible stored Sol preference to the runtime override", async () => {
@@ -67,6 +122,27 @@ describe("hosted member assistant model preference", () => {
 
     await expect(readHostedMemberAssistantModelPreference({
       memberId: "member_edge",
+      prisma: createReadClient(),
+    })).resolves.toMatchObject({
+      hostedAssistantModelOverride: "gpt-5.6-sol",
+      model: "gpt-5.6-sol",
+      reasoningEffort: "low",
+      solAvailable: true,
+    });
+  });
+
+  it("resolves an active Family Edge member's stored Sol preference to the runtime override", async () => {
+    mocks.findUniqueHostedMember.mockResolvedValue(buildMemberState({
+      assistantModelPreference: "gpt-5.6-sol",
+      billingStatus: HostedBillingStatus.not_started,
+      currentBillingPhase: null,
+      currentBillingPlanCode: null,
+      familyBillingStatus: HostedBillingStatus.active,
+      familyPlanCode: "edge",
+    }));
+
+    await expect(readHostedMemberAssistantModelPreference({
+      memberId: "member_family_edge",
       prisma: createReadClient(),
     })).resolves.toMatchObject({
       hostedAssistantModelOverride: "gpt-5.6-sol",
@@ -135,6 +211,10 @@ describe("hosted member assistant model preference", () => {
       .mockResolvedValueOnce(buildMemberState({
         assistantModelPreference: "gpt-5.6-sol",
         billingStatus: HostedBillingStatus.not_started,
+        currentBillingPhase: null,
+        currentBillingPlanCode: null,
+        familyBillingStatus: HostedBillingStatus.active,
+        familyPlanCode: "pulse",
       }))
       .mockResolvedValueOnce(null);
 
@@ -151,7 +231,7 @@ describe("hosted member assistant model preference", () => {
       memberId: "member_family_sponsored",
       prisma,
     })).resolves.toMatchObject({
-      dormantSolPreference: false,
+      dormantSolPreference: true,
       model: "gpt-5.6-terra",
       reasoningEffort: "low",
       solAvailable: false,
@@ -252,12 +332,57 @@ describe("hosted member assistant model preference", () => {
       updated: true,
     });
     expect(mocks.lockHostedMemberRow).toHaveBeenCalledWith(tx, "member_edge");
+    expect(mocks.lockHostedMemberSponsoredAccessRows).toHaveBeenCalledWith(
+      tx,
+      "member_edge",
+    );
     expect(mocks.updateHostedMember).toHaveBeenCalledWith({
       data: {
         assistantModelPreference: "gpt-5.6-sol",
       },
       where: {
         id: "member_edge",
+      },
+    });
+  });
+
+  it("locks current sponsorship and saves Sol for an active Family Edge member", async () => {
+    const tx = createTransactionClient();
+    mocks.findUniqueHostedMember.mockResolvedValue(buildMemberState({
+      assistantModelPreference: null,
+      billingStatus: HostedBillingStatus.not_started,
+      currentBillingPhase: null,
+      currentBillingPlanCode: null,
+      familyBillingStatus: HostedBillingStatus.active,
+      familyPlanCode: "edge",
+    }));
+
+    await expect(updateHostedMemberAssistantModelPreferenceTx({
+      memberId: "member_family_edge",
+      model: "gpt-5.6-sol",
+      prisma: tx,
+    })).resolves.toMatchObject({
+      hostedAssistantModelOverride: "gpt-5.6-sol",
+      model: "gpt-5.6-sol",
+      solAvailable: true,
+      effectiveModelUpdated: true,
+      updated: true,
+    });
+    expect(mocks.lockHostedMemberRow).toHaveBeenCalledWith(tx, "member_family_edge");
+    expect(mocks.lockHostedMemberSponsoredAccessRows).toHaveBeenCalledWith(
+      tx,
+      "member_family_edge",
+    );
+    expect(mocks.lockHostedMemberRow.mock.invocationCallOrder[0])
+      .toBeLessThan(mocks.lockHostedMemberSponsoredAccessRows.mock.invocationCallOrder[0]!);
+    expect(mocks.lockHostedMemberSponsoredAccessRows.mock.invocationCallOrder[0])
+      .toBeLessThan(mocks.findUniqueHostedMember.mock.invocationCallOrder[0]!);
+    expect(mocks.updateHostedMember).toHaveBeenCalledWith({
+      data: {
+        assistantModelPreference: "gpt-5.6-sol",
+      },
+      where: {
+        id: "member_family_edge",
       },
     });
   });
@@ -295,7 +420,11 @@ describe("hosted member assistant model preference", () => {
     const tx = createTransactionClient();
     mocks.findUniqueHostedMember.mockResolvedValue(buildMemberState({
       assistantModelPreference: null,
-      currentBillingPlanCode: "launch_monthly",
+      billingStatus: HostedBillingStatus.not_started,
+      currentBillingPhase: null,
+      currentBillingPlanCode: null,
+      familyBillingStatus: HostedBillingStatus.active,
+      familyPlanCode: "pulse",
     }));
 
     await expect(updateHostedMemberAssistantModelPreferenceTx({
@@ -391,6 +520,9 @@ function buildMemberState(input: {
   currentBillingPhase?: string | null;
   currentBillingPlanCode?: string | null;
   familyBillingStatus?: HostedBillingStatus | null;
+  familyMembershipStatus?: string;
+  familyPlanCode?: string;
+  familySuspendedAt?: Date | null;
   suspendedAt?: Date | null;
   threadContainerMemberId?: string | null;
 }) {
@@ -400,9 +532,10 @@ function buildMemberState(input: {
       : [{
           group: {
             billingStatus: input.familyBillingStatus,
-            suspendedAt: null,
+            suspendedAt: input.familySuspendedAt ?? null,
           },
-          status: "active",
+          planCode: input.familyPlanCode ?? "pulse",
+          status: input.familyMembershipStatus ?? "active",
         }],
     assistantModelPreference: input.assistantModelPreference,
     assistantReasoningEffortPreference:

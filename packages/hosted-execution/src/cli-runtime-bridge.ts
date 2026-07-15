@@ -1,5 +1,9 @@
 import type { DeviceSyncAccountRecord } from "@murphai/device-syncd/client";
-import { parseHostedExecutionDeviceSyncConnectLinkResponse } from "@murphai/device-syncd/hosted-runtime";
+import {
+  parseHostedExecutionDeviceSyncConnectLinkResponse,
+  parseHostedExecutionDeviceSyncReconcileResponse,
+  type HostedExecutionDeviceSyncReconcileResponse,
+} from "@murphai/device-syncd/hosted-runtime";
 import { z } from "zod";
 
 export const HOSTED_RUNTIME_PROCESS_ENV = "MURPH_HOSTED_RUNTIME_PROCESS";
@@ -15,6 +19,8 @@ export const HOSTED_RUNTIME_CODEX_MODEL_CATALOG_JSON_ENV =
 export const HOSTED_CLI_BRIDGE_ASSISTANT_CURRENT_ROUTE_PATH = "/assistant/current-route";
 export const HOSTED_CLI_BRIDGE_DEVICE_CONNECT_LINK_PATH = "/device/connect-link";
 export const HOSTED_CLI_BRIDGE_DEVICE_ACCOUNT_LIST_PATH = "/device/accounts/list";
+export const HOSTED_CLI_BRIDGE_DEVICE_ACCOUNT_RECONCILE_PATH =
+  "/device/accounts/reconcile";
 export const HOSTED_CLI_BRIDGE_REQUEST_TIMEOUT_MS = 10_000;
 
 export const HOSTED_CLI_BRIDGE_ENV_NAMES = [
@@ -45,6 +51,10 @@ const hostedCliDeviceConnectLinkRequestSchema = z.object({
 const hostedCliDeviceAccountListRequestSchema = z.object({
   provider: z.string().trim().min(1).nullable().optional(),
   sourceProvider: z.string().trim().min(1).nullable().optional(),
+}).strict();
+
+const hostedCliDeviceAccountReconcileRequestSchema = z.object({
+  accountId: z.string().trim().min(1),
 }).strict();
 
 const hostedCliAssistantCurrentRouteRequestSchema = z.object({}).strict();
@@ -126,6 +136,9 @@ export type HostedCliDeviceConnectLinkRequest =
 
 export type HostedCliDeviceAccountListRequest =
   z.infer<typeof hostedCliDeviceAccountListRequestSchema>;
+
+export type HostedCliDeviceAccountReconcileRequest =
+  z.infer<typeof hostedCliDeviceAccountReconcileRequestSchema>;
 
 export type HostedCliAssistantCurrentRouteRequest =
   z.infer<typeof hostedCliAssistantCurrentRouteRequestSchema>;
@@ -224,6 +237,12 @@ export function parseHostedCliDeviceAccountListRequest(
   return hostedCliDeviceAccountListRequestSchema.parse(value);
 }
 
+export function parseHostedCliDeviceAccountReconcileRequest(
+  value: unknown,
+): HostedCliDeviceAccountReconcileRequest {
+  return hostedCliDeviceAccountReconcileRequestSchema.parse(value);
+}
+
 export function parseHostedCliAssistantCurrentRouteRequest(
   value: unknown,
 ): HostedCliAssistantCurrentRouteRequest {
@@ -292,6 +311,25 @@ export async function requestHostedCliDeviceAccountList(input: {
   });
 
   return hostedCliDeviceAccountListResponseSchema.parse(payload);
+}
+
+export async function requestHostedCliDeviceAccountReconcile(input: {
+  accountId: string;
+  bridge: HostedCliBridgeClientConfig;
+  fetchImpl?: typeof fetch;
+  timeoutMs?: number;
+}): Promise<HostedExecutionDeviceSyncReconcileResponse> {
+  const payload = await requestHostedCliBridgeJson({
+    body: parseHostedCliDeviceAccountReconcileRequest({
+      accountId: input.accountId,
+    }),
+    bridge: input.bridge,
+    fetchImpl: input.fetchImpl,
+    path: HOSTED_CLI_BRIDGE_DEVICE_ACCOUNT_RECONCILE_PATH,
+    timeoutMs: input.timeoutMs,
+  });
+
+  return parseHostedExecutionDeviceSyncReconcileResponse(payload);
 }
 
 async function requestHostedCliBridgeJson(input: {
