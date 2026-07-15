@@ -820,7 +820,6 @@ async function resumeHostedPulseTrialStartPaidPausedSubscription(input: {
               buildHostedPulseTrialStartPaidCleanupIdempotencyKey(),
           }),
         );
-        stripeMutationCompleted = true;
         assertHostedStripePulseTrialStartPaidPostMutationSubscriptionShape({
           priceId: input.priceId,
           subscription: cleanedSubscription,

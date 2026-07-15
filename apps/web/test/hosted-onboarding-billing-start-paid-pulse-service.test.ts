@@ -1012,7 +1012,7 @@ describe("startHostedPulseTrialPaidPlan", () => {
     expect(mocks.stripe.subscriptions.resume).not.toHaveBeenCalled();
   });
 
-  test("canonical-reconciles a deterministic resume failure after paused cleanup succeeds", async () => {
+  test("surfaces a deterministic resume failure after paused cleanup succeeds", async () => {
     mocks.readHostedMemberCoreState.mockResolvedValueOnce({
       billingStatus: HostedBillingStatus.paused,
       createdAt: new Date("2026-05-01T00:00:00.000Z"),
@@ -1049,8 +1049,7 @@ describe("startHostedPulseTrialPaidPlan", () => {
       trialEnd: null,
     });
     mocks.stripe.subscriptions.retrieve
-      .mockResolvedValueOnce(pausedLegacySubscription)
-      .mockResolvedValueOnce(cleanedPausedSubscription);
+      .mockResolvedValueOnce(pausedLegacySubscription);
     mocks.stripe.subscriptions.update.mockResolvedValueOnce(cleanedPausedSubscription);
     mocks.stripe.subscriptions.resume.mockRejectedValueOnce({
       statusCode: 400,
@@ -1060,19 +1059,25 @@ describe("startHostedPulseTrialPaidPlan", () => {
     await expect(startHostedPulseTrialPaidPlan({
       memberId: "member_123",
       now: new Date("2026-05-06T00:00:00.000Z"),
-    })).resolves.toEqual({
-      billingPlanCode: "launch_monthly",
-      status: "billing_pending",
+    })).rejects.toMatchObject({
+      code: "HOSTED_PULSE_TRIAL_START_PAID_STRIPE_UNAVAILABLE",
+      details: {
+        operationName: "subscription.resume.paused-trial",
+        statusCode: 400,
+        type: "StripeInvalidRequestError",
+      },
+      httpStatus: 502,
+      retryable: true,
     });
 
-    expect(mocks.stripe.subscriptions.retrieve).toHaveBeenCalledTimes(2);
+    expect(mocks.stripe.subscriptions.retrieve).toHaveBeenCalledTimes(1);
     expect(mocks.withHostedMemberStripeMutationLock).toHaveBeenCalledTimes(1);
     expect(mocks.stripe.subscriptions.update).toHaveBeenCalledTimes(1);
     expect(mocks.stripe.subscriptions.resume).toHaveBeenCalledTimes(1);
     expect(mocks.applyStripeInvoicePaid).not.toHaveBeenCalled();
   });
 
-  test("canonical-reconciles deterministic resume failures after ordinary paused cleanup", async () => {
+  test("surfaces deterministic resume failures after ordinary paused cleanup", async () => {
     mocks.readHostedMemberCoreState.mockResolvedValueOnce({
       billingStatus: HostedBillingStatus.paused,
       createdAt: new Date("2026-05-01T00:00:00.000Z"),
@@ -1099,12 +1104,18 @@ describe("startHostedPulseTrialPaidPlan", () => {
     await expect(startHostedPulseTrialPaidPlan({
       memberId: "member_123",
       now: new Date("2026-05-06T00:00:00.000Z"),
-    })).resolves.toEqual({
-      billingPlanCode: "launch_monthly",
-      status: "billing_pending",
+    })).rejects.toMatchObject({
+      code: "HOSTED_PULSE_TRIAL_START_PAID_STRIPE_UNAVAILABLE",
+      details: {
+        operationName: "subscription.resume.paused-trial",
+        statusCode: 400,
+        type: "StripeInvalidRequestError",
+      },
+      httpStatus: 502,
+      retryable: true,
     });
 
-    expect(mocks.stripe.subscriptions.retrieve).toHaveBeenCalledTimes(2);
+    expect(mocks.stripe.subscriptions.retrieve).toHaveBeenCalledTimes(1);
     expect(mocks.stripe.subscriptions.update).toHaveBeenCalledTimes(1);
     expect(mocks.stripe.subscriptions.resume).toHaveBeenCalledTimes(1);
     expect(mocks.applyStripeInvoicePaid).not.toHaveBeenCalled();
