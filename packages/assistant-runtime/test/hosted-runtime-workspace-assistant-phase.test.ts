@@ -12104,13 +12104,15 @@ describe("runHostedWorkspaceAssistantPhase runtime logs", () => {
     ).toBe("2026-04-27T00:10:00.000Z");
   });
 
-  it("runs the automation lane when pending assistant input exists before background work", async () => {
+  it("probes pending input when imported conversations have no eligible foreground ids", async () => {
     mocks.resolveHostedPendingAssistantInputWakeAt.mockResolvedValueOnce(
       "2026-04-27T00:10:00.000Z",
     );
 
     const result = await runHostedWorkspaceAssistantPhase(createPhaseInput({
-      importedCount: 0,
+      assistantInputIds: [],
+      conversationImportedCount: 1,
+      importedCount: 1,
       now: () => "2026-04-27T00:10:00.000Z",
     }));
 
