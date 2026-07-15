@@ -20480,6 +20480,18 @@ describe("hosted workspace runtime entrypoint", () => {
             vaultRoot,
           });
 
+          const invalidRelease = await input.beforeProviderAcceptedInputs?.({
+            acceptedInputs: [
+              { id: firstInputId, source: "assistant-input" },
+              {
+                id: "ain_22222222222222222222222222222222",
+                source: "assistant-input",
+              },
+            ],
+          });
+          assert.equal(input.currentAssistantPersonalizationInputId?.(), null);
+          await invalidRelease?.();
+
           const release = await input.beforeProviderAcceptedInputs?.({
             acceptedInputs: [
               { id: secondInputId, source: "assistant-input" },

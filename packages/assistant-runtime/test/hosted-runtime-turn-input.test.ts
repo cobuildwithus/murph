@@ -785,7 +785,7 @@ describe("selectHostedAssistantInputIds", () => {
 
     expect(selection.inputIds).toEqual(inputIds.slice(0, 50));
     expect(selection.inputIds).not.toContain(inputIds[50]);
-    await expect(resolveHostedPreferenceCausalSeqForSelectedInput({
+    await expect(resolveHostedPersonalizationInputIdForAcceptedInputs({
       assistantInputIds: inputIds,
       vaultRoot,
     })).resolves.toBeNull();
