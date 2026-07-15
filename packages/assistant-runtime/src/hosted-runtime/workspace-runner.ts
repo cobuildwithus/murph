@@ -811,14 +811,15 @@ export async function runHostedWorkspaceUntilIdleOrBudget(
         vaultRoot: input.vaultRoot,
       })).inputIds
     : [];
+  const precomputedAssistantInputTail = acceptedInitialAssistantInputBatch
+    ? filterHostedWorkspaceRunnerAssistantInputBatch(
+        acceptedInitialAssistantInputBatch,
+        new Set(selectedInitialAssistantInputIds),
+      )
+    : null;
   checkpointRequestSession.seedAssistantInputSelection(
     selectedInitialAssistantInputIds.length,
-    acceptedInitialAssistantInputBatch
-      ? filterHostedWorkspaceRunnerAssistantInputBatch(
-          acceptedInitialAssistantInputBatch,
-          new Set(selectedInitialAssistantInputIds),
-        )
-      : null,
+    precomputedAssistantInputTail,
   );
 
   const runAssistantPhase = input.runAssistantPhase;
@@ -1169,6 +1170,8 @@ export async function runHostedWorkspaceUntilIdleOrBudget(
         initialAssistantInputBatchHasWork
         || initialMailboxImportHasForegroundConversationWork
         || foregroundConversationWorkObserved,
+      hasPrecomputedAssistantInputTail:
+        hostedWorkspaceRunnerAssistantInputBatchHasWork(precomputedAssistantInputTail),
       now: input.now,
       postCheckpointWakeMerged,
       result: assistantPhaseResult,
@@ -2618,6 +2621,7 @@ function mergeAssistantContextSnapshotRefreshWake(input: {
 
 async function reconcilePendingAssistantInputWake(input: {
   foregroundConversationWorkObserved: boolean;
+  hasPrecomputedAssistantInputTail: boolean;
   now?: (() => string) | null;
   postCheckpointWakeMerged: boolean;
   result: HostedWorkspaceRunnerAssistantPhaseResult;
@@ -2627,7 +2631,7 @@ async function reconcilePendingAssistantInputWake(input: {
     const nextWakeReason = input.result.nextWakeReason ?? "assistant";
     const wakeIsImmediate = hostedWorkspaceRunnerWakeIsImmediate(input.result.nextWakeAt, input.now);
     if (input.foregroundConversationWorkObserved && nextWakeReason === "assistant") {
-      if (wakeIsImmediate) {
+      if (wakeIsImmediate || input.hasPrecomputedAssistantInputTail) {
         return false;
       }
     } else if (
