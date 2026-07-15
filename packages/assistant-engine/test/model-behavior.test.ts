@@ -563,7 +563,10 @@ describe('assistant execution prompt contract', () => {
 
     expect(prompt).toContain('send_progress_update')
     expect(prompt).toContain(
-      'A required `send_progress_update` call is not a final answer and does not conflict with acting directly',
+      'Native commentary is internal, not member-visible',
+    )
+    expect(prompt).toContain(
+      'Use `murph.send_progress_update` for interim updates the member must see; commentary does not count',
     )
     expect(prompt).toContain(
       'Use it sparingly for genuinely long, multi-step, research, long parsing/scans, or substantial non-audio content-inspection work',
