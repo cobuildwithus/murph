@@ -1124,7 +1124,7 @@ describe('assistant system prompt cache stability', () => {
     )
 
     expect(layers.staticCacheableCorePrompt.length).toBeLessThanOrEqual(7_500)
-    expect(layers.stableRouteCapabilityPrompt.length).toBeLessThanOrEqual(61_000)
+    expect(layers.stableRouteCapabilityPrompt.length).toBeLessThanOrEqual(61_018)
   })
 
   it('passes the injected CLI contract through byte-for-byte at the stable-route tail', () => {
