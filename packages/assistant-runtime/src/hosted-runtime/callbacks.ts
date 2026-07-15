@@ -35,6 +35,7 @@ import {
   dispatchAssistantOutboxIntent,
   findAssistantAutoReplyDeliveryIntentIds,
   hasAssistantAutoReplyChannel,
+  isAssistantOutboxReplyBubbleSuccessor,
   listAssistantOutboxIntents,
   markAssistantOutboxIntentMirrorTerminalById,
   normalizeAssistantDeliveryError,
@@ -118,6 +119,7 @@ const HOSTED_ASSISTANT_DELIVERY_BOUNDARY = "hosted_runtime_outbox";
 const HOSTED_NON_IDEMPOTENT_CONFIRMATION_GRACE_MS = 2 * 60 * 1000;
 const HOSTED_SENDING_STALE_RECONCILIATION_MS = 10 * 60 * 1000;
 const HOSTED_LINQ_DELIVERY_OUTCOME_WRITE_TIMEOUT_MS = 2_000;
+const HOSTED_LINQ_REPLY_BUBBLE_PAUSE_MS = 1_500;
 const HOSTED_TELEGRAM_VOICE_MEMO_DELIVERY_OPERATION =
   "Hosted assistant Telegram voice memo delivery";
 
@@ -1687,6 +1689,23 @@ export async function drainHostedPreparedAssistantDeliveries(input: {
           vaultRoot: input.vaultRoot,
         });
       }
+      const nextEffect = input.assistantDeliveryEffects[index + 1] ?? null;
+      if (shouldPauseBeforeNextHostedAssistantReplyBubble({
+        currentEffect: assistantDeliveryEffect,
+        nextEffect,
+        outcome,
+      })) {
+        try {
+          await waitForHostedAssistantReplyBubblePause(input.signal ?? null);
+        } catch (error) {
+          await resetHostedPreparedAssistantDeliveryEffects({
+            effects: input.assistantDeliveryEffects.slice(index + 1),
+            preparedDispatchByIntentId,
+            vaultRoot: input.vaultRoot,
+          });
+          throw error;
+        }
+      }
     }
   } catch (error) {
     recordHostedLinqTypingStopStillPendingEffects({
@@ -1705,6 +1724,74 @@ export async function drainHostedPreparedAssistantDeliveries(input: {
   }
 
   return outcomes;
+}
+
+function shouldPauseBeforeNextHostedAssistantReplyBubble(input: {
+  currentEffect: HostedAssistantDeliveryEffect;
+  nextEffect: HostedAssistantDeliveryEffect | null;
+  outcome: HostedAssistantDeliveryOutcome;
+}): boolean {
+  if (input.outcome.deliveryStatus !== "sent" || !input.nextEffect) {
+    return false;
+  }
+  if (
+    input.currentEffect.deliveryPhase !== "foreground_current_turn"
+    || input.nextEffect.deliveryPhase !== "foreground_current_turn"
+    || isHostedAssistantReactionOnlyEffect(input.currentEffect)
+    || isHostedAssistantReactionOnlyEffect(input.nextEffect)
+  ) {
+    return false;
+  }
+  const currentChannel = normalizeHostedAssistantDeliveryChannel(
+    input.currentEffect.payload.channel,
+  )?.toLowerCase();
+  const nextChannel = normalizeHostedAssistantDeliveryChannel(
+    input.nextEffect.payload.channel,
+  )?.toLowerCase();
+  if (currentChannel !== "linq" || nextChannel !== "linq") {
+    return false;
+  }
+  if (
+    readHostedAssistantDeliveryEffectBoundaryKey(input.currentEffect)
+    !== readHostedAssistantDeliveryEffectBoundaryKey(input.nextEffect)
+  ) {
+    return false;
+  }
+  return isAssistantOutboxReplyBubbleSuccessor(
+    {
+      deliveryIdempotencyKey: input.currentEffect.payload.idempotencyKey,
+      turnId: input.currentEffect.payload.turnId,
+    },
+    {
+      deliveryIdempotencyKey: input.nextEffect.payload.idempotencyKey,
+      turnId: input.nextEffect.payload.turnId,
+    },
+  );
+}
+
+function waitForHostedAssistantReplyBubblePause(
+  signal: AbortSignal | null,
+): Promise<void> {
+  assertHostedDeliveryLiveness(signal);
+  return new Promise((resolve, reject) => {
+    const onAbort = () => {
+      clearTimeout(timer);
+      signal?.removeEventListener("abort", onAbort);
+      try {
+        assertHostedDeliveryLiveness(signal);
+      } catch (error) {
+        reject(error);
+      }
+    };
+    const timer = setTimeout(() => {
+      signal?.removeEventListener("abort", onAbort);
+      resolve();
+    }, HOSTED_LINQ_REPLY_BUBBLE_PAUSE_MS);
+    signal?.addEventListener("abort", onAbort, { once: true });
+    if (signal?.aborted) {
+      onAbort();
+    }
+  });
 }
 
 async function maybeYieldHostedPreparedAssistantDeliveryDrain(input: {
