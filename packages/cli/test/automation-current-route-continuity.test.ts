@@ -328,7 +328,7 @@ test("the managed onboarding follow-up materializes its signup route into the cu
     vi.stubEnv(HOSTED_CLI_BRIDGE_TOKEN_ENV, "test-bridge-token");
     vi.stubEnv(HOSTED_CLI_BRIDGE_URL_ENV, bridge.url);
 
-    await upsertAutomation({
+    const managedFollowup = {
       continuityPolicy: MURPH_ONBOARDING_FOLLOWUP_AUTOMATION.continuityPolicy,
       instructions: MURPH_ONBOARDING_FOLLOWUP_AUTOMATION.instructions,
       route: {
@@ -343,12 +343,11 @@ test("the managed onboarding follow-up materializes its signup route into the cu
       slug: MURPH_ONBOARDING_FOLLOWUP_AUTOMATION.slug,
       status: "active",
       summary: MURPH_ONBOARDING_FOLLOWUP_AUTOMATION.summary,
-      tags: [...MURPH_ONBOARDING_FOLLOWUP_AUTOMATION.tags],
       title: MURPH_ONBOARDING_FOLLOWUP_AUTOMATION.title,
       vaultRoot,
-    });
+    } as const;
 
-    const saved = await runInProcessJsonCli(cli, [
+    const saveArgs = [
       "automation",
       "save",
       MURPH_ONBOARDING_FOLLOWUP_AUTOMATION.title,
@@ -366,7 +365,23 @@ test("the managed onboarding follow-up materializes its signup route into the cu
       "linq_chat_real",
       "--vault",
       vaultRoot,
-    ]);
+    ];
+
+    await upsertAutomation({
+      ...managedFollowup,
+      tags: MURPH_ONBOARDING_FOLLOWUP_AUTOMATION.tags.filter(
+        (tag) => tag !== "murph-managed:onboarding-followup",
+      ),
+    });
+    const untaggedSave = await runInProcessJsonCli(cli, saveArgs);
+    assert.equal(untaggedSave.envelope.ok, false);
+    assert.match(untaggedSave.envelope.error.message ?? "", /current chat/i);
+
+    await upsertAutomation({
+      ...managedFollowup,
+      tags: [...MURPH_ONBOARDING_FOLLOWUP_AUTOMATION.tags],
+    });
+    const saved = await runInProcessJsonCli(cli, saveArgs);
     assert.equal(
       saved.envelope.ok,
       true,

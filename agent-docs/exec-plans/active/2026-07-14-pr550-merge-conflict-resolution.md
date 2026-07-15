@@ -225,3 +225,10 @@ Updated: 2026-07-14
 - The restored CLI route-materialization regression passed all 9 tests; CLI and
   Cloudflare typechecks passed. A second full E2E rerun against the rebuilt
   runner is in progress while the requested checkpoint is pushed.
+- The second full onboarding E2E passed both tests in 448 seconds against the
+  rebuilt runner: route materialization, first scheduled send, deterministic
+  archive, and no provider call or Linq send at the removed second wake.
+- The required coverage-write audit found one negative-boundary gap and added
+  proof that the otherwise identical onboarding record is rejected when its
+  canonical ownership tag is absent. The focused 9-test file, CLI typecheck,
+  and diff check pass after that test-only hardening.
