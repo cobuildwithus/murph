@@ -67,6 +67,10 @@ export const POST = withJsonError(async (request: Request) => {
       });
     }
     if (error instanceof HostedPulseTrialExtensionProviderError) {
+      console.error(
+        "Hosted ops member Pulse Trial Stripe request failed.",
+        error.logDetails,
+      );
       throw hostedOnboardingError({
         code: "HOSTED_OPS_PULSE_TRIAL_EXTENSION_PROVIDER_UNAVAILABLE",
         httpStatus: 502,

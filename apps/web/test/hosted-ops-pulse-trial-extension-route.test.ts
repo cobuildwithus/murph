@@ -50,6 +50,7 @@ const PREVIEW_PROOF: HostedPulseTrialExtensionPreviewProof = {
 };
 
 let route: RouteModule;
+let consoleErrorSpy: ReturnType<typeof vi.spyOn>;
 let consoleInfoSpy: ReturnType<typeof vi.spyOn>;
 const originalOpsMemberIds = process.env.HOSTED_OPS_MEMBER_IDS;
 
@@ -63,6 +64,7 @@ describe("hosted ops member Pulse Trial extension route", () => {
     vi.useFakeTimers({ toFake: ["Date"] });
     vi.setSystemTime(NOW);
     process.env.HOSTED_OPS_MEMBER_IDS = OPERATOR_MEMBER_ID;
+    consoleErrorSpy = vi.spyOn(console, "error").mockImplementation(() => {});
     consoleInfoSpy = vi.spyOn(console, "info").mockImplementation(() => {});
     mocks.requireActiveHostedAppSessionFromRequest.mockResolvedValue({
       member: { id: OPERATOR_MEMBER_ID },
@@ -75,6 +77,7 @@ describe("hosted ops member Pulse Trial extension route", () => {
 
   afterEach(() => {
     vi.useRealTimers();
+    consoleErrorSpy.mockRestore();
     consoleInfoSpy.mockRestore();
     if (originalOpsMemberIds === undefined) {
       delete process.env.HOSTED_OPS_MEMBER_IDS;
@@ -158,7 +161,16 @@ describe("hosted ops member Pulse Trial extension route", () => {
     mocks.applyHostedPulseTrialExtension
       .mockRejectedValueOnce(new HostedPulseTrialExtensionPreviewStaleError())
       .mockRejectedValueOnce(new HostedPulseTrialExtensionLockBusyError())
-      .mockRejectedValueOnce(new HostedPulseTrialExtensionProviderError());
+      .mockRejectedValueOnce(new HostedPulseTrialExtensionProviderError({
+        error: {
+          code: "resource_missing",
+          message: `sensitive ${TARGET_MEMBER_ID}`,
+          requestId: "req_private",
+          statusCode: 404,
+          type: "StripeInvalidRequestError",
+        },
+        operationName: "retrieve_subscription",
+      }));
 
     const stale = await route.POST(makeRequest({
       memberId: TARGET_MEMBER_ID,
@@ -180,6 +192,27 @@ describe("hosted ops member Pulse Trial extension route", () => {
     assert.equal(busy.status, 409);
     assert.equal(unavailable.status, 502);
     expect(mocks.applyHostedPulseTrialExtension).toHaveBeenCalledTimes(3);
+    assert.deepEqual(await unavailable.json(), {
+      error: {
+        code: "HOSTED_OPS_PULSE_TRIAL_EXTENSION_PROVIDER_UNAVAILABLE",
+        message: "Stripe could not confirm this trial extension request.",
+        retryable: true,
+      },
+    });
+    expect(consoleErrorSpy).toHaveBeenCalledTimes(2);
+    expect(consoleErrorSpy.mock.calls[0]).toEqual([
+      "Hosted ops member Pulse Trial Stripe request failed.",
+      {
+        code: "resource_missing",
+        operationName: "retrieve_subscription",
+        requestIdPresent: true,
+        statusCode: 404,
+        type: "StripeInvalidRequestError",
+      },
+    ]);
+    expect(JSON.stringify(consoleErrorSpy.mock.calls[0])).not.toMatch(
+      /hbm_|req_|sensitive/u,
+    );
   });
 
   test("rejects retired campaign and batch modes", async () => {

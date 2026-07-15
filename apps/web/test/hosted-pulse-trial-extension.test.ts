@@ -495,16 +495,174 @@ describe("single-member Pulse Trial extension", () => {
       async (input: { run: (tx: object) => Promise<unknown> }) => input.run({}),
     );
     stripe.retrieveSubscription.mockResolvedValue(paused);
-    stripe.updateSubscription.mockRejectedValueOnce(new Error("provider unavailable"));
-    await expect(applyHostedPulseTrialExtension({
+    stripe.updateSubscription.mockRejectedValueOnce({
+      code: "api_connection_error",
+      message: `sensitive ${MEMBER_ID} ${CUSTOMER_ID} ${SUBSCRIPTION_ID}`,
+      requestId: "req_private",
+      statusCode: 503,
+      type: "StripeConnectionError",
+    });
+    const updateError = await applyHostedPulseTrialExtension({
       memberId: MEMBER_ID,
       now: new Date("2026-07-14T16:02:00.000Z"),
       previewProof: preview.previewProof,
       priceId: PRICE_ID,
       prisma: {} as never,
       stripe,
-    })).rejects.toBeInstanceOf(HostedPulseTrialExtensionProviderError);
+    }).catch((error: unknown) => error);
 
+    expect(updateError).toBeInstanceOf(HostedPulseTrialExtensionProviderError);
+    expect((updateError as HostedPulseTrialExtensionProviderError).logDetails)
+      .toEqual({
+        code: "api_connection_error",
+        operationName: "update_subscription",
+        requestIdPresent: true,
+        statusCode: 503,
+        type: "StripeConnectionError",
+      });
+    expect(JSON.stringify(
+      (updateError as HostedPulseTrialExtensionProviderError).logDetails,
+    )).not.toMatch(/hbm_|cus_|sub_|req_|sensitive/u);
+
+    expect(mocks.updateHostedMemberCoreState).not.toHaveBeenCalled();
+    expect(mocks.writeHostedMemberStripeBillingRefTx).not.toHaveBeenCalled();
+    expect(
+      mocks.reconcileHostedAiUsageAllowancePeriodForMemberTx,
+    ).not.toHaveBeenCalled();
+  });
+
+  test("projects a failed Stripe lookup into identifier-free diagnostics", async () => {
+    const stripe = makeStripeClient(makeSubscription());
+    stripe.retrieveSubscription.mockRejectedValueOnce({
+      code: "resource_missing",
+      message: `No such subscription: ${SUBSCRIPTION_ID}`,
+      param: "subscription",
+      rawType: "invalid_request_error",
+      requestId: "req_private",
+      statusCode: 404,
+    });
+
+    const lookupError = await previewHostedPulseTrialExtension({
+      memberId: MEMBER_ID,
+      now: NOW,
+      priceId: PRICE_ID,
+      prisma: {} as never,
+      stripe,
+    }).catch((error: unknown) => error);
+
+    expect(lookupError).toBeInstanceOf(HostedPulseTrialExtensionProviderError);
+    expect((lookupError as HostedPulseTrialExtensionProviderError).logDetails)
+      .toEqual({
+        code: "resource_missing",
+        operationName: "retrieve_subscription",
+        requestIdPresent: true,
+        statusCode: 404,
+        type: "invalid_request_error",
+      });
+    expect(JSON.stringify(
+      (lookupError as HostedPulseTrialExtensionProviderError).logDetails,
+    )).not.toMatch(/hbm_|cus_|sub_|req_|message|param/u);
+  });
+
+  test("rejects identifier-shaped metadata and tolerates throwing provider getters", async () => {
+    const stripe = makeStripeClient(makeSubscription());
+    stripe.retrieveSubscription
+      .mockRejectedValueOnce({
+        code: "whsec_private",
+        rawType: SUBSCRIPTION_ID,
+        requestId: "req_private",
+        statusCode: 600,
+        type: "sk_private",
+      })
+      .mockRejectedValueOnce(Object.defineProperties({}, {
+        code: {
+          get: () => {
+            throw new Error(`sensitive ${MEMBER_ID}`);
+          },
+        },
+        rawType: { get: () => "invalid_request_error" },
+        requestId: {
+          get: () => {
+            throw new Error("sensitive request ID");
+          },
+        },
+        statusCode: {
+          get: () => {
+            throw new Error("sensitive status");
+          },
+        },
+        type: {
+          get: () => {
+            throw new Error("sensitive type");
+          },
+        },
+      }));
+
+    const identifierError = await previewHostedPulseTrialExtension({
+      memberId: MEMBER_ID,
+      now: NOW,
+      priceId: PRICE_ID,
+      prisma: {} as never,
+      stripe,
+    }).catch((error: unknown) => error);
+    const getterError = await previewHostedPulseTrialExtension({
+      memberId: MEMBER_ID,
+      now: NOW,
+      priceId: PRICE_ID,
+      prisma: {} as never,
+      stripe,
+    }).catch((error: unknown) => error);
+
+    expect(identifierError).toBeInstanceOf(HostedPulseTrialExtensionProviderError);
+    expect((identifierError as HostedPulseTrialExtensionProviderError).logDetails)
+      .toEqual({
+        operationName: "retrieve_subscription",
+        requestIdPresent: true,
+      });
+    expect(getterError).toBeInstanceOf(HostedPulseTrialExtensionProviderError);
+    expect((getterError as HostedPulseTrialExtensionProviderError).logDetails)
+      .toEqual({
+        operationName: "retrieve_subscription",
+        requestIdPresent: false,
+        type: "invalid_request_error",
+      });
+    expect(JSON.stringify([
+      (identifierError as HostedPulseTrialExtensionProviderError).logDetails,
+      (getterError as HostedPulseTrialExtensionProviderError).logDetails,
+    ])).not.toMatch(/cus_|hbm_|req_|sensitive|sk_|sub_|whsec_/u);
+  });
+
+  test("identifies post-update validation failure without local reconciliation", async () => {
+    const paused = makeSubscription({ status: "paused", trialEnd: 1_700_000_000 });
+    const stripe = makeStripeClient(paused);
+    const preview = await previewHostedPulseTrialExtension({
+      memberId: MEMBER_ID,
+      now: NOW,
+      priceId: PRICE_ID,
+      prisma: {} as never,
+      stripe,
+    });
+    if (!preview.previewProof) {
+      throw new Error("Expected an eligible preview.");
+    }
+    stripe.retrieveSubscription.mockResolvedValue(paused);
+    stripe.updateSubscription.mockResolvedValue(makeSubscription({
+      status: "trialing",
+      trialEnd: TARGET_FROM_PAUSED,
+    }));
+
+    const validationError = await applyHostedPulseTrialExtension({
+      memberId: MEMBER_ID,
+      now: new Date("2026-07-14T16:02:00.000Z"),
+      previewProof: preview.previewProof,
+      priceId: PRICE_ID,
+      prisma: {} as never,
+      stripe,
+    }).catch((error: unknown) => error);
+
+    expect(validationError).toBeInstanceOf(HostedPulseTrialExtensionProviderError);
+    expect((validationError as HostedPulseTrialExtensionProviderError).logDetails)
+      .toEqual({ operationName: "validate_updated_subscription" });
     expect(mocks.updateHostedMemberCoreState).not.toHaveBeenCalled();
     expect(mocks.writeHostedMemberStripeBillingRefTx).not.toHaveBeenCalled();
     expect(
