@@ -42,10 +42,10 @@ that Murph should use on the next hosted turn:
   explains that Sol requires paid Edge access. A paid Pulse member who is
   eligible for the direct upgrade sees the existing Edge upgrade action; other
   ineligible members see the Edge requirement without a billing action.
-- Only an active, unsuspended personal member whose own current billing state is
-  paid Edge can choose Sol. Sponsored Family access, Pulse, and trials do not
-  qualify. Synthetic thread-container members receive their derived Sol target
-  but cannot mutate or persist a preference.
+- Only an active, unsuspended personal member with direct paid Edge access or an
+  active paid Family Edge assignment can choose Sol. Family Pulse assignments,
+  direct Pulse, and trials do not qualify. Synthetic thread-container members
+  receive their derived Sol target but cannot mutate or persist a preference.
 - The common reasoning choices are `low`, `medium`, `high`, and `xhigh`. `low`
   is the default when no reasoning override is stored.
 - Postgres stores nullable non-default model and reasoning intent only for the
