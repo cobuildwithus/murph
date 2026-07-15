@@ -209,6 +209,13 @@ it has been explicitly elevated to a cross-cutting invariant.
   causal identifier, changed anchor or conversation, overflow, or post-freeze
   arrival starts a later turn; terminal evidence covers every admitted input
   so restart repair cannot resend the reply.
+- Accepted-turn membership remains authoritative during restart recovery. If
+  terminal evidence proves only an oldest contiguous handled prefix while a
+  post-freeze successor is also pending, repair and retire exactly that prefix,
+  checkpoint at its terminal input, and leave the successor pending for a later
+  turn. Recovery never widens the historical turn or advances past an uncovered
+  obligation; ambiguous, overlapping, noncontiguous, or conflicting evidence
+  fails closed.
 - Progress never advances past accepted work without terminal or durable
   pending evidence. A checkpoint cannot make an unhandled obligation disappear.
 - Commit durable work before signaling. A wake is a droppable, replayable
