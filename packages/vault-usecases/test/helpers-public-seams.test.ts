@@ -205,10 +205,12 @@ describe("helper barrel exports", () => {
     ]);
 
     expect(inferEntityKind("current")).toBe("core");
+    expect(inferEntityKind("hab_sleep-environment")).toBe("habitat");
     expect(inferEntityKind("prov_01JNV422Y2M5ZBV64ZP4N1DRB1")).toBe("provider");
     expect(inferEntityKind("xfm_01JNV422Y2M5ZBV64ZP4N1DRB1")).toBe("transform");
     expect(inferEntityKind("unknown_lookup")).toBe("entity");
     expect(isQueryableRecordId("current")).toBe(true);
+    expect(isQueryableRecordId("hab_sleep-environment")).toBe(true);
     expect(isQueryableRecordId("xfm_01JNV422Y2M5ZBV64ZP4N1DRB1")).toBe(false);
     expect(describeLookupConstraint("prov_01JNV422Y2M5ZBV64ZP4N1DRB1")).toBeNull();
     expect(describeLookupConstraint("xfm_01JNV422Y2M5ZBV64ZP4N1DRB1")).toContain("import batch");
@@ -255,10 +257,15 @@ describe("helper barrel exports", () => {
           snapshotId: "current",
           parentGoalId: "goal_parent",
         },
-        relatedIds: ["evt_1", "evt_1", "xfm_1"],
+        relatedIds: ["evt_1", "evt_1", "hab_sleep-environment", "xfm_1"],
       }),
     ).toEqual([
       { id: "evt_1", kind: inferEntityKind("evt_1"), queryable: isQueryableRecordId("evt_1") },
+      {
+        id: "hab_sleep-environment",
+        kind: "habitat",
+        queryable: true,
+      },
       { id: "xfm_1", kind: inferEntityKind("xfm_1"), queryable: isQueryableRecordId("xfm_1") },
       { id: "evt_2", kind: inferEntityKind("evt_2"), queryable: isQueryableRecordId("evt_2") },
       {

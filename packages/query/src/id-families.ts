@@ -19,15 +19,6 @@ interface EventDisplayIdentityRule {
   payloadKeys: readonly string[];
 }
 
-interface IdFamilyDefinition {
-  family: string;
-  entityKind: string;
-  prefix?: string;
-  exactIds?: readonly string[];
-  queryable: boolean;
-  lookupConstraint?: string;
-}
-
 const EVENT_DISPLAY_IDENTITY_RULES = Object.freeze<EventDisplayIdentityRule[]>([
   {
     eventKind: "document",
@@ -41,108 +32,12 @@ const EVENT_DISPLAY_IDENTITY_RULES = Object.freeze<EventDisplayIdentityRule[]>([
   },
 ]);
 
-export const ID_FAMILY_REGISTRY = Object.freeze<IdFamilyDefinition[]>([
-  {
-    family: "core",
-    entityKind: "core",
-    exactIds: ["core", "current"],
-    queryable: true,
-  },
-  {
-    family: "audit",
-    entityKind: "audit",
-    prefix: "aud_",
-    queryable: true,
-  },
-  {
-    family: "event",
-    entityKind: "event",
-    prefix: "evt_",
-    queryable: true,
-  },
-  {
-    family: "experiment",
-    entityKind: "experiment",
-    prefix: "exp_",
-    queryable: true,
-  },
-  {
-    family: "food",
-    entityKind: "food",
-    prefix: "food_",
-    queryable: true,
-  },
-  {
-    family: "habitat",
-    entityKind: "habitat",
-    prefix: "hab_",
-    queryable: true,
-  },
-  {
-    family: "recipe",
-    entityKind: "recipe",
-    prefix: "rcp_",
-    queryable: true,
-  },
-  {
-    family: "provider",
-    entityKind: "provider",
-    prefix: "prov_",
-    queryable: true,
-  },
-  {
-    family: "protocol",
-    entityKind: "protocol",
-    prefix: "prot_",
-    queryable: true,
-  },
-  {
-    family: "sample",
-    entityKind: "sample",
-    prefix: "smp_",
-    queryable: true,
-  },
-  {
-    family: "workout_format",
-    entityKind: "workout_format",
-    prefix: "wfmt_",
-    queryable: true,
-  },
-  {
-    family: "journal",
-    entityKind: "journal",
-    prefix: "journal:",
-    queryable: true,
-  },
-  {
-    family: "meal",
-    entityKind: "meal",
-    prefix: "meal_",
-    queryable: true,
-  },
-  {
-    family: "document",
-    entityKind: "document",
-    prefix: "doc_",
-    queryable: true,
-  },
-  {
-    family: "transform",
-    entityKind: "transform",
-    prefix: "xfm_",
-    queryable: false,
-    lookupConstraint:
-      "Transform ids identify an import batch, not a query-layer record. Use returned sample ids with `samples show` or inspect them with `samples list` instead.",
-  },
-  {
-    family: "pack",
-    entityKind: "export_pack",
-    prefix: "pack_",
-    queryable: false,
-    lookupConstraint:
-      "Export pack ids identify derived exports, not canonical vault records. Inspect the materialized pack files instead of passing the pack id to `show`.",
-  },
-]);
+export {
+  describeLookupIdConstraint as describeLookupConstraint,
+  inferLookupIdEntityKind as inferIdEntityKind,
+  isQueryableLookupId,
+  LOOKUP_ID_FAMILY_REGISTRY as ID_FAMILY_REGISTRY,
+} from "@murphai/contracts";
 
 export function deriveVaultRecordIdentity(
   recordType: QueryRecordType,
@@ -166,38 +61,6 @@ export function deriveVaultRecordIdentity(
     displayId: displayId ?? fallbackId,
     primaryLookupId: displayId ?? fallbackId,
   };
-}
-
-export function inferIdEntityKind(id: string): string {
-  return findIdFamily(id)?.entityKind ?? "entity";
-}
-
-export function isQueryableLookupId(id: string): boolean {
-  const family = findIdFamily(id);
-  return family ? family.queryable : false;
-}
-
-export function describeLookupConstraint(id: string): string | null {
-  return findIdFamily(id)?.lookupConstraint ?? null;
-}
-
-function findIdFamily(id: string): IdFamilyDefinition | null {
-  const normalizedId = id.trim();
-  if (!normalizedId) {
-    return null;
-  }
-
-  for (const family of ID_FAMILY_REGISTRY) {
-    if (family.exactIds?.includes(normalizedId)) {
-      return family;
-    }
-
-    if (family.prefix && normalizedId.startsWith(family.prefix)) {
-      return family;
-    }
-  }
-
-  return null;
 }
 
 function pickString(
