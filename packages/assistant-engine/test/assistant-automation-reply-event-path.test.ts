@@ -1127,7 +1127,7 @@ describe('assistant auto-reply event-first path', () => {
     expect(result.terminalLinqCleanup).toBeUndefined()
   })
 
-  it('admits an attested same-session affirmative Linq reaction without duplicating turn context', async () => {
+  it('binds an attested same-session affirmative Linq reaction to the exact older target', async () => {
     const vault = await createTempVault()
     replyEventPathMocks.resolveAssistantSession.mockResolvedValue({
       created: false,
@@ -1143,6 +1143,14 @@ describe('assistant auto-reply event-first path', () => {
         message: 'Would you like me to continue?',
         providerMessageId: 'linq-msg-same-session-target',
         sentAt: '2026-04-08T00:05:00.000Z',
+        sessionId: 'session-chat',
+      }),
+      createOutboxMessage({
+        channel: 'linq',
+        intentId: 'intent-newer-same-session-message',
+        message: 'Should I send the newer message?',
+        providerMessageId: 'linq-msg-newer-same-session',
+        sentAt: '2026-04-08T00:06:00.000Z',
         sessionId: 'session-chat',
       }),
     ])
@@ -1184,8 +1192,15 @@ describe('assistant auto-reply event-first path', () => {
     })
     expect(result.terminalLinqCleanup).toBeUndefined()
     expect(replyEventPathMocks.sendAssistantMessage).toHaveBeenCalledTimes(1)
-    expect(replyEventPathMocks.sendAssistantMessage.mock.calls[0]?.[0].turnContext)
-      .toBeUndefined()
+    const sendInput = replyEventPathMocks.sendAssistantMessage.mock.calls[0]?.[0]
+    const turnContext = sendInput?.turnContext
+    expect(turnContext).toContain('Affirmative reaction target:')
+    expect(turnContext).toContain('Would you like me to continue?')
+    expect(turnContext).not.toContain('Should I send the newer message?')
+    expect(turnContext).not.toContain('another assistant run')
+    expect(sendInput?.receiptMetadata).not.toHaveProperty(
+      AUTO_REPLY_RECEIPT_CROSS_SESSION_CONTEXT_INTENT_ID_KEY,
+    )
   })
 
   it('terminally suppresses an affirmative Linq reaction without an exact same-route sent target', async () => {

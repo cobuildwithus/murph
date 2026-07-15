@@ -96,6 +96,32 @@ after a new web producer consumes it. Runner-first deployment avoids that
 feature-only loss. Either side may otherwise roll back independently because
 the strict persisted assistant-input schema is unchanged.
 
+## Linq Affirmative-Reaction Rollout
+
+The affirmative-reaction adapter transfers target authorship from a live Linq
+message read to an optional wake marker plus exact same-route sent-outbox
+attestation in the runner. Old Web with a marker-aware runner is safe; new Web
+with an old runner is unsafe because the old tolerant parser drops the marker
+and imports the synthetic `Yes.` as an ordinary message.
+
+Roll out the first marker-aware release in this order:
+
+1. Deploy the Cloudflare Worker and runner bundle with
+   `container_rollout=immediate`. Require the predeploy parser/importer tests
+   for that exact commit and managed-container smoke reporting its runner-bundle
+   fingerprint before processing the new wake shape.
+2. Deploy `apps/web` only after the runner fleet has converged.
+3. Smoke an affirmative reaction to an exact Murph delivery in both a private
+   and group chat, then verify that a reaction to a participant-authored target
+   is terminally suppressed before model execution.
+
+Once Web can emit a synthetic affirmative-reaction wake, that marker-aware
+runner bundle is a rollback floor while any such mailbox item or imported input
+can remain. Do not independently restore an older runner; roll Web back first,
+prove no synthetic reaction work remains, and otherwise use a forward fix on
+the marker-aware bundle or newer. Existing runner fingerprint admission rejects
+stale warm containers, but it does not make an old deployed parser compatible.
+
 ## Linq Provider-Claim Protocol
 
 Every Linq provider entry uses one Web-owned authorization and atomic dispatch
