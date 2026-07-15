@@ -124,6 +124,10 @@ describe("workspace source resolution", () => {
     ]);
     expect(tsconfig.compilerOptions?.paths?.["@murphai/hosted-execution/plan-usage"])
       .toEqual(["./packages/hosted-execution/src/plan-usage.ts"]);
+    expect(tsconfig.compilerOptions?.paths?.["@murphai/hosted-execution/assistant-identifiers"])
+      .toEqual(["./packages/hosted-execution/src/assistant-identifiers.ts"]);
+    expect(tsconfig.compilerOptions?.paths?.["@murphai/hosted-execution/assistant-personalization"])
+      .toEqual(["./packages/hosted-execution/src/assistant-personalization.ts"]);
   });
 });
 

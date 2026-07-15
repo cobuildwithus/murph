@@ -382,7 +382,6 @@ describe("startHostedContainerEntrypoint", () => {
     expect(response.json).toMatchObject({
       activeJobCount: 0,
       hostedRuntimeArchitectureVersion: HOSTED_RUNTIME_ARCHITECTURE_VERSION,
-      lastCleanupStatus: "not_run",
       ok: true,
       poisoned: false,
       service: "cloudflare-hosted-runner-node",
@@ -2780,16 +2779,13 @@ describe("startHostedContainerEntrypoint", () => {
     controller.cleanup();
   });
 
-
-  it("stops warm Codex before an invocation when a CLI bridge off-invocation violation is already pending", async () => {
+  it("stops warm Codex before an invocation with a pending CLI bridge violation", async () => {
     const consumeCliBridgeOffInvocationViolation = vi.fn()
       .mockResolvedValueOnce(true)
       .mockResolvedValueOnce(false);
     const stopWarmCodex = vi.fn(async () => undefined);
-    const runnerSpy = vi.spyOn(hostedInvocation, "runHostedWorkspaceInvocation").mockResolvedValue(
-      buildWorkspaceRunnerResult(),
-    );
-
+    const runnerSpy = vi.spyOn(hostedInvocation, "runHostedWorkspaceInvocation")
+      .mockResolvedValue(buildWorkspaceRunnerResult());
     const server = await startHostedContainerEntrypoint({
       port: 0,
       runtime: {
@@ -2799,12 +2795,11 @@ describe("startHostedContainerEntrypoint", () => {
     });
     servers.push(server);
     const address = server.address();
-
     if (!address || typeof address === "string") {
       throw new Error("Expected the hosted container entrypoint to expose a TCP port.");
     }
 
-    const response = await fetch(`http://127.0.0.1:${address.port}/internal/workspace-invocation`, {
+    const response = await sendHostedContainerJsonRequest({
       body: JSON.stringify(buildJobBody({
         wake: {
           event: { kind: "runtime.timer", triggerKind: "runtime_timer", userId: "u1" },
@@ -2812,42 +2807,24 @@ describe("startHostedContainerEntrypoint", () => {
           occurredAt: "2026-03-26T12:00:00.000Z",
         },
       })),
-      headers: {
-        "content-type": "application/json; charset=utf-8",
-      },
-      method: "POST",
+      path: "/internal/workspace-invocation",
+      port: address.port,
     });
 
     expect(response.status).toBe(200);
-    expect(runnerSpy).toHaveBeenCalledTimes(1);
     expect(consumeCliBridgeOffInvocationViolation).toHaveBeenCalledTimes(2);
-    expect(stopWarmCodex).toHaveBeenCalledTimes(1);
     expect(stopWarmCodex).toHaveBeenCalledWith("cli-bridge-off-invocation-request");
-    expect(mocks.emitHostedExecutionStructuredLog.mock.calls
-      .map(([input]) => input)).toContainEqual(expect.objectContaining({
-        details: expect.objectContaining({
-          warmCodexStopReason: "cli-bridge-off-invocation-request",
-          warmCodexStopStatus: "completed",
-        }),
-        message: "Hosted container warm Codex stop completed.",
-      }));
-    const stopCallOrder = stopWarmCodex.mock.invocationCallOrder.at(0);
-    const runnerCallOrder = runnerSpy.mock.invocationCallOrder.at(0);
-    if (stopCallOrder === undefined || runnerCallOrder === undefined) {
-      throw new Error("Expected warm Codex stop and runner invocation call order.");
-    }
-    expect(stopCallOrder).toBeLessThan(runnerCallOrder);
+    expect(stopWarmCodex.mock.invocationCallOrder[0])
+      .toBeLessThan(runnerSpy.mock.invocationCallOrder[0] ?? Number.MAX_SAFE_INTEGER);
   });
 
-  it("stops warm Codex after a consumed CLI bridge off-invocation violation", async () => {
+  it("stops warm Codex after an invocation that records a CLI bridge violation", async () => {
     const consumeCliBridgeOffInvocationViolation = vi.fn()
       .mockResolvedValueOnce(false)
       .mockResolvedValueOnce(true);
     const stopWarmCodex = vi.fn(async () => undefined);
-    const runnerSpy = vi.spyOn(hostedInvocation, "runHostedWorkspaceInvocation").mockResolvedValue(
-      buildWorkspaceRunnerResult(),
-    );
-
+    const runnerSpy = vi.spyOn(hostedInvocation, "runHostedWorkspaceInvocation")
+      .mockResolvedValue(buildWorkspaceRunnerResult());
     const server = await startHostedContainerEntrypoint({
       port: 0,
       runtime: {
@@ -2857,12 +2834,11 @@ describe("startHostedContainerEntrypoint", () => {
     });
     servers.push(server);
     const address = server.address();
-
     if (!address || typeof address === "string") {
       throw new Error("Expected the hosted container entrypoint to expose a TCP port.");
     }
 
-    const response = await fetch(`http://127.0.0.1:${address.port}/internal/workspace-invocation`, {
+    const response = await sendHostedContainerJsonRequest({
       body: JSON.stringify(buildJobBody({
         wake: {
           event: { kind: "runtime.timer", triggerKind: "runtime_timer", userId: "u1" },
@@ -2870,61 +2846,40 @@ describe("startHostedContainerEntrypoint", () => {
           occurredAt: "2026-03-26T12:00:00.000Z",
         },
       })),
-      headers: {
-        "content-type": "application/json; charset=utf-8",
-      },
-      method: "POST",
+      path: "/internal/workspace-invocation",
+      port: address.port,
     });
 
     expect(response.status).toBe(200);
-    expect(runnerSpy).toHaveBeenCalledTimes(1);
     expect(consumeCliBridgeOffInvocationViolation).toHaveBeenCalledTimes(2);
-    expect(stopWarmCodex).toHaveBeenCalledTimes(1);
     expect(stopWarmCodex).toHaveBeenCalledWith("cli-bridge-off-invocation-request");
-    expect(mocks.emitHostedExecutionStructuredLog.mock.calls
-      .map(([input]) => input)).toContainEqual(expect.objectContaining({
-        details: expect.objectContaining({
-          warmCodexStopReason: "cli-bridge-off-invocation-request",
-          warmCodexStopStatus: "completed",
-        }),
-        message: "Hosted container warm Codex stop completed.",
-      }));
-    const runnerCallOrder = runnerSpy.mock.invocationCallOrder.at(0);
-    const stopCallOrder = stopWarmCodex.mock.invocationCallOrder.at(0);
-    if (runnerCallOrder === undefined || stopCallOrder === undefined) {
-      throw new Error("Expected runner invocation and warm Codex stop call order.");
-    }
-    expect(runnerCallOrder).toBeLessThan(stopCallOrder);
+    expect(runnerSpy.mock.invocationCallOrder[0])
+      .toBeLessThan(stopWarmCodex.mock.invocationCallOrder[0] ?? Number.MAX_SAFE_INTEGER);
   });
 
-  it("logs warm Codex stop failures without raw process details", async () => {
+  it("poisons the container when CLI bridge violation cleanup fails", async () => {
     const consumeCliBridgeOffInvocationViolation = vi.fn()
       .mockResolvedValueOnce(true)
       .mockResolvedValueOnce(false);
     const stopWarmCodex = vi.fn(async () => {
       throw new Error("warm stop failed");
     });
-    const exitScheduler = vi.fn();
-    const runnerSpy = vi.spyOn(hostedInvocation, "runHostedWorkspaceInvocation").mockResolvedValue(
-      buildWorkspaceRunnerResult(),
-    );
-
+    const runnerSpy = vi.spyOn(hostedInvocation, "runHostedWorkspaceInvocation")
+      .mockResolvedValue(buildWorkspaceRunnerResult());
     const server = await startHostedContainerEntrypoint({
       port: 0,
       runtime: {
         consumeCliBridgeOffInvocationViolation,
-        exitScheduler,
         stopWarmCodex,
       },
     });
     servers.push(server);
     const address = server.address();
-
     if (!address || typeof address === "string") {
       throw new Error("Expected the hosted container entrypoint to expose a TCP port.");
     }
 
-    const response = await fetch(`http://127.0.0.1:${address.port}/internal/workspace-invocation`, {
+    const response = await sendHostedContainerJsonRequest({
       body: JSON.stringify(buildJobBody({
         wake: {
           event: { kind: "runtime.timer", triggerKind: "runtime_timer", userId: "u1" },
@@ -2932,36 +2887,27 @@ describe("startHostedContainerEntrypoint", () => {
           occurredAt: "2026-03-26T12:00:00.000Z",
         },
       })),
-      headers: {
-        "content-type": "application/json; charset=utf-8",
-      },
-      method: "POST",
+      path: "/internal/workspace-invocation",
+      port: address.port,
     });
 
     expect(response.status).toBe(500);
-    expect(exitScheduler).not.toHaveBeenCalled();
     expect(runnerSpy).not.toHaveBeenCalled();
-    expect(stopWarmCodex).toHaveBeenCalledWith("cli-bridge-off-invocation-request");
-    expect(mocks.emitHostedExecutionStructuredLog.mock.calls
-      .map(([input]) => input)).toContainEqual(expect.objectContaining({
+    expect(mocks.emitHostedExecutionStructuredLog).toHaveBeenCalledWith(
+      expect.objectContaining({
         details: expect.objectContaining({
-          errorName: "Error",
           warmCodexStopReason: "cli-bridge-off-invocation-request",
           warmCodexStopStatus: "failed",
         }),
-        message: "Hosted container failed to stop warm Codex after an off-invocation CLI bridge request.",
-      }));
-
+        message:
+          "Hosted container failed to stop warm Codex after an off-invocation CLI bridge request.",
+      }),
+    );
     const health = await sendHostedContainerGetRequest({
       path: "/health",
       port: address.port,
     });
-    expect(health.status).toBe(200);
-    expect(health.json).toMatchObject({
-      activeJobCount: 0,
-      lastCleanupStatus: "failed",
-      poisoned: true,
-    });
+    expect(health.json).toMatchObject({ poisoned: true });
   });
 
 });

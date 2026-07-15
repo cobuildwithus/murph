@@ -21,6 +21,7 @@ const HOSTED_BLIND_INDEX_PATTERN =
   /^(?<prefix>hbidx):(?<kind>[a-z0-9-]+):(?<version>v[0-9]+):(?<digest>[0-9a-f]+)$/u;
 
 export type HostedBlindIndexKind =
+  | "assistant-input"
   | "email"
   | "external-thread"
   | "external-thread-identity"
@@ -43,6 +44,21 @@ export interface HostedBlindIndexParts {
   kind: string;
   prefix: typeof HOSTED_BLIND_INDEX_PREFIX;
   version: string;
+}
+
+export function createHostedAssistantInputLookupKey(
+  value: string | null | undefined,
+): string | null {
+  return createHostedLookupKey("assistant-input", normalizeHostedOpaqueInput(value));
+}
+
+export function createHostedAssistantInputLookupKeyReadCandidates(
+  value: string | null | undefined,
+): string[] {
+  return createHostedLookupKeyReadCandidates(
+    "assistant-input",
+    normalizeHostedOpaqueInput(value),
+  );
 }
 
 export function createHostedPhoneLookupKey(value: string | null | undefined): string | null {

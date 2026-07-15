@@ -416,6 +416,55 @@ describe('real codex app-server with scripted provider', () => {
     expect(second.turnId).not.toBe(first.turnId)
   })
 
+  it('restores persisted dynamic tools on a real cold thread resume', {
+    timeout: TURN_TIMEOUT_MS,
+  }, async () => {
+    const scenario = await prepareScriptedTurnScenario()
+    const progressUpdates: string[] = []
+    const progressDelivery = {
+      send: async (text: string) => {
+        progressUpdates.push(text)
+        return { kind: 'sent' as const, source: 'model' as const }
+      },
+    }
+    const dynamicTools = resolveMurphDynamicTools({
+      progressUpdatesAvailable: true,
+    })
+
+    scenario.stub.queue({ text: 'COLD_TOOL_SEED_OK' })
+    const first = await executeCodexAppServerTurn({
+      ...scenario.turnInput,
+      dynamicTools,
+      progressDelivery,
+      prompt: 'Reply exactly COLD_TOOL_SEED_OK.',
+    })
+    expect(first.finalMessage).toBe('COLD_TOOL_SEED_OK')
+
+    await stopWarmCodexAppServer('dynamic-tool-cold-resume-proof')
+    scenario.stub.queue(
+      {
+        functionCall: {
+          arguments: { text: 'Cold-resume progress update.' },
+          name: 'send_progress_update',
+          namespace: 'murph',
+        },
+      },
+      { text: 'COLD_TOOL_RESUME_OK' },
+    )
+    const resumed = await executeCodexAppServerTurn({
+      ...scenario.turnInput,
+      dynamicTools,
+      progressDelivery,
+      prompt: 'Send one progress update, then reply exactly COLD_TOOL_RESUME_OK.',
+      resumeSessionId: first.sessionId,
+    })
+
+    expect(resumed.finalMessage).toBe('COLD_TOOL_RESUME_OK')
+    expect(resumed.threadId).toBe(first.threadId)
+    expect(progressUpdates).toEqual(['Cold-resume progress update.'])
+    expect(scenario.stub.requestCountSinceBaseline()).toBe(3)
+  })
+
   it('relays murph dynamic tool calls through item/tool/call for real', {
     timeout: TURN_TIMEOUT_MS,
   }, async () => {

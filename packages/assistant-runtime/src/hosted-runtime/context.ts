@@ -228,8 +228,23 @@ export async function applyHostedMemberPreferences(
   }
 
   await updateAssistantPreferences({
+    ...(wake.causalOrigin ? { causalOrigin: wake.causalOrigin } : {}),
     causalSeq,
-    preferences: wake.preferences,
+    preferences: wake.requestedFields === undefined
+      ? wake.preferences
+      : {
+          ...(wake.preferences.personality === undefined
+            ? {}
+            : { personality: wake.preferences.personality }),
+          ...(wake.requestedFields.includes("tone")
+            && wake.preferences.tone !== undefined
+            ? { tone: wake.preferences.tone }
+            : {}),
+          ...(wake.requestedFields.includes("voice")
+            && wake.preferences.voice !== undefined
+            ? { voice: wake.preferences.voice }
+            : {}),
+        },
     updatedAt: appliedAt,
     vaultRoot,
   });

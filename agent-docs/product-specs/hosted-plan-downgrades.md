@@ -75,6 +75,13 @@ that Murph should use on the next hosted turn:
 - Changing the preference does not create a mailbox item, wake, queue, or a
   second runtime state machine.
 
+Conversation style remains independently available through
+`murph.personalization`, which atomically reads or updates the private member's
+tone and voice and may report the same model resolver's current context. It does
+not write model or reasoning preferences. Conversation model and reasoning
+changes use `murph.assistant_configuration` and its exact-target approval flow,
+so the style path cannot bypass the configuration owner.
+
 ## Included Usage Behavior
 
 Monthly included AI allowance remains a measured billing and product signal,
@@ -117,12 +124,13 @@ Deploy this additive path in the following order:
 
 1. Apply the nullable Postgres migration.
 2. Deploy web first and wait until every serving web instance is on the new
-   version. This establishes the compatibility consumer that accepts and
-   honors an originating usage-notice target before Cloudflare can produce
-   one. Do not continue while an old web instance can still accept usage
-   records.
+   version. This establishes the configuration and personalization callbacks
+   plus the compatibility consumer that accepts and honors an originating
+   usage-notice target before Cloudflare can produce one. Do not continue while
+   an old web instance can still accept usage records.
 3. Deploy Cloudflare. The new runtime consumes the optional workspace model
-   and reasoning fields and begins producing originating usage-notice targets.
+   and reasoning fields, advertises the conversational configuration and style
+   tools, and begins producing originating usage-notice targets.
 4. After both deployments are current, run the count-only dry run and then the
    fixed-campaign apply form of
    `pnpm --dir apps/web runtime:recheck-usage-advisory`. This sends the existing
@@ -166,11 +174,12 @@ no model-specific fallback or rollback path.
 
 Focused contract coverage proves old/no-field compatibility, personal-member
 Luna/Terra/Sol eligibility, the common reasoning values, next-turn projection,
-and the relation-derived thread-container Sol default. The normal deploy keeps
-its managed-container fingerprint and live Terra smoke. An optional post-deploy
-canary may save one non-default target for an eligible personal member and
-confirm the next new invocation reports it while usage retains both
-requested-model and served-model attribution.
+the relation-derived thread-container Sol default, and private-member tone/voice
+reads and writes. The normal deploy keeps its managed-container fingerprint and
+live Terra smoke. An optional post-deploy canary may save one non-default target
+for an eligible personal member through the approved configuration flow, update
+style through personalization, and confirm the next new invocation reports the
+target while usage retains both requested-model and served-model attribution.
 
 ## First-Version Scope
 

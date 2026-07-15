@@ -69,6 +69,9 @@
       "@murphai/hosted-execution/assistant-model": [
         "../../packages/hosted-execution/src/assistant-model.ts"
       ],
+      "@murphai/hosted-execution/assistant-personalization": [
+        "../../packages/hosted-execution/src/assistant-personalization.ts"
+      ],
       "@murphai/hosted-execution/assistant-configuration-approval": [
         "../../packages/hosted-execution/src/assistant-configuration-approval.ts"
       ],
