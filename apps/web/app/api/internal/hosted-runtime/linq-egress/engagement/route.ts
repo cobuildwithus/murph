@@ -71,6 +71,7 @@ export const POST = withJsonError(async (request: Request) => {
 
     const asserted = await assertHostedLinqRecentInboundEngagementForRuntime({
       answeredMailboxItemIds,
+      authorityCheckOnly,
       currentInbound,
       directRecipientPhoneNumber,
       fromPhoneNumber,

@@ -3162,10 +3162,12 @@ function createHostedAssistantLinqSendDependency(input: {
 }): NonNullable<AssistantHostedProgressDeliveryDependencies["sendLinq"]> {
   return async (request) => {
     await assertHostedDeliveryLiveNow(input);
-    const deliveryContext = shouldBypassHostedLinqDeliveryContextForHomeFallback({
+    const currentHomeRouteOnly = shouldBypassHostedLinqDeliveryContextForHomeFallback({
+      answeredMailboxItemIds: request.answeredMailboxItemIds,
       homeRouteFallbackAllowed: request.homeRouteFallbackAllowed === true,
       replyToMessageId: request.replyToMessageId ?? null,
-    })
+    });
+    const deliveryContext = currentHomeRouteOnly
       ? null
       : resolveHostedAssistantLinqDeliveryContextFromCandidatesForRequest({
           contexts: input.linqDeliveryContexts ?? [],
@@ -3183,17 +3185,14 @@ function createHostedAssistantLinqSendDependency(input: {
     const idempotencyKey = request.idempotencyKey?.trim() || null;
     const includesVaultFile =
       request.media?.some((media) => media.kind === "vault_file") === true;
-    const engagement = includesVaultFile || shouldBypassHostedLinqDeliveryContextForHomeFallback({
-      homeRouteFallbackAllowed: request.homeRouteFallbackAllowed === true,
-      replyToMessageId: request.replyToMessageId ?? null,
-    })
+    const engagement = includesVaultFile || currentHomeRouteOnly
       ? await assertHostedAssistantLinqRecentInboundEngagementForDelivery({
           answeredMailboxItemIds: request.answeredMailboxItemIds,
           authorityCheckOnly: true,
           directRecipientPhoneNumber,
           effectsPort: input.effectsPort ?? null,
           fromPhoneNumber,
-          homeRouteFallbackAllowed: request.homeRouteFallbackAllowed === true,
+          homeRouteFallbackAllowed: currentHomeRouteOnly,
           idempotencyKey,
           intentId: input.intentId ?? null,
           replyToMessageId: request.replyToMessageId ?? null,
@@ -3242,7 +3241,7 @@ function createHostedAssistantLinqSendDependency(input: {
             directRecipientPhoneNumber,
             effectsPort: input.effectsPort ?? null,
             fromPhoneNumber,
-            homeRouteFallbackAllowed: false,
+            homeRouteFallbackAllowed: currentHomeRouteOnly,
             idempotencyKey,
             intentId: input.intentId ?? null,
             replyToMessageId: request.replyToMessageId ?? null,
@@ -3482,10 +3481,12 @@ function createHostedAssistantLinqVoiceMemoSendDependency(input: {
 }): NonNullable<AssistantHostedProgressDeliveryDependencies["sendLinqVoiceMemo"]> {
   return async (request) => {
     await assertHostedDeliveryLiveNow(input);
-    const deliveryContext = shouldBypassHostedLinqDeliveryContextForHomeFallback({
+    const currentHomeRouteOnly = shouldBypassHostedLinqDeliveryContextForHomeFallback({
+      answeredMailboxItemIds: request.answeredMailboxItemIds,
       homeRouteFallbackAllowed: request.homeRouteFallbackAllowed === true,
       replyToMessageId: request.replyToMessageId ?? null,
-    })
+    });
+    const deliveryContext = currentHomeRouteOnly
       ? null
       : resolveHostedAssistantLinqDeliveryContextFromCandidatesForRequest({
           contexts: input.linqDeliveryContexts ?? [],
@@ -3499,10 +3500,7 @@ function createHostedAssistantLinqVoiceMemoSendDependency(input: {
       : null;
     const replyToMessageId =
       request.replyToMessageId ?? deliveryContext?.replyToMessageId ?? null;
-    const engagement = shouldBypassHostedLinqDeliveryContextForHomeFallback({
-      homeRouteFallbackAllowed: request.homeRouteFallbackAllowed === true,
-      replyToMessageId,
-    })
+    const engagement = currentHomeRouteOnly
       ? await assertHostedAssistantLinqRecentInboundEngagementForDelivery({
           answeredMailboxItemIds: request.answeredMailboxItemIds,
           authorityCheckOnly: true,
@@ -3538,7 +3536,7 @@ function createHostedAssistantLinqVoiceMemoSendDependency(input: {
               deliveryContext?.directRecipientPhoneNumber ?? null,
             effectsPort: input.effectsPort ?? null,
             fromPhoneNumber: deliveryContext?.fromPhoneNumber ?? null,
-            homeRouteFallbackAllowed: false,
+            homeRouteFallbackAllowed: currentHomeRouteOnly,
             idempotencyKey,
             intentId: input.intentId ?? null,
             providerDispatchClaimAttemptedAt: claimStartedAt,
@@ -4080,10 +4078,13 @@ function normalizeHostedAssistantLinqTargetKind(
 }
 
 function shouldBypassHostedLinqDeliveryContextForHomeFallback(input: {
+  answeredMailboxItemIds?: readonly string[] | null;
   homeRouteFallbackAllowed: boolean;
   replyToMessageId: string | null;
 }): boolean {
-  return input.homeRouteFallbackAllowed && !input.replyToMessageId?.trim();
+  return input.homeRouteFallbackAllowed
+    && !input.replyToMessageId?.trim()
+    && (input.answeredMailboxItemIds?.length ?? 0) === 0;
 }
 
 function normalizeHostedLinqDirectRecipient(value: string | null | undefined): string | null {

@@ -86,6 +86,7 @@ import {
 } from './canonical-jobs.js'
 import {
   appendAssistantCronRun,
+  buildAssistantCronTarget,
   isAssistantCronJobDue,
   type AssistantCronStore,
   readAssistantCronStore,
@@ -450,7 +451,7 @@ export async function executeClaimedAssistantCronJob(
     job: rawInput.job,
     vault: rawInput.vault,
   })
-  const preparedJob = deviceActivityAuthority.route === null
+  const deviceActivityPreparedJob = deviceActivityAuthority.route === null
     ? rawInput.job
     : {
         ...rawInput.job,
@@ -462,6 +463,19 @@ export async function executeClaimedAssistantCronJob(
           },
         }),
       }
+  // Maintenance has no audience. Neutralize only this ephemeral claim after
+  // authority preparation; the canonical automation route remains unchanged.
+  const preparedJob = assistantCronJobIsPreemptibleBackgroundMaintenance(
+    deviceActivityPreparedJob,
+  )
+    ? {
+        ...deviceActivityPreparedJob,
+        job: assistantCronJobSchema.parse({
+          ...deviceActivityPreparedJob.job,
+          target: buildAssistantCronTarget({}),
+        }),
+      }
+    : deviceActivityPreparedJob
   const input = {
     ...rawInput,
     job: preparedJob,

@@ -184,6 +184,10 @@ describe('store-backed assistant input source', () => {
     const { vaultRoot } = await createAssistantInputSourceVault(
       'assistant-input-source-participant-context-',
     )
+    const groupReactionContext = [
+      'Participant +15551110000 added a like reaction on: first message',
+      'Participant +15552220000 added a laugh reaction on: second message',
+    ].join('\n')
     const storedInput = createStoredHostedMailboxInput({
       eventId: 'evt_participant_context',
       laneSeq: '43',
@@ -209,7 +213,7 @@ describe('store-backed assistant input source', () => {
     })
     await recordHostedMailboxAssistantInputItem({
       groupParticipantAdded: true,
-      groupReactionContext: 'A participant liked: previous group message',
+      groupReactionContext,
       inputId: stored.inputId,
       mailboxItemId: 'raw_mailbox_item_participant_context',
       vault: vaultRoot,
@@ -220,7 +224,7 @@ describe('store-backed assistant input source', () => {
 
     expect(result.inputs[0]?.event.groupParticipantAdded).toBe(true)
     expect(result.inputs[0]?.event.groupReactionContext).toBe(
-      'A participant liked: previous group message',
+      groupReactionContext,
     )
     expect(
       Object.hasOwn(
@@ -234,7 +238,7 @@ describe('store-backed assistant input source', () => {
     })).toEqual(new Map([
       [stored.inputId, {
         groupParticipantAdded: true,
-        groupReactionContext: 'A participant liked: previous group message',
+        groupReactionContext,
         inputId: stored.inputId,
         mailboxItemId: 'raw_mailbox_item_participant_context',
       }],
@@ -249,7 +253,7 @@ describe('store-backed assistant input source', () => {
     expect(storedEventFile).not.toContain('groupParticipantAdded')
     expect(storedEventFile).not.toContain('groupReactionContext')
     expect(storedEventFile).not.toContain(
-      'A participant liked: previous group message',
+      groupReactionContext,
     )
   })
 

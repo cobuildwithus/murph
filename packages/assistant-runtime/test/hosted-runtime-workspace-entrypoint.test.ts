@@ -5190,6 +5190,7 @@ describe("hosted workspace runtime entrypoint", () => {
     const checkpointRequests: HostedWorkspaceCheckpointRequest[] = [];
     const fetchRequests: HostedMailboxFetchRequest[] = [];
     const imported: string[] = [];
+    const assistantWorkspaceVersions: string[] = [];
     let bootstrapImported = false;
 
     const conversationItem = createMailboxItem({
@@ -5258,10 +5259,11 @@ describe("hosted workspace runtime entrypoint", () => {
             }),
           }),
           async runAssistantPhase(input) {
-            assert.equal(input.workspace?.version, "1");
+            const workspaceVersion = input.workspace?.version ?? "missing";
+            assistantWorkspaceVersions.push(workspaceVersion);
             assert.equal(
               typeof input.workspace?.redactedStatus?.hostedCanonicalWriteReceiptLogSha256,
-              "string",
+              workspaceVersion === "1" ? "string" : "undefined",
             );
             assert.equal(input.initialMailboxImport.state.watermarks.system, "1");
             assert.equal(input.initialMailboxImport.state.watermarks.conversation, "1");
@@ -5278,11 +5280,14 @@ describe("hosted workspace runtime entrypoint", () => {
 
       assert.deepEqual(fetchRequests.map((request) => request.lanes.map((lane) => lane.lane)), [
         ["system", "conversation"],
+        ["conversation"],
+        ["system"],
       ]);
       assert.deepEqual(imported, [
         "system:member.activated",
         "conversation:conversation.message",
       ]);
+      assert.deepEqual(assistantWorkspaceVersions, ["1", "2"]);
       assert.deepEqual(checkpointRequests.map((request) => request.reason), [
         "canonical_runtime_commit",
         "idle_shutdown",
@@ -5303,19 +5308,13 @@ describe("hosted workspace runtime entrypoint", () => {
         typeof checkpointRequests[0]?.redactedStatus?.hostedCanonicalWriteReceiptLogSha256,
         "string",
       );
-      assert.deepEqual(result, {
-        nextWakeAt: null,
-        redactedStatus: {
-          hostedMailboxBlockedCount: 0,
-          hostedMailboxConversationImportedSeq: "1",
-          hostedMailboxFetchedCount: 2,
-          hostedMailboxImportedCount: 2,
-          hostedMailboxRetryableBlockedCount: 0,
-          hostedMailboxSystemHandledThroughSeq: "1",
-          hostedMailboxSystemImportedSeq: "1",
-        },
-        status: "idle",
-      });
+      assert.match(checkpointRequests[0]?.nextWakeAt ?? "", /^\d{4}-\d{2}-\d{2}T/u);
+      assert.equal(checkpointRequests[0]?.nextWakeReason, "assistant");
+      assert.equal(checkpointRequests[1]?.nextWakeAt, checkpointRequests[0]?.nextWakeAt);
+      assert.equal(checkpointRequests[1]?.nextWakeReason, "assistant");
+      assert.equal(result.nextWakeAt, checkpointRequests[0]?.nextWakeAt);
+      assert.equal(result.nextWakeReason, "assistant");
+      assert.equal(result.status, "scheduled");
     } finally {
       await removeTempRoot(vaultRoot);
     }
@@ -17002,6 +17001,8 @@ describe("hosted workspace runtime entrypoint", () => {
         checkpointRequests[1]?.redactedStatus?.hostedMailboxConversationImportedSeq,
         "1",
       );
+      assert.match(checkpointRequests[1]?.nextWakeAt ?? "", /^\d{4}-\d{2}-\d{2}T/u);
+      assert.equal(checkpointRequests[1]?.nextWakeReason, "assistant");
       assert.equal(
         checkpointRequests[2]?.redactedStatus?.hostedCanonicalWriteReceiptLogSha256,
         finalReceiptLog?.sha256,

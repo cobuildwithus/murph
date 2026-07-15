@@ -625,6 +625,8 @@ export async function runHostedWorkspaceUntilIdleOrBudget(
         mailboxStatus,
       ) ?? mailboxStatus;
       const checkpoint = await input.checkpointRuntimeRedactedStatus({
+        nextWakeAt: resolveHostedWorkspaceRunnerNowIso(input.now),
+        nextWakeReason: HOSTED_ASSISTANT_WAKE_REASON,
         reason: "canonical_runtime_commit",
         redactedStatus,
         workspace: checkpointRequestSession.latestWorkspace() ?? input.workspace,
