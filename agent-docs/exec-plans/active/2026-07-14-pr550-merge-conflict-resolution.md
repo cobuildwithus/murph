@@ -71,6 +71,12 @@ Updated: 2026-07-14
    the durable outbox boundary.
    Mitigation: assert the checkpointed outbox counters, then prove restart and
    foreground-before-retry ordering through the existing end-to-end effects.
+7. Risk: managed onboarding is seeded before Linq materializes the member's
+   direct chat, so ordinary same-conversation authorization rejects its first
+   current-chat update.
+   Mitigation: permit only the exact system-owned onboarding slug/tag shape to
+   replace its locator-only signup route with the verified current direct Linq
+   route; every other hosted automation update remains same-conversation only.
 
 ## Tasks
 
@@ -136,6 +142,17 @@ Updated: 2026-07-14
   bounded transition. Retry that read only inside the existing 20-second
   checkpoint waiter, retain all checkpoint predicates, and surface the last
   transport error if the waiter times out.
+- The remaining Linq onboarding E2E failure is a base-branch regression from
+  deleting the managed onboarding route-materialization exception in #652.
+  The scripted `automation save` exits `invalid_option`, so the original daily
+  wake remains. Restore only that system-owned direct-Linq transition and its
+  focused CLI regression; do not weaken general current-chat authorization.
+- After route materialization was restored, the same E2E reached completion
+  and exposed its stale pre-#652 expectation that the archived automation's
+  second wake remains scheduled for a model-backed skip turn. Align the proof
+  with #652's deterministic managed-automation owner: require one managed
+  update, require the obsolete wake to disappear, and prove no provider call or
+  Linq send occurs at the former second due time.
 
 ## Verification
 
@@ -196,3 +213,15 @@ Updated: 2026-07-14
   proof and made no edits.
 - Push/mergeability proof, CI on the new merge head, and the ReviewGPT hard-cap
   disposition remain pending.
+- The exact merged-head onboarding scenario reproduced the CI failure locally.
+  A temporary provider-output probe proved `automation save` exited 1 because
+  the seeded managed route did not yet belong to the materialized current chat;
+  the probe was removed before implementation.
+- The first rebuilt-run verification passed route acceleration, the first
+  scheduled send, and onboarding completion, then failed only because the test
+  still required the now-archived second wake. Runtime status proved the
+  deterministic owner updated one managed automation and selected the next real
+  daily wake instead.
+- The restored CLI route-materialization regression passed all 9 tests; CLI and
+  Cloudflare typechecks passed. A second full E2E rerun against the rebuilt
+  runner is in progress while the requested checkpoint is pushed.

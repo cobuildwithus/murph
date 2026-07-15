@@ -215,38 +215,21 @@ describe("hosted local onboarding follow-up e2e", () => {
       .toBe(onboardingCompleteReplyText);
     const completionStatus = await requireScenario().waitForHostedCompletion(userId);
     expect(completionStatus.lastErrorCode ?? null).toBeNull();
-    await waitForHostedWorkspaceNextWakeAt({
-      expectedNextWakeAt: secondDueAt,
-      userId,
-    });
+    expect(completionStatus.workspace?.redactedStatus?.murphManagedAutomationUpdated)
+      .toBe(1);
+    expect(completionStatus.workspace?.nextWakeAt).not.toBe(secondDueAt);
 
-    requireScenario().queueAssistantResponses(
-      buildHostedAssistantArchiveAndSkipResponses(),
-      { matchInputContains: followupInstructionMatcher },
-    );
     const secondSendBaseline = countOutboundLinqMessageSends();
     const secondProviderRequestBaseline = requireScenario().assistantProviderRequests.length;
     await sleepUntil(secondDueAt);
-    await waitForAssistantProviderRequestCount({
-      minimumCount: secondProviderRequestBaseline + 1,
-      timeoutMs: scheduledSendWaitMs,
-      userId,
-    });
-    const secondRunStatus = await requireScenario().waitForHostedCompletion(userId);
-    expect(secondRunStatus.lastErrorCode ?? null).toBeNull();
     await expectNoAdditionalOutboundLinqSend({
       baselineCount: secondSendBaseline,
       quietWindowMs: secondPeriodQuietWindowMs,
     });
-    const archiveTurnRequestBodies = requireScenario().assistantProviderRequests
-      .slice(secondProviderRequestBaseline)
-      .filter((request) => request.url === "/v1/responses")
-      .map((request) => request.body);
-    expect(archiveTurnRequestBodies.some((body) =>
-      body.includes(followupSlug)
-      && body.replaceAll("\\", "").replaceAll(/\s/gu, "")
-        .includes('"status":"archived"')
-    )).toBe(true);
+    expect(requireScenario().assistantProviderRequests)
+      .toHaveLength(secondProviderRequestBaseline);
+    const postSecondDueStatus = await requireScenario().harness.readUserStatus(userId);
+    expect(postSecondDueStatus.lastErrorCode ?? null).toBeNull();
   }, 720_000);
 });
 
@@ -313,50 +296,6 @@ function buildActivationWake(memberId: string) {
     memberId,
     occurredAt: new Date().toISOString(),
   });
-}
-
-async function waitForHostedWorkspaceNextWakeAt(input: {
-  expectedNextWakeAt: string;
-  userId: string;
-}): Promise<void> {
-  const startedAt = Date.now();
-  let latestNextWakeAt: string | null = null;
-  let latestNextAlarmAt: string | null = null;
-  let latestError: string | null = null;
-
-  while ((Date.now() - startedAt) < 120_000) {
-    let status: Awaited<ReturnType<HostedLocalFullStackScenario["harness"]["readUserStatus"]>>;
-    try {
-      status = await requireScenario().harness.readUserStatus(input.userId);
-    } catch (error) {
-      latestError = error instanceof Error ? error.message : String(error);
-      await sleep(1_000);
-      continue;
-    }
-
-    if (status.lastErrorCode) {
-      throw new Error(await requireScenario().buildFailureMessage(input.userId, [
-        "Hosted runner reported an error before checkpointing the onboarding follow-up wake.",
-        `lastErrorCode: ${status.lastErrorCode}`,
-      ]));
-    }
-
-    latestNextWakeAt = status.workspace?.nextWakeAt ?? null;
-    latestNextAlarmAt = status.nextAlarmAt ?? null;
-    if (latestNextWakeAt === input.expectedNextWakeAt) {
-      return;
-    }
-
-    await sleep(1_000);
-  }
-
-  throw new Error(await requireScenario().buildFailureMessage(input.userId, [
-    "Timed out waiting for the hosted workspace to checkpoint the onboarding follow-up wake.",
-    `expectedNextWakeAt: ${input.expectedNextWakeAt}`,
-    `latestNextWakeAt: ${latestNextWakeAt ?? "null"}`,
-    `latestNextAlarmAt: ${latestNextAlarmAt ?? "null"}`,
-    latestError ? `latest status read error: ${latestError}` : null,
-  ].filter((line): line is string => Boolean(line))));
 }
 
 function countOutboundLinqMessageSends(): number {
@@ -485,35 +424,6 @@ async function waitForHostedWorkspaceNextWakeAfter(input: {
   ].filter((line): line is string => Boolean(line))));
 }
 
-async function waitForAssistantProviderRequestCount(input: {
-  minimumCount: number;
-  timeoutMs: number;
-  userId: string;
-}): Promise<void> {
-  const startedAt = Date.now();
-  while ((Date.now() - startedAt) < input.timeoutMs) {
-    if (requireScenario().assistantProviderRequests.length >= input.minimumCount) {
-      return;
-    }
-
-    const status = await requireScenario().harness.readUserStatus(input.userId).catch(() => null);
-    if (status?.lastErrorCode) {
-      throw new Error(await requireScenario().buildFailureMessage(input.userId, [
-        `Hosted runner reported ${status.lastErrorCode} before the expected onboarding follow-up skip turn ran.`,
-        `assistant provider request count: ${requireScenario().assistantProviderRequests.length}`,
-      ]));
-    }
-
-    await sleep(250);
-  }
-
-  throw new Error(await requireScenario().buildFailureMessage(input.userId, [
-    "Timed out waiting for the onboarding follow-up skip turn to call the assistant provider.",
-    `expected request count: ${input.minimumCount}`,
-    `actual request count: ${requireScenario().assistantProviderRequests.length}`,
-  ]));
-}
-
 function buildHostedAssistantAccelerateFollowupResponses(input: {
   deliveryTarget: string;
   text: string;
@@ -561,29 +471,6 @@ function buildHostedAssistantCompleteOnboardingResponses(input: {
       "manual",
     ]),
     input.text,
-  ];
-}
-
-function buildHostedAssistantArchiveAndSkipResponses(): readonly HostedLocalAssistantProviderScriptedResponse[] {
-  return [
-    buildAssistantProviderVaultCliCall([
-      "automation",
-      "set-status",
-      followupSlug,
-      "--status",
-      "archived",
-    ]),
-    buildAssistantProviderVaultCliCall([
-      "automation",
-      "show",
-      followupSlug,
-      "--format",
-      "json",
-    ]),
-    JSON.stringify({
-      kind: "skip",
-      privateSummary: "Onboarding is complete; archived the follow-up automation.",
-    }),
   ];
 }
 
