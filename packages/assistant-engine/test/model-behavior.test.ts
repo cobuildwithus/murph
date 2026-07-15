@@ -2086,7 +2086,7 @@ describe('assistant Murph onboarding guidance', () => {
       'Until then, leave onboarding open.',
     )
     expect(prompt).toContain(
-      'Ask at most one onboarding question in a reply and follow the skill\'s stand-alone-reply rules.',
+      'Ask at most one onboarding question or checkpoint in a reply; the skill\'s bundled minimal-identity prompt counts as one checkpoint.',
     )
     expect(prompt).toContain(
       "Use the current prompt's date, timezone, channel, delivery route, and available tool guidance as runtime context whenever the onboarding skill is used",
