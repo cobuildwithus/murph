@@ -1,0 +1,229 @@
+import { beforeAll, beforeEach, describe, expect, it, vi } from "vitest";
+
+import { hostedOnboardingError } from "@/src/lib/hosted-onboarding/errors";
+
+const mocks = vi.hoisted(() => ({
+  fetchClinicalRetrievalPage: vi.fn(),
+  readClinicalRetrievalRun: vi.fn(),
+  recordClinicalRetrievalOutcome: vi.fn(),
+  requireHostedCloudflareCallbackRequest: vi.fn(),
+  requireHostedRuntimeActiveAccess: vi.fn(),
+}));
+
+vi.mock("@/src/lib/clinical-records/retrieval", () => ({
+  fetchClinicalRetrievalPage: mocks.fetchClinicalRetrievalPage,
+  readClinicalRetrievalRun: mocks.readClinicalRetrievalRun,
+  recordClinicalRetrievalOutcome: mocks.recordClinicalRetrievalOutcome,
+}));
+
+vi.mock("@/src/lib/hosted-execution/cloudflare-callback-auth", () => ({
+  requireHostedCloudflareCallbackRequest: mocks.requireHostedCloudflareCallbackRequest,
+}));
+
+vi.mock("@/src/lib/hosted-mailbox/runtime-access", () => ({
+  requireHostedRuntimeActiveAccess: mocks.requireHostedRuntimeActiveAccess,
+}));
+
+type ReadRunRoute = typeof import("../app/api/internal/clinical-records/runtime/read-run/route");
+type FetchPageRoute = typeof import("../app/api/internal/clinical-records/runtime/fetch-page/route");
+type RecordOutcomeRoute = typeof import("../app/api/internal/clinical-records/runtime/record-outcome/route");
+
+let readRunRoute: ReadRunRoute;
+let fetchPageRoute: FetchPageRoute;
+let recordOutcomeRoute: RecordOutcomeRoute;
+
+describe("Clinical Records internal runtime routes", () => {
+  beforeAll(async () => {
+    [readRunRoute, fetchPageRoute, recordOutcomeRoute] = await Promise.all([
+      import("../app/api/internal/clinical-records/runtime/read-run/route"),
+      import("../app/api/internal/clinical-records/runtime/fetch-page/route"),
+      import("../app/api/internal/clinical-records/runtime/record-outcome/route"),
+    ]);
+  });
+
+  beforeEach(() => {
+    vi.clearAllMocks();
+    vi.spyOn(console, "warn").mockImplementation(() => {});
+    mocks.requireHostedCloudflareCallbackRequest.mockResolvedValue("member_clinical_1");
+    mocks.requireHostedRuntimeActiveAccess.mockResolvedValue(undefined);
+    mocks.readClinicalRetrievalRun.mockResolvedValue({
+      errorCode: "family-unavailable",
+      retryable: false,
+      status: "unavailable",
+    });
+    mocks.fetchClinicalRetrievalPage.mockResolvedValue({
+      errorCode: "family-unavailable",
+      retryable: false,
+      status: "unavailable",
+    });
+    mocks.recordClinicalRetrievalOutcome.mockResolvedValue(undefined);
+  });
+
+  it("rejects all three operations before signed auth when the runtime write fence is absent", async () => {
+    const responses = await Promise.all([
+      readRunRoute.POST(jsonRequest("/api/internal/clinical-records/runtime/read-run", {
+        generation: 1,
+        runId: "run_1",
+      })),
+      fetchPageRoute.POST(jsonRequest("/api/internal/clinical-records/runtime/fetch-page", {
+        cursor: null,
+        generation: 1,
+        requestId: "request_1",
+        resourceType: "Patient",
+        runId: "run_1",
+      })),
+      recordOutcomeRoute.POST(jsonRequest("/api/internal/clinical-records/runtime/record-outcome", {
+        counts: emptyOutcomeCounts(),
+        generation: 1,
+        runId: "run_1",
+        status: "failed",
+      })),
+    ]);
+
+    for (const response of responses) {
+      expect(response.status).toBe(401);
+      await expect(response.json()).resolves.toEqual({
+        error: {
+          code: "CLINICAL_RECORD_RUNTIME_WRITE_FENCE_REQUIRED",
+          message: "Clinical Records runtime access requires the active runtime write fence.",
+          retryable: false,
+        },
+      });
+    }
+    expect(mocks.requireHostedCloudflareCallbackRequest).not.toHaveBeenCalled();
+    expect(mocks.readClinicalRetrievalRun).not.toHaveBeenCalled();
+    expect(mocks.fetchClinicalRetrievalPage).not.toHaveBeenCalled();
+    expect(mocks.recordClinicalRetrievalOutcome).not.toHaveBeenCalled();
+  });
+
+  it("accepts canonical forwarded fences and preserves strict runtime response shapes", async () => {
+    const headers = runtimeWriteFenceHeaders();
+    const readResponse = await readRunRoute.POST(jsonRequest(
+      "/api/internal/clinical-records/runtime/read-run",
+      { generation: 1, runId: "run_1" },
+      headers,
+    ));
+    const fetchResponse = await fetchPageRoute.POST(jsonRequest(
+      "/api/internal/clinical-records/runtime/fetch-page",
+      {
+        cursor: null,
+        generation: 1,
+        requestId: "request_1",
+        resourceType: "Patient",
+        runId: "run_1",
+      },
+      headers,
+    ));
+    const outcomeResponse = await recordOutcomeRoute.POST(jsonRequest(
+      "/api/internal/clinical-records/runtime/record-outcome",
+      {
+        counts: emptyOutcomeCounts(),
+        errorCode: "provider-unavailable",
+        generation: 1,
+        runId: "run_1",
+        status: "failed",
+      },
+      headers,
+    ));
+
+    await expect(readResponse.json()).resolves.toEqual({
+      errorCode: "family-unavailable",
+      retryable: false,
+      status: "unavailable",
+    });
+    await expect(fetchResponse.json()).resolves.toEqual({
+      errorCode: "family-unavailable",
+      retryable: false,
+      status: "unavailable",
+    });
+    await expect(outcomeResponse.json()).resolves.toEqual({ ok: true });
+    expect(mocks.requireHostedCloudflareCallbackRequest).toHaveBeenCalledTimes(3);
+    expect(mocks.requireHostedRuntimeActiveAccess).toHaveBeenCalledTimes(3);
+  });
+
+  it("rejects inactive members before any Clinical Records read, egress, or outcome mutation", async () => {
+    mocks.requireHostedRuntimeActiveAccess.mockRejectedValue(hostedOnboardingError({
+      code: "CLINICAL_RECORD_RUNTIME_MEMBER_INACTIVE",
+      httpStatus: 403,
+      message: "Clinical Records runtime access is inactive.",
+    }));
+    const headers = runtimeWriteFenceHeaders();
+    const responses = await Promise.all([
+      readRunRoute.POST(jsonRequest("/api/internal/clinical-records/runtime/read-run", {
+        generation: 1,
+        runId: "run_1",
+      }, headers)),
+      fetchPageRoute.POST(jsonRequest("/api/internal/clinical-records/runtime/fetch-page", {
+        cursor: null,
+        generation: 1,
+        requestId: "request_1",
+        resourceType: "Patient",
+        runId: "run_1",
+      }, headers)),
+      recordOutcomeRoute.POST(jsonRequest("/api/internal/clinical-records/runtime/record-outcome", {
+        counts: emptyOutcomeCounts(),
+        generation: 1,
+        runId: "run_1",
+        status: "failed",
+      }, headers)),
+    ]);
+
+    for (const response of responses) {
+      expect(response.status).toBe(403);
+      await expect(response.json()).resolves.toEqual({
+        error: {
+          code: "CLINICAL_RECORD_RUNTIME_MEMBER_INACTIVE",
+          message: "Clinical Records runtime access is inactive.",
+          retryable: false,
+        },
+      });
+    }
+    expect(mocks.readClinicalRetrievalRun).not.toHaveBeenCalled();
+    expect(mocks.fetchClinicalRetrievalPage).not.toHaveBeenCalled();
+    expect(mocks.recordClinicalRetrievalOutcome).not.toHaveBeenCalled();
+  });
+
+  it("rejects non-canonical generations in otherwise present fences", async () => {
+    const response = await readRunRoute.POST(jsonRequest(
+      "/api/internal/clinical-records/runtime/read-run",
+      { generation: 1, runId: "run_1" },
+      {
+        ...runtimeWriteFenceHeaders(),
+        "x-hosted-runtime-workspace-version": "04",
+      },
+    ));
+
+    expect(response.status).toBe(401);
+    expect(mocks.requireHostedCloudflareCallbackRequest).not.toHaveBeenCalled();
+  });
+});
+
+function jsonRequest(path: string, body: Record<string, unknown>, headers: HeadersInit = {}): Request {
+  return new Request(`https://join.example.test${path}`, {
+    body: JSON.stringify(body),
+    headers: { "content-type": "application/json", ...headers },
+    method: "POST",
+  });
+}
+
+function runtimeWriteFenceHeaders(): Record<string, string> {
+  return {
+    "x-hosted-runtime-attempt-id": "attempt_clinical_1",
+    "x-hosted-runtime-lease-generation": "9",
+    "x-hosted-runtime-workspace-version": "4",
+  };
+}
+
+function emptyOutcomeCounts(): Record<string, number> {
+  return {
+    createdCount: 0,
+    executableDecisionCount: 0,
+    fetchedPageCount: 0,
+    fetchedResourceFamilyCount: 0,
+    rawFileCount: 0,
+    retractedCount: 0,
+    reviewDecisionCount: 0,
+    skippedExistingCount: 0,
+    supersededCount: 0,
+  };
+}

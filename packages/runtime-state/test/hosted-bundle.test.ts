@@ -4735,6 +4735,11 @@ test("runtime-state portability defaults operational paths to machine-local unle
   expect(describeVaultLocalStateRelativePath(".runtime/operations/op_test/payloads/staged.md")?.relativePath).toBe(
     ".runtime/operations/op_test/payloads/staged.md",
   );
+  expect(describeVaultLocalStateRelativePath(".runtime/operations/clinical-records/retrieval.json")).toMatchObject({
+    owner: "vault-usecases-clinical-records",
+    portability: "portable",
+    rebuildable: false,
+  });
   expect(describeVaultLocalStateRelativePath(".runtime/operations/inbox/config.json")).toMatchObject({
     classification: "operational",
     portability: "machine_local",

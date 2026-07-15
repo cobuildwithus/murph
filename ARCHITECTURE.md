@@ -15,6 +15,29 @@ External conversation directness is three-state authority. Explicit direct evide
 
 Hosted automation writes also use the current-route bridge as an authority boundary. An authenticated hosted conversation may create, edit, import, pause, or reactivate an automation only for that same conversation; the CLI persists the trusted current route instead of trusting model-supplied locators or directness. Scheduled notification turns receive no conversation-mutation grant: managed lifecycle cleanup stays deterministic in its existing owner. Explicit cross-route authoring remains a local operator capability. For scheduled Linq execution, the persisted route is only a bounded routing hint: before model or provider work, the existing web egress owner resolves the concrete destination and its direct/group fact. A known group route never falls back to a personal home; a personal or legacy-unknown route may use the owner's authorized current-home fallback. Unresolved authority remains retryable without a marker or manual-repair protocol.
 
+## Hosted Clinical Records
+
+`apps/web` is the Clinical Records credential and provider-egress control plane.
+It owns the versioned Epic directory, short-lived connect intent, single-use
+SMART state/PKCE session, encrypted patient/token authority, retrieval
+generation, and operational status. The initial lane permits one retrieval
+generation per unique member/provider connection; later retry, reconnect, or
+refresh requires a bounded raw-evidence retention lifecycle. The hosted runner receives only a
+credential-free descriptor and bounded raw FHIR pages through three signed
+runtime operations; Cloudflare proves and forwards the active attempt, lease
+generation, and workspace version before web revalidates the fence shape and
+bound member. Postgres stores no raw FHIR body. Raw-first page integrity and
+FHIR import decisions remain with `packages/clinical-records` and
+`packages/importers`, canonical writes remain with `packages/core`, and the
+active hosted runtime reaches that composition through `packages/vault-usecases`.
+Accepted pages are atomically staged by that vault owner in one bounded,
+private, portable `.runtime/operations/clinical-records/**` checkpoint so
+foreground preemption resumes without replaying completed provider pages. The
+checkpoint is non-canonical and is removed when import or terminal rejection
+is captured; final raw paths remain absent until full semantic validation.
+The full behavior and rollout contract lives in
+`agent-docs/product-specs/clinical-records-intake.md`.
+
 ## Hosted Computer Authentication
 
 `apps/web` owns both Kernel login transports behind the existing durable
@@ -137,14 +160,20 @@ Clinical retrieval ownership is intentionally split across existing layers.
 FHIR pagination, opaque cursor/request replay, run state, and the signed
 read/fetch/outcome routes. Its durable system-mailbox handoff is exactly
 `{runId, generation}` and uses the existing per-user Temporal workflow.
+The member/provider unique connection owns one initial retrieval generation,
+which bounds immutable raw-evidence directories until a future retention owner
+can preserve canonical raw references across refreshes.
 `apps/cloudflare` supplies only the typed signed-web-control transport adapter.
 `packages/assistant-runtime` performs finite preemptible background iteration,
-then `@murphai/vault-usecases/clinical-records` atomically commits immutable raw
-pages and the retrieval manifest before lazily invoking
+resuming from the vault-owned operational checkpoint after preemption. Then
+`@murphai/vault-usecases/clinical-records` revalidates the web-owned current run
+immediately before atomically committing immutable raw pages and the retrieval
+manifest, and again before lazily invoking
 `@murphai/importers/clinical-records` and core canonical writes. Raw FHIR page
-bodies live only in the user vault and its encrypted hosted workspace snapshot
-after that handoff; they never enter Temporal state, the mailbox pointer,
-hosted logs, or model context.
+bodies live only in the user vault's bounded operational checkpoint, final raw
+evidence, and encrypted hosted workspace snapshot; they never enter assistant
+session state, Postgres, Temporal state, the mailbox pointer, hosted logs, or
+model context.
 
 Current hosted external-data lookup boundary: `apps/web` owns read-only product label lookup on `/api/foods` and `/api/supplements`, authenticated by the shared server-to-server `MURPH_DATA_API_KEY`. The shared labels database is configured by `MURPH_LABELS_DB_URL`, and both `/api/foods` and `/api/supplements` require it; `MURPH_SUPPLEMENT_DB_URL` is not a runtime fallback. Deployments must configure `MURPH_LABELS_DB_URL` before serving label lookup routes. The `foods` table stores USDA/FDC rows, and the `supplements` table stores DSLD, DailyMed, and official brand-site label rows; each row carries `data_origin`, `data_origin_id`, `data_origin_url`, `data_origin_priority`, optional `serving_grams`, and a `canonical_key` used to dedupe alternate records for the same label/product at query time. `data_origin` is the source type, such as `usda_branded`, `dsld`, `dailymed`, or `brand_site`, not a brand name. Query results use source-qualified ids such as `fdc:<id>`, `dailymed:<id>`, or `blueprint:<handle>` when a source prefix is needed, while API payloads expose provenance through `dataOrigin` and `dataOriginId` and include the stored source label JSON for search and exact lookup results. Product contaminant observations from sources such as PlasticList, NYC DOHMH, King County, and Pure Earth live in `product_tests`, with concentration limits and broad screening guidance in `contaminant_thresholds`; source-only observations keep source product identity without creating label rows, and label responses attach contaminant summaries only for rows linked to the exact selected `food_id` or `supplement_id`, including bounded raw observations plus threshold-exceedance alerts where comparable. Daily-exposure guidance can be scored at read time from the selected label's `serving_grams`, but the lookup layer never infers contaminants from names, brands, ingredients, tags, categories, or fuzzy matches. Hosted runtime callers reach label lookup through the fixed internal `murph-data-api.worker` host; `apps/cloudflare` injects the data API key during allowed `/api/foods` and `/api/supplements` `GET` egress and bounded batch-search `POST` egress, and `packages/cli` exposes those paths through `food search-labels`, `food search-labels-batch`, `supplement search-labels`, and `supplement search-labels-batch` without local key access.
 

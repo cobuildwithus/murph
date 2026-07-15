@@ -1,4 +1,5 @@
 import { assistantLocalStateDescriptors } from "./assistant-local-state-descriptors.ts";
+import { clinicalRecordsLocalStateDescriptors } from "./clinical-records-local-state-descriptors.ts";
 import { deviceSyncLocalStateDescriptors } from "./device-sync-local-state-descriptors.ts";
 import { inboxLocalStateDescriptors } from "./inbox-local-state-descriptors.ts";
 import { parserLocalStateDescriptors } from "./parser-local-state-descriptors.ts";
@@ -8,6 +9,7 @@ import { writeOperationLocalStateDescriptors } from "./write-operation-local-sta
 
 export const vaultLocalStatePathDescriptors: readonly VaultLocalStatePathDescriptor[] = [
   ...assistantLocalStateDescriptors,
+  ...clinicalRecordsLocalStateDescriptors,
   ...inboxLocalStateDescriptors,
   ...deviceSyncLocalStateDescriptors,
   ...parserLocalStateDescriptors,

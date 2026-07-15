@@ -1,5 +1,7 @@
 import { createHash } from "node:crypto";
-import { readFile } from "node:fs/promises";
+import { mkdtemp, readFile, rm } from "node:fs/promises";
+import { tmpdir } from "node:os";
+import path from "node:path";
 
 import {
   CLINICAL_RAW_MANIFEST_MAX_RESOURCES_PER_FILE,
@@ -14,7 +16,11 @@ import {
   HOSTED_CLINICAL_RECORDS_MAX_PAGES,
   HOSTED_CLINICAL_RECORDS_MAX_TOTAL_BODY_BYTES,
 } from "@murphai/hosted-execution/clinical-records";
-import { describe, expect, it, vi } from "vitest";
+import {
+  readClinicalFhirRetrievalCheckpointForRun,
+  writeClinicalFhirRetrievalCheckpoint,
+} from "@murphai/vault-usecases/clinical-records";
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
 import {
   runHostedClinicalRecordsSyncWakeLane,
@@ -49,6 +55,16 @@ const WAKE = {
   runId: "clinical_run_1",
   userId: "member_1",
 };
+
+let vaultRoot: string;
+
+beforeEach(async () => {
+  vaultRoot = await mkdtemp(path.join(tmpdir(), "murph-clinical-runtime-"));
+});
+
+afterEach(async () => {
+  await rm(vaultRoot, { force: true, recursive: true });
+});
 
 describe("hosted clinical records maintenance", () => {
   it("fetches finite opaque-cursor pages, imports once, and records bounded counts", async () => {
@@ -89,7 +105,7 @@ describe("hosted clinical records maintenance", () => {
     const result = await runHostedClinicalRecordsSyncWakeLane({
       clinicalRecordsPort: port,
       importSnapshot,
-      vaultRoot: "/tmp/clinical-vault",
+      vaultRoot,
       wake: WAKE,
     });
 
@@ -147,7 +163,7 @@ describe("hosted clinical records maintenance", () => {
     const result = await runHostedClinicalRecordsSyncWakeLane({
       clinicalRecordsPort: port,
       importSnapshot,
-      vaultRoot: "/tmp/clinical-vault",
+      vaultRoot,
       wake: WAKE,
     });
 
@@ -200,7 +216,7 @@ describe("hosted clinical records maintenance", () => {
     const result = await runHostedClinicalRecordsSyncWakeLane({
       clinicalRecordsPort: port,
       importSnapshot,
-      vaultRoot: "/tmp/clinical-vault",
+      vaultRoot,
       wake: WAKE,
     });
 
@@ -242,32 +258,42 @@ describe("hosted clinical records maintenance", () => {
         retryable: false,
         status: "unavailable",
       });
-    const port = createPort({
-      fetchPage,
-      readRun: vi.fn().mockResolvedValue({ run: multiFamilyRun, status: "ready" }),
-    });
-    const importSnapshot = vi.fn().mockResolvedValue({
-      canonical: {
-        applied: false,
-        createdCount: 0,
-        retractedCount: 0,
-        skippedExistingCount: 0,
-        supersededCount: 0,
-      },
-      executableDecisionCount: 0,
-      manifestPath: "raw/clinical/fhir/connection_1/clinical_run_1/manifest.json",
-      rawFileCount: 3,
-      reviewDecisionCount: 0,
+    const readRun = vi.fn()
+      .mockResolvedValueOnce({ run: multiFamilyRun, status: "ready" })
+      .mockResolvedValueOnce({
+        errorCode: HOSTED_CLINICAL_RECORDS_AUTHORIZATION_REQUIRED_ERROR_CODE,
+        retryable: false,
+        status: "unavailable",
+      });
+    const port = createPort({ fetchPage, readRun });
+    const importSnapshot = vi.fn<
+      NonNullable<Parameters<typeof runHostedClinicalRecordsSyncWakeLane>[0]["importSnapshot"]>
+    >(async (snapshot) => {
+      await snapshot.assertCurrent?.();
+      return {
+        canonical: {
+          applied: false,
+          createdCount: 0,
+          retractedCount: 0,
+          skippedExistingCount: 0,
+          supersededCount: 0,
+        },
+        executableDecisionCount: 0,
+        manifestPath: "raw/clinical/fhir/connection_1/clinical_run_1/manifest.json",
+        rawFileCount: 3,
+        reviewDecisionCount: 0,
+      };
     });
 
     const result = await runHostedClinicalRecordsSyncWakeLane({
       clinicalRecordsPort: port,
       importSnapshot,
-      vaultRoot: "/tmp/clinical-vault",
+      vaultRoot,
       wake: WAKE,
     });
 
     expect(fetchPage).toHaveBeenCalledTimes(2);
+    expect(readRun).toHaveBeenCalledTimes(2);
     expect(importSnapshot).toHaveBeenCalledWith(expect.objectContaining({
       completedResourceTypes: ["Observation"],
       errors: [
@@ -324,7 +350,7 @@ describe("hosted clinical records maintenance", () => {
     const result = await runHostedClinicalRecordsSyncWakeLane({
       clinicalRecordsPort: port,
       importSnapshot,
-      vaultRoot: "/tmp/clinical-vault",
+      vaultRoot,
       wake: WAKE,
     });
 
@@ -340,6 +366,10 @@ describe("hosted clinical records maintenance", () => {
       status: "failed",
     }));
     expect(port.recordOutcome).not.toHaveBeenCalled();
+    await expect(readClinicalFhirRetrievalCheckpointForRun({
+      identity: WAKE,
+      vaultRoot,
+    })).resolves.toBeNull();
   });
 
   it("retries transient control-plane misses without recording a terminal outcome", async () => {
@@ -354,7 +384,7 @@ describe("hosted clinical records maintenance", () => {
     await expect(runHostedClinicalRecordsSyncWakeLane({
       clinicalRecordsPort: port,
       importSnapshot: vi.fn(),
-      vaultRoot: "/tmp/clinical-vault",
+      vaultRoot,
       wake: WAKE,
     })).rejects.toMatchObject({ code: "CLINICAL_RECORDS_RUN_RETRYABLE" });
     expect(port.fetchPage).not.toHaveBeenCalled();
@@ -373,7 +403,7 @@ describe("hosted clinical records maintenance", () => {
     await expect(runHostedClinicalRecordsSyncWakeLane({
       clinicalRecordsPort: port,
       importSnapshot,
-      vaultRoot: "/tmp/clinical-vault",
+      vaultRoot,
       wake: WAKE,
     })).rejects.toMatchObject({ code: "CLINICAL_RECORDS_RUN_POINTER_MISMATCH" });
 
@@ -395,7 +425,7 @@ describe("hosted clinical records maintenance", () => {
     await expect(runHostedClinicalRecordsSyncWakeLane({
       clinicalRecordsPort: port,
       importSnapshot,
-      vaultRoot: "/tmp/clinical-vault",
+      vaultRoot,
       wake: WAKE,
     })).rejects.toMatchObject({ code: "CLINICAL_RECORDS_PAGE_RETRYABLE" });
 
@@ -415,7 +445,7 @@ describe("hosted clinical records maintenance", () => {
     const result = await runHostedClinicalRecordsSyncWakeLane({
       clinicalRecordsPort: port,
       importSnapshot,
-      vaultRoot: "/tmp/clinical-vault",
+      vaultRoot,
       wake: WAKE,
     });
 
@@ -427,6 +457,50 @@ describe("hosted clinical records maintenance", () => {
       status: "failed",
     }));
     expect(port.recordOutcome).not.toHaveBeenCalled();
+    expect(result.status).toBe("failed");
+  });
+
+  it("fails a logical page-URL cycle even when every opaque cursor is distinct", async () => {
+    const firstPageUrlHash = "a".repeat(64);
+    const secondPageUrlHash = "b".repeat(64);
+    const fetchPage = vi.fn()
+      .mockResolvedValueOnce({
+        body: "{\"resourceType\":\"Bundle\",\"entry\":[]}",
+        nextCursor: "randomized-cursor-1",
+        nextPageUrlHash: firstPageUrlHash,
+        status: "page",
+      })
+      .mockResolvedValueOnce({
+        body: "{\"resourceType\":\"Bundle\",\"entry\":[]}",
+        nextCursor: "randomized-cursor-2",
+        nextPageUrlHash: secondPageUrlHash,
+        pageUrlHash: firstPageUrlHash,
+        status: "page",
+      })
+      .mockResolvedValueOnce({
+        body: "{\"resourceType\":\"Bundle\",\"entry\":[]}",
+        nextCursor: "randomized-cursor-3",
+        nextPageUrlHash: firstPageUrlHash,
+        pageUrlHash: secondPageUrlHash,
+        status: "page",
+      });
+    const port = createPort({ fetchPage });
+    const importSnapshot = vi.fn();
+
+    const result = await runHostedClinicalRecordsSyncWakeLane({
+      clinicalRecordsPort: port,
+      importSnapshot,
+      vaultRoot,
+      wake: WAKE,
+    });
+
+    expect(fetchPage).toHaveBeenCalledTimes(3);
+    expect(importSnapshot).not.toHaveBeenCalled();
+    expect(result.outcome).toEqual(expect.objectContaining({
+      counts: expect.objectContaining({ fetchedPageCount: 3 }),
+      errorCode: "cursor_cycle",
+      status: "failed",
+    }));
     expect(result.status).toBe("failed");
   });
 
@@ -443,7 +517,7 @@ describe("hosted clinical records maintenance", () => {
     const result = await runHostedClinicalRecordsSyncWakeLane({
       clinicalRecordsPort: port,
       importSnapshot,
-      vaultRoot: "/tmp/clinical-vault",
+      vaultRoot,
       wake: WAKE,
     });
 
@@ -484,7 +558,7 @@ describe("hosted clinical records maintenance", () => {
     const result = await runHostedClinicalRecordsSyncWakeLane({
       clinicalRecordsPort: port,
       importSnapshot,
-      vaultRoot: "/tmp/clinical-vault",
+      vaultRoot,
       wake: WAKE,
     });
 
@@ -522,7 +596,7 @@ describe("hosted clinical records maintenance", () => {
     const result = await runHostedClinicalRecordsSyncWakeLane({
       clinicalRecordsPort: port,
       importSnapshot,
-      vaultRoot: "/tmp/clinical-vault",
+      vaultRoot,
       wake: WAKE,
     });
 
@@ -571,7 +645,7 @@ describe("hosted clinical records maintenance", () => {
     const result = await runHostedClinicalRecordsSyncWakeLane({
       clinicalRecordsPort: port,
       importSnapshot,
-      vaultRoot: "/tmp/clinical-vault",
+      vaultRoot,
       wake: WAKE,
     });
 
@@ -616,7 +690,7 @@ describe("hosted clinical records maintenance", () => {
     const result = await runHostedClinicalRecordsSyncWakeLane({
       clinicalRecordsPort: port,
       importSnapshot,
-      vaultRoot: "/tmp/clinical-vault",
+      vaultRoot,
       wake: WAKE,
     });
 
@@ -685,7 +759,7 @@ describe("hosted clinical records maintenance", () => {
     const result = await runHostedClinicalRecordsSyncWakeLane({
       clinicalRecordsPort: port,
       importSnapshot,
-      vaultRoot: "/tmp/clinical-vault",
+      vaultRoot,
       wake: WAKE,
     });
 
@@ -743,7 +817,7 @@ describe("hosted clinical records maintenance", () => {
     const result = await runHostedClinicalRecordsSyncWakeLane({
       clinicalRecordsPort: port,
       importSnapshot,
-      vaultRoot: "/tmp/clinical-vault",
+      vaultRoot,
       wake: WAKE,
     });
 
@@ -771,7 +845,7 @@ describe("hosted clinical records maintenance", () => {
     const result = await runHostedClinicalRecordsSyncWakeLane({
       clinicalRecordsPort: port,
       importSnapshot: vi.fn(),
-      vaultRoot: "/tmp/clinical-vault",
+      vaultRoot,
       wake: WAKE,
     });
 
@@ -795,7 +869,7 @@ describe("hosted clinical records maintenance", () => {
     const result = await runHostedClinicalRecordsSyncWakeLane({
       clinicalRecordsPort: port,
       importSnapshot,
-      vaultRoot: "/tmp/clinical-vault",
+      vaultRoot,
       wake: WAKE,
     });
 
@@ -812,6 +886,48 @@ describe("hosted clinical records maintenance", () => {
     expect(port.recordOutcome).not.toHaveBeenCalled();
   });
 
+  it("fails closed when web revokes the run at the vault write boundary", async () => {
+    const readRun = vi.fn()
+      .mockResolvedValueOnce({ run: RUN, status: "ready" })
+      .mockResolvedValueOnce({
+        errorCode: "connection-inactive",
+        retryable: false,
+        status: "unavailable",
+      });
+    const port = createPort({ readRun });
+    const importSnapshot = vi.fn<
+      NonNullable<Parameters<typeof runHostedClinicalRecordsSyncWakeLane>[0]["importSnapshot"]>
+    >(async (snapshot) => {
+      await snapshot.assertCurrent?.();
+      throw new Error("Revoked authority must stop the import.");
+    });
+
+    const result = await runHostedClinicalRecordsSyncWakeLane({
+      clinicalRecordsPort: port,
+      importSnapshot,
+      vaultRoot,
+      wake: WAKE,
+    });
+
+    expect(result).toEqual({
+      counts: {
+        createdCount: 0,
+        executableDecisionCount: 0,
+        fetchedPageCount: 0,
+        fetchedResourceFamilyCount: 0,
+        rawFileCount: 0,
+        retractedCount: 0,
+        reviewDecisionCount: 0,
+        skippedExistingCount: 0,
+        supersededCount: 0,
+      },
+      outcome: null,
+      status: "unavailable",
+    });
+    expect(readRun).toHaveBeenCalledTimes(2);
+    expect(port.recordOutcome).not.toHaveBeenCalled();
+  });
+
   it("does not overwrite a web-terminalized authorization-required read", async () => {
     const port = createPort({
       readRun: vi.fn().mockResolvedValue({
@@ -824,7 +940,7 @@ describe("hosted clinical records maintenance", () => {
     const result = await runHostedClinicalRecordsSyncWakeLane({
       clinicalRecordsPort: port,
       importSnapshot: vi.fn(),
-      vaultRoot: "/tmp/clinical-vault",
+      vaultRoot,
       wake: WAKE,
     });
 
@@ -833,6 +949,187 @@ describe("hosted clinical records maintenance", () => {
     expect(port.recordOutcome).not.toHaveBeenCalled();
   });
 
+  it("resumes completed families after authorization terminalization and import preemption", async () => {
+    const multiFamilyRun: HostedClinicalRecordsRunDescriptor = {
+      ...RUN,
+      retrievalScopes: [
+        RUN.retrievalScopes[0]!,
+        {
+          coverage: "whole-family",
+          queryFingerprint: "b".repeat(64),
+          resourceType: "Condition",
+        },
+        {
+          coverage: "whole-family",
+          queryFingerprint: "c".repeat(64),
+          resourceType: "MedicationRequest",
+        },
+      ],
+    };
+    const { completedPage } = await seedPartialClinicalCheckpoint(multiFamilyRun);
+    const terminalAuthorization = {
+      errorCode: HOSTED_CLINICAL_RECORDS_AUTHORIZATION_REQUIRED_ERROR_CODE,
+      retryable: false,
+      status: "unavailable" as const,
+    };
+    const port = createPort({
+      readRun: vi.fn().mockResolvedValue(terminalAuthorization),
+    });
+    let shouldYield = false;
+    let importAttempt = 0;
+    let successfulImports = 0;
+    let firstImportAuthorized: (() => void) | undefined;
+    const firstImportReachedAuthorityCheck = new Promise<void>((resolve) => {
+      firstImportAuthorized = resolve;
+    });
+    const importSnapshot = vi.fn<
+      NonNullable<Parameters<typeof runHostedClinicalRecordsSyncWakeLane>[0]["importSnapshot"]>
+    >(async (snapshot) => {
+      importAttempt += 1;
+      await snapshot.assertCurrent?.();
+      if (importAttempt === 1) {
+        firstImportAuthorized?.();
+        return await new Promise<never>((_resolve, reject) => {
+          const signal = snapshot.signal;
+          if (!signal) {
+            reject(new Error("Expected a Clinical Records cancellation signal."));
+            return;
+          }
+          signal.addEventListener("abort", () => reject(signal.reason), { once: true });
+        });
+      }
+      successfulImports += 1;
+      return {
+        canonical: {
+          applied: true,
+          createdCount: 1,
+          retractedCount: 0,
+          skippedExistingCount: 0,
+          supersededCount: 0,
+        },
+        executableDecisionCount: 1,
+        manifestPath: "raw/clinical/fhir/connection_1/clinical_run_1/manifest.json",
+        rawFileCount: 2,
+        reviewDecisionCount: 0,
+      };
+    });
+
+    const interrupted = runHostedClinicalRecordsSyncWakeLane({
+      clinicalRecordsPort: port,
+      importSnapshot,
+      shouldYieldClinicalRecords: () => shouldYield,
+      vaultRoot,
+      wake: WAKE,
+    });
+    await firstImportReachedAuthorityCheck;
+    shouldYield = true;
+    await expect(interrupted).rejects.toMatchObject({ name: "AbortError" });
+
+    const retained = await readClinicalFhirRetrievalCheckpointForRun({
+      identity: WAKE,
+      vaultRoot,
+    });
+    expect(retained).toMatchObject({
+      checkpoint: {
+        authorizationRequired: true,
+        completedResourceTypes: ["Observation"],
+        currentResourceIndex: 3,
+        errors: [
+          {
+            code: HOSTED_CLINICAL_RECORDS_AUTHORIZATION_REQUIRED_ERROR_CODE,
+            resourceType: "Condition",
+          },
+          { code: "not-attempted", resourceType: "MedicationRequest" },
+        ],
+        pages: [{ content: completedPage, resourceType: "Observation" }],
+      },
+      identity: multiFamilyRun,
+    });
+
+    shouldYield = false;
+    const completed = await runHostedClinicalRecordsSyncWakeLane({
+      clinicalRecordsPort: port,
+      importSnapshot,
+      shouldYieldClinicalRecords: () => shouldYield,
+      vaultRoot,
+      wake: WAKE,
+    });
+
+    expect(completed).toMatchObject({
+      counts: { createdCount: 1, fetchedResourceFamilyCount: 1 },
+      outcome: null,
+      status: "partial",
+    });
+    expect(successfulImports).toBe(1);
+    expect(importSnapshot).toHaveBeenCalledTimes(2);
+    for (const [snapshot] of importSnapshot.mock.calls) {
+      expect(snapshot).toMatchObject({
+        completedResourceTypes: ["Observation"],
+        pages: [{ content: completedPage, resourceType: "Observation" }],
+      });
+    }
+    await expect(readClinicalFhirRetrievalCheckpointForRun({
+      identity: WAKE,
+      vaultRoot,
+    })).resolves.toBeNull();
+    expect(port.fetchPage).not.toHaveBeenCalled();
+    expect(port.recordOutcome).not.toHaveBeenCalled();
+  });
+
+  it.each(["connection-inactive", "run-generation-stale"])(
+    "rejects a retained authorization checkpoint when web authority becomes %s",
+    async (authorityErrorCode) => {
+      const multiFamilyRun: HostedClinicalRecordsRunDescriptor = {
+        ...RUN,
+        retrievalScopes: [
+          RUN.retrievalScopes[0]!,
+          {
+            coverage: "whole-family",
+            queryFingerprint: "b".repeat(64),
+            resourceType: "Condition",
+          },
+        ],
+      };
+      await seedPartialClinicalCheckpoint(multiFamilyRun);
+      const readRun = vi.fn()
+        .mockResolvedValueOnce({
+          errorCode: HOSTED_CLINICAL_RECORDS_AUTHORIZATION_REQUIRED_ERROR_CODE,
+          retryable: false,
+          status: "unavailable",
+        })
+        .mockResolvedValueOnce({
+          errorCode: authorityErrorCode,
+          retryable: false,
+          status: "unavailable",
+        });
+      let simulatedRawWrites = 0;
+      let simulatedCanonicalWrites = 0;
+      const importSnapshot = vi.fn<
+        NonNullable<Parameters<typeof runHostedClinicalRecordsSyncWakeLane>[0]["importSnapshot"]>
+      >(async (snapshot) => {
+        await snapshot.assertCurrent?.();
+        simulatedRawWrites += 1;
+        simulatedCanonicalWrites += 1;
+        throw new Error("Revoked authority must stop the import.");
+      });
+
+      const result = await runHostedClinicalRecordsSyncWakeLane({
+        clinicalRecordsPort: createPort({ readRun }),
+        importSnapshot,
+        vaultRoot,
+        wake: WAKE,
+      });
+
+      expect(result).toEqual(unavailableClinicalRecordsResult());
+      expect(simulatedRawWrites).toBe(0);
+      expect(simulatedCanonicalWrites).toBe(0);
+      await expect(readClinicalFhirRetrievalCheckpointForRun({
+        identity: WAKE,
+        vaultRoot,
+      })).resolves.toBeNull();
+    },
+  );
+
   it("preempts before reading and leaves the durable mailbox item retryable", async () => {
     const port = createPort();
 
@@ -840,7 +1137,7 @@ describe("hosted clinical records maintenance", () => {
       clinicalRecordsPort: port,
       importSnapshot: vi.fn(),
       shouldYieldClinicalRecords: () => true,
-      vaultRoot: "/tmp/clinical-vault",
+      vaultRoot,
       wake: WAKE,
     })).rejects.toMatchObject({ code: "CLINICAL_RECORDS_FOREGROUND_PREEMPTED" });
     expect(port.readRun).not.toHaveBeenCalled();
@@ -865,7 +1162,7 @@ describe("hosted clinical records maintenance", () => {
       clinicalRecordsPort: port,
       importSnapshot: vi.fn(),
       shouldYieldClinicalRecords: () => shouldYield,
-      vaultRoot: "/tmp/clinical-vault",
+      vaultRoot,
       wake: WAKE,
     });
     await vi.waitFor(() => expect(readRun).toHaveBeenCalledOnce());
@@ -894,7 +1191,7 @@ describe("hosted clinical records maintenance", () => {
       clinicalRecordsPort: port,
       importSnapshot,
       shouldYieldClinicalRecords: () => shouldYield,
-      vaultRoot: "/tmp/clinical-vault",
+      vaultRoot,
       wake: WAKE,
     });
     await vi.waitFor(() => expect(importSnapshot).toHaveBeenCalledOnce());
@@ -929,7 +1226,7 @@ describe("hosted clinical records maintenance", () => {
       clinicalRecordsPort: createPort(),
       importSnapshot,
       signal: controller.signal,
-      vaultRoot: "/tmp/clinical-vault",
+      vaultRoot,
       wake: WAKE,
     });
 
@@ -945,11 +1242,6 @@ describe("hosted clinical records maintenance", () => {
 
   it("reuses the same generation after preemption and then completes", async () => {
     const fetchPage = vi.fn()
-      .mockResolvedValueOnce({
-        body: "{\"resourceType\":\"Bundle\",\"entry\":[]}",
-        nextCursor: "opaque-cursor-2",
-        status: "page",
-      })
       .mockResolvedValueOnce({
         body: "{\"resourceType\":\"Bundle\",\"entry\":[]}",
         nextCursor: "opaque-cursor-2",
@@ -981,21 +1273,22 @@ describe("hosted clinical records maintenance", () => {
       importSnapshot,
       shouldYieldClinicalRecords: () => {
         preemptionChecks += 1;
-        return preemptionChecks === 7;
+        return preemptionChecks === 6;
       },
-      vaultRoot: "/tmp/clinical-vault",
+      vaultRoot,
       wake: WAKE,
     })).rejects.toMatchObject({ code: "CLINICAL_RECORDS_FOREGROUND_PREEMPTED" });
     const completed = await runHostedClinicalRecordsSyncWakeLane({
       clinicalRecordsPort: port,
       importSnapshot,
       shouldYieldClinicalRecords: () => false,
-      vaultRoot: "/tmp/clinical-vault",
+      vaultRoot,
       wake: WAKE,
     });
 
     expect(completed.status).toBe("completed");
     expect(port.readRun).toHaveBeenCalledTimes(2);
+    expect(fetchPage).toHaveBeenCalledTimes(2);
     expect(port.recordOutcome).not.toHaveBeenCalled();
     expect(completed.outcome).toEqual(expect.objectContaining({
       generation: 1,
@@ -1006,14 +1299,65 @@ describe("hosted clinical records maintenance", () => {
       requestId: "cr-1-1-1",
     }), expect.objectContaining({ signal: expect.any(AbortSignal) }));
     expect(fetchPage).toHaveBeenNthCalledWith(2, expect.objectContaining({
-      cursor: null,
-      requestId: "cr-1-1-1",
-    }), expect.objectContaining({ signal: expect.any(AbortSignal) }));
-    expect(fetchPage).toHaveBeenNthCalledWith(3, expect.objectContaining({
       cursor: "opaque-cursor-2",
       requestId: "cr-1-1-2",
     }), expect.objectContaining({ signal: expect.any(AbortSignal) }));
   });
+
+  it("resumes a staged snapshot above sixteen MiB without replaying provider pages", async () => {
+    const pageBodies = Array.from({ length: 5 }, (_, index) =>
+      createLargeFhirBundleBody(index + 1, 4 * 1024 * 1024)
+    );
+    const fetchPage = vi.fn()
+      .mockResolvedValueOnce({ body: pageBodies[0], nextCursor: "cursor-2", status: "page" })
+      .mockResolvedValueOnce({ body: pageBodies[1], nextCursor: "cursor-3", status: "page" })
+      .mockResolvedValueOnce({ body: pageBodies[2], nextCursor: "cursor-4", status: "page" })
+      .mockResolvedValueOnce({ body: pageBodies[3], nextCursor: "cursor-5", status: "page" })
+      .mockResolvedValueOnce({ body: pageBodies[4], nextCursor: null, status: "page" });
+    const port = createPort({ fetchPage });
+    const importSnapshot = vi.fn().mockResolvedValue({
+      canonical: {
+        applied: false,
+        createdCount: 0,
+        retractedCount: 0,
+        skippedExistingCount: 0,
+        supersededCount: 0,
+      },
+      executableDecisionCount: 0,
+      manifestPath: "raw/clinical/fhir/connection_1/clinical_run_1/manifest.json",
+      rawFileCount: 6,
+      reviewDecisionCount: 0,
+    });
+
+    await expect(runHostedClinicalRecordsSyncWakeLane({
+      clinicalRecordsPort: port,
+      importSnapshot,
+      shouldYieldClinicalRecords: () => fetchPage.mock.calls.length >= 3,
+      vaultRoot,
+      wake: WAKE,
+    })).rejects.toMatchObject({ name: expect.stringMatching(/AbortError|HostedClinicalRecordsRuntimeError/u) });
+
+    const completed = await runHostedClinicalRecordsSyncWakeLane({
+      clinicalRecordsPort: port,
+      importSnapshot,
+      shouldYieldClinicalRecords: () => false,
+      vaultRoot,
+      wake: WAKE,
+    });
+
+    expect(completed).toEqual(expect.objectContaining({
+      counts: expect.objectContaining({ fetchedPageCount: 5 }),
+      status: "completed",
+    }));
+    expect(fetchPage).toHaveBeenCalledTimes(5);
+    expect(fetchPage).toHaveBeenNthCalledWith(4, expect.objectContaining({
+      cursor: "cursor-4",
+      requestId: "cr-1-1-4",
+    }), expect.objectContaining({ signal: expect.any(AbortSignal) }));
+    expect(importSnapshot).toHaveBeenCalledWith(expect.objectContaining({
+      pages: pageBodies.map((content) => expect.objectContaining({ content })),
+    }));
+  }, 20_000);
 
   it("keeps raw FHIR and the clinical importer out of the static mailbox path", async () => {
     const [eventsSource, importerRootSource, maintenanceImportSource] = await Promise.all([
@@ -1067,6 +1411,55 @@ function createPort(
   };
 }
 
+async function seedPartialClinicalCheckpoint(
+  run: HostedClinicalRecordsRunDescriptor,
+): Promise<{ completedPage: string; partialPage: string }> {
+  const completedPage = "{\"resourceType\":\"Bundle\",\"entry\":[]}";
+  const partialPage = "{\"resourceType\":\"Bundle\",\"entry\":[]}";
+  await writeClinicalFhirRetrievalCheckpoint({
+    checkpoint: {
+      authorizationRequired: false,
+      completedResourceTypes: ["Observation"],
+      currentResourceIndex: 1,
+      cursor: "condition-page-2",
+      errors: [],
+      pageFetchCount: 2,
+      pages: [
+        { content: completedPage, resourceType: "Observation" },
+        { content: partialPage, resourceType: "Condition" },
+      ],
+      resourcePageStartIndex: 1,
+      seenCursors: [],
+      seenPageUrlHashes: [],
+      successfulPageCount: 2,
+      totalBodyBytes: Buffer.byteLength(completedPage, "utf8")
+        + Buffer.byteLength(partialPage, "utf8"),
+      totalResourceCount: 0,
+    },
+    identity: run,
+    vaultRoot,
+  });
+  return { completedPage, partialPage };
+}
+
+function unavailableClinicalRecordsResult() {
+  return {
+    counts: {
+      createdCount: 0,
+      executableDecisionCount: 0,
+      fetchedPageCount: 0,
+      fetchedResourceFamilyCount: 0,
+      rawFileCount: 0,
+      retractedCount: 0,
+      reviewDecisionCount: 0,
+      skippedExistingCount: 0,
+      supersededCount: 0,
+    },
+    outcome: null,
+    status: "unavailable",
+  };
+}
+
 function createFhirBundleBody(
   resourceCount: number,
   resourceType = "Observation",
@@ -1075,6 +1468,21 @@ function createFhirBundleBody(
     entry: Array.from({ length: resourceCount }, () => ({
       resource: { resourceType },
     })),
+    resourceType: "Bundle",
+  });
+}
+
+function createLargeFhirBundleBody(page: number, minimumBytes: number): string {
+  const prefix = JSON.stringify({
+    entry: [],
+    page,
+    padding: "",
+    resourceType: "Bundle",
+  });
+  return JSON.stringify({
+    entry: [],
+    page,
+    padding: "x".repeat(Math.max(0, minimumBytes - Buffer.byteLength(prefix, "utf8"))),
     resourceType: "Bundle",
   });
 }

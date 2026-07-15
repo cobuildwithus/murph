@@ -462,12 +462,11 @@ export function isClinicalFhirUrlWithinBase(input: {
 }
 
 export function hashClinicalFhirPageUrl(value: string): string {
-  const pageUrl = value.trim();
-  if (pageUrl.length === 0 || pageUrl.length > 4_096) {
+  if (value.length === 0 || value.length > 4_096) {
     throw new Error("Expected a bounded FHIR page URL.");
   }
 
-  return createHash("sha256").update(pageUrl, "utf8").digest("hex");
+  return createHash("sha256").update(value, "utf8").digest("hex");
 }
 
 function parseClinicalFhirPatientReference(value: string): {
