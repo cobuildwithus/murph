@@ -309,8 +309,10 @@ function createProviderAttemptResult(): AssistantProviderTurnAttemptResult {
     codexThreadId: 'provider-session-1',
     rawEvents: [],
     response: 'provider response',
+    responseDeliveryContextOrdinal: 0,
     stderr: '',
     stdout: '',
+    transcriptResponse: 'provider response',
     usage: null,
   }
 

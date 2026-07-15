@@ -527,7 +527,7 @@ export interface CodexAppServerTurnResult {
   // already finished an answer.
   precedingAgentMessageSegments: readonly CodexAppServerResponseSegment[]
   /** Accepted-input ordinal whose delivery context owns the selected final reply. */
-  responseDeliveryContextOrdinal?: number
+  responseDeliveryContextOrdinal: number
   additionalUsages: AssistantProviderUsageDraft[]
   responseMedia: AssistantResponseMedia[]
   jsonEvents: unknown[]
@@ -542,7 +542,7 @@ export interface CodexAppServerTurnResult {
 }
 
 export interface CodexAppServerResponseSegment {
-  deliveryContextOrdinal?: number
+  deliveryContextOrdinal: number
   media: AssistantResponseMedia[]
   response: string
 }
@@ -3078,7 +3078,6 @@ async function runCodexAppServerTurnOnProcess(
     }
     if (
       precedingAgentMessageSegments.some((segment) =>
-        typeof segment.deliveryContextOrdinal !== 'number' ||
         segment.deliveryContextOrdinal < deliveryContextOrdinal
       )
     ) {
@@ -3146,14 +3145,14 @@ async function runCodexAppServerTurnOnProcess(
     )?.patch ?? null
 
   const shouldSuppressDeliveryContext = (
-    deliveryContextOrdinal?: number,
+    deliveryContextOrdinal: number,
   ): boolean => {
     if (
-      reservedNoReplyDeliveryContextOrdinals.has(deliveryContextOrdinal ?? 0)
+      reservedNoReplyDeliveryContextOrdinals.has(deliveryContextOrdinal)
     ) {
       return true
     }
-    const patch = resolveFinalActionPatch(deliveryContextOrdinal ?? 0)
+    const patch = resolveFinalActionPatch(deliveryContextOrdinal)
     return patch?.kind === 'none'
   }
 
@@ -4291,9 +4290,7 @@ async function runCodexAppServerTurnOnProcess(
       reaction: entry.patch.reaction,
     })),
     precedingAgentMessageSegments: filteredPrecedingAgentMessageSegments.map((segment) => ({
-      ...(typeof segment.deliveryContextOrdinal === 'number'
-        ? { deliveryContextOrdinal: segment.deliveryContextOrdinal }
-        : {}),
+      deliveryContextOrdinal: segment.deliveryContextOrdinal,
       response: segment.response,
       media: [...segment.media],
     })),
