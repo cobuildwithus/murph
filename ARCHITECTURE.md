@@ -103,9 +103,26 @@ Missing, legacy, mismatched, or ambiguous identity fails closed with no numeric
 sequence fallback. Tone and voice changes continue to
 append the existing `member.preferences.updated` mailbox event inside the web
 transaction and converge into canonical vault preferences through normal
-runtime handling. Model and reasoning changes remain exclusively owned by
-`murph.assistant_configuration`. The runtime may request an update only from
-eligible user input in the active bounded exact-successor provider batch and
+runtime handling. Hosted `murph.assistant_style` set/reset operations use a
+separate strict personality action on that same signed, input-bound callback;
+local mode continues to mutate the canonical vault directly. Web resolves the
+accepted input's causal sequence inside the transaction, applies Humor, Push,
+and Detail independently against nullable per-dial projection watermarks, and
+atomically updates the display projection plus watermark. When at least one
+requested dial applies, it also appends a sparse
+`member.preferences.updated` event with `causalOrigin: "turn"` and the original
+intent sequence. A newer sequence advances that dial's watermark even
+when its visible value is unchanged; an older sequence is a field-local stale
+no-op; the same sequence plus the same value is an idempotent retry; and the same
+sequence plus a different value is a later command from the same accepted turn.
+The runtime uses Web's requested effective results as an invocation-only
+overlay, while `show` still begins from canonical vault state; the mailbox event
+remains the only durable path into `bank/preferences.json`.
+
+Model and reasoning
+changes remain exclusively owned by `murph.assistant_configuration`. The
+runtime may request an update only from eligible user input in the active
+bounded exact-successor provider batch and
 forwards only that batch's terminal input id; inside the mutation transaction,
 web binds that input id to the callback member and one live conversation
 mailbox row before re-deriving access and Sol eligibility. A
@@ -116,8 +133,10 @@ callbacks are rejected. The personalization response
 returns only the effective enum values (normalizing absent stored style to the
 shared `formal`/`upbeat` presentation defaults), read-only model availability,
 and truthful saved/unchanged state so the assistant can confirm what actually
-happened. No vault-only setter or second personalization store exists; Settings
-is the fallback only when the hosted tool port is unavailable.
+happened. The personality response additionally reports each requested dial as
+saved, unchanged, or superseded so a delayed callback cannot echo stale intent.
+No vault-only setter or second personalization store exists for hosted writes;
+Settings is the fallback only when the hosted tool port is unavailable.
 
 ## Module Map
 

@@ -56,6 +56,7 @@ import {
   executeMurphDynamicToolRequest,
   isComputerDynamicToolRequest,
   MURPH_ASSISTANT_STYLE_TOOL,
+  type AssistantStyleTurnSettingsOverlay,
   type MurphDynamicToolFinalActionPatch,
   type MurphDynamicToolReactionPatch,
   type MurphDynamicToolRequest,
@@ -2428,6 +2429,9 @@ async function runCodexAppServerTurnOnProcess(
   let lastEventError: string | null = null
   let lastEventErrorInfo: CodexStructuredErrorInfo | null = null
   let responseMedia: AssistantResponseMedia[] = []
+  const assistantStyleSettingsOverlay: AssistantStyleTurnSettingsOverlay = {
+    settings: {},
+  }
   let finalActionPatches: Array<{
     deliveryContextOrdinal: number
     patch: MurphDynamicToolFinalActionPatch
@@ -3010,9 +3014,9 @@ async function runCodexAppServerTurnOnProcess(
     }
   }
 
-  // Stateful dynamic tools run serialized in request order so response media,
-  // final-action patches, and computer pause barriers apply deterministically
-  // even if Codex issues overlapping tool requests.
+  // Stateful dynamic tools run serialized in request order so preference
+  // mutations, response media, final-action patches, and computer pause
+  // barriers apply deterministically even if Codex overlaps tool requests.
   const trackDynamicToolExecution = (run: () => Promise<unknown>): void => {
     dynamicToolExecutionChain = dynamicToolExecutionChain
       .then(run)
@@ -3352,6 +3356,7 @@ async function runCodexAppServerTurnOnProcess(
     const runDynamicTool = () => withHostedCanonicalWritePort(
       hostedCanonicalWritePort,
       async () => await executeMurphDynamicToolRequest({
+        assistantStyleSettingsOverlay,
         assistantStyleSettingsAvailable: input.dynamicTools.some(
           (tool) =>
             tool.namespace === MURPH_ASSISTANT_STYLE_TOOL.namespace &&
@@ -4396,6 +4401,7 @@ function isSerializedDynamicToolRequest(
     request.kind === 'generate-voice-memo' ||
     request.kind === 'generate-song' ||
     request.kind === 'attach-response-media' ||
+    request.kind === 'assistant-style' ||
     request.kind === 'personalization' ||
     request.kind === 'submit-product-feedback' ||
     isComputerDynamicToolRequest(request)

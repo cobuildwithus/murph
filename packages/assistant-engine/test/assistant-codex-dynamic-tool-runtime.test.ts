@@ -12,6 +12,10 @@ const codexMocks = vi.hoisted(() => ({
     kind: string
     voiceMemoRuntime: unknown
   }>,
+  onDynamicToolCall: null as null | ((input: {
+    kind: string
+    styleValue: number | null
+  }) => Promise<void>),
   spawn: vi.fn(),
 }))
 
@@ -38,6 +42,14 @@ vi.mock('../src/assistant-codex/dynamic-tools.ts', async (importOriginal) => {
             : {}),
           kind: input.request.kind,
           voiceMemoRuntime: input.voiceMemoRuntime ?? null,
+        })
+        await codexMocks.onDynamicToolCall?.({
+          kind: input.request.kind,
+          styleValue:
+            input.request.kind === 'assistant-style' &&
+            input.request.args.action === 'set'
+              ? input.request.args.value
+              : null,
         })
         return {
           rpcResult: {
@@ -91,6 +103,7 @@ function executeCodexAppServerTurn(
 afterEach(async () => {
   await stopWarmCodexAppServer('dynamic-tool-runtime-test-cleanup')
   codexMocks.dynamicToolCalls.splice(0)
+  codexMocks.onDynamicToolCall = null
   codexMocks.spawn.mockReset()
   vi.restoreAllMocks()
   await Promise.all(
@@ -165,7 +178,116 @@ describe('Codex dynamic tool runtime routing', () => {
       },
     ])
   })
+
+  it('serializes overlapping assistant-style calls in provider command order', async () => {
+    const workingDirectory = await createTempDir(
+      'assistant-codex-style-order-work-',
+    )
+    const codexHome = await createTempDir('assistant-codex-style-order-home-')
+    const firstStarted = createDeferred<void>()
+    const releaseFirst = createDeferred<void>()
+    const executionOrder: number[] = []
+    codexMocks.onDynamicToolCall = async ({ kind, styleValue }) => {
+      if (kind !== 'assistant-style' || styleValue === null) {
+        return
+      }
+      executionOrder.push(styleValue)
+      if (styleValue === 2) {
+        firstStarted.resolve()
+        await releaseFirst.promise
+      }
+    }
+    codexMocks.spawn.mockImplementation(() => {
+      const child = new MockChildProcess()
+      queueMicrotask(() => {
+        void runScriptedOverlappingStyleTurn(child)
+      })
+      return child
+    })
+
+    const turn = executeCodexAppServerTurn({
+      approvalPolicy: 'never',
+      codexCommand: 'codex',
+      codexHome,
+      dynamicTools: resolveMurphDynamicTools({
+        assistantStyleSettingsAvailable: true,
+        progressUpdatesAvailable: false,
+      }),
+      env: {
+        CODEX_HOME: codexHome,
+        PATH: '/usr/bin',
+      },
+      prompt: 'Set humor twice.',
+      sandbox: 'workspace-write',
+      workingDirectory,
+    })
+
+    await firstStarted.promise
+    await Promise.resolve()
+    const orderWhileFirstWasPending = [...executionOrder]
+    releaseFirst.resolve()
+
+    await expect(turn).resolves.toMatchObject({
+      finalMessage: 'ordered',
+      threadId: 'thread-style-order',
+      turnId: 'turn-style-order',
+    })
+    expect(orderWhileFirstWasPending).toEqual([2])
+    expect(executionOrder).toEqual([2, 8])
+  })
 })
+
+async function runScriptedOverlappingStyleTurn(
+  child: MockChildProcess,
+): Promise<void> {
+  const initialize = await child.waitForRpcMethod('initialize')
+  child.stdout.write(jsonLine({ id: initialize.id, result: {} }))
+  const threadStart = await child.waitForRpcMethod('thread/start')
+  child.stdout.write(jsonLine({
+    id: threadStart.id,
+    result: { thread: { id: 'thread-style-order' } },
+  }))
+  const turnStart = await child.waitForRpcMethod('turn/start')
+  child.stdout.write(jsonLine({
+    id: turnStart.id,
+    result: { turn: { id: 'turn-style-order' } },
+  }))
+  child.stdout.write(jsonLine({
+    method: 'turn/started',
+    params: { turn: { id: 'turn-style-order' } },
+  }))
+
+  for (const [id, value] of [[11, 2], [12, 8]] as const) {
+    child.stdout.write(jsonLine({
+      id,
+      method: 'item/tool/call',
+      params: {
+        arguments: { action: 'set', setting: 'humor', value },
+        namespace: 'murph',
+        tool: 'assistant_style',
+        turnId: 'turn-style-order',
+      },
+    }))
+  }
+  await child.waitForRpcId(11)
+  await child.waitForRpcId(12)
+  child.stdout.write(jsonLine({
+    method: 'item/completed',
+    params: {
+      item: {
+        id: 'assistant-style-order',
+        message: 'ordered',
+        type: 'assistant_message',
+      },
+    },
+  }))
+  child.stdout.write(jsonLine({
+    method: 'turn/completed',
+    params: {
+      turn: { id: 'turn-style-order', status: 'completed' },
+    },
+  }))
+}
 
 async function runScriptedDynamicToolTurn(
   child: MockChildProcess,
@@ -385,4 +507,15 @@ async function createTempDir(prefix: string): Promise<string> {
 
 function jsonLine(value: unknown): string {
   return `${JSON.stringify(value)}\n`
+}
+
+function createDeferred<T>() {
+  let resolvePromise: (value: T | PromiseLike<T>) => void = () => undefined
+  const promise = new Promise<T>((resolve) => {
+    resolvePromise = resolve
+  })
+  return {
+    promise,
+    resolve: resolvePromise,
+  }
 }

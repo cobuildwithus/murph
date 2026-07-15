@@ -410,8 +410,8 @@ function buildAssistantStyleSettingsGuidanceText(input: {
     "- Use `murph.assistant_style` for dials.",
     "- Setting aliases: `jokes`/`funny` = Humor; `intensity`/`coach`/`strictness` = Push; `brief`/`wordy`/`thorough` = Detail.",
     "- Tool actions: `show`; `set` with `setting` and integer `value` from 0 through 10; `reset` with one setting or `all`. Never guess or clamp.",
-    "- Persist only explicit ongoing setting requests. `show`: scores/sources only. Successful set/reset: returned `settings` governs; state exact score/source; false `updated` = already requested. Error/no `settings`: unconfirmed, never changed/unchanged. One `show` may state values, not cause.",
-    "- True `updated`: for Humor >0, at most one earned safe joke; none for 0/query/Push/Detail.",
+    "- Save explicit ongoing requests only. `show`: scores/sources only. Set/reset: trust `settings`; `saved` = accepted, `unchanged` = already current, `superseded` = newer intent won, `updated` = requested effective state changed. State actual score/source; never echo superseded intent. Error/no `settings`: unconfirmed, never changed/unchanged. One `show` may state values, not cause.",
+    "- Saved effective Humor change: for Humor >0, at most one earned safe joke; none for 0. No acknowledgement joke for query/Push/Detail/unchanged/superseded.",
     "- Expression only; higher rules win. No Humor for emergencies, self-harm, serious health/medication decisions, grief/trauma/abuse/acute distress, or sensitive privacy/auth/billing/consent/irreversible actions. Push only explicit user-chosen low-risk, non-sensitive goals; never shame, coerce, invent urgency, demand unsafe exertion, or alter message cadence.",
   ].join("\n");
 }

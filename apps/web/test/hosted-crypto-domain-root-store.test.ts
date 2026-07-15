@@ -689,10 +689,25 @@ function createHostedMemberIdentityServiceTransaction(): HostedCryptoTestTransac
       const now = new Date("2026-05-02T00:00:00.000Z");
       return {
         assistantDetail: null,
+        assistantDetailCausalSeq:
+          input.data.assistantDetailCausalSeq === undefined ||
+          input.data.assistantDetailCausalSeq === null
+            ? null
+            : BigInt(input.data.assistantDetailCausalSeq),
         assistantHumor: null,
+        assistantHumorCausalSeq:
+          input.data.assistantHumorCausalSeq === undefined ||
+          input.data.assistantHumorCausalSeq === null
+            ? null
+            : BigInt(input.data.assistantHumorCausalSeq),
         assistantModelPreference: null,
         assistantReasoningEffortPreference: null,
         assistantPush: null,
+        assistantPushCausalSeq:
+          input.data.assistantPushCausalSeq === undefined ||
+          input.data.assistantPushCausalSeq === null
+            ? null
+            : BigInt(input.data.assistantPushCausalSeq),
         assistantTone: null,
         assistantToneCausalSeq: null,
         assistantVoice: null,
