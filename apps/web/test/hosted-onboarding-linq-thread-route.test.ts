@@ -2318,6 +2318,41 @@ describe("Linq explicit external-thread routing", () => {
     expect(prisma.readPendingGroupReactionContextEncrypted()).toBeNull();
     expect(prisma.readPendingParticipantAddition()).toBe(false);
   });
+
+  it("rolls unreadable reaction context back after a mailbox dedupe race", async () => {
+    const prisma = createPrisma({
+      routeContainerMemberId: "member_thread_container_123",
+    });
+    await appendRoutedReactionContext(
+      prisma,
+      "A participant added a like reaction on: Existing message",
+    );
+    const encryptedContext = prisma.readPendingGroupReactionContextEncrypted();
+    expect(encryptedContext).not.toBeNull();
+    secureBoxMocks.openHostedUserSecureBoxString.mockRejectedValueOnce(
+      new Error("decrypt unavailable"),
+    );
+    vi.mocked(mailboxStore.appendHostedMailboxEnvelopeTx).mockResolvedValueOnce({
+      dedupeConflict: false,
+      duplicate: true,
+      inserted: false,
+      item: buildHostedMailboxItem({
+        id: "mailbox_existing",
+        userId: "member_thread_container_123",
+      }),
+    });
+
+    await expect(runRoutedMessageTransaction(
+      prisma,
+      buildLinqMessageReceivedEvent({}),
+    )).rejects.toMatchObject({
+      code: "LINQ_MAILBOX_APPEND_RACE",
+      retryable: true,
+    });
+    expect(prisma.readPendingGroupReactionContextEncrypted()).toBe(
+      encryptedContext,
+    );
+  });
 });
 
 describe("Linq group chat auto-provision", () => {

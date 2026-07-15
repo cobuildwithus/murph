@@ -1268,13 +1268,10 @@ async function planHostedLinqExplicitThreadRouteWebhook(input: {
     envelope: mailboxEnvelope,
     tx: input.prisma,
   });
-  if (
-    (pendingContext.groupParticipantAdded || pendingContext.groupReactionContext)
-    && mailboxAppend.duplicate
-  ) {
-    // Escaping the transaction restores the consumed context bit. The
-    // concurrent delivery already owns the mailbox item, so its retry takes
-    // the early dedupe path without stealing context from the next message.
+  if (mailboxAppend.duplicate) {
+    // The early dedupe read was empty, so this is necessarily a concurrent
+    // append race. Escaping the transaction restores any consumed route
+    // context; the retry then takes the ordinary early-dedupe path.
     throw hostedOnboardingError({
       code: "LINQ_MAILBOX_APPEND_RACE",
       httpStatus: 503,

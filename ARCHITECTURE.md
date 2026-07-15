@@ -309,7 +309,9 @@ reseal share one 500 ms deadline, and consume decrypt has the same bound, so
 optional crypto cannot inherit the general KMS deadline while holding locks.
 When raising the consumed hint beyond the legacy 512-character contract, deploy
 the hosted runner bundle before the web producer so every parser accepts the
-new 5,129-character maximum before web can emit it.
+new 5,129-character maximum before web can emit it. Once web has written the
+new array shape, forward-fix web rather than rolling it back until those
+transient slots have been consumed or cleared.
 
 Hosted Linq unknown first-contact admission is a web-owned classifier gate on
 the signup-link path only. It runs after cheap deterministic ingress filters and
