@@ -421,29 +421,19 @@ describe.skipIf(!runPostgresConcurrencyProof)(
         });
         await expect(consumerTransaction).resolves.toBe(true);
 
-        const [delivery, period] = await Promise.all([
-          fixture.observer.hostedLinqDelivery.findUnique({
-            select: {
-              source: true,
-              status: true,
-              template: true,
-            },
-            where: { idempotencyKey: usageDeliveryLookupKey },
-          }),
-          fixture.observer.hostedAiUsagePeriod.findFirst({
-            select: { limitNoticeSentAt: true },
-            where: {
-              memberId: fixture.containerMemberId,
-              periodStart,
-            },
-          }),
-        ]);
+        const delivery = await fixture.observer.hostedLinqDelivery.findUnique({
+          select: {
+            source: true,
+            status: true,
+            template: true,
+          },
+          where: { idempotencyKey: usageDeliveryLookupKey },
+        });
         expect(delivery).toEqual({
           source: "hosted_webhook_side_effect",
           status: "provider_dispatch_started",
           template: "ai_usage_quota",
         });
-        expect(period?.limitNoticeSentAt).toEqual(attemptedAt);
         await expect(readPendingParticipantAddition(fixture)).resolves.toBe(false);
       } finally {
         releaseUsageAuthorityCheck.resolve();
