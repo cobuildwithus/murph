@@ -2533,7 +2533,10 @@ export async function runHostedWorkspaceRuntimeJobInProcess(
         ): Promise<HostedMailboxImportCheckpointResult> => {
           idleWakeOrdinal += 1;
           const previousPendingWake = pendingWake;
-          const passWorkspace = overlayPendingWakeOnCommittedWorkspace(runtimeStateDirty);
+          const passWorkspace = overlayPendingWakeOnCommittedWorkspace(
+            runtimeStateDirty,
+            null,
+          );
           result = await runHostedWorkspaceUntilIdleOrBudget({
             ...baseRunnerInput,
             deferInitialMailboxPostCheckpointEffects: true,
@@ -2546,7 +2549,13 @@ export async function runHostedWorkspaceRuntimeJobInProcess(
             signal: importSignal,
             workspace: passWorkspace,
           });
-          absorbForegroundPassResult(result, passWorkspace, previousPendingWake, false);
+          absorbForegroundPassResult(
+            result,
+            passWorkspace,
+            previousPendingWake,
+            null,
+            false,
+          );
           // Importing mailbox state never services an already-selected wake.
           pendingWake = selectEarliestHostedRuntimeWake([
             {
