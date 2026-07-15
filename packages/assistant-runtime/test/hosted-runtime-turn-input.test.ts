@@ -1122,6 +1122,15 @@ describe("resolveHostedPersonalizationInputIdForAcceptedInputs", () => {
       vaultRoot,
     })).resolves.toBeNull();
   });
+
+  it("fails closed when an accepted input event is missing", async () => {
+    const vaultRoot = await createTempVault();
+
+    await expect(resolveHostedPersonalizationInputIdForAcceptedInputs({
+      assistantInputIds: ["ain_00000000000000000000000000000000"],
+      vaultRoot,
+    })).resolves.toBeNull();
+  });
 });
 
 async function createTempVault(): Promise<string> {
