@@ -18,6 +18,7 @@ const mocks = vi.hoisted(() => {
     hasPendingDirtyConnection: vi.fn(),
     inspectCompanionHrvCaptureReceipt: vi.fn(),
     getStoredConnectionAccountForUser: vi.fn(),
+    requireHostedCloudflareCallbackRequest: vi.fn(),
     clearStoredProviderConfigCredential: vi.fn(),
     listConnectionSources: vi.fn(),
     listConnectionsForUser: vi.fn(),
@@ -93,6 +94,10 @@ vi.mock("@/src/lib/hosted-runner/control", () => ({
 
 vi.mock("@/src/lib/hosted-orchestration/signal-runtime", () => ({
   signalHostedDeviceSyncMailboxRuntime: mocks.signalHostedDeviceSyncMailboxRuntime,
+}));
+
+vi.mock("@/src/lib/hosted-execution/cloudflare-callback-auth", () => ({
+  requireHostedCloudflareCallbackRequest: mocks.requireHostedCloudflareCallbackRequest,
 }));
 
 vi.mock("@/src/lib/device-sync/auth", () => ({
@@ -358,12 +363,14 @@ import {
 import { PrismaDeviceSyncControlPlaneStore } from "@/src/lib/device-sync/prisma-store";
 import { getPrisma } from "@/src/lib/prisma";
 import {
-  appendHostedDeviceSyncManualReconcileWake,
   appendHostedDeviceSyncScheduledReconcileWake,
   persistHostedDeviceSyncCompanionMetadata,
 } from "@/src/lib/device-sync/wake-service";
 import { createHostedBrowserConnectionId } from "@/src/lib/device-sync/public-connection";
 import { hostedOnboardingError } from "@/src/lib/hosted-onboarding/errors";
+import {
+  POST as reconcileRoutePost,
+} from "../app/api/internal/device-sync/reconcile/route";
 
 function buildPublicConnectionId(connectionId: string): string {
   return createHostedBrowserConnectionId(ROUTING_INDEX_KEY, connectionId);
@@ -483,6 +490,7 @@ describe("hosted device-sync wakes", () => {
       signalAccepted: true,
       workflowId: "hosted-user-runtime:user-123",
     });
+    mocks.requireHostedCloudflareCallbackRequest.mockResolvedValue("user-123");
     mocks.appendHostedMailboxEnvelope.mockResolvedValue(undefined);
     mocks.getConnectionForUser.mockResolvedValue(buildHostedConnection());
     mocks.ensureSdkConnection.mockResolvedValue(buildHostedConnection({
@@ -592,29 +600,55 @@ describe("hosted device-sync wakes", () => {
     });
   });
 
-  it("appends a manual reconcile wake without mutating connection state", async () => {
-    await expect(appendHostedDeviceSyncManualReconcileWake({
-      connectionId: "dsc_123",
-      occurredAt: "2026-07-15T12:00:00.000Z",
-      provider: "oura",
-      userId: "user-123",
-    })).resolves.toMatchObject({
-      wakeAccepted: true,
-      wakeInserted: true,
-    });
-
-    expect(mocks.appendHostedMailboxEnvelope).toHaveBeenCalledWith(
-      expect.objectContaining({
-        envelope: expect.objectContaining({
-          connectionId: "dsc_123",
-          hint: expect.objectContaining({ reason: "manual_reconcile" }),
-          reason: "reconcile_due",
-        }),
-        tx: mocks.prismaTx,
-      }),
+  it("returns queued after a manual reconcile commits even when its wake signal fails", async () => {
+    mocks.signalHostedDeviceSyncMailboxRuntime.mockRejectedValueOnce(
+      new Error("Temporal unavailable"),
     );
-    expect(mocks.createSignal).not.toHaveBeenCalled();
-    expect(mocks.syncDurableConnectionState).not.toHaveBeenCalled();
+    const warn = vi.spyOn(console, "warn").mockImplementation(() => undefined);
+
+    try {
+      const request = new Request(
+        "https://control.example.test/api/internal/device-sync/reconcile",
+        {
+          body: JSON.stringify({ connectionId: "dsc_123" }),
+          method: "POST",
+        },
+      );
+      const response = await reconcileRoutePost(request);
+
+      expect(response.status).toBe(200);
+      await expect(response.json()).resolves.toMatchObject({
+        connectionId: "dsc_123",
+        status: "queued",
+      });
+      expect(mocks.requireHostedCloudflareCallbackRequest).toHaveBeenCalledWith(request, {
+        maxBodyBytes: 4 * 1024,
+      });
+      expect(mocks.appendHostedMailboxEnvelope).toHaveBeenCalledWith(
+        expect.objectContaining({
+          envelope: expect.objectContaining({
+            connectionId: "dsc_123",
+            hint: expect.objectContaining({ reason: "manual_reconcile" }),
+            reason: "reconcile_due",
+          }),
+          tx: mocks.prismaTx,
+        }),
+      );
+      expect(mocks.signalHostedDeviceSyncMailboxRuntime).toHaveBeenCalledWith({
+        mailboxItemId: "mailbox_123",
+      });
+      expect(warn).toHaveBeenCalledWith(
+        "Hosted device-sync wake Temporal signal failed after mailbox append.",
+        expect.objectContaining({
+          errorCode: "HOSTED_DEVICE_SYNC_TEMPORAL_SIGNAL_FAILED",
+          mailboxItemIdPresent: true,
+        }),
+      );
+      expect(mocks.createSignal).not.toHaveBeenCalled();
+      expect(mocks.syncDurableConnectionState).not.toHaveBeenCalled();
+    } finally {
+      warn.mockRestore();
+    }
   });
 
   it("re-signals duplicate due-reconcile wakes and records the successful due claim", async () => {

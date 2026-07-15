@@ -789,7 +789,6 @@ export async function appendHostedDeviceSyncManualReconcileWake(input: {
     userId: input.userId,
   });
   const appendResult = await persistHostedDeviceSyncWake({
-    signalFailureMode: "throw",
     wake,
     store,
     persist: async () => {},
