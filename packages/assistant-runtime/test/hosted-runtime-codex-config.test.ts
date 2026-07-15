@@ -17,6 +17,9 @@ import {
   MURPH_ASSISTANT_SKILLS_ROOT_ENV,
 } from "@murphai/assistant-engine/assistant-skill-assets";
 import {
+  MURPH_GROUP_READ_PERMISSION_PROFILE,
+} from "@murphai/assistant-engine/assistant-codex-permissions";
+import {
   HostedAssistantConfigurationError,
 } from "@murphai/operator-config/hosted-assistant-config";
 import {
@@ -197,6 +200,27 @@ test("hosted Codex runtime config writes OpenAI Responses config without secret 
   assert.match(config, /^request_max_retries = 4$/mu);
   assert.match(config, /^stream_max_retries = 0$/mu);
   assert.doesNotMatch(config, /^requires_openai_auth = true$/mu);
+  assert.match(
+    config,
+    new RegExp(
+      String.raw`\[permissions\.${MURPH_GROUP_READ_PERMISSION_PROFILE}\.filesystem\]\n":minimal" = "read"\nglob_scan_max_depth = 64`,
+      "u",
+    ),
+  );
+  assert.match(
+    config,
+    new RegExp(
+      String.raw`\[permissions\.${MURPH_GROUP_READ_PERMISSION_PROFILE}\.filesystem\.":workspace_roots"\]\n"\." = "read"\n"\.runtime" = "none"\n"\.runtime/\*\*" = "none"\n"\.codex" = "none"\n"\.codex/\*\*" = "none"\n"\.env" = "none"\n"\.env\.\*" = "none"\n"\*\*/\.env" = "none"\n"\*\*/\.env\.\*" = "none"`,
+      "u",
+    ),
+  );
+  assert.match(
+    config,
+    new RegExp(
+      String.raw`\[permissions\.${MURPH_GROUP_READ_PERMISSION_PROFILE}\.network\]\nenabled = false`,
+      "u",
+    ),
+  );
   assert.match(config, /\[features\]\nplugins = false\nmulti_agent_v2 = true\nmemories = true/u);
   assert.doesNotMatch(config, /root_agent_usage_hint_text/u);
   assert.match(
@@ -1343,6 +1367,25 @@ test("hosted Codex config TOML omits credential values and runtime authority hea
       "requires_openai_auth = false",
       "request_max_retries = 4",
       "stream_max_retries = 0",
+      "",
+      "# Read-only, ephemeral consultations initiated by a current group member.",
+      `[permissions.${MURPH_GROUP_READ_PERMISSION_PROFILE}.filesystem]`,
+      '":minimal" = "read"',
+      'glob_scan_max_depth = 64',
+      "",
+      `[permissions.${MURPH_GROUP_READ_PERMISSION_PROFILE}.filesystem.":workspace_roots"]`,
+      '"." = "read"',
+      '".runtime" = "none"',
+      '".runtime/**" = "none"',
+      '".codex" = "none"',
+      '".codex/**" = "none"',
+      '".env" = "none"',
+      '".env.*" = "none"',
+      '"**/.env" = "none"',
+      '"**/.env.*" = "none"',
+      "",
+      `[permissions.${MURPH_GROUP_READ_PERMISSION_PROFILE}.network]`,
+      "enabled = false",
       "",
       "# Hosted runs should not perform Codex plugin marketplace or remote plugin",
       "# sync work on cold wake; Murph owns the hosted runtime tool surface.",

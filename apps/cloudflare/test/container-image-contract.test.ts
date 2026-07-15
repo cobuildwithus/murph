@@ -469,6 +469,7 @@ describe("hosted runner container image contract", () => {
     expect(baseDockerfile).not.toContain("export PATH=");
     expect(baseDockerfile).not.toContain("FFMPEG_COMMAND=");
     expect(baseDockerfile).not.toContain("PDFTOTEXT_COMMAND=");
+    expect(baseDockerfile).toContain("bubblewrap \\");
     expect(baseDockerfile).toContain("file \\");
     expect(baseDockerfile).toContain("jq \\");
     expect(baseDockerfile).toContain("mupdf-tools \\");
@@ -775,6 +776,9 @@ describe("hosted runner container image contract", () => {
       "docker build --platform linux/amd64 -f ../../Dockerfile.cloudflare-hosted-runner --build-arg HOSTED_RUNNER_BUNDLE_DIR=.deploy/runner-smoke-bundle -t murph-cloudflare-runner .",
     );
     expect(runnerDockerSmokeScript).toContain('"--platform",\n      "linux/amd64"');
+    expect(runnerDockerSmokeScript).toContain(
+      '"--security-opt",\n      "seccomp=unconfined"',
+    );
     expect(runnerDockerSmokeScript).toContain("codexHostedShellVaultCliLlmsBytes=");
     expect(runnerDockerSmokeScript).toContain("codexHostedShellMurphPathBytes=");
     expect(runnerDockerSmokeScript).toContain("codexHostedShellPythonVersion=");

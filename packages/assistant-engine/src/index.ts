@@ -7,6 +7,8 @@
  */
 
 export * from './assistant-automation.js'
+export * from './assistant-ask.js'
+export * from './assistant-codex-permissions.js'
 export type {
   AssistantAutomationOperationScope,
 } from './assistant/automation/operation-scope.js'

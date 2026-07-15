@@ -28,6 +28,8 @@ import type {
   HostedRuntimeFamilyPlanToolResponse,
   HostedRuntimeAssistantConfigurationControlRequest,
   HostedRuntimeAssistantConfigurationToolResponse,
+  HostedRuntimeAssistantAskControlRequest,
+  HostedRuntimeAssistantAskControlResponse,
   HostedRuntimeGroupToolRequest,
   HostedRuntimeGroupToolResponse,
   HostedRuntimeNewsletterToolRequest,
@@ -140,6 +142,13 @@ export interface HostedRuntimeAssistantConfigurationToolPort {
   request(
     request: HostedRuntimeAssistantConfigurationControlRequest,
   ): Promise<HostedRuntimeAssistantConfigurationToolResponse>;
+}
+
+export interface HostedRuntimeAssistantAskPort {
+  request(
+    request: HostedRuntimeAssistantAskControlRequest,
+    context?: { signal?: AbortSignal | null },
+  ): Promise<HostedRuntimeAssistantAskControlResponse>;
 }
 
 export interface HostedRuntimeArtifactWriter {
@@ -566,6 +575,7 @@ export interface HostedRuntimeVaultSharePort {
 
 export interface HostedRuntimePlatform {
   actionApprovalPort?: HostedRuntimeActionApprovalPort | null;
+  assistantAskPort?: HostedRuntimeAssistantAskPort | null;
   assistantPersonalizationToolPort?: HostedRuntimeAssistantPersonalizationToolPort | null;
   assistantConfigurationToolPort?: HostedRuntimeAssistantConfigurationToolPort | null;
   artifactStore: HostedRuntimeArtifactStore;
