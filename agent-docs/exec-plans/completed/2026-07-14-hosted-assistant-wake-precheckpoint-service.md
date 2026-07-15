@@ -64,8 +64,10 @@ Round 1 returned three accepted findings whose remediation is implemented:
    awaited filesystem work, so foreground input can interrupt those walks.
 
 Focused owner tests now cover each finding. The required coverage-write audit
-passed with zero findings and no edits. Final shared-host verification, CI, and
-the ReviewGPT correction round remain.
+passed with zero findings and no edits. The candidate head's complete required
+CI matrix also passed, including checkpoint durability and the corrected
+onboarding-follow-up lane. The ReviewGPT correction round will certify the
+exact final plan-close head alongside its fresh CI run.
 
 ## Post-merge integration finding
 
@@ -84,10 +86,10 @@ aborted checkpoint does not wait behind an earlier writer, and recursive stage
 deletion becomes an explicit per-entry walk so one native `rm` cannot retain
 the canonical lock for an unbounded tree. It deliberately does not use
 `Promise.race`, which would release locks while abandoned cleanup continued
-touching live state. Focused tests must prove exact abort-reason propagation,
-queue ordering after a canceled waiter, symlink-safe bounded deletion, and that
-work after the interruption is not visited. Final owner verification and the
-ReviewGPT correction round must cover this additional delta.
+touching live state. Focused tests prove exact abort-reason propagation, queue
+ordering after a canceled waiter, symlink-safe bounded deletion, and that work
+after the interruption is not visited. The final ReviewGPT correction round
+will cover this additional delta.
 
 This additional source growth triggered the plan's architecture pressure
 check. Skipping terminal and assistant-residue cleanup would silently disable
@@ -99,12 +101,9 @@ queue, and makes the existing recursive deletion finite and cooperative.
 
 ## Review remediation retrospective
 
-The immutable first-reviewed authored-source shape was +467/-162. At the final
-pre-audit checkpoint, the PR's authored-source shape was +989/-229. The raw
-authored-source remediation commit is +526/-71 relative to the first-reviewed
-head; overlapping edits make that raw delta differ slightly from subtracting
-the two base-to-head tables. This crossed the ReviewGPT remediation growth
-trigger and increased source additions by more than 25 percent.
+The immutable first-reviewed authored-source shape was +467/-162. The final
+pre-close implementation shape is +1,352/-300. This crossed the ReviewGPT
+remediation growth trigger and increased source additions by 189.5 percent.
 
 The growth remains one ownership correction rather than a new architecture:
 the runtime decouples a runnable foreground wake from snapshot publication,
@@ -123,39 +122,55 @@ metadata.
 
 ## Evidence
 
-The current hot-wake implementation has green local proof:
+The implementation and its integration corrections have green proof:
 
-- Typecheck passed.
-- The focused hot-wake matrix passed 14 tests.
-- The full hosted runtime workspace-entrypoint suite passed 210 tests.
-- Independent adversarial review reported no hot-wake finding.
+- The focused hot-wake matrix passed 14 tests, and the full hosted-runtime
+  workspace-entrypoint suite passed 210 tests.
+- The full workspace-runner suite passed 98 tests; the focused legacy
+  materialization suites passed 30 tests.
+- Runtime-state passed 175 tests, Cloudflare snapshot suites passed 17 tests,
+  and the assistant bridge suite passed 28 tests.
+- Assistant-runtime coverage passed 72 files / 1,615 tests at 87.83 percent
+  statement coverage. Cloudflare verification passed 103 files / 1,785 tests
+  plus its Workers-runtime checks.
 - The required coverage-write audit passed with zero findings and no edits;
-  existing tests cover the floor/hot-wake matrix, checkpoint-first barriers,
-  pre-CAS interruption, accepted initial-batch remainder, atomic legacy
-  migration, and the real archive/preflight cancellation seams.
-- `git diff --check` was clean at the hot-wake implementation checkpoint.
-- Current `main`, including the TypeScript 7 shared-host verification profile,
-  was merged twice through clean normal merges while preserving first-reviewed
-  head ancestry. The post-merge assistant-runtime shared-host typecheck passed
-  after the first merge; the final diff-aware owner lane is queued under the
-  shared host-wide slot after the second clean base merge.
-- CI on the intermediate current-main head isolated two independent failures:
-  the intentional checkpoint foreground-preemption path grew the runner entry
-  chunk to 1,477,545 bytes, exactly 6,328 bytes above its ratcheted budget, and
-  the new pre-phase selector exposed legacy test doubles that returned input
-  IDs without persisting their canonical events. The entry baseline now
-  advances by exactly 6,328 bytes while preserving the 48,000-byte tolerance
-  and 9,300,000-byte total ceiling. The affected fixtures now stage real events,
-  and the batch-full expectation preserves the prior accepted remainder ahead
-  of a later input.
+  tests cover the floor/hot-wake matrix, checkpoint-first barriers, pre-CAS
+  interruption, accepted initial-batch remainder, atomic legacy migration, and
+  real archive, preflight, cleanup, lock-wait, and recursive-delete cancellation
+  seams.
+- The final shared-host diff lane passed dependency and workspace guards,
+  affected-package TypeScript checks, every affected package test suite, built
+  package-boundary checks, generated-artifact preparation, Prisma generation,
+  and the web TypeScript 7 check. Once it reached the duplicate web Vitest
+  stage, the exact owned command was stopped with Ctrl-C because its base had
+  advanced and the candidate head's complete GitHub app-verification lane was
+  already green. Fresh CI will exercise the rebased final head.
+- The complete candidate CI matrix passed: Linux and macOS host matrices,
+  release build/typecheck, app verification, package coverage, runner/web
+  bundle assembly, every hosted E2E shard, checkpoint durability, and the
+  onboarding-follow-up shard.
+- The Linux runner assembly proved the entry ratchet on the candidate base. The
+  entry baseline preserves its 48,000-byte host tolerance and the independent
+  static-closure and total ceilings.
+- The onboarding E2E now follows the deterministic managed reconciler introduced
+  on `main`; this branch removes its final obsolete scripted expectation/import
+  and corrects the testing map instead of restoring a scenario-specific
+  checkpoint override.
+- Docs gardening and full branch-range docs drift passed. The docs checks will
+  run once more after this plan is archived.
+- The branch was rebased normally onto the latest `main`; range-diff marked all
+  ten PR commits patch-identical, and the required ReviewGPT prompt commit
+  remains in history.
 
 ## State
 
-The hot-wake implementation, all three accepted ReviewGPT remediations, and the
-two intermediate-head CI corrections are implemented with focused proof. The
-post-merge cleanup-cancellation correction is in progress. The task remains
-active while its focused proof, final shared-host owner verification, CI, and
-the ReviewGPT correction round run.
+The hot-wake implementation, all three accepted ReviewGPT remediations, the
+cleanup-cancellation correction, and the current-main CI fixture and bundle
+ratchets are implemented with focused and candidate-head proof. The local task
+plan is complete. The exact archived-plan head will be pushed for fresh CI and
+the required ReviewGPT correction round before PR #636 is marked ready or
+merged.
 
-Status: active
+Status: completed
 Updated: 2026-07-14
+Completed: 2026-07-14
