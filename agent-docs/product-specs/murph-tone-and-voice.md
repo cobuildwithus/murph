@@ -298,8 +298,9 @@ Ordering never uses the web projection or wall-clock comparison.
 New `conversation.message` mailbox rows also store a nullable server-keyed
 lookup of the existing deterministic assistant input id. The raw id is not
 persisted in that projection; the mailbox wire shape, `sourceRef`, and event id
-do not change. For an update, the conversation personalization callback carries the
-sole input id only when the provider accepted exactly one input; it does not
+do not change. For an update, the conversation personalization callback carries
+the terminal provider-accepted input id only after the accepted ids revalidate
+as one same-conversation, same-reply-anchor, exact-successor batch; it does not
 carry a sequence. Inside the mutation transaction,
 web derives the configured lookup-key candidates and resolves the callback
 member and one matching key to one live conversation-lane
