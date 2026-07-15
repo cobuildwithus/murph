@@ -799,6 +799,9 @@ describe("hosted runner container image contract", () => {
     expect(runnerDockerSmokeScript).toContain(
       '"--security-opt",\n      "seccomp=unconfined"',
     );
+    expect(runnerDockerSmokeScript).toContain(
+      '"--security-opt",\n      "apparmor=unconfined"',
+    );
     expect(runnerDockerSmokeScript).toContain("codexHostedShellVaultCliLlmsBytes=");
     expect(runnerDockerSmokeScript).toContain("codexHostedShellMurphPathBytes=");
     expect(runnerDockerSmokeScript).toContain("codexHostedShellPythonVersion=");
