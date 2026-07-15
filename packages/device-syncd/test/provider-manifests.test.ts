@@ -100,24 +100,19 @@ describe("deviceSyncProviderManifests", () => {
     expect(config).not.toHaveProperty("baseUrl");
   });
 
-  it("accepts stale Junction dense timeseries env overrides without enabling dense fetches", () => {
+  it("defaults Junction timeseries resources from the compact code-owned allowlist", () => {
     const configs = readConfiguredDeviceSyncProviderConfigs({
       JUNCTION_API_KEY: "sk_us_test_manifest",
       JUNCTION_CLIENT_USER_ID_SECRET: "<REDACTED_JUNCTION_CLIENT_USER_ID_SECRET>",
       JUNCTION_ENV: "sandbox",
       JUNCTION_REGION: "us",
-      JUNCTION_TIMESERIES_RESOURCES: "steps,heart_rate",
     });
 
     const junctionConfig = configs.junction;
-    expect(junctionConfig?.timeseriesResources).toEqual([
-      ...JUNCTION_DEFAULT_TIMESERIES_RESOURCES,
-      "steps",
-      "heart_rate",
-    ]);
     if (!junctionConfig) {
       throw new Error("Expected Junction config to be present.");
     }
+    expect(junctionConfig).not.toHaveProperty("timeseriesResources");
     expect(normalizeJunctionDeviceSyncRuntimeConfig(junctionConfig).timeseriesResources)
       .toEqual([...JUNCTION_DEFAULT_TIMESERIES_RESOURCES]);
     expect(() => createConfiguredDeviceSyncProvidersFromConfigs(configs)).not.toThrow();
@@ -355,6 +350,7 @@ describe("deviceSyncProviderManifests", () => {
     expect(cloned.junction).not.toHaveProperty("allowCustomBaseUrl");
     expect(cloned.junction).not.toHaveProperty("baseUrl");
     expect(cloned.junction).not.toHaveProperty("clientUserIdSecret");
+    expect(cloned.junction).not.toHaveProperty("timeseriesResources");
     expect(cloned.junction).not.toHaveProperty("webhookSecret");
     expect(cloned.junction).toMatchObject({
       allowedLinkHosts: ["junction.com", "tryvital.io"],
@@ -414,6 +410,19 @@ describe("deviceSyncProviderManifests", () => {
         "runtime.providerConfigs",
       ),
     ).toThrow(/provider-owned webhook secret/);
+  });
+
+  it("rejects Junction timeseries resources from serialized runtime config", () => {
+    expect(() =>
+      parseSerializableConfiguredDeviceSyncProviderConfigs(
+        {
+          junction: {
+            timeseriesResources: ["blood_oxygen"],
+          },
+        },
+        "runtime.providerConfigs",
+      ),
+    ).toThrow(/timeseriesResources is code-owned/u);
   });
 
   it("rejects Junction provider-owned secrets when cloning serializable runtime config", () => {

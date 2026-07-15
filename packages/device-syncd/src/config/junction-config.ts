@@ -1,7 +1,4 @@
 import {
-  JUNCTION_DEFAULT_TIMESERIES_RESOURCES,
-} from "@murphai/contracts";
-import {
   JUNCTION_API_KEY_ENV_KEYS,
   JUNCTION_CLIENT_USER_ID_SECRET_ENV_KEYS,
   JUNCTION_ENV_ENV_KEYS,
@@ -13,7 +10,6 @@ import {
   JUNCTION_SUMMARY_BACKFILL_DAYS_ENV_KEYS,
   JUNCTION_SUMMARY_RESOURCES_ENV_KEYS,
   JUNCTION_TIMESERIES_BACKFILL_DAYS_ENV_KEYS,
-  JUNCTION_TIMESERIES_RESOURCES_ENV_KEYS,
   JUNCTION_WEBHOOK_SECRET_ENV_KEYS,
   JUNCTION_WEBHOOK_TIMESTAMP_TOLERANCE_MS_ENV_KEYS,
 } from "./provider-env.ts";
@@ -57,7 +53,6 @@ export function readConfiguredJunctionDeviceSyncProviderConfig(
     region: parseJunctionRegion(region),
     providerFilter: parseCsvEnv(env, JUNCTION_PROVIDER_FILTER_ENV_KEYS),
     summaryResources: parseCsvEnv(env, JUNCTION_SUMMARY_RESOURCES_ENV_KEYS),
-    timeseriesResources: parseJunctionTimeseriesResourcesEnv(env),
     summaryBackfillDays: parseIntegerEnv(env, JUNCTION_SUMMARY_BACKFILL_DAYS_ENV_KEYS),
     timeseriesBackfillDays: parseIntegerEnv(env, JUNCTION_TIMESERIES_BACKFILL_DAYS_ENV_KEYS),
     reconcileDays: parseIntegerEnv(env, JUNCTION_RECONCILE_DAYS_ENV_KEYS),
@@ -69,15 +64,6 @@ export function readConfiguredJunctionDeviceSyncProviderConfig(
 
   assertValidJunctionClientConfig(config);
   return config;
-}
-
-function parseJunctionTimeseriesResourcesEnv(env: DeviceSyncEnvSource): string[] | undefined {
-  const resources = parseCsvEnv(env, JUNCTION_TIMESERIES_RESOURCES_ENV_KEYS);
-  if (!resources || resources.length === 0) {
-    return resources;
-  }
-
-  return [...new Set([...JUNCTION_DEFAULT_TIMESERIES_RESOURCES, ...resources])];
 }
 
 function parseJunctionEnvironment(value: string): JunctionEnvironment {
