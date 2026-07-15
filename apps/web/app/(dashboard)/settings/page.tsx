@@ -16,7 +16,7 @@ import { Watch } from "lucide-react";
 import Link from "next/link";
 import { PageHeader } from "@/src/components/ui/page-header";
 import {
-  readHostedAccountSettingsSnapshot,
+  readHostedAccountSettingsPageSnapshot,
   withServerApprovedPrivyAccountHints,
 } from "@/src/lib/hosted-onboarding/account-settings-snapshot";
 import {
@@ -29,8 +29,6 @@ import {
   readHostedFamilyAccessForMember,
   readHostedFamilyOwnerSnapshotForMember,
 } from "@/src/lib/hosted-onboarding/family-plan";
-import { readHostedMemberStripeBillingRef } from "@/src/lib/hosted-onboarding/hosted-member-billing-store";
-import { readHostedMemberRoutingState } from "@/src/lib/hosted-onboarding/hosted-member-routing-store";
 import { getHostedPrivySession } from "@/src/lib/hosted-onboarding/hosted-session";
 import { getHostedDashboardPageAuthSnapshot } from "@/src/lib/hosted-onboarding/page-auth";
 import { getPrisma } from "@/src/lib/prisma";
@@ -67,9 +65,7 @@ export default async function SettingsPage({
 
   const prisma = getPrisma();
   const [
-    routing,
-    account,
-    billingRef,
+    settingsSnapshot,
     freshPrivySession,
     familyOwner,
     familyAccess,
@@ -78,14 +74,7 @@ export default async function SettingsPage({
   ] =
     authenticatedMember
       ? await Promise.all([
-          readHostedMemberRoutingState({
-            memberId: authenticatedMember.id,
-            prisma,
-          }),
-          readHostedAccountSettingsSnapshot({
-            memberId: authenticatedMember.id,
-          }),
-          readHostedMemberStripeBillingRef({
+          readHostedAccountSettingsPageSnapshot({
             memberId: authenticatedMember.id,
             prisma,
           }),
@@ -106,7 +95,10 @@ export default async function SettingsPage({
             prisma,
           }),
         ])
-      : [null, null, null, null, null, null, { status: "unavailable" } as const, null];
+      : [null, null, null, null, { status: "unavailable" } as const, null];
+  const account = settingsSnapshot?.account ?? null;
+  const billingRef = settingsSnapshot?.billingRef ?? null;
+  const routing = settingsSnapshot?.routing ?? null;
   const activeFamilyOwner = familyOwner?.billingActive === true;
   const sponsoredMember = familyAccess !== null && familyOwner === null;
   const canStartFamily =

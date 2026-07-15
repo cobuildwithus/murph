@@ -760,6 +760,21 @@ backfill or dual-write as needed, switch application reads/writes in a later
 deploy, then add validating constraints or clean up the old shape only after
 the replacement deployment is live and the prior production function window
 has drained.
+
+Production `DATABASE_URL` must use PlanetScale's transaction-mode PgBouncer
+endpoint (normally port `6432`); `DIRECT_DATABASE_URL` remains the direct
+Postgres endpoint for migrations and other session-scoped administration. The
+hosted web Prisma module creates one `pg.Pool` per module runtime, immediately
+registers it with Vercel Fluid Compute, and passes that same pool to
+`PrismaPg`. The adapter owns external-pool disposal so `$disconnect()` retains
+its existing cleanup contract. Keep session-persistent setup such as connection
+`SET` hooks out of this path because transaction pooling can move consecutive
+transactions between backend connections. Pool limits remain five clients,
+five seconds for connection acquisition, and 30 seconds for idle retirement;
+tune those values only from measured pool and database pressure. Connection
+failure logs expose only a fixed failure category and numeric total, idle, and
+waiting counts.
+
 Destructive contract cleanup belongs under
 `apps/web/prisma/contract-migrations` and runs through the
 `Hosted Web Contract Migrations` GitHub workflow after Vercel reports a
