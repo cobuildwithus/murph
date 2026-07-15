@@ -458,7 +458,7 @@ describe("hosted onboarding member activation", () => {
     });
   });
 
-  it("emits Telegram first-contact without a Linq lookup for phone-less members", async () => {
+  it("emits Telegram first-contact from the verified user id before the first inbound message", async () => {
     const member = makeMemberSnapshot({
       identity: {
         phoneLookupKey: null,
@@ -472,8 +472,8 @@ describe("hosted onboarding member activation", () => {
         pendingLinqChatId: null,
         pendingLinqParticipantContact: null,
         pendingLinqRecipientPhone: null,
-        telegramThreadId: "telegram_user_123:business:biz-42:dm-topic:9",
-        telegramUserId: "telegram_user_123",
+        telegramThreadId: null,
+        telegramUserId: "456",
         telegramUserLookupKey: "telegram_lookup_123",
       },
     });
@@ -506,12 +506,12 @@ describe("hosted onboarding member activation", () => {
             channel: "telegram",
             delivery: {
               kind: "thread",
-              target: "telegram_user_123:business:biz-42:dm-topic:9",
+              target: "456",
             },
             identityId: null,
             threadId: expectedTelegramAssistantThreadId({
               memberId: "member_123",
-              threadId: "telegram_user_123:business:biz-42:dm-topic:9",
+              threadId: "456",
             }),
             threadIsDirect: true,
           },
@@ -527,12 +527,12 @@ describe("hosted onboarding member activation", () => {
         channel: "telegram",
         delivery: {
           kind: "thread",
-          target: "telegram_user_123:business:biz-42:dm-topic:9",
+          target: "456",
         },
         identityId: null,
         threadId: expectedTelegramAssistantThreadId({
           memberId: "member_123",
-          threadId: "telegram_user_123:business:biz-42:dm-topic:9",
+          threadId: "456",
         }),
         threadIsDirect: true,
       },

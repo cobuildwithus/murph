@@ -75,8 +75,6 @@ const CURRENT_PLATFORM_SECRET_KEYS = [
   "JUNCTION_API_KEY",
   "JUNCTION_CLIENT_USER_ID_SECRET",
   "TELEGRAM_BOT_TOKEN",
-  "WHATSAPP_ACCESS_TOKEN",
-  "WHATSAPP_PHONE_NUMBER_ID",
 ] as const;
 
 const CURRENT_USER_SECRET_KEYS = [
@@ -226,7 +224,7 @@ function createReasonablyAvailableHostedConfigSource(): Record<string, string> {
     HOSTED_CRYPTO_CLOUDFLARE_AUTOMATION_PRIVATE_KEYRING_JSON:
       '{"keys":[{"keyId":"cloudflare-automation:v1","privateJwk":{"kty":"EC","d":"fixture-automation"}}]}',
     HOSTED_EXECUTION_RUNNER_HOST_ALIAS: "runner-callback.example.test",
-    HOSTED_EXECUTION_RUNNER_ENV_PROFILES: "exa,hosted-email,linq,mapbox,telegram,whatsapp",
+    HOSTED_EXECUTION_RUNNER_ENV_PROFILES: "exa,hosted-email,linq,mapbox,telegram",
     HOSTED_LOG_FINGERPRINT_SECRET: "fixture-log-fingerprint-secret",
     HOSTED_PROVIDER_EGRESS_CREDENTIAL_SIGNING_SECRET:
       "fixture-provider-egress-signing-secret",
@@ -249,8 +247,6 @@ function createReasonablyAvailableHostedConfigSource(): Record<string, string> {
     OURA_CLIENT_SECRET: "fixture-oura-client-secret",
     TELEGRAM_API_BASE_URL: "https://telegram.example.test",
     TELEGRAM_BOT_TOKEN: "fixture-telegram-token",
-    WHATSAPP_ACCESS_TOKEN: "fixture-whatsapp-token",
-    WHATSAPP_PHONE_NUMBER_ID: "fixture-whatsapp-phone-number-id",
     TELEGRAM_FILE_BASE_URL: "https://telegram-files.example.test",
     OPENAI_API_KEY: "fixture-vercel-openai-key",
     WHOOP_CLIENT_ID: "fixture-whoop-client-id",

@@ -413,6 +413,60 @@ describe('assistant cron store filesystem edges', () => {
     })
   })
 
+  it('reads inert legacy route markers without quarantine and preserves them on unrelated rewrites', async () => {
+    const paths = await createAssistantPaths(
+      'assistant-cron-schedule-store-legacy-route-marker-',
+    )
+    const legacyJob = createCronJob({
+      jobId: 'cron_legacy_route_marker',
+      name: 'Legacy route marker',
+    })
+    const legacyStore = {
+      jobs: [
+        {
+          ...legacyJob,
+          target: {
+            ...legacyJob.target,
+            channel: 'linq',
+            currentRouteSnapshot: true,
+            deliveryTarget: 'legacy-chat',
+            threadIsDirect: true,
+          },
+        },
+      ],
+      version: 1 as const,
+    }
+
+    await mkdir(path.dirname(paths.cronJobsPath), {
+      recursive: true,
+    })
+    await writeFile(paths.cronJobsPath, JSON.stringify(legacyStore, null, 2), 'utf8')
+
+    const store = await readAssistantCronStore(paths)
+    expect(store).toEqual(legacyStore)
+    await expect(
+      listAssistantQuarantineEntriesAtPaths(paths, {
+        artifactKind: 'cron-store',
+      }),
+    ).resolves.toEqual([])
+
+    store.jobs[0] = {
+      ...store.jobs[0]!,
+      name: 'Renamed legacy route marker',
+    }
+    await writeAssistantCronStore(paths, store)
+
+    expect(JSON.parse(await readFile(paths.cronJobsPath, 'utf8'))).toEqual({
+      ...legacyStore,
+      jobs: [
+        {
+          ...legacyStore.jobs[0],
+          name: 'Renamed legacy route marker',
+        },
+      ],
+    })
+  })
+
   it('quarantines corrupted cron stores and records a runtime event', async () => {
     const paths = await createAssistantPaths('assistant-cron-schedule-store-corrupt-')
 

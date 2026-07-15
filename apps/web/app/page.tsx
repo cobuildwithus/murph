@@ -64,12 +64,6 @@ export const metadata: Metadata = createMurphPageMetadata({
 //   KH         — WhatsApp 69% > Telegram 61% reach (Kursiv 2025)
 //   AZ, GE, TM — WhatsApp/IMO leads, not Telegram
 //   BG, RS, GR — Viber #1
-//
-// When we ship WhatsApp support, swap to the future mapping:
-//   WHATSAPP: most of Europe, LatAm, India, MENA, Africa, SEA, plus GB/IE/NZ/HK/SG/JP
-//   IMESSAGE: AU, CA, US (only)
-//   TELEGRAM: unchanged (BY, ET, IR, MD, RU, TJ, UA, UZ)
-//   DEFAULT: whatsapp
 const TELEGRAM_DEFAULT_COUNTRIES: ReadonlySet<string> = new Set([
   "BY",
   "ET",

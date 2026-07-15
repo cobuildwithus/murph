@@ -6,6 +6,8 @@ import {
   ensureHostedThreadContainerRouteTx,
 } from "../src/lib/hosted-routing/thread-container-service";
 import {
+  appendHostedLinqThreadRouteReactionContextTx,
+  consumeHostedLinqThreadRoutePendingContextTx,
   markHostedLinqThreadRouteParticipantAdditionPendingTx,
   readHostedThreadRouteByThreadIdentity,
 } from "../src/lib/hosted-routing/thread-route-store";
@@ -250,6 +252,7 @@ function buildLinqMessageReceivedEvent(input: {
 }
 
 function createPrisma(input: {
+  pendingGroupReactionContextEncrypted?: string | null;
   pendingParticipantAddition?: boolean;
   routeAccountPhone?: string;
   routeContainerMemberId?: string | null;
@@ -266,6 +269,8 @@ function createPrisma(input: {
   const routeOwnerActive = input.routeOwnerActive ?? true;
   const routeOwnerSponsored = input.routeOwnerSponsored ?? false;
   const routeParticipantActive = input.routeParticipantActive ?? false;
+  let pendingGroupReactionContextEncrypted =
+    input.pendingGroupReactionContextEncrypted ?? null;
   let pendingParticipantAddition = input.pendingParticipantAddition ?? false;
   const hostedThreadRoute = {
     findMany: vi.fn().mockImplementation(async ({ where }: { where: Record<string, unknown> }) => {
@@ -284,10 +289,11 @@ function createPrisma(input: {
         channel: "linq",
         threadId: "chat_group_123",
       });
-      if (
-        (!expected || !lookupKeys.includes(expected))
-        && (!expectedIdentity || !identityLookupKeys.includes(expectedIdentity))
-      ) {
+      const lookupMatches = where.threadLookupKey === undefined
+        || (expected !== null && lookupKeys.includes(expected));
+      const identityMatches = where.threadIdentityLookupKey === undefined
+        || (expectedIdentity !== null && identityLookupKeys.includes(expectedIdentity));
+      if (!lookupMatches || !identityMatches) {
         return [];
       }
       return [
@@ -329,37 +335,93 @@ function createPrisma(input: {
             },
           },
           containerMemberId: routeContainerMemberId,
+          pendingGroupReactionContextEncrypted,
+          pendingParticipantAddition,
           threadIdentityLookupKey: expectedIdentity,
           threadLookupKey: expected,
         },
       ];
     }),
-    updateMany: vi.fn().mockImplementation(async ({ data, where }: {
-      data: { pendingParticipantAddition?: boolean };
+    findFirst: vi.fn().mockImplementation(async ({ where }: {
       where: {
+        channel?: string;
         containerMemberId?: string;
-        pendingParticipantAddition?: boolean;
+        threadIdentityLookupKey?: { in?: string[] };
       };
     }) => {
+      const expected = createHostedExternalThreadLookupKey({
+        accountLookupKey: routeAccountLookupKey,
+        channel: "linq",
+        threadId: "chat_group_123",
+      });
+      const expectedIdentity = createHostedExternalThreadIdentityLookupKey({
+        channel: "linq",
+        threadId: "chat_group_123",
+      });
+      const identityLookupKeys = where.threadIdentityLookupKey?.in ?? [];
+      if (
+        !routeContainerMemberId
+        || where.channel !== "linq"
+        || where.containerMemberId !== routeContainerMemberId
+        || !expected
+        || !expectedIdentity
+        || !identityLookupKeys.includes(expectedIdentity)
+      ) {
+        return null;
+      }
+      return {
+        containerMemberId: routeContainerMemberId,
+        pendingGroupReactionContextEncrypted,
+        pendingParticipantAddition,
+        threadIdentityLookupKey: expectedIdentity,
+        threadLookupKey: expected,
+      };
+    }),
+    updateMany: vi.fn().mockImplementation(async ({ data, where }: {
+      data: {
+        pendingGroupReactionContextEncrypted?: string | null;
+        pendingParticipantAddition?: boolean;
+      };
+      where: {
+        channel?: string;
+        containerMemberId?: string;
+        pendingParticipantAddition?: boolean;
+        threadIdentityLookupKey?: string | { in?: string[] };
+        threadLookupKey?: string;
+      };
+    }) => {
+      const expected = createHostedExternalThreadLookupKey({
+        accountLookupKey: routeAccountLookupKey,
+        channel: "linq",
+        threadId: "chat_group_123",
+      });
+      const expectedIdentity = createHostedExternalThreadIdentityLookupKey({
+        channel: "linq",
+        threadId: "chat_group_123",
+      });
+      const identityMatches = where.threadIdentityLookupKey === undefined
+        || (typeof where.threadIdentityLookupKey === "string"
+          ? where.threadIdentityLookupKey === expectedIdentity
+          : expectedIdentity !== null
+            && (where.threadIdentityLookupKey.in ?? []).includes(expectedIdentity));
       if (
         !routeContainerMemberId
         || where.containerMemberId !== routeContainerMemberId
+        || (where.channel !== undefined && where.channel !== "linq")
+        || !identityMatches
+        || (where.threadLookupKey !== undefined && where.threadLookupKey !== expected)
+        || (where.pendingParticipantAddition === true && !pendingParticipantAddition)
       ) {
         return { count: 0 };
       }
-      if (data.pendingParticipantAddition === true) {
-        pendingParticipantAddition = true;
-        return { count: 1 };
+      if (data.pendingParticipantAddition !== undefined) {
+        pendingParticipantAddition = data.pendingParticipantAddition;
       }
-      if (
-        data.pendingParticipantAddition === false
-        && where.pendingParticipantAddition === true
-        && pendingParticipantAddition
-      ) {
-        pendingParticipantAddition = false;
-        return { count: 1 };
+      if (Object.hasOwn(data, "pendingGroupReactionContextEncrypted")) {
+        pendingGroupReactionContextEncrypted =
+          data.pendingGroupReactionContextEncrypted ?? null;
       }
-      return { count: 0 };
+      return { count: 1 };
     }),
   };
   const hostedMemberRouting = {
@@ -426,10 +488,12 @@ function createPrisma(input: {
   };
   const transaction = vi.fn(async (callback: (tx: unknown) => Promise<unknown>) => {
     const pendingBefore = pendingParticipantAddition;
+    const reactionContextBefore = pendingGroupReactionContextEncrypted;
     try {
       return await callback(prisma);
     } catch (error) {
       pendingParticipantAddition = pendingBefore;
+      pendingGroupReactionContextEncrypted = reactionContextBefore;
       throw error;
     }
   });
@@ -443,7 +507,12 @@ function createPrisma(input: {
     hostedThreadContainerParticipant,
     hostedThreadRoute,
     hostedWorkspace,
+    readPendingGroupReactionContextEncrypted: () =>
+      pendingGroupReactionContextEncrypted,
     readPendingParticipantAddition: () => pendingParticipantAddition,
+    setPendingGroupReactionContextEncrypted: (value: string | null) => {
+      pendingGroupReactionContextEncrypted = value;
+    },
   };
   return prisma;
 }
@@ -463,6 +532,8 @@ function createStatefulThreadRoutePrisma() {
   const routes: Array<{
     channel: string;
     containerMemberId: string;
+    pendingGroupReactionContextEncrypted: string | null;
+    pendingParticipantAddition: boolean;
     threadIdentityLookupKey: string;
     threadLookupKey: string;
   }> = [];
@@ -519,7 +590,11 @@ function createStatefulThreadRoutePrisma() {
           },
         );
       }
-      routes.push(data);
+      routes.push({
+        ...data,
+        pendingGroupReactionContextEncrypted: null,
+        pendingParticipantAddition: false,
+      });
       return data;
     }),
     findMany: vi.fn().mockImplementation(async ({ where }: { where: Record<string, unknown> }) => {
@@ -527,13 +602,13 @@ function createStatefulThreadRoutePrisma() {
       const identityLookupKeys =
         (where.threadIdentityLookupKey as { in?: string[] } | undefined)?.in ?? [];
       return routes
-        .filter((route) =>
-          route.channel === where.channel
-          && (
-            lookupKeys.includes(route.threadLookupKey)
-            || identityLookupKeys.includes(route.threadIdentityLookupKey)
-          ),
-        )
+        .filter((route) => {
+          const lookupMatches = where.threadLookupKey === undefined
+            || lookupKeys.includes(route.threadLookupKey);
+          const identityMatches = where.threadIdentityLookupKey === undefined
+            || identityLookupKeys.includes(route.threadIdentityLookupKey);
+          return route.channel === where.channel && lookupMatches && identityMatches;
+        })
         .map((route) => ({
           channel: route.channel,
           container: {
@@ -577,8 +652,33 @@ function createStatefulThreadRoutePrisma() {
         containerMemberId: route.containerMemberId,
       };
     }),
+    findFirst: vi.fn().mockImplementation(async ({ where }: {
+      where: {
+        channel?: string;
+        containerMemberId?: string;
+        threadIdentityLookupKey?: { in?: string[] };
+      };
+    }) => {
+      const identityLookupKeys = where.threadIdentityLookupKey?.in ?? [];
+      const route = routes.find((candidate) =>
+        candidate.channel === where.channel
+        && candidate.containerMemberId === where.containerMemberId
+        && identityLookupKeys.includes(candidate.threadIdentityLookupKey),
+      );
+      return route
+        ? {
+            containerMemberId: route.containerMemberId,
+            pendingGroupReactionContextEncrypted:
+              route.pendingGroupReactionContextEncrypted,
+            pendingParticipantAddition: route.pendingParticipantAddition,
+            threadIdentityLookupKey: route.threadIdentityLookupKey,
+            threadLookupKey: route.threadLookupKey,
+          }
+        : null;
+    }),
     update: vi.fn().mockImplementation(async ({ data, where }: {
       data: {
+        pendingGroupReactionContextEncrypted?: string | null;
         threadIdentityLookupKey: string;
         threadLookupKey: string;
       };
@@ -597,11 +697,50 @@ function createStatefulThreadRoutePrisma() {
       if (!route) {
         throw new Error("Expected existing route.");
       }
+      if (Object.hasOwn(data, "pendingGroupReactionContextEncrypted")) {
+        route.pendingGroupReactionContextEncrypted =
+          data.pendingGroupReactionContextEncrypted ?? null;
+      }
       route.threadIdentityLookupKey = data.threadIdentityLookupKey;
       route.threadLookupKey = data.threadLookupKey;
       return route;
     }),
-    updateMany: vi.fn().mockResolvedValue({ count: 0 }),
+    updateMany: vi.fn().mockImplementation(async ({ data, where }: {
+      data: {
+        pendingGroupReactionContextEncrypted?: string | null;
+        pendingParticipantAddition?: boolean;
+      };
+      where: {
+        channel?: string;
+        containerMemberId?: string;
+        threadIdentityLookupKey?: string | { in?: string[] };
+        threadLookupKey?: string;
+      };
+    }) => {
+      const route = routes.find((candidate) => {
+        const identityMatches = where.threadIdentityLookupKey === undefined
+          || (typeof where.threadIdentityLookupKey === "string"
+            ? candidate.threadIdentityLookupKey === where.threadIdentityLookupKey
+            : (where.threadIdentityLookupKey.in ?? [])
+                .includes(candidate.threadIdentityLookupKey));
+        return candidate.channel === where.channel
+          && candidate.containerMemberId === where.containerMemberId
+          && identityMatches
+          && (where.threadLookupKey === undefined
+            || candidate.threadLookupKey === where.threadLookupKey);
+      });
+      if (!route) {
+        return { count: 0 };
+      }
+      if (data.pendingParticipantAddition !== undefined) {
+        route.pendingParticipantAddition = data.pendingParticipantAddition;
+      }
+      if (Object.hasOwn(data, "pendingGroupReactionContextEncrypted")) {
+        route.pendingGroupReactionContextEncrypted =
+          data.pendingGroupReactionContextEncrypted ?? null;
+      }
+      return { count: 1 };
+    }),
   };
   const hostedMemberRouting = {
     findMany: vi.fn().mockResolvedValue([]),
@@ -651,6 +790,7 @@ function createStatefulThreadRoutePrisma() {
       channel: string;
       containerMemberId: string;
       ownerMemberId: string;
+      pendingGroupReactionContextEncrypted?: string | null;
       threadIdentityLookupKey: string;
       threadLookupKey: string;
     }) {
@@ -661,6 +801,9 @@ function createStatefulThreadRoutePrisma() {
       routes.push({
         channel: input.channel,
         containerMemberId: input.containerMemberId,
+        pendingGroupReactionContextEncrypted:
+          input.pendingGroupReactionContextEncrypted ?? null,
+        pendingParticipantAddition: false,
         threadIdentityLookupKey: input.threadIdentityLookupKey,
         threadLookupKey: input.threadLookupKey,
       });
@@ -722,6 +865,32 @@ async function markRoutedParticipantAdditionPending(
     prisma: prisma as never,
     threadId: "chat_group_123",
   });
+}
+
+async function appendRoutedReactionContext(
+  prisma: ReturnType<typeof createPrisma>,
+  text: string,
+): Promise<void> {
+  const accountLookupKey = requireTestPhoneLookupKey("+15550000000");
+  await expect(
+    prisma.$transaction((transaction) =>
+      appendHostedLinqThreadRouteReactionContextTx({
+        accountLookupKey,
+        containerMemberId: "member_thread_container_123",
+        prisma: transaction as never,
+        text,
+        threadId: "chat_group_123",
+      }),
+    ),
+  ).resolves.toBe("appended");
+}
+
+function requireTestPhoneLookupKey(phoneNumber: string): string {
+  const lookupKey = createHostedPhoneLookupKey(phoneNumber);
+  if (!lookupKey) {
+    throw new Error("Expected a Linq account lookup key.");
+  }
+  return lookupKey;
 }
 
 async function runRoutedMessageTransaction(
@@ -862,6 +1031,7 @@ describe("Linq explicit external-thread routing", () => {
         channel: "linq",
         containerMemberId: "member_thread_container_123",
         ownerMemberId: "member_owner_123",
+        pendingGroupReactionContextEncrypted: "encrypted pending reaction context",
         threadIdentityLookupKey: priorThreadIdentityLookupKey,
         threadLookupKey: priorThreadLookupKey,
       });
@@ -899,6 +1069,7 @@ describe("Linq explicit external-thread routing", () => {
       );
       expect(prisma.hostedThreadRoute.update).toHaveBeenCalledWith({
         data: {
+          pendingGroupReactionContextEncrypted: null,
           threadIdentityLookupKey: currentThreadIdentityLookupKey,
           threadLookupKey: currentThreadLookupKey,
         },
@@ -1038,9 +1209,17 @@ describe("Linq explicit external-thread routing", () => {
     const prisma = createPrisma({
       routeContainerMemberId: "member_thread_container_123",
     });
+    const latestReactionContext =
+      "A participant added a heart reaction on: How did we sleep?";
     await markRoutedParticipantAdditionPending(prisma);
     await markRoutedParticipantAdditionPending(prisma);
+    await appendRoutedReactionContext(
+      prisma,
+      "A participant added a like reaction on: Earlier context",
+    );
+    await appendRoutedReactionContext(prisma, latestReactionContext);
     expect(prisma.readPendingParticipantAddition()).toBe(true);
+    expect(prisma.readPendingGroupReactionContextEncrypted()).not.toBeNull();
     vi.mocked(mailboxStore.readHostedMailboxItemByDedupeKey).mockResolvedValueOnce(null);
     vi.mocked(linqDailyState.incrementHostedLinqInboundDailyState).mockResolvedValueOnce({
       dayUtc: new Date("2026-06-24T00:00:00.000Z"),
@@ -1123,6 +1302,7 @@ describe("Linq explicit external-thread routing", () => {
 
     expect(readAppendedConversationMessage(0)).toMatchObject({
       groupParticipantAdded: true,
+      groupReactionContext: latestReactionContext,
       linqMessage: expect.objectContaining({
         messageId: "msg_group_123",
       }),
@@ -1137,6 +1317,77 @@ describe("Linq explicit external-thread routing", () => {
     expect(readAppendedConversationMessage(1)).not.toHaveProperty(
       "groupParticipantAdded",
     );
+    expect(readAppendedConversationMessage(1)).not.toHaveProperty(
+      "groupReactionContext",
+    );
+    expect(prisma.readPendingGroupReactionContextEncrypted()).toBeNull();
+    expect(prisma.readPendingParticipantAddition()).toBe(false);
+  });
+
+  it("keeps reaction context account-bound without delaying participant context", async () => {
+    const prisma = createPrisma({
+      routeContainerMemberId: "member_thread_container_123",
+    });
+    const reactionContext =
+      "A participant added a heart reaction on: How did we sleep?";
+    const correctAccountLookupKey = requireTestPhoneLookupKey("+15550000000");
+    const wrongAccountLookupKey = requireTestPhoneLookupKey("+15559999999");
+    await markRoutedParticipantAdditionPending(prisma);
+    await appendRoutedReactionContext(prisma, reactionContext);
+
+    await expect(
+      prisma.$transaction((transaction) =>
+        consumeHostedLinqThreadRoutePendingContextTx({
+          accountLookupKey: wrongAccountLookupKey,
+          containerMemberId: "member_thread_container_123",
+          prisma: transaction as never,
+          threadId: "chat_group_123",
+        }),
+      ),
+    ).resolves.toEqual({
+      groupParticipantAdded: true,
+      groupReactionContext: null,
+    });
+    expect(prisma.readPendingParticipantAddition()).toBe(false);
+    expect(prisma.readPendingGroupReactionContextEncrypted()).not.toBeNull();
+
+    await expect(
+      prisma.$transaction((transaction) =>
+        consumeHostedLinqThreadRoutePendingContextTx({
+          accountLookupKey: correctAccountLookupKey,
+          containerMemberId: "member_thread_container_123",
+          prisma: transaction as never,
+          threadId: "chat_group_123",
+        }),
+      ),
+    ).resolves.toEqual({
+      groupParticipantAdded: false,
+      groupReactionContext: reactionContext,
+    });
+    expect(prisma.readPendingGroupReactionContextEncrypted()).toBeNull();
+  });
+
+  it("drops corrupt optional reaction context without blocking the next message", async () => {
+    const prisma = createPrisma({
+      pendingGroupReactionContextEncrypted: "invalid ciphertext",
+      pendingParticipantAddition: true,
+      routeContainerMemberId: "member_thread_container_123",
+    });
+
+    await expect(
+      prisma.$transaction((transaction) =>
+        consumeHostedLinqThreadRoutePendingContextTx({
+          accountLookupKey: requireTestPhoneLookupKey("+15550000000"),
+          containerMemberId: "member_thread_container_123",
+          prisma: transaction as never,
+          threadId: "chat_group_123",
+        }),
+      ),
+    ).resolves.toEqual({
+      groupParticipantAdded: true,
+      groupReactionContext: null,
+    });
+    expect(prisma.readPendingGroupReactionContextEncrypted()).toBeNull();
     expect(prisma.readPendingParticipantAddition()).toBe(false);
   });
 
@@ -1677,7 +1928,10 @@ describe("Linq explicit external-thread routing", () => {
     const prisma = createPrisma({
       routeContainerMemberId: "member_thread_container_123",
     });
+    const reactionContext =
+      "A participant added a like reaction on: Existing message";
     await markRoutedParticipantAdditionPending(prisma);
+    await appendRoutedReactionContext(prisma, reactionContext);
     vi.mocked(mailboxStore.readHostedMailboxItemByDedupeKey).mockResolvedValueOnce(
       buildHostedMailboxItem({
         id: "mailbox_existing",
@@ -1705,6 +1959,7 @@ describe("Linq explicit external-thread routing", () => {
     });
     expect(wakeHandoff).not.toHaveProperty("wakeMailboxCheckpoint");
     expect(mailboxStore.appendHostedMailboxEnvelopeTx).not.toHaveBeenCalled();
+    expect(prisma.readPendingGroupReactionContextEncrypted()).not.toBeNull();
     expect(prisma.readPendingParticipantAddition()).toBe(true);
 
     await planHostedOnboardingLinqWebhook({
@@ -1716,15 +1971,20 @@ describe("Linq explicit external-thread routing", () => {
     });
     expect(readAppendedConversationMessage(0)).toMatchObject({
       groupParticipantAdded: true,
+      groupReactionContext: reactionContext,
     });
+    expect(prisma.readPendingGroupReactionContextEncrypted()).toBeNull();
     expect(prisma.readPendingParticipantAddition()).toBe(false);
   });
 
-  it("rolls participant context back when routed mailbox append fails", async () => {
+  it("rolls pending group context back when routed mailbox append fails", async () => {
     const prisma = createPrisma({
       routeContainerMemberId: "member_thread_container_123",
     });
+    const reactionContext =
+      "A participant added a laugh reaction on: Existing message";
     await markRoutedParticipantAdditionPending(prisma);
+    await appendRoutedReactionContext(prisma, reactionContext);
     vi.mocked(mailboxStore.appendHostedMailboxEnvelopeTx).mockRejectedValueOnce(
       new Error("mailbox append failed"),
     );
@@ -1733,6 +1993,7 @@ describe("Linq explicit external-thread routing", () => {
       prisma,
       buildLinqMessageReceivedEvent({}),
     )).rejects.toThrow("mailbox append failed");
+    expect(prisma.readPendingGroupReactionContextEncrypted()).not.toBeNull();
     expect(prisma.readPendingParticipantAddition()).toBe(true);
 
     await runRoutedMessageTransaction(prisma, buildLinqMessageReceivedEvent({
@@ -1741,15 +2002,20 @@ describe("Linq explicit external-thread routing", () => {
     }));
     expect(readAppendedConversationMessage(1)).toMatchObject({
       groupParticipantAdded: true,
+      groupReactionContext: reactionContext,
     });
+    expect(prisma.readPendingGroupReactionContextEncrypted()).toBeNull();
     expect(prisma.readPendingParticipantAddition()).toBe(false);
   });
 
-  it("rolls participant context back after a routed mailbox dedupe race", async () => {
+  it("rolls pending group context back after a routed mailbox dedupe race", async () => {
     const prisma = createPrisma({
       routeContainerMemberId: "member_thread_container_123",
     });
+    const reactionContext =
+      "A participant added a question reaction on: Existing message";
     await markRoutedParticipantAdditionPending(prisma);
+    await appendRoutedReactionContext(prisma, reactionContext);
     vi.mocked(mailboxStore.appendHostedMailboxEnvelopeTx).mockResolvedValueOnce({
       dedupeConflict: false,
       duplicate: true,
@@ -1768,6 +2034,7 @@ describe("Linq explicit external-thread routing", () => {
       httpStatus: 503,
       retryable: true,
     });
+    expect(prisma.readPendingGroupReactionContextEncrypted()).not.toBeNull();
     expect(prisma.readPendingParticipantAddition()).toBe(true);
 
     await runRoutedMessageTransaction(prisma, buildLinqMessageReceivedEvent({
@@ -1776,7 +2043,9 @@ describe("Linq explicit external-thread routing", () => {
     }));
     expect(readAppendedConversationMessage(1)).toMatchObject({
       groupParticipantAdded: true,
+      groupReactionContext: reactionContext,
     });
+    expect(prisma.readPendingGroupReactionContextEncrypted()).toBeNull();
     expect(prisma.readPendingParticipantAddition()).toBe(false);
   });
 });

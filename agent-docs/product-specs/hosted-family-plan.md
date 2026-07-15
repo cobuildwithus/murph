@@ -140,7 +140,7 @@ add a Family seat before issuing another invite.
 
 Accepted invite targets:
 
-- phone number for WhatsApp or phone-bound flows
+- phone number for phone-bound flows
 - Telegram username for a convenience fallback when Telegram strips the deep
   link start payload
 - optional display label such as "Mom" for owner-facing seat status
@@ -187,16 +187,6 @@ exactly one non-expired pending invite that was pre-bound to that username,
 accept that invite without requiring the user to paste a token. If the match is
 missing or ambiguous, fail closed rather than guessing.
 
-### WhatsApp / Phone
-
-Phone pre-bound invites may be accepted in chat when the response arrives from
-the invited phone number and the WhatsApp messaging consent path has been
-completed. For the MVP, the inbound family invite token is the WhatsApp
-consent-writing command for that phone-bound acceptance. Fully unbound invites
-may also be claimed from phone messaging when the sender explicitly sends the
-family invite token; the sender's verified phone identity becomes the claimant.
-The accepted member still gets their own `HostedMember` and routing rows.
-
 ### iMessage / SMS
 
 A phone pre-bound invite opened on the web accept page leads with a "Continue in
@@ -212,7 +202,7 @@ brand-new invitee, whom the webhook assigns a home line on first contact.
 
 Web remains a fallback for unsupported verification, settings, wearable
 connection, export, deletion, and other account management tasks. The family
-MVP should not require a web visit for a straightforward Telegram, WhatsApp, or
+MVP should not require a web visit for a straightforward Telegram or
 Messages invite acceptance. For unbound invites, a signed-in hosted member may
 tap Accept on the web page, and their verified phone or email identity becomes
 the claimant.
@@ -297,7 +287,7 @@ access.
 2. Add per-seat Family billing checkout/reconciliation for the owner group.
 3. Add invite issuance and acceptance primitives for web/assistant-owned
    commands.
-4. Add Telegram deep-link and WhatsApp/phone pre-bound acceptance flows.
+4. Add Telegram deep-link and phone pre-bound acceptance flows.
 5. Add the smallest owner-facing management UI needed to invite/remove members.
 6. Add export/delete coverage and direct privacy proof.
 

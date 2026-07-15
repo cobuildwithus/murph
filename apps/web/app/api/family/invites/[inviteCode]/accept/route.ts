@@ -49,7 +49,7 @@ export const POST = withJsonError(async (
       throw hostedOnboardingError({
         code: "HOSTED_FAMILY_WEB_ACCEPT_REQUIRES_CONTACT",
         httpStatus: 409,
-        message: "Open this invite from Telegram or WhatsApp to join.",
+        message: "Open this invite from Telegram to join.",
       });
     }
     if (!view.seatAvailable) {

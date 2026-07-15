@@ -9,7 +9,7 @@ Cloudflare execution worker.
   workspace checkpoint, redacted runtime log, hosted usage record, and Temporal
   processing/status seams
 - define the shared hosted `conversation.message` payload shapes for supported
-  hosted conversation channels: Linq, Telegram, email, and WhatsApp
+  hosted conversation channels: Linq, Telegram, and email
 - define hosted execution auth header names and request-canonicalization helpers
 - normalize the shared hosted execution env variables that are deployment-vendor neutral
 - build stable internal route paths for hosted runtime mailbox, workspace,

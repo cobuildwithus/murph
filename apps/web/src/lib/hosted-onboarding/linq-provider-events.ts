@@ -65,6 +65,8 @@ export type ParsedHostedLinqProviderEvent = {
   providerStatus: string | null;
   reactionCustomEmoji: string | null;
   reactionFromHandle: string | null;
+  reactionIsFromMe: boolean | null;
+  reactionPartIndex: number | null;
   reactionType: string | null;
   service: string | null;
   traceIdSuffix: string | null;
@@ -285,12 +287,23 @@ function parseHostedLinqReactionProviderEvent(input: {
     ["reaction", "emoji"],
   ] as const);
   const reactionFromHandle = readFirstHandleAtPaths(data, [
+    ["from"],
     ["from_handle"],
     ["fromHandle"],
     ["sender_handle"],
     ["senderHandle"],
     ["actor", "handle"],
     ["reactor", "handle"],
+  ] as const);
+  const rawReactionIsFromMe = data?.is_from_me;
+  const reactionIsFromMe = typeof rawReactionIsFromMe === "boolean"
+    ? rawReactionIsFromMe
+    : null;
+  const reactionPartIndex = readFirstIntegerAtPaths(data, [
+    ["part_index"],
+    ["partIndex"],
+    ["reaction", "part_index"],
+    ["reaction", "partIndex"],
   ] as const);
   const service = readFirstStringAtPaths(data, [
     ["service"],
@@ -316,7 +329,9 @@ function parseHostedLinqReactionProviderEvent(input: {
       customEmojiPresent: reactionCustomEmoji !== null,
       extractionStrategy: "reaction-event",
       fromHandlePresent: reactionFromHandle !== null,
+      isFromMePresent: reactionIsFromMe !== null,
       messageIdPresent: messageId !== null,
+      partIndexPresent: reactionPartIndex !== null,
       phoneNumberRole: linePhoneNumber ? "line" : "unknown",
       reactionTypePresent: reactionType !== null,
       servicePresent: service !== null,
@@ -332,6 +347,8 @@ function parseHostedLinqReactionProviderEvent(input: {
     rawBody: input.rawBody,
     reactionCustomEmoji,
     reactionFromHandle,
+    reactionIsFromMe,
+    reactionPartIndex,
     reactionType,
     service,
   });
@@ -500,6 +517,8 @@ function buildParsedProviderEvent(input: {
   rawBody?: string | null;
   reactionCustomEmoji: string | null;
   reactionFromHandle: string | null;
+  reactionIsFromMe?: boolean | null;
+  reactionPartIndex?: number | null;
   reactionType: string | null;
   service: string | null;
 }): ParsedHostedLinqProviderEvent {
@@ -551,6 +570,8 @@ function buildParsedProviderEvent(input: {
     providerStatus: normalizeSafeProviderToken(input.providerStatus),
     reactionCustomEmoji: normalizeSafeProviderToken(input.reactionCustomEmoji),
     reactionFromHandle: normalizeNullableString(input.reactionFromHandle),
+    reactionIsFromMe: input.reactionIsFromMe ?? null,
+    reactionPartIndex: input.reactionPartIndex ?? null,
     reactionType: normalizeSafeProviderToken(input.reactionType),
     service: normalizeSafeProviderToken(input.service),
     traceIdSuffix: toHostedOnboardingLogIdSuffix(input.event.trace_id),
@@ -657,6 +678,19 @@ function readFirstHandleAtPaths(
     }
   }
 
+  return null;
+}
+
+function readFirstIntegerAtPaths(
+  record: Record<string, unknown> | null,
+  paths: ReadonlyArray<readonly string[]>,
+): number | null {
+  for (const path of paths) {
+    const value = readValueAtPath(record, path);
+    if (typeof value === "number" && Number.isSafeInteger(value) && value >= 0) {
+      return value;
+    }
+  }
   return null;
 }
 

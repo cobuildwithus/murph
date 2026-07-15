@@ -1116,7 +1116,7 @@ describe("hosted runtime control contracts", () => {
     expect([
       readHostedIngressLatencySource("linq"),
       readHostedIngressLatencySource("telegram"),
-      readHostedIngressLatencySource("whatsapp"),
+      readHostedIngressLatencySource("signal"),
       readHostedIngressLatencySource("email"),
       readHostedIngressLatencySource(null),
     ]).toEqual([

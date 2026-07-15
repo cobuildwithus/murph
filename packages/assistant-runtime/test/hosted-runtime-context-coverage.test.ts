@@ -23,12 +23,9 @@ import {
 import { resolveAssistantStatePaths } from "@murphai/runtime-state/node";
 
 const mocks = vi.hoisted(() => ({
-  createIntegratedInboxServices: vi.fn(),
   createIntegratedVaultServices: vi.fn(),
   emitHostedExecutionStructuredLog: vi.fn(),
   ensureHostedAssistantOperatorDefaults: vi.fn(),
-  inboxInit: vi.fn(),
-  inboxList: vi.fn(),
   readOperatorConfig: vi.fn(),
   resolveHostedAssistantConfig: vi.fn(),
   resolveHostedAssistantOperatorDefaultsState: vi.fn(),
@@ -45,10 +42,6 @@ vi.mock("@murphai/hosted-execution", async () => {
     emitHostedExecutionStructuredLog: mocks.emitHostedExecutionStructuredLog,
   };
 });
-
-vi.mock("@murphai/inbox-services", () => ({
-  createIntegratedInboxServices: mocks.createIntegratedInboxServices,
-}));
 
 vi.mock("@murphai/vault-usecases/vault-services", () => ({
   createIntegratedVaultServices: mocks.createIntegratedVaultServices,
@@ -81,7 +74,6 @@ vi.mock("@murphai/operator-config/operator-config", async () => {
 import {
   applyHostedMemberPreferences,
   prepareHostedWakeContext,
-  prepareHostedInboxProjectionRuntime,
   readHostedAssistantRuntimeState,
   reconcileHostedAssistantChannelState,
   requireHostedBootstrapForWake,
@@ -132,10 +124,6 @@ async function createWorkspace(): Promise<{ cleanup: () => Promise<void>; vaultR
 
 beforeEach(() => {
   vi.clearAllMocks();
-  mocks.createIntegratedInboxServices.mockReturnValue({
-    init: mocks.inboxInit,
-    list: mocks.inboxList,
-  });
   mocks.createIntegratedVaultServices.mockReturnValue({
     core: {
       init: mocks.vaultInit,
@@ -147,10 +135,6 @@ beforeEach(() => {
     seeded: false,
     source: "missing",
   });
-  mocks.inboxList.mockResolvedValue({
-    items: [],
-  });
-  mocks.inboxInit.mockResolvedValue(undefined);
   mocks.readOperatorConfig.mockResolvedValue(null);
   mocks.resolveHostedAssistantConfig.mockResolvedValue(null);
   mocks.resolveHostedAssistantOperatorDefaultsState.mockReturnValue({
@@ -304,15 +288,12 @@ describe("hosted runtime context coverage", () => {
           channelCapabilities: {
             emailSendReady: false,
             telegramBotConfigured: true,
-            whatsappCloudApiConfigured: false,
           },
         }),
       );
 
       assert.equal(result, null);
-      expect(mocks.inboxList).not.toHaveBeenCalled();
       expect(mocks.vaultInit).not.toHaveBeenCalled();
-      expect(mocks.inboxInit).not.toHaveBeenCalled();
     } finally {
       await cleanup();
     }
@@ -409,7 +390,6 @@ describe("hosted runtime context coverage", () => {
           channelCapabilities: {
             emailSendReady: true,
             telegramBotConfigured: true,
-            whatsappCloudApiConfigured: false,
           },
         }),
       );
@@ -562,7 +542,6 @@ describe("hosted runtime context coverage", () => {
           {
             emailSendReady: true,
             telegramBotConfigured: true,
-            whatsappCloudApiConfigured: false,
           },
           true,
         ),
@@ -600,7 +579,6 @@ describe("hosted runtime context coverage", () => {
         ],
         updatedAt: "2026-04-08T00:05:00.000Z",
       });
-      expect(mocks.inboxList).not.toHaveBeenCalled();
     } finally {
       await cleanup();
     }
@@ -652,7 +630,6 @@ describe("hosted runtime context coverage", () => {
           {
             emailSendReady: true,
             telegramBotConfigured: false,
-            whatsappCloudApiConfigured: false,
           },
           true,
         ),
@@ -677,7 +654,6 @@ describe("hosted runtime context coverage", () => {
         },
       ]);
       assert.equal(state.version, 1);
-      expect(mocks.inboxList).not.toHaveBeenCalled();
     } finally {
       await cleanup();
     }
@@ -848,24 +824,6 @@ describe("hosted runtime context coverage", () => {
         detail: 7,
         humor: 9,
       });
-    } finally {
-      await cleanup();
-    }
-  });
-
-  it("initializes cold current-message projection without a historical rebuild", async () => {
-    const { cleanup, vaultRoot } = await createWorkspace();
-
-    try {
-      await prepareHostedInboxProjectionRuntime(vaultRoot, "req_projection_without_startup");
-
-      expect(mocks.inboxInit).toHaveBeenCalledWith({
-        rebuild: false,
-        rebuildParserJobs: false,
-        requestId: "req_projection_without_startup",
-        vault: vaultRoot,
-      });
-      expect(mocks.emitHostedExecutionStructuredLog).not.toHaveBeenCalled();
     } finally {
       await cleanup();
     }

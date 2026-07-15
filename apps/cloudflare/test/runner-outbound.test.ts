@@ -2951,7 +2951,6 @@ describe("handleRunnerOutboundRequest", () => {
     "/linq/chat-action",
     "/linq/chats/mark-read",
     "/linq/messages/delete",
-    "/whatsapp/send",
   ])("does not route legacy provider delivery effect path %s", async (path) => {
     const ownsActiveInvocationLease = vi.fn(async () => true);
     const fetchMock = vi.fn();

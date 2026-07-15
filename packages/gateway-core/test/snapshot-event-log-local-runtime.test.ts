@@ -330,7 +330,7 @@ describe('@murphai/gateway-core snapshot, event-log, and barrel behavior', () =>
           lastMessagePreview: null,
           messageCount: 0,
           route: {
-            channel: 'whatsapp',
+            channel: 'signal',
             directness: 'group',
             identityId: null,
             participantId: '   ',
@@ -391,7 +391,7 @@ describe('@murphai/gateway-core snapshot, event-log, and barrel behavior', () =>
       'Outbound Alias',
       'participant-only@example.test',
       'thread-thread-only',
-      'whatsapp',
+      'signal',
     ])
 
     const transcriptMatch = listGatewayConversationsFromSnapshot(snapshot, {

@@ -17,7 +17,10 @@ import {
   exampleSampleRecords,
   exampleVaultMetadata,
 } from "../src/examples.ts";
-import { automationFrontmatterSchema as automationFrontmatterContract } from "../src/automation.ts";
+import {
+  automationFrontmatterSchema as automationFrontmatterContract,
+  automationRouteSchema,
+} from "../src/automation.ts";
 import { parseFrontmatterDocument } from "../src/frontmatter.ts";
 import {
   integrationIngestRecordSchema as integrationIngestRecordContract,
@@ -314,6 +317,17 @@ describe("schema catalog and example seam", () => {
     expect(routeSchema?.required).toEqual(
       expect.not.arrayContaining(["deliverySource"]),
     );
+  });
+
+  it("accepts the retired route marker only as legacy read data", () => {
+    expect(automationRouteSchema.parse({
+      channel: "linq",
+      currentRouteSnapshot: true,
+      deliveryTarget: "legacy-chat",
+      identityId: null,
+      participantId: null,
+      threadId: null,
+    }).currentRouteSnapshot).toBe(true);
   });
 
   it("keeps every validated vault family on the schema-artifact seam", () => {

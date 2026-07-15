@@ -47,17 +47,6 @@ const HOSTED_TELEGRAM_DELIVERY_ENV = {
   ],
 } as const;
 
-const HOSTED_WHATSAPP_DELIVERY_ENV = {
-  forwardedConfig: [
-    "WHATSAPP_API_BASE_URL",
-    "WHATSAPP_GRAPH_VERSION",
-  ],
-  workerSecrets: [
-    "WHATSAPP_ACCESS_TOKEN",
-    "WHATSAPP_PHONE_NUMBER_ID",
-  ],
-} as const;
-
 export const HOSTED_ELEVENLABS_ENV_NAMES = [
   ...HOSTED_ELEVENLABS_ENV.workerSecrets,
   ...HOSTED_ELEVENLABS_ENV.forwardedConfig,
@@ -84,10 +73,6 @@ export const HOSTED_TELEGRAM_DELIVERY_FORWARDED_ENV_NAMES = [
   ...HOSTED_TELEGRAM_DELIVERY_ENV.forwardedConfig,
 ] as const;
 
-export const HOSTED_WHATSAPP_DELIVERY_FORWARDED_ENV_NAMES = [
-  ...HOSTED_WHATSAPP_DELIVERY_ENV.forwardedConfig,
-] as const;
-
 export const HOSTED_ASSISTANT_WORKER_SECRET_ENV_NAMES = [
   ...HOSTED_ELEVENLABS_ENV.workerSecrets,
   ...HOSTED_EXA_SEARCH_ENV.codexShellWorkerSecrets,
@@ -95,14 +80,12 @@ export const HOSTED_ASSISTANT_WORKER_SECRET_ENV_NAMES = [
   ...HOSTED_MURPH_DATA_API_ENV.codexShellWorkerSecrets,
   ...HOSTED_LINQ_DELIVERY_ENV.workerSecrets,
   ...HOSTED_TELEGRAM_DELIVERY_ENV.workerSecrets,
-  ...HOSTED_WHATSAPP_DELIVERY_ENV.workerSecrets,
 ] as const;
 
 export const HOSTED_ASSISTANT_FORWARDED_CONFIG_ENV_NAMES = [
   ...HOSTED_ELEVENLABS_ENV.forwardedConfig,
   ...HOSTED_LINQ_DELIVERY_ENV.forwardedConfig,
   ...HOSTED_TELEGRAM_DELIVERY_ENV.forwardedConfig,
-  ...HOSTED_WHATSAPP_DELIVERY_ENV.forwardedConfig,
 ] as const;
 
 export const HOSTED_ASSISTANT_CODEX_SHELL_ENV_NAMES = [

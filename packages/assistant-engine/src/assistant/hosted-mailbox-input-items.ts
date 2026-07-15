@@ -8,6 +8,9 @@ import {
   writeAssistantStateVersionedJson,
   type AssistantStatePaths,
 } from '@murphai/runtime-state/node'
+import {
+  HOSTED_EXECUTION_LINQ_GROUP_REACTION_CONTEXT_MAX_CHARS,
+} from '@murphai/hosted-execution/contracts'
 import { isMissingFileError, normalizeNullableString } from './shared.js'
 import { ensureAssistantState } from './store/persistence.js'
 import { resolveAssistantStatePaths } from './store/paths.js'
@@ -22,6 +25,7 @@ const ASSISTANT_HOSTED_MAILBOX_ITEM_ID_PATTERN =
 
 export interface HostedMailboxAssistantInputItem {
   groupParticipantAdded?: true
+  groupReactionContext?: string
   inputId: string
   mailboxItemId: string
 }
@@ -38,6 +42,7 @@ export interface HostedMailboxAssistantInputItemInventory {
 
 export async function recordHostedMailboxAssistantInputItem(input: {
   groupParticipantAdded?: true
+  groupReactionContext?: string
   inputId: string
   mailboxItemId: string
   vault: string
@@ -197,6 +202,7 @@ function normalizeHostedMailboxAssistantInputItem(
   }
   const record = value as {
     groupParticipantAdded?: unknown
+    groupReactionContext?: unknown
     inputId?: unknown
     mailboxItemId?: unknown
   }
@@ -208,10 +214,23 @@ function normalizeHostedMailboxAssistantInputItem(
       'groupParticipantAdded must be true when present.',
     )
   }
+  const groupReactionContext = typeof record.groupReactionContext === 'string'
+    ? normalizeNullableString(record.groupReactionContext)
+    : null
+  if (
+    record.groupReactionContext !== undefined &&
+    (typeof record.groupReactionContext !== 'string' ||
+      !groupReactionContext ||
+      groupReactionContext.length >
+        HOSTED_EXECUTION_LINQ_GROUP_REACTION_CONTEXT_MAX_CHARS)
+  ) {
+    throw new TypeError('groupReactionContext must be a bounded string when present.')
+  }
   return {
     ...(record.groupParticipantAdded === true
       ? { groupParticipantAdded: record.groupParticipantAdded }
       : {}),
+    ...(groupReactionContext ? { groupReactionContext } : {}),
     inputId: normalizeAssistantInputEventId(record.inputId, 'inputId'),
     mailboxItemId: normalizeHostedMailboxItemId(
       record.mailboxItemId,

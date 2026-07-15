@@ -98,6 +98,7 @@ import {
   hostedFamilyInviteHasReusableTarget,
   issueHostedFamilyInviteFromOwnerTx,
   issueHostedFamilyInviteTx,
+  prepareHostedLegacySyntheticFamilyCleanupTx,
   readHostedFamilyCheckoutSessionIdFromUrl,
   resolveHostedFamilyChatNotificationRouteTx,
   resolveHostedFamilyCheckoutRedirectUrl,
@@ -492,7 +493,6 @@ describe("hosted Family plan", () => {
     expect(replyText).toContain(
       "When they open it they can join by text right from their phone.",
     );
-    expect(replyText).not.toContain("for example on WhatsApp");
   });
 
   it("uses the web accept link for email-bound family invite replies", () => {
@@ -1425,7 +1425,7 @@ describe("hosted Family plan", () => {
     expect(tx.hostedAccountGroupMembership.upsert).toHaveBeenCalled();
   });
 
-  it("marks WhatsApp family invite phone acceptance as provider-verified", async () => {
+  it("marks family invite phone acceptance as provider-verified", async () => {
     const now = new Date("2026-06-18T12:30:00.000Z");
     const tx = createTxMock();
     tx.hostedAccountGroupInvite.findUnique.mockResolvedValueOnce(createPendingInvite({
@@ -1505,7 +1505,7 @@ describe("hosted Family plan", () => {
     expect(activationMocks.activateHostedMemberForFamilySponsorshipTx).not.toHaveBeenCalled();
   });
 
-  it("does not let WhatsApp claim a Telegram-bound invite", async () => {
+  it("does not let phone acceptance claim a Telegram-bound invite", async () => {
     const tx = createTxMock();
     tx.hostedAccountGroupInvite.findUnique.mockResolvedValueOnce(createPendingInvite({
       targetPhoneLookupKey: null,
@@ -1523,7 +1523,7 @@ describe("hosted Family plan", () => {
     expect(tx.hostedAccountGroupInvite.updateMany).not.toHaveBeenCalled();
   });
 
-  it("does not let WhatsApp claim an email-bound invite", async () => {
+  it("does not let phone acceptance claim an email-bound invite", async () => {
     const tx = createTxMock();
     tx.hostedAccountGroupInvite.findUnique.mockResolvedValueOnce(createPendingInvite({
       targetEmailLookupKey: createHostedEmailLookupKey("mom@example.com"),
@@ -2141,6 +2141,88 @@ describe("hosted Family plan", () => {
     expect(tx.hostedAccountGroupBillingRef.upsert).not.toHaveBeenCalled();
     expect(tx.hostedAccountGroup.update).not.toHaveBeenCalled();
     expect(activationMocks.activateHostedMemberForFamilySponsorshipTx).not.toHaveBeenCalled();
+  });
+
+  it("prepares consistent cleanup for a legacy Family invoice without a customer", async () => {
+    const lastStripeEventCreatedAt = new Date("2026-06-18T12:00:00.000Z");
+    const event = makeFamilyStripeSubscriptionEvent();
+    Object.assign(event, { id: "evt_family_invoice", type: "invoice.paid" });
+    Object.assign(event.data.object, {
+      customer: null,
+      id: "in_family",
+      object: "invoice",
+      subscription: "sub_family",
+    });
+    const group = {
+      billingStatus: HostedBillingStatus.not_started,
+      id: "hbag_family",
+      ownerMemberId: "member_owner",
+      suspendedAt: null,
+    };
+    const tx = createTxMock({
+      group,
+    });
+    const billingRef = createBillingRefMock({ group, lastStripeEventCreatedAt });
+    tx.hostedAccountGroupBillingRef.findMany.mockResolvedValue([billingRef]);
+    tx.hostedAccountGroupBillingRef.findUnique.mockResolvedValue(billingRef);
+    tx.hostedThreadContainer.findUnique.mockResolvedValue({ memberId: "member_owner" });
+
+    await expect(prepareHostedLegacySyntheticFamilyCleanupTx({
+      event,
+      tx,
+    })).resolves.toBe("sub_family");
+
+    expect(tx.$queryRaw.mock.invocationCallOrder[0]).toBeLessThan(
+      tx.hostedAccountGroupBillingRef.findMany.mock.invocationCallOrder[1],
+    );
+    expect(tx.hostedAccountGroupBillingRef.upsert).toHaveBeenCalledWith(expect.objectContaining({
+      update: expect.objectContaining({
+        billedSeatCount: null,
+        currentBillingPhase: null,
+        currentBillingPlanCode: "launch_family_monthly",
+        currentPeriodEnd: null,
+        currentPeriodStart: null,
+        lastStripeEventCreatedAt,
+        stripeCustomerLookupKey: expect.stringMatching(/^hbidx:stripe-customer:v1:/u),
+        stripeSubscriptionItemLookupKey: null,
+        stripeSubscriptionLookupKey: expect.stringMatching(/^hbidx:stripe-subscription:v1:/u),
+      }),
+    }));
+    expect(tx.hostedAccountGroup.update).toHaveBeenCalledWith({
+      data: { billingStatus: HostedBillingStatus.canceled },
+      where: { id: "hbag_family" },
+    });
+  });
+
+  it("leaves already-active legacy Family billing for explicit operator repair", async () => {
+    const tx = createTxMock();
+    tx.hostedThreadContainer.findUnique.mockResolvedValue({ memberId: "member_owner" });
+
+    await expect(prepareHostedLegacySyntheticFamilyCleanupTx({
+      event: makeFamilyStripeSubscriptionEvent(),
+      tx,
+    })).resolves.toBeNull();
+
+    expect(tx.hostedAccountGroupBillingRef.upsert).not.toHaveBeenCalled();
+    expect(tx.hostedAccountGroup.update).not.toHaveBeenCalled();
+  });
+
+  it("does not clean up a legacy event after its Family binding changes under lock", async () => {
+    const tx = createTxMock();
+    tx.hostedAccountGroupBillingRef.findUnique
+      .mockResolvedValueOnce(createBillingRefMock())
+      .mockResolvedValueOnce(createBillingRefMock({
+        stripeSubscriptionIdEncrypted: "encrypted:sub_newer",
+      }));
+
+    await expect(prepareHostedLegacySyntheticFamilyCleanupTx({
+      event: makeFamilyStripeSubscriptionEvent(),
+      tx,
+    })).resolves.toBeNull();
+
+    expect(tx.hostedThreadContainer.findUnique).not.toHaveBeenCalled();
+    expect(tx.hostedAccountGroupBillingRef.upsert).not.toHaveBeenCalled();
+    expect(tx.hostedAccountGroup.update).not.toHaveBeenCalled();
   });
 
   it("reconciles active Family billing while skipping direct-paid members during activation", async () => {
@@ -3629,6 +3711,16 @@ function makeFamilyStripeCheckoutSession(input: {
   };
 
   return session as Stripe.Checkout.Session;
+}
+
+function makeFamilyStripeSubscriptionEvent(): Stripe.Event {
+  return {
+    created: 1_771_948_800,
+    data: { object: makeFamilyStripeSubscription() },
+    id: "evt_family_subscription",
+    object: "event",
+    type: "customer.subscription.updated",
+  } as Stripe.Event;
 }
 
 function makeFamilyStripeSubscription(input: {

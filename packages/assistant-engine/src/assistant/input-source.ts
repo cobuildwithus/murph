@@ -43,6 +43,7 @@ export interface AssistantInputEvent {
   conversation: AssistantInputConversationRef | null
   cursor: AssistantInputCursor
   groupParticipantAdded?: true
+  groupReactionContext?: string
   hostedMailboxItemId?: string | null
   inputId: string
   occurredAt: string
@@ -211,6 +212,9 @@ async function listStoredAssistantInputCandidates(input: {
         ...(hostedMailboxItem?.groupParticipantAdded === true
           ? { groupParticipantAdded: hostedMailboxItem.groupParticipantAdded }
           : {}),
+        ...(hostedMailboxItem?.groupReactionContext
+          ? { groupReactionContext: hostedMailboxItem.groupReactionContext }
+          : {}),
         hostedMailboxItemId: hostedMailboxItem?.mailboxItemId ?? null,
       })
     }),
@@ -222,6 +226,7 @@ export function assistantInputCandidateFromStoredEvent(
   event: AssistantInputEventRecord,
   input?: {
     groupParticipantAdded?: true
+    groupReactionContext?: string
     hostedMailboxItemId?: string | null
   },
 ): AssistantInputCandidate {
@@ -230,6 +235,9 @@ export function assistantInputCandidateFromStoredEvent(
     ...(input?.groupParticipantAdded === true
       ? { groupParticipantAdded: input.groupParticipantAdded }
       : {}),
+    ...(input?.groupReactionContext
+      ? { groupReactionContext: input.groupReactionContext }
+      : {}),
     hostedMailboxItemId: input?.hostedMailboxItemId ?? null,
   })
 }
@@ -237,6 +245,7 @@ export function assistantInputCandidateFromStoredEvent(
 function assistantInputCandidateFromStoredEventWithHostedMailboxItem(input: {
   event: AssistantInputEventRecord
   groupParticipantAdded?: true
+  groupReactionContext?: string
   hostedMailboxItemId: string | null
 }): AssistantInputCandidate {
   const event = input.event
@@ -245,6 +254,13 @@ function assistantInputCandidateFromStoredEventWithHostedMailboxItem(input: {
     event.sourceMetadata?.kind === 'linq' &&
     event.sourceMetadata.externalThreadRouteAuthorityPresent === true &&
     event.conversation?.threadIsDirect === false
+  const groupReactionContext =
+    input.groupReactionContext &&
+    event.sourceMetadata?.kind === 'linq' &&
+    event.sourceMetadata.externalThreadRouteAuthorityPresent === true &&
+    event.conversation?.threadIsDirect === false
+      ? input.groupReactionContext
+      : null
   return {
     acceptedInput: {
       id: event.inputId,
@@ -265,6 +281,7 @@ function assistantInputCandidateFromStoredEventWithHostedMailboxItem(input: {
       ...(groupParticipantAdded
         ? { groupParticipantAdded: true }
         : {}),
+      ...(groupReactionContext ? { groupReactionContext } : {}),
       hostedMailboxItemId: input.hostedMailboxItemId,
       inputId: event.inputId,
       occurredAt: event.occurredAt,

@@ -139,11 +139,6 @@
       "import": "./dist/telegram-runtime.js",
       "default": "./dist/telegram-runtime.js"
     },
-    "./whatsapp-runtime": {
-      "types": "./dist/whatsapp-runtime.d.ts",
-      "import": "./dist/whatsapp-runtime.js",
-      "default": "./dist/whatsapp-runtime.js"
-    },
     "./text/shared": {
       "types": "./dist/text/shared.d.ts",
       "import": "./dist/text/shared.js",

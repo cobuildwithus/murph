@@ -63,7 +63,19 @@ describe("assistant phone calls", () => {
       "Set callerName to the user-approved first name",
     );
     expect(MURPH_CREATE_PHONE_CALL_TOOL.description).toContain(
-      "likely required booking facts such as patient name or date of birth",
+      "$MURPH_ASSISTANT_SKILLS_ROOT/appointment-scheduling/SKILL.md",
+    );
+    expect(MURPH_CREATE_PHONE_CALL_TOOL.description).toContain(
+      "satisfy its ready-to-act gate",
+    );
+    expect(MURPH_CREATE_PHONE_CALL_TOOL.description).toContain(
+      "completed, user-approved readiness brief",
+    );
+    expect(MURPH_CREATE_PHONE_CALL_TOOL.description).not.toContain(
+      "appointment type, acceptable dates and times, timezone, clinician",
+    );
+    expect(MURPH_CREATE_PHONE_CALL_TOOL.description).toContain(
+      "information-only or connectivity-test call must stay non-mutating",
     );
     expect(MURPH_CREATE_PHONE_CALL_TOOL.description).toContain(
       "Murph resolves verified transfer numbers server-side",

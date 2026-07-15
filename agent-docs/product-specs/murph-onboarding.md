@@ -246,7 +246,8 @@ The existing daily onboarding automation is a recovery path, not a category
 drip or a support-obligation resolver. It should read recent conversation and
 the resume snapshot, then do one of three things:
 
-1. archive itself because onboarding is complete or declined;
+1. return skip because onboarding is complete or declined; the existing
+   managed-automation reconciler archives the follow-up deterministically;
 2. advance unfinished direction or support-loop setup with one useful action or
    question; or
 3. ask one unresolved foundation question with a clear context dividend.

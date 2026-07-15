@@ -1,4 +1,5 @@
 import { createHash } from "node:crypto";
+import path from "node:path";
 
 import type {
   HostedExecutionConversationMessageWake,
@@ -8,7 +9,6 @@ import {
   isHostedEmailConversationMessageWake,
   isHostedLinqConversationMessageWake,
   isHostedTelegramConversationMessageWake,
-  isHostedWhatsAppConversationMessageWake,
   readHostedLinqConversationMessageAccountLookupKey,
 } from "@murphai/hosted-execution";
 import {
@@ -70,7 +70,6 @@ import {
   enqueueHostedPendingAssistantInputId,
 } from "./pending-input-index.ts";
 import {
-  prepareHostedInboxProjectionRuntime,
   prepareHostedAssistantAutoReplyForWake,
   requireHostedBootstrapForWake,
   type HostedAssistantAutoReplyReadinessState,
@@ -406,6 +405,19 @@ export async function importHostedConversationMailboxItem(input: {
   const linqDeliveryContext = buildHostedAssistantLinqDeliveryContextFromWake(decoded.wake);
   const emailDeliveryContext = buildHostedAssistantEmailDeliveryContextFromWake(decoded.wake);
   assertHostedConversationMailboxImportLive(input.signal ?? null);
+  if (!requiresHostedConversationInboxProjection({
+    attachmentDescriptorCount: stagedInput.attachmentDescriptorCount,
+    wake: decoded.wake,
+  })) {
+    return {
+      assistantInputId: stagedInput.inputId,
+      captureId: null,
+      ...(emailDeliveryContext ? { emailDeliveryContext } : {}),
+      ...(linqDeliveryContext ? { linqDeliveryContext } : {}),
+      metrics: createEmptyHostedConversationWakeMetrics(),
+      status: "imported",
+    };
+  }
   const projectionEffect = await projectHostedConversationAssistantInputBestEffort({
     importConversationWake,
     loadAttachmentEvidenceCapture,
@@ -863,11 +875,18 @@ async function stageHostedConversationAssistantInputEvent(input: {
   vaultRoot: string;
   wake: HostedExecutionConversationMessageWake;
 }): Promise<HostedConversationMailboxAssistantInputStageResult> {
-  const groupParticipantAdded = isHostedLinqConversationMessageWake(input.wake)
-    && input.wake.message.groupParticipantAdded === true
-    && input.wake.message.routeAuthority !== null
-    && input.wake.message.routeAuthority !== undefined
-    && input.wake.message.linqMessage.threadIsDirect === false;
+  const linqWake = isHostedLinqConversationMessageWake(input.wake)
+    ? input.wake
+    : null;
+  const groupContextAuthorized = linqWake
+    && linqWake.message.routeAuthority !== null
+    && linqWake.message.routeAuthority !== undefined
+    && linqWake.message.linqMessage.threadIsDirect === false;
+  const groupParticipantAdded = groupContextAuthorized
+    && linqWake?.message.groupParticipantAdded === true;
+  const groupReactionContext = groupContextAuthorized
+    ? linqWake?.message.groupReactionContext
+    : undefined;
   const event = await upsertAssistantInputEvent({
     event: createHostedConversationAssistantInputEvent({
       item: input.item,
@@ -877,15 +896,32 @@ async function stageHostedConversationAssistantInputEvent(input: {
   });
   await recordHostedMailboxAssistantInputItem({
     ...(groupParticipantAdded ? { groupParticipantAdded } : {}),
+    ...(groupReactionContext ? { groupReactionContext } : {}),
     inputId: event.inputId,
     mailboxItemId: input.item.item.id,
     vault: input.vaultRoot,
   });
-  if (event.projection.status === "not_attempted") {
+  const projectionRequired = requiresHostedConversationInboxProjection({
+    attachmentDescriptorCount: event.content.attachmentDescriptors.length,
+    wake: input.wake,
+  });
+  if (
+    projectionRequired
+    && event.projection.status === "not_attempted"
+  ) {
     await updateAssistantInputProjection({
       inputId: event.inputId,
       projection: {
         status: "pending",
+      },
+      vault: input.vaultRoot,
+    });
+  }
+  if (!projectionRequired && event.projection.status === "pending") {
+    await updateAssistantInputProjection({
+      inputId: event.inputId,
+      projection: {
+        status: "not_attempted",
       },
       vault: input.vaultRoot,
     });
@@ -1167,12 +1203,6 @@ function createHostedConversationAssistantInputText(
       : "Received a Telegram message.";
   }
 
-  if (isHostedWhatsAppConversationMessageWake(wake)) {
-    return normalizeHostedAssistantInputText(
-      wake.message.whatsappMessage.text,
-    ) ?? "Received a WhatsApp message.";
-  }
-
   if (isHostedEmailConversationMessageWake(wake)) {
     return createHostedEmailConversationAssistantInputText(wake);
   }
@@ -1375,26 +1405,6 @@ function createHostedConversationAssistantInputConversation(
     };
   }
 
-  if (isHostedWhatsAppConversationMessageWake(wake)) {
-    return {
-      accountId: hashNullableHostedAssistantConversationIdentifier(
-        identifierBlind,
-        wake.message.whatsappMessage.phoneNumberId ?? "whatsapp",
-      ),
-      actorId: hashNullableHostedAssistantConversationIdentifier(
-        identifierBlind,
-        wake.message.whatsappMessage.fromWaId,
-      ),
-      actorIsSelf: false,
-      source: "whatsapp",
-      threadId: hashNullableHostedAssistantConversationIdentifier(
-        identifierBlind,
-        wake.message.whatsappMessage.threadId,
-      ),
-      threadIsDirect: true,
-    };
-  }
-
   return null;
 }
 
@@ -1478,10 +1488,6 @@ function readHostedConversationAssistantIdentifierSecret(
     );
   }
 
-  if (isHostedWhatsAppConversationMessageWake(wake)) {
-    return wake.message.whatsappMessage.threadId || wake.message.whatsappMessage.fromWaId;
-  }
-
   return wake.eventId;
 }
 
@@ -1524,18 +1530,6 @@ function createHostedConversationAssistantInputReplyTarget(
       ),
       threadId: normalizeHostedAssistantInputReplyTargetIdentifier(
         wake.message.threadTarget,
-      ),
-    };
-  }
-
-  if (isHostedWhatsAppConversationMessageWake(wake)) {
-    return {
-      channel: "whatsapp",
-      messageId: normalizeHostedAssistantInputReplyTargetIdentifier(
-        wake.message.whatsappMessage.messageId,
-      ),
-      threadId: normalizeHostedAssistantInputReplyTargetIdentifier(
-        wake.message.whatsappMessage.threadId,
       ),
     };
   }
@@ -1847,6 +1841,29 @@ function decodedWakeMatchesMailboxItem(
     && wake.eventId === item.dedupeKey;
 }
 
+function requiresHostedConversationInboxProjection(input: {
+  attachmentDescriptorCount: number | undefined;
+  wake: HostedExecutionConversationMessageWake;
+}): boolean {
+  if (
+    isHostedEmailConversationMessageWake(input.wake)
+    && parseHostedEmailThreadTarget(input.wake.message.threadTarget)?.targetKind
+      === "group"
+  ) {
+    return false;
+  }
+  if (
+    isHostedLinqConversationMessageWake(input.wake)
+    && input.wake.message.linqMessage.parts.some((part) => part.type === "link")
+  ) {
+    return true;
+  }
+  if (input.attachmentDescriptorCount !== 0) {
+    return true;
+  }
+  return isHostedEmailConversationMessageWake(input.wake);
+}
+
 async function prepareHostedConversationMailboxWakeContext(input: {
   runtime: Pick<
     NormalizedHostedAssistantRuntimeConfig,
@@ -1856,10 +1873,13 @@ async function prepareHostedConversationMailboxWakeContext(input: {
   wake: HostedExecutionConversationMessageWake;
 }): Promise<void> {
   void input.runtime;
-  await prepareHostedInboxProjectionRuntime(
-    input.vaultRoot,
-    input.wake.eventId,
-  );
+  const inboxServices = createIntegratedInboxServices();
+  await inboxServices.init({
+    rebuild: false,
+    rebuildParserJobs: false,
+    requestId: input.wake.eventId,
+    vault: path.resolve(input.vaultRoot),
+  });
 }
 
 function normalizeConversationMailboxReasonCode(

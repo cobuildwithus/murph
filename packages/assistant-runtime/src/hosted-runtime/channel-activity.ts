@@ -26,12 +26,6 @@ const HOSTED_TELEGRAM_CHANNEL_ENV_KEYS = [
   "TELEGRAM_BOT_TOKEN",
   "TELEGRAM_FILE_BASE_URL",
 ] as const;
-const HOSTED_WHATSAPP_CHANNEL_ENV_KEYS = [
-  "WHATSAPP_ACCESS_TOKEN",
-  "WHATSAPP_API_BASE_URL",
-  "WHATSAPP_GRAPH_VERSION",
-  "WHATSAPP_PHONE_NUMBER_ID",
-] as const;
 
 const HOSTED_LINQ_TYPING_MAX_SESSION_MS = 5 * 60_000;
 const HOSTED_LINQ_TYPING_REFRESH_MS = 45_000;
@@ -96,17 +90,6 @@ export function buildHostedTelegramVoiceMemoChannelEnv(input: {
     ...pickHostedChannelEnv(source, HOSTED_TELEGRAM_CHANNEL_ENV_KEYS),
     ...pickHostedChannelEnv(source, HOSTED_ELEVENLABS_ENV_NAMES),
   };
-}
-
-export function buildHostedWhatsAppChannelEnv(input: {
-  forwardedEnv: Readonly<Record<string, string>>;
-  platformEnv?: Readonly<Record<string, string>>;
-}): Record<string, string> {
-  const source = {
-    ...input.forwardedEnv,
-    ...(input.platformEnv ?? {}),
-  };
-  return pickHostedChannelEnv(source, HOSTED_WHATSAPP_CHANNEL_ENV_KEYS);
 }
 
 export function createHostedAssistantChannelTypingDependencies(input: {

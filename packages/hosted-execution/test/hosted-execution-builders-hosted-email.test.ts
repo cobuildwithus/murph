@@ -13,7 +13,6 @@ import {
   buildHostedExecutionRuntimeTimerWake,
   buildHostedExecutionTelegramConversationMessageWake,
   buildHostedExecutionDeviceSyncWake,
-  buildHostedExecutionWhatsAppConversationMessageWake,
 } from "../src/builders.ts";
 import {
   HOSTED_EMAIL_GROUP_RECIPIENTS_CALLBACK_PATH,
@@ -256,6 +255,7 @@ describe("hosted execution wake builders", () => {
     const wake = buildHostedExecutionLinqConversationMessageWake({
       eventId: "linq-1",
       groupParticipantAdded: true,
+      groupReactionContext: "Someone reacted ❤️ to “morning walk”.",
       linqMessage,
       occurredAt,
       phoneLookupKey: "phone_lookup_123",
@@ -271,6 +271,7 @@ describe("hosted execution wake builders", () => {
       contactKind: "phone",
       contactLookupKey: "phone_lookup_123",
       groupParticipantAdded: true,
+      groupReactionContext: "Someone reacted ❤️ to “morning walk”.",
       linqMessage: {
         chatId: "chat_123",
         from: "+15551234567",
@@ -298,6 +299,25 @@ describe("hosted execution wake builders", () => {
     expect(wake.message.linqMessage).not.toBe(linqMessage);
     expect(wake.message.linqMessage.parts).not.toBe(linqMessage.parts);
     expect(wake.message.routeAuthority).not.toBe(routeAuthority);
+  });
+
+  it.each([
+    ["blank", "   "],
+    ["over 512 characters", "x".repeat(513)],
+  ])("rejects %s Linq group reaction context in the builder", (_label, groupReactionContext) => {
+    expect(() => buildHostedExecutionLinqConversationMessageWake({
+      eventId: "linq-invalid-reaction-context",
+      groupReactionContext,
+      linqMessage: buildNonDirectLinqMessage(),
+      occurredAt,
+      phoneLookupKey: "phone_lookup_123",
+      routeAuthority: {
+        channel: "linq",
+        containerMemberId: "member_thread_container_123",
+        threadId: "chat_group_123",
+      },
+      userId: "member_thread_container_123",
+    })).toThrow(/group reaction context is invalid/u);
   });
 
   it("rejects non-direct Linq wakes without thread-container route authority", () => {
@@ -461,38 +481,6 @@ describe("hosted execution wake builders", () => {
     );
     expect(wake.message.telegramMessage.attachments).not.toBe(attachments);
     expect(wake.message.telegramMessage.attachments?.[0]).not.toBe(attachments[0]);
-  });
-
-  it("copies WhatsApp message payloads without mutating caller-owned data", () => {
-    const whatsappMessage = {
-      fromWaId: "15551234567",
-      messageId: "wamid.test",
-      phoneNumberId: "phone-number-id",
-      schema: "murph.hosted-whatsapp-message.v1" as const,
-      text: "CHECKIN",
-      threadId: "15551234567",
-    };
-    const wake = buildHostedExecutionWhatsAppConversationMessageWake({
-      eventId: "whatsapp-1",
-      occurredAt,
-      userId: "user_123",
-      whatsappMessage,
-    });
-
-    whatsappMessage.text = "mutated";
-
-    expect(wake.message).toEqual({
-      channel: "whatsapp",
-      whatsappMessage: {
-        fromWaId: "15551234567",
-        messageId: "wamid.test",
-        phoneNumberId: "phone-number-id",
-        schema: "murph.hosted-whatsapp-message.v1",
-        text: "CHECKIN",
-        threadId: "15551234567",
-      },
-    });
-    expect(wake.message.whatsappMessage).not.toBe(whatsappMessage);
   });
 
   it("distinguishes omitted versus explicit nullable email routing metadata", () => {

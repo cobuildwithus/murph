@@ -8,7 +8,7 @@ Stateless provider ingress semantics that need to be shared with hosted callers 
 
 Consumers that only need shared Linq or Telegram webhook parsing, verification, targets, summaries, or sparse minimization should depend on `@murphai/messaging-ingress` directly instead of `@murphai/inboxd` convenience subpaths.
 
-Consumers that need inbox-owned normalization without the full inboxd barrel should use the focused connector exports such as `@murphai/inboxd/connectors/linq/normalize`, `@murphai/inboxd/connectors/telegram/normalize`, or `@murphai/inboxd/connectors/hosted-conversation` for hosted mailbox conversation wakes including WhatsApp.
+Consumers that need inbox-owned normalization without the full inboxd barrel should use the focused connector exports such as `@murphai/inboxd/connectors/linq/normalize`, `@murphai/inboxd/connectors/telegram/normalize`, or `@murphai/inboxd/connectors/hosted-conversation` for hosted mailbox conversation wakes.
 
 ## Runtime expectations
 
@@ -26,6 +26,7 @@ Consumers that need inbox-owned normalization without the full inboxd barrel sho
 - append-only `ledger/inbox-attachment-retention/YYYY/YYYY-MM.jsonl` records 14-day raw inbox image/audio/video byte expiration, preserving descriptors, hashes, message relationships, and retained parser derivatives while projecting expired bytes as `retention_expired`
 - assistant admission must not depend on hidden local inbox projection rows; decoded assistant input belongs in the assistant input store, while inbox capture remains a canonical/searchable projection
 - inbox intake and runtime rebuild rely on canonical inbox-capture ledger evidence, but they will backfill a missing inbox-capture record from a deterministic current-format raw envelope only when an unresolved `inbox_capture_persist` write operation shows raw writes completed before the ledger append
+- crash recovery opens write-operation metadata only for operations whose staging directory still exists; clean terminal metadata without stage residue is skipped on a fresh-capture miss, while residue remains visible for validation and diagnostics
 - inbox SQLite projection state lives under `<vault>/.runtime/projections/inboxd.sqlite`
 - any idempotent promotion from inbox captures into canonical records must be derivable from canonical vault evidence rather than local `.runtime` state alone
 
@@ -33,7 +34,7 @@ Consumers that need inbox-owned normalization without the full inboxd barrel sho
 
 - connector contracts for polling and webhook sources
 - a generic normalized chat-poll connector factory for source-specific transports
-- Telegram and email/Linq inbox connector ownership plus shared connector primitives for supported inbox sources; hosted conversation normalization also covers WhatsApp text wakes emitted by the control plane
+- Telegram and email/Linq inbox connector ownership plus shared connector primitives for supported inbox sources
 - source-specific checkpoints for connectors whose cursors are not derivable from `occurredAt`/`externalId`
 - capture pipeline with atomic raw persistence, inbox-capture ledger append, dedupe, FTS, and a durable local capture mutation cursor for downstream inbox/query projections
 - rebuilds and replay dedupe treat raw envelopes as source evidence, not a legacy persistence lane, except for the narrow current-format crash-recovery path gated by unresolved `inbox_capture_persist` metadata

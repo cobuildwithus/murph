@@ -31,6 +31,8 @@ import {
   assistantCronTargetSchema,
   assistantCronRunRecordSchema,
   assistantBindingDeliveryKindValues,
+  assistantChannelNameSchema,
+  assistantChannelNameValues,
   assistantChannelDeliveryTargetKindValues,
   assistantOutboxIntentSchema,
   assistantResponseMediaSchema,
@@ -42,6 +44,11 @@ import {
 } from '../src/assistant-cli-contracts.ts'
 
 describe('assistant CLI delivery contracts', () => {
+  it('keeps the supported messaging channels explicit after the hard cut', () => {
+    expect(assistantChannelNameValues).toEqual(['telegram', 'linq', 'email'])
+    expect(() => assistantChannelNameSchema.parse('whatsapp')).toThrow()
+  })
+
   it('reuses gateway-owned delivery target kinds', () => {
     expect(assistantChannelDeliveryTargetKindValues).toEqual(gatewayDeliveryTargetKindValues)
   })
