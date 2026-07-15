@@ -77,6 +77,7 @@ interface HostedTestPrismaFactoryClient {
   hostedMailboxItem: {
     count(args: unknown): Promise<number>;
     findUniqueOrThrow(args: unknown): Promise<{
+      consumedAt: Date | null;
       dedupeKey: string;
       id: string;
       kind: string;
@@ -457,6 +458,15 @@ export interface HostedMailboxAppendForTestResponse {
   };
 }
 
+export interface HostedMailboxItemForTest {
+  consumedAt: string | null;
+  dedupeKey: string;
+  id: string;
+  kind: string;
+  lane: string;
+  laneSeq: string;
+}
+
 export interface HostedLinqWorkspaceIsolationStateForTest {
   personal: {
     conversationMailboxCount: number;
@@ -560,6 +570,39 @@ export async function appendHostedExecutionWakeForTest(input: {
         id: append.item.id,
         seq: append.item.laneSeq.toString(),
       },
+    };
+  });
+}
+
+export async function readHostedMailboxItemForTest(input: {
+  dedupeKey: string;
+  environment?: NodeJS.ProcessEnv;
+  userId: string;
+}): Promise<HostedMailboxItemForTest> {
+  return withHostedWebTestkitDeps(input.environment, async (deps) => {
+    const item = await deps.prisma.hostedMailboxItem.findUniqueOrThrow({
+      select: {
+        consumedAt: true,
+        dedupeKey: true,
+        id: true,
+        kind: true,
+        lane: true,
+        laneSeq: true,
+      },
+      where: {
+        userId_dedupeKey: {
+          dedupeKey: input.dedupeKey,
+          userId: input.userId,
+        },
+      },
+    });
+    return {
+      consumedAt: item.consumedAt?.toISOString() ?? null,
+      dedupeKey: item.dedupeKey,
+      id: item.id,
+      kind: item.kind,
+      lane: item.lane,
+      laneSeq: item.laneSeq.toString(),
     };
   });
 }

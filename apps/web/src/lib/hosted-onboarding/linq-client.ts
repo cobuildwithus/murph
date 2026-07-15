@@ -207,7 +207,7 @@ export type HostedLinqReactionTargetMessage = {
 const HOSTED_LINQ_REACTION_TARGET_MAX_PARTS = 32;
 const HOSTED_LINQ_REACTION_TARGET_TEXT_MAX_CHARS = 512;
 const HOSTED_LINQ_REACTION_TARGET_URL_PATTERN =
-  /(?:https?:\/\/|file:\/\/)[^\s)"'<>]+/giu;
+  /(?:\b[a-z][a-z0-9+.-]*:\/\/[^\s)"'<>]+|\b(?:blob|cid|data|geo|javascript|magnet|mailto|sms|tel|urn|xmpp):[^\s)"'<>]+|\bwww\.[^\s)"'<>]+|\b(?:[a-z0-9](?:[a-z0-9-]{0,61}[a-z0-9])?\.)+[a-z]{2,63}(?::\d{1,5})?(?:[/?#][^\s)"'<>]*)?|\b(?:\d{1,3}\.){3}\d{1,3}(?::\d{1,5})?(?:[/?#][^\s)"'<>]*)?)/giu;
 
 export async function getHostedLinqChatSummary(input: {
   chatId: string;
@@ -305,7 +305,8 @@ function parseHostedLinqReactionTargetPart(value: unknown): string {
   const record = value as Record<string, unknown>;
   if (record.type === "text" && typeof record.value === "string") {
     const text = normalizeNullableString(record.value)
-      ?.replace(HOSTED_LINQ_REACTION_TARGET_URL_PATTERN, "[link]")
+      ?.slice(0, HOSTED_LINQ_REACTION_TARGET_TEXT_MAX_CHARS)
+      .replace(HOSTED_LINQ_REACTION_TARGET_URL_PATTERN, "[link]")
       .slice(0, HOSTED_LINQ_REACTION_TARGET_TEXT_MAX_CHARS);
     return text || "[unsupported content]";
   }
