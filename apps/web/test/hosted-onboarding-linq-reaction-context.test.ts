@@ -29,6 +29,7 @@ vi.mock("@/src/lib/hosted-onboarding/member-access", () => ({
 import type { HostedLinqWebhookEvent } from "@/src/lib/hosted-onboarding/linq";
 import { parseHostedLinqProviderEvent } from "@/src/lib/hosted-onboarding/linq-provider-events";
 import {
+  buildHostedLinqAffirmativeReactionMessageEvent,
   stageHostedLinqGroupReactionContext,
 } from "@/src/lib/hosted-onboarding/webhook-provider-linq-reaction-context";
 
@@ -63,7 +64,9 @@ describe("stageHostedLinqGroupReactionContext", () => {
     mocks.getHostedLinqReactionTargetMessage.mockResolvedValue({
       chatId: "chat_group_123",
       id: "message_target_123",
+      isFromMe: false,
       parts: ["A useful group message"],
+      service: "iMessage",
     });
     mocks.appendHostedLinqThreadRouteReactionContextTx.mockResolvedValue("appended");
   });
@@ -275,6 +278,113 @@ describe("stageHostedLinqGroupReactionContext", () => {
       event: buildReactionEvent(),
       prisma: createPrismaStub(),
     })).resolves.toBe(false);
+  });
+
+  it.each([false, true])(
+    "promotes an exact Murph-authored affirmative reaction through the ordinary %s group flag",
+    async (isGroup) => {
+      mocks.getHostedLinqChatSummary.mockResolvedValueOnce({
+        handles: [
+          { handle: "+15550000000", isMe: true, status: "active" },
+          { handle: "+15551234567", isMe: false, status: "active" },
+        ],
+        isGroup,
+      });
+      mocks.getHostedLinqReactionTargetMessage.mockResolvedValueOnce({
+        chatId: "chat_group_123",
+        id: "message_target_123",
+        isFromMe: true,
+        parts: ["Would you like me to continue?"],
+        service: "iMessage",
+      });
+
+      await expect(buildHostedLinqAffirmativeReactionMessageEvent({
+        event: buildReactionEvent(),
+      })).resolves.toMatchObject({
+        data: {
+          chat: {
+            id: "chat_group_123",
+            is_group: isGroup,
+          },
+          from: "+15551234567",
+          is_from_me: false,
+          message: {
+            id: "message_target_123",
+            parts: [
+              {
+                type: "text",
+                value: expect.stringContaining("affirmative reply"),
+              },
+              {
+                type: "text",
+                value: expect.stringContaining("Would you like me to continue?"),
+              },
+            ],
+            reply_to: {
+              message_id: "message_target_123",
+            },
+          },
+        },
+        event_id: "event_reaction_123",
+        event_type: "message.received",
+      });
+    },
+  );
+
+  it.each([
+    [
+      "self-line",
+      [
+        { handle: "+15550000000", isMe: true, status: "active" },
+        { handle: "+15550000001", isMe: true, status: "active" },
+        { handle: "+15551234567", isMe: false, status: "active" },
+      ],
+    ],
+    [
+      "actor",
+      [
+        { handle: "+15550000000", isMe: true, status: "active" },
+        { handle: "+15551234567", isMe: false, status: "active" },
+        { handle: "+15551234567", isMe: false, status: "active" },
+      ],
+    ],
+  ])("rejects an ambiguous active %s roster", async (_kind, handles) => {
+    mocks.getHostedLinqChatSummary.mockResolvedValueOnce({
+      handles,
+      isGroup: false,
+    });
+    mocks.getHostedLinqReactionTargetMessage.mockResolvedValueOnce({
+      chatId: "chat_group_123",
+      id: "message_target_123",
+      isFromMe: true,
+      parts: ["Would you like me to continue?"],
+      service: "iMessage",
+    });
+
+    await expect(buildHostedLinqAffirmativeReactionMessageEvent({
+      event: buildReactionEvent(),
+    })).resolves.toBeNull();
+  });
+
+  it("keeps nonaffirmative and participant-target reactions on the silent path", async () => {
+    await expect(buildHostedLinqAffirmativeReactionMessageEvent({
+      event: buildReactionEvent({
+        customEmoji: "😂",
+        reactionType: "custom",
+      }),
+    })).resolves.toBeNull();
+    expect(mocks.getHostedLinqReactionTargetMessage).not.toHaveBeenCalled();
+
+    mocks.getHostedLinqReactionTargetMessage.mockResolvedValueOnce({
+      chatId: "chat_group_123",
+      id: "message_target_123",
+      isFromMe: false,
+      parts: ["Participant-authored message"],
+      service: "iMessage",
+    });
+    await expect(buildHostedLinqAffirmativeReactionMessageEvent({
+      event: buildReactionEvent(),
+    })).resolves.toBeNull();
   });
 });
 

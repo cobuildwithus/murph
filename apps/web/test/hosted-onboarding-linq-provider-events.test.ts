@@ -2,7 +2,7 @@ import { describe, expect, it } from "vitest";
 
 import type { HostedLinqWebhookEvent } from "@/src/lib/hosted-onboarding/linq";
 import {
-  normalizeHostedLinqGroupJoinOfferReaction,
+  isHostedLinqAffirmativeReaction,
   parseHostedLinqProviderEvent,
 } from "@/src/lib/hosted-onboarding/linq-provider-events";
 
@@ -148,11 +148,11 @@ describe("parseHostedLinqProviderEvent", () => {
     expect(parsed?.providerCreatedAt.toISOString()).toBe("2026-03-26T12:01:00.000Z");
     expect(JSON.stringify(parsed?.payloadSanitizedJson)).not.toContain("+15551234567");
     expect(JSON.stringify(parsed?.payloadShapeJson)).not.toContain("+15551234567");
-    expect(normalizeHostedLinqGroupJoinOfferReaction({
+    expect(isHostedLinqAffirmativeReaction({
       customEmoji: parsed?.reactionCustomEmoji,
       eventType: parsed?.eventType ?? "reaction.added",
       reactionType: parsed?.reactionType,
-    })).toBe("accept");
+    })).toBe(true);
   });
 
   it("parses canonical reaction from and part_index fields", () => {
@@ -244,26 +244,26 @@ describe("parseHostedLinqProviderEvent", () => {
     expect(persisted).not.toContain("participant_private_123");
   });
 
-  it("normalizes the join-offer reaction allowlist deterministically", () => {
-    expect(normalizeHostedLinqGroupJoinOfferReaction({
+  it("recognizes the affirmative reaction allowlist deterministically", () => {
+    expect(isHostedLinqAffirmativeReaction({
       eventType: "reaction.added",
       reactionType: "love",
-    })).toBe("accept");
-    expect(normalizeHostedLinqGroupJoinOfferReaction({
+    })).toBe(true);
+    expect(isHostedLinqAffirmativeReaction({
       customEmoji: "❤️",
       eventType: "reaction.added",
       reactionType: "custom",
-    })).toBe("accept");
-    expect(normalizeHostedLinqGroupJoinOfferReaction({
+    })).toBe(true);
+    expect(isHostedLinqAffirmativeReaction({
       customEmoji: "😂",
       eventType: "reaction.added",
       reactionType: "custom",
-    })).toBeNull();
-    expect(normalizeHostedLinqGroupJoinOfferReaction({
+    })).toBe(false);
+    expect(isHostedLinqAffirmativeReaction({
       customEmoji: "👍",
       eventType: "reaction.removed",
       reactionType: "custom",
-    })).toBeNull();
+    })).toBe(false);
   });
 
   it("stores provider payload shape without raw dynamic webhook keys", () => {

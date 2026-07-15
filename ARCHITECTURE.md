@@ -378,6 +378,15 @@ new 5,129-character maximum before web can emit it. Once web has written the
 new array shape, forward-fix web rather than rolling it back until those
 transient slots have been consumed or cleared.
 
+One case is actionable immediately: an affirmative added reaction from the
+active participant to Murph's exact provider-attested outbound message is
+adapted into the existing `message.received` planner input. That same planner
+owns private and group routing, access, quotas, mailbox dedupe, and wake handoff;
+the reaction path adds no mailbox kind or lifecycle. Existing group join-offer
+acceptance remains the earlier exact owner. Reactions to participant-authored
+messages, removals, and nonaffirmative reactions remain on the silent group
+context path above (or ignored outside groups).
+
 Hosted Linq unknown first-contact admission is a web-owned classifier gate on
 the signup-link path only. It runs after cheap deterministic ingress filters and
 before member/invite mutation, calls OpenAI through an env-only key with bounded
