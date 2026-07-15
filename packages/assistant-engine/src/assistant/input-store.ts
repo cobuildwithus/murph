@@ -577,6 +577,7 @@ export async function listAssistantInputEvents(input: {
   limit?: number
   onInvalidRecord?: ((failure: AssistantInputEventRecordParseFailure) => void) | null
   paths?: AssistantStatePaths
+  signal?: AbortSignal | null
   skipInvalidRecords?: boolean
   source?: string | null
   vault?: string
@@ -584,6 +585,7 @@ export async function listAssistantInputEvents(input: {
   events: AssistantInputEventRecord[]
   nextCursor: AssistantInputCursor | null
 }> {
+  input.signal?.throwIfAborted()
   const { paths } = resolveAssistantInputContext(input)
   const limit = normalizeAssistantInputEventListLimit(input.limit)
   const onInvalidRecord = input.onInvalidRecord ?? null
@@ -594,9 +596,11 @@ export async function listAssistantInputEvents(input: {
     const entries = await readdir(directory, {
       withFileTypes: true,
     })
+    input.signal?.throwIfAborted()
     const records: AssistantInputEventRecord[] = []
 
     for (const entry of entries) {
+      input.signal?.throwIfAborted()
       if (!entry.name.endsWith('.json')) {
         continue
       }
@@ -609,9 +613,12 @@ export async function listAssistantInputEvents(input: {
         }
         const filePath = path.join(directory, entry.name)
         await assertAssistantStatePathHasNoSymlinks(filePath)
+        input.signal?.throwIfAborted()
         const raw = await readFile(filePath, 'utf8')
+        input.signal?.throwIfAborted()
         records.push(parseAssistantInputEventFile(JSON.parse(raw)))
       } catch (error) {
+        input.signal?.throwIfAborted()
         if (!skipInvalidRecords) {
           throw error
         }
@@ -655,6 +662,7 @@ export async function listAssistantInputEvents(input: {
       nextCursor,
     }
   } catch (error) {
+    input.signal?.throwIfAborted()
     if (isMissingFileError(error)) {
       return {
         events: [],

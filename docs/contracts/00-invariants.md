@@ -2,8 +2,9 @@
 
 This file contains Murph's cross-cutting engineering rules. Product behavior
 belongs in product specs. Protocol details, file paths, provider fields,
-numeric tuning, incident history, and rollout case law belong in owner docs and
-executable tests.
+tunable numeric settings, incident history, and rollout case law belong in
+owner docs and executable tests. A fixed numeric floor appears here only when
+it has been explicitly elevated to a cross-cutting invariant.
 
 ## Admission Test
 
@@ -86,6 +87,16 @@ executable tests.
   waits, but never let background, replay, maintenance, or diagnostic budgets
   cap fresh accepted input.
 - Routine hosted workspace snapshot publication is idle-only and interruptible.
+  After the latest durably accepted conversation message, routine checkpoint
+  construction has a hard 180-second minimum quiet window. Internal assistant,
+  maintenance, retention, cleanup, projection, and scheduled wakes must not
+  shorten it. Only the exact assistant retry or follow-up wake projected
+  directly by the current foreground assistant phase may run as foreground
+  work inside that window without publishing a snapshot. Inherited, committed,
+  durability-gated, and shutdown-time wakes do not use this exception. If the
+  hot pass dirties state, the full quiet window starts again. An actual host
+  termination may use the separate last-chance durability path, but durably
+  staged foreground work still wins.
   Current-turn durability barriers may run only for facts the current reply or
   effect consumes. Before provider start, that is limited to accepted-input and
   turn-ownership proof; before an irreversible send, to the minimal outbox
@@ -276,9 +287,11 @@ executable tests.
 - Make hot-path size, dependency closure, call ordering, scan complexity, state
   placement, provider shape, and replay boundaries executable with
   deterministic tests when prose cannot prevent drift.
-- Numeric latency budgets, retry counts, scan limits, and output limits live in
+- Tunable latency budgets, retry counts, scan limits, and output limits live in
   owner protocol or SLO docs and tests so they can be measured and ratcheted
-  without turning this file into configuration.
+  without turning this file into configuration. Fixed numeric floors explicitly
+  elevated to baseline invariants are mirrored mechanically in owner config and
+  tests.
 - Codex test doubles sit behind the production adapter. They may fake unsafe
   external edges, credentials, time, and deliberate failures; they must not
   maintain a second Codex lifecycle, protocol, scheduler, supervisor, or retry

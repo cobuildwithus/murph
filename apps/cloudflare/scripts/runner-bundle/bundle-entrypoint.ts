@@ -61,7 +61,11 @@ export const RUNNER_ENTRYPOINT_BUNDLE_DIRECTORY_NAME = "dist-bundled";
 // too if total creep becomes the concern. Investigate the listed largest
 // inputs before raising either.
 const RUNNER_ENTRYPOINT_BUNDLE_TOTAL_BYTES_BUDGET = 9_300_000;
-const RUNNER_ENTRYPOINT_BUNDLE_ENTRY_BASELINE_BYTES = 1_423_217;
+// The checkpoint foreground-preemption path adds reviewed boot-critical logic.
+// Current-main assembly measured 1,480,763B on CI Linux (+9,546B) and
+// 1,485,768B on local macOS (+14,551B); advance only by the larger entry
+// overage and preserve the noise band.
+const RUNNER_ENTRYPOINT_BUNDLE_ENTRY_BASELINE_BYTES = 1_437_768;
 // PR #631 added 913B for its reviewed Clinical Records crypto-lane labels and
 // another 872B for bounded checkpoint/resume handling over the latest mainline
 // baseline. Advance only by those measured overages and preserve the separate

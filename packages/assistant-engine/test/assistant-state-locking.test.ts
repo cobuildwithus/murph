@@ -97,6 +97,69 @@ test('assistant state write locks allow nested reentry while serializing concurr
   ])
 })
 
+test('assistant state write locks remove aborted waiters without bypassing the active writer', async () => {
+  const { parentRoot, vaultRoot } = await createTempVaultContext(
+    'murph-assistant-state-aborted-waiter-',
+  )
+  cleanupPaths.push(parentRoot)
+
+  const paths = resolveAssistantStatePaths(vaultRoot)
+  const lock = createAssistantStateWriteLock<AssistantStatePaths>({
+    ownerKeyPrefix: 'assistant-engine-abort-test',
+    lockDirectory: '.locks/assistant-engine-abort-test',
+    lockMetadataPath: '.locks/assistant-engine-abort-test/owner.json',
+    invalidMetadataReason: 'Assistant-engine abort test lock metadata is malformed.',
+    heldLockErrorCode: 'ASSISTANT_ENGINE_ABORT_TEST_LOCKED',
+    formatHeldLockMessage() {
+      return 'Assistant-engine abort test lock is already held.'
+    },
+  })
+  const firstHolding = createDeferred<void>()
+  const releaseFirst = createDeferred<void>()
+  const events: string[] = []
+
+  const first = lock.withWriteLock(paths, async () => {
+    events.push('first:start')
+    firstHolding.resolve()
+    await releaseFirst.promise
+    events.push('first:end')
+  })
+  await firstHolding.promise
+
+  const controller = new AbortController()
+  const abortReason = new Error('foreground work interrupted maintenance')
+  let abortedCallbackRan = false
+  const aborted = lock.withWriteLock(
+    paths,
+    async () => {
+      abortedCallbackRan = true
+    },
+    controller.signal,
+  )
+  controller.abort(abortReason)
+
+  let receivedReason: unknown
+  try {
+    await aborted
+    assert.fail('Expected the queued writer to abort.')
+  } catch (error) {
+    receivedReason = error
+  }
+  assert.equal(receivedReason, abortReason)
+  assert.equal(abortedCallbackRan, false)
+
+  const later = lock.withWriteLock(paths, async () => {
+    events.push('later:start')
+  })
+  await Promise.resolve()
+  assert.deepEqual(events, ['first:start'])
+
+  releaseFirst.resolve()
+  await Promise.all([first, later])
+  assert.equal(abortedCallbackRan, false)
+  assert.deepEqual(events, ['first:start', 'first:end', 'later:start'])
+})
+
 test('assistant state write locks recover stale external locks before continuing', async () => {
   const { parentRoot, vaultRoot } = await createTempVaultContext(
     'murph-assistant-state-stale-lock-',
