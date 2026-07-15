@@ -791,6 +791,19 @@ it. The
 migration repeats the same narrow orphan predicate after promotion and the
 prior-function drain; that post-drain pass is the final historical-cleanup
 authority.
+The permanent Linq invite-delivery data-producer rollback floor is
+`e67aedb61fd021f50cadae147b92006fef43b97e`, the merge of PR #668 and the
+first `main` commit with both the live account-deletion cleanup and the delayed
+invite-dispatch fence. Freeze deploys and rollbacks before promoting the
+cleanup deployment, then record that deployed commit, this floor SHA, both
+production-alias proofs, the elapsed drain, and the contract-migration outcome
+before ending the freeze. After the contract migration is recorded, do not
+roll Vercel below this floor. Rerunning the existing workflow is not a repair
+for rows recreated by a below-floor rollback because the recorded migration ID
+and checksum make its SQL skip. A below-floor emergency rollback therefore
+requires a roll-forward, a fresh promotion-and-drain proof, and either a new
+timestamped cleanup migration or explicit operator SQL before the deletion
+guarantee is restored.
 Rollback floor: after contract cleanup drops an old schema shape, the oldest
 safe Vercel rollback target is the first deployed commit that no longer reads or
 writes that dropped shape. Rolling back below that floor requires restoring or
