@@ -2,6 +2,7 @@ import {
   DEVICE_SYNC_HISTORICAL_DATA_RECONNECT_REQUIRED_ERROR_CODE,
   isDeviceSyncConnectionSetupConfirmed,
   isEstablishedDeviceSyncConnection,
+  requiresHistoricalResetDeviceSyncSource,
 } from "@murphai/device-syncd/public-account";
 
 import type {
@@ -320,6 +321,12 @@ function buildHostedDeviceSyncSourceReconnectNotice(input: {
   if (
     !errorCode
     || !HOSTED_DEVICE_SYNC_RECONNECT_REQUIRED_SOURCE_ERROR_CODES.has(errorCode)
+  ) {
+    return null;
+  }
+  if (
+    errorCode === DEVICE_SYNC_HISTORICAL_DATA_RECONNECT_REQUIRED_ERROR_CODE
+    && !requiresHistoricalResetDeviceSyncSource(input.source)
   ) {
     return null;
   }

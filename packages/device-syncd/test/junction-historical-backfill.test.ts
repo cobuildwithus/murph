@@ -132,6 +132,15 @@ function createProvider(summaryRecord: Record<string, unknown>) {
         return createJsonResponse({ data: [summaryRecord] });
       }
 
+      if (
+        url
+          === "https://api.sandbox.us.junction.com/v2/introspect/historical_pull?user_id=junction-user-1&user_limit=1"
+      ) {
+        // Keep this focused suite on the canonical-import fallback without
+        // triggering the client's retry delays when no snapshot is available.
+        return createJsonResponse({ data: [] });
+      }
+
       if (url.includes("/v2/timeseries/junction-user-1/")) {
         return createJsonResponse({ groups: {} });
       }
@@ -157,10 +166,12 @@ async function executeBackfill(summaryRecord: Record<string, unknown>) {
   return { importedSnapshots, result };
 }
 
-test("Junction sleep-cycle historical backfill marks staged records complete", async () => {
+test("Junction sleep-cycle historical backfill uses canonical importer evidence when introspection is unavailable", async () => {
   const { importedSnapshots, result } = await executeBackfill({
     id: "sleep-cycle-1",
     connectionId: "provider-garmin-1",
+    start: "2026-04-02T01:00:00.000Z",
+    end: "2026-04-02T02:00:00.000Z",
     stages: [
       {
         stage: "light",
@@ -171,7 +182,7 @@ test("Junction sleep-cycle historical backfill marks staged records complete", a
   });
 
   assert.deepEqual(result.metadataPatch, {
-    junctionHistoricalBackfillStatus: "coverage_v2_complete",
+    junctionHistoricalBackfillStatus: "coverage_v3_complete",
     junctionHistoricalBackfillEmptyAttempts: 0,
     junctionHistoricalBackfillLastEmptyAt: null,
     junctionHistoricalBackfillWindowStart: "2026-04-01T00:00:00.000Z",
@@ -181,38 +192,6 @@ test("Junction sleep-cycle historical backfill marks staged records complete", a
   assert.equal(importedSnapshots.length, 1);
 });
 
-for (const [label, summaryRecord] of [
-  [
-    "stage duration",
-    {
-      id: "sleep-cycle-duration-1",
-      connectionId: "provider-garmin-1",
-      stages: [
-        {
-          stage: "deep",
-          durationMinutes: 40,
-        },
-      ],
-    },
-  ],
-  [
-    "stage count",
-    {
-      id: "sleep-cycle-stage-count-1",
-      connectionId: "provider-garmin-1",
-      stageCount: 4,
-    },
-  ],
-] satisfies Array<[string, Record<string, unknown>]>) {
-  test(`Junction sleep-cycle historical backfill marks ${label} records complete`, async () => {
-    const { importedSnapshots, result } = await executeBackfill(summaryRecord);
-
-    assert.equal(result.metadataPatch?.junctionHistoricalBackfillStatus, "coverage_v2_complete");
-    assert.equal(result.scheduledJobs, undefined);
-    assert.equal(importedSnapshots.length, 1);
-  });
-}
-
 test("Junction sleep-cycle id-only historical backfill keeps retrying", async () => {
   const { importedSnapshots, result } = await executeBackfill({
     id: "sleep-cycle-empty-1",
@@ -220,7 +199,7 @@ test("Junction sleep-cycle id-only historical backfill keeps retrying", async ()
   });
 
   assert.deepEqual(result.metadataPatch, {
-    junctionHistoricalBackfillStatus: "coverage_v2_retrying",
+    junctionHistoricalBackfillStatus: "coverage_v3_retrying",
     junctionHistoricalBackfillEmptyAttempts: 1,
     junctionHistoricalBackfillLastEmptyAt: "2026-04-03T00:00:00.000Z",
     junctionHistoricalBackfillWindowStart: "2026-04-01T00:00:00.000Z",
@@ -230,7 +209,19 @@ test("Junction sleep-cycle id-only historical backfill keeps retrying", async ()
   assert.equal(importedSnapshots.length, 1);
 });
 
-for (const stageCount of [0, -1]) {
+test("Junction sleep-cycle stage duration without a canonical interval keeps retrying", async () => {
+  const { importedSnapshots, result } = await executeBackfill({
+    id: "sleep-cycle-duration-1",
+    connectionId: "provider-garmin-1",
+    stages: [{ stage: "deep", durationMinutes: 40 }],
+  });
+
+  assert.equal(result.metadataPatch?.junctionHistoricalBackfillStatus, "coverage_v3_retrying");
+  assertConnectBackfillRetryWake(result);
+  assert.equal(importedSnapshots.length, 1);
+});
+
+for (const stageCount of [4, 0, -1]) {
   test(`Junction sleep-cycle stageCount ${stageCount} historical backfill keeps retrying`, async () => {
     const { importedSnapshots, result } = await executeBackfill({
       id: `sleep-cycle-stage-count-${stageCount}`,
@@ -239,7 +230,7 @@ for (const stageCount of [0, -1]) {
     });
 
     assert.deepEqual(result.metadataPatch, {
-      junctionHistoricalBackfillStatus: "coverage_v2_retrying",
+      junctionHistoricalBackfillStatus: "coverage_v3_retrying",
       junctionHistoricalBackfillEmptyAttempts: 1,
       junctionHistoricalBackfillLastEmptyAt: "2026-04-03T00:00:00.000Z",
       junctionHistoricalBackfillWindowStart: "2026-04-01T00:00:00.000Z",
