@@ -64,6 +64,8 @@ const HOSTED_EXECUTION_LOCAL_WINDOWS_PATH_PATTERN = /[A-Za-z]:\\[^\s)"']+/gu;
 const HOSTED_EXECUTION_WORKFLOW_ID_PATTERN = /\bhosted-user-runtime:[A-Za-z0-9._:-]+/gu;
 const HOSTED_EXECUTION_DIRECT_ID_PATTERN =
   /\b(member|user)_[A-Za-z0-9._:-]*\d[A-Za-z0-9._:-]*/gu;
+const HOSTED_EXECUTION_HOSTED_ID_PATTERN =
+  /\b(haa|hbag|hbagi|hbagm|hbce|hbdi|hbfca|hbi|hbid|hbidx|hbm|hbpc|hbvs|hccv|hch|hcp|hcr|hgrp|hgrpjo|hgrpm|hid|hla|hld|hpc|hsn)_[A-Za-z0-9_-]{8,}(?=$|[^A-Za-z0-9_-])/gu;
 const HOSTED_EXECUTION_SENSITIVE_ID_PRESENT_DETAIL_KEYS = {
   boundUserId: "boundUserIdPresent",
   codexThreadId: "codexThreadIdPresent",
@@ -932,6 +934,7 @@ function redactHostedExecutionText(value: string): string {
     .replace(/\bhttps?:\/\/[^\s)"'<>]+/giu, "<REDACTED_URL>")
     .replace(HOSTED_EXECUTION_WORKFLOW_ID_PATTERN, "hosted-user-runtime:<redacted-id>")
     .replace(HOSTED_EXECUTION_DIRECT_ID_PATTERN, "$1_<redacted-id>")
+    .replace(HOSTED_EXECUTION_HOSTED_ID_PATTERN, "$1_<redacted-id>")
     .replace(
       /\b(authorization)\b\s*:\s*Bearer\s+[A-Za-z0-9._~+/=-]+\b/giu,
       (_match, key: string) => `${key}=Bearer [redacted]`,

@@ -74,7 +74,25 @@ describe("runtime invocation transport failure fence handling", () => {
   });
 
   it("keeps the write fence when the invocation is still active in the container", async () => {
+    const rawHostedId = "hbm_abcdefghijklmnop-";
+    const rawPath = "/tmp/runtime.log";
+    const rawUrl = "https://internal.example.test/private?token=url-secret";
+    const rawEmail = "operator@example.test";
+    const rawPhone = "+15551234567";
+    const rawToken = "raw-token";
+    const safeDetailPrefix =
+      "container transport failed for hbm_<redacted-id> at <REDACTED_PATH> "
+      + "via <REDACTED_URL> contact [redacted-email] [redacted-phone] token=[redacted] ";
+    const safeCausePrefix = "authorization=Bearer [redacted] ";
+    const invocationError = new Error(
+      `container transport failed for ${rawHostedId} at ${rawPath} via ${rawUrl} `
+      + `contact ${rawEmail} ${rawPhone} token=${rawToken} ${"x".repeat(400)}`,
+      {
+        cause: new Error(`authorization=Bearer cause-secret ${"y".repeat(400)}`),
+      },
+    );
     const harness = await createTransportFailureHarness({
+      invocationError,
       readActiveRuntimeUserFence: async (token) => ({
         active: true,
         attemptId: token.attemptId,
@@ -98,9 +116,25 @@ describe("runtime invocation transport failure fence handling", () => {
         redactedJson: expect.objectContaining({
           attemptStillActive: true,
           fenceCleared: false,
+          safeErrorCause:
+            `${safeCausePrefix}${"y".repeat(319 - safeCausePrefix.length)}…`,
+          safeErrorDetail:
+            `${safeDetailPrefix}${"x".repeat(319 - safeDetailPrefix.length)}…`,
         }),
       }),
     ]);
+    const serializedEntries = JSON.stringify(harness.loggedFailureEntries());
+    for (const rawSensitiveValue of [
+      rawHostedId,
+      rawPath,
+      rawUrl,
+      rawEmail,
+      rawPhone,
+      rawToken,
+      "cause-secret",
+    ]) {
+      expect(serializedEntries).not.toContain(rawSensitiveValue);
+    }
   });
 
   it("keeps the accepted write fence when the local active pointer is missing but progress is not durable yet", async () => {
@@ -591,22 +625,26 @@ describe("runtime invocation transport failure fence handling", () => {
 });
 
 describe("buildHostedRunnerRedactedErrorJson", () => {
-  it("keeps scalar diagnostics and the string-array details keys in the persisted redacted shape", () => {
-    const redacted = buildHostedRunnerRedactedErrorJson(
-      new Error("container transport failed"),
+  it("keeps scalar diagnostics plus bounded sanitized detail and cause in the persisted redacted shape", () => {
+    const error = new Error(
+      "container transport failed for hbm_abcdefghijklmnop- at /tmp/runtime.log",
+      { cause: new Error("authorization=Bearer secret-token") },
     );
+    const redacted = buildHostedRunnerRedactedErrorJson(error);
 
     expect(redacted).toEqual({
-      detailsKeys: ["errorCode", "errorDetail", "errorMessage", "errorName"],
+      detailsKeys: ["errorCause", "errorCode", "errorDetail", "errorMessage", "errorName"],
       errorCode: "runtime_error",
       errorDetailPresent: true,
       errorName: "Error",
-      // The sanitized summary moves to the runtime-log allowlisted key.
+      safeErrorCause: "authorization=Bearer [redacted]",
+      safeErrorDetail:
+        "container transport failed for hbm_<redacted-id> at <REDACTED_PATH>",
       safeErrorMessage: "Hosted execution runtime failed.",
     });
-    // The raw error text stays out of the persisted redacted JSON; only the
-    // presence flag survives.
-    expect(JSON.stringify(redacted)).not.toContain("container transport failed");
+    expect(JSON.stringify(redacted)).not.toContain("abcdefghijklmnop-");
+    expect(JSON.stringify(redacted)).not.toContain("/tmp/runtime.log");
+    expect(JSON.stringify(redacted)).not.toContain("secret-token");
   });
 
   it("returns an empty redacted object for undefined errors", () => {
@@ -634,6 +672,7 @@ describe("buildHostedRunnerRedactedErrorJson", () => {
 });
 
 async function createTransportFailureHarness(input: {
+  invocationError?: Error;
   /** `null` omits the probe method from the container stub entirely. */
   readActiveRuntimeUserFence:
     | ((
@@ -695,6 +734,7 @@ async function createTransportFailureHarness(input: {
       workspace: null,
     }),
     runnerContainerNamespace: createFailingInvokeContainerNamespace({
+      invocationError: input.invocationError,
       readActiveRuntimeUserFence: readActiveRuntimeUserFenceInput
         ? (() => readActiveRuntimeUserFenceInput(token))
         : null,
@@ -735,6 +775,7 @@ async function createTransportFailureHarness(input: {
 }
 
 function createFailingInvokeContainerNamespace(input: {
+  invocationError?: Error;
   readActiveRuntimeUserFence:
     | (() => Promise<WorkerActiveRuntimeUserFenceResult>)
     | null;
@@ -743,7 +784,7 @@ function createFailingInvokeContainerNamespace(input: {
   const stub: HostedExecutionContainerStubLike = {
     destroyInstance: async () => {},
     invoke: async () => {
-      throw new Error("container transport failed");
+      throw input.invocationError ?? new Error("container transport failed");
     },
     ...(readActiveRuntimeUserFenceInput
       ? {

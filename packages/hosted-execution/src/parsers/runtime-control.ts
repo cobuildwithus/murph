@@ -4805,7 +4805,7 @@ function assertSafeRedactedString(value: string, label: string): void {
     throw new TypeError(`${label} must not contain a direct identifier.`);
   }
   if (
-    /(["']?(?:authorization|secret|token|password|cookie|set-cookie|api[-_]?key)["']?\s*[:=]\s*["']?)([^"',\s}]+)/iu
+    /(["']?(?:authorization|secret|token|password|cookie|set-cookie|api[-_]?key)["']?\s*[:=]\s*)(?!(?:(?:Basic|Bearer)\s+)?\[redacted\](?=$|\s|[,.;:)}\]](?=$|\s)))["']?([^"',\s}]+)/iu
       .test(value)
     || /\b(Basic|Bearer)\s+[A-Z0-9._~+/=-]+\b/iu.test(value)
     || /\b(?:sk|pk|rk)_(?:live|test)_[A-Z0-9]+\b/iu.test(value)
