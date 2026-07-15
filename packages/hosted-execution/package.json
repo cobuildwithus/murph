@@ -38,10 +38,6 @@
       "types": "./dist/assistant-personalization.d.ts",
       "default": "./dist/assistant-personalization.js"
     },
-    "./assistant-configuration-approval": {
-      "types": "./dist/assistant-configuration-approval.d.ts",
-      "default": "./dist/assistant-configuration-approval.js"
-    },
     "./assistant-capabilities": {
       "types": "./dist/assistant-capabilities.d.ts",
       "default": "./dist/assistant-capabilities.js"

@@ -85,12 +85,11 @@ not write model or reasoning preferences. Conversation model and reasoning
 changes use the input-bound `murph.assistant_configuration` owner, so the style
 path cannot bypass the configuration owner.
 
-For the approval-simplification rollout, deploy web first so it accepts both
-the direct input-bound request and the legacy exact-target approval request.
-Deploy the new Cloudflare runtime next so new turns stop creating configuration
-approvals. Retain the legacy web parser and handler until pre-rollout runners
-and their bounded idle windows have drained; then remove the legacy request
-shape and its configuration-specific approval helpers in a separate cleanup.
+The approval simplification is fully deployed: both the runtime and web accept
+only the direct input-bound request. Configuration-specific approval helpers
+and the legacy exact-target request shape no longer exist. Generic secure
+approval remains independently owned by sensitive actions such as vault-file
+delivery.
 
 ## Included Usage Behavior
 
