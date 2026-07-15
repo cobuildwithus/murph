@@ -235,6 +235,9 @@ drain/batch service seam in `packages/device-syncd/src/service.ts`.
    schema-versioned scalar checkpoint containing the frozen night/schedule
    identity, next window position, completed/accepted counts, and accepted
    RMSSD sum, plus an outbox of at most three already-derived strict envelopes.
+   First admission accepts night dates from three UTC dates behind through one
+   UTC date ahead, so all three outbox entries remain admissible when the
+   member's local date trails UTC without uploading a timezone.
    The exact app-scoped CoreBluetooth peripheral UUID may persist in that
    protected state solely to restore the enrolled band; it never enters
    ingestion or logs. An incomplete window is discarded across a process gap;
