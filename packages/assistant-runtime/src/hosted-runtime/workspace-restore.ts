@@ -20,6 +20,9 @@ import {
 import type {
   HostedExecutionBundleRef,
 } from "@murphai/hosted-execution/contracts";
+import {
+  buildHostedExecutionSafeErrorDiagnostics,
+} from "@murphai/hosted-execution";
 import type {
   HostedWorkspaceState,
 } from "@murphai/hosted-execution/runtime-control";
@@ -50,8 +53,10 @@ import {
   normalizeCodexResumeState,
   normalizeCodexRolloutRelativePath,
 } from "@murphai/operator-config/assistant/codex-resume-state";
-import type {
-  HostedRuntimeLogContext,
+import {
+  buildHostedRuntimeLogContextFields,
+  writeHostedRuntimeLogBestEffort,
+  type HostedRuntimeLogContext,
 } from "./runtime-logs.ts";
 import {
   readHostedCanonicalWriteReceiptLogEntries,
@@ -148,6 +153,7 @@ export async function restoreHostedWorkspaceRuntimeJobWorkspace(input: {
       logContext: input.logContext ?? null,
       platform: input.platform,
       restored,
+      signal: input.signal ?? null,
       snapshotRef,
       workspace: input.workspace ?? null,
     });
@@ -177,7 +183,9 @@ export async function restoreHostedWorkspaceRuntimeJobWorkspace(input: {
       vaultRoot: restored.vaultRoot,
     });
     await applyHostedCanonicalWriteReceiptsFromWorkspaceState({
+      logContext: input.logContext ?? null,
       platform: input.platform,
+      signal: input.signal ?? null,
       status: input.workspace?.redactedStatus ?? null,
       vaultRoot: restored.vaultRoot,
     });
@@ -201,7 +209,9 @@ export async function restoreHostedWorkspaceRuntimeJobWorkspace(input: {
     await clearHostedWorkspaceRuntimeLocalRoots(restored);
     await clearHostedWorkspaceRestoreCachesBestEffort(restored.vaultRoot);
     await applyHostedCanonicalWriteReceiptsFromWorkspaceState({
+      logContext: input.logContext ?? null,
       platform: input.platform,
+      signal: input.signal ?? null,
       status: input.workspace?.redactedStatus ?? null,
       vaultRoot: restored.vaultRoot,
     });
@@ -311,7 +321,9 @@ export async function restoreHostedWorkspaceRuntimeJobWorkspace(input: {
   }
 
   await applyHostedCanonicalWriteReceiptsFromWorkspaceState({
+    logContext: input.logContext ?? null,
     platform: input.platform,
+    signal: input.signal ?? null,
     status: input.workspace?.redactedStatus ?? null,
     vaultRoot: restored.vaultRoot,
   });
@@ -352,6 +364,7 @@ async function tryRestoreHostedWorkspaceFromCleanCheckpointMarker(input: {
   logContext: HostedRuntimeLogContext | null;
   platform: HostedRuntimePlatform;
   restored: HostedRestoredExecutionContext;
+  signal: AbortSignal | null;
   snapshotRef: HostedWorkspaceSnapshotV2Ref;
   workspace: HostedWorkspaceState | null;
 }): Promise<
@@ -402,7 +415,9 @@ async function tryRestoreHostedWorkspaceFromCleanCheckpointMarker(input: {
       vaultRoot: input.restored.vaultRoot,
     });
     await applyHostedCanonicalWriteReceiptsFromWorkspaceState({
+      logContext: input.logContext,
       platform: input.platform,
+      signal: input.signal ?? null,
       status: input.workspace?.redactedStatus ?? null,
       vaultRoot: input.restored.vaultRoot,
     });
@@ -948,14 +963,28 @@ function createHostedWorkspaceRuntimeArtifactMaterializer(input: {
 }
 
 async function applyHostedCanonicalWriteReceiptsFromWorkspaceState(input: {
+  logContext: HostedRuntimeLogContext | null;
   platform: HostedRuntimePlatform;
+  signal: AbortSignal | null;
   status: HostedWorkspaceState["redactedStatus"] | null | undefined;
   vaultRoot: string;
 }): Promise<void> {
-  const entries = await readHostedCanonicalWriteReceiptLogEntries({
-    artifactStore: input.platform.artifactStore,
-    status: input.status,
-  });
+  const recoveryFailures: unknown[] = [];
+  const recordRecoveryFailure = (error: unknown): void => {
+    if (input.signal?.aborted) {
+      throw error;
+    }
+    recoveryFailures.push(error);
+  };
+  let entries: Awaited<ReturnType<typeof readHostedCanonicalWriteReceiptLogEntries>> = [];
+  try {
+    entries = await readHostedCanonicalWriteReceiptLogEntries({
+      artifactStore: input.platform.artifactStore,
+      status: input.status,
+    });
+  } catch (error) {
+    recordRecoveryFailure(error);
+  }
   const appliedReceiptRefs = new Set<string>();
   const dirtyDomains = new Set<AssistantContextSnapshotDirtyDomain>();
   for (const entry of entries) {
@@ -965,17 +994,23 @@ async function applyHostedCanonicalWriteReceiptsFromWorkspaceState(input: {
     }
     appliedReceiptRefs.add(receiptRefKey);
 
-    const bytes = await input.platform.artifactStore.get(entry.sha256);
-    if (!bytes) {
-      throw new Error("Hosted canonical write receipt artifact is unavailable.");
-    }
-    if (bytes.byteLength !== entry.byteSize) {
-      throw new Error("Hosted canonical write receipt artifact size does not match its log ref.");
-    }
-    const parsed = parseHostedCanonicalWriteReceiptForRestore(
-      Buffer.from(bytes).toString("utf8"),
-    );
-    if (parsed) {
+    try {
+      const bytes = await input.platform.artifactStore.get(entry.sha256);
+      if (!bytes) {
+        throw new Error("Hosted canonical write receipt artifact is unavailable.");
+      }
+      if (bytes.byteLength !== entry.byteSize) {
+        throw new Error("Hosted canonical write receipt artifact size does not match its log ref.");
+      }
+      const parsed = parseHostedCanonicalWriteReceiptForRestore(
+        Buffer.from(bytes).toString("utf8"),
+      );
+      if (!parsed) {
+        continue;
+      }
+      for (const domain of listAssistantContextSnapshotDirtyDomainsForCanonicalWrite(parsed)) {
+        dirtyDomains.add(domain);
+      }
       await applyHostedCanonicalWriteReceipt({
         readPayload: async (ref) =>
           await readHostedCanonicalWritePayloadForRestore({
@@ -985,16 +1020,47 @@ async function applyHostedCanonicalWriteReceiptsFromWorkspaceState(input: {
         receipt: parsed,
         vaultRoot: input.vaultRoot,
       });
-      for (const domain of listAssistantContextSnapshotDirtyDomainsForCanonicalWrite(parsed)) {
-        dirtyDomains.add(domain);
-      }
+    } catch (error) {
+      recordRecoveryFailure(error);
     }
   }
   if (dirtyDomains.size > 0) {
-    await markAssistantContextSnapshotDirty({
-      domains: [...dirtyDomains],
-      vaultRoot: input.vaultRoot,
+    try {
+      await markAssistantContextSnapshotDirty({
+        domains: [...dirtyDomains],
+        vaultRoot: input.vaultRoot,
+      });
+    } catch (error) {
+      recordRecoveryFailure(error);
+    }
+  }
+  if (recoveryFailures.length > 0) {
+    const diagnostics = buildHostedExecutionSafeErrorDiagnostics(recoveryFailures[0]);
+    const nestedErrorCode = typeof diagnostics?.errorCode === "string"
+      ? diagnostics.errorCode
+      : "runtime_error";
+    console.warn("Hosted canonical write receipt recovery failed; foreground authority retained.", {
+      errorCode: "canonical_write_receipt_recovery_failed",
+      failureCount: recoveryFailures.length,
+      nestedErrorCode,
     });
+    void writeHostedRuntimeLogBestEffort({
+      entry: {
+        ...buildHostedRuntimeLogContextFields(input.logContext),
+        component: "runtime",
+        errorCode: "canonical_write_receipt_recovery_failed",
+        eventCode: "runner.error",
+        level: "warn",
+        phase: "restore",
+        redactedJson: {
+          canonicalWriteReceiptRecoveryFailed: recoveryFailures.length,
+          nestedErrorCode,
+          safeErrorMessage:
+            "Canonical receipt recovery rejected unsafe state; foreground reply authority continued.",
+        },
+      },
+      platform: input.platform,
+    }).catch(() => undefined);
   }
 }
 

@@ -16660,6 +16660,269 @@ describe("hosted workspace runtime entrypoint", () => {
     }
   });
 
+  test("retains foreground reply authority when canonical receipt recovery fails", async () => {
+    const vaultRoot = await mkdtemp(path.join(tmpdir(), "murph-workspace-entrypoint-"));
+    const events: string[] = [];
+    const checkpointRequests: HostedWorkspaceCheckpointRequest[] = [];
+    const logRequests: HostedRuntimeLogRequest[] = [];
+    const malformedReceiptBytes = Buffer.from('{"schema":"invalid"}\n', "utf8");
+    const malformedReceiptHash = sha256Hex(malformedReceiptBytes);
+    const validPayloadBytes = Buffer.from("receipt recovery continued\n", "utf8");
+    const validPayloadHash = sha256Hex(validPayloadBytes);
+    const validReceiptBytes = Buffer.from(`${JSON.stringify({
+      actions: [{
+        byteLength: validPayloadBytes.byteLength,
+        contentRef: {
+          byteSize: validPayloadBytes.byteLength,
+          sha256: validPayloadHash,
+        },
+        effect: "create",
+        kind: "text_upsert",
+        sha256: validPayloadHash,
+        targetRelativePath: "journal/receipt-recovery-continued.md",
+      }],
+      committedAt: TEST_NOW,
+      createdAt: TEST_NOW,
+      occurredAt: TEST_NOW,
+      operationId: "op_synthetic_receipt_recovery_continued",
+      operationType: "hosted_canonical_write_test",
+      schema: HOSTED_CANONICAL_WRITE_RECEIPT_SCHEMA_VERSION,
+      summary: "Continue receipt recovery after a malformed entry.",
+      updatedAt: TEST_NOW,
+    }, null, 2)}\n`, "utf8");
+    const validReceiptHash = sha256Hex(validReceiptBytes);
+    const receiptLogBytes = Buffer.from(`${JSON.stringify({
+      entries: [
+        {
+          byteSize: malformedReceiptBytes.byteLength,
+          sha256: malformedReceiptHash,
+        },
+        {
+          byteSize: validReceiptBytes.byteLength,
+          sha256: validReceiptHash,
+        },
+      ],
+      schema: "murph.hosted-canonical-write-receipt-log.v1",
+    }, null, 2)}\n`, "utf8");
+    const receiptLogHash = sha256Hex(receiptLogBytes);
+    const consoleWarn = vi.spyOn(console, "warn").mockImplementation(() => undefined);
+    const logWriteRelease = createDeferred<void>();
+    let logWriteSettled = false;
+    const basePlatform = createPlatform({
+      artifactBytesByHash: new Map([
+        [malformedReceiptHash, malformedReceiptBytes],
+        [receiptLogHash, receiptLogBytes],
+        [validPayloadHash, validPayloadBytes],
+        [validReceiptHash, validReceiptBytes],
+      ]),
+      artifactLabelsByHash: new Map([
+        [malformedReceiptHash, "malformed-receipt"],
+        [receiptLogHash, "receipt-log"],
+        [validPayloadHash, "valid-payload"],
+        [validReceiptHash, "valid-receipt"],
+      ]),
+      events,
+      logRequests,
+      mailboxPort: createMailboxPort({
+        events,
+        items: [createMailboxItem({
+          id: "mailbox_item_entrypoint_receipt_recovery_failed",
+          laneSeq: "1",
+        })],
+      }),
+      workspacePort: createWorkspacePort({
+        checkpointRequests,
+        events,
+        workspace: createWorkspaceState({
+          redactedStatus: {
+            hostedCanonicalWriteReceiptLogByteSize: receiptLogBytes.byteLength,
+            hostedCanonicalWriteReceiptLogSha256: receiptLogHash,
+          },
+          version: "0",
+        }),
+      }),
+    });
+    const baseLogPort = basePlatform.logPort;
+    if (!baseLogPort) {
+      throw new Error("Receipt recovery proof requires a hosted runtime log port.");
+    }
+    const platform: HostedRuntimePlatform = {
+      ...basePlatform,
+      logPort: {
+        async write(request) {
+          const response = await baseLogPort.write(request);
+          await logWriteRelease.promise;
+          logWriteSettled = true;
+          return response;
+        },
+      },
+    };
+
+    try {
+      await withRealTimeout(runHostedWorkspaceRuntimeJobInProcess(createWorkspaceRuntimeJobInput(), {
+        async createCheckpointSnapshot(snapshotInput) {
+          events.push(`snapshot:${snapshotInput.reason}:${await readCheckpointConversationWatermark(snapshotInput, vaultRoot)}`);
+          return {
+            snapshotRef: createBundleRef({
+              hash: "5".repeat(64),
+              key: "users/bundles/member-synthetic/receipt-recovery-failed.bundle.json",
+              size: 512,
+            }),
+          };
+        },
+        async importItem(item) {
+          events.push(`import:${item.item.laneSeq}`);
+          return { status: "imported" };
+        },
+        platform,
+        async runAssistantPhase() {
+          assert.equal(
+            (await readHostedMailboxImportState({ vaultRoot })).watermarks.conversation,
+            "1",
+          );
+          assert.equal(
+            await readFile(path.join(vaultRoot, "journal", "receipt-recovery-continued.md"), "utf8"),
+            "receipt recovery continued\n",
+          );
+          events.push("assistant");
+          return { progressed: false };
+        },
+        vaultRoot,
+      }), 15_000, () => events.join(","));
+
+      const recoveryLogIndex = requireEventIndex(
+        events,
+        "runtime.log:runner.error",
+      );
+      const mailboxFetchIndex = requireEventIndex(events, "mailbox.fetch");
+      const importIndex = requireEventIndex(events, "import:1");
+      const assistantIndex = requireEventIndex(events, "assistant");
+      const snapshotIndex = requireEventIndex(events, "snapshot:idle_shutdown:1");
+      assert.ok(recoveryLogIndex < mailboxFetchIndex);
+      assert.ok(mailboxFetchIndex < importIndex);
+      assert.ok(importIndex < assistantIndex);
+      assert.ok(assistantIndex < snapshotIndex);
+      assert.equal(logWriteSettled, false);
+      assert.equal(consoleWarn.mock.calls.length, 1);
+      const recoveryLog = logRequests.flatMap((request) => request.entries).find(
+        (entry) => entry.errorCode === "canonical_write_receipt_recovery_failed",
+      );
+      assert.equal(
+        recoveryLog?.errorCode,
+        "canonical_write_receipt_recovery_failed",
+      );
+      assert.equal(
+        recoveryLog?.redactedJson?.canonicalWriteReceiptRecoveryFailed,
+        1,
+      );
+      assert.equal(recoveryLog?.eventCode, "runner.error");
+      assert.equal(recoveryLog?.level, "warn");
+      assert.equal(recoveryLog?.phase, "restore");
+      assert.equal(recoveryLog?.redactedJson?.nestedErrorCode, "runtime_error");
+      assert.equal(
+        recoveryLog?.redactedJson?.safeErrorMessage,
+        "Canonical receipt recovery rejected unsafe state; foreground reply authority continued.",
+      );
+      assert.equal(JSON.stringify(recoveryLog).includes('"schema":"invalid"'), false);
+      assert.equal(
+        checkpointRequests.at(-1)?.redactedStatus?.hostedCanonicalWriteReceiptLogSha256,
+        undefined,
+      );
+    } finally {
+      logWriteRelease.resolve();
+      consoleWarn.mockRestore();
+      await removeTempRoot(vaultRoot);
+    }
+  });
+
+  test("preserves host cancellation during canonical receipt recovery", async () => {
+    const vaultRoot = await mkdtemp(path.join(tmpdir(), "murph-workspace-entrypoint-"));
+    const events: string[] = [];
+    const logRequests: HostedRuntimeLogRequest[] = [];
+    const abortController = new AbortController();
+    const abortReason = new Error("Synthetic host cancellation during receipt recovery.");
+    const missingReceiptHash = "f".repeat(64);
+    const receiptLogBytes = Buffer.from(`${JSON.stringify({
+      entries: [{
+        byteSize: 1,
+        sha256: missingReceiptHash,
+      }],
+      schema: "murph.hosted-canonical-write-receipt-log.v1",
+    }, null, 2)}\n`, "utf8");
+    const receiptLogHash = sha256Hex(receiptLogBytes);
+    const consoleWarn = vi.spyOn(console, "warn").mockImplementation(() => undefined);
+    const basePlatform = createPlatform({
+      artifactBytesByHash: new Map([
+        [receiptLogHash, receiptLogBytes],
+      ]),
+      artifactLabelsByHash: new Map([
+        [missingReceiptHash, "missing-receipt"],
+        [receiptLogHash, "receipt-log"],
+      ]),
+      events,
+      logRequests,
+      mailboxPort: createMailboxPort({
+        events,
+        items: [createMailboxItem({ laneSeq: "1" })],
+      }),
+      workspacePort: createWorkspacePort({
+        checkpointRequests: [],
+        events,
+        workspace: createWorkspaceState({
+          redactedStatus: {
+            hostedCanonicalWriteReceiptLogByteSize: receiptLogBytes.byteLength,
+            hostedCanonicalWriteReceiptLogSha256: receiptLogHash,
+          },
+          version: "0",
+        }),
+      }),
+    });
+    const baseArtifactStore = basePlatform.artifactStore;
+    const platform: HostedRuntimePlatform = {
+      ...basePlatform,
+      artifactStore: {
+        ...baseArtifactStore,
+        async get(sha256) {
+          const bytes = await baseArtifactStore.get(sha256);
+          if (sha256 === missingReceiptHash) {
+            abortController.abort(abortReason);
+          }
+          return bytes;
+        },
+      },
+    };
+
+    try {
+      await assert.rejects(
+        runHostedWorkspaceRuntimeJobInProcess(createWorkspaceRuntimeJobInput(), {
+          async createCheckpointSnapshot() {
+            throw new Error("Cancelled receipt recovery must not checkpoint.");
+          },
+          async importItem() {
+            throw new Error("Cancelled receipt recovery must not import mailbox work.");
+          },
+          platform,
+          async runAssistantPhase() {
+            throw new Error("Cancelled receipt recovery must not enter the assistant phase.");
+          },
+          signal: abortController.signal,
+          vaultRoot,
+        }),
+        (error) => error === abortReason,
+      );
+
+      assert.ok(events.includes("artifact.get:receipt-log"));
+      assert.ok(events.includes("artifact.get:missing-receipt"));
+      assert.equal(events.includes("mailbox.fetch"), false);
+      assert.equal(events.some((event) => event.startsWith("runtime.log:")), false);
+      assert.equal(logRequests.length, 0);
+      assert.equal(consoleWarn.mock.calls.length, 0);
+    } finally {
+      consoleWarn.mockRestore();
+      await removeTempRoot(vaultRoot);
+    }
+  });
+
   test("persists hosted canonical write receipts before the idle workspace checkpoint", async () => {
     const vaultRoot = await mkdtemp(path.join(tmpdir(), "murph-workspace-entrypoint-"));
     const events: string[] = [];

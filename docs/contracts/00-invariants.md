@@ -86,6 +86,11 @@ it has been explicitly elevated to a cross-cutting invariant.
   backlog. Bound unavoidable pre-provider and pre-delivery collections and
   waits, but never let background, replay, maintenance, or diagnostic budgets
   cap fresh accepted input.
+- Recovery, replay, audit, checkpoint, projection, maintenance, and diagnostic
+  failures may reject unsafe mutation and surface explicit degraded state, but
+  cannot indefinitely withhold foreground reply authority from durably accepted
+  current input. Continue from the last-known-good authorized state; never
+  fabricate or force conflicting canonical state to make recovery appear clean.
 - Routine hosted workspace snapshot publication is idle-only and interruptible.
   After the latest durably accepted conversation message, routine checkpoint
   construction has a hard 180-second minimum quiet window. Internal assistant,
