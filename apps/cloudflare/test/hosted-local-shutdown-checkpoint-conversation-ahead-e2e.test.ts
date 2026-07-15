@@ -256,14 +256,19 @@ describe("hosted local shutdown checkpoint conversation-ahead e2e", () => {
     expect(readAssistantProviderRequestText(providerRequests[1]!))
       .toContain(conversationAheadInboundText);
 
-    const finalStatus = await waitForRestoredCleanupPass({
+    const finalStatus = await waitForRestoredTerminalBoundaryAfterNaturalCheckpoint({
       afterIdleSnapshotAtMs: committedShutdownSnapshotAtMs,
     });
     expect(finalStatus.lastErrorCode ?? null).toBeNull();
     expect(finalStatus.mailboxLag.every((lane) => lane.lag === "0")).toBe(true);
-    expect(requireLatestIdleShutdownSnapshotAtMs(finalStatus))
+    const finalIdleSnapshotAtMs = requireLatestIdleShutdownSnapshotAtMs(finalStatus);
+    expect(finalIdleSnapshotAtMs)
       .toBeGreaterThan(committedShutdownSnapshotAtMs);
-    await assertNoDuplicateReplyAfterCleanupPass({
+    expect(hasReachedRestoredTerminalBoundary(
+      finalStatus,
+      finalIdleSnapshotAtMs,
+    )).toBe(true);
+    await assertNoDuplicateReplyAfterTerminalBoundary({
       baselineConversationAheadAcceptedCount,
       baselineFirstAcceptedCount,
       baselineMessageIdCount,
@@ -381,7 +386,7 @@ async function waitForCommittedShutdownCheckpoint(input: {
   ]));
 }
 
-async function waitForRestoredCleanupPass(input: {
+async function waitForRestoredTerminalBoundaryAfterNaturalCheckpoint(input: {
   afterIdleSnapshotAtMs: number;
 }): Promise<HostedRunnerStatusResponse> {
   const startedAt = Date.now();
@@ -394,14 +399,17 @@ async function waitForRestoredCleanupPass(input: {
       && lastStatus.mailboxLag.every((lane) => lane.lag === "0")
       && latestIdleSnapshotAtMs !== null
       && latestIdleSnapshotAtMs > input.afterIdleSnapshotAtMs
-      && hasAssistantPassFinishedAtOrAfter(lastStatus, latestIdleSnapshotAtMs)
+      && hasReachedRestoredTerminalBoundary(
+        lastStatus,
+        latestIdleSnapshotAtMs,
+      )
     ) {
       return lastStatus;
     }
     await sleep(100);
   }
   throw new Error(await requireScenario().buildFailureMessage(userId, [
-    "Timed out waiting for the restored cleanup pass after its natural idle checkpoint.",
+    "Timed out waiting for a restored terminal boundary after the natural idle checkpoint.",
     ...(lastStatus ? [`last status: ${JSON.stringify(lastStatus)}`] : []),
   ]));
 }
@@ -448,7 +456,33 @@ function hasAssistantPassFinishedAtOrAfter(
   );
 }
 
-async function assertNoDuplicateReplyAfterCleanupPass(input: {
+function hasReachedRestoredTerminalBoundary(
+  status: HostedRunnerStatusResponse,
+  naturalIdleSnapshotAtMs: number,
+): boolean {
+  return hasAssistantPassFinishedAtOrAfter(status, naturalIdleSnapshotAtMs)
+    || (
+      !status.inFlight
+      && hasIdleShutdownSnapshotWithoutRuntimeWakeAt(
+        status,
+        naturalIdleSnapshotAtMs,
+      )
+    );
+}
+
+function hasIdleShutdownSnapshotWithoutRuntimeWakeAt(
+  status: HostedRunnerStatusResponse,
+  expectedAtMs: number,
+): boolean {
+  return (status.recentLogs ?? []).some((entry) =>
+    entry.eventCode === "checkpoint.snapshot_finished"
+    && entry.redactedJson?.checkpointReason === "idle_shutdown"
+    && entry.redactedJson.runtimeWakePendingAtCheckpoint === false
+    && Date.parse(entry.at) === expectedAtMs
+  );
+}
+
+async function assertNoDuplicateReplyAfterTerminalBoundary(input: {
   baselineConversationAheadAcceptedCount: number;
   baselineFirstAcceptedCount: number;
   baselineMessageIdCount: number;

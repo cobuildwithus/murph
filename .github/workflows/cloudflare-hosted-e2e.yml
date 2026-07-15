@@ -133,7 +133,7 @@ jobs:
           - name: Linq delivery + recovery + Temporal E2E
             fastGate: "1"
             slug: linq-delivery-recovery-temporal
-            scenarios: linq-delivery linq-lost-active-operation temporal-orchestration timezone-injection
+            scenarios: linq-delivery linq-lost-active-operation temporal-orchestration timezone-injection linq-same-wake-batching
           - name: Telegram + idle checkpoint E2E
             slug: telegram-idle-checkpoint
             scenarios: telegram idle-checkpoint-deferred-progress direct-r2-presigned-put

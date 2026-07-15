@@ -79,6 +79,9 @@ import {
 import {
   createHostedAssistantChannelTypingDependencies,
 } from "./hosted-runtime/channel-activity.ts";
+import {
+  resolveHostedPersonalizationInputIdForAcceptedInputs,
+} from "./hosted-runtime/turn-input.ts";
 import type {
   HostedAssistantWorkspaceRuntimeJobResult,
   HostedAssistantWorkspaceRuntimeJobInput,
@@ -1707,10 +1710,16 @@ export async function runHostedWorkspaceRuntimeJobInProcess(
                     runtime: foregroundRuntime,
                     runtimeEnv: invocationRuntimeEnv,
                     beforeProviderAcceptedInputs: async ({ acceptedInputs }) => {
+                      const assistantInputIds = acceptedInputs.every(
+                        (acceptedInput) => acceptedInput.source === "assistant-input",
+                      )
+                        ? acceptedInputs.map((acceptedInput) => acceptedInput.id)
+                        : [];
                       const assistantPersonalizationInputId =
-                        acceptedInputs.length === 1
-                          ? acceptedInputs[0]?.id ?? null
-                          : null;
+                        await resolveHostedPersonalizationInputIdForAcceptedInputs({
+                          assistantInputIds,
+                          vaultRoot: restored.vaultRoot,
+                        });
                       currentAssistantPersonalizationInputId =
                         assistantPersonalizationInputId;
                       return () => {

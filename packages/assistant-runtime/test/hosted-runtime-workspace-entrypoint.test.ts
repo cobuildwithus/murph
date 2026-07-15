@@ -210,6 +210,9 @@ import {
   resolveHostedPendingAssistantInputWakeAt,
 } from "../src/hosted-runtime/pending-assistant-input.ts";
 import {
+  selectHostedAssistantInputIds,
+} from "../src/hosted-runtime/turn-input.ts";
+import {
   readHostedProviderCleanupCheckpoint,
   recordHostedProviderCleanupBeforeCommit,
 } from "../src/hosted-runtime/provider-cleanup.ts";
@@ -14003,6 +14006,172 @@ describe("hosted workspace runtime entrypoint", () => {
     }
   });
 
+  test("keeps an uncovered successor ahead of the boundary after handled-prefix repair", async () => {
+    const vaultRoot = await mkdtemp(path.join(tmpdir(), "murph-runtime-prefix-repair-order-"));
+    const events: string[] = [];
+    const checkpointRequests: HostedWorkspaceCheckpointRequest[] = [];
+    const runtimeAbortController = new AbortController();
+    const importedInputIds: string[] = [];
+    const selectedInputIdsByPhase: string[][] = [];
+    const providerInputIdsByTurn: string[][] = [];
+    const mailboxItems = Array.from({ length: 4 }, (_, index) => {
+      const laneSeq = String(index + 1);
+      return createMailboxItem({
+        id: `mailbox_item_entrypoint_prefix_repair_order_${laneSeq}`,
+        laneSeq,
+        occurredAt: `2026-04-27T00:00:0${laneSeq}.000Z`,
+      });
+    });
+
+    try {
+      await initializeVault({ createdAt: TEST_NOW, vaultRoot });
+      await runHostedWorkspaceRuntimeJobInProcess(
+        createWorkspaceRuntimeJobInput({
+          request: {
+            attemptId: "attempt_synthetic_runtime_prefix_repair_order",
+            budget: {
+              maxMailboxItems: 4,
+            },
+            idleCheckpointDelayMs: 1,
+            leaseGeneration: "9",
+            userId: TEST_USER_ID,
+            workspaceVersion: "4",
+          },
+        }),
+        {
+          async createCheckpointSnapshot(snapshotInput) {
+            events.push(`snapshot:${snapshotInput.reason}`);
+            return {
+              snapshotRef: createBundleRef({
+                hash: "b".repeat(64),
+                key: "users/bundles/member-synthetic/runtime-prefix-repair-order.bundle.json",
+                size: 640,
+              }),
+            };
+          },
+          async importItem(item) {
+            const inputId = await stagePendingLinqAssistantInputForMailboxItem({
+              causalSeq: item.item.laneSeq,
+              item: item.item,
+              threadId: item.item.laneSeq === "4"
+                ? "thread_boundary"
+                : "thread_repaired_group",
+              vaultRoot,
+            });
+            importedInputIds.push(inputId);
+            return {
+              assistantInputId: inputId,
+              status: "imported",
+            };
+          },
+          platform: createPlatform({
+            mailboxPort: createMailboxPort({
+              events,
+              items: mailboxItems,
+            }),
+            workspacePort: createWorkspacePort({
+              checkpointRequests,
+              events,
+              workspace: createWorkspaceState({ version: "4" }),
+            }),
+          }),
+          async runAssistantPhase(phaseInput) {
+            const acceptedInputIds = phaseInput.initialAssistantInputBatch?.assistantInputIds
+              ?? phaseInput.initialMailboxImport.importResult.assistantInputIds
+              ?? [];
+            const selection = acceptedInputIds.length > 0
+              ? await selectHostedAssistantInputIds({
+                  freshAssistantInputIds: acceptedInputIds,
+                  mode: "foreground",
+                  vaultRoot,
+                })
+              : await selectHostedAssistantInputIds({
+                  mode: "background",
+                  vaultRoot,
+                });
+            if (selection.inputIds.length === 0) {
+              return {
+                foregroundReplyFailed: 0,
+                nextWakeAt: null,
+                progressed: false,
+                redactedStatus: {
+                  hostedAssistantProgressed: false,
+                },
+              };
+            }
+
+            selectedInputIdsByPhase.push(selection.inputIds);
+
+            if (selectedInputIdsByPhase.length === 1) {
+              // The assistant-engine regression owns the detailed evidence
+              // validation. Exercise its persisted postcondition here: A and B
+              // are terminal and checkpointed, while compatible successor C
+              // remains pending and boundary D is the precomputed local tail.
+              assert.deepEqual(selection.inputIds, importedInputIds.slice(0, 3));
+              for (const inputId of importedInputIds.slice(0, 2)) {
+                await writeSyntheticAssistantAutoReplyTerminalEvidence({
+                  inputId,
+                  vaultRoot,
+                });
+              }
+              const repairedThrough = await readAssistantInputEvent({
+                inputId: importedInputIds[1] ?? "",
+                vault: vaultRoot,
+              });
+              assert.ok(repairedThrough);
+              await updateAssistantAutomationState(vaultRoot, (state) => ({
+                ...state,
+                autoReply: state.autoReply.map((entry) => ({
+                  ...entry,
+                  eligibleAfter: repairedThrough.cursor,
+                })),
+                updatedAt: TEST_NOW,
+              }));
+            } else {
+              providerInputIdsByTurn.push(selection.inputIds);
+              assert.equal(selection.inputIds.length, 1);
+              const inputId = selection.inputIds[0];
+              assert.ok(inputId);
+              await writeSyntheticAssistantAutoReplyTerminalEvidence({
+                inputId,
+                vaultRoot,
+              });
+            }
+
+            return {
+              checkpointReason: "assistant_runtime_commit" as const,
+              foregroundReplyFailed: 0,
+              nextWakeAt: null,
+              progressed: true,
+              redactedStatus: {
+                hostedAssistantProgressed: true,
+              },
+            };
+          },
+          signal: runtimeAbortController.signal,
+          vaultRoot,
+        },
+      );
+
+      assert.equal(importedInputIds.length, 4);
+      assert.deepEqual(selectedInputIdsByPhase, [
+        importedInputIds.slice(0, 3),
+        [importedInputIds[2]],
+        [importedInputIds[3]],
+      ]);
+      assert.deepEqual(providerInputIdsByTurn, [
+        [importedInputIds[2]],
+        [importedInputIds[3]],
+      ]);
+      assert.deepEqual(await compactHostedPendingAssistantInputIds({ vaultRoot }), []);
+      assert.equal(checkpointRequests.length, 1);
+      assert.equal(checkpointRequests[0]?.reason, "idle_shutdown");
+    } finally {
+      runtimeAbortController.abort();
+      await removeTempRoot(vaultRoot);
+    }
+  });
+
   test("foreground rerun batch keeps fresh context after consumed replay", async () => {
     const vaultRoot = await mkdtemp(path.join(tmpdir(), "murph-runtime-foreground-context-replay-"));
     const events: string[] = [];
@@ -21027,7 +21196,7 @@ describe("hosted workspace runtime entrypoint", () => {
     }
   });
 
-  test("binds exactly one stored provider input id and clears it after the attempt", async () => {
+  test("binds a gap-free provider batch to its terminal stored input id", async () => {
     const vaultRoot = await mkdtemp(path.join(tmpdir(), "murph-workspace-entrypoint-"));
 
     try {
@@ -21049,26 +21218,28 @@ describe("hosted workspace runtime entrypoint", () => {
         async runAssistantPhase(input) {
           assert.equal(typeof input.beforeProviderAcceptedInputs, "function");
           assert.equal(input.currentAssistantPersonalizationInputId?.(), null);
-          const item = createMailboxItem({
-            id: "mailbox_item_preference_causal_binding",
-            laneSeq: "41",
-          });
-          const assistantInputId = await stageAssistantInputEventForMailboxItem({
-            causalSeq: "999",
-            item,
+          const firstInputId = await stageAssistantInputEventForMailboxItem({
+            causalSeq: "41",
+            item: createMailboxItem({
+              id: "mailbox_item_preference_batch_1",
+              laneSeq: "41",
+              occurredAt: "2026-04-26T00:00:01.000Z",
+            }),
             vaultRoot,
           });
-          const emptyRelease = await input.beforeProviderAcceptedInputs?.({
-            acceptedInputs: [],
+          const secondInputId = await stageAssistantInputEventForMailboxItem({
+            causalSeq: "42",
+            item: createMailboxItem({
+              id: "mailbox_item_preference_batch_2",
+              laneSeq: "42",
+              occurredAt: "2026-04-26T00:00:02.000Z",
+            }),
+            vaultRoot,
           });
-          assert.equal(input.currentAssistantPersonalizationInputId?.(), null);
-          await emptyRelease?.();
-          const ambiguousRelease = await input.beforeProviderAcceptedInputs?.({
+
+          const invalidRelease = await input.beforeProviderAcceptedInputs?.({
             acceptedInputs: [
-              {
-                id: assistantInputId,
-                source: "assistant-input",
-              },
+              { id: firstInputId, source: "assistant-input" },
               {
                 id: "ain_22222222222222222222222222222222",
                 source: "assistant-input",
@@ -21076,17 +21247,19 @@ describe("hosted workspace runtime entrypoint", () => {
             ],
           });
           assert.equal(input.currentAssistantPersonalizationInputId?.(), null);
-          await ambiguousRelease?.();
+          await invalidRelease?.();
+
           const release = await input.beforeProviderAcceptedInputs?.({
-            acceptedInputs: [{
-              id: assistantInputId,
-              source: "assistant-input",
-            }],
+            acceptedInputs: [
+              { id: secondInputId, source: "assistant-input" },
+              { id: firstInputId, source: "assistant-input" },
+            ],
           });
           assert.equal(
             input.currentAssistantPersonalizationInputId?.(),
-            assistantInputId,
+            secondInputId,
           );
+          assert.equal(typeof release, "function");
           await release?.();
           assert.equal(input.currentAssistantPersonalizationInputId?.(), null);
           return { progressed: false };
@@ -23049,6 +23222,7 @@ async function stageAssistantInputEventForMailboxItem(input: {
 }
 
 async function stagePendingLinqAssistantInputForMailboxItem(input: {
+  causalSeq?: string;
   item: HostedMailboxItem;
   threadId?: string;
   vaultRoot: string;

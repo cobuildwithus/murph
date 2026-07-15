@@ -1,4 +1,5 @@
 import {
+  DEFAULT_ASSISTANT_AUTOMATION_SCAN_LIMIT,
   assistantInputCandidateFromStoredEvent,
   compareAssistantInputCursors,
   isSameAssistantConversationRef,
@@ -15,6 +16,11 @@ import {
 import {
   readAssistantAutomationState,
 } from "@murphai/assistant-engine/assistant-state";
+import {
+  shouldGroupAdjacentAssistantInputCandidates,
+} from "@murphai/assistant-engine/assistant-automation";
+import { assistantPreferenceCausalSeqSchema } from "@murphai/contracts";
+
 import {
   compactHostedPendingAssistantInputIds,
   isHostedPendingAssistantInputStillReplyable,
@@ -40,6 +46,40 @@ export type HostedAssistantInputSelection =
 export interface HostedAssistantInputSource extends AssistantInputSource {
   readObservedInputIds(): string[];
   readSelectedInputIds(): string[];
+}
+
+export async function resolveHostedPersonalizationInputIdForAcceptedInputs(input: {
+  assistantInputIds: readonly string[];
+  vaultRoot: string;
+}): Promise<string | null> {
+  const inputIds = uniqueStrings(input.assistantInputIds);
+  if (
+    inputIds.length === 0
+    || inputIds.length !== input.assistantInputIds.length
+  ) {
+    return null;
+  }
+  let events: AssistantInputEventRecord[];
+  try {
+    events = await readHostedAssistantInputEventsById({
+      inputIds,
+      vaultRoot: input.vaultRoot,
+    });
+  } catch {
+    return null;
+  }
+  let batch: AssistantInputEventRecord[];
+  try {
+    batch = selectHostedAssistantInputEventBatch({
+      events,
+      limit: DEFAULT_ASSISTANT_AUTOMATION_SCAN_LIMIT,
+    });
+  } catch {
+    return null;
+  }
+  return batch.length === events.length
+    ? batch.at(-1)?.inputId ?? null
+    : null;
 }
 
 export function createHostedAssistantInputSource(input: {
@@ -90,11 +130,18 @@ export function createHostedAssistantInputSource(input: {
         observedInputIds.add(inputId);
         newPendingInputIds.push(inputId);
       }
+      const appendablePendingEvents = await readHostedAssistantInputEventsById({
+        inputIds: newPendingInputIds,
+        vaultRoot: input.vaultRoot,
+      });
+      const appendablePendingInputIds = selectedInputIds.length === 0
+        ? selectHostedAssistantInputEventBatch({
+            events: appendablePendingEvents,
+            limit: DEFAULT_ASSISTANT_AUTOMATION_SCAN_LIMIT,
+          }).map((event) => event.inputId)
+        : [];
       const added = appendSelectedHostedAssistantInputIds({
-        inputIds: newPendingInputIds.slice(
-          0,
-          Math.max(0, 1 - selectedInputIds.length),
-        ),
+        inputIds: appendablePendingInputIds,
         selectedInputIdSet,
         selectedInputIds,
       });
@@ -167,14 +214,12 @@ export async function selectHostedAssistantInputIds(
       inputIds: pendingInputIds,
       vaultRoot: input.vaultRoot,
     });
-    const limit = normalizeHostedAssistantInputQueryLimit(input.limit);
+    const limit = normalizeHostedAssistantInputBatchLimit(input.limit);
     return {
-      inputIds: pendingEvents
-        .sort((left, right) =>
-          compareAssistantInputCursors(left.cursor, right.cursor)
-        )
-        .slice(0, Math.min(limit, 1))
-        .map((event) => event.inputId),
+      inputIds: selectHostedAssistantInputEventBatch({
+        events: pendingEvents,
+        limit,
+      }).map((event) => event.inputId),
       mode: "background",
       pendingInputIds,
     };
@@ -197,15 +242,72 @@ export async function selectHostedAssistantInputIds(
 
   return {
     freshInputIds,
-    inputIds: freshEvents
-      .sort((left, right) =>
-        compareAssistantInputCursors(left.cursor, right.cursor)
-      )
-      .slice(0, 1)
-      .map((event) => event.inputId),
+    inputIds: selectHostedAssistantInputEventBatch({
+      events: freshEvents,
+      limit: DEFAULT_ASSISTANT_AUTOMATION_SCAN_LIMIT,
+    }).map((event) => event.inputId),
     mode: "foreground",
     pendingInputIds: [],
   };
+}
+
+function selectHostedAssistantInputEventBatch(input: {
+  events: readonly AssistantInputEventRecord[];
+  limit: number;
+}): AssistantInputEventRecord[] {
+  const orderedEvents = [...input.events].sort((left, right) =>
+    compareAssistantInputCursors(left.cursor, right.cursor)
+  );
+  const selected: AssistantInputEventRecord[] = [];
+  let previousEvent: AssistantInputEventRecord | null = null;
+
+  for (const event of orderedEvents) {
+    if (selected.length >= input.limit) {
+      break;
+    }
+    if (
+      previousEvent
+      && !isHostedAssistantInputEventBatchSuccessor(previousEvent, event)
+    ) {
+      break;
+    }
+    selected.push(event);
+    previousEvent = event;
+  }
+
+  return selected;
+}
+
+function isHostedAssistantInputEventBatchSuccessor(
+  previous: AssistantInputEventRecord,
+  candidate: AssistantInputEventRecord,
+): boolean {
+  if (
+    !shouldGroupAdjacentAssistantInputCandidates(
+      assistantInputCandidateFromStoredEvent(previous),
+      assistantInputCandidateFromStoredEvent(candidate),
+    )
+  ) {
+    return false;
+  }
+
+  const previousCausalSeq = readPositiveHostedAssistantInputCausalSeq(previous);
+  const candidateCausalSeq = readPositiveHostedAssistantInputCausalSeq(candidate);
+  return previousCausalSeq !== null
+    && candidateCausalSeq !== null
+    && candidateCausalSeq === previousCausalSeq + 1n;
+}
+
+function readPositiveHostedAssistantInputCausalSeq(
+  event: AssistantInputEventRecord,
+): bigint | null {
+  if (event.sourceRef.kind !== "hosted-mailbox") {
+    return null;
+  }
+  const causalSeq = BigInt(
+    assistantPreferenceCausalSeqSchema.parse(event.sourceRef.causalSeq ?? "0"),
+  );
+  return causalSeq > 0n ? causalSeq : null;
 }
 
 async function readHostedAssistantInputCandidatesById(input: {
@@ -393,6 +495,16 @@ function normalizeHostedAssistantInputQueryLimit(value: number | undefined): num
     return DEFAULT_HOSTED_ASSISTANT_INPUT_QUERY_LIMIT;
   }
   return Math.max(1, Math.trunc(value));
+}
+
+function normalizeHostedAssistantInputBatchLimit(value: number | undefined): number {
+  if (typeof value !== "number" || !Number.isFinite(value)) {
+    return DEFAULT_ASSISTANT_AUTOMATION_SCAN_LIMIT;
+  }
+  return Math.min(
+    DEFAULT_ASSISTANT_AUTOMATION_SCAN_LIMIT,
+    Math.max(1, Math.trunc(value)),
+  );
 }
 
 function uniqueStrings(values: readonly string[]): string[] {

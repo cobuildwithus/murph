@@ -77,8 +77,10 @@ if [[ -n "$review_gpt_pr_ref" ]]; then
     gh pr view "$review_gpt_pr_ref" --json headRefOid --jq '.headRefOid'
   )"
   review_gpt_pr_body="$(
-    gh pr view "$review_gpt_pr_ref" --json body --jq '.body'
+    gh pr view "$review_gpt_pr_ref" --json body --jq '.body // ""'
   )"
+  printf '%s\n' "$review_gpt_pr_body" \
+    > "$review_gpt_pr_context_dir/pr-body.md"
   review_gpt_recorded_first_head="$(
     printf '%s\n' "$review_gpt_pr_body" \
       | sed -nE 's/^ReviewGPT first-reviewed head: ([0-9a-f]{40})$/\1/p'
@@ -189,7 +191,7 @@ if [[ -n "$review_gpt_pr_ref" ]]; then
     printf '}\n'
   } > "$review_gpt_pr_context_dir/review-round.json"
 
-  COBUILD_AUDIT_CONTEXT_ALWAYS_PATHS="${COBUILD_AUDIT_CONTEXT_ALWAYS_PATHS:-}"$'\n'"$review_gpt_pr_context_dir/pr.diff"$'\n'"$review_gpt_pr_context_dir/changed-files.txt"$'\n'"$review_gpt_pr_context_dir/review-round.json"$'\n'"$review_gpt_pr_context_dir/since-first-reviewed-head.diff"$'\n'"$review_gpt_pr_context_dir/since-previous-reviewed-head.diff"
+  COBUILD_AUDIT_CONTEXT_ALWAYS_PATHS="${COBUILD_AUDIT_CONTEXT_ALWAYS_PATHS:-}"$'\n'"$review_gpt_pr_context_dir/pr-body.md"$'\n'"$review_gpt_pr_context_dir/pr.diff"$'\n'"$review_gpt_pr_context_dir/changed-files.txt"$'\n'"$review_gpt_pr_context_dir/review-round.json"$'\n'"$review_gpt_pr_context_dir/since-first-reviewed-head.diff"$'\n'"$review_gpt_pr_context_dir/since-previous-reviewed-head.diff"
   COBUILD_AUDIT_CONTEXT_ALWAYS_PATHS="$COBUILD_AUDIT_CONTEXT_ALWAYS_PATHS"$'\n'"$(cat "$review_gpt_pr_context_dir/changed-files.txt")"
   export COBUILD_AUDIT_CONTEXT_ALWAYS_PATHS
 fi

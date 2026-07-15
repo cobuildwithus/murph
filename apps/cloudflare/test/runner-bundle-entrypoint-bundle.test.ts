@@ -516,16 +516,16 @@ describe("runner bundle container-entrypoint esbuild step", () => {
     const budgets = resolveRunnerEntrypointBundleBudgets();
 
     // Entry = measured CI Linux baseline (1,423,217B after the 2026-07-13
-    // mainline integration) + the exact 14,551B current-PR ratchet from the
-    // larger local-macOS 1,485,768B emit (CI Linux emitted 1,480,763B) +
-    // 48,000B noise band. Static closure advances the latest mainline baseline
-    // by PR #631's exact 913B crypto-lane and 872B checkpoint overages while
-    // preserving the separate 96,000B noise band.
+    // mainline integration) + the prior 14,551B host-variance ratchet + PR
+    // #626's exact 7,706B local-macOS overage + 48,000B noise band. Static
+    // closure advances the latest mainline baseline by PR #631's exact 913B
+    // crypto-lane and 872B checkpoint overages plus PR #626's exact 33,357B
+    // local-macOS overage, while preserving the separate 96,000B noise band.
     // Locking exact values makes any silent change to a ratchet a failing,
     // reviewed diff.
     expect(budgets).toEqual({
-      entryBytes: 1_444_867 + 48_000,
-      staticClosureBytes: 7_079_389 + 96_000,
+      entryBytes: 1_452_573 + 48_000,
+      staticClosureBytes: 7_112_746 + 96_000,
       totalBytes: 9_300_000,
     });
     // The ratchet is meaningfully tighter than the prior loose 2.9MB ceiling

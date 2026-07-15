@@ -298,8 +298,9 @@ Ordering never uses the web projection or wall-clock comparison.
 New `conversation.message` mailbox rows also store a nullable server-keyed
 lookup of the existing deterministic assistant input id. The raw id is not
 persisted in that projection; the mailbox wire shape, `sourceRef`, and event id
-do not change. For an update, the conversation personalization callback carries the
-sole input id only when the provider accepted exactly one input; it does not
+do not change. For an update, the conversation personalization callback carries
+the terminal provider-accepted input id only after the accepted ids revalidate
+as one same-conversation, same-reply-anchor, exact-successor batch; it does not
 carry a sequence. Inside the mutation transaction,
 web derives the configured lookup-key candidates and resolves the callback
 member and one matching key to one live conversation-lane
@@ -324,19 +325,27 @@ retention wakes do not block it. The web checkpoint transaction advances the
 durable system `consumed_seq` together with the snapshot CAS, so a conflict or
 rollback leaves pending work replayable.
 
-The canonical assistant-input selector admits at most one mailbox-backed input
-to each hosted provider turn. Later accepted inputs remain pending for a later
-turn instead of being folded into or steered through a turn with a different
-causal anchor. For web-owned tone and voice, the runtime forwards the selected
-provider-accepted input id through the dedicated personalization port. The
-model cannot provide or replace that id or a numeric sequence. The id is
-invocation-local transport only; web's mailbox row remains the ordering
-authority. At local `murph.assistant_style` mutation time, the signed Web
-personalization port binds that sole provider-accepted input id to the callback
-member and one live mailbox row, then returns the canonical sequence for Humor,
-Push, and Detail ordering. Persisted assistant-input files are never numeric
-authority; missing or ambiguous authority fails the hosted write closed without
-blocking the ordinary reply.
+The canonical assistant-input selector admits a bounded, cursor-ordered compound
+batch. Foreground starts with the oldest fresh input in the current wake and may
+add only later fresh siblings; it never pulls older pending backlog ahead of that
+batch. Background starts with the oldest replyable pending input. A batch
+continues only while every input has the same canonical conversation and
+provider-native reply anchor and each positive per-member mailbox causal
+sequence is the exact successor of the previous one. A conversation or
+reply-anchor change, sequence gap, 50-input bound, or legacy sequence-zero input
+ends the batch, and the remainder stays pending.
+
+The accepted-input boundary forwards the batch's terminal provider-accepted
+input id through the dedicated personalization port. The model cannot provide
+or replace that id or a numeric sequence. Web binds the id to the callback
+member and one live mailbox row, then derives the canonical sequence for tone,
+voice, Humor, Push, and Detail ordering. Exact-successor proof means the
+terminal input cannot cross an intervening system-lane Settings mutation. The
+selected batch is frozen before the provider starts; mailbox input accepted
+later remains pending for another turn. The id is invocation-local transport
+only and is cleared after the provider attempt; persisted assistant-input files
+are never numeric authority. Missing or ambiguous authority fails the hosted
+write closed without blocking the ordinary reply.
 
 Tokenless pending items restored from the legacy v1 local mailbox state are
 treated as sequence zero. They drain through the same terminal path. A legacy

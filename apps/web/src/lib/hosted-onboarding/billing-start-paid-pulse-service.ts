@@ -1,3 +1,5 @@
+import { randomUUID } from "node:crypto";
+
 import {
   HostedBillingStatus,
   type PrismaClient,
@@ -76,9 +78,11 @@ const START_PAID_PULSE_RECOVERABLE_STRIPE_SUBSCRIPTION_STATUSES = new Set([
   "trialing",
   "unpaid",
 ]);
+const PULSE_TRIAL_EXTENSION_TARGET_METADATA_KEY =
+  "murphTrialExtensionTargetTrialEnd";
 
 type HostedPulseTrialStartPaidIdempotencyOperation =
-  | "paused-legacy-metered-cleanup-v1"
+  | "active-trial-end-now-v2"
   | "paused-resume-v1";
 
 export type HostedPulseTrialStartPaidResult =
@@ -669,11 +673,13 @@ async function updateHostedPulseTrialStartPaidSubscription(input: {
           () => input.stripe.subscriptions.update(input.stripeSubscriptionId, {
             expand: [...START_PAID_PULSE_STRIPE_UPDATE_EXPANSIONS],
             ...(input.legacyMeteredItems.length > 0 ? { items: input.legacyMeteredItems } : {}),
+            metadata: { murphTrialExtensionTargetTrialEnd: "" },
             payment_behavior: "allow_incomplete",
             trial_end: "now",
           }, {
             idempotencyKey: buildHostedPulseTrialStartPaidIdempotencyKey({
               memberId: input.memberId,
+              operation: "active-trial-end-now-v2",
               priceId: input.priceId,
               stripeSubscriptionId: input.stripeSubscriptionId,
               trialEnd: input.trialEnd,
@@ -794,55 +800,34 @@ async function resumeHostedPulseTrialStartPaidPausedSubscription(input: {
   let stripeMutationCompleted = false;
 
   try {
-    if (input.legacyMeteredItems.length > 0) {
-      const cleanedSubscription = await withHostedMemberStripeMutationLock({
-        memberId: input.memberId,
-        prisma: input.prisma,
-        run: async () => {
-          const subscription = await callHostedStripeStartPaidPulseOperation(
-            "subscription.update.paused-legacy-metered-cleanup",
-            () => input.stripe.subscriptions.update(input.stripeSubscriptionId, {
-              expand: [...START_PAID_PULSE_STRIPE_UPDATE_EXPANSIONS],
-              items: input.legacyMeteredItems,
-              proration_behavior: "none",
-            }, {
-              idempotencyKey: buildHostedPulseTrialStartPaidIdempotencyKey({
-                memberId: input.memberId,
-                operation: "paused-legacy-metered-cleanup-v1",
-                priceId: input.priceId,
-                stripeSubscriptionId: input.stripeSubscriptionId,
-                trialEnd: input.trialEnd,
-              }),
-            }),
-          );
-          stripeMutationCompleted = true;
-          return subscription;
-        },
-      });
-      assertHostedStripePulseTrialStartPaidPostMutationSubscriptionShape({
-        priceId: input.priceId,
-        subscription: cleanedSubscription,
-      });
-      const cleanedInvoiceResult = await maybeResolveHostedPulseTrialStartPaidPostMutationInvoiceResult({
-        invoice: readExpandedLatestInvoice(cleanedSubscription),
-        memberId: input.memberId,
-        now: input.now,
-        priceId: input.priceId,
-        prisma: input.prisma,
-        stripeCustomerId: input.stripeCustomerId,
-        stripeSubscriptionId: input.stripeSubscriptionId,
-        subscription: cleanedSubscription,
-      });
-
-      if (cleanedInvoiceResult) {
-        return cleanedInvoiceResult;
-      }
-    }
-
     const resumedSubscription = await withHostedMemberStripeMutationLock({
       memberId: input.memberId,
       prisma: input.prisma,
       run: async () => {
+        const cleanedSubscription = await callHostedStripeStartPaidPulseOperation(
+          "subscription.update.paused-pre-resume-cleanup",
+          () => input.stripe.subscriptions.update(input.stripeSubscriptionId, {
+            expand: [...START_PAID_PULSE_STRIPE_UPDATE_EXPANSIONS],
+            ...(input.legacyMeteredItems.length > 0
+              ? { items: input.legacyMeteredItems }
+              : {}),
+            metadata: {
+              [PULSE_TRIAL_EXTENSION_TARGET_METADATA_KEY]: "",
+            },
+            proration_behavior: "none",
+          }, {
+            idempotencyKey:
+              buildHostedPulseTrialStartPaidCleanupIdempotencyKey(),
+          }),
+        );
+        assertHostedStripePulseTrialStartPaidPostMutationSubscriptionShape({
+          priceId: input.priceId,
+          subscription: cleanedSubscription,
+        });
+        if (cleanedSubscription.status !== "paused") {
+          return cleanedSubscription;
+        }
+
         const subscription = await callHostedStripeStartPaidPulseOperation(
           "subscription.resume.paused-trial",
           () => input.stripe.subscriptions.resume(input.stripeSubscriptionId, {
@@ -1099,4 +1084,11 @@ function buildHostedPulseTrialStartPaidIdempotencyKey(input: {
         operation: input.operation,
       }
     : keyPayload))}`;
+}
+
+function buildHostedPulseTrialStartPaidCleanupIdempotencyKey(): string {
+  // Clearing metadata and deleting already-selected legacy items are
+  // convergent operations. A fresh key per top-level attempt prevents Stripe
+  // from replaying a cached cleanup response after provider state changes.
+  return `hosted-billing-start-paid-pulse:paused-cleanup:${randomUUID()}`;
 }
