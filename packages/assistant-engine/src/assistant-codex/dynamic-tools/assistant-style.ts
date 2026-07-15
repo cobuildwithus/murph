@@ -70,8 +70,9 @@ export function readAssistantStyleDynamicToolRequest(input: {
 
 export async function executeAssistantStyleDynamicTool(input: {
   available: boolean
-  causalSeq: string | null
+  causalSeqRequired: boolean
   request: Extract<AssistantStyleDynamicToolRequest, { kind: 'assistant-style' }>
+  resolveCausalSeq: (() => Promise<string | null>) | null
   vaultRoot: string | null
 }): Promise<{
   rpcResult: {
@@ -91,23 +92,32 @@ export async function executeAssistantStyleDynamicTool(input: {
 
   try {
     const { args } = input.request
+    const causalSeq = args.action === 'show'
+      ? null
+      : await input.resolveCausalSeq?.() ?? null
+    if (args.action !== 'show' && input.causalSeqRequired && !causalSeq) {
+      return assistantStyleTextResult(
+        false,
+        'assistant style settings could not be updated',
+      )
+    }
     const usecases = await import('@murphai/vault-usecases/preferences')
     const result = args.action === 'show'
       ? await usecases.showAssistantPersonality(input.vaultRoot)
       : args.action === 'set'
         ? await usecases.setAssistantPersonalitySetting({
-            ...(input.causalSeq ? { causalSeq: input.causalSeq } : {}),
+            ...(causalSeq ? { causalSeq } : {}),
             setting: args.setting,
             value: args.value,
             vault: input.vaultRoot,
           })
         : args.setting === 'all'
           ? await usecases.resetAllAssistantPersonalitySettings({
-              ...(input.causalSeq ? { causalSeq: input.causalSeq } : {}),
+              ...(causalSeq ? { causalSeq } : {}),
               vault: input.vaultRoot,
             })
           : await usecases.resetAssistantPersonalitySetting({
-              ...(input.causalSeq ? { causalSeq: input.causalSeq } : {}),
+              ...(causalSeq ? { causalSeq } : {}),
               setting: args.setting,
               vault: input.vaultRoot,
             })

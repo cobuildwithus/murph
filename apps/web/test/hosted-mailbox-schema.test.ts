@@ -29,6 +29,13 @@ describe("hosted mailbox workspace Prisma groundwork", () => {
       ),
       "utf8",
     );
+    const assistantInputLookupMigrationSql = readFileSync(
+      new URL(
+        "../prisma/migrations/20260714130000_hosted_mailbox_assistant_input_lookup/migration.sql",
+        import.meta.url,
+      ),
+      "utf8",
+    );
 
     for (const modelName of [
       "HostedMailboxItem",
@@ -84,5 +91,19 @@ describe("hosted mailbox workspace Prisma groundwork", () => {
     expect(retentionWakeMigrationSql).toContain(
       'SET "inbox_media_retention_wake_at" = CURRENT_TIMESTAMP',
     );
+    expect(schema).toContain(
+      'assistantInputLookupKey String?               @map("assistant_input_lookup_key")',
+    );
+    expect(schema).toContain('@@unique([userId, assistantInputLookupKey])');
+    expect(assistantInputLookupMigrationSql).toContain(
+      'ADD COLUMN "assistant_input_lookup_key" TEXT',
+    );
+    expect(assistantInputLookupMigrationSql).toContain(
+      'CREATE UNIQUE INDEX "hosted_mailbox_item_user_id_assistant_input_lookup_key_key"',
+    );
+    expect(assistantInputLookupMigrationSql).toContain(
+      'ON "hosted_mailbox_item"("user_id", "assistant_input_lookup_key")',
+    );
+    expect(assistantInputLookupMigrationSql).not.toMatch(/UPDATE|NOT NULL/iu);
   });
 });

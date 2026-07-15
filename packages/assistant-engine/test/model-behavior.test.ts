@@ -275,7 +275,7 @@ describe('assistant execution prompt contract', () => {
     }
   })
 
-  it('keeps the assistant style settings fact in the stable route prompt', () => {
+  it('keeps conversation-first personalization guidance and private dial controls in the stable route prompt', () => {
     const layers = buildAssistantSystemPromptLayers(createCommonCodexPromptInput())
 
     expect(layers.prompt).toContain('/settings?voice=true')
@@ -353,6 +353,33 @@ describe('assistant execution prompt contract', () => {
     )
     expect(layers.stableRouteCapabilityPrompt).toContain(
       'available only in this private direct conversation',
+    )
+    expect(layers.stableRouteCapabilityPrompt).toContain(
+      '`murph.personalization`',
+    )
+    expect(layers.stableRouteCapabilityPrompt).toContain(
+      '`murph.assistant_configuration`',
+    )
+    expect(layers.stableRouteCapabilityPrompt).toContain(
+      '`unchanged` means no save',
+    )
+    expect(layers.stableRouteCapabilityPrompt).toContain(
+      'never guess voice, model, or reasoning ids',
+    )
+    expect(layers.stableRouteCapabilityPrompt).toContain(
+      'use `/settings?voice=true` only for voice or sound changes',
+    )
+    expect(layers.stableRouteCapabilityPrompt).toContain(
+      'Use `/settings` for tone, model, or reasoning changes',
+    )
+    expect(layers.stableRouteCapabilityPrompt).toContain(
+      'never use a same-turn voice demo as activation proof',
+    )
+    expect(layers.stableRouteCapabilityPrompt).toContain(
+      'exact-target approval result is authoritative',
+    )
+    expect(layers.stableRouteCapabilityPrompt).toContain(
+      'a saved change starts on the next turn',
     )
     expect(layers.threadContextPrompt).not.toContain('/settings?voice=true')
     expect(layers.dynamicTurnContextPrompt).not.toContain('/settings?voice=true')
@@ -1124,7 +1151,7 @@ describe('assistant system prompt cache stability', () => {
     )
 
     expect(layers.staticCacheableCorePrompt.length).toBeLessThanOrEqual(7_500)
-    expect(layers.stableRouteCapabilityPrompt.length).toBeLessThanOrEqual(61_000)
+    expect(layers.stableRouteCapabilityPrompt.length).toBeLessThanOrEqual(62_000)
   })
 
   it('passes the injected CLI contract through byte-for-byte at the stable-route tail', () => {

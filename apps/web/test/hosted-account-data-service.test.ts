@@ -99,6 +99,11 @@ const REQUIRED_STORE_SLUGS = [
   "prisma.hosted_member_billing_ref",
   "prisma.hosted_connected_app_connect_intent",
   "prisma.hosted_connected_apps_session",
+  "prisma.clinical_record_connect_intent",
+  "prisma.clinical_record_oauth_session",
+  "prisma.clinical_record_connection",
+  "prisma.clinical_record_retrieval_run",
+  "prisma.clinical_record_retrieval_request",
   "prisma.hosted_account_group",
   "prisma.hosted_account_group_membership",
   "prisma.hosted_account_group_invite",
@@ -330,6 +335,36 @@ describe("deleteHostedAccountData", () => {
         userId: "member_123",
       },
     );
+  });
+
+  it("deletes every Clinical Records control-plane row before its connection owner", async () => {
+    const operationOrder: string[] = [];
+    const prisma = createHostedAccountDeletionPrismaForTest({
+      onTransaction: () => {},
+      operationOrder,
+    });
+
+    const result = await deleteHostedAccountData({
+      memberId: "member_123",
+      prisma,
+      request: new Request("https://join.example.test/settings"),
+    });
+
+    expect(operationOrder.filter((operation) => operation.startsWith("delete:clinicalRecord")))
+      .toEqual([
+        "delete:clinicalRecordRetrievalRequest",
+        "delete:clinicalRecordRetrievalRun",
+        "delete:clinicalRecordOauthSession",
+        "delete:clinicalRecordConnectIntent",
+        "delete:clinicalRecordConnection",
+      ]);
+    expect(result.deletedCounts).toMatchObject({
+      "prisma.clinical_record_connect_intent": 1,
+      "prisma.clinical_record_connection": 1,
+      "prisma.clinical_record_oauth_session": 1,
+      "prisma.clinical_record_retrieval_request": 1,
+      "prisma.clinical_record_retrieval_run": 1,
+    });
   });
 
   it("deletes owned external-thread container runtimes with the account owner", async () => {

@@ -42,7 +42,17 @@ vi.mock('@murphai/query', async (importOriginal) => {
   const actual = await importOriginal<typeof import('@murphai/query')>()
   return {
     ...actual,
-    listAutomations: vi.fn(async () => deviceActivityMocks.automations),
+    listAutomations: vi.fn(async (
+      _vault: string,
+      options?: { status?: readonly string[] },
+    ) => {
+      const allowed = options?.status
+      return allowed
+        ? deviceActivityMocks.automations.filter((record) =>
+            allowed.includes(record.status)
+          )
+        : deviceActivityMocks.automations
+    }),
     listScheduledLogs: vi.fn(async () => []),
     readVaultRawTolerant: vi.fn(async () => {
       if (!deviceActivityMocks.readModel) {
@@ -154,6 +164,39 @@ describe('device activity triggered automations', () => {
         vaultRoot,
       }),
     )
+  })
+
+  it('does not schedule later activity for an archived parent automation', async () => {
+    deviceActivityMocks.automations = [{
+      ...createDeviceActivityAutomation({
+        activityKind: 'walk',
+        after: '2026-06-07T11:00:00.000Z',
+        source: 'whoop',
+      }),
+      status: 'archived',
+    }]
+    deviceActivityMocks.readModel = createVaultReadModel({
+      entities: [
+        createActivityEntity({
+          entityId: 'evt_walk_after_archive',
+          occurredAt: '2026-06-07T12:00:00.000Z',
+          title: 'Walk after archive',
+          workoutType: 'walking',
+        }),
+      ],
+      vaultRoot,
+    })
+
+    await expect(scheduleDeviceActivityTriggeredAutomations({
+      now: () => '2026-06-07T12:01:00.000Z',
+      vault: vaultRoot,
+    })).resolves.toEqual({
+      matched: 0,
+      nextWakeAt: null,
+      scheduled: 0,
+    })
+    expect(await readQueuedCronJobs(vaultRoot)).toEqual([])
+    expect(deviceActivityMocks.advanceAutomationDeviceActivityCursor).not.toHaveBeenCalled()
   })
 
   it('preserves the saved conversation route on generated activity notifications', async () => {

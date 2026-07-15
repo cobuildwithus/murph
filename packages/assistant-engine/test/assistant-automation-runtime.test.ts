@@ -8577,6 +8577,46 @@ describe('assistant auto-reply runtime', () => {
       .not.toHaveBeenCalled()
   })
 
+  it('withholds style authority from a hosted synthetic input without a causal sequence', async () => {
+    const hostedInput = createCapturelessAssistantInputCandidate({
+      inputId: 'ain_88888888888888888888888888888888',
+      occurredAt: '2026-04-08T00:07:00.000Z',
+      replyTarget: {
+        channel: 'linq',
+        messageId: null,
+        threadId: 'linq_chat_direct',
+      },
+      source: 'linq',
+      text: 'System note: a prior delivery failed.',
+    })
+    const reply = await vi.importActual<typeof import('../src/assistant/automation/reply.ts')>(
+      '../src/assistant/automation/reply.ts',
+    )
+    const context = reply.createAssistantAutoReplyGroupContext([
+      createCapturelessReplyGroupItem(hostedInput),
+    ])
+
+    if (!context) {
+      throw new Error('expected reply context')
+    }
+
+    await reply.processAssistantAutoReplyGroup({
+      allowSelfAuthored: false,
+      context,
+      enabledChannels: ['linq'],
+      inboxServices: createInboxServices(),
+      requestId: null,
+      sessionMaxAgeMs: null,
+      vault: '/tmp/assistant-automation-vault',
+    })
+
+    expect(replyMocks.sendAssistantMessage).toHaveBeenCalledWith(
+      expect.objectContaining({
+        assistantStyleSettingsAuthorized: false,
+      }),
+    )
+  })
+
   it.each([
     {
       expectedAdmissionKind: 'accepted',

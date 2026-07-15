@@ -3,6 +3,7 @@ import { readdir, readFile } from 'node:fs/promises'
 import path from 'node:path'
 import { z } from 'zod'
 import { assistantPreferenceCausalSeqSchema } from '@murphai/contracts'
+import { createHostedMailboxAssistantInputIdFromBlindedIdentity } from '@murphai/hosted-execution/assistant-identifiers'
 import {
   assertAssistantStatePathHasNoSymlinks,
   ensureAssistantStateDir,
@@ -492,6 +493,13 @@ export interface AssistantInputEventRecordParseFailure {
 export function createAssistantInputEventId(input: {
   sourceRef: AssistantInputSourceRef
 }): string {
+  if (input.sourceRef.kind === 'hosted-mailbox') {
+    return createHostedMailboxAssistantInputIdFromBlindedIdentity({
+      dedupeKey: input.sourceRef.dedupeKey,
+      eventId: input.sourceRef.eventId,
+      lane: input.sourceRef.lane,
+    })
+  }
   return `ain_${sha256Hex(stableStringify(assistantInputSourceRefIdentity(input.sourceRef))).slice(0, 32)}`
 }
 
@@ -839,13 +847,20 @@ async function readAssistantInputEventAtPaths(input: {
   paths: AssistantStatePaths
 }): Promise<AssistantInputEventRecord | null> {
   try {
+    const expectedInputId = normalizeAssistantInputEventId(input.inputId)
     const filePath = resolveAssistantInputEventPath({
-      inputId: input.inputId,
+      inputId: expectedInputId,
       paths: input.paths,
     })
     await assertAssistantStatePathHasNoSymlinks(filePath)
     const raw = await readFile(filePath, 'utf8')
-    return parseAssistantInputEventFile(JSON.parse(raw))
+    const record = parseAssistantInputEventFile(JSON.parse(raw))
+    if (record.inputId !== expectedInputId) {
+      throw new TypeError(
+        'assistant input event record inputId must match its storage path.',
+      )
+    }
+    return record
   } catch (error) {
     if (isMissingFileError(error)) {
       return null

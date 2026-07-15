@@ -9,6 +9,10 @@ import {
   type AssistantUsageRecord,
 } from "@murphai/hosted-execution/assistant-usage";
 import {
+  HOSTED_RUNTIME_ASSISTANT_PREFERENCE_CAUSAL_SEQ_ACTION,
+  HOSTED_RUNTIME_ASSISTANT_PERSONALIZATION_TOOL_PATH,
+} from "@murphai/hosted-execution/assistant-personalization";
+import {
   buildHostedWorkspaceSnapshotV2Aad,
   encodeHostedWorkspaceSnapshotV2DataKey,
   HOSTED_WORKSPACE_SNAPSHOT_ENCRYPTION_SCHEME,
@@ -3760,6 +3764,30 @@ describe("buildHostedExecutionRuntimePlatform", () => {
           status: 200,
         });
       }
+      if (url.pathname.endsWith(HOSTED_RUNTIME_ASSISTANT_PERSONALIZATION_TOOL_PATH)) {
+        const body = await request.clone().json() as { action?: unknown };
+        if (body.action === HOSTED_RUNTIME_ASSISTANT_PREFERENCE_CAUSAL_SEQ_ACTION) {
+          return new Response(JSON.stringify({
+            action: HOSTED_RUNTIME_ASSISTANT_PREFERENCE_CAUSAL_SEQ_ACTION,
+            result: { causalSeq: "42" },
+          }), {
+            headers: { "content-type": "application/json; charset=utf-8" },
+            status: 200,
+          });
+        }
+        return new Response(JSON.stringify({
+          action: "read",
+          result: {
+            model: "gpt-5.6-terra",
+            solAvailable: false,
+            tone: "formal",
+            voice: "warm",
+          },
+        }), {
+          headers: { "content-type": "application/json; charset=utf-8" },
+          status: 200,
+        });
+      }
       if (url.pathname.endsWith(HOSTED_RUNTIME_GROUP_TOOL_PATH)) {
         return new Response(JSON.stringify({
           action: "read_current",
@@ -3811,6 +3839,7 @@ describe("buildHostedExecutionRuntimePlatform", () => {
     expect(platform.issueExportPort).toBeDefined();
     expect(platform.usageRecordPort).toBeDefined();
     expect(platform.productFeedbackPort).toBeDefined();
+    expect(platform.assistantPersonalizationToolPort).toBeDefined();
     expect(platform.groupToolPort).toBeDefined();
     expect(platform.vaultSharePort).toBeDefined();
     expect(platform.deviceSyncPort).toBeDefined();
@@ -3860,6 +3889,25 @@ describe("buildHostedExecutionRuntimePlatform", () => {
       relatedChangelogItemIds: ["native-message-formatting"],
       summary: "Interested in native message formatting.",
     });
+    await expect(platform.assistantPersonalizationToolPort!.request({ action: "read" }))
+      .resolves.toEqual({
+        action: "read",
+        result: {
+          model: "gpt-5.6-terra",
+          solAvailable: false,
+          tone: "formal",
+          voice: "warm",
+        },
+      });
+    await expect(platform.assistantPersonalizationToolPort!.request(
+      { action: "read" },
+      { assistantInputId: "ain_0123456789abcdef0123456789abcdef" },
+    )).resolves.toMatchObject({ action: "read" });
+    await expect(
+      platform.assistantPersonalizationToolPort!.resolvePreferenceCausalSeq({
+        assistantInputId: "ain_0123456789abcdef0123456789abcdef",
+      }),
+    ).resolves.toBe("42");
     await expect(platform.groupToolPort!.request({ action: "read_current" }))
       .resolves.toEqual({
         action: "read_current",
@@ -3872,7 +3920,7 @@ describe("buildHostedExecutionRuntimePlatform", () => {
       connectionId: "conn_123",
     });
 
-    expect(fetchMock).toHaveBeenCalledTimes(11);
+    expect(fetchMock).toHaveBeenCalledTimes(14);
     const requests = fetchMock.mock.calls.map((call, index) =>
       requireFetchRequest(call, `callback web-control request ${index}`)
     );
@@ -3885,6 +3933,9 @@ describe("buildHostedExecutionRuntimePlatform", () => {
       "http://web-control.worker/api/internal/hosted-execution/issues/record",
       "http://web-control.worker/api/internal/hosted-execution/usage/record",
       "http://web-control.worker/api/internal/hosted-execution/product-feedback/record",
+      `http://web-control.worker${HOSTED_RUNTIME_ASSISTANT_PERSONALIZATION_TOOL_PATH}`,
+      `http://web-control.worker${HOSTED_RUNTIME_ASSISTANT_PERSONALIZATION_TOOL_PATH}?assistantInputId=ain_0123456789abcdef0123456789abcdef`,
+      `http://web-control.worker${HOSTED_RUNTIME_ASSISTANT_PERSONALIZATION_TOOL_PATH}?assistantInputId=ain_0123456789abcdef0123456789abcdef`,
       `http://web-control.worker${buildExpectedGroupToolPath()}`,
       `http://web-control.worker${buildExpectedVaultShareActiveKindsPath()}`,
       "http://web-control.worker/api/internal/device-sync/runtime/snapshot",
@@ -3895,6 +3946,36 @@ describe("buildHostedExecutionRuntimePlatform", () => {
       expect(request.headers.get("x-hosted-runtime-workspace-version")).toBe("6");
       expect(request.headers.has("x-hosted-execution-runner-proxy-token")).toBe(false);
     }
+  });
+
+  it("rejects malformed preference causal-sequence responses", async () => {
+    const fetchMock = vi.fn(async () => new Response(JSON.stringify({
+      action: HOSTED_RUNTIME_ASSISTANT_PREFERENCE_CAUSAL_SEQ_ACTION,
+      result: { causalSeq: "not-a-sequence" },
+    }), {
+      headers: { "content-type": "application/json; charset=utf-8" },
+      status: 200,
+    }));
+    const platform = buildHostedExecutionRuntimePlatform({
+      boundUserId: "member_123",
+      fetchImpl: fetchMock as typeof fetch,
+      workspaceCheckpointBridge: {
+        readCurrentLease: () => ({
+          attemptId: "runtime_write_123",
+          leaseGeneration: "7",
+          userId: "member_123",
+          workspaceVersion: "6",
+        }),
+      },
+    });
+
+    await expect(
+      platform.assistantPersonalizationToolPort!.resolvePreferenceCausalSeq({
+        assistantInputId: "ain_0123456789abcdef0123456789abcdef",
+      }),
+    ).rejects.toThrow(
+      "Hosted assistant preference causal sequence returned invalid JSON.",
+    );
   });
 
   it("attaches active lease headers to direct signed web-control callbacks", async () => {

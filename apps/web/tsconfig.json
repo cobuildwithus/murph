@@ -69,6 +69,9 @@
       "@murphai/hosted-execution/assistant-model": [
         "../../packages/hosted-execution/src/assistant-model.ts"
       ],
+      "@murphai/hosted-execution/assistant-personalization": [
+        "../../packages/hosted-execution/src/assistant-personalization.ts"
+      ],
       "@murphai/hosted-execution/assistant-configuration-approval": [
         "../../packages/hosted-execution/src/assistant-configuration-approval.ts"
       ],
@@ -89,6 +92,9 @@
       ],
       "@murphai/hosted-execution/connected-apps": [
         "../../packages/hosted-execution/src/connected-apps.ts"
+      ],
+      "@murphai/hosted-execution/clinical-records": [
+        "../../packages/hosted-execution/src/clinical-records.ts"
       ],
       "@murphai/hosted-execution/contracts": [
         "../../packages/hosted-execution/src/contracts.ts"

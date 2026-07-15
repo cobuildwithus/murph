@@ -19,6 +19,7 @@
     "product-labels:env-check": "pnpm --dir ../.. exec tsx apps/web/scripts/check-product-label-runtime-env.ts",
     "companion-auth-diagnostics:waf-check": "pnpm --dir ../.. exec tsx apps/web/scripts/check-companion-auth-diagnostics-waf.ts",
     "device:reconnect-link": "pnpm --dir ../.. exec tsx --tsconfig apps/web/tsconfig.json apps/web/scripts/create-device-reconnect-link.ts",
+    "clinical-records:providers:import": "pnpm --dir ../.. exec tsx --tsconfig apps/web/tsconfig.json apps/web/scripts/import-epic-clinical-provider-directory.ts",
     "linq:sync-lines": "pnpm --dir ../.. exec tsx --tsconfig apps/web/tsconfig.json apps/web/scripts/sync-hosted-linq-lines.ts",
     "runtime:recheck-usage-advisory": "pnpm --dir ../.. exec tsx --tsconfig apps/web/tsconfig.json apps/web/scripts/recheck-usage-advisory-workflows.ts",
     "privacy:backfill-phone-calls": "pnpm --dir ../.. exec tsx --tsconfig apps/web/tsconfig.json apps/web/scripts/backfill-hosted-phone-call-private-content.ts",
@@ -41,6 +42,7 @@
   },
   "dependencies": {
     "@base-ui/react": "1.4.1",
+    "@murphai/clinical-records": "workspace:*",
     "@murphai/cloudflare-hosted-control": "workspace:*",
     "@murphai/contracts": "workspace:*",
     "@murphai/device-syncd": "workspace:*",

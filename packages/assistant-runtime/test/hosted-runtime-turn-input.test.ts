@@ -488,8 +488,17 @@ describe("selectHostedAssistantInputIds", () => {
       mode: "foreground",
       vaultRoot,
     });
+    const selectedSource = createHostedAssistantInputSource({
+      selectedInputIds: selection.inputIds,
+      vaultRoot,
+    });
+    const selectedCandidates = await selectedSource.listInputCandidates({
+      limit: 3,
+    });
 
     expect(selection.inputIds).toEqual([fresh.inputId]);
+    expect(selectedCandidates.inputs.map((candidate) => candidate.event.inputId))
+      .toEqual(selection.inputIds);
     expect(selection.pendingInputIds).toEqual([
       fresh.inputId,
       laterFirst.inputId,
@@ -691,6 +700,43 @@ describe("selectHostedAssistantInputIds", () => {
       .toContain("ain_0000000000000000000000000000aaa1");
   });
 
+  it("keeps a fresh direct-message foreground selection bounded to that input", async () => {
+    const vaultRoot = await createTempVault();
+    await enableLinqAutoReply(vaultRoot);
+    const baseTime = Date.parse("2026-04-23T00:00:00.000Z");
+    const stored = [];
+    for (let index = 0; index < 52; index += 1) {
+      const event = await upsertAssistantInputEvent({
+        vault: vaultRoot,
+        event: createAssistantInputEvent({
+          causalSeq: String(index + 1),
+          dedupeKey: `dedupe_bounded_foreground_${index}`,
+          eventId: `evt_bounded_foreground_${index}`,
+          itemId: `item_bounded_foreground_${index}`,
+          laneSeq: String(index + 1),
+          messageId: `msg_bounded_foreground_${index}`,
+          occurredAt: new Date(baseTime + index * 2_000).toISOString(),
+          receivedAt: new Date(baseTime + index * 2_000 + 1_000).toISOString(),
+          text: `adjacent direct message ${index}`,
+        }),
+      });
+      stored.push(event);
+      await enqueueHostedPendingAssistantInputId({
+        inputId: event.inputId,
+        vaultRoot,
+      });
+    }
+
+    const selection = await selectHostedAssistantInputIds({
+      freshAssistantInputIds: [stored.at(-1)!.inputId],
+      mode: "foreground",
+      vaultRoot,
+    });
+
+    expect(selection.inputIds).toEqual([stored.at(-1)!.inputId]);
+    expect(selection.pendingInputIds).toHaveLength(52);
+  });
+
   it("background mode selects bounded oldest non-terminal pending ids", async () => {
     const vaultRoot = await createTempVault();
     await enableLinqAutoReply(vaultRoot);
@@ -776,6 +822,7 @@ async function enableLinqAutoReply(vaultRoot: string): Promise<void> {
 }
 
 function createAssistantInputEvent(input: {
+  causalSeq?: string | null;
   dedupeKey?: string;
   eventId?: string;
   itemId?: string;
@@ -832,6 +879,7 @@ function createAssistantInputEvent(input: {
         }
       : null,
     sourceRef: {
+      ...(input.causalSeq === undefined ? {} : { causalSeq: input.causalSeq }),
       dedupeKey: input.dedupeKey ?? "dedupe_selected",
       eventId: input.eventId ?? "evt_selected",
       itemId: input.itemId ?? "item_selected",

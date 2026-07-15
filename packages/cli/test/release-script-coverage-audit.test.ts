@@ -1230,6 +1230,9 @@ describe('monorepo release flow coverage audit', () => {
     expect(prReviewGptLoop).not.toContain('Hard cap: 15 rounds per PR')
     expect(prReviewGptLoop).toContain('Prompt-primary PRs use the local')
     expect(agentsGuide).toContain('Prompt-primary PRs do not run ReviewGPT')
+    expect(agentWorkflowRouting).toContain(
+      "For prompt-primary changes, run the completion workflow's `prompt-review` pass",
+    )
     expect(agentsGuide).toContain('isolated regression test or explanatory doc')
     expect(agentsGuide).toContain('later rounds verify only remediation deltas')
     expect(agentWorkflowRouting).toContain('proportional low-risk exemptions')

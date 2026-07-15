@@ -1,6 +1,8 @@
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
 
 import {
+  createHostedAssistantInputLookupKey,
+  createHostedAssistantInputLookupKeyReadCandidates,
   createHostedLinqChatLookupKey,
   createHostedPhoneLookupKey,
   createHostedPhoneLookupKeyReadCandidates,
@@ -39,6 +41,9 @@ describe("hosted member lookup keys", () => {
 
   it("creates blind lookup keys that do not expose raw identifiers", () => {
     const privy = createHostedPrivyUserLookupKey("did:privy:abc123");
+    const assistantInput = createHostedAssistantInputLookupKey(
+      "ain_0123456789abcdef0123456789abcdef",
+    );
     const linq = createHostedLinqChatLookupKey("chat_123");
     const customer = createHostedStripeCustomerLookupKey("cus_123");
     const subscription = createHostedStripeSubscriptionLookupKey("sub_123");
@@ -47,6 +52,7 @@ describe("hosted member lookup keys", () => {
     const event = createHostedStripeBillingEventLookupKey("evt_123");
 
     expect(privy).toMatch(/^hbidx:privy-user:v1:/u);
+    expect(assistantInput).toMatch(/^hbidx:assistant-input:v1:/u);
     expect(linq).toMatch(/^hbidx:linq-chat:v1:/u);
     expect(customer).toMatch(/^hbidx:stripe-customer:v1:/u);
     expect(subscription).toMatch(/^hbidx:stripe-subscription:v1:/u);
@@ -55,6 +61,9 @@ describe("hosted member lookup keys", () => {
     expect(event).toMatch(/^hbidx:stripe-billing-event:v1:/u);
 
     expect(privy).not.toContain("did:privy:abc123");
+    expect(assistantInput).not.toContain(
+      "ain_0123456789abcdef0123456789abcdef",
+    );
     expect(linq).not.toContain("chat_123");
     expect(customer).not.toContain("cus_123");
     expect(subscription).not.toContain("sub_123");
@@ -83,9 +92,16 @@ describe("hosted member lookup keys", () => {
 
     try {
       const candidates = createHostedPhoneLookupKeyReadCandidates("+15551234567");
+      const assistantInputCandidates =
+        createHostedAssistantInputLookupKeyReadCandidates(
+          "ain_0123456789abcdef0123456789abcdef",
+        );
 
       expect(readHostedContactPrivacyCurrentVersion()).toBe("v2");
       expect(candidates).toHaveLength(2);
+      expect(assistantInputCandidates).toHaveLength(2);
+      expect(parseHostedBlindIndex(assistantInputCandidates[0])?.version).toBe("v2");
+      expect(parseHostedBlindIndex(assistantInputCandidates[1])?.version).toBe("v1");
       expect(parseHostedBlindIndex(candidates[0])?.version).toBe("v2");
       expect(parseHostedBlindIndex(candidates[1])?.version).toBe("v1");
     } finally {

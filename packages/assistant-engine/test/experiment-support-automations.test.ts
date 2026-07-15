@@ -333,8 +333,10 @@ it('persists the deterministic outcome with a pinned asOf for an eligible final-
     vaultRoot: '/tmp/lifecycle-precondition/vault',
   })
   expect(
-    vaultServicesMocks.writeExperimentOutcome.mock.invocationCallOrder[0],
-  ).toBeLessThan(coreMocks.patchAutomation.mock.invocationCallOrder[0] ?? 0)
+    coreMocks.patchAutomation.mock.invocationCallOrder[0],
+  ).toBeLessThan(
+    vaultServicesMocks.writeExperimentOutcome.mock.invocationCallOrder[0] ?? 0,
+  )
 })
 
 it('continues at the Auckland final-results fire instant using the experiment local day', async () => {
@@ -456,26 +458,35 @@ it('treats a missing activity nudge automation as a successful final-results pre
   })
 })
 
-it('does not block outcome persistence when activity nudge archive fails', async () => {
+it('blocks outcome persistence until activity nudge cleanup succeeds', async () => {
   resetPreconditionMocks()
   vaultServicesMocks.showExperiment.mockResolvedValue(
     buildShowExperimentResult(eligibleFrontmatter),
   )
   coreMocks.patchAutomation
     .mockReset()
-    .mockRejectedValue(new Error('archive failed'))
+    .mockRejectedValueOnce(new Error('archive failed'))
+    .mockResolvedValueOnce({})
+
+  await expect(runExperimentLifecycleOutcomePrecondition({
+    automationId: FINAL_RESULTS_AUTOMATION_ID,
+    tags: ['experiment', 'final-results'],
+    vault: '/tmp/lifecycle-precondition/vault',
+  })).rejects.toThrow('archive failed')
+  expect(vaultServicesMocks.writeExperimentOutcome).not.toHaveBeenCalled()
 
   const result = await runExperimentLifecycleOutcomePrecondition({
     automationId: FINAL_RESULTS_AUTOMATION_ID,
     tags: ['experiment', 'final-results'],
     vault: '/tmp/lifecycle-precondition/vault',
   })
-
   expect(result).toEqual({ kind: 'continue' })
   expect(vaultServicesMocks.writeExperimentOutcome).toHaveBeenCalledWith(
     expect.objectContaining({ lookup: FINAL_RESULTS_EXPERIMENT_ID }),
   )
-  expect(coreMocks.patchAutomation).toHaveBeenCalledWith({
+  expect(vaultServicesMocks.writeExperimentOutcome).toHaveBeenCalledTimes(1)
+  expect(coreMocks.patchAutomation).toHaveBeenCalledTimes(2)
+  expect(coreMocks.patchAutomation).toHaveBeenLastCalledWith({
     lookup: 'experiment-activity-nudge-sauna-rhr',
     status: 'archived',
     vaultRoot: '/tmp/lifecycle-precondition/vault',
@@ -603,7 +614,7 @@ it('does not archive the activity nudge when final results are not due yet', asy
   expect(coreMocks.patchAutomation).not.toHaveBeenCalled()
 })
 
-it('does not block a terminal skip verdict when activity nudge archive fails', async () => {
+it('does not consume a terminal skip verdict when activity nudge archive fails', async () => {
   resetPreconditionMocks()
   vaultServicesMocks.showExperiment.mockResolvedValue(
     buildShowExperimentResult({
@@ -615,16 +626,11 @@ it('does not block a terminal skip verdict when activity nudge archive fails', a
     .mockReset()
     .mockRejectedValue(new Error('archive failed'))
 
-  const result = await runExperimentLifecycleOutcomePrecondition({
+  await expect(runExperimentLifecycleOutcomePrecondition({
     automationId: FINAL_RESULTS_AUTOMATION_ID,
     tags: ['experiment', 'final-results'],
     vault: '/tmp/lifecycle-precondition/vault',
-  })
-
-  expect(result).toEqual({
-    kind: 'skip',
-    reason: 'assistant support opts out of scheduled summaries',
-  })
+  })).rejects.toThrow('archive failed')
   expect(vaultServicesMocks.writeExperimentOutcome).not.toHaveBeenCalled()
   expect(coreMocks.patchAutomation).toHaveBeenCalledWith({
     lookup: 'experiment-activity-nudge-sauna-rhr',
