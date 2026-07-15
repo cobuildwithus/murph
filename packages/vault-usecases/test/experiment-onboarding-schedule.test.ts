@@ -157,6 +157,87 @@ test("applyExperimentOnboardingRecord accepts status-only updates", async () => 
   assert.equal(updateInput.runPlan, undefined);
 });
 
+test("applyExperimentOnboardingRecord clears stale primary direction and duplicate aliases", async () => {
+  const experimentEntity = {
+    entityId: "exp_01JNV44P4R5SWC90K2AHXQJQZA",
+    family: "experiment",
+    kind: "experiment",
+    title: "Recovery experiment",
+    status: "active",
+    occurredAt: null,
+    date: null,
+    path: "bank/experiments/recovery-experiment.md",
+    body: "---\n",
+    attributes: {
+      schemaVersion: "murph.frontmatter.experiment.v1",
+      docType: "experiment",
+      experimentId: "exp_01JNV44P4R5SWC90K2AHXQJQZA",
+      slug: "recovery-experiment",
+      status: "active",
+      title: "Recovery experiment",
+      startedOn: "2026-04-29",
+      analysisPlan: {
+        primaryBiomarkerKey: "biomarker:resting-heart-rate",
+        secondaryBiomarkerKeys: ["biomarker:hrv"],
+        desiredDirection: "decrease",
+        expectedDirections: [
+          { biomarkerKey: "biomarker:hrv", direction: "decrease" },
+        ],
+      },
+    },
+    links: [],
+    relatedIds: [],
+    stream: null,
+    experimentSlug: "recovery-experiment",
+    tags: [],
+    frontmatter: null,
+  };
+  const queryRuntime = {
+    readVault: vi.fn(async () => ({ entities: [experimentEntity] })),
+    lookupEntityById: vi.fn(() => experimentEntity),
+  };
+  const updateExperiment = vi.fn(
+    async (_input: { analysisPlan?: Record<string, unknown> }) => ({
+      experimentId: "exp_01JNV44P4R5SWC90K2AHXQJQZA",
+      slug: "recovery-experiment",
+      relativePath: "bank/experiments/recovery-experiment.md",
+      status: "active",
+      updated: true as const,
+    }),
+  );
+
+  const module = await importWithMocks<
+    typeof import("../src/usecases/experiment-journal-vault.ts")
+  >("../src/usecases/experiment-journal-vault.ts", {
+    "../src/query-runtime.js": () => ({
+      loadQueryRuntime: vi.fn(async () => queryRuntime),
+    }),
+    "../src/runtime-import.js": () => ({
+      loadRuntimeModule: vi.fn(async (specifier: string) => {
+        assert.equal(specifier, "@murphai/core");
+        return { updateExperiment };
+      }),
+    }),
+  });
+
+  await module.applyExperimentOnboardingRecord({
+    vault: "test-vault",
+    lookup: "recovery-experiment",
+    primaryBiomarkerKey: "biomarker:hrv-rmssd",
+    expectedDirection: ["biomarker:hrv-rmssd=increase"],
+  });
+
+  const updateInput = updateExperiment.mock.calls[0]?.[0];
+  assert.ok(updateInput);
+  assert.deepEqual(updateInput.analysisPlan, {
+    primaryBiomarkerKey: "biomarker:hrv-rmssd",
+    secondaryBiomarkerKeys: [],
+    expectedDirections: [
+      { biomarkerKey: "biomarker:hrv-rmssd", direction: "increase" },
+    ],
+  });
+});
+
 test("applyExperimentOnboardingRecord clears run baseline windows with zero baseline days", async () => {
   const experimentEntity = {
     entityId: "exp_01JNV44P4R5SWC90K2AHXQJQYT",

@@ -769,6 +769,8 @@ test("experiment progress usecases read metrics from the query metric projection
   });
   assert.equal(card.card.movers.length, 1);
   assert.equal(card.card.movers[0]?.label, "Sleep Efficiency");
+  assert.equal(card.card.movers[0]?.direction, "up");
+  assert.equal(card.card.movers[0]?.sentiment, "positive");
   assert.equal(card.card.sessions.logged, 3);
   assert.equal(card.card.weeks[0]?.cells, "CCCOOOO");
 

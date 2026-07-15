@@ -11,6 +11,7 @@ const WORKSPACE_SOURCE_ENTRY_RELATIVE_PATHS = {
   "@murphai/contracts": "../contracts/src/index.ts",
   "@murphai/core": "../core/src/index.ts",
   "@murphai/device-syncd": "../device-syncd/src/index.ts",
+  "@murphai/health-commons": "../health-commons/src/index.ts",
   "@murphai/importers": "../importers/src/index.ts",
   "@murphai/operator-config": "../operator-config/package.json",
   "@murphai/query": "../query/src/index.ts",

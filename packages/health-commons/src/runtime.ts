@@ -4,6 +4,7 @@ import { fileURLToPath, pathToFileURL } from "node:url";
 
 import {
   HEALTH_COMMONS_BIOMARKER_DESIRED_DIRECTIONS,
+  type HealthCommonsBiomarkerDesiredDirection,
   type HealthCommonsCatalog,
   type HealthCommonsCatalogEntity,
   type HealthCommonsEntityType,
@@ -14,6 +15,10 @@ import {
   type HealthCommonsRelation,
   type HealthCommonsRelationType,
 } from "@murphai/contracts";
+import {
+  resolveMetricDefinition,
+  resolveMetricDefinitionForBiomarker,
+} from "@murphai/health-metrics";
 import {
   HEALTH_COMMONS_PROTOCOL_FAMILY_GRAPH_SCHEMA_VERSION,
   HEALTH_COMMONS_PROTOCOL_INDEX_SCHEMA_VERSION,
@@ -569,6 +574,30 @@ export function getGeneratedHealthCommonsWebBiomarkerIndex(
 
   cachedGeneratedWebBiomarkerIndex ??= loadGeneratedHealthCommonsWebBiomarkerIndex();
   return cachedGeneratedWebBiomarkerIndex;
+}
+
+export function resolveGeneratedHealthCommonsBiomarkerDesiredDirection(
+  biomarkerKey: string,
+  options: LoadGeneratedHealthCommonsWebArtifactOptions = {},
+): HealthCommonsBiomarkerDesiredDirection | null {
+  const canonicalBiomarkerKey = resolveCanonicalBiomarkerKey(biomarkerKey);
+  const entry = getGeneratedHealthCommonsWebBiomarkerIndex(options).biomarkers.find(
+    (biomarker) => biomarker.key === canonicalBiomarkerKey,
+  );
+  return entry?.desiredDirection ?? null;
+}
+
+function resolveCanonicalBiomarkerKey(biomarkerKey: string): string {
+  const normalized = biomarkerKey.trim().toLowerCase();
+  const slug = normalized.split(":").at(-1) ?? normalized;
+  const normalizedBiomarkerKey = normalized.startsWith("biomarker:")
+    ? normalized
+    : `biomarker:${slug}`;
+  return (
+    resolveMetricDefinitionForBiomarker(normalizedBiomarkerKey)?.biomarkerKey ??
+    resolveMetricDefinition(slug)?.biomarkerKey ??
+    normalizedBiomarkerKey
+  );
 }
 
 export function loadGeneratedHealthCommonsWebRouteBundle(input: {

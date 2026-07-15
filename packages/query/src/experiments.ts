@@ -551,10 +551,19 @@ function requireExperimentFrontmatter(entity: CanonicalEntity): QueryExperimentF
 }
 
 function buildMetricResults(context: ExperimentSummaryContext): ExperimentMetricResult[] {
-  const biomarkerKeys = [
+  const candidateBiomarkerKeys = [
     context.frontmatter.analysisPlan?.primaryBiomarkerKey,
     ...(context.frontmatter.analysisPlan?.secondaryBiomarkerKeys ?? []),
   ].filter((value): value is string => typeof value === "string" && value.length > 0);
+  const seenMetricIdentities = new Set<string>();
+  const biomarkerKeys = candidateBiomarkerKeys.filter((biomarkerKey) => {
+    const metricIdentity = resolveExperimentMetricIdentity(biomarkerKey).metricKey;
+    if (seenMetricIdentities.has(metricIdentity)) {
+      return false;
+    }
+    seenMetricIdentities.add(metricIdentity);
+    return true;
+  });
 
   return biomarkerKeys.map((biomarkerKey) => {
     const metricWindows = selectMetricWindows(context, biomarkerKey);
@@ -614,14 +623,22 @@ function resolveExpectedDirection(
   analysisPlan: QueryExperimentFrontmatter["analysisPlan"] | undefined,
   biomarkerKey: string,
 ): ExperimentMetricResult["expectedDirection"] {
-  const explicitDirection = analysisPlan?.expectedDirections?.find(
-    (entry) => entry.biomarkerKey === biomarkerKey,
-  )?.direction;
-  if (explicitDirection) {
-    return explicitDirection;
+  const metricIdentity = resolveExperimentMetricIdentity(biomarkerKey).metricKey;
+  const expectedDirections = analysisPlan?.expectedDirections ?? [];
+  for (let index = expectedDirections.length - 1; index >= 0; index -= 1) {
+    const entry = expectedDirections[index];
+    if (
+      entry &&
+      resolveExperimentMetricIdentity(entry.biomarkerKey).metricKey === metricIdentity
+    ) {
+      return entry.direction;
+    }
   }
 
-  if (analysisPlan?.primaryBiomarkerKey === biomarkerKey) {
+  if (
+    analysisPlan?.primaryBiomarkerKey &&
+    resolveExperimentMetricIdentity(analysisPlan.primaryBiomarkerKey).metricKey === metricIdentity
+  ) {
     return analysisPlan.desiredDirection ?? null;
   }
 

@@ -17,11 +17,15 @@ import {
   jsonObjectSchema,
   protocolRefSchema,
   safeParseContract,
+  type HealthCommonsBiomarkerDesiredDirection,
   type ExperimentFrontmatter,
   type ExperimentRunScheduleIntent,
 } from '@murphai/contracts'
 import { stringifyFrontmatterDocument } from '@murphai/core'
-import { synthesizeLegacySessionAdherenceTargets } from '@murphai/query'
+import {
+  resolveExperimentMetricIdentity,
+  synthesizeLegacySessionAdherenceTargets,
+} from '@murphai/query'
 import { z } from 'zod'
 import {
   loadQueryRuntime,
@@ -1484,15 +1488,31 @@ export async function showExperimentProgressCard(input: {
     lookup: input.lookup,
     vault: input.vault,
   })
+  const frontmatter = requireExperimentFrontmatter(entity)
   const metricPoints = await readExperimentJournalMetricPoints({
     asOf: input.asOf,
-    frontmatter: requireExperimentFrontmatter(entity),
+    frontmatter,
     query,
     vault: input.vault,
+  })
+  const healthCommons = await loadHealthCommonsBiomarkerDirectionRuntime()
+  const biomarkerKeys = [
+    frontmatter.analysisPlan?.primaryBiomarkerKey ?? null,
+    ...(frontmatter.analysisPlan?.secondaryBiomarkerKeys ?? []),
+  ].filter((biomarkerKey): biomarkerKey is string => biomarkerKey !== null)
+  const biomarkerDesiredDirections = uniqueStrings(biomarkerKeys).flatMap((biomarkerKey) => {
+    const desiredDirection =
+      healthCommons.resolveGeneratedHealthCommonsBiomarkerDesiredDirection(
+        biomarkerKey,
+      )
+    return desiredDirection === null
+      ? []
+      : [{ biomarkerKey, desiredDirection }]
   })
 
   const { card, warnings } = query.buildExperimentProgressCard(readModel, slug, {
     asOf: input.asOf,
+    biomarkerDesiredDirections,
     confounders: input.confounders,
     metricPoints,
   })
@@ -2529,12 +2549,23 @@ function buildAnalysisPlanForOnboardingApply(
   existing: ExperimentFrontmatterValue['analysisPlan'],
 ): ExperimentAnalysisPlanValue | undefined {
   const patch: Partial<ExperimentAnalysisPlanValue> = {}
-
-  if (input.primaryBiomarkerKey !== undefined) {
-    patch.primaryBiomarkerKey = normalizeHealthCommonsKeyOption(
-      input.primaryBiomarkerKey,
-      'primary-biomarker-key',
+  const requestedPrimaryBiomarkerKey = input.primaryBiomarkerKey === undefined
+    ? undefined
+    : normalizeHealthCommonsKeyOption(
+        input.primaryBiomarkerKey,
+        'primary-biomarker-key',
+      )
+  const primaryBiomarkerChanged = requestedPrimaryBiomarkerKey !== undefined &&
+    (
+      existing?.primaryBiomarkerKey === undefined ||
+      !matchesExperimentBiomarkerIdentity(
+        requestedPrimaryBiomarkerKey,
+        existing.primaryBiomarkerKey,
+      )
     )
+
+  if (requestedPrimaryBiomarkerKey !== undefined) {
+    patch.primaryBiomarkerKey = requestedPrimaryBiomarkerKey
   }
 
   const secondaryBiomarkerKeys = normalizeHealthCommonsKeyListOption(
@@ -2542,7 +2573,21 @@ function buildAnalysisPlanForOnboardingApply(
     'secondary-biomarker-key',
   )
   if (secondaryBiomarkerKeys !== undefined) {
-    patch.secondaryBiomarkerKeys = secondaryBiomarkerKeys
+    patch.secondaryBiomarkerKeys = withoutExperimentBiomarkerIdentity(
+      secondaryBiomarkerKeys,
+      requestedPrimaryBiomarkerKey ?? existing?.primaryBiomarkerKey,
+    )
+  } else if (
+    requestedPrimaryBiomarkerKey !== undefined &&
+    existing?.secondaryBiomarkerKeys
+  ) {
+    const nextSecondaryBiomarkerKeys = withoutExperimentBiomarkerIdentity(
+      existing.secondaryBiomarkerKeys,
+      requestedPrimaryBiomarkerKey,
+    )
+    if (nextSecondaryBiomarkerKeys.length !== existing.secondaryBiomarkerKeys.length) {
+      patch.secondaryBiomarkerKeys = nextSecondaryBiomarkerKeys
+    }
   }
 
   if (input.desiredDirection !== undefined) {
@@ -2582,12 +2627,34 @@ function buildAnalysisPlanForOnboardingApply(
     return undefined
   }
 
-  return experimentAnalysisPlanSchema.parse(
-    compactObject({
-      ...(existing ?? {}),
-      ...patch,
-    }),
+  const next = compactObject({
+    ...(existing ?? {}),
+    ...patch,
+  })
+  if (primaryBiomarkerChanged && input.desiredDirection === undefined) {
+    delete next.desiredDirection
+  }
+
+  return experimentAnalysisPlanSchema.parse(next)
+}
+
+function withoutExperimentBiomarkerIdentity(
+  biomarkerKeys: readonly string[],
+  omittedBiomarkerKey: string | undefined,
+): string[] {
+  if (omittedBiomarkerKey === undefined) {
+    return [...biomarkerKeys]
+  }
+
+  return biomarkerKeys.filter(
+    (biomarkerKey) =>
+      !matchesExperimentBiomarkerIdentity(biomarkerKey, omittedBiomarkerKey),
   )
+}
+
+function matchesExperimentBiomarkerIdentity(left: string, right: string): boolean {
+  return resolveExperimentMetricIdentity(left).metricKey ===
+    resolveExperimentMetricIdentity(right).metricKey
 }
 
 function buildRunPlanDatePatch(input: ApplyExperimentOnboardingRecordInput) {
@@ -2776,9 +2843,15 @@ function normalizeExpectedDirectionEntriesOption(
     return undefined
   }
 
-  const next = new Map<string, z.infer<typeof experimentSignalDirectionSchema>>()
+  const next = new Map<
+    string,
+    {
+      biomarkerKey: string
+      direction: z.infer<typeof experimentSignalDirectionSchema>
+    }
+  >()
   for (const entry of existing ?? []) {
-    next.set(entry.biomarkerKey, entry.direction)
+    next.set(resolveExperimentMetricIdentity(entry.biomarkerKey).metricKey, entry)
   }
 
   for (const entry of normalized) {
@@ -2804,11 +2877,28 @@ function normalizeExpectedDirectionEntriesOption(
       )
     }
 
-    next.set(biomarkerKey, direction.data)
+    next.set(resolveExperimentMetricIdentity(biomarkerKey).metricKey, {
+      biomarkerKey,
+      direction: direction.data,
+    })
   }
 
   return experimentExpectedDirectionsSchema.parse(
-    [...next].map(([biomarkerKey, direction]) => ({ biomarkerKey, direction })),
+    [...next.values()],
+  )
+}
+
+type HealthCommonsBiomarkerDirectionRuntime = {
+  resolveGeneratedHealthCommonsBiomarkerDesiredDirection(
+    biomarkerKey: string,
+  ): HealthCommonsBiomarkerDesiredDirection | null
+}
+
+async function loadHealthCommonsBiomarkerDirectionRuntime(): Promise<
+  HealthCommonsBiomarkerDirectionRuntime
+> {
+  return loadRuntimeModule<HealthCommonsBiomarkerDirectionRuntime>(
+    '@murphai/health-commons/runtime',
   )
 }
 
