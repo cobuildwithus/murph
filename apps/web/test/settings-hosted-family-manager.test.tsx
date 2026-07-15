@@ -445,12 +445,12 @@ test("HostedFamilyManager confirms a member move to Edge", async () => {
   }
 });
 
-test("HostedFamilyManager shows and locks a pending member tier", async () => {
+test("HostedFamilyManager retries the persisted target while keeping removal locked", async () => {
   const { HostedFamilyManager } = await import(
     "@/src/components/settings/hosted-family-settings-actions"
   );
   const props = baseFamilyManagerProps();
-  const { cleanup, container } = await renderClientComponent(
+  const { cleanup, container, window } = await renderClientComponent(
     createElement(HostedFamilyManager, {
       ...props,
       members: [
@@ -467,15 +467,26 @@ test("HostedFamilyManager shows and locks a pending member tier", async () => {
     }),
     { requireButton: false },
   );
+  mocks.requestHostedOnboardingJson.mockResolvedValueOnce({ syncing: true });
 
   try {
     assert.match(container.textContent ?? "", /Updating to Edge/);
-    const manage = container.querySelector<HTMLButtonElement>(
-      'button[aria-label="Manage Mom\'s plan"]',
+    const retry = container.querySelector<HTMLButtonElement>(
+      'button[aria-label="Retry updating Mom\'s plan to Edge"]',
     );
-    assert.ok(manage);
-    assert.equal(manage.disabled, true);
+    assert.ok(retry);
+    assert.equal(retry.disabled, false);
     assert.equal(buttonByText(container, "Remove").disabled, true);
+
+    await clickButton(container, window, "Retry update");
+    assert.match(container.textContent ?? "", /Upgrade Mom from Pulse to Edge/);
+    await clickButton(container, window, "Upgrade to Edge");
+
+    expect(mocks.requestHostedOnboardingJson).toHaveBeenCalledWith({
+      method: "PATCH",
+      payload: { planCode: "edge" },
+      url: "/api/settings/billing/family/members/member_mom",
+    });
   } finally {
     await cleanup();
   }

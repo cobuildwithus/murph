@@ -18,8 +18,6 @@ const mocks = vi.hoisted(() => ({
   revokeHostedFamilyInviteTx: vi.fn(),
   updateHostedFamilyMemberPlan: vi.fn(),
   updateHostedFamilyPlanCapacities: vi.fn(),
-  updateHostedFamilySeatCount: vi.fn(),
-  waitForHostedFamilyBilledSeatCount: vi.fn(),
   waitForHostedFamilyPlanCapacities: vi.fn(),
 }));
 
@@ -46,16 +44,12 @@ vi.mock("@/src/lib/hosted-onboarding/family-plan", () => ({
   revokeHostedFamilyInviteTx: mocks.revokeHostedFamilyInviteTx,
   updateHostedFamilyMemberPlan: mocks.updateHostedFamilyMemberPlan,
   updateHostedFamilyPlanCapacities: mocks.updateHostedFamilyPlanCapacities,
-  updateHostedFamilySeatCount: mocks.updateHostedFamilySeatCount,
-  waitForHostedFamilyBilledSeatCount: mocks.waitForHostedFamilyBilledSeatCount,
   waitForHostedFamilyPlanCapacities: mocks.waitForHostedFamilyPlanCapacities,
 }));
 
 let inviteRoute: typeof import("../app/api/settings/billing/family/invite/route");
 let inviteCancelRoute: typeof import("../app/api/settings/billing/family/invite/[inviteId]/route");
 let memberRemoveRoute: typeof import("../app/api/settings/billing/family/members/[memberId]/route");
-let capacityRoute: typeof import("../app/api/settings/billing/family/capacity/route");
-let seatsRoute: typeof import("../app/api/settings/billing/family/seats/route");
 
 const ownerSnapshot = {
   billingActive: true,
@@ -118,32 +112,18 @@ beforeEach(async () => {
   );
   mocks.revokeHostedFamilyInviteTx.mockResolvedValue(true);
   mocks.removeHostedFamilyMemberTx.mockResolvedValue(true);
-  mocks.updateHostedFamilySeatCount.mockResolvedValue({
-    seats: {
-      active: 1,
-      billed: 3,
-      invited: 1,
-      max: 6,
-      min: 2,
-      remaining: 1,
-      used: 2,
-    },
-  });
   mocks.readHostedFamilyOwnerSnapshotForMember.mockResolvedValue(ownerSnapshot);
   mocks.updateHostedFamilyMemberPlan.mockResolvedValue({
     snapshot: ownerSnapshot,
     syncing: false,
   });
   mocks.updateHostedFamilyPlanCapacities.mockResolvedValue(ownerSnapshot);
-  mocks.waitForHostedFamilyBilledSeatCount.mockResolvedValue(true);
   mocks.waitForHostedFamilyPlanCapacities.mockResolvedValue(true);
   mocks.hostedFamilyInviteHasReusableTarget.mockReturnValue(true);
 
   inviteRoute = await import("../app/api/settings/billing/family/invite/route");
   inviteCancelRoute = await import("../app/api/settings/billing/family/invite/[inviteId]/route");
   memberRemoveRoute = await import("../app/api/settings/billing/family/members/[memberId]/route");
-  capacityRoute = await import("../app/api/settings/billing/family/capacity/route");
-  seatsRoute = await import("../app/api/settings/billing/family/seats/route");
 });
 
 function inviteRequest(body: Record<string, unknown>) {
@@ -424,88 +404,6 @@ test("does not add a seat when the seat limit is hit but addSeatIfNeeded is off"
   expect(mocks.updateHostedFamilyPlanCapacities).not.toHaveBeenCalled();
 });
 
-test("updates paid Family seat count explicitly", async () => {
-  mocks.readHostedFamilyOwnerSnapshotForMember.mockResolvedValueOnce({
-    billingActive: true,
-    groupId: "hbag_family",
-    seats: { active: 1, billed: 3, invited: 1, max: 6, min: 2, remaining: 1, used: 2 },
-  });
-
-  const response = await seatsRoute.PATCH(
-    new Request("https://join.example.test/api/settings/billing/family/seats", {
-      body: JSON.stringify({ seatCount: 3 }),
-      headers: { "content-type": "application/json", origin: "https://join.example.test" },
-      method: "PATCH",
-    }),
-  );
-
-  expect(response.status).toBe(200);
-  await expect(response.json()).resolves.toEqual({
-    seats: {
-      active: 1,
-      billed: 3,
-      invited: 1,
-      max: 6,
-      min: 2,
-      remaining: 1,
-      used: 2,
-    },
-  });
-  expect(mocks.updateHostedFamilySeatCount).toHaveBeenCalledWith({
-    groupId: "hbag_family",
-    ownerMemberId: "member_owner",
-    prisma: expect.any(Object),
-    targetSeatCount: 3,
-  });
-});
-
-test("updates the exact paid Pulse and Edge capacity", async () => {
-  const response = await capacityRoute.PATCH(
-    new Request("https://join.example.test/api/settings/billing/family/capacity", {
-      body: JSON.stringify({ capacities: { edge: 1, pulse: 2 } }),
-      headers: { "content-type": "application/json", origin: "https://join.example.test" },
-      method: "PATCH",
-    }),
-  );
-
-  expect(response.status).toBe(200);
-  await expect(response.json()).resolves.toEqual({
-    plans: {
-      edge: { active: 0, billed: 0, invited: 0, remaining: 0, used: 0 },
-      pulse: { active: 2, billed: 2, invited: 0, remaining: 0, used: 2 },
-    },
-    seats: { active: 2, billed: 2, invited: 0, max: 6, min: 2, remaining: 0, used: 2 },
-    syncing: false,
-  });
-  expect(mocks.updateHostedFamilyPlanCapacities).toHaveBeenCalledWith({
-    groupId: "hbag_family",
-    ownerMemberId: "member_owner",
-    prisma: expect.any(Object),
-    targetCapacities: { edge: 1, pulse: 2 },
-  });
-  expect(mocks.waitForHostedFamilyPlanCapacities).toHaveBeenCalledWith({
-    groupId: "hbag_family",
-    prisma: expect.any(Object),
-    targetCapacities: { edge: 1, pulse: 2 },
-  });
-});
-
-test("reports a paid capacity change that is still syncing", async () => {
-  mocks.waitForHostedFamilyPlanCapacities.mockResolvedValueOnce(false);
-
-  const response = await capacityRoute.PATCH(
-    new Request("https://join.example.test/api/settings/billing/family/capacity", {
-      body: JSON.stringify({ capacities: { edge: 1, pulse: 2 } }),
-      headers: { "content-type": "application/json", origin: "https://join.example.test" },
-      method: "PATCH",
-    }),
-  );
-
-  expect(response.status).toBe(200);
-  await expect(response.json()).resolves.toMatchObject({ syncing: true });
-  expect(mocks.readHostedFamilyOwnerSnapshotForMember).not.toHaveBeenCalled();
-});
-
 test("changes an active Family member tier", async () => {
   const response = await memberRemoveRoute.PATCH(
     new Request("https://join.example.test/api/settings/billing/family/members/member_child", {
@@ -547,25 +445,6 @@ test("reports a member tier change that is still syncing", async () => {
 
   expect(response.status).toBe(200);
   await expect(response.json()).resolves.toMatchObject({ syncing: true });
-});
-
-test("does not create a family owner group from the seats route", async () => {
-  mocks.hostedAccountGroupFindUnique.mockResolvedValueOnce(null);
-
-  const response = await seatsRoute.PATCH(
-    new Request("https://join.example.test/api/settings/billing/family/seats", {
-      body: JSON.stringify({ seatCount: 3 }),
-      headers: { "content-type": "application/json", origin: "https://join.example.test" },
-      method: "PATCH",
-    }),
-  );
-
-  expect(response.status).toBe(404);
-  await expect(response.json()).resolves.toMatchObject({
-    error: { code: "HOSTED_FAMILY_GROUP_NOT_FOUND" },
-  });
-  expect(mocks.ensureHostedAccountGroupForOwnerTx).not.toHaveBeenCalled();
-  expect(mocks.updateHostedFamilySeatCount).not.toHaveBeenCalled();
 });
 
 test("rejects an empty invite target", async () => {

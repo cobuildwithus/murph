@@ -501,89 +501,99 @@ export function HostedFamilyManager(props: {
       </div>
 
       <div className="overflow-x-auto">
-      <table className="w-full min-w-[44rem] text-sm">
-        <thead className="sr-only">
-          <tr>
-            <th>Member</th>
-            <th>Tier</th>
-            <th>Status</th>
-            <th>Actions</th>
-          </tr>
-        </thead>
-        <tbody className="divide-y divide-border">
-        {props.members.map((member) => (
-          <tr key={member.memberId}>
-            <td className="py-3 pr-3">
-              <div className="truncate font-medium text-foreground">
-                {member.isOwner ? "You" : member.label ?? "Family member"}
-              </div>
-              {!member.isOwner && member.joinedAtIso ? (
-                <div className="text-xs text-muted-foreground">
-                  Joined {formatFamilyDate(member.joinedAtIso)}
-                </div>
-              ) : null}
-            </td>
-            <td className="py-3 pr-3 align-top">
-              <Badge variant="outline">
-                {props.tiers.find((tier) => tier.planCode === member.planCode)?.name}
-              </Badge>
-            </td>
-            <td className="py-3 pr-3 align-top">
-              <Badge variant={member.pendingPlanCode ? "secondary" : member.isOwner ? "outline" : "default"}>
-                {member.pendingPlanCode
-                  ? `Updating to ${props.tiers.find((tier) => tier.planCode === member.pendingPlanCode)?.name}`
-                  : member.isOwner ? "Owner" : "Active"}
-              </Badge>
-            </td>
-            <td className="py-3 text-right align-top">
-              <div className="inline-flex items-center gap-1">
-                {props.tiers
-                  .filter((tier) => tier.planCode !== member.planCode)
-                  .map((tier) => (
-                    <Button
-                      key={tier.planCode}
-                      type="button"
-                      variant="ghost"
-                      size="sm"
-                      aria-label={member.isOwner
-                        ? "Manage your plan"
-                        : `Manage ${member.label ?? "this family member"}'s plan`}
-                      disabled={isActing || member.pendingPlanCode !== null}
-                      onClick={() => setPendingAction({
-                        from: member.planCode,
-                        id: member.memberId,
-                        isOwner: member.isOwner,
-                        kind: "change-plan",
-                        label: member.isOwner ? "you" : member.label ?? "this family member",
-                        to: tier.planCode,
-                      })}
-                    >
-                      Manage
-                    </Button>
-                  ))}
-              {member.isOwner ? null : (
-                <Button
-                  type="button"
-                  variant="ghost"
-                  size="sm"
-                  disabled={isActing || member.pendingPlanCode !== null}
-                  onClick={() =>
-                    setPendingAction({
-                      id: member.memberId,
-                      kind: "remove-member",
-                      label: member.label ?? "this family member",
-                    })
-                  }
-                >
-                  Remove
-                </Button>
-              )}
-              </div>
-            </td>
-          </tr>
-        ))}
+        <table className="w-full min-w-[44rem] text-sm">
+          <thead className="sr-only">
+            <tr>
+              <th>Member</th>
+              <th>Tier</th>
+              <th>Status</th>
+              <th>Actions</th>
+            </tr>
+          </thead>
+          <tbody className="divide-y divide-border">
+            {props.members.map((member) => {
+              const isRetry = member.pendingPlanCode !== null;
+              const targetPlanCode = member.pendingPlanCode
+                ?? props.tiers.find((tier) => tier.planCode !== member.planCode)?.planCode;
+              const targetTier = props.tiers.find(
+                (tier) => tier.planCode === targetPlanCode,
+              );
 
-        {props.invites.map((invite) => {
+              return (
+                <tr key={member.memberId}>
+                  <td className="py-3 pr-3">
+                    <div className="truncate font-medium text-foreground">
+                      {member.isOwner ? "You" : member.label ?? "Family member"}
+                    </div>
+                    {!member.isOwner && member.joinedAtIso ? (
+                      <div className="text-xs text-muted-foreground">
+                        Joined {formatFamilyDate(member.joinedAtIso)}
+                      </div>
+                    ) : null}
+                  </td>
+                  <td className="py-3 pr-3 align-top">
+                    <Badge variant="outline">
+                      {props.tiers.find((tier) => tier.planCode === member.planCode)?.name}
+                    </Badge>
+                  </td>
+                  <td className="py-3 pr-3 align-top">
+                    <Badge variant={member.pendingPlanCode ? "secondary" : member.isOwner ? "outline" : "default"}>
+                      {member.pendingPlanCode
+                        ? `Updating to ${props.tiers.find((tier) => tier.planCode === member.pendingPlanCode)?.name}`
+                        : member.isOwner ? "Owner" : "Active"}
+                    </Badge>
+                  </td>
+                  <td className="py-3 text-right align-top">
+                    <div className="inline-flex items-center gap-1">
+                      {targetTier ? (
+                        <Button
+                          type="button"
+                          variant="ghost"
+                          size="sm"
+                          aria-label={isRetry
+                            ? member.isOwner
+                              ? `Retry updating your plan to ${targetTier.name}`
+                              : `Retry updating ${member.label ?? "this family member"}'s plan to ${targetTier.name}`
+                            : member.isOwner
+                              ? "Manage your plan"
+                              : `Manage ${member.label ?? "this family member"}'s plan`}
+                          disabled={isActing}
+                          onClick={() => setPendingAction({
+                            from: member.planCode,
+                            id: member.memberId,
+                            isOwner: member.isOwner,
+                            kind: "change-plan",
+                            label: member.isOwner ? "you" : member.label ?? "this family member",
+                            to: targetTier.planCode,
+                          })}
+                        >
+                          {isRetry ? "Retry update" : "Manage"}
+                        </Button>
+                      ) : null}
+                      {member.isOwner ? null : (
+                        <Button
+                          type="button"
+                          variant="ghost"
+                          size="sm"
+                          disabled={isActing || member.pendingPlanCode !== null}
+                          onClick={() =>
+                            setPendingAction({
+                              id: member.memberId,
+                              kind: "remove-member",
+                              label: member.label ?? "this family member",
+                            })
+                          }
+                        >
+                          Remove
+                        </Button>
+                      )}
+                    </div>
+                  </td>
+                </tr>
+              );
+            })}
+
+            {props.invites.map((invite) => {
           const link = inviteShareLink(invite);
           const secondary = invite.targetLabel ? inviteContacts(invite)[0] ?? null : null;
           return (

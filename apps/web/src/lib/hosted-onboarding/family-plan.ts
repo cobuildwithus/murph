@@ -1969,36 +1969,6 @@ function describeSafeHostedFamilyDirectPaidStripeError(error: unknown): Record<s
   };
 }
 
-export async function updateHostedFamilySeatCount(input: {
-  groupId: string;
-  now?: Date;
-  ownerMemberId: string;
-  prisma?: PrismaClient;
-  targetSeatCount: unknown;
-}): Promise<HostedFamilyOwnerSnapshot> {
-  const prisma = input.prisma ?? getPrisma();
-  const targetSeatCount = normalizeHostedFamilySeatCount(input.targetSeatCount);
-  const capacities = await readHostedFamilyPlanCapacitiesTx({
-    groupId: input.groupId,
-    tx: prisma,
-  });
-  if (!capacities) {
-    throw hostedOnboardingError({
-      code: "HOSTED_FAMILY_BILLING_SYNCING",
-      httpStatus: 409,
-      message: "Family billing is still syncing. Try again shortly.",
-      retryable: true,
-    });
-  }
-  return updateHostedFamilyPlanCapacities({
-    ...input,
-    targetCapacities: {
-      ...capacities,
-      pulse: capacities.pulse + targetSeatCount - sumHostedFamilyPlanCapacities(capacities),
-    },
-  });
-}
-
 export async function updateHostedFamilyPlanCapacities(input: {
   groupId: string;
   now?: Date;
@@ -2213,38 +2183,6 @@ async function updateHostedFamilyStripeCapacitiesUnderOwnerLock(input: {
       httpStatus: 502,
       message: "Stripe did not confirm the requested Family capacity.",
     });
-  }
-}
-
-/**
- * Poll until the subscription webhook reconciles billedSeatCount to the target,
- * so callers can chain on a confirmed seat (invite-and-add) or show the real
- * count after an add or remove. Returns false if the deadline passes first.
- */
-export async function waitForHostedFamilyBilledSeatCount(input: {
-  groupId: string;
-  intervalMs?: number;
-  prisma?: HostedOnboardingReadClient;
-  targetSeatCount: number;
-  timeoutMs?: number;
-}): Promise<boolean> {
-  const prisma = input.prisma ?? getPrisma();
-  const intervalMs = input.intervalMs ?? 400;
-  // Keep the wait short so it stays well inside the request budget and reads as a
-  // brief spinner; a slow webhook falls back to the syncing response and refresh.
-  const deadline = Date.now() + (input.timeoutMs ?? 6_000);
-  for (;;) {
-    const billedSeatCount = await readHostedFamilyBilledSeatCountTx({
-      groupId: input.groupId,
-      tx: prisma,
-    });
-    if (billedSeatCount === input.targetSeatCount) {
-      return true;
-    }
-    if (Date.now() >= deadline) {
-      return false;
-    }
-    await new Promise((resolve) => setTimeout(resolve, intervalMs));
   }
 }
 
