@@ -66,9 +66,23 @@ customer, subscription, and invoice.
 
 ## State
 
-Active. The archived tree and delegated UI edits have been reconstructed. The
-current implementation uses one shared product-tier type, an exact per-tier
+Complete locally. The recovered implementation is rebased onto current
+`origin/main` and keeps one shared product-tier type, an exact per-tier
 capacity projection owned by Stripe webhook reconciliation, and no generic
-persisted billing-operation model. Focused web and runtime parser tests plus
-both affected package typechecks pass; the branch is ready for a checkpoint
-commit and rebase onto current `origin/main` before completion audits.
+persisted billing-operation model. The changed web suite, full hosted-web
+suite, assistant Family/model-budget suites, hosted-execution parser suite,
+affected package typechecks, and all repository guards pass. Security/privacy,
+frontend, and coverage-write audits have no remaining findings; coverage-write
+added one service-level mixed-tier Stripe-composition regression.
+
+The shared `test:diff` retry passed the branch-owned checks and full
+assistant-engine suite, then reached unchanged CLI tests whose source-test
+route expected a missing built `packages/core/dist/index.js`; subsequent
+unchanged CLI lock/runtime tests exhausted their 60-second timeouts. This task
+does not change `packages/core` or `packages/cli`, so that harness/build
+precondition remains outside this Family billing scope. Browser proof was not
+available because the managed browser inventory was empty. The remaining gates
+are the pushed-head PR CI and ReviewGPT loop.
+Status: completed
+Updated: 2026-07-14
+Completed: 2026-07-14
