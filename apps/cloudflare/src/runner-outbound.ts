@@ -1220,6 +1220,10 @@ async function handleRunnerWorkspaceSnapshotAbortRequest(input: {
     return jsonError("Hosted workspace snapshot upload session is stale.", 409);
   }
 
+  if (!await requestOwnsWorkspaceSnapshotSession(input, session)) {
+    return jsonError("Hosted workspace snapshot upload session is stale.", 409);
+  }
+
   await retireWorkspaceSnapshotUploadSession({
     bucket: input.bucket,
     deleteObject: true,
@@ -1283,6 +1287,9 @@ async function handleRunnerWorkspaceSnapshotCompleteRequest(input: {
   ) {
     return jsonError("Hosted workspace snapshot upload session is stale.", 409);
   }
+  if (!await requestOwnsWorkspaceSnapshotSession(input, session)) {
+    return jsonError("Hosted workspace snapshot upload session is stale.", 409);
+  }
 
   if (Date.parse(session.expiresAt) <= Date.now()) {
     const alreadyCurrentResponse = await completeExpiredCurrentWorkspaceSnapshotUploadSession({
@@ -1295,6 +1302,9 @@ async function handleRunnerWorkspaceSnapshotCompleteRequest(input: {
     });
     if (alreadyCurrentResponse) {
       return alreadyCurrentResponse;
+    }
+    if (!await requestOwnsWorkspaceSnapshotSession(input, session)) {
+      return jsonError("Hosted workspace snapshot upload session is stale.", 409);
     }
     try {
       await recordWorkspaceSnapshotObjectCleanup(input.env, {
@@ -1362,6 +1372,9 @@ async function handleRunnerWorkspaceSnapshotCompleteRequest(input: {
     return jsonError("Hosted workspace snapshot object metadata is unavailable.", 503);
   }
   const object = await snapshotObjectStore.head(snapshotRef.objectKey);
+  if (!await requestOwnsWorkspaceSnapshotSession(input, session)) {
+    return jsonError("Hosted workspace snapshot upload session is stale.", 409);
+  }
   if (!object) {
     await retireWorkspaceSnapshotUploadSession({
       bucket: input.bucket,
@@ -1452,6 +1465,9 @@ async function handleRunnerWorkspaceSnapshotCompleteRequest(input: {
   }
 
   const retireAfterAmbiguousCheckpoint = async (): Promise<Response | null> => {
+    if (!await requestOwnsWorkspaceSnapshotSession(input, session)) {
+      return jsonError("Hosted workspace snapshot upload session is stale.", 409);
+    }
     try {
       await retireAmbiguousWorkspaceSnapshotUploadSession({
         env: input.env,
@@ -1477,6 +1493,9 @@ async function handleRunnerWorkspaceSnapshotCompleteRequest(input: {
   } catch {
     return jsonError("Hosted workspace snapshot current state is unavailable.", 502);
   }
+  if (!await requestOwnsWorkspaceSnapshotSession(input, session)) {
+    return jsonError("Hosted workspace snapshot upload session is stale.", 409);
+  }
   if (
     preCheckpointReplacedSnapshotRef
     && !isReplacementRefSameAsSnapshotRef(preCheckpointReplacedSnapshotRef, snapshotRef)
@@ -1492,19 +1511,13 @@ async function handleRunnerWorkspaceSnapshotCompleteRequest(input: {
       if (!remembered) {
         return jsonError("Hosted workspace snapshot upload session is stale.", 409);
       }
+      if (!await requestOwnsWorkspaceSnapshotSession(input, session)) {
+        return jsonError("Hosted workspace snapshot upload session is stale.", 409);
+      }
       session.replacedSnapshotRef = preCheckpointReplacedSnapshotRef;
     } catch {
       return jsonError("Hosted workspace replaced snapshot cleanup state is unavailable.", 503);
     }
-  }
-
-  const currentWriteFence = await requireWorkspaceSnapshotWriteFence({
-    env: input.env,
-    request: input.request,
-    userId: input.userId,
-  });
-  if (!currentWriteFence) {
-    return jsonError("Hosted workspace snapshot upload session is stale.", 409);
   }
 
   let checkpointResponse: Response;
@@ -1826,12 +1839,7 @@ async function completeExpiredCurrentWorkspaceSnapshotUploadSession(input: {
     return jsonError("Hosted workspace snapshot upload session is stale.", 409);
   }
 
-  const currentWriteFence = await requireWorkspaceSnapshotWriteFence({
-    env: input.env,
-    request: input.request,
-    userId: input.userId,
-  });
-  if (!currentWriteFence || currentWriteFence.workspaceVersion !== input.session.workspaceVersion) {
+  if (!await requestOwnsWorkspaceSnapshotSession(input, input.session)) {
     return jsonError("Hosted workspace snapshot upload session is stale.", 409);
   }
 
@@ -1847,6 +1855,10 @@ async function completeExpiredCurrentWorkspaceSnapshotUploadSession(input: {
     if (!replacedSnapshotCleanupSucceeded) {
       return jsonError("Hosted workspace replaced snapshot cleanup failed.", 503);
     }
+  }
+
+  if (!await requestOwnsWorkspaceSnapshotSession(input, input.session)) {
+    return jsonError("Hosted workspace snapshot upload session is stale.", 409);
   }
 
   await retireWorkspaceSnapshotUploadSession({
@@ -2393,6 +2405,22 @@ async function requireWorkspaceSnapshotWriteFence(input: {
     }
     throw error;
   }
+}
+
+async function requestOwnsWorkspaceSnapshotSession(input: {
+  env: RunnerOutboundEnvironmentSource;
+  request: Request;
+  userId: string;
+}, session: HostedWorkspaceSnapshotUploadSession): Promise<boolean> {
+  const writeFence = await requireWorkspaceSnapshotWriteFence({
+    env: input.env,
+    request: input.request,
+    userId: input.userId,
+  });
+  return writeFence !== null
+    && session.attemptId === writeFence.attemptId
+    && session.leaseGeneration === writeFence.generation
+    && session.workspaceVersion === writeFence.workspaceVersion;
 }
 
 async function createWorkspaceSnapshotUploadSession(input: {
