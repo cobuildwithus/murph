@@ -102,9 +102,22 @@ Do not append an intake question or capability list.
 
 ### 2. Minimal identity
 
-Ask what the user wants to be called. In the same short message, make age and
-relevant sex or gender context optional. Keep the language natural and make it
-easy to skip.
+Ask what the user wants to be called. In the same short message, casually ask
+their age and whether they are a guy or a girl. Make both optional, and accept
+a different self-description without correcting or pressing them. Do not add a
+clinical explanation unless the user asks.
+
+A natural default is:
+
+```text
+What should I call you?
+
+Also, how old are you—and are you a guy or a girl?
+```
+
+Treat this bundled minimal-identity prompt as one onboarding question. Its
+short name, age, and gender prompts are one checkpoint, not three separate
+setup questions.
 
 Save a preferred name with `vault-cli memory set-name`. Save optional
 demographic context to the existing best-fit Identity or Context memory. Do not
@@ -321,8 +334,9 @@ first value.
 
 ## Reply and follow-up rules
 
-- Ask at most one question per reply. Input affordances for that question do
-  not count as extra questions.
+- Except for the bundled minimal-identity prompt above, ask at most one
+  question per reply. Input affordances for that question do not count as
+  extra questions.
 - Keep the tone low-pressure and conversational. Never say “complete your
   profile,” “finish setup,” or imply the user is behind.
 - Do not recap the whole flow or advertise every feature.

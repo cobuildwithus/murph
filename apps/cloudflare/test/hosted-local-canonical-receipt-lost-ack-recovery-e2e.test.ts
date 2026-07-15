@@ -469,10 +469,6 @@ async function seedPreferenceReceiptRecoveryIncident(): Promise<
     receiptLogArtifact.ref.sha256,
     receiptLogArtifact.bytes,
   );
-  for (const [sha256, bytes] of artifactsBySha256) {
-    await uploadHostedArtifact(preferenceRecoveryUserId, sha256, bytes);
-  }
-
   const checkpoint = await seedHostedWorkspaceCheckpointForTest({
     browserVaultReplicaRef: createPreferenceRecoveryBrowserVaultReplicaRef(
       snapshotHash,
@@ -490,6 +486,10 @@ async function seedPreferenceReceiptRecoveryIncident(): Promise<
     userId: preferenceRecoveryUserId,
   });
   expect(checkpoint.status).toBe("updated");
+
+  for (const [sha256, bytes] of artifactsBySha256) {
+    await uploadHostedArtifact(preferenceRecoveryUserId, sha256, bytes);
+  }
 
   return {
     auditIds: [firstAudit.auditId, secondAudit.auditId],

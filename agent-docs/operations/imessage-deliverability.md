@@ -1,6 +1,6 @@
 # iMessage Deliverability and Reply Safety
 
-Last verified: 2026-07-07
+Last verified: 2026-07-15
 
 ## Purpose
 
@@ -92,6 +92,8 @@ Linq egress should stay small and obvious:
 - Proactive current-home fallback sends do not inherit replay-scoped route authority or inbound context; reply-anchored sends keep their matching inbound context.
 - Egress no longer owns a separate "recent inbound" recency check; hosted automation recency belongs to reconciliation/wake selection.
 - Typing indicators do not call web-owned egress assertions. They are locally throttled to one session per chat, capped at five minutes, with a restart cooldown after a max-length session.
+- Delimiter-generated Linq reply bubbles send the first bubble immediately, then pause 1.5 seconds after each confirmed sibling send. The pause applies only within that reply's existing outbox sequence; it does not pace unrelated sends, retries, reactions, or progress updates.
+- Do not restart typing between reply bubbles. Linq clears the turn's existing indicator on send, and repeated typing cycles add line activity without proven deliverability value.
 
 ## Prompt and copy guidance
 
