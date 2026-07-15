@@ -1,4 +1,5 @@
 import { createHostedArtifactStore } from "./bundle-store.ts";
+import { HostedEncryptedR2PayloadUnreadableError } from "./crypto.ts";
 import { HostedBundleGarbageCollector } from "./bundle-gc.ts";
 import type {
   HostedExecutionBundleRef,
@@ -495,6 +496,15 @@ async function handleRunnerArtifactRequest(input: {
       message: "Hosted runner artifact request failed.",
       phase: "wake.running",
     });
+    if (
+      input.request.method === "GET"
+      && error instanceof HostedEncryptedR2PayloadUnreadableError
+    ) {
+      emitCompleted({
+        artifactReadable: false,
+      }, 422);
+      return jsonError("Artifact is unreadable.", 422);
+    }
     throw error;
   }
 }

@@ -37,6 +37,13 @@ export interface EncryptedR2BucketLike {
 const utf8Decoder = new TextDecoder();
 const utf8Encoder = new TextEncoder();
 
+export class HostedEncryptedR2PayloadUnreadableError extends Error {
+  constructor(cause: unknown) {
+    super("Hosted encrypted R2 payload is unreadable.", { cause });
+    this.name = "HostedEncryptedR2PayloadUnreadableError";
+  }
+}
+
 function describeHostedStorageEnvelopeLabel(scope: HostedStorageScope): string {
   switch (scope) {
     case "artifact":
@@ -107,11 +114,17 @@ export async function readEncryptedR2Payload(input: {
     return null;
   }
 
-  const envelopeValue: unknown = JSON.parse(utf8Decoder.decode(await object.arrayBuffer()));
-  const envelope = parseHostedCipherEnvelope(
-    envelopeValue,
-    input.callerLabel ?? describeHostedStorageEnvelopeLabel(input.scope),
-  );
+  const serializedEnvelope = utf8Decoder.decode(await object.arrayBuffer());
+  let envelope: HostedCipherEnvelope;
+  try {
+    const envelopeValue: unknown = JSON.parse(serializedEnvelope);
+    envelope = parseHostedCipherEnvelope(
+      envelopeValue,
+      input.callerLabel ?? describeHostedStorageEnvelopeLabel(input.scope),
+    );
+  } catch (error) {
+    throw new HostedEncryptedR2PayloadUnreadableError(error);
+  }
 
   let cryptoKeysById = input.cryptoKeysById;
   if (
@@ -125,15 +138,19 @@ export async function readEncryptedR2Payload(input: {
     }
   }
 
-  return decryptHostedStorageEnvelope({
-    aad: input.aad,
-    envelope,
-    expectedKeyId: input.expectedKeyId,
-    key: input.cryptoKey,
-    keysById: cryptoKeysById,
-    label: input.callerLabel ?? describeHostedStorageEnvelopeLabel(input.scope),
-    scope: input.scope,
-  });
+  try {
+    return await decryptHostedStorageEnvelope({
+      aad: input.aad,
+      envelope,
+      expectedKeyId: input.expectedKeyId,
+      key: input.cryptoKey,
+      keysById: cryptoKeysById,
+      label: input.callerLabel ?? describeHostedStorageEnvelopeLabel(input.scope),
+      scope: input.scope,
+    });
+  } catch (error) {
+    throw new HostedEncryptedR2PayloadUnreadableError(error);
+  }
 }
 
 export async function writeEncryptedR2Payload(input: {

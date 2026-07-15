@@ -184,6 +184,7 @@ import {
   drainHostedRuntimeDeferredUsageCompletionsBestEffort,
   parseHostedAssistantWorkspaceRuntimeJobInput,
   runHostedWorkspaceRuntimeJobInProcess,
+  type HostedWorkspaceRuntimeJobOptions,
   type HostedWorkspaceSnapshotCheckpointRequestBuilderInput,
 } from "../src/hosted-runtime.ts";
 import {
@@ -238,12 +239,13 @@ import {
 import {
   readHostedSystemMailboxState,
 } from "../src/hosted-runtime/system-mailbox-state.ts";
-import type {
-  HostedRuntimeDeviceSyncPort,
-  HostedRuntimeMailboxPort,
-  HostedRuntimePlatform,
-  RuntimeLivenessPort,
-  HostedRuntimeWorkspacePort,
+import {
+  HostedRuntimeArtifactReadError,
+  type HostedRuntimeDeviceSyncPort,
+  type HostedRuntimeMailboxPort,
+  type HostedRuntimePlatform,
+  type RuntimeLivenessPort,
+  type HostedRuntimeWorkspacePort,
 } from "../src/hosted-runtime-contracts.ts";
 import type {
   HostedAssistantRuntimeResolvedConfig,
@@ -17193,6 +17195,857 @@ describe("hosted workspace runtime entrypoint", () => {
     }
   });
 
+  test("retains foreground reply authority when canonical receipt recovery fails", async () => {
+    const vaultRoot = await mkdtemp(path.join(tmpdir(), "murph-workspace-entrypoint-"));
+    const events: string[] = [];
+    const checkpointRequests: HostedWorkspaceCheckpointRequest[] = [];
+    const logRequests: HostedRuntimeLogRequest[] = [];
+    const baseSnapshotRef = createWorkspaceSnapshotV2Ref(
+      "snapshot-receipt-recovery-failed",
+    );
+    const firstPayloadBytes = Buffer.from("partial receipt write\n", "utf8");
+    const firstPayloadHash = sha256Hex(firstPayloadBytes);
+    const missingPayloadHash = "e".repeat(64);
+    const receiptBytes = Buffer.from(`${JSON.stringify({
+      actions: [
+        {
+          byteLength: firstPayloadBytes.byteLength,
+          contentRef: {
+            byteSize: firstPayloadBytes.byteLength,
+            sha256: firstPayloadHash,
+          },
+          effect: "create",
+          kind: "text_upsert",
+          sha256: firstPayloadHash,
+          targetRelativePath: "journal/partial-receipt-write.md",
+        },
+        {
+          byteLength: 1,
+          contentRef: {
+            byteSize: 1,
+            sha256: missingPayloadHash,
+          },
+          effect: "create",
+          kind: "text_upsert",
+          sha256: missingPayloadHash,
+          targetRelativePath: "journal/missing-receipt-write.md",
+        },
+      ],
+      committedAt: TEST_NOW,
+      createdAt: TEST_NOW,
+      occurredAt: TEST_NOW,
+      operationId: "op_synthetic_partial_receipt_recovery",
+      operationType: "hosted_canonical_write_test",
+      schema: HOSTED_CANONICAL_WRITE_RECEIPT_SCHEMA_VERSION,
+      summary: "Reject a partial multi-action receipt recovery.",
+      updatedAt: TEST_NOW,
+    }, null, 2)}\n`, "utf8");
+    const receiptHash = sha256Hex(receiptBytes);
+    const receiptLogBytes = Buffer.from(`${JSON.stringify({
+      entries: [
+        {
+          byteSize: receiptBytes.byteLength,
+          sha256: receiptHash,
+        },
+      ],
+      schema: "murph.hosted-canonical-write-receipt-log.v1",
+    }, null, 2)}\n`, "utf8");
+    const receiptLogHash = sha256Hex(receiptLogBytes);
+    const consoleWarn = vi.spyOn(console, "warn").mockImplementation(() => undefined);
+    const logWriteRelease = createDeferred<void>();
+    let foregroundCanonicalWriteCompleted = false;
+    let logWriteSettled = false;
+    let restoreCallCount = 0;
+    const basePlatform = createPlatform({
+      artifactBytesByHash: new Map([
+        [firstPayloadHash, firstPayloadBytes],
+        [receiptHash, receiptBytes],
+        [receiptLogHash, receiptLogBytes],
+      ]),
+      artifactLabelsByHash: new Map([
+        [firstPayloadHash, "first-payload"],
+        [missingPayloadHash, "missing-payload"],
+        [receiptHash, "partial-receipt"],
+        [receiptLogHash, "receipt-log"],
+      ]),
+      events,
+      logRequests,
+      mailboxPort: createMailboxPort({
+        events,
+        items: [createMailboxItem({
+          id: "mailbox_item_entrypoint_receipt_recovery_failed",
+          laneSeq: "1",
+        })],
+      }),
+      workspacePort: createWorkspacePort({
+        checkpointRequests,
+        events,
+        workspace: createWorkspaceState({
+          redactedStatus: {
+            hostedCanonicalWriteReceiptLogByteSize: receiptLogBytes.byteLength,
+            hostedCanonicalWriteReceiptLogSha256: receiptLogHash,
+          },
+          snapshotRef: baseSnapshotRef,
+          version: "0",
+        }),
+      }),
+      workspaceSnapshotPort: {
+        async abortSnapshotSession() {
+          throw new Error("Receipt recovery test should not abort snapshots.");
+        },
+        async completeSnapshotSession() {
+          throw new Error("Receipt recovery test should not complete snapshots.");
+        },
+        async putSnapshotObjectDirect() {
+          throw new Error("Receipt recovery test should not upload snapshots.");
+        },
+        async restoreWorkspaceSnapshot(input) {
+          restoreCallCount += 1;
+          await initializeVault({ createdAt: TEST_NOW, vaultRoot: input.durableRoot });
+        },
+        async startSnapshotSession() {
+          throw new Error("Receipt recovery test should not start snapshots.");
+        },
+      },
+    });
+    const baseLogPort = basePlatform.logPort;
+    if (!baseLogPort) {
+      throw new Error("Receipt recovery proof requires a hosted runtime log port.");
+    }
+    const baseArtifactStore = basePlatform.artifactStore;
+    let terminalArtifactReadAttempts = 0;
+    const platform: HostedRuntimePlatform = {
+      ...basePlatform,
+      artifactStore: {
+        ...baseArtifactStore,
+        async get(sha256, context) {
+          if (sha256 === missingPayloadHash) {
+            terminalArtifactReadAttempts += 1;
+            throw new HostedRuntimeArtifactReadError({
+              cause: new Error("Hosted artifact is persistently unreadable."),
+              retryable: false,
+            });
+          }
+          return await baseArtifactStore.get(sha256, context);
+        },
+      },
+      logPort: {
+        async write(request) {
+          const response = await baseLogPort.write(request);
+          await logWriteRelease.promise;
+          logWriteSettled = true;
+          return response;
+        },
+      },
+    };
+
+    try {
+      await withRealTimeout(runHostedWorkspaceRuntimeJobInProcess(createWorkspaceRuntimeJobInput(), {
+        async createCheckpointSnapshot(snapshotInput) {
+          events.push(`snapshot:${snapshotInput.reason}:${await readCheckpointConversationWatermark(snapshotInput, vaultRoot)}`);
+          return {
+            snapshotRef: createBundleRef({
+              hash: "5".repeat(64),
+              key: "users/bundles/member-synthetic/receipt-recovery-failed.bundle.json",
+              size: 512,
+            }),
+          };
+        },
+        async importItem(item) {
+          events.push(`import:${item.item.laneSeq}`);
+          return { status: "imported" };
+        },
+        platform,
+        async runAssistantPhase(input) {
+          assert.equal(
+            (await readHostedMailboxImportState({ vaultRoot })).watermarks.conversation,
+            "1",
+          );
+          await assert.rejects(
+            readFile(path.join(vaultRoot, "journal", "partial-receipt-write.md"), "utf8"),
+            /ENOENT/u,
+          );
+          if (!foregroundCanonicalWriteCompleted) {
+            await runCanonicalWrite({
+              mutate: async ({ batch }) => {
+                await batch.stageTextWrite(
+                  "journal/foreground-reply-work.md",
+                  "foreground reply work\n",
+                );
+              },
+              occurredAt: TEST_NOW,
+              operationType: "hosted_canonical_write_test",
+              summary: "Persist foreground reply work after failed recovery.",
+              vaultRoot: input.restored.vaultRoot,
+            });
+            foregroundCanonicalWriteCompleted = true;
+          }
+          events.push("assistant");
+          return { progressed: false };
+        },
+        vaultRoot,
+      }), 15_000, () => events.join(","));
+
+      const recoveryLogIndex = requireEventIndex(
+        events,
+        "runtime.log:runner.error",
+      );
+      const mailboxFetchIndex = requireEventIndex(events, "mailbox.fetch");
+      const importIndex = requireEventIndex(events, "import:1");
+      const assistantIndex = requireEventIndex(events, "assistant");
+      const snapshotIndex = requireEventIndex(events, "snapshot:idle_shutdown:1");
+      assert.ok(recoveryLogIndex < mailboxFetchIndex);
+      assert.ok(mailboxFetchIndex < importIndex);
+      assert.ok(importIndex < assistantIndex);
+      assert.ok(assistantIndex < snapshotIndex);
+      assert.equal(
+        events.filter((event) => event === "artifact.get:receipt-log").length,
+        1,
+      );
+      assert.equal(restoreCallCount, 2);
+      assert.equal(terminalArtifactReadAttempts, 1);
+      assert.equal(logWriteSettled, false);
+      assert.equal(consoleWarn.mock.calls.length, 1);
+      const recoveryLog = logRequests.flatMap((request) => request.entries).find(
+        (entry) => entry.errorCode === "canonical_write_receipt_recovery_failed",
+      );
+      assert.equal(
+        recoveryLog?.errorCode,
+        "canonical_write_receipt_recovery_failed",
+      );
+      assert.equal(
+        recoveryLog?.redactedJson?.canonicalWriteReceiptRecoveryFailed,
+        1,
+      );
+      assert.equal(recoveryLog?.eventCode, "runner.error");
+      assert.equal(recoveryLog?.level, "warn");
+      assert.equal(recoveryLog?.phase, "restore");
+      assert.equal(recoveryLog?.redactedJson?.nestedErrorCode, "runtime_error");
+      assert.equal(
+        recoveryLog?.redactedJson?.safeErrorMessage,
+        "Canonical receipt recovery rejected unsafe state; foreground reply authority continued.",
+      );
+      assert.equal(JSON.stringify(recoveryLog).includes("partial receipt write"), false);
+      assert.equal(
+        checkpointRequests.at(-1)?.redactedStatus?.hostedCanonicalWriteReceiptLogSha256,
+        undefined,
+      );
+      assert.equal(
+        checkpointRequests.at(-1)?.redactedStatus?.hostedCanonicalWriteReceiptLogByteSize,
+        undefined,
+      );
+      assert.equal(
+        await readFile(path.join(vaultRoot, "journal", "foreground-reply-work.md"), "utf8"),
+        "foreground reply work\n",
+      );
+    } finally {
+      logWriteRelease.resolve();
+      consoleWarn.mockRestore();
+      await removeTempRoot(vaultRoot);
+    }
+  });
+
+  test.each([
+    {
+      expectedReadAttempts: 3,
+      failingArtifact: "receipt-log" as const,
+    },
+    {
+      expectedReadAttempts: 2,
+      failingArtifact: "receipt" as const,
+    },
+    {
+      expectedReadAttempts: 2,
+      failingArtifact: "second-payload" as const,
+    },
+  ])("retries a durable canonical receipt after transient $failingArtifact unavailability", async ({
+    expectedReadAttempts,
+    failingArtifact,
+  }) => {
+    const vaultRoot = await mkdtemp(path.join(tmpdir(), "murph-workspace-entrypoint-"));
+    const events: string[] = [];
+    const checkpointRequests: HostedWorkspaceCheckpointRequest[] = [];
+    const baseSnapshotRef = createWorkspaceSnapshotV2Ref(
+      "snapshot-transient-receipt-read",
+    );
+    const firstRestoredPayloadBytes = Buffer.from("first restored canonical write\n", "utf8");
+    const firstRestoredPayloadHash = sha256Hex(firstRestoredPayloadBytes);
+    const secondRestoredPayloadBytes = Buffer.from("second restored canonical write\n", "utf8");
+    const secondRestoredPayloadHash = sha256Hex(secondRestoredPayloadBytes);
+    const receiptBytes = Buffer.from(`${JSON.stringify({
+      actions: [
+        {
+          byteLength: firstRestoredPayloadBytes.byteLength,
+          contentRef: {
+            byteSize: firstRestoredPayloadBytes.byteLength,
+            sha256: firstRestoredPayloadHash,
+          },
+          effect: "create",
+          kind: "text_upsert",
+          sha256: firstRestoredPayloadHash,
+          targetRelativePath: "journal/first-restored-after-transient-read.md",
+        },
+        {
+          byteLength: secondRestoredPayloadBytes.byteLength,
+          contentRef: {
+            byteSize: secondRestoredPayloadBytes.byteLength,
+            sha256: secondRestoredPayloadHash,
+          },
+          effect: "create",
+          kind: "text_upsert",
+          sha256: secondRestoredPayloadHash,
+          targetRelativePath: "journal/second-restored-after-transient-read.md",
+        },
+      ],
+      committedAt: TEST_NOW,
+      createdAt: TEST_NOW,
+      occurredAt: TEST_NOW,
+      operationId: "op_synthetic_transient_receipt_read",
+      operationType: "hosted_canonical_write_test",
+      schema: HOSTED_CANONICAL_WRITE_RECEIPT_SCHEMA_VERSION,
+      summary: "Replay canonical work after transient artifact unavailability.",
+      updatedAt: TEST_NOW,
+    }, null, 2)}\n`, "utf8");
+    const receiptHash = sha256Hex(receiptBytes);
+    const receiptLogBytes = Buffer.from(`${JSON.stringify({
+      entries: [{
+        byteSize: receiptBytes.byteLength,
+        sha256: receiptHash,
+      }],
+      schema: "murph.hosted-canonical-write-receipt-log.v1",
+    }, null, 2)}\n`, "utf8");
+    const receiptLogHash = sha256Hex(receiptLogBytes);
+    const durableWorkspace = createWorkspaceState({
+      redactedStatus: {
+        hostedCanonicalWriteReceiptLogByteSize: receiptLogBytes.byteLength,
+        hostedCanonicalWriteReceiptLogSha256: receiptLogHash,
+      },
+      snapshotRef: baseSnapshotRef,
+      version: "0",
+    });
+    const basePlatform = createPlatform({
+      artifactBytesByHash: new Map([
+        [receiptLogHash, receiptLogBytes],
+        [receiptHash, receiptBytes],
+        [firstRestoredPayloadHash, firstRestoredPayloadBytes],
+        [secondRestoredPayloadHash, secondRestoredPayloadBytes],
+      ]),
+      artifactLabelsByHash: new Map([
+        [receiptLogHash, "receipt-log"],
+        [receiptHash, "receipt"],
+        [firstRestoredPayloadHash, "first-payload"],
+        [secondRestoredPayloadHash, "second-payload"],
+      ]),
+      events,
+      mailboxPort: createMailboxPort({ events, items: [] }),
+      workspacePort: createWorkspacePort({
+        checkpointRequests,
+        events,
+        workspace: durableWorkspace,
+      }),
+      workspaceSnapshotPort: {
+        async abortSnapshotSession() {
+          throw new Error("Transient receipt read test should not abort snapshots.");
+        },
+        async completeSnapshotSession() {
+          throw new Error("Transient receipt read test should not complete snapshots.");
+        },
+        async putSnapshotObjectDirect() {
+          throw new Error("Transient receipt read test should not upload snapshots.");
+        },
+        async restoreWorkspaceSnapshot(input) {
+          await rm(input.durableRoot, { force: true, recursive: true });
+          await initializeVault({ createdAt: TEST_NOW, vaultRoot: input.durableRoot });
+        },
+        async startSnapshotSession() {
+          throw new Error("Transient receipt read test should not start snapshots.");
+        },
+      },
+    });
+    const transientReadCause = Object.assign(
+      new Error("Hosted artifact fetch failed with HTTP 503."),
+      { status: 503, statusCode: 503 },
+    );
+    const transientReadError = new HostedRuntimeArtifactReadError({
+      cause: transientReadCause,
+      retryable: true,
+    });
+    const baseArtifactStore = basePlatform.artifactStore;
+    const failingArtifactHash = {
+      "receipt-log": receiptLogHash,
+      receipt: receiptHash,
+      "second-payload": secondRestoredPayloadHash,
+    }[failingArtifact];
+    let transientReadAttempts = 0;
+    const platform: HostedRuntimePlatform = {
+      ...basePlatform,
+      artifactStore: {
+        ...baseArtifactStore,
+        async get(sha256, context) {
+          if (sha256 === failingArtifactHash && transientReadAttempts++ === 0) {
+            throw transientReadError;
+          }
+          return await baseArtifactStore.get(sha256, context);
+        },
+      },
+    };
+    let assistantPhaseCalls = 0;
+    const runtimeOptions: HostedWorkspaceRuntimeJobOptions = {
+      async createCheckpointSnapshot() {
+        return {
+          snapshotRef: createWorkspaceSnapshotV2Ref(
+            "snapshot-after-transient-receipt-read",
+          ),
+        };
+      },
+      async importItem() {
+        throw new Error("Transient receipt read test should not import mailbox work.");
+      },
+      platform,
+      async runAssistantPhase(input) {
+        assistantPhaseCalls += 1;
+        assert.equal(
+          await readFile(
+            path.join(vaultRoot, "journal", "first-restored-after-transient-read.md"),
+            "utf8",
+          ),
+          "first restored canonical write\n",
+        );
+        assert.equal(
+          await readFile(
+            path.join(vaultRoot, "journal", "second-restored-after-transient-read.md"),
+            "utf8",
+          ),
+          "second restored canonical write\n",
+        );
+        await runCanonicalWrite({
+          mutate: async ({ batch }) => {
+            await batch.stageTextWrite(
+              "journal/foreground-after-transient-read.md",
+              "fresh foreground write\n",
+            );
+          },
+          occurredAt: TEST_NOW,
+          operationType: "hosted_canonical_write_test",
+          summary: "Persist foreground work after canonical receipt retry.",
+          vaultRoot: input.restored.vaultRoot,
+        });
+        return { progressed: false };
+      },
+      vaultRoot,
+    };
+
+    try {
+      await assert.rejects(
+        runHostedWorkspaceRuntimeJobInProcess(
+          createWorkspaceRuntimeJobInput(),
+          runtimeOptions,
+        ),
+        (error) => error === transientReadCause,
+      );
+      assert.equal(checkpointRequests.length, 0);
+      assert.equal(assistantPhaseCalls, 0);
+      assert.equal(
+        durableWorkspace.redactedStatus?.hostedCanonicalWriteReceiptLogSha256,
+        receiptLogHash,
+      );
+      await assert.rejects(
+        readFile(path.join(vaultRoot, "journal", "first-restored-after-transient-read.md")),
+        /ENOENT/u,
+      );
+      await assert.rejects(
+        readFile(path.join(vaultRoot, "journal", "second-restored-after-transient-read.md")),
+        /ENOENT/u,
+      );
+
+      await runHostedWorkspaceRuntimeJobInProcess(
+        createWorkspaceRuntimeJobInput(),
+        runtimeOptions,
+      );
+
+      assert.equal(transientReadAttempts, expectedReadAttempts);
+      assert.equal(assistantPhaseCalls, 1);
+      assert.equal(
+        await readFile(
+          path.join(vaultRoot, "journal", "first-restored-after-transient-read.md"),
+          "utf8",
+        ),
+        "first restored canonical write\n",
+      );
+      assert.equal(
+        await readFile(
+          path.join(vaultRoot, "journal", "second-restored-after-transient-read.md"),
+          "utf8",
+        ),
+        "second restored canonical write\n",
+      );
+      assert.equal(
+        await readFile(
+          path.join(vaultRoot, "journal", "foreground-after-transient-read.md"),
+          "utf8",
+        ),
+        "fresh foreground write\n",
+      );
+      assert.equal(
+        typeof checkpointRequests[0]?.redactedStatus
+          ?.hostedCanonicalWriteReceiptLogSha256,
+        "string",
+      );
+      assert.notEqual(
+        checkpointRequests[0]?.redactedStatus?.hostedCanonicalWriteReceiptLogSha256,
+        receiptLogHash,
+      );
+      assert.equal(
+        checkpointRequests.at(-1)?.redactedStatus?.hostedCanonicalWriteReceiptLogSha256,
+        undefined,
+      );
+    } finally {
+      await removeTempRoot(vaultRoot);
+    }
+  });
+
+  test("rejects consecutive failed receipt logs without creating repair ownership", async () => {
+    const vaultRoot = await mkdtemp(path.join(tmpdir(), "murph-workspace-entrypoint-"));
+    const events: string[] = [];
+    const checkpointRequests: HostedWorkspaceCheckpointRequest[] = [];
+    const logRequests: HostedRuntimeLogRequest[] = [];
+    const artifactBytesByHash = new Map<string, Uint8Array>();
+    const artifactLabelsByHash = new Map<string, string>();
+    const baseSnapshotRef = createWorkspaceSnapshotV2Ref(
+      "snapshot-unreadable-receipt-log",
+    );
+    const unreadableReceiptLogBytes = Buffer.from('{"schema":"invalid"}\n', "utf8");
+    const unreadableReceiptLogHash = sha256Hex(unreadableReceiptLogBytes);
+    artifactBytesByHash.set(unreadableReceiptLogHash, unreadableReceiptLogBytes);
+    artifactLabelsByHash.set(unreadableReceiptLogHash, "first-failed-receipt-log");
+    const consoleWarn = vi.spyOn(console, "warn").mockImplementation(() => undefined);
+    const firstCrash = new Error("Synthetic crash after foreground canonical checkpoint.");
+    let assistantInvocation = 0;
+    let durableWorkspace = createWorkspaceState({
+      redactedStatus: {
+        hostedCanonicalWriteReceiptLogByteSize: unreadableReceiptLogBytes.byteLength,
+        hostedCanonicalWriteReceiptLogSha256: unreadableReceiptLogHash,
+      },
+      snapshotRef: baseSnapshotRef,
+      version: "0",
+    });
+    let restoreCallCount = 0;
+    const workspacePort: HostedRuntimeWorkspacePort = {
+      async checkpoint(request) {
+        events.push("workspace.checkpoint");
+        checkpointRequests.push(request);
+        durableWorkspace = createWorkspaceState({
+          inboxMediaRetentionWakeAt: request.inboxMediaRetentionWakeAt ?? null,
+          nextWakeAt: request.nextWakeAt ?? null,
+          nextWakeReason: request.nextWakeReason ?? null,
+          redactedStatus: request.redactedStatus ?? null,
+          snapshotRef: request.snapshotRef,
+          version: String(BigInt(request.expectedWorkspaceVersion) + 1n),
+        });
+        return {
+          checkpointed: true,
+          workspace: durableWorkspace,
+        };
+      },
+      async read() {
+        events.push("workspace.read");
+        return {
+          fetchedAt: TEST_NOW,
+          workspace: durableWorkspace,
+        };
+      },
+    };
+    const platform = createPlatform({
+      artifactBytesByHash,
+      artifactLabelsByHash,
+      events,
+      logRequests,
+      mailboxPort: createMailboxPort({
+        events,
+        items: [createMailboxItem({
+          id: "mailbox_item_entrypoint_consecutive_receipt_failures",
+          laneSeq: "1",
+        })],
+      }),
+      workspacePort,
+      workspaceSnapshotPort: {
+        async abortSnapshotSession() {
+          throw new Error("Consecutive receipt failure test should not abort snapshots.");
+        },
+        async completeSnapshotSession() {
+          throw new Error("Consecutive receipt failure test should not complete snapshots.");
+        },
+        async putSnapshotObjectDirect() {
+          throw new Error("Consecutive receipt failure test should not upload snapshots.");
+        },
+        async restoreWorkspaceSnapshot(input) {
+          restoreCallCount += 1;
+          await rm(input.durableRoot, { force: true, recursive: true });
+          await initializeVault({ createdAt: TEST_NOW, vaultRoot: input.durableRoot });
+        },
+        async startSnapshotSession() {
+          throw new Error("Consecutive receipt failure test should not start snapshots.");
+        },
+      },
+    });
+    const runAssistantPhase: NonNullable<HostedWorkspaceRuntimeJobOptions["runAssistantPhase"]> = async (input) => {
+      assistantInvocation += 1;
+      assert.equal(
+        (await readHostedMailboxImportState({ vaultRoot })).watermarks.conversation,
+        "1",
+      );
+      if (assistantInvocation === 1) {
+        await runCanonicalWrite({
+          mutate: async ({ batch }) => {
+            await batch.stageTextWrite(
+              "journal/foreground-before-crash.md",
+              "foreground write before crash\n",
+            );
+          },
+          occurredAt: TEST_NOW,
+          operationType: "hosted_canonical_write_test",
+          summary: "Persist foreground work after the first rejected receipt log.",
+          vaultRoot: input.restored.vaultRoot,
+        });
+        events.push("assistant:1");
+        throw firstCrash;
+      }
+      await assert.rejects(
+        readFile(path.join(vaultRoot, "journal", "foreground-before-crash.md"), "utf8"),
+        /ENOENT/u,
+      );
+      await runCanonicalWrite({
+        mutate: async ({ batch }) => {
+          await batch.stageTextWrite(
+            "journal/foreground-after-second-failure.md",
+            "foreground write after second failure\n",
+          );
+        },
+        occurredAt: TEST_NOW,
+        operationType: "hosted_canonical_write_test",
+        summary: "Persist foreground work after the second rejected receipt log.",
+        vaultRoot: input.restored.vaultRoot,
+      });
+      events.push("assistant:2");
+      return { progressed: false };
+    };
+
+    try {
+      const runtimeOptions: HostedWorkspaceRuntimeJobOptions = {
+        async createCheckpointSnapshot(snapshotInput) {
+          events.push(`snapshot:${snapshotInput.reason}`);
+          return {
+            snapshotRef: createWorkspaceSnapshotV2Ref(
+              "snapshot-consecutive-receipt-failures",
+            ),
+          };
+        },
+        async importItem(item) {
+          events.push(`import:${item.item.laneSeq}`);
+          return { status: "imported" as const };
+        },
+        platform,
+        runAssistantPhase,
+        vaultRoot,
+      };
+      await assert.rejects(
+        withRealTimeout(
+          runHostedWorkspaceRuntimeJobInProcess(
+            createWorkspaceRuntimeJobInput(),
+            runtimeOptions,
+          ),
+          15_000,
+          () => events.join(","),
+        ),
+        (error) => error === firstCrash,
+      );
+
+      const firstForegroundCheckpoint = checkpointRequests.find(
+        (request) => request.reason === "canonical_runtime_commit",
+      );
+      const secondFailedLogHash = firstForegroundCheckpoint?.redactedStatus
+        ?.hostedCanonicalWriteReceiptLogSha256;
+      assert.equal(typeof secondFailedLogHash, "string");
+      assert.notEqual(secondFailedLogHash, unreadableReceiptLogHash);
+      artifactBytesByHash.delete(String(secondFailedLogHash));
+      artifactLabelsByHash.set(String(secondFailedLogHash), "second-failed-receipt-log");
+      await rm(vaultRoot, { force: true, recursive: true });
+      runtimeOptions.platform = {
+        ...platform,
+        artifactStore: createPlatform({
+          artifactBytesByHash,
+          artifactLabelsByHash,
+          events,
+          mailboxPort: null,
+          workspacePort: null,
+        }).artifactStore,
+      };
+
+      await withRealTimeout(
+        runHostedWorkspaceRuntimeJobInProcess(
+          createWorkspaceRuntimeJobInput({
+            request: {
+              attemptId: "attempt_synthetic_second_receipt_failure",
+              workspaceVersion: durableWorkspace.version,
+            },
+          }),
+          runtimeOptions,
+        ),
+        15_000,
+        () => events.join(","),
+      );
+
+      assert.ok(requireEventIndex(events, "import:1") < requireEventIndex(events, "assistant:1"));
+      assert.ok(requireEventIndex(events, "assistant:1") < requireEventIndex(events, "assistant:2"));
+      assert.equal(
+        events.filter((event) => event === "artifact.get:first-failed-receipt-log").length,
+        1,
+      );
+      assert.equal(
+        events.filter((event) => event === "artifact.get:second-failed-receipt-log").length,
+        1,
+      );
+      assert.equal(restoreCallCount, 4);
+      const recoveryLogs = logRequests.flatMap((request) => request.entries).filter(
+        (entry) => entry.errorCode === "canonical_write_receipt_recovery_failed",
+      );
+      assert.equal(recoveryLogs.length, 2);
+      for (const recoveryLog of recoveryLogs) {
+        assert.equal(recoveryLog.level, "warn");
+        assert.equal(recoveryLog.redactedJson?.canonicalWriteReceiptRecoveryFailed, 1);
+      }
+      assert.equal(JSON.stringify(recoveryLogs).includes('"schema":"invalid"'), false);
+      const foregroundCanonicalCheckpoints = checkpointRequests.filter(
+        (request) => request.reason === "canonical_runtime_commit",
+      );
+      assert.equal(foregroundCanonicalCheckpoints.length, 2);
+      assert.equal(
+        foregroundCanonicalCheckpoints[0]?.redactedStatus
+          ?.hostedCanonicalWriteReceiptLogSha256,
+        secondFailedLogHash,
+      );
+      assert.equal(
+        typeof foregroundCanonicalCheckpoints[1]?.redactedStatus
+          ?.hostedCanonicalWriteReceiptLogSha256,
+        "string",
+      );
+      assert.notEqual(
+        foregroundCanonicalCheckpoints[1]?.redactedStatus
+          ?.hostedCanonicalWriteReceiptLogSha256,
+        secondFailedLogHash,
+      );
+      for (const checkpointRequest of checkpointRequests) {
+        assert.equal(
+          Object.keys(checkpointRequest.redactedStatus ?? {}).some((key) =>
+            key.startsWith("hostedCanonicalWriteRepair")
+          ),
+          false,
+        );
+      }
+      const finalStatus = checkpointRequests.at(-1)?.redactedStatus;
+      assert.equal(finalStatus?.hostedCanonicalWriteReceiptLogSha256, undefined);
+      assert.equal(finalStatus?.hostedCanonicalWriteReceiptLogByteSize, undefined);
+      assert.equal(
+        await readFile(
+          path.join(vaultRoot, "journal", "foreground-after-second-failure.md"),
+          "utf8",
+        ),
+        "foreground write after second failure\n",
+      );
+    } finally {
+      consoleWarn.mockRestore();
+      await removeTempRoot(vaultRoot);
+    }
+  });
+
+  test("preserves host cancellation during canonical receipt recovery", async () => {
+    const vaultRoot = await mkdtemp(path.join(tmpdir(), "murph-workspace-entrypoint-"));
+    const events: string[] = [];
+    const logRequests: HostedRuntimeLogRequest[] = [];
+    const abortController = new AbortController();
+    const abortReason = new Error("Synthetic host cancellation during receipt recovery.");
+    const missingReceiptHash = "f".repeat(64);
+    const receiptLogBytes = Buffer.from(`${JSON.stringify({
+      entries: [{
+        byteSize: 1,
+        sha256: missingReceiptHash,
+      }],
+      schema: "murph.hosted-canonical-write-receipt-log.v1",
+    }, null, 2)}\n`, "utf8");
+    const receiptLogHash = sha256Hex(receiptLogBytes);
+    const consoleWarn = vi.spyOn(console, "warn").mockImplementation(() => undefined);
+    const basePlatform = createPlatform({
+      artifactBytesByHash: new Map([
+        [receiptLogHash, receiptLogBytes],
+      ]),
+      artifactLabelsByHash: new Map([
+        [missingReceiptHash, "missing-receipt"],
+        [receiptLogHash, "receipt-log"],
+      ]),
+      events,
+      logRequests,
+      mailboxPort: createMailboxPort({
+        events,
+        items: [createMailboxItem({ laneSeq: "1" })],
+      }),
+      workspacePort: createWorkspacePort({
+        checkpointRequests: [],
+        events,
+        workspace: createWorkspaceState({
+          redactedStatus: {
+            hostedCanonicalWriteReceiptLogByteSize: receiptLogBytes.byteLength,
+            hostedCanonicalWriteReceiptLogSha256: receiptLogHash,
+          },
+          version: "0",
+        }),
+      }),
+    });
+    const baseArtifactStore = basePlatform.artifactStore;
+    const platform: HostedRuntimePlatform = {
+      ...basePlatform,
+      artifactStore: {
+        ...baseArtifactStore,
+        async get(sha256, context) {
+          const bytes = await baseArtifactStore.get(sha256, context);
+          if (sha256 === missingReceiptHash) {
+            abortController.abort(abortReason);
+          }
+          return bytes;
+        },
+      },
+    };
+
+    try {
+      await assert.rejects(
+        runHostedWorkspaceRuntimeJobInProcess(createWorkspaceRuntimeJobInput(), {
+          async createCheckpointSnapshot() {
+            throw new Error("Cancelled receipt recovery must not checkpoint.");
+          },
+          async importItem() {
+            throw new Error("Cancelled receipt recovery must not import mailbox work.");
+          },
+          platform,
+          async runAssistantPhase() {
+            throw new Error("Cancelled receipt recovery must not enter the assistant phase.");
+          },
+          signal: abortController.signal,
+          vaultRoot,
+        }),
+        (error) => error === abortReason,
+      );
+
+      assert.ok(events.includes("artifact.get:receipt-log"));
+      assert.ok(events.includes("artifact.get:missing-receipt"));
+      assert.equal(events.includes("mailbox.fetch"), false);
+      assert.equal(events.some((event) => event.startsWith("runtime.log:")), false);
+      assert.equal(logRequests.length, 0);
+      assert.equal(consoleWarn.mock.calls.length, 0);
+    } finally {
+      consoleWarn.mockRestore();
+      await removeTempRoot(vaultRoot);
+    }
+  });
+
   test("persists hosted canonical write receipts before the idle workspace checkpoint", async () => {
     const vaultRoot = await mkdtemp(path.join(tmpdir(), "murph-workspace-entrypoint-"));
     const events: string[] = [];
@@ -17420,7 +18273,7 @@ describe("hosted workspace runtime entrypoint", () => {
 
       assert.equal(assistantPhaseCalls, 1);
       assert.equal(foregroundPendingGuardChecks, 1);
-      assert.deepEqual(artifactGetCalls, [receiptLogHash, receiptHash, receiptLogHash]);
+      assert.deepEqual(artifactGetCalls, [receiptLogHash, receiptHash]);
       assert.deepEqual(events.filter((event) => event.startsWith("snapshot:")), [
         "snapshot:idle_shutdown",
         "snapshot:idle_shutdown",
@@ -20031,7 +20884,6 @@ describe("hosted workspace runtime entrypoint", () => {
         olderPayloadHash,
         receiptHash,
         exactPayloadHash,
-        receiptLogHash,
       ]);
       assert.equal(await readFile(path.join(vaultRoot, "note.md"), "utf8"), "base note\n");
       assert.equal(

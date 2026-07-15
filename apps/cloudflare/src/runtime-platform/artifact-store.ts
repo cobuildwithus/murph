@@ -1,5 +1,8 @@
 import { emitHostedExecutionStructuredLog } from "@murphai/hosted-execution";
-import type { HostedRuntimePlatform } from "@murphai/assistant-runtime/hosted-runtime-contracts";
+import {
+  HostedRuntimeArtifactReadError,
+  type HostedRuntimePlatform,
+} from "@murphai/assistant-runtime/hosted-runtime-contracts";
 
 import { CLOUDFLARE_HOSTED_RUNTIME_BASE_URLS } from "../internal-hosts.ts";
 import {
@@ -284,7 +287,10 @@ export function createCloudflareArtifactStore(input: {
             assertHostedArtifactFetchLive(context.signal);
             continue;
           }
-          throw error;
+          throw new HostedRuntimeArtifactReadError({
+            cause: error,
+            retryable: true,
+          });
         }
         assertHostedArtifactFetchLive(context.signal);
 
@@ -308,7 +314,14 @@ export function createCloudflareArtifactStore(input: {
           return null;
         }
 
-        assertHostedOk(response, "Hosted artifact fetch");
+        try {
+          assertHostedOk(response, "Hosted artifact fetch");
+        } catch (error) {
+          throw new HostedRuntimeArtifactReadError({
+            cause: error,
+            retryable: response.status !== 422,
+          });
+        }
         const bodyStartedAt = Date.now();
         emitHostedExecutionStructuredLog({
           component: "hosted.runtime.artifact-store",
@@ -363,7 +376,10 @@ export function createCloudflareArtifactStore(input: {
             assertHostedArtifactFetchLive(context.signal);
             continue;
           }
-          throw wrappedError;
+          throw new HostedRuntimeArtifactReadError({
+            cause: wrappedError,
+            retryable: true,
+          });
         }
         assertHostedArtifactFetchLive(context.signal);
 
@@ -383,7 +399,10 @@ export function createCloudflareArtifactStore(input: {
         return new Uint8Array(body);
       }
 
-      throw new Error("Hosted artifact fetch exhausted retry attempts.");
+      throw new HostedRuntimeArtifactReadError({
+        cause: new Error("Hosted artifact fetch exhausted retry attempts."),
+        retryable: true,
+      });
     },
     async put({ bytes, sha256 }) {
       await putArtifactOnce({ bytes, sha256 });

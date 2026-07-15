@@ -145,7 +145,6 @@ import {
   HOSTED_CANONICAL_WRITE_RECEIPT_LOG_MAX_ENTRIES,
   hostedCanonicalWriteReceiptRecoveryStatusFields,
   omitHostedCanonicalWriteReceiptLogStatusFields,
-  readHostedCanonicalWriteReceiptLogEntries,
   readHostedCanonicalWriteReceiptLogStatusFingerprint,
   readHostedCanonicalWriteReceiptRecoveryWake,
 } from "./hosted-runtime/canonical-write-receipt-log.ts";
@@ -1076,16 +1075,20 @@ export async function runHostedWorkspaceRuntimeJobInProcess(
     });
     assertRuntimeNotAborted();
     let activeWorkspace = workspaceRead.workspace;
-    const pendingCanonicalReceiptCount = (
-      await readHostedCanonicalWriteReceiptLogEntries({
-        artifactStore: guardedRuntime.platform.artifactStore,
-        status: activeWorkspace?.redactedStatus ?? null,
-      })
-    ).length;
-    const pendingCanonicalReceiptRecoveryWake =
-      readHostedCanonicalWriteReceiptRecoveryWake(
-        activeWorkspace?.redactedStatus ?? null,
-      );
+    const pendingCanonicalReceiptCount = restored.canonicalWriteReceiptCount;
+    const canonicalWriteReceiptRecoveryFailed =
+      restored.canonicalWriteReceiptRecoveryFailed;
+    if (activeWorkspace && canonicalWriteReceiptRecoveryFailed) {
+      activeWorkspace = {
+        ...activeWorkspace,
+        redactedStatus: omitHostedCanonicalWriteReceiptLogStatusFields(
+          activeWorkspace.redactedStatus,
+        ),
+      };
+    }
+    const pendingCanonicalReceiptRecoveryWake = readHostedCanonicalWriteReceiptRecoveryWake(
+      activeWorkspace?.redactedStatus ?? null,
+    );
     if (
       pendingCanonicalReceiptRecoveryWake
       && pendingCanonicalReceiptCount < HOSTED_CANONICAL_WRITE_RECEIPT_LOG_MAX_ENTRIES
@@ -1847,7 +1850,8 @@ export async function runHostedWorkspaceRuntimeJobInProcess(
         nextWakeAt: pendingWake.nextWakeAt,
       });
     let runtimeStateDirty =
-      readHostedCanonicalWriteReceiptLogStatusFingerprint(
+      canonicalWriteReceiptRecoveryFailed
+      || readHostedCanonicalWriteReceiptLogStatusFingerprint(
         activeWorkspace?.redactedStatus ?? null,
       ) !== null;
     const pendingDurableCheckpointEffects: HostedWorkspaceDurableCheckpointEffect[] = [];
