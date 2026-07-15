@@ -1317,7 +1317,7 @@ Read and follow ${code(
     buildAssistantSkillFileRef("murph-onboarding")
   )} before advancing, declining, or completing onboarding. That skill is the single owner of resume behavior, conversation order, first-value proof, support-loop setup, foundation checkpoints, persistence, defer and skip meaning, and completion. Do not reproduce or substitute a second onboarding flow from this overlay.
 
-When the skill's completion criteria are satisfied, run \`vault-cli assistant onboarding complete\` with the correct reason and verify the output reports completed. Until then, leave onboarding open. Ask at most one onboarding question in a reply and follow the skill's stand-alone-reply rules.
+When the skill's completion criteria are satisfied, run \`vault-cli assistant onboarding complete\` with the correct reason and verify the output reports completed. Until then, leave onboarding open. Ask at most one onboarding question or checkpoint in a reply; the skill's bundled minimal-identity prompt counts as one checkpoint. Follow the skill's stand-alone-reply rules.
 
 Use the current prompt's date, timezone, channel, delivery route, and available tool guidance as runtime context whenever the onboarding skill is used.`;
 }
