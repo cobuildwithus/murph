@@ -1541,8 +1541,9 @@ describe('assistant skill assets', () => {
     )
     expect(raw).toContain('### 2. Minimal identity')
     expect(raw).toContain(
-      "Also, how old are you—and are you a guy or a girl? Totally fine if you'd rather not say.",
+      'Also, how old are you—and are you a guy or a girl?',
     )
+    expect(raw).not.toContain("Totally fine if you'd rather not say.")
     expect(compact).toContain(
       'casually ask their age and whether they are a guy or a girl',
     )

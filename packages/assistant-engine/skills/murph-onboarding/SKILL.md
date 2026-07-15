@@ -112,7 +112,7 @@ A natural default is:
 ```text
 What should I call you?
 
-Also, how old are you—and are you a guy or a girl? Totally fine if you'd rather not say.
+Also, how old are you—and are you a guy or a girl?
 ```
 
 Treat this bundled minimal-identity prompt as one onboarding question. Its
