@@ -34,7 +34,7 @@ const OPS_TOOLS = [
   },
   {
     description:
-      "Recover and extend the fixed Pulse Trial cohort started or redeemed before July 14 UTC, or handle one eligible member.",
+      "Preview and add seven days to one member's active or lapsed paused Pulse Trial without changing paid billing.",
     href: "/ops/trials",
     label: "Trials",
   },

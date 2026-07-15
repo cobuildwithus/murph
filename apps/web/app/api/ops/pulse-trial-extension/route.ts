@@ -1,12 +1,11 @@
 import { requireHostedOpsRequestAccess } from "@/src/lib/hosted-ops/access";
 import {
-  extendHostedPulseTrialsForCampaign,
-  HOSTED_PULSE_TRIAL_EXTENSION_CAMPAIGN,
-  HostedPulseTrialExtensionContinuationError,
-  HostedPulseTrialExtensionPreviewMismatchError,
-  isHostedPulseTrialExtensionContinuationTokenShape,
-  type HostedPulseTrialExtensionMode,
-  type HostedPulseTrialExtensionSummary,
+  applyHostedPulseTrialExtension,
+  HostedPulseTrialExtensionLockBusyError,
+  HostedPulseTrialExtensionPreviewStaleError,
+  HostedPulseTrialExtensionProviderError,
+  previewHostedPulseTrialExtension,
+  type HostedPulseTrialExtensionPreviewProof,
 } from "@/src/lib/hosted-ops/pulse-trial-extension";
 import { hostedOnboardingError } from "@/src/lib/hosted-onboarding/errors";
 import {
@@ -17,190 +16,125 @@ import {
 
 export const dynamic = "force-dynamic";
 export const fetchCache = "force-no-store";
-export const maxDuration = 800;
+export const maxDuration = 220;
 export const revalidate = 0;
 
-const HOSTED_OPS_PULSE_TRIAL_EXTENSION_BODY_LIMIT_BYTES = 4 * 1024;
-const HOSTED_OPS_PULSE_TRIAL_EXTENSION_MAX_CANDIDATES = 4;
+const REQUEST_BODY_LIMIT_BYTES = 4 * 1024;
+const MEMBER_ID_MAX_LENGTH = 128;
 
 export const POST = withJsonError(async (request: Request) => {
   await requireHostedOpsRequestAccess(request, {
     requireMutationOrigin: true,
   });
   const body = await readHostedOnboardingJsonObject(request, {
-    limitBytes: HOSTED_OPS_PULSE_TRIAL_EXTENSION_BODY_LIMIT_BYTES,
+    limitBytes: REQUEST_BODY_LIMIT_BYTES,
     tooLargeErrorCode: "HOSTED_OPS_PULSE_TRIAL_EXTENSION_REQUEST_TOO_LARGE",
     tooLargeErrorMessage: "Hosted ops trial extension request body is too large.",
   });
+  const memberId = readMemberId(body.memberId);
+  const mode = readMode(body.mode);
 
-  const mode = readMode(body);
-  const memberId = readMemberId(body);
-  const continuationToken = readContinuationToken(body);
-  if (
-    mode === "apply" &&
-    readOptionalString(body.campaign) !== HOSTED_PULSE_TRIAL_EXTENSION_CAMPAIGN
-  ) {
-    throw hostedOnboardingError({
-      code: "HOSTED_OPS_PULSE_TRIAL_EXTENSION_CAMPAIGN_CONFIRMATION_INVALID",
-      httpStatus: 400,
-      message:
-        "Applying a trial extension requires the exact campaign key from a fresh preview.",
-      retryable: false,
-    });
-  }
-  const previewProof = mode === "apply"
-    ? {
-        candidatePreviewTokens: readRequiredCandidatePreviewTokens(body),
-        candidateSnapshotDigest: readRequiredCandidateSnapshotDigest(body),
-      }
-    : null;
-
-  let summary: HostedPulseTrialExtensionSummary;
   try {
-    const commonInput = {
-      maxCandidates: HOSTED_OPS_PULSE_TRIAL_EXTENSION_MAX_CANDIDATES,
-      memberId,
-      continuationToken,
-    };
-    summary = previewProof
-      ? await extendHostedPulseTrialsForCampaign({
-          ...commonInput,
-          expectedCandidatePreviewTokens: previewProof.candidatePreviewTokens,
-          expectedCandidateSnapshotDigest: previewProof.candidateSnapshotDigest,
-          mode: "apply",
+    const result = mode === "apply"
+      ? await applyHostedPulseTrialExtension({
+          memberId,
+          previewProof: readPreviewProof(body.previewProof),
         })
-      : await extendHostedPulseTrialsForCampaign({
-          ...commonInput,
-          mode: "dry-run",
-        });
+      : await previewHostedPulseTrialExtension({ memberId });
+
+    if (mode === "apply") {
+      console.info("Hosted ops member Pulse Trial extension completed.", {
+        outcome: result.outcome,
+        timestamp: new Date().toISOString(),
+      });
+    }
+    return jsonOk(result);
   } catch (error) {
-    if (error instanceof HostedPulseTrialExtensionPreviewMismatchError) {
+    if (error instanceof HostedPulseTrialExtensionPreviewStaleError) {
       throw hostedOnboardingError({
         code: "HOSTED_OPS_PULSE_TRIAL_EXTENSION_PREVIEW_STALE",
         httpStatus: 409,
-        message: "Eligible trials changed since Preview. Preview again before applying.",
+        message: error.message,
         retryable: false,
       });
     }
-    if (error instanceof HostedPulseTrialExtensionContinuationError) {
+    if (error instanceof HostedPulseTrialExtensionLockBusyError) {
       throw hostedOnboardingError({
-        code: "HOSTED_OPS_PULSE_TRIAL_EXTENSION_CONTINUATION_INVALID",
-        httpStatus: 400,
-        message: "Trial extension continuation is invalid. Restart at Batch 1.",
-        retryable: false,
+        code: "HOSTED_OPS_PULSE_TRIAL_EXTENSION_LOCK_BUSY",
+        httpStatus: 409,
+        message: error.message,
+        retryable: true,
+      });
+    }
+    if (error instanceof HostedPulseTrialExtensionProviderError) {
+      throw hostedOnboardingError({
+        code: "HOSTED_OPS_PULSE_TRIAL_EXTENSION_PROVIDER_UNAVAILABLE",
+        httpStatus: 502,
+        message: error.message,
+        retryable: true,
       });
     }
     throw error;
   }
-  if (mode === "apply") {
-    console.info("Hosted ops Pulse Trial extension applied.", {
-      campaign: HOSTED_PULSE_TRIAL_EXTENSION_CAMPAIGN,
-      localWindowsReconciled: summary.localWindowsReconciled,
-      providerTrialsCleanedUp: summary.providerTrialsCleanedUp,
-      providerTrialsRecovered: summary.providerTrialsRecovered,
-      scope: memberId ? "member" : "all",
-      stripeTrialsExtended: summary.stripeTrialsExtended,
-      timestamp: new Date().toISOString(),
-    });
-  }
-
-  return jsonOk(summary);
 });
 
-function readMode(body: Record<string, unknown>): HostedPulseTrialExtensionMode {
-  const value = body.mode;
-  if (value === undefined || value === null || value === "" || value === "dry-run") {
-    return "dry-run";
+function readMode(value: unknown): "apply" | "preview" {
+  if (value === undefined || value === null || value === "" || value === "preview") {
+    return "preview";
   }
   if (value === "apply") {
     return "apply";
   }
-
   throw hostedOnboardingError({
     code: "HOSTED_OPS_PULSE_TRIAL_EXTENSION_MODE_INVALID",
     httpStatus: 400,
-    message: "Trial extension mode must be dry-run or apply.",
+    message: "Trial extension mode must be preview or apply.",
     retryable: false,
   });
 }
 
-function readMemberId(body: Record<string, unknown>): string | undefined {
-  if (!Object.hasOwn(body, "memberId")) {
-    return undefined;
-  }
-  const memberId = readOptionalString(body.memberId);
-  if (memberId) {
+function readMemberId(value: unknown): string {
+  const memberId = typeof value === "string" ? value.trim() : "";
+  if (
+    memberId.length > 0 &&
+    memberId.length <= MEMBER_ID_MAX_LENGTH &&
+    /^hbm_[A-Za-z0-9_-]+$/u.test(memberId)
+  ) {
     return memberId;
   }
-
   throw hostedOnboardingError({
     code: "HOSTED_OPS_PULSE_TRIAL_EXTENSION_MEMBER_ID_INVALID",
     httpStatus: 400,
-    message: "Member id must be a non-empty string when provided.",
+    message: "Enter a valid hosted member ID.",
     retryable: false,
   });
 }
 
-function readRequiredCandidateSnapshotDigest(body: Record<string, unknown>): string {
-  const value = body.candidateSnapshotDigest;
-  if (typeof value === "string" && value.trim().length > 0) {
-    return value;
+function readPreviewProof(value: unknown): HostedPulseTrialExtensionPreviewProof {
+  if (!value || typeof value !== "object" || Array.isArray(value)) {
+    throw invalidPreviewProofError();
   }
-
-  throw hostedOnboardingError({
-    code: "HOSTED_OPS_PULSE_TRIAL_EXTENSION_PREVIEW_DIGEST_INVALID",
-    httpStatus: 400,
-    message: "Applying a trial extension requires a candidate snapshot from Preview.",
-    retryable: false,
-  });
-}
-
-function readRequiredCandidatePreviewTokens(body: Record<string, unknown>): readonly string[] {
-  const value = body.candidatePreviewTokens;
+  const previewedAt = Reflect.get(value, "previewedAt");
+  const targetTrialEndsAt = Reflect.get(value, "targetTrialEndsAt");
+  const token = Reflect.get(value, "token");
   if (
-    Array.isArray(value) &&
-    value.length <= HOSTED_OPS_PULSE_TRIAL_EXTENSION_MAX_CANDIDATES &&
-    value.every((token): token is string =>
-      typeof token === "string" && token.trim().length > 0
-    )
+    typeof previewedAt !== "string" ||
+    typeof targetTrialEndsAt !== "string" ||
+    typeof token !== "string" ||
+    previewedAt.length > 64 ||
+    targetTrialEndsAt.length > 64 ||
+    token.length > 256
   ) {
-    return value;
+    throw invalidPreviewProofError();
   }
+  return { previewedAt, targetTrialEndsAt, token };
+}
 
-  throw hostedOnboardingError({
+function invalidPreviewProofError(): Error {
+  return hostedOnboardingError({
     code: "HOSTED_OPS_PULSE_TRIAL_EXTENSION_PREVIEW_PROOF_INVALID",
     httpStatus: 400,
-    message: "Applying a trial extension requires a complete successful Preview.",
+    message: "Preview this member before applying the extension.",
     retryable: false,
   });
-}
-
-function readContinuationToken(
-  body: Record<string, unknown>,
-): string | null {
-  if (!Object.hasOwn(body, "continuationToken") || body.continuationToken === null) {
-    return null;
-  }
-  const token = readOptionalString(body.continuationToken);
-  if (
-    token &&
-    isHostedPulseTrialExtensionContinuationTokenShape(token)
-  ) {
-    return token;
-  }
-
-  throw hostedOnboardingError({
-    code: "HOSTED_OPS_PULSE_TRIAL_EXTENSION_CONTINUATION_INVALID",
-    httpStatus: 400,
-    message: "Trial extension continuation is invalid. Restart at Batch 1.",
-    retryable: false,
-  });
-}
-
-function readOptionalString(value: unknown): string | null {
-  if (typeof value !== "string") {
-    return null;
-  }
-  const normalized = value.trim();
-  return normalized.length > 0 ? normalized : null;
 }
