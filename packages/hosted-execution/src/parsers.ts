@@ -152,6 +152,7 @@ export {
   parseHostedRuntimeLatencyTraceRequest,
   parseHostedRuntimeLatencyTraceResponse,
   parseHostedRuntimeLogEntry,
+  parseHostedRuntimeRedactedJson,
   parseHostedRuntimeLogRequest,
   parseHostedRuntimeLogResponse,
   parseHostedRuntimeUsageRecordRequest,

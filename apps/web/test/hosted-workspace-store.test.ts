@@ -1505,6 +1505,60 @@ describe("hosted runtime log store", () => {
     });
   });
 
+  it("persists empty redacted JSON as null", async () => {
+    const hostedRuntimeLog = createHostedRuntimeLogDelegate();
+    const tx = createHostedWorkspaceTx({
+      hostedRuntimeLog,
+      hostedWorkspace: createHostedWorkspaceDelegate(),
+    });
+
+    const result = await recordHostedRuntimeLogTx({
+      at: "2026-04-26T00:02:00.000Z",
+      component: "mailbox",
+      eventCode: "mailbox.imported",
+      level: "info",
+      phase: "import",
+      redacted: {},
+      tx,
+      userId: "member_workspace_1",
+    });
+
+    expect(hostedRuntimeLog.create).toHaveBeenCalledWith({
+      data: expect.objectContaining({
+        redactedJson: Prisma.DbNull,
+      }),
+    });
+    expect(result.redactedJson).toBeNull();
+  });
+
+  it("rejects URLs and direct identifiers before persisting redacted JSON", async () => {
+    const hostedRuntimeLog = createHostedRuntimeLogDelegate();
+    const tx = createHostedWorkspaceTx({
+      hostedRuntimeLog,
+      hostedWorkspace: createHostedWorkspaceDelegate(),
+    });
+
+    for (const [unsafeValue, expectedError] of [
+      ["Provider failed at https://provider.example.test/private", /URL/u],
+      ["retrying hosted-user-runtime:opaque-test", /direct identifier/u],
+    ] as const) {
+      await expect(recordHostedRuntimeLogTx({
+        at: "2026-04-26T00:02:00.000Z",
+        component: "mailbox",
+        eventCode: "mailbox.imported",
+        level: "warn",
+        phase: "import",
+        redacted: {
+          safeErrorMessage: unsafeValue,
+        },
+        tx,
+        userId: "member_workspace_1",
+      })).rejects.toThrow(expectedError);
+    }
+
+    expect(hostedRuntimeLog.create).not.toHaveBeenCalled();
+  });
+
   it("persists sanitized device-sync provider failure diagnostics", async () => {
     const hostedRuntimeLog = createHostedRuntimeLogDelegate();
     const tx = createHostedWorkspaceTx({
