@@ -649,6 +649,13 @@ describe("hosted Prisma baseline migration", () => {
       ),
       "utf8",
     );
+    const hostedFamilyPendingMemberPlanMigrationSql = readFileSync(
+      new URL(
+        "../prisma/migrations/20260715150000_hosted_family_pending_member_plan/migration.sql",
+        import.meta.url,
+      ),
+      "utf8",
+    );
     const hostedFamilyPlanCodeContractMigrationSql = readFileSync(
       new URL(
         "../prisma/contract-migrations/20260714150000_require_hosted_family_plan_codes/migration.sql",
@@ -797,6 +804,7 @@ describe("hosted Prisma baseline migration", () => {
       "20260714120000_hosted_group_reaction_context",
       "20260714130000_hosted_mailbox_assistant_input_lookup",
       "20260715120000_delete_orphaned_linq_invite_deliveries",
+      "20260715150000_hosted_family_pending_member_plan",
       "migration_lock.toml",
     ]);
     expect(hostedFamilyMixedTierCapacityMigrationSql).toContain(
@@ -819,6 +827,9 @@ describe("hosted Prisma baseline migration", () => {
     );
     expect(hostedFamilyMixedTierCapacityMigrationSql).not.toContain(
       'INSERT INTO "hosted_account_group_plan_capacity"',
+    );
+    expect(hostedFamilyPendingMemberPlanMigrationSql).toContain(
+      'ADD COLUMN "pending_plan_code" TEXT',
     );
     expect(hostedGroupJoinConfirmationEligibilityMigrationSql).toContain(
       'ALTER TABLE "hosted_group_member"',

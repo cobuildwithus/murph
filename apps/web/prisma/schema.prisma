@@ -1066,6 +1066,7 @@ model HostedAccountGroupMembership {
   memberId    String             @map("member_id")
   role        String
   planCode    String             @default("pulse") @map("plan_code")
+  pendingPlanCode String?        @map("pending_plan_code")
   status      String             @default("active")
   joinedAt    DateTime?          @map("joined_at")
   removedAt   DateTime?          @map("removed_at")

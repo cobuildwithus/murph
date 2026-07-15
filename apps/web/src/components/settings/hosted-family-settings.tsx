@@ -18,6 +18,7 @@ export function HostedFamilySettings(props: { ownerSnapshot: HostedFamilyOwnerSn
     joinedAtIso: member.joinedAt ? member.joinedAt.toISOString() : null,
     label: member.label,
     memberId: member.memberId,
+    pendingPlanCode: member.pendingPlanCode,
     planCode: member.planCode,
   }));
   const invites: FamilyManagerInvite[] = snapshot.invites.map((invite) => ({

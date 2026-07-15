@@ -226,6 +226,7 @@ test("HostedFamilySettings explains family member privacy without enumerating da
         joinedAt: new Date("2026-06-18T12:00:00.000Z"),
         label: "You",
         memberId: "member_owner",
+        pendingPlanCode: null,
         planCode: "pulse",
         role: "owner",
         status: "active",

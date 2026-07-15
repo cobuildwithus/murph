@@ -1,6 +1,6 @@
 # Hosted Family Plan
 
-Last verified: 2026-07-14
+Last verified: 2026-07-15
 
 ## Purpose
 
@@ -74,10 +74,11 @@ Family offer price. Do not multiply the aggregate seat count by the Pulse
 price once mixed-tier subscriptions exist.
 
 Do not introduce generic plan-transition machinery or a second durable billing
-operation owner. Family checkout and explicit owner-confirmed capacity changes
-update the exact Stripe item composition. Webhook reconciliation remains the
-only writer of the local paid-capacity projection. Direct Pulse and Edge
-billing continue to use the existing member billing path.
+operation owner. Family checkout, invites, and member-level plan changes update
+the exact Stripe item composition. The owner-facing settings surface manages
+people, not seat quantities. Webhook reconciliation remains the only writer of
+the local paid-capacity projection. Direct Pulse and Edge billing continue to
+use the existing member billing path.
 
 When an owner converts an existing direct-paid subscription, the request only
 updates Stripe and reports that Family billing is syncing. The Family
@@ -85,12 +86,22 @@ subscription webhook writes the paid projection and clears the old direct
 billing reference in the same transaction, so entitlement ownership changes
 once and never advances Stripe's event watermark from local wall time.
 
-Changing a member's tier is a local assignment change under the Family owner
-lock and requires an already-open paid seat in the destination tier. If none is
-open, the owner adds the destination seat first, moves the member after Stripe
-reconciles it, and may then remove the freed source-tier seat. This ordering
-keeps every webhook-visible composition valid without a second transition
-state machine.
+Changing a member's tier is one owner-confirmed action. Web records the target
+in the membership's nullable `pendingPlanCode` while the current tier and access
+remain active, then swaps the source and destination quantities in one
+serialized Stripe subscription update. The subscription webhook accepts that
+pending intent only when the incoming quantities equal the exact one-member
+swap from the current paid projection; it then writes the member tier and paid
+projection in the same transaction and clears the pending value. This one-field
+bridge is required when all six Family places are occupied because a temporary
+seventh paid place is invalid. Retries reuse the same pending intent and Stripe
+idempotency key. The request path never writes paid capacity.
+While that intent exists, Settings labels the member as updating and disables
+further plan or removal actions until the webhook clears it.
+
+Member plan swaps use Stripe prorations on the next invoice: upgrades add the
+prorated difference and downgrades add the corresponding credit. The owner sees
+the target per-person monthly price before confirming.
 
 Core invariant:
 
@@ -105,10 +116,12 @@ Pulse-only web response, but the old parser rejects the new `plans` and
 `planCode` fields. Deploy Cloudflare hosted execution first with immediate
 runner-container rollout, verify the new bundle is serving, and then deploy
 hosted web. Hosted web predeploy applies the nullable/defaulted assignment
-columns and empty capacity table before the new web build. Existing Pulse-only
-groups read through the live legacy billed total until the first new webhook
-atomically writes exact tier rows. The post-deploy contract lane adds the
-assignment constraints only after the prior web-function window drains.
+columns, nullable pending-plan column, and empty capacity table before the new
+web build. Existing Pulse-only groups read through the live legacy billed total
+until the first new webhook atomically writes exact tier rows. The new member
+management UI must not receive traffic until the webhook build that understands
+`pendingPlanCode` is live. The post-deploy contract lane adds assignment
+constraints only after the prior web-function window drains.
 
 Configure both Family Stripe price ids before exposing Edge capacity. After
 web deploy, reconcile one Pulse-only subscription and one mixed Pulse/Edge
