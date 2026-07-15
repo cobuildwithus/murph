@@ -1630,6 +1630,7 @@ function buildLinqProviderWebhookBody(input: {
 function createPrismaStub() {
   const prisma = {
     $executeRaw: vi.fn().mockResolvedValue([]),
+    $queryRaw: vi.fn().mockResolvedValue([{ id: "member_123" }]),
     $transaction: vi.fn(async (callback: (tx: unknown) => Promise<unknown>) => callback(prisma)),
     hostedLinqAlert: {
       createMany: vi.fn().mockResolvedValue({ count: 1 }),

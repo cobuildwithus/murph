@@ -31,6 +31,7 @@ import { readHostedMemberStripeBillingRef } from "../hosted-onboarding/hosted-me
 import { readHostedMemberIdentity } from "../hosted-onboarding/hosted-member-identity-store";
 import { readHostedAccountGroupStripeBillingRef } from "../hosted-onboarding/family-plan";
 import { deleteHostedPrivyUser } from "../hosted-onboarding/privy";
+import { buildHostedLinqInviteSignupEffectIdMemberPrefix } from "../hosted-onboarding/linq-invite-signup-effect-id";
 import { getHostedOnboardingStripe } from "../hosted-onboarding/runtime";
 import { HOSTED_ONBOARDING_TRANSACTION_OPTIONS } from "../hosted-onboarding/shared";
 import {
@@ -45,7 +46,7 @@ import {
 } from "../hosted-orchestration/signal-runtime";
 import {
   assertHostedPhoneCallsReadyForAccountDeletionTx,
-  stopHostedPhoneCallsForAccountDeletion,
+  deleteHostedPhoneCallsForAccountDeletion,
 } from "../phone-calls/account-deletion";
 import {
   revokeOutgoingHostedVaultSharesForMemberDeletionTx,
@@ -243,6 +244,12 @@ export const HOSTED_ACCOUNT_DATA_STORE_COVERAGE = [
     label: "Linq daily message counters",
     deletion: "live-delete",
     note: "Deletes member-scoped Linq daily inbound/outbound quota counters.",
+  },
+  {
+    slug: "prisma.hosted_linq_invite_delivery",
+    label: "Linq signup-link delivery records",
+    deletion: "live-delete",
+    note: "Deletes signup-link delivery records whose delivery identity contains the member id. Unrelated operational delivery records remain under their normal retention policy.",
   },
   {
     slug: "prisma.hosted_invite",
@@ -590,7 +597,7 @@ export async function deleteHostedAccountData(input: {
     now: deletionStartedAt,
     prisma: input.prisma,
   });
-  await stopHostedPhoneCallsForAccountDeletion({
+  await deleteHostedPhoneCallsForAccountDeletion({
     memberIds: deletionMemberIds,
     prisma: input.prisma,
     signal: input.request.signal,
@@ -900,6 +907,21 @@ function buildStringInFilter(values: readonly string[]): string | { in: string[]
   return { in: uniqueValues };
 }
 
+function buildHostedLinqInviteSignupDeliveryWhere(
+  memberIds: readonly string[],
+): Prisma.HostedLinqDeliveryWhereInput {
+  return {
+    OR: uniqueStrings(memberIds).map((memberId) => ({
+      sourceRef: {
+        startsWith: buildHostedLinqInviteSignupEffectIdMemberPrefix(memberId),
+      },
+    })),
+    template: {
+      in: ["invite_signup", "invite_signup_fallback"],
+    },
+  };
+}
+
 async function assertNoConnectedAppWritesAfterProviderCleanupTx(input: {
   memberId: string;
   prisma: Prisma.TransactionClient;
@@ -1178,6 +1200,7 @@ async function countHostedAccountData(input: {
     hostedAiUsagePeriod,
     hostedProductFeedback,
     hostedLinqDailyState,
+    hostedLinqInviteDelivery,
     deviceConnection,
     deviceSyncCompanionCaptureReceipt,
     deviceSyncDirtyConnection,
@@ -1289,6 +1312,9 @@ async function countHostedAccountData(input: {
     input.prisma.hostedAiUsagePeriod.count({ where: { memberId: memberIdFilter } }),
     input.prisma.hostedProductFeedback.count({ where: { memberId: memberIdFilter } }),
     input.prisma.hostedLinqDailyState.count({ where: { memberId: memberIdFilter } }),
+    input.prisma.hostedLinqDelivery.count({
+      where: buildHostedLinqInviteSignupDeliveryWhere(memberIds),
+    }),
     input.prisma.deviceConnection.count({ where: { userId: memberIdFilter } }),
     input.prisma.deviceSyncCompanionCaptureReceipt.count({ where: { userId: memberIdFilter } }),
     input.prisma.deviceSyncDirtyConnection.count({ where: { userId: memberIdFilter } }),
@@ -1331,6 +1357,7 @@ async function countHostedAccountData(input: {
     "prisma.hosted_invite": hostedInvite,
     "prisma.hosted_ingress_latency_trace": hostedIngressLatencyTrace,
     "prisma.hosted_linq_daily_state": hostedLinqDailyState,
+    "prisma.hosted_linq_invite_delivery": hostedLinqInviteDelivery,
     "prisma.hosted_mailbox_item": hostedMailboxItem,
     "prisma.hosted_mailbox_lane_counter": hostedMailboxLaneCounter,
     "prisma.hosted_mailbox_payload": hostedMailboxPayload,
@@ -1391,6 +1418,9 @@ async function deleteHostedAccountPrismaRows(input: {
   record("prisma.hosted_product_feedback", await input.prisma.hostedProductFeedback.deleteMany({ where: { memberId: memberIdFilter } }));
   record("prisma.hosted_codex_auth_connection", await input.prisma.hostedCodexAuthConnection.deleteMany({ where: { memberId: memberIdFilter } }));
   record("prisma.hosted_linq_daily_state", await input.prisma.hostedLinqDailyState.deleteMany({ where: { memberId: memberIdFilter } }));
+  record("prisma.hosted_linq_invite_delivery", await input.prisma.hostedLinqDelivery.deleteMany({
+    where: buildHostedLinqInviteSignupDeliveryWhere(input.memberIds),
+  }));
   record("prisma.hosted_invite", await input.prisma.hostedInvite.deleteMany({ where: { memberId: memberIdFilter } }));
   record("prisma.hosted_consent_event", await input.prisma.hostedConsentEvent.deleteMany({ where: { memberId: memberIdFilter } }));
   record("prisma.hosted_consent_grant", await input.prisma.hostedConsentGrant.deleteMany({ where: { memberId: memberIdFilter } }));

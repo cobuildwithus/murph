@@ -572,6 +572,13 @@ describe("hosted Prisma baseline migration", () => {
       ),
       "utf8",
     );
+    const orphanedHostedLinqInviteDeliveryDeletionMigrationSql = readFileSync(
+      new URL(
+        "../prisma/migrations/20260715120000_delete_orphaned_linq_invite_deliveries/migration.sql",
+        import.meta.url,
+      ),
+      "utf8",
+    );
     const hostedMemberAssistantModelPreferenceMigrationSql = readFileSync(
       new URL(
         "../prisma/migrations/20260709120000_hosted_member_assistant_model_preference/migration.sql",
@@ -789,6 +796,7 @@ describe("hosted Prisma baseline migration", () => {
       "20260714090000_hosted_family_mixed_tier_capacity",
       "20260714120000_hosted_group_reaction_context",
       "20260714130000_hosted_mailbox_assistant_input_lookup",
+      "20260715120000_delete_orphaned_linq_invite_deliveries",
       "migration_lock.toml",
     ]);
     expect(hostedFamilyMixedTierCapacityMigrationSql).toContain(
@@ -1045,6 +1053,21 @@ describe("hosted Prisma baseline migration", () => {
       'hosted_linq_line_phone_number_key',
     );
     expect(hostedLinqObservabilityMigrationSql).not.toContain("raw_payload");
+    expect(orphanedHostedLinqInviteDeliveryDeletionMigrationSql).toContain(
+      'DELETE FROM "hosted_linq_delivery"',
+    );
+    expect(orphanedHostedLinqInviteDeliveryDeletionMigrationSql).toContain(
+      "'invite_signup', 'invite_signup_fallback'",
+    );
+    expect(orphanedHostedLinqInviteDeliveryDeletionMigrationSql).toContain(
+      'split_part("delivery"."source_ref", \':\', 2)',
+    );
+    expect(orphanedHostedLinqInviteDeliveryDeletionMigrationSql).toContain(
+      "NOT EXISTS",
+    );
+    expect(orphanedHostedLinqInviteDeliveryDeletionMigrationSql).toContain(
+      'FROM "hosted_member"',
+    );
     expect(hostedLinqEgressEngagementMigrationSql).toContain('"linq_last_inbound_at" TIMESTAMP(3)');
     expect(hostedLinqEgressEngagementMigrationSql).toContain('"pending_linq_last_inbound_at" TIMESTAMP(3)');
     expect(hostedLinqEgressEngagementMigrationSql).toContain('"last_inbound_at" TIMESTAMP(3)');

@@ -21,6 +21,7 @@ import {
   updateHostedMemberCoreState,
   type HostedMemberBillingSnapshot,
 } from "../hosted-onboarding/hosted-member-store";
+import { readActiveHostedFamilySponsorship } from "../hosted-onboarding/member-access";
 import {
   isHostedPulseTrialSubscriptionForKnownPolicy,
 } from "../hosted-onboarding/pulse-trial-subscription-cleanup";
@@ -51,6 +52,7 @@ export type HostedPulseTrialExtensionEligibilityCode =
   | "eligible"
   | "member_not_found"
   | "member_suspended"
+  | "family_sponsored"
   | "missing_billing_reference"
   | "not_a_redeemed_pulse_trial"
   | "paid_billing"
@@ -230,6 +232,7 @@ export async function previewHostedPulseTrialExtension(
     memberId: input.memberId,
     now,
     priceId: dependencies.priceId,
+    prisma: dependencies.prisma,
     stripe: dependencies.stripe,
   });
 
@@ -289,6 +292,7 @@ export async function applyHostedPulseTrialExtension(
           memberId: input.memberId,
           now: proofDates.previewedAt,
           priceId: dependencies.priceId,
+          prisma: tx,
           stripe: dependencies.stripe,
         });
         const subscription = state.subscription;
@@ -474,7 +478,7 @@ async function prepareHostedPulseTrialExtension(input: {
     preparedSubscription = await input.stripe.updateSubscription(
       input.subscription.id,
       {
-        metadata: buildHostedPulseTrialExtensionMetadata(input),
+        metadata: buildHostedPulseTrialExtensionPendingMetadata(input),
       },
       {
         idempotencyKey: buildHostedPulseTrialExtensionIdempotencyKey({
@@ -560,7 +564,7 @@ async function updateHostedPulseTrialExtension(input: {
     return await input.stripe.updateSubscription(
       input.subscription.id,
       {
-        metadata: buildHostedPulseTrialExtensionMetadata(input),
+        metadata: buildHostedPulseTrialExtensionCompletedMetadata(input),
         proration_behavior: "none",
         trial_end: input.targetTrialEnd,
       },
@@ -580,7 +584,7 @@ async function updateHostedPulseTrialExtension(input: {
   }
 }
 
-function buildHostedPulseTrialExtensionMetadata(input: {
+function buildHostedPulseTrialExtensionPendingMetadata(input: {
   operationId: string;
   targetTrialEnd: number;
 }): Record<string, string> {
@@ -589,6 +593,17 @@ function buildHostedPulseTrialExtensionMetadata(input: {
       HOSTED_PULSE_TRIAL_EXTENSION_DAYS.toString(),
     [EXTENSION_OPERATION_METADATA_KEY]: input.operationId,
     [EXTENSION_TARGET_METADATA_KEY]: input.targetTrialEnd.toString(),
+  };
+}
+
+function buildHostedPulseTrialExtensionCompletedMetadata(input: {
+  operationId: string;
+}): Record<string, string> {
+  return {
+    [EXTENSION_DAYS_METADATA_KEY]:
+      HOSTED_PULSE_TRIAL_EXTENSION_DAYS.toString(),
+    [EXTENSION_OPERATION_METADATA_KEY]: input.operationId,
+    [EXTENSION_TARGET_METADATA_KEY]: "",
   };
 }
 
@@ -621,12 +636,23 @@ async function inspectHostedPulseTrialExtensionState(input: {
   memberId: string;
   now: Date;
   priceId: string;
+  prisma: PrismaClient | Prisma.TransactionClient;
   stripe: HostedPulseTrialExtensionStripeClient;
 }): Promise<HostedPulseTrialExtensionState> {
   const localReason = classifyHostedPulseTrialExtensionLocalState(input.member);
   if (localReason) {
     return buildIneligibleHostedPulseTrialExtensionState({
       code: localReason,
+      member: input.member,
+    });
+  }
+
+  if (await readActiveHostedFamilySponsorship({
+    memberId: input.memberId,
+    prisma: input.prisma,
+  })) {
+    return buildIneligibleHostedPulseTrialExtensionState({
+      code: "family_sponsored",
       member: input.member,
     });
   }
@@ -674,6 +700,13 @@ async function inspectHostedPulseTrialExtensionState(input: {
     now: input.now,
     subscription,
   });
+  if (subscription.status === "active" && !recoverableOperation) {
+    return buildIneligibleHostedPulseTrialExtensionState({
+      code: "provider_subscription_not_extendable",
+      member: input.member,
+      subscription,
+    });
+  }
   const targetTrialEnd = recoverableOperation?.targetTrialEnd ??
     (subscription.status === "trialing"
       ? requireSafeUnixSecond(currentTrialEnd) +
@@ -814,6 +847,8 @@ function readHostedPulseTrialExtensionEligibilityMessage(
       return "No hosted member exists with this ID.";
     case "member_suspended":
       return "This member is suspended, so billing was left unchanged.";
+    case "family_sponsored":
+      return "This member already has access through an active Family plan.";
     case "missing_billing_reference":
       return "This member has no Stripe billing record.";
     case "not_a_redeemed_pulse_trial":
@@ -1064,21 +1099,25 @@ function readHostedPulseTrialExtensionRecoverableOperation(input: {
   const metadataTarget = readHostedPulseTrialExtensionMetadataTarget(
     input.subscription,
   );
+  const localTrialEnd = input.member?.billingRef?.currentTrialEndsAt
+    ? Math.floor(input.member.billingRef.currentTrialEndsAt.getTime() / 1000)
+    : null;
 
   if (
     (input.subscription.status === "paused" ||
       input.subscription.status === "active") &&
     metadataTarget !== null &&
-    metadataTarget > nowUnix
+    metadataTarget > nowUnix &&
+    (
+      input.subscription.status !== "active" ||
+      localTrialEnd !== metadataTarget
+    )
   ) {
     return { operationId, targetTrialEnd: metadataTarget };
   }
 
   const trialEnd = readSafeUnixSecond(input.subscription.trial_end);
   const trialingTarget = metadataTarget ?? trialEnd;
-  const localTrialEnd = input.member?.billingRef?.currentTrialEndsAt
-    ? Math.floor(input.member.billingRef.currentTrialEndsAt.getTime() / 1000)
-    : null;
   if (
     input.subscription.status === "trialing" &&
     trialEnd !== null &&

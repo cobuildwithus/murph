@@ -16,7 +16,7 @@ const serviceMocks = vi.hoisted(() => ({
   revokeOutgoingHostedVaultSharesForMemberDeletionTx: vi.fn(),
   signalHostedMailboxAppendRuntime: vi.fn(),
   assertHostedPhoneCallsReadyForAccountDeletionTx: vi.fn(),
-  stopHostedPhoneCallsForAccountDeletion: vi.fn(),
+  deleteHostedPhoneCallsForAccountDeletion: vi.fn(),
   terminateHostedUserRuntimeWorkflowBestEffort: vi.fn(),
 }));
 
@@ -64,8 +64,8 @@ vi.mock("@/src/lib/hosted-orchestration/signal-runtime", () => ({
 vi.mock("@/src/lib/phone-calls/account-deletion", () => ({
   assertHostedPhoneCallsReadyForAccountDeletionTx:
     serviceMocks.assertHostedPhoneCallsReadyForAccountDeletionTx,
-  stopHostedPhoneCallsForAccountDeletion:
-    serviceMocks.stopHostedPhoneCallsForAccountDeletion,
+  deleteHostedPhoneCallsForAccountDeletion:
+    serviceMocks.deleteHostedPhoneCallsForAccountDeletion,
 }));
 
 vi.mock("@/src/lib/hosted-vault-share/share-grant-store", () => ({
@@ -123,6 +123,7 @@ const REQUIRED_STORE_SLUGS = [
   "prisma.hosted_ai_usage_period",
   "prisma.hosted_product_feedback",
   "prisma.hosted_linq_daily_state",
+  "prisma.hosted_linq_invite_delivery",
   "prisma.hosted_invite",
   "prisma.hosted_consent_event",
   "prisma.hosted_consent_grant",
@@ -192,8 +193,8 @@ beforeEach(() => {
   serviceMocks.signalHostedMailboxAppendRuntime.mockResolvedValue(undefined);
   serviceMocks.assertHostedPhoneCallsReadyForAccountDeletionTx.mockReset();
   serviceMocks.assertHostedPhoneCallsReadyForAccountDeletionTx.mockResolvedValue(undefined);
-  serviceMocks.stopHostedPhoneCallsForAccountDeletion.mockReset();
-  serviceMocks.stopHostedPhoneCallsForAccountDeletion.mockResolvedValue(undefined);
+  serviceMocks.deleteHostedPhoneCallsForAccountDeletion.mockReset();
+  serviceMocks.deleteHostedPhoneCallsForAccountDeletion.mockResolvedValue(undefined);
   serviceMocks.terminateHostedUserRuntimeWorkflowBestEffort.mockReset();
   serviceMocks.terminateHostedUserRuntimeWorkflowBestEffort.mockResolvedValue({
     configured: true,
@@ -397,6 +398,26 @@ describe("deleteHostedAccountData", () => {
     });
     expect(deleteCalls).toEqual(expect.arrayContaining([
       {
+        model: "hostedLinqDelivery",
+        where: {
+          OR: [
+            {
+              sourceRef: {
+                startsWith: "linq-invite-signup:member_123:",
+              },
+            },
+            {
+              sourceRef: {
+                startsWith: "linq-invite-signup:member_thread_container_123:",
+              },
+            },
+          ],
+          template: {
+            in: ["invite_signup", "invite_signup_fallback"],
+          },
+        },
+      },
+      {
         model: "hostedThreadRoute",
         where: {
           OR: [
@@ -441,6 +462,7 @@ describe("deleteHostedAccountData", () => {
         },
       },
     ]));
+    expect(result.deletedCounts["prisma.hosted_linq_invite_delivery"]).toBe(1);
   });
 
   it("deletes delivery-time consume stamps with hosted mailbox item rows", async () => {
@@ -879,10 +901,10 @@ describe("deleteHostedAccountData", () => {
     );
   });
 
-  it("suspends call creation, ends provider calls, and rechecks authority before local deletion", async () => {
+  it("suspends call creation, deletes provider calls, and rechecks authority before local deletion", async () => {
     const operationOrder: string[] = [];
-    serviceMocks.stopHostedPhoneCallsForAccountDeletion.mockImplementation(async () => {
-      operationOrder.push("phone-call:stop");
+    serviceMocks.deleteHostedPhoneCallsForAccountDeletion.mockImplementation(async () => {
+      operationOrder.push("phone-call:delete-provider-data");
     });
     serviceMocks.assertHostedPhoneCallsReadyForAccountDeletionTx.mockImplementation(async () => {
       operationOrder.push("phone-call:assert-ready");
@@ -898,7 +920,7 @@ describe("deleteHostedAccountData", () => {
       request: new Request("https://join.example.test/settings"),
     });
 
-    expect(operationOrder.indexOf("phone-call:stop")).toBeGreaterThan(
+    expect(operationOrder.indexOf("phone-call:delete-provider-data")).toBeGreaterThan(
       operationOrder.indexOf("update:hostedMember"),
     );
     expect(operationOrder.indexOf("phone-call:assert-ready")).toBeGreaterThan(
@@ -909,9 +931,9 @@ describe("deleteHostedAccountData", () => {
     );
   });
 
-  it("preserves local rows when active provider calls cannot be ended", async () => {
+  it("preserves local rows when provider call data cannot be deleted", async () => {
     const onTransaction = vi.fn();
-    serviceMocks.stopHostedPhoneCallsForAccountDeletion.mockRejectedValue(
+    serviceMocks.deleteHostedPhoneCallsForAccountDeletion.mockRejectedValue(
       new HostedOnboardingError({
         code: "ACCOUNT_DELETION_PHONE_CALL_CLEANUP_FAILED",
         httpStatus: 502,

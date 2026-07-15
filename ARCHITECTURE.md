@@ -1,6 +1,6 @@
 # Murph Architecture
 
-Last verified: 2026-07-14
+Last verified: 2026-07-15
 
 ## Hosted Group Self-Awareness
 
@@ -71,7 +71,12 @@ call for request-key idempotency, provider call id, status, bounded call brief,
 and final analysis. Briefs and results are encrypted before persistence with the
 control-domain hosted secure-box lane and AAD bound to the member, table, row,
 field, and scope; only provider/status/timestamp identifiers remain operational
-metadata. Nullable legacy JSON columns are read only when ciphertext is absent
+metadata. During account deletion, the member is suspended before `apps/web`
+processes a bounded batch containing every durable Retell provider call id,
+stops active calls, and deletes each provider object before clearing its local
+id. The `HostedPhoneCall` row remains the retry owner on any ambiguous provider
+or local-write failure, and the destructive account transaction fails closed
+while any provider id or active unbound reservation remains. Nullable legacy JSON columns are read only when ciphertext is absent
 and exist solely for the bounded migration scrub. Retell reaches `apps/web` only through signed raw-body
 function/webhook routes for `ask_murph`, `call_ended`, and `call_analyzed`;
 Murph does not persist raw Retell transcripts, request bodies, recordings, or

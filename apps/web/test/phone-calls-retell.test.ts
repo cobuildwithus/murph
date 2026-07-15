@@ -427,7 +427,7 @@ describe("Retell phone-call runtime", () => {
     expect(fetchImpl).toHaveBeenCalledOnce();
   });
 
-  it("stops registered or ongoing calls during account deletion", async () => {
+  it("stops active calls and deletes their provider data during account deletion", async () => {
     vi.stubEnv("RETELL_API_KEY", "retell-api-key");
     const fetchImpl = vi.fn<typeof fetch>()
       .mockResolvedValueOnce(new Response(JSON.stringify({
@@ -437,31 +437,171 @@ describe("Retell phone-call runtime", () => {
         headers: { "content-type": "application/json" },
         status: 200,
       }))
+      .mockResolvedValueOnce(new Response(null, { status: 204 }))
       .mockResolvedValueOnce(new Response(null, { status: 204 }));
 
     await createRetellPhoneCallAccountDeletionRuntime({ fetchImpl })
-      .stopIfActive("retell_call_123");
+      .deleteProviderCall("retell_call_123");
 
-    expect(fetchImpl).toHaveBeenCalledTimes(2);
+    expect(fetchImpl).toHaveBeenCalledTimes(3);
     expect(String(fetchImpl.mock.calls[0]![0])).toContain("/v2/get-call/retell_call_123");
     expect(String(fetchImpl.mock.calls[1]![0])).toContain("/v2/stop-call/retell_call_123");
     expect(fetchImpl.mock.calls[1]![1]?.method).toBe("POST");
+    expect(String(fetchImpl.mock.calls[2]![0])).toContain("/v2/delete-call/retell_call_123");
+    expect(fetchImpl.mock.calls[2]![1]?.method).toBe("DELETE");
   });
 
-  it("does not stop calls Retell already reports as terminal", async () => {
+  it("deletes calls Retell already reports as terminal without stopping them", async () => {
     vi.stubEnv("RETELL_API_KEY", "retell-api-key");
-    const fetchImpl = vi.fn<typeof fetch>().mockResolvedValue(new Response(JSON.stringify({
-      call_id: "retell_call_123",
-      call_status: "ended",
-    }), {
-      headers: { "content-type": "application/json" },
-      status: 200,
-    }));
+    const fetchImpl = vi.fn<typeof fetch>()
+      .mockResolvedValueOnce(new Response(JSON.stringify({
+        call_id: "retell_call_123",
+        call_status: "ended",
+      }), {
+        headers: { "content-type": "application/json" },
+        status: 200,
+      }))
+      .mockResolvedValueOnce(new Response(null, { status: 204 }));
 
     await createRetellPhoneCallAccountDeletionRuntime({ fetchImpl })
-      .stopIfActive("retell_call_123");
+      .deleteProviderCall("retell_call_123");
 
-    expect(fetchImpl).toHaveBeenCalledTimes(1);
+    expect(fetchImpl).toHaveBeenCalledTimes(2);
+    expect(String(fetchImpl.mock.calls[1]![0])).toContain("/v2/delete-call/retell_call_123");
+  });
+
+  it("accepts an already-absent Retell call as deleted", async () => {
+    vi.stubEnv("RETELL_API_KEY", "retell-api-key");
+    const fetchImpl = vi.fn<typeof fetch>().mockResolvedValue(new Response(
+      JSON.stringify({
+        message: "Cannot find requested asset under given api key.",
+        status: "error",
+      }),
+      {
+        headers: { "content-type": "application/json" },
+        status: 422,
+      },
+    ));
+
+    await expect(createRetellPhoneCallAccountDeletionRuntime({ fetchImpl })
+      .deleteProviderCall("retell_call_123")).resolves.toBeUndefined();
+
+    expect(fetchImpl).toHaveBeenCalledOnce();
+    expect(String(fetchImpl.mock.calls[0]![0])).toContain("/v2/get-call/retell_call_123");
+  });
+
+  it("accepts a delete-time missing-asset response as completed cleanup", async () => {
+    vi.stubEnv("RETELL_API_KEY", "retell-api-key");
+    const fetchImpl = vi.fn<typeof fetch>()
+      .mockResolvedValueOnce(new Response(JSON.stringify({
+        call_id: "retell_call_123",
+        call_status: "ended",
+      }), {
+        headers: { "content-type": "application/json" },
+        status: 200,
+      }))
+      .mockResolvedValueOnce(new Response(
+        JSON.stringify({
+          message: "Cannot find requested asset under given api key.",
+          status: "error",
+        }),
+        {
+          headers: { "content-type": "application/json" },
+          status: 422,
+        },
+      ));
+
+    await expect(createRetellPhoneCallAccountDeletionRuntime({ fetchImpl })
+      .deleteProviderCall("retell_call_123")).resolves.toBeUndefined();
+
+    expect(fetchImpl).toHaveBeenCalledTimes(2);
+  });
+
+  it("accepts a stop-time missing-asset response as completed cleanup", async () => {
+    vi.stubEnv("RETELL_API_KEY", "retell-api-key");
+    const fetchImpl = vi.fn<typeof fetch>()
+      .mockResolvedValueOnce(new Response(JSON.stringify({
+        call_id: "retell_call_123",
+        call_status: "ongoing",
+      }), {
+        headers: { "content-type": "application/json" },
+        status: 200,
+      }))
+      .mockResolvedValueOnce(new Response(
+        JSON.stringify({
+          message: "Cannot find requested asset under given api key.",
+          status: "error",
+        }),
+        {
+          headers: { "content-type": "application/json" },
+          status: 422,
+        },
+      ));
+
+    await expect(createRetellPhoneCallAccountDeletionRuntime({ fetchImpl })
+      .deleteProviderCall("retell_call_123")).resolves.toBeUndefined();
+
+    expect(fetchImpl).toHaveBeenCalledTimes(2);
+    expect(String(fetchImpl.mock.calls[1]![0])).toContain("/v2/stop-call/retell_call_123");
+  });
+
+  it("keeps unrelated Retell validation failures retryable", async () => {
+    vi.stubEnv("RETELL_API_KEY", "retell-api-key");
+    const fetchImpl = vi.fn<typeof fetch>().mockResolvedValue(new Response(
+      JSON.stringify({
+        message: "The call id is invalid.",
+        status: "error",
+      }),
+      {
+        headers: { "content-type": "application/json" },
+        status: 422,
+      },
+    ));
+
+    await expect(createRetellPhoneCallAccountDeletionRuntime({ fetchImpl })
+      .deleteProviderCall("retell_call_123")).rejects.toMatchObject({ status: 422 });
+
+    expect(fetchImpl).toHaveBeenCalledOnce();
+  });
+
+  it("keeps generic not-found responses retryable", async () => {
+    vi.stubEnv("RETELL_API_KEY", "retell-api-key");
+    const fetchImpl = vi.fn<typeof fetch>().mockResolvedValue(new Response(
+      JSON.stringify({ message: "Generic route not found." }),
+      {
+        headers: { "content-type": "application/json" },
+        status: 404,
+      },
+    ));
+
+    await expect(createRetellPhoneCallAccountDeletionRuntime({ fetchImpl })
+      .deleteProviderCall("retell_call_123")).rejects.toMatchObject({ status: 404 });
+
+    expect(fetchImpl).toHaveBeenCalledOnce();
+  });
+
+  it("keeps ambiguous Retell delete failures retryable", async () => {
+    vi.stubEnv("RETELL_API_KEY", "retell-api-key");
+    const fetchImpl = vi.fn<typeof fetch>()
+      .mockResolvedValueOnce(new Response(JSON.stringify({
+        call_id: "retell_call_123",
+        call_status: "ended",
+      }), {
+        headers: { "content-type": "application/json" },
+        status: 200,
+      }))
+      .mockResolvedValueOnce(new Response(
+        JSON.stringify({ message: "Provider unavailable." }),
+        {
+          headers: { "content-type": "application/json" },
+          status: 500,
+        },
+      ));
+
+    await expect(createRetellPhoneCallAccountDeletionRuntime({ fetchImpl })
+      .deleteProviderCall("retell_call_123")).rejects.toMatchObject({ status: 500 });
+
+    expect(fetchImpl).toHaveBeenCalledTimes(2);
   });
 });
 

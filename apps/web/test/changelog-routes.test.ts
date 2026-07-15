@@ -21,6 +21,53 @@ import {
 } from "../src/lib/changelog";
 
 describe("changelog routes", () => {
+  it("publishes every item from the two newest editions with canonical links", async () => {
+    const response = await getChangelogFeed(
+      new Request(
+        "https://join.example.test/api/changelog?from=2026-07-14&to=2026-07-16",
+      ),
+    );
+    const body = await response.json();
+    const items = body.items as Array<{
+      id: string;
+      publishedOn: string;
+      url: string;
+    }>;
+
+    expect(response.status).toBe(200);
+    expect(items).toHaveLength(9);
+    expect(items.map((item) => item.publishedOn)).toEqual([
+      "2026-07-15",
+      "2026-07-15",
+      "2026-07-15",
+      "2026-07-15",
+      "2026-07-15",
+      "2026-07-14",
+      "2026-07-14",
+      "2026-07-14",
+      "2026-07-14",
+    ]);
+    expect(items.map((item) => item.id)).toEqual(
+      expect.arrayContaining([
+        "affirmative-reactions-as-replies",
+        "reaction-first-group-permissions",
+        "exercise-library-250-more-visual-guides",
+        "fresh-messages-stay-foreground",
+        "billing-settings-handoff",
+        "plan-usage-percentage",
+        "personal-group-awareness",
+        "appointment-scheduling-brief",
+        "apple-health-chat-handoff",
+      ]),
+    );
+    for (const item of items) {
+      const itemUrl = new URL(item.url);
+      expect(`${itemUrl.pathname}${itemUrl.search}${itemUrl.hash}`).toBe(
+        buildChangelogItemPath(item.id),
+      );
+    }
+  });
+
   it("returns a bounded feed with canonical links for an explicit window", async () => {
     const response = await getChangelogFeed(
       new Request(
