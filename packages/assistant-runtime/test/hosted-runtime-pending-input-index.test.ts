@@ -48,6 +48,19 @@ afterEach(async () => {
 });
 
 describe("hosted pending assistant input index", () => {
+  it("preserves the exact abort reason before background compaction starts", async () => {
+    const vaultRoot = await createTempVault();
+    const controller = new AbortController();
+    const reason = new Error("foreground input interrupted pending compaction");
+    controller.abort(reason);
+
+    await expect(compactHostedPendingAssistantInputIds({
+      signal: controller.signal,
+      vaultRoot,
+    })).rejects.toBe(reason);
+    await expect(readHostedPendingAssistantInputIds({ vaultRoot })).resolves.toEqual([]);
+  });
+
   it("treats a missing file as an empty greenfield index", async () => {
     const vaultRoot = await createTempVault();
 

@@ -6,7 +6,7 @@ import { isHostedOnboardingError } from "../hosted-onboarding/errors";
 import { lookupHostedMemberIdentityByPhoneNumber } from "../hosted-onboarding/hosted-member-identity-store";
 import { lookupHostedMemberByVerifiedEmailAddress } from "../hosted-onboarding/hosted-member-store";
 import {
-  normalizeHostedLinqGroupJoinOfferReaction,
+  isHostedLinqAffirmativeReaction,
   type ParsedHostedLinqProviderEvent,
 } from "../hosted-onboarding/linq-provider-events";
 import { readActiveHostedMemberAccess } from "../hosted-onboarding/member-access";
@@ -57,11 +57,11 @@ export async function handleHostedGroupJoinOfferReaction(input: {
     });
   }
   if (
-    normalizeHostedLinqGroupJoinOfferReaction({
+    !isHostedLinqAffirmativeReaction({
       customEmoji: input.event.reactionCustomEmoji,
       eventType: input.event.eventType,
       reactionType: input.event.reactionType,
-    }) !== "accept"
+    })
   ) {
     return skipHostedGroupJoinOfferReaction({
       reason: "unsupported_reaction",

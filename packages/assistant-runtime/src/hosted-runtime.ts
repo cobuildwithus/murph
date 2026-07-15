@@ -881,9 +881,9 @@ export async function runHostedWorkspaceRuntimeJobInProcess(
   const guardedWorkspacePort = guardedRuntime.platform.workspacePort ?? workspacePort;
   let latestCheckpointSnapshotCleanForWarmReuse = false;
   const createAbortGuardedCheckpointSnapshot: HostedWorkspaceSnapshotCheckpointBuilder =
-    async (snapshotInput) => {
+    async (snapshotInput, context) => {
       assertRuntimeNotAborted();
-      const snapshot = await options.createCheckpointSnapshot(snapshotInput);
+      const snapshot = await options.createCheckpointSnapshot(snapshotInput, context);
       assertRuntimeNotAborted();
       latestCheckpointSnapshotCleanForWarmReuse =
         snapshot.localWorkspaceCleanForWarmReuse === true;
@@ -1625,6 +1625,8 @@ export async function runHostedWorkspaceRuntimeJobInProcess(
         }
       },
     };
+    const invocationLocalAssistantProjectedWakeKeys =
+      new WeakMap<HostedWorkspaceRunnerResult, string | null>();
     const runWorkspaceForegroundPass = async (passInput: {
       initialAssistantInputBatch?: HostedWorkspaceRunnerAssistantInputBatch | null;
       initialMailboxImport?: HostedWorkspaceRunnerInput["initialMailboxImport"];
@@ -1660,6 +1662,7 @@ export async function runHostedWorkspaceRuntimeJobInProcess(
       });
       try {
         let currentAssistantPersonalizationInputId: string | null = null;
+        let invocationLocalAssistantProjectedWakeKey: string | null = null;
         const passResult = await hostedCliBridge.runWithInvocation(
           {
             currentDeliveryRoute: () => currentOperationDeliveryRoute,
@@ -1691,7 +1694,7 @@ export async function runHostedWorkspaceRuntimeJobInProcess(
               runAssistantPhase: async (phaseInput) => {
                 currentAssistantPersonalizationInputId = null;
                 try {
-                  return await (
+                  const phaseResult = await (
                     options.runAssistantPhase ?? runHostedWorkspaceAssistantPhase
                   )({
                     ...phaseInput,
@@ -1718,6 +1721,16 @@ export async function runHostedWorkspaceRuntimeJobInProcess(
                     suppressDirtyPendingFetch: suppressDirtyPendingFetchUntilCheckpoint,
                     signal: passSignal,
                   });
+                  invocationLocalAssistantProjectedWakeKey =
+                    Object.hasOwn(phaseResult, "nextWakeAt")
+                    && phaseResult.nextWakeAt
+                    && hostedRuntimeWakeReasonIsAssistant(phaseResult.nextWakeReason ?? null)
+                      ? buildHostedRuntimeWakeKey({
+                          nextWakeAt: phaseResult.nextWakeAt,
+                          nextWakeReason: phaseResult.nextWakeReason ?? null,
+                        })
+                      : null;
+                  return phaseResult;
                 } finally {
                   currentAssistantPersonalizationInputId = null;
                 }
@@ -1739,6 +1752,10 @@ export async function runHostedWorkspaceRuntimeJobInProcess(
               await drainHostedCodexPostTurnCleanups();
             }
           },
+        );
+        invocationLocalAssistantProjectedWakeKeys.set(
+          passResult,
+          invocationLocalAssistantProjectedWakeKey,
         );
         trackMailboxPostCheckpointEffects(passResult.mailboxPostCheckpointEffectsFinished);
         emitPhaseLog({
@@ -1827,6 +1844,9 @@ export async function runHostedWorkspaceRuntimeJobInProcess(
     // Hold a later durable wake while its earlier assistant predecessor is
     // checkpointed and serviced.
     let pendingWakeAfterDueAssistantService: HostedRuntimeHeldDurableWake | null = null;
+    let invocationLocalProjectedAssistantWakeKey: string | null = null;
+    let hotProjectedAssistantWakeAttemptedKey: string | null = null;
+    let durableCheckpointFollowUpPending = false;
     let redactedStatus: NonNullable<HostedWorkspaceInvocationResult["redactedStatus"]> = {};
     let invocationStatus: HostedWorkspaceInvocationResult["status"] =
       resolveHostedWorkspaceInvocationStatus({
@@ -1978,6 +1998,7 @@ export async function runHostedWorkspaceRuntimeJobInProcess(
         nextWakeAt: workspace.nextWakeAt ?? null,
         nextWakeReason: workspace.nextWakeReason ?? null,
       };
+      invocationLocalProjectedAssistantWakeKey = null;
       redactedStatus = workspace.redactedStatus
         ?? omitHostedCanonicalWriteReceiptLogStatusFields(redactedStatus)
         ?? {};
@@ -2025,6 +2046,8 @@ export async function runHostedWorkspaceRuntimeJobInProcess(
             durableWake: copyHostedRuntimePendingWake(durableWake),
           }
         : null;
+      invocationLocalProjectedAssistantWakeKey = null;
+      durableCheckpointFollowUpPending = true;
       runtimeStateDirty = true;
       idleCheckpointStartByMs ??= Date.now();
     };
@@ -2213,11 +2236,23 @@ export async function runHostedWorkspaceRuntimeJobInProcess(
       };
       const overlayPendingWakeOnCommittedWorkspace = (
         checkpointPendingBeforePass: boolean,
+        presentedInvocationLocalProjectedAssistantWakeKey: string | null,
       ): HostedWorkspaceState | null => {
         if (committedWorkspace === null) {
           return null;
         }
         let passWake = pendingWake;
+        if (presentedInvocationLocalProjectedAssistantWakeKey !== null) {
+          return {
+            ...committedWorkspace,
+            nextWakeAt: pendingWake.nextWakeAt,
+            nextWakeReason: pendingWake.nextWakeReason,
+            redactedStatus: overlayHostedRuntimePendingRedactedStatus({
+              committedStatus: committedWorkspace.redactedStatus ?? null,
+              pendingStatus: redactedStatus,
+            }),
+          };
+        }
         if (
           checkpointPendingBeforePass
           && hostedRuntimeWakeReasonIsAssistant(committedWorkspace.nextWakeReason ?? null)
@@ -2249,9 +2284,13 @@ export async function runHostedWorkspaceRuntimeJobInProcess(
         passResult: HostedWorkspaceRunnerResult,
         passWorkspace: HostedWorkspaceState | null,
         previousPendingWake: HostedRuntimePendingWake,
+        presentedInvocationLocalProjectedAssistantWakeKey: string | null,
         preserveDueAssistantWakeOnNoProgress: boolean,
       ): void => {
         const checkpointPendingBeforePass = runtimeStateDirty;
+        const previousInvocationLocalProjectedAssistantWakeKey =
+          invocationLocalProjectedAssistantWakeKey;
+        const previousPendingWakeKey = buildHostedRuntimeWakeKey(previousPendingWake);
         pendingDurableCheckpointEffects.push(...passResult.afterDurableCheckpoint);
         if (passResult.runtimeStateDirty) {
           markIdleCheckpointTimerAfterDirtyWork();
@@ -2270,8 +2309,11 @@ export async function runHostedWorkspaceRuntimeJobInProcess(
           nowMs: Date.now(),
         });
         const replaceWake = shouldReplaceHostedWorkspaceInvocationWake(passResult);
+        const passProjectedAssistantWakeKey =
+          invocationLocalAssistantProjectedWakeKeys.get(passResult) ?? null;
         const passProducedDefaultWake =
           replaceWake
+          || passProjectedAssistantWakeKey !== null
           || passResult.mailboxRetryAt !== null
           || (passResult.latestMailboxImport.importResult.nextRetryAt ?? null) !== null;
         const presentedDefaultWakeKey =
@@ -2286,8 +2328,10 @@ export async function runHostedWorkspaceRuntimeJobInProcess(
           unservicedRecheckWakeKeys.delete(presentedDefaultWakeKey);
         }
         const wakeResolution = resolvePendingWakeAfterForegroundPass({
+          assistantProjectedWakeKey: passProjectedAssistantWakeKey,
           checkpointPendingBeforePass,
           passWake,
+          presentedInvocationLocalProjectedAssistantWakeKey,
           previousPendingWake,
           preserveDueAssistantWakeOnNoProgress,
           replaceWake,
@@ -2302,6 +2346,29 @@ export async function runHostedWorkspaceRuntimeJobInProcess(
             preservedDueAssistantWakeOnNoProgress:
               wakeResolution.preservedDueAssistantWakeOnNoProgress,
           });
+        }
+        const pendingWakeKey = buildHostedRuntimeWakeKey(pendingWake);
+        const committedWakeKey = buildHostedRuntimeWakeKey({
+          nextWakeAt: committedWorkspace?.nextWakeAt ?? null,
+          nextWakeReason: committedWorkspace?.nextWakeReason ?? null,
+        });
+        const passProjectedAssistantWake =
+          passProjectedAssistantWakeKey !== null
+          && pendingWakeKey !== null
+          && pendingWakeKey === passProjectedAssistantWakeKey
+          && hostedRuntimeWakeReasonIsAssistant(pendingWake.nextWakeReason);
+        if (passProjectedAssistantWake) {
+          const preservesUnprovenPreviousWake =
+            pendingWakeKey === previousPendingWakeKey
+            && previousInvocationLocalProjectedAssistantWakeKey !== previousPendingWakeKey;
+          invocationLocalProjectedAssistantWakeKey =
+            pendingWakeKey !== presentedDefaultWakeKey
+              && pendingWakeKey !== committedWakeKey
+              && !preservesUnprovenPreviousWake
+              ? pendingWakeKey
+              : null;
+        } else if (pendingWakeKey !== invocationLocalProjectedAssistantWakeKey) {
+          invocationLocalProjectedAssistantWakeKey = null;
         }
         redactedStatus = mergeHostedWorkspaceInvocationRedactedStatus(
           redactedStatus,
@@ -2327,6 +2394,7 @@ export async function runHostedWorkspaceRuntimeJobInProcess(
         initialMailboxImportContext?: HostedWorkspaceRunnerMailboxImportContext | null;
         initialMailboxPrefetch?: HostedMailboxPrefixPrefetch | null;
         latencySeed?: HostedRuntimeWakeLatencySeed | null;
+        invocationLocalProjectedAssistantWakeKey?: string | null;
         preserveDueAssistantWakeOnNoProgress?: boolean;
         requestIdKind: "checkpoint-interrupt" | "checkpoint-wake" | "idle-wake";
         signal?: AbortSignal;
@@ -2343,8 +2411,19 @@ export async function runHostedWorkspaceRuntimeJobInProcess(
           idleWakeOrdinal += 1;
           const previousPendingWake = pendingWake;
           const checkpointPendingBeforePass = runtimeStateDirty;
+          const requestedInvocationLocalProjectedAssistantWakeKey =
+            singleWakeInput.invocationLocalProjectedAssistantWakeKey ?? null;
+          const presentedInvocationLocalProjectedAssistantWakeKey =
+            requestedInvocationLocalProjectedAssistantWakeKey !== null
+            && requestedInvocationLocalProjectedAssistantWakeKey
+              === buildHostedRuntimeWakeKey(previousPendingWake)
+            && hostedRuntimeWakeReasonIsAssistant(previousPendingWake.nextWakeReason)
+            && hostedRuntimeWakeIsDue(previousPendingWake.nextWakeAt)
+              ? requestedInvocationLocalProjectedAssistantWakeKey
+              : null;
           const passWorkspace = overlayPendingWakeOnCommittedWorkspace(
             checkpointPendingBeforePass,
+            presentedInvocationLocalProjectedAssistantWakeKey,
           );
           result = await runWorkspaceForegroundPass({
             initialAssistantInputBatch: singleWakeInput.initialAssistantInputBatch ?? null,
@@ -2360,6 +2439,7 @@ export async function runHostedWorkspaceRuntimeJobInProcess(
             result,
             passWorkspace,
             previousPendingWake,
+            presentedInvocationLocalProjectedAssistantWakeKey,
             singleWakeInput.preserveDueAssistantWakeOnNoProgress === true,
           );
           return result;
@@ -2467,7 +2547,10 @@ export async function runHostedWorkspaceRuntimeJobInProcess(
         ): Promise<HostedMailboxImportCheckpointResult> => {
           idleWakeOrdinal += 1;
           const previousPendingWake = pendingWake;
-          const passWorkspace = overlayPendingWakeOnCommittedWorkspace(runtimeStateDirty);
+          const passWorkspace = overlayPendingWakeOnCommittedWorkspace(
+            runtimeStateDirty,
+            null,
+          );
           result = await runHostedWorkspaceUntilIdleOrBudget({
             ...baseRunnerInput,
             deferInitialMailboxPostCheckpointEffects: true,
@@ -2480,7 +2563,13 @@ export async function runHostedWorkspaceRuntimeJobInProcess(
             signal: importSignal,
             workspace: passWorkspace,
           });
-          absorbForegroundPassResult(result, passWorkspace, previousPendingWake, false);
+          absorbForegroundPassResult(
+            result,
+            passWorkspace,
+            previousPendingWake,
+            null,
+            false,
+          );
           // Importing mailbox state never services an already-selected wake.
           pendingWake = selectEarliestHostedRuntimeWake([
             {
@@ -2597,6 +2686,54 @@ export async function runHostedWorkspaceRuntimeJobInProcess(
           signal: input.signal,
         });
       };
+      const resolveHotProjectedAssistantWake = (): {
+        key: string;
+        wakeAtMs: number;
+      } | null => {
+        if (
+          hotProjectedAssistantWakeAttemptedKey !== null
+          || !runtimeStateDirty
+          || invocationStatus === "budget_exhausted"
+          || mailboxBudgetExhausted()
+          || options.shutdownSignal?.aborted === true
+          || pendingDurableCheckpointEffects.length > 0
+          || durableCheckpointFollowUpPending
+          || committedWorkspace === null
+        ) {
+          return null;
+        }
+
+        const pendingWakeKey = buildHostedRuntimeWakeKey(pendingWake);
+        if (
+          pendingWakeKey === null
+          || pendingWakeKey !== invocationLocalProjectedAssistantWakeKey
+          || !hostedRuntimeWakeReasonIsAssistant(pendingWake.nextWakeReason)
+        ) {
+          return null;
+        }
+
+        const committedWakeKey = buildHostedRuntimeWakeKey({
+          nextWakeAt: committedWorkspace?.nextWakeAt ?? null,
+          nextWakeReason: committedWorkspace?.nextWakeReason ?? null,
+        });
+        if (pendingWakeKey === committedWakeKey) {
+          return null;
+        }
+
+        const wakeAtMs = Date.parse(pendingWake.nextWakeAt ?? "");
+        if (
+          !Number.isFinite(wakeAtMs)
+          || idleCheckpointStartByMs === null
+          || wakeAtMs >= idleCheckpointStartByMs
+          || Date.now() >= idleCheckpointStartByMs
+        ) {
+          return null;
+        }
+        return {
+          key: pendingWakeKey,
+          wakeAtMs,
+        };
+      };
 
       result = await runForegroundPass({
         initialMailboxImport,
@@ -2635,29 +2772,12 @@ export async function runHostedWorkspaceRuntimeJobInProcess(
       }
       let pendingCheckpointWakeLatencySeed: HostedRuntimeWakeLatencySeed | null = null;
       while (runtimeStateDirty) {
-        let checkpointWakeLatencySeed = pendingCheckpointWakeLatencySeed;
+        let checkpointWakeLatencySeed: HostedRuntimeWakeLatencySeed | null =
+          pendingCheckpointWakeLatencySeed;
         pendingCheckpointWakeLatencySeed = null;
         if (idleCheckpointStartByMs === null) {
           throw new Error("Dirty hosted runtime is missing an idle checkpoint timer.");
         }
-        const pendingAssistantWakeRepeatsDueService =
-          hostedRuntimeWakeReasonIsAssistant(committedWorkspace?.nextWakeReason ?? null)
-          && hostedRuntimeWakeIsDue(committedWorkspace?.nextWakeAt ?? null)
-          && hostedRuntimeWakeIsDue(pendingWake.nextWakeAt);
-        const pendingAssistantWakeAtMs =
-          pendingWake.nextWakeAt !== null
-            && hostedRuntimeWakeReasonIsAssistant(pendingWake.nextWakeReason)
-            && !pendingAssistantWakeRepeatsDueService
-            && buildHostedRuntimeWakeKey(pendingWake)
-              !== buildHostedRuntimeWakeKey({
-                nextWakeAt: committedWorkspace?.nextWakeAt ?? null,
-                nextWakeReason: committedWorkspace?.nextWakeReason ?? null,
-              })
-            ? Date.parse(pendingWake.nextWakeAt)
-            : Number.NaN;
-        const checkpointStartByMs = Number.isFinite(pendingAssistantWakeAtMs)
-          ? Math.min(idleCheckpointStartByMs, pendingAssistantWakeAtMs)
-          : idleCheckpointStartByMs;
         const queuedWakeLatencySeed = consumePendingHostedRuntimeWake(
           options.runtimeWakeSignal ?? null,
           options.shutdownSignal ?? null,
@@ -2668,8 +2788,24 @@ export async function runHostedWorkspaceRuntimeJobInProcess(
           }
           checkpointWakeLatencySeed ??= queuedWakeLatencySeed;
         }
+        const hotProjectedAssistantWake = resolveHotProjectedAssistantWake();
+        if (
+          hotProjectedAssistantWake !== null
+          && hotProjectedAssistantWake.wakeAtMs <= Date.now()
+        ) {
+          hotProjectedAssistantWakeAttemptedKey = hotProjectedAssistantWake.key;
+          await runForegroundPass({
+            invocationLocalProjectedAssistantWakeKey: hotProjectedAssistantWake.key,
+            latencySeed: null,
+            preserveDueAssistantWakeOnNoProgress: true,
+            requestIdKind: "idle-wake",
+          });
+          pendingCheckpointWakeLatencySeed ??= checkpointWakeLatencySeed;
+          continue;
+        }
         const dirtyWaitResult = await waitForHostedRuntimeDirtyWindow({
-          idleCheckpointStartByMs: checkpointStartByMs,
+          idleCheckpointStartByMs,
+          projectedAssistantWakeAtMs: hotProjectedAssistantWake?.wakeAtMs ?? null,
           runtimeAbortSignal: runtimeAbortController.signal,
           runtimeWakeSignal: options.runtimeWakeSignal ?? null,
           shutdownSignal: options.shutdownSignal ?? null,
@@ -2682,6 +2818,10 @@ export async function runHostedWorkspaceRuntimeJobInProcess(
             continue;
           }
           pendingCheckpointWakeLatencySeed ??= latencySeed;
+          continue;
+        }
+        if (dirtyWaitResult.kind === "projected_assistant_wake") {
+          pendingCheckpointWakeLatencySeed ??= checkpointWakeLatencySeed;
           continue;
         }
         const dirtyWindowCheckpointTrigger = resolveHostedRuntimeIdleCheckpointTrigger({
@@ -2800,7 +2940,7 @@ export async function runHostedWorkspaceRuntimeJobInProcess(
         });
         const idleCheckpointPhaseLogDetails =
           buildHostedRuntimeIdleCheckpointPhaseLogDetails({
-            idleCheckpointStartByMs: checkpointStartByMs,
+            idleCheckpointStartByMs,
             idleCheckpointTrigger,
             pendingWake,
             runtimeWakePendingAtCheckpoint,
@@ -2815,23 +2955,37 @@ export async function runHostedWorkspaceRuntimeJobInProcess(
           status: "start",
         });
         let checkpoint: HostedWorkspaceCheckpointResponse;
+        let checkpointWakeNotificationAfterCommit: RuntimeWakeNotification | null = null;
+        const checkpointWakeInterruption =
+          createHostedRuntimeCheckpointWakeInterruption({
+            enabled:
+              idleCheckpointPhaseLogDetails.idleCheckpointTrigger !== "shutdown_signal",
+            runtimeWakeSignal: options.runtimeWakeSignal ?? null,
+          });
         try {
           latestCheckpointSnapshotCleanForWarmReuse = false;
-          checkpoint = await checkpointHostedRuntimeDirtyWorkspace({
-            assertRuntimeNotAborted,
-            checkpointRequestBuilder,
-            expectedUserId: input.request.userId,
-            idleCheckpointTrigger: idleCheckpointPhaseLogDetails.idleCheckpointTrigger,
-            nextWakeAt: idleCheckpointWake.nextWakeAt,
-            nextWakeReason: idleCheckpointWake.nextWakeReason,
-            inboxMediaRetentionWakeAt: idleCheckpointWake.inboxMediaRetentionWakeAt,
-            issueExportPort: runtime.platform.issueExportPort ?? null,
-            redactedStatus,
-            runtimeWakePendingAtCheckpoint,
-            runtimeAbortSignal: runtimeAbortController.signal,
-            vaultRoot: restored.vaultRoot,
-            workspacePort: foregroundWorkspacePort,
-          });
+          try {
+            checkpoint = await checkpointHostedRuntimeDirtyWorkspace({
+              assertRuntimeNotAborted,
+              checkpointRequestBuilder,
+              checkpointSignal: checkpointWakeInterruption.signal,
+              expectedUserId: input.request.userId,
+              idleCheckpointTrigger: idleCheckpointPhaseLogDetails.idleCheckpointTrigger,
+              nextWakeAt: idleCheckpointWake.nextWakeAt,
+              nextWakeReason: idleCheckpointWake.nextWakeReason,
+              inboxMediaRetentionWakeAt: idleCheckpointWake.inboxMediaRetentionWakeAt,
+              issueExportPort: runtime.platform.issueExportPort ?? null,
+              redactedStatus,
+              runtimeWakePendingAtCheckpoint,
+              runtimeAbortSignal: runtimeAbortController.signal,
+              vaultRoot: restored.vaultRoot,
+              workspacePort: foregroundWorkspacePort,
+            });
+          } finally {
+            await checkpointWakeInterruption.dispose();
+            checkpointWakeNotificationAfterCommit =
+              checkpointWakeInterruption.takeNotification();
+          }
         } catch (error) {
           if (error instanceof HostedRuntimeCheckpointInterruptedByWakeError) {
             const shutdownWasSignaled = () => options.shutdownSignal?.aborted === true;
@@ -2845,7 +2999,9 @@ export async function runHostedWorkspaceRuntimeJobInProcess(
               };
               continue;
             }
-            const latencySeed = createHostedRuntimeWakeLatencySeed(error.notification);
+            const latencySeed = createHostedRuntimeWakeLatencySeed(
+              error.notification ?? checkpointWakeNotificationAfterCommit,
+            );
             if (shutdownWasSignaled()) {
               pendingCheckpointWakeLatencySeed ??= latencySeed;
               continue;
@@ -2883,6 +3039,11 @@ export async function runHostedWorkspaceRuntimeJobInProcess(
           }
           throw error;
         }
+        if (checkpointWakeNotificationAfterCommit) {
+          checkpointWakeLatencySeed ??= createHostedRuntimeWakeLatencySeed(
+            checkpointWakeNotificationAfterCommit,
+          );
+        }
         emitPhaseLog({
           details: {
             ...idleCheckpointPhaseLogDetails,
@@ -2897,9 +3058,13 @@ export async function runHostedWorkspaceRuntimeJobInProcess(
         });
         const durableCheckpointEffectCount = pendingDurableCheckpointEffects.length;
         const conversationInputAhead = checkpoint.conversationInputAhead === true;
+        const hotProjectedAssistantWakeKeyPresentedBeforeCheckpoint =
+          hotProjectedAssistantWakeAttemptedKey;
         rebaseCommittedWorkspace(checkpoint.workspace);
         runtimeStateDirty = false;
         idleCheckpointStartByMs = null;
+        hotProjectedAssistantWakeAttemptedKey = null;
+        durableCheckpointFollowUpPending = false;
         if (
           latestCheckpointSnapshotCleanForWarmReuse
           && durableCheckpointEffectCount === 0
@@ -2996,6 +3161,10 @@ export async function runHostedWorkspaceRuntimeJobInProcess(
           && invocationStatus !== "budget_exhausted"
           && hostedRuntimeWakeReasonIsAssistant(committedWorkspace?.nextWakeReason ?? null)
           && hostedRuntimeWakeIsDue(committedWorkspace?.nextWakeAt ?? null)
+          && buildHostedRuntimeWakeKey({
+            nextWakeAt: committedWorkspace?.nextWakeAt ?? null,
+            nextWakeReason: committedWorkspace?.nextWakeReason ?? null,
+          }) !== hotProjectedAssistantWakeKeyPresentedBeforeCheckpoint
         ) {
           const dueAssistantWakeHandled = await runOptionalPostCheckpointWork(async () => {
             await runForegroundPass({
@@ -3541,7 +3710,8 @@ const activeHostedRuntimeDeferredUsageCaptures =
 
 type HostedRuntimeDirtyWaitResult =
   | { kind: "external_wake"; notification: RuntimeWakeNotification }
-  | { kind: "idle_checkpoint"; trigger: "idle_window" | "shutdown_signal" };
+  | { kind: "idle_checkpoint"; trigger: "idle_window" | "shutdown_signal" }
+  | { kind: "projected_assistant_wake" };
 
 type HostedRuntimeIdleCheckpointTrigger =
   | "idle_window"
@@ -3764,15 +3934,18 @@ function shouldReplaceHostedWorkspaceInvocationWake(
 }
 
 function resolvePendingWakeAfterForegroundPass(input: {
+  assistantProjectedWakeKey: string | null;
   checkpointPendingBeforePass: boolean;
   nowMs: number;
   passWake: HostedRuntimePendingWake;
+  presentedInvocationLocalProjectedAssistantWakeKey: string | null;
   previousPendingWake: HostedRuntimePendingWake;
   preserveDueAssistantWakeOnNoProgress: boolean;
   replaceWake: boolean;
 }): HostedRuntimePendingWakeResolution {
   const preservePendingWakeThroughPreCheckpointPass =
     input.checkpointPendingBeforePass
+    && input.presentedInvocationLocalProjectedAssistantWakeKey === null
     && input.previousPendingWake.nextWakeAt !== null
     && (
       !hostedRuntimeWakeReasonIsAssistant(input.previousPendingWake.nextWakeReason)
@@ -3785,7 +3958,9 @@ function resolvePendingWakeAfterForegroundPass(input: {
     };
   }
 
-  const previousWakeAt = input.checkpointPendingBeforePass
+  const previousWakeAt =
+    input.checkpointPendingBeforePass
+      && input.presentedInvocationLocalProjectedAssistantWakeKey === null
     ? input.previousPendingWake.nextWakeAt
     : normalizeHostedFutureWakeAt(input.previousPendingWake.nextWakeAt, input.nowMs);
   const previousWake = {
@@ -3797,6 +3972,20 @@ function resolvePendingWakeAfterForegroundPass(input: {
     return {
       pendingWake: copyHostedRuntimePendingWake(input.passWake),
       preservedDueAssistantWakeOnNoProgress: false,
+    };
+  }
+
+  if (
+    input.preserveDueAssistantWakeOnNoProgress
+    && input.presentedInvocationLocalProjectedAssistantWakeKey !== null
+    && input.assistantProjectedWakeKey === null
+    && input.previousPendingWake.nextWakeAt !== null
+    && hostedRuntimeWakeReasonIsAssistant(input.previousPendingWake.nextWakeReason)
+    && hostedRuntimeWakeIsDue(input.previousPendingWake.nextWakeAt, input.nowMs)
+  ) {
+    return {
+      pendingWake: copyHostedRuntimePendingWake(input.previousPendingWake),
+      preservedDueAssistantWakeOnNoProgress: true,
     };
   }
 
@@ -3963,8 +4152,64 @@ function resolveHostedRuntimeIdleCheckpointTrigger(input: {
   return "idle_window";
 }
 
+interface HostedRuntimeCheckpointWakeInterruption {
+  dispose(): Promise<void>;
+  readonly signal: AbortSignal | null;
+  takeNotification(): RuntimeWakeNotification | null;
+}
+
+function createHostedRuntimeCheckpointWakeInterruption(input: {
+  enabled: boolean;
+  runtimeWakeSignal: RuntimeWakeSignal | null;
+}): HostedRuntimeCheckpointWakeInterruption {
+  if (!input.enabled || !input.runtimeWakeSignal) {
+    return {
+      dispose: async () => undefined,
+      signal: null,
+      takeNotification: () => null,
+    };
+  }
+
+  const checkpointAbortController = new AbortController();
+  const waitAbortController = new AbortController();
+  let notification: RuntimeWakeNotification | null = null;
+  const waitCompletion = input.runtimeWakeSignal.wait(waitAbortController.signal).then(
+    (nextNotification) => {
+      notification = nextNotification;
+      checkpointAbortController.abort(
+        new HostedRuntimeCheckpointInterruptedByWakeError({
+          notification: nextNotification,
+        }),
+      );
+    },
+    (error: unknown) => {
+      if (!waitAbortController.signal.aborted) {
+        checkpointAbortController.abort(error);
+      }
+    },
+  );
+
+  return {
+    async dispose() {
+      if (!waitAbortController.signal.aborted) {
+        waitAbortController.abort(
+          new DOMException("Hosted runtime checkpoint wake wait finished.", "AbortError"),
+        );
+      }
+      await waitCompletion;
+    },
+    signal: checkpointAbortController.signal,
+    takeNotification() {
+      const current = notification;
+      notification = null;
+      return current;
+    },
+  };
+}
+
 async function waitForHostedRuntimeDirtyWindow(input: {
   idleCheckpointStartByMs: number;
+  projectedAssistantWakeAtMs: number | null;
   runtimeAbortSignal: AbortSignal;
   runtimeWakeSignal: RuntimeWakeSignal | null;
   shutdownSignal: AbortSignal | null;
@@ -3976,9 +4221,18 @@ async function waitForHostedRuntimeDirtyWindow(input: {
   if (input.idleCheckpointStartByMs <= nowMs) {
     return { kind: "idle_checkpoint", trigger: "idle_window" };
   }
+  if (
+    input.projectedAssistantWakeAtMs !== null
+    && input.projectedAssistantWakeAtMs <= nowMs
+  ) {
+    return { kind: "projected_assistant_wake" };
+  }
 
+  const waitUntilMs = input.projectedAssistantWakeAtMs === null
+    ? input.idleCheckpointStartByMs
+    : Math.min(input.idleCheckpointStartByMs, input.projectedAssistantWakeAtMs);
   const timeoutDelayMs = Math.min(
-    Math.max(0, input.idleCheckpointStartByMs - nowMs),
+    Math.max(0, waitUntilMs - nowMs),
     HOSTED_RUNTIME_MAX_TIMER_DELAY_MS,
   );
   if (timeoutDelayMs <= 0) {
@@ -3994,7 +4248,14 @@ async function waitForHostedRuntimeDirtyWindow(input: {
     let settled = false;
     const wakeAbortController = new AbortController();
     const timer = setTimeout(() => {
-      settle(() => resolve({ kind: "idle_checkpoint", trigger: "idle_window" }));
+      const projectedAssistantWakeIsFirst =
+        input.projectedAssistantWakeAtMs !== null
+        && input.projectedAssistantWakeAtMs < input.idleCheckpointStartByMs;
+      settle(() => resolve(
+        projectedAssistantWakeIsFirst
+          ? { kind: "projected_assistant_wake" }
+          : { kind: "idle_checkpoint", trigger: "idle_window" },
+      ));
     }, timeoutDelayMs);
     const abort = () => {
       settle(() => reject(readHostedRuntimeAbortReason(input.runtimeAbortSignal)));
@@ -4061,6 +4322,7 @@ function hostedRuntimeWakeIsDue(
 async function checkpointHostedRuntimeDirtyWorkspace(input: {
   assertRuntimeNotAborted: () => void;
   checkpointRequestBuilder: ReturnType<typeof createHostedWorkspaceSnapshotCheckpointRequestBuilder>;
+  checkpointSignal?: AbortSignal | null;
   expectedUserId: string;
   idleCheckpointTrigger?: HostedRuntimeIdleCheckpointTrigger;
   inboxMediaRetentionWakeAt: string | null;
@@ -4105,11 +4367,15 @@ async function checkpointHostedRuntimeDirtyWorkspace(input: {
       Promise.resolve(input.checkpointRequestBuilder.checkpoint(
         checkpointInput,
         input.workspacePort,
+        { signal: input.checkpointSignal ?? null },
       )),
       input.runtimeAbortSignal,
     )
     : await raceHostedRuntimeCancellation(
-      Promise.resolve(input.checkpointRequestBuilder.createRequest(checkpointInput))
+      Promise.resolve(input.checkpointRequestBuilder.createRequest(
+        checkpointInput,
+        { signal: input.checkpointSignal ?? null },
+      ))
         .then((checkpointRequest) => input.workspacePort!.checkpoint(checkpointRequest)),
       input.runtimeAbortSignal,
     );
@@ -4267,7 +4533,8 @@ function createAbortGuardedHostedRuntimePlatform(
   return {
     ...platform,
     artifactStore: {
-      get: platform.artifactStore.get,
+      get: (sha256, context) =>
+        guard(() => platform.artifactStore.get(sha256, context)),
       put: (putInput) => guard(() => platform.artifactStore.put(putInput)),
     },
     ...(platform.browserVaultReplicaPort
@@ -4370,7 +4637,8 @@ function createAbortGuardedHostedRuntimePlatform(
     ...(platform.logPort
       ? {
           logPort: {
-            write: (request) => guard(() => platform.logPort!.write(request)),
+            write: (request, context) =>
+              guard(() => platform.logPort!.write(request, context)),
           },
         }
       : {}),

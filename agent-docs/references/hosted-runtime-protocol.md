@@ -1,6 +1,6 @@
 # Hosted Mailbox Runtime Protocol
 
-Last verified: 2026-07-12
+Last verified: 2026-07-14
 
 ## Decision
 
@@ -37,9 +37,12 @@ The live ownership split is:
   callback transport.
   UserRunner holds one foreground runtime write fence for the whole hosted
   invocation and passes the single `idleCheckpointDelayMs` runtime policy knob.
-  The runtime, not the host, waits for the idle window or a scheduled wake and
-  checkpoints dirty local runtime state before returning success. When
-  Cloudflare reports container activity
+  The runtime, not the host, keeps dirty state warm through the configured idle
+  floor. The exact assistant wake projected directly by the current foreground
+  assistant phase may run once before that floor without checkpointing;
+  inherited or committed wakes and durability barriers remain checkpoint-first.
+  At the idle floor, or on shutdown, the runtime checkpoints remaining dirty
+  state before returning success. When Cloudflare reports container activity
   expiry, the shell yields to any active foreground operation; otherwise it runs
   cleanup only. There is no pending idle-checkpoint Durable Object state, idle
   checkpoint lease, idle checkpoint alarm, or host-owned shutdown checkpoint
@@ -72,8 +75,11 @@ import mailbox prefix into local runtime state and stage AssistantInputEvent row
 pull pending device-sync dirty rows
 for Linq input with link parts, attachment-bearing non-email input, and direct raw email, run best-effort local inbox projection plus audio/video transcript enrichment without checkpointing it
 run local runtime work until idle or budget
-wait for the runtime idle window, a coalesced wake, or a projected runtime wake
-checkpoint final dirty runtime state with checkpoint reason idle_shutdown; commit
+while dirty and before the idle floor, service fresh foreground input and at
+  most one exact assistant wake projected by the current foreground phase
+  without publishing a snapshot; other wakes do not shorten the floor
+at the idle floor, or on shutdown, checkpoint final dirty runtime state with
+  checkpoint reason idle_shutdown; commit
   the valid workspace-CAS snapshot even when web observes newer conversation input
 if the default-mode runtime remains live, import that ahead input immediately;
   during retention-only work or shutdown, leave the durable mailbox row for
@@ -91,7 +97,8 @@ source adapter -> AssistantInputEvent -> AssistantInputSource -> scanner / activ
 The hosted adapter is the mailbox importer. It decodes a conversation mailbox
 row into a bounded `AssistantInputEvent`, stages it in local runtime state,
 marks the active invocation dirty, and checkpoints that dirty state only at the
-final runtime-owned idle or scheduled-wake checkpoint. Plain-text Linq plus
+runtime-owned idle-floor—or last-chance shutdown—`idle_shutdown` checkpoint.
+Plain-text Linq plus
 attachment-free Telegram and WhatsApp input does not initialize or import inbox
 projection. Linq input with link parts retains the existing projection path.
 Direct email retains raw-message projection because its staged preview is
@@ -809,7 +816,8 @@ background-only mailbox semantics are unchanged.
 The runtime stages decoded conversation rows as assistant input and marks the
 active invocation dirty. Foreground runtime work may defer intermediate checkpoints.
 The active invocation remains dirty until the runtime-owned
-idle or scheduled-wake checkpoint succeeds. RunnerContainer never records
+idle-floor—or last-chance shutdown—`idle_shutdown` checkpoint succeeds.
+RunnerContainer never records
 pending checkpoint intent. Activity expiry is cleanup-only. Plain-text Linq plus
 attachment-free Telegram and WhatsApp input skips projection and cannot be
 delayed by projection initialization or history scans. Linq links, direct email,
@@ -880,7 +888,8 @@ provider confirms a safe retry contract.
 
 This is the deploy/reset recovery contract. If a Cloudflare Durable Object,
 worker isolate, or runner container resets after local mailbox staging but
-before the final runtime-owned idle or scheduled-wake checkpoint succeeds, the next
+before the runtime-owned idle-floor—or last-chance shutdown—`idle_shutdown`
+checkpoint succeeds, the next
 invocation reimports from the web-owned mailbox because the staged watermark was
 never checkpointed. If reset happens after a successful final checkpoint but
 before terminal handling, the next invocation must still run the assistant
@@ -901,7 +910,7 @@ inbound message deletion is still eventual, but it is
 queued only after terminal handling evidence is durable under
 `.runtime/operations/assistant/auto-reply/evidence/<captureId>.json` and is
 drained through hosted provider-cleanup after the next successful runtime-owned
-idle or scheduled-wake workspace checkpoint. The first deferred cleanup wake is
+idle-floor workspace checkpoint. The first deferred cleanup wake is
 scheduled after the configured idle-checkpoint horizon so cleanup cannot shorten
 the warm idle window; actual cleanup failures use the provider-cleanup retry
 delay. Post-checkpoint delivery and provider-cleanup drains recompute cleanup
@@ -1080,19 +1089,30 @@ old web deployment's `checkpointed: false` plus
 response remains a successful transport-level compatibility result and must not
 be collapsed into a generic HTTP conflict. Current web no longer produces it;
 post-upload local wake checks must not discard a valid snapshot on its behalf.
-Checkpoint-required wake metadata remains checkpoint-gated. A new due or
-projected assistant wake moves the next `idle_shutdown` no later than its own
-deadline, so the warm invocation persists and services it instead of waiting
-out the idle timer. If servicing an already-committed due assistant wake
-immediately produces another due wake, the continuation keeps the idle delay to
-bound repeated failing passes. Other pending work, including mailbox budget
-exhaustion and deferred durable checkpoint follow-ups, preserves its
-invocation-local wake candidate without pulling checkpointing earlier. A
-durable checkpoint-effect follow-up still carries its real typed wake.
-Conversation input actually imported and staged before a shutdown yield carries
-a due assistant wake on its real dirty-state checkpoint; a bare runtime wake or
+In production, the configured idle checkpoint delay is at least 180 seconds,
+and every dirty foreground pass restarts that hard lower bound. The exact
+assistant wake projected directly by the current foreground assistant phase may
+run once per dirty checkpoint generation before that boundary against the warm
+projected state, without entering maintenance or publishing a snapshot. A
+no-progress hot attempt preserves its exact wake without replaying it again in
+the same invocation; a dirty progressed attempt restarts the full idle window.
+Mailbox budget exhaustion, pending durable checkpoint effects, staged durable
+follow-ups, and inherited, committed, or otherwise unproven wake keys remain
+checkpoint-first and do not shorten the routine floor. Shutdown does not use the
+hot-service exception; it may take the separate last-chance durability
+checkpoint. A restored or committed due wake may run ordinarily when the
+workspace is clean, but a dirty invocation checkpoints first. A durable
+checkpoint-effect follow-up still carries its real typed wake. Conversation
+input actually imported and staged before a shutdown yield carries a due
+assistant wake on its real dirty-state checkpoint; a bare runtime wake or
 no-work mailbox notification observed during shutdown does not become a
 metadata-only assistant handoff.
+Routine snapshot planning, archive construction, and direct object upload remain
+interruptible until canonical checkpoint publication begins. A foreground wake
+aborts that pre-publication work, unwinds the snapshot session and temporary
+archive, and returns to foreground import. Once canonical publication begins,
+the checkpoint completes and the consumed wake is retained for immediate
+post-commit foreground handling.
 Retryable mailbox import blocks are mailbox-continuation checkpoints even when
 an earlier assistant or device wake wins the projected `nextWakeReason`; web
 uses the redacted `hostedMailboxRetryableBlockedCount` as the explicit signal.

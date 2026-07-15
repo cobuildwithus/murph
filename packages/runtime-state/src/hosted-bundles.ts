@@ -1893,8 +1893,10 @@ export async function collectHostedWorkspaceSnapshotArchivePlan(input: {
   durableRoot: string;
   extraFiles?: readonly HostedWorkspaceSnapshotArchiveExtraPath[];
   operatorHomeRoot?: string | null;
+  signal?: AbortSignal | null;
   vaultRoot: string;
 }): Promise<HostedWorkspaceSnapshotArchivePlan> {
+  assertHostedWorkspaceSnapshotArchivePlanLive(input.signal);
   const durableRoot = path.resolve(input.durableRoot);
   const vaultRoot = path.resolve(input.vaultRoot);
   if (!isSameOrDescendantWorkspaceSnapshotPath(vaultRoot, durableRoot)) {
@@ -1920,7 +1922,9 @@ export async function collectHostedWorkspaceSnapshotArchivePlan(input: {
       shouldIncludeWorkspaceSnapshotVaultRelativePath(relativePath),
     root: "vault",
     rootPath: vaultRoot,
+    signal: input.signal,
   });
+  assertHostedWorkspaceSnapshotArchivePlanLive(input.signal);
 
   const operatorHomeRoot = input.operatorHomeRoot ? path.resolve(input.operatorHomeRoot) : null;
   if (operatorHomeRoot && isSameOrDescendantWorkspaceSnapshotPath(operatorHomeRoot, durableRoot)) {
@@ -1928,7 +1932,9 @@ export async function collectHostedWorkspaceSnapshotArchivePlan(input: {
     const codexContinuityCollection = await collectHostedCodexContinuity({
       assistantStateRoot,
       operatorHomeRoot,
+      signal: input.signal,
     });
+    assertHostedWorkspaceSnapshotArchivePlanLive(input.signal);
     codexHomeSnapshotDiagnostics = createHostedCodexContinuityDiagnostics({
       collection: codexContinuityCollection,
       hashSecret: input.codexHomeSnapshotHashSecret,
@@ -1945,7 +1951,9 @@ export async function collectHostedWorkspaceSnapshotArchivePlan(input: {
   } else {
     const missingCodexContinuity = await collectMissingHostedCodexContinuity(
       resolveAssistantStatePaths(vaultRoot).assistantStateRoot,
+      input.signal,
     );
+    assertHostedWorkspaceSnapshotArchivePlanLive(input.signal);
     codexHomeSnapshotDiagnostics = createHostedCodexContinuityDiagnostics({
       collection: missingCodexContinuity,
       hashSecret: input.codexHomeSnapshotHashSecret,
@@ -1963,10 +1971,14 @@ export async function collectHostedWorkspaceSnapshotArchivePlan(input: {
       includeRelativePath: () => false,
       root: "operator-home",
       rootPath: operatorHomeRoot,
+      signal: input.signal,
     });
+    assertHostedWorkspaceSnapshotArchivePlanLive(input.signal);
   }
 
+  assertHostedWorkspaceSnapshotArchivePlanLive(input.signal);
   entries.sort((left, right) => left.archivePath.localeCompare(right.archivePath));
+  assertHostedWorkspaceSnapshotArchivePlanLive(input.signal);
   return {
     codexHomeSnapshotDiagnostics,
     directoryCount: entries.filter((entry) => entry.kind === "directory").length,
@@ -2005,7 +2017,9 @@ async function collectHostedWorkspaceRootArchiveEntries(input: {
   includeRelativePath(relativePath: string): boolean;
   root: "operator-home" | "vault";
   rootPath: string;
+  signal?: AbortSignal | null;
 }): Promise<void> {
+  assertHostedWorkspaceSnapshotArchivePlanLive(input.signal);
   const rootPath = path.resolve(input.rootPath);
   const rootArchivePrefix = normalizeWorkspaceSnapshotRelativePath(
     path.relative(input.durableRoot, rootPath).split(path.sep).join(path.posix.sep),
@@ -2029,7 +2043,9 @@ async function collectHostedWorkspaceRootArchiveEntries(input: {
   }
 
   async function visit(currentPath: string): Promise<void> {
+    assertHostedWorkspaceSnapshotArchivePlanLive(input.signal);
     const stats = await lstat(currentPath);
+    assertHostedWorkspaceSnapshotArchivePlanLive(input.signal);
     const relativePath = normalizeWorkspaceSnapshotRelativePath(
       path.relative(rootPath, currentPath).split(path.sep).join(path.posix.sep),
     );
@@ -2087,26 +2103,45 @@ async function collectHostedWorkspaceRootArchiveEntries(input: {
 
     let children;
     try {
+      assertHostedWorkspaceSnapshotArchivePlanLive(input.signal);
       children = await readdir(currentPath);
+      assertHostedWorkspaceSnapshotArchivePlanLive(input.signal);
     } catch (error) {
+      assertHostedWorkspaceSnapshotArchivePlanLive(input.signal);
       if (isMissingPathError(error)) {
         return;
       }
       throw error;
     }
     for (const child of children.sort((left, right) => left.localeCompare(right))) {
+      assertHostedWorkspaceSnapshotArchivePlanLive(input.signal);
       await visit(path.join(currentPath, child));
+      assertHostedWorkspaceSnapshotArchivePlanLive(input.signal);
     }
   }
 
   try {
+    assertHostedWorkspaceSnapshotArchivePlanLive(input.signal);
     await visit(rootPath);
+    assertHostedWorkspaceSnapshotArchivePlanLive(input.signal);
   } catch (error) {
+    assertHostedWorkspaceSnapshotArchivePlanLive(input.signal);
     if (isMissingPathError(error)) {
       return;
     }
     throw error;
   }
+}
+
+function assertHostedWorkspaceSnapshotArchivePlanLive(
+  signal: AbortSignal | null | undefined,
+): void {
+  if (!signal?.aborted) {
+    return;
+  }
+  throw signal.reason instanceof Error
+    ? signal.reason
+    : new Error("Hosted workspace snapshot archive planning was interrupted.");
 }
 
 function joinHostedWorkspaceArchivePath(prefix: string, relativePath: string): string {
@@ -2730,10 +2765,14 @@ function createEmptyHostedCodexContinuityCollection(): HostedCodexContinuityColl
 
 async function collectMissingHostedCodexContinuity(
   assistantStateRoot: string,
+  signal?: AbortSignal | null,
 ): Promise<HostedCodexContinuityCollection> {
+  assertHostedWorkspaceSnapshotArchivePlanLive(signal);
   const requirements = await readAssistantSessionProviderResumeRequirements(
     assistantStateRoot,
+    signal,
   );
+  assertHostedWorkspaceSnapshotArchivePlanLive(signal);
   if (requirements.length === 0) {
     return createEmptyHostedCodexContinuityCollection();
   }
@@ -2750,10 +2789,14 @@ async function collectMissingHostedCodexContinuity(
 async function collectHostedCodexContinuity(input: {
   assistantStateRoot: string;
   operatorHomeRoot: string;
+  signal?: AbortSignal | null;
 }): Promise<HostedCodexContinuityCollection> {
+  assertHostedWorkspaceSnapshotArchivePlanLive(input.signal);
   const requirements = await readAssistantSessionProviderResumeRequirements(
     input.assistantStateRoot,
+    input.signal,
   );
+  assertHostedWorkspaceSnapshotArchivePlanLive(input.signal);
   const codexHomeRoot = path.join(input.operatorHomeRoot, HOSTED_CODEX_HOME_RELATIVE_PATH);
   const entries: HostedCodexContinuityEntry[] = [];
   let archivedUnsupportedCount = 0;
@@ -2761,6 +2804,7 @@ async function collectHostedCodexContinuity(input: {
   let missingRolloutCount = 0;
 
   for (const requirement of requirements) {
+    assertHostedWorkspaceSnapshotArchivePlanLive(input.signal);
     const normalizedPath = normalizeHostedCodexRolloutRelativePathForProvider({
       providerSessionId: requirement.providerSessionId,
       value: requirement.codexRolloutRelativePath,
@@ -2777,7 +2821,9 @@ async function collectHostedCodexContinuity(input: {
     const rolloutFile = await inspectHostedCodexRolloutFile({
       codexHomeRoot,
       relativePath: normalizedPath.relativePath,
+      signal: input.signal,
     });
+    assertHostedWorkspaceSnapshotArchivePlanLive(input.signal);
     if (!rolloutFile) {
       missingRolloutCount += 1;
       continue;
@@ -2801,6 +2847,7 @@ async function collectHostedCodexContinuity(input: {
 async function inspectHostedCodexRolloutFile(input: {
   codexHomeRoot: string;
   relativePath: string;
+  signal?: AbortSignal | null;
 }): Promise<{
   absolutePath: string;
   stats: Stats;
@@ -2814,11 +2861,14 @@ async function inspectHostedCodexRolloutFile(input: {
 
   let currentPath = input.codexHomeRoot;
   for (const [index, segment] of segments.entries()) {
+    assertHostedWorkspaceSnapshotArchivePlanLive(input.signal);
     const nextPath = path.join(currentPath, segment);
     let entry: Stats;
     try {
       entry = await lstat(nextPath);
+      assertHostedWorkspaceSnapshotArchivePlanLive(input.signal);
     } catch {
+      assertHostedWorkspaceSnapshotArchivePlanLive(input.signal);
       return null;
     }
 
@@ -2967,6 +3017,7 @@ function createHostedCodexContinuityDiagnostics(input: {
 
 async function readAssistantSessionProviderResumeRequirements(
   assistantStateRoot: string,
+  signal?: AbortSignal | null,
 ): Promise<Array<{
   codexRolloutRelativePath: string | null;
   providerSessionId: string;
@@ -2979,14 +3030,18 @@ async function readAssistantSessionProviderResumeRequirements(
   let visitedFiles = 0;
 
   async function visit(directoryPath: string): Promise<void> {
+    assertHostedWorkspaceSnapshotArchivePlanLive(signal);
     let entries;
     try {
       entries = await readdir(directoryPath, { withFileTypes: true });
+      assertHostedWorkspaceSnapshotArchivePlanLive(signal);
     } catch {
+      assertHostedWorkspaceSnapshotArchivePlanLive(signal);
       return;
     }
 
     for (const entry of entries.sort((left, right) => left.name.localeCompare(right.name))) {
+      assertHostedWorkspaceSnapshotArchivePlanLive(signal);
       if (visitedFiles > HOSTED_HOT_STATE_MAX_FILES) {
         return;
       }
@@ -2994,6 +3049,7 @@ async function readAssistantSessionProviderResumeRequirements(
       const absolutePath = path.join(directoryPath, entry.name);
       if (entry.isDirectory()) {
         await visit(absolutePath);
+        assertHostedWorkspaceSnapshotArchivePlanLive(signal);
         continue;
       }
       if (!entry.isFile()) {
@@ -3001,7 +3057,14 @@ async function readAssistantSessionProviderResumeRequirements(
       }
 
       visitedFiles += 1;
-      const text = await readFile(absolutePath, "utf8");
+      let text: string;
+      try {
+        text = await readFile(absolutePath, "utf8");
+      } catch (error) {
+        assertHostedWorkspaceSnapshotArchivePlanLive(signal);
+        throw error;
+      }
+      assertHostedWorkspaceSnapshotArchivePlanLive(signal);
       for (const requirement of readAssistantSessionProviderResumeRequirementsFromText(text)) {
         if (requirement.providerSessionId) {
           requirements.push({
@@ -3013,7 +3076,9 @@ async function readAssistantSessionProviderResumeRequirements(
     }
   }
 
+  assertHostedWorkspaceSnapshotArchivePlanLive(signal);
   await visit(sessionsRoot);
+  assertHostedWorkspaceSnapshotArchivePlanLive(signal);
   return dedupeAssistantSessionProviderResumeRequirements(requirements);
 }
 

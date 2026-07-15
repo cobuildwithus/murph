@@ -766,6 +766,125 @@ describe("buildHostedExecutionRuntimePlatform", () => {
     }
   });
 
+  it("preserves cancellation while a direct R2 snapshot presign is pending", async () => {
+    const encryptedBytes = new Uint8Array([1, 2, 3, 4, 5]);
+    const tempRoot = await mkdtemp(path.join(tmpdir(), "murph-runner-platform-r2-presign-abort-"));
+    const abortController = new AbortController();
+    const abortReason = new Error("foreground wake interrupted snapshot presign");
+    let resolvePresignStarted: (() => void) | null = null;
+    const presignStarted = new Promise<void>((resolve) => {
+      resolvePresignStarted = resolve;
+    });
+
+    try {
+      const encryptedFilePath = path.join(tempRoot, "workspace.snapshot.enc");
+      await writeFile(encryptedFilePath, encryptedBytes);
+      const objectKey =
+        "users/hsn_0123456789abcdef01234567/workspace-snapshots/snapshot_runner_platform.snapshot.enc";
+      const fetchMock = vi.fn(async (...args: Parameters<typeof fetch>) => {
+        const request = requireFetchRequest(args, "workspace snapshot pending presign fetch");
+        resolvePresignStarted?.();
+        resolvePresignStarted = null;
+        await delayWithAbort(60_000, request.signal);
+        return new Response("unexpected", { status: 500 });
+      });
+      const platform = buildTestHostedExecutionRuntimePlatform({
+        boundUserId: "member_123",
+        fetchImpl: fetchMock as typeof fetch,
+      });
+
+      const upload = platform.workspaceSnapshotPort!.putSnapshotObjectDirect({
+        encryptedByteSize: encryptedBytes.byteLength,
+        encryptedObjectSha256: "c".repeat(64),
+        objectKey,
+        signal: abortController.signal,
+        snapshotId: "snapshot_runner_platform",
+        sourceFilePath: encryptedFilePath,
+      });
+      await presignStarted;
+      abortController.abort(abortReason);
+
+      await expect(upload).rejects.toBe(abortReason);
+      expect(fetchMock).toHaveBeenCalledOnce();
+    } finally {
+      await rm(tempRoot, {
+        force: true,
+        recursive: true,
+      });
+    }
+  });
+
+  it("preserves cancellation while the direct R2 snapshot PUT is pending", async () => {
+    const encryptedBytes = new Uint8Array([1, 2, 3, 4, 5]);
+    const tempRoot = await mkdtemp(path.join(tmpdir(), "murph-runner-platform-r2-put-abort-"));
+    const abortController = new AbortController();
+    const abortReason = new Error("foreground wake interrupted snapshot PUT");
+    const objectKey =
+      "users/hsn_0123456789abcdef01234567/workspace-snapshots/snapshot_runner_platform.snapshot.enc";
+    const putUrl =
+      `https://r2.example.test/bundles/${objectKey}?X-Amz-Signature=fixture`;
+    let resolvePutStarted: (() => void) | null = null;
+    const putStarted = new Promise<void>((resolve) => {
+      resolvePutStarted = resolve;
+    });
+
+    try {
+      const encryptedFilePath = path.join(tempRoot, "workspace.snapshot.enc");
+      await writeFile(encryptedFilePath, encryptedBytes);
+      const fetchMock = vi.fn(async (...args: Parameters<typeof fetch>) => {
+        const request = requireFetchRequest(args, "workspace snapshot pending PUT fetch");
+        if (request.url.includes("/workspace-snapshots/snapshot_runner_platform/presign-put")) {
+          return new Response(
+            JSON.stringify({
+              expiresAt: new Date(Date.now() + 60_000).toISOString(),
+              putUrl,
+            }),
+            {
+              headers: {
+                "content-type": "application/json; charset=utf-8",
+              },
+              status: 200,
+            },
+          );
+        }
+
+        resolvePutStarted?.();
+        resolvePutStarted = null;
+        await delayWithAbort(60_000, request.signal);
+        return new Response("unexpected", { status: 500 });
+      });
+      const platform = buildTestHostedExecutionRuntimePlatform({
+        boundUserId: "member_123",
+        fetchImpl: fetchMock as typeof fetch,
+      });
+
+      const upload = platform.workspaceSnapshotPort!.putSnapshotObjectDirect({
+        encryptedByteSize: encryptedBytes.byteLength,
+        encryptedObjectSha256: "c".repeat(64),
+        objectKey,
+        signal: abortController.signal,
+        snapshotId: "snapshot_runner_platform",
+        sourceFilePath: encryptedFilePath,
+      });
+      await putStarted;
+      abortController.abort(abortReason);
+
+      await expect(upload).rejects.toBe(abortReason);
+      expect(fetchMock).toHaveBeenCalledTimes(2);
+      const putRequest = requireFetchRequest(
+        fetchMock.mock.calls[1],
+        "cancelled direct R2 workspace snapshot PUT",
+      );
+      expect(putRequest.method).toBe("PUT");
+      expect(putRequest.url).toBe(putUrl);
+    } finally {
+      await rm(tempRoot, {
+        force: true,
+        recursive: true,
+      });
+    }
+  });
+
   it("logs redacted direct R2 transport failure text without presigned URL material", async () => {
     const encryptedBytes = new Uint8Array([1, 2, 3, 4, 5]);
     const tempRoot = await mkdtemp(path.join(tmpdir(), "murph-runner-platform-r2-put-"));
@@ -895,6 +1014,38 @@ describe("buildHostedExecutionRuntimePlatform", () => {
         recursive: true,
       });
     }
+  });
+
+  it("preserves cancellation while a workspace snapshot session start is pending", async () => {
+    const abortController = new AbortController();
+    const abortReason = new Error("foreground wake interrupted snapshot session start");
+    let resolveStartRequested: (() => void) | null = null;
+    const startRequested = new Promise<void>((resolve) => {
+      resolveStartRequested = resolve;
+    });
+    const fetchMock = vi.fn(async (...args: Parameters<typeof fetch>) => {
+      const request = requireFetchRequest(args, "workspace snapshot pending session start");
+      expect(request.url).toBe("http://workspace-snapshots.worker/workspace-snapshots/start");
+      resolveStartRequested?.();
+      resolveStartRequested = null;
+      await delayWithAbort(60_000, request.signal);
+      return new Response("unexpected", { status: 500 });
+    });
+    const platform = buildTestHostedExecutionRuntimePlatform({
+      boundUserId: "member_123",
+      fetchImpl: fetchMock as typeof fetch,
+    });
+
+    const start = platform.workspaceSnapshotPort!.startSnapshotSession({
+      expectedWorkspaceVersion: "6",
+      reason: "idle_shutdown",
+      signal: abortController.signal,
+    });
+    await startRequested;
+    abortController.abort(abortReason);
+
+    await expect(start).rejects.toBe(abortReason);
+    expect(fetchMock).toHaveBeenCalledOnce();
   });
 
   it("reuses the snapshot session write fence when aborting after the runtime lease changes", async () => {
@@ -2341,6 +2492,7 @@ describe("buildHostedExecutionRuntimePlatform", () => {
 
   it("attaches the active runtime write fence to legacy artifact reads", async () => {
     const fetchMock = vi.fn(async () => new Response(null, { status: 404 }));
+
     const platform = buildTestHostedExecutionRuntimePlatform({
       boundUserId: "member_123",
       fetchImpl: fetchMock as typeof fetch,
@@ -2351,6 +2503,35 @@ describe("buildHostedExecutionRuntimePlatform", () => {
     const request = requireFetchRequest(fetchMock.mock.calls[0], "artifact read");
     expect(request.url).toBe(`http://artifacts.worker/objects/${"a".repeat(64)}`);
     expectDefaultRuntimeWriteFenceHeaders(request);
+  });
+
+  it("preserves cancellation while a legacy snapshot artifact fetch is pending", async () => {
+    const abortController = new AbortController();
+    const abortReason = new Error("foreground wake interrupted legacy artifact fetch");
+    let resolveFetchStarted: (() => void) | null = null;
+    const fetchStarted = new Promise<void>((resolve) => {
+      resolveFetchStarted = resolve;
+    });
+    const fetchMock = vi.fn(async (...args: Parameters<typeof fetch>) => {
+      const request = requireFetchRequest(args, "pending legacy snapshot artifact fetch");
+      resolveFetchStarted?.();
+      resolveFetchStarted = null;
+      await delayWithAbort(60_000, request.signal);
+      return new Response("unexpected", { status: 500 });
+    });
+    const platform = buildTestHostedExecutionRuntimePlatform({
+      boundUserId: "member_123",
+      fetchImpl: fetchMock as typeof fetch,
+    });
+
+    const artifact = platform.artifactStore.get("a".repeat(64), {
+      signal: abortController.signal,
+    });
+    await fetchStarted;
+    abortController.abort(abortReason);
+
+    await expect(artifact).rejects.toBe(abortReason);
+    expect(fetchMock).toHaveBeenCalledOnce();
   });
 
   it("retries replay-safe artifact fetch transport failures once", async () => {

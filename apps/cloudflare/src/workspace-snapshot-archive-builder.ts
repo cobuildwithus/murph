@@ -17,6 +17,7 @@ export function createCloudflareHostedWorkspaceSnapshotArchiveBuilder():
         ivBase64: input.ivBase64,
         maxEncryptedBytes: input.maxEncryptedBytes,
         outputDir: input.outputDir,
+        signal: input.signal,
       });
     },
   };

@@ -184,13 +184,13 @@ export function isHostedLinqProviderEventType(value: string): value is HostedLin
   return (HOSTED_LINQ_PROVIDER_EVENT_TYPES as readonly string[]).includes(value);
 }
 
-export function normalizeHostedLinqGroupJoinOfferReaction(input: {
+export function isHostedLinqAffirmativeReaction(input: {
   customEmoji?: string | null;
   eventType: string;
   reactionType?: string | null;
-}): "accept" | null {
+}): boolean {
   if (input.eventType !== "reaction.added") {
-    return null;
+    return false;
   }
   const reactionType = normalizeReactionToken(input.reactionType);
   if (
@@ -200,11 +200,11 @@ export function normalizeHostedLinqGroupJoinOfferReaction(input: {
     || reactionType === "thumbsup"
     || reactionType === "heart"
   ) {
-    return "accept";
+    return true;
   }
 
   const customEmoji = normalizeReactionEmoji(input.customEmoji);
-  return customEmoji === "👍" || customEmoji === "❤" ? "accept" : null;
+  return customEmoji === "👍" || customEmoji === "❤";
 }
 
 function parseHostedLinqMessageReceivedProviderEvent(input: {

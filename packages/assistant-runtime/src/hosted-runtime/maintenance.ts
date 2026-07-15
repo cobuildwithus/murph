@@ -581,6 +581,7 @@ export async function runHostedAssistantAutomation(
     const currentTurnDeliveryIntentIds =
       result.currentTurnDeliveryIntentIds ?? [];
     const nextWakeAt = resolveHostedAssistantAutomationNextWakeAt({
+      inferBacklogFromSaturation: selectedInputIds.mode === "background",
       nowMs: resolveHostedMaintenanceWakeNowMs(wake),
       resultNextWakeAt: result.nextWakeAt,
       scanLimit: maxPerScan,
@@ -812,6 +813,7 @@ async function sleep(delayMs: number): Promise<void> {
 }
 
 function resolveHostedAssistantAutomationNextWakeAt(input: {
+  inferBacklogFromSaturation: boolean;
   nowMs: number;
   resultNextWakeAt: string | null;
   scanLimit: number;
@@ -831,7 +833,9 @@ function resolveHostedAssistantAutomationNextWakeAt(input: {
       input.resultNextWakeAt,
       input.nowMs,
     ),
-    resolveHostedAssistantBacklogWakeAt(input),
+    input.inferBacklogFromSaturation
+      ? resolveHostedAssistantBacklogWakeAt(input)
+      : null,
   );
 }
 

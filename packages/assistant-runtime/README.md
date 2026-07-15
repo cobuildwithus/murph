@@ -12,7 +12,7 @@ Current responsibilities:
 - own the canonical hosted runtime launch spec: semantic env split,
   forwarded env profiles, platform-only runtime config, typed resolved config,
   typed parser toolchain validation, commit timeout, and child-env projection helpers
-- keep hosted execution local-runtime-first: normal hosted turns write mailbox and assistant input state into the warm container, may defer intermediate foreground checkpoints, and keep dirty state dirty until the runtime-owned idle/scheduled-wake `idle_shutdown` checkpoint succeeds
+- keep hosted execution local-runtime-first: normal hosted turns write mailbox and assistant input state into the warm container, may defer intermediate foreground checkpoints, may hot-service only the exact assistant wake projected by the current foreground phase before the idle floor, and otherwise keep dirty state dirty until the runtime-owned idle-floor—or last-chance shutdown—`idle_shutdown` checkpoint succeeds
 - accept a committed valid checkpoint's optional `conversationInputAhead` observation, import that durable conversation input immediately while the invocation remains live, and avoid post-upload snapshot discard or metadata-only shutdown resnapshot
 - collect and deliver due hosted side effects from live container state without waiting for foreground hosted workspace checkpointing
 - apply every `member.preferences.updated` system-mailbox delta in mailbox order, carrying the mailbox owner's cross-lane causal sequence so the canonical preference owner stale-no-ops only fields superseded by newer accepted intent while current siblings still apply; bounded per-field watermarks in `bank/assistant-preference-mutations.json` make replay idempotent without reservation or receipt retention
@@ -43,11 +43,15 @@ input makes one best-effort inbox projection attempt while the decoded wake is
 still in memory so raw attachment paths remain inspectable and audio/video
 transcription jobs can drain before prompt construction when parser output is
 available. Normal foreground work may defer intermediate hosted workspace
-checkpoints before Codex admission or reply delivery. The active invocation
-remains dirty until the runtime-owned idle/scheduled-wake
-`idle_shutdown` checkpoint succeeds; if the container dies before that
-checkpoint, local runtime residue since the last accepted checkpoint can be
-lost. Inbox capture, audio/video transcript work,
+checkpoints before Codex admission or reply delivery. While dirty, the exact
+assistant wake projected by the current foreground phase may run once when due
+before the idle floor without publishing a snapshot. Otherwise the invocation
+remains dirty until the runtime-owned idle-floor—or last-chance shutdown—
+`idle_shutdown` checkpoint succeeds; inherited or committed wakes and
+durability barriers remain checkpoint-first. A restored due wake in a clean
+workspace runs ordinarily. If the container dies before that checkpoint, local
+runtime residue since the last accepted checkpoint can be lost. Inbox capture,
+audio/video transcript work,
 attachment materialization, and display/search indexes are recovery context;
 they are not a hidden runtime-only admission path for Codex. Prompt construction
 reads the staged assistant input event and its sanitized vault-relative

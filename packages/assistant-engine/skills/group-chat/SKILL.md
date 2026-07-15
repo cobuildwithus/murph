@@ -29,6 +29,18 @@ someone must link an external workspace. If the room asks to create the group,
 join it, or approve sharing, call `create_join_link` or `post_join_offer`; those
 actions create the hosted group record as part of the existing flow.
 
+## Additive permissions
+
+When the room adds a sharing permission to a group that already exists, default
+to `murph.group action="post_join_offer"`. Do not tell existing members to join
+again or make them open the link as the primary action. Lead the offer with the
+exact words "Like this message," then say that liking opts them into the exact
+`{{share_scope}}`. Keep `{{join_url}}` as the secondary customize path for
+someone who wants to share more or less. Liking adds only the disclosed
+permission snapshot; it does not make an existing member redo membership or
+their other grants. Use `create_join_link` when the room explicitly asks for a
+standalone link, not as the default for an additive permission.
+
 ## The decision ladder
 
 Run this on every inbound group message, top to bottom, and take the first
@@ -193,10 +205,11 @@ do not re-interrogate them. Use the current group's non-blank `displayName` from
 generic default, and confirm the essentials in one line.
 
 Apply the answers directly. The chosen name is the automation title, the name
-used in the setup notice, and the group display name for the join surface. For
-the newsletter react-to-join path, pass that same chosen name as `displayName`
-on `murph.group action="post_join_offer"`. If you mint a standalone join link
-instead, pass the same `displayName` on `murph.group action="create_join_link"`.
+used in the setup notice, and the group display name for the permissions
+surface. For the newsletter like-to-consent path, pass that same chosen name
+as `displayName` on `murph.group action="post_join_offer"`. If you mint a
+standalone join link instead, pass the same `displayName` on
+`murph.group action="create_join_link"`.
 The chosen schedule becomes the cron expression; `0 9 * * 0` is the Sunday 9am
 default. Tone and any custom notes belong in the automation instructions.
 
@@ -239,15 +252,16 @@ decision sequence in the `group-newsletter` skill. Do not duplicate or
 improvise a second run sequence from this setup section.
 
 If a member never granted email sharing and expresses interest, or the group
-asks how someone can join the newsletter, post a join offer scoped to
+asks how someone can opt into the newsletter, post a permission offer scoped to
 `group-email.v0`, `sleep-duration-days.v0`, `activity-days.v0`, `workout-days.v0`,
 `resting-heart-rate-days.v0`, and `hrv-days.v0` unless the group chose a
-different set. Every join offer must lead with "Like this message," immediately
-say what liking it will do, include `{{share_scope}}` exactly once, and
+different set. Every permission offer must lead with "Like this message,"
+immediately say what liking it will do, include `{{share_scope}}` exactly once, and
 include `{{join_url}}` exactly once as the customize link so a member can share
 more or less. When this offer names the newsletter group, pass the group's
 chosen name as `displayName` on the `post_join_offer` call. Liking the message
-grants the disclosed snapshot; the link lets a member pick a different set.
+adds the disclosed snapshot; the link lets a member pick a different set. For
+existing participants, call this permission opt-in, never joining or rejoining.
 Never silently share health data that the message did not disclose, never include any other
 URL, and never repeatedly re-offer to someone who declined.
 

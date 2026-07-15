@@ -99,7 +99,10 @@ import type {
 } from "./liveness.ts";
 
 export interface HostedRuntimeArtifactReader {
-  get(sha256: string): Promise<Uint8Array | null>;
+  get(
+    sha256: string,
+    context?: { signal?: AbortSignal | null },
+  ): Promise<Uint8Array | null>;
 }
 
 export interface HostedRuntimeAssistantConfigurationToolPort {
@@ -415,7 +418,7 @@ export interface HostedRuntimeMailboxPort {
 }
 
 export interface HostedRuntimeWorkspacePort {
-  read?(): Promise<HostedWorkspaceReadResponse>;
+  read?(context?: { signal?: AbortSignal | null }): Promise<HostedWorkspaceReadResponse>;
   checkpoint(
     request: HostedWorkspaceCheckpointRequest,
   ): Promise<HostedWorkspaceCheckpointResponse>;
@@ -477,6 +480,7 @@ export interface HostedRuntimeWorkspaceSnapshotPort {
     encryptedByteSize: number;
     encryptedObjectSha256: string;
     objectKey: string;
+    signal?: AbortSignal | null;
     sourceFilePath: string;
     snapshotId: string;
   }): Promise<HostedRuntimeWorkspaceSnapshotDirectUploadTimingDetails | void>;
@@ -491,11 +495,15 @@ export interface HostedRuntimeWorkspaceSnapshotPort {
     nextWakeAt?: string | null;
     nextWakeReason?: string | null;
     reason: "idle_shutdown";
+    signal?: AbortSignal | null;
   }): Promise<HostedRuntimeWorkspaceSnapshotSessionStart>;
 }
 
 export interface HostedRuntimeLogPort {
-  write(request: HostedRuntimeLogRequest): Promise<HostedRuntimeLogResponse>;
+  write(
+    request: HostedRuntimeLogRequest,
+    context?: { signal?: AbortSignal | null },
+  ): Promise<HostedRuntimeLogResponse>;
 }
 
 export interface HostedRuntimeLatencyTracePort {

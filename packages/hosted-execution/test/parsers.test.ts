@@ -132,6 +132,7 @@ describe("parseHostedExecutionEvent", () => {
           groupParticipantAdded: true,
           groupReactionContext: "Someone reacted ❤️ to “morning walk”.",
           linqMessage: {
+            affirmativeReaction: true,
             chatId: "chat_123",
             from: "+15550001111",
             isFromMe: false,
@@ -159,6 +160,9 @@ describe("parseHostedExecutionEvent", () => {
       message: {
         groupParticipantAdded: true,
         groupReactionContext: "Someone reacted ❤️ to “morning walk”.",
+        linqMessage: {
+          affirmativeReaction: true,
+        },
         routeAuthority: {
           accountLookupKey: "hbidx:phone:v1:account",
           channel: "linq",
@@ -168,6 +172,33 @@ describe("parseHostedExecutionEvent", () => {
       },
     });
   });
+
+  it.each([false, "true", null])(
+    "rejects non-true Linq affirmative reaction markers: %j",
+    (affirmativeReaction) => {
+      expect(() => parseHostedExecutionWake({
+        eventId: "linq-affirmative-reaction-1",
+        kind: "conversation.message",
+        message: {
+          channel: "linq",
+          contactKind: "phone",
+          contactLookupKey: "hbidx:phone:v1:sender",
+          linqMessage: {
+            affirmativeReaction,
+            chatId: "chat_123",
+            from: "+15550001111",
+            isFromMe: false,
+            messageId: "reaction_event_123",
+            parts: [{ type: "text", value: "Yes." }],
+            replyToMessageId: "msg_murph_123",
+            threadIsDirect: true,
+          },
+        },
+        occurredAt: "2026-04-08T00:15:00.000Z",
+        userId: "member_personal_123",
+      })).toThrow(/affirmativeReaction must be true when present/u);
+    },
+  );
 
   it.each([false, "true"])(
     "rejects non-true Linq participant context: %j",

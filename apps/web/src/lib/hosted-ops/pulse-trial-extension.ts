@@ -40,6 +40,8 @@ const PREVIEW_TOKEN_PREFIX = "pulse-member-preview-v1";
 const PREVIEW_HMAC_CONTEXT = "hosted-member-pulse-trial-extension-preview-v1";
 const EXTENSION_OPERATION_METADATA_KEY = "murphTrialExtensionOperation";
 const EXTENSION_DAYS_METADATA_KEY = "murphTrialExtensionDays";
+const STRIPE_ERROR_IDENTIFIER_PREFIX =
+  /^(?:acct|ch|cus|hbm|pi|pk|pm|price|req|rk|seti|sk|src|sub|whsec)_/iu;
 
 export const HOSTED_PULSE_TRIAL_EXTENSION_DAYS = 7 as const;
 
@@ -158,9 +160,23 @@ export class HostedPulseTrialExtensionPreviewStaleError extends Error {
 }
 
 export class HostedPulseTrialExtensionProviderError extends Error {
-  constructor() {
+  readonly logDetails: Record<string, unknown>;
+
+  constructor(input: {
+    error?: unknown;
+    operationName:
+      | "retrieve_subscription"
+      | "update_subscription"
+      | "validate_updated_subscription";
+  }) {
     super("Stripe could not confirm this trial extension request.");
     this.name = "HostedPulseTrialExtensionProviderError";
+    this.logDetails = {
+      operationName: input.operationName,
+      ...(Object.prototype.hasOwnProperty.call(input, "error")
+        ? describeSafeHostedPulseTrialExtensionStripeError(input.error)
+        : {}),
+    };
   }
 }
 
@@ -324,8 +340,11 @@ export async function applyHostedPulseTrialExtension(
               ...buildHostedPulseTrialExtensionStripeRequestOptions(),
             },
           );
-        } catch {
-          throw new HostedPulseTrialExtensionProviderError();
+        } catch (error) {
+          throw new HostedPulseTrialExtensionProviderError({
+            error,
+            operationName: "update_subscription",
+          });
         }
 
         if (!isHostedPulseTrialExtensionAlreadyApplied({
@@ -335,7 +354,9 @@ export async function applyHostedPulseTrialExtension(
           subscription: updatedSubscription,
           targetTrialEnd: proofDates.targetTrialEndUnix,
         })) {
-          throw new HostedPulseTrialExtensionProviderError();
+          throw new HostedPulseTrialExtensionProviderError({
+            operationName: "validate_updated_subscription",
+          });
         }
 
         const reconciledMember = await reconcileHostedPulseTrialExtensionLocalState({
@@ -414,8 +435,11 @@ async function inspectHostedPulseTrialExtensionState(input: {
       billingRef.stripeSubscriptionId,
       buildHostedPulseTrialExtensionStripeRequestOptions(),
     );
-  } catch {
-    throw new HostedPulseTrialExtensionProviderError();
+  } catch (error) {
+    throw new HostedPulseTrialExtensionProviderError({
+      error,
+      operationName: "retrieve_subscription",
+    });
   }
 
   const providerReason = classifyHostedPulseTrialExtensionProviderState({
@@ -929,6 +953,64 @@ function buildHostedPulseTrialExtensionStripeRequestOptions(): Stripe.RequestOpt
     maxNetworkRetries: STRIPE_REQUEST_MAX_NETWORK_RETRIES,
     timeout: STRIPE_REQUEST_TIMEOUT_MS,
   };
+}
+
+function describeSafeHostedPulseTrialExtensionStripeError(
+  error: unknown,
+): Record<string, unknown> {
+  if (!error || typeof error !== "object") {
+    return { type: typeof error };
+  }
+
+  const code = readSafeHostedPulseTrialExtensionStripeErrorToken(
+    readHostedPulseTrialExtensionStripeErrorField(error, "code"),
+  );
+  const type = readSafeHostedPulseTrialExtensionStripeErrorToken(
+    readHostedPulseTrialExtensionStripeErrorField(error, "type"),
+  ) ?? readSafeHostedPulseTrialExtensionStripeErrorToken(
+    readHostedPulseTrialExtensionStripeErrorField(error, "rawType"),
+  );
+  const statusCode = readHostedPulseTrialExtensionStripeErrorField(
+    error,
+    "statusCode",
+  );
+  const requestId = readHostedPulseTrialExtensionStripeErrorField(
+    error,
+    "requestId",
+  );
+
+  return {
+    ...(code ? { code } : {}),
+    ...(type ? { type } : {}),
+    ...(typeof statusCode === "number" &&
+        Number.isInteger(statusCode) &&
+        statusCode >= 100 &&
+        statusCode <= 599
+      ? { statusCode }
+      : {}),
+    requestIdPresent: typeof requestId === "string" && requestId.length > 0,
+  };
+}
+
+function readSafeHostedPulseTrialExtensionStripeErrorToken(
+  value: unknown,
+): string | null {
+  return typeof value === "string" &&
+      /^[A-Za-z0-9_.-]{1,120}$/u.test(value) &&
+      !STRIPE_ERROR_IDENTIFIER_PREFIX.test(value)
+    ? value
+    : null;
+}
+
+function readHostedPulseTrialExtensionStripeErrorField(
+  error: object,
+  field: "code" | "rawType" | "requestId" | "statusCode" | "type",
+): unknown {
+  try {
+    return Reflect.get(error, field);
+  } catch {
+    return undefined;
+  }
 }
 
 function coerceStripeCustomerId(

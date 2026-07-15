@@ -1,8 +1,5 @@
 import { createHmac } from "node:crypto";
 import {
-  MURPH_ASSISTANT_SIGNUP_WELCOME_MESSAGE,
-} from "@murphai/contracts";
-import {
   buildHostedExecutionMemberActivatedWake,
 } from "@murphai/hosted-execution";
 import { afterAll, beforeAll, describe, expect, it, vi } from "vitest";
