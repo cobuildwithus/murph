@@ -2732,7 +2732,7 @@ describe("hosted device-sync runtime", () => {
         methodVersion: COMPANION_HRV_RMSSD_METHOD_VERSION,
         nightDate: "2026-04-04",
         rmssdMs: 48.25,
-        completedWindowCount: 60,
+        completedWindowCount: 84,
         acceptedWindowCount: 56,
       });
       const job = getStore(service).enqueueJob({
@@ -2959,7 +2959,7 @@ describe("hosted device-sync runtime", () => {
       methodVersion: COMPANION_HRV_RMSSD_METHOD_VERSION,
       nightDate: "2026-04-04",
       rmssdMs: 48.25,
-      completedWindowCount: 60,
+      completedWindowCount: 84,
       acceptedWindowCount: 56,
     });
     const dirtyState = buildDirtyState({
@@ -4232,7 +4232,7 @@ describe("hosted device-sync runtime", () => {
           methodVersion: COMPANION_HRV_RMSSD_METHOD_VERSION,
           nightDate: "2026-04-04",
           rmssdMs: 48.25,
-          completedWindowCount: 60,
+          completedWindowCount: 84,
           acceptedWindowCount: 56,
         });
         const changedCompanionObservationJson = JSON.stringify({
@@ -4379,7 +4379,7 @@ describe("hosted device-sync runtime", () => {
       methodVersion: COMPANION_HRV_RMSSD_METHOD_VERSION,
       nightDate: "2026-07-10",
       rmssdMs: 48.25,
-      completedWindowCount: 60,
+      completedWindowCount: 84,
       acceptedWindowCount: 56,
     });
     const companionAdmissionId = createHash("sha256")
@@ -4796,7 +4796,7 @@ describe("hosted device-sync runtime", () => {
         methodVersion: COMPANION_HRV_RMSSD_METHOD_VERSION,
         nightDate: "2026-07-13",
         rmssdMs: 47.5,
-        completedWindowCount: 60,
+        completedWindowCount: 84,
         acceptedWindowCount: 56,
       });
       const companionJob = getStore(service).enqueueJob({

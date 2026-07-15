@@ -3,11 +3,13 @@ import { z } from "zod";
 export const COMPANION_HRV_RMSSD_SCHEMA =
   "murph.companion.overnight-prv-rmssd.v1";
 export const COMPANION_HRV_RMSSD_RESOURCE = "companion_hrv_rmssd";
-export const COMPANION_HRV_RMSSD_METHOD_VERSION = "prv-rmssd-5m-mean-v1";
+export const COMPANION_HRV_RMSSD_METHOD_VERSION =
+  "prv-rmssd-5m-mean-scheduled-0000-0800-local-v1";
 
 const COMPANION_ADMISSION_ID_PATTERN = /^[a-f0-9]{64}$/u;
+const MINIMUM_COMPLETED_WINDOWS = 84;
 const MINIMUM_ACCEPTED_WINDOWS = 48;
-const MAXIMUM_COMPLETED_WINDOWS = 192;
+const MAXIMUM_COMPLETED_WINDOWS = 108;
 const MAXIMUM_SERIALIZED_BYTES = 512;
 
 const companionHrvRmssdObservationSchema = z
@@ -17,7 +19,7 @@ const companionHrvRmssdObservationSchema = z
     nightDate: z.iso.date(),
     rmssdMs: z.number().finite().positive().max(1_000),
     completedWindowCount: z.number().int()
-      .min(MINIMUM_ACCEPTED_WINDOWS)
+      .min(MINIMUM_COMPLETED_WINDOWS)
       .max(MAXIMUM_COMPLETED_WINDOWS),
     acceptedWindowCount: z.number().int().min(MINIMUM_ACCEPTED_WINDOWS),
   })

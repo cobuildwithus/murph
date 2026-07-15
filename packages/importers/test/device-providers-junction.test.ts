@@ -2769,7 +2769,7 @@ test("Junction normalizer maps companion WHOOP overnight PRV to one estimated da
   const event = payload.events?.find((entry) =>
     entry.fields?.metric === "whoop-ble-overnight-prv-rmssd"
   );
-  assert.equal(event?.title, "Estimated WHOOP BLE overnight PRV (RMSSD)");
+  assert.equal(event?.title, "Estimated WHOOP BLE scheduled overnight PRV (RMSSD)");
   assert.equal(event?.occurredAt, "2026-07-10T12:00:00.000Z");
   assert.equal(event?.dayKey, "2026-07-10");
   assert.equal(event?.timeZone, undefined);
@@ -2782,7 +2782,7 @@ test("Junction normalizer maps companion WHOOP overnight PRV to one estimated da
   assert.equal(event?.externalRef?.facet, "whoop-ble-overnight-prv-rmssd");
   assert.match(
     event?.externalRef?.version ?? "",
-    /^prv-rmssd-5m-mean-v1:[a-f0-9]{64}$/u,
+    /^prv-rmssd-5m-mean-scheduled-0000-0800-local-v1:[a-f0-9]{64}$/u,
   );
   assert.equal(
     event?.externalRef?.version,

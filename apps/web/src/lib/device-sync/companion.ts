@@ -156,15 +156,28 @@ interface CompanionAuthDiagnosticLog {
   appVersion: string | null;
 }
 
+export type CompanionConnectionIntent = "connect" | "resume";
+
 /**
- * Validates the optional companion sign-in request metadata and discards it.
+ * Validates the companion sign-in request and returns its lifecycle intent.
  *
  * A `companion_installations` record was considered in the MVP spec and is
- * deliberately deferred until operationally needed: the metadata carries no
- * load-bearing behavior today, so we validate the shape for forward
- * compatibility and persist or log nothing from it.
+ * deliberately deferred until operationally needed: installation metadata
+ * carries no load-bearing behavior today, so it is persisted and logged
+ * nowhere. A missing intent is retained only for legacy-client inference.
  */
-export function validateCompanionSignInRequestBody(body: Record<string, unknown>): void {
+export function validateCompanionSignInRequestBody(
+  body: Record<string, unknown>,
+): CompanionConnectionIntent | null {
+  const connectionIntent = body.connectionIntent;
+  if (
+    connectionIntent !== undefined
+    && connectionIntent !== "connect"
+    && connectionIntent !== "resume"
+  ) {
+    throw companionRequestInvalid("connectionIntent must be connect or resume when provided.");
+  }
+
   const platform = readOptionalBoundedString(body, "platform");
   if (platform !== null && platform !== "ios") {
     throw companionRequestInvalid("platform must be ios when provided.");
@@ -174,7 +187,7 @@ export function validateCompanionSignInRequestBody(body: Record<string, unknown>
 
   const sdkVersions = body.sdkVersions;
   if (sdkVersions === undefined || sdkVersions === null) {
-    return;
+    return connectionIntent ?? null;
   }
 
   if (typeof sdkVersions !== "object" || Array.isArray(sdkVersions)) {
@@ -191,6 +204,8 @@ export function validateCompanionSignInRequestBody(body: Record<string, unknown>
       throw companionRequestInvalid("sdkVersions must be an object of string values.");
     }
   }
+
+  return connectionIntent ?? null;
 }
 
 export function parseCompanionHrvRmssdObservationRequestBody(
