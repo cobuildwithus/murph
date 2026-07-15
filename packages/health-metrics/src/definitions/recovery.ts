@@ -42,7 +42,7 @@ export const RECOVERY_METRICS = [
     biomarkerKey: null,
     canonicalUnit: "ms",
     category: "recovery",
-    displayName: "WHOOP BLE overnight PRV",
+    displayName: "WHOOP BLE scheduled overnight PRV",
     displayUnit: "ms",
     key: "whoop-ble-overnight-prv-rmssd",
     selectionPolicy: { kind: "latest-valid", staleAfterDays: 14 },

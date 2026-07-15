@@ -57,20 +57,54 @@ Last verified: 2026-07-14
   tokens, patient ids, URLs, or provider response bodies.
 - AgentMail-backed email polling and delivery must keep API keys in environment variables only, must not write raw Authorization headers to vault/runtime artifacts, and must limit assistant auto-reply to positively classified direct threads or signed hosted group routes that resolve to a current grantor; indeterminate or malformed hosted routes must fail closed. A signed group route is routing authority, not SMTP sender authentication, and must never authorize private assistant style settings.
 - Cloudflare-hosted reply aliases are private signed routing capabilities, not SMTP sender-identity proof. Hosted email ingress may accept the current per-user signed reply alias after the web-owned callback resolves its alias key to an active member, and it must do that before persisting the raw `.eml` or dispatching hosted execution; leaked aliases must not route to another member or be described as verified email ownership. Web is allowed to derive and display the same deterministic per-member alias as Cloudflare because web owns member routing state; verified-email sync should persist the alias lookup key before settings presents the alias as reachable. Treat hosted email signing-secret rotation as a compatibility event because deterministic displayed aliases and stored lookup keys are derived from that secret. Direct mail to the fixed public sender address must remain fail-closed unless a trusted runtime seam supplies a provider-authenticated sender verdict with aligned SPF, DKIM, or DMARC proof, then resolves only through a synced verified-owner index that stores secret-derived sender hashes instead of raw verified emails. The direct-public path must require matching envelope and `From` sender values plus authenticated sender proof before lookup, public-sender misses or failed owner authorization should be accepted-and-dropped instead of bounced so the mailbox leaks less account state, new outbound mail should reuse one stable per-user reply alias instead of minting fresh per-thread route state, and any accepted reply-alias message must remain scoped to the alias owner. The hosted worker must never treat envelope/header `From` fields or raw `Authentication-Results` / `ARC-*` headers as authentication proof.
-- Companion (iOS) device-sync routes under `/api/device-sync/companion/**` normally authenticate with a Privy identity token in `Authorization: Bearer` (no cookie fallback, so no browser ambient authority or CSRF surface). The Messages enrollment route follows that rule, then mints a 24-hour Messages-only bearer; the revoke and proof-action routes are the only companion exceptions that accept that derived scope. The one pre-login exception, `POST /api/device-sync/companion/auth-diagnostics`, accepts only an allowlisted, size-bounded failure envelope containing app-owned categories and an optional Murph-recognized Privy auth machine code; unsupported provider codes become `null`. It writes one structured hosted warning, has no database or object-storage sink, and must never retain or log raw provider prose, email, phone, OTP, tokens, authorization headers, member/user ids, or health data. Treat its telemetry as spoofable rather than audit evidence; a bundled mobile secret is not an attestation boundary because it can be extracted and replayed. Production keeps this route hidden unless `MURPH_COMPANION_AUTH_DIAGNOSTICS_ENABLED=1`, and the production build must use explicit Vercel API credentials to prove the enabled WAF rule is the first active custom rule, matches only this exact path, and caps requests at 30 per minute per IP with a fixed window. The Junction SDK sign-in token authenticated routes mint is short-lived, returned exactly once, and must never be logged or persisted; the account-ensure step must reuse the shared device-sync `upsertConnection` external-account identity discipline so SDK and Junction Link flows always share one `device_connection`. The junction client's API-key-prefix/environment validation is the sandbox/production separation authority, and the response surfaces the active environment.
+- Companion (iOS) device-sync routes under `/api/device-sync/companion/**` normally authenticate with a Privy identity token in `Authorization: Bearer` (no cookie fallback, so no browser ambient authority or CSRF surface). The Messages enrollment route follows that rule, then mints a 24-hour Messages-only bearer; the revoke and proof-action routes are the only companion exceptions that accept that derived scope. The one pre-login exception, `POST /api/device-sync/companion/auth-diagnostics`, accepts only an allowlisted, size-bounded failure envelope containing app-owned categories and an optional Murph-recognized Privy auth machine code; unsupported provider codes become `null`. It writes one structured hosted warning, has no database or object-storage sink, and must never retain or log raw provider prose, email, phone, OTP, tokens, authorization headers, member/user ids, or health data. Treat its telemetry as spoofable rather than audit evidence; a bundled mobile secret is not an attestation boundary because it can be extracted and replayed. Production keeps this route hidden unless `MURPH_COMPANION_AUTH_DIAGNOSTICS_ENABLED=1`, and the production build must use explicit Vercel API credentials to prove the enabled WAF rule is the first active custom rule, matches only this exact path, and caps requests at 30 per minute per IP with a fixed window. The Junction SDK sign-in token authenticated routes mint is short-lived, returned exactly once, and must never be logged or persisted. Only explicit hosted `connect` authority may run the account-ensure step, which must reuse the shared device-sync `upsertConnection` external-account identity discipline so SDK and Junction Link flows always share one `device_connection`; passive `resume` and omitted-intent reconciliation may not ensure or reactivate a row. The junction client's API-key-prefix/environment validation is the sandbox/production separation authority, and the response surfaces the active environment.
 - Messages mini-app credentials are random, member-scoped, and persisted only as Messages-domain-separated lookup hashes in one deterministic Messages-owned row per member in the existing short-lived session table; never persist the raw-token hash that the historical unscoped device-agent reader used. Before enrollment reads identity or authority, it must finish validating the bounded request body. Credential issuance must then lock the hosted member and active sponsorship rows, re-check active access and current launch consent, and atomically rotate that one feature-owned row in the same transaction so repeated enrollment stays bounded and account deletion serializes without post-deletion recreation. Every rotation mints a fresh bearer, replaces the lookup hash and expiry, clears revocation/replacement state, and leaves ordinary device-agent rows untouched. Explicit revocation and expired-session cleanup must compare-and-set on the exact authenticated lookup hash as well as the stable row id, so a stale credential generation cannot revoke its replacement. Device-agent routes must also require their distinct `hbds_agent_` prefix before hashing so an `hbds_imessage_` credential can never export wearable credentials across current operation or reader rollback. Re-check active hosted access and current launch consent on every proof action, while keeping authenticated self-revocation available after access or consent is lost so cleanup cannot be blocked. Keep the message URL capability-less, never link Privy into the extension, and never copy, persist, log, or share a raw Privy access, refresh, or identity token. The containing app must explicitly address the shared Keychain group for the derived credential while keeping each target's private group first so Privy's default Keychain storage remains private.
 - The authenticated companion WHOOP overnight-PRV route accepts only the strict,
   size-bounded six-field `murph.companion.overnight-prv-rmssd.v1` envelope:
   `schema`, `methodVersion`, `nightDate`, `rmssdMs`, `completedWindowCount`,
-  and `acceptedWindowCount`. Unknown fields fail.
+  and `acceptedWindowCount`. Unknown fields fail, and the only method is
+  `prv-rmssd-5m-mean-scheduled-0000-0800-local-v1`.
   The route must never accept, log, persist, or echo exact capture timestamps,
   duration, timezone offset, coverage milliseconds, R-R intervals, raw BLE
   bytes, packet timestamps, heart-rate samples, per-window values, device
   identity, Apple Health values, or WHOOP account data. The phone alone enforces
   its per-window interval coverage policy; the server validates only the
-  compact nightly contract, including at least 48 accepted windows and at
-  least 50% acceptance among completed windows, with completed windows capped
-  at 192.
+  compact nightly contract, including 84...108 completed windows, at least 48
+  accepted windows, and at least 50% acceptance among completed windows.
+
+  After explicit enrollment, iOS continuously subscribes to the band and owns
+  the fixed `00:00–08:00` local schedule. It freezes the schedule's timezone
+  rules for each night. A fully traversed occurrence is bounded to 84...108
+  completed five-minute windows: typically 84, 96, or 108, with intermediate
+  counts such as 90 or 102 when the zone shifts by half an hour. The backend
+  owns no capture scheduler. The only health-derived local persistence allowed is one
+  schema-versioned, OS-protected scalar checkpoint for the current scheduled
+  night plus at most three already-derived strict-envelope outbox entries. The
+  checkpoint is limited to frozen schedule/night identity, window position,
+  completed/accepted counts, and accepted-RMSSD sum. The exact app-scoped
+  CoreBluetooth peripheral UUID may persist in the same protected local state
+  solely to restore the enrolled band, but it never uploads or enters logs. Raw
+  intervals, packets, heart-rate samples, partial-window state, per-window
+  values, WHOOP account identity, and every other band identifier remain
+  memory-only; the current partial window is discarded across a process gap.
+  Exact capture times, duration, timezone details, and coverage are neither
+  uploaded nor logged.
+
+  The local Connect WHOOP control enrolls only the CoreBluetooth band and must
+  not send hosted `connectionIntent: "connect"`. Known same-member passive SDK
+  repair sends `resume`. A fresh or unproven install omits intent so durable
+  server state decides: exactly one established row resumes, zero provider rows
+  may establish the first lane, and terminal or ambiguous state rejects without
+  mutation. Only a future visible hosted-health/Junction Reconnect action may
+  send `connect` and create or reactivate the hosted lane. Data ingress and
+  outbox retry may not. Local band disconnect or sign-out disables BLE resume
+  and clears the local enrollment, checkpoint, peripheral UUID, and unsent
+  outbox after cleanup without silently changing hosted connection state.
+  Force-quit prevents iOS from relaunching the app for BLE until the member
+  opens Murph again; a single local watchdog notification may be continually
+  postponed while callbacks are healthy and fire only when reopening is needed.
+  That notification must contain no health value, band identifier, or account
+  identifier.
 
   The route reuses one authenticated, consent-gated, active member-owned
   Junction connection and never establishes, recreates, or reactivates one from
@@ -104,10 +138,20 @@ Last verified: 2026-07-14
   under its single selected daily `hrv-rmssd` owner. Deploy the
   runtime consumer first with immediate container rollout, runner-bundle
   fingerprint proof, and a compact import smoke; deploy web second and release
-  iOS last. Before iOS distribution, require a signed physical-iPhone WHOOP
-  5/MG overnight capture-to-query test, network/log proof that forbidden raw
-  data is absent, and paired-ECG validation. Roll back in reverse order, draining
-  staged work before runtime support is removed.
+  iOS last. Web must understand `resume`, omitted-intent server inference, and
+  the future explicit `connect` authority before the automatic client ships.
+  Direct-BLE enrollment sends no hosted lifecycle intent. Separately, known
+  same-member passive SDK repair uses `resume`, while a fresh/unproven install
+  omits intent and may establish only when zero provider rows exist. Terminal
+  or ambiguous state rejects, and omission must never reverse a durable
+  disconnect. Before iOS distribution,
+  require a signed physical-iPhone
+  continuous-stream and overnight WHOOP 5/MG capture-to-query test, including
+  background, reconnect, force-quit-watchdog, DST, and timezone-change cases;
+  network/log proof that forbidden raw data is absent; and paired-ECG
+  validation. Once scheduled-method clients ship, keep web and runtime support
+  until those clients and all staged envelopes have drained. Roll back in
+  reverse order, draining staged work before runtime support is removed.
 - Direct Strava webhook POST delivery must fail closed unless the provider-owned signing secret verifies the `X-Strava-Signature` timestamp and HMAC over the raw body. The Strava GET verify token is only a subscription-challenge/admin secret, not POST delivery authentication. Junction-backed device sync uses Junction's own webhook signature boundary and must not depend on direct Strava webhook trust.
 - Hosted Linq first-contact admission is a web-owned OpenAI egress path for unknown signup-link candidates only. Keep `HOSTED_ONBOARDING_LINQ_FIRST_CONTACT_ADMISSION_OPENAI_API_KEY` or the fallback `OPENAI_API_KEY` in web environment configuration only. The approved classifier input is bounded first-contact text plus sparse contact-kind/part-type metadata and a fixed `imessage`/`sms`/`rcs`/`unknown` service enum; do not add member ids, raw provider payloads, routing secrets, invite codes, mailbox bodies, transcripts, contact lookup keys, attachments, or prior conversation context. Do not persist classifier prompts, raw responses, model rationales, provider response bodies, or raw first-contact message text. The legacy nullable rejected-message-text column is retained only as an ignored deploy-skew compatibility column during the expand/contract rollout, and the migration scrubs stored values rather than dropping the column under old app code. Persist only the event-id keyed terminal allow/block decision with confidence/source so replay and concurrency observe the same admission result, and keep that decision write duplicate-safe by event id without relying on caught unique-constraint errors inside open transactions. Logs may include only sanitized confidence/source/failure metadata, safe bounded provider error code/type/message/request-id-presence, and event id suffixes. When enforcement is enabled, textless deterministic blocks, explicit classifier blocks, OpenAI refusal, content-filter outcomes, and first-contact budget exhaustion must be acknowledged as blocked without member creation, invite creation, reply send, read receipt, wake, or mailbox side effects. Classifier-unavailable states, including missing keys, timeouts, ordinary non-2xx responses, malformed output, non-completed OpenAI responses, max-output exhaustion, and OpenAI quota or credits exhaustion, intentionally fail open by recording a deterministic allow decision so a legitimate first contact is not permanently dropped.
 - The Cloudflare `runtime/ensure-processing` route accepts exactly two credentials: the Temporal orchestrator's web-callback signature and web's Vercel OIDC identity (the same identity already used by the browser-vault/status/deletion control routes). Authorization dispatches on the credential the caller presented and never falls through a failed signature to OIDC or vice versa. The web direct wake is a Linq-only post-Temporal latency hint, carries no message payload, mints diagnostics-only `web-ingress-` attempt ids, and grants web no authority it did not already exercise through the Temporal signal; the `triggeredByWebDirect` diagnostic is derived from the authorizing credential, never from caller-supplied fields.

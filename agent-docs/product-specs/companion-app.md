@@ -36,24 +36,40 @@ generic `hrv` or biomarker alias. These series must never aggregate together.
 
 An internal 2026-07-10 hardware spike proved the private WHOOP 5/MG BLE
 pulse-interval transport with Heart Rate Broadcast off. The beta calculator
-extends that transport into a user-started overnight session: it processes
-non-overlapping five-minute windows in constant memory, accepts a window only
-with 240–300 seconds of pair-supported interval coverage, and takes the
-equal-weight mean of accepted window RMSSDs. At finish it publishes only when
-at least 48 windows were accepted and at least half of completed windows
-qualified. The nightly
+extends that transport into a one-time-enrollment, automatic overnight path.
+After the member explicitly connects the band, the app continuously subscribes
+and evaluates a fixed `00:00–08:00` local civil-time window without a nightly
+Start or Finish action. It freezes the timezone rules for each night, so travel
+or a settings change cannot retarget an in-progress or retained occurrence. A
+fully traversed occurrence is bounded to 84...108 five-minute windows:
+typically 84, 96, or 108, with intermediate counts such as 90 or 102 for
+half-hour timezone transitions. It accepts a window only with 240–300 seconds of
+pair-supported interval coverage and takes the equal-weight mean of accepted
+window RMSSDs. It publishes only when at least 48 windows were accepted and at
+least half of completed windows qualified. The nightly
 upload has exactly `schema`, `methodVersion`, `nightDate`, `rmssdMs`,
 `completedWindowCount`, and `acceptedWindowCount`; the completed count covers
 full attempted five-minute windows and the sole accepted method is
-`prv-rmssd-5m-mean-v1`. Raw BLE packets, R-R intervals, packet timestamps,
-exact capture times/duration,
-timezone offset, coverage milliseconds, device identity, and per-window values
-are neither persisted nor uploaded. A BLE disconnect hard-breaks interval
-adjacency and the current window segment; reconnect may continue the same
-user-started session, but no interval or window crosses the gap and the final
-coverage gates decide whether the night qualifies. One non-health band-stream
-cleanup-intent boolean may survive process restoration; intervals, window
-state, and calculated values remain memory-only.
+`prv-rmssd-5m-mean-scheduled-0000-0800-local-v1`. Raw BLE packets, R-R
+intervals, packet timestamps, exact capture times/duration, timezone offset,
+coverage milliseconds, WHOOP account identity, any band identifier, and
+per-window values are never uploaded or logged. A BLE disconnect hard-breaks interval adjacency and the
+current window segment; reconnect may continue the same scheduled night, but no
+interval or window crosses the gap and the final coverage gates decide whether
+the night qualifies.
+
+The only health-derived local persistence is one schema-versioned,
+OS-protected scalar checkpoint for the current scheduled night and an outbox of
+at most three already-derived strict envelopes. The checkpoint contains only
+the frozen schedule/night identity, next window position, completed/accepted
+counts, and accepted-RMSSD sum. The current partial window is discarded after a
+process gap; intervals and per-window results remain memory-only. The exact
+app-scoped CoreBluetooth peripheral UUID may persist beside the checkpoint only
+to restore the enrolled band; it never uploads or enters logs. A single local
+watchdog notification is continually postponed while the stream is healthy and
+reminds the member to reopen Murph if callbacks stop. Leaving the app
+backgrounded or the phone locked is sufficient; force-quitting prevents iOS
+from relaunching the BLE app until the member opens Murph again.
 
 Backend admission accepts one strict envelope per active connection and
 `nightDate`, retains a sparse hashed replay receipt for 30 days (at most 64 per
@@ -65,6 +81,26 @@ proprietary overnight HRV or Recovery algorithm and is not clinical ECG HRV.
 Distribution remains gated on written WHOOP authorization plus legal/privacy
 approval, a signed-iPhone overnight capture-to-query test, forbidden-data
 network/log proof, and paired-ECG validation.
+
+Local band enrollment and hosted connection lifecycle are separate. The visible
+one-time Connect WHOOP action enrolls only the CoreBluetooth band and does not
+send hosted `connectionIntent: "connect"`. A known same-member passive SDK
+repair sends `connectionIntent: "resume"`. A fresh or unproven installation
+omits intent and lets durable server state decide: exactly one established row
+resumes, zero provider rows may establish the first lane, and terminal or
+ambiguous state rejects without mutation. Only a future visible
+hosted-health/Junction Reconnect action may send `connect` and create/reactivate
+that lane. Data upload and local outbox retry never establish a lane. Local
+band disconnect or sign-out disables BLE resume and clears local enrollment,
+checkpoint, peripheral UUID, and outbox state after band cleanup without
+silently changing hosted connection state.
+
+Ship the scheduled-method runtime/Cloudflare consumer first with immediate
+container rollout, fingerprint proof, and a compact import smoke; ship web
+acceptance plus resume/omitted-intent/future-connect authority second;
+distribute iOS last. Once iOS
+can emit the scheduled method, web and runtime support remain the rollback floor
+until those clients and all staged envelopes drain. Roll back in reverse order.
 
 A thin iOS companion app that reads Apple Health and feeds the existing
 Junction pipeline removes WHOOP's veto from the critical path, covers every
@@ -146,12 +182,16 @@ from day one. Constraints that keep this safe and maintainable:
    finite ranges, and upload bounded batches. It never uploads whole
    metadata dictionaries, raw HealthKit identifiers, or an arbitrary metric
    name/unit/event schema.
-6. **Direct BLE reduces locally.** Overnight WHOOP pulse intervals exist only
-   transiently inside the current five-minute calculation window. The app
-   persists neither intervals nor per-window values and uploads one compact
-   nightly summary only after the method's coverage gates pass. One non-health
-   cleanup-intent boolean may persist so a restored process can stop an orphaned
-   band stream without restoring health calculation state.
+6. **Direct BLE reduces locally.** One explicit enrollment keeps the WHOOP
+   subscription active and automatically evaluates the fixed local
+   `00:00–08:00` window. Pulse intervals exist only transiently inside the
+   current five-minute calculation window. The app persists neither intervals
+   nor per-window values and uploads one compact nightly summary only after the
+   method's coverage gates pass. Restart safety is limited to one protected
+   scalar night checkpoint and three already-derived strict-envelope outbox
+   entries, plus the exact app-scoped CoreBluetooth peripheral UUID needed to
+   restore the enrolled band. That UUID never uploads or enters logs; the
+   backend does not schedule capture.
 
 ## Sync Behavior and Product Constraints
 
@@ -173,6 +213,11 @@ from day one. Constraints that keep this safe and maintainable:
   explicit refresh. It has no independent background observer in this slice;
   Junction background delivery remains responsible for ordinary Apple Health
   categories.
+- Direct WHOOP BLE capture is different from HealthKit background delivery: it
+  depends on the enrolled CoreBluetooth subscription and can continue while
+  Murph is backgrounded or the phone is locked, but iOS will not relaunch it
+  after a member force-quits the app. The local watchdog reminder is the only
+  recovery prompt; there is no nightly Start/Finish UI or backend wake.
 
 ## MVP Scope (v1, App Store reviewable)
 

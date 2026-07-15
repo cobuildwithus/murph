@@ -4,6 +4,7 @@ import { afterEach, beforeAll, beforeEach, describe, expect, it, vi } from "vite
 import {
   serializeHostedExecutionDeviceSyncDirtyPayloadIdentity,
 } from "@murphai/device-syncd/hosted-runtime";
+import { deviceSyncError } from "@murphai/device-syncd/errors";
 
 import { hostedOnboardingError } from "../src/lib/hosted-onboarding/errors";
 import { createBearerRequest, createJsonPostRequest } from "./route-test-helpers";
@@ -165,7 +166,7 @@ function healthMetadataRecord(overrides: Record<string, unknown> = {}) {
 
 const validHrvObservation = {
   schema: "murph.companion.overnight-prv-rmssd.v1",
-  methodVersion: "prv-rmssd-5m-mean-v1",
+  methodVersion: "prv-rmssd-5m-mean-scheduled-0000-0800-local-v1",
   nightDate: "2026-07-10",
   rmssdMs: 52.75,
   completedWindowCount: 96,
@@ -673,6 +674,23 @@ describe("device sync companion routes", () => {
       expect(mocks.createSdkSignInSession).not.toHaveBeenCalled();
     });
 
+    it.each([null, 17, "automatic", "connect "])(
+      "rejects invalid connection intent %j before reaching Junction",
+      async (connectionIntent) => {
+        mockVerifiedPrivyUser();
+
+        const response = await signInTokenRoute.POST(signInTokenRequest({
+          connectionIntent,
+        }));
+
+        expect(response.status).toBe(400);
+        expect(await response.json()).toMatchObject({
+          error: { code: "COMPANION_REQUEST_INVALID" },
+        });
+        expect(mocks.createSdkSignInSession).not.toHaveBeenCalled();
+      },
+    );
+
     it("rejects requests with an invalid bearer token", async () => {
       mocks.verifyIdentityToken.mockRejectedValue(new Error("invalid token"));
 
@@ -741,6 +759,7 @@ describe("device sync companion routes", () => {
       const response = await signInTokenRoute.POST(signInTokenRequest({
         appInstallationId: "install-1",
         appVersion: "1.0.0",
+        connectionIntent: "connect",
         platform: "ios",
         sdkVersions: { vital: "1.8.8" },
       }));
@@ -750,11 +769,56 @@ describe("device sync companion routes", () => {
         environment: "sandbox",
         signInToken: SIGN_IN_TOKEN,
       });
-      expect(mocks.createSdkSignInSession).toHaveBeenCalledWith("member_1", "junction");
+      expect(mocks.createSdkSignInSession).toHaveBeenCalledWith(
+        "member_1",
+        "junction",
+        "connect",
+      );
       expect(mocks.assertHostedLaunchRequiredConsentGranted).toHaveBeenCalledWith({
         memberId: "member_1",
         prisma: mocks.prismaClient,
       });
+    });
+
+    it("forwards passive session repair as resume intent", async () => {
+      mockVerifiedPrivyUser();
+
+      const response = await signInTokenRoute.POST(signInTokenRequest({
+        connectionIntent: "resume",
+        platform: "ios",
+      }));
+
+      expect(response.status).toBe(200);
+      expect(mocks.createSdkSignInSession).toHaveBeenCalledWith(
+        "member_1",
+        "junction",
+        "resume",
+      );
+    });
+
+    it("returns a typed reconnect requirement for terminal server state", async () => {
+      mockVerifiedPrivyUser();
+      const warn = vi.spyOn(console, "warn").mockImplementation(() => {});
+      mocks.createSdkSignInSession.mockRejectedValueOnce(deviceSyncError({
+        code: "SDK_SIGN_IN_RECONNECT_REQUIRED",
+        message: "Reconnect the device-sync provider before resuming SDK sign-in.",
+        retryable: false,
+        httpStatus: 409,
+      }));
+
+      const response = await signInTokenRoute.POST(signInTokenRequest({
+        connectionIntent: "resume",
+      }));
+
+      expect(response.status).toBe(409);
+      expect(await response.json()).toEqual({
+        error: {
+          code: "SDK_SIGN_IN_RECONNECT_REQUIRED",
+          message: "Reconnect the device-sync provider before resuming SDK sign-in.",
+          retryable: false,
+        },
+      });
+      warn.mockRestore();
     });
 
     it("accepts an empty request body", async () => {
@@ -767,6 +831,11 @@ describe("device sync companion routes", () => {
         environment: "sandbox",
         signInToken: SIGN_IN_TOKEN,
       });
+      expect(mocks.createSdkSignInSession).toHaveBeenCalledWith(
+        "member_1",
+        "junction",
+        null,
+      );
     });
 
     it("never passes the sign-in token to any logger call", async () => {
