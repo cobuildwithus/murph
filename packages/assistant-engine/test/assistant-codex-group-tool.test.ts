@@ -125,6 +125,11 @@ describe("murph.group dynamic tool", () => {
       .toContain("continue with create_join_link or post_join_offer");
     expect(MURPH_GROUP_TOOL.description)
       .toContain("instead of claiming that an external workspace-linking step is required");
+    expect(MURPH_GROUP_TOOL.description)
+      .toContain("When these actions are available for the current connected group-chat turn");
+    expect(MURPH_GROUP_TOOL.description)
+      .toContain("whether each participant already uses Murph");
+    expect(MURPH_GROUP_TOOL.description).not.toContain("their own Murph");
   });
 
   it("parses the chat-scoped actions without accepting a model-supplied thread target", () => {
