@@ -33,6 +33,25 @@ test('message formatting renders simple emphasis spans with UTF-16 ranges', () =
   })
 })
 
+test('message formatting renders bold spans up to the doubled length limit', () => {
+  const acceptedContent = 'a'.repeat(320)
+  const rejectedContent = 'a'.repeat(321)
+
+  assert.deepEqual(renderMarkdownMessageText(`**${acceptedContent}**`), {
+    decorations: [
+      {
+        range: [0, 320],
+        style: 'bold',
+      },
+    ],
+    text: acceptedContent,
+  })
+  assert.deepEqual(renderMarkdownMessageText(`**${rejectedContent}**`), {
+    decorations: [],
+    text: `**${rejectedContent}**`,
+  })
+})
+
 test('message formatting renders star italics and underline spans', () => {
   assert.deepEqual(
     renderMarkdownMessageText(
