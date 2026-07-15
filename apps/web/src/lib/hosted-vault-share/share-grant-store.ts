@@ -9,6 +9,7 @@ import {
   buildHostedVaultShareRevokeDedupeKey,
   HOSTED_VAULT_SHARE_REVOKE_PAYLOAD_SCHEMA,
   parseHostedVaultShareProjectionScope,
+  parseHostedVaultShareProjectionScopeKey,
   type HostedVaultShareProjectionScope,
 } from "@murphai/hosted-execution/vault-share";
 
@@ -163,8 +164,6 @@ export async function revokeHostedVaultSharesWithCleanupTx(input: {
       destinationMemberId: true,
       grantorMemberId: true,
       id: true,
-      projectionKind: true,
-      projectionScopeJson: true,
       projectionScopeKey: true,
     },
     where: {
@@ -207,8 +206,6 @@ export async function revokeOutgoingHostedVaultSharesForMemberDeletionTx(input: 
       destinationMemberId: true,
       grantorMemberId: true,
       id: true,
-      projectionKind: true,
-      projectionScopeJson: true,
       projectionScopeKey: true,
     },
     where: {
@@ -241,8 +238,6 @@ async function revokeHostedVaultShareRowsTx(input: {
     destinationMemberId: string;
     grantorMemberId: string;
     id: string;
-    projectionKind: string;
-    projectionScopeJson: unknown;
     projectionScopeKey: string;
     revokedAt: Date;
   }>>`
@@ -257,8 +252,6 @@ async function revokeHostedVaultShareRowsTx(input: {
       destination_member_id AS "destinationMemberId",
       grantor_member_id AS "grantorMemberId",
       id,
-      projection_kind AS "projectionKind",
-      projection_scope_json AS "projectionScopeJson",
       projection_scope_key AS "projectionScopeKey",
       revoked_at AS "revokedAt"
   `;
@@ -307,25 +300,22 @@ function normalizeRevocableHostedVaultShareRows(rows: readonly {
   destinationMemberId: string;
   grantorMemberId: string;
   id: string;
-  projectionKind: string;
-  projectionScopeJson: unknown;
   projectionScopeKey: string;
 }[]): RevocableHostedVaultShare[] {
-  return rows.flatMap((row) => {
-    const projectionScope = parseHostedVaultShareRowProjectionScope(row);
-    if (!projectionScope) {
-      return [];
-    }
+  return rows.map((row) => {
+    const projectionScope = assertValidHostedVaultShareProjectionScopeKey(
+      row.projectionScopeKey,
+    );
     const projectionScopeKey = buildHostedVaultShareProjectionScopeKey(projectionScope);
 
-    return [{
+    return {
       destinationMemberId: row.destinationMemberId,
       grantorMemberId: row.grantorMemberId,
       id: row.id,
       projectionKind: projectionScope.projectionKind,
       projectionScope,
       projectionScopeKey,
-    }];
+    };
   });
 }
 
@@ -333,19 +323,16 @@ function normalizeRevokedHostedVaultShareRows(rows: readonly {
   destinationMemberId: string;
   grantorMemberId: string;
   id: string;
-  projectionKind: string;
-  projectionScopeJson: unknown;
   projectionScopeKey: string;
   revokedAt: Date;
 }[]): RevokedHostedVaultShare[] {
-  return rows.flatMap((row) => {
-    const projectionScope = parseHostedVaultShareRowProjectionScope(row);
-    if (!projectionScope) {
-      return [];
-    }
+  return rows.map((row) => {
+    const projectionScope = assertValidHostedVaultShareProjectionScopeKey(
+      row.projectionScopeKey,
+    );
     const projectionScopeKey = buildHostedVaultShareProjectionScopeKey(projectionScope);
 
-    return [{
+    return {
       destinationMemberId: row.destinationMemberId,
       grantorMemberId: row.grantorMemberId,
       id: row.id,
@@ -353,7 +340,7 @@ function normalizeRevokedHostedVaultShareRows(rows: readonly {
       projectionScope,
       projectionScopeKey,
       revokedAt: row.revokedAt,
-    }];
+    };
   });
 }
 
@@ -430,6 +417,24 @@ function parseHostedVaultShareRowProjectionScope(row: {
     return scope;
   } catch {
     return null;
+  }
+}
+
+function assertValidHostedVaultShareProjectionScopeKey(
+  projectionScopeKey: string,
+): HostedVaultShareProjectionScope {
+  try {
+    return parseHostedVaultShareProjectionScopeKey(
+      projectionScopeKey,
+      "Hosted vault-share row projection scope key",
+    );
+  } catch {
+    throw hostedOnboardingError({
+      code: "HOSTED_VAULT_SHARE_STATE_INVALID",
+      httpStatus: 500,
+      message: "Stored vault-share state is invalid.",
+      retryable: false,
+    });
   }
 }
 

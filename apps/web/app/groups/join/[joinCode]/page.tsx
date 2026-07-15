@@ -3,6 +3,7 @@ import Link from "next/link";
 
 import {
   GroupJoinAcceptForm,
+  GroupJoinLeaveButton,
   GroupJoinLegalConsentGate,
   GroupJoinSignInButton,
 } from "@/src/components/hosted-groups/group-join-client";
@@ -152,17 +153,24 @@ function renderGroupJoin(input: {
         className="flex flex-col"
         role="region"
       >
-        {input.authenticated && !input.launchConsentStatus?.launchGranted ? (
-          <GroupJoinLegalConsentGate initialStatus={input.launchConsentStatus} />
-        ) : input.authenticated ? (
-          <GroupJoinAcceptForm
-            activeVaultShareProjectionScopes={view.activeVaultShareProjectionScopes}
-            alreadyActiveMember={alreadyActiveMember}
-            groupName={groupName}
-            joinCode={input.joinCode}
-            permissions={view.requestedVaultShareProjections}
-            postJoinDestination={alreadyActiveMember ? "/home" : input.postJoinDestination}
-          />
+        {input.authenticated ? (
+          <div className="flex flex-col gap-2">
+            {!input.launchConsentStatus?.launchGranted ? (
+              <GroupJoinLegalConsentGate initialStatus={input.launchConsentStatus} />
+            ) : (
+              <GroupJoinAcceptForm
+                activeVaultShareProjectionScopes={view.activeVaultShareProjectionScopes}
+                alreadyActiveMember={alreadyActiveMember}
+                groupName={groupName}
+                joinCode={input.joinCode}
+                permissions={view.requestedVaultShareProjections}
+                postJoinDestination={alreadyActiveMember ? "/home" : input.postJoinDestination}
+              />
+            )}
+            {view.viewerCanLeave ? (
+              <GroupJoinLeaveButton groupName={groupName} joinCode={input.joinCode} />
+            ) : null}
+          </div>
         ) : (
           <div className="flex flex-col gap-2">
             <GroupJoinSignInButton />

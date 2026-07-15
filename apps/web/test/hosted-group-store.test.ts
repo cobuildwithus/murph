@@ -56,6 +56,7 @@ import {
   createHostedGroupJoinLinkForOwnedThreadContainerTx,
   HOSTED_GROUP_VAULT_SHARE_DESTINATION_LIMIT_PER_PROJECTION,
   HOSTED_GROUP_VAULT_SHARE_GRANT_LIMIT_PER_GRANTOR_PROJECTION,
+  leaveHostedGroupMemberTx,
   readHostedGroupJoinView,
   readHostedGroupMembershipsForMember,
   recordHostedGroupJoinOfferTx,
@@ -1509,6 +1510,250 @@ function buildStatefulJoinOfferTx(): PrismaClient & {
   });
 }
 
+describe("readHostedGroupJoinView leave affordance", () => {
+  beforeEach(() => {
+    vi.clearAllMocks();
+    mocks.readActiveHostedVaultShareProjectionScopes.mockResolvedValue([]);
+  });
+
+  it.each([
+    ["member_self", "member_owner", [{ id: "membership_1" }], true, "active"],
+    ["member_owner", "member_owner", [{ id: "membership_1" }], false, "active"],
+    ["member_nonmember", "member_owner", [], false, null],
+  ] as const)(
+    "derives viewerCanLeave from canonical ownership for %s",
+    async (memberId, ownerMemberId, members, viewerCanLeave, viewerMembershipStatus) => {
+      const prisma = createPrismaStub({
+        hostedGroup: {
+          findUnique: vi.fn(async () => ({
+            _count: { members: 2 },
+            displayName: "Sunday Sleep Crew",
+            id: "group_1",
+            joinPolicyJson: JOIN_POLICY,
+            kind: "friends",
+            members,
+            ownerMemberId,
+            runtimeMemberId: "member_group_runtime",
+          })),
+        },
+      });
+
+      await expect(readHostedGroupJoinView({
+        joinCode: "join_1",
+        memberId,
+        prisma,
+      })).resolves.toMatchObject({
+        viewerCanLeave,
+        viewerMembershipStatus,
+      });
+    },
+  );
+});
+
+function buildLeaveTx(input?: {
+  currentMembershipId?: string | null;
+  groupExists?: boolean;
+  ownerMemberId?: string;
+  runtimeMemberId?: string | null;
+  selectedMembershipId?: string | null;
+  selectedMembershipMemberId?: string;
+}) {
+  const groupExists = input?.groupExists !== false;
+  const hostedGroupFindUnique = vi.fn(async (args: {
+    where: { id?: string; joinCode?: string };
+  }) => {
+    if (args.where.joinCode) {
+      return groupExists ? { id: "group_1" } : null;
+    }
+    if (args.where.id) {
+      return groupExists
+        ? {
+            id: "group_1",
+            ownerMemberId: input?.ownerMemberId ?? "member_owner",
+            runtimeMemberId: input?.runtimeMemberId === undefined
+              ? "member_group_runtime"
+              : input.runtimeMemberId,
+          }
+        : null;
+    }
+    return null;
+  });
+  const hostedGroupMemberFindUnique = vi.fn(async (args: {
+    where: {
+      groupId_memberId?: { groupId: string; memberId: string };
+      id?: string;
+    };
+  }) => {
+    if (args.where.id) {
+      const selectedMembershipId = input?.selectedMembershipId === undefined
+        ? args.where.id
+        : input.selectedMembershipId;
+      return selectedMembershipId
+        ? {
+            groupId: "group_1",
+            memberId: input?.selectedMembershipMemberId ?? "member_self",
+          }
+        : null;
+    }
+    const currentMembershipId = input?.currentMembershipId === undefined
+      ? "membership_1"
+      : input.currentMembershipId;
+    return currentMembershipId ? { id: currentMembershipId } : null;
+  });
+  const hostedGroupMemberDelete = vi.fn(async () => ({}));
+  const queryRaw = vi.fn(async () => []);
+  const tx = createPrismaStub({
+    $queryRaw: queryRaw,
+    hostedGroup: { findUnique: hostedGroupFindUnique },
+    hostedGroupMember: {
+      delete: hostedGroupMemberDelete,
+      findUnique: hostedGroupMemberFindUnique,
+    },
+  });
+  return {
+    hostedGroupFindUnique,
+    hostedGroupMemberDelete,
+    hostedGroupMemberFindUnique,
+    queryRaw,
+    tx,
+  };
+}
+
+describe("leaveHostedGroupMemberTx", () => {
+  beforeEach(() => {
+    vi.clearAllMocks();
+    mocks.revokeHostedVaultSharesWithCleanupTx.mockResolvedValue({
+      cleanupSignals: [],
+      revokedCount: 0,
+    });
+  });
+
+  it("hard-deletes the selected self-membership and revokes every share atomically", async () => {
+    const leave = buildLeaveTx({ currentMembershipId: "membership_1" });
+    const cleanupSignals = [{
+      mailboxItemId: "mailbox_item_revoke_1",
+      memberId: "member_group_runtime",
+    }];
+    mocks.revokeHostedVaultSharesWithCleanupTx.mockResolvedValueOnce({
+      cleanupSignals,
+      revokedCount: 3,
+    });
+    const now = new Date("2026-07-15T12:00:00.000Z");
+
+    await expect(leaveHostedGroupMemberTx({
+      memberId: "member_self",
+      membershipId: "membership_1",
+      now,
+      tx: leave.tx,
+    })).resolves.toEqual({
+      kind: "left",
+      vaultShareCleanupSignals: cleanupSignals,
+    });
+
+    expect(mocks.revokeHostedVaultSharesWithCleanupTx).toHaveBeenCalledWith({
+      destinationMemberId: "member_group_runtime",
+      grantorMemberId: "member_self",
+      now,
+      tx: leave.tx,
+    });
+    expect(leave.hostedGroupMemberDelete).toHaveBeenCalledWith({
+      where: { id: "membership_1" },
+    });
+  });
+
+  it("rejects the canonical owner without revoking shares or deleting membership", async () => {
+    const leave = buildLeaveTx({ ownerMemberId: "member_self" });
+
+    await expect(leaveHostedGroupMemberTx({
+      joinCode: "join_1",
+      memberId: "member_self",
+      now: new Date("2026-07-15T12:00:00.000Z"),
+      tx: leave.tx,
+    })).resolves.toEqual({
+      kind: "owner_cannot_leave",
+      vaultShareCleanupSignals: [],
+    });
+
+    expect(mocks.revokeHostedVaultSharesWithCleanupTx).not.toHaveBeenCalled();
+    expect(leave.hostedGroupMemberDelete).not.toHaveBeenCalled();
+  });
+
+  it("does not let a stale membership selector remove a later rejoin", async () => {
+    const leave = buildLeaveTx({ currentMembershipId: "membership_rejoined" });
+
+    await expect(leaveHostedGroupMemberTx({
+      memberId: "member_self",
+      membershipId: "membership_old",
+      now: new Date("2026-07-15T12:00:00.000Z"),
+      tx: leave.tx,
+    })).resolves.toEqual({
+      kind: "already_left",
+      vaultShareCleanupSignals: [],
+    });
+
+    expect(mocks.revokeHostedVaultSharesWithCleanupTx).not.toHaveBeenCalled();
+    expect(leave.hostedGroupMemberDelete).not.toHaveBeenCalled();
+  });
+
+  it("does not let a callback member select another member's membership", async () => {
+    const leave = buildLeaveTx({ selectedMembershipMemberId: "member_other" });
+
+    await expect(leaveHostedGroupMemberTx({
+      memberId: "member_self",
+      membershipId: "membership_other",
+      now: new Date("2026-07-15T12:00:00.000Z"),
+      tx: leave.tx,
+    })).resolves.toEqual({
+      kind: "already_left",
+      vaultShareCleanupSignals: [],
+    });
+
+    expect(leave.hostedGroupFindUnique).not.toHaveBeenCalled();
+    expect(mocks.revokeHostedVaultSharesWithCleanupTx).not.toHaveBeenCalled();
+    expect(leave.hostedGroupMemberDelete).not.toHaveBeenCalled();
+  });
+
+  it("repairs orphaned shares for an authenticated join-page member", async () => {
+    const leave = buildLeaveTx({ currentMembershipId: null });
+    const cleanupSignals = [{
+      mailboxItemId: "mailbox_item_revoke_1",
+      memberId: "member_group_runtime",
+    }];
+    mocks.revokeHostedVaultSharesWithCleanupTx.mockResolvedValueOnce({
+      cleanupSignals,
+      revokedCount: 1,
+    });
+
+    await expect(leaveHostedGroupMemberTx({
+      joinCode: "join_1",
+      memberId: "member_self",
+      now: new Date("2026-07-15T12:00:00.000Z"),
+      tx: leave.tx,
+    })).resolves.toEqual({
+      kind: "left",
+      vaultShareCleanupSignals: cleanupSignals,
+    });
+
+    expect(leave.hostedGroupMemberDelete).not.toHaveBeenCalled();
+  });
+
+  it("is idempotent when both membership and shares are already absent", async () => {
+    const leave = buildLeaveTx({ currentMembershipId: null });
+
+    await expect(leaveHostedGroupMemberTx({
+      joinCode: "join_1",
+      memberId: "member_self",
+      now: new Date("2026-07-15T12:00:00.000Z"),
+      tx: leave.tx,
+    })).resolves.toEqual({
+      kind: "already_left",
+      vaultShareCleanupSignals: [],
+    });
+
+    expect(leave.hostedGroupMemberDelete).not.toHaveBeenCalled();
+  });
+});
+
 function configureHostedContactPrivacyKeyringForTest(input: {
   currentVersion: string;
   entries: Record<string, string>;
@@ -1627,6 +1872,7 @@ describe("readHostedGroupMembershipsForMember", () => {
           ],
           kind: "friends",
           memberCount: 7,
+          membershipId: "membership_running",
           ownerJoinCode: null,
           requestedVaultShareProjectionScopes: [
             { projectionKind: "sleep-times.v0" },
@@ -1639,6 +1885,7 @@ describe("readHostedGroupMembershipsForMember", () => {
           grantedVaultShareProjectionScopes: [{ projectionKind: "group-email.v0" }],
           kind: "family",
           memberCount: 4,
+          membershipId: "membership_family",
           ownerJoinCode: "join_family",
           requestedVaultShareProjectionScopes: [{ projectionKind: "group-email.v0" }],
           role: "owner",

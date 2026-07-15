@@ -15500,6 +15500,7 @@ describe('steered final segments', () => {
           ],
           kind: 'friends',
           memberCount: 4,
+          membershipId: 'hgm_current_member',
           permissionsUrl: 'https://example.test/groups/join/sentinel',
           requestedVaultShareProjectionScopes: [
             { projectionKind: 'hrv-days.v0' as const },

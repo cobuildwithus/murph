@@ -247,6 +247,60 @@ export function GroupJoinAcceptForm(props: {
   );
 }
 
+export function GroupJoinLeaveButton(props: {
+  groupName: string;
+  joinCode: string;
+}) {
+  const router = useRouter();
+  const [submitting, setSubmitting] = useState(false);
+  const [errorMessage, setErrorMessage] = useState<string | null>(null);
+
+  async function leaveGroup() {
+    const confirmed = window.confirm(
+      `Leave ${props.groupName}? This ends your Murph membership and future sharing. `
+      + "Murph queues its shared copies for cleanup, but this won't remove you from "
+      + "the iMessage chat or erase past messages, provider history, backups, or "
+      + "copies already held outside Murph.",
+    );
+    if (!confirmed) {
+      return;
+    }
+
+    setErrorMessage(null);
+    setSubmitting(true);
+    try {
+      await requestHostedOnboardingJson({
+        method: "POST",
+        url: `/api/groups/join/${encodeURIComponent(props.joinCode)}/leave`,
+      });
+      router.push("/home");
+    } catch (error) {
+      setSubmitting(false);
+      setErrorMessage(toErrorMessage(error, "Could not leave this group right now."));
+    }
+  }
+
+  return (
+    <div className="flex flex-col items-center gap-1">
+      <Button
+        type="button"
+        size="lg"
+        variant="link"
+        onClick={() => void leaveGroup()}
+        disabled={submitting}
+        className="w-full text-destructive hover:text-destructive"
+      >
+        {submitting ? "Leaving..." : "Leave group"}
+      </Button>
+      {errorMessage ? (
+        <p role="alert" className="text-center text-sm text-destructive [overflow-wrap:anywhere]">
+          {errorMessage}
+        </p>
+      ) : null}
+    </div>
+  );
+}
+
 function readCurrentGroupJoinPath(): string {
   if (typeof window === "undefined") {
     return "/home";

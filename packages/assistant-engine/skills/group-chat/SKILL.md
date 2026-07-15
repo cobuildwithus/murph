@@ -41,6 +41,31 @@ permission snapshot; it does not make an existing member redo membership or
 their other grants. Use `create_join_link` when the room explicitly asks for a
 standalone link, not as the default for an additive permission.
 
+## Leaving a hosted group
+
+Do not leave a membership from inside the group room or treat the visible
+sender as private-account authority. If someone asks here to leave the Murph
+group, tell them to ask Murph in their private one-to-one conversation. If they
+already have the group's join page, they can also manage their own membership
+there; do not create, reconstruct, or reveal a reusable join URL for an
+ordinary member.
+
+In the member's private Murph conversation, act only on that member's explicit
+request. Call `murph.group action="list_memberships"` first, match the group
+they chose, and call `action="leave_membership"` only with the exact nonempty
+`membershipId` returned in that result. Never guess an id, accept one supplied
+by the user, target a group by its name alone, or remove someone else. If the
+chosen result has no `membershipId`, say that leaving through chat is
+temporarily unavailable and mention the existing join page only when the
+member already has its link.
+
+Report the tool result exactly. `left` means their Murph group membership and
+future sharing ended. It does not remove them from the iMessage chat or erase
+historical messages, provider history, backups, or copies already held by
+other people. `already_left` means there was no current membership to remove.
+For `owner_cannot_leave`, explain that the group's owner cannot leave their own
+group. Never claim success after `unavailable`.
+
 ## The decision ladder
 
 Run this on every inbound group message, top to bottom, and take the first

@@ -2,7 +2,7 @@
 
 Status: Implemented
 
-Last verified: 2026-07-10
+Last verified: 2026-07-15
 
 ## User outcome
 
@@ -31,11 +31,17 @@ The same link supports both initial join and later sharing changes. It is reusab
 
 `apps/web` remains the only owner of hosted group membership and grant state:
 
-- `HostedGroupMember` proves the callback-authenticated member belongs to a group.
+- `HostedGroupMember` proves the callback-authenticated member belongs to a group
+  and supplies the opaque selector for leaving that exact membership.
 - `HostedGroup.joinPolicyJson` supplies requested permission scopes.
 - active `HostedVaultShare` rows from that member to the group's runtime supply granted scopes.
 
-The personal tool is read-only and derives its member id from the signed hosted callback. The model cannot choose another member. The result omits the group roster, other member ids, handles, emails, names, and sharing state.
+The personal list derives its member id from the signed hosted callback. The
+model cannot choose another member. Results may include the member's own opaque
+membership ids so private Murph can select one for `leave_membership`; Web
+rechecks that the selector belongs to the callback member before mutation. The
+result omits the group roster, other member ids, handles, emails, names, and
+sharing state.
 
 The hosted runner does not create a canonical membership copy in the personal vault or assistant runtime. Each call reads current web-owned truth. The response may remain in normal provider-native thread continuity and its referenced encrypted workspace snapshot; do not clear the provider session merely because the read is private.
 
@@ -43,13 +49,49 @@ The hosted runner does not create a canonical membership copy in the personal va
 
 Personal visibility extends the existing `murph.group` dynamic tool with `action="list_memberships"`. This keeps one hosted group control boundary and avoids a second API route or state owner.
 
-Permission changes stay on the existing authenticated join page for members who already possess the owner-authorized link. Reacting in a personal direct-message thread to change a group permission is deliberately out of scope: it would require a new message-bound authorization and irreversible-effect path. Existing server-owned reactions inside a route-bound group chat remain unchanged.
+Permission changes stay on the existing authenticated join page for members who already possess the owner-authorized link. Private Murph's only membership mutation is self-leave, selected from its current Web-owned list and bound to the signed callback member. Reacting in a personal direct-message thread to change a group permission remains deliberately out of scope. Existing server-owned reactions inside a route-bound group chat remain unchanged.
+
+### Leaving a membership
+
+A non-owner may leave one of their hosted groups by asking their private Murph
+or by using that group's join page while authenticated. Private Murph first
+reads the member's own memberships, then calls `leave_membership` with the
+opaque membership id returned for the selected group. The signed callback is
+the actor authority; the id is only a selector, and a foreign or stale id cannot
+affect another member. The existing join page instead binds the actor to the app
+session and the group to the link already being viewed.
+
+Web commits either path as one transaction: it revokes every active share from
+that member to the group runtime, appends the existing durable projection
+cleanup envelopes, and deletes the membership row. The canonical owner cannot
+leave. Repeating a completed leave is safe, and a later explicit join creates a
+new membership. The leave mutation itself is not gated by launch consent,
+suspension status, or billing/runtime access. Asking private Murph still depends
+on that existing runtime being reachable, and the join-page fallback requires
+an existing authenticated app session; neither surface introduces a new
+reauthentication or inactive-message path.
+
+The confirmation must describe the boundary precisely. Murph membership and
+future sharing end, and Murph-owned projected copies are queued for cleanup.
+This does not remove the person from the iMessage chat or erase historical
+messages, provider copies, backups, or copies already shared outside Murph. A
+provider output already accepted before departure can still arrive once.
+Because membership remains row-presence truth, an old affirmative join reaction
+that the existing system later accepts can create a fresh membership after a
+leave. Fencing that provider replay would require the lifecycle/epoch machinery
+deliberately excluded from this minimal behavior.
 
 ## Deployment compatibility
 
-The response contract widens across the hosted runner and web control plane. Deploy the Cloudflare worker and runner bundle first, with immediate container rollout and convergence proof, then deploy web. Old web never emits `list_memberships`; updated web must not emit it to a warm runner whose strict parser does not recognize the action.
-
-After web deploy, do not roll the runner below the `list_memberships` parser while web can receive calls from updated assistant tool schemas. Roll web back first if the runner must be rolled back.
+This change widens the existing `list_memberships` response and group-tool
+action contract across the hosted runner and Web control plane. Deploy the
+updated Cloudflare worker and runner bundle first, with immediate container
+rollout and convergence proof. Its parser accepts legacy membership summaries
+without an id, and private Murph calls leave only when the selected summary
+includes one. Then deploy Web, which adds ids, the tool handler, and the
+join-page path together. Roll Web back before rolling the runner below the
+widened parser. No persisted wire shape changes, so no compatibility floor
+remains after both planes converge.
 
 ## Direct proof
 
@@ -61,3 +103,6 @@ At minimum, verify these cases:
 4. An existing join code becomes a first-party permission URL for the group owner only; ordinary members and missing codes remain `null`.
 5. Unsupported selector scopes are filtered for older callers.
 6. An inactive caller receives structured unavailability.
+7. A non-owner's private-tool or authenticated join-page departure atomically
+   removes membership, revokes all active grants, and appends cleanup work; an
+   owner attempt makes no change and a repeated departure remains idempotent.

@@ -206,3 +206,63 @@ test("opens the post-auth destination only after membership succeeds", async () 
 
   expect(mocks.routerPush).toHaveBeenCalledWith("/home?initialVisit=true");
 });
+
+test("confirms the provider boundary before leaving and returns home", async () => {
+  mocks.requestHostedOnboardingJson.mockResolvedValueOnce({ ok: true, status: "left" });
+  const { GroupJoinLeaveButton } = await import(
+    "@/src/components/hosted-groups/group-join-client"
+  );
+  const { button, cleanup, window } = await renderClientComponent(
+    createElement(GroupJoinLeaveButton, {
+      groupName: "Sunday Sleep Crew",
+      joinCode: "JOIN123",
+    }),
+  );
+  cleanupRender = cleanup;
+  const confirmLeave = vi.fn(() => true);
+  Object.defineProperty(window, "confirm", {
+    configurable: true,
+    value: confirmLeave,
+  });
+
+  await act(async () => {
+    button.dispatchEvent(new window.Event("click", { bubbles: true }));
+    await Promise.resolve();
+  });
+
+  expect(confirmLeave).toHaveBeenCalledWith(expect.stringMatching(
+    /ends your Murph membership.*queues its shared copies for cleanup.*won't remove you from the iMessage chat.*provider history.*backups.*outside Murph/u,
+  ));
+  expect(mocks.requestHostedOnboardingJson).toHaveBeenCalledWith({
+    method: "POST",
+    url: "/api/groups/join/JOIN123/leave",
+  });
+  expect(mocks.routerPush).toHaveBeenCalledWith("/home");
+});
+
+test("does not leave when the confirmation is cancelled", async () => {
+  const { GroupJoinLeaveButton } = await import(
+    "@/src/components/hosted-groups/group-join-client"
+  );
+  const { button, cleanup, window } = await renderClientComponent(
+    createElement(GroupJoinLeaveButton, {
+      groupName: "Sunday Sleep Crew",
+      joinCode: "JOIN123",
+    }),
+  );
+  cleanupRender = cleanup;
+  const confirmLeave = vi.fn(() => false);
+  Object.defineProperty(window, "confirm", {
+    configurable: true,
+    value: confirmLeave,
+  });
+
+  await act(async () => {
+    button.dispatchEvent(new window.Event("click", { bubbles: true }));
+    await Promise.resolve();
+  });
+
+  expect(confirmLeave).toHaveBeenCalledOnce();
+  expect(mocks.requestHostedOnboardingJson).not.toHaveBeenCalled();
+  expect(mocks.routerPush).not.toHaveBeenCalled();
+});

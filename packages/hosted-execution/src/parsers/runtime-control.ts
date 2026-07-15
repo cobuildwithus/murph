@@ -817,6 +817,23 @@ export function parseHostedRuntimeGroupToolRequest(
     );
     return { action };
   }
+  if (action === "leave_membership") {
+    assertAllowedObjectKeys(
+      record,
+      new Set(["action", "membershipId"]),
+      "Hosted runtime group tool leave_membership request",
+    );
+    const membershipId = requireString(
+      record.membershipId,
+      "Hosted runtime group tool leave_membership request membershipId",
+    ).trim();
+    if (!membershipId) {
+      throw new TypeError(
+        "Hosted runtime group tool leave_membership request membershipId must not be blank.",
+      );
+    }
+    return { action, membershipId };
+  }
   if (action === "update_display_name") {
     assertAllowedObjectKeys(
       record,
@@ -1221,6 +1238,46 @@ export function parseHostedRuntimeGroupToolResponse(
             "Hosted runtime group tool list_memberships unavailableReason",
           ),
           memberships: null,
+        },
+      };
+    }
+  }
+
+  if (action === "leave_membership") {
+    const result = requireObject(
+      record.result,
+      "Hosted runtime group tool leave_membership response result",
+    );
+    const status = requireString(
+      result.status,
+      "Hosted runtime group tool leave_membership response status",
+    );
+    if (
+      status === "left"
+      || status === "already_left"
+      || status === "owner_cannot_leave"
+    ) {
+      assertAllowedObjectKeys(
+        result,
+        new Set(["status"]),
+        "Hosted runtime group tool leave_membership response result",
+      );
+      return { action, result: { status } };
+    }
+    if (status === "unavailable") {
+      assertAllowedObjectKeys(
+        result,
+        new Set(["status", "unavailableReason"]),
+        "Hosted runtime group tool leave_membership unavailable response result",
+      );
+      return {
+        action,
+        result: {
+          status,
+          unavailableReason: requireString(
+            result.unavailableReason,
+            "Hosted runtime group tool leave_membership unavailableReason",
+          ),
         },
       };
     }
@@ -1818,6 +1875,7 @@ function parseHostedRuntimeGroupMembershipSummaries(
         "grantedVaultShareProjectionScopes",
         "kind",
         "memberCount",
+        "membershipId",
         "permissionsUrl",
         "requestedVaultShareProjectionScopes",
         "role",
@@ -1858,6 +1916,10 @@ function parseHostedRuntimeGroupMembershipSummaries(
       grantedVaultShareProjectionScopes,
       kind: requireString(record.kind, `${label} entry kind`),
       memberCount,
+      membershipId: parseHostedRuntimeGroupMembershipId(
+        record.membershipId,
+        `${label} entry membershipId`,
+      ),
       permissionsUrl: readNullableString(
         record.permissionsUrl,
         `${label} entry permissionsUrl`,
@@ -1866,6 +1928,21 @@ function parseHostedRuntimeGroupMembershipSummaries(
       role: requireString(record.role, `${label} entry role`),
     };
   });
+}
+
+function parseHostedRuntimeGroupMembershipId(
+  value: unknown,
+  label: string,
+): string | null {
+  const membershipId = readNullableString(value, label);
+  if (membershipId === null) {
+    return null;
+  }
+  const normalized = membershipId.trim();
+  if (!normalized) {
+    throw new TypeError(`${label} must not be blank.`);
+  }
+  return normalized;
 }
 
 function parseHostedRuntimeGroupProjectionKindArray<
