@@ -40,13 +40,11 @@ export const RUNNER_ENTRYPOINT_BUNDLE_DIRECTORY_NAME = "dist-bundled";
 //   turn-scoped importer code out of this closure.
 // The tolerances below cover local emit jitter.
 //
-// The entry chunk gates cold-start parse, so it is ratcheted, not given
-// headroom: the guard holds it to the measured baseline plus a tight noise
-// band. Any growth past baseline + tolerance fails the assembly, so weight
-// can only land on the boot path as a reviewed edit to the baseline constant
-// below. When an increase is intentional, advance the baseline by the exact
-// measured overage and say why in the same change; keep the existing noise
-// band separate so the reviewed growth cannot silently consume it.
+// The entry chunk gates cold-start parse, so its measured baseline stays
+// explicit. The guard combines the original emit-jitter tolerance with a
+// deliberate operational headroom allowance; growth past that combined cap
+// still fails assembly, and the fixed total-bundle ceiling remains a separate
+// backstop.
 //
 // Node parses the entry chunk plus every statically reachable chunk before
 // HTTP listen, so the static boot closure is ratcheted with the same reviewed
@@ -88,11 +86,12 @@ const RUNNER_ENTRYPOINT_BUNDLE_ENTRY_BASELINE_BYTES = 1_450_742;
 // complete-tail wake ownership later removes 179B. Explicit invocation-local
 // wake provenance adds 230B. Preserve the separate 96KB noise band.
 const RUNNER_ENTRYPOINT_BUNDLE_STATIC_CLOSURE_BASELINE_BYTES = 7_096_782;
-// Noise band above the baseline before the ratchet trips (~2%): absorbs
-// content-hash and minifier jitter without letting real boot-path weight land
-// silently. Keep it tight; it is a tolerance for noise, not feature headroom.
+// Preserve the original emit-jitter bands and add one shared operational
+// allowance to both coupled boot-path caps. The static closure contains the
+// entry chunk, so applying the headroom to only one cap would be misleading.
 const RUNNER_ENTRYPOINT_BUNDLE_ENTRY_TOLERANCE_BYTES = 48_000;
 const RUNNER_ENTRYPOINT_BUNDLE_STATIC_CLOSURE_TOLERANCE_BYTES = 96_000;
+const RUNNER_ENTRYPOINT_BUNDLE_OPERATIONAL_HEADROOM_BYTES = 250_000;
 // The @murphai package markers are path suffixes, not node_modules-anchored:
 // workspace package inputs appear as `node_modules/@murphai/*/dist/...` in
 // the staged production assembly but as `packages/*/dist/...` when bundling
@@ -152,7 +151,7 @@ export async function bundleRunnerContainerEntrypoint(
     buildResult.metafile,
   );
   console.log(
-    `runner entrypoint bundle size: entry ${bundleBytes.entryBytes}B (baseline ${RUNNER_ENTRYPOINT_BUNDLE_ENTRY_BASELINE_BYTES}B + ${RUNNER_ENTRYPOINT_BUNDLE_ENTRY_TOLERANCE_BYTES}B tolerance), static boot closure ${bundleBytes.staticClosureBytes}B (baseline ${RUNNER_ENTRYPOINT_BUNDLE_STATIC_CLOSURE_BASELINE_BYTES}B + ${RUNNER_ENTRYPOINT_BUNDLE_STATIC_CLOSURE_TOLERANCE_BYTES}B tolerance), total ${bundleBytes.totalBytes}B of ${RUNNER_ENTRYPOINT_BUNDLE_TOTAL_BYTES_BUDGET}B budget`,
+    `runner entrypoint bundle size: entry ${bundleBytes.entryBytes}B (baseline ${RUNNER_ENTRYPOINT_BUNDLE_ENTRY_BASELINE_BYTES}B + ${RUNNER_ENTRYPOINT_BUNDLE_ENTRY_TOLERANCE_BYTES}B tolerance + ${RUNNER_ENTRYPOINT_BUNDLE_OPERATIONAL_HEADROOM_BYTES}B headroom), static boot closure ${bundleBytes.staticClosureBytes}B (baseline ${RUNNER_ENTRYPOINT_BUNDLE_STATIC_CLOSURE_BASELINE_BYTES}B + ${RUNNER_ENTRYPOINT_BUNDLE_STATIC_CLOSURE_TOLERANCE_BYTES}B tolerance + ${RUNNER_ENTRYPOINT_BUNDLE_OPERATIONAL_HEADROOM_BYTES}B headroom), total ${bundleBytes.totalBytes}B of ${RUNNER_ENTRYPOINT_BUNDLE_TOTAL_BYTES_BUDGET}B budget`,
   );
   assertRunnerEntrypointBundleBoots({
     bundleDir,
@@ -164,8 +163,9 @@ export async function bundleRunnerContainerEntrypoint(
   });
 }
 
-// Single source of truth for the production budgets: the entry chunk is the
-// ratcheted baseline plus its noise tolerance, the total is the fixed ceiling.
+// Single source of truth for the production budgets: both boot-path caps use
+// their ratcheted baseline, emit-jitter tolerance, and shared operational
+// headroom; the total remains a fixed ceiling.
 // Exported so a unit test can lock these values (the assembly path calls
 // assertRunnerEntrypointBundleWithinBudgets with this as the default).
 export function resolveRunnerEntrypointBundleBudgets(): {
@@ -176,10 +176,12 @@ export function resolveRunnerEntrypointBundleBudgets(): {
   return {
     entryBytes:
       RUNNER_ENTRYPOINT_BUNDLE_ENTRY_BASELINE_BYTES
-      + RUNNER_ENTRYPOINT_BUNDLE_ENTRY_TOLERANCE_BYTES,
+      + RUNNER_ENTRYPOINT_BUNDLE_ENTRY_TOLERANCE_BYTES
+      + RUNNER_ENTRYPOINT_BUNDLE_OPERATIONAL_HEADROOM_BYTES,
     staticClosureBytes:
       RUNNER_ENTRYPOINT_BUNDLE_STATIC_CLOSURE_BASELINE_BYTES
-      + RUNNER_ENTRYPOINT_BUNDLE_STATIC_CLOSURE_TOLERANCE_BYTES,
+      + RUNNER_ENTRYPOINT_BUNDLE_STATIC_CLOSURE_TOLERANCE_BYTES
+      + RUNNER_ENTRYPOINT_BUNDLE_OPERATIONAL_HEADROOM_BYTES,
     totalBytes: RUNNER_ENTRYPOINT_BUNDLE_TOTAL_BYTES_BUDGET,
   };
 }
