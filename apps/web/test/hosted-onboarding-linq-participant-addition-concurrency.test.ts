@@ -9,8 +9,12 @@ import {
 } from "@/src/lib/hosted-onboarding/contact-privacy";
 import {
   buildHostedAiUsageGateNoticeIdempotencyKey,
+  markHostedAiUsageLimitNoticeDeliveryRetryableTx,
   startHostedAiUsageLimitNoticeDispatchTx,
 } from "@/src/lib/hosted-onboarding/linq-delivery-store";
+import {
+  startAuthorizedHostedAiUsageLimitNoticeDispatchTx,
+} from "@/src/lib/hosted-execution/usage-limit-notice-claim";
 import {
   createHostedLinqDeliveryIdempotencyLookupKey,
 } from "@/src/lib/hosted-onboarding/linq-observability-identifiers";
@@ -441,6 +445,192 @@ describe.skipIf(!runPostgresConcurrencyProof)(
           ...(usageTransaction ? [usageTransaction] : []),
           ...(consumerTransaction ? [consumerTransaction] : []),
         ]);
+        await fixture.observer.hostedLinqDelivery.deleteMany({
+          where: { idempotencyKey: usageDeliveryLookupKey },
+        });
+        await fixture.observer.hostedAiUsagePeriod.deleteMany({
+          where: {
+            memberId: fixture.containerMemberId,
+            periodStart,
+          },
+        });
+        await cleanupRouteFixture(fixture);
+      }
+    });
+
+    it("rejects ineligible usage-limit candidates without mutating the reusable delivery row", async () => {
+      const fixture = await createRouteFixture();
+      const attemptedAt = new Date("2026-07-13T12:00:00.000Z");
+      const retryableAttemptedAt = new Date("2026-07-13T12:05:00.000Z");
+      const retryAfterAt = new Date("2026-07-13T12:10:00.000Z");
+      const staleRetryAttemptedAt = new Date("2026-07-13T12:15:00.000Z");
+      const currentAttemptedAt = new Date("2026-07-13T12:20:00.000Z");
+      const periodStart = new Date("2026-07-01T00:00:00.000Z");
+      const periodEnd = new Date("2026-08-01T00:00:00.000Z");
+      const usageIdempotencyKey = buildHostedAiUsageGateNoticeIdempotencyKey({
+        memberId: fixture.containerMemberId,
+        periodStart,
+      });
+      const usageDeliveryLookupKey =
+        createHostedLinqDeliveryIdempotencyLookupKey(usageIdempotencyKey);
+      if (!usageDeliveryLookupKey) {
+        throw new Error("Expected a usage-limit delivery lookup key.");
+      }
+      const claimUsageNotice = (input: {
+        attemptedAt: Date;
+        prisma?: PrismaClient;
+        sourceRef: string;
+      }) => startAuthorizedHostedAiUsageLimitNoticeDispatchTx({
+        attemptedAt: input.attemptedAt,
+        memberId: fixture.containerMemberId,
+        noticeDeliveryTarget: {
+          channel: "linq",
+          replyToMessageId: input.sourceRef,
+          routeAuthority: {
+            channel: "linq",
+            containerMemberId: fixture.containerMemberId,
+            threadId: fixture.threadId,
+          },
+          target: fixture.threadId,
+        },
+        periodStart,
+        prisma: input.prisma ?? fixture.participantClient,
+        source: "hosted_webhook_side_effect",
+        sourceRef: input.sourceRef,
+        targetKind: "thread",
+      });
+      const setBlockedAt = (blockedAt: Date | null) =>
+        fixture.observer.hostedAiUsagePeriod.update({
+          data: { blockedAt },
+          where: {
+            memberId_periodStart: {
+              memberId: fixture.containerMemberId,
+              periodStart,
+            },
+          },
+        });
+
+      await fixture.observer.hostedMember.updateMany({
+        data: { billingStatus: "active" },
+        where: {
+          id: {
+            in: [fixture.containerMemberId, fixture.ownerMemberId],
+          },
+        },
+      });
+      await fixture.observer.hostedAiUsagePeriod.create({
+        data: {
+          billingPlanCode: "launch_monthly",
+          blockedAt: attemptedAt,
+          limitUsdMicros: 10_000_000n,
+          memberId: fixture.containerMemberId,
+          periodEnd,
+          periodStart,
+          spentUsdMicros: 10_000_000n,
+        },
+      });
+
+      const candidateReady = createDeferred();
+      const releaseClaim = createDeferred();
+      let staleClaim: ReturnType<
+        typeof startAuthorizedHostedAiUsageLimitNoticeDispatchTx
+      > | null = null;
+
+      try {
+        await expect(claimUsageNotice({
+          attemptedAt: new Date(periodStart.getTime() - 1),
+          sourceRef: "usage-before-period",
+        })).resolves.toEqual({ status: "already_notified" });
+        await expect(claimUsageNotice({
+          attemptedAt: periodEnd,
+          sourceRef: "usage-at-period-end",
+        })).resolves.toEqual({ status: "already_notified" });
+        await expect(fixture.observer.hostedLinqDelivery.findUnique({
+          where: { idempotencyKey: usageDeliveryLookupKey },
+        })).resolves.toBeNull();
+
+        staleClaim = (async () => {
+          candidateReady.resolve();
+          await releaseClaim.promise;
+          return claimUsageNotice({
+            attemptedAt,
+            sourceRef: `usage-before-plan-change:${fixture.containerMemberId}`,
+          });
+        })();
+
+        await candidateReady.promise;
+        await fixture.observer.hostedAiUsagePeriod.update({
+          data: {
+            billingPlanCode: "launch_edge_monthly",
+            blockedAt: null,
+            limitUsdMicros: 25_000_000n,
+          },
+          where: {
+            memberId_periodStart: {
+              memberId: fixture.containerMemberId,
+              periodStart,
+            },
+          },
+        });
+        releaseClaim.resolve();
+
+        await expect(staleClaim).resolves.toEqual({ status: "already_notified" });
+        await expect(fixture.observer.hostedLinqDelivery.findUnique({
+          where: { idempotencyKey: usageDeliveryLookupKey },
+        })).resolves.toBeNull();
+
+        await setBlockedAt(retryableAttemptedAt);
+
+        await expect(startHostedAiUsageLimitNoticeDispatchTx({
+          attemptedAt: retryableAttemptedAt,
+          memberId: fixture.containerMemberId,
+          periodStart,
+          prisma: fixture.messageClient,
+          source: "hosted_runtime_ai_usage_limit_notice",
+          sourceRef: `retryable-usage:${fixture.containerMemberId}`,
+          targetKind: "telegram_thread",
+        })).resolves.toEqual({
+          idempotencyKey: usageIdempotencyKey,
+          status: "claimed",
+        });
+        await expect(markHostedAiUsageLimitNoticeDeliveryRetryableTx({
+          expectedAttemptedAt: retryableAttemptedAt,
+          failedAt: retryableAttemptedAt,
+          idempotencyKey: usageIdempotencyKey,
+          prisma: fixture.messageClient,
+          retryAfterAt,
+        })).resolves.toBe(true);
+        await setBlockedAt(null);
+
+        await expect(claimUsageNotice({
+          attemptedAt: staleRetryAttemptedAt,
+          sourceRef: `stale-retry:${fixture.containerMemberId}`,
+        })).resolves.toEqual({ status: "already_notified" });
+        await expect(fixture.observer.hostedLinqDelivery.findUnique({
+          select: {
+            attemptedAt: true,
+            retryAfterAt: true,
+            status: true,
+          },
+          where: { idempotencyKey: usageDeliveryLookupKey },
+        })).resolves.toEqual({
+          attemptedAt: retryableAttemptedAt,
+          retryAfterAt,
+          status: "failed",
+        });
+        await setBlockedAt(currentAttemptedAt);
+
+        await expect(claimUsageNotice({
+          attemptedAt: currentAttemptedAt,
+          prisma: fixture.messageClient,
+          sourceRef: `usage-after-plan-change:${fixture.containerMemberId}`,
+        })).resolves.toEqual({
+          idempotencyKey: usageIdempotencyKey,
+          status: "claimed",
+        });
+      } finally {
+        releaseClaim.resolve();
+        await Promise.allSettled(staleClaim ? [staleClaim] : []);
         await fixture.observer.hostedLinqDelivery.deleteMany({
           where: { idempotencyKey: usageDeliveryLookupKey },
         });
