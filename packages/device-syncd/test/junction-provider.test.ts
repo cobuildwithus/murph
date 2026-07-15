@@ -186,6 +186,71 @@ function createHistoricalPullFetch(
   });
 }
 
+function createMixedGarminOuraActivityProvider(
+  garminHistoricalStatus: "failure" | "success",
+) {
+  return createJunctionProvider(async (input) => {
+    const url = readUrl(input);
+
+    if (url === "https://api.sandbox.us.junction.com/v2/user/providers/junction-user-1") {
+      return createJsonResponse({
+        providers: [
+          {
+            id: "provider-garmin-1",
+            slug: "garmin",
+            name: "Garmin",
+            status: "connected",
+            resource_availability: { activity: true },
+          },
+          {
+            id: "provider-oura-1",
+            slug: "oura",
+            name: "Oura",
+            status: "connected",
+            resource_availability: { activity: true },
+          },
+        ],
+      });
+    }
+
+    if (url.startsWith("https://api.sandbox.us.junction.com/v2/summary/activity/junction-user-1")) {
+      return createJsonResponse({
+        data: [
+          { id: "garmin-activity-1", connectionId: "provider-garmin-1", steps: 4321 },
+          { id: "oura-activity-1", connectionId: "provider-oura-1", steps: 1234 },
+        ],
+      });
+    }
+
+    throw new Error(`Unexpected request: ${url}`);
+  }, {
+    summaryResources: ["activity"],
+  }, createHistoricalPullFetch({
+    garmin: {
+      not_pulled: [],
+      pulled: {
+        activity: {
+          days_with_data: garminHistoricalStatus === "success" ? 1 : 0,
+          ...(garminHistoricalStatus === "failure"
+            ? { error_details: "Historical pull failed." }
+            : {}),
+          status: garminHistoricalStatus,
+        },
+      },
+    },
+    oura: {
+      not_pulled: [],
+      pulled: {
+        activity: {
+          days_with_data: 0,
+          error_details: "Historical pull failed.",
+          status: "failure",
+        },
+      },
+    },
+  }));
+}
+
 function executeJunctionJob(
   provider: ReturnType<typeof createJunctionProvider>,
   context: ProviderJobContext,
@@ -3471,6 +3536,158 @@ test("Junction explicit Garmin failure marks only Garmin when another source suc
   );
 });
 
+test("Junction saturated mixed failures mark only Garmin while retrying the other source", async () => {
+  const provider = createMixedGarminOuraActivityProvider("failure");
+  const importedSnapshots: unknown[] = [];
+  const upserts: Array<Parameters<NonNullable<ProviderJobContext["upsertConnectionSource"]>>[0]> = [];
+
+  const result = await executeJunctionJob(
+    provider,
+    createJunctionJobContext({
+      account: createAccount({
+        metadata: {
+          junctionHistoricalBackfillStatus: "coverage_v3_retrying",
+          junctionHistoricalBackfillEmptyAttempts: 4,
+          junctionHistoricalBackfillLastEmptyAt: "2026-04-02T00:00:00.000Z",
+          junctionHistoricalBackfillWindowStart: "2026-04-01T00:00:00.000Z",
+          junctionHistoricalBackfillWindowEnd: "2026-04-03T00:00:00.000Z",
+        },
+      }),
+      importSnapshot: async (snapshot) => {
+        importedSnapshots.push(snapshot);
+        return { imported: true };
+      },
+      listConnectionSources: () => [],
+      upsertConnectionSource: (input) => {
+        upserts.push(input);
+        return createConnectionSource(input);
+      },
+    }),
+    createJob("backfill", {
+      windowStart: "2026-04-01T00:00:00.000Z",
+      windowEnd: "2026-04-03T00:00:00.000Z",
+    }),
+  );
+
+  assert.equal(importedSnapshots.length, 1);
+  const importedSnapshot = importedSnapshots[0] as {
+    summaries?: Record<string, Array<Record<string, unknown>>>;
+  };
+  assert.deepEqual(
+    importedSnapshot.summaries?.activity?.map((record) => record.sourceProviderSlug).sort(),
+    ["garmin", "oura"],
+  );
+  assert.equal(result.metadataPatch?.junctionHistoricalBackfillStatus, "coverage_v3_retrying");
+  assert.equal(result.metadataPatch?.junctionHistoricalBackfillEmptyAttempts, 4);
+  assertConnectBackfillRetryWake(result, "2026-04-04T00:00:00.000Z");
+  const resetSources = upserts.filter((source) =>
+    source.lastErrorCode === "HISTORICAL_DATA_RECONNECT_REQUIRED"
+  );
+  assert.deepEqual(resetSources.map((source) => source.sourceProviderSlug), ["garmin"]);
+});
+
+test("Junction saturated mixed failures wait for the due observation before marking Garmin", async () => {
+  const provider = createMixedGarminOuraActivityProvider("failure");
+  const importedSnapshots: unknown[] = [];
+  const upserts: Array<Parameters<NonNullable<ProviderJobContext["upsertConnectionSource"]>>[0]> = [];
+
+  const result = await executeJunctionJob(
+    provider,
+    createJunctionJobContext({
+      account: createAccount({
+        metadata: {
+          junctionHistoricalBackfillStatus: "coverage_v3_retrying",
+          junctionHistoricalBackfillEmptyAttempts: 4,
+          junctionHistoricalBackfillLastEmptyAt: "2026-04-02T12:00:00.000Z",
+          junctionHistoricalBackfillWindowStart: "2026-04-01T00:00:00.000Z",
+          junctionHistoricalBackfillWindowEnd: "2026-04-03T00:00:00.000Z",
+        },
+      }),
+      importSnapshot: async (snapshot) => {
+        importedSnapshots.push(snapshot);
+        return { imported: true };
+      },
+      listConnectionSources: () => [],
+      upsertConnectionSource: (input) => {
+        upserts.push(input);
+        return createConnectionSource(input);
+      },
+    }),
+    createJob("backfill", {
+      windowStart: "2026-04-01T00:00:00.000Z",
+      windowEnd: "2026-04-03T00:00:00.000Z",
+    }),
+  );
+
+  assert.equal(importedSnapshots.length, 1);
+  assert.equal(result.metadataPatch, undefined);
+  assertConnectBackfillRetryWake(result, "2026-04-03T12:00:00.000Z");
+  assert.equal(
+    upserts.some((source) =>
+      source.lastErrorCode === "HISTORICAL_DATA_RECONNECT_REQUIRED"
+    ),
+    false,
+  );
+});
+
+test("Junction clears Garmin recovery after success while Oura remains retrying", async () => {
+  const provider = createMixedGarminOuraActivityProvider("success");
+  const importedSnapshots: unknown[] = [];
+  const upserts: Array<Parameters<NonNullable<ProviderJobContext["upsertConnectionSource"]>>[0]> = [];
+  let sources = [createConnectionSource({
+    status: "error",
+    lastErrorCode: "HISTORICAL_DATA_RECONNECT_REQUIRED",
+    lastErrorMessage: "Historical data remained incomplete.",
+  })];
+
+  const result = await executeJunctionJob(
+    provider,
+    createJunctionJobContext({
+      account: createAccount({
+        metadata: {
+          junctionHistoricalBackfillStatus: "coverage_v3_retrying",
+          junctionHistoricalBackfillEmptyAttempts: 4,
+          junctionHistoricalBackfillLastEmptyAt: "2026-04-02T00:00:00.000Z",
+          junctionHistoricalBackfillWindowStart: "2026-04-01T00:00:00.000Z",
+          junctionHistoricalBackfillWindowEnd: "2026-04-03T00:00:00.000Z",
+        },
+      }),
+      importSnapshot: async (snapshot) => {
+        importedSnapshots.push(snapshot);
+        return { imported: true };
+      },
+      listConnectionSources: () => sources,
+      upsertConnectionSource: (input) => {
+        upserts.push(input);
+        const stored = createConnectionSource(input);
+        sources = [
+          ...sources.filter((source) => source.sourceInstanceKey !== stored.sourceInstanceKey),
+          stored,
+        ];
+        return stored;
+      },
+    }),
+    createJob("backfill", {
+      windowStart: "2026-04-01T00:00:00.000Z",
+      windowEnd: "2026-04-03T00:00:00.000Z",
+    }),
+  );
+
+  assert.equal(importedSnapshots.length, 1);
+  assert.equal(result.metadataPatch?.junctionHistoricalBackfillStatus, "coverage_v3_retrying");
+  assert.equal(result.metadataPatch?.junctionHistoricalBackfillEmptyAttempts, 4);
+  assertConnectBackfillRetryWake(result, "2026-04-04T00:00:00.000Z");
+  const garminUpdates = upserts.filter((source) => source.sourceProviderSlug === "garmin");
+  assert.equal(garminUpdates[0]?.lastErrorCode, "HISTORICAL_DATA_RECONNECT_REQUIRED");
+  assert.equal(garminUpdates.at(-1)?.status, "connected");
+  const garminSource = sources.find((source) => source.sourceProviderSlug === "garmin");
+  const ouraSource = sources.find((source) => source.sourceProviderSlug === "oura");
+  assert.equal(garminSource?.status, "connected");
+  assert.equal(garminSource?.lastErrorCode, null);
+  assert.equal(ouraSource?.status, "connected");
+  assert.equal(ouraSource?.lastErrorCode, null);
+});
+
 test("Junction exhausted historical backfill preserves reconnect-required source health", async () => {
   const provider = createEmptyJunctionBackfillProvider();
   const historicalError = createConnectionSource({
@@ -3711,6 +3928,68 @@ test("Junction current coverage clears a stale Oura reset marker", async () => {
   assert.equal(upserts.at(-1)?.status, "connected");
   assert.equal(Object.hasOwn(upserts.at(-1) ?? {}, "lastErrorCode"), false);
 });
+
+for (const sourceProviderSlug of ["oura", "apple_health_kit"] as const) {
+  test(`Junction retrying coverage clears a stale ${sourceProviderSlug} reset marker`, async () => {
+    const provider = createHistoricalActivityProvider(
+      sourceProviderSlug,
+      createHistoricalPullFetch({
+        [sourceProviderSlug]: {
+          not_pulled: [],
+          pulled: {
+            activity: { days_with_data: 1, status: "success" },
+          },
+        },
+      }),
+    );
+    const sourceInstanceKey = requireValue(buildJunctionProviderSourceInstanceKey({
+      connectionId: "acct-junction-1",
+      sourceProviderSlug,
+    }));
+    const existingSource = createConnectionSource({
+      sourceInstanceKey,
+      sourceProviderSlug,
+      status: "error",
+      lastErrorCode: "HISTORICAL_DATA_RECONNECT_REQUIRED",
+      lastErrorMessage: "Historical data remained incomplete.",
+    });
+    const upserts: Array<Parameters<NonNullable<ProviderJobContext["upsertConnectionSource"]>>[0]> = [];
+
+    await executeJunctionJob(
+      provider,
+      createJunctionJobContext({
+        account: createAccount({
+          metadata: {
+            junctionHistoricalBackfillStatus: "coverage_v3_retrying",
+            junctionHistoricalBackfillEmptyAttempts: 4,
+            junctionHistoricalBackfillLastEmptyAt: "2026-04-02T00:00:00.000Z",
+            junctionHistoricalBackfillWindowStart: "2026-04-01T00:00:00.000Z",
+            junctionHistoricalBackfillWindowEnd: "2026-04-03T00:00:00.000Z",
+          },
+        }),
+        listConnectionSources: () => [existingSource],
+        upsertConnectionSource: (input) => {
+          upserts.push(input);
+          return createConnectionSource(input);
+        },
+      }),
+      createJob("backfill", {
+        windowStart: "2026-04-01T00:00:00.000Z",
+        windowEnd: "2026-04-03T00:00:00.000Z",
+      }),
+    );
+
+    const sourceUpdates = upserts.filter((source) =>
+      source.sourceProviderSlug === sourceProviderSlug
+    );
+    assert.ok(sourceUpdates.length > 0);
+    for (const source of sourceUpdates) {
+      assert.equal(source.status, "connected");
+      assert.equal(Object.hasOwn(source, "lastErrorCode"), false);
+      assert.equal(Object.hasOwn(source, "lastErrorMessage"), false);
+    }
+  });
+}
 
 test("Junction queued jobs preserve an Oura reset marker owned by opaque future coverage", async () => {
   const provider = createHistoricalActivityProvider(

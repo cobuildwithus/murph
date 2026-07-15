@@ -1010,7 +1010,7 @@ describe("applyHostedDeviceSyncRuntimeResult", () => {
     expect(harness.record.metadata).toEqual(retryingMetadata);
   });
 
-  it("keeps Junction historical progress and its reset marker bidirectionally consistent", async () => {
+  it("enforces terminal Junction progress while allowing provider reset markers during retrying", async () => {
     const hostedConnectionId = "conn_junction_reset_consistency";
     const sourceInstanceKey = buildJunctionProviderSourceInstanceKey({
       connectionId: hostedConnectionId,
@@ -1021,9 +1021,13 @@ describe("applyHostedDeviceSyncRuntimeResult", () => {
     }
     const windowStart = "2026-04-01T00:00:00.000Z";
     const windowEnd = "2026-04-03T00:00:00.000Z";
-    const progress = (status: "complete" | "exhausted" | "retrying") => ({
-      junctionHistoricalBackfillEmptyAttempts: status === "exhausted" ? 5 : 1,
-      junctionHistoricalBackfillLastEmptyAt: "2026-04-06T10:00:00.000Z",
+    const progress = (
+      status: "complete" | "exhausted" | "retrying",
+      lastEmptyAt = "2026-04-06T10:00:00.000Z",
+    ) => ({
+      junctionHistoricalBackfillEmptyAttempts:
+        status === "exhausted" ? 5 : status === "retrying" ? 4 : 0,
+      junctionHistoricalBackfillLastEmptyAt: status === "complete" ? null : lastEmptyAt,
       junctionHistoricalBackfillStatus: `coverage_v3_${status}`,
       junctionHistoricalBackfillWindowEnd: windowEnd,
       junctionHistoricalBackfillWindowStart: windowStart,
@@ -1046,11 +1050,18 @@ describe("applyHostedDeviceSyncRuntimeResult", () => {
 
     const cases = [
       {
-        expectedWrite: "skipped_version_mismatch",
-        name: "marker without exhausted progress",
+        expectedSource: {
+          lastErrorCode: "HISTORICAL_DATA_RECONNECT_REQUIRED",
+          status: "error",
+        },
+        expectedWrite: "applied",
+        name: "retrying progress with marker",
         storedMetadata: progress("retrying"),
         storedSource: source(false, "2026-04-06T10:00:00.000Z"),
         update: {
+          connection: {
+            metadata: progress("retrying", "2026-04-06T10:05:00.000Z"),
+          },
           connectionId: hostedConnectionId,
           observedUpdatedAt: "2026-04-06T10:00:00.000Z",
           sources: [{
@@ -1061,6 +1072,29 @@ describe("applyHostedDeviceSyncRuntimeResult", () => {
         },
       },
       {
+        expectedSource: {
+          lastErrorCode: null,
+          status: "connected",
+        },
+        expectedWrite: "applied",
+        name: "retrying progress with marker clear",
+        storedMetadata: progress("retrying"),
+        storedSource: source(true, "2026-04-06T10:00:00.000Z"),
+        update: {
+          connection: {
+            metadata: progress("retrying", "2026-04-06T10:05:00.000Z"),
+          },
+          connectionId: hostedConnectionId,
+          observedUpdatedAt: "2026-04-06T10:00:00.000Z",
+          sources: [{
+            ...source(false, "2026-04-06T10:05:00.000Z"),
+            connectionId: undefined,
+            observedLastSeenAt: "2026-04-06T10:00:00.000Z",
+          }],
+        },
+      },
+      {
+        expectedSource: null,
         expectedWrite: "skipped_version_mismatch",
         name: "completed progress without marker clear",
         storedMetadata: progress("exhausted"),
@@ -1072,6 +1106,10 @@ describe("applyHostedDeviceSyncRuntimeResult", () => {
         },
       },
       {
+        expectedSource: {
+          lastErrorCode: null,
+          status: "connected",
+        },
         expectedWrite: "applied",
         name: "completed progress with marker clear",
         storedMetadata: progress("exhausted"),
@@ -1110,7 +1148,7 @@ describe("applyHostedDeviceSyncRuntimeResult", () => {
       if (scenario.expectedWrite === "applied") {
         expect(harness.syncDurableConnectionState, scenario.name).toHaveBeenCalledTimes(1);
         expect(harness.upsertConnectionSource, scenario.name).toHaveBeenCalledWith(
-          expect.objectContaining({ lastErrorCode: null, status: "connected" }),
+          expect.objectContaining(scenario.expectedSource),
         );
       } else {
         expect(harness.syncDurableConnectionState, scenario.name).not.toHaveBeenCalled();
@@ -1175,7 +1213,26 @@ describe("applyHostedDeviceSyncRuntimeResult", () => {
     });
   });
 
-  it("preserves a Junction reset marker on source-only updates while progress is exhausted", async () => {
+  it.each([
+    {
+      emptyAttempts: 4,
+      expectedSource: { lastErrorCode: null, status: "connected" },
+      status: "retrying",
+    },
+    {
+      emptyAttempts: 5,
+      expectedSource: {
+        lastErrorCode: "HISTORICAL_DATA_RECONNECT_REQUIRED",
+        lastErrorMessage: "Historical data remained incomplete.",
+        status: "error",
+      },
+      status: "exhausted",
+    },
+  ] as const)("resolves newer provider source state while progress is $status", async ({
+    emptyAttempts,
+    expectedSource,
+    status,
+  }) => {
     const hostedConnectionId = "conn_junction_source_marker";
     const sourceInstanceKey = buildJunctionProviderSourceInstanceKey({
       connectionId: hostedConnectionId,
@@ -1205,9 +1262,9 @@ describe("applyHostedDeviceSyncRuntimeResult", () => {
       record: buildHostedRecord({
         id: hostedConnectionId,
         metadata: {
-          junctionHistoricalBackfillEmptyAttempts: 5,
+          junctionHistoricalBackfillEmptyAttempts: emptyAttempts,
           junctionHistoricalBackfillLastEmptyAt: "2026-04-06T10:00:00.000Z",
-          junctionHistoricalBackfillStatus: "coverage_v3_exhausted",
+          junctionHistoricalBackfillStatus: `coverage_v3_${status}`,
           junctionHistoricalBackfillWindowEnd: windowEnd,
           junctionHistoricalBackfillWindowStart: windowStart,
         },
@@ -1250,10 +1307,8 @@ describe("applyHostedDeviceSyncRuntimeResult", () => {
 
     expect(response.updates[0]?.writeUpdate).toBe("applied");
     expect(harness.upsertConnectionSource).toHaveBeenCalledWith(expect.objectContaining({
-      lastErrorCode: "HISTORICAL_DATA_RECONNECT_REQUIRED",
-      lastErrorMessage: "Historical data remained incomplete.",
+      ...expectedSource,
       sourceInstanceKey,
-      status: "error",
     }));
   });
 

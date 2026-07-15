@@ -92,13 +92,17 @@ authenticated old-window push evidence are the bounded fallback when
 introspection is unavailable. Direct Garmin sleep webhooks remain the
 authoritative carrier.
 
-Only an explicit Junction `failure` for every still-pending Garmin obligation
-can exhaust progress and mark Garmin reconnect-required; current ingestion
-stays active. The member must confirm the existing connection-wide disconnect
-before restarting that export, because the reset can disconnect other
-wearables on the same Junction connection. If provider-side deregistration
-fails, the local disconnect still stands and the member must remove the
-connection in the Garmin account before reconnecting.
+Connection metadata owns aggregate retry status, attempts, and cadence across
+pending sources; a provider source row owns provider-specific recovery state.
+Once the shared observation ladder is saturated, an explicit Junction
+`failure` for every still-pending Garmin obligation can mark the Garmin source
+reconnect-required while aggregate metadata remains `retrying` for another
+provider. Successful Garmin coverage clears that source marker independently.
+Current ingestion stays active. The member must confirm the existing
+connection-wide disconnect before restarting the Garmin export, because the
+reset can disconnect other wearables on the same Junction connection. If
+provider-side deregistration fails, the local disconnect still stands and the
+member must remove the connection in the Garmin account before reconnecting.
 
 The direct companion spot-HRV row is deliberately not a provider push-primary
 cell: it represents a user-requested local measurement, so no authoritative

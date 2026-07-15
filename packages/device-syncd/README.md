@@ -94,14 +94,20 @@ existing daily retry cadence; none of those states can request a reset.
 Canonical normalization evidence and authenticated old-window push evidence
 provide the bounded fallback when introspection is unavailable.
 
-Only an explicit Junction `failure` for every still-pending Garmin obligation
-can exhaust historical progress and mark Garmin reconnect-required. Current
-ingestion remains active. Restarting that export requires the member to confirm
-the existing connection-wide disconnect and then reconnect Garmin. The reset
-can disconnect other wearables on the same Junction connection, so its scope
-must be explained before confirmation. If provider-side deregistration fails,
-the local disconnect still stands and the member must remove the connection in
-the Garmin account before reconnecting.
+Connection metadata owns the aggregate retry status, attempt count, and daily
+cadence across all pending sources. Garmin's connection-source row separately
+owns reset eligibility. Once the observation ladder is saturated, an explicit
+Junction `failure` for every still-pending Garmin obligation can mark Garmin
+reconnect-required while aggregate metadata remains `retrying` for another
+provider. Successful Garmin coverage clears that source marker without waiting
+for the other provider. Current ingestion remains active throughout.
+
+Restarting the Garmin export requires the member to confirm the existing
+connection-wide disconnect and then reconnect Garmin. The reset can disconnect
+other wearables on the same Junction connection, so its scope must be explained
+before confirmation. If provider-side deregistration fails, the local
+disconnect still stands and the member must remove the connection in the Garmin
+account before reconnecting.
 
 WHOOP uses OAuth plus webhooks.
 Strava uses OAuth, polling, and optional app-global webhooks.

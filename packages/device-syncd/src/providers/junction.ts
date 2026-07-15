@@ -775,6 +775,16 @@ export function createJunctionDeviceSyncProvider(
       backfillFollowUp.metadataPatch?.[JUNCTION_HISTORICAL_BACKFILL_METADATA_KEYS.status],
     ) ?? readHistoricalBackfillStatus(context.account.metadata);
     const historicalStatusBeforeJob = readHistoricalBackfillStatus(context.account.metadata);
+    const saturatedRetryObserved =
+      backfillFollowUp.metadataPatch !== undefined
+      && historicalStatusBeforeJob?.coverageVersion
+        === JUNCTION_HISTORICAL_BACKFILL_COVERAGE_VERSION
+      && historicalStatusBeforeJob.status === "retrying"
+      && readHistoricalBackfillEmptyAttempts(
+        context.account.metadata,
+        window.windowStart,
+        window.windowEnd,
+      ) >= EMPTY_HISTORICAL_BACKFILL_RETRY_DELAYS_MS.length;
     if (
       isConnectHistoricalBackfill
       && (
@@ -784,6 +794,7 @@ export function createJunctionDeviceSyncProvider(
       )
       && (
         historicalStatusAfterJob?.status === "exhausted"
+        || saturatedRetryObserved
         || (
           historicalSummaryCoverage.complete
           && historicalStatusBeforeJob?.status === "exhausted"
@@ -5775,7 +5786,7 @@ async function projectJunctionSources(
     || (
       historicalState !== null
       && historicalState.coverageVersion >= JUNCTION_HISTORICAL_BACKFILL_COVERAGE_VERSION
-      && historicalState.status === "exhausted"
+      && historicalState.status !== "complete"
     )
   );
   const preserveHistoricalReconnectProviderSlugs =

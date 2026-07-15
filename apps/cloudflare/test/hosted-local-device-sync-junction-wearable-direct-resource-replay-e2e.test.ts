@@ -1365,7 +1365,7 @@ function readJunctionHistoricalCoverageMask(
   provider: string,
 ): number | null {
   const parts = evidence?.split("|") ?? [];
-  if (parts.length !== 4 || parts[0] !== "e1") {
+  if (parts.length !== 4 || parts[0] !== "e2") {
     return null;
   }
 

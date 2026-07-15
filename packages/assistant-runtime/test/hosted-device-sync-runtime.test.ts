@@ -787,11 +787,11 @@ describe("hosted device-sync runtime", () => {
     const externalAccountId = "junction-source-identity";
     const windowStart = "2026-04-01T00:00:00.000Z";
     const windowEnd = "2026-04-03T00:00:00.000Z";
-    const exhaustedMetadata = {
-      junctionHistoricalBackfillEmptyAttempts: 5,
-      junctionHistoricalBackfillEvidence: `e1|${windowStart}|${windowEnd}|garmin:1`,
+    const retryingMetadata = {
+      junctionHistoricalBackfillEmptyAttempts: 1,
+      junctionHistoricalBackfillEvidence: `e2|${windowStart}|${windowEnd}|garmin:1`,
       junctionHistoricalBackfillLastEmptyAt: "2026-04-04T00:00:00.000Z",
-      junctionHistoricalBackfillStatus: "coverage_v2_exhausted",
+      junctionHistoricalBackfillStatus: "coverage_v3_retrying",
       junctionHistoricalBackfillWindowEnd: windowEnd,
       junctionHistoricalBackfillWindowStart: windowStart,
     };
@@ -803,7 +803,7 @@ describe("hosted device-sync runtime", () => {
         providerConfigKey: "junction",
       },
       externalAccountId,
-      metadata: exhaustedMetadata,
+      metadata: retryingMetadata,
       provider: "junction",
     });
     const deviceSyncPort: HostedRuntimeDeviceSyncPort = {
@@ -860,7 +860,7 @@ describe("hosted device-sync runtime", () => {
           providerConfigKey: "junction",
         },
         externalAccountId,
-        metadata: exhaustedMetadata,
+        metadata: retryingMetadata,
         provider: "junction",
         sources: [
           {
@@ -868,7 +868,7 @@ describe("hosted device-sync runtime", () => {
             firstSeenAt: "2026-04-01T09:00:00.000Z",
             lastErrorCode: "HISTORICAL_DATA_RECONNECT_REQUIRED",
             lastErrorMessage: "Historical data remained incomplete.",
-            lastSeenAt: "2026-04-06T09:15:00.000Z",
+            lastSeenAt: "2026-04-06T09:25:00.000Z",
             resourceCount: 2,
             resourceAvailabilitySummary: { activity: true, sleep: true },
             sourceInstanceKey: hostedSourceInstanceKey,
@@ -896,13 +896,13 @@ describe("hosted device-sync runtime", () => {
         sources[0]?.lastErrorCode,
         "HISTORICAL_DATA_RECONNECT_REQUIRED",
       );
+      assert.equal(sources[0]?.lastSeenAt, "2026-04-06T09:25:00.000Z");
       assert.deepEqual(sources[0]?.resourceAvailabilitySummary, {
         activity: true,
         sleep: true,
       });
 
       hostedSnapshot = buildRuntimeSnapshot({
-        connectedAt: "2026-04-06T09:30:00.000Z",
         connectionId: hostedConnectionId,
         credential: {
           credentialMetadata: {},
@@ -911,7 +911,7 @@ describe("hosted device-sync runtime", () => {
         },
         externalAccountId,
         hostedUpdatedAt: "2026-04-06T09:30:00.000Z",
-        metadata: {},
+        metadata: retryingMetadata,
         provider: "junction",
         sources: [
           {
@@ -919,7 +919,7 @@ describe("hosted device-sync runtime", () => {
             firstSeenAt: "2026-04-01T09:00:00.000Z",
             lastErrorCode: null,
             lastErrorMessage: null,
-            lastSeenAt: "2026-04-06T09:10:00.000Z",
+            lastSeenAt: "2026-04-06T09:30:00.000Z",
             resourceCount: 1,
             resourceAvailabilitySummary: { activity: true },
             sourceInstanceKey: hostedSourceInstanceKey,
@@ -943,7 +943,12 @@ describe("hosted device-sync runtime", () => {
       assert.equal(reconnectedSources[0]?.sourceInstanceKey, localSourceInstanceKey);
       assert.equal(reconnectedSources[0]?.status, "connected");
       assert.equal(reconnectedSources[0]?.lastErrorCode, null);
-      assert.equal(reconnectedSources[0]?.lastSeenAt, "2026-04-06T09:10:00.000Z");
+      assert.equal(reconnectedSources[0]?.lastSeenAt, "2026-04-06T09:30:00.000Z");
+      assert.equal(
+        getStore(service).getAccountById(localAccountId)?.metadata
+          .junctionHistoricalBackfillStatus,
+        "coverage_v3_retrying",
+      );
     } finally {
       closeHostedRuntimeDeviceSyncService(service);
       await cleanup();

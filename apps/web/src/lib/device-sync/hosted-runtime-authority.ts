@@ -770,10 +770,17 @@ function isHostedRuntimeHistoricalResetStateInconsistent(input: {
     sourcesByProvider.set(source.sourceProviderSlug.trim().toLowerCase(), source);
   }
 
-  const resetRequired = readJunctionHistoricalBackfillProgress(input.historicalMetadata)?.status
-    === "exhausted";
+  const historicalStatus = readJunctionHistoricalBackfillProgress(
+    input.historicalMetadata,
+  )?.status ?? null;
   const resetPresent = [...sourcesByProvider.values()].some(requiresHistoricalResetDeviceSyncSource);
-  return resetRequired !== resetPresent;
+  if (historicalStatus === "retrying") {
+    return false;
+  }
+  if (historicalStatus === "exhausted") {
+    return !resetPresent;
+  }
+  return resetPresent;
 }
 
 function resolveHostedRuntimeSourceUpdatesToApply(input: {
