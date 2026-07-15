@@ -194,7 +194,7 @@ test("automation save preserves hosted iMessage current-route continuity locator
   }
 });
 
-test("an authenticated hosted turn can manage an older direct Linq automation in its vault", async () => {
+test("an authenticated hosted turn can manage an older experiment reminder in its vault", async () => {
   const { parentRoot, vaultRoot } = await createTempVaultContext(
     "murph-automation-vault-authority-",
   );
@@ -233,20 +233,20 @@ test("an authenticated hosted turn can manage an older direct Linq automation in
     };
     await upsertAutomation({
       continuityPolicy: "preserve",
-      instructions: "Send the meditation reminder.",
+      instructions: "Send the meditation experiment prep reminder.",
       route: olderRoute,
       schedule: { kind: "cron", expression: "30 23 * * 1,4" },
-      slug: "meditation-reminder",
+      slug: "experiment-first-prep-meditation-2026-07-20",
       status: "active",
       tags: [],
-      title: "Meditation reminder",
+      title: "Meditation experiment prep reminder",
       vaultRoot,
     });
 
     const archived = await runInProcessJsonCli(cli, [
       "automation",
       "set-status",
-      "meditation-reminder",
+      "experiment-first-prep-meditation-2026-07-20",
       "--status",
       "archived",
       "--vault",
@@ -257,7 +257,7 @@ test("an authenticated hosted turn can manage an older direct Linq automation in
     const edited = await runInProcessJsonCli(cli, [
       "automation",
       "edit",
-      "meditation-reminder",
+      "experiment-first-prep-meditation-2026-07-20",
       "--summary",
       "Updated from the member's current conversation.",
       "--schedule-kind",
@@ -272,7 +272,7 @@ test("an authenticated hosted turn can manage an older direct Linq automation in
     const reactivated = await runInProcessJsonCli(cli, [
       "automation",
       "set-status",
-      "meditation-reminder",
+      "experiment-first-prep-meditation-2026-07-20",
       "--status",
       "active",
       "--vault",
@@ -290,7 +290,7 @@ test("an authenticated hosted turn can manage an older direct Linq automation in
     }>(cli, [
       "automation",
       "show",
-      "meditation-reminder",
+      "experiment-first-prep-meditation-2026-07-20",
       "--vault",
       vaultRoot,
     ]);
@@ -659,7 +659,7 @@ test("group automation records are vault-scoped while route writes stay in the c
     await upsertAutomation({
       automationId: "automation_01HZXW2Y6Y8QWQ8QWQ8QWQ8QWY",
       continuityPolicy: "preserve",
-      instructions: "Send the other room reminder.",
+      instructions: "Compose the group health newsletter.",
       route: {
         channel: "linq",
         deliverySource: null,
@@ -670,10 +670,10 @@ test("group automation records are vault-scoped while route writes stay in the c
         threadIsDirect: false,
       },
       schedule: { kind: "at", at: "2026-12-06T12:00:00.000Z" },
-      slug: "foreign-room-reminder",
+      slug: "group-health-newsletter",
       status: "active",
       tags: [],
-      title: "Foreign room reminder",
+      title: "Group health newsletter",
       vaultRoot,
     });
 
@@ -769,59 +769,74 @@ test("group automation records are vault-scoped while route writes stay in the c
       "UNKNOWN",
     );
 
-    const archivedForeign = await runInProcessJsonCli(cli, [
+    const archivedNewsletter = await runInProcessJsonCli(cli, [
       "automation",
       "set-status",
-      "foreign-room-reminder",
+      "group-health-newsletter",
       "--status",
       "archived",
       "--vault",
       vaultRoot,
     ]);
-    assert.equal(archivedForeign.envelope.ok, true);
+    assert.equal(archivedNewsletter.envelope.ok, true);
 
-    const editedForeign = await runInProcessJsonCli(cli, [
+    const editedNewsletter = await runInProcessJsonCli(cli, [
       "automation",
       "edit",
-      "foreign-room-reminder",
+      "group-health-newsletter",
       "--summary",
       "Updated from the current authenticated group turn.",
+      "--schedule-kind",
+      "cron",
+      "--schedule-cron",
+      "0 8 * * 0",
       "--vault",
       vaultRoot,
     ]);
-    assert.equal(editedForeign.envelope.ok, true);
+    assert.equal(editedNewsletter.envelope.ok, true);
 
-    const foreignBeforeReplacement = await runInProcessJsonCli<{
+    const newsletterBeforeReplacement = await runInProcessJsonCli<{
       automation: {
         route: Record<string, unknown>;
+        schedule: Record<string, unknown>;
         status: string;
         summary: string | null;
       } | null;
     }>(cli, [
       "automation",
       "show",
-      "foreign-room-reminder",
+      "group-health-newsletter",
       "--vault",
       vaultRoot,
     ]);
-    assert.equal(foreignBeforeReplacement.envelope.ok, true);
+    assert.equal(newsletterBeforeReplacement.envelope.ok, true);
     assert.equal(
-      foreignBeforeReplacement.envelope.data?.automation?.status,
+      newsletterBeforeReplacement.envelope.data?.automation?.status,
       "archived",
     );
     assert.equal(
-      foreignBeforeReplacement.envelope.data?.automation?.summary,
+      newsletterBeforeReplacement.envelope.data?.automation?.summary,
       "Updated from the current authenticated group turn.",
     );
-    assert.deepEqual(foreignBeforeReplacement.envelope.data?.automation?.route, {
-      channel: "linq",
-      deliverySource: null,
-      deliveryTarget: "linq_group_other",
-      identityId: null,
-      participantId: null,
-      threadId: null,
-      threadIsDirect: false,
-    });
+    assert.deepEqual(
+      newsletterBeforeReplacement.envelope.data?.automation?.schedule,
+      {
+        expression: "0 8 * * 0",
+        kind: "cron",
+      },
+    );
+    assert.deepEqual(
+      newsletterBeforeReplacement.envelope.data?.automation?.route,
+      {
+        channel: "linq",
+        deliverySource: null,
+        deliveryTarget: "linq_group_other",
+        identityId: null,
+        participantId: null,
+        threadId: null,
+        threadIsDirect: false,
+      },
+    );
 
     for (const title of ["Current room reminder", "Unused group reminder"]) {
       const sameOrUnusedPath = path.join(
@@ -868,9 +883,9 @@ test("group automation records are vault-scoped while route writes stay in the c
     const collidedSave = await runInProcessJsonCli(cli, [
       "automation",
       "save",
-      "Foreign room replacement",
+      "Group health newsletter replacement",
       "--slug",
-      "foreign-room-reminder",
+      "group-health-newsletter",
       "--instructions",
       "Replace it.",
       "--schedule-kind",
@@ -885,7 +900,7 @@ test("group automation records are vault-scoped while route writes stay in the c
     const collidedEdit = await runInProcessJsonCli(cli, [
       "automation",
       "edit",
-      "foreign-room-reminder",
+      "group-health-newsletter",
       "--channel",
       "linq",
       "--delivery-target",
@@ -897,9 +912,9 @@ test("group automation records are vault-scoped while route writes stay in the c
 
     const collidedImportPath = path.join(parentRoot, "collided-route.json");
     await writeFile(collidedImportPath, JSON.stringify({
-      title: "Foreign room import replacement",
+      title: "Group health newsletter import replacement",
       automationId: "automation_01HZXW2Y6Y8QWQ8QWQ8QWQ8QWY",
-      slug: "foreign-room-reminder",
+      slug: "group-health-newsletter",
       status: "active",
       continuityPolicy: "preserve",
       schedule: { kind: "at", at: "2026-12-06T12:00:00.000Z" },
@@ -933,7 +948,7 @@ test("group automation records are vault-scoped while route writes stay in the c
     const collidedStatus = await runInProcessJsonCli(cli, [
       "automation",
       "set-status",
-      "foreign-room-reminder",
+      "group-health-newsletter",
       "--status",
       "paused",
       "--vault",

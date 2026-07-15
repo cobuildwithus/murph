@@ -2045,6 +2045,10 @@ test('automation help points operators at canonical automations', async () => {
   assert.match(saveHelp, /Create or update one automation from typed command fields\./u)
   assert.match(saveHelp, /automation import-json/u)
   assert.match(importJsonHelp, /Import or bulk-edit one automation from an advanced JSON payload\./u)
+  assert.match(
+    importJsonHelp,
+    /Prefer automation save for typed creation or intentional full replacement\./u,
+  )
   assert.match(scaffoldHelp, /advanced automation JSON payload template/u)
 }, INCUR_HELP_TIMEOUT_MS)
 

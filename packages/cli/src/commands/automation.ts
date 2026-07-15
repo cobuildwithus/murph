@@ -926,7 +926,7 @@ export function registerAutomationCommands(cli: Cli.Cli) {
   automation.command("import-json", {
     args: z.object({}),
     description: "Import or bulk-edit one automation from an advanced JSON payload.",
-    hint: "Prefer automation save for canonical typed create/update usage.",
+    hint: "Prefer automation save for typed creation or intentional full replacement.",
     options: withBaseOptions({
       input: textInputOptionSchema.describe(
         "Advanced automation payload in @file.json form or - for stdin.",
