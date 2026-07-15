@@ -1,6 +1,6 @@
 # Pace Linq reply bubbles
 
-Status: active
+Status: completed
 Created: 2026-07-15
 Updated: 2026-07-15
 
@@ -74,9 +74,25 @@ Updated: 2026-07-15
 
 ## Verification
 
-- Focused assistant-engine ordering and assistant-runtime callback tests.
-- Truthful owner coverage via the repository verification router, plus
-  typecheck and `git diff --check`.
-- Required `coverage-write` audit, parent final diff review, green PR CI,
-  exact-head ReviewGPT `ROUND_OUTCOME: PASS`, and clean merge proof against the
-  latest `main`.
+- Focused assistant-engine ordering: 9/9 tests passed.
+- Focused assistant-runtime callbacks: 176/176 tests passed, including exact
+  nominal 0/1.5/3.0-second dispatch timing, unpaced adjacent reactions and
+  unrelated Linq effects, and abort/reset behavior.
+- `pnpm typecheck` passed across the repository workspace.
+- Assistant-engine owner coverage passed serially: 155 files passed, one
+  skipped; 2,242 tests passed, four skipped.
+- Assistant-runtime owner coverage passed serially: 74 files passed; 1,697
+  tests passed, two skipped.
+- The required `coverage-write` pass added only the two missing no-delay cases
+  above and reported no remaining proof gap beyond ordinary wall-clock timer
+  drift under runtime load.
+- The broader diff-aware lane completed the edited-owner and reverse-owner
+  suites but remained red in untouched reverse-dependent setup/CLI tests due to
+  repeatable existing expansion failures and load-sensitive timeouts. The
+  verification router's documented fallback of root typecheck plus both edited
+  owner coverage lanes passed.
+- Parent final diff review found no additional state owner, queue, scheduler,
+  typing lifecycle, or deployment protocol, and no unresolved correctness gap.
+- Remaining gates: green PR CI, exact-head ReviewGPT `ROUND_OUTCOME: PASS`, and
+  clean merge proof against the latest `main`.
+Completed: 2026-07-15
