@@ -3,6 +3,7 @@ import {
   assistantTonePreferenceValues,
   assistantVoiceOptionIdValues,
   assistantVoiceOptions,
+  MURPH_PRODUCT_ORIGIN,
 } from '@murphai/contracts'
 import {
   hostedRuntimeAssistantPersonalizationToolRequestSchema,
@@ -325,7 +326,7 @@ export const MURPH_FAMILY_PLAN_TOOL = {
   namespace: 'murph',
   name: 'family_plan',
   description:
-    'Read or manage the current hosted user\'s Murph Family plan. Use for Murph Family plan questions, tier/seat status checks, starting Family checkout, and requests to invite a family member on Pulse or Edge. Do not use for family medical history.',
+    'Read the current hosted user\'s Murph Family plan, start Family checkout, or create an invite. Use for Murph Family plan questions, tier/seat status checks, starting Family checkout, and requests to invite a family member on Pulse or Edge. The only supported actions are read_status, start_checkout, and create_invite. For invite cancellation, member removal, member-tier changes, or Family seat/capacity changes, do not invent an action or claim a change; use murph.plan_usage\'s explicit private management handoff. Do not use for family medical history.',
   inputSchema: {
     type: 'object',
     additionalProperties: false,
@@ -388,7 +389,7 @@ export const MURPH_PLAN_USAGE_TOOL = {
   namespace: 'murph',
   name: 'plan_usage',
   description:
-    'Read the current hosted member\'s cost-weighted included usage, reset or trial-end date, and any server-authorized plan action. Use only for an explicit plan/included-usage question or manual 1:1 check. Never call it automatically during onboarding or as a watcher. Cost-weighted included usage is not a literal token count or cash balance. Communicate usage only through usedPercent and remainingPercent; never expose, infer, or format internal currency amounts as usage progress. Percentages, dates, and forecasts are approximate; if forecast is null, invent no estimate, precision, scarcity, or urgency. Never plead, imply Murph will die, use existential guilt, shame, or pressure. Mention actions only when recommendedAction is non-null; use its label and URL. This read-only tool does not change billing. It is not a group balance or top-up surface. Never ask a group for money, claim a shared balance, or name a payer.',
+    `Read the current hosted member's cost-weighted included usage, reset or trial-end date, and any server-authorized plan action. Use only for an explicit plan/included-usage question, an explicit request to manage billing or an unsupported Family account change, or a manual 1:1 check. Never call it automatically during onboarding or as a watcher. Cost-weighted included usage is not a literal token count or cash balance. Communicate usage only through usedPercent and remainingPercent; never expose, infer, or format internal currency amounts as usage progress. Percentages, dates, and forecasts are approximate; if forecast is null, invent no estimate, precision, scarcity, or urgency. Never plead, imply Murph will die, use existential guilt, shame, or pressure. Mention server-authorized start or upgrade actions only when recommendedAction is non-null and relevant to the member's request; use its label and URL. For an explicit billing-management or unsupported Family-management request, direct the member to ${MURPH_PRODUCT_ORIGIN}/settings#subscription only after a private result whose status is active or exhausted, or whose reason is trial_conversion_pending; make clear that the tool only read status and made no billing or Family change. Describe this as a neutral Settings browser handoff, not a plan recommendation or billing action. Do not provide that private account-management link for group_not_supported or hosted_access_inactive. This read-only tool does not change billing. It is not a group balance or top-up surface. Never ask a group for money, claim a shared balance, or name a payer.`,
   inputSchema: {
     type: 'object',
     additionalProperties: false,

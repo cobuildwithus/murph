@@ -2109,6 +2109,14 @@ describe('assistant conversation scope', () => {
     expect(prompt).toContain('Computer-use tools:')
     expect(prompt).toContain('Phone calls:')
     expect(prompt).toContain('action="start_checkout"')
+    expect(prompt).toContain('For new or converting Family access')
+    expect(prompt).toContain('return its checkout link plainly')
+    expect(prompt).toContain(
+      'Never use it for active-plan tier/capacity, member-removal, or invite-cancellation changes',
+    )
+    expect(prompt).toContain(
+      "route those through `murph.plan_usage`'s private management handoff",
+    )
     expect(prompt).toContain('GOOGLECALENDAR_CREATE_EVENT')
     expect(prompt).toContain('OUTLOOK_CALENDAR_CREATE_EVENT')
     expect(prompt).toContain('User-provided content and vault writes:')
