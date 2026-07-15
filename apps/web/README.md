@@ -1127,3 +1127,14 @@ Current hosted billing assumptions:
   The provider update uses no proration and carries a proof-derived idempotency
   key and metadata marker. A retry after Stripe success reconciles local billing
   instead of adding another seven days.
+- `/ops/email` is the operator-only member email composer. It accepts up to 100
+  explicit hosted member IDs plus one plain-text subject and body. Preview
+  resolves verified email first and falls back to the stored Stripe checkout
+  email, while returning member eligibility only and never returning an email
+  address.
+- Send re-reads current member suspension and recipient state and requires the
+  exact 24-hour signed Preview. Unknown members, account-deletion-suspended
+  members, and members without a recipient stay skipped. Ready recipients are
+  submitted as separate emails in one strict Resend batch with a Preview-bound
+  idempotency key, so an ambiguous response can be retried without duplicate
+  delivery. Logs contain aggregate counts and safe provider status only.

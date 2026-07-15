@@ -38,6 +38,12 @@ const OPS_TOOLS = [
     href: "/ops/trials",
     label: "Trials",
   },
+  {
+    description:
+      "Preview recipients and send one plain-text email to an explicit list of member IDs.",
+    href: "/ops/email",
+    label: "Member email",
+  },
 ] as const;
 
 export default async function HostedOpsPage() {
