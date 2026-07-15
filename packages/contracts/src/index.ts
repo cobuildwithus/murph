@@ -39,4 +39,5 @@ export {
 } from "./health-entities.ts";
 
 export * from "./integration-ingest.ts";
+export * from "./junction-resources.ts";
 export * from "./lookup-id-families.ts";
