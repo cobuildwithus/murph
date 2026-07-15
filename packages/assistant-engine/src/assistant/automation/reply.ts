@@ -1268,10 +1268,12 @@ async function evaluateAssistantAutoReplyGroup(input: {
       ),
       session: existingSession,
     })
-  if (
+  const affirmativeReaction =
     primaryReplyInput.sourceMetadata?.kind === 'linq' &&
-    primaryReplyInput.sourceMetadata.affirmativeReaction === true &&
-    !outboxContext.replyTargetAttested
+    primaryReplyInput.sourceMetadata.affirmativeReaction === true
+  if (
+    affirmativeReaction &&
+    outboxContext.replyTargetDelivery === null
   ) {
     return createAdvancingSkipDecision(
       'affirmative Linq reaction target is not an attested assistant delivery',
@@ -1308,9 +1310,13 @@ async function evaluateAssistantAutoReplyGroup(input: {
     operatorAuthority: 'direct-operator',
     primaryInput: primaryReplyInput,
     prompt: preparedInput.prompt,
-    turnContext: buildAssistantAutoReplyCrossSessionTurnContext(
-      latestCrossSessionDelivery?.message ?? null,
-    ),
+    turnContext: affirmativeReaction
+      ? buildAssistantAutoReplyAffirmativeReactionTurnContext(
+          outboxContext.replyTargetDelivery?.message ?? null,
+        )
+      : buildAssistantAutoReplyCrossSessionTurnContext(
+          latestCrossSessionDelivery?.message ?? null,
+        ),
     userMessageContent: preparedInput.userMessageContent,
   }
 }
@@ -3552,14 +3558,14 @@ async function resolveAssistantAutoReplyLatestCrossSessionDelivery(input: {
   session: AssistantSession | null
 }): Promise<{
   delivery: AssistantAutoReplyMatchingOutboxDelivery | null
-  replyTargetAttested: boolean
+  replyTargetDelivery: AssistantAutoReplyMatchingOutboxDelivery | null
 }> {
   const channel = normalizeNullableString(input.input.source)
   const deliveryTarget = normalizeNullableString(input.deliveryTarget)
   if (!channel || !deliveryTarget) {
     return {
       delivery: null,
-      replyTargetAttested: false,
+      replyTargetDelivery: null,
     }
   }
 
@@ -3569,10 +3575,12 @@ async function resolveAssistantAutoReplyLatestCrossSessionDelivery(input: {
       historyReader: input.historyReader,
       input: input.input,
     })
-  const replyTargetAttested = input.replyToMessageId !== null &&
-    matchingDeliveries.some((delivery) =>
-      delivery.providerMessageIds.includes(input.replyToMessageId!),
-    )
+  const replyToMessageId = input.replyToMessageId
+  const replyTargetDelivery = replyToMessageId === null
+    ? null
+    : matchingDeliveries.find((delivery) =>
+        delivery.providerMessageIds.includes(replyToMessageId),
+      ) ?? null
   const sessionEligible = matchingDeliveries
     .filter((delivery) =>
       input.session === null || delivery.sessionId !== input.session.sessionId,
@@ -3590,12 +3598,12 @@ async function resolveAssistantAutoReplyLatestCrossSessionDelivery(input: {
   // stale deliveries; an exact provider-id match across the same route can't
   // be either. The send-ack/inbound-webhook race that records sentAt after
   // the inbound input's receivedAt is the realistic case this protects.
-  if (input.replyToMessageId) {
+  if (replyToMessageId) {
     return {
       delivery: sessionEligible.find((delivery) =>
-        delivery.providerMessageIds.includes(input.replyToMessageId!),
+        delivery.providerMessageIds.includes(replyToMessageId),
       ) ?? null,
-      replyTargetAttested,
+      replyTargetDelivery,
     }
   }
 
@@ -3605,7 +3613,7 @@ async function resolveAssistantAutoReplyLatestCrossSessionDelivery(input: {
   if (causalUpperBoundMs === null) {
     return {
       delivery: null,
-      replyTargetAttested,
+      replyTargetDelivery,
     }
   }
 
@@ -3615,7 +3623,7 @@ async function resolveAssistantAutoReplyLatestCrossSessionDelivery(input: {
   if (fresh.length === 0) {
     return {
       delivery: null,
-      replyTargetAttested,
+      replyTargetDelivery,
     }
   }
 
@@ -3632,7 +3640,7 @@ async function resolveAssistantAutoReplyLatestCrossSessionDelivery(input: {
   }
   return {
     delivery: fresh.slice(firstFreshIndex).at(-1) ?? null,
-    replyTargetAttested,
+    replyTargetDelivery,
   }
 }
 
@@ -3885,6 +3893,24 @@ function buildAssistantAutoReplyCrossSessionTurnContext(
     normalized.slice(0, ASSISTANT_AUTO_REPLY_PRIOR_MESSAGE_MAX_LENGTH),
     '',
     'Use it only to interpret the current user message.',
+  ].join('\n')
+}
+
+function buildAssistantAutoReplyAffirmativeReactionTurnContext(
+  message: string | null,
+): string | null {
+  const normalized = normalizeNullableString(message)
+  if (!normalized) {
+    return null
+  }
+
+  return [
+    'Affirmative reaction target:',
+    'The user reacted affirmatively to this exact assistant message:',
+    '',
+    normalized.slice(0, ASSISTANT_AUTO_REPLY_PRIOR_MESSAGE_MAX_LENGTH),
+    '',
+    'Bind the affirmative response only to this message.',
   ].join('\n')
 }
 
