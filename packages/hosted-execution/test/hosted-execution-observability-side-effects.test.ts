@@ -166,6 +166,11 @@ describe("hosted execution observability", () => {
     ).toBe(
       "safe message for hosted-user-runtime:<redacted-id> and member_<redacted-id>",
     );
+    expect(
+      sanitizeHostedExecutionStructuredLogText(
+        "accepted attempt failed for hbm_abcdefghijklmnop-",
+      ),
+    ).toBe("accepted attempt failed for hbm_<redacted-id>");
 
     const repeated = "x".repeat(260);
     const normalized = normalizeHostedExecutionOperatorMessage(repeated);

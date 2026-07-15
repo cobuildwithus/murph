@@ -2255,6 +2255,30 @@ describe("hosted runtime control contracts", () => {
         safeErrorDetail: "retrying member_abc123",
       },
     })).toThrow(/direct identifier/u);
+    expect(parseHostedRuntimeLogEntry({
+      ...entry,
+      redactedJson: {
+        safeErrorCause: "authorization=Bearer [redacted].",
+        safeErrorDetail: "request failed with token=[redacted]",
+      },
+    })).toMatchObject({
+      redactedJson: {
+        safeErrorCause: "authorization=Bearer [redacted].",
+        safeErrorDetail: "request failed with token=[redacted]",
+      },
+    });
+    expect(() => parseHostedRuntimeLogEntry({
+      ...entry,
+      redactedJson: {
+        safeErrorDetail: "request failed with token=[redacted]suffix",
+      },
+    })).toThrow(/secret-shaped content/u);
+    expect(() => parseHostedRuntimeLogEntry({
+      ...entry,
+      redactedJson: {
+        safeErrorDetail: "request failed with token=[redacted].suffix",
+      },
+    })).toThrow(/secret-shaped content/u);
     expect(() => parseHostedRuntimeLogEntry({
       ...entry,
       outboxIntentRef: "<HOME_DIR>/intent.json",

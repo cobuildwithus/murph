@@ -110,17 +110,18 @@ export function readRunnerWriteFenceValidationRejectReason(input: {
 }
 
 /**
- * Same metadata-only picks as `buildHostedRunnerMetadataOnlyErrorDetails`, but
- * narrowed to the persisted runtime-log `redactedJson` value shape. Keys must
- * pass the hosted runtime-log redacted-key gate; the sanitized error summary is
- * emitted under the allowlisted `safeErrorMessage` key because bare
- * `errorMessage` is rejected by that gate.
+ * Same metadata-only picks as `buildHostedRunnerMetadataOnlyErrorDetails`, plus
+ * the shared sanitizer's bounded error detail and cause, narrowed to the
+ * persisted runtime-log `redactedJson` value shape. Keys must pass the hosted
+ * runtime-log redacted-key gate; sanitized error text uses the allowlisted
+ * `safeError*` keys because the bare diagnostic keys are rejected by that gate.
  */
 const SAFE_REDACTED_ERROR_CODE_DETAIL_PATTERN = /^[A-Za-z0-9][A-Za-z0-9._:-]{0,95}$/u;
 
 export function buildHostedRunnerRedactedErrorJson(
   error: unknown,
 ): HostedRuntimeRedactedJson {
+  const diagnostics = buildHostedExecutionSafeErrorDiagnostics(error);
   const details = buildHostedRunnerMetadataOnlyErrorDetails(error);
   const redacted: HostedRuntimeRedactedJson = {};
   for (const [key, value] of Object.entries(details)) {
@@ -151,6 +152,12 @@ export function buildHostedRunnerRedactedErrorJson(
     ) {
       redacted[redactedKey] = value;
     }
+  }
+  if (typeof diagnostics?.errorDetail === "string") {
+    redacted.safeErrorDetail = diagnostics.errorDetail;
+  }
+  if (typeof diagnostics?.errorCause === "string") {
+    redacted.safeErrorCause = diagnostics.errorCause;
   }
   return redacted;
 }
