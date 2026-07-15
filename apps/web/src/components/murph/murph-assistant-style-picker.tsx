@@ -507,7 +507,15 @@ function VoiceCard({
         </span>
         <SelectedCheck selected={selected} />
       </label>
-      <div onClick={(event) => event.stopPropagation()} role="presentation">
+      <div
+        onClick={(event) => {
+          event.stopPropagation();
+          if (!disabled) {
+            onSelect();
+          }
+        }}
+        role="presentation"
+      >
         <VoiceMemoPlayer
           ref={playerRef}
           src={option.previewPath}
