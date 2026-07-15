@@ -3344,6 +3344,7 @@ describe("runHostedAssistantAutomationLane", () => {
       },
       inboxServices: expect.anything(),
       inputSource: expect.any(Object),
+      maxInputPerScan: 50,
       maxPerScan: 1,
       onEvent: expect.any(Function),
       onProviderEvent: expect.any(Function),
@@ -3917,13 +3918,49 @@ describe("runHostedAssistantAutomationLane", () => {
     expect(mocks.createHostedRuntimeDeviceSyncService).not.toHaveBeenCalled();
   });
 
-  it("bounds background automation scans to one due item per pass", async () => {
-    mocks.runAssistantAutomationPass.mockResolvedValueOnce({
-      nextWakeAt: null,
-      progressed: false,
+  it("reserves bounded batch capacity for input discovered during pre-scan refresh", async () => {
+    const selectedInputIds: string[] = [];
+    mocks.createHostedAssistantInputSource.mockReturnValueOnce({
+      listInputCandidates: vi.fn(async (query) => ({
+        inputs: [],
+        nextCursor: query.afterCursor ?? null,
+      })),
+      listNewConversationInputs: vi.fn(async (query) => ({
+        inputs: [],
+        nextCursor: query.afterCursor ?? null,
+      })),
+      readObservedInputIds: vi.fn(() => [...selectedInputIds]),
+      readSelectedInputIds: vi.fn(() => [...selectedInputIds]),
+      refresh: vi.fn(async () => {
+        selectedInputIds.push(
+          "ain_refresh_batch_000000000000000001",
+          "ain_refresh_batch_000000000000000002",
+          "ain_refresh_batch_000000000000000003",
+        );
+        return {
+          progressed: true,
+          reason: "ingested_input" as const,
+        };
+      }),
+    });
+    mocks.runAssistantAutomationPass.mockImplementationOnce(async (input) => {
+      await input.inputSource?.refresh();
+      expect(input.maxInputPerScan).toBe(50);
+      expect(input.shouldDeferCron?.()).toBe(true);
+      return {
+        nextWakeAt: null,
+        progressed: true,
+        replies: {
+          considered: 3,
+          failed: 0,
+          nextWakeAt: null,
+          replied: 1,
+          skipped: 0,
+        },
+      };
     });
 
-    await runHostedAssistantAutomationLane({
+    const result = await runHostedAssistantAutomationLane({
       wake: {
         eventId: "evt_background_scan_limit",
         kind: "runtime.timer",
@@ -3945,7 +3982,55 @@ describe("runHostedAssistantAutomationLane", () => {
 
     expect(mocks.runAssistantAutomationPass.mock.calls[0]?.[0]).toEqual(
       expect.objectContaining({
+        maxInputPerScan: 50,
         maxPerScan: 1,
+      }),
+    );
+    expect(result).toMatchObject({
+      activeTurnInputIngested: true,
+      assistantAutomationSelectedInputIds: selectedInputIds,
+      nextWakeAt: "2026-04-08T00:00:00.000Z",
+    });
+  });
+
+  it("sizes a background scan to the selected causal batch", async () => {
+    const selectedInputIds = [
+      "ain_background_batch_000000000000000001",
+      "ain_background_batch_000000000000000002",
+    ];
+    mocks.selectHostedAssistantInputIds.mockResolvedValueOnce({
+      inputIds: selectedInputIds,
+      mode: "background",
+      pendingInputIds: selectedInputIds,
+    });
+    mocks.runAssistantAutomationPass.mockResolvedValueOnce({
+      nextWakeAt: null,
+      progressed: true,
+    });
+
+    await runHostedAssistantAutomationLane({
+      wake: {
+        eventId: "evt_background_causal_batch",
+        kind: "runtime.timer",
+        occurredAt: "2026-04-08T00:00:00.000Z",
+        triggerKind: "runtime_timer",
+        userId: "member_123",
+      },
+      executionContext: {
+        hosted: {
+          issueDeviceConnectLink: vi.fn(),
+          memberId: "member_123",
+          userEnvKeys: [],
+        },
+      },
+      requestId: "req_background_causal_batch",
+      runtime: createHostedAutomationRuntime(),
+      vaultRoot: "/tmp/vault-root",
+    });
+
+    expect(mocks.runAssistantAutomationPass.mock.calls[0]?.[0]).toEqual(
+      expect.objectContaining({
+        maxPerScan: selectedInputIds.length,
       }),
     );
   });

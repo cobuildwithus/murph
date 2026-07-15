@@ -135,7 +135,7 @@ include_tests=0
 include_docs=0
 preset_dir="scripts/chatgpt-review-presets"
 # PR review runs pass REVIEW_GPT_PR_URL plus round metadata so this wrapper can
-# add the full PR diff, exact reviewed heads, and remediation delta to
+# add the PR body, full PR diff, exact reviewed heads, and remediation delta to
 # codebase.zip.
 package_script="scripts/package-audit-context-full.sh"
 # `current` skips connector selection. The PR loop requires the selected

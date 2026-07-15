@@ -114,6 +114,7 @@ export interface RunAssistantAutomationInput {
 
 export interface RunAssistantAutomationPassInput
   extends Omit<RunAssistantAutomationInput, 'once' | 'onInboxEvent' | 'startDaemon'> {
+  maxInputPerScan?: number
   scanNumber?: number
 }
 
@@ -932,7 +933,7 @@ export async function runAssistantAutomationPass(
     executionContext,
     ...(input.operationScope ? { operationScope: input.operationScope } : {}),
     inboxServices,
-    maxPerScan: input.maxPerScan,
+    maxPerScan: input.maxInputPerScan ?? input.maxPerScan,
     onEvent: input.onEvent,
     onProviderEvent: input.onProviderEvent ?? null,
     onProviderRequestStarted: input.onProviderRequestStarted ?? null,
