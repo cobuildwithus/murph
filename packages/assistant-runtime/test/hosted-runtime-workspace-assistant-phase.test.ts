@@ -753,18 +753,18 @@ describe("runHostedWorkspaceAssistantPhase runtime logs", () => {
       request: vi.fn(),
       resolvePreferenceCausalSeq: vi.fn(),
     };
-    const currentAssistantPersonalizationInputId = () =>
+    const currentAssistantPreferenceInputId = () =>
       "ain_33333333333333333333333333333333";
 
     await runHostedWorkspaceAssistantPhase(createPhaseInput({
-      currentAssistantPersonalizationInputId,
+      currentAssistantPreferenceInputId,
       runtimeAssistantPersonalizationToolPort: assistantPersonalizationToolPort,
     }));
 
     expect(mocks.hydrateHostedExecutionDefaultTarget).toHaveBeenCalledWith(
       {
         hosted: expect.objectContaining({
-          currentAssistantPersonalizationInputId,
+          currentAssistantPreferenceInputId,
           personalizationTool: assistantPersonalizationToolPort,
         }),
       },
@@ -774,7 +774,7 @@ describe("runHostedWorkspaceAssistantPhase runtime logs", () => {
       expect.objectContaining({
         executionContext: expect.objectContaining({
           hosted: expect.objectContaining({
-            currentAssistantPersonalizationInputId,
+            currentAssistantPreferenceInputId,
             personalizationTool: assistantPersonalizationToolPort,
           }),
         }),
@@ -12790,8 +12790,8 @@ function createPhaseInput(input: {
     HostedWorkspaceRuntimeAssistantPhaseInput["initialMailboxImport"]["importResult"]["assistantInputRecords"]
   >;
   conversationImportedCount?: number;
-  currentAssistantPersonalizationInputId?:
-    HostedWorkspaceRuntimeAssistantPhaseInput["currentAssistantPersonalizationInputId"];
+  currentAssistantPreferenceInputId?:
+    HostedWorkspaceRuntimeAssistantPhaseInput["currentAssistantPreferenceInputId"];
   currentDeliveryRouteScope?: HostedWorkspaceRuntimeAssistantPhaseInput["currentDeliveryRouteScope"];
   deviceSyncWorkspaceWakeHandled?: HostedWorkspaceRuntimeAssistantPhaseInput["deviceSyncWorkspaceWakeHandled"];
   importedCount?: number;
@@ -12835,8 +12835,8 @@ function createPhaseInput(input: {
   const assistantInputIds = input.assistantInputIds
     ?? (input.importedCount ? ["ain_00000000000000000000000000000001"] : []);
   return {
-    currentAssistantPersonalizationInputId:
-      input.currentAssistantPersonalizationInputId,
+    currentAssistantPreferenceInputId:
+      input.currentAssistantPreferenceInputId,
     deviceSyncWorkspaceWakeHandled: input.deviceSyncWorkspaceWakeHandled,
     initialAssistantInputBatch: input.initialAssistantInputBatch,
     latestAssistantInputBatch: input.latestAssistantInputBatch,

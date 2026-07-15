@@ -1664,7 +1664,7 @@ export async function runHostedWorkspaceRuntimeJobInProcess(
         status: "start",
       });
       try {
-        let currentAssistantPersonalizationInputId: string | null = null;
+        let currentAssistantPreferenceInputId: string | null = null;
         let invocationLocalAssistantProjectedWakeKey: string | null = null;
         const passResult = await hostedCliBridge.runWithInvocation(
           {
@@ -1695,14 +1695,14 @@ export async function runHostedWorkspaceRuntimeJobInProcess(
                 startedAtEpochMs: passStartedAtEpochMs,
               },
               runAssistantPhase: async (phaseInput) => {
-                currentAssistantPersonalizationInputId = null;
+                currentAssistantPreferenceInputId = null;
                 try {
                   const phaseResult = await (
                     options.runAssistantPhase ?? runHostedWorkspaceAssistantPhase
                   )({
                     ...phaseInput,
-                    currentAssistantPersonalizationInputId: () =>
-                      currentAssistantPersonalizationInputId,
+                    currentAssistantPreferenceInputId: () =>
+                      currentAssistantPreferenceInputId,
                     currentDeliveryRouteScope,
                     deviceSyncWorkspaceWakeHandled: deviceSyncWorkspaceWakeHandledUntilCheckpoint,
                     request: input.request,
@@ -1715,15 +1715,15 @@ export async function runHostedWorkspaceRuntimeJobInProcess(
                       )
                         ? acceptedInputs.map((acceptedInput) => acceptedInput.id)
                         : [];
-                      const assistantPersonalizationInputId =
+                      const assistantPreferenceInputId =
                         await resolveHostedPersonalizationInputIdForAcceptedInputs({
                           assistantInputIds,
                           vaultRoot: restored.vaultRoot,
                         });
-                      currentAssistantPersonalizationInputId =
-                        assistantPersonalizationInputId;
+                      currentAssistantPreferenceInputId =
+                        assistantPreferenceInputId;
                       return () => {
-                        currentAssistantPersonalizationInputId = null;
+                        currentAssistantPreferenceInputId = null;
                       };
                     },
                     stagedDirtyAcks: stagedDeviceSyncDirtyAcks,
@@ -1741,7 +1741,7 @@ export async function runHostedWorkspaceRuntimeJobInProcess(
                       : null;
                   return phaseResult;
                 } finally {
-                  currentAssistantPersonalizationInputId = null;
+                  currentAssistantPreferenceInputId = null;
                 }
               },
               signal: passSignal,

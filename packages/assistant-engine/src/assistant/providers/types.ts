@@ -217,6 +217,8 @@ export interface AssistantProviderTurnExecutionResult {
   finalAction?: AssistantNoReplyDisposition
   reactions?: readonly AssistantCurrentMessageReactionAction[] | null
   response: string
+  /** Capability-free semantic response persisted into model-visible history. */
+  transcriptResponse?: string | null
   // Completed final answers that were followed by a steered user message and
   // later superseded by another final answer in the same provider turn, in
   // completion order. Delivered ahead of `response` because Codex frontends

@@ -1,6 +1,6 @@
 # Hosted Plan Downgrades
 
-Last verified: 2026-07-12
+Last verified: 2026-07-15
 
 ## Goal
 
@@ -67,9 +67,12 @@ that Murph should use on the next hosted turn:
 - Configuration updates require an explicit personal-member choice. The
   authenticated Settings form uses its normal session and CSRF boundary. An
   assistant-driven update additionally requires eligible accepted user input
-  for that turn and passkey approval bound to both the explicitly requested
-  fields and the exact fully resolved model and reasoning target; web consumes
-  that approval in the matching field-level preference-write transaction.
+  for that turn. The runtime forwards the terminal input id from its locally
+  revalidated bounded exact-successor provider batch, and web binds it to the
+  callback member plus one live conversation mailbox row inside the matching
+  field-level preference-write transaction. This low-risk preference update
+  does not require a passkey or browser handoff; missing or ambiguous input
+  authority fails closed.
   Murph may suggest Luna or an Edge upgrade, but it must not switch model or
   reasoning effort automatically because usage is low or exhausted.
 - Changing the preference does not create a mailbox item, wake, queue, or a
@@ -79,8 +82,15 @@ Conversation style remains independently available through
 `murph.personalization`, which atomically reads or updates the private member's
 tone and voice and may report the same model resolver's current context. It does
 not write model or reasoning preferences. Conversation model and reasoning
-changes use `murph.assistant_configuration` and its exact-target approval flow,
-so the style path cannot bypass the configuration owner.
+changes use the input-bound `murph.assistant_configuration` owner, so the style
+path cannot bypass the configuration owner.
+
+For the approval-simplification rollout, deploy web first so it accepts both
+the direct input-bound request and the legacy exact-target approval request.
+Deploy the new Cloudflare runtime next so new turns stop creating configuration
+approvals. Retain the legacy web parser and handler until pre-rollout runners
+and their bounded idle windows have drained; then remove the legacy request
+shape and its configuration-specific approval helpers in a separate cleanup.
 
 ## Included Usage Behavior
 

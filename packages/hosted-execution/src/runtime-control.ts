@@ -1307,6 +1307,11 @@ export type HostedRuntimeAssistantConfigurationControlRequest =
     }
   | ({
       action: "update";
+      assistantInputId: string;
+    } & HostedAssistantConfigurationApprovalChanges)
+  | ({
+      /** Legacy approval-backed request accepted during the runner rollout drain. */
+      action: "update";
       approval: HostedActionApprovalConsumeRequest;
       target: HostedAssistantConfigurationApprovalTarget;
     } & HostedAssistantConfigurationApprovalChanges);

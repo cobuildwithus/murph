@@ -403,6 +403,28 @@ describe("hosted runtime control contracts", () => {
       reasoningEffort: "none",
     })).toThrow(/not supported/u);
 
+    const assistantInputId = `ain_${"c".repeat(32)}`;
+    expect(parseHostedRuntimeAssistantConfigurationControlRequest({
+      action: "update",
+      assistantInputId,
+      reasoningEffort: "medium",
+    })).toEqual({
+      action: "update",
+      assistantInputId,
+      reasoningEffort: "medium",
+    });
+    expect(() => parseHostedRuntimeAssistantConfigurationControlRequest({
+      action: "update",
+      assistantInputId: `ain_${"c".repeat(31)}`,
+      reasoningEffort: "medium",
+    })).toThrow(/assistantInputId is invalid/u);
+    expect(() => parseHostedRuntimeAssistantConfigurationControlRequest({
+      action: "update",
+      assistantInputId,
+      approval: {},
+      reasoningEffort: "medium",
+    })).toThrow(/not allowed/u);
+
     const target = {
       model: HOSTED_ASSISTANT_TERRA_MODEL,
       reasoningEffort: "high" as const,

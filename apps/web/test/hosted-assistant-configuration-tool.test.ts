@@ -4,6 +4,7 @@ const mocks = vi.hoisted(() => ({
   consumeApproval: vi.fn(),
   getPrisma: vi.fn(),
   readPreference: vi.fn(),
+  readPreferenceCausalSeq: vi.fn(),
   transaction: vi.fn(),
   updateConfiguration: vi.fn(),
 }));
@@ -21,6 +22,11 @@ vi.mock("@/src/lib/hosted-onboarding/assistant-model-preference", () => ({
 
 vi.mock("@/src/lib/action-approvals", () => ({
   consumeHostedActionApproval: mocks.consumeApproval,
+}));
+
+vi.mock("@/src/lib/hosted-mailbox/store", () => ({
+  readHostedMailboxPreferenceCausalSeqByAssistantInputIdTx:
+    mocks.readPreferenceCausalSeq,
 }));
 
 import {
@@ -45,6 +51,7 @@ describe("hosted runtime assistant configuration tool", () => {
       $transaction: mocks.transaction,
     });
     mocks.readPreference.mockResolvedValue(buildSnapshot());
+    mocks.readPreferenceCausalSeq.mockResolvedValue("42");
     mocks.consumeApproval.mockResolvedValue({
       approvalGeneration: "b".repeat(64),
       approvalId: `haa_${"a".repeat(32)}`,
@@ -76,7 +83,64 @@ describe("hosted runtime assistant configuration tool", () => {
     expect(mocks.transaction).not.toHaveBeenCalled();
   });
 
-  it("saves an explicitly requested model and reasoning effort for the next turn", async () => {
+  it("saves an explicitly requested model and reasoning effort from live conversation input", async () => {
+    const request = {
+      action: "update" as const,
+      assistantInputId: `ain_${"c".repeat(32)}`,
+      model: "gpt-5.6-luna" as const,
+      reasoningEffort: "high" as const,
+    };
+    await expect(handleHostedRuntimeAssistantConfigurationTool({
+      memberId: "member_123",
+      request,
+    })).resolves.toEqual({
+      action: "update",
+      result: {
+        ...buildSnapshot({
+          model: "gpt-5.6-luna",
+          reasoningEffort: "high",
+        }),
+        appliesAt: "next_turn",
+        requiredPlan: null,
+        status: "updated",
+      },
+    });
+    expect(mocks.readPreferenceCausalSeq).toHaveBeenCalledWith({
+      assistantInputId: request.assistantInputId,
+      memberId: "member_123",
+      prisma: { label: "tx" },
+    });
+    expect(mocks.consumeApproval).not.toHaveBeenCalled();
+    expect(mocks.updateConfiguration).toHaveBeenCalledWith({
+      memberId: "member_123",
+      model: "gpt-5.6-luna",
+      prisma: { label: "tx" },
+      reasoningEffort: "high",
+    });
+    expect(mocks.readPreferenceCausalSeq.mock.invocationCallOrder[0]).toBeLessThan(
+      mocks.updateConfiguration.mock.invocationCallOrder[0]!,
+    );
+  });
+
+  it("rejects direct updates without live conversation input authority", async () => {
+    mocks.readPreferenceCausalSeq.mockResolvedValue(null);
+
+    await expect(handleHostedRuntimeAssistantConfigurationTool({
+      memberId: "member_123",
+      request: {
+        action: "update",
+        assistantInputId: `ain_${"d".repeat(32)}`,
+        reasoningEffort: "medium",
+      },
+    })).rejects.toMatchObject({
+      code: "ASSISTANT_CONFIGURATION_INPUT_AUTHORITY_INVALID",
+      httpStatus: 403,
+    });
+    expect(mocks.consumeApproval).not.toHaveBeenCalled();
+    expect(mocks.updateConfiguration).not.toHaveBeenCalled();
+  });
+
+  it("keeps legacy exact-target approvals valid during the runner rollout drain", async () => {
     await expect(handleHostedRuntimeAssistantConfigurationTool({
       memberId: "member_123",
       request: buildUpdateRequest({
