@@ -35,7 +35,6 @@ import {
   collectJunctionWearableBrowserVaultSummaryFailures,
   JUNCTION_WEARABLE_BROWSER_VAULT_BIOMARKER_EXPECTATIONS,
   JUNCTION_WEARABLE_FIXTURE_SUMMARY_RESOURCES,
-  JUNCTION_WEARABLE_FIXTURE_TIMESERIES_RESOURCES,
   JUNCTION_WEARABLE_HOSTED_DIRECT_REPLAY_BROWSER_VAULT_METRIC_EXPECTATIONS,
   normalizeJunctionProviderSlugForComparison,
   summarizeJunctionWearableBrowserVaultExperimentProgress,
@@ -120,7 +119,6 @@ describe("hosted local Junction wearable direct-resource replay e2e", () => {
         JUNCTION_SUMMARY_RESOURCES: [
           ...new Set([...JUNCTION_WEARABLE_FIXTURE_SUMMARY_RESOURCES, "sleep_cycle"]),
         ].join(","),
-        JUNCTION_TIMESERIES_RESOURCES: JUNCTION_WEARABLE_FIXTURE_TIMESERIES_RESOURCES.join(","),
         JUNCTION_WEBHOOK_SECRET: junctionWebhookSecret,
         LINQ_API_BASE_URL: requireLinqStub().runnerBaseUrl,
         LINQ_API_TOKEN: linqApiToken,
