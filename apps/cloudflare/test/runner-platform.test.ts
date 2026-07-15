@@ -108,6 +108,8 @@ import {
   HOSTED_EXECUTION_RUNNER_PROXY_TOKEN_HEADER,
   HOSTED_PROVIDER_EGRESS_TOKEN_HEADER,
   HOSTED_RUNNER_BOUND_USER_ID_HEADER,
+  HOSTED_RUNTIME_ARTIFACT_FETCH_CORRELATION_ID_HEADER,
+  HOSTED_RUNTIME_ARTIFACT_READ_PURPOSE_HEADER,
   HOSTED_RUNTIME_ATTEMPT_ID_HEADER,
   HOSTED_RUNTIME_LEASE_GENERATION_HEADER,
   HOSTED_RUNTIME_WORKSPACE_VERSION_HEADER,
@@ -2428,7 +2430,9 @@ describe("buildHostedExecutionRuntimePlatform", () => {
 
     let thrown: unknown;
     try {
-      await platform.artifactStore.get("a".repeat(64));
+      await platform.artifactStore.get("a".repeat(64), {
+        purpose: "workspace_restore",
+      });
     } catch (error) {
       thrown = error;
     }
@@ -2525,11 +2529,30 @@ describe("buildHostedExecutionRuntimePlatform", () => {
       fetchImpl: fetchMock as typeof fetch,
     });
 
-    await expect(platform.artifactStore.get("a".repeat(64))).resolves.toBeNull();
+    await expect(platform.artifactStore.get("a".repeat(64), {
+      purpose: "workspace_restore",
+    })).resolves.toBeNull();
 
     const request = requireFetchRequest(fetchMock.mock.calls[0], "artifact read");
     expect(request.url).toBe(`http://artifacts.worker/objects/${"a".repeat(64)}`);
     expectDefaultRuntimeWriteFenceHeaders(request);
+    expect(request.headers.get(HOSTED_RUNTIME_ARTIFACT_READ_PURPOSE_HEADER))
+      .toBe("workspace_restore");
+    const correlationId = request.headers.get(
+      HOSTED_RUNTIME_ARTIFACT_FETCH_CORRELATION_ID_HEADER,
+    );
+    expect(correlationId).toMatch(
+      /^[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/u,
+    );
+    expect(mocks.emitHostedExecutionStructuredLog).toHaveBeenCalledWith(
+      expect.objectContaining({
+        component: "hosted.runtime.artifact-store",
+        details: expect.objectContaining({
+          artifactFetchCorrelationId: correlationId,
+          artifactReadPurpose: "workspace_restore",
+        }),
+      }),
+    );
   });
 
   it("preserves cancellation while a legacy snapshot artifact fetch is pending", async () => {
@@ -2552,6 +2575,7 @@ describe("buildHostedExecutionRuntimePlatform", () => {
     });
 
     const artifact = platform.artifactStore.get("a".repeat(64), {
+      purpose: "legacy_snapshot_materialization",
       signal: abortController.signal,
     });
     await fetchStarted;
@@ -2579,10 +2603,18 @@ describe("buildHostedExecutionRuntimePlatform", () => {
       fetchImpl: fetchMock as typeof fetch,
     });
 
-    const result = await platform.artifactStore.get("b".repeat(64));
+    const result = await platform.artifactStore.get("b".repeat(64), {
+      purpose: "workspace_artifact_materialization",
+    });
 
     expect(new TextDecoder().decode(result ?? new Uint8Array())).toBe("artifact-bytes");
     expect(fetchMock).toHaveBeenCalledTimes(2);
+    const firstRequest = requireFetchRequest(fetchMock.mock.calls[0], "first artifact read");
+    const secondRequest = requireFetchRequest(fetchMock.mock.calls[1], "retried artifact read");
+    expect(firstRequest.headers.get(HOSTED_RUNTIME_ARTIFACT_READ_PURPOSE_HEADER))
+      .toBe("workspace_artifact_materialization");
+    expect(secondRequest.headers.get(HOSTED_RUNTIME_ARTIFACT_FETCH_CORRELATION_ID_HEADER))
+      .toBe(firstRequest.headers.get(HOSTED_RUNTIME_ARTIFACT_FETCH_CORRELATION_ID_HEADER));
     expect(mocks.emitHostedExecutionStructuredLog).toHaveBeenCalledWith(
       expect.objectContaining({
         component: "hosted.runtime.artifact-store",
@@ -2636,7 +2668,9 @@ describe("buildHostedExecutionRuntimePlatform", () => {
       fetchImpl: fetchMock as typeof fetch,
     });
 
-    const result = await platform.artifactStore.get("c".repeat(64));
+    const result = await platform.artifactStore.get("c".repeat(64), {
+      purpose: "canonical_write_receipt",
+    });
 
     expect(new TextDecoder().decode(result ?? new Uint8Array())).toBe("artifact-bytes");
     expect(fetchMock).toHaveBeenCalledTimes(2);
@@ -2704,7 +2738,9 @@ describe("buildHostedExecutionRuntimePlatform", () => {
         fetchImpl: fetchMock as typeof fetch,
       });
 
-      await expect(platform.artifactStore.get("d".repeat(64)))
+      await expect(platform.artifactStore.get("d".repeat(64), {
+        purpose: "workspace_restore",
+      }))
         .rejects.toThrow(testCase.expectedMessage);
       expect(fetchMock, testCase.label).toHaveBeenCalledTimes(1);
       const serializedLogs = JSON.stringify(mocks.emitHostedExecutionStructuredLog.mock.calls);

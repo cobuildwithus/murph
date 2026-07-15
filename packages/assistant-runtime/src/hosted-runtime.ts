@@ -79,6 +79,9 @@ import {
 import {
   createHostedAssistantChannelTypingDependencies,
 } from "./hosted-runtime/channel-activity.ts";
+import {
+  resolveHostedPersonalizationInputIdForAcceptedInputs,
+} from "./hosted-runtime/turn-input.ts";
 import type {
   HostedAssistantWorkspaceRuntimeJobResult,
   HostedAssistantWorkspaceRuntimeJobInput,
@@ -1628,8 +1631,6 @@ export async function runHostedWorkspaceRuntimeJobInProcess(
         }
       },
     };
-    const invocationLocalAssistantProjectedWakeKeys =
-      new WeakMap<HostedWorkspaceRunnerResult, string | null>();
     const runWorkspaceForegroundPass = async (passInput: {
       initialAssistantInputBatch?: HostedWorkspaceRunnerAssistantInputBatch | null;
       initialMailboxImport?: HostedWorkspaceRunnerInput["initialMailboxImport"];
@@ -1664,8 +1665,7 @@ export async function runHostedWorkspaceRuntimeJobInProcess(
         status: "start",
       });
       try {
-        let currentAssistantPersonalizationInputId: string | null = null;
-        let invocationLocalAssistantProjectedWakeKey: string | null = null;
+        let currentAssistantPreferenceInputId: string | null = null;
         const passResult = await hostedCliBridge.runWithInvocation(
           {
             currentDeliveryRoute: () => currentOperationDeliveryRoute,
@@ -1695,14 +1695,14 @@ export async function runHostedWorkspaceRuntimeJobInProcess(
                 startedAtEpochMs: passStartedAtEpochMs,
               },
               runAssistantPhase: async (phaseInput) => {
-                currentAssistantPersonalizationInputId = null;
+                currentAssistantPreferenceInputId = null;
                 try {
                   const phaseResult = await (
                     options.runAssistantPhase ?? runHostedWorkspaceAssistantPhase
                   )({
                     ...phaseInput,
-                    currentAssistantPersonalizationInputId: () =>
-                      currentAssistantPersonalizationInputId,
+                    currentAssistantPreferenceInputId: () =>
+                      currentAssistantPreferenceInputId,
                     currentDeliveryRouteScope,
                     deviceSyncWorkspaceWakeHandled: deviceSyncWorkspaceWakeHandledUntilCheckpoint,
                     request: input.request,
@@ -1710,32 +1710,29 @@ export async function runHostedWorkspaceRuntimeJobInProcess(
                     runtime: foregroundRuntime,
                     runtimeEnv: invocationRuntimeEnv,
                     beforeProviderAcceptedInputs: async ({ acceptedInputs }) => {
-                      const assistantPersonalizationInputId =
-                        acceptedInputs.length === 1
-                          ? acceptedInputs[0]?.id ?? null
-                          : null;
-                      currentAssistantPersonalizationInputId =
-                        assistantPersonalizationInputId;
+                      const assistantInputIds = acceptedInputs.every(
+                        (acceptedInput) => acceptedInput.source === "assistant-input",
+                      )
+                        ? acceptedInputs.map((acceptedInput) => acceptedInput.id)
+                        : [];
+                      const assistantPreferenceInputId =
+                        await resolveHostedPersonalizationInputIdForAcceptedInputs({
+                          assistantInputIds,
+                          vaultRoot: restored.vaultRoot,
+                        });
+                      currentAssistantPreferenceInputId =
+                        assistantPreferenceInputId;
                       return () => {
-                        currentAssistantPersonalizationInputId = null;
+                        currentAssistantPreferenceInputId = null;
                       };
                     },
                     stagedDirtyAcks: stagedDeviceSyncDirtyAcks,
                     suppressDirtyPendingFetch: suppressDirtyPendingFetchUntilCheckpoint,
                     signal: passSignal,
                   });
-                  invocationLocalAssistantProjectedWakeKey =
-                    Object.hasOwn(phaseResult, "nextWakeAt")
-                    && phaseResult.nextWakeAt
-                    && hostedRuntimeWakeReasonIsAssistant(phaseResult.nextWakeReason ?? null)
-                      ? buildHostedRuntimeWakeKey({
-                          nextWakeAt: phaseResult.nextWakeAt,
-                          nextWakeReason: phaseResult.nextWakeReason ?? null,
-                        })
-                      : null;
                   return phaseResult;
                 } finally {
-                  currentAssistantPersonalizationInputId = null;
+                  currentAssistantPreferenceInputId = null;
                 }
               },
               signal: passSignal,
@@ -1755,10 +1752,6 @@ export async function runHostedWorkspaceRuntimeJobInProcess(
               await drainHostedCodexPostTurnCleanups();
             }
           },
-        );
-        invocationLocalAssistantProjectedWakeKeys.set(
-          passResult,
-          invocationLocalAssistantProjectedWakeKey,
         );
         trackMailboxPostCheckpointEffects(passResult.mailboxPostCheckpointEffectsFinished);
         emitPhaseLog({
@@ -2313,8 +2306,19 @@ export async function runHostedWorkspaceRuntimeJobInProcess(
           nowMs: Date.now(),
         });
         const replaceWake = shouldReplaceHostedWorkspaceInvocationWake(passResult);
+        const invocationLocalAssistantWakeAt =
+          passResult.assistantPhaseResult?.invocationLocalAssistantWakeAt ?? null;
         const passProjectedAssistantWakeKey =
-          invocationLocalAssistantProjectedWakeKeys.get(passResult) ?? null;
+          invocationLocalAssistantWakeAt !== null
+          && passResult.assistantPhaseResult?.nextWakeAt === invocationLocalAssistantWakeAt
+          && hostedRuntimeWakeReasonIsAssistant(
+            passResult.assistantPhaseResult.nextWakeReason ?? null,
+          )
+            ? buildHostedRuntimeWakeKey({
+                nextWakeAt: invocationLocalAssistantWakeAt,
+                nextWakeReason: passResult.assistantPhaseResult.nextWakeReason ?? null,
+              })
+            : null;
         const passProducedDefaultWake =
           replaceWake
           || passProjectedAssistantWakeKey !== null

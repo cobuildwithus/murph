@@ -77,7 +77,8 @@ changes, a dirty worktree, or a checkout that is not at the pushed head.
 The PR body must carry the intent contract, applicable UX outline, and change-shape breakdown from
 `agent-docs/operations/completion-workflow.md` § PR Description: why the PR
 exists, the user-visible goal and flow it is meant to ship, invariants to
-preserve, and added/deleted lines by source, tests, docs, config/tooling, and generated/other.
+preserve, non-obvious affected surfaces, and added/deleted lines by source,
+tests, docs, config/tooling, and generated/other.
 Before firing a round, confirm that block is present and current.
 
 At round 1, also record the exact first-reviewed head and its five-category
@@ -113,9 +114,10 @@ current user explicitly asks for the loop.
 2. Run ReviewGPT with the PR preset and the default randomized usable managed
    browser lane. Pass the PR ref and substantive round through
    `REVIEW_GPT_PR_URL` and `REVIEW_GPT_ROUND_NUMBER`. The packager adds the full
-   current PR patch, exact round metadata, and the delta from the previous
+   PR body, current patch, exact round metadata, and the delta from the previous
    reviewed head to the guarded `codebase.zip` source snapshot:
 
+   - `review-gpt-pr-context/pr-body.md`
    - `review-gpt-pr-context/pr.diff`
    - `review-gpt-pr-context/changed-files.txt`
    - `review-gpt-pr-context/review-round.json`
@@ -222,6 +224,11 @@ current user explicitly asks for the loop.
    - **Accepted simplification**: accept only when the change removes more
      complexity than it adds and has direct proof that required behavior and
      invariants are preserved.
+   - **Accepted purpose drift**: first prove whether the non-obvious surface is
+     necessary for the PR outcome. Delete it or split it into a separate PR when
+     it is unnecessary. When it is necessary but undisclosed, update the PR
+     intent contract with the reason and regression proof before the next
+     review round. Disclosure alone does not cure unnecessary scope.
    - **Rejected**: wrong, already handled, speculative, not worth the added
      complexity, or missing the required reproduction/proof. Note the reason.
 
@@ -303,6 +310,18 @@ current user explicitly asks for the loop.
    schema, or the implemented contract. Run their focused verification and CI
    instead. If such a change does alter the implemented contract or executable
    behavior, use the ordinary next-round rule.
+
+   One narrow exception closes a disclosure-only finding: when every other
+   accepted finding is resolved and ReviewGPT accepted necessary-but-undisclosed
+   Purpose Drift as the only remaining issue, update `Non-obvious affected
+   surfaces` and retry the same substantive round number against the same pushed
+   head. Keep the original round metadata and state in the invocation that this
+   is a disclosure-only verification retry, naming the prior finding and the
+   corrected reason and regression proof. The retry verifies only that corrected
+   intent contract against the already-reviewed patch; it does not reopen the
+   patch, advance the substantive-round counter, or reset the first-reviewed
+   baseline. The retry must still return `ROUND_OUTCOME: PASS` before the gate is
+   complete.
 
 ## Base-Update-Only Exception
 

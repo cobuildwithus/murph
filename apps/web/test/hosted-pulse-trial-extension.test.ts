@@ -3,12 +3,24 @@ import type Stripe from "stripe";
 import { afterEach, beforeEach, describe, expect, test, vi } from "vitest";
 
 const mocks = vi.hoisted(() => ({
+  readActiveHostedFamilySponsorship: vi.fn(),
   readHostedMemberBillingSnapshot: vi.fn(),
   reconcileHostedAiUsageAllowancePeriodForMemberTx: vi.fn(),
   updateHostedMemberCoreState: vi.fn(),
   withHostedMemberStripeMutationLockForOps: vi.fn(),
   writeHostedMemberStripeBillingRefTx: vi.fn(),
 }));
+
+vi.mock("../src/lib/hosted-onboarding/member-access", async () => {
+  const actual = await vi.importActual<
+    typeof import("../src/lib/hosted-onboarding/member-access")
+  >("../src/lib/hosted-onboarding/member-access");
+  return {
+    ...actual,
+    readActiveHostedFamilySponsorship:
+      mocks.readActiveHostedFamilySponsorship,
+  };
+});
 
 vi.mock("../src/lib/hosted-onboarding/hosted-member-store", async () => {
   const actual = await vi.importActual<
@@ -76,6 +88,7 @@ describe("single-member Pulse Trial extension", () => {
     vi.clearAllMocks();
     process.env.HOSTED_CONTACT_PRIVACY_KEYS = `v1:${CONTACT_PRIVACY_KEY}`;
     process.env.HOSTED_CONTACT_PRIVACY_CURRENT_KEY_VERSION = "v1";
+    mocks.readActiveHostedFamilySponsorship.mockResolvedValue(false);
     mocks.readHostedMemberBillingSnapshot.mockResolvedValue(makeMember());
     mocks.withHostedMemberStripeMutationLockForOps.mockImplementation(
       async (input: { run: (tx: object) => Promise<unknown> }) => input.run({}),
@@ -199,6 +212,153 @@ describe("single-member Pulse Trial extension", () => {
     expect(JSON.stringify(result)).not.toContain(SUBSCRIPTION_ID);
   });
 
+  test("rejects active Family sponsorship before reading Stripe", async () => {
+    mocks.readActiveHostedFamilySponsorship.mockResolvedValue(true);
+    const stripe = makeStripeClient(makeSubscription({ status: "paused" }));
+
+    const result = await previewHostedPulseTrialExtension({
+      memberId: MEMBER_ID,
+      now: NOW,
+      priceId: PRICE_ID,
+      prisma: {} as never,
+      stripe,
+    });
+
+    expect(result).toMatchObject({
+      eligibilityCode: "family_sponsored",
+      eligible: false,
+      message: "This member already has access through an active Family plan.",
+      providerStatus: null,
+      targetTrialEndsAt: null,
+    });
+    expect(stripe.retrieveSubscription).not.toHaveBeenCalled();
+    expect(stripe.resumeSubscription).not.toHaveBeenCalled();
+    expect(stripe.updateSubscription).not.toHaveBeenCalled();
+  });
+
+  test("rejects Apply if Family sponsorship became active after Preview", async () => {
+    mocks.readActiveHostedFamilySponsorship
+      .mockResolvedValueOnce(false)
+      .mockResolvedValueOnce(true);
+    const prisma = {};
+    const lockTx = {};
+    mocks.withHostedMemberStripeMutationLockForOps.mockImplementationOnce(
+      async (input: { run: (tx: object) => Promise<unknown> }) =>
+        input.run(lockTx),
+    );
+    const stripe = makeStripeClient(makeSubscription({
+      status: "paused",
+      trialEnd: 1_700_000_000,
+    }));
+    const preview = await previewHostedPulseTrialExtension({
+      memberId: MEMBER_ID,
+      now: NOW,
+      priceId: PRICE_ID,
+      prisma: prisma as never,
+      stripe,
+    });
+    if (!preview.previewProof) {
+      throw new Error("Expected a preview proof.");
+    }
+    stripe.retrieveSubscription.mockClear();
+
+    await expect(applyHostedPulseTrialExtension({
+      memberId: MEMBER_ID,
+      now: new Date(NOW.getTime() + 60_000),
+      previewProof: preview.previewProof,
+      priceId: PRICE_ID,
+      prisma: prisma as never,
+      stripe,
+    })).rejects.toBeInstanceOf(HostedPulseTrialExtensionPreviewStaleError);
+    expect(mocks.readActiveHostedFamilySponsorship).toHaveBeenNthCalledWith(
+      1,
+      { memberId: MEMBER_ID, prisma },
+    );
+    expect(mocks.readActiveHostedFamilySponsorship).toHaveBeenNthCalledWith(
+      2,
+      { memberId: MEMBER_ID, prisma: lockTx },
+    );
+    expect(
+      mocks.withHostedMemberStripeMutationLockForOps.mock.invocationCallOrder[0],
+    ).toBeLessThan(
+      mocks.readActiveHostedFamilySponsorship.mock.invocationCallOrder[1] ?? 0,
+    );
+    expect(stripe.retrieveSubscription).not.toHaveBeenCalled();
+    expect(stripe.resumeSubscription).not.toHaveBeenCalled();
+    expect(stripe.updateSubscription).not.toHaveBeenCalled();
+    expect(mocks.updateHostedMemberCoreState).not.toHaveBeenCalled();
+    expect(mocks.writeHostedMemberStripeBillingRefTx).not.toHaveBeenCalled();
+  });
+
+  test("does not recover a completed extension after the provider becomes paid active", async () => {
+    mocks.readHostedMemberBillingSnapshot.mockResolvedValue(makeMember({
+      billingPhase: "trial",
+      billingStatus: HostedBillingStatus.active,
+      trialEndsAt: new Date(TARGET_FROM_PAUSED * 1000),
+    }));
+    let providerSubscription = makeSubscription({
+      extensionDays: "7",
+      extensionOperation: RECOVERABLE_OPERATION_ID,
+      extensionTargetTrialEnd: TARGET_FROM_PAUSED,
+      status: "trialing",
+      trialEnd: TARGET_FROM_PAUSED,
+    });
+    const stripe = makeStripeClient(providerSubscription);
+    stripe.retrieveSubscription.mockImplementation(
+      async () => providerSubscription,
+    );
+    const preConversionPreview = await previewHostedPulseTrialExtension({
+      memberId: MEMBER_ID,
+      now: NOW,
+      priceId: PRICE_ID,
+      prisma: {} as never,
+      stripe,
+    });
+    if (!preConversionPreview.previewProof) {
+      throw new Error("Expected an eligible pre-conversion preview.");
+    }
+
+    providerSubscription = makeSubscription({
+      extensionDays: "7",
+      extensionOperation: RECOVERABLE_OPERATION_ID,
+      extensionTargetTrialEnd: TARGET_FROM_PAUSED,
+      status: "active",
+      trialEnd: TARGET_FROM_PAUSED,
+    });
+
+    const result = await previewHostedPulseTrialExtension({
+      memberId: MEMBER_ID,
+      now: NOW,
+      priceId: PRICE_ID,
+      prisma: {} as never,
+      stripe,
+    });
+
+    expect(result).toMatchObject({
+      eligibilityCode: "provider_subscription_not_extendable",
+      eligible: false,
+      localBillingPhase: "trial",
+      localBillingStatus: "active",
+      outcome: "preview",
+      providerStatus: "active",
+    });
+    expect(result.previewProof).toBeNull();
+    expect(stripe.updateSubscription).not.toHaveBeenCalled();
+    expect(stripe.resumeSubscription).not.toHaveBeenCalled();
+
+    await expect(applyHostedPulseTrialExtension({
+      memberId: MEMBER_ID,
+      now: new Date("2026-07-14T16:02:00.000Z"),
+      previewProof: preConversionPreview.previewProof,
+      priceId: PRICE_ID,
+      prisma: {} as never,
+      stripe,
+    })).rejects.toBeInstanceOf(HostedPulseTrialExtensionPreviewStaleError);
+    expect(stripe.updateSubscription).not.toHaveBeenCalled();
+    expect(stripe.resumeSubscription).not.toHaveBeenCalled();
+    expect(mocks.writeHostedMemberStripeBillingRefTx).not.toHaveBeenCalled();
+  });
+
   test("extends a paused trial once and reconciles local billing under the lock", async () => {
     const paused = makeSubscription({ status: "paused", trialEnd: 1_700_000_000 });
     const stripe = makeStripeClient(paused);
@@ -270,6 +430,9 @@ describe("single-member Pulse Trial extension", () => {
         timeout: 80_000,
       }),
     );
+    expect(providerSubscription.metadata).not.toHaveProperty(
+      "murphTrialExtensionTargetTrialEnd",
+    );
     expect(stripe.resumeSubscription).toHaveBeenCalledWith(
       SUBSCRIPTION_ID,
       {
@@ -286,10 +449,15 @@ describe("single-member Pulse Trial extension", () => {
     expect(stripe.updateSubscription).toHaveBeenNthCalledWith(
       2,
       SUBSCRIPTION_ID,
-      expect.objectContaining({
+      {
+        metadata: {
+          murphTrialExtensionDays: "7",
+          murphTrialExtensionOperation: operationId,
+          murphTrialExtensionTargetTrialEnd: "",
+        },
         proration_behavior: "none",
         trial_end: TARGET_FROM_PAUSED,
-      }),
+      },
       expect.objectContaining({
         idempotencyKey:
           `hosted-member-trial-extension:update:${operationId}`,
@@ -389,7 +557,7 @@ describe("single-member Pulse Trial extension", () => {
       SUBSCRIPTION_ID,
       expect.objectContaining({
         metadata: expect.objectContaining({
-          murphTrialExtensionTargetTrialEnd: TARGET_FROM_LIVE.toString(),
+          murphTrialExtensionTargetTrialEnd: "",
         }),
         trial_end: TARGET_FROM_LIVE,
       }),

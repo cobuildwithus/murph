@@ -755,6 +755,13 @@ describe("parseHostedRuntimeGroupTool", () => {
       action: "list_memberships",
     });
     expect(parseHostedRuntimeGroupToolRequest({
+      action: "leave_membership",
+      membershipId: "hgm_self_123",
+    })).toEqual({
+      action: "leave_membership",
+      membershipId: "hgm_self_123",
+    });
+    expect(parseHostedRuntimeGroupToolRequest({
       action: "update_display_name",
       updateDisplayName: {
         displayName: "  Weekly   Health Crew  ",
@@ -881,6 +888,24 @@ describe("parseHostedRuntimeGroupTool", () => {
       parseHostedRuntimeGroupToolRequest({
         action: "read_current",
         requestedVaultShareProjectionKinds: ["sleep-times.v0"],
+      })
+    ).toThrow(/not allowed/u);
+    expect(() =>
+      parseHostedRuntimeGroupToolRequest({
+        action: "leave_membership",
+      })
+    ).toThrow(/membershipId/u);
+    expect(() =>
+      parseHostedRuntimeGroupToolRequest({
+        action: "leave_membership",
+        membershipId: "   ",
+      })
+    ).toThrow(/must not be blank/u);
+    expect(() =>
+      parseHostedRuntimeGroupToolRequest({
+        action: "leave_membership",
+        groupId: "hgrp_hijack",
+        membershipId: "hgm_self_123",
       })
     ).toThrow(/not allowed/u);
     expect(() =>
@@ -1042,6 +1067,7 @@ describe("parseHostedRuntimeGroupTool", () => {
           ],
           kind: "friends",
           memberCount: 7,
+          membershipId: "hgm_self_123",
           permissionsUrl: "https://example.com/groups/join/abc123",
           requestedVaultShareProjectionScopes: [
             { projectionKind: "group-email.v0" },
@@ -1086,6 +1112,49 @@ describe("parseHostedRuntimeGroupTool", () => {
         truncated: false,
       },
     })).toThrow(/not allowed/u);
+
+    const { membershipId: _omittedMembershipId, ...legacyMembership } =
+      response.result.memberships[0];
+    void _omittedMembershipId;
+    expect(parseHostedRuntimeGroupToolResponse({
+      action: "list_memberships",
+      result: {
+        memberships: [legacyMembership],
+        status: "ok",
+        truncated: false,
+      },
+    })).toEqual({
+      action: "list_memberships",
+      result: {
+        memberships: [{ ...legacyMembership, membershipId: null }],
+        status: "ok",
+        truncated: false,
+      },
+    });
+    expect(parseHostedRuntimeGroupToolResponse({
+      action: "list_memberships",
+      result: {
+        memberships: [{
+          ...response.result.memberships[0],
+          membershipId: null,
+        }],
+        status: "ok",
+        truncated: false,
+      },
+    })).toMatchObject({
+      result: { memberships: [{ membershipId: null }] },
+    });
+    expect(() => parseHostedRuntimeGroupToolResponse({
+      action: "list_memberships",
+      result: {
+        memberships: [{
+          ...response.result.memberships[0],
+          membershipId: "   ",
+        }],
+        status: "ok",
+        truncated: false,
+      },
+    })).toThrow(/membershipId must not be blank/u);
 
     const {
       requestedVaultShareProjectionScopes: _omittedRequestedScopes,
@@ -1632,6 +1701,33 @@ describe("parseHostedRuntimeGroupTool", () => {
         result: { revokedCount: 2, status: "revoked" },
       })
     ).toThrow(/must be 1/u);
+  });
+
+  it("parses leave_membership responses without accepting extra state", () => {
+    for (const status of ["left", "already_left", "owner_cannot_leave"] as const) {
+      expect(parseHostedRuntimeGroupToolResponse({
+        action: "leave_membership",
+        result: { status },
+      })).toEqual({
+        action: "leave_membership",
+        result: { status },
+      });
+    }
+    expect(parseHostedRuntimeGroupToolResponse({
+      action: "leave_membership",
+      result: { status: "unavailable", unavailableReason: "membership_lookup_unavailable" },
+    })).toEqual({
+      action: "leave_membership",
+      result: { status: "unavailable", unavailableReason: "membership_lookup_unavailable" },
+    });
+    expect(() => parseHostedRuntimeGroupToolResponse({
+      action: "leave_membership",
+      result: { status: "left", groupId: "hgrp_private" },
+    })).toThrow(/not allowed/u);
+    expect(() => parseHostedRuntimeGroupToolResponse({
+      action: "leave_membership",
+      result: { status: "unavailable" },
+    })).toThrow(/unavailableReason/u);
   });
 });
 

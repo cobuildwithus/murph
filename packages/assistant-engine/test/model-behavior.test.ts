@@ -376,7 +376,7 @@ describe('assistant execution prompt contract', () => {
       'never use a same-turn voice demo as activation proof',
     )
     expect(layers.stableRouteCapabilityPrompt).toContain(
-      'exact-target approval result is authoritative',
+      'explicit user-requested model or reasoning changes',
     )
     expect(layers.stableRouteCapabilityPrompt).toContain(
       'a saved change starts on the next turn',
@@ -408,19 +408,20 @@ describe('assistant execution prompt contract', () => {
     }
   })
 
-  it('requires pending vault-file approvals to include the returned handoff link and approved sends to avoid stock queue copy', () => {
+  it('keeps pending vault approval capabilities outside model context and approved sends free of stock queue copy', () => {
     const prompt = buildAssistantSystemPrompt(createCommonCodexPromptInput())
 
     expect(prompt).toContain('Vault file sends:')
     expect(prompt).toContain(
-      'send a normal text reply with the raw approval URL',
+      'explain naturally that approval is required',
     )
     expect(prompt).toContain(
       'The file is not attached yet.',
     )
     expect(prompt).toContain(
-      'Do not omit the URL, summarize around it without the URL, or rely on a separate automated message.',
+      'The runtime appends the exact approval link outside model context',
     )
+    expect(prompt).toContain('do not invent, request, or print an approval URL')
     expect(prompt).toContain(
       'When `murph.send_vault_file` returns `status: "approved"`',
     )
@@ -2140,18 +2141,24 @@ describe('assistant conversation scope', () => {
 
     expect(prompt).toContain('Email replies can converse about this group')
     expect(prompt).toContain('Group-email replies cannot create, edit, import, pause')
+    expect(prompt).not.toContain('existing automation in this bound runtime vault')
+    expect(prompt).not.toContain('`vault-cli automation set-status`')
     expect(prompt).not.toContain('Group automation writes are current-room-only')
     expect(prompt).not.toContain('Scheduled automation commands are available for this group room')
   })
 
-  it('keeps hosted direct automation writes in the current conversation', () => {
+  it('keeps hosted route writes current while permitting vault-owned record mutations', () => {
     const prompt = buildAssistantSystemPrompt(createCommonCodexPromptInput({
       conversationScope: 'direct',
       hostedRuntime: true,
     }))
 
-    expect(prompt).toContain('Hosted chat automation writes are current-conversation-only')
-    expect(prompt).toContain('omit route flags so the trusted route is inherited')
+    expect(prompt).toContain('existing automation in this bound runtime vault')
+    expect(prompt).toContain('`vault-cli automation edit` for non-route changes')
+    expect(prompt).toContain('`vault-cli automation set-status`')
+    expect(prompt).toContain('stored route remains unchanged')
+    expect(prompt).toContain('bind to the trusted current conversation')
+    expect(prompt).toContain('do not target another route')
     expect(prompt).not.toContain('inspect saved local self-targets')
   })
 

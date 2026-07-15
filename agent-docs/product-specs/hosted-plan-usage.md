@@ -32,6 +32,14 @@ The available projection keeps these access states distinct:
 | Direct paid Edge | Edge | Monthly | None |
 | Sponsored member | Family | Monthly | None |
 
+An active sponsored member keeps their assigned Family tier when the local
+Family billing projection is absent, invalid, or lacks a period containing the
+usage timestamp. Only a valid paid Family projection supplies period bounds;
+otherwise the shared allowance resolver uses its existing UTC calendar-month
+fallback, just as it does for direct paid plans. Because included usage is
+advisory rather than an exact prepaid meter, already-accounted fallback usage
+is not moved between periods later.
+
 Synthetic group-thread allowance is not personal plan usage. It returns the
 unavailable reason `group_not_supported` before exposing personal usage facts.
 Inactive hosted access and a trial awaiting conversion also return explicit

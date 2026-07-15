@@ -67,6 +67,7 @@ describe("murph.group dynamic tool", () => {
     expect(MURPH_GROUP_TOOL.inputSchema.properties.action.enum).toEqual([
       "read_current",
       "list_memberships",
+      "leave_membership",
       "update_display_name",
       "create_join_link",
       "post_join_offer",
@@ -122,6 +123,16 @@ describe("murph.group dynamic tool", () => {
     expect(MURPH_GROUP_TOOL.inputSchema.properties.projectionScopes.description)
       .toContain("Existing membership and other grants remain unchanged");
     expect(MURPH_GROUP_TOOL.description).toContain('action="list_memberships"');
+    expect(MURPH_GROUP_TOOL.description).toContain('action="leave_membership"');
+    expect(MURPH_GROUP_TOOL.description).toContain("call list_memberships first");
+    expect(MURPH_GROUP_TOOL.description).toContain("nonempty membershipId");
+    expect(MURPH_GROUP_TOOL.description).toContain("Never guess a membershipId");
+    expect(MURPH_GROUP_TOOL.description).toContain("construct, use, or expose a join URL to leave");
+    expect(MURPH_GROUP_TOOL.description).toContain("leaving through chat is temporarily unavailable");
+    expect(MURPH_GROUP_TOOL.description).toContain("does not remove them from the iMessage chat");
+    expect(MURPH_GROUP_TOOL.description).toContain("Owners cannot leave");
+    expect(MURPH_GROUP_TOOL.inputSchema.properties.membershipId.description)
+      .toContain("immediately preceding list_memberships result");
     expect(MURPH_GROUP_TOOL.description).toContain("permission only");
     expect(MURPH_GROUP_TOOL.description)
       .toContain('In a connected group-chat turn, if read_current returns status="none"');
@@ -285,6 +296,58 @@ describe("murph.group dynamic tool", () => {
     });
   });
 
+  it("parses and executes an opaque private-membership leave", async () => {
+    const request = readMurphDynamicToolRequest(groupToolCall({
+      action: "leave_membership",
+      membershipId: "hgm_self_123",
+    }));
+    if (!request || request.kind !== "group") {
+      throw new Error("Expected group request.");
+    }
+    expect(request.request).toEqual({
+      action: "leave_membership",
+      membershipId: "hgm_self_123",
+    });
+
+    const groupRequest = vi.fn<GroupToolRequest>(async () => ({
+      action: "leave_membership",
+      result: { status: "left" },
+    }));
+    const result = await executeMurphDynamicToolRequest({
+      env: {},
+      fetchImpl: fetch,
+      hostedToolContext: createGroupHostedToolContext({ groupRequest }),
+      nextUsageOrdinal: () => 1,
+      progressDelivery: null,
+      request,
+      vaultRoot: null,
+    });
+
+    expect(result.rpcResult.success).toBe(true);
+    expect(readGroupToolPayload(result)).toEqual({
+      action: "leave_membership",
+      result: { status: "left" },
+    });
+    expect(groupRequest).toHaveBeenCalledWith({
+      action: "leave_membership",
+      membershipId: "hgm_self_123",
+    });
+
+    expect(readMurphDynamicToolRequest(groupToolCall({
+      action: "leave_membership",
+    }))?.kind).toBe("invalid-group-arguments");
+    expect(readMurphDynamicToolRequest(groupToolCall({
+      action: "leave_membership",
+      groupId: "hgrp_hijack",
+      membershipId: "hgm_self_123",
+    }))?.kind).toBe("invalid-group-arguments");
+    expect(readMurphDynamicToolRequest(groupToolCall({
+      action: "leave_membership",
+      membershipId: "hgm_self_123",
+      permissionsUrl: "https://example.test/groups/join/reusable",
+    }))?.kind).toBe("invalid-group-arguments");
+  });
+
   it("parses and executes personal membership reads", async () => {
     const request = readMurphDynamicToolRequest(groupToolCall({
       action: "list_memberships",
@@ -302,6 +365,7 @@ describe("murph.group dynamic tool", () => {
           grantedVaultShareProjectionScopes: [{ projectionKind: "profile-name.v0" as const }],
           kind: "friends",
           memberCount: 7,
+          membershipId: "hgm_self_123",
           permissionsUrl: "https://www.withmurph.ai/groups/join/abc123",
           requestedVaultShareProjectionScopes: [{ projectionKind: "hrv-days.v0" as const }],
           role: "member",

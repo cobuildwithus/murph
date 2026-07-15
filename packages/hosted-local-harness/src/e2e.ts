@@ -64,6 +64,7 @@ export type HostedLocalE2eScenarioName =
   | "linq-onboarding-followup"
   | "linq-first-contact-test-controls"
   | "linq-scheduled-reminder"
+  | "linq-same-wake-batching"
   | "linq-webhook"
   | "linq-webhook-audio"
   | "runner-warm-reuse"
@@ -252,6 +253,10 @@ export const hostedLocalE2eScenarios: readonly HostedLocalE2eScenario[] = [
     file: "apps/cloudflare/test/hosted-local-linq-webhook-e2e.test.ts",
     name: "linq-webhook",
     requiresParserToolchain: true,
+  },
+  {
+    file: "apps/cloudflare/test/hosted-local-linq-same-wake-batching-e2e.test.ts",
+    name: "linq-same-wake-batching",
   },
   {
     file: "apps/cloudflare/test/hosted-local-runner-warm-auth-recovery-e2e.test.ts",

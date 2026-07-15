@@ -1,4 +1,4 @@
-import { mkdtemp, rm } from "node:fs/promises";
+import { access, mkdtemp, rm } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import path from "node:path";
 import { afterEach, describe, expect, it } from "vitest";
@@ -14,6 +14,7 @@ import {
   compactHostedPendingAssistantInputIds,
   enqueueHostedPendingAssistantInputId,
   readHostedPendingAssistantInputIds,
+  resolveHostedPendingAssistantInputStatePath,
 } from "../src/hosted-runtime/pending-input-index.ts";
 import {
   resolveHostedPendingAssistantInputWakeAt,
@@ -69,7 +70,7 @@ describe("resolveHostedPendingAssistantInputWakeAt", () => {
     })).resolves.toBeNull();
   });
 
-  it("keeps an indexed terminal candidate wakeable until the background lane compacts it", async () => {
+  it("keeps foreground inspection read-only before background wake resolution compacts stale indexed input", async () => {
     const vaultRoot = await createTempVault();
     await saveAssistantAutomationState(vaultRoot, {
       autoReply: [{
@@ -95,12 +96,17 @@ describe("resolveHostedPendingAssistantInputWakeAt", () => {
     });
 
     await expect(resolveHostedPendingAssistantInputWakeAt({
+      inspectOnly: true,
       now: () => "2026-06-02T12:02:00.000Z",
       vaultRoot,
-    })).resolves.toBe("2026-06-02T12:02:00.000Z");
+    })).resolves.toBe("2026-06-02T12:02:30.000Z");
     await expect(readHostedPendingAssistantInputIds({ vaultRoot }))
       .resolves.toEqual([event.inputId]);
-    await expect(compactHostedPendingAssistantInputIds({ vaultRoot }))
+    await expect(resolveHostedPendingAssistantInputWakeAt({
+      now: () => "2026-06-02T12:02:30.000Z",
+      vaultRoot,
+    })).resolves.toBeNull();
+    await expect(readHostedPendingAssistantInputIds({ vaultRoot }))
       .resolves.toEqual([]);
   });
 
@@ -126,6 +132,27 @@ describe("resolveHostedPendingAssistantInputWakeAt", () => {
     })).resolves.toBe("2026-06-02T12:02:00.000Z");
     await expect(readHostedPendingAssistantInputIds({ vaultRoot }))
       .resolves.toContain(event.inputId);
+  });
+
+  it("schedules maintenance for a missing index without backfilling in an inspect-only probe", async () => {
+    const vaultRoot = await createTempVault();
+    await saveAssistantAutomationState(vaultRoot, {
+      autoReply: [{
+        channel: "linq",
+        eligibleAfter: null,
+        enabledAt: "2026-06-02T12:00:00.000Z",
+      }],
+      updatedAt: "2026-06-02T12:00:00.000Z",
+      version: 1,
+    });
+
+    await expect(resolveHostedPendingAssistantInputWakeAt({
+      inspectOnly: true,
+      now: () => "2026-06-02T12:02:00.000Z",
+      vaultRoot,
+    })).resolves.toBe("2026-06-02T12:02:30.000Z");
+    await expect(access(resolveHostedPendingAssistantInputStatePath(vaultRoot)))
+      .rejects.toMatchObject({ code: "ENOENT" });
   });
 });
 

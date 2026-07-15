@@ -1202,13 +1202,28 @@ describe('assistant protocol index planning', () => {
     expect(plan.developerInstructions).not.toContain('/settings?voice=true')
     expect(plan.developerInstructions).not.toContain('Hosted wearable connection links are available')
     expect(plan.developerInstructions).toContain(
-      'Group automation writes are current-room-only',
+      'existing automation in this bound runtime vault',
     )
     expect(plan.developerInstructions).toContain(
-      'never use saved personal/self targets',
+      '`vault-cli automation edit` for non-route changes',
     )
-    expect(plan.developerInstructions).not.toContain(
-      'explicit route flags',
+    expect(plan.developerInstructions).toContain(
+      '`vault-cli automation set-status`',
+    )
+    expect(plan.developerInstructions).toContain(
+      'stored route remains unchanged',
+    )
+    expect(plan.developerInstructions).toContain(
+      'bind to the trusted current group room',
+    )
+    expect(plan.developerInstructions).toContain(
+      'Never use saved personal/self targets',
+    )
+    expect(plan.developerInstructions).toContain(
+      'explicit route options',
+    )
+    expect(plan.developerInstructions).toContain(
+      'do not target another route',
     )
     expect(plan.dynamicTools.map((tool) => tool.name)).toEqual(
       expect.arrayContaining([
@@ -2499,6 +2514,81 @@ describe('assistant protocol index planning', () => {
     expect(
       planningMocks.readAssistantCliSurfaceBootstrapContext,
     ).toHaveBeenCalledTimes(1)
+  })
+
+  it('keeps a pending vault approval capability out of fresh-thread history after a route change', async () => {
+    planningMocks.readAssistantCliSurfaceBootstrapContext.mockResolvedValue('bootstrap contract')
+    planningMocks.readAssistantContextSnapshotPrompt.mockResolvedValue(null)
+    planningMocks.resolveCodexAssistantTargetCapabilities.mockReturnValue({
+      supportsNativeResume: true,
+    })
+    const approvalUrl =
+      `https://www.withmurph.ai/approve/haa_${'a'.repeat(32)}`
+    const vault = await mkdtemp(
+      path.join(os.tmpdir(), 'assistant-route-plan-vault-approval-'),
+    )
+    const route = createRoute()
+    const session = createSession({
+      resumeState: {
+        assistantContractFingerprint:
+          '0000000000000000000000000000000000000000000000000000000000000000',
+        routeFingerprint: 'route-before-model-change',
+        threadId: 'thread-before-model-change',
+      },
+      turnCount: 1,
+    })
+
+    try {
+      await appendAssistantTranscriptEntries(vault, session.sessionId, [
+        {
+          kind: 'user',
+          text: 'Send the report.',
+        },
+        {
+          kind: 'assistant',
+          text: 'Approval is required.',
+        },
+      ])
+
+      const plan = await resolveAssistantRouteTurnPlan({
+        executionContext: null,
+        input: {
+          ...createMessageInput(),
+          model: 'gpt-5.5',
+          prompt: 'Use medium reasoning now.',
+          vault,
+        },
+        profile: {
+          promptProfile: 'conversation',
+          threadScope: 'session-thread',
+          toolProfile: 'provider-turn',
+        },
+        promptTimeContext: {
+          currentLocalDate: '2026-05-04',
+          currentTimeZone: 'Asia/Kuala_Lumpur',
+        },
+        route,
+        session,
+        sharedPlan: createPrivateSharedPlan(),
+      })
+
+      expect(plan.resume).toBeNull()
+      expect(plan.conversationHistoryMessages).toEqual([
+        {
+          content: 'Send the report.',
+          role: 'user',
+        },
+        {
+          content: 'Approval is required.',
+          role: 'assistant',
+        },
+      ])
+      expect(JSON.stringify(plan.conversationHistoryMessages)).not.toContain(
+        approvalUrl,
+      )
+    } finally {
+      await rm(vault, { force: true, recursive: true })
+    }
   })
 })
 

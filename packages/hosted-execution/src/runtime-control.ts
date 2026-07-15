@@ -14,13 +14,6 @@ import type {
   AssistantUsageTokenPricingBasis,
 } from "./assistant-usage.ts";
 import type {
-  HostedActionApprovalConsumeRequest,
-} from "./action-approval.ts";
-import type {
-  HostedAssistantConfigurationApprovalChanges,
-  HostedAssistantConfigurationApprovalTarget,
-} from "./assistant-configuration-approval.ts";
-import type {
   HostedAssistantModelOverride,
   HostedAssistantProductModel,
   HostedAssistantReasoningEffort,
@@ -849,6 +842,7 @@ export interface HostedRuntimeProductFeedbackRecordResponse {
 export type HostedRuntimeGroupToolAction =
   | "read_current"
   | "list_memberships"
+  | "leave_membership"
   | "update_display_name"
   | "create_join_link"
   | "post_join_offer"
@@ -899,6 +893,7 @@ export interface HostedRuntimeGroupMembershipSummary {
   grantedVaultShareProjectionScopes: HostedVaultShareProjectionScope[];
   kind: string;
   memberCount: number;
+  membershipId: string | null;
   permissionsUrl: string | null;
   requestedVaultShareProjectionScopes: HostedVaultShareProjectionScope[];
   role: string;
@@ -961,6 +956,7 @@ export interface HostedRuntimeGroupChatParticipant {
 export type HostedRuntimeGroupToolRequest =
   | { action: "read_current" }
   | { action: "list_memberships" }
+  | { action: "leave_membership"; membershipId: string }
   | {
       action: "update_display_name";
       linqThread?: HostedRuntimeGroupToolLinqThreadContext | null;
@@ -1009,6 +1005,14 @@ export type HostedRuntimeGroupToolResponse =
             unavailableReason: string;
             memberships: null;
           };
+    }
+  | {
+      action: "leave_membership";
+      result:
+        | { status: "left" }
+        | { status: "already_left" }
+        | { status: "owner_cannot_leave" }
+        | { status: "unavailable"; unavailableReason: string };
     }
   | {
       action: "create_join_link";
@@ -1299,7 +1303,17 @@ export type HostedRuntimeAssistantConfigurationToolRequest =
     }
   | ({
       action: "update";
-    } & HostedAssistantConfigurationApprovalChanges);
+    } & HostedRuntimeAssistantConfigurationChanges);
+
+export type HostedRuntimeAssistantConfigurationChanges =
+  | {
+      model: HostedAssistantProductModel;
+      reasoningEffort?: HostedAssistantReasoningEffort;
+    }
+  | {
+      model?: never;
+      reasoningEffort: HostedAssistantReasoningEffort;
+    };
 
 export type HostedRuntimeAssistantConfigurationControlRequest =
   | {
@@ -1307,9 +1321,8 @@ export type HostedRuntimeAssistantConfigurationControlRequest =
     }
   | ({
       action: "update";
-      approval: HostedActionApprovalConsumeRequest;
-      target: HostedAssistantConfigurationApprovalTarget;
-    } & HostedAssistantConfigurationApprovalChanges);
+      assistantInputId: string;
+    } & HostedRuntimeAssistantConfigurationChanges);
 
 export interface HostedRuntimeAssistantConfigurationSnapshot {
   availableModels: HostedAssistantProductModel[];

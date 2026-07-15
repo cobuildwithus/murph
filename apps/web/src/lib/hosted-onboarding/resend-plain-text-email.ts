@@ -1,6 +1,7 @@
 import { normalizeNullableString, parseInteger } from "../primitives";
 
 const RESEND_EMAILS_ENDPOINT = "https://api.resend.com/emails";
+const RESEND_BATCH_EMAILS_ENDPOINT = "https://api.resend.com/emails/batch";
 const HOSTED_RESEND_EMAIL_DEFAULT_TIMEOUT_MS = 10_000;
 const HOSTED_RESEND_EMAIL_MIN_TIMEOUT_MS = 1_000;
 const HOSTED_RESEND_EMAIL_MAX_TIMEOUT_MS = 30_000;
@@ -15,6 +16,10 @@ export type HostedResendPlainTextEmailConfig = {
 
 export type HostedResendPlainTextEmailResult = {
   providerMessageId: string | null;
+};
+
+export type HostedResendPlainTextEmailBatchResult = {
+  providerMessageIds: string[];
 };
 
 export class HostedResendPlainTextEmailError extends Error {
@@ -84,6 +89,49 @@ export async function sendHostedResendPlainTextEmail(input: {
   };
 }
 
+export async function sendHostedResendPlainTextEmailBatch(input: {
+  config: HostedResendPlainTextEmailConfig;
+  emails: Array<{
+    subject: string;
+    text: string;
+    to: string[];
+  }>;
+  fetchImpl?: typeof fetch;
+  idempotencyKey: string;
+}): Promise<HostedResendPlainTextEmailBatchResult> {
+  const response = await (input.fetchImpl ?? fetch)(RESEND_BATCH_EMAILS_ENDPOINT, {
+    body: JSON.stringify(input.emails.map((email) => ({
+      from: input.config.from,
+      subject: email.subject,
+      text: email.text,
+      to: email.to,
+    }))),
+    headers: {
+      Authorization: `Bearer ${input.config.apiKey}`,
+      "Content-Type": "application/json",
+      "Idempotency-Key": input.idempotencyKey,
+    },
+    method: "POST",
+    signal: AbortSignal.timeout(input.config.timeoutMs),
+  });
+
+  if (!response.ok) {
+    throw new HostedResendPlainTextEmailError(
+      "Hosted Resend email batch send failed.",
+      {
+        code: "RESEND_BATCH_SEND_FAILED",
+        providerStatus: response.status,
+      },
+    );
+  }
+
+  return {
+    providerMessageIds: readResendBatchMessageIds(
+      await readResendJsonPayload(response),
+    ),
+  };
+}
+
 function readHostedResendPlainTextEmailTimeoutMs(
   source: HostedResendPlainTextEmailEnv,
 ): number {
@@ -114,4 +162,20 @@ function readResendMessageId(value: unknown): string | null {
 
   const id = "id" in value ? value.id : null;
   return typeof id === "string" && id ? id : null;
+}
+
+function readResendBatchMessageIds(value: unknown): string[] {
+  if (!value || typeof value !== "object" || Array.isArray(value)) {
+    return [];
+  }
+
+  const data = "data" in value ? value.data : null;
+  if (!Array.isArray(data)) {
+    return [];
+  }
+
+  return data.flatMap((entry) => {
+    const id = readResendMessageId(entry);
+    return id ? [id] : [];
+  });
 }

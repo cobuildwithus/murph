@@ -1,6 +1,6 @@
 # Hosted Mailbox Runtime Protocol
 
-Last verified: 2026-07-14
+Last verified: 2026-07-15
 
 ## Decision
 
@@ -252,6 +252,20 @@ discard a valid uploaded
 snapshot or create a second metadata-only shutdown snapshot. Assistant
 admission, assistant automation, outbox intent creation, and reply delivery
 remain independent of device-sync and other maintenance completion.
+Once terminal reply delivery is durable, the foreground lane releases ownership;
+it does not wait for provider cleanup or another exact automation inventory
+scan. A conversation import that lands while foreground-owned maintenance is
+in flight aborts that work through the runner-scoped background-maintenance
+signal so the new message can enter assistant admission immediately.
+
+Foreground wake projection is read-only unless the foreground turn itself
+committed a canonical write under `bank/automations`. That write arms an
+immediate assistant maintenance wake, where exact cron reconciliation remains
+owned. Ordinary post-delivery work does not rescan exact cron status. Pending
+assistant-input probes also inspect only the existing index: a candidate in a
+complete index keeps its immediate wake, while a missing or incomplete index
+gets a bounded 30-second maintenance wake. Compaction and legacy backfill stay
+in the maintenance lane rather than extending reply ownership.
 If an `inbox_media_retention` invocation is the active write-fenced child when
 foreground/default work arrives, the runner preempts that exact child through
 the existing container abort seam, clears the old fence by identity, and starts
@@ -417,6 +431,13 @@ staging/trace-row race; it carries no message, prompt, response, reasoning, or
 provider payload. Post-generation delivery guards must never create or
 overwrite the local Codex start milestone.
 
+Runner-to-Worker legacy artifact reads carry one fixed-vocabulary purpose and
+one UUID correlation id per logical fetch; retries retain that same id. Both
+sides log only validated purpose/correlation metadata, timing, status, and
+ordinal fields, never artifact refs or bytes. The allowed purposes distinguish
+workspace restore, canonical-write receipts, legacy snapshot materialization,
+and workspace artifact materialization.
+
 Repeated dirty hints while the same connection is already dirty do not append or signal
 another device-sync wake; dirty coalescing remains the work-queue invariant,
 and any stronger signal-delivery repair must be mailbox-wide. Redacted runtime logs
@@ -509,12 +530,17 @@ Tokenless v1 pending items map to sequence zero and drain; they cannot overwrite
 a field whose zero-or-newer watermark is already established.
 Those watermarks live in the bounded canonical companion document
 `bank/assistant-preference-mutations.json`, separate from the strict preference
-value document. The canonical selector admits at most one mailbox-backed input
-per provider turn; later inputs remain pending instead of being folded or
-steered across causal anchors. During that turn, the accepted-input boundary
-passes the exact selected sequence directly to the private hosted style
-operation. The model cannot supply the number, and the turn-local value is
-cleared at turn completion.
+value document. The canonical selector admits a bounded, cursor-ordered compound
+batch. Foreground begins with the oldest fresh input in the current wake and
+considers only later fresh siblings; background begins with the oldest replyable
+pending input. The batch continues only across the same canonical conversation,
+the same provider-native reply anchor, and exact-successor positive per-member
+causal sequences. A gap, missing or legacy sequence, boundary change, or the
+50-input bound ends the batch and leaves the remainder pending. During that turn,
+the accepted-input boundary passes the terminal sequence directly to the private
+hosted style operation as the compound turn frontier. Exact-successor proof
+prevents that frontier from crossing an intervening Settings row. The model
+cannot supply the number, and the turn-local value is cleared at turn completion.
 
 `runtime.pending-effects-reconcile-requested` is the pointer-only continuation
 for a trusted owner-state change that may unblock an already-persisted runtime
@@ -529,6 +555,14 @@ may refresh a denied or expired cycle. The row is never authorization or outcome
 truth.
 Secure-action approval and denial use this shape because the exact attachment,
 destination, and delivery identity remain in the runtime-owned parked intent.
+When a pending vault-file action must surface an approval capability, the
+assistant runtime keeps the approval owner's URL out of model context and
+appends that exact hidden value only to the ephemeral delivery response. The
+durable assistant transcript stores the capability-free semantic response, not
+the transport-complete delivery text. A required user-visible capability also
+overrides no-reply selection before the runtime persists any no-reply
+suppression or completion marker. The model is not an authority for
+capability-token transcription or delivery decisions.
 An approved vault-file intent is also bound to its persisted provider target and
 target kind at final dispatch. Linq current-home fallback cannot substitute a
 different destination after approval; that intent fails before approval consume
@@ -862,14 +896,16 @@ must resume before post-checkpoint delivery or background drains continue. A
 source-less wake preempts those drains only after the resumed import proves new
 conversation work; a no-progress or system-only nudge must not starve bounded
 maintenance or the idle checkpoint.
-The assistant engine then admits the persisted input through live steering or
-pre-provider admission without using hosted-specific mailbox
-refresh/checkpoint ports. While a Codex turn is live, same-conversation input is
-steered into that live provider turn. After the live provider turn ends,
-untargeted new input remains staged for a normal later assistant turn, while
-strict active-turn-targeted input fails closed instead of falling through; the
-assistant engine does not synthesize another provider request inside the same
-assistant turn.
+The assistant engine admits the frozen same-wake compound batch before provider
+start without using hosted-specific mailbox refresh/checkpoint ports. While a
+Codex turn is live, later mailbox input may still be imported and staged, but it
+does not join that provider batch; it remains pending for a normal later
+assistant turn. Strict active-turn-targeted input still fails closed instead of
+falling through, and the assistant engine does not synthesize another provider
+request inside the same assistant turn.
+Other assistant input owners may still use the generic pre-provider admission or
+live-steering paths when they prove the input shares the active turn's causal
+anchor; this mailbox-specific freeze does not change those owners.
 When mailbox import produces or reuses a canonical write receipt, the runner
 publishes the receipt-log fingerprint and the advanced imported watermark in
 the same status checkpoint. That progress checkpoint is still required when
@@ -894,9 +930,9 @@ receipt log, so repeated deterministic recovery failures cannot acquire
 foreground authority or checkpoint partial state.
 Accepted-input journaling, transcript updates, checkpoint bookkeeping,
 provider-request metadata, and outbox intent creation remain on the normal
-local assistant-service path. The same-reply coalescing window ends when the
-live provider turn ends, not at physical provider delivery; mailbox input that
-arrives after that boundary remains durable staged input for a later turn.
+local assistant-service path. The same-reply coalescing window closes when the
+bounded batch is selected before provider start; mailbox input that arrives
+after that boundary remains durable staged input for a later turn.
 Hosted Linq reply sends are idempotent when an outbox idempotency key is
 present. The Linq HTTP layer may retry those POST sends on transient transport,
 408, or 5xx failures, and the hosted outbox must keep such failures retryable
@@ -1029,11 +1065,14 @@ v2 snapshot, restore must still be correct from durable mailbox, exact canonical
 write receipts, transcript, and assistant runtime state even if provider-native
 resume optimization is unavailable.
 Fresh-thread starts and stale native-resume fallback may include bounded recent
-committed transcript history; primary native-resume attempts do not replay that
-history into the provider prompt. Active-turn input is not serialized as
-provider prompt history; it is either folded in before the first provider
-request, steered through the live Codex turn, or left unaccepted for a later
-normal turn when it misses the live steering window.
+committed transcript history. That history is semantic assistant content and
+must exclude runtime-owned capability URLs that were appended only for user
+delivery. Primary native-resume attempts do not replay committed history into
+the provider prompt, and the provider-native turn never receives those
+runtime-appended URLs. Active-turn input is not serialized as provider prompt
+history; it is either folded in before the first provider request, steered
+through the live Codex turn, or left unaccepted for a later normal turn when it
+misses the live steering window.
 
 Browser-vault replicas are derived dashboard sidecars, not canonical workspace
 state. `apps/web` assesses browser-session backstops from the latest replica

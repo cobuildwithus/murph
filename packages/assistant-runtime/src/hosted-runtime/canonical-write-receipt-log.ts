@@ -150,7 +150,9 @@ export async function readHostedCanonicalWriteReceiptLogEntries(input: {
   if (!ref) {
     return [];
   }
-  const bytes = await input.artifactStore.get(ref.sha256);
+  const bytes = await input.artifactStore.get(ref.sha256, {
+    purpose: "canonical_write_receipt",
+  });
   if (!bytes) {
     throw new Error("Hosted canonical write receipt log artifact is unavailable.");
   }

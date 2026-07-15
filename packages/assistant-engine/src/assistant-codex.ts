@@ -513,6 +513,7 @@ export function readCodexAppServerTurnFailureContext(
 
 export interface CodexAppServerTurnResult {
   finalMessage: string
+  transcriptMessage: string | null
   acceptedNoReplyDeliveryContextOrdinals: readonly number[]
   finalAction: AssistantNoReplyDisposition | null
   finalActionExplicit: boolean
@@ -592,6 +593,16 @@ function appendRequiredComputerHandoffUrl(
   return normalizedMessage
     ? `${normalizedMessage}\n\nTake over here: ${handoffUrl}`
     : `Take over here: ${handoffUrl}`
+}
+
+function appendRequiredVaultFileApprovalUrls(
+  message: string,
+  approvalUrls: readonly string[],
+): string {
+  return [
+    normalizeNullableString(message),
+    ...approvalUrls,
+  ].filter((part): part is string => part !== null).join('\n\n')
 }
 
 export async function executeCodexAppServerTurn(
@@ -2421,6 +2432,8 @@ async function runCodexAppServerTurnOnProcess(
     deliveryContextOrdinal: number
     patch: MurphDynamicToolFinalActionPatch
   }> = []
+  const acceptedNoReplyDeliveryContextOrdinals: number[] = []
+  let noReplySettlementStarted = false
   let reactionPatches: Array<{
     deliveryContextOrdinal: number
     patch: MurphDynamicToolReactionPatch
@@ -2442,6 +2455,7 @@ async function runCodexAppServerTurnOnProcess(
   const runtimeIssueInputs: AssistantRuntimeIssueInput[] = []
   let computerToolsLockedAfterUserPause = false
   let requiredComputerHandoffUrl: string | null = null
+  const requiredVaultFileApprovalUrls: string[] = []
   const actionDiagnostics = input.onTraceEvent
     ? createCodexActionDiagnosticsReducer()
     : null
@@ -2542,6 +2556,25 @@ async function runCodexAppServerTurnOnProcess(
         .map((entry) => entry.deliveryContextOrdinal),
     )].sort((left, right) => left - right)
 
+  const hasRequiredUserVisibleLink = (): boolean =>
+    requiredComputerHandoffUrl !== null || requiredVaultFileApprovalUrls.length > 0
+
+  const settleNoReplyFinalActions = async (): Promise<void> => {
+    if (hasRequiredUserVisibleLink() || noReplySettlementStarted) {
+      return
+    }
+    noReplySettlementStarted = true
+    for (const deliveryContextOrdinal of listNoReplyFinalActionPatchOrdinals()) {
+      await input.onFinishWithoutReplyAccepted?.({
+        deliveryContextOrdinal,
+      })
+      acceptedNoReplyDeliveryContextOrdinals.push(deliveryContextOrdinal)
+      await input.onFinishWithoutReplyRecorded?.({
+        deliveryContextOrdinal,
+      })
+    }
+  }
+
   const annotateTurnFailureContext = (error: unknown) => {
     if (!error || typeof error !== 'object') {
       return
@@ -2553,7 +2586,7 @@ async function runCodexAppServerTurnOnProcess(
       providerActionCount,
       runtimeIssueInputs: [...runtimeIssueInputs],
       acceptedNoReplyDeliveryContextOrdinals:
-        listNoReplyFinalActionPatchOrdinals(),
+        [...acceptedNoReplyDeliveryContextOrdinals],
       reactions: reactionPatches.map((entry) => ({
         deliveryContextOrdinal: entry.deliveryContextOrdinal,
         reaction: entry.patch.reaction,
@@ -3092,40 +3125,17 @@ async function runCodexAppServerTurnOnProcess(
       return true
     }
 
-    let reservedNoReply = false
-    try {
-      if (patch.kind === 'none') {
-        reserveNoReplyDeliveryContext(deliveryContextOrdinal)
-        reservedNoReply = true
-        await input.onFinishWithoutReplyAccepted?.({
-          deliveryContextOrdinal,
-        })
-      }
-      finalActionPatches = [
-        ...finalActionPatches,
-        {
-          deliveryContextOrdinal,
-          patch,
-        },
-      ]
-      if (patch.kind === 'none') {
-        reservedNoReplyDeliveryContextOrdinals.delete(deliveryContextOrdinal)
-        await input.onFinishWithoutReplyRecorded?.({
-          deliveryContextOrdinal,
-        })
-      }
-      return true
-    } catch (error) {
-      if (
-        reservedNoReply &&
-        !finalActionPatches.some(
-          (action) => action.deliveryContextOrdinal === deliveryContextOrdinal,
-        )
-      ) {
-        reservedNoReplyDeliveryContextOrdinals.delete(deliveryContextOrdinal)
-      }
-      throw error
+    finalActionPatches = [
+      ...finalActionPatches,
+      {
+        deliveryContextOrdinal,
+        patch,
+      },
+    ]
+    if (patch.kind === 'none') {
+      reservedNoReplyDeliveryContextOrdinals.delete(deliveryContextOrdinal)
     }
+    return true
   }
 
   const resolveFinalActionPatch = (
@@ -3239,6 +3249,25 @@ async function runCodexAppServerTurnOnProcess(
             {
               type: 'inputText',
               text: 'finish_without_reply is unavailable after pausing a computer run for the user',
+            },
+          ],
+        },
+      })
+      return
+    }
+
+    if (
+      requiredVaultFileApprovalUrls.length > 0 &&
+      dynamicToolRequest.kind === 'finish-without-reply'
+    ) {
+      void tryWriteRpcMessage({
+        id: requestId,
+        result: {
+          success: false,
+          contentItems: [
+            {
+              type: 'inputText',
+              text: 'finish_without_reply is unavailable while a vault-file approval link must be delivered',
             },
           ],
         },
@@ -3367,6 +3396,12 @@ async function runCodexAppServerTurnOnProcess(
       }
       if (result.requiredComputerHandoffUrl) {
         requiredComputerHandoffUrl = result.requiredComputerHandoffUrl
+      }
+      if (
+        result.requiredVaultFileApprovalUrl &&
+        !requiredVaultFileApprovalUrls.includes(result.requiredVaultFileApprovalUrl)
+      ) {
+        requiredVaultFileApprovalUrls.push(result.requiredVaultFileApprovalUrl)
       }
       if (result.responseMediaPatch) {
         try {
@@ -4067,6 +4102,10 @@ async function runCodexAppServerTurnOnProcess(
     lifecycleStage = 'turn_completed'
     emitAppServerTimingTrace('turn-completed')
     closeLiveTurn()
+    if (stdinFailure) {
+      throw stdinFailure
+    }
+    await settleNoReplyFinalActions()
     if (abortRequested || terminationSignalSent) {
       normalShutdown = true
       lifecycleStage = 'abort_cleanup'
@@ -4095,9 +4134,6 @@ async function runCodexAppServerTurnOnProcess(
         emitAppServerTimingTrace('warm-idle')
       }
     }
-    if (stdinFailure) {
-      throw stdinFailure
-    }
   } catch (error) {
     const recordedEndReason = codexProcess.recordedEndReason
     const preserveInterruptCleanupTimeout =
@@ -4120,13 +4156,18 @@ async function runCodexAppServerTurnOnProcess(
       (recordedEndReason === 'previous-turn-abort' ||
         (recordedEndReason === 'previous-process-exit' &&
           providerRequestStartedNotified))
-    const turnFailure = shouldApplyRecordedOwner
+    let turnFailure = shouldApplyRecordedOwner
       ? (buildRecordedTerminationError(lastEventError) ?? error)
       : error
     emitActionDiagnosticsTrace()
     dynamicToolAbortController.abort()
     await drainPendingDynamicToolExecutions()
     await drainPendingProgressDeliveries()
+    try {
+      await settleNoReplyFinalActions()
+    } catch (settlementError) {
+      turnFailure = settlementError
+    }
     annotateTurnFailureContext(turnFailure)
     closeLiveTurn()
     normalShutdown = true
@@ -4196,8 +4237,9 @@ async function runCodexAppServerTurnOnProcess(
         : finalTrailingSteerCandidate?.deliveryContextOrdinal ??
           latestDeliveryContextOrdinal
   const finalActionPatch = resolveFinalActionPatch(finalDeliveryContextOrdinal)
+  const requiredUserVisibleLink = hasRequiredUserVisibleLink()
   const noReplySelected =
-    finalActionPatch?.kind === 'none' && !requiredComputerHandoffUrl
+    finalActionPatch?.kind === 'none' && !requiredUserVisibleLink
   const finalAction: AssistantNoReplyDisposition | null = noReplySelected
     ? { kind: 'none' }
     : null
@@ -4205,12 +4247,16 @@ async function runCodexAppServerTurnOnProcess(
     noReplySelected || suppressTrailingSteerCandidateForEarlierNoReply
       ? ''
       : selectedFinalMessage
-  const finalMessage = requiredComputerHandoffUrl
+  let finalMessage = requiredComputerHandoffUrl
     ? appendRequiredComputerHandoffUrl(
         modelFinalMessage,
         requiredComputerHandoffUrl,
       )
     : modelFinalMessage
+  finalMessage = appendRequiredVaultFileApprovalUrls(
+    finalMessage,
+    requiredVaultFileApprovalUrls,
+  )
   if (
     noReplySelected &&
     normalizeNullableString(extractedFinalMessage) !== null
@@ -4232,11 +4278,14 @@ async function runCodexAppServerTurnOnProcess(
 
   return {
     acceptedNoReplyDeliveryContextOrdinals:
-      requiredComputerHandoffUrl ? [] : listNoReplyFinalActionPatchOrdinals(),
+      acceptedNoReplyDeliveryContextOrdinals,
     finalAction,
     finalActionExplicit:
-      finalActionPatch !== null && !requiredComputerHandoffUrl,
+      finalActionPatch !== null && !requiredUserVisibleLink,
     finalMessage,
+    transcriptMessage:
+      normalizeNullableString(modelFinalMessage) ??
+      (finalResponseMedia.length > 0 ? '' : null),
     reactions: reactionPatches.map((entry) => ({
       deliveryContextOrdinal: entry.deliveryContextOrdinal,
       reaction: entry.patch.reaction,

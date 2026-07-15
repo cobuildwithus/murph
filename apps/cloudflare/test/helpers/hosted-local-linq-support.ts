@@ -77,6 +77,12 @@ interface HostedLocalLinqAcceptedMessage {
   request: ObservedLinqRequest;
 }
 
+interface HostedLocalLinqArmedRequestDelay {
+  delayMs: number;
+  expectedMethod: string;
+  expectedPath: string;
+}
+
 type HostedLinqInboundPartInput =
   | {
       type: "text";
@@ -93,6 +99,11 @@ type HostedLinqInboundPartInput =
 
 export interface HostedLocalLinqStub {
   acceptedSendRequests: ObservedLinqRequest[];
+  armNextRequestDelay(input: {
+    delayMs: number;
+    expectedMethod: string;
+    expectedPath: string;
+  }): void;
   armNextPostAcceptLostAcknowledgment(input: {
     expectedPath: string;
     matchRequest: ObservedLinqRequestMatcher;
@@ -226,6 +237,7 @@ export async function startHostedLocalLinqStub(input: {
   let attachmentDownloadContainerBaseUrl = "";
   let nextPostAcceptLostAcknowledgment: HostedLocalLinqArmedSendFailure | null = null;
   let nextPreAcceptRetryableSendFailure: HostedLocalLinqArmedSendFailure | null = null;
+  let nextRequestDelay: HostedLocalLinqArmedRequestDelay | null = null;
   let postAcceptLostAcknowledgmentAcceptedMessage: HostedLocalLinqAcceptedMessage | null = null;
   let server: HttpServer | null = null;
 
@@ -242,6 +254,15 @@ export async function startHostedLocalLinqStub(input: {
       url: request.url ?? "/",
     };
     observedRequests.push(observedRequest);
+    if (
+      nextRequestDelay
+      && observedRequest.method === nextRequestDelay.expectedMethod
+      && observedRequest.url === nextRequestDelay.expectedPath
+    ) {
+      const delayMs = nextRequestDelay.delayMs;
+      nextRequestDelay = null;
+      await sleep(delayMs);
+    }
     if (process.env.MURPH_E2E_DEBUG_LINQ_STUB === "1") {
       console.log(`[linq-stub] ${request.method ?? "GET"} ${request.url ?? "/"}`);
     }
@@ -497,6 +518,16 @@ export async function startHostedLocalLinqStub(input: {
 
   return {
     acceptedSendRequests,
+    armNextRequestDelay({ delayMs, expectedMethod, expectedPath }) {
+      if (!Number.isSafeInteger(delayMs) || delayMs < 1) {
+        throw new TypeError("A Linq request delay requires a positive integer delayMs.");
+      }
+      nextRequestDelay = {
+        delayMs,
+        expectedMethod,
+        expectedPath,
+      };
+    },
     armNextPostAcceptLostAcknowledgment: ({
       expectedPath,
       matchRequest,

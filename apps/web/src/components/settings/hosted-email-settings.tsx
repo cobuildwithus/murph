@@ -64,6 +64,7 @@ export function HostedEmailSettings(props: {
         murphEmailAddress={props.murphEmailAddress ?? null}
         authSatisfied={controller.authenticated && controller.clientAuthenticated}
         canSendEmailUpdateCode={controller.canSendEmailUpdateCode}
+        hasPendingEmailSync={controller.hasPendingEmailSync}
         isBusy={controller.isBusy}
         isSendingCode={controller.isSendingCode}
         isSubmittingCode={controller.isSubmittingCode}
@@ -73,6 +74,7 @@ export function HostedEmailSettings(props: {
         onChangeEmailAddress={controller.setEmailAddress}
         onAuthRequired={controller.handleClientAuthRequired}
         onResendCode={controller.handleResendCode}
+        onRetryEmailSync={controller.handleRetryEmailSync}
         onSendCode={controller.handleSendCode}
         onSyncVerifiedEmail={controller.handleSyncVerifiedEmail}
         onUseAnotherEmail={controller.handleUseAnotherEmail}

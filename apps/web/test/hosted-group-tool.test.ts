@@ -13,6 +13,7 @@ const mocks = vi.hoisted(() => ({
   hostedThreadContainerParticipantUpsert: vi.fn(),
   hostedThreadContainerFindUnique: vi.fn(),
   isHostedMemberSuspended: vi.fn(),
+  leaveHostedGroupMemberTx: vi.fn(),
   lookupHostedMemberByVerifiedEmailAddress: vi.fn(),
   lookupHostedMemberIdentityByPhoneNumber: vi.fn(),
   readActiveHostedMemberAccess: vi.fn(),
@@ -92,6 +93,7 @@ vi.mock("@/src/lib/hosted-routing/thread-route-store", () => ({
 vi.mock("@/src/lib/hosted-groups/group-store", () => ({
   createHostedGroupJoinLinkForOwnedThreadContainerTx:
     mocks.createHostedGroupJoinLinkForOwnedThreadContainerTx,
+  leaveHostedGroupMemberTx: mocks.leaveHostedGroupMemberTx,
   readHostedGroupByRuntimeMemberId: mocks.readHostedGroupByRuntimeMemberId,
   readHostedGroupMembershipsForMember: mocks.readHostedGroupMembershipsForMember,
   recordHostedGroupJoinOfferTx: mocks.recordHostedGroupJoinOfferTx,
@@ -213,6 +215,10 @@ describe("handleHostedRuntimeGroupTool", () => {
   beforeEach(() => {
     vi.clearAllMocks();
     mocks.hasHostedRuntimeActiveAccess.mockResolvedValue(true);
+    mocks.leaveHostedGroupMemberTx.mockResolvedValue({
+      kind: "left",
+      vaultShareCleanupSignals: [],
+    });
     mocks.readActiveHostedMemberAccess.mockResolvedValue(true);
     mocks.readHostedGroupByRuntimeMemberId.mockResolvedValue(GROUP_SUMMARY);
     mocks.readHostedGroupMembershipsForMember.mockResolvedValue({
@@ -224,6 +230,7 @@ describe("handleHostedRuntimeGroupTool", () => {
         ],
         kind: "friends",
         memberCount: 7,
+        membershipId: "membership_runners",
         ownerJoinCode: null,
         requestedVaultShareProjectionScopes: [
           { projectionKind: "group-email.v0" },
@@ -268,6 +275,7 @@ describe("handleHostedRuntimeGroupTool", () => {
   it("classifies group-tool actions by access authority", () => {
     expect(HOSTED_RUNTIME_GROUP_TOOL_ACCESS_CLASSIFICATION).toEqual({
       create_join_link: "owner_active",
+      leave_membership: "participant_aware",
       list_memberships: "participant_aware",
       post_join_offer: "owner_active",
       preflight_set_chat_avatar: "owner_active",
@@ -295,6 +303,7 @@ describe("handleHostedRuntimeGroupTool", () => {
           ],
           kind: "friends",
           memberCount: 7,
+          membershipId: "membership_runners",
           permissionsUrl: null,
           requestedVaultShareProjectionScopes: [
             { projectionKind: "group-email.v0" },
@@ -319,6 +328,7 @@ describe("handleHostedRuntimeGroupTool", () => {
         grantedVaultShareProjectionScopes: [{ projectionKind: "profile-name.v0" }],
         kind: "friends",
         memberCount: 7,
+        membershipId: "membership_runners_owner",
         ownerJoinCode: "join_runners",
         requestedVaultShareProjectionScopes: [{ projectionKind: "hrv-days.v0" }],
         role: "owner",
@@ -357,6 +367,97 @@ describe("handleHostedRuntimeGroupTool", () => {
     });
     expect(mocks.readHostedGroupMembershipsForMember).not.toHaveBeenCalled();
   });
+
+  it("leaves only the callback member's selected membership and signals durable cleanup", async () => {
+    mocks.hasHostedRuntimeActiveAccess.mockResolvedValue(false);
+    mocks.leaveHostedGroupMemberTx.mockResolvedValueOnce({
+      kind: "left",
+      vaultShareCleanupSignals: [{
+        mailboxItemId: "mailbox_item_revoke_1",
+        memberId: "member_group_runtime",
+      }],
+    });
+    mocks.signalHostedMailboxAppendRuntime.mockRejectedValueOnce(
+      new Error("runtime unavailable"),
+    );
+
+    await expect(handleHostedRuntimeGroupTool({
+      memberId: "member_self",
+      request: {
+        action: "leave_membership",
+        membershipId: "membership_runners",
+      },
+    })).resolves.toEqual({
+      action: "leave_membership",
+      result: { status: "left" },
+    });
+
+    expect(mocks.leaveHostedGroupMemberTx).toHaveBeenCalledWith({
+      memberId: "member_self",
+      membershipId: "membership_runners",
+      now: expect.any(Date),
+      tx: fakeTx,
+    });
+    expect(mocks.hasHostedRuntimeActiveAccess).not.toHaveBeenCalled();
+    expect(mocks.signalHostedMailboxAppendRuntime).toHaveBeenCalledWith({
+      abortSignal: expect.any(AbortSignal),
+      expectedUserId: "member_group_runtime",
+      mailboxItemId: "mailbox_item_revoke_1",
+    });
+  });
+
+  it("returns a committed membership leave when cleanup signaling stalls", async () => {
+    vi.useFakeTimers();
+    try {
+      mocks.leaveHostedGroupMemberTx.mockResolvedValueOnce({
+        kind: "left",
+        vaultShareCleanupSignals: [{
+          mailboxItemId: "mailbox_item_revoke_1",
+          memberId: "member_group_runtime",
+        }],
+      });
+      mocks.signalHostedMailboxAppendRuntime.mockReturnValueOnce(new Promise(() => {}));
+
+      const response = handleHostedRuntimeGroupTool({
+        memberId: "member_self",
+        request: {
+          action: "leave_membership",
+          membershipId: "membership_runners",
+        },
+      });
+      await vi.advanceTimersByTimeAsync(5_000);
+
+      await expect(response).resolves.toEqual({
+        action: "leave_membership",
+        result: { status: "left" },
+      });
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
+  it.each(["already_left", "owner_cannot_leave"] as const)(
+    "returns the %s membership leave outcome without a cleanup claim",
+    async (kind) => {
+      mocks.leaveHostedGroupMemberTx.mockResolvedValueOnce({
+        kind,
+        vaultShareCleanupSignals: [],
+      });
+
+      await expect(handleHostedRuntimeGroupTool({
+        memberId: "member_self",
+        request: {
+          action: "leave_membership",
+          membershipId: "membership_runners",
+        },
+      })).resolves.toEqual({
+        action: "leave_membership",
+        result: { status: kind },
+      });
+
+      expect(mocks.signalHostedMailboxAppendRuntime).not.toHaveBeenCalled();
+    },
+  );
 
   it("reads the current group for the runtime member", async () => {
     await expect(handleHostedRuntimeGroupTool({
@@ -733,6 +834,7 @@ describe("handleHostedRuntimeGroupTool", () => {
       }),
     );
     expect(mocks.signalHostedMailboxAppendRuntime).toHaveBeenCalledWith({
+      abortSignal: expect.any(AbortSignal),
       expectedUserId: "member_group_runtime",
       mailboxItemId: "hmi_revoke_1",
     });
@@ -868,6 +970,7 @@ describe("filterHostedRuntimeGroupToolResponseProjectionScopes", () => {
           ],
           kind: "friends",
           memberCount: 4,
+          membershipId: "membership_runners",
           permissionsUrl: "https://www.withmurph.ai/groups/join/abc123",
           requestedVaultShareProjectionScopes: [SLEEP_SCOPE, RUNNING_DISTANCE_SCOPE],
           role: "member",
@@ -888,6 +991,7 @@ describe("filterHostedRuntimeGroupToolResponseProjectionScopes", () => {
           grantedVaultShareProjectionScopes: [{ projectionKind: "profile-name.v0" }],
           kind: "friends",
           memberCount: 4,
+          membershipId: "membership_runners",
           permissionsUrl: "https://www.withmurph.ai/groups/join/abc123",
           requestedVaultShareProjectionScopes: [SLEEP_SCOPE],
           role: "member",

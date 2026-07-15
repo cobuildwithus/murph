@@ -96,7 +96,7 @@ The Settings vault export does not include:
 | `prisma.hosted_ai_usage_period` | Live delete | Metadata/counts | Deletes local allowance-period snapshots. Export includes period windows, allowance totals, and billing-state metadata while omitting internal reconciliation identifiers. |
 | `prisma.hosted_product_feedback` | Live delete | Confirmed data export | Deletes assistant-captured product feedback rows. Confirmed export includes safe kind/summary metadata and optional published changelog item ids while omitting internal feedback ids. |
 | `prisma.hosted_linq_daily_state` | Live delete | Metadata/counts | Deletes Linq daily inbound/outbound quota counters. |
-| `prisma.hosted_linq_invite_delivery` | Live delete | Metadata/counts | Deletes signup-link delivery records whose delivery identity contains the member id; unrelated operational delivery records remain under their normal retention policy. |
+| `prisma.hosted_linq_invite_delivery` | Live delete | Metadata/counts | Deletes signup-link delivery records whose delivery identity contains the member id; unrelated operational delivery records remain under their normal retention policy. Historical orphan cleanup is finalized after production promotion and the prior-function drain. |
 | `prisma.hosted_invite` | Live delete | Metadata/counts | Deletes invite codes and channel metadata owned by the member. |
 | `prisma.hosted_consent_event` | Live delete | Confirmed data export | Deletes member-scoped consent event history. Confirmed export includes event scope/source/action and document metadata. |
 | `prisma.hosted_consent_grant` | Live delete | Confirmed data export | Deletes member-scoped consent grant state. Confirmed export includes grant scope/source/status and document metadata. |

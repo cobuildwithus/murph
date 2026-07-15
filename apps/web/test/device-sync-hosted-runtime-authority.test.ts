@@ -510,6 +510,70 @@ describe("applyHostedDeviceSyncRuntimeResult", () => {
     vi.clearAllMocks();
   });
 
+  it("applies accepted connection updates sequentially in request order", async () => {
+    let activeLocks = 0;
+    let maxActiveLocks = 0;
+    const withConnectionMutationLock = vi.fn(async (
+      _connectionId: string,
+      callback: (tx: {
+        deviceConnection: {
+          findFirst: () => Promise<null>;
+        };
+      }) => Promise<unknown>,
+    ) => {
+      activeLocks += 1;
+      maxActiveLocks = Math.max(maxActiveLocks, activeLocks);
+      await Promise.resolve();
+      try {
+        return await callback({
+          deviceConnection: {
+            findFirst: vi.fn(async () => null),
+          },
+        });
+      } finally {
+        activeLocks -= 1;
+      }
+    });
+    mocks.createHostedDeviceSyncControlPlane.mockReturnValue({
+      store: {
+        withConnectionMutationLock,
+      },
+    });
+    const { applyHostedDeviceSyncRuntimeResult } = await import(
+      "@/src/lib/device-sync/hosted-runtime-authority"
+    );
+
+    const response = await applyHostedDeviceSyncRuntimeResult({
+      request: new Request("https://example.test/device-sync/runtime/apply", {
+        body: JSON.stringify({
+          updates: [
+            { connectionId: "conn_first" },
+            { connectionId: "conn_second" },
+          ],
+          userId: "user_123",
+        }),
+        method: "POST",
+      }),
+      trustedUserId: "user_123",
+    });
+
+    expect(maxActiveLocks).toBe(1);
+    expect(withConnectionMutationLock).toHaveBeenNthCalledWith(
+      1,
+      "conn_first",
+      expect.any(Function),
+    );
+    expect(withConnectionMutationLock).toHaveBeenNthCalledWith(
+      2,
+      "conn_second",
+      expect.any(Function),
+    );
+    expect(response.updates.map((update) => update.connectionId)).toEqual([
+      "conn_first",
+      "conn_second",
+    ]);
+  });
+
   it("rejects omitted observedUpdatedAt fences for connection and local-state mutations", async () => {
     const { applyHostedDeviceSyncRuntimeResult } = await import(
       "@/src/lib/device-sync/hosted-runtime-authority"

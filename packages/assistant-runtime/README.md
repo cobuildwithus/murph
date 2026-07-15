@@ -15,8 +15,11 @@ Current responsibilities:
 - keep hosted execution local-runtime-first: normal hosted turns write mailbox and assistant input state into the warm container, may defer intermediate foreground checkpoints, may hot-service only the exact assistant wake projected by the current foreground phase before the idle floor, and otherwise keep dirty state dirty until the runtime-owned idle-floor—or last-chance shutdown—`idle_shutdown` checkpoint succeeds
 - accept a committed valid checkpoint's optional `conversationInputAhead` observation, import that durable conversation input immediately while the invocation remains live, and avoid post-upload snapshot discard or metadata-only shutdown resnapshot
 - collect and deliver due hosted side effects from live container state without waiting for foreground hosted workspace checkpointing
+- release foreground ownership after terminal reply delivery, abort in-flight provider cleanup when later conversation input is staged, and reserve exact automation reconciliation for canonical automation writes or maintenance wakes
+- keep foreground pending-input checks read-only; incomplete indexes schedule bounded maintenance while compaction and legacy backfill remain maintenance-owned
 - apply every `member.preferences.updated` system-mailbox delta in mailbox order, carrying the mailbox owner's cross-lane causal sequence so the canonical preference owner stale-no-ops only fields superseded by newer accepted intent while current siblings still apply; bounded per-field watermarks in `bank/assistant-preference-mutations.json` make replay idempotent without reservation or receipt retention
-- admit at most one mailbox-backed input per hosted provider turn and pass its exact causal sequence directly to hosted personality commands at the accepted-input boundary, leaving later inputs pending rather than steering across causal anchors
+- admit one bounded, cursor-ordered batch of same-conversation, same-reply-anchor mailbox inputs only when their positive causal sequences are exact successors; pass the terminal sequence directly to hosted personality commands at the accepted-input boundary as the compound turn frontier, and leave gaps, legacy input, overflow, and later arrivals pending
+- scope each hosted CLI current-route grant to the active provider operation so an authenticated interactive turn can mutate canonical automation records in its already-bound runtime vault; the grant selects the trusted destination for route writes but does not make stored delivery routes a second record-ownership system, and scheduled turns receive no grant
 - seed the hosted signup onboarding follow-up automation after successful signup welcome delivery; its first run is deferred until the next local day, then the scheduled assistant checks onboarding resume context and archives the automation once onboarding is complete
 - export sanitized pending assistant-runtime issue records through the injected host platform after commit instead of persisting raw hosted diagnostics in the worker
 - expose the method-based `HostedRuntimePlatform` seam that hosted apps inject at runtime
@@ -92,6 +95,12 @@ Current non-goals:
 - replacing the canonical vault or hosted bundle model
 
 `HostedRuntimePlatform` is the only hosted transport seam this package expects. Runtime code talks to semantic capabilities such as `artifactStore`, `effectsPort`, `deviceSyncPort`, `issueExportPort`, `usageRecordPort`, and the read-only `planUsageToolPort`; it does not reconstruct internal URLs, inspect hostnames, default Cloudflare worker topology, or interpret billing state. The plan-usage port passes through to assistant context without mutation authority.
+Artifact reads require a fixed-vocabulary purpose so the host can correlate
+secret-safe timing across retries without exposing a content hash or payload.
+Automation-document inventory reads are bounded to small concurrent batches,
+and cron occurrence projection searches eligible local dates and configured
+hours/minutes while preserving DST and standard day-of-month/day-of-week
+semantics.
 
 Clinical retrieval follows the same system-mailbox ownership rule. The mailbox
 contains only `{runId, generation}`. The runtime reads a bounded descriptor,

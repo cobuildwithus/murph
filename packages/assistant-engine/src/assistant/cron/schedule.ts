@@ -18,6 +18,9 @@ const DURATION_UNITS = {
 } as const
 
 const MAX_CRON_LOOKAHEAD_MINUTES = 366 * 24 * 60
+const MINUTE_MS = 60_000
+const HOUR_MS = 60 * MINUTE_MS
+const DAY_MS = 24 * HOUR_MS
 
 interface ParsedCronField {
   any: boolean
@@ -184,9 +187,11 @@ export function findNextAssistantCronOccurrence(
 
   return findNextAssistantTimeZoneOccurrence({
     after,
+    hours: resolveParsedCronFieldValues(parsed.hour, 0, 23),
+    minutes: resolveParsedCronFieldValues(parsed.minute, 0, 59),
     timeZone,
-    matches(dateTime) {
-      return matchesAssistantCronExpression(parsed, dateTime)
+    matchesDate(dateTime) {
+      return matchesAssistantCronDate(parsed, dateTime)
     },
   })
 }
@@ -333,24 +338,14 @@ function resolveCronFieldRange(
   }
 }
 
-function matchesAssistantCronExpression(
+function matchesAssistantCronDate(
   expression: ParsedCronExpression,
   dateTime: {
-    minute: number
-    hour: number
     month: number
     day: number
     dayOfWeek: number
   },
 ): boolean {
-  if (!matchesParsedCronField(expression.minute, dateTime.minute)) {
-    return false
-  }
-
-  if (!matchesParsedCronField(expression.hour, dateTime.hour)) {
-    return false
-  }
-
   if (!matchesParsedCronField(expression.month, dateTime.month)) {
     return false
   }
@@ -383,6 +378,21 @@ function matchesParsedCronField(field: ParsedCronField, value: number): boolean 
   return field.any || field.values.has(value)
 }
 
+function resolveParsedCronFieldValues(
+  field: ParsedCronField,
+  minimum: number,
+  maximum: number,
+): number[] {
+  if (!field.any) {
+    return [...field.values].sort((left, right) => left - right)
+  }
+
+  return Array.from(
+    { length: maximum - minimum + 1 },
+    (_, index) => minimum + index,
+  )
+}
+
 function invalidCronFieldError(label: string, value: string): VaultCliError {
   return new VaultCliError(
     'ASSISTANT_CRON_INVALID_SCHEDULE',
@@ -405,38 +415,138 @@ function findNextAssistantDailyLocalOccurrence(
 
   return findNextAssistantTimeZoneOccurrence({
     after,
+    hours: [parsedTime.hour],
+    minutes: [parsedTime.minute],
     timeZone,
-    matches(dateTime) {
-      return dateTime.hour === parsedTime.hour && dateTime.minute === parsedTime.minute
+    matchesDate() {
+      return true
     },
   })
 }
 
 function findNextAssistantTimeZoneOccurrence(input: {
   after: Date
-  matches: (dateTime: {
-    minute: number
-    hour: number
+  hours: readonly number[]
+  matchesDate: (dateTime: {
     month: number
     day: number
     dayOfWeek: number
   }) => boolean
+  minutes: readonly number[]
   timeZone?: string | null
 }): string | null {
-  const resolvedTimeZone = normalizeAssistantCronTimeZone(input.timeZone)
-  const candidate = new Date(input.after.getTime())
-  candidate.setUTCSeconds(0, 0)
-  candidate.setUTCMinutes(candidate.getUTCMinutes() + 1)
+  const timeZone = normalizeAssistantCronTimeZone(input.timeZone)
+  const searchStart =
+    Math.floor(input.after.getTime() / MINUTE_MS) * MINUTE_MS + MINUTE_MS
+  const searchEnd = searchStart + MAX_CRON_LOOKAHEAD_MINUTES * MINUTE_MS
+  const firstLocal = formatTimeZoneDateTimeParts(searchStart, timeZone)
+  const lastLocal = formatTimeZoneDateTimeParts(
+    searchEnd - MINUTE_MS,
+    timeZone,
+  )
+  const firstLocalDay = Date.UTC(firstLocal.year, firstLocal.month - 1, firstLocal.day)
+  const lastLocalDay = Date.UTC(lastLocal.year, lastLocal.month - 1, lastLocal.day)
 
-  for (let index = 0; index < MAX_CRON_LOOKAHEAD_MINUTES; index += 1) {
-    if (input.matches(formatTimeZoneDateTimeParts(candidate, resolvedTimeZone))) {
-      return candidate.toISOString()
+  for (
+    let localDay = firstLocalDay;
+    localDay <= lastLocalDay;
+    localDay += DAY_MS
+  ) {
+    const calendarDate = new Date(localDay)
+    const dateTime = {
+      day: calendarDate.getUTCDate(),
+      dayOfWeek: calendarDate.getUTCDay(),
+      month: calendarDate.getUTCMonth() + 1,
+    }
+    if (!input.matchesDate(dateTime)) {
+      continue
     }
 
-    candidate.setUTCMinutes(candidate.getUTCMinutes() + 1)
+    const occurrence = findAssistantTimeZoneOccurrenceOnDate({
+      afterOrAt: searchStart,
+      before: searchEnd,
+      day: dateTime.day,
+      hours: input.hours,
+      localDay,
+      minutes: input.minutes,
+      month: dateTime.month,
+      timeZone,
+      year: calendarDate.getUTCFullYear(),
+    })
+    if (occurrence !== null) {
+      return new Date(occurrence).toISOString()
+    }
   }
 
   return null
+}
+
+function findAssistantTimeZoneOccurrenceOnDate(input: {
+  afterOrAt: number
+  before: number
+  day: number
+  hours: readonly number[]
+  localDay: number
+  minutes: readonly number[]
+  month: number
+  timeZone: string
+  year: number
+}): number | null {
+  const offsets = collectAssistantTimeZoneOffsets(input.timeZone, input.localDay)
+  let earliest = Number.POSITIVE_INFINITY
+
+  for (const hour of input.hours) {
+    for (const minute of input.minutes) {
+      const localMinute = input.localDay + hour * HOUR_MS + minute * MINUTE_MS
+
+      for (const offset of offsets) {
+        const candidate = Math.ceil((localMinute - offset) / MINUTE_MS) * MINUTE_MS
+        if (
+          candidate < input.afterOrAt ||
+          candidate >= input.before ||
+          candidate >= earliest
+        ) {
+          continue
+        }
+
+        const projected = formatTimeZoneDateTimeParts(candidate, input.timeZone)
+        if (
+          projected.year === input.year &&
+          projected.month === input.month &&
+          projected.day === input.day &&
+          projected.hour === hour &&
+          projected.minute === minute
+        ) {
+          earliest = candidate
+        }
+      }
+    }
+  }
+
+  return Number.isFinite(earliest) ? earliest : null
+}
+
+function collectAssistantTimeZoneOffsets(
+  timeZone: string,
+  localDay: number,
+): Set<number> {
+  const offsets = new Set<number>()
+
+  for (const delta of [-2 * DAY_MS, 0, 2 * DAY_MS]) {
+    const instant = localDay + delta
+    const projected = formatTimeZoneDateTimeParts(instant, timeZone)
+    const projectedAsUtc = Date.UTC(
+      projected.year,
+      projected.month - 1,
+      projected.day,
+      projected.hour,
+      projected.minute,
+      projected.second,
+    )
+    offsets.add(projectedAsUtc - instant)
+  }
+
+  return offsets
 }
 
 function normalizeAssistantCronTimeZone(value: string | null | undefined): string {

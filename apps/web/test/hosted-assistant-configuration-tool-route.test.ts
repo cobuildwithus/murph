@@ -1,8 +1,4 @@
 import { beforeAll, beforeEach, describe, expect, it, vi } from "vitest";
-import {
-  buildHostedAssistantConfigurationApprovalConsumerId,
-  buildHostedAssistantConfigurationApprovalRequest,
-} from "@murphai/hosted-execution/assistant-configuration-approval";
 
 const mocks = vi.hoisted(() => ({
   handleTool: vi.fn(),
@@ -84,27 +80,34 @@ describe("hosted assistant configuration tool route", () => {
     expect(mocks.handleTool).not.toHaveBeenCalled();
   });
 
-  it("accepts a fully resolved update with exact approval proof", async () => {
-    const approvalRequest = buildHostedAssistantConfigurationApprovalRequest({
-      changes: {
-        model: "gpt-5.6-luna",
-        reasoningEffort: "medium",
-      },
-      returnContactKind: "text",
-      target: {
-        model: "gpt-5.6-luna",
-        reasoningEffort: "medium",
-      },
-    });
+  it("accepts a direct update bound to live conversation input", async () => {
     const body = {
       action: "update",
-      approval: {
-        approvalGeneration: "b".repeat(64),
-        consumerId: buildHostedAssistantConfigurationApprovalConsumerId(
-          approvalRequest,
-        ),
-        request: approvalRequest,
+      assistantInputId: `ain_${"c".repeat(32)}`,
+      model: "gpt-5.6-luna",
+      reasoningEffort: "medium",
+    };
+
+    const response = await route.POST(new Request(
+      "https://join.example.test/api/internal/hosted-execution/assistant-configuration/tool",
+      {
+        body: JSON.stringify(body),
+        headers: { "content-type": "application/json" },
+        method: "POST",
       },
+    ));
+
+    expect(response.status).toBe(200);
+    expect(mocks.handleTool).toHaveBeenCalledWith({
+      memberId: "member_123",
+      request: body,
+    });
+  });
+
+  it("rejects the removed approval-backed update shape", async () => {
+    const body = {
+      action: "update",
+      approval: {},
       model: "gpt-5.6-luna",
       reasoningEffort: "medium",
       target: {
@@ -122,10 +125,7 @@ describe("hosted assistant configuration tool route", () => {
       },
     ));
 
-    expect(response.status).toBe(200);
-    expect(mocks.handleTool).toHaveBeenCalledWith({
-      memberId: "member_123",
-      request: body,
-    });
+    expect(response.status).toBe(400);
+    expect(mocks.handleTool).not.toHaveBeenCalled();
   });
 });

@@ -783,6 +783,27 @@ without letting stale events replace valid pending runs. After those gates, it c
 The shared production migration URL resolver strips Prisma-style
 `sslcert=system`, `sslkey=system`, and `sslrootcert=system` markers before
 handing Postgres URLs to raw `pg` clients, while preserving real SSL file paths.
+The merged
+`20260715120000_delete_orphaned_linq_invite_deliveries` Prisma migration is an
+unchanged historical first pass because production may already have recorded
+it. The
+`20260715150000_delete_orphaned_linq_invite_deliveries_after_drain` contract
+migration repeats the same narrow orphan predicate after promotion and the
+prior-function drain; that post-drain pass is the final historical-cleanup
+authority.
+The permanent Linq invite-delivery data-producer rollback floor is
+`e67aedb61fd021f50cadae147b92006fef43b97e`, the merge of PR #668 and the
+first `main` commit with both the live account-deletion cleanup and the delayed
+invite-dispatch fence. Freeze deploys and rollbacks before promoting the
+cleanup deployment, then record that deployed commit, this floor SHA, both
+production-alias proofs, the elapsed drain, and the contract-migration outcome
+before ending the freeze. After the contract migration is recorded, do not
+roll Vercel below this floor. Rerunning the existing workflow is not a repair
+for rows recreated by a below-floor rollback because the recorded migration ID
+and checksum make its SQL skip. A below-floor emergency rollback therefore
+requires a roll-forward, a fresh promotion-and-drain proof, and either a new
+timestamped cleanup migration or explicit operator SQL before the deletion
+guarantee is restored.
 Rollback floor: after contract cleanup drops an old schema shape, the oldest
 safe Vercel rollback target is the first deployed commit that no longer reads or
 writes that dropped shape. Rolling back below that floor requires restoring or
@@ -1117,12 +1138,24 @@ Current hosted billing assumptions:
   the local trial and usage-period window in that operation.
 - A live `trialing` Pulse Trial extends from its current Stripe trial end. A
   lapsed `paused` no-card Pulse Trial restarts for seven days from Preview time.
-  The proof expires after 15 minutes. Paid, scheduled, canceling, canceled,
-  incomplete, past-due, unpaid, foreign, or otherwise mismatched billing is
-  displayed as ineligible and is never mutated. The route does not search for
-  members, process cohorts or batches, or clean up provider subscriptions.
+  The proof expires after 15 minutes. Active Family sponsorship and paid,
+  scheduled, canceling, canceled, incomplete, past-due, unpaid, foreign, or
+  otherwise mismatched direct billing are displayed as ineligible and are never
+  mutated. The route does not search for members, process cohorts or batches,
+  or clean up provider subscriptions.
 - Stripe reads and writes use one 80-second attempt. Apply gives the member lock
   at most 25 seconds to acquire and the locked transaction at most 190 seconds.
   The provider update uses no proration and carries a proof-derived idempotency
   key and metadata marker. A retry after Stripe success reconciles local billing
   instead of adding another seven days.
+- `/ops/email` is the operator-only member email composer. It accepts up to 100
+  explicit hosted member IDs plus one plain-text subject and body. Preview
+  resolves verified email first and falls back to the stored Stripe checkout
+  email, while returning member eligibility only and never returning an email
+  address.
+- Send re-reads current member suspension and recipient state and requires the
+  exact 24-hour signed Preview. Unknown members, account-deletion-suspended
+  members, and members without a recipient stay skipped. Ready recipients are
+  submitted as separate emails in one strict Resend batch with a Preview-bound
+  idempotency key, so an ambiguous response can be retried without duplicate
+  delivery. Logs contain aggregate counts and safe provider status only.

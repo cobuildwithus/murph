@@ -127,6 +127,15 @@ describe("createHostedGroupToolWithLinqThreadContext", () => {
 
     await groupTool.request({ action: "read_current" });
     expect(request).toHaveBeenLastCalledWith({ action: "read_current" });
+
+    await groupTool.request({
+      action: "leave_membership",
+      membershipId: "hgm_private_member",
+    });
+    expect(request).toHaveBeenLastCalledWith({
+      action: "leave_membership",
+      membershipId: "hgm_private_member",
+    });
   });
 
   it("fails closed when the turn carries two distinct route-authorized threads", async () => {
@@ -315,6 +324,18 @@ describe("createHostedGroupToolWithLinqThreadContext", () => {
       action: "update_display_name",
       result: {
         group: null,
+        status: "unavailable",
+        unavailableReason: "authenticated_sender_required",
+      },
+    });
+    expect(request).not.toHaveBeenCalled();
+
+    await expect(groupTool.request({
+      action: "leave_membership",
+      membershipId: "hgm_private_member",
+    })).resolves.toEqual({
+      action: "leave_membership",
+      result: {
         status: "unavailable",
         unavailableReason: "authenticated_sender_required",
       },
