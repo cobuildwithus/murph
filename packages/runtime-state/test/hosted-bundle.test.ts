@@ -3184,6 +3184,36 @@ test("hosted assistant hot-state snapshots include only exact Codex rollout cont
   }
 });
 
+test("hosted assistant hot-state cleanup retains no Codex home files", async () => {
+  const workspaceRoot = await mkdtemp(path.join(tmpdir(), "hosted-runner-hot-codex-clear-"));
+
+  try {
+    const vaultRoot = path.join(workspaceRoot, "vault");
+    const operatorHomeRoot = path.join(workspaceRoot, "operator-home");
+    const codexHomeRoot = path.join(operatorHomeRoot, ".codex-hosted");
+    await mkdir(path.join(codexHomeRoot, "sessions", "2026", "05", "05"), {
+      recursive: true,
+    });
+    await writeFile(path.join(codexHomeRoot, "auth.json"), "{\"fixture\":true}\n", "utf8");
+    await writeFile(
+      path.join(codexHomeRoot, "sessions", "2026", "05", "05", "rollout.jsonl"),
+      "{\"type\":\"provider-owned\"}\n",
+      "utf8",
+    );
+    await writeFile(path.join(operatorHomeRoot, "keep.txt"), "keep\n", "utf8");
+
+    await clearHostedAssistantRuntimeHotState({
+      operatorHomeRoot,
+      vaultRoot,
+    });
+
+    await assert.rejects(lstat(codexHomeRoot), { code: "ENOENT" });
+    assert.equal(await readFile(path.join(operatorHomeRoot, "keep.txt"), "utf8"), "keep\n");
+  } finally {
+    await rm(workspaceRoot, { force: true, recursive: true });
+  }
+});
+
 test("hosted assistant hot-state snapshots do not retry when Codex sessions move during capture", async () => {
   const workspaceRoot = await mkdtemp(path.join(tmpdir(), "hosted-runner-hot-codex-drift-"));
   const restoreRoot = await mkdtemp(path.join(tmpdir(), "hosted-runner-hot-codex-drift-restore-"));
