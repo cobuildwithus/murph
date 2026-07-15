@@ -194,6 +194,123 @@ test("automation save preserves hosted iMessage current-route continuity locator
   }
 });
 
+test("an authenticated hosted turn can manage an older direct Linq automation in its vault", async () => {
+  const { parentRoot, vaultRoot } = await createTempVaultContext(
+    "murph-automation-vault-authority-",
+  );
+  const bridge = await startAssistantCurrentRouteBridgeStub({
+    response: {
+      route: {
+        channel: "linq",
+        deliveryTarget: "linq_chat_current",
+        identityId: "hid_current_identity",
+        participantId: "hid_current_participant",
+        threadId: "hid_current_thread",
+        threadIsDirect: true,
+      },
+    },
+    token: "test-bridge-token",
+  });
+
+  try {
+    const cli = Cli.create("vault-cli", {
+      description: "automation vault authority test cli",
+      version: "0.0.0-test",
+    });
+    registerAutomationCommands(cli);
+    vi.stubEnv(HOSTED_RUNTIME_PROCESS_ENV, "1");
+    vi.stubEnv(HOSTED_CLI_BRIDGE_TOKEN_ENV, "test-bridge-token");
+    vi.stubEnv(HOSTED_CLI_BRIDGE_URL_ENV, bridge.url);
+
+    const olderRoute = {
+      channel: "linq" as const,
+      deliverySource: null,
+      deliveryTarget: "linq_chat_older",
+      identityId: "hid_older_identity",
+      participantId: "hid_older_participant",
+      threadId: "hid_older_thread",
+      threadIsDirect: true,
+    };
+    await upsertAutomation({
+      continuityPolicy: "preserve",
+      instructions: "Send the meditation reminder.",
+      route: olderRoute,
+      schedule: { kind: "cron", expression: "30 23 * * 1,4" },
+      slug: "meditation-reminder",
+      status: "active",
+      tags: [],
+      title: "Meditation reminder",
+      vaultRoot,
+    });
+
+    const archived = await runInProcessJsonCli(cli, [
+      "automation",
+      "set-status",
+      "meditation-reminder",
+      "--status",
+      "archived",
+      "--vault",
+      vaultRoot,
+    ]);
+    assert.equal(archived.envelope.ok, true);
+
+    const edited = await runInProcessJsonCli(cli, [
+      "automation",
+      "edit",
+      "meditation-reminder",
+      "--summary",
+      "Updated from the member's current conversation.",
+      "--schedule-kind",
+      "every",
+      "--schedule-every-ms",
+      "120000",
+      "--vault",
+      vaultRoot,
+    ]);
+    assert.equal(edited.envelope.ok, true);
+
+    const reactivated = await runInProcessJsonCli(cli, [
+      "automation",
+      "set-status",
+      "meditation-reminder",
+      "--status",
+      "active",
+      "--vault",
+      vaultRoot,
+    ]);
+    assert.equal(reactivated.envelope.ok, true);
+
+    const shown = await runInProcessJsonCli<{
+      automation: {
+        route: Record<string, unknown>;
+        schedule: Record<string, unknown>;
+        status: string;
+        summary: string | null;
+      } | null;
+    }>(cli, [
+      "automation",
+      "show",
+      "meditation-reminder",
+      "--vault",
+      vaultRoot,
+    ]);
+    assert.equal(shown.envelope.ok, true);
+    assert.equal(shown.envelope.data?.automation?.status, "active");
+    assert.equal(
+      shown.envelope.data?.automation?.summary,
+      "Updated from the member's current conversation.",
+    );
+    assert.deepEqual(shown.envelope.data?.automation?.schedule, {
+      everyMs: 120000,
+      kind: "every",
+    });
+    assert.deepEqual(shown.envelope.data?.automation?.route, olderRoute);
+  } finally {
+    await bridge.stop();
+    await rm(parentRoot, { recursive: true, force: true });
+  }
+});
+
 test("a verified direct Linq automation follows participant-to-chat materialization", async () => {
   const { parentRoot, vaultRoot } = await createTempVaultContext(
     "murph-automation-direct-route-materialization-",
@@ -511,7 +628,7 @@ test("automation save enriches an explicit same-conversation target with blinded
   }
 });
 
-test("group automation writes are restricted to the current room", async () => {
+test("group automation records are vault-scoped while route writes stay in the current room", async () => {
   const { parentRoot, vaultRoot } = await createTempVaultContext(
     "murph-automation-group-route-authority-",
   );
@@ -652,55 +769,59 @@ test("group automation writes are restricted to the current room", async () => {
       "UNKNOWN",
     );
 
-    const titleDerivedForeignCollisions = [
-      {
-        fileName: "foreign-title-only.json",
-        payload: {
-          title: "Foreign room reminder",
-        },
-      },
-      {
-        fileName: "foreign-title-with-fresh-id.json",
-        payload: {
-          automationId: "automation_fresh_title_collision",
-          title: "Foreign room reminder",
-        },
-      },
-      {
-        fileName: "foreign-formatted-title.json",
-        payload: {
-          title: "Foreign---room reminder",
-        },
-      },
-    ];
-    for (const collision of titleDerivedForeignCollisions) {
-      const collisionPath = path.join(parentRoot, collision.fileName);
-      await writeFile(collisionPath, JSON.stringify({
-        ...collision.payload,
-        status: "active",
-        continuityPolicy: "preserve",
-        schedule: { kind: "at", at: "2026-12-06T12:00:00.000Z" },
-        route: {
-          channel: "linq",
-          deliveryTarget: "linq_group_current",
-          identityId: "hid_group_identity",
-          participantId: "hid_group_participant",
-          threadId: "hid_group_thread",
-          threadIsDirect: false,
-        },
-        instructions: "Must not replace another room's automation.",
-        tags: [],
-      }));
-      const collisionImport = await runInProcessJsonCli(cli, [
-        "automation",
-        "import-json",
-        "--input",
-        `@${collisionPath}`,
-        "--vault",
-        vaultRoot,
-      ]);
-      assert.equal(collisionImport.envelope.ok, false);
-    }
+    const archivedForeign = await runInProcessJsonCli(cli, [
+      "automation",
+      "set-status",
+      "foreign-room-reminder",
+      "--status",
+      "archived",
+      "--vault",
+      vaultRoot,
+    ]);
+    assert.equal(archivedForeign.envelope.ok, true);
+
+    const editedForeign = await runInProcessJsonCli(cli, [
+      "automation",
+      "edit",
+      "foreign-room-reminder",
+      "--summary",
+      "Updated from the current authenticated group turn.",
+      "--vault",
+      vaultRoot,
+    ]);
+    assert.equal(editedForeign.envelope.ok, true);
+
+    const foreignBeforeReplacement = await runInProcessJsonCli<{
+      automation: {
+        route: Record<string, unknown>;
+        status: string;
+        summary: string | null;
+      } | null;
+    }>(cli, [
+      "automation",
+      "show",
+      "foreign-room-reminder",
+      "--vault",
+      vaultRoot,
+    ]);
+    assert.equal(foreignBeforeReplacement.envelope.ok, true);
+    assert.equal(
+      foreignBeforeReplacement.envelope.data?.automation?.status,
+      "archived",
+    );
+    assert.equal(
+      foreignBeforeReplacement.envelope.data?.automation?.summary,
+      "Updated from the current authenticated group turn.",
+    );
+    assert.deepEqual(foreignBeforeReplacement.envelope.data?.automation?.route, {
+      channel: "linq",
+      deliverySource: null,
+      deliveryTarget: "linq_group_other",
+      identityId: null,
+      participantId: null,
+      threadId: null,
+      threadIsDirect: false,
+    });
 
     for (const title of ["Current room reminder", "Unused group reminder"]) {
       const sameOrUnusedPath = path.join(
@@ -759,7 +880,7 @@ test("group automation writes are restricted to the current room", async () => {
       "--vault",
       vaultRoot,
     ]);
-    assert.equal(collidedSave.envelope.ok, false);
+    assert.equal(collidedSave.envelope.ok, true);
 
     const collidedEdit = await runInProcessJsonCli(cli, [
       "automation",
@@ -772,7 +893,7 @@ test("group automation writes are restricted to the current room", async () => {
       "--vault",
       vaultRoot,
     ]);
-    assert.equal(collidedEdit.envelope.ok, false);
+    assert.equal(collidedEdit.envelope.ok, true);
 
     const collidedImportPath = path.join(parentRoot, "collided-route.json");
     await writeFile(collidedImportPath, JSON.stringify({
@@ -785,6 +906,9 @@ test("group automation writes are restricted to the current room", async () => {
       route: {
         channel: "linq",
         deliveryTarget: "linq_group_current",
+        identityId: null,
+        participantId: null,
+        threadId: null,
         threadIsDirect: false,
       },
       instructions: "Replace it.",
@@ -798,7 +922,13 @@ test("group automation writes are restricted to the current room", async () => {
       "--vault",
       vaultRoot,
     ]);
-    assert.equal(collidedImport.envelope.ok, false);
+    assert.equal(
+      collidedImport.envelope.ok,
+      true,
+      collidedImport.envelope.ok
+        ? undefined
+        : JSON.stringify(collidedImport.envelope.error),
+    );
 
     const collidedStatus = await runInProcessJsonCli(cli, [
       "automation",
@@ -809,7 +939,7 @@ test("group automation writes are restricted to the current room", async () => {
       "--vault",
       vaultRoot,
     ]);
-    assert.equal(collidedStatus.envelope.ok, false);
+    assert.equal(collidedStatus.envelope.ok, true);
 
     for (const status of ["paused", "active"] as const) {
       const updated = await runInProcessJsonCli(cli, [
@@ -1027,11 +1157,33 @@ test("hosted direct-email automation writes follow a stable thread across changi
       "edit",
       "email-thread-reminder",
       "--summary",
-      "Must not cross threads.",
+      "Updated from another authenticated thread in the same vault.",
       "--vault",
       vaultRoot,
     ]);
-    assert.equal(differentThreadEdit.envelope.ok, false);
+    assert.equal(differentThreadEdit.envelope.ok, true);
+
+    const afterDifferentThreadEdit = await runInProcessJsonCli<{
+      automation: {
+        route: { deliveryTarget: string | null; threadId: string | null };
+      } | null;
+    }>(cli, [
+      "automation",
+      "show",
+      "email-thread-reminder",
+      "--vault",
+      vaultRoot,
+    ]);
+    assert.equal(afterDifferentThreadEdit.envelope.ok, true);
+    assert.deepEqual(afterDifferentThreadEdit.envelope.data?.automation?.route, {
+      channel: "email",
+      deliverySource: null,
+      deliveryTarget: laterEnvelope,
+      identityId: "email-sender-identity",
+      participantId: null,
+      threadId: "stable-email-thread",
+      threadIsDirect: true,
+    });
   } finally {
     await bridge.stop();
     await rm(parentRoot, { recursive: true, force: true });
@@ -1232,6 +1384,26 @@ test("hosted automation writes fail closed when the current route is unavailable
     vi.stubEnv(HOSTED_CLI_BRIDGE_TOKEN_ENV, "test-bridge-token");
     vi.stubEnv(HOSTED_CLI_BRIDGE_URL_ENV, bridge.url);
 
+    await upsertAutomation({
+      continuityPolicy: "preserve",
+      instructions: "Keep this automation unchanged without an interactive grant.",
+      route: {
+        channel: "linq",
+        deliverySource: null,
+        deliveryTarget: "linq_chat_existing",
+        identityId: "hid_existing_identity",
+        participantId: "hid_existing_participant",
+        threadId: "hid_existing_thread",
+        threadIsDirect: true,
+      },
+      schedule: { kind: "at", at: "2026-12-06T12:00:00.000Z" },
+      slug: "existing-reminder",
+      status: "active",
+      tags: [],
+      title: "Existing reminder",
+      vaultRoot,
+    });
+
     const saved = await runInProcessJsonCli(cli, [
       "automation",
       "save",
@@ -1283,6 +1455,35 @@ test("hosted automation writes fail closed when the current route is unavailable
       missingBridge.envelope.ok ? null : missingBridge.envelope.error.message,
       "Hosted automation changes require one verified current conversation.",
     );
+
+    for (const args of [
+      ["automation", "edit", "existing-reminder", "--summary", "Scheduled edit"],
+      ["automation", "set-status", "existing-reminder", "--status", "paused"],
+    ]) {
+      const denied = await runInProcessJsonCli(cli, [
+        ...args,
+        "--vault",
+        vaultRoot,
+      ]);
+      assert.equal(denied.envelope.ok, false);
+      assert.equal(
+        denied.envelope.ok ? null : denied.envelope.error.message,
+        "Hosted automation changes require one verified current conversation.",
+      );
+    }
+
+    const existing = await runInProcessJsonCli<{
+      automation: { status: string; summary: string | null } | null;
+    }>(cli, [
+      "automation",
+      "show",
+      "existing-reminder",
+      "--vault",
+      vaultRoot,
+    ]);
+    assert.equal(existing.envelope.ok, true);
+    assert.equal(existing.envelope.data?.automation?.status, "active");
+    assert.equal(existing.envelope.data?.automation?.summary, null);
   } finally {
     await bridge.stop();
     await rm(parentRoot, { recursive: true, force: true });
