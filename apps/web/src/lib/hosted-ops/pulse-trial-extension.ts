@@ -21,6 +21,7 @@ import {
   updateHostedMemberCoreState,
   type HostedMemberBillingSnapshot,
 } from "../hosted-onboarding/hosted-member-store";
+import { readActiveHostedFamilySponsorship } from "../hosted-onboarding/member-access";
 import {
   isHostedPulseTrialSubscriptionForKnownPolicy,
 } from "../hosted-onboarding/pulse-trial-subscription-cleanup";
@@ -51,6 +52,7 @@ export type HostedPulseTrialExtensionEligibilityCode =
   | "eligible"
   | "member_not_found"
   | "member_suspended"
+  | "family_sponsored"
   | "missing_billing_reference"
   | "not_a_redeemed_pulse_trial"
   | "paid_billing"
@@ -230,6 +232,7 @@ export async function previewHostedPulseTrialExtension(
     memberId: input.memberId,
     now,
     priceId: dependencies.priceId,
+    prisma: dependencies.prisma,
     stripe: dependencies.stripe,
   });
 
@@ -289,6 +292,7 @@ export async function applyHostedPulseTrialExtension(
           memberId: input.memberId,
           now: proofDates.previewedAt,
           priceId: dependencies.priceId,
+          prisma: tx,
           stripe: dependencies.stripe,
         });
         const subscription = state.subscription;
@@ -632,12 +636,23 @@ async function inspectHostedPulseTrialExtensionState(input: {
   memberId: string;
   now: Date;
   priceId: string;
+  prisma: PrismaClient | Prisma.TransactionClient;
   stripe: HostedPulseTrialExtensionStripeClient;
 }): Promise<HostedPulseTrialExtensionState> {
   const localReason = classifyHostedPulseTrialExtensionLocalState(input.member);
   if (localReason) {
     return buildIneligibleHostedPulseTrialExtensionState({
       code: localReason,
+      member: input.member,
+    });
+  }
+
+  if (await readActiveHostedFamilySponsorship({
+    memberId: input.memberId,
+    prisma: input.prisma,
+  })) {
+    return buildIneligibleHostedPulseTrialExtensionState({
+      code: "family_sponsored",
       member: input.member,
     });
   }
@@ -832,6 +847,8 @@ function readHostedPulseTrialExtensionEligibilityMessage(
       return "No hosted member exists with this ID.";
     case "member_suspended":
       return "This member is suspended, so billing was left unchanged.";
+    case "family_sponsored":
+      return "This member already has access through an active Family plan.";
     case "missing_billing_reference":
       return "This member has no Stripe billing record.";
     case "not_a_redeemed_pulse_trial":
