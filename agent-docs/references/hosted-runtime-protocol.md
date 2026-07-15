@@ -901,10 +901,15 @@ start without broad hosted mailbox rediscovery. While a Codex turn is live,
 later mailbox input may still be imported and staged. Its exact staged input ID
 may join through the generic live-steering path only when the stored event is
 the next positive causal-sequence successor and preserves the conversation,
-delivery route, native reply anchor, account/audience, and group actor. After
-the provider acknowledges `turn/steer`, Murph journals and checkpoints the
-accepted input before any hosted tool effect or final delivery may proceed.
-Missing input, a causal gap, a boundary change, or a missed live window remains pending for a normal later
+delivery route, native reply anchor, account/audience, and group actor. A
+projection-pending input is a causal barrier until the existing
+projection-completion notification retries it; terminal projection failure is
+still replyable through the normal fallback. Duplicate staging and
+projection-completion notifications at or behind the newest queued or committed
+frontier are ignored before exact-successor proof. After the provider
+acknowledges `turn/steer`, Murph journals and checkpoints the accepted input
+before any hosted tool effect or final delivery may proceed. Missing input, a
+causal gap, a boundary change, or a missed live window remains pending for a normal later
 assistant turn. Strict active-turn-targeted input still fails closed instead of
 falling through, and the assistant engine does not synthesize another provider
 request inside the same assistant turn. Final-delivery and hosted-tool effect

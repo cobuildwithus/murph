@@ -324,11 +324,12 @@ async function selectHostedAssistantExactSuccessorEvents(input: {
   replyableInputIds: ReadonlySet<string>;
   vaultRoot: string;
 }): Promise<AssistantInputEventRecord[]> {
-  if (!input.afterCursor || input.events.length === 0) {
+  const afterCursor = input.afterCursor;
+  if (!afterCursor || input.events.length === 0) {
     return [];
   }
   const [anchor] = await readHostedAssistantInputEventsById({
-    inputIds: [input.afterCursor.inputId],
+    inputIds: [afterCursor.inputId],
     missingInput: "skip",
     vaultRoot: input.vaultRoot,
   });
@@ -337,15 +338,22 @@ async function selectHostedAssistantExactSuccessorEvents(input: {
   }
 
   // Exact notification avoids a global scan, but it does not weaken the
-  // compound-batch boundary. Stop at the first missing causal successor or
-  // non-replyable event and leave every later ID pending.
+  // compound-batch boundary. Ignore duplicate notifications at or behind the
+  // supplied frontier, then stop at the first missing causal successor,
+  // incomplete projection, or non-replyable event and leave later IDs pending.
+  const successorEvents = [...input.events]
+    .sort((left, right) =>
+      compareAssistantInputCursors(left.cursor, right.cursor)
+    )
+    .filter((event) =>
+      compareAssistantInputCursors(event.cursor, afterCursor) > 0
+    );
   const selected: AssistantInputEventRecord[] = [];
   let previous = anchor;
-  for (const event of [...input.events].sort((left, right) =>
-    compareAssistantInputCursors(left.cursor, right.cursor)
-  )) {
+  for (const event of successorEvents) {
     if (
-      !input.replyableInputIds.has(event.inputId)
+      event.projection.status === "pending"
+      || !input.replyableInputIds.has(event.inputId)
       || !isHostedAssistantInputEventBatchSuccessor(previous, event)
     ) {
       break;

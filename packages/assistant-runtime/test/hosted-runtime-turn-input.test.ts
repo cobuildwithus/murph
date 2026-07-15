@@ -355,6 +355,182 @@ describe("createHostedAssistantInputSource", () => {
     expect(listSpy).not.toHaveBeenCalled();
   });
 
+  it("keeps projection-pending exact input as a causal barrier until projection settles", async () => {
+    const vaultRoot = await createTempVault();
+    await enableLinqAutoReply(vaultRoot);
+    const anchor = await upsertAssistantInputEvent({
+      vault: vaultRoot,
+      event: createAssistantInputEvent({
+        causalSeq: "40",
+        dedupeKey: "dedupe_projection_barrier_anchor",
+        eventId: "evt_projection_barrier_anchor",
+        itemId: "item_projection_barrier_anchor",
+        laneSeq: "40",
+        messageId: "msg_projection_barrier_anchor",
+        text: "projection barrier anchor",
+      }),
+    });
+    const projecting = await upsertAssistantInputEvent({
+      vault: vaultRoot,
+      event: createAssistantInputEvent({
+        causalSeq: "41",
+        dedupeKey: "dedupe_projection_barrier_pending",
+        eventId: "evt_projection_barrier_pending",
+        itemId: "item_projection_barrier_pending",
+        laneSeq: "41",
+        messageId: "msg_projection_barrier_pending",
+        text: "attachment still projecting",
+      }),
+    });
+    const later = await upsertAssistantInputEvent({
+      vault: vaultRoot,
+      event: createAssistantInputEvent({
+        causalSeq: "42",
+        dedupeKey: "dedupe_projection_barrier_later",
+        eventId: "evt_projection_barrier_later",
+        itemId: "item_projection_barrier_later",
+        laneSeq: "42",
+        messageId: "msg_projection_barrier_later",
+        text: "later exact successor",
+      }),
+    });
+    for (const inputId of [anchor.inputId, projecting.inputId, later.inputId]) {
+      await enqueueHostedPendingAssistantInputId({ inputId, vaultRoot });
+    }
+    await updateAssistantInputProjection({
+      inputId: projecting.inputId,
+      projection: { status: "pending" },
+      vault: vaultRoot,
+    });
+    const source = createHostedAssistantInputSource({
+      pendingInputRefreshMode: "none",
+      selectedInputIds: [anchor.inputId],
+      vaultRoot,
+    });
+
+    await expect(source.listInputCandidatesByIds({
+      afterCursor: anchor.cursor,
+      inputIds: [projecting.inputId, later.inputId],
+      sourceId: "linq",
+    })).resolves.toMatchObject({ inputs: [] });
+
+    await updateAssistantInputProjection({
+      inputId: projecting.inputId,
+      projection: {
+        captureId: "cap_projection_barrier_ready",
+        status: "succeeded",
+      },
+      vault: vaultRoot,
+    });
+    const ready = await source.listInputCandidatesByIds({
+      afterCursor: anchor.cursor,
+      inputIds: [projecting.inputId, later.inputId],
+      sourceId: "linq",
+    });
+    expect(ready.inputs.map((candidate) => candidate.event.inputId)).toEqual([
+      projecting.inputId,
+      later.inputId,
+    ]);
+    expect(ready.inputs[0]?.projection).toMatchObject({
+      captureId: "cap_projection_barrier_ready",
+      status: "succeeded",
+    });
+
+    const failedProjection = await upsertAssistantInputEvent({
+      vault: vaultRoot,
+      event: createAssistantInputEvent({
+        causalSeq: "43",
+        dedupeKey: "dedupe_projection_barrier_failed",
+        eventId: "evt_projection_barrier_failed",
+        itemId: "item_projection_barrier_failed",
+        laneSeq: "43",
+        messageId: "msg_projection_barrier_failed",
+        text: "projection fallback input",
+      }),
+    });
+    await enqueueHostedPendingAssistantInputId({
+      inputId: failedProjection.inputId,
+      vaultRoot,
+    });
+    await updateAssistantInputProjection({
+      inputId: failedProjection.inputId,
+      projection: {
+        reasonCode: "projection_failed",
+        status: "failed",
+      },
+      vault: vaultRoot,
+    });
+    const failed = await source.listInputCandidatesByIds({
+      afterCursor: later.cursor,
+      inputIds: [failedProjection.inputId],
+      sourceId: "linq",
+    });
+    expect(failed.inputs.map((candidate) => candidate.event.inputId)).toEqual([
+      failedProjection.inputId,
+    ]);
+    expect(failed.inputs[0]?.projection.status).toBe("failed");
+  });
+
+  it("ignores duplicate exact ids at the supplied frontier before checking successors", async () => {
+    const vaultRoot = await createTempVault();
+    await enableLinqAutoReply(vaultRoot);
+    const anchor = await upsertAssistantInputEvent({
+      vault: vaultRoot,
+      event: createAssistantInputEvent({
+        causalSeq: "60",
+        dedupeKey: "dedupe_stale_frontier_anchor",
+        eventId: "evt_stale_frontier_anchor",
+        itemId: "item_stale_frontier_anchor",
+        laneSeq: "60",
+        messageId: "msg_stale_frontier_anchor",
+        text: "stale frontier anchor",
+      }),
+    });
+    const accepted = await upsertAssistantInputEvent({
+      vault: vaultRoot,
+      event: createAssistantInputEvent({
+        causalSeq: "61",
+        dedupeKey: "dedupe_stale_frontier_accepted",
+        eventId: "evt_stale_frontier_accepted",
+        itemId: "item_stale_frontier_accepted",
+        laneSeq: "61",
+        messageId: "msg_stale_frontier_accepted",
+        text: "already accepted exact input",
+      }),
+    });
+    const next = await upsertAssistantInputEvent({
+      vault: vaultRoot,
+      event: createAssistantInputEvent({
+        causalSeq: "62",
+        dedupeKey: "dedupe_stale_frontier_next",
+        eventId: "evt_stale_frontier_next",
+        itemId: "item_stale_frontier_next",
+        laneSeq: "62",
+        messageId: "msg_stale_frontier_next",
+        text: "next cancellation input",
+      }),
+    });
+    for (const inputId of [anchor.inputId, accepted.inputId, next.inputId]) {
+      await enqueueHostedPendingAssistantInputId({ inputId, vaultRoot });
+    }
+    const source = createHostedAssistantInputSource({
+      pendingInputRefreshMode: "none",
+      selectedInputIds: [anchor.inputId],
+      vaultRoot,
+    });
+
+    const exact = await source.listInputCandidatesByIds({
+      afterCursor: accepted.cursor,
+      inputIds: [anchor.inputId, accepted.inputId, next.inputId],
+      knownInputIds: [accepted.inputId],
+      sourceId: "linq",
+    });
+
+    expect(exact.inputs.map((candidate) => candidate.event.inputId)).toEqual([
+      next.inputId,
+    ]);
+  });
+
   it("batches newly enqueued exact successors while the pre-provider selection is empty", async () => {
     const vaultRoot = await createTempVault();
     await enableLinqAutoReply(vaultRoot);

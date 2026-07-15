@@ -1849,7 +1849,8 @@ function createAssistantAutoReplyActiveTurnInputHooks(input: {
       ...(admissionInput.knownInputIds ?? []),
     ]
     const lateInputs = await listAutoReplyActiveTurnInputs({
-      afterCursor: context.lastInputCursor,
+      afterCursor:
+        pendingAcceptances.at(-1)?.lastInputCursor ?? context.lastInputCursor,
       conversation,
       context,
       inputIds: availableInputIds,
