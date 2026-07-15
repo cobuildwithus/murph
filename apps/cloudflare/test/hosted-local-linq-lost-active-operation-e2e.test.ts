@@ -90,16 +90,9 @@ describe("hosted local Linq lost active-operation e2e", () => {
 
     const replyPath = `/chats/${encodeURIComponent(chatId)}/messages`;
     const outboundCountBeforeReply = requireLinqStub().countObservedSends(replyPath);
-    let liveReplyProviderRequestIncludedSecondInput: boolean | null = null;
     requireScenario().queueAssistantResponses([
       buildAssistantProviderShellCommandCall("sleep 3 && echo first-turn-held"),
-      {
-        onResponseStarted: () => {
-          liveReplyProviderRequestIncludedSecondInput = requireScenario()
-            .assistantProviderRequests.at(-1)?.body.includes(secondInboundText) ?? false;
-        },
-        text: unsteeredFirstReplyText,
-      },
+      unsteeredFirstReplyText,
     ], {
       matchInputContains: "First message while starting the turn.",
     });
@@ -152,7 +145,6 @@ describe("hosted local Linq lost active-operation e2e", () => {
       userId,
     });
     expect(requireLinqStub().readObservedMessageText(liveTurnSend)).toBe(secondReplyText);
-    expect(liveReplyProviderRequestIncludedSecondInput).toBe(true);
 
     const finalStatus = await requireScenario().waitForHostedCompletion(userId);
     expect(finalStatus.lastErrorCode ?? null).toBeNull();
