@@ -582,7 +582,7 @@ const automationSaveOptionSchemas = {
     .string()
     .min(1)
     .optional()
-    .describe("Optional existing automation id to update."),
+    .describe("Optional existing automation id whose full definition will be replaced."),
   ...automationSharedOptionSchemas,
   instructions: z
     .string()
@@ -632,13 +632,13 @@ export function registerAutomationCommands(cli: Cli.Cli) {
     args: z.object({
       title: z.string().min(1).max(160).describe("Automation title."),
     }),
-    description: "Create or update one automation from typed command fields.",
+    description: "Create one automation or intentionally replace its full definition from typed command fields.",
     examples: [
       {
         args: {
           title: "'Daily mobility'",
         },
-        description: "Save a daily automation without a JSON payload.",
+        description: "Create a daily automation without a JSON payload.",
         options: {
           channel: "telegram",
           deliveryTarget: "telegram_thread_real",
@@ -650,7 +650,7 @@ export function registerAutomationCommands(cli: Cli.Cli) {
         },
       },
     ],
-    hint: "Use automation import-json only when importing an advanced JSON payload from @file.json or stdin.",
+    hint: "Use automation edit for existing-record changes and automation set-status for lifecycle changes. Use automation import-json only for an advanced JSON full-definition replacement from @file.json or stdin.",
     options: withBaseOptions(automationSaveOptionSchemas),
     output: automationSaveResultSchema,
     async run(context) {
@@ -727,14 +727,14 @@ export function registerAutomationCommands(cli: Cli.Cli) {
         args: {
           lookup: "daily-mobility",
         },
-        description: "Update an automation continuity policy without resubmitting instructions, schedule, or route fields.",
+        description: "Patch an automation continuity policy without resubmitting instructions, schedule, or route fields.",
         options: {
           continuityPolicy: "preserve",
           vault: "./vault",
         },
       },
     ],
-    hint: "Use automation save when creating an automation or replacing the full typed automation shape.",
+    hint: "Use automation save when creating an automation or intentionally replacing the full typed automation shape.",
     options: withBaseOptions(automationEditOptionSchemas),
     output: automationSaveResultSchema,
     async run(context) {
@@ -925,8 +925,8 @@ export function registerAutomationCommands(cli: Cli.Cli) {
 
   automation.command("import-json", {
     args: z.object({}),
-    description: "Import or bulk-edit one automation from an advanced JSON payload.",
-    hint: "Prefer automation save for typed creation or intentional full replacement.",
+    description: "Create one automation or intentionally replace its full definition from an advanced JSON payload.",
+    hint: "Prefer automation save for typed creation or intentional full replacement. Use automation edit or automation set-status for ordinary existing-record changes.",
     options: withBaseOptions({
       input: textInputOptionSchema.describe(
         "Advanced automation payload in @file.json form or - for stdin.",

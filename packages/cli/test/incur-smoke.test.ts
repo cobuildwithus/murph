@@ -2039,16 +2039,38 @@ test('assistant session show schema emits the normalized session output shape', 
 
 test('automation help points operators at canonical automations', async () => {
   const saveHelp = await runSourceCliRaw(['automation', 'save', '--help'])
+  const saveDiscovery = await runSourceCliRaw(['automation', 'save', '--llms-full'])
   const importJsonHelp = await runSourceCliRaw(['automation', 'import-json', '--help'])
+  const importJsonDiscovery = await runSourceCliRaw([
+    'automation',
+    'import-json',
+    '--llms-full',
+  ])
   const scaffoldHelp = await runSourceCliRaw(['automation', 'scaffold', '--help'])
 
-  assert.match(saveHelp, /Create or update one automation from typed command fields\./u)
-  assert.match(saveHelp, /automation import-json/u)
-  assert.match(importJsonHelp, /Import or bulk-edit one automation from an advanced JSON payload\./u)
-  assert.match(
-    importJsonHelp,
-    /Prefer automation save for typed creation or intentional full replacement\./u,
-  )
+  for (const surface of [saveHelp, saveDiscovery]) {
+    assert.match(
+      surface,
+      /Create one automation or intentionally replace its full definition from typed command fields\./u,
+    )
+    assert.match(surface, /Use automation edit for existing-record changes/u)
+    assert.match(surface, /automation set-status for lifecycle changes/u)
+    assert.match(surface, /automation import-json/u)
+    assert.match(
+      surface,
+      /Optional existing automation id whose full definition will be replaced\./u,
+    )
+    assert.doesNotMatch(surface, /Create or update/u)
+    assert.doesNotMatch(surface, /existing automation id to update/u)
+  }
+  for (const surface of [importJsonHelp, importJsonDiscovery]) {
+    assert.match(
+      surface,
+      /Create one automation or intentionally replace its full definition from an advanced JSON payload\./u,
+    )
+    assert.match(surface, /Use automation edit or automation set-status/u)
+    assert.doesNotMatch(surface, /bulk-edit/u)
+  }
   assert.match(scaffoldHelp, /advanced automation JSON payload template/u)
 }, INCUR_HELP_TIMEOUT_MS)
 
@@ -2400,6 +2422,22 @@ test('full llms json manifest remains available for schema-rich commands', async
     String(ageInputsCommand?.description ?? ''),
     /metadata-only/u,
   )
+  const automationSaveCommand = manifest.commands.find(
+    (command) => command.name === 'automation save',
+  )
+  const automationImportCommand = manifest.commands.find(
+    (command) => command.name === 'automation import-json',
+  )
+  assert.match(
+    String(automationSaveCommand?.description ?? ''),
+    /intentionally replace its full definition from typed command fields/u,
+  )
+  assert.match(
+    String(automationImportCommand?.description ?? ''),
+    /intentionally replace its full definition from an advanced JSON payload/u,
+  )
+  assert.doesNotMatch(String(automationSaveCommand?.description ?? ''), /update/u)
+  assert.doesNotMatch(String(automationImportCommand?.description ?? ''), /bulk-edit/u)
   assert.equal(
     manifest.commands.some((command) => command.name === 'age model-cards'),
     true,

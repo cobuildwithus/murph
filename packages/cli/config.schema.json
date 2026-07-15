@@ -1245,7 +1245,7 @@
                           "maxLength": 128
                         },
                         "id": {
-                          "description": "Optional existing automation id to update.",
+                          "description": "Optional existing automation id whose full definition will be replaced.",
                           "type": "string",
                           "minLength": 1
                         },
