@@ -2140,18 +2140,24 @@ describe('assistant conversation scope', () => {
 
     expect(prompt).toContain('Email replies can converse about this group')
     expect(prompt).toContain('Group-email replies cannot create, edit, import, pause')
+    expect(prompt).not.toContain('existing automation in this bound runtime vault')
+    expect(prompt).not.toContain('`vault-cli automation set-status`')
     expect(prompt).not.toContain('Group automation writes are current-room-only')
     expect(prompt).not.toContain('Scheduled automation commands are available for this group room')
   })
 
-  it('keeps hosted direct automation writes in the current conversation', () => {
+  it('keeps hosted route writes current while permitting vault-owned record mutations', () => {
     const prompt = buildAssistantSystemPrompt(createCommonCodexPromptInput({
       conversationScope: 'direct',
       hostedRuntime: true,
     }))
 
-    expect(prompt).toContain('Hosted chat automation writes are current-conversation-only')
-    expect(prompt).toContain('omit route flags so the trusted route is inherited')
+    expect(prompt).toContain('existing automation in this bound runtime vault')
+    expect(prompt).toContain('`vault-cli automation edit` for non-route changes')
+    expect(prompt).toContain('`vault-cli automation set-status`')
+    expect(prompt).toContain('stored route remains unchanged')
+    expect(prompt).toContain('bind to the trusted current conversation')
+    expect(prompt).toContain('do not target another route')
     expect(prompt).not.toContain('inspect saved local self-targets')
   })
 

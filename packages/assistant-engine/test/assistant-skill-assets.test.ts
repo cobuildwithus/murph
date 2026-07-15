@@ -164,6 +164,16 @@ describe('assistant skill assets', () => {
     }
   })
 
+  it('keeps automation command selection in the shared developer prompt', async () => {
+    const registeredSkillText = (
+      await Promise.all(ASSISTANT_SKILLS.map(readSkillFile))
+    ).join('\n')
+
+    expect(registeredSkillText).not.toMatch(
+      /(?:vault-cli\s+)?automation\s+(?:save|edit|set-status|import-json)\b/u,
+    )
+  })
+
   it('uses unique safe skill slugs and names', () => {
     const slugs = new Set<string>()
     const names = new Set<string>()
@@ -665,17 +675,22 @@ describe('assistant skill assets', () => {
       /`read_current` can return `status="none"`[\s\S]*not that\s+someone must link an external workspace[\s\S]*those\s+actions create the hosted group record/u,
     )
     expect(raw).toContain('If the group wants the recurring update in the chat instead of email')
-    expect(raw).toContain('vault-cli automation save')
+    expect(raw).toContain(
+      "Create a new newsletter under the developer prompt's shared automation action",
+    )
+    expect(raw).toContain(
+      "For changes or stopping, follow the developer prompt's shared automation",
+    )
+    expect(raw).not.toContain('the current group channel')
     expect(raw).toContain("the group's chosen name as the positional `<title>`")
     expect(raw).toContain('require every email subject to start with that exact name')
     expect(raw).toContain('Future notification turns may not read this skill')
     expect(raw).toContain('Use exactly `--slug group-health-newsletter`')
     expect(raw).toContain('Any other slug will not be able to send')
-    expect(raw).toContain('vault-cli automation set-status group-health-newsletter --status archived')
     expect(raw).toContain('--schedule-cron "0 9 * * 0"')
     expect(raw).toContain('--continuity-policy fresh')
     expect(raw).toMatch(
-      /until the\s+`vault-cli automation save` command succeeds[\s\S]*never turn a\s+failed command into a confirmation/u,
+      /until its\s+`vault-cli automation` command succeeds[\s\S]*never\s+turn a failed command into a confirmation/u,
     )
     expect(raw).toContain('next natural cron occurrence')
     expect(raw).toContain('Never create an')
@@ -804,6 +819,9 @@ describe('assistant skill assets', () => {
     expect(raw).toMatch(/Existing\s+members like the server-owned message to opt into/)
     expect(raw).toContain('Do not tell the room to join again')
     expect(raw).not.toContain('Mint the join link with `murph.group`')
+    expect(raw).toContain(
+      "under the developer prompt's shared\nautomation action rules",
+    )
   })
 
   it('builds stable symbolic skill file references', () => {
@@ -927,7 +945,10 @@ describe('assistant skill assets', () => {
       /After a verified appointment,\s+delivery, order, enrollment, or submission, offer at most one adjacent step/u,
     )
     expect(raw).toContain('30-day supplement supply')
-    expect(raw).toContain('vault-cli automation save')
+    expect(raw).toContain(
+      "under the developer prompt's shared automation action rules",
+    )
+    expect(raw).not.toContain('the current conversation route when it is deliverable')
     expect(raw).toContain('Do not auto-reorder.')
     expect(raw).toContain(
       'Treat this check-in as the one\nadjacent next step',
@@ -1071,7 +1092,15 @@ describe('assistant skill assets', () => {
     )
     expect(raw).toContain('vault-cli experiment start <slug>')
     expect(raw).toContain('vault-cli experiment edit <id>')
-    expect(raw).toContain('vault-cli automation save <title>')
+    expect(raw).toContain(
+      "Follow the developer prompt's shared automation action rules for creation",
+    )
+    expect(raw).toContain(
+      "For rescheduling, follow the developer prompt's shared automation action rules",
+    )
+    expect(raw).not.toContain('stable slug lets rescheduling update')
+    expect(raw).not.toContain('Include the current route fields')
+    expect(raw).not.toContain('--channel <channel>')
     expect(raw).toContain('first_session_start_at')
     expect(raw).toContain('first_session_prep_reminder_at')
     expect(raw).toContain('first_session_prep_automation_slug')

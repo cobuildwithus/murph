@@ -462,11 +462,10 @@ bounded replenishment check-in when the order result or the user's request gives
 reliable supply-duration evidence. Examples include a 30-day supplement supply,
 90 contact lenses used one per day, or four weekly meal boxes.
 
-Use `vault-cli automation save` with:
+Create it under the developer prompt's shared automation action rules with:
 
 - `--schedule-kind at` and a single ISO timestamp near expected depletion
 - a stable slug that identifies the item and date
-- the current conversation route when it is deliverable
 - `--continuity-policy preserve`
 - instructions that ask whether the user wants Murph to reorder or adjust the
   item

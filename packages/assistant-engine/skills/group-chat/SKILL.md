@@ -174,10 +174,10 @@ messages are expected; send them on schedule with confidence. Etiquette:
   sustained silence, reduce frequency rather than escalating.
 - Automations do not override the ladder: between scheduled sends, the normal
   reply rules above still apply.
-- Do not say an update is saved, scheduled, or active until the
-  `vault-cli automation save` command succeeds. If it fails, correct the
-  command or tell the group plainly that setup did not complete; never turn a
-  failed command into a confirmation.
+- Do not say an update is saved, scheduled, changed, or active until its
+  `vault-cli automation` command succeeds. If it fails, correct the command or
+  tell the group plainly that the requested change did not complete; never
+  turn a failed command into a confirmation.
 
 ## Group health newsletter
 
@@ -189,8 +189,8 @@ section owns the group-room setup, consent, notice, and opt-out behavior.
 
 The group health newsletter is a single cron automation in the group runtime's
 vault, not a new scheduler or private data store. Any member can set it up,
-edit it, or stop it. One automation per group wins, and the latest request
-replaces the previous one.
+edit it, or stop it. One automation per group wins; apply later requests to
+the same stable slug.
 
 When a group asks for a newsletter, do not create it immediately with invented
 defaults. First send one short setup message that gets the essentials: what the
@@ -219,7 +219,8 @@ newsletter email tool. Set up a normal scheduled group-chat update automation
 under the Scheduled updates and automations rules above; it reads the same
 shared vault projections and needs no email grant.
 
-Set up or edit it with `vault-cli automation save` using:
+Create a new newsletter under the developer prompt's shared automation action
+rules using:
 
 - the group's chosen name as the positional `<title>`
 - Use exactly `--slug group-health-newsletter`. Any other slug will not be able to send
@@ -227,7 +228,6 @@ Set up or edit it with `vault-cli automation save` using:
 - `--schedule-kind cron`
 - `--schedule-cron "0 9 * * 0"` unless the group chose another schedule
 - `--continuity-policy fresh`
-- the current group channel
 - instructions that say this is the group health newsletter, include the
   exact chosen name, chosen tone, and any optional custom note, and explicitly
   require the scheduled run to read and follow
@@ -236,7 +236,8 @@ Set up or edit it with `vault-cli automation save` using:
   newsletter label. Future notification turns may not read this skill, so keep
   that complete naming rule in the saved instructions.
 
-Stop it with `vault-cli automation set-status group-health-newsletter --status archived`.
+For changes or stopping, follow the developer prompt's shared automation
+action rules and apply only the requested fields to `group-health-newsletter`.
 
 When creating or materially editing the newsletter, post one clear group notice
 in the chat. Say what will be shared, that it goes only to members who granted
