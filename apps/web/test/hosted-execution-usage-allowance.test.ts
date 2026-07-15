@@ -1422,6 +1422,56 @@ describe("accountHostedAiUsageForAllowanceTx", () => {
     expect(countPeriodMetadataUpdateCalls(tx)).toBe(1);
   });
 
+  it("uses a Family calendar period while the sponsor period projection is missing", async () => {
+    const updateMany = vi.fn(async () => ({ count: 1 }));
+    const executeRaw = vi.fn<AllowanceExecuteRaw>(async () => 1);
+    const tx = createAllowanceTx({
+      billingPhase: "trial",
+      checkoutOffer: "pulse_trial_7d",
+      executeRaw,
+      familyAccessActive: true,
+      familyPeriodEnd: null,
+      familyPeriodStart: null,
+      hostedAiUsageUpdateMany: updateMany,
+      periodEnd: new Date("2026-05-01T00:00:00.000Z"),
+      periodStart: new Date("2026-04-01T00:00:00.000Z"),
+      pulseTrialPolicyVersion: "pulse-trial-2026-05-05-v1",
+      trialEndsAt: new Date("2026-04-08T12:00:00.000Z"),
+      trialStartedAt: new Date("2026-04-01T12:00:00.000Z"),
+    });
+
+    await accountHostedAiUsageForAllowanceTx({
+      memberId: "member_123",
+      now: new Date("2026-04-09T12:00:05.000Z"),
+      record: {
+        ...BASE_USAGE_RECORD,
+        occurredAt: "2026-04-09T12:00:01.000Z",
+      },
+      tx: tx as never,
+    });
+
+    expect(updateMany).toHaveBeenCalledWith(expect.objectContaining({
+      data: expect.objectContaining({
+        allowanceAccountedAt: new Date("2026-04-09T12:00:05.000Z"),
+        allowanceCostUsdMicros: 1896n,
+        allowanceCounted: true,
+        allowancePeriodEnd: new Date("2026-05-01T00:00:00.000Z"),
+        allowancePeriodStart: new Date("2026-04-01T00:00:00.000Z"),
+        allowancePricingVersion: "openai-api-pricing-2026-05-05-standard",
+      }),
+    }));
+    expect(tx.hostedAiUsagePeriod.createMany).toHaveBeenCalledWith(expect.objectContaining({
+      data: expect.objectContaining({
+        billingPlanCode: "launch_monthly",
+        limitUsdMicros: 10_000_000n,
+        memberId: "member_123",
+        periodEnd: new Date("2026-05-01T00:00:00.000Z"),
+        periodStart: new Date("2026-04-01T00:00:00.000Z"),
+      }),
+    }));
+    expect(countPeriodMetadataUpdateCalls(tx)).toBe(1);
+  });
+
   it("validates OpenAI flex evidence before marking stale-trial usage denied", async () => {
     const updateMany = vi.fn(async () => ({ count: 1 }));
     const executeRaw = vi.fn<AllowanceExecuteRaw>(async () => 1);
@@ -1966,13 +2016,15 @@ describe("resolveHostedAiUsageGate", () => {
     });
   });
 
-  it("denies Family-sponsored members when the group billing period is missing", async () => {
+  it("uses a calendar period for Family-sponsored members when the group period is missing", async () => {
     const prisma = createGatePrisma({
       billingStatus: HostedBillingStatus.not_started,
       familyAccessActive: true,
       familyPeriodEnd: null,
       familyPeriodStart: null,
       findUniquePeriod: null,
+      periodEnd: new Date("2026-05-01T00:00:00.000Z"),
+      periodStart: new Date("2026-04-01T00:00:00.000Z"),
       spentUsdMicros: 0n,
     });
 
@@ -1981,14 +2033,18 @@ describe("resolveHostedAiUsageGate", () => {
       now: "2026-04-09T12:00:00.000Z",
       prisma: prisma as never,
     })).resolves.toMatchObject({
-      allowed: false,
-      reason: "hosted_access_inactive",
-      userNotice: null,
+      allowed: true,
+      allowanceSource: "family_sponsored_plan",
+      billingPlanCode: "launch_monthly",
+      limitUsdMicros: 10_000_000n,
+      periodEnd: new Date("2026-05-01T00:00:00.000Z"),
+      periodStart: new Date("2026-04-01T00:00:00.000Z"),
+      remainingUsdMicros: 10_000_000n,
+      spentUsdMicros: 0n,
     });
-    expect(prisma.hostedAiUsagePeriod.createMany).not.toHaveBeenCalled();
   });
 
-  it("does not treat non-Family group billing as sponsored access", async () => {
+  it("keeps Family sponsorship when the group billing projection is invalid", async () => {
     const prisma = createGatePrisma({
       billingPhase: "trial",
       billingStatus: HostedBillingStatus.canceled,
@@ -2009,11 +2065,14 @@ describe("resolveHostedAiUsageGate", () => {
       now: "2026-04-09T12:00:00.000Z",
       prisma: prisma as never,
     })).resolves.toMatchObject({
-      allowed: false,
-      reason: "hosted_access_inactive",
-      userNotice: null,
+      allowed: true,
+      billingPlanCode: "launch_monthly",
+      limitUsdMicros: 10_000_000n,
+      periodEnd: new Date("2026-05-01T00:00:00.000Z"),
+      periodStart: new Date("2026-04-01T00:00:00.000Z"),
+      remainingUsdMicros: 10_000_000n,
+      spentUsdMicros: 0n,
     });
-    expect(prisma.hostedAiUsagePeriod.createMany).not.toHaveBeenCalled();
   });
 
   it("keeps pending Pulse Trial billing notices stable when no trial start exists", async () => {
@@ -2925,6 +2984,8 @@ function createAllowanceTx(input: {
   familyAccessActive?: boolean;
   familyBillingPlanCode?: string | null;
   familyPlanCode?: "edge" | "pulse";
+  familyPeriodEnd?: Date | null;
+  familyPeriodStart?: Date | null;
   hostedAiUsageAggregate?: ReturnType<typeof vi.fn>;
   hostedAiUsageUpdateMany: ReturnType<typeof vi.fn>;
   limitNoticeSentAt?: Date | null;
@@ -2938,6 +2999,12 @@ function createAllowanceTx(input: {
   trialEndsAt?: Date | null;
   trialStartedAt?: Date | null;
 }) {
+  const familyPeriodStart = input.familyPeriodStart === undefined
+    ? input.periodStart ?? new Date("2026-03-01T00:00:00.000Z")
+    : input.familyPeriodStart;
+  const familyPeriodEnd = input.familyPeriodEnd === undefined
+    ? input.periodEnd ?? new Date("2026-04-01T00:00:00.000Z")
+    : input.familyPeriodEnd;
   const defaultAggregate = vi.fn()
     .mockResolvedValueOnce({
       _max: {
@@ -3020,8 +3087,8 @@ function createAllowanceTx(input: {
             billedSeatCount: 2,
             currentBillingPlanCode: input.familyBillingPlanCode ?? "launch_family_monthly",
             currentBillingPhase: "paid",
-            currentPeriodEnd: input.periodEnd ?? new Date("2026-04-01T00:00:00.000Z"),
-            currentPeriodStart: input.periodStart ?? new Date("2026-03-01T00:00:00.000Z"),
+            currentPeriodEnd: familyPeriodEnd,
+            currentPeriodStart: familyPeriodStart,
           }
         : null),
     },
