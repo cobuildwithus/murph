@@ -22,6 +22,10 @@ import type {
 
 import { hasHostedRuntimeActiveAccess } from "../hosted-mailbox/runtime-access";
 import {
+  createHostedPostCommitDeadline,
+  waitForHostedPostCommitOperation,
+} from "../hosted-onboarding/bounded-post-commit";
+import {
   assertHostedMemberNotSuspended,
 } from "../hosted-onboarding/entitlement";
 import { readActiveHostedMemberAccess } from "../hosted-onboarding/member-access";
@@ -71,6 +75,7 @@ import {
 } from "./group-newsletter";
 import {
   createHostedGroupJoinLinkForOwnedThreadContainerTx,
+  leaveHostedGroupMemberTx,
   readHostedGroupByRuntimeMemberId,
   readHostedGroupMembershipsForMember,
   recordHostedGroupJoinOfferTx,
@@ -94,6 +99,7 @@ export type HostedRuntimeGroupToolAccessClassification =
 
 export const HOSTED_RUNTIME_GROUP_TOOL_ACCESS_CLASSIFICATION = {
   create_join_link: "owner_active",
+  leave_membership: "participant_aware",
   list_memberships: "participant_aware",
   post_join_offer: "owner_active",
   preflight_set_chat_avatar: "owner_active",
@@ -114,6 +120,13 @@ export async function handleHostedRuntimeGroupTool(input: {
 }): Promise<HostedRuntimeGroupToolResponse> {
   if (input.request.action === "list_memberships") {
     return handleHostedRuntimeGroupListMemberships({ memberId: input.memberId });
+  }
+
+  if (input.request.action === "leave_membership") {
+    return handleHostedRuntimeGroupLeaveMembership({
+      memberId: input.memberId,
+      membershipId: input.request.membershipId,
+    });
   }
 
   if (input.request.action === "create_join_link") {
@@ -195,6 +208,44 @@ export async function handleHostedRuntimeGroupTool(input: {
     result: group
       ? { status: "ok", group }
       : { status: "none", group: null },
+  };
+}
+
+async function handleHostedRuntimeGroupLeaveMembership(input: {
+  memberId: string;
+  membershipId: string;
+}): Promise<HostedRuntimeGroupToolResponse> {
+  const unavailable = (unavailableReason: string): HostedRuntimeGroupToolResponse => ({
+    action: "leave_membership",
+    result: { status: "unavailable", unavailableReason },
+  });
+
+  const membershipId = input.membershipId.trim();
+  if (!membershipId) {
+    return unavailable("membership_unavailable");
+  }
+
+  const prisma = getPrisma();
+  const result = await prisma.$transaction(async (tx) => leaveHostedGroupMemberTx({
+    memberId: input.memberId,
+    membershipId,
+    now: new Date(),
+    tx,
+  }), HOSTED_ONBOARDING_TRANSACTION_OPTIONS);
+  if (result.kind === "group_not_found") {
+    return unavailable(result.kind);
+  }
+  if (result.kind !== "left") {
+    return {
+      action: "leave_membership",
+      result: { status: result.kind },
+    };
+  }
+
+  await signalVaultShareCleanupRuntimesBestEffort(result.vaultShareCleanupSignals);
+  return {
+    action: "leave_membership",
+    result: { status: "left" },
   };
 }
 
@@ -406,11 +457,16 @@ async function lookupSelfOptOutParticipantMember(input: {
 async function signalVaultShareCleanupRuntimesBestEffort(
   signals: readonly { mailboxItemId: string; memberId: string }[],
 ): Promise<void> {
+  const deadlineMs = createHostedPostCommitDeadline(undefined);
   await Promise.all(signals.map(async (signal) => {
     try {
-      await signalHostedMailboxAppendRuntime({
-        expectedUserId: signal.memberId,
-        mailboxItemId: signal.mailboxItemId,
+      await waitForHostedPostCommitOperation({
+        deadlineMs,
+        operation: (abortSignal) => signalHostedMailboxAppendRuntime({
+          abortSignal,
+          expectedUserId: signal.memberId,
+          mailboxItemId: signal.mailboxItemId,
+        }),
       });
     } catch {
       // The revoke mailbox item is durable; the destination runtime will observe it later.

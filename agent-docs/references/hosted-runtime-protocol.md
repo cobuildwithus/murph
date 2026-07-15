@@ -1,6 +1,6 @@
 # Hosted Mailbox Runtime Protocol
 
-Last verified: 2026-07-14
+Last verified: 2026-07-15
 
 ## Decision
 
@@ -555,6 +555,14 @@ may refresh a denied or expired cycle. The row is never authorization or outcome
 truth.
 Secure-action approval and denial use this shape because the exact attachment,
 destination, and delivery identity remain in the runtime-owned parked intent.
+When a pending vault-file action must surface an approval capability, the
+assistant runtime keeps the approval owner's URL out of model context and
+appends that exact hidden value only to the ephemeral delivery response. The
+durable assistant transcript stores the capability-free semantic response, not
+the transport-complete delivery text. A required user-visible capability also
+overrides no-reply selection before the runtime persists any no-reply
+suppression or completion marker. The model is not an authority for
+capability-token transcription or delivery decisions.
 An approved vault-file intent is also bound to its persisted provider target and
 target kind at final dispatch. Linq current-home fallback cannot substitute a
 different destination after approval; that intent fails before approval consume
@@ -1040,11 +1048,14 @@ v2 snapshot, restore must still be correct from durable mailbox, exact canonical
 write receipts, transcript, and assistant runtime state even if provider-native
 resume optimization is unavailable.
 Fresh-thread starts and stale native-resume fallback may include bounded recent
-committed transcript history; primary native-resume attempts do not replay that
-history into the provider prompt. Active-turn input is not serialized as
-provider prompt history; it is either folded in before the first provider
-request, steered through the live Codex turn, or left unaccepted for a later
-normal turn when it misses the live steering window.
+committed transcript history. That history is semantic assistant content and
+must exclude runtime-owned capability URLs that were appended only for user
+delivery. Primary native-resume attempts do not replay committed history into
+the provider prompt, and the provider-native turn never receives those
+runtime-appended URLs. Active-turn input is not serialized as provider prompt
+history; it is either folded in before the first provider request, steered
+through the live Codex turn, or left unaccepted for a later normal turn when it
+misses the live steering window.
 
 Browser-vault replicas are derived dashboard sidecars, not canonical workspace
 state. `apps/web` assesses browser-session backstops from the latest replica

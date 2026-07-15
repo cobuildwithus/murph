@@ -579,6 +579,13 @@ describe("hosted Prisma baseline migration", () => {
       ),
       "utf8",
     );
+    const orphanedHostedLinqInviteDeliveryContractMigrationSql = readFileSync(
+      new URL(
+        "../prisma/contract-migrations/20260715150000_delete_orphaned_linq_invite_deliveries_after_drain/migration.sql",
+        import.meta.url,
+      ),
+      "utf8",
+    );
     const hostedMemberAssistantModelPreferenceMigrationSql = readFileSync(
       new URL(
         "../prisma/migrations/20260709120000_hosted_member_assistant_model_preference/migration.sql",
@@ -645,6 +652,13 @@ describe("hosted Prisma baseline migration", () => {
     const hostedFamilyMixedTierCapacityMigrationSql = readFileSync(
       new URL(
         "../prisma/migrations/20260714090000_hosted_family_mixed_tier_capacity/migration.sql",
+        import.meta.url,
+      ),
+      "utf8",
+    );
+    const hostedFamilyPendingMemberPlanMigrationSql = readFileSync(
+      new URL(
+        "../prisma/migrations/20260715150000_hosted_family_pending_member_plan/migration.sql",
         import.meta.url,
       ),
       "utf8",
@@ -797,6 +811,7 @@ describe("hosted Prisma baseline migration", () => {
       "20260714120000_hosted_group_reaction_context",
       "20260714130000_hosted_mailbox_assistant_input_lookup",
       "20260715120000_delete_orphaned_linq_invite_deliveries",
+      "20260715150000_hosted_family_pending_member_plan",
       "migration_lock.toml",
     ]);
     expect(hostedFamilyMixedTierCapacityMigrationSql).toContain(
@@ -819,6 +834,9 @@ describe("hosted Prisma baseline migration", () => {
     );
     expect(hostedFamilyMixedTierCapacityMigrationSql).not.toContain(
       'INSERT INTO "hosted_account_group_plan_capacity"',
+    );
+    expect(hostedFamilyPendingMemberPlanMigrationSql).toContain(
+      'ADD COLUMN "pending_plan_code" TEXT',
     );
     expect(hostedGroupJoinConfirmationEligibilityMigrationSql).toContain(
       'ALTER TABLE "hosted_group_member"',
@@ -1067,6 +1085,9 @@ describe("hosted Prisma baseline migration", () => {
     );
     expect(orphanedHostedLinqInviteDeliveryDeletionMigrationSql).toContain(
       'FROM "hosted_member"',
+    );
+    expect(orphanedHostedLinqInviteDeliveryContractMigrationSql).toBe(
+      orphanedHostedLinqInviteDeliveryDeletionMigrationSql,
     );
     expect(hostedLinqEgressEngagementMigrationSql).toContain('"linq_last_inbound_at" TIMESTAMP(3)');
     expect(hostedLinqEgressEngagementMigrationSql).toContain('"pending_linq_last_inbound_at" TIMESTAMP(3)');

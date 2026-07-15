@@ -849,6 +849,7 @@ export interface HostedRuntimeProductFeedbackRecordResponse {
 export type HostedRuntimeGroupToolAction =
   | "read_current"
   | "list_memberships"
+  | "leave_membership"
   | "update_display_name"
   | "create_join_link"
   | "post_join_offer"
@@ -899,6 +900,7 @@ export interface HostedRuntimeGroupMembershipSummary {
   grantedVaultShareProjectionScopes: HostedVaultShareProjectionScope[];
   kind: string;
   memberCount: number;
+  membershipId: string | null;
   permissionsUrl: string | null;
   requestedVaultShareProjectionScopes: HostedVaultShareProjectionScope[];
   role: string;
@@ -961,6 +963,7 @@ export interface HostedRuntimeGroupChatParticipant {
 export type HostedRuntimeGroupToolRequest =
   | { action: "read_current" }
   | { action: "list_memberships" }
+  | { action: "leave_membership"; membershipId: string }
   | {
       action: "update_display_name";
       linqThread?: HostedRuntimeGroupToolLinqThreadContext | null;
@@ -1009,6 +1012,14 @@ export type HostedRuntimeGroupToolResponse =
             unavailableReason: string;
             memberships: null;
           };
+    }
+  | {
+      action: "leave_membership";
+      result:
+        | { status: "left" }
+        | { status: "already_left" }
+        | { status: "owner_cannot_leave" }
+        | { status: "unavailable"; unavailableReason: string };
     }
   | {
       action: "create_join_link";
@@ -1306,6 +1317,11 @@ export type HostedRuntimeAssistantConfigurationControlRequest =
       action: "read";
     }
   | ({
+      action: "update";
+      assistantInputId: string;
+    } & HostedAssistantConfigurationApprovalChanges)
+  | ({
+      /** Legacy approval-backed request accepted during the runner rollout drain. */
       action: "update";
       approval: HostedActionApprovalConsumeRequest;
       target: HostedAssistantConfigurationApprovalTarget;

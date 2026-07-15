@@ -187,9 +187,11 @@ export async function applyHostedDeviceSyncRuntimeResult(input: {
     }
   }
 
-  const updates = await Promise.all(
-    parsed.updates.map(async (update) => {
-      const result = await controlPlane.store.withConnectionMutationLock(update.connectionId, async (tx) => {
+  const updates: HostedExecutionDeviceSyncRuntimeApplyEntry[] = [];
+  for (const update of parsed.updates) {
+    const result = await controlPlane.store.withConnectionMutationLock(
+      update.connectionId,
+      async (tx) => {
         const record = await tx.deviceConnection.findFirst({
           where: {
             id: update.connectionId,
@@ -469,11 +471,10 @@ export async function applyHostedDeviceSyncRuntimeResult(input: {
           tokenUpdate,
           writeUpdate,
         } satisfies HostedExecutionDeviceSyncRuntimeApplyEntry;
-      });
-
-      return result;
-    }),
-  );
+      },
+    );
+    updates.push(result);
+  }
 
   return {
     appliedAt,

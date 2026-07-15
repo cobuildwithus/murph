@@ -223,8 +223,9 @@ loses a reminder; it must never lose the challenge.
 
 ## The daily loop
 
-Schedule one dispatch a day with `vault-cli automation save` (dailyLocal
-schedule, `continuityPolicy: preserve`). Each run:
+Create one daily dispatch automation under the developer prompt's shared
+automation action rules with a `dailyLocal` schedule and
+`continuityPolicy: preserve`. Each run:
 
 1. Read the challenge page.
 2. Read fresh standings with the same scope shape used for the challenge

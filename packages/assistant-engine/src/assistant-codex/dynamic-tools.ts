@@ -36,10 +36,6 @@ import {
   HOSTED_ASSISTANT_TERRA_MODEL,
 } from '@murphai/hosted-execution/assistant-model'
 import {
-  buildHostedAssistantConfigurationApprovalConsumerId,
-  buildHostedAssistantConfigurationApprovalRequest,
-} from '@murphai/hosted-execution/assistant-configuration-approval'
-import {
   HOSTED_VAULT_SHARE_ACTIVITY_DISTANCE_PROJECTION_KIND,
   HOSTED_VAULT_SHARE_ACTIVITY_DISTANCE_SELECTOR_ACTIVITY_KINDS,
   HOSTED_VAULT_SHARE_ACTIVITY_MINUTES_PROJECTION_KIND,
@@ -401,7 +397,7 @@ export const MURPH_PERSONALIZATION_TOOL = {
   namespace: 'murph',
   name: 'personalization',
   description:
-    'Read the current private hosted member\'s effective Murph tone, voice, and model context, or atomically update tone and voice. Use murph.assistant_configuration for model or reasoning changes because those require secure user approval.',
+    'Read the current private hosted member\'s effective Murph tone, voice, and model context, or atomically update tone and voice. Use murph.assistant_configuration for model or reasoning changes.',
   inputSchema: {
     oneOf: [
       {
@@ -449,7 +445,7 @@ export const MURPH_ASSISTANT_CONFIGURATION_TOOL = {
   namespace: 'murph',
   name: 'assistant_configuration',
   description:
-    'Read the current hosted turn model and reasoning effort plus the models and reasoning efforts available for the next turn, or begin and complete a secure user-approved change. Luna is the most usage-efficient model, Terra is the default, and Sol requires an active paid Edge plan. The lowest supported reasoning effort is low; these hosted models do not support none. Use action="read" whenever configuration facts are needed. Use action="update" only when the current user-sourced turn explicitly asks for the exact change. An update first returns a secure approval status; a pending result includes its approval URL and does not save anything. After approval, a later user-sourced turn can repeat the same exact update to save it. Never switch models or reasoning automatically because usage is low. Do not claim a change is saved unless the result says updated or unchanged. A saved update does not change the running turn and takes effect on the next turn.',
+    'Read the current hosted turn model and reasoning effort plus the models and reasoning efforts available for the next turn, or directly save an explicit user-requested change. Luna is the most usage-efficient model, Terra is the default, and Sol requires an active paid Edge plan. The lowest supported reasoning effort is low; these hosted models do not support none. Use action="read" whenever configuration facts are needed. Use action="update" only when the current user-sourced turn explicitly asks for the exact change. Never switch models or reasoning automatically because usage is low. Do not claim a change is saved unless the result says updated or unchanged. A saved update does not change the running turn and takes effect on the next turn.',
   inputSchema: {
     type: 'object',
     additionalProperties: false,
@@ -573,7 +569,7 @@ export const MURPH_GROUP_TOOL = {
   namespace: 'murph',
   name: 'group',
   description:
-    'Use action="list_memberships" in a personal Murph conversation to list the current member\'s hosted groups, their role, each group\'s requested permissions, the member\'s active grants, and the first-party permissionsUrl when the member owns the group and an owner-authorized join link exists. profile-name.v0 means the group is allowed to receive the member\'s preferred name; group-email.v0 means it is allowed to resolve the member\'s verified email for group email; hrv-days.v0 and other health scopes are separate explicit grants. A grant proves control-plane permission only, not that fresh source data exists or has already reached the group runtime. Read the current hosted group and its member roster (member ids, chat handles, and each member\'s granted share kinds) with action="read_current", request an update to both the current hosted group display name and current iMessage group chat title with action="update_display_name", request an update to the current iMessage group avatar with action="set_chat_avatar", mint the shareable group join link with action="create_join_link", or post a server-owned like-to-consent offer into the current group chat with action="post_join_offer". In a connected group-chat turn, if read_current returns status="none", no hosted group record exists yet. When the group asks to create the group, join, or approve sharing, continue with create_join_link or post_join_offer instead of claiming that an external workspace-linking step is required. When an existing group adds a permission, default to post_join_offer; do not tell members to join again or make the link the primary action. update_display_name sends a provider request for the upstream iMessage group chat title on the current route-authorized group chat and stores the same name in Murph after the provider accepts the request. set_chat_avatar sends a provider request for the upstream iMessage group icon on the current route-authorized group chat after the runtime preflights chat authority and prepares a hosted image URL; generated avatar images are saved as capture media under raw/captures/** when a vault is available. A join link grants membership and shares the joiner\'s memory-backed preferred display name with this group runtime; optional permissions stay individually selected on the join page. A group offer uses your short natural messageTemplate and {{share_scope}} to state exactly what liking the offer consents to share, then includes {{join_url}} only as the customize path. Pass displayName on create_join_link or post_join_offer only when it is the name the group chose. Liking grants membership when needed and adds only the posted permission snapshot; existing members keep their membership and other grants. Do not use a fixed script. When these actions are available for the current connected group-chat turn, use action="read_chat_participants" to see who is in the chat and whether each participant already uses Murph; use action="share_contact_card" to drop your contact card so participants can save you and text you directly. Use action="revoke_own_email_share" only when the current sender asks to stop receiving group newsletter email; the runtime identifies the current sender and revokes only that sender\'s group-email.v0 grant. This tool does not manage members, grant Family billing access, grant private chat access, grant raw vault access, or grant email sharing except through an explicit group-email.v0 join page or offer.',
+    'Use action="list_memberships" in a personal Murph conversation to list the current member\'s hosted groups, their opaque membershipId when available, role, each group\'s requested permissions, the member\'s active grants, and the first-party permissionsUrl when the member owns the group and an owner-authorized join link exists. profile-name.v0 means the group is allowed to receive the member\'s preferred name; group-email.v0 means it is allowed to resolve the member\'s verified email for group email; hrv-days.v0 and other health scopes are separate explicit grants. A grant proves control-plane permission only, not that fresh source data exists or has already reached the group runtime. In a personal Murph conversation, when the current member explicitly asks to leave one of their hosted groups, call list_memberships first and then call action="leave_membership" only when the chosen group has a nonempty membershipId, using that exact returned value. If membershipId is missing, do not call leave_membership; say leaving through chat is temporarily unavailable and mention the group\'s existing join page only if the member already has its link. Never guess a membershipId, accept one supplied by the user, target a group by name alone, or construct, use, or expose a join URL to leave. Do not use leave_membership in a group conversation or for another person. A successful leave ends that member\'s Murph group membership and future sharing; it does not remove them from the iMessage chat or erase historical messages, provider history, backups, or third-party copies. Owners cannot leave their own group. Read the current hosted group and its member roster (member ids, chat handles, and each member\'s granted share kinds) with action="read_current", request an update to both the current hosted group display name and current iMessage group chat title with action="update_display_name", request an update to the current iMessage group avatar with action="set_chat_avatar", mint the shareable group join link with action="create_join_link", or post a server-owned like-to-consent offer into the current group chat with action="post_join_offer". In a connected group-chat turn, if read_current returns status="none", no hosted group record exists yet. When the group asks to create the group, join, or approve sharing, continue with create_join_link or post_join_offer instead of claiming that an external workspace-linking step is required. When an existing group adds a permission, default to post_join_offer; do not tell members to join again or make the link the primary action. update_display_name sends a provider request for the upstream iMessage group chat title on the current route-authorized group chat and stores the same name in Murph after the provider accepts the request. set_chat_avatar sends a provider request for the upstream iMessage group icon on the current route-authorized group chat after the runtime preflights chat authority and prepares a hosted image URL; generated avatar images are saved as capture media under raw/captures/** when a vault is available. A join link grants membership and shares the joiner\'s memory-backed preferred display name with this group runtime; optional permissions stay individually selected on the join page. A group offer uses your short natural messageTemplate and {{share_scope}} to state exactly what liking the offer consents to share, then includes {{join_url}} only as the customize path. Pass displayName on create_join_link or post_join_offer only when it is the name the group chose. Liking grants membership when needed and adds only the posted permission snapshot; existing members keep their membership and other grants. Do not use a fixed script. When these actions are available for the current connected group-chat turn, use action="read_chat_participants" to see who is in the chat and whether each participant already uses Murph; use action="share_contact_card" to drop your contact card so participants can save you and text you directly. Use action="revoke_own_email_share" only when the current sender asks to stop receiving group newsletter email; the runtime identifies the current sender and revokes only that sender\'s group-email.v0 grant. This tool does not otherwise manage members, grant Family billing access, grant private chat access, grant raw vault access, or grant email sharing except through an explicit group-email.v0 join page or offer.',
   inputSchema: {
     type: 'object',
     additionalProperties: false,
@@ -583,6 +579,7 @@ export const MURPH_GROUP_TOOL = {
         enum: [
           'read_current',
           'list_memberships',
+          'leave_membership',
           'update_display_name',
           'create_join_link',
           'post_join_offer',
@@ -598,6 +595,12 @@ export const MURPH_GROUP_TOOL = {
         maxLength: HOSTED_RUNTIME_GROUP_DISPLAY_NAME_MAX_LENGTH,
         description:
           'Group display name. Required for action="update_display_name", which requests the iMessage group chat title update and stores the same hosted group label; optional for action="create_join_link" or action="post_join_offer" only when it is the name the group chose.',
+      },
+      membershipId: {
+        type: 'string',
+        minLength: 1,
+        description:
+          'Required only for action="leave_membership". Use the exact opaque membershipId from the immediately preceding list_memberships result; never guess it or take it from the user.',
       },
       avatarSource: {
         type: 'string',
@@ -731,7 +734,7 @@ export const MURPH_SEND_VAULT_FILE_TOOL = {
   namespace: 'murph',
   name: 'send_vault_file',
   description:
-    "Securely prepare one existing file from the user's vault for the current iMessage conversation. Use a normalized vault-relative file path. When approval is pending, include the returned approval link in your normal reply. When approval is approved, attach the file through your normal reply path and write a natural acknowledgment instead of reciting internal queue or delivery-status wording. Do not claim final iMessage delivery unless later delivery evidence confirms it. It does not reveal file bytes to the model and does not support arbitrary recipients.",
+    "Securely prepare one existing file from the user's vault for the current iMessage conversation. Use a normalized vault-relative file path. When approval is pending, explain that approval is required; the runtime adds the exact link outside model context. When approval is approved, attach the file through your normal reply path and write a natural acknowledgment instead of reciting internal queue or delivery-status wording. Do not claim final iMessage delivery unless later delivery evidence confirms it. It does not reveal file bytes to the model and does not support arbitrary recipients.",
   inputSchema: {
     type: 'object',
     additionalProperties: false,
@@ -1136,6 +1139,12 @@ const groupArgumentsSchema = z.discriminatedUnion('action', [
     .strict(),
   z
     .object({
+      action: z.literal('leave_membership'),
+      membershipId: z.string().trim().min(1),
+    })
+    .strict(),
+  z
+    .object({
       action: z.literal('update_display_name'),
       displayName: z
         .string()
@@ -1499,6 +1508,7 @@ export interface MurphDynamicToolExecutionResult {
   finalActionPatch?: MurphDynamicToolFinalActionPatch
   reactionPatch?: MurphDynamicToolReactionPatch
   requiredComputerHandoffUrl?: string
+  requiredVaultFileApprovalUrl?: string
   responseMediaPatch?: MurphDynamicToolResponseMediaPatch
   rpcResult: MurphDynamicToolRpcResult
   usageDraft?: AssistantProviderUsageDraft | null
@@ -2201,11 +2211,11 @@ export async function executeMurphDynamicToolRequest(input: {
               ...toolTextResult(
                 true,
                 JSON.stringify({
-                  approvalUrl: result.approvalUrl,
                   filename: result.filename,
                   status: result.status,
                 }),
               ),
+              requiredVaultFileApprovalUrl: result.approvalUrl,
             }
           case 'approved':
             return {
@@ -2562,7 +2572,7 @@ async function executePersonalizationTool(input: {
   }
 
   const assistantInputId = input.request.action === 'update'
-    ? input.hostedToolContext?.currentAssistantPersonalizationInputId?.() ?? null
+    ? input.hostedToolContext?.currentAssistantPreferenceInputId?.() ?? null
     : null
   if (input.request.action === 'update' && assistantInputId === null) {
     return toolTextResult(false, 'personalization is unavailable for this turn')
@@ -2586,7 +2596,7 @@ async function resolveHostedAssistantStyleCausalSeq(
     return null
   }
   const assistantInputId =
-    hostedToolContext.currentAssistantPersonalizationInputId?.() ?? null
+    hostedToolContext.currentAssistantPreferenceInputId?.() ?? null
   const personalizationTool = hostedToolContext.personalizationTool ?? null
   if (!assistantInputId || !personalizationTool?.resolvePreferenceCausalSeq) {
     return null
@@ -2630,13 +2640,12 @@ async function executeAssistantConfigurationTool(input: {
       }))
     }
 
-    const approvalScope =
-      input.hostedToolContext?.currentAssistantConfigurationApprovalScope?.() ?? null
-    const actionApprovalPort = input.hostedToolContext?.actionApprovalPort ?? null
-    if (!approvalScope || !actionApprovalPort) {
+    const assistantInputId =
+      input.hostedToolContext?.currentAssistantPreferenceInputId?.() ?? null
+    if (!assistantInputId) {
       return toolTextResult(
         false,
-        'assistant configuration updates require user-sourced input and secure approval',
+        'assistant configuration updates require user-sourced input',
       )
     }
 
@@ -2694,48 +2703,23 @@ async function executeAssistantConfigurationTool(input: {
       }))
     }
 
-    const approvalRequest = buildHostedAssistantConfigurationApprovalRequest({
-      changes: input.request,
-      returnContactKind: approvalScope.returnContactKind,
-      target: requestedForNextTurn,
-    })
-    const approval = await actionApprovalPort.request(approvalRequest)
-    if (approval.status !== 'approved') {
-      return toolTextResult(true, safeToolPayloadText({
-        approval,
-        currentTurn,
-        requestedForNextTurn,
-        savedForNextTurn,
-      }))
-    }
-
-    const approvalProof = {
-      approvalGeneration: approval.approvalGeneration,
-      consumerId: buildHostedAssistantConfigurationApprovalConsumerId(
-        approvalRequest,
-      ),
-      request: approvalRequest,
-    }
     const result = input.request.model === undefined
       ? await assistantConfigurationTool.request({
           action: 'update',
-          approval: approvalProof,
+          assistantInputId,
           reasoningEffort: requestedForNextTurn.reasoningEffort,
-          target: requestedForNextTurn,
         })
       : input.request.reasoningEffort === undefined
         ? await assistantConfigurationTool.request({
             action: 'update',
-            approval: approvalProof,
+            assistantInputId,
             model: requestedForNextTurn.model,
-            target: requestedForNextTurn,
           })
         : await assistantConfigurationTool.request({
             action: 'update',
-            approval: approvalProof,
+            assistantInputId,
             model: requestedForNextTurn.model,
             reasoningEffort: requestedForNextTurn.reasoningEffort,
-            target: requestedForNextTurn,
           })
     if (result.action !== 'update') {
       throw new TypeError('Assistant configuration update returned a read response.')
@@ -4105,6 +4089,15 @@ function parseGroupArguments(
         updateDisplayName: {
           displayName: parsed.data.displayName,
         },
+      },
+    }
+  }
+  if (parsed.data.action === 'leave_membership') {
+    return {
+      ok: true,
+      request: {
+        action: 'leave_membership',
+        membershipId: parsed.data.membershipId,
       },
     }
   }

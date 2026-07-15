@@ -1,6 +1,5 @@
 import { Cli, z } from "incur";
 
-import { MURPH_ONBOARDING_FOLLOWUP_AUTOMATION } from "@murphai/assistant-engine";
 import {
   HostedCliBridgeRequestError,
   isHostedRuntimeProcessEnv,
@@ -49,10 +48,8 @@ import {
 } from "@murphai/operator-config/vault-cli-contracts";
 import {
   patchAutomation,
-  resolveAutomationUpsertSlug,
   scaffoldAutomationPayload,
   upsertAutomation,
-  type AutomationRecord,
 } from "@murphai/core";
 import {
   listAutomations,
@@ -299,11 +296,32 @@ function authorizeAutomationRouteForCurrentContext(
   route: AutomationRoute,
   currentRouteContext: AutomationCurrentRouteContext,
 ): AutomationRoute {
-  const currentRoute = currentRouteContext.route;
-  if (!currentRouteContext.hosted) {
+  const currentRoute = requireHostedAutomationMutationContext(
+    currentRouteContext,
+  );
+  if (!currentRoute) {
     return route;
   }
 
+  if (!assistantDeliveryRoutesBelongToSameConversation(route, currentRoute)) {
+    return invalidAutomationOption(
+      "Hosted automation route changes can target only the current chat.",
+    );
+  }
+
+  return automationRouteSchema.parse(
+    resolveAssistantDeliveryRouteWithCurrentRoute({}, currentRoute),
+  );
+}
+
+function requireHostedAutomationMutationContext(
+  currentRouteContext: AutomationCurrentRouteContext,
+): HostedCliAssistantCurrentRoute | null {
+  if (!currentRouteContext.hosted) {
+    return null;
+  }
+
+  const currentRoute = currentRouteContext.route;
   if (!currentRoute || typeof currentRoute.threadIsDirect !== "boolean") {
     return invalidAutomationOption(
       "Hosted automation changes require one verified current conversation.",
@@ -315,61 +333,7 @@ function authorizeAutomationRouteForCurrentContext(
     );
   }
 
-  if (!assistantDeliveryRoutesBelongToSameConversation(route, currentRoute)) {
-    return invalidAutomationOption(
-      "A hosted conversation can create or update automations only for its current chat.",
-    );
-  }
-
-  return automationRouteSchema.parse(
-    resolveAssistantDeliveryRouteWithCurrentRoute({}, currentRoute),
-  );
-}
-
-async function authorizeExistingAutomationForUpsert(input: {
-  currentRouteContext: AutomationCurrentRouteContext;
-  lookups: readonly (string | null | undefined)[];
-  vaultRoot: string;
-}): Promise<void> {
-  if (!input.currentRouteContext.hosted) {
-    return;
-  }
-
-  for (const lookup of new Set(input.lookups.map((value) => value?.trim()).filter(Boolean))) {
-    const existing = await showAutomation(input.vaultRoot, lookup as string);
-    if (
-      existing
-      && !isManagedOnboardingFollowupRouteMaterialization(
-        existing,
-        input.currentRouteContext,
-      )
-    ) {
-      authorizeAutomationRouteForCurrentContext(
-        existing.route,
-        input.currentRouteContext,
-      );
-    }
-  }
-}
-
-function isManagedOnboardingFollowupRouteMaterialization(
-  existing: AutomationRecord,
-  currentRouteContext: AutomationCurrentRouteContext,
-): boolean {
-  const currentRoute = currentRouteContext.route;
-  const existingTags = new Set(existing.tags);
-  return currentRouteContext.hosted
-    && currentRoute?.channel === "linq"
-    && currentRoute.threadIsDirect === true
-    && existing.slug === MURPH_ONBOARDING_FOLLOWUP_AUTOMATION.slug
-    && existingTags.has("murph-managed")
-    && existingTags.has("murph-managed:onboarding-followup")
-    && existing.route.channel === "linq"
-    && existing.route.deliveryTarget === null
-    && existing.route.threadId === null
-    && existing.route.threadIsDirect !== false
-    && typeof existing.route.identityId === "string"
-    && typeof existing.route.participantId === "string";
+  return currentRoute;
 }
 
 function assertAutomationRouteCanDeliver(
@@ -618,7 +582,7 @@ const automationSaveOptionSchemas = {
     .string()
     .min(1)
     .optional()
-    .describe("Optional existing automation id to update."),
+    .describe("Optional existing automation id whose full definition will be replaced."),
   ...automationSharedOptionSchemas,
   instructions: z
     .string()
@@ -668,13 +632,13 @@ export function registerAutomationCommands(cli: Cli.Cli) {
     args: z.object({
       title: z.string().min(1).max(160).describe("Automation title."),
     }),
-    description: "Create or update one automation from typed command fields.",
+    description: "Create one automation or intentionally replace its full definition from typed command fields.",
     examples: [
       {
         args: {
           title: "'Daily mobility'",
         },
-        description: "Save a daily automation without a JSON payload.",
+        description: "Create a daily automation without a JSON payload.",
         options: {
           channel: "telegram",
           deliveryTarget: "telegram_thread_real",
@@ -686,23 +650,12 @@ export function registerAutomationCommands(cli: Cli.Cli) {
         },
       },
     ],
-    hint: "Use automation import-json only when importing an advanced JSON payload from @file.json or stdin.",
+    hint: "Use automation edit for existing-record changes and automation set-status for lifecycle changes. Use automation import-json only for an advanced JSON full-definition replacement from @file.json or stdin.",
     options: withBaseOptions(automationSaveOptionSchemas),
     output: automationSaveResultSchema,
     async run(context) {
       const now = new Date().toISOString();
       const currentRouteContext = await readAutomationCurrentRoute();
-      await authorizeExistingAutomationForUpsert({
-        currentRouteContext,
-        lookups: [
-          context.options.id,
-          resolveAutomationUpsertSlug({
-            slug: context.options.slug,
-            title: context.args.title,
-          }),
-        ],
-        vaultRoot: context.options.vault,
-      });
       const route = authorizeAutomationRouteForCurrentContext(
         buildAutomationRouteFromOptions({
           channel: context.options.channel,
@@ -774,14 +727,14 @@ export function registerAutomationCommands(cli: Cli.Cli) {
         args: {
           lookup: "daily-mobility",
         },
-        description: "Update an automation continuity policy without resubmitting instructions, schedule, or route fields.",
+        description: "Patch an automation continuity policy without resubmitting instructions, schedule, or route fields.",
         options: {
           continuityPolicy: "preserve",
           vault: "./vault",
         },
       },
     ],
-    hint: "Use automation save when creating an automation or replacing the full typed automation shape.",
+    hint: "Use automation save when creating an automation or intentionally replacing the full typed automation shape.",
     options: withBaseOptions(automationEditOptionSchemas),
     output: automationSaveResultSchema,
     async run(context) {
@@ -794,10 +747,7 @@ export function registerAutomationCommands(cli: Cli.Cli) {
           "Automation was not found.",
         );
       }
-      authorizeAutomationRouteForCurrentContext(
-        existing.route,
-        currentRouteContext,
-      );
+      requireHostedAutomationMutationContext(currentRouteContext);
       const routeOptions = {
         channel: context.options.channel,
         deliveryTarget: context.options.deliveryTarget,
@@ -825,25 +775,19 @@ export function registerAutomationCommands(cli: Cli.Cli) {
         triggerKind: context.options.triggerKind,
         triggerLocalTime: context.options.triggerLocalTime,
       };
-      const requestedRoute = hasDefinedAutomationOption(routeOptions)
-        ? buildAutomationRouteFromOptions(
-            routeOptions,
-            currentRouteContext.route,
+      const route = hasDefinedAutomationOption(routeOptions)
+        ? authorizeAutomationRouteForCurrentContext(
+            buildAutomationRouteFromOptions(
+              routeOptions,
+              currentRouteContext.route,
+            ),
+            currentRouteContext,
           )
-        : existing.route;
-      const authorizedRoute = authorizeAutomationRouteForCurrentContext(
-        requestedRoute,
-        currentRouteContext,
-      );
-      const route =
-        hasDefinedAutomationOption(routeOptions) ||
-        currentRouteContext.hosted
-          ? authorizedRoute
-          : undefined;
+        : undefined;
       if (
         (context.options.status ?? existing.status) === "active"
       ) {
-        assertActiveAutomationRouteCanDeliver(authorizedRoute);
+        assertActiveAutomationRouteCanDeliver(route ?? existing.route);
       }
       const assistantTargetOverride = buildAutomationAssistantTargetOverridePatchFromOptions({
         ...assistantTargetOverrideOptions,
@@ -854,8 +798,8 @@ export function registerAutomationCommands(cli: Cli.Cli) {
         continuityPolicy: context.options.continuityPolicy,
         instructions: context.options.instructions,
         lookup: context.args.lookup,
-        // Local callers may replace the stored route. Hosted callers use the
-        // trusted current conversation route selected above.
+        // Route flags replace the stored route. Hosted route writes are
+        // restricted above to the trusted current conversation.
         route,
         schedule: hasDefinedAutomationOption(scheduleOptions)
           ? buildAutomationScheduleFromOptions(scheduleOptions, { now })
@@ -914,19 +858,16 @@ export function registerAutomationCommands(cli: Cli.Cli) {
           "Automation was not found.",
         );
       }
-      const route = authorizeAutomationRouteForCurrentContext(
-        existing.route,
-        currentRouteContext,
-      );
+      requireHostedAutomationMutationContext(currentRouteContext);
       if (context.options.status === "active") {
-        assertActiveAutomationRouteCanDeliver(route);
+        assertActiveAutomationRouteCanDeliver(existing.route);
       }
 
       const result = await upsertAutomation({
         automationId: existing.automationId,
         continuityPolicy: existing.continuityPolicy,
         instructions: existing.instructions,
-        route,
+        route: existing.route,
         schedule: existing.schedule,
         slug: existing.slug,
         status: context.options.status,
@@ -984,8 +925,8 @@ export function registerAutomationCommands(cli: Cli.Cli) {
 
   automation.command("import-json", {
     args: z.object({}),
-    description: "Import or bulk-edit one automation from an advanced JSON payload.",
-    hint: "Prefer automation save for canonical typed create/update usage.",
+    description: "Create one automation or intentionally replace its full definition from an advanced JSON payload.",
+    hint: "Prefer automation save for typed creation or intentional full replacement. Use automation edit or automation set-status for ordinary existing-record changes.",
     options: withBaseOptions({
       input: textInputOptionSchema.describe(
         "Advanced automation payload in @file.json form or - for stdin.",
@@ -1000,17 +941,6 @@ export function registerAutomationCommands(cli: Cli.Cli) {
           "automation payload",
         ),
       );
-      await authorizeExistingAutomationForUpsert({
-        currentRouteContext,
-        lookups: [
-          input.automationId,
-          resolveAutomationUpsertSlug({
-            slug: input.slug,
-            title: input.title,
-          }),
-        ],
-        vaultRoot: context.options.vault,
-      });
       const route = authorizeAutomationRouteForCurrentContext(
         normalizeAutomationRouteFieldsForSave(input.route),
         currentRouteContext,

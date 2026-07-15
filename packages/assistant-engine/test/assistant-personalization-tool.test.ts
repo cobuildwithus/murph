@@ -64,7 +64,7 @@ describe('assistant personalization tool', () => {
       computerToolsAvailable: false,
       currentHostedDeliveryContext: () => null,
       currentHostedMailboxItemIds: () => [],
-      currentAssistantPersonalizationInputId: () =>
+      currentAssistantPreferenceInputId: () =>
         'ain_11111111111111111111111111111111',
       personalizationTool,
       sendVaultFile: vi.fn(async () => ({
@@ -120,7 +120,7 @@ describe('assistant personalization tool', () => {
       fetchImpl: fetch,
       hostedToolContext: {
         computerToolsAvailable: false,
-        currentAssistantPersonalizationInputId: () => null,
+        currentAssistantPreferenceInputId: () => null,
         currentHostedDeliveryContext: () => null,
         currentHostedMailboxItemIds: () => [],
         personalizationTool,

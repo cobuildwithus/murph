@@ -21581,7 +21581,7 @@ describe("hosted workspace runtime entrypoint", () => {
         }),
         async runAssistantPhase(input) {
           assert.equal(typeof input.beforeProviderAcceptedInputs, "function");
-          assert.equal(input.currentAssistantPersonalizationInputId?.(), null);
+          assert.equal(input.currentAssistantPreferenceInputId?.(), null);
           const firstInputId = await stageAssistantInputEventForMailboxItem({
             causalSeq: "41",
             item: createMailboxItem({
@@ -21600,7 +21600,6 @@ describe("hosted workspace runtime entrypoint", () => {
             }),
             vaultRoot,
           });
-
           const invalidRelease = await input.beforeProviderAcceptedInputs?.({
             acceptedInputs: [
               { id: firstInputId, source: "assistant-input" },
@@ -21610,9 +21609,8 @@ describe("hosted workspace runtime entrypoint", () => {
               },
             ],
           });
-          assert.equal(input.currentAssistantPersonalizationInputId?.(), null);
+          assert.equal(input.currentAssistantPreferenceInputId?.(), null);
           await invalidRelease?.();
-
           const release = await input.beforeProviderAcceptedInputs?.({
             acceptedInputs: [
               { id: secondInputId, source: "assistant-input" },
@@ -21620,12 +21618,12 @@ describe("hosted workspace runtime entrypoint", () => {
             ],
           });
           assert.equal(
-            input.currentAssistantPersonalizationInputId?.(),
+            input.currentAssistantPreferenceInputId?.(),
             secondInputId,
           );
           assert.equal(typeof release, "function");
           await release?.();
-          assert.equal(input.currentAssistantPersonalizationInputId?.(), null);
+          assert.equal(input.currentAssistantPreferenceInputId?.(), null);
           return { progressed: false };
         },
         vaultRoot,

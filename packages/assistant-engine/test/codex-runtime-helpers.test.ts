@@ -2239,6 +2239,39 @@ describe('Codex assistant registry helpers', () => {
     })
   })
 
+  it('keeps runtime-owned delivery capabilities out of the provider transcript response', async () => {
+    const approvalUrl =
+      `https://www.withmurph.ai/approve/haa_${'a'.repeat(32)}`
+    codexAppServerMocks.executeCodexAppServerTurn.mockResolvedValueOnce({
+      finalMessage: `Approval is required.\n\n${approvalUrl}`,
+      jsonEvents: [],
+      providerActionCount: 1,
+      responseMedia: [],
+      runtimeIssueInputs: [],
+      sessionId: 'provider-session-capability-split',
+      stderr: '',
+      stdout: '',
+      threadId: 'provider-session-capability-split',
+      transcriptMessage: 'Approval is required.',
+      turnId: 'turn-capability-split',
+    })
+
+    const attempt = await executeCodexAssistantTurnAttempt({
+      providerConfig: normalizeAssistantProviderConfig({
+        provider: 'codex-cli',
+      }),
+      userPrompt: 'Send the report.',
+      workingDirectory: '/tmp/provider-tests',
+    })
+
+    expect(attempt.ok).toBe(true)
+    if (!attempt.ok) {
+      throw new Error('expected successful provider attempt')
+    }
+    expect(attempt.result.response).toContain(approvalUrl)
+    expect(attempt.result.transcriptResponse).toBe('Approval is required.')
+  })
+
   it('propagates failure-context runtime issue inputs through failed provider metadata', async () => {
     const runtimeIssueInput = {
       component: 'assistant.codex-action',

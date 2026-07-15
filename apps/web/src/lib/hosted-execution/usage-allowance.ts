@@ -254,7 +254,6 @@ type HostedAiUsageAllowancePricingDecision =
   };
 
 async function resolveHostedAiUsageAllowanceBillingRefForMember(input: {
-  at: Date;
   billingRef: HostedAiUsageAllowanceBillingRef | null;
   billingStatus: HostedBillingStatus;
   memberId: string;
@@ -274,7 +273,6 @@ async function resolveHostedAiUsageAllowanceBillingRefForMember(input: {
   }
 
   const familyBillingRef = await readHostedFamilySponsoredBillingRefForMember({
-    at: input.at,
     memberId: input.memberId,
     tx: input.tx,
   });
@@ -292,7 +290,6 @@ async function resolveHostedAiUsageAllowanceBillingRefForMember(input: {
 }
 
 async function readHostedFamilySponsoredBillingRefForMember(input: {
-  at: Date;
   memberId: string;
   tx: Prisma.TransactionClient;
 }): Promise<HostedAiUsageAllowanceBillingRef | null> {
@@ -319,25 +316,17 @@ async function readHostedFamilySponsoredBillingRefForMember(input: {
       groupId: familyAccess.groupId,
     },
   });
-  if (
-    billingRef?.currentBillingPlanCode !== HOSTED_FAMILY_BILLING_PLAN_CODE ||
-    billingRef.currentBillingPhase !== "paid"
-  ) {
-    return null;
-  }
+  const periodBillingRef =
+    billingRef?.currentBillingPlanCode === HOSTED_FAMILY_BILLING_PLAN_CODE &&
+    billingRef.currentBillingPhase === "paid"
+      ? billingRef
+      : null;
+  const currentPeriodStart = periodBillingRef?.currentPeriodStart ?? null;
+  const currentPeriodEnd = periodBillingRef?.currentPeriodEnd ?? null;
 
-  const currentPeriodStart = billingRef.currentPeriodStart;
-  const currentPeriodEnd = billingRef.currentPeriodEnd;
-  if (
-    !currentPeriodStart ||
-    !currentPeriodEnd ||
-    currentPeriodStart.getTime() >= currentPeriodEnd.getTime() ||
-    input.at.getTime() < currentPeriodStart.getTime() ||
-    input.at.getTime() >= currentPeriodEnd.getTime()
-  ) {
-    return null;
-  }
-
+  // Family sponsorship owns the plan, tier, and allowance. Only a paid Family
+  // projection is eligible to define the billing period; the shared resolver
+  // validates its bounds and falls back to a UTC month when they lag.
   return {
     allowanceSource: "family_sponsored_plan",
     currentBillingPhase: "paid",
@@ -795,7 +784,6 @@ export async function accountHostedAiUsageForAllowanceTx(input: {
   }
   const allowanceAccess = memberState.suspendedAt === null
     ? await resolveHostedAiUsageAllowanceBillingRefForMember({
-        at,
         billingRef: memberState.billingRef,
         billingStatus: memberState.billingStatus,
         memberId: input.memberId,
@@ -1015,7 +1003,6 @@ export async function resolveHostedAiUsageGate(input: {
 
     const allowanceAccess = memberState.suspendedAt === null
       ? await resolveHostedAiUsageAllowanceBillingRefForMember({
-          at: now,
           billingRef: memberState.billingRef,
           billingStatus: memberState.billingStatus,
           memberId: input.memberId,
@@ -1126,7 +1113,6 @@ export async function readHostedAiUsageGate(input: {
 
     const allowanceAccess = memberState.suspendedAt === null
       ? await resolveHostedAiUsageAllowanceBillingRefForMember({
-          at: now,
           billingRef: memberState.billingRef,
           billingStatus: memberState.billingStatus,
           memberId: input.memberId,

@@ -65,7 +65,8 @@ const RUNNER_ENTRYPOINT_BUNDLE_TOTAL_BYTES_BUDGET = 9_300_000;
 // reviewed boot-critical batching recovery logic. Assembly measured
 // 1,486,467B on CI Linux (+699B over the prior budget) and 1,493,474B on local
 // macOS (+7,706B); advance only by the larger entry overage and preserve the
-// noise band. Post-delivery foreground release, mutation-scoped maintenance,
+// noise band. PR #678 then added 633B for runtime-owned approval-link delivery.
+// Post-delivery foreground release, mutation-scoped maintenance,
 // and indexed cron reconciliation on that merged base measure 1,497,825B on
 // local macOS, 4,351B over the resulting budget. Advance by that exact overage;
 // the review remediation deletes foreground terminal-evidence inspection and
@@ -74,7 +75,7 @@ const RUNNER_ENTRYPOINT_BUNDLE_TOTAL_BYTES_BUDGET = 9_300_000;
 // authoritative across the complete local tail drain removes 179B. Explicit
 // invocation-local wake provenance adds 230B while preventing an inherited
 // reminder from suppressing pending-index repair.
-const RUNNER_ENTRYPOINT_BUNDLE_ENTRY_BASELINE_BYTES = 1_450_109;
+const RUNNER_ENTRYPOINT_BUNDLE_ENTRY_BASELINE_BYTES = 1_450_742;
 // PR #631 added 913B for its reviewed Clinical Records crypto-lane labels and
 // another 872B for bounded checkpoint/resume handling. The exact PR #626 head
 // then measured a 7,190,569B local macOS closure (+33,357B over the prior

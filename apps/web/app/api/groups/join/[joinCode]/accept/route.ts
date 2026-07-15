@@ -54,6 +54,7 @@ export const POST = withJsonError(async (
 
   const joinCode = await resolveDecodedRouteParam(context.params, "joinCode");
   const body = await readOptionalJsonObject(request, { limitBytes: BODY_LIMIT_BYTES });
+  const expectedMembershipId = parseExpectedMembershipId(body);
   const selectedVaultShareProjectionScopes = parseSelectedVaultShareProjectionScopes(
     body.selectedVaultShareProjectionScopes ?? body.selectedVaultShareProjectionKinds,
   );
@@ -62,6 +63,7 @@ export const POST = withJsonError(async (
   const now = new Date();
   const result = await prisma.$transaction(async (tx) => acceptHostedGroupJoinCodeTx({
     confirmationPublicBaseUrl: resolveHostedPublicBaseUrl(),
+    expectedMembershipId,
     joinCode,
     memberId: auth.member.id,
     now,
@@ -196,4 +198,29 @@ function parseSelectedVaultShareProjectionScopes(value: unknown): HostedVaultSha
   return HOSTED_VAULT_SHARE_SELECTABLE_PROJECTION_SCOPES.filter((scope) =>
     selected.has(buildHostedVaultShareProjectionScopeKey(scope))
   );
+}
+
+function parseExpectedMembershipId(body: Record<string, unknown>): string | null {
+  if (!Object.prototype.hasOwnProperty.call(body, "expectedMembershipId")) {
+    throw hostedOnboardingError({
+      code: "HOSTED_GROUP_MEMBERSHIP_CHANGED",
+      httpStatus: 409,
+      message: "Your group membership changed. Reload this page and try again.",
+      retryable: false,
+    });
+  }
+
+  const value = body.expectedMembershipId;
+  if (value === null) {
+    return null;
+  }
+  if (typeof value !== "string" || value.trim().length === 0) {
+    throw hostedOnboardingError({
+      code: "HOSTED_GROUP_MEMBERSHIP_ID_INVALID",
+      httpStatus: 400,
+      message: "Group membership id must be a non-empty string or null.",
+      retryable: false,
+    });
+  }
+  return value.trim();
 }

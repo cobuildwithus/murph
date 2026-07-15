@@ -222,7 +222,7 @@ export interface HostedWorkspaceRuntimeAssistantPhaseInput
   >;
   runtimeEnv: Readonly<Record<string, string>>;
   beforeProviderAcceptedInputs?: AssistantBeforeProviderAcceptedInputsHook | null;
-  currentAssistantPersonalizationInputId?: () => string | null;
+  currentAssistantPreferenceInputId?: () => string | null;
   stagedDirtyAcks?: readonly HostedDeviceSyncDirtyProcessedPostCheckpointRecord[] | null;
   suppressDirtyPendingFetch?: boolean;
   signal?: AbortSignal | null;
@@ -321,6 +321,7 @@ function buildHostedGroupEmailRestrictedActionUnavailable(
     case "preflight_set_chat_avatar":
     case "set_chat_avatar":
     case "share_contact_card":
+    case "leave_membership":
       return {
         action: request.action,
         result: { status: "unavailable", unavailableReason },
@@ -619,10 +620,10 @@ export async function runHostedWorkspaceAssistantPhase(
     {
       hosted: {
         actionApprovalPort: input.runtime.platform.actionApprovalPort ?? null,
-        ...(input.currentAssistantPersonalizationInputId
+        ...(input.currentAssistantPreferenceInputId
           ? {
-              currentAssistantPersonalizationInputId:
-                input.currentAssistantPersonalizationInputId,
+              currentAssistantPreferenceInputId:
+                input.currentAssistantPreferenceInputId,
             }
           : {}),
         assistantConfigurationTool:

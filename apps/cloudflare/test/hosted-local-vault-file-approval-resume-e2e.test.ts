@@ -164,12 +164,6 @@ describe("hosted local vault-file approval resume e2e", () => {
       scenario: requireScenario(),
       userId,
     });
-    expect(requireLinqStub().readObservedMessageText(pendingReply)).toBe(
-      pendingReplyText,
-    );
-    expect(readObservedLinqMessageParts(pendingReply)).toEqual([
-      { type: "text", value: pendingReplyText },
-    ]);
     await requireScenario().waitForHostedCompletion(userId);
 
     const challenge = await waitForLatestChallenge((candidate) =>
@@ -178,6 +172,17 @@ describe("hosted local vault-file approval resume e2e", () => {
       && candidate.tokenHash.length > 0
     );
     expect(challenge.actionId).toMatch(/^vault-file-send:[0-9a-f]{64}$/u);
+    expect(challenge.approvalKey).toMatch(/^haa_[A-Za-z0-9_-]{32}$/u);
+    const pendingReplyWithApprovalUrl = [
+      pendingReplyText,
+      `${requireScenario().harness.webBaseUrl}/approve/${challenge.approvalKey}`,
+    ].join("\n\n");
+    expect(requireLinqStub().readObservedMessageText(pendingReply)).toBe(
+      pendingReplyWithApprovalUrl,
+    );
+    expect(readObservedLinqMessageParts(pendingReply)).toEqual([
+      { type: "text", value: pendingReplyWithApprovalUrl },
+    ]);
     expect(requireLinqStub().countObservedRequests({
       expectedMethod: "POST",
       expectedPath: "/attachments",

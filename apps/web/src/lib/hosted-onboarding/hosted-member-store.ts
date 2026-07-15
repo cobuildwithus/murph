@@ -120,6 +120,11 @@ export interface HostedMemberEmailAuthorizationLookup {
   matchedBy: "verifiedEmail";
 }
 
+export interface HostedMemberEmailSnapshot {
+  core: HostedMemberCoreState;
+  emailAuthorization: HostedMemberEmailAuthorizationState | null;
+}
+
 export interface HostedMemberEmailAuthorizationWriteInput {
   directPublicSender?: {
     address: string;
@@ -208,6 +213,39 @@ export async function readHostedMemberCoreState(input: {
     },
     select: hostedMemberCoreStateSelect,
   });
+}
+
+export async function readHostedMemberEmailSnapshots(input: {
+  memberIds: readonly string[];
+  prisma: HostedOnboardingReadClient;
+}): Promise<HostedMemberEmailSnapshot[]> {
+  if (input.memberIds.length === 0) {
+    return [];
+  }
+
+  const records = await input.prisma.hostedMember.findMany({
+    where: {
+      id: {
+        in: [...input.memberIds],
+      },
+    },
+    select: {
+      ...hostedMemberCoreStateSelect,
+      emailAuthorization: {
+        select: hostedMemberEmailAuthorizationStateSelect,
+      },
+    },
+  });
+
+  return Promise.all(records.map(async (record) => ({
+    core: projectHostedMemberCoreState(record),
+    emailAuthorization: record.emailAuthorization
+      ? await projectHostedMemberEmailAuthorizationState(
+          record.emailAuthorization,
+          input.prisma,
+        )
+      : null,
+  })));
 }
 
 export async function claimHostedMemberSignupWelcomeEmailAttempt(input: {

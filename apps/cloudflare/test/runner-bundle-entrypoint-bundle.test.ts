@@ -517,11 +517,11 @@ describe("runner bundle container-entrypoint esbuild step", () => {
 
     // Entry = measured CI Linux baseline (1,423,217B after the 2026-07-13
     // mainline integration) + the prior 14,551B host-variance ratchet + PR
-    // #626's exact 7,706B local-macOS overage, then this PR's exact 4,351B
-    // overage on the merged base and the final 233B boundary-tail integration,
-    // less the final 179B complete-tail ownership reduction, plus the 230B
-    // explicit wake-provenance correction and the 48,000B noise band. Static
-    // closure
+    // #626's exact 7,706B local-macOS overage, PR #678's exact 633B overage,
+    // then this PR's exact 4,351B overage on the merged base and the final 233B
+    // boundary-tail integration, less the final 179B complete-tail ownership
+    // reduction, plus the 230B explicit wake-provenance correction and the
+    // 48,000B noise band. Static closure
     // advances the latest mainline baseline by PR #631's exact 913B crypto-lane
     // and 872B checkpoint overages, PR #626's exact 33,357B local-macOS
     // overage, this PR's exact 1,929B merged-base overage, and the same final
@@ -531,7 +531,7 @@ describe("runner bundle container-entrypoint esbuild step", () => {
     // Locking exact values makes any silent change to a ratchet a failing,
     // reviewed diff.
     expect(budgets).toEqual({
-      entryBytes: 1_450_109 + 48_000,
+      entryBytes: 1_450_742 + 48_000,
       staticClosureBytes: 7_096_782 + 96_000,
       totalBytes: 9_300_000,
     });
