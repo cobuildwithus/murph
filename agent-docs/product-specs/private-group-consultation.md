@@ -1,4 +1,4 @@
-# Private-to-Group Murph Consultation
+# Private-to-Group Murph Ask
 
 Status: Proposed
 
@@ -6,376 +6,315 @@ Last verified: 2026-07-15
 
 ## Decision
 
-Add one membership-routed consultation primitive:
+Add one durable **Assistant Ask** primitive:
 
 ```text
-private Murph asks -> joined group Murph answers -> private Murph continues
+one authorized Murph asks another context's Murph one question
+the target Murph reads its own context and returns one bounded answer
 ```
 
-It is asynchronous because hosted runtimes are independently scheduled. A
-synchronous call would hold the private model turn open through another
-runtime's cold start and model call, while current runtime signaling reports
-acceptance rather than a returned answer.
+The first use is personal Murph asking a joined group Murph for group-owned
+context. It is a real agent-to-agent request/reply, not private Murph reading
+group files. The group runtime receives the question, runs its own Murph, and
+owns the answer.
 
-Use the existing encrypted mailboxes for the request and result. Do not add a
-group-context projection, consultation table, workflow, timer, active-group
-state, cross-runtime mount, or general agent bus.
+Use three small layers:
 
-The only mailbox extension is a narrow source-bound append: Web may supply an
-opaque deterministic item id. The global mailbox primary key then prevents one
-private input from moving to a different group during retry. The same value is
-the request item id, event id, and dedupe key. It is not a new state owner.
+1. `murph.group(action="ask")` is the product action.
+2. `assistant.ask.requested` and `assistant.ask.completed` are the generic
+   encrypted mailbox protocol.
+3. `runIsolatedAssistantAsk` is the target-owned, one-shot, read-only Codex
+   execution primitive.
 
-## User behavior
+Keep the protocol generic but admission typed. The first target adapter is
+`joined_group`. A future context type may reuse Assistant Ask only after adding
+its own server-side resolver, authorization fence, disclosure policy, and
+context builder. There is no arbitrary runtime-id escape hatch.
 
-For example:
+Do not reuse `assistant.notification.requested` for the answer. A notification
+contains privileged instructions and delivery intent; an Assistant Ask answer
+is untrusted correlated data. The paired completion event keeps data separate
+from authority and lets a future caller consume an answer without pretending
+it is a notification.
 
-> Build a hotel workout around today's exercises from 100 Club.
+Do not add a context projection, agent registry, general message bus, database
+table, workflow, timer, second container, cross-workspace mount, or
+same-process Codex multiplexer.
 
-Private Murph asks 100 Club's Murph for the current prescription. When the
-answer returns, private Murph combines it with the member's private equipment,
-preferences, and health context.
+## Smallest complete contract
 
-- With one joined group, resolution is automatic.
-- With several groups, an exact current display label such as `100 Club`
-  resolves automatically.
-- If the group is unclear, Murph shows safe group labels and asks the member to
-  choose. The member never sees or copies an internal id.
-- Private Murph says it is asking the group and will use the answer if it
-  arrives. It does not promise a follow-up or claim to have an answer early.
-- The result appears only in the private conversation. The consultation creates
-  no group message, reaction, typing indicator, or visible activity.
-- An expired request produces no timeout message. A later user request can try
-  again without a consultation timer, status row, or background notifier.
-
-## Assistant interface
-
-Extend the existing `murph.group` tool:
+The model-facing action is:
 
 ```ts
-type ConsultGroupArguments = {
-  action: "consult";
+type AskGroupArguments = {
+  action: "ask";
   question: string;
   groupLabel?: string;
 };
 ```
 
-- `question` is the smallest standalone question the group Murph needs.
-- `groupLabel` is an optional user-visible label, not authority.
-- The schema accepts no membership, member, group, runtime, chat, mailbox,
-  route, callback, session, or attachment field.
-- `list_memberships` is not a prerequisite.
+The model supplies no member, membership, runtime, mailbox, session, callback,
+or return-route identifier. Web derives all authority and routing from the
+authenticated caller and stored request.
 
-The runtime maps the existing `AssistantHostedToolRequestKeyScope` into an
-equivalent strict wire-origin type owned by `packages/hosted-execution`, outside
-model arguments: accepted input ids, inbound mailbox item ids, conversation
-identity, and recipient identity. This preserves the package dependency
-direction. Consultation is allowed only during an authenticated personal direct
-turn with fresh user-authored input. Group, email, scheduled, notification, and
-consultation-result turns cannot start one. One accepted input can append at
-most one consultation request.
-Any consult result closes the consultation capability for that model turn, so
-clarification or retry requires later user-authored input. Transport retry of
-the same in-flight tool call remains automatic and does not reopen the model
-capability.
-
-Submission returns:
+The target execution surface is:
 
 ```ts
-type ConsultGroupSubmissionResult =
-  | { status: "accepted"; groupDisplayName: string | null }
-  | {
-      status: "needs_group";
-      reason: "duplicate_label" | "label_not_found" | "multiple_memberships";
-      candidates: Array<{ displayName: string | null }>;
-    }
-  | { status: "no_memberships" }
-  | {
-      status: "unavailable";
-      reason:
-        | "candidate_set_truncated"
-        | "group_runtime_unavailable"
-        | "request_expired"
-        | "request_conflict";
-    };
-```
+runIsolatedAssistantAsk({
+  targetContext,
+  question,
+  signal,
+}): Promise<AssistantAskAnswer>
 
-`accepted` means the request mailbox item committed. It does not mean the
-group has answered.
-
-## Automatic group resolution
-
-Web resolves the group because it owns `HostedGroupMember` truth and the
-signed callback supplies the personal member.
-
-1. The runtime proves the tool is executing in a personal direct user turn.
-   Web proves the signed personal caller and owns the membership checks.
-2. Read only current memberships for that member.
-3. If `groupLabel` is absent, select only when exactly one membership exists.
-4. If `groupLabel` is present, normalize it and current display labels using
-   Unicode NFC, trimming, whitespace collapse, and full case folding. Preserve
-   punctuation and emoji.
-5. Run a membership-scoped exact-match query that returns at most two rows.
-   An explicit nonmatching label never falls back to a sole membership.
-6. Select only one exact match. Otherwise return safe candidates.
-7. Require the selected group to own an active synthetic runtime before
-   accepting the request.
-
-The bounded candidate list contains only current display labels. It contains no
-ids, group metadata, roster identities, handles, emails, or sharing state. If
-Web cannot prove the list is complete, it returns `candidate_set_truncated`
-rather than a false not-found result.
-
-Private Murph may use a label from the current user message. After Murph has
-shown candidates, it may use a candidate's label only following a later
-user-authored selection. Duplicate or unnamed groups that remain
-indistinguishable require one group to be named or renamed. V1 adds no opaque
-selection token or persisted active-group preference for that rare edge case.
-
-Never fuzzy-match, choose the newest or owned group, inspect roster identities,
-fan out, or let a model resolve authority.
-
-## Authority and disclosure
-
-`HostedGroupMember` remains the sole consultation authority.
-
-- Web derives the selected membership and group runtime internally.
-- The request carries that membership row id as a hidden generation fence.
-- Web checks the exact row at admission, group preflight, and result append.
-- Leaving and rejoining creates a new row, so old work cannot cross the rejoin.
-- The completion callback must be signed by the selected group's exact runtime
-  and current runtime write fence.
-
-V1 treats current Murph membership as permission to ask the group Murph the
-same kind of question the member could ask inside the group. It does not grant
-access to another member's private Murph, private vault, identity, email, or
-unshared health data.
-
-The group answer follows one simple rule: it must be safe to post to the whole
-group. This reuses the room's existing disclosure semantics and does not add a
-new per-member ACL system. The answer must not quote raw transcript history or
-expose protected notes, ids, vault paths, secrets, contact details, permission
-metadata, private health projections, or another member's non-room-visible
-facts.
-
-## Private question boundary
-
-The only private-to-group content field is the bounded `question`. The request
-does not include the private transcript, private vault, provider session,
-attachments, contact details, or return route. The runtime may expose the same
-group-visible member identity that a normal group turn would show, derived from
-the verified membership rather than model arguments. No other requester data
-crosses.
-
-Private Murph follows these semantic rules:
-
-- Ask only for group-owned facts needed by the current user request.
-- Do not include facts from earlier private messages or the private vault
-  unless the member explicitly asks to share that fact.
-- If a private fact is necessary, ask the member before including it.
-
-The narrow field mechanically limits the egress surface, but Web cannot prove
-the meaning of free text. These are model-policy rules, not a semantic data-loss
-prevention claim.
-
-Treat the question, group-visible member label, group knowledge, and group
-answer as untrusted prompt data. Keep them out of developer instructions.
-
-## Request mailbox flow
-
-The existing request mailbox item is the durable job, operation record, and
-idempotency fence.
-
-1. The runtime supplies the stable request-key scope from the accepted private
-   input. No tool-call ordinal is used.
-2. Before group resolution, Web derives one opaque request identity from a
-   fixed, domain-separated SHA-256 digest over a canonical encoding of the
-   authenticated requester and the already-opaque request-key scope. It
-   excludes the question, label, membership, and destination so one accepted
-   input always has one consultation identity. Authorization does not depend on
-   digest secrecy, and no raw personal or conversation identifier appears in
-   the resulting id.
-3. Web looks up that identity by the mailbox's global primary key before group
-   resolution.
-4. If the row exists, Web first requires the consultation request kind and
-   schema. An expired row returns `request_expired` without payload access or
-   group resolution. For a live row, Web decrypts it, verifies the same
-   requester and origin, and compares the exact canonical tool arguments. Exact
-   replay reuses the stored mailbox item and its original group-runtime
-   destination. Changed arguments or any identity, kind, or schema collision
-   return `request_conflict`. Web never resolves a group again for that request
-   identity, even if labels or memberships changed.
-5. Only when no row exists does Web resolve the membership and attempt to append
-   one encrypted `group.consultation.requested` system-mailbox item with that
-   exact identity. Hidden server fields contain the canonical arguments,
-   requester, membership generation, originating private conversation and
-   accepted-input references, and selected group display label. The model sees
-   only the bounded question plus the normal group-visible member identity. The
-   exact item id is bound into the mailbox payload's existing encryption AAD.
-6. The request identity is also the event id and destination dedupe key, so the
-   request has no second identity. The global primary key serializes concurrent
-   inserts. A unique conflict is rolled back, globally reread, and verified
-   through step 4. If the exact global id is absent, it fails as
-   `request_conflict`; it never triggers another append or becomes a
-   destination-local duplicate.
-7. Web signals the group's existing runtime workflow after commit. The signal
-   carries only the mailbox pointer; it is not a second source of truth.
-8. Web returns `accepted` after the mailbox append commits or exact live replay
-   finds it. Replay re-signals only the stored destination; it never selects a
-   replacement group. Exact expired replay returns `request_expired`.
-
-The request mailbox row's existing `expiresAt` field is the sole ten-minute
-deadline. Expired work is no longer fetched; pending work that reaches preflight
-after expiry is completed without a model call. Metadata remains available for
-ordinary mailbox retention, but the encrypted payload follows the existing
-fail-closed expiry rule and is not read after expiry. V1 adds no timeout
-notification, consultation status endpoint, or sweeper. A later user request
-can try again from a new accepted input.
-
-A post-commit runtime-signal failure does not reverse `accepted`. Exact live
-replay finds the globally addressed item before membership resolution and
-signals that same item again. A later ordinary group-runtime wake processes it
-only while it is live; after expiry the normal mailbox projection skips it.
-
-A tool transport timeout after append is safe: the runtime retries only the
-same stable request. The global item lookup returns an exact live replay,
-`request_expired`, or a conflict. A group rename, leave, rejoin, or
-membership-count change cannot redirect that retry.
-
-## Group consultation turn
-
-`group.consultation.requested` uses a dedicated mailbox route. It is not
-imported as a group message and does not resume the room's provider session.
-
-Before model work, the group runtime asks Web to recheck the hidden membership
-generation, row expiry, active access, group runtime identity, and current write
-fence. Invalid or expired work is completed without a model call.
-
-Valid work runs with existing primitives:
-
-- a fresh temporary Codex thread and isolated provider home, discarded after
-  the result;
-- the normal group-mode system and skill contract;
-- the existing read-only Codex sandbox over an OS-enforced read view containing
-  only the group workspace and runtime transcript needed for the turn,
-  including the conversation history, committed group vault, and group-shared
-  data available to a normal group turn; and
-- a positive capability profile that can only read that view and emit one
-  structured consultation result. Every other model capability is absent.
-
-The fresh session does not resume the room's provider thread. The runtime
-assembles its group context from existing durable group sources.
-
-Read-only mode alone is not a read-confinement boundary. Consultation tool
-processes inherit no provider credentials, signing material, secret environment
-values, unrelated host files, or operational runtime paths. Provider auth and
-callbacks remain in the supervising runtime outside the model-visible
-filesystem view. A working-directory convention is not sufficient.
-
-Read-only describes the consultation model, not required runtime bookkeeping.
-Normal system-mailbox import, pending-item removal, and watermark progress are
-checkpointed. Those checkpoints may persist only operational mailbox state;
-they cannot persist model-authored group content or the temporary provider home.
-Success and terminal membership or expiry outcomes checkpoint that progress so
-the request does not replay forever.
-
-The consultation runs inside the group container; it does not copy that read
-set into the private container. The read-only sandbox and closed capability
-profile prevent canonical mutation or delivery, but they do not make every
-group-vault field member-visible. Only the bounded answer crosses containers,
-and confidentiality still relies on the whole-room disclosure policy above.
-
-The turn returns one structured result:
-
-```ts
-type GroupConsultationAnswer =
+type AssistantAskAnswer =
   | { outcome: "answered"; answer: string }
   | { outcome: "cannot_answer"; answer?: string };
 ```
 
-If the runner crashes before the result commits, ordinary mailbox retry may run
-the read-only turn again. No consultation-specific lease or running state is
-needed.
+`targetContext` is a sealed value built by an authorized target adapter. It
+fixes the workspace roots, system contract, untrusted context, and read-only
+permission profile; ordinary callers cannot choose them. The executor owns no
+routing, persistence, membership, retry, or delivery state. Those remain with
+their existing owners.
 
-## Private result flow
-
-The group runtime sends only the request mailbox item id and structured answer
-to a narrow signed Web callback. The item id stays outside model output. Web
-loads that exact request row's metadata and requires the row's owner to be the
-completing group runtime. Expired work receives a terminal acknowledgement
-without payload access or result append. Only for live work does Web decrypt
-the original payload; the completing runtime therefore cannot replace its
-requester, membership generation, origin, question, or row expiry.
-
-Web:
-
-1. binds the completing runtime, checks its current write fence, and verifies
-   the exact request-row owner, kind, schema, and metadata;
-2. returns terminal success without decryption when the row is expired;
-3. for live work, decrypts the payload, derives the deterministic private result
-   event id, and returns success when that exact result item already exists;
-4. rechecks the exact membership generation for a new result;
-5. bounds the stored question and structured answer;
-6. revalidates the stored member-owned private conversation and resolves its
-   private return route;
-7. appends one encrypted `group.consultation.completed` system-mailbox item to
-   the private runtime; and
-8. returns success only after that append commits.
-
-The result event id is derived from the stored request mailbox item id. Existing
-mailbox dedupe makes the first committed result win. If a lost callback response
-causes another model run with a different answer, the duplicate result append
-does not replace or deliver it. A result committed before expiry is already
-durable even if its callback response is lost; an after-expiry retry returns the
-generic terminal outcome without decrypting the request again.
-
-The group request is completed and its mailbox progress checkpointed only after
-result append succeeds, returns the existing duplicate, or reaches a terminal
-membership or expiry failure. If no safe private route exists, result append
-remains retryable until the request's `expiresAt`, then the answer is suppressed.
-
-The private result wake separates trusted routing from untrusted data:
-
-```ts
-type GroupConsultationCompleted = {
-  route: ServerResolvedPrivateRoute;
-  origin: HostedGroupConsultationOrigin;
-  data: {
-    groupDisplayName: string | null;
-    originalQuestion: string;
-    result: GroupConsultationAnswer;
-  };
-};
+```text
+private message
+  -> private Murph asks
+  -> Web resolves a current membership
+  -> assistant.ask.requested enters the group mailbox
+  -> isolated read-only group Murph answers
+  -> assistant.ask.completed enters the bound private mailbox
+  -> private Murph combines the answer with private context and replies
 ```
 
-`HostedGroupConsultationOrigin` is the strict wire type owned by
-`packages/hosted-execution`; the engine maps it to and from its local tool-scope
-type at the boundary.
+V1 is one asynchronous question and one answer, one hop deep. It has no
+streaming, broadcast, recursion, autonomous follow-up, or target-side action.
 
-The origin contains no return route. To resolve one, Web loads the exact stored
-personal inbound mailbox item or items referenced by `inboundMailboxItemIds`,
-verifies that they belong to the requester and the same user-authored direct
-conversation, decrypts them, and invokes the existing channel-specific resolver
-for that conversation. The opaque conversation and recipient identities must
-match. Web never substitutes the member's current notification route.
+## Final UX
 
-The private runtime uses `origin` to load its own durable accepted input and
-private context without sending either to the group. It requires the input to
-belong to the same personal runtime and a user-authored direct conversation;
-missing, stale, foreign, or non-direct origins fail closed. Fixed
-server-authored instructions supply `data` as quoted untrusted context, never as
-`assistant.notification.requested.instructions`. It runs a positive output-only
-profile that can read the bound private origin and context and emit one reply on
-the server-bound route. Every other model capability is absent.
+Happy path:
 
-The reply is bound to the verified originating private conversation, not a
-model-selected or merely current route. It does not persist the original
-invocation's route grant: Web re-derives current authority for that stored
-conversation at completion. If the origin is no longer safely replyable or the
-accepted input is unavailable, the answer is suppressed instead of being
-retargeted. If newer messages intervened in the same conversation, private
-Murph introduces the answer as a delayed group result. Existing private-outbox
-idempotency owns channel-delivery retries; consultation adds no delivery ledger.
+> **Member:** Build my hotel workout around today's 100 Club exercises.
+>
+> **Private Murph:** I'm checking privately with 100 Club's Murph now — nothing
+> will be posted there.
+>
+> **Private Murph, later:** Got it — today's group work is squats plus the
+> pelvic sequence. Here's the hotel version...
+
+If private messages intervene, the answer begins naturally, for example:
+`quick follow-up from 100 Club...`.
+
+- One joined group: choose it automatically.
+- Several groups plus one exact label match: choose it automatically.
+- Ambiguous: ask once using safe visible labels, such as
+  `Which group did you mean: 100 Club or Wednesday Training?`
+- No groups: offer the existing paste-or-screenshot fallback.
+- Duplicate or unnamed labels: fail closed and ask the member to name or
+  rename one; never expose an id.
+- Cannot answer: say the group context was insufficient.
+- Write request: explain that private Murph may ask and read but cannot post or
+  change anything in the group.
+- Membership ends, the request expires, or the original private route is no
+  longer safe: suppress the answer.
+
+There is no timeout notification or status UI. A later user message may retry.
+Nothing is posted, reacted to, or shown as typing in the group.
+
+## Routing, authority, and disclosure
+
+Web owns target resolution because it owns current `HostedGroupMember` truth.
+
+1. Allow `ask` only from fresh user-authored input in an authenticated personal
+   direct turn, once per accepted input.
+2. With one current membership and no label, select it.
+3. With a label, normalize it and current display labels using Unicode NFC,
+   trimming, whitespace collapse, and full case folding. Preserve punctuation
+   and emoji; select only one exact match.
+4. Otherwise return a bounded set of visible labels for clarification.
+5. Require a valid current synthetic group-runtime identity before accepting
+   the ask. The runtime may be cold; the committed request wakes it.
+
+Never fuzzy-match, pick the newest or owned group, inspect roster identities to
+guess, or fan out. `list_memberships` is not required, and the model never
+receives a membership id for an ask.
+
+The exact membership row is a hidden generation fence. Web checks it at
+admission, before the target reads context, and before appending the answer.
+Leave and rejoin creates a new generation, so old work cannot cross it. Target
+completion also requires the exact group runtime and its current write fence.
+
+Membership permits the same class of read the member could request in the
+room. The answer must be safe to post to the whole group. This reuses the
+room's disclosure boundary rather than adding per-member ACLs.
+
+The target may read the full committed group conversation, committed group
+vault and challenge state, and server-approved group-shared projections already
+visible in that runtime. It may not read another member's private Murph or
+vault, unshared health data, other workspaces, operator state, secrets,
+permission metadata, routes, provider sessions, or runtime internals.
+
+Only the smallest standalone question crosses from private to group. Private
+history, attachments, contacts, private vault data, and return routing do not.
+If the question needs a fact from earlier private context, private Murph asks
+for explicit consent first. The question, group context, and answer are quoted
+untrusted prompt data, never developer instructions.
+
+## Durable request/reply lifecycle
+
+The request and completion mailbox items are the only durable operation state.
+
+### Request admission
+
+1. The runtime supplies a stable server-owned scope for the accepted private
+   input.
+2. Web derives an opaque global request id from the authenticated requester and
+   that scope, then looks it up before resolving a group.
+3. An exact retry reuses the stored request and pinned destination. Changed
+   arguments conflict. Rename, leave, rejoin, or membership-count changes
+   cannot redirect the same accepted input.
+4. For a new id, Web resolves the membership and appends one encrypted
+   `assistant.ask.requested` item. Its item id, event id, and dedupe key are the
+   same value.
+5. Hidden server fields bind origin, membership generation, destination, and
+   expiry. The target model sees only the bounded question and normal
+   group-visible requester presentation.
+6. Web signals the existing group runtime after commit. `accepted` means
+   durable, not answered.
+
+This needs one narrow mailbox-store seam that accepts a server-derived item
+id. It needs no new table or schema migration.
+
+### Target execution and completion
+
+Before reading, the group runtime rechecks expiry, membership generation,
+target identity, and write fence. It runs one isolated ask and submits only the
+request id plus structured answer through a narrow signed callback.
+
+Web loads the original request, repeats the checks, derives one stable
+completion id, and appends `assistant.ask.completed` to the original private
+runtime. The target never receives a callback address or private route. The
+request is acknowledged only when the completion is durable, already exists,
+or is terminally expired or unauthorized.
+
+If a lost callback response causes another model run, completion dedupe makes
+the first committed answer win. Existing mailbox pending, retry, backoff,
+expiry, checkpoint, and retention mechanisms own the rest; there is no
+consultation lease, result table, or delivery ledger.
+
+### Private continuation
+
+The private runtime verifies the server-bound origin, reloads the original
+accepted input and current private context, and treats the answer as untrusted
+data. It may emit one reply on the revalidated original private route. The
+delayed turn has neither Assistant Ask nor side-effecting tools; a later user
+message can authorize more work.
+
+If private Murph is already replying, the completion waits in the normal
+mailbox and becomes a later follow-up. It never steals foreground authority.
+
+## Foreground group lifecycle
+
+One mailbox feeds two deliberately different execution lanes:
+
+- the resident foreground Murph is the sole model-authored canonical-content
+  writer and outbound sender; and
+- at most one isolated, preemptible Assistant Ask reader may run beside it.
+
+Trusted runtime owners still persist ordinary mailbox and process bookkeeping.
+
+If group Murph is already replying when an ask arrives:
+
+1. Its resident process keeps the active turn, provider session, route grant,
+   and outbox authority.
+2. The existing mailbox watcher imports the ask.
+3. A tiny detached controller starts a separate one-shot App Server process
+   without awaiting it on the foreground path.
+4. Foreground messages continue to start, steer, and deliver normally. The
+   child cannot write, send, react, type, steer, or signal-interrupt the
+   resident process.
+5. More asks stay pending. When the child settles, the controller calls the
+   same non-awaiting `kick()` once to claim the next due ask, if any. The
+   existing mailbox remains the queue.
+6. New foreground work does not cancel or await the child; the processes and
+   authorities are independent.
+7. Before invocation return, checkpoint, shutdown, fence loss, or workspace
+   replacement, the runtime interrupts the exact child, waits for a bounded
+   grace period, terminates only that proven-owned process if necessary,
+   requeues its item, proves exit, and only then releases the workspace.
+
+A controller owns only one promise and one `AbortController`, not a pool,
+scheduler, lease, or persisted state. A child failure cannot interrupt,
+replace, or poison the resident App Server.
+This is the narrow answer to the larger mailbox-concurrency issue: one serial
+writer lane plus one read-only ask lane, not general parallel mailbox
+execution.
+
+## Native Codex confinement
+
+Use the existing `CodexAppServerProcess` plus Codex's native App Server and
+permission-profile fields. Do not build a Murph sandbox.
+
+The one-shot thread uses:
+
+- a named `detached-read` permission profile;
+- the exact group root in `runtimeWorkspaceRoots`;
+- a fresh supervisor-owned empty working directory, not the group root;
+- `ephemeral: true` and a fresh temporary Codex home; and
+- native schema-constrained output on `turn/start`.
+
+The temporary home contains only the named profile and minimum auth/config
+needed by the App Server. No loaded config layer may contain legacy
+`sandbox_mode` or `[sandbox_workspace_write]` keys, and no request may pass
+legacy `sandbox`; those paths do not compose with native permissions. Assert
+the effective profile, roots, working directory, instruction sources, and
+approval policy before model work, and fail closed on any mismatch.
+
+The named profile must OS-enforce read access only to Codex's `:minimal`
+runtime and the exact `:workspace_roots`, no writes, explicit denial of
+`.runtime/**`, environment files and operational paths, no other workspace or
+operator-home access, no tool network, and approval policy `never`.
+
+The child receives no hosted dynamic tools, CLI bridge, route grant, signing
+material, memories, plugins, MCP servers, apps, web search, or multi-agent
+capability. Project config and instruction discovery are disabled, so a target
+workspace `.codex/config.toml`, hook, or skill cannot expand behavior. Set
+`shell_environment_policy.inherit = "none"` with only a tiny benign allowlist;
+model-run commands cannot inherit provider credentials. A trusted group
+context builder supplies the target system contract and committed transcript;
+built-in read commands remain OS-confined.
+
+The pinned App Server marks `permissions` and `runtimeWorkspaceRoots`
+experimental. Initialize the child with `experimentalApi = true`, pin this
+integration to the bundled Codex version, and verify its generated protocol
+schema so an upgrade cannot silently drop either field.
+
+Implement one small wrapper around the existing process and event parser with
+exact process ownership and `try/finally` cleanup. Do not add another adapter or
+process pool. Same-process multiplexing is rejected because the current adapter
+has one scalar active turn and process-wide interruption. A Codex subagent is
+also wrong because it would belong to the foreground session instead of the
+target runtime.
+
+Feature enablement requires a production-like runner test proving that the
+named profile is enforced by the Linux sandbox. If it fails, fail closed and
+fix the existing runner image or native Codex configuration. Do not substitute
+prompt rules, prefix checks, or a custom wrapper.
+
+## Read consistency
+
+Read the currently restored live group workspace. Do not create a snapshot,
+copy, projection, mount, or read lock.
+
+This is a best-effort, non-transactional read. It may observe committed files
+from slightly different moments and cannot see words the resident Murph is
+currently generating but has not committed. That tradeoff is accepted. A
+transient unreadable input retries through the mailbox rather than adding
+coordination machinery.
+
+If evidence later proves an immutable view necessary, it can replace the read
+implementation behind `runIsolatedAssistantAsk` without changing the product
+action or mailbox protocol.
 
 ## Bounds and retention
 
@@ -383,102 +322,134 @@ idempotency owns channel-delivery retries; consultation adds no delivery ledger.
 - question: 1,200 Unicode code points
 - answer: 4,000 Unicode code points and 1,500 output tokens
 - request lifetime: ten minutes
-- consultations per accepted private input: one
-- consultation depth: one
+- asks per accepted private input: one
+- ask depth: one
+- detached asks per target runtime: one
 - attachments: none
 
-Both runtimes use their existing active-access and AI-usage gates. The group
-model call records usage against the group runtime through existing usage
-fields. V1 adds no requester usage field, quota table, subscription, or billing
-state.
+Expiry is the only deadline. There is no timer, sweeper, status endpoint, or
+timeout message. Raw question and answer payloads may persist only in encrypted
+mailbox data and bounded encrypted processing state, never normalized rows,
+analytics, or logs. After private Murph uses the answer, its composed reply
+follows ordinary private-conversation, provider, and channel retention.
+Existing mailbox, workspace, and account rules remain authoritative.
 
-Question and answer bodies traverse authenticated TLS callbacks and the model
-provider boundary. Within Murph-owned storage, durable copies may exist only in
-encrypted mailbox payloads and bounded encrypted runtime operational state used
-to process those payloads. They do not enter a normalized Web row, projection,
-analytics, or logs. Provider processing and retention follow the existing
-runtime-provider contract.
+## Implementation plan
 
-The result may remain in ordinary private provider and channel history after
-delivery. Leaving later cannot erase that delivered copy. Existing mailbox,
-workspace, and account-deletion retention owners remove undelivered operational
-copies; there is no consultation-specific cleanup owner.
+### 1. Contracts and admission
+
+- `packages/hosted-execution`: add strict `assistant.ask.requested` and
+  `assistant.ask.completed` contracts, limits, origin binding, parsers,
+  builders, and wake identities.
+- `packages/assistant-engine`: add `murph.group(action="ask")` and the fresh
+  personal-input/one-ask policy.
+- `apps/web`: add automatic membership resolution, stable request-id replay,
+  the narrow explicit-id append, target preflight, and idempotent completion.
+
+### 2. Isolated execution
+
+- `packages/assistant-engine`: extend the existing App Server request builder
+  with `permissions`,
+  `runtimeWorkspaceRoots`, `ephemeral`, and `outputSchema`.
+- Reject native `permissions` plus legacy `sandbox`.
+- Add `runIsolatedAssistantAsk` with exact child cleanup.
+- `packages/assistant-runtime`: own the `detached-read` profile and minimal
+  child environment.
+- `apps/cloudflare`: add no coordinator; change only the existing runner
+  bundle/image contract if the native sandbox proof requires it.
+
+### 3. Target background lane
+
+- `packages/assistant-runtime`: route `assistant.ask.requested` out of ordinary
+  serial system-message
+  execution and into one invocation-local detached controller.
+- Kick it after initial mailbox restore and late request import.
+- Reuse existing pending, retry, backoff, expiry, cancellation, checkpoint,
+  usage, and fence owners.
+
+### 4. Private completion
+
+- `packages/assistant-runtime` and `packages/assistant-engine`: consume
+  `assistant.ask.completed` as correlated untrusted data.
+- Reload the bound accepted input and private context.
+- Run one output-only continuation on the original revalidated route with the
+  UX above.
+
+### 5. Rollout
+
+- Deploy disabled target consumers, native permission configuration, and
+  completion handling first.
+- Deploy the disabled Web producer second.
+- Prove the production sandbox and warm-runtime convergence, then enable the
+  producer.
+- Update `ARCHITECTURE.md`, `agent-docs/SECURITY.md`,
+  `agent-docs/RELIABILITY.md`, and the testing map with implemented behavior in
+  the same code change.
+
+No database migration is required. Rollback disables the producer first, lets
+requests drain or expire for ten minutes, then rolls back consumers.
+
+## Required proof
+
+1. Automatic/exact-label resolution works; ambiguous, duplicate, unnamed, and
+   truncated sets reveal safe labels only.
+2. Model-supplied identities, destinations, callbacks, and routes are rejected.
+3. Retry cannot retarget after rename, leave, rejoin, or membership changes.
+4. Only a fresh personal direct input can ask, once, at depth one.
+5. A group foreground turn continues while an isolated ask succeeds or fails;
+   the resident process is never interrupted or poisoned.
+6. Checkpoint, shutdown, fence loss, and workspace replacement cancel and
+   requeue exact owned work before releasing its root.
+7. Intended committed group context is readable, while writes, `.runtime/**`,
+   other roots, secrets, route grants, and tool network are OS-denied.
+8. Prompt injection cannot gain instruction, write, network, delivery, or
+   recursion authority.
+9. Duplicate callbacks/model runs yield one completion and private follow-up.
+10. Completion is bound to the original private conversation; leave, expiry,
+    or an unsafe route suppresses it.
+11. No group message, reaction, typing, session mutation, memory write, or
+    model-authored canonical mutation occurs.
+12. Question and answer content stays out of normalized rows, logs, and
+    analytics.
+
+The production-faithful concurrency test pauses an active group provider turn,
+imports an ask, starts the child, delivers a new group message, and proves both
+the group reply and private completion. A second test kills only the child and
+proves foreground continuity plus mailbox retry.
+
+## Final tradeoffs
+
+No product question blocks implementation.
+
+| Decision | Default | Accepted cost |
+| --- | --- | --- |
+| Transport | Async paired mailbox events | The answer may arrive later. |
+| Target Murph | Fresh target-owned session | No uncommitted resident output. |
+| Isolation | Cold one-shot process | Startup latency and process cost. |
+| Read view | Live, non-transactional workspace | Slightly mixed freshness. |
+| Concurrency | One detached ask per runtime | Further asks wait. |
+| Capability | Read and answer only | Later input authorizes actions. |
+| Expiry | Silent after ten minutes | No progress or timeout UI. |
+
+The only hard technical gate is proving the named Codex filesystem profile in
+the real production runner image. That is verification, not a new product
+decision. Additional target types, higher concurrency, writes, or multi-turn
+agent conversations require later evidence and a new authorization review.
 
 ## Non-goals
 
-- A group-context projection or reverse Vault Share grant
-- A consultation database table, status API, timeout workflow, or sweeper
-- General agent discovery, messaging, delegation, or recursion
-- Synchronous cross-runtime RPC or runtime coordination locks
-- Mounting or decrypting one runtime's workspace inside another
-- Copying group chat history into a personal prompt or vault; full read access
-  stays inside the group runtime and only the bounded answer crosses
-- Consulting several groups from one accepted input
-- Model-authored group-content mutation or sending anything into the group chat
-- A new per-member ACL system inside group knowledge
-- Hard semantic detection of private facts inside free text
+- Arbitrary assistant discovery or model-selected destinations
+- General command bus, synchronous RPC, streaming, broadcast, or recursion
+- Target writes or any visible group activity
+- Projection, snapshot, cross-runtime mount, or copied transcript
+- New table, queue, scheduler, workflow, timer, lease, or Durable Object
+- Shared warm Codex process, provider thread, or interruption domain
+- Process pool, priority manager, or general mailbox concurrency engine
 
-## Implementation ownership
+## Platform references
 
-- `packages/assistant-engine`: closed tool action, use policy, isolated group
-  turn, and output-only private result turn
-- `packages/hosted-execution`: two strict mailbox event contracts, the wire
-  origin type, parsers, and builders
-- `packages/assistant-runtime`: request/result mailbox routing and turn profiles
-- `apps/web`: automatic membership resolution, the narrow source-bound mailbox
-  append using the existing global item id, preflight and completion checks,
-  private-route resolution, and idempotent result append
-- `apps/cloudflare`: signed transport, runtime write-fence checks, and runtime
-  signaling
-
-Do not add another state owner unless implementation proof shows that existing
-mailbox dedupe, expiry, retry, and retention cannot preserve this contract.
-
-## Deployment compatibility
-
-1. Deploy both mailbox parsers and consumers, the isolated turn profiles, and
-   signed callbacks with production disabled.
-2. Deploy Web resolution and producer code disabled.
-3. Prove warm runner convergence and both event paths.
-4. Enable the Web producer.
-
-Web must not emit a request to a runner that cannot parse it. Disable the
-producer or roll Web back before rolling the runner below the new contract.
-No database migration is required. The mailbox store gains only an explicit-id
-append path; ordinary append behavior continues to generate random ids.
-
-## Direct proof
-
-At minimum, verify:
-
-1. One membership and one exact label resolve without a membership id or list
-   call; a nonmatching explicit label never falls back.
-2. Multiple, duplicate, unnamed, and truncated membership sets produce safe,
-   truthful clarification without ids or roster data.
-3. Only a personal direct user turn can consult, and every model-supplied
-   identity, route, attachment, and callback field is rejected.
-4. Exact live request replay deduplicates while changed arguments under the same
-   accepted-input key conflict; expired replay returns only `request_expired`.
-   After the first commit, a rename, leave, rejoin, label collision, or
-   membership-count change cannot append to another group.
-5. Foreign runtimes, ended membership generations, expired requests, and later
-   rejoins cannot authorize work or result delivery.
-6. The group turn uses a fresh thread, normal group-mode context, the full
-   intended group-data read set, an OS-confined read-only sandbox, and a
-   read-result-only capability profile. Only normal operational mailbox progress
-   is checkpointed; no model-authored group content is. A prescription present
-   only in group conversation remains answerable, while injected instructions
-   cannot read a canary outside the view or recover an environment secret.
-7. Prompt injection in the question, group knowledge, or answer never gains
-   developer-instruction or outbound-tool authority.
-8. A lost completion response or changed second model answer produces at most
-   one private result mailbox item.
-9. The result reloads and decrypts the stored originating inbound item,
-   revalidates its member-owned private route, and can never fall back to a
-   current notification route, the group route, or another member.
-10. Request expiry needs no timer or status row. Expired payloads remain
-    unreadable, and a late completion reveals no answer.
-11. Question and answer bodies stay out of normalized rows, projections, logs,
-    and analytics.
-12. No group message, reaction, typing event, memory write, or model-authored
-    canonical group-content mutation occurs.
+- [Codex App Server](https://learn.chatgpt.com/docs/app-server.md)
+- [Codex sandboxing](https://learn.chatgpt.com/docs/sandboxing.md)
+- [Codex permissions](https://learn.chatgpt.com/docs/permissions.md)
+- [Cloudflare container architecture](https://developers.cloudflare.com/containers/platform-details/architecture/)
+- [Cloudflare container process execution](https://developers.cloudflare.com/containers/execute-commands/)
