@@ -1049,6 +1049,7 @@ describe("hosted Linq egress authority", () => {
     const response = await postHostedLinqEgressEngagement(
       new Request("https://internal.example.test/engagement", {
         body: JSON.stringify({
+          authorityCheckOnly: true,
           homeRouteFallbackAllowed: true,
           target: "chat-stale-home",
           targetKind: "explicit",
@@ -1066,6 +1067,7 @@ describe("hosted Linq egress authority", () => {
         code: "HOSTED_LINQ_EGRESS_ROUTE_AUTHORITY_MISMATCH",
       },
     });
+    expect(prisma.hostedThreadRoute.findMany).toHaveBeenCalledTimes(2);
     expect(prisma.hostedLinqDelivery.create).not.toHaveBeenCalled();
   });
 });
