@@ -97,7 +97,7 @@ export function AuthDialog({
   open,
   onOpenChange,
   title = "Log in or sign up",
-  description = "Whatever comes up with your health, you don’t have to figure it out alone.",
+  description = "Whatever healthier looks like for you, Murph helps you understand what matters, build habits that fit your life, and follow through.",
   onCompleted,
   requireLaunchConsentOnCompletion = false,
   showPassiveLegalNotice = false,
