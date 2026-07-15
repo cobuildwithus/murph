@@ -42,7 +42,6 @@ export function buildRunnerRecordTimingLogDetails(
     activeWriteFenceWorkspaceVersion: writeFence?.workspaceVersion ?? null,
     failureCount: record.failureCount,
     lastErrorCode: record.lastErrorCode,
-    runnerAlarmAt: null,
   };
 }
 

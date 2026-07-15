@@ -5,7 +5,6 @@ import {
 import { ensureRunnerStateSchema } from "./runner-state-schema.js";
 import {
   createDefaultRunnerMetaRow,
-  normalizeIsoDate,
   normalizeIsoDateOrNull,
   normalizeNonNegativeInteger,
   projectRunnerStateRecord,
@@ -52,8 +51,6 @@ export function runnerWriteFenceIdentityMatches(
     && current.kind === expected.kind
     && current.userId === expected.userId;
 }
-
-export type RunnerInvocationLease = RunnerWriteFenceToken;
 
 export class RunnerWriteFenceAlreadyActiveError extends Error {
   readonly record: RunnerStateRecord;
@@ -199,7 +196,6 @@ export class RunnerStateStore {
     const processingMode = readRunnerRuntimeProcessingMode(input.processingMode);
 
     meta.active_attempt_id = attemptId;
-    meta.active_expires_at = null;
     meta.active_generation = nextGeneration;
     meta.active_kind = kind;
     meta.active_provider_egress_token_hash = providerEgressTokenHash;
@@ -207,7 +203,6 @@ export class RunnerStateStore {
     meta.active_runner_container_name = requireRunnerContainerName(input.runnerContainerName);
     meta.active_started_at = startedAt;
     meta.active_workspace_version = null;
-    meta.wake_at = null;
     this.writeMetaRowSync(meta);
 
     return {
@@ -242,20 +237,6 @@ export class RunnerStateStore {
     };
   }
 
-  async beginInvocation(input: Parameters<RunnerStateStore["beginWriteFence"]>[0]): Promise<RunnerWriteFenceToken> {
-    return await this.beginWriteFence(input);
-  }
-
-  async bindInvocationWorkspaceVersion(input: {
-    lease: RunnerWriteFenceToken;
-    workspaceVersion: string;
-  }): Promise<RunnerWriteFenceToken> {
-    return await this.bindWriteFenceWorkspaceVersion({
-      token: input.lease,
-      workspaceVersion: input.workspaceVersion,
-    });
-  }
-
   async clearWriteFenceAfterCompletion(input: {
     finishedAt?: string | null;
     token: RunnerWriteFenceToken;
@@ -271,7 +252,6 @@ export class RunnerStateStore {
       };
     }
     meta.failure_count = 0;
-    meta.backoff_until = null;
     meta.last_error_at = null;
     meta.last_error_code = null;
     meta.last_invocation_at = input.finishedAt ?? new Date().toISOString();
@@ -349,19 +329,6 @@ export class RunnerStateStore {
     };
   }
 
-  async completeInvocation(input: {
-    finishedAt?: string | null;
-    lease: RunnerWriteFenceToken;
-  }): Promise<{
-    completed: boolean;
-    record: RunnerStateRecord;
-  }> {
-    return await this.clearWriteFenceAfterCompletion({
-      finishedAt: input.finishedAt,
-      token: input.lease,
-    });
-  }
-
   async clearWriteFenceAfterTransportFailure(input: {
     error: unknown;
     finishedAt?: string | null;
@@ -407,7 +374,6 @@ export class RunnerStateStore {
 
     const attemptId = meta.active_attempt_id;
     this.clearActiveRunMetaSync(meta);
-    meta.wake_at = null;
     this.writeMetaRowSync(meta);
 
     return {
@@ -586,7 +552,6 @@ export class RunnerStateStore {
 
   private readStateFromMetaSync(meta: RunnerMetaRow): RunnerStateRecord {
     return projectRunnerStateRecord({
-      bundleRef: null,
       meta,
     });
   }
@@ -625,7 +590,6 @@ export class RunnerStateStore {
     const row = this.sql.exec<RunnerMetaRow>(
       `SELECT
         user_id,
-        wake_at,
         active_attempt_id,
         active_generation,
         active_kind,
@@ -633,9 +597,7 @@ export class RunnerStateStore {
         active_runner_container_name,
         active_reason,
         active_started_at,
-        active_expires_at,
         active_workspace_version,
-        backoff_until,
         failure_count,
         last_error_at,
         last_error_code,
@@ -656,7 +618,6 @@ export class RunnerStateStore {
       `INSERT OR REPLACE INTO runner_meta (
         singleton,
         user_id,
-        wake_at,
         active_attempt_id,
         active_generation,
         active_kind,
@@ -664,17 +625,14 @@ export class RunnerStateStore {
         active_runner_container_name,
         active_reason,
         active_started_at,
-        active_expires_at,
         active_workspace_version,
-        backoff_until,
         failure_count,
         last_error_at,
         last_error_code,
         last_invocation_at
-      ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+      ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
       1,
       meta.user_id,
-      meta.wake_at,
       meta.active_attempt_id,
       normalizeNonNegativeInteger(meta.active_generation),
       meta.active_kind,
@@ -682,9 +640,7 @@ export class RunnerStateStore {
       meta.active_runner_container_name,
       meta.active_reason,
       meta.active_started_at,
-      meta.active_expires_at,
       meta.active_workspace_version,
-      meta.backoff_until,
       normalizeNonNegativeInteger(meta.failure_count),
       meta.last_error_at,
       meta.last_error_code,
@@ -711,7 +667,6 @@ export class RunnerStateStore {
 
   private clearActiveRunMetaSync(meta: RunnerMetaRow): void {
     meta.active_attempt_id = null;
-    meta.active_expires_at = null;
     meta.active_kind = null;
     meta.active_provider_egress_token_hash = null;
     meta.active_reason = null;
