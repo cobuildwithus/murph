@@ -12,7 +12,6 @@ import {
   JUNCTION_COMPANION_HRV_OBSERVATION_INVALID_CODE,
 } from "@murphai/device-syncd/junction-resources";
 import { buildDeviceSyncTokenCipherOptions, createSecretCodec } from "@murphai/device-syncd/local-secret-codec";
-import { requiresHistoricalResetDeviceSyncSource } from "@murphai/device-syncd/public-account";
 import type { DeviceSyncService } from "@murphai/device-syncd/service";
 import type {
   DeviceSyncJobInput,
@@ -21,10 +20,8 @@ import type {
   StoredDeviceSyncAccount,
 } from "@murphai/device-syncd/types";
 import {
-  JUNCTION_HISTORICAL_BACKFILL_METADATA_KEYS,
   mergeHostedDeviceSyncConnectionMetadata,
   normalizeHostedDeviceSyncJobHints,
-  readJunctionHistoricalBackfillStatus,
   resolveHostedDeviceSyncWakeContext,
   sanitizeHostedExecutionDeviceSyncRuntimeCredentialMetadata,
   serializeHostedExecutionDeviceSyncDirtyPayloadIdentity,
@@ -196,8 +193,6 @@ export async function syncHostedDeviceSyncControlPlaneState(input: {
         && shouldPreserveLocalHydrationSource({
           hostedConnectionEpochChanged,
           localSource,
-          metadata: stored.metadata,
-          provider: entry.connection.provider,
           source,
         })
       ) {
@@ -302,28 +297,10 @@ function resolveHostedHydrationSourceInstanceKey(input: {
 function shouldPreserveLocalHydrationSource(input: {
   hostedConnectionEpochChanged: boolean;
   localSource: StoredDeviceConnectionSource;
-  metadata: Record<string, unknown>;
-  provider: string;
   source: NonNullable<HostedDeviceSyncRuntimeConnectionSnapshot["sources"]>[number];
 }): boolean {
   if (input.hostedConnectionEpochChanged) {
     return false;
-  }
-
-  if (input.provider.trim().toLowerCase() === "junction") {
-    const historicalStatus = readJunctionHistoricalBackfillStatus(
-      input.metadata[JUNCTION_HISTORICAL_BACKFILL_METADATA_KEYS.status],
-    );
-    if (historicalStatus?.status !== "exhausted") {
-      return Date.parse(input.localSource.lastSeenAt) >= Date.parse(input.source.lastSeenAt);
-    }
-
-    if (requiresHistoricalResetDeviceSyncSource(input.source)) {
-      return false;
-    }
-    if (requiresHistoricalResetDeviceSyncSource(input.localSource)) {
-      return true;
-    }
   }
 
   return Date.parse(input.localSource.lastSeenAt) >= Date.parse(input.source.lastSeenAt);

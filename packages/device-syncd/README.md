@@ -31,7 +31,9 @@ What it does:
 
 Current providers:
 - Direct runtime providers: Oura, Strava, and WHOOP.
-- Junction-backed connect sources are driven by `DEVICE_CONNECT_SOURCES` and `JUNCTION_PROVIDER_FILTER`; current configured targets include Garmin/Fitbit-style Junction sources when enabled.
+- Junction-backed sources come from `DEVICE_CONNECT_SOURCES`. `JUNCTION_PROVIDER_FILTER`
+  selects Link targets such as Garmin and Fitbit; recognized Junction SDK sources such
+  as Apple Health participate independently of that Link-only filter.
 
 Use `packages/device-syncd/src/config/connect-routes.ts` as the source of truth
 for the current connect target catalog, and use
@@ -67,38 +69,45 @@ HTTP/env shapes.
 - optional webhook fan-in
 - normalized snapshot import through `@murphai/importers`
 
-Garmin and the hosted `/connect` catalog connect through Junction Link when Junction credentials are configured. Leave `JUNCTION_PROVIDER_FILTER` unset or empty to use the shared default list that matches `/connect`; set it only to narrow the enabled Junction targets for an environment.
+Garmin and other hosted `/connect` targets use Junction Link when Junction credentials
+are configured. Leave `JUNCTION_PROVIDER_FILTER` unset or empty to use the shared Link
+defaults; set it only to narrow the enabled Link targets for an environment. Recognized
+Junction SDK sources, including Apple Health, are resolved from the same connect-route
+catalog and remain eligible for historical coverage without appearing in that filter.
 
 Junction connect-time history is tracked per advertised high-signal daily
 source/resource pair (activity, sleep, and `sleep_cycle`), not by a single
 account-level "has data" flag. An activity row therefore cannot close a missing
 sleep obligation. Availability describes capability, so empty sparse resources
 such as workouts or body measurements do not become failed-export signals.
-Garmin history arrives asynchronously
-and incrementally through daily-data webhooks, so incomplete delayed passes use
-the existing bounded backfill ladder to observe resource-aware coverage rather
-than call a separate export endpoint. The coverage-policy version is encoded in
-the existing status scalar instead of adding another metadata field or retry
-store. Legacy terminal metadata is reevaluated lazily, and late webhooks remain
-importable even after the polling budget is exhausted. Authenticated old-window
-webhooks that produce canonical events add bounded source/resource evidence for
-the exact connect window. The existing deduplicated verification unions that
-evidence with fresh REST rows, and complete late coverage clears the source
-error even when Garmin's REST sleep response remains empty. If Garmin coverage
-is still incomplete, only the pending source is marked reconnect-required while
-current ingestion remains active. Hosted apply treats that progress and source
-signal as one monotonic transition: stale or legacy writers cannot clear either
-half, a reset signal exists exactly while progress is exhausted, source-only
-writes stay in their observed connection epoch, future versions stay opaque,
-and hosted/local source keys collapse to one semantic provider source. To
-restart the export, the member explicitly confirms the existing connection-wide
-disconnect and then reconnects Garmin.
-That reset can disconnect other wearables on the same Junction connection, so
-its scope must be explained before confirmation. A failed provider-side
-deregistration still completes the local disconnect, but the member must remove
-the connection in the wearable provider account before reconnecting. Recovery
-does not depend on an automatic export endpoint, operator action, or vendor
-support.
+`@murphai/importers` is the sole owner of summary semantics: the same adapter
+that performs canonical import emits bounded source/resource normalization
+evidence for fallback coverage checks. `device-syncd` does not maintain a
+second raw-payload metric parser.
+
+Junction's historical-pull status is authoritative when available. A `success`
+completes its source/resource obligation even when the provider reports zero
+rows, and Murph does not compare provider-specific history ranges with its own
+connect window. `not_pulled` is not an obligation. Scheduled, in-progress,
+retrying, unknown, malformed, or unavailable status remains pending on the
+existing daily retry cadence; none of those states can request a reset.
+Canonical normalization evidence and authenticated old-window push evidence
+provide the bounded fallback when introspection is unavailable.
+
+Connection metadata owns the aggregate retry status, attempt count, and daily
+cadence across all pending sources. Garmin's connection-source row separately
+owns reset eligibility. Once the observation ladder is saturated, an explicit
+Junction `failure` for every still-pending Garmin obligation can mark Garmin
+reconnect-required while aggregate metadata remains `retrying` for another
+provider. Successful Garmin coverage clears that source marker without waiting
+for the other provider. Current ingestion remains active throughout.
+
+Restarting the Garmin export requires the member to confirm the existing
+connection-wide disconnect and then reconnect Garmin. The reset can disconnect
+other wearables on the same Junction connection, so its scope must be explained
+before confirmation. If provider-side deregistration fails, the local
+disconnect still stands and the member must remove the connection in the Garmin
+account before reconnecting.
 
 WHOOP uses OAuth plus webhooks.
 Strava uses OAuth, polling, and optional app-global webhooks.

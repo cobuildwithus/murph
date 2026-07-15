@@ -726,10 +726,10 @@ export async function notifyAssistantActiveTurnInputAvailableForInputIds(input: 
       }
 
       const conversation = conversationRefFromAssistantInputConversation(event.conversation)
-      conversationsByKey.set(
-        formatAssistantActiveTurnConversationNotificationKey(conversation),
-        conversation,
-      )
+      const key = resolveAssistantConversationLookupKey({ conversation })
+      if (key) {
+        conversationsByKey.set(key, conversation)
+      }
     } catch (error: unknown) {
       warnAssistantBestEffortFailure({
         error,
@@ -819,20 +819,6 @@ function formatAssistantActiveTurnInputControllerKey(input: {
   vault: string
 }): AssistantActiveTurnInputControllerKey {
   return `${input.vault}\u0000${input.kind}\u0000${input.value}`
-}
-
-function formatAssistantActiveTurnConversationNotificationKey(
-  conversation: ConversationRef,
-): string {
-  return [
-    conversation.alias ?? '',
-    conversation.channel ?? '',
-    conversation.directness ?? '',
-    conversation.identityId ?? '',
-    conversation.participantId ?? '',
-    conversation.sessionId ?? '',
-    conversation.threadId ?? '',
-  ].join('\u0000')
 }
 
 function formatAssistantActiveTurnLiveProviderTurnKey(

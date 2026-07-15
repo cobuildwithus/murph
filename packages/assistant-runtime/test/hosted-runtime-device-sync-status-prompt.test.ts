@@ -224,6 +224,35 @@ describe("hosted device sync status prompt", () => {
     expect(prompt).not.toContain("deregisters only Garmin");
   });
 
+  it("ignores stale historical reset markers on non-Garmin sources", () => {
+    const prompt = buildHostedDeviceSyncStatusPromptFromSnapshot({
+      reconnectTargets: [
+        {
+          connectTarget: "oura",
+          label: "Oura",
+          provider: "junction",
+          sourceProviderSlug: "oura",
+        },
+      ],
+      snapshot: buildSnapshot({
+        sources: [
+          {
+            displayName: null,
+            firstSeenAt: "2026-06-01T00:00:00.000Z",
+            lastErrorCode: "HISTORICAL_DATA_RECONNECT_REQUIRED",
+            lastErrorMessage: "Historical data remained incomplete.",
+            lastSeenAt: "2026-06-29T00:00:00.000Z",
+            resourceCount: 0,
+            sourceProviderSlug: "oura",
+            status: "error",
+          },
+        ],
+      }),
+    });
+
+    expect(prompt).toBeNull();
+  });
+
   it("normalizes lowercase reconnect error codes", () => {
     const prompt = buildHostedDeviceSyncStatusPromptFromSnapshot({
       reconnectTargets: [
