@@ -3272,6 +3272,7 @@ export async function runHostedWorkspaceRuntimeJobInProcess(
                 nextWakeAt: checkpointReturnWake.nextWakeAt ?? null,
               }),
         };
+        await drainDeferredUsageBestEffort();
         emitPhaseLog({
           details: {
             immediateRecheckRequested,
@@ -3343,6 +3344,7 @@ export async function runHostedWorkspaceRuntimeJobInProcess(
             nextWakeAt: noProgressReturnWake.nextWakeAt,
           }),
     };
+    await drainDeferredUsageBestEffort();
     emitPhaseLog({
       details: {
         invocationStatus: invocationResult.status,

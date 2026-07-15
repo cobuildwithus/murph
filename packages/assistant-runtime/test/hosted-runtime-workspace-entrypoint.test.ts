@@ -10319,17 +10319,9 @@ describe("hosted workspace runtime entrypoint", () => {
       assert.equal(assistantPhaseCalls, 1);
       assert.equal(events.includes("usage.record:done"), false);
       assert.equal(events.includes("browser.refresh"), false);
-      const result = await withRealTimeout(
-        resultPromise,
-        1_000,
-        () => "Runtime did not settle while deferred usage recording was pending.",
-      );
-      assert.equal(resultSettled, true);
+      assert.equal(resultSettled, false);
       assert.equal(assistantPhaseCalls, 1);
       assert.equal(events.includes("usage.record:done"), false);
-
-      assert.equal(result.status, "scheduled");
-      assert.equal(result.nextWakeAt, checkpointInboxMediaRetentionWakeAt);
       assert.deepEqual(events.filter((event) => event.startsWith("snapshot:")), [
         "snapshot:idle_shutdown",
       ]);
@@ -10347,6 +10339,14 @@ describe("hosted workspace runtime entrypoint", () => {
         1_000,
         () => "Deferred usage recording did not finish after release.",
       );
+      const result = await withRealTimeout(
+        resultPromise,
+        1_000,
+        () => "Runtime did not settle after deferred usage recording finished.",
+      );
+      assert.equal(resultSettled, true);
+      assert.equal(result.status, "scheduled");
+      assert.equal(result.nextWakeAt, checkpointInboxMediaRetentionWakeAt);
     } finally {
       releaseUsageRecord.resolve();
       if (resultPromise) {
@@ -10439,11 +10439,6 @@ describe("hosted workspace runtime entrypoint", () => {
         1_000,
         () => "Previous invocation deferred usage did not start.",
       );
-      await withRealTimeout(
-        firstResultPromise,
-        1_000,
-        () => "Previous invocation did not return while deferred usage was pending.",
-      );
       assert.equal(events.includes("first.usage:done"), false);
 
       const failure = await withRealTimeout(
@@ -10489,6 +10484,11 @@ describe("hosted workspace runtime entrypoint", () => {
         usageRecordFinished.promise,
         1_000,
         () => "Previous invocation deferred usage did not finish after release.",
+      );
+      await withRealTimeout(
+        firstResultPromise,
+        1_000,
+        () => "Previous invocation did not return after deferred usage finished.",
       );
     } finally {
       releaseUsageRecord.resolve();

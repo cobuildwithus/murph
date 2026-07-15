@@ -371,28 +371,26 @@ async function handleRunnerArtifactRequest(input: {
     });
   };
 
-  if (input.request.method === "PUT") {
-    const validationStartedAt = Date.now();
-    emitPhase("Hosted runner artifact write fence validation started.");
-    const ownsWriteFence = await writeRequestOwnsRuntimeWriteFence({
-      env: input.env,
-      request: input.request,
-      userId: input.userId,
-    });
-    emitPhase(
-      "Hosted runner artifact write fence validation completed.",
-      {
-        artifactAuthorized: ownsWriteFence,
-        validationDurationMs: Date.now() - validationStartedAt,
-      },
-      ownsWriteFence ? "info" : "warn",
-    );
-    if (!ownsWriteFence) {
-      emitCompleted({
-        artifactAuthorized: false,
-      }, 401);
-      return unauthorized();
-    }
+  const validationStartedAt = Date.now();
+  emitPhase("Hosted runner artifact write fence validation started.");
+  const ownsWriteFence = await writeRequestOwnsRuntimeWriteFence({
+    env: input.env,
+    request: input.request,
+    userId: input.userId,
+  });
+  emitPhase(
+    "Hosted runner artifact write fence validation completed.",
+    {
+      artifactAuthorized: ownsWriteFence,
+      validationDurationMs: Date.now() - validationStartedAt,
+    },
+    ownsWriteFence ? "info" : "warn",
+  );
+  if (!ownsWriteFence) {
+    emitCompleted({
+      artifactAuthorized: false,
+    }, 401);
+    return unauthorized();
   }
 
   try {
@@ -571,11 +569,14 @@ async function handleRunnerWorkspaceSnapshotStartRequest(input: {
     userId: input.userId,
     workspaceVersion: writeFence.workspaceVersion,
   };
-  await createWorkspaceSnapshotUploadSession({
+  const createdSession = await createWorkspaceSnapshotUploadSession({
     env: input.env,
     session,
     userId: input.userId,
   });
+  if (!createdSession) {
+    return jsonError("Hosted workspace snapshot upload session is stale.", 409);
+  }
 
   return json({
     encryption: {
@@ -1171,16 +1172,12 @@ async function handleRunnerWorkspaceSnapshotAbortRequest(input: {
   snapshotId: string;
   userId: string;
 }): Promise<Response> {
-  let writeFence;
-  try {
-    writeFence = requireRunnerRuntimeWriteFenceHeaders(input.request);
-  } catch (error) {
-    if (error instanceof RunnerRuntimeWriteFenceError) {
-      return unauthorized();
-    }
-    throw error;
-  }
-  if (!writeFence.workspaceVersion) {
+  const writeFence = await requireWorkspaceSnapshotWriteFence({
+    env: input.env,
+    request: input.request,
+    userId: input.userId,
+  });
+  if (!writeFence) {
     return unauthorized();
   }
 
@@ -1223,6 +1220,10 @@ async function handleRunnerWorkspaceSnapshotAbortRequest(input: {
     return jsonError("Hosted workspace snapshot upload session is stale.", 409);
   }
 
+  if (!await requestOwnsWorkspaceSnapshotSession(input, session)) {
+    return jsonError("Hosted workspace snapshot upload session is stale.", 409);
+  }
+
   await retireWorkspaceSnapshotUploadSession({
     bucket: input.bucket,
     deleteObject: true,
@@ -1246,16 +1247,12 @@ async function handleRunnerWorkspaceSnapshotCompleteRequest(input: {
   snapshotId: string;
   userId: string;
 }): Promise<Response> {
-  let writeFence;
-  try {
-    writeFence = requireRunnerRuntimeWriteFenceHeaders(input.request);
-  } catch (error) {
-    if (error instanceof RunnerRuntimeWriteFenceError) {
-      return unauthorized();
-    }
-    throw error;
-  }
-  if (!writeFence.workspaceVersion) {
+  const writeFence = await requireWorkspaceSnapshotWriteFence({
+    env: input.env,
+    request: input.request,
+    userId: input.userId,
+  });
+  if (!writeFence) {
     return unauthorized();
   }
   const body = await readJsonObject(input.request, {
@@ -1290,6 +1287,9 @@ async function handleRunnerWorkspaceSnapshotCompleteRequest(input: {
   ) {
     return jsonError("Hosted workspace snapshot upload session is stale.", 409);
   }
+  if (!await requestOwnsWorkspaceSnapshotSession(input, session)) {
+    return jsonError("Hosted workspace snapshot upload session is stale.", 409);
+  }
 
   if (Date.parse(session.expiresAt) <= Date.now()) {
     const alreadyCurrentResponse = await completeExpiredCurrentWorkspaceSnapshotUploadSession({
@@ -1302,6 +1302,9 @@ async function handleRunnerWorkspaceSnapshotCompleteRequest(input: {
     });
     if (alreadyCurrentResponse) {
       return alreadyCurrentResponse;
+    }
+    if (!await requestOwnsWorkspaceSnapshotSession(input, session)) {
+      return jsonError("Hosted workspace snapshot upload session is stale.", 409);
     }
     try {
       await recordWorkspaceSnapshotObjectCleanup(input.env, {
@@ -1369,6 +1372,9 @@ async function handleRunnerWorkspaceSnapshotCompleteRequest(input: {
     return jsonError("Hosted workspace snapshot object metadata is unavailable.", 503);
   }
   const object = await snapshotObjectStore.head(snapshotRef.objectKey);
+  if (!await requestOwnsWorkspaceSnapshotSession(input, session)) {
+    return jsonError("Hosted workspace snapshot upload session is stale.", 409);
+  }
   if (!object) {
     await retireWorkspaceSnapshotUploadSession({
       bucket: input.bucket,
@@ -1459,6 +1465,9 @@ async function handleRunnerWorkspaceSnapshotCompleteRequest(input: {
   }
 
   const retireAfterAmbiguousCheckpoint = async (): Promise<Response | null> => {
+    if (!await requestOwnsWorkspaceSnapshotSession(input, session)) {
+      return jsonError("Hosted workspace snapshot upload session is stale.", 409);
+    }
     try {
       await retireAmbiguousWorkspaceSnapshotUploadSession({
         env: input.env,
@@ -1473,19 +1482,6 @@ async function handleRunnerWorkspaceSnapshotCompleteRequest(input: {
     }
   };
 
-  const currentWriteFence = await requireWorkspaceSnapshotWriteFence({
-    env: input.env,
-    request: input.request,
-    userId: input.userId,
-  });
-  if (!currentWriteFence) {
-    const cleanupResponse = await retireAfterAmbiguousCheckpoint();
-    if (cleanupResponse) {
-      return cleanupResponse;
-    }
-    return jsonError("Hosted workspace snapshot upload session is stale.", 409);
-  }
-
   let preCheckpointReplacedSnapshotRef: HostedExecutionSnapshotRefValue | null = null;
   try {
     const preCheckpointWorkspace = await readCurrentHostedWorkspace({
@@ -1497,18 +1493,27 @@ async function handleRunnerWorkspaceSnapshotCompleteRequest(input: {
   } catch {
     return jsonError("Hosted workspace snapshot current state is unavailable.", 502);
   }
+  if (!await requestOwnsWorkspaceSnapshotSession(input, session)) {
+    return jsonError("Hosted workspace snapshot upload session is stale.", 409);
+  }
   if (
     preCheckpointReplacedSnapshotRef
     && !isReplacementRefSameAsSnapshotRef(preCheckpointReplacedSnapshotRef, snapshotRef)
     && !session.replacedSnapshotRef
   ) {
     try {
-      await rememberReplacedWorkspaceSnapshotCleanupInUploadSession({
+      const remembered = await rememberReplacedWorkspaceSnapshotCleanupInUploadSession({
         env: input.env,
         replacedSnapshotRef: preCheckpointReplacedSnapshotRef,
         session,
         userId: input.userId,
       });
+      if (!remembered) {
+        return jsonError("Hosted workspace snapshot upload session is stale.", 409);
+      }
+      if (!await requestOwnsWorkspaceSnapshotSession(input, session)) {
+        return jsonError("Hosted workspace snapshot upload session is stale.", 409);
+      }
       session.replacedSnapshotRef = preCheckpointReplacedSnapshotRef;
     } catch {
       return jsonError("Hosted workspace replaced snapshot cleanup state is unavailable.", 503);
@@ -1555,14 +1560,10 @@ async function handleRunnerWorkspaceSnapshotCompleteRequest(input: {
     return jsonError("Hosted workspace snapshot checkpoint user mismatch.", 502);
   }
 	if (!checkpoint.checkpointed) {
-		const cleanupRetryResponse = await completeAlreadyCheckpointedWorkspaceSnapshotCleanup({
-			bucket: input.bucket,
+		const cleanupRetryResponse = await completeAlreadyCheckpointedWorkspaceSnapshotResponse({
 			checkpoint,
-      env: input.env,
-      environment: input.environment,
       session,
       snapshotRef,
-      userId: input.userId,
     });
 		if (cleanupRetryResponse) {
 			return cleanupRetryResponse;
@@ -1608,61 +1609,10 @@ async function handleRunnerWorkspaceSnapshotCompleteRequest(input: {
     return jsonError("Hosted workspace snapshot checkpoint ref mismatch.", 502);
   }
 
-  const replacedSnapshotCleanupSucceeded = await deleteReplacedWorkspaceSnapshotObject({
-    bucket: input.bucket,
-    checkpoint,
-    env: input.env,
-    environment: input.environment,
-    session,
-    snapshotRef,
-  });
-  if (!replacedSnapshotCleanupSucceeded) {
-    const replacedSnapshotRef = checkpoint.replacedSnapshotRef ?? null;
-    if (replacedSnapshotRef && !session.replacedSnapshotRef) {
-      await rememberReplacedWorkspaceSnapshotCleanupInUploadSession({
-        env: input.env,
-        replacedSnapshotRef,
-        session,
-        userId: input.userId,
-      });
-    }
-    return jsonError("Hosted workspace replaced snapshot cleanup failed.", 503);
-  }
-  await retireWorkspaceSnapshotUploadSession({
-    bucket: input.bucket,
-    deleteObject: false,
-    env: input.env,
-    objectKey: snapshotRef.objectKey,
-    snapshotId: input.snapshotId,
-    userId: input.userId,
-  }).catch(() => undefined);
-
   return json({
     checkpoint,
     ok: true,
     snapshotRef,
-  });
-}
-
-async function deleteReplacedWorkspaceSnapshotObject(input: {
-  bucket: WorkspaceSnapshotR2BucketLike | null;
-  checkpoint: ReturnType<typeof parseHostedWorkspaceCheckpointResponse>;
-  env: RunnerOutboundEnvironmentSource;
-  environment: ReturnType<typeof readHostedExecutionEnvironment>;
-  session: HostedWorkspaceSnapshotUploadSession;
-  snapshotRef: HostedWorkspaceSnapshotV2Ref;
-}): Promise<boolean> {
-  const replacedSnapshotRef =
-    input.checkpoint.replacedSnapshotRef ?? input.session.replacedSnapshotRef ?? null;
-  if (!replacedSnapshotRef) {
-    return true;
-  }
-  return await deleteReplacedWorkspaceSnapshotRef({
-    bucket: input.bucket,
-    env: input.env,
-    environment: input.environment,
-    replacedSnapshotRef,
-    snapshotRef: input.snapshotRef,
   });
 }
 
@@ -1820,19 +1770,11 @@ async function recordReplacedWorkspaceSnapshotOrphanCandidate(input: {
   });
 }
 
-async function completeAlreadyCheckpointedWorkspaceSnapshotCleanup(input: {
-  bucket: WorkspaceSnapshotR2BucketLike | null;
+function completeAlreadyCheckpointedWorkspaceSnapshotResponse(input: {
   checkpoint: ReturnType<typeof parseHostedWorkspaceCheckpointResponse>;
-  env: RunnerOutboundEnvironmentSource;
-  environment: ReturnType<typeof readHostedExecutionEnvironment>;
   session: HostedWorkspaceSnapshotUploadSession;
   snapshotRef: HostedWorkspaceSnapshotV2Ref;
-  userId: string;
-}): Promise<Response | null> {
-  const replacedSnapshotRef = input.session.replacedSnapshotRef ?? null;
-  if (!replacedSnapshotRef) {
-    return null;
-  }
+}): Response | null {
   const currentSnapshotRef = input.checkpoint.workspace.snapshotRef;
   if (
     !isHostedWorkspaceSnapshotV2Ref(currentSnapshotRef) ||
@@ -1840,35 +1782,12 @@ async function completeAlreadyCheckpointedWorkspaceSnapshotCleanup(input: {
   ) {
     return null;
   }
-  const replacedSnapshotCleanupSucceeded = await deleteReplacedWorkspaceSnapshotRef({
-    bucket: input.bucket,
-    env: input.env,
-    environment: input.environment,
-    replacedSnapshotRef,
-    snapshotRef: input.snapshotRef,
-  });
-  if (!replacedSnapshotCleanupSucceeded) {
-    await rememberReplacedWorkspaceSnapshotCleanupInUploadSession({
-      env: input.env,
-      replacedSnapshotRef,
-      session: input.session,
-      userId: input.userId,
-    });
-    return jsonError("Hosted workspace replaced snapshot cleanup failed.", 503);
-  }
-  await retireWorkspaceSnapshotUploadSession({
-    bucket: input.bucket,
-    deleteObject: false,
-    env: input.env,
-    objectKey: input.snapshotRef.objectKey,
-    snapshotId: input.snapshotRef.snapshotId,
-    userId: input.userId,
-  }).catch(() => undefined);
+  const replacedSnapshotRef = input.session.replacedSnapshotRef ?? null;
 
   return json({
     checkpoint: {
       checkpointed: true,
-      replacedSnapshotRef,
+      ...(replacedSnapshotRef ? { replacedSnapshotRef } : {}),
       workspace: {
         ...input.checkpoint.workspace,
         snapshotRef: input.snapshotRef,
@@ -1920,12 +1839,7 @@ async function completeExpiredCurrentWorkspaceSnapshotUploadSession(input: {
     return jsonError("Hosted workspace snapshot upload session is stale.", 409);
   }
 
-  const currentWriteFence = await requireWorkspaceSnapshotWriteFence({
-    env: input.env,
-    request: input.request,
-    userId: input.userId,
-  });
-  if (!currentWriteFence || currentWriteFence.workspaceVersion !== input.session.workspaceVersion) {
+  if (!await requestOwnsWorkspaceSnapshotSession(input, input.session)) {
     return jsonError("Hosted workspace snapshot upload session is stale.", 409);
   }
 
@@ -1941,6 +1855,10 @@ async function completeExpiredCurrentWorkspaceSnapshotUploadSession(input: {
     if (!replacedSnapshotCleanupSucceeded) {
       return jsonError("Hosted workspace replaced snapshot cleanup failed.", 503);
     }
+  }
+
+  if (!await requestOwnsWorkspaceSnapshotSession(input, input.session)) {
+    return jsonError("Hosted workspace snapshot upload session is stale.", 409);
   }
 
   await retireWorkspaceSnapshotUploadSession({
@@ -1968,14 +1886,15 @@ async function rememberReplacedWorkspaceSnapshotCleanupInUploadSession(input: {
   replacedSnapshotRef: HostedExecutionSnapshotRefValue;
   session: HostedWorkspaceSnapshotUploadSession;
   userId: string;
-}): Promise<void> {
-  await createWorkspaceSnapshotUploadSession({
-    env: input.env,
-    session: {
-      ...input.session,
-      replacedSnapshotRef: input.replacedSnapshotRef,
-    },
-    userId: input.userId,
+}): Promise<boolean> {
+  const stub = await resolveRunnerOutboundUserRunnerStub(input.env, input.userId);
+  const rememberReplacedSnapshotRef = requireRunnerOutboundUserStubMethod(
+    stub,
+    "rememberHostedWorkspaceSnapshotReplacedRef",
+  );
+  return await rememberReplacedSnapshotRef({
+    expectedSession: input.session,
+    replacedSnapshotRef: input.replacedSnapshotRef,
   });
 }
 
@@ -2488,11 +2407,27 @@ async function requireWorkspaceSnapshotWriteFence(input: {
   }
 }
 
+async function requestOwnsWorkspaceSnapshotSession(input: {
+  env: RunnerOutboundEnvironmentSource;
+  request: Request;
+  userId: string;
+}, session: HostedWorkspaceSnapshotUploadSession): Promise<boolean> {
+  const writeFence = await requireWorkspaceSnapshotWriteFence({
+    env: input.env,
+    request: input.request,
+    userId: input.userId,
+  });
+  return writeFence !== null
+    && session.attemptId === writeFence.attemptId
+    && session.leaseGeneration === writeFence.generation
+    && session.workspaceVersion === writeFence.workspaceVersion;
+}
+
 async function createWorkspaceSnapshotUploadSession(input: {
   env: RunnerOutboundEnvironmentSource;
   session: HostedWorkspaceSnapshotUploadSession;
   userId: string;
-}): Promise<HostedWorkspaceSnapshotUploadSession> {
+}): Promise<HostedWorkspaceSnapshotUploadSession | null> {
   const stub = await resolveRunnerOutboundUserRunnerStub(input.env, input.userId);
   const createSession = requireRunnerOutboundUserStubMethod(
     stub,

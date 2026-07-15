@@ -89,6 +89,12 @@ export class UserRunnerDurableObject extends DurableObject implements UserRunner
     return this.runner.createHostedWorkspaceSnapshotUploadSession(input);
   }
 
+  async rememberHostedWorkspaceSnapshotReplacedRef(
+    input: Parameters<HostedUserRunner["rememberHostedWorkspaceSnapshotReplacedRef"]>[0],
+  ): ReturnType<HostedUserRunner["rememberHostedWorkspaceSnapshotReplacedRef"]> {
+    return this.runner.rememberHostedWorkspaceSnapshotReplacedRef(input);
+  }
+
   async readHostedWorkspaceSnapshotUploadSession(
     input: Parameters<HostedUserRunner["readHostedWorkspaceSnapshotUploadSession"]>[0],
   ): ReturnType<HostedUserRunner["readHostedWorkspaceSnapshotUploadSession"]> {

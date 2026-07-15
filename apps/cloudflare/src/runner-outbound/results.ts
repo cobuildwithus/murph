@@ -107,6 +107,7 @@ export async function handleRunnerResultsRequest(input: {
       env: input.env,
       environment: input.environment,
       rawMessageKey: decodeRouteParam(messageMatch.groups.rawMessageKey),
+      request: input.request,
       userId: input.userId,
     });
   }
@@ -170,8 +171,13 @@ async function handleRunnerEmailMessageReadRequest(input: {
   env: RunnerOutboundEnvironmentSource;
   environment: ReturnType<typeof readHostedExecutionEnvironment>;
   rawMessageKey: string;
+  request: Request;
   userId: string;
 }): Promise<Response> {
+  if (!await requestOwnsRuntimeWriteFenceWrite(input)) {
+    return unauthorized();
+  }
+
   const crypto = await resolveRunnerOutboundUserCryptoContext({
     bucket: input.bucket,
     domain: "ingress",

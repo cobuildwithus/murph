@@ -689,8 +689,8 @@ describe("handleRunnerOutboundRequest", () => {
       const response = await handleRunnerOutboundRequest(
         new Request(`http://web-control.worker${path}`, {
           ...(body === undefined ? {} : { body: JSON.stringify(body) }),
-          headers: createRunnerProxyHeaders(
-            body === undefined
+          headers: createRunnerWriteFenceProxyHeaders({
+            ...(body === undefined
               ? {}
               : {
                   "content-type": "application/json; charset=utf-8",
@@ -699,30 +699,8 @@ describe("handleRunnerOutboundRequest", () => {
                   "x-hosted-execution-signature": "child-signature",
                   "x-hosted-execution-user-id": "member_spoofed",
                   "x-hosted-runner-bound-user-id": "member_spoofed",
-                  ...(path === "/api/internal/hosted-workspace/checkpoint"
-                    || path === HOSTED_EXECUTION_DEVICE_SYNC_RUNTIME_SNAPSHOT_PATH
-                    || path === HOSTED_RUNTIME_LATENCY_TRACE_PATH
-                    || path === HOSTED_RUNTIME_LINQ_EGRESS_DELIVERY_PATH
-                    || path === HOSTED_RUNTIME_LINQ_EGRESS_ENGAGEMENT_PATH
-                    || path === HOSTED_RUNTIME_CODEX_AUTH_PATH
-                    || path === HOSTED_RUNTIME_ASSISTANT_PERSONALIZATION_TOOL_PATH
-                    || path === HOSTED_RUNTIME_PLAN_USAGE_TOOL_PATH
-                    || path === HOSTED_CLINICAL_RECORDS_RUNTIME_READ_RUN_PATH
-                    || path === HOSTED_CLINICAL_RECORDS_RUNTIME_FETCH_PAGE_PATH
-                    || path === HOSTED_CLINICAL_RECORDS_RUNTIME_RECORD_OUTCOME_PATH
-                    || isHostedComputerWebControlRequest({ method: "POST", path })
-                    ? {
-                        "x-hosted-runtime-attempt-id": "attempt_1",
-                        "x-hosted-runtime-lease-generation": "9",
-                      }
-                    : {}),
-                  ...(path === "/api/internal/hosted-workspace/checkpoint"
-                    ? {
-                        "x-hosted-runtime-workspace-version": "4",
-                      }
-                    : {}),
-                },
-          ),
+                }),
+          }),
           method: "POST",
         }),
         createRunnerOutboundEnv({
@@ -1856,7 +1834,7 @@ describe("handleRunnerOutboundRequest", () => {
     const response = await handleRunnerOutboundRequest(
       new Request(`http://web-control.worker${HOSTED_RUNTIME_USAGE_RECORD_PATH}`, {
         body: JSON.stringify({ usage }),
-        headers: createRunnerProxyHeaders({
+        headers: createRunnerWriteFenceProxyHeaders({
           "content-type": "application/json; charset=utf-8",
         }),
         method: "POST",
@@ -1909,7 +1887,7 @@ describe("handleRunnerOutboundRequest", () => {
     const response = await handleRunnerOutboundRequest(
       new Request(`http://web-control.worker${HOSTED_RUNTIME_USAGE_RECORD_PATH}`, {
         body: JSON.stringify({ usage }),
-        headers: createRunnerProxyHeaders({
+        headers: createRunnerWriteFenceProxyHeaders({
           "content-type": "application/json; charset=utf-8",
         }),
         method: "POST",
@@ -1946,7 +1924,7 @@ describe("handleRunnerOutboundRequest", () => {
             payload: "x".repeat((256 * 1024) + 1),
           },
         }),
-        headers: createRunnerProxyHeaders({
+        headers: createRunnerWriteFenceProxyHeaders({
           "content-type": "application/json; charset=utf-8",
         }),
         method: "POST",
@@ -2793,6 +2771,39 @@ describe("handleRunnerOutboundRequest", () => {
     });
   });
 
+  it("rejects raw email reads when the claimed member does not own the active fence", async () => {
+    const validateRuntimeWriteFence = vi.fn(async () => false);
+    const fetchMock = vi.fn();
+    vi.stubGlobal("fetch", fetchMock);
+
+    const response = await handleRunnerOutboundRequest(
+      new Request("http://results.worker/messages/raw_message_123", {
+        headers: createRunnerProxyHeaders({
+          "x-hosted-runtime-attempt-id": "attempt_1",
+          "x-hosted-runtime-lease-generation": "9",
+          "x-hosted-runtime-workspace-version": "4",
+        }),
+        method: "GET",
+      }),
+      createRunnerOutboundEnv({
+        USER_RUNNER: {
+          getByName() {
+            return { validateRuntimeWriteFence };
+          },
+        },
+      }),
+      "member_456",
+    );
+
+    expect(response.status).toBe(401);
+    expect(validateRuntimeWriteFence).toHaveBeenCalledWith({
+      attemptId: "attempt_1",
+      generation: "9",
+      userId: "member_456",
+    });
+    expect(fetchMock).not.toHaveBeenCalled();
+  });
+
   it("preserves planned group recipient ids across the runner send response", async () => {
     const runner = createWorkspaceVersionAwareUserRunner();
     const emailSendMock = vi.fn(async (_message: unknown) => undefined);
@@ -3310,7 +3321,7 @@ describe("handleRunnerOutboundRequest", () => {
 
     const response = await handleRunnerOutboundRequest(
       new Request(`http://web-control.worker${HOSTED_RUNTIME_WORKSPACE_PATH}`, {
-        headers: createRunnerProxyHeaders(),
+        headers: createRunnerWriteFenceProxyHeaders(),
         method: "GET",
       }),
       createRunnerOutboundEnv({
@@ -3384,7 +3395,7 @@ describe("handleRunnerOutboundRequest", () => {
 
     const response = await handleRunnerOutboundRequest(
       new Request(`http://web-control.worker${HOSTED_RUNTIME_WORKSPACE_PATH}`, {
-        headers: createRunnerProxyHeaders(),
+        headers: createRunnerWriteFenceProxyHeaders(),
         method: "GET",
       }),
       createRunnerOutboundEnv({
@@ -3436,7 +3447,7 @@ describe("handleRunnerOutboundRequest", () => {
 
     const response = await handleRunnerOutboundRequest(
       new Request(`http://web-control.worker${HOSTED_RUNTIME_WORKSPACE_PATH}`, {
-        headers: createRunnerProxyHeaders(),
+        headers: createRunnerWriteFenceProxyHeaders(),
         method: "GET",
       }),
       createRunnerOutboundEnv({
@@ -3660,7 +3671,7 @@ describe("handleRunnerOutboundRequest", () => {
 
     const response = await handleRunnerOutboundRequest(
       new Request(MISSING_ARTIFACT_URL, {
-        headers: createRunnerProxyHeaders(),
+        headers: createRunnerWriteFenceProxyHeaders(),
         method: "GET",
       }),
       env,
@@ -3688,6 +3699,35 @@ describe("handleRunnerOutboundRequest", () => {
     );
     expect(serializedLogs).not.toContain("member_123");
     expect(serializedLogs).not.toContain("a".repeat(64));
+  });
+
+  it("rejects artifact reads when the claimed member does not own the active fence", async () => {
+    const validateRuntimeWriteFence = vi.fn(async () => false);
+    const fetchMock = vi.fn();
+    vi.stubGlobal("fetch", fetchMock);
+
+    const response = await handleRunnerOutboundRequest(
+      new Request(MISSING_ARTIFACT_URL, {
+        headers: createRunnerWriteFenceProxyHeaders(),
+        method: "GET",
+      }),
+      createRunnerOutboundEnv({
+        USER_RUNNER: {
+          getByName() {
+            return { validateRuntimeWriteFence };
+          },
+        },
+      }),
+      "member_456",
+    );
+
+    expect(response.status).toBe(401);
+    expect(validateRuntimeWriteFence).toHaveBeenCalledWith({
+      attemptId: "attempt_1",
+      generation: "9",
+      userId: "member_456",
+    });
+    expect(fetchMock).not.toHaveBeenCalled();
   });
 
   it("accepts a later artifact write after rejecting missing lease headers", async () => {
@@ -4050,6 +4090,67 @@ describe("handleRunnerOutboundRequest", () => {
       secondBody.snapshotId,
       "second workspace snapshot id",
     ))).toBe(true);
+  });
+
+  it("does not let a stale snapshot start replace the active owner's upload session", async () => {
+    const fixture = await createHostedRuntimeCryptoContextFixture();
+    const runner = createWorkspaceVersionAwareUserRunner();
+    const env = createRunnerOutboundEnv({
+      ...fixture.env,
+      USER_RUNNER: {
+        getByName: runner.getByName,
+      },
+    });
+    const activeSnapshotId = "snapshot_active_owner";
+    const activeObjectKey = await hostedWorkspaceSnapshotObjectKey({
+      snapshotId: activeSnapshotId,
+      userId: "member_123",
+    });
+    const activeSnapshotRef = createWorkspaceSnapshotV2Ref({
+      encryptedByteSize: 4,
+      encryptedObjectSha256: "a".repeat(64),
+      objectKey: activeObjectKey,
+      snapshotId: activeSnapshotId,
+      userId: "member_123",
+    });
+    const activeSession = {
+      ...createWorkspaceSnapshotUploadSession(activeSnapshotRef, {
+        workspaceVersion: "5",
+      }),
+      attemptId: "attempt_2",
+      leaseGeneration: "10",
+    };
+    fixture.fetchMock.mockImplementationOnce(async () => {
+      runner.setActiveWriteFence({
+        attemptId: activeSession.attemptId,
+        leaseGeneration: activeSession.leaseGeneration,
+      });
+      await runner.createHostedWorkspaceSnapshotUploadSession(activeSession);
+      return new Response(JSON.stringify(fixture.context), {
+        headers: {
+          "content-type": "application/json; charset=utf-8",
+        },
+        status: 200,
+      });
+    });
+    vi.stubGlobal("fetch", fixture.fetchMock);
+
+    const response = await handleRunnerOutboundRequest(
+      createWorkspaceSnapshotStartRequest({
+        expectedWorkspaceVersion: "4",
+        workspaceVersion: "4",
+      }),
+      env,
+      "member_123",
+    );
+
+    expect(response.status).toBe(409);
+    await expect(response.json()).resolves.toEqual({
+      error: "Hosted workspace snapshot upload session is stale.",
+    });
+    expect(runner.workspaceSnapshotUploadSessions.size).toBe(1);
+    expect(runner.workspaceSnapshotUploadSessions.get(activeSnapshotId)).toEqual(activeSession);
+    expect(runner.workspaceSnapshotOrphanCandidates.size).toBe(0);
   });
 
   it("rejects direct-R2 workspace snapshot sessions for canonical runtime commits", async () => {
@@ -5163,7 +5264,7 @@ describe("handleRunnerOutboundRequest", () => {
         version: "5",
       }),
     }));
-    expect(runner.ownsActiveInvocationLease).toHaveBeenCalledOnce();
+    expect(runner.ownsActiveInvocationLease).toHaveBeenCalledTimes(4);
     expect(fetchMock).toHaveBeenCalledTimes(2);
     expect(fetchMock.mock.calls[0]?.[0]).toBe("https://web.example.test/api/internal/hosted-workspace");
     expect(fetchMock.mock.calls[1]?.[0]).toBe("https://web.example.test/api/internal/hosted-workspace/checkpoint");
@@ -5178,13 +5279,13 @@ describe("handleRunnerOutboundRequest", () => {
         snapshotId,
       }),
     }));
-    expect(runner.deleteHostedWorkspaceSnapshotUploadSession).toHaveBeenCalledOnce();
-    expect(runner.workspaceSnapshotUploadSessions.has(snapshotId)).toBe(false);
+    expect(runner.deleteHostedWorkspaceSnapshotUploadSession).not.toHaveBeenCalled();
+    expect(runner.workspaceSnapshotUploadSessions.has(snapshotId)).toBe(true);
     expect(runner.recordHostedWorkspaceSnapshotOrphanCandidate).not.toHaveBeenCalled();
     expect(head).toHaveBeenCalledWith(objectKey);
   });
 
-  it("deletes the replaced successful workspace snapshot after checkpoint CAS", async () => {
+  it("retains the replaced successful workspace snapshot for delayed cleanup after checkpoint CAS", async () => {
     const runner = createWorkspaceVersionAwareUserRunner();
     const bytes = new Uint8Array([1, 2, 3, 4]);
     const snapshotId = "snapshot_complete_replaces_previous";
@@ -5261,12 +5362,16 @@ describe("handleRunnerOutboundRequest", () => {
     );
 
     expect(response.status).toBe(200);
-    expect(deleteObject).toHaveBeenCalledWith(replacedObjectKey);
+    expect(deleteObject).not.toHaveBeenCalled();
     expect(runner.recordHostedWorkspaceSnapshotOrphanCandidate).not.toHaveBeenCalled();
     expect(runner.workspaceSnapshotOrphanCandidates.has(replacedSnapshotId)).toBe(false);
+    expect(runner.workspaceSnapshotUploadSessions.get(snapshotId)).toMatchObject({
+      replacedSnapshotRef,
+      snapshotId,
+    });
   });
 
-  it("deletes replaced legacy workspace snapshot bundles and artifacts after checkpoint CAS", async () => {
+  it("retains replaced legacy workspace snapshot bundles for delayed cleanup after checkpoint CAS", async () => {
     const fixture = await createHostedRuntimeCryptoContextFixture();
     const runner = createWorkspaceVersionAwareUserRunner();
     const bytes = new Uint8Array([1, 2, 3, 4]);
@@ -5369,20 +5474,20 @@ describe("handleRunnerOutboundRequest", () => {
     );
 
     expect(response.status).toBe(200);
-    expect(bucket.objects.has(legacyBaseRef.key)).toBe(false);
-    expect(bucket.objects.has(legacyDeltaRef.key)).toBe(false);
-    expect(bucket.objects.has(legacyArtifactKey)).toBe(false);
-    expect(bucket.deleted).toEqual(expect.arrayContaining([
-      legacyBaseRef.key,
-      legacyDeltaRef.key,
-      legacyArtifactKey,
-    ]));
+    expect(bucket.objects.has(legacyBaseRef.key)).toBe(true);
+    expect(bucket.objects.has(legacyDeltaRef.key)).toBe(true);
+    expect(bucket.objects.has(legacyArtifactKey)).toBe(true);
+    expect(bucket.deleted).toEqual([]);
     expect(runner.recordHostedWorkspaceSnapshotOrphanCandidate).not.toHaveBeenCalled();
     expect(runner.workspaceSnapshotOrphanCandidates.has(`legacy-${snapshotId}`)).toBe(false);
-    expect(fixture.fetchMock).toHaveBeenCalledOnce();
+    expect(runner.workspaceSnapshotUploadSessions.get(snapshotId)).toMatchObject({
+      replacedSnapshotRef,
+      snapshotId,
+    });
+    expect(fixture.fetchMock).not.toHaveBeenCalled();
   });
 
-  it("records the replaced successful workspace snapshot for retry when direct deletion fails", async () => {
+  it("does not attempt direct replaced snapshot deletion after checkpoint CAS", async () => {
     const runner = createWorkspaceVersionAwareUserRunner();
     const bytes = new Uint8Array([1, 2, 3, 4]);
     const snapshotId = "snapshot_complete_replaces_previous_delete_fails";
@@ -5461,24 +5566,18 @@ describe("handleRunnerOutboundRequest", () => {
     );
 
     expect(response.status).toBe(200);
-    expect(deleteObject).toHaveBeenCalledWith(replacedObjectKey);
-    expect(runner.recordHostedWorkspaceSnapshotOrphanCandidate).toHaveBeenCalledWith({
-      createdAt: expect.stringMatching(/^20/u),
-      objectKey: replacedObjectKey,
-      schema: HOSTED_WORKSPACE_SNAPSHOT_ORPHAN_CANDIDATE_SCHEMA,
-      snapshotId: replacedSnapshotId,
-      userId: "member_123",
-    });
-    expect(runner.workspaceSnapshotOrphanCandidates.get(replacedSnapshotId)).toMatchObject({
-      objectKey: replacedObjectKey,
-      snapshotId: replacedSnapshotId,
+    expect(deleteObject).not.toHaveBeenCalled();
+    expect(runner.recordHostedWorkspaceSnapshotOrphanCandidate).not.toHaveBeenCalled();
+    expect(runner.workspaceSnapshotUploadSessions.get(snapshotId)).toMatchObject({
+      replacedSnapshotRef,
+      snapshotId,
     });
   });
 
-  it("rejects snapshot completion when replaced snapshot cleanup has no durable outcome", async () => {
+  it("preserves the selected restore object when post-checkpoint completion becomes stale", async () => {
     const runner = createWorkspaceVersionAwareUserRunner();
     const bytes = new Uint8Array([1, 2, 3, 4]);
-    const snapshotId = "snapshot_complete_replaces_previous_cleanup_fails";
+    const snapshotId = "snapshot_complete_stale_cleanup_owner";
     const objectKey = await hostedWorkspaceSnapshotObjectKey({
       snapshotId,
       userId: "member_123",
@@ -5490,7 +5589,10 @@ describe("handleRunnerOutboundRequest", () => {
       snapshotId,
       userId: "member_123",
     });
-    const replacedSnapshotId = "snapshot_previous_cleanup_fails";
+    const staleSession = createWorkspaceSnapshotUploadSession(snapshotRef);
+    await runner.createHostedWorkspaceSnapshotUploadSession(staleSession);
+
+    const replacedSnapshotId = "snapshot_stale_cleanup_previous";
     const replacedObjectKey = await hostedWorkspaceSnapshotObjectKey({
       snapshotId: replacedSnapshotId,
       userId: "member_123",
@@ -5502,13 +5604,26 @@ describe("handleRunnerOutboundRequest", () => {
       snapshotId: replacedSnapshotId,
       userId: "member_123",
     });
-    runner.recordHostedWorkspaceSnapshotOrphanCandidate.mockImplementationOnce(async () => {
-      throw new Error("orphan recording failed");
+    const activeSnapshotId = "snapshot_stale_cleanup_active";
+    const activeObjectKey = await hostedWorkspaceSnapshotObjectKey({
+      snapshotId: activeSnapshotId,
+      userId: "member_123",
     });
-    runner.workspaceSnapshotUploadSessions.set(snapshotId, createWorkspaceSnapshotUploadSession(snapshotRef));
-    const deleteObject = vi.fn(async () => {
-      throw new Error("delete failed");
+    const activeSnapshotRef = createWorkspaceSnapshotV2Ref({
+      encryptedByteSize: 6,
+      encryptedObjectSha256: "c".repeat(64),
+      objectKey: activeObjectKey,
+      snapshotId: activeSnapshotId,
+      userId: "member_123",
     });
+    const activeSession = {
+      ...createWorkspaceSnapshotUploadSession(activeSnapshotRef, {
+        workspaceVersion: "5",
+      }),
+      attemptId: "attempt_2",
+      leaseGeneration: "10",
+    };
+    const deleteObject = vi.fn(async () => {});
     const env = createRunnerOutboundEnv({
       BUNDLES: createWorkspaceSnapshotBucket(
         async (key) => ({ key, size: bytes.byteLength }),
@@ -5526,8 +5641,16 @@ describe("handleRunnerOutboundRequest", () => {
     });
     const fetchMock = createWorkspaceSnapshotCompleteWebFetchMock({
       currentSnapshotRef: replacedSnapshotRef,
-      onCheckpoint: (args) => {
-        const checkpointRequest = readTestFetchBodyObject(args, "workspace snapshot checkpoint request");
+      onCheckpoint: async (args) => {
+        const checkpointRequest = readTestFetchBodyObject(
+          args,
+          "stale cleanup checkpoint request",
+        );
+        runner.setActiveWriteFence({
+          attemptId: activeSession.attemptId,
+          leaseGeneration: activeSession.leaseGeneration,
+        });
+        await runner.createHostedWorkspaceSnapshotUploadSession(activeSession);
         return new Response(
           JSON.stringify({
             ...createHostedWorkspaceCheckpointResponseWithSnapshotRef(
@@ -5557,23 +5680,18 @@ describe("handleRunnerOutboundRequest", () => {
       "member_123",
     );
 
-    expect(response.status).toBe(503);
-    await expect(response.json()).resolves.toEqual({
-      error: "Hosted workspace replaced snapshot cleanup failed.",
+    expect(response.status).toBe(200);
+    expect(runner.rememberHostedWorkspaceSnapshotReplacedRef).toHaveBeenCalledWith({
+      expectedSession: staleSession,
+      replacedSnapshotRef,
     });
-    expect(fetchMock).toHaveBeenCalledTimes(2);
+    expect(runner.workspaceSnapshotUploadSessions.has(snapshotId)).toBe(false);
+    expect(runner.workspaceSnapshotUploadSessions.get(activeSnapshotId)).toEqual(activeSession);
+    expect(runner.workspaceSnapshotUploadSessions.get(activeSnapshotId)?.replacedSnapshotRef)
+      .toBeUndefined();
     expect(runner.deleteHostedWorkspaceSnapshotUploadSession).not.toHaveBeenCalled();
-    expect(deleteObject).toHaveBeenCalledWith(replacedObjectKey);
-    expect(runner.recordHostedWorkspaceSnapshotOrphanCandidate).toHaveBeenCalledOnce();
-    expect(runner.workspaceSnapshotOrphanCandidates.has(replacedSnapshotId)).toBe(false);
-    expect(runner.createHostedWorkspaceSnapshotUploadSession).toHaveBeenCalledWith(expect.objectContaining({
-      replacedSnapshotRef,
-      snapshotId,
-    }));
-    expect(runner.workspaceSnapshotUploadSessions.get(snapshotId)).toMatchObject({
-      replacedSnapshotRef,
-      snapshotId,
-    });
+    expect(runner.workspaceSnapshotOrphanCandidates.has(activeSnapshotId)).toBe(false);
+    expect(deleteObject).not.toHaveBeenCalled();
   });
 
   it("does not checkpoint when the replaced snapshot cleanup ref cannot be persisted first", async () => {
@@ -5603,7 +5721,7 @@ describe("handleRunnerOutboundRequest", () => {
       snapshotId: replacedSnapshotId,
       userId: "member_123",
     });
-    runner.createHostedWorkspaceSnapshotUploadSession.mockImplementationOnce(async () => {
+    runner.rememberHostedWorkspaceSnapshotReplacedRef.mockImplementationOnce(async () => {
       throw new Error("session write failed");
     });
     runner.workspaceSnapshotUploadSessions.set(snapshotId, createWorkspaceSnapshotUploadSession(snapshotRef));
@@ -5646,7 +5764,7 @@ describe("handleRunnerOutboundRequest", () => {
       error: "Hosted workspace replaced snapshot cleanup state is unavailable.",
     });
     expect(fetchMock).toHaveBeenCalledOnce();
-    expect(runner.createHostedWorkspaceSnapshotUploadSession).toHaveBeenCalledOnce();
+    expect(runner.rememberHostedWorkspaceSnapshotReplacedRef).toHaveBeenCalledOnce();
     expect(runner.recordHostedWorkspaceSnapshotOrphanCandidate).not.toHaveBeenCalled();
     expect(runner.deleteHostedWorkspaceSnapshotUploadSession).not.toHaveBeenCalled();
     expect(deleteObject).not.toHaveBeenCalled();
@@ -5656,7 +5774,7 @@ describe("handleRunnerOutboundRequest", () => {
     expect(runner.workspaceSnapshotUploadSessions.get(snapshotId)?.replacedSnapshotRef).toBeUndefined();
   });
 
-  it("finishes replaced snapshot cleanup when completion retry sees the new snapshot already current", async () => {
+  it("retains delayed cleanup when completion retry sees the new snapshot already current", async () => {
     const runner = createWorkspaceVersionAwareUserRunner();
     const bytes = new Uint8Array([1, 2, 3, 4]);
     const snapshotId = "snapshot_complete_retry_replaced_cleanup";
@@ -5752,13 +5870,13 @@ describe("handleRunnerOutboundRequest", () => {
         version: "5",
       }),
     }));
-    expect(deleteObject).toHaveBeenCalledWith(replacedObjectKey);
+    expect(deleteObject).not.toHaveBeenCalled();
     expect(runner.recordHostedWorkspaceSnapshotOrphanCandidate).not.toHaveBeenCalled();
-    expect(runner.deleteHostedWorkspaceSnapshotUploadSession).toHaveBeenCalledWith({
+    expect(runner.deleteHostedWorkspaceSnapshotUploadSession).not.toHaveBeenCalled();
+    expect(runner.workspaceSnapshotUploadSessions.get(snapshotId)).toMatchObject({
+      replacedSnapshotRef,
       snapshotId,
-      userId: "member_123",
     });
-    expect(runner.workspaceSnapshotUploadSessions.has(snapshotId)).toBe(false);
   });
 
   it("ignores replaced successful workspace snapshots outside the bound user namespace", async () => {
@@ -5968,8 +6086,8 @@ describe("handleRunnerOutboundRequest", () => {
       },
       method: "HEAD",
     }));
-    expect(runner.deleteHostedWorkspaceSnapshotUploadSession).toHaveBeenCalledOnce();
-    expect(runner.workspaceSnapshotUploadSessions.has(snapshotId)).toBe(false);
+    expect(runner.deleteHostedWorkspaceSnapshotUploadSession).not.toHaveBeenCalled();
+    expect(runner.workspaceSnapshotUploadSessions.has(snapshotId)).toBe(true);
   });
 
   it("rejects hosted-local workspace snapshot completion when HEAD omits the checksum header", async () => {
@@ -6284,6 +6402,83 @@ describe("handleRunnerOutboundRequest", () => {
     expect(deleteObject).toHaveBeenCalledWith(objectKey);
   });
 
+  it("does not abort a snapshot after its active fence changes during the session read", async () => {
+    const runner = createWorkspaceVersionAwareUserRunner();
+    const snapshotId = "snapshot_abort_stale_session_read";
+    const objectKey = await hostedWorkspaceSnapshotObjectKey({
+      snapshotId,
+      userId: "member_123",
+    });
+    const snapshotRef = createWorkspaceSnapshotV2Ref({
+      encryptedByteSize: 4,
+      encryptedObjectSha256: "a".repeat(64),
+      objectKey,
+      snapshotId,
+      userId: "member_123",
+    });
+    const staleSession = createWorkspaceSnapshotUploadSession(snapshotRef);
+    await runner.createHostedWorkspaceSnapshotUploadSession(staleSession);
+    const activeSnapshotId = "snapshot_abort_active_replacement";
+    const activeObjectKey = await hostedWorkspaceSnapshotObjectKey({
+      snapshotId: activeSnapshotId,
+      userId: "member_123",
+    });
+    const activeSnapshotRef = createWorkspaceSnapshotV2Ref({
+      encryptedByteSize: 4,
+      encryptedObjectSha256: "b".repeat(64),
+      objectKey: activeObjectKey,
+      snapshotId: activeSnapshotId,
+      userId: "member_123",
+    });
+    const activeSession = {
+      ...createWorkspaceSnapshotUploadSession(activeSnapshotRef, {
+        workspaceVersion: "5",
+      }),
+      attemptId: "attempt_2",
+      leaseGeneration: "10",
+    };
+    runner.readHostedWorkspaceSnapshotUploadSession.mockImplementationOnce(async () => {
+      runner.setActiveWriteFence({
+        attemptId: activeSession.attemptId,
+        leaseGeneration: activeSession.leaseGeneration,
+      });
+      await runner.createHostedWorkspaceSnapshotUploadSession(activeSession);
+      return staleSession;
+    });
+    const deleteObject = vi.fn(async () => {});
+    const env = createRunnerOutboundEnv({
+      BUNDLES: createWorkspaceSnapshotBucket(
+        async (key) => ({ key, size: 4 }),
+        async (key) => ({ key, size: 4 }),
+        deleteObject,
+      ),
+      USER_RUNNER: {
+        getByName: runner.getByName,
+      },
+    });
+
+    const response = await handleRunnerOutboundRequest(
+      createWorkspaceSnapshotAbortRequest({
+        objectKey,
+        snapshotId,
+        workspaceVersion: "4",
+      }),
+      env,
+      "member_123",
+    );
+
+    expect(response.status).toBe(409);
+    await expect(response.json()).resolves.toEqual({
+      error: "Hosted workspace snapshot upload session is stale.",
+    });
+    expect(runner.validateRuntimeWriteFence).toHaveBeenCalledTimes(2);
+    expect(runner.deleteHostedWorkspaceSnapshotUploadSession).not.toHaveBeenCalled();
+    expect(runner.workspaceSnapshotUploadSessions.has(snapshotId)).toBe(false);
+    expect(runner.workspaceSnapshotUploadSessions.get(activeSnapshotId)).toEqual(activeSession);
+    expect(deleteObject).not.toHaveBeenCalled();
+    expect(runner.recordHostedWorkspaceSnapshotOrphanCandidate).not.toHaveBeenCalled();
+  });
+
   it("retains uploaded snapshot cleanup before deleting an aborted session when object deletion fails", async () => {
     const runner = createWorkspaceVersionAwareUserRunner();
     const snapshotId = "snapshot_abort_delete_failure";
@@ -6347,7 +6542,7 @@ describe("handleRunnerOutboundRequest", () => {
     expect(runner.workspaceSnapshotUploadSessions.has(snapshotId)).toBe(false);
   });
 
-  it("lets a stale invocation abort its own active workspace snapshot upload session", async () => {
+  it("rejects a stale invocation abort before session or object access", async () => {
     const runner = createWorkspaceVersionAwareUserRunner({
       leaseGeneration: "10",
     });
@@ -6386,18 +6581,22 @@ describe("handleRunnerOutboundRequest", () => {
       "member_123",
     );
 
-    expect(response.status).toBe(200);
+    expect(response.status).toBe(401);
     await expect(response.json()).resolves.toEqual({
-      aborted: true,
-      ok: true,
+      error: "Unauthorized",
     });
-    expect(runner.validateRuntimeWriteFence).not.toHaveBeenCalled();
-    expect(runner.deleteHostedWorkspaceSnapshotUploadSession).toHaveBeenCalledOnce();
-    expect(runner.workspaceSnapshotUploadSessions.has(snapshotId)).toBe(false);
-    expect(deleteObject).toHaveBeenCalledWith(objectKey);
+    expect(runner.validateRuntimeWriteFence).toHaveBeenCalledWith({
+      attemptId: "attempt_1",
+      generation: "9",
+      userId: "member_123",
+    });
+    expect(runner.readHostedWorkspaceSnapshotUploadSession).not.toHaveBeenCalled();
+    expect(runner.deleteHostedWorkspaceSnapshotUploadSession).not.toHaveBeenCalled();
+    expect(runner.workspaceSnapshotUploadSessions.has(snapshotId)).toBe(true);
+    expect(deleteObject).not.toHaveBeenCalled();
   });
 
-  it("rejects stale abort headers without deleting a different active upload session", async () => {
+  it("rejects aborts when the request workspace version differs from the active upload session", async () => {
     const runner = createWorkspaceVersionAwareUserRunner();
     const snapshotId = "snapshot_abort_stale_headers";
     const objectKey = await hostedWorkspaceSnapshotObjectKey({
@@ -6413,7 +6612,6 @@ describe("handleRunnerOutboundRequest", () => {
     });
     runner.workspaceSnapshotUploadSessions.set(snapshotId, {
       ...createWorkspaceSnapshotUploadSession(snapshotRef),
-      leaseGeneration: "10",
       workspaceVersion: "8",
     });
     const deleteObject = vi.fn(async () => {});
@@ -6442,7 +6640,11 @@ describe("handleRunnerOutboundRequest", () => {
     await expect(response.json()).resolves.toEqual({
       error: "Hosted workspace snapshot upload session is stale.",
     });
-    expect(runner.validateRuntimeWriteFence).not.toHaveBeenCalled();
+    expect(runner.validateRuntimeWriteFence).toHaveBeenCalledWith({
+      attemptId: "attempt_1",
+      generation: "9",
+      userId: "member_123",
+    });
     expect(runner.deleteHostedWorkspaceSnapshotUploadSession).not.toHaveBeenCalled();
     expect(runner.workspaceSnapshotUploadSessions.has(snapshotId)).toBe(true);
     expect(deleteObject).not.toHaveBeenCalled();
@@ -6495,7 +6697,11 @@ describe("handleRunnerOutboundRequest", () => {
     await expect(response.json()).resolves.toEqual({
       error: "Hosted workspace snapshot upload session is stale.",
     });
-    expect(runner.validateRuntimeWriteFence).not.toHaveBeenCalled();
+    expect(runner.validateRuntimeWriteFence).toHaveBeenCalledWith({
+      attemptId: "attempt_1",
+      generation: "9",
+      userId: "member_123",
+    });
     expect(runner.deleteHostedWorkspaceSnapshotUploadSession).not.toHaveBeenCalled();
     expect(runner.workspaceSnapshotUploadSessions.has(snapshotId)).toBe(true);
     expect(deleteObject).not.toHaveBeenCalled();
@@ -6640,6 +6846,104 @@ describe("handleRunnerOutboundRequest", () => {
     expect(runner.deleteHostedWorkspaceSnapshotUploadSession).not.toHaveBeenCalled();
     expect(runner.workspaceSnapshotUploadSessions.has(snapshotId)).toBe(true);
     expect(deleteObject).not.toHaveBeenCalled();
+    expect(fetchMock).not.toHaveBeenCalled();
+  });
+
+  it("does not retire an oversized completion after its active fence changes during the session read", async () => {
+    const runner = createWorkspaceVersionAwareUserRunner();
+    const snapshotId = "snapshot_complete_stale_session_read";
+    const objectKey = await hostedWorkspaceSnapshotObjectKey({
+      snapshotId,
+      userId: "member_123",
+    });
+    const snapshotRef = createWorkspaceSnapshotV2Ref({
+      encryptedByteSize: HOSTED_WORKSPACE_SNAPSHOT_MAX_SINGLE_PART_BYTES,
+      encryptedObjectSha256: "a".repeat(64),
+      objectKey,
+      snapshotId,
+      userId: "member_123",
+    });
+    const staleSession = createWorkspaceSnapshotUploadSession(snapshotRef);
+    await runner.createHostedWorkspaceSnapshotUploadSession(staleSession);
+
+    const activeSnapshotId = "snapshot_complete_session_read_active_replacement";
+    const activeObjectKey = await hostedWorkspaceSnapshotObjectKey({
+      snapshotId: activeSnapshotId,
+      userId: "member_123",
+    });
+    const activeSnapshotRef = createWorkspaceSnapshotV2Ref({
+      encryptedByteSize: 4,
+      encryptedObjectSha256: "b".repeat(64),
+      objectKey: activeObjectKey,
+      snapshotId: activeSnapshotId,
+      userId: "member_123",
+    });
+    const activeCleanupSnapshotId = "snapshot_complete_session_read_active_cleanup";
+    const activeCleanupObjectKey = await hostedWorkspaceSnapshotObjectKey({
+      snapshotId: activeCleanupSnapshotId,
+      userId: "member_123",
+    });
+    const activeCleanupSnapshotRef = createWorkspaceSnapshotV2Ref({
+      encryptedByteSize: 4,
+      encryptedObjectSha256: "c".repeat(64),
+      objectKey: activeCleanupObjectKey,
+      snapshotId: activeCleanupSnapshotId,
+      userId: "member_123",
+    });
+    const activeSession = {
+      ...createWorkspaceSnapshotUploadSession(activeSnapshotRef, {
+        replacedSnapshotRef: activeCleanupSnapshotRef,
+        workspaceVersion: "5",
+      }),
+      attemptId: "attempt_2",
+      leaseGeneration: "10",
+    };
+    runner.readHostedWorkspaceSnapshotUploadSession.mockImplementationOnce(async () => {
+      runner.setActiveWriteFence({
+        attemptId: activeSession.attemptId,
+        leaseGeneration: activeSession.leaseGeneration,
+      });
+      await runner.createHostedWorkspaceSnapshotUploadSession(activeSession);
+      return staleSession;
+    });
+
+    const deleteObject = vi.fn(async () => {});
+    const headObject = vi.fn();
+    const env = createRunnerOutboundEnv({
+      BUNDLES: createWorkspaceSnapshotBucket(
+        async (key) => ({ key, size: HOSTED_WORKSPACE_SNAPSHOT_MAX_SINGLE_PART_BYTES }),
+        headObject,
+        deleteObject,
+      ),
+      USER_RUNNER: {
+        getByName: runner.getByName,
+      },
+    });
+    const fetchMock = vi.fn();
+    vi.stubGlobal("fetch", fetchMock);
+
+    const response = await handleRunnerOutboundRequest(
+      createWorkspaceSnapshotCompleteRequest({
+        snapshotId,
+        snapshotRef,
+        workspaceVersion: "4",
+      }),
+      env,
+      "member_123",
+    );
+
+    expect(response.status).toBe(409);
+    await expect(response.json()).resolves.toEqual({
+      error: "Hosted workspace snapshot upload session is stale.",
+    });
+    expect(runner.validateRuntimeWriteFence).toHaveBeenCalledTimes(2);
+    expect(runner.readHostedWorkspaceSnapshotUploadSession).toHaveBeenCalledOnce();
+    expect(runner.deleteHostedWorkspaceSnapshotUploadSession).not.toHaveBeenCalled();
+    expect(runner.recordHostedWorkspaceSnapshotOrphanCandidate).not.toHaveBeenCalled();
+    expect(runner.workspaceSnapshotUploadSessions.has(snapshotId)).toBe(false);
+    expect(runner.workspaceSnapshotUploadSessions.get(activeSnapshotId)).toEqual(activeSession);
+    expect(deleteObject).not.toHaveBeenCalled();
+    expect(headObject).not.toHaveBeenCalled();
     expect(fetchMock).not.toHaveBeenCalled();
   });
 
@@ -6867,7 +7171,7 @@ describe("handleRunnerOutboundRequest", () => {
     expect(runner.workspaceSnapshotUploadSessions.has(snapshotId)).toBe(false);
   });
 
-  it("keeps an expired current workspace snapshot retry when the active write fence moved", async () => {
+  it("rejects an expired retry before session or web access when the active fence moved", async () => {
     const runner = createWorkspaceVersionAwareUserRunner({
       leaseGeneration: "10",
     });
@@ -6924,11 +7228,11 @@ describe("handleRunnerOutboundRequest", () => {
       "member_123",
     );
 
-    expect(response.status).toBe(409);
+    expect(response.status).toBe(401);
     await expect(response.json()).resolves.toEqual({
-      error: "Hosted workspace snapshot upload session is stale.",
+      error: "Unauthorized",
     });
-    expect(fetchMock).toHaveBeenCalledOnce();
+    expect(fetchMock).not.toHaveBeenCalled();
     expect(runner.validateRuntimeWriteFence).toHaveBeenCalledWith({
       attemptId: "attempt_1",
       generation: "9",
@@ -7000,7 +7304,7 @@ describe("handleRunnerOutboundRequest", () => {
       error: "Hosted workspace snapshot upload session is stale.",
     });
     expect(fetchMock).toHaveBeenCalledOnce();
-    expect(runner.validateRuntimeWriteFence).not.toHaveBeenCalled();
+    expect(runner.validateRuntimeWriteFence).toHaveBeenCalledTimes(2);
     expect(deleteObject).not.toHaveBeenCalled();
     expect(runner.recordHostedWorkspaceSnapshotOrphanCandidate).not.toHaveBeenCalled();
     expect(runner.deleteHostedWorkspaceSnapshotUploadSession).not.toHaveBeenCalled();
@@ -7095,7 +7399,7 @@ describe("handleRunnerOutboundRequest", () => {
     });
   });
 
-  it("defers snapshot object cleanup when complete sees a replaced active write fence", async () => {
+  it("rejects stale completion before session, object, web, or cleanup access", async () => {
     const runner = createWorkspaceVersionAwareUserRunner({
       leaseGeneration: "10",
     });
@@ -7113,15 +7417,16 @@ describe("handleRunnerOutboundRequest", () => {
     });
     runner.workspaceSnapshotUploadSessions.set(snapshotId, createWorkspaceSnapshotUploadSession(snapshotRef));
     const deleteObject = vi.fn(async () => {});
+    const headObject = vi.fn(async (key: string) => ({
+      checksums: createWorkspaceSnapshotHeadChecksums(snapshotRef),
+      customMetadata: createWorkspaceSnapshotHeadMetadata(snapshotRef),
+      key,
+      size: 4,
+    }));
     const env = createRunnerOutboundEnv({
       BUNDLES: createWorkspaceSnapshotBucket(
         async (key) => ({ key, size: 4 }),
-        async (key) => ({
-          checksums: createWorkspaceSnapshotHeadChecksums(snapshotRef),
-          customMetadata: createWorkspaceSnapshotHeadMetadata(snapshotRef),
-          key,
-          size: 4,
-        }),
+        headObject,
         deleteObject,
       ),
       USER_RUNNER: {
@@ -7141,26 +7446,225 @@ describe("handleRunnerOutboundRequest", () => {
       "member_123",
     );
 
-    expect(response.status).toBe(409);
+    expect(response.status).toBe(401);
     await expect(response.json()).resolves.toEqual({
-      error: "Hosted workspace snapshot upload session is stale.",
+      error: "Unauthorized",
     });
     expect(runner.validateRuntimeWriteFence).toHaveBeenCalledWith({
       attemptId: "attempt_1",
       generation: "9",
       userId: "member_123",
     });
-    expect(runner.deleteHostedWorkspaceSnapshotUploadSession).toHaveBeenCalledOnce();
-    expect(runner.workspaceSnapshotUploadSessions.has(snapshotId)).toBe(false);
+    expect(runner.readHostedWorkspaceSnapshotUploadSession).not.toHaveBeenCalled();
+    expect(headObject).not.toHaveBeenCalled();
+    expect(runner.deleteHostedWorkspaceSnapshotUploadSession).not.toHaveBeenCalled();
+    expect(runner.workspaceSnapshotUploadSessions.has(snapshotId)).toBe(true);
     expect(deleteObject).not.toHaveBeenCalled();
-    expect(runner.recordHostedWorkspaceSnapshotOrphanCandidate).toHaveBeenCalledWith({
-      createdAt: expect.stringMatching(/^20/u),
-      objectKey,
-      schema: HOSTED_WORKSPACE_SNAPSHOT_ORPHAN_CANDIDATE_SCHEMA,
+    expect(runner.recordHostedWorkspaceSnapshotOrphanCandidate).not.toHaveBeenCalled();
+    expect(fetchMock).not.toHaveBeenCalled();
+  });
+
+  it("preserves the replacement owner when the active fence changes during object metadata read", async () => {
+    const runner = createWorkspaceVersionAwareUserRunner();
+    const snapshotId = "snapshot_complete_replaced_write_fence";
+    const objectKey = await hostedWorkspaceSnapshotObjectKey({
       snapshotId,
       userId: "member_123",
     });
+    const snapshotRef = createWorkspaceSnapshotV2Ref({
+      encryptedByteSize: 4,
+      encryptedObjectSha256: "a".repeat(64),
+      objectKey,
+      snapshotId,
+      userId: "member_123",
+    });
+    await runner.createHostedWorkspaceSnapshotUploadSession(
+      createWorkspaceSnapshotUploadSession(snapshotRef),
+    );
+    const activeSnapshotId = "snapshot_complete_head_active_replacement";
+    const activeObjectKey = await hostedWorkspaceSnapshotObjectKey({
+      snapshotId: activeSnapshotId,
+      userId: "member_123",
+    });
+    const activeSnapshotRef = createWorkspaceSnapshotV2Ref({
+      encryptedByteSize: 4,
+      encryptedObjectSha256: "b".repeat(64),
+      objectKey: activeObjectKey,
+      snapshotId: activeSnapshotId,
+      userId: "member_123",
+    });
+    const activeSession = {
+      ...createWorkspaceSnapshotUploadSession(activeSnapshotRef, {
+        workspaceVersion: "5",
+      }),
+      attemptId: "attempt_2",
+      leaseGeneration: "10",
+    };
+    const deleteObject = vi.fn(async () => {});
+    const headObject = vi.fn(async (key: string) => {
+      runner.setActiveWriteFence({
+        attemptId: activeSession.attemptId,
+        leaseGeneration: activeSession.leaseGeneration,
+      });
+      await runner.createHostedWorkspaceSnapshotUploadSession(activeSession);
+      return {
+        checksums: createWorkspaceSnapshotHeadChecksums(snapshotRef),
+        customMetadata: createWorkspaceSnapshotHeadMetadata(snapshotRef),
+        key,
+        size: 4,
+      };
+    });
+    const env = createRunnerOutboundEnv({
+      BUNDLES: createWorkspaceSnapshotBucket(
+        async (key) => ({ key, size: 4 }),
+        headObject,
+        deleteObject,
+      ),
+      USER_RUNNER: {
+        getByName: runner.getByName,
+      },
+    });
+    const fetchMock = createWorkspaceSnapshotCompleteWebFetchMock({
+      onCheckpoint: () => {
+        throw new Error("stale completion must not checkpoint");
+      },
+    });
+    vi.stubGlobal("fetch", fetchMock);
+
+    const response = await handleRunnerOutboundRequest(
+      createWorkspaceSnapshotCompleteRequest({
+        snapshotId,
+        snapshotRef,
+        workspaceVersion: "4",
+      }),
+      env,
+      "member_123",
+    );
+
+    expect(response.status).toBe(409);
+    await expect(response.json()).resolves.toEqual({
+      error: "Hosted workspace snapshot upload session is stale.",
+    });
+    expect(runner.validateRuntimeWriteFence).toHaveBeenCalledTimes(3);
+    expect(runner.readHostedWorkspaceSnapshotUploadSession).toHaveBeenCalledOnce();
+    expect(headObject).toHaveBeenCalledWith(objectKey);
     expect(fetchMock).not.toHaveBeenCalled();
+    expect(runner.deleteHostedWorkspaceSnapshotUploadSession).not.toHaveBeenCalled();
+    expect(runner.workspaceSnapshotUploadSessions.has(snapshotId)).toBe(false);
+    expect(runner.workspaceSnapshotUploadSessions.get(activeSnapshotId)).toEqual(activeSession);
+    expect(deleteObject).not.toHaveBeenCalled();
+    expect(runner.recordHostedWorkspaceSnapshotOrphanCandidate).not.toHaveBeenCalled();
+  });
+
+  it("keeps a replacement owner's upload session when the fence changes during the web read", async () => {
+    const runner = createWorkspaceVersionAwareUserRunner();
+    const snapshotId = "snapshot_complete_stale_during_web_read";
+    const objectKey = await hostedWorkspaceSnapshotObjectKey({
+      snapshotId,
+      userId: "member_123",
+    });
+    const snapshotRef = createWorkspaceSnapshotV2Ref({
+      encryptedByteSize: 4,
+      encryptedObjectSha256: "a".repeat(64),
+      objectKey,
+      snapshotId,
+      userId: "member_123",
+    });
+    const activeSnapshotId = "snapshot_complete_active_replacement";
+    const activeObjectKey = await hostedWorkspaceSnapshotObjectKey({
+      snapshotId: activeSnapshotId,
+      userId: "member_123",
+    });
+    const activeSnapshotRef = createWorkspaceSnapshotV2Ref({
+      encryptedByteSize: 4,
+      encryptedObjectSha256: "b".repeat(64),
+      objectKey: activeObjectKey,
+      snapshotId: activeSnapshotId,
+      userId: "member_123",
+    });
+    const replacedSnapshotId = "snapshot_complete_previous_checkpoint";
+    const replacedObjectKey = await hostedWorkspaceSnapshotObjectKey({
+      snapshotId: replacedSnapshotId,
+      userId: "member_123",
+    });
+    const replacedSnapshotRef = createWorkspaceSnapshotV2Ref({
+      encryptedByteSize: 4,
+      encryptedObjectSha256: "c".repeat(64),
+      objectKey: replacedObjectKey,
+      snapshotId: replacedSnapshotId,
+      userId: "member_123",
+    });
+    const staleSession = createWorkspaceSnapshotUploadSession(snapshotRef);
+    await runner.createHostedWorkspaceSnapshotUploadSession(staleSession);
+    const deleteObject = vi.fn(async () => {});
+    const headObject = vi.fn(async (key: string) => ({
+      checksums: createWorkspaceSnapshotHeadChecksums(snapshotRef),
+      customMetadata: createWorkspaceSnapshotHeadMetadata(snapshotRef),
+      key,
+      size: 4,
+    }));
+    const env = createRunnerOutboundEnv({
+      BUNDLES: createWorkspaceSnapshotBucket(
+        async (key) => ({ key, size: 4 }),
+        headObject,
+        deleteObject,
+      ),
+      USER_RUNNER: {
+        getByName: runner.getByName,
+      },
+    });
+    const activeSession = {
+      ...createWorkspaceSnapshotUploadSession(activeSnapshotRef, {
+        workspaceVersion: "5",
+      }),
+      attemptId: "attempt_2",
+      leaseGeneration: "10",
+    };
+    const fetchMock = createWorkspaceSnapshotCompleteWebFetchMock({
+      currentSnapshotRef: replacedSnapshotRef,
+      currentWorkspaceVersion: "5",
+      async onCheckpoint() {
+        runner.setActiveWriteFence({
+          attemptId: activeSession.attemptId,
+          leaseGeneration: activeSession.leaseGeneration,
+        });
+        await runner.createHostedWorkspaceSnapshotUploadSession(activeSession);
+        return new Response("invalid checkpoint response", {
+          headers: {
+            "content-type": "application/json; charset=utf-8",
+          },
+          status: 200,
+        });
+      },
+    });
+    vi.stubGlobal("fetch", fetchMock);
+
+    const response = await handleRunnerOutboundRequest(
+      createWorkspaceSnapshotCompleteRequest({
+        snapshotId,
+        snapshotRef,
+        workspaceVersion: "4",
+      }),
+      env,
+      "member_123",
+    );
+
+    expect(response.status).toBe(409);
+    await expect(response.json()).resolves.toEqual({
+      error: "Hosted workspace snapshot upload session is stale.",
+    });
+    expect(runner.rememberHostedWorkspaceSnapshotReplacedRef).toHaveBeenCalledWith({
+      expectedSession: staleSession,
+      replacedSnapshotRef,
+    });
+    expect(runner.validateRuntimeWriteFence).toHaveBeenCalled();
+    expect(fetchMock).toHaveBeenCalledTimes(2);
+    expect(runner.workspaceSnapshotUploadSessions.has(snapshotId)).toBe(false);
+    expect(runner.workspaceSnapshotUploadSessions.get(activeSnapshotId)).toEqual(activeSession);
+    expect(runner.workspaceSnapshotOrphanCandidates.has(activeSnapshotId)).toBe(false);
+    expect(runner.recordHostedWorkspaceSnapshotOrphanCandidate).not.toHaveBeenCalled();
+    expect(runner.deleteHostedWorkspaceSnapshotUploadSession).not.toHaveBeenCalled();
+    expect(deleteObject).not.toHaveBeenCalled();
   });
 
   it("retires workspace snapshot upload sessions when the checkpoint request fails", async () => {
@@ -7888,7 +8392,7 @@ it("returns foreground-pending checkpoint responses from snapshot completion wit
     );
 
     expect(response.status).toBe(409);
-    expect(runner.validateRuntimeWriteFence).not.toHaveBeenCalled();
+    expect(runner.validateRuntimeWriteFence).toHaveBeenCalledTimes(3);
     expect(runner.deleteHostedWorkspaceSnapshotUploadSession).toHaveBeenCalledOnce();
     expect(runner.workspaceSnapshotUploadSessions.has(snapshotId)).toBe(false);
     expect(deleteObject).toHaveBeenCalledWith(objectKey);
@@ -8201,7 +8705,7 @@ it("returns foreground-pending checkpoint responses from snapshot completion wit
     );
 
     expect(response.status).toBe(503);
-    expect(runner.validateRuntimeWriteFence).not.toHaveBeenCalled();
+    expect(runner.validateRuntimeWriteFence).toHaveBeenCalledTimes(3);
     expect(fetchMock).not.toHaveBeenCalled();
   });
 
@@ -8751,7 +9255,7 @@ it("returns foreground-pending checkpoint responses from snapshot completion wit
 
     const response = await handleRunnerOutboundRequest(
       new Request(`http://web-control.worker${HOSTED_RUNTIME_WORKSPACE_PATH}`, {
-        headers: createRunnerProxyHeaders({
+        headers: createRunnerWriteFenceProxyHeaders({
           "x-hosted-runtime-web-control-user-id": "member_sender",
         }),
         method: "GET",
@@ -8905,6 +9409,15 @@ function createAssistantPersonalizationRunnerRequest(
       method: "POST",
     },
   );
+}
+
+function createRunnerWriteFenceProxyHeaders(headers: Record<string, string> = {}) {
+  return createRunnerProxyHeaders({
+    "x-hosted-runtime-attempt-id": "attempt_1",
+    "x-hosted-runtime-lease-generation": "9",
+    "x-hosted-runtime-workspace-version": "4",
+    ...headers,
+  });
 }
 
 function createMailboxPayloadDecodeHeaders(headers: Record<string, string> = {}) {
@@ -9387,8 +9900,8 @@ function createWorkspaceVersionAwareUserRunner(input: {
   leaseGeneration?: string;
   userId?: string;
 } = {}) {
-  const attemptId = input.attemptId ?? "attempt_1";
-  const leaseGeneration = input.leaseGeneration ?? "9";
+  let attemptId = input.attemptId ?? "attempt_1";
+  let leaseGeneration = input.leaseGeneration ?? "9";
   const userId = input.userId ?? "member_123";
   const workspaceSnapshotUploadSessions = new Map<string, HostedWorkspaceSnapshotUploadSession>();
   const workspaceSnapshotOrphanCandidates = new Map<string, HostedWorkspaceSnapshotOrphanCandidate>();
@@ -9413,6 +9926,13 @@ function createWorkspaceVersionAwareUserRunner(input: {
     session: HostedWorkspaceSnapshotUploadSession,
   ) => {
     if (
+      session.attemptId !== attemptId
+      || session.leaseGeneration !== leaseGeneration
+      || session.userId !== userId
+    ) {
+      return null;
+    }
+    if (
       currentWorkspaceSnapshotUploadSessionId
       && currentWorkspaceSnapshotUploadSessionId !== session.snapshotId
     ) {
@@ -9421,6 +9941,28 @@ function createWorkspaceVersionAwareUserRunner(input: {
     workspaceSnapshotUploadSessions.set(session.snapshotId, session);
     currentWorkspaceSnapshotUploadSessionId = session.snapshotId;
     return session;
+  });
+  const rememberHostedWorkspaceSnapshotReplacedRef = vi.fn(async (request: {
+    expectedSession: HostedWorkspaceSnapshotUploadSession;
+    replacedSnapshotRef: NonNullable<HostedWorkspaceSnapshotUploadSession["replacedSnapshotRef"]>;
+  }) => {
+    const current = workspaceSnapshotUploadSessions.get(request.expectedSession.snapshotId);
+    if (
+      !current
+      || current.attemptId !== attemptId
+      || current.leaseGeneration !== leaseGeneration
+      || current.attemptId !== request.expectedSession.attemptId
+      || current.leaseGeneration !== request.expectedSession.leaseGeneration
+      || current.objectKey !== request.expectedSession.objectKey
+      || current.workspaceVersion !== request.expectedSession.workspaceVersion
+    ) {
+      return false;
+    }
+    workspaceSnapshotUploadSessions.set(current.snapshotId, {
+      ...current,
+      replacedSnapshotRef: request.replacedSnapshotRef,
+    });
+    return true;
   });
   const readHostedWorkspaceSnapshotUploadSession = vi.fn(async (request: {
     snapshotId: string;
@@ -9464,6 +10006,7 @@ function createWorkspaceVersionAwareUserRunner(input: {
         bindUser,
         createHostedWorkspaceSnapshotUploadSession,
         deleteHostedWorkspaceSnapshotUploadSession,
+        rememberHostedWorkspaceSnapshotReplacedRef,
         ownsActiveInvocationLease,
         readHostedWorkspaceSnapshotUploadSession,
         recordHostedWorkspaceSnapshotOrphanCandidate,
@@ -9473,6 +10016,14 @@ function createWorkspaceVersionAwareUserRunner(input: {
     ownsActiveInvocationLease,
     readHostedWorkspaceSnapshotUploadSession,
     recordHostedWorkspaceSnapshotOrphanCandidate,
+    rememberHostedWorkspaceSnapshotReplacedRef,
+    setActiveWriteFence(input: {
+      attemptId: string;
+      leaseGeneration: string;
+    }) {
+      attemptId = input.attemptId;
+      leaseGeneration = input.leaseGeneration;
+    },
     validateRuntimeWriteFence,
     workspaceSnapshotOrphanCandidates,
     workspaceSnapshotUploadSessions,
@@ -9793,10 +10344,12 @@ function isHostedWorkspaceReadFetch(args: Parameters<typeof fetch>): boolean {
 function createWorkspaceSnapshotCompleteWebFetchMock(input: {
   currentSnapshotRef?: NonNullable<HostedWorkspaceReadResponse["workspace"]>["snapshotRef"];
   currentWorkspaceVersion?: string;
+  onWorkspaceRead?(): Promise<void> | void;
   onCheckpoint(args: Parameters<typeof fetch>): Promise<Response> | Response;
 }): ReturnType<typeof vi.fn<typeof fetch>> {
   return vi.fn<typeof fetch>(async (...args: Parameters<typeof fetch>): Promise<Response> => {
     if (isHostedWorkspaceReadFetch(args)) {
+      await input.onWorkspaceRead?.();
       return createHostedWorkspaceReadFetchResponse(
         input.currentSnapshotRef ?? null,
         input.currentWorkspaceVersion ?? "4",
