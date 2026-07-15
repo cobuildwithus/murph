@@ -41,11 +41,12 @@ Prove that rapid replyable Linq messages exposed by one hosted wake are processe
 
 ## State
 
-Implementation and focused verification are complete. The repeated hosted-local
-Linq E2E passed on the TypeScript 7 base, as did the full pre-audit assistant
-automation suite plus the persisted modern and serialized legacy recovery cases, empty-selection
-refresh batching, hosted maintenance capacity/classification, package
-typechecks, harness tests, runner-bundle assembly/budget tests, docs drift, and
-diff checks. The branch still needs rebasing onto the newest `main`, resolving
-the docs-index conflict, then final exact-head focused/E2E verification,
-ReviewGPT, and CI.
+Implementation and pre-rebase focused verification are complete. The repeated
+hosted-local Linq E2E passed on the TypeScript 7 base, as did the full assistant
+automation suite plus the persisted modern and serialized legacy recovery cases,
+empty-selection refresh batching, hosted maintenance capacity/classification,
+package typechecks, harness tests, runner-bundle assembly/budget tests, docs
+drift, and diff checks. The branch is now rebased onto current `main`; conflict
+resolution preserves web-owned mailbox authority by exposing the terminal input
+id from a locally revalidated compound batch rather than restoring local numeric
+authority. Final exact-head focused/E2E verification, ReviewGPT, and CI remain.
