@@ -99,6 +99,7 @@ type PendingAction =
   | { id: string; kind: "cancel-invite"; label: string }
   | { id: string; kind: "remove-member"; label: string }
   | {
+      canRemove: boolean;
       from: HostedPlanCode;
       id: string;
       isOwner: boolean;
@@ -559,6 +560,7 @@ export function HostedFamilyManager(props: {
                               : `Manage ${member.label ?? "this family member"}'s plan`}
                           disabled={isActing}
                           onClick={() => setPendingAction({
+                            canRemove: !member.isOwner && !isRetry,
                             from: member.planCode,
                             id: member.memberId,
                             isOwner: member.isOwner,
@@ -570,23 +572,6 @@ export function HostedFamilyManager(props: {
                           {isRetry ? "Retry update" : "Manage"}
                         </Button>
                       ) : null}
-                      {member.isOwner ? null : (
-                        <Button
-                          type="button"
-                          variant="ghost"
-                          size="sm"
-                          disabled={isActing || member.pendingPlanCode !== null}
-                          onClick={() =>
-                            setPendingAction({
-                              id: member.memberId,
-                              kind: "remove-member",
-                              label: member.label ?? "this family member",
-                            })
-                          }
-                        >
-                          Remove
-                        </Button>
-                      )}
                     </div>
                   </td>
                 </tr>
@@ -912,6 +897,25 @@ export function HostedFamilyManager(props: {
                     ? pendingAction.to === "edge" ? "Upgrade to Edge" : "Downgrade to Pulse"
                       : "Cancel invite"}
             </Button>
+            {pendingAction?.kind === "change-plan" && pendingAction.canRemove ? (
+              <Button
+                type="button"
+                size="xl"
+                variant="destructive"
+                onClick={() => {
+                  setActionError(null);
+                  setPendingAction({
+                    id: pendingAction.id,
+                    kind: "remove-member",
+                    label: pendingAction.label,
+                  });
+                }}
+                disabled={isActing}
+                className="w-full"
+              >
+                Remove from Family
+              </Button>
+            ) : null}
             <Button
               type="button"
               size="xl"

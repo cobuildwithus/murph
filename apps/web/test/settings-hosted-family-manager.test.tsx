@@ -445,6 +445,49 @@ test("HostedFamilyManager confirms a member move to Edge", async () => {
   }
 });
 
+test("HostedFamilyManager keeps member removal inside the manage dialog", async () => {
+  const { HostedFamilyManager } = await import(
+    "@/src/components/settings/hosted-family-settings-actions"
+  );
+  const props = baseFamilyManagerProps();
+  const { cleanup, container, window } = await renderClientComponent(
+    createElement(HostedFamilyManager, {
+      ...props,
+      members: [
+        ...props.members,
+        {
+          isOwner: false,
+          joinedAtIso: "2026-07-02T00:00:00.000Z",
+          label: "Mom",
+          memberId: "member_mom",
+          pendingPlanCode: null,
+          planCode: "pulse" as const,
+        },
+      ],
+    }),
+    { requireButton: false },
+  );
+  mocks.requestHostedOnboardingJson.mockResolvedValueOnce({});
+
+  try {
+    assert.equal(buttonByTextOrNull(container, "Remove"), null);
+
+    await clickLastButton(container, window, "Manage");
+    assert.ok(buttonByText(container, "Remove from Family"));
+
+    await clickButton(container, window, "Remove from Family");
+    assert.match(container.textContent ?? "", /Remove Mom\?/);
+    await clickButton(container, window, "Remove member");
+
+    expect(mocks.requestHostedOnboardingJson).toHaveBeenCalledWith({
+      method: "DELETE",
+      url: "/api/settings/billing/family/members/member_mom",
+    });
+  } finally {
+    await cleanup();
+  }
+});
+
 test("HostedFamilyManager retries the persisted target while keeping removal locked", async () => {
   const { HostedFamilyManager } = await import(
     "@/src/components/settings/hosted-family-settings-actions"
@@ -476,10 +519,11 @@ test("HostedFamilyManager retries the persisted target while keeping removal loc
     );
     assert.ok(retry);
     assert.equal(retry.disabled, false);
-    assert.equal(buttonByText(container, "Remove").disabled, true);
+    assert.equal(buttonByTextOrNull(container, "Remove from Family"), null);
 
     await clickButton(container, window, "Retry update");
     assert.match(container.textContent ?? "", /Upgrade Mom from Pulse to Edge/);
+    assert.equal(buttonByTextOrNull(container, "Remove from Family"), null);
     await clickButton(container, window, "Upgrade to Edge");
 
     expect(mocks.requestHostedOnboardingJson).toHaveBeenCalledWith({
@@ -534,7 +578,7 @@ test("HostedFamilyManager locks row actions and ignores dialog dismissal while a
         ?.disabled,
       true,
     );
-    assert.equal(buttonByText(container, "Remove").disabled, true);
+    assert.equal(buttonByText(container, "Remove from Family").disabled, true);
     assert.match(container.textContent ?? "", /Working\.\.\./);
 
     const dismiss = container.querySelector<HTMLButtonElement>(
@@ -889,11 +933,15 @@ async function clickLastButton(
 }
 
 function buttonByText(container: HTMLElement, label: string): HTMLButtonElement {
-  const button = [...container.querySelectorAll("button")].find(
-    (candidate) => candidate.textContent?.includes(label),
-  );
+  const button = buttonByTextOrNull(container, label);
   assert.ok(button, `Expected button containing "${label}"`);
   return button;
+}
+
+function buttonByTextOrNull(container: HTMLElement, label: string): HTMLButtonElement | null {
+  return [...container.querySelectorAll("button")].find(
+    (candidate) => candidate.textContent?.includes(label),
+  ) ?? null;
 }
 
 function inputById(container: HTMLElement, id: string): HTMLInputElement {

@@ -1,5 +1,5 @@
 {
-  "catalogHash": "sha256:cec57a030a2a58b789be9ed75462fd4efacb51cf1a7ba19b131225a49b20fdac",
+  "catalogHash": "sha256:d3fb788fb23813ca125218d1bdc7ca33a9f4cccc14c65b54e3e235943c104f56",
   "generatedAt": null,
   "items": [
     {
@@ -33839,7 +33839,23 @@
       ],
       "equipment": [],
       "id": "ST626",
-      "images": [],
+      "images": [
+        {
+          "alt": "Woman lying supine with arms overhead, legs long, and bare ankles crossed on a sand mat.",
+          "step": "Set the crossed-ankle start",
+          "url": "https://imagedelivery.net/TDuhqfLDl0Fb8RGwGw6mYw/ff8da5d0-2331-490c-854d-ddef91304400/public"
+        },
+        {
+          "alt": "Woman forming a gentle supine banana curve with crossed ankles and both arms overhead.",
+          "step": "Arc into the stretch",
+          "url": "https://imagedelivery.net/TDuhqfLDl0Fb8RGwGw6mYw/1cd05b65-9b91-481b-a0c8-a003c5853600/public"
+        },
+        {
+          "alt": "Woman breathing at a gentle supine banana-stretch endpoint with crossed ankles and grounded hips.",
+          "step": "Settle and breathe",
+          "url": "https://imagedelivery.net/TDuhqfLDl0Fb8RGwGw6mYw/73d6c05d-ee82-432b-2bf8-b27614d6cb00/public"
+        }
+      ],
       "kind": "stretch",
       "level": "beginner",
       "modality": "Static stretch",
@@ -33933,7 +33949,23 @@
       ],
       "equipment": [],
       "id": "ST628",
-      "images": [],
+      "images": [
+        {
+          "alt": "A woman lies prone in a forearm-supported sphinx setup with elbows under shoulders and pelvis grounded.",
+          "step": "Set the sphinx",
+          "url": "https://imagedelivery.net/TDuhqfLDl0Fb8RGwGw6mYw/b830fc40-31aa-4f3e-40a1-5db11cee5800/public"
+        },
+        {
+          "alt": "The same woman presses her forearms down to lift her upper chest slightly while keeping her pelvis and legs grounded.",
+          "step": "Press the forearms",
+          "url": "https://imagedelivery.net/TDuhqfLDl0Fb8RGwGw6mYw/20c9a03c-d92c-4710-ddb4-805368104600/public"
+        },
+        {
+          "alt": "The same woman holds a slightly taller forearm-supported sphinx position with her pelvis grounded.",
+          "step": "Hold the gentle lift",
+          "url": "https://imagedelivery.net/TDuhqfLDl0Fb8RGwGw6mYw/773a9435-f0fa-4208-c79e-6d4e45079600/public"
+        }
+      ],
       "kind": "stretch",
       "level": "beginner",
       "modality": "Mobility",
@@ -33975,7 +34007,23 @@
       ],
       "equipment": [],
       "id": "ST629",
-      "images": [],
+      "images": [
+        {
+          "alt": "Woman lying prone barefoot with both palms beside her ribs, elbows bent, and both long legs grounded on a sand mat.",
+          "step": "Set the prone start",
+          "url": "https://imagedelivery.net/TDuhqfLDl0Fb8RGwGw6mYw/5e37b067-8e30-4ed6-c120-4937cd398800/public"
+        },
+        {
+          "alt": "Woman beginning a small cobra rock with her chest slightly lifted, elbows deeply bent, and pelvis and legs grounded.",
+          "step": "Rock into a small lift",
+          "url": "https://imagedelivery.net/TDuhqfLDl0Fb8RGwGw6mYw/abf761d8-7fef-4529-a928-f85919b67400/public"
+        },
+        {
+          "alt": "Woman pausing in a modest low cobra with bent elbows, a long neck, and her pelvis, thighs, and feet grounded.",
+          "step": "Pause in small cobra",
+          "url": "https://imagedelivery.net/TDuhqfLDl0Fb8RGwGw6mYw/17ca49c4-e32d-4867-c887-fe6ba7421800/public"
+        }
+      ],
       "kind": "stretch",
       "level": "beginner",
       "modality": "Dynamic stretch",
@@ -34181,7 +34229,23 @@
       ],
       "equipment": [],
       "id": "ST633",
-      "images": [],
+      "images": [
+        {
+          "alt": "Woman seated tall on a mat with bent knees, both bare feet planted, and both arms reaching forward.",
+          "step": "Sit tall with feet planted",
+          "url": "https://imagedelivery.net/TDuhqfLDl0Fb8RGwGw6mYw/601a6090-cfc1-403f-42ad-2390bc5e9800/public"
+        },
+        {
+          "alt": "Woman rounding her seated spine into a C curve with arms reaching forward and both feet grounded.",
+          "step": "Round into a C curve",
+          "url": "https://imagedelivery.net/TDuhqfLDl0Fb8RGwGw6mYw/a8d7456a-1227-4f4c-e4f0-d17df9fd3000/public"
+        },
+        {
+          "alt": "Woman laterally arcing a seated C curve to her right with hips centered and both feet planted.",
+          "step": "Reach slightly to the right",
+          "url": "https://imagedelivery.net/TDuhqfLDl0Fb8RGwGw6mYw/87ca1a36-f0e8-4506-f673-9fdbb10ae500/public"
+        }
+      ],
       "kind": "stretch",
       "level": "beginner",
       "modality": "Static stretch",
@@ -34280,7 +34344,28 @@
       ],
       "equipment": [],
       "id": "ST635",
-      "images": [],
+      "images": [
+        {
+          "alt": "A woman holds a neutral tabletop position on both hands and knees in an elevated three-quarter view.",
+          "step": "Set tabletop",
+          "url": "https://imagedelivery.net/TDuhqfLDl0Fb8RGwGw6mYw/50909d54-5329-41ef-d0a8-b9b548e9c400/public"
+        },
+        {
+          "alt": "The same woman lowers into child pose with both arms reaching long and her hips near her heels.",
+          "step": "Sit into child pose",
+          "url": "https://imagedelivery.net/TDuhqfLDl0Fb8RGwGw6mYw/0cfcfc86-2c7c-4293-5cf6-e12851e4e100/public"
+        },
+        {
+          "alt": "The woman threads her right arm palm-up beneath her planted left arm while keeping her hips back near her heels.",
+          "step": "Thread the right arm",
+          "url": "https://imagedelivery.net/TDuhqfLDl0Fb8RGwGw6mYw/c556c34a-638c-4167-fa19-703e922cc100/public"
+        },
+        {
+          "alt": "The woman threads her left arm palm-up beneath her planted right arm while keeping her hips back near her heels.",
+          "step": "Thread the left arm",
+          "url": "https://imagedelivery.net/TDuhqfLDl0Fb8RGwGw6mYw/b019d1b1-b2f5-4ed7-3c52-d3d88797f300/public"
+        }
+      ],
       "kind": "stretch",
       "level": "beginner",
       "modality": "Static stretch",
@@ -34694,7 +34779,23 @@
       ],
       "equipment": [],
       "id": "ST643",
-      "images": [],
+      "images": [
+        {
+          "alt": "Man seated barefoot in a supported shin-box position with the front leg viewer-right and back leg viewer-left.",
+          "step": "Set the shin box",
+          "url": "https://imagedelivery.net/TDuhqfLDl0Fb8RGwGw6mYw/8ee44dc5-92c4-4641-0972-fc954dda2100/public"
+        },
+        {
+          "alt": "Man sitting tall with the front leg folded viewer-right and back leg folded viewer-left, hands resting lightly on his thighs.",
+          "step": "Sit tall",
+          "url": "https://imagedelivery.net/TDuhqfLDl0Fb8RGwGw6mYw/f1e0be14-d134-4d10-c40e-00c69a026a00/public"
+        },
+        {
+          "alt": "Man holding a tall shin-box stretch with grounded hips and a relaxed breathing posture.",
+          "step": "Settle and breathe",
+          "url": "https://imagedelivery.net/TDuhqfLDl0Fb8RGwGw6mYw/3c44f544-1c5b-441b-8800-7772eb9f6f00/public"
+        }
+      ],
       "kind": "stretch",
       "level": "beginner",
       "modality": "Static stretch",
@@ -34737,7 +34838,23 @@
         "Couch or wall"
       ],
       "id": "ST644",
-      "images": [],
+      "images": [
+        {
+          "alt": "A man sets a half-kneeling hip-flexor stretch with his rear foot supported against a wall.",
+          "step": "Set the elevated back foot",
+          "url": "https://imagedelivery.net/TDuhqfLDl0Fb8RGwGw6mYw/8ed5889a-c534-40b7-fe54-33b382bd4700/public"
+        },
+        {
+          "alt": "The same man sits taller in the wall-supported half-kneeling stretch with ribs stacked over pelvis.",
+          "step": "Stack the pelvis",
+          "url": "https://imagedelivery.net/TDuhqfLDl0Fb8RGwGw6mYw/66b058b1-5542-43a7-529c-ac3d23c74600/public"
+        },
+        {
+          "alt": "The same man holds a gentle forward hip shift in the elevated-foot half-kneeling stretch.",
+          "step": "Shift forward gently",
+          "url": "https://imagedelivery.net/TDuhqfLDl0Fb8RGwGw6mYw/18f22ed0-743a-4789-0dfd-be0d9c17a400/public"
+        }
+      ],
       "kind": "stretch",
       "level": "intermediate",
       "modality": "Static stretch",
@@ -34938,7 +35055,23 @@
       ],
       "equipment": [],
       "id": "ST648",
-      "images": [],
+      "images": [
+        {
+          "alt": "Man in a barefoot right-foot-forward low lunge with the left knee supported on a sand mat and both hands on the front thigh.",
+          "step": "Set the low lunge",
+          "url": "https://imagedelivery.net/TDuhqfLDl0Fb8RGwGw6mYw/12eb650d-997c-4179-65ae-56356108d200/public"
+        },
+        {
+          "alt": "Man in a right-foot-forward low lunge bending his left rear knee and reaching his left hand toward the lifted left heel.",
+          "step": "Bend the rear knee and reach",
+          "url": "https://imagedelivery.net/TDuhqfLDl0Fb8RGwGw6mYw/71f86dea-4c28-4c8f-45b7-11712dba1e00/public"
+        },
+        {
+          "alt": "Man gently holding his left rear foot with his left hand in a stable right-foot-forward low lunge.",
+          "step": "Hold the rear foot gently",
+          "url": "https://imagedelivery.net/TDuhqfLDl0Fb8RGwGw6mYw/940a8e1a-9b91-4eb9-20a0-ee5f46c76100/public"
+        }
+      ],
       "kind": "stretch",
       "level": "intermediate",
       "modality": "Static stretch",
@@ -35136,7 +35269,23 @@
       ],
       "equipment": [],
       "id": "ST652",
-      "images": [],
+      "images": [
+        {
+          "alt": "Man in a right-leg-forward lizard lunge with the foot outside both planted hands and the back knee supported.",
+          "step": "Set the lizard lunge",
+          "url": "https://imagedelivery.net/TDuhqfLDl0Fb8RGwGw6mYw/aeb19b88-cf81-430b-a117-f8f7b6ac3500/public"
+        },
+        {
+          "alt": "Man midway through a lizard rock-back with hips moving rearward, front toes lifting, and support contacts unchanged.",
+          "step": "Start rocking back",
+          "url": "https://imagedelivery.net/TDuhqfLDl0Fb8RGwGw6mYw/3f543021-b491-4395-eb10-890136322700/public"
+        },
+        {
+          "alt": "Man holding a right-leg half split with toes lifted, heel down, long spine, two planted palms, and the back knee supported.",
+          "step": "Reach the half split",
+          "url": "https://imagedelivery.net/TDuhqfLDl0Fb8RGwGw6mYw/9924d9f8-4145-4464-62e3-68c5001dfb00/public"
+        }
+      ],
       "kind": "stretch",
       "level": "intermediate",
       "modality": "Dynamic stretch",
@@ -35178,7 +35327,28 @@
       ],
       "equipment": [],
       "id": "ST653",
-      "images": [],
+      "images": [
+        {
+          "alt": "A woman holds a left-leg-forward kneeling lizard lunge with both palms inside the lead foot.",
+          "step": "Set left-leg lizard",
+          "url": "https://imagedelivery.net/TDuhqfLDl0Fb8RGwGw6mYw/a958ceba-dd99-483b-9294-2e1a5fe12900/public"
+        },
+        {
+          "alt": "The woman lowers her left shoulder toward the inside of her left front knee while her right arm supports the lizard lunge.",
+          "step": "Drop toward the left knee",
+          "url": "https://imagedelivery.net/TDuhqfLDl0Fb8RGwGw6mYw/22057eda-6b77-46b4-9986-54ca19ca1400/public"
+        },
+        {
+          "alt": "The same woman holds a mirrored right-leg-forward lizard lunge with both palms inside the lead foot.",
+          "step": "Switch to right-leg lizard",
+          "url": "https://imagedelivery.net/TDuhqfLDl0Fb8RGwGw6mYw/e18193c4-304d-459b-20ba-5d6dafe31200/public"
+        },
+        {
+          "alt": "The woman lowers her right forearm and shoulder inside her right front knee while her left arm supports the mirrored lizard lunge.",
+          "step": "Drop toward the right knee",
+          "url": "https://imagedelivery.net/TDuhqfLDl0Fb8RGwGw6mYw/d25c2c18-9502-41b6-c354-911c3133ff00/public"
+        }
+      ],
       "kind": "stretch",
       "level": "intermediate",
       "modality": "Static stretch",
@@ -35220,7 +35390,23 @@
       ],
       "equipment": [],
       "id": "ST654",
-      "images": [],
+      "images": [
+        {
+          "alt": "Woman sitting upright in pigeon pose with a folded front leg and long back leg on a sand mat.",
+          "step": "Set pigeon pose",
+          "url": "https://imagedelivery.net/TDuhqfLDl0Fb8RGwGw6mYw/ccb99bd3-85f7-447e-2ae6-9b77d375fa00/public"
+        },
+        {
+          "alt": "Woman reaching the front-leg-side arm straight overhead from an upright pigeon pose.",
+          "step": "Reach overhead",
+          "url": "https://imagedelivery.net/TDuhqfLDl0Fb8RGwGw6mYw/fde8b1e9-ce61-4737-4869-d19765e06100/public"
+        },
+        {
+          "alt": "Woman side-bending away from the front leg in pigeon pose while keeping the opposite hand and hips grounded.",
+          "step": "Side bend away",
+          "url": "https://imagedelivery.net/TDuhqfLDl0Fb8RGwGw6mYw/5c31eee1-ceaf-44c8-4c88-47c8d91bfc00/public"
+        }
+      ],
       "kind": "stretch",
       "level": "intermediate",
       "modality": "Static stretch",
@@ -35262,7 +35448,23 @@
       ],
       "equipment": [],
       "id": "ST655",
-      "images": [],
+      "images": [
+        {
+          "alt": "A woman sits upright in a right-leg-forward pigeon pose with a comfortable diagonal shin.",
+          "step": "Set a comfortable pigeon",
+          "url": "https://imagedelivery.net/TDuhqfLDl0Fb8RGwGw6mYw/46b6b03f-a624-4fee-f1fb-5299adcec300/public"
+        },
+        {
+          "alt": "The same woman adjusts her front shin to a more open but still diagonal pigeon position.",
+          "step": "Adjust the shin angle",
+          "url": "https://imagedelivery.net/TDuhqfLDl0Fb8RGwGw6mYw/20221615-f1d0-49a6-7b8f-e5ce7dab4c00/public"
+        },
+        {
+          "alt": "The same woman holds a supported pigeon endpoint with square hips and a long spine.",
+          "step": "Settle into the angle",
+          "url": "https://imagedelivery.net/TDuhqfLDl0Fb8RGwGw6mYw/318b510b-537c-4035-de85-7abe9a03f100/public"
+        }
+      ],
       "kind": "stretch",
       "level": "intermediate",
       "modality": "Static stretch",
@@ -35467,7 +35669,23 @@
         "Table"
       ],
       "id": "ST659",
-      "images": [],
+      "images": [
+        {
+          "alt": "Woman standing barefoot behind a table with her bent left shin fully supported sideways on the tabletop and her right foot steady on the floor.",
+          "step": "Set the supported figure-four",
+          "url": "https://imagedelivery.net/TDuhqfLDl0Fb8RGwGw6mYw/344da26d-98b8-4d75-678e-51e7f9602c00/public"
+        },
+        {
+          "alt": "Woman beginning a long-spine forward hinge over her supported left-shin figure-four while standing on her right foot.",
+          "step": "Begin the hip hinge",
+          "url": "https://imagedelivery.net/TDuhqfLDl0Fb8RGwGw6mYw/545f01eb-896b-4dd1-b256-0596da485800/public"
+        },
+        {
+          "alt": "Woman pausing in a comfortable forward hinge over a table-supported left figure-four with a long spine and steady right foot.",
+          "step": "Pause in the forward hinge",
+          "url": "https://imagedelivery.net/TDuhqfLDl0Fb8RGwGw6mYw/5a0c741d-230b-4514-aa90-558499f03b00/public"
+        }
+      ],
       "kind": "stretch",
       "level": "beginner",
       "modality": "Static stretch",
@@ -35667,7 +35885,23 @@
       ],
       "equipment": [],
       "id": "ST663",
-      "images": [],
+      "images": [
+        {
+          "alt": "Woman sitting tall in a loose cross-legged position with both bare feet visible before half lotus.",
+          "step": "Set a comfortable seat",
+          "url": "https://imagedelivery.net/TDuhqfLDl0Fb8RGwGw6mYw/44eebfc1-4793-458e-c1c5-eafbe39a4900/public"
+        },
+        {
+          "alt": "Woman supporting her right foot with both hands midway toward the opposite thigh while sitting tall.",
+          "step": "Guide the right foot up",
+          "url": "https://imagedelivery.net/TDuhqfLDl0Fb8RGwGw6mYw/41b7fc75-60c4-4718-ccfe-712778bfe300/public"
+        },
+        {
+          "alt": "Woman holding a half-lotus endpoint with the same moving knee open at viewer-left and its foot on the opposite thigh.",
+          "step": "Rest the foot on the thigh",
+          "url": "https://imagedelivery.net/TDuhqfLDl0Fb8RGwGw6mYw/dda41d13-4162-41fc-220e-763bf2bc1b00/public"
+        }
+      ],
       "kind": "stretch",
       "level": "intermediate",
       "modality": "Static stretch",
@@ -35767,7 +36001,23 @@
         "Wall"
       ],
       "id": "ST665",
-      "images": [],
+      "images": [
+        {
+          "alt": "A woman sets a high wide-knee frog position with both separate bare feet pressing a wall behind her.",
+          "step": "Set wide knees at the wall",
+          "url": "https://imagedelivery.net/TDuhqfLDl0Fb8RGwGw6mYw/dd5e2060-0b27-4804-183d-7a1cee60de00/public"
+        },
+        {
+          "alt": "The woman shifts her hips backward in a mid-range frog stretch while both feet remain supported on the wall.",
+          "step": "Shift the hips back",
+          "url": "https://imagedelivery.net/TDuhqfLDl0Fb8RGwGw6mYw/ac5907a3-306e-4b62-f674-623bc2036600/public"
+        },
+        {
+          "alt": "The woman holds a deeper supported frog stretch with both ankles and feet separated against the wall.",
+          "step": "Settle into the hold",
+          "url": "https://imagedelivery.net/TDuhqfLDl0Fb8RGwGw6mYw/86e3916e-e03f-4400-511d-5fb32831ef00/public"
+        }
+      ],
       "kind": "stretch",
       "level": "intermediate",
       "modality": "Static stretch",
@@ -35861,7 +36111,23 @@
       ],
       "equipment": [],
       "id": "ST667",
-      "images": [],
+      "images": [
+        {
+          "alt": "Man in a neutral hands-and-knees position on a sand exercise mat.",
+          "step": "Start on all fours",
+          "url": "https://imagedelivery.net/TDuhqfLDl0Fb8RGwGw6mYw/5b3bee89-2fbe-4d56-2465-c3dea6ad1100/public"
+        },
+        {
+          "alt": "Man on both hands and one knee with the other leg extended straight to the side, heel down and toes lifted.",
+          "step": "Extend the side leg",
+          "url": "https://imagedelivery.net/TDuhqfLDl0Fb8RGwGw6mYw/79c1caed-466b-40da-5052-07eab361a400/public"
+        },
+        {
+          "alt": "Man in a deep adductor rock-back with hips behind the support knee, arms reaching forward, and the straight side-leg heel grounded with toes up.",
+          "step": "Rock the hips back",
+          "url": "https://imagedelivery.net/TDuhqfLDl0Fb8RGwGw6mYw/9c73dd09-fbb5-4201-9f8d-2e908aca1a00/public"
+        }
+      ],
       "kind": "stretch",
       "level": "beginner",
       "modality": "Mobility",
@@ -35902,7 +36168,23 @@
       ],
       "equipment": [],
       "id": "ST668",
-      "images": [],
+      "images": [
+        {
+          "alt": "A man kneels on his left knee with his right leg extended straight to the side.",
+          "step": "Extend the right leg",
+          "url": "https://imagedelivery.net/TDuhqfLDl0Fb8RGwGw6mYw/4d4b88f6-bbad-4b88-5b53-bab22e10f300/public"
+        },
+        {
+          "alt": "The same man shifts his hips back in a half-kneeling adductor rock while keeping the side leg long.",
+          "step": "Shift the hips back",
+          "url": "https://imagedelivery.net/TDuhqfLDl0Fb8RGwGw6mYw/c37deee4-151a-412c-4086-e19ebbb01600/public"
+        },
+        {
+          "alt": "The same man reaches his left arm overhead toward his extended right leg while holding the adductor stretch.",
+          "step": "Add the overhead reach",
+          "url": "https://imagedelivery.net/TDuhqfLDl0Fb8RGwGw6mYw/f078951c-9f3b-471d-0a53-f0d85a7d8000/public"
+        }
+      ],
       "kind": "stretch",
       "level": "beginner",
       "modality": "Static stretch",
@@ -36052,7 +36334,23 @@
         "Wall"
       ],
       "id": "ST671",
-      "images": [],
+      "images": [
+        {
+          "alt": "Man standing barefoot in a wide stance with his wall-side palm lightly supported, opposite hand on his hip, and both feet planted with slight natural turnout.",
+          "step": "Set the wide stance",
+          "url": "https://imagedelivery.net/TDuhqfLDl0Fb8RGwGw6mYw/b5e0ef86-c238-4583-fb7f-733a42d7f300/public"
+        },
+        {
+          "alt": "Man beginning a viewer-right wall-supported side rock with his bent-side knee flexed, wall-side leg long, and both slightly turned-out bare feet planted.",
+          "step": "Rock toward the bent-side foot",
+          "url": "https://imagedelivery.net/TDuhqfLDl0Fb8RGwGw6mYw/55f54450-001d-4d41-6f9f-94bb0fb20c00/public"
+        },
+        {
+          "alt": "Man pausing in a moderate viewer-right side lunge beside a wall with his bent-side knee aligned, wall-side leg long, and both slightly turned-out feet planted.",
+          "step": "Pause in the side lunge",
+          "url": "https://imagedelivery.net/TDuhqfLDl0Fb8RGwGw6mYw/d46d2c01-d089-4b12-f0f3-2bf8c0484500/public"
+        }
+      ],
       "kind": "stretch",
       "level": "beginner",
       "modality": "Mobility",
@@ -36208,7 +36506,23 @@
       ],
       "equipment": [],
       "id": "ST674",
-      "images": [],
+      "images": [
+        {
+          "alt": "Man standing barefoot in a wide stance with both heels down and chest tall before a Cossack hold.",
+          "step": "Set a wide stance",
+          "url": "https://imagedelivery.net/TDuhqfLDl0Fb8RGwGw6mYw/59b1b331-f5a3-43e0-d855-01211607aa00/public"
+        },
+        {
+          "alt": "Man shifting into a viewer-left side squat while the viewer-right leg lengthens and its heel stays planted.",
+          "step": "Shift into the right side",
+          "url": "https://imagedelivery.net/TDuhqfLDl0Fb8RGwGw6mYw/ecfeb275-b3c4-4d4f-6bfc-967f755ffa00/public"
+        },
+        {
+          "alt": "Man holding a deep viewer-left Cossack with the viewer-right leg straight and its heel pressed into the mat.",
+          "step": "Hold the Cossack",
+          "url": "https://imagedelivery.net/TDuhqfLDl0Fb8RGwGw6mYw/8af37764-3d8c-4146-1c0f-2844328a2700/public"
+        }
+      ],
       "kind": "stretch",
       "level": "intermediate",
       "modality": "Static stretch",
@@ -36250,7 +36564,28 @@
       ],
       "equipment": [],
       "id": "ST675",
-      "images": [],
+      "images": [
+        {
+          "alt": "A woman stands upright in a wide symmetrical stance with both bare feet flat and her chest tall.",
+          "step": "Set a wide stance",
+          "url": "https://imagedelivery.net/TDuhqfLDl0Fb8RGwGw6mYw/151671fc-a201-409d-6cf6-67ac9c579700/public"
+        },
+        {
+          "alt": "The woman holds a right-side Cossack squat with her straight left heel grounded and left toes lifted.",
+          "step": "Sit to the right",
+          "url": "https://imagedelivery.net/TDuhqfLDl0Fb8RGwGw6mYw/ed979290-a4f7-47b5-51e6-970ef7073700/public"
+        },
+        {
+          "alt": "The woman returns upright to the center of a wide stance with both feet flat and her arms lightly forward.",
+          "step": "Return through center",
+          "url": "https://imagedelivery.net/TDuhqfLDl0Fb8RGwGw6mYw/0f9e98d2-b248-4afb-fc5d-e250b1b3b200/public"
+        },
+        {
+          "alt": "The woman holds a left-side Cossack squat with her straight right heel grounded and right toes lifted.",
+          "step": "Sit to the left",
+          "url": "https://imagedelivery.net/TDuhqfLDl0Fb8RGwGw6mYw/f7f133a6-26bc-42d3-cd77-cc150f07da00/public"
+        }
+      ],
       "kind": "stretch",
       "level": "intermediate",
       "modality": "Static stretch",
@@ -36402,7 +36737,23 @@
         "Pillows optional"
       ],
       "id": "ST678",
-      "images": [],
+      "images": [
+        {
+          "alt": "Woman lying on her back with knees bent and bare feet flat on a sand mat.",
+          "step": "Lie back with knees bent",
+          "url": "https://imagedelivery.net/TDuhqfLDl0Fb8RGwGw6mYw/dfabe2a0-c09f-41bd-ff0a-658c5f719c00/public"
+        },
+        {
+          "alt": "Woman lying supine with knees open symmetrically and the soles of her feet together.",
+          "step": "Bring the soles together",
+          "url": "https://imagedelivery.net/TDuhqfLDl0Fb8RGwGw6mYw/277e27d0-8da8-4695-8d75-7a0fb25a8500/public"
+        },
+        {
+          "alt": "Woman breathing calmly in reclined bound angle with one hand on her chest and the other on her abdomen.",
+          "step": "Relax and breathe",
+          "url": "https://imagedelivery.net/TDuhqfLDl0Fb8RGwGw6mYw/aaa859e5-790d-4632-6ae3-f9c702b90f00/public"
+        }
+      ],
       "kind": "stretch",
       "level": "beginner",
       "modality": "Static stretch",
@@ -36444,7 +36795,28 @@
       ],
       "equipment": [],
       "id": "ST679",
-      "images": [],
+      "images": [
+        {
+          "alt": "A woman lies supine with her head supported and both knees drawing toward her ribs as her hands reach toward matching feet.",
+          "step": "Draw the knees in",
+          "url": "https://imagedelivery.net/TDuhqfLDl0Fb8RGwGw6mYw/bd97a75b-3801-4e92-363d-b5eb17860700/public"
+        },
+        {
+          "alt": "The same woman holds the outside edges of her matching feet in a centered happy-baby position.",
+          "step": "Hold happy baby",
+          "url": "https://imagedelivery.net/TDuhqfLDl0Fb8RGwGw6mYw/da982861-7a93-4532-7ebe-8164d88dd400/public"
+        },
+        {
+          "alt": "The same woman shifts her happy-baby hold toward her left while her head and shoulders stay grounded.",
+          "step": "Rock to subject-left",
+          "url": "https://imagedelivery.net/TDuhqfLDl0Fb8RGwGw6mYw/66c114f5-f152-4340-d488-b68f8c972400/public"
+        },
+        {
+          "alt": "The same woman shifts her happy-baby hold toward her right while her head and shoulders stay grounded.",
+          "step": "Rock to subject-right",
+          "url": "https://imagedelivery.net/TDuhqfLDl0Fb8RGwGw6mYw/a0e871a3-30e2-48b4-f771-fb522c71ee00/public"
+        }
+      ],
       "kind": "stretch",
       "level": "beginner",
       "modality": "Dynamic stretch",
@@ -36486,7 +36858,23 @@
       ],
       "equipment": [],
       "id": "ST680",
-      "images": [],
+      "images": [
+        {
+          "alt": "Woman upright in half-kneeling with the viewer-right working foot slightly offset and planted, knee over ankle, and rear knee grounded.",
+          "step": "Set the offset half-kneeling stance",
+          "url": "https://imagedelivery.net/TDuhqfLDl0Fb8RGwGw6mYw/d188767f-5c57-44a4-04c7-a149140fb600/public"
+        },
+        {
+          "alt": "Woman in upright half-kneeling moving her viewer-right working knee gently inward around a planted foot while the rear knee stays grounded.",
+          "step": "Let the front knee move inward",
+          "url": "https://imagedelivery.net/TDuhqfLDl0Fb8RGwGw6mYw/44cdeb7f-2fbf-42fb-d77e-c22b32fdf800/public"
+        },
+        {
+          "alt": "Woman pausing in gentle half-kneeling hip internal rotation with her viewer-right knee angled inward and working foot flat.",
+          "step": "Pause at a gentle inward angle",
+          "url": "https://imagedelivery.net/TDuhqfLDl0Fb8RGwGw6mYw/dfc197ac-d34b-4ace-228c-0c835565ab00/public"
+        }
+      ],
       "kind": "stretch",
       "level": "intermediate",
       "modality": "Mobility",
@@ -36528,7 +36916,28 @@
         "Strap or towel"
       ],
       "id": "ST681",
-      "images": [],
+      "images": [
+        {
+          "alt": "Woman lying supine with her viewer-left right knee bent and lifted in a towel while the other foot stays planted.",
+          "step": "Bend the right knee",
+          "url": "https://imagedelivery.net/TDuhqfLDl0Fb8RGwGw6mYw/f5d567c8-5213-48d1-db89-eb7323a29000/public"
+        },
+        {
+          "alt": "Woman slowly straightening her towel-supported viewer-left right knee with heel reaching upward.",
+          "step": "Straighten the right knee",
+          "url": "https://imagedelivery.net/TDuhqfLDl0Fb8RGwGw6mYw/cc544a8f-3751-4579-3ee0-40fb281c6800/public"
+        },
+        {
+          "alt": "Woman lying supine after switching to a bent viewer-right left knee in a towel with the other foot planted.",
+          "step": "Bend the left knee",
+          "url": "https://imagedelivery.net/TDuhqfLDl0Fb8RGwGw6mYw/732656cb-8ef8-40f0-25e4-f4a1a0a27300/public"
+        },
+        {
+          "alt": "Woman slowly straightening her towel-supported viewer-right left knee with heel reaching upward.",
+          "step": "Straighten the left knee",
+          "url": "https://imagedelivery.net/TDuhqfLDl0Fb8RGwGw6mYw/9a3ffc00-1d1c-4cae-2c80-f8c8bc257500/public"
+        }
+      ],
       "kind": "stretch",
       "level": "beginner",
       "modality": "Static stretch",
@@ -36571,7 +36980,23 @@
         "Strap or towel"
       ],
       "id": "ST682",
-      "images": [],
+      "images": [
+        {
+          "alt": "A woman lies supine with her right leg raised and supported by a strap around the forefoot while her left leg stays long.",
+          "step": "Raise and support the right leg",
+          "url": "https://imagedelivery.net/TDuhqfLDl0Fb8RGwGw6mYw/617e9923-e0a3-47bb-dbb6-1be62b479a00/public"
+        },
+        {
+          "alt": "The woman keeps her strap-supported right leg still while pointing the raised foot and toes away from her shin.",
+          "step": "Point the toes",
+          "url": "https://imagedelivery.net/TDuhqfLDl0Fb8RGwGw6mYw/86288788-221b-4fe9-defd-7fed0845c900/public"
+        },
+        {
+          "alt": "The woman flexes her strap-supported raised right ankle, drawing the toes toward the shin while the heel reaches up.",
+          "step": "Flex the ankle",
+          "url": "https://imagedelivery.net/TDuhqfLDl0Fb8RGwGw6mYw/ec14059e-5eca-46cc-5500-34e0cbd12600/public"
+        }
+      ],
       "kind": "stretch",
       "level": "beginner",
       "modality": "Mobility",
@@ -36615,7 +37040,28 @@
         "Strap or towel"
       ],
       "id": "ST683",
-      "images": [],
+      "images": [
+        {
+          "alt": "Man lying supine with a yoga strap around the forefoot of a bent raised leg and the opposite foot planted.",
+          "step": "Loop the strap",
+          "url": "https://imagedelivery.net/TDuhqfLDl0Fb8RGwGw6mYw/6298d822-367a-4661-abca-ed5baa96d700/public"
+        },
+        {
+          "alt": "Man holding a strap around the foot of one straight raised leg while lying supine with the other knee bent.",
+          "step": "Straighten the leg up",
+          "url": "https://imagedelivery.net/TDuhqfLDl0Fb8RGwGw6mYw/ac19cad6-b26a-447c-8075-423f7d5f8000/public"
+        },
+        {
+          "alt": "Man lowering one straight strapped leg to a low diagonal while keeping the opposite foot and pelvis grounded.",
+          "step": "Lower with control",
+          "url": "https://imagedelivery.net/TDuhqfLDl0Fb8RGwGw6mYw/a1525ceb-ece4-4485-f1ac-1170d29b2000/public"
+        },
+        {
+          "alt": "Man returning the same straight strapped leg upward to repeat a controlled supine hamstring floss.",
+          "step": "Lift and repeat",
+          "url": "https://imagedelivery.net/TDuhqfLDl0Fb8RGwGw6mYw/ff756bd9-9ba5-425f-1537-cbb56c0cd000/public"
+        }
+      ],
       "kind": "stretch",
       "level": "beginner",
       "modality": "Dynamic stretch",
@@ -36659,7 +37105,23 @@
         "Low step"
       ],
       "id": "ST684",
-      "images": [],
+      "images": [
+        {
+          "alt": "A man stands tall behind a low charcoal exercise step with both feet on the floor.",
+          "step": "Stand behind the step",
+          "url": "https://imagedelivery.net/TDuhqfLDl0Fb8RGwGw6mYw/e62cf00b-b7ed-41b0-3003-39b833268f00/public"
+        },
+        {
+          "alt": "The same man places his right heel on the step while keeping his left foot flat on the floor.",
+          "step": "Place the right heel",
+          "url": "https://imagedelivery.net/TDuhqfLDl0Fb8RGwGw6mYw/6d751a83-a2a0-4cfc-63d7-e0df6285a400/public"
+        },
+        {
+          "alt": "The same man hinges forward with a long spine over his right heel on the step.",
+          "step": "Hinge with a long spine",
+          "url": "https://imagedelivery.net/TDuhqfLDl0Fb8RGwGw6mYw/61f7ede0-e102-43f2-1343-7c7f91e24600/public"
+        }
+      ],
       "kind": "stretch",
       "level": "beginner",
       "modality": "Static stretch",
@@ -36701,7 +37163,28 @@
       ],
       "equipment": [],
       "id": "ST685",
-      "images": [],
+      "images": [
+        {
+          "alt": "Man standing in a short staggered stance with his viewer-right working heel forward and forefoot lifted while the support foot stays flat behind.",
+          "step": "Set the heel-forward stance",
+          "url": "https://imagedelivery.net/TDuhqfLDl0Fb8RGwGw6mYw/a638a30a-cc4a-4d02-dc4a-9fac9fe9d600/public"
+        },
+        {
+          "alt": "Man standing upright with his viewer-right working heel anchored and forefoot visibly rotated viewer-left toward the midline.",
+          "step": "Turn the working toes slightly inward",
+          "url": "https://imagedelivery.net/TDuhqfLDl0Fb8RGwGw6mYw/aadd8640-307a-485a-7baf-243ddfcfcd00/public"
+        },
+        {
+          "alt": "Man beginning a long-spine hip hinge with his viewer-right working heel anchored and toe cluster visibly rotated toward viewer-left.",
+          "step": "Begin the hip hinge",
+          "url": "https://imagedelivery.net/TDuhqfLDl0Fb8RGwGw6mYw/62d1b9b2-b704-4b66-2452-272a3d7c0600/public"
+        },
+        {
+          "alt": "Man pausing in a comfortable long-spine hamstring hinge with his viewer-right heel anchored and toe cluster visibly rotated toward viewer-left.",
+          "step": "Pause in the outer-hamstring stretch",
+          "url": "https://imagedelivery.net/TDuhqfLDl0Fb8RGwGw6mYw/1407298c-7b01-4c27-58d9-3b907125ba00/public"
+        }
+      ],
       "kind": "stretch",
       "level": "beginner",
       "modality": "Static stretch",
@@ -36742,7 +37225,28 @@
       ],
       "equipment": [],
       "id": "ST686",
-      "images": [],
+      "images": [
+        {
+          "alt": "Man standing tall with his viewer-left right heel forward and toes lifted before turning them out.",
+          "step": "Set the right heel forward",
+          "url": "https://imagedelivery.net/TDuhqfLDl0Fb8RGwGw6mYw/32e46ff2-7850-45ed-a0e2-7a9b12302800/public"
+        },
+        {
+          "alt": "Man standing tall as his lifted viewer-left right toes turn slightly outward around a planted heel.",
+          "step": "Turn the right toes out",
+          "url": "https://imagedelivery.net/TDuhqfLDl0Fb8RGwGw6mYw/fe66af9e-19a4-4f49-c316-5e4a962ef600/public"
+        },
+        {
+          "alt": "Man hinging toward the camera over his forward viewer-left right leg while the toes stay turned out.",
+          "step": "Hinge over the right leg",
+          "url": "https://imagedelivery.net/TDuhqfLDl0Fb8RGwGw6mYw/76786f84-ffc6-48d3-dafc-67a165367200/public"
+        },
+        {
+          "alt": "Man hinging toward the camera over his forward viewer-right left leg with its heel down and toes turned outward.",
+          "step": "Switch and hinge left",
+          "url": "https://imagedelivery.net/TDuhqfLDl0Fb8RGwGw6mYw/a42e52af-47bd-4601-729b-e21696756300/public"
+        }
+      ],
       "kind": "stretch",
       "level": "beginner",
       "modality": "Static stretch",
@@ -36785,7 +37289,23 @@
         "Strap or towel"
       ],
       "id": "ST687",
-      "images": [],
+      "images": [
+        {
+          "alt": "A woman sits tall with one leg extended and a strap looped around that foot while the other leg folds outward.",
+          "step": "Sit tall with the strap",
+          "url": "https://imagedelivery.net/TDuhqfLDl0Fb8RGwGw6mYw/da6dab3e-32a5-4dbf-cd24-7219e40d4500/public"
+        },
+        {
+          "alt": "The woman hinges forward from her hips with a long spine while her strap-supported right leg stays straight on the mat.",
+          "step": "Hinge from the hips",
+          "url": "https://imagedelivery.net/TDuhqfLDl0Fb8RGwGw6mYw/8ebcb35d-8083-4b22-56c5-b2a291e3ea00/public"
+        },
+        {
+          "alt": "The woman holds a deeper seated hamstring hinge with her spine long and her extended heel grounded.",
+          "step": "Hold the gentle stretch",
+          "url": "https://imagedelivery.net/TDuhqfLDl0Fb8RGwGw6mYw/c45f9945-de88-4937-c528-842a74988600/public"
+        }
+      ],
       "kind": "stretch",
       "level": "beginner",
       "modality": "Static stretch",
@@ -36827,7 +37347,28 @@
       ],
       "equipment": [],
       "id": "ST688",
-      "images": [],
+      "images": [
+        {
+          "alt": "Woman sitting tall with one leg extended and the other knee bent, foot resting against the inner thigh.",
+          "step": "Set the legs",
+          "url": "https://imagedelivery.net/TDuhqfLDl0Fb8RGwGw6mYw/1dfc3b88-392b-429e-a719-3fc94e8e3a00/public"
+        },
+        {
+          "alt": "Woman seated upright with one straight leg and its toes actively flexed upward.",
+          "step": "Flex the long foot",
+          "url": "https://imagedelivery.net/TDuhqfLDl0Fb8RGwGw6mYw/b84f541d-a95b-46ad-53ff-8edc6f9d8500/public"
+        },
+        {
+          "alt": "Woman hinging forward with a long spine over one straight flexed-foot leg, hands resting on the shin.",
+          "step": "Hinge from the hips",
+          "url": "https://imagedelivery.net/TDuhqfLDl0Fb8RGwGw6mYw/3d1b14a7-72ed-4aa5-6212-4a45e2926900/public"
+        },
+        {
+          "alt": "Woman breathing in a controlled seated hamstring stretch with an open chest and long neutral spine.",
+          "step": "Breathe in the stretch",
+          "url": "https://imagedelivery.net/TDuhqfLDl0Fb8RGwGw6mYw/249f4f65-0493-4775-6bf0-892c11e4ef00/public"
+        }
+      ],
       "kind": "stretch",
       "level": "beginner",
       "modality": "Static stretch",
@@ -36867,7 +37408,23 @@
       ],
       "equipment": [],
       "id": "ST689",
-      "images": [],
+      "images": [
+        {
+          "alt": "A woman holds an upright right-leg-forward half-kneeling stance on a sand mat.",
+          "step": "Set the half-kneeling stance",
+          "url": "https://imagedelivery.net/TDuhqfLDl0Fb8RGwGw6mYw/72792c68-92ab-4115-9c65-d45be5bc2b00/public"
+        },
+        {
+          "alt": "The same woman straightens her right front leg with the heel planted and toes lifted.",
+          "step": "Straighten and lift the toes",
+          "url": "https://imagedelivery.net/TDuhqfLDl0Fb8RGwGw6mYw/5fcc881c-db23-4316-2559-5342ba21db00/public"
+        },
+        {
+          "alt": "The same woman hinges forward with a long spine over her straight right leg while keeping the heel down and toes up.",
+          "step": "Hinge back gently",
+          "url": "https://imagedelivery.net/TDuhqfLDl0Fb8RGwGw6mYw/7bd69059-6add-41c5-51fb-e570b62e8000/public"
+        }
+      ],
       "kind": "stretch",
       "level": "beginner",
       "modality": "Static stretch",
@@ -36908,7 +37465,28 @@
       ],
       "equipment": [],
       "id": "ST690",
-      "images": [],
+      "images": [
+        {
+          "alt": "Woman in a supported half split with hips back, long viewer-right working leg, relaxed foot on the floor, and rear knee/shin grounded.",
+          "step": "Set the half-split base",
+          "url": "https://imagedelivery.net/TDuhqfLDl0Fb8RGwGw6mYw/eea5d564-77e5-47d9-4f68-3ee1e1386c00/public"
+        },
+        {
+          "alt": "Woman holding a stable half split while pointing her viewer-right working foot away and down with the leg long.",
+          "step": "Point the working foot",
+          "url": "https://imagedelivery.net/TDuhqfLDl0Fb8RGwGw6mYw/a64d4b2c-2092-4f60-8102-fe244ad6d800/public"
+        },
+        {
+          "alt": "Woman holding a stable half split with her viewer-right heel grounded and toes flexed strongly toward the shin.",
+          "step": "Flex the working foot",
+          "url": "https://imagedelivery.net/TDuhqfLDl0Fb8RGwGw6mYw/629867e7-150e-448b-a558-af9199094900/public"
+        },
+        {
+          "alt": "Woman holding a stable half split with her viewer-right foot at ankle midrange and a two-headed arrow showing point-and-flex.",
+          "step": "Alternate in a controlled range",
+          "url": "https://imagedelivery.net/TDuhqfLDl0Fb8RGwGw6mYw/e98ec599-8c78-4dc9-abd5-a379f0291000/public"
+        }
+      ],
       "kind": "stretch",
       "level": "beginner",
       "modality": "Mobility",
@@ -36950,7 +37528,28 @@
       ],
       "equipment": [],
       "id": "ST691",
-      "images": [],
+      "images": [
+        {
+          "alt": "Woman in a right low lunge with viewer-left front foot flat, viewer-right rear knee down, and both hands on the mat.",
+          "step": "Set a right low lunge",
+          "url": "https://imagedelivery.net/TDuhqfLDl0Fb8RGwGw6mYw/2eab08f0-9b84-4dcc-a598-66d0dafb0f00/public"
+        },
+        {
+          "alt": "Woman rocking back into a right half split with viewer-left heel anchored and both hands visibly supported inside the shin.",
+          "step": "Rock back to half split",
+          "url": "https://imagedelivery.net/TDuhqfLDl0Fb8RGwGw6mYw/c2f70c3e-ea33-41e2-2cfd-562a5e293200/public"
+        },
+        {
+          "alt": "Woman returning with control to the same right low lunge after a half-split rock-back.",
+          "step": "Return to the lunge",
+          "url": "https://imagedelivery.net/TDuhqfLDl0Fb8RGwGw6mYw/72e0e893-67a1-4229-fbae-23698a081c00/public"
+        },
+        {
+          "alt": "Woman facing diagonally viewer-left after switching to a viewer-right left half split with viewer-left rear knee down and both hands visible.",
+          "step": "Switch and rock back left",
+          "url": "https://imagedelivery.net/TDuhqfLDl0Fb8RGwGw6mYw/eea35d49-ea1b-47e7-99ee-8d4c9d36b300/public"
+        }
+      ],
       "kind": "stretch",
       "level": "beginner",
       "modality": "Dynamic stretch",
@@ -36993,7 +37592,23 @@
         "Yoga blocks or books"
       ],
       "id": "ST692",
-      "images": [],
+      "images": [
+        {
+          "alt": "A woman stands in a short staggered stance with both heels grounded and two yoga blocks beside her front foot.",
+          "step": "Set the staggered stance",
+          "url": "https://imagedelivery.net/TDuhqfLDl0Fb8RGwGw6mYw/769b97cf-820e-481a-6060-aac8fce70800/public"
+        },
+        {
+          "alt": "The woman hinges forward with a long spine and supports each hand on a yoga block beside her front foot.",
+          "step": "Hinge to the blocks",
+          "url": "https://imagedelivery.net/TDuhqfLDl0Fb8RGwGw6mYw/59ff0ed5-199b-4ebd-e399-76542add5d00/public"
+        },
+        {
+          "alt": "The woman holds a deeper pyramid stretch over her front leg with a long spine and both hands supported by blocks.",
+          "step": "Lengthen over the front leg",
+          "url": "https://imagedelivery.net/TDuhqfLDl0Fb8RGwGw6mYw/33258d38-6e64-4fef-d739-97ce71d3ad00/public"
+        }
+      ],
       "kind": "stretch",
       "level": "beginner",
       "modality": "Static stretch",
@@ -37035,7 +37650,28 @@
       ],
       "equipment": [],
       "id": "ST693",
-      "images": [],
+      "images": [
+        {
+          "alt": "Man standing tall with bare feet parallel and hip-width on a sand exercise mat.",
+          "step": "Stand hip-width",
+          "url": "https://imagedelivery.net/TDuhqfLDl0Fb8RGwGw6mYw/d66b8fff-8b96-4fc9-d004-7f2a3fdce100/public"
+        },
+        {
+          "alt": "Man standing with both knees softly bent and both bare heels grounded.",
+          "step": "Soften the knees",
+          "url": "https://imagedelivery.net/TDuhqfLDl0Fb8RGwGw6mYw/4566f4a8-4db9-4e94-221d-8b372ce3dd00/public"
+        },
+        {
+          "alt": "Man halfway into a forward fold with bent knees, grounded heels, and hands resting lightly on his shins.",
+          "step": "Hinge forward",
+          "url": "https://imagedelivery.net/TDuhqfLDl0Fb8RGwGw6mYw/dbcf18e6-3be5-4e82-ae7d-eb85d8172900/public"
+        },
+        {
+          "alt": "Man in a relaxed forward fold with knees bent, hips high, heels grounded, and head and arms hanging down.",
+          "step": "Relax into the fold",
+          "url": "https://imagedelivery.net/TDuhqfLDl0Fb8RGwGw6mYw/97ed7e4d-f1dc-426d-b8e3-cf3e7dcd8200/public"
+        }
+      ],
       "kind": "stretch",
       "level": "beginner",
       "modality": "Static stretch",
@@ -37076,7 +37712,18 @@
       ],
       "equipment": [],
       "id": "ST694",
-      "images": [],
+      "images": [
+        {
+          "alt": "A barefoot man stands tall with parallel hip-width feet and softly extended knees.",
+          "step": "Stand tall",
+          "url": "https://imagedelivery.net/TDuhqfLDl0Fb8RGwGw6mYw/375a33d8-58e6-46ec-68e2-814f58c0aa00/public"
+        },
+        {
+          "alt": "The same man folds forward from the hips and lightly holds each same-side lower leg.",
+          "step": "Fold and hold lightly",
+          "url": "https://imagedelivery.net/TDuhqfLDl0Fb8RGwGw6mYw/996dcc3c-47fa-4bfe-3dcd-5cd3d81e2000/public"
+        }
+      ],
       "kind": "stretch",
       "level": "beginner",
       "modality": "Static stretch",
@@ -37120,7 +37767,28 @@
         "Wall"
       ],
       "id": "ST695",
-      "images": [],
+      "images": [
+        {
+          "alt": "Woman lying supine with one nearly straight leg supported vertically on a viewer-right wall and the opposite leg long on the floor.",
+          "step": "Set one leg on the wall",
+          "url": "https://imagedelivery.net/TDuhqfLDl0Fb8RGwGw6mYw/cd865387-a61a-4753-60f4-43ef75573500/public"
+        },
+        {
+          "alt": "Woman maintaining a supine wall hamstring stretch while a short arrow shows a small pelvis glide toward the viewer-right wall.",
+          "step": "Glide the hips slightly toward the wall",
+          "url": "https://imagedelivery.net/TDuhqfLDl0Fb8RGwGw6mYw/728c260e-fdf5-43e3-8028-de3417a9f200/public"
+        },
+        {
+          "alt": "Woman holding the adjusted supine wall stretch with a level pelvis and softly straight wall-supported knee.",
+          "step": "Keep the pelvis square",
+          "url": "https://imagedelivery.net/TDuhqfLDl0Fb8RGwGw6mYw/6b683200-96ea-40e6-31b1-39ae7346e500/public"
+        },
+        {
+          "alt": "Woman breathing calmly at the adjusted supine wall hamstring stretch with the working leg vertical and shoulders relaxed.",
+          "step": "Pause at the adjusted stretch",
+          "url": "https://imagedelivery.net/TDuhqfLDl0Fb8RGwGw6mYw/662fcc0b-52f2-40fb-43eb-c3d6c7216a00/public"
+        }
+      ],
       "kind": "stretch",
       "level": "beginner",
       "modality": "Static stretch",
@@ -37164,7 +37832,28 @@
         "Doorway"
       ],
       "id": "ST696",
-      "images": [],
+      "images": [
+        {
+          "alt": "Man lying supine at an open doorway with right leg raised against the wall beside the viewer-left jamb and left leg extended through the opening.",
+          "step": "Set the right leg at the doorway",
+          "url": "https://imagedelivery.net/TDuhqfLDl0Fb8RGwGw6mYw/b34b7893-40ea-4c70-444a-46c1d53ec400/public"
+        },
+        {
+          "alt": "Man making a small clockwise circle with the raised right foot while the right leg stays long against the wall beside the doorway.",
+          "step": "Circle the right ankle outward",
+          "url": "https://imagedelivery.net/TDuhqfLDl0Fb8RGwGw6mYw/6c218b90-2d28-4827-a2bd-f9ccaff65800/public"
+        },
+        {
+          "alt": "Man reversing into a small counterclockwise circle with the raised right foot while the rest of the doorway stretch remains still.",
+          "step": "Reverse the right circle",
+          "url": "https://imagedelivery.net/TDuhqfLDl0Fb8RGwGw6mYw/110c5a23-494c-4834-8b35-467d4dcf3500/public"
+        },
+        {
+          "alt": "Man after switching sides with left foot visibly supported against the wall beside the viewer-right jamb and a small circle arrow around the raised ankle.",
+          "step": "Switch and circle the left ankle",
+          "url": "https://imagedelivery.net/TDuhqfLDl0Fb8RGwGw6mYw/2ee4a817-e46c-4be1-442e-8a590fa30600/public"
+        }
+      ],
       "kind": "stretch",
       "level": "beginner",
       "modality": "Mobility",
@@ -37208,7 +37897,28 @@
         "Wall"
       ],
       "id": "ST697",
-      "images": [],
+      "images": [
+        {
+          "alt": "A woman stands tall beside a wall with both feet planted and one hand resting lightly against the wall.",
+          "step": "Stand close to the wall",
+          "url": "https://imagedelivery.net/TDuhqfLDl0Fb8RGwGw6mYw/0ef71980-1a27-42dc-34b8-6bd2de882700/public"
+        },
+        {
+          "alt": "The woman holds her lifted right ankle with her right hand while her left hand lightly supports her at the wall.",
+          "step": "Hold the right ankle",
+          "url": "https://imagedelivery.net/TDuhqfLDl0Fb8RGwGw6mYw/acbe3d86-f795-449d-d809-d927fac62600/public"
+        },
+        {
+          "alt": "The woman resets with both feet down and switches to right-hand wall support before stretching the other leg.",
+          "step": "Return and switch hands",
+          "url": "https://imagedelivery.net/TDuhqfLDl0Fb8RGwGw6mYw/d9714da1-97f1-466c-efbd-9f7e7fd9fd00/public"
+        },
+        {
+          "alt": "The woman holds her lifted left ankle with her left hand while her right hand supports her lightly at the wall.",
+          "step": "Hold the left ankle",
+          "url": "https://imagedelivery.net/TDuhqfLDl0Fb8RGwGw6mYw/3e111f23-287f-41f6-0b11-ed38f59a2f00/public"
+        }
+      ],
       "kind": "stretch",
       "level": "beginner",
       "modality": "Static stretch",
@@ -37252,7 +37962,28 @@
         "Wall optional"
       ],
       "id": "ST698",
-      "images": [],
+      "images": [
+        {
+          "alt": "Woman standing upright with both feet grounded and one hand lightly supported on a wall rail.",
+          "step": "Stand with support",
+          "url": "https://imagedelivery.net/TDuhqfLDl0Fb8RGwGw6mYw/ab0b8d95-4789-4808-7528-6b20e6444100/public"
+        },
+        {
+          "alt": "Woman balancing on her viewer-right leg while holding the viewer-left ankle behind and moving that knee slightly back.",
+          "step": "Stretch the first side",
+          "url": "https://imagedelivery.net/TDuhqfLDl0Fb8RGwGw6mYw/7cf9dbe2-bb49-4b5a-f633-e70e441ef500/public"
+        },
+        {
+          "alt": "Woman standing on both feet after releasing the first quad stretch and switching her rail support hand.",
+          "step": "Release and switch",
+          "url": "https://imagedelivery.net/TDuhqfLDl0Fb8RGwGw6mYw/7eed2042-d17b-4ec8-590b-bbd5e59b1c00/public"
+        },
+        {
+          "alt": "Woman balancing on her viewer-left leg while holding the opposite viewer-right ankle behind and moving that knee slightly back.",
+          "step": "Stretch the other side",
+          "url": "https://imagedelivery.net/TDuhqfLDl0Fb8RGwGw6mYw/9112310d-fbd0-4979-7cbd-f1c826a77100/public"
+        }
+      ],
       "kind": "stretch",
       "level": "beginner",
       "modality": "Static stretch",
@@ -37296,7 +38027,23 @@
         "Strap or towel"
       ],
       "id": "ST699",
-      "images": [],
+      "images": [
+        {
+          "alt": "A woman lies on her left side with her head supported and the yoga strap resting beside her free right hand.",
+          "step": "Set the side-lying base",
+          "url": "https://imagedelivery.net/TDuhqfLDl0Fb8RGwGw6mYw/f5f1e1bf-94ab-4a89-6211-202565d80100/public"
+        },
+        {
+          "alt": "The same woman bends her right top knee and loops a yoga strap around the right forefoot.",
+          "step": "Loop the top foot",
+          "url": "https://imagedelivery.net/TDuhqfLDl0Fb8RGwGw6mYw/af298797-8bf6-46c4-02d7-99626f25eb00/public"
+        },
+        {
+          "alt": "The same woman gently guides her right heel inward with a strap while keeping the top knee low.",
+          "step": "Guide the heel toward the glutes",
+          "url": "https://imagedelivery.net/TDuhqfLDl0Fb8RGwGw6mYw/22774287-af2a-4784-fbc9-aeb99e269c00/public"
+        }
+      ],
       "kind": "stretch",
       "level": "beginner",
       "modality": "Static stretch",
@@ -37340,7 +38087,28 @@
         "Pillow and strap optional"
       ],
       "id": "ST700",
-      "images": [],
+      "images": [
+        {
+          "alt": "Woman lying face down with both legs long and one narrow pillow supporting only the distal near working thigh.",
+          "step": "Set the pillow under the working thigh",
+          "url": "https://imagedelivery.net/TDuhqfLDl0Fb8RGwGw6mYw/9013dbf1-8864-4256-ed10-098f24440500/public"
+        },
+        {
+          "alt": "Woman lying prone with the pillow-supported near thigh stable while the working shin bends upward and the far leg remains long.",
+          "step": "Bend the working knee gently",
+          "url": "https://imagedelivery.net/TDuhqfLDl0Fb8RGwGw6mYw/669a78ec-1a2d-4a8b-2b9d-2ed64a730a00/public"
+        },
+        {
+          "alt": "Woman lying prone with the supported working knee bent farther and the heel moving toward but not touching the seat.",
+          "step": "Bring the heel toward the seat",
+          "url": "https://imagedelivery.net/TDuhqfLDl0Fb8RGwGw6mYw/b882ad16-cad3-46ec-d81a-2afae0ceda00/public"
+        },
+        {
+          "alt": "Woman calmly holding the prone pillow-supported quad stretch with the working knee bent, pelvis grounded, and far leg long.",
+          "step": "Pause and breathe into the front thigh",
+          "url": "https://imagedelivery.net/TDuhqfLDl0Fb8RGwGw6mYw/af1c9b27-8fc8-4ef0-295f-d78137c64a00/public"
+        }
+      ],
       "kind": "stretch",
       "level": "beginner",
       "modality": "Static stretch",
@@ -37383,7 +38151,28 @@
         "Wall"
       ],
       "id": "ST701",
-      "images": [],
+      "images": [
+        {
+          "alt": "Woman in half kneeling with right rear knee close to the wall, left front foot grounded, torso tall, and hands on the front thigh.",
+          "step": "Set the right knee near the wall",
+          "url": "https://imagedelivery.net/TDuhqfLDl0Fb8RGwGw6mYw/ac4b0013-2297-43fe-6b9e-8a2e3321c800/public"
+        },
+        {
+          "alt": "Woman with right rear knee grounded on a mat flush to the wall, right shin vertical against the wall, and left front foot flat.",
+          "step": "Bring the right foot up the wall",
+          "url": "https://imagedelivery.net/TDuhqfLDl0Fb8RGwGw6mYw/f431a767-a02b-4921-f547-8d80fd5e3500/public"
+        },
+        {
+          "alt": "Woman holding a right wall-supported quad stretch with hands on hips, pelvis gently tucked, ribs stacked, and rear knee grounded.",
+          "step": "Tuck the pelvis gently",
+          "url": "https://imagedelivery.net/TDuhqfLDl0Fb8RGwGw6mYw/579b766d-8444-47fa-e9a7-1512aa3bff00/public"
+        },
+        {
+          "alt": "Woman still facing viewer-right after switching to a left rear wall-supported quad stretch with right foot forward and left rear knee grounded.",
+          "step": "Switch and stretch the left quad",
+          "url": "https://imagedelivery.net/TDuhqfLDl0Fb8RGwGw6mYw/d8a6e562-ee27-485e-02b7-1e7a33372300/public"
+        }
+      ],
       "kind": "stretch",
       "level": "intermediate",
       "modality": "Static stretch",
@@ -37425,7 +38214,23 @@
       ],
       "equipment": [],
       "id": "ST702",
-      "images": [],
+      "images": [
+        {
+          "alt": "A woman kneels tall with both shins grounded and the tops of both feet resting on the mat behind her.",
+          "step": "Begin in tall kneeling",
+          "url": "https://imagedelivery.net/TDuhqfLDl0Fb8RGwGw6mYw/105991d5-652f-4d62-492d-2a3bd1741d00/public"
+        },
+        {
+          "alt": "The woman remains tall in kneeling with both sets of toes tucked under and both heels raised.",
+          "step": "Tuck both toes",
+          "url": "https://imagedelivery.net/TDuhqfLDl0Fb8RGwGw6mYw/73c07b66-21be-4050-9172-9428fb82b700/public"
+        },
+        {
+          "alt": "The woman sits upright toward her raised heels while keeping both feet tucked under at the toes.",
+          "step": "Sit toward the heels",
+          "url": "https://imagedelivery.net/TDuhqfLDl0Fb8RGwGw6mYw/f589eede-682d-482e-d880-51c01085df00/public"
+        }
+      ],
       "kind": "stretch",
       "level": "intermediate",
       "modality": "Static stretch",
@@ -37469,7 +38274,28 @@
         "Pillow optional"
       ],
       "id": "ST703",
-      "images": [],
+      "images": [
+        {
+          "alt": "Man kneeling tall with knees under hips, shins and feet extending behind, and a cushion waiting between his feet.",
+          "step": "Start in tall kneeling",
+          "url": "https://imagedelivery.net/TDuhqfLDl0Fb8RGwGw6mYw/8334ba6e-c480-41d1-ef2c-7b3786a70800/public"
+        },
+        {
+          "alt": "Man sitting upright on a cushion between his heels with knees and shins grounded and hands on his thighs.",
+          "step": "Sit between the heels",
+          "url": "https://imagedelivery.net/TDuhqfLDl0Fb8RGwGw6mYw/1e0a2e09-5f32-4d84-06df-2d5aa0262700/public"
+        },
+        {
+          "alt": "Man in a supported hero seat with both hands visibly planted behind his hips and his chest open.",
+          "step": "Place the hands behind",
+          "url": "https://imagedelivery.net/TDuhqfLDl0Fb8RGwGw6mYw/c512734b-2708-47d4-9543-f7a97daf0000/public"
+        },
+        {
+          "alt": "Man leaning back slightly from a cushion-supported hero seat with both hands planted behind him and both knees grounded.",
+          "step": "Lean back slightly",
+          "url": "https://imagedelivery.net/TDuhqfLDl0Fb8RGwGw6mYw/c4222c44-44df-4778-a839-e0c8f4151500/public"
+        }
+      ],
       "kind": "stretch",
       "level": "intermediate",
       "modality": "Static stretch",
@@ -37512,7 +38338,23 @@
         "Book or low step"
       ],
       "id": "ST704",
-      "images": [],
+      "images": [
+        {
+          "alt": "A man stands tall with his near right forefoot supported on a flat book and the heel floating beyond its edge.",
+          "step": "Place the ball of the right foot",
+          "url": "https://imagedelivery.net/TDuhqfLDl0Fb8RGwGw6mYw/2e226c9f-78d5-4a32-17b6-fc8003973f00/public"
+        },
+        {
+          "alt": "The same man begins lowering his near right heel while keeping the forefoot planted on the book.",
+          "step": "Begin the heel drop",
+          "url": "https://imagedelivery.net/TDuhqfLDl0Fb8RGwGw6mYw/03189f49-250e-4045-f5db-2182b677cc00/public"
+        },
+        {
+          "alt": "The same man holds a gentle right heel drop below the top of the book while staying upright.",
+          "step": "Hold the gentle drop",
+          "url": "https://imagedelivery.net/TDuhqfLDl0Fb8RGwGw6mYw/ef0126e9-a20d-47ca-49a5-23111237a900/public"
+        }
+      ],
       "kind": "stretch",
       "level": "beginner",
       "modality": "Static stretch",
@@ -37556,7 +38398,23 @@
         "Wall"
       ],
       "id": "ST705",
-      "images": [],
+      "images": [
+        {
+          "alt": "Woman standing upright facing a viewer-right wall with the near working heel down, toes up the wall, and rear foot flat behind.",
+          "step": "Set the working toes on the wall",
+          "url": "https://imagedelivery.net/TDuhqfLDl0Fb8RGwGw6mYw/de654d9b-608f-4fde-59bf-d58644319000/public"
+        },
+        {
+          "alt": "Woman making a small whole-body lean toward the wall while preserving the toes-up working foot and grounded heel.",
+          "step": "Lean forward slightly",
+          "url": "https://imagedelivery.net/TDuhqfLDl0Fb8RGwGw6mYw/980efe9d-a9b4-45cc-e737-4c010f62e700/public"
+        },
+        {
+          "alt": "Woman calmly holding a toes-up wall calf stretch with the working heel grounded, knee aligned, and rear foot flat.",
+          "step": "Pause and breathe into the calf",
+          "url": "https://imagedelivery.net/TDuhqfLDl0Fb8RGwGw6mYw/bb609b08-ed64-4136-77d1-c8df6ddbb900/public"
+        }
+      ],
       "kind": "stretch",
       "level": "beginner",
       "modality": "Static stretch",
@@ -37600,7 +38458,23 @@
         "Wall"
       ],
       "id": "ST706",
-      "images": [],
+      "images": [
+        {
+          "alt": "Man facing a wall in a short staggered stance with left foot forward, right foot back, both heels down, and both hands supported.",
+          "step": "Set a short staggered stance",
+          "url": "https://imagedelivery.net/TDuhqfLDl0Fb8RGwGw6mYw/88f635d2-3a04-48fd-a878-d6e816a5da00/public"
+        },
+        {
+          "alt": "Man bending the right rear knee in a short wall-supported soleus stretch while keeping the right heel grounded.",
+          "step": "Bend the back knee",
+          "url": "https://imagedelivery.net/TDuhqfLDl0Fb8RGwGw6mYw/b91827cd-6fe9-4f0e-deaf-da206a89fc00/public"
+        },
+        {
+          "alt": "Man holding a mild right soleus stretch with bent rear knee, rear heel down, knee tracking over toes, and hands on the wall.",
+          "step": "Hold a mild soleus stretch",
+          "url": "https://imagedelivery.net/TDuhqfLDl0Fb8RGwGw6mYw/8815b79c-d56d-4d53-1718-f3533bf70200/public"
+        }
+      ],
       "kind": "stretch",
       "level": "beginner",
       "modality": "Static stretch",
@@ -37644,7 +38518,18 @@
         "Step"
       ],
       "id": "ST707",
-      "images": [],
+      "images": [
+        {
+          "alt": "A woman stands tall on a low step with her right forefoot supported at the edge and her heel free beyond it.",
+          "step": "Set the right forefoot on the edge",
+          "url": "https://imagedelivery.net/TDuhqfLDl0Fb8RGwGw6mYw/6adf5031-8b1b-44f4-d404-48232f14ab00/public"
+        },
+        {
+          "alt": "The woman bends her right knee softly and lowers the unsupported right heel below the step edge while keeping the forefoot planted.",
+          "step": "Bend the knee and lower the heel",
+          "url": "https://imagedelivery.net/TDuhqfLDl0Fb8RGwGw6mYw/5b281517-da86-4feb-c7ff-57760d3a5500/public"
+        }
+      ],
       "kind": "stretch",
       "level": "beginner",
       "modality": "Static stretch",
