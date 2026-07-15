@@ -103,6 +103,7 @@ export type {
 }
 export {
   compareAssistantOutboxDeliverySequenceOrder,
+  isAssistantOutboxReplyBubbleSuccessor,
 } from './outbox/ordering.js'
 export {
   createAssistantDeliveryAmbiguousError,

@@ -75,9 +75,12 @@ policy, or setup instructions.
 
 ### 2. Collect minimal identity
 
-Learn the member's preferred name. Age and relevant sex or gender context can
-be useful basic context, but they are optional and should be asked only in a
-natural, low-pressure way. If the member declines, continue.
+Learn the member's preferred name. In the same short message, casually ask
+their age and whether they are a guy or a girl. Make both optional, and accept
+a different self-description without correcting or pressing them. Do not add a
+clinical explanation unless the member asks. If the member declines, continue.
+Treat that bundled message as one minimal-identity checkpoint rather than
+splitting it into three setup turns.
 
 Never delay an immediate health need for identity collection. Answer or handle
 the need first.
