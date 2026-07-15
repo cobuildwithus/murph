@@ -321,6 +321,7 @@ function buildHostedGroupEmailRestrictedActionUnavailable(
     case "preflight_set_chat_avatar":
     case "set_chat_avatar":
     case "share_contact_card":
+    case "leave_membership":
       return {
         action: request.action,
         result: { status: "unavailable", unavailableReason },

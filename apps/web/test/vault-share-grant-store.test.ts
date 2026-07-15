@@ -140,6 +140,102 @@ describe("revokeHostedVaultSharesTx", () => {
     expect(tx.$queryRaw).not.toHaveBeenCalled();
     expect(mocks.appendHostedMailboxEnvelopeTx).not.toHaveBeenCalled();
   });
+
+  it.each([
+    ["a malformed projection scope", {
+      projectionScopeJson: { projectionKind: "unsupported.v0" },
+    }],
+    ["a mismatched projection kind", {
+      projectionKind: "profile-name.v0",
+    }],
+  ])("revokes an active grant with %s from its canonical scope key", async (_label, overrides) => {
+    const tx = buildTx();
+    const share = {
+      destinationMemberId: "member_referee",
+      grantorMemberId: "member_grantor",
+      id: "share_invalid",
+      projectionKind: "sleep-times.v0",
+      projectionScopeJson: SLEEP_SCOPE,
+      projectionScopeKey: SLEEP_SCOPE_KEY,
+      ...overrides,
+    };
+    tx.hostedVaultShare.findMany.mockResolvedValue([share]);
+    tx.$queryRaw.mockResolvedValue([{
+      ...share,
+      revokedAt: new Date("2026-07-01T00:00:00.000Z"),
+    }]);
+
+    await expect(revokeHostedVaultSharesTx({
+      destinationMemberId: "member_referee",
+      grantorMemberId: "member_grantor",
+      now: new Date("2026-07-01T00:00:00.000Z"),
+      tx,
+    })).resolves.toBe(1);
+
+    expect(mocks.appendHostedMailboxEnvelopeTx).toHaveBeenCalledWith(expect.objectContaining({
+      envelope: expect.objectContaining({
+        revoke: expect.objectContaining({
+          projectionKind: "sleep-times.v0",
+          projectionScope: SLEEP_SCOPE,
+        }),
+      }),
+      tx,
+    }));
+  });
+
+  it("fails closed before revocation when an active grant has an invalid canonical scope key", async () => {
+    const tx = buildTx();
+    tx.hostedVaultShare.findMany.mockResolvedValue([{
+      destinationMemberId: "member_referee",
+      grantorMemberId: "member_grantor",
+      id: "share_invalid",
+      projectionKind: "sleep-times.v0",
+      projectionScopeJson: SLEEP_SCOPE,
+      projectionScopeKey: "unsupported.v0",
+    }]);
+
+    await expect(revokeHostedVaultSharesTx({
+      destinationMemberId: "member_referee",
+      grantorMemberId: "member_grantor",
+      now: new Date("2026-07-01T00:00:00.000Z"),
+      tx,
+    })).rejects.toMatchObject({
+      code: "HOSTED_VAULT_SHARE_STATE_INVALID",
+      httpStatus: 500,
+      message: "Stored vault-share state is invalid.",
+      retryable: false,
+    });
+
+    expect(tx.$queryRaw).not.toHaveBeenCalled();
+    expect(mocks.appendHostedMailboxEnvelopeTx).not.toHaveBeenCalled();
+  });
+
+  it("fails closed when a transitioned grant returns an invalid canonical scope key", async () => {
+    const tx = buildTx();
+    tx.$queryRaw.mockResolvedValue([{
+      destinationMemberId: "member_referee",
+      grantorMemberId: "member_grantor",
+      id: "share_invalid",
+      projectionKind: "sleep-times.v0",
+      projectionScopeJson: SLEEP_SCOPE,
+      projectionScopeKey: "unsupported.v0",
+      revokedAt: new Date("2026-07-01T00:00:00.000Z"),
+    }]);
+
+    await expect(revokeHostedVaultSharesTx({
+      destinationMemberId: "member_referee",
+      grantorMemberId: "member_grantor",
+      now: new Date("2026-07-01T00:00:00.000Z"),
+      tx,
+    })).rejects.toMatchObject({
+      code: "HOSTED_VAULT_SHARE_STATE_INVALID",
+      httpStatus: 500,
+      message: "Stored vault-share state is invalid.",
+      retryable: false,
+    });
+
+    expect(mocks.appendHostedMailboxEnvelopeTx).not.toHaveBeenCalled();
+  });
 });
 
 describe("grantHostedVaultShareTx", () => {
