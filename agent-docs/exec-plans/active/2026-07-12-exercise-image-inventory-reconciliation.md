@@ -2,7 +2,7 @@
 
 Status: active
 Created: 2026-07-12
-Updated: 2026-07-14
+Updated: 2026-07-15
 
 ## Goal
 
@@ -60,6 +60,7 @@ Updated: 2026-07-14
 - Keep the historical abandoned variant-plan worktree untouched and move authoritative continuation into the existing PR #561 lane.
 - Follow the user's superseding 2026-07-13 delivery route: direct fast-forward pushes to `main` in batches of 50 movements, followed by a final batch of 43. ReviewGPT is PR-only and does not apply to this direct-main route.
 - Preserve the seven completed-but-uncommitted recovery handoffs as the first seven movements of batch 1, then continue every other missing movement in ascending manifest sequence.
+- Per the user's 2026-07-15 direction, exercise-image checkpoints use the image-specific QA, hosted-byte, public-delivery, seed-drift, generation, and package-verification gates without separate coverage-write or deep-review passes.
 
 ## Progress
 
@@ -89,17 +90,18 @@ Updated: 2026-07-14
 - Completed checkpoint batch 1: recovered seven accepted handoffs with 23 already verified images, then generated or reused 43 direct movements at sequences 10–52 with 143 images. Independent original-resolution review rejected and replaced incorrect limb pairings, movement grips, support-leg changes, and subject/equipment continuity breaks before upload. All 166 images passed deterministic identity preflight, hosted-byte verification, and public delivery checks; only the 50 owning seed `Images` fields changed.
 - Completed checkpoint batch 2: generated 50 movements at sequences 53–99 and 125–127 with 115 unique images. A second independent original-resolution review caught and corrected movement-phase, equipment, side-label, and metadata defects across `EX815`, `EX816`, `EX823`, `EX827`, `EX828`, `EX829`, `EX841`, and `EX916`; targeted re-reviews then reported zero remaining findings. All 115 accepted images passed checksum promotion, identity preflight, hosted-original byte verification, and public delivery checks; only the 50 owning seed `Images` fields changed.
 - Completed checkpoint batch 3: generated and independently reviewed 50 movements with 155 unique images. Independent original-resolution review caught and corrected side/limb sequencing, subject and equipment continuity, camera locks, movement phases, and false annotation leaders before upload. All 155 accepted images passed checksum promotion, identity preflight, hosted-original byte verification, and public delivery checks; only the 50 owning seed `Images` fields changed.
+- Completed checkpoint batch 5: generated and independently reviewed 50 movements at sequences 271–320 with 171 unique images after reducing `ST556` to three truthful phases. Final targeted remediation replaced `ST625`'s transition and endpoint so the away-from-wall pelvis shift is visibly progressive while its palm and feet stay fixed. All 171 accepted images passed checksum promotion, identity preflight, hosted-original byte verification, and public delivery checks; only the 50 owning seed `Images` fields changed.
 
 ## Now
 
 - Checkpoint batch 2 is landed on `main` at 1,505 imaged movements, 243 image-less movements, and 4,522 unique public images.
 - Batch 3 is landed on `main` at 1,555 imaged movements, 193 image-less movements, and 4,677 unique public images. Its 155 images passed originating and independent review, idempotent upload, hosted-byte verification, public delivery checks, package verification on TypeScript 7, and zero-finding security/privacy and coverage-write audits.
 - Batch 4 is landed on `main` at 1,605 imaged movements, 143 image-less movements, and 4,861 unique public images. Its 184 square canonical images passed originating and independent review, idempotent hosted-byte/public-delivery verification, TypeScript 7 package verification, zero-finding coverage-write, and local deep review; the sole cosmetic ST491 annotation finding was removed and targeted re-approved before landing. Superseded ST491 objects remain unreferenced.
-- Batch 5 is the exact next 50 still-empty movements at manifest sequences 271–320 with 172 planned slides. Its five generation lanes are starting from the prevalidated collision-free assignment.
+- Batch 5 is complete at 1,655 imaged movements, 93 image-less movements, and 5,032 unique public images. Its five generation lanes produced 171 accepted square images; all 50 carousels are uploaded, byte-verified, publicly delivered, cataloged, regenerated, and package-verified with exact seed-drift proof.
 
 ## Next
 
-- Generate, independently review, upload, catalog, verify, and land batch 5 as the next 50-movement / 172-slide checkpoint.
+- Land Batch 5, then start the exact next 50 still-empty movements at manifest sequences 321–370; their initial movement-specific plan totals 173 slides pending per-movement validation.
 - Continue the deterministic checkpoints to 1,748 imaged / zero image-less, then run aggregate completion verification and close the active plan with `scripts/finish-task`.
 
 ## Verification
@@ -114,8 +116,9 @@ Updated: 2026-07-14
 - Batch-2 regenerated catalog proof: 1,748 total movements; 1,505 with images; 243 without images; 4,522 ordered images; 4,522 unique public URLs; zero invalid delivery URLs. All 115 new images passed hosted-original byte and public-delivery verification. Package verification passed typecheck, all six tests, and deterministic generation; independent coverage/acceptance and security/privacy audits report zero findings.
 - Batch-3 regenerated catalog proof: 1,748 total movements; 1,555 with images; 193 without images; 4,677 ordered images; 4,677 unique public URLs; zero invalid or duplicate delivery URLs. Direct diff proof shows exactly 50 formerly empty `Images` cells changed (31 strength-addon and 19 stretch), exactly 155 unique new URLs, and zero non-image-field drift. Package verification on TypeScript 7 passed typecheck, all six tests, and deterministic generation; independent coverage-write and security/privacy audits report zero findings and no edits.
 - Batch-4 regenerated catalog proof: 1,748 total movements; 1,605 with images; 143 without images; 4,861 ordered images; 4,861 unique public URLs. Direct CSV proof shows exactly 50 formerly empty `Images` cells changed, exactly 184 unique new URLs, and zero non-`Images`-field drift. `pnpm --dir packages/exercise-library verify` passes under the shared-host TypeScript 7 profile after final asset remediation: typecheck, all six tests, and deterministic generated-artifact verification are green. Coverage-write passed at 81.35% statements / 73.44% branches with zero findings or edits; the local deep-review gate has no unresolved finding.
+- Batch-5 regenerated catalog proof: 1,748 total movements; 1,655 with images; 93 without images; 5,032 ordered images; 5,032 unique public URLs. Direct controller/CSV/catalog reconciliation proves exactly 50 formerly empty `Images` cells changed (49 stretch-addon and one stretch), exactly 171 unique new URLs, zero removed URLs, zero non-`Images`-field drift, and agreement across accepted source hashes, upload identities, hosted receipts, ordered seed mappings, and generated records. `pnpm --dir packages/exercise-library verify` passes: typecheck, all six tests, and deterministic generated-artifact verification are green.
 - The latest handoff batch passes `pnpm --dir packages/exercise-library verify`: typecheck, all 6 tests, and deterministic generated-artifact checks are green; seed drift is limited to the 14 intended `Images` fields.
 - The subsequent 175/200-range batch also passes `pnpm --dir packages/exercise-library verify`; seed drift is limited to nine intended `Images` fields across two owning seed files, and 4,172 public URLs are unique.
-- Remaining generation, upload, full repository verification, completion audits, and final-head CI are pending.
+- Batch 6, the final 43-movement checkpoint, aggregate completion verification, and final-head CI are pending.
 - The controller-ready handoff batch passes `pnpm --dir packages/exercise-library verify`: typecheck, all 6 tests, and deterministic generated-artifact checks are green.
 - Sequence 6 also passes `pnpm --dir packages/exercise-library verify`; direct drift proof shows only `EX654.images` changed, with 4,105 unique valid public URLs and no invalid alt records.
