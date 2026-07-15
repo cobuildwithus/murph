@@ -3704,6 +3704,89 @@ describe("hosted Family plan", () => {
     expect(tx.hostedAccountGroupBillingRef.update).not.toHaveBeenCalled();
   });
 
+  it("serializes concurrent tier-capacity changes through the owner Stripe lock", async () => {
+    const tx = createTxMock({
+      activeMembershipCount: 1,
+      billedSeatCount: 5,
+      pendingInviteCount: 0,
+    });
+    tx.hostedAccountGroupMembership.findMany.mockResolvedValue([
+      { memberId: "member_owner", planCode: "pulse" },
+    ]);
+    tx.hostedAccountGroupPlanCapacity.findMany.mockResolvedValue([
+      { billedQuantity: 3, planCode: "pulse" },
+      { billedQuantity: 2, planCode: "edge" },
+    ]);
+    const prisma = tx as FamilyPlanTxMock & {
+      $transaction: ReturnType<typeof vi.fn>;
+    };
+    let transactionTail = Promise.resolve();
+    prisma.$transaction = vi.fn(async (callback) => {
+      const previous = transactionTail;
+      let release = () => {};
+      transactionTail = new Promise<void>((resolve) => {
+        release = resolve;
+      });
+      await previous;
+      try {
+        return await callback(tx);
+      } finally {
+        release();
+      }
+    });
+
+    let stripeSubscription = makeFamilyStripeSubscription({
+      edgeItemQuantity: 2,
+      itemQuantity: 3,
+    });
+    const stripeSubscriptionRetrieve = vi.fn(async () => stripeSubscription);
+    const stripeSubscriptionUpdate = vi.fn(async () => {
+      stripeSubscription = makeFamilyStripeSubscription({
+        edgeItemQuantity: 2,
+        itemQuantity: 4,
+      });
+      return stripeSubscription;
+    });
+    runtimeMocks.requireHostedStripeApi.mockReturnValue({
+      subscriptions: {
+        retrieve: stripeSubscriptionRetrieve,
+        update: stripeSubscriptionUpdate,
+      },
+    });
+
+    const [first, second] = await Promise.allSettled([
+      updateHostedFamilyPlanCapacities({
+        groupId: "hbag_family",
+        now: new Date("2026-06-18T12:00:00.000Z"),
+        ownerMemberId: "member_owner",
+        prisma: prisma as never,
+        targetCapacities: { edge: 2, pulse: 4 },
+      }),
+      updateHostedFamilyPlanCapacities({
+        groupId: "hbag_family",
+        now: new Date("2026-06-18T12:00:00.000Z"),
+        ownerMemberId: "member_owner",
+        prisma: prisma as never,
+        targetCapacities: { edge: 3, pulse: 3 },
+      }),
+    ]);
+
+    expect(first).toMatchObject({ status: "fulfilled" });
+    expect(second).toMatchObject({
+      reason: { code: "HOSTED_FAMILY_BILLING_SYNCING" },
+      status: "rejected",
+    });
+    expect(stripeSubscriptionRetrieve).toHaveBeenCalledTimes(2);
+    expect(stripeSubscriptionUpdate).toHaveBeenCalledTimes(1);
+    expect(stripeSubscriptionUpdate).toHaveBeenCalledWith(
+      "sub_family",
+      expect.objectContaining({
+        items: [{ id: "si_family", quantity: 4 }],
+      }),
+      expect.any(Object),
+    );
+  });
+
   it("does not reduce Family seats below active members and pending invites", async () => {
     const tx = createTxMock({
       activeMembershipCount: 2,

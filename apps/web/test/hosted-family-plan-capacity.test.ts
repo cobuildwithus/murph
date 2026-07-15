@@ -42,6 +42,11 @@ describe("hosted Family exact-tier capacity", () => {
       { billedQuantity: 1, planCode: "edge" },
     ])).toEqual({ edge: 1, pulse: 2 });
     expect(readHostedFamilyPlanCapacities([], 3)).toEqual({ edge: 0, pulse: 3 });
+    expect(readHostedFamilyPlanCapacities([], 2)).toEqual({ edge: 0, pulse: 2 });
+    expect(readHostedFamilyPlanCapacities([
+      { billedQuantity: 2, planCode: "pulse" },
+      { billedQuantity: 1, planCode: "edge" },
+    ], 6)).toEqual({ edge: 1, pulse: 2 });
     expect(readHostedFamilyPlanCapacities([
       { billedQuantity: 2, planCode: "pulse" },
       { billedQuantity: 1, planCode: "pulse" },

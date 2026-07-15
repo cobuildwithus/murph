@@ -105,9 +105,10 @@ Pulse-only web response, but the old parser rejects the new `plans` and
 `planCode` fields. Deploy Cloudflare hosted execution first with immediate
 runner-container rollout, verify the new bundle is serving, and then deploy
 hosted web. Hosted web predeploy applies the nullable/defaulted assignment
-columns, capacity table, and Pulse backfill before the new web build; the
-post-deploy contract lane adds the assignment constraints only after the prior
-web-function window drains.
+columns and empty capacity table before the new web build. Existing Pulse-only
+groups read through the live legacy billed total until the first new webhook
+atomically writes exact tier rows. The post-deploy contract lane adds the
+assignment constraints only after the prior web-function window drains.
 
 Configure both Family Stripe price ids before exposing Edge capacity. After
 web deploy, reconcile one Pulse-only subscription and one mixed Pulse/Edge

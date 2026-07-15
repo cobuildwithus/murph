@@ -24,13 +24,3 @@ ADD COLUMN "plan_code" TEXT DEFAULT 'pulse';
 
 ALTER TABLE "hosted_account_group_invite"
 ADD COLUMN "plan_code" TEXT DEFAULT 'pulse';
-
-INSERT INTO "hosted_account_group_plan_capacity" (
-  "group_id",
-  "plan_code",
-  "billed_quantity"
-)
-SELECT "group_id", 'pulse', "billed_seat_count"
-FROM "hosted_account_group_billing_ref"
-WHERE "billed_seat_count" > 0
-ON CONFLICT ("group_id", "plan_code") DO NOTHING;

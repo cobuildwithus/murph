@@ -97,7 +97,10 @@ import {
   signalHostedMemberActivationRuntimeWakeBestEffortResult,
 } from "./member-activation-runtime-wake";
 import { createHostedMember } from "./hosted-member-store";
-import { readHostedMemberStripeBillingRef } from "./hosted-member-billing-store";
+import {
+  readHostedMemberStripeBillingRef,
+  withHostedMemberStripeMutationLock,
+} from "./hosted-member-billing-store";
 import {
   lookupHostedMemberIdentityByPhoneNumber,
   readHostedMemberIdentity,
@@ -1960,139 +1963,139 @@ export async function updateHostedFamilyPlanCapacities(input: {
     });
   }
 
-  const prepared = await prisma.$transaction(async (tx) => {
-    const group = await tx.hostedAccountGroup.findUnique({
-      select: hostedAccountGroupAccessSelect,
-      where: { id: input.groupId },
-    });
-    if (!group || group.ownerMemberId !== input.ownerMemberId) {
-      throw hostedOnboardingError({
-        code: "HOSTED_FAMILY_OWNER_REQUIRED",
-        httpStatus: 403,
-        message: "Only the Family plan owner can change Family capacity.",
+  await withHostedMemberStripeMutationLock({
+    memberId: input.ownerMemberId,
+    prisma,
+    run: async (tx) => {
+      const group = await tx.hostedAccountGroup.findUnique({
+        select: hostedAccountGroupAccessSelect,
+        where: { id: input.groupId },
       });
-    }
-    if (!hasHostedAccountGroupAccess(group)) {
-      throw hostedOnboardingError({
-        code: "HOSTED_FAMILY_BILLING_INACTIVE",
-        httpStatus: 409,
-        message: "Family billing must be active before changing capacity.",
+      if (!group || group.ownerMemberId !== input.ownerMemberId) {
+        throw hostedOnboardingError({
+          code: "HOSTED_FAMILY_OWNER_REQUIRED",
+          httpStatus: 403,
+          message: "Only the Family plan owner can change Family capacity.",
+        });
+      }
+      if (!hasHostedAccountGroupAccess(group)) {
+        throw hostedOnboardingError({
+          code: "HOSTED_FAMILY_BILLING_INACTIVE",
+          httpStatus: 409,
+          message: "Family billing must be active before changing capacity.",
+        });
+      }
+      await assertHostedFamilyOwnerCanStartBillingTx({
+        groupId: group.id,
+        ownerMemberId: group.ownerMemberId,
+        tx,
       });
-    }
-    await lockHostedMemberRow(tx, group.ownerMemberId);
-    await assertHostedFamilyOwnerCanStartBillingTx({
-      groupId: group.id,
-      ownerMemberId: group.ownerMemberId,
-      tx,
-    });
 
-    const [billingRef, current, memberships, invites] = await Promise.all([
-      readHostedAccountGroupStripeBillingRef({ groupId: group.id, prisma: tx }),
-      readHostedFamilyPlanCapacitiesTx({ groupId: group.id, tx }),
-      tx.hostedAccountGroupMembership.findMany({
-        select: { memberId: true, planCode: true },
-        where: { groupId: group.id, status: "active" },
-      }),
-      tx.hostedAccountGroupInvite.findMany({
-        select: { planCode: true },
-        where: {
-          expiresAt: { gt: now },
-          groupId: group.id,
-          status: "pending",
-        },
-      }),
-    ]);
-    if (!billingRef?.stripeSubscriptionId || !current) {
-      throw hostedOnboardingError({
-        code: "HOSTED_FAMILY_BILLING_SYNCING",
-        httpStatus: 409,
-        message: "Family billing is still syncing. Try again shortly.",
-        retryable: true,
-      });
-    }
-    const usage = countHostedFamilyAssignmentsByPlan([
-      ...memberships,
-      ...invites,
-    ]);
-    if (HOSTED_PLAN_CODES.some((planCode) => usage[planCode] > target[planCode])) {
-      throw hostedOnboardingError({
-        code: "HOSTED_FAMILY_CAPACITY_BELOW_USAGE",
-        httpStatus: 409,
-        message: "Family capacity cannot be reduced below assigned members and pending invites.",
-      });
-    }
-    return {
-      billingVersion: billingRef.updatedAt.getTime(),
-      current,
-      stripeSubscriptionId: billingRef.stripeSubscriptionId,
-    };
-  }, HOSTED_ONBOARDING_TRANSACTION_OPTIONS);
-
-  const priceIdsByPlan = { ...readHostedOnboardingEnvironment().stripeFamilyPriceIdsByPlan };
-  for (const planCode of HOSTED_PLAN_CODES) {
-    if (target[planCode] > 0) {
-      priceIdsByPlan[planCode] = requireHostedStripeFamilyPlanConfig({ planCode }).priceId;
-    }
-  }
-  const stripe = requireHostedStripeApi();
-  const subscription = await stripe.subscriptions.retrieve(prepared.stripeSubscriptionId, {
-    expand: ["items.data.price"],
-  });
-  const stripeState = readHostedFamilyStripePlanState({
-    priceIdsByPlan,
-    subscription,
-  });
-  if (!stripeState) {
-    throw hostedOnboardingError({
-      code: "HOSTED_FAMILY_SUBSCRIPTION_INVALID",
-      httpStatus: 409,
-      message: "Family billing contains an unsupported subscription item.",
-    });
-  }
-  if (
-    !hostedFamilyPlanCapacitiesEqual(stripeState.capacities, prepared.current) &&
-    !hostedFamilyPlanCapacitiesEqual(stripeState.capacities, target)
-  ) {
-    throw hostedOnboardingError({
-      code: "HOSTED_FAMILY_BILLING_SYNCING",
-      httpStatus: 409,
-      message: "Family billing changed elsewhere and is still syncing. Try again shortly.",
-      retryable: true,
-    });
-  }
-
-  if (!hostedFamilyPlanCapacitiesEqual(stripeState.capacities, target)) {
-    const increase = calculateHostedFamilyMonthlyAmountUsdCents(target) >
-      calculateHostedFamilyMonthlyAmountUsdCents(stripeState.capacities);
-    const updated = await stripe.subscriptions.update(
-      prepared.stripeSubscriptionId,
-      {
-        expand: ["items.data.price"],
-        items: buildHostedFamilyStripeCapacityUpdateItems({
-          current: stripeState,
-          priceIdsByPlan,
-          target,
+      const [billingRef, current, memberships, invites] = await Promise.all([
+        readHostedAccountGroupStripeBillingRef({ groupId: group.id, prisma: tx }),
+        readHostedFamilyPlanCapacitiesTx({ groupId: group.id, tx }),
+        tx.hostedAccountGroupMembership.findMany({
+          select: { memberId: true, planCode: true },
+          where: { groupId: group.id, status: "active" },
         }),
-        ...(increase ? { payment_behavior: "error_if_incomplete" as const } : {}),
-        proration_behavior: increase ? "always_invoice" : "none",
-      },
-      {
-        idempotencyKey:
-          `family-capacity:${input.groupId}:${prepared.billingVersion}:${target.pulse}:${target.edge}`,
-      },
-    );
-    const applied = readHostedFamilyStripePlanState({
-      priceIdsByPlan,
-      subscription: updated,
-    });
-    if (!applied || !hostedFamilyPlanCapacitiesEqual(applied.capacities, target)) {
-      throw hostedOnboardingError({
-        code: "HOSTED_FAMILY_CAPACITY_UPDATE_UNCONFIRMED",
-        httpStatus: 502,
-        message: "Stripe did not confirm the requested Family capacity.",
+        tx.hostedAccountGroupInvite.findMany({
+          select: { planCode: true },
+          where: {
+            expiresAt: { gt: now },
+            groupId: group.id,
+            status: "pending",
+          },
+        }),
+      ]);
+      if (!billingRef?.stripeSubscriptionId || !current) {
+        throw hostedOnboardingError({
+          code: "HOSTED_FAMILY_BILLING_SYNCING",
+          httpStatus: 409,
+          message: "Family billing is still syncing. Try again shortly.",
+          retryable: true,
+        });
+      }
+      const usage = countHostedFamilyAssignmentsByPlan([
+        ...memberships,
+        ...invites,
+      ]);
+      if (HOSTED_PLAN_CODES.some((planCode) => usage[planCode] > target[planCode])) {
+        throw hostedOnboardingError({
+          code: "HOSTED_FAMILY_CAPACITY_BELOW_USAGE",
+          httpStatus: 409,
+          message: "Family capacity cannot be reduced below assigned members and pending invites.",
+        });
+      }
+      const priceIdsByPlan = {
+        ...readHostedOnboardingEnvironment().stripeFamilyPriceIdsByPlan,
+      };
+      for (const planCode of HOSTED_PLAN_CODES) {
+        if (target[planCode] > 0) {
+          priceIdsByPlan[planCode] = requireHostedStripeFamilyPlanConfig({ planCode }).priceId;
+        }
+      }
+      const stripe = requireHostedStripeApi();
+      const subscription = await stripe.subscriptions.retrieve(
+        billingRef.stripeSubscriptionId,
+        { expand: ["items.data.price"] },
+      );
+      const stripeState = readHostedFamilyStripePlanState({
+        priceIdsByPlan,
+        subscription,
       });
-    }
-  }
+      if (!stripeState) {
+        throw hostedOnboardingError({
+          code: "HOSTED_FAMILY_SUBSCRIPTION_INVALID",
+          httpStatus: 409,
+          message: "Family billing contains an unsupported subscription item.",
+        });
+      }
+      if (
+        !hostedFamilyPlanCapacitiesEqual(stripeState.capacities, current) &&
+        !hostedFamilyPlanCapacitiesEqual(stripeState.capacities, target)
+      ) {
+        throw hostedOnboardingError({
+          code: "HOSTED_FAMILY_BILLING_SYNCING",
+          httpStatus: 409,
+          message: "Family billing changed elsewhere and is still syncing. Try again shortly.",
+          retryable: true,
+        });
+      }
+
+      if (!hostedFamilyPlanCapacitiesEqual(stripeState.capacities, target)) {
+        const increase = calculateHostedFamilyMonthlyAmountUsdCents(target) >
+          calculateHostedFamilyMonthlyAmountUsdCents(stripeState.capacities);
+        const updated = await stripe.subscriptions.update(
+          billingRef.stripeSubscriptionId,
+          {
+            expand: ["items.data.price"],
+            items: buildHostedFamilyStripeCapacityUpdateItems({
+              current: stripeState,
+              priceIdsByPlan,
+              target,
+            }),
+            ...(increase ? { payment_behavior: "error_if_incomplete" as const } : {}),
+            proration_behavior: increase ? "always_invoice" : "none",
+          },
+          {
+            idempotencyKey:
+              `family-capacity:${input.groupId}:${billingRef.updatedAt.getTime()}:${target.pulse}:${target.edge}`,
+          },
+        );
+        const applied = readHostedFamilyStripePlanState({
+          priceIdsByPlan,
+          subscription: updated,
+        });
+        if (!applied || !hostedFamilyPlanCapacitiesEqual(applied.capacities, target)) {
+          throw hostedOnboardingError({
+            code: "HOSTED_FAMILY_CAPACITY_UPDATE_UNCONFIRMED",
+            httpStatus: 502,
+            message: "Stripe did not confirm the requested Family capacity.",
+          });
+        }
+      }
+    },
+  });
 
   const snapshot = await readHostedFamilyOwnerSnapshotForMember({
     memberId: input.ownerMemberId,

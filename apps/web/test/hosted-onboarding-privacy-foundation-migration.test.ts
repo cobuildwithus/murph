@@ -809,8 +809,8 @@ describe("hosted Prisma baseline migration", () => {
     expect(hostedFamilyPlanCodeContractMigrationSql).toContain(
       'VALIDATE CONSTRAINT "hosted_account_group_membership_plan_code_check"',
     );
-    expect(hostedFamilyMixedTierCapacityMigrationSql).toContain(
-      "SELECT \"group_id\", 'pulse', \"billed_seat_count\"",
+    expect(hostedFamilyMixedTierCapacityMigrationSql).not.toContain(
+      'INSERT INTO "hosted_account_group_plan_capacity"',
     );
     expect(hostedGroupJoinConfirmationEligibilityMigrationSql).toContain(
       'ALTER TABLE "hosted_group_member"',
