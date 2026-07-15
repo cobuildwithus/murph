@@ -108,16 +108,40 @@ a new requirement-level continuation decision; there is no automatic Round 6.
 
 ## Evidence So Far
 
-- Shared-host focused verification: assistant-engine retry policy 5/5;
-  assistant-runtime callbacks and channel activity 224/224; Cloudflare runner
-  platform 125/125; Web engagement, delivery route, and store 142/142; and the
-  operator runtime-helper owner suite passed before the latest-main merge.
+- Shared-host focused verification passed across the corrected owners:
+  assistant-engine retry policy 5/5; assistant-runtime callbacks and channel
+  activity 224/224; Cloudflare runner platform 127/127; Web engagement,
+  delivery route, and store 142/142; operator runtime helpers 30/30; the
+  current prompt-budget assertion 1/1; combined runtime callbacks and
+  workspace entrypoint 408/408; and current Web Linq engagement 37/37.
 - Coverage proves the same claim-attempt timestamp flows from the runtime
   request through Web persistence and exact release CAS, including invalid-
   timestamp rejection and timestamp-mismatch conflict.
 - Control-plane invalid JSON and body-read failure are marked response-
   unavailable. Latest `main` removed the retired channel, and the merge keeps it
   deleted.
-- Scoped `git diff --check` is green. Final exact-head typechecks, verification,
-  bundle assembly, CI, and ReviewGPT remain required after latest-main lineage
-  reconstruction.
+- Latest `main` at `fd2929469a57529307ab5638adf48091fd92199d` is merged at
+  `b84600890a29dd6edf3e025a13fea2d70b58e6ef`. The prompt-upgrade commit, first
+  reviewed head, and previous reviewed head remain ancestors. A semantic audit
+  found the latest Junction historical-coverage work disjoint from this PR's
+  wake, provider-entry, outbox, and Linq owners.
+- Shared-host `pnpm verify:acceptance` at `6c35a39fcce51f37b0ee2e126336aa484cfc2597`
+  passed every pre-coverage gate, including dependency policy, workspace
+  boundaries, hosted guards, runtime-artifact preparation, TypeScript 7
+  workspace typecheck, docs, and artifact hygiene.
+  Package coverage then reported three host-resource failures: one CLI test
+  exceeded its coverage-mode timeout, one assistant-engine worker timed out
+  during fork termination, and one assistant-runtime worker exhausted its V8
+  heap. The exact CLI test passed under coverage in 36.72 seconds (the focused
+  command then failed only the intentionally unexercised package-wide coverage
+  thresholds); the assistant-engine file passed 87/87 without coverage; and the
+  full assistant-runtime no-coverage suite passed 73 files and 1,702 tests with
+  two skipped. The assistant-engine focused coverage worker independently
+  reproduced the V8 heap limit before coverage collection, confirming the
+  remaining coverage blocker is resource-bound rather than an assertion.
+- The current-source Cloudflare runner bundle rebuilt all workspace artifacts
+  and assembled within budget: entry 937,577 B, static boot closure 6,888,343 B,
+  and total 8,861,630 B. The requested fresh-artifact assemble-only rerun also
+  passed with the same bundle sizes.
+- Scoped `git diff --check` is green. Final parent review, privacy/prohibited-
+  cast/generated scans, exact-head CI, and ReviewGPT Round 5 remain required.
