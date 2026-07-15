@@ -517,15 +517,17 @@ describe("runner bundle container-entrypoint esbuild step", () => {
 
     // Entry = measured CI Linux baseline (1,423,217B after the 2026-07-13
     // mainline integration) + the prior 14,551B host-variance ratchet + PR
-    // #626's exact 7,706B local-macOS overage + 48,000B noise band. Static
-    // closure advances the latest mainline baseline by PR #631's exact 913B
-    // crypto-lane and 872B checkpoint overages plus PR #626's exact 33,357B
-    // local-macOS overage, while preserving the separate 96,000B noise band.
+    // #626's exact 7,706B local-macOS overage, then this PR's exact 4,351B
+    // overage on the merged base, plus the 48,000B noise band. Static closure
+    // advances the latest mainline baseline by PR #631's exact 913B crypto-lane
+    // and 872B checkpoint overages, PR #626's exact 33,357B local-macOS
+    // overage, and this PR's exact 1,929B merged-base overage while preserving
+    // the separate 96,000B noise band.
     // Locking exact values makes any silent change to a ratchet a failing,
     // reviewed diff.
     expect(budgets).toEqual({
-      entryBytes: 1_452_573 + 48_000,
-      staticClosureBytes: 7_112_746 + 96_000,
+      entryBytes: 1_449_825 + 48_000,
+      staticClosureBytes: 7_096_498 + 96_000,
       totalBytes: 9_300_000,
     });
     // The ratchet is meaningfully tighter than the prior loose 2.9MB ceiling
