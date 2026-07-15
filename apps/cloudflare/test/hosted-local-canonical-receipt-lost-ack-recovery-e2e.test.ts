@@ -232,6 +232,14 @@ describe("hosted local canonical receipt lost-ack recovery e2e", () => {
       memberId: preferenceRecoveryUserId,
       memberPhone,
     });
+    await requireScenario().runWake(
+      buildActivationWake(preferenceRecoveryUserId),
+      preferenceRecoveryUserId,
+    );
+    const activationStatus = await requireScenario().waitForHostedCompletion(
+      preferenceRecoveryUserId,
+    );
+    expect(activationStatus.workspace).not.toBeNull();
     await requireScenario().bindActiveHostedLinqHomeChat({
       chatId: preferenceRecoveryChatId,
       memberId: preferenceRecoveryUserId,
