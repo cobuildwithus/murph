@@ -86,9 +86,10 @@ validated fence identity is the only member identity forwarded and signed for
 the web callback. New `conversation.message` mailbox rows also store a nullable
 server-keyed lookup of their existing deterministic assistant input id; the raw
 id is not persisted there, and this adds no mailbox wire, `sourceRef`, or
-event-id field. For an update, the runtime forwards the
-sole input id only when the provider accepted exactly one input. Inside the
-mutation transaction, web resolves the
+event-id field. For an update, the runtime forwards the terminal
+provider-accepted input id only after the accepted ids revalidate as one
+same-conversation, same-reply-anchor, exact-successor batch. Inside the mutation
+transaction, web resolves the
 callback member plus a keyed lookup of that id to one live conversation-lane
 `conversation.message` row and uses the row's canonical causal sequence.
 Missing, legacy, mismatched, or ambiguous identity fails closed with no numeric

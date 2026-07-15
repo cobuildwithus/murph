@@ -59,12 +59,13 @@ export async function resolveHostedPersonalizationInputIdForAcceptedInputs(input
   ) {
     return null;
   }
-  const events = await readHostedAssistantInputEventsById({
-    inputIds,
-    missingInput: "skip",
-    vaultRoot: input.vaultRoot,
-  });
-  if (events.length !== inputIds.length) {
+  let events: AssistantInputEventRecord[];
+  try {
+    events = await readHostedAssistantInputEventsById({
+      inputIds,
+      vaultRoot: input.vaultRoot,
+    });
+  } catch {
     return null;
   }
   let batch: AssistantInputEventRecord[];
@@ -129,17 +130,10 @@ export function createHostedAssistantInputSource(input: {
         observedInputIds.add(inputId);
         newPendingInputIds.push(inputId);
       }
-      const appendablePendingEvents = input.pendingInputRefreshMode === "existing"
-        ? await readHostedReplyablePendingAssistantInputEvents({
-            inputIds: newPendingInputIds,
-            missingInput: "skip",
-            vaultRoot: input.vaultRoot,
-          })
-        : await readHostedAssistantInputEventsById({
-            inputIds: newPendingInputIds,
-            missingInput: "skip",
-            vaultRoot: input.vaultRoot,
-          });
+      const appendablePendingEvents = await readHostedAssistantInputEventsById({
+        inputIds: newPendingInputIds,
+        vaultRoot: input.vaultRoot,
+      });
       const appendablePendingInputIds = selectedInputIds.length === 0
         ? selectHostedAssistantInputEventBatch({
             events: appendablePendingEvents,
