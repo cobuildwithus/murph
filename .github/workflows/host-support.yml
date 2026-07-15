@@ -200,7 +200,7 @@ jobs:
 
       - name: Verify CLI package shape
         if: ${{ matrix.shard == 'cli' }}
-        run: pnpm exec tsx packages/cli/scripts/verify-package-shape.ts
+        run: pnpm --dir packages/cli exec tsx scripts/verify-package-shape.ts
 
       - name: Run package coverage shard
         run: |

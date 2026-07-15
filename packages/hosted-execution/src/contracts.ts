@@ -167,8 +167,11 @@ export interface HostedExecutionMemberPreferences {
 
 export interface HostedExecutionMemberPreferencesUpdatedEvent
   extends HostedExecutionBaseEvent {
+  causalOrigin?: "event" | "turn";
   kind: "member.preferences.updated";
+  preferenceCausalSeq?: string;
   preferences: HostedExecutionMemberPreferences;
+  requestedFields?: Array<"tone" | "voice">;
 }
 
 export type HostedExecutionAssistantNotificationDeliveryDispatchMode =
@@ -365,7 +368,13 @@ export const HOSTED_EXECUTION_LINQ_CONVERSATION_CONTACT_KINDS = [
 export type HostedExecutionLinqConversationContactKind =
   (typeof HOSTED_EXECUTION_LINQ_CONVERSATION_CONTACT_KINDS)[number];
 
-export const HOSTED_EXECUTION_LINQ_GROUP_REACTION_CONTEXT_MAX_CHARS = 512;
+export const HOSTED_EXECUTION_LINQ_GROUP_REACTION_CONTEXT_MAX_ITEMS = 10;
+export const HOSTED_EXECUTION_LINQ_GROUP_REACTION_CONTEXT_ITEM_MAX_CHARS = 512;
+// Ten max-size entries plus the nine newline separators in the consumed hint.
+export const HOSTED_EXECUTION_LINQ_GROUP_REACTION_CONTEXT_MAX_CHARS =
+  (HOSTED_EXECUTION_LINQ_GROUP_REACTION_CONTEXT_ITEM_MAX_CHARS
+    * HOSTED_EXECUTION_LINQ_GROUP_REACTION_CONTEXT_MAX_ITEMS)
+  + HOSTED_EXECUTION_LINQ_GROUP_REACTION_CONTEXT_MAX_ITEMS - 1;
 
 interface HostedExecutionLinqConversationMessagePayloadBase {
   accountLookupKey?: string | null;
@@ -484,8 +493,11 @@ export interface HostedExecutionMemberChannelsUpdatedWake extends HostedExecutio
 
 export interface HostedExecutionMemberPreferencesUpdatedWake
   extends HostedExecutionBaseWake {
+  causalOrigin?: "event" | "turn";
   kind: "member.preferences.updated";
+  preferenceCausalSeq?: string;
   preferences: HostedExecutionMemberPreferences;
+  requestedFields?: Array<"tone" | "voice">;
 }
 
 export interface HostedExecutionVaultShareDeliveryWake extends HostedExecutionBaseWake {

@@ -28,6 +28,7 @@ export const DEVICE_SYNC_RUNTIME_DIRECTORY_RELATIVE_PATH = `${RUNTIME_OPERATIONA
 export const DEVICE_SYNC_LAUNCHER_STATE_RELATIVE_PATH = `${DEVICE_SYNC_RUNTIME_DIRECTORY_RELATIVE_PATH}/launcher.json`;
 export const DEVICE_SYNC_STDOUT_LOG_RELATIVE_PATH = `${DEVICE_SYNC_RUNTIME_DIRECTORY_RELATIVE_PATH}/stdout.log`;
 export const DEVICE_SYNC_STDERR_LOG_RELATIVE_PATH = `${DEVICE_SYNC_RUNTIME_DIRECTORY_RELATIVE_PATH}/stderr.log`;
+export const CLINICAL_RECORDS_RUNTIME_DIRECTORY_RELATIVE_PATH = `${RUNTIME_OPERATIONAL_ROOT_RELATIVE_PATH}/clinical-records`;
 export const PARSER_RUNTIME_DIRECTORY_RELATIVE_PATH = `${RUNTIME_OPERATIONAL_ROOT_RELATIVE_PATH}/parsers`;
 export const PARSER_TOOLCHAIN_CONFIG_RELATIVE_PATH = `${PARSER_RUNTIME_DIRECTORY_RELATIVE_PATH}/toolchain.json`;
 export const ASSISTANT_RUNTIME_DIRECTORY_RELATIVE_PATH = ASSISTANT_RUNTIME_ROOT_RELATIVE_PATH;
@@ -38,6 +39,7 @@ export interface RuntimePaths {
   operationalRoot: string;
   projectionsRoot: string;
   cacheRoot: string;
+  clinicalRecordsRuntimeRoot: string;
   tempRoot: string;
   queryDbPath: string;
   inboxDbPath: string;
@@ -100,6 +102,10 @@ export function resolveRuntimePaths(vaultRoot: string): RuntimePaths {
     operationalRoot,
     projectionsRoot,
     cacheRoot: path.join(absoluteVaultRoot, RUNTIME_CACHE_ROOT_RELATIVE_PATH),
+    clinicalRecordsRuntimeRoot: path.join(
+      absoluteVaultRoot,
+      CLINICAL_RECORDS_RUNTIME_DIRECTORY_RELATIVE_PATH,
+    ),
     tempRoot: path.join(absoluteVaultRoot, RUNTIME_TEMP_ROOT_RELATIVE_PATH),
     queryDbPath: path.join(absoluteVaultRoot, QUERY_DB_RELATIVE_PATH),
     inboxDbPath: path.join(absoluteVaultRoot, INBOX_DB_RELATIVE_PATH),

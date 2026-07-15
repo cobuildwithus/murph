@@ -259,6 +259,133 @@ model DeviceBrowserAssertionNonce {
   @@map("device_browser_assertion_nonce")
 }
 
+model ClinicalRecordConnectIntent {
+  claimHash                String       @id @map("claim_hash")
+  memberId                 String       @map("member_id")
+  providerDirectoryEntryId String?      @map("provider_directory_entry_id")
+  createdAt                DateTime     @default(now()) @map("created_at")
+  expiresAt                DateTime     @map("expires_at")
+  startedAt                DateTime?    @map("started_at")
+  completedAt              DateTime?    @map("completed_at")
+  member                   HostedMember @relation(fields: [memberId], references: [id], onDelete: Cascade)
+
+  @@index([expiresAt])
+  @@index([memberId, expiresAt])
+  @@index([startedAt])
+  @@map("clinical_record_connect_intent")
+}
+
+model ClinicalRecordOauthSession {
+  stateHash                String       @id @map("state_hash")
+  memberId                 String       @map("member_id")
+  webSessionId             String       @map("web_session_id")
+  connectIntentClaimHash   String       @map("connect_intent_claim_hash")
+  providerDirectoryEntryId String       @map("provider_directory_entry_id")
+  fhirBaseHash             String       @map("fhir_base_hash")
+  tokenEndpoint            String       @map("token_endpoint")
+  clientId                 String       @map("client_id")
+  redirectUri              String       @map("redirect_uri")
+  requestedScopesJson      Json         @map("requested_scopes_json")
+  codeVerifierEncrypted    String       @map("code_verifier_encrypted")
+  createdAt                DateTime     @default(now()) @map("created_at")
+  expiresAt                DateTime     @map("expires_at")
+  consumedAt               DateTime?    @map("consumed_at")
+  member                   HostedMember @relation(fields: [memberId], references: [id], onDelete: Cascade)
+
+  @@index([expiresAt])
+  @@index([memberId, providerDirectoryEntryId])
+  @@index([connectIntentClaimHash])
+  @@map("clinical_record_oauth_session")
+}
+
+model ClinicalRecordConnection {
+  id                       String                           @id
+  memberId                 String                           @map("member_id")
+  providerDirectoryEntryId String                           @map("provider_directory_entry_id")
+  sourceSystem             String                           @map("source_system")
+  displayName              String                           @map("display_name")
+  fhirBaseUrlEncrypted     String                           @map("fhir_base_url_encrypted")
+  fhirBaseHash             String                           @map("fhir_base_hash")
+  tokenEndpoint            String                           @map("token_endpoint")
+  clientId                 String                           @map("client_id")
+  status                   String                           @default("active")
+  patientIdEncrypted       String?                          @map("patient_id_encrypted")
+  accessTokenEncrypted     String?                          @map("access_token_encrypted")
+  refreshTokenEncrypted    String?                          @map("refresh_token_encrypted")
+  accessTokenExpiresAt     DateTime?                        @map("access_token_expires_at")
+  requestedScopesJson      Json                             @map("requested_scopes_json")
+  grantedScopesJson        Json                             @map("granted_scopes_json")
+  tokenVersion             Int                              @default(1) @map("token_version")
+  retrievalGeneration      Int                              @default(0) @map("retrieval_generation")
+  connectedAt              DateTime                         @map("connected_at")
+  disconnectedAt           DateTime?                        @map("disconnected_at")
+  lastSyncCompletedAt      DateTime?                        @map("last_sync_completed_at")
+  lastErrorCode            String?                          @map("last_error_code")
+  createdAt                DateTime                         @default(now()) @map("created_at")
+  updatedAt                DateTime                         @updatedAt @map("updated_at")
+  member                   HostedMember                     @relation(fields: [memberId], references: [id], onDelete: Cascade)
+  retrievalRuns            ClinicalRecordRetrievalRun[]
+  retrievalRequests        ClinicalRecordRetrievalRequest[]
+
+  @@unique([memberId, providerDirectoryEntryId])
+  @@index([memberId, status, updatedAt])
+  @@index([fhirBaseHash])
+  @@map("clinical_record_connection")
+}
+
+model ClinicalRecordRetrievalRun {
+  id                   String                           @id
+  memberId             String                           @map("member_id")
+  connectionId         String                           @map("connection_id")
+  generation           Int
+  status               String                           @default("queued")
+  resourceTypesJson    Json                             @map("resource_types_json")
+  grantedScopesJson    Json                             @map("granted_scopes_json")
+  pageCount            Int                              @default(0) @map("page_count")
+  fetchedBytes         Int                              @default(0) @map("fetched_bytes")
+  egressBytes          Int                              @default(0) @map("egress_bytes")
+  providerRequestCount Int                              @default(0) @map("provider_request_count")
+  importedCount        Int                              @default(0) @map("imported_count")
+  reviewCount          Int                              @default(0) @map("review_count")
+  lastErrorCode        String?                          @map("last_error_code")
+  outcomeCountsJson    Json?                            @map("outcome_counts_json")
+  createdAt            DateTime                         @default(now()) @map("created_at")
+  startedAt            DateTime?                        @map("started_at")
+  completedAt          DateTime?                        @map("completed_at")
+  connection           ClinicalRecordConnection         @relation(fields: [connectionId], references: [id], onDelete: Cascade)
+  member               HostedMember                     @relation(fields: [memberId], references: [id], onDelete: Cascade)
+  requests             ClinicalRecordRetrievalRequest[]
+
+  @@unique([connectionId, generation])
+  @@index([memberId, status, createdAt])
+  @@index([connectionId, createdAt])
+  @@map("clinical_record_retrieval_run")
+}
+
+model ClinicalRecordRetrievalRequest {
+  id                 String                     @id
+  memberId           String                     @map("member_id")
+  connectionId       String                     @map("connection_id")
+  runId              String                     @map("run_id")
+  generation         Int
+  requestFingerprint String                     @map("request_fingerprint")
+  reservedBytes      Int                        @default(0) @map("reserved_bytes")
+  responseBytes      Int?                       @map("response_bytes")
+  claimVersion       Int                        @default(1) @map("claim_version")
+  claimedAt          DateTime                   @map("claimed_at")
+  completedAt        DateTime?                  @map("completed_at")
+  createdAt          DateTime                   @default(now()) @map("created_at")
+  updatedAt          DateTime                   @updatedAt @map("updated_at")
+  connection         ClinicalRecordConnection   @relation(fields: [connectionId], references: [id], onDelete: Cascade)
+  run                ClinicalRecordRetrievalRun @relation(fields: [runId], references: [id], onDelete: Cascade)
+  member             HostedMember               @relation(fields: [memberId], references: [id], onDelete: Cascade)
+
+  @@unique([runId, requestFingerprint])
+  @@index([memberId, createdAt])
+  @@index([connectionId, generation])
+  @@map("clinical_record_retrieval_request")
+}
+
 model HostedWebInternalRequestNonce {
   nonceHash String   @id @map("nonce_hash")
   userId    String   @map("user_id")
@@ -349,7 +476,9 @@ model HostedMember {
   assistantModelPreference       String?                         @map("assistant_model_preference")
   assistantReasoningEffortPreference String?                     @map("assistant_reasoning_effort_preference")
   assistantTone                  String?                         @map("assistant_tone")
+  assistantToneCausalSeq         BigInt?                         @map("assistant_tone_causal_seq")
   assistantVoice                 String?                         @map("assistant_voice")
+  assistantVoiceCausalSeq        BigInt?                         @map("assistant_voice_causal_seq")
   assistantHumor                 Int?                            @map("assistant_humor")
   assistantPush                  Int?                            @map("assistant_push")
   assistantDetail                Int?                            @map("assistant_detail")
@@ -390,6 +519,11 @@ model HostedMember {
   mealPhotoCaptureEnrollments    HostedMealPhotoCaptureEnrollment[]
   connectedAppsSession           HostedConnectedAppsSession?
   connectedAppConnectIntents     HostedConnectedAppConnectIntent[]
+  clinicalRecordConnectIntents       ClinicalRecordConnectIntent[]
+  clinicalRecordOauthSessions        ClinicalRecordOauthSession[]
+  clinicalRecordConnections          ClinicalRecordConnection[]
+  clinicalRecordRetrievalRuns        ClinicalRecordRetrievalRun[]
+  clinicalRecordRetrievalRequests    ClinicalRecordRetrievalRequest[]
   codexAuthConnection            HostedCodexAuthConnection?
   computerRuns                   HostedComputerRun[]
   computerHandoffs               HostedComputerHandoff[]
@@ -713,6 +847,7 @@ model HostedMemberEmailAuthorization {
 model HostedMailboxItem {
   id                      String                @id
   userId                  String                @map("user_id")
+  assistantInputLookupKey String?               @map("assistant_input_lookup_key")
   causalSeq               BigInt?               @map("causal_seq")
   lane                    String
   laneSeq                 BigInt                @map("lane_seq")
@@ -735,6 +870,7 @@ model HostedMailboxItem {
   @@unique([userId, id])
   @@unique([userId, lane, laneSeq])
   @@unique([userId, causalSeq])
+  @@unique([userId, assistantInputLookupKey])
   @@unique([userId, dedupeKey])
   @@index([userId, lane, laneSeq])
   @@index([userId, kind, createdAt])

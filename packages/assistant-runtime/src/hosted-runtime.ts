@@ -44,6 +44,9 @@ import {
   findAssistantSessionIdByCodexThreadId,
 } from "@murphai/assistant-engine";
 import {
+  drainHostedCodexPostTurnCleanups,
+} from "@murphai/assistant-engine/assistant-codex";
+import {
   type AssistantCurrentDeliveryRoute,
 } from "@murphai/operator-config/assistant/current-delivery-route";
 import {
@@ -69,6 +72,7 @@ import {
 import {
   getOrCreateHostedCliRuntimeBridge,
 } from "./hosted-runtime/cli-runtime-bridge.ts";
+import { readHostedRunnerCommitTimeoutMs } from "./hosted-runtime/timeouts.ts";
 import {
   executeHostedMailboxEvent,
 } from "./hosted-runtime/events.ts";
@@ -164,9 +168,6 @@ import {
 import {
   collectHostedPendingAssistantInputMediaRetentionProtections,
 } from "./hosted-runtime/pending-input-index.ts";
-import {
-  resolveHostedPreferenceCausalSeqForSelectedInput,
-} from "./hosted-runtime/turn-input.ts";
 import {
   computeHostedRuntimeElapsedMs,
 } from "./hosted-runtime/utils.ts";
@@ -337,6 +338,7 @@ const HOSTED_INITIAL_BOOTSTRAP_MAILBOX_IMPORT_LANES = ["system", "conversation"]
 const HOSTED_FOREGROUND_MAILBOX_PREFETCH_LANES = ["conversation", "system"] as const;
 const HOSTED_INITIAL_BOOTSTRAP_PENDING_REASON_CODE = "bootstrap.pending";
 const HOSTED_RUNTIME_ISSUE_POST_CHECKPOINT_EXPORT_TIMEOUT_MS = 2_500;
+const HOSTED_CLI_BRIDGE_OWNER_TIMEOUT_MARGIN_MS = 5_000;
 const HOSTED_VAULT_FORMAT_MIGRATION_MAX_BUNDLES = 500;
 
 interface HostedInitialMailboxImportPlan {
@@ -1278,7 +1280,6 @@ export async function runHostedWorkspaceRuntimeJobInProcess(
       ...projectHostedRuntimeTrustStoreEnv(process.env),
       ...guardedRuntime.forwardedEnv,
       ...guardedRuntime.userEnv,
-      ...hostedCliBridge.env,
       ...(imageCodexModelCatalogJson
         ? { [HOSTED_RUNTIME_CODEX_MODEL_CATALOG_JSON_ENV]: imageCodexModelCatalogJson }
         : {}),
@@ -1660,7 +1661,7 @@ export async function runHostedWorkspaceRuntimeJobInProcess(
         status: "start",
       });
       try {
-        let currentPreferenceCausalSeq: string | null = null;
+        let currentAssistantPersonalizationInputId: string | null = null;
         let invocationLocalAssistantProjectedWakeKey: string | null = null;
         const passResult = await hostedCliBridge.runWithInvocation(
           {
@@ -1668,9 +1669,16 @@ export async function runHostedWorkspaceRuntimeJobInProcess(
             currentRouteGrant: () => currentOperationRouteGrant,
             deviceSyncPort: guardedRuntime.platform.deviceSyncPort ?? null,
             messagingReturnTarget: () => hostedCliBridgeMessagingReturnTarget,
+            requestTimeoutMs:
+              readHostedRunnerCommitTimeoutMs(guardedRuntime.commitTimeoutMs)
+              + HOSTED_CLI_BRIDGE_OWNER_TIMEOUT_MARGIN_MS,
             signal: passSignal,
           },
-          async () => {
+          async (hostedCliBridgeEnv) => {
+            const invocationRuntimeEnv = {
+              ...runtimeEnv,
+              ...hostedCliBridgeEnv,
+            };
             const passPromise = runHostedWorkspaceUntilIdleOrBudget({
               ...baseRunnerInput,
               initialAssistantInputBatch: passInput.initialAssistantInputBatch ?? null,
@@ -1684,28 +1692,29 @@ export async function runHostedWorkspaceRuntimeJobInProcess(
                 startedAtEpochMs: passStartedAtEpochMs,
               },
               runAssistantPhase: async (phaseInput) => {
-                currentPreferenceCausalSeq = null;
+                currentAssistantPersonalizationInputId = null;
                 try {
                   const phaseResult = await (
                     options.runAssistantPhase ?? runHostedWorkspaceAssistantPhase
                   )({
                     ...phaseInput,
-                    currentAssistantPreferenceCausalSeq: () =>
-                      currentPreferenceCausalSeq,
+                    currentAssistantPersonalizationInputId: () =>
+                      currentAssistantPersonalizationInputId,
                     currentDeliveryRouteScope,
                     deviceSyncWorkspaceWakeHandled: deviceSyncWorkspaceWakeHandledUntilCheckpoint,
                     request: input.request,
                     restored,
                     runtime: foregroundRuntime,
-                    runtimeEnv,
+                    runtimeEnv: invocationRuntimeEnv,
                     beforeProviderAcceptedInputs: async ({ acceptedInputs }) => {
-                      currentPreferenceCausalSeq =
-                        await resolveHostedPreferenceCausalSeqForSelectedInput({
-                          assistantInputIds: acceptedInputs.map((item) => item.id),
-                          vaultRoot: restored.vaultRoot,
-                        });
+                      const assistantPersonalizationInputId =
+                        acceptedInputs.length === 1
+                          ? acceptedInputs[0]?.id ?? null
+                          : null;
+                      currentAssistantPersonalizationInputId =
+                        assistantPersonalizationInputId;
                       return () => {
-                        currentPreferenceCausalSeq = null;
+                        currentAssistantPersonalizationInputId = null;
                       };
                     },
                     stagedDirtyAcks: stagedDeviceSyncDirtyAcks,
@@ -1723,7 +1732,7 @@ export async function runHostedWorkspaceRuntimeJobInProcess(
                       : null;
                   return phaseResult;
                 } finally {
-                  currentPreferenceCausalSeq = null;
+                  currentAssistantPersonalizationInputId = null;
                 }
               },
               signal: passSignal,
@@ -1736,6 +1745,11 @@ export async function runHostedWorkspaceRuntimeJobInProcess(
                 return await passPromise;
               }
               throw error;
+            } finally {
+              // Provider results have already reached the assistant delivery
+              // path. Drain the bounded native terminal cleanup barrier before
+              // this invocation releases CLI bridge authority.
+              await drainHostedCodexPostTurnCleanups();
             }
           },
         );

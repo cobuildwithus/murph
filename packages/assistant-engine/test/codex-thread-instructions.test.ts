@@ -15,6 +15,7 @@ import { VaultCliError } from '@murphai/operator-config/vault-cli-errors'
 import {
   executeCodexAssistantTurnAttempt,
 } from '../src/assistant/codex-runtime.ts'
+import { resolveMurphDynamicTools } from '../src/assistant-codex/dynamic-tools.ts'
 import {
   executeCodexAssistantTurnAttempt as executeCodexAssistantTurnAttemptUnchecked,
 } from '../src/assistant/providers/codex-cli.ts'
@@ -145,7 +146,50 @@ describe('Codex thread instructions', () => {
       })
   })
 
+  it('keeps personalized resumes on the native Codex thread', async () => {
+    codexAppServerMocks.executeCodexAppServerTurn.mockResolvedValueOnce({
+      finalMessage: 'done',
+      jsonEvents: [],
+      providerActionCount: 0,
+      sessionId: 'thread-cold-old',
+      stderr: '',
+      stdout: '',
+      threadId: 'thread-cold-old',
+      turnId: 'turn-native-resume',
+    })
+
+    const dynamicTools = resolveMurphDynamicTools({
+      personalizationAvailable: true,
+    })
+
+    const attempt = await executeCodexAssistantTurnAttemptUnchecked({
+      providerConfig: normalizeAssistantProviderConfig({
+        provider: 'codex-cli',
+      }),
+      dynamicTools,
+      env: {},
+      developerInstructions: null,
+      resume: {
+        codexThreadId: 'thread-cold-old',
+      },
+      userPrompt: 'Continue.',
+      workingDirectory: '/tmp/provider-tests',
+    })
+
+    expect(codexAppServerMocks.executeCodexAppServerTurn).toHaveBeenCalledTimes(1)
+    expect(codexAppServerMocks.executeCodexAppServerTurn.mock.calls[0]?.[0])
+      .toMatchObject({
+        dynamicTools,
+        resumeSessionId: 'thread-cold-old',
+      })
+    expect(attempt).toMatchObject({
+      ok: true,
+      result: { codexThreadId: 'thread-cold-old' },
+    })
+  })
+
   it('returns stale native-resume failure without starting a fresh thread', async () => {
+    const dynamicTools = resolveMurphDynamicTools({})
     codexAppServerMocks.executeCodexAppServerTurn
       .mockRejectedValueOnce(
         new VaultCliError(
@@ -163,7 +207,7 @@ describe('Codex thread instructions', () => {
         providerConfig: normalizeAssistantProviderConfig({
           provider: 'codex-cli',
         }),
-        dynamicTools: [],
+        dynamicTools,
         env: {},
         developerInstructions: null,
         resume: {
@@ -180,6 +224,7 @@ describe('Codex thread instructions', () => {
     expect(codexAppServerMocks.executeCodexAppServerTurn.mock.calls[0]?.[0])
       .toMatchObject({
         developerInstructions: null,
+        dynamicTools,
         resumeSessionId: 'stale-thread',
       })
   })

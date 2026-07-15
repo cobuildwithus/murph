@@ -12,6 +12,10 @@ import type { Prisma, PrismaClient } from "@prisma/client";
 
 const WEB_SEAL_LANES = new Set<HostedCryptoLane>([
   "hosted-member-private-field",
+  "clinical-records-oauth",
+  "clinical-records-page-cursor",
+  "clinical-records-patient-id",
+  "clinical-records-token",
   "device-sync-external-account-id",
   "device-sync-payload",
   "device-sync-token",

@@ -1,6 +1,10 @@
 import { describe, expect, it } from "vitest";
 
 import {
+  HOSTED_EXECUTION_LINQ_GROUP_REACTION_CONTEXT_MAX_CHARS,
+} from "../src/contracts.ts";
+
+import {
   parseHostedExecutionExternalThreadRouteAuthority,
   parseHostedExecutionEvent,
   parseHostedExecutionWake,
@@ -199,7 +203,10 @@ describe("parseHostedExecutionEvent", () => {
   it.each([
     ["blank", "   "],
     ["non-string", 42],
-    ["over 512 characters", "x".repeat(513)],
+    [
+      "over the bounded reaction context limit",
+      "x".repeat(HOSTED_EXECUTION_LINQ_GROUP_REACTION_CONTEXT_MAX_CHARS + 1),
+    ],
   ])("rejects %s Linq group reaction context", (_label, groupReactionContext) => {
     expect(() => parseHostedExecutionWake({
       eventId: "linq-group-reaction-context-1",
@@ -652,6 +659,41 @@ describe("parseHostedExecutionEvent", () => {
         userId: "user-1",
       }),
     ).toThrow(/Unsupported hosted execution event kind/i);
+  });
+});
+
+describe("Linq group reaction context bounds", () => {
+  it("accepts the maximum bounded Linq group reaction context", () => {
+    const groupReactionContext = "x".repeat(
+      HOSTED_EXECUTION_LINQ_GROUP_REACTION_CONTEXT_MAX_CHARS,
+    );
+    expect(parseHostedExecutionWake({
+      eventId: "linq-group-reaction-context-max",
+      kind: "conversation.message",
+      message: {
+        channel: "linq",
+        contactKind: "phone",
+        contactLookupKey: "hbidx:phone:v1:sender",
+        groupReactionContext,
+        linqMessage: {
+          chatId: "chat_123",
+          from: "+15550001111",
+          isFromMe: false,
+          messageId: "msg_123",
+          parts: [{ type: "text", value: "hello" }],
+          threadIsDirect: false,
+        },
+        routeAuthority: {
+          channel: "linq",
+          containerMemberId: "member_container_123",
+          threadId: "chat_123",
+        },
+      },
+      occurredAt: "2026-04-08T00:15:00.000Z",
+      userId: "member_container_123",
+    })).toMatchObject({
+      message: { groupReactionContext },
+    });
   });
 });
 

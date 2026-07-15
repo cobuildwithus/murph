@@ -20,6 +20,9 @@ import {
   type HostedClinicalRecordsRunDescriptor,
 } from "@murphai/hosted-execution/clinical-records";
 import type {
+  ClinicalFhirRetrievalCheckpoint,
+  ClinicalFhirRetrievalCheckpointIdentity,
+  ClinicalFhirRetrievalCheckpointRecord,
   ClinicalFhirSnapshotImportInput,
   ClinicalFhirSnapshotImportResult,
 } from "@murphai/vault-usecases/clinical-records";
@@ -35,9 +38,26 @@ const CLINICAL_RECORDS_VAULT_MODULE_SPECIFIER =
   "@murphai/vault-usecases/clinical-records";
 
 type ClinicalRecordsVaultModule = {
+  clearClinicalFhirRetrievalCheckpoint(input: {
+    identity: Pick<ClinicalFhirRetrievalCheckpointIdentity, "generation" | "runId">;
+    vaultRoot: string;
+  }): Promise<void>;
   importClinicalFhirSnapshot(
     input: ClinicalFhirSnapshotImportInput,
   ): Promise<ClinicalFhirSnapshotImportResult>;
+  readClinicalFhirRetrievalCheckpoint(input: {
+    identity: ClinicalFhirRetrievalCheckpointIdentity;
+    vaultRoot: string;
+  }): Promise<ClinicalFhirRetrievalCheckpoint | null>;
+  readClinicalFhirRetrievalCheckpointForRun(input: {
+    identity: Pick<ClinicalFhirRetrievalCheckpointIdentity, "generation" | "runId">;
+    vaultRoot: string;
+  }): Promise<ClinicalFhirRetrievalCheckpointRecord | null>;
+  writeClinicalFhirRetrievalCheckpoint(input: {
+    checkpoint: ClinicalFhirRetrievalCheckpoint;
+    identity: ClinicalFhirRetrievalCheckpointIdentity;
+    vaultRoot: string;
+  }): Promise<void>;
 };
 
 export interface HostedClinicalRecordsSyncMetrics {
@@ -95,139 +115,243 @@ async function runHostedClinicalRecordsSyncWakeLaneWithCancellation(input: {
   );
   throwIfPreempted(input);
   const readResponse = parseHostedClinicalRecordsReadRunResponse(readResponsePayload);
+  if (readResponse.status === "unavailable" && readResponse.retryable) {
+    throw new HostedClinicalRecordsRuntimeError(
+      "CLINICAL_RECORDS_RUN_RETRYABLE",
+      "Hosted clinical records run is temporarily unavailable.",
+    );
+  }
+  const vaultModule = await loadClinicalRecordsVaultModule();
+  let checkpoint: ClinicalFhirRetrievalCheckpoint;
+  let checkpointIdentity: ClinicalFhirRetrievalCheckpointIdentity;
+  let recoveringAuthorizationRequired = false;
   if (readResponse.status === "unavailable") {
-    if (readResponse.retryable) {
-      throw new HostedClinicalRecordsRuntimeError(
-        "CLINICAL_RECORDS_RUN_RETRYABLE",
-        "Hosted clinical records run is temporarily unavailable.",
-      );
+    if (
+      readResponse.errorCode
+      !== HOSTED_CLINICAL_RECORDS_AUTHORIZATION_REQUIRED_ERROR_CODE
+    ) {
+      await vaultModule.clearClinicalFhirRetrievalCheckpoint({
+        identity: input.wake,
+        vaultRoot: input.vaultRoot,
+      });
+      return unavailableClinicalRecordsSync();
     }
-    return {
-      counts: emptyCounts(),
-      outcome: null,
-      status: "unavailable",
+    const record = await vaultModule.readClinicalFhirRetrievalCheckpointForRun({
+      identity: input.wake,
+      vaultRoot: input.vaultRoot,
+    });
+    if (!record) {
+      return unavailableClinicalRecordsSync();
+    }
+    checkpoint = record.checkpoint;
+    checkpointIdentity = record.identity;
+    recoveringAuthorizationRequired = true;
+  } else {
+    const run = readResponse.run;
+    assertRunMatchesWake(run, input.wake);
+    throwIfPreempted(input);
+    checkpointIdentity = {
+      connectionId: run.connectionId,
+      fetchedAt: run.fetchedAt,
+      fhirBaseUrlHash: run.fhirBaseUrlHash,
+      generation: run.generation,
+      grantedScopes: run.grantedScopes,
+      patientIdHash: run.patientIdHash,
+      ...(run.providerDirectoryEntryId
+        ? { providerDirectoryEntryId: run.providerDirectoryEntryId }
+        : {}),
+      requestedScopes: run.requestedScopes,
+      retrievalJobId: run.retrievalJobId,
+      retrievalScopes: run.retrievalScopes.map((scope) =>
+        clinicalFhirRetrievalScopeSchema.parse(scope)
+      ),
+      runId: run.runId,
+      sourceSystem: clinicalSourceSystemSchema.parse(run.sourceSystem),
     };
+    checkpoint = await vaultModule.readClinicalFhirRetrievalCheckpoint({
+      identity: checkpointIdentity,
+      vaultRoot: input.vaultRoot,
+    }) ?? emptyRetrievalCheckpoint();
   }
 
-  const run = readResponse.run;
-  assertRunMatchesWake(run, input.wake);
-  throwIfPreempted(input);
-  const retrievalScopes = run.retrievalScopes.map((scope) =>
+  const retrievalScopes = checkpointIdentity.retrievalScopes.map((scope) =>
     clinicalFhirRetrievalScopeSchema.parse(scope)
   );
-  const pages: ClinicalFhirSnapshotImportInput["pages"] = [];
-  const completedResourceTypes: string[] = [];
-  const errors: NonNullable<ClinicalFhirSnapshotImportInput["errors"]> = [];
-  let pageFetchCount = 0;
-  let successfulPageCount = 0;
-  let totalBodyBytes = 0;
-  let totalResourceCount = 0;
-  let authorizationRequired = false;
-
-  for (const [resourceIndex, scope] of retrievalScopes.entries()) {
+  const sourceSystem = clinicalSourceSystemSchema.parse(checkpointIdentity.sourceSystem);
+  if (checkpoint.currentResourceIndex > retrievalScopes.length) {
+    throw new HostedClinicalRecordsRuntimeError(
+      "CLINICAL_RECORDS_CHECKPOINT_SCOPE_MISMATCH",
+      "Hosted clinical records checkpoint exceeds its retrieval scope.",
+    );
+  }
+  if (recoveringAuthorizationRequired) {
+    finalizeAuthorizationRequiredCheckpoint({
+      checkpoint,
+      retrievalScopes,
+    });
+    await persistRetrievalCheckpoint({ checkpoint, checkpointIdentity, input, vaultModule });
     throwIfPreempted(input);
-    let cursor: string | null = null;
-    const seenCursors = new Set<string>();
+  }
+
+  for (
+    let resourceIndex = checkpoint.currentResourceIndex;
+    resourceIndex < retrievalScopes.length;
+    resourceIndex += 1
+  ) {
+    if (checkpoint.authorizationRequired) {
+      break;
+    }
+    const scope = retrievalScopes[resourceIndex];
+    if (!scope) {
+      throw new HostedClinicalRecordsRuntimeError(
+        "CLINICAL_RECORDS_SCOPE_UNAVAILABLE",
+        "Hosted clinical records retrieval scope is unavailable.",
+      );
+    }
+    throwIfPreempted(input);
     let completed = false;
-    const resourcePageStartIndex = pages.length;
 
     while (!completed) {
       throwIfPreempted(input);
-      if (pageFetchCount >= HOSTED_CLINICAL_RECORDS_MAX_PAGES) {
-        return terminalFailure({
-          counts: fetchCounts(successfulPageCount, completedResourceTypes.length),
+      if (checkpoint.pageFetchCount >= HOSTED_CLINICAL_RECORDS_MAX_PAGES) {
+        return await terminalFailureAfterClearingCheckpoint({
+          checkpoint,
+          checkpointIdentity,
           errorCode: "page_limit_exceeded",
-          wake: input.wake,
+          input,
+          vaultModule,
         });
       }
-      if (cursor && seenCursors.has(cursor)) {
-        return terminalFailure({
-          counts: fetchCounts(successfulPageCount, completedResourceTypes.length),
+      if (
+        checkpoint.cursor
+        && checkpoint.seenCursors.includes(checkpoint.cursor)
+      ) {
+        return await terminalFailureAfterClearingCheckpoint({
+          checkpoint,
+          checkpointIdentity,
           errorCode: "cursor_cycle",
-          wake: input.wake,
+          input,
+          vaultModule,
         });
-      }
-      if (cursor) {
-        seenCursors.add(cursor);
       }
 
+      const requestedCursor = checkpoint.cursor;
       const responsePayload = await port.fetchPage(
         {
-          cursor,
-          generation: run.generation,
-          requestId: `cr-${run.generation}-${resourceIndex + 1}-${seenCursors.size + 1}`,
+          cursor: checkpoint.cursor,
+          generation: checkpointIdentity.generation,
+          requestId: `cr-${checkpointIdentity.generation}-${resourceIndex + 1}-${checkpoint.pageFetchCount + 1}`,
           resourceType: scope.resourceType,
-          runId: run.runId,
+          runId: checkpointIdentity.runId,
         },
         { signal: input.signal },
       );
-      throwIfPreempted(input);
       const response = parseHostedClinicalRecordsFetchPageResponse(responsePayload);
-      pageFetchCount += 1;
+      checkpoint.pageFetchCount += 1;
       if (response.status === "unavailable") {
         if (response.retryable) {
+          await persistRetrievalCheckpoint({
+            checkpoint,
+            checkpointIdentity,
+            input,
+            vaultModule,
+          });
           throw new HostedClinicalRecordsRuntimeError(
             "CLINICAL_RECORDS_PAGE_RETRYABLE",
             "Hosted clinical records page is temporarily unavailable.",
           );
         }
-        errors.push({
-          code: response.errorCode,
-          message: "Provider did not return this FHIR resource family.",
-          resourceType: scope.resourceType,
-        });
-        authorizationRequired = response.errorCode
-          === HOSTED_CLINICAL_RECORDS_AUTHORIZATION_REQUIRED_ERROR_CODE;
-        pages.splice(resourcePageStartIndex);
+        if (
+          response.errorCode
+          === HOSTED_CLINICAL_RECORDS_AUTHORIZATION_REQUIRED_ERROR_CODE
+        ) {
+          finalizeAuthorizationRequiredCheckpoint({ checkpoint, retrievalScopes });
+        } else {
+          checkpoint.errors.push({
+            code: response.errorCode,
+            message: "Provider did not return this FHIR resource family.",
+            resourceType: scope.resourceType,
+          });
+          checkpoint.pages.splice(checkpoint.resourcePageStartIndex);
+          checkpoint.currentResourceIndex = resourceIndex + 1;
+          checkpoint.cursor = null;
+          checkpoint.resourcePageStartIndex = checkpoint.pages.length;
+          checkpoint.seenCursors = [];
+          checkpoint.seenPageUrlHashes = [];
+        }
+        await persistRetrievalCheckpoint({ checkpoint, checkpointIdentity, input, vaultModule });
+        throwIfPreempted(input);
         break;
       }
-      successfulPageCount += 1;
+      checkpoint.successfulPageCount += 1;
 
       const pageBodyBytes = Buffer.byteLength(response.body, "utf8");
       if (pageBodyBytes > CLINICAL_RAW_RESOURCE_FILE_MAX_BYTES) {
-        return terminalFailure({
-          counts: fetchCounts(successfulPageCount, completedResourceTypes.length),
+        return await terminalFailureAfterClearingCheckpoint({
+          checkpoint,
+          checkpointIdentity,
           errorCode: "page_size_exceeded",
-          wake: input.wake,
+          input,
+          vaultModule,
         });
       }
       let pageResourceCount: number;
       try {
         pageResourceCount = countClinicalFhirPageResources(response.body);
       } catch {
-        return terminalFailure({
-          counts: fetchCounts(successfulPageCount, completedResourceTypes.length),
+        return await terminalFailureAfterClearingCheckpoint({
+          checkpoint,
+          checkpointIdentity,
           errorCode: "invalid_fhir_page",
-          wake: input.wake,
+          input,
+          vaultModule,
         });
       }
       if (pageResourceCount > CLINICAL_RAW_MANIFEST_MAX_RESOURCES_PER_FILE) {
-        return terminalFailure({
-          counts: fetchCounts(successfulPageCount, completedResourceTypes.length),
+        return await terminalFailureAfterClearingCheckpoint({
+          checkpoint,
+          checkpointIdentity,
           errorCode: "page_resource_limit_exceeded",
-          wake: input.wake,
+          input,
+          vaultModule,
         });
       }
       if (
-        totalResourceCount + pageResourceCount
+        checkpoint.totalResourceCount + pageResourceCount
         > CLINICAL_RAW_MANIFEST_MAX_TOTAL_RESOURCES
       ) {
-        return terminalFailure({
-          counts: fetchCounts(successfulPageCount, completedResourceTypes.length),
+        return await terminalFailureAfterClearingCheckpoint({
+          checkpoint,
+          checkpointIdentity,
           errorCode: "snapshot_resource_limit_exceeded",
-          wake: input.wake,
+          input,
+          vaultModule,
         });
       }
-      totalResourceCount += pageResourceCount;
-      totalBodyBytes += pageBodyBytes;
-      if (totalBodyBytes > HOSTED_CLINICAL_RECORDS_MAX_TOTAL_BODY_BYTES) {
-        return terminalFailure({
-          counts: fetchCounts(successfulPageCount, completedResourceTypes.length),
+      if (
+        response.pageUrlHash
+        && checkpoint.seenPageUrlHashes.includes(response.pageUrlHash)
+      ) {
+        return await terminalFailureAfterClearingCheckpoint({
+          checkpoint,
+          checkpointIdentity,
+          errorCode: "cursor_cycle",
+          input,
+          vaultModule,
+        });
+      }
+      checkpoint.totalResourceCount += pageResourceCount;
+      checkpoint.totalBodyBytes += pageBodyBytes;
+      if (checkpoint.totalBodyBytes > HOSTED_CLINICAL_RECORDS_MAX_TOTAL_BODY_BYTES) {
+        return await terminalFailureAfterClearingCheckpoint({
+          checkpoint,
+          checkpointIdentity,
           errorCode: "snapshot_size_exceeded",
-          wake: input.wake,
+          input,
+          vaultModule,
         });
       }
-      pages.push({
+      checkpoint.pages.push({
         content: response.body,
         ...(response.nextPageUrlHash
           ? { nextPageUrlHash: response.nextPageUrlHash }
@@ -235,86 +359,277 @@ async function runHostedClinicalRecordsSyncWakeLaneWithCancellation(input: {
         ...(response.pageUrlHash ? { pageUrlHash: response.pageUrlHash } : {}),
         resourceType: scope.resourceType,
       });
-      cursor = response.nextCursor;
-      completed = cursor === null;
-    }
-
-    if (completed) {
-      completedResourceTypes.push(scope.resourceType);
-    }
-    if (authorizationRequired) {
-      for (const remainingScope of retrievalScopes.slice(resourceIndex + 1)) {
-        errors.push({
-          code: "not-attempted",
-          message: "Retrieval was not attempted after provider authorization ended.",
-          resourceType: remainingScope.resourceType,
+      if (requestedCursor) {
+        checkpoint.seenCursors.push(requestedCursor);
+      }
+      if (response.pageUrlHash) {
+        checkpoint.seenPageUrlHashes.push(response.pageUrlHash);
+      }
+      if (
+        response.nextPageUrlHash
+        && checkpoint.seenPageUrlHashes.includes(response.nextPageUrlHash)
+      ) {
+        return await terminalFailureAfterClearingCheckpoint({
+          checkpoint,
+          checkpointIdentity,
+          errorCode: "cursor_cycle",
+          input,
+          vaultModule,
         });
       }
+      checkpoint.cursor = response.nextCursor;
+      completed = checkpoint.cursor === null;
+      if (completed) {
+        checkpoint.completedResourceTypes.push(scope.resourceType);
+        checkpoint.currentResourceIndex = resourceIndex + 1;
+        checkpoint.resourcePageStartIndex = checkpoint.pages.length;
+        checkpoint.seenCursors = [];
+        checkpoint.seenPageUrlHashes = [];
+      }
+      await persistRetrievalCheckpoint({ checkpoint, checkpointIdentity, input, vaultModule });
+      throwIfPreempted(input);
+    }
+
+    if (checkpoint.authorizationRequired) {
       break;
     }
   }
 
   throwIfPreempted(input);
-  const importSnapshot = input.importSnapshot
-    ?? (await loadRuntimeModule<ClinicalRecordsVaultModule>(
-      CLINICAL_RECORDS_VAULT_MODULE_SPECIFIER,
-    )).importClinicalFhirSnapshot;
+  const importSnapshot = input.importSnapshot ?? vaultModule.importClinicalFhirSnapshot;
   let result: ClinicalFhirSnapshotImportResult;
   try {
     result = await importSnapshot({
-      completedResourceTypes,
-      connectionId: run.connectionId,
-      ...(errors.length > 0 ? { errors } : {}),
-      fetchedAt: run.fetchedAt,
-      fhirBaseUrlHash: run.fhirBaseUrlHash,
-      grantedScopes: run.grantedScopes,
-      pages,
-      patientIdHash: run.patientIdHash,
-      ...(run.providerDirectoryEntryId
-        ? { providerDirectoryEntryId: run.providerDirectoryEntryId }
+      assertCurrent: async () => {
+        await assertClinicalRecordsRunCurrent({
+          allowAuthorizationRequired: checkpoint.authorizationRequired,
+          input,
+          port,
+        });
+      },
+      completedResourceTypes: checkpoint.completedResourceTypes,
+      connectionId: checkpointIdentity.connectionId,
+      ...(checkpoint.errors.length > 0 ? { errors: checkpoint.errors } : {}),
+      fetchedAt: checkpointIdentity.fetchedAt,
+      fhirBaseUrlHash: checkpointIdentity.fhirBaseUrlHash,
+      grantedScopes: checkpointIdentity.grantedScopes,
+      pages: checkpoint.pages,
+      patientIdHash: checkpointIdentity.patientIdHash,
+      ...(checkpointIdentity.providerDirectoryEntryId
+        ? { providerDirectoryEntryId: checkpointIdentity.providerDirectoryEntryId }
         : {}),
-      requestedScopes: run.requestedScopes,
-      retrievalJobId: run.retrievalJobId,
+      requestedScopes: checkpointIdentity.requestedScopes,
+      retrievalJobId: checkpointIdentity.retrievalJobId,
       retrievalScopes,
       signal: input.signal,
-      sourceSystem: clinicalSourceSystemSchema.parse(run.sourceSystem),
+      sourceSystem,
       vaultRoot: input.vaultRoot,
     });
   } catch (error) {
     if (isClinicalFhirSnapshotRejectedError(error)) {
+      await clearRetrievalCheckpoint({ checkpointIdentity, input, vaultModule });
       const failure = terminalFailure({
-        counts: fetchCounts(successfulPageCount, completedResourceTypes.length),
+        counts: fetchCounts(
+          checkpoint.successfulPageCount,
+          checkpoint.completedResourceTypes.length,
+        ),
         errorCode: "snapshot_rejected",
         wake: input.wake,
       });
-      return authorizationRequired
+      return checkpoint.authorizationRequired
         ? { ...failure, outcome: null }
         : failure;
     }
+    if (error instanceof HostedClinicalRecordsRunNoLongerCurrentError) {
+      await clearRetrievalCheckpoint({ checkpointIdentity, input, vaultModule });
+      return {
+        counts: emptyCounts(),
+        outcome: null,
+        status: "unavailable",
+      };
+    }
     throw error;
   }
+  await clearRetrievalCheckpoint({ checkpointIdentity, input, vaultModule });
   const counts: HostedClinicalRecordsOutcomeCounts = {
     createdCount: result.canonical.createdCount,
     executableDecisionCount: result.executableDecisionCount,
-    fetchedPageCount: successfulPageCount,
-    fetchedResourceFamilyCount: completedResourceTypes.length,
+    fetchedPageCount: checkpoint.successfulPageCount,
+    fetchedResourceFamilyCount: checkpoint.completedResourceTypes.length,
     rawFileCount: result.rawFileCount,
     retractedCount: result.canonical.retractedCount,
     reviewDecisionCount: result.reviewDecisionCount,
     skippedExistingCount: result.canonical.skippedExistingCount,
     supersededCount: result.canonical.supersededCount,
   };
-  const status = errors.length > 0 ? "partial" : "completed";
-  const outcome = authorizationRequired
+  const status = checkpoint.errors.length > 0 ? "partial" : "completed";
+  const outcome = checkpoint.authorizationRequired
     ? null
     : {
       counts,
-      ...(errors[0] ? { errorCode: errors[0].code } : {}),
-      generation: run.generation,
-      runId: run.runId,
+      ...(checkpoint.errors[0] ? { errorCode: checkpoint.errors[0].code } : {}),
+      generation: checkpointIdentity.generation,
+      runId: checkpointIdentity.runId,
       status,
     } satisfies HostedClinicalRecordsRecordOutcomeRequest;
   return { counts, outcome, status };
+}
+
+async function loadClinicalRecordsVaultModule(): Promise<ClinicalRecordsVaultModule> {
+  return await loadRuntimeModule<ClinicalRecordsVaultModule>(
+    CLINICAL_RECORDS_VAULT_MODULE_SPECIFIER,
+  );
+}
+
+function emptyRetrievalCheckpoint(): ClinicalFhirRetrievalCheckpoint {
+  return {
+    authorizationRequired: false,
+    completedResourceTypes: [],
+    currentResourceIndex: 0,
+    cursor: null,
+    errors: [],
+    pageFetchCount: 0,
+    pages: [],
+    resourcePageStartIndex: 0,
+    seenCursors: [],
+    seenPageUrlHashes: [],
+    successfulPageCount: 0,
+    totalBodyBytes: 0,
+    totalResourceCount: 0,
+  };
+}
+
+function finalizeAuthorizationRequiredCheckpoint(input: {
+  checkpoint: ClinicalFhirRetrievalCheckpoint;
+  retrievalScopes: ClinicalFhirRetrievalCheckpointIdentity["retrievalScopes"];
+}): void {
+  if (input.checkpoint.authorizationRequired) {
+    return;
+  }
+  const currentResourceIndex = input.checkpoint.currentResourceIndex;
+  const currentScope = input.retrievalScopes[currentResourceIndex];
+  input.checkpoint.pages.splice(input.checkpoint.resourcePageStartIndex);
+  input.checkpoint.authorizationRequired = true;
+  input.checkpoint.currentResourceIndex = input.retrievalScopes.length;
+  input.checkpoint.cursor = null;
+  input.checkpoint.resourcePageStartIndex = input.checkpoint.pages.length;
+  input.checkpoint.seenCursors = [];
+  input.checkpoint.seenPageUrlHashes = [];
+  if (!currentScope) {
+    return;
+  }
+  input.checkpoint.errors.push({
+    code: HOSTED_CLINICAL_RECORDS_AUTHORIZATION_REQUIRED_ERROR_CODE,
+    message: "Provider did not return this FHIR resource family.",
+    resourceType: currentScope.resourceType,
+  });
+  for (
+    const remainingScope of input.retrievalScopes.slice(currentResourceIndex + 1)
+  ) {
+    input.checkpoint.errors.push({
+      code: "not-attempted",
+      message: "Retrieval was not attempted after provider authorization ended.",
+      resourceType: remainingScope.resourceType,
+    });
+  }
+}
+
+function unavailableClinicalRecordsSync(): HostedClinicalRecordsSyncMetrics {
+  return {
+    counts: emptyCounts(),
+    outcome: null,
+    status: "unavailable",
+  };
+}
+
+async function persistRetrievalCheckpoint(input: {
+  checkpoint: ClinicalFhirRetrievalCheckpoint;
+  checkpointIdentity: ClinicalFhirRetrievalCheckpointIdentity;
+  input: { vaultRoot: string };
+  vaultModule: ClinicalRecordsVaultModule;
+}): Promise<void> {
+  await input.vaultModule.writeClinicalFhirRetrievalCheckpoint({
+    checkpoint: input.checkpoint,
+    identity: input.checkpointIdentity,
+    vaultRoot: input.input.vaultRoot,
+  });
+}
+
+async function clearRetrievalCheckpoint(input: {
+  checkpointIdentity: ClinicalFhirRetrievalCheckpointIdentity;
+  input: { vaultRoot: string };
+  vaultModule: ClinicalRecordsVaultModule;
+}): Promise<void> {
+  await input.vaultModule.clearClinicalFhirRetrievalCheckpoint({
+    identity: input.checkpointIdentity,
+    vaultRoot: input.input.vaultRoot,
+  });
+}
+
+async function terminalFailureAfterClearingCheckpoint(input: {
+  checkpoint: ClinicalFhirRetrievalCheckpoint;
+  checkpointIdentity: ClinicalFhirRetrievalCheckpointIdentity;
+  errorCode: string;
+  input: {
+    vaultRoot: string;
+    wake: HostedExecutionClinicalRecordsSyncRequestedWake;
+  };
+  vaultModule: ClinicalRecordsVaultModule;
+}): Promise<HostedClinicalRecordsSyncMetrics> {
+  await clearRetrievalCheckpoint(input);
+  return terminalFailure({
+    counts: fetchCounts(
+      input.checkpoint.successfulPageCount,
+      input.checkpoint.completedResourceTypes.length,
+    ),
+    errorCode: input.errorCode,
+    wake: input.input.wake,
+  });
+}
+
+async function assertClinicalRecordsRunCurrent(input: {
+  allowAuthorizationRequired: boolean;
+  input: {
+    signal: AbortSignal | null;
+    shouldYieldClinicalRecords?: (() => boolean) | null;
+    wake: HostedExecutionClinicalRecordsSyncRequestedWake;
+  };
+  port: HostedRuntimeClinicalRecordsPort;
+}): Promise<void> {
+  throwIfPreempted(input.input);
+  const payload = await input.port.readRun(
+    {
+      generation: input.input.wake.generation,
+      runId: input.input.wake.runId,
+    },
+    { signal: input.input.signal },
+  );
+  const response = parseHostedClinicalRecordsReadRunResponse(payload);
+  if (response.status === "unavailable") {
+    if (
+      input.allowAuthorizationRequired
+      && response.errorCode === HOSTED_CLINICAL_RECORDS_AUTHORIZATION_REQUIRED_ERROR_CODE
+    ) {
+      throwIfPreempted(input.input);
+      return;
+    }
+    if (response.retryable) {
+      throw new HostedClinicalRecordsRuntimeError(
+        "CLINICAL_RECORDS_RUN_RETRYABLE",
+        "Hosted clinical records run is temporarily unavailable.",
+      );
+    }
+    throw new HostedClinicalRecordsRunNoLongerCurrentError();
+  }
+  assertRunMatchesWake(response.run, input.input.wake);
+  throwIfPreempted(input.input);
+}
+
+class HostedClinicalRecordsRunNoLongerCurrentError extends Error {
+  constructor() {
+    super("Hosted clinical records run is no longer current.");
+    this.name = "HostedClinicalRecordsRunNoLongerCurrentError";
+  }
 }
 
 function assertRunMatchesWake(

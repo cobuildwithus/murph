@@ -63,9 +63,10 @@ it has been explicitly elevated to a cross-cutting invariant.
 - A durably accepted current conversation message is the runtime's
   highest-priority work.
 - From durable acceptance through provider start and durable reply handoff,
-  await only the current input, current authority and decryption, routing,
-  minimal current-conversation context, assistant execution, and minimum
-  delivery-intent state required for that reply.
+  await only loading and decrypting the accepted current input, minimal
+  current-conversation context, assistant execution, and persistence of the
+  minimum delivery-intent state. Do not re-resolve mutable authority or routing
+  on this path.
 - Projection, enrichment, diagnostics, telemetry, usage accounting, retention,
   compaction, cleanup, device sync, browser refresh, cron, replay catch-up, and
   unrelated mailbox work stay off that path. Keep their static dependency
@@ -111,6 +112,10 @@ it has been explicitly elevated to a cross-cutting invariant.
   disposition: delivered response, explicit policy non-reply, or an explicit
   durable supersession record naming the later accepted input. Accidental
   silence is not terminal.
+- When admission changes canonical state that the accepted work requires,
+  commit that change and the accepted-work record in one atomic owner
+  operation. Optional configuration may add or omit metadata; it cannot gate
+  either required write.
 - Product, dedupe, revision, and effect identities derive from stable product
   or provider facts. Attempt identities are unique to one attempt. These roles
   remain distinct across retry, replay, overlapping ingestion, restart, reorder,
@@ -211,10 +216,14 @@ it has been explicitly elevated to a cross-cutting invariant.
 
 ## Provider And Runtime Boundaries
 
-- Side effects, automations, notifications, and provider calls need a concrete
-  authorized target before execution. Invalid routes and unauthorized actions
-  fail before model or provider work; do not add a queue or repair worker to
-  compensate for an invalid shape.
+- The admission owner rejects invalid shape or missing admission-time authority
+  before committing accepted work. A valid durable accepted-work record is
+  sufficient admission authority for model start; the runtime must not repeat
+  route, provider, network, or mutable-authority checks before model work.
+  Resolve mutable target and effect authority from durable owner facts only at
+  the irreversible-effect boundary. Later authority loss takes a typed durable
+  disposition rather than retroactively erasing accepted work or spawning
+  repair machinery.
 - When provider target identity and audience privacy are coupled, one live
   owner resolves the effective target and audience class atomically before
   model work. Persisted routes, snapshots, and legacy markers are hints, never

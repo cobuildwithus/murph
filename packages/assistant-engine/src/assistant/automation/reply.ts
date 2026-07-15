@@ -538,7 +538,12 @@ async function resolveAssistantAutoReplyGroupOutcome(input: {
           item.inputCandidate.event.sourceMetadata
             .assistantStyleSettingsAuthorized === true
         )
-      : undefined
+      : context.items.some((item) =>
+          item.inputCandidate?.event.sourceRef.kind === 'hosted-mailbox' &&
+          item.inputCandidate.event.sourceRef.causalSeq == null
+        )
+        ? false
+        : undefined
   const activeTurnHooks = input.inputSource
     ? createAssistantAutoReplyActiveTurnInputHooks({
         ...(assistantStyleSettingsAuthorized === undefined

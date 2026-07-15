@@ -4,7 +4,10 @@ import {
   readTelegramAutoReplyMetadataFromAssistantInput,
   type TelegramAutoReplyMetadata,
 } from './prompt-builder.js'
-import type { AssistantAutomationInputSummary } from './input-summary.js'
+import {
+  assistantAutomationInputSummaryFromCandidate,
+  type AssistantAutomationInputSummary,
+} from './input-summary.js'
 
 export interface AssistantAutoReplyGroupItem {
   inputCandidate?: AssistantInputCandidate | null

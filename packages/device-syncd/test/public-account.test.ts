@@ -3,9 +3,12 @@ import assert from "node:assert/strict";
 import { test } from "vitest";
 
 import {
+  DEVICE_SYNC_HISTORICAL_DATA_RECONNECT_REQUIRED_ERROR_CODE,
   isDeviceSyncConnectionSetupConfirmed,
   isEstablishedDeviceSyncConnection,
+  isJunctionHistoricalResetProviderSlug,
   redactPublicDeviceSyncMetadata,
+  requiresHistoricalResetDeviceSyncSource,
   toRedactedPublicDeviceSyncAccount,
 } from "../src/public-account.ts";
 
@@ -78,5 +81,28 @@ test("established connection status requires active source-confirmed setup", () 
   assert.equal(isEstablishedDeviceSyncConnection({
     setupPhase: "source_confirmed",
     status: "disconnected",
+  }), false);
+});
+
+test("historical connection reset recovery is limited to Garmin error sources", () => {
+  assert.equal(isJunctionHistoricalResetProviderSlug("garmin"), true);
+  assert.equal(isJunctionHistoricalResetProviderSlug(" Garmin "), true);
+  assert.equal(isJunctionHistoricalResetProviderSlug("oura"), false);
+  assert.equal(isJunctionHistoricalResetProviderSlug(null), false);
+
+  assert.equal(requiresHistoricalResetDeviceSyncSource({
+    lastErrorCode: DEVICE_SYNC_HISTORICAL_DATA_RECONNECT_REQUIRED_ERROR_CODE,
+    sourceProviderSlug: "garmin",
+    status: "error",
+  }), true);
+  assert.equal(requiresHistoricalResetDeviceSyncSource({
+    lastErrorCode: DEVICE_SYNC_HISTORICAL_DATA_RECONNECT_REQUIRED_ERROR_CODE,
+    sourceProviderSlug: "oura",
+    status: "error",
+  }), false);
+  assert.equal(requiresHistoricalResetDeviceSyncSource({
+    lastErrorCode: DEVICE_SYNC_HISTORICAL_DATA_RECONNECT_REQUIRED_ERROR_CODE,
+    sourceProviderSlug: "garmin",
+    status: "connected",
   }), false);
 });

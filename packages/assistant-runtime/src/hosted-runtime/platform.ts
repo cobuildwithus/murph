@@ -46,6 +46,11 @@ import type {
 import type {
   AssistantUsageRecord,
 } from "@murphai/hosted-execution/assistant-usage";
+import type {
+  HostedRuntimeAssistantPersonalizationToolAuthority,
+  HostedRuntimeAssistantPersonalizationToolRequest,
+  HostedRuntimeAssistantPersonalizationToolResponse,
+} from "@murphai/hosted-execution/assistant-personalization";
 import {
   assistantResponseMediaSchema,
 } from "@murphai/operator-config/assistant-cli-contracts";
@@ -370,6 +375,16 @@ export interface HostedRuntimePlanUsageToolPort {
   read(): Promise<HostedPlanUsageStatus>;
 }
 
+export interface HostedRuntimeAssistantPersonalizationToolPort {
+  resolvePreferenceCausalSeq(
+    authority: HostedRuntimeAssistantPersonalizationToolAuthority,
+  ): Promise<string>;
+  request(
+    request: HostedRuntimeAssistantPersonalizationToolRequest,
+    authority?: HostedRuntimeAssistantPersonalizationToolAuthority,
+  ): Promise<HostedRuntimeAssistantPersonalizationToolResponse>;
+}
+
 export interface HostedRuntimeGroupToolPort {
   request(
     request: HostedRuntimeGroupToolRequest,
@@ -516,6 +531,7 @@ export interface HostedRuntimeVaultSharePort {
 
 export interface HostedRuntimePlatform {
   actionApprovalPort?: HostedRuntimeActionApprovalPort | null;
+  assistantPersonalizationToolPort?: HostedRuntimeAssistantPersonalizationToolPort | null;
   assistantConfigurationToolPort?: HostedRuntimeAssistantConfigurationToolPort | null;
   artifactStore: HostedRuntimeArtifactStore;
   browserVaultReplicaPort?: HostedRuntimeBrowserVaultReplicaPort | null;

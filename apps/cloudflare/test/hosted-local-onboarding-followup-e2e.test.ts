@@ -85,7 +85,6 @@ describe("hosted local onboarding follow-up e2e", () => {
 
     const materializedChatId = requireLinqStub().requireObservedChatId(userId);
     const followupPath = `/chats/${encodeURIComponent(materializedChatId)}/messages`;
-
     const completionBaseline = requireLinqStub().countObservedSends(followupPath);
     requireScenario().queueAssistantResponses(
       buildHostedAssistantCompleteOnboardingResponses({
@@ -130,7 +129,6 @@ async function startScenario(): Promise<void> {
     additionalEnv: {
       HOSTED_ASSISTANT_MODEL: productionLikeAssistantModel,
       HOSTED_ASSISTANT_PROVIDER: "openai",
-      HOSTED_EXECUTION_IDLE_CHECKPOINT_DELAY_MS: String(lifecycleCheckpointDelayMs),
       HOSTED_ONBOARDING_LINQ_LOCAL_ALLOWED_INBOUND_PHONE_NUMBERS:
         buildLinqRecipientPhoneNumber(userId),
       LINQ_API_BASE_URL: requireLinqStub().runnerBaseUrl,

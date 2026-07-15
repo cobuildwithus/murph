@@ -27,10 +27,14 @@ export {
   JUNCTION_OPT_IN_TIMESERIES_RESOURCES,
   JUNCTION_RAW_ONLY_SUMMARY_RESOURCES,
   canNormalizeJunctionSleepCycleRecordToCompactStages,
+  classifyJunctionSummaryNormalizationEvidence,
   junctionProviderAdapter,
   normalizeJunctionResourceName,
   normalizeJunctionSnapshot,
   type JunctionSnapshotInput,
+  type JunctionSummaryNormalizationEvidence,
+  type JunctionSummaryNormalizationEvidenceWindow,
+  type JunctionSummaryResource,
 } from "./junction.ts";
 export {
   normalizeJunctionSourceProviderSlug,

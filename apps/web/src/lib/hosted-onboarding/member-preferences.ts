@@ -55,10 +55,16 @@ type HostedMemberPersonalityColumns = {
   assistantPush: number | null;
 };
 
+function maxCausalSeq(current: bigint | null, next: bigint): bigint {
+  return current !== null && current > next ? current : next;
+}
+
 export async function upsertHostedMemberAssistantPreferencesTx(input: {
+  causalOrigin?: "event" | "turn";
   mailboxPayloadMode: HostedMemberAssistantPreferencesMailboxPayloadMode;
   memberId: string;
   occurredAt: string;
+  preferenceCausalSeq?: string;
   preferences: HostedMemberAssistantPreferencesUpdate;
   prisma: Prisma.TransactionClient;
 }): Promise<HostedMemberAssistantPreferencesResult> {
@@ -73,7 +79,9 @@ export async function upsertHostedMemberAssistantPreferencesTx(input: {
       assistantHumor: true,
       assistantPush: true,
       assistantTone: true,
+      assistantToneCausalSeq: true,
       assistantVoice: true,
+      assistantVoiceCausalSeq: true,
       id: true,
     },
   });
@@ -86,16 +94,28 @@ export async function upsertHostedMemberAssistantPreferencesTx(input: {
     });
   }
 
-  const changedPreferences = resolveChangedAssistantPreferences({
+  const requestedCausalSeq = input.preferenceCausalSeq === undefined
+    ? null
+    : BigInt(input.preferenceCausalSeq);
+  const applicablePreferences = resolveApplicableAssistantPreferences({
     current: {
       personality: member,
       tone: member.assistantTone,
       voice: member.assistantVoice,
     },
     preferences: input.preferences,
+    ...(requestedCausalSeq === null
+      ? {}
+      : {
+          causalSeq: requestedCausalSeq,
+          currentCausalSeq: {
+            tone: member.assistantToneCausalSeq,
+            voice: member.assistantVoiceCausalSeq,
+          },
+        }),
   });
 
-  if (!changedPreferences) {
+  if (!applicablePreferences) {
     return {
       assistantPersonality: normalizeStoredAssistantPersonality(member),
       assistantTone: normalizeStoredAssistantTone(member.assistantTone),
@@ -107,56 +127,34 @@ export async function upsertHostedMemberAssistantPreferencesTx(input: {
 
   if (
     input.mailboxPayloadMode === "legacy_snapshot"
-    && changedPreferences.personality !== undefined
+    && applicablePreferences.personality !== undefined
   ) {
     throw new TypeError(
       "Assistant personality updates require the sparse mailbox payload rollout.",
     );
   }
 
-  const updatedMember = await input.prisma.hostedMember.update({
-    where: {
-      id: input.memberId,
-    },
-    data: {
-      ...(changedPreferences.tone === undefined
-        ? {}
-        : { assistantTone: changedPreferences.tone }),
-      ...(changedPreferences.voice === undefined
-        ? {}
-        : { assistantVoice: changedPreferences.voice }),
-      ...(changedPreferences.personality?.humor === undefined
-        ? {}
-        : { assistantHumor: changedPreferences.personality.humor }),
-      ...(changedPreferences.personality?.push === undefined
-        ? {}
-        : { assistantPush: changedPreferences.personality.push }),
-      ...(changedPreferences.personality?.detail === undefined
-        ? {}
-        : { assistantDetail: changedPreferences.personality.detail }),
-    },
-    select: {
-      assistantDetail: true,
-      assistantHumor: true,
-      assistantPush: true,
-      assistantTone: true,
-      assistantVoice: true,
-    },
-  });
-
   const wake = buildHostedExecutionMemberPreferencesUpdatedWake({
+    ...(input.causalOrigin ? { causalOrigin: input.causalOrigin } : {}),
     eventId: buildHostedMemberPreferencesUpdatedEventId({
       memberId: input.memberId,
       updateId: randomUUID(),
     }),
     memberId: input.memberId,
     occurredAt: input.occurredAt,
+    ...(input.preferenceCausalSeq
+      ? { preferenceCausalSeq: input.preferenceCausalSeq }
+      : {}),
     preferences: input.mailboxPayloadMode === "sparse_delta"
-      ? changedPreferences
+      ? applicablePreferences
       : buildHostedMemberAssistantPreferencesSnapshot({
-          tone: updatedMember.assistantTone,
-          voice: updatedMember.assistantVoice,
+          tone: applicablePreferences.tone ?? member.assistantTone,
+          voice: applicablePreferences.voice ?? member.assistantVoice,
         }),
+    requestedFields: [
+      ...(applicablePreferences.tone === undefined ? [] : ["tone" as const]),
+      ...(applicablePreferences.voice === undefined ? [] : ["voice" as const]),
+    ],
   });
   const append = await appendHostedMailboxEnvelopeTx({
     envelope: wake,
@@ -170,6 +168,59 @@ export async function upsertHostedMemberAssistantPreferencesTx(input: {
       retryable: true,
     });
   }
+  const effectiveCausalSeq = requestedCausalSeq ?? BigInt(append.item.causalSeq!);
+  const projectedTone = wake.preferences.tone;
+  const projectedVoice = wake.preferences.voice;
+  const visibleValueChanged = applicablePreferences.personality !== undefined
+    || (
+      applicablePreferences.tone !== undefined
+      && applicablePreferences.tone !== member.assistantTone
+    )
+    || (
+      applicablePreferences.voice !== undefined
+      && applicablePreferences.voice !== member.assistantVoice
+    );
+  const updatedMember = await input.prisma.hostedMember.update({
+    where: {
+      id: input.memberId,
+    },
+    data: {
+      ...(projectedTone === undefined
+        ? {}
+        : {
+            assistantTone: projectedTone,
+            assistantToneCausalSeq: maxCausalSeq(
+              member.assistantToneCausalSeq,
+              effectiveCausalSeq,
+            ),
+          }),
+      ...(projectedVoice === undefined
+        ? {}
+        : {
+            assistantVoice: projectedVoice,
+            assistantVoiceCausalSeq: maxCausalSeq(
+              member.assistantVoiceCausalSeq,
+              effectiveCausalSeq,
+            ),
+          }),
+      ...(applicablePreferences.personality?.humor === undefined
+        ? {}
+        : { assistantHumor: applicablePreferences.personality.humor }),
+      ...(applicablePreferences.personality?.push === undefined
+        ? {}
+        : { assistantPush: applicablePreferences.personality.push }),
+      ...(applicablePreferences.personality?.detail === undefined
+        ? {}
+        : { assistantDetail: applicablePreferences.personality.detail }),
+    },
+    select: {
+      assistantDetail: true,
+      assistantHumor: true,
+      assistantPush: true,
+      assistantTone: true,
+      assistantVoice: true,
+    },
+  });
 
   return {
     assistantPersonality: normalizeStoredAssistantPersonality(updatedMember),
@@ -178,7 +229,7 @@ export async function upsertHostedMemberAssistantPreferencesTx(input: {
     dispatch: {
       mailboxItemId: append.item.id,
     },
-    updated: true,
+    updated: visibleValueChanged,
   };
 }
 
@@ -221,20 +272,31 @@ export function buildHostedMemberPreferencesUpdatedEventId(input: {
   ].join(":");
 }
 
-function resolveChangedAssistantPreferences(input: {
+function resolveApplicableAssistantPreferences(input: {
+  causalSeq?: bigint;
   current: {
     personality: HostedMemberPersonalityColumns;
     tone: string | null;
     voice: string | null;
   };
+  currentCausalSeq?: {
+    tone: bigint | null;
+    voice: bigint | null;
+  };
   preferences: HostedMemberAssistantPreferencesUpdate;
 }): HostedExecutionMemberPreferences | null {
-  const tone = input.preferences.tone !== undefined
-    && input.preferences.tone !== input.current.tone
+  const toneApplicable = input.causalSeq === undefined
+    || input.currentCausalSeq?.tone === null
+    || input.currentCausalSeq?.tone === undefined
+    || input.causalSeq >= input.currentCausalSeq.tone;
+  const voiceApplicable = input.causalSeq === undefined
+    || input.currentCausalSeq?.voice === null
+    || input.currentCausalSeq?.voice === undefined
+    || input.causalSeq >= input.currentCausalSeq.voice;
+  const tone = toneApplicable && input.preferences.tone !== undefined
     ? input.preferences.tone
     : undefined;
-  const voice = input.preferences.voice !== undefined
-    && input.preferences.voice !== input.current.voice
+  const voice = voiceApplicable && input.preferences.voice !== undefined
     ? input.preferences.voice
     : undefined;
   const personality: HostedMemberAssistantPersonalityUpdate = {};

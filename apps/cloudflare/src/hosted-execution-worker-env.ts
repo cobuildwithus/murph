@@ -34,6 +34,7 @@ const HOSTED_EXECUTION_LOOPBACK_HOSTS = new Set([
   "::1",
   "[::1]",
 ]);
+const HOSTED_EXECUTION_RUNNER_COMMIT_RESPONSE_MARGIN_MS = 5_000;
 const HOSTED_EXECUTION_MIN_PRODUCTION_IDLE_CHECKPOINT_DELAY_MS = 180_000;
 
 export interface HostedExecutionWorkerEnvironmentOptions {
@@ -73,7 +74,7 @@ export function readHostedExecutionWorkerEnvironment(
   }
   const runnerCommitTimeoutMs = parsePositiveInteger(
     normalizeHostedExecutionString(source.HOSTED_EXECUTION_RUNNER_COMMIT_TIMEOUT_MS),
-    30_000,
+    45_000,
     "HOSTED_EXECUTION_RUNNER_COMMIT_TIMEOUT_MS",
   );
   const webControlTimeoutMs = parsePositiveInteger(
@@ -85,6 +86,16 @@ export function readHostedExecutionWorkerEnvironment(
     webControlTimeoutMs,
     "HOSTED_EXECUTION_WEB_CONTROL_TIMEOUT_MS",
   );
+  if (
+    runnerCommitTimeoutMs
+    < webControlTimeoutMs + HOSTED_EXECUTION_RUNNER_COMMIT_RESPONSE_MARGIN_MS
+  ) {
+    throw new TypeError(
+      "HOSTED_EXECUTION_RUNNER_COMMIT_TIMEOUT_MS must be at least "
+      + `${HOSTED_EXECUTION_RUNNER_COMMIT_RESPONSE_MARGIN_MS}ms greater than `
+      + "HOSTED_EXECUTION_WEB_CONTROL_TIMEOUT_MS.",
+    );
+  }
 
   return {
     allowedRunnerSecretKeys: normalizeHostedExecutionString(source.HOSTED_EXECUTION_ALLOWED_RUNNER_SECRET_KEYS),

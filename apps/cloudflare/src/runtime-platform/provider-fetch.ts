@@ -522,6 +522,7 @@ function normalizeCloudflareHostedFetchHostname(hostname: string): string {
 const HOSTED_RUNTIME_INTERNAL_OPERATION_DESCRIPTIONS: Record<string, string> = {
   artifact_fetch: "Hosted artifact fetch",
   artifact_upload: "Hosted artifact upload",
+  assistant_personalization_tool: "Hosted assistant personalization tool",
   assistant_runtime_issue_export: "Hosted assistant runtime issue export",
   browser_vault_replica_publish: "Hosted browser-vault replica publish",
   browser_vault_replica_write: "Hosted browser-vault replica write",

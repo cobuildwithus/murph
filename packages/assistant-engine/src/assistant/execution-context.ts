@@ -6,6 +6,11 @@ import type {
 import { normalizeAssistantBackendTarget } from '@murphai/operator-config/assistant-backend'
 import type { AssistantUsageRecord } from '@murphai/hosted-execution/assistant-usage'
 import type {
+  HostedRuntimeAssistantPersonalizationToolAuthority,
+  HostedRuntimeAssistantPersonalizationToolRequest,
+  HostedRuntimeAssistantPersonalizationToolResponse,
+} from '@murphai/hosted-execution/assistant-personalization'
+import type {
   HostedActionApprovalRequest,
   HostedActionApprovalResult,
 } from '@murphai/hosted-execution/action-approval'
@@ -87,6 +92,16 @@ export interface AssistantHostedPlanUsageTool {
   read(): Promise<HostedPlanUsageStatus>
 }
 
+export interface AssistantHostedPersonalizationTool {
+  resolvePreferenceCausalSeq?(
+    authority: HostedRuntimeAssistantPersonalizationToolAuthority,
+  ): Promise<string>
+  request(
+    request: HostedRuntimeAssistantPersonalizationToolRequest,
+    authority?: HostedRuntimeAssistantPersonalizationToolAuthority,
+  ): Promise<HostedRuntimeAssistantPersonalizationToolResponse>
+}
+
 export interface AssistantHostedAssistantConfigurationTool {
   request(
     request: HostedRuntimeAssistantConfigurationControlRequest,
@@ -150,13 +165,14 @@ export type AssistantWorkspaceArtifactMaterializer = (
 
 export interface AssistantHostedExecutionContext {
   actionApprovalPort?: AssistantHostedActionApprovalPort | null
-  currentAssistantPreferenceCausalSeq?: () => string | null
+  currentAssistantPersonalizationInputId?: () => string | null
   assistantConfigurationTool?: AssistantHostedAssistantConfigurationTool | null
   channelTypingDependencies?: AssistantChannelTypingDependencies
   connectedApps?: AssistantConnectedAppsPort | null
   defaultTarget?: AssistantModelTarget | null
   deviceConnectProviders?: readonly AssistantHostedDeviceConnectProvider[]
   familyPlanTool?: AssistantHostedFamilyPlanTool | null
+  personalizationTool?: AssistantHostedPersonalizationTool | null
   groupTool?: AssistantHostedGroupTool | null
   newsletterTool?: AssistantHostedNewsletterTool | null
   planUsageTool?: AssistantHostedPlanUsageTool | null
@@ -219,6 +235,9 @@ export function normalizeAssistantExecutionContext(
     hosted?.generatedImageUploader,
   )
   const familyPlanTool = normalizeAssistantFamilyPlanTool(hosted?.familyPlanTool)
+  const personalizationTool = normalizeAssistantPersonalizationTool(
+    hosted?.personalizationTool,
+  )
   const groupTool = normalizeAssistantGroupTool(hosted?.groupTool)
   const newsletterTool = normalizeAssistantNewsletterTool(hosted?.newsletterTool)
   const planUsageTool = normalizeAssistantPlanUsageTool(hosted?.planUsageTool)
@@ -236,10 +255,10 @@ export function normalizeAssistantExecutionContext(
   return {
     hosted: {
       ...(actionApprovalPort ? { actionApprovalPort } : {}),
-      ...(typeof hosted?.currentAssistantPreferenceCausalSeq === 'function'
+      ...(typeof hosted?.currentAssistantPersonalizationInputId === 'function'
         ? {
-            currentAssistantPreferenceCausalSeq:
-              hosted.currentAssistantPreferenceCausalSeq,
+            currentAssistantPersonalizationInputId:
+              hosted.currentAssistantPersonalizationInputId,
           }
         : {}),
       ...(assistantConfigurationTool ? { assistantConfigurationTool } : {}),
@@ -251,6 +270,7 @@ export function normalizeAssistantExecutionContext(
         : {}),
       ...(generatedImageUploader ? { generatedImageUploader } : {}),
       ...(familyPlanTool ? { familyPlanTool } : {}),
+      ...(personalizationTool ? { personalizationTool } : {}),
       ...(groupTool ? { groupTool } : {}),
       ...(newsletterTool ? { newsletterTool } : {}),
       ...(planUsageTool ? { planUsageTool } : {}),
@@ -385,6 +405,24 @@ function normalizeAssistantPlanUsageTool(
 
   return {
     read: input.read.bind(input),
+  }
+}
+
+function normalizeAssistantPersonalizationTool(
+  input: AssistantHostedExecutionContext['personalizationTool'] | undefined,
+): AssistantHostedPersonalizationTool | undefined {
+  if (!input || typeof input.request !== 'function') {
+    return undefined
+  }
+
+  return {
+    ...(typeof input.resolvePreferenceCausalSeq === 'function'
+      ? {
+          resolvePreferenceCausalSeq:
+            input.resolvePreferenceCausalSeq.bind(input),
+        }
+      : {}),
+    request: input.request.bind(input),
   }
 }
 

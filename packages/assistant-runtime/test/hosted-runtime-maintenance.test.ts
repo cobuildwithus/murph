@@ -782,6 +782,9 @@ describe("runHostedAssistantAutomation", () => {
       "refreshed-input",
       "provider-bound",
     ]);
+    expect(mocks.createHostedAssistantInputSource).toHaveBeenCalledWith(
+      expect.objectContaining({ pendingInputRefreshMode: "compact" }),
+    );
   });
 
   it("passes a lazy background dynamic context builder for background-only passes", async () => {
@@ -3646,6 +3649,9 @@ describe("runHostedAssistantAutomationLane", () => {
         freshAssistantInputIds: ["ain_current_foreground"],
         mode: "foreground",
       }),
+    );
+    expect(mocks.createHostedAssistantInputSource).toHaveBeenCalledWith(
+      expect.objectContaining({ pendingInputRefreshMode: "none" }),
     );
   });
 
