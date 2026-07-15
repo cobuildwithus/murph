@@ -33,6 +33,14 @@ interface HostedCloudflareCallbackVerificationEnvironment {
   publicKeysById: Readonly<Record<string, JsonWebKey>>;
 }
 
+interface HostedCloudflareCallbackRequestOptions {
+  maxBodyBytes: number;
+  maxTimestampSkewMs?: number;
+  nonceStore?: HostedCallbackRequestNonceStore;
+  nowMs?: number;
+  payloadText?: string;
+}
+
 const publicKeyCache = new Map<string, Promise<CryptoKey>>();
 
 function normalizeOptionalString(value: string | null | undefined): string | null {
@@ -46,13 +54,7 @@ function normalizeOptionalString(value: string | null | undefined): string | nul
 
 export async function requireHostedCloudflareCallbackRequest(
   request: Request,
-  options: {
-    maxBodyBytes: number;
-    maxTimestampSkewMs?: number;
-    nonceStore?: HostedCallbackRequestNonceStore;
-    nowMs?: number;
-    payloadText?: string;
-  },
+  options: HostedCloudflareCallbackRequestOptions,
 ): Promise<string> {
   const verification = requireHostedCloudflareCallbackVerificationEnvironment(process.env);
   const userId = requireHostedExecutionUserId(request);
@@ -129,6 +131,24 @@ export async function requireHostedCloudflareCallbackRequest(
   }
 
   return userId;
+}
+
+export async function requireHostedCloudflareCallbackJsonRequest(
+  request: Request,
+  options: Omit<HostedCloudflareCallbackRequestOptions, "payloadText">,
+): Promise<{ payload: unknown; userId: string }> {
+  const payloadText = (await readRawBodyBuffer(request, {
+    limitBytes: options.maxBodyBytes,
+  })).toString("utf8");
+  const userId = await requireHostedCloudflareCallbackRequest(request, {
+    ...options,
+    payloadText,
+  });
+
+  return {
+    payload: payloadText.trim() ? JSON.parse(payloadText) : {},
+    userId,
+  };
 }
 
 async function readHostedCloudflareCallbackPayload(

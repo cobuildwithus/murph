@@ -3,7 +3,7 @@ import { beforeAll, beforeEach, describe, expect, it, vi } from "vitest";
 const mocks = vi.hoisted(() => ({
   after: vi.fn(),
   handleHostedRuntimeAssistantPersonalizationTool: vi.fn(),
-  requireHostedCloudflareCallbackRequest: vi.fn(),
+  requireHostedCloudflareCallbackJsonRequest: vi.fn(),
   resolveHostedRuntimeAssistantPreferenceCausalSeq: vi.fn(),
   signalHostedMailboxAppendRuntime: vi.fn(),
 }));
@@ -14,8 +14,8 @@ vi.mock("next/server", async (importOriginal) => ({
 }));
 
 vi.mock("@/src/lib/hosted-execution/cloudflare-callback-auth", () => ({
-  requireHostedCloudflareCallbackRequest:
-    mocks.requireHostedCloudflareCallbackRequest,
+  requireHostedCloudflareCallbackJsonRequest:
+    mocks.requireHostedCloudflareCallbackJsonRequest,
 }));
 vi.mock("@/src/lib/hosted-execution/assistant-personalization-tool", () => ({
   handleHostedRuntimeAssistantPersonalizationTool:
@@ -42,8 +42,11 @@ describe("hosted assistant personalization internal route", () => {
 
   beforeEach(() => {
     vi.clearAllMocks();
-    mocks.requireHostedCloudflareCallbackRequest.mockResolvedValue(
-      "member_personalization_route",
+    mocks.requireHostedCloudflareCallbackJsonRequest.mockImplementation(
+      async (request: Request) => ({
+        payload: await request.json(),
+        userId: "member_personalization_route",
+      }),
     );
     mocks.handleHostedRuntimeAssistantPersonalizationTool.mockResolvedValue({
       action: "read",
@@ -74,9 +77,9 @@ describe("hosted assistant personalization internal route", () => {
     const response = await route.POST(request);
 
     expect(response.status).toBe(200);
-    expect(mocks.requireHostedCloudflareCallbackRequest).toHaveBeenCalledWith(
+    expect(mocks.requireHostedCloudflareCallbackJsonRequest).toHaveBeenCalledWith(
       request,
-      { maxBodyBytes: 2_048, payloadText: payload },
+      { maxBodyBytes: 2_048 },
     );
     expect(mocks.handleHostedRuntimeAssistantPersonalizationTool).toHaveBeenCalledWith({
       memberId: "member_personalization_route",
@@ -115,9 +118,9 @@ describe("hosted assistant personalization internal route", () => {
     const response = await route.POST(request);
 
     expect(response.status).toBe(200);
-    expect(mocks.requireHostedCloudflareCallbackRequest).toHaveBeenCalledWith(
+    expect(mocks.requireHostedCloudflareCallbackJsonRequest).toHaveBeenCalledWith(
       request,
-      { maxBodyBytes: 2_048, payloadText: payload },
+      { maxBodyBytes: 2_048 },
     );
     expect(mocks.handleHostedRuntimeAssistantPersonalizationTool).toHaveBeenCalledWith({
       authority: {
@@ -168,7 +171,7 @@ describe("hosted assistant personalization internal route", () => {
     const response = await route.POST(request);
 
     expect(response.status).toBe(400);
-    expect(mocks.requireHostedCloudflareCallbackRequest).toHaveBeenCalledOnce();
+    expect(mocks.requireHostedCloudflareCallbackJsonRequest).toHaveBeenCalledOnce();
     expect(mocks.resolveHostedRuntimeAssistantPreferenceCausalSeq)
       .not.toHaveBeenCalled();
   });
@@ -187,7 +190,7 @@ describe("hosted assistant personalization internal route", () => {
     const response = await route.POST(request);
 
     expect(response.status).toBe(400);
-    expect(mocks.requireHostedCloudflareCallbackRequest).toHaveBeenCalledOnce();
+    expect(mocks.requireHostedCloudflareCallbackJsonRequest).toHaveBeenCalledOnce();
     expect(mocks.handleHostedRuntimeAssistantPersonalizationTool).not.toHaveBeenCalled();
   });
 
@@ -205,7 +208,7 @@ describe("hosted assistant personalization internal route", () => {
     const response = await route.POST(request);
 
     expect(response.status).toBe(400);
-    expect(mocks.requireHostedCloudflareCallbackRequest).toHaveBeenCalledOnce();
+    expect(mocks.requireHostedCloudflareCallbackJsonRequest).toHaveBeenCalledOnce();
     expect(mocks.handleHostedRuntimeAssistantPersonalizationTool).not.toHaveBeenCalled();
   });
 });
