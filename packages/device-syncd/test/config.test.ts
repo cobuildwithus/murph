@@ -5,6 +5,10 @@ import { Writable } from "node:stream";
 import { test } from "vitest";
 
 import {
+  JUNCTION_DEFAULT_TIMESERIES_RESOURCES,
+} from "@murphai/importers/device-providers/junction-resources";
+
+import {
   cloneConfiguredDeviceSyncRuntimeConfig,
   cloneSerializableConfiguredDeviceSyncProviderConfigs,
   configuredDeviceSyncProviderKeys,
@@ -437,6 +441,28 @@ test("readConfiguredDeviceSyncRuntimeConfig keeps only the shared hosted runtime
   );
 });
 
+test("readConfiguredDeviceSyncRuntimeConfig preserves canonical Junction timeseries defaults", () => {
+  const env = {
+    DEVICE_SYNC_PUBLIC_BASE_URL: "https://device-sync.example.test",
+    DEVICE_SYNC_SECRET: "runtime-codec-secret",
+    JUNCTION_API_KEY: "sk_us_test_runtime",
+    JUNCTION_CLIENT_USER_ID_SECRET: "<REDACTED_JUNCTION_CLIENT_USER_ID_SECRET>",
+    JUNCTION_ENV: "sandbox",
+    JUNCTION_REGION: "us",
+    JUNCTION_TIMESERIES_RESOURCES: "blood_oxygen",
+  };
+  const runtimeConfig = requireValue(readConfiguredDeviceSyncRuntimeConfig(env));
+  const canonicalProviderConfigs = cloneSerializableConfiguredDeviceSyncProviderConfigs(
+    readConfiguredDeviceSyncProviderConfigs(env),
+  );
+
+  assert.deepEqual(runtimeConfig.providerConfigs, canonicalProviderConfigs);
+  assert.deepEqual(
+    runtimeConfig.providerConfigs.junction?.timeseriesResources,
+    JUNCTION_DEFAULT_TIMESERIES_RESOURCES,
+  );
+});
+
 test("parseConfiguredDeviceSyncRuntimeConfig accepts the shared hosted runtime shape", () => {
   const parsed = parseConfiguredDeviceSyncRuntimeConfig(
     {
@@ -496,6 +522,15 @@ test("readConfiguredDeviceSyncRuntimeConfig returns null when hosted runtime pre
       DEVICE_SYNC_SECRET: "runtime-codec-secret",
     }),
     null,
+  );
+  assert.throws(
+    () =>
+      readConfiguredDeviceSyncRuntimeConfig({
+        DEVICE_SYNC_PUBLIC_BASE_URL: "https://device-sync.example.test",
+        DEVICE_SYNC_SECRET: "runtime-codec-secret",
+        OURA_CLIENT_ID: "oura-client-id",
+      }),
+    /Oura configuration is incomplete/u,
   );
 });
 

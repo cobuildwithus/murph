@@ -1,31 +1,22 @@
 import { describe, expect, it } from "vitest";
+import {
+  LOOKUP_ID_FAMILY_REGISTRY,
+  describeLookupIdConstraint,
+  inferLookupIdEntityKind,
+  isQueryableLookupId,
+} from "@murphai/contracts";
 import * as sharedQuery from "@murphai/query";
 
 import {
   loadQueryRuntime,
 } from "../src/query-runtime.ts";
-import {
-  describeQueryLookupConstraint,
-  inferQueryIdEntityKind,
-  isQueryableQueryLookupId,
-} from "../src/query-id-families.ts";
 
 describe("query runtime compatibility surface", () => {
-  it("keeps the local lookup helpers as thin aliases over the shared query owner", () => {
-    const lookupIds = [
-      "evt_01JABCDEF0123456789ABCDEF",
-      "prot_01JABCDEF0123456789ABCDEF",
-      "pack_01JABCDEF0123456789ABCDEF",
-      "xfm_01JABCDEF0123456789ABCDEF",
-    ];
-
-    for (const lookupId of lookupIds) {
-      expect(inferQueryIdEntityKind(lookupId)).toBe(sharedQuery.inferIdEntityKind(lookupId));
-      expect(isQueryableQueryLookupId(lookupId)).toBe(sharedQuery.isQueryableLookupId(lookupId));
-      expect(describeQueryLookupConstraint(lookupId)).toBe(
-        sharedQuery.describeLookupConstraint(lookupId),
-      );
-    }
+  it("re-exports lookup classification from the contracts owner", () => {
+    expect(sharedQuery.ID_FAMILY_REGISTRY).toBe(LOOKUP_ID_FAMILY_REGISTRY);
+    expect(sharedQuery.inferIdEntityKind).toBe(inferLookupIdEntityKind);
+    expect(sharedQuery.isQueryableLookupId).toBe(isQueryableLookupId);
+    expect(sharedQuery.describeLookupConstraint).toBe(describeLookupIdConstraint);
   });
 
   it("loads the shared query runtime surface without a second local function layer", async () => {

@@ -948,6 +948,9 @@ importers:
       '@murphai/core':
         specifier: workspace:*
         version: link:../core
+      '@murphai/health-commons':
+        specifier: workspace:*
+        version: link:../health-commons
       '@murphai/importers':
         specifier: workspace:*
         version: link:../importers

@@ -42,6 +42,8 @@ type FetchLike = typeof fetch;
 
 const scriptDir = path.dirname(fileURLToPath(import.meta.url));
 const appDir = path.resolve(scriptDir, "..");
+const WORKER_VERSION_SMOKE_MAX_ATTEMPTS = 5;
+const WORKER_VERSION_SMOKE_RETRY_DELAY_MS = 2_000;
 const DEFAULT_RUNNER_CONTAINER_SMOKE_MAX_ATTEMPTS = 120;
 const DEFAULT_RUNNER_CONTAINER_SMOKE_RETRY_DELAY_MS = 10_000;
 interface SmokeControlRequest {
@@ -95,6 +97,13 @@ class RunnerContainerSmokeRetryableError extends Error {
   constructor(message: string) {
     super(message);
     this.name = "RunnerContainerSmokeRetryableError";
+  }
+}
+
+class SmokeWorkerVersionMismatchError extends Error {
+  constructor(message: string) {
+    super(message);
+    this.name = "SmokeWorkerVersionMismatchError";
   }
 }
 
@@ -178,18 +187,14 @@ export async function runSmokeHostedDeploy(input: {
   const versionOverrideHeaders = buildVersionOverrideHeaders(source);
   const smokeBaseUrl = `${workerBaseUrl}/`;
 
-  await assertServiceBanner(
+  await assertPublicWorkerSmoke({
     fetchImpl,
-    new URL("/", smokeBaseUrl).toString(),
+    healthUrl: new URL("/health", smokeBaseUrl).toString(),
+    log,
+    serviceBannerUrl: new URL("/", smokeBaseUrl).toString(),
     smokeVersionId,
     versionOverrideHeaders,
-  );
-  await assertHealth(
-    fetchImpl,
-    new URL("/health", smokeBaseUrl).toString(),
-    smokeVersionId,
-    versionOverrideHeaders,
-  );
+  });
 
   let status: SmokeUserStatus | null = null;
   const statusRequest: SmokeControlRequest | null = smokeUserId && authorizationHeader
@@ -580,6 +585,46 @@ async function sleep(ms: number): Promise<void> {
   await new Promise((resolve) => setTimeout(resolve, ms));
 }
 
+async function assertPublicWorkerSmoke(input: {
+  fetchImpl: FetchLike;
+  healthUrl: string;
+  log: (message: string) => void;
+  serviceBannerUrl: string;
+  smokeVersionId: string | null;
+  versionOverrideHeaders: Record<string, string> | undefined;
+}): Promise<void> {
+  for (let attempt = 1; attempt <= WORKER_VERSION_SMOKE_MAX_ATTEMPTS; attempt += 1) {
+    try {
+      await assertServiceBanner(
+        input.fetchImpl,
+        input.serviceBannerUrl,
+        input.smokeVersionId,
+        input.versionOverrideHeaders,
+      );
+      await assertHealth(
+        input.fetchImpl,
+        input.healthUrl,
+        input.smokeVersionId,
+        input.versionOverrideHeaders,
+      );
+      return;
+    } catch (error) {
+      if (
+        !(error instanceof SmokeWorkerVersionMismatchError) ||
+        attempt >= WORKER_VERSION_SMOKE_MAX_ATTEMPTS
+      ) {
+        throw error;
+      }
+
+      input.log(
+        `Worker version smoke attempt ${attempt}/${WORKER_VERSION_SMOKE_MAX_ATTEMPTS} failed `
+          + `(${error.message}); retrying in ${WORKER_VERSION_SMOKE_RETRY_DELAY_MS}ms.`,
+      );
+      await sleep(WORKER_VERSION_SMOKE_RETRY_DELAY_MS);
+    }
+  }
+}
+
 async function assertHealth(
   fetchImpl: FetchLike,
   url: string,
@@ -640,8 +685,17 @@ function assertSmokeWorkerVersion(
     return;
   }
 
+  if (
+    typeof payload.workerVersionId !== "string" ||
+    payload.workerVersionId.trim().length === 0
+  ) {
+    throw new Error(`${action} did not report Worker version metadata.`);
+  }
+
   if (payload.workerVersionId !== expectedVersionId) {
-    throw new Error(`${action} did not run the requested Worker version.`);
+    throw new SmokeWorkerVersionMismatchError(
+      `${action} did not run the requested Worker version.`,
+    );
   }
 }
 

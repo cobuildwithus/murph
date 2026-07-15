@@ -23,11 +23,6 @@ import {
   toOwnedEventCommandShowEntity,
   toSampleCommandListItem,
 } from "../src/commands/query-record-command-helpers.ts";
-import {
-  describeQueryLookupConstraint,
-  inferQueryIdEntityKind,
-  isQueryableQueryLookupId,
-} from "../src/query-id-families.ts";
 import { importWithMocks } from "./mock-import.ts";
 
 import type { QueryEntity } from "../src/query-runtime.ts";
@@ -81,7 +76,14 @@ describe("query record command helpers", () => {
       attributes: {
         extraLinks: ["xfm_batch_1", "prov_fitbit", "", 7, "evt_walk", " evt_padded "],
       },
-      relatedIds: ["prov_fitbit", " evt_walk ", "", "prot_template", "rcp_soup"],
+      relatedIds: [
+        "prov_fitbit",
+        " evt_walk ",
+        "",
+        "hab_sleep-environment",
+        "prot_template",
+        "rcp_soup",
+      ],
     });
 
     Reflect.set(record, "title", undefined);
@@ -101,6 +103,7 @@ describe("query record command helpers", () => {
     expect(result.links).toEqual([
       { id: " evt_padded ", kind: "event", queryable: true },
       { id: "evt_walk", kind: "event", queryable: true },
+      { id: "hab_sleep-environment", kind: "habitat", queryable: true },
       { id: "prot_template", kind: "protocol", queryable: true },
       { id: "prov_fitbit", kind: "provider", queryable: true },
       { id: "rcp_soup", kind: "recipe", queryable: true },
@@ -344,19 +347,6 @@ describe("query helper primitives", () => {
 });
 
 describe("query runtime wrappers", () => {
-  it("classifies query lookup ids through the shared id-family rules", () => {
-    expect(inferQueryIdEntityKind("exp_morning")).toBe("experiment");
-    expect(inferQueryIdEntityKind("prot_template")).toBe("protocol");
-    expect(inferQueryIdEntityKind("unknown_lookup")).toBe("entity");
-
-    expect(isQueryableQueryLookupId("journal:2026-04-08")).toBe(true);
-    expect(isQueryableQueryLookupId("prot_template")).toBe(true);
-    expect(isQueryableQueryLookupId("xfm_batch_1")).toBe(false);
-
-    expect(describeQueryLookupConstraint("exp_morning")).toBeNull();
-    expect(describeQueryLookupConstraint("xfm_batch_1")).not.toBeNull();
-  });
-
   it("loads the query runtime through the runtime import seam", async () => {
     const runtimeStub = { marker: "query-runtime" };
     const loadRuntimeModuleMock = vi.fn(async (specifier: string) => {
