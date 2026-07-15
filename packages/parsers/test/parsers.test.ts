@@ -2666,6 +2666,105 @@ test("attachment parse worker consumes inbox jobs, writes derived artifacts, and
   pipeline.close();
 });
 
+test("attachment parse worker requeues its claimed job when provider parsing aborts", async () => {
+  const vaultRoot = await makeTempDirectory("murph-parser-worker-aborted-provider-vault");
+  const sourceRoot = await makeTempDirectory("murph-parser-worker-aborted-provider-source");
+  await initializeVault({ vaultRoot, createdAt: "2026-03-12T12:00:00.000Z" });
+
+  const audioPath = await writeExternalFile(
+    sourceRoot,
+    "aborted-provider.wav",
+    "wav-bytes-placeholder",
+  );
+  const runtime = await openInboxRuntime({ vaultRoot });
+  const pipeline = await createInboxPipeline({ vaultRoot, runtime });
+
+  const capture = await pipeline.processCapture({
+    source: "telegram",
+    externalId: "aborted-provider-1",
+    accountId: "self",
+    thread: {
+      id: "chat-aborted-provider-1",
+    },
+    actor: {
+      isSelf: false,
+    },
+    occurredAt: "2026-03-13T11:04:00.000Z",
+    text: null,
+    attachments: [
+      {
+        kind: "audio",
+        mime: "audio/wav",
+        originalPath: audioPath,
+        fileName: "aborted-provider.wav",
+      },
+    ],
+    raw: {},
+  });
+  const storedCapture = runtime.getCapture(capture.captureId);
+  assert.ok(storedCapture);
+  const attachmentId = storedCapture.attachments[0]?.attachmentId;
+  assert.ok(attachmentId);
+
+  const requeueFilters: RequeueAttachmentParseJobsInput[] = [];
+  const requeueAttachmentParseJobs = runtime.requeueAttachmentParseJobs.bind(runtime);
+  runtime.requeueAttachmentParseJobs = (filters) => {
+    assert.ok(filters);
+    requeueFilters.push(filters);
+    return requeueAttachmentParseJobs(filters);
+  };
+
+  const controller = new AbortController();
+  const results = await runAttachmentParseWorker({
+    vaultRoot,
+    runtime,
+    registry: createParserRegistry([
+      {
+        id: "aborted-provider",
+        locality: "remote",
+        openness: "closed",
+        runtime: "remote_api",
+        priority: 500,
+        async discover() {
+          return {
+            available: true,
+            reason: "available for provider abort test",
+          };
+        },
+        supports(request) {
+          return (request.preparedKind ?? request.artifact.kind) === "audio";
+        },
+        async run(request) {
+          assert.equal(request.signal, controller.signal);
+          controller.abort();
+          throw new Error("provider parse aborted");
+        },
+      },
+    ]),
+    ffmpeg: disableFfmpegLookup(),
+    maxJobs: 1,
+    signal: controller.signal,
+  });
+
+  assert.deepEqual(results, []);
+  assert.deepEqual(requeueFilters, [
+    {
+      attachmentId,
+      captureId: capture.captureId,
+      state: "running",
+    },
+  ]);
+  assert.equal(runtime.getCapture(capture.captureId)?.attachments[0]?.parseState, "pending");
+  const jobs = runtime.listAttachmentParseJobs({ captureId: capture.captureId, limit: 10 });
+  assert.equal(jobs.length, 1);
+  assert.equal(jobs[0]?.state, "pending");
+  assert.equal(jobs[0]?.attempts, 1);
+  assert.equal(jobs[0]?.errorCode ?? null, null);
+  assert.equal(jobs[0]?.errorMessage ?? null, null);
+
+  pipeline.close();
+});
+
 test("stale running parser attempts do not overwrite a requeued rerun", async () => {
   const vaultRoot = await makeTempDirectory("murph-parser-worker-race-vault");
   const sourceRoot = await makeTempDirectory("murph-parser-worker-race-source");

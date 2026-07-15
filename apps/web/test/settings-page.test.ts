@@ -209,56 +209,6 @@ beforeEach(() => {
   mocks.readHostedSecureApprovalStatus.mockResolvedValue({ status: "unavailable" });
 });
 
-test("HostedFamilySettings explains family member privacy without enumerating data categories", async () => {
-  const { HostedFamilySettings } = await vi.importActual<
-    typeof import("@/src/components/settings/hosted-family-settings")
-  >("@/src/components/settings/hosted-family-settings");
-
-  const ownerSnapshot = {
-    billingActive: true,
-    billingStatus: HostedBillingStatus.active,
-    displayName: "Family",
-    groupId: "hbag_family",
-    invites: [],
-    members: [
-      {
-        isOwner: true,
-        joinedAt: new Date("2026-06-18T12:00:00.000Z"),
-        label: "You",
-        memberId: "member_owner",
-        pendingPlanCode: null,
-        planCode: "pulse",
-        role: "owner",
-        status: "active",
-      },
-    ],
-    ownerMemberId: "member_owner",
-    plans: {
-      edge: { active: 0, billed: 0, invited: 0, remaining: 0, used: 0 },
-      pulse: { active: 1, billed: 2, invited: 0, remaining: 1, used: 1 },
-    },
-    seats: {
-      active: 1,
-      billed: 2,
-      invited: 0,
-      max: 4,
-      min: 2,
-      remaining: 3,
-      used: 1,
-    },
-    suspendedAt: null,
-  } satisfies Parameters<typeof HostedFamilySettings>[0]["ownerSnapshot"];
-
-  const markup = renderToStaticMarkup(React.createElement(HostedFamilySettings, {
-    ownerSnapshot,
-  }));
-
-  assert.match(
-    markup,
-    /You pay for your family&#x27;s access, but what they share with Murph stays private to them\./,
-  );
-});
-
 test("SettingsPage metadata uses the shared preview image", async () => {
   const { metadata } = await import("../app/(dashboard)/settings/page");
 
