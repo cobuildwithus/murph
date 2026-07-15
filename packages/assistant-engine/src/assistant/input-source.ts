@@ -163,6 +163,7 @@ async function listStoredAssistantInputCandidates(input: {
       afterCursor: cursor,
       conversation: input.conversation,
       limit: scanLimit,
+      signal: input.signal,
       source: null,
       vault: input.vault,
     })
@@ -201,6 +202,7 @@ async function listStoredAssistantInputCandidates(input: {
 
   const hostedMailboxItems = await readHostedMailboxAssistantInputItemDetails({
     inputIds: selected.map((event) => event.inputId),
+    signal: input.signal,
     vault: input.vault,
   })
 

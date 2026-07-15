@@ -371,6 +371,7 @@ async function createHostedWorkspaceV2Snapshot(
     ({ prunedRuntimeSymlinkCount } = await pruneHostedWorkspaceSnapshotRuntimeOwnedSymlinks({
       durableRoot,
       operatorHomeRoot,
+      signal: input.signal,
     }));
     assertHostedWorkspaceSnapshotConstructionLive(input.signal);
     if (prunedRuntimeSymlinkCount > 0) {
@@ -389,6 +390,7 @@ async function createHostedWorkspaceV2Snapshot(
     try {
       terminalWriteOperationPruneResult = await pruneTerminalWriteOperationRecords({
         checkpointedAfter: input.previousWorkspaceCheckpointedAt,
+        signal: input.signal,
         vaultRoot: input.vaultRoot,
       });
       if (hasTerminalWriteOperationPrunedFiles(terminalWriteOperationPruneResult)) {
@@ -424,6 +426,7 @@ async function createHostedWorkspaceV2Snapshot(
     assertHostedWorkspaceSnapshotConstructionLive(input.signal);
     try {
       const pendingInputIds = await compactHostedPendingAssistantInputIds({
+        signal: input.signal,
         vaultRoot: input.vaultRoot,
       });
       assertHostedWorkspaceSnapshotConstructionLive(input.signal);
@@ -432,6 +435,7 @@ async function createHostedWorkspaceV2Snapshot(
         pendingInputIds,
         protectPendingProviderCleanupEvidence:
           !(await hasHostedProviderCleanupRecoveryCompleted(input.vaultRoot)),
+        signal: input.signal,
         vault: input.vaultRoot,
       });
       if (

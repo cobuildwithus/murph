@@ -44,6 +44,10 @@ Success criteria:
    checkpoint-first while dirty; keep clean/restored wakes ordinary.
 5. Add timer, no-drop, and loop-prevention regressions, then rerun the affected
    owner suites, audits, CI, and ReviewGPT on the pushed head.
+6. Keep foreground interruption responsive while snapshot cleanup holds runtime
+   locks by threading the existing checkpoint abort signal through recursive
+   symlink pruning, write-operation pruning, pending-input compaction, and
+   assistant-runtime residue inventory and deletion loops.
 
 ## ReviewGPT accepted findings
 
@@ -62,6 +66,36 @@ Round 1 returned three accepted findings whose remediation is implemented:
 Focused owner tests now cover each finding. The required coverage-write audit
 passed with zero findings and no edits. Final shared-host verification, CI, and
 the ReviewGPT correction round remain.
+
+## Post-merge integration finding
+
+The final integration review found one additional foreground-priority gap:
+pre-snapshot cleanup held the canonical lock and, for pending-input and residue
+work, the assistant-runtime lock while potentially unbounded filesystem and
+record scans ignored the already-existing foreground abort signal. The runtime
+did not begin the fresh foreground pass until the checkpoint promise unwound,
+so a wake arriving mid-cleanup could still be delayed by the rest of those
+walks.
+
+The accepted correction cooperatively threads the checkpoint signal through
+each cleanup owner and checks it around awaited filesystem work and between
+records. The assistant-state write-lock queue itself becomes cancellable so an
+aborted checkpoint does not wait behind an earlier writer, and recursive stage
+deletion becomes an explicit per-entry walk so one native `rm` cannot retain
+the canonical lock for an unbounded tree. It deliberately does not use
+`Promise.race`, which would release locks while abandoned cleanup continued
+touching live state. Focused tests must prove exact abort-reason propagation,
+queue ordering after a canceled waiter, symlink-safe bounded deletion, and that
+work after the interruption is not visited. Final owner verification and the
+ReviewGPT correction round must cover this additional delta.
+
+This additional source growth triggered the plan's architecture pressure
+check. Skipping terminal and assistant-residue cleanup would silently disable
+the only production pruning path, including privacy-retention cleanup; racing
+the work would abandon mutations; and adding a scheduler or cleanup owner would
+expand state and lifecycle complexity. The smallest durable correction keeps
+the existing owners and locks, adds one optional signal to the existing lock
+queue, and makes the existing recursive deletion finite and cooperative.
 
 ## Review remediation retrospective
 
@@ -119,8 +153,9 @@ The current hot-wake implementation has green local proof:
 
 The hot-wake implementation, all three accepted ReviewGPT remediations, and the
 two intermediate-head CI corrections are implemented with focused proof. The
-task remains active while final shared-host owner verification, CI, and the
-ReviewGPT correction round run.
+post-merge cleanup-cancellation correction is in progress. The task remains
+active while its focused proof, final shared-host owner verification, CI, and
+the ReviewGPT correction round run.
 
 Status: active
 Updated: 2026-07-14

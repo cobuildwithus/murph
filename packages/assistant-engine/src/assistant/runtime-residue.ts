@@ -101,19 +101,29 @@ export async function pruneAssistantRuntimeResidue(input: {
   now?: Date
   pendingInputIds: readonly string[]
   protectPendingProviderCleanupEvidence?: boolean
+  signal?: AbortSignal | null
   vault: string
 }): Promise<AssistantRuntimeResiduePruneResult> {
-  return await withAssistantRuntimeWriteLock(input.vault, async (paths) => {
-    await ensureAssistantState(paths)
-    return await pruneAssistantRuntimeResidueAtPaths({
-      now: input.now ?? new Date(),
-      paths,
-      pendingInputIds: input.pendingInputIds,
-      protectPendingProviderCleanupEvidence:
-        input.protectPendingProviderCleanupEvidence ?? false,
-      vault: input.vault,
-    })
-  })
+  input.signal?.throwIfAborted()
+  const result = await withAssistantRuntimeWriteLock(
+    input.vault,
+    async (paths) => {
+      await ensureAssistantState(paths)
+      input.signal?.throwIfAborted()
+      return await pruneAssistantRuntimeResidueAtPaths({
+        now: input.now ?? new Date(),
+        paths,
+        pendingInputIds: input.pendingInputIds,
+        protectPendingProviderCleanupEvidence:
+          input.protectPendingProviderCleanupEvidence ?? false,
+        signal: input.signal,
+        vault: input.vault,
+      })
+    },
+    input.signal,
+  )
+  input.signal?.throwIfAborted()
+  return result
 }
 
 async function pruneAssistantRuntimeResidueAtPaths(input: {
@@ -121,14 +131,18 @@ async function pruneAssistantRuntimeResidueAtPaths(input: {
   paths: AssistantStatePaths
   pendingInputIds: readonly string[]
   protectPendingProviderCleanupEvidence: boolean
+  signal?: AbortSignal | null
   vault: string
 }): Promise<AssistantRuntimeResiduePruneResult> {
+  input.signal?.throwIfAborted()
   const directories = resolveAssistantRuntimeResidueDirectories(input.paths)
   const inventory = await readAssistantRuntimeResidueInventory({
     directories,
     paths: input.paths,
+    signal: input.signal,
     vault: input.vault,
   })
+  input.signal?.throwIfAborted()
   const plan = planAssistantRuntimeResiduePrune({
     inventory,
     now: input.now,
@@ -138,36 +152,39 @@ async function pruneAssistantRuntimeResidueAtPaths(input: {
   })
 
   for (const filePath of plan.journalPaths) {
-    await removeAssistantStateFile(filePath)
+    await removeAssistantStateFile(filePath, input.signal)
   }
   for (const filePath of plan.inputEventPaths) {
-    await removeAssistantStateFile(filePath)
+    await removeAssistantStateFile(filePath, input.signal)
   }
   for (const filePath of plan.hostedMailboxInputItemPaths) {
-    await removeAssistantStateFile(filePath)
+    await removeAssistantStateFile(filePath, input.signal)
   }
   for (const filePath of plan.receiptPaths) {
-    await removeAssistantStateFile(filePath)
+    await removeAssistantStateFile(filePath, input.signal)
   }
 
   let evidenceFilesPruned = 0
   for (const group of plan.evidenceGroups) {
+    input.signal?.throwIfAborted()
     for (const filePath of group.filePaths) {
-      await removeAssistantStateFile(filePath)
+      await removeAssistantStateFile(filePath, input.signal)
       evidenceFilesPruned += 1
     }
   }
   for (const filePath of plan.provenancePaths) {
-    await removeAssistantStateFile(filePath)
+    await removeAssistantStateFile(filePath, input.signal)
   }
 
-  await Promise.all([
-    removeAssistantStateDirectoryIfEmpty(directories.acceptedTurnInputs),
-    removeAssistantStateDirectoryIfEmpty(directories.evidence),
-    removeAssistantStateDirectoryIfEmpty(directories.hostedMailboxInputItems),
-    removeAssistantStateDirectoryIfEmpty(directories.inputEvents),
-    removeAssistantStateDirectoryIfEmpty(directories.provenance),
-  ])
+  for (const directory of [
+    directories.acceptedTurnInputs,
+    directories.evidence,
+    directories.hostedMailboxInputItems,
+    directories.inputEvents,
+    directories.provenance,
+  ]) {
+    await removeAssistantStateDirectoryIfEmpty(directory, input.signal)
+  }
 
   return {
     acceptedTurnInputJournalsPruned: plan.journalPaths.length,
@@ -575,8 +592,10 @@ function compareEvidenceGroupsNewestFirst(
 async function readAssistantRuntimeResidueInventory(input: {
   directories: ReturnType<typeof resolveAssistantRuntimeResidueDirectories>
   paths: AssistantStatePaths
+  signal?: AbortSignal | null
   vault: string
 }): Promise<AssistantRuntimeResidueInventory> {
+  input.signal?.throwIfAborted()
   const [
     evidence,
     hostedMailboxInputItems,
@@ -587,20 +606,39 @@ async function readAssistantRuntimeResidueInventory(input: {
     receipts,
   ] =
     await Promise.all([
-      readEvidenceInventory(input.directories.evidence, input.vault),
-      readHostedMailboxAssistantInputItemInventory(input.paths),
-      readInputEventInventory(input.directories.inputEvents, input.paths),
+      readEvidenceInventory(
+        input.directories.evidence,
+        input.vault,
+        input.signal,
+      ),
+      readHostedMailboxAssistantInputItemInventory(input.paths, input.signal),
+      readInputEventInventory(
+        input.directories.inputEvents,
+        input.paths,
+        input.signal,
+      ),
       readJsonInventory(
         input.directories.acceptedTurnInputs,
         (value) => assistantAcceptedTurnInputJournalSchema.parse(value),
+        input.signal,
       ),
-      readOutboxInventory(input.paths.outboxDirectory, input.vault),
-      readProvenanceInventory(input.directories.provenance, input.vault),
+      readOutboxInventory(
+        input.paths.outboxDirectory,
+        input.vault,
+        input.signal,
+      ),
+      readProvenanceInventory(
+        input.directories.provenance,
+        input.vault,
+        input.signal,
+      ),
       readJsonInventory(
         input.paths.turnsDirectory,
         (value) => assistantTurnReceiptSchema.parse(value),
+        input.signal,
       ),
     ])
+  input.signal?.throwIfAborted()
 
   return {
     evidence,
@@ -616,11 +654,13 @@ async function readAssistantRuntimeResidueInventory(input: {
 async function readEvidenceInventory(
   directory: string,
   vault: string,
+  signal?: AbortSignal | null,
 ): Promise<Inventory<EvidenceFile>> {
   const records: EvidenceFile[] = []
   let trusted = true
 
-  for (const entry of await readDirectoryEntries(directory)) {
+  for (const entry of await readDirectoryEntries(directory, signal)) {
+    signal?.throwIfAborted()
     if (!entry.name.endsWith('.json')) {
       continue
     }
@@ -642,6 +682,7 @@ async function readEvidenceInventory(
         vault,
         evidenceId,
       )
+      signal?.throwIfAborted()
       if (!record) {
         trusted = false
         continue
@@ -652,6 +693,7 @@ async function readEvidenceInventory(
         record,
       })
     } catch {
+      signal?.throwIfAborted()
       trusted = false
     }
   }
@@ -662,11 +704,13 @@ async function readEvidenceInventory(
 async function readInputEventInventory(
   directory: string,
   paths: AssistantStatePaths,
+  signal?: AbortSignal | null,
 ): Promise<Inventory<PersistedRecord<AssistantInputEventRecord>>> {
   const records: Array<PersistedRecord<AssistantInputEventRecord>> = []
   let trusted = true
 
-  for (const entry of await readDirectoryEntries(directory)) {
+  for (const entry of await readDirectoryEntries(directory, signal)) {
+    signal?.throwIfAborted()
     if (!entry.name.endsWith('.json')) {
       continue
     }
@@ -678,6 +722,7 @@ async function readInputEventInventory(
     const inputId = entry.name.slice(0, -'.json'.length)
     try {
       const record = await readAssistantInputEvent({ inputId, paths })
+      signal?.throwIfAborted()
       if (!record) {
         trusted = false
         continue
@@ -687,6 +732,7 @@ async function readInputEventInventory(
         record,
       })
     } catch {
+      signal?.throwIfAborted()
       trusted = false
     }
   }
@@ -697,11 +743,13 @@ async function readInputEventInventory(
 async function readOutboxInventory(
   directory: string,
   vault: string,
+  signal?: AbortSignal | null,
 ): Promise<Inventory<PersistedRecord<AssistantOutboxIntent>>> {
   const records: Array<PersistedRecord<AssistantOutboxIntent>> = []
   let trusted = true
 
-  for (const entry of await readDirectoryEntries(directory)) {
+  for (const entry of await readDirectoryEntries(directory, signal)) {
+    signal?.throwIfAborted()
     if (!entry.name.endsWith('.json')) {
       continue
     }
@@ -713,6 +761,7 @@ async function readOutboxInventory(
     const filePath = path.join(directory, entry.name)
     try {
       const record = await readAssistantOutboxIntentInventoryEntry(vault, filePath)
+      signal?.throwIfAborted()
       if (!record) {
         trusted = false
         continue
@@ -722,6 +771,7 @@ async function readOutboxInventory(
         record,
       })
     } catch {
+      signal?.throwIfAborted()
       trusted = false
     }
   }
@@ -732,11 +782,13 @@ async function readOutboxInventory(
 async function readProvenanceInventory(
   directory: string,
   vault: string,
+  signal?: AbortSignal | null,
 ): Promise<Inventory<PersistedRecord<AssistantAutoReplyIntentProvenance>>> {
   const records: Array<PersistedRecord<AssistantAutoReplyIntentProvenance>> = []
   let trusted = true
 
-  for (const entry of await readDirectoryEntries(directory)) {
+  for (const entry of await readDirectoryEntries(directory, signal)) {
+    signal?.throwIfAborted()
     if (!entry.name.endsWith('.json')) {
       continue
     }
@@ -758,6 +810,7 @@ async function readProvenanceInventory(
         intentId,
         vault,
       })
+      signal?.throwIfAborted()
       if (!record) {
         trusted = false
         continue
@@ -767,6 +820,7 @@ async function readProvenanceInventory(
         record,
       })
     } catch {
+      signal?.throwIfAborted()
       trusted = false
     }
   }
@@ -777,11 +831,13 @@ async function readProvenanceInventory(
 async function readJsonInventory<T>(
   directory: string,
   parse: (value: unknown) => T,
+  signal?: AbortSignal | null,
 ): Promise<Inventory<PersistedRecord<T>>> {
   const records: Array<PersistedRecord<T>> = []
   let trusted = true
 
-  for (const entry of await readDirectoryEntries(directory)) {
+  for (const entry of await readDirectoryEntries(directory, signal)) {
+    signal?.throwIfAborted()
     if (!entry.name.endsWith('.json')) {
       continue
     }
@@ -792,11 +848,14 @@ async function readJsonInventory<T>(
 
     const filePath = path.join(directory, entry.name)
     try {
+      const raw = await readFile(filePath, 'utf8')
+      signal?.throwIfAborted()
       records.push({
         filePath,
-        record: parse(JSON.parse(await readFile(filePath, 'utf8'))),
+        record: parse(JSON.parse(raw)),
       })
     } catch {
+      signal?.throwIfAborted()
       trusted = false
     }
   }
@@ -819,11 +878,19 @@ function resolveAssistantRuntimeResidueDirectories(paths: AssistantStatePaths) {
   }
 }
 
-async function readDirectoryEntries(directory: string): Promise<Dirent[]> {
+async function readDirectoryEntries(
+  directory: string,
+  signal?: AbortSignal | null,
+): Promise<Dirent[]> {
+  signal?.throwIfAborted()
   try {
     await assertAssistantStatePathHasNoSymlinks(directory)
-    return await readdir(directory, { withFileTypes: true })
+    signal?.throwIfAborted()
+    const entries = await readdir(directory, { withFileTypes: true })
+    signal?.throwIfAborted()
+    return entries
   } catch (error) {
+    signal?.throwIfAborted()
     if (isMissingFileError(error)) {
       return []
     }
@@ -831,18 +898,33 @@ async function readDirectoryEntries(directory: string): Promise<Dirent[]> {
   }
 }
 
-async function removeAssistantStateFile(filePath: string): Promise<void> {
+async function removeAssistantStateFile(
+  filePath: string,
+  signal?: AbortSignal | null,
+): Promise<void> {
+  signal?.throwIfAborted()
   await assertAssistantStatePathHasNoSymlinks(filePath)
+  signal?.throwIfAborted()
   await rm(filePath, { force: true })
+  signal?.throwIfAborted()
 }
 
-async function removeAssistantStateDirectoryIfEmpty(directory: string): Promise<void> {
+async function removeAssistantStateDirectoryIfEmpty(
+  directory: string,
+  signal?: AbortSignal | null,
+): Promise<void> {
+  signal?.throwIfAborted()
   try {
     await assertAssistantStatePathHasNoSymlinks(directory)
-    if ((await readdir(directory)).length === 0) {
+    signal?.throwIfAborted()
+    const entries = await readdir(directory)
+    signal?.throwIfAborted()
+    if (entries.length === 0) {
       await rmdir(directory)
+      signal?.throwIfAborted()
     }
   } catch (error) {
+    signal?.throwIfAborted()
     if (isMissingFileError(error) || readNodeErrorCode(error) === 'ENOTEMPTY') {
       return
     }

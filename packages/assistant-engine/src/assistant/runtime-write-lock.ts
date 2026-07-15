@@ -24,9 +24,10 @@ const assistantRuntimeWriteLock = createAssistantStateWriteLock<AssistantStatePa
 export async function withAssistantRuntimeWriteLock<TResult>(
   vault: string,
   run: (paths: AssistantStatePaths) => Promise<TResult>,
+  signal?: AbortSignal | null,
 ): Promise<TResult> {
   const paths = resolveAssistantStatePaths(vault)
-  return assistantRuntimeWriteLock.withWriteLock(paths, () => run(paths))
+  return assistantRuntimeWriteLock.withWriteLock(paths, () => run(paths), signal)
 }
 
 export async function inspectAssistantRuntimeWriteLock(

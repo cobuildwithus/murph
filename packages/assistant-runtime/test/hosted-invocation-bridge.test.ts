@@ -1,3 +1,4 @@
+import { existsSync } from "node:fs";
 import {
   access,
   chmod,
@@ -6,6 +7,7 @@ import {
   readFile,
   readdir,
   rm,
+  symlink,
   writeFile,
 } from "node:fs/promises";
 import { tmpdir } from "node:os";
@@ -318,6 +320,68 @@ describe("createHostedWorkspaceRuntimeBridgeJobOptions", () => {
     }
 
     expect(snapshotArchiveBuilder.buildEncryptedSnapshot).toHaveBeenCalledOnce();
+    expect(calls.startSnapshotSession).toHaveBeenCalledOnce();
+    expect(calls.abortSnapshotSession).toHaveBeenCalledOnce();
+    expect(calls.putSnapshotObjectDirect).not.toHaveBeenCalled();
+    expect(calls.completeSnapshotSession).not.toHaveBeenCalled();
+  });
+
+  it("propagates checkpoint interruption into runtime-owned symlink cleanup", async () => {
+    const vaultRoot = await createVaultRoot();
+    const workspaceRoot = path.dirname(path.dirname(vaultRoot));
+    const runtimeRoot = path.join(
+      workspaceRoot,
+      "durable",
+      "home",
+      ".codex-hosted",
+      "nested",
+    );
+    const symlinkTarget = path.join(workspaceRoot, "runtime-symlink-target.txt");
+    const symlinkPaths = [
+      path.join(runtimeRoot, "first-link"),
+      path.join(runtimeRoot, "second-link"),
+    ];
+    await mkdir(runtimeRoot, { recursive: true });
+    await writeFile(symlinkTarget, "runtime-owned symlink target\n", "utf8");
+    await Promise.all(symlinkPaths.map(async (symlinkPath) => {
+      await symlink(symlinkTarget, symlinkPath);
+    }));
+
+    const { calls, platform } = createRuntimePlatform();
+    const snapshotArchiveBuilder = createSnapshotArchiveBuilder();
+    const controller = new AbortController();
+    const interruption = new Error("Synthetic foreground cleanup interruption.");
+    const nativeThrowIfAborted = controller.signal.throwIfAborted.bind(
+      controller.signal,
+    );
+    let untouchedPathAtInterruption: string | null = null;
+    Object.defineProperty(controller.signal, "throwIfAborted", {
+      configurable: true,
+      value() {
+        const remainingPaths = symlinkPaths.filter((symlinkPath) =>
+          existsSync(symlinkPath)
+        );
+        if (!controller.signal.aborted && remainingPaths.length === 1) {
+          [untouchedPathAtInterruption] = remainingPaths;
+          controller.abort(interruption);
+        }
+        nativeThrowIfAborted();
+      },
+    });
+    const options = createBridgeOptions({
+      platform,
+      snapshotArchiveBuilder,
+      vaultRoot,
+    });
+
+    await expect(options.createCheckpointSnapshot(
+      createCheckpointInput("idle_shutdown"),
+      { signal: controller.signal },
+    )).rejects.toBe(interruption);
+
+    expect(symlinkPaths.filter((symlinkPath) => existsSync(symlinkPath)))
+      .toEqual([untouchedPathAtInterruption]);
+    expect(snapshotArchiveBuilder.buildEncryptedSnapshot).not.toHaveBeenCalled();
     expect(calls.startSnapshotSession).toHaveBeenCalledOnce();
     expect(calls.abortSnapshotSession).toHaveBeenCalledOnce();
     expect(calls.putSnapshotObjectDirect).not.toHaveBeenCalled();
