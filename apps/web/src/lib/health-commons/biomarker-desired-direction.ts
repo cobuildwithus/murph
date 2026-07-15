@@ -3,6 +3,7 @@ import {
   type HealthCommonsBiomarkerDesiredDirection,
 } from "@murphai/contracts";
 import biomarkerIndex from "@murphai/health-commons/generated/web/browse/biomarkers.json";
+import { resolveExperimentMetricIdentity } from "@murphai/query/browser-experiments";
 
 let biomarkerDesiredDirectionByKey: Map<
   string,
@@ -21,7 +22,9 @@ export function resolveBiomarkerDesiredDirection(
     }
     biomarkerDesiredDirectionByKey = map;
   }
-  return biomarkerDesiredDirectionByKey.get(biomarkerKey) ?? null;
+  const canonicalBiomarkerKey =
+    resolveExperimentMetricIdentity(biomarkerKey).biomarkerKey ?? biomarkerKey;
+  return biomarkerDesiredDirectionByKey.get(canonicalBiomarkerKey) ?? null;
 }
 
 function isHealthCommonsBiomarkerDesiredDirection(

@@ -1,6 +1,6 @@
 import {
   JUNCTION_DEFAULT_TIMESERIES_RESOURCES,
-} from "@murphai/importers/device-providers/junction-resources";
+} from "@murphai/contracts";
 import {
   JUNCTION_API_KEY_ENV_KEYS,
   JUNCTION_CLIENT_USER_ID_SECRET_ENV_KEYS,

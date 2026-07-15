@@ -35,6 +35,13 @@ import {
   WHOOP_DEVICE_SYNC_PROVIDER_ENV_SPEC,
   type DeviceSyncProviderEnvSpec,
 } from "./provider-env.ts";
+import {
+  JUNCTION_SERIALIZABLE_PROVIDER_CONFIG_SCHEMA,
+  OURA_SERIALIZABLE_PROVIDER_CONFIG_SCHEMA,
+  STRAVA_SERIALIZABLE_PROVIDER_CONFIG_SCHEMA,
+  WHOOP_SERIALIZABLE_PROVIDER_CONFIG_SCHEMA,
+  type SerializableConfigFieldKind,
+} from "./serializable-provider-configs.ts";
 import { normalizeJunctionProviderFilter } from "./junction-connect-sources.ts";
 import { normalizeString } from "../shared.ts";
 
@@ -51,7 +58,7 @@ import type {
 } from "./provider-types.ts";
 import type { DeviceSyncProviderCredentialPolicy } from "../types.ts";
 
-export type SerializableConfigFieldKind = "boolean" | "number" | "string" | "string[]";
+export type { SerializableConfigFieldKind } from "./serializable-provider-configs.ts";
 export type DeviceSyncJobPayloadFieldKind = "boolean" | "number" | "string" | "string[]";
 export type HostedHintFieldKind = Exclude<DeviceSyncJobPayloadFieldKind, "string[]">;
 
@@ -139,10 +146,6 @@ const WHOOP_SYNC = requireDeviceProviderSyncDescriptor(WHOOP_DEVICE_PROVIDER_DES
 const WHOOP_DEFAULT_SCOPES = Object.freeze([...WHOOP_OAUTH.defaultScopes]);
 const WHOOP_REQUIRED_SCOPES = Object.freeze(["offline", "read:profile"] as const);
 
-const DEFAULT_DISALLOWED_SERIALIZABLE_FIELDS = Object.freeze({
-  fetchImpl: "is not supported in serialized runtime config.",
-});
-
 const JUNCTION_DEVICE_SYNC_PROVIDER_MANIFEST = defineConfiguredDeviceSyncProviderManifest<
   "junction",
   ConfiguredDeviceSyncProviderConfigByKey["junction"],
@@ -156,29 +159,9 @@ const JUNCTION_DEVICE_SYNC_PROVIDER_MANIFEST = defineConfiguredDeviceSyncProvide
   descriptor: JUNCTION_DEVICE_PROVIDER_DESCRIPTOR,
   env: JUNCTION_DEVICE_SYNC_PROVIDER_ENV_SPEC,
   readConfig: readConfiguredJunctionDeviceSyncProviderConfig,
-  serializableFields: {
-    allowedLinkHosts: "string[]",
-    environment: "string",
-    providerFilter: "string[]",
-    reconcileDays: "number",
-    reconcileIntervalMs: "number",
-    region: "string",
-    requestTimeoutMs: "number",
-    summaryBackfillDays: "number",
-    summaryResources: "string[]",
-    timeseriesBackfillDays: "number",
-    timeseriesResources: "string[]",
-    webhookTimestampToleranceMs: "number",
-  },
-  disallowedSerializableFields: {
-    ...DEFAULT_DISALLOWED_SERIALIZABLE_FIELDS,
-    apiKey:
-      "is a provider-owned API secret and is not supported in serialized runtime config.",
-    clientUserIdSecret:
-      "is a provider-owned HMAC secret and is not supported in serialized runtime config.",
-    webhookSecret:
-      "is a provider-owned webhook secret and is not supported in serialized runtime config.",
-  },
+  serializableFields: JUNCTION_SERIALIZABLE_PROVIDER_CONFIG_SCHEMA.serializableFields,
+  disallowedSerializableFields:
+    JUNCTION_SERIALIZABLE_PROVIDER_CONFIG_SCHEMA.disallowedSerializableFields,
   jobs: freezeConfiguredDeviceSyncProviderJobDefinitions({
     backfill: {
       payload: {
@@ -224,23 +207,9 @@ const OURA_DEVICE_SYNC_PROVIDER_MANIFEST = defineConfiguredDeviceSyncProviderMan
   descriptor: OURA_DEVICE_PROVIDER_DESCRIPTOR,
   env: OURA_DEVICE_SYNC_PROVIDER_ENV_SPEC,
   readConfig: readConfiguredOuraDeviceSyncProviderConfig,
-  serializableFields: {
-    apiBaseUrl: "string",
-    authBaseUrl: "string",
-    backfillDays: "number",
-    clientId: "string",
-    clientSecret: "string",
-    reconcileDays: "number",
-    reconcileIntervalMs: "number",
-    requestTimeoutMs: "number",
-    scopes: "string[]",
-    webhookTimestampToleranceMs: "number",
-  },
-  disallowedSerializableFields: {
-    ...DEFAULT_DISALLOWED_SERIALIZABLE_FIELDS,
-    webhookVerificationToken:
-      "is a provider-owned admin secret and is not supported in serialized runtime config.",
-  },
+  serializableFields: OURA_SERIALIZABLE_PROVIDER_CONFIG_SCHEMA.serializableFields,
+  disallowedSerializableFields:
+    OURA_SERIALIZABLE_PROVIDER_CONFIG_SCHEMA.disallowedSerializableFields,
   jobs: freezeConfiguredDeviceSyncProviderJobDefinitions({
     backfill: {
       payload: {
@@ -289,18 +258,9 @@ const WHOOP_DEVICE_SYNC_PROVIDER_MANIFEST = defineConfiguredDeviceSyncProviderMa
   descriptor: WHOOP_DEVICE_PROVIDER_DESCRIPTOR,
   env: WHOOP_DEVICE_SYNC_PROVIDER_ENV_SPEC,
   readConfig: readConfiguredWhoopDeviceSyncProviderConfig,
-  serializableFields: {
-    backfillDays: "number",
-    baseUrl: "string",
-    clientId: "string",
-    clientSecret: "string",
-    reconcileDays: "number",
-    reconcileIntervalMs: "number",
-    requestTimeoutMs: "number",
-    scopes: "string[]",
-    webhookTimestampToleranceMs: "number",
-  },
-  disallowedSerializableFields: DEFAULT_DISALLOWED_SERIALIZABLE_FIELDS,
+  serializableFields: WHOOP_SERIALIZABLE_PROVIDER_CONFIG_SCHEMA.serializableFields,
+  disallowedSerializableFields:
+    WHOOP_SERIALIZABLE_PROVIDER_CONFIG_SCHEMA.disallowedSerializableFields,
   jobs: freezeConfiguredDeviceSyncProviderJobDefinitions({
     backfill: {
       payload: {
@@ -345,25 +305,9 @@ const STRAVA_DEVICE_SYNC_PROVIDER_MANIFEST = defineConfiguredDeviceSyncProviderM
   descriptor: STRAVA_DEVICE_PROVIDER_DESCRIPTOR,
   env: STRAVA_DEVICE_SYNC_PROVIDER_ENV_SPEC,
   readConfig: readConfiguredStravaDeviceSyncProviderConfig,
-  serializableFields: {
-    apiBaseUrl: "string",
-    authBaseUrl: "string",
-    backfillDays: "number",
-    clientId: "string",
-    clientSecret: "string",
-    reconcileDays: "number",
-    reconcileIntervalMs: "number",
-    requestTimeoutMs: "number",
-    scopes: "string[]",
-    webhookTimestampToleranceMs: "number",
-  },
-  disallowedSerializableFields: {
-    ...DEFAULT_DISALLOWED_SERIALIZABLE_FIELDS,
-    webhookSigningSecret:
-      "is a provider-owned webhook signing secret and is not supported in serialized runtime config.",
-    webhookVerifyToken:
-      "is a provider-owned admin secret and is not supported in serialized runtime config.",
-  },
+  serializableFields: STRAVA_SERIALIZABLE_PROVIDER_CONFIG_SCHEMA.serializableFields,
+  disallowedSerializableFields:
+    STRAVA_SERIALIZABLE_PROVIDER_CONFIG_SCHEMA.disallowedSerializableFields,
   jobs: freezeConfiguredDeviceSyncProviderJobDefinitions({
     backfill: {
       payload: {
