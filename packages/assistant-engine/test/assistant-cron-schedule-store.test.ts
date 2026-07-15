@@ -1,7 +1,7 @@
 import { mkdir, readFile, rm, stat, writeFile } from 'node:fs/promises'
 import path from 'node:path'
 
-import { afterEach, describe, expect, it } from 'vitest'
+import { afterEach, describe, expect, it, vi } from 'vitest'
 
 import type {
   AssistantCronJob,
@@ -9,6 +9,7 @@ import type {
   AssistantCronSchedule,
   AssistantCronTarget,
 } from '@murphai/operator-config/assistant-cli-contracts'
+import { formatTimeZoneDateTimeParts } from '@murphai/contracts'
 import { VaultCliError } from '@murphai/operator-config/vault-cli-errors'
 import {
   buildAssistantCronSchedule,
@@ -232,6 +233,124 @@ describe('assistant cron schedule helpers', () => {
         'UTC',
       ),
     ).toBe('2026-04-12T00:00:00.000Z')
+  })
+
+  it('preserves DST, leap-day, and day-of-month/day-of-week semantics', () => {
+    expect(
+      findNextAssistantCronOccurrence(
+        '30 2 * * *',
+        new Date('2026-03-07T08:00:00.000Z'),
+        'America/New_York',
+      ),
+    ).toBe('2026-03-09T06:30:00.000Z')
+
+    expect(
+      findNextAssistantCronOccurrence(
+        '30 1 * * *',
+        new Date('2026-11-01T05:30:00.000Z'),
+        'America/New_York',
+      ),
+    ).toBe('2026-11-01T06:30:00.000Z')
+
+    expect(
+      findNextAssistantCronOccurrence(
+        '0 0 29 2 *',
+        new Date('2027-03-01T00:00:00.000Z'),
+        'UTC',
+      ),
+    ).toBe('2028-02-29T00:00:00.000Z')
+
+    expect(
+      findNextAssistantCronOccurrence(
+        '0 0 13 * 5',
+        new Date('2026-08-06T00:00:00.000Z'),
+        'UTC',
+      ),
+    ).toBe('2026-08-07T00:00:00.000Z')
+  })
+
+  it('matches an independent minute-scan oracle across timezone and field combinations', () => {
+    const cases = [
+      {
+        after: '2026-03-08T06:45:12.000Z',
+        expression: '15 2 * * *',
+        timeZone: 'America/New_York',
+      },
+      {
+        after: '2026-11-01T05:50:00.000Z',
+        expression: '15,45 1 * * *',
+        timeZone: 'America/New_York',
+      },
+      {
+        after: '2026-04-04T14:40:00.000Z',
+        expression: '*/20 1-3 * * *',
+        timeZone: 'Australia/Lord_Howe',
+      },
+      {
+        after: '2026-09-12T18:44:59.000Z',
+        expression: '0,15,30,45 * * * *',
+        timeZone: 'Asia/Kathmandu',
+      },
+      {
+        after: '2026-09-12T18:45:00.000Z',
+        expression: '30 * * * *',
+        timeZone: 'Asia/Kathmandu',
+      },
+      {
+        after: '2026-08-06T00:00:00.000Z',
+        expression: '0 0 13 * 5',
+        timeZone: 'UTC',
+      },
+      {
+        after: '2026-12-30T23:00:00.000Z',
+        expression: '5 0 1 1 *',
+        timeZone: 'Pacific/Kiritimati',
+      },
+      {
+        after: '2026-10-24T22:59:30.000Z',
+        expression: '7-52/15 0-3 * * 0,6',
+        timeZone: 'Europe/Berlin',
+      },
+      {
+        after: '2028-02-28T23:59:00.000Z',
+        expression: '0 0 29 2 *',
+        timeZone: 'UTC',
+      },
+    ] as const
+
+    for (const testCase of cases) {
+      const after = new Date(testCase.after)
+      expect(
+        findNextAssistantCronOccurrence(
+          testCase.expression,
+          after,
+          testCase.timeZone,
+        ),
+        `${testCase.expression} after ${testCase.after} in ${testCase.timeZone}`,
+      ).toBe(
+        findNextAssistantCronOccurrenceByMinute({
+          after,
+          expression: testCase.expression,
+          timeZone: testCase.timeZone,
+        }),
+      )
+    }
+  })
+
+  it('searches sparse cron schedules by local date instead of every minute', () => {
+    const formatToParts = vi.spyOn(Intl.DateTimeFormat.prototype, 'formatToParts')
+    try {
+      expect(
+        findNextAssistantCronOccurrence(
+          '0 3 1 1 *',
+          new Date('2026-01-02T00:00:00.000Z'),
+          'Pacific/Kiritimati',
+        ),
+      ).toBe('2026-12-31T13:00:00.000Z')
+      expect(formatToParts.mock.calls.length).toBeLessThan(100)
+    } finally {
+      formatToParts.mockRestore()
+    }
   })
 })
 
@@ -735,6 +854,84 @@ function createCronRun(input: {
     startedAt: input.startedAt,
     status: 'succeeded',
     trigger: input.trigger ?? 'scheduled',
+  }
+}
+
+function findNextAssistantCronOccurrenceByMinute(input: {
+  after: Date
+  expression: string
+  timeZone: string
+}): string | null {
+  const [minute, hour, dayOfMonth, month, dayOfWeek] = input.expression
+    .split(/\s+/u)
+  if (!minute || !hour || !dayOfMonth || !month || !dayOfWeek) {
+    throw new Error(`Invalid reference cron expression: ${input.expression}`)
+  }
+
+  const fields = {
+    dayOfMonth: parseReferenceCronField(dayOfMonth, 1, 31),
+    dayOfWeek: parseReferenceCronField(dayOfWeek, 0, 7, (value) =>
+      value === 7 ? 0 : value),
+    hour: parseReferenceCronField(hour, 0, 23),
+    minute: parseReferenceCronField(minute, 0, 59),
+    month: parseReferenceCronField(month, 1, 12),
+  }
+  const candidate = new Date(input.after.getTime())
+  candidate.setUTCSeconds(0, 0)
+  candidate.setUTCMinutes(candidate.getUTCMinutes() + 1)
+
+  for (let index = 0; index < 14 * 24 * 60; index += 1) {
+    const local = formatTimeZoneDateTimeParts(candidate, input.timeZone)
+    const dayOfMonthMatches = fields.dayOfMonth.values.has(local.day)
+    const dayOfWeekMatches = fields.dayOfWeek.values.has(local.dayOfWeek)
+    const dayMatches = fields.dayOfMonth.any && fields.dayOfWeek.any
+      ? true
+      : fields.dayOfMonth.any
+        ? dayOfWeekMatches
+        : fields.dayOfWeek.any
+          ? dayOfMonthMatches
+          : dayOfMonthMatches || dayOfWeekMatches
+
+    if (
+      fields.minute.values.has(local.minute)
+      && fields.hour.values.has(local.hour)
+      && fields.month.values.has(local.month)
+      && dayMatches
+    ) {
+      return candidate.toISOString()
+    }
+    candidate.setUTCMinutes(candidate.getUTCMinutes() + 1)
+  }
+
+  return null
+}
+
+function parseReferenceCronField(
+  value: string,
+  minimum: number,
+  maximum: number,
+  normalize: (value: number) => number = (candidate) => candidate,
+): { any: boolean; values: Set<number> } {
+  const values = new Set<number>()
+  for (const segment of value.split(',')) {
+    const [rangeValue = '', stepValue] = segment.split('/')
+    const step = stepValue ? Number.parseInt(stepValue, 10) : 1
+    const [start, end] = rangeValue === '*'
+      ? [minimum, maximum]
+      : rangeValue.includes('-')
+        ? rangeValue.split('-').map((part) => Number.parseInt(part, 10))
+        : [Number.parseInt(rangeValue, 10), Number.parseInt(rangeValue, 10)]
+
+    if (!Number.isInteger(start) || !Number.isInteger(end) || step < 1) {
+      throw new Error(`Invalid reference cron field: ${value}`)
+    }
+    for (let candidate = start; candidate <= end; candidate += step) {
+      values.add(normalize(candidate))
+    }
+  }
+  return {
+    any: value === '*',
+    values,
   }
 }
 

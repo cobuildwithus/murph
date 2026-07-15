@@ -235,6 +235,7 @@ export async function runHostedAssistantAutomationLane(input: {
         redactedLogEntries: [],
         replyFailed: 0,
         selectedInputIds: [],
+        selectedInputWakeAt: null,
         terminalLinqCleanup: null,
         timings: undefined,
       };
@@ -259,6 +260,7 @@ export async function runHostedAssistantAutomationLane(input: {
     assistantAutomationReplyFailed: assistantResult.replyFailed,
     assistantAutomationScanElapsedMs: assistantResult.timings?.scanElapsedMs ?? null,
     assistantAutomationSelectedInputIds: assistantResult.selectedInputIds,
+    assistantAutomationSelectedInputWakeAt: assistantResult.selectedInputWakeAt,
     assistantAutomationTerminalLinqCleanup: assistantResult.terminalLinqCleanup,
     assistantAutomationTotalElapsedMs: assistantResult.timings?.totalElapsedMs ?? null,
     assistantInputCandidateListed:
@@ -299,6 +301,7 @@ export async function runHostedAssistantAutomation(
   redactedLogEntries: HostedExecutionRedactedLogEntry[];
   replyFailed: number;
   selectedInputIds: string[];
+  selectedInputWakeAt: string | null;
   terminalLinqCleanup: string[] | null;
   timings?: {
     activeTurnInputIngested?: boolean | null;
@@ -575,9 +578,13 @@ export async function runHostedAssistantAutomation(
     };
     const currentTurnDeliveryIntentIds =
       result.currentTurnDeliveryIntentIds ?? [];
+    const wakeNowMs = resolveHostedMaintenanceWakeNowMs(wake);
+    const selectedInputWakeAt = selectedInputIds.mode === "foreground"
+      ? normalizeHostedFutureWakeAt(replies.nextWakeAt ?? null, wakeNowMs)
+      : null;
     const nextWakeAt = resolveHostedAssistantAutomationNextWakeAt({
       inferBacklogFromSaturation: selectedInputIds.mode === "background",
-      nowMs: resolveHostedMaintenanceWakeNowMs(wake),
+      nowMs: wakeNowMs,
       resultNextWakeAt: result.nextWakeAt,
       scanLimit: Math.max(1, baseInputSource.readSelectedInputIds().length),
       scanResult: {
@@ -618,6 +625,7 @@ export async function runHostedAssistantAutomation(
       redactedLogEntries,
       replyFailed: replies.failed,
       selectedInputIds: baseInputSource.readSelectedInputIds(),
+      selectedInputWakeAt,
       terminalLinqCleanup: replies.terminalLinqCleanup ?? null,
       timings: {
         activeTurnInputIngested,
@@ -657,6 +665,7 @@ export async function runHostedAssistantAutomation(
         redactedLogEntries,
         replyFailed: 0,
         selectedInputIds: baseInputSource.readSelectedInputIds(),
+        selectedInputWakeAt: selectedInputIds.mode === "foreground" ? nextWakeAt : null,
         terminalLinqCleanup: null,
       };
     }

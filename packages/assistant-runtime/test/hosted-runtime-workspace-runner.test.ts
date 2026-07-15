@@ -116,6 +116,7 @@ import type {
 } from "../src/hosted-runtime-contracts.ts";
 
 const TEST_NOW = "2026-04-26T00:00:00.000Z";
+const TEST_PENDING_INDEX_MAINTENANCE_WAKE_AT = "2026-04-26T00:00:30.000Z";
 const TEST_USER_ID = "member_synthetic_workspace_runner";
 const TERMINAL_EVIDENCE_SCHEMA =
   "murph.assistant-auto-reply-terminal-evidence.v1";
@@ -512,6 +513,7 @@ describe("runHostedWorkspaceUntilIdleOrBudget", () => {
           return {
             checkpointReason: "assistant_runtime_commit",
             foregroundReplyFailed: 0,
+            invocationLocalAssistantWakeAt: "2026-04-26T00:00:30.000Z",
             nextWakeAt: "2026-04-26T00:00:30.000Z",
             nextWakeReason: "assistant",
             progressed: true,
@@ -2971,7 +2973,7 @@ describe("runHostedWorkspaceUntilIdleOrBudget", () => {
     }
   });
 
-  test("checkpoints canonical write receipts without snapshotting dirty runtime state", async () => {
+  test("signals automation schedule writes after checkpointing their receipts", async () => {
     const vaultRoot = await mkdtemp(path.join(tmpdir(), "murph-workspace-runner-"));
     await initializeVault({
       createdAt: new Date(TEST_NOW),
@@ -3031,24 +3033,26 @@ describe("runHostedWorkspaceUntilIdleOrBudget", () => {
           workspacePort,
         }),
         requestId: "request_synthetic_runner_dirty_receipt_snapshot",
-        async runAssistantPhase() {
+        async runAssistantPhase(phaseInput) {
+          assert.equal(phaseInput.assistantAutomationScheduleChanged?.(), false);
           await applyCanonicalWriteBatch({
             audit: {
-              action: "experiment_update",
+              action: "automation_upsert",
               commandName: "test.dirtyReceiptSnapshot",
               summary: "Synthetic canonical write on dirty runtime state.",
             },
-            operationType: "dirty_receipt_snapshot_test",
+            operationType: "automation_upsert",
             summary: "Synthetic canonical write on dirty runtime state",
             textWrites: [
               {
                 content: "Synthetic dirty receipt snapshot\n",
                 overwrite: true,
-                relativePath: "bank/dirty-receipt-snapshot.md",
+                relativePath: "bank/automations/dirty-receipt-snapshot.md",
               },
             ],
             vaultRoot,
           });
+          assert.equal(phaseInput.assistantAutomationScheduleChanged?.(), true);
           return {
             checkpointReason: "canonical_runtime_commit",
             progressed: true,
@@ -4592,7 +4596,10 @@ describe("runHostedWorkspaceUntilIdleOrBudget", () => {
       });
       assert.equal(result.initialMailboxImport.state.watermarks.conversation, "1");
       assert.equal(result.latestMailboxImport.state.watermarks.conversation, "3");
-      assert.equal(result.assistantPhaseResult?.nextWakeAt, TEST_NOW);
+      assert.equal(
+        result.assistantPhaseResult?.nextWakeAt,
+        TEST_PENDING_INDEX_MAINTENANCE_WAKE_AT,
+      );
       assert.equal(result.assistantPhaseResult?.nextWakeReason, "assistant");
       assert.deepEqual(checkpointRequests.map((request) => request.reason), [
       ]);
@@ -4859,7 +4866,10 @@ describe("runHostedWorkspaceUntilIdleOrBudget", () => {
       assert.deepEqual(yieldStates, [false, true]);
       assert.deepEqual(backgroundDeviceSyncJobStarts, ["job-1"]);
       assert.equal(assistantPhaseCompleted, true);
-      assert.equal(result.assistantPhaseResult?.nextWakeAt, TEST_NOW);
+      assert.equal(
+        result.assistantPhaseResult?.nextWakeAt,
+        TEST_PENDING_INDEX_MAINTENANCE_WAKE_AT,
+      );
       assert.equal(result.assistantPhaseResult?.nextWakeReason, "assistant");
       assert.equal(result.latestMailboxImport.state.watermarks.conversation, "2");
       assert.equal(result.runtimeStateDirty, true);
@@ -5298,6 +5308,7 @@ describe("runHostedWorkspaceUntilIdleOrBudget", () => {
         runtimeWakeSignal,
         async runAssistantPhase(input) {
           yieldStates.push(input.shouldYieldBackgroundMaintenance?.() ?? false);
+          assert.equal(input.backgroundMaintenanceSignal?.aborted, false);
           return {
             afterCheckpointKeepsForegroundImportLoop: true,
             afterCheckpoint: async () => {
@@ -5311,6 +5322,7 @@ describe("runHostedWorkspaceUntilIdleOrBudget", () => {
               await waitForCondition(() =>
                 input.shouldYieldBackgroundMaintenance?.() === true
               );
+              assert.equal(input.backgroundMaintenanceSignal?.aborted, true);
               yieldStates.push(input.shouldYieldBackgroundMaintenance?.() ?? false);
               return {
                 checkpointReason: "assistant_runtime_commit",
@@ -5559,7 +5571,10 @@ describe("runHostedWorkspaceUntilIdleOrBudget", () => {
       assert.deepEqual(importStartedSeqs, ["1", "2"]);
       assert.deepEqual(importedSeqs, ["1", "2"]);
       assert.deepEqual(yieldStates, [false, false, true]);
-      assert.equal(result.assistantPhaseResult?.nextWakeAt, TEST_NOW);
+      assert.equal(
+        result.assistantPhaseResult?.nextWakeAt,
+        TEST_PENDING_INDEX_MAINTENANCE_WAKE_AT,
+      );
       assert.equal(result.assistantPhaseResult?.nextWakeReason, "assistant");
       assert.deepEqual(fetchRequests.map((request) => request.lanes), [
         [
@@ -5668,7 +5683,10 @@ describe("runHostedWorkspaceUntilIdleOrBudget", () => {
 
       assert.deepEqual(importedSeqs, ["1", "2"]);
       assert.equal(result.assistantPhaseResult?.progressed, false);
-      assert.equal(result.assistantPhaseResult?.nextWakeAt, TEST_NOW);
+      assert.equal(
+        result.assistantPhaseResult?.nextWakeAt,
+        TEST_PENDING_INDEX_MAINTENANCE_WAKE_AT,
+      );
       assert.equal(result.assistantPhaseResult?.nextWakeReason, "assistant");
       assert.equal(result.latestMailboxImport.state.watermarks.conversation, "2");
       assert.deepEqual(checkpointRequests.map((request) => request.reason), [
@@ -6552,7 +6570,7 @@ describe("runHostedWorkspaceUntilIdleOrBudget", () => {
     }
   });
 
-  test("backfills an incomplete pending index before checkpointing an initial fresh turn wake", async () => {
+  test("schedules maintenance for an incomplete pending index without foreground backfill", async () => {
     const vaultRoot = await mkdtemp(path.join(tmpdir(), "murph-workspace-runner-"));
     const items = [
       createMailboxItem({
@@ -6562,6 +6580,7 @@ describe("runHostedWorkspaceUntilIdleOrBudget", () => {
     ];
     const { mailboxPort } = createMailboxPort({ items });
     const checkpointRequests: HostedWorkspaceCheckpointRequest[] = [];
+    const reminderWakeAt = "2026-04-26T06:00:00.000Z";
 
     try {
       await saveAssistantAutomationState(vaultRoot, {
@@ -6591,8 +6610,8 @@ describe("runHostedWorkspaceUntilIdleOrBudget", () => {
           attemptId: "attempt_synthetic_runner_initial_fresh_incomplete_pending",
           expectedWorkspaceVersion: "0",
           leaseGeneration: "4",
-          nextWakeAt: null,
-          nextWakeReason: null,
+          nextWakeAt: reminderWakeAt,
+          nextWakeReason: "assistant",
           snapshotRef: null,
         }),
         expectedUserId: TEST_USER_ID,
@@ -6619,18 +6638,35 @@ describe("runHostedWorkspaceUntilIdleOrBudget", () => {
           return {
             checkpointReason: "canonical_runtime_commit",
             foregroundReplyFailed: 0,
+            nextWakeAt: reminderWakeAt,
+            nextWakeReason: "assistant",
             progressed: true,
           };
         },
         vaultRoot,
-        workspace: createWorkspaceState({ version: "0" }),
+        workspace: createWorkspaceState({
+          nextWakeAt: reminderWakeAt,
+          nextWakeReason: "assistant",
+          version: "0",
+        }),
         now: () => TEST_NOW,
       });
 
-      assert.equal(result.assistantPhaseResult?.nextWakeAt, TEST_NOW);
+      assert.equal(
+        result.assistantPhaseResult?.nextWakeAt,
+        TEST_PENDING_INDEX_MAINTENANCE_WAKE_AT,
+      );
       assert.equal(result.assistantPhaseResult?.nextWakeReason, "assistant");
+      assert.equal(
+        result.assistantPhaseResult?.invocationLocalAssistantWakeAt,
+        TEST_PENDING_INDEX_MAINTENANCE_WAKE_AT,
+      );
       assert.equal(result.runtimeStateDirty, true);
       assert.deepEqual(checkpointRequests, []);
+      assert.deepEqual(
+        await readExistingHostedPendingAssistantInputIds({ vaultRoot }),
+        [],
+      );
     } finally {
       await rm(vaultRoot, {
         force: true,

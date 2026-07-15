@@ -217,7 +217,10 @@ async function stageLegacyWorkspaceRefsForV2Snapshot(input: {
       const inlineFile = preservedInlineFiles.get(`${file.root}:${file.path}`);
       const bytes = inlineFile?.sha256 === file.sha256 && inlineFile.size === file.size
         ? inlineFile.bytes
-        : await input.artifactStore.get(file.sha256, { signal: input.signal });
+        : await input.artifactStore.get(file.sha256, {
+            purpose: "legacy_snapshot_materialization",
+            signal: input.signal,
+          });
       assertHostedWorkspaceLegacySnapshotPreparationLive(input.signal);
       if (bytes === null) {
         throw new Error("Hosted workspace skipped-inline artifact is unavailable.");
@@ -363,6 +366,7 @@ async function readHostedWorkspaceEffectivePreservedState(input: {
   }
 
   const baseBundle = await input.artifactStore.get(baseSnapshotRef.hash, {
+    purpose: "legacy_snapshot_materialization",
     signal: input.signal,
   });
   assertHostedWorkspaceLegacySnapshotPreparationLive(input.signal);
@@ -381,6 +385,7 @@ async function readHostedWorkspaceEffectivePreservedState(input: {
     const hotSnapshotRef = readHostedExecutionSnapshotHotRef(input.snapshotRef);
     if (hotSnapshotRef) {
       const hotBundle = await input.artifactStore.get(hotSnapshotRef.hash, {
+        purpose: "legacy_snapshot_materialization",
         signal: input.signal,
       });
       assertHostedWorkspaceLegacySnapshotPreparationLive(input.signal);
@@ -402,6 +407,7 @@ async function readHostedWorkspaceEffectivePreservedState(input: {
   }
 
   const deltaBundle = await input.artifactStore.get(deltaSnapshotRef.hash, {
+    purpose: "legacy_snapshot_materialization",
     signal: input.signal,
   });
   assertHostedWorkspaceLegacySnapshotPreparationLive(input.signal);

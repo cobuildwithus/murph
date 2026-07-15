@@ -130,7 +130,9 @@ async function fetchHostedArtifact(
   },
   ref: HostedBundleArtifactRef,
 ): Promise<Uint8Array> {
-  const bytes = await input.artifactStore.get(ref.sha256);
+  const bytes = await input.artifactStore.get(ref.sha256, {
+    purpose: "workspace_artifact_materialization",
+  });
 
   if (!bytes) {
     const error = new Error("Hosted artifact fetch failed with HTTP 404.") as Error & {

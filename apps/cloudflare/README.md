@@ -173,6 +173,9 @@ publishing a snapshot; inherited or committed wakes and durability barriers
 remain checkpoint-first. If state remains dirty, the direct invocation
 checkpoints with reason `idle_shutdown` at the floor or during shutdown before
 returning success. A restored due wake in a clean workspace runs ordinarily.
+Foreground conversation staging also aborts runner-owned background maintenance,
+including an in-flight provider-cleanup request, without aborting the foreground
+invocation itself.
 When Cloudflare reports
 the container `sleepAfter` lifecycle expiry, the container only yields to an
 active foreground operation or tears down the warm shell.
@@ -183,6 +186,11 @@ per-invocation outbound proxy tokens or dynamically installed outbound
 handlers. The runner does not run a separate post-request PID sweep over the
 native Codex App Server; warm lifecycle is owned by the existing Codex
 app-server slot and explicit runner cleanup paths.
+
+Legacy artifact `GET` requests attach a validated read-purpose header and one
+UUID correlation id that is stable across replay-safe retries. Runner and Worker
+structured logs use only those fields plus bounded timing/status metadata; they
+do not log artifact hashes or bodies.
 
 The warm shell is destroyed when an invocation fails, warm health is stale,
 deploy smoke finishes, explicit cleanup is called, or Cloudflare reports idle

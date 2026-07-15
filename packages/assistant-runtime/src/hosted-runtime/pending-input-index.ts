@@ -175,19 +175,21 @@ function resolveCollectionNowMs(value: Date | string | undefined): number {
 export async function hasHostedPendingAssistantInputWakeCandidate(input: {
   vaultRoot: string;
 }): Promise<boolean> {
-  const existing = await readHostedPendingAssistantInputStateAtPath({
-    filePath: resolveHostedPendingAssistantInputStatePath(input.vaultRoot),
-  });
-  if (existing.state.inputIds.length > 0) {
-    return true;
-  }
-  if (!existing.missing && existing.state.backfilled) {
-    return false;
-  }
-
   return (await compactHostedPendingAssistantInputIds({
     vaultRoot: input.vaultRoot,
   })).length > 0;
+}
+
+export async function inspectHostedPendingAssistantInputWakeCandidate(input: {
+  vaultRoot: string;
+}): Promise<{ hasCandidate: boolean; indexComplete: boolean }> {
+  const existing = await readHostedPendingAssistantInputStateAtPath({
+    filePath: resolveHostedPendingAssistantInputStatePath(input.vaultRoot),
+  });
+  return {
+    hasCandidate: existing.state.inputIds.length > 0,
+    indexComplete: !existing.missing && existing.state.backfilled,
+  };
 }
 
 export async function enqueueHostedPendingAssistantInputId(input: {

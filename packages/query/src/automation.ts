@@ -30,6 +30,7 @@ import {
 import { parseFrontmatterDocument, type FrontmatterObject } from "./health/shared.ts";
 
 const AUTOMATIONS_DIRECTORY = VAULT_LAYOUT.automationsDirectory;
+const AUTOMATION_DOCUMENT_READ_CONCURRENCY = 16;
 const dailyLocalTimePattern = /^(?:[01]\d|2[0-3]):[0-5]\d$/u;
 type AutomationAssistantReasoningEffort = NonNullable<
   AutomationAssistantTargetOverride["reasoningEffort"]
@@ -435,10 +436,26 @@ async function loadAutomationRecords(vaultRoot: string): Promise<AutomationQuery
   const relativePaths = await walkRelativeFiles(vaultRoot, AUTOMATIONS_DIRECTORY, ".md");
   const records: AutomationQueryRecord[] = [];
 
-  for (const relativePath of relativePaths) {
-    const document = await readMarkdownDocument(vaultRoot, relativePath);
-    const record = parseAutomationRecord(document.attributes, relativePath, document.markdown);
-    records.push(record);
+  for (
+    let offset = 0;
+    offset < relativePaths.length;
+    offset += AUTOMATION_DOCUMENT_READ_CONCURRENCY
+  ) {
+    const outcomes = await Promise.allSettled(
+      relativePaths
+        .slice(offset, offset + AUTOMATION_DOCUMENT_READ_CONCURRENCY)
+        .map(async (relativePath) => {
+          const document = await readMarkdownDocument(vaultRoot, relativePath);
+          return parseAutomationRecord(document.attributes, relativePath, document.markdown);
+        }),
+    );
+
+    for (const outcome of outcomes) {
+      if (outcome.status === "rejected") {
+        throw outcome.reason;
+      }
+      records.push(outcome.value);
+    }
   }
 
   return records.sort((left, right) =>

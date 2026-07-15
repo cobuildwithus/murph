@@ -3,6 +3,8 @@ import type { HostedRuntimePlatform } from "@murphai/assistant-runtime/hosted-ru
 
 import { CLOUDFLARE_HOSTED_RUNTIME_BASE_URLS } from "../internal-hosts.ts";
 import {
+  HOSTED_RUNTIME_ARTIFACT_FETCH_CORRELATION_ID_HEADER,
+  HOSTED_RUNTIME_ARTIFACT_READ_PURPOSE_HEADER,
   HOSTED_RUNTIME_ATTEMPT_ID_HEADER,
   HOSTED_RUNTIME_LEASE_GENERATION_HEADER,
   HOSTED_RUNTIME_WORKSPACE_VERSION_HEADER,
@@ -197,11 +199,14 @@ export function createCloudflareArtifactStore(input: {
   let artifactFetchOrdinal = 0;
   return {
     async get(sha256, context) {
-      assertHostedArtifactFetchLive(context?.signal);
+      assertHostedArtifactFetchLive(context.signal);
       const ordinal = ++artifactFetchOrdinal;
       const startedAt = Date.now();
+      const correlationId = crypto.randomUUID();
       const logDetails = {
+        artifactFetchCorrelationId: correlationId,
         artifactFetchOrdinal: ordinal,
+        artifactReadPurpose: context.purpose,
         method: "GET",
         operation: "artifact_fetch",
         path: "/objects/REDACTED",
@@ -222,7 +227,7 @@ export function createCloudflareArtifactStore(input: {
         attempt <= HOSTED_REPLAY_SAFE_READ_RETRY_ATTEMPTS;
         attempt += 1
       ) {
-        assertHostedArtifactFetchLive(context?.signal);
+        assertHostedArtifactFetchLive(context.signal);
         const attemptLogDetails = {
           ...logDetails,
           artifactFetchAttempt: attempt,
@@ -230,26 +235,31 @@ export function createCloudflareArtifactStore(input: {
         };
         let response: Response;
         try {
+          const headers = input.workspaceCheckpointBridge
+            ? await requireHostedRuntimeWriteFenceHeaders(
+                input.workspaceCheckpointBridge,
+                "Hosted artifact fetch",
+              )
+            : new Headers();
+          headers.set(
+            HOSTED_RUNTIME_ARTIFACT_FETCH_CORRELATION_ID_HEADER,
+            correlationId,
+          );
+          headers.set(
+            HOSTED_RUNTIME_ARTIFACT_READ_PURPOSE_HEADER,
+            context.purpose,
+          );
           response = await fetchHostedResponse({
             description: "Hosted artifact fetch",
             fetchImpl,
-            ...(input.workspaceCheckpointBridge
-              ? {
-                  init: {
-                    headers: await requireHostedRuntimeWriteFenceHeaders(
-                      input.workspaceCheckpointBridge,
-                      "Hosted artifact fetch",
-                    ),
-                  },
-                }
-              : {}),
+            init: { headers },
             redactedLogPath: "/objects/REDACTED",
-            signal: context?.signal ?? null,
+            signal: context.signal ?? null,
             timeoutMs,
             url: new URL(`/objects/${sha256}`, `${CLOUDFLARE_HOSTED_RUNTIME_BASE_URLS.artifactStore}/`),
           });
         } catch (error) {
-          assertHostedArtifactFetchLive(context?.signal);
+          assertHostedArtifactFetchLive(context.signal);
           const retrying = shouldRetryHostedRuntimeReplaySafeRead({
             attempt,
             error,
@@ -271,12 +281,12 @@ export function createCloudflareArtifactStore(input: {
           });
           if (retrying) {
             await sleepHostedReplaySafeReadRetryDelay();
-            assertHostedArtifactFetchLive(context?.signal);
+            assertHostedArtifactFetchLive(context.signal);
             continue;
           }
           throw error;
         }
-        assertHostedArtifactFetchLive(context?.signal);
+        assertHostedArtifactFetchLive(context.signal);
 
         emitHostedExecutionStructuredLog({
           component: "hosted.runtime.artifact-store",
@@ -316,7 +326,7 @@ export function createCloudflareArtifactStore(input: {
         try {
           body = await response.arrayBuffer();
         } catch (error) {
-          assertHostedArtifactFetchLive(context?.signal);
+          assertHostedArtifactFetchLive(context.signal);
           const wrappedError = new HostedRuntimeControlPlaneFetchError({
             cause: error,
             description: "Hosted artifact fetch response body read",
@@ -350,12 +360,12 @@ export function createCloudflareArtifactStore(input: {
           });
           if (retrying) {
             await sleepHostedReplaySafeReadRetryDelay();
-            assertHostedArtifactFetchLive(context?.signal);
+            assertHostedArtifactFetchLive(context.signal);
             continue;
           }
           throw wrappedError;
         }
-        assertHostedArtifactFetchLive(context?.signal);
+        assertHostedArtifactFetchLive(context.signal);
 
         emitHostedExecutionStructuredLog({
           component: "hosted.runtime.artifact-store",

@@ -252,6 +252,20 @@ discard a valid uploaded
 snapshot or create a second metadata-only shutdown snapshot. Assistant
 admission, assistant automation, outbox intent creation, and reply delivery
 remain independent of device-sync and other maintenance completion.
+Once terminal reply delivery is durable, the foreground lane releases ownership;
+it does not wait for provider cleanup or another exact automation inventory
+scan. A conversation import that lands while foreground-owned maintenance is
+in flight aborts that work through the runner-scoped background-maintenance
+signal so the new message can enter assistant admission immediately.
+
+Foreground wake projection is read-only unless the foreground turn itself
+committed a canonical write under `bank/automations`. That write arms an
+immediate assistant maintenance wake, where exact cron reconciliation remains
+owned. Ordinary post-delivery work does not rescan exact cron status. Pending
+assistant-input probes also inspect only the existing index: a candidate in a
+complete index keeps its immediate wake, while a missing or incomplete index
+gets a bounded 30-second maintenance wake. Compaction and legacy backfill stay
+in the maintenance lane rather than extending reply ownership.
 If an `inbox_media_retention` invocation is the active write-fenced child when
 foreground/default work arrives, the runner preempts that exact child through
 the existing container abort seam, clears the old fence by identity, and starts
@@ -416,6 +430,13 @@ lock. Emission is queued off the reply path and may retry only the bounded
 staging/trace-row race; it carries no message, prompt, response, reasoning, or
 provider payload. Post-generation delivery guards must never create or
 overwrite the local Codex start milestone.
+
+Runner-to-Worker legacy artifact reads carry one fixed-vocabulary purpose and
+one UUID correlation id per logical fetch; retries retain that same id. Both
+sides log only validated purpose/correlation metadata, timing, status, and
+ordinal fields, never artifact refs or bytes. The allowed purposes distinguish
+workspace restore, canonical-write receipts, legacy snapshot materialization,
+and workspace artifact materialization.
 
 Repeated dirty hints while the same connection is already dirty do not append or signal
 another device-sync wake; dirty coalescing remains the work-queue invariant,

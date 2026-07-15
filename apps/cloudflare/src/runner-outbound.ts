@@ -63,6 +63,9 @@ import { asWorkerStringEnvironment } from "./worker-contracts.ts";
 import { CLOUDFLARE_HOSTED_RUNTIME_HOSTS } from "./internal-hosts.ts";
 import { json, jsonError, methodNotAllowed, notFound, readJsonObject, unauthorized } from "./json.ts";
 import {
+  readHostedRuntimeArtifactFetchTelemetry,
+} from "./runner-outbound/headers.ts";
+import {
   requireRunnerRuntimeWriteFenceHeaders,
   requireRunnerRuntimeWriteFenceWrite,
   RunnerRuntimeWriteFenceError,
@@ -331,7 +334,16 @@ async function handleRunnerArtifactRequest(input: {
   const startedAt = Date.now();
   const method = readHostedRunnerDiagnosticMethod(input.request.method);
   const operation = input.request.method === "PUT" ? "artifact_upload" : "artifact_fetch";
+  const fetchTelemetry = input.request.method === "GET"
+    ? readHostedRuntimeArtifactFetchTelemetry(input.request.headers)
+    : null;
   const logDetails = {
+    ...(fetchTelemetry
+      ? {
+          artifactFetchCorrelationId: fetchTelemetry.correlationId,
+          artifactReadPurpose: fetchTelemetry.purpose,
+        }
+      : {}),
     method,
     operation,
     userIdPresent: input.userId.length > 0,
