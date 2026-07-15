@@ -533,6 +533,26 @@ describe("hosted web production migration guard", () => {
     assert.match(sql, /DROP FUNCTION IF EXISTS clear_orphaned_hosted_linq_home_participant\(\)/u);
   });
 
+  test("repeats the Linq invite orphan scrub in the post-drain contract lane", async () => {
+    const migrationId =
+      "20260715150000_delete_orphaned_linq_invite_deliveries_after_drain";
+    const migrations = await listHostedWebContractMigrations();
+    const migration = migrations.find(({ id }) => id === migrationId);
+    const predeploySql = await readFile(
+      path.join(
+        appRoot,
+        "prisma",
+        "migrations",
+        "20260715120000_delete_orphaned_linq_invite_deliveries",
+        "migration.sql",
+      ),
+      "utf8",
+    );
+
+    assert.ok(migration, `Expected contract migration ${migrationId}`);
+    assert.equal(migration.sql, predeploySql);
+  });
+
   test("applies hosted web contract migrations idempotently and rejects checksum drift", async () => {
     const database = new FakeContractMigrationDatabase();
     const migration: HostedWebContractMigration = {
