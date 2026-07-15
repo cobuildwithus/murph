@@ -174,6 +174,7 @@ function resolveHostedLinqAlertKind(event: ParsedHostedLinqProviderEvent): strin
     case "phone_number.status_updated":
       return "phone_number_status_updated";
     case "message.delivered":
+    case "message.sent":
     case "message.received":
     case "participant.added":
     case "participant.removed":
