@@ -12,33 +12,17 @@ import {
   resolveMurphVitestMaxWorkers,
 } from "./vitest-parallelism.js";
 import { murphVitestNoTimeouts } from "./vitest-timeouts.js";
-import {
-  createVitestAliasesFromTsconfigPaths,
-  createVitestWorkspaceRuntimeAliases,
-  type WorkspaceSourceEntryRelativePaths,
-  resolveWorkspaceSourceEntries,
-} from "./workspace-source-resolution.js";
-
-type MurphVitestAlias = {
-  find: RegExp;
-  replacement: string;
-};
+import { createVitestAliasesFromTsconfigPaths } from "./workspace-source-resolution.js";
 
 type MurphVitestTestOptions = Omit<
   TestUserConfig,
   "name" | "environment" | "include" | "coverage"
 >;
 
-type MurphVitestExtraAliases =
-  | readonly MurphVitestAlias[]
-  | ((input: { packageDir: string }) => readonly MurphVitestAlias[]);
-
 export interface MurphPackageVitestConfigInput {
   configUrl: string;
   name: string;
   rootRelativePath?: string;
-  workspaceSourceEntryRelativePaths?: WorkspaceSourceEntryRelativePaths;
-  extraAliases?: MurphVitestExtraAliases;
   coverage?: ReturnType<typeof createMurphVitestCoverage>;
   coverageInclude?: readonly string[];
   coverageExclude?: readonly string[];
@@ -50,18 +34,10 @@ export interface MurphPackageVitestConfigInput {
 
 export function createMurphPackageVitestConfig(input: MurphPackageVitestConfigInput) {
   const packageDir = path.dirname(fileURLToPath(input.configUrl));
-  const aliases = [
-    ...(input.workspaceSourceEntryRelativePaths
-      ? createVitestWorkspaceRuntimeAliases(
-          resolveWorkspaceSourceEntries(packageDir, input.workspaceSourceEntryRelativePaths),
-        )
-      : []),
-    ...resolveExtraAliases(packageDir, input.extraAliases),
-    ...createVitestAliasesFromTsconfigPaths({
-      workspaceDir: packageDir,
-      specifierFilter: isWorkspaceSourceSpecifier,
-    }),
-  ];
+  const aliases = createVitestAliasesFromTsconfigPaths({
+    workspaceDir: packageDir,
+    specifierFilter: isWorkspaceSourceSpecifier,
+  });
 
   return defineConfig({
     ...(input.rootRelativePath
@@ -89,15 +65,4 @@ export function createMurphPackageVitestConfig(input: MurphPackageVitestConfigIn
 
 function isWorkspaceSourceSpecifier(specifier: string): boolean {
   return specifier === "murph" || specifier.startsWith("@murphai/");
-}
-
-function resolveExtraAliases(
-  packageDir: string,
-  extraAliases: MurphVitestExtraAliases | undefined,
-): MurphVitestAlias[] {
-  if (!extraAliases) {
-    return [];
-  }
-
-  return [...(typeof extraAliases === "function" ? extraAliases({ packageDir }) : extraAliases)];
 }

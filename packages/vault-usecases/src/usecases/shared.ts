@@ -6,7 +6,10 @@ import {
   BLOOD_TEST_CATEGORY,
   BLOOD_TEST_SPECIMEN_TYPES,
   VAULT_LAYOUT,
+  describeLookupIdConstraint,
   healthEntityDefinitions,
+  inferLookupIdEntityKind,
+  isQueryableLookupId,
   jsonObjectSchema,
   safeParseContract,
   type RawImportManifest,
@@ -21,11 +24,6 @@ import {
 import { loadJsonInputObject } from "../json-input.js"
 import { loadRuntimeModule } from "../runtime-import.js"
 import { createRuntimeUnavailableError } from "../runtime-errors.js"
-import {
-  describeQueryLookupConstraint,
-  inferQueryIdEntityKind,
-  isQueryableQueryLookupId,
-} from "../query-id-families.js"
 import {
   applyRecordPatch,
   type JsonObject as RecordMutationJsonObject,
@@ -130,11 +128,11 @@ export function inferEntityKind(id: string) {
     return "provider"
   }
 
-  return inferQueryIdEntityKind(id)
+  return inferLookupIdEntityKind(id)
 }
 
 export function isQueryableRecordId(id: string) {
-  return isHealthQueryableRecordId(id) || isQueryableQueryLookupId(id)
+  return isHealthQueryableRecordId(id) || isQueryableLookupId(id)
 }
 
 export function describeLookupConstraint(id: string) {
@@ -142,7 +140,7 @@ export function describeLookupConstraint(id: string) {
     return null
   }
 
-  return describeQueryLookupConstraint(id)
+  return describeLookupIdConstraint(id)
 }
 
 function isProviderLookupId(id: string) {
