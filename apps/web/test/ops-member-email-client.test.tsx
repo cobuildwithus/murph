@@ -33,17 +33,8 @@ vi.mock("@/src/components/ui/button", () => ({
   },
 }));
 
-vi.mock("@/src/components/ui/field", () => ({
-  Field: ({ "data-invalid": dataInvalid, ...props }: ComponentProps<"div"> & {
-    "data-invalid"?: boolean;
-  }) => {
-    void dataInvalid;
-    return createElement("div", props);
-  },
-  FieldDescription: (props: ComponentProps<"p">) => createElement("p", props),
-  FieldError: (props: ComponentProps<"div">) => createElement("div", props),
-  FieldGroup: (props: ComponentProps<"div">) => createElement("div", props),
-  FieldLabel: (props: ComponentProps<"label">) => createElement("label", props),
+vi.mock("@/src/components/ui/label", () => ({
+  Label: (props: ComponentProps<"label">) => createElement("label", props),
 }));
 
 vi.mock("@/src/components/ui/input", () => ({

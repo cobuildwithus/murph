@@ -1129,9 +1129,9 @@ Current hosted billing assumptions:
   instead of adding another seven days.
 - `/ops/email` is the operator-only member email composer. It accepts up to 100
   explicit hosted member IDs plus one plain-text subject and body. Preview
-  resolves verified email first and falls back to the stored Stripe checkout
-  email, while returning member eligibility only and never returning an email
-  address.
+  accepts only the member's current verified email, while returning member
+  eligibility only and never returning an email address. A stored Stripe
+  checkout email is not recipient authority for this free-form message.
 - Send re-reads current member suspension and recipient state and requires the
   exact 24-hour signed Preview. Unknown members, account-deletion-suspended
   members, and members without a recipient stay skipped. Ready recipients are

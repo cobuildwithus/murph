@@ -10,14 +10,8 @@ import {
 } from "@/src/components/ui/alert";
 import { Badge } from "@/src/components/ui/badge";
 import { Button } from "@/src/components/ui/button";
-import {
-  Field,
-  FieldDescription,
-  FieldError,
-  FieldGroup,
-  FieldLabel,
-} from "@/src/components/ui/field";
 import { Input } from "@/src/components/ui/input";
+import { Label } from "@/src/components/ui/label";
 import { Textarea } from "@/src/components/ui/textarea";
 import type {
   HostedOpsMemberEmailPreviewProof,
@@ -162,8 +156,8 @@ export function MemberEmailClient() {
               Compose
             </h2>
             <p className="max-w-2xl text-sm leading-6 text-muted-foreground">
-              Verified email is used first, with the Stripe checkout email as
-              fallback. Recipient addresses stay server-side.
+              Only the member&apos;s verified email can receive this message.
+              Recipient addresses stay server-side.
             </p>
           </div>
 
@@ -174,11 +168,11 @@ export function MemberEmailClient() {
               void previewEmail();
             }}
           >
-            <FieldGroup>
-              <Field data-invalid={Boolean(memberIdsError)}>
-                <FieldLabel htmlFor="member-email-member-ids">
+            <div className="flex w-full flex-col gap-5">
+              <div className="flex w-full flex-col gap-2">
+                <Label className="w-fit leading-snug" htmlFor="member-email-member-ids">
                   Member IDs
-                </FieldLabel>
+                </Label>
                 <Textarea
                   aria-describedby="member-email-member-ids-description"
                   aria-errormessage={memberIdsError
@@ -197,22 +191,29 @@ export function MemberEmailClient() {
                   spellCheck={false}
                   value={memberIdsText}
                 />
-                <FieldDescription id="member-email-member-ids-description">
+                <p
+                  className="text-sm leading-normal text-muted-foreground"
+                  id="member-email-member-ids-description"
+                >
                   One per line, or separated by spaces or commas. Up to 100
                   unique members.
-                </FieldDescription>
+                </p>
                 {memberIdsError ? (
-                  <FieldError id="member-email-member-ids-error">
+                  <div
+                    className="text-sm text-destructive"
+                    id="member-email-member-ids-error"
+                    role="alert"
+                  >
                     {memberIdsError}
-                  </FieldError>
+                  </div>
                 ) : null}
-              </Field>
+              </div>
 
-              <Field
-                data-invalid={subject.length > MEMBER_EMAIL_MAX_SUBJECT_LENGTH}
-              >
+              <div className="flex w-full flex-col gap-2">
                 <div className="flex items-baseline justify-between gap-4">
-                  <FieldLabel htmlFor="member-email-subject">Subject</FieldLabel>
+                  <Label className="w-fit leading-snug" htmlFor="member-email-subject">
+                    Subject
+                  </Label>
                   <CharacterCount
                     current={subject.length}
                     id="member-email-subject-count"
@@ -236,15 +237,21 @@ export function MemberEmailClient() {
                   value={subject}
                 />
                 {subject.length > MEMBER_EMAIL_MAX_SUBJECT_LENGTH ? (
-                  <FieldError id="member-email-subject-error">
+                  <div
+                    className="text-sm text-destructive"
+                    id="member-email-subject-error"
+                    role="alert"
+                  >
                     Subject must be 200 characters or fewer.
-                  </FieldError>
+                  </div>
                 ) : null}
-              </Field>
+              </div>
 
-              <Field data-invalid={text.length > MEMBER_EMAIL_MAX_TEXT_LENGTH}>
+              <div className="flex w-full flex-col gap-2">
                 <div className="flex items-baseline justify-between gap-4">
-                  <FieldLabel htmlFor="member-email-text">Message</FieldLabel>
+                  <Label className="w-fit leading-snug" htmlFor="member-email-text">
+                    Message
+                  </Label>
                   <CharacterCount
                     current={text.length}
                     id="member-email-text-count"
@@ -267,16 +274,23 @@ export function MemberEmailClient() {
                   required
                   value={text}
                 />
-                <FieldDescription id="member-email-text-description">
+                <p
+                  className="text-sm leading-normal text-muted-foreground"
+                  id="member-email-text-description"
+                >
                   The message is sent exactly as plain text.
-                </FieldDescription>
+                </p>
                 {text.length > MEMBER_EMAIL_MAX_TEXT_LENGTH ? (
-                  <FieldError id="member-email-text-error">
+                  <div
+                    className="text-sm text-destructive"
+                    id="member-email-text-error"
+                    role="alert"
+                  >
                     Message must be 20,000 characters or fewer.
-                  </FieldError>
+                  </div>
                 ) : null}
-              </Field>
-            </FieldGroup>
+              </div>
+            </div>
 
             <div className="mt-6 flex items-center justify-between gap-4 border-t border-border/70 pt-5">
               <span className="text-xs text-muted-foreground">

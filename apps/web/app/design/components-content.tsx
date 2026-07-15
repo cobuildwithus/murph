@@ -28,13 +28,6 @@ import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/src/components/ui/ta
 import { Progress } from "@/src/components/ui/progress";
 import { Separator } from "@/src/components/ui/separator";
 import { Input } from "@/src/components/ui/input";
-import {
-  Field,
-  FieldDescription,
-  FieldError,
-  FieldGroup,
-  FieldLabel,
-} from "@/src/components/ui/field";
 import { Textarea } from "@/src/components/ui/textarea";
 import { InputOTP, InputOTPGroup, InputOTPSlot } from "@/src/components/ui/input-otp";
 import { Label } from "@/src/components/ui/label";
@@ -226,35 +219,37 @@ export function ComponentsContent() {
               <Label htmlFor="email-ds">Email</Label>
               <Input id="email-ds" type="email" placeholder="you@example.com" />
             </div>
-            <FieldGroup>
-              <Field>
-                <FieldLabel htmlFor="notes-ds">Notes</FieldLabel>
+            <div className="grid gap-5">
+              <div className="grid gap-2">
+                <Label htmlFor="notes-ds">Notes</Label>
                 <Textarea
                   id="notes-ds"
                   placeholder="Add a plain-text note"
                 />
-                <FieldDescription>
+                <p className="text-sm text-muted-foreground">
                   A multiline field with supporting help text.
-                </FieldDescription>
-              </Field>
-              <Field data-invalid="true">
-                <FieldLabel htmlFor="invalid-notes-ds">Invalid notes</FieldLabel>
+                </p>
+              </div>
+              <div className="grid gap-2">
+                <Label htmlFor="invalid-notes-ds">Invalid notes</Label>
                 <Textarea
                   aria-invalid="true"
                   defaultValue="This example needs attention."
                   id="invalid-notes-ds"
                 />
-                <FieldError>Review this value before continuing.</FieldError>
-              </Field>
-              <Field data-disabled="true">
-                <FieldLabel htmlFor="disabled-notes-ds">Disabled notes</FieldLabel>
+                <p className="text-sm text-destructive" role="alert">
+                  Review this value before continuing.
+                </p>
+              </div>
+              <div className="grid gap-2">
+                <Label htmlFor="disabled-notes-ds">Disabled notes</Label>
                 <Textarea
                   defaultValue="Locked value"
                   disabled
                   id="disabled-notes-ds"
                 />
-              </Field>
-            </FieldGroup>
+              </div>
+            </div>
             <div className="grid gap-2">
               <Label htmlFor="disabled-ds">Disabled</Label>
               <Input id="disabled-ds" placeholder="Can't edit this" disabled />

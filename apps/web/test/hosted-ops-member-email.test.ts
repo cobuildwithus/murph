@@ -151,12 +151,12 @@ describe("hosted ops member email", () => {
     });
 
     expect(first).toEqual({
-      message: "2 member emails were sent.",
+      message: "1 member email was sent.",
       outcome: "sent",
       previewProof: null,
       recipients: [
         { memberId: MEMBER_ONE, status: "sent" },
-        { memberId: MEMBER_TWO, status: "sent" },
+        { memberId: MEMBER_TWO, status: "no_email" },
         { memberId: MEMBER_THREE, status: "no_email" },
         { memberId: MEMBER_FOUR, status: "member_suspended" },
         { memberId: "hbm_missing", status: "member_not_found" },
@@ -164,8 +164,8 @@ describe("hosted ops member email", () => {
       summary: {
         readyCount: 0,
         requestedCount: 5,
-        sentCount: 2,
-        skippedCount: 3,
+        sentCount: 1,
+        skippedCount: 4,
       },
     });
     expect(mocks.sendHostedResendPlainTextEmailBatch).toHaveBeenCalledTimes(2);
@@ -174,7 +174,6 @@ describe("hosted ops member email", () => {
     expect(firstCall).toMatchObject({
       emails: [
         { subject: SUBJECT, text: TEXT, to: ["verified@example.com"] },
-        { subject: SUBJECT, text: TEXT, to: ["payer@example.com"] },
       ],
       idempotencyKey: expect.stringMatching(/^hosted-ops-member-email\//u),
     });
@@ -300,7 +299,9 @@ describe("hosted ops member email", () => {
   });
 
   it("returns no proof when every supplied member is skipped", async () => {
-    mocks.readHostedMemberEmailSnapshots.mockResolvedValue([]);
+    mocks.readHostedMemberEmailSnapshots.mockResolvedValue([
+      makeSnapshot(MEMBER_ONE, { stripeCheckoutEmail: "payer@example.com" }),
+    ]);
 
     await expect(previewHostedOpsMemberEmail({
       env: ENV,
@@ -311,8 +312,10 @@ describe("hosted ops member email", () => {
     })).resolves.toMatchObject({
       message: "No supplied member can receive this email.",
       previewProof: null,
+      recipients: [{ memberId: MEMBER_ONE, status: "no_email" }],
       summary: { readyCount: 0, skippedCount: 1 },
     });
+    expect(mocks.sendHostedResendPlainTextEmailBatch).not.toHaveBeenCalled();
   });
 
   it("fails closed when the existing Resend configuration is absent", async () => {

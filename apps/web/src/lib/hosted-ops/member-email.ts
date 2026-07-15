@@ -228,7 +228,6 @@ function inspectHostedOpsMemberEmailRecipient(input: {
   }
 
   const recipient = input.snapshot.emailAuthorization?.verifiedEmail?.address
-    ?? input.snapshot.emailAuthorization?.stripeCheckoutEmail?.address
     ?? null;
   if (!recipient) {
     return buildSkippedHostedOpsMemberEmailInspection(
