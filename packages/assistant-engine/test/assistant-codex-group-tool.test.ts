@@ -115,6 +115,12 @@ describe("murph.group dynamic tool", () => {
       .toContain('Lead with the exact words "Like this message"');
     expect(MURPH_GROUP_TOOL.inputSchema.properties.messageTemplate.description)
       .not.toContain("Lead with reacting to this message");
+    expect(MURPH_GROUP_TOOL.inputSchema.properties.messageTemplate.description)
+      .toContain("never joining or rejoining");
+    expect(MURPH_GROUP_TOOL.inputSchema.properties.messageTemplate.description)
+      .toContain("secondary customize path");
+    expect(MURPH_GROUP_TOOL.inputSchema.properties.projectionScopes.description)
+      .toContain("Existing membership and other grants remain unchanged");
     expect(MURPH_GROUP_TOOL.description).toContain('action="list_memberships"');
     expect(MURPH_GROUP_TOOL.description).toContain("permission only");
     expect(MURPH_GROUP_TOOL.description)
@@ -125,6 +131,12 @@ describe("murph.group dynamic tool", () => {
       .toContain("continue with create_join_link or post_join_offer");
     expect(MURPH_GROUP_TOOL.description)
       .toContain("instead of claiming that an external workspace-linking step is required");
+    expect(MURPH_GROUP_TOOL.description)
+      .toContain("When an existing group adds a permission, default to post_join_offer");
+    expect(MURPH_GROUP_TOOL.description)
+      .toContain("do not tell members to join again or make the link the primary action");
+    expect(MURPH_GROUP_TOOL.description)
+      .toContain("existing members keep their membership and other grants");
   });
 
   it("parses the chat-scoped actions without accepting a model-supplied thread target", () => {

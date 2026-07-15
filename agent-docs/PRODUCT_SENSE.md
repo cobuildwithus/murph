@@ -100,6 +100,10 @@ default destination for every goal or the definition of activation.
 - WHOOP relay setup stays factual and sequential: explain that WHOOP limits
   third-party data access, give WHOOP's documented Apple Health menu path, then
   hand off to the Murph iOS app. Never invent an undocumented WHOOP deep link.
+- In an existing group, a new sharing scope is an additive consent request, not
+  another join. Default to the route-bound server-owned like-to-consent offer;
+  liking adds only the disclosed snapshot, while the first-party page is the
+  customize path.
 
 ## First-Class Product Objects
 

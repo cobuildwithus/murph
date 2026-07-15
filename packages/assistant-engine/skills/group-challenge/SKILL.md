@@ -148,10 +148,14 @@ loses a reminder; it must never lose the challenge.
    argument is engagement, not friction. Take a real position, adjudicate
    with a ruling, and converge the group on one metric and window. Record
    the ruling on the page.
-2. **Collect consent.** Mint the join link with `murph.group`
-   `action="create_join_link"` and the challenge's share scopes; members pick
-   what they share on the join page. Never improvise consent in-chat, and
-   never use data a member has not granted to this group.
+2. **Collect consent.** Read the current group and use `murph.group`
+   `action="post_join_offer"` with the challenge's share scopes. Existing
+   members like the server-owned message to opt into that permission snapshot;
+   the included first-party link is only for someone who wants to customize
+   what they share. Do not tell the room to join again or make the link the
+   primary action. Use `action="create_join_link"` only when the group
+   explicitly asks for a standalone link. Never use data a member has not
+   granted to this group.
 3. **Ask for introductions and photos.** Each participant gives a one-line
    intro or a fun fact about themselves, plus a photo if they're willing.
    Record every intro verbatim on the page — they are seed material for

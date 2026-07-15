@@ -134,6 +134,14 @@ describe('assistant capability-offers prompt contract', () => {
     expect(section).toContain('normal `vault-cli automation` surface')
     expect(section).toContain('start with "Like this message" and say what it does')
     expect(section).not.toContain('lead with reacting to this message')
+    expect(section).toContain('when the current group is adding a sharing permission')
+    expect(section).toContain('permission opt-in, not joining or rejoining')
+    expect(section).toContain('secondary customize link')
+    expect(section).toContain('grants membership only when needed')
+    expect(section).toContain(
+      'Existing members keep their membership and other grants unchanged',
+    )
+    expect(section).not.toContain('to join by reacting')
   })
 
   it('delegates capability mechanics and stays compact', () => {
