@@ -388,7 +388,8 @@ delivery on the same route before the synthetic `Yes.` can reach reply
 generation. Synthetic reactions stay in one-input automation groups, so an
 adjacent ordinary reply cannot lend them trust or be suppressed with them.
 This keeps the path independent of Linq's short provider-message retention
-while recovering cross-session target context from existing truth.
+while rendering the exact same- or cross-session target from existing outbox
+truth.
 Unmatched targets are terminally silent, and synthetic reaction identities are
 excluded from message read receipts and provider-message cleanup. The reaction
 path adds no mailbox kind, state, or lifecycle. Existing group join-offer
