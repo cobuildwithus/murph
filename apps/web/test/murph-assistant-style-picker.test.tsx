@@ -222,8 +222,15 @@ test("MurphAssistantStylePicker shows each tone as a sample message rather than 
 
   try {
     const text = rendered.container.textContent ?? "";
-    assert.match(text, /you're up 3 lbs this week/u);
-    assert.match(text, /You are up 3 pounds this week/u);
+    assert.match(
+      text,
+      /Your sleep is down this week\. Want to work on sleep first\?/u,
+    );
+    assert.match(
+      text,
+      /sleep is way down this week\. wanna fix sleep first\?/u,
+    );
+    assert.doesNotMatch(text, /pounds|lbs|weight/iu);
     assert.equal(findRadioInput(rendered.container, "Formal")?.checked, true);
     assert.equal(findRadioInput(rendered.container, "Casual")?.checked, false);
     assert.match(
