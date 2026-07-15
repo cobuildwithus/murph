@@ -1711,14 +1711,14 @@ export async function runHostedWorkspaceRuntimeJobInProcess(
                     runtimeEnv: invocationRuntimeEnv,
                     beforeProviderAcceptedInputs: async ({ acceptedInputs }) => {
                       const assistantInputIds = acceptedInputs.every(
-                          (acceptedInput) => acceptedInput.source === "assistant-input",
-                        )
+                        (acceptedInput) => acceptedInput.source === "assistant-input",
+                      )
                         ? acceptedInputs.map((acceptedInput) => acceptedInput.id)
                         : [];
                       const assistantPersonalizationInputId =
                         await resolveHostedPersonalizationInputIdForAcceptedInputs({
                           assistantInputIds,
-                          vaultRoot,
+                          vaultRoot: restored.vaultRoot,
                         });
                       currentAssistantPersonalizationInputId =
                         assistantPersonalizationInputId;
