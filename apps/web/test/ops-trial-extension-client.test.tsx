@@ -215,7 +215,10 @@ describe("TrialExtensionClient", () => {
     fetchMock
       .mockResolvedValueOnce(jsonResponse(makeResult()))
       .mockResolvedValueOnce(jsonResponse({
-        error: { message: "Billing changed since Preview. Preview this member again." },
+        error: {
+          code: "HOSTED_OPS_PULSE_TRIAL_EXTENSION_PREVIEW_STALE",
+          message: "Billing changed since Preview. Preview this member again.",
+        },
       }, 409));
     const rendered = await renderClientComponent(createElement(TrialExtensionClient));
     cleanupRender = rendered.cleanup;
@@ -235,6 +238,84 @@ describe("TrialExtensionClient", () => {
       "Billing changed since Preview",
     );
     expect(rendered.container.textContent).not.toContain("Apply +7 days");
+  });
+
+  test("retries an ambiguous Apply with the byte-identical Preview proof", async () => {
+    fetchMock
+      .mockResolvedValueOnce(jsonResponse(makeResult()))
+      .mockRejectedValueOnce(new TypeError("connection lost"))
+      .mockResolvedValueOnce(jsonResponse(makeResult({
+        currentTrialEndsAt: "2026-07-21T16:00:00.000Z",
+        localBillingPhase: "trial",
+        localBillingStatus: "active",
+        message: "The seven-day extension was already in Stripe and local billing is reconciled.",
+        outcome: "reconciled",
+        previewProof: null,
+        providerStatus: "trialing",
+      })));
+    const rendered = await renderClientComponent(createElement(TrialExtensionClient));
+    cleanupRender = rendered.cleanup;
+    const input = rendered.container.querySelector("input");
+    if (!input) {
+      throw new Error("Member input was not rendered.");
+    }
+
+    await changeInput(rendered.window, input, MEMBER_ID);
+    await clickButton(rendered.window, getButton(rendered.container, "Preview"));
+    await clickButton(
+      rendered.window,
+      getButton(rendered.container, "Apply +7 days"),
+    );
+
+    expect(rendered.container.textContent).toContain(
+      "Retry Apply with the same Preview",
+    );
+    expect(rendered.container.textContent).toContain("Apply +7 days");
+
+    await clickButton(
+      rendered.window,
+      getButton(rendered.container, "Apply +7 days"),
+    );
+
+    expect(readRequestBodyText(2)).toBe(readRequestBodyText(1));
+    expect(rendered.container.textContent).toContain("Reconciled");
+  });
+
+  test("keeps an existing proof when a replacement Preview fails", async () => {
+    fetchMock
+      .mockResolvedValueOnce(jsonResponse(makeResult()))
+      .mockRejectedValueOnce(new TypeError("connection lost"))
+      .mockResolvedValueOnce(jsonResponse(makeResult({
+        currentTrialEndsAt: "2026-07-21T16:00:00.000Z",
+        localBillingPhase: "trial",
+        localBillingStatus: "active",
+        outcome: "extended",
+        previewProof: null,
+        providerStatus: "trialing",
+      })));
+    const rendered = await renderClientComponent(createElement(TrialExtensionClient));
+    cleanupRender = rendered.cleanup;
+    const input = rendered.container.querySelector("input");
+    if (!input) {
+      throw new Error("Member input was not rendered.");
+    }
+
+    await changeInput(rendered.window, input, MEMBER_ID);
+    await clickButton(rendered.window, getButton(rendered.container, "Preview"));
+    await clickButton(rendered.window, getButton(rendered.container, "Preview"));
+
+    expect(rendered.container.textContent).toContain("Apply +7 days");
+
+    await clickButton(
+      rendered.window,
+      getButton(rendered.container, "Apply +7 days"),
+    );
+
+    expect(readRequestBody(2)).toEqual({
+      memberId: MEMBER_ID,
+      mode: "apply",
+      previewProof: makeResult().previewProof,
+    });
   });
 });
 
@@ -270,11 +351,15 @@ function jsonResponse(body: unknown, status = 200): Response {
 }
 
 function readRequestBody(index: number): unknown {
+  return JSON.parse(readRequestBodyText(index)) as unknown;
+}
+
+function readRequestBodyText(index: number): string {
   const init = fetchMock.mock.calls[index]?.[1];
   if (!init || typeof init.body !== "string") {
     throw new Error("Expected a JSON request body.");
   }
-  return JSON.parse(init.body) as unknown;
+  return init.body;
 }
 
 function getButton(container: HTMLElement, label: string): HTMLButtonElement {

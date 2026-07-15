@@ -93,6 +93,7 @@ beforeEach(() => {
     invite: {
       acceptUrl: "https://app.murph.test/family/accept/NEWCODE",
       id: "inv_new",
+      planCode: "pulse",
       targetLabel: "Mom",
       targetPhoneHint: "+48 6** *** ***",
       telegramInviteUrl: "https://t.me/withmurph_bot?start=family_NEWCODE",
@@ -261,6 +262,7 @@ test("HostedFamilyManager copies a Telegram deep link for pending Telegram invit
           channel: "family",
           expiresAtIso: "2026-07-30T00:00:00.000Z",
           id: "inv_telegram",
+          planCode: "pulse",
           targetEmail: null,
           targetLabel: "Dad",
           targetPhoneHint: null,
@@ -284,6 +286,217 @@ test("HostedFamilyManager copies a Telegram deep link for pending Telegram invit
   }
 });
 
+test("HostedFamilyManager adds exact Edge capacity without changing Pulse", async () => {
+  const { HostedFamilyManager } = await import(
+    "@/src/components/settings/hosted-family-settings-actions"
+  );
+  const { cleanup, container, window } = await renderClientComponent(
+    createElement(HostedFamilyManager, baseFamilyManagerProps()),
+    { requireButton: false },
+  );
+  mocks.requestHostedOnboardingJson.mockResolvedValueOnce({ syncing: false });
+
+  try {
+    const addEdge = container.querySelector<HTMLButtonElement>(
+      'button[aria-label="Add Edge seat at $19/mo"]',
+    );
+    assert.ok(addEdge);
+    await act(async () => {
+      addEdge.dispatchEvent(new window.Event("click", { bubbles: true }));
+    });
+
+    assert.match(
+      container.textContent ?? "",
+      /Add one Edge seat at \$19\/mo\? Stripe updates immediately and may invoice the prorated amount now\./,
+    );
+    expect(mocks.requestHostedOnboardingJson).not.toHaveBeenCalled();
+    await clickButton(container, window, "Add paid seat");
+
+    expect(mocks.requestHostedOnboardingJson).toHaveBeenCalledWith({
+      method: "PATCH",
+      payload: { capacities: { edge: 1, pulse: 2 } },
+      url: "/api/settings/billing/family/capacity",
+    });
+    expect(mocks.refresh).toHaveBeenCalledTimes(1);
+    assert.match(container.textContent ?? "", /Edge capacity added\./);
+  } finally {
+    await cleanup();
+  }
+});
+
+test("HostedFamilyManager reports a capacity change still syncing with Stripe", async () => {
+  const { HostedFamilyManager } = await import(
+    "@/src/components/settings/hosted-family-settings-actions"
+  );
+  const { cleanup, container, window } = await renderClientComponent(
+    createElement(HostedFamilyManager, baseFamilyManagerProps()),
+    { requireButton: false },
+  );
+  mocks.requestHostedOnboardingJson.mockResolvedValueOnce({ syncing: true });
+
+  try {
+    const addEdge = container.querySelector<HTMLButtonElement>(
+      'button[aria-label="Add Edge seat at $19/mo"]',
+    );
+    assert.ok(addEdge);
+    await act(async () => {
+      addEdge.dispatchEvent(new window.Event("click", { bubbles: true }));
+    });
+    await clickButton(container, window, "Add paid seat");
+
+    assert.match(
+      container.textContent ?? "",
+      /Edge capacity change submitted\. Stripe is still syncing; refresh in a moment\./,
+    );
+    assert.doesNotMatch(container.textContent ?? "", /Edge capacity added\./);
+  } finally {
+    await cleanup();
+  }
+});
+
+test("HostedFamilyManager adds the selected Edge seat while creating an invite", async () => {
+  const { HostedFamilyManager } = await import(
+    "@/src/components/settings/hosted-family-settings-actions"
+  );
+  const { cleanup, container, window } = await renderClientComponent(
+    createElement(HostedFamilyManager, baseFamilyManagerProps()),
+    { requireButton: false },
+  );
+
+  try {
+    await clickButton(container, window, "Invite member");
+    await clickButton(container, window, "Edge · $19/mo");
+    await act(async () => {
+      setInputValue(window, inputById(container, "family-invite-phone"), "+48600000000");
+    });
+    await clickButton(container, window, "Create invite & add Edge · $19/mo");
+
+    expect(mocks.requestHostedOnboardingJson).toHaveBeenCalledWith(
+      expect.objectContaining({
+        payload: expect.objectContaining({
+          addSeatIfNeeded: true,
+          planCode: "edge",
+          targetPhoneNumber: "+48600000000",
+        }),
+        url: "/api/settings/billing/family/invite",
+      }),
+    );
+  } finally {
+    await cleanup();
+  }
+});
+
+test("HostedFamilyManager requires an open seat in the selected tier at maximum capacity", async () => {
+  const { HostedFamilyManager } = await import(
+    "@/src/components/settings/hosted-family-settings-actions"
+  );
+  const { cleanup, container, window } = await renderClientComponent(
+    createElement(HostedFamilyManager, {
+      ...baseFamilyManagerProps(),
+      plans: {
+        edge: { active: 0, billed: 1, invited: 0, remaining: 1, used: 0 },
+        pulse: { active: 1, billed: 5, invited: 4, remaining: 0, used: 5 },
+      },
+      seats: {
+        active: 1,
+        billed: 6,
+        invited: 4,
+        max: 6,
+        min: 2,
+        remaining: 1,
+        used: 5,
+      },
+    }),
+    { requireButton: false },
+  );
+
+  try {
+    await clickButton(container, window, "Invite member");
+    assert.match(
+      container.textContent ?? "",
+      /No open Pulse seats\. Choose a tier with an open seat or free one first\./,
+    );
+    assert.equal(buttonByText(container, "Create invite").disabled, true);
+
+    await clickButton(container, window, "Edge · $19/mo");
+    assert.doesNotMatch(container.textContent ?? "", /No open Edge seats\./);
+    assert.equal(buttonByText(container, "Create invite").disabled, false);
+  } finally {
+    await cleanup();
+  }
+});
+
+test("HostedFamilyManager confirms a member move to Edge", async () => {
+  const { HostedFamilyManager } = await import(
+    "@/src/components/settings/hosted-family-settings-actions"
+  );
+  const { cleanup, container, window } = await renderClientComponent(
+    createElement(HostedFamilyManager, {
+      ...baseFamilyManagerProps(),
+      members: [
+        ...baseFamilyManagerProps().members,
+        {
+          isOwner: false,
+          joinedAtIso: "2026-07-02T00:00:00.000Z",
+          label: "Mom",
+          memberId: "member_mom",
+          planCode: "pulse" as const,
+        },
+      ],
+      plans: {
+        edge: { active: 0, billed: 1, invited: 0, remaining: 1, used: 0 },
+        pulse: { active: 2, billed: 2, invited: 0, remaining: 0, used: 2 },
+      },
+      seats: {
+        active: 2,
+        billed: 3,
+        invited: 0,
+        max: 6,
+        min: 2,
+        remaining: 1,
+        used: 2,
+      },
+    }),
+    { requireButton: false },
+  );
+
+  try {
+    await clickLastButton(container, window, "Move to Edge");
+    assert.match(container.textContent ?? "", /Change Mom from Pulse to Edge\?/);
+    await clickButton(container, window, "Change tier");
+
+    expect(mocks.requestHostedOnboardingJson).toHaveBeenCalledWith({
+      method: "PATCH",
+      payload: { planCode: "edge" },
+      url: "/api/settings/billing/family/members/member_mom",
+    });
+  } finally {
+    await cleanup();
+  }
+});
+
+test("HostedFamilyManager requires paid destination capacity before a member move", async () => {
+  const { HostedFamilyManager } = await import(
+    "@/src/components/settings/hosted-family-settings-actions"
+  );
+  const { cleanup, container, window } = await renderClientComponent(
+    createElement(HostedFamilyManager, baseFamilyManagerProps()),
+    { requireButton: false },
+  );
+
+  try {
+    await clickButton(container, window, "Move to Edge");
+    assert.match(
+      container.textContent ?? "",
+      /Add a paid Edge seat above, move yourself, then remove the empty Pulse seat if you no longer need it\./,
+    );
+    assert.equal(buttonByText(container, "Add Edge seat first").disabled, true);
+    expect(mocks.requestHostedOnboardingJson).not.toHaveBeenCalled();
+  } finally {
+    await cleanup();
+  }
+});
+
 test("HostedFamilyManager disables paid-seat submit for an invalid email", async () => {
   const { HostedFamilyManager } = await import(
     "@/src/components/settings/hosted-family-settings-actions"
@@ -300,6 +513,10 @@ test("HostedFamilyManager disables paid-seat submit for an invalid email", async
         remaining: 0,
         used: 2,
       },
+      plans: {
+        edge: { active: 0, billed: 0, invited: 0, remaining: 0, used: 0 },
+        pulse: { active: 1, billed: 2, invited: 1, remaining: 0, used: 2 },
+      },
     }),
     { requireButton: false },
   );
@@ -313,7 +530,7 @@ test("HostedFamilyManager disables paid-seat submit for an invalid email", async
 
     assert.match(
       container.textContent ?? "",
-      /Enter a valid email to invite\. It adds a paid seat at \$7\/mo\./,
+      /Enter a valid email to invite\. It adds a paid Pulse seat at \$7\/mo\./,
     );
     assert.equal(buttonByText(container, "Create invite").disabled, true);
     expect(mocks.requestHostedOnboardingJson).not.toHaveBeenCalled();
@@ -338,6 +555,10 @@ test("HostedFamilyManager requires a stable target before adding a paid seat", a
         remaining: 0,
         used: 2,
       },
+      plans: {
+        edge: { active: 0, billed: 0, invited: 0, remaining: 0, used: 0 },
+        pulse: { active: 1, billed: 2, invited: 1, remaining: 0, used: 2 },
+      },
     }),
     { requireButton: false },
   );
@@ -345,13 +566,13 @@ test("HostedFamilyManager requires a stable target before adding a paid seat", a
   try {
     assert.match(
       container.textContent ?? "",
-      /No open seats\. Inviting with a contact adds a paid seat at \$7\/mo\./,
+      /2 of 2 paid seats assigned/,
     );
 
     await clickButton(container, window, "Invite member");
     assert.match(
       container.textContent ?? "",
-      /Add a contact to invite\. It adds a paid seat at \$7\/mo\./,
+      /Add a contact to invite\. It adds a paid Pulse seat at \$7\/mo\./,
     );
 
     await act(async () => {
@@ -366,14 +587,17 @@ test("HostedFamilyManager requires a stable target before adding a paid seat", a
     });
     assert.match(
       container.textContent ?? "",
-      /Enter a valid phone number to invite\. It adds a paid seat at \$7\/mo\./,
+      /Enter a valid phone number to invite\. It adds a paid Pulse seat at \$7\/mo\./,
     );
     assert.equal(buttonByText(container, "Create invite").disabled, true);
 
     await act(async () => {
       setInputValue(window, inputById(container, "family-invite-phone"), "+48600000000");
     });
-    const contactBoundSubmit = buttonByText(container, "Create invite & add seat");
+    const contactBoundSubmit = buttonByText(
+      container,
+      "Create invite & add Pulse · $7/mo",
+    );
     assert.equal(contactBoundSubmit.disabled, false);
 
     await clickButton(container, window, "Email");
@@ -383,7 +607,7 @@ test("HostedFamilyManager requires a stable target before adding a paid seat", a
     assert.equal(inactivePhoneSubmit.disabled, true);
 
     await clickButton(container, window, "iMessage");
-    await clickButton(container, window, "Create invite & add seat");
+    await clickButton(container, window, "Create invite & add Pulse · $7/mo");
 
     expect(mocks.requestHostedOnboardingJson).toHaveBeenCalledWith(
       expect.objectContaining({
@@ -494,9 +718,13 @@ function baseFamilyManagerProps() {
         joinedAtIso: "2026-07-01T00:00:00.000Z",
         label: null,
         memberId: "member_owner",
+        planCode: "pulse" as const,
       },
     ],
-    seatPrice: "$7/mo",
+    plans: {
+      edge: { active: 0, billed: 0, invited: 0, remaining: 0, used: 0 },
+      pulse: { active: 1, billed: 2, invited: 0, remaining: 1, used: 1 },
+    },
     seats: {
       active: 1,
       billed: 2,
@@ -506,6 +734,10 @@ function baseFamilyManagerProps() {
       remaining: 1,
       used: 1,
     },
+    tiers: [
+      { name: "Pulse", planCode: "pulse" as const, priceLabel: "$7/mo" },
+      { name: "Edge", planCode: "edge" as const, priceLabel: "$19/mo" },
+    ],
   };
 }
 
@@ -515,6 +747,21 @@ async function clickButton(
   label: string,
 ) {
   const button = buttonByText(container, label);
+  await act(async () => {
+    button.dispatchEvent(new window.Event("click", { bubbles: true }));
+  });
+}
+
+async function clickLastButton(
+  container: HTMLElement,
+  window: Window & typeof globalThis,
+  label: string,
+) {
+  const buttons = [...container.querySelectorAll("button")].filter(
+    (candidate) => candidate.textContent?.includes(label),
+  );
+  const button = buttons.at(-1);
+  assert.ok(button, `Expected button containing "${label}"`);
   await act(async () => {
     button.dispatchEvent(new window.Event("click", { bubbles: true }));
   });

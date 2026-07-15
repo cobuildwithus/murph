@@ -20,6 +20,7 @@ import {
 } from "@murphai/runtime-state/node/assistant-runtime-issues";
 import {
   HOSTED_RUNTIME_DEVICE_SYNC_BRIDGE_KINDS,
+  HOSTED_PLAN_CODES,
   HOSTED_INGRESS_LATENCY_SOURCES,
   HOSTED_RUNTIME_ASSISTANT_MILESTONES,
   HOSTED_RUNTIME_SIDE_INPUT_UNAVAILABLE_CODES,
@@ -97,6 +98,7 @@ import {
   type HostedRuntimeFamilyPlanToolResponse,
   type HostedRuntimeFamilyPlanToolStartCheckoutResponse,
   type HostedRuntimeFamilyPlanToolStatusResponse,
+  type HostedPlanCode,
   type HostedRuntimeAssistantConfigurationSnapshot,
   type HostedRuntimeAssistantConfigurationControlRequest,
   type HostedRuntimeAssistantConfigurationToolRequest,
@@ -2442,7 +2444,13 @@ function parseHostedRuntimeFamilyPlanInviteRequest(
   const invite = requireObject(value, label);
   assertAllowedObjectKeys(
     invite,
-    new Set(["targetEmail", "targetLabel", "targetPhoneNumber", "targetTelegramUsername"]),
+    new Set([
+      "planCode",
+      "targetEmail",
+      "targetLabel",
+      "targetPhoneNumber",
+      "targetTelegramUsername",
+    ]),
     label,
   );
   const targetEmail = readOptionalNullableString(
@@ -2468,6 +2476,9 @@ function parseHostedRuntimeFamilyPlanInviteRequest(
   }
 
   return {
+    ...(invite.planCode === undefined
+      ? {}
+      : { planCode: parseHostedRuntimePlanCode(invite.planCode) }),
     ...(targetEmail === undefined ? {} : { targetEmail }),
     targetLabel,
     targetPhoneNumber,
@@ -2506,18 +2517,20 @@ export function parseHostedRuntimeFamilyPlanToolResponse(
     );
     assertAllowedObjectKeys(
       result,
-      new Set(["invite", "replyText", "seats"]),
+      new Set(["invite", "plans", "replyText", "seats"]),
       "Hosted runtime family plan tool create_invite response result",
     );
+    const seats = parseHostedRuntimeFamilyPlanSeatStatus(result.seats);
     return {
       action,
       result: {
         invite: parseHostedRuntimeFamilyPlanInvite(result.invite),
+        plans: parseHostedRuntimeFamilyPlanPlans(result.plans, seats),
         replyText: requireString(
           result.replyText,
           "Hosted runtime family plan invite replyText",
         ),
-        seats: parseHostedRuntimeFamilyPlanSeatStatus(result.seats),
+        seats,
       },
     };
   }
@@ -2725,11 +2738,13 @@ function parseHostedRuntimeFamilyPlanStatusResponse(
       "members",
       "owner",
       "pendingInvites",
+      "plans",
       "seats",
     ]),
     "Hosted runtime family plan status response",
   );
 
+  const seats = parseHostedRuntimeFamilyPlanSeatStatus(record.seats);
   return {
     billingActive: requireBoolean(
       record.billingActive,
@@ -2751,7 +2766,8 @@ function parseHostedRuntimeFamilyPlanStatusResponse(
       record.pendingInvites,
       "Hosted runtime family plan status pendingInvites",
     ).map(parseHostedRuntimeFamilyPlanInvite),
-    seats: parseHostedRuntimeFamilyPlanSeatStatus(record.seats),
+    plans: parseHostedRuntimeFamilyPlanPlans(record.plans, seats),
+    seats,
   };
 }
 
@@ -2772,6 +2788,7 @@ function parseHostedRuntimeFamilyPlanStartCheckoutResponse(
       "owner",
       "preparedInvite",
       "preparedInviteReplyText",
+      "plans",
       "seats",
       "unavailableReason",
     ]),
@@ -2787,6 +2804,7 @@ function parseHostedRuntimeFamilyPlanStartCheckoutResponse(
     );
   }
 
+  const seats = parseHostedRuntimeFamilyPlanSeatStatus(record.seats);
   return {
     alreadyActive: requireBoolean(
       record.alreadyActive,
@@ -2815,7 +2833,8 @@ function parseHostedRuntimeFamilyPlanStartCheckoutResponse(
       record.preparedInviteReplyText,
       "Hosted runtime family plan start_checkout preparedInviteReplyText",
     ),
-    seats: parseHostedRuntimeFamilyPlanSeatStatus(record.seats),
+    plans: parseHostedRuntimeFamilyPlanPlans(record.plans, seats),
+    seats,
     unavailableReason,
   };
 }
@@ -2842,11 +2861,65 @@ function parseHostedRuntimeFamilyPlanSeatStatus(value: unknown) {
   };
 }
 
+function parseHostedRuntimeFamilyPlanPlans(
+  value: unknown,
+  legacySeats: ReturnType<typeof parseHostedRuntimeFamilyPlanSeatStatus>,
+) {
+  if (value === undefined) {
+    return {
+      edge: { active: 0, billed: 0, invited: 0, remaining: 0, used: 0 },
+      pulse: {
+        active: legacySeats.active,
+        billed: legacySeats.billed,
+        invited: legacySeats.invited,
+        remaining: legacySeats.remaining,
+        used: legacySeats.used,
+      },
+    };
+  }
+  const record = requireObject(value, "Hosted runtime family plan plans");
+  return Object.fromEntries(HOSTED_PLAN_CODES.map((planCode) => {
+    const status = requireObject(
+      record[planCode],
+      `Hosted runtime family plan ${planCode} status`,
+    );
+    assertAllowedObjectKeys(
+      status,
+      new Set(["active", "billed", "invited", "remaining", "used"]),
+      `Hosted runtime family plan ${planCode} status`,
+    );
+    return [planCode, {
+      active: requireNumber(status.active, `Hosted runtime family plan ${planCode} active`),
+      billed: requireNumber(status.billed, `Hosted runtime family plan ${planCode} billed`),
+      invited: requireNumber(status.invited, `Hosted runtime family plan ${planCode} invited`),
+      remaining: requireNumber(
+        status.remaining,
+        `Hosted runtime family plan ${planCode} remaining`,
+      ),
+      used: requireNumber(status.used, `Hosted runtime family plan ${planCode} used`),
+    }];
+  })) as Record<HostedPlanCode, {
+    active: number;
+    billed: number;
+    invited: number;
+    remaining: number;
+    used: number;
+  }>;
+}
+
+function parseHostedRuntimePlanCode(value: unknown): HostedPlanCode {
+  const planCode = requireString(value, "Hosted runtime Family plan code");
+  if (HOSTED_PLAN_CODES.includes(planCode as HostedPlanCode)) {
+    return planCode as HostedPlanCode;
+  }
+  throw new TypeError("Hosted runtime Family plan code is not supported.");
+}
+
 function parseHostedRuntimeFamilyPlanMember(value: unknown) {
   const record = requireObject(value, "Hosted runtime family plan member");
   assertAllowedObjectKeys(
     record,
-    new Set(["isOwner", "label", "role", "status"]),
+    new Set(["isOwner", "label", "planCode", "role", "status"]),
     "Hosted runtime family plan member",
   );
 
@@ -2859,6 +2932,9 @@ function parseHostedRuntimeFamilyPlanMember(value: unknown) {
       record.label,
       "Hosted runtime family plan member label",
     ),
+    planCode: record.planCode === undefined
+      ? "pulse" as const
+      : parseHostedRuntimePlanCode(record.planCode),
     role: requireString(record.role, "Hosted runtime family plan member role"),
     status: requireString(record.status, "Hosted runtime family plan member status"),
   };
@@ -2871,6 +2947,7 @@ function parseHostedRuntimeFamilyPlanInvite(value: unknown) {
     new Set([
       "acceptUrl",
       "expiresAt",
+      "planCode",
       "status",
       "targetLabel",
       "targetPhoneHint",
@@ -2888,6 +2965,9 @@ function parseHostedRuntimeFamilyPlanInvite(value: unknown) {
       record.expiresAt,
       "Hosted runtime family plan invite expiresAt",
     ),
+    planCode: record.planCode === undefined
+      ? "pulse" as const
+      : parseHostedRuntimePlanCode(record.planCode),
     status: requireString(record.status, "Hosted runtime family plan invite status"),
     targetLabel: readNullableString(
       record.targetLabel,

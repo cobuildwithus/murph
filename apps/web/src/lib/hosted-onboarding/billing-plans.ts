@@ -1,3 +1,10 @@
+import {
+  HOSTED_PLAN_CODES,
+  type HostedPlanCode,
+} from "@murphai/hosted-execution/runtime-control";
+
+export { HOSTED_PLAN_CODES, type HostedPlanCode };
+
 export const HOSTED_BILLING_PLAN_CODES = [
   "launch_monthly",
   "launch_edge_monthly",
@@ -67,6 +74,7 @@ export interface HostedBillingPlanDefinition {
   readonly code: HostedBillingPlanCode;
   readonly displayName: string;
   readonly interval: HostedBillingPlanInterval;
+  readonly planCode: HostedPlanCode;
   readonly priceIdEnvKey: string;
   readonly recurringAmountUsdCents: number;
 }
@@ -87,6 +95,7 @@ const HOSTED_BILLING_PLAN_DEFINITIONS = {
     code: "launch_monthly",
     displayName: "Pulse",
     interval: "month",
+    planCode: "pulse",
     priceIdEnvKey: "HOSTED_ONBOARDING_STRIPE_PRICE_ID_LAUNCH_MONTHLY",
     recurringAmountUsdCents: 800,
   },
@@ -95,6 +104,7 @@ const HOSTED_BILLING_PLAN_DEFINITIONS = {
     code: "launch_edge_monthly",
     displayName: "Edge",
     interval: "month",
+    planCode: "edge",
     priceIdEnvKey: "HOSTED_ONBOARDING_STRIPE_PRICE_ID_LAUNCH_EDGE_MONTHLY",
     recurringAmountUsdCents: 2_000,
   },
@@ -105,18 +115,109 @@ export const HOSTED_AI_USAGE_MONTHLY_ALLOWANCE_USD_MICROS = {
   launch_monthly: 10_000_000n,
 } as const satisfies Record<HostedBillingPlanCode, bigint>;
 
+export interface HostedPlanDefinition {
+  readonly aiUsageMonthlyAllowanceUsdMicros: bigint;
+  readonly code: HostedPlanCode;
+  readonly displayName: string;
+}
+
+const HOSTED_PLAN_DEFINITIONS = {
+  pulse: {
+    aiUsageMonthlyAllowanceUsdMicros: 10_000_000n,
+    displayName: "Pulse",
+  },
+  edge: {
+    aiUsageMonthlyAllowanceUsdMicros: 25_000_000n,
+    displayName: "Edge",
+  },
+} as const satisfies Record<
+  HostedPlanCode,
+  Omit<HostedPlanDefinition, "code">
+>;
+
+export interface HostedFamilyBillingOfferDefinition {
+  readonly planCode: HostedPlanCode;
+  readonly priceIdEnvKey: string;
+  readonly recurringAmountUsdCents: number;
+}
+
+const HOSTED_FAMILY_BILLING_OFFERS = {
+  pulse: {
+    priceIdEnvKey: "HOSTED_ONBOARDING_STRIPE_PRICE_ID_LAUNCH_FAMILY_SEAT_MONTHLY",
+    recurringAmountUsdCents: 700,
+  },
+  edge: {
+    priceIdEnvKey: "HOSTED_ONBOARDING_STRIPE_PRICE_ID_LAUNCH_FAMILY_EDGE_SEAT_MONTHLY",
+    recurringAmountUsdCents: 1_900,
+  },
+} as const satisfies Record<
+  HostedPlanCode,
+  Omit<HostedFamilyBillingOfferDefinition, "planCode">
+>;
+
 export const HOSTED_FAMILY_MIN_SEATS = 2;
 export const HOSTED_FAMILY_MAX_SEATS = 6;
-export const HOSTED_FAMILY_SEAT_RECURRING_AMOUNT_USD_CENTS = 700;
-export const HOSTED_FAMILY_SPONSORED_USAGE_ALLOWANCE_USD_MICROS = 10_000_000n;
 
 export const HOSTED_FAMILY_PLAN_DISPLAY = {
   displayName: "Family",
   maxSeats: HOSTED_FAMILY_MAX_SEATS,
   minSeats: HOSTED_FAMILY_MIN_SEATS,
-  recurringAmountUsdCentsPerSeat: HOSTED_FAMILY_SEAT_RECURRING_AMOUNT_USD_CENTS,
-  sponsoredUsageAllowanceUsdMicros: HOSTED_FAMILY_SPONSORED_USAGE_ALLOWANCE_USD_MICROS,
+  recurringAmountUsdCentsPerSeat:
+    HOSTED_FAMILY_BILLING_OFFERS.pulse.recurringAmountUsdCents,
+  plans: HOSTED_PLAN_CODES.map((code) => ({
+    code,
+    displayName: HOSTED_PLAN_DEFINITIONS[code].displayName,
+    recurringAmountUsdCents:
+      HOSTED_FAMILY_BILLING_OFFERS[code].recurringAmountUsdCents,
+  })),
 } as const;
+
+export function getHostedPlanDefinition(code: HostedPlanCode): HostedPlanDefinition {
+  return {
+    ...HOSTED_PLAN_DEFINITIONS[code],
+    code,
+  };
+}
+
+export function getHostedFamilyBillingOfferDefinition(
+  code: HostedPlanCode,
+): HostedFamilyBillingOfferDefinition {
+  return {
+    ...HOSTED_FAMILY_BILLING_OFFERS[code],
+    planCode: code,
+  };
+}
+
+export function getHostedPlanCodeForBillingPlan(
+  code: HostedBillingPlanCode,
+): HostedPlanCode {
+  return HOSTED_BILLING_PLAN_DEFINITIONS[code].planCode;
+}
+
+export function getHostedBillingPlanCodeForPlan(
+  planCode: HostedPlanCode,
+): HostedBillingPlanCode {
+  const billingPlanCode = HOSTED_BILLING_PLAN_CODES.find(
+    (code) => HOSTED_BILLING_PLAN_DEFINITIONS[code].planCode === planCode,
+  );
+  if (!billingPlanCode) {
+    throw new TypeError(`No direct billing plan is configured for ${planCode}.`);
+  }
+  return billingPlanCode;
+}
+
+export function parseHostedPlanCode(value: unknown): HostedPlanCode | null {
+  return typeof value === "string" &&
+    HOSTED_PLAN_CODES.includes(value as HostedPlanCode)
+    ? value as HostedPlanCode
+    : null;
+}
+
+export function getHostedAiUsageMonthlyAllowanceForPlan(
+  code: HostedPlanCode,
+): bigint {
+  return HOSTED_PLAN_DEFINITIONS[code].aiUsageMonthlyAllowanceUsdMicros;
+}
 
 export function getHostedBillingPlanDefinition(
   code: HostedBillingPlanCode

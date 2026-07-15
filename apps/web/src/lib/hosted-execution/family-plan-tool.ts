@@ -61,6 +61,7 @@ export async function handleHostedRuntimeFamilyPlanTool(input: {
   return await getPrisma().$transaction(async (tx) => {
     const invite = await issueHostedFamilyInviteFromOwnerTx({
       ownerMemberId: input.memberId,
+      planCode: request.invite.planCode ?? "pulse",
       targetEmail: request.invite.targetEmail ?? null,
       targetLabel: request.invite.targetLabel ?? null,
       targetPhoneNumber: request.invite.targetPhoneNumber ?? null,
@@ -79,11 +80,13 @@ export async function handleHostedRuntimeFamilyPlanTool(input: {
         invite: projectHostedRuntimeFamilyPlanToolInvite(snapshotInvite ?? {
           acceptUrl: null,
           expiresAt: invite.invite.expiresAt,
+          planCode: invite.invite.planCode,
           status: invite.invite.status,
           targetLabel: invite.invite.targetLabel,
           targetPhoneHint: invite.invite.targetPhoneHint,
           telegramInviteUrl: null,
         }),
+        plans: snapshot?.plans ?? emptyHostedRuntimeFamilyPlanPlans(),
         replyText: invite.replyText,
         seats: snapshot?.seats ?? emptyHostedRuntimeFamilyPlanSeatStatus(),
       },
@@ -105,6 +108,7 @@ async function startHostedRuntimeFamilyPlanCheckout(
       const prepared = await prisma.$transaction(async (tx) => {
         return await issueHostedFamilyInviteFromOwnerTx({
           ownerMemberId: memberId,
+          planCode: inviteRequest.planCode ?? "pulse",
           targetEmail: inviteRequest.targetEmail ?? null,
           targetLabel: inviteRequest.targetLabel ?? null,
           targetPhoneNumber: inviteRequest.targetPhoneNumber ?? null,
@@ -128,6 +132,7 @@ async function startHostedRuntimeFamilyPlanCheckout(
           refreshedSnapshot,
         ),
         preparedInviteReplyText: prepared.replyText,
+        plans: refreshedSnapshot?.plans ?? ownerSnapshot.plans,
         seats: refreshedSnapshot?.seats ?? ownerSnapshot.seats,
         unavailableReason: null,
       };
@@ -141,6 +146,7 @@ async function startHostedRuntimeFamilyPlanCheckout(
       owner: true,
       preparedInvite: null,
       preparedInviteReplyText: null,
+      plans: ownerSnapshot.plans,
       seats: ownerSnapshot.seats,
       unavailableReason: null,
     };
@@ -158,6 +164,7 @@ async function startHostedRuntimeFamilyPlanCheckout(
       owner: false,
       preparedInvite: null,
       preparedInviteReplyText: null,
+      plans: emptyHostedRuntimeFamilyPlanPlans(),
       seats: emptyHostedRuntimeFamilyPlanSeatStatus(),
       unavailableReason: "already_sponsored",
     };
@@ -187,6 +194,7 @@ async function startHostedRuntimeFamilyPlanCheckout(
     owner: true,
     preparedInvite: null,
     preparedInviteReplyText: null,
+    plans: snapshot?.plans ?? emptyHostedRuntimeFamilyPlanPlans(),
     seats: snapshot?.seats ?? emptyHostedRuntimeFamilyPlanSeatStatus(),
     unavailableReason: null,
   };
@@ -205,6 +213,7 @@ async function readHostedRuntimeFamilyPlanToolStatus(
       members: [],
       owner: false,
       pendingInvites: [],
+      plans: emptyHostedRuntimeFamilyPlanPlans(),
       seats: emptyHostedRuntimeFamilyPlanSeatStatus(),
     };
   }
@@ -215,11 +224,13 @@ async function readHostedRuntimeFamilyPlanToolStatus(
     members: snapshot.members.map((member) => ({
       isOwner: member.isOwner,
       label: member.label,
+      planCode: member.planCode,
       role: member.role,
       status: member.status,
     })),
     owner: true,
     pendingInvites: snapshot.invites.map(projectHostedRuntimeFamilyPlanToolInvite),
+    plans: snapshot.plans,
     seats: snapshot.seats,
   };
 }
@@ -227,6 +238,7 @@ async function readHostedRuntimeFamilyPlanToolStatus(
 function projectHostedRuntimeFamilyPlanToolInvite(input: {
   acceptUrl: string | null;
   expiresAt: Date;
+  planCode: "edge" | "pulse";
   status: string;
   targetLabel: string | null;
   targetPhoneHint: string | null;
@@ -235,6 +247,7 @@ function projectHostedRuntimeFamilyPlanToolInvite(input: {
   return {
     acceptUrl: input.acceptUrl,
     expiresAt: input.expiresAt.toISOString(),
+    planCode: input.planCode,
     status: input.status,
     targetLabel: input.targetLabel,
     targetPhoneHint: input.targetPhoneHint,
@@ -248,6 +261,7 @@ function projectPreparedHostedRuntimeFamilyPlanToolInvite(
     acceptUrl: string | null;
     expiresAt: Date;
     id: string;
+    planCode: "edge" | "pulse";
     status: string;
     targetLabel: string | null;
     targetPhoneHint: string | null;
@@ -260,11 +274,25 @@ function projectPreparedHostedRuntimeFamilyPlanToolInvite(
   return projectHostedRuntimeFamilyPlanToolInvite(snapshotInvite ?? {
     acceptUrl: null,
     expiresAt: prepared.invite.expiresAt,
+    planCode: prepared.invite.planCode,
     status: prepared.invite.status,
     targetLabel: prepared.invite.targetLabel,
     targetPhoneHint: prepared.invite.targetPhoneHint,
     telegramInviteUrl: null,
   });
+}
+
+function emptyHostedRuntimeFamilyPlanPlans() {
+  return {
+    edge: { active: 0, billed: 0, invited: 0, remaining: 0, used: 0 },
+    pulse: {
+      active: 0,
+      billed: HOSTED_FAMILY_MIN_SEATS,
+      invited: 0,
+      remaining: HOSTED_FAMILY_MIN_SEATS,
+      used: 0,
+    },
+  };
 }
 
 function emptyHostedRuntimeFamilyPlanSeatStatus(): HostedRuntimeFamilyPlanToolSeatStatus {

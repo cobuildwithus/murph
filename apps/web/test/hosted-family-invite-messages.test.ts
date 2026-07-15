@@ -68,6 +68,7 @@ function phoneBoundPrisma() {
         expiresAt: FUTURE,
         group: GROUP,
         inviteCode: "CODEDAD",
+        planCode: "pulse",
         status: "pending",
         targetEmailLookupKey: null,
         targetLabel: "Dad",
@@ -78,6 +79,11 @@ function phoneBoundPrisma() {
     },
     hostedAccountGroupMembership: {
       count: vi.fn().mockResolvedValue(2),
+    },
+    hostedAccountGroupPlanCapacity: {
+      findMany: vi.fn().mockResolvedValue([
+        { billedQuantity: 4, planCode: "pulse" },
+      ]),
     },
     hostedAccountGroupBillingRef: {
       findUnique: vi.fn().mockResolvedValue({ billedSeatCount: 4 }),
