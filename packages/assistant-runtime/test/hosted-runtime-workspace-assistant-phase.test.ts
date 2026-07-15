@@ -8413,6 +8413,69 @@ describe("runHostedWorkspaceAssistantPhase runtime logs", () => {
     }));
   });
 
+  it.each([
+    {
+      deliveryNow: "2026-05-08T16:00:02.000Z",
+      initialNow: "2026-05-08T16:00:01.000Z",
+      label: "already due",
+    },
+    {
+      deliveryNow: "2026-05-08T16:00:01.000Z",
+      initialNow: "2026-05-08T15:59:59.000Z",
+      label: "crosses due time during delivery",
+    },
+  ])(
+    "preserves a deferred cron wake that is $label without another cron read",
+    async ({ deliveryNow, initialNow }) => {
+      const assistantWakeAt = "2026-05-08T16:00:00.000Z";
+      let now = initialNow;
+      mocks.runHostedAssistantAutomationLane.mockResolvedValueOnce({
+        assistantAutomationCronStatusDeferred: true,
+        assistantAutomationProgressed: true,
+        deviceSyncProcessed: 0,
+        deviceSyncSkipped: true,
+        nextWakeAt: null,
+        parserProcessed: 0,
+        postCheckpointRecord: null,
+        redactedLogEntries: [],
+      });
+      mocks.collectHostedAssistantDeliverySideEffects.mockResolvedValueOnce([
+        createDeliveryEffect(),
+      ]);
+      mocks.drainHostedPreparedAssistantDeliveries.mockImplementationOnce(async () => {
+        now = deliveryNow;
+        return [createSentDeliveryOutcome()];
+      });
+
+      const result = await runHostedWorkspaceAssistantPhase(createPhaseInput({
+        importedCount: 1,
+        now: () => now,
+        workspace: {
+          checkpointedAt: "2026-05-08T15:59:40.000Z",
+          createdAt: "2026-05-08T15:59:40.000Z",
+          nextWakeAt: assistantWakeAt,
+          nextWakeReason: "assistant",
+          redactedStatus: null,
+          snapshotRef: null,
+          updatedAt: "2026-05-08T15:59:40.000Z",
+          userId: "member_synthetic_phase",
+          version: "8",
+        },
+      }));
+
+      expect(mocks.getAssistantCronStatus).not.toHaveBeenCalled();
+      expect(result).toEqual(expect.objectContaining({
+        checkpointReason: "outbox_receipt",
+        nextWakeAt: assistantWakeAt,
+        progressed: true,
+        redactedStatus: expect.objectContaining({
+          hostedOutboxDeliverySent: 1,
+          nextWakeAt: assistantWakeAt,
+        }),
+      }));
+    },
+  );
+
   it.each(["assistant", null] as const)(
     "does not keep a synthetic legacy device-sync retry through clean fast dispatch for %s wakes",
     async (nextWakeReason) => {

@@ -14394,10 +14394,10 @@ describe("hosted workspace runtime entrypoint", () => {
       assert.equal(checkpointRequests.length, 2);
       assert.equal(checkpointRequests[0]?.reason, "idle_shutdown");
       assert.equal(checkpointRequests[1]?.reason, "idle_shutdown");
-      assert.equal(checkpointRequests[1]?.nextWakeReason, null);
-      assert.equal(assistantPhaseCalls, 2);
+      assert.equal(checkpointRequests[1]?.nextWakeReason, "assistant");
+      assert.ok(assistantPhaseCalls >= 3);
       assert.deepEqual(await readHostedPendingAssistantInputIds({ vaultRoot }), []);
-      assert.equal(result.status, "idle");
+      assert.equal(result.status, "scheduled");
     } finally {
       runtimeAbortController.abort();
       mocks.summarizeWearableSleepRuntime.mockClear();

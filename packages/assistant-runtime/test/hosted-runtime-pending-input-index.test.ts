@@ -516,7 +516,7 @@ describe("hosted pending assistant input index", () => {
     await expect(readHostedPendingAssistantInputIds({ vaultRoot })).resolves.toEqual([]);
   });
 
-  it("inspects terminal indexed input without mutating before maintenance compacts it", async () => {
+  it("keeps complete nonempty index inspection conservative before maintenance compacts it", async () => {
     const vaultRoot = await createTempVault();
     await saveAssistantAutomationState(vaultRoot, {
       autoReply: [{
@@ -553,7 +553,7 @@ describe("hosted pending assistant input index", () => {
     });
 
     await expect(inspectHostedPendingAssistantInputWakeCandidate({ vaultRoot }))
-      .resolves.toEqual({ hasCandidate: false, indexComplete: true });
+      .resolves.toEqual({ hasCandidate: true, indexComplete: true });
     await expect(readHostedPendingAssistantInputIds({ vaultRoot }))
       .resolves.toEqual([event.inputId]);
     await expect(resolveHostedPendingAssistantInputWakeAt({ vaultRoot }))

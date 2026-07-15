@@ -1124,7 +1124,9 @@ export async function runHostedWorkspaceAssistantPhase(
               new Date(resolveHostedAssistantPhaseNowMs(input)).toISOString(),
               HOSTED_ASSISTANT_WAKE_REASON,
             )
-          : null;
+          : assistantMetrics.assistantAutomationCronStatusDeferred === true
+            ? createExistingHostedAssistantWorkspaceWakeCandidate(input)
+            : null;
       writeHostedAssistantTurnTimingRuntimeLog({
         currentTurnDeliveryIntentCount: currentTurnDeliveryIntentIds.length,
         elapsedMs: elapsedSince(assistantPhaseStartedAt),

@@ -187,49 +187,9 @@ export async function inspectHostedPendingAssistantInputWakeCandidate(input: {
     filePath: resolveHostedPendingAssistantInputStatePath(input.vaultRoot),
   });
   return {
-    hasCandidate: await hasReplyableHostedPendingAssistantInputId({
-      inputIds: existing.state.inputIds,
-      vaultRoot: input.vaultRoot,
-    }),
+    hasCandidate: existing.state.inputIds.length > 0,
     indexComplete: !existing.missing && existing.state.backfilled,
   };
-}
-
-async function hasReplyableHostedPendingAssistantInputId(input: {
-  inputIds: readonly string[];
-  vaultRoot: string;
-}): Promise<boolean> {
-  if (input.inputIds.length === 0) {
-    return false;
-  }
-
-  const enabledAutoReplyChannels = new Set(
-    (await readAssistantAutomationState(input.vaultRoot)).autoReply
-      .map((entry) => entry.channel),
-  );
-  for (const inputId of input.inputIds) {
-    const event = await readAssistantInputEvent({
-      inputId,
-      vault: input.vaultRoot,
-    });
-    if (
-      !event
-      || !isHostedPendingAssistantInputStillReplyable({
-        enabledAutoReplyChannels,
-        event,
-      })
-    ) {
-      continue;
-    }
-    if (!(await hasCompleteAssistantAutoReplyTerminalEvidence({
-      captureId: event.projection.captureId,
-      inputId,
-      vault: input.vaultRoot,
-    }))) {
-      return true;
-    }
-  }
-  return false;
 }
 
 export async function enqueueHostedPendingAssistantInputId(input: {
