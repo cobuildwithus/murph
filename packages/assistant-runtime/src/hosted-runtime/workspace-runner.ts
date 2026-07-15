@@ -83,6 +83,7 @@ import {
   resolveHostedPendingAssistantInputWakeAt,
 } from "./pending-assistant-input.ts";
 import {
+  compactHostedPendingAssistantInputIds,
   resolveHostedPendingAssistantInputStatePath,
 } from "./pending-input-index.ts";
 import {
@@ -1024,6 +1025,7 @@ export async function runHostedWorkspaceUntilIdleOrBudget(
   let mailboxPostCheckpointEffectsFinished: Promise<void> | null = null;
   let postCheckpointWakeMerged = false;
   let assistantPhaseResult: HostedWorkspaceRunnerAssistantPhaseResult;
+  let latestAssistantInputBatch: HostedWorkspaceRunnerAssistantInputBatch | null = null;
   let runnerError: unknown = null;
   try {
     assistantPhaseResult = await withHostedCanonicalWritePort(
@@ -1116,6 +1118,16 @@ export async function runHostedWorkspaceUntilIdleOrBudget(
         });
       }
     }
+    latestAssistantInputBatch =
+      await rebuildHostedWorkspaceRunnerAssistantInputBatchAfterSelectedPrefixRepair({
+        acceptedInitialAssistantInputBatch,
+        assistantPhaseResult,
+        latestAssistantInputBatch:
+          checkpointRequestSession.latestAssistantInputBatch(),
+        selectedInitialAssistantInputIds,
+        signal: input.signal ?? null,
+        vaultRoot: input.vaultRoot,
+      });
     if (await reconcilePendingAssistantInputWake({
       foregroundConversationWorkObserved,
       now: input.now,
@@ -1164,8 +1176,7 @@ export async function runHostedWorkspaceUntilIdleOrBudget(
     initialMailboxImport,
     latestMailboxImport: checkpointRequestSession.latestMailboxImport()
       ?? initialMailboxImport,
-    latestAssistantInputBatch:
-      checkpointRequestSession.latestAssistantInputBatch(),
+    latestAssistantInputBatch,
     latestWorkspace: checkpointRequestSession.latestWorkspace()
       ?? initialMailboxImport.checkpoint?.workspace
       ?? input.workspace,
@@ -1774,6 +1785,79 @@ function filterHostedWorkspaceRunnerAssistantInputBatch(
       return !excludedInputIds.has(record.assistantInputId);
     }),
   );
+}
+
+async function rebuildHostedWorkspaceRunnerAssistantInputBatchAfterSelectedPrefixRepair(input: {
+  acceptedInitialAssistantInputBatch: HostedWorkspaceRunnerAssistantInputBatch | null;
+  assistantPhaseResult: HostedWorkspaceRunnerAssistantPhaseResult;
+  latestAssistantInputBatch: HostedWorkspaceRunnerAssistantInputBatch | null;
+  selectedInitialAssistantInputIds: readonly string[];
+  signal: AbortSignal | null;
+  vaultRoot: string;
+}): Promise<HostedWorkspaceRunnerAssistantInputBatch | null> {
+  if (
+    input.acceptedInitialAssistantInputBatch === null
+    || input.assistantPhaseResult.progressed !== true
+    || input.assistantPhaseResult.foregroundReplyFailed !== 0
+    || input.selectedInitialAssistantInputIds.length < 2
+    || new Set(input.selectedInitialAssistantInputIds).size
+      !== input.selectedInitialAssistantInputIds.length
+  ) {
+    return input.latestAssistantInputBatch;
+  }
+
+  const pendingInputIds = new Set(await compactHostedPendingAssistantInputIds({
+    ...(input.signal ? { signal: input.signal } : {}),
+    vaultRoot: input.vaultRoot,
+  }));
+  const pendingSelectedInputIds = input.selectedInitialAssistantInputIds.filter(
+    (inputId) => pendingInputIds.has(inputId),
+  );
+  if (
+    pendingSelectedInputIds.length === 0
+    || pendingSelectedInputIds.length === input.selectedInitialAssistantInputIds.length
+  ) {
+    return input.latestAssistantInputBatch;
+  }
+
+  const suffixStart =
+    input.selectedInitialAssistantInputIds.length - pendingSelectedInputIds.length;
+  if (pendingSelectedInputIds.some(
+    (inputId, index) =>
+      input.selectedInitialAssistantInputIds[suffixStart + index] !== inputId,
+  )) {
+    return input.latestAssistantInputBatch;
+  }
+
+  const acceptedRecordsByInputId = new Map<string, HostedMailboxAssistantInputRecord>();
+  for (const record of readHostedWorkspaceRunnerAssistantInputBatchRecords(
+    input.acceptedInitialAssistantInputBatch,
+  )) {
+    if (acceptedRecordsByInputId.has(record.assistantInputId)) {
+      return input.latestAssistantInputBatch;
+    }
+    acceptedRecordsByInputId.set(record.assistantInputId, record);
+  }
+  const repairedSuffixRecords: HostedMailboxAssistantInputRecord[] = [];
+  for (const inputId of pendingSelectedInputIds) {
+    const record = acceptedRecordsByInputId.get(inputId);
+    if (!record) {
+      return input.latestAssistantInputBatch;
+    }
+    repairedSuffixRecords.push(record);
+  }
+  const tailRecords = input.latestAssistantInputBatch
+    ? readHostedWorkspaceRunnerAssistantInputBatchRecords(input.latestAssistantInputBatch)
+    : [];
+  const repairedSuffixInputIds = new Set(pendingSelectedInputIds);
+  if (tailRecords.some((record) => repairedSuffixInputIds.has(record.assistantInputId))) {
+    return input.latestAssistantInputBatch;
+  }
+
+  return buildHostedWorkspaceRunnerAssistantInputBatch([
+    ...repairedSuffixRecords,
+    ...tailRecords,
+  ]);
 }
 
 function readHostedWorkspaceRunnerAssistantInputBatchRecords(
