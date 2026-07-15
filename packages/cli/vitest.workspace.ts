@@ -12,11 +12,7 @@ import {
   resolveMurphVitestMaxWorkers,
 } from "../../config/vitest-parallelism.js";
 import { murphVitestNoTimeouts } from "../../config/vitest-timeouts.js";
-import {
-  createVitestAliasesFromTsconfigPaths,
-  createVitestWorkspaceRuntimeAliases,
-  resolveWorkspaceSourceEntries,
-} from "../../config/workspace-source-resolution.js";
+import { createVitestAliasesFromTsconfigPaths } from "../../config/workspace-source-resolution.js";
 import {
   resolveVitestBucketFiles,
   type VitestBucketSeed,
@@ -32,33 +28,6 @@ const cliVitestCoverageThresholds = {
   branches: 55,
   statements: 80,
 } as const;
-const WORKSPACE_SOURCE_ENTRY_RELATIVE_PATHS = {
-  "@murphai/assistantd": "../assistantd/package.json",
-  "@murphai/assistant-cli": "../assistant-cli/package.json",
-  "@murphai/assistant-engine": "../assistant-engine/src/index.ts",
-  "@murphai/operator-config": "../operator-config/package.json",
-  "@murphai/setup-cli": "../setup-cli/package.json",
-  "@murphai/contracts": "../contracts/src/index.ts",
-  "@murphai/core": "../core/src/index.ts",
-  "@murphai/device-syncd": "../device-syncd/src/index.ts",
-  "@murphai/device-syncd/client": "../device-syncd/src/client.ts",
-  "@murphai/exercise-library": "../exercise-library/src/index.ts",
-  "@murphai/exercise-library/runtime": "../exercise-library/src/runtime.ts",
-  "@murphai/gateway-core": "../gateway-core/src/index.ts",
-  "@murphai/hosted-execution": "../hosted-execution/src/index.ts",
-  "@murphai/importers": "../importers/src/index.ts",
-  "@murphai/inbox-services": "../inbox-services/src/index.ts",
-  "@murphai/inboxd": "../inboxd/src/index.ts",
-  "@murphai/messaging-ingress": "../messaging-ingress/package.json",
-  "@murphai/parsers": "../parsers/src/index.ts",
-  "@murphai/query": "../query/src/index.ts",
-  "@murphai/runtime-state": "../runtime-state/src/index.ts",
-  "@murphai/vault-usecases": "../vault-usecases/src/index.ts",
-  murph: "./src/index.ts",
-} as const;
-const cliVitestRuntimeAliases = createVitestWorkspaceRuntimeAliases(
-  resolveWorkspaceSourceEntries(packageDir, WORKSPACE_SOURCE_ENTRY_RELATIVE_PATHS),
-);
 const cliVitestTsconfigAliases = createVitestAliasesFromTsconfigPaths({
   workspaceDir: packageDir,
   specifierFilter: (specifier) =>
@@ -95,7 +64,7 @@ export function createCliVitestProject(name: string, fileNames: readonly string[
 
   return defineConfig({
     resolve: {
-      alias: [...cliVitestRuntimeAliases, ...cliVitestTsconfigAliases],
+      alias: cliVitestTsconfigAliases,
     },
     test: {
       ...murphVitestNoTimeouts,
