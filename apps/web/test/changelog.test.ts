@@ -79,8 +79,8 @@ describe("changelog registry", () => {
   it("keeps the default archive window to seven calendar days", () => {
     const firstPage = resolveChangelogPage(1);
     expect(firstPage?.editions).toHaveLength(7);
-    expect(firstPage?.editions[0]?.publishedOn).toBe("2026-07-13");
-    expect(firstPage?.editions.at(-1)?.publishedOn).toBe("2026-07-07");
+    expect(firstPage?.editions[0]?.publishedOn).toBe("2026-07-15");
+    expect(firstPage?.editions.at(-1)?.publishedOn).toBe("2026-07-09");
   });
 
   it("resolves only known canonical edition cursors", () => {
