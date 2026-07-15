@@ -39,6 +39,7 @@ type MockAutomationRecord = {
 const cronMocks = vi.hoisted(() => ({
   applyAssistantSelfDeliveryTargetDefaults: vi.fn(),
   automationsByVault: new Map<string, MockAutomationRecord[]>(),
+  buildExperimentFinalResultsSeeds: vi.fn(),
   executeScheduledLogOccurrence: vi.fn(),
   getAssistantChannelAdapter: vi.fn(),
   listCanonicalScheduledLogs: vi.fn(),
@@ -50,6 +51,7 @@ const cronMocks = vi.hoisted(() => ({
   renderAutoLoggedFoodMealNote: vi.fn(),
   readAutomationByRelativePath: vi.fn(),
   resolveAssistantBindingDelivery: vi.fn(),
+  runExperimentLifecycleOutcomePrecondition: vi.fn(),
   sendAssistantMessageLocal: vi.fn(),
   setScheduledLogStatus: vi.fn(),
   scheduledLogsByVault: new Map<string, ScheduledLogQueryRecord[]>(),
@@ -63,6 +65,12 @@ vi.mock('@murphai/core', () => ({
   loadVault: cronMocks.loadVault,
   setScheduledLogStatus: cronMocks.setScheduledLogStatus,
   upsertAutomation: cronMocks.upsertAutomation,
+}))
+
+vi.mock('../src/assistant/experiment-support-automations.ts', () => ({
+  buildExperimentFinalResultsSeeds: cronMocks.buildExperimentFinalResultsSeeds,
+  runExperimentLifecycleOutcomePrecondition:
+    cronMocks.runExperimentLifecycleOutcomePrecondition,
 }))
 
 vi.mock('@murphai/query', async (importOriginal) => {
@@ -186,6 +194,10 @@ beforeEach(() => {
   cronMocks.automationsByVault.clear()
   cronMocks.scheduledLogsByVault.clear()
   cronMocks.nextAutomationId = 1
+  cronMocks.buildExperimentFinalResultsSeeds.mockReset().mockResolvedValue([])
+  cronMocks.runExperimentLifecycleOutcomePrecondition
+    .mockReset()
+    .mockResolvedValue({ kind: 'continue' })
 
   cronMocks.applyAssistantSelfDeliveryTargetDefaults.mockReset().mockImplementation(
     async (input: Record<string, boolean | string | null | undefined>) => ({
@@ -3998,6 +4010,89 @@ describe('assistant cron runtime orchestration', () => {
         }),
       ]),
     )
+  })
+
+  it('retries final-results lifecycle cleanup before stale one-shot expiry', async () => {
+    vi.useFakeTimers()
+    vi.setSystemTime(new Date('2026-04-08T10:59:50.000Z'))
+    const { vaultRoot } = await createRuntimeContext(
+      'assistant-cron-runtime-final-results-cleanup-retry-',
+    )
+    const canonicalJob = await addAssistantCronJob({
+      channel: 'telegram',
+      deliveryTarget: 'room-1',
+      name: 'final results cleanup retry',
+      now: new Date('2026-04-08T08:00:00.000Z'),
+      prompt: 'Share the final experiment results.',
+      schedule: {
+        kind: 'at',
+        at: '2026-04-08T10:00:00.000Z',
+      },
+      vault: vaultRoot,
+    })
+    const automation = getVaultAutomationStore(vaultRoot).find(
+      (record) => record.automationId === canonicalJob.jobId,
+    )
+    if (!automation) {
+      throw new Error('Expected the final-results automation fixture.')
+    }
+    automation.tags = [...automation.tags, 'experiment', 'final-results']
+    cronMocks.runExperimentLifecycleOutcomePrecondition
+      .mockRejectedValueOnce(new Error('archive failed'))
+      .mockResolvedValueOnce({ kind: 'continue' })
+
+    await expect(processDueAssistantCronJobsLocal({
+      limit: 1,
+      vault: vaultRoot,
+    })).resolves.toEqual({
+      failed: 1,
+      processed: 1,
+      succeeded: 0,
+    })
+    const failedStore = await readAssistantCronCanonicalRuntimeStore(
+      resolveAssistantStatePaths(vaultRoot),
+    )
+    const failedRecord = failedStore.jobs.find(
+      (record) => record.jobId === canonicalJob.jobId,
+    )
+    expect(failedRecord?.state.pendingOccurrenceAt).toBe(
+      '2026-04-08T10:00:00.000Z',
+    )
+    expect(failedRecord?.state.retryAfterAt).toBe(
+      '2026-04-08T11:00:20.000Z',
+    )
+    expect(cronMocks.sendAssistantMessageLocal).not.toHaveBeenCalled()
+
+    vi.setSystemTime(new Date('2026-04-08T11:00:20.000Z'))
+    await expect(processDueAssistantCronJobsLocal({
+      limit: 1,
+      vault: vaultRoot,
+    })).resolves.toEqual({
+      failed: 0,
+      processed: 1,
+      succeeded: 0,
+    })
+
+    expect(
+      cronMocks.runExperimentLifecycleOutcomePrecondition,
+    ).toHaveBeenCalledTimes(2)
+    expect(cronMocks.sendAssistantMessageLocal).not.toHaveBeenCalled()
+    await expect(listAssistantCronJobs(vaultRoot)).resolves.toEqual([])
+    await expect(listAssistantCronRuns({
+      job: canonicalJob.jobId,
+      vault: vaultRoot,
+    })).resolves.toMatchObject({
+      runs: expect.arrayContaining([
+        expect.objectContaining({
+          error: 'archive failed',
+          status: 'failed',
+        }),
+        expect.objectContaining({
+          outcome: 'expired',
+          status: 'skipped',
+        }),
+      ]),
+    })
   })
 
   it('surfaces the typed failure code in cron.job.completed events', async () => {
