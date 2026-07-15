@@ -120,11 +120,17 @@ a new requirement-level continuation decision; there is no automatic Round 6.
 - Control-plane invalid JSON and body-read failure are marked response-
   unavailable. Latest `main` removed the retired channel, and the merge keeps it
   deleted.
-- Latest `main` at `fd2929469a57529307ab5638adf48091fd92199d` is merged at
-  `b84600890a29dd6edf3e025a13fea2d70b58e6ef`. The prompt-upgrade commit, first
-  reviewed head, and previous reviewed head remain ancestors. A semantic audit
-  found the latest Junction historical-coverage work disjoint from this PR's
-  wake, provider-entry, outbox, and Linq owners.
+- Latest `main` at `7bcc26b46087b7d5be06ee27dea6ef042ae2cbd2` is merged at
+  `ea3df60b22e5b335da506d12c63b605af93b2f14`. The prompt-upgrade commit, first
+  reviewed head, and previous reviewed head remain ancestors. Semantic audits
+  found the Junction historical-coverage and member-trial changes disjoint from
+  this PR. The later fresh-input and group-turn ordering changes overlapped only
+  the workspace assistant phase and its test; the exact merged phase plus
+  mailbox-import tests pass 294/294. The final semantic audit confirmed that
+  imported-count tracking yields only background work, reply admission remains
+  ID-only, foreign group input remains pending for its next causal turn, and the
+  accepted foreground reply still passes through the exact provider-entry
+  permit.
 - Shared-host `pnpm verify:acceptance` at `6c35a39fcce51f37b0ee2e126336aa484cfc2597`
   passed every pre-coverage gate, including dependency policy, workspace
   boundaries, hosted guards, runtime-artifact preparation, TypeScript 7
@@ -143,5 +149,12 @@ a new requirement-level continuation decision; there is no automatic Round 6.
   and assembled within budget: entry 937,577 B, static boot closure 6,888,343 B,
   and total 8,861,630 B. The requested fresh-artifact assemble-only rerun also
   passed with the same bundle sizes.
-- Scoped `git diff --check` is green. Final parent review, privacy/prohibited-
-  cast/generated scans, exact-head CI, and ReviewGPT Round 5 remain required.
+- Final parent review, simplicity review, and security/privacy review passed
+  with no actionable findings. The apparent Linq release no-row concern was
+  rejected: a timed-out claim request can still commit after a release probe,
+  so absence is not authoritative and automatic retry would risk duplicate
+  non-idempotent egress. The existing terminal ambiguity is the correct
+  fail-closed behavior.
+- Scoped `git diff --check`, privacy/identifier, prohibited-cast, secret-literal,
+  binary, generated/sensitive-path, and retired-channel added-line scans are
+  green. Exact-head CI and ReviewGPT Round 5 remain required.
