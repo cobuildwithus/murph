@@ -196,7 +196,8 @@ export function createCloudflareArtifactStore(input: {
 
   let artifactFetchOrdinal = 0;
   return {
-    async get(sha256) {
+    async get(sha256, context) {
+      assertHostedArtifactFetchLive(context?.signal);
       const ordinal = ++artifactFetchOrdinal;
       const startedAt = Date.now();
       const logDetails = {
@@ -221,6 +222,7 @@ export function createCloudflareArtifactStore(input: {
         attempt <= HOSTED_REPLAY_SAFE_READ_RETRY_ATTEMPTS;
         attempt += 1
       ) {
+        assertHostedArtifactFetchLive(context?.signal);
         const attemptLogDetails = {
           ...logDetails,
           artifactFetchAttempt: attempt,
@@ -232,10 +234,12 @@ export function createCloudflareArtifactStore(input: {
             description: "Hosted artifact fetch",
             fetchImpl,
             redactedLogPath: "/objects/REDACTED",
+            signal: context?.signal ?? null,
             timeoutMs,
             url: new URL(`/objects/${sha256}`, `${CLOUDFLARE_HOSTED_RUNTIME_BASE_URLS.artifactStore}/`),
           });
         } catch (error) {
+          assertHostedArtifactFetchLive(context?.signal);
           const retrying = shouldRetryHostedRuntimeReplaySafeRead({
             attempt,
             error,
@@ -257,10 +261,12 @@ export function createCloudflareArtifactStore(input: {
           });
           if (retrying) {
             await sleepHostedReplaySafeReadRetryDelay();
+            assertHostedArtifactFetchLive(context?.signal);
             continue;
           }
           throw error;
         }
+        assertHostedArtifactFetchLive(context?.signal);
 
         emitHostedExecutionStructuredLog({
           component: "hosted.runtime.artifact-store",
@@ -300,6 +306,7 @@ export function createCloudflareArtifactStore(input: {
         try {
           body = await response.arrayBuffer();
         } catch (error) {
+          assertHostedArtifactFetchLive(context?.signal);
           const wrappedError = new HostedRuntimeControlPlaneFetchError({
             cause: error,
             description: "Hosted artifact fetch response body read",
@@ -333,10 +340,12 @@ export function createCloudflareArtifactStore(input: {
           });
           if (retrying) {
             await sleepHostedReplaySafeReadRetryDelay();
+            assertHostedArtifactFetchLive(context?.signal);
             continue;
           }
           throw wrappedError;
         }
+        assertHostedArtifactFetchLive(context?.signal);
 
         emitHostedExecutionStructuredLog({
           component: "hosted.runtime.artifact-store",
@@ -360,4 +369,15 @@ export function createCloudflareArtifactStore(input: {
       await putArtifactOnce({ bytes, sha256 });
     },
   };
+}
+
+function assertHostedArtifactFetchLive(
+  signal: AbortSignal | null | undefined,
+): void {
+  if (!signal?.aborted) {
+    return;
+  }
+  throw signal.reason instanceof Error
+    ? signal.reason
+    : new Error("Hosted artifact fetch was interrupted.");
 }

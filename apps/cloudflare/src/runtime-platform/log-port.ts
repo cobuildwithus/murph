@@ -11,13 +11,17 @@ export function createHostedWebRuntimeLogPort(input: {
   transport: HostedWebControlTransport;
 }) {
   return {
-    async write(request: Parameters<NonNullable<HostedRuntimePlatform["logPort"]>["write"]>[0]) {
+    async write(
+      request: Parameters<NonNullable<HostedRuntimePlatform["logPort"]>["write"]>[0],
+      context?: Parameters<NonNullable<HostedRuntimePlatform["logPort"]>["write"]>[1],
+    ) {
       const payload = await fetchHostedWebControlPlaneJson({
         body: request,
         boundUserId: input.boundUserId,
         description: "Hosted runtime log write",
         fetchImpl: input.fetchImpl,
         path: HOSTED_RUNTIME_LOG_PATH,
+        signal: context?.signal ?? null,
         timeoutMs: input.timeoutMs,
         transport: input.transport,
       });

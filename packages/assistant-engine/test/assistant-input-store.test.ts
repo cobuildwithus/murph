@@ -40,6 +40,51 @@ afterEach(async () => {
 })
 
 describe('assistant input event store', () => {
+  it('does not swallow an exact abort reason while skipping invalid records', async () => {
+    const { vaultRoot } = await createAssistantInputStoreVault(
+      'assistant-input-store-abort-',
+    )
+    await upsertAssistantInputEvent({
+      vault: vaultRoot,
+      event: createHostedMailboxEventInput({
+        eventId: 'evt_abort',
+        occurredAt: '2026-04-22T10:00:00.000Z',
+        laneSeq: 'conversation:42',
+        text: 'abort during scan',
+        threadId: 'chat_1',
+      }),
+    })
+    const controller = new AbortController()
+    const reason = new Error('foreground input interrupted event scan')
+    const throwIfAborted = controller.signal.throwIfAborted.bind(
+      controller.signal,
+    )
+    let checks = 0
+    Object.defineProperty(controller.signal, 'throwIfAborted', {
+      configurable: true,
+      value() {
+        checks += 1
+        // The fifth check follows the record read, before a parse failure can
+        // enter the skip-invalid catch path.
+        if (checks === 5) {
+          controller.abort(reason)
+        }
+        throwIfAborted()
+      },
+    })
+    const invalidRecords: string[] = []
+
+    await expect(listAssistantInputEvents({
+      onInvalidRecord(failure) {
+        invalidRecords.push(failure.fileName)
+      },
+      signal: controller.signal,
+      skipInvalidRecords: true,
+      vault: vaultRoot,
+    })).rejects.toBe(reason)
+    expect(invalidRecords).toEqual([])
+  })
+
   it('orders cursors by instant when timestamp offsets differ', () => {
     expect(
       compareAssistantInputCursors(

@@ -68,8 +68,10 @@ export async function recordHostedMailboxAssistantInputItem(input: {
 
 export async function readHostedMailboxAssistantInputItemDetails(input: {
   inputIds: readonly string[]
+  signal?: AbortSignal | null
   vault: string
 }): Promise<ReadonlyMap<string, HostedMailboxAssistantInputItem>> {
+  input.signal?.throwIfAborted()
   if (input.inputIds.length === 0) {
     return new Map()
   }
@@ -81,6 +83,7 @@ export async function readHostedMailboxAssistantInputItemDetails(input: {
     const item = await readHostedMailboxAssistantInputItemAtPaths({
       inputId: normalizedInputId,
       paths,
+      signal: input.signal,
     })
     if (item) {
       items.set(item.inputId, item)
@@ -92,13 +95,18 @@ export async function readHostedMailboxAssistantInputItemDetails(input: {
 
 export async function readHostedMailboxAssistantInputItemInventory(
   paths: AssistantStatePaths,
+  signal?: AbortSignal | null,
 ): Promise<HostedMailboxAssistantInputItemInventory> {
+  signal?.throwIfAborted()
   const directory = resolveHostedMailboxAssistantInputItemsDirectory(paths)
   let entries: Dirent[]
   try {
     await assertAssistantStatePathHasNoSymlinks(directory)
+    signal?.throwIfAborted()
     entries = await readdir(directory, { withFileTypes: true })
+    signal?.throwIfAborted()
   } catch (error) {
+    signal?.throwIfAborted()
     if (isMissingFileError(error)) {
       return { records: [], trusted: true }
     }
@@ -108,6 +116,7 @@ export async function readHostedMailboxAssistantInputItemInventory(
   const records: HostedMailboxAssistantInputItemInventoryEntry[] = []
   let trusted = true
   for (const entry of entries) {
+    signal?.throwIfAborted()
     if (!entry.name.endsWith('.json')) {
       continue
     }
@@ -123,8 +132,11 @@ export async function readHostedMailboxAssistantInputItemInventory(
         'inputId',
       )
       await assertAssistantStatePathHasNoSymlinks(filePath)
+      signal?.throwIfAborted()
+      const raw = await readFile(filePath, 'utf8')
+      signal?.throwIfAborted()
       const item = parseHostedMailboxAssistantInputItemFile(
-        JSON.parse(await readFile(filePath, 'utf8')),
+        JSON.parse(raw),
       )
       if (item.inputId !== inputId) {
         trusted = false
@@ -132,6 +144,7 @@ export async function readHostedMailboxAssistantInputItemInventory(
       }
       records.push({ filePath, inputId })
     } catch {
+      signal?.throwIfAborted()
       trusted = false
     }
   }
@@ -158,14 +171,19 @@ function resolveHostedMailboxAssistantInputItemPath(input: {
 async function readHostedMailboxAssistantInputItemAtPaths(input: {
   inputId: string
   paths: AssistantStatePaths
+  signal?: AbortSignal | null
 }): Promise<HostedMailboxAssistantInputItem | null> {
+  input.signal?.throwIfAborted()
   try {
     const filePath = resolveHostedMailboxAssistantInputItemPath(input)
     await assertAssistantStatePathHasNoSymlinks(filePath)
+    input.signal?.throwIfAborted()
     const raw = await readFile(filePath, 'utf8')
+    input.signal?.throwIfAborted()
     const item = parseHostedMailboxAssistantInputItemFile(JSON.parse(raw))
     return item.inputId === input.inputId ? item : null
   } catch (error) {
+    input.signal?.throwIfAborted()
     if (
       isMissingFileError(error) ||
       error instanceof SyntaxError ||

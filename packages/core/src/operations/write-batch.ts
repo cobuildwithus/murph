@@ -1,7 +1,7 @@
 import path from "node:path";
 import { AsyncLocalStorage } from "node:async_hooks";
 import { createHash, randomUUID } from "node:crypto";
-import { createReadStream, promises as fs } from "node:fs";
+import { createReadStream, promises as fs, type Stats } from "node:fs";
 
 import {
   copyFileAtomic,
@@ -336,6 +336,7 @@ export interface PruneTerminalWriteOperationRecordsInput {
   now?: DateInput;
   retainedOperationCount?: number;
   retentionMs?: number;
+  signal?: AbortSignal | null;
   vaultRoot: string;
 }
 
@@ -968,6 +969,60 @@ async function safeUnlink(absolutePath: string): Promise<void> {
   }
 }
 
+async function removeTreeInterruptibly(
+  absolutePath: string,
+  signal: AbortSignal | null | undefined,
+): Promise<void> {
+  signal?.throwIfAborted();
+
+  let stats: Stats;
+  try {
+    stats = await fs.lstat(absolutePath);
+  } catch (error) {
+    signal?.throwIfAborted();
+    if (isErrnoException(error) && error.code === "ENOENT") {
+      return;
+    }
+    throw error;
+  }
+  signal?.throwIfAborted();
+
+  if (!stats.isDirectory()) {
+    await safeUnlink(absolutePath);
+    signal?.throwIfAborted();
+    return;
+  }
+
+  let childNames: string[];
+  try {
+    childNames = await fs.readdir(absolutePath);
+  } catch (error) {
+    signal?.throwIfAborted();
+    if (isErrnoException(error) && error.code === "ENOENT") {
+      return;
+    }
+    throw error;
+  }
+  signal?.throwIfAborted();
+
+  childNames.sort((left, right) => left.localeCompare(right));
+  for (const childName of childNames) {
+    signal?.throwIfAborted();
+    await removeTreeInterruptibly(path.join(absolutePath, childName), signal);
+  }
+
+  try {
+    await fs.rmdir(absolutePath);
+  } catch (error) {
+    signal?.throwIfAborted();
+    if (isErrnoException(error) && error.code === "ENOENT") {
+      return;
+    }
+    throw error;
+  }
+  signal?.throwIfAborted();
+}
+
 export function isTerminalWriteOperationStatus(status: string): boolean {
   return status === "committed" || status === "rolled_back";
 }
@@ -1015,6 +1070,7 @@ export async function listWriteOperationMetadataPathsWithStageDirectories(
 export async function pruneTerminalWriteOperationRecords(
   input: PruneTerminalWriteOperationRecordsInput,
 ): Promise<PruneTerminalWriteOperationRecordsResult> {
+  input.signal?.throwIfAborted();
   const checkpointedAfterMs = parsePruneBoundaryMs(input.checkpointedAfter);
   const nowMs = parsePruneBoundaryMs(input.now ?? new Date());
   const retainedOperationCount = normalizeTerminalWriteOperationRetainedCount(
@@ -1042,7 +1098,10 @@ export async function pruneTerminalWriteOperationRecords(
 
   const candidates: PrunableTerminalWriteOperationRecord[] = [];
   const cutoffMs = nowMs - retentionMs;
-  for (const relativePath of await listWriteOperationMetadataPaths(input.vaultRoot)) {
+  const metadataPaths = await listWriteOperationMetadataPaths(input.vaultRoot);
+  input.signal?.throwIfAborted();
+  for (const relativePath of metadataPaths) {
+    input.signal?.throwIfAborted();
     result.scannedCount += 1;
     const operationId = operationIdFromMetadataPath(relativePath);
     if (!operationId) {
@@ -1051,6 +1110,7 @@ export async function pruneTerminalWriteOperationRecords(
     }
 
     const operation = await readStrictPrunableWriteOperation(input.vaultRoot, relativePath);
+    input.signal?.throwIfAborted();
     if (!operation || operation.operationId !== operationId) {
       result.invalidCount += 1;
       continue;
@@ -1076,20 +1136,26 @@ export async function pruneTerminalWriteOperationRecords(
       input.vaultRoot,
       path.posix.join(WRITE_OPERATION_DIRECTORY, operationId),
     )).absolutePath;
+    input.signal?.throwIfAborted();
     if (updatedAtMs >= checkpointedAfterMs) {
-      if (await pathExists(stageRoot)) {
+      const stageRootExists = await pathExists(stageRoot);
+      input.signal?.throwIfAborted();
+      if (stageRootExists) {
         result.retainedStageDirectoryCount += 1;
       }
       result.retainedUncheckpointedTerminalCount += 1;
       continue;
     }
 
-    if (await pathExists(stageRoot)) {
-      await fs.rm(stageRoot, { force: true, recursive: true });
+    const stageRootExists = await pathExists(stageRoot);
+    input.signal?.throwIfAborted();
+    if (stageRootExists) {
+      await removeTreeInterruptibly(stageRoot, input.signal);
       result.prunedStageDirectoryCount += 1;
     }
 
     await resolveVaultPathOnDisk(input.vaultRoot, relativePath);
+    input.signal?.throwIfAborted();
 
     candidates.push({
       metadataRelativePath: relativePath,
@@ -1105,6 +1171,7 @@ export async function pruneTerminalWriteOperationRecords(
   );
 
   for (const [index, candidate] of candidates.entries()) {
+    input.signal?.throwIfAborted();
     if (index < retainedOperationCount) {
       result.retainedNewestTerminalCount += 1;
       continue;
@@ -1115,8 +1182,10 @@ export async function pruneTerminalWriteOperationRecords(
       continue;
     }
 
-    if (await pathExists(candidate.stageRoot)) {
-      await fs.rm(candidate.stageRoot, { force: true, recursive: true });
+    const stageRootExists = await pathExists(candidate.stageRoot);
+    input.signal?.throwIfAborted();
+    if (stageRootExists) {
+      await removeTreeInterruptibly(candidate.stageRoot, input.signal);
       result.prunedStageDirectoryCount += 1;
     }
 
@@ -1124,8 +1193,11 @@ export async function pruneTerminalWriteOperationRecords(
       input.vaultRoot,
       candidate.metadataRelativePath,
     )).absolutePath;
+    input.signal?.throwIfAborted();
     const measured = await measureExistingFile(metadataPath);
+    input.signal?.throwIfAborted();
     await safeUnlink(metadataPath);
+    input.signal?.throwIfAborted();
     result.prunedCount += 1;
     result.prunedFileCount += measured.fileCount;
     result.prunedByteCount += measured.byteCount;

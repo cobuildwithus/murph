@@ -55,7 +55,7 @@ export function createCoalescingRuntimeWakeSignal(): RuntimeWakeSignal {
   };
   const flushWaiters = () => {
     flushScheduled = false;
-    if (!pending) {
+    if (!pending || waiters.size === 0) {
       return;
     }
 

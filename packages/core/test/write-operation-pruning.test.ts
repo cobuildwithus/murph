@@ -3,7 +3,7 @@ import { promises as fs } from "node:fs";
 import os from "node:os";
 import path from "node:path";
 
-import { afterEach, test } from "vitest";
+import { afterEach, test, vi } from "vitest";
 
 import {
   initializeVault,
@@ -244,6 +244,136 @@ test("pruneTerminalWriteOperationRecords retains the newest clean committed reco
   await assertMissing(vaultRoot, `${WRITE_OPERATION_DIRECTORY}/op_clean_committed_000.json`);
   await assertPresent(vaultRoot, `${WRITE_OPERATION_DIRECTORY}/op_clean_committed_001.json`);
   await assertPresent(vaultRoot, `${WRITE_OPERATION_DIRECTORY}/op_clean_committed_100.json`);
+});
+
+test("pruneTerminalWriteOperationRecords aborts between candidates with the exact reason", async () => {
+  const vaultRoot = await makeVaultRoot();
+  const firstOperationId = "op_prune_abort_first";
+  const laterOperationId = "op_prune_abort_later";
+  const firstMetadataRelativePath = `${WRITE_OPERATION_DIRECTORY}/${firstOperationId}.json`;
+  const laterMetadataRelativePath = `${WRITE_OPERATION_DIRECTORY}/${laterOperationId}.json`;
+  await writeCommittedOperationRecord(vaultRoot, {
+    operationId: firstOperationId,
+    updatedAt: "2026-06-02T00:00:00.000Z",
+  });
+  await writeCommittedOperationRecord(vaultRoot, {
+    operationId: laterOperationId,
+    updatedAt: "2026-06-01T00:00:00.000Z",
+  });
+
+  const controller = new AbortController();
+  const abortReason = new Error("foreground wake interrupted operation pruning");
+  const nativeThrowIfAborted = controller.signal.throwIfAborted.bind(controller.signal);
+  const metadataAbsolutePaths = new Set([
+    resolveVaultPath(vaultRoot, firstMetadataRelativePath).absolutePath,
+    resolveVaultPath(vaultRoot, laterMetadataRelativePath).absolutePath,
+  ]);
+  const originalUnlink = fs.unlink.bind(fs);
+  let removedMetadataCount = 0;
+  const unlinkSpy = vi.spyOn(fs, "unlink").mockImplementation(async (...args) => {
+    await originalUnlink(...args);
+    if (typeof args[0] === "string" && metadataAbsolutePaths.has(args[0])) {
+      removedMetadataCount += 1;
+    }
+  });
+  Object.defineProperty(controller.signal, "throwIfAborted", {
+    configurable: true,
+    value() {
+      if (removedMetadataCount === 1 && !controller.signal.aborted) {
+        controller.abort(abortReason);
+      }
+      nativeThrowIfAborted();
+    },
+  });
+
+  try {
+    await assert.rejects(
+      pruneTerminalWriteOperationRecords({
+        checkpointedAfter: "2026-06-10T00:00:00.000Z",
+        now: "2026-06-22T00:00:00.000Z",
+        retainedOperationCount: 0,
+        signal: controller.signal,
+        vaultRoot,
+      }),
+      (error) => error === abortReason,
+    );
+  } finally {
+    unlinkSpy.mockRestore();
+  }
+
+  assert.equal(removedMetadataCount, 1);
+  await assertMissing(vaultRoot, firstMetadataRelativePath);
+  await assertPresent(vaultRoot, laterMetadataRelativePath);
+});
+
+test("pruneTerminalWriteOperationRecords aborts a nested stage tree before the later child", async () => {
+  const vaultRoot = await makeVaultRoot();
+  const operationId = "op_prune_nested_abort";
+  const metadataRelativePath = `${WRITE_OPERATION_DIRECTORY}/${operationId}.json`;
+  const stageRootRelativePath = `${WRITE_OPERATION_DIRECTORY}/${operationId}`;
+  const firstChildRelativePath = `${stageRootRelativePath}/payloads/a-external-link`;
+  const laterChildRelativePath = `${stageRootRelativePath}/payloads/z-later/retained.txt`;
+  await writeCommittedOperationRecord(vaultRoot, {
+    operationId,
+    updatedAt: "2026-06-01T00:00:00.000Z",
+  });
+  await writeStageResidue(
+    vaultRoot,
+    stageRootRelativePath,
+    "payloads/z-later/retained.txt",
+    "later\n",
+  );
+
+  const externalDirectory = await fs.mkdtemp(
+    path.join(os.tmpdir(), "murph-core-write-operation-prune-linked-tree-"),
+  );
+  tempRoots.push(externalDirectory);
+  const externalSentinelPath = path.join(externalDirectory, "sentinel.txt");
+  await fs.writeFile(externalSentinelPath, "external\n", "utf8");
+  const firstChildAbsolutePath = resolveVaultPath(vaultRoot, firstChildRelativePath).absolutePath;
+  await fs.symlink(externalDirectory, firstChildAbsolutePath, "dir");
+
+  const controller = new AbortController();
+  const abortReason = new Error("foreground wake interrupted nested operation pruning");
+  const nativeThrowIfAborted = controller.signal.throwIfAborted.bind(controller.signal);
+  const originalUnlink = fs.unlink.bind(fs);
+  let removedFirstChild = false;
+  const unlinkSpy = vi.spyOn(fs, "unlink").mockImplementation(async (...args) => {
+    await originalUnlink(...args);
+    if (typeof args[0] === "string" && args[0] === firstChildAbsolutePath) {
+      removedFirstChild = true;
+    }
+  });
+  Object.defineProperty(controller.signal, "throwIfAborted", {
+    configurable: true,
+    value() {
+      if (removedFirstChild && !controller.signal.aborted) {
+        controller.abort(abortReason);
+      }
+      nativeThrowIfAborted();
+    },
+  });
+
+  try {
+    await assert.rejects(
+      pruneTerminalWriteOperationRecords({
+        checkpointedAfter: "2026-06-10T00:00:00.000Z",
+        now: "2026-06-22T00:00:00.000Z",
+        retainedOperationCount: 0,
+        signal: controller.signal,
+        vaultRoot,
+      }),
+      (error) => error === abortReason,
+    );
+  } finally {
+    unlinkSpy.mockRestore();
+  }
+
+  assert.equal(removedFirstChild, true);
+  await assertMissing(vaultRoot, firstChildRelativePath);
+  await assertPresent(vaultRoot, laterChildRelativePath);
+  await assertPresent(vaultRoot, metadataRelativePath);
+  assert.equal(await fs.readFile(externalSentinelPath, "utf8"), "external\n");
 });
 
 test("pruneTerminalWriteOperationRecords rejects symlinked operation directories without deleting external records", async () => {

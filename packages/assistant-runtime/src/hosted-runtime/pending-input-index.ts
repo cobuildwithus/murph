@@ -223,19 +223,24 @@ export async function enqueueHostedPendingAssistantInputId(input: {
 }
 
 export async function compactHostedPendingAssistantInputIds(input: {
+  signal?: AbortSignal | null;
   vaultRoot: string;
 }): Promise<string[]> {
+  input.signal?.throwIfAborted();
   const filePath = resolveHostedPendingAssistantInputStatePath(input.vaultRoot);
   const existingBeforeLock = await readHostedPendingAssistantInputStateAtPath({
     filePath,
   });
+  input.signal?.throwIfAborted();
   const backfilledState = existingBeforeLock.missing || !existingBeforeLock.state.backfilled
     ? await createBackfilledHostedPendingAssistantInputState({
       respectEligibleAfter: true,
+      signal: input.signal,
       vaultRoot: input.vaultRoot,
     })
     : null;
-  return await withAssistantRuntimeWriteLock(input.vaultRoot, async (paths) => {
+  input.signal?.throwIfAborted();
+  const inputIds = await withAssistantRuntimeWriteLock(input.vaultRoot, async (paths) => {
     const filePath = resolveHostedPendingAssistantInputStatePathFromRoot(
       paths.assistantStateRoot,
     );
@@ -243,35 +248,44 @@ export async function compactHostedPendingAssistantInputIds(input: {
       filePath,
       missingState: backfilledState,
     });
+    input.signal?.throwIfAborted();
     const state = stateBeforeCompaction.backfilled
       ? stateBeforeCompaction
       : mergeHostedPendingAssistantInputBackfill({
         backfilledState: backfilledState
           ?? await createBackfilledHostedPendingAssistantInputState({
             respectEligibleAfter: true,
+            signal: input.signal,
             vaultRoot: input.vaultRoot,
           }),
         state: stateBeforeCompaction,
       });
-    return await compactHostedPendingAssistantInputStateForWrite({
+    input.signal?.throwIfAborted();
+    const compactedInputIds = await compactHostedPendingAssistantInputStateForWrite({
       backfilled: true,
       filePath,
       paths,
+      signal: input.signal,
       state,
       stateBeforeCompaction,
       vaultRoot: input.vaultRoot,
     });
-  });
+    return compactedInputIds;
+  }, input.signal);
+  input.signal?.throwIfAborted();
+  return inputIds;
 }
 
 async function compactHostedPendingAssistantInputStateForWrite(input: {
   backfilled: boolean;
   filePath: string;
   paths: Parameters<typeof readAssistantInputEvent>[0]["paths"];
+  signal?: AbortSignal | null;
   state: HostedPendingAssistantInputState;
   stateBeforeCompaction: HostedPendingAssistantInputState;
   vaultRoot: string;
 }): Promise<string[]> {
+  input.signal?.throwIfAborted();
   if (input.state.inputIds.length === 0) {
     const emptyState = createHostedPendingAssistantInputState([], {
       backfilled: input.backfilled,
@@ -281,6 +295,7 @@ async function compactHostedPendingAssistantInputStateForWrite(input: {
         filePath: input.filePath,
         state: emptyState,
       });
+      input.signal?.throwIfAborted();
     }
     return [];
   }
@@ -289,12 +304,15 @@ async function compactHostedPendingAssistantInputStateForWrite(input: {
     (await readAssistantAutomationState(input.vaultRoot)).autoReply
       .map((entry) => entry.channel),
   );
+  input.signal?.throwIfAborted();
   const remaining: { cursor: AssistantInputCursor; inputId: string }[] = [];
   for (const inputId of input.state.inputIds) {
+    input.signal?.throwIfAborted();
     const event = await readAssistantInputEvent({
       inputId,
       paths: input.paths,
     });
+    input.signal?.throwIfAborted();
     if (!event) {
       continue;
     }
@@ -311,6 +329,7 @@ async function compactHostedPendingAssistantInputStateForWrite(input: {
       inputId,
       vault: input.vaultRoot,
     });
+    input.signal?.throwIfAborted();
     if (!complete) {
       remaining.push({
         cursor: event.cursor,
@@ -331,6 +350,7 @@ async function compactHostedPendingAssistantInputStateForWrite(input: {
       filePath: input.filePath,
       state: remainingState,
     });
+    input.signal?.throwIfAborted();
   }
   return [...remainingState.inputIds];
 }
@@ -456,9 +476,12 @@ function resolveHostedPendingAssistantInputStatePathFromRoot(
 
 async function createBackfilledHostedPendingAssistantInputState(input: {
   respectEligibleAfter: boolean;
+  signal?: AbortSignal | null;
   vaultRoot: string;
 }): Promise<HostedPendingAssistantInputState> {
+  input.signal?.throwIfAborted();
   const automationState = await readAssistantAutomationState(input.vaultRoot);
+  input.signal?.throwIfAborted();
   if (automationState.autoReply.length === 0) {
     return createEmptyHostedPendingAssistantInputState({
       backfilled: true,
@@ -471,20 +494,25 @@ async function createBackfilledHostedPendingAssistantInputState(input: {
   const pending: { cursor: AssistantInputCursor; inputId: string }[] = [];
 
   for (const channelState of automationState.autoReply) {
+    input.signal?.throwIfAborted();
     let cursor = input.respectEligibleAfter ? channelState.eligibleAfter : null;
 
     while (true) {
+      input.signal?.throwIfAborted();
       const listed = await source.listInputCandidates({
         afterCursor: cursor,
         limit: DEFAULT_ASSISTANT_AUTOMATION_SCAN_LIMIT,
+        signal: input.signal ?? undefined,
         sourceId: channelState.channel,
       });
+      input.signal?.throwIfAborted();
       const listedItems = listed.inputs;
       if (listedItems.length === 0) {
         break;
       }
 
       for (const candidate of listedItems) {
+        input.signal?.throwIfAborted();
         if (candidate.event.source !== channelState.channel) {
           continue;
         }
@@ -496,6 +524,7 @@ async function createBackfilledHostedPendingAssistantInputState(input: {
           inputId: candidate.event.inputId,
           vault: input.vaultRoot,
         });
+        input.signal?.throwIfAborted();
         if (!complete) {
           pending.push({
             cursor: candidate.event.cursor,

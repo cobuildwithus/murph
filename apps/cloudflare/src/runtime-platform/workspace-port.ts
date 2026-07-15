@@ -37,7 +37,7 @@ export function createHostedWebWorkspacePort(input: {
   workspaceCheckpointBridge: HostedWorkspaceCheckpointBridgeAuthority | null;
 }) {
   return {
-    async read() {
+    async read(context?: { signal?: AbortSignal | null }) {
       const payload = await fetchHostedWebControlPlaneJson({
         boundUserId: input.boundUserId,
         description: "Hosted workspace read",
@@ -52,6 +52,7 @@ export function createHostedWebWorkspacePort(input: {
           : {}),
         method: "GET",
         path: HOSTED_RUNTIME_WORKSPACE_PATH,
+        signal: context?.signal ?? null,
         timeoutMs: input.timeoutMs,
         transport: input.transport,
       });
