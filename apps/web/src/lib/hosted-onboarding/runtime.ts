@@ -3,7 +3,9 @@ import Stripe from "stripe";
 import {
   getHostedBillingPlanDefinition,
   getHostedDefaultBillingPlanCode,
+  getHostedFamilyBillingOfferDefinition,
   type HostedBillingPlanCode,
+  type HostedPlanCode,
 } from "./billing-plans";
 import { hostedOnboardingError } from "./errors";
 import { readHostedOnboardingEnvironment, type HostedOnboardingEnvironment } from "./env";
@@ -102,6 +104,31 @@ export function requireHostedStripeBillingPlanConfig(input?: {
 
   return {
     billingPlanCode,
+    priceId,
+    stripe: requireHostedStripeApi(),
+  };
+}
+
+export function requireHostedStripeFamilyPlanConfig(input: {
+  planCode: HostedPlanCode;
+}): {
+  planCode: HostedPlanCode;
+  priceId: string;
+  stripe: Stripe;
+} {
+  const environment = getHostedOnboardingEnvironment();
+  const offer = getHostedFamilyBillingOfferDefinition(input.planCode);
+  const priceId = environment.stripeFamilyPriceIdsByPlan[input.planCode];
+  if (!priceId) {
+    throw hostedOnboardingError({
+      code: "STRIPE_PRICE_ID_REQUIRED",
+      message: `${offer.priceIdEnvKey} must be configured for hosted Family billing.`,
+      httpStatus: 500,
+    });
+  }
+
+  return {
+    planCode: input.planCode,
     priceId,
     stripe: requireHostedStripeApi(),
   };

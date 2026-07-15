@@ -1184,7 +1184,11 @@ export type HostedRuntimeFamilyPlanToolAction =
   | "read_status"
   | "start_checkout";
 
+export const HOSTED_PLAN_CODES = ["pulse", "edge"] as const;
+export type HostedPlanCode = (typeof HOSTED_PLAN_CODES)[number];
+
 export interface HostedRuntimeFamilyPlanCreateInviteRequest {
+  planCode?: HostedPlanCode;
   targetEmail?: string | null;
   targetLabel?: string | null;
   targetPhoneNumber?: string | null;
@@ -1217,6 +1221,7 @@ export interface HostedRuntimeFamilyPlanToolSeatStatus {
 export interface HostedRuntimeFamilyPlanToolMember {
   isOwner: boolean;
   label: string | null;
+  planCode: HostedPlanCode;
   role: string;
   status: string;
 }
@@ -1224,11 +1229,25 @@ export interface HostedRuntimeFamilyPlanToolMember {
 export interface HostedRuntimeFamilyPlanToolInvite {
   acceptUrl: string | null;
   expiresAt: string;
+  planCode: HostedPlanCode;
   status: string;
   targetLabel: string | null;
   targetPhoneHint: string | null;
   telegramInviteUrl: string | null;
 }
+
+export interface HostedRuntimeFamilyPlanToolPlanStatus {
+  active: number;
+  billed: number;
+  invited: number;
+  remaining: number;
+  used: number;
+}
+
+export type HostedRuntimeFamilyPlanToolPlans = Record<
+  HostedPlanCode,
+  HostedRuntimeFamilyPlanToolPlanStatus
+>;
 
 export interface HostedRuntimeFamilyPlanToolStatusResponse {
   billingActive: boolean;
@@ -1236,11 +1255,13 @@ export interface HostedRuntimeFamilyPlanToolStatusResponse {
   members: HostedRuntimeFamilyPlanToolMember[];
   owner: boolean;
   pendingInvites: HostedRuntimeFamilyPlanToolInvite[];
+  plans: HostedRuntimeFamilyPlanToolPlans;
   seats: HostedRuntimeFamilyPlanToolSeatStatus;
 }
 
 export interface HostedRuntimeFamilyPlanToolCreateInviteResponse {
   invite: HostedRuntimeFamilyPlanToolInvite;
+  plans: HostedRuntimeFamilyPlanToolPlans;
   replyText: string;
   seats: HostedRuntimeFamilyPlanToolSeatStatus;
 }
@@ -1253,6 +1274,7 @@ export interface HostedRuntimeFamilyPlanToolStartCheckoutResponse {
   owner: boolean;
   preparedInvite: HostedRuntimeFamilyPlanToolInvite | null;
   preparedInviteReplyText: string | null;
+  plans: HostedRuntimeFamilyPlanToolPlans;
   seats: HostedRuntimeFamilyPlanToolSeatStatus;
   unavailableReason: "already_sponsored" | null;
 }

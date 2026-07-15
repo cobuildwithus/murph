@@ -1981,6 +1981,7 @@ describe("parseHostedRuntimeFamilyPlanTool", () => {
     expect(parseHostedRuntimeFamilyPlanToolRequest({
       action: "create_invite",
       invite: {
+        planCode: "edge",
         targetEmail: "dad@example.com",
         targetLabel: "dad",
         targetPhoneNumber: null,
@@ -1989,6 +1990,7 @@ describe("parseHostedRuntimeFamilyPlanTool", () => {
     })).toEqual({
       action: "create_invite",
       invite: {
+        planCode: "edge",
         targetEmail: "dad@example.com",
         targetLabel: "dad",
         targetPhoneNumber: null,
@@ -2013,6 +2015,56 @@ describe("parseHostedRuntimeFamilyPlanTool", () => {
         },
       })
     ).toThrow(/phone number, Telegram username, or email/u);
+
+    expect(() =>
+      parseHostedRuntimeFamilyPlanToolRequest({
+        action: "create_invite",
+        invite: {
+          planCode: "future",
+          targetEmail: "dad@example.com",
+        },
+      })
+    ).toThrow(/plan code is not supported/u);
+  });
+
+  it("parses exact member and invite tiers with per-tier capacity", () => {
+    expect(parseHostedRuntimeFamilyPlanToolResponse({
+      action: "read_status",
+      result: {
+        billingActive: true,
+        billingStatus: "active",
+        members: [
+          { isOwner: true, label: null, planCode: "pulse", role: "owner", status: "active" },
+          { isOwner: false, label: "Dad", planCode: "edge", role: "member", status: "active" },
+        ],
+        owner: true,
+        pendingInvites: [
+          {
+            acceptUrl: null,
+            expiresAt: "2026-06-25T00:00:00.000Z",
+            planCode: "edge",
+            status: "pending",
+            targetLabel: "Mom",
+            targetPhoneHint: null,
+            telegramInviteUrl: null,
+          },
+        ],
+        plans: {
+          edge: { active: 1, billed: 2, invited: 1, remaining: 0, used: 2 },
+          pulse: { active: 1, billed: 1, invited: 0, remaining: 0, used: 1 },
+        },
+        seats: { active: 2, billed: 3, invited: 1, max: 6, min: 2, remaining: 0, used: 3 },
+      },
+    })).toMatchObject({
+      result: {
+        members: [{ planCode: "pulse" }, { planCode: "edge" }],
+        pendingInvites: [{ planCode: "edge" }],
+        plans: {
+          edge: { billed: 2, used: 2 },
+          pulse: { billed: 1, used: 1 },
+        },
+      },
+    });
   });
 
   it("parses family plan status responses with sanitized member and invite fields", () => {
@@ -2101,9 +2153,26 @@ describe("parseHostedRuntimeFamilyPlanTool", () => {
         billingStatus: "not_started",
         checkoutUrl: "https://checkout.stripe.test/family",
         owner: true,
+        plans: {
+          edge: {
+            active: 0,
+            billed: 0,
+            invited: 0,
+            remaining: 0,
+            used: 0,
+          },
+          pulse: {
+            active: 1,
+            billed: 2,
+            invited: 0,
+            remaining: 1,
+            used: 1,
+          },
+        },
         preparedInvite: {
           acceptUrl: null,
           expiresAt: "2026-06-25T00:00:00.000Z",
+          planCode: "pulse",
           status: "pending",
           targetLabel: "Adam",
           targetPhoneHint: null,

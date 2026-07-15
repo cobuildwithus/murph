@@ -27,6 +27,7 @@ import {
 import { assertHostedMemberBillingStartMessagingReady } from "./billing-start-preconditions";
 import { requireHostedInviteForBillingCheckout } from "./invite-service";
 import { requiresHostedBillingCheckout } from "./lifecycle";
+import { readActiveHostedFamilySponsorship } from "./member-access";
 import {
   deriveHostedOnboardingTimingErrorName,
   finishHostedOnboardingTiming,
@@ -120,6 +121,17 @@ export async function createHostedBillingCheckout(
         alreadyActive: true,
         url: null,
       };
+    }
+
+    if (await readActiveHostedFamilySponsorship({
+      memberId: invite.member.id,
+      prisma,
+    })) {
+      throw hostedOnboardingError({
+        code: "HOSTED_FAMILY_MEMBER_ALREADY_SPONSORED",
+        httpStatus: 409,
+        message: "Your Murph access is already covered by a Family plan.",
+      });
     }
 
     if (!requiresHostedBillingCheckout(invite.member.billingStatus)) {

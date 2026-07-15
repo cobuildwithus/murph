@@ -635,6 +635,20 @@ describe("hosted Prisma baseline migration", () => {
       ),
       "utf8",
     );
+    const hostedFamilyMixedTierCapacityMigrationSql = readFileSync(
+      new URL(
+        "../prisma/migrations/20260714090000_hosted_family_mixed_tier_capacity/migration.sql",
+        import.meta.url,
+      ),
+      "utf8",
+    );
+    const hostedFamilyPlanCodeContractMigrationSql = readFileSync(
+      new URL(
+        "../prisma/contract-migrations/20260714150000_require_hosted_family_plan_codes/migration.sql",
+        import.meta.url,
+      ),
+      "utf8",
+    );
     const deviceSyncCompanionCaptureReceiptMigrationSql = readFileSync(
       new URL(
         "../prisma/migrations/20260712010000_device_sync_companion_capture_receipt/migration.sql",
@@ -772,10 +786,32 @@ describe("hosted Prisma baseline migration", () => {
       "20260713190000_hosted_group_join_confirmation_drain_index",
       "20260713210000_hosted_thread_route_participant_addition",
       "20260714060000_add_assistant_preference_projection_watermarks",
+      "20260714090000_hosted_family_mixed_tier_capacity",
       "20260714120000_hosted_group_reaction_context",
       "20260714130000_hosted_mailbox_assistant_input_lookup",
       "migration_lock.toml",
     ]);
+    expect(hostedFamilyMixedTierCapacityMigrationSql).toContain(
+      'ADD COLUMN "plan_code" TEXT DEFAULT \'pulse\'',
+    );
+    expect(hostedFamilyMixedTierCapacityMigrationSql).toContain(
+      'CREATE TABLE "hosted_account_group_plan_capacity"',
+    );
+    expect(hostedFamilyMixedTierCapacityMigrationSql).toContain(
+      'CHECK ("plan_code" IN (\'pulse\', \'edge\'))',
+    );
+    expect(hostedFamilyPlanCodeContractMigrationSql).toContain(
+      'WHERE "plan_code" IS NULL',
+    );
+    expect(hostedFamilyPlanCodeContractMigrationSql).toContain(
+      'ALTER COLUMN "plan_code" SET NOT NULL',
+    );
+    expect(hostedFamilyPlanCodeContractMigrationSql).toContain(
+      'VALIDATE CONSTRAINT "hosted_account_group_membership_plan_code_check"',
+    );
+    expect(hostedFamilyMixedTierCapacityMigrationSql).not.toContain(
+      'INSERT INTO "hosted_account_group_plan_capacity"',
+    );
     expect(hostedGroupJoinConfirmationEligibilityMigrationSql).toContain(
       'ALTER TABLE "hosted_group_member"',
     );

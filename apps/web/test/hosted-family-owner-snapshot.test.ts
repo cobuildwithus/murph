@@ -63,6 +63,9 @@ function ownerSnapshotPrisma() {
     hostedAccountGroupBillingRef: {
       findUnique: vi.fn().mockResolvedValue({ billedSeatCount: 4 }),
     },
+    hostedAccountGroupPlanCapacity: {
+      findMany: vi.fn().mockResolvedValue([]),
+    },
     hostedAccountGroupInvite: {
       findMany: vi.fn(({ where }: { where: { status: string } }) =>
         where.status === "accepted"
@@ -76,6 +79,7 @@ function ownerSnapshotPrisma() {
                 group: GROUP,
                 id: "inv_dad",
                 inviteCode: "CODEDAD",
+                planCode: "pulse",
                 status: "pending",
                 targetLabel: "Dad",
                 targetPhoneNumberEncrypted: "enc:dad",
@@ -85,8 +89,20 @@ function ownerSnapshotPrisma() {
     },
     hostedAccountGroupMembership: {
       findMany: vi.fn().mockResolvedValue([
-        { joinedAt: NOW, memberId: "m_owner", role: "owner", status: "active" },
-        { joinedAt: FUTURE, memberId: "m_mom", role: "member", status: "active" },
+        {
+          joinedAt: NOW,
+          memberId: "m_owner",
+          planCode: "pulse",
+          role: "owner",
+          status: "active",
+        },
+        {
+          joinedAt: FUTURE,
+          memberId: "m_mom",
+          planCode: "pulse",
+          role: "member",
+          status: "active",
+        },
       ]),
     },
   };
@@ -133,6 +149,9 @@ test("owner snapshot exposes a Telegram link only for a Telegram-bound invite", 
     hostedAccountGroupBillingRef: {
       findUnique: vi.fn().mockResolvedValue({ billedSeatCount: 4 }),
     },
+    hostedAccountGroupPlanCapacity: {
+      findMany: vi.fn().mockResolvedValue([]),
+    },
     hostedAccountGroupInvite: {
       findMany: vi.fn(({ where }: { where: { status: string } }) =>
         where.status === "accepted"
@@ -144,6 +163,7 @@ test("owner snapshot exposes a Telegram link only for a Telegram-bound invite", 
                 group: GROUP,
                 id: "inv_uncle",
                 inviteCode: "CODETG",
+                planCode: "pulse",
                 status: "pending",
                 targetLabel: "Uncle",
                 targetTelegramUsernameEncrypted: "enc:uncle",
@@ -153,7 +173,13 @@ test("owner snapshot exposes a Telegram link only for a Telegram-bound invite", 
     },
     hostedAccountGroupMembership: {
       findMany: vi.fn().mockResolvedValue([
-        { joinedAt: NOW, memberId: "m_owner", role: "owner", status: "active" },
+        {
+          joinedAt: NOW,
+          memberId: "m_owner",
+          planCode: "pulse",
+          role: "owner",
+          status: "active",
+        },
       ]),
     },
   };
@@ -179,6 +205,9 @@ test("active member identity falls back to the invited email when there is no la
     hostedAccountGroupBillingRef: {
       findUnique: vi.fn().mockResolvedValue({ billedSeatCount: 4 }),
     },
+    hostedAccountGroupPlanCapacity: {
+      findMany: vi.fn().mockResolvedValue([]),
+    },
     hostedAccountGroupInvite: {
       findMany: vi.fn(({ where }: { where: { status: string } }) =>
         where.status === "accepted"
@@ -186,6 +215,7 @@ test("active member identity falls back to the invited email when there is no la
               {
                 acceptedByMemberId: "m_dad",
                 group: GROUP,
+                planCode: "pulse",
                 targetEmailEncrypted: "enc:dad",
                 targetLabel: null,
               },
@@ -195,8 +225,20 @@ test("active member identity falls back to the invited email when there is no la
     },
     hostedAccountGroupMembership: {
       findMany: vi.fn().mockResolvedValue([
-        { joinedAt: NOW, memberId: "m_owner", role: "owner", status: "active" },
-        { joinedAt: FUTURE, memberId: "m_dad", role: "member", status: "active" },
+        {
+          joinedAt: NOW,
+          memberId: "m_owner",
+          planCode: "pulse",
+          role: "owner",
+          status: "active",
+        },
+        {
+          joinedAt: FUTURE,
+          memberId: "m_dad",
+          planCode: "pulse",
+          role: "member",
+          status: "active",
+        },
       ]),
     },
   };
@@ -249,6 +291,7 @@ function acceptanceViewPrisma(input: {
         expiresAt: input.expiresAt,
         group: input.group ?? GROUP,
         inviteCode: "CODEDAD",
+        planCode: "pulse",
         status: input.status,
         targetEmailLookupKey: input.targetEmailLookupKey ?? null,
         targetLabel: "Dad",
@@ -262,6 +305,9 @@ function acceptanceViewPrisma(input: {
     },
     hostedAccountGroupBillingRef: {
       findUnique: vi.fn().mockResolvedValue({ billedSeatCount: 4 }),
+    },
+    hostedAccountGroupPlanCapacity: {
+      findMany: vi.fn().mockResolvedValue([]),
     },
     // No existing member matches the invited phone by default (findMany is the
     // version-tolerant read the resolver uses), so the accept page falls back to

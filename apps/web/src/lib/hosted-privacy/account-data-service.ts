@@ -137,6 +137,12 @@ export const HOSTED_ACCOUNT_DATA_STORE_COVERAGE = [
     note: "Deletes local Family Stripe references for groups owned by the member. Family billing cancellation runs before local deletion so sponsored access cannot keep billing after owner deletion.",
   },
   {
+    slug: "prisma.hosted_account_group_plan_capacity",
+    label: "Hosted Family paid tier capacity",
+    deletion: "live-delete",
+    note: "Deletes the aggregate per-tier capacity projection for Family groups owned by the member. Export reports counts only and never exposes Stripe item identifiers.",
+  },
+  {
     slug: "prisma.hosted_group",
     label: "Generic hosted groups",
     deletion: "live-delete",
@@ -1141,6 +1147,7 @@ async function countHostedAccountData(input: {
     hostedAccountGroupMembership,
     hostedAccountGroupInvite,
     hostedAccountGroupBillingRef,
+    hostedAccountGroupPlanCapacity,
     hostedGroup,
     hostedGroupMember,
     hostedMemberEmailAuthorization,
@@ -1212,6 +1219,9 @@ async function countHostedAccountData(input: {
           ownerMemberId: memberIdFilter,
         },
       },
+    }),
+    input.prisma.hostedAccountGroupPlanCapacity.count({
+      where: { group: { ownerMemberId: memberIdFilter } },
     }),
     input.prisma.hostedGroup.count({
       where: {
@@ -1330,6 +1340,7 @@ async function countHostedAccountData(input: {
     "prisma.hosted_account_group_billing_ref": hostedAccountGroupBillingRef,
     "prisma.hosted_account_group_invite": hostedAccountGroupInvite,
     "prisma.hosted_account_group_membership": hostedAccountGroupMembership,
+    "prisma.hosted_account_group_plan_capacity": hostedAccountGroupPlanCapacity,
     "prisma.hosted_group": hostedGroup,
     "prisma.hosted_group_member": hostedGroupMember,
     "prisma.hosted_member_billing_ref": hostedMemberBillingRef,
@@ -1412,6 +1423,9 @@ async function deleteHostedAccountPrismaRows(input: {
         ownerMemberId: memberIdFilter,
       },
     },
+  }));
+  record("prisma.hosted_account_group_plan_capacity", await input.prisma.hostedAccountGroupPlanCapacity.deleteMany({
+    where: { group: { ownerMemberId: memberIdFilter } },
   }));
   record("prisma.hosted_account_group", await input.prisma.hostedAccountGroup.deleteMany({ where: { ownerMemberId: memberIdFilter } }));
   record("prisma.hosted_group_member", await input.prisma.hostedGroupMember.deleteMany({
