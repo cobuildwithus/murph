@@ -325,7 +325,7 @@ describe("getHostedLinqReactionTargetMessage", () => {
     expect(message.parts[0]).toMatch(
       /^HRV:42 Dose:5mg Status:better See \[link\] /u,
     );
-    expect(message.parts[0]).toHaveLength(512);
+    expect(message.parts[0]?.length).toBeLessThanOrEqual(512);
     expect(message.parts.slice(1, 4)).toEqual([
       "[attachment]",
       "[link]",
@@ -361,6 +361,32 @@ describe("getHostedLinqReactionTargetMessage", () => {
       httpStatus: 502,
       retryable: false,
     });
+  });
+
+  it("bounds URL scrubbing work before scanning adversarial dotted text", async () => {
+    const longDottedText = `${"a.".repeat(50_000)}1`;
+    const shortDottedText = `${"a.".repeat(1_024)}1`;
+    vi.stubGlobal("fetch", vi.fn(async () => createJsonResponse({
+      chat_id: "chat_123",
+      id: "msg_123",
+      parts: [
+        { type: "text", value: longDottedText },
+        ...Array.from({ length: 31 }, () => ({
+          type: "text",
+          value: shortDottedText,
+        })),
+      ],
+    }, 200)));
+
+    const startedAt = performance.now();
+    const message = await getHostedLinqReactionTargetMessage({
+      messageId: "msg_123",
+    });
+    const elapsedMs = performance.now() - startedAt;
+
+    expect(message.parts).toHaveLength(32);
+    expect(message.parts.every((part) => part.length <= 512)).toBe(true);
+    expect(elapsedMs).toBeLessThan(1_000);
   });
 });
 

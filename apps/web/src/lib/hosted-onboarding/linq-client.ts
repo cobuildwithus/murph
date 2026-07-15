@@ -305,7 +305,8 @@ function parseHostedLinqReactionTargetPart(value: unknown): string {
   const record = value as Record<string, unknown>;
   if (record.type === "text" && typeof record.value === "string") {
     const text = normalizeNullableString(record.value)
-      ?.replace(HOSTED_LINQ_REACTION_TARGET_URL_PATTERN, "[link]")
+      ?.slice(0, HOSTED_LINQ_REACTION_TARGET_TEXT_MAX_CHARS)
+      .replace(HOSTED_LINQ_REACTION_TARGET_URL_PATTERN, "[link]")
       .slice(0, HOSTED_LINQ_REACTION_TARGET_TEXT_MAX_CHARS);
     return text || "[unsupported content]";
   }
