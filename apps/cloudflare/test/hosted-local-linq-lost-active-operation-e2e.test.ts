@@ -25,8 +25,9 @@ const linqApiToken = "linq-local-test-token";
 const linqWebhookSecret = "linq-local-lost-active-operation-secret";
 const assistantModel = "gpt-5.5";
 const chatId = `chat_local_linq_lost_active_operation_${Date.now()}`;
+const firstReplyText = "I got the first note.";
 const secondInboundText = "Second message that used to be stranded behind idle checkpoint.";
-const combinedReplyText = "I got both notes.";
+const secondReplyText = "I got the second note too.";
 
 const streamDevLogs = process.env.MURPH_E2E_STREAM_DEV_LOGS === "1";
 const workerPersistDirOverride = process.env.MURPH_E2E_CF_PERSIST_DIR?.trim() || null;
@@ -89,16 +90,21 @@ describe("hosted local Linq lost active-operation e2e", () => {
 
     const replyPath = `/chats/${encodeURIComponent(chatId)}/messages`;
     const outboundCountBeforeReply = requireLinqStub().countObservedSends(replyPath);
+    let firstReplyProviderRequestIncludedSecondInput: boolean | null = null;
     requireScenario().queueAssistantResponses([
       buildAssistantProviderShellCommandCall("sleep 3 && echo first-turn-held"),
+      {
+        onResponseStarted: () => {
+          firstReplyProviderRequestIncludedSecondInput = requireScenario()
+            .assistantProviderRequests.at(-1)?.body.includes(secondInboundText) ?? false;
+        },
+        text: firstReplyText,
+      },
     ], {
       matchInputContains: "First message while starting the turn.",
     });
-    requireScenario().queueAssistantResponses([combinedReplyText], {
-      matchInputContains: [
-        "First message while starting the turn.",
-        secondInboundText,
-      ],
+    requireScenario().queueAssistantResponses([secondReplyText], {
+      matchInputContains: secondInboundText,
     });
 
     const firstWebhookResponse = await postSignedLinqWebhook(buildHostedLinqInboundEvent(
@@ -139,28 +145,33 @@ describe("hosted local Linq lost active-operation e2e", () => {
         .some((request) => request.body.includes("first-turn-held")),
       "Expected the already-running hosted assistant turn to finish its delayed tool output after the outer pointer was dropped.",
     );
-    await waitForCondition(
-      () => requireScenario().assistantProviderRequests
-        .filter((request) => request.url === "/v1/responses")
-        .slice(firstTurnProviderRequestCount)
-        .some((request) => request.body.includes("first-turn-held")
-          && request.body.includes(secondInboundText)),
-      "Expected the live provider continuation to include the second Linq message after the outer pointer was dropped.",
-    );
-
-    const observedSends = await requireLinqStub().waitForMatchingSendCount({
-      expectedCount: outboundCountBeforeReply + 1,
+    const firstSend = await requireLinqStub().waitForAdditionalSend({
+      baselineCount: outboundCountBeforeReply,
       expectedPath: replyPath,
       scenario: requireScenario(),
       userId,
     });
-    const combinedSend = observedSends[outboundCountBeforeReply]!;
-    expect(requireLinqStub().readObservedMessageText(combinedSend)).toBe(combinedReplyText);
+    expect(requireLinqStub().readObservedMessageText(firstSend)).toBe(firstReplyText);
+    expect(firstReplyProviderRequestIncludedSecondInput).toBe(false);
+    await waitForCondition(
+      () => requireScenario().assistantProviderRequests
+        .filter((request) => request.url === "/v1/responses")
+        .slice(firstTurnProviderRequestCount)
+        .some((request) => request.body.includes(secondInboundText)),
+      "Expected the pending second Linq message to begin its next causal provider turn after the first reply was handed off.",
+    );
+    const secondSend = await requireLinqStub().waitForAdditionalSend({
+      baselineCount: outboundCountBeforeReply + 1,
+      expectedPath: replyPath,
+      scenario: requireScenario(),
+      userId,
+    });
+    expect(requireLinqStub().readObservedMessageText(secondSend)).toBe(secondReplyText);
 
     const finalStatus = await requireScenario().waitForHostedCompletion(userId);
     expect(finalStatus.lastErrorCode ?? null).toBeNull();
     expect(finalStatus.mailboxLag.every((lane) => lane.lag === "0")).toBe(true);
-    expect(requireLinqStub().countObservedSends(replyPath)).toBe(outboundCountBeforeReply + 1);
+    expect(requireLinqStub().countObservedSends(replyPath)).toBe(outboundCountBeforeReply + 2);
   }, 360_000);
 });
 

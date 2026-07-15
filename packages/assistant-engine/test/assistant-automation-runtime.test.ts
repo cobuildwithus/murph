@@ -7141,14 +7141,12 @@ describe('assistant auto-reply runtime', () => {
     replyMocks.sendAssistantMessage.mockImplementation(async (input: {
       activeTurnCheckpoint?: (checkpoint: AssistantActiveTurnInputCheckpointInput) => Promise<void>
       activeTurnInput?: (admission: {
-        availableInputIds?: readonly string[]
         sessionId: string
         turnId: string
         vault: string
       }) => Promise<unknown>
     }) => {
       const admitted = await input.activeTurnInput?.({
-        availableInputIds: [hostedInput.event.inputId],
         sessionId: 'session-1',
         turnId: 'turn-1',
         vault: '/tmp/assistant-automation-vault',
@@ -7242,7 +7240,7 @@ describe('assistant auto-reply runtime', () => {
       )
   })
 
-  it('keeps a foreign group actor and later same-actor input pending on the exact account route', async () => {
+  it('keeps a foreign group actor and later same-actor input pending on the account route', async () => {
     const initialCapture = createCaptureSummary({
       accountId: 'safe_acct_group_a',
       actorId: 'safe_actor_a',
@@ -7316,21 +7314,19 @@ describe('assistant auto-reply runtime', () => {
       text: 'later message from actor A',
       threadIsDirect: false,
     })
-    const notifiedInputs = [otherAccount, actorB, laterActorA]
-    const listInputCandidatesByIds = vi.fn(async (input: {
-      inputIds: readonly string[]
+    const routeCandidates = [otherAccount, actorB, laterActorA]
+    const listInputCandidates = vi.fn(async (input: {
+      sourceId?: string | null
     }) => {
-      expect(input.inputIds).toEqual(
-        notifiedInputs.map((candidate) => candidate.event.inputId),
-      )
+      expect(input.sourceId).toBe('linq')
       return {
-        inputs: notifiedInputs,
+        inputs: routeCandidates,
         nextCursor: laterActorA.event.cursor,
       }
     })
     const listNewConversationInputs = vi.fn(async () => ({
-      inputs: [laterActorA],
-      nextCursor: laterActorA.event.cursor,
+      inputs: [],
+      nextCursor: initialInput.event.cursor,
     }))
     const checkpointAcceptedInput = vi.fn(async () => undefined)
     const refresh = vi.fn(async () => ({
@@ -7339,22 +7335,18 @@ describe('assistant auto-reply runtime', () => {
     }))
     const inputSource = {
       checkpointAcceptedInput,
+      listInputCandidates,
       listNewConversationInputs,
-      listInputCandidatesByIds,
       refresh,
     }
     replyMocks.sendAssistantMessage.mockImplementation(async (input: {
       activeTurnInput?: (admission: {
-        availableInputIds?: readonly string[]
         sessionId: string
         turnId: string
         vault: string
       }) => Promise<unknown>
     }) => {
       await expect(input.activeTurnInput?.({
-        availableInputIds: notifiedInputs.map(
-          (candidate) => candidate.event.inputId,
-        ),
         sessionId: 'session-group-order-a',
         turnId: 'turn-group-order-a',
         vault: '/tmp/assistant-automation-vault',
@@ -7396,9 +7388,9 @@ describe('assistant auto-reply runtime', () => {
     })
 
     expect(result.replied).toBe(1)
-    expect(listInputCandidatesByIds).toHaveBeenCalledTimes(1)
-    expect(listNewConversationInputs).not.toHaveBeenCalled()
-    expect(refresh).not.toHaveBeenCalled()
+    expect(listInputCandidates).toHaveBeenCalledTimes(1)
+    expect(listNewConversationInputs).toHaveBeenCalledTimes(1)
+    expect(refresh).toHaveBeenCalledTimes(1)
     expect(checkpointAcceptedInput).not.toHaveBeenCalled()
     expect(evidenceMocks.writeAssistantAutoReplyReplyIntentEvidence)
       .toHaveBeenCalledWith(expect.objectContaining({
@@ -7461,17 +7453,10 @@ describe('assistant auto-reply runtime', () => {
       inputs: [],
       nextCursor: initialInput.event.cursor,
     }))
-    const listInputCandidatesByIds = vi.fn(async (input: {
-      inputIds: readonly string[]
-    }) => {
-      expect(input.inputIds).toEqual(
-        routeCandidates.map((candidate) => candidate.event.inputId),
-      )
-      return {
-        inputs: routeCandidates,
-        nextCursor: routeCandidates[routeCandidates.length - 1]!.event.cursor,
-      }
-    })
+    const listInputCandidates = vi.fn(async () => ({
+      inputs: routeCandidates,
+      nextCursor: routeCandidates[routeCandidates.length - 1]!.event.cursor,
+    }))
     const checkpointAcceptedInput = vi.fn(async () => undefined)
     const refresh = vi.fn(async () => ({
       progressed: false,
@@ -7479,20 +7464,18 @@ describe('assistant auto-reply runtime', () => {
     }))
     const inputSource = {
       checkpointAcceptedInput,
-      listInputCandidatesByIds,
+      listInputCandidates,
       listNewConversationInputs,
       refresh,
     }
     replyMocks.sendAssistantMessage.mockImplementation(async (input: {
       activeTurnInput?: (admission: {
-        availableInputIds?: readonly string[]
         sessionId: string
         turnId: string
         vault: string
       }) => Promise<unknown>
     }) => {
       await expect(input.activeTurnInput?.({
-        availableInputIds: routeCandidates.map((candidate) => candidate.event.inputId),
         sessionId: 'session-1',
         turnId: 'turn-1',
         vault: '/tmp/assistant-automation-vault',
@@ -7534,9 +7517,9 @@ describe('assistant auto-reply runtime', () => {
     })
 
     expect(result.replied).toBe(1)
-    expect(listNewConversationInputs).not.toHaveBeenCalled()
-    expect(listInputCandidatesByIds).toHaveBeenCalledTimes(1)
-    expect(refresh).not.toHaveBeenCalled()
+    expect(listNewConversationInputs).toHaveBeenCalledTimes(1)
+    expect(listInputCandidates).toHaveBeenCalledTimes(1)
+    expect(refresh).toHaveBeenCalledTimes(1)
     expect(checkpointAcceptedInput).not.toHaveBeenCalled()
     expect(evidenceMocks.writeAssistantAutoReplyReplyIntentEvidence)
       .toHaveBeenCalledWith(expect.objectContaining({

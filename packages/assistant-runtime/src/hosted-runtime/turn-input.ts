@@ -41,9 +41,6 @@ export type HostedAssistantInputSelection =
     };
 
 export interface HostedAssistantInputSource extends AssistantInputSource {
-  listInputCandidatesByIds(
-    input: AssistantInputCandidateQuery & { inputIds: readonly string[] },
-  ): Promise<AssistantInputCandidateBatch>;
   readObservedInputIds(): string[];
   readSelectedInputIds(): string[];
 }
@@ -80,13 +77,10 @@ export function createHostedAssistantInputSource(input: {
   const emittedListInputCandidateCursorKeys = new Set<string>();
   let selectedCandidatesPromise: Promise<AssistantInputCandidate[]> | null = null;
   const readSelectedCandidates = () => {
-    selectedCandidatesPromise ??= readHostedAssistantInputEventsById({
+    selectedCandidatesPromise ??= readHostedAssistantInputCandidatesById({
       inputIds: selectedInputIds,
       vaultRoot: input.vaultRoot,
-    }).then((events) => createHostedAssistantInputCandidates({
-      events,
-      vaultRoot: input.vaultRoot,
-    }));
+    });
     return selectedCandidatesPromise;
   };
 
@@ -146,28 +140,6 @@ export function createHostedAssistantInputSource(input: {
       return filterHostedAssistantInputCandidates({
         candidates,
         emittedCursorKeys: emittedListInputCandidateCursorKeys,
-        query,
-      });
-    },
-    async listInputCandidatesByIds(query) {
-      assertHostedAssistantInputQueryNotAborted(query.signal);
-      const inputIds = uniqueStrings(query.inputIds);
-      for (const inputId of inputIds) {
-        observedInputIds.add(inputId);
-      }
-      const events = await readHostedReplyablePendingAssistantInputEvents({
-        inputIds,
-        missingInput: "skip",
-        vaultRoot: input.vaultRoot,
-      });
-      const candidates = await createHostedAssistantInputCandidates({
-        events,
-        vaultRoot: input.vaultRoot,
-      });
-      assertHostedAssistantInputQueryNotAborted(query.signal);
-      return filterHostedAssistantInputCandidates({
-        candidates,
-        ignoreAfterCursor: true,
         query,
       });
     },
@@ -265,15 +237,16 @@ export async function selectHostedAssistantInputIds(
   };
 }
 
-async function createHostedAssistantInputCandidates(input: {
-  events: readonly AssistantInputEventRecord[];
+async function readHostedAssistantInputCandidatesById(input: {
+  inputIds: readonly string[];
   vaultRoot: string;
 }): Promise<AssistantInputCandidate[]> {
+  const events = await readHostedAssistantInputEventsById(input);
   const hostedMailboxItems = await readHostedMailboxAssistantInputItemDetails({
-    inputIds: input.events.map((event) => event.inputId),
+    inputIds: events.map((event) => event.inputId),
     vault: input.vaultRoot,
   });
-  return [...input.events]
+  return events
     .sort((left, right) =>
       compareAssistantInputCursors(left.cursor, right.cursor)
     )
@@ -340,17 +313,14 @@ async function readHostedReplyablePendingAssistantInputEvents(input: {
 
 function filterHostedAssistantInputCandidates(input: {
   candidates: readonly AssistantInputCandidate[];
-  emittedCursorKeys?: Set<string>;
-  ignoreAfterCursor?: boolean;
+  emittedCursorKeys: Set<string>;
   query: AssistantInputCandidateQuery;
 }): AssistantInputCandidateBatch {
   const knownInputIds = new Set(input.query.knownInputIds ?? []);
-  const afterCursor = input.ignoreAfterCursor === true
-    ? null
-    : readEffectiveHostedAssistantInputSourceAfterCursor({
-        afterCursor: input.query.afterCursor ?? null,
-        emittedCursorKeys: input.emittedCursorKeys ?? new Set(),
-      });
+  const afterCursor = readEffectiveHostedAssistantInputSourceAfterCursor({
+    afterCursor: input.query.afterCursor ?? null,
+    emittedCursorKeys: input.emittedCursorKeys,
+  });
   const batch = buildHostedAssistantInputCandidateBatch({
     afterCursor,
     candidates: input.candidates.filter((candidate) => {
@@ -368,7 +338,7 @@ function filterHostedAssistantInputCandidates(input: {
     limit: input.query.limit,
   });
   for (const candidate of batch.inputs) {
-    input.emittedCursorKeys?.add(hostedAssistantInputCursorKey(candidate.event.cursor));
+    input.emittedCursorKeys.add(hostedAssistantInputCursorKey(candidate.event.cursor));
   }
   return batch;
 }

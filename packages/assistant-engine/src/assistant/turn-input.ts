@@ -18,7 +18,6 @@ export interface AssistantTurnInputRefreshResult {
 }
 
 export interface AssistantActiveTurnInputAdmissionBaseInput {
-  availableInputIds?: readonly string[]
   knownProjectionCaptureIds?: readonly string[]
   knownInputIds?: readonly string[]
   signal?: AbortSignal

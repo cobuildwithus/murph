@@ -49,7 +49,6 @@ import {
 import type {
   AssistantInputCandidateBatch,
   AssistantInputCandidate,
-  AssistantInputCandidateQuery,
   AssistantInputSource,
 } from '../input-source.js'
 import {
@@ -209,12 +208,7 @@ type AssistantAutoReplyDecision =
 type AssistantActiveTurnInputSource = Pick<
   AssistantInputSource,
   'checkpointAcceptedInput' | 'listNewConversationInputs' | 'refresh'
-> & {
-  listInputCandidates?: AssistantInputSource['listInputCandidates']
-  listInputCandidatesByIds?: (
-    input: AssistantInputCandidateQuery & { inputIds: readonly string[] }
-  ) => Promise<AssistantInputCandidateBatch>
-}
+> & Partial<Pick<AssistantInputSource, 'listInputCandidates'>>
 
 type AssistantAutoReplySendResult = Awaited<
   ReturnType<typeof sendAssistantMessage>
@@ -1739,15 +1733,13 @@ function createAssistantAutoReplyActiveTurnInputHooks(input: {
   const pendingAcceptances: AssistantAutoReplyActiveTurnPendingAcceptance[] = []
 
   const admit: AssistantActiveTurnInputAdmissionHook = async (admissionInput) => {
-    if (!input.inputSource.listInputCandidatesByIds) {
-      const refreshResult = await input.inputSource.refresh({
-        signal: admissionInput.signal,
-      })
-      if (refreshResult.reason === 'source_unavailable') {
-        throw new AssistantActiveTurnInputUnavailableError(
-          'same-conversation input source is temporarily unavailable during the active turn; will retry later.',
-        )
-      }
+    const refreshResult = await input.inputSource.refresh({
+      signal: admissionInput.signal,
+    })
+    if (refreshResult.reason === 'source_unavailable') {
+      throw new AssistantActiveTurnInputUnavailableError(
+        'same-conversation input source is temporarily unavailable during the active turn; will retry later.',
+      )
     }
 
     const knownProjectionCaptureIds = [
@@ -1765,7 +1757,6 @@ function createAssistantAutoReplyActiveTurnInputHooks(input: {
       conversation,
       context,
       inputSource: input.inputSource,
-      inputIds: admissionInput.availableInputIds ?? [],
       knownProjectionCaptureIds,
       knownInputIds,
       signal: admissionInput.signal,
@@ -2012,7 +2003,6 @@ async function listAutoReplyActiveTurnInputs(input: {
   afterCursor: AssistantInputCandidate['event']['cursor']
   context: AssistantAutoReplyGroupContext
   conversation: AssistantInputConversationRef
-  inputIds: readonly string[]
   inputSource: AssistantActiveTurnInputSource
   knownProjectionCaptureIds: readonly string[]
   knownInputIds: readonly string[]
@@ -2020,29 +2010,6 @@ async function listAutoReplyActiveTurnInputs(input: {
 }): Promise<AssistantInputCandidateBatch> {
   const expectedChannel = normalizeNullableString(input.context.firstItem.summary.source)
   const deliveryTarget = readAutoReplyDeliveryTarget(input.context)
-  if (
-    input.inputSource.listInputCandidatesByIds &&
-    expectedChannel &&
-    deliveryTarget
-  ) {
-    const exact = await input.inputSource.listInputCandidatesByIds({
-      afterCursor: input.afterCursor,
-      inputIds: input.inputIds,
-      knownInputIds: input.knownInputIds,
-      limit: 100,
-      signal: input.signal,
-      sourceId: expectedChannel,
-    })
-    return selectAutoReplyRouteInput({
-      afterCursor: input.afterCursor,
-      candidates: exact.inputs,
-      conversation: input.conversation,
-      deliveryTarget,
-      expectedChannel,
-      knownProjectionCaptureIds: input.knownProjectionCaptureIds,
-    })
-  }
-
   const strict = await input.inputSource.listNewConversationInputs({
     afterCursor: input.afterCursor,
     conversation: input.conversation,

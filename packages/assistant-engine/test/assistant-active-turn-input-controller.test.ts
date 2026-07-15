@@ -725,10 +725,8 @@ test('active-turn controller retries input-available admission after non-fatal i
   )
   let failedOnce = false
   let probeAdmissions = 0
-  const admittedInputIds: Array<readonly string[] | undefined> = []
   const controller = createAssistantActiveTurnInputController({
-    admissionHook: async (input) => {
-      admittedInputIds.push(input.availableInputIds)
+    admissionHook: async () => {
       if (!failedOnce) {
         failedOnce = true
         throw unavailable
@@ -760,9 +758,7 @@ test('active-turn controller retries input-available admission after non-fatal i
     vault: '/vaults/test',
   })
   try {
-    const notification = controller.notifyInputAvailable({
-      inputIds: ['ain_00000000000000000000000000000021'],
-    }).catch(() => undefined)
+    const notification = controller.notifyInputAvailable().catch(() => undefined)
     assert.deepEqual(await controller.admitAvailable({ probeIfIdle: true }), {
       acceptedInputs: [
         {
@@ -784,10 +780,6 @@ test('active-turn controller retries input-available admission after non-fatal i
     })
     await notification
     assert.equal(probeAdmissions, 1)
-    assert.deepEqual(admittedInputIds, [
-      ['ain_00000000000000000000000000000021'],
-      ['ain_00000000000000000000000000000021'],
-    ])
   } finally {
     controller.close()
   }
@@ -1071,13 +1063,11 @@ test('active-turn controller reruns input-available admission for in-flight noti
   } = await import('../src/assistant/active-turn-input-controller.ts')
   const firstAdmissionStarted = createDeferred<void>()
   const firstAdmissionRelease = createDeferred<void>()
-  const admittedInputIds: Array<readonly string[] | undefined> = []
   let admissionCount = 0
   const steer = vi.fn(async () => undefined)
   let ordinal = 0
   const controller = createAssistantActiveTurnInputController({
-    admissionHook: async (input) => {
-      admittedInputIds.push(input.availableInputIds)
+    admissionHook: async () => {
       admissionCount += 1
       ordinal += 1
       if (ordinal === 1) {
@@ -1129,7 +1119,6 @@ test('active-turn controller reruns input-available admission for in-flight noti
         identityId: 'identity-1',
         threadId: 'thread-1',
       },
-      inputIds: ['ain_00000000000000000000000000000031'],
       vault: '/vaults/test',
     })
     await firstAdmissionStarted.promise
@@ -1139,7 +1128,6 @@ test('active-turn controller reruns input-available admission for in-flight noti
         identityId: 'identity-1',
         threadId: 'thread-1',
       },
-      inputIds: ['ain_00000000000000000000000000000032'],
       vault: '/vaults/test',
     })
     await Promise.resolve()
@@ -1151,10 +1139,6 @@ test('active-turn controller reruns input-available admission for in-flight noti
       secondNotification,
     ])
     assert.equal(admissionCount, 2)
-    assert.deepEqual(admittedInputIds, [
-      ['ain_00000000000000000000000000000031'],
-      ['ain_00000000000000000000000000000032'],
-    ])
     assert.equal(firstResult?.kind, 'accepted')
     assert.equal(secondResult?.kind, 'accepted')
     expect(steer).toHaveBeenCalledTimes(1)
@@ -1194,7 +1178,7 @@ test('active-turn controller reruns input-available admission for in-flight noti
   }
 })
 
-test('active-turn notifier preserves A-B-A input order for one shared group route', async () => {
+test('active-turn notifier coalesces A-B-A staged ids into one generic group wake', async () => {
   const actorByInputId = new Map([
     ['ain_61616161616161616161616161616161', 'actor-a'],
     ['ain_62626262626262626262626262626262', 'actor-b'],
@@ -1216,10 +1200,10 @@ test('active-turn notifier preserves A-B-A input order for one shared group rout
     createAssistantActiveTurnInputController,
     notifyAssistantActiveTurnInputAvailableForInputIds,
   } = await import('../src/assistant/active-turn-input-controller.ts')
-  const admittedInputIds: Array<readonly string[] | undefined> = []
+  let admissionCount = 0
   const controller = createAssistantActiveTurnInputController({
-    admissionHook: async (input) => {
-      admittedInputIds.push(input.availableInputIds)
+    admissionHook: async () => {
+      admissionCount += 1
       return { kind: 'no-new-input' }
     },
     conversationKeys: [
@@ -1236,7 +1220,7 @@ test('active-turn notifier preserves A-B-A input order for one shared group rout
       inputIds,
       vault: '/vaults/test',
     })
-    assert.deepEqual(admittedInputIds, [inputIds])
+    assert.equal(admissionCount, 1)
   } finally {
     controller.close()
     vi.doUnmock('../src/assistant/input-store.js')
