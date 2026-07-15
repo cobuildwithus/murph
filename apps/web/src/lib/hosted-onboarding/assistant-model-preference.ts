@@ -22,11 +22,13 @@ import {
 import {
   parseHostedBillingPhase,
   parseHostedBillingPlanCode,
+  parseHostedPlanCode,
 } from "./billing-plans";
 import { hasActiveHostedMemberAccess } from "./member-access";
 import { hostedOnboardingError } from "./errors";
 import {
   lockHostedMemberRow,
+  lockHostedMemberSponsoredAccessRows,
 } from "./shared";
 
 const HOSTED_MEMBER_ASSISTANT_MODEL_SELECT = {
@@ -38,6 +40,7 @@ const HOSTED_MEMBER_ASSISTANT_MODEL_SELECT = {
           suspendedAt: true,
         },
       },
+      planCode: true,
       status: true,
     },
     where: {
@@ -101,17 +104,36 @@ export interface HostedMemberAssistantModelUpdateResult
 }
 
 export function isHostedMemberSolModelEligible(input: {
+  accountGroupMemberships: readonly {
+    group: {
+      billingStatus: HostedBillingStatus;
+      suspendedAt: Date | null;
+    };
+    planCode: string;
+    status: string;
+  }[];
   billingStatus: HostedBillingStatus;
   currentBillingPhase: string | null;
   currentBillingPlanCode: string | null;
   isThreadContainerMember: boolean;
   suspendedAt: Date | null;
 }): boolean {
-  return input.billingStatus === HostedBillingStatus.active
-    && input.suspendedAt === null
+  if (input.suspendedAt !== null || input.isThreadContainerMember) {
+    return false;
+  }
+
+  const hasDirectPaidEdgeAccess =
+    input.billingStatus === HostedBillingStatus.active
     && parseHostedBillingPhase(input.currentBillingPhase) === "paid"
-    && parseHostedBillingPlanCode(input.currentBillingPlanCode) === "launch_edge_monthly"
-    && !input.isThreadContainerMember;
+    && parseHostedBillingPlanCode(input.currentBillingPlanCode) === "launch_edge_monthly";
+  const hasFamilyEdgeAccess = input.accountGroupMemberships.some(
+    (membership) => membership.status === "active"
+      && parseHostedPlanCode(membership.planCode) === "edge"
+      && membership.group.billingStatus === HostedBillingStatus.active
+      && membership.group.suspendedAt === null,
+  );
+
+  return hasDirectPaidEdgeAccess || hasFamilyEdgeAccess;
 }
 
 export async function readHostedMemberAssistantModelPreference(input: {
@@ -166,6 +188,7 @@ export async function updateHostedMemberAssistantConfigurationTx(input: {
     });
   }
   await lockHostedMemberRow(input.prisma, input.memberId);
+  await lockHostedMemberSponsoredAccessRows(input.prisma, input.memberId);
 
   const member = await readHostedMemberAssistantModelState(input);
   if (!member) {
@@ -278,6 +301,7 @@ function resolveHostedMemberAssistantModel(
     member,
   );
   const solAvailable = isHostedMemberSolModelEligible({
+    accountGroupMemberships: member.accountGroupMemberships,
     billingStatus: member.billingStatus,
     currentBillingPhase: member.billingRef?.currentBillingPhase ?? null,
     currentBillingPlanCode: member.billingRef?.currentBillingPlanCode ?? null,

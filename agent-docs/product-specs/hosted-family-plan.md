@@ -24,6 +24,8 @@ invite has one assigned tier and receives that tier's individual usage cap.
   membership are active.
 - Every sponsored member gets their assigned tier's member-level usage
   allowance. There is no shared Family usage pool.
+- An active Family Edge assignment unlocks Edge model choices, including Sol;
+  a Family Pulse assignment does not.
 - Every family member remains a separate `HostedMember` with their own routing,
   mailbox, workspace/runtime state, legal consent, export, and deletion rights.
 - The owner can see seat and setup status, such as invited, joined, messaging
