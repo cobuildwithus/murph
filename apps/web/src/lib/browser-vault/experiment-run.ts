@@ -1,4 +1,5 @@
 import {
+  resolveBiomarkerChangeSentiment,
   resolveExperimentAdherenceRollupTarget,
   selectBrowserVaultExperimentResults,
   type BrowserVaultExperimentBiomarkerResult,
@@ -22,7 +23,6 @@ import type {
 } from "@/src/types/experiments";
 import { normalizeExperimentRunStatus } from "@/src/lib/browser-vault/experiment-status";
 import { resolveBiomarkerDesiredDirection } from "@/src/lib/health-commons/biomarker-desired-direction";
-import type { HealthCommonsBiomarkerDesiredDirection } from "@murphai/contracts";
 
 export interface ResolveBrowserVaultExperimentRunInput {
   client: BrowserVaultQueryClient | null;
@@ -248,7 +248,7 @@ function buildSignals(results: BrowserVaultExperimentResultsView): ExperimentRun
         delta: showDelta ? formatDelta(biomarker.deltaAbs, unit) : "",
         direction,
         sentiment: showDelta
-          ? resolveSignalSentiment(
+          ? resolveBiomarkerChangeSentiment(
               direction,
               resolveBiomarkerDesiredDirection(biomarker.biomarkerKey),
             )
@@ -1189,25 +1189,6 @@ function resolveSignalDirection(
   }
 
   return deltaAbs > 0 ? "up" : "down";
-}
-
-function resolveSignalSentiment(
-  direction: "up" | "down" | "neutral",
-  desiredDirection: HealthCommonsBiomarkerDesiredDirection | null,
-): "positive" | "negative" | "neutral" {
-  if (direction === "neutral" || !desiredDirection) {
-    return "neutral";
-  }
-
-  if (desiredDirection === "mixed_or_contextual" || desiredDirection === "stable") {
-    return "neutral";
-  }
-
-  const movingInDesiredDirection =
-    (direction === "up" && (desiredDirection === "higher" || desiredDirection === "higher_or_stable")) ||
-    (direction === "down" && (desiredDirection === "lower" || desiredDirection === "lower_or_stable"));
-
-  return movingInDesiredDirection ? "positive" : "negative";
 }
 
 function formatDelta(value: number, unit: string | null | undefined): string {
