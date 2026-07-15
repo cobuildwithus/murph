@@ -137,6 +137,11 @@ describe("murph.group dynamic tool", () => {
       .toContain("do not tell members to join again or make the link the primary action");
     expect(MURPH_GROUP_TOOL.description)
       .toContain("existing members keep their membership and other grants");
+    expect(MURPH_GROUP_TOOL.description)
+      .toContain("When these actions are available for the current connected group-chat turn");
+    expect(MURPH_GROUP_TOOL.description)
+      .toContain("whether each participant already uses Murph");
+    expect(MURPH_GROUP_TOOL.description).not.toContain("their own Murph");
   });
 
   it("parses the chat-scoped actions without accepting a model-supplied thread target", () => {

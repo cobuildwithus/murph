@@ -711,6 +711,23 @@ describe('assistant skill assets', () => {
     expect(raw).toContain('Do not tell existing members to join')
   })
 
+  it('keeps the new-group contact handoff natural and reactive', async () => {
+    const groupChatSkill = ASSISTANT_SKILLS.find((skill) => skill.slug === 'group-chat')
+    expect(groupChatSkill).toBeTruthy()
+    if (!groupChatSkill) return
+
+    const raw = await readSkillFile(groupChatSkill)
+    expect(raw).toContain('When the group tools are available')
+    expect(raw).toContain('check the room once on your first reply')
+    expect(raw).toContain('text you to get set up')
+    expect(raw).toContain('Use your own words,\n  not a fixed script')
+    expect(raw).toContain('Do not repeat the invitation unprompted')
+    expect(raw).toContain('when someone new joins later')
+    expect(raw).toContain('If\n  someone asks why they have not been added')
+    expect(raw).not.toContain('their own Murph')
+    expect(raw).not.toContain('the shape of "')
+  })
+
   it('registers a dedicated group newsletter editorial skill', async () => {
     const newsletterSkill = ASSISTANT_SKILLS.find(
       (skill) => skill.slug === 'group-newsletter',
