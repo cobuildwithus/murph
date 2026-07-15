@@ -103,9 +103,14 @@ sequence fallback. Tone and voice changes continue to
 append the existing `member.preferences.updated` mailbox event inside the web
 transaction and converge into canonical vault preferences through normal
 runtime handling. Model and reasoning changes remain exclusively owned by
-`murph.assistant_configuration`, whose exact resolved target is bound to
-passkey-backed approval and applies at the next hosted invocation without a
-mailbox event or vault copy. The personalization response
+`murph.assistant_configuration`. The runtime may request an update only from
+the sole accepted user input for the active turn; inside the mutation
+transaction, web binds that input id to the callback member and one live
+conversation mailbox row before re-deriving access and Sol eligibility. A
+successful change applies at the next hosted invocation without passkey
+approval, a mailbox event, or a vault copy. Legacy approval-shaped
+configuration callbacks remain web-accepted only while pre-rollout runners
+drain; new runtimes do not create them. The personalization response
 returns only the effective enum values (normalizing absent stored style to the
 shared `formal`/`upbeat` presentation defaults), read-only model availability,
 and truthful saved/unchanged state so the assistant can confirm what actually

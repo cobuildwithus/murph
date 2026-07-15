@@ -3995,7 +3995,7 @@ test('sendAssistantMessageLocal exposes hosted personalization input authority t
   await sendAssistantMessageLocal({
     executionContext: {
       hosted: {
-        currentAssistantPersonalizationInputId: () => assistantInputId,
+        currentAssistantPreferenceInputId: () => assistantInputId,
         memberId: 'member-hosted',
         userEnvKeys: [],
       },
@@ -4008,7 +4008,7 @@ test('sendAssistantMessageLocal exposes hosted personalization input authority t
     mocks.executeCodexTurnWithRecovery.mock.calls[0]?.[0]?.hostedToolContext
   assert.ok(hostedToolContext)
   assert.equal(
-    hostedToolContext.currentAssistantPersonalizationInputId?.(),
+    hostedToolContext.currentAssistantPreferenceInputId?.(),
     assistantInputId,
   )
 })

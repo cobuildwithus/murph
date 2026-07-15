@@ -36,10 +36,6 @@ import {
   HOSTED_ASSISTANT_TERRA_MODEL,
 } from '@murphai/hosted-execution/assistant-model'
 import {
-  buildHostedAssistantConfigurationApprovalConsumerId,
-  buildHostedAssistantConfigurationApprovalRequest,
-} from '@murphai/hosted-execution/assistant-configuration-approval'
-import {
   HOSTED_VAULT_SHARE_ACTIVITY_DISTANCE_PROJECTION_KIND,
   HOSTED_VAULT_SHARE_ACTIVITY_DISTANCE_SELECTOR_ACTIVITY_KINDS,
   HOSTED_VAULT_SHARE_ACTIVITY_MINUTES_PROJECTION_KIND,
@@ -401,7 +397,7 @@ export const MURPH_PERSONALIZATION_TOOL = {
   namespace: 'murph',
   name: 'personalization',
   description:
-    'Read the current private hosted member\'s effective Murph tone, voice, and model context, or atomically update tone and voice. Use murph.assistant_configuration for model or reasoning changes because those require secure user approval.',
+    'Read the current private hosted member\'s effective Murph tone, voice, and model context, or atomically update tone and voice. Use murph.assistant_configuration for model or reasoning changes.',
   inputSchema: {
     oneOf: [
       {
@@ -449,7 +445,7 @@ export const MURPH_ASSISTANT_CONFIGURATION_TOOL = {
   namespace: 'murph',
   name: 'assistant_configuration',
   description:
-    'Read the current hosted turn model and reasoning effort plus the models and reasoning efforts available for the next turn, or begin and complete a secure user-approved change. Luna is the most usage-efficient model, Terra is the default, and Sol requires an active paid Edge plan. The lowest supported reasoning effort is low; these hosted models do not support none. Use action="read" whenever configuration facts are needed. Use action="update" only when the current user-sourced turn explicitly asks for the exact change. An update first returns a secure approval status; a pending result includes its approval URL and does not save anything. After approval, a later user-sourced turn can repeat the same exact update to save it. Never switch models or reasoning automatically because usage is low. Do not claim a change is saved unless the result says updated or unchanged. A saved update does not change the running turn and takes effect on the next turn.',
+    'Read the current hosted turn model and reasoning effort plus the models and reasoning efforts available for the next turn, or directly save an explicit user-requested change. Luna is the most usage-efficient model, Terra is the default, and Sol requires an active paid Edge plan. The lowest supported reasoning effort is low; these hosted models do not support none. Use action="read" whenever configuration facts are needed. Use action="update" only when the current user-sourced turn explicitly asks for the exact change. Never switch models or reasoning automatically because usage is low. Do not claim a change is saved unless the result says updated or unchanged. A saved update does not change the running turn and takes effect on the next turn.',
   inputSchema: {
     type: 'object',
     additionalProperties: false,
@@ -1499,6 +1495,7 @@ export interface MurphDynamicToolExecutionResult {
   finalActionPatch?: MurphDynamicToolFinalActionPatch
   reactionPatch?: MurphDynamicToolReactionPatch
   requiredComputerHandoffUrl?: string
+  requiredVaultFileApprovalUrl?: string
   responseMediaPatch?: MurphDynamicToolResponseMediaPatch
   rpcResult: MurphDynamicToolRpcResult
   usageDraft?: AssistantProviderUsageDraft | null
@@ -2206,6 +2203,7 @@ export async function executeMurphDynamicToolRequest(input: {
                   status: result.status,
                 }),
               ),
+              requiredVaultFileApprovalUrl: result.approvalUrl,
             }
           case 'approved':
             return {
@@ -2562,7 +2560,7 @@ async function executePersonalizationTool(input: {
   }
 
   const assistantInputId = input.request.action === 'update'
-    ? input.hostedToolContext?.currentAssistantPersonalizationInputId?.() ?? null
+    ? input.hostedToolContext?.currentAssistantPreferenceInputId?.() ?? null
     : null
   if (input.request.action === 'update' && assistantInputId === null) {
     return toolTextResult(false, 'personalization is unavailable for this turn')
@@ -2586,7 +2584,7 @@ async function resolveHostedAssistantStyleCausalSeq(
     return null
   }
   const assistantInputId =
-    hostedToolContext.currentAssistantPersonalizationInputId?.() ?? null
+    hostedToolContext.currentAssistantPreferenceInputId?.() ?? null
   const personalizationTool = hostedToolContext.personalizationTool ?? null
   if (!assistantInputId || !personalizationTool?.resolvePreferenceCausalSeq) {
     return null
@@ -2630,13 +2628,12 @@ async function executeAssistantConfigurationTool(input: {
       }))
     }
 
-    const approvalScope =
-      input.hostedToolContext?.currentAssistantConfigurationApprovalScope?.() ?? null
-    const actionApprovalPort = input.hostedToolContext?.actionApprovalPort ?? null
-    if (!approvalScope || !actionApprovalPort) {
+    const assistantInputId =
+      input.hostedToolContext?.currentAssistantPreferenceInputId?.() ?? null
+    if (!assistantInputId) {
       return toolTextResult(
         false,
-        'assistant configuration updates require user-sourced input and secure approval',
+        'assistant configuration updates require user-sourced input',
       )
     }
 
@@ -2694,48 +2691,23 @@ async function executeAssistantConfigurationTool(input: {
       }))
     }
 
-    const approvalRequest = buildHostedAssistantConfigurationApprovalRequest({
-      changes: input.request,
-      returnContactKind: approvalScope.returnContactKind,
-      target: requestedForNextTurn,
-    })
-    const approval = await actionApprovalPort.request(approvalRequest)
-    if (approval.status !== 'approved') {
-      return toolTextResult(true, safeToolPayloadText({
-        approval,
-        currentTurn,
-        requestedForNextTurn,
-        savedForNextTurn,
-      }))
-    }
-
-    const approvalProof = {
-      approvalGeneration: approval.approvalGeneration,
-      consumerId: buildHostedAssistantConfigurationApprovalConsumerId(
-        approvalRequest,
-      ),
-      request: approvalRequest,
-    }
     const result = input.request.model === undefined
       ? await assistantConfigurationTool.request({
           action: 'update',
-          approval: approvalProof,
+          assistantInputId,
           reasoningEffort: requestedForNextTurn.reasoningEffort,
-          target: requestedForNextTurn,
         })
       : input.request.reasoningEffort === undefined
         ? await assistantConfigurationTool.request({
             action: 'update',
-            approval: approvalProof,
+            assistantInputId,
             model: requestedForNextTurn.model,
-            target: requestedForNextTurn,
           })
         : await assistantConfigurationTool.request({
             action: 'update',
-            approval: approvalProof,
+            assistantInputId,
             model: requestedForNextTurn.model,
             reasoningEffort: requestedForNextTurn.reasoningEffort,
-            target: requestedForNextTurn,
           })
     if (result.action !== 'update') {
       throw new TypeError('Assistant configuration update returned a read response.')

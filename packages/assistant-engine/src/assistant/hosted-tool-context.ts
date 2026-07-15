@@ -44,10 +44,6 @@ export interface AssistantHostedToolRequestKeyScope {
   recipientKey: string | null
 }
 
-export interface AssistantHostedAssistantConfigurationApprovalScope {
-  returnContactKind: HostedReturnContactKind | null
-}
-
 export type AssistantHostedVaultFileSendResult =
   | {
       approvalUrl: string
@@ -79,10 +75,8 @@ export interface AssistantHostedToolContext {
     model: string | null
     reasoningEffort: string | null
   }
-  currentAssistantConfigurationApprovalScope?():
-    AssistantHostedAssistantConfigurationApprovalScope | null
   currentHostedMailboxItemIds(): readonly string[]
-  currentAssistantPersonalizationInputId?(): string | null
+  currentAssistantPreferenceInputId?(): string | null
   currentScheduledAutomationAuthority?(): HostedRuntimeNewsletterScheduledAuthority | null
   closeNewsletterCapability?(): void
   recordNewsletterSendResult?(
@@ -109,7 +103,7 @@ export function createAssistantHostedToolContext(input: {
   personalizationTool?: AssistantHostedPersonalizationTool | null
   planUsageTool?: AssistantHostedPlanUsageTool | null
   computerToolsAvailable?: boolean
-  getAssistantPersonalizationInputId?: () => string | null
+  getAssistantPreferenceInputId?: () => string | null
   getDeliveryContext?: () => AssistantHostedToolDeliveryContext
   getUserActionAcceptedInputIds?: () => readonly string[]
   messageInput: AssistantMessageInput
@@ -162,25 +156,13 @@ export function createAssistantHostedToolContext(input: {
     planUsageTool: input.planUsageTool ?? null,
     phoneCalls: input.phoneCalls ?? null,
     computerToolsAvailable: input.computerToolsAvailable === true,
-    currentAssistantPersonalizationInputId: () =>
-      input.getAssistantPersonalizationInputId?.() ?? null,
+    currentAssistantPreferenceInputId: () =>
+      input.getAssistantPreferenceInputId?.() ?? null,
     currentAssistantTarget: () => {
       const session = readDeliveryContext().session
       return {
         model: session.providerOptions.model ?? null,
         reasoningEffort: session.providerOptions.reasoningEffort ?? null,
-      }
-    },
-    currentAssistantConfigurationApprovalScope: () => {
-      const acceptedInputIds = input.getUserActionAcceptedInputIds?.() ?? []
-      if (acceptedInputIds.length === 0) {
-        return null
-      }
-      const deliveryContext = readDeliveryContext()
-      return {
-        returnContactKind: resolveAssistantHostedReturnContactKind(
-          deliveryContext.messageInput.channel,
-        ),
       }
     },
     currentHostedDeliveryContext: () => {

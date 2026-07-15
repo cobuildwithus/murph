@@ -702,10 +702,10 @@ export async function sendAssistantMessageLocal(
               personalizationTool: hostedExecutionContext.personalizationTool ?? null,
               planUsageTool: hostedExecutionContext.planUsageTool ?? null,
               phoneCalls: hostedExecutionContext.phoneCalls ?? null,
-              ...(hostedExecutionContext.currentAssistantPersonalizationInputId
+              ...(hostedExecutionContext.currentAssistantPreferenceInputId
                 ? {
-                    getAssistantPersonalizationInputId:
-                      hostedExecutionContext.currentAssistantPersonalizationInputId,
+                    getAssistantPreferenceInputId:
+                      hostedExecutionContext.currentAssistantPreferenceInputId,
                   }
                 : {}),
               getDeliveryContext: () => ({

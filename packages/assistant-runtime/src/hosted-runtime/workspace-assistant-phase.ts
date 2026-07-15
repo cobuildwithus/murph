@@ -222,7 +222,7 @@ export interface HostedWorkspaceRuntimeAssistantPhaseInput
   >;
   runtimeEnv: Readonly<Record<string, string>>;
   beforeProviderAcceptedInputs?: AssistantBeforeProviderAcceptedInputsHook | null;
-  currentAssistantPersonalizationInputId?: () => string | null;
+  currentAssistantPreferenceInputId?: () => string | null;
   stagedDirtyAcks?: readonly HostedDeviceSyncDirtyProcessedPostCheckpointRecord[] | null;
   suppressDirtyPendingFetch?: boolean;
   signal?: AbortSignal | null;
@@ -619,10 +619,10 @@ export async function runHostedWorkspaceAssistantPhase(
     {
       hosted: {
         actionApprovalPort: input.runtime.platform.actionApprovalPort ?? null,
-        ...(input.currentAssistantPersonalizationInputId
+        ...(input.currentAssistantPreferenceInputId
           ? {
-              currentAssistantPersonalizationInputId:
-                input.currentAssistantPersonalizationInputId,
+              currentAssistantPreferenceInputId:
+                input.currentAssistantPreferenceInputId,
             }
           : {}),
         assistantConfigurationTool:

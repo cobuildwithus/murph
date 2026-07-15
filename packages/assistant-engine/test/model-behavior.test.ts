@@ -376,7 +376,7 @@ describe('assistant execution prompt contract', () => {
       'never use a same-turn voice demo as activation proof',
     )
     expect(layers.stableRouteCapabilityPrompt).toContain(
-      'exact-target approval result is authoritative',
+      'explicit user-requested model or reasoning changes',
     )
     expect(layers.stableRouteCapabilityPrompt).toContain(
       'a saved change starts on the next turn',

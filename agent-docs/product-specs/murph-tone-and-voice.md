@@ -1,6 +1,6 @@
 # How Murph Talks
 
-Last verified: 2026-07-14
+Last verified: 2026-07-15
 Status: Implemented for onboarding, settings, hosted mailbox handoff, prompt tone, voice memo default resolution, supervisor-run preview generation, and private Humor, Push, and Detail controls in conversation and Settings
 
 ## Product Contract
@@ -94,9 +94,10 @@ the runtime has its web-owned port:
 Model and reasoning mutations belong exclusively to
 `murph.assistant_configuration`. That operation reads the current-turn and
 saved next-turn configuration, requires user-sourced intent for an exact update,
-and saves only after the matching passkey approval is consumed. A pending
-approval does not change configuration, and a saved update starts on the next
-turn rather than changing the turn that requested it.
+and saves only when web binds the sole accepted input id to the callback member
+and one live conversation mailbox row. This preference change does not require
+passkey approval. A saved update starts on the next turn rather than changing
+the turn that requested it.
 
 Voice labels shown to members map to tool ids from the shared
 `assistantVoiceOptions` roster; voice guidance derives the complete mapping

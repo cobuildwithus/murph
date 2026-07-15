@@ -594,6 +594,54 @@ function appendRequiredComputerHandoffUrl(
     : `Take over here: ${handoffUrl}`
 }
 
+function appendRequiredVaultFileApprovalUrls(
+  message: string,
+  approvalUrls: readonly string[],
+): string {
+  let finalMessage = normalizeNullableString(message)
+  const requiredApprovalUrls = new Set(approvalUrls)
+  for (const approvalUrl of approvalUrls) {
+    let exactUrlPresent = false
+    try {
+      const parsed = new URL(approvalUrl)
+      const pathPrefix = parsed.pathname.slice(0, parsed.pathname.lastIndexOf('/') + 1)
+      const approvalUrlPrefix = `${parsed.origin}${pathPrefix}`
+      finalMessage = normalizeNullableString(
+        finalMessage?.replace(
+          new RegExp(`${escapeRegExp(approvalUrlPrefix)}[^\\s<>()\\[\\]{}"']+`, 'gu'),
+          (candidate) => {
+            const withoutSentencePunctuation = candidate.replace(/[.,;:!?]+$/u, '')
+            if (requiredApprovalUrls.has(withoutSentencePunctuation)) {
+              if (withoutSentencePunctuation === approvalUrl) {
+                exactUrlPresent = true
+              }
+              return withoutSentencePunctuation
+            }
+            return ''
+          },
+        ) ?? '',
+      )
+    } catch {
+      // The trusted approval owner validates this URL before it reaches the
+      // assistant. If a test double violates that contract, exact append still
+      // preserves the supplied value without attempting URL-shaped cleanup.
+      exactUrlPresent = finalMessage?.includes(approvalUrl) === true
+    }
+
+    if (!exactUrlPresent) {
+      finalMessage = finalMessage
+        ? `${finalMessage}\n\n${approvalUrl}`
+        : approvalUrl
+    }
+  }
+
+  return finalMessage ?? ''
+}
+
+function escapeRegExp(value: string): string {
+  return value.replace(/[.*+?^${}()|[\]\\]/gu, '\\$&')
+}
+
 export async function executeCodexAppServerTurn(
   input: CodexAppServerTurnInput,
 ): Promise<CodexAppServerTurnResult> {
@@ -2442,6 +2490,7 @@ async function runCodexAppServerTurnOnProcess(
   const runtimeIssueInputs: AssistantRuntimeIssueInput[] = []
   let computerToolsLockedAfterUserPause = false
   let requiredComputerHandoffUrl: string | null = null
+  const requiredVaultFileApprovalUrls: string[] = []
   const actionDiagnostics = input.onTraceEvent
     ? createCodexActionDiagnosticsReducer()
     : null
@@ -3247,6 +3296,25 @@ async function runCodexAppServerTurnOnProcess(
     }
 
     if (
+      requiredVaultFileApprovalUrls.length > 0 &&
+      dynamicToolRequest.kind === 'finish-without-reply'
+    ) {
+      void tryWriteRpcMessage({
+        id: requestId,
+        result: {
+          success: false,
+          contentItems: [
+            {
+              type: 'inputText',
+              text: 'finish_without_reply is unavailable while a vault-file approval link must be delivered',
+            },
+          ],
+        },
+      })
+      return
+    }
+
+    if (
       computerToolsLockedAfterUserPause &&
       isComputerDynamicToolRequest(dynamicToolRequest)
     ) {
@@ -3367,6 +3435,12 @@ async function runCodexAppServerTurnOnProcess(
       }
       if (result.requiredComputerHandoffUrl) {
         requiredComputerHandoffUrl = result.requiredComputerHandoffUrl
+      }
+      if (
+        result.requiredVaultFileApprovalUrl &&
+        !requiredVaultFileApprovalUrls.includes(result.requiredVaultFileApprovalUrl)
+      ) {
+        requiredVaultFileApprovalUrls.push(result.requiredVaultFileApprovalUrl)
       }
       if (result.responseMediaPatch) {
         try {
@@ -4196,8 +4270,10 @@ async function runCodexAppServerTurnOnProcess(
         : finalTrailingSteerCandidate?.deliveryContextOrdinal ??
           latestDeliveryContextOrdinal
   const finalActionPatch = resolveFinalActionPatch(finalDeliveryContextOrdinal)
+  const requiredUserVisibleLink =
+    requiredComputerHandoffUrl !== null || requiredVaultFileApprovalUrls.length > 0
   const noReplySelected =
-    finalActionPatch?.kind === 'none' && !requiredComputerHandoffUrl
+    finalActionPatch?.kind === 'none' && !requiredUserVisibleLink
   const finalAction: AssistantNoReplyDisposition | null = noReplySelected
     ? { kind: 'none' }
     : null
@@ -4205,12 +4281,16 @@ async function runCodexAppServerTurnOnProcess(
     noReplySelected || suppressTrailingSteerCandidateForEarlierNoReply
       ? ''
       : selectedFinalMessage
-  const finalMessage = requiredComputerHandoffUrl
+  let finalMessage = requiredComputerHandoffUrl
     ? appendRequiredComputerHandoffUrl(
         modelFinalMessage,
         requiredComputerHandoffUrl,
       )
     : modelFinalMessage
+  finalMessage = appendRequiredVaultFileApprovalUrls(
+    finalMessage,
+    requiredVaultFileApprovalUrls,
+  )
   if (
     noReplySelected &&
     normalizeNullableString(extractedFinalMessage) !== null
@@ -4232,10 +4312,10 @@ async function runCodexAppServerTurnOnProcess(
 
   return {
     acceptedNoReplyDeliveryContextOrdinals:
-      requiredComputerHandoffUrl ? [] : listNoReplyFinalActionPatchOrdinals(),
+      requiredUserVisibleLink ? [] : listNoReplyFinalActionPatchOrdinals(),
     finalAction,
     finalActionExplicit:
-      finalActionPatch !== null && !requiredComputerHandoffUrl,
+      finalActionPatch !== null && !requiredUserVisibleLink,
     finalMessage,
     reactions: reactionPatches.map((entry) => ({
       deliveryContextOrdinal: entry.deliveryContextOrdinal,

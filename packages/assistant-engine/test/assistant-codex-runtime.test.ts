@@ -130,6 +130,8 @@ function executeCodexAppServerTurn(
       productFeedbackAvailable:
         typeof input.productFeedbackRecorder?.recordProductFeedback === 'function',
       progressUpdatesAvailable: input.progressDelivery != null,
+      vaultFileSendAvailable:
+        input.hostedToolContext?.vaultFileSendAvailable === true,
     }),
   })
 }
@@ -155,16 +157,18 @@ function createProgressDeliveryMock(
 function createHostedToolContext(input: {
   computerToolsAvailable?: boolean
   groupTool?: AssistantHostedToolContext['groupTool']
+  sendVaultFile?: AssistantHostedToolContext['sendVaultFile']
+  vaultFileSendAvailable?: boolean
 } = {}): AssistantHostedToolContext {
   return {
     computerToolsAvailable: input.computerToolsAvailable ?? true,
     currentHostedDeliveryContext: () => null,
     currentHostedMailboxItemIds: () => [],
     groupTool: input.groupTool ?? null,
-    sendVaultFile: vi.fn(async () => {
+    sendVaultFile: input.sendVaultFile ?? vi.fn(async () => {
       throw new Error('Vault-file sending is unavailable for this turn.')
     }),
-    vaultFileSendAvailable: false,
+    vaultFileSendAvailable: input.vaultFileSendAvailable ?? false,
   }
 }
 
@@ -1947,6 +1951,188 @@ describe('assistant codex runtime', () => {
       finalMessage: 'Take over here: https://web.example.test/computer/handoff/raw-token',
     })
   })
+
+  const vaultApprovalUrlScenarios = [
+    {
+      expectedFinalMessage: `Approve here:\n\nhttps://www.withmurph.ai/approve/haa_${'a'.repeat(32)}`,
+      name: 'replaces a model-corrupted link with the exact owner URL',
+      selectNoReplyBeforeApproval: false,
+    },
+    {
+      expectedFinalMessage: `https://www.withmurph.ai/approve/haa_${'a'.repeat(32)}`,
+      name: 'overrides an earlier no-reply selection',
+      selectNoReplyBeforeApproval: true,
+    },
+    {
+      approvalCount: 2,
+      expectedFinalMessage: [
+        'Approve here:',
+        `https://www.withmurph.ai/approve/haa_${'a'.repeat(32)}`,
+        `https://www.withmurph.ai/approve/haa_${'b'.repeat(32)}`,
+      ].join('\n\n'),
+      name: 'preserves every exact owner URL when multiple vault approvals are pending',
+      selectNoReplyBeforeApproval: false,
+    },
+    {
+      expectedFinalMessage: `Approve here: https://www.withmurph.ai/approve/haa_${'a'.repeat(32)}`,
+      modelMessage: `Approve here: https://www.withmurph.ai/approve/haa_${'a'.repeat(32)}.`,
+      name: 'strips sentence punctuation from an exact owner URL',
+      selectNoReplyBeforeApproval: false,
+    },
+  ] as const
+
+  async function runVaultApprovalUrlScenario(
+    scenario: (typeof vaultApprovalUrlScenarios)[number],
+  ): Promise<void> {
+    const workingDirectory = await createTempDir('assistant-codex-vault-approval-url-work-')
+    const approvalCount = 'approvalCount' in scenario ? scenario.approvalCount : 1
+    const exactApprovalUrls = [
+      `https://www.withmurph.ai/approve/haa_${'a'.repeat(32)}`,
+      `https://www.withmurph.ai/approve/haa_${'b'.repeat(32)}`,
+    ].slice(0, approvalCount)
+    const malformedApprovalUrls = [
+      `https://www.withmurph.ai/approve/haa_${'a'.repeat(31)}`,
+      `https://www.withmurph.ai/approve/haa_${'b'.repeat(31)}`,
+    ].slice(0, approvalCount)
+    let nextApprovalIndex = 0
+    const sendVaultFile = vi.fn(async () => {
+      const approvalUrl = exactApprovalUrls[nextApprovalIndex]
+      if (!approvalUrl) {
+        throw new Error('Unexpected vault approval request.')
+      }
+      nextApprovalIndex += 1
+      return {
+        approvalUrl,
+        filename: `report-${nextApprovalIndex}.pdf`,
+        status: 'pending' as const,
+      }
+    })
+    const hostedToolContext = createHostedToolContext({
+      computerToolsAvailable: false,
+      sendVaultFile,
+      vaultFileSendAvailable: true,
+    })
+
+    codexMocks.spawn.mockImplementation(() => {
+      const child = new MockChildProcess()
+
+      queueMicrotask(() => {
+        void (async () => {
+          await waitForRpcMethod(child, 'initialize')
+          child.stdout.write(jsonLine({ id: 1, result: {} }))
+          await waitForRpcMethod(child, 'thread/start')
+          child.stdout.write(jsonLine({
+            id: 2,
+            result: { thread: { id: 'thread-vault-approval-url' } },
+          }))
+          await waitForRpcMethod(child, 'turn/start')
+          child.stdout.write(jsonLine({
+            id: 3,
+            result: { turn: { id: 'turn-vault-approval-url' } },
+          }))
+
+          if (scenario.selectNoReplyBeforeApproval) {
+            child.stdout.write(jsonLine({
+              id: 70,
+              method: 'item/tool/call',
+              params: {
+                arguments: {},
+                namespace: 'murph',
+                tool: 'finish_without_reply',
+              },
+            }))
+            await expect(waitForRpcResponse(child, 70)).resolves.toMatchObject({
+              id: 70,
+              result: { success: true },
+            })
+          }
+
+          for (let approvalIndex = 0; approvalIndex < approvalCount; approvalIndex += 1) {
+            const requestId = 71 + approvalIndex
+            child.stdout.write(jsonLine({
+              id: requestId,
+              method: 'item/tool/call',
+              params: {
+                arguments: { ref: `documents/report-${approvalIndex + 1}.pdf` },
+                namespace: 'murph',
+                tool: 'send_vault_file',
+              },
+            }))
+            await expect(waitForRpcResponse(child, requestId)).resolves.toMatchObject({
+              id: requestId,
+              result: { success: true },
+            })
+          }
+
+          child.stdout.write(jsonLine({
+            id: 80,
+            method: 'item/tool/call',
+            params: {
+              arguments: {},
+              namespace: 'murph',
+              tool: 'finish_without_reply',
+            },
+          }))
+          await expect(waitForRpcResponse(child, 80)).resolves.toEqual({
+            id: 80,
+            result: {
+              contentItems: [{
+                text: 'finish_without_reply is unavailable while a vault-file approval link must be delivered',
+                type: 'inputText',
+              }],
+              success: false,
+            },
+          })
+
+          child.stdout.write(jsonLine({
+            method: 'item/completed',
+            params: {
+              item: {
+                id: 'assistant-vault-approval-url',
+                message: 'modelMessage' in scenario
+                  ? scenario.modelMessage
+                  : `Approve here: ${malformedApprovalUrls.join(' ')}`,
+                type: 'assistant_message',
+              },
+            },
+          }))
+          child.stdout.write(jsonLine({
+            method: 'turn/completed',
+            params: {
+              turn: {
+                id: 'turn-vault-approval-url',
+                status: 'completed',
+              },
+            },
+          }))
+        })()
+      })
+
+      return child
+    })
+
+    const result = await executeCodexAppServerTurn({
+      allowFinishWithoutReply: true,
+      hostedToolContext,
+      prompt: 'send the report',
+      workingDirectory,
+    })
+
+    expect(result).toMatchObject({
+      acceptedNoReplyDeliveryContextOrdinals: [],
+      finalAction: null,
+      finalMessage: scenario.expectedFinalMessage,
+    })
+    for (const exactApprovalUrl of exactApprovalUrls) {
+      expect(result.finalMessage.split(exactApprovalUrl)).toHaveLength(2)
+    }
+    expect(sendVaultFile).toHaveBeenCalledTimes(approvalCount)
+  }
+
+  it.each(vaultApprovalUrlScenarios)(
+    '$name for a pending vault approval',
+    runVaultApprovalUrlScenario,
+  )
 
   it('aborts and drains in-flight image generation when the turn fails', async () => {
     const workingDirectory = await createTempDir('assistant-codex-image-failure-work-')

@@ -441,6 +441,9 @@ describe('assistant vault-file send', () => {
     })
 
     expect(result.finalActionPatch).toBeUndefined()
+    expect(result.requiredVaultFileApprovalUrl).toBe(
+      'https://murph.test/approve/haa_test',
+    )
     expect(result.responseMediaPatch).toBeUndefined()
     expect(result.rpcResult).toMatchObject({ success: true })
     expect(result.rpcResult.contentItems[0]?.text).toBe(JSON.stringify({

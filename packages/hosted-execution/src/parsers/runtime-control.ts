@@ -9,11 +9,16 @@ import {
 import {
   parseHostedActionApprovalConsumeRequest,
 } from "../action-approval.ts";
+import type {
+  HostedAssistantConfigurationApprovalTarget,
+} from "../assistant-configuration-approval.ts";
 import {
   isHostedAssistantProductModel,
   isHostedAssistantReasoningEffort,
   parseHostedAssistantModelOverride,
   parseHostedAssistantReasoningEffortOverride,
+  type HostedAssistantProductModel,
+  type HostedAssistantReasoningEffort,
 } from "../assistant-model.ts";
 import {
   parseAssistantRuntimeIssueRecord,
@@ -2208,46 +2213,76 @@ export function parseHostedRuntimeAssistantConfigurationControlRequest(
     );
   }
 
+  if (record.assistantInputId !== undefined) {
+    assertAllowedObjectKeys(
+      record,
+      new Set(["action", "assistantInputId", "model", "reasoningEffort"]),
+      "Hosted runtime assistant configuration control update request",
+    );
+    const assistantInputId = requireString(
+      record.assistantInputId,
+      "Hosted runtime assistant configuration control assistantInputId",
+    );
+    if (!/^ain_[0-9a-f]{32}$/u.test(assistantInputId)) {
+      throw new TypeError(
+        "Hosted runtime assistant configuration control assistantInputId is invalid.",
+      );
+    }
+    const changes = parseHostedRuntimeAssistantConfigurationChanges(
+      record,
+      "Hosted runtime assistant configuration control",
+    );
+    return {
+      action,
+      assistantInputId,
+      ...changes,
+    };
+  }
+
   assertAllowedObjectKeys(
     record,
     new Set(["action", "approval", "model", "reasoningEffort", "target"]),
     "Hosted runtime assistant configuration control update request",
   );
 
+  const changes = parseHostedRuntimeAssistantConfigurationChanges(
+    record,
+    "Hosted runtime assistant configuration control",
+  );
+  const approval = parseHostedActionApprovalConsumeRequest(record.approval);
+  const target = parseHostedRuntimeAssistantConfigurationTarget(record.target);
+  return { action, approval, target, ...changes };
+}
+
+function parseHostedRuntimeAssistantConfigurationChanges(
+  record: Record<string, unknown>,
+  label: string,
+):
+  | { model: HostedAssistantProductModel; reasoningEffort?: HostedAssistantReasoningEffort }
+  | { model?: never; reasoningEffort: HostedAssistantReasoningEffort } {
   const model = record.model === undefined
     ? undefined
-    : parseHostedRuntimeAssistantProductModel(
-        record.model,
-        "Hosted runtime assistant configuration control model",
-      );
+    : parseHostedRuntimeAssistantProductModel(record.model, `${label} model`);
   const reasoningEffort = record.reasoningEffort === undefined
     ? undefined
     : parseHostedRuntimeAssistantReasoningEffort(
         record.reasoningEffort,
-        "Hosted runtime assistant configuration control reasoningEffort",
+        `${label} reasoningEffort`,
       );
-  const approval = parseHostedActionApprovalConsumeRequest(record.approval);
-  const target = parseHostedRuntimeAssistantConfigurationTarget(record.target);
   if (model === undefined) {
     if (reasoningEffort === undefined) {
-      throw new TypeError(
-        "Hosted runtime assistant configuration control update requires a model or reasoning effort.",
-      );
+      throw new TypeError(`${label} update requires a model or reasoning effort.`);
     }
-    return { action, approval, reasoningEffort, target };
+    return { reasoningEffort };
   }
-
   return reasoningEffort === undefined
-    ? { action, approval, model, target }
-    : { action, approval, model, reasoningEffort, target };
+    ? { model }
+    : { model, reasoningEffort };
 }
 
 function parseHostedRuntimeAssistantConfigurationTarget(
   value: unknown,
-): Extract<
-  HostedRuntimeAssistantConfigurationControlRequest,
-  { action: "update" }
->["target"] {
+): HostedAssistantConfigurationApprovalTarget {
   const record = requireObject(
     value,
     "Hosted runtime assistant configuration control target",
