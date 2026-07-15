@@ -36,16 +36,27 @@ Make hosted Humor, Push, and Detail changes requested in a private conversation 
 - The state-inconsistency re-audit returned zero verified findings after the
   retired direct-vault resolver was hard-rejected and deleted from current
   source.
+- The branch is rebased onto current `main`. Final serial verification passes:
+  Prisma generate/validate; Web prepared typecheck and 45 focused tests;
+  assistant-engine typecheck and 84 focused tests; hosted-execution typecheck
+  and 343 coverage tests; Cloudflare verification with 1,833 tests;
+  assistant-runtime typecheck, 222 preference-phase tests, and the three
+  timing-sensitive acceptance cases; docs drift; scenario integrity; and diff
+  checks.
 - Full acceptance reached green workspace typecheck, docs/artifact guards, all
   Web tests, Web lint/build, and owner coverage before unrelated machine-wide
-  OOM and timing failures; isolated fallbacks pass. Final verification will run
-  again after rebasing onto current `main`.
+  OOM and timing failures. A lower-concurrency assistant-engine coverage rerun
+  passed 2,239 tests and produced coverage, then an unchanged local-service
+  stress-test worker exhausted its 4 GB heap and timed out during fork cleanup;
+  focused changed-path tests remain green and CI is the clean-machine full-lane
+  proof.
 
 ## State
 
-Implementation and local audit are complete. Rebase, final verification,
-PR/ReviewGPT/CI, deployment, and gate enablement remain; the production flag is
-still disabled.
+Repository implementation, local audit, rebase, and final serial verification
+are complete. PR/ReviewGPT/CI, the controlled deployment, and gate enablement
+remain; the production flag is still disabled.
 
-Status: active
+Status: completed
 Updated: 2026-07-15
+Completed: 2026-07-15
