@@ -1512,7 +1512,7 @@ describe("executeHostedMailboxEvent", () => {
         localTime: "13:30",
       },
       slug: "finish-onboarding-followup",
-      summary: "Daily value-and-foundation continuation check until Murph onboarding is complete.",
+      summary: "Daily aspiration-and-foundation continuation check until Murph onboarding is complete.",
       tags: [
         "assistant",
         "scheduled",
@@ -1528,7 +1528,7 @@ describe("executeHostedMailboxEvent", () => {
       "The managed-automation owner archives this follow-up deterministically.",
     );
     expect(seedInput?.instructions).toContain(
-      "Goal: advance Murph onboarding through useful support and a finite health-context foundation without turning it into a drip questionnaire.",
+      "Goal: advance Murph onboarding through an anchored health aspiration, a finite health-context foundation, and a contextual return without turning it into a drip questionnaire or unsolicited plan.",
     );
     expect(seedInput?.instructions).toContain("Success criteria:");
     expect(seedInput?.instructions).toContain("If `onboarding.status` is `completed`");
@@ -1548,7 +1548,10 @@ describe("executeHostedMailboxEvent", () => {
       "If a promised follow-through or next step in the member's agreed support loop is due, do that first.",
     );
     expect(seedInput?.instructions).toContain(
-      "Otherwise use exactly the next unresolved step from the onboarding skill, including its required bridge before foundation questions and its targeted-read rules for omitted, truncated, or errored evidence.",
+      "Otherwise use exactly the next unresolved step from the onboarding skill, including aspiration capture, explicit parking, foundation questions, contextual return, and its targeted-read rules for omitted, truncated, or errored evidence.",
+    );
+    expect(seedInput?.instructions).toContain(
+      "If that step is only a reflection or parking transition, combine it with the next skill-approved question when the skill permits; otherwise return skip.",
     );
     expect(seedInput?.instructions).toContain(
       "This automation never owns a promised check-in, reminder, or proactive support action.",
@@ -1565,13 +1568,15 @@ describe("executeHostedMailboxEvent", () => {
     expect(seedInput?.instructions).toContain(
       "Output: send one brief, natural, low-pressure in-chat continuation only when it advances unfinished onboarding.",
     );
-    expect(seedInput?.instructions).toContain("Ask at most one question.");
+    expect(seedInput?.instructions).toContain(
+      "Every user-facing scheduled continuation must include exactly one easy, reply-oriented question; otherwise return skip.",
+    );
     expect(seedInput?.instructions).toContain(
       "The user's reply will be handled by the next normal Murph onboarding turn",
     );
     expect(seedInput?.instructions).toContain("available recent user messages");
     expect(seedInput?.instructions).toContain(
-      "one skill-approved onboarding action or question usefully advances the relationship",
+      "exactly one skill-approved, reply-oriented onboarding question usefully advances the relationship",
     );
     expect(seedInput?.instructions).not.toContain("The six checkpoints are");
     expect(seedInput?.instructions).toContain("return skip");
