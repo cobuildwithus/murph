@@ -672,6 +672,7 @@ describe("hosted mailbox conversation import adapter", () => {
     });
 
     assert.equal(outcome.status, "imported");
+    assert.equal("assistantInputId" in outcome, false);
     if (outcome.status === "imported") {
       assert.equal(outcome.reasonCode ?? null, null);
     }
@@ -1322,40 +1323,60 @@ describe("hosted mailbox conversation import adapter", () => {
               type: "text",
               value: "assistant is unavailable",
             },
+            {
+              type: "link",
+              value: "https://example.invalid/context",
+            },
           ],
         },
         phoneLookupKey: "redacted-contact-sentinel",
       },
     });
-
-    const outcome = await withOperatorHomeRoot(operatorHomeRoot, () =>
-      importHostedConversationMailboxItem({
-        decodePayload: createDecodedPayloadDecoder(decodedWake),
-        async importConversationWake() {
-          return {
-            captureId: null,
-            metrics: {
-              nextWakeAt: null,
-              parserProcessed: 0,
-            },
-          };
-        },
-        item,
-        runtime: createRuntime(),
-        vaultRoot,
-      })
-    );
-
-    assert.equal(outcome.status, "imported");
-    const listed = await listAssistantInputEvents({
+    let activeTurnAdmissionCount = 0;
+    const controller = createAssistantActiveTurnInputController({
+      admissionHook: async () => {
+        activeTurnAdmissionCount += 1;
+        return {
+          kind: "no-new-input",
+        };
+      },
+      conversationKeys: [createLinqConversationLookupKey({ item, wake: decodedWake })],
+      sessionId: "session_unconfigured",
+      turnId: "turn_unconfigured",
       vault: vaultRoot,
     });
-    assert.deepEqual(listed.events[0]?.replyTarget, {
-      channel: "linq",
-      messageId: "msg_unconfigured",
-      threadId: "chat_unconfigured",
-    });
-    assert.deepEqual(await readHostedPendingAssistantInputIds({ vaultRoot }), []);
+    let stagedCallbackCount = 0;
+
+    try {
+      const outcome = await withOperatorHomeRoot(operatorHomeRoot, () =>
+        importHostedConversationMailboxItem({
+          decodePayload: createDecodedPayloadDecoder(decodedWake),
+          item,
+          onConversationInputStaged() {
+            stagedCallbackCount += 1;
+          },
+          runtime: createRuntime(),
+          vaultRoot,
+        })
+      );
+
+      assert.equal(outcome.status, "imported");
+      assert.equal("assistantInputId" in outcome, false);
+      assert.equal(activeTurnAdmissionCount, 0);
+      assert.equal(stagedCallbackCount, 0);
+      const listed = await listAssistantInputEvents({
+        vault: vaultRoot,
+      });
+      assert.notEqual(listed.events[0]?.projection.status, "not_attempted");
+      assert.deepEqual(listed.events[0]?.replyTarget, {
+        channel: "linq",
+        messageId: "msg_unconfigured",
+        threadId: "chat_unconfigured",
+      });
+      assert.deepEqual(await readHostedPendingAssistantInputIds({ vaultRoot }), []);
+    } finally {
+      controller.close();
+    }
   });
 
   test("does not enqueue pending email input when the assistant is configured but email is unavailable", async () => {

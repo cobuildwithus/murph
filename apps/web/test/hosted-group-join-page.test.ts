@@ -12,10 +12,16 @@ const mocks = vi.hoisted(() => ({
 vi.mock("server-only", () => ({}));
 
 vi.mock("@/src/components/hosted-groups/group-join-client", () => ({
-  GroupJoinAcceptForm(props: { groupName: string }) {
+  GroupJoinAcceptForm(props: {
+    groupName: string;
+    postJoinDestination: string;
+  }) {
     return createElement(
       "form",
-      { "data-group-name": props.groupName },
+      {
+        "data-group-name": props.groupName,
+        "data-post-join-destination": props.postJoinDestination,
+      },
       "Accept group invite",
     );
   },
@@ -38,7 +44,7 @@ vi.mock("@/src/components/hosted-groups/group-join-client", () => ({
     );
   },
   GroupJoinSignInButton() {
-    return createElement("button", null, "Sign in to join");
+    return createElement("button", null, "Continue to join");
   },
 }));
 
@@ -164,12 +170,62 @@ test("renders the join form for authenticated viewers with current launch consen
   expect(markup).not.toContain('data-legal-consent-gate="true"');
 });
 
-async function renderGroupJoinPage(joinCode: string): Promise<string> {
+test.each([
+  ["initial-visit", "/home?initialVisit=true"],
+  ["setup", "/join"],
+  ["untrusted", "/home"],
+] as const)(
+  "passes the bounded %s post-auth handoff to the join form",
+  async (postJoin, destination) => {
+    mocks.getHostedPageAuthSnapshot.mockResolvedValueOnce({
+      authenticated: true,
+      authenticatedMember: { id: "member_123" },
+    });
+    mocks.readHostedConsentStatus.mockResolvedValueOnce(createConsentStatus({
+      launchGranted: true,
+    }));
+
+    const markup = await renderGroupJoinPage("JOIN123", { postJoin });
+
+    expect(markup).toContain(`data-post-join-destination="${destination.replaceAll("&", "&amp;")}"`);
+  },
+);
+
+test("does not send an existing group member through the new-member handoff", async () => {
+  mocks.getHostedPageAuthSnapshot.mockResolvedValueOnce({
+    authenticated: true,
+    authenticatedMember: { id: "member_123" },
+  });
+  mocks.readHostedConsentStatus.mockResolvedValueOnce(createConsentStatus({
+    launchGranted: true,
+  }));
+  mocks.readHostedGroupJoinView.mockResolvedValueOnce({
+    activeVaultShareProjectionKinds: [],
+    activeVaultShareProjectionScopes: [],
+    displayName: "Sunday Sleep Crew",
+    id: "hgrp_123",
+    kind: "family",
+    memberCount: 2,
+    requestedVaultShareProjections: [],
+    status: "active",
+    viewerMembershipStatus: "active",
+  });
+
+  const markup = await renderGroupJoinPage("JOIN123", { postJoin: "initial-visit" });
+
+  expect(markup).toContain('data-post-join-destination="/home"');
+});
+
+async function renderGroupJoinPage(
+  joinCode: string,
+  searchParams?: { postJoin?: string | string[] | undefined },
+): Promise<string> {
   const { default: GroupJoinPage } = await import("../app/groups/join/[joinCode]/page");
 
   return renderToStaticMarkup(
     await GroupJoinPage({
       params: Promise.resolve({ joinCode }),
+      ...(searchParams ? { searchParams: Promise.resolve(searchParams) } : {}),
     }),
   );
 }

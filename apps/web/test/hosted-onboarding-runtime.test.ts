@@ -3,6 +3,7 @@ import { afterEach, describe, expect, it } from "vitest";
 import type { HostedOnboardingEnvironment } from "@/src/lib/hosted-onboarding/env";
 import {
   requireHostedStripeCheckoutConfig,
+  requireHostedStripeFamilyPlanConfig,
 } from "@/src/lib/hosted-onboarding/runtime";
 
 const globalForHostedOnboarding = globalThis as typeof globalThis & {
@@ -35,6 +36,10 @@ function createHostedOnboardingEnvironment(
     privyAppSecret: null,
     privyVerificationKey: null,
     publicBaseUrl: "https://join.example.test",
+    stripeFamilyPriceIdsByPlan: {
+      edge: "price_family_edge_123",
+      pulse: "price_family_pulse_123",
+    },
     stripePriceIdsByPlan: {
       launch_edge_monthly: "price_edge_monthly_123",
       launch_monthly: "price_monthly_123",
@@ -63,5 +68,19 @@ describe("requireHostedStripeCheckoutConfig", () => {
     expect(config.billingPlanCode).toBe("launch_monthly");
     expect(config.priceId).toBe("price_monthly_123");
     expect(config.stripe).toBeTruthy();
+  });
+
+  it("resolves the configured Family price for each member tier", () => {
+    globalForHostedOnboarding.__murphHostedOnboardingEnv =
+      createHostedOnboardingEnvironment();
+
+    expect(requireHostedStripeFamilyPlanConfig({ planCode: "pulse" })).toMatchObject({
+      planCode: "pulse",
+      priceId: "price_family_pulse_123",
+    });
+    expect(requireHostedStripeFamilyPlanConfig({ planCode: "edge" })).toMatchObject({
+      planCode: "edge",
+      priceId: "price_family_edge_123",
+    });
   });
 });

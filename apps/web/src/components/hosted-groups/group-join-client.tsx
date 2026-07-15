@@ -15,7 +15,12 @@ import { requestHostedOnboardingJson } from "@/src/components/hosted-onboarding/
 import { navigateHostedAuthRedirect } from "@/src/components/hosted-onboarding/hosted-auth-navigation";
 import { toErrorMessage } from "@/src/components/settings/hosted-settings-sync-helpers";
 import { Button } from "@/src/components/ui/button";
+import {
+  buildGroupJoinPostAuthReturnPath,
+  type GroupJoinPostJoinDestination,
+} from "@/src/lib/hosted-groups/group-join-handoff";
 import type { HostedConsentStatus } from "@/src/lib/legal/consent";
+import type { HostedPrivyCompletionPayload } from "@/src/lib/hosted-onboarding/types";
 import { cn } from "@/src/lib/utils";
 
 export interface GroupJoinPermissionDisplay {
@@ -26,23 +31,26 @@ export interface GroupJoinPermissionDisplay {
 }
 
 export function GroupJoinSignInButton() {
-  const [open, setOpen] = useState(false);
+  const [open, setOpen] = useState(true);
 
-  function handleCompleted() {
-    navigateHostedAuthRedirect(readCurrentGroupJoinPath());
+  function handleCompleted(payload: HostedPrivyCompletionPayload) {
+    navigateHostedAuthRedirect(buildGroupJoinPostAuthReturnPath({
+      currentPath: readCurrentGroupJoinPath(),
+      payload,
+    }));
   }
 
   return (
     <>
       <Button type="button" size="xl" onClick={() => setOpen(true)}>
-        Sign in to join
+        Continue to join
       </Button>
       <AuthDialog
         open={open}
         onCompleted={handleCompleted}
         onOpenChange={setOpen}
         requireLaunchConsentOnCompletion
-        title="Sign in to join this Murph group"
+        title="Continue to join this Murph group"
         description="Create or open your private Murph account, then we'll bring you back here."
       />
     </>
@@ -91,6 +99,7 @@ export function GroupJoinAcceptForm(props: {
   groupName: string;
   joinCode: string;
   permissions: readonly GroupJoinPermissionDisplay[];
+  postJoinDestination: GroupJoinPostJoinDestination;
 }) {
   const router = useRouter();
   const [selected, setSelected] = useState<Set<string>>(
@@ -146,7 +155,12 @@ export function GroupJoinAcceptForm(props: {
         <p className="text-base font-medium text-foreground">
           {props.alreadyActiveMember ? "Your sharing is updated." : `You're in ${props.groupName}.`}
         </p>
-        <Button type="button" size="xl" onClick={() => router.push("/home")} className="w-full">
+        <Button
+          type="button"
+          size="xl"
+          onClick={() => router.push(props.postJoinDestination)}
+          className="w-full"
+        >
           Open Murph
         </Button>
       </div>

@@ -275,6 +275,30 @@ export async function readActiveHostedMemberAccess(input: {
 }
 
 /**
+ * Billing-only guard for flows that must distinguish Family sponsorship from
+ * a member's own Stripe access. Keep this query here with the canonical access
+ * derivation instead of teaching direct billing about Family table details.
+ */
+export async function readActiveHostedFamilySponsorship(input: {
+  memberId: string;
+  prisma?: HostedOnboardingReadClient;
+}): Promise<boolean> {
+  const prisma = input.prisma ?? getPrisma();
+  const membership = await prisma.hostedAccountGroupMembership.findFirst({
+    select: { id: true },
+    where: {
+      group: {
+        billingStatus: HostedBillingStatus.active,
+        suspendedAt: null,
+      },
+      memberId: input.memberId,
+      status: "active",
+    },
+  });
+  return membership !== null;
+}
+
+/**
  * Runtime model-work admission owned by hosted access, not usage accounting.
  * Monthly and in-window trial allowances are advisory; only inactive access
  * and invalid or expired trial entitlement deny model-capable work.

@@ -379,6 +379,10 @@ export async function importHostedConversationMailboxItem(input: {
     vaultRoot: input.vaultRoot,
     wake: decoded.wake,
   });
+  const foregroundAssistantInputId =
+    pendingReplyEligible && input.item.durablyConsumed !== true
+      ? stagedInput.inputId
+      : null;
   if (input.item.durablyConsumed !== true) {
     const latencyMilestones = withHostedConversationImportLatencyMilestones({
       autoReplyPreparedAtEpochMs,
@@ -388,7 +392,9 @@ export async function importHostedConversationMailboxItem(input: {
       pendingIndexEnsuredAtEpochMs,
       stagedAtEpochMs: Date.now(),
     });
-    notifyConversationInputStagedBestEffort(input.onConversationInputStaged ?? null);
+    if (foregroundAssistantInputId) {
+      notifyConversationInputStagedBestEffort(input.onConversationInputStaged ?? null);
+    }
     recordHostedConversationLatencyTraceAssistantInputStagedBestEffort({
       inputId: stagedInput.inputId,
       item: input.item,
@@ -397,11 +403,13 @@ export async function importHostedConversationMailboxItem(input: {
       runtimeAttemptId: input.runtimeAttemptId ?? null,
       wake: decoded.wake,
     });
-    await notifyAssistantActiveTurnInputAvailableForInputIds({
-      inputIds: [stagedInput.inputId],
-      ...(input.signal ? { signal: input.signal } : {}),
-      vault: input.vaultRoot,
-    });
+    if (foregroundAssistantInputId) {
+      await notifyAssistantActiveTurnInputAvailableForInputIds({
+        inputIds: [foregroundAssistantInputId],
+        ...(input.signal ? { signal: input.signal } : {}),
+        vault: input.vaultRoot,
+      });
+    }
   }
 
   const linqDeliveryContext = buildHostedAssistantLinqDeliveryContextFromWake(decoded.wake);
@@ -412,7 +420,7 @@ export async function importHostedConversationMailboxItem(input: {
     wake: decoded.wake,
   })) {
     return {
-      assistantInputId: stagedInput.inputId,
+      ...(foregroundAssistantInputId ? { assistantInputId: foregroundAssistantInputId } : {}),
       captureId: null,
       ...(emailDeliveryContext ? { emailDeliveryContext } : {}),
       ...(linqDeliveryContext ? { linqDeliveryContext } : {}),
@@ -438,7 +446,7 @@ export async function importHostedConversationMailboxItem(input: {
     };
   }
   return {
-    assistantInputId: stagedInput.inputId,
+    ...(foregroundAssistantInputId ? { assistantInputId: foregroundAssistantInputId } : {}),
     captureId: null,
     ...(emailDeliveryContext ? { emailDeliveryContext } : {}),
     ...(linqDeliveryContext ? { linqDeliveryContext } : {}),

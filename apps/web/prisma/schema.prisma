@@ -1053,6 +1053,7 @@ model HostedAccountGroup {
   owner          HostedMember                   @relation("HostedAccountGroupOwner", fields: [ownerMemberId], references: [id], onDelete: Restrict)
   memberships    HostedAccountGroupMembership[]
   invites        HostedAccountGroupInvite[]
+  planCapacities HostedAccountGroupPlanCapacity[]
   billingRef     HostedAccountGroupBillingRef?
 
   @@index([billingStatus])
@@ -1064,6 +1065,7 @@ model HostedAccountGroupMembership {
   groupId     String             @map("group_id")
   memberId    String             @map("member_id")
   role        String
+  planCode    String             @default("pulse") @map("plan_code")
   status      String             @default("active")
   joinedAt    DateTime?          @map("joined_at")
   removedAt   DateTime?          @map("removed_at")
@@ -1092,6 +1094,7 @@ model HostedAccountGroupInvite {
   targetEmailLookupKey            String?             @map("target_email_lookup_key")
   targetEmailEncrypted            String?             @map("target_email_encrypted")
   channel                         String              @default("family")
+  planCode                        String              @default("pulse") @map("plan_code")
   status                          String              @default("pending")
   acceptedAt                      DateTime?           @map("accepted_at")
   expiresAt                       DateTime            @map("expires_at")
@@ -1108,6 +1111,19 @@ model HostedAccountGroupInvite {
   @@index([acceptedByMemberId])
   @@index([expiresAt])
   @@map("hosted_account_group_invite")
+}
+
+model HostedAccountGroupPlanCapacity {
+  groupId        String             @map("group_id")
+  planCode       String             @map("plan_code")
+  billedQuantity Int                @map("billed_quantity")
+  createdAt      DateTime           @default(now()) @map("created_at")
+  updatedAt      DateTime           @updatedAt @map("updated_at")
+  group          HostedAccountGroup @relation(fields: [groupId], references: [id], onDelete: Cascade)
+
+  @@id([groupId, planCode])
+  @@index([planCode])
+  @@map("hosted_account_group_plan_capacity")
 }
 
 model HostedAccountGroupBillingRef {

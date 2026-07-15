@@ -1,6 +1,6 @@
 # Hosted Family Plan
 
-Last verified: 2026-07-12
+Last verified: 2026-07-14
 
 ## Purpose
 
@@ -10,19 +10,20 @@ feel like Spotify Family for access, but keep Signal-style privacy for health
 data and conversations.
 
 Family supports 2-6 sponsored people. The owner counts as one sponsored person.
-Family billing is per sponsored seat at $7/person/month. Each sponsored person
-receives an individual Pulse-equivalent monthly usage cap.
+One Family subscription can reserve an exact mix of Pulse seats at
+$7/person/month and Edge seats at $19/person/month. Each member and pending
+invite has one assigned tier and receives that tier's individual usage cap.
 
 ## Product Contract
 
 - One owner pays for the hosted Family plan.
 - A Family owner is a real hosted member. A synthetic group-chat thread container cannot own a Family plan, inspect Family account state, begin checkout, or issue invites; those operations belong in a participant's private Murph conversation. This invariant is enforced at canonical group creation and billing authorization and is rechecked before checkout redirects or Stripe reconciliation can bind or activate Family billing state; assistant-tool guards are only an earlier user-facing rejection.
-- The owner buys 2-6 reserved sponsored seats. Active members and pending
-  invites consume those seats.
+- The owner buys 2-6 reserved sponsored seats in an exact Pulse/Edge mix.
+  Active members and pending invites consume capacity from their assigned tier.
 - Family members receive sponsored hosted access while the plan and their
   membership are active.
-- Every sponsored member gets their own member-level Pulse-equivalent usage
-  allowance. There is no shared Family usage pool in v1.
+- Every sponsored member gets their assigned tier's member-level usage
+  allowance. There is no shared Family usage pool.
 - Every family member remains a separate `HostedMember` with their own routing,
   mailbox, workspace/runtime state, legal consent, export, and deletion rights.
 - The owner can see seat and setup status, such as invited, joined, messaging
@@ -52,28 +53,67 @@ membership alone must not grant health-data sharing.
 
 ## Seats And Billing
 
-The MVP Family plan is per sponsored seat:
+The Family plan is per sponsored seat and tier:
 
 - minimum 2 sponsored people
 - maximum 6 sponsored people
 - the owner counts as one sponsored person
-- active memberships plus pending invites must not exceed paid seats
+- active memberships plus pending invites assigned to a tier must not exceed
+  that tier's paid quantity
 
 Stripe owns the subscription, invoices, payment method, renewal state, and seat
-quantity. Murph stores only the hosted read model needed for entitlement,
-settings display, and reconciliation: customer id, subscription id,
-subscription item id, current billing phase/period, and billed seat count.
+quantities. One subscription contains at most one licensed monthly item for
+each supported Family tier. Murph stores only the hosted read model needed for
+entitlement, settings display, and reconciliation: customer id, subscription
+id, current billing phase/period, a per-tier capacity projection, and the
+legacy total/item fields needed while existing Pulse-only subscriptions roll
+forward.
 
-The first version should not introduce generic plan-transition machinery or
-invite-side billing mutation. Family checkout and explicit seat-count changes
-update Stripe billing; invite creation only consumes already-paid seats. Direct
-Pulse and Edge billing continue to use the existing member billing path.
+Internal Family MRR derives from the same per-tier projection and each tier's
+Family offer price. Do not multiply the aggregate seat count by the Pulse
+price once mixed-tier subscriptions exist.
+
+Do not introduce generic plan-transition machinery or a second durable billing
+operation owner. Family checkout and explicit owner-confirmed capacity changes
+update the exact Stripe item composition. Webhook reconciliation remains the
+only writer of the local paid-capacity projection. Direct Pulse and Edge
+billing continue to use the existing member billing path.
+
+When an owner converts an existing direct-paid subscription, the request only
+updates Stripe and reports that Family billing is syncing. The Family
+subscription webhook writes the paid projection and clears the old direct
+billing reference in the same transaction, so entitlement ownership changes
+once and never advances Stripe's event watermark from local wall time.
+
+Changing a member's tier is a local assignment change under the Family owner
+lock and requires an already-open paid seat in the destination tier. If none is
+open, the owner adds the destination seat first, moves the member after Stripe
+reconciles it, and may then remove the freed source-tier seat. This ordering
+keeps every webhook-visible composition valid without a second transition
+state machine.
 
 Core invariant:
 
 ```ts
-activeMembershipCount + pendingInviteCount <= billedSeatCount
+activeMembershipCount[tier] + pendingInviteCount[tier] <= billedQuantity[tier]
 ```
+
+## Deployment Order
+
+The hosted-execution response parser is backward compatible with the old
+Pulse-only web response, but the old parser rejects the new `plans` and
+`planCode` fields. Deploy Cloudflare hosted execution first with immediate
+runner-container rollout, verify the new bundle is serving, and then deploy
+hosted web. Hosted web predeploy applies the nullable/defaulted assignment
+columns and empty capacity table before the new web build. Existing Pulse-only
+groups read through the live legacy billed total until the first new webhook
+atomically writes exact tier rows. The post-deploy contract lane adds the
+assignment constraints only after the prior web-function window drains.
+
+Configure both Family Stripe price ids before exposing Edge capacity. After
+web deploy, reconcile one Pulse-only subscription and one mixed Pulse/Edge
+subscription, then verify settings quantities, member allowances, and Family
+MRR match the Stripe items.
 
 ## Data Ownership
 
@@ -84,8 +124,11 @@ The clean model is:
 
 - `HostedAccountGroup`: the family group and owner.
 - `HostedAccountGroupMembership`: one member's role and access state in the
-  group.
-- `HostedAccountGroupInvite`: a scoped invite into the group.
+  group, including their assigned tier.
+- `HostedAccountGroupInvite`: a scoped invite into the group, including the
+  tier reserved if it is accepted.
+- `HostedAccountGroupPlanCapacity`: the Stripe-derived paid quantity for one
+  supported tier.
 - `HostedAccountGroupBillingRef`: the Stripe-derived read model for the family
   subscription.
 
@@ -114,15 +157,24 @@ Sponsored access must fail closed when:
 - the family subscription is canceled, unpaid, paused, suspended, or otherwise
   inactive,
 - the member is removed from the group,
-- active memberships exceed the billed seat count — enforced at write time:
-  invite issuance/acceptance assert seat fit, and the subscription webhook
-  fails the whole group to `unpaid` when active members exceed billed seats
-  (reads trust that invariant instead of re-counting seats per access check),
+- active memberships exceed paid capacity for any assigned tier — enforced at
+  write time: invite issuance/acceptance assert tier fit, and the subscription
+  webhook fails the whole group to `unpaid` when active members exceed a paid
+  tier quantity (reads trust that invariant instead of re-counting capacity per
+  access check),
 - the membership is not accepted/active, or
 - required launch/legal consent is missing at the boundary that requires it.
 
 Privacy access for export and deletion must remain available under the existing
 privacy rules even after sponsored access is revoked.
+
+An actively sponsored member cannot start a separate direct checkout. If a
+direct checkout opened before Family acceptance completes afterward, checkout
+and subscription reconciliation must leave it unbound and cancel that
+superseded subscription after the database transaction. A Family conversion
+may clear an owner's prior direct billing reference only when it names the same
+Stripe subscription that became the Family subscription; never erase a
+different subscription reference.
 
 ## Invite Issuance
 

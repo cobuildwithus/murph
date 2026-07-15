@@ -1178,6 +1178,55 @@ test('active-turn controller reruns input-available admission for in-flight noti
   }
 })
 
+test('active-turn notifier coalesces A-B-A staged ids into one generic group wake', async () => {
+  const actorByInputId = new Map([
+    ['ain_61616161616161616161616161616161', 'actor-a'],
+    ['ain_62626262626262626262626262626262', 'actor-b'],
+    ['ain_63636363636363636363636363636363', 'actor-a'],
+  ])
+  vi.doMock('../src/assistant/input-store.js', () => ({
+    readAssistantInputEvent: vi.fn(async (input: { inputId: string }) => ({
+      conversation: {
+        accountId: 'account-group-order',
+        actorId: actorByInputId.get(input.inputId) ?? null,
+        actorIsSelf: false,
+        source: 'linq',
+        threadId: 'thread-group-order',
+        threadIsDirect: false,
+      },
+    })),
+  }))
+  const {
+    createAssistantActiveTurnInputController,
+    notifyAssistantActiveTurnInputAvailableForInputIds,
+  } = await import('../src/assistant/active-turn-input-controller.ts')
+  let admissionCount = 0
+  const controller = createAssistantActiveTurnInputController({
+    admissionHook: async () => {
+      admissionCount += 1
+      return { kind: 'no-new-input' }
+    },
+    conversationKeys: [
+      'channel:linq|identity:account-group-order|audience:group|thread:thread-group-order',
+    ],
+    sessionId: 'session-group-order',
+    turnId: 'turn-group-order',
+    vault: '/vaults/test',
+  })
+  const inputIds = [...actorByInputId.keys()]
+
+  try {
+    await notifyAssistantActiveTurnInputAvailableForInputIds({
+      inputIds,
+      vault: '/vaults/test',
+    })
+    assert.equal(admissionCount, 1)
+  } finally {
+    controller.close()
+    vi.doUnmock('../src/assistant/input-store.js')
+  }
+})
+
 test('active-turn controller reruns input-available admission after an accepted in-flight notification', async () => {
   const {
     createAssistantActiveTurnInputController,

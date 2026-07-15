@@ -9,6 +9,7 @@ import {
   type HostedRuntimeAssistantPersonalizationToolRequest,
 } from '@murphai/hosted-execution/assistant-personalization'
 import {
+  HOSTED_PLAN_CODES,
   HOSTED_PRODUCT_FEEDBACK_KINDS,
   HOSTED_PRODUCT_FEEDBACK_SUMMARY_MAX_LENGTH,
   HOSTED_RUNTIME_GROUP_DISPLAY_NAME_MAX_LENGTH,
@@ -324,7 +325,7 @@ export const MURPH_FAMILY_PLAN_TOOL = {
   namespace: 'murph',
   name: 'family_plan',
   description:
-    'Read or manage the current hosted user\'s Murph Family plan. Use for Murph Family plan questions, seat/status checks, starting Family checkout, and requests to invite a family member. Do not use for family medical history.',
+    'Read or manage the current hosted user\'s Murph Family plan. Use for Murph Family plan questions, tier/seat status checks, starting Family checkout, and requests to invite a family member on Pulse or Edge. Do not use for family medical history.',
   inputSchema: {
     type: 'object',
     additionalProperties: false,
@@ -344,6 +345,11 @@ export const MURPH_FAMILY_PLAN_TOOL = {
             ],
             default: null,
             description: 'Email address for an email-bound web invite when the user provided one.',
+          },
+          planCode: {
+            type: 'string',
+            enum: [...HOSTED_PLAN_CODES],
+            description: 'Pulse or Edge tier requested for this Family member. Omit for Pulse.',
           },
           targetLabel: {
             anyOf: [
@@ -566,7 +572,7 @@ export const MURPH_GROUP_TOOL = {
   namespace: 'murph',
   name: 'group',
   description:
-    'Use action="list_memberships" in a personal Murph conversation to list the current member\'s hosted groups, their role, each group\'s requested permissions, the member\'s active grants, and the first-party permissionsUrl when the member owns the group and an owner-authorized join link exists. profile-name.v0 means the group is allowed to receive the member\'s preferred name; group-email.v0 means it is allowed to resolve the member\'s verified email for group email; hrv-days.v0 and other health scopes are separate explicit grants. A grant proves control-plane permission only, not that fresh source data exists or has already reached the group runtime. Read the current hosted group and its member roster (member ids, chat handles, and each member\'s granted share kinds) with action="read_current", request an update to both the current hosted group display name and current iMessage group chat title with action="update_display_name", request an update to the current iMessage group avatar with action="set_chat_avatar", mint the shareable group join link with action="create_join_link", or post a server-owned react-to-join offer into the current group chat with action="post_join_offer". In a connected group-chat turn, if read_current returns status="none", no hosted group record exists yet. When the group asks to create the group, join, or approve sharing, continue with create_join_link or post_join_offer instead of claiming that an external workspace-linking step is required. update_display_name sends a provider request for the upstream iMessage group chat title on the current route-authorized group chat and stores the same name in Murph after the provider accepts the request. set_chat_avatar sends a provider request for the upstream iMessage group icon on the current route-authorized group chat after the runtime preflights chat authority and prepares a hosted image URL; generated avatar images are saved as capture media under raw/captures/** when a vault is available. A join link grants membership and shares the joiner\'s memory-backed preferred display name with this group runtime; optional permissions stay individually selected on the join page. A join offer uses your short natural messageTemplate and {{share_scope}} to state exactly what liking the offer shares, then includes the customize link with {{join_url}} so people can share more or less. Pass displayName on create_join_link or post_join_offer only when it is the name the group chose. Reactions grant membership plus only the posted permission snapshot. Do not use a fixed script. Use action="read_chat_participants" to see who is in this group chat and whether each participant already has their own Murph; use action="share_contact_card" to drop your contact card into this chat once so people who do not have you saved can tap it, save you, and text you directly. Use action="revoke_own_email_share" only when the current sender asks to stop receiving group newsletter email; the runtime identifies the current sender and revokes only that sender\'s group-email.v0 grant. This tool does not manage members, grant Family billing access, grant private chat access, grant raw vault access, or grant email sharing except through an explicit group-email.v0 join page or offer.',
+    'Use action="list_memberships" in a personal Murph conversation to list the current member\'s hosted groups, their role, each group\'s requested permissions, the member\'s active grants, and the first-party permissionsUrl when the member owns the group and an owner-authorized join link exists. profile-name.v0 means the group is allowed to receive the member\'s preferred name; group-email.v0 means it is allowed to resolve the member\'s verified email for group email; hrv-days.v0 and other health scopes are separate explicit grants. A grant proves control-plane permission only, not that fresh source data exists or has already reached the group runtime. Read the current hosted group and its member roster (member ids, chat handles, and each member\'s granted share kinds) with action="read_current", request an update to both the current hosted group display name and current iMessage group chat title with action="update_display_name", request an update to the current iMessage group avatar with action="set_chat_avatar", mint the shareable group join link with action="create_join_link", or post a server-owned react-to-join offer into the current group chat with action="post_join_offer". In a connected group-chat turn, if read_current returns status="none", no hosted group record exists yet. When the group asks to create the group, join, or approve sharing, continue with create_join_link or post_join_offer instead of claiming that an external workspace-linking step is required. update_display_name sends a provider request for the upstream iMessage group chat title on the current route-authorized group chat and stores the same name in Murph after the provider accepts the request. set_chat_avatar sends a provider request for the upstream iMessage group icon on the current route-authorized group chat after the runtime preflights chat authority and prepares a hosted image URL; generated avatar images are saved as capture media under raw/captures/** when a vault is available. A join link grants membership and shares the joiner\'s memory-backed preferred display name with this group runtime; optional permissions stay individually selected on the join page. A join offer uses your short natural messageTemplate and {{share_scope}} to state exactly what liking the offer shares, then includes the customize link with {{join_url}} so people can share more or less. Pass displayName on create_join_link or post_join_offer only when it is the name the group chose. Reactions grant membership plus only the posted permission snapshot. Do not use a fixed script. When these actions are available for the current connected group-chat turn, use action="read_chat_participants" to see who is in the chat and whether each participant already uses Murph; use action="share_contact_card" to drop your contact card so participants can save you and text you directly. Use action="revoke_own_email_share" only when the current sender asks to stop receiving group newsletter email; the runtime identifies the current sender and revokes only that sender\'s group-email.v0 grant. This tool does not manage members, grant Family billing access, grant private chat access, grant raw vault access, or grant email sharing except through an explicit group-email.v0 join page or offer.',
   inputSchema: {
     type: 'object',
     additionalProperties: false,
@@ -1267,6 +1273,7 @@ const familyPlanArgumentsSchema = z
     z.object({
       action: z.literal('start_checkout'),
       invite: z.object({
+        planCode: z.enum(HOSTED_PLAN_CODES).optional(),
         targetEmail: z.string().trim().email().max(320).nullable().default(null),
         targetLabel: z.string().trim().min(1).max(80).nullable().default(null),
         targetPhoneNumber: z.string().trim().min(1).max(40).nullable().default(null),
@@ -1276,6 +1283,7 @@ const familyPlanArgumentsSchema = z
     z.object({
       action: z.literal('create_invite'),
       invite: z.object({
+        planCode: z.enum(HOSTED_PLAN_CODES).optional(),
         targetEmail: z.string().trim().email().max(320).nullable().default(null),
         targetLabel: z.string().trim().min(1).max(80).nullable().default(null),
         targetPhoneNumber: z.string().trim().min(1).max(40).nullable().default(null),
@@ -3933,6 +3941,9 @@ function parseFamilyPlanArguments(
         ? {
             action: 'start_checkout',
             invite: {
+              ...(parsed.data.invite.planCode
+                ? { planCode: parsed.data.invite.planCode }
+                : {}),
               ...(parsed.data.invite.targetEmail
                 ? { targetEmail: parsed.data.invite.targetEmail }
                 : {}),
@@ -3952,6 +3963,9 @@ function parseFamilyPlanArguments(
     request: {
       action: 'create_invite',
       invite: {
+        ...(parsed.data.invite.planCode
+          ? { planCode: parsed.data.invite.planCode }
+          : {}),
         ...(parsed.data.invite.targetEmail
           ? { targetEmail: parsed.data.invite.targetEmail }
           : {}),
