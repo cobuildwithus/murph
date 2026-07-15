@@ -3,6 +3,8 @@ import { AsyncLocalStorage } from "node:async_hooks";
 import { createHash, randomUUID } from "node:crypto";
 import { createReadStream, promises as fs, type Stats } from "node:fs";
 
+import { auditRecordSchema } from "@murphai/contracts";
+
 import {
   copyFileAtomic,
   copyFileAtomicExclusive,
@@ -757,6 +759,14 @@ async function applyHostedCanonicalJsonlAppendReceiptAction(input: {
   }
 
   if (existing.byteLength !== originalSize) {
+    if (await tryReconcileHostedCanonicalAuditAppend({
+      bytes: input.bytes,
+      comparisonOptions,
+      existing,
+      target,
+    })) {
+      return;
+    }
     throw new VaultError(
       "HOSTED_CANONICAL_WRITE_APPEND_BASE_MISMATCH",
       "Hosted canonical JSONL append base content does not match the receipt.",
@@ -764,6 +774,92 @@ async function applyHostedCanonicalJsonlAppendReceiptAction(input: {
   }
 
   await fs.appendFile(target.absolutePath, input.bytes);
+}
+
+async function tryReconcileHostedCanonicalAuditAppend(input: {
+  bytes: Uint8Array;
+  comparisonOptions: VaultPathComparisonOptions;
+  existing: Uint8Array;
+  target: ResolvedVaultPath;
+}): Promise<boolean> {
+  const comparisonRelativePath = normalizeRelativeVaultPathForComparison(
+    input.target.relativePath,
+    input.comparisonOptions,
+  );
+  const auditDirectory = normalizeRelativeVaultPathForComparison(
+    VAULT_LAYOUT.auditDirectory,
+    input.comparisonOptions,
+  );
+  if (
+    !comparisonRelativePath.startsWith(`${auditDirectory}/`) ||
+    !isJsonlRelativePath(input.target.relativePath, input.comparisonOptions)
+  ) {
+    return false;
+  }
+
+  const payload = Buffer.from(input.bytes).toString("utf8");
+  if (!payload.endsWith("\n")) {
+    return false;
+  }
+  const payloadLines = payload.slice(0, -1).split("\n");
+  if (payloadLines.length !== 1 || payloadLines[0]?.length === 0) {
+    return false;
+  }
+  const incomingRecord = parseHostedAuditRecordLine(payloadLines[0]);
+  if (!incomingRecord) {
+    return false;
+  }
+
+  const existingText = Buffer.from(input.existing).toString("utf8");
+  if (existingText.length > 0 && !existingText.endsWith("\n")) {
+    return false;
+  }
+  const existingLines = existingText.length === 0 ? [] : existingText.slice(0, -1).split("\n");
+  const existingRecordIds = new Set<string>();
+  let matchingRecord: typeof incomingRecord | null = null;
+  for (const line of existingLines) {
+    if (line.length === 0) {
+      return false;
+    }
+    const record = parseHostedAuditRecordLine(line);
+    if (!record) {
+      return false;
+    }
+    if (existingRecordIds.has(record.id)) {
+      throw new VaultError(
+        "HOSTED_CANONICAL_WRITE_APPEND_BASE_MISMATCH",
+        "Hosted canonical audit replay found a duplicate existing audit record ID.",
+      );
+    }
+    existingRecordIds.add(record.id);
+    if (record.id === incomingRecord.id) {
+      matchingRecord = record;
+    }
+  }
+
+  if (matchingRecord) {
+    if (JSON.stringify(matchingRecord) !== JSON.stringify(incomingRecord)) {
+      throw new VaultError(
+        "HOSTED_CANONICAL_WRITE_APPEND_BASE_MISMATCH",
+        "Hosted canonical audit replay found conflicting content for an existing audit record ID.",
+      );
+    }
+    return true;
+  }
+
+  await fs.appendFile(input.target.absolutePath, input.bytes);
+  return true;
+}
+
+function parseHostedAuditRecordLine(line: string) {
+  let value: unknown;
+  try {
+    value = JSON.parse(line);
+  } catch {
+    return null;
+  }
+  const result = auditRecordSchema.safeParse(value);
+  return result.success ? result.data : null;
 }
 
 function isArchivedIntegrationIngestAppendError(

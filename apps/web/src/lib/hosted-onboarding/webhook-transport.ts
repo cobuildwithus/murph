@@ -57,6 +57,7 @@ import {
   toHostedOnboardingLogIdSuffix,
 } from "./logging";
 import { requireHostedOnboardingLinqConfig } from "./runtime";
+import { lockHostedMemberRow } from "./shared";
 
 type HostedLinqTransportPersistenceClient = PrismaClient | Prisma.TransactionClient;
 type HostedLinqTransportPostResponseScheduler = (task: () => Promise<void>) => void;
@@ -312,6 +313,11 @@ type HostedLinqSideEffectDrainSkipReason =
   | "notice_in_flight"
   | "notice_target_unauthorized";
 
+type HostedLinqProviderDispatchPreparation =
+  | "claimed"
+  | "in_flight"
+  | "target_unauthorized";
+
 export type HostedLinqSideEffectDrainResult = {
   sentCount: number;
   skipped: readonly {
@@ -437,7 +443,7 @@ async function sendHostedLinqSideEffect(
       ? effect.payload
       : null;
   const deliveryAttemptTask = usageLimitPayload
-    ? Promise.resolve(true)
+    ? Promise.resolve<HostedLinqProviderDispatchPreparation>("claimed")
     : prepareHostedLinqSideEffectProviderDispatch({
         effect,
         prisma: options.prisma,
@@ -446,7 +452,11 @@ async function sendHostedLinqSideEffect(
   let deliveryEffect = effect;
 
   try {
-    if (!await deliveryAttemptTask) {
+    const preparation = await deliveryAttemptTask;
+    if (preparation === "target_unauthorized") {
+      return "notice_target_unauthorized";
+    }
+    if (preparation === "in_flight") {
       return "notice_in_flight";
     }
 
@@ -694,34 +704,42 @@ async function prepareHostedLinqSideEffectProviderDispatch(input: {
   effect: HostedLinqMessageSideEffect;
   prisma: HostedLinqTransportPersistenceClient;
   startedAtMs: number;
-}): Promise<boolean> {
+}): Promise<HostedLinqProviderDispatchPreparation> {
   const template = input.effect.payload.template;
   const target = readHostedLinqSideEffectDeliveryTarget(input.effect.payload);
-  if (!target.linqChatId) {
-    const claim = await claimHostedLinqDeliveryProviderDispatchTx({
-      attemptedAt: new Date(input.startedAtMs),
-      idempotencyKey: input.effect.effectId,
-      phoneNumber: target.phoneNumber,
-      prisma: input.prisma,
-      source: "hosted_webhook_side_effect",
-      sourceRef: input.effect.effectId,
-      status: "provider_dispatch_started",
-      targetKind: target.targetKind,
-      template,
-    });
-    return claim.claimed;
-  }
 
   return await runHostedLinqTransportTransaction(input.prisma, async (prisma) => {
-    await acquireHostedLinqChatOwnershipLockTx({
-      chatId: target.linqChatId,
-      tx: prisma,
-    });
-    await assertHostedLinqSideEffectRouteAuthority(input.effect, prisma);
+    if (
+      input.effect.payload.template === "invite_signup"
+      || input.effect.payload.template === "invite_signup_fallback"
+    ) {
+      await lockHostedMemberRow(prisma, input.effect.payload.memberId);
+      const invite = await prisma.hostedInvite.findUnique({
+        select: { id: true },
+        where: {
+          id: input.effect.payload.inviteId,
+          member: { suspendedAt: null },
+          memberId: input.effect.payload.memberId,
+        },
+      });
+      if (!invite) {
+        return "target_unauthorized";
+      }
+    }
+
+    if (target.linqChatId) {
+      await acquireHostedLinqChatOwnershipLockTx({
+        chatId: target.linqChatId,
+        tx: prisma,
+      });
+      await assertHostedLinqSideEffectRouteAuthority(input.effect, prisma);
+    }
     const claim = await claimHostedLinqDeliveryProviderDispatchTx({
       attemptedAt: new Date(input.startedAtMs),
       idempotencyKey: input.effect.effectId,
-      linqChatId: target.linqChatId,
+      ...(target.linqChatId
+        ? { linqChatId: target.linqChatId }
+        : { phoneNumber: target.phoneNumber }),
       prisma,
       source: "hosted_webhook_side_effect",
       sourceRef: input.effect.effectId,
@@ -729,7 +747,7 @@ async function prepareHostedLinqSideEffectProviderDispatch(input: {
       targetKind: target.targetKind,
       template,
     });
-    return claim.claimed;
+    return claim.claimed ? "claimed" : "in_flight";
   });
 }
 

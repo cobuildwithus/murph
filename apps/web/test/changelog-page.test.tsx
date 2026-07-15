@@ -52,6 +52,8 @@ describe("ChangelogPage", () => {
       await ChangelogPage({ searchParams: Promise.resolve({}) }),
     );
 
+    expect(markup).toContain("A lighter way to say yes");
+    expect(markup).toContain("Your plan, groups, and next appointment");
     expect(markup).toContain("More control, less waiting");
     expect(markup).toContain("Health help with more context");
     expect(markup).toContain("A cleaner fit on every phone");
@@ -59,7 +61,7 @@ describe("ChangelogPage", () => {
     expect(markup).toContain("Better answers, better instincts");
     expect(markup).not.toContain("Murph referees your group challenge");
     expect(markup).toContain('aria-label="Changelog pages"');
-    expect(markup).toContain('href="/changelog?edition=2026-07-06"');
+    expect(markup).toContain('href="/changelog?edition=2026-07-08"');
     expect(markup).toContain(
       'href="/changelog?edition=2026-07-12#eye-health-playbook"',
     );
@@ -85,18 +87,18 @@ describe("ChangelogPage", () => {
   it("renders the requested older seven-day window with newer and older links", async () => {
     const markup = renderToStaticMarkup(
       await ChangelogPage({
-        searchParams: Promise.resolve({ edition: "2026-07-06" }),
+        searchParams: Promise.resolve({ edition: "2026-07-08" }),
       }),
     );
 
     expect(markup).toContain("Murph referees your group challenge");
-    expect(markup).not.toContain("More control, less waiting");
+    expect(markup).not.toContain("A lighter way to say yes");
     expect(markup).toContain(
       "Seven days of features and improvements from the full Murph archive.",
     );
     expect(markup).not.toContain("The latest seven days");
     expect(markup).toContain('href="/changelog"');
-    expect(markup).toContain('href="/changelog?edition=2026-06-28"');
+    expect(markup).toContain('href="/changelog?edition=2026-06-30"');
     expect(markup).toContain("Newer");
     expect(markup).toContain("Older");
   });
@@ -120,12 +122,12 @@ describe("ChangelogPage", () => {
       ),
     );
     const metadata = await generateMetadata({
-      searchParams: Promise.resolve({ edition: "2026-07-06" }),
+      searchParams: Promise.resolve({ edition: "2026-07-08" }),
     });
 
     expect(metadata).toEqual(
       expect.objectContaining({
-        alternates: { canonical: "/changelog?edition=2026-07-06" },
+        alternates: { canonical: "/changelog?edition=2026-07-08" },
         openGraph: expect.objectContaining({
           images: [expect.objectContaining({ url: pageTwoCardUrl })],
         }),

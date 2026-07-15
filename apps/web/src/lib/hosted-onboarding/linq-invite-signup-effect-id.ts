@@ -16,10 +16,16 @@ export function buildHostedLinqInviteSignupEffectId(input: {
   occurredAt: Date | string;
 }): string {
   const dayUtc = resolveHostedLinqDayUtc(input.occurredAt).toISOString();
-  const base = `${HOSTED_LINQ_INVITE_SIGNUP_EFFECT_ID_PREFIX}${input.memberId}:${dayUtc}`;
+  const base = `${buildHostedLinqInviteSignupEffectIdMemberPrefix(input.memberId)}${dayUtc}`;
   return typeof input.attempt === "number" && input.attempt > 1
     ? `${base}:a${input.attempt}`
     : base;
+}
+
+export function buildHostedLinqInviteSignupEffectIdMemberPrefix(
+  memberId: string,
+): string {
+  return `${HOSTED_LINQ_INVITE_SIGNUP_EFFECT_ID_PREFIX}${memberId}:`;
 }
 
 export function parseHostedLinqInviteSignupEffectId(

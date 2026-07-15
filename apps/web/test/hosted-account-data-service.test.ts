@@ -123,6 +123,7 @@ const REQUIRED_STORE_SLUGS = [
   "prisma.hosted_ai_usage_period",
   "prisma.hosted_product_feedback",
   "prisma.hosted_linq_daily_state",
+  "prisma.hosted_linq_invite_delivery",
   "prisma.hosted_invite",
   "prisma.hosted_consent_event",
   "prisma.hosted_consent_grant",
@@ -397,6 +398,26 @@ describe("deleteHostedAccountData", () => {
     });
     expect(deleteCalls).toEqual(expect.arrayContaining([
       {
+        model: "hostedLinqDelivery",
+        where: {
+          OR: [
+            {
+              sourceRef: {
+                startsWith: "linq-invite-signup:member_123:",
+              },
+            },
+            {
+              sourceRef: {
+                startsWith: "linq-invite-signup:member_thread_container_123:",
+              },
+            },
+          ],
+          template: {
+            in: ["invite_signup", "invite_signup_fallback"],
+          },
+        },
+      },
+      {
         model: "hostedThreadRoute",
         where: {
           OR: [
@@ -441,6 +462,7 @@ describe("deleteHostedAccountData", () => {
         },
       },
     ]));
+    expect(result.deletedCounts["prisma.hosted_linq_invite_delivery"]).toBe(1);
   });
 
   it("deletes delivery-time consume stamps with hosted mailbox item rows", async () => {
