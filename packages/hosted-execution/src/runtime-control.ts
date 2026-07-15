@@ -893,7 +893,7 @@ export interface HostedRuntimeGroupMembershipSummary {
   grantedVaultShareProjectionScopes: HostedVaultShareProjectionScope[];
   kind: string;
   memberCount: number;
-  membershipId: string | null;
+  membershipId: string;
   permissionsUrl: string | null;
   requestedVaultShareProjectionScopes: HostedVaultShareProjectionScope[];
   role: string;

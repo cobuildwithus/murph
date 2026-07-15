@@ -705,7 +705,7 @@ describe('assistant skill assets', () => {
     expect(raw).toContain('`membershipId` returned in that result')
     expect(raw).toContain('Never guess an id')
     expect(raw).toContain('do not create, reconstruct, or reveal a reusable join URL')
-    expect(raw).toContain('temporarily unavailable')
+    expect(raw).not.toContain('temporarily unavailable')
     expect(raw).toContain('does not remove them from the iMessage chat')
     expect(raw).toContain('owner_cannot_leave')
     expect(raw).toContain('group-email.v0')

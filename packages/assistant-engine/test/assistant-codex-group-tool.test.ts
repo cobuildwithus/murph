@@ -125,10 +125,10 @@ describe("murph.group dynamic tool", () => {
     expect(MURPH_GROUP_TOOL.description).toContain('action="list_memberships"');
     expect(MURPH_GROUP_TOOL.description).toContain('action="leave_membership"');
     expect(MURPH_GROUP_TOOL.description).toContain("call list_memberships first");
-    expect(MURPH_GROUP_TOOL.description).toContain("nonempty membershipId");
+    expect(MURPH_GROUP_TOOL.description).toContain("exact nonempty membershipId");
     expect(MURPH_GROUP_TOOL.description).toContain("Never guess a membershipId");
     expect(MURPH_GROUP_TOOL.description).toContain("construct, use, or expose a join URL to leave");
-    expect(MURPH_GROUP_TOOL.description).toContain("leaving through chat is temporarily unavailable");
+    expect(MURPH_GROUP_TOOL.description).not.toContain("temporarily unavailable");
     expect(MURPH_GROUP_TOOL.description).toContain("does not remove them from the iMessage chat");
     expect(MURPH_GROUP_TOOL.description).toContain("Owners cannot leave");
     expect(MURPH_GROUP_TOOL.inputSchema.properties.membershipId.description)

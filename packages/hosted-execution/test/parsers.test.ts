@@ -1116,22 +1116,15 @@ describe("parseHostedRuntimeGroupTool", () => {
     const { membershipId: _omittedMembershipId, ...legacyMembership } =
       response.result.memberships[0];
     void _omittedMembershipId;
-    expect(parseHostedRuntimeGroupToolResponse({
+    expect(() => parseHostedRuntimeGroupToolResponse({
       action: "list_memberships",
       result: {
         memberships: [legacyMembership],
         status: "ok",
         truncated: false,
       },
-    })).toEqual({
-      action: "list_memberships",
-      result: {
-        memberships: [{ ...legacyMembership, membershipId: null }],
-        status: "ok",
-        truncated: false,
-      },
-    });
-    expect(parseHostedRuntimeGroupToolResponse({
+    })).toThrow(/membershipId/u);
+    expect(() => parseHostedRuntimeGroupToolResponse({
       action: "list_memberships",
       result: {
         memberships: [{
@@ -1141,9 +1134,7 @@ describe("parseHostedRuntimeGroupTool", () => {
         status: "ok",
         truncated: false,
       },
-    })).toMatchObject({
-      result: { memberships: [{ membershipId: null }] },
-    });
+    })).toThrow(/membershipId/u);
     expect(() => parseHostedRuntimeGroupToolResponse({
       action: "list_memberships",
       result: {
