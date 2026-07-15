@@ -587,6 +587,44 @@ describe("hosted onboarding Linq webhook hard-cut flows", () => {
       .not.toHaveBeenCalled();
   });
 
+  it("does not restage duplicate non-join reaction context", async () => {
+    const prisma = createPrismaStub();
+    mocks.getPrisma.mockReturnValue(prisma);
+    prisma.hostedLinqProviderEvent.createMany
+      .mockResolvedValueOnce({ count: 1 })
+      .mockResolvedValueOnce({ count: 0 });
+    mocks.handleHostedGroupJoinOfferReaction.mockResolvedValue({
+      reason: "unsupported_reaction",
+      status: "ignored",
+    });
+    mocks.stageHostedLinqGroupReactionContext.mockResolvedValue(true);
+    const webhook = {
+      rawBody: buildLinqProviderWebhookBody({
+        data: {
+          chat_id: "chat_group_1",
+          custom_emoji: "😂",
+          from: "+15551234567",
+          message_id: "msg_group_123",
+          reaction_type: "custom",
+        },
+        eventId: "evt_reaction_context_123",
+        eventType: "reaction.added",
+      }),
+      signature: null,
+      timestamp: null,
+    };
+
+    await expect(handleHostedOnboardingLinqWebhook(webhook)).resolves.toMatchObject({
+      ignored: false,
+      reason: "staged-linq-group-reaction-context",
+    });
+    await expect(handleHostedOnboardingLinqWebhook(webhook)).resolves.toMatchObject({
+      duplicate: true,
+      ignored: true,
+    });
+    expect(mocks.stageHostedLinqGroupReactionContext).toHaveBeenCalledTimes(1);
+  });
+
   it("reruns duplicate Linq reaction.added events so a failed join-offer confirmation can retry", async () => {
     const prisma = createPrismaStub();
     mocks.getPrisma.mockReturnValue(prisma);
