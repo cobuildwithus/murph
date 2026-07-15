@@ -1,4 +1,4 @@
-import { access, mkdtemp, readFile, readdir, rm, stat } from "node:fs/promises";
+import { access, mkdtemp, readFile, readdir, rm, stat, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import path from "node:path";
 
@@ -18,6 +18,7 @@ import {
   ClinicalFhirSnapshotRejectedError,
   importClinicalFhirSnapshot,
   readClinicalFhirRetrievalCheckpoint,
+  readClinicalFhirRetrievalCheckpointForRun,
   type ClinicalFhirSnapshotImportInput,
   writeClinicalFhirRetrievalCheckpoint,
 } from "@murphai/vault-usecases/clinical-records";
@@ -94,9 +95,30 @@ describe("importClinicalFhirSnapshot", () => {
       identity,
       vaultRoot: input.vaultRoot,
     })).resolves.toEqual(checkpoint);
+    await expect(readClinicalFhirRetrievalCheckpointForRun({
+      identity: { generation: identity.generation, runId: identity.runId },
+      vaultRoot: input.vaultRoot,
+    })).resolves.toEqual({ checkpoint, identity });
+    const persistedCheckpoint = await readFile(
+      path.join(checkpointDirectory, checkpointFiles[0]!),
+      "utf8",
+    );
+    expect(persistedCheckpoint).not.toContain(FHIR_BASE_URL);
+    expect(persistedCheckpoint).not.toContain(PATIENT_ID);
 
     await expect(readClinicalFhirRetrievalCheckpoint({
       identity: { ...identity, connectionId: "different-clinical-connection" },
+      vaultRoot: input.vaultRoot,
+    })).rejects.toBeInstanceOf(ClinicalFhirRetrievalCheckpointError);
+    const tamperedCheckpoint = JSON.parse(persistedCheckpoint);
+    tamperedCheckpoint.identity.connectionId = "tampered-clinical-connection";
+    await writeFile(
+      path.join(checkpointDirectory, checkpointFiles[0]!),
+      JSON.stringify(tamperedCheckpoint),
+      "utf8",
+    );
+    await expect(readClinicalFhirRetrievalCheckpointForRun({
+      identity: { generation: identity.generation, runId: identity.runId },
       vaultRoot: input.vaultRoot,
     })).rejects.toBeInstanceOf(ClinicalFhirRetrievalCheckpointError);
 

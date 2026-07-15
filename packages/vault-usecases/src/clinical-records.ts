@@ -8,7 +8,9 @@ import {
   CLINICAL_RAW_RESOURCE_FILES_MAX_TOTAL_BYTES,
   CLINICAL_RAW_RESOURCE_FILE_MAX_BYTES,
   clinicalFhirRetrievalScopeSchema,
+  clinicalFhirRetrievalScopesSchema,
   clinicalFhirResourceTypeSchema,
+  clinicalIsoDateTimeSchema,
   clinicalSourceSystemSchema,
   clinicalRawManifestSchema,
   clinicalRawPathSchema,
@@ -119,6 +121,11 @@ export interface ClinicalFhirRetrievalCheckpoint {
   totalResourceCount: number;
 }
 
+export interface ClinicalFhirRetrievalCheckpointRecord {
+  checkpoint: ClinicalFhirRetrievalCheckpoint;
+  identity: ClinicalFhirRetrievalCheckpointIdentity;
+}
+
 export interface ClinicalFhirSnapshotImportResult {
   canonical: {
     applied: boolean;
@@ -163,6 +170,21 @@ const clinicalFhirRetrievalCheckpointSchema = z.object({
     message: z.string().min(1).max(512),
     resourceType: clinicalFhirResourceTypeSchema.optional(),
   }).strict()).max(CLINICAL_RAW_MANIFEST_MAX_RESOURCE_FILES),
+  identity: z.object({
+    connectionId: z.string().min(1).max(120).regex(/^[A-Za-z0-9._-]+$/u),
+    fetchedAt: clinicalIsoDateTimeSchema,
+    fhirBaseUrlHash: z.string().regex(SHA256_HEX_PATTERN),
+    generation: z.number().int().min(1).max(Number.MAX_SAFE_INTEGER),
+    grantedScopes: z.array(z.string().min(1).max(200)).max(50),
+    patientIdHash: z.string().regex(SHA256_HEX_PATTERN),
+    providerDirectoryEntryId: z.string().min(1).max(120)
+      .regex(/^[A-Za-z0-9._-]+$/u).optional(),
+    requestedScopes: z.array(z.string().min(1).max(200)).max(50),
+    retrievalJobId: z.string().min(1).max(120).regex(/^[A-Za-z0-9._-]+$/u),
+    retrievalScopes: clinicalFhirRetrievalScopesSchema,
+    runId: z.string().min(1).max(120).regex(/^[A-Za-z0-9._-]+$/u),
+    sourceSystem: clinicalSourceSystemSchema,
+  }).strict(),
   identityHash: z.string().regex(SHA256_HEX_PATTERN),
   pageFetchCount: z.number().int().nonnegative()
     .max(CLINICAL_RAW_MANIFEST_MAX_RESOURCE_FILES),
@@ -191,6 +213,25 @@ export async function readClinicalFhirRetrievalCheckpoint(input: {
   identity: ClinicalFhirRetrievalCheckpointIdentity;
   vaultRoot: string;
 }): Promise<ClinicalFhirRetrievalCheckpoint | null> {
+  const record = await readClinicalFhirRetrievalCheckpointForRun(input);
+  if (!record) {
+    return null;
+  }
+  if (
+    hashClinicalFhirRetrievalCheckpointIdentity(record.identity)
+    !== hashClinicalFhirRetrievalCheckpointIdentity(input.identity)
+  ) {
+    throw new ClinicalFhirRetrievalCheckpointError(
+      new TypeError("Clinical FHIR retrieval checkpoint identity changed."),
+    );
+  }
+  return record.checkpoint;
+}
+
+export async function readClinicalFhirRetrievalCheckpointForRun(input: {
+  identity: Pick<ClinicalFhirRetrievalCheckpointIdentity, "generation" | "runId">;
+  vaultRoot: string;
+}): Promise<ClinicalFhirRetrievalCheckpointRecord | null> {
   let raw: string;
   try {
     raw = await readFile(resolveClinicalFhirRetrievalCheckpointPath(input), "utf8");
@@ -203,12 +244,21 @@ export async function readClinicalFhirRetrievalCheckpoint(input: {
 
   try {
     const parsed = clinicalFhirRetrievalCheckpointSchema.parse(JSON.parse(raw));
-    if (parsed.identityHash !== hashClinicalFhirRetrievalCheckpointIdentity(input.identity)) {
+    if (
+      parsed.identity.runId !== input.identity.runId
+      || parsed.identity.generation !== input.identity.generation
+      || parsed.identityHash !== hashClinicalFhirRetrievalCheckpointIdentity(parsed.identity)
+    ) {
       throw new TypeError("Clinical FHIR retrieval checkpoint identity changed.");
     }
     assertClinicalFhirRetrievalCheckpointConsistent(parsed);
-    const { identityHash: _identityHash, schema: _schema, ...checkpoint } = parsed;
-    return checkpoint;
+    const {
+      identity,
+      identityHash: _identityHash,
+      schema: _schema,
+      ...checkpoint
+    } = parsed;
+    return { checkpoint, identity };
   } catch (error) {
     throw new ClinicalFhirRetrievalCheckpointError(error);
   }
@@ -219,9 +269,13 @@ export async function writeClinicalFhirRetrievalCheckpoint(input: {
   identity: ClinicalFhirRetrievalCheckpointIdentity;
   vaultRoot: string;
 }): Promise<void> {
+  const identity = clinicalFhirRetrievalCheckpointSchema.shape.identity.parse(
+    input.identity,
+  );
   const parsed = clinicalFhirRetrievalCheckpointSchema.parse({
     ...input.checkpoint,
-    identityHash: hashClinicalFhirRetrievalCheckpointIdentity(input.identity),
+    identity,
+    identityHash: hashClinicalFhirRetrievalCheckpointIdentity(identity),
     schema: CLINICAL_RETRIEVAL_CHECKPOINT_SCHEMA,
   });
   assertClinicalFhirRetrievalCheckpointConsistent(parsed);
