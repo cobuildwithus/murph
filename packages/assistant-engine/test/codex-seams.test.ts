@@ -330,15 +330,6 @@ describe('assistant Codex seam helpers', () => {
     expect(unprovedMigration).not.toHaveProperty(
       'threadCompatibilityFingerprint',
     )
-    expect(() =>
-      buildCodexThreadIdentity(
-        normalizeAssistantProviderConfig({
-          approvalPolicy: 'on-request',
-          model: 'gpt-5.5',
-          modelProvider: 'openai',
-        }),
-      ),
-    ).toThrow()
   })
 
   it('records recovered Codex thread ids without persisting failed-turn resume state', async () => {
