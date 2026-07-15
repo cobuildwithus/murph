@@ -167,6 +167,7 @@ function buildHostedAssistantCompleteOnboardingResponses(input: {
     input.text,
   ];
 }
+
 async function postSignedLinqWebhook(event: Record<string, unknown>): Promise<Response> {
   const rawBody = JSON.stringify(event);
   const timestamp = String(Math.floor(Date.now() / 1000));
@@ -190,6 +191,7 @@ function signLinqWebhook(secret: string, payload: string, timestamp: string): st
 
   return `sha256=${signature}`;
 }
+
 function requireLinqStub(): HostedLocalLinqStub {
   if (!linqStub) {
     throw new Error("Hosted local Linq stub was not initialized.");

@@ -818,9 +818,7 @@ active invocation dirty. Foreground runtime work may defer intermediate checkpoi
 The active invocation remains dirty until the runtime-owned
 idle-floor—or last-chance shutdown—`idle_shutdown` checkpoint succeeds.
 RunnerContainer never records
-pending checkpoint intent. Activity expiry is cleanup-only. Projection status
-is logged and artifacts remain rebuildable best-effort state rather than a
-reason to take another workspace checkpoint. Plain-text Linq plus
+pending checkpoint intent. Activity expiry is cleanup-only. Plain-text Linq plus
 attachment-free Telegram and WhatsApp input skips projection and cannot be
 delayed by projection initialization or history scans. Linq links, direct email,
 and attachment projection status are logged, and their artifacts remain
