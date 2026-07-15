@@ -33,6 +33,7 @@ export const HOSTED_EXECUTION_DEVICE_SYNC_RUNTIME_DIRTY_PENDING_PATH =
   "/api/internal/device-sync/runtime/dirty-pending";
 export const HOSTED_EXECUTION_DEVICE_SYNC_RUNTIME_DIRTY_ACK_PATH =
   "/api/internal/device-sync/runtime/dirty-ack";
+export const HOSTED_EXECUTION_DEVICE_SYNC_RUNTIME_APPLY_UPDATE_LIMIT = 100;
 export const HOSTED_EXECUTION_DEVICE_SYNC_STAGED_DIRTY_ACK_RECORD_LIMIT = 200;
 export const HOSTED_EXECUTION_DEVICE_SYNC_STAGED_DIRTY_ACK_PAYLOAD_ID_LIMIT = 5_000;
 
@@ -676,9 +677,10 @@ export function parseHostedExecutionDeviceSyncRuntimeApplyRequest(
   trustedUserId: string | null = null,
 ): HostedExecutionDeviceSyncRuntimeApplyRequest {
   const record = requireObject(value, "Hosted device-sync runtime apply request");
-  const updates = requireArray(
+  const updates = requireBoundedArray(
     record.updates,
     "Hosted device-sync runtime apply request updates",
+    HOSTED_EXECUTION_DEVICE_SYNC_RUNTIME_APPLY_UPDATE_LIMIT,
   ).map((entry, index) => parseHostedExecutionDeviceSyncRuntimeConnectionUpdate(entry, index));
 
   assertUniqueHostedExecutionDeviceSyncRuntimeApplyConnectionIds(updates);
@@ -708,9 +710,10 @@ export function parseHostedExecutionDeviceSyncRuntimeApplyResponse(
 
   return {
     appliedAt,
-    updates: requireArray(
+    updates: requireBoundedArray(
       record.updates,
       "Hosted device-sync runtime apply response updates",
+      HOSTED_EXECUTION_DEVICE_SYNC_RUNTIME_APPLY_UPDATE_LIMIT,
     ).map((entry, index) => parseHostedExecutionDeviceSyncRuntimeApplyEntry(entry, index)),
     userId: requireString(record.userId, "Hosted device-sync runtime apply response userId"),
   };

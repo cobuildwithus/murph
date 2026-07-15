@@ -519,6 +519,37 @@ describe("mergeGuardedJunctionHistoricalBackfillMetadata", () => {
 });
 
 describe("parseHostedExecutionDeviceSyncRuntimeApplyRequest", () => {
+  it("rejects runtime apply request and response batches above the shared limit", () => {
+    const connectionIds = Array.from(
+      {
+        length:
+          hostedRuntime.HOSTED_EXECUTION_DEVICE_SYNC_RUNTIME_APPLY_UPDATE_LIMIT + 1,
+      },
+      (_, index) => `conn_${index}`,
+    );
+
+    expect(() =>
+      parseHostedExecutionDeviceSyncRuntimeApplyRequest({
+        updates: connectionIds.map((connectionId) => ({ connectionId })),
+        userId: "user_123",
+      })
+    ).toThrowError(/runtime apply request updates must include no more than 100 entries/u);
+
+    expect(() =>
+      parseHostedExecutionDeviceSyncRuntimeApplyResponse({
+        appliedAt: "2026-04-07T02:00:00.000Z",
+        updates: connectionIds.map((connectionId) => ({
+          connection: null,
+          connectionId,
+          status: "missing",
+          tokenUpdate: "missing",
+          writeUpdate: "missing",
+        })),
+        userId: "user_123",
+      })
+    ).toThrowError(/runtime apply response updates must include no more than 100 entries/u);
+  });
+
   it("parses staged dirty ack overlays on dirty-pending requests", () => {
     expect(
       parseHostedExecutionDeviceSyncDirtyPendingRequest(
