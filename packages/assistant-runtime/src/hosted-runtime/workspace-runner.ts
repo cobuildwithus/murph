@@ -811,15 +811,14 @@ export async function runHostedWorkspaceUntilIdleOrBudget(
         vaultRoot: input.vaultRoot,
       })).inputIds
     : [];
-  const precomputedAssistantInputTail = acceptedInitialAssistantInputBatch
-    ? filterHostedWorkspaceRunnerAssistantInputBatch(
-        acceptedInitialAssistantInputBatch,
-        new Set(selectedInitialAssistantInputIds),
-      )
-    : null;
   checkpointRequestSession.seedAssistantInputSelection(
     selectedInitialAssistantInputIds.length,
-    precomputedAssistantInputTail,
+    acceptedInitialAssistantInputBatch
+      ? filterHostedWorkspaceRunnerAssistantInputBatch(
+          acceptedInitialAssistantInputBatch,
+          new Set(selectedInitialAssistantInputIds),
+        )
+      : null,
   );
 
   const runAssistantPhase = input.runAssistantPhase;
@@ -1170,8 +1169,6 @@ export async function runHostedWorkspaceUntilIdleOrBudget(
         initialAssistantInputBatchHasWork
         || initialMailboxImportHasForegroundConversationWork
         || foregroundConversationWorkObserved,
-      hasPrecomputedAssistantInputTail:
-        hostedWorkspaceRunnerAssistantInputBatchHasWork(precomputedAssistantInputTail),
       now: input.now,
       postCheckpointWakeMerged,
       result: assistantPhaseResult,
@@ -2621,7 +2618,6 @@ function mergeAssistantContextSnapshotRefreshWake(input: {
 
 async function reconcilePendingAssistantInputWake(input: {
   foregroundConversationWorkObserved: boolean;
-  hasPrecomputedAssistantInputTail: boolean;
   now?: (() => string) | null;
   postCheckpointWakeMerged: boolean;
   result: HostedWorkspaceRunnerAssistantPhaseResult;
@@ -2630,14 +2626,11 @@ async function reconcilePendingAssistantInputWake(input: {
   if (input.result.nextWakeAt) {
     const nextWakeReason = input.result.nextWakeReason ?? "assistant";
     const wakeIsImmediate = hostedWorkspaceRunnerWakeIsImmediate(input.result.nextWakeAt, input.now);
-    if (input.foregroundConversationWorkObserved && nextWakeReason === "assistant") {
-      if (wakeIsImmediate || input.hasPrecomputedAssistantInputTail) {
-        return false;
-      }
-    } else if (
-      input.postCheckpointWakeMerged
-      || nextWakeReason !== "assistant"
-      || !wakeIsImmediate
+    if (
+      nextWakeReason !== "assistant"
+      || wakeIsImmediate
+      || !input.foregroundConversationWorkObserved
+      || !input.postCheckpointWakeMerged
     ) {
       return false;
     }
@@ -3289,9 +3282,12 @@ function mergeDeferredPostCheckpointWake(input: {
     }
   }
 
+  const postCheckpointWakeChanged =
+    postCheckpointWake.at !== previousWake.at
+    || postCheckpointWake.reason !== previousWake.reason;
   input.assistantPhaseResult.nextWakeAt = postCheckpointWake.at;
   input.assistantPhaseResult.nextWakeReason = postCheckpointWake.reason;
-  return postCheckpointWake.at !== null;
+  return postCheckpointWake.at !== null && postCheckpointWakeChanged;
 }
 
 function appendHostedWorkspaceDurableCheckpointEffect(input: {

@@ -25,6 +25,7 @@ import {
 } from "@murphai/contracts";
 import {
   readAssistantContextSnapshotState,
+  type RunAssistantAutomationPassInput,
 } from "@murphai/assistant-engine";
 import {
   readAssistantInputEvent,
@@ -98,9 +99,22 @@ const mocks = vi.hoisted(() => ({
   createHostedWorkspaceSnapshotCheckpointRequestBuilder: vi.fn(),
   prepareHostedCodexRuntimeEnvironment: vi.fn(),
   refreshHostedBrowserVaultReplicaFromRuntime: vi.fn(),
+  runAssistantAutomationPass: vi.fn(),
   summarizeWearableSleepRuntime: vi.fn(),
   snapshotHostedPortableWorkspaceDelta: vi.fn(),
 }));
+
+vi.mock("@murphai/assistant-engine", async (importOriginal) => {
+  const actual = await importOriginal<typeof import("@murphai/assistant-engine")>();
+
+  return {
+    ...actual,
+    runAssistantAutomationPass:
+      mocks.runAssistantAutomationPass.mockImplementation(
+        actual.runAssistantAutomationPass,
+      ),
+  };
+});
 
 vi.mock("@murphai/query", async (importOriginal) => {
   const actual = await importOriginal<typeof import("@murphai/query")>();
@@ -190,6 +204,7 @@ import {
   collectHostedPendingAssistantInputMediaRetentionProtections,
   compactHostedPendingAssistantInputIds,
   enqueueHostedPendingAssistantInputId,
+  inspectHostedPendingAssistantInputWakeCandidate,
   readHostedPendingAssistantInputIds,
 } from "../src/hosted-runtime/pending-input-index.ts";
 import {
@@ -14168,6 +14183,159 @@ describe("hosted workspace runtime entrypoint", () => {
       assert.equal(checkpointRequests[0]?.reason, "idle_shutdown");
     } finally {
       runtimeAbortController.abort();
+      await removeTempRoot(vaultRoot);
+    }
+  });
+
+  test("preserves the inbox bootstrap retry across an all-pending boundary tail", async () => {
+    const vaultRoot = await mkdtemp(path.join(tmpdir(), "murph-runtime-bootstrap-boundary-tail-"));
+    const events: string[] = [];
+    const checkpointRequests: HostedWorkspaceCheckpointRequest[] = [];
+    const runtimeAbortController = new AbortController();
+    const mailboxItems = Array.from({ length: 4 }, (_, index) => {
+      const laneSeq = String(index + 1);
+      return createMailboxItem({
+        id: `mailbox_item_entrypoint_bootstrap_boundary_tail_${laneSeq}`,
+        laneSeq,
+        occurredAt: `2026-04-27T00:00:0${laneSeq}.000Z`,
+      });
+    });
+    const importedInputIds: string[] = [];
+    const secondBootstrapObserved = createDeferred<void>();
+    const scheduledRetryObserved = createDeferred<number>();
+    const originalAutomationPass =
+      mocks.runAssistantAutomationPass.getMockImplementation();
+    let automationPassCount = 0;
+    let resultPromise: ReturnType<typeof runHostedWorkspaceRuntimeJobInProcess> | null = null;
+
+    assert.ok(originalAutomationPass);
+    vi.useFakeTimers({ toFake: ["Date", "setTimeout", "clearTimeout"] });
+    try {
+      vi.setSystemTime(new Date(TEST_NOW));
+      mocks.runAssistantAutomationPass.mockClear();
+      mocks.runAssistantAutomationPass.mockImplementation(
+        async (input: RunAssistantAutomationPassInput) => {
+          automationPassCount += 1;
+          events.push(`automation.pass:${automationPassCount}:${Date.now()}`);
+          if (automationPassCount <= 2) {
+            if (automationPassCount === 2) {
+              secondBootstrapObserved.resolve();
+            }
+            throw { code: "INBOX_NOT_INITIALIZED" };
+          }
+
+          scheduledRetryObserved.resolve(Date.now());
+          assert.ok(input.signal);
+          return await new Promise((_, reject) => {
+            if (input.signal?.aborted) {
+              reject(input.signal.reason);
+              return;
+            }
+            input.signal?.addEventListener(
+              "abort",
+              () => reject(input.signal?.reason),
+              { once: true },
+            );
+          });
+        },
+      );
+
+      await initializeVault({ createdAt: TEST_NOW, vaultRoot });
+      resultPromise = runHostedWorkspaceRuntimeJobInProcess(
+        createWorkspaceRuntimeJobInput({
+          request: {
+            attemptId: "attempt_synthetic_bootstrap_boundary_tail",
+            budget: {
+              maxMailboxItems: 4,
+            },
+            idleCheckpointDelayMs: 180_000,
+            leaseGeneration: "9",
+            userId: TEST_USER_ID,
+            workspaceVersion: "4",
+          },
+        }),
+        {
+          async createCheckpointSnapshot(snapshotInput) {
+            events.push(`snapshot:${snapshotInput.reason}`);
+            return {
+              snapshotRef: createBundleRef({
+                hash: "7".repeat(64),
+                key: "users/bundles/member-synthetic/bootstrap-boundary-tail.bundle.json",
+                size: 640,
+              }),
+            };
+          },
+          async importItem(item) {
+            const inputId = await stagePendingLinqAssistantInputForMailboxItem({
+              causalSeq: item.item.laneSeq,
+              item: item.item,
+              threadId: item.item.laneSeq === "4"
+                ? "thread_bootstrap_boundary"
+                : "thread_bootstrap_group",
+              vaultRoot,
+            });
+            importedInputIds.push(inputId);
+            return {
+              assistantInputId: inputId,
+              status: "imported",
+            };
+          },
+          platform: createPlatform({
+            mailboxPort: createMailboxPort({
+              events,
+              items: mailboxItems,
+            }),
+            workspacePort: createWorkspacePort({
+              checkpointRequests,
+              events,
+              workspace: createWorkspaceState({ version: "4" }),
+            }),
+          }),
+          signal: runtimeAbortController.signal,
+          vaultRoot,
+        },
+      );
+
+      await withRealTimeout(secondBootstrapObserved.promise, 15_000, () =>
+        events.join(",")
+      );
+      await waitForFakeTimerScheduled(() => events.join(","));
+      assert.equal(automationPassCount, 2);
+      assert.equal(importedInputIds.length, 4);
+      assert.deepEqual(
+        await inspectHostedPendingAssistantInputWakeCandidate({ vaultRoot }),
+        {
+          hasCandidate: true,
+          indexComplete: true,
+        },
+      );
+      assert.equal(
+        checkpointRequests.some((request) => request.reason === "idle_shutdown"),
+        false,
+      );
+      assert.equal(events.includes("snapshot:idle_shutdown"), false);
+
+      await vi.advanceTimersByTimeAsync(30_000);
+      const retryStartedAt = await withRealTimeout(
+        scheduledRetryObserved.promise,
+        1_000,
+        () => events.join(","),
+      );
+
+      assert.equal(retryStartedAt, Date.parse(TEST_NOW) + 30_000);
+      assert.equal(automationPassCount, 3);
+      assert.equal(
+        checkpointRequests.some((request) => request.reason === "idle_shutdown"),
+        false,
+      );
+      assert.equal(events.includes("snapshot:idle_shutdown"), false);
+    } finally {
+      runtimeAbortController.abort(
+        new DOMException("Synthetic test cleanup.", "AbortError"),
+      );
+      await resultPromise?.catch(() => undefined);
+      mocks.runAssistantAutomationPass.mockImplementation(originalAutomationPass);
+      vi.useRealTimers();
       await removeTempRoot(vaultRoot);
     }
   });
