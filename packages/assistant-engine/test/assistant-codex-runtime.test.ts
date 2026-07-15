@@ -1800,10 +1800,12 @@ describe('assistant codex runtime', () => {
     expect(liveTurnReleased).toBe(1)
   })
 
-  it('overrides an earlier no-reply and rejects a later one after a computer pause', async () => {
+  it('overrides an overlapping earlier no-reply and rejects a later one after a computer pause', async () => {
     const workingDirectory = await createTempDir('assistant-codex-computer-pause-no-reply-work-')
     const progressDelivery = createProgressDeliveryMock()
     const hostedToolContext = createHostedToolContext()
+    const onFinishWithoutReplyAccepted = vi.fn()
+    const onFinishWithoutReplyRecorded = vi.fn()
     const fetchImpl = vi.fn(async (
       url: string | URL | Request,
       init?: RequestInit,
@@ -1858,7 +1860,7 @@ describe('assistant codex runtime', () => {
               },
             }),
           )
-          child.stdout.write(
+          child.stdout.write([
             jsonLine({
               id: 60,
               method: 'item/tool/call',
@@ -1868,13 +1870,6 @@ describe('assistant codex runtime', () => {
                 arguments: {},
               },
             }),
-          )
-          await expect(waitForRpcResponse(child, 60)).resolves.toMatchObject({
-            id: 60,
-            result: { success: true },
-          })
-
-          child.stdout.write(
             jsonLine({
               id: 61,
               method: 'item/tool/call',
@@ -1889,7 +1884,11 @@ describe('assistant codex runtime', () => {
                 },
               },
             }),
-          )
+          ].join(''))
+          await expect(waitForRpcResponse(child, 60)).resolves.toMatchObject({
+            id: 60,
+            result: { success: true },
+          })
           await expect(waitForRpcResponse(child, 61)).resolves.toMatchObject({
             id: 61,
             result: { success: true },
@@ -1981,6 +1980,8 @@ describe('assistant codex runtime', () => {
       executeCodexAppServerTurn({
         fetchImpl,
         hostedToolContext,
+        onFinishWithoutReplyAccepted,
+        onFinishWithoutReplyRecorded,
         progressDelivery,
         prompt: 'pause for confirmation',
         workingDirectory,
@@ -1994,6 +1995,8 @@ describe('assistant codex runtime', () => {
         'Open the secure checkout: https://web.example.test/computer/handoff/raw-token',
     })
     expect(fetchImpl).toHaveBeenCalledTimes(1)
+    expect(onFinishWithoutReplyAccepted).not.toHaveBeenCalled()
+    expect(onFinishWithoutReplyRecorded).not.toHaveBeenCalled()
   })
 
   const vaultApprovalUrlScenarios = [
