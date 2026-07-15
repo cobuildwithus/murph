@@ -67,11 +67,12 @@ that Murph should use on the next hosted turn:
 - Configuration updates require an explicit personal-member choice. The
   authenticated Settings form uses its normal session and CSRF boundary. An
   assistant-driven update additionally requires eligible accepted user input
-  for that turn. The runtime forwards the sole accepted input id, and web binds
-  it to the callback member plus one live conversation mailbox row inside the
-  matching field-level preference-write transaction. This low-risk preference
-  update does not require a passkey or browser handoff; missing or ambiguous
-  input authority fails closed.
+  for that turn. The runtime forwards the terminal input id from its locally
+  revalidated bounded exact-successor provider batch, and web binds it to the
+  callback member plus one live conversation mailbox row inside the matching
+  field-level preference-write transaction. This low-risk preference update
+  does not require a passkey or browser handoff; missing or ambiguous input
+  authority fails closed.
   Murph may suggest Luna or an Edge upgrade, but it must not switch model or
   reasoning effort automatically because usage is low or exhausted.
 - Changing the preference does not create a mailbox item, wake, queue, or a

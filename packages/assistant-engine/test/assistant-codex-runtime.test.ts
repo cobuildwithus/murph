@@ -1949,17 +1949,20 @@ describe('assistant codex runtime', () => {
       acceptedNoReplyDeliveryContextOrdinals: [],
       finalAction: null,
       finalMessage: 'Take over here: https://web.example.test/computer/handoff/raw-token',
+      transcriptMessage: null,
     })
   })
 
   const vaultApprovalUrlScenarios = [
     {
       expectedFinalMessage: `Approval is required.\n\nhttps://www.withmurph.ai/approve/haa_${'a'.repeat(32)}`,
+      expectedTranscriptMessage: 'Approval is required.',
       name: 'appends the exact owner URL outside model context',
       selectNoReplyBeforeApproval: false,
     },
     {
       expectedFinalMessage: `https://www.withmurph.ai/approve/haa_${'a'.repeat(32)}`,
+      expectedTranscriptMessage: null,
       name: 'overrides an earlier no-reply selection',
       selectNoReplyBeforeApproval: true,
     },
@@ -1970,6 +1973,7 @@ describe('assistant codex runtime', () => {
         `https://www.withmurph.ai/approve/haa_${'a'.repeat(32)}`,
         `https://www.withmurph.ai/approve/haa_${'b'.repeat(32)}`,
       ].join('\n\n'),
+      expectedTranscriptMessage: 'Approval is required.',
       name: 'preserves every exact owner URL when multiple vault approvals are pending',
       selectNoReplyBeforeApproval: false,
     },
@@ -2123,9 +2127,11 @@ describe('assistant codex runtime', () => {
       acceptedNoReplyDeliveryContextOrdinals: [],
       finalAction: null,
       finalMessage: scenario.expectedFinalMessage,
+      transcriptMessage: scenario.expectedTranscriptMessage,
     })
     for (const exactApprovalUrl of exactApprovalUrls) {
       expect(result.finalMessage.split(exactApprovalUrl)).toHaveLength(2)
+      expect(result.transcriptMessage ?? '').not.toContain(exactApprovalUrl)
     }
     expect(sendVaultFile).toHaveBeenCalledTimes(approvalCount)
     expect(onFinishWithoutReplyAccepted).not.toHaveBeenCalled()

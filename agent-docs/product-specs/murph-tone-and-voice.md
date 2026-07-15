@@ -94,10 +94,11 @@ the runtime has its web-owned port:
 Model and reasoning mutations belong exclusively to
 `murph.assistant_configuration`. That operation reads the current-turn and
 saved next-turn configuration, requires user-sourced intent for an exact update,
-and saves only when web binds the sole accepted input id to the callback member
-and one live conversation mailbox row. This preference change does not require
-passkey approval. A saved update starts on the next turn rather than changing
-the turn that requested it.
+and saves only when web binds the terminal input id from the locally revalidated
+bounded exact-successor provider batch to the callback member and one live
+conversation mailbox row. This preference change does not require passkey
+approval. A saved update starts on the next turn rather than changing the turn
+that requested it.
 
 Voice labels shown to members map to tool ids from the shared
 `assistantVoiceOptions` roster; voice guidance derives the complete mapping

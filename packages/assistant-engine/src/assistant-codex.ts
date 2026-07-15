@@ -513,6 +513,7 @@ export function readCodexAppServerTurnFailureContext(
 
 export interface CodexAppServerTurnResult {
   finalMessage: string
+  transcriptMessage: string | null
   acceptedNoReplyDeliveryContextOrdinals: readonly number[]
   finalAction: AssistantNoReplyDisposition | null
   finalActionExplicit: boolean
@@ -4282,6 +4283,9 @@ async function runCodexAppServerTurnOnProcess(
     finalActionExplicit:
       finalActionPatch !== null && !requiredUserVisibleLink,
     finalMessage,
+    transcriptMessage:
+      normalizeNullableString(modelFinalMessage) ??
+      (finalResponseMedia.length > 0 ? '' : null),
     reactions: reactionPatches.map((entry) => ({
       deliveryContextOrdinal: entry.deliveryContextOrdinal,
       reaction: entry.patch.reaction,

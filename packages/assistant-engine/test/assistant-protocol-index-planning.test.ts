@@ -2500,6 +2500,81 @@ describe('assistant protocol index planning', () => {
       planningMocks.readAssistantCliSurfaceBootstrapContext,
     ).toHaveBeenCalledTimes(1)
   })
+
+  it('keeps a pending vault approval capability out of fresh-thread history after a route change', async () => {
+    planningMocks.readAssistantCliSurfaceBootstrapContext.mockResolvedValue('bootstrap contract')
+    planningMocks.readAssistantContextSnapshotPrompt.mockResolvedValue(null)
+    planningMocks.resolveCodexAssistantTargetCapabilities.mockReturnValue({
+      supportsNativeResume: true,
+    })
+    const approvalUrl =
+      `https://www.withmurph.ai/approve/haa_${'a'.repeat(32)}`
+    const vault = await mkdtemp(
+      path.join(os.tmpdir(), 'assistant-route-plan-vault-approval-'),
+    )
+    const route = createRoute()
+    const session = createSession({
+      resumeState: {
+        assistantContractFingerprint:
+          '0000000000000000000000000000000000000000000000000000000000000000',
+        routeFingerprint: 'route-before-model-change',
+        threadId: 'thread-before-model-change',
+      },
+      turnCount: 1,
+    })
+
+    try {
+      await appendAssistantTranscriptEntries(vault, session.sessionId, [
+        {
+          kind: 'user',
+          text: 'Send the report.',
+        },
+        {
+          kind: 'assistant',
+          text: 'Approval is required.',
+        },
+      ])
+
+      const plan = await resolveAssistantRouteTurnPlan({
+        executionContext: null,
+        input: {
+          ...createMessageInput(),
+          model: 'gpt-5.5',
+          prompt: 'Use medium reasoning now.',
+          vault,
+        },
+        profile: {
+          promptProfile: 'conversation',
+          threadScope: 'session-thread',
+          toolProfile: 'provider-turn',
+        },
+        promptTimeContext: {
+          currentLocalDate: '2026-05-04',
+          currentTimeZone: 'Asia/Kuala_Lumpur',
+        },
+        route,
+        session,
+        sharedPlan: createPrivateSharedPlan(),
+      })
+
+      expect(plan.resume).toBeNull()
+      expect(plan.conversationHistoryMessages).toEqual([
+        {
+          content: 'Send the report.',
+          role: 'user',
+        },
+        {
+          content: 'Approval is required.',
+          role: 'assistant',
+        },
+      ])
+      expect(JSON.stringify(plan.conversationHistoryMessages)).not.toContain(
+        approvalUrl,
+      )
+    } finally {
+      await rm(vault, { force: true, recursive: true })
+    }
+  })
 })
 
 function createMessageInput(): AssistantMessageInput {

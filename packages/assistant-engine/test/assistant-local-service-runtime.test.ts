@@ -154,6 +154,52 @@ test('sendAssistantMessageLocal completes a successful turn, persists usage, and
   )
 })
 
+test('sendAssistantMessageLocal delivers an exact approval URL without persisting it in assistant history', async () => {
+  const approvalUrl =
+    `https://www.withmurph.ai/approve/haa_${'a'.repeat(32)}`
+  const session = createAssistantSession()
+  const { mocks, sendAssistantMessageLocal } = await loadLocalServiceModule({
+    providerOutcome: {
+      kind: 'succeeded',
+      providerTurn: {
+        onboardingGuidanceInjected: true,
+        codexContinuation: {
+          kind: 'explicit-structured-history',
+        },
+        codexThreadId: 'provider-thread-capability-split',
+        response: `Approval is required.\n\n${approvalUrl}`,
+        route: {
+          routeId: 'route-capability-split',
+        },
+        session,
+        transcriptResponse: 'Approval is required.',
+      },
+    },
+    session,
+  })
+
+  const result = await sendAssistantMessageLocal({
+    deliverResponse: true,
+    executionContext: {
+      hosted: null,
+    },
+    prompt: 'Send the report.',
+    vault: '/vaults/test',
+  })
+
+  expect(result.response).toContain(approvalUrl)
+  expect(mocks.dispatchAssistantReply).toHaveBeenCalledWith(
+    expect.objectContaining({
+      response: `Approval is required.\n\n${approvalUrl}`,
+    }),
+  )
+  expect(mocks.finalizeAssistantTurnArtifacts).toHaveBeenCalledWith(
+    expect.objectContaining({
+      assistantTranscriptText: 'Approval is required.',
+    }),
+  )
+})
+
 test('sendAssistantMessageLocal replies safely without starting the provider for an unverified external audience', async () => {
   const safetyResponse =
     "I couldn't verify whether this is a private or group conversation, so I can't safely use account context here yet. Please try again in your private chat with Murph."
@@ -7017,6 +7063,7 @@ async function loadLocalServiceModule(input?: {
           response: string
           responseMedia?: readonly AssistantResponseMedia[] | null
           session: AssistantSession
+          transcriptResponse?: string | null
         }
       }
   deliveryOutcome?: {

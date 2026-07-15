@@ -1551,9 +1551,23 @@ export async function sendAssistantMessageLocal(
                 session: currentSession,
                 sharedPlan,
               })
+        const rawTranscriptResponseText = noReplySelected
+          ? null
+          : providerResult.transcriptResponse === undefined
+            ? rawFinalResponseText
+            : providerResult.transcriptResponse
+        const transcriptResponseText =
+          rawTranscriptResponseText === null
+            ? null
+            : resolveAssistantPersistedReplyText({
+                messageInput: finalReplyInput,
+                rawResponse: rawTranscriptResponseText,
+                session: currentSession,
+                sharedPlan,
+              })
         const assistantTranscriptText = resolveAssistantProviderTranscriptText({
           media: providerResult.responseMedia,
-          response: finalResponseText,
+          response: transcriptResponseText,
         })
         const turnArtifactsStartedAt = Date.now()
         const session = await finalizeAssistantTurnArtifacts({

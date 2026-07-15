@@ -389,6 +389,7 @@ export async function executeCodexAssistantTurnAttempt(
           }
         : {}),
       response: result.finalMessage,
+      transcriptResponse: result.transcriptMessage,
       responseDeliveryContextOrdinal: result.responseDeliveryContextOrdinal,
       reactions: result.reactions,
       precedingResponseSegments: (result.precedingAgentMessageSegments ?? []).map((segment) => ({
