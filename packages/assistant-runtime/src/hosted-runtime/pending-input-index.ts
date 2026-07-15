@@ -175,19 +175,61 @@ function resolveCollectionNowMs(value: Date | string | undefined): number {
 export async function hasHostedPendingAssistantInputWakeCandidate(input: {
   vaultRoot: string;
 }): Promise<boolean> {
-  const existing = await readHostedPendingAssistantInputStateAtPath({
-    filePath: resolveHostedPendingAssistantInputStatePath(input.vaultRoot),
-  });
-  if (existing.state.inputIds.length > 0) {
-    return true;
-  }
-  if (!existing.missing && existing.state.backfilled) {
-    return false;
-  }
-
   return (await compactHostedPendingAssistantInputIds({
     vaultRoot: input.vaultRoot,
   })).length > 0;
+}
+
+export async function inspectHostedPendingAssistantInputWakeCandidate(input: {
+  vaultRoot: string;
+}): Promise<{ hasCandidate: boolean; indexComplete: boolean }> {
+  const existing = await readHostedPendingAssistantInputStateAtPath({
+    filePath: resolveHostedPendingAssistantInputStatePath(input.vaultRoot),
+  });
+  return {
+    hasCandidate: await hasReplyableHostedPendingAssistantInputId({
+      inputIds: existing.state.inputIds,
+      vaultRoot: input.vaultRoot,
+    }),
+    indexComplete: !existing.missing && existing.state.backfilled,
+  };
+}
+
+async function hasReplyableHostedPendingAssistantInputId(input: {
+  inputIds: readonly string[];
+  vaultRoot: string;
+}): Promise<boolean> {
+  if (input.inputIds.length === 0) {
+    return false;
+  }
+
+  const enabledAutoReplyChannels = new Set(
+    (await readAssistantAutomationState(input.vaultRoot)).autoReply
+      .map((entry) => entry.channel),
+  );
+  for (const inputId of input.inputIds) {
+    const event = await readAssistantInputEvent({
+      inputId,
+      vault: input.vaultRoot,
+    });
+    if (
+      !event
+      || !isHostedPendingAssistantInputStillReplyable({
+        enabledAutoReplyChannels,
+        event,
+      })
+    ) {
+      continue;
+    }
+    if (!(await hasCompleteAssistantAutoReplyTerminalEvidence({
+      captureId: event.projection.captureId,
+      inputId,
+      vault: input.vaultRoot,
+    }))) {
+      return true;
+    }
+  }
+  return false;
 }
 
 export async function enqueueHostedPendingAssistantInputId(input: {

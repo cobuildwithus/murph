@@ -14394,10 +14394,10 @@ describe("hosted workspace runtime entrypoint", () => {
       assert.equal(checkpointRequests.length, 2);
       assert.equal(checkpointRequests[0]?.reason, "idle_shutdown");
       assert.equal(checkpointRequests[1]?.reason, "idle_shutdown");
-      assert.equal(checkpointRequests[1]?.nextWakeReason, "assistant");
-      assert.ok(assistantPhaseCalls >= 3);
+      assert.equal(checkpointRequests[1]?.nextWakeReason, null);
+      assert.equal(assistantPhaseCalls, 2);
       assert.deepEqual(await readHostedPendingAssistantInputIds({ vaultRoot }), []);
-      assert.equal(result.status, "scheduled");
+      assert.equal(result.status, "idle");
     } finally {
       runtimeAbortController.abort();
       mocks.summarizeWearableSleepRuntime.mockClear();
@@ -19138,8 +19138,8 @@ describe("hosted workspace runtime entrypoint", () => {
         ...platform,
         artifactStore: {
           ...platform.artifactStore,
-          async get(sha256) {
-            const bytes = await platform.artifactStore.get(sha256);
+          async get(sha256, context) {
+            const bytes = await platform.artifactStore.get(sha256, context);
             if (sha256 === bundle.hash && mailboxItems.length === 0) {
               events.push("artifact.get:workspace-bundle");
               mailboxItems.push(createMailboxItem({

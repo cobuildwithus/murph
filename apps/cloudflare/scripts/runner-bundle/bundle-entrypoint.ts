@@ -65,12 +65,21 @@ const RUNNER_ENTRYPOINT_BUNDLE_TOTAL_BYTES_BUDGET = 9_300_000;
 // Current-main assembly measured 1,480,763B on CI Linux (+9,546B) and
 // 1,485,768B on local macOS (+14,551B); advance only by the larger entry
 // overage and preserve the noise band.
-const RUNNER_ENTRYPOINT_BUNDLE_ENTRY_BASELINE_BYTES = 1_437_768;
+// Post-delivery foreground release and mutation-scoped reconciliation add a
+// reviewed 4,693B on local macOS while removing the ordinary-reply cron scan;
+// input-driven maintenance cancellation and delayed index repair add 1,637B,
+// earliest-wake selection adds 108B, and read-only terminal-evidence inspection
+// adds a final reviewed 661B.
+const RUNNER_ENTRYPOINT_BUNDLE_ENTRY_BASELINE_BYTES = 1_444_867;
 // PR #631 added 913B for its reviewed Clinical Records crypto-lane labels and
 // another 872B for bounded checkpoint/resume handling over the latest mainline
 // baseline. Advance only by those measured overages and preserve the separate
 // 96KB noise band.
-const RUNNER_ENTRYPOINT_BUNDLE_STATIC_CLOSURE_BASELINE_BYTES = 7_061_212;
+// Indexed cron search and purpose-correlated artifact reads add a reviewed
+// 15,771B to the local static boot closure; the cancellation/index correction
+// adds the same reviewed 1,637B, followed by 108B for earliest-wake selection
+// and 661B for read-only terminal-evidence inspection.
+const RUNNER_ENTRYPOINT_BUNDLE_STATIC_CLOSURE_BASELINE_BYTES = 7_079_389;
 // Noise band above the baseline before the ratchet trips (~2%): absorbs
 // content-hash and minifier jitter without letting real boot-path weight land
 // silently. Keep it tight; it is a tolerance for noise, not feature headroom.

@@ -103,6 +103,10 @@ import {
   type RunnerOutboundEnvironmentSource,
 } from "../src/runner-outbound.ts";
 import {
+  HOSTED_RUNTIME_ARTIFACT_FETCH_CORRELATION_ID_HEADER,
+  HOSTED_RUNTIME_ARTIFACT_READ_PURPOSE_HEADER,
+} from "../src/runner-outbound/headers.ts";
+import {
   resolveRunnerOutboundUserCryptoContext,
   resolveRunnerOutboundUserRunnerStub,
   resetRunnerOutboundSharedCachesForTest,
@@ -3669,9 +3673,15 @@ describe("handleRunnerOutboundRequest", () => {
     });
     vi.stubGlobal("fetch", fixture.fetchMock);
 
+    const artifactFetchCorrelationId = "123e4567-e89b-42d3-a456-426614174000";
     const response = await handleRunnerOutboundRequest(
       new Request(MISSING_ARTIFACT_URL, {
-        headers: createRunnerWriteFenceProxyHeaders(),
+        headers: {
+          ...createRunnerWriteFenceProxyHeaders(),
+          [HOSTED_RUNTIME_ARTIFACT_FETCH_CORRELATION_ID_HEADER]:
+            artifactFetchCorrelationId,
+          [HOSTED_RUNTIME_ARTIFACT_READ_PURPOSE_HEADER]: "workspace_restore",
+        },
         method: "GET",
       }),
       env,
@@ -3684,6 +3694,8 @@ describe("handleRunnerOutboundRequest", () => {
         component: "runner",
         details: expect.objectContaining({
           artifactFound: false,
+          artifactFetchCorrelationId,
+          artifactReadPurpose: "workspace_restore",
           method: "GET",
           operation: "artifact_fetch",
           responseStatus: 404,

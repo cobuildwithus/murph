@@ -965,7 +965,9 @@ async function applyHostedCanonicalWriteReceiptsFromWorkspaceState(input: {
     }
     appliedReceiptRefs.add(receiptRefKey);
 
-    const bytes = await input.platform.artifactStore.get(entry.sha256);
+    const bytes = await input.platform.artifactStore.get(entry.sha256, {
+      purpose: "canonical_write_receipt",
+    });
     if (!bytes) {
       throw new Error("Hosted canonical write receipt artifact is unavailable.");
     }
@@ -1002,7 +1004,9 @@ async function readHostedCanonicalWritePayloadForRestore(input: {
   platform: HostedRuntimePlatform;
   ref: HostedCanonicalWriteReceiptContentRef;
 }): Promise<Uint8Array | ArrayBuffer | null> {
-  return await input.platform.artifactStore.get(input.ref.sha256);
+  return await input.platform.artifactStore.get(input.ref.sha256, {
+    purpose: "canonical_write_receipt",
+  });
 }
 
 function parseHostedCanonicalWriteReceiptForRestore(
@@ -1387,7 +1391,9 @@ async function readHostedWorkspaceRuntimeBundle(input: {
   platform: HostedRuntimePlatform;
   ref: HostedExecutionBundleRef;
 }): Promise<Uint8Array | ArrayBuffer> {
-  const bundle = await input.platform.artifactStore.get(input.ref.hash);
+  const bundle = await input.platform.artifactStore.get(input.ref.hash, {
+    purpose: "workspace_restore",
+  });
   if (!bundle) {
     throw new HostedWorkspaceRuntimeSnapshotRestoreError(input.ref.hash);
   }
