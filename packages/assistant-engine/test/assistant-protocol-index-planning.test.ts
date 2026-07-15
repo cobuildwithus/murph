@@ -621,10 +621,10 @@ describe('assistant protocol index planning', () => {
         initialAttemptPlan.routePlan.assistantContractFingerprint,
       )
       expect(updatedAttemptPlan.routePlan.developerInstructions).toContain(
-        'Humor 9/10: use prominent, bold, dry humor',
+        'Humor 9/10: when humor is welcome, take a bold, situation-specific swing',
       )
       expect(updatedAttemptPlan.routePlan.developerInstructions).toContain(
-        'Detail 0/10: give the shortest complete answer',
+        'Detail 0/10: lead with the shortest complete answer',
       )
       expect(updatedAttemptPlan.routePlan.dynamicTools.map((tool) => tool.name)).toContain(
         'assistant_style',
@@ -721,7 +721,7 @@ describe('assistant protocol index planning', () => {
       })
       expect(
         localAttemptPlan.routePlan.developerInstructions,
-      ).toContain('Humor 9/10: use prominent, bold, dry humor')
+      ).toContain('Humor 9/10: when humor is welcome, take a bold, situation-specific swing')
       expect(localAttemptPlan.routePlan.dynamicTools.map((tool) => tool.name)).toContain(
         'assistant_style',
       )
