@@ -248,6 +248,23 @@ Caution-rating dots (1–5 filled sand dots) + "Who should avoid" list + "Precau
 ### Inputs / Fields
 Cream background, 1px warm border, rounded-md (10px). Focus: border shifts to sage (`#7a8c6e`), no glow. Mono labels above, body placeholder inside. Category and library filters use the `Select` dropdown, not a horizontal toggle pill row — toggle rows look broken in the active state when one pill has primary fill and the rest sit on transparent muted-surface, and they don't compress at small widths. Search inputs only appear when there are enough rows to need them (>~15 entries); below that, the dropdown alone is enough.
 
+### Choice Cards
+Use the shared `ChoiceCard` with `RadioGroup` when a member must compare two to
+five consequential options. Each card has one short title, one sentence that
+names the real tradeoff, and an optional mono metadata line. Selected cards use
+the normal sage selection tint and warm border; unavailable choices stay visible
+but disabled, with the plan or access requirement named directly. Keyboard
+focus rings the whole card. Keep actions outside the card label so the full card
+remains one predictable radio target. Stack on narrow screens and use a compact
+grid only when the options are true peers. Do not use choice cards as navigation
+or as a substitute for ordinary buttons.
+
+### Spinner
+Use the shared `Spinner` for compact pending feedback inside buttons or beside a
+short status label. Pair it with a disabled control and visible action copy such
+as `Saving`; the spinner never replaces the label or becomes a full-page loader.
+Use `MurphPulseLoader` for branded account setup states instead.
+
 ### Chips / Labels
 DM Mono uppercase with 0.11em tracking. Muted-surface background (`rgba(196, 168, 130, 0.15)`), slate-muted text, rounded-sm, 4px 8px padding. Used for phase names, units, and filing-card metadata.
 

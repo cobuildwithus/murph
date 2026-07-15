@@ -22,6 +22,7 @@ import { ContactSupportAction } from "@/src/components/support/contact-support-a
 import { AuthButton } from "@/src/components/ui/auth-button";
 import { MurphPulseLoader } from "@/src/components/ui/murph-pulse-loader";
 import { Button } from "@/src/components/ui/button";
+import { ChoiceCard } from "@/src/components/ui/choice-card";
 import { PaymentButton } from "@/src/components/ui/payment-button";
 import { Badge } from "@/src/components/ui/badge";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/src/components/ui/tabs";
@@ -44,6 +45,8 @@ import { Avatar, AvatarFallback } from "@/src/components/ui/avatar";
 import { Alert, AlertTitle, AlertDescription } from "@/src/components/ui/alert";
 import { Toggle } from "@/src/components/ui/toggle";
 import { ToggleGroup, ToggleGroupItem } from "@/src/components/ui/toggle-group";
+import { RadioGroup } from "@/src/components/ui/radio-group";
+import { Spinner } from "@/src/components/ui/spinner";
 import {
   SegmentedControl,
   type SegmentedControlOption,
@@ -154,6 +157,7 @@ export function ComponentsContent() {
     useState<SegmentedControlDemoValue>("phone");
   const [warmSegmentedControlValue, setWarmSegmentedControlValue] =
     useState<SegmentedControlDemoValue>("email");
+  const [choiceCardValue, setChoiceCardValue] = useState("terra");
   const [addedContactAvatar, setAddedContactAvatar] =
     useState<MurphContactAvatarOption | null>(null);
   const [inlineContactAvatarId, setInlineContactAvatarId] = useState("hooded");
@@ -340,6 +344,61 @@ export function ComponentsContent() {
               <ToggleGroupItem value="21d">21d</ToggleGroupItem>
               <ToggleGroupItem value="all">All</ToggleGroupItem>
             </ToggleGroup>
+          </div>
+        </Section>
+
+        <Separator />
+
+        <Section title="Radio Group & Choice Cards">
+          <p className="max-w-2xl text-sm text-muted-foreground">
+            Use choice cards when a member must compare a small set of
+            consequential options. Keep the tradeoff in one sentence and make
+            plan limits visible without hiding the option.
+          </p>
+          <RadioGroup
+            className="grid gap-3 sm:grid-cols-3"
+            value={choiceCardValue}
+            onValueChange={setChoiceCardValue}
+          >
+            <ChoiceCard
+              description="Quick support for short questions and routine tasks."
+              id="design-choice-luna"
+              meta="AI usage · Low"
+              title="Luna"
+              value="luna"
+            />
+            <ChoiceCard
+              badge={<Badge variant="outline">Recommended</Badge>}
+              description="A balanced choice for most questions and planning."
+              id="design-choice-terra"
+              meta="AI usage · Balanced"
+              title="Terra"
+              value="terra"
+            />
+            <ChoiceCard
+              badge={<Badge variant="outline">Edge</Badge>}
+              description="More depth for research and complex decisions."
+              disabled
+              id="design-choice-sol"
+              meta="AI usage · High · Edge required"
+              title="Sol"
+              value="sol"
+            />
+          </RadioGroup>
+        </Section>
+
+        <Separator />
+
+        <Section title="Spinner">
+          <div className="flex flex-wrap items-center gap-5">
+            <div className="flex items-center gap-2 text-sm text-muted-foreground">
+              <Spinner aria-hidden="true" />
+              Loading
+            </div>
+            <Button disabled>
+              <Spinner aria-hidden="true" />
+              Saving
+            </Button>
           </div>
         </Section>
 

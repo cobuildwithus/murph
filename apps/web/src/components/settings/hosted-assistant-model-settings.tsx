@@ -7,7 +7,6 @@ import {
   isHostedAssistantProductModel,
   type HostedAssistantProductModel,
 } from "@murphai/hosted-execution/assistant-model";
-import { LoaderCircle } from "lucide-react";
 import { useState } from "react";
 
 import {
@@ -16,7 +15,14 @@ import {
 } from "@/src/components/hosted-onboarding/client-api";
 import { Badge } from "@/src/components/ui/badge";
 import { Button } from "@/src/components/ui/button";
-import { cn } from "@/src/lib/utils";
+import { ChoiceCard } from "@/src/components/ui/choice-card";
+import {
+  FieldDescription,
+  FieldLegend,
+  FieldSet,
+} from "@/src/components/ui/field";
+import { RadioGroup } from "@/src/components/ui/radio-group";
+import { Spinner } from "@/src/components/ui/spinner";
 
 import { SettingsStatusLine } from "./connected-account-card";
 import { UpgradeToEdgeButton } from "./hosted-plan-upgrade-button";
@@ -26,25 +32,30 @@ const SOL_REQUIRES_EDGE_ERROR_CODE = "ASSISTANT_MODEL_SOL_REQUIRES_EDGE";
 
 const MODEL_OPTIONS = [
   {
-    description:
-      "Efficient for quick, everyday work. Uses less of your plan’s AI usage.",
+    description: "Quick support for check-ins, simple questions, and routine tasks.",
     model: HOSTED_ASSISTANT_LUNA_MODEL,
-    name: "GPT-5.6 Luna",
+    name: "Luna",
+    usage: "AI usage · Low",
   },
   {
-    description: "Everyday check-ins, questions, and planning.",
+    description:
+      "A balanced choice for most questions, planning, and everyday health decisions.",
     model: HOSTED_ASSISTANT_TERRA_MODEL,
-    name: "GPT-5.6 Terra",
+    name: "Terra",
+    usage: "AI usage · Balanced",
   },
   {
-    description: "Deeper research and harder tasks. Uses more of your Edge limit.",
+    description:
+      "More depth for research, complex decisions, and demanding tasks.",
     model: HOSTED_ASSISTANT_SOL_MODEL,
-    name: "GPT-5.6 Sol",
+    name: "Sol",
+    usage: "AI usage · High",
   },
 ] as const satisfies ReadonlyArray<{
   description: string;
   model: HostedAssistantProductModel;
   name: string;
+  usage: string;
 }>;
 
 interface AssistantModelSettingsResponse {
@@ -88,11 +99,6 @@ function HostedAssistantModelSettingsForm(
     message: string;
     tone: "destructive" | "neutral" | "success";
   } | null>(null);
-  const availableModelOptions = solAvailable
-    ? MODEL_OPTIONS
-    : MODEL_OPTIONS.filter(
-        (option) => option.model !== HOSTED_ASSISTANT_SOL_MODEL,
-      );
   const controlsDisabled = isSaving || !props.configurationAvailable;
   const hasChanges = draftModel !== currentModel || dormantSolPreference;
 
@@ -120,7 +126,7 @@ function HostedAssistantModelSettingsForm(
       setDormantSolPreference(response.dormantSolPreference);
       setSolAvailable(response.solAvailable);
       setStatus({
-        message: `Default model updated to ${readModelName(response.model)}.`,
+        message: `${readModelName(response.model)} is now Murph’s default.`,
         tone: "success",
       });
     } catch (error) {
@@ -133,8 +139,8 @@ function HostedAssistantModelSettingsForm(
       }
       setStatus({
         message: solNoLongerAvailable
-          ? `Your Edge access changed. ${readModelName(currentModel)} is still your default.`
-          : "Could not update your default model. Try again.",
+          ? `Your Edge access changed. Murph will keep using ${readModelName(currentModel)}.`
+          : "We couldn’t save this change. Try again.",
         tone: solNoLongerAvailable ? "neutral" : "destructive",
       });
     } finally {
@@ -144,100 +150,100 @@ function HostedAssistantModelSettingsForm(
 
   return (
     <form
-      className="flex flex-col items-start gap-4"
+      className="flex flex-col items-start gap-5"
       aria-busy={isSaving}
       onSubmit={(event) => {
         event.preventDefault();
         void saveModel();
       }}
     >
-      <p className="text-sm text-pretty text-muted-foreground">
-        Choose Murph’s default model. Changes apply to new work and can take a
-        few minutes.
-      </p>
+      <div className="flex max-w-2xl flex-col gap-1">
+        <p className="text-sm text-pretty text-muted-foreground">
+          Pick Murph’s starting model. You can switch for a specific task in
+          conversation.
+        </p>
+        <p className="text-xs text-pretty text-muted-foreground">
+          Changes begin with the next reply and may take a few minutes.
+        </p>
+      </div>
 
       {!props.configurationAvailable ? (
         <p className="w-full rounded-xl border border-border bg-muted/30 p-4 text-sm text-pretty text-muted-foreground">
-          Active personal Murph access is required to change assistant settings.
+          Model choices are read-only until personal Murph access is active.
         </p>
       ) : null}
 
       {dormantSolPreference ? (
         <p className="w-full rounded-xl border border-border bg-muted/30 p-4 text-sm text-pretty text-muted-foreground">
-          GPT-5.6 Terra is in use now. GPT-5.6 Sol remains saved and will resume
-          if Edge access returns. Save Terra or Luna to replace that saved choice.
+          Terra is active while Edge is paused. Sol is still saved and will
+          return with Edge. Choose Luna or save Terra to replace it.
         </p>
       ) : null}
 
-      <fieldset
-        className="w-full overflow-hidden rounded-xl border border-border bg-background disabled:opacity-70"
+      <FieldSet
+        className="w-full gap-3"
         disabled={controlsDisabled}
       >
-        <legend className="sr-only">Default model</legend>
-        {availableModelOptions.map((option, index) => {
-          const selected = draftModel === option.model;
-          const nameId = `assistant-model-${option.model}-name`;
-          const descriptionId = `assistant-model-${option.model}-description`;
+        <FieldLegend className="sr-only">Default model</FieldLegend>
+        <FieldDescription className="sr-only">
+          Choose one model for new Murph replies.
+        </FieldDescription>
+        <RadioGroup
+          className="grid gap-3 lg:grid-cols-3"
+          disabled={controlsDisabled}
+          value={draftModel}
+          onValueChange={(value) => {
+            if (!isHostedAssistantProductModel(value)) {
+              return;
+            }
 
-          return (
-            <label
-              key={option.model}
-              className={cn(
-                "flex min-h-24 items-start gap-3 px-4 py-4 transition-colors",
-                index > 0 && "border-t border-border",
-                controlsDisabled
-                  ? "cursor-default"
-                  : "cursor-pointer hover:bg-muted/50",
-                selected && "bg-primary/10",
-                isSaving && "cursor-wait",
-              )}
-            >
-              <input
-                type="radio"
-                name="assistant-model"
-                value={option.model}
-                checked={selected}
-                aria-labelledby={nameId}
-                aria-describedby={descriptionId}
-                className="mt-1 size-4 shrink-0 accent-primary focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2"
-                onChange={() => {
-                  setDraftModel(option.model);
-                  setStatus(null);
-                }}
-              />
-              <span className="min-w-0">
-                <span className="flex flex-wrap items-center gap-2">
-                  <span
-                    id={nameId}
-                    className="font-serif text-lg font-semibold tracking-tight text-foreground"
-                  >
-                    {option.name}
+            setDraftModel(value);
+            setStatus(null);
+          }}
+        >
+          {MODEL_OPTIONS.map((option) => {
+            const selected = draftModel === option.model;
+            const unavailable =
+              option.model === HOSTED_ASSISTANT_SOL_MODEL && !solAvailable;
+            const current = option.model === currentModel;
+            const badge = readModelOptionBadge({
+              current,
+              model: option.model,
+              selected,
+              unavailable,
+            });
+
+            return (
+              <ChoiceCard
+                badge={badge}
+                description={option.description}
+                disabled={controlsDisabled || unavailable}
+                id={`assistant-model-${option.model}`}
+                key={option.model}
+                meta={
+                  unavailable
+                    ? `${option.usage} · Edge required`
+                    : option.usage
+                }
+                title={
+                  <span className="flex items-baseline gap-2">
+                    <span>{option.name}</span>
+                    <span className="font-mono text-[10px] font-medium uppercase tracking-[0.12em] text-muted-foreground">
+                      GPT-5.6
+                    </span>
                   </span>
-                  {option.model === HOSTED_ASSISTANT_SOL_MODEL ? (
-                    <Badge
-                      variant="outline"
-                      className="h-5 rounded-md px-1.5 font-mono text-[9px] uppercase tracking-[0.12em] text-muted-foreground"
-                    >
-                      Edge
-                    </Badge>
-                  ) : null}
-                </span>
-                <span
-                  id={descriptionId}
-                  className="mt-0.5 block max-w-2xl text-sm text-pretty text-muted-foreground"
-                >
-                  {option.description}
-                </span>
-              </span>
-            </label>
-          );
-        })}
-      </fieldset>
+                }
+                value={option.model}
+              />
+            );
+          })}
+        </RadioGroup>
+      </FieldSet>
 
       {props.configurationAvailable && !solAvailable ? (
-        <div className="flex w-full flex-col items-start gap-3 rounded-xl border border-border bg-muted/30 p-4 sm:flex-row sm:items-center sm:justify-between">
+        <div className="flex w-full flex-col items-start gap-3 px-1 sm:flex-row sm:items-center sm:justify-between">
           <p className="text-sm text-pretty text-muted-foreground">
-            GPT-5.6 Sol is available with an active Edge plan.
+            Sol requires an active Edge plan.
           </p>
           {props.canUpgradeToEdge ? (
             <UpgradeToEdgeButton>Upgrade to Edge</UpgradeToEdgeButton>
@@ -251,10 +257,8 @@ function HostedAssistantModelSettingsForm(
           disabled={controlsDisabled || !hasChanges}
           className="w-full sm:w-auto"
         >
-          {isSaving ? (
-            <LoaderCircle className="animate-spin" aria-hidden="true" />
-          ) : null}
-          {isSaving ? "Saving…" : "Save model"}
+          {isSaving ? <Spinner aria-hidden="true" /> : null}
+          {isSaving ? "Saving…" : "Save change"}
         </Button>
         <SettingsStatusLine
           message={status?.message ?? null}
@@ -263,6 +267,42 @@ function HostedAssistantModelSettingsForm(
         />
       </div>
     </form>
+  );
+}
+
+function readModelOptionBadge(input: {
+  current: boolean;
+  model: HostedAssistantProductModel;
+  selected: boolean;
+  unavailable: boolean;
+}): React.ReactNode {
+  if (input.current) {
+    return <ModelOptionBadge>Current</ModelOptionBadge>;
+  }
+
+  if (input.selected) {
+    return <ModelOptionBadge>Selected</ModelOptionBadge>;
+  }
+
+  if (input.unavailable) {
+    return <ModelOptionBadge>Edge</ModelOptionBadge>;
+  }
+
+  if (input.model === HOSTED_ASSISTANT_TERRA_MODEL) {
+    return <ModelOptionBadge>Recommended</ModelOptionBadge>;
+  }
+
+  return null;
+}
+
+function ModelOptionBadge({ children }: { children: React.ReactNode }) {
+  return (
+    <Badge
+      variant="outline"
+      className="h-5 rounded-md px-1.5 font-mono text-[9px] uppercase tracking-[0.12em] text-muted-foreground"
+    >
+      {children}
+    </Badge>
   );
 }
 
