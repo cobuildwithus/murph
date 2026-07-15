@@ -46,6 +46,7 @@ export function useHostedEmailSettingsController(input: {
   const [isSyncingEmailRoute, setIsSyncingEmailRoute] = useState(false);
   const [noticeMessage, setNoticeMessage] = useState<string | null>(null);
   const [pendingEmailAddress, setPendingEmailAddress] = useState<string | null>(null);
+  const [pendingEmailSyncAddress, setPendingEmailSyncAddress] = useState<string | null>(null);
   const [successMessage, setSuccessMessage] = useState<string | null>(null);
   const [verifiedEmailOverride, setVerifiedEmailOverride] = useState<HostedPrivyEmailAccount | null>(null);
   const updateEmailErrorRef = useRef(false);
@@ -70,13 +71,10 @@ export function useHostedEmailSettingsController(input: {
 
       setErrorMessage("We could not link that email address.");
     },
-    onSuccess: (params) => {
+    onSuccess: async (params) => {
       setIsPrivyLinkModalActive(false);
       if (params.linkMethod === "email") {
-        void handleLinkedEmailAccount({
-          linkedUser: params.user,
-          preferredEmailAddress: readLinkedEmailAddress(params.linkedAccount),
-        });
+        await handleLinkedEmailAccount(params.linkedAccount);
       }
     },
   });
@@ -192,6 +190,7 @@ export function useHostedEmailSettingsController(input: {
     setSuccessMessage(null);
     setCode("");
     setPendingEmailAddress(null);
+    setPendingEmailSyncAddress(null);
   }
 
   async function handleVerifyCode(rawCode?: string) {
@@ -244,7 +243,7 @@ export function useHostedEmailSettingsController(input: {
     }
 
     if (!verifiedEmailAddress) {
-      setSuccessMessage("Email verified.");
+      setErrorMessage("We could not confirm the email address you verified. Try again.");
       return;
     }
 
@@ -272,34 +271,30 @@ export function useHostedEmailSettingsController(input: {
     linkEmail();
   }
 
-  async function handleLinkedEmailAccount(input: {
-    linkedUser: HostedEmailPrivyUser;
-    preferredEmailAddress: string | null;
-  }) {
-    const { linkedUser } = input;
-    const refreshedUser = await refreshUser().catch(() => linkedUser);
-    const displayState = resolveHostedEmailSettingsDisplayStateFromUsers({
-      fallbackUser: linkedUser,
-      initialLinkedAccounts: linkedAccounts,
-      preferredEmailAddress: input.preferredEmailAddress,
-      refreshedUser,
-    });
-    const linkedEmail = displayState.currentVerifiedEmail ?? displayState.currentEmail;
+  async function handleLinkedEmailAccount(linkedAccount: unknown) {
+    const linkedEmailAddress = readLinkedEmailAddress(linkedAccount);
 
-    if (!linkedEmail?.address) {
-      setSuccessMessage("Email linked.");
+    if (!linkedEmailAddress) {
+      setErrorMessage("We could not confirm the email address you linked. Try again.");
       return;
     }
 
-    setEmailAddress(linkedEmail.address);
+    setPendingEmailSyncAddress(linkedEmailAddress);
+    setEmailAddress(linkedEmailAddress);
+    await syncVerifiedEmailAddress(linkedEmailAddress, "verify");
+  }
 
-    if (!displayState.currentVerifiedEmail) {
-      setSuccessMessage(`Email linked: ${linkedEmail.address}`);
+  async function handleRetryEmailSync() {
+    setErrorMessage(null);
+    setNoticeMessage(null);
+    setSuccessMessage(null);
+
+    if (!pendingEmailSyncAddress) {
+      setErrorMessage("Link your email before trying to save it again.");
       return;
     }
 
-    setVerifiedEmailOverride(displayState.currentVerifiedEmail);
-    await syncVerifiedEmailAddress(displayState.currentVerifiedEmail.address, "verify");
+    await syncVerifiedEmailAddress(pendingEmailSyncAddress, "verify");
   }
 
   async function handleSyncVerifiedEmail() {
@@ -327,6 +322,13 @@ export function useHostedEmailSettingsController(input: {
       setErrorMessage(syncPresentation.errorMessage);
 
       if (syncPresentation.syncResult) {
+        setPendingEmailSyncAddress(null);
+        setEmailAddress(syncPresentation.syncResult.emailAddress);
+        setVerifiedEmailOverride({
+          address: syncPresentation.syncResult.emailAddress,
+          verifiedAt: readVerifiedAtTimestamp(syncPresentation.syncResult.verifiedAt),
+        });
+
         try {
           await input.onSynced?.(syncPresentation.syncResult);
         } catch (error) {
@@ -352,6 +354,7 @@ export function useHostedEmailSettingsController(input: {
     isSendingCode,
     isSubmittingCode,
     isSyncingEmailRoute,
+    hasPendingEmailSync: pendingEmailSyncAddress !== null,
     canSendEmailUpdateCode,
     noticeMessage,
     pendingEmailAddress,
@@ -359,6 +362,7 @@ export function useHostedEmailSettingsController(input: {
     setCode,
     setEmailAddress,
     handleLinkEmail,
+    handleRetryEmailSync,
     handleClientAuthRequired,
     handleResendCode,
     handleSendCode,
@@ -430,6 +434,13 @@ function readCurrentUnixTimestamp(): number {
   return Math.trunc(Date.now() / 1000);
 }
 
+function readVerifiedAtTimestamp(value: string): number {
+  const timestamp = Date.parse(value);
+  return Number.isFinite(timestamp)
+    ? Math.trunc(timestamp / 1000)
+    : readCurrentUnixTimestamp();
+}
+
 function readPrivyLinkedAccounts(input: HostedEmailPrivyUser): readonly PrivyLinkedAccountLike[] | null {
   if (!Array.isArray(input?.linkedAccounts)) {
     return null;
@@ -439,11 +450,13 @@ function readPrivyLinkedAccounts(input: HostedEmailPrivyUser): readonly PrivyLin
 }
 
 function readLinkedEmailAddress(input: unknown): string | null {
-  if (!isPrivyLinkedAccountLike(input)) {
+  if (!isPrivyLinkedAccountLike(input) || input.type !== "email") {
     return null;
   }
 
-  return typeof input.address === "string" ? input.address : null;
+  return normalizeEmailAddress(
+    typeof input.address === "string" ? input.address : null,
+  );
 }
 
 function isPrivyLinkedAccountLike(value: unknown): value is PrivyLinkedAccountLike {
