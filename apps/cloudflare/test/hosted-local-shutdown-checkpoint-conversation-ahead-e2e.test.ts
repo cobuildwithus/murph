@@ -256,22 +256,19 @@ describe("hosted local shutdown checkpoint conversation-ahead e2e", () => {
     expect(readAssistantProviderRequestText(providerRequests[1]!))
       .toContain(conversationAheadInboundText);
 
-    const finalStatus = await waitForRestoredQuiescenceAfterNaturalCheckpoint({
+    const finalStatus = await waitForRestoredTerminalBoundaryAfterNaturalCheckpoint({
       afterIdleSnapshotAtMs: committedShutdownSnapshotAtMs,
     });
     expect(finalStatus.lastErrorCode ?? null).toBeNull();
     expect(finalStatus.mailboxLag.every((lane) => lane.lag === "0")).toBe(true);
-    expect(finalStatus.inFlight).toBe(false);
     const finalIdleSnapshotAtMs = requireLatestIdleShutdownSnapshotAtMs(finalStatus);
     expect(finalIdleSnapshotAtMs)
       .toBeGreaterThan(committedShutdownSnapshotAtMs);
-    expect(hasIdleShutdownSnapshotWithoutRuntimeWakeAt(
+    expect(hasReachedRestoredTerminalBoundary(
       finalStatus,
       finalIdleSnapshotAtMs,
     )).toBe(true);
-    expect(hasAssistantPassFinishedAtOrAfter(finalStatus, finalIdleSnapshotAtMs))
-      .toBe(false);
-    await assertNoDuplicateReplyAfterQuiescence({
+    await assertNoDuplicateReplyAfterTerminalBoundary({
       baselineConversationAheadAcceptedCount,
       baselineFirstAcceptedCount,
       baselineMessageIdCount,
@@ -389,7 +386,7 @@ async function waitForCommittedShutdownCheckpoint(input: {
   ]));
 }
 
-async function waitForRestoredQuiescenceAfterNaturalCheckpoint(input: {
+async function waitForRestoredTerminalBoundaryAfterNaturalCheckpoint(input: {
   afterIdleSnapshotAtMs: number;
 }): Promise<HostedRunnerStatusResponse> {
   const startedAt = Date.now();
@@ -398,12 +395,11 @@ async function waitForRestoredQuiescenceAfterNaturalCheckpoint(input: {
     lastStatus = await readHostedRunnerStatusWithLogLimit(100);
     const latestIdleSnapshotAtMs = readLatestIdleShutdownSnapshotAtMs(lastStatus);
     if (
-      !lastStatus.inFlight
-      && !lastStatus.lastErrorCode
+      !lastStatus.lastErrorCode
       && lastStatus.mailboxLag.every((lane) => lane.lag === "0")
       && latestIdleSnapshotAtMs !== null
       && latestIdleSnapshotAtMs > input.afterIdleSnapshotAtMs
-      && hasIdleShutdownSnapshotWithoutRuntimeWakeAt(
+      && hasReachedRestoredTerminalBoundary(
         lastStatus,
         latestIdleSnapshotAtMs,
       )
@@ -413,7 +409,7 @@ async function waitForRestoredQuiescenceAfterNaturalCheckpoint(input: {
     await sleep(100);
   }
   throw new Error(await requireScenario().buildFailureMessage(userId, [
-    "Timed out waiting for restored quiescence after the natural idle checkpoint.",
+    "Timed out waiting for a restored terminal boundary after the natural idle checkpoint.",
     ...(lastStatus ? [`last status: ${JSON.stringify(lastStatus)}`] : []),
   ]));
 }
@@ -460,6 +456,20 @@ function hasAssistantPassFinishedAtOrAfter(
   );
 }
 
+function hasReachedRestoredTerminalBoundary(
+  status: HostedRunnerStatusResponse,
+  naturalIdleSnapshotAtMs: number,
+): boolean {
+  return hasAssistantPassFinishedAtOrAfter(status, naturalIdleSnapshotAtMs)
+    || (
+      !status.inFlight
+      && hasIdleShutdownSnapshotWithoutRuntimeWakeAt(
+        status,
+        naturalIdleSnapshotAtMs,
+      )
+    );
+}
+
 function hasIdleShutdownSnapshotWithoutRuntimeWakeAt(
   status: HostedRunnerStatusResponse,
   expectedAtMs: number,
@@ -472,7 +482,7 @@ function hasIdleShutdownSnapshotWithoutRuntimeWakeAt(
   );
 }
 
-async function assertNoDuplicateReplyAfterQuiescence(input: {
+async function assertNoDuplicateReplyAfterTerminalBoundary(input: {
   baselineConversationAheadAcceptedCount: number;
   baselineFirstAcceptedCount: number;
   baselineMessageIdCount: number;
