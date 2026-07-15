@@ -1,6 +1,6 @@
 # Group Health Newsletter
 
-Last verified: 2026-07-14
+Last verified: 2026-07-15
 Status: Implemented
 
 ## Current State
@@ -126,7 +126,9 @@ The sent parent manifest and terminal recipient evidence for the occurrence are
 protected from normal terminal outbox pruning only while the canonical cron
 occurrence remains unresolved. Once it resolves, ordinary bounded retention
 applies. Sent and ambiguous children are never replayed, and a
-changed proof after a sent parent is terminal for that occurrence instead of
+parent or child that reaches `ASSISTANT_DELIVERY_RETRY_EXHAUSTED` is terminal
+for the occurrence rather than gaining a fresh retry budget under a new token.
+A changed proof after a sent parent is terminal for that occurrence instead of
 authorizing a second payload under the same message identity. Missing
 prepare/send results and unavailable preparation are explicit retryable
 failures. The first-run opt-out window remains separate and supplies no

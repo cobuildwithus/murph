@@ -12,6 +12,7 @@ import {
 } from '../redaction.js'
 
 const OUTBOX_RETRY_DELAYS_MS = [30_000, 120_000, 600_000, 1_800_000]
+export const ASSISTANT_OUTBOX_MAX_RETRY_ATTEMPTS = 48
 const STALE_SENDING_AFTER_MS = 10 * 60 * 1000
 const ASSISTANT_DELIVERY_ERROR_DIAGNOSTIC_MAX_KEYS = 24
 const ASSISTANT_DELIVERY_ERROR_DIAGNOSTIC_STRING_MAX_LENGTH = 2048
@@ -128,6 +129,24 @@ export function resolveAssistantOutboxRetryDelayMs(attemptCount: number): number
       Math.min(Math.max(Math.trunc(attemptCount) - 1, 0), OUTBOX_RETRY_DELAYS_MS.length - 1)
     ] ?? OUTBOX_RETRY_DELAYS_MS[OUTBOX_RETRY_DELAYS_MS.length - 1]!
   )
+}
+
+export function isAssistantOutboxRetryBudgetExhausted(
+  intent: Pick<AssistantOutboxIntent, 'attemptCount'>,
+): boolean {
+  return intent.attemptCount >= ASSISTANT_OUTBOX_MAX_RETRY_ATTEMPTS
+}
+
+export function createAssistantDeliveryRetryExhaustedError(
+  cause?: unknown,
+): AssistantDeliveryError {
+  const detail = cause ? normalizeAssistantDeliveryError(cause).message : null
+  return assistantDeliveryErrorSchema.parse({
+    code: 'ASSISTANT_DELIVERY_RETRY_EXHAUSTED',
+    message: detail
+      ? `Assistant outbound delivery reached its automatic retry limit and will not be retried automatically. ${detail}`
+      : 'Assistant outbound delivery reached its automatic retry limit and will not be retried automatically.',
+  })
 }
 
 export function createAssistantDeliveryConfirmationPendingError(
