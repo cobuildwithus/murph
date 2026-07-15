@@ -47,6 +47,8 @@ import {
 import {
   createAssistantDeliveryAmbiguousError,
   createAssistantDeliveryConfirmationPendingError,
+  createAssistantDeliveryRetryExhaustedError,
+  isAssistantOutboxRetryBudgetExhausted,
   isAssistantOutboxRetryableError,
   normalizeAssistantDeliveryError,
   shouldBeginAssistantOutboxDispatch,
@@ -618,6 +620,28 @@ async function dispatchAssistantOutboxIntentInternal(input: DispatchAssistantOut
       }
     }
 
+    if (
+      (
+        intent.status === 'retryable' ||
+        (
+          intent.status === 'sending' &&
+          inferAssistantOutboxDeliveryTransportIdempotent(intent)
+        )
+      ) &&
+      !intent.delivery &&
+      (
+        !intent.deliveryConfirmationPending ||
+        inferAssistantOutboxDeliveryTransportIdempotent(intent)
+      ) &&
+      isAssistantOutboxRetryBudgetExhausted(intent)
+    ) {
+      return {
+        action: 'retry-exhausted' as const,
+        intent,
+        intentPath,
+      }
+    }
+
     if (shouldFailClosedAssistantOutboxStaleSendingIntent(intent)) {
       return {
         action: 'recover-stale-non-idempotent' as const,
@@ -689,6 +713,43 @@ async function dispatchAssistantOutboxIntentInternal(input: DispatchAssistantOut
     return {
       intent: prepared.intent,
       deliveryError: prepared.intent.lastError,
+      session: null,
+    }
+  }
+
+  if (prepared.action === 'retry-exhausted') {
+    const recoveredDelivery =
+      (await input.dispatchHooks?.resolveDeliveredIntent?.({
+        intent: prepared.intent,
+        vault: input.vault,
+      })) ??
+      resolvePersistedAssistantOutboxDelivery(prepared.intent)
+    if (recoveredDelivery) {
+      const sentIntent = await markAssistantOutboxIntentSent({
+        delivery: recoveredDelivery,
+        intent: prepared.intent,
+        intentPath: prepared.intentPath,
+        vault: input.vault,
+      })
+      return {
+        intent: sentIntent,
+        deliveryError: null,
+        session: null,
+      }
+    }
+
+    const failedIntent = await markAssistantOutboxIntentMirrorTerminal({
+      error: createAssistantDeliveryRetryExhaustedError(prepared.intent.lastError),
+      failedAt: now,
+      intent: prepared.intent,
+      intentPath: prepared.intentPath,
+      onlyCurrentStatuses: ['retryable', 'sending'],
+      status: 'failed',
+      vault: input.vault,
+    })
+    return {
+      intent: failedIntent,
+      deliveryError: failedIntent.lastError,
       session: null,
     }
   }
