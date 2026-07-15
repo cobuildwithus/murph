@@ -1,6 +1,6 @@
 # Group Health Newsletter
 
-Last verified: 2026-07-14
+Last verified: 2026-07-15
 Status: Implemented
 
 ## Current State
@@ -286,33 +286,31 @@ Everything else is reuse: scheduling, health projections, rollup engine, roster,
 
 ## Deployment Concerns
 
-The hosted newsletter callback keeps old `read_stats`, snapshot-less, and
-proof-less
-`prepare` requests wire-compatible only so they can fail closed with
-`newsletter_runner_upgrade_required`. A successful `prepare` requires
-both `includeAuthorizationSnapshot: true` and
-`includeAuthorizationProof: true`, and returns the address-free live grant
-snapshot plus its SHA-256 proof. The model-facing schema exposes only `prepare`
-and `send`; the proof and HTML stay in trusted outbox/effect state. The legacy request
-parser exists only to prevent an ambiguous transport failure during rollout.
+The hosted newsletter callback accepts only `prepare` and `send`. Every
+successful `prepare` returns the address-free live grant snapshot plus its
+SHA-256 proof. The model-facing schema exposes the same two actions, while the
+proof and HTML stay in trusted outbox/effect state. The signed, member-bound
+callback, live membership and grant resolution, exact share-id/scope filtering,
+and proof-required delivery revalidation remain the authorization boundary; the
+retired request-version negotiation did not contribute authority.
 
-Deploy the fail-closed Vercel/web callback first and keep that version as the
-web rollback floor. Then deploy Cloudflare/runner with
-`container_rollout=immediate`, with no newsletter occurrence between those
-deploys. An old runner in that interval receives
-`newsletter_runner_upgrade_required`, not participant or health data, because
-it omits the new proof marker. Its cron path predates the current retry contract,
-so the operational schedule gap is required to avoid spending an occurrence
-without a send. Do not roll web back below this authorization-proof floor while
-the current runner is active. After both are live, run one
-preparation call and confirm the trusted web wire contains only member ids,
-email eligibility, and address-free share ids/scope keys, while the model-facing
-runner result contains only the authorized current-week facts and no raw email
-addresses or grant metadata. Confirm a scheduled send first persists the
-existing-outbox parent and recipient children, re-resolves the current
-authorization snapshot, fails closed when either recipients or health grants
-change after preparation, and preserves its idempotency key without replaying a
-sent or ambiguous child.
+For the contract cleanup, deploy Vercel/web first, then deploy the
+Cloudflare/runner bundle with `container_rollout=immediate`. During the short
+skew window, the strict web parser rejects the prior runner's request shape; the
+current runner records the unavailable result and preserves the newsletter
+occurrence for retry rather than spending it. After both planes deploy, the
+cleanup head is the independent rollback floor for each plane. A coordinated
+rollback may return both planes to the PR #608 contract by rolling Cloudflare
+back first and Vercel/web second; never roll the runner below PR #608. After
+both are live, run one preparation call and confirm the trusted web wire contains
+only member ids, email eligibility, and address-free share ids/scope keys, while
+the model-facing runner result contains only the authorized current-week facts
+and no raw email addresses or grant metadata. Confirm a scheduled send first
+persists the existing-outbox parent and recipient children, re-resolves the
+current authorization snapshot, fails closed when either recipients or health
+grants change after preparation, preserves the occurrence until a terminal
+delivery result, and preserves its idempotency key without replaying a sent or
+ambiguous child.
 
 The base newsletter change spans **Cloudflare** (`apps/cloudflare`: HTML MIME, group-send path, address-resolution callback, inbound thread participation) and **Vercel/web** (`apps/web`: `group-email.v0` display + default request, address-resolution endpoint, `?addEmail=true`). Safe deploy order is **web first, then Cloudflare** — the web resolution endpoint and the new grant kind must exist before the Worker calls them. Both sides must recognize `group-email.v0` during the window.
 

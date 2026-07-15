@@ -1739,44 +1739,19 @@ describe("parseHostedRuntimeNewsletterTool", () => {
     memberId: "member_123",
   };
 
-  it("parses current, legacy, and scheduled send requests", () => {
+  it("parses prepare and send requests", () => {
     expect(parseHostedRuntimeNewsletterToolRequest({
       action: "prepare",
       groupId: "group_123",
     })).toEqual({
       action: "prepare",
       groupId: "group_123",
-    });
-
-    expect(parseHostedRuntimeNewsletterToolRequest({
-      action: "prepare",
-      groupId: "group_123",
-      includeAuthorizationProof: true,
-      includeAuthorizationSnapshot: true,
-    })).toEqual({
-      action: "prepare",
-      groupId: "group_123",
-      includeAuthorizationProof: true,
-      includeAuthorizationSnapshot: true,
     });
     expect(() => parseHostedRuntimeNewsletterToolRequest({
       action: "prepare",
       groupId: "group_123",
-      includeAuthorizationProof: false,
-    })).toThrow(/must be true/u);
-    expect(() => parseHostedRuntimeNewsletterToolRequest({
-      action: "prepare",
-      groupId: "group_123",
-      includeAuthorizationSnapshot: false,
-    })).toThrow(/must be true/u);
-
-    expect(parseHostedRuntimeNewsletterToolRequest({
-      action: "read_stats",
-      groupId: "group_123",
-    })).toEqual({
-      action: "read_stats",
-      groupId: "group_123",
-    });
+      retiredVersionMarker: true,
+    })).toThrow(/not allowed/u);
 
     expect(parseHostedRuntimeNewsletterToolRequest({
       action: "send",
@@ -1833,6 +1808,10 @@ describe("parseHostedRuntimeNewsletterTool", () => {
         subject: " ",
       })
     ).toThrow(/subject must not be blank/u);
+    expect(() => parseHostedRuntimeNewsletterToolRequest({
+      action: "retired_action",
+      groupId: "group_123",
+    })).toThrow(/action is not supported/u);
   });
 
   it("requires authorization snapshots in successful prepare responses", () => {
@@ -1942,36 +1921,14 @@ describe("parseHostedRuntimeNewsletterTool", () => {
     })).toThrow(/participants must contain at most 100 entries/u);
   });
 
-  it("accepts only fail-closed legacy responses", () => {
-    const legacyParticipant = {
-      ...PARTICIPANT,
-      displayName: null,
-    };
+  it("rejects unsupported response actions", () => {
     expect(() => parseHostedRuntimeNewsletterToolResponse({
-      action: "read_stats",
+      action: "retired_action",
       result: {
-        groupId: "group_123",
-        missingEmailParticipants: [
-          { ...legacyParticipant, hasEmail: false },
-        ],
-        participants: [legacyParticipant],
-        status: "ok",
+        status: "unavailable",
+        unavailableReason: "unsupported_action",
       },
     })).toThrow(/not supported/u);
-
-    expect(parseHostedRuntimeNewsletterToolResponse({
-      action: "read_stats",
-      result: {
-        status: "unavailable",
-        unavailableReason: "newsletter_runner_upgrade_required",
-      },
-    })).toEqual({
-      action: "read_stats",
-      result: {
-        status: "unavailable",
-        unavailableReason: "newsletter_runner_upgrade_required",
-      },
-    });
   });
 
   it("parses newsletter send outcomes and validates partial counts", () => {

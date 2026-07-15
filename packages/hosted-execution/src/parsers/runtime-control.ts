@@ -1488,46 +1488,8 @@ export function parseHostedRuntimeNewsletterToolRequest(
   if (action === "prepare") {
     assertAllowedObjectKeys(
       record,
-      new Set([
-        "action",
-        "groupId",
-        "includeAuthorizationProof",
-        "includeAuthorizationSnapshot",
-      ]),
-      "Hosted runtime newsletter tool prepare request",
-    );
-    if (
-      record.includeAuthorizationProof !== undefined
-      && record.includeAuthorizationProof !== true
-    ) {
-      throw new TypeError(
-        "Hosted runtime newsletter tool includeAuthorizationProof must be true when present.",
-      );
-    }
-    if (
-      record.includeAuthorizationSnapshot !== undefined
-      && record.includeAuthorizationSnapshot !== true
-    ) {
-      throw new TypeError(
-        "Hosted runtime newsletter tool includeAuthorizationSnapshot must be true when present.",
-      );
-    }
-    return {
-      action,
-      groupId: requireString(record.groupId, "Hosted runtime newsletter tool groupId"),
-      ...(record.includeAuthorizationProof === true
-        ? { includeAuthorizationProof: true as const }
-        : {}),
-      ...(record.includeAuthorizationSnapshot === true
-        ? { includeAuthorizationSnapshot: true as const }
-        : {}),
-    };
-  }
-  if (action === "read_stats") {
-    assertAllowedObjectKeys(
-      record,
       new Set(["action", "groupId"]),
-      "Hosted runtime newsletter tool read_stats request",
+      "Hosted runtime newsletter tool prepare request",
     );
     return {
       action,
@@ -1619,28 +1581,6 @@ export function parseHostedRuntimeNewsletterToolResponse(
         result,
         new Set(["status", "unavailableReason"]),
         "Hosted runtime newsletter tool prepare unavailable response result",
-      );
-      return {
-        action,
-        result: {
-          status,
-          unavailableReason: requireString(
-            result.unavailableReason,
-            "Hosted runtime newsletter tool unavailableReason",
-          ),
-        },
-      };
-    }
-  }
-
-  if (action === "read_stats") {
-    const result = requireObject(record.result, "Hosted runtime newsletter tool read_stats response result");
-    const status = requireString(result.status, "Hosted runtime newsletter tool read_stats response status");
-    if (status === "unavailable") {
-      assertAllowedObjectKeys(
-        result,
-        new Set(["status", "unavailableReason"]),
-        "Hosted runtime newsletter tool read_stats unavailable response result",
       );
       return {
         action,

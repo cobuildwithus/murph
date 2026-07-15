@@ -3060,19 +3060,10 @@ async function executeNewsletterTool(input: {
         return groupSharedProjectionUnavailableResult(input.request.action)
       }
     }
-    const request: HostedRuntimeNewsletterToolRequest =
-      input.request.action === 'send' || input.request.action === 'prepare'
-        ? {
-            ...input.request,
-            ...(input.request.action === 'prepare'
-              ? {
-                  includeAuthorizationProof: true as const,
-                  includeAuthorizationSnapshot: true as const,
-                }
-              : {}),
-            scheduledAutomationAuthority,
-          }
-        : input.request
+    const request: HostedRuntimeNewsletterToolRequest = {
+      ...input.request,
+      scheduledAutomationAuthority,
+    }
     const result = await newsletterTool.request(request)
     if (result.action === 'send') {
       input.hostedToolContext?.recordNewsletterSendResult?.(result)
