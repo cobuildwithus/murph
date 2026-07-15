@@ -51,6 +51,7 @@ import {
   resolveAutomationUpsertSlug,
   scaffoldAutomationPayload,
   upsertAutomation,
+  type AutomationRecord,
 } from "@murphai/core";
 import {
   listAutomations,
@@ -58,6 +59,7 @@ import {
 } from "@murphai/query";
 const automationSlugPattern = /^[a-z0-9]+(?:-[a-z0-9]+)*$/u;
 const dailyLocalTimePattern = /^(?:[01]\d|2[0-3]):[0-5]\d$/u;
+const managedOnboardingFollowupSlug = "finish-onboarding-followup";
 
 interface AutomationScheduleOptions {
   activityKind?: string;
@@ -335,13 +337,41 @@ async function authorizeExistingAutomationForUpsert(input: {
 
   for (const lookup of new Set(input.lookups.map((value) => value?.trim()).filter(Boolean))) {
     const existing = await showAutomation(input.vaultRoot, lookup as string);
-    if (existing) {
+    if (
+      existing &&
+      !isManagedOnboardingFollowupRouteMaterialization(
+        existing,
+        input.currentRouteContext,
+      )
+    ) {
       authorizeAutomationRouteForCurrentContext(
         existing.route,
         input.currentRouteContext,
       );
     }
   }
+}
+
+function isManagedOnboardingFollowupRouteMaterialization(
+  existing: AutomationRecord,
+  currentRouteContext: AutomationCurrentRouteContext,
+): boolean {
+  const currentRoute = currentRouteContext.route;
+  const tags = new Set(existing.tags);
+  return currentRouteContext.hosted &&
+    currentRoute?.channel === "linq" &&
+    currentRoute.threadIsDirect === true &&
+    existing.slug === managedOnboardingFollowupSlug &&
+    tags.has("murph-managed") &&
+    tags.has("murph-managed:onboarding-followup") &&
+    existing.route.channel === "linq" &&
+    existing.route.deliverySource?.kind === "linq" &&
+    existing.route.deliveryTarget === null &&
+    existing.route.threadId === null &&
+    existing.route.threadIsDirect === true &&
+    typeof existing.route.identityId === "string" &&
+    existing.route.identityId === currentRoute.identityId &&
+    typeof existing.route.participantId === "string";
 }
 
 function assertAutomationRouteCanDeliver(

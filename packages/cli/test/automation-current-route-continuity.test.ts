@@ -299,6 +299,132 @@ test("a verified direct Linq automation follows participant-to-chat materializat
   }
 });
 
+test("the managed onboarding follow-up materializes from its signup route into the current chat", async () => {
+  const { parentRoot, vaultRoot } = await createTempVaultContext(
+    "murph-automation-direct-route-materialization-",
+  );
+  const bridge = await startAssistantCurrentRouteBridgeStub({
+    response: {
+      route: {
+        channel: "linq",
+        deliveryTarget: "linq_chat_real",
+        identityId: "hid_direct_identity",
+        participantId: "hid_direct_participant",
+        threadId: "hid_materialized_thread",
+        threadIsDirect: true,
+      },
+    },
+    token: "test-bridge-token",
+  });
+
+  try {
+    const cli = Cli.create("vault-cli", {
+      description: "automation direct route materialization test cli",
+      version: "0.0.0-test",
+    });
+    registerAutomationCommands(cli);
+    vi.stubEnv(HOSTED_RUNTIME_PROCESS_ENV, "1");
+    vi.stubEnv(HOSTED_CLI_BRIDGE_TOKEN_ENV, "test-bridge-token");
+    vi.stubEnv(HOSTED_CLI_BRIDGE_URL_ENV, bridge.url);
+
+    const seedOnboardingFollowup = (
+      tags: string[],
+      identityId = "hid_direct_identity",
+    ) => upsertAutomation({
+      continuityPolicy: "preserve",
+      instructions: "Send the onboarding follow-up.",
+      route: {
+        channel: "linq",
+        deliverySource: {
+          kind: "linq",
+          fromPhoneNumber: "+15550001111",
+        },
+        deliveryTarget: null,
+        identityId,
+        participantId: "hid_signup_contact_participant",
+        threadId: null,
+        threadIsDirect: true,
+      },
+      schedule: { kind: "cron", expression: "0 7 * * *" },
+      slug: "finish-onboarding-followup",
+      status: "active",
+      tags,
+      title: "Finish onboarding",
+      vaultRoot,
+    });
+
+    const saveArgs = [
+      "automation",
+      "save",
+      "Finish onboarding",
+      "--slug",
+      "finish-onboarding-followup",
+      "--instructions",
+      "Send the onboarding follow-up soon.",
+      "--schedule-kind",
+      "every",
+      "--schedule-every-ms",
+      "150000",
+      "--channel",
+      "linq",
+      "--delivery-target",
+      "linq_chat_real",
+      "--vault",
+      vaultRoot,
+    ];
+    await seedOnboardingFollowup(["murph-managed"]);
+    const missingTag = await runInProcessJsonCli(cli, saveArgs);
+    assert.equal(missingTag.envelope.ok, false);
+
+    const managedTags = [
+      "murph-managed",
+      "murph-managed:onboarding-followup",
+    ];
+    await seedOnboardingFollowup(managedTags, "hid_other_line_identity");
+    const wrongIdentity = await runInProcessJsonCli(cli, saveArgs);
+    assert.equal(wrongIdentity.envelope.ok, false);
+
+    await seedOnboardingFollowup(managedTags);
+    const saved = await runInProcessJsonCli(cli, saveArgs);
+    assert.equal(
+      saved.envelope.ok,
+      true,
+      saved.envelope.ok ? undefined : JSON.stringify(saved.envelope.error),
+    );
+
+    const shown = await runInProcessJsonCli<{
+      automation: {
+        route: {
+          deliveryTarget: string | null;
+          identityId: string | null;
+          participantId: string | null;
+          threadId: string | null;
+          threadIsDirect?: boolean | null;
+        };
+      } | null;
+    }>(cli, [
+      "automation",
+      "show",
+      "finish-onboarding-followup",
+      "--vault",
+      vaultRoot,
+    ]);
+    assert.equal(shown.envelope.ok, true);
+    assert.deepEqual(shown.envelope.data?.automation?.route, {
+      channel: "linq",
+      deliverySource: null,
+      deliveryTarget: "linq_chat_real",
+      identityId: "hid_direct_identity",
+      participantId: "hid_direct_participant",
+      threadId: "hid_materialized_thread",
+      threadIsDirect: true,
+    });
+  } finally {
+    await bridge.stop();
+    await rm(parentRoot, { recursive: true, force: true });
+  }
+});
+
 // Hosted linq conversation locators are hid_-blinded; an explicit delivery
 // target naming the current conversation must still inherit them so the saved
 // route can resolve that conversation's session at fire time.
