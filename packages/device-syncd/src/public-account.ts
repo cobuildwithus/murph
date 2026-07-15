@@ -9,16 +9,21 @@ export const DEVICE_SYNC_HISTORICAL_RESET_REVOKE_FAILED_ERROR_CODE =
 export const DEVICE_SYNC_DISCONNECT_IN_PROGRESS_ERROR_CODE =
   "DISCONNECT_IN_PROGRESS";
 
-// A Junction historical export can only restart after the provider-side connection is
-// deregistered, so recovery state rides the existing durable error-code scalars. These
-// predicates are the single reading of that state for the disconnect path and the
-// browser/settings projections.
+// Garmin historical exports can only restart after the provider-side connection is
+// deregistered. Keep that provider-specific rule beside the durable recovery marker so
+// every reader applies the same narrow interpretation.
+export function isJunctionHistoricalResetProviderSlug(value: unknown): boolean {
+  return typeof value === "string" && value.trim().toLowerCase() === "garmin";
+}
+
 export function requiresHistoricalResetDeviceSyncSource(source: {
   lastErrorCode?: string | null;
+  sourceProviderSlug: string;
   status?: string | null;
 }): boolean {
   return source.status === "error"
-    && source.lastErrorCode === DEVICE_SYNC_HISTORICAL_DATA_RECONNECT_REQUIRED_ERROR_CODE;
+    && source.lastErrorCode === DEVICE_SYNC_HISTORICAL_DATA_RECONNECT_REQUIRED_ERROR_CODE
+    && isJunctionHistoricalResetProviderSlug(source.sourceProviderSlug);
 }
 
 // True for a disconnected account whose provider-side revoke failed while a historical
