@@ -2776,6 +2776,29 @@ describe("hosted device-sync wakes", () => {
     }));
   });
 
+  it("accepts the oldest entry in a three-night outbox when the local date trails UTC", async () => {
+    const connection = buildHostedConnection({
+      id: "dsc_junction_123",
+      provider: "junction",
+      setupPhase: "source_confirmed",
+    });
+    mocks.listConnectionsForUser.mockResolvedValue([connection]);
+    mocks.getConnectionForUser.mockResolvedValue(connection);
+
+    await expect(acceptTestCompanionHrvRmssdObservation({
+      acceptedAt: "2026-07-11T06:00:00.000Z",
+      observation: {
+        ...buildCompanionHrvRmssdObservation(),
+        nightDate: "2026-07-08",
+      },
+    })).resolves.toBeUndefined();
+
+    expect(mocks.upsertDirtyConnection).toHaveBeenCalledWith(expect.objectContaining({
+      connectionId: "dsc_junction_123",
+      userId: "user-123",
+    }));
+  });
+
   it("accepts a retained exact HRV retry before freshness and connection-liveness gates", async () => {
     mocks.listConnectionsForUser.mockResolvedValue([
       buildHostedConnection({
@@ -2823,7 +2846,7 @@ describe("hosted device-sync wakes", () => {
   });
 
   it.each([
-    ["stale", "2026-07-07"],
+    ["stale", "2026-07-06"],
     ["future", "2026-07-12"],
   ])("rejects an unseen %s HRV night at first admission", async (_label, nightDate) => {
     const connection = buildHostedConnection({
