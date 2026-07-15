@@ -875,6 +875,13 @@ publishes the receipt-log fingerprint and the advanced imported watermark in
 the same status checkpoint. That progress checkpoint is still required when
 the receipt fingerprint is already durable: receipt durability proves the
 canonical write, not the corresponding mailbox watermark.
+Receipt replay is fail-stop for each restore attempt. If the receipt log, a
+receipt, a payload, or application fails, the runtime discards that local tree
+and reloads the authoritative snapshot before admitting foreground work. A
+valid failed log fingerprint moves to repair-only status metadata; it is no
+longer active replay or append authority, so it cannot block a fresh canonical
+write. Ordinary checkpoints retain the repair metadata until explicit repair
+resolves it.
 Accepted-input journaling, transcript updates, checkpoint bookkeeping,
 provider-request metadata, and outbox intent creation remain on the normal
 local assistant-service path. The same-reply coalescing window ends when the

@@ -59,6 +59,8 @@ import {
   type HostedRuntimeLogContext,
 } from "./runtime-logs.ts";
 import {
+  hostedCanonicalWriteRepairStatusFields,
+  omitHostedCanonicalWriteReceiptLogStatusFields,
   readHostedCanonicalWriteReceiptLogEntries,
   readHostedCanonicalWriteReceiptLogStatusFingerprint,
   type HostedCanonicalWriteReceiptLogStatusFingerprint,
@@ -100,6 +102,10 @@ export type HostedWorkspaceRuntimeRestoreMode = "null-bootstrap" | "snapshot";
 
 export interface HostedWorkspaceRuntimeRestoreResult
   extends HostedRestoredExecutionContext {
+  canonicalWriteReceiptCount: number;
+  canonicalWriteReceiptRecoveryFailure: {
+    repairLogRef: HostedCanonicalWriteReceiptLogStatusFingerprint | null;
+  } | null;
   materializeWorkspaceArtifacts: HostedWorkspaceArtifactMaterializer;
   materializedArtifactPaths: ReadonlySet<string>;
   mode: HostedWorkspaceRuntimeRestoreMode;
@@ -140,6 +146,85 @@ export async function restoreHostedWorkspaceRuntimeJobWorkspace(input: {
   const deltaSnapshotRef = readHostedExecutionSnapshotDeltaRef(snapshotRef);
   const hotSnapshotRef = readHostedExecutionSnapshotHotRef(snapshotRef);
   const materializerBundles: Array<() => Promise<Uint8Array | ArrayBuffer | null>> = [];
+  const restoreLastKnownGoodAfterReceiptFailure = async (
+    error: unknown,
+  ): Promise<HostedWorkspaceRuntimeRestoreResult> => {
+    const diagnostics = buildHostedExecutionSafeErrorDiagnostics(error);
+    const nestedErrorCode = typeof diagnostics?.errorCode === "string"
+      ? diagnostics.errorCode
+      : "runtime_error";
+    console.warn("Hosted canonical write receipt recovery failed; foreground authority retained.", {
+      errorCode: "canonical_write_receipt_recovery_failed",
+      failureCount: 1,
+      nestedErrorCode,
+    });
+    void writeHostedRuntimeLogBestEffort({
+      entry: {
+        ...buildHostedRuntimeLogContextFields(input.logContext),
+        component: "runtime",
+        errorCode: "canonical_write_receipt_recovery_failed",
+        eventCode: "runner.error",
+        level: "warn",
+        phase: "restore",
+        redactedJson: {
+          canonicalWriteReceiptRecoveryFailed: 1,
+          nestedErrorCode,
+          safeErrorMessage:
+            "Canonical receipt recovery rejected unsafe state; foreground reply authority continued.",
+        },
+      },
+      platform: input.platform,
+    }).catch(() => undefined);
+
+    let repairLogRef: HostedCanonicalWriteReceiptLogStatusFingerprint | null = null;
+    try {
+      repairLogRef = readHostedCanonicalWriteReceiptLogStatusFingerprint(
+        input.workspace?.redactedStatus ?? null,
+      );
+    } catch {
+      // An invalid fingerprint is not a usable durable retry reference.
+    }
+    await clearHostedWorkspaceRuntimeLocalRoots(restored);
+    await clearHostedWorkspaceRestoreCachesBestEffort(restored.vaultRoot);
+    const restoredLastKnownGood = await restoreHostedWorkspaceRuntimeJobWorkspace({
+      ...input,
+      workspace: input.workspace
+        ? {
+            ...input.workspace,
+            redactedStatus: {
+              ...(omitHostedCanonicalWriteReceiptLogStatusFields(
+                input.workspace.redactedStatus,
+              ) ?? {}),
+              ...hostedCanonicalWriteRepairStatusFields(repairLogRef),
+            },
+          }
+        : null,
+    });
+    return {
+      ...restoredLastKnownGood,
+      canonicalWriteReceiptRecoveryFailure: { repairLogRef },
+    };
+  };
+  const recoverCanonicalWriteReceipts = async (vaultRoot: string) => {
+    try {
+      return {
+        count: await applyHostedCanonicalWriteReceiptsFromWorkspaceState({
+          platform: input.platform,
+          status: input.workspace?.redactedStatus ?? null,
+          vaultRoot,
+        }),
+        restored: null,
+      };
+    } catch (error) {
+      if (input.signal?.aborted) {
+        throw input.signal.reason ?? error;
+      }
+      return {
+        count: 0,
+        restored: await restoreLastKnownGoodAfterReceiptFailure(error),
+      };
+    }
+  };
 
   await clearHostedWorkspaceLiveRuntimeStateBestEffort(restored.vaultRoot);
 
@@ -153,13 +238,18 @@ export async function restoreHostedWorkspaceRuntimeJobWorkspace(input: {
       logContext: input.logContext ?? null,
       platform: input.platform,
       restored,
-      signal: input.signal ?? null,
       snapshotRef,
       workspace: input.workspace ?? null,
     });
     if (warmRestored) {
+      const receiptRecovery = await recoverCanonicalWriteReceipts(warmRestored.vaultRoot);
+      if (receiptRecovery.restored) {
+        return receiptRecovery.restored;
+      }
       return {
         ...warmRestored,
+        canonicalWriteReceiptCount: receiptRecovery.count,
+        canonicalWriteReceiptRecoveryFailure: null,
         mode: "snapshot",
         restoreWasCold: false,
         restoreTiming: null,
@@ -182,16 +272,15 @@ export async function restoreHostedWorkspaceRuntimeJobWorkspace(input: {
     const restoredMaterializedArtifactPaths = await readHostedMaterializedArtifactPaths({
       vaultRoot: restored.vaultRoot,
     });
-    await applyHostedCanonicalWriteReceiptsFromWorkspaceState({
-      logContext: input.logContext ?? null,
-      platform: input.platform,
-      signal: input.signal ?? null,
-      status: input.workspace?.redactedStatus ?? null,
-      vaultRoot: restored.vaultRoot,
-    });
+    const receiptRecovery = await recoverCanonicalWriteReceipts(restored.vaultRoot);
+    if (receiptRecovery.restored) {
+      return receiptRecovery.restored;
+    }
 
     return {
       ...restored,
+      canonicalWriteReceiptCount: receiptRecovery.count,
+      canonicalWriteReceiptRecoveryFailure: null,
       materializeWorkspaceArtifacts: createHostedWorkspaceRuntimeArtifactMaterializer({
         materializedArtifactPaths: restoredMaterializedArtifactPaths,
         platform: input.platform,
@@ -208,19 +297,18 @@ export async function restoreHostedWorkspaceRuntimeJobWorkspace(input: {
   if (!baseSnapshotRef && !hotSnapshotRef && !deltaSnapshotRef) {
     await clearHostedWorkspaceRuntimeLocalRoots(restored);
     await clearHostedWorkspaceRestoreCachesBestEffort(restored.vaultRoot);
-    await applyHostedCanonicalWriteReceiptsFromWorkspaceState({
-      logContext: input.logContext ?? null,
-      platform: input.platform,
-      signal: input.signal ?? null,
-      status: input.workspace?.redactedStatus ?? null,
-      vaultRoot: restored.vaultRoot,
-    });
+    const receiptRecovery = await recoverCanonicalWriteReceipts(restored.vaultRoot);
+    if (receiptRecovery.restored) {
+      return receiptRecovery.restored;
+    }
     const restoredMaterializedArtifactPaths = await readHostedMaterializedArtifactPaths({
       vaultRoot: restored.vaultRoot,
     });
 
     return {
       ...restored,
+      canonicalWriteReceiptCount: receiptRecovery.count,
+      canonicalWriteReceiptRecoveryFailure: null,
       materializeWorkspaceArtifacts: createHostedWorkspaceRuntimeArtifactMaterializer({
         materializedArtifactPaths: restoredMaterializedArtifactPaths,
         platform: input.platform,
@@ -320,19 +408,18 @@ export async function restoreHostedWorkspaceRuntimeJobWorkspace(input: {
     });
   }
 
-  await applyHostedCanonicalWriteReceiptsFromWorkspaceState({
-    logContext: input.logContext ?? null,
-    platform: input.platform,
-    signal: input.signal ?? null,
-    status: input.workspace?.redactedStatus ?? null,
-    vaultRoot: restored.vaultRoot,
-  });
+  const receiptRecovery = await recoverCanonicalWriteReceipts(restored.vaultRoot);
+  if (receiptRecovery.restored) {
+    return receiptRecovery.restored;
+  }
   const restoredMaterializedArtifactPaths = await readHostedMaterializedArtifactPaths({
     vaultRoot: restored.vaultRoot,
   });
 
   return {
     ...restored,
+    canonicalWriteReceiptCount: receiptRecovery.count,
+    canonicalWriteReceiptRecoveryFailure: null,
     materializeWorkspaceArtifacts: createHostedWorkspaceRuntimeArtifactMaterializer({
       materializedArtifactPaths: restoredMaterializedArtifactPaths,
       platform: input.platform,
@@ -364,7 +451,6 @@ async function tryRestoreHostedWorkspaceFromCleanCheckpointMarker(input: {
   logContext: HostedRuntimeLogContext | null;
   platform: HostedRuntimePlatform;
   restored: HostedRestoredExecutionContext;
-  signal: AbortSignal | null;
   snapshotRef: HostedWorkspaceSnapshotV2Ref;
   workspace: HostedWorkspaceState | null;
 }): Promise<
@@ -412,13 +498,6 @@ async function tryRestoreHostedWorkspaceFromCleanCheckpointMarker(input: {
       operatorHomeRoot: input.restored.operatorHomeRoot,
     });
     const restoredMaterializedArtifactPaths = await readHostedMaterializedArtifactPaths({
-      vaultRoot: input.restored.vaultRoot,
-    });
-    await applyHostedCanonicalWriteReceiptsFromWorkspaceState({
-      logContext: input.logContext,
-      platform: input.platform,
-      signal: input.signal ?? null,
-      status: input.workspace?.redactedStatus ?? null,
       vaultRoot: input.restored.vaultRoot,
     });
     return {
@@ -963,28 +1042,14 @@ function createHostedWorkspaceRuntimeArtifactMaterializer(input: {
 }
 
 async function applyHostedCanonicalWriteReceiptsFromWorkspaceState(input: {
-  logContext: HostedRuntimeLogContext | null;
   platform: HostedRuntimePlatform;
-  signal: AbortSignal | null;
   status: HostedWorkspaceState["redactedStatus"] | null | undefined;
   vaultRoot: string;
-}): Promise<void> {
-  const recoveryFailures: unknown[] = [];
-  const recordRecoveryFailure = (error: unknown): void => {
-    if (input.signal?.aborted) {
-      throw error;
-    }
-    recoveryFailures.push(error);
-  };
-  let entries: Awaited<ReturnType<typeof readHostedCanonicalWriteReceiptLogEntries>> = [];
-  try {
-    entries = await readHostedCanonicalWriteReceiptLogEntries({
-      artifactStore: input.platform.artifactStore,
-      status: input.status,
-    });
-  } catch (error) {
-    recordRecoveryFailure(error);
-  }
+}): Promise<number> {
+  const entries = await readHostedCanonicalWriteReceiptLogEntries({
+    artifactStore: input.platform.artifactStore,
+    status: input.status,
+  });
   const appliedReceiptRefs = new Set<string>();
   const dirtyDomains = new Set<AssistantContextSnapshotDirtyDomain>();
   for (const entry of entries) {
@@ -994,74 +1059,39 @@ async function applyHostedCanonicalWriteReceiptsFromWorkspaceState(input: {
     }
     appliedReceiptRefs.add(receiptRefKey);
 
-    try {
-      const bytes = await input.platform.artifactStore.get(entry.sha256);
-      if (!bytes) {
-        throw new Error("Hosted canonical write receipt artifact is unavailable.");
-      }
-      if (bytes.byteLength !== entry.byteSize) {
-        throw new Error("Hosted canonical write receipt artifact size does not match its log ref.");
-      }
-      const parsed = parseHostedCanonicalWriteReceiptForRestore(
-        Buffer.from(bytes).toString("utf8"),
-      );
-      if (!parsed) {
-        continue;
-      }
-      for (const domain of listAssistantContextSnapshotDirtyDomainsForCanonicalWrite(parsed)) {
-        dirtyDomains.add(domain);
-      }
-      await applyHostedCanonicalWriteReceipt({
-        readPayload: async (ref) =>
-          await readHostedCanonicalWritePayloadForRestore({
-            platform: input.platform,
-            ref,
-          }),
-        receipt: parsed,
-        vaultRoot: input.vaultRoot,
-      });
-    } catch (error) {
-      recordRecoveryFailure(error);
+    const bytes = await input.platform.artifactStore.get(entry.sha256);
+    if (!bytes) {
+      throw new Error("Hosted canonical write receipt artifact is unavailable.");
     }
+    if (bytes.byteLength !== entry.byteSize) {
+      throw new Error("Hosted canonical write receipt artifact size does not match its log ref.");
+    }
+    const parsed = parseHostedCanonicalWriteReceiptForRestore(
+      Buffer.from(bytes).toString("utf8"),
+    );
+    if (!parsed) {
+      continue;
+    }
+    for (const domain of listAssistantContextSnapshotDirtyDomainsForCanonicalWrite(parsed)) {
+      dirtyDomains.add(domain);
+    }
+    await applyHostedCanonicalWriteReceipt({
+      readPayload: async (ref) =>
+        await readHostedCanonicalWritePayloadForRestore({
+          platform: input.platform,
+          ref,
+        }),
+      receipt: parsed,
+      vaultRoot: input.vaultRoot,
+    });
   }
   if (dirtyDomains.size > 0) {
-    try {
-      await markAssistantContextSnapshotDirty({
-        domains: [...dirtyDomains],
-        vaultRoot: input.vaultRoot,
-      });
-    } catch (error) {
-      recordRecoveryFailure(error);
-    }
-  }
-  if (recoveryFailures.length > 0) {
-    const diagnostics = buildHostedExecutionSafeErrorDiagnostics(recoveryFailures[0]);
-    const nestedErrorCode = typeof diagnostics?.errorCode === "string"
-      ? diagnostics.errorCode
-      : "runtime_error";
-    console.warn("Hosted canonical write receipt recovery failed; foreground authority retained.", {
-      errorCode: "canonical_write_receipt_recovery_failed",
-      failureCount: recoveryFailures.length,
-      nestedErrorCode,
+    await markAssistantContextSnapshotDirty({
+      domains: [...dirtyDomains],
+      vaultRoot: input.vaultRoot,
     });
-    void writeHostedRuntimeLogBestEffort({
-      entry: {
-        ...buildHostedRuntimeLogContextFields(input.logContext),
-        component: "runtime",
-        errorCode: "canonical_write_receipt_recovery_failed",
-        eventCode: "runner.error",
-        level: "warn",
-        phase: "restore",
-        redactedJson: {
-          canonicalWriteReceiptRecoveryFailed: recoveryFailures.length,
-          nestedErrorCode,
-          safeErrorMessage:
-            "Canonical receipt recovery rejected unsafe state; foreground reply authority continued.",
-        },
-      },
-      platform: input.platform,
-    }).catch(() => undefined);
   }
+  return entries.length;
 }
 
 async function readHostedCanonicalWritePayloadForRestore(input: {
