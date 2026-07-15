@@ -45,11 +45,16 @@ describe("assistant product feedback", () => {
       acceptedInputIds: ["assistant_input_2"],
       feedback,
     });
+    const liveSteeredInput = buildAssistantProductFeedbackIdempotencyKey({
+      acceptedInputIds: ["assistant_input_1", "assistant_input_2"],
+      feedback,
+    });
 
     expect(first).toMatch(/^[a-f0-9]{64}$/u);
     expect(reordered).toBe(first);
     expect(reworded).toBe(first);
     expect(nextInput).not.toBe(first);
+    expect(liveSteeredInput).toBe(nextInput);
   });
 
   it("enables recording only for accepted assistant input", () => {
@@ -81,6 +86,38 @@ describe("assistant product feedback", () => {
 
     expect(enabled).toContain(MURPH_SUBMIT_PRODUCT_FEEDBACK_TOOL);
     expect(disabled).not.toContain(MURPH_SUBMIT_PRODUCT_FEEDBACK_TOOL);
+  });
+
+  it("reads the latest checkpointed input authority when recording", async () => {
+    let acceptedInputIds = ["assistant_input_1"];
+    const recordProductFeedback = vi.fn(async () => ({
+      feedbackId: "product_feedback_steered",
+      recorded: true,
+    }));
+    const recorder = createAssistantProductFeedbackRecorder({
+      acceptedInputItems: [{ id: "assistant_input_1", source: "assistant-input" }],
+      getAcceptedInputIds: () => acceptedInputIds,
+      productFeedbackRecorder: { recordProductFeedback },
+    });
+    if (!recorder) {
+      throw new Error("Expected a turn-scoped product feedback recorder.");
+    }
+    acceptedInputIds = ["assistant_input_1", "assistant_input_2"];
+    const feedback = {
+      kind: "feature_interest" as const,
+      relatedChangelogItemIds: [],
+      summary: "Interested in live steering.",
+    };
+
+    await recorder.recordProductFeedback(feedback);
+
+    expect(recordProductFeedback).toHaveBeenCalledWith({
+      ...feedback,
+      idempotencyKey: buildAssistantProductFeedbackIdempotencyKey({
+        acceptedInputIds,
+        feedback,
+      }),
+    });
   });
 
   it("advertises optional changelog metadata in the tool schema", () => {

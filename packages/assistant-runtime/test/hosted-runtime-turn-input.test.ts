@@ -178,13 +178,14 @@ describe("createHostedAssistantInputSource", () => {
     expect(listed.inputs[0]?.event.groupParticipantAdded).toBe(true);
   });
 
-  it("defers newly enqueued pending ids once the turn has a frozen batch", async () => {
+  it("admits only an exact notified id once the turn has a frozen batch", async () => {
     const listSpy = vi.spyOn(assistantEngine, "listAssistantInputEvents");
     const vaultRoot = await createTempVault();
     await enableLinqAutoReply(vaultRoot);
     const oldUnrelated = await upsertAssistantInputEvent({
       vault: vaultRoot,
       event: createAssistantInputEvent({
+        causalSeq: "10",
         dedupeKey: "dedupe_old_unrelated",
         eventId: "evt_old_unrelated",
         itemId: "item_old_unrelated",
@@ -199,6 +200,7 @@ describe("createHostedAssistantInputSource", () => {
     const fresh = await upsertAssistantInputEvent({
       vault: vaultRoot,
       event: createAssistantInputEvent({
+        causalSeq: "20",
         dedupeKey: "dedupe_fresh_active",
         eventId: "evt_fresh_active",
         itemId: "item_fresh_active",
@@ -225,6 +227,7 @@ describe("createHostedAssistantInputSource", () => {
     const late = await upsertAssistantInputEvent({
       vault: vaultRoot,
       event: createAssistantInputEvent({
+        causalSeq: "21",
         dedupeKey: "dedupe_late_active",
         eventId: "evt_late_active",
         itemId: "item_late_active",
@@ -256,12 +259,27 @@ describe("createHostedAssistantInputSource", () => {
       afterCursor: fresh.cursor,
       conversation: fresh.conversation!,
     });
+    const exact = await source.listInputCandidatesByIds({
+      afterCursor: fresh.cursor,
+      inputIds: [late.inputId],
+      sourceId: "linq",
+    });
+    const missingInputId = "ain_99999999999999999999999999999999";
+    const missingExact = await source.listInputCandidatesByIds({
+      afterCursor: fresh.cursor,
+      inputIds: [missingInputId],
+      sourceId: "linq",
+    });
 
     expect(allSelected.inputs.map((candidate) => candidate.event.inputId)).toEqual([
       fresh.inputId,
     ]);
     expect(lateConversationInputs.inputs.map((candidate) => candidate.event.inputId))
       .toEqual([]);
+    expect(exact.inputs.map((candidate) => candidate.event.inputId)).toEqual([
+      late.inputId,
+    ]);
+    expect(missingExact.inputs).toEqual([]);
     await expect(readHostedPendingAssistantInputIds({ vaultRoot })).resolves.toEqual([
       oldUnrelated.inputId,
       fresh.inputId,
@@ -272,6 +290,68 @@ describe("createHostedAssistantInputSource", () => {
       reason: "no_new_input",
     });
     expect(source.readSelectedInputIds()).toEqual([fresh.inputId]);
+    expect(source.readObservedInputIds()).toEqual([
+      oldUnrelated.inputId,
+      fresh.inputId,
+      late.inputId,
+      missingInputId,
+    ]);
+    expect(listSpy).not.toHaveBeenCalled();
+  });
+
+  it("does not live-steer an exact notified input across a causal gap", async () => {
+    const listSpy = vi.spyOn(assistantEngine, "listAssistantInputEvents");
+    const vaultRoot = await createTempVault();
+    await enableLinqAutoReply(vaultRoot);
+    const anchor = await upsertAssistantInputEvent({
+      vault: vaultRoot,
+      event: createAssistantInputEvent({
+        causalSeq: "30",
+        dedupeKey: "dedupe_exact_gap_anchor",
+        eventId: "evt_exact_gap_anchor",
+        itemId: "item_exact_gap_anchor",
+        laneSeq: "30",
+        messageId: "msg_exact_gap_anchor",
+        occurredAt: "2026-04-23T00:00:01.000Z",
+        receivedAt: "2026-04-23T00:00:02.000Z",
+        text: "exact gap anchor",
+      }),
+    });
+    const afterGap = await upsertAssistantInputEvent({
+      vault: vaultRoot,
+      event: createAssistantInputEvent({
+        causalSeq: "32",
+        dedupeKey: "dedupe_exact_after_gap",
+        eventId: "evt_exact_after_gap",
+        itemId: "item_exact_after_gap",
+        laneSeq: "32",
+        messageId: "msg_exact_after_gap",
+        occurredAt: "2026-04-23T00:00:03.000Z",
+        receivedAt: "2026-04-23T00:00:04.000Z",
+        text: "exact input after a gap",
+      }),
+    });
+    for (const inputId of [anchor.inputId, afterGap.inputId]) {
+      await enqueueHostedPendingAssistantInputId({ inputId, vaultRoot });
+    }
+    const source = createHostedAssistantInputSource({
+      initialPendingInputIds: [anchor.inputId, afterGap.inputId],
+      pendingInputRefreshMode: "none",
+      selectedInputIds: [anchor.inputId],
+      vaultRoot,
+    });
+
+    const exact = await source.listInputCandidatesByIds({
+      afterCursor: anchor.cursor,
+      inputIds: [afterGap.inputId],
+      sourceId: "linq",
+    });
+
+    expect(exact.inputs).toEqual([]);
+    await expect(readHostedPendingAssistantInputIds({ vaultRoot })).resolves.toEqual([
+      anchor.inputId,
+      afterGap.inputId,
+    ]);
     expect(listSpy).not.toHaveBeenCalled();
   });
 

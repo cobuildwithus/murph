@@ -7,6 +7,7 @@ import {
   readHostedMailboxAssistantInputItemDetails,
   type AssistantInputCandidate,
   type AssistantInputCandidateBatch,
+  type AssistantInputCandidateByIdQuery,
   type AssistantInputCandidateQuery,
   type AssistantInputCursor,
   type AssistantInputEventRecord,
@@ -44,6 +45,9 @@ export type HostedAssistantInputSelection =
     };
 
 export interface HostedAssistantInputSource extends AssistantInputSource {
+  listInputCandidatesByIds(
+    input: AssistantInputCandidateByIdQuery,
+  ): Promise<AssistantInputCandidateBatch>;
   readObservedInputIds(): string[];
   readSelectedInputIds(): string[];
 }
@@ -164,6 +168,42 @@ export function createHostedAssistantInputSource(input: {
         query,
       });
     },
+    async listInputCandidatesByIds(query) {
+      assertHostedAssistantInputQueryNotAborted(query.signal);
+      const inputIds = uniqueStrings(query.inputIds);
+      for (const inputId of inputIds) {
+        observedInputIds.add(inputId);
+      }
+      const events = await readHostedAssistantInputEventsById({
+        inputIds,
+        missingInput: "skip",
+        vaultRoot: input.vaultRoot,
+      });
+      const replyableEvents = events.length === inputIds.length
+        ? await filterHostedReplyablePendingAssistantInputEvents({
+            events,
+            vaultRoot: input.vaultRoot,
+          })
+        : [];
+      const exactSuccessors = await selectHostedAssistantExactSuccessorEvents({
+        afterCursor: query.afterCursor ?? null,
+        events,
+        replyableInputIds: new Set(
+          replyableEvents.map((event) => event.inputId),
+        ),
+        vaultRoot: input.vaultRoot,
+      });
+      const candidates = await createHostedAssistantInputCandidates({
+        events: exactSuccessors,
+        vaultRoot: input.vaultRoot,
+      });
+      assertHostedAssistantInputQueryNotAborted(query.signal);
+      return filterHostedAssistantInputCandidates({
+        candidates,
+        ignoreAfterCursor: true,
+        query,
+      });
+    },
     async listNewConversationInputs(query) {
       assertHostedAssistantInputQueryNotAborted(query.signal);
       const candidates = await readSelectedCandidates();
@@ -278,6 +318,44 @@ function selectHostedAssistantInputEventBatch(input: {
   return selected;
 }
 
+async function selectHostedAssistantExactSuccessorEvents(input: {
+  afterCursor: AssistantInputCursor | null;
+  events: readonly AssistantInputEventRecord[];
+  replyableInputIds: ReadonlySet<string>;
+  vaultRoot: string;
+}): Promise<AssistantInputEventRecord[]> {
+  if (!input.afterCursor || input.events.length === 0) {
+    return [];
+  }
+  const [anchor] = await readHostedAssistantInputEventsById({
+    inputIds: [input.afterCursor.inputId],
+    missingInput: "skip",
+    vaultRoot: input.vaultRoot,
+  });
+  if (!anchor) {
+    return [];
+  }
+
+  // Exact notification avoids a global scan, but it does not weaken the
+  // compound-batch boundary. Stop at the first missing causal successor or
+  // non-replyable event and leave every later ID pending.
+  const selected: AssistantInputEventRecord[] = [];
+  let previous = anchor;
+  for (const event of [...input.events].sort((left, right) =>
+    compareAssistantInputCursors(left.cursor, right.cursor)
+  )) {
+    if (
+      !input.replyableInputIds.has(event.inputId)
+      || !isHostedAssistantInputEventBatchSuccessor(previous, event)
+    ) {
+      break;
+    }
+    selected.push(event);
+    previous = event;
+  }
+  return selected;
+}
+
 function isHostedAssistantInputEventBatchSuccessor(
   previous: AssistantInputEventRecord,
   candidate: AssistantInputEventRecord,
@@ -315,11 +393,21 @@ async function readHostedAssistantInputCandidatesById(input: {
   vaultRoot: string;
 }): Promise<AssistantInputCandidate[]> {
   const events = await readHostedAssistantInputEventsById(input);
+  return createHostedAssistantInputCandidates({
+    events,
+    vaultRoot: input.vaultRoot,
+  });
+}
+
+async function createHostedAssistantInputCandidates(input: {
+  events: readonly AssistantInputEventRecord[];
+  vaultRoot: string;
+}): Promise<AssistantInputCandidate[]> {
   const hostedMailboxItems = await readHostedMailboxAssistantInputItemDetails({
-    inputIds: events.map((event) => event.inputId),
+    inputIds: input.events.map((event) => event.inputId),
     vault: input.vaultRoot,
   });
-  return events
+  return [...input.events]
     .sort((left, right) =>
       compareAssistantInputCursors(left.cursor, right.cursor)
     )
@@ -339,6 +427,7 @@ async function readHostedAssistantInputCandidatesById(input: {
 
 async function readHostedAssistantInputEventsById(input: {
   inputIds: readonly string[];
+  missingInput?: "skip" | "throw";
   vaultRoot: string;
 }): Promise<AssistantInputEventRecord[]> {
   const events: AssistantInputEventRecord[] = [];
@@ -348,6 +437,9 @@ async function readHostedAssistantInputEventsById(input: {
       vault: input.vaultRoot,
     });
     if (!event) {
+      if (input.missingInput === "skip") {
+        continue;
+      }
       throw new Error(
         `Hosted assistant input source references a missing input event: ${inputId}`,
       );
@@ -361,7 +453,21 @@ async function readHostedReplyablePendingAssistantInputEvents(input: {
   inputIds: readonly string[];
   vaultRoot: string;
 }): Promise<AssistantInputEventRecord[]> {
-  const events = await readHostedAssistantInputEventsById(input);
+  const events = await readHostedAssistantInputEventsById({
+    inputIds: input.inputIds,
+    vaultRoot: input.vaultRoot,
+  });
+  return filterHostedReplyablePendingAssistantInputEvents({
+    events,
+    vaultRoot: input.vaultRoot,
+  });
+}
+
+async function filterHostedReplyablePendingAssistantInputEvents(input: {
+  events: readonly AssistantInputEventRecord[];
+  vaultRoot: string;
+}): Promise<AssistantInputEventRecord[]> {
+  const events = input.events;
   if (events.length === 0) {
     return [];
   }
@@ -381,14 +487,17 @@ async function readHostedReplyablePendingAssistantInputEvents(input: {
 
 function filterHostedAssistantInputCandidates(input: {
   candidates: readonly AssistantInputCandidate[];
-  emittedCursorKeys: Set<string>;
+  emittedCursorKeys?: Set<string>;
+  ignoreAfterCursor?: boolean;
   query: AssistantInputCandidateQuery;
 }): AssistantInputCandidateBatch {
   const knownInputIds = new Set(input.query.knownInputIds ?? []);
-  const afterCursor = readEffectiveHostedAssistantInputSourceAfterCursor({
-    afterCursor: input.query.afterCursor ?? null,
-    emittedCursorKeys: input.emittedCursorKeys,
-  });
+  const afterCursor = input.ignoreAfterCursor === true
+    ? null
+    : readEffectiveHostedAssistantInputSourceAfterCursor({
+        afterCursor: input.query.afterCursor ?? null,
+        emittedCursorKeys: input.emittedCursorKeys ?? new Set(),
+      });
   const batch = buildHostedAssistantInputCandidateBatch({
     afterCursor,
     candidates: input.candidates.filter((candidate) => {
@@ -406,7 +515,7 @@ function filterHostedAssistantInputCandidates(input: {
     limit: input.query.limit,
   });
   for (const candidate of batch.inputs) {
-    input.emittedCursorKeys.add(hostedAssistantInputCursorKey(candidate.event.cursor));
+    input.emittedCursorKeys?.add(hostedAssistantInputCursorKey(candidate.event.cursor));
   }
   return batch;
 }
