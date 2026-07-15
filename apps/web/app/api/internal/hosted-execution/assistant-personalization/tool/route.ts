@@ -7,27 +7,21 @@ import {
 import { after } from "next/server";
 
 import {
-  requireHostedCloudflareCallbackRequest,
+  requireHostedCloudflareCallbackJsonRequest,
 } from "@/src/lib/hosted-execution/cloudflare-callback-auth";
 import {
   handleHostedRuntimeAssistantPersonalizationTool,
   resolveHostedRuntimeAssistantPreferenceCausalSeq,
 } from "@/src/lib/hosted-execution/assistant-personalization-tool";
-import { readRawBodyBuffer } from "@/src/lib/http";
 import { jsonOk, withJsonError } from "@/src/lib/hosted-onboarding/http";
 import { signalHostedMailboxAppendRuntime } from "@/src/lib/hosted-orchestration/signal-runtime";
 
 const BODY_LIMIT_BYTES = 2_048;
 
 export const POST = withJsonError(async (request: Request) => {
-  const payloadText = (await readRawBodyBuffer(request, {
-    limitBytes: BODY_LIMIT_BYTES,
-  })).toString("utf8");
-  const memberId = await requireHostedCloudflareCallbackRequest(request, {
+  const { payload, userId: memberId } = await requireHostedCloudflareCallbackJsonRequest(request, {
     maxBodyBytes: BODY_LIMIT_BYTES,
-    payloadText,
   });
-  const payload: unknown = payloadText.trim() ? JSON.parse(payloadText) : {};
   const authority = readAssistantInputAuthority(request);
   if (isAssistantPreferenceCausalSeqRequest(payload)) {
     parseHostedRuntimeAssistantPreferenceCausalSeqRequest(payload);
