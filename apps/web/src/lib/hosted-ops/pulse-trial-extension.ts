@@ -159,7 +159,7 @@ export class HostedPulseTrialExtensionPreviewStaleError extends Error {
 
 export class HostedPulseTrialExtensionProviderError extends Error {
   constructor() {
-    super("Stripe could not be checked for this member. Try Preview again.");
+    super("Stripe could not confirm this trial extension request.");
     this.name = "HostedPulseTrialExtensionProviderError";
   }
 }
@@ -284,6 +284,11 @@ export async function applyHostedPulseTrialExtension(
             },
           });
         }
+
+        requireHostedPulseTrialExtensionPreviewFresh({
+          now,
+          previewedAt: proofDates.previewedAt,
+        });
 
         if (
           !state.eligible ||
@@ -729,8 +734,7 @@ function parseHostedPulseTrialExtensionPreviewProofDates(input: {
   if (
     !Number.isFinite(previewedAt.getTime()) ||
     !Number.isFinite(targetTrialEndsAt.getTime()) ||
-    input.now.getTime() < previewedAt.getTime() - 60_000 ||
-    input.now.getTime() > previewedAt.getTime() + PREVIEW_PROOF_TTL_MS
+    input.now.getTime() < previewedAt.getTime() - 60_000
   ) {
     throw new HostedPulseTrialExtensionPreviewStaleError();
   }
@@ -749,6 +753,18 @@ function parseHostedPulseTrialExtensionPreviewProofDates(input: {
     targetTrialEndsAt: canonicalTargetTrialEndsAt,
     targetTrialEndUnix,
   };
+}
+
+function requireHostedPulseTrialExtensionPreviewFresh(input: {
+  now: Date;
+  previewedAt: Date;
+}): void {
+  if (
+    input.now.getTime() >
+      input.previewedAt.getTime() + PREVIEW_PROOF_TTL_MS
+  ) {
+    throw new HostedPulseTrialExtensionPreviewStaleError();
+  }
 }
 
 function readHostedPulseTrialExtensionTokenParts(token: string): {

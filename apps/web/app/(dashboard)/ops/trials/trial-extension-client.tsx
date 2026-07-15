@@ -22,6 +22,8 @@ import type {
 } from "@/src/lib/hosted-ops/pulse-trial-extension";
 
 type PendingAction = "apply" | "preview" | null;
+const PREVIEW_STALE_ERROR_CODE =
+  "HOSTED_OPS_PULSE_TRIAL_EXTENSION_PREVIEW_STALE";
 
 export function TrialExtensionClient() {
   const [memberId, setMemberId] = useState("");
@@ -39,7 +41,6 @@ export function TrialExtensionClient() {
     }
     setPending("preview");
     setError(null);
-    setResult(null);
     try {
       const preview = await requestTrialExtension({
         memberId: normalizedMemberId,
@@ -69,8 +70,14 @@ export function TrialExtensionClient() {
         previewProof: result.previewProof,
       }));
     } catch (requestError) {
-      setResult(null);
-      setError(readRequestErrorMessage(requestError));
+      if (isPreviewStaleRequestError(requestError)) {
+        setResult(null);
+        setError(readRequestErrorMessage(requestError));
+      } else {
+        setError(
+          "The trial extension could not be confirmed. Retry Apply with the same Preview.",
+        );
+      }
     } finally {
       setPending(null);
     }
@@ -321,14 +328,55 @@ async function requestTrialExtension(input: {
     headers: { "content-type": "application/json" },
     method: "POST",
   });
-  const payload: unknown = await response.json();
+  let payload: unknown;
+  try {
+    payload = await response.json();
+  } catch {
+    throw new TrialExtensionRequestError(
+      "Trial extension returned an unreadable response.",
+      null,
+    );
+  }
   if (!response.ok) {
-    throw new Error(readResponseErrorMessage(payload));
+    throw new TrialExtensionRequestError(
+      readResponseErrorMessage(payload),
+      readResponseErrorCode(payload),
+    );
   }
   if (!isHostedPulseTrialExtensionResult(payload)) {
-    throw new Error("Trial extension returned an invalid response.");
+    throw new TrialExtensionRequestError(
+      "Trial extension returned an invalid response.",
+      null,
+    );
   }
   return payload;
+}
+
+class TrialExtensionRequestError extends Error {
+  readonly code: string | null;
+
+  constructor(message: string, code: string | null) {
+    super(message);
+    this.code = code;
+    this.name = "TrialExtensionRequestError";
+  }
+}
+
+function readResponseErrorCode(payload: unknown): string | null {
+  if (!payload || typeof payload !== "object") {
+    return null;
+  }
+  const error = Reflect.get(payload, "error");
+  if (!error || typeof error !== "object") {
+    return null;
+  }
+  const code = Reflect.get(error, "code");
+  return typeof code === "string" ? code : null;
+}
+
+function isPreviewStaleRequestError(error: unknown): boolean {
+  return error instanceof TrialExtensionRequestError &&
+    error.code === PREVIEW_STALE_ERROR_CODE;
 }
 
 function isHostedPulseTrialExtensionResult(
