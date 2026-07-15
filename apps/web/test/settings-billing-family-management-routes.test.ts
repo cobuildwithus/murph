@@ -57,6 +57,17 @@ let memberRemoveRoute: typeof import("../app/api/settings/billing/family/members
 let capacityRoute: typeof import("../app/api/settings/billing/family/capacity/route");
 let seatsRoute: typeof import("../app/api/settings/billing/family/seats/route");
 
+const ownerSnapshot = {
+  billingActive: true,
+  groupId: "hbag_family",
+  members: [],
+  plans: {
+    edge: { active: 0, billed: 0, invited: 0, remaining: 0, used: 0 },
+    pulse: { active: 2, billed: 2, invited: 0, remaining: 0, used: 2 },
+  },
+  seats: { active: 2, billed: 2, invited: 0, max: 6, min: 2, remaining: 0, used: 2 },
+};
+
 beforeEach(async () => {
   vi.clearAllMocks();
   mocks.assertHostedOnboardingMutationOrigin.mockImplementation(() => {});
@@ -118,18 +129,11 @@ beforeEach(async () => {
       used: 2,
     },
   });
-  const ownerSnapshot = {
-    billingActive: true,
-    groupId: "hbag_family",
-    members: [],
-    plans: {
-      edge: { active: 0, billed: 0, invited: 0, remaining: 0, used: 0 },
-      pulse: { active: 2, billed: 2, invited: 0, remaining: 0, used: 2 },
-    },
-    seats: { active: 2, billed: 2, invited: 0, max: 6, min: 2, remaining: 0, used: 2 },
-  };
   mocks.readHostedFamilyOwnerSnapshotForMember.mockResolvedValue(ownerSnapshot);
-  mocks.updateHostedFamilyMemberPlan.mockResolvedValue(ownerSnapshot);
+  mocks.updateHostedFamilyMemberPlan.mockResolvedValue({
+    snapshot: ownerSnapshot,
+    syncing: false,
+  });
   mocks.updateHostedFamilyPlanCapacities.mockResolvedValue(ownerSnapshot);
   mocks.waitForHostedFamilyBilledSeatCount.mockResolvedValue(true);
   mocks.waitForHostedFamilyPlanCapacities.mockResolvedValue(true);
@@ -513,6 +517,10 @@ test("changes an active Family member tier", async () => {
   );
 
   expect(response.status).toBe(200);
+  await expect(response.json()).resolves.toMatchObject({
+    members: [],
+    syncing: false,
+  });
   expect(mocks.updateHostedFamilyMemberPlan).toHaveBeenCalledWith({
     groupId: "hbag_family",
     memberId: "member_child",
@@ -520,6 +528,25 @@ test("changes an active Family member tier", async () => {
     planCode: "edge",
     prisma: expect.any(Object),
   });
+});
+
+test("reports a member tier change that is still syncing", async () => {
+  mocks.updateHostedFamilyMemberPlan.mockResolvedValueOnce({
+    snapshot: ownerSnapshot,
+    syncing: true,
+  });
+
+  const response = await memberRemoveRoute.PATCH(
+    new Request("https://join.example.test/api/settings/billing/family/members/member_child", {
+      body: JSON.stringify({ planCode: "edge" }),
+      headers: { "content-type": "application/json", origin: "https://join.example.test" },
+      method: "PATCH",
+    }),
+    { params: Promise.resolve({ memberId: "member_child" }) },
+  );
+
+  expect(response.status).toBe(200);
+  await expect(response.json()).resolves.toMatchObject({ syncing: true });
 });
 
 test("does not create a family owner group from the seats route", async () => {

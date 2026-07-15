@@ -39,11 +39,23 @@ vi.mock("@/src/components/ui/dialog", () => ({
   Dialog: ({
     children,
     open,
+    onOpenChange,
   }: {
     children?: ReactNode;
     open?: boolean;
     onOpenChange?: (open: boolean) => void;
-  }) => (open ? createElement("div", { "data-dialog-open": "true" }, children) : null),
+  }) => (open
+    ? createElement(
+        "div",
+        { "data-dialog-open": "true" },
+        children,
+        createElement("button", {
+          "aria-label": "Dismiss dialog",
+          onClick: () => onOpenChange?.(false),
+          type: "button",
+        }),
+      )
+    : null),
   DialogContent: ({ children, className }: HTMLAttributes<HTMLDivElement>) =>
     createElement("div", { className, "data-dialog-content": "true" }, children),
   DialogDescription: (props: HTMLAttributes<HTMLParagraphElement>) =>
@@ -286,69 +298,20 @@ test("HostedFamilyManager copies a Telegram deep link for pending Telegram invit
   }
 });
 
-test("HostedFamilyManager adds exact Edge capacity without changing Pulse", async () => {
+test("HostedFamilyManager hides paid seat quantity controls", async () => {
   const { HostedFamilyManager } = await import(
     "@/src/components/settings/hosted-family-settings-actions"
   );
-  const { cleanup, container, window } = await renderClientComponent(
+  const { cleanup, container } = await renderClientComponent(
     createElement(HostedFamilyManager, baseFamilyManagerProps()),
     { requireButton: false },
   );
-  mocks.requestHostedOnboardingJson.mockResolvedValueOnce({ syncing: false });
 
   try {
-    const addEdge = container.querySelector<HTMLButtonElement>(
-      'button[aria-label="Add Edge seat at $19/mo"]',
-    );
-    assert.ok(addEdge);
-    await act(async () => {
-      addEdge.dispatchEvent(new window.Event("click", { bubbles: true }));
-    });
-
-    assert.match(
-      container.textContent ?? "",
-      /Add one Edge seat at \$19\/mo\? Stripe updates immediately and may invoice the prorated amount now\./,
-    );
-    expect(mocks.requestHostedOnboardingJson).not.toHaveBeenCalled();
-    await clickButton(container, window, "Add paid seat");
-
-    expect(mocks.requestHostedOnboardingJson).toHaveBeenCalledWith({
-      method: "PATCH",
-      payload: { capacities: { edge: 1, pulse: 2 } },
-      url: "/api/settings/billing/family/capacity",
-    });
-    expect(mocks.refresh).toHaveBeenCalledTimes(1);
-    assert.match(container.textContent ?? "", /Edge capacity added\./);
-  } finally {
-    await cleanup();
-  }
-});
-
-test("HostedFamilyManager reports a capacity change still syncing with Stripe", async () => {
-  const { HostedFamilyManager } = await import(
-    "@/src/components/settings/hosted-family-settings-actions"
-  );
-  const { cleanup, container, window } = await renderClientComponent(
-    createElement(HostedFamilyManager, baseFamilyManagerProps()),
-    { requireButton: false },
-  );
-  mocks.requestHostedOnboardingJson.mockResolvedValueOnce({ syncing: true });
-
-  try {
-    const addEdge = container.querySelector<HTMLButtonElement>(
-      'button[aria-label="Add Edge seat at $19/mo"]',
-    );
-    assert.ok(addEdge);
-    await act(async () => {
-      addEdge.dispatchEvent(new window.Event("click", { bubbles: true }));
-    });
-    await clickButton(container, window, "Add paid seat");
-
-    assert.match(
-      container.textContent ?? "",
-      /Edge capacity change submitted\. Stripe is still syncing; refresh in a moment\./,
-    );
-    assert.doesNotMatch(container.textContent ?? "", /Edge capacity added\./);
+    assert.match(container.textContent ?? "", /1 family member/);
+    assert.doesNotMatch(container.textContent ?? "", /paid seats assigned/);
+    assert.equal(container.querySelector('button[aria-label^="Add "]'), null);
+    assert.equal(container.querySelector('button[aria-label^="Remove an empty"]'), null);
   } finally {
     await cleanup();
   }
@@ -440,6 +403,7 @@ test("HostedFamilyManager confirms a member move to Edge", async () => {
           joinedAtIso: "2026-07-02T00:00:00.000Z",
           label: "Mom",
           memberId: "member_mom",
+          pendingPlanCode: null,
           planCode: "pulse" as const,
         },
       ],
@@ -459,11 +423,17 @@ test("HostedFamilyManager confirms a member move to Edge", async () => {
     }),
     { requireButton: false },
   );
+  mocks.requestHostedOnboardingJson.mockResolvedValueOnce({ syncing: false });
 
   try {
-    await clickLastButton(container, window, "Move to Edge");
-    assert.match(container.textContent ?? "", /Change Mom from Pulse to Edge\?/);
-    await clickButton(container, window, "Change tier");
+    assert.ok(container.querySelector('button[aria-label="Manage Mom\'s plan"]'));
+    await clickLastButton(container, window, "Manage");
+    assert.match(container.textContent ?? "", /Manage Mom/);
+    assert.match(
+      container.textContent ?? "",
+      /Upgrade Mom from Pulse to Edge at \$19\/mo\. The prorated difference will appear on your next invoice\./,
+    );
+    await clickButton(container, window, "Upgrade to Edge");
 
     expect(mocks.requestHostedOnboardingJson).toHaveBeenCalledWith({
       method: "PATCH",
@@ -475,7 +445,107 @@ test("HostedFamilyManager confirms a member move to Edge", async () => {
   }
 });
 
-test("HostedFamilyManager requires paid destination capacity before a member move", async () => {
+test("HostedFamilyManager shows and locks a pending member tier", async () => {
+  const { HostedFamilyManager } = await import(
+    "@/src/components/settings/hosted-family-settings-actions"
+  );
+  const props = baseFamilyManagerProps();
+  const { cleanup, container } = await renderClientComponent(
+    createElement(HostedFamilyManager, {
+      ...props,
+      members: [
+        ...props.members,
+        {
+          isOwner: false,
+          joinedAtIso: "2026-07-02T00:00:00.000Z",
+          label: "Mom",
+          memberId: "member_mom",
+          pendingPlanCode: "edge" as const,
+          planCode: "pulse" as const,
+        },
+      ],
+    }),
+    { requireButton: false },
+  );
+
+  try {
+    assert.match(container.textContent ?? "", /Updating to Edge/);
+    const manage = container.querySelector<HTMLButtonElement>(
+      'button[aria-label="Manage Mom\'s plan"]',
+    );
+    assert.ok(manage);
+    assert.equal(manage.disabled, true);
+    assert.equal(buttonByText(container, "Remove").disabled, true);
+  } finally {
+    await cleanup();
+  }
+});
+
+test("HostedFamilyManager locks row actions and ignores dialog dismissal while acting", async () => {
+  const { HostedFamilyManager } = await import(
+    "@/src/components/settings/hosted-family-settings-actions"
+  );
+  const props = baseFamilyManagerProps();
+  let resolveRequest: ((value: { syncing: boolean }) => void) | undefined;
+  const request = new Promise<{ syncing: boolean }>((resolve) => {
+    resolveRequest = resolve;
+  });
+  mocks.requestHostedOnboardingJson.mockReturnValueOnce(request);
+  const { cleanup, container, window } = await renderClientComponent(
+    createElement(HostedFamilyManager, {
+      ...props,
+      members: [
+        ...props.members,
+        {
+          isOwner: false,
+          joinedAtIso: "2026-07-02T00:00:00.000Z",
+          label: "Mom",
+          memberId: "member_mom",
+          pendingPlanCode: null,
+          planCode: "pulse" as const,
+        },
+      ],
+    }),
+    { requireButton: false },
+  );
+
+  try {
+    await clickLastButton(container, window, "Manage");
+    await clickButton(container, window, "Upgrade to Edge");
+
+    assert.equal(
+      container.querySelector<HTMLButtonElement>('button[aria-label="Manage your plan"]')
+        ?.disabled,
+      true,
+    );
+    assert.equal(
+      container.querySelector<HTMLButtonElement>('button[aria-label="Manage Mom\'s plan"]')
+        ?.disabled,
+      true,
+    );
+    assert.equal(buttonByText(container, "Remove").disabled, true);
+    assert.match(container.textContent ?? "", /Working\.\.\./);
+
+    const dismiss = container.querySelector<HTMLButtonElement>(
+      'button[aria-label="Dismiss dialog"]',
+    );
+    assert.ok(dismiss);
+    await act(async () => {
+      dismiss.dispatchEvent(new window.Event("click", { bubbles: true }));
+    });
+    assert.match(container.textContent ?? "", /Working\.\.\./);
+
+    await act(async () => {
+      resolveRequest?.({ syncing: false });
+      await request;
+    });
+    assert.doesNotMatch(container.textContent ?? "", /Working\.\.\./);
+  } finally {
+    await cleanup();
+  }
+});
+
+test("HostedFamilyManager reports an owner-specific tier error without exposing capacity", async () => {
   const { HostedFamilyManager } = await import(
     "@/src/components/settings/hosted-family-settings-actions"
   );
@@ -483,15 +553,56 @@ test("HostedFamilyManager requires paid destination capacity before a member mov
     createElement(HostedFamilyManager, baseFamilyManagerProps()),
     { requireButton: false },
   );
+  mocks.requestHostedOnboardingJson.mockRejectedValueOnce(undefined);
 
   try {
-    await clickButton(container, window, "Move to Edge");
+    await clickButton(container, window, "Manage");
     assert.match(
       container.textContent ?? "",
-      /Add a paid Edge seat above, move yourself, then remove the empty Pulse seat if you no longer need it\./,
+      /Upgrade your plan from Pulse to Edge at \$19\/mo/,
     );
-    assert.equal(buttonByText(container, "Add Edge seat first").disabled, true);
-    expect(mocks.requestHostedOnboardingJson).not.toHaveBeenCalled();
+    await clickButton(container, window, "Upgrade to Edge");
+    expect(mocks.requestHostedOnboardingJson).toHaveBeenCalledWith({
+      method: "PATCH",
+      payload: { planCode: "edge" },
+      url: "/api/settings/billing/family/members/member_owner",
+    });
+    assert.match(container.textContent ?? "", /Could not change your tier right now\./);
+  } finally {
+    await cleanup();
+  }
+});
+
+test("HostedFamilyManager offers one-click downgrade copy for an Edge member", async () => {
+  const { HostedFamilyManager } = await import(
+    "@/src/components/settings/hosted-family-settings-actions"
+  );
+  const props = baseFamilyManagerProps();
+  const { cleanup, container, window } = await renderClientComponent(
+    createElement(HostedFamilyManager, {
+      ...props,
+      members: props.members.map((member) => ({ ...member, planCode: "edge" as const })),
+      plans: {
+        edge: { active: 1, billed: 1, invited: 0, remaining: 0, used: 1 },
+        pulse: { active: 0, billed: 1, invited: 0, remaining: 1, used: 0 },
+      },
+    }),
+    { requireButton: false },
+  );
+  mocks.requestHostedOnboardingJson.mockResolvedValueOnce({ syncing: false });
+
+  try {
+    await clickButton(container, window, "Manage");
+    assert.match(
+      container.textContent ?? "",
+      /Downgrade your plan from Edge to Pulse at \$7\/mo\. Any prorated credit will apply to your next invoice\./,
+    );
+    await clickButton(container, window, "Downgrade to Pulse");
+    expect(mocks.requestHostedOnboardingJson).toHaveBeenCalledWith({
+      method: "PATCH",
+      payload: { planCode: "pulse" },
+      url: "/api/settings/billing/family/members/member_owner",
+    });
   } finally {
     await cleanup();
   }
@@ -564,10 +675,8 @@ test("HostedFamilyManager requires a stable target before adding a paid seat", a
   );
 
   try {
-    assert.match(
-      container.textContent ?? "",
-      /2 of 2 paid seats assigned/,
-    );
+    assert.match(container.textContent ?? "", /1 family member/);
+    assert.doesNotMatch(container.textContent ?? "", /paid seats assigned/);
 
     await clickButton(container, window, "Invite member");
     assert.match(
@@ -718,6 +827,7 @@ function baseFamilyManagerProps() {
         joinedAtIso: "2026-07-01T00:00:00.000Z",
         label: null,
         memberId: "member_owner",
+        pendingPlanCode: null,
         planCode: "pulse" as const,
       },
     ],

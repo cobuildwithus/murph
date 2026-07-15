@@ -36,7 +36,7 @@ export const PATCH = withJsonError(async (
       message: "Only the Family plan owner can change member tiers.",
     });
   }
-  const snapshot = await updateHostedFamilyMemberPlan({
+  const result = await updateHostedFamilyMemberPlan({
     groupId: group.id,
     memberId,
     ownerMemberId: auth.member.id,
@@ -44,9 +44,10 @@ export const PATCH = withJsonError(async (
     prisma,
   });
   return jsonOk({
-    members: snapshot.members,
-    plans: snapshot.plans,
-    seats: snapshot.seats,
+    members: result.snapshot.members,
+    plans: result.snapshot.plans,
+    seats: result.snapshot.seats,
+    syncing: result.syncing,
   });
 });
 
