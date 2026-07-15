@@ -14,10 +14,13 @@ describe('assistant progress prompt contract', () => {
     })
 
     expect(prompt).toContain(
-      'A required `send_progress_update` call is not a final answer and does not conflict with acting directly',
+      'Native commentary is internal, not member-visible',
     )
     expect(prompt).toContain(
-      'continue immediately with the first file, vault, web, skill, media, or CLI action',
+      'Use `murph.send_progress_update` for interim updates the member must see; commentary does not count',
+    )
+    expect(prompt).toContain(
+      'It is not a final answer, so continue immediately with the first needed action',
     )
     expect(prompt).toContain(
       'Use it sparingly for genuinely long, multi-step, research, long parsing/scans, or substantial non-audio content-inspection work',

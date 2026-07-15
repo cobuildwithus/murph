@@ -184,7 +184,10 @@ describe('assistant execution prompt contract', () => {
       'Assistant personality preferences',
     )
     expect(defaultLayers.staticCacheableCorePrompt).toContain(
-      'Defaults: light dry humor when fitting, supportive teammate energy with small reversible steps, and balanced useful detail.',
+      'Defaults: Humor 3—at most one earned situational beat when playful; no canned bits or user-directed jokes. Push 3—one small reversible step with visible choice. Detail 5—answer first, then useful context.',
+    )
+    expect(defaultLayers.staticCacheableCorePrompt).toContain(
+      'Calm, observant, direct, plainspoken.',
     )
     expect(defaultLayers.staticCacheableCorePrompt).toContain(
       'Be a peer, not an authority',
@@ -202,12 +205,51 @@ describe('assistant execution prompt contract', () => {
       'Assistant personality preferences for this private conversation:',
     )
     expect(layers.threadContextPrompt).toContain(
-      'Humor 9/10: use prominent, bold, dry humor',
+      'Humor 9/10: when humor is welcome, take a bold, situation-specific swing',
+    )
+    expect(layers.threadContextPrompt).toContain(
+      'absurd but unmistakably nonliteral escalation',
+    )
+    expect(layers.threadContextPrompt).toContain(
+      'Make the contrast large enough to read as a joke',
+    )
+    expect(layers.threadContextPrompt).toContain(
+      'Humor is permission, not a quota',
+    )
+    expect(layers.threadContextPrompt).toContain(
+      'if no specific beat sharpens the point or rewards shared context, omit it at any score',
+    )
+    expect(layers.threadContextPrompt).toContain(
+      'In factual answers, use at most one beat',
+    )
+    expect(layers.threadContextPrompt).toContain(
+      'Never explain a joke or repeat the same punchline; avoid stock personification, canned meme templates, and forced analogies',
+    )
+    expect(layers.threadContextPrompt).toContain(
+      'When health stakes or emotional reception are unclear, stay literal',
+    )
+    expect(layers.threadContextPrompt).toContain(
+      'Target Murph or the situation, never the user, their identity, body, symptoms, condition, competence, or effort',
     )
     expect(layers.threadContextPrompt).not.toContain('Push 3/10')
     expect(layers.threadContextPrompt).not.toContain('Detail 5/10')
     expect(layers.threadContextPrompt).toContain(
-      "the user's explicit current-turn instruction always win",
+      'Apply these dials within the saved tone and current channel style',
+    )
+    expect(layers.threadContextPrompt).toContain(
+      "Fit them inside the channel's pacing: Detail sets the length budget, Humor and Push fit inside it, and Humor never gets its own bubble",
+    )
+    expect(layers.threadContextPrompt).toContain(
+      'They change expression, not facts, authority, safety thresholds, or required warnings',
+    )
+    expect(layers.threadContextPrompt).toContain(
+      'When urgent action is needed, lead with the action, timeframe, and safety essentials; when the user has limited capacity, omit optional background',
+    )
+    expect(layers.threadContextPrompt).toContain(
+      "Stay warm, competent, respectful of the user's choices, and factually clear",
+    )
+    expect(layers.threadContextPrompt).toContain(
+      "the user's explicit current-turn instructions take precedence",
     )
     expect(layers.stableRouteCapabilityPrompt).not.toContain('Humor 9/10')
     expect(layers.dynamicTurnContextPrompt).not.toContain('Humor 9/10')
@@ -215,14 +257,14 @@ describe('assistant execution prompt contract', () => {
 
   it('maps exact personality scores into the reviewed behavior bands', () => {
     const humorCases = [
-      [0, 'use no intentional jokes'],
-      [1, 'use occasional light, dry humor'],
-      [3, 'use occasional light, dry humor'],
-      [4, 'use regular wit when it helps'],
-      [6, 'use regular wit when it helps'],
-      [7, 'use prominent, bold, dry humor'],
-      [9, 'use prominent, bold, dry humor'],
-      [10, 'use maximum safe comedic ambition'],
+      [0, 'use no jokes, puns, teasing'],
+      [1, 'use occasional, subtle situational wit'],
+      [3, 'use occasional, subtle situational wit'],
+      [4, 'when a strong opportunity arises'],
+      [6, 'when a strong opportunity arises'],
+      [7, 'take a bold, situation-specific swing'],
+      [9, 'take a bold, situation-specific swing'],
+      [10, 'take the largest safe creative swing'],
     ] as const
     for (const [score, expected] of humorCases) {
       const prompt = buildAssistantSystemPrompt(
@@ -235,14 +277,14 @@ describe('assistant execution prompt contract', () => {
     }
 
     const pushCases = [
-      [0, 'use no motivational pressure'],
-      [1, 'use supportive teammate energy'],
-      [3, 'use supportive teammate energy'],
-      [4, 'use focused high-school-coach energy'],
-      [6, 'use focused high-school-coach energy'],
-      [7, 'use strict college-coach energy'],
-      [9, 'use strict college-coach energy'],
-      [10, 'use terse, theatrical drill-sergeant energy'],
+      [0, 'reflect, inform, and offer choices'],
+      [1, 'encourage gently'],
+      [3, 'encourage gently'],
+      [4, 'be direct and action-oriented'],
+      [6, 'be direct and action-oriented'],
+      [7, 'use firm accountability'],
+      [9, 'use firm accountability'],
+      [10, 'use maximum directness and brevity'],
     ] as const
     for (const [score, expected] of pushCases) {
       const prompt = buildAssistantSystemPrompt(
@@ -255,14 +297,14 @@ describe('assistant execution prompt contract', () => {
     }
 
     const detailCases = [
-      [0, 'give the shortest complete answer'],
-      [1, 'stay concise and include only the essential reason'],
-      [3, 'stay concise and include only the essential reason'],
-      [4, 'give a balanced explanation'],
-      [6, 'give a balanced explanation'],
-      [7, 'cover relevant context, tradeoffs, uncertainty'],
-      [9, 'cover relevant context, tradeoffs, uncertainty'],
-      [10, 'be comprehensive when warranted'],
+      [0, 'lead with the shortest complete answer'],
+      [1, 'lead with the bottom line'],
+      [3, 'lead with the bottom line'],
+      [4, 'give answer-first balanced detail'],
+      [6, 'give answer-first balanced detail'],
+      [7, 'give a thorough, answer-first response'],
+      [9, 'give a thorough, answer-first response'],
+      [10, 'give the most complete decision-relevant answer'],
     ] as const
     for (const [score, expected] of detailCases) {
       const prompt = buildAssistantSystemPrompt(
@@ -273,6 +315,35 @@ describe('assistant execution prompt contract', () => {
       expect(prompt).toContain(`Detail ${score}/10`)
       expect(prompt).toContain(expected)
     }
+
+    const maximumPrompt = buildAssistantSystemPrompt(
+      createCommonCodexPromptInput({
+        assistantPersonality: {
+          detail: 10,
+          humor: 10,
+          push: 10,
+        },
+      }),
+    )
+    expect(maximumPrompt).toContain(
+      'In factual answers, use at most one beat',
+    )
+    expect(maximumPrompt).toContain('one bold deadpan beat, ridiculous escalation')
+    expect(maximumPrompt).toContain(
+      'never motive or character; ask for a commitment, revision, or decline, then respect the answer',
+    )
+    expect(maximumPrompt).toContain(
+      'Push changes delivery, not authority',
+    )
+    expect(maximumPrompt).toContain(
+      'Never pressure a reply, signup, sharing, spending, consent, health compliance, authorization, or irreversible action',
+    )
+    expect(maximumPrompt).toContain(
+      'Start with the conclusion and, when relevant, the immediate action',
+    )
+    expect(maximumPrompt).toContain(
+      'Do not imply completeness, enumerate remote possibilities, or add background that would not change understanding or action',
+    )
   })
 
   it('keeps conversation-first personalization guidance and private dial controls in the stable route prompt', () => {
@@ -325,7 +396,7 @@ describe('assistant execution prompt contract', () => {
       'One `show` may state values, not cause',
     )
     expect(layers.stableRouteCapabilityPrompt).toContain(
-      'one fresh safe joke only for Humor >0',
+      'for Humor >0, at most one earned safe joke',
     )
     expect(layers.stableRouteCapabilityPrompt).toContain(
       'none for 0/query/Push/Detail',
@@ -334,7 +405,7 @@ describe('assistant execution prompt contract', () => {
       'Persist only explicit ongoing setting requests',
     )
     expect(layers.stableRouteCapabilityPrompt).toContain(
-      'no shame, threats, coercion, false urgency',
+      'never shame, coerce, invent urgency',
     )
     expect(layers.stableRouteCapabilityPrompt).toContain(
       'self-harm',
@@ -492,7 +563,10 @@ describe('assistant execution prompt contract', () => {
 
     expect(prompt).toContain('send_progress_update')
     expect(prompt).toContain(
-      'A required `send_progress_update` call is not a final answer and does not conflict with acting directly',
+      'Native commentary is internal, not member-visible',
+    )
+    expect(prompt).toContain(
+      'Use `murph.send_progress_update` for interim updates the member must see; commentary does not count',
     )
     expect(prompt).toContain(
       'Use it sparingly for genuinely long, multi-step, research, long parsing/scans, or substantial non-audio content-inspection work',
@@ -1411,7 +1485,7 @@ Execution context:
       'Current Murph product base URL for user-facing app links: http://localhost:3000',
     )
     expect(promptA.cacheMetadata.staticPromptHash).toBe(
-      'ca8549f6f738dd10ae3278f8aaccab2f88cd99ce1faea341a880f1a2a57bf0b5',
+      '2911ba23c4ede7bfb0363c42c516025c487f5f2120d538d39ba6d29adbb347c5',
     )
     expect(promptA.cacheMetadata.toolSchemaHash).toBe(
       'assistant-tool-schema-common-codex-test',
@@ -2012,7 +2086,7 @@ describe('assistant Murph onboarding guidance', () => {
       'Until then, leave onboarding open.',
     )
     expect(prompt).toContain(
-      'Ask at most one onboarding question in a reply and follow the skill\'s stand-alone-reply rules.',
+      'Ask at most one onboarding question or checkpoint in a reply; the skill\'s bundled minimal-identity prompt counts as one checkpoint.',
     )
     expect(prompt).toContain(
       "Use the current prompt's date, timezone, channel, delivery route, and available tool guidance as runtime context whenever the onboarding skill is used",
