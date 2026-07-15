@@ -21,10 +21,6 @@ import {
   requestJsonWithRetry,
 } from '../src/http-json-retry.ts'
 import {
-  createRuntimeUnavailableError,
-  RUNTIME_PACKAGES,
-} from '../src/runtime-errors.ts'
-import {
   resolveLinqApiBaseUrl,
   resolveLinqApiToken,
   resolveLinqWebhookSecret,
@@ -1332,32 +1328,6 @@ test('fetchJsonResponse forwards the timeout signal and wraps transport failures
       }),
     (error) => error === wrapped,
   )
-})
-
-test('runtime unavailable helpers preserve the public operator-config error contract', () => {
-  assert.deepEqual([...RUNTIME_PACKAGES], [
-    '@murphai/core',
-    '@murphai/importers',
-    '@murphai/query',
-    'incur',
-  ])
-
-  const withCause = createRuntimeUnavailableError(
-    'samples import-csv',
-    new Error('missing runtime install'),
-  )
-  assert.ok(withCause instanceof VaultCliError)
-  assert.equal(withCause.code, 'runtime_unavailable')
-  assert.match(withCause.message, /samples import-csv/u)
-  assert.deepEqual(withCause.context, {
-    cause: 'missing runtime install',
-    packages: [...RUNTIME_PACKAGES],
-  })
-
-  const withoutErrorCause = createRuntimeUnavailableError('assistant run', 'boom')
-  assert.deepEqual(withoutErrorCause.context, {
-    packages: [...RUNTIME_PACKAGES],
-  })
 })
 
 test('device sync client helpers trim env values, send bearer auth, and map control-plane failures', async () => {

@@ -389,10 +389,7 @@ async function snapshotHostedPortableWorkspaceBundle(
     hostedCodexContinuity,
   );
   const codexSnapshotExplicitFiles = operatorHomeRoot
-    ? await createHostedCodexSnapshotExplicitFiles({
-        collection: hostedCodexContinuity,
-        operatorHomeRoot,
-      })
+    ? createHostedCodexContinuitySnapshotExplicitFiles(hostedCodexContinuity)
     : [];
   const vaultBundle = await snapshotHostedBundleRoots({
     assertSnapshotLive: input.assertSnapshotLive,
@@ -697,10 +694,9 @@ async function collectHostedPortableWorkspaceDeltaFiles(input: {
   });
 
   if (input.operatorHomeRoot) {
-    const codexSnapshotExplicitFiles = await createHostedCodexSnapshotExplicitFiles({
-      collection: input.codexContinuity,
-      operatorHomeRoot: input.operatorHomeRoot,
-    });
+    const codexSnapshotExplicitFiles = createHostedCodexContinuitySnapshotExplicitFiles(
+      input.codexContinuity,
+    );
     await collectHostedPortableWorkspaceDeltaRoot({
       artifactRefProvider: input.artifactRefProvider,
       artifactSink: input.artifactSink,
@@ -1359,10 +1355,7 @@ export async function snapshotHostedAssistantRuntimeHotState(input: {
     hostedCodexContinuity,
   );
   const codexSnapshotExplicitFiles = operatorHomeRoot
-    ? await createHostedCodexSnapshotExplicitFiles({
-        collection: hostedCodexContinuity,
-        operatorHomeRoot,
-      })
+    ? createHostedCodexContinuitySnapshotExplicitFiles(hostedCodexContinuity)
     : [];
 
   await input.assertSnapshotLive?.();
@@ -1440,11 +1433,7 @@ export async function clearHostedAssistantRuntimeHotState(input: {
   const vaultRoot = path.resolve(input.vaultRoot);
   const operatorHomeRoot = input.operatorHomeRoot ? path.resolve(input.operatorHomeRoot) : null;
   const assistantStateRoot = resolveAssistantStatePaths(vaultRoot).assistantStateRoot;
-  const retainedCodexHomeRelativePaths = operatorHomeRoot
-    ? await createHostedCodexHomeAuthRetainedRelativePaths({
-        operatorHomeRoot,
-      })
-    : new Set<string>();
+  const retainedCodexHomeRelativePaths = new Set<string>();
 
   await Promise.all([
     ...HOSTED_ASSISTANT_RUNTIME_HOT_STATE_INCLUDE_PATHS.map((relativePath) =>
@@ -2711,27 +2700,12 @@ function shouldIncludeHostedOperatorHomeRelativePath(relativePath: string): bool
     || normalizedRelativePath === HOSTED_CODEX_HOME_RELATIVE_PATH;
 }
 
-async function createHostedCodexSnapshotExplicitFiles(input: {
-  collection: HostedCodexContinuityCollection;
-  operatorHomeRoot: string;
-}): Promise<string[]> {
-  void input.operatorHomeRoot;
-  return createHostedCodexContinuitySnapshotExplicitFiles(input.collection);
-}
-
 function createHostedCodexContinuitySnapshotExplicitFiles(
   collection: HostedCodexContinuityCollection,
 ): string[] {
   return [...new Set(collection.entries.map((entry) =>
     `${HOSTED_CODEX_HOME_RELATIVE_PATH}/${entry.codexRolloutRelativePath}`
   ))].sort((left, right) => left.localeCompare(right));
-}
-
-async function createHostedCodexHomeAuthRetainedRelativePaths(input: {
-  operatorHomeRoot: string;
-}): Promise<Set<string>> {
-  void input.operatorHomeRoot;
-  return new Set();
 }
 
 function createHostedCodexContinuitySnapshotArtifactPathSet(

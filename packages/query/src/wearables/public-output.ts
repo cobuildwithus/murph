@@ -61,23 +61,6 @@ export function projectWearableActivityDayPublicSources(day: WearableActivityDay
     metrics,
     day.summaryConfidence,
     "No activity summary metrics were available for this date.",
-    [
-      day.steps,
-      day.activeCalories,
-      day.totalCalories,
-      day.distanceKm,
-      day.floorsClimbed,
-      day.totalElevationGainMeters,
-      day.altitudeChangeMeters,
-      day.estimatedVo2Max,
-      day.activityScore,
-      day.dayStrain,
-      day.workoutStrain,
-      day.maxHeartRate,
-      day.percentRecorded,
-      day.sessionMinutes,
-      day.sessionCount,
-    ],
   );
 
   return {
@@ -95,23 +78,6 @@ export function projectWearableActivityDayPublicSources(day: WearableActivityDay
       metrics: metrics.map(([, metric]) => metric),
       originalNotes: day.notes,
       originalSummaryConfidence: day.summaryConfidence,
-      sourceMetrics: [
-        day.steps,
-        day.activeCalories,
-        day.totalCalories,
-        day.distanceKm,
-        day.floorsClimbed,
-        day.totalElevationGainMeters,
-        day.altitudeChangeMeters,
-        day.estimatedVo2Max,
-        day.activityScore,
-        day.dayStrain,
-        day.workoutStrain,
-        day.maxHeartRate,
-        day.percentRecorded,
-        day.sessionMinutes,
-        day.sessionCount,
-      ],
       summaryConfidence,
       fallbackNotes: summarizeActivityNotes({
         activityTypes: day.activityTypes,
@@ -188,7 +154,6 @@ export function projectWearableSleepNightPublicSources(night: WearableSleepNight
     metrics,
     night.summaryConfidence,
     "No sleep metrics were available for this date.",
-    sourceMetrics,
   );
   const sleepProviderTextEntries = buildMetricProviderTextProjectionEntries(sourceMetrics);
   const summaryConfidence = {
@@ -211,7 +176,6 @@ export function projectWearableSleepNightPublicSources(night: WearableSleepNight
       metrics: projectedMetrics,
       originalNotes: night.notes,
       originalSummaryConfidence: night.summaryConfidence,
-      sourceMetrics,
       summaryConfidence,
       filterOriginalNote: (note) => !isSleepWindowSelectionNote(note),
       projectOriginalNote: (note) => projectProviderTextPublicSources(note, sleepProviderTextEntries),
@@ -260,18 +224,6 @@ export function projectWearableRecoveryDayPublicSources(day: WearableRecoveryDay
     metrics,
     day.summaryConfidence,
     "No recovery metrics were available for this date.",
-    [
-      day.recoveryScore,
-      day.readinessScore,
-      day.restingHeartRate,
-      day.hrv,
-      day.respiratoryRate,
-      day.spo2,
-      day.temperatureDeviation,
-      day.temperature,
-      day.bodyBattery,
-      day.stressLevel,
-    ],
   );
 
   return {
@@ -282,18 +234,6 @@ export function projectWearableRecoveryDayPublicSources(day: WearableRecoveryDay
       metrics: metrics.map(([, metric]) => metric),
       originalNotes: day.notes,
       originalSummaryConfidence: day.summaryConfidence,
-      sourceMetrics: [
-        day.recoveryScore,
-        day.readinessScore,
-        day.restingHeartRate,
-        day.hrv,
-        day.respiratoryRate,
-        day.spo2,
-        day.temperatureDeviation,
-        day.temperature,
-        day.bodyBattery,
-        day.stressLevel,
-      ],
       summaryConfidence,
       fallbackNotes: summarizeRecoveryNotes({
         readinessScore,
@@ -332,14 +272,6 @@ export function projectWearableBodyStateDayPublicSources(day: WearableBodyStateD
     metrics,
     day.summaryConfidence,
     "No body-state metrics were available for this date.",
-    [
-      day.weightKg,
-      day.bodyFatPercentage,
-      day.bmi,
-      day.leanBodyMassKg,
-      day.temperature,
-      day.waistCircumference,
-    ],
   );
 
   return {
@@ -350,14 +282,6 @@ export function projectWearableBodyStateDayPublicSources(day: WearableBodyStateD
       metrics: metrics.map(([, metric]) => metric),
       originalNotes: day.notes,
       originalSummaryConfidence: day.summaryConfidence,
-      sourceMetrics: [
-        day.weightKg,
-        day.bodyFatPercentage,
-        day.bmi,
-        day.leanBodyMassKg,
-        day.temperature,
-        day.waistCircumference,
-      ],
       summaryConfidence,
       fallbackNotes: summarizeBodyStateNotes({
         bodyFatPercentage,
@@ -426,10 +350,8 @@ function rebuildPublicSummaryConfidence(
   metrics: ReadonlyArray<readonly [string, WearableResolvedMetric]>,
   original: WearableSummaryConfidence,
   missingSummaryNote: string,
-  sourceMetrics: readonly WearableResolvedMetric[],
 ): WearableSummaryConfidence {
   const extraNotes = original.notes.filter((note) => !isAutoSummaryConfidenceNote(note, missingSummaryNote));
-  void sourceMetrics;
 
   return summarizeMetricsConfidence(metrics, {
     extraNotes,
@@ -444,10 +366,8 @@ function projectSummaryNotes(input: {
   originalNotes: readonly string[];
   originalSummaryConfidence: WearableSummaryConfidence;
   projectOriginalNote?: (note: string) => string;
-  sourceMetrics: readonly WearableResolvedMetric[];
   summaryConfidence: WearableSummaryConfidence;
 }): string[] {
-  void input.sourceMetrics;
   const originalSummaryNotes = new Set(input.originalSummaryConfidence.notes);
   const projectedOriginalNotes = input.originalNotes
     .filter((note) => !originalSummaryNotes.has(note))

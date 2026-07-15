@@ -2,7 +2,7 @@
 
 import type { CSSProperties } from "react";
 
-import { cn } from "@/lib/utils";
+import { cn } from "@/src/lib/utils";
 
 type Ring = "core" | "mid" | "outer";
 
