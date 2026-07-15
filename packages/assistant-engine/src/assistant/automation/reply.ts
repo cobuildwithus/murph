@@ -1254,7 +1254,7 @@ async function evaluateAssistantAutoReplyGroup(input: {
     )
   }
 
-  const latestCrossSessionDelivery =
+  const outboxContext =
     await resolveAssistantAutoReplyLatestCrossSessionDelivery({
       deliveryTarget: conversationDeliveryTarget,
       historyReader: input.historyReader,
@@ -1268,6 +1268,16 @@ async function evaluateAssistantAutoReplyGroup(input: {
       ),
       session: existingSession,
     })
+  if (
+    primaryReplyInput.sourceMetadata?.kind === 'linq' &&
+    primaryReplyInput.sourceMetadata.affirmativeReaction === true &&
+    !outboxContext.replyTargetAttested
+  ) {
+    return createAdvancingSkipDecision(
+      'affirmative Linq reaction target is not an attested assistant delivery',
+    )
+  }
+  const latestCrossSessionDelivery = outboxContext.delivery
   if (
     input.executionContext?.hosted &&
     primaryReplyInput.source === 'telegram' &&
@@ -3136,6 +3146,12 @@ function resolveAutoReplyLinqProviderMessageIdsFromContext(
     if (item.summary.source !== 'linq') {
       continue
     }
+    if (
+      item.inputCandidate?.event.sourceMetadata?.kind === 'linq' &&
+      item.inputCandidate.event.sourceMetadata.affirmativeReaction === true
+    ) {
+      continue
+    }
     const replyTargetMessageId = readLinqProviderMessageId(
       item.inputCandidate?.event.replyTarget?.channel === 'linq'
         ? item.inputCandidate.event.replyTarget.messageId
@@ -3534,20 +3550,30 @@ async function resolveAssistantAutoReplyLatestCrossSessionDelivery(input: {
   input: AssistantAutoReplyPrimaryInput
   replyToMessageId: string | null
   session: AssistantSession | null
-}): Promise<AssistantAutoReplyMatchingOutboxDelivery | null> {
+}): Promise<{
+  delivery: AssistantAutoReplyMatchingOutboxDelivery | null
+  replyTargetAttested: boolean
+}> {
   const channel = normalizeNullableString(input.input.source)
   const deliveryTarget = normalizeNullableString(input.deliveryTarget)
   if (!channel || !deliveryTarget) {
-    return null
+    return {
+      delivery: null,
+      replyTargetAttested: false,
+    }
   }
 
-  const sessionEligible = (
+  const matchingDeliveries =
     await listAssistantAutoReplyMatchingOutboxDeliveries({
       deliveryTarget,
       historyReader: input.historyReader,
       input: input.input,
     })
-  )
+  const replyTargetAttested = input.replyToMessageId !== null &&
+    matchingDeliveries.some((delivery) =>
+      delivery.providerMessageIds.includes(input.replyToMessageId!),
+    )
+  const sessionEligible = matchingDeliveries
     .filter((delivery) =>
       input.session === null || delivery.sessionId !== input.session.sessionId,
     )
@@ -3565,25 +3591,32 @@ async function resolveAssistantAutoReplyLatestCrossSessionDelivery(input: {
   // be either. The send-ack/inbound-webhook race that records sentAt after
   // the inbound input's receivedAt is the realistic case this protects.
   if (input.replyToMessageId) {
-    return (
-      sessionEligible.find((delivery) =>
+    return {
+      delivery: sessionEligible.find((delivery) =>
         delivery.providerMessageIds.includes(input.replyToMessageId!),
-      ) ?? null
-    )
+      ) ?? null,
+      replyTargetAttested,
+    }
   }
 
   const causalUpperBoundMs = resolveAssistantAutoReplyOutboxCausalUpperBoundMs(
     input.input,
   )
   if (causalUpperBoundMs === null) {
-    return null
+    return {
+      delivery: null,
+      replyTargetAttested,
+    }
   }
 
   const fresh = sessionEligible.filter(
     (delivery) => delivery.sentAtMs <= causalUpperBoundMs,
   )
   if (fresh.length === 0) {
-    return null
+    return {
+      delivery: null,
+      replyTargetAttested,
+    }
   }
 
   // Unanchored fallback: once a delivery has been used as turn context, no
@@ -3597,7 +3630,10 @@ async function resolveAssistantAutoReplyLatestCrossSessionDelivery(input: {
       firstFreshIndex = index + 1
     }
   }
-  return fresh.slice(firstFreshIndex).at(-1) ?? null
+  return {
+    delivery: fresh.slice(firstFreshIndex).at(-1) ?? null,
+    replyTargetAttested,
+  }
 }
 
 function readAssistantAutoReplyConsumedCrossSessionIntentIds(

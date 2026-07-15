@@ -348,6 +348,7 @@ export type HostedExecutionLinqConversationMessagePart =
   | HostedExecutionLinqConversationMediaPart;
 
 export interface HostedExecutionLinqConversationMessage {
+  affirmativeReaction?: true;
   chatId: string;
   from: string;
   isFromMe: boolean;

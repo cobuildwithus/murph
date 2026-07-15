@@ -1510,6 +1510,9 @@ function createHostedConversationAssistantInputSourceMetadata(
     const externalThreadRouteAuthorityPresent = wake.message.routeAuthority !== undefined
       && wake.message.routeAuthority !== null;
     return {
+      ...(wake.message.linqMessage.affirmativeReaction === true
+        ? { affirmativeReaction: true }
+        : {}),
       externalThreadRouteAuthorityPresent,
       kind: "linq",
       partCount: wake.message.linqMessage.parts.length,

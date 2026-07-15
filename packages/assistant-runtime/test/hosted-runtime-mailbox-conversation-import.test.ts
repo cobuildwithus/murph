@@ -1524,6 +1524,7 @@ describe("hosted mailbox conversation import adapter", () => {
         groupParticipantAdded: true,
         groupReactionContext,
         linqMessage: {
+          affirmativeReaction: true,
           chatId: "chat_email_identity",
           from: "buddy@example.test",
           isFromMe: false,
@@ -1531,10 +1532,11 @@ describe("hosted mailbox conversation import adapter", () => {
           parts: [
             {
               type: "text",
-              value: "hello from email",
+              value: "Yes.",
             },
           ],
-          reactionEligible: true,
+          reactionEligible: false,
+          replyToMessageId: "msg_murph_123",
           service: "iMessage",
           threadIsDirect: false,
         },
@@ -1587,11 +1589,12 @@ describe("hosted mailbox conversation import adapter", () => {
     assert.equal(event.replyTarget?.threadId, "chat_email_identity");
     assert.equal(event.replyTarget?.messageId, "msg_email_identity");
     assert.deepEqual(event.sourceMetadata, {
+      affirmativeReaction: true,
       externalThreadRouteAuthorityPresent: false,
       kind: "linq",
       partCount: 1,
-      reactionEligible: true,
-      replyToMessageId: null,
+      reactionEligible: false,
+      replyToMessageId: "msg_murph_123",
       service: "iMessage",
     });
     assert.equal(JSON.stringify(event).includes(groupReactionContext), false);

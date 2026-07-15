@@ -378,6 +378,24 @@ new 5,129-character maximum before web can emit it. Once web has written the
 new array shape, forward-fix web rather than rolling it back until those
 transient slots have been consumed or cleared.
 
+One case is actionable immediately: an affirmative added reaction from the
+active participant is adapted into the existing `message.received` planner
+input, using the reaction event as inbound identity and the reacted-to message
+only as a reply reference. That same planner owns private and group routing,
+access, quotas, mailbox dedupe, and wake handoff. At the existing assistant
+outbox-history boundary, the reply reference must exactly match a sent Murph
+delivery on the same route before the synthetic `Yes.` can reach reply
+generation. Synthetic reactions stay in one-input automation groups, so an
+adjacent ordinary reply cannot lend them trust or be suppressed with them.
+This keeps the path independent of Linq's short provider-message retention
+while recovering cross-session target context from existing truth.
+Unmatched targets are terminally silent, and synthetic reaction identities are
+excluded from message read receipts and provider-message cleanup. The reaction
+path adds no mailbox kind, state, or lifecycle. Existing group join-offer
+acceptance remains the earlier exact owner. Removals and nonaffirmative
+reactions remain on the silent group context path above (or ignored outside
+groups).
+
 Hosted Linq unknown first-contact admission is a web-owned classifier gate on
 the signup-link path only. It runs after cheap deterministic ingress filters and
 before member/invite mutation, calls OpenAI through an env-only key with bounded

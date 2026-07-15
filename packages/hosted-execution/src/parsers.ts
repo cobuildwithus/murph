@@ -847,7 +847,16 @@ function parseHostedExecutionLinqConversationMessage(
   label: string,
 ): HostedExecutionLinqConversationMessagePayload["linqMessage"] {
   const record = requireObject(value, label);
+  if (
+    record.affirmativeReaction !== undefined
+    && record.affirmativeReaction !== true
+  ) {
+    throw new TypeError(`${label} affirmativeReaction must be true when present.`);
+  }
   return {
+    ...(record.affirmativeReaction === undefined
+      ? {}
+      : { affirmativeReaction: true }),
     chatId: requireString(record.chatId, `${label} chatId`),
     from: requireString(record.from, `${label} from`),
     isFromMe: requireBoolean(record.isFromMe, `${label} isFromMe`),

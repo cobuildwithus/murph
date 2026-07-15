@@ -4,6 +4,7 @@ import { beforeEach, describe, expect, it, vi } from "vitest";
 const mocks = vi.hoisted(() => ({
   acquireHostedMemberHomeLinqRouteLockTx: vi.fn(),
   acquireHostedMemberHomeLinqRecipientAssignmentLockTx: vi.fn(),
+  buildHostedLinqAffirmativeReactionMessageEvent: vi.fn(),
   claimHostedLinqOnboardingLinkNotice: vi.fn(),
   claimHostedLinqQuotaReplyNotice: vi.fn(),
   markHostedLinqOnboardingLinkNoticeSent: vi.fn(),
@@ -177,6 +178,8 @@ vi.mock("@/src/lib/hosted-groups/join-offer-reaction", () => ({
 }));
 
 vi.mock("@/src/lib/hosted-onboarding/webhook-provider-linq-reaction-context", () => ({
+  buildHostedLinqAffirmativeReactionMessageEvent:
+    mocks.buildHostedLinqAffirmativeReactionMessageEvent,
   stageHostedLinqGroupReactionContext:
     mocks.stageHostedLinqGroupReactionContext,
 }));
@@ -222,6 +225,7 @@ describe("hosted onboarding Linq webhook hard-cut flows", () => {
       reason: "accepted",
       status: "accepted",
     });
+    mocks.buildHostedLinqAffirmativeReactionMessageEvent.mockResolvedValue(null);
     mocks.stageHostedLinqGroupReactionContext.mockResolvedValue(false);
     mocks.markHostedLinqOnboardingLinkNoticeSent.mockResolvedValue(true);
     mocks.releaseHostedLinqOnboardingLinkNoticeClaim.mockResolvedValue(undefined);
@@ -533,6 +537,150 @@ describe("hosted onboarding Linq webhook hard-cut flows", () => {
     expect(mocks.stageHostedLinqGroupReactionContext).not.toHaveBeenCalled();
     expect(mocks.appendHostedMailboxEnvelopeTx).not.toHaveBeenCalled();
     expect(mocks.nudgeHostedRunnerUserBestEffort).not.toHaveBeenCalled();
+  });
+
+  it("routes an affirmative private-chat reaction through the ordinary message planner", async () => {
+    const prisma = createPrismaStub();
+    mocks.getPrisma.mockReturnValue(prisma);
+    mocks.handleHostedGroupJoinOfferReaction.mockResolvedValue({
+      reason: "no_offer_match",
+      status: "ignored",
+    });
+    const messageEvent = JSON.parse(buildLinqMessageWebhookBody({
+      eventId: "evt_reaction_reply_123",
+      isGroup: false,
+      messageId: "evt_reaction_reply_123",
+      service: "iMessage",
+      text: "Yes.",
+    }));
+    messageEvent.data.reply_to = { message_id: "msg_murph_123" };
+    mocks.buildHostedLinqAffirmativeReactionMessageEvent.mockResolvedValue(messageEvent);
+    mocks.lookupHostedMemberIdentityByPhoneNumber.mockResolvedValue({
+      core: {
+        billingStatus: HostedBillingStatus.active,
+        id: "member_123",
+        suspendedAt: null,
+      },
+    });
+    mocks.readHostedMemberHomeLinqRoute.mockResolvedValue({
+      linqChatId: "chat_123",
+      linqRecipientPhone: "+15550000000",
+      memberId: "member_123",
+    });
+    await expect(handleHostedOnboardingLinqWebhook({
+      rawBody: buildLinqProviderWebhookBody({
+        data: {
+          chat_id: "chat_123",
+          from: "+15551234567",
+          message_id: "msg_murph_123",
+          reaction_type: "like",
+        },
+        eventId: "evt_reaction_reply_123",
+        eventType: "reaction.added",
+      }),
+      signature: null,
+      timestamp: null,
+    })).resolves.toMatchObject({
+      ignored: false,
+      ok: true,
+      reason: "wake-appended-active-member",
+    });
+
+    expect(mocks.buildHostedLinqAffirmativeReactionMessageEvent).toHaveBeenCalledWith({
+      event: expect.objectContaining({
+        eventId: "evt_reaction_reply_123",
+        eventType: "reaction.added",
+      }),
+    });
+    expect(mocks.stageHostedLinqGroupReactionContext).not.toHaveBeenCalled();
+    expect(mocks.appendHostedMailboxEnvelopeTx).toHaveBeenCalledWith({
+      envelope: expect.objectContaining({
+        eventId: "evt_reaction_reply_123",
+        kind: "conversation.message",
+        message: expect.objectContaining({
+          linqMessage: expect.objectContaining({
+            affirmativeReaction: true,
+            messageId: "evt_reaction_reply_123",
+            reactionEligible: false,
+            replyToMessageId: "msg_murph_123",
+          }),
+        }),
+        userId: "member_123",
+      }),
+      tx: prisma,
+    });
+    expect(mocks.signalHostedMailboxAppendRuntime).toHaveBeenCalledWith({
+      abortSignal: expect.any(AbortSignal),
+      expectedUserId: "member_123",
+      mailboxItemId: "mailbox_evt_123",
+    });
+    expect(mocks.sendHostedLinqReadReceipt).not.toHaveBeenCalled();
+  });
+
+  it("reenters the ordinary planner on a duplicate reaction after mailbox append fails", async () => {
+    const prisma = createPrismaStub();
+    mocks.getPrisma.mockReturnValue(prisma);
+    prisma.hostedLinqProviderEvent.createMany
+      .mockResolvedValueOnce({ count: 1 })
+      .mockResolvedValueOnce({ count: 0 });
+    mocks.handleHostedGroupJoinOfferReaction.mockResolvedValue({
+      reason: "no_offer_match",
+      status: "ignored",
+    });
+    const messageEvent = JSON.parse(buildLinqMessageWebhookBody({
+      eventId: "evt_reaction_reply_retry_123",
+      isGroup: false,
+      messageId: "evt_reaction_reply_retry_123",
+      service: "iMessage",
+      text: "Yes.",
+    }));
+    messageEvent.data.reply_to = { message_id: "msg_murph_retry_123" };
+    mocks.buildHostedLinqAffirmativeReactionMessageEvent.mockResolvedValue(messageEvent);
+    mocks.lookupHostedMemberIdentityByPhoneNumber.mockResolvedValue({
+      core: {
+        billingStatus: HostedBillingStatus.active,
+        id: "member_123",
+        suspendedAt: null,
+      },
+    });
+    mocks.readHostedMemberHomeLinqRoute.mockResolvedValue({
+      linqChatId: "chat_123",
+      linqRecipientPhone: "+15550000000",
+      memberId: "member_123",
+    });
+    mocks.appendHostedMailboxEnvelopeTx.mockRejectedValueOnce(
+      new Error("mailbox append failed"),
+    );
+    const webhook = {
+      rawBody: buildLinqProviderWebhookBody({
+        data: {
+          chat_id: "chat_123",
+          from: "+15551234567",
+          message_id: "msg_murph_retry_123",
+          reaction_type: "like",
+        },
+        eventId: "evt_reaction_reply_retry_123",
+        eventType: "reaction.added",
+      }),
+      signature: null,
+      timestamp: null,
+    };
+
+    await expect(handleHostedOnboardingLinqWebhook(webhook)).rejects.toThrow(
+      "mailbox append failed",
+    );
+    await expect(handleHostedOnboardingLinqWebhook(webhook)).resolves.toMatchObject({
+      ignored: false,
+      ok: true,
+      reason: "wake-appended-active-member",
+    });
+
+    expect(prisma.hostedLinqProviderEvent.createMany).toHaveBeenCalledTimes(2);
+    expect(mocks.buildHostedLinqAffirmativeReactionMessageEvent).toHaveBeenCalledTimes(2);
+    expect(mocks.appendHostedMailboxEnvelopeTx).toHaveBeenCalledTimes(2);
+    expect(mocks.signalHostedMailboxAppendRuntime).toHaveBeenCalledTimes(1);
+    expect(mocks.stageHostedLinqGroupReactionContext).not.toHaveBeenCalled();
+    expect(mocks.sendHostedLinqReadReceipt).not.toHaveBeenCalled();
   });
 
   it("stages group reaction context without scheduling, sending, or waking", async () => {
@@ -1419,6 +1567,7 @@ function buildLinqMessageWebhookBody(input: {
   eventId?: string;
   eventType?: string;
   from?: string;
+  isGroup?: boolean;
   isFromMe?: boolean;
   messageId?: string;
   service?: string;
@@ -1433,6 +1582,7 @@ function buildLinqMessageWebhookBody(input: {
     data: {
       chat: {
         id: "chat_123",
+        ...(input.isGroup === undefined ? {} : { is_group: input.isGroup }),
         owner_handle: {
           handle: "+15550000000",
           id: "handle_owner_123",

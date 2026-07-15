@@ -1046,7 +1046,7 @@ describe('assistant auto-reply event-first path', () => {
     expect(sendInput).not.toHaveProperty('turnContext')
   })
 
-  it('honors an explicit Linq replyToMessageId even after the watermark consumed a newer matching delivery', async () => {
+  it('honors an attested cross-session affirmative Linq reaction after the watermark consumed a newer delivery', async () => {
     const vault = await createTempVault()
     replyEventPathMocks.resolveAssistantSession.mockResolvedValue({
       created: false,
@@ -1082,19 +1082,25 @@ describe('assistant auto-reply event-first path', () => {
     const candidate = createAssistantInputCandidate({
       occurredAt: '2026-04-08T00:10:00.000Z',
       optionalInboxCaptureId: null,
+      replyTarget: {
+        channel: 'linq',
+        messageId: 'reaction-event-anchored',
+        threadId: 'thread-1',
+      },
       source: 'linq',
       sourceMetadata: {
+        affirmativeReaction: true,
         kind: 'linq',
         partCount: 1,
         reactionEligible: false,
         replyToMessageId: 'linq-msg-anchored',
         service: null,
       },
-      text: 'yes do that one',
+      text: 'Yes.',
       threadIsDirect: true,
     })
 
-    await processAssistantAutoReplyGroup({
+    const result = await processAssistantAutoReplyGroup({
       allowSelfAuthored: false,
       context: createReplyContext(candidate),
       deliveryDispatchMode: 'queue-only',
@@ -1118,6 +1124,120 @@ describe('assistant auto-reply event-first path', () => {
         'intent-anchored-target',
     }))
     expect(replyEventPathMocks.listAssistantTurnReceipts).not.toHaveBeenCalled()
+    expect(result.terminalLinqCleanup).toBeUndefined()
+  })
+
+  it('admits an attested same-session affirmative Linq reaction without duplicating turn context', async () => {
+    const vault = await createTempVault()
+    replyEventPathMocks.resolveAssistantSession.mockResolvedValue({
+      created: false,
+      session: {
+        lastTurnAt: '2026-04-08T00:06:00.000Z',
+        sessionId: 'session-chat',
+      },
+    })
+    replyEventPathMocks.listAssistantOutboxIntents.mockResolvedValue([
+      createOutboxMessage({
+        channel: 'linq',
+        intentId: 'intent-same-session-reaction-target',
+        message: 'Would you like me to continue?',
+        providerMessageId: 'linq-msg-same-session-target',
+        sentAt: '2026-04-08T00:05:00.000Z',
+        sessionId: 'session-chat',
+      }),
+    ])
+    const candidate = createAssistantInputCandidate({
+      occurredAt: '2026-04-08T00:10:00.000Z',
+      optionalInboxCaptureId: null,
+      replyTarget: {
+        channel: 'linq',
+        messageId: 'reaction-event-same-session',
+        threadId: 'thread-1',
+      },
+      source: 'linq',
+      sourceMetadata: {
+        affirmativeReaction: true,
+        kind: 'linq',
+        partCount: 1,
+        reactionEligible: false,
+        replyToMessageId: 'linq-msg-same-session-target',
+        service: 'iMessage',
+      },
+      text: 'Yes.',
+      threadIsDirect: true,
+    })
+
+    const result = await processAssistantAutoReplyGroup({
+      allowSelfAuthored: false,
+      context: createReplyContext(candidate),
+      enabledChannels: ['linq'],
+      inboxServices: createInboxServices(),
+      requestId: null,
+      sessionMaxAgeMs: null,
+      vault,
+    })
+
+    expect(result).toMatchObject({
+      failed: 0,
+      replied: 1,
+      skipped: 0,
+    })
+    expect(result.terminalLinqCleanup).toBeUndefined()
+    expect(replyEventPathMocks.sendAssistantMessage).toHaveBeenCalledTimes(1)
+    expect(replyEventPathMocks.sendAssistantMessage.mock.calls[0]?.[0].turnContext)
+      .toBeUndefined()
+  })
+
+  it('terminally suppresses an affirmative Linq reaction without an exact same-route sent target', async () => {
+    const vault = await createTempVault()
+    replyEventPathMocks.listAssistantOutboxIntents.mockResolvedValue([
+      createOutboxMessage({
+        channel: 'linq',
+        intentId: 'intent-unrelated-reaction-target',
+        message: 'Unrelated Murph message',
+        providerMessageId: 'linq-msg-unrelated',
+        sentAt: '2026-04-08T00:05:00.000Z',
+        sessionId: 'session-other',
+      }),
+    ])
+    const candidate = createAssistantInputCandidate({
+      occurredAt: '2026-04-08T00:10:00.000Z',
+      optionalInboxCaptureId: null,
+      replyTarget: {
+        channel: 'linq',
+        messageId: 'reaction-event-unattested',
+        threadId: 'thread-1',
+      },
+      source: 'linq',
+      sourceMetadata: {
+        affirmativeReaction: true,
+        kind: 'linq',
+        partCount: 1,
+        reactionEligible: false,
+        replyToMessageId: 'linq-msg-participant-authored',
+        service: 'iMessage',
+      },
+      text: 'Yes.',
+      threadIsDirect: true,
+    })
+
+    const result = await processAssistantAutoReplyGroup({
+      allowSelfAuthored: false,
+      context: createReplyContext(candidate),
+      enabledChannels: ['linq'],
+      inboxServices: createInboxServices(),
+      requestId: null,
+      sessionMaxAgeMs: null,
+      vault,
+    })
+
+    expect(result).toMatchObject({
+      failed: 0,
+      replied: 0,
+      skipped: 1,
+    })
+    expect(result.terminalLinqCleanup).toBeUndefined()
+    expect(replyEventPathMocks.sendAssistantMessage).not.toHaveBeenCalled()
   })
 
   it('uses the anchored input timestamps to compute the causal cutoff so an anchored delivery sent after the oldest grouped input is still eligible', async () => {

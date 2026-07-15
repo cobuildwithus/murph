@@ -22,6 +22,9 @@ function createInputSummary(
     text: overrides.text ?? 'hello',
     attachmentCount: overrides.attachmentCount ?? 0,
     actorIsSelf: overrides.actorIsSelf ?? overrides.conversation?.actorIsSelf ?? false,
+    ...(overrides.affirmativeReaction === true
+      ? { affirmativeReaction: true }
+      : {}),
     replyToMessageId: overrides.replyToMessageId ?? null,
   }
 }
@@ -72,6 +75,23 @@ describe('shouldGroupAdjacentConversationInput', () => {
     })
 
     expect(shouldGroupAdjacentConversationInput(first, second)).toBe(true)
+  })
+
+  it('keeps affirmative reactions separate from adjacent ordinary replies', () => {
+    const ordinary = createInputSummary({
+      inputId: 'ain_ordinary',
+      replyToMessageId: 'linq-msg-shared',
+    })
+    const reaction = createInputSummary({
+      affirmativeReaction: true,
+      inputId: 'ain_reaction',
+      occurredAt: '2026-04-22T10:01:00.000Z',
+      replyToMessageId: 'linq-msg-shared',
+      text: 'Yes.',
+    })
+
+    expect(shouldGroupAdjacentConversationInput(ordinary, reaction)).toBe(false)
+    expect(shouldGroupAdjacentConversationInput(reaction, ordinary)).toBe(false)
   })
 
   it('splits the group when adjacent inputs reply to different assistant messages', () => {

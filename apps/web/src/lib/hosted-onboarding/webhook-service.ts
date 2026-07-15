@@ -82,6 +82,7 @@ import {
   handleHostedGroupJoinOfferReaction,
 } from "../hosted-groups/join-offer-reaction";
 import {
+  buildHostedLinqAffirmativeReactionMessageEvent,
   stageHostedLinqGroupReactionContext,
 } from "./webhook-provider-linq-reaction-context";
 import {
@@ -136,13 +137,14 @@ export async function handleHostedOnboardingLinqWebhook(input: {
         timestampPresent: Boolean(input.timestamp),
       },
     );
-    const event = verifyAndParseHostedLinqWebhookRequest({
+    let event = verifyAndParseHostedLinqWebhookRequest({
       rawBody: input.rawBody,
       signature: input.signature,
       timestamp: input.timestamp,
     });
     eventId = event.event_id;
     eventType = event.event_type;
+    let affirmativeReaction = false;
     finishHostedOnboardingTiming(verifyTiming, "completed", {
       eventIdSuffix: toHostedOnboardingLogIdSuffix(eventId),
       eventType,
@@ -165,7 +167,7 @@ export async function handleHostedOnboardingLinqWebhook(input: {
       return response;
     }
 
-    const providerEvent = parseHostedLinqProviderEvent({
+    let providerEvent = parseHostedLinqProviderEvent({
       event,
       rawBody: input.rawBody,
     });
@@ -183,32 +185,56 @@ export async function handleHostedOnboardingLinqWebhook(input: {
         prisma,
         signal: input.signal,
       });
-      const contextStaged =
-        providerResult.duplicate || reactionResult.status === "accepted"
+      if (reactionResult.status === "accepted") {
+        const response: HostedOnboardingLinqWebhookResponse = {
+          duplicate: providerResult.duplicate || undefined,
+          ignored: false,
+          ok: true,
+          reason: "accepted-linq-group-join-offer-reaction",
+        };
+        responseReason = response.reason ?? null;
+        finishHostedOnboardingTiming(timing, "completed", {
+          duplicate: providerResult.duplicate,
+          eventIdSuffix: toHostedOnboardingLogIdSuffix(eventId),
+          eventType,
+          responseReason,
+        });
+        return response;
+      }
+
+      const messageEvent = await buildHostedLinqAffirmativeReactionMessageEvent({
+        event: providerEvent,
+        ...(input.signal ? { signal: input.signal } : {}),
+      });
+      if (messageEvent) {
+        event = messageEvent;
+        affirmativeReaction = true;
+        providerEvent = null;
+      } else {
+        const contextStaged = providerResult.duplicate
           ? false
           : await stageHostedLinqGroupReactionContext({
               event: providerEvent,
               prisma,
               ...(input.signal ? { signal: input.signal } : {}),
             });
-      const response: HostedOnboardingLinqWebhookResponse = {
-        duplicate: providerResult.duplicate || undefined,
-        ignored: reactionResult.status !== "accepted" && !contextStaged,
-        ok: true,
-        reason: reactionResult.status === "accepted"
-          ? "accepted-linq-group-join-offer-reaction"
-          : contextStaged
+        const response: HostedOnboardingLinqWebhookResponse = {
+          duplicate: providerResult.duplicate || undefined,
+          ignored: !contextStaged,
+          ok: true,
+          reason: contextStaged
             ? "staged-linq-group-reaction-context"
             : `skipped-linq-group-join-offer-reaction:${reactionResult.reason}`,
-      };
-      responseReason = response.reason ?? null;
-      finishHostedOnboardingTiming(timing, "completed", {
-        duplicate: providerResult.duplicate,
-        eventIdSuffix: toHostedOnboardingLogIdSuffix(eventId),
-        eventType,
-        responseReason,
-      });
-      return response;
+        };
+        responseReason = response.reason ?? null;
+        finishHostedOnboardingTiming(timing, "completed", {
+          duplicate: providerResult.duplicate,
+          eventIdSuffix: toHostedOnboardingLogIdSuffix(eventId),
+          eventType,
+          responseReason,
+        });
+        return response;
+      }
     }
     if (providerEvent && event.event_type !== "message.received") {
       const prisma = input.prisma ?? getPrisma();
@@ -255,7 +281,7 @@ export async function handleHostedOnboardingLinqWebhook(input: {
     });
 
     const currentInboundReply: HostedLinqCurrentInboundReplyProof | null =
-      event.event_type === "message.received"
+      event.event_type === "message.received" && !affirmativeReaction
         ? buildHostedLinqCurrentInboundReplyProof(event)
         : null;
 
@@ -285,6 +311,7 @@ export async function handleHostedOnboardingLinqWebhook(input: {
           prisma,
           (transaction) =>
             planHostedOnboardingLinqWebhook({
+              affirmativeReaction,
               event: planningEvent,
               firstContactAdmitted: recordedAdmission?.kind === "allow",
               requireFirstContactAdmission,
@@ -313,6 +340,7 @@ export async function handleHostedOnboardingLinqWebhook(input: {
               prisma,
               (transaction) =>
                 planHostedOnboardingLinqWebhook({
+                  affirmativeReaction,
                   event: planningEvent,
                   firstContactAdmitted: true,
                   requireFirstContactAdmission,
@@ -366,6 +394,7 @@ export async function handleHostedOnboardingLinqWebhook(input: {
                 prisma,
                 (transaction) =>
                   planHostedOnboardingLinqWebhook({
+                    affirmativeReaction,
                     event: planningEvent,
                     firstContactAdmitted: true,
                     requireFirstContactAdmission,
