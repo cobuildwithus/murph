@@ -9674,7 +9674,7 @@ test("Junction companion HRV jobs import the derived observation without Junctio
     methodVersion: COMPANION_HRV_RMSSD_METHOD_VERSION,
     nightDate: "2026-04-02",
     rmssdMs: 48.25,
-    completedWindowCount: 60,
+    completedWindowCount: 96,
     acceptedWindowCount: 56,
   } satisfies Parameters<typeof serializeCompanionHrvRmssdObservation>[0];
   const companionObservationJson = serializeCompanionHrvRmssdObservation(observation);
@@ -9745,7 +9745,7 @@ test("Junction companion HRV jobs reject mismatched admission identities without
     methodVersion: COMPANION_HRV_RMSSD_METHOD_VERSION,
     nightDate: "2026-04-02",
     rmssdMs: 48.25,
-    completedWindowCount: 60,
+    completedWindowCount: 96,
     acceptedWindowCount: 56,
   };
 
