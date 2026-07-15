@@ -721,6 +721,46 @@ describe("selectHostedAssistantInputIds", () => {
     expect(selection.inputIds).toEqual([first.inputId]);
   });
 
+  it("ends a same-thread group batch when the actor changes", async () => {
+    const vaultRoot = await createTempVault();
+    const first = await upsertAssistantInputEvent({
+      vault: vaultRoot,
+      event: createAssistantInputEvent({
+        actorId: "actor_a",
+        causalSeq: "7",
+        dedupeKey: "dedupe_group_actor_boundary_first",
+        eventId: "evt_group_actor_boundary_first",
+        itemId: "item_group_actor_boundary_first",
+        laneSeq: "10",
+        occurredAt: "2026-04-23T00:00:01.000Z",
+        receivedAt: "2026-04-23T00:00:02.000Z",
+        threadIsDirect: false,
+      }),
+    });
+    const nextActor = await upsertAssistantInputEvent({
+      vault: vaultRoot,
+      event: createAssistantInputEvent({
+        actorId: "actor_b",
+        causalSeq: "8",
+        dedupeKey: "dedupe_group_actor_boundary_second",
+        eventId: "evt_group_actor_boundary_second",
+        itemId: "item_group_actor_boundary_second",
+        laneSeq: "11",
+        occurredAt: "2026-04-23T00:00:03.000Z",
+        receivedAt: "2026-04-23T00:00:04.000Z",
+        threadIsDirect: false,
+      }),
+    });
+
+    const selection = await selectHostedAssistantInputIds({
+      freshAssistantInputIds: [first.inputId, nextActor.inputId],
+      mode: "foreground",
+      vaultRoot,
+    });
+
+    expect(selection.inputIds).toEqual([first.inputId]);
+  });
+
   it("ends a causal batch before a legacy unsequenced input", async () => {
     const vaultRoot = await createTempVault();
     const first = await upsertAssistantInputEvent({
@@ -1153,6 +1193,7 @@ async function enableLinqAutoReply(vaultRoot: string): Promise<void> {
 }
 
 function createAssistantInputEvent(input: {
+  actorId?: string;
   causalSeq?: string | null;
   dedupeKey?: string;
   eventId?: string;
@@ -1185,7 +1226,7 @@ function createAssistantInputEvent(input: {
     },
     conversation: {
       accountId: "acct_1",
-      actorId: "actor_1",
+      actorId: input.actorId ?? "actor_1",
       actorIsSelf: false,
       source,
       threadId,
