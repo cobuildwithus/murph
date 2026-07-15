@@ -260,7 +260,16 @@ function buildCardMovers(
   warnings: string[],
 ): ExperimentProgressCardData["movers"] {
   const candidates: RankedMoverCandidate[] = [];
+  const seenMetricIdentities = new Set<string>();
+  let duplicateMetricCount = 0;
   for (const signal of signals) {
+    const metricIdentity = resolveExperimentMetricIdentity(signal.biomarkerKey).metricKey;
+    if (seenMetricIdentities.has(metricIdentity)) {
+      duplicateMetricCount += 1;
+      continue;
+    }
+    seenMetricIdentities.add(metricIdentity);
+
     if (
       signal.completeness === "insufficient" ||
       signal.baselineMean === null ||
@@ -284,10 +293,15 @@ function buildCardMovers(
     });
   }
 
-  const skippedCount = signals.length - candidates.length;
+  const skippedCount = signals.length - candidates.length - duplicateMetricCount;
   if (skippedCount > 0) {
     warnings.push(
       `${skippedCount} metric(s) skipped as movers (missing baseline mean or insufficient data)`,
+    );
+  }
+  if (duplicateMetricCount > 0) {
+    warnings.push(
+      `${duplicateMetricCount} alias-equivalent metric(s) skipped as duplicate movers`,
     );
   }
 

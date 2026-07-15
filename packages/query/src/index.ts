@@ -117,12 +117,6 @@ export {
   decideExperimentFollowupDue,
   summarizeExperimentProgress,
 } from "./experiments.ts";
-export { resolveBiomarkerChangeSentiment } from "./biomarker-change-sentiment.ts";
-export type {
-  BiomarkerChangeDirection,
-  BiomarkerChangeSentiment,
-} from "./biomarker-change-sentiment.ts";
-export { resolveExperimentMetricIdentity } from "./experiment-metrics.ts";
 export { buildExperimentProgressCard } from "./experiment-progress-card.ts";
 export type {
   BuildExperimentProgressCardOptions,

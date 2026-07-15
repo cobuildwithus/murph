@@ -157,7 +157,7 @@ test("applyExperimentOnboardingRecord accepts status-only updates", async () => 
   assert.equal(updateInput.runPlan, undefined);
 });
 
-test("applyExperimentOnboardingRecord clears stale primary direction and duplicate aliases", async () => {
+test("applyExperimentOnboardingRecord preserves untouched hypothesis fields on primary edits", async () => {
   const experimentEntity = {
     entityId: "exp_01JNV44P4R5SWC90K2AHXQJQZA",
     family: "experiment",
@@ -224,16 +224,16 @@ test("applyExperimentOnboardingRecord clears stale primary direction and duplica
     vault: "test-vault",
     lookup: "recovery-experiment",
     primaryBiomarkerKey: "biomarker:hrv-rmssd",
-    expectedDirection: ["biomarker:hrv-rmssd=increase"],
   });
 
   const updateInput = updateExperiment.mock.calls[0]?.[0];
   assert.ok(updateInput);
   assert.deepEqual(updateInput.analysisPlan, {
     primaryBiomarkerKey: "biomarker:hrv-rmssd",
-    secondaryBiomarkerKeys: [],
+    secondaryBiomarkerKeys: ["biomarker:hrv"],
+    desiredDirection: "decrease",
     expectedDirections: [
-      { biomarkerKey: "biomarker:hrv-rmssd", direction: "increase" },
+      { biomarkerKey: "biomarker:hrv", direction: "decrease" },
     ],
   });
 });

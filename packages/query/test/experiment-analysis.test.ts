@@ -3134,7 +3134,6 @@ test("experiment progress resolves linked events, skipped sessions, digest remin
     analysisPlan: {
       primaryBiomarkerKey: "biomarker:hrv",
       secondaryBiomarkerKeys: [
-        "biomarker:hrv-rmssd",
         "biomarker:resting-heart-rate",
         "biomarker:sleep-efficiency",
         "biomarker:deep-sleep",
@@ -3142,9 +3141,9 @@ test("experiment progress resolves linked events, skipped sessions, digest remin
         "biomarker:temperature",
         "biomarker:unknown-signal",
       ],
-      desiredDirection: "decrease",
+      desiredDirection: "increase",
       expectedDirections: [
-        { biomarkerKey: "biomarker:hrv-rmssd", direction: "increase" },
+        { biomarkerKey: "biomarker:hrv", direction: "increase" },
         { biomarkerKey: "biomarker:resting-heart-rate", direction: "decrease" },
       ],
     },
@@ -3327,7 +3326,6 @@ test("experiment progress resolves linked events, skipped sessions, digest remin
     ],
   );
   assert.equal(progress.signals[0]?.deltaAbs, 5);
-  assert.equal(progress.signals[0]?.expectedDirection, "increase");
   assert.equal(progress.signals[0]?.movedAsExpected, true);
   assert.equal(progress.signals[1]?.expectedDirection, "decrease");
   assert.equal(progress.signals[1]?.deltaAbs, -2);
@@ -4035,7 +4033,12 @@ test("buildExperimentProgressCard interprets an HRV increase independently of a 
     },
     analysisPlan: {
       primaryBiomarkerKey: "biomarker:hrv",
+      secondaryBiomarkerKeys: ["biomarker:hrv-rmssd"],
       desiredDirection: "decrease",
+      expectedDirections: [{
+        biomarkerKey: "biomarker:hrv-rmssd",
+        direction: "increase",
+      }],
     },
     protocolRef: null,
   });
@@ -4098,6 +4101,9 @@ test("buildExperimentProgressCard interprets an HRV increase independently of a 
   const progress = summarizeExperimentProgress(vault, "contrary-hrv-hypothesis", {
     asOf: "2026-06-06",
   });
+  const outcome = analyzeExperimentOutcome(vault, "contrary-hrv-hypothesis", {
+    asOf: "2026-06-06",
+  });
   const { card } = buildExperimentProgressCard(vault, "contrary-hrv-hypothesis", {
     asOf: "2026-06-06",
     biomarkerDesiredDirections: [{
@@ -4106,7 +4112,33 @@ test("buildExperimentProgressCard interprets an HRV increase independently of a 
     }],
   });
 
+  assert.equal(progress.signals.length, 2);
+  assert.equal(progress.signals[0]?.biomarkerKey, "biomarker:hrv");
+  assert.equal(progress.signals[0]?.expectedDirection, "decrease");
   assert.equal(progress.signals[0]?.movedAsExpected, false);
+  assert.equal(progress.signals[1]?.biomarkerKey, "biomarker:hrv-rmssd");
+  assert.equal(progress.signals[1]?.expectedDirection, "increase");
+  assert.equal(progress.signals[1]?.movedAsExpected, true);
+  assert.deepEqual(
+    outcome.metricResults.map((result) => ({
+      biomarkerKey: result.biomarkerKey,
+      expectedDirection: result.expectedDirection,
+      movedAsExpected: result.movedAsExpected,
+    })),
+    [
+      {
+        biomarkerKey: "biomarker:hrv",
+        expectedDirection: "decrease",
+        movedAsExpected: false,
+      },
+      {
+        biomarkerKey: "biomarker:hrv-rmssd",
+        expectedDirection: "increase",
+        movedAsExpected: true,
+      },
+    ],
+  );
+  assert.equal(card.movers.length, 1);
   assert.equal(card.movers[0]?.direction, "up");
   assert.equal(card.movers[0]?.sentiment, "positive");
 });

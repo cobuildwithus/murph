@@ -22,10 +22,7 @@ import {
   type ExperimentRunScheduleIntent,
 } from '@murphai/contracts'
 import { stringifyFrontmatterDocument } from '@murphai/core'
-import {
-  resolveExperimentMetricIdentity,
-  synthesizeLegacySessionAdherenceTargets,
-} from '@murphai/query'
+import { synthesizeLegacySessionAdherenceTargets } from '@murphai/query'
 import { z } from 'zod'
 import {
   loadQueryRuntime,
@@ -2549,23 +2546,12 @@ function buildAnalysisPlanForOnboardingApply(
   existing: ExperimentFrontmatterValue['analysisPlan'],
 ): ExperimentAnalysisPlanValue | undefined {
   const patch: Partial<ExperimentAnalysisPlanValue> = {}
-  const requestedPrimaryBiomarkerKey = input.primaryBiomarkerKey === undefined
-    ? undefined
-    : normalizeHealthCommonsKeyOption(
-        input.primaryBiomarkerKey,
-        'primary-biomarker-key',
-      )
-  const primaryBiomarkerChanged = requestedPrimaryBiomarkerKey !== undefined &&
-    (
-      existing?.primaryBiomarkerKey === undefined ||
-      !matchesExperimentBiomarkerIdentity(
-        requestedPrimaryBiomarkerKey,
-        existing.primaryBiomarkerKey,
-      )
-    )
 
-  if (requestedPrimaryBiomarkerKey !== undefined) {
-    patch.primaryBiomarkerKey = requestedPrimaryBiomarkerKey
+  if (input.primaryBiomarkerKey !== undefined) {
+    patch.primaryBiomarkerKey = normalizeHealthCommonsKeyOption(
+      input.primaryBiomarkerKey,
+      'primary-biomarker-key',
+    )
   }
 
   const secondaryBiomarkerKeys = normalizeHealthCommonsKeyListOption(
@@ -2573,21 +2559,7 @@ function buildAnalysisPlanForOnboardingApply(
     'secondary-biomarker-key',
   )
   if (secondaryBiomarkerKeys !== undefined) {
-    patch.secondaryBiomarkerKeys = withoutExperimentBiomarkerIdentity(
-      secondaryBiomarkerKeys,
-      requestedPrimaryBiomarkerKey ?? existing?.primaryBiomarkerKey,
-    )
-  } else if (
-    requestedPrimaryBiomarkerKey !== undefined &&
-    existing?.secondaryBiomarkerKeys
-  ) {
-    const nextSecondaryBiomarkerKeys = withoutExperimentBiomarkerIdentity(
-      existing.secondaryBiomarkerKeys,
-      requestedPrimaryBiomarkerKey,
-    )
-    if (nextSecondaryBiomarkerKeys.length !== existing.secondaryBiomarkerKeys.length) {
-      patch.secondaryBiomarkerKeys = nextSecondaryBiomarkerKeys
-    }
+    patch.secondaryBiomarkerKeys = secondaryBiomarkerKeys
   }
 
   if (input.desiredDirection !== undefined) {
@@ -2627,34 +2599,12 @@ function buildAnalysisPlanForOnboardingApply(
     return undefined
   }
 
-  const next = compactObject({
-    ...(existing ?? {}),
-    ...patch,
-  })
-  if (primaryBiomarkerChanged && input.desiredDirection === undefined) {
-    delete next.desiredDirection
-  }
-
-  return experimentAnalysisPlanSchema.parse(next)
-}
-
-function withoutExperimentBiomarkerIdentity(
-  biomarkerKeys: readonly string[],
-  omittedBiomarkerKey: string | undefined,
-): string[] {
-  if (omittedBiomarkerKey === undefined) {
-    return [...biomarkerKeys]
-  }
-
-  return biomarkerKeys.filter(
-    (biomarkerKey) =>
-      !matchesExperimentBiomarkerIdentity(biomarkerKey, omittedBiomarkerKey),
+  return experimentAnalysisPlanSchema.parse(
+    compactObject({
+      ...(existing ?? {}),
+      ...patch,
+    }),
   )
-}
-
-function matchesExperimentBiomarkerIdentity(left: string, right: string): boolean {
-  return resolveExperimentMetricIdentity(left).metricKey ===
-    resolveExperimentMetricIdentity(right).metricKey
 }
 
 function buildRunPlanDatePatch(input: ApplyExperimentOnboardingRecordInput) {
@@ -2843,15 +2793,9 @@ function normalizeExpectedDirectionEntriesOption(
     return undefined
   }
 
-  const next = new Map<
-    string,
-    {
-      biomarkerKey: string
-      direction: z.infer<typeof experimentSignalDirectionSchema>
-    }
-  >()
+  const next = new Map<string, z.infer<typeof experimentSignalDirectionSchema>>()
   for (const entry of existing ?? []) {
-    next.set(resolveExperimentMetricIdentity(entry.biomarkerKey).metricKey, entry)
+    next.set(entry.biomarkerKey, entry.direction)
   }
 
   for (const entry of normalized) {
@@ -2877,14 +2821,11 @@ function normalizeExpectedDirectionEntriesOption(
       )
     }
 
-    next.set(resolveExperimentMetricIdentity(biomarkerKey).metricKey, {
-      biomarkerKey,
-      direction: direction.data,
-    })
+    next.set(biomarkerKey, direction.data)
   }
 
   return experimentExpectedDirectionsSchema.parse(
-    [...next.values()],
+    [...next].map(([biomarkerKey, direction]) => ({ biomarkerKey, direction })),
   )
 }
 
