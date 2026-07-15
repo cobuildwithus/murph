@@ -1540,7 +1540,23 @@ describe('assistant skill assets', () => {
       'That request can establish first value and may answer one or more onboarding checkpoints, but it does not complete onboarding by itself.',
     )
     expect(raw).toContain('### 2. Minimal identity')
-    expect(compact).toContain('age and relevant sex or gender context optional')
+    expect(raw).toContain(
+      "Also, how old are you—and are you a guy or a girl? Totally fine if you'd rather not say.",
+    )
+    expect(compact).toContain(
+      'casually ask their age and whether they are a guy or a girl',
+    )
+    expect(compact).toContain(
+      'accept a different self-description without correcting or pressing them',
+    )
+    expect(raw).not.toContain('age and relevant sex or gender context')
+    expect(raw).not.toContain("I'll only ask about sex or gender")
+    expect(raw).not.toContain("what's your gender")
+    expect(raw).not.toContain('how do you identify')
+    expect(raw).not.toContain('avoid dumb assumptions')
+    expect(compact).toContain(
+      'Treat this bundled minimal-identity prompt as one onboarding question.',
+    )
     expect(raw).toContain('If the user gives only a name, continue.')
     expect(raw).toContain(
       "Is there something about your health you'd like to change, understand, or handle right now, or would it be more useful to figure out where to focus?",
@@ -1625,7 +1641,9 @@ describe('assistant skill assets', () => {
       'vault-cli assistant onboarding complete --reason user_answered',
     )
     expect(raw).toContain('--reason user_declined')
-    expect(raw).toContain('Ask at most one question per reply.')
+    expect(compact).toContain(
+      'Except for the bundled minimal-identity prompt above, ask at most one question per reply.',
+    )
     expect(compact).toContain(
       'If the last onboarding question is still unanswered, do not send a different setup question.',
     )
