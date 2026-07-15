@@ -14,13 +14,6 @@ import type {
   AssistantUsageTokenPricingBasis,
 } from "./assistant-usage.ts";
 import type {
-  HostedActionApprovalConsumeRequest,
-} from "./action-approval.ts";
-import type {
-  HostedAssistantConfigurationApprovalChanges,
-  HostedAssistantConfigurationApprovalTarget,
-} from "./assistant-configuration-approval.ts";
-import type {
   HostedAssistantModelOverride,
   HostedAssistantProductModel,
   HostedAssistantReasoningEffort,
@@ -1310,7 +1303,17 @@ export type HostedRuntimeAssistantConfigurationToolRequest =
     }
   | ({
       action: "update";
-    } & HostedAssistantConfigurationApprovalChanges);
+    } & HostedRuntimeAssistantConfigurationChanges);
+
+export type HostedRuntimeAssistantConfigurationChanges =
+  | {
+      model: HostedAssistantProductModel;
+      reasoningEffort?: HostedAssistantReasoningEffort;
+    }
+  | {
+      model?: never;
+      reasoningEffort: HostedAssistantReasoningEffort;
+    };
 
 export type HostedRuntimeAssistantConfigurationControlRequest =
   | {
@@ -1319,13 +1322,7 @@ export type HostedRuntimeAssistantConfigurationControlRequest =
   | ({
       action: "update";
       assistantInputId: string;
-    } & HostedAssistantConfigurationApprovalChanges)
-  | ({
-      /** Legacy approval-backed request accepted during the runner rollout drain. */
-      action: "update";
-      approval: HostedActionApprovalConsumeRequest;
-      target: HostedAssistantConfigurationApprovalTarget;
-    } & HostedAssistantConfigurationApprovalChanges);
+    } & HostedRuntimeAssistantConfigurationChanges);
 
 export interface HostedRuntimeAssistantConfigurationSnapshot {
   availableModels: HostedAssistantProductModel[];

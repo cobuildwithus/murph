@@ -1,8 +1,4 @@
 import { beforeAll, beforeEach, describe, expect, it, vi } from "vitest";
-import {
-  buildHostedAssistantConfigurationApprovalConsumerId,
-  buildHostedAssistantConfigurationApprovalRequest,
-} from "@murphai/hosted-execution/assistant-configuration-approval";
 
 const mocks = vi.hoisted(() => ({
   handleTool: vi.fn(),
@@ -108,27 +104,10 @@ describe("hosted assistant configuration tool route", () => {
     });
   });
 
-  it("accepts a legacy exact approval during the runner rollout drain", async () => {
-    const approvalRequest = buildHostedAssistantConfigurationApprovalRequest({
-      changes: {
-        model: "gpt-5.6-luna",
-        reasoningEffort: "medium",
-      },
-      returnContactKind: "text",
-      target: {
-        model: "gpt-5.6-luna",
-        reasoningEffort: "medium",
-      },
-    });
+  it("rejects the removed approval-backed update shape", async () => {
     const body = {
       action: "update",
-      approval: {
-        approvalGeneration: "b".repeat(64),
-        consumerId: buildHostedAssistantConfigurationApprovalConsumerId(
-          approvalRequest,
-        ),
-        request: approvalRequest,
-      },
+      approval: {},
       model: "gpt-5.6-luna",
       reasoningEffort: "medium",
       target: {
@@ -146,10 +125,7 @@ describe("hosted assistant configuration tool route", () => {
       },
     ));
 
-    expect(response.status).toBe(200);
-    expect(mocks.handleTool).toHaveBeenCalledWith({
-      memberId: "member_123",
-      request: body,
-    });
+    expect(response.status).toBe(400);
+    expect(mocks.handleTool).not.toHaveBeenCalled();
   });
 });
