@@ -14,6 +14,7 @@ export interface AssistantAutomationInputSummary {
   text: string | null
   attachmentCount: number
   actorIsSelf: boolean
+  affirmativeReaction?: true
   // Provider-level native reply target (Linq only today). Carried on the
   // summary so adjacent-grouping can split across reply-anchor boundaries
   // without re-reading source metadata.
@@ -34,6 +35,8 @@ export function assistantAutomationInputSummaryFromCandidate(
   const sourceMetadata = input.event.sourceMetadata
   const replyToMessageId =
     sourceMetadata?.kind === 'linq' ? sourceMetadata.replyToMessageId ?? null : null
+  const affirmativeReaction =
+    sourceMetadata?.kind === 'linq' && sourceMetadata.affirmativeReaction === true
 
   return {
     inputId: input.event.inputId,
@@ -45,6 +48,7 @@ export function assistantAutomationInputSummaryFromCandidate(
     text: input.event.transcriptText ?? input.event.text,
     attachmentCount: input.event.attachmentCount,
     actorIsSelf: conversation.actorIsSelf,
+    ...(affirmativeReaction ? { affirmativeReaction: true } : {}),
     replyToMessageId,
   }
 }

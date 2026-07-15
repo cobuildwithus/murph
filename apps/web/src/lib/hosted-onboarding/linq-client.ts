@@ -201,9 +201,7 @@ export type HostedLinqChatSummary = {
 export type HostedLinqReactionTargetMessage = {
   chatId: string;
   id: string;
-  isFromMe: boolean | null;
   parts: string[];
-  service: string | null;
 };
 
 const HOSTED_LINQ_REACTION_TARGET_MAX_PARTS = 32;
@@ -294,11 +292,9 @@ function parseHostedLinqReactionTargetMessage(
   return {
     chatId,
     id,
-    isFromMe: typeof record.is_from_me === "boolean" ? record.is_from_me : null,
     parts: parts
       .slice(0, HOSTED_LINQ_REACTION_TARGET_MAX_PARTS)
       .map(parseHostedLinqReactionTargetPart),
-    service: normalizeNullableString(record.service),
   };
 }
 

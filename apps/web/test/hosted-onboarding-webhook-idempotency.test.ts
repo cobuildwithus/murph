@@ -549,14 +549,11 @@ describe("hosted onboarding Linq webhook hard-cut flows", () => {
     const messageEvent = JSON.parse(buildLinqMessageWebhookBody({
       eventId: "evt_reaction_reply_123",
       isGroup: false,
-      messageId: "msg_murph_123",
+      messageId: "evt_reaction_reply_123",
       service: "iMessage",
-      text: "The participant affirmed your exact message.",
+      text: "Yes.",
     }));
-    messageEvent.data.parts.push({
-      type: "text",
-      value: "Reacted-to message: Would you like me to continue?",
-    });
+    messageEvent.data.reply_to = { message_id: "msg_murph_123" };
     mocks.buildHostedLinqAffirmativeReactionMessageEvent.mockResolvedValue(messageEvent);
     mocks.lookupHostedMemberIdentityByPhoneNumber.mockResolvedValue({
       core: {
@@ -602,8 +599,10 @@ describe("hosted onboarding Linq webhook hard-cut flows", () => {
         kind: "conversation.message",
         message: expect.objectContaining({
           linqMessage: expect.objectContaining({
-            messageId: "msg_murph_123",
+            affirmativeReaction: true,
+            messageId: "evt_reaction_reply_123",
             reactionEligible: false,
+            replyToMessageId: "msg_murph_123",
           }),
         }),
         userId: "member_123",
@@ -615,6 +614,7 @@ describe("hosted onboarding Linq webhook hard-cut flows", () => {
       expectedUserId: "member_123",
       mailboxItemId: "mailbox_evt_123",
     });
+    expect(mocks.sendHostedLinqReadReceipt).not.toHaveBeenCalled();
   });
 
   it("reenters the ordinary planner on a duplicate reaction after mailbox append fails", async () => {
@@ -630,14 +630,11 @@ describe("hosted onboarding Linq webhook hard-cut flows", () => {
     const messageEvent = JSON.parse(buildLinqMessageWebhookBody({
       eventId: "evt_reaction_reply_retry_123",
       isGroup: false,
-      messageId: "msg_murph_retry_123",
+      messageId: "evt_reaction_reply_retry_123",
       service: "iMessage",
-      text: "The participant affirmed your exact message.",
+      text: "Yes.",
     }));
-    messageEvent.data.parts.push({
-      type: "text",
-      value: "Reacted-to message: Would you like me to continue?",
-    });
+    messageEvent.data.reply_to = { message_id: "msg_murph_retry_123" };
     mocks.buildHostedLinqAffirmativeReactionMessageEvent.mockResolvedValue(messageEvent);
     mocks.lookupHostedMemberIdentityByPhoneNumber.mockResolvedValue({
       core: {
@@ -683,6 +680,7 @@ describe("hosted onboarding Linq webhook hard-cut flows", () => {
     expect(mocks.appendHostedMailboxEnvelopeTx).toHaveBeenCalledTimes(2);
     expect(mocks.signalHostedMailboxAppendRuntime).toHaveBeenCalledTimes(1);
     expect(mocks.stageHostedLinqGroupReactionContext).not.toHaveBeenCalled();
+    expect(mocks.sendHostedLinqReadReceipt).not.toHaveBeenCalled();
   });
 
   it("stages group reaction context without scheduling, sending, or waking", async () => {

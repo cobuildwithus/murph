@@ -122,6 +122,15 @@ export function shouldGroupAdjacentConversationInput(
   if (!isSameAssistantConversationRef(first.conversation, candidate.conversation)) {
     return false
   }
+  // An affirmative reaction is a synthetic trigger with its own target
+  // attestation. Keep it in a one-input group so adjacent ordinary messages
+  // cannot lend it trust or be suppressed with it.
+  if (
+    first.affirmativeReaction === true ||
+    candidate.affirmativeReaction === true
+  ) {
+    return false
+  }
   // Native reply targets identify the specific prior assistant message the
   // input is answering. Mixing them into one group would inject only one
   // turn context for messages that semantically need different anchors;

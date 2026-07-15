@@ -286,7 +286,6 @@ describe("getHostedLinqReactionTargetMessage", () => {
     const fetchMock = vi.fn(async () => createJsonResponse({
       chat_id: "chat_123",
       id: "msg_123",
-      is_from_me: true,
       parts: [
         {
           type: "text",
@@ -311,7 +310,6 @@ describe("getHostedLinqReactionTargetMessage", () => {
           value: `part-${index}`,
         })),
       ],
-      service: "iMessage",
     }, 200));
     vi.stubGlobal("fetch", fetchMock);
 
@@ -322,8 +320,6 @@ describe("getHostedLinqReactionTargetMessage", () => {
     expect(message).toMatchObject({
       chatId: "chat_123",
       id: "msg_123",
-      isFromMe: true,
-      service: "iMessage",
     });
     expect(message.parts).toHaveLength(32);
     expect(message.parts[0]).toMatch(

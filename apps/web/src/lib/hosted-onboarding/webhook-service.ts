@@ -144,6 +144,7 @@ export async function handleHostedOnboardingLinqWebhook(input: {
     });
     eventId = event.event_id;
     eventType = event.event_type;
+    let affirmativeReaction = false;
     finishHostedOnboardingTiming(verifyTiming, "completed", {
       eventIdSuffix: toHostedOnboardingLogIdSuffix(eventId),
       eventType,
@@ -207,6 +208,7 @@ export async function handleHostedOnboardingLinqWebhook(input: {
       });
       if (messageEvent) {
         event = messageEvent;
+        affirmativeReaction = true;
         providerEvent = null;
       } else {
         const contextStaged = providerResult.duplicate
@@ -279,7 +281,7 @@ export async function handleHostedOnboardingLinqWebhook(input: {
     });
 
     const currentInboundReply: HostedLinqCurrentInboundReplyProof | null =
-      event.event_type === "message.received"
+      event.event_type === "message.received" && !affirmativeReaction
         ? buildHostedLinqCurrentInboundReplyProof(event)
         : null;
 
@@ -309,6 +311,7 @@ export async function handleHostedOnboardingLinqWebhook(input: {
           prisma,
           (transaction) =>
             planHostedOnboardingLinqWebhook({
+              affirmativeReaction,
               event: planningEvent,
               firstContactAdmitted: recordedAdmission?.kind === "allow",
               requireFirstContactAdmission,
@@ -337,6 +340,7 @@ export async function handleHostedOnboardingLinqWebhook(input: {
               prisma,
               (transaction) =>
                 planHostedOnboardingLinqWebhook({
+                  affirmativeReaction,
                   event: planningEvent,
                   firstContactAdmitted: true,
                   requireFirstContactAdmission,
@@ -390,6 +394,7 @@ export async function handleHostedOnboardingLinqWebhook(input: {
                 prisma,
                 (transaction) =>
                   planHostedOnboardingLinqWebhook({
+                    affirmativeReaction,
                     event: planningEvent,
                     firstContactAdmitted: true,
                     requireFirstContactAdmission,

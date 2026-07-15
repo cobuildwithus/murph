@@ -42,30 +42,17 @@ export async function buildHostedLinqAffirmativeReactionMessageEvent(input: {
     return null;
   }
 
-  const [chat, target] = await Promise.all([
-    readHostedLinqReactionCanonicalChat({
-      actor: eventContext.actor,
-      chatId: eventContext.chatId,
-      ...(input.signal ? { signal: input.signal } : {}),
-    }),
-    getHostedLinqReactionTargetMessage({
-      messageId: eventContext.messageId,
-      ...(input.signal ? { signal: input.signal } : {}),
-    }),
-  ]);
-  const targetText = buildHostedLinqReactionTargetText({
+  const chat = await readHostedLinqReactionCanonicalChat({
+    actor: eventContext.actor,
     chatId: eventContext.chatId,
-    messageId: eventContext.messageId,
-    partIndex: eventContext.partIndex,
-    target,
+    ...(input.signal ? { signal: input.signal } : {}),
   });
-  if (!chat || target.isFromMe !== true || !targetText) {
+  if (!chat) {
     return null;
   }
 
   const occurredAt = input.event.providerCreatedAt.toISOString();
-  const reactionLabel = readHostedLinqReactionLabel(input.event);
-  const service = target.service ?? input.event.service ?? "iMessage";
+  const service = input.event.service ?? "iMessage";
   return {
     api_version: input.event.apiVersion ?? "v3",
     created_at: occurredAt,
@@ -94,18 +81,11 @@ export async function buildHostedLinqAffirmativeReactionMessageEvent(input: {
       },
       is_from_me: false,
       message: {
-        id: eventContext.messageId,
+        id: input.event.eventId,
         parts: [
           {
             type: "text",
-            value: [
-              `The participant used ${reactionLabel} as an affirmative reply to your exact message.`,
-              "If that message clearly asked a yes/no question or offered a specific action, treat this as yes or confirmation of only that action and do not ask the same question again. Otherwise keep it as context only; do not infer unrelated intent.",
-            ].join("\n"),
-          },
-          {
-            type: "text",
-            value: `Reacted-to message:\n${targetText}`,
+            value: "Yes.",
           },
         ],
         reply_to: {
