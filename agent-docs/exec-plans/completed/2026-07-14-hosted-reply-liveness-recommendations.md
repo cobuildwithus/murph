@@ -66,13 +66,14 @@ The smallest durable response is:
 2. Extend one existing restart E2E to cover a same-line A-to-B transition,
    fresh-before-retry ordering, restart-safe exact reply authority, and
    exactly-once delivery together.
-3. Delete the foreground reply path's remaining dependency on the background
-   pending index and add one focused malformed-index regression.
-4. Close the current concurrent-duplicate quota race with one post-lock recheck
-   and one database concurrency test.
-5. Add a due-before-idle timing profile to the existing scheduled-reminder CI
-   E2E as a P1 integration proof.
-6. Inventory and drain legacy delivery intents, then delete their compatibility
+3. Delete foreground selection and refresh's remaining read dependency on the
+   background pending index and add one focused malformed-index regression.
+   Make the existing input-source boundary require one of two modes: foreground
+   uses `none`; background recovery uses `compact`.
+4. Keep due-before-idle timing at the deterministic owner test unless the
+   existing E2E can prove it without extra wall-clock waits or test-only runtime
+   behavior.
+5. Inventory and drain legacy delivery intents, then delete their compatibility
    scan and the temporary manual repair surface. Do not expand either.
 
 No new queue, scheduler, repair worker, route owner, authority owner, persisted
@@ -227,6 +228,8 @@ The ownership rules are:
 - The runtime does not repeat ingress, provider, network, or mutable-route
   validation before model start. The accepted mailbox record is its admission
   proof.
+- No new synchronous read or validation stage belongs between that durable
+  acceptance and model start.
 - The web/provider boundary owns mutable recipient and route authority at the
   irreversible effect.
 - A wake is a replayable latency hint, never accepted-work truth.
@@ -287,9 +290,8 @@ incident-specific bullets to the canonical contract.
 | Former-route exact reply authority | Web egress tests cover exact persisted direct input and strict negatives | Existing restart E2E uses one chat, so it does not prove old A after home becomes B |
 | Fresh work outranks old pending work | Strong runtime selection tests and the existing restart E2E | Combine it with route movement and former-route retry in one incident-shaped E2E |
 | Group, wrong member, wrong line, and unavailable directness fail closed | Existing web and hosted-local group/route tests | No duplicate full-stack permutations needed |
-| Due assistant wake beats a longer idle checkpoint | Strong in-process workspace-entrypoint tests | Existing CI reminder profiles checkpoint before due; add one due-before-idle profile |
-| Duplicate admission is semantically idempotent | Mailbox append has a dedupe lock | Concurrent identical webhooks can mutate daily quota twice before append dedupes |
-| Fresh foreground work is independent of background state | Fresh-only selection behavior is tested | Foreground still parses the unrelated pending index; malformed state can block it |
+| Due assistant wake beats a longer idle checkpoint | Strong deterministic in-process workspace-entrypoint tests | No additional wall-clock E2E is justified with the current harness |
+| Foreground selection and refresh are independent of background recovery reads | Fresh-only selection behavior is tested | Foreground still parses the unrelated pending index; malformed state can block selection |
 | New reply intent contains complete exact accepted-input identity | Current callbacks carry `answeredMailboxItemIds` | Compatibility fallbacks can mask a propagation regression; add an owner assertion and consumed-state proof |
 
 The existing CI already runs the relevant restart, scheduled reminder, group
@@ -358,7 +360,7 @@ duplicate retries.
 
 ## P0 Owner Tests And Small Code Corrections
 
-### Remove the foreground pending-index dependency
+### Remove the foreground pending-index read
 
 Current foreground selection uses only fresh events, but it still calls
 `readExistingHostedPendingAssistantInputIds` first. The parser rethrows malformed
@@ -367,36 +369,24 @@ state, and a large valid index adds work proportional to unrelated backlog.
 The smallest correction is deletion:
 
 - foreground selection reads and returns only the fresh batch;
-- foreground input-source refresh does not discover background work;
-- background recovery remains the sole owner of the pending index.
+- foreground input-source refresh uses an explicit `none` mode and does not
+  discover background work;
+- background recovery remains the sole reader and compactor of the pending
+  index, using `compact`; staging still enqueues input there for restart
+  durability;
+- the mode is required at every construction site, with no inferred or default
+  behavior.
 
-Add a focused runtime regression proving that valid fresh input is selected when
-the background pending-index file is malformed. A large-index case may remain a
-cheap owner test, but do not add full-stack malformed-state injection.
+Do not infer the mode from whether an input is already selected. Background
+recovery also starts with a selected input, and its refresh must continue to
+observe fresh work so foreground input can preempt maintenance. Two required
+literal modes keep that ownership visible without introducing separate
+constructors, a strategy object, or another state owner.
 
-### Independently close the concurrent duplicate quota race
-
-Current active-member ingress performs a fast mailbox dedupe read before taking
-the existing per-member route lock. Two identical concurrent webhooks can both
-miss that read. The lock serializes route resolution, but the second transaction
-can still increment the daily inbound counter before mailbox append dedupes the
-item. Repeated overlap can cause premature quota suppression and redundant
-wakes.
-
-This is a newly found current liveness bug, not evidence for the original
-incident and not a prerequisite for the combined restart E2E.
-
-Keep the fast precheck. After route-lock resolution and before daily quota
-mutation, re-read the same mailbox dedupe key and return the existing duplicate
-plan when found. Add one real database concurrency test asserting:
-
-- one mailbox item;
-- one daily inbound increment;
-- one semantic admission;
-- the duplicate response/wake behavior remains replay-safe.
-
-Do not create a second idempotency table, lock manager, or webhook state machine.
-The existing member lock and mailbox identity are sufficient.
+Add a focused runtime regression proving that already-staged valid fresh input
+is selected and refreshed when the background pending-index file is malformed.
+A large-index case may remain a cheap owner test, but do not add full-stack
+malformed-state injection.
 
 ### Strengthen the admission owner test
 
@@ -411,33 +401,17 @@ and prove:
 Keep direct/group, wrong-line, wrong-member, and classification-unavailable
 negative cases in their existing owner tests.
 
-## P1 Full-Stack Wake Deadline Proof
+## Deferred Full-Stack Wake Deadline Proof
 
-The in-process runtime tests already prove the corrected rule. One full-stack
-proof is useful because the failure crossed runtime checkpoint publication,
-workspace wake state, and orchestration.
+The deterministic in-process workspace-entrypoint test already proves that the
+60-second assistant wake advances the 180-second idle deadline. With the current
+harness, adding the same proof to the scheduled-reminder E2E would restructure
+two reminder lifecycles and add about 90 seconds of wall-clock waiting to CI.
+That is slower and more brittle without protecting a distinct owner rule.
 
-Extend the already-CI
-`apps/cloudflare/test/hosted-local-linq-scheduled-reminder-e2e.test.ts` scenario
-instead of promoting the slower multi-purpose manual latency scenario or adding
-another scheduler scenario.
-
-Add one timing profile where the reminder is due before the ordinary idle
-checkpoint—for example, a 30-second reminder with a 45-second idle deadline—and
-assert:
-
-1. without an inbound message or test nudge, the due assistant wake advances
-   the checkpoint by its own deadline plus bounded slack;
-2. the reminder sends after that checkpoint and before the ordinary idle
-   deadline;
-3. the reminder sends exactly once;
-4. short quiescence produces neither another reminder nor another service pass.
-
-Adapt the proof to observe checkpoint/send-by-deadline rather than requiring a
-future published wake at the instant the checkpoint is already due. Keep it P1:
-the owner-level deadline tests are already strong, and the P0 combined reply
-scenario closes the incident's highest-value missing proof. No new CI scenario
-or matrix leg is needed.
+Do not add that E2E now. Reconsider it only if the existing scenario can expose
+the same production lifecycle with deterministic time control, no production
+switch, no second harness, and no additional wall-clock delay.
 
 ## Compatibility And Cleanup Gates
 
@@ -503,8 +477,8 @@ Do not add:
 - Linq-specific wording in the canonical invariant contract;
 - the explicit manual legacy repair path in normal reply processing.
 
-The preferred fixes are deletion, a post-lock recheck, stable exact identities,
-and stronger assertions in existing owners.
+The preferred fixes are deletion, stable exact identities, and stronger
+assertions in existing owners.
 
 ## Recommended Implementation Order
 
@@ -516,11 +490,9 @@ and stronger assertions in existing owners.
 3. Delete the foreground pending-index read and add its focused regression.
 4. Extend the existing restart E2E with the A-to-B incident sequence, including
    consumed-state assertions once available.
-5. Independently add the duplicate-webhook post-lock recheck and database
-   concurrency test; do not make it a prerequisite for the reply E2E.
-6. Extend the existing scheduled-reminder CI scenario with the due-before-idle
-   profile after deterministic local proof.
-7. Inventory and drain legacy intents and stale routes; delete compatibility
+5. Keep due-before-idle coverage at its deterministic owner test until the
+   existing E2E can prove it without wall-clock delay or runtime test hooks.
+6. Inventory and drain legacy intents and stale routes; delete compatibility
    and manual repair only after their explicit removal gates are met.
 
 No production architecture should be added to support these tests. If a test
@@ -534,13 +506,11 @@ The follow-up is complete when:
 - the two invariant changes are canonical and provider-neutral;
 - accepted same-line replacement input commits its route and mailbox atomically
   under default configuration;
-- concurrent duplicate input mutates quota once;
 - foreground selection has no read, parse, or work dependency on the pending
   index;
 - the combined restart E2E proves fresh B before old A and exact once-per-chat
   delivery across restart;
 - every new direct-reply intent persists complete exact accepted-input identity;
-- a due assistant wake is full-stack proven to beat the longer idle deadline;
 - legacy compatibility and manual repair each have measured drain/removal
   evidence rather than becoming permanent architecture;
 - no new runtime state owner or background process is introduced.
@@ -596,8 +566,12 @@ Repository incident records:
   implementation were independently re-read for causal attribution.
 - Focused hosted-web ingress and delivery-authority suites passed: 157 tests.
 - Focused assistant-runtime foreground-selection suite passed: 11 tests.
+- The final diff-aware owner run passed every guard, the affected TypeScript 7
+  typecheck, and 1,607 runtime tests. Four short-deadline entrypoint cases that
+  bypass the changed automation path passed individually. A separate unchanged
+  browser-vault timeout passed both on latest `main` and on the branch when
+  rerun, isolating it to cold-cache/load variance.
 - `pnpm docs:drift` passed.
 - `git diff --check`, referenced-path validation, and privacy/path scans passed.
 
-Completed: 2026-07-14
 Completed: 2026-07-14

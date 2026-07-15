@@ -1576,6 +1576,7 @@ describe("hosted mailbox conversation import adapter", () => {
     assert.equal(JSON.stringify(event).includes(groupReactionContext), false);
 
     const source = createHostedAssistantInputSource({
+      pendingInputRefreshMode: "none",
       selectedInputIds: [event.inputId],
       vaultRoot,
     });
@@ -1692,6 +1693,7 @@ describe("hosted mailbox conversation import adapter", () => {
     assert.equal(event.replyTarget?.threadId, "chat_group_identity");
 
     const source = createHostedAssistantInputSource({
+      pendingInputRefreshMode: "none",
       selectedInputIds: [event.inputId],
       vaultRoot,
     });
@@ -1775,6 +1777,7 @@ describe("hosted mailbox conversation import adapter", () => {
     assert.equal(JSON.stringify(event).includes(groupReactionContext), false);
 
     const source = createHostedAssistantInputSource({
+      pendingInputRefreshMode: "none",
       selectedInputIds: [event.inputId],
       vaultRoot,
     });
@@ -4111,6 +4114,7 @@ describe("hosted mailbox conversation import adapter", () => {
     const pendingInputIds = await readHostedPendingAssistantInputIds({ vaultRoot });
     assert.equal(pendingInputIds.length, 5);
     const source = createHostedAssistantInputSource({
+      pendingInputRefreshMode: "compact",
       selectedInputIds: pendingInputIds,
       vaultRoot,
     });
