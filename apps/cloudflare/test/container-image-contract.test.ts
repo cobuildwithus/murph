@@ -423,6 +423,10 @@ describe("hosted runner container image contract", () => {
       new URL("../../../.github/workflows/cloudflare-runner-base-image.yml", import.meta.url),
       "utf8",
     );
+    const runnerPermissionSandboxWorkflow = await readFile(
+      new URL("../../../.github/workflows/cloudflare-runner-permission-sandbox.yml", import.meta.url),
+      "utf8",
+    );
 
     expect(baseDockerfile).toContain("ARG CODEX_CLI_VERSION=0.144.0");
     expect(baseDockerfile).toContain("ARG NODE_VERSION=24.14.1");
@@ -445,6 +449,15 @@ describe("hosted runner container image contract", () => {
     expect(runnerBasePublishWorkflow).not.toContain("pull_request:");
     expect(runnerBasePublishWorkflow).toContain(
       "run: pnpm --dir apps/cloudflare runner:docker:base -- --push",
+    );
+    expect(runnerPermissionSandboxWorkflow).toContain(
+      "sudo sysctl --write kernel.apparmor_restrict_unprivileged_userns=0",
+    );
+    expect(runnerPermissionSandboxWorkflow).toContain(
+      'test "$(sysctl --values kernel.apparmor_restrict_unprivileged_userns)" = "0"',
+    );
+    expect(runnerPermissionSandboxWorkflow).toContain(
+      "run: pnpm --dir apps/cloudflare runner:docker:smoke:prepared-base",
     );
     await expect(
       access(new URL("../../../Dockerfile.cloudflare-whisper-model", import.meta.url)),

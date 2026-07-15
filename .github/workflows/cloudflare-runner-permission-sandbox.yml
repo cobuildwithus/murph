@@ -78,5 +78,10 @@ jobs:
       - name: Prepare runner base image
         run: pnpm --dir apps/cloudflare runner:docker:base
 
+      - name: Allow capability-bearing nested user namespaces
+        run: |
+          sudo sysctl --write kernel.apparmor_restrict_unprivileged_userns=0
+          test "$(sysctl --values kernel.apparmor_restrict_unprivileged_userns)" = "0"
+
       - name: Prove native Codex permission confinement
         run: pnpm --dir apps/cloudflare runner:docker:smoke:prepared-base
