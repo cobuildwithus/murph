@@ -1576,6 +1576,7 @@ describe("hosted mailbox conversation import adapter", () => {
     assert.equal(JSON.stringify(event).includes(groupReactionContext), false);
 
     const source = createHostedAssistantInputSource({
+      pendingInputRefreshMode: "none",
       selectedInputIds: [event.inputId],
       vaultRoot,
     });
