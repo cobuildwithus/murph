@@ -513,6 +513,7 @@ describe("runHostedWorkspaceUntilIdleOrBudget", () => {
           return {
             checkpointReason: "assistant_runtime_commit",
             foregroundReplyFailed: 0,
+            invocationLocalAssistantWakeAt: "2026-04-26T00:00:30.000Z",
             nextWakeAt: "2026-04-26T00:00:30.000Z",
             nextWakeReason: "assistant",
             progressed: true,
@@ -6579,6 +6580,7 @@ describe("runHostedWorkspaceUntilIdleOrBudget", () => {
     ];
     const { mailboxPort } = createMailboxPort({ items });
     const checkpointRequests: HostedWorkspaceCheckpointRequest[] = [];
+    const reminderWakeAt = "2026-04-26T06:00:00.000Z";
 
     try {
       await saveAssistantAutomationState(vaultRoot, {
@@ -6608,8 +6610,8 @@ describe("runHostedWorkspaceUntilIdleOrBudget", () => {
           attemptId: "attempt_synthetic_runner_initial_fresh_incomplete_pending",
           expectedWorkspaceVersion: "0",
           leaseGeneration: "4",
-          nextWakeAt: null,
-          nextWakeReason: null,
+          nextWakeAt: reminderWakeAt,
+          nextWakeReason: "assistant",
           snapshotRef: null,
         }),
         expectedUserId: TEST_USER_ID,
@@ -6636,11 +6638,17 @@ describe("runHostedWorkspaceUntilIdleOrBudget", () => {
           return {
             checkpointReason: "canonical_runtime_commit",
             foregroundReplyFailed: 0,
+            nextWakeAt: reminderWakeAt,
+            nextWakeReason: "assistant",
             progressed: true,
           };
         },
         vaultRoot,
-        workspace: createWorkspaceState({ version: "0" }),
+        workspace: createWorkspaceState({
+          nextWakeAt: reminderWakeAt,
+          nextWakeReason: "assistant",
+          version: "0",
+        }),
         now: () => TEST_NOW,
       });
 
@@ -6649,6 +6657,10 @@ describe("runHostedWorkspaceUntilIdleOrBudget", () => {
         TEST_PENDING_INDEX_MAINTENANCE_WAKE_AT,
       );
       assert.equal(result.assistantPhaseResult?.nextWakeReason, "assistant");
+      assert.equal(
+        result.assistantPhaseResult?.invocationLocalAssistantWakeAt,
+        TEST_PENDING_INDEX_MAINTENANCE_WAKE_AT,
+      );
       assert.equal(result.runtimeStateDirty, true);
       assert.deepEqual(checkpointRequests, []);
       assert.deepEqual(

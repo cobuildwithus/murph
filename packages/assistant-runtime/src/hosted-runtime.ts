@@ -1628,8 +1628,6 @@ export async function runHostedWorkspaceRuntimeJobInProcess(
         }
       },
     };
-    const invocationLocalAssistantProjectedWakeKeys =
-      new WeakMap<HostedWorkspaceRunnerResult, string | null>();
     const runWorkspaceForegroundPass = async (passInput: {
       initialAssistantInputBatch?: HostedWorkspaceRunnerAssistantInputBatch | null;
       initialMailboxImport?: HostedWorkspaceRunnerInput["initialMailboxImport"];
@@ -1665,7 +1663,6 @@ export async function runHostedWorkspaceRuntimeJobInProcess(
       });
       try {
         let currentAssistantPersonalizationInputId: string | null = null;
-        let invocationLocalAssistantProjectedWakeKey: string | null = null;
         const passResult = await hostedCliBridge.runWithInvocation(
           {
             currentDeliveryRoute: () => currentOperationDeliveryRoute,
@@ -1730,15 +1727,6 @@ export async function runHostedWorkspaceRuntimeJobInProcess(
                     suppressDirtyPendingFetch: suppressDirtyPendingFetchUntilCheckpoint,
                     signal: passSignal,
                   });
-                  invocationLocalAssistantProjectedWakeKey =
-                    Object.hasOwn(phaseResult, "nextWakeAt")
-                    && phaseResult.nextWakeAt
-                    && hostedRuntimeWakeReasonIsAssistant(phaseResult.nextWakeReason ?? null)
-                      ? buildHostedRuntimeWakeKey({
-                          nextWakeAt: phaseResult.nextWakeAt,
-                          nextWakeReason: phaseResult.nextWakeReason ?? null,
-                        })
-                      : null;
                   return phaseResult;
                 } finally {
                   currentAssistantPersonalizationInputId = null;
@@ -1761,10 +1749,6 @@ export async function runHostedWorkspaceRuntimeJobInProcess(
               await drainHostedCodexPostTurnCleanups();
             }
           },
-        );
-        invocationLocalAssistantProjectedWakeKeys.set(
-          passResult,
-          invocationLocalAssistantProjectedWakeKey,
         );
         trackMailboxPostCheckpointEffects(passResult.mailboxPostCheckpointEffectsFinished);
         emitPhaseLog({
@@ -2318,8 +2302,19 @@ export async function runHostedWorkspaceRuntimeJobInProcess(
           nowMs: Date.now(),
         });
         const replaceWake = shouldReplaceHostedWorkspaceInvocationWake(passResult);
+        const invocationLocalAssistantWakeAt =
+          passResult.assistantPhaseResult?.invocationLocalAssistantWakeAt ?? null;
         const passProjectedAssistantWakeKey =
-          invocationLocalAssistantProjectedWakeKeys.get(passResult) ?? null;
+          invocationLocalAssistantWakeAt !== null
+          && passResult.assistantPhaseResult?.nextWakeAt === invocationLocalAssistantWakeAt
+          && hostedRuntimeWakeReasonIsAssistant(
+            passResult.assistantPhaseResult.nextWakeReason ?? null,
+          )
+            ? buildHostedRuntimeWakeKey({
+                nextWakeAt: invocationLocalAssistantWakeAt,
+                nextWakeReason: passResult.assistantPhaseResult.nextWakeReason ?? null,
+              })
+            : null;
         const passProducedDefaultWake =
           replaceWake
           || passProjectedAssistantWakeKey !== null

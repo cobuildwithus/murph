@@ -519,16 +519,20 @@ describe("runner bundle container-entrypoint esbuild step", () => {
     // mainline integration) + the prior 14,551B host-variance ratchet + PR
     // #626's exact 7,706B local-macOS overage, then this PR's exact 4,351B
     // overage on the merged base and the final 233B boundary-tail integration,
-    // plus the 48,000B noise band. Static closure
+    // less the final 179B complete-tail ownership reduction, plus the 230B
+    // explicit wake-provenance correction and the 48,000B noise band. Static
+    // closure
     // advances the latest mainline baseline by PR #631's exact 913B crypto-lane
     // and 872B checkpoint overages, PR #626's exact 33,357B local-macOS
     // overage, this PR's exact 1,929B merged-base overage, and the same final
-    // 233B integration while preserving the separate 96,000B noise band.
+    // 233B integration, less the same 179B ownership reduction, plus the same
+    // 230B provenance correction while preserving the separate 96,000B noise
+    // band.
     // Locking exact values makes any silent change to a ratchet a failing,
     // reviewed diff.
     expect(budgets).toEqual({
-      entryBytes: 1_449_879 + 48_000,
-      staticClosureBytes: 7_096_552 + 96_000,
+      entryBytes: 1_450_109 + 48_000,
+      staticClosureBytes: 7_096_782 + 96_000,
       totalBytes: 9_300_000,
     });
     // The ratchet is meaningfully tighter than the prior loose 2.9MB ceiling

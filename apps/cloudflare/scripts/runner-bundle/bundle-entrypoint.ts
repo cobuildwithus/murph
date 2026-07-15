@@ -71,8 +71,10 @@ const RUNNER_ENTRYPOINT_BUNDLE_TOTAL_BYTES_BUDGET = 9_300_000;
 // the review remediation deletes foreground terminal-evidence inspection and
 // leaves exact replyability policy with maintenance. Preserving the merged
 // base's precomputed boundary-tail retry added 233B; making the phase wake
-// authoritative across the complete local tail drain removes 179B.
-const RUNNER_ENTRYPOINT_BUNDLE_ENTRY_BASELINE_BYTES = 1_449_879;
+// authoritative across the complete local tail drain removes 179B. Explicit
+// invocation-local wake provenance adds 230B while preventing an inherited
+// reminder from suppressing pending-index repair.
+const RUNNER_ENTRYPOINT_BUNDLE_ENTRY_BASELINE_BYTES = 1_450_109;
 // PR #631 added 913B for its reviewed Clinical Records crypto-lane labels and
 // another 872B for bounded checkpoint/resume handling. The exact PR #626 head
 // then measured a 7,190,569B local macOS closure (+33,357B over the prior
@@ -82,9 +84,9 @@ const RUNNER_ENTRYPOINT_BUNDLE_ENTRY_BASELINE_BYTES = 1_449_879;
 // foreground cancellation, and delayed index repair measure a 7,192,498B local
 // static boot closure, 1,929B over the resulting budget. Advance by that exact
 // overage; boundary-tail retry preservation added the same measured 233B, and
-// complete-tail wake ownership later removes 179B. Preserve the separate 96KB
-// noise band.
-const RUNNER_ENTRYPOINT_BUNDLE_STATIC_CLOSURE_BASELINE_BYTES = 7_096_552;
+// complete-tail wake ownership later removes 179B. Explicit invocation-local
+// wake provenance adds 230B. Preserve the separate 96KB noise band.
+const RUNNER_ENTRYPOINT_BUNDLE_STATIC_CLOSURE_BASELINE_BYTES = 7_096_782;
 // Noise band above the baseline before the ratchet trips (~2%): absorbs
 // content-hash and minifier jitter without letting real boot-path weight land
 // silently. Keep it tight; it is a tolerance for noise, not feature headroom.

@@ -1824,6 +1824,7 @@ function stripHostedAssistantPhaseWake(
   }
 
   const stripped: HostedWorkspaceRunnerAssistantPhaseResult = { ...result };
+  delete stripped.invocationLocalAssistantWakeAt;
   delete stripped.nextWakeAt;
   delete stripped.nextWakeReason;
   if (result.afterCheckpoint) {
@@ -1899,6 +1900,8 @@ function mergeContinuingSystemMailboxAssistantPhaseResult(input: {
   // assistant-lane result; carry it through the system-mailbox merge so the
   // workspace runner can gate the durable conversation consumed ack.
   const foregroundReplyFailed = input.assistantResult.foregroundReplyFailed;
+  const invocationLocalAssistantWakeAt =
+    input.assistantResult.invocationLocalAssistantWakeAt ?? null;
   if (progressedResult) {
     return {
       ...(afterCheckpoint ? { afterCheckpoint } : {}),
@@ -1911,6 +1914,9 @@ function mergeContinuingSystemMailboxAssistantPhaseResult(input: {
         : {}),
       checkpointReason: progressedResult.checkpointReason,
       ...(foregroundReplyFailed === undefined ? {} : { foregroundReplyFailed }),
+      ...(invocationLocalAssistantWakeAt
+        ? { invocationLocalAssistantWakeAt }
+        : {}),
       ...(hasNextWakeAt ? { nextWakeAt: nextWake.at } : {}),
       ...(shouldExposeHostedAssistantPhaseNextWakeReason(nextWake.reason)
         ? { nextWakeReason: nextWake.reason }
@@ -1927,6 +1933,9 @@ function mergeContinuingSystemMailboxAssistantPhaseResult(input: {
       : {}),
     ...(deviceSyncMaintenanceRan ? { deviceSyncMaintenanceRan: true } : {}),
     ...(foregroundReplyFailed === undefined ? {} : { foregroundReplyFailed }),
+    ...(invocationLocalAssistantWakeAt
+      ? { invocationLocalAssistantWakeAt }
+      : {}),
     ...(hasNextWakeAt ? { nextWakeAt: nextWake.at } : {}),
     ...(shouldExposeHostedAssistantPhaseNextWakeReason(nextWake.reason)
       ? { nextWakeReason: nextWake.reason }
@@ -3926,6 +3935,16 @@ async function runForegroundAssistantReplyPhase(input: {
     vaultRoot: input.input.restored.vaultRoot,
   });
   const deliveryEffects = preparedDeliveryEffects.effects;
+  const assistantNextWakeAt = resolveHostedAssistantAutomationNextWakeAt({
+    input: input.input,
+    nextWakeAt: input.assistantMetrics.nextWakeAt,
+  });
+  const assistantNextWakeReason = resolveHostedAssistantAutomationNextWakeReason({
+    assistantNextWakeAt,
+  });
+  const invocationLocalAssistantWake = assistantNextWakeAt
+    ? { invocationLocalAssistantWakeAt: assistantNextWakeAt }
+    : {};
 
   if (
     shouldFastDispatchAssistantDeliveryEffects({
@@ -3995,6 +4014,7 @@ async function runForegroundAssistantReplyPhase(input: {
     if (!progressed) {
       return {
         foregroundReplyFailed,
+        ...invocationLocalAssistantWake,
         ...(nextWakeAt ? { nextWakeAt } : {}),
         ...(shouldExposeHostedAssistantPhaseNextWakeReason(postDelivery.nextWakeReason)
           ? { nextWakeReason: postDelivery.nextWakeReason }
@@ -4006,6 +4026,7 @@ async function runForegroundAssistantReplyPhase(input: {
     return {
       checkpointReason: postDelivery.checkpointReason,
       foregroundReplyFailed,
+      ...invocationLocalAssistantWake,
       nextWakeAt,
       ...(shouldExposeHostedAssistantPhaseNextWakeReason(postDelivery.nextWakeReason)
         ? { nextWakeReason: postDelivery.nextWakeReason }
@@ -4017,13 +4038,6 @@ async function runForegroundAssistantReplyPhase(input: {
 
   const outboxWakeAt = await resolveHostedAssistantOutboxNextWakeAt({
     vaultRoot: input.input.restored.vaultRoot,
-  });
-  const assistantNextWakeAt = resolveHostedAssistantAutomationNextWakeAt({
-    input: input.input,
-    nextWakeAt: input.assistantMetrics.nextWakeAt,
-  });
-  const assistantNextWakeReason = resolveHostedAssistantAutomationNextWakeReason({
-    assistantNextWakeAt,
   });
   const providerCleanupScheduledWakeAt =
     await resolveHostedProviderCleanupScheduledWakeAt({
@@ -4079,6 +4093,7 @@ async function runForegroundAssistantReplyPhase(input: {
   if (!progressed) {
     return {
       foregroundReplyFailed,
+      ...invocationLocalAssistantWake,
       ...(nextWakeAt ? { nextWakeAt } : {}),
       ...(shouldExposeHostedAssistantPhaseNextWakeReason(nextWake.reason)
         ? { nextWakeReason: nextWake.reason }
@@ -4130,6 +4145,7 @@ async function runForegroundAssistantReplyPhase(input: {
           wakeStateProgressed,
         }),
     foregroundReplyFailed,
+    ...invocationLocalAssistantWake,
     nextWakeAt,
     ...(shouldExposeHostedAssistantPhaseNextWakeReason(nextWake.reason)
       ? { nextWakeReason: nextWake.reason }
