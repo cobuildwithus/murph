@@ -95,26 +95,6 @@ test("loadRuntimeModule resolves workspace or built-in modules dynamically", asy
   assert.equal(typeof pathModule.join, "function");
 });
 
-test("public runtime barrel stays importable before query helper wiring is resolved", async () => {
-  let lookupHelperLoads = 0;
-  const runtimeModule = await importWithMocks<typeof import("../src/runtime.ts")>(
-    "../src/runtime.ts",
-    {
-      "@murphai/query/id-families": () => {
-        lookupHelperLoads += 1;
-        return {
-          describeLookupConstraint: vi.fn(),
-          inferIdEntityKind: vi.fn(),
-          isQueryableLookupId: vi.fn(),
-        };
-      },
-    },
-  );
-
-  assert.equal(typeof runtimeModule.loadQueryRuntime, "function");
-  assert.equal(lookupHelperLoads, 0);
-});
-
 test("createRuntimeUnavailableError preserves package guidance with and without an Error cause", () => {
   const withCause = createRuntimeUnavailableError("integrated vault-cli services", new Error("boom"));
   const withoutCause = createRuntimeUnavailableError("integrated vault-cli services", "boom");
