@@ -129,6 +129,19 @@ export interface JunctionSnapshotInput {
   companionHrvRmssd?: JunctionCompanionHrvRmssdSnapshotEntry[];
 }
 
+export type JunctionSummaryResource =
+  (typeof JUNCTION_ALLOWED_SUMMARY_RESOURCES)[number];
+
+export interface JunctionSummaryNormalizationEvidence {
+  readonly resource: JunctionSummaryResource;
+  readonly sourceProviderSlug: string;
+}
+
+export interface JunctionSummaryNormalizationEvidenceWindow {
+  readonly windowEnd: string;
+  readonly windowStart: string;
+}
+
 type TimestampSemantics = NonNullable<DeviceDataOrigin["timestampSemantics"]>;
 type MealNutritionTotals = NonNullable<MealNutrition["totals"]>;
 type MealNutritionTotalKey = keyof MealNutritionTotals;
@@ -905,6 +918,99 @@ export function normalizeJunctionSnapshot(
       companionHrvRmssdObservations: companionHrvRmssd?.length ?? 0,
     }),
   });
+}
+
+export function classifyJunctionSummaryNormalizationEvidence(
+  snapshot: Pick<
+    JunctionSnapshotInput,
+    "connections" | "importedAt" | "summaries" | "windowEnd" | "windowStart"
+  >,
+  evidenceWindow?: JunctionSummaryNormalizationEvidenceWindow,
+): readonly JunctionSummaryNormalizationEvidence[] {
+  const evidenceRange = evidenceWindow
+    ? {
+        endMs: Date.parse(evidenceWindow.windowEnd),
+        startMs: Date.parse(evidenceWindow.windowStart),
+      }
+    : null;
+  if (
+    evidenceRange
+    && (
+      !Number.isFinite(evidenceRange.startMs)
+      || !Number.isFinite(evidenceRange.endMs)
+      || evidenceRange.startMs >= evidenceRange.endMs
+    )
+  ) {
+    return [];
+  }
+
+  const evidenceByKey = new Map<string, JunctionSummaryNormalizationEvidence>();
+
+  for (const [resource, payload] of allowedResourceEntries(
+    snapshot.summaries,
+    SUMMARY_RESOURCE_ALLOWLIST,
+  )) {
+    const normalized = normalizeJunctionSnapshot({
+      connections: snapshot.connections,
+      importedAt: snapshot.importedAt,
+      summaries: { [resource]: payload },
+      windowEnd: snapshot.windowEnd,
+      windowStart: snapshot.windowStart,
+    });
+
+    for (const event of normalized.events ?? []) {
+      if (
+        evidenceRange
+        && !isJunctionSummaryEvidenceEventInRange(event, evidenceRange)
+      ) {
+        continue;
+      }
+      const sourceProviderSlug = normalizeJunctionSourceProviderSlug(
+        event.dataOrigin?.sourceProviderSlug,
+      );
+      if (!sourceProviderSlug) {
+        continue;
+      }
+
+      const summaryResource = resource as JunctionSummaryResource;
+      const key = `${summaryResource}\u0000${sourceProviderSlug}`;
+      evidenceByKey.set(key, {
+        resource: summaryResource,
+        sourceProviderSlug,
+      });
+    }
+  }
+
+  return [...evidenceByKey.values()].sort((left, right) =>
+    left.resource.localeCompare(right.resource)
+    || left.sourceProviderSlug.localeCompare(right.sourceProviderSlug)
+  );
+}
+
+function isJunctionSummaryEvidenceEventInRange(
+  event: Pick<DeviceEventPayload, "dayKey" | "occurredAt">,
+  evidenceRange: { endMs: number; startMs: number },
+): boolean {
+  const occurredAtMs = Date.parse(event.occurredAt);
+  if (
+    Number.isFinite(occurredAtMs)
+    && occurredAtMs >= evidenceRange.startMs
+    && occurredAtMs < evidenceRange.endMs
+  ) {
+    return true;
+  }
+
+  // Daily summaries and overnight sessions can canonically occur at or after
+  // the UTC window end while still belonging to its final calendar day. The
+  // importer-owned dayKey is the stable ownership signal for that case; a
+  // connection-day record has the next dayKey and remains outside the window.
+  if (typeof event.dayKey !== "string" || !isDateOnlyJunctionTimestamp(event.dayKey)) {
+    return false;
+  }
+  const dayStartMs = Date.parse(`${event.dayKey}T00:00:00.000Z`);
+  return Number.isFinite(dayStartMs)
+    && dayStartMs >= evidenceRange.startMs
+    && dayStartMs < evidenceRange.endMs;
 }
 
 function normalizeCompanionHrvRmssd(
@@ -4655,7 +4761,6 @@ function allowedResourceEntries(
     if (!normalized || !allowlist.has(normalized)) {
       continue;
     }
-
     mergedEntries.set(
       normalized,
       mergeJunctionResourcePayloads(mergedEntries.get(normalized), payload, normalized),

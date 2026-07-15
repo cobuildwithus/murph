@@ -4136,7 +4136,7 @@ test("manual reconcile preserves delayed Junction retry metadata timing", async 
       },
       connectedAt: ownerWindowEnd,
       metadata: {
-        junctionHistoricalBackfillStatus: "coverage_v2_retrying",
+        junctionHistoricalBackfillStatus: "coverage_v3_retrying",
         junctionHistoricalBackfillEmptyAttempts: 1,
         junctionHistoricalBackfillLastEmptyAt: "2026-04-04T00:00:00.000Z",
         junctionHistoricalBackfillWindowStart: ownerWindowStart,
@@ -4248,7 +4248,7 @@ test("device sync service wakes Junction retrying historical backfill at the ret
     assert.equal(processedJob?.kind, "backfill");
 
     const afterEmptyBackfill = store.getAccountById(account.id);
-    assert.equal(afterEmptyBackfill?.metadata.junctionHistoricalBackfillStatus, "coverage_v2_retrying");
+    assert.equal(afterEmptyBackfill?.metadata.junctionHistoricalBackfillStatus, "coverage_v3_retrying");
     assert.equal(afterEmptyBackfill?.metadata.junctionHistoricalBackfillEmptyAttempts, 1);
     assert.equal(afterEmptyBackfill?.metadata.junctionHistoricalBackfillLastEmptyAt, executedAt);
     assert.equal(afterEmptyBackfill?.nextReconcileAt, retryDueAt);
@@ -4309,13 +4309,13 @@ test("device sync service wakes Junction retrying historical backfill at the ret
   }
 });
 
-test("device sync scheduler materializes Junction metadata retry when it is due", async () => {
+test("device sync scheduler immediately repairs legacy Junction coverage progress", async () => {
   const vaultRoot = await makeTempDirectory("murph-device-syncd-junction-legacy-retry-priority");
   const scheduledAt = "2026-04-04T00:05:00.000Z";
-  const retryDueAt = "2026-04-04T00:15:00.000Z";
+  const repairRetryDueAt = "2026-04-04T00:20:00.000Z";
   const ownerWindowStart = "2026-04-01T00:00:00.000Z";
   const ownerWindowEnd = "2026-04-03T00:00:00.000Z";
-  let now = new Date(scheduledAt);
+  const now = new Date(scheduledAt);
   const importer: DeviceSyncImporterPort = {
     async importDeviceProviderSnapshot() {
       return { ok: true };
@@ -4398,9 +4398,16 @@ test("device sync scheduler materializes Junction metadata retry when it is due"
     const queuedJobs = readJobsForAccountForTesting(store, account.id).filter((job) => job.status === "queued");
     const queuedBackfillRow = queuedJobs.find((job) => job.kind === "backfill");
     const queuedReconcileRow = queuedJobs.find((job) => job.kind === "reconcile");
+    const queuedBackfill = queuedBackfillRow ? store.getJobById(queuedBackfillRow.id) : null;
     const queuedReconcile = queuedReconcileRow ? store.getJobById(queuedReconcileRow.id) : null;
 
-    assert.equal(queuedBackfillRow, undefined);
+    assert.ok(queuedBackfill);
+    assert.equal(queuedBackfill.availableAt, scheduledAt);
+    assert.equal(queuedBackfill.priority, 30);
+    assert.deepEqual(queuedBackfill.payload, {
+      windowStart: ownerWindowStart,
+      windowEnd: ownerWindowEnd,
+    });
     assert.ok(queuedReconcile);
     assert.equal(queuedReconcile.priority, 40);
 
@@ -4408,38 +4415,17 @@ test("device sync scheduler materializes Junction metadata retry when it is due"
 
     assert.equal(routineJob?.id, queuedReconcile.id);
     assert.equal(store.getJobById(queuedReconcile.id)?.status, "succeeded");
-    assert.equal(service.getNextWakeAt(scheduledAt), retryDueAt);
+    assert.equal(service.getNextWakeAt(scheduledAt), scheduledAt);
 
-    now = new Date(retryDueAt);
-    await service.runSchedulerOnce();
-    const dueBackfillRow = readJobsForAccountForTesting(store, account.id)
-      .filter((job) => job.status === "queued")
-      .find((job) => job.kind === "backfill");
-    const dueBackfill = dueBackfillRow ? store.getJobById(dueBackfillRow.id) : null;
-    assert.ok(dueBackfill);
-    assert.equal(dueBackfill.availableAt, retryDueAt);
-    assert.equal(dueBackfill.priority, 50);
-    assert.deepEqual(dueBackfill.payload, {
-      windowStart: ownerWindowStart,
-      windowEnd: ownerWindowEnd,
-    });
-    const dueRaceReconcile = store.enqueueJob({
-      provider: "junction",
-      accountId: account.id,
-      kind: "reconcile",
-      payload: {
-        windowStart: "2026-04-02T00:15:00.000Z",
-        windowEnd: retryDueAt,
-      },
-      priority: 40,
-      availableAt: retryDueAt,
-      dedupeKey: "junction-legacy-retry-race-reconcile",
-    });
-    const claimedJob = store.claimDueJob("worker-legacy-retry", retryDueAt, 60_000);
+    const repairJob = await service.runWorkerOnce();
+    const repairedAccount = store.getAccountById(account.id);
 
-    assert.equal(claimedJob?.id, dueBackfill.id);
-    assert.equal(store.getJobById(dueBackfill.id)?.status, "running");
-    assert.equal(store.getJobById(dueRaceReconcile.id)?.status, "queued");
+    assert.equal(repairJob?.id, queuedBackfill.id);
+    assert.equal(store.getJobById(queuedBackfill.id)?.status, "succeeded");
+    assert.equal(repairedAccount?.metadata.junctionHistoricalBackfillStatus, "coverage_v3_retrying");
+    assert.equal(repairedAccount?.metadata.junctionHistoricalBackfillEmptyAttempts, 1);
+    assert.equal(repairedAccount?.metadata.junctionHistoricalBackfillLastEmptyAt, scheduledAt);
+    assert.equal(repairedAccount?.nextReconcileAt, repairRetryDueAt);
   } finally {
     close();
   }
@@ -4493,7 +4479,7 @@ test("device sync scheduler rematerializes dead Junction metadata retries", asyn
       },
       connectedAt: ownerWindowEnd,
       metadata: {
-        junctionHistoricalBackfillStatus: "coverage_v2_retrying",
+        junctionHistoricalBackfillStatus: "coverage_v3_retrying",
         junctionHistoricalBackfillEmptyAttempts: 1,
         junctionHistoricalBackfillLastEmptyAt: "2026-04-04T00:00:00.000Z",
         junctionHistoricalBackfillWindowStart: ownerWindowStart,
@@ -7310,7 +7296,7 @@ test("sqlite store prioritizes metadataPatch entries when capped metadata is ful
       metadataPatch: {
         junctionHistoricalBackfillEmptyAttempts: 1,
         junctionHistoricalBackfillLastEmptyAt: "2026-03-20T12:00:00.000Z",
-        junctionHistoricalBackfillStatus: "coverage_v2_retrying",
+        junctionHistoricalBackfillStatus: "coverage_v3_retrying",
         junctionHistoricalBackfillWindowEnd: "2026-03-20T00:00:00.000Z",
         junctionHistoricalBackfillWindowStart: "2025-12-20T00:00:00.000Z",
       },
@@ -7330,7 +7316,7 @@ test("sqlite store prioritizes metadataPatch entries when capped metadata is ful
     {
       junctionHistoricalBackfillEmptyAttempts: 1,
       junctionHistoricalBackfillLastEmptyAt: "2026-03-20T12:00:00.000Z",
-      junctionHistoricalBackfillStatus: "coverage_v2_retrying",
+      junctionHistoricalBackfillStatus: "coverage_v3_retrying",
       junctionHistoricalBackfillWindowEnd: "2026-03-20T00:00:00.000Z",
       junctionHistoricalBackfillWindowStart: "2025-12-20T00:00:00.000Z",
     },

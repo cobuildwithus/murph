@@ -22,9 +22,15 @@ import type {
   AssistantProviderUsage,
 } from '../src/assistant/providers/types.ts'
 import type {
+  AssistantMessageInput,
   AssistantTurnSharedPlan,
   ExecutedAssistantProviderTurnResult,
+  ResolvedAssistantSession,
 } from '../src/assistant/service-contracts.ts'
+import {
+  resolveAssistantConversationPolicy,
+  resolveAssistantConversationScope,
+} from '../src/assistant/conversation-policy.ts'
 
 type CodexAssistantTarget = Extract<
   AssistantSession['target'],
@@ -2015,7 +2021,16 @@ test('sendAssistantNotificationLocal returns skip decisions without delivering',
       session: providerSession,
     })),
     resolveAssistantTurnRoute: vi.fn(() => providerResult.route),
-    resolveAssistantTurnSharedPlan: vi.fn(async () => sharedPlan),
+    resolveAssistantTurnSharedPlan: vi.fn(async (
+      message: AssistantMessageInput,
+      resolved: ResolvedAssistantSession,
+    ) => ({
+      ...sharedPlan,
+      conversationPolicy: resolveAssistantConversationPolicy({
+        message,
+        session: resolved.session,
+      }),
+    })),
     startAssistantChannelTypingIndicator: vi.fn(() => ({
       stop: vi.fn(async () => undefined),
     })),
@@ -2213,7 +2228,23 @@ test('sendAssistantNotificationLocal returns skip decisions without delivering',
         providerRequestOrdinal: number | null
         startedAt: string
       }) => void
+      plan: AssistantTurnSharedPlan
     }
+  expect(maintenanceRunnerCall.plan.conversationPolicy.audience).toEqual({
+    actorId: null,
+    bindingDelivery: null,
+    channel: null,
+    deliveryPolicy: 'binding-target-only',
+    effectiveThreadIsDirect: null,
+    explicitTarget: null,
+    identityId: null,
+    replyToMessageId: null,
+    threadId: null,
+    threadIsDirect: null,
+  })
+  expect(resolveAssistantConversationScope(
+    maintenanceRunnerCall.plan.conversationPolicy.audience,
+  )).toBe('direct')
   maintenanceRunnerCall.onProviderRequestStarted?.({
     providerRequestOrdinal: 1,
     startedAt: '2026-04-09T03:10:00.000Z',

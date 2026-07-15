@@ -3917,13 +3917,13 @@ test("device sync store preserves guarded Junction historical progress across ca
     });
     store.patchAccount(seeded.id, {
       metadata: {
-        junctionHistoricalBackfillStatus: "coverage_v2_retrying",
+        junctionHistoricalBackfillStatus: "coverage_v3_retrying",
         junctionHistoricalBackfillEmptyAttempts: 2,
         junctionHistoricalBackfillLastEmptyAt: "2026-04-03T00:30:00.000Z",
         junctionHistoricalBackfillWindowStart: "2026-04-01T00:00:00.000Z",
         junctionHistoricalBackfillWindowEnd: "2026-04-03T00:00:00.000Z",
         junctionHistoricalBackfillEvidence:
-          "e1|2026-04-01T00:00:00.000Z|2026-04-03T00:00:00.000Z|garmin:1",
+          "e2|2026-04-01T00:00:00.000Z|2026-04-03T00:00:00.000Z|garmin:1",
       },
     });
 
@@ -3952,13 +3952,13 @@ test("device sync store preserves guarded Junction historical progress across ca
 
     assert.equal(completed.id, seeded.id);
     assert.deepEqual(completed.metadata, {
-      junctionHistoricalBackfillStatus: "coverage_v2_retrying",
+      junctionHistoricalBackfillStatus: "coverage_v3_retrying",
       junctionHistoricalBackfillEmptyAttempts: 2,
       junctionHistoricalBackfillLastEmptyAt: "2026-04-03T00:30:00.000Z",
       junctionHistoricalBackfillWindowStart: "2026-04-01T00:00:00.000Z",
       junctionHistoricalBackfillWindowEnd: "2026-04-03T00:00:00.000Z",
       junctionHistoricalBackfillEvidence:
-        "e1|2026-04-01T00:00:00.000Z|2026-04-03T00:00:00.000Z|garmin:1",
+        "e2|2026-04-01T00:00:00.000Z|2026-04-03T00:00:00.000Z|garmin:1",
       callbackOutcome: "complete",
     });
   } finally {

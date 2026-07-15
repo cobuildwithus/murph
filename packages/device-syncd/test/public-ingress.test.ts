@@ -1027,13 +1027,13 @@ test("public ingress completes seeded external-link callbacks after mutable webh
     },
     metadata: {
       callbackOutcome: "seeded",
-      junctionHistoricalBackfillStatus: "coverage_v2_retrying",
+      junctionHistoricalBackfillStatus: "coverage_v3_retrying",
       junctionHistoricalBackfillEmptyAttempts: 2,
       junctionHistoricalBackfillLastEmptyAt: "2026-04-03T00:30:00.000Z",
       junctionHistoricalBackfillWindowStart: "2026-04-01T00:00:00.000Z",
       junctionHistoricalBackfillWindowEnd: "2026-04-03T00:00:00.000Z",
       junctionHistoricalBackfillEvidence:
-        "e1|2026-04-01T00:00:00.000Z|2026-04-03T00:00:00.000Z|garmin:1",
+        "e2|2026-04-01T00:00:00.000Z|2026-04-03T00:00:00.000Z|garmin:1",
       seedOnlyState: "discard",
     },
     connectedAt: seeded.connectedAt,
@@ -1079,13 +1079,13 @@ test("public ingress completes seeded external-link callbacks after mutable webh
   assert.equal(completed.account.id, seeded.id);
   assert.deepEqual(completed.account.metadata, {
     callbackOutcome: "complete",
-    junctionHistoricalBackfillStatus: "coverage_v2_retrying",
+    junctionHistoricalBackfillStatus: "coverage_v3_retrying",
     junctionHistoricalBackfillEmptyAttempts: 2,
     junctionHistoricalBackfillLastEmptyAt: "2026-04-03T00:30:00.000Z",
     junctionHistoricalBackfillWindowStart: "2026-04-01T00:00:00.000Z",
     junctionHistoricalBackfillWindowEnd: "2026-04-03T00:00:00.000Z",
     junctionHistoricalBackfillEvidence:
-      "e1|2026-04-01T00:00:00.000Z|2026-04-03T00:00:00.000Z|garmin:1",
+      "e2|2026-04-01T00:00:00.000Z|2026-04-03T00:00:00.000Z|garmin:1",
   });
   assert.equal(
     Object.prototype.hasOwnProperty.call(

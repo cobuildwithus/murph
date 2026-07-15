@@ -1,6 +1,6 @@
 # Device Provider Compatibility Matrix
 
-Last verified: 2026-07-12
+Last verified: 2026-07-14
 
 ## Purpose
 
@@ -77,23 +77,32 @@ source/resource pair: activity, sleep, and `sleep_cycle`. Data in another
 family (for example activity) is not evidence that Garmin sleep or
 `sleep_cycle` landed. Availability describes capability, so empty sparse
 resources such as workouts or body measurements are not treated as failed
-exports. Garmin delivers requested history
-asynchronously and incrementally through daily-data webhooks, so Murph observes
-that resource-aware coverage with its existing bounded ladder and accepts late
-webhooks after polling ends. An authenticated old-window webhook that produces
-canonical events records bounded source/resource evidence for the exact connect
-window. The existing deduplicated verification unions that evidence with fresh
-REST rows, so complete late coverage clears the source error even when Garmin's
-REST sleep response stays empty. If coverage remains incomplete, Murph marks
-only the pending source reconnect-required while current ingestion stays active.
-To restart the export, the member explicitly confirms the existing
-connection-wide disconnect and then reconnects Garmin; this can disconnect
-other wearables on the same Junction connection and must be explained before
-confirmation. If remote deregistration fails, the local disconnect still stands
-and the member is told to remove the connection in the wearable provider account
-before reconnecting. Recovery does not depend on an automatic export endpoint,
-operator action, or vendor support.
-Direct sleep webhooks remain the authoritative carrier.
+exports. Recognized SDK sources such as Apple Health participate independently
+of the Link-only `JUNCTION_PROVIDER_FILTER`.
+
+The importer owns summary semantics and emits bounded canonical
+source/resource normalization evidence; historical coverage must consume that
+evidence rather than maintain a second raw-payload metric parser. Junction's
+historical-pull status is authoritative when available: `success` completes an
+obligation even with zero rows, provider-specific history ranges are accepted
+as reported, and `not_pulled` creates no obligation. Scheduled, in-progress,
+retrying, unknown, malformed, or unavailable status stays pending on the
+existing daily retry cadence. Canonical normalization evidence and
+authenticated old-window push evidence are the bounded fallback when
+introspection is unavailable. Direct Garmin sleep webhooks remain the
+authoritative carrier.
+
+Connection metadata owns aggregate retry status, attempts, and cadence across
+pending sources; a provider source row owns provider-specific recovery state.
+Once the shared observation ladder is saturated, an explicit Junction
+`failure` for every still-pending Garmin obligation can mark the Garmin source
+reconnect-required while aggregate metadata remains `retrying` for another
+provider. Successful Garmin coverage clears that source marker independently.
+Current ingestion stays active. The member must confirm the existing
+connection-wide disconnect before restarting the Garmin export, because the
+reset can disconnect other wearables on the same Junction connection. If
+provider-side deregistration fails, the local disconnect still stands and the
+member must remove the connection in the Garmin account before reconnecting.
 
 The direct companion spot-HRV row is deliberately not a provider push-primary
 cell: it represents a user-requested local measurement, so no authoritative
