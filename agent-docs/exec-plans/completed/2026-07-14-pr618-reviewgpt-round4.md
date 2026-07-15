@@ -120,8 +120,8 @@ a new requirement-level continuation decision; there is no automatic Round 6.
 - Control-plane invalid JSON and body-read failure are marked response-
   unavailable. Latest `main` removed the retired channel, and the merge keeps it
   deleted.
-- Latest `main` at `7bcc26b46087b7d5be06ee27dea6ef042ae2cbd2` is merged at
-  `ea3df60b22e5b335da506d12c63b605af93b2f14`. The prompt-upgrade commit, first
+- Latest `main` at `d27da542de3bff81c73d42204b4b17543c585a1c` is merged at
+  `42a9f699a1ed41d7333deaa0e9d8f5350590bcfd`. The prompt-upgrade commit, first
   reviewed head, and previous reviewed head remain ancestors. Semantic audits
   found the Junction historical-coverage and member-trial changes disjoint from
   this PR. The later fresh-input and group-turn ordering changes overlapped only
@@ -130,7 +130,13 @@ a new requirement-level continuation decision; there is no automatic Round 6.
   imported-count tracking yields only background work, reply admission remains
   ID-only, foreign group input remains pending for its next causal turn, and the
   accepted foreground reply still passes through the exact provider-entry
-  permit.
+  permit. The later exact-mailbox-continuation merge overlaps the workspace
+  runner, entrypoint tests, and protocol documentation. Its continuation wake
+  selection remains downstream of the workspace CAS and independent of the
+  exact runtime-revision provider-entry permit; exact wake requeueing preserves
+  newer foreground work. The three directly overlapping runtime test files pass
+  373/373. Three inherited protocol references to the retired channel were
+  deleted so the durable documentation matches current `main`.
 - Shared-host `pnpm verify:acceptance` at `6c35a39fcce51f37b0ee2e126336aa484cfc2597`
   passed every pre-coverage gate, including dependency policy, workspace
   boundaries, hosted guards, runtime-artifact preparation, TypeScript 7
@@ -158,3 +164,6 @@ a new requirement-level continuation decision; there is no automatic Round 6.
 - Scoped `git diff --check`, privacy/identifier, prohibited-cast, secret-literal,
   binary, generated/sensitive-path, and retired-channel added-line scans are
   green. Exact-head CI and ReviewGPT Round 5 remain required.
+Status: completed
+Updated: 2026-07-15
+Completed: 2026-07-15

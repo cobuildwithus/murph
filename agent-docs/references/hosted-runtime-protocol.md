@@ -92,7 +92,7 @@ The hosted adapter is the mailbox importer. It decodes a conversation mailbox
 row into a bounded `AssistantInputEvent`, stages it in local runtime state,
 marks the active invocation dirty, and checkpoints that dirty state only at the
 final runtime-owned idle or scheduled-wake checkpoint. Plain-text Linq plus
-attachment-free Telegram and WhatsApp input does not initialize or import inbox
+attachment-free Telegram input does not initialize or import inbox
 projection. Linq input with link parts retains the existing projection path.
 Direct email retains raw-message projection because its staged preview is
 bounded; group-routed email remains intentionally raw-free.
@@ -811,7 +811,7 @@ active invocation dirty. Foreground runtime work may defer intermediate checkpoi
 The active invocation remains dirty until the runtime-owned
 idle or scheduled-wake checkpoint succeeds. RunnerContainer never records
 pending checkpoint intent. Activity expiry is cleanup-only. Plain-text Linq plus
-attachment-free Telegram and WhatsApp input skips projection and cannot be
+attachment-free Telegram input skips projection and cannot be
 delayed by projection initialization or history scans. Linq links, direct email,
 and attachment projection status are logged, and their artifacts remain
 rebuildable best-effort state rather than a reason to take another workspace
@@ -943,7 +943,7 @@ attachment-bearing non-email input, and direct raw email, local inbox projection
 and audio/video transcript enrichment may run after local staging and before
 assistant admission because they update rebuildable local projection artifacts
 and `AssistantInputEvent` projection metadata. Plain-text Linq plus
-attachment-free Telegram and WhatsApp input proceeds from staging to admission
+attachment-free Telegram input proceeds from staging to admission
 without that work.
 Projection updates must not request an additional workspace checkpoint. Linq
 inbound message deletion is still eventual, but it is
