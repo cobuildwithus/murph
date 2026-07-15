@@ -1375,14 +1375,21 @@ function buildAssistantSharedAutomationActionText(
   conversationScope: AssistantConversationScope,
   hostedRuntime: boolean
 ): string {
+  const actionGuidance = hostedRuntime
+    ? `An existing automation in this bound runtime vault may be changed even when it stores an earlier conversation route. Use ${code(
+        "vault-cli automation edit"
+      )} for non-route changes and ${code(
+        "vault-cli automation set-status"
+      )} to pause, reactivate, or archive it; omit route flags so its stored route remains unchanged.`
+    : `Use ${code(
+        "vault-cli automation save"
+      )} with typed schedule and instruction fields to create or update ordinary automations.`;
   const routeGuidance = hostedRuntime
-    ? conversationScope === "group"
-      ? "Group automation writes are current-room-only: omit route flags so the trusted room route is inherited, never use saved personal/self targets, and do not try to create, edit, import, pause, or reactivate an automation owned by another conversation."
-      : "Hosted chat automation writes are current-conversation-only: omit route flags so the trusted route is inherited."
+    ? `Use ${code(
+        "vault-cli automation save"
+      )} to create or fully replace an ordinary automation. New records, full save/import-json replacements, and explicit route options bind to the trusted current ${conversationScope === "group" ? "group room" : "conversation"}; do not target another route.${conversationScope === "group" ? " Never use saved personal/self targets in this group vault." : ""}`
     : `Pass ${code("--channel")} with ${code("--delivery-target")}, ${code("--thread-id")}, or ${code("--participant-id")} for the intended destination.`;
-  return `Use ${code(
-    "vault-cli automation save"
-  )} with typed schedule and instruction fields to create or update ordinary automations. ${routeGuidance} Reserve ${code(
+  return `${actionGuidance} ${routeGuidance} Reserve ${code(
     "vault-cli automation import-json"
   )} for advanced payload imports that the typed surface cannot express.
 
@@ -1398,7 +1405,7 @@ function buildAssistantSharedAutomationPreferenceText(
   hostedRuntime: boolean
 ): string {
   const routePreference = hostedRuntime
-    ? `Omit route flags so the automation inherits ${conversationScope === "group" ? "this group room" : "this conversation"}; a preserve automation continues that conversation instead of starting a separate thread.`
+    ? `For a new automation or full replacement, omit route flags so it inherits ${conversationScope === "group" ? "this group room" : "this conversation"}; a preserve automation continues that conversation instead of starting a separate thread.`
     : "A preserve automation continues its resolved conversation.";
   const selfTargetPreference = hostedRuntime || conversationScope === "group"
     ? "Do not inspect or reuse saved personal phone, Telegram, or email self-targets for this chat-authored automation."

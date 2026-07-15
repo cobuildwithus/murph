@@ -1202,13 +1202,28 @@ describe('assistant protocol index planning', () => {
     expect(plan.developerInstructions).not.toContain('/settings?voice=true')
     expect(plan.developerInstructions).not.toContain('Hosted wearable connection links are available')
     expect(plan.developerInstructions).toContain(
-      'Group automation writes are current-room-only',
+      'existing automation in this bound runtime vault',
     )
     expect(plan.developerInstructions).toContain(
-      'never use saved personal/self targets',
+      '`vault-cli automation edit` for non-route changes',
     )
-    expect(plan.developerInstructions).not.toContain(
-      'explicit route flags',
+    expect(plan.developerInstructions).toContain(
+      '`vault-cli automation set-status`',
+    )
+    expect(plan.developerInstructions).toContain(
+      'stored route remains unchanged',
+    )
+    expect(plan.developerInstructions).toContain(
+      'bind to the trusted current group room',
+    )
+    expect(plan.developerInstructions).toContain(
+      'Never use saved personal/self targets',
+    )
+    expect(plan.developerInstructions).toContain(
+      'explicit route options',
+    )
+    expect(plan.developerInstructions).toContain(
+      'do not target another route',
     )
     expect(plan.dynamicTools.map((tool) => tool.name)).toEqual(
       expect.arrayContaining([
