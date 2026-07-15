@@ -29,6 +29,9 @@ const SOURCE_ROOTS = [
 ] as const
 
 const ALLOWED_NON_CORE_CANONICAL_MUTATORS = [
+  // Production runner smoke only: constructs disposable vault fixtures and
+  // proves the shipped CLI/sandbox behavior inside an isolated container.
+  'apps/cloudflare/src/hosted-runner-smoke-child.ts',
 ] as const
 
 const FS_MUTATION_PATTERNS = [

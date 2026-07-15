@@ -508,6 +508,7 @@ describe("hosted execution coverage gaps", () => {
       "./assistant-capabilities",
       "./assistant-identifiers",
       "./assistant-model",
+      "./assistant-permissions",
       "./assistant-personalization",
       "./assistant-usage",
       "./auth",

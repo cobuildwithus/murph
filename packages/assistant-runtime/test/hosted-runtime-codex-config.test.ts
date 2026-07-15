@@ -18,7 +18,7 @@ import {
 } from "@murphai/assistant-engine/assistant-skill-assets";
 import {
   MURPH_GROUP_READ_PERMISSION_PROFILE,
-} from "@murphai/assistant-engine/assistant-codex-permissions";
+} from "@murphai/hosted-execution/assistant-permissions";
 import {
   HostedAssistantConfigurationError,
 } from "@murphai/operator-config/hosted-assistant-config";
@@ -210,7 +210,7 @@ test("hosted Codex runtime config writes OpenAI Responses config without secret 
   assert.match(
     config,
     new RegExp(
-      String.raw`\[permissions\.${MURPH_GROUP_READ_PERMISSION_PROFILE}\.filesystem\.":workspace_roots"\]\n"\." = "read"\n"\.runtime" = "none"\n"\.runtime/\*\*" = "none"\n"\.codex" = "none"\n"\.codex/\*\*" = "none"\n"\.env" = "none"\n"\.env\.\*" = "none"\n"\*\*/\.env" = "none"\n"\*\*/\.env\.\*" = "none"`,
+      String.raw`\[permissions\.${MURPH_GROUP_READ_PERMISSION_PROFILE}\.filesystem\.":workspace_roots"\]\n"\." = "read"\n"\.runtime" = "deny"\n"\.codex" = "deny"\n"\*\*/\.env" = "deny"\n"\*\*/\.env\.\*" = "deny"`,
       "u",
     ),
   );
@@ -1375,14 +1375,10 @@ test("hosted Codex config TOML omits credential values and runtime authority hea
       "",
       `[permissions.${MURPH_GROUP_READ_PERMISSION_PROFILE}.filesystem.":workspace_roots"]`,
       '"." = "read"',
-      '".runtime" = "none"',
-      '".runtime/**" = "none"',
-      '".codex" = "none"',
-      '".codex/**" = "none"',
-      '".env" = "none"',
-      '".env.*" = "none"',
-      '"**/.env" = "none"',
-      '"**/.env.*" = "none"',
+      '".runtime" = "deny"',
+      '".codex" = "deny"',
+      '"**/.env" = "deny"',
+      '"**/.env.*" = "deny"',
       "",
       `[permissions.${MURPH_GROUP_READ_PERMISSION_PROFILE}.network]`,
       "enabled = false",

@@ -26,7 +26,7 @@ import {
 import {
   buildMurphGroupReadPermissionProfileTomlLines,
   MURPH_GROUP_READ_PERMISSION_PROFILE,
-} from "@murphai/assistant-engine/assistant-codex-permissions";
+} from "@murphai/hosted-execution/assistant-permissions";
 import {
   HOSTED_CODEX_SHELL_ENVIRONMENT_INHERITANCE,
   HOSTED_CODEX_SHELL_ENVIRONMENT_INCLUDE_ONLY,
