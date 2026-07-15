@@ -1,8 +1,5 @@
 import { createHmac } from "node:crypto";
 import {
-  MURPH_ASSISTANT_SIGNUP_WELCOME_MESSAGE,
-} from "@murphai/contracts";
-import {
   buildHostedExecutionMemberActivatedWake,
 } from "@murphai/hosted-execution";
 import { afterAll, beforeAll, describe, expect, it, vi } from "vitest";
@@ -28,10 +25,6 @@ const userId = `member_local_linq_onboarding_followup_${Date.now()}`;
 const linqWebhookSecret = "linq-local-onboarding-followup-secret";
 const onboardingCompleteReplyText = "Setup is marked complete.";
 const productionLikeAssistantModel = "gpt-5.5";
-// This scenario proves lifecycle ownership rather than quiet-window timing.
-// Production's 180-second floor is covered separately by env/runtime tests.
-const lifecycleCheckpointDelayMs =
-  process.env.MURPH_HOSTED_LOCAL_E2E_FAST_GATE === "1" ? 1 : 30_000;
 
 const streamDevLogs = process.env.MURPH_E2E_STREAM_DEV_LOGS === "1";
 const workerPersistDirOverride = process.env.MURPH_E2E_CF_PERSIST_DIR?.trim() || null;
