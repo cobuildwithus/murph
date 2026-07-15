@@ -59,7 +59,9 @@ import {
   type HostedRuntimeLogContext,
 } from "./runtime-logs.ts";
 import {
+  HostedCanonicalWriteReceiptArtifactReadError,
   omitHostedCanonicalWriteReceiptLogStatusFields,
+  readHostedCanonicalWriteReceiptArtifact,
   readHostedCanonicalWriteReceiptLogEntries,
   readHostedCanonicalWriteReceiptLogStatusFingerprint,
   type HostedCanonicalWriteReceiptLogStatusFingerprint,
@@ -204,6 +206,11 @@ export async function restoreHostedWorkspaceRuntimeJobWorkspace(input: {
     } catch (error) {
       if (input.signal?.aborted) {
         throw input.signal.reason ?? error;
+      }
+      if (error instanceof HostedCanonicalWriteReceiptArtifactReadError) {
+        await clearHostedWorkspaceRuntimeLocalRoots(restored);
+        await clearHostedWorkspaceRestoreCachesBestEffort(restored.vaultRoot);
+        throw error.cause ?? error;
       }
       return {
         count: 0,
@@ -1045,7 +1052,10 @@ async function applyHostedCanonicalWriteReceiptsFromWorkspaceState(input: {
     }
     appliedReceiptRefs.add(receiptRefKey);
 
-    const bytes = await input.platform.artifactStore.get(entry.sha256);
+    const bytes = await readHostedCanonicalWriteReceiptArtifact({
+      artifactStore: input.platform.artifactStore,
+      sha256: entry.sha256,
+    });
     if (!bytes) {
       throw new Error("Hosted canonical write receipt artifact is unavailable.");
     }
@@ -1084,7 +1094,10 @@ async function readHostedCanonicalWritePayloadForRestore(input: {
   platform: HostedRuntimePlatform;
   ref: HostedCanonicalWriteReceiptContentRef;
 }): Promise<Uint8Array | ArrayBuffer | null> {
-  return await input.platform.artifactStore.get(input.ref.sha256);
+  return await readHostedCanonicalWriteReceiptArtifact({
+    artifactStore: input.platform.artifactStore,
+    sha256: input.ref.sha256,
+  });
 }
 
 function parseHostedCanonicalWriteReceiptForRestore(
