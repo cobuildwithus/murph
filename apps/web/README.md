@@ -1117,10 +1117,11 @@ Current hosted billing assumptions:
   the local trial and usage-period window in that operation.
 - A live `trialing` Pulse Trial extends from its current Stripe trial end. A
   lapsed `paused` no-card Pulse Trial restarts for seven days from Preview time.
-  The proof expires after 15 minutes. Paid, scheduled, canceling, canceled,
-  incomplete, past-due, unpaid, foreign, or otherwise mismatched billing is
-  displayed as ineligible and is never mutated. The route does not search for
-  members, process cohorts or batches, or clean up provider subscriptions.
+  The proof expires after 15 minutes. Active Family sponsorship and paid,
+  scheduled, canceling, canceled, incomplete, past-due, unpaid, foreign, or
+  otherwise mismatched direct billing are displayed as ineligible and are never
+  mutated. The route does not search for members, process cohorts or batches,
+  or clean up provider subscriptions.
 - Stripe reads and writes use one 80-second attempt. Apply gives the member lock
   at most 25 seconds to acquire and the locked transaction at most 190 seconds.
   The provider update uses no proration and carries a proof-derived idempotency
