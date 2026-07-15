@@ -1735,10 +1735,15 @@ describe("hosted device-sync wakes", () => {
     const activeConnection = buildHostedConnection({
       provider: "junction",
     });
-    let currentSources: Array<{ lastErrorCode: string; status: string }> = [];
+    let currentSources: Array<{
+      lastErrorCode: string;
+      sourceProviderSlug: string;
+      status: string;
+    }> = [];
     const revokeAccess = vi.fn(async () => {
       currentSources = [{
         lastErrorCode: DEVICE_SYNC_HISTORICAL_DATA_RECONNECT_REQUIRED_ERROR_CODE,
+        sourceProviderSlug: "garmin",
         status: "error",
       }];
       throw new Error("junction deregistration failed upstream");
