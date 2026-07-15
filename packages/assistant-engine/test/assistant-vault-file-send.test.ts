@@ -447,10 +447,10 @@ describe('assistant vault-file send', () => {
     expect(result.responseMediaPatch).toBeUndefined()
     expect(result.rpcResult).toMatchObject({ success: true })
     expect(result.rpcResult.contentItems[0]?.text).toBe(JSON.stringify({
-      approvalUrl: 'https://murph.test/approve/haa_test',
       filename: 'report.pdf',
       status: 'pending',
     }))
+    expect(result.rpcResult.contentItems[0]?.text).not.toContain('haa_test')
   })
 
   it('attaches an approved vault file to the normal assistant reply path', async () => {

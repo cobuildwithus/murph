@@ -1954,8 +1954,8 @@ describe('assistant codex runtime', () => {
 
   const vaultApprovalUrlScenarios = [
     {
-      expectedFinalMessage: `Approve here:\n\nhttps://www.withmurph.ai/approve/haa_${'a'.repeat(32)}`,
-      name: 'replaces a model-corrupted link with the exact owner URL',
+      expectedFinalMessage: `Approval is required.\n\nhttps://www.withmurph.ai/approve/haa_${'a'.repeat(32)}`,
+      name: 'appends the exact owner URL outside model context',
       selectNoReplyBeforeApproval: false,
     },
     {
@@ -1966,17 +1966,11 @@ describe('assistant codex runtime', () => {
     {
       approvalCount: 2,
       expectedFinalMessage: [
-        'Approve here:',
+        'Approval is required.',
         `https://www.withmurph.ai/approve/haa_${'a'.repeat(32)}`,
         `https://www.withmurph.ai/approve/haa_${'b'.repeat(32)}`,
       ].join('\n\n'),
       name: 'preserves every exact owner URL when multiple vault approvals are pending',
-      selectNoReplyBeforeApproval: false,
-    },
-    {
-      expectedFinalMessage: `Approve here: https://www.withmurph.ai/approve/haa_${'a'.repeat(32)}`,
-      modelMessage: `Approve here: https://www.withmurph.ai/approve/haa_${'a'.repeat(32)}.`,
-      name: 'strips sentence punctuation from an exact owner URL',
       selectNoReplyBeforeApproval: false,
     },
   ] as const
@@ -1990,11 +1984,9 @@ describe('assistant codex runtime', () => {
       `https://www.withmurph.ai/approve/haa_${'a'.repeat(32)}`,
       `https://www.withmurph.ai/approve/haa_${'b'.repeat(32)}`,
     ].slice(0, approvalCount)
-    const malformedApprovalUrls = [
-      `https://www.withmurph.ai/approve/haa_${'a'.repeat(31)}`,
-      `https://www.withmurph.ai/approve/haa_${'b'.repeat(31)}`,
-    ].slice(0, approvalCount)
     let nextApprovalIndex = 0
+    const onFinishWithoutReplyAccepted = vi.fn()
+    const onFinishWithoutReplyRecorded = vi.fn()
     const sendVaultFile = vi.fn(async () => {
       const approvalUrl = exactApprovalUrls[nextApprovalIndex]
       if (!approvalUrl) {
@@ -2058,9 +2050,18 @@ describe('assistant codex runtime', () => {
                 tool: 'send_vault_file',
               },
             }))
-            await expect(waitForRpcResponse(child, requestId)).resolves.toMatchObject({
+            await expect(waitForRpcResponse(child, requestId)).resolves.toEqual({
               id: requestId,
-              result: { success: true },
+              result: {
+                contentItems: [{
+                  text: JSON.stringify({
+                    filename: `report-${approvalIndex + 1}.pdf`,
+                    status: 'pending',
+                  }),
+                  type: 'inputText',
+                }],
+                success: true,
+              },
             })
           }
 
@@ -2089,9 +2090,7 @@ describe('assistant codex runtime', () => {
             params: {
               item: {
                 id: 'assistant-vault-approval-url',
-                message: 'modelMessage' in scenario
-                  ? scenario.modelMessage
-                  : `Approve here: ${malformedApprovalUrls.join(' ')}`,
+                message: 'Approval is required.',
                 type: 'assistant_message',
               },
             },
@@ -2114,6 +2113,8 @@ describe('assistant codex runtime', () => {
     const result = await executeCodexAppServerTurn({
       allowFinishWithoutReply: true,
       hostedToolContext,
+      onFinishWithoutReplyAccepted,
+      onFinishWithoutReplyRecorded,
       prompt: 'send the report',
       workingDirectory,
     })
@@ -2127,12 +2128,118 @@ describe('assistant codex runtime', () => {
       expect(result.finalMessage.split(exactApprovalUrl)).toHaveLength(2)
     }
     expect(sendVaultFile).toHaveBeenCalledTimes(approvalCount)
+    expect(onFinishWithoutReplyAccepted).not.toHaveBeenCalled()
+    expect(onFinishWithoutReplyRecorded).not.toHaveBeenCalled()
   }
 
   it.each(vaultApprovalUrlScenarios)(
     '$name for a pending vault approval',
     runVaultApprovalUrlScenario,
   )
+
+  it('leaves an earlier no-reply unsettled when the provider fails after creating a vault approval', async () => {
+    const workingDirectory = await createTempDir(
+      'assistant-codex-vault-approval-failure-work-',
+    )
+    const exactApprovalUrl =
+      `https://www.withmurph.ai/approve/haa_${'c'.repeat(32)}`
+    const sendVaultFile = vi.fn(async () => ({
+      approvalUrl: exactApprovalUrl,
+      filename: 'report.pdf',
+      status: 'pending' as const,
+    }))
+    const hostedToolContext = createHostedToolContext({
+      computerToolsAvailable: false,
+      sendVaultFile,
+      vaultFileSendAvailable: true,
+    })
+    const onFinishWithoutReplyAccepted = vi.fn()
+    const onFinishWithoutReplyRecorded = vi.fn()
+
+    codexMocks.spawn.mockImplementation(() => {
+      const child = new MockChildProcess()
+
+      queueMicrotask(() => {
+        void (async () => {
+          const initialize = await waitForRpcMethod(child, 'initialize')
+          child.stdout.write(jsonLine({ id: initialize.id, result: {} }))
+          await writeWarmTurnStarted({
+            child,
+            requestCount: 1,
+            threadId: 'thread-vault-approval-failure',
+            turnId: 'turn-vault-approval-failure',
+          })
+          child.stdout.write(jsonLine({
+            id: 81,
+            method: 'item/tool/call',
+            params: {
+              arguments: {},
+              namespace: 'murph',
+              tool: 'finish_without_reply',
+            },
+          }))
+          await expect(waitForRpcResponse(child, 81)).resolves.toMatchObject({
+            id: 81,
+            result: { success: true },
+          })
+          child.stdout.write(jsonLine({
+            id: 82,
+            method: 'item/tool/call',
+            params: {
+              arguments: { ref: 'documents/report.pdf' },
+              namespace: 'murph',
+              tool: 'send_vault_file',
+            },
+          }))
+          await expect(waitForRpcResponse(child, 82)).resolves.toEqual({
+            id: 82,
+            result: {
+              contentItems: [{
+                text: JSON.stringify({
+                  filename: 'report.pdf',
+                  status: 'pending',
+                }),
+                type: 'inputText',
+              }],
+              success: true,
+            },
+          })
+          child.stdout.write(jsonLine({
+            method: 'turn/completed',
+            params: {
+              status: 'failed',
+              threadId: 'thread-vault-approval-failure',
+              turnId: 'turn-vault-approval-failure',
+            },
+          }))
+        })()
+      })
+
+      return child
+    })
+
+    const error: unknown = await executeCodexAppServerTurn({
+      allowFinishWithoutReply: true,
+      hostedToolContext,
+      onFinishWithoutReplyAccepted,
+      onFinishWithoutReplyRecorded,
+      prompt: 'send the report',
+      workingDirectory,
+    }).then(
+      () => {
+        throw new Error('expected the Codex turn to fail')
+      },
+      (turnError: unknown) => turnError,
+    )
+
+    expect(error).toMatchObject({ code: 'ASSISTANT_CODEX_FAILED' })
+    expect(readCodexAppServerTurnFailureContext(error)).toMatchObject({
+      acceptedNoReplyDeliveryContextOrdinals: [],
+    })
+    expect(sendVaultFile).toHaveBeenCalledOnce()
+    expect(onFinishWithoutReplyAccepted).not.toHaveBeenCalled()
+    expect(onFinishWithoutReplyRecorded).not.toHaveBeenCalled()
+  })
 
   it('aborts and drains in-flight image generation when the turn fails', async () => {
     const workingDirectory = await createTempDir('assistant-codex-image-failure-work-')
@@ -14574,6 +14681,8 @@ describe('assistant codex event shaping', () => {
     it('includes pending reactions in the failure context when a no-reply turn fails', async () => {
       const workingDirectory = await createTempDir('assistant-codex-reaction-fail-work-')
       const codexHome = await createTempDir('assistant-codex-reaction-fail-home-')
+      const onFinishWithoutReplyAccepted = vi.fn()
+      const onFinishWithoutReplyRecorded = vi.fn()
       const spawnedChildren: MockChildProcess[] = []
       mockProcessGroupSignalsForChildren(spawnedChildren)
 
@@ -14648,6 +14757,8 @@ describe('assistant codex event shaping', () => {
         env: {
           PATH: '/custom/bin',
         },
+        onFinishWithoutReplyAccepted,
+        onFinishWithoutReplyRecorded,
         prompt: 'react and then finish without reply',
         sandbox: 'workspace-write',
         workingDirectory,
@@ -14670,6 +14781,19 @@ describe('assistant codex event shaping', () => {
           },
         ],
       })
+      expect(onFinishWithoutReplyAccepted).toHaveBeenCalledOnce()
+      expect(onFinishWithoutReplyAccepted).toHaveBeenCalledWith({
+        deliveryContextOrdinal: 0,
+      })
+      expect(onFinishWithoutReplyRecorded).toHaveBeenCalledOnce()
+      expect(onFinishWithoutReplyRecorded).toHaveBeenCalledWith({
+        deliveryContextOrdinal: 0,
+      })
+      expect(
+        onFinishWithoutReplyAccepted.mock.invocationCallOrder[0],
+      ).toBeLessThan(
+        onFinishWithoutReplyRecorded.mock.invocationCallOrder[0],
+      )
     })
 
     it('preserves accepted no-reply and rollout context when the recorded hook fails', async () => {
@@ -14680,9 +14804,7 @@ describe('assistant codex event shaping', () => {
         `sessions/2026/07/14/rollout-2026-07-14T01-02-03-${threadId}.jsonl`
       const onFinishWithoutReplyAccepted = vi.fn()
       const markerFailure = new Error('no-reply marker persistence failed')
-      const recordedHookCalled = createDeferred<void>()
       const onFinishWithoutReplyRecorded = vi.fn(async () => {
-        recordedHookCalled.resolve()
         throw markerFailure
       })
       const spawnedChildren: MockChildProcess[] = []
@@ -14727,7 +14849,19 @@ describe('assistant codex event shaping', () => {
                 turnId: 'turn-no-reply-recorded-fail',
               },
             }))
-            await recordedHookCalled.promise
+            await expect(waitForRpcResponse(child, 43)).resolves.toMatchObject({
+              id: 43,
+              result: { success: true },
+            })
+            child.stdout.write(jsonLine({
+              method: 'turn/completed',
+              params: {
+                turn: {
+                  id: 'turn-no-reply-recorded-fail',
+                  status: 'completed',
+                },
+              },
+            }))
           })()
         })
 

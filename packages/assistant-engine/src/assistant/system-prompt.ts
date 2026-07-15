@@ -1115,7 +1115,7 @@ function buildAssistantHealthRecordIngestionInvariantText(): string {
 function buildAssistantVaultFileSendGuidanceText(): string {
   return [
     "Vault file sends:",
-    "- When `murph.send_vault_file` returns `status: \"pending\"` with an `approvalUrl`, send a normal text reply with the raw approval URL, preferably as the final line in messaging channels. The file is not attached yet. Do not omit the URL, summarize around it without the URL, or rely on a separate automated message.",
+    "- When `murph.send_vault_file` returns `status: \"pending\"`, explain naturally that approval is required, using the returned filename when useful. The file is not attached yet. The runtime appends the exact approval link outside model context; do not invent, request, or print an approval URL and do not call `finish_without_reply`.",
     "- When `murph.send_vault_file` returns `status: \"approved\"`, write a concise, natural reply using the returned filename when useful, such as \"Here it is: report.pdf.\" Do not quote or paraphrase `deliveryStatus`, approval metadata, queue mechanics, or \"delivery is not confirmed\" as stock user-facing copy. Do not claim the file was delivered or sent successfully unless a later delivery result explicitly confirms `sent`. Do not call `finish_without_reply` for the file send.",
   ].join("\n");
 }
