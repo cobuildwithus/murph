@@ -89,8 +89,9 @@ import {
   HOSTED_RUNTIME_VAULT_SHARE_DELIVER_PATH,
   HOSTED_RUNTIME_WORKSPACE_PATH,
 } from "@murphai/hosted-execution/routes";
-import type {
-  R2PutValueLike,
+import {
+  encryptHostedStorageEnvelope,
+  type R2PutValueLike,
 } from "../src/crypto.ts";
 import {
   createHostedArtifactStore,
@@ -3704,7 +3705,16 @@ describe("handleRunnerOutboundRequest", () => {
   it("reports a persistently unreadable encrypted artifact as terminal", async () => {
     const fixture = await createHostedRuntimeCryptoContextFixture();
     const baseEnv = createRunnerOutboundEnv(fixture.env);
-    const malformedEnvelope = new TextEncoder().encode('{"schema":"invalid"}');
+    const envelope = await encryptHostedStorageEnvelope({
+      key: Uint8Array.from({ length: 32 }, (_, index) => 101 + index),
+      keyId: fixture.context.envelopes.runtime.rootKeyId,
+      plaintext: new TextEncoder().encode("persisted artifact"),
+      scope: "artifact",
+    });
+    const malformedEnvelope = new TextEncoder().encode(JSON.stringify({
+      ...envelope,
+      keyId: ` ${envelope.keyId}`,
+    }));
     const env = createRunnerOutboundEnv({
       ...fixture.env,
       BUNDLES: {

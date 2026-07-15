@@ -1,4 +1,4 @@
-import { describe, expect, it } from "vitest";
+import { describe, expect, it, vi } from "vitest";
 
 import {
   createHostedArtifactStore,
@@ -100,6 +100,46 @@ describe("readEncryptedR2Payload", () => {
       HostedEncryptedR2PayloadUnreadableError,
     );
     await expect(read).rejects.toThrow("Hosted encrypted R2 payload is unreadable.");
+  });
+
+  it.each([
+    ["whitespace-only", " "],
+    ["surrounding-whitespace", " udrk:runtime:previous-root "],
+    ["unbounded", "k".repeat(257)],
+  ])("rejects a %s stored key ID before historical-key lookup", async (_case, keyId) => {
+    const key = createTestRootKey(19);
+    const envelope = await encryptHostedStorageEnvelope({
+      key,
+      keyId: "udrk:runtime:current-root",
+      plaintext: new TextEncoder().encode("{\"ok\":true}"),
+      scope: "artifact",
+    });
+    const payload = new TextEncoder().encode(JSON.stringify({ ...envelope, keyId }));
+    const resolveCryptoKeyById = vi.fn(async () => key);
+
+    await expect(readEncryptedR2Payload({
+      bucket: {
+        async get() {
+          return {
+            async arrayBuffer() {
+              return payload.buffer.slice(
+                payload.byteOffset,
+                payload.byteOffset + payload.byteLength,
+              );
+            },
+          };
+        },
+        async put() {
+          throw new Error("unexpected rewrite");
+        },
+      },
+      cryptoKey: key,
+      expectedKeyId: "udrk:runtime:current-root",
+      key: "artifacts/test",
+      resolveCryptoKeyById,
+      scope: "artifact",
+    })).rejects.toBeInstanceOf(HostedEncryptedR2PayloadUnreadableError);
+    expect(resolveCryptoKeyById).not.toHaveBeenCalled();
   });
 
   it("fails closed when a stored payload is rebound without the expected AAD", async () => {

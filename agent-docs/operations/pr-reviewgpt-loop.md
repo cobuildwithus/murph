@@ -328,10 +328,15 @@ the touched surface, push it, and use the ordinary review-loop rules.
   the round counter; correct the gap and retry the same substantive round.
 - `ROUND_OUTCOME: RETROSPECTIVE_REQUIRED` pauses tactical remediation until the
   requirement-level retrospective is recorded. It is not a structural verdict.
-- Hard cap: 5 rounds per PR. There is no automatic sixth substantive round. If
-  accepted findings remain, revisit the original requirement and obtain an
-  explicit continuation decision after the retrospective; the answer may be
-  delete, revert, shrink, split, redesign, continue, or abandon.
+- Hard cap: 5 rounds per PR. There is no automatic sixth substantive round. An
+  accepted round-five finding may still be reproduced and fixed; do not leave a
+  known bug in place merely because the review counter reached five. After that
+  fix, pause the ReviewGPT loop and make every other required specialist audit,
+  parent final review, verification check, and PR CI job green. Record the cap
+  retrospective and obtain an explicit continuation decision before starting
+  round six; the answer may be delete, revert, shrink, split, redesign,
+  continue, or abandon. A green non-ReviewGPT gate does not make the PR
+  merge-ready without the required later `PASS`.
 - Report a per-round summary at handoff: findings received, accepted, rejected
   with reasons, origin/mechanism, what landed, source-shape movement, and any
   retrospective decision. Report tooling retries separately.
