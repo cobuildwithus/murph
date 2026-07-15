@@ -65,16 +65,29 @@ const RUNNER_ENTRYPOINT_BUNDLE_TOTAL_BYTES_BUDGET = 9_300_000;
 // reviewed boot-critical batching recovery logic. Assembly measured
 // 1,486,467B on CI Linux (+699B over the prior budget) and 1,493,474B on local
 // macOS (+7,706B); advance only by the larger entry overage and preserve the
-// noise band. PR #678 then measured 1,494,107B on local macOS after separating
-// runtime-owned approval-link delivery from capability-free transcript history;
-// advance by that exact 633B overage and preserve the same noise band.
-const RUNNER_ENTRYPOINT_BUNDLE_ENTRY_BASELINE_BYTES = 1_446_107;
+// noise band. PR #678 then added 633B for runtime-owned approval-link delivery.
+// Post-delivery foreground release, mutation-scoped maintenance,
+// and indexed cron reconciliation on that merged base measure 1,497,825B on
+// local macOS, 4,351B over the resulting budget. Advance by that exact overage;
+// the review remediation deletes foreground terminal-evidence inspection and
+// leaves exact replyability policy with maintenance. Preserving the merged
+// base's precomputed boundary-tail retry added 233B; making the phase wake
+// authoritative across the complete local tail drain removes 179B. Explicit
+// invocation-local wake provenance adds 230B while preventing an inherited
+// reminder from suppressing pending-index repair.
+const RUNNER_ENTRYPOINT_BUNDLE_ENTRY_BASELINE_BYTES = 1_450_742;
 // PR #631 added 913B for its reviewed Clinical Records crypto-lane labels and
 // another 872B for bounded checkpoint/resume handling. The exact PR #626 head
 // then measured a 7,190,569B local macOS closure (+33,357B over the prior
 // budget); advance only by that measured overage and preserve the separate
 // 96KB noise band.
-const RUNNER_ENTRYPOINT_BUNDLE_STATIC_CLOSURE_BASELINE_BYTES = 7_094_569;
+// On that merged base, indexed cron search, purpose-correlated artifact reads,
+// foreground cancellation, and delayed index repair measure a 7,192,498B local
+// static boot closure, 1,929B over the resulting budget. Advance by that exact
+// overage; boundary-tail retry preservation added the same measured 233B, and
+// complete-tail wake ownership later removes 179B. Explicit invocation-local
+// wake provenance adds 230B. Preserve the separate 96KB noise band.
+const RUNNER_ENTRYPOINT_BUNDLE_STATIC_CLOSURE_BASELINE_BYTES = 7_096_782;
 // Noise band above the baseline before the ratchet trips (~2%): absorbs
 // content-hash and minifier jitter without letting real boot-path weight land
 // silently. Keep it tight; it is a tolerance for noise, not feature headroom.

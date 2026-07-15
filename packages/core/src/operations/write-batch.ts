@@ -735,45 +735,40 @@ async function applyHostedCanonicalJsonlAppendReceiptAction(input: {
     }
   }
 
-  if (existing.byteLength < originalSize) {
-    throw new VaultError(
-      "HOSTED_CANONICAL_WRITE_APPEND_BASE_MISMATCH",
-      "Hosted canonical JSONL append base size is not present.",
-    );
-  }
-
-  const baseReceipt = createCommittedPayloadReceipt(existing.subarray(0, input.baseByteLength));
-  if (baseReceipt.sha256 !== input.baseSha256 || baseReceipt.byteLength !== input.baseByteLength) {
-    throw new VaultError(
-      "HOSTED_CANONICAL_WRITE_APPEND_BASE_MISMATCH",
-      "Hosted canonical JSONL append base content does not match the receipt.",
-    );
-  }
-
-  const appendedEnd = originalSize + input.bytes.byteLength;
-  if (
-    existing.byteLength >= appendedEnd &&
-    Buffer.from(existing.subarray(originalSize, appendedEnd)).equals(Buffer.from(input.bytes))
-  ) {
-    return;
-  }
-
-  if (existing.byteLength !== originalSize) {
-    if (await tryReconcileHostedCanonicalAuditAppend({
-      bytes: input.bytes,
-      comparisonOptions,
-      existing,
-      target,
-    })) {
+  const baseSizeIsPresent = existing.byteLength >= originalSize;
+  const baseReceipt = baseSizeIsPresent
+    ? createCommittedPayloadReceipt(existing.subarray(0, input.baseByteLength))
+    : null;
+  const baseMatches = baseReceipt?.sha256 === input.baseSha256
+    && baseReceipt.byteLength === input.baseByteLength;
+  if (baseMatches) {
+    const appendedEnd = originalSize + input.bytes.byteLength;
+    if (
+      existing.byteLength >= appendedEnd &&
+      Buffer.from(existing.subarray(originalSize, appendedEnd)).equals(Buffer.from(input.bytes))
+    ) {
       return;
     }
-    throw new VaultError(
-      "HOSTED_CANONICAL_WRITE_APPEND_BASE_MISMATCH",
-      "Hosted canonical JSONL append base content does not match the receipt.",
-    );
+    if (existing.byteLength === originalSize) {
+      await fs.appendFile(target.absolutePath, input.bytes);
+      return;
+    }
   }
 
-  await fs.appendFile(target.absolutePath, input.bytes);
+  if (await tryReconcileHostedCanonicalAuditAppend({
+    bytes: input.bytes,
+    comparisonOptions,
+    existing,
+    target,
+  })) {
+    return;
+  }
+  throw new VaultError(
+    "HOSTED_CANONICAL_WRITE_APPEND_BASE_MISMATCH",
+    baseSizeIsPresent
+      ? "Hosted canonical JSONL append base content does not match the receipt."
+      : "Hosted canonical JSONL append base size is not present.",
+  );
 }
 
 async function tryReconcileHostedCanonicalAuditAppend(input: {

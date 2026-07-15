@@ -1281,11 +1281,11 @@ describe("runHostedAssistantAutomation", () => {
   });
 
   it("treats missing inbox runtime state as a non-fatal bootstrap gap", async () => {
-    mocks.runAssistantAutomationPass.mockRejectedValueOnce({
+    mocks.runAssistantAutomationPass.mockRejectedValue({
       code: "INBOX_NOT_INITIALIZED",
     });
 
-    await expect(
+    const runWithInputIds = (freshAssistantInputIds: readonly string[] = []) =>
       runHostedAssistantAutomation(
         "/tmp/vault-root",
         "req_123",
@@ -1299,12 +1299,16 @@ describe("runHostedAssistantAutomation", () => {
         {
           eventId: "evt_automation_gap",
           kind: "runtime.timer",
-        occurredAt: "2026-04-08T00:00:00.000Z",
-        triggerKind: "runtime_timer",
-        userId: "member_123",
-      },
-    ),
-    ).resolves.toEqual(expect.objectContaining({
+          occurredAt: "2026-04-08T00:00:00.000Z",
+          triggerKind: "runtime_timer",
+          userId: "member_123",
+        },
+        freshAssistantInputIds,
+      );
+
+    const backgroundResult = await runWithInputIds();
+
+    expect(backgroundResult).toEqual(expect.objectContaining({
       nextWakeAt: expect.any(String),
       progressed: true,
       redactedLogEntries: [
@@ -1316,6 +1320,10 @@ describe("runHostedAssistantAutomation", () => {
         }),
       ],
     }));
+    expect(backgroundResult.selectedInputWakeAt).toBeNull();
+
+    const foregroundResult = await runWithInputIds(["ain_bootstrap_gap"]);
+    expect(foregroundResult.selectedInputWakeAt).toBe(foregroundResult.nextWakeAt);
   });
 
   it("rethrows unexpected automation failures", async () => {
@@ -4184,6 +4192,106 @@ describe("runHostedAssistantAutomationLane", () => {
       }),
     );
     expect(result.nextWakeAt).toBeNull();
+  });
+
+  it("keeps an aggregate reminder out of foreground input wake provenance", async () => {
+    const reminderWakeAt = "2026-04-08T06:00:00.000Z";
+    mocks.runAssistantAutomationPass.mockResolvedValueOnce({
+      cronProcessed: 0,
+      nextWakeAt: reminderWakeAt,
+      progressed: false,
+      replies: {
+        considered: 1,
+        failed: 0,
+        nextWakeAt: null,
+        replied: 0,
+        skipped: 1,
+      },
+      routing: {
+        considered: 0,
+        failed: 0,
+        nextWakeAt: null,
+        noAction: 0,
+        routed: 0,
+        skipped: 0,
+      },
+    });
+
+    const result = await runHostedAssistantAutomationLane({
+      wake: {
+        eventId: "evt_foreground_with_reminder",
+        kind: "runtime.timer",
+        occurredAt: "2026-04-08T00:00:00.000Z",
+        triggerKind: "runtime_timer",
+        userId: "member_123",
+      },
+      executionContext: {
+        hosted: {
+          issueDeviceConnectLink: vi.fn(),
+          memberId: "member_123",
+          userEnvKeys: [],
+        },
+      },
+      freshAssistantInputIds: ["ain_foreground_with_reminder"],
+      requestId: "req_foreground_with_reminder",
+      runtime: createHostedAutomationRuntime(),
+      vaultRoot: "/tmp/vault-root",
+    });
+
+    expect(result).toEqual(expect.objectContaining({
+      assistantAutomationSelectedInputWakeAt: null,
+      nextWakeAt: reminderWakeAt,
+    }));
+  });
+
+  it("exposes a foreground input retry before aggregate wake ownership is lost", async () => {
+    const retryWakeAt = "2026-04-08T00:00:30.000Z";
+    mocks.runAssistantAutomationPass.mockResolvedValueOnce({
+      cronProcessed: 0,
+      nextWakeAt: retryWakeAt,
+      progressed: false,
+      replies: {
+        considered: 1,
+        failed: 0,
+        nextWakeAt: retryWakeAt,
+        replied: 0,
+        skipped: 1,
+      },
+      routing: {
+        considered: 0,
+        failed: 0,
+        nextWakeAt: null,
+        noAction: 0,
+        routed: 0,
+        skipped: 0,
+      },
+    });
+
+    const result = await runHostedAssistantAutomationLane({
+      wake: {
+        eventId: "evt_foreground_retry",
+        kind: "runtime.timer",
+        occurredAt: "2026-04-08T00:00:00.000Z",
+        triggerKind: "runtime_timer",
+        userId: "member_123",
+      },
+      executionContext: {
+        hosted: {
+          issueDeviceConnectLink: vi.fn(),
+          memberId: "member_123",
+          userEnvKeys: [],
+        },
+      },
+      freshAssistantInputIds: ["ain_foreground_retry"],
+      requestId: "req_foreground_retry",
+      runtime: createHostedAutomationRuntime(),
+      vaultRoot: "/tmp/vault-root",
+    });
+
+    expect(result).toEqual(expect.objectContaining({
+      assistantAutomationSelectedInputWakeAt: retryWakeAt,
+      nextWakeAt: retryWakeAt,
+    }));
   });
 
   it("schedules an immediate wake when the capped background scan saturates", async () => {

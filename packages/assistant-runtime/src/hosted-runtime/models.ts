@@ -202,6 +202,7 @@ export interface HostedMaintenanceMetrics {
   assistantAutomationReplyFailed?: number | null;
   assistantAutomationScanElapsedMs?: number | null;
   assistantAutomationSelectedInputIds?: string[] | null;
+  assistantAutomationSelectedInputWakeAt?: string | null;
   assistantAutomationTerminalLinqCleanup?: readonly string[] | null;
   assistantAutomationTotalElapsedMs?: number | null;
   assistantInputCandidateListed?: boolean | null;

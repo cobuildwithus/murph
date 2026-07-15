@@ -6,14 +6,6 @@ import type {
   HostedRuntimeAssistantConfigurationToolResponse,
 } from "@murphai/hosted-execution/runtime-control";
 import {
-  buildHostedAssistantConfigurationApprovalRequest,
-} from "@murphai/hosted-execution/assistant-configuration-approval";
-import {
-  serializeHostedActionApprovalRequest,
-} from "@murphai/hosted-execution/action-approval";
-
-import { consumeHostedActionApproval } from "../action-approvals";
-import {
   readHostedMemberAssistantModelPreference,
   updateHostedMemberAssistantConfigurationTx,
 } from "../hosted-onboarding/assistant-model-preference";
@@ -46,45 +38,21 @@ export async function handleHostedRuntimeAssistantConfigurationTool(input: {
     };
   }
   const updateRequest = input.request;
-  if ("approval" in updateRequest) {
-    const expectedApprovalRequest = buildHostedAssistantConfigurationApprovalRequest({
-      changes: updateRequest,
-      returnContactKind: updateRequest.approval.request.returnContactKind,
-      target: updateRequest.target,
-    });
-    if (
-      serializeHostedActionApprovalRequest(expectedApprovalRequest) !==
-        serializeHostedActionApprovalRequest(updateRequest.approval.request)
-    ) {
-      throw actionApprovalUnavailable();
-    }
-  }
 
   try {
     const updated = await prisma.$transaction(async (tx) => {
-      if ("assistantInputId" in updateRequest) {
-        const causalSeq =
-          await readHostedMailboxPreferenceCausalSeqByAssistantInputIdTx({
-            assistantInputId: updateRequest.assistantInputId,
-            memberId: input.memberId,
-            prisma: tx,
-          });
-        if (causalSeq === null) {
-          throw hostedOnboardingError({
-            code: "ASSISTANT_CONFIGURATION_INPUT_AUTHORITY_INVALID",
-            httpStatus: 403,
-            message: "Assistant configuration is unavailable for this turn.",
-          });
-        }
-      } else {
-        const approval = await consumeHostedActionApproval({
+      const causalSeq =
+        await readHostedMailboxPreferenceCausalSeqByAssistantInputIdTx({
+          assistantInputId: updateRequest.assistantInputId,
           memberId: input.memberId,
           prisma: tx,
-          request: updateRequest.approval,
         });
-        if (approval.status !== "approved") {
-          throw actionApprovalUnavailable();
-        }
+      if (causalSeq === null) {
+        throw hostedOnboardingError({
+          code: "ASSISTANT_CONFIGURATION_INPUT_AUTHORITY_INVALID",
+          httpStatus: 403,
+          message: "Assistant configuration is unavailable for this turn.",
+        });
       }
       const updatedConfiguration = await updateHostedMemberAssistantConfigurationTx({
         memberId: input.memberId,
@@ -96,16 +64,6 @@ export async function handleHostedRuntimeAssistantConfigurationTool(input: {
           ? {}
           : { reasoningEffort: updateRequest.reasoningEffort }),
       });
-      if (
-        "target" in updateRequest
-        && (
-          updatedConfiguration.model !== updateRequest.target.model
-          || updatedConfiguration.reasoningEffort !==
-            updateRequest.target.reasoningEffort
-        )
-      ) {
-        throw actionApprovalUnavailable();
-      }
       return updatedConfiguration;
     }, HOSTED_ONBOARDING_TRANSACTION_OPTIONS);
 
@@ -147,14 +105,6 @@ export async function handleHostedRuntimeAssistantConfigurationTool(input: {
       },
     };
   }
-}
-
-function actionApprovalUnavailable() {
-  return hostedOnboardingError({
-    code: "ACTION_APPROVAL_UNAVAILABLE",
-    httpStatus: 403,
-    message: "Secure approval is unavailable for this change.",
-  });
 }
 
 function projectHostedRuntimeAssistantConfigurationSnapshot(input: {

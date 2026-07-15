@@ -110,9 +110,9 @@ forwards only that batch's terminal input id; inside the mutation transaction,
 web binds that input id to the callback member and one live conversation
 mailbox row before re-deriving access and Sol eligibility. A
 successful change applies at the next hosted invocation without passkey
-approval, a mailbox event, or a vault copy. Legacy approval-shaped
-configuration callbacks remain web-accepted only while pre-rollout runners
-drain; new runtimes do not create them. The personalization response
+approval, a mailbox event, or a vault copy. The runtime and web control plane
+accept only the input-bound update shape; approval-shaped configuration
+callbacks are rejected. The personalization response
 returns only the effective enum values (normalizing absent stored style to the
 shared `formal`/`upbeat` presentation defaults), read-only model availability,
 and truthful saved/unchanged state so the assistant can confirm what actually

@@ -26,11 +26,6 @@ import {
   parseHostedAssistantReasoningEffortOverride,
 } from "../src/assistant-model.ts";
 import {
-  buildHostedAssistantConfigurationApprovalConsumerId,
-  buildHostedAssistantConfigurationApprovalRequest,
-} from "../src/assistant-configuration-approval.ts";
-
-import {
   HOSTED_MAILBOX_ITEM_PAYLOAD_SCHEMA,
   HOSTED_MAILBOX_PAYLOAD_SCHEMA,
   HOSTED_MAILBOX_KINDS,
@@ -425,38 +420,15 @@ describe("hosted runtime control contracts", () => {
       reasoningEffort: "medium",
     })).toThrow(/not allowed/u);
 
-    const target = {
-      model: HOSTED_ASSISTANT_TERRA_MODEL,
-      reasoningEffort: "high" as const,
-    };
-    const approvalRequest = buildHostedAssistantConfigurationApprovalRequest({
-      changes: { reasoningEffort: "high" },
-      returnContactKind: "text",
-      target,
-    });
-    const approval = {
-      approvalGeneration: "b".repeat(64),
-      consumerId: buildHostedAssistantConfigurationApprovalConsumerId(
-        approvalRequest,
-      ),
-      request: approvalRequest,
-    };
-    expect(parseHostedRuntimeAssistantConfigurationControlRequest({
-      action: "update",
-      approval,
-      reasoningEffort: "high",
-      target,
-    })).toEqual({
-      action: "update",
-      approval,
-      reasoningEffort: "high",
-      target,
-    });
     expect(() => parseHostedRuntimeAssistantConfigurationControlRequest({
       action: "update",
-      approval,
-      target,
-    })).toThrow(/requires a model or reasoning effort/u);
+      approval: {},
+      reasoningEffort: "high",
+      target: {
+        model: HOSTED_ASSISTANT_TERRA_MODEL,
+        reasoningEffort: "high",
+      },
+    })).toThrow(/not allowed/u);
 
     const snapshot = {
       availableModels: [...HOSTED_ASSISTANT_PRODUCT_MODELS],

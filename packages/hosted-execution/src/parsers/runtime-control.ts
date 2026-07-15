@@ -7,12 +7,6 @@ import {
   parseAssistantUsageRecord,
 } from "../assistant-usage.ts";
 import {
-  parseHostedActionApprovalConsumeRequest,
-} from "../action-approval.ts";
-import type {
-  HostedAssistantConfigurationApprovalTarget,
-} from "../assistant-configuration-approval.ts";
-import {
   isHostedAssistantProductModel,
   isHostedAssistantReasoningEffort,
   parseHostedAssistantModelOverride,
@@ -2290,45 +2284,25 @@ export function parseHostedRuntimeAssistantConfigurationControlRequest(
     );
   }
 
-  if (record.assistantInputId !== undefined) {
-    assertAllowedObjectKeys(
-      record,
-      new Set(["action", "assistantInputId", "model", "reasoningEffort"]),
-      "Hosted runtime assistant configuration control update request",
-    );
-    const assistantInputId = requireString(
-      record.assistantInputId,
-      "Hosted runtime assistant configuration control assistantInputId",
-    );
-    if (!/^ain_[0-9a-f]{32}$/u.test(assistantInputId)) {
-      throw new TypeError(
-        "Hosted runtime assistant configuration control assistantInputId is invalid.",
-      );
-    }
-    const changes = parseHostedRuntimeAssistantConfigurationChanges(
-      record,
-      "Hosted runtime assistant configuration control",
-    );
-    return {
-      action,
-      assistantInputId,
-      ...changes,
-    };
-  }
-
   assertAllowedObjectKeys(
     record,
-    new Set(["action", "approval", "model", "reasoningEffort", "target"]),
+    new Set(["action", "assistantInputId", "model", "reasoningEffort"]),
     "Hosted runtime assistant configuration control update request",
   );
-
+  const assistantInputId = requireString(
+    record.assistantInputId,
+    "Hosted runtime assistant configuration control assistantInputId",
+  );
+  if (!/^ain_[0-9a-f]{32}$/u.test(assistantInputId)) {
+    throw new TypeError(
+      "Hosted runtime assistant configuration control assistantInputId is invalid.",
+    );
+  }
   const changes = parseHostedRuntimeAssistantConfigurationChanges(
     record,
     "Hosted runtime assistant configuration control",
   );
-  const approval = parseHostedActionApprovalConsumeRequest(record.approval);
-  const target = parseHostedRuntimeAssistantConfigurationTarget(record.target);
-  return { action, approval, target, ...changes };
+  return { action, assistantInputId, ...changes };
 }
 
 function parseHostedRuntimeAssistantConfigurationChanges(
@@ -2355,31 +2329,6 @@ function parseHostedRuntimeAssistantConfigurationChanges(
   return reasoningEffort === undefined
     ? { model }
     : { model, reasoningEffort };
-}
-
-function parseHostedRuntimeAssistantConfigurationTarget(
-  value: unknown,
-): HostedAssistantConfigurationApprovalTarget {
-  const record = requireObject(
-    value,
-    "Hosted runtime assistant configuration control target",
-  );
-  assertAllowedObjectKeys(
-    record,
-    new Set(["model", "reasoningEffort"]),
-    "Hosted runtime assistant configuration control target",
-  );
-
-  return {
-    model: parseHostedRuntimeAssistantProductModel(
-      record.model,
-      "Hosted runtime assistant configuration control target model",
-    ),
-    reasoningEffort: parseHostedRuntimeAssistantReasoningEffort(
-      record.reasoningEffort,
-      "Hosted runtime assistant configuration control target reasoningEffort",
-    ),
-  };
 }
 
 export function parseHostedRuntimeAssistantConfigurationToolResponse(

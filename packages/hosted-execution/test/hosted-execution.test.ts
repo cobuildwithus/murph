@@ -504,7 +504,6 @@ describe("hosted execution coverage gaps", () => {
       ".",
       "./action-approval",
       "./assistant-capabilities",
-      "./assistant-configuration-approval",
       "./assistant-identifiers",
       "./assistant-model",
       "./assistant-personalization",

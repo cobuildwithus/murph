@@ -89,8 +89,9 @@ import {
   HOSTED_RUNTIME_VAULT_SHARE_DELIVER_PATH,
   HOSTED_RUNTIME_WORKSPACE_PATH,
 } from "@murphai/hosted-execution/routes";
-import type {
-  R2PutValueLike,
+import {
+  encryptHostedStorageEnvelope,
+  type R2PutValueLike,
 } from "../src/crypto.ts";
 import {
   createHostedArtifactStore,
@@ -102,6 +103,10 @@ import {
   handleRunnerOutboundRequest,
   type RunnerOutboundEnvironmentSource,
 } from "../src/runner-outbound.ts";
+import {
+  HOSTED_RUNTIME_ARTIFACT_FETCH_CORRELATION_ID_HEADER,
+  HOSTED_RUNTIME_ARTIFACT_READ_PURPOSE_HEADER,
+} from "../src/runner-outbound/headers.ts";
 import {
   resolveRunnerOutboundUserCryptoContext,
   resolveRunnerOutboundUserRunnerStub,
@@ -3669,9 +3674,15 @@ describe("handleRunnerOutboundRequest", () => {
     });
     vi.stubGlobal("fetch", fixture.fetchMock);
 
+    const artifactFetchCorrelationId = "123e4567-e89b-42d3-a456-426614174000";
     const response = await handleRunnerOutboundRequest(
       new Request(MISSING_ARTIFACT_URL, {
-        headers: createRunnerWriteFenceProxyHeaders(),
+        headers: {
+          ...createRunnerWriteFenceProxyHeaders(),
+          [HOSTED_RUNTIME_ARTIFACT_FETCH_CORRELATION_ID_HEADER]:
+            artifactFetchCorrelationId,
+          [HOSTED_RUNTIME_ARTIFACT_READ_PURPOSE_HEADER]: "workspace_restore",
+        },
         method: "GET",
       }),
       env,
@@ -3684,6 +3695,8 @@ describe("handleRunnerOutboundRequest", () => {
         component: "runner",
         details: expect.objectContaining({
           artifactFound: false,
+          artifactFetchCorrelationId,
+          artifactReadPurpose: "workspace_restore",
           method: "GET",
           operation: "artifact_fetch",
           responseStatus: 404,
@@ -3699,6 +3712,62 @@ describe("handleRunnerOutboundRequest", () => {
     );
     expect(serializedLogs).not.toContain("member_123");
     expect(serializedLogs).not.toContain("a".repeat(64));
+  });
+
+  it("reports a persistently unreadable encrypted artifact as terminal", async () => {
+    const fixture = await createHostedRuntimeCryptoContextFixture();
+    const baseEnv = createRunnerOutboundEnv(fixture.env);
+    const envelope = await encryptHostedStorageEnvelope({
+      key: Uint8Array.from({ length: 32 }, (_, index) => 101 + index),
+      keyId: fixture.context.envelopes.runtime.rootKeyId,
+      plaintext: new TextEncoder().encode("persisted artifact"),
+      scope: "artifact",
+    });
+    const malformedEnvelope = new TextEncoder().encode(JSON.stringify({
+      ...envelope,
+      keyId: `${envelope.keyId}\0bad`,
+    }));
+    const env = createRunnerOutboundEnv({
+      ...fixture.env,
+      BUNDLES: {
+        ...baseEnv.BUNDLES,
+        async get() {
+          return {
+            async arrayBuffer() {
+              return toArrayBuffer(malformedEnvelope);
+            },
+            key: "redacted-artifact-key",
+            size: malformedEnvelope.byteLength,
+          };
+        },
+      },
+    });
+    vi.stubGlobal("fetch", fixture.fetchMock);
+
+    const response = await handleRunnerOutboundRequest(
+      new Request(MISSING_ARTIFACT_URL, {
+        headers: createRunnerWriteFenceProxyHeaders(),
+        method: "GET",
+      }),
+      env,
+      "member_123",
+    );
+
+    expect(response.status).toBe(422);
+    await expect(response.json()).resolves.toEqual({
+      error: "Artifact is unreadable.",
+    });
+    expect(hostedExecutionMocks.emitHostedExecutionStructuredLog).toHaveBeenCalledWith(
+      expect.objectContaining({
+        component: "runner",
+        details: expect.objectContaining({
+          artifactReadable: false,
+          operation: "artifact_fetch",
+          responseStatus: 422,
+        }),
+        message: "Hosted runner artifact request completed.",
+      }),
+    );
   });
 
   it("rejects artifact reads when the claimed member does not own the active fence", async () => {

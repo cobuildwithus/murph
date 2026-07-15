@@ -98,11 +98,41 @@ import type {
   RuntimeLivenessPort,
 } from "./liveness.ts";
 
+export const HOSTED_RUNTIME_ARTIFACT_READ_PURPOSES = [
+  "canonical_write_receipt",
+  "legacy_snapshot_materialization",
+  "workspace_artifact_materialization",
+  "workspace_restore",
+] as const;
+
+export type HostedRuntimeArtifactReadPurpose =
+  typeof HOSTED_RUNTIME_ARTIFACT_READ_PURPOSES[number];
+
+export interface HostedRuntimeArtifactReadContext {
+  purpose: HostedRuntimeArtifactReadPurpose;
+  signal?: AbortSignal | null;
+}
+
 export interface HostedRuntimeArtifactReader {
   get(
     sha256: string,
-    context?: { signal?: AbortSignal | null },
+    context: HostedRuntimeArtifactReadContext,
   ): Promise<Uint8Array | null>;
+}
+
+export class HostedRuntimeArtifactReadError extends Error {
+  readonly retryable: boolean;
+
+  constructor(input: { cause: unknown; retryable: boolean }) {
+    super(
+      input.cause instanceof Error
+        ? input.cause.message
+        : "Hosted runtime artifact read failed.",
+      { cause: input.cause },
+    );
+    this.name = "HostedRuntimeArtifactReadError";
+    this.retryable = input.retryable;
+  }
 }
 
 export interface HostedRuntimeAssistantConfigurationToolPort {
