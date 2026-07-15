@@ -1049,6 +1049,7 @@ Internal hosted maintenance and Cloudflare callback routes:
 - `POST /api/internal/device-sync/runtime/apply`
 - `POST /api/internal/device-sync/runtime/dirty-pending`
 - `POST /api/internal/device-sync/runtime/dirty-ack`
+- `POST /api/internal/device-sync/reconcile`
 - `POST /api/internal/hosted-execution/usage/record`
 - `POST /api/internal/hosted-execution/plan-usage/tool`
 - `POST /api/internal/hosted-mailbox/fetch`

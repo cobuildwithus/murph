@@ -4324,6 +4324,43 @@ describe("buildHostedExecutionRuntimePlatform", () => {
     }
   });
 
+  it("routes device reconcile through the signed web-control port", async () => {
+    const fetchMock = vi.fn(async (input: RequestInfo | URL, init?: RequestInit) => {
+      const request = input instanceof Request ? input : new Request(input, init);
+      expect(new URL(request.url).pathname).toBe("/api/internal/device-sync/reconcile");
+      await expect(request.json()).resolves.toEqual({ connectionId: "conn_123" });
+      return new Response(JSON.stringify({
+        connectionId: "conn_123",
+        occurredAt: "2026-07-15T12:00:00.000Z",
+        status: "queued",
+      }), {
+        headers: { "content-type": "application/json; charset=utf-8" },
+        status: 200,
+      });
+    });
+    const environment = readHostedExecutionEnvironment(createHostedExecutionTestEnv({
+      HOSTED_WEB_BASE_URL: "https://web.example.test",
+    }));
+    const platform = buildTestHostedExecutionRuntimePlatform({
+      boundUserId: "member_123",
+      fetchImpl: fetchMock as typeof fetch,
+      webCallbackSigning: environment.webCallbackSigning,
+      webControlBaseUrl: "https://web.example.test",
+    });
+
+    await expect(platform.deviceSyncPort!.reconcileAccount!({
+      connectionId: "conn_123",
+    })).resolves.toEqual({
+      connectionId: "conn_123",
+      occurredAt: "2026-07-15T12:00:00.000Z",
+      status: "queued",
+    });
+
+    const request = requireFetchRequest(fetchMock.mock.calls[0], "device reconcile request");
+    expectDefaultRuntimeWriteFenceHeaders(request);
+    expect(request.headers.get("x-hosted-execution-user-id")).toBe("member_123");
+  });
+
   it("write-fences Linq egress authority assertions and preserves only boolean directness", async () => {
     let responseCount = 0;
     const fetchMock = vi.fn(async (input: RequestInfo | URL, init?: RequestInit) => {

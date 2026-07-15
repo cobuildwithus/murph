@@ -6,6 +6,7 @@ import {
   HOSTED_CLI_BRIDGE_ASSISTANT_CURRENT_ROUTE_PATH,
   HOSTED_CLI_BRIDGE_ROUTE_GRANT_HEADER,
   HOSTED_CLI_BRIDGE_DEVICE_ACCOUNT_LIST_PATH,
+  HOSTED_CLI_BRIDGE_DEVICE_ACCOUNT_RECONCILE_PATH,
   HOSTED_CLI_BRIDGE_DEVICE_CONNECT_LINK_PATH,
   HOSTED_CLI_BRIDGE_REQUEST_TIMEOUT_MS,
   HOSTED_CLI_BRIDGE_TOKEN_ENV,
@@ -13,6 +14,7 @@ import {
   HOSTED_CLI_BRIDGE_URL_ENV,
   parseHostedCliAssistantCurrentRouteRequest,
   parseHostedCliDeviceAccountListRequest,
+  parseHostedCliDeviceAccountReconcileRequest,
   parseHostedCliDeviceConnectLinkRequest,
   type HostedCliAssistantCurrentRoute,
 } from "@murphai/hosted-execution/cli-runtime-bridge";
@@ -272,6 +274,7 @@ async function handleHostedCliBridgeRequest(input: {
       path !== HOSTED_CLI_BRIDGE_ASSISTANT_CURRENT_ROUTE_PATH
       && path !== HOSTED_CLI_BRIDGE_DEVICE_CONNECT_LINK_PATH
       && path !== HOSTED_CLI_BRIDGE_DEVICE_ACCOUNT_LIST_PATH
+      && path !== HOSTED_CLI_BRIDGE_DEVICE_ACCOUNT_RECONCILE_PATH
     ) {
       writeHostedCliBridgeError(
         input.response,
@@ -391,6 +394,7 @@ async function handleActiveHostedCliBridgeRequest(input: {
     const request = parseHostedCliDeviceAccountListRequest(body);
     try {
       const snapshot = await input.active.deviceSyncPort.fetchSnapshot({
+        includeCredentialMaterial: false,
         ...(request.provider ? { provider: request.provider } : {}),
         ...(request.sourceProvider ? { sourceProviderSlug: request.sourceProvider } : {}),
       });
@@ -405,6 +409,34 @@ async function handleActiveHostedCliBridgeRequest(input: {
         502,
         "HOSTED_DEVICE_ACCOUNT_LIST_FAILED",
         "Hosted device account list failed.",
+      );
+    }
+    return;
+  }
+
+  if (input.path === HOSTED_CLI_BRIDGE_DEVICE_ACCOUNT_RECONCILE_PATH) {
+    const request = parseHostedCliDeviceAccountReconcileRequest(body);
+    if (!input.active.deviceSyncPort.reconcileAccount) {
+      writeHostedCliBridgeError(
+        input.response,
+        503,
+        "HOSTED_DEVICE_ACCOUNT_RECONCILE_UNAVAILABLE",
+        "Hosted device account reconcile is unavailable.",
+      );
+      return;
+    }
+    try {
+      const result = await input.active.deviceSyncPort.reconcileAccount({
+        connectionId: request.accountId,
+        signal: input.active.signal,
+      });
+      writeHostedCliBridgeJson(input.response, 200, result);
+    } catch {
+      writeHostedCliBridgeError(
+        input.response,
+        502,
+        "HOSTED_DEVICE_ACCOUNT_RECONCILE_FAILED",
+        "Hosted device account reconcile failed.",
       );
     }
     return;

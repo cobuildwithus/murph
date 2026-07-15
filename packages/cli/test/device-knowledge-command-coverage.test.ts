@@ -362,6 +362,7 @@ test('device commands route every verb through the registered device service gro
   )
   assert.equal(reconciled.exitCode, null)
   assert.equal(reconciled.envelope.ok, true)
+  assert.ok('job' in reconciled.envelope.data)
   assert.equal(reconciled.envelope.data.job.accountId, connectedAccount.id)
   assert.deepEqual(calls.reconcileAccount, {
     vault: vaultRoot,

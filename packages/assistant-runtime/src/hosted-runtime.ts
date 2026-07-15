@@ -4568,6 +4568,12 @@ function createAbortGuardedHostedRuntimePlatform(
               guard(() => platform.deviceSyncPort!.applyUpdates(applyInput)),
             createConnectLink: (connectInput) =>
               guard(() => platform.deviceSyncPort!.createConnectLink(connectInput)),
+            ...(platform.deviceSyncPort.reconcileAccount
+              ? {
+                  reconcileAccount: (reconcileInput) =>
+                    guard(() => platform.deviceSyncPort!.reconcileAccount!(reconcileInput)),
+                }
+              : {}),
             fetchDirtyStates: (dirtyInput) =>
               guard(() => platform.deviceSyncPort!.fetchDirtyStates(dirtyInput)),
             fetchSnapshot: (snapshotInput) =>

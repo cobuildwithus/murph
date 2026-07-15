@@ -331,7 +331,7 @@ The placeholder grammar above applies to health nouns that expose the shared sca
 - Top-level `doctor` is a shorthand alias for `assistant doctor`; it shares the same option/output contract so installed `murph doctor` discovery stays truthful.
 - Top-level `run` is a shorthand alias for `assistant run`; it shares the same option/output contract so installed `murph run` discovery stays truthful while keeping automation explicit.
 - Top-level `stop` is a shorthand alias for `assistant stop`; it shares the same option/output contract so installed `murph stop` discovery stays truthful while giving operators a supported recovery path for stuck assistant automation locks.
-- `device` is a local control-plane noun backed by `@murphai/device-syncd`; it exposes provider discovery plus browser-based connect/reconcile/disconnect actions, and it can also start, inspect, or stop the Murph-managed local daemon for the selected vault.
+- `device` is backed locally by `@murphai/device-syncd`; it exposes provider discovery plus browser-based connect/reconcile/disconnect actions, and it can also start, inspect, or stop the Murph-managed local daemon for the selected vault. In hosted execution, `device account list` and `device account reconcile` use the invocation-scoped bridge instead of starting a local daemon.
 
 These are semantic groupings, not a parallel command registry. For example, `event` remains the generic write/read surface for non-specialized event kinds, and `provider` remains the registry-backed noun for `bank/providers/*.md`.
 
@@ -387,6 +387,7 @@ Read surfaces intentionally separate summary from detail:
 - `sample-summary:<date>:<stream>` ids emitted by `timeline` are derived context handles, not valid `show` targets.
 - A successful `show` response surfaces the canonical read id in `entity.id`.
 - `device account show|reconcile|disconnect` accept the device-sync control-plane account ids returned by `device account list`; they are not canonical vault ids.
+- Hosted `device account reconcile` appends one member-bound device-sync wake. The runtime delegates provider-specific job creation to the existing device-sync service; hosted `show` and `disconnect` remain unavailable, and browser Settings remains the hosted disconnect owner.
 
 ## Success Output
 
