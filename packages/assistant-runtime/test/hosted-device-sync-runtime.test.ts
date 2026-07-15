@@ -6764,6 +6764,10 @@ describe("hosted device-sync runtime", () => {
             return createTestJsonResponse({ data: [] });
           }
 
+          if (new URL(url).pathname === "/v2/introspect/historical_pull") {
+            return createTestJsonResponse({ data: [] });
+          }
+
           throw new Error(`Unexpected Junction request: ${url}`);
         },
       },
@@ -6886,7 +6890,7 @@ describe("hosted device-sync runtime", () => {
         {
           junctionHistoricalBackfillEmptyAttempts: 1,
           junctionHistoricalBackfillLastEmptyAt: executedAt,
-          junctionHistoricalBackfillStatus: "coverage_v2_retrying",
+          junctionHistoricalBackfillStatus: "coverage_v3_retrying",
           junctionHistoricalBackfillWindowEnd: "2026-04-03T00:00:00.000Z",
           junctionHistoricalBackfillWindowStart: "2026-04-01T00:00:00.000Z",
         },
@@ -6927,7 +6931,7 @@ describe("hosted device-sync runtime", () => {
         hosted: true,
         junctionHistoricalBackfillEmptyAttempts: 1,
         junctionHistoricalBackfillLastEmptyAt: executedAt,
-        junctionHistoricalBackfillStatus: "coverage_v2_retrying",
+        junctionHistoricalBackfillStatus: "coverage_v3_retrying",
         junctionHistoricalBackfillWindowEnd: "2026-04-03T00:00:00.000Z",
         junctionHistoricalBackfillWindowStart: "2026-04-01T00:00:00.000Z",
       });
@@ -6946,7 +6950,7 @@ describe("hosted device-sync runtime", () => {
         hosted: true,
         junctionHistoricalBackfillEmptyAttempts: 1,
         junctionHistoricalBackfillLastEmptyAt: executedAt,
-        junctionHistoricalBackfillStatus: "coverage_v2_retrying",
+        junctionHistoricalBackfillStatus: "coverage_v3_retrying",
         junctionHistoricalBackfillWindowEnd: "2026-04-03T00:00:00.000Z",
         junctionHistoricalBackfillWindowStart: "2026-04-01T00:00:00.000Z",
       });
@@ -7044,9 +7048,9 @@ describe("hosted device-sync runtime", () => {
         metadata: {
           junctionHistoricalBackfillEmptyAttempts: 5,
           junctionHistoricalBackfillEvidence:
-            `e1|${originalWindowStart}|${originalWindowEnd}|garmin:1`,
+            `e2|${originalWindowStart}|${originalWindowEnd}|garmin:1`,
           junctionHistoricalBackfillLastEmptyAt: "2026-04-04T00:00:00.000Z",
-          junctionHistoricalBackfillStatus: "coverage_v2_exhausted",
+          junctionHistoricalBackfillStatus: "coverage_v3_exhausted",
           junctionHistoricalBackfillWindowEnd: originalWindowEnd,
           junctionHistoricalBackfillWindowStart: originalWindowStart,
         },

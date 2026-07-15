@@ -9,7 +9,11 @@ import {
   parseSerializedCompanionHrvRmssdObservation,
   serializeCompanionHrvRmssdObservation,
 } from "@murphai/contracts";
-import { canNormalizeJunctionSleepCycleRecordToCompactStages } from "@murphai/importers";
+import {
+  canNormalizeJunctionSleepCycleRecordToCompactStages,
+  classifyJunctionSummaryNormalizationEvidence,
+  type JunctionSummaryNormalizationEvidence,
+} from "@murphai/importers";
 import { resolveJunctionOrigin } from "@murphai/importers/device-providers/junction-origin";
 import {
   JUNCTION_ALLOWED_SUMMARY_RESOURCES,
@@ -17,16 +21,8 @@ import {
   JUNCTION_DEFAULT_SUMMARY_RESOURCES,
   JUNCTION_DEFAULT_TIMESERIES_RESOURCES,
   JUNCTION_KNOWN_TIMESERIES_RESOURCES,
-  JUNCTION_SLEEP_END_TIMESTAMP_PATHS,
-  JUNCTION_SLEEP_STAGE_ARRAY_PATHS,
-  JUNCTION_SLEEP_STAGE_COUNT_PATHS,
-  JUNCTION_SLEEP_STAGE_DURATION_PATHS,
-  JUNCTION_SLEEP_STAGE_VALUE_PATHS,
-  JUNCTION_SLEEP_START_TIMESTAMP_PATHS,
-  JUNCTION_SLEEP_SUMMARY_NUMBER_PATHS,
   isJunctionRawDirectIdentityContainerKey,
   isJunctionRawDirectIdentityKey,
-  normalizeJunctionSleepStageValue,
   normalizeJunctionResourceName,
 } from "@murphai/importers/device-providers/junction-resources";
 import { JUNCTION_DEVICE_PROVIDER_DESCRIPTOR } from "@murphai/importers/device-providers/provider-descriptors";
@@ -50,7 +46,11 @@ import {
   type JunctionHistoricalBackfillStatus,
 } from "../junction-historical-backfill-progress.ts";
 import { DEVICE_SYNC_METADATA_MAX_STRING_LENGTH } from "../metadata.ts";
-import { DEVICE_SYNC_HISTORICAL_DATA_RECONNECT_REQUIRED_ERROR_CODE } from "../public-account.ts";
+import {
+  DEVICE_SYNC_HISTORICAL_DATA_RECONNECT_REQUIRED_ERROR_CODE,
+  isJunctionHistoricalResetProviderSlug,
+  requiresHistoricalResetDeviceSyncSource,
+} from "../public-account.ts";
 import {
   assertValidJunctionClientUserIdSecret,
   normalizeJunctionDeviceSyncRuntimeConfig,
@@ -76,8 +76,10 @@ import {
   JunctionClient,
   type JunctionClientConfig,
   type JunctionDateQueryFormat,
+  type JunctionHistoricalPullSnapshot,
   type JunctionProviderConnection,
 } from "./junction-client.ts";
+import { resolveJunctionDeviceConnectRouteByProviderSlug } from "../config/connect-routes.ts";
 import {
   buildJunctionProviderSourceInstanceKey,
   JUNCTION_DEFAULT_PROVIDER_FILTER,
@@ -105,7 +107,6 @@ import type {
   ProviderJobContext,
   ProviderJobResult,
   ProviderScheduleResult,
-  ProviderSnapshotImportReceipt,
   ProviderWebhookContext,
   ProviderWebhookResult,
   StoredDeviceSyncAccount,
@@ -134,9 +135,15 @@ interface JunctionTimeseriesImportResult {
   yieldedAt: string | null;
 }
 
+interface JunctionDirectSummaryImportResult {
+  durableDeliveryAccepted: boolean;
+  normalizationEvidence: readonly JunctionSummaryNormalizationEvidence[];
+}
+
 interface JunctionHistoricalBackfillCoverage {
   complete: boolean;
   pendingProviderSlugs: string[];
+  reconnectProviderSlugs: string[];
 }
 
 type JunctionHistoricalBackfillFollowUp = Pick<ProviderJobResult, "metadataPatch" | "nextReconcileAt" | "scheduledJobs">;
@@ -208,39 +215,6 @@ const JUNCTION_HISTORICAL_BACKFILL_REQUIRED_SUMMARY_RESOURCES = Object.freeze([
 const JUNCTION_HISTORICAL_BACKFILL_REQUIRED_SUMMARY_RESOURCE_SET = new Set<string>(
   JUNCTION_HISTORICAL_BACKFILL_REQUIRED_SUMMARY_RESOURCES,
 );
-const JUNCTION_HISTORICAL_EVIDENCE_ACTIVITY_TIMESTAMP_PATHS = Object.freeze([
-  "observedAtRaw",
-  "observed_at_raw",
-  "observedAt",
-  "observed_at",
-  "timestamp",
-  "time",
-  "date",
-  "day",
-  "calendarDate",
-  "calendar_date",
-  "localDate",
-  "local_date",
-  "end",
-  "endAt",
-  "end_at",
-  "timeEnd",
-  "time_end",
-  "start",
-  "startAt",
-  "start_at",
-  "timeStart",
-  "time_start",
-] as const);
-const JUNCTION_HISTORICAL_EVIDENCE_SLEEP_TIMESTAMP_PATHS = Object.freeze([
-  "sessionEnd",
-  "session_end",
-  ...JUNCTION_SLEEP_END_TIMESTAMP_PATHS,
-  ...JUNCTION_SLEEP_START_TIMESTAMP_PATHS,
-  "sessionStart",
-  "session_start",
-  ...JUNCTION_HISTORICAL_EVIDENCE_ACTIVITY_TIMESTAMP_PATHS,
-] as const);
 
 type JunctionOptionalResourceFailureReason = "not_found" | "unavailable" | "unsupported" | "ambiguous";
 
@@ -258,239 +232,12 @@ interface JunctionSkippedOptionalResource {
   responseDetail?: string;
 }
 
-const JUNCTION_HISTORICAL_SUMMARY_METRIC_PATHS = Object.freeze({
-  activity: [
-    "steps",
-    "step_count",
-    "daily_steps",
-    "activeCalories",
-    "active_calories",
-    "calories",
-    "totalCalories",
-    "total_calories",
-    "distanceKm",
-    "distance_km",
-    "floors",
-    "floorsClimbed",
-    "floors_climbed",
-    "floorsAscended",
-    "floors_ascended",
-    "activityScore",
-    "activity_score",
-    "score",
-  ],
-  body: [
-    "weightKg",
-    "weight_kg",
-    "weight",
-    "bmi",
-    "body_mass_index",
-    "bodyFatPercentage",
-    "body_fat_percentage",
-    "body_fat_percent",
-    "leanBodyMassKg",
-    "lean_body_mass_kg",
-    "leanBodyMassKilogram",
-    "lean_body_mass_kilogram",
-    "leanMassKg",
-    "lean_mass_kg",
-    "waistCircumference",
-    "waist_circumference",
-    "waistCircumferenceCentimeter",
-    "waist_circumference_centimeter",
-    "waistCircumferenceCm",
-    "waist_circumference_cm",
-  ],
-  sleep: JUNCTION_SLEEP_SUMMARY_NUMBER_PATHS,
-  sleep_cycle: [],
-  workouts: [
-    "calories",
-    "totalCalories",
-    "total_calories",
-    "averageHeartRate",
-    "average_heart_rate",
-    "average_hr",
-    "avg_hr",
-    "maxHeartRate",
-    "max_heart_rate",
-    "max_hr",
-  ],
-  meal: [],
-  menstrual_cycle: [],
-  electrocardiogram: [],
-} satisfies Record<JunctionHistoricalBackfillCompletionSummaryResource, readonly string[]>);
-const JUNCTION_RAW_ONLY_COMPLETION_PATHS = Object.freeze({
-  meal: {
-    strings: [
-      "timestamp",
-      "recordedAt",
-      "recorded_at",
-      "loggedAt",
-      "logged_at",
-      "date",
-      "day",
-      "calendarDate",
-      "calendar_date",
-      "name",
-      "mealName",
-      "meal_name",
-      "mealType",
-      "meal_type",
-      "description",
-      "notes",
-    ],
-    numbers: [
-      "calories",
-      "caloriesKcal",
-      "calories_kcal",
-      "energyKcal",
-      "energy_kcal",
-      "kcal",
-      "protein",
-      "proteinGrams",
-      "protein_grams",
-      "protein_g",
-      "carbs",
-      "carbohydrates",
-      "carbohydrateGrams",
-      "carbohydrate_grams",
-      "carbohydrate_g",
-      "fat",
-      "fatGrams",
-      "fat_grams",
-      "fat_g",
-      "fiber",
-      "fibre",
-      "water",
-      "macros.water",
-      "macros.fibre",
-      "macros.fiber",
-      "energy.value",
-    ],
-    arrays: [
-      "foods",
-      "foodItems",
-      "food_items",
-      "items",
-      "ingredients",
-      "nutrients",
-    ],
-  },
-  menstrual_cycle: {
-    strings: [
-      "timestamp",
-      "recordedAt",
-      "recorded_at",
-      "createdAt",
-      "created_at",
-      "date",
-      "day",
-      "cycleStart",
-      "cycle_start",
-      "cycleEnd",
-      "cycle_end",
-      "periodStart",
-      "period_start",
-      "periodEnd",
-      "period_end",
-      "flow",
-      "menstrualFlow",
-      "menstrual_flow",
-      "cyclePhase",
-      "cycle_phase",
-      "menstrualPhase",
-      "menstrual_phase",
-    ],
-    numbers: [
-      "cycleDay",
-      "cycle_day",
-      "menstrualCycleDay",
-      "menstrual_cycle_day",
-      "cycleLengthDays",
-      "cycle_length_days",
-      "periodLengthDays",
-      "period_length_days",
-    ],
-    arrays: [
-      "menstrualFlow",
-      "menstrual_flow",
-      "symptoms",
-      "sexualActivity",
-      "sexual_activity",
-      // Facet arrays the importer normalizes; a window containing only
-      // these must not be classified as an empty backfill.
-      "ovulationTest",
-      "ovulation_test",
-      "homePregnancyTest",
-      "home_pregnancy_test",
-      "detectedDeviations",
-      "detected_deviations",
-      "basalBodyTemperature",
-      "basal_body_temperature",
-    ],
-  },
-  electrocardiogram: {
-    strings: [
-      "sessionStart",
-      "session_start",
-      "classification",
-      "inconclusiveCause",
-      "inconclusive_cause",
-    ],
-    numbers: [
-      "heartRateMean",
-      "heart_rate_mean",
-      "voltageSampleCount",
-      "voltage_sample_count",
-    ],
-    arrays: [],
-  },
-} satisfies Record<"meal" | "menstrual_cycle" | "electrocardiogram", {
-  readonly strings: readonly string[];
-  readonly numbers: readonly string[];
-  readonly arrays: readonly string[];
-}>);
 const JUNCTION_WEBHOOK_NESTED_RECORD_KEYS = Object.freeze([
   "data",
   "results",
   "items",
   "records",
 ] as const);
-const JUNCTION_WORKOUT_START_TIMESTAMP_PATHS = Object.freeze([
-  "startAt",
-  "start_at",
-  "start",
-  "timeStart",
-  "time_start",
-] as const);
-const JUNCTION_WORKOUT_END_TIMESTAMP_PATHS = Object.freeze([
-  "endAt",
-  "end_at",
-  "end",
-  "timeEnd",
-  "time_end",
-] as const);
-const JUNCTION_WORKOUT_DURATION_MINUTE_PATHS = Object.freeze([
-  "durationMinutes",
-  "duration_minutes",
-  "movingTimeMinutes",
-  "moving_time_minutes",
-] as const);
-const JUNCTION_WORKOUT_DURATION_SECOND_PATHS = Object.freeze([
-  "durationSeconds",
-  "duration_seconds",
-  "movingTime",
-  "moving_time",
-  "duration",
-] as const);
-const JUNCTION_WORKOUT_DURATION_MILLISECOND_PATHS = Object.freeze([
-  "durationMillis",
-  "duration_millis",
-] as const);
-const JUNCTION_FLOATING_TIMESTAMP_SOURCE_PROVIDER_SLUGS = new Set([
-  "abbott_libreview",
-  "freestyle_libre",
-]);
 const JUNCTION_TIMESERIES_RESOURCE_NAMES = new Set<string>([
   ...JUNCTION_KNOWN_TIMESERIES_RESOURCES,
 ]);
@@ -858,6 +605,28 @@ export function createJunctionDeviceSyncProvider(
       : retryAt;
   }
 
+  async function loadJunctionHistoricalPullSnapshot(
+    context: ProviderJobContext,
+  ): Promise<JunctionHistoricalPullSnapshot | null> {
+    try {
+      return await client.introspectHistoricalPull({
+        signal: context.signal ?? null,
+        userId: context.account.externalAccountId,
+        userLimit: 1,
+      });
+    } catch (error) {
+      if (context.signal?.aborted) {
+        throw error;
+      }
+
+      context.logger.warn?.("Junction historical-pull introspection was unavailable; using canonical import evidence.", {
+        provider: "junction",
+        errorCode: isDeviceSyncError(error) ? error.code : "JUNCTION_HISTORICAL_PULL_INTROSPECTION_FAILED",
+      });
+      return null;
+    }
+  }
+
   async function executeJob(
     context: ProviderJobContext,
     job: DeviceSyncJobRecord,
@@ -898,21 +667,17 @@ export function createJunctionDeviceSyncProvider(
     if (profileSummaryResult.records.length > 0) {
       summaries[JUNCTION_PROFILE_SUMMARY_RESOURCE] = profileSummaryResult.records;
     }
-    const historicalSummaryCoverage = evaluateJunctionHistoricalBackfillCoverage(
-      summaries,
-      sourceProviders,
-      summaryResources,
-      providerFilter,
-      isConnectHistoricalBackfill
-        ? readJunctionHistoricalBackfillEvidence(
-            context.account.metadata[JUNCTION_HISTORICAL_BACKFILL_METADATA_KEYS.evidence],
-          )
-        : null,
-      window,
-    );
+    const importConnections = sanitizeJunctionImportConnections(sourceProviders);
+    const importSummaries = sanitizeJunctionImportSnapshots(summaries, sourceProviders);
+    const summaryNormalizationEvidence = classifyJunctionSummaryNormalizationEvidence({
+      connections: importConnections,
+      importedAt: summaryWindow.windowEnd,
+      summaries: importSummaries,
+      windowEnd: summaryWindow.windowEnd,
+      windowStart: summaryWindow.windowStart,
+    });
     const historicalSummaryHasRecords = hasJunctionHistoricalBackfillSummaryRecords(
-      summaries,
-      sourceProviders,
+      summaryNormalizationEvidence,
     );
     const summaryHasFetchedRecords = hasJunctionSnapshotRecords(summaries);
     const baseTimeseriesWindowStart = job.kind === "backfill"
@@ -932,11 +697,29 @@ export function createJunctionDeviceSyncProvider(
         importedAt: summaryWindow.windowEnd,
         windowStart: summaryWindow.windowStart,
         windowEnd: summaryWindow.windowEnd,
-        connections: sanitizeJunctionImportConnections(sourceProviders),
-        summaries: sanitizeJunctionImportSnapshots(summaries, sourceProviders),
+        connections: importConnections,
+        summaries: importSummaries,
         timeseries: {},
       });
     }
+    // Current records are durable before the optional historical-status probe.
+    // An unavailable introspection endpoint must not hold fresh ingestion hostage.
+    const historicalPullSnapshot = isConnectHistoricalBackfill && !context.shouldYield?.()
+      ? await loadJunctionHistoricalPullSnapshot(context)
+      : null;
+    const historicalSummaryCoverage = evaluateJunctionHistoricalBackfillCoverage(
+      summaryNormalizationEvidence,
+      sourceProviders,
+      summaryResources,
+      providerFilter,
+      historicalPullSnapshot,
+      isConnectHistoricalBackfill
+        ? readJunctionHistoricalBackfillEvidence(
+            context.account.metadata[JUNCTION_HISTORICAL_BACKFILL_METADATA_KEYS.evidence],
+          )
+        : null,
+      window,
+    );
     if (
       job.kind === "backfill"
       || shouldImportClosedTimeseriesForReconcile(context.account.lastSyncCompletedAt, window.windowEnd)
@@ -970,6 +753,11 @@ export function createJunctionDeviceSyncProvider(
       ? isConnectHistoricalBackfill
         ? buildHistoricalBackfillFollowUp({
             coverageComplete: historicalSummaryCoverage.complete,
+            terminalFailure:
+              historicalSummaryCoverage.pendingProviderSlugs.length > 0
+              && historicalSummaryCoverage.pendingProviderSlugs.every((providerSlug) =>
+                historicalSummaryCoverage.reconnectProviderSlugs.includes(providerSlug)
+              ),
             metadata: context.account.metadata,
             now: context.now,
             windowStart: window.windowStart,
@@ -1004,11 +792,11 @@ export function createJunctionDeviceSyncProvider(
     ) {
       const pendingProviderSlugs = new Set(historicalSummaryCoverage.pendingProviderSlugs);
       const hasCoveredProvider = sourceProviders.some((provider) => {
-        const providerSlug = normalizeProviderSlug(
+        const providerSlug = resolveJunctionHistoricalCoverageProviderSlug(
           provider.origin.sourceProviderSlug ?? provider.slug,
+          providerFilter,
         );
         return providerSlug !== null
-          && providerFilter.includes(providerSlug)
           && mapJunctionSourceStatus(provider.status) !== "disconnected"
           && !pendingProviderSlugs.has(providerSlug);
       });
@@ -1021,7 +809,7 @@ export function createJunctionDeviceSyncProvider(
       if (!historicalSummaryCoverage.complete) {
         await markJunctionHistoricalReconnectRequired(
           context,
-          historicalSummaryCoverage.pendingProviderSlugs,
+          historicalSummaryCoverage.reconnectProviderSlugs,
         );
       }
     }
@@ -1062,17 +850,9 @@ export function createJunctionDeviceSyncProvider(
         .map(normalizeProviderSlug)
         .filter((providerSlug): providerSlug is string => providerSlug !== null),
     );
-    if (recoveryProviderSlugs.size === 0) {
-      for (const source of existingSources) {
-        const providerSlug = normalizeProviderSlug(source.sourceProviderSlug);
-        if (source.status !== "disconnected" && providerSlug) {
-          recoveryProviderSlugs.add(providerSlug);
-        }
-      }
-    }
 
     for (const providerSlug of recoveryProviderSlugs) {
-      if (!providerFilter.includes(providerSlug)) {
+      if (!isJunctionHistoricalResetProviderSlug(providerSlug)) {
         continue;
       }
 
@@ -1154,7 +934,7 @@ export function createJunctionDeviceSyncProvider(
     }
     if (
       resource === "sleep_cycle"
-      && !hasNormalizableJunctionDirectSleepCycleRecord(record, sourceProviderSlug)
+      && !canNormalizeJunctionSleepCycleRecordToCompactStages(record, sourceProviderSlug)
     ) {
       return null;
     }
@@ -1231,6 +1011,16 @@ export function createJunctionDeviceSyncProvider(
       }
     }
 
+    const summaryNormalizationEvidence = providerSnapshot.ok
+      ? classifyJunctionSummaryNormalizationEvidence({
+          connections: sanitizeJunctionImportConnections(sourceProviders),
+          importedAt: window.windowEnd,
+          summaries: sanitizeJunctionImportSnapshots(summaries, sourceProviders),
+          windowEnd: window.windowEnd,
+          windowStart: window.windowStart,
+        })
+      : [];
+
     return {
       generatedAt: context.now,
       provider: "junction",
@@ -1243,9 +1033,9 @@ export function createJunctionDeviceSyncProvider(
         window,
         sourceProviders: describeJunctionDiagnosticSourceProviders(providerSnapshot),
         summary: {
-          hasUsefulHistoricalRecords: providerSnapshot.ok
-            ? hasJunctionHistoricalBackfillSummaryRecords(summaries, sourceProviders)
-            : false,
+          hasUsefulHistoricalRecords: hasJunctionHistoricalBackfillSummaryRecords(
+            summaryNormalizationEvidence,
+          ),
           resources: summaryDiagnostics,
         },
         timeseriesProbe: {
@@ -1293,19 +1083,23 @@ export function createJunctionDeviceSyncProvider(
 
     if (endpoint === "introspect_resources" || endpoint === "historical_pull") {
       const sourceProviderSlug = normalizeProviderSlug(context.sourceProviderSlug);
-      const payloadResult = await runJunctionDiagnosticPayloadCall(() =>
-        endpoint === "introspect_resources"
-          ? client.introspectResources({
+      const response = endpoint === "introspect_resources"
+        ? describeJunctionIntrospectionResources(
+            await runJunctionDiagnosticPayloadCall(() => client.introspectResources({
               sourceProviderSlug,
               userId: context.account.externalAccountId,
               userLimit: 1,
-            })
-          : client.introspectHistoricalPull({
+            })),
+            sourceProviderSlug,
+          )
+        : describeJunctionIntrospectionHistoricalPull(
+            await runJunctionDiagnosticPayloadCall(() => client.introspectHistoricalPull({
               sourceProviderSlug,
               userId: context.account.externalAccountId,
               userLimit: 1,
-            })
-      );
+            })),
+            sourceProviderSlug,
+          );
 
       return {
         generatedAt: context.now,
@@ -1323,9 +1117,7 @@ export function createJunctionDeviceSyncProvider(
             }),
             sourceFiltered: Boolean(sourceProviderSlug),
           },
-          response: endpoint === "introspect_resources"
-            ? describeJunctionIntrospectionResources(payloadResult, sourceProviderSlug)
-            : describeJunctionIntrospectionHistoricalPull(payloadResult, sourceProviderSlug),
+          response,
         },
       };
     }
@@ -1582,24 +1374,27 @@ export function createJunctionDeviceSyncProvider(
 
       const directInput = readJunctionDirectResourceJobInput(job, window);
       if (directInput) {
-        const directHistoricalWindow = isJunctionHistoricalBackfillRequiredSummaryResource(
-          directInput.resource,
-        )
-          ? readJunctionDirectHistoricalEvidenceWindow(
-              directInput,
-              buildConnectHistoricalBackfillWindow(context.account, summaryBackfillDays),
-            )
-          : window;
         const sourceProviders = shouldLoadJunctionDirectResourceSourceProviders(directInput)
           ? await loadSourceProviders()
           : [];
-        const importReceipt = await importJunctionDirectResourceSnapshot(
+        const connectHistoricalWindow = buildConnectHistoricalBackfillWindow(
+          context.account,
+          summaryBackfillDays,
+        );
+        const importResult = await importJunctionDirectResourceSnapshot(
           context,
           sourceProviders,
           directInput.windowStart,
           directInput.windowEnd,
           directInput.resource,
           [directInput.record],
+          connectHistoricalWindow,
+        );
+        const directHistoricalWindow = readJunctionDirectHistoricalEvidenceWindow(
+          directInput,
+          connectHistoricalWindow,
+          importResult.normalizationEvidence,
+          providerFilter,
         );
         return withJunctionHistoricalCoverageVerification(
           context,
@@ -1610,7 +1405,7 @@ export function createJunctionDeviceSyncProvider(
             job,
             directInput,
             directHistoricalWindow,
-            importReceipt,
+            importResult,
             { nextReconcileAt: clampWebhookJobNextReconcileAt(context) },
           ),
         );
@@ -1800,24 +1595,27 @@ export function createJunctionDeviceSyncProvider(
     job: DeviceSyncJobRecord,
     directInput: JunctionDirectResourceJobInput,
     directHistoricalWindow: { windowEnd: string; windowStart: string } | null,
-    importReceipt: ProviderSnapshotImportReceipt,
+    importResult: JunctionDirectSummaryImportResult,
     result: ProviderJobResult,
   ): ProviderJobResult {
     const eventType = normalizeString(job.payload.eventType);
-    const acceptedUsefulRawDelivery = importReceipt.durableDeliveryAccepted
-      && isJunctionHistoricalBackfillCompletionSummaryResource(directInput.resource)
-      && hasUsefulJunctionHistoricalBackfillSummaryRecord(
-        directInput.resource,
-        directInput.record,
-        directInput.sourceProviderSlug,
+    const providerSlug = resolveJunctionHistoricalCoverageProviderSlug(
+      directInput.sourceProviderSlug,
+      providerFilter,
+    );
+    const acceptedCanonicalDelivery = importResult.durableDeliveryAccepted
+      && providerSlug !== null
+      && importResult.normalizationEvidence.some((entry) =>
+        entry.resource === directInput.resource
+        && canonicalizeJunctionHistoricalProviderSlug(entry.sourceProviderSlug) === providerSlug
       );
     if (
       !canCurrentRuntimeMutateJunctionHistoricalBackfillProgress(context.account.metadata)
       || !directHistoricalWindow
-      || (importReceipt.canonicalEventCount <= 0 && !acceptedUsefulRawDelivery)
+      || !acceptedCanonicalDelivery
       || !eventType
       || !isJunctionDataEvent(eventType)
-      || !providerFilter.includes(directInput.sourceProviderSlug)
+      || !providerSlug
       || !isJunctionHistoricalBackfillRequiredSummaryResource(directInput.resource)
     ) {
       return result;
@@ -1830,7 +1628,7 @@ export function createJunctionDeviceSyncProvider(
     const evidence = addJunctionHistoricalBackfillEvidence({
       existingValue:
         context.account.metadata[JUNCTION_HISTORICAL_BACKFILL_METADATA_KEYS.evidence],
-      providerSlug: directInput.sourceProviderSlug,
+      providerSlug,
       resource: directInput.resource,
       windowEnd: connectWindow.windowEnd,
       windowStart: connectWindow.windowStart,
@@ -2176,8 +1974,20 @@ export function createJunctionDeviceSyncProvider(
     windowEnd: string,
     resource: string,
     records: readonly Record<string, unknown>[],
-  ): Promise<ProviderSnapshotImportReceipt> {
+    historicalEvidenceWindow: { windowEnd: string; windowStart: string },
+  ): Promise<JunctionDirectSummaryImportResult> {
     const snapshots: Record<string, unknown[]> = { [resource]: [...records] };
+    const connections = sanitizeJunctionImportConnections(sourceProviders);
+    const summaries = sanitizeJunctionImportSnapshots(snapshots, sourceProviders, {
+      blockedStringValues: [context.account.externalAccountId],
+    });
+    const normalizationEvidence = classifyJunctionSummaryNormalizationEvidence({
+      connections,
+      importedAt: context.now,
+      summaries,
+      windowEnd,
+      windowStart,
+    }, historicalEvidenceWindow);
 
     const receipt = await context.importSnapshot({
       provider: "junction",
@@ -2186,15 +1996,13 @@ export function createJunctionDeviceSyncProvider(
       importedAt: context.now,
       windowStart,
       windowEnd,
-      connections: sanitizeJunctionImportConnections(sourceProviders),
-      summaries: sanitizeJunctionImportSnapshots(snapshots, sourceProviders, {
-        blockedStringValues: [context.account.externalAccountId],
-      }),
+      connections,
+      summaries,
       timeseries: {},
     });
     return {
-      canonicalEventCount: readProviderSnapshotCanonicalEventCount(receipt),
       durableDeliveryAccepted: readProviderSnapshotDurableDeliveryAccepted(receipt),
+      normalizationEvidence,
     };
   }
 
@@ -2709,9 +2517,9 @@ interface JunctionDiagnosticCallResult {
   retryable?: boolean;
 }
 
-interface JunctionDiagnosticPayloadResult {
+interface JunctionDiagnosticPayloadResult<Payload = unknown> {
   ok: boolean;
-  payload?: unknown;
+  payload?: Payload;
   errorDetails?: Record<string, unknown>;
   errorCode?: string;
   responseStatus?: number | null;
@@ -2747,9 +2555,9 @@ async function runJunctionDiagnosticCall(
   }
 }
 
-async function runJunctionDiagnosticPayloadCall(
-  load: () => Promise<unknown>,
-): Promise<JunctionDiagnosticPayloadResult> {
+async function runJunctionDiagnosticPayloadCall<Payload>(
+  load: () => Promise<Payload>,
+): Promise<JunctionDiagnosticPayloadResult<Payload>> {
   try {
     return {
       ok: true,
@@ -3225,53 +3033,38 @@ function describeJunctionIntrospectionResources(
 }
 
 function describeJunctionIntrospectionHistoricalPull(
-  result: JunctionDiagnosticPayloadResult,
+  result: JunctionDiagnosticPayloadResult<JunctionHistoricalPullSnapshot>,
   requestedSourceProviderSlug: string | null,
 ): Record<string, unknown> {
   if (!result.ok) {
     return describeJunctionDiagnosticPayloadFailure(result, "JUNCTION_INTROSPECT_HISTORICAL_PULL_FAILED");
   }
 
-  const sourceProviders = extractJunctionIntrospectionSourceProviders(
-    result.payload,
-    requestedSourceProviderSlug,
+  const sourceProviders = (result.payload?.sources ?? []).filter((source) =>
+    !requestedSourceProviderSlug
+    || normalizeProviderSlug(source.sourceProviderSlug) === requestedSourceProviderSlug
   );
   const sourceKeyMap = buildJunctionDiagnosticSourceKeyMap(sourceProviders);
   const pulled = [];
   const notPulled = [];
 
   for (const sourceProvider of sourceProviders) {
-    const notPulledResources = Array.isArray(sourceProvider.details.not_pulled)
-      ? sourceProvider.details.not_pulled
-          .map(normalizeProviderSlug)
-          .filter((entry): entry is string => Boolean(entry))
-      : [];
-    for (const resource of notPulledResources) {
+    for (const resource of sourceProvider.notPulledResources) {
       notPulled.push({
         resource,
         sourceKey: readJunctionDiagnosticSourceKey(sourceKeyMap, sourceProvider.sourceProviderSlug),
       });
     }
 
-    const pulledByResource = readPlainObject(sourceProvider.details.pulled);
-    if (!pulledByResource) {
-      continue;
-    }
-
-    for (const [resource, rawDetails] of Object.entries(pulledByResource)) {
-      const details = readPlainObject(rawDetails) ?? {};
-      const timeline = readPlainObject(details.timeline);
+    for (const historicalResource of sourceProvider.pulledResources) {
       pulled.push({
-        resource,
+        resource: historicalResource.resource,
         sourceKey: readJunctionDiagnosticSourceKey(sourceKeyMap, sourceProvider.sourceProviderSlug),
-        status: normalizeString(details.status) ?? null,
-        daysWithData: readSafeInteger(details.days_with_data ?? details.daysWithData),
-        rangeStart: normalizeString(details.range_start ?? details.rangeStart) ?? null,
-        rangeEnd: normalizeString(details.range_end ?? details.rangeEnd) ?? null,
-        scheduledAt: normalizeString(timeline?.scheduled_at ?? timeline?.scheduledAt) ?? null,
-        startedAt: normalizeString(timeline?.started_at ?? timeline?.startedAt) ?? null,
-        endedAt: normalizeString(timeline?.ended_at ?? timeline?.endedAt) ?? null,
-        hasErrorDetails: Boolean(normalizeString(details.error_details ?? details.errorDetails)),
+        status: historicalResource.status,
+        daysWithData: historicalResource.daysWithData,
+        rangeStart: historicalResource.rangeStart,
+        rangeEnd: historicalResource.rangeEnd,
+        hasErrorDetails: historicalResource.errorDetails !== null,
       });
     }
   }
@@ -3282,6 +3075,7 @@ function describeJunctionIntrospectionHistoricalPull(
   return {
     ok: true,
     responseStatus: result.responseStatus ?? 200,
+    matchedUser: result.payload?.matchedUser ?? false,
     sourceProviderCount: sourceProviders.length,
     pulledCount: pulled.length,
     notPulledCount: notPulled.length,
@@ -4359,47 +4153,39 @@ function hasJunctionSnapshotRecords(snapshot: Record<string, unknown[]>): boolea
 }
 
 function hasJunctionHistoricalBackfillSummaryRecords(
-  snapshot: Record<string, unknown[]>,
-  sourceProviders: readonly JunctionProviderConnection[],
+  evidence: readonly JunctionSummaryNormalizationEvidence[],
 ): boolean {
-  const sourceReferences = buildJunctionSourceReferenceMap(sourceProviders);
-
-  return Object.entries(snapshot).some(([resource, records]) =>
+  return evidence.some(({ resource }) =>
     isJunctionHistoricalBackfillCompletionSummaryResource(resource)
-      && records.some((record) =>
-        expandJunctionHistoricalBackfillSummaryRecord(record).some(({ entry, originFallback }) =>
-          hasUsefulJunctionHistoricalBackfillSummaryRecord(
-            resource,
-            entry,
-            resolveJunctionSummarySourceProviderSlug(entry, originFallback, sourceReferences),
-          )
-        )
-      )
   );
 }
 
 function evaluateJunctionHistoricalBackfillCoverage(
-  snapshot: Record<string, unknown[]>,
+  summaryEvidence: readonly JunctionSummaryNormalizationEvidence[],
   sourceProviders: readonly JunctionProviderConnection[],
   configuredSummaryResources: readonly string[],
   providerFilter: readonly string[],
+  historicalPullSnapshot: JunctionHistoricalPullSnapshot | null,
   historicalPushEvidence: JunctionHistoricalBackfillEvidence | null,
   window: { windowEnd: string; windowStart: string },
 ): JunctionHistoricalBackfillCoverage {
-  const configuredProviderSlugs = new Set(providerFilter);
   const configuredResources = new Set<string>(
     configuredSummaryResources.filter((resource) =>
       JUNCTION_HISTORICAL_BACKFILL_REQUIRED_SUMMARY_RESOURCE_SET.has(resource)
     ),
   );
-  const requiredResourcesByProvider = new Map<string, Set<string>>();
+  const advertisedResourcesByProvider = new Map<string, Set<string>>();
   const connectedProviderSlugs = new Set<string>();
   const pendingProviderSlugs = new Set<string>();
+  const reconnectProviderSlugs = new Set<string>();
   const providerStatusBySlug = new Map<string, DeviceConnectionSourceStatus>();
 
   for (const provider of sourceProviders) {
-    const providerSlug = normalizeProviderSlug(provider.origin.sourceProviderSlug ?? provider.slug);
-    if (!providerSlug || !configuredProviderSlugs.has(providerSlug)) {
+    const providerSlug = resolveJunctionHistoricalCoverageProviderSlug(
+      provider.origin.sourceProviderSlug ?? provider.slug,
+      providerFilter,
+    );
+    if (!providerSlug) {
       continue;
     }
     const status = mapJunctionSourceStatus(provider.status);
@@ -4408,24 +4194,6 @@ function evaluateJunctionHistoricalBackfillCoverage(
       providerSlug,
       existingStatus ? mergeJunctionSourceStatus(existingStatus, status) : status,
     );
-  }
-
-  for (const [providerSlug, status] of providerStatusBySlug.entries()) {
-    if (status === "disconnected") {
-      continue;
-    }
-    if (status !== "connected") {
-      pendingProviderSlugs.add(providerSlug);
-      continue;
-    }
-    connectedProviderSlugs.add(providerSlug);
-  }
-
-  for (const provider of sourceProviders) {
-    const providerSlug = normalizeProviderSlug(provider.origin.sourceProviderSlug ?? provider.slug);
-    if (!providerSlug || providerStatusBySlug.get(providerSlug) !== "connected") {
-      continue;
-    }
 
     for (const [rawResource, availability] of Object.entries(provider.resourceAvailability)) {
       const resource = normalizeJunctionResourceName(rawResource);
@@ -4437,62 +4205,106 @@ function evaluateJunctionHistoricalBackfillCoverage(
         continue;
       }
 
-      const requiredResources = requiredResourcesByProvider.get(providerSlug) ?? new Set<string>();
-      requiredResources.add(resource);
-      requiredResourcesByProvider.set(providerSlug, requiredResources);
+      const advertisedResources = advertisedResourcesByProvider.get(providerSlug) ?? new Set<string>();
+      advertisedResources.add(resource);
+      advertisedResourcesByProvider.set(providerSlug, advertisedResources);
     }
   }
 
-  const coveredResourcesByProvider = new Map<string, Set<string>>();
-  for (const [providerSlug, requiredResources] of requiredResourcesByProvider.entries()) {
-    for (const resource of requiredResources) {
-      if (
-        isJunctionHistoricalBackfillRequiredSummaryResource(resource)
-        && hasJunctionHistoricalBackfillEvidence(
-          historicalPushEvidence,
-          providerSlug,
-          resource,
-          window.windowStart,
-          window.windowEnd,
-        )
-      ) {
-        const coveredResources = coveredResourcesByProvider.get(providerSlug) ?? new Set<string>();
-        coveredResources.add(resource);
-        coveredResourcesByProvider.set(providerSlug, coveredResources);
-      }
-    }
-  }
-  const sourceReferences = buildJunctionSourceReferenceMap(sourceProviders);
+  const historicalSourcesByProvider = new Map(
+    historicalPullSnapshot?.matchedUser
+      ? historicalPullSnapshot.sources.flatMap((source) => {
+          const providerSlug = resolveJunctionHistoricalCoverageProviderSlug(
+            source.sourceProviderSlug,
+            providerFilter,
+          );
+          return providerSlug ? [[providerSlug, source] as const] : [];
+        })
+      : [],
+  );
 
-  for (const [resource, records] of Object.entries(snapshot)) {
-    if (!isJunctionHistoricalBackfillCompletionSummaryResource(resource)) {
+  for (const [providerSlug, status] of providerStatusBySlug.entries()) {
+    if (status === "disconnected") {
       continue;
     }
 
-    for (const record of records) {
-      for (const { entry, originFallback } of expandJunctionHistoricalBackfillSummaryRecord(record)) {
-        const providerSlug = normalizeProviderSlug(
-          resolveJunctionSummarySourceProviderSlug(entry, originFallback, sourceReferences),
-        );
-        if (
-          !providerSlug
-          || !requiredResourcesByProvider.get(providerSlug)?.has(resource)
-          || !hasUsefulJunctionHistoricalBackfillSummaryRecord(resource, entry, providerSlug)
-        ) {
+    const historicalSource = historicalSourcesByProvider.get(providerSlug);
+    const notPulledResources = new Set(
+      historicalSource?.notPulledResources.flatMap((value) => {
+        const resource = normalizeJunctionResourceName(value);
+        return resource ? [resource] : [];
+      }) ?? [],
+    );
+    const historicalResources = new Map(
+      historicalSource?.pulledResources.flatMap((entry) => {
+        const resource = normalizeJunctionResourceName(entry.resource);
+        return resource && configuredResources.has(resource)
+          ? [[resource, entry] as const]
+          : [];
+      }) ?? [],
+    );
+    const requiredResources = new Set([
+      ...(advertisedResourcesByProvider.get(providerSlug) ?? []),
+      ...historicalResources.keys(),
+    ].filter((resource) =>
+      !notPulledResources.has(resource) || historicalResources.has(resource)
+    ));
+
+    if (status === "connected") {
+      connectedProviderSlugs.add(providerSlug);
+    }
+    if (requiredResources.size === 0) {
+      continue;
+    }
+    if (status !== "connected") {
+      pendingProviderSlugs.add(providerSlug);
+      continue;
+    }
+
+    let hasPendingResource = false;
+    let everyPendingResourceFailed = true;
+    for (const resource of requiredResources) {
+      if (!isJunctionHistoricalBackfillRequiredSummaryResource(resource)) {
+        continue;
+      }
+
+      const historicalResource = historicalResources.get(resource);
+      if (historicalSource) {
+        if (historicalResource?.status === "success") {
           continue;
         }
+        hasPendingResource = true;
+        if (historicalResource?.status !== "failure") {
+          everyPendingResourceFailed = false;
+        }
+        continue;
+      }
 
-        const coveredResources = coveredResourcesByProvider.get(providerSlug) ?? new Set<string>();
-        coveredResources.add(resource);
-        coveredResourcesByProvider.set(providerSlug, coveredResources);
+      const coveredBySummary = summaryEvidence.some((entry) =>
+        entry.resource === resource
+        && canonicalizeJunctionHistoricalProviderSlug(entry.sourceProviderSlug) === providerSlug
+      );
+      const coveredByPush = hasJunctionHistoricalBackfillEvidence(
+        historicalPushEvidence,
+        providerSlug,
+        resource,
+        window.windowStart,
+        window.windowEnd,
+      );
+      if (!coveredBySummary && !coveredByPush) {
+        hasPendingResource = true;
+        everyPendingResourceFailed = false;
       }
     }
-  }
 
-  for (const [providerSlug, requiredResources] of requiredResourcesByProvider.entries()) {
-    const coveredResources = coveredResourcesByProvider.get(providerSlug);
-    if ([...requiredResources].some((resource) => !coveredResources?.has(resource))) {
+    if (hasPendingResource) {
       pendingProviderSlugs.add(providerSlug);
+      if (
+        everyPendingResourceFailed
+        && isJunctionHistoricalResetProviderSlug(providerSlug)
+      ) {
+        reconnectProviderSlugs.add(providerSlug);
+      }
     }
   }
 
@@ -4502,7 +4314,38 @@ function evaluateJunctionHistoricalBackfillCoverage(
   return {
     complete: connectedProviderSlugs.size > 0 && sortedPendingProviderSlugs.length === 0,
     pendingProviderSlugs: sortedPendingProviderSlugs,
+    reconnectProviderSlugs: [...reconnectProviderSlugs]
+      .sort((left, right) => left.localeCompare(right)),
   };
+}
+
+function canonicalizeJunctionHistoricalProviderSlug(value: unknown): string | null {
+  const providerSlug = normalizeProviderSlug(value);
+  if (!providerSlug) {
+    return null;
+  }
+
+  return resolveJunctionDeviceConnectRouteByProviderSlug(providerSlug)?.route.sourceProviderSlug
+    ?? null;
+}
+
+function resolveJunctionHistoricalCoverageProviderSlug(
+  value: unknown,
+  providerFilter: readonly string[],
+): string | null {
+  const providerSlug = canonicalizeJunctionHistoricalProviderSlug(value);
+  if (!providerSlug) {
+    return null;
+  }
+
+  const route = resolveJunctionDeviceConnectRouteByProviderSlug(providerSlug)?.route;
+  if (!route) {
+    return null;
+  }
+
+  return route.kind === "junction_sdk" || providerFilter.includes(providerSlug)
+    ? providerSlug
+    : null;
 }
 
 function isJunctionHistoricalBackfillRequiredSummaryResource(
@@ -4514,69 +4357,25 @@ function isJunctionHistoricalBackfillRequiredSummaryResource(
 function readJunctionDirectHistoricalEvidenceWindow(
   input: JunctionDirectResourceJobInput,
   connectWindow: { windowEnd: string; windowStart: string },
+  evidence: readonly JunctionSummaryNormalizationEvidence[],
+  providerFilter: readonly string[],
 ): { windowEnd: string; windowStart: string } | null {
-  if (!isJunctionHistoricalBackfillRequiredSummaryResource(input.resource)) {
-    return null;
-  }
-
-  const connectWindowStartMs = Date.parse(connectWindow.windowStart);
-  const connectWindowEndMs = Date.parse(connectWindow.windowEnd);
+  const providerSlug = resolveJunctionHistoricalCoverageProviderSlug(
+    input.sourceProviderSlug,
+    providerFilter,
+  );
   if (
-    !Number.isFinite(connectWindowStartMs)
-    || !Number.isFinite(connectWindowEndMs)
-    || connectWindowStartMs >= connectWindowEndMs
+    !providerSlug
+    || !isJunctionHistoricalBackfillRequiredSummaryResource(input.resource)
+    || !evidence.some((entry) =>
+      entry.resource === input.resource
+      && canonicalizeJunctionHistoricalProviderSlug(entry.sourceProviderSlug) === providerSlug
+    )
   ) {
     return null;
   }
 
-  for (const { entry, originFallback } of expandJunctionHistoricalBackfillSummaryRecord(input.record)) {
-    const record = originFallback ? { ...originFallback, ...entry } : entry;
-    if (!hasUsefulJunctionHistoricalBackfillSummaryRecord(
-      input.resource,
-      record,
-      input.sourceProviderSlug,
-    )) {
-      continue;
-    }
-
-    const timestampPaths = input.resource === "activity"
-      ? JUNCTION_HISTORICAL_EVIDENCE_ACTIVITY_TIMESTAMP_PATHS
-      : JUNCTION_HISTORICAL_EVIDENCE_SLEEP_TIMESTAMP_PATHS;
-
-    for (const path of timestampPaths) {
-      const timestampMs = junctionHistoricalEvidenceTimestampMillis(
-        readJunctionRecordPath(record, path),
-        input.sourceProviderSlug,
-      );
-      if (timestampMs === null) {
-        continue;
-      }
-      if (timestampMs >= connectWindowStartMs && timestampMs < connectWindowEndMs) {
-        const windowStart = new Date(timestampMs).toISOString();
-        return {
-          windowStart,
-          windowEnd: addMilliseconds(windowStart, 1),
-        };
-      }
-
-      break;
-    }
-  }
-
-  return null;
-}
-
-function junctionHistoricalEvidenceTimestampMillis(
-  value: unknown,
-  sourceProviderSlug: string,
-): number | null {
-  const normalized = normalizeString(value);
-  if (normalized && /^\d{4}-\d{2}-\d{2}$/u.test(normalized)) {
-    const timestamp = toJunctionWebhookWindowBoundaryTimestampIfValid(normalized, "start");
-    return timestamp ? Date.parse(timestamp) : null;
-  }
-
-  return junctionTimestampMillis(value, sourceProviderSlug);
+  return connectWindow;
 }
 
 function isJunctionResourceAdvertisedAvailable(value: unknown): boolean {
@@ -4603,401 +4402,15 @@ function isJunctionHistoricalBackfillCompletionSummaryResource(
   return JUNCTION_HISTORICAL_BACKFILL_COMPLETION_SUMMARY_RESOURCE_SET.has(resource);
 }
 
-function hasUsefulJunctionHistoricalBackfillSummaryRecord(
-  resource: JunctionHistoricalBackfillCompletionSummaryResource,
-  entry: Record<string, unknown>,
-  sourceProviderSlug: string | null,
-  options: { acceptSleepCycleStageCount?: boolean } = {},
-): boolean {
-  if (!sourceProviderSlug) {
-    return false;
-  }
-
-  if (
-    resource !== "sleep_cycle"
-    && !isJunctionSourceSpecificFloatingTimestampProvider(sourceProviderSlug)
-    && hasFiniteNumberFromJunctionRecordPaths(entry, JUNCTION_HISTORICAL_SUMMARY_METRIC_PATHS[resource])
-  ) {
-    return true;
-  }
-
-  if (resource === "sleep") {
-    return hasPositiveJunctionTimestampRange(
-      entry,
-      JUNCTION_SLEEP_START_TIMESTAMP_PATHS,
-      JUNCTION_SLEEP_END_TIMESTAMP_PATHS,
-      sourceProviderSlug,
-    );
-  }
-
-  if (resource === "sleep_cycle") {
-    return (
-      (options.acceptSleepCycleStageCount ?? true)
-      && hasPositiveFiniteNumberFromJunctionRecordPaths(entry, JUNCTION_SLEEP_STAGE_COUNT_PATHS)
-    )
-      || hasUsefulJunctionSleepCycleStageRecord(entry, sourceProviderSlug);
-  }
-
-  if (resource === "workouts") {
-    return hasUsefulJunctionWorkoutSessionRecord(entry, sourceProviderSlug);
-  }
-
-  if (resource === "meal" || resource === "menstrual_cycle" || resource === "electrocardiogram") {
-    return hasUsefulJunctionRawOnlyHistoricalBackfillSummaryRecord(resource, entry);
-  }
-
-  return false;
-}
-
-function hasUsefulJunctionRawOnlyHistoricalBackfillSummaryRecord(
-  resource: "meal" | "menstrual_cycle" | "electrocardiogram",
-  entry: Record<string, unknown>,
-): boolean {
-  // Mirrors the importer invariant: predicted cycles are forecasts, not
-  // facts — they emit no normalized events, so forecast-only windows must
-  // not complete the historical backfill.
-  if (
-    resource === "menstrual_cycle"
-    && (entry.isPredicted === true || entry.is_predicted === true)
-  ) {
-    return false;
-  }
-
-  const paths = JUNCTION_RAW_ONLY_COMPLETION_PATHS[resource];
-  return hasStringFromJunctionRecordPaths(entry, paths.strings)
-    || hasFiniteNumberFromJunctionRecordPaths(entry, paths.numbers)
-    || hasNonEmptyJunctionRecordArrayFromPaths(entry, paths.arrays);
-}
-
-function hasUsefulJunctionSleepCycleStageRecord(
-  entry: Record<string, unknown>,
-  sourceProviderSlug: string,
-): boolean {
-  return collectJunctionSleepCycleStageRecords(entry).some((stage) =>
-    hasUsefulJunctionSleepCycleStageInterval(stage, sourceProviderSlug)
-  );
-}
-
-function hasNormalizableJunctionDirectSleepCycleRecord(
-  record: Record<string, unknown>,
-  sourceProviderSlug: string,
-): boolean {
-  return canNormalizeJunctionSleepCycleRecordToCompactStages(record, sourceProviderSlug);
-}
-
-function hasJunctionSleepStageValue(entry: Record<string, unknown>): boolean {
-  return firstJunctionSleepStageFromPaths(entry) !== null;
-}
-
-function firstJunctionSleepStageFromPaths(entry: Record<string, unknown>) {
-  for (const path of JUNCTION_SLEEP_STAGE_VALUE_PATHS) {
-    const stage = normalizeJunctionSleepStageValue(readJunctionRecordPath(entry, path));
-    if (stage !== null) {
-      return stage;
-    }
-  }
-
-  return null;
-}
-
-function collectJunctionSleepCycleStageRecords(value: unknown): Record<string, unknown>[] {
-  return collectJunctionSleepCycleStageRecordsWithSeen(value, new Set());
-}
-
-function collectJunctionSleepCycleStageRecordsWithSeen(
-  value: unknown,
-  seen: Set<Record<string, unknown>>,
-): Record<string, unknown>[] {
-  if (Array.isArray(value)) {
-    return value.flatMap((entry) => collectJunctionSleepCycleStageRecordsWithSeen(entry, seen));
-  }
-
-  const entry = readPlainObject(value);
-  if (!entry || seen.has(entry)) {
-    return [];
-  }
-  seen.add(entry);
-
-  if (hasJunctionSleepStageValue(entry)) {
-    return [entry];
-  }
-
-  return JUNCTION_SLEEP_STAGE_ARRAY_PATHS.flatMap((path) => {
-    const nested = readJunctionRecordPath(entry, path);
-    return nested === value ? [] : collectJunctionSleepCycleStageRecordsWithSeen(nested, seen);
-  });
-}
-
-function hasUsefulJunctionSleepCycleStageInterval(
-  entry: Record<string, unknown>,
-  sourceProviderSlug: string,
-): boolean {
-  return hasPositiveFiniteNumberFromJunctionRecordPaths(entry, JUNCTION_SLEEP_STAGE_DURATION_PATHS)
-    || hasPositiveJunctionTimestampRange(
-      entry,
-      JUNCTION_SLEEP_START_TIMESTAMP_PATHS,
-      JUNCTION_SLEEP_END_TIMESTAMP_PATHS,
-      sourceProviderSlug,
-    );
-}
-
-function expandJunctionHistoricalBackfillSummaryRecord(
-  value: unknown,
-): Array<{ entry: Record<string, unknown>; originFallback?: Record<string, unknown> }> {
-  const record = readPlainObject(value);
-  if (!record) {
-    return [];
-  }
-
-  const nestedEntries = readNestedJunctionHistoricalBackfillSummaryEntries(record);
-  if (!nestedEntries) {
-    return [{ entry: record }];
-  }
-
-  return nestedEntries.map((entry) => ({
-    entry,
-    originFallback: record,
-  }));
-}
-
-function readNestedJunctionHistoricalBackfillSummaryEntries(
-  record: Record<string, unknown>,
-): Record<string, unknown>[] | null {
-  for (const key of ["data", "results", "items", "records"]) {
-    const directEntry = readPlainObject(record[key]);
-    const entries = directEntry
-      ? [directEntry]
-      : readJunctionRecordArray(record[key]).flatMap((entry) => {
-          const normalized = readPlainObject(entry);
-          return normalized ? [normalized] : [];
-        });
-    if (entries.length > 0) {
-      return entries;
-    }
-  }
-
-  return null;
-}
-
-function resolveJunctionSummarySourceProviderSlug(
-  entry: Record<string, unknown>,
-  originFallback: Record<string, unknown> | undefined,
-  sourceReferences: ReadonlyMap<string, Record<string, unknown>>,
-): string | null {
-  const resolvedOrigin = resolveJunctionOrigin(
-    entry,
-    buildJunctionSummarySourceFallback(entry, originFallback, sourceReferences),
-  );
-  return resolvedOrigin.sourceProviderSlug ?? null;
-}
-
-function buildJunctionSummarySourceFallback(
-  entry: Record<string, unknown>,
-  originFallback: Record<string, unknown> | undefined,
-  sourceReferences: ReadonlyMap<string, Record<string, unknown>>,
-): Record<string, unknown> {
-  const entryReference = readJunctionSourceReference(entry, sourceReferences);
-  const fallbackReference = originFallback
-    ? readJunctionSourceReference(originFallback, sourceReferences)
-    : {};
-
-  return {
-    ...(originFallback ?? {}),
-    ...fallbackReference,
-    ...entryReference,
-  };
-}
-
-function hasUsefulJunctionWorkoutSessionRecord(
-  entry: Record<string, unknown>,
-  sourceProviderSlug: string,
-): boolean {
-  const hasDuration =
-    hasPositiveFiniteNumberFromJunctionRecordPaths(entry, JUNCTION_WORKOUT_DURATION_MINUTE_PATHS)
-    || hasPositiveFiniteNumberFromJunctionRecordPaths(entry, JUNCTION_WORKOUT_DURATION_SECOND_PATHS)
-    || hasPositiveFiniteNumberFromJunctionRecordPaths(entry, JUNCTION_WORKOUT_DURATION_MILLISECOND_PATHS)
-    || hasPositiveJunctionTimestampRange(
-      entry,
-      JUNCTION_WORKOUT_START_TIMESTAMP_PATHS,
-      JUNCTION_WORKOUT_END_TIMESTAMP_PATHS,
-      sourceProviderSlug,
-    );
-  if (!hasDuration) {
-    return false;
-  }
-
-  const startAt = firstJunctionTimestampMillisFromPaths(
-    entry,
-    JUNCTION_WORKOUT_START_TIMESTAMP_PATHS,
-    sourceProviderSlug,
-  );
-  const endAt = firstJunctionTimestampMillisFromPaths(
-    entry,
-    JUNCTION_WORKOUT_END_TIMESTAMP_PATHS,
-    sourceProviderSlug,
-  );
-  return startAt !== null || (endAt === null && !isJunctionSourceSpecificFloatingTimestampProvider(sourceProviderSlug));
-}
-
-function hasFiniteNumberFromJunctionRecordPaths(
-  entry: Record<string, unknown>,
-  paths: readonly string[],
-): boolean {
-  return paths.some((path) => finiteJunctionNumber(readJunctionRecordPath(entry, path)) !== undefined);
-}
-
-function hasStringFromJunctionRecordPaths(
-  entry: Record<string, unknown>,
-  paths: readonly string[],
-): boolean {
-  return paths.some((path) => normalizeString(readJunctionRecordPath(entry, path)) !== undefined);
-}
-
-function hasPositiveFiniteNumberFromJunctionRecordPaths(
-  entry: Record<string, unknown>,
-  paths: readonly string[],
-): boolean {
-  return paths.some((path) => {
-    const numeric = finiteJunctionNumber(readJunctionRecordPath(entry, path));
-    return numeric !== undefined && numeric > 0;
-  });
-}
-
-function hasNonEmptyJunctionRecordArrayFromPaths(
-  entry: Record<string, unknown>,
-  paths: readonly string[],
-): boolean {
-  return paths.some((path) =>
-    readJunctionRecordArray(readJunctionRecordPath(entry, path)).some(isUsefulJunctionRawOnlyArrayEntry)
-  );
-}
-
-function isUsefulJunctionRawOnlyArrayEntry(value: unknown): boolean {
-  if (value === undefined || value === null) {
-    return false;
-  }
-
-  if (typeof value === "string") {
-    return normalizeString(value) !== undefined;
-  }
-
-  if (typeof value === "number") {
-    return Number.isFinite(value);
-  }
-
-  if (typeof value === "boolean") {
-    return true;
-  }
-
-  if (Array.isArray(value)) {
-    return value.some(isUsefulJunctionRawOnlyArrayEntry);
-  }
-
-  const record = readPlainObject(value);
-  if (!record) {
-    return false;
-  }
-
-  return Object.entries(record).some(([key, nested]) =>
-    !isBlockedJunctionImportSourceIdentityKey(key)
-    && !isBlockedJunctionImportSourceIdentityContainerKey(key)
-    && isUsefulJunctionRawOnlyArrayEntry(nested)
-  );
-}
-
-function hasPositiveJunctionTimestampRange(
-  entry: Record<string, unknown>,
-  startPaths: readonly string[],
-  endPaths: readonly string[],
-  sourceProviderSlug: string,
-): boolean {
-  const startAt = firstJunctionTimestampMillisFromPaths(entry, startPaths, sourceProviderSlug);
-  const endAt = firstJunctionTimestampMillisFromPaths(entry, endPaths, sourceProviderSlug);
-  return startAt !== null && endAt !== null && endAt > startAt;
-}
-
-function firstJunctionTimestampMillisFromPaths(
-  entry: Record<string, unknown>,
-  paths: readonly string[],
-  sourceProviderSlug: string,
-): number | null {
-  for (const path of paths) {
-    const timestamp = junctionTimestampMillis(readJunctionRecordPath(entry, path), sourceProviderSlug);
-    if (timestamp !== null) {
-      return timestamp;
-    }
-  }
-
-  return null;
-}
-
-function readJunctionRecordPath(entry: Record<string, unknown>, path: string): unknown {
-  return path.split(".").reduce<unknown>((current, key) => {
-    const record = readPlainObject(current);
-    return record ? record[key] : undefined;
-  }, entry);
-}
-
 function readJunctionRecordArray(value: unknown): unknown[] {
   return Array.isArray(value) ? value : [];
-}
-
-function finiteJunctionNumber(value: unknown): number | undefined {
-  if (typeof value === "number" && Number.isFinite(value)) {
-    return value;
-  }
-
-  if (typeof value === "string" && value.trim()) {
-    const numeric = Number(value);
-    return Number.isFinite(numeric) ? numeric : undefined;
-  }
-
-  return undefined;
-}
-
-function junctionTimestampMillis(value: unknown, sourceProviderSlug: string): number | null {
-  if (value instanceof Date && Number.isFinite(value.getTime())) {
-    return value.getTime();
-  }
-
-  if (typeof value === "number" && Number.isFinite(value)) {
-    return value;
-  }
-
-  if (typeof value !== "string" || !value.trim()) {
-    return null;
-  }
-
-  const trimmed = value.trim();
-  if (isRejectedJunctionSafeTimestampString(trimmed, sourceProviderSlug)) {
-    return null;
-  }
-
-  const parsed = Date.parse(trimmed);
-  return Number.isFinite(parsed) ? parsed : null;
-}
-
-function isRejectedJunctionSafeTimestampString(value: string, sourceProviderSlug: string): boolean {
-  if (isJunctionSourceSpecificFloatingTimestampProvider(sourceProviderSlug)) {
-    return true;
-  }
-
-  return /^\d{4}-\d{2}-\d{2}(?:$|[ t]\d{2}:\d{2})/iu.test(value)
-    && !/z$/iu.test(value)
-    && !/[+-]\d{2}:?\d{2}$/u.test(value);
-}
-
-function isJunctionSourceSpecificFloatingTimestampProvider(sourceProviderSlug: string): boolean {
-  const normalizedSourceProviderSlug = normalizeProviderSlug(sourceProviderSlug);
-  return normalizedSourceProviderSlug
-    ? JUNCTION_FLOATING_TIMESTAMP_SOURCE_PROVIDER_SLUGS.has(normalizedSourceProviderSlug)
-    : false;
 }
 
 function buildHistoricalBackfillFollowUp(input: {
   coverageComplete: boolean;
   metadata: Record<string, unknown>;
   now: string;
+  terminalFailure: boolean;
   windowStart: string;
   windowEnd: string;
 }): JunctionHistoricalBackfillFollowUp {
@@ -5039,8 +4452,12 @@ function buildHistoricalBackfillFollowUp(input: {
     input.windowStart,
     input.windowEnd,
   );
-  const emptyAttempts = previousEmptyAttempts + 1;
-  const retryDelayMs = EMPTY_HISTORICAL_BACKFILL_RETRY_DELAYS_MS[emptyAttempts - 1] ?? null;
+  let emptyAttempts = previousEmptyAttempts + 1;
+  let retryDelayMs = EMPTY_HISTORICAL_BACKFILL_RETRY_DELAYS_MS[emptyAttempts - 1] ?? null;
+  if (retryDelayMs === null && !input.terminalFailure) {
+    emptyAttempts = EMPTY_HISTORICAL_BACKFILL_RETRY_DELAYS_MS.length;
+    retryDelayMs = EMPTY_HISTORICAL_BACKFILL_RETRY_DELAYS_MS[emptyAttempts - 1] ?? null;
+  }
   const status: JunctionHistoricalBackfillStatus = retryDelayMs === null ? "exhausted" : "retrying";
 
   const metadataPatch = buildHistoricalBackfillMetadataPatch({
@@ -6350,8 +5767,11 @@ async function projectJunctionSources(
   }
 
   const historicalState = readHistoricalBackfillStatus(context.account.metadata);
+  const preserveOpaqueHistoricalReconnect =
+    !canCurrentRuntimeMutateJunctionHistoricalBackfillProgress(context.account.metadata);
   const preserveHistoricalReconnect = options.preserveHistoricalReconnect ?? (
     options.preserveHistoricalReconnectProviderSlugs !== undefined
+    || preserveOpaqueHistoricalReconnect
     || (
       historicalState !== null
       && historicalState.coverageVersion >= JUNCTION_HISTORICAL_BACKFILL_COVERAGE_VERSION
@@ -6384,8 +5804,13 @@ async function projectJunctionSources(
         || preserveHistoricalReconnectProviderSlugs.has(source.sourceProviderSlug)
       )
       && source.status !== "disconnected"
-      && existing?.status === "error"
-      && existing.lastErrorCode === DEVICE_SYNC_HISTORICAL_DATA_RECONNECT_REQUIRED_ERROR_CODE;
+      && existing !== undefined
+      && (
+        preserveOpaqueHistoricalReconnect
+          ? existing.status === "error"
+            && existing.lastErrorCode === DEVICE_SYNC_HISTORICAL_DATA_RECONNECT_REQUIRED_ERROR_CODE
+          : requiresHistoricalResetDeviceSyncSource(existing)
+      );
     const historicalReconnectError = keepHistoricalReconnect ? existing : null;
     await context.upsertConnectionSource({
       sourceInstanceKey: existing?.sourceInstanceKey ?? source.sourceInstanceKey,
@@ -6679,11 +6104,6 @@ function readPlainObject(value: unknown): Record<string, unknown> | null {
   return value && typeof value === "object" && !Array.isArray(value)
     ? value as Record<string, unknown>
     : null;
-}
-
-function readProviderSnapshotCanonicalEventCount(value: unknown): number {
-  const count = readPlainObject(value)?.canonicalEventCount;
-  return typeof count === "number" && Number.isSafeInteger(count) && count > 0 ? count : 0;
 }
 
 function readProviderSnapshotDurableDeliveryAccepted(value: unknown): boolean {
