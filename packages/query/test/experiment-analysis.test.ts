@@ -4000,18 +4000,202 @@ test("buildExperimentProgressCard marks logged intervention days as completed", 
 test("buildExperimentProgressCard surfaces the resting-heart-rate mover with downward sentiment", () => {
   const { card } = buildExperimentProgressCard(createExperimentVault(), "sauna-rhr", {
     asOf: "2026-04-12",
+    biomarkerDesiredDirections: [{
+      biomarkerKey: "biomarker:resting-heart-rate",
+      desiredDirection: "lower_or_stable",
+    }],
   });
 
   assert.ok(card.movers.length >= 1);
   const rhr = card.movers[0];
   assert.match(rhr.label, /heart rate/iu);
-  // RHR fell from baseline, and the analysis plan wants a decrease → positive.
+  // RHR fell from baseline, matching its canonical lower-or-stable direction.
   assert.equal(rhr.direction, "down");
   assert.equal(rhr.sentiment, "positive");
   // The headline is an unsigned percent-change magnitude; the arrow shows direction.
   assert.match(rhr.changePct, /^\d+(?:\.\d+)?%$/u);
   // The raw change keeps its sign (a fall reads with a minus) and carries the unit.
   assert.match(rhr.delta, /^−.*bpm$/u);
+});
+
+test("buildExperimentProgressCard interprets an HRV increase independently of a contrary experiment hypothesis", () => {
+  const experiment = makeExperiment("active", {
+    experimentId: "exp_01JNV4458HYPP53JDQCBP1QKHT",
+    slug: "contrary-hrv-hypothesis",
+    runPlan: {
+      baselineStart: "2026-06-01",
+      baselineEnd: "2026-06-03",
+      interventionStart: "2026-06-04",
+      interventionEnd: "2026-06-06",
+      modality: "recovery",
+      targetSessions: 3,
+      minimumUsefulSessions: 1,
+    },
+    analysisPlan: {
+      primaryBiomarkerKey: "biomarker:hrv",
+      secondaryBiomarkerKeys: ["biomarker:hrv-rmssd"],
+      desiredDirection: "decrease",
+      expectedDirections: [{
+        biomarkerKey: "biomarker:hrv-rmssd",
+        direction: "increase",
+      }],
+    },
+    protocolRef: null,
+  });
+  const vault = createVaultReadModel({
+    vaultRoot: "/virtual/experiment-progress-card-hrv-direction",
+    metadata: null,
+    entities: [
+      experiment,
+      makeSample({
+        entityId: "sample_progress_card_hrv_baseline_1",
+        dayKey: "2026-06-01",
+        stream: "hrv",
+        occurredAt: "2026-06-01T06:00:00.000Z",
+        unit: "ms",
+        value: 45,
+      }),
+      makeSample({
+        entityId: "sample_progress_card_hrv_baseline_2",
+        dayKey: "2026-06-02",
+        stream: "hrv",
+        occurredAt: "2026-06-02T06:00:00.000Z",
+        unit: "ms",
+        value: 46,
+      }),
+      makeSample({
+        entityId: "sample_progress_card_hrv_baseline_3",
+        dayKey: "2026-06-03",
+        stream: "hrv",
+        occurredAt: "2026-06-03T06:00:00.000Z",
+        unit: "ms",
+        value: 47,
+      }),
+      makeSample({
+        entityId: "sample_progress_card_hrv_intervention_1",
+        dayKey: "2026-06-04",
+        stream: "hrv",
+        occurredAt: "2026-06-04T06:00:00.000Z",
+        unit: "ms",
+        value: 50,
+      }),
+      makeSample({
+        entityId: "sample_progress_card_hrv_intervention_2",
+        dayKey: "2026-06-05",
+        stream: "hrv",
+        occurredAt: "2026-06-05T06:00:00.000Z",
+        unit: "ms",
+        value: 51,
+      }),
+      makeSample({
+        entityId: "sample_progress_card_hrv_intervention_3",
+        dayKey: "2026-06-06",
+        stream: "hrv",
+        occurredAt: "2026-06-06T06:00:00.000Z",
+        unit: "ms",
+        value: 52,
+      }),
+    ],
+  });
+
+  const progress = summarizeExperimentProgress(vault, "contrary-hrv-hypothesis", {
+    asOf: "2026-06-06",
+  });
+  const outcome = analyzeExperimentOutcome(vault, "contrary-hrv-hypothesis", {
+    asOf: "2026-06-06",
+  });
+  const { card } = buildExperimentProgressCard(vault, "contrary-hrv-hypothesis", {
+    asOf: "2026-06-06",
+    biomarkerDesiredDirections: [{
+      biomarkerKey: "biomarker:hrv-rmssd",
+      desiredDirection: "higher_or_stable",
+    }],
+  });
+
+  assert.equal(progress.signals.length, 2);
+  assert.equal(progress.signals[0]?.biomarkerKey, "biomarker:hrv");
+  assert.equal(progress.signals[0]?.expectedDirection, "decrease");
+  assert.equal(progress.signals[0]?.movedAsExpected, false);
+  assert.equal(progress.signals[1]?.biomarkerKey, "biomarker:hrv-rmssd");
+  assert.equal(progress.signals[1]?.expectedDirection, "increase");
+  assert.equal(progress.signals[1]?.movedAsExpected, true);
+  assert.deepEqual(
+    outcome.metricResults.map((result) => ({
+      biomarkerKey: result.biomarkerKey,
+      expectedDirection: result.expectedDirection,
+      movedAsExpected: result.movedAsExpected,
+    })),
+    [
+      {
+        biomarkerKey: "biomarker:hrv",
+        expectedDirection: "decrease",
+        movedAsExpected: false,
+      },
+      {
+        biomarkerKey: "biomarker:hrv-rmssd",
+        expectedDirection: "increase",
+        movedAsExpected: true,
+      },
+    ],
+  );
+  assert.equal(card.movers.length, 1);
+  assert.equal(card.movers[0]?.direction, "up");
+  assert.equal(card.movers[0]?.sentiment, "positive");
+});
+
+test("buildExperimentProgressCard keeps partial biomarker movement neutral", () => {
+  const experiment = makeExperiment("active", {
+    experimentId: "exp_01JNV4458HYPP53JDQCBP1QKHV",
+    slug: "partial-rhr-signal",
+    runPlan: {
+      baselineStart: "2026-06-01",
+      baselineEnd: "2026-06-03",
+      interventionStart: "2026-06-04",
+      interventionEnd: "2026-06-06",
+      modality: "recovery",
+      targetSessions: 3,
+      minimumUsefulSessions: 1,
+    },
+    analysisPlan: {
+      primaryBiomarkerKey: "biomarker:resting-heart-rate",
+      desiredDirection: "decrease",
+    },
+    protocolRef: null,
+  });
+  const vault = createVaultReadModel({
+    vaultRoot: "/virtual/experiment-progress-card-partial-direction",
+    metadata: null,
+    entities: [
+      experiment,
+      makeObservation({
+        entityId: "evt_progress_card_partial_rhr_baseline",
+        dayKey: "2026-06-01",
+        metric: "resting-heart-rate",
+        occurredAt: "2026-06-01T06:00:00.000Z",
+        unit: "bpm",
+        value: 60,
+      }),
+      makeObservation({
+        entityId: "evt_progress_card_partial_rhr_intervention",
+        dayKey: "2026-06-04",
+        metric: "resting-heart-rate",
+        occurredAt: "2026-06-04T06:00:00.000Z",
+        unit: "bpm",
+        value: 58,
+      }),
+    ],
+  });
+
+  const { card } = buildExperimentProgressCard(vault, "partial-rhr-signal", {
+    asOf: "2026-06-04",
+    biomarkerDesiredDirections: [{
+      biomarkerKey: "biomarker:resting-heart-rate",
+      desiredDirection: "lower_or_stable",
+    }],
+  });
+
+  assert.equal(card.movers[0]?.direction, "down");
+  assert.equal(card.movers[0]?.sentiment, "neutral");
 });
 
 test("buildExperimentProgressCard uses display-grade metric samples for movers", () => {
