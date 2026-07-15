@@ -52,7 +52,12 @@ checkpointing handoff serializes profile-writer transfer between the normal
 task browser and the Managed Auth browser. Saved credentials, health checks,
 and automatic reauthentication are enabled for managed connections, session
 recording is disabled, and account deletion removes connections before the
-profile.
+profile. Completing a direct Live View login leaves the awaiting task browser
+as the sole profile writer so the public Done request can return without waiting
+for profile checkpoint and replacement. Only a later conversation-authorized
+resume stops that browser to save the profile, creates and durably publishes its
+replacement, and then returns browser control to the assistant; replacement
+failure leaves the completed handoff and browserless awaiting run retryable.
 
 ## Hosted Phone Calls
 

@@ -53,9 +53,9 @@ type PreparedRunBrowser = {
 };
 type AmbiguousBrowserWriteReplayResult = ComputerRunRecord | "unknown" | null;
 type AwaitingOpenResumeAuthority = {
+  completedLoginHandoff: ComputerHandoffRecord | null;
   expectedHandoffStatus: ComputerHandoffRecord["status"] | null;
   expectedHandoffUpdatedAt: Date | null;
-  expectedKernelSessionId: string;
   expectedPausedAt: Date;
   expectedPendingHandoffId: string | null;
   expectedResumeAfterMailboxLaneSeq: bigint | null;
@@ -1621,14 +1621,6 @@ export class ComputerUseService {
         };
       }
 
-      if (claimed.purpose === "login") {
-        await this.checkpointProfileAfterLoginHandoff(
-          run,
-          now,
-          store,
-          claimed.updatedAt,
-        );
-      }
       const completed = await store.completeHandoff({
         expectedUpdatedAt: claimed.updatedAt,
         handoffId: claimed.id,
@@ -2038,12 +2030,20 @@ export class ComputerUseService {
       });
     }
 
-    const state = await this.readBrowserState(input.run);
+    const resumableRun = authority.completedLoginHandoff
+      ? await this.checkpointProfileAfterLoginHandoff(
+          input.run,
+          input.now,
+          input.store,
+          authority.completedLoginHandoff,
+        )
+      : input.run;
+    const state = await this.readBrowserState(resumableRun);
     const resumed = await input.store.markRunRunning({
-      awaitingReason: input.run.awaitingReason,
+      awaitingReason: resumableRun.awaitingReason,
       expectedHandoffStatus: authority.expectedHandoffStatus,
       expectedHandoffUpdatedAt: authority.expectedHandoffUpdatedAt,
-      expectedKernelSessionId: authority.expectedKernelSessionId,
+      expectedKernelSessionId: requireKernelSessionId(resumableRun),
       expectedPausedAt: authority.expectedPausedAt,
       expectedPendingHandoffId: authority.expectedPendingHandoffId,
       expectedResumeAfterMailboxLaneSeq:
@@ -2090,13 +2090,11 @@ export class ComputerUseService {
   }): Promise<AwaitingOpenResumeAuthority | null> {
     if (
       input.run.status !== "awaiting_user" ||
-      !input.run.pausedAt ||
-      !input.run.kernelSessionId
+      !input.run.pausedAt
     ) {
       return null;
     }
     const pausedAt = input.run.pausedAt;
-    const expectedKernelSessionId = input.run.kernelSessionId;
     const pendingHandoffId = input.run.pendingHandoffId;
     const validateResumeProof = async (): Promise<boolean> => {
       if (!input.resumeAfterMailboxItemId) {
@@ -2115,13 +2113,13 @@ export class ComputerUseService {
     };
 
     if (!pendingHandoffId) {
-      if (!await validateResumeProof()) {
+      if (!input.run.kernelSessionId || !await validateResumeProof()) {
         return null;
       }
       return {
+        completedLoginHandoff: null,
         expectedHandoffStatus: null,
         expectedHandoffUpdatedAt: null,
-        expectedKernelSessionId,
         expectedPausedAt: pausedAt,
         expectedPendingHandoffId: null,
         expectedResumeAfterMailboxLaneSeq:
@@ -2140,15 +2138,21 @@ export class ComputerUseService {
 
     if (handoff.status === "completed") {
       if (
-        input.run.resumeAfterMailboxLaneSeq !== null &&
+        (
+          input.run.resumeAfterMailboxLaneSeq !== null ||
+          handoff.purpose === "login"
+        ) &&
         !await validateResumeProof()
       ) {
         return null;
       }
+      if (handoff.purpose !== "login" && !input.run.kernelSessionId) {
+        return null;
+      }
       return {
+        completedLoginHandoff: handoff.purpose === "login" ? handoff : null,
         expectedHandoffStatus: handoff.status,
         expectedHandoffUpdatedAt: handoff.updatedAt,
-        expectedKernelSessionId,
         expectedPausedAt: pausedAt,
         expectedPendingHandoffId: pendingHandoffId,
         expectedResumeAfterMailboxLaneSeq:
@@ -2164,6 +2168,10 @@ export class ComputerUseService {
       return null;
     }
 
+    if (!input.run.kernelSessionId) {
+      return null;
+    }
+
     if (
       handoff.status === "checkpointing" &&
       !isStaleCheckpointingHandoff(handoff, input.now)
@@ -2176,9 +2184,9 @@ export class ComputerUseService {
         return null;
       }
       return {
+        completedLoginHandoff: null,
         expectedHandoffStatus: handoff.status,
         expectedHandoffUpdatedAt: handoff.updatedAt,
-        expectedKernelSessionId,
         expectedPausedAt: pausedAt,
         expectedPendingHandoffId: pendingHandoffId,
         expectedResumeAfterMailboxLaneSeq:
@@ -2192,9 +2200,9 @@ export class ComputerUseService {
         return null;
       }
       return {
+        completedLoginHandoff: null,
         expectedHandoffStatus: handoff.status,
         expectedHandoffUpdatedAt: handoff.updatedAt,
-        expectedKernelSessionId,
         expectedPausedAt: pausedAt,
         expectedPendingHandoffId: pendingHandoffId,
         expectedResumeAfterMailboxLaneSeq:
@@ -2272,19 +2280,21 @@ export class ComputerUseService {
   private async checkpointProfileAfterLoginHandoff(
     run: ComputerRunRecord,
     now: Date,
-    store: ComputerUseStore = this.store,
-    expectedHandoffUpdatedAt?: Date,
-  ): Promise<void> {
+    store: ComputerUseStore,
+    handoff: ComputerHandoffRecord,
+  ): Promise<ComputerRunRecord> {
     const detached = await this.detachRunBrowserForHandoff(
       run,
       now,
       store,
-      expectedHandoffUpdatedAt,
+      handoff.updatedAt,
+      "completed",
     );
-    await this.attachRunBrowserFromProfile(
+    return await this.attachRunBrowserFromProfile(
       detached,
       store,
-      expectedHandoffUpdatedAt,
+      handoff.updatedAt,
+      "completed",
     );
   }
 
@@ -2293,6 +2303,7 @@ export class ComputerUseService {
     now: Date,
     store: ComputerUseStore,
     expectedHandoffUpdatedAt?: Date,
+    expectedHandoffStatus: "checkpointing" | "completed" = "checkpointing",
   ): Promise<ComputerRunRecord> {
     const state = run.kernelSessionId
       ? await this.readBrowserState(run).catch(() => ({
@@ -2326,6 +2337,7 @@ export class ComputerUseService {
       throw browserCleanupFailedError();
     }
     return await store.clearRunBrowser({
+      expectedHandoffStatus,
       expectedHandoffUpdatedAt: expectedHandoffUpdatedAt ?? null,
       expectedKernelSessionId: oldKernelSessionId,
       expectedPendingHandoffId: run.pendingHandoffId,
@@ -2340,10 +2352,12 @@ export class ComputerUseService {
     run: ComputerRunRecord,
     store: ComputerUseStore,
     expectedHandoffUpdatedAt?: Date,
+    expectedHandoffStatus: "checkpointing" | "completed" = "checkpointing",
   ): Promise<ComputerRunRecord> {
     const prepared = await this.prepareRunBrowserFromProfile(
       run,
       expectedHandoffUpdatedAt,
+      expectedHandoffStatus,
     );
     try {
       return await store.replaceRunBrowser(prepared.replaceInput);
@@ -2372,6 +2386,7 @@ export class ComputerUseService {
   private async prepareRunBrowserFromProfile(
     run: ComputerRunRecord,
     expectedHandoffUpdatedAt?: Date,
+    expectedHandoffStatus: "checkpointing" | "completed" = "checkpointing",
   ): Promise<PreparedRunBrowser> {
     const browserName = buildKernelBrowserName({ runId: run.id });
     if (!await this.deleteBrowserBestEffort(browserName)) {
@@ -2390,6 +2405,7 @@ export class ComputerUseService {
       this.assertAllowedLiveViewUrl(browser.liveViewUrl);
       return {
         replaceInput: {
+          expectedHandoffStatus,
           expectedHandoffUpdatedAt: expectedHandoffUpdatedAt ?? null,
           expectedPendingHandoffId: run.pendingHandoffId,
           kernelLiveViewUrlEncrypted: await this.encryptRequiredRunSecret({
@@ -2469,7 +2485,7 @@ export class ComputerUseService {
     store?: ComputerUseStore;
   }): Promise<ComputerRunHandle> {
     const store = input.store ?? this.store;
-    const run = await store.requireOwnedRun({
+    let run = await store.requireOwnedRun({
       memberId: input.memberId,
       runId: input.runId,
     });
@@ -2495,6 +2511,7 @@ export class ComputerUseService {
       });
     }
     const pausedAt = run.pausedAt;
+    let completedLoginHandoff: ComputerHandoffRecord | null = null;
     let retiredStaticPreviewHandoff: ComputerHandoffRecord | null = null;
 
     if (run.pendingHandoffId) {
@@ -2539,6 +2556,12 @@ export class ComputerUseService {
       }
 
       if (pendingHandoff) {
+        if (
+          pendingHandoff.status === "completed" &&
+          pendingHandoff.purpose === "login"
+        ) {
+          completedLoginHandoff = pendingHandoff;
+        }
         if (pendingHandoff.status !== "completed") {
           if (
             pendingHandoff.status === "checkpointing" &&
@@ -2623,10 +2646,24 @@ export class ComputerUseService {
       runCheckpointContext: run.checkpointContext,
       store,
     });
+    if (completedLoginHandoff) {
+      run = await this.checkpointProfileAfterLoginHandoff(
+        run,
+        input.now,
+        store,
+        completedLoginHandoff,
+      );
+    }
     const resumed = await store.markRunRunning({
       awaitingReason: run.awaitingReason,
-      expectedHandoffStatus: retiredStaticPreviewHandoff?.status ?? null,
-      expectedHandoffUpdatedAt: retiredStaticPreviewHandoff?.updatedAt ?? null,
+      expectedHandoffUpdatedAt:
+        completedLoginHandoff?.updatedAt ??
+        retiredStaticPreviewHandoff?.updatedAt ??
+        null,
+      expectedHandoffStatus:
+        completedLoginHandoff?.status ??
+        retiredStaticPreviewHandoff?.status ??
+        null,
       expectedKernelSessionId: requireKernelSessionId(run),
       expectedPausedAt: pausedAt,
       expectedPendingHandoffId: run.pendingHandoffId,

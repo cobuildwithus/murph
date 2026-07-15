@@ -243,10 +243,17 @@ is active.
   do not reflect commit order. Timestamps remain audit metadata. Unmarked
   direct-login and pre-migration rows retain the existing timestamp reply proof
   during the bounded active-run drain and are never reclassified from mutable
-  handoff timestamps. Browser publication and handoff conversion or completion
-  commit in one transaction. If both idempotent terminal-write attempts
-  return an error, Murph treats the outcome as unknown and leaves the handoff
-  checkpointing until durable state can be reread or safely reclaimed; it does
+  handoff timestamps. For a direct `login` Live View handoff, Done durably
+  completes the handoff and returns to the conversation while the existing task
+  browser remains the sole profile writer. The next resume that proves a newer
+  mailbox item stops that browser so Kernel saves the profile, removes any stale
+  deterministic replacement, creates a replacement from the saved profile, and
+  only then marks the run `running`. A failed replacement leaves the completed
+  handoff and browserless `awaiting_user` run retryable without another login or
+  Done click. Managed Auth browser publication and handoff conversion or
+  completion commit in one transaction. If both idempotent terminal-write
+  attempts return an error, Murph treats the outcome as unknown and leaves the
+  handoff checkpointing until durable state can be reread or safely reclaimed; it does
   not provision or delete another task browser in that request. Every
   nonterminal Managed Auth row remains on the provider-aware recovery path,
   including when its inter-request claim is yielded to `open`; generic
