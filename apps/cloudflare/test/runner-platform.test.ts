@@ -2512,7 +2512,9 @@ describe("buildHostedExecutionRuntimePlatform", () => {
 
     let thrown: unknown;
     try {
-      await platform.artifactStore.get("a".repeat(64));
+      await platform.artifactStore.get("a".repeat(64), {
+        purpose: "workspace_restore",
+      });
     } catch (error) {
       thrown = error;
     }
