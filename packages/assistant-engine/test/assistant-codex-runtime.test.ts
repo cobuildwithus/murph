@@ -11,6 +11,14 @@ import {
   HOSTED_RUNTIME_CODEX_MODEL_CATALOG_JSON_ENV,
 } from '@murphai/hosted-execution/cli-runtime-bridge'
 import {
+  HOSTED_ASSISTANT_PRODUCT_MODELS,
+  HOSTED_ASSISTANT_REASONING_EFFORTS,
+  HOSTED_ASSISTANT_SOL_MODEL,
+  HOSTED_ASSISTANT_TERRA_MODEL,
+  type HostedAssistantProductModel,
+  type HostedAssistantReasoningEffort,
+} from '@murphai/hosted-execution/assistant-model'
+import {
   initializeVault,
   withHostedCanonicalWritePort,
   type HostedCanonicalWritePort,
@@ -124,6 +132,8 @@ function executeCodexAppServerTurn(
     dynamicTools: input.dynamicTools ?? resolveMurphDynamicTools({
       allowFinishWithoutReply: input.allowFinishWithoutReply,
       allowMessageReactions: input.allowMessageReactions,
+      assistantConfigurationAvailable:
+        input.hostedToolContext?.assistantConfigurationTool != null,
       computerToolsAvailable:
         input.hostedToolContext?.computerToolsAvailable === true,
       connectedAppsAvailable: input.hostedToolContext?.connectedApps != null,
@@ -1455,6 +1465,171 @@ describe('assistant codex runtime', () => {
       ],
     })
     expect(uploader.uploadGeneratedImage).toHaveBeenCalledOnce()
+  })
+
+  it('applies overlapping assistant configuration updates in request order', async () => {
+    const workingDirectory = await createTempDir(
+      'assistant-codex-configuration-order-work-',
+    )
+    const firstUpdateStarted = createDeferred<void>()
+    const releaseFirstUpdate = createDeferred<void>()
+    const configurationCalls: string[] = []
+    let savedModel: HostedAssistantProductModel = HOSTED_ASSISTANT_TERRA_MODEL
+    let savedReasoningEffort: HostedAssistantReasoningEffort = 'low'
+    let updateCount = 0
+
+    const configurationSnapshot = () => ({
+      availableModels: [...HOSTED_ASSISTANT_PRODUCT_MODELS],
+      availableReasoningEfforts: [...HOSTED_ASSISTANT_REASONING_EFFORTS],
+      configurationAvailable: true,
+      dormantSolPreference: false,
+      model: savedModel,
+      reasoningEffort: savedReasoningEffort,
+      solAvailable: true,
+    })
+    const assistantConfigurationTool: NonNullable<
+      AssistantHostedToolContext['assistantConfigurationTool']
+    > = {
+      async request(request) {
+        if (request.action === 'read') {
+          configurationCalls.push(`read:${savedModel}`)
+          return {
+            action: 'read',
+            result: configurationSnapshot(),
+          }
+        }
+
+        updateCount += 1
+        configurationCalls.push(`update:${request.model ?? savedModel}`)
+        if (updateCount === 1) {
+          firstUpdateStarted.resolve()
+          await releaseFirstUpdate.promise
+        }
+        savedModel = request.model ?? savedModel
+        savedReasoningEffort = request.reasoningEffort ?? savedReasoningEffort
+        return {
+          action: 'update',
+          result: {
+            ...configurationSnapshot(),
+            appliesAt: 'next_turn',
+            requiredPlan: null,
+            status: 'updated',
+          },
+        }
+      },
+    }
+    const hostedToolContext: AssistantHostedToolContext = {
+      ...createHostedToolContext(),
+      assistantConfigurationTool,
+      currentAssistantPreferenceInputId: () => `ain_${'a'.repeat(32)}`,
+      currentAssistantTarget: () => ({
+        model: HOSTED_ASSISTANT_TERRA_MODEL,
+        reasoningEffort: 'low',
+      }),
+    }
+
+    codexMocks.spawn.mockImplementation(() => {
+      const child = new MockChildProcess()
+
+      queueMicrotask(() => {
+        void (async () => {
+          await waitForRpcMethod(child, 'initialize')
+          child.stdout.write(jsonLine({ id: 1, result: {} }))
+          await waitForRpcMethod(child, 'thread/start')
+          child.stdout.write(jsonLine({
+            id: 2,
+            result: { thread: { id: 'thread-configuration-order' } },
+          }))
+          await waitForRpcMethod(child, 'turn/start')
+          child.stdout.write(jsonLine({
+            id: 3,
+            result: { turn: { id: 'turn-configuration-order' } },
+          }))
+          child.stdout.write(jsonLine({
+            id: 71,
+            method: 'item/tool/call',
+            params: {
+              arguments: {
+                action: 'update',
+                model: HOSTED_ASSISTANT_SOL_MODEL,
+              },
+              namespace: 'murph',
+              tool: 'assistant_configuration',
+            },
+          }))
+          child.stdout.write(jsonLine({
+            id: 72,
+            method: 'item/tool/call',
+            params: {
+              arguments: {
+                action: 'update',
+                model: HOSTED_ASSISTANT_TERRA_MODEL,
+              },
+              namespace: 'murph',
+              tool: 'assistant_configuration',
+            },
+          }))
+
+          await firstUpdateStarted.promise
+          try {
+            expect(configurationCalls).toEqual([
+              `read:${HOSTED_ASSISTANT_TERRA_MODEL}`,
+              `update:${HOSTED_ASSISTANT_SOL_MODEL}`,
+            ])
+          } finally {
+            releaseFirstUpdate.resolve()
+          }
+
+          const messages = await waitForRpcMessages(child, 6)
+          expect(messages[4]).toMatchObject({
+            id: 71,
+            result: { success: true },
+          })
+          expect(messages[5]).toMatchObject({
+            id: 72,
+            result: { success: true },
+          })
+          expect(configurationCalls).toEqual([
+            `read:${HOSTED_ASSISTANT_TERRA_MODEL}`,
+            `update:${HOSTED_ASSISTANT_SOL_MODEL}`,
+            `read:${HOSTED_ASSISTANT_SOL_MODEL}`,
+            `update:${HOSTED_ASSISTANT_TERRA_MODEL}`,
+          ])
+
+          child.stdout.write(jsonLine({
+            method: 'item/completed',
+            params: {
+              item: {
+                id: 'assistant-configuration-order',
+                message: 'Configuration updates complete',
+                type: 'assistant_message',
+              },
+            },
+          }))
+          child.stdout.write(jsonLine({
+            method: 'turn/completed',
+            params: {
+              turn: {
+                id: 'turn-configuration-order',
+                status: 'completed',
+              },
+            },
+          }))
+        })()
+      })
+
+      return child
+    })
+
+    await expect(executeCodexAppServerTurn({
+      env: { OPENAI_API_KEY: 'openai-test-key' },
+      hostedToolContext,
+      prompt: 'switch to Sol, then back to Terra',
+      workingDirectory,
+    })).resolves.toMatchObject({
+      finalMessage: 'Configuration updates complete',
+    })
+    expect(savedModel).toBe(HOSTED_ASSISTANT_TERRA_MODEL)
   })
 
   const computerPauseFinalMessageScenarios = [

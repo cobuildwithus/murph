@@ -3011,8 +3011,8 @@ async function runCodexAppServerTurnOnProcess(
   }
 
   // Stateful dynamic tools run serialized in request order so response media,
-  // final-action patches, and computer pause barriers apply deterministically
-  // even if Codex issues overlapping tool requests.
+  // preference writes, final-action patches, and computer pause barriers apply
+  // deterministically even if Codex issues overlapping tool requests.
   const trackDynamicToolExecution = (run: () => Promise<unknown>): void => {
     dynamicToolExecutionChain = dynamicToolExecutionChain
       .then(run)
@@ -4396,6 +4396,7 @@ function isSerializedDynamicToolRequest(
     request.kind === 'generate-voice-memo' ||
     request.kind === 'generate-song' ||
     request.kind === 'attach-response-media' ||
+    request.kind === 'assistant-configuration' ||
     request.kind === 'personalization' ||
     request.kind === 'submit-product-feedback' ||
     isComputerDynamicToolRequest(request)

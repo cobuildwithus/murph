@@ -108,9 +108,13 @@ runtime handling. Model and reasoning changes remain exclusively owned by
 eligible user input in the active bounded exact-successor provider batch and
 forwards only that batch's terminal input id; inside the mutation transaction,
 web binds that input id to the callback member and one live conversation
-mailbox row before re-deriving access and Sol eligibility. A
-successful change applies at the next hosted invocation without passkey
-approval, a mailbox event, or a vault copy. The runtime and web control plane
+mailbox row before re-deriving access and Sol eligibility. A confirmed change
+applies to the next separately accepted provider turn, including a follow-up in
+the same active invocation, without passkey approval, a mailbox event, or a
+vault copy. The running turn keeps its starting target. Only the authoritative
+web response updates an ephemeral invocation-local projection; web remains the
+sole durable owner, and a later invocation rereads the preference there. The
+runtime and web control plane
 accept only the input-bound update shape; approval-shaped configuration
 callbacks are rejected. The personalization response
 returns only the effective enum values (normalizing absent stored style to the
