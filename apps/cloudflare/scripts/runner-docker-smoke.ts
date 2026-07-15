@@ -40,11 +40,13 @@ async function main(): Promise<void> {
       "run",
       "--rm",
       // Cloudflare runs the image in its own Linux VM. Docker's default
-      // seccomp profile blocks the user namespace that Codex uses to apply
-      // the nested read-only permission profile, so expose that VM-level
+      // seccomp and AppArmor profiles block the namespaces that Codex uses to
+      // apply the nested read-only permission profile, so expose that VM-level
       // capability in this disposable, networkless smoke container.
       "--security-opt",
       "seccomp=unconfined",
+      "--security-opt",
+      "apparmor=unconfined",
       "--platform",
       "linux/amd64",
       "--interactive",
