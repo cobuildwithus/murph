@@ -22,6 +22,7 @@ import {
 } from "@/src/lib/hosted-onboarding/linq-delivery-store";
 import {
   buildHostedLinqInviteSignupEffectId,
+  buildHostedLinqInviteSignupEffectIdMemberPrefix,
   parseHostedLinqInviteSignupEffectId,
 } from "@/src/lib/hosted-onboarding/linq-invite-signup-effect-id";
 import { ingestHostedLinqProviderEventTx } from "@/src/lib/hosted-onboarding/linq-provider-event-store";
@@ -3540,6 +3541,8 @@ describe("hosted Linq signup-link delivery attempts", () => {
   });
 
   it("round-trips attempt ordinals through the invite effect id", () => {
+    expect(buildHostedLinqInviteSignupEffectIdMemberPrefix("member_123"))
+      .toBe("linq-invite-signup:member_123:");
     expect(buildHostedLinqInviteSignupEffectId({
       memberId: "member_123",
       occurredAt: "2026-03-26T12:34:56.000Z",
