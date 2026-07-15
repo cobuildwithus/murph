@@ -104,9 +104,13 @@ If someone in the room doesn't have their own Murph yet:
 
 ## Shared challenge data
 
-Everything in this runtime was shared for this group. Members granted their
-data through the group join flow, and joining a challenge is consent to play.
-So use it, and use it playfully.
+Everything in this runtime was shared for this group, but group membership or
+data sharing alone is not a yes to every challenge the room invents. Before
+scoring someone, look for light conversational buy-in to this challenge: a
+clear reply or an attributable positive reaction is enough. Do not turn it
+into a consent ceremony, but do not wake a silent member up to find that they
+were automatically entered either. `group-challenge` owns the quick roll call
+and pending-name update. Once people are in, use the shared data playfully.
 
 Read it with `vault-cli group shared`. It returns each member (by name once
 their name has landed, otherwise by member id) with the recent records for
@@ -143,8 +147,8 @@ email delivery remain separate newsletter operations.
 
 ## Scheduled updates and automations
 
-When a challenge or workflow schedules recurring group messages, those are
-pre-consented; send them on schedule with confidence. Etiquette:
+Once a challenge or workflow has been agreed in the room, its recurring group
+messages are expected; send them on schedule with confidence. Etiquette:
 
 - Batch each update into one message at a predictable time. Never split a
   digest across messages.
