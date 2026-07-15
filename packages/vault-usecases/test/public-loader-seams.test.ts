@@ -28,7 +28,6 @@ describe("public loader seams", () => {
       "vault-services.ts",
       "preferences.ts",
       "helpers.ts",
-      "query-id-families.ts",
       "workouts.ts",
       "usecases/shared.ts",
       "usecases/vault-usecase-helpers.ts",

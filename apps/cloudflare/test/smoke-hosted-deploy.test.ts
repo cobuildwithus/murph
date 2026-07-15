@@ -249,28 +249,159 @@ describe("runSmokeHostedDeploy", () => {
     ]);
   });
 
-  it("fails when a version override is configured but the Worker reports a different version", async () => {
-    await expect(runSmokeHostedDeploy({
-      fetchImpl: async (url: RequestInfo | URL) => {
-        if (String(url).endsWith("/")) {
+  it("retries when the Worker banner has not reached the requested version", async () => {
+    vi.useFakeTimers();
+    try {
+      let bannerCalls = 0;
+      let healthCalls = 0;
+      const smoke = runSmokeHostedDeploy({
+        fetchImpl: async (url: RequestInfo | URL) => {
+          if (String(url).endsWith("/")) {
+            bannerCalls += 1;
+            return new Response(JSON.stringify({
+              ok: true,
+              service: "cloudflare-hosted-runner",
+              workerVersionId: bannerCalls === 1 ? "version-other" : "version-123",
+            }), { status: 200 });
+          }
+
+          healthCalls += 1;
+          return new Response(JSON.stringify({ ok: true, workerVersionId: "version-123" }), {
+            status: 200,
+          });
+        },
+        log() {},
+        source: {
+          CF_WORKER_NAME: "hosted-worker",
+          HOSTED_EXECUTION_SMOKE_VERSION_ID: "version-123",
+          HOSTED_EXECUTION_SMOKE_WORKER_BASE_URL: "https://worker.example.test",
+        },
+      });
+
+      await vi.runAllTimersAsync();
+      await smoke;
+
+      expect(bannerCalls).toBe(2);
+      expect(healthCalls).toBe(1);
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
+  it("retries the banner and health pair when health has not reached the requested version", async () => {
+    vi.useFakeTimers();
+    try {
+      let bannerCalls = 0;
+      let healthCalls = 0;
+      const smoke = runSmokeHostedDeploy({
+        fetchImpl: async (url: RequestInfo | URL) => {
+          if (String(url).endsWith("/")) {
+            bannerCalls += 1;
+            return new Response(JSON.stringify({
+              ok: true,
+              service: "cloudflare-hosted-runner",
+              workerVersionId: "version-123",
+            }), { status: 200 });
+          }
+
+          healthCalls += 1;
+          return new Response(JSON.stringify({
+            ok: true,
+            workerVersionId: healthCalls === 1 ? "version-other" : "version-123",
+          }), { status: 200 });
+        },
+        log() {},
+        source: {
+          CF_WORKER_NAME: "hosted-worker",
+          HOSTED_EXECUTION_SMOKE_VERSION_ID: "version-123",
+          HOSTED_EXECUTION_SMOKE_WORKER_BASE_URL: "https://worker.example.test",
+        },
+      });
+
+      await vi.runAllTimersAsync();
+      await smoke;
+
+      expect(bannerCalls).toBe(2);
+      expect(healthCalls).toBe(2);
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
+  it("fails after the bounded retry window when the Worker keeps reporting another version", async () => {
+    vi.useFakeTimers();
+    try {
+      let bannerCalls = 0;
+      const smoke = runSmokeHostedDeploy({
+        fetchImpl: async () => {
+          bannerCalls += 1;
           return new Response(JSON.stringify({
             ok: true,
             service: "cloudflare-hosted-runner",
             workerVersionId: "version-other",
-          }), {
-            status: 200,
-          });
-        }
+          }), { status: 200 });
+        },
+        log() {},
+        source: {
+          CF_WORKER_NAME: "hosted-worker",
+          HOSTED_EXECUTION_SMOKE_VERSION_ID: "version-123",
+          HOSTED_EXECUTION_SMOKE_WORKER_BASE_URL: "https://worker.example.test",
+        },
+      });
+      const assertion = expect(smoke).rejects.toThrow(
+        "worker banner check did not run the requested Worker version.",
+      );
 
-        return new Response(JSON.stringify({ ok: true, workerVersionId: "version-other" }), { status: 200 });
-      },
+      await vi.runAllTimersAsync();
+      await assertion;
+
+      expect(bannerCalls).toBe(5);
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
+  it("does not retry public smoke HTTP failures", async () => {
+    const fetchImpl = vi.fn(async () => new Response(null, { status: 503 }));
+
+    await expect(runSmokeHostedDeploy({
+      fetchImpl,
       log() {},
       source: {
         CF_WORKER_NAME: "hosted-worker",
         HOSTED_EXECUTION_SMOKE_VERSION_ID: "version-123",
         HOSTED_EXECUTION_SMOKE_WORKER_BASE_URL: "https://worker.example.test",
       },
-    })).rejects.toThrow("worker banner check did not run the requested Worker version.");
+    })).rejects.toThrow("worker banner check failed with HTTP 503.");
+
+    expect(fetchImpl).toHaveBeenCalledTimes(1);
+  });
+
+  it("does not retry a public smoke payload missing Worker version metadata", async () => {
+    vi.useFakeTimers();
+    try {
+      const fetchImpl = vi.fn(async () => new Response(JSON.stringify({
+        ok: true,
+        service: "cloudflare-hosted-runner",
+      }), { status: 200 }));
+      const smoke = runSmokeHostedDeploy({
+        fetchImpl,
+        log() {},
+        source: {
+          CF_WORKER_NAME: "hosted-worker",
+          HOSTED_EXECUTION_SMOKE_VERSION_ID: "version-123",
+          HOSTED_EXECUTION_SMOKE_WORKER_BASE_URL: "https://worker.example.test",
+        },
+      });
+      const assertion = expect(smoke).rejects.toThrow(/worker banner check/u);
+
+      await vi.runAllTimersAsync();
+      await assertion;
+
+      expect(fetchImpl).toHaveBeenCalledTimes(1);
+    } finally {
+      vi.useRealTimers();
+    }
   });
 
   it("executes the deploy-signed runner container smoke when enabled", async () => {
