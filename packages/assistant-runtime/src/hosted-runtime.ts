@@ -2924,6 +2924,12 @@ export async function runHostedWorkspaceRuntimeJobInProcess(
           || (pendingWake.nextWakeAt !== null
             && Date.parse(pendingWake.nextWakeAt) - Date.now()
               < HOSTED_IDLE_COMPACT_TIMEOUT_MS);
+        const idleMaintenanceAssistantTarget =
+          readConfirmedAssistantTarget() ?? {
+            model: runtimeEnv.HOSTED_ASSISTANT_MODEL ?? null,
+            reasoningEffort:
+              runtimeEnv.HOSTED_ASSISTANT_REASONING_EFFORT ?? null,
+          };
         const idleMaintenance = dirtyWindowCheckpointTrigger === "shutdown_signal"
           ? buildHostedShutdownIdleMaintenanceOutcome()
           : await runHostedPendingInputProtectedIdleMaintenance({
@@ -2938,12 +2944,10 @@ export async function runHostedWorkspaceRuntimeJobInProcess(
               }),
               materializeWorkspaceArtifacts: restored.materializeWorkspaceArtifacts,
               memberId: input.request.userId,
-              model:
-                readConfirmedAssistantTarget()?.model
-                ?? runtimeEnv.HOSTED_ASSISTANT_MODEL
-                ?? null,
+              model: idleMaintenanceAssistantTarget.model,
               pendingWork: idleMaintenancePendingWork,
               providerName: runtimeEnv[HOSTED_CODEX_EFFECTIVE_MODEL_PROVIDER_ID_ENV] ?? null,
+              reasoningEffort: idleMaintenanceAssistantTarget.reasoningEffort,
               recordUsage: guardedRuntime.platform.usageRecordPort
                 ? async (record) => {
                     await guardedRuntime.platform.usageRecordPort?.recordUsage(record);
@@ -3631,6 +3635,7 @@ export async function runHostedPendingInputProtectedIdleMaintenance(input: {
   model: string | null;
   pendingWork: boolean;
   providerName: string | null;
+  reasoningEffort: string | null;
   recordUsage: Parameters<typeof runHostedIdleCheckpointMaintenance>[0]["recordUsage"];
   resolveAssistantSessionId: Parameters<typeof runHostedIdleCheckpointMaintenance>[0]["resolveAssistantSessionId"];
   shutdownSignal: AbortSignal | null;
@@ -3661,6 +3666,7 @@ export async function runHostedPendingInputProtectedIdleMaintenance(input: {
     protectedCaptureIds: mediaRetentionProtections.protectedCaptureIds,
     protectedStoredPaths: mediaRetentionProtections.protectedStoredPaths,
     providerName: input.providerName,
+    reasoningEffort: input.reasoningEffort,
     recordUsage: input.recordUsage,
     resolveAssistantSessionId: input.resolveAssistantSessionId,
     shutdownSignal: input.shutdownSignal,
@@ -3699,6 +3705,7 @@ async function runHostedInboxMediaRetentionOnlyCheckpoint(input: {
         model: null,
         pendingWork: false,
         providerName: null,
+        reasoningEffort: null,
         recordUsage: null,
         resolveAssistantSessionId: null,
         shutdownSignal: input.shutdownSignal,

@@ -72,6 +72,7 @@ export async function runHostedIdleCheckpointMaintenance(input: {
   protectedCaptureIds?: readonly string[];
   protectedStoredPaths?: readonly string[];
   providerName: string | null;
+  reasoningEffort?: string | null;
   recordUsage: ((record: AssistantUsageRecord) => Promise<void>) | null;
   resolveAssistantSessionId: ((codexThreadId: string) => Promise<string | null>) | null;
   shutdownSignal: AbortSignal | null;
@@ -183,6 +184,10 @@ export async function runHostedIdleCheckpointMaintenance(input: {
     let outcome: CodexWarmThreadCompactionOutcome;
     try {
       outcome = await compactWarmCodexThread({
+        expectedTarget: {
+          model: input.model,
+          reasoningEffort: input.reasoningEffort ?? null,
+        },
         minThreadTokens: HOSTED_IDLE_COMPACT_MIN_THREAD_TOKENS,
         signal: abortController.signal,
         timeoutMs: HOSTED_IDLE_COMPACT_TIMEOUT_MS,
@@ -194,8 +199,12 @@ export async function runHostedIdleCheckpointMaintenance(input: {
       );
     }
 
+    const boundModel = outcome.kind === "compacted"
+      ? outcome.target.model
+      : null;
     if (
       outcome.kind === "compacted"
+      && boundModel
       && input.recordUsage
       && input.resolveAssistantSessionId
     ) {
@@ -204,7 +213,7 @@ export async function runHostedIdleCheckpointMaintenance(input: {
       // checkpoint nor delay a pending wake.
       const { recordUsage, resolveAssistantSessionId } = input;
       const { threadId, usage } = outcome;
-      const model = input.model;
+      const model = boundModel;
       void (async () => {
         const assistantSessionId = await resolveAssistantSessionId(threadId);
         if (!assistantSessionId) {

@@ -244,7 +244,13 @@ type CodexAppServerActiveTurnBinding = {
 export interface CodexWarmThreadTokenUsage {
   lastInputTokens: number
   serviceTier: AssistantProviderServiceTier | null
+  target: CodexWarmThreadTarget
   threadId: string
+}
+
+export interface CodexWarmThreadTarget {
+  model: string | null
+  reasoningEffort: string | null
 }
 
 function prepareCodexRpcParams(
@@ -753,6 +759,10 @@ class CodexAppServerProcess {
   private activeTurn: CodexAppServerActiveTurnBinding | null = null
   private boundThreadId: string | null = null
   private boundThreadServiceTier: AssistantProviderServiceTier | null = null
+  private boundThreadTarget: CodexWarmThreadTarget = {
+    model: null,
+    reasoningEffort: null,
+  }
   private cleanupProcessExitListener: () => void
   private lastThreadTokenUsage: CodexWarmThreadTokenUsage | null = null
   private readonly codexCommand: string
@@ -1255,6 +1265,7 @@ class CodexAppServerProcess {
     this.lastThreadTokenUsage = {
       lastInputTokens,
       serviceTier: this.boundThreadServiceTier,
+      target: { ...this.boundThreadTarget },
       threadId: update.threadId,
     }
   }
@@ -1269,6 +1280,10 @@ class CodexAppServerProcess {
 
   noteBoundThreadServiceTier(serviceTier: AssistantProviderServiceTier | null): void {
     this.boundThreadServiceTier = serviceTier
+  }
+
+  noteBoundThreadTarget(target: CodexWarmThreadTarget): void {
+    this.boundThreadTarget = normalizeCodexWarmThreadTarget(target)
   }
 
   // Exposed so a freshly bound turn can route foreign-thread events before
@@ -1962,6 +1977,7 @@ export type CodexWarmThreadCompactionOutcome =
       threadContextTokensBefore: number
       threadId: string
       serviceTier: AssistantProviderServiceTier | null
+      target: CodexWarmThreadTarget
       usage: CodexWarmThreadCompactionUsage
     }
   | {
@@ -1972,7 +1988,12 @@ export type CodexWarmThreadCompactionOutcome =
     }
   | {
       kind: 'skipped'
-      reason: 'below_threshold' | 'no_thread_vitals' | 'no_warm_process' | 'turn_in_flight'
+      reason:
+        | 'below_threshold'
+        | 'no_thread_vitals'
+        | 'no_warm_process'
+        | 'target_changed'
+        | 'turn_in_flight'
       threadContextTokensBefore: number | null
     }
 
@@ -1985,6 +2006,7 @@ export type CodexWarmThreadCompactionOutcome =
 // because the idle checkpoint that follows snapshots the Codex home,
 // including rollout files, and must never capture a rollout mid-teardown.
 export async function compactWarmCodexThread(input: {
+  expectedTarget?: CodexWarmThreadTarget | null
   minThreadTokens: number
   signal?: AbortSignal | null
   timeoutMs: number
@@ -2000,6 +2022,22 @@ export async function compactWarmCodexThread(input: {
     const vitals = processInstance.warmThreadTokenUsage
     if (!vitals) {
       return { kind: 'skipped', reason: 'no_thread_vitals', threadContextTokensBefore: null } as const
+    }
+    if (
+      input.expectedTarget &&
+      !areCodexWarmThreadTargetsEqual(vitals.target, input.expectedTarget)
+    ) {
+      // The confirmed target belongs to a future provider turn. This warm
+      // process still owns the completed old-target thread, whose native
+      // resume state the normal target-fingerprint transition will discard.
+      // Retire it without paying to compact obsolete work or attributing that
+      // work to the future target.
+      await processInstance.poison('idle-compaction-target-changed')
+      return {
+        kind: 'skipped',
+        reason: 'target_changed',
+        threadContextTokensBefore: vitals.lastInputTokens,
+      } as const
     }
     if (vitals.lastInputTokens < input.minThreadTokens) {
       return {
@@ -2171,6 +2209,7 @@ export async function compactWarmCodexThread(input: {
         threadContextTokensBefore: vitals.lastInputTokens,
         threadId: vitals.threadId,
         serviceTier: vitals.serviceTier,
+        target: vitals.target,
         usage: providerUsage
           ?? estimateCodexWarmThreadCompactionUsage(vitals.lastInputTokens),
       }
@@ -2199,6 +2238,27 @@ export async function compactWarmCodexThread(input: {
     processInstance.releaseTurn(binding)
     processInstance.releaseReservation()
   }
+}
+
+function normalizeCodexWarmThreadTarget(
+  target: CodexWarmThreadTarget,
+): CodexWarmThreadTarget {
+  return {
+    model: normalizeNullableString(target.model),
+    reasoningEffort: normalizeNullableString(target.reasoningEffort),
+  }
+}
+
+function areCodexWarmThreadTargetsEqual(
+  left: CodexWarmThreadTarget,
+  right: CodexWarmThreadTarget,
+): boolean {
+  const normalizedLeft = normalizeCodexWarmThreadTarget(left)
+  const normalizedRight = normalizeCodexWarmThreadTarget(right)
+  return (
+    normalizedLeft.model === normalizedRight.model &&
+    normalizedLeft.reasoningEffort === normalizedRight.reasoningEffort
+  )
 }
 
 function hashCodexRawString(value: string): string {
@@ -4069,6 +4129,10 @@ async function runCodexAppServerTurnOnProcess(
     }
 
     lifecycleStage = 'turn_start'
+    codexProcess.noteBoundThreadTarget({
+      model: input.model ?? null,
+      reasoningEffort: input.reasoningEffort ?? null,
+    })
     codexProcess.noteBoundThreadServiceTier(input.serviceTier ?? null)
     const turnStartRequest = sendRequest(
       'turn/start',

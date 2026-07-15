@@ -180,6 +180,10 @@ describe('real codex app-server with scripted provider', () => {
     // turn's tokenUsage events, not a placeholder.
     scenario.stub.markRequestBaseline()
     const skipped = await compactWarmCodexThread({
+      expectedTarget: {
+        model: SCRIPTED_MODEL,
+        reasoningEffort: 'low',
+      },
       minThreadTokens: 50_000,
       timeoutMs: 30_000,
     })
@@ -197,12 +201,20 @@ describe('real codex app-server with scripted provider', () => {
     // served by the stub and the thread reports compacted.
     scenario.stub.queue({ text: 'SCRIPTED_COMPACT_SUMMARY' })
     const compacted = await compactWarmCodexThread({
+      expectedTarget: {
+        model: SCRIPTED_MODEL,
+        reasoningEffort: 'low',
+      },
       minThreadTokens: 1,
       timeoutMs: 60_000,
     })
     expect(compacted).toMatchObject({
       kind: 'compacted',
       serviceTier: null,
+      target: {
+        model: SCRIPTED_MODEL,
+        reasoningEffort: 'low',
+      },
       threadId: seeded.threadId,
     })
     // Usage attribution must never regress to the zero-row production failure:
@@ -251,6 +263,65 @@ describe('real codex app-server with scripted provider', () => {
     })
     expect(resumed.finalMessage).toBe('POST_COMPACT_OK')
     expect(resumed.threadId).toBe(seeded.threadId)
+  })
+
+  it('retires an obsolete warm thread instead of compacting it for a future target', {
+    timeout: TURN_TIMEOUT_MS,
+  }, async () => {
+    const cases = [
+      {
+        label: 'model change',
+        target: {
+          model: 'gpt-5.6-sol',
+          reasoningEffort: 'low',
+        },
+      },
+      {
+        label: 'reasoning change',
+        target: {
+          model: SCRIPTED_MODEL,
+          reasoningEffort: 'high',
+        },
+      },
+    ] as const
+
+    for (const testCase of cases) {
+      const scenario = await prepareScriptedTurnScenario()
+      scenario.stub.queue({ text: `TARGET_CHANGE_SEED_${testCase.label}` })
+      await executeCodexAppServerTurn({
+        ...scenario.turnInput,
+        prompt: `Seed the warm thread before a ${testCase.label}.`,
+      })
+
+      scenario.stub.markRequestBaseline()
+      await expect(
+        compactWarmCodexThread({
+          expectedTarget: testCase.target,
+          minThreadTokens: 1,
+          timeoutMs: 30_000,
+        }),
+      ).resolves.toMatchObject({
+        kind: 'skipped',
+        reason: 'target_changed',
+        threadContextTokensBefore: expect.any(Number),
+      })
+      expect(scenario.stub.requestCountSinceBaseline()).toBe(0)
+      await expect(
+        compactWarmCodexThread({
+          expectedTarget: {
+            model: SCRIPTED_MODEL,
+            reasoningEffort: 'low',
+          },
+          minThreadTokens: 1,
+          timeoutMs: 30_000,
+        }),
+      ).resolves.toEqual({
+        kind: 'skipped',
+        reason: 'no_warm_process',
+        threadContextTokensBefore: null,
+      })
+      expect(scenario.stub.requestCountSinceBaseline()).toBe(0)
+    }
   })
 
   it('skips off-turn compaction while a member turn is in flight', {

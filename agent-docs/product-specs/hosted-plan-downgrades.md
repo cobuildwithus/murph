@@ -69,7 +69,10 @@ that Murph should use on the next hosted turn:
   same active invocation. The running turn keeps the target it started with;
   the tool never mutates it in place. Only `updated` and `unchanged` responses
   may refresh that projection. Failure statuses leave it unchanged, and a new
-  invocation always rereads the web-owned preference.
+  invocation always rereads the web-owned preference. At idle shutdown, a
+  projected target that differs from the engine-owned warm-thread target
+  retires that obsolete thread without compaction; valid compaction usage is
+  attributed from the target bound to the thread, never the future preference.
 - Configuration updates require an explicit personal-member choice. The
   authenticated Settings form uses its normal session and CSRF boundary. An
   assistant-driven update additionally requires eligible accepted user input

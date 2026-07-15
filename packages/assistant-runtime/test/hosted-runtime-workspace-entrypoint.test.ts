@@ -6689,6 +6689,7 @@ describe("hosted workspace runtime entrypoint", () => {
       createDeferred<void>(),
       createDeferred<void>(),
       createDeferred<void>(),
+      createDeferred<void>(),
     ];
     const configurationRequests: HostedRuntimeAssistantConfigurationControlRequest[] = [];
     const configurationResponses: HostedRuntimeAssistantConfigurationToolResponse[] = [
@@ -6762,6 +6763,21 @@ describe("hosted workspace runtime entrypoint", () => {
           requiredPlan: null,
           solAvailable: true,
           status: "updated",
+        },
+      },
+      {
+        action: "update",
+        result: {
+          appliesAt: "next_turn",
+          availableModels: ["gpt-5.6-terra", "gpt-5.6-sol"],
+          availableReasoningEfforts: ["low", "high"],
+          configurationAvailable: true,
+          dormantSolPreference: false,
+          model: "gpt-5.6-sol",
+          reasoningEffort: "high",
+          requiredPlan: null,
+          solAvailable: true,
+          status: "unchanged",
         },
       },
     ];
@@ -6886,10 +6902,17 @@ describe("hosted workspace runtime entrypoint", () => {
                   model: "gpt-5.6-sol",
                   reasoningEffort: "high",
                 });
+              } else if (assistantPhaseCalls === 5) {
+                await configurationTool.request({
+                  action: "update",
+                  assistantInputId: `ain_${"5".repeat(32)}`,
+                  model: "gpt-5.6-sol",
+                  reasoningEffort: "high",
+                });
               }
 
               phaseObserved[assistantPhaseCalls - 1]?.resolve();
-              return assistantPhaseCalls < 4
+              return assistantPhaseCalls < 5
                 ? {
                     checkpointReason: "assistant_runtime_commit" as const,
                     nextWakeAt: null,
@@ -6910,7 +6933,7 @@ describe("hosted workspace runtime entrypoint", () => {
       );
 
       await withRealTimeout(phaseObserved[0]!.promise, 15_000, () => events.join(","));
-      for (let nextPhase = 2; nextPhase <= 4; nextPhase += 1) {
+      for (let nextPhase = 2; nextPhase <= 5; nextPhase += 1) {
         await waitForFakeTimerScheduled(() => events.join(","));
         assert.equal(checkpointRequests.length, 0);
         mailboxItems.push(createMailboxItem({
@@ -6951,10 +6974,17 @@ describe("hosted workspace runtime entrypoint", () => {
           runtimeEffort: "low",
           runtimeModel: "gpt-5.6-terra",
         },
+        {
+          forwardedEffort: "high",
+          forwardedModel: "gpt-5.6-sol",
+          runtimeEffort: "high",
+          runtimeModel: "gpt-5.6-sol",
+        },
       ]);
       assert.deepEqual(configurationRequests.map((request) => request.action), [
         "update",
         "read",
+        "update",
         "update",
         "update",
         "update",
@@ -6967,8 +6997,14 @@ describe("hosted workspace runtime entrypoint", () => {
       assert.equal(result.status, "idle");
       assert.equal(checkpointRequests.length, 1);
       expect(mocks.runHostedIdleCheckpointMaintenance).toHaveBeenCalledOnce();
+      // Idle maintenance receives the latest expected target so the engine can
+      // reject an obsolete warm thread. Usage attribution, when compaction is
+      // valid, comes back from the engine-owned bound thread target.
       expect(mocks.runHostedIdleCheckpointMaintenance).toHaveBeenCalledWith(
-        expect.objectContaining({ model: "gpt-5.6-sol" }),
+        expect.objectContaining({
+          model: "gpt-5.6-sol",
+          reasoningEffort: "high",
+        }),
       );
     } finally {
       vi.useRealTimers();

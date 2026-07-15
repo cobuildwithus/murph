@@ -80,13 +80,17 @@ describe("runHostedIdleCheckpointMaintenance", () => {
     expect(compactWarmCodexThread).not.toHaveBeenCalled();
   });
 
-  it("records provider compaction usage without the estimate marker", async () => {
+  it("records provider compaction usage from the bound warm-thread target", async () => {
     compactWarmCodexThread.mockResolvedValue({
       kind: "compacted",
       durationMs: 1_200,
       threadContextTokensBefore: 140_000,
       threadId: "thread_xyz",
       serviceTier: "flex",
+      target: {
+        model: "gpt-5.6-terra",
+        reasoningEffort: "low",
+      },
       usage: {
         cachedInputTokens: 96_000,
         inputTokens: 140_000,
@@ -100,9 +104,10 @@ describe("runHostedIdleCheckpointMaintenance", () => {
     const outcome = await runHostedIdleCheckpointMaintenance({
       credentialSource: "member",
       memberId: "member_1",
-      model: "gpt-5.5",
+      model: "gpt-5.6-sol",
       providerName: "hosted-openai",
       pendingWork: false,
+      reasoningEffort: "high",
       recordUsage: async (record) => {
         recorded.push(record);
       },
@@ -116,6 +121,10 @@ describe("runHostedIdleCheckpointMaintenance", () => {
     // Recording is fire-and-forget; flush the microtask queue before asserting.
     await new Promise((resolve) => setTimeout(resolve, 0));
     expect(compactWarmCodexThread).toHaveBeenCalledWith({
+      expectedTarget: {
+        model: "gpt-5.6-sol",
+        reasoningEffort: "high",
+      },
       minThreadTokens: HOSTED_IDLE_COMPACT_MIN_THREAD_TOKENS,
       signal: expect.any(AbortSignal),
       timeoutMs: HOSTED_IDLE_COMPACT_TIMEOUT_MS,
@@ -130,7 +139,7 @@ describe("runHostedIdleCheckpointMaintenance", () => {
       outputTokens: 900,
       providerName: "hosted-openai",
       providerRequestId: "thread_xyz",
-      requestedModel: "gpt-5.5",
+      requestedModel: "gpt-5.6-terra",
       sessionId: "asst_real_session",
       tokenPricingBasis: "openai-flex",
       totalTokens: 140_900,
@@ -138,6 +147,35 @@ describe("runHostedIdleCheckpointMaintenance", () => {
       usageExtractionSourcePath: null,
       usageExtractionVersion: "legacy",
     });
+  });
+
+  it("does not record usage when a target change retires the warm thread", async () => {
+    compactWarmCodexThread.mockResolvedValue({
+      kind: "skipped",
+      reason: "target_changed",
+      threadContextTokensBefore: 140_000,
+    });
+    const recordUsage = vi.fn();
+
+    const outcome = await runHostedIdleCheckpointMaintenance({
+      credentialSource: "platform",
+      memberId: "member_1",
+      model: "gpt-5.6-sol",
+      pendingWork: false,
+      providerName: "hosted-openai",
+      reasoningEffort: "high",
+      recordUsage,
+      resolveAssistantSessionId: async () => "asst_real_session",
+      shutdownSignal: null,
+      wakeSignal: null,
+    });
+
+    expect(outcome).toEqual({
+      kind: "skipped",
+      reason: "target_changed",
+      threadContextTokensBefore: 140_000,
+    });
+    expect(recordUsage).not.toHaveBeenCalled();
   });
 
   it("runs inbox media retention during idle maintenance and keeps compaction fail-open", async () => {
@@ -483,6 +521,10 @@ describe("runHostedIdleCheckpointMaintenance", () => {
       threadContextTokensBefore: 140_000,
       threadId: "thread_xyz",
       serviceTier: null,
+      target: {
+        model: "gpt-5.5",
+        reasoningEffort: null,
+      },
       usage: {
         cachedInputTokens: null,
         inputTokens: 140_000,
@@ -537,6 +579,10 @@ describe("runHostedIdleCheckpointMaintenance", () => {
       threadContextTokensBefore: 120_000,
       threadId: "thread_xyz",
       serviceTier: null,
+      target: {
+        model: "gpt-5.5",
+        reasoningEffort: null,
+      },
       usage: {
         cachedInputTokens: 0,
         inputTokens: 120_000,
@@ -749,6 +795,10 @@ describe("runHostedIdleCheckpointMaintenance", () => {
       threadContextTokensBefore: 110_000,
       threadId: "thread_orphan",
       serviceTier: null,
+      target: {
+        model: "gpt-5.5",
+        reasoningEffort: null,
+      },
       usage: {
         cachedInputTokens: 0,
         inputTokens: 110_000,
