@@ -9,6 +9,9 @@
   "references": [
     {
       "path": "../contracts/tsconfig.build.json"
+    },
+    {
+      "path": "../health-metrics"
     }
   ],
   "include": [

@@ -32,6 +32,7 @@ import {
   loadGeneratedHealthCommonsWebRouteBundle,
   loadGeneratedHealthCommonsWebRouteIndex,
   MURPH_HEALTH_COMMONS_PACKAGE_ROOT_ENV,
+  resolveGeneratedHealthCommonsBiomarkerDesiredDirection,
 } from "@murphai/health-commons";
 import { healthCommonsCatalogSchema } from "@murphai/contracts";
 
@@ -243,6 +244,21 @@ function createMeasurementMethodCatalogReader() {
 }
 
 describe("@murphai/health-commons runtime catalog reader", () => {
+  it("resolves desired directions through canonical biomarker aliases", () => {
+    expect(
+      resolveGeneratedHealthCommonsBiomarkerDesiredDirection("biomarker:hrv"),
+    ).toBe("higher_or_stable");
+    expect(
+      resolveGeneratedHealthCommonsBiomarkerDesiredDirection("biomarker:hrv-rmssd"),
+    ).toBe("higher_or_stable");
+    expect(
+      resolveGeneratedHealthCommonsBiomarkerDesiredDirection("biomarker:resting_hr"),
+    ).toBe("lower_or_stable");
+    expect(
+      resolveGeneratedHealthCommonsBiomarkerDesiredDirection("biomarker:not-in-catalog"),
+    ).toBeNull();
+  });
+
   it("loads the compact generated biomarker browse index", () => {
     const biomarkerIndex = getGeneratedHealthCommonsWebBiomarkerIndex();
     const publishedRouteIds = biomarkerIndex.biomarkers

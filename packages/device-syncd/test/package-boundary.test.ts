@@ -116,6 +116,17 @@ test("hosted web-safe device-sync graph stays out of provider runtime modules", 
   );
 });
 
+test("hosted runner runtime-config static graph stays out of per-turn provider modules", async () => {
+  const root = "packages/device-syncd/src/runtime-config.ts";
+  const path = await findDeniedHostedRunnerRuntimeConfigGraphPath(root);
+
+  assert.equal(
+    path,
+    null,
+    path ? `${root}\n${path.join("\n  -> ")}` : undefined,
+  );
+});
+
 const repoRoot = resolve(dirname(fileURLToPath(import.meta.url)), "../../..");
 const deviceSyncdSrcRoot = resolve(repoRoot, "packages/device-syncd/src");
 const webRoot = resolve(repoRoot, "apps/web");
@@ -195,11 +206,71 @@ async function findDeniedDeviceSyncGraphPath(root: string): Promise<string[] | n
   return null;
 }
 
+async function findDeniedHostedRunnerRuntimeConfigGraphPath(
+  root: string,
+): Promise<string[] | null> {
+  const rootPath = resolve(repoRoot, root);
+  const visited = new Set<string>();
+  const stack: Array<{ file: string; path: string[] }> = [{
+    file: rootPath,
+    path: [toRepoPath(rootPath)],
+  }];
+
+  while (stack.length > 0) {
+    const current = stack.pop();
+    if (!current || visited.has(current.file)) {
+      continue;
+    }
+    visited.add(current.file);
+
+    if (isDeniedHostedRunnerRuntimeConfigModule(current.file)) {
+      return current.path;
+    }
+
+    const source = await readFile(current.file, "utf8");
+    for (const specifier of readStaticModuleSpecifiers(source)) {
+      if (isDeniedHostedRunnerRuntimeConfigSpecifier(specifier)) {
+        return [...current.path, specifier];
+      }
+
+      const resolvedModule = resolveLocalModule(current.file, specifier);
+      if (!resolvedModule || visited.has(resolvedModule)) {
+        continue;
+      }
+      stack.push({
+        file: resolvedModule,
+        path: [...current.path, toRepoPath(resolvedModule)],
+      });
+    }
+  }
+
+  return null;
+}
+
 function readModuleSpecifiers(source: string): string[] {
   const specifiers = new Set<string>();
   const patterns = [
     /\bimport\s+(?!type\b)(?:[^'";]*?\s+from\s+)?["']([^"']+)["']/gu,
     /\bimport\s*\(\s*["']([^"']+)["']\s*\)/gu,
+    /\bexport\s+(?!type\b)[^'";]*?\s+from\s+["']([^"']+)["']/gu,
+  ];
+
+  for (const pattern of patterns) {
+    for (const match of source.matchAll(pattern)) {
+      const specifier = match[1];
+      if (specifier) {
+        specifiers.add(specifier);
+      }
+    }
+  }
+
+  return [...specifiers];
+}
+
+function readStaticModuleSpecifiers(source: string): string[] {
+  const specifiers = new Set<string>();
+  const patterns = [
+    /\bimport\s+(?!type\b)(?:[^'";]*?\s+from\s+)?["']([^"']+)["']/gu,
     /\bexport\s+(?!type\b)[^'";]*?\s+from\s+["']([^"']+)["']/gu,
   ];
 
@@ -259,6 +330,19 @@ function isDeniedWebSafeDeviceSyncModule(file: string): boolean {
   const repoPath = toRepoPath(file);
   return DENIED_WEB_SAFE_DEVICE_SYNC_MODULES.has(repoPath)
     || repoPath.startsWith("packages/device-syncd/src/providers/");
+}
+
+function isDeniedHostedRunnerRuntimeConfigModule(file: string): boolean {
+  const repoPath = toRepoPath(file);
+  return DENIED_WEB_SAFE_DEVICE_SYNC_MODULES.has(repoPath)
+    || repoPath.startsWith("packages/device-syncd/src/providers/");
+}
+
+function isDeniedHostedRunnerRuntimeConfigSpecifier(specifier: string): boolean {
+  return specifier === "@murphai/importers"
+    || specifier.startsWith("@murphai/importers/")
+    || specifier === "@junction-api/sdk"
+    || specifier.startsWith("@junction-api/sdk/");
 }
 
 function toRepoPath(file: string): string {
