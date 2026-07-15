@@ -174,7 +174,7 @@ describe("createHostedAssistantInputSource", () => {
     expect(listed.inputs[0]?.event.groupParticipantAdded).toBe(true);
   });
 
-  it("defers late input to its own next turn once the active turn has a causal input", async () => {
+  it("keeps late input pending but outside the active causal source", async () => {
     const listSpy = vi.spyOn(assistantEngine, "listAssistantInputEvents");
     const vaultRoot = await createTempVault();
     await enableLinqAutoReply(vaultRoot);
@@ -233,24 +233,9 @@ describe("createHostedAssistantInputSource", () => {
     expect(lateConversationInputs.inputs.map((candidate) => candidate.event.inputId))
       .toEqual([]);
     await expect(readHostedPendingAssistantInputIds({ vaultRoot })).resolves.toEqual([
+      fresh.inputId,
       late.inputId,
     ]);
-
-    const nextSelection = await selectHostedAssistantInputIds({
-      mode: "background",
-      vaultRoot,
-    });
-    expect(nextSelection.inputIds).toEqual([late.inputId]);
-    const nextSource = createHostedAssistantInputSource({
-      initialPendingInputIds: nextSelection.pendingInputIds,
-      selectedInputIds: nextSelection.inputIds,
-      vaultRoot,
-    });
-    const nextTurnCandidates = await nextSource.listInputCandidates({
-      sourceId: "linq",
-    });
-    expect(nextTurnCandidates.inputs.map((candidate) => candidate.event.inputId))
-      .toEqual([late.inputId]);
     expect(listSpy).not.toHaveBeenCalled();
   });
 

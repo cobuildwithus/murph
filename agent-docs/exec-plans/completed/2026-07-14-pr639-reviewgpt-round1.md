@@ -1,6 +1,6 @@
 # PR 639 ReviewGPT Round 1 Remediation
 
-Status: active
+Status: completed
 Created: 2026-07-14
 Updated: 2026-07-14
 
@@ -39,13 +39,20 @@ A's reply.
 4. Run coverage-bearing scoped verification and required completion audits.
 5. Finish the scoped commit, push, and run ReviewGPT Round 2 with CI.
 
-## Progress
+## Completion
 
-Now:
-
-- Branch rebased and pushed conflict-free on current `main`.
-- ReviewGPT Round 1 High accepted; deletion boundary proven from code and CI.
-
-Next:
-
-- Implement the deletion and focused regressions.
+- Branch rebased onto `main` after PR #641; the overlapping hosted-runtime
+  coordination rewrite is now entirely owned by `main` and absent from this
+  patch.
+- Exact ids locate and coalesce the active conversation wake but no longer
+  enter admission or provider input.
+- Late input stays in the existing mailbox and becomes the next ordinary
+  causal turn; no replacement state or recovery path was added.
+- ReviewGPT Round 1 High is accepted and covered by separate-turn unit and
+  hosted Linq E2E regressions.
+- Focused assistant-engine tests passed 166/166, assistant-runtime tests passed
+  11/11, and the hosted Linq ordering E2E passed 1/1.
+- Coverage review found no remaining proof gap. The full diff lane passed the
+  affected typechecks and guards before reaching an unrelated current-`main`
+  prompt-size failure (`61,018 > 61,000`); this patch changes no prompt surface.
+Completed: 2026-07-14

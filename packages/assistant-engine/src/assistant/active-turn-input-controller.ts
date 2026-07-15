@@ -727,10 +727,7 @@ export async function notifyAssistantActiveTurnInputAvailableForInputIds(input: 
 
       const conversation = conversationRefFromAssistantInputConversation(event.conversation)
       const key = resolveAssistantConversationLookupKey({ conversation })
-      if (!key) {
-        continue
-      }
-      if (!conversationsByKey.has(key)) {
+      if (key) {
         conversationsByKey.set(key, conversation)
       }
     } catch (error: unknown) {
