@@ -1243,10 +1243,10 @@ routing.
 - lease/fencing generation
 - alarm/fence coordination
 - container invocation
-- optional signed web allow-decision payload compatibility on legacy foreground
-  requests; Cloudflare does not validate it as runner-start authority and
-  missing, stale, mismatched, or invalid decisions never trigger a live web
-  usage-gate callback before the hot reply path starts
+- no signed usage-allow decision or live Web usage-gate callback in runner-start
+  authority; Temporal consumes the web-owned member-access decision, and
+  Cloudflare/runner #587 or newer is the permanent rollback floor while Web
+  omits the retired callback route
 - direct-R2 snapshot upload-session plumbing plus legacy encrypted
   bundle/artifact/env/journal object plumbing
 - worker-to-web callback signing
