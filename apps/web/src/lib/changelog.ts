@@ -619,7 +619,7 @@ const RAW_CHANGELOG_EDITIONS = [
         priority: 5,
         title: "Murph texts the way people text",
         summary:
-          "On iMessage, Telegram, and WhatsApp, a reply now arrives as two or three short bubbles instead of one block of text, with the question last and nothing after it.",
+          "On iMessage and Telegram, a reply now arrives as two or three short bubbles instead of one block of text, with the question last and nothing after it.",
         relevanceTags: ["messaging", "imessage", "polish"],
         sourcePullRequests: [447],
       },

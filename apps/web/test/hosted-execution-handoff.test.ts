@@ -427,30 +427,6 @@ describe("hosted webhook Temporal handoff", () => {
     });
   });
 
-  it("does not record ingress latency traces for WhatsApp handoff", async () => {
-    await expect(maybeHandoffHostedExecutionWebhookWake({
-      response: {
-        ok: true,
-        reason: "wake-appended-active-member",
-      },
-      scheduleAfterResponse: schedulerMocks.scheduleAfterResponse,
-      wakeHandoff: buildWakeHandoff({
-        eventId: "evt_whatsapp_handoff",
-        mailboxItemId: "mailbox_whatsapp_123",
-        source: "whatsapp",
-      }),
-    })).resolves.toMatchObject({
-      reason: "temporal-signaled",
-      workflowId: "hosted-user-runtime:user-123",
-    });
-
-    expect(signalMocks.signalHostedMailboxAppendRuntime).toHaveBeenCalledTimes(1);
-    expect(schedulerMocks.scheduleAfterResponse).not.toHaveBeenCalled();
-    expect(latencyStoreMocks.recordHostedIngressAcceptedFromMailboxItem).not.toHaveBeenCalled();
-    expect(
-      latencyStoreMocks.recordHostedIngressTemporalSignalAccepted,
-    ).not.toHaveBeenCalled();
-  });
 });
 
 async function flushScheduledAfterCallbacks(): Promise<void> {

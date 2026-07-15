@@ -752,7 +752,7 @@ export async function runHostedWorkspaceUntilIdleOrBudget(
         ?? input.workspace,
       mailboxPostCheckpointEffectsFinished: null,
       mailboxRetryAt: checkpointRequestSession.mailboxRetryAt(),
-      runtimeRedactedStatus: null,
+      runtimeRedactedStatus,
       runtimeStateDirty: checkpointRequestSession.hasRuntimeStateDirty(),
     };
   }
@@ -1143,6 +1143,20 @@ export async function runHostedWorkspaceUntilIdleOrBudget(
     runtimeRedactedStatus,
     runtimeStateDirty: checkpointRequestSession.hasRuntimeStateDirty(),
   };
+}
+
+export async function finishHostedMailboxImportPostCheckpointEffects(input: {
+  importResult: HostedMailboxImportCheckpointResult;
+  runnerInput: HostedWorkspaceRunnerInput;
+  signal?: AbortSignal | null;
+}): Promise<void> {
+  await runHostedMailboxPostCheckpointEffectsAndWriteLogBestEffort({
+    effects: input.importResult.afterCheckpointEffects,
+    input: input.runnerInput,
+    phase: "active_turn_input",
+    signal: input.signal ?? input.runnerInput.signal ?? null,
+    timeoutMs: HOSTED_MAILBOX_POST_CHECKPOINT_EFFECT_TIMEOUT_MS,
+  });
 }
 
 function assertHostedWorkspaceRunnerUser(input: HostedWorkspaceRunnerInput): void {
@@ -1852,7 +1866,7 @@ type HostedMailboxForWorkspaceRunnerImportInput = {
   suppressNoopRuntimeLog?: boolean;
 };
 
-export async function importHostedMailboxForWorkspaceRunner(
+async function importHostedMailboxForWorkspaceRunner(
   input: HostedMailboxForWorkspaceRunnerImportInput,
 ): Promise<HostedMailboxImportCheckpointResult> {
   const signal = input.signal ?? input.importItemContext?.signal ?? input.input.signal ?? null;

@@ -342,7 +342,6 @@ const CLOUDFLARE_HOSTED_PROVIDER_FETCH_BASE_URL_ENV_KEYS = [
   "LINQ_API_BASE_URL",
   "TELEGRAM_API_BASE_URL",
   "TELEGRAM_FILE_BASE_URL",
-  "WHATSAPP_API_BASE_URL",
 ] as const;
 
 const CLOUDFLARE_HOSTED_PROVIDER_FETCH_HOSTNAMES = new Set([
@@ -351,7 +350,6 @@ const CLOUDFLARE_HOSTED_PROVIDER_FETCH_HOSTNAMES = new Set([
   "api.mapbox.com",
   "api.openai.com",
   "api.telegram.org",
-  "graph.facebook.com",
 ]);
 
 export function readCloudflareHostedProviderFetchBaseUrls(

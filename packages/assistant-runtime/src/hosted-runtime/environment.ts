@@ -445,8 +445,6 @@ function cloneHostedAssistantRuntimeResolvedConfig(
   const channelCapabilities = {
     emailSendReady: input?.channelCapabilities.emailSendReady ?? false,
     telegramBotConfigured: input?.channelCapabilities.telegramBotConfigured ?? false,
-    whatsappCloudApiConfigured:
-      input?.channelCapabilities.whatsappCloudApiConfigured ?? false,
   };
 
   return {

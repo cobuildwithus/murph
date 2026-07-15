@@ -39,20 +39,20 @@ describe("@murphai/messaging-ingress package boundary", () => {
         default: "./dist/telegram-webhook-payload.js",
         types: "./dist/telegram-webhook-payload.d.ts",
       },
-      "./whatsapp-webhook": {
-        default: "./dist/whatsapp-webhook.js",
-        types: "./dist/whatsapp-webhook.d.ts",
-      },
     });
     expect(packageJson).not.toHaveProperty("main");
     expect(packageJson).not.toHaveProperty("types");
     await expect(access(new URL("../src/index.ts", import.meta.url))).rejects.toThrow();
+    await expect(access(new URL("../src/whatsapp-webhook.ts", import.meta.url))).rejects.toThrow();
   });
 
   it("rejects the package root while keeping the focused subpaths importable", async () => {
     const importBySpecifier = async (specifier: string) => import(specifier);
 
     await expect(importBySpecifier("@murphai/messaging-ingress")).rejects.toThrow();
+    await expect(
+      importBySpecifier("@murphai/messaging-ingress/whatsapp-webhook"),
+    ).rejects.toThrow();
     await expect(importBySpecifier("@murphai/messaging-ingress/linq-webhook")).resolves.toMatchObject({
       verifyAndParseLinqWebhookRequest: expect.any(Function),
     });
@@ -65,11 +65,6 @@ describe("@murphai/messaging-ingress package boundary", () => {
       parseTelegramWebhookUpdate: expect.any(Function),
       verifyAndParseTelegramWebhookRequest: expect.any(Function),
     });
-    await expect(importBySpecifier("@murphai/messaging-ingress/whatsapp-webhook")).resolves.toMatchObject({
-      buildWhatsAppWebhookEventId: expect.any(Function),
-      parseWhatsAppInboundTexts: expect.any(Function),
-      verifyAndParseWhatsAppWebhookRequest: expect.any(Function),
-    });
   });
 
   builtDistTest("keeps built export targets importable through package resolution", async () => {
@@ -80,7 +75,6 @@ describe("@murphai/messaging-ingress package boundary", () => {
         "await import('@murphai/messaging-ingress/linq-webhook');",
         "await import('@murphai/messaging-ingress/telegram-webhook');",
         "await import('@murphai/messaging-ingress/telegram-webhook-payload');",
-        "await import('@murphai/messaging-ingress/whatsapp-webhook');",
       ].join("\n"),
     ], {
       cwd: packageDir,

@@ -1473,7 +1473,7 @@ describe("executeHostedMailboxEvent", () => {
     });
     const seedInput = mocks.upsertAssistantCronAutomation.mock.calls.at(0)?.[0];
     expect(seedInput?.instructions).toContain(
-      "vault-cli automation set-status finish-onboarding-followup --status archived",
+      "The managed-automation owner archives this follow-up deterministically.",
     );
     expect(seedInput?.instructions).toContain(
       "Goal: advance Murph onboarding through useful support and a finite health-context foundation without turning it into a drip questionnaire.",
@@ -1490,7 +1490,7 @@ describe("executeHostedMailboxEvent", () => {
       "If the onboarding skill says the visible and saved evidence satisfies answered completion, or shows an overall decline, run its required completion command.",
     );
     expect(seedInput?.instructions).toContain(
-      "If completion succeeds, archive this automation, then return skip.",
+      "Whether completion succeeds or fails, return skip without messaging",
     );
     expect(seedInput?.instructions).not.toContain(
       "If a promised follow-through or next step in the member's agreed support loop is due, do that first.",

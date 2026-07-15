@@ -213,7 +213,6 @@ function createHostedAutomationRuntime(input: {
       channelCapabilities: {
         emailSendReady: false,
         telegramBotConfigured: false,
-        whatsappCloudApiConfigured: false,
       },
       deviceSync: input.deviceSync ?? null,
     },
@@ -3522,9 +3521,6 @@ describe("runHostedAssistantAutomationLane", () => {
     const beforeProviderAcceptedInputs = vi.fn(async () => undefined);
     const operationScope: AssistantAutomationOperationScope = {
       async runAutoReplyGroup({ executionContext, operation, turnEnvironment }) {
-        return await operation(executionContext, turnEnvironment);
-      },
-      async runCronJob({ executionContext, operation, turnEnvironment }) {
         return await operation(executionContext, turnEnvironment);
       },
     };

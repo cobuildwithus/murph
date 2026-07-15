@@ -114,13 +114,6 @@ export function buildHostedRunnerChannelPlatformEnv(
     copyHostedPlatformEnv(platformEnv, channelEnv, "TELEGRAM_FILE_BASE_URL");
   }
 
-  if (platformEnv.WHATSAPP_ACCESS_TOKEN && platformEnv.WHATSAPP_PHONE_NUMBER_ID) {
-    channelEnv.WHATSAPP_ACCESS_TOKEN = HOSTED_CLOUDFLARE_INJECTED_CREDENTIAL;
-    copyHostedPlatformEnv(platformEnv, channelEnv, "WHATSAPP_API_BASE_URL");
-    channelEnv.WHATSAPP_PHONE_NUMBER_ID = HOSTED_CLOUDFLARE_INJECTED_CREDENTIAL;
-    copyHostedPlatformEnv(platformEnv, channelEnv, "WHATSAPP_GRAPH_VERSION");
-  }
-
   return channelEnv;
 }
 

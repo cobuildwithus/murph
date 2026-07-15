@@ -311,20 +311,6 @@ Required for hosted Linq ingress:
 
 - `LINQ_WEBHOOK_SECRET`
 
-Required for hosted WhatsApp Cloud API ingress:
-
-- `WHATSAPP_VERIFY_TOKEN`
-- `WHATSAPP_APP_SECRET`
-
-The WhatsApp webhook maps Cloud API `from` sender ids to existing verified
-hosted phone identities. Normal text messages are appended to the hosted mailbox
-only after the member has active access and current `feature.whatsapp-messaging`
-consent; inbound `START` grants that consent and inbound `STOP` revokes it.
-
-WhatsApp outbound replies are sent by the Cloudflare hosted runner provider
-effect. Configure those Cloud API delivery credentials on `apps/cloudflare`;
-keep this web surface to ingress verification secrets only.
-
 Optional but recommended:
 
 - `DEVICE_SYNC_PUBLIC_BASE_URL`

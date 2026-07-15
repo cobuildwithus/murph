@@ -11,7 +11,6 @@ import {
   sendHostedProviderLinqMessage,
   sendHostedProviderTelegramChatAction,
   sendHostedProviderTelegramMessage,
-  sendHostedProviderWhatsAppMessage,
   setHostedProviderLinqMessageReaction,
 } from "../src/hosted-provider-effects.ts";
 import {
@@ -217,18 +216,6 @@ describe("hosted provider effects", () => {
     }, {
       env: {
         LINQ_API_TOKEN: "linq-token",
-      },
-      fetchImplementation: null,
-    })).rejects.toMatchObject({
-      code: HOSTED_PROVIDER_FETCH_UNAVAILABLE_CODE,
-    });
-    await expect(sendHostedProviderWhatsAppMessage({
-      message: "hello",
-      target: "15550100001",
-    }, {
-      env: {
-        WHATSAPP_ACCESS_TOKEN: "test-access-token",
-        WHATSAPP_PHONE_NUMBER_ID: "phone-number-id-1",
       },
       fetchImplementation: null,
     })).rejects.toMatchObject({
@@ -870,98 +857,4 @@ describe("hosted provider effects", () => {
     );
   });
 
-  it("sends WhatsApp messages through Worker-owned provider env", async () => {
-    const fetchMock = vi.fn(async (
-      ..._args: Parameters<typeof fetch>
-    ) => new Response(JSON.stringify({
-      contacts: [{ wa_id: "15550100001" }],
-      messages: [{ id: "wamid.MESSAGE_1" }],
-      messaging_product: "whatsapp",
-    }), {
-      headers: {
-        "content-type": "application/json; charset=utf-8",
-      },
-      status: 200,
-    }));
-    vi.stubGlobal("fetch", fetchMock);
-
-    await expect(sendHostedProviderWhatsAppMessage({
-      message: "hello",
-      replyToMessageId: "wamid.REPLY_1",
-      target: "15550100001",
-    }, {
-      env: {
-        WHATSAPP_ACCESS_TOKEN: "test-access-token",
-        WHATSAPP_PHONE_NUMBER_ID: "phone-number-id-1",
-      },
-      fetchImplementation: fetchMock as typeof fetch,
-    })).resolves.toEqual({
-      providerMessageId: "wamid.MESSAGE_1",
-      providerThreadId: "15550100001",
-      target: "15550100001",
-    });
-
-    expect(fetchMock).toHaveBeenCalledOnce();
-    assert.equal(
-      String(fetchMock.mock.calls[0]?.[0]),
-      "https://graph.facebook.com/v25.0/phone-number-id-1/messages",
-    );
-    assert.deepEqual(JSON.parse(String(fetchMock.mock.calls[0]?.[1]?.body)), {
-      messaging_product: "whatsapp",
-      recipient_type: "individual",
-      to: "15550100001",
-      type: "text",
-      context: {
-        message_id: "wamid.REPLY_1",
-      },
-      text: {
-        body: "hello",
-        preview_url: false,
-      },
-    });
-  });
-
-  it("uses the hosted provider fetch dependency for WhatsApp effects", async () => {
-    const rawGlobalFetch = vi.fn(async (
-      ..._args: Parameters<typeof fetch>
-    ) => {
-      throw new Error("raw global fetch should not be used");
-    });
-    vi.stubGlobal("fetch", rawGlobalFetch);
-
-    const fetchImplementation = vi.fn(async (
-      ..._args: Parameters<typeof fetch>
-    ) => new Response(JSON.stringify({
-      contacts: [{ wa_id: "15550100001" }],
-      messages: [{ id: "wamid.MESSAGE_1" }],
-      messaging_product: "whatsapp",
-    }), {
-      headers: {
-        "content-type": "application/json; charset=utf-8",
-      },
-      status: 200,
-    }));
-
-    await expect(sendHostedProviderWhatsAppMessage({
-      message: "hello",
-      target: "15550100001",
-    }, {
-      env: {
-        WHATSAPP_ACCESS_TOKEN: "test-access-token",
-        WHATSAPP_PHONE_NUMBER_ID: "phone-number-id-1",
-      },
-      fetchImplementation,
-    })).resolves.toEqual({
-      providerMessageId: "wamid.MESSAGE_1",
-      providerThreadId: "15550100001",
-      target: "15550100001",
-    });
-
-    expect(rawGlobalFetch).not.toHaveBeenCalled();
-    expect(fetchImplementation).toHaveBeenCalledOnce();
-    assert.equal(
-      String(fetchImplementation.mock.calls[0]?.[0]),
-      "https://graph.facebook.com/v25.0/phone-number-id-1/messages",
-    );
-  });
 });

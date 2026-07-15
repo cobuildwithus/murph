@@ -2,7 +2,6 @@ import {
   sendLinqMessage,
   sendLinqVoiceMemoMessage,
   sendTelegramMessage,
-  sendWhatsAppMessage,
   setLinqMessageReaction,
   startTelegramTypingIndicator,
 } from "@murphai/assistant-engine/assistant-channel-runtime";
@@ -39,8 +38,6 @@ import type {
   HostedRuntimeTelegramGetFileRequest,
   HostedRuntimeTelegramSendRequest,
   HostedRuntimeTelegramSendResponse,
-  HostedRuntimeWhatsAppSendRequest,
-  HostedRuntimeWhatsAppSendResponse,
 } from "./hosted-runtime/platform.ts";
 
 export interface HostedProviderEffectDependencies {
@@ -202,21 +199,6 @@ export async function setHostedProviderLinqMessageReaction(
   );
   dependencies.onProviderDispatchEntered?.();
   return await setLinqMessageReaction(request, {
-    env: context.env,
-    fetchImplementation: context.fetchImplementation,
-    signal: context.signal,
-  });
-}
-
-export async function sendHostedProviderWhatsAppMessage(
-  request: HostedRuntimeWhatsAppSendRequest,
-  dependencies: HostedProviderEffectDependencies,
-): Promise<HostedRuntimeWhatsAppSendResponse> {
-  const context = createHostedProviderEffectContext(
-    dependencies,
-    "Hosted WhatsApp message delivery",
-  );
-  return await sendWhatsAppMessage(request, {
     env: context.env,
     fetchImplementation: context.fetchImplementation,
     signal: context.signal,

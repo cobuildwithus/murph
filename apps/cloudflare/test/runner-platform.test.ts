@@ -4160,13 +4160,16 @@ describe("buildHostedExecutionRuntimePlatform", () => {
     }
   });
 
-  it("write-fences Linq egress authority assertions through direct web-control", async () => {
+  it("write-fences Linq egress authority assertions and preserves only boolean directness", async () => {
+    let responseCount = 0;
     const fetchMock = vi.fn(async (input: RequestInfo | URL, init?: RequestInit) => {
       const request = input instanceof Request ? input : new Request(input, init);
       expect(new URL(request.url).pathname).toBe(HOSTED_RUNTIME_LINQ_EGRESS_ENGAGEMENT_PATH);
+      responseCount += 1;
       return new Response(JSON.stringify({
         ok: true,
         providerDispatchClaimed: true,
+        threadIsDirect: responseCount === 1 ? false : "false",
       }), {
         headers: { "content-type": "application/json; charset=utf-8" },
         status: 200,
@@ -4193,14 +4196,23 @@ describe("buildHostedExecutionRuntimePlatform", () => {
       targetKind: "thread",
     })).resolves.toEqual({
       providerDispatchClaimed: true,
+      threadIsDirect: false,
+    });
+    await expect(assertLinqRecentInboundEngagement({
+      target: "chat_456",
+      targetKind: "thread",
+    })).resolves.toEqual({
+      providerDispatchClaimed: true,
     });
 
-    expect(fetchMock).toHaveBeenCalledTimes(1);
-    const request = requireFetchRequest(fetchMock.mock.calls[0], "direct Linq egress authority request");
-    expect(request.url).toBe(`https://web.example.test${HOSTED_RUNTIME_LINQ_EGRESS_ENGAGEMENT_PATH}`);
-    expectDefaultRuntimeWriteFenceHeaders(request);
-    expect(request.headers.get("x-hosted-execution-user-id")).toBe("member_123");
-    expect(request.headers.get("x-hosted-execution-signature")).toMatch(/^[A-Za-z0-9\-_]+$/u);
+    expect(fetchMock).toHaveBeenCalledTimes(2);
+    for (const [index, call] of fetchMock.mock.calls.entries()) {
+      const request = requireFetchRequest(call, `direct Linq egress authority request ${index}`);
+      expect(request.url).toBe(`https://web.example.test${HOSTED_RUNTIME_LINQ_EGRESS_ENGAGEMENT_PATH}`);
+      expectDefaultRuntimeWriteFenceHeaders(request);
+      expect(request.headers.get("x-hosted-execution-user-id")).toBe("member_123");
+      expect(request.headers.get("x-hosted-execution-signature")).toMatch(/^[A-Za-z0-9\-_]+$/u);
+    }
   });
 
   it("write-fences Linq delivery outcomes through direct web-control", async () => {
@@ -6237,7 +6249,6 @@ describe("buildHostedExecutionRuntimePlatform", () => {
     expect("sendLinqChatAction" in platform.effectsPort).toBe(false);
     expect("markLinqRead" in platform.effectsPort).toBe(false);
     expect("deleteLinqMessages" in platform.effectsPort).toBe(false);
-    expect("sendWhatsApp" in platform.effectsPort).toBe(false);
     await platform.browserVaultReplicaPort!.write({ replica });
     await platform.effectsPort.getTelegramFile!({
       fileId: "telegram_file_123",
@@ -6941,7 +6952,6 @@ describe("buildHostedExecutionRuntimePlatform", () => {
     expect("sendLinqChatAction" in platform.effectsPort).toBe(false);
     expect("markLinqRead" in platform.effectsPort).toBe(false);
     expect("deleteLinqMessages" in platform.effectsPort).toBe(false);
-    expect("sendWhatsApp" in platform.effectsPort).toBe(false);
   });
 
   it("passes Telegram provider-effect caller signals to the internal fetch", async () => {

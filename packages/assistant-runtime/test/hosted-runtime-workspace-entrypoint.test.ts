@@ -1476,6 +1476,7 @@ describe("hosted workspace runtime entrypoint", () => {
     const assistantOneObserved = createDeferred<void>();
     const assistantTwoObserved = createDeferred<void>();
     const checkpointStartedAtMs: number[] = [];
+    const runtimeWakeSignal = createCoalescingRuntimeWakeSignal();
     const durableEffect = vi.fn(async () => {
       events.push("durable-effect");
       return {
@@ -1526,10 +1527,25 @@ describe("hosted workspace runtime entrypoint", () => {
               }),
               workspacePort: createWorkspacePort({
                 checkpointRequests,
+                checkpointWorkspace: (request) => {
+                  if (checkpointRequests.length === 2) {
+                    events.push("runtime-wake:after-follow-up-checkpoint");
+                    runtimeWakeSignal.notify();
+                  }
+                  return createWorkspaceState({
+                    inboxMediaRetentionWakeAt: request.inboxMediaRetentionWakeAt ?? null,
+                    nextWakeAt: request.nextWakeAt ?? null,
+                    nextWakeReason: request.nextWakeReason ?? null,
+                    redactedStatus: request.redactedStatus ?? null,
+                    snapshotRef: request.snapshotRef,
+                    version: String(BigInt(request.expectedWorkspaceVersion) + 1n),
+                  });
+                },
                 events,
                 workspace: createWorkspaceState({ version: "0" }),
               }),
             }),
+            runtimeWakeSignal,
             async runAssistantPhase(input) {
               assistantPass += 1;
               events.push(
@@ -1607,6 +1623,18 @@ describe("hosted workspace runtime entrypoint", () => {
         "assistant:1:none",
         `assistant:2:${dueAssistantWakeAt}`,
       ]);
+      const runtimeWakeIndex = requireEventIndex(
+        events,
+        "runtime-wake:after-follow-up-checkpoint",
+      );
+      const assistantTwoIndex = requireEventIndex(
+        events,
+        `assistant:2:${dueAssistantWakeAt}`,
+      );
+      assert.ok(
+        events.slice(runtimeWakeIndex + 1, assistantTwoIndex).includes("mailbox.fetch"),
+        events.join(","),
+      );
       assert.equal(result.status, "scheduled");
       assert.equal(result.nextWakeAt, durableWakeAt);
     } finally {
@@ -17201,22 +17229,43 @@ describe("hosted workspace runtime entrypoint", () => {
     }
   });
 
-  test("carries hosted canonical receipt logs across pre-checkpoint foreground passes", async () => {
+  test("receipts late pre-checkpoint mailbox canonical writes before the next foreground commit", async () => {
     const vaultRoot = await mkdtemp(path.join(tmpdir(), "murph-workspace-entrypoint-"));
+    const sourceVaultRoot = await mkdtemp(path.join(tmpdir(), "murph-workspace-base-"));
     const events: string[] = [];
     const checkpointRequests: HostedWorkspaceCheckpointRequest[] = [];
     const artifactBytesByHash = new Map<string, Uint8Array>();
-    const artifactPutCalls: Array<{ byteLength: number; sha256: string }> = [];
     const mailboxItems: HostedMailboxItem[] = [];
     const runtimeWakeSignal = createCoalescingRuntimeWakeSignal();
     let assistantPhaseCalls = 0;
     let wakeTimer: ReturnType<typeof setTimeout> | null = null;
 
     try {
-      await initializeVault({ createdAt: TEST_NOW, vaultRoot });
+      await initializeVault({ createdAt: TEST_NOW, vaultRoot: sourceVaultRoot });
+      const baseBundle = await snapshotHostedBundleRoots({
+        kind: "vault",
+        roots: [{ root: sourceVaultRoot, rootKey: "vault" }],
+      });
+      assert.ok(baseBundle);
+      const baseHash = sha256HostedBundleHex(baseBundle);
+      const baseRef = createBundleRef({
+        hash: baseHash,
+        key: "users/bundles/member-synthetic/canonical-pre-checkpoint-base.bundle.json",
+        size: baseBundle.byteLength,
+      });
+      artifactBytesByHash.set(baseHash, baseBundle);
+      const initialHotSnapshot = await snapshotHostedAssistantRuntimeHotState({
+        vaultRoot: sourceVaultRoot,
+      });
+      const initialHotHash = sha256HostedBundleHex(initialHotSnapshot.bundle);
+      const initialHotRef = createBundleRef({
+        hash: initialHotHash,
+        key: "users/bundles/member-synthetic/canonical-pre-checkpoint-initial-hot.bundle.json",
+        size: initialHotSnapshot.bundle.byteLength,
+      });
+      artifactBytesByHash.set(initialHotHash, initialHotSnapshot.bundle);
       const platform = createPlatform({
         artifactBytesByHash,
-        artifactPutCalls,
         events,
         mailboxPort: createMailboxPort({
           events,
@@ -17225,7 +17274,13 @@ describe("hosted workspace runtime entrypoint", () => {
         workspacePort: createWorkspacePort({
           checkpointRequests,
           events,
-          workspace: createWorkspaceState({ version: "0" }),
+          workspace: createWorkspaceState({
+            snapshotRef: buildHostedExecutionLayeredSnapshotRef({
+              base: baseRef,
+              hot: initialHotRef,
+            }),
+            version: "0",
+          }),
         }),
       });
 
@@ -17250,6 +17305,29 @@ describe("hosted workspace runtime entrypoint", () => {
         },
         async importItem(item) {
           events.push(`mailbox.importItem:${item.item.id}`);
+          await persistCanonicalInboxCapture({
+            vaultRoot,
+            captureId: "cap_workspace_pre_checkpoint_mailbox",
+            eventId: "evt_01JQ8PWXP5A68SQM1W0GYM41V4",
+            storedAt: TEST_NOW,
+            input: {
+              source: "telegram",
+              externalId: item.item.id,
+              accountId: "self",
+              thread: {
+                id: "thread-workspace-pre-checkpoint-mailbox",
+                isDirect: true,
+              },
+              actor: {
+                isSelf: false,
+              },
+              occurredAt: TEST_NOW,
+              receivedAt: TEST_NOW,
+              text: "late mailbox conversation",
+              attachments: [],
+              raw: {},
+            },
+          });
           return { status: "imported" };
         },
         platform,
@@ -17296,34 +17374,70 @@ describe("hosted workspace runtime entrypoint", () => {
       assert.deepEqual(checkpointRequests.map((request) => request.reason), [
         "canonical_runtime_commit",
         "canonical_runtime_commit",
+        "canonical_runtime_commit",
         "idle_shutdown",
       ]);
       assert.deepEqual(checkpointRequests.map((request) => request.expectedWorkspaceVersion), [
         "0",
         "1",
         "2",
+        "3",
       ]);
       const receiptLogs = listHostedCanonicalWriteReceiptLogArtifacts(artifactBytesByHash);
-      assert.equal(receiptLogs.length, 2);
-      assert.equal(receiptLogs[0]?.entries.length, 1);
-      assert.equal(receiptLogs.at(-1)?.entries.length, 2);
-      assert.equal(
-        checkpointRequests[0]?.redactedStatus?.hostedCanonicalWriteReceiptLogSha256,
-        receiptLogs[0]?.sha256,
+      assert.equal(receiptLogs.length, 3);
+      const receiptLogsBySha = new Map(receiptLogs.map((log) => [log.sha256, log]));
+      const firstReceiptLog = receiptLogsBySha.get(
+        String(checkpointRequests[0]?.redactedStatus?.hostedCanonicalWriteReceiptLogSha256),
       );
-      assert.equal(
-        checkpointRequests[1]?.redactedStatus?.hostedCanonicalWriteReceiptLogSha256,
-        receiptLogs.at(-1)?.sha256,
+      const mailboxReceiptLog = receiptLogsBySha.get(
+        String(checkpointRequests[1]?.redactedStatus?.hostedCanonicalWriteReceiptLogSha256),
       );
+      const finalReceiptLog = receiptLogsBySha.get(
+        String(checkpointRequests[2]?.redactedStatus?.hostedCanonicalWriteReceiptLogSha256),
+      );
+      assert.equal(firstReceiptLog?.entries.length, 1);
+      assert.equal(mailboxReceiptLog?.entries.length, 2);
+      assert.equal(finalReceiptLog?.entries.length, 3);
+      const mailboxReceiptRef = mailboxReceiptLog?.entries.at(-1);
+      assert.ok(isPlainJsonObject(mailboxReceiptRef));
+      assert.ok(typeof mailboxReceiptRef.sha256 === "string");
+      const mailboxReceiptBytes = artifactBytesByHash.get(mailboxReceiptRef.sha256);
+      assert.ok(mailboxReceiptBytes);
+      const mailboxReceipt = parseJsonArtifact(mailboxReceiptBytes);
+      assert.ok(isPlainJsonObject(mailboxReceipt));
+      assert.equal(mailboxReceipt.operationType, "inbox_capture_persist");
+      const finalReceiptRef = finalReceiptLog?.entries.at(-1);
+      assert.ok(isPlainJsonObject(finalReceiptRef));
+      assert.ok(typeof finalReceiptRef.sha256 === "string");
+      const finalReceiptBytes = artifactBytesByHash.get(finalReceiptRef.sha256);
+      assert.ok(finalReceiptBytes);
+      const finalReceipt = parseJsonArtifact(finalReceiptBytes);
+      assert.ok(isPlainJsonObject(finalReceipt));
+      assert.equal(finalReceipt.operationType, "hosted_canonical_write_test");
       assert.equal(
-        checkpointRequests[1]?.redactedStatus?.hostedCanonicalWriteReceiptLogEntryCount,
+        checkpointRequests[0]?.redactedStatus?.hostedMailboxConversationImportedSeq,
         undefined,
       );
-      const checkpointRedactedStatus = checkpointRequests[2]?.redactedStatus ?? {};
+      assert.equal(
+        checkpointRequests[1]?.redactedStatus?.hostedMailboxConversationImportedSeq,
+        "1",
+      );
+      assert.equal(
+        checkpointRequests[2]?.redactedStatus?.hostedCanonicalWriteReceiptLogSha256,
+        finalReceiptLog?.sha256,
+      );
+      assert.equal(
+        checkpointRequests[2]?.redactedStatus?.hostedMailboxConversationImportedSeq,
+        "1",
+      );
+      assert.equal(
+        checkpointRequests[2]?.redactedStatus?.hostedCanonicalWriteReceiptLogEntryCount,
+        undefined,
+      );
+      const checkpointRedactedStatus = checkpointRequests[3]?.redactedStatus ?? {};
       assert.equal(checkpointRedactedStatus.hostedCanonicalWriteReceiptLogEntryCount, undefined);
       assert.equal(checkpointRedactedStatus.hostedCanonicalWriteReceiptLogSha256, undefined);
       assert.equal(checkpointRedactedStatus.hostedCanonicalWriteReceiptLogByteSize, undefined);
-      assert.equal(artifactPutCalls.length, 6);
       assert.equal(
         await readFile(path.join(vaultRoot, "journal", "pre-checkpoint-first.md"), "utf8"),
         "first hosted note\n",
@@ -17332,11 +17446,21 @@ describe("hosted workspace runtime entrypoint", () => {
         await readFile(path.join(vaultRoot, "journal", "pre-checkpoint-second.md"), "utf8"),
         "second hosted note\n",
       );
+      assert.equal(
+        (
+          await readFile(
+            path.join(vaultRoot, "ledger", "inbox-captures", "2026", "2026-04.jsonl"),
+            "utf8",
+          )
+        ).includes("cap_workspace_pre_checkpoint_mailbox"),
+        true,
+      );
     } finally {
       if (wakeTimer) {
         clearTimeout(wakeTimer);
       }
       await removeTempRoot(vaultRoot);
+      await removeTempRoot(sourceVaultRoot);
     }
   });
 
@@ -22964,7 +23088,6 @@ function createDeviceSyncResolvedConfig(): HostedAssistantRuntimeResolvedConfig 
     channelCapabilities: {
       emailSendReady: false,
       telegramBotConfigured: false,
-      whatsappCloudApiConfigured: false,
     },
     deviceSync: {
       providerConfigs: {
@@ -24098,6 +24221,139 @@ describe("hosted runtime shutdown signal", () => {
       assert.equal(checkpointRequests.length, 1);
       assert.deepEqual(checkpointSnapshotTriggers, ["idle_window"]);
       assert.equal(result.status, "idle");
+    } finally {
+      shutdownController.abort(new Error("Test cleanup."));
+      await removeTempRoot(vaultRoot);
+    }
+  }, 30_000);
+
+  test("shutdown after a retained system import preserves its wake and effects", async () => {
+    const vaultRoot = await mkdtemp(path.join(tmpdir(), "murph-workspace-entrypoint-"));
+    const checkpointRequests: HostedWorkspaceCheckpointRequest[] = [];
+    const events: string[] = [];
+    const mailboxItems: ReturnType<typeof createMailboxItem>[] = [];
+    const runtimeWakeSignal = createCoalescingRuntimeWakeSignal();
+    const shutdownController = new AbortController();
+    let assistantPhaseCalls = 0;
+    let postCheckpointEffectCalls = 0;
+    let postCheckpointWakeQueued = false;
+    const checkpointSnapshotTriggers: Array<
+      HostedWorkspaceCheckpointRequest["idleCheckpointTrigger"]
+    > = [];
+    const systemItem = createMailboxItem({
+      id: "mailbox_item_shutdown_after_system_import",
+      kind: "runtime.manual-requested",
+      lane: "system",
+      laneSeq: "1",
+    });
+
+    try {
+      await initializeVault({ createdAt: TEST_NOW, vaultRoot });
+      const result = await runHostedWorkspaceRuntimeJobInProcess(
+        createWorkspaceRuntimeJobInput({
+          request: {
+            attemptId: "attempt_synthetic_shutdown_after_system_import",
+            idleCheckpointDelayMs: 50,
+            leaseGeneration: "7",
+            userId: TEST_USER_ID,
+            workspaceVersion: "0",
+          },
+        }),
+        {
+          async createCheckpointSnapshot(snapshotInput) {
+            checkpointSnapshotTriggers.push(snapshotInput.idleCheckpointTrigger);
+            return {
+              snapshotRef: createBundleRef({
+                hash: "f".repeat(64),
+                key: "users/bundles/member-synthetic/shutdown-after-system-import.bundle.json",
+                size: 512,
+              }),
+            };
+          },
+          async importItem(item) {
+            events.push(`mailbox.importItem:${item.item.id}`);
+            const outcome = await importRuntimeControlSystemMailboxItemForTest({
+              item: item.item,
+              vaultRoot,
+            });
+            shutdownController.abort(
+              new DOMException("Synthetic container SIGTERM.", "AbortError"),
+            );
+            return {
+              ...outcome,
+              afterCheckpoint: async () => {
+                postCheckpointEffectCalls += 1;
+                return {
+                  attachmentEvidenceUpdated: null,
+                  kind: "meal_photo_cleanup" as const,
+                  projectionUpdated: null,
+                  reasonCode: null,
+                  status: "succeeded" as const,
+                };
+              },
+            };
+          },
+          platform: createPlatform({
+            mailboxPort: createMailboxPort({ events, items: mailboxItems }),
+            workspacePort: createWorkspacePort({
+              checkpointRequests,
+              checkpointWorkspace: (request) => {
+                if (request.reason === "idle_shutdown" && !postCheckpointWakeQueued) {
+                  postCheckpointWakeQueued = true;
+                  mailboxItems.push(systemItem);
+                  runtimeWakeSignal.notify();
+                }
+                return createWorkspaceState({
+                  nextWakeAt: request.nextWakeAt ?? null,
+                  nextWakeReason: request.nextWakeReason ?? null,
+                  snapshotRef: request.snapshotRef,
+                  version: String(BigInt(request.expectedWorkspaceVersion) + 1n),
+                });
+              },
+              events,
+              workspace: createWorkspaceState({ version: "0" }),
+            }),
+          }),
+          runtimeWakeSignal,
+          async runAssistantPhase() {
+            assistantPhaseCalls += 1;
+            if (assistantPhaseCalls > 1) {
+              throw new Error("Retained system work should be handed to the replacement runtime.");
+            }
+            return {
+              checkpointReason: "assistant_runtime_commit",
+              progressed: true,
+            };
+          },
+          shutdownSignal: shutdownController.signal,
+          vaultRoot,
+        },
+      );
+
+      assert.equal(postCheckpointWakeQueued, true);
+      assert.equal(assistantPhaseCalls, 1);
+      assert.equal(postCheckpointEffectCalls, 1);
+      assert.deepEqual(
+        events.filter((event) => event.startsWith("mailbox.importItem:")),
+        ["mailbox.importItem:mailbox_item_shutdown_after_system_import"],
+      );
+      const systemMailbox = await readHostedSystemMailboxState(vaultRoot);
+      assert.equal(
+        systemMailbox.pending.some((item) => item.itemId === systemItem.id),
+        true,
+      );
+      assert.equal(
+        checkpointRequests.at(-1)?.redactedStatus?.hostedMailboxSystemImportedSeq,
+        "1",
+      );
+      const pendingAssistantWakeAt = checkpointRequests.at(-1)?.nextWakeAt;
+      assert.match(pendingAssistantWakeAt ?? "", /^\d{4}-\d{2}-\d{2}T/u);
+      assert.equal(checkpointRequests.at(-1)?.nextWakeReason, "assistant");
+      assert.deepEqual(checkpointSnapshotTriggers, ["idle_window", "shutdown_signal"]);
+      assert.equal(result.nextWakeAt, pendingAssistantWakeAt);
+      assert.equal(result.nextWakeReason, "assistant");
+      assert.equal(result.immediateRecheckRequested, true);
+      assert.equal(result.status, "scheduled");
     } finally {
       shutdownController.abort(new Error("Test cleanup."));
       await removeTempRoot(vaultRoot);

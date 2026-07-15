@@ -88,7 +88,7 @@ Linq egress should stay small and obvious:
 
 - Participant-target sends are signup-welcome only, tied to `signup-welcome:<memberId>`, the member's verified phone, and the assigned home line.
 - Thread sends use same-user route authority as target context when it matches the requested thread, otherwise they fall back to the member's durable home or pending Linq route.
-- A personal automation route with `currentRouteSnapshot: true` means "deliver through the member's current direct home route." The stored target remains only as bounded authority evidence; do not add a second locator heuristic or another route-ownership flag.
+- The Web Linq egress owner resolves the canonical delivery target and direct/group audience at send time. Stored automation routes are bounded authority evidence, not a second route-ownership system.
 - Proactive current-home fallback sends do not inherit replay-scoped route authority or inbound context; reply-anchored sends keep their matching inbound context.
 - Egress no longer owns a separate "recent inbound" recency check; hosted automation recency belongs to reconciliation/wake selection.
 - Typing indicators do not call web-owned egress assertions. They are locally throttled to one session per chat, capped at five minutes, with a restart cooldown after a max-length session.

@@ -13,7 +13,6 @@ import {
   buildHostedExecutionRuntimeTimerWake,
   buildHostedExecutionTelegramConversationMessageWake,
   buildHostedExecutionDeviceSyncWake,
-  buildHostedExecutionWhatsAppConversationMessageWake,
 } from "../src/builders.ts";
 import {
   HOSTED_EMAIL_GROUP_RECIPIENTS_CALLBACK_PATH,
@@ -482,38 +481,6 @@ describe("hosted execution wake builders", () => {
     );
     expect(wake.message.telegramMessage.attachments).not.toBe(attachments);
     expect(wake.message.telegramMessage.attachments?.[0]).not.toBe(attachments[0]);
-  });
-
-  it("copies WhatsApp message payloads without mutating caller-owned data", () => {
-    const whatsappMessage = {
-      fromWaId: "15551234567",
-      messageId: "wamid.test",
-      phoneNumberId: "phone-number-id",
-      schema: "murph.hosted-whatsapp-message.v1" as const,
-      text: "CHECKIN",
-      threadId: "15551234567",
-    };
-    const wake = buildHostedExecutionWhatsAppConversationMessageWake({
-      eventId: "whatsapp-1",
-      occurredAt,
-      userId: "user_123",
-      whatsappMessage,
-    });
-
-    whatsappMessage.text = "mutated";
-
-    expect(wake.message).toEqual({
-      channel: "whatsapp",
-      whatsappMessage: {
-        fromWaId: "15551234567",
-        messageId: "wamid.test",
-        phoneNumberId: "phone-number-id",
-        schema: "murph.hosted-whatsapp-message.v1",
-        text: "CHECKIN",
-        threadId: "15551234567",
-      },
-    });
-    expect(wake.message.whatsappMessage).not.toBe(whatsappMessage);
   });
 
   it("distinguishes omitted versus explicit nullable email routing metadata", () => {

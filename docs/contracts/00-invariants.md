@@ -215,6 +215,17 @@ it has been explicitly elevated to a cross-cutting invariant.
   authorized target before execution. Invalid routes and unauthorized actions
   fail before model or provider work; do not add a queue or repair worker to
   compensate for an invalid shape.
+- When provider target identity and audience privacy are coupled, one live
+  owner resolves the effective target and audience class atomically before
+  model work. Persisted routes, snapshots, and legacy markers are hints, never
+  authority; an unavailable owner causes a typed retry rather than successful
+  consumption. Recheck the same effective target at irreversible provider
+  entry, and do not require record-by-record repair when the live owner can
+  resolve an authorized legacy hint.
+- A scheduled notification is not an authenticated conversation turn and does
+  not receive conversation-scoped automation mutation authority. Deterministic
+  lifecycle owners retire or reconcile managed automations; authenticated
+  inbound turns remain the authority for user-directed automation changes.
 - Provider shapes come from a pinned canonical SDK or published typed contract.
   A bespoke boundary needs a documented reason and exact-shape tests. On the
   foreground path, an external call may fail or delay a reply only when the

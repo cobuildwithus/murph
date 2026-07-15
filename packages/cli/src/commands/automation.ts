@@ -1,6 +1,5 @@
 import { Cli, z } from "incur";
 
-import { MURPH_ONBOARDING_FOLLOWUP_AUTOMATION } from "@murphai/assistant-engine";
 import {
   HostedCliBridgeRequestError,
   isHostedRuntimeProcessEnv,
@@ -52,7 +51,6 @@ import {
   resolveAutomationUpsertSlug,
   scaffoldAutomationPayload,
   upsertAutomation,
-  type AutomationRecord,
 } from "@murphai/core";
 import {
   listAutomations,
@@ -263,26 +261,9 @@ function buildAutomationRouteFromOptions(
     participantId: normalizeAutomationRouteOption(input.participantId),
     threadId: normalizeAutomationRouteOption(input.threadId),
   });
-  const parsed = automationRouteSchema.parse(
+  return automationRouteSchema.parse(
     resolveAssistantDeliveryRouteWithCurrentRoute(explicit, currentRoute),
   );
-
-  if (
-    currentRoute &&
-    explicit.deliveryTarget === null &&
-    explicit.identityId === null &&
-    explicit.participantId === null &&
-    explicit.threadId === null &&
-    parsed.deliveryTarget === normalizeAutomationRouteOption(currentRoute.deliveryTarget) &&
-    parsed.channel === normalizeAutomationRouteOption(currentRoute.channel)
-  ) {
-    return {
-      ...parsed,
-      currentRouteSnapshot: true,
-    };
-  }
-
-  return parsed;
 }
 
 async function readAutomationCurrentRoute(): Promise<AutomationCurrentRouteContext> {
@@ -338,11 +319,9 @@ function authorizeAutomationRouteForCurrentContext(
     );
   }
 
-  return automationRouteSchema.parse({
-    ...resolveAssistantDeliveryRouteWithCurrentRoute({}, currentRoute),
-    currentRouteSnapshot: true,
-    threadIsDirect: currentRoute.threadIsDirect,
-  });
+  return automationRouteSchema.parse(
+    resolveAssistantDeliveryRouteWithCurrentRoute({}, currentRoute),
+  );
 }
 
 async function authorizeExistingAutomationForUpsert(input: {
@@ -356,40 +335,13 @@ async function authorizeExistingAutomationForUpsert(input: {
 
   for (const lookup of new Set(input.lookups.map((value) => value?.trim()).filter(Boolean))) {
     const existing = await showAutomation(input.vaultRoot, lookup as string);
-    if (
-      existing &&
-      !isLegacyManagedOnboardingFollowupRouteUpgrade(
-        existing,
-        input.currentRouteContext,
-      )
-    ) {
+    if (existing) {
       authorizeAutomationRouteForCurrentContext(
         existing.route,
         input.currentRouteContext,
       );
     }
   }
-}
-
-function isLegacyManagedOnboardingFollowupRouteUpgrade(
-  existing: AutomationRecord,
-  currentRouteContext: AutomationCurrentRouteContext,
-): boolean {
-  const currentRoute = currentRouteContext.route;
-  const existingTags = new Set(existing.tags);
-  return currentRouteContext.hosted &&
-    currentRoute?.channel === "linq" &&
-    currentRoute.threadIsDirect === true &&
-    existing.slug === MURPH_ONBOARDING_FOLLOWUP_AUTOMATION.slug &&
-    existingTags.has("murph-managed") &&
-    existingTags.has("murph-managed:onboarding-followup") &&
-    existing.route.channel === "linq" &&
-    existing.route.currentRouteSnapshot !== true &&
-    existing.route.deliveryTarget === null &&
-    existing.route.threadId === null &&
-    existing.route.threadIsDirect !== false &&
-    typeof existing.route.identityId === "string" &&
-    typeof existing.route.participantId === "string";
 }
 
 function assertAutomationRouteCanDeliver(
@@ -874,8 +826,8 @@ export function registerAutomationCommands(cli: Cli.Cli) {
         continuityPolicy: context.options.continuityPolicy,
         instructions: context.options.instructions,
         lookup: context.args.lookup,
-        // Local callers may replace the stored route. Hosted callers are
-        // restricted above to a canonical snapshot of the current chat.
+        // Local callers may replace the stored route. Hosted callers use the
+        // trusted current conversation route selected above.
         route,
         schedule: hasDefinedAutomationOption(scheduleOptions)
           ? buildAutomationScheduleFromOptions(scheduleOptions, { now })

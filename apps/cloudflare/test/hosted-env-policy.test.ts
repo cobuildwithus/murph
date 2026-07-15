@@ -213,7 +213,6 @@ describe("hosted runner log categories", () => {
       hostedEmailConfigured: false,
       linqConfigured: false,
       telegramConfigured: true,
-      whatsappConfigured: false,
     });
   });
 
