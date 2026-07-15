@@ -4,7 +4,7 @@ import { promises as fs } from "node:fs";
 import os from "node:os";
 import path from "node:path";
 
-import { CONTRACT_SCHEMA_VERSION } from "@murphai/contracts";
+import { CONTRACT_SCHEMA_VERSION, type AuditRecord } from "@murphai/contracts";
 import { afterEach, test, vi } from "vitest";
 
 import {
@@ -55,6 +55,7 @@ import {
   applyHostedCanonicalWriteReceipt,
   HOSTED_CANONICAL_WRITE_RECEIPT_SCHEMA_VERSION,
   resolveHostedCanonicalWritePayloadFilePath,
+  type HostedCanonicalWriteReceipt,
   WriteBatch,
   WRITE_OPERATION_SCHEMA_VERSION,
 } from "../src/operations/write-batch.ts";
@@ -89,6 +90,54 @@ async function assertHostedPayloadFile(input: {
     }), "utf8"),
     input.content,
   );
+}
+
+function buildHostedJsonlAppendReceipt(input: {
+  appendContent: string;
+  baseContent: string;
+  operationId: string;
+  targetRelativePath: string;
+}): HostedCanonicalWriteReceipt {
+  return {
+    schema: HOSTED_CANONICAL_WRITE_RECEIPT_SCHEMA_VERSION,
+    operationId: input.operationId,
+    operationType: "hosted_jsonl_replay",
+    summary: "Replay a hosted JSONL append.",
+    createdAt: FIXED_TIME,
+    updatedAt: FIXED_TIME,
+    occurredAt: FIXED_TIME,
+    committedAt: FIXED_TIME,
+    actions: [{
+      kind: "jsonl_append",
+      targetRelativePath: input.targetRelativePath,
+      appendSha256: createHash("sha256").update(input.appendContent).digest("hex"),
+      appendByteLength: Buffer.byteLength(input.appendContent),
+      baseSha256: createHash("sha256").update(input.baseContent).digest("hex"),
+      baseByteLength: Buffer.byteLength(input.baseContent),
+      originalSize: Buffer.byteLength(input.baseContent),
+      contentRef: {
+        sha256: createHash("sha256").update(input.appendContent).digest("hex"),
+        byteSize: Buffer.byteLength(input.appendContent),
+      },
+    }],
+  };
+}
+
+function buildAuditRecord(id: string, summary: string): AuditRecord {
+  return {
+    schemaVersion: CONTRACT_SCHEMA_VERSION.audit,
+    id,
+    action: "preferences_update",
+    status: "success",
+    occurredAt: FIXED_TIME,
+    actor: "core",
+    commandName: "preferences.update",
+    summary,
+    changes: [{
+      path: "preferences.md",
+      op: "update",
+    }],
+  };
 }
 
 afterEach(async () => {
@@ -870,6 +919,294 @@ test("hosted JSONL replay rejects matching-size base content drift", async () =>
     /base content does not match/u,
   );
   assert.equal(await fs.readFile(targetAbsolutePath, "utf8"), "other\n");
+});
+
+test("hosted audit replay accepts an identical record after another audit append", async () => {
+  const vaultRoot = await makeTempDirectory("murph-core-hosted-audit-identical-replay");
+  await initializeVault({ vaultRoot });
+  const targetRelativePath = "audit/2026/2026-04.jsonl";
+  const targetAbsolutePath = path.join(vaultRoot, targetRelativePath);
+  const baseContent = `${JSON.stringify(buildAuditRecord(
+    "aud_01JQ9R7WF97M1WAB2B4QF2Q1AC",
+    "Base audit record.",
+  ))}\n`;
+  const interveningContent = `${JSON.stringify(buildAuditRecord(
+    "aud_01JQ9R7WF97M1WAB2B4QF2Q1AD",
+    "Intervening audit record.",
+  ))}\n`;
+  const appendContent = `${JSON.stringify(buildAuditRecord(
+    "aud_01JQ9R7WF97M1WAB2B4QF2Q1AE",
+    "Replayed audit record.",
+  ))}\n`;
+  const existingContent = `${baseContent}${interveningContent}${appendContent}`;
+  await fs.mkdir(path.dirname(targetAbsolutePath), { recursive: true });
+  await fs.writeFile(targetAbsolutePath, existingContent, "utf8");
+
+  await applyHostedCanonicalWriteReceipt({
+    vaultRoot,
+    readPayload: async () => Buffer.from(appendContent, "utf8"),
+    receipt: buildHostedJsonlAppendReceipt({
+      appendContent,
+      baseContent,
+      operationId: "op_hosted_audit_identical_replay",
+      targetRelativePath,
+    }),
+  });
+
+  assert.equal(await fs.readFile(targetAbsolutePath, "utf8"), existingContent);
+});
+
+test("hosted audit replay appends a missing record after another audit append", async () => {
+  const vaultRoot = await makeTempDirectory("murph-core-hosted-audit-missing-replay");
+  await initializeVault({ vaultRoot });
+  const targetRelativePath = "audit/2026/2026-04.jsonl";
+  const targetAbsolutePath = path.join(vaultRoot, targetRelativePath);
+  const baseContent = `${JSON.stringify(buildAuditRecord(
+    "aud_01JQ9R7WF97M1WAB2B4QF2Q1AF",
+    "Base audit record.",
+  ))}\n`;
+  const interveningContent = `${JSON.stringify(buildAuditRecord(
+    "aud_01JQ9R7WF97M1WAB2B4QF2Q1AG",
+    "Intervening audit record.",
+  ))}\n`;
+  const appendContent = `${JSON.stringify(buildAuditRecord(
+    "aud_01JQ9R7WF97M1WAB2B4QF2Q1AH",
+    "Missing audit record.",
+  ))}\n`;
+  await fs.mkdir(path.dirname(targetAbsolutePath), { recursive: true });
+  await fs.writeFile(targetAbsolutePath, `${baseContent}${interveningContent}`, "utf8");
+  const receipt = buildHostedJsonlAppendReceipt({
+    appendContent,
+    baseContent,
+    operationId: "op_hosted_audit_missing_replay",
+    targetRelativePath,
+  });
+
+  for (let attempt = 0; attempt < 2; attempt += 1) {
+    await applyHostedCanonicalWriteReceipt({
+      vaultRoot,
+      readPayload: async () => Buffer.from(appendContent, "utf8"),
+      receipt,
+    });
+  }
+
+  assert.equal(
+    await fs.readFile(targetAbsolutePath, "utf8"),
+    `${baseContent}${interveningContent}${appendContent}`,
+  );
+});
+
+test("hosted audit replay rejects conflicting content for an existing audit ID", async () => {
+  const vaultRoot = await makeTempDirectory("murph-core-hosted-audit-conflicting-replay");
+  await initializeVault({ vaultRoot });
+  const targetRelativePath = "audit/2026/2026-04.jsonl";
+  const targetAbsolutePath = path.join(vaultRoot, targetRelativePath);
+  const baseContent = `${JSON.stringify(buildAuditRecord(
+    "aud_01JQ9R7WF97M1WAB2B4QF2Q1AJ",
+    "Base audit record.",
+  ))}\n`;
+  const appendRecordId = "aud_01JQ9R7WF97M1WAB2B4QF2Q1AK";
+  const existingContent = `${baseContent}${JSON.stringify(buildAuditRecord(
+    appendRecordId,
+    "Conflicting audit record.",
+  ))}\n`;
+  const appendContent = `${JSON.stringify(buildAuditRecord(
+    appendRecordId,
+    "Expected audit record.",
+  ))}\n`;
+  await fs.mkdir(path.dirname(targetAbsolutePath), { recursive: true });
+  await fs.writeFile(targetAbsolutePath, existingContent, "utf8");
+
+  await assert.rejects(
+    applyHostedCanonicalWriteReceipt({
+      vaultRoot,
+      readPayload: async () => Buffer.from(appendContent, "utf8"),
+      receipt: buildHostedJsonlAppendReceipt({
+        appendContent,
+        baseContent,
+        operationId: "op_hosted_audit_conflicting_replay",
+        targetRelativePath,
+      }),
+    }),
+    /conflicting content for an existing audit record ID/u,
+  );
+  assert.equal(await fs.readFile(targetAbsolutePath, "utf8"), existingContent);
+});
+
+test("hosted audit replay rejects duplicate existing audit IDs before appending", async () => {
+  const vaultRoot = await makeTempDirectory("murph-core-hosted-audit-duplicate-id-replay");
+  await initializeVault({ vaultRoot });
+  const targetRelativePath = "audit/2026/2026-04.jsonl";
+  const targetAbsolutePath = path.join(vaultRoot, targetRelativePath);
+  const baseContent = `${JSON.stringify(buildAuditRecord(
+    "aud_01JQ9R7WF97M1WAB2B4QF2Q1AT",
+    "Base audit record.",
+  ))}\n`;
+  const duplicateRecordId = "aud_01JQ9R7WF97M1WAB2B4QF2Q1AV";
+  const existingContent = [
+    baseContent,
+    `${JSON.stringify(buildAuditRecord(duplicateRecordId, "First duplicate record."))}\n`,
+    `${JSON.stringify(buildAuditRecord(duplicateRecordId, "Second duplicate record."))}\n`,
+  ].join("");
+  const appendContent = `${JSON.stringify(buildAuditRecord(
+    "aud_01JQ9R7WF97M1WAB2B4QF2Q1AW",
+    "Missing audit record.",
+  ))}\n`;
+  await fs.mkdir(path.dirname(targetAbsolutePath), { recursive: true });
+  await fs.writeFile(targetAbsolutePath, existingContent, "utf8");
+
+  await assert.rejects(
+    applyHostedCanonicalWriteReceipt({
+      vaultRoot,
+      readPayload: async () => Buffer.from(appendContent, "utf8"),
+      receipt: buildHostedJsonlAppendReceipt({
+        appendContent,
+        baseContent,
+        operationId: "op_hosted_audit_duplicate_id_replay",
+        targetRelativePath,
+      }),
+    }),
+    /duplicate existing audit record ID/u,
+  );
+  assert.equal(await fs.readFile(targetAbsolutePath, "utf8"), existingContent);
+});
+
+test("hosted audit replay preserves the base guard for malformed audit shards", async () => {
+  const vaultRoot = await makeTempDirectory("murph-core-hosted-audit-malformed-replay");
+  await initializeVault({ vaultRoot });
+  const targetRelativePath = "audit/2026/2026-04.jsonl";
+  const targetAbsolutePath = path.join(vaultRoot, targetRelativePath);
+  const baseContent = `${JSON.stringify(buildAuditRecord(
+    "aud_01JQ9R7WF97M1WAB2B4QF2Q1AM",
+    "Base audit record.",
+  ))}\n`;
+  const appendContent = `${JSON.stringify(buildAuditRecord(
+    "aud_01JQ9R7WF97M1WAB2B4QF2Q1AN",
+    "Missing audit record.",
+  ))}\n`;
+  const existingContent = `${baseContent}{"not":"an audit record"}\n`;
+  await fs.mkdir(path.dirname(targetAbsolutePath), { recursive: true });
+  await fs.writeFile(targetAbsolutePath, existingContent, "utf8");
+
+  await assert.rejects(
+    applyHostedCanonicalWriteReceipt({
+      vaultRoot,
+      readPayload: async () => Buffer.from(appendContent, "utf8"),
+      receipt: buildHostedJsonlAppendReceipt({
+        appendContent,
+        baseContent,
+        operationId: "op_hosted_audit_malformed_replay",
+        targetRelativePath,
+      }),
+    }),
+    /base content does not match/u,
+  );
+  assert.equal(await fs.readFile(targetAbsolutePath, "utf8"), existingContent);
+});
+
+test("hosted audit replay does not reconcile a schema-invalid append record", async () => {
+  const vaultRoot = await makeTempDirectory("murph-core-hosted-audit-invalid-record-replay");
+  await initializeVault({ vaultRoot });
+  const targetRelativePath = "audit/2026/2026-04.jsonl";
+  const targetAbsolutePath = path.join(vaultRoot, targetRelativePath);
+  const baseContent = `${JSON.stringify(buildAuditRecord(
+    "aud_01JQ9R7WF97M1WAB2B4QF2Q1AX",
+    "Base audit record.",
+  ))}\n`;
+  const existingContent = `${baseContent}${JSON.stringify(buildAuditRecord(
+    "aud_01JQ9R7WF97M1WAB2B4QF2Q1AY",
+    "Intervening audit record.",
+  ))}\n`;
+  const appendContent = `${JSON.stringify({
+    schemaVersion: CONTRACT_SCHEMA_VERSION.audit,
+    id: "aud_01JQ9R7WF97M1WAB2B4QF2Q1AZ",
+  })}\n`;
+  await fs.mkdir(path.dirname(targetAbsolutePath), { recursive: true });
+  await fs.writeFile(targetAbsolutePath, existingContent, "utf8");
+
+  await assert.rejects(
+    applyHostedCanonicalWriteReceipt({
+      vaultRoot,
+      readPayload: async () => Buffer.from(appendContent, "utf8"),
+      receipt: buildHostedJsonlAppendReceipt({
+        appendContent,
+        baseContent,
+        operationId: "op_hosted_audit_invalid_record_replay",
+        targetRelativePath,
+      }),
+    }),
+    /base content does not match/u,
+  );
+  assert.equal(await fs.readFile(targetAbsolutePath, "utf8"), existingContent);
+});
+
+test("hosted audit replay preserves the short-base guard", async () => {
+  const vaultRoot = await makeTempDirectory("murph-core-hosted-audit-short-base-replay");
+  await initializeVault({ vaultRoot });
+  const targetRelativePath = "audit/2026/2026-04.jsonl";
+  const targetAbsolutePath = path.join(vaultRoot, targetRelativePath);
+  const baseContent = `${JSON.stringify(buildAuditRecord(
+    "aud_01JQ9R7WF97M1WAB2B4QF2Q1B0",
+    "Base audit record.",
+  ))}\n`;
+  const existingContent = "";
+  const appendContent = `${JSON.stringify(buildAuditRecord(
+    "aud_01JQ9R7WF97M1WAB2B4QF2Q1B1",
+    "Missing audit record.",
+  ))}\n`;
+  await fs.mkdir(path.dirname(targetAbsolutePath), { recursive: true });
+  await fs.writeFile(targetAbsolutePath, existingContent, "utf8");
+
+  await assert.rejects(
+    applyHostedCanonicalWriteReceipt({
+      vaultRoot,
+      readPayload: async () => Buffer.from(appendContent, "utf8"),
+      receipt: buildHostedJsonlAppendReceipt({
+        appendContent,
+        baseContent,
+        operationId: "op_hosted_audit_short_base_replay",
+        targetRelativePath,
+      }),
+    }),
+    /base size is not present/u,
+  );
+  assert.equal(await fs.readFile(targetAbsolutePath, "utf8"), existingContent);
+});
+
+test("hosted audit replay does not reconcile a multi-record append payload", async () => {
+  const vaultRoot = await makeTempDirectory("murph-core-hosted-audit-multi-record-replay");
+  await initializeVault({ vaultRoot });
+  const targetRelativePath = "audit/2026/2026-04.jsonl";
+  const targetAbsolutePath = path.join(vaultRoot, targetRelativePath);
+  const baseContent = `${JSON.stringify(buildAuditRecord(
+    "aud_01JQ9R7WF97M1WAB2B4QF2Q1AP",
+    "Base audit record.",
+  ))}\n`;
+  const existingContent = `${baseContent}${JSON.stringify(buildAuditRecord(
+    "aud_01JQ9R7WF97M1WAB2B4QF2Q1AQ",
+    "Intervening audit record.",
+  ))}\n`;
+  const appendContent = [
+    buildAuditRecord("aud_01JQ9R7WF97M1WAB2B4QF2Q1AR", "First append record."),
+    buildAuditRecord("aud_01JQ9R7WF97M1WAB2B4QF2Q1AS", "Second append record."),
+  ].map((record) => `${JSON.stringify(record)}\n`).join("");
+  await fs.mkdir(path.dirname(targetAbsolutePath), { recursive: true });
+  await fs.writeFile(targetAbsolutePath, existingContent, "utf8");
+
+  await assert.rejects(
+    applyHostedCanonicalWriteReceipt({
+      vaultRoot,
+      readPayload: async () => Buffer.from(appendContent, "utf8"),
+      receipt: buildHostedJsonlAppendReceipt({
+        appendContent,
+        baseContent,
+        operationId: "op_hosted_audit_multi_record_replay",
+        targetRelativePath,
+      }),
+    }),
+    /base content does not match/u,
+  );
+  assert.equal(await fs.readFile(targetAbsolutePath, "utf8"), existingContent);
 });
 
 test("hosted canonical receipt replay allows raw manifest text writes idempotently", async () => {
