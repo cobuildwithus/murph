@@ -199,6 +199,75 @@ describe("single-member Pulse Trial extension", () => {
     expect(JSON.stringify(result)).not.toContain(SUBSCRIPTION_ID);
   });
 
+  test("does not recover a completed extension after the provider becomes paid active", async () => {
+    mocks.readHostedMemberBillingSnapshot.mockResolvedValue(makeMember({
+      billingPhase: "trial",
+      billingStatus: HostedBillingStatus.active,
+      trialEndsAt: new Date(TARGET_FROM_PAUSED * 1000),
+    }));
+    let providerSubscription = makeSubscription({
+      extensionDays: "7",
+      extensionOperation: RECOVERABLE_OPERATION_ID,
+      extensionTargetTrialEnd: TARGET_FROM_PAUSED,
+      status: "trialing",
+      trialEnd: TARGET_FROM_PAUSED,
+    });
+    const stripe = makeStripeClient(providerSubscription);
+    stripe.retrieveSubscription.mockImplementation(
+      async () => providerSubscription,
+    );
+    const preConversionPreview = await previewHostedPulseTrialExtension({
+      memberId: MEMBER_ID,
+      now: NOW,
+      priceId: PRICE_ID,
+      prisma: {} as never,
+      stripe,
+    });
+    if (!preConversionPreview.previewProof) {
+      throw new Error("Expected an eligible pre-conversion preview.");
+    }
+
+    providerSubscription = makeSubscription({
+      extensionDays: "7",
+      extensionOperation: RECOVERABLE_OPERATION_ID,
+      extensionTargetTrialEnd: TARGET_FROM_PAUSED,
+      status: "active",
+      trialEnd: TARGET_FROM_PAUSED,
+    });
+
+    const result = await previewHostedPulseTrialExtension({
+      memberId: MEMBER_ID,
+      now: NOW,
+      priceId: PRICE_ID,
+      prisma: {} as never,
+      stripe,
+    });
+
+    expect(result).toMatchObject({
+      eligibilityCode: "provider_subscription_not_extendable",
+      eligible: false,
+      localBillingPhase: "trial",
+      localBillingStatus: "active",
+      outcome: "preview",
+      providerStatus: "active",
+    });
+    expect(result.previewProof).toBeNull();
+    expect(stripe.updateSubscription).not.toHaveBeenCalled();
+    expect(stripe.resumeSubscription).not.toHaveBeenCalled();
+
+    await expect(applyHostedPulseTrialExtension({
+      memberId: MEMBER_ID,
+      now: new Date("2026-07-14T16:02:00.000Z"),
+      previewProof: preConversionPreview.previewProof,
+      priceId: PRICE_ID,
+      prisma: {} as never,
+      stripe,
+    })).rejects.toBeInstanceOf(HostedPulseTrialExtensionPreviewStaleError);
+    expect(stripe.updateSubscription).not.toHaveBeenCalled();
+    expect(stripe.resumeSubscription).not.toHaveBeenCalled();
+    expect(mocks.writeHostedMemberStripeBillingRefTx).not.toHaveBeenCalled();
+  });
+
   test("extends a paused trial once and reconciles local billing under the lock", async () => {
     const paused = makeSubscription({ status: "paused", trialEnd: 1_700_000_000 });
     const stripe = makeStripeClient(paused);
@@ -270,6 +339,9 @@ describe("single-member Pulse Trial extension", () => {
         timeout: 80_000,
       }),
     );
+    expect(providerSubscription.metadata).not.toHaveProperty(
+      "murphTrialExtensionTargetTrialEnd",
+    );
     expect(stripe.resumeSubscription).toHaveBeenCalledWith(
       SUBSCRIPTION_ID,
       {
@@ -286,10 +358,15 @@ describe("single-member Pulse Trial extension", () => {
     expect(stripe.updateSubscription).toHaveBeenNthCalledWith(
       2,
       SUBSCRIPTION_ID,
-      expect.objectContaining({
+      {
+        metadata: {
+          murphTrialExtensionDays: "7",
+          murphTrialExtensionOperation: operationId,
+          murphTrialExtensionTargetTrialEnd: "",
+        },
         proration_behavior: "none",
         trial_end: TARGET_FROM_PAUSED,
-      }),
+      },
       expect.objectContaining({
         idempotencyKey:
           `hosted-member-trial-extension:update:${operationId}`,
@@ -389,7 +466,7 @@ describe("single-member Pulse Trial extension", () => {
       SUBSCRIPTION_ID,
       expect.objectContaining({
         metadata: expect.objectContaining({
-          murphTrialExtensionTargetTrialEnd: TARGET_FROM_LIVE.toString(),
+          murphTrialExtensionTargetTrialEnd: "",
         }),
         trial_end: TARGET_FROM_LIVE,
       }),
