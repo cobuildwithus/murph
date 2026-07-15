@@ -36,6 +36,23 @@ export function compareAssistantOutboxDeliverySequenceOrder(
   )
 }
 
+export function isAssistantOutboxReplyBubbleSuccessor(
+  current: AssistantOutboxDeliverySequenceIntent,
+  next: AssistantOutboxDeliverySequenceIntent,
+): boolean {
+  const currentOrder = readAssistantOutboxDeliverySequenceOrder(current)
+  const nextOrder = readAssistantOutboxDeliverySequenceOrder(next)
+  const currentBubble = currentOrder.bubble
+  if (!currentBubble || currentOrder.turnId !== nextOrder.turnId) {
+    return false
+  }
+  if (nextOrder.bubble) {
+    return nextOrder.bubble.prefixKey === currentBubble.prefixKey
+      && nextOrder.bubble.ordinal > currentBubble.ordinal
+  }
+  return shouldAssistantOutboxBubblePrecedeNonBubble(currentBubble, nextOrder)
+}
+
 function readAssistantOutboxDeliverySequenceOrder(
   intent: AssistantOutboxDeliverySequenceIntent,
 ): AssistantOutboxDeliverySequenceOrder {
