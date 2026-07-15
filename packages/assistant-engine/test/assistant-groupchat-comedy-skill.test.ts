@@ -42,6 +42,15 @@ describe('assistant group-chat comedy skill', () => {
     expect(normalized).toContain(
       'Food or drink stunts can be funny, but the hard limits still apply',
     )
+    expect(normalized).toContain(
+      "These limits govern Murph's participation and framing, including stakes the group proposes.",
+    )
+    expect(normalized).toContain(
+      'If a consequence crosses the safety or non-coercion limits, do not encourage, arrange, score, or settle it',
+    )
+    expect(normalized).toContain(
+      'offer one equally funny safer remix without lecturing',
+    )
 
     expect(comedy).not.toContain('chug a gallon of milk')
     expect(comedy).not.toContain('cold plunge in a lake')
@@ -59,6 +68,12 @@ describe('assistant group-chat comedy skill', () => {
       'do not turn zero-purchase into a rule: a modest purchase can carry a strong bit',
     )
     expect(normalized).toContain('single-use junk')
+    expect(normalized).toContain(
+      "the group's explicit choice wins when it is safe, opted-in, and within the `groupchat-comedy` hard limits",
+    )
+    expect(normalized).toContain(
+      'settle only safe, opted-in stakes within the `groupchat-comedy` hard limits',
+    )
     expect(challenge).not.toContain('polite "harmless" forfeits')
   })
 })

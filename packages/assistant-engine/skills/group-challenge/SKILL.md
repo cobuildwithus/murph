@@ -71,11 +71,13 @@ if they require running-only zone minutes, say that exact share is unsupported
 instead of widening consent.
 
 Do not default to biomarker or body-score leaderboards — but the group's
-explicit choice wins. If the members want a physique frame (weekly progress
-pics, a body-recomp bet), that is their call, not yours to veto: pitch a
-sharper alternative at most once, as a peer, never as a refusal or a
-lecture, then run what they pick. Opt-in stays individual — whoever passes
-on photos or the frame plays whatever slice they did consent to, with zero
+explicit choice wins when it is safe, opted-in, and within the
+`groupchat-comedy` hard limits. If the members want a physique frame (weekly
+progress pics, a body-recomp bet), that is their call, not yours to veto:
+pitch a sharper alternative at most once, as a peer, never as a refusal or a
+lecture, then run what they pick within those limits. Opt-in stays individual
+— whoever passes on photos or the frame plays whatever slice they did consent
+to, with zero
 commentary on the abstention. Where no share scope can score the chosen
 frame, say so plainly as an operational limit and let the members judge for
 themselves; your own commentary stays on effort, change, and the bit. If a
@@ -102,9 +104,9 @@ The page carries these sections, kept current:
 
 - **Rules & metric** — the agreed metric, window, and the ruling that
   settled any dispute about it.
-- **Roster & intros** — each member's name, member id, whether they are in or
-  still pending, their intro or fun fact (verbatim), and the capture refs for
-  their photos.
+- **Roster & intros** — each member's name, member id, participation state
+  (`in`, `pending`, `declined`, or `withdrawn`), their intro or fun fact
+  (verbatim), and the capture refs for their photos.
 - **Baselines** — per-member starting values where shared data allows.
 - **Stakes** — verbatim, exactly as the group agreed them.
 - **Canon** — running bits, nicknames, claims, commissioned bits, with dates.
@@ -167,7 +169,10 @@ loses a reminder; it must never lose the challenge.
    name]." This is for social buy-in, not a formal consent ceremony. Group
    membership or an existing data grant is not enough by itself, and silence
    never means yes. Do not nag someone who stays quiet; ask the room whether
-   to wait or run it with the people who are in.
+   to wait or run it with the people who are in. If someone declines or later
+   withdraws, record that state in the same turn. Never list them as waiting,
+   ask them for challenge materials, score them, or privately check in about
+   challenge silence. Re-entry requires a new explicit affirmative response.
 4. **Collect sharing permissions.** Mint the join link with `murph.group`
    `action="create_join_link"` and the challenge's share scopes; members pick
    what they share on the join page. Never improvise data-sharing permission
@@ -316,8 +321,8 @@ when they recover.
 
 1. Compute final standings from fresh shared data plus the page's
    snapshots.
-2. Declare the winner with a stakes callback, and settle what the losers
-   owe.
+2. Declare the winner with a stakes callback, and settle only safe, opted-in
+   stakes within the `groupchat-comedy` hard limits.
 3. Produce one closing artifact — a comic or recap built from the pinned
    photos and the challenge's canon.
 4. Flip the page to `--status archived` and forget the pointer with

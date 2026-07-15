@@ -49,6 +49,18 @@ describe('assistant group challenge buy-in guidance', () => {
       'Never ask a pending person for challenge materials; their silence is not something to follow up on.',
     )
     expect(challenge).toContain(
+      'participation state (`in`, `pending`, `declined`, or `withdrawn`)',
+    )
+    expect(challenge).toContain(
+      'If someone declines or later withdraws, record that state in the same turn.',
+    )
+    expect(challenge).toContain(
+      'Never list them as waiting, ask them for challenge materials, score them, or privately check in about challenge silence.',
+    )
+    expect(challenge).toContain(
+      'Re-entry requires a new explicit affirmative response.',
+    )
+    expect(challenge).toContain(
       'Pending silence never creates a private check-in.',
     )
     expect(comedy).toContain(
@@ -73,6 +85,9 @@ describe('assistant group challenge buy-in guidance', () => {
     )
     expect(groupChat).toContain(
       'do not wake a silent member up to find that they were automatically entered either',
+    )
+    expect(groupChat).toContain(
+      'What the group safely and individually opts to do within the `groupchat-comedy` hard limits',
     )
     expect(groupChat).not.toContain('joining a challenge is consent to play')
   })
