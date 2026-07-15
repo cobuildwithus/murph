@@ -45,7 +45,7 @@ import {
 } from "../hosted-orchestration/signal-runtime";
 import {
   assertHostedPhoneCallsReadyForAccountDeletionTx,
-  stopHostedPhoneCallsForAccountDeletion,
+  deleteHostedPhoneCallsForAccountDeletion,
 } from "../phone-calls/account-deletion";
 import {
   revokeOutgoingHostedVaultSharesForMemberDeletionTx,
@@ -590,7 +590,7 @@ export async function deleteHostedAccountData(input: {
     now: deletionStartedAt,
     prisma: input.prisma,
   });
-  await stopHostedPhoneCallsForAccountDeletion({
+  await deleteHostedPhoneCallsForAccountDeletion({
     memberIds: deletionMemberIds,
     prisma: input.prisma,
     signal: input.request.signal,

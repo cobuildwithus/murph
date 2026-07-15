@@ -5,28 +5,28 @@ import {
   assertHostedPhoneCallsReadyForAccountDeletionTx,
   HOSTED_PHONE_CALL_ACCOUNT_DELETION_BATCH_SIZE,
   HOSTED_PHONE_CALL_ACCOUNT_DELETION_TIMEOUT_MS,
-  stopHostedPhoneCallsForAccountDeletion,
+  deleteHostedPhoneCallsForAccountDeletion,
 } from "@/src/lib/phone-calls/account-deletion";
 
 describe("hosted phone-call account deletion", () => {
-  it("does nothing when no active phone calls exist", async () => {
+  it("does nothing when no phone-call provider data exists", async () => {
     const store = createStore([]);
-    const stopIfActive = vi.fn();
+    const deleteProviderCall = vi.fn();
 
-    await stopHostedPhoneCallsForAccountDeletion({
+    await deleteHostedPhoneCallsForAccountDeletion({
       memberIds: ["member_1"],
       prisma: store.prisma,
       runtime: {
         resolveProviderCall: vi.fn(),
-        stopIfActive,
+        deleteProviderCall,
       },
     });
 
-    expect(stopIfActive).not.toHaveBeenCalled();
+    expect(deleteProviderCall).not.toHaveBeenCalled();
     expect(store.updateMany).not.toHaveBeenCalled();
   });
 
-  it("stops known calls before reporting an unresolved reservation", async () => {
+  it("deletes known calls before reporting an unresolved reservation", async () => {
     const store = createStore([{
       id: "hpc_0",
       providerCallId: "retell_0",
@@ -34,68 +34,107 @@ describe("hosted phone-call account deletion", () => {
       id: "hpc_1",
       providerCallId: null,
     }]);
-    const stopIfActive = vi.fn();
+    const deleteProviderCall = vi.fn();
 
-    await expect(stopHostedPhoneCallsForAccountDeletion({
+    await expect(deleteHostedPhoneCallsForAccountDeletion({
       memberIds: ["member_1"],
       prisma: store.prisma,
       runtime: {
         resolveProviderCall: vi.fn(),
-        stopIfActive,
+        deleteProviderCall,
       },
     })).rejects.toMatchObject({
       code: "ACCOUNT_DELETION_PHONE_CALL_CLEANUP_FAILED",
       retryable: true,
     });
-    expect(stopIfActive).toHaveBeenCalledWith("retell_0", {
+    expect(deleteProviderCall).toHaveBeenCalledWith("retell_0", {
       signal: expect.any(AbortSignal),
     });
     expect(store.updateMany).toHaveBeenCalledWith({
       data: {
         endedAt: expect.any(Date),
+        providerCallId: null,
         status: "ended",
       },
       where: {
         id: "hpc_0",
         providerCallId: "retell_0",
-        status: { in: ["starting", "calling", "failed"] },
       },
     });
   });
 
-  it("stops provider calls before marking their local reservations ended", async () => {
+  it("deletes provider calls before clearing their local retry ownership", async () => {
     const store = createStore([{
       id: "hpc_1",
       providerCallId: "retell_1",
     }]);
-    const stopIfActive = vi.fn().mockResolvedValue(undefined);
+    const deleteProviderCall = vi.fn().mockResolvedValue(undefined);
 
-    await stopHostedPhoneCallsForAccountDeletion({
+    await deleteHostedPhoneCallsForAccountDeletion({
       memberIds: ["member_1"],
       prisma: store.prisma,
       runtime: {
         resolveProviderCall: vi.fn(),
-        stopIfActive,
+        deleteProviderCall,
       },
     });
 
-    expect(stopIfActive).toHaveBeenCalledWith("retell_1", {
+    expect(deleteProviderCall).toHaveBeenCalledWith("retell_1", {
       signal: expect.any(AbortSignal),
     });
     expect(store.updateMany).toHaveBeenCalledWith({
       data: {
         endedAt: expect.any(Date),
+        providerCallId: null,
         status: "ended",
       },
       where: {
         id: "hpc_1",
         providerCallId: "retell_1",
-        status: { in: ["starting", "calling", "failed"] },
       },
     });
-    expect(stopIfActive.mock.invocationCallOrder[0]).toBeLessThan(
+    expect(deleteProviderCall.mock.invocationCallOrder[0]).toBeLessThan(
       store.updateMany.mock.invocationCallOrder[0]!,
     );
+  });
+
+  it("deletes terminal provider calls without rewriting their terminal state", async () => {
+    const store = createStore([{
+      id: "hpc_terminal",
+      providerCallId: "retell_terminal",
+      status: "completed",
+    }]);
+    const deleteProviderCall = vi.fn().mockResolvedValue(undefined);
+
+    await deleteHostedPhoneCallsForAccountDeletion({
+      memberIds: ["member_1"],
+      prisma: store.prisma,
+      runtime: {
+        deleteProviderCall,
+        resolveProviderCall: vi.fn(),
+      },
+    });
+
+    expect(deleteProviderCall).toHaveBeenCalledWith("retell_terminal", {
+      signal: expect.any(AbortSignal),
+    });
+    expect(store.updateMany).toHaveBeenCalledWith({
+      data: { providerCallId: null },
+      where: {
+        id: "hpc_terminal",
+        providerCallId: "retell_terminal",
+      },
+    });
+    expect(store.findMany).toHaveBeenCalledWith(expect.objectContaining({
+      where: {
+        memberId: { in: ["member_1"] },
+        provider: "retell",
+        OR: [
+          { providerCallId: { not: null } },
+          { status: { in: ["starting", "calling"] } },
+        ],
+      },
+    }));
   });
 
   it("fails retryably and leaves local authority intact when provider cleanup fails", async () => {
@@ -105,12 +144,12 @@ describe("hosted phone-call account deletion", () => {
     }]);
     const providerError = new Error("provider unavailable");
 
-    await expect(stopHostedPhoneCallsForAccountDeletion({
+    await expect(deleteHostedPhoneCallsForAccountDeletion({
       memberIds: ["member_1"],
       prisma: store.prisma,
       runtime: {
         resolveProviderCall: vi.fn(),
-        stopIfActive: vi.fn().mockRejectedValue(providerError),
+        deleteProviderCall: vi.fn().mockRejectedValue(providerError),
       },
     })).rejects.toSatisfy((error: unknown) =>
       error instanceof HostedOnboardingError
@@ -121,35 +160,35 @@ describe("hosted phone-call account deletion", () => {
     expect(store.updateMany).not.toHaveBeenCalled();
   });
 
-  it("keeps failed cleanup authority failed after stopping the provider call", async () => {
+  it("keeps failed cleanup status after deleting the provider call", async () => {
     const store = createStore([{
       id: "hpc_1",
       providerCallId: "retell_1",
       status: "failed",
     }]);
-    const stopIfActive = vi.fn().mockResolvedValue(undefined);
+    const deleteProviderCall = vi.fn().mockResolvedValue(undefined);
 
-    await stopHostedPhoneCallsForAccountDeletion({
+    await deleteHostedPhoneCallsForAccountDeletion({
       memberIds: ["member_1"],
       prisma: store.prisma,
       runtime: {
         resolveProviderCall: vi.fn(),
-        stopIfActive,
+        deleteProviderCall,
       },
     });
 
-    expect(stopIfActive).toHaveBeenCalledWith("retell_1", {
+    expect(deleteProviderCall).toHaveBeenCalledWith("retell_1", {
       signal: expect.any(AbortSignal),
     });
     expect(store.updateMany).toHaveBeenCalledWith({
       data: {
         endedAt: expect.any(Date),
+        providerCallId: null,
         status: "failed",
       },
       where: {
         id: "hpc_1",
         providerCallId: "retell_1",
-        status: { in: ["starting", "calling", "failed"] },
       },
     });
   });
@@ -163,12 +202,12 @@ describe("hosted phone-call account deletion", () => {
     }]);
     const resolveProviderCall = vi.fn().mockResolvedValue({ state: "not_found" });
 
-    await stopHostedPhoneCallsForAccountDeletion({
+    await deleteHostedPhoneCallsForAccountDeletion({
       memberIds: ["member_1"],
       prisma: store.prisma,
       runtime: {
         resolveProviderCall,
-        stopIfActive: vi.fn(),
+        deleteProviderCall: vi.fn(),
       },
     });
 
@@ -188,7 +227,7 @@ describe("hosted phone-call account deletion", () => {
     });
   });
 
-  it("stops a stale provider call recovered by metadata before account deletion", async () => {
+  it("deletes a stale provider call recovered by metadata before account deletion", async () => {
     const store = createStore([{
       id: "hpc_1",
       providerCallId: null,
@@ -199,21 +238,21 @@ describe("hosted phone-call account deletion", () => {
       providerCallId: "retell_recovered",
       state: "found",
     });
-    const stopIfActive = vi.fn().mockResolvedValue(undefined);
+    const deleteProviderCall = vi.fn().mockResolvedValue(undefined);
 
-    await stopHostedPhoneCallsForAccountDeletion({
+    await deleteHostedPhoneCallsForAccountDeletion({
       memberIds: ["member_1"],
       prisma: store.prisma,
       runtime: {
         resolveProviderCall,
-        stopIfActive,
+        deleteProviderCall,
       },
     });
 
     expect(resolveProviderCall).toHaveBeenCalledWith("hpc_1", {
       signal: expect.any(AbortSignal),
     });
-    expect(stopIfActive).toHaveBeenCalledWith("retell_recovered", {
+    expect(deleteProviderCall).toHaveBeenCalledWith("retell_recovered", {
       signal: expect.any(AbortSignal),
     });
     expect(store.updateMany).toHaveBeenNthCalledWith(1, {
@@ -233,17 +272,17 @@ describe("hosted phone-call account deletion", () => {
     expect(store.updateMany).toHaveBeenNthCalledWith(2, {
       data: {
         endedAt: expect.any(Date),
+        providerCallId: null,
         status: "ended",
       },
       where: {
         id: "hpc_1",
         providerCallId: "retell_recovered",
-        status: { in: ["starting", "calling", "failed"] },
       },
     });
   });
 
-  it("does not stop a recovered call when provider-id binding throws", async () => {
+  it("does not delete a recovered call when provider-id binding throws", async () => {
     const store = createStore([{
       id: "hpc_1",
       providerCallId: null,
@@ -252,9 +291,9 @@ describe("hosted phone-call account deletion", () => {
     }]);
     const databaseError = new Error("database unavailable");
     store.updateMany.mockRejectedValueOnce(databaseError);
-    const stopIfActive = vi.fn();
+    const deleteProviderCall = vi.fn();
 
-    await expect(stopHostedPhoneCallsForAccountDeletion({
+    await expect(deleteHostedPhoneCallsForAccountDeletion({
       memberIds: ["member_1"],
       prisma: store.prisma,
       runtime: {
@@ -262,16 +301,16 @@ describe("hosted phone-call account deletion", () => {
           providerCallId: "retell_recovered",
           state: "found",
         }),
-        stopIfActive,
+        deleteProviderCall,
       },
     })).rejects.toSatisfy((error: unknown) =>
       error instanceof HostedOnboardingError
       && error.cause === databaseError,
     );
-    expect(stopIfActive).not.toHaveBeenCalled();
+    expect(deleteProviderCall).not.toHaveBeenCalled();
   });
 
-  it("stops after a zero-row bind only when the same provider id is already durable", async () => {
+  it("deletes after a zero-row bind only when the same provider id is already durable", async () => {
     const store = createStore([{
       id: "hpc_1",
       providerCallId: null,
@@ -290,9 +329,9 @@ describe("hosted phone-call account deletion", () => {
       status: "calling",
       updatedAt: new Date(),
     });
-    const stopIfActive = vi.fn().mockResolvedValue(undefined);
+    const deleteProviderCall = vi.fn().mockResolvedValue(undefined);
 
-    await stopHostedPhoneCallsForAccountDeletion({
+    await deleteHostedPhoneCallsForAccountDeletion({
       memberIds: ["member_1"],
       prisma: store.prisma,
       runtime: {
@@ -300,25 +339,25 @@ describe("hosted phone-call account deletion", () => {
           providerCallId: "retell_recovered",
           state: "found",
         }),
-        stopIfActive,
+        deleteProviderCall,
       },
     });
 
-    expect(stopIfActive).toHaveBeenCalledOnce();
+    expect(deleteProviderCall).toHaveBeenCalledOnce();
     expect(store.updateMany).toHaveBeenNthCalledWith(2, {
       data: {
         endedAt: expect.any(Date),
+        providerCallId: null,
         status: "ended",
       },
       where: {
         id: "hpc_1",
         providerCallId: "retell_recovered",
-        status: { in: ["starting", "calling", "failed"] },
       },
     });
   });
 
-  it("does not stop stale recovered authority after an incompatible bind race", async () => {
+  it("does not delete stale recovered authority after an incompatible bind race", async () => {
     const store = createStore([{
       id: "hpc_1",
       providerCallId: null,
@@ -335,9 +374,9 @@ describe("hosted phone-call account deletion", () => {
       status: "calling",
       updatedAt: new Date(),
     });
-    const stopIfActive = vi.fn();
+    const deleteProviderCall = vi.fn();
 
-    await expect(stopHostedPhoneCallsForAccountDeletion({
+    await expect(deleteHostedPhoneCallsForAccountDeletion({
       memberIds: ["member_1"],
       prisma: store.prisma,
       runtime: {
@@ -345,13 +384,13 @@ describe("hosted phone-call account deletion", () => {
           providerCallId: "retell_recovered",
           state: "found",
         }),
-        stopIfActive,
+        deleteProviderCall,
       },
     })).rejects.toMatchObject({
       code: "ACCOUNT_DELETION_PHONE_CALL_CLEANUP_FAILED",
       retryable: true,
     });
-    expect(stopIfActive).not.toHaveBeenCalled();
+    expect(deleteProviderCall).not.toHaveBeenCalled();
   });
 
   it("keeps recovered provider identity durable when terminal persistence fails", async () => {
@@ -365,9 +404,9 @@ describe("hosted phone-call account deletion", () => {
     store.updateMany
       .mockResolvedValueOnce({ count: 1 })
       .mockRejectedValueOnce(databaseError);
-    const stopIfActive = vi.fn().mockResolvedValue(undefined);
+    const deleteProviderCall = vi.fn().mockResolvedValue(undefined);
 
-    await expect(stopHostedPhoneCallsForAccountDeletion({
+    await expect(deleteHostedPhoneCallsForAccountDeletion({
       memberIds: ["member_1"],
       prisma: store.prisma,
       runtime: {
@@ -375,7 +414,7 @@ describe("hosted phone-call account deletion", () => {
           providerCallId: "retell_recovered",
           state: "found",
         }),
-        stopIfActive,
+        deleteProviderCall,
       },
     })).rejects.toSatisfy((error: unknown) =>
       error instanceof HostedOnboardingError
@@ -385,12 +424,12 @@ describe("hosted phone-call account deletion", () => {
     expect(store.updateMany).toHaveBeenNthCalledWith(1, expect.objectContaining({
       data: expect.objectContaining({ providerCallId: "retell_recovered" }),
     }));
-    expect(stopIfActive).toHaveBeenCalledWith("retell_recovered", {
+    expect(deleteProviderCall).toHaveBeenCalledWith("retell_recovered", {
       signal: expect.any(AbortSignal),
     });
   });
 
-  it("stops only one deterministic batch before asking the deletion owner to retry", async () => {
+  it("deletes only one deterministic batch before asking the deletion owner to retry", async () => {
     const calls = Array.from(
       { length: HOSTED_PHONE_CALL_ACCOUNT_DELETION_BATCH_SIZE + 1 },
       (_, index) => ({
@@ -399,21 +438,21 @@ describe("hosted phone-call account deletion", () => {
       }),
     );
     const store = createStore(calls);
-    const stopIfActive = vi.fn().mockResolvedValue(undefined);
+    const deleteProviderCall = vi.fn().mockResolvedValue(undefined);
 
-    await expect(stopHostedPhoneCallsForAccountDeletion({
+    await expect(deleteHostedPhoneCallsForAccountDeletion({
       memberIds: ["member_1"],
       prisma: store.prisma,
       runtime: {
         resolveProviderCall: vi.fn(),
-        stopIfActive,
+        deleteProviderCall,
       },
     })).rejects.toMatchObject({
       code: "ACCOUNT_DELETION_PHONE_CALL_CLEANUP_FAILED",
       retryable: true,
     });
 
-    expect(stopIfActive).toHaveBeenCalledTimes(HOSTED_PHONE_CALL_ACCOUNT_DELETION_BATCH_SIZE);
+    expect(deleteProviderCall).toHaveBeenCalledTimes(HOSTED_PHONE_CALL_ACCOUNT_DELETION_BATCH_SIZE);
     expect(store.findMany).toHaveBeenCalledWith(expect.objectContaining({
       orderBy: [{ updatedAt: "asc" }, { id: "asc" }],
       take: HOSTED_PHONE_CALL_ACCOUNT_DELETION_BATCH_SIZE + 1,
@@ -427,19 +466,19 @@ describe("hosted phone-call account deletion", () => {
         id: "hpc_1",
         providerCallId: "retell_1",
       }]);
-      const stopIfActive = vi.fn(async (_providerCallId: string, options?: {
+      const deleteProviderCall = vi.fn(async (_providerCallId: string, options?: {
         signal?: AbortSignal;
       }) => await new Promise<void>((_resolve, reject) => {
         options?.signal?.addEventListener("abort", () => {
           reject(options.signal?.reason);
         }, { once: true });
       }));
-      const cleanup = stopHostedPhoneCallsForAccountDeletion({
+      const cleanup = deleteHostedPhoneCallsForAccountDeletion({
         memberIds: ["member_1"],
         prisma: store.prisma,
         runtime: {
           resolveProviderCall: vi.fn(),
-          stopIfActive,
+          deleteProviderCall,
         },
       });
 
@@ -454,7 +493,7 @@ describe("hosted phone-call account deletion", () => {
     }
   });
 
-  it("blocks the final transaction while any phone-call authority is active", async () => {
+  it("blocks the final transaction while provider cleanup ownership remains", async () => {
     const store = createStore([], 1);
 
     await expect(assertHostedPhoneCallsReadyForAccountDeletionTx({
@@ -463,6 +502,16 @@ describe("hosted phone-call account deletion", () => {
     })).rejects.toMatchObject({
       code: "ACCOUNT_DELETION_PHONE_CALL_CLEANUP_FAILED",
       retryable: true,
+    });
+    expect(store.prisma.hostedPhoneCall.count).toHaveBeenCalledWith({
+      where: {
+        memberId: { in: ["member_1"] },
+        provider: "retell",
+        OR: [
+          { providerCallId: { not: null } },
+          { status: { in: ["starting", "calling"] } },
+        ],
+      },
     });
   });
 });
@@ -496,7 +545,7 @@ function createStore(
   return {
     findMany: prisma.hostedPhoneCall.findMany,
     findUnique: prisma.hostedPhoneCall.findUnique,
-    prisma: prisma as Parameters<typeof stopHostedPhoneCallsForAccountDeletion>[0]["prisma"],
+    prisma: prisma as Parameters<typeof deleteHostedPhoneCallsForAccountDeletion>[0]["prisma"],
     updateMany,
   };
 }
