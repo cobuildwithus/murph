@@ -4034,6 +4034,44 @@ describe("runHostedWorkspaceAssistantPhase runtime logs", () => {
     });
   });
 
+  it("does not label an aggregate reminder as invocation-local foreground work", async () => {
+    const reminderWakeAt = "2026-04-27T06:00:00.000Z";
+    mocks.runHostedAssistantAutomationLane.mockResolvedValueOnce({
+      assistantAutomationCurrentTurnDeliveryIntentIds: [],
+      assistantAutomationProgressed: false,
+      assistantAutomationSelectedInputWakeAt: null,
+      nextWakeAt: reminderWakeAt,
+      redactedLogEntries: [],
+    });
+
+    const result = await runHostedWorkspaceAssistantPhase(createPhaseInput({
+      importedCount: 1,
+      now: () => "2026-04-27T00:00:00.000Z",
+    }));
+
+    expect(result.nextWakeAt).toBe(reminderWakeAt);
+    expect(result).not.toHaveProperty("invocationLocalAssistantWakeAt");
+  });
+
+  it("labels a selected foreground retry as invocation-local work", async () => {
+    const retryWakeAt = "2026-04-27T00:00:30.000Z";
+    mocks.runHostedAssistantAutomationLane.mockResolvedValueOnce({
+      assistantAutomationCurrentTurnDeliveryIntentIds: [],
+      assistantAutomationProgressed: false,
+      assistantAutomationSelectedInputWakeAt: retryWakeAt,
+      nextWakeAt: retryWakeAt,
+      redactedLogEntries: [],
+    });
+
+    const result = await runHostedWorkspaceAssistantPhase(createPhaseInput({
+      importedCount: 1,
+      now: () => "2026-04-27T00:00:00.000Z",
+    }));
+
+    expect(result.nextWakeAt).toBe(retryWakeAt);
+    expect(result.invocationLocalAssistantWakeAt).toBe(retryWakeAt);
+  });
+
   it("does not checkpoint no-op alarms only because automation returned a future wake", async () => {
     const nextWakeAt = "2026-04-27T00:01:00.000Z";
     const existingWakeAt = "2026-04-27T00:05:00.000Z";

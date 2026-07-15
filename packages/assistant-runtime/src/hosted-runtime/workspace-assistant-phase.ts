@@ -3943,8 +3943,12 @@ async function runForegroundAssistantReplyPhase(input: {
   const assistantNextWakeReason = resolveHostedAssistantAutomationNextWakeReason({
     assistantNextWakeAt,
   });
-  const invocationLocalAssistantWake = assistantNextWakeAt
-    ? { invocationLocalAssistantWakeAt: assistantNextWakeAt }
+  const selectedInputWakeAt = resolveHostedAssistantAutomationNextWakeAt({
+    input: input.input,
+    nextWakeAt: input.assistantMetrics.assistantAutomationSelectedInputWakeAt ?? null,
+  });
+  const invocationLocalAssistantWake = selectedInputWakeAt
+    ? { invocationLocalAssistantWakeAt: selectedInputWakeAt }
     : {};
 
   if (
