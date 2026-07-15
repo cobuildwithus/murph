@@ -59,7 +59,6 @@ import {
   type HostedRuntimeLogContext,
 } from "./runtime-logs.ts";
 import {
-  hostedCanonicalWriteRepairStatusFields,
   omitHostedCanonicalWriteReceiptLogStatusFields,
   readHostedCanonicalWriteReceiptLogEntries,
   readHostedCanonicalWriteReceiptLogStatusFingerprint,
@@ -103,9 +102,7 @@ export type HostedWorkspaceRuntimeRestoreMode = "null-bootstrap" | "snapshot";
 export interface HostedWorkspaceRuntimeRestoreResult
   extends HostedRestoredExecutionContext {
   canonicalWriteReceiptCount: number;
-  canonicalWriteReceiptRecoveryFailure: {
-    repairLogRef: HostedCanonicalWriteReceiptLogStatusFingerprint | null;
-  } | null;
+  canonicalWriteReceiptRecoveryFailed: boolean;
   materializeWorkspaceArtifacts: HostedWorkspaceArtifactMaterializer;
   materializedArtifactPaths: ReadonlySet<string>;
   mode: HostedWorkspaceRuntimeRestoreMode;
@@ -176,14 +173,6 @@ export async function restoreHostedWorkspaceRuntimeJobWorkspace(input: {
       platform: input.platform,
     }).catch(() => undefined);
 
-    let repairLogRef: HostedCanonicalWriteReceiptLogStatusFingerprint | null = null;
-    try {
-      repairLogRef = readHostedCanonicalWriteReceiptLogStatusFingerprint(
-        input.workspace?.redactedStatus ?? null,
-      );
-    } catch {
-      // An invalid fingerprint is not a usable durable retry reference.
-    }
     await clearHostedWorkspaceRuntimeLocalRoots(restored);
     await clearHostedWorkspaceRestoreCachesBestEffort(restored.vaultRoot);
     const restoredLastKnownGood = await restoreHostedWorkspaceRuntimeJobWorkspace({
@@ -191,18 +180,15 @@ export async function restoreHostedWorkspaceRuntimeJobWorkspace(input: {
       workspace: input.workspace
         ? {
             ...input.workspace,
-            redactedStatus: {
-              ...(omitHostedCanonicalWriteReceiptLogStatusFields(
-                input.workspace.redactedStatus,
-              ) ?? {}),
-              ...hostedCanonicalWriteRepairStatusFields(repairLogRef),
-            },
+            redactedStatus: omitHostedCanonicalWriteReceiptLogStatusFields(
+              input.workspace.redactedStatus,
+            ),
           }
         : null,
     });
     return {
       ...restoredLastKnownGood,
-      canonicalWriteReceiptRecoveryFailure: { repairLogRef },
+      canonicalWriteReceiptRecoveryFailed: true,
     };
   };
   const recoverCanonicalWriteReceipts = async (vaultRoot: string) => {
@@ -249,7 +235,7 @@ export async function restoreHostedWorkspaceRuntimeJobWorkspace(input: {
       return {
         ...warmRestored,
         canonicalWriteReceiptCount: receiptRecovery.count,
-        canonicalWriteReceiptRecoveryFailure: null,
+        canonicalWriteReceiptRecoveryFailed: false,
         mode: "snapshot",
         restoreWasCold: false,
         restoreTiming: null,
@@ -280,7 +266,7 @@ export async function restoreHostedWorkspaceRuntimeJobWorkspace(input: {
     return {
       ...restored,
       canonicalWriteReceiptCount: receiptRecovery.count,
-      canonicalWriteReceiptRecoveryFailure: null,
+      canonicalWriteReceiptRecoveryFailed: false,
       materializeWorkspaceArtifacts: createHostedWorkspaceRuntimeArtifactMaterializer({
         materializedArtifactPaths: restoredMaterializedArtifactPaths,
         platform: input.platform,
@@ -308,7 +294,7 @@ export async function restoreHostedWorkspaceRuntimeJobWorkspace(input: {
     return {
       ...restored,
       canonicalWriteReceiptCount: receiptRecovery.count,
-      canonicalWriteReceiptRecoveryFailure: null,
+      canonicalWriteReceiptRecoveryFailed: false,
       materializeWorkspaceArtifacts: createHostedWorkspaceRuntimeArtifactMaterializer({
         materializedArtifactPaths: restoredMaterializedArtifactPaths,
         platform: input.platform,
@@ -419,7 +405,7 @@ export async function restoreHostedWorkspaceRuntimeJobWorkspace(input: {
   return {
     ...restored,
     canonicalWriteReceiptCount: receiptRecovery.count,
-    canonicalWriteReceiptRecoveryFailure: null,
+    canonicalWriteReceiptRecoveryFailed: false,
     materializeWorkspaceArtifacts: createHostedWorkspaceRuntimeArtifactMaterializer({
       materializedArtifactPaths: restoredMaterializedArtifactPaths,
       platform: input.platform,

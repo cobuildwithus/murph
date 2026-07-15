@@ -10,9 +10,6 @@ import {
   HOSTED_CANONICAL_WRITE_RECEIPT_RECOVERY_PRIOR_WAKE_AT_STATUS_KEY,
   HOSTED_CANONICAL_WRITE_RECEIPT_RECOVERY_PRIOR_WAKE_REASON_STATUS_KEY,
   HOSTED_CANONICAL_WRITE_RECEIPT_RECOVERY_STATUS_KEY,
-  HOSTED_CANONICAL_WRITE_REPAIR_LOG_BYTE_SIZE_STATUS_KEY,
-  HOSTED_CANONICAL_WRITE_REPAIR_LOG_SHA_STATUS_KEY,
-  HOSTED_CANONICAL_WRITE_REPAIR_STATUS_KEY,
   type HostedRuntimeRedactedJson,
 } from "@murphai/hosted-execution/runtime-control";
 
@@ -100,20 +97,6 @@ export function hostedCanonicalWriteReceiptRecoveryStatusFields(
     [HOSTED_CANONICAL_WRITE_RECEIPT_RECOVERY_PRIOR_WAKE_REASON_STATUS_KEY]:
       wake.nextWakeReason,
     [HOSTED_CANONICAL_WRITE_RECEIPT_RECOVERY_STATUS_KEY]: "pending",
-  };
-}
-
-export function hostedCanonicalWriteRepairStatusFields(
-  logRef: HostedCanonicalWriteReceiptLogStatusFingerprint | null,
-): HostedRuntimeRedactedJson {
-  return {
-    [HOSTED_CANONICAL_WRITE_REPAIR_STATUS_KEY]: "required",
-    ...(logRef
-      ? {
-          [HOSTED_CANONICAL_WRITE_REPAIR_LOG_SHA_STATUS_KEY]: logRef.sha256,
-          [HOSTED_CANONICAL_WRITE_REPAIR_LOG_BYTE_SIZE_STATUS_KEY]: logRef.byteSize,
-        }
-      : {}),
   };
 }
 

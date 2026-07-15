@@ -140,7 +140,6 @@ import {
 } from "./hosted-runtime/workspace-restore.ts";
 import {
   HOSTED_CANONICAL_WRITE_RECEIPT_LOG_MAX_ENTRIES,
-  hostedCanonicalWriteRepairStatusFields,
   hostedCanonicalWriteReceiptRecoveryStatusFields,
   omitHostedCanonicalWriteReceiptLogStatusFields,
   readHostedCanonicalWriteReceiptLogStatusFingerprint,
@@ -1074,26 +1073,13 @@ export async function runHostedWorkspaceRuntimeJobInProcess(
     assertRuntimeNotAborted();
     let activeWorkspace = workspaceRead.workspace;
     const pendingCanonicalReceiptCount = restored.canonicalWriteReceiptCount;
-    const canonicalWriteReceiptRecoveryFailure =
-      restored.canonicalWriteReceiptRecoveryFailure;
-    const retainCanonicalWriteRepairStatus = (
-      status: HostedWorkspaceInvocationResult["redactedStatus"] | null,
-    ): HostedRuntimeRedactedJson | null =>
-      canonicalWriteReceiptRecoveryFailure
-        ? {
-            ...(status ?? {}),
-            ...hostedCanonicalWriteRepairStatusFields(
-              canonicalWriteReceiptRecoveryFailure.repairLogRef,
-            ),
-          }
-        : status ?? null;
-    if (activeWorkspace && canonicalWriteReceiptRecoveryFailure) {
+    const canonicalWriteReceiptRecoveryFailed =
+      restored.canonicalWriteReceiptRecoveryFailed;
+    if (activeWorkspace && canonicalWriteReceiptRecoveryFailed) {
       activeWorkspace = {
         ...activeWorkspace,
-        redactedStatus: retainCanonicalWriteRepairStatus(
-          omitHostedCanonicalWriteReceiptLogStatusFields(
-            activeWorkspace.redactedStatus,
-          ),
+        redactedStatus: omitHostedCanonicalWriteReceiptLogStatusFields(
+          activeWorkspace.redactedStatus,
         ),
       };
     }
@@ -1464,7 +1450,7 @@ export async function runHostedWorkspaceRuntimeJobInProcess(
           nextWakeReason: checkpointNextWake.nextWakeReason,
           inboxMediaRetentionWakeAt: activeWorkspace?.inboxMediaRetentionWakeAt ?? null,
           issueExportPort: runtime.platform.issueExportPort ?? null,
-          redactedStatus: retainCanonicalWriteRepairStatus(redactedStatus),
+          redactedStatus,
           runtimeAbortSignal: runtimeAbortController.signal,
           vaultRoot: restored.vaultRoot,
           workspacePort: foregroundWorkspacePort,
@@ -1871,7 +1857,7 @@ export async function runHostedWorkspaceRuntimeJobInProcess(
         nextWakeAt: pendingWake.nextWakeAt,
       });
     let runtimeStateDirty =
-      canonicalWriteReceiptRecoveryFailure !== null
+      canonicalWriteReceiptRecoveryFailed
       || readHostedCanonicalWriteReceiptLogStatusFingerprint(
         activeWorkspace?.redactedStatus ?? null,
       ) !== null;
@@ -2993,7 +2979,7 @@ export async function runHostedWorkspaceRuntimeJobInProcess(
               nextWakeReason: idleCheckpointWake.nextWakeReason,
               inboxMediaRetentionWakeAt: idleCheckpointWake.inboxMediaRetentionWakeAt,
               issueExportPort: runtime.platform.issueExportPort ?? null,
-              redactedStatus: retainCanonicalWriteRepairStatus(redactedStatus),
+              redactedStatus,
               runtimeWakePendingAtCheckpoint,
               runtimeAbortSignal: runtimeAbortController.signal,
               vaultRoot: restored.vaultRoot,

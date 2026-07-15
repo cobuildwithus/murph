@@ -170,6 +170,7 @@ import {
   drainHostedRuntimeDeferredUsageCompletionsBestEffort,
   parseHostedAssistantWorkspaceRuntimeJobInput,
   runHostedWorkspaceRuntimeJobInProcess,
+  type HostedWorkspaceRuntimeJobOptions,
   type HostedWorkspaceSnapshotCheckpointRequestBuilderInput,
 } from "../src/hosted-runtime.ts";
 import {
@@ -16880,16 +16881,8 @@ describe("hosted workspace runtime entrypoint", () => {
         undefined,
       );
       assert.equal(
-        checkpointRequests.at(-1)?.redactedStatus?.hostedCanonicalWriteRepairStatus,
-        "required",
-      );
-      assert.equal(
-        checkpointRequests.at(-1)?.redactedStatus?.hostedCanonicalWriteRepairLogSha256,
-        receiptLogHash,
-      );
-      assert.equal(
-        checkpointRequests.at(-1)?.redactedStatus?.hostedCanonicalWriteRepairLogByteSize,
-        receiptLogBytes.byteLength,
+        checkpointRequests.at(-1)?.redactedStatus?.hostedCanonicalWriteReceiptLogByteSize,
+        undefined,
       );
       assert.equal(
         await readFile(path.join(vaultRoot, "journal", "foreground-reply-work.md"), "utf8"),
@@ -16902,165 +16895,253 @@ describe("hosted workspace runtime entrypoint", () => {
     }
   });
 
-  test("keeps foreground canonical writes independent from an unreadable repair log", async () => {
+  test("rejects consecutive failed receipt logs without creating repair ownership", async () => {
     const vaultRoot = await mkdtemp(path.join(tmpdir(), "murph-workspace-entrypoint-"));
     const events: string[] = [];
     const checkpointRequests: HostedWorkspaceCheckpointRequest[] = [];
     const logRequests: HostedRuntimeLogRequest[] = [];
+    const artifactBytesByHash = new Map<string, Uint8Array>();
+    const artifactLabelsByHash = new Map<string, string>();
     const baseSnapshotRef = createWorkspaceSnapshotV2Ref(
       "snapshot-unreadable-receipt-log",
     );
     const unreadableReceiptLogBytes = Buffer.from('{"schema":"invalid"}\n', "utf8");
     const unreadableReceiptLogHash = sha256Hex(unreadableReceiptLogBytes);
+    artifactBytesByHash.set(unreadableReceiptLogHash, unreadableReceiptLogBytes);
+    artifactLabelsByHash.set(unreadableReceiptLogHash, "first-failed-receipt-log");
     const consoleWarn = vi.spyOn(console, "warn").mockImplementation(() => undefined);
-    let foregroundCanonicalWriteCompleted = false;
+    const firstCrash = new Error("Synthetic crash after foreground canonical checkpoint.");
+    let assistantInvocation = 0;
+    let durableWorkspace = createWorkspaceState({
+      redactedStatus: {
+        hostedCanonicalWriteReceiptLogByteSize: unreadableReceiptLogBytes.byteLength,
+        hostedCanonicalWriteReceiptLogSha256: unreadableReceiptLogHash,
+      },
+      snapshotRef: baseSnapshotRef,
+      version: "0",
+    });
     let restoreCallCount = 0;
+    const workspacePort: HostedRuntimeWorkspacePort = {
+      async checkpoint(request) {
+        events.push("workspace.checkpoint");
+        checkpointRequests.push(request);
+        durableWorkspace = createWorkspaceState({
+          inboxMediaRetentionWakeAt: request.inboxMediaRetentionWakeAt ?? null,
+          nextWakeAt: request.nextWakeAt ?? null,
+          nextWakeReason: request.nextWakeReason ?? null,
+          redactedStatus: request.redactedStatus ?? null,
+          snapshotRef: request.snapshotRef,
+          version: String(BigInt(request.expectedWorkspaceVersion) + 1n),
+        });
+        return {
+          checkpointed: true,
+          workspace: durableWorkspace,
+        };
+      },
+      async read() {
+        events.push("workspace.read");
+        return {
+          fetchedAt: TEST_NOW,
+          workspace: durableWorkspace,
+        };
+      },
+    };
+    const platform = createPlatform({
+      artifactBytesByHash,
+      artifactLabelsByHash,
+      events,
+      logRequests,
+      mailboxPort: createMailboxPort({
+        events,
+        items: [createMailboxItem({
+          id: "mailbox_item_entrypoint_consecutive_receipt_failures",
+          laneSeq: "1",
+        })],
+      }),
+      workspacePort,
+      workspaceSnapshotPort: {
+        async abortSnapshotSession() {
+          throw new Error("Consecutive receipt failure test should not abort snapshots.");
+        },
+        async completeSnapshotSession() {
+          throw new Error("Consecutive receipt failure test should not complete snapshots.");
+        },
+        async putSnapshotObjectDirect() {
+          throw new Error("Consecutive receipt failure test should not upload snapshots.");
+        },
+        async restoreWorkspaceSnapshot(input) {
+          restoreCallCount += 1;
+          await rm(input.durableRoot, { force: true, recursive: true });
+          await initializeVault({ createdAt: TEST_NOW, vaultRoot: input.durableRoot });
+        },
+        async startSnapshotSession() {
+          throw new Error("Consecutive receipt failure test should not start snapshots.");
+        },
+      },
+    });
+    const runAssistantPhase: NonNullable<HostedWorkspaceRuntimeJobOptions["runAssistantPhase"]> = async (input) => {
+      assistantInvocation += 1;
+      assert.equal(
+        (await readHostedMailboxImportState({ vaultRoot })).watermarks.conversation,
+        "1",
+      );
+      if (assistantInvocation === 1) {
+        await runCanonicalWrite({
+          mutate: async ({ batch }) => {
+            await batch.stageTextWrite(
+              "journal/foreground-before-crash.md",
+              "foreground write before crash\n",
+            );
+          },
+          occurredAt: TEST_NOW,
+          operationType: "hosted_canonical_write_test",
+          summary: "Persist foreground work after the first rejected receipt log.",
+          vaultRoot: input.restored.vaultRoot,
+        });
+        events.push("assistant:1");
+        throw firstCrash;
+      }
+      await assert.rejects(
+        readFile(path.join(vaultRoot, "journal", "foreground-before-crash.md"), "utf8"),
+        /ENOENT/u,
+      );
+      await runCanonicalWrite({
+        mutate: async ({ batch }) => {
+          await batch.stageTextWrite(
+            "journal/foreground-after-second-failure.md",
+            "foreground write after second failure\n",
+          );
+        },
+        occurredAt: TEST_NOW,
+        operationType: "hosted_canonical_write_test",
+        summary: "Persist foreground work after the second rejected receipt log.",
+        vaultRoot: input.restored.vaultRoot,
+      });
+      events.push("assistant:2");
+      return { progressed: false };
+    };
 
     try {
-      await withRealTimeout(runHostedWorkspaceRuntimeJobInProcess(
-        createWorkspaceRuntimeJobInput(),
-        {
-          async createCheckpointSnapshot(snapshotInput) {
-            events.push(`snapshot:${snapshotInput.reason}`);
-            return {
-              snapshotRef: createWorkspaceSnapshotV2Ref(
-                "snapshot-unreadable-receipt-log-repair",
-              ),
-            };
-          },
-          async importItem(item) {
-            events.push(`import:${item.item.laneSeq}`);
-            return { status: "imported" };
-          },
-          platform: createPlatform({
-            artifactBytesByHash: new Map([
-              [unreadableReceiptLogHash, unreadableReceiptLogBytes],
-            ]),
-            artifactLabelsByHash: new Map([
-              [unreadableReceiptLogHash, "unreadable-receipt-log"],
-            ]),
-            events,
-            logRequests,
-            mailboxPort: createMailboxPort({
-              events,
-              items: [createMailboxItem({
-                id: "mailbox_item_entrypoint_unreadable_receipt_log",
-                laneSeq: "1",
-              })],
-            }),
-            workspacePort: createWorkspacePort({
-              checkpointRequests,
-              events,
-              workspace: createWorkspaceState({
-                redactedStatus: {
-                  hostedCanonicalWriteReceiptLogByteSize:
-                    unreadableReceiptLogBytes.byteLength,
-                  hostedCanonicalWriteReceiptLogSha256: unreadableReceiptLogHash,
-                },
-                snapshotRef: baseSnapshotRef,
-                version: "0",
-              }),
-            }),
-            workspaceSnapshotPort: {
-              async abortSnapshotSession() {
-                throw new Error("Unreadable receipt log test should not abort snapshots.");
-              },
-              async completeSnapshotSession() {
-                throw new Error("Unreadable receipt log test should not complete snapshots.");
-              },
-              async putSnapshotObjectDirect() {
-                throw new Error("Unreadable receipt log test should not upload snapshots.");
-              },
-              async restoreWorkspaceSnapshot(input) {
-                restoreCallCount += 1;
-                await initializeVault({ createdAt: TEST_NOW, vaultRoot: input.durableRoot });
-              },
-              async startSnapshotSession() {
-                throw new Error("Unreadable receipt log test should not start snapshots.");
-              },
-            },
-          }),
-          async runAssistantPhase(input) {
-            assert.equal(
-              (await readHostedMailboxImportState({ vaultRoot })).watermarks.conversation,
-              "1",
-            );
-            if (!foregroundCanonicalWriteCompleted) {
-              await runCanonicalWrite({
-                mutate: async ({ batch }) => {
-                  await batch.stageTextWrite(
-                    "journal/foreground-after-unreadable-log.md",
-                    "foreground canonical write continued\n",
-                  );
-                },
-                occurredAt: TEST_NOW,
-                operationType: "hosted_canonical_write_test",
-                summary: "Persist foreground work independently from repair metadata.",
-                vaultRoot: input.restored.vaultRoot,
-              });
-              foregroundCanonicalWriteCompleted = true;
-            }
-            events.push("assistant");
-            return { progressed: false };
-          },
-          vaultRoot,
+      const runtimeOptions: HostedWorkspaceRuntimeJobOptions = {
+        async createCheckpointSnapshot(snapshotInput) {
+          events.push(`snapshot:${snapshotInput.reason}`);
+          return {
+            snapshotRef: createWorkspaceSnapshotV2Ref(
+              "snapshot-consecutive-receipt-failures",
+            ),
+          };
         },
-      ), 15_000, () => events.join(","));
+        async importItem(item) {
+          events.push(`import:${item.item.laneSeq}`);
+          return { status: "imported" as const };
+        },
+        platform,
+        runAssistantPhase,
+        vaultRoot,
+      };
+      await assert.rejects(
+        withRealTimeout(
+          runHostedWorkspaceRuntimeJobInProcess(
+            createWorkspaceRuntimeJobInput(),
+            runtimeOptions,
+          ),
+          15_000,
+          () => events.join(","),
+        ),
+        (error) => error === firstCrash,
+      );
 
-      assert.ok(requireEventIndex(events, "import:1") < requireEventIndex(events, "assistant"));
-      assert.equal(
-        events.filter((event) => event === "artifact.get:unreadable-receipt-log").length,
-        1,
-      );
-      assert.equal(restoreCallCount, 2);
-      const recoveryLog = logRequests.flatMap((request) => request.entries).find(
-        (entry) => entry.errorCode === "canonical_write_receipt_recovery_failed",
-      );
-      assert.equal(recoveryLog?.level, "warn");
-      assert.equal(recoveryLog?.redactedJson?.canonicalWriteReceiptRecoveryFailed, 1);
-      assert.equal(JSON.stringify(recoveryLog).includes('"schema":"invalid"'), false);
-      assert.ok(checkpointRequests.length >= 2);
-      for (const checkpointRequest of checkpointRequests) {
-        assert.equal(
-          checkpointRequest.redactedStatus?.hostedCanonicalWriteRepairStatus,
-          "required",
-        );
-        assert.equal(
-          checkpointRequest.redactedStatus?.hostedCanonicalWriteRepairLogSha256,
-          unreadableReceiptLogHash,
-        );
-        assert.equal(
-          checkpointRequest.redactedStatus?.hostedCanonicalWriteRepairLogByteSize,
-          unreadableReceiptLogBytes.byteLength,
-        );
-      }
-      const foregroundCanonicalCheckpoint = checkpointRequests.find(
+      const firstForegroundCheckpoint = checkpointRequests.find(
         (request) => request.reason === "canonical_runtime_commit",
       );
+      const secondFailedLogHash = firstForegroundCheckpoint?.redactedStatus
+        ?.hostedCanonicalWriteReceiptLogSha256;
+      assert.equal(typeof secondFailedLogHash, "string");
+      assert.notEqual(secondFailedLogHash, unreadableReceiptLogHash);
+      artifactBytesByHash.delete(String(secondFailedLogHash));
+      artifactLabelsByHash.set(String(secondFailedLogHash), "second-failed-receipt-log");
+      await rm(vaultRoot, { force: true, recursive: true });
+      runtimeOptions.platform = {
+        ...platform,
+        artifactStore: createPlatform({
+          artifactBytesByHash,
+          artifactLabelsByHash,
+          events,
+          mailboxPort: null,
+          workspacePort: null,
+        }).artifactStore,
+      };
+
+      await withRealTimeout(
+        runHostedWorkspaceRuntimeJobInProcess(
+          createWorkspaceRuntimeJobInput({
+            request: {
+              attemptId: "attempt_synthetic_second_receipt_failure",
+              workspaceVersion: durableWorkspace.version,
+            },
+          }),
+          runtimeOptions,
+        ),
+        15_000,
+        () => events.join(","),
+      );
+
+      assert.ok(requireEventIndex(events, "import:1") < requireEventIndex(events, "assistant:1"));
+      assert.ok(requireEventIndex(events, "assistant:1") < requireEventIndex(events, "assistant:2"));
       assert.equal(
-        typeof foregroundCanonicalCheckpoint?.redactedStatus
+        events.filter((event) => event === "artifact.get:first-failed-receipt-log").length,
+        1,
+      );
+      assert.equal(
+        events.filter((event) => event === "artifact.get:second-failed-receipt-log").length,
+        1,
+      );
+      assert.equal(restoreCallCount, 4);
+      const recoveryLogs = logRequests.flatMap((request) => request.entries).filter(
+        (entry) => entry.errorCode === "canonical_write_receipt_recovery_failed",
+      );
+      assert.equal(recoveryLogs.length, 2);
+      for (const recoveryLog of recoveryLogs) {
+        assert.equal(recoveryLog.level, "warn");
+        assert.equal(recoveryLog.redactedJson?.canonicalWriteReceiptRecoveryFailed, 1);
+      }
+      assert.equal(JSON.stringify(recoveryLogs).includes('"schema":"invalid"'), false);
+      const foregroundCanonicalCheckpoints = checkpointRequests.filter(
+        (request) => request.reason === "canonical_runtime_commit",
+      );
+      assert.equal(foregroundCanonicalCheckpoints.length, 2);
+      assert.equal(
+        foregroundCanonicalCheckpoints[0]?.redactedStatus
+          ?.hostedCanonicalWriteReceiptLogSha256,
+        secondFailedLogHash,
+      );
+      assert.equal(
+        typeof foregroundCanonicalCheckpoints[1]?.redactedStatus
           ?.hostedCanonicalWriteReceiptLogSha256,
         "string",
       );
       assert.notEqual(
-        foregroundCanonicalCheckpoint?.redactedStatus?.hostedCanonicalWriteReceiptLogSha256,
-        unreadableReceiptLogHash,
+        foregroundCanonicalCheckpoints[1]?.redactedStatus
+          ?.hostedCanonicalWriteReceiptLogSha256,
+        secondFailedLogHash,
       );
+      for (const checkpointRequest of checkpointRequests) {
+        assert.equal(
+          Object.keys(checkpointRequest.redactedStatus ?? {}).some((key) =>
+            key.startsWith("hostedCanonicalWriteRepair")
+          ),
+          false,
+        );
+      }
       const finalStatus = checkpointRequests.at(-1)?.redactedStatus;
       assert.equal(finalStatus?.hostedCanonicalWriteReceiptLogSha256, undefined);
       assert.equal(finalStatus?.hostedCanonicalWriteReceiptLogByteSize, undefined);
-      assert.equal(finalStatus?.hostedCanonicalWriteRepairStatus, "required");
-      assert.equal(finalStatus?.hostedCanonicalWriteRepairLogSha256, unreadableReceiptLogHash);
-      assert.equal(
-        finalStatus?.hostedCanonicalWriteRepairLogByteSize,
-        unreadableReceiptLogBytes.byteLength,
-      );
       assert.equal(
         await readFile(
-          path.join(vaultRoot, "journal", "foreground-after-unreadable-log.md"),
+          path.join(vaultRoot, "journal", "foreground-after-second-failure.md"),
           "utf8",
         ),
-        "foreground canonical write continued\n",
+        "foreground write after second failure\n",
       );
     } finally {
       consoleWarn.mockRestore();
