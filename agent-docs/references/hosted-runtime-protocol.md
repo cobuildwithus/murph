@@ -780,7 +780,9 @@ assistant-engine active-turn controller. If the foreground wake path does not
 consume or commit appended mailbox rows, Temporal/web reconciliation rechecks are
 the durable recovery path rather than Cloudflare alarm inference. The workspace
 runner owns every mutating mailbox path; the outer wake coordinator may only read
-or prefetch mailbox state.
+or prefetch mailbox state. An intermediate receipt-and-watermark checkpoint stays
+immediately due until a later runner pass replaces that continuation with its
+precise idle or scheduled state.
 
 The runtime reads `HostedWorkspace`, validates workspace version/user metadata,
 then restores the encrypted local workspace before fetching mailbox rows. A new

@@ -1,6 +1,9 @@
 import { describe, expect, it } from "vitest";
 
-import type { HostedExecutionTelegramAttachment } from "../src/contracts.ts";
+import {
+  HOSTED_EXECUTION_LINQ_GROUP_REACTION_CONTEXT_MAX_CHARS,
+  type HostedExecutionTelegramAttachment,
+} from "../src/contracts.ts";
 
 import {
   buildHostedExecutionAssistantNotificationRequestedWake,
@@ -303,7 +306,10 @@ describe("hosted execution wake builders", () => {
 
   it.each([
     ["blank", "   "],
-    ["over 512 characters", "x".repeat(513)],
+    [
+      "over the bounded reaction context limit",
+      "x".repeat(HOSTED_EXECUTION_LINQ_GROUP_REACTION_CONTEXT_MAX_CHARS + 1),
+    ],
   ])("rejects %s Linq group reaction context in the builder", (_label, groupReactionContext) => {
     expect(() => buildHostedExecutionLinqConversationMessageWake({
       eventId: "linq-invalid-reaction-context",
@@ -318,6 +324,25 @@ describe("hosted execution wake builders", () => {
       },
       userId: "member_thread_container_123",
     })).toThrow(/group reaction context is invalid/u);
+  });
+
+  it("accepts the maximum bounded Linq group reaction context in the builder", () => {
+    const groupReactionContext = "x".repeat(
+      HOSTED_EXECUTION_LINQ_GROUP_REACTION_CONTEXT_MAX_CHARS,
+    );
+    expect(buildHostedExecutionLinqConversationMessageWake({
+      eventId: "linq-max-reaction-context",
+      groupReactionContext,
+      linqMessage: buildNonDirectLinqMessage(),
+      occurredAt,
+      phoneLookupKey: "phone_lookup_123",
+      routeAuthority: {
+        channel: "linq",
+        containerMemberId: "member_thread_container_123",
+        threadId: "chat_group_123",
+      },
+      userId: "member_thread_container_123",
+    }).message.groupReactionContext).toBe(groupReactionContext);
   });
 
   it("rejects non-direct Linq wakes without thread-container route authority", () => {
