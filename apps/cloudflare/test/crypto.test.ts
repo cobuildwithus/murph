@@ -106,6 +106,8 @@ describe("readEncryptedR2Payload", () => {
     ["whitespace-only", " "],
     ["surrounding-whitespace", " udrk:runtime:previous-root "],
     ["unbounded", "k".repeat(257)],
+    ["embedded-control", "udrk:runtime:\0bad"],
+    ["nonportable", "udrk:runtime:résumé"],
   ])("rejects a %s stored key ID before historical-key lookup", async (_case, keyId) => {
     const key = createTestRootKey(19);
     const envelope = await encryptHostedStorageEnvelope({

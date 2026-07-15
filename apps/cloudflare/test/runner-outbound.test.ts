@@ -3713,7 +3713,7 @@ describe("handleRunnerOutboundRequest", () => {
     });
     const malformedEnvelope = new TextEncoder().encode(JSON.stringify({
       ...envelope,
-      keyId: ` ${envelope.keyId}`,
+      keyId: `${envelope.keyId}\0bad`,
     }));
     const env = createRunnerOutboundEnv({
       ...fixture.env,

@@ -3,7 +3,7 @@ const HOSTED_STORAGE_CONTEXT_SALT = new TextEncoder().encode(
 );
 
 export const HOSTED_CIPHER_ENVELOPE_SCHEMA = "murph.hosted-cipher.v1";
-const HOSTED_CIPHER_KEY_ID_MAX_LENGTH = 256;
+const HOSTED_CIPHER_KEY_ID_PATTERN = /^[A-Za-z0-9][A-Za-z0-9._:-]{0,255}$/u;
 
 export type HostedCipherEnvelopeSchema = typeof HOSTED_CIPHER_ENVELOPE_SCHEMA;
 
@@ -240,13 +240,8 @@ function requireString(value: unknown, label: string): string {
 
 function requireHostedCipherKeyId(value: unknown, label: string): string {
   const keyId = requireString(value, label);
-  if (keyId !== keyId.trim()) {
-    throw new TypeError(`${label} must not contain surrounding whitespace.`);
-  }
-  if (keyId.length > HOSTED_CIPHER_KEY_ID_MAX_LENGTH) {
-    throw new TypeError(
-      `${label} must be at most ${HOSTED_CIPHER_KEY_ID_MAX_LENGTH} characters.`,
-    );
+  if (!HOSTED_CIPHER_KEY_ID_PATTERN.test(keyId)) {
+    throw new TypeError(`${label} must be a 1-256 character portable identifier.`);
   }
   return keyId;
 }
