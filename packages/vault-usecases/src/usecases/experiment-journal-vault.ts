@@ -17,6 +17,7 @@ import {
   jsonObjectSchema,
   protocolRefSchema,
   safeParseContract,
+  type HealthCommonsBiomarkerDesiredDirection,
   type ExperimentFrontmatter,
   type ExperimentRunScheduleIntent,
 } from '@murphai/contracts'
@@ -1484,15 +1485,31 @@ export async function showExperimentProgressCard(input: {
     lookup: input.lookup,
     vault: input.vault,
   })
+  const frontmatter = requireExperimentFrontmatter(entity)
   const metricPoints = await readExperimentJournalMetricPoints({
     asOf: input.asOf,
-    frontmatter: requireExperimentFrontmatter(entity),
+    frontmatter,
     query,
     vault: input.vault,
+  })
+  const healthCommons = await loadHealthCommonsBiomarkerDirectionRuntime()
+  const biomarkerKeys = [
+    frontmatter.analysisPlan?.primaryBiomarkerKey ?? null,
+    ...(frontmatter.analysisPlan?.secondaryBiomarkerKeys ?? []),
+  ].filter((biomarkerKey): biomarkerKey is string => biomarkerKey !== null)
+  const biomarkerDesiredDirections = uniqueStrings(biomarkerKeys).flatMap((biomarkerKey) => {
+    const desiredDirection =
+      healthCommons.resolveGeneratedHealthCommonsBiomarkerDesiredDirection(
+        biomarkerKey,
+      )
+    return desiredDirection === null
+      ? []
+      : [{ biomarkerKey, desiredDirection }]
   })
 
   const { card, warnings } = query.buildExperimentProgressCard(readModel, slug, {
     asOf: input.asOf,
+    biomarkerDesiredDirections,
     confounders: input.confounders,
     metricPoints,
   })
@@ -2809,6 +2826,20 @@ function normalizeExpectedDirectionEntriesOption(
 
   return experimentExpectedDirectionsSchema.parse(
     [...next].map(([biomarkerKey, direction]) => ({ biomarkerKey, direction })),
+  )
+}
+
+type HealthCommonsBiomarkerDirectionRuntime = {
+  resolveGeneratedHealthCommonsBiomarkerDesiredDirection(
+    biomarkerKey: string,
+  ): HealthCommonsBiomarkerDesiredDirection | null
+}
+
+async function loadHealthCommonsBiomarkerDirectionRuntime(): Promise<
+  HealthCommonsBiomarkerDirectionRuntime
+> {
+  return loadRuntimeModule<HealthCommonsBiomarkerDirectionRuntime>(
+    '@murphai/health-commons/runtime',
   )
 }
 
