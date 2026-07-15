@@ -24,6 +24,11 @@ import {
 import { RadioGroup } from "@/src/components/ui/radio-group";
 import { Spinner } from "@/src/components/ui/spinner";
 
+import {
+  ASSISTANT_MODEL_CHOICE_CARD_CLASSES,
+  AssistantModelArtwork,
+  type AssistantModelArtworkVariant,
+} from "./assistant-model-artwork";
 import { SettingsStatusLine } from "./connected-account-card";
 import { UpgradeToEdgeButton } from "./hosted-plan-upgrade-button";
 
@@ -32,26 +37,28 @@ const SOL_REQUIRES_EDGE_ERROR_CODE = "ASSISTANT_MODEL_SOL_REQUIRES_EDGE";
 
 const MODEL_OPTIONS = [
   {
-    description: "Quick support for check-ins, simple questions, and routine tasks.",
+    artwork: "luna",
+    description: "Fast health intelligence",
     model: HOSTED_ASSISTANT_LUNA_MODEL,
     name: "Luna",
-    usage: "AI usage · Low",
+    usage: "Low usage",
   },
   {
-    description:
-      "A balanced choice for most questions, planning, and everyday health decisions.",
+    artwork: "terra",
+    description: "Advanced health intelligence",
     model: HOSTED_ASSISTANT_TERRA_MODEL,
     name: "Terra",
-    usage: "AI usage · Balanced",
+    usage: "Balanced usage",
   },
   {
-    description:
-      "More depth for research, complex decisions, and demanding tasks.",
+    artwork: "sol",
+    description: "Highest health intelligence",
     model: HOSTED_ASSISTANT_SOL_MODEL,
     name: "Sol",
-    usage: "AI usage · High",
+    usage: "High usage",
   },
 ] as const satisfies ReadonlyArray<{
+  artwork: AssistantModelArtworkVariant;
   description: string;
   model: HostedAssistantProductModel;
   name: string;
@@ -157,15 +164,9 @@ function HostedAssistantModelSettingsForm(
         void saveModel();
       }}
     >
-      <div className="flex max-w-2xl flex-col gap-1">
-        <p className="text-sm text-pretty text-muted-foreground">
-          Pick Murph’s starting model. You can switch for a specific task in
-          conversation.
-        </p>
-        <p className="text-xs text-pretty text-muted-foreground">
-          Changes begin with the next reply and may take a few minutes.
-        </p>
-      </div>
+      <p className="max-w-2xl text-sm text-pretty text-muted-foreground">
+        Choose the intelligence behind your personal health assistant.
+      </p>
 
       {!props.configurationAvailable ? (
         <p className="w-full rounded-xl border border-border bg-muted/30 p-4 text-sm text-pretty text-muted-foreground">
@@ -215,7 +216,11 @@ function HostedAssistantModelSettingsForm(
 
             return (
               <ChoiceCard
+                artwork={<AssistantModelArtwork variant={option.artwork} />}
                 badge={badge}
+                className={
+                  ASSISTANT_MODEL_CHOICE_CARD_CLASSES[option.artwork]
+                }
                 description={option.description}
                 disabled={controlsDisabled || unavailable}
                 id={`assistant-model-${option.model}`}
@@ -225,14 +230,7 @@ function HostedAssistantModelSettingsForm(
                     ? `${option.usage} · Edge required`
                     : option.usage
                 }
-                title={
-                  <span className="flex items-baseline gap-2">
-                    <span>{option.name}</span>
-                    <span className="font-mono text-[10px] font-medium uppercase tracking-[0.12em] text-muted-foreground">
-                      GPT-5.6
-                    </span>
-                  </span>
-                }
+                title={option.name}
                 value={option.model}
               />
             );

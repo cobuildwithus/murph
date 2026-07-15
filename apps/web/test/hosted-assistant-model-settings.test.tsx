@@ -74,9 +74,8 @@ test("eligible Pulse members can choose Luna or Terra and discover the Edge upgr
   assert.match(markup, />Luna</);
   assert.match(markup, />Terra</);
   assert.match(markup, />Sol</);
-  assert.match(markup, /GPT-5\.6/);
   assert.match(markup, /Sol requires an active Edge plan\./);
-  assert.match(markup, /AI usage · High · Edge required/);
+  assert.match(markup, /High usage · Edge required/);
   assert.match(markup, />Upgrade to Edge<\/button>/);
   assert.match(markup, /role="radio"/);
   assert.match(markup, /Save change/);
@@ -169,7 +168,7 @@ test("Edge members can explicitly save Sol as their default model", async () => 
   );
   assert.match(
     view.container.textContent ?? "",
-    /Changes begin with the next reply and may take a few minutes\./,
+    /Choose the intelligence behind your personal health assistant\./,
   );
   const terraInput = findModelRadio(
     view.container,
@@ -297,26 +296,34 @@ test("model radios stay labeled and the form becomes busy while saving", async (
   );
   const options = [
     {
-      description: "Quick support for check-ins, simple questions, and routine tasks.",
+      accent: "#777b7d",
+      artwork: "luna",
+      backgroundAccent: "#777b7d",
+      description: "Fast health intelligence",
       model: HOSTED_ASSISTANT_LUNA_MODEL,
       name: "Luna",
-      usage: "AI usage · Low",
+      usage: "Low usage",
     },
     {
-      description:
-        "A balanced choice for most questions, planning, and everyday health decisions.",
+      accent: "#557d78",
+      artwork: "terra",
+      backgroundAccent: "#4f7f97",
+      description: "Advanced health intelligence",
       model: HOSTED_ASSISTANT_TERRA_MODEL,
       name: "Terra",
-      usage: "AI usage · Balanced",
+      usage: "Balanced usage",
     },
     {
-      description:
-        "More depth for research, complex decisions, and demanding tasks.",
+      accent: "#8f6817",
+      artwork: "sol",
+      backgroundAccent: "#d9ad35",
+      description: "Highest health intelligence",
       model: HOSTED_ASSISTANT_SOL_MODEL,
       name: "Sol",
-      usage: "AI usage · High",
+      usage: "High usage",
     },
   ] as const;
+  const artworkRadii: number[] = [];
 
   for (const option of options) {
     const input = findModelRadio(view.container, option.model);
@@ -330,11 +337,52 @@ test("model radios stay labeled and the form becomes busy while saving", async (
       visibleRadio?.getAttribute("aria-describedby"),
       `${input.id}-description ${input.id}-meta`,
     );
+    const artwork = label?.querySelector(
+      `svg[data-model-artwork="${option.artwork}"][aria-hidden="true"]`,
+    );
+    assert.ok(artwork);
+    const artworkRadius = Number(
+      artwork.querySelector("circle")?.getAttribute("r"),
+    );
+    assert.ok(Number.isFinite(artworkRadius));
+    artworkRadii.push(artworkRadius);
+    assert.ok(
+      label?.className.includes(
+        `has-data-checked:border-[${option.accent}]`,
+      ),
+    );
+    assert.ok(
+      label?.className.includes(
+        `[&_[data-slot=radio-group-item][data-checked]]:bg-[${option.accent}]`,
+      ),
+    );
+    assert.ok(
+      label?.className.includes(`hover:border-[${option.accent}]/40`),
+    );
+    assert.ok(
+      label?.className.includes(
+        `hover:bg-[${option.backgroundAccent}]/5`,
+      ),
+    );
+    assert.ok(
+      label?.className.includes(
+        `has-data-checked:hover:border-[${option.accent}]`,
+      ),
+    );
+    assert.ok(
+      label?.className.includes(
+        `has-data-checked:hover:bg-[${option.backgroundAccent}]/10`,
+      ),
+    );
+    assert.ok(!label?.className.includes("hover:border-primary/35"));
     assert.match(label?.textContent ?? "", new RegExp(option.name));
-    assert.match(label?.textContent ?? "", /GPT-5\.6/);
     assert.match(label?.textContent ?? "", new RegExp(option.description));
     assert.match(label?.textContent ?? "", new RegExp(option.usage));
   }
+  assert.ok(
+    artworkRadii[0] < artworkRadii[1]
+      && artworkRadii[1] < artworkRadii[2],
+  );
 
   const solInput = findModelRadio(view.container, HOSTED_ASSISTANT_SOL_MODEL);
   await act(async () => {

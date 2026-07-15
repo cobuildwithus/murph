@@ -131,9 +131,9 @@ A single-accent system. Sage green carries every affirmative signal; the rest of
 
 ### Named Rules
 
-**The One Green Rule.** Sage is the only affirmative accent. If something needs to feel positive, it gets sage — and only sage. Blue, teal, and purple are prohibited as UI color; they belong to other products.
+**The One Green Rule.** Sage is the only affirmative accent. If something needs to feel positive, it gets sage — and only sage. Blue, teal, and purple are prohibited as general UI color; they belong to other products. A bounded product-identity choice card may carry its illustration color through hover, selection border, and radio when the color distinguishes named peers rather than communicating positive status. Keep that exception local to the card and maintain non-text contrast.
 
-**The No Gray Rule.** All neutrals are tinted warm. Borders use `rgba(196, 168, 130, 0.25)`, not `#e0e0e0`. Cards sit on cream, not on gray. If a surface looks cold, it's wrong.
+**The No Gray Rule.** All structural neutrals are tinted warm. Borders use `rgba(196, 168, 130, 0.25)`, not `#e0e0e0`. Cards sit on cream, not on gray. If a surface looks cold, it's wrong. Literal gray may appear inside a bounded identifying illustration, such as the Luna artwork, but does not become a page surface or general neutral token.
 
 **The Chalkboard Rule.** Data is presented on paper, as if written by hand. Stat numbers are serif (Fraunces), not the sans-serif dashboard default. Charts use dashed baseline + solid active lines, not filled areas.
 
@@ -250,14 +250,18 @@ Cream background, 1px warm border, rounded-md (10px). Focus: border shifts to sa
 
 ### Choice Cards
 Use the shared `ChoiceCard` with `RadioGroup` when a member must compare two to
-five consequential options. Each card has one short title, one sentence that
-names the real tradeoff, and an optional mono metadata line. Selected cards use
-the normal sage selection tint and warm border; unavailable choices stay visible
-but disabled, with the plan or access requirement named directly. Keyboard
-focus rings the whole card. Keep actions outside the card label so the full card
-remains one predictable radio target. Stack on narrow screens and use a compact
-grid only when the options are true peers. Do not use choice cards as navigation
-or as a substitute for ordinary buttons.
+five consequential options. Each card has one short title, one brief purpose
+phrase, and an optional mono metadata line. Product-specific inline artwork can
+sit behind the content when one quiet, familiar visual cue replaces explanatory
+copy; keep it flat, `aria-hidden`, and subordinate to the text. Selected cards
+normally use the sage selection tint and warm border, but a quiet accent drawn
+from product-specific artwork can carry through the border, tint, and radio.
+Unavailable choices stay visible but disabled, with the plan or access
+requirement named directly.
+Keyboard focus rings the whole card. Keep actions outside the card label so the
+full card remains one predictable radio target. Stack on narrow screens and use
+a compact grid only when the options are true peers. Do not use choice cards as
+navigation or as a substitute for ordinary buttons.
 
 ### Spinner
 Use the shared `Spinner` for compact pending feedback inside buttons or beside a

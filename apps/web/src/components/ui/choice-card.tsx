@@ -14,6 +14,7 @@ type ChoiceCardProps = Omit<
   React.ComponentProps<typeof RadioGroupItem>,
   "aria-describedby" | "aria-labelledby" | "id" | "title"
 > & {
+  artwork?: React.ReactNode;
   badge?: React.ReactNode;
   className?: string;
   description: React.ReactNode;
@@ -23,6 +24,7 @@ type ChoiceCardProps = Omit<
 };
 
 function ChoiceCard({
+  artwork,
   badge,
   className,
   description,
@@ -39,15 +41,23 @@ function ChoiceCard({
   return (
     <FieldLabel
       className={cn(
-        "h-full cursor-pointer rounded-xl border-border bg-card p-0 transition-[border-color,background-color] duration-200 ease-out hover:border-primary/35 hover:bg-primary/5 has-[:focus-visible]:ring-2 has-[:focus-visible]:ring-ring has-data-checked:border-primary/50 has-data-checked:bg-primary/10 has-data-checked:ring-1 has-data-checked:ring-primary/15 data-[disabled=true]:cursor-not-allowed data-[disabled=true]:opacity-55 data-[disabled=true]:hover:border-border data-[disabled=true]:hover:bg-card",
+        "relative isolate h-full cursor-pointer overflow-hidden rounded-xl border-border bg-card p-0 transition-[border-color,background-color] duration-200 ease-out hover:border-primary/35 hover:bg-primary/5 has-[:focus-visible]:ring-2 has-[:focus-visible]:ring-ring has-data-checked:border-primary/50 has-data-checked:bg-primary/10 has-data-checked:ring-1 has-data-checked:ring-primary/15 data-[disabled=true]:cursor-not-allowed data-[disabled=true]:hover:border-border data-[disabled=true]:hover:bg-card",
+        artwork && "min-h-44",
         className,
       )}
       data-disabled={disabled ? "true" : undefined}
       htmlFor={id}
     >
+      {artwork ? (
+        <span
+          aria-hidden="true"
+          className="pointer-events-none absolute inset-y-0 right-0 z-0 w-3/4"
+        >
+          {artwork}
+        </span>
+      ) : null}
       <Field
-        className="h-full items-start gap-3 p-4 sm:p-5"
-        data-disabled={disabled ? "true" : undefined}
+        className="relative z-10 h-full items-start gap-3 p-4 sm:p-5"
         orientation="horizontal"
       >
         <RadioGroupItem
@@ -57,7 +67,7 @@ function ChoiceCard({
           id={id}
           {...props}
         />
-        <FieldContent className="gap-2">
+        <FieldContent className={cn("gap-2", disabled && "opacity-55")}>
           <div className="flex flex-wrap items-center justify-between gap-2">
             <FieldTitle
               id={titleId}

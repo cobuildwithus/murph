@@ -13,6 +13,10 @@ import {
   HostedEmailMurphContactDialog,
   WebmailIcon,
 } from "@/src/components/settings/hosted-email-murph-contact-dialog";
+import {
+  ASSISTANT_MODEL_CHOICE_CARD_CLASSES,
+  AssistantModelArtwork,
+} from "@/src/components/settings/assistant-model-artwork";
 import { HealthDomainCard } from "@/src/components/overview/health-domain-card";
 import { ActiveExperimentBanner } from "@/src/components/overview/active-experiment-banner";
 import { ProfileStats } from "@/src/components/overview/profile-stats";
@@ -351,9 +355,7 @@ export function ComponentsContent() {
 
         <Section title="Radio Group & Choice Cards">
           <p className="max-w-2xl text-sm text-muted-foreground">
-            Use choice cards when a member must compare a small set of
-            consequential options. Keep the tradeoff in one sentence and make
-            plan limits visible without hiding the option.
+            Choose the intelligence behind your personal health assistant.
           </p>
           <RadioGroup
             className="grid gap-3 sm:grid-cols-3"
@@ -361,26 +363,31 @@ export function ComponentsContent() {
             onValueChange={setChoiceCardValue}
           >
             <ChoiceCard
-              description="Quick support for short questions and routine tasks."
+              artwork={<AssistantModelArtwork variant="luna" />}
+              className={ASSISTANT_MODEL_CHOICE_CARD_CLASSES.luna}
+              description="Fast health intelligence"
               id="design-choice-luna"
-              meta="AI usage · Low"
+              meta="Low usage"
               title="Luna"
               value="luna"
             />
             <ChoiceCard
+              artwork={<AssistantModelArtwork variant="terra" />}
               badge={<Badge variant="outline">Recommended</Badge>}
-              description="A balanced choice for most questions and planning."
+              className={ASSISTANT_MODEL_CHOICE_CARD_CLASSES.terra}
+              description="Advanced health intelligence"
               id="design-choice-terra"
-              meta="AI usage · Balanced"
+              meta="Balanced usage"
               title="Terra"
               value="terra"
             />
             <ChoiceCard
+              artwork={<AssistantModelArtwork variant="sol" />}
               badge={<Badge variant="outline">Edge</Badge>}
-              description="More depth for research and complex decisions."
-              disabled
+              className={ASSISTANT_MODEL_CHOICE_CARD_CLASSES.sol}
+              description="Highest health intelligence"
               id="design-choice-sol"
-              meta="AI usage · High · Edge required"
+              meta="High usage · Edge plan"
               title="Sol"
               value="sol"
             />
