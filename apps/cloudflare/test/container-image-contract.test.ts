@@ -462,6 +462,13 @@ describe("hosted runner container image contract", () => {
     expect(baseDockerfile).toContain(
       'native_codex="$(find "$(npm root -g)/@openai" -path \'*/vendor/*/bin/codex\' -type f -perm /111 -print -quit)"',
     );
+    expect(baseDockerfile).toContain(
+      'native_bwrap="$(find "$(npm root -g)/@openai" -path \'*/vendor/*/codex-resources/bwrap\' -type f -perm /111 -print -quit)"',
+    );
+    expect(baseDockerfile).toContain('test -n "${native_bwrap}"');
+    expect(baseDockerfile).toContain(
+      '"${native_bwrap}" --help | grep -Fq -- \'--argv0\'',
+    );
     expect(baseDockerfile).toContain('ln -sfn "${native_codex}" /usr/local/bin/codex');
     expect(baseDockerfile).toContain("npm cache clean --force");
     expect(baseDockerfile).toContain("PATH=/app/node_modules/.bin:/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin");
@@ -469,7 +476,7 @@ describe("hosted runner container image contract", () => {
     expect(baseDockerfile).not.toContain("export PATH=");
     expect(baseDockerfile).not.toContain("FFMPEG_COMMAND=");
     expect(baseDockerfile).not.toContain("PDFTOTEXT_COMMAND=");
-    expect(baseDockerfile).toContain("bubblewrap \\");
+    expect(baseDockerfile).not.toContain("bubblewrap \\");
     expect(baseDockerfile).toContain("file \\");
     expect(baseDockerfile).toContain("jq \\");
     expect(baseDockerfile).toContain("mupdf-tools \\");

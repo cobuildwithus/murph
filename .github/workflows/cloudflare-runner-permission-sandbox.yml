@@ -1,0 +1,82 @@
+name: Cloudflare Runner Permission Sandbox
+
+on:
+  pull_request:
+    paths:
+      - ".github/workflows/cloudflare-runner-permission-sandbox.yml"
+      - "Dockerfile.cloudflare-hosted-runner"
+      - "Dockerfile.cloudflare-hosted-runner-base"
+      - "apps/cloudflare/package.json"
+      - "apps/cloudflare/scripts/runner-base-image*"
+      - "apps/cloudflare/scripts/runner-bundle/**"
+      - "apps/cloudflare/scripts/runner-docker-smoke.ts"
+      - "apps/cloudflare/src/hosted-runner-smoke*"
+      - "packages/assistant-engine/package.json"
+      - "packages/assistant-engine/src/assistant-ask.ts"
+      - "packages/assistant-engine/src/assistant-codex.ts"
+      - "packages/assistant-engine/src/assistant-codex/**"
+      - "packages/hosted-execution/package.json"
+      - "packages/hosted-execution/src/assistant-permissions.ts"
+      - "packages/assistant-runtime/src/hosted-runtime/codex-config.ts"
+      - "pnpm-lock.yaml"
+  push:
+    branches:
+      - main
+    paths:
+      - ".github/workflows/cloudflare-runner-permission-sandbox.yml"
+      - "Dockerfile.cloudflare-hosted-runner"
+      - "Dockerfile.cloudflare-hosted-runner-base"
+      - "apps/cloudflare/package.json"
+      - "apps/cloudflare/scripts/runner-base-image*"
+      - "apps/cloudflare/scripts/runner-bundle/**"
+      - "apps/cloudflare/scripts/runner-docker-smoke.ts"
+      - "apps/cloudflare/src/hosted-runner-smoke*"
+      - "packages/assistant-engine/package.json"
+      - "packages/assistant-engine/src/assistant-ask.ts"
+      - "packages/assistant-engine/src/assistant-codex.ts"
+      - "packages/assistant-engine/src/assistant-codex/**"
+      - "packages/hosted-execution/package.json"
+      - "packages/hosted-execution/src/assistant-permissions.ts"
+      - "packages/assistant-runtime/src/hosted-runtime/codex-config.ts"
+      - "pnpm-lock.yaml"
+  workflow_dispatch:
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.event.pull_request.number || github.ref }}
+  cancel-in-progress: true
+
+permissions:
+  contents: read
+
+jobs:
+  runner-permission-sandbox:
+    name: Runner permission sandbox gate
+    runs-on: ubuntu-24.04
+    timeout-minutes: 45
+    env:
+      MURPH_RUNNER_BUNDLE_BUILD_CONCURRENCY: "4"
+    steps:
+      - uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6
+        with:
+          persist-credentials: false
+
+      - name: Setup pnpm
+        uses: pnpm/action-setup@fc06bc1257f339d1d5d8b3a19a8cae5388b55320 # v5
+
+      - name: Setup Node
+        uses: actions/setup-node@48b55a011bda9f5d6aeb4c2d9c7362e8dae4041e # v6
+        with:
+          node-version-file: .nvmrc
+          cache: pnpm
+
+      - name: Install workspace dependencies
+        run: pnpm install --frozen-lockfile
+
+      - name: Assemble production runner bundle
+        run: pnpm --dir apps/cloudflare runner:bundle
+
+      - name: Prepare runner base image
+        run: pnpm --dir apps/cloudflare runner:docker:base
+
+      - name: Prove native Codex permission confinement
+        run: pnpm --dir apps/cloudflare runner:docker:smoke:prepared-base

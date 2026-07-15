@@ -1,6 +1,6 @@
 # Private-to-group Assistant Ask
 
-Status: active
+Status: completed
 Created: 2026-07-15
 Updated: 2026-07-15
 
@@ -113,3 +113,4 @@ Updated: 2026-07-15
   against current `origin/main`.
 - Expected outcome: every required check passes and no accepted audit or
   ReviewGPT finding remains unresolved.
+Completed: 2026-07-15

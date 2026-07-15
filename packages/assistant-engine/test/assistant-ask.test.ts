@@ -27,9 +27,8 @@ import {
   READ_ONLY_ASSISTANT_ASK_THREAD_CONFIG,
 } from '../src/assistant-ask.ts'
 import {
-  buildMurphGroupReadPermissionProfileTomlLines,
   MURPH_GROUP_READ_PERMISSION_PROFILE,
-} from '../src/assistant-codex-permissions.ts'
+} from '@murphai/hosted-execution/assistant-permissions'
 
 const cleanupRoots: string[] = []
 
@@ -39,28 +38,6 @@ afterEach(async () => {
   await Promise.all(cleanupRoots.splice(0).map((root) =>
     rm(root, { force: true, recursive: true }),
   ))
-})
-
-describe('group-read Codex permissions', () => {
-  it('grants read-only workspace access with non-overlapping secret carve-outs', () => {
-    expect(buildMurphGroupReadPermissionProfileTomlLines()).toEqual([
-      '# Read-only, ephemeral consultations initiated by a current group member.',
-      '[permissions.murph-group-read.filesystem]',
-      '":minimal" = "read"',
-      'glob_scan_max_depth = 64',
-      '',
-      '[permissions.murph-group-read.filesystem.":workspace_roots"]',
-      '"." = "read"',
-      '".runtime" = "deny"',
-      '".codex" = "deny"',
-      '"**/.env" = "deny"',
-      '"**/.env.*" = "deny"',
-      '',
-      '[permissions.murph-group-read.network]',
-      'enabled = false',
-      '',
-    ])
-  })
 })
 
 describe('executeReadOnlyAssistantAsk', () => {

@@ -7,7 +7,7 @@ import {
 } from "@murphai/assistant-engine/assistant-skill-assets";
 import {
   buildMurphGroupReadPermissionProfileTomlLines,
-} from "@murphai/assistant-engine/assistant-codex-permissions";
+} from "@murphai/hosted-execution/assistant-permissions";
 import {
   HOSTED_RUNTIME_CODEX_APP_SERVER_COMMAND_ENV,
   HOSTED_RUNTIME_PROCESS_ENV,
