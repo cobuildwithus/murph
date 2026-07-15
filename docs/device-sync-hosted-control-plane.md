@@ -217,6 +217,14 @@ These are authenticated by local-agent credentials, not browser cookies.
 
 These routes are authenticated by signed server-to-server traffic that never reaches the browser. `:connectTarget` is resolved through the same connect-target registry used by `/connect`; the target carries the manifest provider plus optional Junction `sourceProviderSlug` such as Garmin, Oura, or Strava. The connect-link route creates a short-lived first-party connect intent and returns `connectUrl` plus a compatibility `authorizationUrl` copy of the same first-party URL; it does not start provider OAuth or return raw provider/Junction URLs to hosted execution. `apps/web` remains the canonical device-sync control plane while `apps/cloudflare` invokes only the narrow runtime callbacks it needs during hosted execution. Dirty-state callbacks are device-sync-specific; they are not a generic mailbox wake broker.
 
+Runtime apply write-back is bounded to 100 distinct connection updates per
+request. The hosted runtime splits larger legitimate results into sequential
+batches, and web applies each accepted connection update sequentially through
+its existing per-connection mutation lock and transaction. This bound prevents
+one signed runtime callback from amplifying into unbounded concurrent database
+transactions without introducing a queue, bulk mutation owner, or second retry
+path.
+
 ## Runtime access strategy
 
 The current hosted runtime strategy is:

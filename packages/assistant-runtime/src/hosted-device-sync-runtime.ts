@@ -20,6 +20,7 @@ import type {
   StoredDeviceSyncAccount,
 } from "@murphai/device-syncd/types";
 import {
+  HOSTED_EXECUTION_DEVICE_SYNC_RUNTIME_APPLY_UPDATE_LIMIT,
   mergeHostedDeviceSyncConnectionMetadata,
   normalizeHostedDeviceSyncJobHints,
   resolveHostedDeviceSyncWakeContext,
@@ -366,11 +367,18 @@ export async function reconcileHostedDeviceSyncControlPlaneState(input: {
     }
   }
 
-  await client.applyUpdates({
-    occurredAt: input.wake.occurredAt,
-    ...(input.signal ? { signal: input.signal } : {}),
-    updates,
-  });
+  let offset = 0;
+  do {
+    await client.applyUpdates({
+      occurredAt: input.wake.occurredAt,
+      ...(input.signal ? { signal: input.signal } : {}),
+      updates: updates.slice(
+        offset,
+        offset + HOSTED_EXECUTION_DEVICE_SYNC_RUNTIME_APPLY_UPDATE_LIMIT,
+      ),
+    });
+    offset += HOSTED_EXECUTION_DEVICE_SYNC_RUNTIME_APPLY_UPDATE_LIMIT;
+  } while (offset < updates.length);
 }
 
 function createEmptyHostedDeviceSyncRuntimeSyncState(
