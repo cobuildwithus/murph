@@ -7705,6 +7705,14 @@ describe("hosted runtime callbacks", () => {
         signal: null,
       },
     );
+    expect(assertRecentInbound.mock.calls.map(([request]) => [
+      request.authorityCheckOnly,
+      request.homeRouteFallbackAllowed,
+      request.target,
+    ])).toEqual([
+      [true, true, "linq_chat_stale"],
+      [false, true, "linq_chat_current"],
+    ]);
     expect(mocks.sendLinqMessage).toHaveBeenCalledTimes(2);
     expect(mocks.sendLinqMessage.mock.calls[0]?.[0]).toEqual(
       expect.objectContaining({
@@ -10107,6 +10115,14 @@ describe("hosted runtime callbacks", () => {
       }),
       { signal: null },
     );
+    expect(assertRecentInbound.mock.calls.map(([request]) => [
+      request.authorityCheckOnly,
+      request.homeRouteFallbackAllowed,
+      request.target,
+    ])).toEqual([
+      [true, true, "linq_chat_stale"],
+      [false, true, "linq_chat_current"],
+    ]);
     expect(mocks.sendLinqVoiceMemoMessage).toHaveBeenCalledWith({
       attachmentId: "attachment_voice_1",
       target: "linq_chat_current",
