@@ -221,7 +221,7 @@ function buildDeviceSyncWake(input: {
   };
   occurredAt: string;
   provider?: string;
-  reason: "disconnected" | "reauthorization_required" | "webhook_hint";
+  reason: "disconnected" | "reauthorization_required" | "reconcile_due" | "webhook_hint";
 }) {
   return {
     connectionId: input.connectionId,
@@ -5175,6 +5175,55 @@ describe("hosted device-sync runtime", () => {
       assert.ok(stored);
       assert.equal(stored.nextReconcileAt, "2026-04-04T12:00:00.000Z");
       assert.deepEqual(readJobsForAccount(service, connected.account.id), []);
+    } finally {
+      closeHostedRuntimeDeviceSyncService(service);
+      await cleanup();
+    }
+  });
+
+  test("manual reconcile wakes delegate job creation to the device-sync service", async () => {
+    const { cleanup, vaultRoot } = await createHostedRuntimeWorkspace(
+      "hosted-device-sync-runtime-",
+    );
+    await mkdir(vaultRoot, { recursive: true });
+    const service = createDeviceSyncServiceForVault(vaultRoot);
+
+    try {
+      const begin = await service.startConnection({ provider: "demo" });
+      const connected = await service.handleOAuthCallback({
+        code: "manual-reconcile",
+        provider: "demo",
+        state: begin.state,
+      });
+      const snapshot = buildRuntimeSnapshot({
+        connectionId: "hosted_conn_manual_reconcile",
+        externalAccountId: connected.account.externalAccountId,
+        localState: {
+          nextReconcileAt: "2026-04-04T12:00:00.000Z",
+        },
+      });
+
+      await syncHostedDeviceSyncControlPlaneState({
+        deviceSyncPort: createSnapshotOnlyDeviceSyncPort(snapshot),
+        wake: buildDeviceSyncWake({
+          connectionId: "hosted_conn_manual_reconcile",
+          hint: { reason: "manual_reconcile" },
+          occurredAt: "2026-04-04T10:00:00.000Z",
+          reason: "reconcile_due",
+        }),
+        secret: DEVICE_SYNC_SECRET,
+        service,
+      });
+
+      const jobs = readJobsForAccount(service, connected.account.id);
+      assert.equal(jobs.length, 1);
+      assert.equal(jobs[0]?.kind, "reconcile");
+      assert.equal(jobs[0]?.priority, 80);
+      assert.equal(jobs[0]?.status, "queued");
+      assert.equal(
+        getStore(service).getAccountById(connected.account.id)?.nextReconcileAt,
+        "2026-04-04T12:00:00.000Z",
+      );
     } finally {
       closeHostedRuntimeDeviceSyncService(service);
       await cleanup();

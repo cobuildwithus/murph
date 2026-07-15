@@ -760,12 +760,50 @@ async function persistHostedDeviceSyncCompanionResource(input: {
   }
 }
 
-export interface HostedDeviceSyncScheduledReconcileWakeResult {
+export interface HostedDeviceSyncReconcileWakeResult {
   reason?: string;
   wakeAccepted: boolean;
   wakeAppended: boolean;
   wakeDuplicate: boolean;
   wakeInserted: boolean;
+}
+
+export async function appendHostedDeviceSyncManualReconcileWake(input: {
+  connectionId: string;
+  occurredAt: string;
+  provider: string;
+  userId: string;
+}): Promise<HostedDeviceSyncReconcileWakeResult> {
+  const store = new PrismaDeviceSyncControlPlaneStore({
+    prisma: getPrisma(),
+  });
+  const wake = buildHostedDeviceSyncWake({
+    connectionId: input.connectionId,
+    hint: {
+      occurredAt: input.occurredAt,
+      reason: "manual_reconcile",
+    },
+    occurredAt: input.occurredAt,
+    provider: input.provider,
+    source: "manual-reconcile",
+    userId: input.userId,
+  });
+  const appendResult = await persistHostedDeviceSyncWake({
+    signalFailureMode: "throw",
+    wake,
+    store,
+    persist: async () => {},
+  });
+  const wakeAccepted = appendResult.inserted
+    || (appendResult.duplicate && !appendResult.dedupeConflict);
+
+  return {
+    ...(appendResult.dedupeConflict ? { reason: "dedupe_conflict" } : {}),
+    wakeAccepted,
+    wakeAppended: appendResult.inserted,
+    wakeDuplicate: appendResult.duplicate && !appendResult.dedupeConflict,
+    wakeInserted: appendResult.inserted,
+  };
 }
 
 export async function appendHostedDeviceSyncScheduledReconcileWake(input: {
@@ -776,7 +814,7 @@ export async function appendHostedDeviceSyncScheduledReconcileWake(input: {
   provider: string;
   traceId?: string | null;
   userId: string;
-}): Promise<HostedDeviceSyncScheduledReconcileWakeResult> {
+}): Promise<HostedDeviceSyncReconcileWakeResult> {
   const prisma = getPrisma();
   const store = new PrismaDeviceSyncControlPlaneStore({
     prisma,

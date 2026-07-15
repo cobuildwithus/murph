@@ -6,6 +6,7 @@ import {
 export type HostedDeviceSyncWakeSource =
   | "connection-established"
   | "disconnect"
+  | "manual-reconcile"
   | "webhook-hint"
   | "scheduled-reconcile";
 
@@ -56,6 +57,8 @@ export function mapHostedDeviceSyncWakeReason(
       return "connected";
     case "disconnect":
       return "disconnected";
+    case "manual-reconcile":
+      return "reconcile_due";
     case "webhook-hint":
       return "webhook_hint";
     case "scheduled-reconcile":

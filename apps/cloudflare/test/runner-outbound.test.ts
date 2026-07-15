@@ -255,6 +255,13 @@ const ALLOWLISTED_WEB_CONTROL_CASES = [
   },
   {
     body: {
+      connectionId: "conn_123",
+    },
+    name: "device-sync reconcile",
+    path: "/api/internal/device-sync/reconcile",
+  },
+  {
+    body: {
       bytes: 17,
       eventId: "evt_123",
     },

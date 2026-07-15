@@ -1,12 +1,12 @@
 # Device Sync Hosted Control Plane
 
-Last verified against repo layout: 2026-07-12
+Last verified against repo layout: 2026-07-15
 
 ## Current split
 
 Murph's hosted device-sync stack is now split this way:
 
-- `apps/web` is the canonical hosted control plane. It owns durable hosted device-sync facts in Postgres, including connection ownership, OAuth/session state, short-lived hosted connect intents, token-audit history, sparse sync signals, per-connection dirty state for webhook freshness, local-agent sessions, and the web-owned internal runtime snapshot/apply/connect-link/dirty-state/pending/ack routes.
+- `apps/web` is the canonical hosted control plane. It owns durable hosted device-sync facts in Postgres, including connection ownership, OAuth/session state, short-lived hosted connect intents, token-audit history, sparse sync signals, per-connection dirty state for webhook freshness, local-agent sessions, and the web-owned internal runtime snapshot/apply/connect-link/reconcile/dirty-state/pending/ack routes.
 - `apps/cloudflare` is the hosted execution plane only. During a hosted job it may call narrow signed web callbacks to fetch the current device-sync runtime snapshot, apply runtime updates, or start a provider connect link, but it is not a second durable device-sync control plane.
 - local `device-syncd` remains the data plane that talks to provider APIs, normalizes provider payloads through `@murphai/importers`, and writes canonical health records into the local vault.
 
@@ -44,6 +44,7 @@ It does not own canonical health-data import, token authority, or canonical host
 - token export and refresh flows for the local agent
 - disconnect, pairing, and other hosted operational control flows
 - the signed internal runtime snapshot, runtime apply, dirty-state fetch/pending/ack, and connect-target link routes consumed by hosted execution
+- validation and durable mailbox handoff for hosted manual reconcile requests
 
 `apps/web` must not:
 
@@ -142,6 +143,7 @@ When a hosted job needs device-sync access, Cloudflare must call the signed inte
 - fetch a specific dirty device-sync revision when processing an explicit lifecycle wake
 - acknowledge processed dirty revisions after checkpoint-safe execution
 - start a provider connect link
+- append a member-bound manual reconcile wake
 
 That execution-time access does not make Cloudflare the durable owner of hosted device-sync authority.
 
@@ -213,9 +215,10 @@ These are authenticated by local-agent credentials, not browser cookies.
 - `POST /api/internal/device-sync/runtime/dirty-state` on `apps/web`
 - `POST /api/internal/device-sync/runtime/dirty-pending` on `apps/web`
 - `POST /api/internal/device-sync/runtime/dirty-ack` on `apps/web`
+- `POST /api/internal/device-sync/reconcile` on `apps/web`
 - `POST /api/internal/device-sync/connect-targets/:connectTarget/connect-link` on `apps/web`
 
-These routes are authenticated by signed server-to-server traffic that never reaches the browser. `:connectTarget` is resolved through the same connect-target registry used by `/connect`; the target carries the manifest provider plus optional Junction `sourceProviderSlug` such as Garmin, Oura, or Strava. The connect-link route creates a short-lived first-party connect intent and returns `connectUrl` plus a compatibility `authorizationUrl` copy of the same first-party URL; it does not start provider OAuth or return raw provider/Junction URLs to hosted execution. `apps/web` remains the canonical device-sync control plane while `apps/cloudflare` invokes only the narrow runtime callbacks it needs during hosted execution. Dirty-state callbacks are device-sync-specific; they are not a generic mailbox wake broker.
+These routes are authenticated by signed server-to-server traffic that never reaches the browser. `:connectTarget` is resolved through the same connect-target registry used by `/connect`; the target carries the manifest provider plus optional Junction `sourceProviderSlug` such as Garmin, Oura, or Strava. The connect-link route creates a short-lived first-party connect intent and returns `connectUrl` plus a compatibility `authorizationUrl` copy of the same first-party URL; it does not start provider OAuth or return raw provider/Junction URLs to hosted execution. The reconcile route validates the member-owned active connection and appends one device-sync wake; the runtime then calls the existing `DeviceSyncService.queueManualReconcile` owner, so web does not duplicate provider scheduling policy or mutate connection schedule state. `apps/web` remains the canonical device-sync control plane while `apps/cloudflare` invokes only the narrow runtime callbacks it needs during hosted execution. Dirty-state callbacks are device-sync-specific; they are not a generic mailbox wake broker.
 
 Runtime apply write-back is bounded to 100 distinct connection updates per
 request. The hosted runtime splits larger legitimate results into sequential

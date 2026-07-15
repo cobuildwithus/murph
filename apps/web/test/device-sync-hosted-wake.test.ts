@@ -358,6 +358,7 @@ import {
 import { PrismaDeviceSyncControlPlaneStore } from "@/src/lib/device-sync/prisma-store";
 import { getPrisma } from "@/src/lib/prisma";
 import {
+  appendHostedDeviceSyncManualReconcileWake,
   appendHostedDeviceSyncScheduledReconcileWake,
   persistHostedDeviceSyncCompanionMetadata,
 } from "@/src/lib/device-sync/wake-service";
@@ -589,6 +590,31 @@ describe("hosted device-sync wakes", () => {
     expect(mocks.signalHostedDeviceSyncMailboxRuntime).toHaveBeenCalledWith({
       mailboxItemId: "mailbox_123",
     });
+  });
+
+  it("appends a manual reconcile wake without mutating connection state", async () => {
+    await expect(appendHostedDeviceSyncManualReconcileWake({
+      connectionId: "dsc_123",
+      occurredAt: "2026-07-15T12:00:00.000Z",
+      provider: "oura",
+      userId: "user-123",
+    })).resolves.toMatchObject({
+      wakeAccepted: true,
+      wakeInserted: true,
+    });
+
+    expect(mocks.appendHostedMailboxEnvelope).toHaveBeenCalledWith(
+      expect.objectContaining({
+        envelope: expect.objectContaining({
+          connectionId: "dsc_123",
+          hint: expect.objectContaining({ reason: "manual_reconcile" }),
+          reason: "reconcile_due",
+        }),
+        tx: mocks.prismaTx,
+      }),
+    );
+    expect(mocks.createSignal).not.toHaveBeenCalled();
+    expect(mocks.syncDurableConnectionState).not.toHaveBeenCalled();
   });
 
   it("re-signals duplicate due-reconcile wakes and records the successful due claim", async () => {

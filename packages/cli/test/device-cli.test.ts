@@ -520,6 +520,67 @@ test('device account list service uses hosted CLI bridge in hosted runtime witho
   }
 })
 
+test('device account reconcile service uses hosted CLI bridge in hosted runtime', async () => {
+  const vaultRoot = await mkdtemp(path.join(tmpdir(), 'murph-device-hosted-account-reconcile-'))
+  const bridgeToken = 'bridge-token'
+  let requestPath: string | null = null
+  let requestBody: unknown = null
+
+  const server = createServer((request, response) => {
+    requestPath = request.url ?? null
+    const chunks: Buffer[] = []
+    request.on('data', (chunk) => {
+      chunks.push(Buffer.isBuffer(chunk) ? chunk : Buffer.from(chunk))
+    })
+    request.on('end', () => {
+      requestBody = JSON.parse(Buffer.concat(chunks).toString('utf8'))
+      response.writeHead(200, { 'content-type': 'application/json' })
+      response.end(JSON.stringify({
+        connectionId: 'dsc_whoop',
+        occurredAt: '2026-07-15T12:00:00.000Z',
+        status: 'queued',
+      }))
+    })
+  })
+
+  try {
+    server.listen(0, '127.0.0.1')
+    await once(server, 'listening')
+    const address = server.address()
+    if (!address || typeof address === 'string') {
+      throw new Error('Expected a TCP listening address for hosted account reconcile test.')
+    }
+
+    vi.stubEnv('MURPH_HOSTED_RUNTIME_PROCESS', '1')
+    vi.stubEnv('MURPH_HOSTED_CLI_BRIDGE_TOKEN', bridgeToken)
+    vi.stubEnv('MURPH_HOSTED_CLI_BRIDGE_URL', `http://127.0.0.1:${address.port}/`)
+
+    assert.deepEqual(await createIntegratedDeviceSyncServices().reconcileAccount({
+      accountId: 'dsc_whoop',
+      vault: vaultRoot,
+    }), {
+      accountId: 'dsc_whoop',
+      backend: 'hosted',
+      occurredAt: '2026-07-15T12:00:00.000Z',
+      status: 'queued',
+    })
+    assert.equal(requestPath, '/device/accounts/reconcile')
+    assert.deepEqual(requestBody, { accountId: 'dsc_whoop' })
+  } finally {
+    vi.unstubAllEnvs()
+    await new Promise<void>((resolve, reject) => {
+      server.close((error) => {
+        if (error) {
+          reject(error)
+          return
+        }
+        resolve()
+      })
+    })
+    await rm(vaultRoot, { recursive: true, force: true })
+  }
+})
+
 test('device account list rejects an explicit base URL in hosted runtime', async () => {
   const vaultRoot = await mkdtemp(path.join(tmpdir(), 'murph-device-hosted-account-list-base-url-'))
   let requestPath: string | null = null

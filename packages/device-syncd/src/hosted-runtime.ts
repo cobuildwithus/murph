@@ -33,6 +33,8 @@ export const HOSTED_EXECUTION_DEVICE_SYNC_RUNTIME_DIRTY_PENDING_PATH =
   "/api/internal/device-sync/runtime/dirty-pending";
 export const HOSTED_EXECUTION_DEVICE_SYNC_RUNTIME_DIRTY_ACK_PATH =
   "/api/internal/device-sync/runtime/dirty-ack";
+export const HOSTED_EXECUTION_DEVICE_SYNC_RECONCILE_PATH =
+  "/api/internal/device-sync/reconcile";
 export const HOSTED_EXECUTION_DEVICE_SYNC_RUNTIME_APPLY_UPDATE_LIMIT = 100;
 export const HOSTED_EXECUTION_DEVICE_SYNC_STAGED_DIRTY_ACK_RECORD_LIMIT = 200;
 export const HOSTED_EXECUTION_DEVICE_SYNC_STAGED_DIRTY_ACK_PAYLOAD_ID_LIMIT = 5_000;
@@ -137,6 +139,16 @@ export interface HostedExecutionDeviceSyncConnectLinkResponse {
   expiresAt: string;
   provider: string;
   providerLabel: string;
+}
+
+export interface HostedExecutionDeviceSyncReconcileRequest {
+  connectionId: string;
+}
+
+export interface HostedExecutionDeviceSyncReconcileResponse {
+  connectionId: string;
+  occurredAt: string;
+  status: "queued";
 }
 
 export interface HostedExecutionDeviceSyncRuntimeTokenBundle {
@@ -587,6 +599,50 @@ export function parseHostedExecutionDeviceSyncConnectLinkResponse(
       record.providerLabel,
       "Hosted device-sync connect link response providerLabel",
     ),
+  };
+}
+
+export function parseHostedExecutionDeviceSyncReconcileRequest(
+  value: unknown,
+): HostedExecutionDeviceSyncReconcileRequest {
+  const record = requireObject(value, "Hosted device-sync reconcile request");
+  assertSupportedFields(
+    record,
+    "Hosted device-sync reconcile request",
+    ["connectionId"],
+  );
+
+  return {
+    connectionId: requireString(
+      record.connectionId,
+      "Hosted device-sync reconcile request connectionId",
+    ),
+  };
+}
+
+export function parseHostedExecutionDeviceSyncReconcileResponse(
+  value: unknown,
+): HostedExecutionDeviceSyncReconcileResponse {
+  const record = requireObject(value, "Hosted device-sync reconcile response");
+  assertSupportedFields(
+    record,
+    "Hosted device-sync reconcile response",
+    ["connectionId", "occurredAt", "status"],
+  );
+  if (record.status !== "queued") {
+    throw new TypeError("Hosted device-sync reconcile response status must be queued.");
+  }
+
+  return {
+    connectionId: requireString(
+      record.connectionId,
+      "Hosted device-sync reconcile response connectionId",
+    ),
+    occurredAt: requireIsoTimestamp(
+      record.occurredAt,
+      "Hosted device-sync reconcile response occurredAt",
+    ),
+    status: "queued",
   };
 }
 
@@ -1437,7 +1493,7 @@ function parseHostedExecutionDeviceSyncRuntimeConnectionUpdate(
 ): HostedExecutionDeviceSyncRuntimeConnectionUpdate {
   const label = `Hosted device-sync runtime apply request updates[${index}]`;
   const record = requireObject(value, label);
-  assertHostedExecutionCredentialFields(record, label, [
+  assertSupportedFields(record, label, [
     "connection",
     "connectionId",
     "credential",
@@ -1524,7 +1580,7 @@ function parseHostedExecutionDeviceSyncRuntimeConnectionSourceUpdate(
   label: string,
 ): HostedExecutionDeviceSyncRuntimeConnectionSourceUpdate {
   const record = requireObject(value, label);
-  assertHostedExecutionCredentialFields(record, label, [
+  assertSupportedFields(record, label, [
     "displayName",
     "firstSeenAt",
     "lastErrorCode",
@@ -1624,7 +1680,7 @@ function parseHostedExecutionDeviceSyncRuntimeFailureDiagnostic(
 ): HostedExecutionDeviceSyncRuntimeFailureDiagnostic {
   const label = `Hosted device-sync runtime apply request updates[${index}].failureDiagnostic`;
   const record = requireObject(value, label);
-  assertHostedExecutionCredentialFields(record, label, [
+  assertSupportedFields(record, label, [
     "accountStatus",
     "code",
     "details",
@@ -1659,7 +1715,7 @@ function parseHostedExecutionDeviceSyncRuntimeFailureDiagnosticDetails(
   }
 
   const record = requireObject(value, label);
-  assertHostedExecutionCredentialFields(record, label, [
+  assertSupportedFields(record, label, [
     "failureCauseCode",
     "failureCauseName",
     "failureErrorCause",
@@ -1989,7 +2045,7 @@ function parseHostedExecutionDeviceSyncRuntimeCredentialSnapshot(
 
   switch (kind) {
     case "oauth_tokens":
-      assertHostedExecutionCredentialFields(record, label, ["kind", "tokenBundle"]);
+      assertSupportedFields(record, label, ["kind", "tokenBundle"]);
       return {
         kind,
         tokenBundle: parseHostedExecutionDeviceSyncRuntimeOAuthTokenBundle(
@@ -1998,7 +2054,7 @@ function parseHostedExecutionDeviceSyncRuntimeCredentialSnapshot(
         ) ?? rejectNullHostedExecutionCredentialTokenBundle(`${label}.tokenBundle`),
       };
     case "oauth_tokens_redacted":
-      assertHostedExecutionCredentialFields(record, label, [
+      assertSupportedFields(record, label, [
         "credentialMetadata",
         "kind",
         "tokenVersion",
@@ -2012,7 +2068,7 @@ function parseHostedExecutionDeviceSyncRuntimeCredentialSnapshot(
         tokenVersion: readNullablePositiveInteger(record.tokenVersion, `${label}.tokenVersion`),
       };
     case "provider_config": {
-      assertHostedExecutionCredentialFields(record, label, [
+      assertSupportedFields(record, label, [
         "credentialMetadata",
         "kind",
         "providerConfigKey",
@@ -2028,7 +2084,7 @@ function parseHostedExecutionDeviceSyncRuntimeCredentialSnapshot(
       };
     }
     case "none":
-      assertHostedExecutionCredentialFields(record, label, ["credentialMetadata", "kind"]);
+      assertSupportedFields(record, label, ["credentialMetadata", "kind"]);
       return {
         credentialMetadata: parseHostedExecutionDeviceSyncCredentialMetadata(
           record.credentialMetadata,
@@ -2049,7 +2105,7 @@ function parseHostedExecutionDeviceSyncRuntimeCredentialUpdate(
   const kind = requireString(record.kind, `${label}.kind`);
 
   if (kind === "oauth_tokens" && record.clearTokens === true) {
-    assertHostedExecutionCredentialFields(record, label, ["clearTokens", "kind"]);
+    assertSupportedFields(record, label, ["clearTokens", "kind"]);
     return {
       clearTokens: true,
       kind,
@@ -2077,7 +2133,7 @@ function requireHostedExecutionWritableCredentialSnapshot(
   return credential;
 }
 
-function assertHostedExecutionCredentialFields(
+function assertSupportedFields(
   record: Record<string, unknown>,
   label: string,
   allowedFields: readonly string[],
