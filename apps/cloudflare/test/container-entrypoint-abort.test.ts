@@ -253,7 +253,6 @@ describe("container entrypoint abort boundary", () => {
       expect(health.status).toBe(200);
       expect(health.json).toMatchObject({
         activeJobCount: 0,
-        lastCleanupStatus: "not_run",
         poisoned: false,
       });
     });
@@ -622,76 +621,6 @@ describe("container entrypoint abort boundary", () => {
         poisoned: false,
       });
     });
-    expect(exit).not.toHaveBeenCalled();
-  });
-
-  it("keeps cleanup failure as poison even when the response is already closed", async () => {
-    const invocationStarted = createDeferred<AbortSignal>();
-    const failCleanup = createDeferred();
-    const consumeCliBridgeOffInvocationViolation = vi.fn()
-      .mockResolvedValueOnce(false)
-      .mockResolvedValueOnce(true);
-    const exit = vi.fn();
-    const stopWarmCodex = vi.fn(async () => {
-      throw new Error("warm stop failed");
-    });
-    mocks.runHostedWorkspaceInvocation.mockImplementation(
-      async (_job, options) => {
-        const signal = options?.signal;
-        if (!signal) {
-          throw new Error("Expected hosted workspace invocation signal.");
-        }
-
-        invocationStarted.resolve(signal);
-        await failCleanup.promise;
-        expect(signal.aborted).toBe(false);
-        return buildWorkspaceRunnerResult();
-      },
-    );
-
-    const server = await startHostedContainerEntrypoint({
-      port: 0,
-      runtime: {
-        consumeCliBridgeOffInvocationViolation,
-        exitScheduler: exit,
-        stopWarmCodex,
-      },
-    });
-    servers.push(server);
-    const address = server.address();
-
-    if (!address || typeof address === "string") {
-      throw new Error("Expected the hosted container entrypoint to expose a TCP port.");
-    }
-
-    const request = sendHostedContainerPostRequest({
-      body: buildWorkspaceJobBody({ eventId: "evt_response_close_cleanup_failure" }),
-      path: "/internal/workspace-invocation",
-      port: address.port,
-    });
-
-    const signal = await invocationStarted.promise;
-    request.close();
-    await request.done;
-    await new Promise((resolve) => setTimeout(resolve, 25));
-    expect(signal.aborted).toBe(false);
-
-    failCleanup.resolve();
-
-    await waitForAssertion(async () => {
-      const health = await sendHostedContainerGetRequest({
-        path: "/health",
-        port: address.port,
-      });
-      expect(health.status).toBe(200);
-      expect(health.json).toMatchObject({
-        activeJobCount: 0,
-        lastCleanupStatus: "failed",
-        poisoned: true,
-      });
-    }, 7000);
-    expect(consumeCliBridgeOffInvocationViolation).toHaveBeenCalledTimes(2);
-    expect(stopWarmCodex).toHaveBeenCalledTimes(1);
     expect(exit).not.toHaveBeenCalled();
   });
 });

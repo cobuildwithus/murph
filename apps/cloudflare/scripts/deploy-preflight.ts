@@ -9,6 +9,7 @@ import {
   normalizeHostedExecutionBaseUrl,
 } from "@murphai/hosted-execution/env";
 
+import { readHostedDeployAutomationTimeouts } from "./deploy-automation/environment.ts";
 import { HOSTED_WORKER_REQUIRED_SECRET_NAMES } from "./deploy-automation/secrets.ts";
 import {
   HOSTED_WORKER_REQUIRED_VAR_NAMES,
@@ -181,6 +182,12 @@ export function listHostedDeployEnvironmentInvariantErrors(
 
   const errors: string[] = [];
   const deployContext = normalizeHostedDeployContext(source.HOSTED_EXECUTION_DEPLOY_CONTEXT);
+
+  try {
+    readHostedDeployAutomationTimeouts(source);
+  } catch (error) {
+    errors.push(error instanceof Error ? error.message : String(error));
+  }
 
   if (
     normalizeOptionalString(source.HOSTED_EXECUTION_DEPLOY_CONTEXT)

@@ -96,7 +96,7 @@ vi.mock("../src/web-control-plane.ts", async () => {
 
 const FIXED_NOW = "2026-04-27T00:00:00.000Z";
 const WORKSPACE_NEXT_WAKE_AT = "2026-04-27T00:02:00.000Z";
-const ACTIVE_RUNTIME_RECHECK_AT = "2026-04-27T00:01:00.000Z";
+const ACTIVE_RUNTIME_RECHECK_AT = "2026-04-27T00:01:34.000Z";
 const TEST_USER_ID = "member_123";
 const TEST_RUNNER_RUNTIME_ENV_SOURCE = {
   HOSTED_ASSISTANT_PROVIDER: "openai",
@@ -2015,7 +2015,7 @@ describe("HostedUserRunner execution coordination", () => {
     })).resolves.toMatchObject({
       action: "replaced",
       kind: "runtime_processing_accepted",
-      recommendedRecheckAt: "2026-04-27T00:01:00.000Z",
+      recommendedRecheckAt: "2026-04-27T00:01:34.000Z",
       runtimeAttemptId: expect.not.stringMatching(token.attemptId),
     });
 
@@ -2388,7 +2388,7 @@ describe("HostedUserRunner execution coordination", () => {
     })).resolves.toMatchObject({
       action: "replaced",
       kind: "runtime_processing_accepted",
-      recommendedRecheckAt: "2026-04-27T00:01:31.000Z",
+      recommendedRecheckAt: "2026-04-27T00:02:05.000Z",
       runtimeAttemptId: expect.not.stringMatching(token.attemptId),
     });
 
@@ -2454,7 +2454,7 @@ describe("HostedUserRunner execution coordination", () => {
     })).resolves.toMatchObject({
       action: "replaced",
       kind: "runtime_processing_accepted",
-      recommendedRecheckAt: "2026-04-27T00:01:31.000Z",
+      recommendedRecheckAt: "2026-04-27T00:02:05.000Z",
       runtimeAttemptId: expect.not.stringMatching(token.attemptId),
     });
 
@@ -2523,7 +2523,7 @@ describe("HostedUserRunner execution coordination", () => {
     })).resolves.toMatchObject({
       action: "replaced",
       kind: "runtime_processing_accepted",
-      recommendedRecheckAt: "2026-04-27T00:01:31.000Z",
+      recommendedRecheckAt: "2026-04-27T00:02:05.000Z",
       runtimeAttemptId: expect.not.stringMatching(token.attemptId),
     });
 
@@ -2594,7 +2594,7 @@ describe("HostedUserRunner execution coordination", () => {
     })).resolves.toMatchObject({
       action: "replaced",
       kind: "runtime_processing_accepted",
-      recommendedRecheckAt: "2026-04-27T00:01:31.000Z",
+      recommendedRecheckAt: "2026-04-27T00:02:05.000Z",
       runtimeAttemptId: expect.not.stringMatching(token.attemptId),
     });
 
@@ -2733,7 +2733,7 @@ describe("HostedUserRunner execution coordination", () => {
     })).resolves.toMatchObject({
       action: "woken",
       kind: "runtime_processing_accepted",
-      recommendedRecheckAt: "2026-04-27T00:02:03.000Z",
+      recommendedRecheckAt: "2026-04-27T00:02:37.000Z",
       runtimeAttemptId: token.attemptId,
     });
 
@@ -2885,7 +2885,7 @@ describe("HostedUserRunner execution coordination", () => {
     })).resolves.toMatchObject({
       action: "replaced",
       kind: "runtime_processing_accepted",
-      recommendedRecheckAt: "2026-04-27T00:01:31.000Z",
+      recommendedRecheckAt: "2026-04-27T00:02:05.000Z",
       runtimeAttemptId: expect.not.stringMatching(token.attemptId),
     });
 
@@ -2941,7 +2941,7 @@ describe("HostedUserRunner execution coordination", () => {
     })).resolves.toMatchObject({
       action: "replaced",
       kind: "runtime_processing_accepted",
-      recommendedRecheckAt: "2026-04-27T00:01:31.000Z",
+      recommendedRecheckAt: "2026-04-27T00:02:05.000Z",
       runtimeAttemptId: expect.not.stringMatching(token.attemptId),
     });
 
@@ -3406,7 +3406,7 @@ describe("HostedUserRunner execution coordination", () => {
     })).resolves.toMatchObject({
       action: "replaced",
       kind: "runtime_processing_accepted",
-      recommendedRecheckAt: "2026-04-27T00:01:31.000Z",
+      recommendedRecheckAt: "2026-04-27T00:02:05.000Z",
       runtimeAttemptId: expect.not.stringMatching(token.attemptId),
     });
 
@@ -3471,7 +3471,7 @@ describe("HostedUserRunner execution coordination", () => {
     })).resolves.toMatchObject({
       action: "replaced",
       kind: "runtime_processing_accepted",
-      recommendedRecheckAt: "2026-04-27T00:01:31.000Z",
+      recommendedRecheckAt: "2026-04-27T00:02:05.000Z",
       runtimeAttemptId: expect.not.stringMatching(token.attemptId),
     });
 
@@ -4568,7 +4568,7 @@ function createRunnerHarness(input: {
     readHostedExecutionEnvironment(createHostedExecutionTestEnv({
       HOSTED_EXECUTION_IDLE_CHECKPOINT_DELAY_MS: "54000",
       HOSTED_EXECUTION_RETRY_DELAY_MS: "5000",
-      HOSTED_EXECUTION_RUNNER_COMMIT_TIMEOUT_MS: "1000",
+      HOSTED_EXECUTION_RUNNER_COMMIT_TIMEOUT_MS: "35000",
     })),
     input.bucket ?? new MemoryEncryptedR2Bucket(),
     input.runnerRuntimeEnvSource ?? TEST_RUNNER_RUNTIME_ENV_SOURCE,

@@ -546,6 +546,27 @@ export async function executeClaimedAssistantCronJob(
       })
     }
 
+    // Lifecycle-owned writes happen before notification expiry so a cleanup
+    // failure remains retryable even when its next attempt crosses the stale
+    // delivery window. Expiry may suppress the outbound, never the owner work.
+    let lifecycleSkipReason: string | null = null
+    if (
+      deviceActivityAuthority.error === null &&
+      input.job.kind === 'canonical' &&
+      input.job.source.kind === 'automation'
+    ) {
+      // Route on the immutable automationId so a user-edited slug cannot
+      // silently bypass the precondition.
+      const lifecycleResult = await runExperimentLifecycleOutcomePrecondition({
+        automationId: input.job.source.automationId,
+        tags: input.job.source.tags,
+        vault: input.vault,
+      })
+      if (lifecycleResult.kind === 'skip') {
+        lifecycleSkipReason = lifecycleResult.reason
+      }
+    }
+
     const staleError =
       input.trigger === 'scheduled' &&
         !assistantCronJobIsPreemptibleBackgroundMaintenance(input.job)
@@ -636,34 +657,6 @@ export async function executeClaimedAssistantCronJob(
           turnEnvironment: input.turnEnvironment ?? null,
           turnTrigger: 'automation-cron',
         })
-        // Run lifecycle-owned deterministic eligibility + persistence BEFORE
-        // the LLM turn. The precondition reads canonical experiment state
-        // once and decides:
-        //   - `continue`: not a lifecycle job (or eligible and outcome
-        //     persisted); proceed to the LLM as normal.
-        //   - `skip`: ineligible at fire time; mark the run skipped so the
-        //     one-shot is consumed without writing an outcome or invoking
-        //     the LLM.
-        // A persistence failure throws → the surrounding try/catch records
-        // the run as failed and the existing cron backoff retries. We must
-        // not delegate this to the LLM: skip and send_message both mark the
-        // run successful and consume the at-occurrence.
-        let lifecycleSkipReason: string | null = null
-        if (
-          input.job.kind === 'canonical' &&
-          input.job.source.kind === 'automation'
-        ) {
-          // Route on the immutable automationId so a user-edited slug cannot
-          // silently bypass the precondition.
-          const lifecycleResult = await runExperimentLifecycleOutcomePrecondition({
-            automationId: input.job.source.automationId,
-            tags: input.job.source.tags,
-            vault: input.vault,
-          })
-          if (lifecycleResult.kind === 'skip') {
-            lifecycleSkipReason = lifecycleResult.reason
-          }
-        }
         if (lifecycleSkipReason !== null) {
           outcome = 'skipped_gate'
           reason = 'lifecycle_precondition'

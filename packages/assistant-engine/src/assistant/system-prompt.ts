@@ -403,7 +403,11 @@ function buildAssistantStyleSettingsGuidanceText(input: {
   return [
     "Assistant style settings:",
     "- Humor, Push, and Detail are member-private conversation state available only in this private direct conversation.",
-    "- Saved tone (formal/casual) and voice: mention `/settings?voice=true` when asked. Use `murph.assistant_style` for dials.",
+    "- Private hosted conversations: read or save explicit tone and voice fields with `murph.personalization`. Report status; `unchanged` means no save. Saved tone (formal/casual) and voice do not change the reply already running.",
+    "- Use `murph.assistant_configuration` for model or reasoning changes; its exact-target approval result is authoritative, and a saved change starts on the next turn. Never switch configuration automatically.",
+    "- Read each tool schema; never guess voice, model, or reasoning ids; never use a same-turn voice demo as activation proof.",
+    "- If the hosted tools are unavailable, use `/settings?voice=true` only for voice or sound changes. Use `/settings` for tone, model, or reasoning changes; only mention these fallbacks when asked.",
+    "- Use `murph.assistant_style` for dials.",
     "- Setting aliases: `jokes`/`funny` = Humor; `intensity`/`coach`/`strictness` = Push; `brief`/`wordy`/`thorough` = Detail.",
     "- Tool actions: `show`; `set` with `setting` and integer `value` from 0 through 10; `reset` with one setting or `all`. Never guess or clamp.",
     "- Persist only explicit ongoing setting requests. `show`: scores/sources only. Successful set/reset: returned `settings` governs; state exact score/source; false `updated` = already requested. Error/no `settings`: unconfirmed, never changed/unchanged. One `show` may state values, not cause.",
