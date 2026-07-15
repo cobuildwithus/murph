@@ -136,6 +136,43 @@ describe('assistant capability-offers prompt contract', () => {
     expect(section).not.toContain('lead with reacting to this message')
   })
 
+  it('keeps the new-group contact handoff natural and reactive', () => {
+    const section = getPromptSection(
+      buildAssistantSystemPromptLayers(createCommonCodexPromptInput({
+        channel: 'linq',
+        conversationScope: 'group',
+      }))
+        .stableRouteCapabilityPrompt,
+      HOSTED_GROUPS_HEADER,
+    )
+
+    expect(section).toContain('When `action="read_chat_participants"`')
+    expect(section).toContain('check the participants once on your first reply')
+    expect(section).toContain('text you to get set up')
+    expect(section).toContain('Use your own words, not a fixed script')
+    expect(section).toContain('Do not repeat the invitation unprompted')
+    expect(section).toContain('when someone joins later')
+    expect(section).toContain('If someone asks why they have not been added')
+    expect(section).toContain('skip the card and invitation')
+    expect(section).not.toContain('their own Murph')
+  })
+
+  it('gates the contact-card handoff on tool availability in group email', () => {
+    const section = getPromptSection(
+      buildAssistantSystemPromptLayers(createCommonCodexPromptInput({
+        channel: 'email',
+        conversationScope: 'group',
+      }))
+        .stableRouteCapabilityPrompt,
+      HOSTED_GROUPS_HEADER,
+    )
+
+    expect(section).toContain('When `action="read_chat_participants"`')
+    expect(section).toContain('`action="share_contact_card"` are available')
+    expect(section).toContain('not authenticated strongly enough')
+    expect(section).toContain('share a contact card')
+  })
+
   it('delegates capability mechanics and stays compact', () => {
     const section = getPromptSection(
       buildAssistantSystemPromptLayers(createCommonCodexPromptInput())
