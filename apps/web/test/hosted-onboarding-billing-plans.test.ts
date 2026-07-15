@@ -10,8 +10,6 @@ import {
   HOSTED_FAMILY_MAX_SEATS,
   HOSTED_FAMILY_MIN_SEATS,
   HOSTED_FAMILY_PLAN_DISPLAY,
-  HOSTED_FAMILY_SEAT_RECURRING_AMOUNT_USD_CENTS,
-  HOSTED_FAMILY_SPONSORED_USAGE_ALLOWANCE_USD_MICROS,
   isHostedAutoPulseTrialEnabled,
   isHostedPulseTrialBillingState,
   isHostedPulseTrialCheckoutEnabled,
@@ -48,14 +46,15 @@ describe("hosted billing launch plan Stripe configuration", () => {
   it("exposes Family as per-seat sponsored billing outside direct member plans", () => {
     expect(HOSTED_FAMILY_MIN_SEATS).toBe(2);
     expect(HOSTED_FAMILY_MAX_SEATS).toBe(6);
-    expect(HOSTED_FAMILY_SEAT_RECURRING_AMOUNT_USD_CENTS).toBe(700);
-    expect(HOSTED_FAMILY_SPONSORED_USAGE_ALLOWANCE_USD_MICROS).toBe(10_000_000n);
     expect(HOSTED_FAMILY_PLAN_DISPLAY).toMatchObject({
       displayName: "Family",
       maxSeats: 6,
       minSeats: 2,
+      plans: [
+        { code: "pulse", recurringAmountUsdCents: 700 },
+        { code: "edge", recurringAmountUsdCents: 1_900 },
+      ],
       recurringAmountUsdCentsPerSeat: 700,
-      sponsoredUsageAllowanceUsdMicros: 10_000_000n,
     });
     expect(resolveConfiguredHostedBillingPlanCodes({
       stripePriceIdsByPlan: basePriceIds,

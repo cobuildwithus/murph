@@ -28,11 +28,13 @@ import {
 import {
   HOSTED_PULSE_TRIAL_OFFER,
   HOSTED_PULSE_TRIAL_USAGE_LIMIT_USD_MICROS,
-  HOSTED_FAMILY_SPONSORED_USAGE_ALLOWANCE_USD_MICROS,
+  getHostedAiUsageMonthlyAllowanceForPlan,
   getHostedAiUsageMonthlyAllowanceUsdMicros,
+  getHostedBillingPlanCodeForPlan,
   getHostedDefaultBillingPlanCode,
   parseHostedBillingPlanCode,
   parseHostedBillingPhase,
+  parseHostedPlanCode,
   parseHostedBillingCheckoutOffer,
   requireHostedPulseTrialPolicy,
   type HostedBillingPlanCode,
@@ -152,7 +154,7 @@ interface HostedAiUsageAllowancePricingModelResolution {
 export type HostedAiUsageAllowanceSourceKind =
   | "direct_paid_member_plan"
   | "direct_trial"
-  | "family_sponsored_pulse"
+  | "family_sponsored_plan"
   | "thread_container";
 
 interface HostedAiUsageAllowanceTokenPricingBasisConfig {
@@ -224,7 +226,7 @@ type HostedAiUsageAllowancePeriodResolution =
   };
 
 interface HostedAiUsageAllowanceBillingRef {
-  allowanceSource?: "family_sponsored_pulse" | null;
+  allowanceSource?: "family_sponsored_plan" | null;
   currentBillingPhase: string | null;
   currentBillingPlanCode: string | null;
   currentCheckoutOffer: string | null;
@@ -301,6 +303,10 @@ async function readHostedFamilySponsoredBillingRefForMember(input: {
   if (!familyAccess) {
     return null;
   }
+  const planCode = parseHostedPlanCode(familyAccess.planCode);
+  if (!planCode) {
+    return null;
+  }
 
   const billingRef = await input.tx.hostedAccountGroupBillingRef.findUnique({
     select: {
@@ -333,9 +339,9 @@ async function readHostedFamilySponsoredBillingRefForMember(input: {
   }
 
   return {
-    allowanceSource: "family_sponsored_pulse",
+    allowanceSource: "family_sponsored_plan",
     currentBillingPhase: "paid",
-    currentBillingPlanCode: "launch_monthly",
+    currentBillingPlanCode: getHostedBillingPlanCodeForPlan(planCode),
     currentCheckoutOffer: null,
     currentPeriodEnd,
     currentPeriodStart,
@@ -343,7 +349,7 @@ async function readHostedFamilySponsoredBillingRefForMember(input: {
     currentTrialStartedAt: null,
     pulseTrialPolicyVersion: null,
     pulseTrialRedeemedAt: null,
-    usageLimitUsdMicrosOverride: HOSTED_FAMILY_SPONSORED_USAGE_ALLOWANCE_USD_MICROS,
+    usageLimitUsdMicrosOverride: getHostedAiUsageMonthlyAllowanceForPlan(planCode),
   };
 }
 
@@ -1737,8 +1743,8 @@ function resolveHostedAiUsageAllowancePeriod(input: {
 
   return {
     allowanceSource:
-      input.billingRef?.allowanceSource === "family_sponsored_pulse"
-        ? "family_sponsored_pulse"
+      input.billingRef?.allowanceSource === "family_sponsored_plan"
+        ? "family_sponsored_plan"
         : "direct_paid_member_plan",
     billingPlanCode,
     kind: "period",
@@ -2643,7 +2649,7 @@ function buildHostedAiUsageGateLimitNotice(input: {
     };
   }
 
-  if (input.allowanceSource === "family_sponsored_pulse") {
+  if (input.allowanceSource === "family_sponsored_plan") {
     return {
       code: "family_usage_limit_reached",
       message: renderHostedAiUsageGateLimitNoticeMessage({

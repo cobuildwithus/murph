@@ -1,6 +1,6 @@
 "use client";
 
-import { Check, Copy, Loader2, Minus } from "lucide-react";
+import { Check, Copy, Loader2, Minus, Plus } from "lucide-react";
 import { useRouter } from "next/navigation";
 import { useMemo, useState } from "react";
 
@@ -23,6 +23,7 @@ import { Input } from "@/src/components/ui/input";
 import { Label } from "@/src/components/ui/label";
 import { PhoneNumberInput } from "@/src/components/ui/phone-number-input";
 import { SegmentedControl } from "@/src/components/ui/segmented-control";
+import type { HostedPlanCode } from "@/src/lib/hosted-onboarding/billing-plans";
 import {
   normalizeHostedEmailAddress,
   normalizeHostedTelegramUsernameForLookup,
@@ -32,11 +33,18 @@ import { cn } from "@/src/lib/utils";
 
 import { toErrorMessage } from "./hosted-settings-sync-helpers";
 
+export interface FamilyManagerTier {
+  name: string;
+  planCode: HostedPlanCode;
+  priceLabel: string;
+}
+
 export interface FamilyManagerMember {
   isOwner: boolean;
   joinedAtIso: string | null;
   label: string | null;
   memberId: string;
+  planCode: HostedPlanCode;
 }
 
 export interface FamilyManagerInvite {
@@ -44,6 +52,7 @@ export interface FamilyManagerInvite {
   channel: string;
   expiresAtIso: string;
   id: string;
+  planCode: HostedPlanCode;
   targetEmail: string | null;
   targetLabel: string | null;
   targetPhoneHint: string | null;
@@ -54,6 +63,7 @@ export interface FamilyManagerInvite {
 interface CreatedFamilyInvite {
   acceptUrl: string | null;
   id: string;
+  planCode: HostedPlanCode;
   targetEmail?: string | null;
   targetLabel: string | null;
   targetPhoneHint: string | null;
@@ -86,7 +96,19 @@ function inviteShareLink(invite: {
 
 type PendingAction =
   | { id: string; kind: "cancel-invite"; label: string }
-  | { id: string; kind: "remove-member"; label: string };
+  | { id: string; kind: "remove-member"; label: string }
+  | {
+      delta: -1 | 1;
+      kind: "change-capacity";
+      planCode: HostedPlanCode;
+    }
+  | {
+      from: HostedPlanCode;
+      id: string;
+      kind: "change-plan";
+      label: string;
+      to: HostedPlanCode;
+    };
 
 type InviteChannel = "imessage" | "email" | "telegram";
 
@@ -125,9 +147,11 @@ export function HostedFamilyStartButton(props: {
 }) {
   const [isSubmitting, setIsSubmitting] = useState(false);
   const [errorMessage, setErrorMessage] = useState<string | null>(null);
+  const [statusMessage, setStatusMessage] = useState<string | null>(null);
 
   async function startCheckout() {
     setErrorMessage(null);
+    setStatusMessage(null);
     setIsSubmitting(true);
     try {
       const response = await requestHostedOnboardingJson<{
@@ -146,6 +170,7 @@ export function HostedFamilyStartButton(props: {
         return;
       }
       setIsSubmitting(false);
+      setStatusMessage("Your Family plan is syncing with Stripe. Refresh in a moment.");
     } catch (error) {
       setIsSubmitting(false);
       setErrorMessage(toErrorMessage(error, "Could not start the Family plan right now."));
@@ -168,6 +193,11 @@ export function HostedFamilyStartButton(props: {
           {errorMessage}
         </p>
       ) : null}
+      {statusMessage ? (
+        <p role="status" className="max-w-xs text-xs leading-tight text-muted-foreground">
+          {statusMessage}
+        </p>
+      ) : null}
     </div>
   );
 }
@@ -176,7 +206,13 @@ export function HostedFamilyManager(props: {
   billingActive: boolean;
   invites: FamilyManagerInvite[];
   members: FamilyManagerMember[];
-  seatPrice: string;
+  plans: Record<HostedPlanCode, {
+    active: number;
+    billed: number;
+    invited: number;
+    remaining: number;
+    used: number;
+  }>;
   seats: {
     active: number;
     billed: number;
@@ -186,6 +222,7 @@ export function HostedFamilyManager(props: {
     remaining: number;
     used: number;
   };
+  tiers: FamilyManagerTier[];
 }) {
   const router = useRouter();
   const [inviteOpen, setInviteOpen] = useState(false);
@@ -194,6 +231,7 @@ export function HostedFamilyManager(props: {
     resolveInvitePhoneCountryOption(phoneCountryCodeHint).code
   );
   const [inviteChannel, setInviteChannel] = useState<InviteChannel>("imessage");
+  const [invitePlanCode, setInvitePlanCode] = useState<HostedPlanCode>("pulse");
   const [label, setLabel] = useState("");
   const [phone, setPhone] = useState("");
   const [telegram, setTelegram] = useState("");
@@ -204,12 +242,17 @@ export function HostedFamilyManager(props: {
   const [createdInviteCopied, setCreatedInviteCopied] = useState(false);
   const [pendingAction, setPendingAction] = useState<PendingAction | null>(null);
   const [actionError, setActionError] = useState<string | null>(null);
+  const [actionNotice, setActionNotice] = useState<string | null>(null);
   const [isActing, setIsActing] = useState(false);
   const [copiedId, setCopiedId] = useState<string | null>(null);
-  const [isRemovingSeat, setIsRemovingSeat] = useState(false);
-  const [seatError, setSeatError] = useState<string | null>(null);
 
-  const seatsFull = props.seats.remaining <= 0;
+  const invitePlan = props.tiers.find((tier) => tier.planCode === invitePlanCode)
+    ?? props.tiers[0];
+  if (!invitePlan) {
+    throw new Error("Family tiers are empty.");
+  }
+  const invitePlanStatus = props.plans[invitePlan.planCode];
+  const seatsFull = invitePlanStatus.remaining <= 0;
   const selectedPhoneCountry = useMemo(
     () => resolveInvitePhoneCountryOption(phoneCountryCode),
     [phoneCountryCode],
@@ -249,20 +292,27 @@ export function HostedFamilyManager(props: {
         : "Telegram username";
   const inviteWillAddSeat = planCanGrow && hasStableTarget;
   const inviteNeedsStableTargetForSeat = planCanGrow && !hasStableTarget;
-  const inviteSubmitDisabled = isInviting || inviteNeedsStableTargetForSeat;
+  const selectedTierUnavailable = seatsFull && !planCanGrow;
+  const inviteSubmitDisabled =
+    isInviting || inviteNeedsStableTargetForSeat || selectedTierUnavailable;
   const inviteDisabled = !props.billingActive || props.seats.used >= props.seats.max;
-  const canRemoveSeat =
-    props.billingActive &&
-    props.seats.billed > props.seats.used &&
-    props.seats.billed > props.seats.min;
   const createdInviteHasContact = Boolean(
     createdInvite?.targetEmail ||
       createdInvite?.targetPhoneHint ||
       createdInvite?.targetTelegramUsername,
   );
+  const pendingTargetTier = pendingAction?.kind === "change-plan"
+    ? props.tiers.find((tier) => tier.planCode === pendingAction.to) ?? null
+    : null;
+  const pendingCapacityTier = pendingAction?.kind === "change-capacity"
+    ? props.tiers.find((tier) => tier.planCode === pendingAction.planCode) ?? null
+    : null;
+  const pendingTargetHasCapacity = pendingAction?.kind !== "change-plan" ||
+    props.plans[pendingAction.to].remaining > 0;
 
   function resetInviteForm() {
     setInviteChannel("imessage");
+    setInvitePlanCode("pulse");
     setLabel("");
     setPhone("");
     setTelegram("");
@@ -307,6 +357,7 @@ export function HostedFamilyManager(props: {
           // Only authorize buying a seat when the dialog actually showed the
           // paid-seat cost, so a stale open-seat form never charges silently.
           addSeatIfNeeded: inviteWillAddSeat,
+          planCode: invitePlan.planCode,
           targetLabel: trimmedLabel || undefined,
           ...(inviteChannel === "imessage" && normalizedPhone
             ? { targetPhoneNumber: normalizedPhone }
@@ -346,13 +397,50 @@ export function HostedFamilyManager(props: {
       return;
     }
     setActionError(null);
+    setActionNotice(null);
     setIsActing(true);
     try {
-      const url =
-        pendingAction.kind === "cancel-invite"
+      if (pendingAction.kind === "change-capacity") {
+        const status = props.plans[pendingAction.planCode];
+        const targetQuantity = status.billed + pendingAction.delta;
+        const targetTotal = props.seats.billed + pendingAction.delta;
+        if (
+          targetQuantity < status.used ||
+          targetQuantity < 0 ||
+          targetTotal < props.seats.min ||
+          targetTotal > props.seats.max
+        ) {
+          setActionError("Family capacity changed. Refresh and try again.");
+          return;
+        }
+        const response = await requestHostedOnboardingJson<{ syncing: boolean }>({
+          method: "PATCH",
+          payload: {
+            capacities: {
+              edge: props.plans.edge.billed,
+              pulse: props.plans.pulse.billed,
+              [pendingAction.planCode]: targetQuantity,
+            },
+          },
+          url: "/api/settings/billing/family/capacity",
+        });
+        setActionNotice(
+          response.syncing
+            ? `${pendingCapacityTier?.name ?? "Family"} capacity change submitted. Stripe is still syncing; refresh in a moment.`
+            : pendingAction.delta > 0
+              ? `${pendingCapacityTier?.name ?? "Family"} capacity added.`
+              : `${pendingCapacityTier?.name ?? "Family"} capacity removed.`,
+        );
+      } else {
+        const url = pendingAction.kind === "cancel-invite"
           ? `/api/settings/billing/family/invite/${encodeURIComponent(pendingAction.id)}`
           : `/api/settings/billing/family/members/${encodeURIComponent(pendingAction.id)}`;
-      await requestHostedOnboardingJson({ method: "DELETE", url });
+        await requestHostedOnboardingJson(
+          pendingAction.kind === "change-plan"
+            ? { method: "PATCH", payload: { planCode: pendingAction.to }, url }
+            : { method: "DELETE", url },
+        );
+      }
       setPendingAction(null);
       router.refresh();
     } catch (error) {
@@ -361,33 +449,15 @@ export function HostedFamilyManager(props: {
           error,
           pendingAction.kind === "cancel-invite"
             ? "Could not cancel that invite right now."
-            : "Could not remove that member right now.",
+            : pendingAction.kind === "remove-member"
+              ? "Could not remove that member right now."
+              : pendingAction.kind === "change-plan"
+                ? "Could not change that member's tier right now."
+                : "Could not change Family capacity right now.",
         ),
       );
     } finally {
       setIsActing(false);
-    }
-  }
-
-  async function removeEmptySeat() {
-    if (!canRemoveSeat) {
-      return;
-    }
-    setSeatError(null);
-    setIsRemovingSeat(true);
-    try {
-      await requestHostedOnboardingJson({
-        method: "PATCH",
-        payload: {
-          seatCount: props.seats.billed - 1,
-        },
-        url: "/api/settings/billing/family/seats",
-      });
-      router.refresh();
-    } catch (error) {
-      setSeatError(toErrorMessage(error, "Could not remove a Family seat right now."));
-    } finally {
-      setIsRemovingSeat(false);
     }
   }
 
@@ -429,43 +499,16 @@ export function HostedFamilyManager(props: {
 
   return (
     <div className="flex flex-col gap-4">
-      <div className="flex flex-wrap items-end justify-between gap-3">
-        <div className="flex flex-col gap-1.5">
-          <div className="flex items-center gap-2.5">
-            <span className="text-sm font-medium text-foreground">
-              {props.seats.used} of {props.seats.billed} paid seats
-            </span>
-            <SeatPips max={props.seats.billed} used={props.seats.used} />
-          </div>
-          <p className="text-xs text-muted-foreground">
-            {seatsFull
-              ? planCanGrow
-                ? `No open seats. Inviting with a contact adds a paid seat at ${props.seatPrice}.`
-                : "All seats are full. Remove a member or cancel an invite to free one."
-              : `${props.seats.remaining} paid ${props.seats.remaining === 1 ? "seat" : "seats"} open`}
-          </p>
-          {seatError ? (
-            <p role="alert" className="max-w-sm text-xs leading-tight text-destructive">
-              {seatError}
+      <div className="flex flex-col gap-3">
+        <div className="flex flex-wrap items-center justify-between gap-3">
+          <div>
+            <p className="text-sm font-medium text-foreground">
+              {props.seats.used} of {props.seats.billed} paid seats assigned
             </p>
-          ) : null}
-        </div>
-        <div className="flex flex-wrap items-center justify-end gap-2">
-          {canRemoveSeat ? (
-            <Button
-              type="button"
-              variant="secondary"
-              onClick={() => void removeEmptySeat()}
-              disabled={isRemovingSeat}
-            >
-              {isRemovingSeat ? (
-                <Loader2 className="size-4 animate-spin" aria-hidden="true" />
-              ) : (
-                <Minus className="size-4" aria-hidden="true" />
-              )}
-              Remove empty seat
-            </Button>
-          ) : null}
+            <p className="text-xs text-muted-foreground">
+              Reserve the exact Pulse and Edge mix your family needs.
+            </p>
+          </div>
           <Button
             type="button"
             onClick={() => {
@@ -477,12 +520,84 @@ export function HostedFamilyManager(props: {
             Invite member
           </Button>
         </div>
+        <div className="divide-y divide-border rounded-lg border border-border">
+          {props.tiers.map((tier) => {
+            const status = props.plans[tier.planCode];
+            const canRemove = props.billingActive &&
+              status.billed > status.used &&
+              props.seats.billed > props.seats.min;
+            const canAdd = props.billingActive && props.seats.billed < props.seats.max;
+            return (
+              <div
+                key={tier.planCode}
+                className="flex flex-wrap items-center justify-between gap-3 px-3 py-2.5"
+              >
+                <div className="min-w-0">
+                  <div className="flex items-center gap-2">
+                    <span className="text-sm font-medium text-foreground">{tier.name}</span>
+                    <span className="text-xs text-muted-foreground">{tier.priceLabel}</span>
+                  </div>
+                  <div className="mt-1 flex items-center gap-2 text-xs text-muted-foreground">
+                    <span>{status.used} of {status.billed} assigned</span>
+                    <SeatPips max={status.billed} used={status.used} />
+                  </div>
+                </div>
+                <div className="flex items-center gap-1">
+                  <Button
+                    type="button"
+                    variant="ghost"
+                    size="icon"
+                    aria-label={`Remove an empty ${tier.name} seat`}
+                    disabled={!canRemove}
+                    onClick={() => {
+                      setActionError(null);
+                      setActionNotice(null);
+                      setPendingAction({
+                        delta: -1,
+                        kind: "change-capacity",
+                        planCode: tier.planCode,
+                      });
+                    }}
+                  >
+                    <Minus className="size-4" aria-hidden="true" />
+                  </Button>
+                  <span className="w-5 text-center text-sm tabular-nums">{status.billed}</span>
+                  <Button
+                    type="button"
+                    variant="ghost"
+                    size="icon"
+                    aria-label={`Add ${tier.name} seat at ${tier.priceLabel}`}
+                    disabled={!canAdd}
+                    onClick={() => {
+                      setActionError(null);
+                      setActionNotice(null);
+                      setPendingAction({
+                        delta: 1,
+                        kind: "change-capacity",
+                        planCode: tier.planCode,
+                      });
+                    }}
+                  >
+                    <Plus className="size-4" aria-hidden="true" />
+                  </Button>
+                </div>
+              </div>
+            );
+          })}
+        </div>
+        {actionNotice ? (
+          <p role="status" className="text-xs leading-tight text-muted-foreground">
+            {actionNotice}
+          </p>
+        ) : null}
       </div>
 
-      <table className="w-full text-sm">
+      <div className="overflow-x-auto">
+      <table className="w-full min-w-[44rem] text-sm">
         <thead className="sr-only">
           <tr>
             <th>Member</th>
+            <th>Tier</th>
             <th>Status</th>
             <th>Actions</th>
           </tr>
@@ -501,11 +616,36 @@ export function HostedFamilyManager(props: {
               ) : null}
             </td>
             <td className="py-3 pr-3 align-top">
+              <Badge variant="outline">
+                {props.tiers.find((tier) => tier.planCode === member.planCode)?.name}
+              </Badge>
+            </td>
+            <td className="py-3 pr-3 align-top">
               <Badge variant={member.isOwner ? "outline" : "default"}>
                 {member.isOwner ? "Owner" : "Active"}
               </Badge>
             </td>
             <td className="py-3 text-right align-top">
+              <div className="inline-flex items-center gap-1">
+                {props.tiers
+                  .filter((tier) => tier.planCode !== member.planCode)
+                  .map((tier) => (
+                    <Button
+                      key={tier.planCode}
+                      type="button"
+                      variant="ghost"
+                      size="sm"
+                      onClick={() => setPendingAction({
+                        from: member.planCode,
+                        id: member.memberId,
+                        kind: "change-plan",
+                        label: member.isOwner ? "yourself" : member.label ?? "this family member",
+                        to: tier.planCode,
+                      })}
+                    >
+                      Move to {tier.name}
+                    </Button>
+                  ))}
               {member.isOwner ? null : (
                 <Button
                   type="button"
@@ -522,6 +662,7 @@ export function HostedFamilyManager(props: {
                   Remove
                 </Button>
               )}
+              </div>
             </td>
           </tr>
         ))}
@@ -538,6 +679,11 @@ export function HostedFamilyManager(props: {
                 <div className="text-xs text-muted-foreground">
                   {secondary ? `${secondary} · ` : ""}Expires {formatFamilyDate(invite.expiresAtIso)}
                 </div>
+              </td>
+              <td className="py-3 pr-3 align-top">
+                <Badge variant="outline">
+                  {props.tiers.find((tier) => tier.planCode === invite.planCode)?.name}
+                </Badge>
               </td>
               <td className="py-3 pr-3 align-top">
                 <Badge variant="secondary">Pending</Badge>
@@ -583,6 +729,7 @@ export function HostedFamilyManager(props: {
         })}
         </tbody>
       </table>
+      </div>
 
       {!props.billingActive ? (
         <p
@@ -662,6 +809,21 @@ export function HostedFamilyManager(props: {
                   />
                 </div>
 
+                <div className="flex flex-col gap-1.5">
+                  <Label>Access</Label>
+                  <SegmentedControl
+                    aria-label="Family member tier"
+                    options={props.tiers.map((tier) => ({
+                      label: `${tier.name} · ${tier.priceLabel}`,
+                      value: tier.planCode,
+                    }))}
+                    value={invitePlanCode}
+                    onValueChange={setInvitePlanCode}
+                    className="border-[#c4a882]/25 bg-[#f5f0e8]"
+                    itemClassName="text-[#736a58] hover:bg-[#fffcf6]/70 hover:text-[#2d3436] aria-pressed:bg-[#fffcf6] aria-pressed:text-[#2d3436] aria-pressed:shadow-none"
+                  />
+                </div>
+
                 <SegmentedControl
                   aria-label="Invite by"
                   options={INVITE_CHANNEL_OPTIONS}
@@ -712,11 +874,15 @@ export function HostedFamilyManager(props: {
                     />
                   </div>
                 ) : null}
-                {inviteNeedsStableTargetForSeat ? (
+                {selectedTierUnavailable ? (
+                  <p role="status" className="text-xs leading-5 text-[#736a58]">
+                    No open {invitePlan.name} seats. Choose a tier with an open seat or free one first.
+                  </p>
+                ) : inviteNeedsStableTargetForSeat ? (
                   <p role="status" className="text-xs leading-5 text-[#736a58]">
                     {activeContactInput
-                      ? `Enter a valid ${activeContactInputNoun} to invite. It adds a paid seat at ${props.seatPrice}.`
-                      : `Add a contact to invite. It adds a paid seat at ${props.seatPrice}.`}
+                      ? `Enter a valid ${activeContactInputNoun} to invite. It adds a paid ${invitePlan.name} seat at ${invitePlan.priceLabel}.`
+                      : `Add a contact to invite. It adds a paid ${invitePlan.name} seat at ${invitePlan.priceLabel}.`}
                   </p>
                 ) : !activeContactInput ? (
                   <p className="text-xs leading-5 text-[#736a58]">
@@ -745,7 +911,7 @@ export function HostedFamilyManager(props: {
                   {isInviting ? (
                     <Loader2 className="size-4 animate-spin" aria-hidden="true" />
                   ) : inviteWillAddSeat ? (
-                    `Create invite & add seat · ${props.seatPrice}`
+                    `Create invite & add ${invitePlan.name} · ${invitePlan.priceLabel}`
                   ) : (
                     "Create invite"
                   )}
@@ -770,12 +936,26 @@ export function HostedFamilyManager(props: {
         <DialogContent className={DIALOG_CLASS}>
           <DialogHeader className="pr-10">
             <DialogTitle className="font-serif text-2xl/7 font-semibold tracking-normal text-[#2d3436]">
-              {pendingAction?.kind === "remove-member" ? "Remove family member" : "Cancel invite"}
+              {pendingAction?.kind === "remove-member"
+                ? "Remove family member"
+                : pendingAction?.kind === "change-plan"
+                  ? `Move to ${props.tiers.find((tier) => tier.planCode === pendingAction.to)?.name}`
+                  : pendingAction?.kind === "change-capacity"
+                    ? `${pendingAction.delta > 0 ? "Add" : "Remove"} ${pendingCapacityTier?.name} seat`
+                    : "Cancel invite"}
             </DialogTitle>
             <DialogDescription className="text-sm leading-6 text-[#736a58]">
               {pendingAction?.kind === "remove-member"
                 ? `Remove ${pendingAction.label}? They keep their own Murph account and data, but their access through your Family plan ends.`
-                : `Cancel the invite for ${pendingAction?.label ?? "this person"}? The invite link stops working.`}
+                : pendingAction?.kind === "change-plan"
+                  ? pendingTargetHasCapacity
+                    ? `Change ${pendingAction.label} from ${props.tiers.find((tier) => tier.planCode === pendingAction.from)?.name} to ${pendingTargetTier?.name}?`
+                    : `Add a paid ${pendingTargetTier?.name} seat above, move ${pendingAction.label}, then remove the empty ${props.tiers.find((tier) => tier.planCode === pendingAction.from)?.name} seat if you no longer need it.`
+                  : pendingAction?.kind === "change-capacity"
+                    ? pendingAction.delta > 0
+                      ? `Add one ${pendingCapacityTier?.name} seat at ${pendingCapacityTier?.priceLabel}? Stripe updates immediately and may invoice the prorated amount now.`
+                      : `Remove one empty ${pendingCapacityTier?.name} seat? This lowers your charge at the next renewal; it does not issue an immediate credit.`
+                    : `Cancel the invite for ${pendingAction?.label ?? "this person"}? The invite link stops working.`}
             </DialogDescription>
           </DialogHeader>
 
@@ -792,16 +972,22 @@ export function HostedFamilyManager(props: {
             <Button
               type="button"
               size="xl"
-              variant="destructive"
+              variant={pendingAction?.kind === "remove-member" || pendingAction?.kind === "cancel-invite"
+                ? "destructive"
+                : "default"}
               onClick={() => void confirmPendingAction()}
-              disabled={isActing}
+              disabled={isActing || !pendingTargetHasCapacity}
               className="w-full"
             >
               {isActing
                 ? "Working..."
                 : pendingAction?.kind === "remove-member"
                   ? "Remove member"
-                  : "Cancel invite"}
+                  : pendingAction?.kind === "change-plan"
+                    ? pendingTargetHasCapacity ? "Change tier" : `Add ${pendingTargetTier?.name} seat first`
+                    : pendingAction?.kind === "change-capacity"
+                      ? pendingAction.delta > 0 ? "Add paid seat" : "Remove empty seat"
+                      : "Cancel invite"}
             </Button>
             <Button
               type="button"
@@ -811,7 +997,9 @@ export function HostedFamilyManager(props: {
               disabled={isActing}
               className="w-full"
             >
-              Keep
+              {pendingAction?.kind === "change-plan" || pendingAction?.kind === "change-capacity"
+                ? "Not now"
+                : "Keep"}
             </Button>
           </div>
         </DialogContent>

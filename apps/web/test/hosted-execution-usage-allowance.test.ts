@@ -1943,6 +1943,29 @@ describe("resolveHostedAiUsageGate", () => {
     }));
   });
 
+  it("uses the sponsored member's exact Edge allowance", async () => {
+    const prisma = createGatePrisma({
+      billingStatus: HostedBillingStatus.not_started,
+      familyAccessActive: true,
+      familyPlanCode: "edge",
+      findUniquePeriod: null,
+      periodEnd: new Date("2026-05-01T00:00:00.000Z"),
+      periodStart: new Date("2026-04-01T00:00:00.000Z"),
+      spentUsdMicros: 0n,
+    });
+
+    await expect(resolveHostedAiUsageGate({
+      memberId: "member_123",
+      now: "2026-04-09T12:00:00.000Z",
+      prisma: prisma as never,
+    })).resolves.toMatchObject({
+      allowed: true,
+      billingPlanCode: "launch_edge_monthly",
+      limitUsdMicros: 25_000_000n,
+      remainingUsdMicros: 25_000_000n,
+    });
+  });
+
   it("denies Family-sponsored members when the group billing period is missing", async () => {
     const prisma = createGatePrisma({
       billingStatus: HostedBillingStatus.not_started,
@@ -2901,6 +2924,7 @@ function createAllowanceTx(input: {
   executeRaw: AllowanceExecuteRawMock;
   familyAccessActive?: boolean;
   familyBillingPlanCode?: string | null;
+  familyPlanCode?: "edge" | "pulse";
   hostedAiUsageAggregate?: ReturnType<typeof vi.fn>;
   hostedAiUsageUpdateMany: ReturnType<typeof vi.fn>;
   limitNoticeSentAt?: Date | null;
@@ -2981,6 +3005,7 @@ function createAllowanceTx(input: {
             },
             groupId: "hbag_family",
             memberId: "member_123",
+            planCode: input.familyPlanCode ?? "pulse",
             role: "member",
             status: "active",
           }
@@ -3040,6 +3065,7 @@ function createGatePrisma(input: {
   executeRaw?: ReturnType<typeof vi.fn>;
   familyAccessActive?: boolean;
   familyBillingPlanCode?: string | null;
+  familyPlanCode?: "edge" | "pulse";
   familyPeriodEnd?: Date | null;
   familyPeriodStart?: Date | null;
   findUniquePeriod?: {
@@ -3165,6 +3191,7 @@ function createGatePrisma(input: {
             },
             groupId: "hbag_family",
             memberId: "member_123",
+            planCode: input.familyPlanCode ?? "pulse",
             role: "member",
             status: "active",
           }

@@ -24,6 +24,7 @@ import {
 } from "./stripe-billing-lookup";
 import {
   applyStripeCheckoutCompleted,
+  cancelHostedFamilySponsoredCheckoutSubscription,
   cancelHostedPulseTrialCheckoutLoserSubscription,
 } from "./stripe-billing-events";
 
@@ -63,6 +64,11 @@ export async function reconcileHostedBillingCheckoutSuccess(input: {
     prisma,
     session,
   });
+  if (activationOutcome.cleanupFamilySponsoredStripeSubscriptionId) {
+    await cancelHostedFamilySponsoredCheckoutSubscription({
+      subscriptionId: activationOutcome.cleanupFamilySponsoredStripeSubscriptionId,
+    });
+  }
   if (activationOutcome.cleanupPulseTrialStripeSubscriptionId) {
     await cancelHostedPulseTrialCheckoutLoserSubscription({
       memberId: invite.memberId,
@@ -93,12 +99,14 @@ async function applyHostedCheckoutSessionSuccess(input: {
 }): Promise<{
   activatedMemberId: string | null;
   cleanupPulseTrialStripeSubscriptionId?: string | null;
+  cleanupFamilySponsoredStripeSubscriptionId?: string | null;
   hostedExecutionEventId: string | null;
   welcomeEmailMemberId: string | null;
 }> {
   let activationOutcome: {
     activatedMemberId: string | null;
     cleanupPulseTrialStripeSubscriptionId?: string | null;
+    cleanupFamilySponsoredStripeSubscriptionId?: string | null;
     hostedExecutionEventId: string | null;
     welcomeEmailMemberId: string | null;
   } = {

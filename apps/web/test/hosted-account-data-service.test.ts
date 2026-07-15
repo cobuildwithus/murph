@@ -108,6 +108,7 @@ const REQUIRED_STORE_SLUGS = [
   "prisma.hosted_account_group_membership",
   "prisma.hosted_account_group_invite",
   "prisma.hosted_account_group_billing_ref",
+  "prisma.hosted_account_group_plan_capacity",
   "prisma.hosted_mailbox_item",
   "prisma.hosted_mailbox_payload",
   "prisma.hosted_mailbox_lane_counter",
