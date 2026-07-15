@@ -3,6 +3,11 @@ import { createHmac } from "node:crypto";
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
 
 import {
+  readHostedLinqFirstContactMemberState,
+  readHostedMailboxItemForTest,
+  type HostedMailboxItemForTest,
+} from "#hosted-web-testing";
+import {
   buildHostedExecutionMemberActivatedWake,
 } from "@murphai/hosted-execution";
 import {
@@ -33,7 +38,10 @@ import {
 
 const runId = Date.now();
 const userId = `member_local_retryable_outbox_restart_${runId}`;
-const chatId = `chat_local_retryable_outbox_restart_${runId}`;
+const olderChatId = `chat_local_retryable_outbox_older_${runId}`;
+const foregroundChatId = `chat_local_retryable_outbox_foreground_${runId}`;
+const olderEventId = `evt_retryable_outbox_older_${runId}`;
+const foregroundEventId = `evt_retryable_outbox_foreground_${runId}`;
 const linqWebhookSecret = "linq-local-retryable-outbox-restart-secret";
 const productionLikeAssistantModel = "gpt-5.5";
 const olderInboundText = "older retryable outbox input";
@@ -60,10 +68,12 @@ describe("hosted local retryable outbox foreground restart e2e", () => {
     await startScenario();
   }, 300_000);
 
-  it("serves new foreground work before replaying a durable retry exactly once", async () => {
+  it("rebinds fresh direct work before replaying its former-route delivery exactly once", async () => {
     const memberPhone = buildLinqRecipientPhoneNumber(userId);
     const homePhone = buildLinqHomePhoneNumber(userId);
-    const replyPath = `/chats/${encodeURIComponent(chatId)}/messages`;
+    const olderReplyPath = `/chats/${encodeURIComponent(olderChatId)}/messages`;
+    const foregroundReplyPath =
+      `/chats/${encodeURIComponent(foregroundChatId)}/messages`;
     const olderReplyMatcher = matchLinqMessageText(olderReplyText);
     const foregroundReplyMatcher = matchLinqMessageText(foregroundReplyText);
 
@@ -75,28 +85,35 @@ describe("hosted local retryable outbox foreground restart e2e", () => {
     await requireScenario().runWake(buildActivationWake(), userId);
     await requireScenario().waitForHostedCompletion(userId);
     await requireScenario().bindActiveHostedLinqHomeChat({
-      chatId,
+      chatId: olderChatId,
       memberId: userId,
-      recipientPhone: memberPhone,
+      participantPhone: memberPhone,
+      recipientPhone: homePhone,
+    });
+    await expect(readMemberState()).resolves.toEqual({
+      homeChatId: olderChatId,
+      homeRecipientPhone: homePhone,
+      memberCount: 1,
+      memberId: userId,
+      pendingChatId: null,
     });
 
     const baselineAcceptedRequestCount = requireLinqStub().acceptedSendRequests.length;
-    const baselineMessageIdCount = requireLinqStub().listObservedMessageIds(chatId).length;
     const baselineProviderRequestCount = countAssistantProviderResponsesApiRequests();
     const baselineOlderObservedCount = requireLinqStub().countObservedSends(
-      replyPath,
+      olderReplyPath,
       olderReplyMatcher,
     );
     const baselineOlderAcceptedCount = requireLinqStub().countAcceptedSends(
-      replyPath,
+      olderReplyPath,
       olderReplyMatcher,
     );
     const baselineForegroundObservedCount = requireLinqStub().countObservedSends(
-      replyPath,
+      foregroundReplyPath,
       foregroundReplyMatcher,
     );
     const baselineForegroundAcceptedCount = requireLinqStub().countAcceptedSends(
-      replyPath,
+      foregroundReplyPath,
       foregroundReplyMatcher,
     );
 
@@ -107,14 +124,16 @@ describe("hosted local retryable outbox foreground restart e2e", () => {
       matchInputContains: foregroundInboundText,
     });
     requireLinqStub().armNextPreAcceptRetryableSendFailure({
-      expectedPath: replyPath,
+      expectedPath: olderReplyPath,
       matchRequest: olderReplyMatcher,
     });
 
     const olderWebhookResponse = await postSignedLinqWebhook(
-      buildHostedLinqInboundEvent(userId, chatId, {
-        eventId: `evt_retryable_outbox_older_${runId}`,
+      buildHostedLinqInboundEvent(userId, olderChatId, {
+        eventId: olderEventId,
+        isGroup: false,
         messageId: `msg_retryable_outbox_older_${runId}`,
+        service: "iMessage",
         text: olderInboundText,
       }),
     );
@@ -127,28 +146,28 @@ describe("hosted local retryable outbox foreground restart e2e", () => {
     await requireScenario().waitForLatestPendingWake(userId);
     await requireLinqStub().waitForMatchingSendCount({
       expectedCount: baselineOlderObservedCount + 3,
-      expectedPath: replyPath,
+      expectedPath: olderReplyPath,
       matchRequest: olderReplyMatcher,
       scenario: requireScenario(),
       userId,
     });
-    expect(requireLinqStub().countAcceptedSends(replyPath, olderReplyMatcher)).toBe(
+    expect(requireLinqStub().countAcceptedSends(olderReplyPath, olderReplyMatcher)).toBe(
       baselineOlderAcceptedCount,
     );
-    expect(requireLinqStub().listObservedMessageIds(chatId)).toHaveLength(
-      baselineMessageIdCount,
-    );
+    const olderMailboxItem = await readMailboxItem(olderEventId);
+    expect(olderMailboxItem).toMatchObject({
+      consumedAt: null,
+      dedupeKey: olderEventId,
+      kind: "conversation.message",
+      lane: "conversation",
+    });
 
     const retryableStatus = await waitForDurableRetryableOutbox();
-    const retryWakeAtMs = Date.parse(retryableStatus.workspace?.nextWakeAt ?? "");
-    expect(Number.isFinite(retryWakeAtMs)).toBe(true);
-    expect(retryWakeAtMs - Date.now()).toBeGreaterThan(5_000);
     expect(retryableStatus.mailboxLag.every((lane) => lane.lag === "0")).toBe(true);
 
     const baselineIdleShutdownCleanupCount = countActivityExpiredDestroyRequestLogs();
     const restartedStatus = await waitForIdleShutdownCheckpoint({
       baselineCleanupCount: baselineIdleShutdownCleanupCount,
-      retryWakeAtMs,
     });
     expect(restartedStatus.workspace).not.toBeNull();
     expect(readHostedExecutionSnapshotHotRef(restartedStatus.workspace?.snapshotRef ?? null))
@@ -159,11 +178,16 @@ describe("hosted local retryable outbox foreground restart e2e", () => {
     expect(restartedStatus.lastErrorCode ?? null).toBeNull();
     expect(countActivityExpiredDestroyRequestLogs())
       .toBeGreaterThan(baselineIdleShutdownCleanupCount);
+    expect(requireLinqStub().countAcceptedSends(olderReplyPath, olderReplyMatcher)).toBe(
+      baselineOlderAcceptedCount,
+    );
 
     const foregroundWebhookResponse = await postSignedLinqWebhook(
-      buildHostedLinqInboundEvent(userId, chatId, {
-        eventId: `evt_retryable_outbox_foreground_${runId}`,
+      buildHostedLinqInboundEvent(userId, foregroundChatId, {
+        eventId: foregroundEventId,
+        isGroup: false,
         messageId: `msg_retryable_outbox_foreground_${runId}`,
+        service: "iMessage",
         text: foregroundInboundText,
       }),
     );
@@ -172,28 +196,64 @@ describe("hosted local retryable outbox foreground restart e2e", () => {
       ok: true,
       reason: "wake-appended-active-member",
     });
+    await expect(readMemberState()).resolves.toEqual({
+      homeChatId: foregroundChatId,
+      homeRecipientPhone: homePhone,
+      memberCount: 1,
+      memberId: userId,
+      pendingChatId: null,
+    });
+    const foregroundMailboxItem = await readMailboxItem(foregroundEventId);
+    expect(foregroundMailboxItem).toMatchObject({
+      dedupeKey: foregroundEventId,
+      kind: "conversation.message",
+      lane: "conversation",
+    });
+    expect(foregroundMailboxItem.id).not.toBe(olderMailboxItem.id);
+    expect(BigInt(foregroundMailboxItem.laneSeq))
+      .toBeGreaterThan(BigInt(olderMailboxItem.laneSeq));
 
     await requireScenario().waitForLatestPendingWake(userId);
     const foregroundReply = await requireLinqStub().waitForAdditionalAcceptedSend({
       baselineCount: baselineForegroundAcceptedCount,
-      expectedPath: replyPath,
+      expectedPath: foregroundReplyPath,
       matchRequest: foregroundReplyMatcher,
       scenario: requireScenario(),
       userId,
     });
     expect(requireLinqStub().readObservedMessageText(foregroundReply)).toBe(foregroundReplyText);
-    expect(requireLinqStub().countAcceptedSends(replyPath, olderReplyMatcher)).toBe(
+    expect(requireLinqStub().countAcceptedSends(olderReplyPath, olderReplyMatcher)).toBe(
       baselineOlderAcceptedCount,
     );
+    const unconsumedOlderMailboxItem = await readMailboxItem(olderEventId);
+    expect(unconsumedOlderMailboxItem).toMatchObject({
+      consumedAt: null,
+      id: olderMailboxItem.id,
+    });
+    const consumedForegroundMailboxItem = await waitForConsumedMailboxItem(
+      foregroundEventId,
+    );
+    expect(consumedForegroundMailboxItem.id).toBe(foregroundMailboxItem.id);
+    expect(consumedForegroundMailboxItem.consumedAt).not.toBeNull();
 
     const olderRetriedReply = await requireLinqStub().waitForAdditionalAcceptedSend({
       baselineCount: baselineOlderAcceptedCount,
-      expectedPath: replyPath,
+      expectedPath: olderReplyPath,
       matchRequest: olderReplyMatcher,
       scenario: requireScenario(),
       userId,
     });
     expect(requireLinqStub().readObservedMessageText(olderRetriedReply)).toBe(olderReplyText);
+    const consumedOlderMailboxItem = await waitForConsumedMailboxItem(olderEventId);
+    expect(consumedOlderMailboxItem.id).toBe(olderMailboxItem.id);
+    expect(consumedOlderMailboxItem.consumedAt).not.toBeNull();
+    await expect(readMemberState()).resolves.toEqual({
+      homeChatId: foregroundChatId,
+      homeRecipientPhone: homePhone,
+      memberCount: 1,
+      memberId: userId,
+      pendingChatId: null,
+    });
 
     const finalStatus = await requireScenario().waitForHostedCompletion(userId);
     expect(finalStatus.lastErrorCode ?? null).toBeNull();
@@ -201,25 +261,38 @@ describe("hosted local retryable outbox foreground restart e2e", () => {
 
     const acceptedReplies = requireLinqStub().acceptedSendRequests
       .slice(baselineAcceptedRequestCount)
-      .filter((request) => request.url === replyPath);
-    expect(acceptedReplies.map((request) => requireLinqStub().readObservedMessageText(request)))
-      .toEqual([foregroundReplyText, olderReplyText]);
-    expect(requireLinqStub().countObservedSends(replyPath, foregroundReplyMatcher)).toBe(
+      .filter((request) =>
+        request.url === olderReplyPath || request.url === foregroundReplyPath
+      );
+    expect(acceptedReplies.map((request) => ({
+      path: request.url,
+      text: requireLinqStub().readObservedMessageText(request),
+    }))).toEqual([
+      {
+        path: foregroundReplyPath,
+        text: foregroundReplyText,
+      },
+      {
+        path: olderReplyPath,
+        text: olderReplyText,
+      },
+    ]);
+    expect(
+      requireLinqStub().countObservedSends(foregroundReplyPath, foregroundReplyMatcher),
+    ).toBe(
       baselineForegroundObservedCount + 1,
     );
-    expect(requireLinqStub().countObservedSends(replyPath, olderReplyMatcher)).toBe(
+    expect(requireLinqStub().countObservedSends(olderReplyPath, olderReplyMatcher)).toBe(
       baselineOlderObservedCount + 4,
     );
-    expect(requireLinqStub().countAcceptedSends(replyPath, foregroundReplyMatcher)).toBe(
+    expect(
+      requireLinqStub().countAcceptedSends(foregroundReplyPath, foregroundReplyMatcher),
+    ).toBe(
       baselineForegroundAcceptedCount + 1,
     );
-    expect(requireLinqStub().countAcceptedSends(replyPath, olderReplyMatcher)).toBe(
+    expect(requireLinqStub().countAcceptedSends(olderReplyPath, olderReplyMatcher)).toBe(
       baselineOlderAcceptedCount + 1,
     );
-    expect(requireLinqStub().listObservedMessageIds(chatId)).toHaveLength(
-      baselineMessageIdCount + 2,
-    );
-
     const assistantProviderRequests = requireScenario().assistantProviderRequests
       .filter((request) => request.url === "/v1/responses")
       .slice(baselineProviderRequestCount);
@@ -233,11 +306,11 @@ describe("hosted local retryable outbox foreground restart e2e", () => {
 
     await assertNoDuplicateDeliveryAfterQuiescence({
       baselineForegroundAcceptedCount,
-      baselineMessageIdCount,
       baselineOlderAcceptedCount,
+      foregroundReplyPath,
       foregroundReplyMatcher,
+      olderReplyPath,
       olderReplyMatcher,
-      replyPath,
     });
     await requireScenario().assertHealthyHostedRun(userId, {
       expectAssistantProviderRequest: true,
@@ -279,16 +352,15 @@ async function waitForDurableRetryableOutbox(): Promise<HostedRunnerStatusRespon
   while (Date.now() - startedAt < 20_000) {
     const status = await readHostedRunnerStatusWithLogLimit(1_000);
     lastStatus = status;
-    const nextWakeAtMs = Date.parse(status.workspace?.nextWakeAt ?? "");
     if (
       status.workspace
-      && !status.inFlight
       && !status.lastErrorCode
       && status.mailboxLag.every((lane) => lane.lag === "0")
-      && Number.isFinite(nextWakeAtMs)
-      && nextWakeAtMs > Date.now()
-      // The prepared delivery effect is consumed by this attempt; the durable
-      // retry is represented by its future wake and nonterminal attempt state.
+      // These counters come from the committed workspace checkpoint. The
+      // prepared delivery effect is consumed, while the failed send remains
+      // nonterminal for a later retry. The outer invocation may still be
+      // draining unrelated runtime residue, so inFlight is not a durability
+      // boundary and the workspace's earliest wake may belong to that cleanup.
       && readHostedOutboxCounter(status, "hostedOutboxDeliveryAttempted") === 1
       && readHostedOutboxCounter(status, "hostedOutboxDeliverySent") === 0
       && readHostedOutboxCounter(status, "hostedOutboxTerminalizedSending") === 0
@@ -306,17 +378,25 @@ async function waitForDurableRetryableOutbox(): Promise<HostedRunnerStatusRespon
 
 async function waitForIdleShutdownCheckpoint(input: {
   baselineCleanupCount: number;
-  retryWakeAtMs: number;
 }): Promise<HostedRunnerStatusResponse> {
   const startedAt = Date.now();
   let lastActivityExpiryError: unknown = null;
   let lastStatus: HostedRunnerStatusResponse | null = null;
+  let lastStatusReadError: unknown = null;
 
   while (Date.now() - startedAt < 20_000) {
-    if (Date.now() >= input.retryWakeAtMs) {
-      break;
+    let status: HostedRunnerStatusResponse;
+    try {
+      status = await readHostedRunnerStatusWithLogLimit(100);
+      lastStatusReadError = null;
+    } catch (error) {
+      // The status transport can briefly disappear while the forced idle
+      // shutdown replaces the runner container. Stay within the same bounded
+      // waiter and let the replacement expose its checkpointed status.
+      lastStatusReadError = error;
+      await sleep(100);
+      continue;
     }
-    const status = await readHostedRunnerStatusWithLogLimit(100);
     lastStatus = status;
     const hotRef = status.workspace
       ? readHostedExecutionSnapshotHotRef(status.workspace.snapshotRef)
@@ -346,39 +426,84 @@ async function waitForIdleShutdownCheckpoint(input: {
   }
 
   throw new Error(await requireScenario().buildFailureMessage(userId, [
-    "Timed out forcing an idle checkpoint and container restart before the old retry became due.",
+    "Timed out forcing an idle checkpoint and container restart.",
     ...(lastStatus ? [`last status: ${JSON.stringify(lastStatus)}`] : []),
     ...(lastActivityExpiryError
       ? [`last activity expiry error: ${formatErrorMessage(lastActivityExpiryError)}`]
+      : []),
+    ...(lastStatusReadError
+      ? [`last status read error: ${formatErrorMessage(lastStatusReadError)}`]
       : []),
   ]));
 }
 
 async function assertNoDuplicateDeliveryAfterQuiescence(input: {
   baselineForegroundAcceptedCount: number;
-  baselineMessageIdCount: number;
   baselineOlderAcceptedCount: number;
+  foregroundReplyPath: string;
   foregroundReplyMatcher: ObservedLinqRequestMatcher;
+  olderReplyPath: string;
   olderReplyMatcher: ObservedLinqRequestMatcher;
-  replyPath: string;
 }): Promise<void> {
   const startedAt = Date.now();
   let lastStatus: HostedRunnerStatusResponse | null = null;
   while (Date.now() - startedAt < 3_000) {
     lastStatus = await readHostedRunnerStatusWithLogLimit(100);
-    expect(requireLinqStub().countAcceptedSends(input.replyPath, input.foregroundReplyMatcher))
+    expect(
+      requireLinqStub().countAcceptedSends(
+        input.foregroundReplyPath,
+        input.foregroundReplyMatcher,
+      ),
+    )
       .toBe(input.baselineForegroundAcceptedCount + 1);
-    expect(requireLinqStub().countAcceptedSends(input.replyPath, input.olderReplyMatcher))
+    expect(
+      requireLinqStub().countAcceptedSends(
+        input.olderReplyPath,
+        input.olderReplyMatcher,
+      ),
+    )
       .toBe(input.baselineOlderAcceptedCount + 1);
-    expect(requireLinqStub().listObservedMessageIds(chatId)).toHaveLength(
-      input.baselineMessageIdCount + 2,
-    );
     await sleep(250);
   }
 
   expect(lastStatus?.lastErrorCode ?? null).toBeNull();
   expect(lastStatus?.mailboxLag.every((lane) => lane.lag === "0")).toBe(true);
   expect(lastStatus ? readPendingDeliveryEffectCount(lastStatus) : -1).toBe(0);
+}
+
+async function readMemberState() {
+  return await readHostedLinqFirstContactMemberState({
+    environment: requireScenario().runtimeEnv,
+    memberPhone: buildLinqRecipientPhoneNumber(userId),
+  });
+}
+
+async function readMailboxItem(dedupeKey: string): Promise<HostedMailboxItemForTest> {
+  return await readHostedMailboxItemForTest({
+    dedupeKey,
+    environment: requireScenario().runtimeEnv,
+    userId,
+  });
+}
+
+async function waitForConsumedMailboxItem(
+  dedupeKey: string,
+): Promise<HostedMailboxItemForTest> {
+  const startedAt = Date.now();
+  let lastItem: HostedMailboxItemForTest | null = null;
+  while (Date.now() - startedAt < 20_000) {
+    lastItem = await readMailboxItem(dedupeKey);
+    if (lastItem.consumedAt) {
+      return lastItem;
+    }
+    await sleep(100);
+  }
+
+  throw new Error(await requireScenario().buildFailureMessage(userId, [
+    "Timed out waiting for an accepted reply to consume its exact mailbox item.",
+    `mailbox dedupe key: ${dedupeKey}`,
+    ...(lastItem ? [`last mailbox item: ${JSON.stringify(lastItem)}`] : []),
+  ]));
 }
 
 async function readHostedRunnerStatusWithLogLimit(

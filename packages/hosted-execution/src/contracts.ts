@@ -167,8 +167,11 @@ export interface HostedExecutionMemberPreferences {
 
 export interface HostedExecutionMemberPreferencesUpdatedEvent
   extends HostedExecutionBaseEvent {
+  causalOrigin?: "event" | "turn";
   kind: "member.preferences.updated";
+  preferenceCausalSeq?: string;
   preferences: HostedExecutionMemberPreferences;
+  requestedFields?: Array<"tone" | "voice">;
 }
 
 export type HostedExecutionAssistantNotificationDeliveryDispatchMode =
@@ -484,8 +487,11 @@ export interface HostedExecutionMemberChannelsUpdatedWake extends HostedExecutio
 
 export interface HostedExecutionMemberPreferencesUpdatedWake
   extends HostedExecutionBaseWake {
+  causalOrigin?: "event" | "turn";
   kind: "member.preferences.updated";
+  preferenceCausalSeq?: string;
   preferences: HostedExecutionMemberPreferences;
+  requestedFields?: Array<"tone" | "voice">;
 }
 
 export interface HostedExecutionVaultShareDeliveryWake extends HostedExecutionBaseWake {

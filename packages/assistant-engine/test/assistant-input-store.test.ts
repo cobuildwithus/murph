@@ -2,6 +2,12 @@ import { rm, stat, symlink, writeFile } from 'node:fs/promises'
 import path from 'node:path'
 import { afterEach, describe, expect, it } from 'vitest'
 import {
+  createHostedAssistantConversationIdentifierBlind,
+  createHostedMailboxAssistantInputId,
+  hashHostedAssistantConversationIdentifier,
+  hashNullableHostedAssistantConversationIdentifier,
+} from '@murphai/hosted-execution/assistant-identifiers'
+import {
   serializeHostedEmailThreadTarget,
 } from '@murphai/runtime-state'
 import {
@@ -473,6 +479,36 @@ describe('assistant input event store', () => {
     ).resolves.toEqual(system)
   })
 
+  it('shares the hosted mailbox input id derivation without changing existing ids', () => {
+    const rawIdentity = {
+      dedupeKey: 'evt_golden',
+      eventId: 'evt_golden',
+      lane: 'conversation' as const,
+      secret: 'hbidx:phone:v1:account',
+      userId: 'member_golden',
+    }
+    const blind = createHostedAssistantConversationIdentifierBlind(rawIdentity)
+    const sourceRef = createHostedMailboxSourceRef({
+      dedupeKey: hashNullableHostedAssistantConversationIdentifier(
+        blind,
+        rawIdentity.dedupeKey,
+      ),
+      eventId: hashHostedAssistantConversationIdentifier(
+        blind,
+        rawIdentity.eventId,
+      ),
+      lane: rawIdentity.lane,
+      laneSeq: '42',
+    })
+
+    expect(createAssistantInputEventId({ sourceRef })).toBe(
+      createHostedMailboxAssistantInputId(rawIdentity),
+    )
+    expect(createAssistantInputEventId({ sourceRef })).toBe(
+      'ain_f4b132fd351b0ac309d77bfc4223137e',
+    )
+  })
+
   it('falls back to hosted event identity when dedupe identity is absent', async () => {
     const first = createHostedMailboxSourceRef({
       dedupeKey: null,
@@ -716,6 +752,54 @@ describe('assistant input event store', () => {
         },
       }),
     ).rejects.toThrow('cursor inputId must match its inputId')
+  })
+
+  it('rejects an internally valid input record stored at another input id path', async () => {
+    const { vaultRoot } = await createAssistantInputStoreVault(
+      'assistant-input-store-path-record-identity-',
+    )
+    const first = await upsertAssistantInputEvent({
+      vault: vaultRoot,
+      event: {
+        occurredAt: '2026-04-22T10:00:00.000Z',
+        sourceRef: createHostedMailboxSourceRef({
+          eventId: 'evt_path_identity_first',
+          itemId: 'item_path_identity_first',
+          laneSeq: '42',
+        }),
+      },
+    })
+    const second = await upsertAssistantInputEvent({
+      vault: vaultRoot,
+      event: {
+        occurredAt: '2026-04-22T10:00:01.000Z',
+        sourceRef: createHostedMailboxSourceRef({
+          eventId: 'evt_path_identity_second',
+          itemId: 'item_path_identity_second',
+          laneSeq: '43',
+        }),
+      },
+    })
+    const paths = resolveAssistantStatePaths(vaultRoot)
+    await writeFile(
+      resolveAssistantInputEventPath({
+        inputId: first.inputId,
+        paths,
+      }),
+      `${JSON.stringify({
+        schema: 'murph.assistant-input-event.v1',
+        schemaVersion: 1,
+        value: second,
+      })}\n`,
+      { mode: 0o600 },
+    )
+
+    await expect(
+      readAssistantInputEvent({
+        inputId: first.inputId,
+        vault: vaultRoot,
+      }),
+    ).rejects.toThrow('inputId must match its storage path')
   })
 
   it('lists inputs by conversation and leaves projection failures listable', async () => {

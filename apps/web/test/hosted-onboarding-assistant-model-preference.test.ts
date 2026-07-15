@@ -14,6 +14,7 @@ vi.mock("@/src/lib/hosted-onboarding/shared", () => ({
 }));
 
 import {
+  assertHostedMemberAssistantPersonalizationEligible,
   isHostedMemberSolModelEligible,
   readHostedMemberAssistantModelPreference,
   updateHostedMemberAssistantConfigurationTx,
@@ -247,6 +248,7 @@ describe("hosted member assistant model preference", () => {
       model: "gpt-5.6-sol",
       reasoningEffort: "low",
       solAvailable: true,
+      effectiveModelUpdated: true,
       updated: true,
     });
     expect(mocks.lockHostedMemberRow).toHaveBeenCalledWith(tx, "member_edge");
@@ -324,6 +326,7 @@ describe("hosted member assistant model preference", () => {
       model: "gpt-5.6-terra",
       reasoningEffort: "low",
       solAvailable: false,
+      effectiveModelUpdated: false,
       updated: true,
     });
     expect(mocks.updateHostedMember).toHaveBeenCalledWith({
@@ -363,6 +366,21 @@ describe("hosted member assistant model preference", () => {
       updated: false,
     });
     expect(mocks.updateHostedMember).not.toHaveBeenCalled();
+  });
+
+  it("rejects synthetic thread-container members from personalization", async () => {
+    mocks.findUniqueHostedMember.mockResolvedValue(buildMemberState({
+      assistantModelPreference: null,
+      threadContainerMemberId: "member_group_chat",
+    }));
+
+    await expect(assertHostedMemberAssistantPersonalizationEligible({
+      memberId: "member_group_chat",
+      prisma: createReadClient(),
+    })).rejects.toMatchObject({
+      code: "ASSISTANT_PERSONALIZATION_PRIVATE_MEMBER_REQUIRED",
+      httpStatus: 403,
+    });
   });
 });
 

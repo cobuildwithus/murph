@@ -7,6 +7,11 @@ const preferenceMocks = vi.hoisted(() => ({
   showAssistantPersonality: vi.fn(),
 }))
 
+const hostedMocks = vi.hoisted(() => ({
+  requestPersonalization: vi.fn(),
+  resolvePreferenceCausalSeq: vi.fn(),
+}))
+
 vi.mock('@murphai/vault-usecases/preferences', () => preferenceMocks)
 
 import {
@@ -20,6 +25,9 @@ beforeEach(() => {
   for (const mock of Object.values(preferenceMocks)) {
     mock.mockReset()
   }
+  hostedMocks.requestPersonalization.mockReset()
+  hostedMocks.resolvePreferenceCausalSeq.mockReset()
+  hostedMocks.resolvePreferenceCausalSeq.mockResolvedValue('41')
 })
 
 describe('assistant style dynamic tool', () => {
@@ -84,16 +92,20 @@ describe('assistant style dynamic tool', () => {
       updated: true,
     })
 
-    const show = await executeStyleRequest({ action: 'show' }, true, '41')
+    const show = await executeStyleRequest(
+      { action: 'show' },
+      true,
+      { hosted: true },
+    )
     const set = await executeStyleRequest({
       action: 'set',
       setting: 'humor',
       value: 8,
-    }, true, '41')
+    }, true, { hosted: true })
     const reset = await executeStyleRequest({
       action: 'reset',
       setting: 'all',
-    }, true, '41')
+    }, true, { hosted: true })
 
     expect(show.rpcResult.success).toBe(true)
     expect(preferenceMocks.showAssistantPersonality).toHaveBeenCalledWith('/tmp/vault')
@@ -111,6 +123,109 @@ describe('assistant style dynamic tool', () => {
       updated: true,
     })
     expect(reset.rpcResult.success).toBe(true)
+    expect(hostedMocks.resolvePreferenceCausalSeq).toHaveBeenCalledTimes(2)
+    expect(hostedMocks.resolvePreferenceCausalSeq).toHaveBeenCalledWith({
+      assistantInputId: 'ain_0123456789abcdef0123456789abcdef',
+    })
+  })
+
+  it('fails hosted mutations closed without provider-accepted input authority', async () => {
+    preferenceMocks.showAssistantPersonality.mockResolvedValue({
+      settings: { humor: { source: 'default', value: 3 } },
+      updated: false,
+    })
+
+    const hostedWithoutInput = { assistantInputId: null, hosted: true }
+    const show = await executeStyleRequest({ action: 'show' }, true, hostedWithoutInput)
+    const set = await executeStyleRequest(
+      { action: 'set', setting: 'humor', value: 8 },
+      true,
+      hostedWithoutInput,
+    )
+    const reset = await executeStyleRequest(
+      { action: 'reset', setting: 'all' },
+      true,
+      hostedWithoutInput,
+    )
+
+    expect(show.rpcResult.success).toBe(true)
+    expect(set.rpcResult.success).toBe(false)
+    expect(reset.rpcResult.success).toBe(false)
+    expect(preferenceMocks.showAssistantPersonality).toHaveBeenCalledWith('/tmp/vault')
+    expect(preferenceMocks.setAssistantPersonalitySetting).not.toHaveBeenCalled()
+    expect(preferenceMocks.resetAllAssistantPersonalitySettings).not.toHaveBeenCalled()
+    expect(hostedMocks.resolvePreferenceCausalSeq).not.toHaveBeenCalled()
+  })
+
+  it('fails a hosted mutation closed when Web authority resolution fails', async () => {
+    hostedMocks.resolvePreferenceCausalSeq.mockRejectedValueOnce(
+      new Error('unavailable'),
+    )
+
+    const result = await executeStyleRequest(
+      { action: 'set', setting: 'humor', value: 8 },
+      true,
+      { hosted: true },
+    )
+
+    expect(result.rpcResult.success).toBe(false)
+    expect(preferenceMocks.setAssistantPersonalitySetting).not.toHaveBeenCalled()
+  })
+
+  it('fails hosted mutations closed when causal resolution is missing or empty', async () => {
+    const missingResolver = await executeStyleRequest(
+      { action: 'set', setting: 'humor', value: 8 },
+      true,
+      { hosted: true, resolverAvailable: false },
+    )
+    hostedMocks.resolvePreferenceCausalSeq.mockResolvedValueOnce(null)
+    const emptyResolution = await executeStyleRequest(
+      { action: 'reset', setting: 'all' },
+      true,
+      { hosted: true },
+    )
+
+    expect(missingResolver.rpcResult.success).toBe(false)
+    expect(emptyResolution.rpcResult.success).toBe(false)
+    expect(preferenceMocks.setAssistantPersonalitySetting).not.toHaveBeenCalled()
+    expect(preferenceMocks.resetAllAssistantPersonalitySettings).not.toHaveBeenCalled()
+  })
+
+  it('does not resolve hosted causal authority before availability and vault guards', async () => {
+    const unavailable = await executeStyleRequest(
+      { action: 'set', setting: 'humor', value: 8 },
+      false,
+      { hosted: true },
+    )
+    const missingVault = await executeStyleRequest(
+      { action: 'set', setting: 'humor', value: 8 },
+      true,
+      { hosted: true, vaultRoot: null },
+    )
+
+    expect(unavailable.rpcResult.success).toBe(false)
+    expect(missingVault.rpcResult.success).toBe(false)
+    expect(hostedMocks.resolvePreferenceCausalSeq).not.toHaveBeenCalled()
+    expect(preferenceMocks.setAssistantPersonalitySetting).not.toHaveBeenCalled()
+  })
+
+  it('keeps local mutations compatible without hosted causal authority', async () => {
+    preferenceMocks.setAssistantPersonalitySetting.mockResolvedValue({
+      settings: { humor: { source: 'custom', value: 8 } },
+      updated: true,
+    })
+
+    const result = await executeStyleRequest(
+      { action: 'set', setting: 'humor', value: 8 },
+      true,
+    )
+
+    expect(result.rpcResult.success).toBe(true)
+    expect(preferenceMocks.setAssistantPersonalitySetting).toHaveBeenCalledWith({
+      setting: 'humor',
+      value: 8,
+      vault: '/tmp/vault',
+    })
   })
 })
 
@@ -128,7 +243,12 @@ function readStyleRequest(argumentsValue: unknown) {
 async function executeStyleRequest(
   argumentsValue: unknown,
   assistantStyleSettingsAvailable: boolean,
-  causalSeq: string | null = null,
+  options: {
+    assistantInputId?: string | null
+    hosted?: boolean
+    resolverAvailable?: boolean
+    vaultRoot?: string | null
+  } = {},
 ) {
   const request = readStyleRequest(argumentsValue)
   if (!request) {
@@ -139,13 +259,25 @@ async function executeStyleRequest(
     assistantStyleSettingsAvailable,
     env: {},
     fetchImpl: fetch,
-    hostedToolContext: causalSeq === null
+    hostedToolContext: options.hosted !== true
       ? null
       : {
           computerToolsAvailable: false,
-          currentAssistantPreferenceCausalSeq: () => causalSeq,
+          currentAssistantPersonalizationInputId: () =>
+            options.assistantInputId === undefined
+              ? 'ain_0123456789abcdef0123456789abcdef'
+              : options.assistantInputId,
           currentHostedDeliveryContext: () => null,
           currentHostedMailboxItemIds: () => [],
+          personalizationTool: {
+            request: hostedMocks.requestPersonalization,
+            ...(options.resolverAvailable === false
+              ? {}
+              : {
+                  resolvePreferenceCausalSeq:
+                    hostedMocks.resolvePreferenceCausalSeq,
+                }),
+          },
           sendVaultFile: async () => {
             throw new Error('unavailable')
           },
@@ -154,6 +286,6 @@ async function executeStyleRequest(
     nextUsageOrdinal: () => 0,
     progressDelivery: null,
     request,
-    vaultRoot: '/tmp/vault',
+    vaultRoot: options.vaultRoot === undefined ? '/tmp/vault' : options.vaultRoot,
   })
 }

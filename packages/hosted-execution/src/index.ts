@@ -1,5 +1,6 @@
 export * from "./auth.ts";
 export * from "./assistant-usage.ts";
+export * from "./assistant-personalization.ts";
 export * from "./builders.ts";
 export {
   HOSTED_EXECUTION_LAYERED_SNAPSHOT_REF_SCHEMA,

@@ -9,6 +9,10 @@ import {
   isHostedMailboxKind,
   isHostedMailboxLane,
 } from "@murphai/hosted-execution/runtime-control";
+import {
+  createHostedMailboxAssistantInputId,
+  readHostedConversationAssistantIdentifierSecret,
+} from "@murphai/hosted-execution/assistant-identifiers";
 import { parseHostedExecutionWake } from "@murphai/hosted-execution/parsers";
 import type {
   HostedMailboxFetchCursorMode,
@@ -32,6 +36,8 @@ import { getPrisma } from "../prisma";
 import { recordHostedRuntimeLogTx } from "../hosted-workspace/store";
 import { advanceHostedMailboxLaneConsumedSeq } from "./lane-counter-store";
 import {
+  createHostedAssistantInputLookupKey,
+  createHostedAssistantInputLookupKeyReadCandidates,
   createHostedExternalThreadIdentityLookupKeyReadCandidates,
 } from "../hosted-onboarding/contact-privacy";
 import { hostedOnboardingError } from "../hosted-onboarding/errors";
@@ -59,6 +65,7 @@ export type HostedMailboxStoreClient = PrismaClient | Prisma.TransactionClient;
 export type HostedMailboxMutationTx = Prisma.TransactionClient;
 
 export interface HostedMailboxItemRow {
+  assistantInputLookupKey: string | null;
   causalSeq?: bigint | null;
   id: string;
   userId: string;
@@ -215,6 +222,18 @@ export async function appendHostedMailboxItemTx(
     tx: HostedMailboxMutationTx;
   },
 ): Promise<AppendHostedMailboxItemResult> {
+  return appendHostedMailboxItemWithAssistantInputLookupKeyTx({
+    ...input,
+    assistantInputLookupKey: null,
+  });
+}
+
+async function appendHostedMailboxItemWithAssistantInputLookupKeyTx(
+  input: AppendHostedMailboxItemBaseInput & {
+    assistantInputLookupKey: string | null;
+    tx: HostedMailboxMutationTx;
+  },
+): Promise<AppendHostedMailboxItemResult> {
   const userId = requireNonEmptyString(input.userId, "Hosted mailbox userId");
   const lane = requireHostedMailboxLane(input.lane);
   const dedupeKey = requireNonEmptyString(input.dedupeKey, "Hosted mailbox dedupeKey");
@@ -310,6 +329,7 @@ export async function appendHostedMailboxItemTx(
     INSERT INTO hosted_mailbox_item (
       id,
       user_id,
+      assistant_input_lookup_key,
       causal_seq,
       lane,
       lane_seq,
@@ -328,6 +348,7 @@ export async function appendHostedMailboxItemTx(
     VALUES (
       ${itemId},
       ${userId},
+      ${input.assistantInputLookupKey},
       ${causalSeq},
       ${lane},
       ${laneSeq},
@@ -347,6 +368,7 @@ export async function appendHostedMailboxItemTx(
     RETURNING
       id,
       user_id AS "userId",
+      assistant_input_lookup_key AS "assistantInputLookupKey",
       causal_seq AS "causalSeq",
       lane,
       lane_seq AS "laneSeq",
@@ -461,11 +483,25 @@ export async function appendHostedMailboxEnvelopeTx(input: {
     },
   });
   const encodedPayload = serializeHostedMailboxPayload(envelope);
+  const lane = resolveHostedMailboxLaneForKind(envelope.kind);
+  const assistantInputLookupKey = envelope.kind === "conversation.message"
+    ? requireNonEmptyString(
+        createHostedAssistantInputLookupKey(createHostedMailboxAssistantInputId({
+          dedupeKey: envelope.eventId,
+          eventId: envelope.eventId,
+          lane,
+          secret: readHostedConversationAssistantIdentifierSecret(envelope),
+          userId: envelope.userId,
+        })) ?? "",
+        "Hosted mailbox assistant input lookup key",
+      )
+    : null;
 
-  return appendHostedMailboxItemTx({
+  return appendHostedMailboxItemWithAssistantInputLookupKeyTx({
+    assistantInputLookupKey,
     dedupeKey: envelope.eventId,
     kind: envelope.kind,
-    lane: resolveHostedMailboxLaneForKind(envelope.kind),
+    lane,
     occurredAt: envelope.occurredAt,
     payloadSerializedJson: encodedPayload.serialized,
     tx: input.tx,
@@ -885,6 +921,7 @@ function projectHostedRuntimeMailboxProjectionItem(input: {
   }
 
   return projectHostedMailboxItem({
+    assistantInputLookupKey: null,
     causalSeq: row.itemCausalSeq,
     consumedAt: row.itemConsumedAt,
     createdAt: requireHostedRuntimeMailboxProjectionValue(
@@ -1560,6 +1597,45 @@ export async function findHostedMailboxItemByDedupeKeyTx(input: {
       },
     },
   });
+}
+
+export async function readHostedMailboxPreferenceCausalSeqByAssistantInputIdTx(input: {
+  assistantInputId: string;
+  memberId: string;
+  prisma: HostedMailboxStoreClient;
+}): Promise<string | null> {
+  const assistantInputId = normalizeNullableString(input.assistantInputId);
+  const memberId = normalizeNullableString(input.memberId);
+  const assistantInputLookupKeys = assistantInputId
+    ? createHostedAssistantInputLookupKeyReadCandidates(assistantInputId)
+    : [];
+
+  if (assistantInputLookupKeys.length === 0 || !memberId) {
+    return null;
+  }
+
+  const rows = await input.prisma.hostedMailboxItem.findMany({
+    select: {
+      causalSeq: true,
+    },
+    take: 2,
+    where: {
+      assistantInputLookupKey: {
+        in: assistantInputLookupKeys,
+      },
+      causalSeq: {
+        not: null,
+      },
+      kind: "conversation.message",
+      lane: "conversation",
+      ...buildHostedMailboxLiveItemWhere(new Date()),
+      userId: memberId,
+    },
+  });
+
+  return rows.length === 1
+    ? rows[0]?.causalSeq?.toString() ?? null
+    : null;
 }
 
 export async function allocateHostedMailboxLaneSeqTx(input: {

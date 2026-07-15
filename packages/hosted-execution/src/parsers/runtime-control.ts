@@ -407,7 +407,10 @@ export function parseHostedMailboxItem(value: unknown): HostedMailboxItem {
 
   return {
     ...(record.causalSeq === undefined
-      ? {}
+      // Legacy-v1 mailbox payloads predate causal tokens. Normalize that
+      // compatibility case once at the wire boundary; active rows use an
+      // explicit sequence or null and must never inherit the legacy anchor.
+      ? { causalSeq: "0" }
       : {
           causalSeq: record.causalSeq === null
             ? null

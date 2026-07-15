@@ -10,6 +10,9 @@ import {
   HOSTED_PHONE_CALLS_PATH,
 } from "@murphai/hosted-execution/phone-calls";
 import {
+  HOSTED_RUNTIME_ASSISTANT_PERSONALIZATION_TOOL_PATH,
+} from "@murphai/hosted-execution/assistant-personalization";
+import {
   HOSTED_EXECUTION_DEVICE_SYNC_RUNTIME_APPLY_PATH,
   HOSTED_EXECUTION_DEVICE_SYNC_RUNTIME_DIRTY_ACK_PATH,
   HOSTED_EXECUTION_DEVICE_SYNC_RUNTIME_DIRTY_PENDING_PATH,
@@ -62,6 +65,7 @@ export type HostedRunnerWebControlOperation =
   | "action_approval_read"
   | "action_approval_request"
   | "assistant_runtime_issue_export"
+  | "assistant_personalization_tool"
   | "assistant_configuration_tool"
   | "browser_vault_replica_publish"
   | "codex_auth_update"
@@ -104,6 +108,7 @@ const HOSTED_RUNNER_WEB_CONTROL_POST_POLICY = new Map<string, HostedRunnerWebCon
   [HOSTED_RUNTIME_ACTION_APPROVAL_CONSUME_PATH, "action_approval_consume"],
   [HOSTED_RUNTIME_ACTION_APPROVAL_READ_PATH, "action_approval_read"],
   [HOSTED_RUNTIME_ACTION_APPROVAL_REQUEST_PATH, "action_approval_request"],
+  [HOSTED_RUNTIME_ASSISTANT_PERSONALIZATION_TOOL_PATH, "assistant_personalization_tool"],
   [HOSTED_RUNTIME_ASSISTANT_CONFIGURATION_TOOL_PATH, "assistant_configuration_tool"],
   [HOSTED_CONNECTED_APPS_PATH, "connected_apps"],
   [HOSTED_CLINICAL_RECORDS_RUNTIME_FETCH_PAGE_PATH, "clinical_records_fetch_page"],
