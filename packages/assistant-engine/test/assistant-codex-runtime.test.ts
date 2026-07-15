@@ -1800,7 +1800,7 @@ describe('assistant codex runtime', () => {
     expect(liveTurnReleased).toBe(1)
   })
 
-  it('overrides an overlapping earlier no-reply and rejects a later one after a computer pause', async () => {
+  it('clears an earlier no-reply and rejects overlapping and later ones after a computer pause', async () => {
     const workingDirectory = await createTempDir('assistant-codex-computer-pause-no-reply-work-')
     const progressDelivery = createProgressDeliveryMock()
     const hostedToolContext = createHostedToolContext()
@@ -1860,6 +1860,22 @@ describe('assistant codex runtime', () => {
               },
             }),
           )
+          child.stdout.write(
+            jsonLine({
+              id: 59,
+              method: 'item/tool/call',
+              params: {
+                namespace: 'murph',
+                tool: 'finish_without_reply',
+                arguments: {},
+              },
+            }),
+          )
+          await expect(waitForRpcResponse(child, 59)).resolves.toMatchObject({
+            id: 59,
+            result: { success: true },
+          })
+
           child.stdout.write([
             jsonLine({
               id: 60,
@@ -1887,7 +1903,7 @@ describe('assistant codex runtime', () => {
           ].join(''))
           await expect(waitForRpcResponse(child, 60)).resolves.toMatchObject({
             id: 60,
-            result: { success: true },
+            result: { success: false },
           })
           await expect(waitForRpcResponse(child, 61)).resolves.toMatchObject({
             id: 61,
