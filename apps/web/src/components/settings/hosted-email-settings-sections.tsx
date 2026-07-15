@@ -23,6 +23,7 @@ export function HostedEmailSettingsContent(props: {
   murphEmailAddress?: string | null;
   authSatisfied: boolean;
   canSendEmailUpdateCode: boolean;
+  hasPendingEmailSync: boolean;
   isBusy: boolean;
   isSendingCode: boolean;
   isSubmittingCode: boolean;
@@ -32,6 +33,7 @@ export function HostedEmailSettingsContent(props: {
   onChangeEmailAddress: (value: string) => void;
   onAuthRequired: () => void;
   onResendCode: () => Promise<void>;
+  onRetryEmailSync: () => Promise<void>;
   onSendCode: (emailAddress?: string) => Promise<void>;
   onSyncVerifiedEmail: () => Promise<void>;
   onUseAnotherEmail: () => void;
@@ -45,6 +47,7 @@ export function HostedEmailSettingsContent(props: {
     murphEmailAddress,
     authSatisfied,
     canSendEmailUpdateCode,
+    hasPendingEmailSync,
     isBusy,
     isSendingCode,
     isSubmittingCode,
@@ -54,6 +57,7 @@ export function HostedEmailSettingsContent(props: {
     onChangeEmailAddress,
     onAuthRequired,
     onResendCode,
+    onRetryEmailSync,
     onSendCode,
     onSyncVerifiedEmail,
     onUseAnotherEmail,
@@ -134,11 +138,17 @@ export function HostedEmailSettingsContent(props: {
                 authSatisfied={authSatisfied}
                 type="button"
                 onAuthRequired={onAuthRequired}
-                onClick={() => void onSendCode()}
+                onClick={() => {
+                  void (hasPendingEmailSync ? onRetryEmailSync() : onSendCode());
+                }}
                 disabled={isBusy}
                 size="sm"
               >
-                Link email
+                {isSyncingEmailRoute
+                  ? "Saving..."
+                  : hasPendingEmailSync
+                    ? "Retry saving"
+                    : "Link email"}
               </AuthButton>
             ) : null
           }
@@ -158,6 +168,7 @@ export function HostedEmailSettingsContent(props: {
           <Input
             id="settings-email-address"
             autoComplete="email"
+            disabled={hasPendingEmailSync}
             inputMode="email"
             inputSize="xl"
             placeholder="user@example.com"
@@ -170,16 +181,22 @@ export function HostedEmailSettingsContent(props: {
             authSatisfied={authSatisfied}
             type="button"
             onAuthRequired={onAuthRequired}
-            onClick={() => void onSendCode(emailInputRef.current?.value ?? emailAddress)}
+            onClick={() => {
+              void (hasPendingEmailSync
+                ? onRetryEmailSync()
+                : onSendCode(emailInputRef.current?.value ?? emailAddress));
+            }}
             disabled={isBusy}
             size="xl"
             className="w-full"
           >
             {isSyncingEmailRoute
               ? "Saving..."
-              : isSendingCode
-                ? "Sending..."
-                : "Send verification code"}
+              : hasPendingEmailSync
+                ? "Retry saving"
+                : isSendingCode
+                  ? "Sending..."
+                  : "Send verification code"}
           </AuthButton>
         </div>
       ) : null}

@@ -420,6 +420,143 @@ describe("HostedEmailSettings", () => {
     });
   });
 
+  it.each([
+    {
+      editedEmailBeforeRetry: "edited-after-callback@example.com",
+      initialActionLabel: "Send verification code",
+      initialEmail: {
+        address: "payer-hint@example.com",
+        verifiedAt: null,
+      },
+      scenario: "a stale Settings email hint",
+    },
+    {
+      editedEmailBeforeRetry: null,
+      initialActionLabel: "Link email",
+      initialEmail: null,
+      scenario: "no initial email",
+    },
+  ])("retries canonical saving inline with $scenario", async ({
+    editedEmailBeforeRetry,
+    initialActionLabel,
+    initialEmail,
+  }) => {
+    mocks.useUser.mockReturnValue({
+      refreshUser: mocks.refreshUser,
+      user: {
+        email: null,
+        linkedAccounts: [
+          {
+            phone_number: "+15555550100",
+            type: "phone",
+          },
+        ],
+      },
+    });
+    const syncFetch = vi.fn<typeof fetch>()
+      .mockResolvedValueOnce(new Response(JSON.stringify({
+        error: {
+          code: "HOSTED_SYNC_UNAVAILABLE",
+          message: "Hosted sync unavailable right now.",
+        },
+      }), {
+        headers: {
+          "content-type": "application/json; charset=utf-8",
+        },
+        status: 503,
+      }))
+      .mockResolvedValueOnce(new Response(JSON.stringify({
+        emailAddress: "linked@example.com",
+        ok: true,
+        runTriggered: true,
+        verifiedAt: "2026-04-25T00:00:00.000Z",
+      }), {
+        headers: {
+          "content-type": "application/json; charset=utf-8",
+        },
+        status: 200,
+      }));
+    vi.stubGlobal("fetch", syncFetch);
+    const onSynced = vi.fn();
+    const { HostedEmailSettings } = await import("@/src/components/settings/hosted-email-settings");
+    const { cleanup, container, window } = await renderClientComponent(
+      createElement(HostedEmailSettings, {
+        authenticated: true,
+        initialEmail,
+        onSynced,
+      }),
+    );
+    cleanupRender = cleanup;
+
+    const initialAction = Array.from(container.querySelectorAll("button")).find(
+      (candidate) => candidate.textContent?.includes(initialActionLabel),
+    );
+    expect(initialAction).toBeTruthy();
+
+    await act(async () => {
+      initialAction?.dispatchEvent(new Event("click", { bubbles: true }));
+    });
+    expect(mocks.linkEmail).toHaveBeenCalledTimes(1);
+
+    await act(async () => {
+      await mocks.linkAccountCallbacks?.onSuccess?.({
+        linkedAccount: {
+          address: "linked@example.com",
+          latest_verified_at: 1771977600,
+          type: "email",
+        },
+        linkMethod: "email",
+        user: {
+          linkedAccounts: [
+            {
+              phone_number: "+15555550100",
+              type: "phone",
+            },
+          ],
+        },
+      });
+    });
+
+    await vi.waitFor(() => {
+      expect(syncFetch).toHaveBeenCalledTimes(1);
+      expect(container.textContent).toContain("Hosted sync unavailable right now.");
+    });
+    const retryButton = Array.from(container.querySelectorAll("button")).find(
+      (candidate) => candidate.textContent?.includes("Retry saving"),
+    );
+    expect(retryButton).toBeTruthy();
+
+    if (editedEmailBeforeRetry) {
+      const emailInput = container.querySelector<HTMLInputElement>(
+        'input[id="settings-email-address"]',
+      );
+      expect(emailInput?.value).toBe("linked@example.com");
+      expect(emailInput?.disabled).toBe(true);
+
+      await act(async () => {
+        if (emailInput) {
+          setInputValue(window, emailInput, editedEmailBeforeRetry);
+        }
+      });
+      expect(emailInput?.value).toBe(editedEmailBeforeRetry);
+    }
+
+    await act(async () => {
+      retryButton?.dispatchEvent(new Event("click", { bubbles: true }));
+    });
+
+    await vi.waitFor(() => {
+      expect(onSynced).toHaveBeenCalledTimes(1);
+    });
+    expect(syncFetch).toHaveBeenCalledTimes(2);
+    expect(syncFetch.mock.calls.map((call) => JSON.parse(String(call[1]?.body)))).toEqual([
+      { expectedEmailAddress: "linked@example.com" },
+      { expectedEmailAddress: "linked@example.com" },
+    ]);
+    expect(mocks.linkEmail).toHaveBeenCalledTimes(1);
+    expect(mocks.sendCode).not.toHaveBeenCalled();
+  });
+
   it("prefills an unverified server-provided email and lets the member send a verification code", async () => {
     const { HostedEmailSettings } = await import("@/src/components/settings/hosted-email-settings");
 
