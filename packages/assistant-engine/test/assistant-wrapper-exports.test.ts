@@ -2,7 +2,9 @@ import { readFile } from 'node:fs/promises'
 import { describe, expect, it } from 'vitest'
 
 import * as assistantAutomation from '../src/assistant-automation.ts'
+import * as assistantAsk from '../src/assistant-ask.ts'
 import * as assistantCodex from '../src/assistant-codex.ts'
+import * as assistantCodexPermissions from '../src/assistant-codex-permissions.ts'
 import * as assistantChannelAdapters from '../src/assistant-channel-adapters.ts'
 import * as assistantChannelRuntime from '../src/assistant-channel-runtime.ts'
 import * as assistantCron from '../src/assistant-cron.ts'
@@ -29,6 +31,15 @@ const wrapperCases = [
     ],
   ],
   [
+    'assistant-ask',
+    assistantAsk,
+    [
+      'executeReadOnlyAssistantAsk',
+      'READ_ONLY_ASSISTANT_ASK_OUTPUT_SCHEMA',
+      'READ_ONLY_ASSISTANT_ASK_THREAD_CONFIG',
+    ],
+  ],
+  [
     'assistant-codex',
     assistantCodex,
     [
@@ -36,6 +47,14 @@ const wrapperCases = [
       'executeCodexAppServerTurn',
       'listMurphDynamicToolNames',
       'resolveCodexDisplayOptions',
+    ],
+  ],
+  [
+    'assistant-codex-permissions',
+    assistantCodexPermissions,
+    [
+      'buildMurphGroupReadPermissionProfileTomlLines',
+      'MURPH_GROUP_READ_PERMISSION_PROFILE',
     ],
   ],
   [

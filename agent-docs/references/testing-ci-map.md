@@ -1,6 +1,6 @@
 # Testing And CI Map
 
-Last verified: 2026-07-14
+Last verified: 2026-07-15
 
 ## Current Repo Checks
 
@@ -144,6 +144,16 @@ tests prove the signed web-control adapter and POST-only outbound allowlist.
   a later parked fallback.
 
 ## Current Gaps
+
+- Assistant Ask has focused contract, parser, Web authority/idempotency,
+  assistant-tool policy, runtime mailbox routing, detached-process lifecycle,
+  and Cloudflare runner-image confinement coverage. The production-like Linux
+  proof must show committed group reads succeed while writes, `.runtime/**`,
+  `.codex/**`, environment files, other roots, inherited shell secrets, and tool network are
+  denied, and it must show child failure or cancellation cannot interrupt the
+  resident foreground App Server. Routine CI uses scripted provider responses;
+  it does not send a real private-to-group ask through deployed Web, Temporal,
+  Cloudflare, a live model provider, and the user messaging channel.
 
 - Clinical Records has focused hosted-web proof for the committed Epic
   directory (including Atlanta/Piedmont search and public-endpoint rejection),

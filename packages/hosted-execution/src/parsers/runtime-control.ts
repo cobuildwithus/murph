@@ -18,10 +18,17 @@ import {
   parseAssistantRuntimeIssueRecord,
 } from "@murphai/runtime-state/node/assistant-runtime-issues";
 import {
+  HOSTED_EXECUTION_ASSISTANT_ASK_ANSWER_MAX_CODE_POINTS,
+  HOSTED_EXECUTION_ASSISTANT_ASK_QUESTION_MAX_CODE_POINTS,
+  HOSTED_EXECUTION_ASSISTANT_ASK_TARGET_LABEL_MAX_CODE_POINTS,
+  type HostedExecutionAssistantAskResult,
+} from "../contracts.ts";
+import {
   HOSTED_RUNTIME_DEVICE_SYNC_BRIDGE_KINDS,
   HOSTED_PLAN_CODES,
   HOSTED_INGRESS_LATENCY_SOURCES,
   HOSTED_RUNTIME_ASSISTANT_MILESTONES,
+  HOSTED_RUNTIME_ASSISTANT_ASK_REQUEST_ID_MAX_CODE_POINTS,
   HOSTED_RUNTIME_SIDE_INPUT_UNAVAILABLE_CODES,
   HOSTED_RUNTIME_LATENCY_TRACE_ASSISTANT_INPUT_MAX_IDS,
   HOSTED_RUNTIME_LATENCY_PHASE_BREAKDOWN_KEYS,
@@ -69,6 +76,8 @@ import {
   type HostedRuntimeLatencyPhaseBreakdown,
   type HostedRuntimeLatencyPhaseBreakdownPhase,
   type HostedRuntimeAssistantMilestone,
+  type HostedRuntimeAssistantAskControlRequest,
+  type HostedRuntimeAssistantAskControlResponse,
   type HostedRuntimeLatencyTraceAssistantMilestoneEvent,
   type HostedRuntimeLatencyTraceAssistantInputStagedEvent,
   type HostedRuntimeLatencyTraceEvent,
@@ -803,11 +812,190 @@ export function parseHostedRuntimeProductFeedbackRecordResponse(
   };
 }
 
+export function parseHostedRuntimeAssistantAskControlRequest(
+  value: unknown,
+): HostedRuntimeAssistantAskControlRequest {
+  const record = requireObject(value, "Hosted runtime assistant ask control request");
+  const action = requireString(
+    record.action,
+    "Hosted runtime assistant ask control request action",
+  );
+  const requestId = parseHostedRuntimeGroupAskBoundedText({
+    label: "Hosted runtime assistant ask control request requestId",
+    maxCodePoints: HOSTED_RUNTIME_ASSISTANT_ASK_REQUEST_ID_MAX_CODE_POINTS,
+    value: record.requestId,
+  });
+  if (action === "prepare") {
+    assertAllowedObjectKeys(
+      record,
+      new Set(["action", "requestId"]),
+      "Hosted runtime assistant ask prepare control request",
+    );
+    return { action, requestId };
+  }
+  if (action === "complete") {
+    assertAllowedObjectKeys(
+      record,
+      new Set(["action", "requestId", "result"]),
+      "Hosted runtime assistant ask complete control request",
+    );
+    return {
+      action,
+      requestId,
+      result: parseHostedRuntimeAssistantAskResult(record.result),
+    };
+  }
+  throw new TypeError("Hosted runtime assistant ask control request action is invalid.");
+}
+
+export function parseHostedRuntimeAssistantAskControlResponse(
+  value: unknown,
+): HostedRuntimeAssistantAskControlResponse {
+  const record = requireObject(value, "Hosted runtime assistant ask control response");
+  const action = requireString(
+    record.action,
+    "Hosted runtime assistant ask control response action",
+  );
+  const status = requireString(
+    record.status,
+    "Hosted runtime assistant ask control response status",
+  );
+  if (action === "prepare" && status === "ready") {
+    assertAllowedObjectKeys(
+      record,
+      new Set(["action", "question", "status", "targetLabel"]),
+      "Hosted runtime assistant ask prepare ready control response",
+    );
+    return {
+      action,
+      question: parseHostedRuntimeGroupAskBoundedText({
+        label: "Hosted runtime assistant ask prepare response question",
+        maxCodePoints: HOSTED_EXECUTION_ASSISTANT_ASK_QUESTION_MAX_CODE_POINTS,
+        value: record.question,
+      }),
+      status,
+      targetLabel: record.targetLabel === null
+        ? null
+        : parseHostedRuntimeGroupAskBoundedText({
+            label: "Hosted runtime assistant ask prepare response targetLabel",
+            maxCodePoints: HOSTED_EXECUTION_ASSISTANT_ASK_TARGET_LABEL_MAX_CODE_POINTS,
+            value: record.targetLabel,
+          }),
+    };
+  }
+  if ((action === "prepare" || action === "complete") && status === "terminal") {
+    assertAllowedObjectKeys(
+      record,
+      new Set(["action", "status", "terminalReason"]),
+      "Hosted runtime assistant ask terminal control response",
+    );
+    const terminalReason = requireString(
+      record.terminalReason,
+      "Hosted runtime assistant ask terminalReason",
+    );
+    if (terminalReason !== "expired" && terminalReason !== "unavailable") {
+      throw new TypeError("Hosted runtime assistant ask terminalReason is invalid.");
+    }
+    return { action, status, terminalReason };
+  }
+  if (
+    action === "complete"
+    && (status === "completed" || status === "already_completed")
+  ) {
+    assertAllowedObjectKeys(
+      record,
+      new Set(["action", "status"]),
+      "Hosted runtime assistant ask complete control response",
+    );
+    return { action, status };
+  }
+  throw new TypeError("Hosted runtime assistant ask control response action/status is invalid.");
+}
+
+function parseHostedRuntimeAssistantAskResult(
+  value: unknown,
+): HostedExecutionAssistantAskResult {
+  const record = requireObject(value, "Hosted runtime assistant ask result");
+  assertAllowedObjectKeys(
+    record,
+    new Set(["answer", "outcome"]),
+    "Hosted runtime assistant ask result",
+  );
+  const outcome = requireString(
+    record.outcome,
+    "Hosted runtime assistant ask result outcome",
+  );
+  if (outcome === "answered") {
+    return {
+      answer: parseHostedRuntimeGroupAskBoundedText({
+        label: "Hosted runtime assistant ask result answer",
+        maxCodePoints: HOSTED_EXECUTION_ASSISTANT_ASK_ANSWER_MAX_CODE_POINTS,
+        value: record.answer,
+      }),
+      outcome,
+    };
+  }
+  if (outcome === "cannot_answer") {
+    return {
+      answer: record.answer === null
+        ? null
+        : parseHostedRuntimeGroupAskBoundedText({
+            label: "Hosted runtime assistant ask result answer",
+            maxCodePoints: HOSTED_EXECUTION_ASSISTANT_ASK_ANSWER_MAX_CODE_POINTS,
+            value: record.answer,
+          }),
+      outcome,
+    };
+  }
+  throw new TypeError("Hosted runtime assistant ask result outcome is invalid.");
+}
+
 export function parseHostedRuntimeGroupToolRequest(
   value: unknown,
 ): HostedRuntimeGroupToolRequest {
   const record = requireObject(value, "Hosted runtime group tool request");
   const action = requireString(record.action, "Hosted runtime group tool request action");
+  if (action === "ask") {
+    assertAllowedObjectKeys(
+      record,
+      new Set([
+        "action",
+        "groupLabel",
+        "originAssistantInputId",
+        "originSessionId",
+        "question",
+      ]),
+      "Hosted runtime group tool ask request",
+    );
+    return {
+      action,
+      ...(record.groupLabel === undefined
+        ? {}
+        : {
+            groupLabel: record.groupLabel === null
+              ? null
+              : parseHostedRuntimeGroupAskBoundedText({
+                  label: "Hosted runtime group tool ask request groupLabel",
+                  maxCodePoints:
+                    HOSTED_EXECUTION_ASSISTANT_ASK_TARGET_LABEL_MAX_CODE_POINTS,
+                  value: record.groupLabel,
+                }),
+          }),
+      originAssistantInputId: parseHostedRuntimeGroupAskOriginInputId(
+        record.originAssistantInputId,
+      ),
+      originSessionId: parseHostedRuntimeGroupAskBoundedText({
+        label: "Hosted runtime group tool ask request originSessionId",
+        maxCodePoints: HOSTED_RUNTIME_ASSISTANT_ASK_REQUEST_ID_MAX_CODE_POINTS,
+        value: record.originSessionId,
+      }),
+      question: parseHostedRuntimeGroupAskBoundedText({
+        label: "Hosted runtime group tool ask request question",
+        maxCodePoints: HOSTED_EXECUTION_ASSISTANT_ASK_QUESTION_MAX_CODE_POINTS,
+        value: record.question,
+      }),
+    };
+  }
   if (action === "read_current" || action === "list_memberships") {
     assertAllowedObjectKeys(
       record,
@@ -1166,6 +1354,97 @@ export function parseHostedRuntimeGroupToolResponse(
   const action = requireString(record.action, "Hosted runtime group tool response action");
   assertAllowedObjectKeys(record, new Set(["action", "result"]), "Hosted runtime group tool response");
 
+  if (action === "ask") {
+    const result = requireObject(
+      record.result,
+      "Hosted runtime group tool ask response result",
+    );
+    const status = requireString(
+      result.status,
+      "Hosted runtime group tool ask response status",
+    );
+    if (status === "accepted") {
+      assertAllowedObjectKeys(
+        result,
+        new Set(["status", "targetLabel"]),
+        "Hosted runtime group tool ask accepted response result",
+      );
+      return {
+        action,
+        result: {
+          status,
+          targetLabel: result.targetLabel === null
+            ? null
+            : parseHostedRuntimeGroupAskBoundedText({
+                label: "Hosted runtime group tool ask response targetLabel",
+                maxCodePoints:
+                  HOSTED_EXECUTION_ASSISTANT_ASK_TARGET_LABEL_MAX_CODE_POINTS,
+                value: result.targetLabel,
+              }),
+        },
+      };
+    }
+    if (status === "clarification_required") {
+      assertAllowedObjectKeys(
+        result,
+        new Set(["groupLabels", "status"]),
+        "Hosted runtime group tool ask clarification response result",
+      );
+      const groupLabels = requireArray(
+        result.groupLabels,
+        "Hosted runtime group tool ask clarification groupLabels",
+      );
+      if (
+        groupLabels.length === 0
+        || groupLabels.length > HOSTED_RUNTIME_GROUP_MEMBERSHIPS_MAX
+      ) {
+        throw new TypeError(
+          `Hosted runtime group tool ask clarification groupLabels must contain between 1 and ${HOSTED_RUNTIME_GROUP_MEMBERSHIPS_MAX} entries.`,
+        );
+      }
+      return {
+        action,
+        result: {
+          groupLabels: groupLabels.map((groupLabel) =>
+            parseHostedRuntimeGroupAskBoundedText({
+              label: "Hosted runtime group tool ask clarification groupLabel",
+              maxCodePoints:
+                HOSTED_EXECUTION_ASSISTANT_ASK_TARGET_LABEL_MAX_CODE_POINTS,
+              value: groupLabel,
+            })
+          ),
+          status,
+        },
+      };
+    }
+    if (status === "no_groups") {
+      assertAllowedObjectKeys(
+        result,
+        new Set(["status"]),
+        "Hosted runtime group tool ask no_groups response result",
+      );
+      return { action, result: { status } };
+    }
+    if (status === "unavailable") {
+      assertAllowedObjectKeys(
+        result,
+        new Set(["status", "unavailableReason"]),
+        "Hosted runtime group tool ask unavailable response result",
+      );
+      return {
+        action,
+        result: {
+          status,
+          unavailableReason: parseHostedRuntimeGroupAskBoundedText({
+            label: "Hosted runtime group tool ask unavailableReason",
+            maxCodePoints: 500,
+            value: result.unavailableReason,
+          }),
+        },
+      };
+    }
+  }
+
   if (action === "read_current") {
     const result = requireObject(record.result, "Hosted runtime group tool read_current response result");
     const status = requireString(result.status, "Hosted runtime group tool read_current response status");
@@ -1478,6 +1757,36 @@ export function parseHostedRuntimeGroupToolResponse(
   }
 
   throw new TypeError("Hosted runtime group tool response action/status is not supported.");
+}
+
+const HOSTED_RUNTIME_GROUP_ASK_ORIGIN_INPUT_ID_PATTERN = /^ain_[0-9a-f]{32}$/u;
+
+function parseHostedRuntimeGroupAskOriginInputId(value: unknown): string {
+  const originAssistantInputId = requireString(
+    value,
+    "Hosted runtime group tool ask request originAssistantInputId",
+  );
+  if (!HOSTED_RUNTIME_GROUP_ASK_ORIGIN_INPUT_ID_PATTERN.test(originAssistantInputId)) {
+    throw new TypeError(
+      "Hosted runtime group tool ask request originAssistantInputId is invalid.",
+    );
+  }
+  return originAssistantInputId;
+}
+
+function parseHostedRuntimeGroupAskBoundedText(input: {
+  label: string;
+  maxCodePoints: number;
+  value: unknown;
+}): string {
+  const normalized = requireString(input.value, input.label).trim();
+  const codePoints = [...normalized].length;
+  if (codePoints === 0 || codePoints > input.maxCodePoints) {
+    throw new TypeError(
+      `${input.label} must contain between 1 and ${input.maxCodePoints} Unicode code points.`,
+    );
+  }
+  return normalized;
 }
 
 export function parseHostedRuntimeNewsletterToolRequest(

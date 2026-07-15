@@ -19,6 +19,14 @@
       "types": "./dist/assistant-automation.d.ts",
       "default": "./dist/assistant-automation.js"
     },
+    "./assistant-ask": {
+      "types": "./dist/assistant-ask.d.ts",
+      "default": "./dist/assistant-ask.js"
+    },
+    "./assistant-codex-permissions": {
+      "types": "./dist/assistant-codex-permissions.d.ts",
+      "default": "./dist/assistant-codex-permissions.js"
+    },
     "./assistant-codex": {
       "types": "./dist/assistant-codex.d.ts",
       "default": "./dist/assistant-codex.js"

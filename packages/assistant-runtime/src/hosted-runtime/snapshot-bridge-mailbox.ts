@@ -309,9 +309,20 @@ function decodedSystemWakeMatchesMailboxItem(
   wake: HostedExecutionWake,
   item: HostedWorkspaceRuntimeBridgeImportItemInput,
 ): wake is HostedExecutionSystemWake {
-  return wake.kind !== "conversation.message"
+  const baseIdentityMatches = wake.kind !== "conversation.message"
     && wake.userId === item.item.userId
     && wake.occurredAt === item.item.occurredAt
     && wake.eventId === item.item.dedupeKey
     && wake.kind === item.item.kind;
+  if (!baseIdentityMatches) {
+    return false;
+  }
+  if (
+    wake.kind === "assistant.ask.requested"
+    || wake.kind === "assistant.ask.completed"
+  ) {
+    return wake.eventId === item.item.id
+      && wake.ask.expiresAt === item.item.expiresAt;
+  }
+  return true;
 }

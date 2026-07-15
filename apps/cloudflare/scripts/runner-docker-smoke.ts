@@ -39,6 +39,12 @@ async function main(): Promise<void> {
     const output = await runDockerCommand([
       "run",
       "--rm",
+      // Cloudflare runs the image in its own Linux VM. Docker's default
+      // seccomp profile blocks the user namespace that Codex uses to apply
+      // the nested read-only permission profile, so expose that VM-level
+      // capability in this disposable, networkless smoke container.
+      "--security-opt",
+      "seccomp=unconfined",
       "--platform",
       "linux/amd64",
       "--interactive",
@@ -66,6 +72,33 @@ async function main(): Promise<void> {
     console.log(`codexCommandDiscovered=${result.codexCommandDiscovered}`);
     console.log(`codexVersion=${result.codexVersion}`);
     console.log(`codexAppServerHelpBytes=${result.codexAppServerHelpBytes}`);
+    console.log(
+      `codexGroupReadPermissionProfileAttested=${result.codexGroupReadPermissionProfileAttested}`,
+    );
+    console.log(
+      `codexGroupReadAuthorizedFileRead=${result.codexGroupReadAuthorizedFileRead}`,
+    );
+    console.log(
+      `codexGroupReadDeepEnvReadDenied=${result.codexGroupReadDeepEnvReadDenied}`,
+    );
+    console.log(
+      `codexGroupReadGroupWriteDenied=${result.codexGroupReadGroupWriteDenied}`,
+    );
+    console.log(
+      `codexGroupReadRuntimeReadDenied=${result.codexGroupReadRuntimeReadDenied}`,
+    );
+    console.log(
+      `codexGroupReadSiblingRootReadDenied=${result.codexGroupReadSiblingRootReadDenied}`,
+    );
+    console.log(
+      `codexGroupReadOutsideRootReadDenied=${result.codexGroupReadOutsideRootReadDenied}`,
+    );
+    console.log(
+      `codexGroupReadNetworkDenied=${result.codexGroupReadNetworkDenied}`,
+    );
+    console.log(
+      `codexGroupReadSecretEnvironmentDenied=${result.codexGroupReadSecretEnvironmentDenied}`,
+    );
     console.log(`codexHostedShellVaultCliLlmsBytes=${result.codexHostedShellVaultCliLlmsBytes}`);
     console.log(`codexHostedShellMurphPathBytes=${result.codexHostedShellMurphPathBytes}`);
     console.log(`codexHostedShellPythonVersion=${result.codexHostedShellPythonVersion}`);

@@ -25,6 +25,7 @@ import type {
   HostedMailboxPayloadFetchResponse,
 } from "@murphai/hosted-execution/runtime-control";
 import type {
+  HostedExecutionConversationMessageWake,
   HostedExecutionMealPhotoCapturedWake,
   HostedExecutionWake,
 } from "@murphai/hosted-execution/contracts";
@@ -168,6 +169,10 @@ interface AppendHostedMailboxItemBaseInput {
   userId: string;
 }
 
+interface AppendHostedMailboxItemInternalInput extends AppendHostedMailboxItemBaseInput {
+  itemId?: string;
+}
+
 export async function appendHostedMailboxItem(
   input: AppendHostedMailboxItemBaseInput & {
     prisma?: PrismaClient;
@@ -229,7 +234,7 @@ export async function appendHostedMailboxItemTx(
 }
 
 async function appendHostedMailboxItemWithAssistantInputLookupKeyTx(
-  input: AppendHostedMailboxItemBaseInput & {
+  input: AppendHostedMailboxItemInternalInput & {
     assistantInputLookupKey: string | null;
     tx: HostedMailboxMutationTx;
   },
@@ -298,7 +303,9 @@ async function appendHostedMailboxItemWithAssistantInputLookupKeyTx(
     };
   }
 
-  const itemId = randomUUID();
+  const itemId = input.itemId === undefined
+    ? randomUUID()
+    : requireHostedMailboxItemId(input.itemId);
   await acquireHostedMailboxCausalAppendLockTx({
     tx: input.tx,
     userId,
@@ -468,6 +475,28 @@ export async function appendHostedMailboxEnvelopeTx(input: {
   envelope: HostedMailboxProducerEnvelope;
   tx: HostedMailboxMutationTx;
 }): Promise<AppendHostedMailboxItemResult> {
+  return appendHostedMailboxEnvelopeInternalTx(input);
+}
+
+export async function appendHostedMailboxEnvelopeWithIdentityTx(input: {
+  envelope: HostedMailboxProducerEnvelope;
+  expiresAt: Date | string;
+  itemId: string;
+  tx: HostedMailboxMutationTx;
+}): Promise<AppendHostedMailboxItemResult> {
+  const itemId = requireHostedMailboxItemId(input.itemId);
+  if (itemId !== input.envelope.eventId) {
+    throw new TypeError("Hosted mailbox item identity must equal the envelope event id.");
+  }
+  return appendHostedMailboxEnvelopeInternalTx({ ...input, itemId });
+}
+
+async function appendHostedMailboxEnvelopeInternalTx(input: {
+  envelope: HostedMailboxProducerEnvelope;
+  expiresAt?: Date | string | null;
+  itemId?: string;
+  tx: HostedMailboxMutationTx;
+}): Promise<AppendHostedMailboxItemResult> {
   const envelope = input.envelope;
   await assertHostedMailboxEnvelopeWorkspaceTargetTx({
     envelope,
@@ -500,6 +529,8 @@ export async function appendHostedMailboxEnvelopeTx(input: {
   return appendHostedMailboxItemWithAssistantInputLookupKeyTx({
     assistantInputLookupKey,
     dedupeKey: envelope.eventId,
+    ...(input.expiresAt === undefined ? {} : { expiresAt: input.expiresAt }),
+    ...(input.itemId === undefined ? {} : { itemId: input.itemId }),
     kind: envelope.kind,
     lane,
     occurredAt: envelope.occurredAt,
@@ -1293,6 +1324,45 @@ export async function readHostedMailboxWakeByDedupeKey(input: {
   return decoded ? parseHostedExecutionWake(decoded) : null;
 }
 
+export async function readHostedMailboxWakeByItemId(input: {
+  availableAt?: Date;
+  mailboxItemId: string;
+  prisma?: HostedMailboxStoreClient;
+}): Promise<HostedExecutionWake | null> {
+  const prisma = input.prisma ?? getPrisma();
+  const item = await readHostedMailboxLiveItemById({
+    availableAt: input.availableAt ?? new Date(),
+    mailboxItemId: input.mailboxItemId,
+    prisma,
+  });
+  if (!item) {
+    return null;
+  }
+  const payload = item.payloadRef
+    ? await readHostedMailboxPayload({
+        dedupeKey: item.dedupeKey,
+        mailboxItemId: item.id,
+        payloadRef: item.payloadRef,
+        prisma,
+        userId: item.userId,
+      })
+    : null;
+  const decoded = await decodeHostedMailboxStoredPayload({
+    dedupeKey: item.dedupeKey,
+    kind: item.kind,
+    lane: item.lane,
+    laneSeq: item.laneSeq,
+    mailboxItemId: item.id,
+    occurredAt: item.occurredAt,
+    payloadCiphertext: payload?.payloadCiphertext ?? null,
+    payloadInlineCiphertext: item.payloadInlineCiphertext,
+    payloadSchema: item.payloadSchema,
+    prisma,
+    userId: item.userId,
+  });
+  return decoded ? parseHostedExecutionWake(decoded) : null;
+}
+
 export async function readHostedMailboxWakeAfterDedupeLockTx(input: {
   dedupeKey: string;
   tx: HostedMailboxMutationTx;
@@ -1636,6 +1706,47 @@ export async function readHostedMailboxPreferenceCausalSeqByAssistantInputIdTx(i
   return rows.length === 1
     ? rows[0]?.causalSeq?.toString() ?? null
     : null;
+}
+
+export async function readHostedMailboxConversationWakeByAssistantInputId(input: {
+  assistantInputId: string;
+  availableAt?: Date;
+  memberId: string;
+  prisma?: HostedMailboxStoreClient;
+}): Promise<HostedExecutionConversationMessageWake | null> {
+  const prisma = input.prisma ?? getPrisma();
+  const assistantInputId = normalizeNullableString(input.assistantInputId);
+  const memberId = normalizeNullableString(input.memberId);
+  const assistantInputLookupKeys = assistantInputId
+    ? createHostedAssistantInputLookupKeyReadCandidates(assistantInputId)
+    : [];
+  const availableAt = input.availableAt ?? new Date();
+
+  if (assistantInputLookupKeys.length === 0 || !memberId) {
+    return null;
+  }
+
+  const rows = await prisma.hostedMailboxItem.findMany({
+    select: { id: true },
+    take: 2,
+    where: {
+      assistantInputLookupKey: { in: assistantInputLookupKeys },
+      kind: "conversation.message",
+      lane: "conversation",
+      ...buildHostedMailboxLiveItemWhere(availableAt),
+      userId: memberId,
+    },
+  });
+  if (rows.length !== 1 || !rows[0]) {
+    return null;
+  }
+
+  const wake = await readHostedMailboxWakeByItemId({
+    availableAt,
+    mailboxItemId: rows[0].id,
+    prisma,
+  });
+  return wake?.kind === "conversation.message" ? wake : null;
 }
 
 export async function allocateHostedMailboxLaneSeqTx(input: {
@@ -2164,6 +2275,14 @@ function requireNonEmptyString(value: string, label: string): string {
   }
 
   return normalized;
+}
+
+function requireHostedMailboxItemId(value: string): string {
+  const itemId = requireNonEmptyString(value, "Hosted mailbox item id");
+  if (itemId.length > 200 || !/^[A-Za-z0-9][A-Za-z0-9._:-]*$/u.test(itemId)) {
+    throw new TypeError("Hosted mailbox item id is invalid.");
+  }
+  return itemId;
 }
 
 function requireDate(value: Date | string, label: string): Date {

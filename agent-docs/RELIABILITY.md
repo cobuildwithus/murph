@@ -1,6 +1,6 @@
 # Reliability
 
-Last verified: 2026-07-11
+Last verified: 2026-07-15
 
 ## Current Guardrails
 
@@ -17,6 +17,21 @@ Last verified: 2026-07-11
 - Add tests for failure modes before relying on production-side recovery logic.
 - Foreground inbox/parser-backed daemon runs should favor restartable connectors with bounded backoff over permanently dead watch loops, while still keeping low-level restart behavior opt-in and always bounded by the owning abort signal.
 - Networked assistant/provider/channel calls should set explicit timeouts, propagate caller abort signals, and only auto-retry request shapes that are replay-safe or rate-limit directed.
+- Assistant Ask uses `assistant.ask.requested` and
+  `assistant.ask.completed` in the existing encrypted mailbox as its only
+  durable queue and operation state. Stable request and completion identities
+  make exact replay idempotent and keep the first committed answer. Retries stay
+  pinned to the original target and membership generation; expiry is the
+  existing ten-minute mailbox deadline, with no second lease, timer, status
+  row, or delivery ledger.
+- A target runtime may run at most one `executeReadOnlyAssistantAsk` child beside
+  its resident foreground turn. The child is a separate one-shot process and
+  cannot write or send, so its startup, provider latency, failure, or retry must
+  not block or poison the foreground process. Further asks remain pending in
+  the mailbox. Before checkpoint, invocation return, shutdown, fence loss, or
+  workspace replacement, the runtime interrupts the exact child, waits a
+  bounded grace period, terminates only that proven-owned process if needed,
+  requeues unfinished work, and proves exit before releasing the workspace.
 - Automatic meal-photo uploads are replay-safe only through the capture id derived by the enrolled installation. Each staging attempt must own a distinct object. Under the per-capture mailbox lock, the first accepted item chooses the canonical object for exact duplicates; later attempts delete only their own losing object. Failed or ambiguous appends must reconcile the mailbox claim before cleanup so they never delete an accepted object's bytes. Web must reject conflicting reuse, re-signal exact mailbox duplicates, lock the hosted member and active sponsorship source rows before rechecking final upload authority, and acknowledge an upload only after private object staging and canonical mailbox append both succeed. Runtime import must check the canonical external reference before writing, verify staged length and SHA-256 before import, and delete staging only through a post-checkpoint effect; cleanup derives the user-namespaced object path without requiring encryption-context rediscovery. After failed cleanup, the R2 lifecycle rule makes staging eligible for asynchronous deletion at 31 days, one day beyond mailbox recovery retention, rather than guaranteeing deletion at that exact age. A missing control client, staged object, write fence, mailbox append, or runtime read is a visible retryable failure rather than a successful setup/upload.
 - Tool-enabled assistant provider turns should disable automatic model retries once local side-effecting tools are in play, so bounded assistant/vault operations are never replayed implicitly by transport-layer retry. Bound tool execution failures should be returned to the model as structured tool results so the model can recover inside the same turn instead of aborting the provider turn.
 - Clinical Records retrieval is generation-fenced and page-idempotent. A

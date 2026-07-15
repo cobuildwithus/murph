@@ -712,6 +712,10 @@ export async function sendAssistantMessageLocal(
                 messageInput: currentInput,
                 session: currentSession,
               }),
+              getConversationScope: () =>
+                resolveAssistantConversationScope(
+                  sharedPlan.conversationPolicy.audience,
+                ),
               getUserActionAcceptedInputIds: () =>
                 resolveAssistantUserActionAcceptedInputIds({
                   acceptedInputItems: acceptedInputItemsForProviderRequest,

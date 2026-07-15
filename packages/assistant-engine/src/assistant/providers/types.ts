@@ -113,6 +113,7 @@ export interface AssistantProviderTurn {
   conversationHistoryMessages?: ReadonlyArray<AssistantProviderConversationMessage>
   developerInstructions?: string | null
   dynamicTools: readonly AssistantProviderDynamicTool[]
+  environments?: readonly Readonly<Record<string, unknown>>[] | null
   env?: NodeJS.ProcessEnv
   generatedImageUploader?: AssistantHostedGeneratedImageUploader | null
   onFinishWithoutReplyAccepted?: ((event: {
