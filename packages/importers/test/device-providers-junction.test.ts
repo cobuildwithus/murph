@@ -22,6 +22,7 @@ import {
   JUNCTION_OPT_IN_SUMMARY_RESOURCES,
   JUNCTION_OPT_IN_TIMESERIES_RESOURCES,
   JUNCTION_RAW_ONLY_SUMMARY_RESOURCES,
+  classifyJunctionSummaryNormalizationEvidence,
   importDeviceProviderSnapshot,
   normalizeJunctionSnapshot,
   prepareDeviceProviderSnapshotImport,
@@ -5039,6 +5040,138 @@ test("Junction sleep_cycle normalizer vectorizes parallel offset stage arrays", 
     "sleep-awake-minutes",
     "sleep-deep-minutes",
   ]);
+});
+
+test("Junction summary normalization evidence uses canonical importer semantics", () => {
+  const window = {
+    importedAt: "2026-06-26T00:00:00.000Z",
+    windowStart: "2026-06-24T00:00:00.000Z",
+    windowEnd: "2026-06-26T00:00:00.000Z",
+  };
+
+  const evidence = classifyJunctionSummaryNormalizationEvidence({
+    ...window,
+    summaries: {
+      activity: [{
+        date: "2026-06-25T00:00:00.000Z",
+        calories_active: 412,
+        sourceProviderSlug: "oura",
+      }],
+      sleep: [{
+        awakeMinutes: 15,
+        deepMinutes: 15,
+        end: "2026-06-25T03:00:00.000Z",
+        lightMinutes: 15,
+        remMinutes: 15,
+        recovery_readiness_score: 82,
+        sourceProviderSlug: "oura",
+        start: "2026-06-25T02:00:00.000Z",
+      }],
+      sleep_cycle: [
+        {
+          id: "sleep-cycle-oura-parallel-evidence",
+          session_start: "2026-06-25T02:00:00.000Z",
+          session_end: "2026-06-25T03:00:00.000Z",
+          sourceProviderSlug: "oura",
+          stage_start_offset_second: [0, 900, 1800, 2700],
+          stage_end_offset_second: [900, 1800, 2700, 3600],
+          stage_type: [2, 3, 4, 1],
+        },
+        {
+          id: "sleep-cycle-stage-count-only",
+          session_end: "2026-06-25T03:00:00.000Z",
+          session_start: "2026-06-25T02:00:00.000Z",
+          sourceProviderSlug: "fitbit",
+          stageCount: 4,
+        },
+      ],
+    },
+  });
+
+  assert.deepEqual(evidence, [
+    { resource: "activity", sourceProviderSlug: "oura" },
+    { resource: "sleep", sourceProviderSlug: "oura" },
+    { resource: "sleep_cycle", sourceProviderSlug: "oura" },
+  ]);
+});
+
+test("Junction summary normalization evidence uses canonical event time or calendar-day ownership", () => {
+  const snapshot = {
+    importedAt: "2026-06-28T00:00:00.000Z",
+    windowStart: "2026-06-25T00:00:00.000Z",
+    windowEnd: "2026-06-26T00:00:00.000Z",
+    summaries: {
+      activity: [
+        {
+          calories_active: 100,
+          date: "2026-06-24T23:59:59.999Z",
+          sourceProviderSlug: "polar",
+        },
+        {
+          calories_active: 200,
+          date: "2026-06-25T00:00:00.000Z",
+          sourceProviderSlug: "oura",
+        },
+        {
+          calories_active: 300,
+          date: "2026-06-26T00:00:00.000Z",
+          sourceProviderSlug: "fitbit",
+        },
+        {
+          calories_active: 400,
+          date: "2026-06-26T00:00:00.001Z",
+          sourceProviderSlug: "garmin",
+        },
+        {
+          calories_active: 500,
+          date: "2026-06-25",
+          sourceProviderSlug: "withings",
+        },
+        {
+          calories_active: 600,
+          date: "2026-06-26",
+          sourceProviderSlug: "polar",
+        },
+      ],
+    },
+  };
+
+  assert.deepEqual(
+    classifyJunctionSummaryNormalizationEvidence(snapshot, {
+      windowStart: "2026-06-25T00:00:00.000Z",
+      windowEnd: "2026-06-26T00:00:00.000Z",
+    }),
+    [
+      { resource: "activity", sourceProviderSlug: "oura" },
+      { resource: "activity", sourceProviderSlug: "withings" },
+    ],
+  );
+
+  const invalidWindows = [
+    {
+      windowStart: "invalid",
+      windowEnd: "2026-06-26T00:00:00.000Z",
+    },
+    {
+      windowStart: "2026-06-25T00:00:00.000Z",
+      windowEnd: "invalid",
+    },
+    {
+      windowStart: "2026-06-25T00:00:00.000Z",
+      windowEnd: "2026-06-25T00:00:00.000Z",
+    },
+    {
+      windowStart: "2026-06-26T00:00:00.000Z",
+      windowEnd: "2026-06-25T00:00:00.000Z",
+    },
+  ];
+
+  for (const invalidWindow of invalidWindows) {
+    assert.deepEqual(
+      classifyJunctionSummaryNormalizationEvidence(snapshot, invalidWindow),
+      [],
+    );
+  }
 });
 
 test("Junction Apple HealthKit zeroed sleep summary preserves awake and derives generic asleep total", () => {

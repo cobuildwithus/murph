@@ -41,6 +41,7 @@ import {
   isAllowedJunctionLinkHost,
   JUNCTION_DEFAULT_ALLOWED_LINK_HOSTS,
   JunctionClient,
+  parseJunctionHistoricalPullSnapshot,
 } from "../src/providers/junction-client.ts";
 import { createJsonResponse, readUrl, requireValue } from "./helpers.ts";
 
@@ -150,6 +151,7 @@ function assertConnectBackfillRetryWake(
 function createJunctionProvider(
   fetchImpl: typeof fetch,
   overrides: Partial<Parameters<typeof createJunctionDeviceSyncProvider>[0]> = {},
+  historicalPullFetchImpl: typeof fetch | null = async () => createJsonResponse({ data: [] }),
 ) {
   return createJunctionDeviceSyncProvider({
     apiKey: "sk_us_test_123",
@@ -159,9 +161,94 @@ function createJunctionProvider(
     summaryResources: ["activity"],
     summaryBackfillDays: 2,
     timeseriesResources: [],
-    fetchImpl,
+    fetchImpl: async (input, init) => {
+      if (
+        historicalPullFetchImpl
+        && new URL(readUrl(input)).pathname === "/v2/introspect/historical_pull"
+      ) {
+        return historicalPullFetchImpl(input, init);
+      }
+
+      return fetchImpl(input, init);
+    },
     ...overrides,
   });
+}
+
+function createHistoricalPullFetch(
+  providers: Record<string, unknown>,
+): typeof fetch {
+  return async () => createJsonResponse({
+    data: [{
+      provider: providers,
+      user_id: "junction-user-1",
+    }],
+  });
+}
+
+function createMixedGarminOuraActivityProvider(
+  garminHistoricalStatus: "failure" | "success",
+) {
+  return createJunctionProvider(async (input) => {
+    const url = readUrl(input);
+
+    if (url === "https://api.sandbox.us.junction.com/v2/user/providers/junction-user-1") {
+      return createJsonResponse({
+        providers: [
+          {
+            id: "provider-garmin-1",
+            slug: "garmin",
+            name: "Garmin",
+            status: "connected",
+            resource_availability: { activity: true },
+          },
+          {
+            id: "provider-oura-1",
+            slug: "oura",
+            name: "Oura",
+            status: "connected",
+            resource_availability: { activity: true },
+          },
+        ],
+      });
+    }
+
+    if (url.startsWith("https://api.sandbox.us.junction.com/v2/summary/activity/junction-user-1")) {
+      return createJsonResponse({
+        data: [
+          { id: "garmin-activity-1", connectionId: "provider-garmin-1", steps: 4321 },
+          { id: "oura-activity-1", connectionId: "provider-oura-1", steps: 1234 },
+        ],
+      });
+    }
+
+    throw new Error(`Unexpected request: ${url}`);
+  }, {
+    summaryResources: ["activity"],
+  }, createHistoricalPullFetch({
+    garmin: {
+      not_pulled: [],
+      pulled: {
+        activity: {
+          days_with_data: garminHistoricalStatus === "success" ? 1 : 0,
+          ...(garminHistoricalStatus === "failure"
+            ? { error_details: "Historical pull failed." }
+            : {}),
+          status: garminHistoricalStatus,
+        },
+      },
+    },
+    oura: {
+      not_pulled: [],
+      pulled: {
+        activity: {
+          days_with_data: 0,
+          error_details: "Historical pull failed.",
+          status: "failure",
+        },
+      },
+    },
+  }));
 }
 
 function executeJunctionJob(
@@ -228,6 +315,7 @@ function createConnectionSource(
 
 function createEmptyJunctionBackfillProvider(
   overrides: Partial<Parameters<typeof createJunctionDeviceSyncProvider>[0]> = {},
+  historicalPullFetchImpl?: typeof fetch,
 ) {
   return createJunctionProvider(async (input) => {
     const url = readUrl(input);
@@ -253,7 +341,35 @@ function createEmptyJunctionBackfillProvider(
       return createJsonResponse({ data: [] });
     }
     throw new Error(`Unexpected request: ${url}`);
-  }, overrides);
+  }, overrides, historicalPullFetchImpl);
+}
+
+function createHistoricalActivityProvider(
+  sourceProviderSlug: string,
+  historicalPullFetchImpl: typeof fetch,
+  overrides: Partial<Parameters<typeof createJunctionDeviceSyncProvider>[0]> = {},
+) {
+  return createJunctionProvider(async (input) => {
+    const url = readUrl(input);
+
+    if (url === "https://api.sandbox.us.junction.com/v2/user/providers/junction-user-1") {
+      return createJsonResponse({
+        providers: [{
+          id: "provider-source-1",
+          name: "Historical source",
+          resource_availability: { activity: true },
+          slug: sourceProviderSlug,
+          status: "connected",
+        }],
+      });
+    }
+
+    if (url.startsWith("https://api.sandbox.us.junction.com/v2/summary/activity/junction-user-1")) {
+      return createJsonResponse({ data: [] });
+    }
+
+    throw new Error(`Unexpected request: ${url}`);
+  }, overrides, historicalPullFetchImpl);
 }
 
 test("Junction provider defaults fetch every default summary resource", async () => {
@@ -687,7 +803,7 @@ test("Junction empty historical backfill records progress and stores the retry w
 
   assert.equal(importedSnapshots.length, 0);
   assert.deepEqual(result.metadataPatch, {
-    junctionHistoricalBackfillStatus: "coverage_v2_retrying",
+    junctionHistoricalBackfillStatus: "coverage_v3_retrying",
     junctionHistoricalBackfillEmptyAttempts: 1,
     junctionHistoricalBackfillLastEmptyAt: "2026-04-04T00:00:00.000Z",
     junctionHistoricalBackfillWindowStart: "2026-04-01T00:00:00.000Z",
@@ -761,7 +877,7 @@ test("Junction due historical backfill retry does not make ordinary reconcile ow
     account: createAccount({
       connectedAt: "2026-04-03T00:00:00.000Z",
       metadata: {
-        junctionHistoricalBackfillStatus: "coverage_v2_retrying",
+        junctionHistoricalBackfillStatus: "coverage_v3_retrying",
         junctionHistoricalBackfillEmptyAttempts: 1,
         junctionHistoricalBackfillLastEmptyAt: "2026-04-04T00:00:00.000Z",
         junctionHistoricalBackfillWindowStart: "2026-04-01T00:00:00.000Z",
@@ -821,7 +937,7 @@ test("Junction materialized due historical backfill retry advances normal reconc
     account: createAccount({
       connectedAt: "2026-04-03T00:00:00.000Z",
       metadata: {
-        junctionHistoricalBackfillStatus: "coverage_v2_retrying",
+        junctionHistoricalBackfillStatus: "coverage_v3_retrying",
         junctionHistoricalBackfillEmptyAttempts: 1,
         junctionHistoricalBackfillLastEmptyAt: "2026-04-04T00:00:00.000Z",
         junctionHistoricalBackfillWindowStart: "2026-04-01T00:00:00.000Z",
@@ -840,7 +956,7 @@ test("Junction materialized due historical backfill retry advances normal reconc
     }),
   );
 
-  assert.equal(result.metadataPatch?.junctionHistoricalBackfillStatus, "coverage_v2_complete");
+  assert.equal(result.metadataPatch?.junctionHistoricalBackfillStatus, "coverage_v3_complete");
   assert.equal(result.nextReconcileAt, "2026-04-04T01:15:00.000Z");
 });
 
@@ -849,7 +965,7 @@ test("Junction exact-window backfill preserves a pending metadata retry before i
     reconcileIntervalMs: 60 * 60_000,
   });
   const metadata = {
-    junctionHistoricalBackfillStatus: "coverage_v2_retrying",
+    junctionHistoricalBackfillStatus: "coverage_v3_retrying",
     junctionHistoricalBackfillEmptyAttempts: 1,
     junctionHistoricalBackfillLastEmptyAt: "2026-04-04T00:00:00.000Z",
     junctionHistoricalBackfillWindowStart: "2026-04-01T00:00:00.000Z",
@@ -882,7 +998,7 @@ test("Junction retrying historical backfill without attempts uses the first retr
   const executor = requireValue(provider.jobExecutor, "Junction provider should expose a job executor.");
   const retryingAccount = createStoredAccount({
     metadata: {
-      junctionHistoricalBackfillStatus: "coverage_v2_retrying",
+      junctionHistoricalBackfillStatus: "coverage_v3_retrying",
       junctionHistoricalBackfillLastEmptyAt: "2026-04-04T00:00:00.000Z",
       junctionHistoricalBackfillWindowStart: "2026-04-01T00:00:00.000Z",
       junctionHistoricalBackfillWindowEnd: "2026-04-03T00:00:00.000Z",
@@ -1058,7 +1174,7 @@ test("Junction useful daily history completes when an available sparse body reso
   );
 
   assert.deepEqual(result.metadataPatch, {
-    junctionHistoricalBackfillStatus: "coverage_v2_complete",
+    junctionHistoricalBackfillStatus: "coverage_v3_complete",
     junctionHistoricalBackfillEmptyAttempts: 0,
     junctionHistoricalBackfillLastEmptyAt: null,
     junctionHistoricalBackfillWindowStart: "2026-04-01T00:00:00.000Z",
@@ -1121,7 +1237,7 @@ test("Junction connected sources with only sparse resources have no completion o
   );
 
   assert.deepEqual(result.metadataPatch, {
-    junctionHistoricalBackfillStatus: "coverage_v2_complete",
+    junctionHistoricalBackfillStatus: "coverage_v3_complete",
     junctionHistoricalBackfillEmptyAttempts: 0,
     junctionHistoricalBackfillLastEmptyAt: null,
     junctionHistoricalBackfillWindowStart: "2026-04-01T00:00:00.000Z",
@@ -1183,7 +1299,7 @@ test("Junction partial activity history does not complete advertised sleep histo
   );
 
   assert.deepEqual(result.metadataPatch, {
-    junctionHistoricalBackfillStatus: "coverage_v2_retrying",
+    junctionHistoricalBackfillStatus: "coverage_v3_retrying",
     junctionHistoricalBackfillEmptyAttempts: 1,
     junctionHistoricalBackfillLastEmptyAt: "2026-04-04T00:00:00.000Z",
     junctionHistoricalBackfillWindowStart: "2026-04-01T00:00:00.000Z",
@@ -1261,10 +1377,233 @@ test("Junction historical coverage does not let one source satisfy another sourc
     }),
   );
 
-  assert.equal(result.metadataPatch?.junctionHistoricalBackfillStatus, "coverage_v2_retrying");
+  assert.equal(result.metadataPatch?.junctionHistoricalBackfillStatus, "coverage_v3_retrying");
   assert.equal(result.metadataPatch?.junctionHistoricalBackfillEmptyAttempts, 1);
   assertConnectBackfillRetryWake(result, "2026-04-04T00:15:00.000Z");
   assert.equal(importedSnapshots.length, 1);
+});
+
+test("Junction Apple Health success completes a 180-day Murph window even with zero days and a short provider range", async () => {
+  const provider = createHistoricalActivityProvider(
+    "apple_health",
+    createHistoricalPullFetch({
+      "apple-healthkit": {
+        not_pulled: [],
+        pulled: {
+          activity: {
+            days_with_data: 0,
+            range_end: "2026-04-03T00:00:00.000Z",
+            range_start: "2026-03-04T00:00:00.000Z",
+            status: "success",
+          },
+        },
+      },
+    }),
+    { summaryBackfillDays: 180 },
+  );
+
+  const result = await executeJunctionJob(
+    provider,
+    createJunctionJobContext(),
+    createJob("backfill", {
+      windowStart: "2025-10-05T00:00:00.000Z",
+      windowEnd: "2026-04-03T00:00:00.000Z",
+    }),
+  );
+
+  assert.deepEqual(result.metadataPatch, {
+    junctionHistoricalBackfillStatus: "coverage_v3_complete",
+    junctionHistoricalBackfillEmptyAttempts: 0,
+    junctionHistoricalBackfillLastEmptyAt: null,
+    junctionHistoricalBackfillWindowStart: "2025-10-05T00:00:00.000Z",
+    junctionHistoricalBackfillWindowEnd: "2026-04-03T00:00:00.000Z",
+  });
+});
+
+test("Junction Apple Health not_pulled resources create no historical obligation", async () => {
+  const provider = createHistoricalActivityProvider(
+    "apple_health_kit",
+    createHistoricalPullFetch({
+      apple_health_kit: {
+        not_pulled: ["activity"],
+        pulled: {},
+      },
+    }),
+  );
+
+  const result = await executeJunctionJob(
+    provider,
+    createJunctionJobContext(),
+    createJob("backfill", {
+      windowStart: "2026-04-01T00:00:00.000Z",
+      windowEnd: "2026-04-03T00:00:00.000Z",
+    }),
+  );
+
+  assert.equal(result.metadataPatch?.junctionHistoricalBackfillStatus, "coverage_v3_complete");
+});
+
+for (const testCase of [
+  { label: "scheduled", notPulled: [] as string[], status: "scheduled" },
+  { label: "in progress", notPulled: [] as string[], status: "in_progress" },
+  {
+    label: "retrying even when malformed not_pulled contradicts it",
+    notPulled: ["activity"],
+    status: "retrying",
+  },
+  { label: "unknown future", notPulled: [] as string[], status: "paused_by_provider" },
+] as const) {
+  test(`Junction Garmin ${testCase.label} historical status stays on the saturated retry without a reset marker`, async () => {
+    const provider = createHistoricalActivityProvider(
+      "garmin",
+      createHistoricalPullFetch({
+        garmin: {
+          not_pulled: testCase.notPulled,
+          pulled: {
+            activity: {
+              days_with_data: 0,
+              status: testCase.status,
+            },
+          },
+        },
+      }),
+    );
+    const upserts: Array<Parameters<NonNullable<ProviderJobContext["upsertConnectionSource"]>>[0]> = [];
+
+    const result = await executeJunctionJob(
+      provider,
+      createJunctionJobContext({
+        account: createAccount({
+          metadata: {
+            junctionHistoricalBackfillStatus: "coverage_v3_retrying",
+            junctionHistoricalBackfillEmptyAttempts: 4,
+            junctionHistoricalBackfillLastEmptyAt: "2026-04-02T00:00:00.000Z",
+            junctionHistoricalBackfillWindowStart: "2026-04-01T00:00:00.000Z",
+            junctionHistoricalBackfillWindowEnd: "2026-04-03T00:00:00.000Z",
+          },
+        }),
+        upsertConnectionSource: (input) => {
+          upserts.push(input);
+          return createConnectionSource(input);
+        },
+      }),
+      createJob("backfill", {
+        windowStart: "2026-04-01T00:00:00.000Z",
+        windowEnd: "2026-04-03T00:00:00.000Z",
+      }),
+    );
+
+    assert.equal(result.metadataPatch?.junctionHistoricalBackfillStatus, "coverage_v3_retrying");
+    assert.equal(result.metadataPatch?.junctionHistoricalBackfillEmptyAttempts, 4);
+    assertConnectBackfillRetryWake(result, "2026-04-04T00:00:00.000Z");
+    assert.equal(
+      upserts.some((source) => source.lastErrorCode === "HISTORICAL_DATA_RECONNECT_REQUIRED"),
+      false,
+    );
+  });
+}
+
+test("Junction Oura historical failure stays retrying and never asks for a shared reset", async () => {
+  const provider = createHistoricalActivityProvider(
+    "oura",
+    createHistoricalPullFetch({
+      oura: {
+        not_pulled: [],
+        pulled: {
+          activity: {
+            days_with_data: 0,
+            error_details: "Historical pull failed.",
+            status: "failure",
+          },
+        },
+      },
+    }),
+  );
+  const upserts: Array<Parameters<NonNullable<ProviderJobContext["upsertConnectionSource"]>>[0]> = [];
+
+  const result = await executeJunctionJob(
+    provider,
+    createJunctionJobContext({
+      account: createAccount({
+        metadata: {
+          junctionHistoricalBackfillStatus: "coverage_v3_retrying",
+          junctionHistoricalBackfillEmptyAttempts: 4,
+          junctionHistoricalBackfillLastEmptyAt: "2026-04-02T00:00:00.000Z",
+          junctionHistoricalBackfillWindowStart: "2026-04-01T00:00:00.000Z",
+          junctionHistoricalBackfillWindowEnd: "2026-04-03T00:00:00.000Z",
+        },
+      }),
+      upsertConnectionSource: (input) => {
+        upserts.push(input);
+        return createConnectionSource(input);
+      },
+    }),
+    createJob("backfill", {
+      windowStart: "2026-04-01T00:00:00.000Z",
+      windowEnd: "2026-04-03T00:00:00.000Z",
+    }),
+  );
+
+  assert.equal(result.metadataPatch?.junctionHistoricalBackfillStatus, "coverage_v3_retrying");
+  assert.equal(result.metadataPatch?.junctionHistoricalBackfillEmptyAttempts, 4);
+  assertConnectBackfillRetryWake(result, "2026-04-04T00:00:00.000Z");
+  assert.equal(
+    upserts.some((source) => source.lastErrorCode === "HISTORICAL_DATA_RECONNECT_REQUIRED"),
+    false,
+  );
+});
+
+test("Junction introspection failure falls back to canonical summaries without failing import", async () => {
+  const importedSnapshots: unknown[] = [];
+  const warnings: string[] = [];
+  const provider = createJunctionProvider(async (input) => {
+    const url = readUrl(input);
+    if (url === "https://api.sandbox.us.junction.com/v2/user/providers/junction-user-1") {
+      return createJsonResponse({
+        providers: [{
+          id: "provider-oura-1",
+          name: "Oura",
+          resource_availability: { activity: true },
+          slug: "oura",
+          status: "connected",
+        }],
+      });
+    }
+    if (url.startsWith("https://api.sandbox.us.junction.com/v2/summary/activity/junction-user-1")) {
+      return createJsonResponse({
+        data: [{
+          connectionId: "provider-oura-1",
+          date: "2026-04-02",
+          id: "oura-activity-1",
+          steps: 4321,
+        }],
+      });
+    }
+    throw new Error(`Unexpected request: ${url}`);
+  }, {}, async () => createJsonResponse({ error: "unavailable" }, 400));
+
+  const result = await executeJunctionJob(
+    provider,
+    createJunctionJobContext({
+      importSnapshot: async (snapshot) => {
+        importedSnapshots.push(snapshot);
+        return { imported: true };
+      },
+      logger: {
+        warn: (message) => warnings.push(message),
+      },
+    }),
+    createJob("backfill", {
+      windowStart: "2026-04-01T00:00:00.000Z",
+      windowEnd: "2026-04-03T00:00:00.000Z",
+    }),
+  );
+
+  assert.equal(result.metadataPatch?.junctionHistoricalBackfillStatus, "coverage_v3_complete");
+  assert.equal(importedSnapshots.length, 1);
+  assert.deepEqual(warnings, [
+    "Junction historical-pull introspection was unavailable; using canonical import evidence.",
+  ]);
 });
 
 test("Junction backfill diagnostic reports redacted provider call counts", async () => {
@@ -1766,7 +2105,7 @@ test("Junction REST diagnostic matrix compares metadata, introspection, and data
     throw new Error(`Unexpected request: ${url}`);
   }, {
     timeseriesResources: ["blood_oxygen"],
-  });
+  }, null);
   const probeRest = provider.diagnostics?.probeRest;
   assert.ok(probeRest);
 
@@ -1994,7 +2333,7 @@ for (const testCase of usefulHistoricalSummaryCompletionCases) {
     );
 
     assert.deepEqual(result.metadataPatch, {
-      junctionHistoricalBackfillStatus: "coverage_v2_complete",
+      junctionHistoricalBackfillStatus: "coverage_v3_complete",
       junctionHistoricalBackfillEmptyAttempts: 0,
       junctionHistoricalBackfillLastEmptyAt: null,
       junctionHistoricalBackfillWindowStart: "2026-04-01T00:00:00.000Z",
@@ -2168,7 +2507,7 @@ for (const testCase of [
     );
 
     assert.deepEqual(result.metadataPatch, {
-      junctionHistoricalBackfillStatus: "coverage_v2_complete",
+      junctionHistoricalBackfillStatus: "coverage_v3_complete",
       junctionHistoricalBackfillEmptyAttempts: 0,
       junctionHistoricalBackfillLastEmptyAt: null,
       junctionHistoricalBackfillWindowStart: "2026-04-01T00:00:00.000Z",
@@ -2225,7 +2564,7 @@ for (const summaryResource of ["sleep", "workouts", "body"] as const) {
     );
 
     assert.deepEqual(result.metadataPatch, {
-      junctionHistoricalBackfillStatus: "coverage_v2_complete",
+      junctionHistoricalBackfillStatus: "coverage_v3_complete",
       junctionHistoricalBackfillEmptyAttempts: 0,
       junctionHistoricalBackfillLastEmptyAt: null,
       junctionHistoricalBackfillWindowStart: "2026-04-01T00:00:00.000Z",
@@ -2236,7 +2575,7 @@ for (const summaryResource of ["sleep", "workouts", "body"] as const) {
   });
 }
 
-test("Junction sleep_cycle stage-count-only historical backfill marks the historical window complete", async () => {
+test("Junction sleep_cycle stage-count-only history stays pending without canonical evidence", async () => {
   const importedSnapshots: unknown[] = [];
   const requests: string[] = [];
   const provider = createJunctionProvider(async (input) => {
@@ -2289,13 +2628,13 @@ test("Junction sleep_cycle stage-count-only historical backfill marks the histor
   );
 
   assert.deepEqual(result.metadataPatch, {
-    junctionHistoricalBackfillStatus: "coverage_v2_complete",
-    junctionHistoricalBackfillEmptyAttempts: 0,
-    junctionHistoricalBackfillLastEmptyAt: null,
+    junctionHistoricalBackfillStatus: "coverage_v3_retrying",
+    junctionHistoricalBackfillEmptyAttempts: 1,
+    junctionHistoricalBackfillLastEmptyAt: "2026-04-03T00:00:00.000Z",
     junctionHistoricalBackfillWindowStart: "2026-04-01T00:00:00.000Z",
     junctionHistoricalBackfillWindowEnd: "2026-04-03T00:00:00.000Z",
   });
-  assert.equal(result.scheduledJobs, undefined);
+  assertConnectBackfillRetryWake(result, "2026-04-03T00:15:00.000Z");
   assert.equal(importedSnapshots.length, 1);
   const summaryRequest = requireValue(
     requests.find((url) => url.includes("/v2/summary/sleep_cycle/")),
@@ -2351,7 +2690,7 @@ for (const summaryResource of ["activity", "sleep"] as const) {
     );
 
     assert.deepEqual(result.metadataPatch, {
-      junctionHistoricalBackfillStatus: "coverage_v2_retrying",
+      junctionHistoricalBackfillStatus: "coverage_v3_retrying",
       junctionHistoricalBackfillEmptyAttempts: 1,
       junctionHistoricalBackfillLastEmptyAt: "2026-04-04T00:00:00.000Z",
       junctionHistoricalBackfillWindowStart: "2026-04-01T00:00:00.000Z",
@@ -2418,7 +2757,7 @@ for (const summaryResource of ["sleep"] as const) {
     );
 
     assert.deepEqual(result.metadataPatch, {
-      junctionHistoricalBackfillStatus: "coverage_v2_retrying",
+      junctionHistoricalBackfillStatus: "coverage_v3_retrying",
       junctionHistoricalBackfillEmptyAttempts: 1,
       junctionHistoricalBackfillLastEmptyAt: "2026-04-04T00:00:00.000Z",
       junctionHistoricalBackfillWindowStart: "2026-04-01T00:00:00.000Z",
@@ -2473,7 +2812,7 @@ test("Junction useful summary without source linkage keeps the historical window
   );
 
   assert.deepEqual(result.metadataPatch, {
-    junctionHistoricalBackfillStatus: "coverage_v2_retrying",
+    junctionHistoricalBackfillStatus: "coverage_v3_retrying",
     junctionHistoricalBackfillEmptyAttempts: 1,
     junctionHistoricalBackfillLastEmptyAt: "2026-04-04T00:00:00.000Z",
     junctionHistoricalBackfillWindowStart: "2026-04-01T00:00:00.000Z",
@@ -2528,7 +2867,7 @@ test("Junction floating-provider metric-only summary keeps the historical window
   );
 
   assert.deepEqual(result.metadataPatch, {
-    junctionHistoricalBackfillStatus: "coverage_v2_retrying",
+    junctionHistoricalBackfillStatus: "coverage_v3_retrying",
     junctionHistoricalBackfillEmptyAttempts: 1,
     junctionHistoricalBackfillLastEmptyAt: "2026-04-04T00:00:00.000Z",
     junctionHistoricalBackfillWindowStart: "2026-04-01T00:00:00.000Z",
@@ -2585,7 +2924,7 @@ test("Junction source envelope summary historical backfill marks the historical 
   );
 
   assert.deepEqual(result.metadataPatch, {
-    junctionHistoricalBackfillStatus: "coverage_v2_complete",
+    junctionHistoricalBackfillStatus: "coverage_v3_complete",
     junctionHistoricalBackfillEmptyAttempts: 0,
     junctionHistoricalBackfillLastEmptyAt: null,
     junctionHistoricalBackfillWindowStart: "2026-04-01T00:00:00.000Z",
@@ -2656,7 +2995,7 @@ test("Junction compact timeseries-only historical backfill keeps the summary win
   );
 
   assert.deepEqual(result.metadataPatch, {
-    junctionHistoricalBackfillStatus: "coverage_v2_retrying",
+    junctionHistoricalBackfillStatus: "coverage_v3_retrying",
     junctionHistoricalBackfillEmptyAttempts: 1,
     junctionHistoricalBackfillLastEmptyAt: "2026-04-04T00:00:00.000Z",
     junctionHistoricalBackfillWindowStart: "2026-04-01T00:00:00.000Z",
@@ -2793,7 +3132,7 @@ test("Junction yielded connect-window backfills keep owner window and resume wit
     [["2026-04-02", "2026-04-02"]],
   );
   assert.deepEqual(secondResult.metadataPatch, {
-    junctionHistoricalBackfillStatus: "coverage_v2_complete",
+    junctionHistoricalBackfillStatus: "coverage_v3_complete",
     junctionHistoricalBackfillEmptyAttempts: 0,
     junctionHistoricalBackfillLastEmptyAt: null,
     junctionHistoricalBackfillWindowStart: ownerWindowStart,
@@ -2862,7 +3201,7 @@ test("Junction profile-only historical backfill has no historical completion obl
 
   assert.deepEqual(result.metadataPatch, {
     junctionProfileSummaryCheckedAt: "2026-04-04T00:00:00.000Z",
-    junctionHistoricalBackfillStatus: "coverage_v2_complete",
+    junctionHistoricalBackfillStatus: "coverage_v3_complete",
     junctionHistoricalBackfillEmptyAttempts: 0,
     junctionHistoricalBackfillLastEmptyAt: null,
     junctionHistoricalBackfillWindowStart: "2026-04-01T00:00:00.000Z",
@@ -2931,13 +3270,13 @@ test("Junction scheduled polling skips profile after the one-shot profile marker
   assert.equal(result.metadataPatch, undefined);
 });
 
-test("Junction empty historical backfill stops retrying after the bounded budget", async () => {
+test("Junction unproven historical coverage saturates at a daily retry without a reset marker", async () => {
   const provider = createEmptyJunctionBackfillProvider();
   const upserts: Array<Parameters<NonNullable<ProviderJobContext["upsertConnectionSource"]>>[0]> = [];
   const context = createJunctionJobContext({
     account: createAccount({
       metadata: {
-        junctionHistoricalBackfillStatus: "coverage_v2_retrying",
+        junctionHistoricalBackfillStatus: "coverage_v3_retrying",
         junctionHistoricalBackfillEmptyAttempts: 4,
         junctionHistoricalBackfillLastEmptyAt: "2026-04-02T00:00:00.000Z",
         junctionHistoricalBackfillWindowStart: "2026-04-01T00:00:00.000Z",
@@ -2961,23 +3300,23 @@ test("Junction empty historical backfill stops retrying after the bounded budget
   );
 
   assert.deepEqual(result.metadataPatch, {
-    junctionHistoricalBackfillStatus: "coverage_v2_exhausted",
-    junctionHistoricalBackfillEmptyAttempts: 5,
+    junctionHistoricalBackfillStatus: "coverage_v3_retrying",
+    junctionHistoricalBackfillEmptyAttempts: 4,
     junctionHistoricalBackfillLastEmptyAt: "2026-04-03T00:00:00.000Z",
     junctionHistoricalBackfillWindowStart: "2026-04-01T00:00:00.000Z",
     junctionHistoricalBackfillWindowEnd: "2026-04-03T00:00:00.000Z",
   });
   assert.equal(result.scheduledJobs, undefined);
-  assert.equal(upserts.length, 2);
+  assertConnectBackfillRetryWake(result, "2026-04-04T00:00:00.000Z");
+  assert.equal(upserts.length, 1);
   assert.equal(upserts[0]?.status, "connected");
-  assert.equal(upserts[1]?.status, "error");
   assert.equal(
-    upserts[1]?.lastErrorCode,
-    "HISTORICAL_DATA_RECONNECT_REQUIRED",
+    upserts.some((source) => source.lastErrorCode === "HISTORICAL_DATA_RECONNECT_REQUIRED"),
+    false,
   );
 });
 
-test("Junction non-connected source with empty availability cannot complete historical coverage", async () => {
+test("Junction non-connected source stays retrying without inventing a historical reset", async () => {
   const provider = createJunctionProvider(async (input) => {
     const url = readUrl(input);
 
@@ -3012,7 +3351,7 @@ test("Junction non-connected source with empty availability cannot complete hist
     createJunctionJobContext({
       account: createAccount({
         metadata: {
-          junctionHistoricalBackfillStatus: "coverage_v2_retrying",
+          junctionHistoricalBackfillStatus: "coverage_v3_retrying",
           junctionHistoricalBackfillEmptyAttempts: 4,
           junctionHistoricalBackfillLastEmptyAt: "2026-04-02T00:00:00.000Z",
           junctionHistoricalBackfillWindowStart: "2026-04-01T00:00:00.000Z",
@@ -3031,14 +3370,20 @@ test("Junction non-connected source with empty availability cannot complete hist
     }),
   );
 
-  assert.equal(result.metadataPatch?.junctionHistoricalBackfillStatus, "coverage_v2_exhausted");
+  assert.equal(result.metadataPatch?.junctionHistoricalBackfillStatus, "coverage_v3_retrying");
+  assert.equal(result.metadataPatch?.junctionHistoricalBackfillEmptyAttempts, 4);
   assert.equal(result.scheduledJobs, undefined);
+  assertConnectBackfillRetryWake(result, "2026-04-04T00:00:00.000Z");
   assert.equal(upserts.at(-1)?.sourceProviderSlug, "garmin");
   assert.equal(upserts.at(-1)?.status, "error");
-  assert.equal(upserts.at(-1)?.lastErrorCode, "HISTORICAL_DATA_RECONNECT_REQUIRED");
+  assert.equal(upserts.at(-1)?.lastErrorCode, "provider_temporarily_unavailable");
+  assert.equal(
+    upserts.some((source) => source.lastErrorCode === "HISTORICAL_DATA_RECONNECT_REQUIRED"),
+    false,
+  );
 });
 
-test("Junction empty provider list marks the existing active source after bounded observation", async () => {
+test("Junction empty provider list keeps retrying without marking an existing source", async () => {
   const provider = createJunctionProvider(async (input) => {
     const url = readUrl(input);
 
@@ -3062,7 +3407,7 @@ test("Junction empty provider list marks the existing active source after bounde
     createJunctionJobContext({
       account: createAccount({
         metadata: {
-          junctionHistoricalBackfillStatus: "coverage_v2_retrying",
+          junctionHistoricalBackfillStatus: "coverage_v3_retrying",
           junctionHistoricalBackfillEmptyAttempts: 4,
           junctionHistoricalBackfillLastEmptyAt: "2026-04-02T00:00:00.000Z",
           junctionHistoricalBackfillWindowStart: "2026-04-01T00:00:00.000Z",
@@ -3081,16 +3426,14 @@ test("Junction empty provider list marks the existing active source after bounde
     }),
   );
 
-  assert.equal(result.metadataPatch?.junctionHistoricalBackfillStatus, "coverage_v2_exhausted");
+  assert.equal(result.metadataPatch?.junctionHistoricalBackfillStatus, "coverage_v3_retrying");
+  assert.equal(result.metadataPatch?.junctionHistoricalBackfillEmptyAttempts, 4);
   assert.equal(result.scheduledJobs, undefined);
-  assert.equal(upserts.length, 1);
-  assert.equal(upserts[0]?.sourceInstanceKey, existingSource.sourceInstanceKey);
-  assert.equal(upserts[0]?.sourceProviderSlug, "garmin");
-  assert.equal(upserts[0]?.status, "error");
-  assert.equal(upserts[0]?.lastErrorCode, "HISTORICAL_DATA_RECONNECT_REQUIRED");
+  assertConnectBackfillRetryWake(result, "2026-04-04T00:00:00.000Z");
+  assert.equal(upserts.length, 0);
 });
 
-test("Junction bounded historical retries mark only sources with incomplete coverage", async () => {
+test("Junction explicit Garmin failure marks only Garmin when another source succeeds", async () => {
   const provider = createJunctionProvider(async (input) => {
     const url = readUrl(input);
 
@@ -3136,7 +3479,25 @@ test("Junction bounded historical retries mark only sources with incomplete cove
     throw new Error(`Unexpected request: ${url}`);
   }, {
     summaryResources: ["activity", "sleep"],
-  });
+  }, createHistoricalPullFetch({
+    fitbit: {
+      not_pulled: [],
+      pulled: {
+        activity: { days_with_data: 1, status: "success" },
+      },
+    },
+    garmin: {
+      not_pulled: [],
+      pulled: {
+        activity: { days_with_data: 1, status: "success" },
+        sleep: {
+          days_with_data: 0,
+          error_details: "Historical pull failed.",
+          status: "failure",
+        },
+      },
+    },
+  }));
   const upserts: Array<Parameters<NonNullable<ProviderJobContext["upsertConnectionSource"]>>[0]> = [];
 
   const result = await executeJunctionJob(
@@ -3144,7 +3505,7 @@ test("Junction bounded historical retries mark only sources with incomplete cove
     createJunctionJobContext({
       account: createAccount({
         metadata: {
-          junctionHistoricalBackfillStatus: "coverage_v2_retrying",
+          junctionHistoricalBackfillStatus: "coverage_v3_retrying",
           junctionHistoricalBackfillEmptyAttempts: 4,
           junctionHistoricalBackfillLastEmptyAt: "2026-04-02T00:00:00.000Z",
           junctionHistoricalBackfillWindowStart: "2026-04-01T00:00:00.000Z",
@@ -3163,7 +3524,7 @@ test("Junction bounded historical retries mark only sources with incomplete cove
     }),
   );
 
-  assert.equal(result.metadataPatch?.junctionHistoricalBackfillStatus, "coverage_v2_exhausted");
+  assert.equal(result.metadataPatch?.junctionHistoricalBackfillStatus, "coverage_v3_exhausted");
   assert.equal(result.metadataPatch?.junctionHistoricalBackfillEmptyAttempts, 5);
   const erroredSources = upserts.filter((source) => source.status === "error");
   assert.equal(erroredSources.length, 1);
@@ -3173,6 +3534,158 @@ test("Junction bounded historical retries mark only sources with incomplete cove
     upserts.some((source) => source.sourceProviderSlug === "fitbit" && source.status === "error"),
     false,
   );
+});
+
+test("Junction saturated mixed failures mark only Garmin while retrying the other source", async () => {
+  const provider = createMixedGarminOuraActivityProvider("failure");
+  const importedSnapshots: unknown[] = [];
+  const upserts: Array<Parameters<NonNullable<ProviderJobContext["upsertConnectionSource"]>>[0]> = [];
+
+  const result = await executeJunctionJob(
+    provider,
+    createJunctionJobContext({
+      account: createAccount({
+        metadata: {
+          junctionHistoricalBackfillStatus: "coverage_v3_retrying",
+          junctionHistoricalBackfillEmptyAttempts: 4,
+          junctionHistoricalBackfillLastEmptyAt: "2026-04-02T00:00:00.000Z",
+          junctionHistoricalBackfillWindowStart: "2026-04-01T00:00:00.000Z",
+          junctionHistoricalBackfillWindowEnd: "2026-04-03T00:00:00.000Z",
+        },
+      }),
+      importSnapshot: async (snapshot) => {
+        importedSnapshots.push(snapshot);
+        return { imported: true };
+      },
+      listConnectionSources: () => [],
+      upsertConnectionSource: (input) => {
+        upserts.push(input);
+        return createConnectionSource(input);
+      },
+    }),
+    createJob("backfill", {
+      windowStart: "2026-04-01T00:00:00.000Z",
+      windowEnd: "2026-04-03T00:00:00.000Z",
+    }),
+  );
+
+  assert.equal(importedSnapshots.length, 1);
+  const importedSnapshot = importedSnapshots[0] as {
+    summaries?: Record<string, Array<Record<string, unknown>>>;
+  };
+  assert.deepEqual(
+    importedSnapshot.summaries?.activity?.map((record) => record.sourceProviderSlug).sort(),
+    ["garmin", "oura"],
+  );
+  assert.equal(result.metadataPatch?.junctionHistoricalBackfillStatus, "coverage_v3_retrying");
+  assert.equal(result.metadataPatch?.junctionHistoricalBackfillEmptyAttempts, 4);
+  assertConnectBackfillRetryWake(result, "2026-04-04T00:00:00.000Z");
+  const resetSources = upserts.filter((source) =>
+    source.lastErrorCode === "HISTORICAL_DATA_RECONNECT_REQUIRED"
+  );
+  assert.deepEqual(resetSources.map((source) => source.sourceProviderSlug), ["garmin"]);
+});
+
+test("Junction saturated mixed failures wait for the due observation before marking Garmin", async () => {
+  const provider = createMixedGarminOuraActivityProvider("failure");
+  const importedSnapshots: unknown[] = [];
+  const upserts: Array<Parameters<NonNullable<ProviderJobContext["upsertConnectionSource"]>>[0]> = [];
+
+  const result = await executeJunctionJob(
+    provider,
+    createJunctionJobContext({
+      account: createAccount({
+        metadata: {
+          junctionHistoricalBackfillStatus: "coverage_v3_retrying",
+          junctionHistoricalBackfillEmptyAttempts: 4,
+          junctionHistoricalBackfillLastEmptyAt: "2026-04-02T12:00:00.000Z",
+          junctionHistoricalBackfillWindowStart: "2026-04-01T00:00:00.000Z",
+          junctionHistoricalBackfillWindowEnd: "2026-04-03T00:00:00.000Z",
+        },
+      }),
+      importSnapshot: async (snapshot) => {
+        importedSnapshots.push(snapshot);
+        return { imported: true };
+      },
+      listConnectionSources: () => [],
+      upsertConnectionSource: (input) => {
+        upserts.push(input);
+        return createConnectionSource(input);
+      },
+    }),
+    createJob("backfill", {
+      windowStart: "2026-04-01T00:00:00.000Z",
+      windowEnd: "2026-04-03T00:00:00.000Z",
+    }),
+  );
+
+  assert.equal(importedSnapshots.length, 1);
+  assert.equal(result.metadataPatch, undefined);
+  assertConnectBackfillRetryWake(result, "2026-04-03T12:00:00.000Z");
+  assert.equal(
+    upserts.some((source) =>
+      source.lastErrorCode === "HISTORICAL_DATA_RECONNECT_REQUIRED"
+    ),
+    false,
+  );
+});
+
+test("Junction clears Garmin recovery after success while Oura remains retrying", async () => {
+  const provider = createMixedGarminOuraActivityProvider("success");
+  const importedSnapshots: unknown[] = [];
+  const upserts: Array<Parameters<NonNullable<ProviderJobContext["upsertConnectionSource"]>>[0]> = [];
+  let sources = [createConnectionSource({
+    status: "error",
+    lastErrorCode: "HISTORICAL_DATA_RECONNECT_REQUIRED",
+    lastErrorMessage: "Historical data remained incomplete.",
+  })];
+
+  const result = await executeJunctionJob(
+    provider,
+    createJunctionJobContext({
+      account: createAccount({
+        metadata: {
+          junctionHistoricalBackfillStatus: "coverage_v3_retrying",
+          junctionHistoricalBackfillEmptyAttempts: 4,
+          junctionHistoricalBackfillLastEmptyAt: "2026-04-02T00:00:00.000Z",
+          junctionHistoricalBackfillWindowStart: "2026-04-01T00:00:00.000Z",
+          junctionHistoricalBackfillWindowEnd: "2026-04-03T00:00:00.000Z",
+        },
+      }),
+      importSnapshot: async (snapshot) => {
+        importedSnapshots.push(snapshot);
+        return { imported: true };
+      },
+      listConnectionSources: () => sources,
+      upsertConnectionSource: (input) => {
+        upserts.push(input);
+        const stored = createConnectionSource(input);
+        sources = [
+          ...sources.filter((source) => source.sourceInstanceKey !== stored.sourceInstanceKey),
+          stored,
+        ];
+        return stored;
+      },
+    }),
+    createJob("backfill", {
+      windowStart: "2026-04-01T00:00:00.000Z",
+      windowEnd: "2026-04-03T00:00:00.000Z",
+    }),
+  );
+
+  assert.equal(importedSnapshots.length, 1);
+  assert.equal(result.metadataPatch?.junctionHistoricalBackfillStatus, "coverage_v3_retrying");
+  assert.equal(result.metadataPatch?.junctionHistoricalBackfillEmptyAttempts, 4);
+  assertConnectBackfillRetryWake(result, "2026-04-04T00:00:00.000Z");
+  const garminUpdates = upserts.filter((source) => source.sourceProviderSlug === "garmin");
+  assert.equal(garminUpdates[0]?.lastErrorCode, "HISTORICAL_DATA_RECONNECT_REQUIRED");
+  assert.equal(garminUpdates.at(-1)?.status, "connected");
+  const garminSource = sources.find((source) => source.sourceProviderSlug === "garmin");
+  const ouraSource = sources.find((source) => source.sourceProviderSlug === "oura");
+  assert.equal(garminSource?.status, "connected");
+  assert.equal(garminSource?.lastErrorCode, null);
+  assert.equal(ouraSource?.status, "connected");
+  assert.equal(ouraSource?.lastErrorCode, null);
 });
 
 test("Junction exhausted historical backfill preserves reconnect-required source health", async () => {
@@ -3186,7 +3699,7 @@ test("Junction exhausted historical backfill preserves reconnect-required source
   const context = createJunctionJobContext({
     account: createAccount({
       metadata: {
-        junctionHistoricalBackfillStatus: "coverage_v2_exhausted",
+        junctionHistoricalBackfillStatus: "coverage_v3_exhausted",
         junctionHistoricalBackfillEmptyAttempts: 5,
         junctionHistoricalBackfillLastEmptyAt: "2026-04-02T00:00:00.000Z",
         junctionHistoricalBackfillWindowStart: "2026-04-01T00:00:00.000Z",
@@ -3217,12 +3730,23 @@ test("Junction exhausted historical backfill preserves reconnect-required source
 });
 
 test("Junction exhausted historical backfill reasserts a missing reconnect marker", async () => {
-  const provider = createEmptyJunctionBackfillProvider();
+  const provider = createEmptyJunctionBackfillProvider({}, createHistoricalPullFetch({
+    garmin: {
+      not_pulled: [],
+      pulled: {
+        activity: {
+          days_with_data: 0,
+          error_details: "Historical pull failed.",
+          status: "failure",
+        },
+      },
+    },
+  }));
   const upserts: Array<Parameters<NonNullable<ProviderJobContext["upsertConnectionSource"]>>[0]> = [];
   const context = createJunctionJobContext({
     account: createAccount({
       metadata: {
-        junctionHistoricalBackfillStatus: "coverage_v2_exhausted",
+        junctionHistoricalBackfillStatus: "coverage_v3_exhausted",
         junctionHistoricalBackfillEmptyAttempts: 5,
         junctionHistoricalBackfillLastEmptyAt: "2026-04-02T00:00:00.000Z",
         junctionHistoricalBackfillWindowStart: "2026-04-01T00:00:00.000Z",
@@ -3292,7 +3816,7 @@ test("Junction exhausted history marker survives a transient upstream provider e
     createJunctionJobContext({
       account: createAccount({
         metadata: {
-          junctionHistoricalBackfillStatus: "coverage_v2_exhausted",
+          junctionHistoricalBackfillStatus: "coverage_v3_exhausted",
           junctionHistoricalBackfillEmptyAttempts: 5,
           junctionHistoricalBackfillLastEmptyAt: "2026-04-02T00:00:00.000Z",
           junctionHistoricalBackfillWindowStart: "2026-04-01T00:00:00.000Z",
@@ -3352,6 +3876,171 @@ test("Junction source projection clears historical reconnect health after connec
   assert.equal(Object.hasOwn(upserts[0] ?? {}, "lastErrorMessage"), false);
 });
 
+test("Junction current coverage clears a stale Oura reset marker", async () => {
+  const provider = createHistoricalActivityProvider(
+    "oura",
+    createHistoricalPullFetch({
+      oura: {
+        not_pulled: [],
+        pulled: {
+          activity: { days_with_data: 1, status: "success" },
+        },
+      },
+    }),
+  );
+  const existingSource = createConnectionSource({
+    sourceInstanceKey: requireValue(buildJunctionProviderSourceInstanceKey({
+      connectionId: "acct-junction-1",
+      sourceProviderSlug: "oura",
+    })),
+    sourceProviderSlug: "oura",
+    status: "error",
+    lastErrorCode: "HISTORICAL_DATA_RECONNECT_REQUIRED",
+    lastErrorMessage: "Historical data remained incomplete.",
+  });
+  const upserts: Array<Parameters<NonNullable<ProviderJobContext["upsertConnectionSource"]>>[0]> = [];
+
+  await executeJunctionJob(
+    provider,
+    createJunctionJobContext({
+      account: createAccount({
+        metadata: {
+          junctionHistoricalBackfillStatus: "coverage_v3_exhausted",
+          junctionHistoricalBackfillEmptyAttempts: 5,
+          junctionHistoricalBackfillLastEmptyAt: "2026-04-02T00:00:00.000Z",
+          junctionHistoricalBackfillWindowStart: "2026-04-01T00:00:00.000Z",
+          junctionHistoricalBackfillWindowEnd: "2026-04-03T00:00:00.000Z",
+        },
+      }),
+      listConnectionSources: () => [existingSource],
+      upsertConnectionSource: (input) => {
+        upserts.push(input);
+        return createConnectionSource(input);
+      },
+    }),
+    createJob("backfill", {
+      windowStart: "2026-04-01T00:00:00.000Z",
+      windowEnd: "2026-04-03T00:00:00.000Z",
+    }),
+  );
+
+  assert.equal(upserts.at(-1)?.sourceProviderSlug, "oura");
+  assert.equal(upserts.at(-1)?.status, "connected");
+  assert.equal(Object.hasOwn(upserts.at(-1) ?? {}, "lastErrorCode"), false);
+});
+
+for (const sourceProviderSlug of ["oura", "apple_health_kit"] as const) {
+  test(`Junction retrying coverage clears a stale ${sourceProviderSlug} reset marker`, async () => {
+    const provider = createHistoricalActivityProvider(
+      sourceProviderSlug,
+      createHistoricalPullFetch({
+        [sourceProviderSlug]: {
+          not_pulled: [],
+          pulled: {
+            activity: { days_with_data: 1, status: "success" },
+          },
+        },
+      }),
+    );
+    const sourceInstanceKey = requireValue(buildJunctionProviderSourceInstanceKey({
+      connectionId: "acct-junction-1",
+      sourceProviderSlug,
+    }));
+    const existingSource = createConnectionSource({
+      sourceInstanceKey,
+      sourceProviderSlug,
+      status: "error",
+      lastErrorCode: "HISTORICAL_DATA_RECONNECT_REQUIRED",
+      lastErrorMessage: "Historical data remained incomplete.",
+    });
+    const upserts: Array<Parameters<NonNullable<ProviderJobContext["upsertConnectionSource"]>>[0]> = [];
+
+    await executeJunctionJob(
+      provider,
+      createJunctionJobContext({
+        account: createAccount({
+          metadata: {
+            junctionHistoricalBackfillStatus: "coverage_v3_retrying",
+            junctionHistoricalBackfillEmptyAttempts: 4,
+            junctionHistoricalBackfillLastEmptyAt: "2026-04-02T00:00:00.000Z",
+            junctionHistoricalBackfillWindowStart: "2026-04-01T00:00:00.000Z",
+            junctionHistoricalBackfillWindowEnd: "2026-04-03T00:00:00.000Z",
+          },
+        }),
+        listConnectionSources: () => [existingSource],
+        upsertConnectionSource: (input) => {
+          upserts.push(input);
+          return createConnectionSource(input);
+        },
+      }),
+      createJob("backfill", {
+        windowStart: "2026-04-01T00:00:00.000Z",
+        windowEnd: "2026-04-03T00:00:00.000Z",
+      }),
+    );
+
+    const sourceUpdates = upserts.filter((source) =>
+      source.sourceProviderSlug === sourceProviderSlug
+    );
+    assert.ok(sourceUpdates.length > 0);
+    for (const source of sourceUpdates) {
+      assert.equal(source.status, "connected");
+      assert.equal(Object.hasOwn(source, "lastErrorCode"), false);
+      assert.equal(Object.hasOwn(source, "lastErrorMessage"), false);
+    }
+  });
+}
+
+test("Junction queued jobs preserve an Oura reset marker owned by opaque future coverage", async () => {
+  const provider = createHistoricalActivityProvider(
+    "oura",
+    createHistoricalPullFetch({
+      oura: {
+        not_pulled: [],
+        pulled: {
+          activity: { days_with_data: 1, status: "success" },
+        },
+      },
+    }),
+  );
+  const existingSource = createConnectionSource({
+    sourceInstanceKey: requireValue(buildJunctionProviderSourceInstanceKey({
+      connectionId: "acct-junction-1",
+      sourceProviderSlug: "oura",
+    })),
+    sourceProviderSlug: "oura",
+    status: "error",
+    lastErrorCode: "HISTORICAL_DATA_RECONNECT_REQUIRED",
+    lastErrorMessage: "Future coverage owns this state.",
+  });
+  const upserts: Array<Parameters<NonNullable<ProviderJobContext["upsertConnectionSource"]>>[0]> = [];
+
+  const result = await executeJunctionJob(
+    provider,
+    createJunctionJobContext({
+      account: createAccount({
+        metadata: {
+          junctionHistoricalBackfillStatus: "coverage_v4_exhausted",
+        },
+      }),
+      listConnectionSources: () => [existingSource],
+      upsertConnectionSource: (input) => {
+        upserts.push(input);
+        return createConnectionSource(input);
+      },
+    }),
+    createJob("backfill", {
+      windowStart: "2026-04-01T00:00:00.000Z",
+      windowEnd: "2026-04-03T00:00:00.000Z",
+    }),
+  );
+
+  assert.equal(result.metadataPatch, undefined);
+  assert.equal(upserts.at(-1)?.sourceProviderSlug, "oura");
+  assert.equal(upserts.at(-1)?.status, "error");
+  assert.equal(upserts.at(-1)?.lastErrorCode, "HISTORICAL_DATA_RECONNECT_REQUIRED");
+});
+
 test("Junction late historical data queues one connect-window verification after exhaustion", async () => {
   const importedSnapshots: unknown[] = [];
   const provider = createJunctionProvider(async (input) => {
@@ -3359,7 +4048,7 @@ test("Junction late historical data queues one connect-window verification after
   });
   const account = createAccount({
     metadata: {
-      junctionHistoricalBackfillStatus: "coverage_v2_exhausted",
+      junctionHistoricalBackfillStatus: "coverage_v3_exhausted",
       junctionHistoricalBackfillEmptyAttempts: 5,
       junctionHistoricalBackfillLastEmptyAt: "2026-04-04T00:00:00.000Z",
       junctionHistoricalBackfillWindowStart: "2026-04-01T00:00:00.000Z",
@@ -3374,7 +4063,7 @@ test("Junction late historical data queues one connect-window verification after
       now: "2026-04-05T00:00:00.000Z",
       importSnapshot: async (snapshot) => {
         importedSnapshots.push(snapshot);
-        return { canonicalEventCount: 1 };
+        return { canonicalEventCount: 1, durableDeliveryAccepted: true };
       },
     }),
     createJob("resource", {
@@ -3398,7 +4087,7 @@ test("Junction late historical data queues one connect-window verification after
   assert.equal(importedSnapshots.length, 1);
   assert.equal(
     result.metadataPatch?.junctionHistoricalBackfillEvidence,
-    "e1|2026-04-01T00:00:00.000Z|2026-04-03T00:00:00.000Z|garmin:1",
+    "e2|2026-04-01T00:00:00.000Z|2026-04-03T00:00:00.000Z|garmin:1",
   );
   assert.equal(result.scheduledJobs?.length, 1);
   assert.equal(result.scheduledJobs?.[0]?.kind, "backfill");
@@ -3421,7 +4110,7 @@ test("Junction late historical data queues one connect-window verification after
     createJunctionJobContext({
       account,
       now: "2026-04-05T00:00:00.000Z",
-      importSnapshot: async () => ({ canonicalEventCount: 1 }),
+      importSnapshot: async () => ({ canonicalEventCount: 1, durableDeliveryAccepted: true }),
     }),
     createJob("resource", {
       eventType: "daily.data.activity.created",
@@ -3442,6 +4131,51 @@ test("Junction late historical data queues one connect-window verification after
   );
   assert.equal(currentResult.scheduledJobs, undefined);
   assert.equal(currentResult.metadataPatch, undefined);
+});
+
+test("Junction direct Apple Health canonical delivery records history despite the Link provider filter", async () => {
+  const provider = createJunctionProvider(async (input) => {
+    throw new Error(`Unexpected request: ${readUrl(input)}`);
+  });
+  const account = createAccount({
+    metadata: {
+      junctionHistoricalBackfillStatus: "coverage_v3_exhausted",
+      junctionHistoricalBackfillEmptyAttempts: 5,
+      junctionHistoricalBackfillLastEmptyAt: "2026-04-03T00:00:00.000Z",
+      junctionHistoricalBackfillWindowStart: "2026-04-01T00:00:00.000Z",
+      junctionHistoricalBackfillWindowEnd: "2026-04-03T00:00:00.000Z",
+    },
+  });
+
+  const result = await executeJunctionJob(
+    provider,
+    createJunctionJobContext({
+      account,
+      importSnapshot: async () => ({ canonicalEventCount: 1, durableDeliveryAccepted: true }),
+    }),
+    createJob("resource", {
+      eventType: "daily.data.activity.created",
+      objectId: "apple-health-activity",
+      occurredAt: "2026-04-02T00:00:00.000Z",
+      resource: "activity",
+      resourceCategory: "summary",
+      sourceProviderSlug: "apple_health_kit",
+      webhookDataJson: JSON.stringify({
+        date: "2026-04-02",
+        id: "apple-health-activity",
+        sourceProviderSlug: "apple_health_kit",
+        steps: 4321,
+      }),
+      windowStart: "2026-04-02T00:00:00.000Z",
+      windowEnd: "2026-04-03T00:00:00.000Z",
+    }),
+  );
+
+  assert.equal(
+    result.metadataPatch?.junctionHistoricalBackfillEvidence,
+    "e2|2026-04-01T00:00:00.000Z|2026-04-03T00:00:00.000Z|apple_health_kit:1",
+  );
+  assert.deepEqual(result.scheduledJobs?.map((job) => job.kind), ["backfill"]);
 });
 
 test("Junction connection-day direct pushes do not prove older historical coverage", async () => {
@@ -3482,7 +4216,7 @@ test("Junction connection-day direct pushes do not prove older historical covera
     createJunctionJobContext({
       account: createAccount({
         metadata: {
-          junctionHistoricalBackfillStatus: "coverage_v2_exhausted",
+          junctionHistoricalBackfillStatus: "coverage_v3_exhausted",
           junctionHistoricalBackfillEmptyAttempts: 5,
           junctionHistoricalBackfillLastEmptyAt: "2026-04-03T00:00:00.000Z",
           junctionHistoricalBackfillWindowStart: "2026-04-01T00:00:00.000Z",
@@ -3491,7 +4225,7 @@ test("Junction connection-day direct pushes do not prove older historical covera
       }),
       importSnapshot: async () => {
         importCount += 1;
-        return { canonicalEventCount: 1 };
+        return { canonicalEventCount: 1, durableDeliveryAccepted: true };
       },
     }),
     createJob("resource", parsed.jobs[0]?.payload ?? {}),
@@ -3563,7 +4297,7 @@ test("Junction connection-day sleep records do not prove older historical covera
       createJunctionJobContext({
         account: createAccount({
           metadata: {
-            junctionHistoricalBackfillStatus: "coverage_v2_exhausted",
+            junctionHistoricalBackfillStatus: "coverage_v3_exhausted",
             junctionHistoricalBackfillEmptyAttempts: 5,
             junctionHistoricalBackfillLastEmptyAt: "2026-04-03T00:00:00.000Z",
             junctionHistoricalBackfillWindowStart: "2026-04-01T00:00:00.000Z",
@@ -3573,7 +4307,7 @@ test("Junction connection-day sleep records do not prove older historical covera
         now: "2026-04-03T12:00:00.000Z",
         importSnapshot: async () => {
           importCount += 1;
-          return { canonicalEventCount: 1 };
+          return { canonicalEventCount: 1, durableDeliveryAccepted: true };
         },
       }),
       createJob("resource", parsed.jobs[0]?.payload ?? {}),
@@ -3641,7 +4375,7 @@ test("Junction direct pushes without canonical events or from another source do 
   const otherSourceResult = await executeJunctionJob(
     provider,
     createJunctionJobContext({
-      importSnapshot: async () => ({ canonicalEventCount: 1 }),
+      importSnapshot: async () => ({ canonicalEventCount: 1, durableDeliveryAccepted: true }),
     }),
     createJob("resource", {
       ...basePayload,
@@ -3666,7 +4400,7 @@ test("Junction meaningful raw-only direct delivery proves history after durable 
   });
   const account = createAccount({
     metadata: {
-      junctionHistoricalBackfillStatus: "coverage_v2_exhausted",
+      junctionHistoricalBackfillStatus: "coverage_v3_exhausted",
       junctionHistoricalBackfillEmptyAttempts: 5,
       junctionHistoricalBackfillLastEmptyAt: "2026-04-04T00:00:00.000Z",
       junctionHistoricalBackfillWindowStart: "2026-04-01T00:00:00.000Z",
@@ -3724,7 +4458,7 @@ test("Junction meaningful raw-only direct delivery proves history after durable 
   assert.equal(unaccepted.metadataPatch, undefined);
   assert.equal(
     result.metadataPatch?.junctionHistoricalBackfillEvidence,
-    "e1|2026-04-01T00:00:00.000Z|2026-04-03T00:00:00.000Z|garmin:4",
+    "e2|2026-04-01T00:00:00.000Z|2026-04-03T00:00:00.000Z|garmin:4",
   );
 });
 
@@ -3734,8 +4468,8 @@ test("Junction direct pushes preserve opaque future historical evidence after im
   }, {
     providerFilter: ["garmin"],
   });
-  const futureStatus = "coverage_v3_exhausted";
-  const futureEvidence = "e2|opaque-future-evidence";
+  const futureStatus = "coverage_v4_exhausted";
+  const futureEvidence = "e3|opaque-future-evidence";
   const account = createAccount({
     metadata: {
       junctionHistoricalBackfillEvidence: futureEvidence,
@@ -3750,7 +4484,7 @@ test("Junction direct pushes preserve opaque future historical evidence after im
       account,
       importSnapshot: async () => {
         importCount += 1;
-        return { canonicalEventCount: 1 };
+        return { canonicalEventCount: 1, durableDeliveryAccepted: true };
       },
     }),
     createJob("resource", {
@@ -3807,7 +4541,7 @@ test("Junction exhausted historical backfill completes when the same window late
   const context = createJunctionJobContext({
     account: createAccount({
       metadata: {
-        junctionHistoricalBackfillStatus: "coverage_v2_exhausted",
+        junctionHistoricalBackfillStatus: "coverage_v3_exhausted",
         junctionHistoricalBackfillEmptyAttempts: 5,
         junctionHistoricalBackfillLastEmptyAt: "2026-04-02T00:00:00.000Z",
         junctionHistoricalBackfillWindowStart: "2026-04-01T00:00:00.000Z",
@@ -3835,7 +4569,7 @@ test("Junction exhausted historical backfill completes when the same window late
   );
 
   assert.deepEqual(result.metadataPatch, {
-    junctionHistoricalBackfillStatus: "coverage_v2_complete",
+    junctionHistoricalBackfillStatus: "coverage_v3_complete",
     junctionHistoricalBackfillEmptyAttempts: 0,
     junctionHistoricalBackfillLastEmptyAt: null,
     junctionHistoricalBackfillWindowStart: "2026-04-01T00:00:00.000Z",
@@ -3855,7 +4589,7 @@ test("Junction exhausted historical backfill completes when the same window late
     createJunctionJobContext({
       account: createAccount({
         metadata: {
-          junctionHistoricalBackfillStatus: "coverage_v3_exhausted",
+          junctionHistoricalBackfillStatus: "coverage_v4_exhausted",
         },
       }),
       listConnectionSources: () => [createConnectionSource({
@@ -3920,7 +4654,7 @@ test("Junction connect-window coverage unions fresh REST rows with matching impo
       account: createAccount({
         metadata: {
           junctionHistoricalBackfillEvidence:
-            "e1|2026-04-01T00:00:00.000Z|2026-04-03T00:00:00.000Z|garmin:2",
+            "e2|2026-04-01T00:00:00.000Z|2026-04-03T00:00:00.000Z|garmin:2",
         },
       }),
     }),
@@ -3928,12 +4662,12 @@ test("Junction connect-window coverage unions fresh REST rows with matching impo
   );
   assert.equal(
     matchingResult.metadataPatch?.junctionHistoricalBackfillStatus,
-    "coverage_v2_complete",
+    "coverage_v3_complete",
   );
 
   for (const evidence of [
-    "e1|2026-04-01T00:00:00.000Z|2026-04-03T00:00:00.000Z|oura:2",
-    "e1|2026-03-31T00:00:00.000Z|2026-04-02T00:00:00.000Z|garmin:2",
+    "e2|2026-04-01T00:00:00.000Z|2026-04-03T00:00:00.000Z|oura:2",
+    "e2|2026-03-31T00:00:00.000Z|2026-04-02T00:00:00.000Z|garmin:2",
   ]) {
     const result = await executeJunctionJob(
       provider,
@@ -3944,7 +4678,7 @@ test("Junction connect-window coverage unions fresh REST rows with matching impo
     );
     assert.equal(
       result.metadataPatch?.junctionHistoricalBackfillStatus,
-      "coverage_v2_retrying",
+      "coverage_v3_retrying",
       evidence,
     );
   }
@@ -3992,7 +4726,7 @@ test("Junction authenticated late sleep pushes recover an exhausted historical w
     webhookSecret: "whsec_d2ViaG9vay10ZXN0LXNlY3JldA==",
   });
   let metadata: Record<string, unknown> = {
-    junctionHistoricalBackfillStatus: "coverage_v2_exhausted",
+    junctionHistoricalBackfillStatus: "coverage_v3_exhausted",
     junctionHistoricalBackfillEmptyAttempts: 5,
     junctionHistoricalBackfillLastEmptyAt: "2026-04-03T00:00:00.000Z",
     junctionHistoricalBackfillWindowStart: windowStart,
@@ -4014,7 +4748,7 @@ test("Junction authenticated late sleep pushes recover an exhausted historical w
       },
       eventType: "historical.data.sleep.created",
       expectedEvidence:
-        "e1|2026-04-01T00:00:00.000Z|2026-04-03T00:00:00.000Z|garmin:2",
+        "e2|2026-04-01T00:00:00.000Z|2026-04-03T00:00:00.000Z|garmin:2",
       expectedResource: "sleep",
       messageId: "msg_late_garmin_sleep_1",
     },
@@ -4034,7 +4768,7 @@ test("Junction authenticated late sleep pushes recover an exhausted historical w
       },
       eventType: "historical.data.hypnogram.created",
       expectedEvidence:
-        "e1|2026-04-01T00:00:00.000Z|2026-04-03T00:00:00.000Z|garmin:6",
+        "e2|2026-04-01T00:00:00.000Z|2026-04-03T00:00:00.000Z|garmin:6",
       expectedResource: "sleep_cycle",
       messageId: "msg_late_garmin_hypnogram_1",
     },
@@ -4066,7 +4800,7 @@ test("Junction authenticated late sleep pushes recover an exhausted historical w
         importSnapshot: async (snapshot) => {
           const summaries = (snapshot as { summaries?: Record<string, unknown[]> }).summaries ?? {};
           importedPushResources.push(...Object.keys(summaries));
-          return { canonicalEventCount: 1 };
+          return { canonicalEventCount: 1, durableDeliveryAccepted: true };
         },
         now: "2026-04-03T00:00:00.000Z",
       }),
@@ -4085,7 +4819,7 @@ test("Junction authenticated late sleep pushes recover an exhausted historical w
   assert.deepEqual(importedPushResources, ["sleep", "sleep_cycle"]);
   assert.equal(
     metadata.junctionHistoricalBackfillEvidence,
-    "e1|2026-04-01T00:00:00.000Z|2026-04-03T00:00:00.000Z|garmin:6",
+    "e2|2026-04-01T00:00:00.000Z|2026-04-03T00:00:00.000Z|garmin:6",
   );
   assert.ok(verificationJob);
 
@@ -4102,7 +4836,7 @@ test("Junction authenticated late sleep pushes recover an exhausted historical w
       account: createAccount({ metadata }),
       importSnapshot: async (snapshot) => {
         verificationSnapshot = snapshot;
-        return { canonicalEventCount: 1 };
+        return { canonicalEventCount: 1, durableDeliveryAccepted: true };
       },
       listConnectionSources: () => [existingSource],
       now: "2026-04-03T00:01:00.000Z",
@@ -4122,16 +4856,16 @@ test("Junction authenticated late sleep pushes recover an exhausted historical w
   assert.deepEqual(verificationSummaries?.sleep_cycle, []);
   assert.equal(
     verificationResult.metadataPatch?.junctionHistoricalBackfillStatus,
-    "coverage_v2_complete",
+    "coverage_v3_complete",
   );
   const completedMetadata = mergeStoredDeviceSyncMetadataPatch(
     metadata,
     verificationResult.metadataPatch,
   );
-  assert.equal(completedMetadata.junctionHistoricalBackfillStatus, "coverage_v2_complete");
+  assert.equal(completedMetadata.junctionHistoricalBackfillStatus, "coverage_v3_complete");
   assert.equal(
     completedMetadata.junctionHistoricalBackfillEvidence,
-    "e1|2026-04-01T00:00:00.000Z|2026-04-03T00:00:00.000Z|garmin:6",
+    "e2|2026-04-01T00:00:00.000Z|2026-04-03T00:00:00.000Z|garmin:6",
   );
   assert.ok(requests.some((url) => url.includes("/v2/summary/activity/")));
   assert.ok(requests.some((url) => url.includes("/v2/summary/sleep/")));
@@ -4183,7 +4917,7 @@ test("Junction coverage ignores errored sources outside the normalized provider 
     }),
   );
 
-  assert.equal(result.metadataPatch?.junctionHistoricalBackfillStatus, "coverage_v2_complete");
+  assert.equal(result.metadataPatch?.junctionHistoricalBackfillStatus, "coverage_v3_complete");
 });
 
 test("Junction reconcile data does not complete pending historical backfill", async () => {
@@ -4214,7 +4948,7 @@ test("Junction reconcile data does not complete pending historical backfill", as
   const context = createJunctionJobContext({
     account: createAccount({
       metadata: {
-        junctionHistoricalBackfillStatus: "coverage_v2_retrying",
+        junctionHistoricalBackfillStatus: "coverage_v3_retrying",
         junctionHistoricalBackfillEmptyAttempts: 1,
         junctionHistoricalBackfillLastEmptyAt: "2026-04-02T00:00:00.000Z",
         junctionHistoricalBackfillWindowStart: "2026-01-03T00:00:00.000Z",
@@ -4361,6 +5095,157 @@ test("Junction createLinkToken accepts documented Link web URL hosts", async () 
   assert.equal(
     isAllowedJunctionLinkHost(new URL(token.linkWebUrl).hostname, JUNCTION_DEFAULT_ALLOWED_LINK_HOSTS),
     true,
+  );
+});
+
+test("Junction historical-pull introspection matches the exact user without SDK release metadata and preserves future states", () => {
+  const snapshot = parseJunctionHistoricalPullSnapshot({
+    data: [
+      {
+        user_id: "junction-user-other",
+        provider: {
+          garmin: {
+            not_pulled: [],
+            pulled: {
+              activity: {
+                days_with_data: 10,
+                status: "failure",
+              },
+            },
+          },
+        },
+      },
+      {
+        user_id: "junction-user-1",
+        provider: {
+          oura: {
+            not_pulled: ["sleep", "sleep"],
+            pulled: {
+              activity: {
+                days_with_data: 0,
+                range_end: "2026-04-03T00:00:00+00:00",
+                range_start: "2026-04-03T00:00:00+00:00",
+                status: "success",
+              },
+              sleep_cycle: {
+                daysWithData: 3,
+                errorDetails: "Provider is preparing this resource.",
+                rangeEnd: "2026-04-03T00:00:00+00:00",
+                rangeStart: "2026-04-01T00:00:00+00:00",
+                status: "paused_by_provider",
+              },
+            },
+          },
+        },
+      },
+    ],
+  }, "junction-user-1");
+
+  assert.deepEqual(snapshot, {
+    matchedUser: true,
+    sources: [{
+      notPulledResources: ["sleep"],
+      pulledResources: [
+        {
+          daysWithData: 0,
+          errorDetails: null,
+          rangeEnd: "2026-04-03T00:00:00+00:00",
+          rangeStart: "2026-04-03T00:00:00+00:00",
+          resource: "activity",
+          status: "success",
+        },
+        {
+          daysWithData: 3,
+          errorDetails: "Provider is preparing this resource.",
+          rangeEnd: "2026-04-03T00:00:00+00:00",
+          rangeStart: "2026-04-01T00:00:00+00:00",
+          resource: "sleep_cycle",
+          status: "paused_by_provider",
+        },
+      ],
+      sourceProviderSlug: "oura",
+    }],
+  });
+
+  assert.deepEqual(
+    parseJunctionHistoricalPullSnapshot({
+      data: [{ user_id: "junction-user-other", provider: {} }],
+    }, "junction-user-1"),
+    { matchedUser: false, sources: [] },
+  );
+});
+
+test("Junction historical-pull introspection applies the optional provider filter at both request and parse boundaries", async () => {
+  const client = new JunctionClient({
+    apiKey: "sk_us_test_123",
+    environment: "sandbox",
+    region: "us",
+    fetchImpl: async (input) => {
+      assert.equal(
+        readUrl(input),
+        "https://api.sandbox.us.junction.com/v2/introspect/historical_pull?user_id=junction-user-1&user_limit=2&provider=garmin",
+      );
+      return createJsonResponse({
+        data: [{
+          user_id: "junction-user-1",
+          provider: {
+            garmin: {
+              not_pulled: ["sleep"],
+              pulled: {
+                activity: {
+                  days_with_data: 0,
+                  status: "success",
+                },
+              },
+            },
+            oura: {
+              not_pulled: [],
+              pulled: {
+                activity: {
+                  days_with_data: 1,
+                  status: "success",
+                },
+              },
+            },
+          },
+        }],
+      });
+    },
+  });
+
+  const snapshot = await client.introspectHistoricalPull({
+    sourceProviderSlug: "Garmin",
+    userId: "junction-user-1",
+    userLimit: 2,
+  });
+
+  assert.deepEqual(snapshot, {
+    matchedUser: true,
+    sources: [{
+      notPulledResources: ["sleep"],
+      pulledResources: [{
+        daysWithData: 0,
+        errorDetails: null,
+        rangeEnd: null,
+        rangeStart: null,
+        resource: "activity",
+        status: "success",
+      }],
+      sourceProviderSlug: "garmin",
+    }],
+  });
+});
+
+test("Junction historical-pull introspection rejects malformed envelopes as retryable", () => {
+  assert.throws(
+    () => parseJunctionHistoricalPullSnapshot({ data: {} }, "junction-user-1"),
+    (error) => {
+      assert.ok(error instanceof DeviceSyncError);
+      assert.equal(error.code, "JUNCTION_HISTORICAL_PULL_RESPONSE_INVALID");
+      assert.equal(error.httpStatus, 502);
+      assert.equal(error.retryable, true);
+      return true;
+    },
   );
 });
 
@@ -4972,7 +5857,7 @@ test("Junction scheduled polling uses stable closed-day windows", () => {
   assert.equal(derivedBackfill?.dedupeKey, second?.jobs[1]?.dedupeKey);
 });
 
-test("Junction scheduled pass repairs legacy completion and honors current terminal status", () => {
+test("Junction scheduled pass repairs legacy coverage and honors current or future terminal status", () => {
   const provider = createJunctionProvider(async (input) => {
     throw new Error(`Unexpected request: ${readUrl(input)}`);
   });
@@ -5010,22 +5895,37 @@ test("Junction scheduled pass repairs legacy completion and honors current termi
     1,
   );
 
+  const priorCoverageVersionV2 = executor.createScheduledJobs?.(
+    createStoredAccount({
+      metadata: {
+        junctionHistoricalBackfillStatus: "coverage_v2_complete",
+        junctionHistoricalBackfillWindowStart: "2026-04-01T00:00:00.000Z",
+        junctionHistoricalBackfillWindowEnd: "2026-04-03T00:00:00.000Z",
+      },
+    }),
+    "2026-04-03T12:34:56.000Z",
+  );
+  assert.equal(
+    priorCoverageVersionV2?.jobs.filter((job) => job.kind === "backfill").length,
+    1,
+  );
+
   for (const metadata of [
     {
-      junctionHistoricalBackfillStatus: "coverage_v2_complete",
-      junctionHistoricalBackfillWindowStart: "2026-04-01T00:00:00.000Z",
-      junctionHistoricalBackfillWindowEnd: "2026-04-03T00:00:00.000Z",
-    },
-    {
-      junctionHistoricalBackfillStatus: "coverage_v2_exhausted",
-      junctionHistoricalBackfillWindowStart: "2026-04-01T00:00:00.000Z",
-      junctionHistoricalBackfillWindowEnd: "2026-04-03T00:00:00.000Z",
-    },
-    {
       junctionHistoricalBackfillStatus: "coverage_v3_complete",
+      junctionHistoricalBackfillWindowStart: "2026-04-01T00:00:00.000Z",
+      junctionHistoricalBackfillWindowEnd: "2026-04-03T00:00:00.000Z",
     },
     {
-      junctionHistoricalBackfillStatus: "coverage_v3_deferred",
+      junctionHistoricalBackfillStatus: "coverage_v3_exhausted",
+      junctionHistoricalBackfillWindowStart: "2026-04-01T00:00:00.000Z",
+      junctionHistoricalBackfillWindowEnd: "2026-04-03T00:00:00.000Z",
+    },
+    {
+      junctionHistoricalBackfillStatus: "coverage_v4_complete",
+    },
+    {
+      junctionHistoricalBackfillStatus: "coverage_v4_deferred",
     },
   ] as const) {
     const scheduled = executor.createScheduledJobs?.(
@@ -5044,7 +5944,7 @@ test("Junction scheduled pass repairs legacy completion and honors current termi
   const completeOtherWindow = executor.createScheduledJobs?.(
     createStoredAccount({
       metadata: {
-        junctionHistoricalBackfillStatus: "coverage_v2_complete",
+        junctionHistoricalBackfillStatus: "coverage_v3_complete",
         junctionHistoricalBackfillWindowStart: "2026-04-02T00:00:00.000Z",
         junctionHistoricalBackfillWindowEnd: "2026-04-04T00:00:00.000Z",
       },
@@ -5062,7 +5962,7 @@ test("Junction scheduled pass repairs legacy completion and honors current termi
   const retryingOtherWindow = executor.createScheduledJobs?.(
     createStoredAccount({
       metadata: {
-        junctionHistoricalBackfillStatus: "coverage_v2_retrying",
+        junctionHistoricalBackfillStatus: "coverage_v3_retrying",
         junctionHistoricalBackfillEmptyAttempts: 1,
         junctionHistoricalBackfillLastEmptyAt: "2026-04-03T12:30:00.000Z",
         junctionHistoricalBackfillWindowStart: "2026-04-02T00:00:00.000Z",
@@ -5084,7 +5984,7 @@ test("Junction scheduled pass reopens progress overwritten by a legacy runner", 
   });
   const executor = requireValue(provider.jobExecutor, "Junction provider should expose a job executor.");
   const currentProgress = {
-    junctionHistoricalBackfillStatus: "coverage_v2_retrying",
+    junctionHistoricalBackfillStatus: "coverage_v3_retrying",
     junctionHistoricalBackfillEmptyAttempts: 2,
     junctionHistoricalBackfillLastEmptyAt: "2026-04-03T12:30:00.000Z",
     junctionHistoricalBackfillWindowStart: "2026-04-01T00:00:00.000Z",
@@ -6833,7 +7733,7 @@ test("Junction polling updates source projection and imports bounded summary/tim
   );
 
   assert.deepEqual(result.metadataPatch, {
-    junctionHistoricalBackfillStatus: "coverage_v2_complete",
+    junctionHistoricalBackfillStatus: "coverage_v3_complete",
     junctionHistoricalBackfillEmptyAttempts: 0,
     junctionHistoricalBackfillLastEmptyAt: null,
     junctionHistoricalBackfillWindowStart: "2026-04-01T00:00:00.000Z",
@@ -10595,7 +11495,7 @@ test("Junction large daily summary webhook payloads import inline without REST f
     createJunctionJobContext({
       importSnapshot: async (snapshot) => {
         importedSnapshots.push(snapshot);
-        return { canonicalEventCount: 1 };
+        return { canonicalEventCount: 1, durableDeliveryAccepted: true };
       },
     }),
     createJob("resource", parsed.jobs[0]?.payload ?? {}),
@@ -10612,7 +11512,7 @@ test("Junction large daily summary webhook payloads import inline without REST f
   assert.doesNotMatch(JSON.stringify(importedSnapshots), /junction-user-1/u);
   assert.equal(
     result.metadataPatch?.junctionHistoricalBackfillEvidence,
-    "e1|2026-04-01T00:00:00.000Z|2026-04-03T00:00:00.000Z|garmin:1",
+    "e2|2026-04-01T00:00:00.000Z|2026-04-03T00:00:00.000Z|garmin:1",
   );
 });
 

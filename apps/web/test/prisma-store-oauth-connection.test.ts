@@ -571,7 +571,7 @@ describe("PrismaDeviceSyncControlPlaneStore hosted connection access", () => {
     expect(createCalled).toBe(false);
   });
 
-  it("atomically preserves Junction historical progress during a guarded callback", async () => {
+  it("preserves legacy v2 Junction progress while discarding stale e1 evidence", async () => {
     let stored = createConnection({
       credentialKind: "provider_config",
       externalAccountIdEncrypted: "enc:junction-user-123",
@@ -666,8 +666,6 @@ describe("PrismaDeviceSyncControlPlaneStore hosted connection access", () => {
           junctionHistoricalBackfillLastEmptyAt: "2026-03-25T00:30:00.000Z",
           junctionHistoricalBackfillWindowStart: "2026-03-23T00:00:00.000Z",
           junctionHistoricalBackfillWindowEnd: "2026-03-25T00:00:00.000Z",
-          junctionHistoricalBackfillEvidence:
-            "e1|2026-03-23T00:00:00.000Z|2026-03-25T00:00:00.000Z|garmin:1",
           callbackOutcome: "complete",
         },
       }),

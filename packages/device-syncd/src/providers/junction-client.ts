@@ -101,6 +101,26 @@ export interface JunctionIntrospectionInput {
   userLimit?: number;
 }
 
+export interface JunctionHistoricalPullResource {
+  daysWithData: number | null;
+  errorDetails: string | null;
+  rangeEnd: string | null;
+  rangeStart: string | null;
+  resource: string;
+  status: string;
+}
+
+export interface JunctionHistoricalPullSource {
+  notPulledResources: readonly string[];
+  pulledResources: readonly JunctionHistoricalPullResource[];
+  sourceProviderSlug: string;
+}
+
+export interface JunctionHistoricalPullSnapshot {
+  matchedUser: boolean;
+  sources: readonly JunctionHistoricalPullSource[];
+}
+
 export interface JunctionRefreshUserDataInput {
   signal?: AbortSignal | null;
   timeoutSeconds?: number | null;
@@ -363,12 +383,19 @@ export class JunctionClient {
     );
   }
 
-  async introspectHistoricalPull(input: JunctionIntrospectionInput): Promise<unknown> {
-    return this.requestJson<unknown>(
+  async introspectHistoricalPull(
+    input: JunctionIntrospectionInput,
+  ): Promise<JunctionHistoricalPullSnapshot> {
+    const payload = await this.requestJson<unknown>(
       "GET",
       `/v2/introspect/historical_pull?${buildJunctionIntrospectionSearch(input).toString()}`,
       undefined,
       { endpointKind: "junction_introspect_historical_pull", signal: input.signal ?? null },
+    );
+    return parseJunctionHistoricalPullSnapshot(
+      payload,
+      input.userId,
+      input.sourceProviderSlug ?? null,
     );
   }
 
@@ -757,6 +784,108 @@ function parseJunctionProviders(payload: unknown): JunctionProviderConnection[] 
   return extractCollectionRecords(payload)
     .map(parseJunctionProviderConnection)
     .filter((provider): provider is JunctionProviderConnection => Boolean(provider));
+}
+
+export function parseJunctionHistoricalPullSnapshot(
+  payload: unknown,
+  expectedUserId: string,
+  requestedSourceProviderSlug: string | null = null,
+): JunctionHistoricalPullSnapshot {
+  const root = readPlainObject(payload);
+  if (!root || !Array.isArray(root.data)) {
+    throw deviceSyncError({
+      code: "JUNCTION_HISTORICAL_PULL_RESPONSE_INVALID",
+      message: "Junction historical-pull introspection returned an invalid response.",
+      retryable: true,
+      httpStatus: 502,
+    });
+  }
+
+  const normalizedExpectedUserId = normalizeString(expectedUserId);
+  const requestedProvider = normalizeJunctionProviderSlug(requestedSourceProviderSlug);
+  const sourcesByProvider = new Map<string, JunctionHistoricalPullSource>();
+  let matchedUser = false;
+
+  for (const value of root.data) {
+    const user = readPlainObject(value);
+    const userId = normalizeString(user?.user_id) ?? normalizeString(user?.userId);
+    if (!user || !normalizedExpectedUserId || userId !== normalizedExpectedUserId) {
+      continue;
+    }
+    matchedUser = true;
+
+    const providers = readPlainObject(user.provider);
+    if (!providers) {
+      continue;
+    }
+
+    for (const [rawProviderSlug, rawDetails] of Object.entries(providers)) {
+      const sourceProviderSlug = normalizeJunctionProviderSlug(rawProviderSlug);
+      const details = readPlainObject(rawDetails);
+      if (
+        !sourceProviderSlug
+        || !details
+        || (requestedProvider && sourceProviderSlug !== requestedProvider)
+      ) {
+        continue;
+      }
+
+      const notPulledResources = Array.isArray(details.not_pulled)
+        ? [...new Set(details.not_pulled.flatMap((resource) => {
+            const normalized = normalizeJunctionProviderSlug(resource);
+            return normalized ? [normalized] : [];
+          }))].sort((left, right) => left.localeCompare(right))
+        : [];
+      const pulled = readPlainObject(details.pulled);
+      const pulledResources = pulled
+        ? Object.entries(pulled).flatMap(([rawResource, rawStatistics]) => {
+            const resource = normalizeJunctionProviderSlug(rawResource);
+            const statistics = readPlainObject(rawStatistics);
+            const status = normalizeString(statistics?.status)?.toLowerCase();
+            if (!resource || !statistics || !status) {
+              return [];
+            }
+
+            const rawDaysWithData = statistics.days_with_data ?? statistics.daysWithData;
+            const daysWithData = typeof rawDaysWithData === "number"
+              && Number.isSafeInteger(rawDaysWithData)
+              && rawDaysWithData >= 0
+              ? rawDaysWithData
+              : null;
+            return [{
+              daysWithData,
+              errorDetails:
+                normalizeString(statistics.error_details)
+                ?? normalizeString(statistics.errorDetails)
+                ?? null,
+              rangeEnd:
+                normalizeString(statistics.range_end)
+                ?? normalizeString(statistics.rangeEnd)
+                ?? null,
+              rangeStart:
+                normalizeString(statistics.range_start)
+                ?? normalizeString(statistics.rangeStart)
+                ?? null,
+              resource,
+              status,
+            }];
+          }).sort((left, right) => left.resource.localeCompare(right.resource))
+        : [];
+
+      sourcesByProvider.set(sourceProviderSlug, {
+        notPulledResources,
+        pulledResources,
+        sourceProviderSlug,
+      });
+    }
+  }
+
+  return {
+    matchedUser,
+    sources: [...sourcesByProvider.values()].sort((left, right) =>
+      left.sourceProviderSlug.localeCompare(right.sourceProviderSlug)
+    ),
+  };
 }
 
 function parseJunctionProviderConnection(value: unknown): JunctionProviderConnection | null {
