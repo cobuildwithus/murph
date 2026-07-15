@@ -13,6 +13,7 @@ vi.mock("server-only", () => ({}));
 
 vi.mock("@/src/components/hosted-groups/group-join-client", () => ({
   GroupJoinAcceptForm(props: {
+    expectedMembershipId: string | null;
     groupName: string;
     postJoinDestination: string;
   }) {
@@ -20,6 +21,7 @@ vi.mock("@/src/components/hosted-groups/group-join-client", () => ({
       "form",
       {
         "data-group-name": props.groupName,
+        "data-membership-id": props.expectedMembershipId ?? "none",
         "data-post-join-destination": props.postJoinDestination,
       },
       "Accept group invite",
@@ -94,6 +96,7 @@ beforeEach(() => {
     requestedVaultShareProjections: [],
     status: "active",
     viewerCanLeave: false,
+    viewerMembershipId: null,
     viewerMembershipStatus: null,
   });
 });
@@ -223,12 +226,14 @@ test("does not send an existing group member through the new-member handoff", as
     requestedVaultShareProjections: [],
     status: "active",
     viewerCanLeave: true,
+    viewerMembershipId: "membership_existing",
     viewerMembershipStatus: "active",
   });
 
   const markup = await renderGroupJoinPage("JOIN123", { postJoin: "initial-visit" });
 
   expect(markup).toContain('data-post-join-destination="/home"');
+  expect(markup).toContain('data-membership-id="membership_existing"');
   expect(markup).toContain('data-join-code="JOIN123"');
   expect(markup).toContain("Leave group");
 });
@@ -251,6 +256,7 @@ test("keeps self-service leave available when an existing member lacks launch co
     requestedVaultShareProjections: [],
     status: "active",
     viewerCanLeave: true,
+    viewerMembershipId: "membership_existing",
     viewerMembershipStatus: "active",
   });
 
@@ -279,6 +285,7 @@ test("does not offer self-service leave to the group owner", async () => {
     requestedVaultShareProjections: [],
     status: "active",
     viewerCanLeave: false,
+    viewerMembershipId: "membership_owner",
     viewerMembershipStatus: "active",
   });
 

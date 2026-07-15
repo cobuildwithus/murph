@@ -51,6 +51,15 @@ Personal visibility extends the existing `murph.group` dynamic tool with `action
 
 Permission changes stay on the existing authenticated join page for members who already possess the owner-authorized link. Private Murph's only membership mutation is self-leave, selected from its current Web-owned list and bound to the signed callback member. Reacting in a personal direct-message thread to change a group permission remains deliberately out of scope. Existing server-owned reactions inside a route-bound group chat remain unchanged.
 
+The authenticated join page renders the viewer's current opaque membership id,
+or explicit absence for a nonmember, into every accept request. After locking
+the group and callback member, Web compares that rendered state with the current
+membership row before creating membership or changing grants. Missing or stale
+rendered state returns a reload conflict. This keeps an older `Save changes`
+request from recreating membership or sharing after a later leave commits, while
+a reloaded nonmember can still explicitly rejoin and receive a fresh row id.
+The route-bound additive group-reaction flow does not use this page precondition.
+
 ### Leaving a membership
 
 A non-owner may leave one of their hosted groups by asking their private Murph
@@ -89,7 +98,9 @@ updated Cloudflare worker and runner bundle first, with immediate container
 rollout and convergence proof. Its parser accepts legacy membership summaries
 without an id, and private Murph calls leave only when the selected summary
 includes one. Then deploy Web, which adds ids, the tool handler, and the
-join-page path together. Roll Web back before rolling the runner below the
+join-page path together. An already-open join page from the previous Web build
+has no membership precondition and receives a reload conflict instead of
+mutating membership. Roll Web back before rolling the runner below the
 widened parser. No persisted wire shape changes, so no compatibility floor
 remains after both planes converge.
 
@@ -106,3 +117,6 @@ At minimum, verify these cases:
 7. A non-owner's private-tool or authenticated join-page departure atomically
    removes membership, revokes all active grants, and appends cleanup work; an
    owner attempt makes no change and a repeated departure remains idempotent.
+8. If leave commits before an older existing-member sharing save, the save
+   conflicts without recreating membership or grants. If the save commits first,
+   the later leave still ends left; a reloaded nonmember can explicitly rejoin.

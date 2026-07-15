@@ -96,6 +96,7 @@ export function GroupJoinLegalConsentGate({
 export function GroupJoinAcceptForm(props: {
   activeVaultShareProjectionScopes: readonly HostedVaultShareProjectionScope[];
   alreadyActiveMember: boolean;
+  expectedMembershipId: string | null;
   groupName: string;
   joinCode: string;
   permissions: readonly GroupJoinPermissionDisplay[];
@@ -136,7 +137,10 @@ export function GroupJoinAcceptForm(props: {
     try {
       await requestHostedOnboardingJson({
         method: "POST",
-        payload: { selectedVaultShareProjectionScopes },
+        payload: {
+          expectedMembershipId: props.expectedMembershipId,
+          selectedVaultShareProjectionScopes,
+        },
         url: `/api/groups/join/${encodeURIComponent(props.joinCode)}/accept`,
       });
       setStatus("joined");

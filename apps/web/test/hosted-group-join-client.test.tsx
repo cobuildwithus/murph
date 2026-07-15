@@ -174,6 +174,7 @@ test("opens the post-auth destination only after membership succeeds", async () 
     createElement(GroupJoinAcceptForm, {
       activeVaultShareProjectionScopes: [],
       alreadyActiveMember: false,
+      expectedMembershipId: null,
       groupName: "Sunday Sleep Crew",
       joinCode: "JOIN123",
       permissions: [],
@@ -189,7 +190,10 @@ test("opens the post-auth destination only after membership succeeds", async () 
 
   expect(mocks.requestHostedOnboardingJson).toHaveBeenCalledWith({
     method: "POST",
-    payload: { selectedVaultShareProjectionScopes: [] },
+    payload: {
+      expectedMembershipId: null,
+      selectedVaultShareProjectionScopes: [],
+    },
     url: "/api/groups/join/JOIN123/accept",
   });
   expect(mocks.routerPush).not.toHaveBeenCalled();
@@ -205,6 +209,39 @@ test("opens the post-auth destination only after membership succeeds", async () 
   });
 
   expect(mocks.routerPush).toHaveBeenCalledWith("/home?initialVisit=true");
+});
+
+test("binds an existing-member sharing update to the rendered membership id", async () => {
+  mocks.requestHostedOnboardingJson.mockResolvedValueOnce({ ok: true });
+  const { GroupJoinAcceptForm } = await import(
+    "@/src/components/hosted-groups/group-join-client"
+  );
+  const { button, cleanup, window } = await renderClientComponent(
+    createElement(GroupJoinAcceptForm, {
+      activeVaultShareProjectionScopes: [],
+      alreadyActiveMember: true,
+      expectedMembershipId: "membership_existing",
+      groupName: "Sunday Sleep Crew",
+      joinCode: "JOIN123",
+      permissions: [],
+      postJoinDestination: "/home",
+    }),
+  );
+  cleanupRender = cleanup;
+
+  await act(async () => {
+    button.dispatchEvent(new window.Event("click", { bubbles: true }));
+    await Promise.resolve();
+  });
+
+  expect(mocks.requestHostedOnboardingJson).toHaveBeenCalledWith({
+    method: "POST",
+    payload: {
+      expectedMembershipId: "membership_existing",
+      selectedVaultShareProjectionScopes: [],
+    },
+    url: "/api/groups/join/JOIN123/accept",
+  });
 });
 
 test("confirms the provider boundary before leaving and returns home", async () => {

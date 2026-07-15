@@ -106,6 +106,10 @@ function buildTx(input?: {
   activeDestinationGrantCount?: number;
   activeGroupGrantCount?: number;
   existingMembershipId?: string | null;
+  membershipState?: {
+    membershipId: string | null;
+    nextMembershipId?: string;
+  };
   offerMessageLookupKey?: string;
   offerProjectionKinds?: string[];
   requestedProjectionKinds?: string[];
@@ -151,6 +155,7 @@ function buildTx(input?: {
                   requestedVaultShareProjectionKinds: input.requestedProjectionKinds,
                 }
               : JOIN_POLICY,
+            ownerMemberId: "member_owner",
             runtimeMemberId: input?.runtimeMemberId === undefined
               ? "member_group_runtime"
               : input.runtimeMemberId,
@@ -211,9 +216,37 @@ function buildTx(input?: {
       updateMany: vi.fn(async () => ({ count: 0 })),
     },
     hostedGroupMember: {
-      create: vi.fn(async () => ({ id: "membership_created" })),
-      findUnique: vi.fn(async () => {
-        return input?.existingMembershipId ? { id: input.existingMembershipId } : null;
+      create: vi.fn(async () => {
+        const membershipId = input?.membershipState?.nextMembershipId ?? "membership_created";
+        if (input?.membershipState) {
+          input.membershipState.membershipId = membershipId;
+        }
+        return { id: membershipId };
+      }),
+      delete: vi.fn(async (args: { where: { id: string } }) => {
+        if (input?.membershipState?.membershipId === args.where.id) {
+          input.membershipState.membershipId = null;
+        }
+        return {};
+      }),
+      findUnique: vi.fn(async (args: {
+        where: {
+          groupId_memberId?: { groupId: string; memberId: string };
+          id?: string;
+        };
+      }) => {
+        const membershipId = input?.membershipState
+          ? input.membershipState.membershipId
+          : input?.existingMembershipId ?? null;
+        if (!membershipId) {
+          return null;
+        }
+        if (args.where.id) {
+          return args.where.id === membershipId
+            ? { groupId: "group_1", memberId: "member_joiner" }
+            : null;
+        }
+        return { id: membershipId };
       }),
       update: vi.fn(async () => ({})),
     },
@@ -277,6 +310,7 @@ describe("acceptHostedGroupJoinCodeTx", () => {
     const tx = buildTx();
 
     await expect(acceptHostedGroupJoinCodeTx({
+      expectedMembershipId: null,
       joinCode: "join_1",
       memberId: "member_joiner",
       now: new Date("2026-07-01T00:00:00.000Z"),
@@ -294,6 +328,7 @@ describe("acceptHostedGroupJoinCodeTx", () => {
     const tx = buildTx({ runtimeMemberId: null });
 
     await expect(acceptHostedGroupJoinCodeTx({
+      expectedMembershipId: null,
       joinCode: "join_1",
       memberId: "member_joiner",
       now: new Date("2026-07-01T00:00:00.000Z"),
@@ -312,6 +347,7 @@ describe("acceptHostedGroupJoinCodeTx", () => {
     const now = new Date("2026-07-01T00:00:00.000Z");
 
     await expect(acceptHostedGroupJoinCodeTx({
+      expectedMembershipId: null,
       joinCode: "join_1",
       memberId: "member_joiner",
       now,
@@ -353,6 +389,7 @@ describe("acceptHostedGroupJoinCodeTx", () => {
 
     await expect(acceptHostedGroupJoinCodeTx({
       confirmationPublicBaseUrl: "https://murph.example",
+      expectedMembershipId: null,
       joinCode: "join_1",
       memberId: "member_joiner",
       now,
@@ -401,6 +438,7 @@ describe("acceptHostedGroupJoinCodeTx", () => {
 
     await expect(acceptHostedGroupJoinCodeTx({
       confirmationPublicBaseUrl: "https://murph.example",
+      expectedMembershipId: null,
       joinCode: "join_1",
       memberId: "member_joiner",
       now: new Date("2026-07-01T00:00:00.000Z"),
@@ -425,6 +463,7 @@ describe("acceptHostedGroupJoinCodeTx", () => {
 
     const result = await acceptHostedGroupJoinCodeTx({
       confirmationPublicBaseUrl: "https://murph.example",
+      expectedMembershipId: null,
       joinCode: "join_1",
       memberId: "member_joiner",
       now,
@@ -453,6 +492,7 @@ describe("acceptHostedGroupJoinCodeTx", () => {
 
     await acceptHostedGroupJoinCodeTx({
       confirmationPublicBaseUrl: "https://murph.example",
+      expectedMembershipId: null,
       joinCode: "join_1",
       memberId: "member_joiner",
       now,
@@ -477,6 +517,7 @@ describe("acceptHostedGroupJoinCodeTx", () => {
 
     await acceptHostedGroupJoinCodeTx({
       confirmationPublicBaseUrl: "https://murph.example",
+      expectedMembershipId: null,
       joinCode: "join_1",
       memberId: "member_joiner",
       now,
@@ -505,6 +546,7 @@ describe("acceptHostedGroupJoinCodeTx", () => {
 
     await expect(acceptHostedGroupJoinCodeTx({
       confirmationPublicBaseUrl: "https://murph.example",
+      expectedMembershipId: "membership_existing",
       joinCode: "join_1",
       memberId: "member_joiner",
       now: new Date("2026-07-01T00:00:00.000Z"),
@@ -520,6 +562,120 @@ describe("acceptHostedGroupJoinCodeTx", () => {
     expect(tx.hostedGroupMember.update).not.toHaveBeenCalled();
   });
 
+  it.each([
+    ["membership_old", null],
+    ["membership_old", "membership_rejoined"],
+    [null, "membership_existing"],
+  ] as const)(
+    "rejects rendered membership %s when the locked membership is %s",
+    async (expectedMembershipId, existingMembershipId) => {
+      const tx = buildTx({ existingMembershipId });
+
+      await expect(acceptHostedGroupJoinCodeTx({
+        expectedMembershipId,
+        joinCode: "join_1",
+        memberId: "member_joiner",
+        now: new Date("2026-07-15T12:00:00.000Z"),
+        selectedVaultShareProjectionKinds: [],
+        tx,
+      })).rejects.toMatchObject({
+        code: "HOSTED_GROUP_MEMBERSHIP_CHANGED",
+        httpStatus: 409,
+        retryable: false,
+      });
+
+      expect(tx.hostedGroupMember.create).not.toHaveBeenCalled();
+      expect(mocks.assertHostedLaunchRequiredConsentGranted).not.toHaveBeenCalled();
+      expect(mocks.grantHostedVaultShareTx).not.toHaveBeenCalled();
+      expect(mocks.revokeHostedVaultSharesWithCleanupTx).not.toHaveBeenCalled();
+    },
+  );
+
+  it("serializes stale save, leave, and explicit rejoin by membership row identity", async () => {
+    const membershipState = {
+      membershipId: "membership_existing" as string | null,
+      nextMembershipId: "membership_rejoined",
+    };
+    let markStaleSaveBlocked!: () => void;
+    const staleSaveBlocked = new Promise<void>((resolve) => {
+      markStaleSaveBlocked = resolve;
+    });
+    let releaseStaleSave!: () => void;
+    const staleSaveBarrier = new Promise<void>((resolve) => {
+      releaseStaleSave = resolve;
+    });
+    const staleSaveTx = buildTx({ membershipState });
+    staleSaveTx.hostedGroup.findUnique.mockImplementationOnce(async () => {
+      markStaleSaveBlocked();
+      await staleSaveBarrier;
+      return { id: "group_1" };
+    });
+    const staleSave = acceptHostedGroupJoinCodeTx({
+      expectedMembershipId: "membership_existing",
+      joinCode: "join_1",
+      memberId: "member_joiner",
+      now: new Date("2026-07-15T12:00:00.000Z"),
+      selectedVaultShareProjectionKinds: [],
+      tx: staleSaveTx,
+    });
+    await staleSaveBlocked;
+
+    const leaveFirstTx = buildTx({ membershipState });
+    await expect(leaveHostedGroupMemberTx({
+      memberId: "member_joiner",
+      membershipId: "membership_existing",
+      now: new Date("2026-07-15T12:00:01.000Z"),
+      tx: leaveFirstTx,
+    })).resolves.toMatchObject({ kind: "left" });
+    expect(membershipState.membershipId).toBeNull();
+
+    vi.clearAllMocks();
+    releaseStaleSave();
+    await expect(staleSave).rejects.toMatchObject({
+      code: "HOSTED_GROUP_MEMBERSHIP_CHANGED",
+      httpStatus: 409,
+    });
+    expect(membershipState.membershipId).toBeNull();
+    expect(staleSaveTx.hostedGroupMember.create).not.toHaveBeenCalled();
+    expect(mocks.grantHostedVaultShareTx).not.toHaveBeenCalled();
+
+    const rejoinTx = buildTx({ membershipState });
+    await expect(acceptHostedGroupJoinCodeTx({
+      expectedMembershipId: null,
+      joinCode: "join_1",
+      memberId: "member_joiner",
+      now: new Date("2026-07-15T12:00:02.000Z"),
+      selectedVaultShareProjectionKinds: [],
+      tx: rejoinTx,
+    })).resolves.toMatchObject({
+      alreadyMember: false,
+      membershipId: "membership_rejoined",
+    });
+    expect(membershipState.membershipId).toBe("membership_rejoined");
+
+    const saveFirstTx = buildTx({ membershipState });
+    await expect(acceptHostedGroupJoinCodeTx({
+      expectedMembershipId: "membership_rejoined",
+      joinCode: "join_1",
+      memberId: "member_joiner",
+      now: new Date("2026-07-15T12:00:03.000Z"),
+      selectedVaultShareProjectionKinds: [],
+      tx: saveFirstTx,
+    })).resolves.toMatchObject({
+      alreadyMember: true,
+      membershipId: "membership_rejoined",
+    });
+
+    const leaveAfterSaveTx = buildTx({ membershipState });
+    await expect(leaveHostedGroupMemberTx({
+      memberId: "member_joiner",
+      membershipId: "membership_rejoined",
+      now: new Date("2026-07-15T12:00:04.000Z"),
+      tx: leaveAfterSaveTx,
+    })).resolves.toMatchObject({ kind: "left" });
+    expect(membershipState.membershipId).toBeNull();
+  });
+
   it("reports email sharing when a join grants it", async () => {
     const tx = buildTx({
       activeGroupGrantCount: 0,
@@ -528,6 +684,7 @@ describe("acceptHostedGroupJoinCodeTx", () => {
     const now = new Date("2026-07-01T00:00:00.000Z");
 
     await expect(acceptHostedGroupJoinCodeTx({
+      expectedMembershipId: null,
       joinCode: "join_1",
       memberId: "member_grantor",
       now,
@@ -554,6 +711,7 @@ describe("acceptHostedGroupJoinCodeTx", () => {
     });
 
     await expect(acceptHostedGroupJoinCodeTx({
+      expectedMembershipId: null,
       joinCode: "join_1",
       memberId: "member_grantor",
       now: new Date("2026-07-01T00:00:00.000Z"),
@@ -583,6 +741,7 @@ describe("acceptHostedGroupJoinCodeTx", () => {
     });
 
     await expect(acceptHostedGroupJoinCodeTx({
+      expectedMembershipId: null,
       joinCode: "join_1",
       memberId: "member_grantor",
       now: new Date("2026-07-01T00:00:00.000Z"),
@@ -613,6 +772,7 @@ describe("acceptHostedGroupJoinCodeTx", () => {
     });
 
     await expect(acceptHostedGroupJoinCodeTx({
+      expectedMembershipId: "membership_existing",
       joinCode: "join_1",
       memberId: "member_grantor",
       now: new Date("2026-07-01T00:00:00.000Z"),
@@ -649,6 +809,7 @@ describe("acceptHostedGroupJoinCodeTx", () => {
     });
 
     await expect(acceptHostedGroupJoinCodeTx({
+      expectedMembershipId: "membership_existing",
       joinCode: "join_1",
       memberId: "member_grantor",
       now,
@@ -1544,6 +1705,7 @@ describe("readHostedGroupJoinView leave affordance", () => {
         prisma,
       })).resolves.toMatchObject({
         viewerCanLeave,
+        viewerMembershipId: members[0]?.id ?? null,
         viewerMembershipStatus,
       });
     },

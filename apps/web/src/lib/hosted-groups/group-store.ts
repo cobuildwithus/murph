@@ -98,6 +98,7 @@ export interface HostedGroupJoinView {
   requestedVaultShareProjections: HostedVaultShareProjectionDisplay[];
   status: "active";
   viewerCanLeave: boolean;
+  viewerMembershipId: string | null;
   viewerMembershipStatus: string | null;
 }
 
@@ -577,6 +578,7 @@ export async function readHostedGroupJoinView(input: {
     ),
     status: "active",
     viewerCanLeave: group.members.length > 0 && group.ownerMemberId !== input.memberId,
+    viewerMembershipId: group.members[0]?.id ?? null,
     viewerMembershipStatus: group.members.length > 0 ? "active" : null,
   };
 }
@@ -587,6 +589,7 @@ export async function acceptHostedGroupJoinCodeTx(input: {
   joinCode: string;
   memberId: string;
   now: Date;
+  expectedMembershipId: string | null;
   selectedVaultShareProjectionScopes?: readonly HostedVaultShareProjectionScope[] | null;
   selectedVaultShareProjectionKinds?: readonly HostedVaultShareProjectionKind[] | null;
 }): Promise<HostedGroupJoinAcceptanceTxResult> {
@@ -604,6 +607,7 @@ export async function acceptHostedGroupJoinCodeTx(input: {
   return acceptHostedGroupJoinTx({
     additiveOnly: false,
     confirmationPublicBaseUrl: input.confirmationPublicBaseUrl ?? null,
+    expectedMembershipId: input.expectedMembershipId,
     groupId: groupLookup.id,
     joinOrigin: "web",
     memberId: input.memberId,
@@ -832,6 +836,7 @@ async function revokeHostedGroupJoinOffersTx(
 async function acceptHostedGroupJoinTx(input: {
   additiveOnly: boolean;
   confirmationPublicBaseUrl: string | null;
+  expectedMembershipId?: string | null;
   groupId: string;
   joinOrigin: HostedGroupJoinConfirmationOrigin;
   memberId: string;
@@ -872,6 +877,22 @@ async function acceptHostedGroupJoinTx(input: {
   }
   assertHostedMemberNotSuspended(member);
 
+  const existingMembership = await input.tx.hostedGroupMember.findUnique({
+    where: { groupId_memberId: { groupId: group.id, memberId: input.memberId } },
+    select: { id: true },
+  });
+  if (
+    input.expectedMembershipId !== undefined
+    && (existingMembership?.id ?? null) !== input.expectedMembershipId
+  ) {
+    throw hostedOnboardingError({
+      code: "HOSTED_GROUP_MEMBERSHIP_CHANGED",
+      httpStatus: 409,
+      message: "Your group membership changed. Reload this page and try again.",
+      retryable: false,
+    });
+  }
+
   const selected = normalizeHostedVaultShareProjectionScopes(
     input.selectedVaultShareProjectionScopes,
   );
@@ -908,10 +929,6 @@ async function acceptHostedGroupJoinTx(input: {
   // gate applies to every join, not only joins that select health projections.
   await assertHostedLaunchRequiredConsentGranted({ memberId: input.memberId, prisma: input.tx });
 
-  const existingMembership = await input.tx.hostedGroupMember.findUnique({
-    where: { groupId_memberId: { groupId: group.id, memberId: input.memberId } },
-    select: { id: true },
-  });
   let membershipId: string;
   let alreadyMember = false;
   if (!existingMembership) {
