@@ -142,6 +142,15 @@ async function runAttachmentParseJobAttempt(
       resultPath: published.resultPath,
     };
   } catch (error) {
+    if (input.signal?.aborted) {
+      input.runtime.requeueAttachmentParseJobs({
+        attachmentId: job.attachmentId,
+        captureId: job.captureId,
+        state: "running",
+      });
+      return null;
+    }
+
     const errorMessage = redactSensitiveText(error instanceof Error ? error.message : String(error));
     const errorCode = classifyParseError(errorMessage);
     const failedJob = input.runtime.failAttachmentParseJob({
