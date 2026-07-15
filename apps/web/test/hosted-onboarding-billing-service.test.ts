@@ -15,10 +15,22 @@ const mocks = vi.hoisted(() => {
   };
 
   return {
+    readActiveHostedFamilySponsorship: vi.fn(),
     requireHostedInviteForBillingCheckout: vi.fn(),
     requireHostedOnboardingPublicBaseUrl: vi.fn(),
     requireHostedStripeCheckoutConfig: vi.fn(),
     stripe,
+  };
+});
+
+vi.mock("@/src/lib/hosted-onboarding/member-access", async () => {
+  const actual = await vi.importActual<
+    typeof import("@/src/lib/hosted-onboarding/member-access")
+  >("@/src/lib/hosted-onboarding/member-access");
+
+  return {
+    ...actual,
+    readActiveHostedFamilySponsorship: mocks.readActiveHostedFamilySponsorship,
   };
 });
 
@@ -87,6 +99,7 @@ describe("createHostedBillingCheckout", () => {
     vi.clearAllMocks();
     vi.spyOn(console, "info").mockImplementation(() => {});
     delete process.env.HOSTED_PULSE_TRIAL_CHECKOUT_ENABLED;
+    mocks.readActiveHostedFamilySponsorship.mockResolvedValue(false);
     mocks.requireHostedOnboardingPublicBaseUrl.mockReturnValue("https://join.example.test");
     mocks.requireHostedStripeCheckoutConfig.mockReturnValue({
       billingPlanCode: "launch_monthly",
@@ -156,6 +169,23 @@ describe("createHostedBillingCheckout", () => {
     });
 
     expect(mocks.stripe.customers.create).not.toHaveBeenCalled();
+    expect(mocks.stripe.checkout.sessions.create).not.toHaveBeenCalled();
+  });
+
+  it("does not start direct billing for a Family-sponsored member", async () => {
+    mocks.requireHostedInviteForBillingCheckout.mockResolvedValue(makeInvite());
+    mocks.readActiveHostedFamilySponsorship.mockResolvedValueOnce(true);
+
+    await expect(createHostedBillingCheckout({
+      inviteCode: "invite-code",
+      member: makeAuthenticatedMember(),
+      now: new Date("2026-03-27T12:00:00.000Z"),
+      prisma: makePrisma() as never,
+    })).rejects.toMatchObject({
+      code: "HOSTED_FAMILY_MEMBER_ALREADY_SPONSORED",
+      httpStatus: 409,
+    });
+
     expect(mocks.stripe.checkout.sessions.create).not.toHaveBeenCalled();
   });
 

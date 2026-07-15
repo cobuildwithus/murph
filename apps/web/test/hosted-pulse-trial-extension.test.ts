@@ -426,6 +426,9 @@ describe("single-member Pulse Trial extension", () => {
       prisma: {} as never,
       stripe,
     })).rejects.toBeInstanceOf(HostedPulseTrialExtensionPreviewStaleError);
+    expect(stripe.retrieveSubscription).toHaveBeenCalledTimes(2);
+    expect(stripe.updateSubscription).not.toHaveBeenCalled();
+    expect(mocks.updateHostedMemberCoreState).not.toHaveBeenCalled();
 
     const originalDigest = preview.previewProof.token.at(-1);
     const tamperedToken = `${preview.previewProof.token.slice(0, -1)}${
@@ -509,7 +512,7 @@ describe("single-member Pulse Trial extension", () => {
     ).not.toHaveBeenCalled();
   });
 
-  test("retries reconcile an already applied provider result without adding days", async () => {
+  test("reconciles an expired exact marker after an ambiguous provider success", async () => {
     const paused = makeSubscription({ status: "paused", trialEnd: 1_700_000_000 });
     const stripe = makeStripeClient(paused);
     const preview = await previewHostedPulseTrialExtension({
@@ -526,16 +529,32 @@ describe("single-member Pulse Trial extension", () => {
     if (!operationId) {
       throw new Error("Expected an operation ID.");
     }
-    stripe.retrieveSubscription.mockResolvedValue(makeSubscription({
-      extensionDays: "7",
-      extensionOperation: operationId,
-      status: "trialing",
-      trialEnd: TARGET_FROM_PAUSED,
-    }));
+    let providerSubscription = paused;
+    stripe.retrieveSubscription.mockImplementation(
+      async () => providerSubscription,
+    );
+    stripe.updateSubscription.mockImplementationOnce(async () => {
+      providerSubscription = makeSubscription({
+        extensionDays: "7",
+        extensionOperation: operationId,
+        status: "trialing",
+        trialEnd: TARGET_FROM_PAUSED,
+      });
+      throw new Error("response lost after provider success");
+    });
+
+    await expect(applyHostedPulseTrialExtension({
+      memberId: MEMBER_ID,
+      now: new Date("2026-07-14T16:03:00.000Z"),
+      previewProof: preview.previewProof,
+      priceId: PRICE_ID,
+      prisma: {} as never,
+      stripe,
+    })).rejects.toBeInstanceOf(HostedPulseTrialExtensionProviderError);
 
     const result = await applyHostedPulseTrialExtension({
       memberId: MEMBER_ID,
-      now: new Date("2026-07-14T16:03:00.000Z"),
+      now: new Date("2026-07-14T16:16:00.000Z"),
       previewProof: preview.previewProof,
       priceId: PRICE_ID,
       prisma: {} as never,
@@ -543,7 +562,8 @@ describe("single-member Pulse Trial extension", () => {
     });
 
     expect(result.outcome).toBe("reconciled");
-    expect(stripe.updateSubscription).not.toHaveBeenCalled();
+    expect(stripe.updateSubscription).toHaveBeenCalledTimes(1);
+    expect(stripe.retrieveSubscription).toHaveBeenCalledTimes(3);
     expect(mocks.writeHostedMemberStripeBillingRefTx).toHaveBeenCalledTimes(1);
   });
 });

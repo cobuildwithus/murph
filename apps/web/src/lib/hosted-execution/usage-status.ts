@@ -123,7 +123,7 @@ export async function projectHostedPersonalAiUsageStatus(input: {
       });
   const accessKind = decision.allowanceSource === "direct_trial"
     ? "trial"
-    : decision.allowanceSource === "family_sponsored_pulse"
+    : decision.allowanceSource === "family_sponsored_plan"
       ? "family_sponsored"
       : "paid";
   const planName = accessKind === "family_sponsored"

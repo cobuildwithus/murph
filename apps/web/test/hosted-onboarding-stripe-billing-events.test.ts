@@ -13,12 +13,24 @@ const mocks = vi.hoisted(() => ({
   findMemberForStripeReversal: vi.fn(),
   findMemberForStripeSubscription: vi.fn(),
   prepareHostedMemberStripeBillingWrite: vi.fn(),
+  readActiveHostedFamilySponsorship: vi.fn(),
   requireHostedStripeApi: vi.fn(),
   suspendHostedMemberForBillingReversalTx: vi.fn(),
   upsertHostedMemberStripeCheckoutEmailIfFreshTx: vi.fn(),
   writeHostedMemberStripeBillingRefIfFreshTx: vi.fn(),
   writeHostedMemberStripeBillingTx: vi.fn(),
 }));
+
+vi.mock("@/src/lib/hosted-onboarding/member-access", async () => {
+  const actual = await vi.importActual<
+    typeof import("@/src/lib/hosted-onboarding/member-access")
+  >("@/src/lib/hosted-onboarding/member-access");
+
+  return {
+    ...actual,
+    readActiveHostedFamilySponsorship: mocks.readActiveHostedFamilySponsorship,
+  };
+});
 
 vi.mock("@/src/lib/hosted-onboarding/member-activation", () => ({
   activateHostedMemberForPositiveSourceTx: mocks.activateHostedMemberForPositiveSourceTx,
@@ -108,6 +120,7 @@ describe("hosted onboarding stripe billing events", () => {
     mocks.findMemberForStripeInvoice.mockResolvedValue(member);
     mocks.findMemberForStripeReversal.mockResolvedValue(member);
     mocks.findMemberForStripeSubscription.mockResolvedValue(member);
+    mocks.readActiveHostedFamilySponsorship.mockResolvedValue(false);
     mocks.prepareHostedMemberStripeBillingWrite.mockResolvedValue({
       canonicalBillingStatus: HostedBillingStatus.active,
       member,
@@ -276,6 +289,41 @@ describe("hosted onboarding stripe billing events", () => {
       skipIfBillingAlreadyActive: false,
       skipIfPreviouslyActivated: true,
     });
+  });
+
+  it("does not activate direct billing from an invoice after Family sponsorship", async () => {
+    mocks.readActiveHostedFamilySponsorship.mockResolvedValueOnce(true);
+    const invoice = makeStripeInvoice({
+      id: "in_paid_123",
+      subscription: "sub_superseded",
+    });
+
+    await expect(applyStripeInvoicePaid(
+      invoice,
+      {
+        eventCreatedAt: new Date("2026-04-23T00:00:00.000Z"),
+        occurredAt: "2026-04-23T00:00:00.000Z",
+        sourceEventId: "evt_paid_123",
+        sourceType: "stripe.invoice.paid",
+      },
+      {} as never,
+      HostedBillingStatus.active,
+      makeStripeSubscription({
+        id: "sub_superseded",
+        metadata: {
+          billingPlanCode: "launch_monthly",
+          checkoutOffer: "standard",
+          memberId: "member_123",
+        },
+        status: "active",
+      }),
+    )).resolves.toMatchObject({
+      cleanupFamilySponsoredStripeSubscriptionId: "sub_superseded",
+      welcomeEmailMemberId: null,
+    });
+
+    expect(mocks.writeHostedMemberStripeBillingTx).not.toHaveBeenCalled();
+    expect(mocks.activateHostedMemberForPositiveSourceTx).not.toHaveBeenCalled();
   });
 
   it("marks invoice.paid billing writes as positive entitlement freshness", async () => {

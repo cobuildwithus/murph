@@ -86,6 +86,9 @@ import {
   resolveHostedPendingAssistantInputStatePath,
 } from "./pending-input-index.ts";
 import {
+  resolveHostedSystemMailboxNextWakeCandidate,
+} from "./system-mailbox.ts";
+import {
   HOSTED_ASSISTANT_WAKE_REASON,
   createHostedRuntimeWakeCandidate,
   selectHostedRuntimeWakeCandidate,
@@ -624,12 +627,38 @@ export async function runHostedWorkspaceUntilIdleOrBudget(
         readCurrentRedactedStatus(),
         mailboxStatus,
       ) ?? mailboxStatus;
+      const workspace = checkpointRequestSession.latestWorkspace() ?? input.workspace;
+      const now = resolveHostedWorkspaceRunnerNowIso(input.now);
+      const systemMailboxWake =
+        (result.importResult.importedSystemMailboxItemIds?.length ?? 0) > 0
+          ? await resolveHostedSystemMailboxNextWakeCandidate({
+              now: () => now,
+              vaultRoot: input.vaultRoot,
+            })
+          : null;
+      const stagedAssistantWork =
+        (result.importResult.assistantInputIds?.length ?? 0) > 0
+        || (result.importResult.conversationImportedCount ?? 0) > 0;
+      const nextWake = selectHostedRuntimeWakeCandidate([
+        createHostedRuntimeWakeCandidate(
+          workspace?.nextWakeAt,
+          workspace?.nextWakeReason ?? null,
+        ),
+        createHostedRuntimeWakeCandidate(
+          result.importResult.nextRetryAt,
+          "mailbox",
+        ),
+        systemMailboxWake,
+        stagedAssistantWork
+          ? createHostedRuntimeWakeCandidate(now, HOSTED_ASSISTANT_WAKE_REASON)
+          : null,
+      ]);
       const checkpoint = await input.checkpointRuntimeRedactedStatus({
-        nextWakeAt: resolveHostedWorkspaceRunnerNowIso(input.now),
-        nextWakeReason: HOSTED_ASSISTANT_WAKE_REASON,
+        nextWakeAt: nextWake.at,
+        nextWakeReason: nextWake.reason,
         reason: "canonical_runtime_commit",
         redactedStatus,
-        workspace: checkpointRequestSession.latestWorkspace() ?? input.workspace,
+        workspace,
       });
       if (checkpoint.workspace.userId !== input.expectedUserId) {
         throw new HostedMailboxImportCheckpointUserMismatchError({

@@ -457,6 +457,7 @@ describe("handleHostedOnboardingTelegramWebhook", () => {
       id: "invite_telegram",
       inviteCode: "invite_telegram",
       invitedByMemberId: "member_owner",
+      planCode: "pulse",
       status: "pending",
       targetEmailEncrypted: null,
       targetEmailLookupKey: null,
@@ -487,9 +488,15 @@ describe("handleHostedOnboardingTelegramWebhook", () => {
           group: invite.group,
           groupId: invite.groupId,
           memberId: acceptedMemberId,
+          planCode: "pulse",
           role: "member",
           status: "active",
         }),
+      },
+      hostedAccountGroupPlanCapacity: {
+        findMany: vi.fn().mockResolvedValue([
+          { billedQuantity: 2, planCode: "pulse" },
+        ]),
       },
       hostedMember: {
         findUnique: vi.fn().mockResolvedValue({

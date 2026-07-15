@@ -5320,6 +5320,132 @@ describe("hosted workspace runtime entrypoint", () => {
     }
   });
 
+  test.each([
+    {
+      expectedStatus: "idle" as const,
+      expectedWakeReason: null,
+      initialWakeAt: null,
+      initialWakeReason: null,
+      name: "terminal system import does not invent assistant work",
+      retrySecondItem: false,
+    },
+    {
+      expectedStatus: "scheduled" as const,
+      expectedWakeReason: "alarm",
+      initialWakeAt: "2099-04-27T00:05:00.000Z",
+      initialWakeReason: "alarm",
+      name: "terminal system import preserves the committed wake",
+      retrySecondItem: false,
+    },
+    {
+      expectedStatus: "scheduled" as const,
+      expectedWakeReason: "mailbox",
+      initialWakeAt: null,
+      initialWakeReason: null,
+      name: "terminal system import preserves its mailbox retry",
+      retrySecondItem: true,
+    },
+  ])("canonical checkpoint: $name", async (scenario) => {
+    const vaultRoot = await mkdtemp(path.join(tmpdir(), "murph-workspace-entrypoint-"));
+    const checkpointRequests: HostedWorkspaceCheckpointRequest[] = [];
+    const events: string[] = [];
+    const mailboxItems = [
+      createMailboxItem({
+        id: "mailbox_item_terminal_system_import",
+        kind: "meal-photo.captured",
+        lane: "system",
+        laneSeq: "1",
+      }),
+      ...(scenario.retrySecondItem
+        ? [createMailboxItem({
+            id: "mailbox_item_retryable_system_import",
+            kind: "meal-photo.captured",
+            lane: "system",
+            laneSeq: "2",
+          })]
+        : []),
+    ];
+
+    try {
+      await initializeVault({ createdAt: TEST_NOW, vaultRoot });
+      const result = await runHostedWorkspaceRuntimeJobInProcess(
+        createWorkspaceRuntimeJobInput(),
+        {
+          async createCheckpointSnapshot() {
+            return {
+              snapshotRef: createBundleRef({
+                hash: "d".repeat(64),
+                key: "users/bundles/member-synthetic/terminal-system-import.bundle.json",
+                size: 512,
+              }),
+            };
+          },
+          async importItem(item) {
+            if (item.item.laneSeq === "2") {
+              return {
+                reasonCode: "synthetic_retryable_system_import",
+                retryable: true,
+                status: "blocked" as const,
+              };
+            }
+            await runCanonicalWrite({
+              mutate: async ({ batch }) => {
+                await batch.stageTextWrite(
+                  "bank/terminal-system-import.md",
+                  "terminal system import\n",
+                );
+              },
+              occurredAt: TEST_NOW,
+              operationType: "hosted_terminal_system_import_test",
+              summary: "Persist terminal system mailbox import",
+              vaultRoot,
+            });
+            return { status: "imported" as const };
+          },
+          platform: createPlatform({
+            mailboxPort: createMailboxPort({
+              events,
+              items: mailboxItems,
+            }),
+            workspacePort: createWorkspacePort({
+              checkpointRequests,
+              events,
+              workspace: createWorkspaceState({
+                nextWakeAt: scenario.initialWakeAt,
+                nextWakeReason: scenario.initialWakeReason,
+                version: "0",
+              }),
+            }),
+          }),
+          vaultRoot,
+        },
+      );
+
+      const canonicalCheckpoint = checkpointRequests.find(
+        (request) => request.reason === "canonical_runtime_commit",
+      );
+      assert.ok(canonicalCheckpoint);
+      assert.equal(
+        typeof canonicalCheckpoint.redactedStatus?.hostedCanonicalWriteReceiptLogSha256,
+        "string",
+      );
+      assert.equal(canonicalCheckpoint.redactedStatus?.hostedMailboxSystemImportedSeq, "1");
+      assert.equal(canonicalCheckpoint.nextWakeReason, scenario.expectedWakeReason);
+      if (scenario.expectedWakeReason === "mailbox") {
+        assert.match(canonicalCheckpoint.nextWakeAt ?? "", /^\d{4}-\d{2}-\d{2}T/u);
+      } else {
+        assert.equal(canonicalCheckpoint.nextWakeAt, scenario.initialWakeAt);
+      }
+      assert.equal(checkpointRequests.at(-1)?.nextWakeAt, canonicalCheckpoint.nextWakeAt);
+      assert.equal(checkpointRequests.at(-1)?.nextWakeReason, scenario.expectedWakeReason);
+      assert.equal(result.nextWakeAt, canonicalCheckpoint.nextWakeAt);
+      assert.equal(result.nextWakeReason ?? null, scenario.expectedWakeReason);
+      assert.equal(result.status, scenario.expectedStatus);
+    } finally {
+      await removeTempRoot(vaultRoot);
+    }
+  });
+
   test("does not import initial conversation messages while cold bootstrap is deferred", async () => {
     const vaultRoot = await mkdtemp(path.join(tmpdir(), "murph-workspace-entrypoint-"));
     const events: string[] = [];
@@ -20163,10 +20289,23 @@ describe("hosted workspace runtime entrypoint", () => {
             if (item.item.lane !== "system") {
               throw new Error("Conversation item should be budget-deferred before import.");
             }
-            return await importRuntimeControlSystemMailboxItemForTest({
+            const outcome = await importRuntimeControlSystemMailboxItemForTest({
               item: item.item,
               vaultRoot,
             });
+            await runCanonicalWrite({
+              mutate: async ({ batch }) => {
+                await batch.stageTextWrite(
+                  "bank/queued-system-import.md",
+                  "queued system import\n",
+                );
+              },
+              occurredAt: TEST_NOW,
+              operationType: "hosted_queued_system_import_test",
+              summary: "Persist queued system mailbox import",
+              vaultRoot,
+            });
+            return outcome;
           },
           platform: createPlatform({
             mailboxPort: createMailboxPort({
@@ -20190,6 +20329,11 @@ describe("hosted workspace runtime entrypoint", () => {
       assert.deepEqual(imported, ["system:1"]);
       assert.equal(systemMailbox.pending.length, 1);
       assert.equal(systemMailbox.pending[0]?.attemptCount, 0);
+      assert.equal(checkpointRequests[0]?.reason, "canonical_runtime_commit");
+      assert.equal(
+        typeof checkpointRequests[0]?.redactedStatus?.hostedCanonicalWriteReceiptLogSha256,
+        "string",
+      );
       assert.equal(checkpointRequests[0]?.nextWakeAt, TEST_NOW);
       assert.equal(checkpointRequests[0]?.nextWakeReason, "assistant");
       assert.equal(result.nextWakeAt, TEST_NOW);

@@ -9,6 +9,7 @@ const mocks = vi.hoisted(() => ({
   findMemberForStripeSubscription: vi.fn(),
   listHostedStripeCheckoutSessionMemberIds: vi.fn(),
   lockHostedMemberRow: vi.fn(),
+  readActiveHostedFamilySponsorship: vi.fn(),
   readHostedMemberBillingSnapshot: vi.fn(),
   requireHostedStripeApi: vi.fn(),
   cancelStripeSubscription: vi.fn(),
@@ -17,6 +18,17 @@ const mocks = vi.hoisted(() => ({
   writeHostedMemberStripeBillingRef: vi.fn(),
   writeHostedMemberStripeBillingTx: vi.fn(),
 }));
+
+vi.mock("@/src/lib/hosted-onboarding/member-access", async () => {
+  const actual = await vi.importActual<
+    typeof import("@/src/lib/hosted-onboarding/member-access")
+  >("@/src/lib/hosted-onboarding/member-access");
+
+  return {
+    ...actual,
+    readActiveHostedFamilySponsorship: mocks.readActiveHostedFamilySponsorship,
+  };
+});
 
 vi.mock("@/src/lib/hosted-onboarding/member-activation", () => ({
   activateHostedMemberForPositiveSourceTx: mocks.activateHostedMemberForPositiveSourceTx,
@@ -93,6 +105,7 @@ vi.mock("@/src/lib/hosted-onboarding/runtime", () => ({
 import {
   applyStripeCheckoutCompleted,
   applyStripeSubscriptionUpdated,
+  cancelHostedFamilySponsoredCheckoutSubscription,
   cancelHostedPulseTrialCheckoutLoserSubscription,
 } from "@/src/lib/hosted-onboarding/stripe-billing-events";
 
@@ -110,6 +123,7 @@ describe("applyStripeCheckoutCompleted", () => {
     mocks.findMemberForStripeSubscription.mockResolvedValue(null);
     mocks.listHostedStripeCheckoutSessionMemberIds.mockResolvedValue(["member_123"]);
     mocks.readHostedMemberBillingSnapshot.mockResolvedValue(makeMemberSnapshot());
+    mocks.readActiveHostedFamilySponsorship.mockResolvedValue(false);
     mocks.requireHostedStripeApi.mockReturnValue({
       subscriptions: {
         cancel: mocks.cancelStripeSubscription,
@@ -201,6 +215,72 @@ describe("applyStripeCheckoutCompleted", () => {
       memberId: "member_123",
       prisma: {},
     });
+  });
+
+  it("cancels rather than binds a direct checkout completed after Family sponsorship", async () => {
+    mocks.readActiveHostedFamilySponsorship.mockResolvedValueOnce(true);
+
+    await expect(applyStripeCheckoutCompleted({
+      created: 1_744_416_000,
+      customer: "cus_123",
+      id: "cs_123",
+      metadata: {
+        billingPlanCode: "launch_monthly",
+        checkoutOffer: "standard",
+        memberId: "member_123",
+      },
+      subscription: "sub_superseded",
+    } as never, {} as never)).resolves.toMatchObject({
+      cleanupFamilySponsoredStripeSubscriptionId: "sub_superseded",
+      welcomeEmailMemberId: null,
+    });
+
+    expect(mocks.writeHostedMemberStripeBillingRef).not.toHaveBeenCalled();
+    expect(mocks.writeHostedMemberStripeBillingTx).not.toHaveBeenCalled();
+  });
+
+  it("cancels a direct subscription event received after Family sponsorship", async () => {
+    mocks.readActiveHostedFamilySponsorship.mockResolvedValueOnce(true);
+    const subscription = {
+      ...makePulseTrialSubscription(),
+      id: "sub_superseded",
+      metadata: {
+        billingPlanCode: "launch_monthly",
+        checkoutOffer: "standard",
+        memberId: "member_123",
+      },
+      status: "active",
+    };
+
+    await expect(applyStripeSubscriptionUpdated(
+      subscription as never,
+      {
+        eventCreatedAt: new Date("2025-04-12T00:00:01.000Z"),
+        occurredAt: "2025-04-12T00:00:01.000Z",
+        sourceEventId: "evt_subscription_created_123",
+        sourceType: "stripe.customer.subscription.created",
+      },
+      {} as never,
+    )).resolves.toMatchObject({
+      cleanupFamilySponsoredStripeSubscriptionId: "sub_superseded",
+      subscriptionCancellationEmail: null,
+    });
+
+    expect(mocks.findMemberForStripeSubscription).not.toHaveBeenCalled();
+    expect(mocks.writeHostedMemberStripeBillingTx).not.toHaveBeenCalled();
+  });
+
+  it("treats an already-absent sponsored checkout subscription as cleaned up", async () => {
+    mocks.cancelStripeSubscription.mockRejectedValueOnce({ code: "resource_missing" });
+
+    await expect(cancelHostedFamilySponsoredCheckoutSubscription({
+      stripe: {
+        subscriptions: {
+          cancel: mocks.cancelStripeSubscription,
+        },
+      } as never,
+      subscriptionId: "sub_superseded",
+    })).resolves.toBeUndefined();
   });
 
   it("ignores stale checkout billing refs without dropping the email hint", async () => {
