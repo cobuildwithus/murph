@@ -1448,8 +1448,7 @@ export async function runHostedWorkspaceAssistantPhase(
 function hasFreshHostedConversationInput(
   input: HostedWorkspaceRuntimeAssistantPhaseInput,
 ): boolean {
-  return readHostedInitialAssistantInputIds(input).length > 0
-    || (input.initialMailboxImport.importResult.conversationImportedCount ?? 0) > 0;
+  return readHostedInitialAssistantInputIds(input).length > 0;
 }
 
 function hasFreshHostedMailboxInput(

@@ -1,12 +1,12 @@
 import assert from "node:assert/strict";
-import { HostedBillingStatus } from "@prisma/client";
 import { afterEach, beforeAll, beforeEach, describe, expect, test, vi } from "vitest";
 
 vi.mock("server-only", () => ({}));
 
 const mocks = vi.hoisted(() => ({
+  applyHostedPulseTrialExtension: vi.fn(),
   assertHostedOnboardingMutationOrigin: vi.fn(),
-  extendHostedPulseTrialsForCampaign: vi.fn(),
+  previewHostedPulseTrialExtension: vi.fn(),
   requireActiveHostedAppSessionFromRequest: vi.fn(),
 }));
 
@@ -25,37 +25,35 @@ vi.mock("@/src/lib/hosted-ops/pulse-trial-extension", async () => {
   >("@/src/lib/hosted-ops/pulse-trial-extension");
   return {
     ...actual,
-    extendHostedPulseTrialsForCampaign: mocks.extendHostedPulseTrialsForCampaign,
+    applyHostedPulseTrialExtension: mocks.applyHostedPulseTrialExtension,
+    previewHostedPulseTrialExtension: mocks.previewHostedPulseTrialExtension,
   };
 });
 
 import {
-  extendHostedPulseTrials,
-  HOSTED_PULSE_TRIAL_EXTENSION_CAMPAIGN,
-  HostedPulseTrialExtensionPreviewMismatchError,
-  type HostedPulseTrialExtensionCandidateSource,
-  type HostedPulseTrialExtensionStripeClient,
-  type HostedPulseTrialExtensionSummary,
+  HostedPulseTrialExtensionLockBusyError,
+  HostedPulseTrialExtensionPreviewStaleError,
+  HostedPulseTrialExtensionProviderError,
+  type HostedPulseTrialExtensionPreviewProof,
+  type HostedPulseTrialExtensionResult,
 } from "@/src/lib/hosted-ops/pulse-trial-extension";
 
-type PulseTrialExtensionRouteModule =
-  typeof import("../app/api/ops/pulse-trial-extension/route");
+type RouteModule = typeof import("../app/api/ops/pulse-trial-extension/route");
 
-let route: PulseTrialExtensionRouteModule;
-
-const originalHostedOpsMemberIds = process.env.HOSTED_OPS_MEMBER_IDS;
-const NOW = new Date("2026-07-10T12:00:00.000Z");
+const NOW = new Date("2026-07-14T16:00:00.000Z");
 const OPERATOR_MEMBER_ID = "member_operator";
-const CANDIDATE_SNAPSHOT_DIGEST = `pulse-candidates-v4.${"a".repeat(43)}`;
-const CANDIDATE_PREVIEW_TOKEN = `pulse-target-v4.${"b".repeat(43)}`;
-const CONTINUATION_TOKEN =
-  `pulse-cursor-v4.v1.${"a".repeat(16)}.${"b".repeat(8)}.${"c".repeat(22)}`;
-const PRE_EXPANSION_CONTINUATION_TOKEN =
-  `pulse-cursor-v3.v1.${"a".repeat(16)}.${"b".repeat(8)}.${"c".repeat(22)}`;
+const TARGET_MEMBER_ID = "hbm_target_1";
+const PREVIEW_PROOF: HostedPulseTrialExtensionPreviewProof = {
+  previewedAt: NOW.toISOString(),
+  targetTrialEndsAt: "2026-07-21T16:00:00.000Z",
+  token: `pulse-member-preview-v1.v1.${"a".repeat(43)}`,
+};
 
+let route: RouteModule;
 let consoleInfoSpy: ReturnType<typeof vi.spyOn>;
+const originalOpsMemberIds = process.env.HOSTED_OPS_MEMBER_IDS;
 
-describe("hosted ops Pulse Trial extension route", () => {
+describe("hosted ops member Pulse Trial extension route", () => {
   beforeAll(async () => {
     route = await import("../app/api/ops/pulse-trial-extension/route");
   });
@@ -69,18 +67,19 @@ describe("hosted ops Pulse Trial extension route", () => {
     mocks.requireActiveHostedAppSessionFromRequest.mockResolvedValue({
       member: { id: OPERATOR_MEMBER_ID },
     });
-    mocks.extendHostedPulseTrialsForCampaign.mockResolvedValue(
-      makeSummary({}),
+    mocks.previewHostedPulseTrialExtension.mockResolvedValue(makeResult());
+    mocks.applyHostedPulseTrialExtension.mockResolvedValue(
+      makeResult({ outcome: "extended", previewProof: null }),
     );
   });
 
   afterEach(() => {
     vi.useRealTimers();
     consoleInfoSpy.mockRestore();
-    if (originalHostedOpsMemberIds === undefined) {
+    if (originalOpsMemberIds === undefined) {
       delete process.env.HOSTED_OPS_MEMBER_IDS;
     } else {
-      process.env.HOSTED_OPS_MEMBER_IDS = originalHostedOpsMemberIds;
+      process.env.HOSTED_OPS_MEMBER_IDS = originalOpsMemberIds;
     }
   });
 
@@ -89,356 +88,139 @@ describe("hosted ops Pulse Trial extension route", () => {
       member: { id: "member_other" },
     });
 
-    const response = await route.POST(makeRequest({}));
+    const response = await route.POST(makeRequest({
+      memberId: TARGET_MEMBER_ID,
+      mode: "preview",
+    }));
 
     assert.equal(response.status, 404);
-    assert.equal(mocks.extendHostedPulseTrialsForCampaign.mock.calls.length, 0);
+    expect(mocks.previewHostedPulseTrialExtension).not.toHaveBeenCalled();
   });
 
-  test("defaults to a bounded preview with the fixed campaign and no member filter", async () => {
-    const response = await route.POST(makeRequest({}));
+  test("previews exactly one trimmed member", async () => {
+    const response = await route.POST(makeRequest({
+      memberId: `  ${TARGET_MEMBER_ID}  `,
+    }));
 
     assert.equal(response.status, 200);
-    assert.equal(route.maxDuration, 800);
-    assert.equal(mocks.assertHostedOnboardingMutationOrigin.mock.calls.length, 1);
-    expect(mocks.extendHostedPulseTrialsForCampaign).toHaveBeenCalledWith({
-      continuationToken: null,
-      maxCandidates: 4,
-      memberId: undefined,
-      mode: "dry-run",
+    assert.equal(route.maxDuration, 220);
+    expect(mocks.assertHostedOnboardingMutationOrigin).toHaveBeenCalledTimes(1);
+    expect(mocks.previewHostedPulseTrialExtension).toHaveBeenCalledWith({
+      memberId: TARGET_MEMBER_ID,
     });
-    const payload = await response.json() as HostedPulseTrialExtensionSummary;
-    assert.equal(payload.campaign, HOSTED_PULSE_TRIAL_EXTENSION_CAMPAIGN);
+    expect(mocks.applyHostedPulseTrialExtension).not.toHaveBeenCalled();
     assert.equal(consoleInfoSpy.mock.calls.length, 0);
   });
 
-  test("passes a trimmed member filter through to the campaign", async () => {
-    await route.POST(makeRequest({ memberId: "  member_target  " }));
-
-    expect(mocks.extendHostedPulseTrialsForCampaign).toHaveBeenCalledWith({
-      continuationToken: null,
-      maxCandidates: 4,
-      memberId: "member_target",
-      mode: "dry-run",
-    });
-  });
-
   test.each([
+    ["missing", undefined],
     ["blank", "   "],
-    ["null", null],
-    ["number", 42],
-    ["object", { id: "member_target" }],
-  ])("rejects a present invalid %s member scope instead of widening to all", async (
-    _label,
-    memberId,
-  ) => {
+    ["wrong prefix", "member_target"],
+    ["object", { id: TARGET_MEMBER_ID }],
+  ])("rejects an invalid %s member ID", async (_label, memberId) => {
     const response = await route.POST(makeRequest({ memberId }));
 
     assert.equal(response.status, 400);
-    assert.equal(mocks.extendHostedPulseTrialsForCampaign.mock.calls.length, 0);
+    expect(mocks.previewHostedPulseTrialExtension).not.toHaveBeenCalled();
+    expect(mocks.applyHostedPulseTrialExtension).not.toHaveBeenCalled();
   });
 
-  test("refuses to apply without the exact current campaign key", async () => {
-    const missing = await route.POST(makeRequest({ mode: "apply" }));
-    const stale = await route.POST(makeRequest({
-      campaign: "pulse-beta-extension-another-occasion",
-      mode: "apply",
-    }));
-
-    assert.equal(missing.status, 400);
-    assert.equal(stale.status, 400);
-    assert.equal(mocks.extendHostedPulseTrialsForCampaign.mock.calls.length, 0);
-  });
-
-  test("applies with the exact campaign key and logs only aggregate results", async () => {
+  test("applies only the supplied member-scoped preview proof", async () => {
     const response = await route.POST(makeRequest({
-      campaign: HOSTED_PULSE_TRIAL_EXTENSION_CAMPAIGN,
-      candidatePreviewTokens: [CANDIDATE_PREVIEW_TOKEN],
-      candidateSnapshotDigest: CANDIDATE_SNAPSHOT_DIGEST,
-      memberId: "member_target",
+      memberId: TARGET_MEMBER_ID,
       mode: "apply",
+      previewProof: PREVIEW_PROOF,
     }));
 
     assert.equal(response.status, 200);
-    expect(mocks.extendHostedPulseTrialsForCampaign).toHaveBeenCalledWith({
-      expectedCandidatePreviewTokens: [CANDIDATE_PREVIEW_TOKEN],
-      expectedCandidateSnapshotDigest: CANDIDATE_SNAPSHOT_DIGEST,
-      continuationToken: null,
-      maxCandidates: 4,
-      memberId: "member_target",
-      mode: "apply",
+    expect(mocks.applyHostedPulseTrialExtension).toHaveBeenCalledWith({
+      memberId: TARGET_MEMBER_ID,
+      previewProof: PREVIEW_PROOF,
     });
-    assert.equal(consoleInfoSpy.mock.calls.length, 1);
+    expect(mocks.previewHostedPulseTrialExtension).not.toHaveBeenCalled();
     assert.deepEqual(consoleInfoSpy.mock.calls[0]?.[1], {
-      campaign: HOSTED_PULSE_TRIAL_EXTENSION_CAMPAIGN,
-      localWindowsReconciled: 0,
-      providerTrialsCleanedUp: 0,
-      providerTrialsRecovered: 0,
-      scope: "member",
-      stripeTrialsExtended: 0,
+      outcome: "extended",
       timestamp: NOW.toISOString(),
     });
   });
 
-  test("passes a production Preview v4 proof unchanged into Apply", async () => {
-    const preview = await buildProductionPreviewProof();
-    const candidatePreviewToken = preview.candidatePreviewTokens?.[0];
-    const candidateSnapshotDigest = preview.candidateSnapshotDigest;
-    assert.ok(candidatePreviewToken);
-    assert.ok(candidateSnapshotDigest);
-    assert.match(candidatePreviewToken, /^pulse-target-v4\./u);
-
+  test("rejects Apply without a complete Preview proof", async () => {
     const response = await route.POST(makeRequest({
-      campaign: HOSTED_PULSE_TRIAL_EXTENSION_CAMPAIGN,
-      candidatePreviewTokens: [candidatePreviewToken],
-      candidateSnapshotDigest,
-      mode: "apply",
-    }));
-
-    assert.equal(response.status, 200);
-    expect(mocks.extendHostedPulseTrialsForCampaign).toHaveBeenCalledWith({
-      expectedCandidatePreviewTokens: [candidatePreviewToken],
-      expectedCandidateSnapshotDigest: candidateSnapshotDigest,
-      continuationToken: null,
-      maxCandidates: 4,
-      memberId: undefined,
-      mode: "apply",
-    });
-  });
-
-  test("passes an opaque snapshot digest unchanged to its semantic owner", async () => {
-    const opaqueSnapshotDigest = "pulse-candidates-future.opaque-proof";
-    const response = await route.POST(makeRequest({
-      campaign: HOSTED_PULSE_TRIAL_EXTENSION_CAMPAIGN,
-      candidatePreviewTokens: [CANDIDATE_PREVIEW_TOKEN],
-      candidateSnapshotDigest: opaqueSnapshotDigest,
-      mode: "apply",
-    }));
-
-    assert.equal(response.status, 200);
-    expect(mocks.extendHostedPulseTrialsForCampaign).toHaveBeenCalledWith({
-      expectedCandidatePreviewTokens: [CANDIDATE_PREVIEW_TOKEN],
-      expectedCandidateSnapshotDigest: opaqueSnapshotDigest,
-      continuationToken: null,
-      maxCandidates: 4,
-      memberId: undefined,
-      mode: "apply",
-    });
-  });
-
-  test.each([
-    ["non-array", CANDIDATE_PREVIEW_TOKEN],
-    ["blank", ["   "]],
-    ["non-string", [42]],
-    ["too many", Array.from({ length: 5 }, () => CANDIDATE_PREVIEW_TOKEN)],
-  ])("rejects %s candidate Preview proof input at the body boundary", async (
-    _label,
-    candidatePreviewTokens,
-  ) => {
-    const response = await route.POST(makeRequest({
-      campaign: HOSTED_PULSE_TRIAL_EXTENSION_CAMPAIGN,
-      candidatePreviewTokens,
-      candidateSnapshotDigest: CANDIDATE_SNAPSHOT_DIGEST,
+      memberId: TARGET_MEMBER_ID,
       mode: "apply",
     }));
 
     assert.equal(response.status, 400);
-    expect(mocks.extendHostedPulseTrialsForCampaign).not.toHaveBeenCalled();
+    expect(mocks.applyHostedPulseTrialExtension).not.toHaveBeenCalled();
   });
 
-  test("refuses to apply without a candidate snapshot from Preview", async () => {
-    const response = await route.POST(makeRequest({
-      campaign: HOSTED_PULSE_TRIAL_EXTENSION_CAMPAIGN,
+  test("maps stale, busy, and unavailable results without widening scope", async () => {
+    mocks.applyHostedPulseTrialExtension
+      .mockRejectedValueOnce(new HostedPulseTrialExtensionPreviewStaleError())
+      .mockRejectedValueOnce(new HostedPulseTrialExtensionLockBusyError())
+      .mockRejectedValueOnce(new HostedPulseTrialExtensionProviderError());
+
+    const stale = await route.POST(makeRequest({
+      memberId: TARGET_MEMBER_ID,
       mode: "apply",
+      previewProof: PREVIEW_PROOF,
     }));
-
-    assert.equal(response.status, 400);
-    assert.equal(mocks.extendHostedPulseTrialsForCampaign.mock.calls.length, 0);
-  });
-
-  test("refuses to apply with a snapshot but without complete provider preview proof", async () => {
-    const response = await route.POST(makeRequest({
-      campaign: HOSTED_PULSE_TRIAL_EXTENSION_CAMPAIGN,
-      candidateSnapshotDigest: CANDIDATE_SNAPSHOT_DIGEST,
+    const busy = await route.POST(makeRequest({
+      memberId: TARGET_MEMBER_ID,
       mode: "apply",
+      previewProof: PREVIEW_PROOF,
     }));
-
-    assert.equal(response.status, 400);
-    assert.equal(mocks.extendHostedPulseTrialsForCampaign.mock.calls.length, 0);
-  });
-
-  test("rejects a changed candidate snapshot before applying", async () => {
-    mocks.extendHostedPulseTrialsForCampaign.mockRejectedValueOnce(
-      new HostedPulseTrialExtensionPreviewMismatchError(),
-    );
-
-    const response = await route.POST(makeRequest({
-      campaign: HOSTED_PULSE_TRIAL_EXTENSION_CAMPAIGN,
-      candidatePreviewTokens: [CANDIDATE_PREVIEW_TOKEN],
-      candidateSnapshotDigest: CANDIDATE_SNAPSHOT_DIGEST,
+    const unavailable = await route.POST(makeRequest({
+      memberId: TARGET_MEMBER_ID,
       mode: "apply",
+      previewProof: PREVIEW_PROOF,
     }));
-    const payload = await response.json() as {
-      error?: { code?: string; message?: string };
-    };
 
-    assert.equal(response.status, 409);
-    assert.equal(payload.error?.code, "HOSTED_OPS_PULSE_TRIAL_EXTENSION_PREVIEW_STALE");
-    assert.match(payload.error?.message ?? "", /Preview again/u);
-    assert.equal(consoleInfoSpy.mock.calls.length, 0);
+    assert.equal(stale.status, 409);
+    assert.equal(busy.status, 409);
+    assert.equal(unavailable.status, 502);
+    expect(mocks.applyHostedPulseTrialExtension).toHaveBeenCalledTimes(3);
   });
 
-  test("passes opaque continuations for all-member and member-scoped traversal", async () => {
-    const continuationResponse = await route.POST(makeRequest({
-      continuationToken: CONTINUATION_TOKEN,
-    }));
-    const memberContinuationResponse = await route.POST(makeRequest({
-      continuationToken: CONTINUATION_TOKEN,
-      memberId: "member_target",
-    }));
-    const malformedContinuationResponse = await route.POST(makeRequest({
-      continuationToken: "member_secret",
-    }));
-    const preExpansionContinuationResponse = await route.POST(makeRequest({
-      continuationToken: PRE_EXPANSION_CONTINUATION_TOKEN,
-    }));
-
-    assert.equal(continuationResponse.status, 200);
-    expect(mocks.extendHostedPulseTrialsForCampaign).toHaveBeenCalledWith({
-      continuationToken: CONTINUATION_TOKEN,
-      maxCandidates: 4,
-      memberId: undefined,
-      mode: "dry-run",
-    });
-    assert.equal(memberContinuationResponse.status, 200);
-    expect(mocks.extendHostedPulseTrialsForCampaign).toHaveBeenCalledWith({
-      continuationToken: CONTINUATION_TOKEN,
-      maxCandidates: 4,
-      memberId: "member_target",
-      mode: "dry-run",
-    });
-    assert.equal(malformedContinuationResponse.status, 400);
-    assert.equal(preExpansionContinuationResponse.status, 400);
-  });
-
-  test("rejects unknown modes", async () => {
-    const response = await route.POST(makeRequest({ mode: "extend-everything" }));
-
-    assert.equal(response.status, 400);
-    assert.equal(mocks.extendHostedPulseTrialsForCampaign.mock.calls.length, 0);
+  test("rejects retired campaign and batch modes", async () => {
+    for (const mode of ["dry-run", "campaign", "all"]) {
+      const response = await route.POST(makeRequest({
+        memberId: TARGET_MEMBER_ID,
+        mode,
+      }));
+      assert.equal(response.status, 400);
+    }
+    expect(mocks.previewHostedPulseTrialExtension).not.toHaveBeenCalled();
   });
 });
+
+function makeResult(
+  overrides: Partial<HostedPulseTrialExtensionResult> = {},
+): HostedPulseTrialExtensionResult {
+  return {
+    currentTrialEndsAt: "2026-07-12T16:00:00.000Z",
+    eligibilityCode: "eligible",
+    eligible: true,
+    extensionDays: 7,
+    localBillingPhase: null,
+    localBillingStatus: "paused",
+    memberId: TARGET_MEMBER_ID,
+    message: "This lapsed Pulse Trial can be restored for seven days.",
+    outcome: "preview",
+    previewProof: PREVIEW_PROOF,
+    providerStatus: "paused",
+    targetTrialEndsAt: PREVIEW_PROOF.targetTrialEndsAt,
+    ...overrides,
+  };
+}
 
 function makeRequest(body: Record<string, unknown>): Request {
   return new Request("http://localhost/api/ops/pulse-trial-extension", {
     body: JSON.stringify(body),
     headers: {
-      "Content-Type": "application/json",
+      "content-type": "application/json",
+      origin: "http://localhost",
     },
     method: "POST",
   });
-}
-
-async function buildProductionPreviewProof(): Promise<HostedPulseTrialExtensionSummary> {
-  const candidateSource: HostedPulseTrialExtensionCandidateSource = {
-    async inspectProviderOnlyTrial() {
-      throw new Error("A suspended local candidate must not inspect Stripe.");
-    },
-    async listCandidates() {
-      return {
-        candidates: [{
-          billingRefCreatedAt: new Date("2026-07-01T12:00:00.000Z"),
-          currentBillingPhase: "trial",
-          currentBillingPlanCode: "launch_monthly",
-          currentCheckoutOffer: "pulse_trial_7d",
-          currentPeriodEnd: new Date("2026-07-09T12:00:00.000Z"),
-          currentTrialEndsAt: new Date("2026-07-09T12:00:00.000Z"),
-          currentTrialStartedAt: new Date("2026-07-02T12:00:00.000Z"),
-          lastStripeEventCreatedAt: null,
-          memberBillingStatus: HostedBillingStatus.active,
-          memberId: "member_preview_contract",
-          memberSuspendedAt: new Date("2026-07-08T12:00:00.000Z"),
-          providerCustomerId: null,
-          providerSubscriptionId: null,
-          pulseTrialRedeemedAt: new Date("2026-07-02T12:00:00.000Z"),
-          stripeCustomerId: "cus_preview_contract",
-          stripeSubscriptionId: "sub_preview_contract",
-        }],
-        nextContinuationToken: null,
-      };
-    },
-    async withStripeMutationLock<TResult>(): Promise<TResult> {
-      throw new Error("Preview must not acquire the member mutation lock.");
-    },
-  };
-  const stripe: HostedPulseTrialExtensionStripeClient = {
-    async retrieveSubscription() {
-      throw new Error("A suspended local candidate must not retrieve Stripe.");
-    },
-    async updateSubscription() {
-      throw new Error("Preview must not update Stripe.");
-    },
-  };
-
-  return extendHostedPulseTrials({
-    candidateSource,
-    maxCandidates: 4,
-    mode: "dry-run",
-    now: NOW,
-    priceId: "price_pulse_monthly_123",
-    stripe,
-  });
-}
-
-function makeSummary(
-  overrides: Partial<HostedPulseTrialExtensionSummary>,
-): HostedPulseTrialExtensionSummary {
-  return {
-    alreadyExtended: 0,
-    campaign: HOSTED_PULSE_TRIAL_EXTENSION_CAMPAIGN,
-    candidatePreviewTokens: [],
-    candidateSnapshotDigest: CANDIDATE_SNAPSHOT_DIGEST,
-    candidates: 0,
-    extensionDays: 7,
-    failures: {
-      db_update_failed: 0,
-      member_lock_busy: 0,
-      preview_state_changed: 0,
-      provider_recovery_failed: 0,
-      provider_recovery_lookup_failed: 0,
-      route_runway_exhausted: 0,
-      stripe_retrieve_failed: 0,
-      stripe_update_failed: 0,
-      stripe_update_result_invalid: 0,
-    },
-    hasMoreCandidates: false,
-    localWindowsReconciled: 0,
-    mode: "dry-run",
-    nextContinuationToken: null,
-    providerTrialsCleanedUp: 0,
-    providerTrialsRecovered: 0,
-    skipped: {
-      local_candidate_changed: 0,
-      local_trial_window_invalid: 0,
-      missing_stripe_refs: 0,
-      outside_campaign_cohort: 0,
-      provider_recovery_not_found: 0,
-      provider_trial_ended: 0,
-      stripe_billing_plan_mismatch: 0,
-      stripe_campaign_marker_conflict: 0,
-      stripe_checkout_offer_mismatch: 0,
-      stripe_customer_mismatch: 0,
-      stripe_price_mismatch: 0,
-      stripe_subscription_id_mismatch: 0,
-      stripe_subscription_canceling: 0,
-      stripe_subscription_not_trialing: 0,
-      stripe_trial_end_invalid: 0,
-    },
-    stripeTrialsExtended: 0,
-    wouldExtend: 0,
-    wouldCleanupProviderTrial: 0,
-    wouldRecoverProviderTrial: 0,
-    wouldReconcile: 0,
-    ...overrides,
-  };
 }
