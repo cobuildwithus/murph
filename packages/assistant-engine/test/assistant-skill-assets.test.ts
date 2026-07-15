@@ -939,6 +939,24 @@ describe('assistant skill assets', () => {
       /For reversible, same-shape retrievals, continue\s+only across the bounded requested set and verify each result; use OS-control only\s+under its fallback rule\./u,
     )
     expect(raw).toMatch(
+      /visible, enabled ordinary control that remains unresponsive after one safe\s+Playwright locator or keyboard alternative and a specific current-state check/iu,
+    )
+    expect(raw).toMatch(
+      /read the control's fresh bounding\s+box immediately before the OS action/iu,
+    )
+    expect(raw).toMatch(
+      /For every fallback click, set `numClicks: 1`/iu,
+    )
+    expect(raw).toMatch(
+      /Amazon's flaky\s+"Place your order" control is one example/iu,
+    )
+    expect(raw).toMatch(
+      /use one coordinate click only after proving the order was not submitted/iu,
+    )
+    expect(raw).toMatch(
+      /purchase outcome remains ambiguous, stop and hand off instead of clicking\s+again/iu,
+    )
+    expect(raw).toMatch(
       /\*\*CAPTCHA or bot check:\*\* first verify it is a real challenge rather than an\s+ordinary cookie banner, modal, or unfamiliar control\. If it is real, pause\s+for takeover\. Do not bypass it\./u,
     )
     expect(raw).toMatch(/refresh the\s+current page as a last resort/)

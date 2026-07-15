@@ -111,7 +111,11 @@ describe("murph computer dynamic tools", () => {
     expect(openDescription).toMatch(/user handoff/iu);
 
     // computer_os_control must use the same open primitive for unknown outcomes.
-    expect(osControlDescription).toMatch(/unknown outcome/iu);
+    expect(osControlDescription).toMatch(/visible enabled control/iu);
+    expect(osControlDescription).toMatch(/fresh bounding box/iu);
+    expect(osControlDescription).toMatch(/set numClicks to 1 for every fallback click/iu);
+    expect(osControlDescription).toMatch(/blind second click/iu);
+    expect(osControlDescription).toMatch(/effect remains ambiguous/iu);
     expect(osControlDescription).toMatch(/computer_open/iu);
     expect(osControlDescription).not.toMatch(/computer_open.*before.*after/iu);
   });
