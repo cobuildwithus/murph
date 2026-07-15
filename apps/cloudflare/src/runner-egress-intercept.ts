@@ -105,7 +105,6 @@ const DEFAULT_EXA_API_BASE_URL = "https://api.exa.ai";
 const DEFAULT_MAPBOX_API_BASE_URL = "https://api.mapbox.com";
 const DEFAULT_TELEGRAM_API_BASE_URL = "https://api.telegram.org";
 const DEFAULT_TELEGRAM_FILE_BASE_URL = "https://api.telegram.org/file";
-const DEFAULT_WHATSAPP_API_BASE_URL = "https://graph.facebook.com";
 const HOSTED_DATA_API_RUNTIME_BASE_URL = "http://murph-data-api.worker";
 const HOSTED_DATA_API_ALLOWED_PATHS = new Set([
   "/api/foods",
@@ -145,7 +144,6 @@ export const HOSTED_RUNNER_DEFAULT_OUTBOUND_HOSTS = {
   transcribe: CLOUDFLARE_HOSTED_TRANSCRIBE_HOST,
   webControlPlane: CLOUDFLARE_HOSTED_RUNTIME_HOSTS.webControlPlane,
   workspaceSnapshotStore: CLOUDFLARE_HOSTED_RUNTIME_HOSTS.workspaceSnapshotStore,
-  whatsApp: "graph.facebook.com",
 } as const;
 
 const OPENAI_EGRESS_POLICY = [
@@ -395,7 +393,6 @@ export const HOSTED_RUNNER_OUTBOUND_BY_HOST: Record<string, HostedRunnerOutbound
   [HOSTED_RUNNER_DEFAULT_OUTBOUND_HOSTS.transcribe]: handleHostedRunnerOpenInternetOutbound,
   [HOSTED_RUNNER_DEFAULT_OUTBOUND_HOSTS.webControlPlane]: handleHostedRunnerInternalOutbound,
   [HOSTED_RUNNER_DEFAULT_OUTBOUND_HOSTS.workspaceSnapshotStore]: handleHostedRunnerInternalOutbound,
-  [HOSTED_RUNNER_DEFAULT_OUTBOUND_HOSTS.whatsApp]: handleHostedRunnerWhatsAppOutbound,
   // Hosted-local rewrites loopback provider bases to this container-reachable
   // host. Send it through the multiplexer so provider policy still applies.
   "host.docker.internal": handleHostedRunnerOpenInternetOutbound,
@@ -421,8 +418,7 @@ export async function handleHostedRunnerOpenInternetOutbound(
     ?? await maybeHandleExaRequest({ ctx, env, request, url, userId })
     ?? await maybeHandleMapboxRequest({ ctx, env, request, url, userId })
     ?? await maybeHandleLinqRequest({ ctx, env, request, url, userId })
-    ?? await maybeHandleTelegramRequest({ ctx, env, request, url, userId })
-    ?? await maybeHandleWhatsAppRequest({ ctx, env, request, url, userId });
+    ?? await maybeHandleTelegramRequest({ ctx, env, request, url, userId });
 
   if (handled) {
     return handled;
@@ -652,23 +648,6 @@ export async function handleHostedRunnerTelegramOutbound(
   const url = new URL(request.url);
   return await requireHandledProviderEgress(
     await maybeHandleTelegramRequest({
-      ctx: _ctx,
-      env,
-      request,
-      url,
-      userId: readHostedRunnerBoundUserId(request),
-    }),
-  );
-}
-
-export async function handleHostedRunnerWhatsAppOutbound(
-  request: Request,
-  env: RunnerOutboundEnvironmentSource,
-  _ctx: HostedRunnerOutboundContext,
-): Promise<Response> {
-  const url = new URL(request.url);
-  return await requireHandledProviderEgress(
-    await maybeHandleWhatsAppRequest({
       ctx: _ctx,
       env,
       request,
@@ -2882,76 +2861,6 @@ async function handleTelegramTokenRewrite(
       upstreamUrl,
       stripHostedProviderUpstreamHeaders(input.request.headers),
     ),
-    url: input.url,
-  });
-}
-
-async function maybeHandleWhatsAppRequest(input: {
-  ctx?: HostedRunnerOutboundContext;
-  env: RunnerOutboundEnvironmentSource;
-  request: Request;
-  url: URL;
-  userId: string | null;
-}): Promise<Response | null> {
-  const providerBase = readProviderBaseConfig(
-    input.env.WHATSAPP_API_BASE_URL,
-    DEFAULT_WHATSAPP_API_BASE_URL,
-    input.env,
-    { acceptFallbackBaseUrl: true },
-  );
-  const pathMatch = readProviderPathMatch(input.url, providerBase);
-  if (!pathMatch) {
-    if (isKnownProviderHost(input.url, providerBase)) {
-      return disallowedProviderEgress();
-    }
-    return null;
-  }
-  const { pathnameSuffix } = pathMatch;
-
-  if (
-    input.request.method !== "POST"
-    || !/^\/v[0-9]+\.[0-9]+\/__cloudflare_injected__\/messages$/u.test(pathnameSuffix)
-  ) {
-    return disallowedProviderEgress();
-  }
-  if (!hasBearerCredentialSentinel(input.request.headers)) {
-    return disallowedProviderEgress();
-  }
-
-  const startedAt = Date.now();
-  const authorization = await authorizeHostedProviderEgress({
-    ...input,
-    providerKind: "whatsapp",
-  });
-  if (!authorization.authorized) {
-    return unauthorizedProviderEgress({
-      authorization,
-      providerKind: "whatsapp",
-      request: input.request,
-      startedAt,
-      url: input.url,
-    });
-  }
-
-  const token = readRequiredInterceptSecret(input.env.WHATSAPP_ACCESS_TOKEN, "WHATSAPP_ACCESS_TOKEN");
-  const phoneNumberId = readRequiredInterceptSecret(
-    input.env.WHATSAPP_PHONE_NUMBER_ID,
-    "WHATSAPP_PHONE_NUMBER_ID",
-  );
-  const upstreamUrl = createProviderUpstreamUrl(input.url, pathMatch);
-  const prefix = normalizedProviderBasePath(pathMatch.upstreamBaseUrl);
-  upstreamUrl.pathname = `${prefix}${pathnameSuffix.replace(
-    "/__cloudflare_injected__/messages",
-    `/${encodeURIComponent(phoneNumberId)}/messages`,
-  )}`;
-  const headers = stripHostedProviderUpstreamHeaders(input.request.headers);
-  headers.set("authorization", `Bearer ${token}`);
-  return await fetchAuthorizedProviderUpstream({
-    authorization,
-    providerKind: "whatsapp",
-    request: input.request,
-    startedAt,
-    upstreamRequest: await createHostedRunnerUpstreamRequest(input.request, upstreamUrl, headers),
     url: input.url,
   });
 }

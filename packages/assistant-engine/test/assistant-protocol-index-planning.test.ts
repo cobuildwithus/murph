@@ -279,7 +279,10 @@ describe('assistant protocol index planning', () => {
       '## Compose each edition',
     )
     expect(scheduledNewsletterPlan.systemPrompt).toContain(
-      'same full read and write tools as an interactive Murph turn',
+      'same vault read and write tools as an interactive Murph turn',
+    )
+    expect(scheduledNewsletterPlan.systemPrompt).toContain(
+      'Scheduled turns do not own automation lifecycle',
     )
 
     const conversationNotificationPlan = await resolveAssistantRouteTurnPlan({

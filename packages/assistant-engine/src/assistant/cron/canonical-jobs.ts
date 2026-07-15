@@ -184,16 +184,12 @@ export function projectCanonicalAssistantCronJob(input: {
           identityId: null,
           participantId: null,
           threadId: null,
-          currentRouteSnapshot: undefined,
           threadIsDirect: undefined,
         }
   const target = assistantCronTargetSchema.parse({
     sessionId: continuitySessionId,
     alias: continuityAlias,
     channel: targetRoute.channel,
-    ...(targetRoute.currentRouteSnapshot === true
-      ? { currentRouteSnapshot: true }
-      : {}),
     deliverySource: targetRoute.deliverySource,
     identityId: targetRoute.identityId,
     participantId: targetRoute.participantId,

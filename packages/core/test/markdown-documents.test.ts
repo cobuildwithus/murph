@@ -16,14 +16,10 @@ import {
   patchAutomation,
   readAutomation,
   readAutomationMarkdown,
-  repairLegacyPersonalHomeAutomationRoutes,
   scaffoldAutomationPayload,
   showAutomation,
   upsertAutomation,
-  type AutomationRoute,
-  type AutomationStatus,
 } from "../src/automation.ts";
-import { withHostedCanonicalWritePort } from "../src/operations/write-batch.ts";
 
 async function createTempVaultRoot(): Promise<string> {
   return fs.mkdtemp(path.join(os.tmpdir(), "murph-core-markdown-"));
@@ -290,148 +286,6 @@ describe("markdown document primitives", () => {
     expect(patched.record.route).toEqual(created.record.route);
     expect(patched.record.summary).toBe(created.record.summary);
     expect(patched.record.tags).toEqual(created.record.tags);
-  });
-
-  it("repairs the complete exact-target legacy personal-home route set", async () => {
-    const vaultRoot = await makeVaultRoot();
-    const legacyRoute = {
-      channel: "linq",
-      deliverySource: null,
-      deliveryTarget: "legacy-home-chat",
-      identityId: null,
-      participantId: null,
-      threadId: null,
-    } as const;
-    const recordInputs: Array<{
-      automationId: string;
-      route: AutomationRoute;
-      slug: string;
-      status: AutomationStatus;
-    }> = [
-      {
-        automationId: "automation_01KZ0000000000000000000091",
-        route: legacyRoute,
-        slug: "active-route",
-        status: "active",
-      },
-      {
-        automationId: "automation_01KZ0000000000000000000092",
-        route: legacyRoute,
-        slug: "paused-route",
-        status: "paused",
-      },
-      {
-        automationId: "automation_01KZ0000000000000000000093",
-        route: legacyRoute,
-        slug: "archived-route",
-        status: "archived",
-      },
-      {
-        automationId: "automation_01KZ0000000000000000000094",
-        route: {
-          ...legacyRoute,
-          threadIsDirect: false,
-        },
-        slug: "group-route",
-        status: "active",
-      },
-      {
-        automationId: "automation_01KZ0000000000000000000095",
-        route: {
-          ...legacyRoute,
-          deliveryTarget: "other-chat",
-        },
-        slug: "other-route",
-        status: "active",
-      },
-    ];
-    const records = await Promise.all(
-      recordInputs.map(async (recordInput) =>
-        await upsertAutomation({
-          vaultRoot,
-          ...createAutomationPayload({
-            automationId: recordInput.automationId,
-            route: recordInput.route,
-            slug: recordInput.slug,
-            status: recordInput.status,
-          }),
-        }),
-      ),
-    );
-
-    await expect(repairLegacyPersonalHomeAutomationRoutes({
-      confirmedDirectDeliveryTargets: ["legacy-home-chat"],
-      now: new Date("2026-07-12T12:00:00.000Z"),
-      vaultRoot,
-    })).resolves.toEqual({ updated: 2 });
-
-    for (const record of records.slice(0, 2)) {
-      await expect(showAutomation({
-        automationId: record.record.automationId,
-        vaultRoot,
-      })).resolves.toMatchObject({
-        route: {
-          currentRouteSnapshot: true,
-          deliveryTarget: "legacy-home-chat",
-          threadIsDirect: true,
-        },
-      });
-    }
-    for (const record of records.slice(2)) {
-      await expect(showAutomation({
-        automationId: record.record.automationId,
-        vaultRoot,
-      })).resolves.toMatchObject({ route: record.record.route });
-    }
-  });
-
-  it("rolls back the complete route repair when hosted persistence fails", async () => {
-    const vaultRoot = await makeVaultRoot();
-    const legacyRoute = {
-      channel: "linq",
-      deliverySource: null,
-      deliveryTarget: "legacy-home-chat",
-      identityId: null,
-      participantId: null,
-      threadId: null,
-    } as const;
-    const records = await Promise.all(
-      [
-        ["automation_01KZ0000000000000000000096", "first-atomic-route"],
-        ["automation_01KZ0000000000000000000097", "second-atomic-route"],
-      ].map(async ([automationId, slug]) =>
-        await upsertAutomation({
-          vaultRoot,
-          ...createAutomationPayload({ automationId, route: legacyRoute, slug }),
-        }),
-      ),
-    );
-
-    await expect(
-      withHostedCanonicalWritePort(
-        {
-          async persistCanonicalWrite() {
-            throw new Error("injected hosted persistence failure");
-          },
-        },
-        async () =>
-          await repairLegacyPersonalHomeAutomationRoutes({
-            confirmedDirectDeliveryTargets: ["legacy-home-chat"],
-            vaultRoot,
-          }),
-      ),
-    ).rejects.toThrow("injected hosted persistence failure");
-
-    for (const record of records) {
-      await expect(showAutomation({
-        automationId: record.record.automationId,
-        vaultRoot,
-      })).resolves.toMatchObject({ route: legacyRoute });
-    }
-    await expect(repairLegacyPersonalHomeAutomationRoutes({
-      confirmedDirectDeliveryTargets: ["legacy-home-chat"],
-      vaultRoot,
-    })).resolves.toEqual({ updated: 2 });
   });
 
   it("advances only the device activity cursor and refuses stale matcher expectations", async () => {

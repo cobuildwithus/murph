@@ -93,13 +93,12 @@ Updated: 2026-07-14
 ## Now
 
 - Checkpoint batch 2 is landed on `main` at 1,505 imaged movements, 243 image-less movements, and 4,522 unique public images.
-- Batch 3 is cataloged and verified locally at 1,555 imaged movements, 193 image-less movements, and 4,677 unique public images. Its 155 images passed originating and independent review, idempotent upload, hosted-byte verification, public delivery checks, package verification on TypeScript 7, and zero-finding security/privacy and coverage-write audits.
-- Batch 4 is independently reconstructed as the subsequent 50 still-empty movements with 183 planned slides. Generation is running in ignored, upload-free handoff lanes so it cannot cross the batch-3 catalog checkpoint.
+- Batch 3 is landed on `main` at 1,555 imaged movements, 193 image-less movements, and 4,677 unique public images. Its 155 images passed originating and independent review, idempotent upload, hosted-byte verification, public delivery checks, package verification on TypeScript 7, and zero-finding security/privacy and coverage-write audits.
+- Batch 4 is the exact next 50 still-empty movements with 184 planned slides after independent review restored a required fourth phase to ST491. All 50 independently approved carousels and 184 square canonical images are uploaded, idempotently byte-verified, cataloged, regenerated, and package-verified at 1,605 imaged / 143 image-less / 4,861 unique images. Coverage-write returned zero findings; deep review's sole cosmetic ST491 annotation finding was removed, targeted re-approved, re-uploaded, and re-verified with no unresolved finding. Superseded ST491 objects remain unreferenced; landing is pending.
 
 ## Next
 
-- Commit batch 3 with `scripts/committer`, reconcile with `origin/main`, and push the exact head to `main` without force.
-- Independently review and consume the batch-4 handoffs as the next 50-movement checkpoint.
+- Verify and land batch 4 as the next 50-movement checkpoint, then start the preplanned 50-movement / 172-slide batch 5 at manifest sequences 271–320.
 - Continue the deterministic checkpoints to 1,748 imaged / zero image-less, then run aggregate completion verification and close the active plan with `scripts/finish-task`.
 
 ## Verification
@@ -113,6 +112,7 @@ Updated: 2026-07-14
 - Batch-1 package verification passes after advancing the exact count guard: typecheck passed, all six tests passed, and deterministic generated-artifact verification passed. Independent coverage/acceptance and security/privacy re-audits report zero remaining findings; all 166 new public image URLs passed range delivery probes.
 - Batch-2 regenerated catalog proof: 1,748 total movements; 1,505 with images; 243 without images; 4,522 ordered images; 4,522 unique public URLs; zero invalid delivery URLs. All 115 new images passed hosted-original byte and public-delivery verification. Package verification passed typecheck, all six tests, and deterministic generation; independent coverage/acceptance and security/privacy audits report zero findings.
 - Batch-3 regenerated catalog proof: 1,748 total movements; 1,555 with images; 193 without images; 4,677 ordered images; 4,677 unique public URLs; zero invalid or duplicate delivery URLs. Direct diff proof shows exactly 50 formerly empty `Images` cells changed (31 strength-addon and 19 stretch), exactly 155 unique new URLs, and zero non-image-field drift. Package verification on TypeScript 7 passed typecheck, all six tests, and deterministic generation; independent coverage-write and security/privacy audits report zero findings and no edits.
+- Batch-4 regenerated catalog proof: 1,748 total movements; 1,605 with images; 143 without images; 4,861 ordered images; 4,861 unique public URLs. Direct CSV proof shows exactly 50 formerly empty `Images` cells changed, exactly 184 unique new URLs, and zero non-`Images`-field drift. `pnpm --dir packages/exercise-library verify` passes under the shared-host TypeScript 7 profile after final asset remediation: typecheck, all six tests, and deterministic generated-artifact verification are green. Coverage-write passed at 81.35% statements / 73.44% branches with zero findings or edits; the local deep-review gate has no unresolved finding.
 - The latest handoff batch passes `pnpm --dir packages/exercise-library verify`: typecheck, all 6 tests, and deterministic generated-artifact checks are green; seed drift is limited to the 14 intended `Images` fields.
 - The subsequent 175/200-range batch also passes `pnpm --dir packages/exercise-library verify`; seed drift is limited to nine intended `Images` fields across two owning seed files, and 4,172 public URLs are unique.
 - Remaining generation, upload, full repository verification, completion audits, and final-head CI are pending.

@@ -63,15 +63,6 @@ vi.mock("@/src/lib/hosted-onboarding/webhook-provider-telegram", () => ({
   planHostedOnboardingTelegramWebhook: vi.fn(),
 }));
 
-vi.mock("@/src/lib/hosted-onboarding/webhook-provider-whatsapp", () => ({
-  planHostedOnboardingWhatsAppWebhook: vi.fn(),
-}));
-
-vi.mock("@/src/lib/hosted-onboarding/whatsapp", () => ({
-  parseHostedWhatsAppInboundTexts: vi.fn(),
-  verifyAndParseHostedWhatsAppWebhookRequest: vi.fn(),
-}));
-
 import {
   handleHostedOnboardingLinqWebhook,
 } from "../src/lib/hosted-onboarding/webhook-service";

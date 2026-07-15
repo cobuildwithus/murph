@@ -1,0 +1,332 @@
+import { rm } from 'node:fs/promises'
+
+import { createAssistantModelTarget } from '@murphai/operator-config/assistant-backend'
+import type { AssistantSession } from '@murphai/operator-config/assistant-cli-contracts'
+import { beforeEach, afterEach, describe, expect, it, vi } from 'vitest'
+
+import type { executeCodexTurnWithRecovery } from '../src/assistant/codex-turn-runner.ts'
+import type { persistAssistantTurnAndSession } from '../src/assistant/turn-finalizer.ts'
+import { sendAssistantNotificationLocal } from '../src/assistant/notification-turn.ts'
+import { resolveAssistantSession } from '../src/assistant/store.ts'
+import { createTempVaultContext } from './test-helpers.ts'
+
+const boundaries = vi.hoisted(() => ({
+  appendTranscript: vi.fn(),
+  createReceipt: vi.fn(),
+  deliverMessage: vi.fn(),
+  executeProvider: vi.fn<typeof executeCodexTurnWithRecovery>(),
+  finalizeReceipt: vi.fn(),
+  persistTurn: vi.fn<typeof persistAssistantTurnAndSession>(),
+  recordDiagnostic: vi.fn(),
+  recordUsage: vi.fn(),
+  refreshStatus: vi.fn(),
+  resolveDefaults: vi.fn(),
+  saveSession: vi.fn(),
+  startLinqTyping: vi.fn(),
+}))
+
+vi.mock('@murphai/operator-config/operator-config', async (importOriginal) => {
+  const actual = await importOriginal<
+    typeof import('@murphai/operator-config/operator-config')
+  >()
+  return {
+    ...actual,
+    resolveAssistantOperatorDefaults: boundaries.resolveDefaults,
+  }
+})
+
+vi.mock('../src/assistant/codex-turn-runner.js', async (importOriginal) => {
+  const actual = await importOriginal<
+    typeof import('../src/assistant/codex-turn-runner.ts')
+  >()
+  return {
+    ...actual,
+    executeCodexTurnWithRecovery: boundaries.executeProvider,
+  }
+})
+
+vi.mock('../src/assistant/runtime-state-service.js', () => ({
+  createAssistantRuntimeStateService: () => ({
+    diagnostics: {
+      recordEvent: boundaries.recordDiagnostic,
+    },
+    outbox: {
+      deliverMessage: boundaries.deliverMessage,
+    },
+    sessions: {
+      save: boundaries.saveSession,
+    },
+    status: {
+      refreshSnapshot: boundaries.refreshStatus,
+    },
+    transcripts: {
+      append: boundaries.appendTranscript,
+    },
+    turns: {
+      createReceipt: boundaries.createReceipt,
+      finalizeReceipt: boundaries.finalizeReceipt,
+    },
+  }),
+}))
+
+vi.mock('../src/assistant/service-usage.js', async (importOriginal) => {
+  const actual = await importOriginal<
+    typeof import('../src/assistant/service-usage.ts')
+  >()
+  return {
+    ...actual,
+    recordAdditionalAssistantUsageEvents: boundaries.recordUsage,
+    recordAssistantUsageEvent: boundaries.recordUsage,
+  }
+})
+
+vi.mock('../src/assistant/turn-finalizer.js', async (importOriginal) => {
+  const actual = await importOriginal<
+    typeof import('../src/assistant/turn-finalizer.ts')
+  >()
+  return {
+    ...actual,
+    persistAssistantTurnAndSession: boundaries.persistTurn,
+  }
+})
+
+const cleanupPaths: string[] = []
+const opaqueLocator = {
+  actorId: 'h1_111111111111111111111111',
+  identityId: 'h1_222222222222222222222222',
+  threadId: 'h1_333333333333333333333333',
+}
+const modelTarget = createAssistantModelTarget({
+  provider: 'codex-cli',
+  approvalPolicy: 'never',
+  model: 'gpt-5.5',
+  modelProvider: 'vercel-ai-gateway',
+  reasoningEffort: 'medium',
+  sandbox: 'danger-full-access',
+})
+
+if (!modelTarget) {
+  throw new Error('Expected a test assistant model target.')
+}
+
+beforeEach(() => {
+  vi.clearAllMocks()
+  boundaries.resolveDefaults.mockResolvedValue({
+    backend: null,
+    identityId: null,
+    selfDeliveryTargets: null,
+  })
+  boundaries.startLinqTyping.mockResolvedValue(null)
+  boundaries.recordDiagnostic.mockResolvedValue(undefined)
+  boundaries.recordUsage.mockResolvedValue(undefined)
+  boundaries.refreshStatus.mockResolvedValue(undefined)
+  boundaries.createReceipt.mockResolvedValue(undefined)
+  boundaries.finalizeReceipt.mockResolvedValue(undefined)
+  boundaries.appendTranscript.mockResolvedValue([])
+  boundaries.saveSession.mockImplementation(async (session: AssistantSession) => session)
+  boundaries.persistTurn.mockImplementation(async (input) => input.session)
+  boundaries.deliverMessage.mockImplementation(async (input) => ({
+    delivery: {
+      channel: 'linq',
+      idempotencyKey: input.deliveryIdempotencyKey ?? null,
+      messageId: 'linq-message-1',
+      sentAt: '2026-07-14T12:30:00.000Z',
+      target: input.explicitTarget ?? input.bindingDelivery?.target ?? 'missing-target',
+      targetKind: 'explicit' as const,
+    },
+    intent: {
+      intentId: 'intent-authorized-audience',
+    },
+    kind: 'sent' as const,
+    session: null,
+  }))
+  boundaries.executeProvider.mockImplementation(async (input) => ({
+    kind: 'succeeded',
+    providerTurn: {
+      assistantContractFingerprint:
+        'aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa',
+      attemptCount: 1,
+      codexContinuation: {
+        kind: 'explicit-structured-history',
+      },
+      codexThreadId: null,
+      provider: input.route.provider,
+      providerOptions: input.route.providerOptions,
+      rawEvents: [],
+      response: JSON.stringify({
+        kind: 'send_message',
+        privateSummary: 'Scheduled update prepared.',
+        text: 'Authorized scheduled update.',
+      }),
+      responseMedia: [],
+      route: input.route,
+      session: input.resolvedSession,
+      stderr: '',
+      stdout: '',
+      usage: null,
+      workingDirectory: input.plan.requestedWorkingDirectory,
+    },
+  }))
+})
+
+afterEach(async () => {
+  await Promise.all(
+    cleanupPaths.splice(0).map((target) =>
+      rm(target, {
+        force: true,
+        recursive: true,
+      }),
+    ),
+  )
+})
+
+describe('notification audience authority integration', () => {
+  it.each([
+    {
+      label: 'direct',
+      target: 'linq-direct-chat',
+      threadIsDirect: true,
+    },
+    {
+      label: 'group',
+      target: 'linq-group-chat',
+      threadIsDirect: false,
+    },
+  ])('carries an authoritative $label Linq tuple through the real policy guard', async ({
+    target,
+    threadIsDirect,
+  }) => {
+    const context = await createPersistedLegacyContext('authorized-audience-')
+
+    const result = await sendNotification({
+      context,
+      bindingDeliveryTarget: target,
+      deliveryTarget: target,
+      threadIsDirect,
+    })
+
+    expect(result.deliveryOutcome?.kind).toBe('sent')
+    expect(boundaries.executeProvider).toHaveBeenCalledTimes(1)
+    const providerInput = boundaries.executeProvider.mock.calls[0]?.[0]
+    expect(providerInput?.plan.conversationPolicy.audience).toMatchObject({
+      effectiveThreadIsDirect: threadIsDirect,
+      explicitTarget: target,
+      threadIsDirect,
+    })
+    expect(boundaries.deliverMessage).toHaveBeenCalledWith(
+      expect.objectContaining({
+        channel: 'linq',
+        explicitTarget: target,
+        threadIsDirect,
+      }),
+    )
+  })
+
+  it('rejects an unknown Linq audience before provider work', async () => {
+    const context = await createPersistedLegacyContext('unknown-audience-')
+
+    await expect(sendNotification({
+      context,
+      deliveryTarget: 'linq-unknown-chat',
+      threadIsDirect: null,
+    })).rejects.toMatchObject({
+      code: 'ASSISTANT_AUDIENCE_UNVERIFIED',
+    })
+
+    expect(boundaries.executeProvider).not.toHaveBeenCalled()
+    expect(boundaries.deliverMessage).not.toHaveBeenCalled()
+  })
+
+  it('does not let a direct session authorize a different explicit target', async () => {
+    const context = await createPersistedLegacyContext('mismatched-audience-')
+    const storedTarget = 'linq-stored-direct-chat'
+    await sendNotification({
+      context,
+      bindingDeliveryTarget: storedTarget,
+      deliveryTarget: storedTarget,
+      threadIsDirect: true,
+    })
+    vi.clearAllMocks()
+
+    await expect(sendNotification({
+      context,
+      bindingDeliveryTarget: storedTarget,
+      deliveryTarget: 'linq-different-chat',
+      threadIsDirect: true,
+    })).rejects.toMatchObject({
+      code: 'ASSISTANT_AUDIENCE_UNVERIFIED',
+    })
+
+    expect(boundaries.executeProvider).not.toHaveBeenCalled()
+    expect(boundaries.deliverMessage).not.toHaveBeenCalled()
+  })
+
+  it('rejects unknown exact text before deterministic delivery', async () => {
+    const context = await createPersistedLegacyContext('unknown-exact-audience-')
+
+    await expect(sendNotification({
+      context,
+      deliveryTarget: 'linq-unknown-exact-chat',
+      responsePolicy: {
+        kind: 'require_send_exact_text',
+        text: 'Scheduled exact text.',
+      },
+      threadIsDirect: null,
+    })).rejects.toMatchObject({
+      code: 'ASSISTANT_AUDIENCE_UNVERIFIED',
+    })
+
+    expect(boundaries.executeProvider).not.toHaveBeenCalled()
+    expect(boundaries.deliverMessage).not.toHaveBeenCalled()
+  })
+})
+
+async function createPersistedLegacyContext(label: string) {
+  const { parentRoot, vaultRoot } = await createTempVaultContext(label)
+  cleanupPaths.push(parentRoot)
+  const resolved = await resolveAssistantSession({
+    ...opaqueLocator,
+    channel: 'linq',
+    target: modelTarget,
+    vault: vaultRoot,
+  })
+  return {
+    sessionId: resolved.session.sessionId,
+    vault: vaultRoot,
+  }
+}
+
+async function sendNotification(input: {
+  bindingDeliveryTarget?: string
+  context: Awaited<ReturnType<typeof createPersistedLegacyContext>>
+  deliveryTarget: string
+  responsePolicy?: Parameters<typeof sendAssistantNotificationLocal>[0]['responsePolicy']
+  threadIsDirect: boolean | null
+}) {
+  return await sendAssistantNotificationLocal({
+    ...opaqueLocator,
+    allowBindingRebind: true,
+    bindingDeliveryTarget: input.bindingDeliveryTarget,
+    channel: 'linq',
+    deliveryIdempotencyKey: 'cron-occurrence-authorized-audience',
+    deliveryTarget: input.deliveryTarget,
+    executionContext: {
+      hosted: {
+        channelTypingDependencies: {
+          startLinqTyping: boundaries.startLinqTyping,
+        },
+        defaultTarget: modelTarget,
+        memberId: 'member-authorized-audience',
+        userEnvKeys: [],
+      },
+    },
+    instructions: 'Prepare the scheduled update.',
+    operatorAuthority: 'direct-operator',
+    responsePolicy: input.responsePolicy,
+    sessionId: input.context.sessionId,
+    threadIsDirect: input.threadIsDirect,
+    turnTrigger: 'automation-cron',
+    vault: input.context.vault,
+    workingDirectory: input.context.vault,
+  })
+}

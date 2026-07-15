@@ -176,29 +176,6 @@ describe("hosted assistant conversation identifiers", () => {
         },
       },
     } satisfies HostedExecutionConversationMessageWake;
-    const whatsAppWake = {
-      ...baseWake,
-      message: {
-        channel: "whatsapp" as const,
-        whatsappMessage: {
-          fromWaId: "15550100002",
-          messageId: "whatsapp_message",
-          schema: "murph.hosted-whatsapp-message.v1" as const,
-          text: "hello",
-          threadId: "whatsapp_thread",
-        },
-      },
-    } satisfies HostedExecutionConversationMessageWake;
-    const whatsAppFallbackWake = {
-      ...whatsAppWake,
-      message: {
-        ...whatsAppWake.message,
-        whatsappMessage: {
-          ...whatsAppWake.message.whatsappMessage,
-          threadId: "",
-        },
-      },
-    } satisfies HostedExecutionConversationMessageWake;
 
     expect(readHostedConversationAssistantIdentifierSecret(linqAccountWake)).toBe(
       "hbidx:phone:v1:account",
@@ -212,12 +189,6 @@ describe("hosted assistant conversation identifiers", () => {
     expect(readHostedConversationAssistantIdentifierSecret(telegramWake)).toBe(
       "telegram_thread",
     );
-    expect(readHostedConversationAssistantIdentifierSecret(whatsAppWake)).toBe(
-      "whatsapp_thread",
-    );
-    expect(readHostedConversationAssistantIdentifierSecret(
-      whatsAppFallbackWake,
-    )).toBe("15550100002");
   });
 
   it("preserves direct, group, legacy, and raw email secret fallbacks", () => {

@@ -1,5 +1,5 @@
 {
-  "catalogHash": "sha256:238a0e187cdc3893480fdc0191e3f58a82aa1331188610da65c7d2ca4ad3bc93",
+  "catalogHash": "sha256:baae11279527c6607ecec78965786e9ed2bcf523fb80ebb4b56af763ab2a50bc",
   "generatedAt": null,
   "items": [
     {
@@ -92639,7 +92639,23 @@
       ],
       "equipment": [],
       "id": "ST412",
-      "images": [],
+      "images": [
+        {
+          "alt": "Woman standing tall with both feet flat on a sand mat before toe rockers.",
+          "step": "Stand tall",
+          "url": "https://imagedelivery.net/TDuhqfLDl0Fb8RGwGw6mYw/ab15fad6-f023-462d-214e-34fdd9d95700/public"
+        },
+        {
+          "alt": "Woman rocking onto both heels with both sets of toes lifted from the mat.",
+          "step": "Rock onto heels",
+          "url": "https://imagedelivery.net/TDuhqfLDl0Fb8RGwGw6mYw/7742110c-2ac2-42a1-e27a-e3b3eb253700/public"
+        },
+        {
+          "alt": "Woman rocking onto both forefeet with both heels lifted from the mat.",
+          "step": "Rock onto forefeet",
+          "url": "https://imagedelivery.net/TDuhqfLDl0Fb8RGwGw6mYw/7638e720-11a9-4830-4727-4de01b46c800/public"
+        }
+      ],
       "kind": "stretch",
       "level": "beginner",
       "modality": "Mobility",
@@ -92686,7 +92702,28 @@
         "Stair"
       ],
       "id": "ST413",
-      "images": [],
+      "images": [
+        {
+          "alt": "Side view of a woman setting the first forefoot on a stair edge with the heel level and unsupported over open air.",
+          "step": "Set the first heel level",
+          "url": "https://imagedelivery.net/TDuhqfLDl0Fb8RGwGw6mYw/20637dd2-fd52-4982-3e3a-07318258c900/public"
+        },
+        {
+          "alt": "Side view of the same woman lowering the first heel below the stair while the forefoot remains fixed on the edge.",
+          "step": "Lower the first heel",
+          "url": "https://imagedelivery.net/TDuhqfLDl0Fb8RGwGw6mYw/3620b97b-60b3-4b9e-9123-818de0ebf700/public"
+        },
+        {
+          "alt": "Mirrored side view of the woman setting the opposite forefoot on the stair edge with the heel level and unsupported.",
+          "step": "Set the opposite heel level",
+          "url": "https://imagedelivery.net/TDuhqfLDl0Fb8RGwGw6mYw/4bf1e2d4-1696-41ea-a26b-43ff1b846000/public"
+        },
+        {
+          "alt": "Mirrored side view of the woman lowering the opposite heel below the stair with the forefoot fixed on the edge.",
+          "step": "Lower the opposite heel",
+          "url": "https://imagedelivery.net/TDuhqfLDl0Fb8RGwGw6mYw/ff878895-a238-4de7-617a-ca8ee4fba100/public"
+        }
+      ],
       "kind": "stretch",
       "level": "beginner",
       "modality": "Static Stretch",
@@ -92914,7 +92951,28 @@
       ],
       "equipment": [],
       "id": "ST417",
-      "images": [],
+      "images": [
+        {
+          "alt": "Woman stands tall in a wide straddle stance with both feet flat before shifting side to side.",
+          "step": "Stand in a wide setup",
+          "url": "https://imagedelivery.net/TDuhqfLDl0Fb8RGwGw6mYw/d404a20f-1009-47f8-74f1-77e612578800/public"
+        },
+        {
+          "alt": "Woman shifts into her right leg while the opposite leg stays straight with the foot flat.",
+          "step": "Shift into the right leg",
+          "url": "https://imagedelivery.net/TDuhqfLDl0Fb8RGwGw6mYw/dcfeab5d-adac-4a19-ce5b-8ae1bf27aa00/public"
+        },
+        {
+          "alt": "Woman returns to a centered wide stance between side shifts.",
+          "step": "Return to center",
+          "url": "https://imagedelivery.net/TDuhqfLDl0Fb8RGwGw6mYw/fe76e67c-3dab-4804-2d6e-aa94736dda00/public"
+        },
+        {
+          "alt": "Woman shifts into her left leg while the opposite leg stays straight with the foot flat.",
+          "step": "Shift into the left leg",
+          "url": "https://imagedelivery.net/TDuhqfLDl0Fb8RGwGw6mYw/3217ea7a-8673-41f5-a6d6-c488c838f000/public"
+        }
+      ],
       "kind": "stretch",
       "level": "beginner",
       "modality": "Dynamic Stretch",
@@ -93016,7 +93074,28 @@
         "Chair"
       ],
       "id": "ST419",
-      "images": [],
+      "images": [
+        {
+          "alt": "Woman uses a chair for light support in a right-facing half-kneeling split-prep setup.",
+          "step": "Set up the first side",
+          "url": "https://imagedelivery.net/TDuhqfLDl0Fb8RGwGw6mYw/b913df91-b52c-4b16-2583-ef0ef0ee4300/public"
+        },
+        {
+          "alt": "Woman shifts her hips back to lengthen the front hamstring while the back knee stays padded and her hands remain on the chair.",
+          "step": "Lengthen the first front leg",
+          "url": "https://imagedelivery.net/TDuhqfLDl0Fb8RGwGw6mYw/65a0da3c-3943-4ec6-44ce-beaa20f19a00/public"
+        },
+        {
+          "alt": "The same woman switches sides into a mirrored left-facing supported half-kneeling setup.",
+          "step": "Set up the other side",
+          "url": "https://imagedelivery.net/TDuhqfLDl0Fb8RGwGw6mYw/1b426716-dcc8-45be-350a-331628748400/public"
+        },
+        {
+          "alt": "The same woman completes the mirrored supported hamstring endpoint with a long spine and grounded front heel.",
+          "step": "Lengthen the other front leg",
+          "url": "https://imagedelivery.net/TDuhqfLDl0Fb8RGwGw6mYw/66650501-df42-47fd-58a4-dbc26efe9200/public"
+        }
+      ],
       "kind": "stretch",
       "level": "intermediate",
       "modality": "Static Stretch",
@@ -93125,7 +93204,28 @@
       ],
       "equipment": [],
       "id": "ST421",
-      "images": [],
+      "images": [
+        {
+          "alt": "Woman holds a supported pigeon setup with one shin angled forward and the opposite leg extended behind.",
+          "step": "Set up the first side",
+          "url": "https://imagedelivery.net/TDuhqfLDl0Fb8RGwGw6mYw/5c683880-30d1-4f71-9e18-0a78fbf3c400/public"
+        },
+        {
+          "alt": "Woman bends the rear knee in pigeon and gently holds that foot with the same-side hand.",
+          "step": "Hold the first rear foot",
+          "url": "https://imagedelivery.net/TDuhqfLDl0Fb8RGwGw6mYw/7e341f97-2692-4668-1a5e-9e6dac97e200/public"
+        },
+        {
+          "alt": "The same woman switches sides into a mirrored supported pigeon setup.",
+          "step": "Switch to the other side",
+          "url": "https://imagedelivery.net/TDuhqfLDl0Fb8RGwGw6mYw/70cd0ce8-f7aa-467a-0def-0e2ed4a8a100/public"
+        },
+        {
+          "alt": "The same woman completes the mirrored pigeon quad hold on the other side.",
+          "step": "Hold the other rear foot",
+          "url": "https://imagedelivery.net/TDuhqfLDl0Fb8RGwGw6mYw/598a5ef9-da76-46fe-0ed5-275e17112000/public"
+        }
+      ],
       "kind": "stretch",
       "level": "advanced",
       "modality": "Static Stretch",
@@ -93171,7 +93271,28 @@
         "Towel"
       ],
       "id": "ST422",
-      "images": [],
+      "images": [
+        {
+          "alt": "Woman sits tall with a towel looped around the ball of one extended foot.",
+          "step": "Loop the first forefoot",
+          "url": "https://imagedelivery.net/TDuhqfLDl0Fb8RGwGw6mYw/b319dc7f-2067-45ca-0d8c-ee52c742df00/public"
+        },
+        {
+          "alt": "Woman gently uses a towel to draw the toes of her extended foot toward her shin.",
+          "step": "Pull the first toes back",
+          "url": "https://imagedelivery.net/TDuhqfLDl0Fb8RGwGw6mYw/358f5547-aac7-4e9e-b030-11fa3c288e00/public"
+        },
+        {
+          "alt": "The same woman switches legs and loops the towel around the ball of the opposite extended foot.",
+          "step": "Switch to the other leg",
+          "url": "https://imagedelivery.net/TDuhqfLDl0Fb8RGwGw6mYw/6e63397e-dd62-4999-35b5-fa116bddd800/public"
+        },
+        {
+          "alt": "The same woman completes the mirrored seated calf and hamstring towel stretch on the other leg.",
+          "step": "Pull the other toes back",
+          "url": "https://imagedelivery.net/TDuhqfLDl0Fb8RGwGw6mYw/fd49cebf-cd6d-4c22-cfa5-aceebc96f300/public"
+        }
+      ],
       "kind": "stretch",
       "level": "beginner",
       "modality": "Static Stretch",
@@ -93217,7 +93338,28 @@
         "Wall"
       ],
       "id": "ST423",
-      "images": [],
+      "images": [
+        {
+          "alt": "Woman lies on a mat with her hips close to a wall and both legs extended together upward.",
+          "step": "Set up with legs together",
+          "url": "https://imagedelivery.net/TDuhqfLDl0Fb8RGwGw6mYw/aa05b8a5-4f34-4ee1-755d-e18910150900/public"
+        },
+        {
+          "alt": "Woman opens both wall-supported legs symmetrically into a gentle V while lying on her back.",
+          "step": "Open into a gentle V",
+          "url": "https://imagedelivery.net/TDuhqfLDl0Fb8RGwGw6mYw/da119204-12bc-4daa-9b4e-3db7255be900/public"
+        },
+        {
+          "alt": "The same woman holds the gentle wall V with one hand on her lower ribs for a calm breathing cue.",
+          "step": "Breathe in the hold",
+          "url": "https://imagedelivery.net/TDuhqfLDl0Fb8RGwGw6mYw/581332a3-3d23-434b-ae89-0f6cc8059600/public"
+        },
+        {
+          "alt": "Woman bends both knees symmetrically with both feet on the wall to exit the stretch slowly.",
+          "step": "Bend both knees to exit",
+          "url": "https://imagedelivery.net/TDuhqfLDl0Fb8RGwGw6mYw/baff73ea-941b-4fbe-a595-bb36e6c62900/public"
+        }
+      ],
       "kind": "stretch",
       "level": "beginner",
       "modality": "Static Stretch",
@@ -93264,7 +93406,28 @@
         "Wall"
       ],
       "id": "ST424",
-      "images": [],
+      "images": [
+        {
+          "alt": "Man lies on a mat with hips close to the wall and both straight legs centered vertically against it.",
+          "step": "Start centered at the wall",
+          "url": "https://imagedelivery.net/TDuhqfLDl0Fb8RGwGw6mYw/e29623fa-0a7c-49d9-7009-f58a77444e00/public"
+        },
+        {
+          "alt": "The leg on viewer-left opens along the wall while the opposite leg stays centered and the pelvis remains level.",
+          "step": "Open the first leg",
+          "url": "https://imagedelivery.net/TDuhqfLDl0Fb8RGwGw6mYw/c1dd1ae9-1c42-4d9d-709e-e14827520400/public"
+        },
+        {
+          "alt": "Both legs return to a parallel centered position against the wall before the other leg opens.",
+          "step": "Return to center and switch",
+          "url": "https://imagedelivery.net/TDuhqfLDl0Fb8RGwGw6mYw/cfb4ad43-9339-4129-d860-69e841fc8200/public"
+        },
+        {
+          "alt": "The leg on viewer-right opens along the wall while the opposite leg stays centered and the pelvis remains level.",
+          "step": "Open the other leg",
+          "url": "https://imagedelivery.net/TDuhqfLDl0Fb8RGwGw6mYw/b6968d22-a199-4e11-264a-a1a5e2ce4900/public"
+        }
+      ],
       "kind": "stretch",
       "level": "beginner",
       "modality": "Static Stretch",
@@ -93312,7 +93475,28 @@
         "Wall or chair"
       ],
       "id": "ST425",
-      "images": [],
+      "images": [
+        {
+          "alt": "Woman faces right in a supported standing hip hinge with both feet grounded and hands on a chair.",
+          "step": "Set up the supported hinge",
+          "url": "https://imagedelivery.net/TDuhqfLDl0Fb8RGwGw6mYw/7c272a02-70f2-423e-5c0a-21d090cbdf00/public"
+        },
+        {
+          "alt": "Woman supports herself on a chair while one straight leg lifts behind to hip height and the standing foot remains flat.",
+          "step": "Lift the first back leg",
+          "url": "https://imagedelivery.net/TDuhqfLDl0Fb8RGwGw6mYw/c6fceb73-fbc7-4139-431b-324e6ceee600/public"
+        },
+        {
+          "alt": "The same woman switches sides into a mirrored left-facing supported hinge with both feet down.",
+          "step": "Reset and switch sides",
+          "url": "https://imagedelivery.net/TDuhqfLDl0Fb8RGwGw6mYw/9106fa75-50d7-40fc-fc36-186c6db48e00/public"
+        },
+        {
+          "alt": "The same woman completes the mirrored supported standing-split endpoint with the other leg lifted behind.",
+          "step": "Lift the other back leg",
+          "url": "https://imagedelivery.net/TDuhqfLDl0Fb8RGwGw6mYw/a4a5f21e-0961-4fea-c03c-bd816484e400/public"
+        }
+      ],
       "kind": "stretch",
       "level": "intermediate",
       "modality": "Static Stretch",
@@ -93356,7 +93540,28 @@
       ],
       "equipment": [],
       "id": "ST426",
-      "images": [],
+      "images": [
+        {
+          "alt": "An athlete stands barefoot in a split stance before a low dragon lunge.",
+          "step": "Set side A",
+          "url": "https://imagedelivery.net/TDuhqfLDl0Fb8RGwGw6mYw/2ec9d7e0-17e9-4ff5-bd39-6f16959c4300/public"
+        },
+        {
+          "alt": "An athlete holds a low lunge with hands planted inside the forward foot and the back leg long.",
+          "step": "Lunge side A",
+          "url": "https://imagedelivery.net/TDuhqfLDl0Fb8RGwGw6mYw/48f1c38f-2361-4b9f-2505-0c19f1707e00/public"
+        },
+        {
+          "alt": "The athlete turns to the opposite direction and switches the leading leg.",
+          "step": "Switch legs",
+          "url": "https://imagedelivery.net/TDuhqfLDl0Fb8RGwGw6mYw/e3e5d7da-2155-49ef-4932-4ed008afc600/public"
+        },
+        {
+          "alt": "The athlete holds the low dragon lunge on the opposite side with both hands inside the foot.",
+          "step": "Lunge side B",
+          "url": "https://imagedelivery.net/TDuhqfLDl0Fb8RGwGw6mYw/9ffcd125-7a0a-4305-0409-2f76ccb21500/public"
+        }
+      ],
       "kind": "stretch",
       "level": "intermediate",
       "modality": "Static Stretch",
@@ -93457,7 +93662,28 @@
       ],
       "equipment": [],
       "id": "ST428",
-      "images": [],
+      "images": [
+        {
+          "alt": "An athlete holds downward-facing dog with a long spine and lifted hips.",
+          "step": "Start in down dog",
+          "url": "https://imagedelivery.net/TDuhqfLDl0Fb8RGwGw6mYw/74fbe4cc-a549-47f1-5b50-ec45365dac00/public"
+        },
+        {
+          "alt": "The athlete steps one foot between the hands into a low lunge from downward dog.",
+          "step": "Step side A through",
+          "url": "https://imagedelivery.net/TDuhqfLDl0Fb8RGwGw6mYw/80e400a0-5e51-402d-28ba-4cdcb5385d00/public"
+        },
+        {
+          "alt": "The athlete presses back to downward-facing dog between lunge sides.",
+          "step": "Press back",
+          "url": "https://imagedelivery.net/TDuhqfLDl0Fb8RGwGw6mYw/b400f5e1-eb0c-47c3-8898-8b213ef35e00/public"
+        },
+        {
+          "alt": "The athlete performs the low lunge on the visibly mirrored opposite side.",
+          "step": "Step side B through",
+          "url": "https://imagedelivery.net/TDuhqfLDl0Fb8RGwGw6mYw/c845dbaf-f0de-4614-38a0-3b7f50146f00/public"
+        }
+      ],
       "kind": "stretch",
       "level": "intermediate",
       "modality": "Mobility",
@@ -95115,7 +95341,28 @@
       ],
       "equipment": [],
       "id": "ST457",
-      "images": [],
+      "images": [
+        {
+          "alt": "An athlete stands tall before beginning controlled ankle, hip, and shoulder rotations.",
+          "step": "Stand tall",
+          "url": "https://imagedelivery.net/TDuhqfLDl0Fb8RGwGw6mYw/170f4d3f-cb06-4bc9-9ebd-ac7328d79500/public"
+        },
+        {
+          "alt": "The athlete balances on one leg with the same-side knee and arm raised for joint circles.",
+          "step": "Circle side A",
+          "url": "https://imagedelivery.net/TDuhqfLDl0Fb8RGwGw6mYw/83a908f2-4eda-4b23-9682-bcc050852900/public"
+        },
+        {
+          "alt": "The athlete returns to a balanced standing reset before changing sides.",
+          "step": "Reset tall",
+          "url": "https://imagedelivery.net/TDuhqfLDl0Fb8RGwGw6mYw/9d90ac9d-2b28-458a-41eb-949ed745ce00/public"
+        },
+        {
+          "alt": "The athlete repeats the ankle, hip, and shoulder rotations on the mirrored side.",
+          "step": "Circle side B",
+          "url": "https://imagedelivery.net/TDuhqfLDl0Fb8RGwGw6mYw/fbca7d27-3a6e-4694-b530-13a2bdd01200/public"
+        }
+      ],
       "kind": "stretch",
       "level": "intermediate",
       "modality": "Mobility Flow",
@@ -95158,7 +95405,28 @@
       ],
       "equipment": [],
       "id": "ST458",
-      "images": [],
+      "images": [
+        {
+          "alt": "An athlete stands in a relaxed starting stance for a morning mobility flow.",
+          "step": "Set an easy stance",
+          "url": "https://imagedelivery.net/TDuhqfLDl0Fb8RGwGw6mYw/67e760d3-66af-4231-5143-35891ba8e800/public"
+        },
+        {
+          "alt": "The athlete turns the head and performs gentle shoulder rolls while standing.",
+          "step": "Turn and roll",
+          "url": "https://imagedelivery.net/TDuhqfLDl0Fb8RGwGw6mYw/427fc29e-83a0-470b-7b35-e8ace2d39800/public"
+        },
+        {
+          "alt": "The athlete performs the cow phase of cat-cow with hands under shoulders and knees under hips.",
+          "step": "Move through cow",
+          "url": "https://imagedelivery.net/TDuhqfLDl0Fb8RGwGw6mYw/abe184b9-40a6-48c4-61df-39347c0ded00/public"
+        },
+        {
+          "alt": "The athlete stands with hands on hips, circles the pelvis, and pumps one heel at a time.",
+          "step": "Circle and pump",
+          "url": "https://imagedelivery.net/TDuhqfLDl0Fb8RGwGw6mYw/6e050d61-c7c2-4d26-0b7c-7f0498fb5200/public"
+        }
+      ],
       "kind": "stretch",
       "level": "beginner",
       "modality": "Mobility Flow",
@@ -95203,7 +95471,28 @@
         "Chair"
       ],
       "id": "ST459",
-      "images": [],
+      "images": [
+        {
+          "alt": "An athlete sits upright on a stable armless chair with both feet flat.",
+          "step": "Sit tall",
+          "url": "https://imagedelivery.net/TDuhqfLDl0Fb8RGwGw6mYw/2088383d-7adf-417f-3be4-184fbb1afe00/public"
+        },
+        {
+          "alt": "The seated athlete turns the head and opens the chest with hands clasped behind.",
+          "step": "Turn and open",
+          "url": "https://imagedelivery.net/TDuhqfLDl0Fb8RGwGw6mYw/40053d5b-ba10-4134-374d-f4292ef3c700/public"
+        },
+        {
+          "alt": "The athlete performs a seated twist while circling one lifted ankle.",
+          "step": "Twist side A",
+          "url": "https://imagedelivery.net/TDuhqfLDl0Fb8RGwGw6mYw/fc37c4ba-f49d-49da-c8af-0d5f4895aa00/public"
+        },
+        {
+          "alt": "The athlete repeats the seated twist and ankle circle on the visibly opposite side.",
+          "step": "Twist side B",
+          "url": "https://imagedelivery.net/TDuhqfLDl0Fb8RGwGw6mYw/52aba2ba-dfcf-4e5d-35a2-03cd22c43f00/public"
+        }
+      ],
       "kind": "stretch",
       "level": "beginner",
       "modality": "Mobility Flow",
@@ -95247,7 +95536,28 @@
       ],
       "equipment": [],
       "id": "ST460",
-      "images": [],
+      "images": [
+        {
+          "alt": "An athlete holds a standing calf stretch with the rear heel grounded.",
+          "step": "Stretch the calf",
+          "url": "https://imagedelivery.net/TDuhqfLDl0Fb8RGwGw6mYw/959be38f-0f75-4f00-a2e5-f0d3bc480a00/public"
+        },
+        {
+          "alt": "The athlete hinges over a softly straight front leg with the toes lifted.",
+          "step": "Stretch the hamstring",
+          "url": "https://imagedelivery.net/TDuhqfLDl0Fb8RGwGw6mYw/e62c529a-ee86-4de4-4ef6-28149a40c200/public"
+        },
+        {
+          "alt": "The athlete holds one ankle behind for a standing quadriceps stretch.",
+          "step": "Stretch the quad",
+          "url": "https://imagedelivery.net/TDuhqfLDl0Fb8RGwGw6mYw/9cd1baad-a385-45fb-292e-648b1129d400/public"
+        },
+        {
+          "alt": "The athlete holds a half-kneeling hip-flexor stretch with an upright torso.",
+          "step": "Stretch the hip flexor",
+          "url": "https://imagedelivery.net/TDuhqfLDl0Fb8RGwGw6mYw/69f07da4-30c5-46b6-a3f4-05fda977f800/public"
+        }
+      ],
       "kind": "stretch",
       "level": "beginner",
       "modality": "Static Stretch",
@@ -95290,7 +95600,28 @@
       ],
       "equipment": [],
       "id": "ST461",
-      "images": [],
+      "images": [
+        {
+          "alt": "An athlete performs a gentle supine pelvic tilt with both feet grounded.",
+          "step": "Tilt the pelvis",
+          "url": "https://imagedelivery.net/TDuhqfLDl0Fb8RGwGw6mYw/c9ef53f0-e304-4f9d-affd-257628f98500/public"
+        },
+        {
+          "alt": "The athlete draws one knee toward the chest while the other leg remains extended.",
+          "step": "Draw one knee in",
+          "url": "https://imagedelivery.net/TDuhqfLDl0Fb8RGwGw6mYw/677bc0a5-794c-41b7-607b-d5d26d5e5e00/public"
+        },
+        {
+          "alt": "The athlete performs supine windshield wipers with both knees moving together.",
+          "step": "Sweep the knees",
+          "url": "https://imagedelivery.net/TDuhqfLDl0Fb8RGwGw6mYw/769e1496-8128-4537-c657-2d9dc588b700/public"
+        },
+        {
+          "alt": "The athlete rests in child's pose with hips toward heels and arms extended.",
+          "step": "Finish in child's pose",
+          "url": "https://imagedelivery.net/TDuhqfLDl0Fb8RGwGw6mYw/2203e388-141a-4465-e430-460e1ef72100/public"
+        }
+      ],
       "kind": "stretch",
       "level": "beginner",
       "modality": "Recovery Flow",
@@ -95334,7 +95665,28 @@
       ],
       "equipment": [],
       "id": "ST462",
-      "images": [],
+      "images": [
+        {
+          "alt": "An athlete sits in butterfly stretch with soles together and a long spine.",
+          "step": "Butterfly",
+          "url": "https://imagedelivery.net/TDuhqfLDl0Fb8RGwGw6mYw/5a41d3a4-b635-4d9e-78e7-24687f50a600/public"
+        },
+        {
+          "alt": "The athlete sits tall in a 90/90 hip position with both knees resting on the mat.",
+          "step": "Switch to 90/90",
+          "url": "https://imagedelivery.net/TDuhqfLDl0Fb8RGwGw6mYw/a262ba7a-c659-4241-268d-c91eafb76a00/public"
+        },
+        {
+          "alt": "The athlete holds pigeon pose with an angled front shin and long rear leg.",
+          "step": "Move to pigeon",
+          "url": "https://imagedelivery.net/TDuhqfLDl0Fb8RGwGw6mYw/878f0db8-5165-4900-d626-5ef3db81b300/public"
+        },
+        {
+          "alt": "The athlete holds a tall half-kneeling hip-flexor stretch with the pelvis gently tucked.",
+          "step": "Finish half-kneeling",
+          "url": "https://imagedelivery.net/TDuhqfLDl0Fb8RGwGw6mYw/7645865c-ad2e-4da3-f8e1-fa9fc73b6400/public"
+        }
+      ],
       "kind": "stretch",
       "level": "intermediate",
       "modality": "Mobility Flow",
@@ -95377,7 +95729,28 @@
       ],
       "equipment": [],
       "id": "ST463",
-      "images": [],
+      "images": [
+        {
+          "alt": "Woman in a stable hands-and-knees quadruped setup on a sand mat.",
+          "step": "Set quadruped",
+          "url": "https://imagedelivery.net/TDuhqfLDl0Fb8RGwGw6mYw/19ed85ff-2f3f-481a-336d-c21c4a923800/public"
+        },
+        {
+          "alt": "Woman threading one arm beneath her torso from quadruped while the other hand supports her.",
+          "step": "Thread one side",
+          "url": "https://imagedelivery.net/TDuhqfLDl0Fb8RGwGw6mYw/53f2e116-31c0-4f90-2753-0175a0703300/public"
+        },
+        {
+          "alt": "Woman mirroring the thread-the-needle position with the opposite arm beneath her torso.",
+          "step": "Thread the other side",
+          "url": "https://imagedelivery.net/TDuhqfLDl0Fb8RGwGw6mYw/e1df0af0-bf87-4fb3-027a-0dfc494b2a00/public"
+        },
+        {
+          "alt": "Elevated rear view of a child's-pose side reach with both palms clearly offset to one side.",
+          "step": "Walk hands to the side",
+          "url": "https://imagedelivery.net/TDuhqfLDl0Fb8RGwGw6mYw/cfc1eb08-af09-4e08-b1b4-ca4ad8833d00/public"
+        }
+      ],
       "kind": "stretch",
       "level": "beginner",
       "modality": "Mobility Flow",
@@ -95423,7 +95796,28 @@
         "Towel optional"
       ],
       "id": "ST464",
-      "images": [],
+      "images": [
+        {
+          "alt": "Woman standing tall and holding a towel with a wide two-hand grip in front of her thighs.",
+          "step": "Take a wide grip",
+          "url": "https://imagedelivery.net/TDuhqfLDl0Fb8RGwGw6mYw/8a505144-5428-4fe6-3472-ee7c00087a00/public"
+        },
+        {
+          "alt": "Woman holding a wide towel grip overhead in a controlled standing shoulder opener.",
+          "step": "Sweep overhead",
+          "url": "https://imagedelivery.net/TDuhqfLDl0Fb8RGwGw6mYw/ab7294b0-0f0a-499a-570b-591f852eeb00/public"
+        },
+        {
+          "alt": "Woman stretching one arm across her chest toward viewer-left with the opposite hand supporting it.",
+          "step": "Stretch one shoulder",
+          "url": "https://imagedelivery.net/TDuhqfLDl0Fb8RGwGw6mYw/d68df9ec-7772-4a34-f464-aa269cef5800/public"
+        },
+        {
+          "alt": "Woman stretching the opposite arm across her chest toward viewer-right with the other hand supporting it.",
+          "step": "Switch shoulders",
+          "url": "https://imagedelivery.net/TDuhqfLDl0Fb8RGwGw6mYw/ba45c41f-5985-418a-e925-73c6b82b4100/public"
+        }
+      ],
       "kind": "stretch",
       "level": "beginner",
       "modality": "Mobility Flow",
@@ -95468,7 +95862,28 @@
         "Wall optional"
       ],
       "id": "ST465",
-      "images": [],
+      "images": [
+        {
+          "alt": "Woman facing a wall in a split-stance calf stretch with her trailing heel grounded.",
+          "step": "Set the calf stretch",
+          "url": "https://imagedelivery.net/TDuhqfLDl0Fb8RGwGw6mYw/ec290253-23bc-4c70-6c76-c1bd6f111c00/public"
+        },
+        {
+          "alt": "Woman performing a supported knee-to-wall ankle rock with the wall-side lead foot flat.",
+          "step": "Rock the first ankle",
+          "url": "https://imagedelivery.net/TDuhqfLDl0Fb8RGwGw6mYw/1b80a2d3-7763-43da-948d-145a0775dd00/public"
+        },
+        {
+          "alt": "Mirrored side view of the opposite knee-to-wall ankle rock with the wall-side lead foot flat.",
+          "step": "Switch sides",
+          "url": "https://imagedelivery.net/TDuhqfLDl0Fb8RGwGw6mYw/75082e40-9eb2-4fde-6d8e-44c0036c2d00/public"
+        },
+        {
+          "alt": "Woman using light wall support while lifting both heels together onto her forefeet.",
+          "step": "Rock onto forefeet",
+          "url": "https://imagedelivery.net/TDuhqfLDl0Fb8RGwGw6mYw/1c81077e-36b0-4693-8e92-1f467494fa00/public"
+        }
+      ],
       "kind": "stretch",
       "level": "beginner",
       "modality": "Mobility Flow",
@@ -95511,7 +95926,18 @@
       ],
       "equipment": [],
       "id": "ST466",
-      "images": [],
+      "images": [
+        {
+          "alt": "Woman begins on all fours with shoulders over wrists and hips over knees before moving into child's pose.",
+          "step": "Set up on all fours",
+          "url": "https://imagedelivery.net/TDuhqfLDl0Fb8RGwGw6mYw/099b88f2-be35-405f-c4d9-ab7e735d7800/public"
+        },
+        {
+          "alt": "Woman rests in child's pose with hips toward heels, arms reaching forward, and a cue to breathe into the back ribs.",
+          "step": "Breathe into child's pose",
+          "url": "https://imagedelivery.net/TDuhqfLDl0Fb8RGwGw6mYw/16461542-581b-431d-5296-cddd4188b600/public"
+        }
+      ],
       "kind": "stretch",
       "level": "beginner",
       "modality": "Breathing/Reset",
@@ -95554,7 +95980,18 @@
       ],
       "equipment": [],
       "id": "ST467",
-      "images": [],
+      "images": [
+        {
+          "alt": "Man lies face down with his forehead on stacked hands and shoulders relaxed for crocodile breathing.",
+          "step": "Settle face down",
+          "url": "https://imagedelivery.net/TDuhqfLDl0Fb8RGwGw6mYw/2196f7cd-ebe3-4976-b50d-69fe027c6e00/public"
+        },
+        {
+          "alt": "Man remains prone while gentle arrows show his belly expanding into the mat and his lower ribs widening.",
+          "step": "Breathe into the mat",
+          "url": "https://imagedelivery.net/TDuhqfLDl0Fb8RGwGw6mYw/c89efe0d-237d-43f7-e629-a960e9d6ee00/public"
+        }
+      ],
       "kind": "stretch",
       "level": "beginner",
       "modality": "Breathing/Reset",
@@ -95653,7 +96090,23 @@
       ],
       "equipment": [],
       "id": "ST469",
-      "images": [],
+      "images": [
+        {
+          "alt": "Woman lying in constructive rest with bent knees, bare feet flat, and arms relaxed beside her.",
+          "step": "Settle into rest",
+          "url": "https://imagedelivery.net/TDuhqfLDl0Fb8RGwGw6mYw/9753bd95-e6c8-4915-dd7b-43c60c8b6700/public"
+        },
+        {
+          "alt": "Woman inhaling in constructive rest with one hand on her upper chest and the other on her abdomen.",
+          "step": "Inhale gently",
+          "url": "https://imagedelivery.net/TDuhqfLDl0Fb8RGwGw6mYw/a64dd53c-0196-4217-a859-945231f65a00/public"
+        },
+        {
+          "alt": "Woman exhaling in constructive rest with both arms visible beside her and both palms turned up.",
+          "step": "Exhale and settle",
+          "url": "https://imagedelivery.net/TDuhqfLDl0Fb8RGwGw6mYw/17f621c5-366f-4beb-0421-cfc357628700/public"
+        }
+      ],
       "kind": "stretch",
       "level": "beginner",
       "modality": "Breathing/Reset",
@@ -95755,7 +96208,18 @@
         "Pillow"
       ],
       "id": "ST471",
-      "images": [],
+      "images": [
+        {
+          "alt": "An athlete kneels on all fours with a long pillow positioned in front for support.",
+          "step": "Place the support",
+          "url": "https://imagedelivery.net/TDuhqfLDl0Fb8RGwGw6mYw/3ca2d724-8d3c-47bf-9914-0d6d01cbdb00/public"
+        },
+        {
+          "alt": "The athlete rests the chest and head on a pillow in supported child's pose.",
+          "step": "Rest on support",
+          "url": "https://imagedelivery.net/TDuhqfLDl0Fb8RGwGw6mYw/b060ab45-3626-4216-bc87-100f80f85900/public"
+        }
+      ],
       "kind": "stretch",
       "level": "beginner",
       "modality": "Recovery",
@@ -95799,7 +96263,28 @@
         "Pillow or rolled towel"
       ],
       "id": "ST472",
-      "images": [],
+      "images": [
+        {
+          "alt": "Woman seated with bent knees in front of one crosswise towel roll, ready to lower onto it.",
+          "step": "Place the roll",
+          "url": "https://imagedelivery.net/TDuhqfLDl0Fb8RGwGw6mYw/5e8bb1cf-f6b2-4d86-bf27-46a67313fd00/public"
+        },
+        {
+          "alt": "Woman lowering backward with forearm support toward a towel roll beneath her upper back.",
+          "step": "Lower with control",
+          "url": "https://imagedelivery.net/TDuhqfLDl0Fb8RGwGw6mYw/da555c3b-ff7c-445c-a0e2-174c16b95900/public"
+        },
+        {
+          "alt": "Woman lying over one upper-back towel roll with both arms open in a low T and both feet grounded.",
+          "step": "Open across the chest",
+          "url": "https://imagedelivery.net/TDuhqfLDl0Fb8RGwGw6mYw/6e4a0c68-439a-45e3-f43f-46f4eb104400/public"
+        },
+        {
+          "alt": "Woman resting over an upper-back towel roll with both arms in an optional goalpost position.",
+          "step": "Try goalpost arms",
+          "url": "https://imagedelivery.net/TDuhqfLDl0Fb8RGwGw6mYw/95846478-17a6-4db8-40e9-6ee842ee8900/public"
+        }
+      ],
       "kind": "stretch",
       "level": "beginner",
       "modality": "Static Stretch",
@@ -95898,7 +96383,23 @@
         "Chair"
       ],
       "id": "ST474",
-      "images": [],
+      "images": [
+        {
+          "alt": "Woman sitting upright on a beige chair with both feet flat and both hands resting on her thighs.",
+          "step": "Set seated posture",
+          "url": "https://imagedelivery.net/TDuhqfLDl0Fb8RGwGw6mYw/f8d3a658-4fe1-474e-b124-90e4b13b9d00/public"
+        },
+        {
+          "alt": "Woman inhaling gently while seated tall with both hands on her thighs and both feet flat.",
+          "step": "Inhale gently",
+          "url": "https://imagedelivery.net/TDuhqfLDl0Fb8RGwGw6mYw/7b2186a7-0541-4e0e-3018-aafb268ada00/public"
+        },
+        {
+          "alt": "Woman exhaling while seated tall with both palms up on her thighs and eyes softly closed.",
+          "step": "Exhale and relax",
+          "url": "https://imagedelivery.net/TDuhqfLDl0Fb8RGwGw6mYw/ea666f67-3d72-40e2-6c2e-685ce0173600/public"
+        }
+      ],
       "kind": "stretch",
       "level": "beginner",
       "modality": "Breathing/Reset",
@@ -95997,7 +96498,28 @@
       ],
       "equipment": [],
       "id": "ST476",
-      "images": [],
+      "images": [
+        {
+          "alt": "Woman standing tall and centered with both feet flat before a rib-expansion side reach.",
+          "step": "Stand tall",
+          "url": "https://imagedelivery.net/TDuhqfLDl0Fb8RGwGw6mYw/d09bb717-4e78-433c-7d2f-4de685b48e00/public"
+        },
+        {
+          "alt": "Woman side bending toward viewer-left with her viewer-right arm overhead and lower hand on her left thigh.",
+          "step": "Reach to the first side",
+          "url": "https://imagedelivery.net/TDuhqfLDl0Fb8RGwGw6mYw/6ab88f09-6ecc-4c60-4bfb-267ee85cce00/public"
+        },
+        {
+          "alt": "Woman side bending toward viewer-right with her viewer-left arm overhead and lower hand on her right thigh.",
+          "step": "Switch sides",
+          "url": "https://imagedelivery.net/TDuhqfLDl0Fb8RGwGw6mYw/9c516bbc-4082-431d-c9d2-48afbe91ae00/public"
+        },
+        {
+          "alt": "Woman returned to a centered upright stance with both hands on her lower ribs and both feet flat.",
+          "step": "Return to center",
+          "url": "https://imagedelivery.net/TDuhqfLDl0Fb8RGwGw6mYw/0ef2d183-67b7-44ea-768b-0894fb9e2700/public"
+        }
+      ],
       "kind": "stretch",
       "level": "beginner",
       "modality": "Breathing/Reset",
@@ -96039,7 +96561,28 @@
       ],
       "equipment": [],
       "id": "ST477",
-      "images": [],
+      "images": [
+        {
+          "alt": "The athlete stands relaxed on a mat with soft knees and arms resting at the sides.",
+          "step": "Stand relaxed",
+          "url": "https://imagedelivery.net/TDuhqfLDl0Fb8RGwGw6mYw/9fff4e18-585c-4177-52b4-39ea1962a300/public"
+        },
+        {
+          "alt": "The athlete gently swings both relaxed arms in the first direction while standing with both feet grounded.",
+          "step": "Shake arms one way",
+          "url": "https://imagedelivery.net/TDuhqfLDl0Fb8RGwGw6mYw/7414b26d-a9fe-47c9-0a7a-bf90f37d2c00/public"
+        },
+        {
+          "alt": "The athlete reverses the loose arm swing while keeping the feet planted and knees soft.",
+          "step": "Reverse the swing",
+          "url": "https://imagedelivery.net/TDuhqfLDl0Fb8RGwGw6mYw/ad8d51bb-5085-4c18-9867-e4c88917e900/public"
+        },
+        {
+          "alt": "The athlete finishes the shake-out in a calm centered stance with relaxed arms.",
+          "step": "Settle to center",
+          "url": "https://imagedelivery.net/TDuhqfLDl0Fb8RGwGw6mYw/537ce915-df72-4c72-7f03-44aa1dcb3800/public"
+        }
+      ],
       "kind": "stretch",
       "level": "beginner",
       "modality": "Recovery",
@@ -96081,7 +96624,23 @@
       ],
       "equipment": [],
       "id": "ST478",
-      "images": [],
+      "images": [
+        {
+          "alt": "Woman lies comfortably supported on her back with bent knees and relaxed shoulders.",
+          "step": "Settle into support",
+          "url": "https://imagedelivery.net/TDuhqfLDl0Fb8RGwGw6mYw/bb905ac7-bd25-41a8-16d4-9cec0b56d700/public"
+        },
+        {
+          "alt": "Woman remains supine while releasing her jaw and dropping tension from both shoulders.",
+          "step": "Release jaw and shoulders",
+          "url": "https://imagedelivery.net/TDuhqfLDl0Fb8RGwGw6mYw/d34f59a8-da50-41c7-e494-0e6cc0e83400/public"
+        },
+        {
+          "alt": "Woman breathes slowly in the supported supine position while her hips relax heavily into the surface.",
+          "step": "Breathe and let the hips feel heavy",
+          "url": "https://imagedelivery.net/TDuhqfLDl0Fb8RGwGw6mYw/e470c7f4-4b76-4ce8-6f75-ee2736db1d00/public"
+        }
+      ],
       "kind": "stretch",
       "level": "beginner",
       "modality": "Recovery",
@@ -96127,7 +96686,23 @@
         "Wall"
       ],
       "id": "ST479",
-      "images": [],
+      "images": [
+        {
+          "alt": "Woman stands in a relaxed posture-reset setup with her back against a stable wall.",
+          "step": "Set up at the wall",
+          "url": "https://imagedelivery.net/TDuhqfLDl0Fb8RGwGw6mYw/35cb0f08-74a1-4a2b-ccb0-3e7091d86e00/public"
+        },
+        {
+          "alt": "Woman gently aligns her head, ribs, and pelvis against the wall with a relaxed chin and shoulders.",
+          "step": "Stack head, ribs, and pelvis",
+          "url": "https://imagedelivery.net/TDuhqfLDl0Fb8RGwGw6mYw/d2a5f581-d5e9-4789-7ac4-30f6f864b900/public"
+        },
+        {
+          "alt": "Woman stands upright a short distance away from the wall and notices her reset posture.",
+          "step": "Step away and notice the reset",
+          "url": "https://imagedelivery.net/TDuhqfLDl0Fb8RGwGw6mYw/6555893b-4df7-4342-0120-26536ec61e00/public"
+        }
+      ],
       "kind": "stretch",
       "level": "beginner",
       "modality": "Mobility",
@@ -96174,7 +96749,23 @@
         "Chair"
       ],
       "id": "ST480",
-      "images": [],
+      "images": [
+        {
+          "alt": "Woman sits near the front of a stable chair with both feet grounded and hands resting on her thighs.",
+          "step": "Ground the seated setup",
+          "url": "https://imagedelivery.net/TDuhqfLDl0Fb8RGwGw6mYw/a876b84c-fa41-44d5-8e83-7fb2ed470300/public"
+        },
+        {
+          "alt": "Seated woman aligns her ribs over her pelvis and lengthens the back of her neck.",
+          "step": "Stack ribs and lengthen the neck",
+          "url": "https://imagedelivery.net/TDuhqfLDl0Fb8RGwGw6mYw/0566ab39-cac2-45ed-495a-ace7e5919c00/public"
+        },
+        {
+          "alt": "Seated woman keeps an upright relaxed stack while lowering her shoulders and breathing into her lower ribs.",
+          "step": "Keep the stack while softening and breathing",
+          "url": "https://imagedelivery.net/TDuhqfLDl0Fb8RGwGw6mYw/6fc7f0c1-73df-4a00-9e44-4f1c623cbe00/public"
+        }
+      ],
       "kind": "stretch",
       "level": "beginner",
       "modality": "Mobility",
@@ -96220,7 +96811,23 @@
         "Rolled towel"
       ],
       "id": "ST481",
-      "images": [],
+      "images": [
+        {
+          "alt": "The athlete sits on a mat and positions a rolled towel lengthwise behind the spine.",
+          "step": "Place the towel",
+          "url": "https://imagedelivery.net/TDuhqfLDl0Fb8RGwGw6mYw/ece5cdc7-04de-4629-1d68-bd9a52405f00/public"
+        },
+        {
+          "alt": "The athlete lies over a lengthwise towel roll with knees bent and elbows supported.",
+          "step": "Settle onto the roll",
+          "url": "https://imagedelivery.net/TDuhqfLDl0Fb8RGwGw6mYw/868a31a4-0119-4676-c204-db2b44e1c300/public"
+        },
+        {
+          "alt": "The athlete relaxes both arms wide while lying over a rolled towel.",
+          "step": "Open and breathe",
+          "url": "https://imagedelivery.net/TDuhqfLDl0Fb8RGwGw6mYw/ae091d64-a1f1-4587-7302-edd96803b900/public"
+        }
+      ],
       "kind": "stretch",
       "level": "beginner",
       "modality": "Recovery",
@@ -96265,7 +96872,18 @@
       ],
       "equipment": [],
       "id": "ST482",
-      "images": [],
+      "images": [
+        {
+          "alt": "An athlete lies supine in a neutral full-body starting position.",
+          "step": "Lie long",
+          "url": "https://imagedelivery.net/TDuhqfLDl0Fb8RGwGw6mYw/44518121-4d37-4a16-7d96-30172085c500/public"
+        },
+        {
+          "alt": "The athlete reaches both arms overhead and lengthens both legs in the opposite direction.",
+          "step": "Reach both ways",
+          "url": "https://imagedelivery.net/TDuhqfLDl0Fb8RGwGw6mYw/b168fc0f-bfb5-4e58-405e-dcc6e2576b00/public"
+        }
+      ],
       "kind": "stretch",
       "level": "beginner",
       "modality": "Static Stretch",
@@ -96307,7 +96925,28 @@
       ],
       "equipment": [],
       "id": "ST483",
-      "images": [],
+      "images": [
+        {
+          "alt": "The athlete stands tall and relaxed on a mat before beginning an overhead stretch.",
+          "step": "Stand tall and relax",
+          "url": "https://imagedelivery.net/TDuhqfLDl0Fb8RGwGw6mYw/9d38f0af-e54a-4193-9363-c4d0b7a0f200/public"
+        },
+        {
+          "alt": "The athlete reaches both clasped hands overhead into the first gentle standing side bend.",
+          "step": "Reach up and over",
+          "url": "https://imagedelivery.net/TDuhqfLDl0Fb8RGwGw6mYw/fe01273c-378c-45f4-c27a-7d405ccfc700/public"
+        },
+        {
+          "alt": "The athlete reaches both clasped hands overhead into the opposite standing side bend.",
+          "step": "Reach the other way",
+          "url": "https://imagedelivery.net/TDuhqfLDl0Fb8RGwGw6mYw/9ed4d388-4dfb-4d42-a453-d15d497fb700/public"
+        },
+        {
+          "alt": "The athlete finishes with both arms reaching straight overhead and both feet grounded.",
+          "step": "Reach straight overhead",
+          "url": "https://imagedelivery.net/TDuhqfLDl0Fb8RGwGw6mYw/80c4aa9c-b86a-4445-cdd0-9ef8ecceab00/public"
+        }
+      ],
       "kind": "stretch",
       "level": "beginner",
       "modality": "Static Stretch",
@@ -96351,7 +96990,28 @@
         "Pillow optional"
       ],
       "id": "ST484",
-      "images": [],
+      "images": [
+        {
+          "alt": "Woman curls comfortably on her right side with her upper hand resting on the exposed back ribs.",
+          "step": "Curl on the right side",
+          "url": "https://imagedelivery.net/TDuhqfLDl0Fb8RGwGw6mYw/18834a70-6313-4f5d-9f66-b525bce6c300/public"
+        },
+        {
+          "alt": "Right-side-lying woman breathes into the upper back ribs beneath her left hand.",
+          "step": "Breathe into the first upper back ribs",
+          "url": "https://imagedelivery.net/TDuhqfLDl0Fb8RGwGw6mYw/9bd966c0-3f25-4003-5087-16a360e35d00/public"
+        },
+        {
+          "alt": "The same woman switches into a mirrored fetal curl on her left side with her right hand uppermost.",
+          "step": "Switch to the left side",
+          "url": "https://imagedelivery.net/TDuhqfLDl0Fb8RGwGw6mYw/7b553830-49b7-45c5-a953-81baf1b71c00/public"
+        },
+        {
+          "alt": "Left-side-lying woman breathes into the opposite upper back ribs beneath her right hand.",
+          "step": "Breathe into the other upper back ribs",
+          "url": "https://imagedelivery.net/TDuhqfLDl0Fb8RGwGw6mYw/12332972-7203-4c71-fb3b-fdaaf1d67900/public"
+        }
+      ],
       "kind": "stretch",
       "level": "beginner",
       "modality": "Breathing/Reset",
@@ -96395,7 +97055,23 @@
         "Door frame or support"
       ],
       "id": "ST485",
-      "images": [],
+      "images": [
+        {
+          "alt": "The athlete stands barefoot while lightly holding a fixed support rail.",
+          "step": "Take light support",
+          "url": "https://imagedelivery.net/TDuhqfLDl0Fb8RGwGw6mYw/4eb088fc-7468-48a8-d729-b47b69281b00/public"
+        },
+        {
+          "alt": "The athlete lowers into a supported half squat with heels grounded.",
+          "step": "Lower with control",
+          "url": "https://imagedelivery.net/TDuhqfLDl0Fb8RGwGw6mYw/2eb2ecf1-20c6-4f27-8b94-d47dd1ce2e00/public"
+        },
+        {
+          "alt": "The athlete breathes calmly in a supported deep squat with both heels down.",
+          "step": "Settle and breathe",
+          "url": "https://imagedelivery.net/TDuhqfLDl0Fb8RGwGw6mYw/de42795d-f7ca-4b80-4579-c4928ba3da00/public"
+        }
+      ],
       "kind": "stretch",
       "level": "beginner",
       "modality": "Breathing/Reset",
@@ -96439,7 +97115,28 @@
       ],
       "equipment": [],
       "id": "ST486",
-      "images": [],
+      "images": [
+        {
+          "alt": "Woman sets a right-foot-forward half-kneeling base with her left knee supported on the mat.",
+          "step": "Set the right-foot-forward base",
+          "url": "https://imagedelivery.net/TDuhqfLDl0Fb8RGwGw6mYw/ad83c1f0-abc6-4fa4-b288-f0f7b21a2f00/public"
+        },
+        {
+          "alt": "Right-foot-forward half-kneeling woman glides forward and reaches her left arm overhead into a gentle right side bend.",
+          "step": "Glide forward and reach the left arm",
+          "url": "https://imagedelivery.net/TDuhqfLDl0Fb8RGwGw6mYw/dbcbef30-18a9-4461-ce60-27257143e200/public"
+        },
+        {
+          "alt": "Woman switches to a left-foot-forward half-kneeling base with her right knee supported on the mat.",
+          "step": "Set the left-foot-forward base",
+          "url": "https://imagedelivery.net/TDuhqfLDl0Fb8RGwGw6mYw/e0c62afe-6f94-423f-b9f7-6a8ac63f5b00/public"
+        },
+        {
+          "alt": "Left-foot-forward half-kneeling woman glides forward and reaches her right arm overhead into a gentle left side bend.",
+          "step": "Glide forward and reach the right arm",
+          "url": "https://imagedelivery.net/TDuhqfLDl0Fb8RGwGw6mYw/ae10931d-95d4-468e-f456-29c523c06100/public"
+        }
+      ],
       "kind": "stretch",
       "level": "beginner",
       "modality": "Mobility Flow",
@@ -96482,7 +97179,28 @@
       ],
       "equipment": [],
       "id": "ST487",
-      "images": [],
+      "images": [
+        {
+          "alt": "Woman stands in a centered relaxed setup for a dynamic chest and hamstring sweep.",
+          "step": "Set the standing base",
+          "url": "https://imagedelivery.net/TDuhqfLDl0Fb8RGwGw6mYw/0042486e-2010-454a-3f66-41d52594fc00/public"
+        },
+        {
+          "alt": "Woman opens both arms wide at shoulder height to create a controlled chest-opening phase.",
+          "step": "Open the chest",
+          "url": "https://imagedelivery.net/TDuhqfLDl0Fb8RGwGw6mYw/95968723-8da8-4f69-e45c-07a0a51ba800/public"
+        },
+        {
+          "alt": "Woman performs an oblique right-heel-forward hamstring scoop with the right heel clearly labeled on viewer-left.",
+          "step": "Scoop beside the right heel",
+          "url": "https://imagedelivery.net/TDuhqfLDl0Fb8RGwGw6mYw/68848613-1bd4-40a0-f5b3-7932920f5500/public"
+        },
+        {
+          "alt": "Woman performs the mirrored oblique left-heel-forward hamstring scoop with the left heel clearly labeled on viewer-right.",
+          "step": "Scoop beside the left heel",
+          "url": "https://imagedelivery.net/TDuhqfLDl0Fb8RGwGw6mYw/42b94d71-73b8-4d43-ac8d-cd8d13807900/public"
+        }
+      ],
       "kind": "stretch",
       "level": "beginner",
       "modality": "Dynamic Stretch",
@@ -96525,7 +97243,28 @@
       ],
       "equipment": [],
       "id": "ST488",
-      "images": [],
+      "images": [
+        {
+          "alt": "Woman stands centered with feet hip-width and arms relaxed before beginning a mobility scan.",
+          "step": "Set a balanced standing base",
+          "url": "https://imagedelivery.net/TDuhqfLDl0Fb8RGwGw6mYw/afde7ecc-7160-43e8-8086-41281455ba00/public"
+        },
+        {
+          "alt": "Standing woman gently turns her neck and rolls her shoulders as the first mobility scan phase.",
+          "step": "Scan neck and shoulders",
+          "url": "https://imagedelivery.net/TDuhqfLDl0Fb8RGwGw6mYw/3527aec8-ed3e-4e16-98a8-c2b2bdaebf00/public"
+        },
+        {
+          "alt": "Standing woman scans hip and knee range with hands on hips, soft knees, and a small side-to-side shift.",
+          "step": "Scan hips and knees",
+          "url": "https://imagedelivery.net/TDuhqfLDl0Fb8RGwGw6mYw/7f761108-c293-4322-41e2-2419a01ed500/public"
+        },
+        {
+          "alt": "Woman balances on her right leg and makes a small comfortable circle with her lifted left ankle on viewer-right.",
+          "step": "Scan the ankles",
+          "url": "https://imagedelivery.net/TDuhqfLDl0Fb8RGwGw6mYw/ad150f40-5de5-47a0-4a4b-55fd1b008800/public"
+        }
+      ],
       "kind": "stretch",
       "level": "beginner",
       "modality": "Mobility",
@@ -96567,7 +97306,28 @@
       ],
       "equipment": [],
       "id": "ST489",
-      "images": [],
+      "images": [
+        {
+          "alt": "Woman performs a controlled forward leg swing while keeping her torso quiet and support foot planted.",
+          "step": "Swing one leg with control",
+          "url": "https://imagedelivery.net/TDuhqfLDl0Fb8RGwGw6mYw/e6372258-8ed2-4f6c-89b4-7931bbcdb000/public"
+        },
+        {
+          "alt": "Woman balances on one foot and draws the opposite knee toward her chest with both hands.",
+          "step": "Lift into a walking knee hug",
+          "url": "https://imagedelivery.net/TDuhqfLDl0Fb8RGwGw6mYw/0f998c43-79de-4cb2-0f6d-dc5414258e00/public"
+        },
+        {
+          "alt": "Woman performs a controlled standing quadriceps pull with one knee bent behind and the other foot planted.",
+          "step": "Add a standing quad pull",
+          "url": "https://imagedelivery.net/TDuhqfLDl0Fb8RGwGw6mYw/1751d7c4-3c8d-4149-4ccd-103217f35b00/public"
+        },
+        {
+          "alt": "Woman rises evenly onto both forefeet for a controlled standing calf raise.",
+          "step": "Finish with a calf raise",
+          "url": "https://imagedelivery.net/TDuhqfLDl0Fb8RGwGw6mYw/2053495f-13b3-4748-c4ec-6e8746facb00/public"
+        }
+      ],
       "kind": "stretch",
       "level": "beginner",
       "modality": "Dynamic Stretch",
@@ -96610,7 +97370,28 @@
       ],
       "equipment": [],
       "id": "ST490",
-      "images": [],
+      "images": [
+        {
+          "alt": "Woman demonstrates the cow phase of cat-cow on a mat with a cue to flow through the spine.",
+          "step": "Flow through cat-cow",
+          "url": "https://imagedelivery.net/TDuhqfLDl0Fb8RGwGw6mYw/9950f147-80ee-46e4-606d-e380c115b700/public"
+        },
+        {
+          "alt": "Woman performs a barefoot standing hip hinge with hips moving back and spine long.",
+          "step": "Practice a hip hinge",
+          "url": "https://imagedelivery.net/TDuhqfLDl0Fb8RGwGw6mYw/e3655fda-07ca-43e4-4ad1-a8426ffb0900/public"
+        },
+        {
+          "alt": "Woman holds a controlled barefoot squat while circling her shoulders gently.",
+          "step": "Squat and circle the shoulders",
+          "url": "https://imagedelivery.net/TDuhqfLDl0Fb8RGwGw6mYw/f1a0411a-96ea-42b2-5f8f-4f43e35ddb00/public"
+        },
+        {
+          "alt": "Woman lowers into a controlled barefoot lunge with the front knee tracking and rear knee hovering above the mat.",
+          "step": "Lower into a controlled lunge",
+          "url": "https://imagedelivery.net/TDuhqfLDl0Fb8RGwGw6mYw/6880117f-7838-4098-c54f-ce6515f39300/public"
+        }
+      ],
       "kind": "stretch",
       "level": "beginner",
       "modality": "Dynamic Stretch",
@@ -96652,7 +97433,28 @@
       ],
       "equipment": [],
       "id": "ST491",
-      "images": [],
+      "images": [
+        {
+          "alt": "The athlete relaxes into a standing forward fold with soft knees.",
+          "step": "Fold softly",
+          "url": "https://imagedelivery.net/TDuhqfLDl0Fb8RGwGw6mYw/51c87071-8538-4860-c28d-019cb9d69b00/public"
+        },
+        {
+          "alt": "The athlete holds a reclined figure-four stretch with one ankle above the opposite knee.",
+          "step": "Open the hip",
+          "url": "https://imagedelivery.net/TDuhqfLDl0Fb8RGwGw6mYw/d72fe01b-c82c-4c63-6b4d-374e7c2b8900/public"
+        },
+        {
+          "alt": "The athlete holds a gentle supine twist with both knees stacked to one side and arms open.",
+          "step": "Settle into the twist",
+          "url": "https://imagedelivery.net/TDuhqfLDl0Fb8RGwGw6mYw/088b1958-6165-43c3-8fa6-b12a9da70800/public"
+        },
+        {
+          "alt": "The athlete rests both legs against a wall while breathing slowly.",
+          "step": "Let the legs rest",
+          "url": "https://imagedelivery.net/TDuhqfLDl0Fb8RGwGw6mYw/9a8c98fc-641e-446e-9559-ce06000ae500/public"
+        }
+      ],
       "kind": "stretch",
       "level": "beginner",
       "modality": "Recovery Flow",
@@ -96697,7 +97499,28 @@
         "Chair"
       ],
       "id": "ST492",
-      "images": [],
+      "images": [
+        {
+          "alt": "Woman sits tall on a stable chair while turning her neck gently and rolling her shoulders.",
+          "step": "Turn the neck and roll the shoulders",
+          "url": "https://imagedelivery.net/TDuhqfLDl0Fb8RGwGw6mYw/3b4321e6-aa1b-4e48-8b83-d9638114da00/public"
+        },
+        {
+          "alt": "Woman performs a gentle seated torso twist while both feet remain grounded and her pelvis stays forward.",
+          "step": "Add a seated torso twist",
+          "url": "https://imagedelivery.net/TDuhqfLDl0Fb8RGwGw6mYw/0106f91e-1fb6-4c6c-96ac-edcc9eefaa00/public"
+        },
+        {
+          "alt": "Woman straightens her right knee from the chair while the opposite foot stays planted.",
+          "step": "Extend the right knee",
+          "url": "https://imagedelivery.net/TDuhqfLDl0Fb8RGwGw6mYw/dbc9722e-6591-41b5-12b9-6c9d2f902100/public"
+        },
+        {
+          "alt": "Woman straightens her left knee and circles the extended ankle while the opposite foot stays planted.",
+          "step": "Extend the left knee and circle the ankle",
+          "url": "https://imagedelivery.net/TDuhqfLDl0Fb8RGwGw6mYw/05573eec-3f6a-4bde-56a0-daed5352b800/public"
+        }
+      ],
       "kind": "stretch",
       "level": "beginner",
       "modality": "Mobility Flow",
@@ -96740,7 +97563,28 @@
       ],
       "equipment": [],
       "id": "ST493",
-      "images": [],
+      "images": [
+        {
+          "alt": "The athlete rests in child's pose with both arms reaching forward.",
+          "step": "Settle into child's pose",
+          "url": "https://imagedelivery.net/TDuhqfLDl0Fb8RGwGw6mYw/07ffc732-dc0a-4ec7-4cf6-ab6c4ec54600/public"
+        },
+        {
+          "alt": "The athlete holds puppy pose with hips stacked over knees and arms extended.",
+          "step": "Lengthen into puppy pose",
+          "url": "https://imagedelivery.net/TDuhqfLDl0Fb8RGwGw6mYw/f20aab2b-1617-46ef-b405-e65a468c5100/public"
+        },
+        {
+          "alt": "The athlete sits upright in a figure-four hip-opening position.",
+          "step": "Open one hip",
+          "url": "https://imagedelivery.net/TDuhqfLDl0Fb8RGwGw6mYw/cf7caab5-5ddd-4af8-c373-2f2598930d00/public"
+        },
+        {
+          "alt": "The athlete holds a gentle supine twist with both shoulders supported.",
+          "step": "Finish with a twist",
+          "url": "https://imagedelivery.net/TDuhqfLDl0Fb8RGwGw6mYw/bd44e939-c138-44a0-d7cf-a93fb425e500/public"
+        }
+      ],
       "kind": "stretch",
       "level": "beginner",
       "modality": "Recovery Flow",
@@ -96783,7 +97627,28 @@
       ],
       "equipment": [],
       "id": "ST494",
-      "images": [],
+      "images": [
+        {
+          "alt": "The athlete stands tall on a mat before beginning an alternating side-reach march.",
+          "step": "Stand grounded",
+          "url": "https://imagedelivery.net/TDuhqfLDl0Fb8RGwGw6mYw/2ec104f6-d9d4-4414-6254-955aa0817600/public"
+        },
+        {
+          "alt": "The athlete reaches one arm overhead while lifting the opposite knee in a controlled march.",
+          "step": "Reach right and lift left",
+          "url": "https://imagedelivery.net/TDuhqfLDl0Fb8RGwGw6mYw/c86396b8-32ae-4890-1b98-48bbf753b300/public"
+        },
+        {
+          "alt": "The athlete returns through center with both feet down and arms lowering smoothly.",
+          "step": "Return through center",
+          "url": "https://imagedelivery.net/TDuhqfLDl0Fb8RGwGw6mYw/5dc49cf2-12a8-4e9a-70c7-c9437e6ed300/public"
+        },
+        {
+          "alt": "The athlete repeats the side-reach march with the opposite arm and knee.",
+          "step": "Reach left and lift right",
+          "url": "https://imagedelivery.net/TDuhqfLDl0Fb8RGwGw6mYw/19d37ebd-e004-4950-a575-1be86768e800/public"
+        }
+      ],
       "kind": "stretch",
       "level": "beginner",
       "modality": "Dynamic Stretch",
@@ -96826,7 +97691,28 @@
       ],
       "equipment": [],
       "id": "ST495",
-      "images": [],
+      "images": [
+        {
+          "alt": "The athlete stands with joined hands extended forward before tracing a figure-eight.",
+          "step": "Set hands forward",
+          "url": "https://imagedelivery.net/TDuhqfLDl0Fb8RGwGw6mYw/d4bd6c27-17bb-41ce-d007-1e9594998400/public"
+        },
+        {
+          "alt": "The athlete sweeps joined hands upward through the first wide arc.",
+          "step": "Sweep the first loop",
+          "url": "https://imagedelivery.net/TDuhqfLDl0Fb8RGwGw6mYw/90a3ab2f-fa11-4bef-d893-39827c86b200/public"
+        },
+        {
+          "alt": "The athlete moves joined hands down and across through the middle of the figure-eight.",
+          "step": "Cross through center",
+          "url": "https://imagedelivery.net/TDuhqfLDl0Fb8RGwGw6mYw/94d51961-d450-43c1-faf6-b1de961d3f00/public"
+        },
+        {
+          "alt": "The athlete completes the figure-eight by sweeping joined hands through the opposite loop.",
+          "step": "Complete the opposite loop",
+          "url": "https://imagedelivery.net/TDuhqfLDl0Fb8RGwGw6mYw/69a42e91-739b-45f7-6d42-c853f36f0c00/public"
+        }
+      ],
       "kind": "stretch",
       "level": "beginner",
       "modality": "Mobility",
@@ -96868,7 +97754,28 @@
       ],
       "equipment": [],
       "id": "ST496",
-      "images": [],
+      "images": [
+        {
+          "alt": "The athlete stands tall with both arms overhead before beginning cross-crawl taps.",
+          "step": "Reach overhead",
+          "url": "https://imagedelivery.net/TDuhqfLDl0Fb8RGwGw6mYw/3e61010b-70c3-4cba-b073-3c0bf44ae500/public"
+        },
+        {
+          "alt": "The athlete brings one elbow toward the opposite lifted knee while balancing on the other foot.",
+          "step": "Tap right elbow to left knee",
+          "url": "https://imagedelivery.net/TDuhqfLDl0Fb8RGwGw6mYw/ed78874a-2587-4056-b460-f1be1d0f1a00/public"
+        },
+        {
+          "alt": "The athlete resets with both arms overhead and a gentle standing twist.",
+          "step": "Reset and twist",
+          "url": "https://imagedelivery.net/TDuhqfLDl0Fb8RGwGw6mYw/fc957392-3e39-4c4d-fb57-e7e725d77f00/public"
+        },
+        {
+          "alt": "The athlete repeats the cross-crawl tap with the opposite elbow and knee.",
+          "step": "Tap left elbow to right knee",
+          "url": "https://imagedelivery.net/TDuhqfLDl0Fb8RGwGw6mYw/e9ccd7c4-61b3-455d-a8b8-a76f957cdd00/public"
+        }
+      ],
       "kind": "stretch",
       "level": "beginner",
       "modality": "Mobility Flow",
@@ -96911,7 +97818,28 @@
       ],
       "equipment": [],
       "id": "ST497",
-      "images": [],
+      "images": [
+        {
+          "alt": "The athlete sets a supported low lunge with the front foot flat and rear knee on the mat.",
+          "step": "Set the first lunge",
+          "url": "https://imagedelivery.net/TDuhqfLDl0Fb8RGwGw6mYw/a892ceb9-3ebb-4f0b-f8e4-d78e70ebd800/public"
+        },
+        {
+          "alt": "The athlete rocks gently into the low lunge while reaching one arm overhead.",
+          "step": "Rock and reach",
+          "url": "https://imagedelivery.net/TDuhqfLDl0Fb8RGwGw6mYw/db378f32-c0b4-449b-99e8-846ec6e6f000/public"
+        },
+        {
+          "alt": "The athlete returns to a centered low-lunge reset with both hands on the front thigh.",
+          "step": "Return with control",
+          "url": "https://imagedelivery.net/TDuhqfLDl0Fb8RGwGw6mYw/bb98a11e-ce85-4bb7-b938-d608b4dc1900/public"
+        },
+        {
+          "alt": "The athlete performs the low-lunge rock and reach on the opposite side.",
+          "step": "Switch and reach",
+          "url": "https://imagedelivery.net/TDuhqfLDl0Fb8RGwGw6mYw/696669c2-02d1-4cf1-e3dc-72c5eb10f800/public"
+        }
+      ],
       "kind": "stretch",
       "level": "beginner",
       "modality": "Mobility",
@@ -96953,7 +97881,28 @@
       ],
       "equipment": [],
       "id": "ST498",
-      "images": [],
+      "images": [
+        {
+          "alt": "The athlete sets an upright half-kneeling stance with hands together at the chest.",
+          "step": "Set half-kneeling",
+          "url": "https://imagedelivery.net/TDuhqfLDl0Fb8RGwGw6mYw/cf0afb0a-ce71-4963-3322-95e9cf752b00/public"
+        },
+        {
+          "alt": "The athlete opens into a supported half-kneeling windmill with one hand grounded and the other overhead.",
+          "step": "Open the first side",
+          "url": "https://imagedelivery.net/TDuhqfLDl0Fb8RGwGw6mYw/2036a96f-e94d-483c-1e4a-aa6c3bc89000/public"
+        },
+        {
+          "alt": "The athlete returns upright to the centered half-kneeling setup.",
+          "step": "Return to center",
+          "url": "https://imagedelivery.net/TDuhqfLDl0Fb8RGwGw6mYw/84dcad0c-59e4-4068-f13f-b95d44758900/public"
+        },
+        {
+          "alt": "The athlete repeats the supported half-kneeling windmill on the opposite side.",
+          "step": "Open the opposite side",
+          "url": "https://imagedelivery.net/TDuhqfLDl0Fb8RGwGw6mYw/51307d74-611e-4aa9-3dfd-008d1ab92b00/public"
+        }
+      ],
       "kind": "stretch",
       "level": "intermediate",
       "modality": "Mobility",
@@ -96995,7 +97944,28 @@
       ],
       "equipment": [],
       "id": "ST499",
-      "images": [],
+      "images": [
+        {
+          "alt": "The athlete holds cow pose on hands and knees with chest open and pelvis tilted.",
+          "step": "Open into cow",
+          "url": "https://imagedelivery.net/TDuhqfLDl0Fb8RGwGw6mYw/e04fbd81-40bc-4b93-5992-26941ee7e900/public"
+        },
+        {
+          "alt": "The athlete rounds the spine upward into cat pose while staying on hands and knees.",
+          "step": "Round into cat",
+          "url": "https://imagedelivery.net/TDuhqfLDl0Fb8RGwGw6mYw/0a4499f4-ba43-4b38-d69d-515aad4ace00/public"
+        },
+        {
+          "alt": "The athlete rocks the hips back toward the heels and adds a gentle tail-wag side shift.",
+          "step": "Rock back and shift",
+          "url": "https://imagedelivery.net/TDuhqfLDl0Fb8RGwGw6mYw/cae25f73-8a63-479d-4ce5-5205536ea700/public"
+        },
+        {
+          "alt": "The athlete threads one arm beneath the torso while the opposite hand and both knees support the pose.",
+          "step": "Thread the arm underneath",
+          "url": "https://imagedelivery.net/TDuhqfLDl0Fb8RGwGw6mYw/95a3365d-0c7d-446e-93cf-6cf1522d2e00/public"
+        }
+      ],
       "kind": "stretch",
       "level": "beginner",
       "modality": "Mobility Flow",

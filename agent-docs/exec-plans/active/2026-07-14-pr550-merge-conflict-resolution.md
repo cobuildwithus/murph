@@ -127,6 +127,15 @@ Updated: 2026-07-14
   earliest wake as the outbox retry. Assert the committed outbox counters
   instead; the existing restart and accepted-send ordering remain the behavioral
   proof.
+- Merge `626ce0e8a8c932dcb036513e8f66b0f90d0a6910` normally. Keep the
+  hosted-execution identifier helper as the sole owner, retain both independently
+  added workspace-assistant-phase tests, and follow `main`'s WhatsApp deletion by
+  removing the obsolete helper branch and fixture that Git could not flag as a
+  textual conflict.
+- Treat status transport loss during the forced idle restart as an expected,
+  bounded transition. Retry that read only inside the existing 20-second
+  checkpoint waiter, retain all checkpoint predicates, and surface the last
+  transport error if the waiter times out.
 
 ## Verification
 
@@ -172,5 +181,18 @@ Updated: 2026-07-14
   scans passed.
 - The required coverage-write audit found the existing stable-boundary proof
   sufficient, made no edits, and reported no unresolved coverage findings.
+- The post-CI focused hosted-local retryable-outbox scenario passed 1 test in
+  351 seconds before the latest base merge.
+- The latest base merge produced two textual conflicts. The resolved
+  workspace-assistant-phase suite and mailbox identifier-owner slice passed 287
+  tests; the migration guard passed 5 tests; hosted-execution,
+  assistant-runtime, assistant-engine, Cloudflare, and Web typechecks passed.
+- The first post-merge hosted-local run built the exact runner bundle within its
+  size budgets, then proved Docker replaced the runner container while the
+  status request briefly failed before an HTTP response. After bounding that
+  expected transition, the exact retryable-outbox scenario passed 1 test in 202
+  seconds.
+- The coverage-write audit and its final follow-up found no missing regression
+  proof and made no edits.
 - Push/mergeability proof, CI on the new merge head, and the ReviewGPT hard-cap
   disposition remain pending.

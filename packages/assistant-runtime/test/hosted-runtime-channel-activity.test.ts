@@ -695,7 +695,6 @@ test("hosted progress delivery dependencies use the hosted Linq provider effect"
   });
 
   assert.equal(delivery.signal, signal);
-  assert.equal("sendWhatsApp" in delivery, false);
   assert.deepEqual(mocks.sendHostedProviderLinqMessage.mock.calls[0]?.[0], {
     directRecipientPhoneNumber: "+15550000001",
     fromPhoneNumber: "+15550000002",

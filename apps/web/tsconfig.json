@@ -135,9 +135,6 @@
       "@murphai/messaging-ingress/telegram-webhook-payload": [
         "../../packages/messaging-ingress/src/telegram-webhook-payload.ts"
       ],
-      "@murphai/messaging-ingress/whatsapp-webhook": [
-        "../../packages/messaging-ingress/src/whatsapp-webhook.ts"
-      ],
       "@murphai/runtime-state": [
         "../../packages/runtime-state/src/index.ts"
       ],

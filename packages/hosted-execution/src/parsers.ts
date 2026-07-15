@@ -52,7 +52,6 @@ import type {
   HostedExecutionExternalThreadRouteAuthority,
   HostedExecutionLinqExternalThreadRouteAuthority,
   HostedExecutionLinqConversationMessagePayload,
-  HostedExecutionWhatsAppConversationMessagePayload,
   HostedExecutionRedactedLogEntry,
   HostedExecutionPlainRuntimeControlWakeKind,
   HostedCodexAuthAction,
@@ -493,8 +492,6 @@ export function parseHostedExecutionConversationMessagePayload(
         channel,
         telegramMessage: parseHostedExecutionTelegramMessage(record.telegramMessage),
       };
-    case "whatsapp":
-      return parseHostedExecutionWhatsAppConversationMessagePayload(record, channel);
     case "email":
       return {
         ...(record.assistantStyleSettingsAuthorized === undefined
@@ -606,47 +603,6 @@ export function parseHostedExecutionConversationMessagePayload(
             }),
       };
   }
-}
-
-function parseHostedExecutionWhatsAppConversationMessagePayload(
-  record: Record<string, unknown>,
-  channel: "whatsapp",
-): HostedExecutionWhatsAppConversationMessagePayload {
-  const messageRecord = requireObject(
-    record.whatsappMessage,
-    "Hosted execution conversation.message wake payload whatsappMessage",
-  );
-  const label = "Hosted execution conversation.message wake payload whatsappMessage";
-
-  return {
-    channel,
-    whatsappMessage: {
-      fromWaId: requireString(messageRecord.fromWaId, `${label} fromWaId`),
-      messageId: requireString(messageRecord.messageId, `${label} messageId`),
-      ...(messageRecord.phoneNumberId === undefined
-        ? {}
-        : {
-            phoneNumberId: readOptionalNullableString(
-              messageRecord.phoneNumberId,
-              `${label} phoneNumberId`,
-            ),
-          }),
-      schema: requireHostedExecutionWhatsAppMessageSchema(messageRecord.schema, `${label} schema`),
-      text: requireString(messageRecord.text, `${label} text`),
-      threadId: requireString(messageRecord.threadId, `${label} threadId`),
-    },
-  };
-}
-
-function requireHostedExecutionWhatsAppMessageSchema(
-  value: unknown,
-  label: string,
-): HostedExecutionWhatsAppConversationMessagePayload["whatsappMessage"]["schema"] {
-  const schema = requireString(value, label);
-  if (schema !== "murph.hosted-whatsapp-message.v1") {
-    throw new TypeError(`${label} is invalid.`);
-  }
-  return schema;
 }
 
 function parseHostedExecutionLinqConversationMessagePayload(

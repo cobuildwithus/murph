@@ -386,7 +386,7 @@ async function seedCurrentDirectSessionRoute(
   vaultRoot: string,
   input: {
     actorId?: string;
-    channel?: "email" | "linq" | "telegram" | "whatsapp";
+    channel?: "email" | "linq" | "telegram";
     identityId?: string;
     now?: string;
     threadId?: string;

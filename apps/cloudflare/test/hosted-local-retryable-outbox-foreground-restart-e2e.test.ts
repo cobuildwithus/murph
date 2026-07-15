@@ -305,9 +305,21 @@ async function waitForIdleShutdownCheckpoint(input: {
   const startedAt = Date.now();
   let lastActivityExpiryError: unknown = null;
   let lastStatus: HostedRunnerStatusResponse | null = null;
+  let lastStatusReadError: unknown = null;
 
   while (Date.now() - startedAt < 20_000) {
-    const status = await readHostedRunnerStatusWithLogLimit(100);
+    let status: HostedRunnerStatusResponse;
+    try {
+      status = await readHostedRunnerStatusWithLogLimit(100);
+      lastStatusReadError = null;
+    } catch (error) {
+      // The status transport can briefly disappear while the forced idle
+      // shutdown replaces the runner container. Stay within the same bounded
+      // waiter and let the replacement expose its checkpointed status.
+      lastStatusReadError = error;
+      await sleep(100);
+      continue;
+    }
     lastStatus = status;
     const hotRef = status.workspace
       ? readHostedExecutionSnapshotHotRef(status.workspace.snapshotRef)
@@ -341,6 +353,9 @@ async function waitForIdleShutdownCheckpoint(input: {
     ...(lastStatus ? [`last status: ${JSON.stringify(lastStatus)}`] : []),
     ...(lastActivityExpiryError
       ? [`last activity expiry error: ${formatErrorMessage(lastActivityExpiryError)}`]
+      : []),
+    ...(lastStatusReadError
+      ? [`last status read error: ${formatErrorMessage(lastStatusReadError)}`]
       : []),
   ]));
 }

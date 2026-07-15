@@ -4500,7 +4500,7 @@ test('sendAssistantMessageLocal does not expose hosted progress or computer deli
     })),
   }
   const sharedPlan = createSharedPlan()
-  sharedPlan.conversationPolicy.audience.channel = 'whatsapp'
+  sharedPlan.conversationPolicy.audience.channel = 'signal'
   const { mocks, sendAssistantMessageLocal } = await loadLocalServiceModule({
     plan: {
       ...sharedPlan,
@@ -4509,7 +4509,7 @@ test('sendAssistantMessageLocal does not expose hosted progress or computer deli
   })
 
   await sendAssistantMessageLocal({
-    channel: 'whatsapp',
+    channel: 'signal',
     deliverResponse: true,
     deliveryDispatchMode: 'queue-only',
     executionContext: {
@@ -4520,7 +4520,7 @@ test('sendAssistantMessageLocal does not expose hosted progress or computer deli
         userEnvKeys: [],
       },
     },
-    prompt: 'Hosted queue-only WhatsApp manual reply',
+    prompt: 'Hosted queue-only unsupported-channel manual reply',
     turnTrigger: 'manual-ask',
     vault: '/vaults/test',
   })

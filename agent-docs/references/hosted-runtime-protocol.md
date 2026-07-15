@@ -130,8 +130,8 @@ active runtime, wrong runner, wrong user, wrong provider, missing signing
 config, or validator failure all fail closed without provider secret
 injection. `ctx.containerId` and RunnerContainer active-user recovery are not
 provider-egress authority.
-Runtime-controlled delivery/control provider integrations such as Linq,
-Telegram, and WhatsApp still use provider-egress token proof when exact runtime
+Runtime-controlled delivery/control provider integrations such as Linq and
+Telegram still use provider-egress token proof when exact runtime
 authority headers are absent. There is no tokenless active-user-fence provider
 authorization path. Runner container names remain lifecycle/routing handles,
 not provider-egress authority outside the explicit signed provider credential
@@ -778,7 +778,9 @@ conversation-mailbox import loop, imports late rows through the same mailbox
 state/input-store path as the initial import, and then notifies the
 assistant-engine active-turn controller. If the foreground wake path does not
 consume or commit appended mailbox rows, Temporal/web reconciliation rechecks are
-the durable recovery path rather than Cloudflare alarm inference.
+the durable recovery path rather than Cloudflare alarm inference. The workspace
+runner owns every mutating mailbox path; the outer wake coordinator may only read
+or prefetch mailbox state.
 
 The runtime reads `HostedWorkspace`, validates workspace version/user metadata,
 then restores the encrypted local workspace before fetching mailbox rows. A new

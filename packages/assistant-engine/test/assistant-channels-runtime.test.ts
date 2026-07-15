@@ -86,7 +86,6 @@ describe('assistant channels runtime seam', () => {
       'telegram',
       'linq',
       'email',
-      'whatsapp',
     ])
     expect(listAssistantChannelAdapters().map((adapter) => adapter.channel)).toEqual(
       listAssistantChannelNames(),

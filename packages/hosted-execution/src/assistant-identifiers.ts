@@ -6,7 +6,6 @@ import {
   isHostedEmailConversationMessageWake,
   isHostedLinqConversationMessageWake,
   isHostedTelegramConversationMessageWake,
-  isHostedWhatsAppConversationMessageWake,
   readHostedLinqConversationMessageAccountLookupKey,
   type HostedExecutionConversationMessageWake,
   type HostedExecutionEmailConversationMessagePayload,
@@ -82,11 +81,6 @@ export function readHostedConversationAssistantIdentifierSecret(
       ?? wake.message.threadTarget
       ?? wake.message.rawMessageKey
     );
-  }
-
-  if (isHostedWhatsAppConversationMessageWake(wake)) {
-    return wake.message.whatsappMessage.threadId
-      || wake.message.whatsappMessage.fromWaId;
   }
 
   return wake.eventId;

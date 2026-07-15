@@ -28,6 +28,7 @@ import {
   type AssistantCronDeliveryRouteValidationProfile,
 } from './cron/targets.js'
 import { buildExperimentFinalResultsSeeds } from './experiment-support-automations.js'
+import { readAssistantOnboardingState } from './onboarding-state.js'
 import { MURPH_ONBOARDING_FOLLOWUP_AUTOMATION } from './onboarding-followup-automation.js'
 
 export { MURPH_ONBOARDING_FOLLOWUP_AUTOMATION }
@@ -847,6 +848,16 @@ async function reconcileExistingOnboardingFollowupAutomation(input: {
 
   if (!isManagedOnboardingFollowupAutomation(existing)) {
     return false
+  }
+
+  if ((await readAssistantOnboardingState(input.vaultRoot)).status === 'completed') {
+    await patchAutomation({
+      lookup: existing.automationId,
+      now: input.now,
+      status: 'archived',
+      vaultRoot: input.vaultRoot,
+    })
+    return true
   }
 
   if (!onboardingFollowupAutomationDefinitionChanged(existing)) {

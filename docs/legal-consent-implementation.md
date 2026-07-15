@@ -48,7 +48,6 @@ Current scopes are defined in `apps/web/src/lib/legal/consent.ts`:
 | `feature.health-ai` | Yes | Optional health-AI processing consent. |
 | `feature.health-commons-contribution` | Yes | Optional contribution of normalized results to Health Commons learning. |
 | `feature.connected-health-source` | Yes | Optional connected-source processing consent beyond explicit launch consent and connect action. |
-| `feature.whatsapp-messaging` | Yes | Optional WhatsApp messaging consent. |
 
 ## Gate Helpers
 
@@ -62,7 +61,6 @@ Server-only helpers in `apps/web/src/lib/legal/consent.ts` provide:
 - `assertHostedLaunchRequiredConsentGranted`.
 
 Browser-vault session creation requires current launch-required consent before reading hosted vault state. Device-sync connection setup requires current launch-required consent before starting a provider OAuth flow; the user's explicit connect action supplies the feature intent for that source, so the connect flow does not require a second connected-source consent grant. Future feature gates should follow the same pattern at the boundary where hosted processing would otherwise begin and should introduce separate optional scopes only when they cover distinct data use beyond launch consent plus an explicit user action.
-WhatsApp webhook handling is also a consent-writing path: `START` grants `feature.whatsapp-messaging`, `STOP` revokes it, and ordinary WhatsApp messages require the grant before processing.
 
 ## Privacy Notes
 
