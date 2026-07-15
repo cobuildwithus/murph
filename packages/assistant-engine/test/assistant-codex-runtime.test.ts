@@ -706,6 +706,7 @@ describe('assistant codex runtime', () => {
           text: 'User message:\nWhat changed?',
         },
       ],
+      model: 'gpt-5',
       serviceTier: null,
       threadId: 'thread-1',
     })
@@ -856,13 +857,13 @@ describe('assistant codex runtime', () => {
             method: 'turn/start',
             params: {
               effort: 'high',
+              model: 'gpt-5',
               serviceTier: null,
               threadId,
             },
           })
           expect(asRecord(turnStart.params).approvalPolicy).toBeUndefined()
           expect(asRecord(turnStart.params).cwd).toBeUndefined()
-          expect(asRecord(turnStart.params).model).toBeUndefined()
           expect(asRecord(turnStart.params).modelProvider).toBeUndefined()
           expect(asRecord(turnStart.params).sandboxPolicy).toBeUndefined()
           const inputItems = readTurnStartInputItems(turnStart)
@@ -11014,7 +11015,7 @@ describe('assistant codex runtime', () => {
     ).rejects.toMatchObject({
       code: 'ASSISTANT_CODEX_RESUME_STALE',
       context: {
-        mismatchedFields: ['cwd', 'model', 'modelProvider', 'sandbox'],
+        mismatchedFields: ['cwd', 'modelProvider', 'sandbox'],
         resumeContextMismatch: true,
         retryable: true,
         staleResume: true,
@@ -11327,11 +11328,11 @@ describe('assistant codex runtime', () => {
         const turnParams = asRecord(turnRequests[index]?.params)
         expect(turnParams).toMatchObject({
           effort: 'high',
+          model: index === 0 ? 'gpt-5' : 'gpt-5.1',
           threadId: expectedThreadId,
         })
         expect(turnParams.approvalPolicy).toBeUndefined()
         expect(turnParams.cwd).toBeUndefined()
-        expect(turnParams.model).toBeUndefined()
         expect(turnParams.modelProvider).toBeUndefined()
         expect(turnParams.sandbox).toBeUndefined()
       }

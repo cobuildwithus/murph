@@ -20,6 +20,7 @@ import {
   buildAssistantProviderTranscriptAuditEntries,
 } from './transcript-audit.js'
 import {
+  readCodexThreadCompatibilityFingerprint,
   readCodexThreadRouteFingerprint,
 } from './codex-thread-route.js'
 import type {
@@ -186,11 +187,13 @@ export function resolveAssistantResumeStateFromProviderTurn(input: {
   codexRolloutRelativePath?: string | null
   codexThreadId: string | null
   routeFingerprint: string
+  threadCompatibilityFingerprint?: string | null
 }): AssistantSession['resumeState'] {
   return buildCodexResumeState({
     assistantContractFingerprint: input.assistantContractFingerprint,
     rolloutRelativePath: input.codexRolloutRelativePath,
     routeFingerprint: input.routeFingerprint,
+    threadCompatibilityFingerprint: input.threadCompatibilityFingerprint,
     threadId: input.codexThreadId,
   })
 }
@@ -214,6 +217,7 @@ export async function applyAssistantSessionCodexResumeStateAction(input: {
   codexRolloutRelativePath: string | null
   codexThreadId: string | null
   routeFingerprint: string
+  threadCompatibilityFingerprint?: string | null
   session: AssistantSession
   vault: string
 }): Promise<AssistantSession> {
@@ -231,6 +235,7 @@ export async function applyAssistantSessionCodexResumeStateAction(input: {
         codexRolloutRelativePath: input.codexRolloutRelativePath,
         codexThreadId: input.codexThreadId,
         routeFingerprint: input.routeFingerprint,
+        threadCompatibilityFingerprint: input.threadCompatibilityFingerprint,
       })
       if (!resumeState) {
         return input.session
@@ -368,6 +373,8 @@ export async function persistAssistantTurnAndSession(input: {
           codexRolloutRelativePath: input.providerResult.codexRolloutRelativePath,
           codexThreadId: input.providerResult.codexThreadId,
           routeFingerprint: readCodexThreadRouteFingerprint(input.providerResult.route),
+          threadCompatibilityFingerprint:
+            readCodexThreadCompatibilityFingerprint(input.providerResult.route),
           sessionResumeState: readAssistantCodexResume(input.session),
         })
 
@@ -393,6 +400,7 @@ function resolveAssistantNextResumeState(input: {
   codexRolloutRelativePath?: string | null
   codexThreadId: string | null
   routeFingerprint: string
+  threadCompatibilityFingerprint?: string | null
   sessionResumeState: AssistantSession['resumeState']
 }): AssistantSession['resumeState'] {
   switch (input.action) {
@@ -406,6 +414,7 @@ function resolveAssistantNextResumeState(input: {
         codexRolloutRelativePath: input.codexRolloutRelativePath,
         codexThreadId: input.codexThreadId,
         routeFingerprint: input.routeFingerprint,
+        threadCompatibilityFingerprint: input.threadCompatibilityFingerprint,
       })
   }
 }

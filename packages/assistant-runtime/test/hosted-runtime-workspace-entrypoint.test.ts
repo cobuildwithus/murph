@@ -6997,13 +6997,11 @@ describe("hosted workspace runtime entrypoint", () => {
       assert.equal(result.status, "idle");
       assert.equal(checkpointRequests.length, 1);
       expect(mocks.runHostedIdleCheckpointMaintenance).toHaveBeenCalledOnce();
-      // Idle maintenance receives the latest expected target so the engine can
-      // reject an obsolete warm thread. Usage attribution, when compaction is
-      // valid, comes back from the engine-owned bound thread target.
+      // Idle maintenance can still check runtime configuration, while usage
+      // attribution comes from the model actually bound to the warm thread.
       expect(mocks.runHostedIdleCheckpointMaintenance).toHaveBeenCalledWith(
         expect.objectContaining({
           model: "gpt-5.6-sol",
-          reasoningEffort: "high",
         }),
       );
     } finally {

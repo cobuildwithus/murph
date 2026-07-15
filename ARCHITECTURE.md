@@ -111,12 +111,16 @@ web binds that input id to the callback member and one live conversation
 mailbox row before re-deriving access and Sol eligibility. A confirmed change
 applies to the next separately accepted provider turn, including a follow-up in
 the same active invocation, without passkey approval, a mailbox event, or a
-vault copy. The running turn keeps its starting target. Only the authoritative
+vault copy. The running turn keeps its starting target. Murph preserves the
+same provider-native Codex thread and sends both the selected model and
+reasoning effort on that next turn's `turn/start`, matching Codex's native
+model-switch lifecycle instead of rebuilding context from a fresh thread.
+Only the authoritative
 web response updates an ephemeral invocation-local projection; web remains the
 sole durable owner, and a later invocation rereads the preference there. Idle
-maintenance compares that projection with the engine-owned warm-thread target:
-a mismatch retires the obsolete thread without compaction, while valid
-compaction usage is attributed from the target bound to that warm thread. The
+maintenance attributes compaction usage to the model actually bound to the
+warm thread, not a future preference, and skips provider work when that model
+cannot be priced. The
 runtime and web control plane
 accept only the input-bound update shape; approval-shaped configuration
 callbacks are rejected. The personalization response

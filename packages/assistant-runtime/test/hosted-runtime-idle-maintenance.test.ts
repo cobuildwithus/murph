@@ -80,17 +80,14 @@ describe("runHostedIdleCheckpointMaintenance", () => {
     expect(compactWarmCodexThread).not.toHaveBeenCalled();
   });
 
-  it("records provider compaction usage from the bound warm-thread target", async () => {
+  it("records provider compaction usage from the warm thread's actual model", async () => {
     compactWarmCodexThread.mockResolvedValue({
       kind: "compacted",
       durationMs: 1_200,
       threadContextTokensBefore: 140_000,
       threadId: "thread_xyz",
       serviceTier: "flex",
-      target: {
-        model: "gpt-5.6-terra",
-        reasoningEffort: "low",
-      },
+      model: "gpt-5.6-terra",
       usage: {
         cachedInputTokens: 96_000,
         inputTokens: 140_000,
@@ -107,7 +104,6 @@ describe("runHostedIdleCheckpointMaintenance", () => {
       model: "gpt-5.6-sol",
       providerName: "hosted-openai",
       pendingWork: false,
-      reasoningEffort: "high",
       recordUsage: async (record) => {
         recorded.push(record);
       },
@@ -121,10 +117,7 @@ describe("runHostedIdleCheckpointMaintenance", () => {
     // Recording is fire-and-forget; flush the microtask queue before asserting.
     await new Promise((resolve) => setTimeout(resolve, 0));
     expect(compactWarmCodexThread).toHaveBeenCalledWith({
-      expectedTarget: {
-        model: "gpt-5.6-sol",
-        reasoningEffort: "high",
-      },
+      canAccountForModel: expect.any(Function),
       minThreadTokens: HOSTED_IDLE_COMPACT_MIN_THREAD_TOKENS,
       signal: expect.any(AbortSignal),
       timeoutMs: HOSTED_IDLE_COMPACT_TIMEOUT_MS,
@@ -149,10 +142,11 @@ describe("runHostedIdleCheckpointMaintenance", () => {
     });
   });
 
-  it("does not record usage when a target change retires the warm thread", async () => {
+  it("does not compact or record usage for an unpriced warm-thread model", async () => {
     compactWarmCodexThread.mockResolvedValue({
       kind: "skipped",
-      reason: "target_changed",
+      model: "gpt-unpriced-experimental",
+      reason: "model_not_accountable",
       threadContextTokensBefore: 140_000,
     });
     const recordUsage = vi.fn();
@@ -163,7 +157,6 @@ describe("runHostedIdleCheckpointMaintenance", () => {
       model: "gpt-5.6-sol",
       pendingWork: false,
       providerName: "hosted-openai",
-      reasoningEffort: "high",
       recordUsage,
       resolveAssistantSessionId: async () => "asst_real_session",
       shutdownSignal: null,
@@ -172,7 +165,7 @@ describe("runHostedIdleCheckpointMaintenance", () => {
 
     expect(outcome).toEqual({
       kind: "skipped",
-      reason: "target_changed",
+      reason: "unpriced_model",
       threadContextTokensBefore: 140_000,
     });
     expect(recordUsage).not.toHaveBeenCalled();
@@ -521,10 +514,7 @@ describe("runHostedIdleCheckpointMaintenance", () => {
       threadContextTokensBefore: 140_000,
       threadId: "thread_xyz",
       serviceTier: null,
-      target: {
-        model: "gpt-5.5",
-        reasoningEffort: null,
-      },
+      model: "gpt-5.5",
       usage: {
         cachedInputTokens: null,
         inputTokens: 140_000,
@@ -579,10 +569,7 @@ describe("runHostedIdleCheckpointMaintenance", () => {
       threadContextTokensBefore: 120_000,
       threadId: "thread_xyz",
       serviceTier: null,
-      target: {
-        model: "gpt-5.5",
-        reasoningEffort: null,
-      },
+      model: "gpt-5.5",
       usage: {
         cachedInputTokens: 0,
         inputTokens: 120_000,
@@ -755,6 +742,12 @@ describe("runHostedIdleCheckpointMaintenance", () => {
   });
 
   it("skips unpriced models so usage can never be unaccountable", async () => {
+    compactWarmCodexThread.mockResolvedValue({
+      kind: "skipped",
+      model: "gpt-unpriced-experimental",
+      reason: "model_not_accountable",
+      threadContextTokensBefore: 120_000,
+    });
     expect(
       await runHostedIdleCheckpointMaintenance({
         credentialSource: "platform",
@@ -767,8 +760,8 @@ describe("runHostedIdleCheckpointMaintenance", () => {
         shutdownSignal: null,
         wakeSignal: null,
       }),
-    ).toEqual({ kind: "skipped", reason: "unpriced_model", threadContextTokensBefore: null });
-    expect(compactWarmCodexThread).not.toHaveBeenCalled();
+    ).toEqual({ kind: "skipped", reason: "unpriced_model", threadContextTokensBefore: 120_000 });
+    expect(compactWarmCodexThread).toHaveBeenCalledOnce();
   });
 
   it("fails open when the engine helper throws", async () => {
@@ -795,10 +788,7 @@ describe("runHostedIdleCheckpointMaintenance", () => {
       threadContextTokensBefore: 110_000,
       threadId: "thread_orphan",
       serviceTier: null,
-      target: {
-        model: "gpt-5.5",
-        reasoningEffort: null,
-      },
+      model: "gpt-5.5",
       usage: {
         cachedInputTokens: 0,
         inputTokens: 110_000,

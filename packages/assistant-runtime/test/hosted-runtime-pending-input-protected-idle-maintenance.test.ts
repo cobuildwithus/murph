@@ -193,7 +193,6 @@ describe("runHostedPendingInputProtectedIdleMaintenance", () => {
         model: null,
         pendingWork: false,
         providerName: null,
-        reasoningEffort: null,
         recordUsage: null,
         resolveAssistantSessionId: null,
         shutdownSignal: null,

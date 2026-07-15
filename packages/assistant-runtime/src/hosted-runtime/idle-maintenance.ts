@@ -51,7 +51,7 @@ export type HostedIdleMaintenanceOutcome =
         | "pending_work"
         | "shutdown"
         | "unpriced_model";
-      threadContextTokensBefore: null;
+      threadContextTokensBefore: number | null;
     } & HostedIdleMaintenanceWake);
 
 // One idle-checkpoint maintenance step: opportunistic, fail-open thread
@@ -72,7 +72,6 @@ export async function runHostedIdleCheckpointMaintenance(input: {
   protectedCaptureIds?: readonly string[];
   protectedStoredPaths?: readonly string[];
   providerName: string | null;
-  reasoningEffort?: string | null;
   recordUsage: ((record: AssistantUsageRecord) => Promise<void>) | null;
   resolveAssistantSessionId: ((codexThreadId: string) => Promise<string | null>) | null;
   shutdownSignal: AbortSignal | null;
@@ -171,23 +170,15 @@ export async function runHostedIdleCheckpointMaintenance(input: {
         retentionWake,
       );
     }
-    if (!normalizeHostedAiUsageAllowancePricedModelId(input.model)) {
-      return attachInboxMediaRetentionWake(
-        { kind: "skipped", reason: "unpriced_model", threadContextTokensBefore: null },
-        retentionWake,
-      );
-    }
-
     // Structurally fail-open: the runtime seam must not assume the engine
     // helper can never throw — an exception here aborts idle maintenance,
     // never the checkpoint.
     let outcome: CodexWarmThreadCompactionOutcome;
     try {
       outcome = await compactWarmCodexThread({
-        expectedTarget: {
-          model: input.model,
-          reasoningEffort: input.reasoningEffort ?? null,
-        },
+        canAccountForModel: (model) =>
+          model !== null &&
+          normalizeHostedAiUsageAllowancePricedModelId(model) !== null,
         minThreadTokens: HOSTED_IDLE_COMPACT_MIN_THREAD_TOKENS,
         signal: abortController.signal,
         timeoutMs: HOSTED_IDLE_COMPACT_TIMEOUT_MS,
@@ -199,8 +190,19 @@ export async function runHostedIdleCheckpointMaintenance(input: {
       );
     }
 
+    if (outcome.kind === "skipped" && outcome.reason === "model_not_accountable") {
+      return attachInboxMediaRetentionWake(
+        {
+          kind: "skipped",
+          reason: outcome.model ? "unpriced_model" : "missing_model",
+          threadContextTokensBefore: outcome.threadContextTokensBefore,
+        },
+        retentionWake,
+      );
+    }
+
     const boundModel = outcome.kind === "compacted"
-      ? outcome.target.model
+      ? outcome.model
       : null;
     if (
       outcome.kind === "compacted"

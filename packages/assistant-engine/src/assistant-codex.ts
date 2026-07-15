@@ -243,14 +243,9 @@ type CodexAppServerActiveTurnBinding = {
 // current thread context size without any extra RPC or model call.
 export interface CodexWarmThreadTokenUsage {
   lastInputTokens: number
-  serviceTier: AssistantProviderServiceTier | null
-  target: CodexWarmThreadTarget
-  threadId: string
-}
-
-export interface CodexWarmThreadTarget {
   model: string | null
-  reasoningEffort: string | null
+  serviceTier: AssistantProviderServiceTier | null
+  threadId: string
 }
 
 function prepareCodexRpcParams(
@@ -758,11 +753,8 @@ class CodexAppServerProcess {
 
   private activeTurn: CodexAppServerActiveTurnBinding | null = null
   private boundThreadId: string | null = null
+  private boundThreadModel: string | null = null
   private boundThreadServiceTier: AssistantProviderServiceTier | null = null
-  private boundThreadTarget: CodexWarmThreadTarget = {
-    model: null,
-    reasoningEffort: null,
-  }
   private cleanupProcessExitListener: () => void
   private lastThreadTokenUsage: CodexWarmThreadTokenUsage | null = null
   private readonly codexCommand: string
@@ -1264,8 +1256,8 @@ class CodexAppServerProcess {
 
     this.lastThreadTokenUsage = {
       lastInputTokens,
+      model: this.boundThreadModel,
       serviceTier: this.boundThreadServiceTier,
-      target: { ...this.boundThreadTarget },
       threadId: update.threadId,
     }
   }
@@ -1282,8 +1274,8 @@ class CodexAppServerProcess {
     this.boundThreadServiceTier = serviceTier
   }
 
-  noteBoundThreadTarget(target: CodexWarmThreadTarget): void {
-    this.boundThreadTarget = normalizeCodexWarmThreadTarget(target)
+  noteBoundThreadModel(model: string | null): void {
+    this.boundThreadModel = normalizeNullableString(model)
   }
 
   // Exposed so a freshly bound turn can route foreign-thread events before
@@ -1974,10 +1966,10 @@ export type CodexWarmThreadCompactionOutcome =
   | {
       kind: 'compacted'
       durationMs: number
+      model: string | null
       threadContextTokensBefore: number
       threadId: string
       serviceTier: AssistantProviderServiceTier | null
-      target: CodexWarmThreadTarget
       usage: CodexWarmThreadCompactionUsage
     }
   | {
@@ -1990,10 +1982,11 @@ export type CodexWarmThreadCompactionOutcome =
       kind: 'skipped'
       reason:
         | 'below_threshold'
+        | 'model_not_accountable'
         | 'no_thread_vitals'
         | 'no_warm_process'
-        | 'target_changed'
         | 'turn_in_flight'
+      model?: string | null
       threadContextTokensBefore: number | null
     }
 
@@ -2006,7 +1999,7 @@ export type CodexWarmThreadCompactionOutcome =
 // because the idle checkpoint that follows snapshots the Codex home,
 // including rollout files, and must never capture a rollout mid-teardown.
 export async function compactWarmCodexThread(input: {
-  expectedTarget?: CodexWarmThreadTarget | null
+  canAccountForModel?: ((model: string | null) => boolean) | null
   minThreadTokens: number
   signal?: AbortSignal | null
   timeoutMs: number
@@ -2023,19 +2016,11 @@ export async function compactWarmCodexThread(input: {
     if (!vitals) {
       return { kind: 'skipped', reason: 'no_thread_vitals', threadContextTokensBefore: null } as const
     }
-    if (
-      input.expectedTarget &&
-      !areCodexWarmThreadTargetsEqual(vitals.target, input.expectedTarget)
-    ) {
-      // The confirmed target belongs to a future provider turn. This warm
-      // process still owns the completed old-target thread, whose native
-      // resume state the normal target-fingerprint transition will discard.
-      // Retire it without paying to compact obsolete work or attributing that
-      // work to the future target.
-      await processInstance.poison('idle-compaction-target-changed')
+    if (input.canAccountForModel && !input.canAccountForModel(vitals.model)) {
       return {
         kind: 'skipped',
-        reason: 'target_changed',
+        model: vitals.model,
+        reason: 'model_not_accountable',
         threadContextTokensBefore: vitals.lastInputTokens,
       } as const
     }
@@ -2206,10 +2191,10 @@ export async function compactWarmCodexThread(input: {
       return {
         kind: 'compacted',
         durationMs: Date.now() - startedAt,
+        model: vitals.model,
         threadContextTokensBefore: vitals.lastInputTokens,
         threadId: vitals.threadId,
         serviceTier: vitals.serviceTier,
-        target: vitals.target,
         usage: providerUsage
           ?? estimateCodexWarmThreadCompactionUsage(vitals.lastInputTokens),
       }
@@ -2238,27 +2223,6 @@ export async function compactWarmCodexThread(input: {
     processInstance.releaseTurn(binding)
     processInstance.releaseReservation()
   }
-}
-
-function normalizeCodexWarmThreadTarget(
-  target: CodexWarmThreadTarget,
-): CodexWarmThreadTarget {
-  return {
-    model: normalizeNullableString(target.model),
-    reasoningEffort: normalizeNullableString(target.reasoningEffort),
-  }
-}
-
-function areCodexWarmThreadTargetsEqual(
-  left: CodexWarmThreadTarget,
-  right: CodexWarmThreadTarget,
-): boolean {
-  const normalizedLeft = normalizeCodexWarmThreadTarget(left)
-  const normalizedRight = normalizeCodexWarmThreadTarget(right)
-  return (
-    normalizedLeft.model === normalizedRight.model &&
-    normalizedLeft.reasoningEffort === normalizedRight.reasoningEffort
-  )
 }
 
 function hashCodexRawString(value: string): string {
@@ -4129,10 +4093,7 @@ async function runCodexAppServerTurnOnProcess(
     }
 
     lifecycleStage = 'turn_start'
-    codexProcess.noteBoundThreadTarget({
-      model: input.model ?? null,
-      reasoningEffort: input.reasoningEffort ?? null,
-    })
+    codexProcess.noteBoundThreadModel(input.model ?? null)
     codexProcess.noteBoundThreadServiceTier(input.serviceTier ?? null)
     const turnStartRequest = sendRequest(
       'turn/start',
@@ -4555,7 +4516,9 @@ function resolveCodexRolloutRelativePath(input: {
 // remain attached (codex-rs `thread_processor.rs` `resume_running_thread`).
 // The thread/resume response echoes the effective execution context, so this
 // echo check is the only client-visible stale-rejoin signal before turn/start.
-// Fields with no requested value are skipped; requested fields must echo back.
+// Fields with no requested value are skipped; requested immutable execution
+// fields must echo back. Model is intentionally excluded because turn/start
+// applies its sticky model override atomically with the next user input.
 function assertCodexResumeContextMatches(input: {
   input: CodexAppServerPreparedTurnInput
   requestedThreadId: string
@@ -4575,11 +4538,6 @@ function assertCodexResumeContextMatches(input: {
       asCodexString(result?.approvalPolicy),
     ],
     ['cwd', input.input.workingDirectory, actualCwd ? path.resolve(actualCwd) : null],
-    [
-      'model',
-      normalizeNullableString(input.input.model),
-      normalizeNullableString(asCodexString(result?.model)),
-    ],
     [
       'modelProvider',
       normalizeNullableString(input.input.modelProvider),

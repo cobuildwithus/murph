@@ -368,9 +368,7 @@ function buildAssistantContinuityFingerprint(
   const identity = JSON.stringify({
     provider: input.provider,
     executionDriver: 'codex-app-server',
-    model: normalizeNullableString(input.model),
     modelProvider: normalizeAssistantCodexModelProvider(input.modelProvider),
-    reasoningEffort: normalizeNullableString(input.reasoningEffort),
     sandbox: normalizeNullableString(input.sandbox),
     approvalPolicy: normalizeNullableString(input.approvalPolicy),
     profile: normalizeNullableString(input.profile),
