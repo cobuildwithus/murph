@@ -287,7 +287,7 @@ test("HomePage shows an advisory while Pulse replies continue after included usa
   assert.match(markup, /used 100% of this month(?:&#x27;|')s included Pulse usage/u);
   assert.match(markup, /Resets in 6 days/);
   assert.match(markup, /Murph keeps replying/);
-  assert.match(markup, /Switch to Luna in Settings/);
+  assert.match(markup, /less capable model that uses less of your included usage/);
   assert.match(markup, /Edge offers more included usage/);
   assert.match(markup, /Upgrade from usage projection/);
   assert.match(markup, /href="https:\/\/example\.test\/settings#subscription"/);
@@ -340,7 +340,7 @@ test("HomePage keeps the exhausted Pulse advisory when action resolution fails c
 
   assert.match(markup, /used 100% of this month(?:&#x27;|')s included Pulse usage/u);
   assert.match(markup, /Murph keeps replying/);
-  assert.match(markup, /Switch to Luna in Settings/);
+  assert.match(markup, /less capable model that uses less of your included usage/);
   assert.doesNotMatch(markup, /Edge offers more included usage/);
   assert.doesNotMatch(markup, /Upgrade from usage projection/);
   assert.doesNotMatch(markup, /settings#subscription/);
@@ -384,7 +384,7 @@ test("HomePage shows a monthly reset advisory while Edge replies continue", asyn
   assert.match(markup, /used 100% of this month(?:&#x27;|')s included Edge usage/u);
   assert.match(markup, /Resets in 6 days/);
   assert.match(markup, /Murph keeps replying/);
-  assert.match(markup, /Switch to Luna in Settings/);
+  assert.match(markup, /less capable model that uses less of your included usage/);
 });
 
 test("HomePage shows an advisory while Family replies continue", async () => {
@@ -410,7 +410,7 @@ test("HomePage shows an advisory while Family replies continue", async () => {
 
   assert.match(markup, /Family has used 100% of this month(?:&#x27;|')s included usage/u);
   assert.match(markup, /Murph keeps replying/);
-  assert.match(markup, /Switch to Luna in Settings/);
+  assert.match(markup, /less capable model that uses less of your included usage/);
   assert.match(markup, /Resets in 6 days/);
 });
 
@@ -447,7 +447,7 @@ test("HomePage shows an advisory while trial replies continue after included usa
 
   assert.match(markup, /used 100% of your included trial usage/u);
   assert.match(markup, /Murph keeps replying/);
-  assert.match(markup, /Switch to Luna in Settings/);
+  assert.match(markup, /less capable model that uses less of your included usage/);
   assert.match(markup, /start Pulse when you(?:&#x27;|')re ready/iu);
   assert.match(markup, /Start from usage projection/);
   assert.match(markup, /href="https:\/\/example\.test\/settings#subscription"/);

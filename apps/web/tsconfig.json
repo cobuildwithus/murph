@@ -117,6 +117,9 @@
       "@murphai/hosted-execution/plan-usage": [
         "../../packages/hosted-execution/src/plan-usage.ts"
       ],
+      "@murphai/hosted-execution/subscription": [
+        "../../packages/hosted-execution/src/subscription.ts"
+      ],
       "@murphai/hosted-execution/routes": [
         "../../packages/hosted-execution/src/routes.ts"
       ],

@@ -4555,6 +4555,7 @@ function isSerializedDynamicToolRequest(
     request.kind === 'assistant-configuration' ||
     request.kind === 'assistant-style' ||
     request.kind === 'personalization' ||
+    request.kind === 'subscription' ||
     request.kind === 'submit-product-feedback' ||
     isComputerDynamicToolRequest(request)
 }
