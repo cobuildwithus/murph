@@ -104,6 +104,7 @@ export interface SignalHostedManualRunInput {
 }
 
 export interface SignalHostedRuntimeRecheckInput {
+  abortSignal?: AbortSignal;
   client?: HostedRuntimeTemporalSignalClient | null;
   environment?: NodeJS.ProcessEnv;
   prisma?: PrismaClient;
@@ -237,6 +238,7 @@ export async function signalHostedRuntimeRecheckRuntime(
   });
 
   return signalHostedUserRuntimeWorkflow({
+    abortSignal: input.abortSignal,
     client: input.client,
     environment: input.environment,
     ensureWorkspace: false,

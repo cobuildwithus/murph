@@ -117,7 +117,7 @@ describe('assistant capability-offers prompt contract', () => {
     )
   })
 
-  it('names newsletter mechanics inside hosted-group guidance', () => {
+  it('names newsletter and new-group permission mechanics inside hosted-group guidance', () => {
     const section = getPromptSection(
       buildAssistantSystemPromptLayers(createCommonCodexPromptInput({
         assistantHostedAutomationAvailable: true,
@@ -140,6 +140,10 @@ describe('assistant capability-offers prompt contract', () => {
     expect(section).toContain('when the current group is adding a sharing permission')
     expect(section).toContain('permission opt-in, not joining or rejoining')
     expect(section).toContain('secondary customize link')
+    expect(section).toContain(
+      "After read_current, use the group-chat skill's core permissions only for `status=none`",
+    )
+    expect(section).toContain('existing groups use workflow scopes')
     expect(section).toContain('grants membership only when needed')
     expect(section).toContain(
       'Existing members keep their membership and other grants unchanged',

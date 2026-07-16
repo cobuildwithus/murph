@@ -5,7 +5,7 @@ Hosted integration control plane for Vercel deployments.
 `apps/web` is the canonical hosted control plane. Hosted product meaning lives
 in Postgres here, not in Cloudflare worker control storage. In particular,
 `apps/web` owns hosted member identity, routing, billing, email authorization,
-device-sync control-plane authority, the hosted AI usage ledger,
+device-sync control-plane authority, the hosted AI usage and usage-credit ledgers,
 hosted computer-use browser run/checkpoint state, and the hosted mailbox,
 latest workspace checkpoint pointer, and redacted runtime logs/status
 projection.
@@ -107,7 +107,8 @@ The `/settings` Data & privacy export uses that same in-browser browser-vault re
 - signed hosted user crypto root envelopes plus append-only crypto audit rows
 - encrypted hosted mailbox rows and lane counters for durable execution inputs
 - latest hosted workspace checkpoint metadata plus redacted runtime logs/status
-- immutable hosted AI usage rows in Postgres for billing-safe reconciliation
+- immutable hosted AI usage rows plus append-only purchased usage-credit entries
+  and their bounded member balance projection in Postgres
 - event-id keyed Linq first-contact classifier decisions with no classifier
   prompt/response bodies; the legacy rejected-message-text column is an ignored
   deploy-skew compatibility column and is scrubbed by migration
@@ -115,7 +116,8 @@ The `/settings` Data & privacy export uses that same in-browser browser-vault re
 - member-bound hosted phone-call rows for web-owned Retell starts and signed
   Retell function/webhook results
 - Kernel-backed hosted computer runs, Live View handoffs, and durable Managed Auth connections
-- hosted Stripe receipt/retry state, billing reconciliation, and onboarding webhook receipts
+- hosted Stripe receipt/retry state, subscription reconciliation, one-time
+  usage-credit reconciliation, and onboarding webhook receipts
 - local-agent pairing plus sparse signal/token routes for hosted integrations
 
 ## Non-goals
@@ -190,6 +192,10 @@ The hosted Prisma schema keeps ownership sharp and nested:
   wakes a bound runtime and does not own a queue, mailbox cursor, or web-visible
   run recovery ledger
 - `HostedAiUsage` owns the canonical hosted usage ledger
+- `HostedUsageCreditPurchase` owns the immutable payer, beneficiary, offer,
+  frozen Checkout request, and reconciliation state for one intentional
+  top-up. `HostedUsageCreditEntry` is the append-only credit source of truth;
+  `HostedMember` holds only its bounded balance/version projection.
 - `HostedProductFeedback` owns assistant-captured structured product feedback
   with only a bounded product-only summary, kind, and optional changelog ids,
   without storing raw conversation text, health details, tags, topics, or provider payloads
@@ -475,6 +481,9 @@ Hosted onboarding extras:
 - `HOSTED_ONBOARDING_STRIPE_PRICE_ID_LAUNCH_MONTHLY`
 - `HOSTED_ONBOARDING_STRIPE_PRICE_ID_LAUNCH_EDGE_MONTHLY`
 - `HOSTED_ONBOARDING_STRIPE_PRICE_ID_LAUNCH_FAMILY_SEAT_MONTHLY`
+- `HOSTED_ONBOARDING_STRIPE_PRICE_ID_USAGE_CREDIT_5_USD`
+- `HOSTED_ONBOARDING_STRIPE_PRICE_ID_USAGE_CREDIT_10_USD`
+- `HOSTED_ONBOARDING_STRIPE_PRICE_ID_USAGE_CREDIT_25_USD`
 - `HOSTED_ONBOARDING_STRIPE_FAMILY_PORTAL_CONFIGURATION_ID` optionally selects a dedicated Family Billing Portal configuration.
 - `STRIPE_SECRET_KEY`
 - `STRIPE_WEBHOOK_SECRET`
@@ -523,21 +532,29 @@ Hosted managed crypto:
 Hosted AI usage metering:
 
 - Hosted AI usage rows are recorded locally for allowance, audit, and future billing analysis. The hosted app no longer attaches Stripe usage prices at checkout or posts Stripe meter events.
-- Hosted AI included-allowance accounting is app-owned: web prices recorded `HostedAiUsage` rows into allowance columns and maintains `HostedAiUsagePeriod` spend snapshots from current hosted billing state. The allowance is an advisory product and billing signal, not a runtime gate for an otherwise active member.
+- Hosted AI included-allowance accounting is app-owned: web prices recorded `HostedAiUsage` rows into allowance columns and maintains `HostedAiUsagePeriod` spend snapshots from current hosted billing state. Subsequent usage-bearing work is blocked when included capacity and purchased usage credit are both exhausted. The operation that crosses the boundary may finish; its accepted input is not discarded.
 - Retell phone calls use the same ledger through a web-internal deterministic row keyed by the Murph call id. Web records Retell's final provider-reported combined cost, including discounts and transfer-leg cost, and never accepts that cost field from the hosted-runtime usage callback. `transfer_ended` and the pre-armed phone-call reconciliation workflow prevent a provisional transfer cost or lost callback from becoming permanent undercounting.
-- Web derives one read-only member plan-usage projection from that same allowance resolver and usage ledger for Settings and `murph.plan_usage`. It persists no forecast and performs no Stripe read. `recommendedAction` remains a thresholded suggestion. An opted-in `subscriptionActionQuote` instead returns current terms for an explicit request, even below the threshold; it is not a recommendation or consent. Callers that send the original empty request receive the original response shape with that field omitted.
+- Purchased usage credit is separate from the included-allowance period. A beneficiary-serialized transaction consumes included capacity first, then append-only credit grants in order, while `HostedMember` carries the bounded balance/version hot-path projection. Unused credit carries across allowance periods and does not create subscription entitlement.
+- Web derives one read-only member plan-usage projection from that same allowance resolver and usage ledger for Settings and `murph.plan_usage`. It persists no forecast and performs no Stripe read. `recommendedAction` is thresholded and may return `add_usage` only for eligible direct paid Pulse and Edge members; the authenticated Settings surface exposes the fixed $5, $10, and $25 catalog. An opted-in `subscriptionActionQuote` returns current terms for an explicit subscription request even below the threshold; it is not a recommendation or consent. Callers that send the original empty request receive the original response shape with that field omitted.
+- Usage-credit Checkout accepts only an authenticated payer buying for the same personal beneficiary, a server-owned offer code, and a single-use client request key. It uses Stripe `mode=payment`, re-fetches the configured active one-time Price to verify its exact single-currency amount and shape, and explicitly disables Adaptive Pricing; the browser cannot choose an amount, Price, payer, beneficiary, or grant.
+- A browser return never grants credit. The existing verified Stripe event receipt owner re-fetches Checkout, line-item, PaymentIntent, and Charge facts and commits at most one purchase grant. After a new grant commits, the same durable Stripe-event retry lane requests the normal runtime recheck so preserved blocked input can resume.
+- The purchase schema separates payer from beneficiary so the accounting owner can later support a synthetic group-container member. Group funding, group checkout authorization, and group contribution presentation are not implemented.
 - Web owns the separate `murph.subscription` callback for an explicit private member choice to continue Pulse at trial end, start Pulse now, or upgrade Pulse to Edge. It binds the runtime-supplied accepted input id to the callback member, atomically claims the first action on that existing mailbox row, re-derives current eligibility, and delegates to the existing billing services. An exact retry is allowed and a conflicting action fails closed. Pulse activation keeps its existing Stripe-hosted invoice or Customer Portal handoff when payment is required; a pending Edge change returns Customer Portal without a separate invoice lookup. No custom checkout or second billing owner is introduced.
 - Homepage period facts come from the same allowance owner. Spend accounting ensure-creates a fresh billing or calendar period inside the spend transaction, with no reset cron.
-- Temporal does not fetch or forward signed usage decisions to Cloudflare ensure-processing, and webhook wake handoff signals Temporal by mailbox pointer only. Model-work admission reads the hosted member-access owner; runtime usage is recorded through the hosted platform after it exists.
+- Web applies the composed access-and-usage gate in runtime reconciliation and
+  mailbox fetch/payload routes before exhausted work reaches the runner.
+  Temporal owns only the resulting blocked orchestration facts; Cloudflare
+  receives no billing or credit projection. Runtime usage is recorded after it
+  exists.
 - Assistant usage recording may carry the exact authority-bound originating Linq group route for a proactive thread-cap crossing notice. Web reuses the existing claimed Linq delivery path, never derives a group target from personal home routing, and keeps the next-inbound gate notice as the backstop when the target is missing or ambiguous.
-- Pulse Trial uses the same allowance system with a phase-aware 4.50 USD advisory threshold. Paid phase is authoritative for the normal Pulse allowance, while stale or malformed trial entitlement still fails member-access admission before any calendar fallback.
+- Pulse Trial uses the same enforced allowance system with a phase-aware 4.50 USD threshold. Trial members cannot buy usage credit; paid phase is authoritative for normal Pulse allowance, while stale or malformed trial entitlement fails admission before any calendar fallback.
 - Included-allowance accounting starts from the deployment that enables allowance accounting on imports. Existing current-period usage rows are not backfilled by default.
 
 `apps/web` records every hosted assistant usage row by member in `HostedAiUsage`.
 Hosted execution accepts Murph-owned usage rows with `stripeMeterSource=murph`.
 Recorded rows keep `stripeMeterStatus=skipped` so they cannot be backbilled by
 the removed Stripe meter path. The hosted allowance owner reads web-owned spend
-for projection and notices; it does not deny otherwise-authorized model calls.
+and the local credit projection for admission, projection, and notices.
 
 Hosted pages assume the hosted Privy phone-auth setup is present and fail fast
 when it is missing instead of carrying fallback branches in page code.
@@ -571,11 +588,11 @@ works locally without a second terminal.
   stdout pipe, stderr pipe, and output-tail buffers, so operator logs never
   contain the live `whsec_...`.
 
-#### Full local test-mode checkout
+#### Full local test-mode Checkout
 
-The local hosted signup flow uses real Stripe Checkout against Stripe's test
-environment; it does not use an in-process fake checkout service. To complete
-the flow without moving real money:
+The local hosted signup and usage-credit flows use real Stripe Checkout against
+Stripe's test environment; they do not use an in-process fake checkout service.
+To complete either flow without moving real money:
 
 1. Configure test-mode Stripe values in `.tmp/.env.hosted-local-stripe`,
    `apps/web/.env.local`, or shell env:
@@ -583,14 +600,18 @@ the flow without moving real money:
    - `HOSTED_ONBOARDING_STRIPE_PRICE_ID_LAUNCH_MONTHLY=price_...`
    - `HOSTED_ONBOARDING_STRIPE_PRICE_ID_LAUNCH_EDGE_MONTHLY=price_...`
    - `HOSTED_ONBOARDING_STRIPE_PRICE_ID_LAUNCH_FAMILY_SEAT_MONTHLY=price_...`
+   - `HOSTED_ONBOARDING_STRIPE_PRICE_ID_USAGE_CREDIT_5_USD=price_...`
+   - `HOSTED_ONBOARDING_STRIPE_PRICE_ID_USAGE_CREDIT_10_USD=price_...`
+   - `HOSTED_ONBOARDING_STRIPE_PRICE_ID_USAGE_CREDIT_25_USD=price_...`
 2. Install and log in to the Stripe CLI once with `stripe login`.
 3. Run root `pnpm dev` without `MURPH_DEV_SKIP_STRIPE_LISTEN=1`; the dev
    orchestrator starts `stripe listen` and injects the captured
    `STRIPE_WEBHOOK_SECRET` into the web process.
-4. Use a real hosted onboarding invite and continue to checkout. The dev-only
-   `/join/<inviteCode>?preview=checkout` URL is only a UI preview; pressing its
-   checkout button still calls the real checkout API.
-6. On the Stripe-hosted Checkout page, use Stripe's interactive test card
+4. Use a real hosted onboarding invite for subscription Checkout, or sign in as
+   an active paid Pulse/Edge member and open **Add usage** in Settings. The
+   dev-only `/join/<inviteCode>?preview=checkout` URL is only a UI preview;
+   pressing its checkout button still calls the real checkout API.
+5. On the Stripe-hosted Checkout page, use Stripe's interactive test card
    `4242 4242 4242 4242` with any future expiration date and any three-digit
    CVC. Stripe test cards are valid only in test environments.
 
@@ -1146,6 +1167,12 @@ Hosted onboarding surfaces:
 - `POST /api/hosted-onboarding/linq/webhook`
 - `POST /api/hosted-onboarding/stripe/webhook`
 
+Authenticated Settings usage-credit surfaces:
+
+- `POST /api/settings/billing/usage-credit/checkout`
+- `GET /api/settings/billing/usage-credit/purchases/:purchaseId`
+- `POST /api/settings/billing/usage-credit/purchases/:purchaseId/expire`
+
 The onboarding lane is intentionally thin:
 
 - Linq or the public landing page can start phone-bound signup.
@@ -1153,9 +1180,11 @@ The onboarding lane is intentionally thin:
   successful hosted completion issues a strict opaque v2 app session whose
   database row stores a dedicated-key HMAC over its bearer, session id, member,
   Privy identity, and expiry. Legacy unsigned cookies are rejected.
-- Stripe Checkout is subscription-only. `invoice.paid` remains the normal
-  positive entitlement source, with one metadata-gated exception: a valid
-  Pulse Trial Checkout completion can activate Pulse in `trial` phase.
+- Hosted onboarding Checkout uses subscription mode. `invoice.paid` remains
+  the normal positive entitlement source, with one metadata-gated exception: a
+  valid Pulse Trial Checkout completion can activate Pulse in `trial` phase.
+  The separate authenticated Settings usage-credit flow uses one-time payment
+  mode and never changes entitlement.
 - Hosted webhook receipts are retry journals for receipt-local side effects,
   not a second execution lifecycle authority.
 - Temporal-bound execution from onboarding and exact message ingress appends
@@ -1170,15 +1199,22 @@ The onboarding lane is intentionally thin:
 
 Current hosted billing assumptions:
 
-- Hosted checkout is always Stripe subscription mode.
+- Hosted onboarding Checkout uses Stripe subscription mode. The only current
+  one-time Checkout is the fixed personal usage-credit catalog in Settings.
 - The launch tiers are monthly Stripe subscription prices; annual checkout is disabled for now.
 - `invoice.paid` is the paid activation and paid-cycle source of truth.
 - `checkout.session.completed` normally binds refs only, except for the
   Pulse Trial offer (`pulse_trial_7d`) when metadata, member ownership, and
-  the expanded/retrieved subscription prove an active seven-day trial.
+  the expanded/retrieved subscription prove an active policy-bound trial.
 - `customer.subscription.*` does not newly activate access and cannot promote
   a Pulse Trial to paid before the accepted paid invoice.
-- Chargebacks, disputes, and refunds suspend hosted access pending manual review.
+- Subscription chargebacks, disputes, and refunds suspend hosted access pending
+  manual review. Matching usage-credit financial reversals are intercepted
+  before subscription handling. Live financial-state changes append capped
+  signed `refund_adjustment` or `dispute_adjustment` entries against unused
+  credit, with positive entries restoring only value previously revoked.
+  Reconciliation failures remain in the durable Stripe retry lane and never
+  silently suspend the subscription.
 - No-card Pulse Trial signup is the default checkout-stage path when billing is
   configured and messaging setup is complete. Set
   `HOSTED_AUTO_PULSE_TRIAL_ENABLED=0` only to force card checkout fallback.

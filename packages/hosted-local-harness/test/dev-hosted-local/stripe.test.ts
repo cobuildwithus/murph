@@ -4,6 +4,7 @@ import { describe, expect, it } from "vitest";
 
 import {
   evaluateHostedLocalStripeCheckoutEnv,
+  HOSTED_LOCAL_STRIPE_BILLING_PRICE_ENV_KEYS,
   writeHostedLocalStripeCheckoutDiagnostics,
 } from "../../src/dev-hosted-local/stripe.ts";
 
@@ -25,6 +26,14 @@ class CapturingWritable extends Writable {
 }
 
 describe("evaluateHostedLocalStripeCheckoutEnv", () => {
+  it("keeps every fixed usage-credit Price under local Stripe authority", () => {
+    expect(HOSTED_LOCAL_STRIPE_BILLING_PRICE_ENV_KEYS).toEqual(expect.arrayContaining([
+      "HOSTED_ONBOARDING_STRIPE_PRICE_ID_USAGE_CREDIT_5_USD",
+      "HOSTED_ONBOARDING_STRIPE_PRICE_ID_USAGE_CREDIT_10_USD",
+      "HOSTED_ONBOARDING_STRIPE_PRICE_ID_USAGE_CREDIT_25_USD",
+    ]));
+  });
+
   it("treats placeholder values as missing checkout configuration", () => {
     expect(
       evaluateHostedLocalStripeCheckoutEnv({

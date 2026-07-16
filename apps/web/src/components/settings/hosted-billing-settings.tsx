@@ -20,6 +20,12 @@ import { HostedSettingsSessionState } from "./hosted-settings-session-state";
 import { StartPaidPulseButton } from "./hosted-start-paid-pulse-button";
 import { SwitchToPulseButton } from "./hosted-plan-switch-to-pulse-button";
 import { UpgradeToEdgeButton } from "./hosted-plan-upgrade-button";
+import {
+  HostedUsageTopUpDialog,
+  type HostedUsageTopUpActivePurchase,
+  type HostedUsageTopUpOffer,
+  type HostedUsageTopUpReturn,
+} from "./hosted-usage-top-up-dialog";
 
 const PULSE_FEATURES = [
   "Run experiments, see what changed",
@@ -68,7 +74,12 @@ export function HostedBillingSettings(props: {
   familyState?: "none" | "owner" | "sponsored";
   scheduledBillingEffectiveAt?: Date | null;
   scheduledBillingPlanCode?: unknown;
+  usageCreditBalanceUsdMicros?: string | null;
   usageStatus?: HostedPlanUsageStatus | null;
+  usageTopUpActivePurchase?: HostedUsageTopUpActivePurchase | null;
+  usageTopUpInitialOpen?: boolean;
+  usageTopUpOffers?: readonly HostedUsageTopUpOffer[];
+  usageTopUpPurchaseReturn?: HostedUsageTopUpReturn | null;
 }) {
   if (!props.authenticated) {
     return (
@@ -92,6 +103,7 @@ export function HostedBillingSettings(props: {
   const familyOwner = familyState === "owner";
   const pulseCurrent = !familyCurrent && currentPlanCode === "launch_monthly";
   const edgeCurrent = !familyCurrent && currentPlanCode === "launch_edge_monthly";
+  const usageTopUpOffers = props.usageTopUpOffers ?? [];
 
   const isPulseTrial =
     pulseCurrent && currentPhase !== "paid" && currentOffer === HOSTED_PULSE_TRIAL_OFFER;
@@ -179,6 +191,11 @@ export function HostedBillingSettings(props: {
       ) : null}
       <PlanUsageBand
         status={props.usageStatus}
+        usageCreditBalanceUsdMicros={props.usageCreditBalanceUsdMicros}
+        usageTopUpActivePurchase={props.usageTopUpActivePurchase}
+        usageTopUpInitialOpen={props.usageTopUpInitialOpen}
+        usageTopUpOffers={usageTopUpOffers}
+        usageTopUpPurchaseReturn={props.usageTopUpPurchaseReturn}
       />
       <div className="grid items-stretch gap-3 sm:grid-cols-3">
         {cards.map((card) => (
@@ -204,41 +221,61 @@ export function HostedBillingSettings(props: {
 
 function PlanUsageBand(props: {
   status?: HostedPlanUsageStatus | null;
+  usageCreditBalanceUsdMicros?: string | null;
+  usageTopUpActivePurchase?: HostedUsageTopUpActivePurchase | null;
+  usageTopUpInitialOpen?: boolean;
+  usageTopUpOffers: readonly HostedUsageTopUpOffer[];
+  usageTopUpPurchaseReturn?: HostedUsageTopUpReturn | null;
 }) {
+  const inactiveTopUpDialog =
+    props.usageTopUpActivePurchase ||
+    props.usageTopUpInitialOpen ||
+    props.usageTopUpPurchaseReturn ? (
+      <HostedUsageTopUpDialog
+        activePurchase={props.usageTopUpActivePurchase}
+        initialOpen={props.usageTopUpInitialOpen}
+        offers={[]}
+        purchaseReturn={props.usageTopUpPurchaseReturn}
+      />
+    ) : null;
+
   if (!props.status) {
-    return null;
+    return inactiveTopUpDialog;
   }
 
   const { status } = props;
   if (status.status === "unavailable") {
     if (status.reason !== "trial_conversion_pending") {
-      return null;
+      return inactiveTopUpDialog;
     }
 
     const action = status.recommendedAction;
     const canShowStartAction = action?.kind === "start_pulse";
     return (
-      <div
-        aria-label="Pulse Trial included AI usage"
-        className="flex flex-col gap-3 rounded-xl border border-border bg-card p-4 sm:flex-row sm:items-center sm:justify-between sm:p-5"
-      >
-        <div>
-          <p className="font-mono text-[10px] uppercase tracking-[0.12em] text-muted-foreground">
-            Included AI usage
-          </p>
-          <p className="mt-1 font-serif text-xl font-semibold tracking-tight text-foreground">
-            Trial ended
-          </p>
-          <p className="mt-1 text-sm text-muted-foreground">
-            {canShowStartAction
-              ? "Start Pulse to keep Murph replying."
-              : "Your included trial usage is no longer active."}
-          </p>
+      <>
+        <div
+          aria-label="Pulse Trial included AI usage"
+          className="flex flex-col gap-3 rounded-xl border border-border bg-card p-4 sm:flex-row sm:items-center sm:justify-between sm:p-5"
+        >
+          <div>
+            <p className="font-mono text-[10px] uppercase tracking-[0.12em] text-muted-foreground">
+              Included AI usage
+            </p>
+            <p className="mt-1 font-serif text-xl font-semibold tracking-tight text-foreground">
+              Trial ended
+            </p>
+            <p className="mt-1 text-sm text-muted-foreground">
+              {canShowStartAction
+                ? "Start Pulse to keep Murph replying."
+                : "Your included trial usage is no longer active."}
+            </p>
+          </div>
+          {canShowStartAction ? (
+            <StartPaidPulseButton>{action.label}</StartPaidPulseButton>
+          ) : null}
         </div>
-        {canShowStartAction ? (
-          <StartPaidPulseButton>{action.label}</StartPaidPulseButton>
-        ) : null}
-      </div>
+        {inactiveTopUpDialog}
+      </>
     );
   }
 
@@ -250,6 +287,17 @@ function PlanUsageBand(props: {
   const forecast = status.forecast
     ? `At your recent pace, included usage may run out in about ${status.forecast.estimatedDaysRemaining} ${status.forecast.estimatedDaysRemaining === 1 ? "day" : "days"}.`
     : null;
+  const usageCreditBalance = projectUsageCreditBalance(
+    props.usageCreditBalanceUsdMicros,
+  );
+  const usageTopUpDialog = (
+    <HostedUsageTopUpDialog
+      activePurchase={props.usageTopUpActivePurchase}
+      initialOpen={props.usageTopUpInitialOpen}
+      offers={props.usageTopUpOffers}
+      purchaseReturn={props.usageTopUpPurchaseReturn}
+    />
+  );
 
   return (
     <div
@@ -281,21 +329,40 @@ function PlanUsageBand(props: {
               {` · ${status.remainingPercent}% remaining`}
             </span>
           </p>
-          {status.status === "exhausted" ? (
+          {usageCreditBalance ? (
             <p className="text-sm text-muted-foreground">
-              {"You've used 100% of this period's included usage. Murph remains available."}
+              <span className="font-medium tabular-nums text-foreground">
+                {usageCreditBalance}
+              </span>{" "}
+              usage credit remaining
+            </p>
+          ) : null}
+          {status.status === "exhausted" ? (
+            <p className="text-sm text-pretty text-muted-foreground">
+              {usageCreditBalance
+                ? "You've used this period's included usage. Murph will use your remaining usage credit."
+                : props.usageTopUpOffers.length > 0
+                ? "You've used this period's included usage and any usage credit. Add usage to continue."
+                : "You've used this period's available usage. Murph pauses new usage until more capacity is available."}
             </p>
           ) : forecast ? (
             <p className="text-sm text-pretty text-muted-foreground">{forecast}</p>
           ) : null}
         </div>
 
-        {action?.kind === "start_pulse" ? (
+        {props.usageTopUpOffers.length > 0 || props.usageTopUpActivePurchase
+          ? usageTopUpDialog
+          : action?.kind === "start_pulse" ? (
           <StartPaidPulseButton>{action.label}</StartPaidPulseButton>
         ) : action?.kind === "upgrade_edge" ? (
           <UpgradeToEdgeButton>{action.label}</UpgradeToEdgeButton>
         ) : null}
       </div>
+      {props.usageTopUpOffers.length === 0 &&
+      !props.usageTopUpActivePurchase &&
+      (props.usageTopUpInitialOpen || props.usageTopUpPurchaseReturn)
+        ? usageTopUpDialog
+        : null}
     </div>
   );
 }
@@ -381,4 +448,29 @@ function formatHostedBillingDate(value: Date): string {
     timeZone: "UTC",
     year: "numeric",
   }).format(value);
+}
+
+function projectUsageCreditBalance(
+  value: string | null | undefined,
+): string | null {
+  if (typeof value !== "string" || !/^[0-9]+$/u.test(value)) {
+    return null;
+  }
+
+  const balanceUsdMicros = BigInt(value);
+  if (balanceUsdMicros === 0n) {
+    return null;
+  }
+  const wholeCents = balanceUsdMicros / 10_000n;
+  if (wholeCents === 0n) {
+    return "<$0.01";
+  }
+
+  const dollars = wholeCents / 100n;
+  const cents = wholeCents % 100n;
+  const groupedDollars = dollars
+    .toString()
+    .replace(/\B(?=(?:[0-9]{3})+(?![0-9]))/gu, ",");
+
+  return `$${groupedDollars}.${cents.toString().padStart(2, "0")}`;
 }
