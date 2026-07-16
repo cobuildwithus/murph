@@ -2118,7 +2118,7 @@ function hasHostedMailboxDedupeConflict(input: {
   );
 }
 
-function resolveHostedMailboxPayloadRef(payloadRef: string): string {
+export function resolveHostedMailboxPayloadRef(payloadRef: string): string {
   return payloadRef.startsWith(HOSTED_MAILBOX_PAYLOAD_REF_PREFIX)
     ? payloadRef.slice(HOSTED_MAILBOX_PAYLOAD_REF_PREFIX.length)
     : payloadRef;
@@ -2195,7 +2195,7 @@ function isHostedMailboxItemExpired(
   );
 }
 
-function buildHostedMailboxLiveItemWhere(at: Date): {
+export function buildHostedMailboxLiveItemWhere(at: Date): {
   createdAt: { gte: Date };
   OR: [{ expiresAt: null }, { expiresAt: { gt: Date } }];
 } {

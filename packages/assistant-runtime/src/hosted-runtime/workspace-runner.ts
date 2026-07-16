@@ -2528,21 +2528,7 @@ function createHostedWorkspaceCanonicalWritePort(input: {
         }
         const receiptLogUpdate = await appendHostedCanonicalWriteReceiptToArtifactLog({
           artifactStore: input.input.platform.artifactStore,
-          beforeReceiptUpload: async () => {
-            for (const payload of writeInput.payloads) {
-              if (payload.bytes.byteLength !== payload.byteLength) {
-                throw new TypeError(
-                  "Hosted canonical write payload length does not match its receipt.",
-                );
-              }
-            }
-            for (const payload of writeInput.payloads) {
-              await input.input.platform.artifactStore.put({
-                bytes: payload.bytes,
-                sha256: payload.sha256,
-              });
-            }
-          },
+          payloads: writeInput.payloads,
           previousStatus: input.readPreviousRedactedStatus(),
           receipt: writeInput.receipt,
         });

@@ -15,6 +15,7 @@ import {
 import { hostedOnboardingError } from "./errors";
 import {
   buildHostedMemberIdentityPrivateColumns,
+  readHostedMemberIdentityPhoneNumbers,
   readHostedMemberIdentityPrivateState,
 } from "./member-private-codecs";
 import {
@@ -38,6 +39,11 @@ export interface HostedMemberIdentityState {
   walletChainType: string | null;
   walletCreatedAt: Date | null;
   walletProvider: string | null;
+}
+
+export interface HostedMemberPhoneNumberSnapshot {
+  memberId: string;
+  phoneNumber: string | null;
 }
 
 export type HostedMemberIdentityLookupState = Omit<HostedMemberIdentityState, "phoneLookupKey">;
@@ -160,6 +166,34 @@ export async function readHostedMemberIdentity(input: {
   });
 
   return identityRecord ? await projectHostedMemberIdentityState(identityRecord, input.prisma) : null;
+}
+
+export async function readHostedMemberPhoneNumberSnapshots(input: {
+  memberIds: readonly string[];
+  prisma: HostedOnboardingReadClient;
+}): Promise<HostedMemberPhoneNumberSnapshot[]> {
+  const memberIds = [...new Set(input.memberIds)];
+  if (memberIds.length === 0) {
+    return [];
+  }
+
+  const records = await input.prisma.hostedMemberIdentity.findMany({
+    where: {
+      memberId: {
+        in: memberIds,
+      },
+    },
+    select: {
+      memberId: true,
+      phoneNumberEncrypted: true,
+    },
+  });
+
+  const phoneNumbers = await readHostedMemberIdentityPhoneNumbers(records, input.prisma);
+  return records.map((record, index) => ({
+    memberId: record.memberId,
+    phoneNumber: phoneNumbers[index] ?? null,
+  }));
 }
 
 export async function upsertHostedMemberIdentity(

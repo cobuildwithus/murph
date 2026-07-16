@@ -5,10 +5,7 @@ import {
   requireHostedAppSessionFromRequest,
   type HostedAppSession,
 } from "./app-session";
-import {
-  readHostedMemberCoreState,
-  type HostedMemberCoreState,
-} from "./hosted-member-store";
+import { type HostedMemberCoreState } from "./hosted-member-store";
 import {
   assertActiveHostedMemberAccessAllowed,
 } from "./member-access";
@@ -57,18 +54,10 @@ export async function resolvePrivyMemberAuthFromSession(input: {
   member: HostedMemberCoreState | null;
   memberLookup: HostedMemberPrivyIdentityLookup | null;
 }> {
-  const [memberLookup, sessionMember] = await Promise.all([
-    lookupHostedMemberForPrivyPrincipal({
-      identity: input.identity,
-      prisma: input.prisma,
-    }),
-    input.memberId
-      ? readHostedMemberCoreState({
-          memberId: input.memberId,
-          prisma: input.prisma,
-        })
-      : Promise.resolve(null),
-  ]);
+  const memberLookup = await lookupHostedMemberForPrivyPrincipal({
+    identity: input.identity,
+    prisma: input.prisma,
+  });
 
   if (!input.memberId) {
     return {
@@ -84,7 +73,7 @@ export async function resolvePrivyMemberAuthFromSession(input: {
     };
   }
 
-  if (!sessionMember || sessionMember.id !== memberLookup.core.id) {
+  if (input.memberId !== memberLookup.core.id) {
     return {
       member: memberLookup.core,
       memberLookup,
@@ -92,7 +81,7 @@ export async function resolvePrivyMemberAuthFromSession(input: {
   }
 
   return {
-    member: sessionMember,
+    member: memberLookup.core,
     memberLookup: null,
   };
 }
@@ -295,15 +284,9 @@ export async function requireFreshActivePrivyMemberAuthForHostedAppSession(
   freshPrivy: AuthenticatedPrivyMemberAuthContext;
 }> {
   const context = await requireFreshPrivyMemberAuthForHostedAppSession(request, prisma);
-  await Promise.all([
-    assertActiveHostedMemberAccessAllowed({
-      memberId: context.appSession.member.id,
-      prisma,
-    }),
-    assertActiveHostedMemberAccessAllowed({
-      memberId: context.freshPrivy.member.id,
-      prisma,
-    }),
-  ]);
+  await assertActiveHostedMemberAccessAllowed({
+    memberId: context.appSession.member.id,
+    prisma,
+  });
   return context;
 }

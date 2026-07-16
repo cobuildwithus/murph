@@ -246,6 +246,30 @@ it has been explicitly elevated to a cross-cutting invariant.
   terminal metadata without stage residue is not recovery work. Narrowing that
   enumeration must preserve canonical identity across physical partitions.
 
+## Database Load And Collection Fanout
+
+- A request, render, transaction, or job that consumes a collection has an
+  owner-documented upper bound on datastore round trips, decrypted fields,
+  external key or provider calls, and concurrency. Evaluate that bound at the
+  maximum admitted cardinality. A small connection pool is a capacity limit,
+  not backpressure that makes unbounded application fanout safe.
+- As output cardinality grows, use narrow set-based reads or explicitly bounded
+  pages. Read shared facts once at their owning boundary and derive downstream
+  views from that snapshot. Sibling helpers must not reread the same owner rows
+  or decrypt fields their caller does not use.
+- Fewer reads must not weaken correctness. Keep required live authority checks
+  at lifetime, target, and irreversible-effect boundaries. Remove only reads
+  proved equivalent, and reuse owner predicates and resolvers instead of
+  copying policy into feature-local code.
+- Per-item external work that cannot be batched is deduplicated and
+  concurrency-capped. Crypto owners batch envelope metadata, preserve binding
+  and authenticity checks, fail closed on missing or mismatched material, and
+  zeroize key and plaintext buffers on success and failure.
+- Hot, locked, or transactional collection paths have deterministic
+  maximum-cardinality tests for datastore call count, selected fields, external
+  call count and concurrency, ordering, and required boundary revalidation.
+  Tunable numeric caps live in the owning protocol or SLO docs and tests.
+
 ## Provider And Runtime Boundaries
 
 - The admission owner rejects invalid shape or missing admission-time authority

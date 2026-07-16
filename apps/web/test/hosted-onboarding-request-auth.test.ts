@@ -165,18 +165,17 @@ describe("hosted Privy request auth", () => {
     }));
   });
 
-  it("starts the identity lookup and direct member read in parallel", async () => {
+  it("uses the member already returned by the Privy principal lookup", async () => {
     const member = createHostedMember();
     const memberLookup = createHostedMemberLookup({
       core: member,
     });
-    const lookupDeferred = createDeferred<typeof memberLookup | null>();
-    const readDeferred = createDeferred<HostedMember | null>();
+    mocks.lookupHostedMemberForPrivyPrincipal.mockResolvedValue(memberLookup);
+    mocks.readHostedMemberCoreState.mockRejectedValue(
+      new Error("unexpected duplicate member read"),
+    );
 
-    mocks.lookupHostedMemberForPrivyPrincipal.mockReturnValue(lookupDeferred.promise);
-    mocks.readHostedMemberCoreState.mockReturnValue(readDeferred.promise);
-
-    const authPromise = resolvePrivyMemberAuthFromSession({
+    await expect(resolvePrivyMemberAuthFromSession({
       identity: {
         phone: {
           number: "+14155552671",
@@ -187,18 +186,13 @@ describe("hosted Privy request auth", () => {
       },
       memberId: member.id,
       prisma,
-    });
-
-    expect(mocks.lookupHostedMemberForPrivyPrincipal).toHaveBeenCalledTimes(1);
-    expect(mocks.readHostedMemberCoreState).toHaveBeenCalledTimes(1);
-
-    lookupDeferred.resolve(memberLookup);
-    readDeferred.resolve(member);
-
-    await expect(authPromise).resolves.toMatchObject({
+    })).resolves.toMatchObject({
       member,
       memberLookup: null,
     });
+
+    expect(mocks.lookupHostedMemberForPrivyPrincipal).toHaveBeenCalledTimes(1);
+    expect(mocks.readHostedMemberCoreState).not.toHaveBeenCalled();
   });
 
   it("requires identity lookup confirmation before trusting the session Murph member id", async () => {
@@ -218,7 +212,6 @@ describe("hosted Privy request auth", () => {
         id: "did:privy:user_123",
       },
     });
-    mocks.readHostedMemberCoreState.mockResolvedValue(member);
     mocks.lookupHostedMemberForPrivyPrincipal.mockResolvedValue(createHostedMemberLookup({
       core: member,
     }));
@@ -229,10 +222,7 @@ describe("hosted Privy request auth", () => {
       },
       memberLookup: null,
     });
-    expect(mocks.readHostedMemberCoreState).toHaveBeenCalledWith({
-      memberId: member.id,
-      prisma,
-    });
+    expect(mocks.readHostedMemberCoreState).not.toHaveBeenCalled();
     expect(mocks.lookupHostedMemberForPrivyPrincipal).toHaveBeenCalledWith(expect.objectContaining({
       identity: expect.objectContaining({
         userId: "did:privy:user_123",
@@ -531,6 +521,10 @@ describe("hosted Privy request auth", () => {
     });
     expect(mocks.requireHostedAppSessionFromRequest).toHaveBeenCalledWith(expect.any(Request));
     expect(mocks.resolveHostedPrivySessionFromRequest).toHaveBeenCalledWith(expect.any(Request));
+    expect(mocks.requireHostedAppSessionFromRequest).toHaveBeenCalledTimes(1);
+    expect(mocks.resolveHostedPrivySessionFromRequest).toHaveBeenCalledTimes(1);
+    expect(mocks.lookupHostedMemberForPrivyPrincipal).toHaveBeenCalledTimes(1);
+    expect(mocks.readHostedMemberCoreState).not.toHaveBeenCalled();
   });
 
   it("rejects fresh Privy proof for a different hosted member than the app session", async () => {
@@ -544,14 +538,45 @@ describe("hosted Privy request auth", () => {
     });
 
     await expect(
-      requireFreshPrivyMemberAuthForHostedAppSession(createAuthenticatedRequest(), prisma),
+      requireFreshActivePrivyMemberAuthForHostedAppSession(createAuthenticatedRequest(), prisma),
     ).rejects.toMatchObject({
       code: "PRIVY_SESSION_MEMBER_MISMATCH",
       httpStatus: 409,
     });
+    expect(hostedMemberAccessFindUnique).not.toHaveBeenCalled();
   });
 
-  it("applies active-member checks to both app session and fresh Privy proof", async () => {
+  it("does not trust the app-session member when the fresh Privy principal has no member", async () => {
+    mocks.lookupHostedMemberForPrivyPrincipal.mockResolvedValue(null);
+
+    await expect(
+      requireFreshActivePrivyMemberAuthForHostedAppSession(createAuthenticatedRequest(), prisma),
+    ).rejects.toMatchObject({
+      code: "HOSTED_MEMBER_NOT_FOUND",
+      httpStatus: 403,
+    });
+    expect(mocks.requireHostedAppSessionFromRequest).toHaveBeenCalledTimes(1);
+    expect(mocks.lookupHostedMemberForPrivyPrincipal).toHaveBeenCalledTimes(1);
+    expect(hostedMemberAccessFindUnique).not.toHaveBeenCalled();
+  });
+
+  it("keeps app-session verification independent from fresh Privy verification", async () => {
+    const appSessionError = Object.assign(new Error("Sign in to continue."), {
+      code: "AUTH_REQUIRED",
+      httpStatus: 401,
+    });
+    mocks.requireHostedAppSessionFromRequest.mockRejectedValue(appSessionError);
+
+    await expect(
+      requireFreshActivePrivyMemberAuthForHostedAppSession(createAuthenticatedRequest(), prisma),
+    ).rejects.toBe(appSessionError);
+    expect(mocks.requireHostedAppSessionFromRequest).toHaveBeenCalledTimes(1);
+    expect(mocks.resolveHostedPrivySessionFromRequest).toHaveBeenCalledTimes(1);
+    expect(mocks.lookupHostedMemberForPrivyPrincipal).toHaveBeenCalledTimes(1);
+    expect(hostedMemberAccessFindUnique).not.toHaveBeenCalled();
+  });
+
+  it("applies one active-member check after app-session and fresh-Privy members match", async () => {
     mocks.requireHostedAppSessionFromRequest.mockResolvedValue({
       expiresAt: new Date("2026-04-26T00:00:00.000Z"),
       member: createHostedMember({
@@ -570,6 +595,41 @@ describe("hosted Privy request auth", () => {
       code: "HOSTED_ACCESS_REQUIRED",
       httpStatus: 403,
     });
+    expect(hostedMemberAccessFindUnique).toHaveBeenCalledTimes(1);
+    expect(hostedMemberAccessFindUnique).toHaveBeenCalledWith(expect.objectContaining({
+      where: {
+        id: "member_123",
+      },
+    }));
+  });
+
+  it("preserves thread-container access semantics with the single post-match check", async () => {
+    hostedMemberAccessFindUnique.mockResolvedValue(createHostedMemberAccessState({
+      billingStatus: HostedBillingStatus.not_started,
+      threadContainer: {
+        owner: {
+          accountGroupMemberships: [],
+          billingStatus: HostedBillingStatus.active,
+          suspendedAt: null,
+        },
+      },
+    }));
+
+    await expect(
+      requireFreshActivePrivyMemberAuthForHostedAppSession(createAuthenticatedRequest(), prisma),
+    ).resolves.toMatchObject({
+      appSession: {
+        member: {
+          id: "member_123",
+        },
+      },
+      freshPrivy: {
+        member: {
+          id: "member_123",
+        },
+      },
+    });
+    expect(hostedMemberAccessFindUnique).toHaveBeenCalledTimes(1);
   });
 });
 
@@ -680,21 +740,5 @@ function createHostedMemberLookup(overrides: Partial<{
       "privyUserId",
     ],
     ...overrides,
-  };
-}
-
-function createDeferred<T>() {
-  let resolve!: (value: T | PromiseLike<T>) => void;
-  let reject!: (reason?: unknown) => void;
-
-  const promise = new Promise<T>((promiseResolve, promiseReject) => {
-    resolve = promiseResolve;
-    reject = promiseReject;
-  });
-
-  return {
-    promise,
-    reject,
-    resolve,
   };
 }
