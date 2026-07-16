@@ -8,7 +8,6 @@ import type {
 } from "@murphai/hosted-execution/runtime-control";
 import {
   listHostedLinqDeliveriesForTest,
-  readHostedAiUsageLimitPeriodForTest,
   seedHostedAiUsageLimitPeriodForTest,
 } from "#hosted-web-testing";
 import { afterAll, beforeAll, describe, expect, it, vi } from "vitest";
@@ -190,13 +189,6 @@ describe("hosted local usage-limit ambiguous send e2e", () => {
       readConversationMailboxMaxSeq(firstCompletedStatus),
       conversationSeqBeforeFirstInbound,
     )).toBeGreaterThan(0);
-
-    const claimedPeriod = await readHostedAiUsageLimitPeriodForTest({
-      environment: requireScenario().runtimeEnv,
-      memberId: userId,
-      periodStart,
-    });
-    expect(claimedPeriod?.limitNoticeSentAt).toBeInstanceOf(Date);
 
     const deliveriesAfterAmbiguousSend = await listHostedLinqDeliveriesForTest({
       environment: requireScenario().runtimeEnv,

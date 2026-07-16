@@ -134,9 +134,10 @@ This advisory policy does not weaken other access or abuse controls. The
 member-access owner validates trial phase, offer, policy, and time bounds on
 model-capable admission; active Family sponsorship still overrides stale own
 billing, and synthetic thread containers retain owner-or-participant access.
-The separate daily Linq anti-abuse quota remains enforceable. The legacy signed
-usage-gate callback remains only as a compatibility adapter over this access
-decision; it does not touch allowance periods.
+The separate daily Linq anti-abuse quota remains enforceable. Temporal consumes
+the member-access decision directly, with no separate runtime usage-gate
+callback. Cloudflare/runner #587 or newer is the permanent rollback floor for a
+Web build that omits the retired route.
 
 ### Deployment And Compatibility
 

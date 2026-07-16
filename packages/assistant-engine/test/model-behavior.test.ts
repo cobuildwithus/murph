@@ -1485,7 +1485,7 @@ Execution context:
       'Current Murph product base URL for user-facing app links: http://localhost:3000',
     )
     expect(promptA.cacheMetadata.staticPromptHash).toBe(
-      '2911ba23c4ede7bfb0363c42c516025c487f5f2120d538d39ba6d29adbb347c5',
+      '78e8502b85d5a35629dc24db70f6c6a429b489d6240464f9d12cf0fa497f5ef7',
     )
     expect(promptA.cacheMetadata.toolSchemaHash).toBe(
       'assistant-tool-schema-common-codex-test',
@@ -1622,25 +1622,10 @@ Execution context:
 })
 
 describe('assistant experiment onboarding guidance', () => {
-  it('omits the preloaded protocol index and keeps task-time discovery commands', () => {
-    const prompt = buildAssistantSystemPrompt(createCommonCodexPromptInput({
-      assistantSupportedExperimentProtocols: [
-        {
-          category: 'Recovery',
-          routeId: 'finnish-sauna',
-          title: 'Finnish Dry Sauna',
-        },
-        {
-          category: 'Exercise',
-          routeId: 'norwegian-4x4',
-          title: 'Norwegian 4x4',
-        },
-      ],
-    }))
+  it('keeps protocol discovery task-time instead of rendering a resident index', () => {
+    const prompt = buildAssistantSystemPrompt(createCommonCodexPromptInput())
 
     expect(prompt).not.toContain('Supported experiment protocols:')
-    expect(prompt).not.toContain('finnish-sauna | Finnish Dry Sauna')
-    expect(prompt).not.toContain('norwegian-4x4 | Norwegian 4x4')
     expect(prompt).toContain('Health Commons route surface:')
     expect(prompt).toContain(
       '`vault-cli commons protocol explore <query> --format json` for broad or ambiguous discovery',
@@ -1725,7 +1710,7 @@ describe('assistant experiment onboarding guidance', () => {
       'capture the user\'s reason in their own words when it is not already clear; it shapes the plan and later support.',
     )
     expect(prompt).toContain(
-      'Do not run a motivation interview or re-ask what the user already said.',
+      'Do not run an open-ended or deep motivation interview, and do not re-ask what the user already said.',
     )
 
     // Context questions earn their place and durable discoveries remain controllable.
@@ -2074,7 +2059,19 @@ describe('assistant Murph onboarding guidance', () => {
       'before advancing, declining, or completing onboarding',
     )
     expect(prompt).toContain(
-      'That skill is the single owner of resume behavior, conversation order, first-value proof, support-loop setup, foundation checkpoints, persistence, defer and skip meaning, and completion.',
+      'That skill is the single owner of resume behavior, aspiration capture and parking, foundation checkpoints, the contextual return, persistence, defer and skip meaning, and completion.',
+    )
+    expect(prompt).toContain(
+      'During discovery, a stated health goal is context, not an action request.',
+    )
+    expect(prompt).toContain(
+      'Do not diagnose, recommend, prescribe, build a plan, or enter a domain workflow solely because the user answered what they want from their health.',
+    )
+    expect(prompt).toContain(
+      'Unless an explicit immediate request or safety need requires problem-solving first, reflect, save, and park the thread before solving it.',
+    )
+    expect(prompt).toContain(
+      'The user may always pause, defer, skip a checkpoint, or decline further setup; honor that without pressure.',
     )
     expect(prompt).toContain(
       'Do not reproduce or substitute a second onboarding flow from this overlay.',
@@ -2086,7 +2083,7 @@ describe('assistant Murph onboarding guidance', () => {
       'Until then, leave onboarding open.',
     )
     expect(prompt).toContain(
-      'Ask at most one onboarding question in a reply and follow the skill\'s stand-alone-reply rules.',
+      'Ask at most one onboarding question or checkpoint in a reply; the skill\'s bundled minimal-identity prompt counts as one checkpoint.',
     )
     expect(prompt).toContain(
       "Use the current prompt's date, timezone, channel, delivery route, and available tool guidance as runtime context whenever the onboarding skill is used",
@@ -2095,6 +2092,8 @@ describe('assistant Murph onboarding guidance', () => {
       'vault-cli assistant onboarding resume-context --format json',
     )
     expect(prompt).not.toContain('all six foundation checkpoints')
+    expect(prompt).not.toContain('first-value proof')
+    expect(prompt).not.toContain('support-loop setup')
     expect(prompt).not.toContain('offer to continue now or another day')
     expect(prompt).not.toContain(
       'including a resolved first experiment setup',

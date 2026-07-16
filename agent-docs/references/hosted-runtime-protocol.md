@@ -293,9 +293,7 @@ proof owns the container lifecycle while it delivers the identity-checked abort.
 A stale result preserves the fence and retries. An accepted or queued result, or
 an ambiguous delivery failure, recycles the old shell fail-closed before the
 container returns `accepted`; only that settled stop allows the controller to
-clear the exact fence and start a replacement. A deploy-skewed request-only
-`requested` result remains non-authoritative without inactive proof and
-preserves the fence for retry.
+clear the exact fence and start a replacement.
 
 The foreground-priority rule does not weaken correctness checks. Wrong-user
 authority, invalid auth, undecryptable mailbox payloads, stale leases, and
@@ -1243,10 +1241,10 @@ routing.
 - lease/fencing generation
 - alarm/fence coordination
 - container invocation
-- optional signed web allow-decision payload compatibility on legacy foreground
-  requests; Cloudflare does not validate it as runner-start authority and
-  missing, stale, mismatched, or invalid decisions never trigger a live web
-  usage-gate callback before the hot reply path starts
+- no signed usage-allow decision or live Web usage-gate callback in runner-start
+  authority; Temporal consumes the web-owned member-access decision, and
+  Cloudflare/runner #587 or newer is the permanent rollback floor while Web
+  omits the retired callback route
 - direct-R2 snapshot upload-session plumbing plus legacy encrypted
   bundle/artifact/env/journal object plumbing
 - worker-to-web callback signing

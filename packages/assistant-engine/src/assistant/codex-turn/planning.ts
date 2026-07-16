@@ -12,9 +12,6 @@ import {
 } from '@murphai/contracts'
 import { loadVault, readPreferencesDocument } from '@murphai/core'
 import {
-  listGeneratedAssistantProtocolIndexEntries,
-} from '@murphai/health-commons/runtime'
-import {
   resolveCodexAssistantTargetCapabilities,
 } from '../codex-runtime.js'
 import {
@@ -137,7 +134,6 @@ export interface AssistantRoutePlanningDiagnostics {
   routeResumeBindingElapsedMs: number | null
   routeTargetCapabilitiesElapsedMs: number | null
   shouldPrepareBootstrapContext: boolean
-  supportedExperimentProtocolsElapsedMs: number | null
 }
 
 type AssistantRoutePlanningSpanKey =
@@ -146,7 +142,6 @@ type AssistantRoutePlanningSpanKey =
   | 'primarySystemPromptElapsedMs'
   | 'routeResumeBindingElapsedMs'
   | 'routeTargetCapabilitiesElapsedMs'
-  | 'supportedExperimentProtocolsElapsedMs'
 
 type AssistantRoutePlanningSpanMetrics = Partial<
   Record<AssistantRoutePlanningSpanKey, number>
@@ -157,7 +152,6 @@ export type AssistantRoutePlanningStage =
   | 'cli_bootstrap'
   | 'primary_instructions'
   | 'resume_binding'
-  | 'supported_experiment_protocols'
   | 'target_capabilities'
 
 const ASSISTANT_ROUTE_PLANNING_SPAN_STAGES: readonly {
@@ -183,10 +177,6 @@ const ASSISTANT_ROUTE_PLANNING_SPAN_STAGES: readonly {
   {
     key: 'routeTargetCapabilitiesElapsedMs',
     stage: 'target_capabilities',
-  },
-  {
-    key: 'supportedExperimentProtocolsElapsedMs',
-    stage: 'supported_experiment_protocols',
   },
 ]
 const ASSISTANT_ROUTE_COMMITTED_TRANSCRIPT_HISTORY_LIMIT = 24
@@ -502,14 +492,6 @@ export async function resolveAssistantRouteTurnPlan(input: {
   const bootstrapAssistantCliContract = scopeAssistantCliSurfaceContractForAssistant({
     contract: unscopedAssistantCliContract,
   })
-  const assistantSupportedExperimentProtocols =
-    input.profile.promptProfile === 'conversation'
-      ? measureRoutePlanningSync(
-          routePlanningSpans,
-          'supportedExperimentProtocolsElapsedMs',
-          () => resolveAssistantSupportedExperimentProtocols(),
-        )
-      : []
   let assistantContextSnapshotElapsedMs: number | null = null
   const assistantContextSnapshotPrompt = maintenanceTurn || !privateInteractiveAudience
     ? null
@@ -561,7 +543,6 @@ export async function resolveAssistantRouteTurnPlan(input: {
               promptCapabilityAvailability.assistantHostedDeviceConnectProviders,
             assistantKnowledgeToolsAvailable:
               promptCapabilityAvailability.assistantKnowledgeToolsAvailable,
-            assistantSupportedExperimentProtocols,
             assistantToolNameAliases,
             assistantPersonality:
               assistantStyleSettingsAvailable
@@ -773,8 +754,6 @@ export async function resolveAssistantRouteTurnPlan(input: {
       routeTargetCapabilitiesElapsedMs:
         routePlanningSpans.routeTargetCapabilitiesElapsedMs ?? null,
       shouldPrepareBootstrapContext,
-      supportedExperimentProtocolsElapsedMs:
-        routePlanningSpans.supportedExperimentProtocolsElapsedMs ?? null,
     },
     resume,
     sessionContext:
@@ -1028,14 +1007,6 @@ function resolveRoutePlanningSlowestSpan(
 
 function elapsedSince(startedAt: number): number {
   return Math.max(0, Date.now() - startedAt)
-}
-
-function resolveAssistantSupportedExperimentProtocols() {
-  try {
-    return listGeneratedAssistantProtocolIndexEntries()
-  } catch {
-    return []
-  }
 }
 
 export async function resolveAssistantPromptTimeContext(
