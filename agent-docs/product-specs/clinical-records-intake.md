@@ -176,8 +176,9 @@ no retry, reconnect, or refresh surface may create another retrieval job until
 the vault owns a lifecycle that preserves every canonical raw reference while
 bounding retained evidence over time.
 
-HTTP 401 or refresh invalid-grant transitions the current credential version
-and run to authorization-required. HTTP 403 marks only that family unavailable.
+HTTP 401 or a token at or within the retrieval expiry leeway transitions the
+current credential version and run to authorization-required. HTTP 403 marks
+only that family unavailable.
 429/5xx and transport failures are retryable; malformed pages, escaped
 pagination, and configured bounds fail closed.
 

@@ -3,7 +3,6 @@ import { describe, expect, it, vi } from "vitest";
 import {
   discoverSmartConfiguration,
   exchangeSmartAuthorizationCode,
-  refreshSmartAccessToken,
   readGrantedSmartResourceTypes,
   selectSmartRequestedScopes,
 } from "@/src/lib/clinical-records/smart";
@@ -75,6 +74,7 @@ describe("Clinical Records SMART negotiation", () => {
         access_token: "access-token",
         expires_in: 3600,
         patient: "patient-1",
+        refresh_token: "unexpected-refresh-token",
         scope: [...baseScopes, "patient/Patient.r", "patient/Observation.s"].join(" "),
         token_type: "Bearer",
       })),
@@ -88,6 +88,7 @@ describe("Clinical Records SMART negotiation", () => {
       "Patient",
       "Observation",
     ]);
+    expect(token).not.toHaveProperty("refreshToken");
     expect(readGrantedSmartResourceTypes(["patient/*.read"], resourceTypes)).toEqual(resourceTypes);
     expect(readGrantedSmartResourceTypes(
       [
@@ -115,40 +116,6 @@ describe("Clinical Records SMART negotiation", () => {
       tokenEndpoint: "https://fhir.example.test/oauth2/token",
       verifier: "verifier",
     })).rejects.toMatchObject({ code: "CLINICAL_RECORD_SMART_SCOPES_INSUFFICIENT" });
-  });
-
-  it("requires reauthorization only for an OAuth invalid_grant refresh response", async () => {
-    await expect(refreshSmartAccessToken({
-      clientId: "client-id",
-      fetchImpl: vi.fn<typeof fetch>().mockResolvedValue(new Response(
-        JSON.stringify({ error: "invalid_grant" }),
-        { headers: { "Content-Type": "application/json" }, status: 400 },
-      )),
-      grantedScopes: ["patient/Patient.rs", "patient/Observation.rs"],
-      refreshToken: "refresh-token",
-      resourceTypes: ["Patient", "Observation"],
-      tokenEndpoint: "https://fhir.example.test/oauth2/token",
-    })).rejects.toMatchObject({
-      code: "CLINICAL_RECORD_SMART_REAUTH_REQUIRED",
-      retryable: false,
-    });
-  });
-
-  it("keeps unrelated OAuth 400 refresh failures retryable", async () => {
-    await expect(refreshSmartAccessToken({
-      clientId: "client-id",
-      fetchImpl: vi.fn<typeof fetch>().mockResolvedValue(new Response(
-        JSON.stringify({ error: "invalid_request" }),
-        { headers: { "Content-Type": "application/json" }, status: 400 },
-      )),
-      grantedScopes: ["patient/Patient.rs", "patient/Observation.rs"],
-      refreshToken: "refresh-token",
-      resourceTypes: ["Patient", "Observation"],
-      tokenEndpoint: "https://fhir.example.test/oauth2/token",
-    })).rejects.toMatchObject({
-      code: "CLINICAL_RECORD_SMART_TOKEN_REFRESH_FAILED",
-      retryable: true,
-    });
   });
 
   it("cancels oversized SMART responses when Content-Length is missing", async () => {

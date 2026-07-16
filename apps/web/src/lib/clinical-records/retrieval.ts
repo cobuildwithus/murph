@@ -35,9 +35,7 @@ import {
   openClinicalConnectionFhirBaseUrl,
   openClinicalConnectionSecret,
   openClinicalPageCursor,
-  sealClinicalConnectionSecret,
   sealClinicalPageCursor,
-  toClinicalJsonArray,
 } from "./secrets";
 import {
   clinicalRecordsError,
@@ -47,7 +45,6 @@ import {
   buildEpicBetaInitialFhirPageUrl,
   buildEpicBetaRetrievalQueryFingerprintInput,
 } from "./epic-beta-policy";
-import { refreshSmartAccessToken } from "./smart";
 import {
   ClinicalResponseBodyLimitError,
   decodeClinicalResponseUtf8,
@@ -59,7 +56,7 @@ const FHIR_PAGE_COUNT = "100";
 const FHIR_NEXT_URL_MAX_CHARS = 1_024;
 const PAGE_REQUEST_CLAIM_STALE_MS = 30_000;
 const PAGE_EGRESS_RESERVATION_BYTES = HOSTED_CLINICAL_RECORDS_MAX_PAGE_BODY_CHARS;
-const TOKEN_REFRESH_LEEWAY_MS = 60_000;
+const TOKEN_EXPIRY_LEEWAY_MS = 60_000;
 const RETRIEVAL_REQUEST_ID_PREFIX = "crq_";
 const FHIR_PATIENT_ID_PATTERN = /^[A-Za-z0-9.-]{1,64}$/u;
 const TERMINAL_RUN_STATUSES = new Set([
@@ -85,20 +82,15 @@ interface RunnableClinicalRun {
   connection: {
     accessTokenEncrypted: string | null;
     accessTokenExpiresAt: Date | null;
-    clientId: string;
     fhirBaseHash: string;
     fhirBaseUrlEncrypted: string;
-    grantedScopesJson: Prisma.JsonValue;
     id: string;
-    memberId: string;
     patientIdEncrypted: string | null;
     providerDirectoryEntryId: string;
-    refreshTokenEncrypted: string | null;
     requestedScopesJson: Prisma.JsonValue;
     retrievalGeneration: number;
     sourceSystem: ClinicalSourceSystem;
     status: string;
-    tokenEndpoint: string;
     tokenVersion: number;
   };
   createdAt: Date;
@@ -245,7 +237,6 @@ export async function fetchClinicalRetrievalPage(input: {
   let providerRequestStarted = false;
   try {
     const accessToken = await requireCurrentAccessToken({
-      fetchImpl: input.fetchImpl,
       memberId: input.memberId,
       run,
     });
@@ -533,7 +524,35 @@ async function loadRunnableClinicalRun(input: {
   | { retryable: boolean; unavailable: string }
 > {
   const record = await getPrisma().clinicalRecordRetrievalRun.findFirst({
-    include: { connection: true },
+    select: {
+      connection: {
+        select: {
+          accessTokenEncrypted: true,
+          accessTokenExpiresAt: true,
+          fhirBaseHash: true,
+          fhirBaseUrlEncrypted: true,
+          id: true,
+          patientIdEncrypted: true,
+          providerDirectoryEntryId: true,
+          requestedScopesJson: true,
+          retrievalGeneration: true,
+          sourceSystem: true,
+          status: true,
+          tokenVersion: true,
+        },
+      },
+      createdAt: true,
+      egressBytes: true,
+      fetchedBytes: true,
+      generation: true,
+      grantedScopesJson: true,
+      id: true,
+      memberId: true,
+      pageCount: true,
+      providerRequestCount: true,
+      resourceTypesJson: true,
+      status: true,
+    },
     where: {
       generation: input.generation,
       id: input.runId,
@@ -643,101 +662,25 @@ function assertFhirPageUrlAllowed(input: {
 }
 
 async function requireCurrentAccessToken(input: {
-  fetchImpl?: typeof fetch;
   memberId: string;
   run: RunnableClinicalRun;
 }): Promise<string> {
   const connection = input.run.connection;
-  const patientId = requireFhirPatientId(await openClinicalConnectionSecret({
-    connectionId: connection.id,
-    encrypted: connection.patientIdEncrypted,
-    field: "patientId",
-    memberId: input.memberId,
-    tokenVersion: connection.tokenVersion,
-  }));
-  const shouldRefresh = connection.accessTokenExpiresAt !== null
-    && connection.accessTokenExpiresAt.getTime() <= Date.now() + TOKEN_REFRESH_LEEWAY_MS;
-  if (!shouldRefresh) {
-    const accessToken = await openClinicalConnectionSecret({
-      connectionId: connection.id,
-      encrypted: connection.accessTokenEncrypted,
-      field: "accessToken",
-      memberId: input.memberId,
-      tokenVersion: connection.tokenVersion,
-    });
-    if (!accessToken) throw reauthRequiredError();
-    return accessToken;
+  if (
+    connection.accessTokenExpiresAt !== null
+    && connection.accessTokenExpiresAt.getTime() <= Date.now() + TOKEN_EXPIRY_LEEWAY_MS
+  ) {
+    throw reauthRequiredError();
   }
-  const refreshToken = await openClinicalConnectionSecret({
+  const accessToken = await openClinicalConnectionSecret({
     connectionId: connection.id,
-    encrypted: connection.refreshTokenEncrypted,
-    field: "refreshToken",
-    memberId: input.memberId,
-    tokenVersion: connection.tokenVersion,
-  });
-  if (!refreshToken) throw reauthRequiredError();
-  const grantedScopes = parseStoredStringArray(connection.grantedScopesJson, "granted scopes");
-  const refreshed = await refreshSmartAccessToken({
-    clientId: connection.clientId,
-    fetchImpl: input.fetchImpl,
-    grantedScopes,
-    refreshToken,
-    resourceTypes: input.run.resourceTypes,
-    tokenEndpoint: connection.tokenEndpoint,
-  });
-  const nextTokenVersion = connection.tokenVersion + 1;
-  const nextPatientEncrypted = await sealClinicalConnectionSecret({
-    connectionId: connection.id,
-    field: "patientId",
-    memberId: input.memberId,
-    tokenVersion: nextTokenVersion,
-    value: patientId,
-  });
-  const nextAccessEncrypted = await sealClinicalConnectionSecret({
-    connectionId: connection.id,
+    encrypted: connection.accessTokenEncrypted,
     field: "accessToken",
     memberId: input.memberId,
-    tokenVersion: nextTokenVersion,
-    value: refreshed.accessToken,
+    tokenVersion: connection.tokenVersion,
   });
-  const nextRefreshEncrypted = await sealClinicalConnectionSecret({
-    connectionId: connection.id,
-    field: "refreshToken",
-    memberId: input.memberId,
-    tokenVersion: nextTokenVersion,
-    value: refreshed.refreshToken ?? refreshToken,
-  });
-  if (!nextPatientEncrypted || !nextAccessEncrypted || !nextRefreshEncrypted) {
-    throw new TypeError("Clinical Records refreshed credential encryption failed.");
-  }
-  const updated = await getPrisma().clinicalRecordConnection.updateMany({
-    data: {
-      accessTokenEncrypted: nextAccessEncrypted,
-      accessTokenExpiresAt: refreshed.expiresInSeconds
-        ? new Date(Date.now() + refreshed.expiresInSeconds * 1_000)
-        : null,
-      grantedScopesJson: toClinicalJsonArray(refreshed.grantedScopes),
-      patientIdEncrypted: nextPatientEncrypted,
-      refreshTokenEncrypted: nextRefreshEncrypted,
-      tokenVersion: nextTokenVersion,
-    },
-    where: {
-      id: connection.id,
-      memberId: input.memberId,
-      retrievalGeneration: input.run.generation,
-      status: { in: ["active", "error"] },
-      tokenVersion: connection.tokenVersion,
-    },
-  });
-  if (updated.count !== 1) {
-    throw clinicalRecordsError({
-      code: "CLINICAL_RECORD_CREDENTIALS_UPDATED",
-      httpStatus: 409,
-      message: "Clinical Records credentials changed during refresh.",
-      retryable: true,
-    });
-  }
-  return refreshed.accessToken;
+  if (!accessToken) throw reauthRequiredError();
+  return accessToken;
 }
 
 async function fetchFhirPage(input: {

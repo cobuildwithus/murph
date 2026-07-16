@@ -112,13 +112,13 @@ describe("Clinical Records authorization persistence", () => {
       expiresInSeconds: 3_600,
       grantedScopes: ["patient/Patient.rs", "patient/Observation.rs"],
       patientId: "patient-low-entropy",
-      refreshToken: null,
+      refreshToken: "unexpected-refresh-token",
     });
     mocks.readGrantedSmartResourceTypes.mockReturnValue(["Patient", "Observation"]);
     mocks.sealClinicalConnectionFhirBaseUrl.mockResolvedValue("sealed-fhir-base-url");
     mocks.sealClinicalOauthVerifier.mockResolvedValue("sealed-verifier");
     mocks.sealClinicalConnectionSecret.mockImplementation(async (input: { field: string }) =>
-      input.field === "refreshToken" ? null : `sealed-${input.field}`
+      `sealed-${input.field}`
     );
     mocks.appendClinicalRetrievalWakeTx.mockResolvedValue({
       id: "mailbox_1",
@@ -216,9 +216,14 @@ describe("Clinical Records authorization persistence", () => {
     const created = harness.connectionCreate.mock.calls[0]?.[0]?.data as Record<string, unknown>;
     expect(created.patientIdEncrypted).toBe("sealed-patientId");
     expect(created.fhirBaseUrlEncrypted).toBe("sealed-fhir-base-url");
+    expect(created.refreshTokenEncrypted).toBeNull();
     expect(created.retrievalGeneration).toBe(1);
     expect(created).not.toHaveProperty("fhirBaseUrl");
     expect(created).not.toHaveProperty("patientIdHash");
+    expect(mocks.sealClinicalConnectionSecret.mock.calls.map(([input]) => input.field)).toEqual([
+      "patientId",
+      "accessToken",
+    ]);
     expect(harness.retrievalRunCreate).toHaveBeenCalledWith({
       data: expect.objectContaining({
         generation: 1,
