@@ -1,6 +1,0 @@
-[mcp_servers.shadcn]
-args = [
-    "shadcn@latest",
-    "mcp",
-]
-command = "npx"

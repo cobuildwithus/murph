@@ -561,6 +561,20 @@ describe('assistant execution prompt contract', () => {
     expect(text).not.toContain('GPT-5 execution bias:')
   })
 
+  it('cleans up temporary files without breaking pending delivery work', () => {
+    const prompt = buildAssistantSystemPrompt(createCommonCodexPromptInput())
+
+    expect(prompt).toContain(
+      'Delete temporary files before the turn ends.',
+    )
+    expect(prompt).toContain(
+      'Keep one only while a pending action needs it, then delete it.',
+    )
+    expect(prompt).toContain(
+      'Never delete user files or durable vault records.',
+    )
+  })
+
   it('always includes the progress update contract', () => {
     const prompt = buildAssistantSystemPrompt(createCommonCodexPromptInput())
 

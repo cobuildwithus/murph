@@ -37,7 +37,7 @@ Success criteria:
 
 ## State
 
-- Done: dbHub inspection found three failed hosted resumed Codex attempts:
+- Done: production database inspection found three failed hosted resumed Codex attempts:
   `2026-05-05T02:56:52Z` with `input.29.output: Invalid input` after 10
   provider actions, `2026-05-05T02:58:12Z` with `input.13.output: Invalid
   input` after 5 provider actions, and `2026-05-05T02:59:56Z` with
@@ -86,7 +86,7 @@ Success criteria:
 ## Completion Audit
 
 - Required: get to the bottom of the three reported production failures.
-  Evidence: dbHub rows show the same provider validation error class on resumed
+  Evidence: production database rows show the same provider validation error class on resumed
   hosted Codex attempts, with provider actions already emitted before failure
   and successful nearby resumed turns proving the runtime was not globally down.
 - Required: reproduce locally. Evidence:

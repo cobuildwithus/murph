@@ -5,6 +5,7 @@ import path from "node:path";
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
 
 import {
+  readHostedMailboxItemForTest,
   seedHostedWorkspaceCheckpointForTest,
 } from "#hosted-web-testing";
 import {
@@ -43,6 +44,9 @@ import {
   startHostedLocalFullStackScenario,
   type HostedLocalFullStackScenario,
 } from "./helpers/hosted-local-full-stack-scenario.js";
+import {
+  ensureProcessingAfterSyntheticMailboxAppendForTest,
+} from "./helpers/hosted-local-wake.js";
 import {
   buildHostedLinqSignupWelcomeWake,
   buildHostedLinqInboundEvent,
@@ -212,11 +216,12 @@ productionDescribe("hosted local Linq first-contact e2e", () => {
     requireScenario().queueAssistantResponses([HOSTED_LINQ_DEFAULT_ASSISTANT_REPLY_TEXT], {
       matchInputContains: "hello mate",
     });
+    const directReplyEventId = `evt_direct_reply_${directReplyUserId}`;
     const webhookResponse = await postSignedLinqWebhook(buildHostedLinqInboundEvent(
       directReplyUserId,
       materializedChatId,
       {
-        eventId: `evt_direct_reply_${directReplyUserId}`,
+        eventId: directReplyEventId,
         messageId: `msg_direct_reply_${directReplyUserId}`,
       },
     ));
@@ -273,6 +278,39 @@ productionDescribe("hosted local Linq first-contact e2e", () => {
       scenario: requireScenario(),
       userId: directReplyUserId,
     });
+
+    // Recreate the old inter-invocation gap deterministically. A direct-woken
+    // invocation has finished and accepted exactly one reply; a later Temporal
+    // ensure now reaches the same Worker endpoint after delivery stamped this
+    // mailbox item with consumedAt. The late invocation must quiesce without
+    // another model turn or Linq send.
+    const assistantProviderResponseCountAfterReply =
+      countAssistantProviderResponsesApiRequests();
+    const answeredMailboxItem = await readHostedMailboxItemForTest({
+      dedupeKey: directReplyEventId,
+      environment: requireScenario().runtimeEnv,
+      userId: directReplyUserId,
+    });
+    expect(answeredMailboxItem.consumedAt).not.toBeNull();
+    const lateEnsure = await ensureProcessingAfterSyntheticMailboxAppendForTest({
+      harness: requireScenario().harness,
+      userId: directReplyUserId,
+    });
+    expect(lateEnsure).toMatchObject({
+      action: "started",
+      kind: "runtime_processing_accepted",
+    });
+    const quiescentStatus = await requireScenario().waitForHostedIdle(
+      directReplyUserId,
+    );
+    expect(quiescentStatus.lastErrorCode ?? null).toBeNull();
+    expect(quiescentStatus.mailboxLag.every((lane) => lane.lag === "0")).toBe(true);
+    expect(countAssistantProviderResponsesApiRequests()).toBe(
+      assistantProviderResponseCountAfterReply,
+    );
+    expect(requireLinqStub().countObservedSends(expectedDirectReplyChatPath)).toBe(
+      outboundCountBeforeReply + 1,
+    );
   }, 300_000);
 
   // Hosted turns dispatch final replies queue-only through the outbox, but an

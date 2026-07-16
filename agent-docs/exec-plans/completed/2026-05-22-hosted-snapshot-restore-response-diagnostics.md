@@ -17,14 +17,14 @@ smallest durable fix once the failing branch is proven.
 
 ## Plan
 
-1. Reproduce the current no-reply state with iMessage, DBHub, and Cloudflare
+1. Reproduce the current no-reply state with iMessage, production database inspection, and Cloudflare
    Observability.
 2. Add targeted Worker-boundary diagnostics for internal outbound response
    status/body shape and workspace snapshot presign branch outcomes.
 3. Add fixed-vocabulary child restore failure categorization after the
    data-key/presign/object checks prove healthy.
 4. Run focused Cloudflare tests and typecheck.
-5. Deploy via `cf:deploy:immediate`, then use iMessage plus Cloudflare/DBHub
+5. Deploy via `cf:deploy:immediate`, then use iMessage plus Cloudflare/production database evidence
    evidence to identify the exact failing branch.
 6. Patch the proven root cause, rerun focused verification, redeploy, and verify
    Murph replies reliably.
@@ -60,11 +60,11 @@ smallest durable fix once the failing branch is proven.
   smoke tests passed.
 - Post-deploy Cloudflare Observability returned no error-level events and no
   hosted container failure events during the controlled repro window.
-- Post-deploy DBHub evidence for the first controlled iMessage repro showed a
+- Post-deploy production database evidence for the first controlled iMessage repro showed a
   new `conversation.message`, fixed-vocabulary
   `workspace.codex_continuity_repaired` events, `outbox.delivery_finished`,
   `assistant.pass_finished`, and checkpoint completion.
-- Post-deploy DBHub evidence for the second controlled iMessage repro showed a
+- Post-deploy production database evidence for the second controlled iMessage repro showed a
   new `conversation.message`, `outbox.delivery_finished`,
   `assistant.pass_finished`, and checkpoint completion without another
   continuity repair event.
