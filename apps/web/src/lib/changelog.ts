@@ -67,7 +67,7 @@ const RAW_CHANGELOG_EDITIONS = [
     publishedOn: "2026-07-15",
     title: "A lighter way to say yes",
     summary:
-      "A like can now answer Murph on iMessage, existing group members can approve a clearly disclosed sharing request without rejoining, and 250 more exercise guides are illustrated. Billing questions also lead straight to the account controls that own the change.",
+      "A like can now answer Murph on iMessage, existing group members can approve a clearly disclosed sharing request without rejoining, and 250 more exercise guides are illustrated. New Pulse Trials now run for two weeks, and billing questions lead straight to the account controls that own the change.",
     items: [
       {
         id: "affirmative-reactions-as-replies",
@@ -118,6 +118,16 @@ const RAW_CHANGELOG_EDITIONS = [
           "A new text now gets Murph's attention before workspace cleanup, recovery, or checkpoint work. When a conversation is already active, the new message can steer the reply without waiting for background housekeeping to finish.",
         relevanceTags: ["assistant", "messaging", "reliability"],
         sourcePullRequests: [635, 636, 641, 643, 653, 656],
+      },
+      {
+        id: "pulse-trial-two-weeks",
+        kind: "feature",
+        priority: 4,
+        title: "Pulse Trial now runs for two weeks",
+        summary:
+          "Every new Pulse Trial now lasts 14 days instead of 10. Trials already created keep the policy and end date they started with.",
+        relevanceTags: ["pulse", "billing", "trial"],
+        sourcePullRequests: [],
       },
       {
         id: "billing-settings-handoff",
