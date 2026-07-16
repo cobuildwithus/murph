@@ -2,6 +2,24 @@
 
 All notable changes to `@murphai/murph` will be documented in this file.
 
+## [1.2.2] - 2026-07-16
+
+### Added
+- extend new Pulse trials to 14 days (#726)
+
+### Fixed
+- resolve release coverage concurrency once
+- register Prisma pool lifecycle (#715)
+
+### Changed
+- make clinical preemption resume deterministic
+- Converge conversational personality settings with dashboard (#716)
+- Apply hosted model changes on the same Codex thread (#697)
+- require complete provider results (#703)
+- Restore hosted live turn steering (#705)
+- Delete usage-notice compatibility fence (#698)
+- Stop appending computer handoff links (#688)
+
 ## [1.2.1] - 2026-07-16
 
 ### Added
