@@ -2,6 +2,25 @@
 
 All notable changes to `@murphai/murph` will be documented in this file.
 
+## [1.2.3] - 2026-07-16
+
+### Fixed
+- bound release coverage heap
+- batch Linq reply authority reads (#732)
+- upload canonical artifacts concurrently (#735)
+
+### Changed
+- scope release heap guard
+- document database load and fanout invariant
+- Optimize device sidebar database reads (#727)
+- narrow dashboard contact reads (#731)
+- reduce settings database read fanout (#730)
+- batch hosted group member reads (#729)
+- Deduplicate fresh Privy auth database reads (#728)
+- Add private-to-group Assistant Ask (#725)
+- fix native message bold parsing
+- Document Murph core strategy
+
 ## [1.2.2] - 2026-07-16
 
 ### Added
