@@ -37,12 +37,15 @@ const mocks = vi.hoisted(() => ({
   recordHostedIngressProviderStarted: vi.fn(),
   recordHostedIngressRuntimeMilestone: vi.fn(),
   recordHostedRuntimeLog: vi.fn(),
+  requireHostedCloudflareCallbackJsonRequest: vi.fn(),
   requireHostedCloudflareCallbackRequest: vi.fn(),
   resolveHostedRuntimeAiUsageGate: vi.fn(),
   signalHostedRuntimeRecheckRuntime: vi.fn(),
 }));
 
 vi.mock("@/src/lib/hosted-execution/cloudflare-callback-auth", () => ({
+  requireHostedCloudflareCallbackJsonRequest:
+    mocks.requireHostedCloudflareCallbackJsonRequest,
   requireHostedCloudflareCallbackRequest: mocks.requireHostedCloudflareCallbackRequest,
 }));
 
@@ -158,6 +161,12 @@ describe("hosted runtime internal web routes", () => {
     );
     mocks.hostedThreadContainerParticipantFindFirst.mockResolvedValue(null);
     mocks.getPrisma.mockReturnValue(createPrismaClientStub());
+    mocks.requireHostedCloudflareCallbackJsonRequest.mockImplementation(
+      async (request: Request) => ({
+        payload: await request.json(),
+        userId: "member_routes_1",
+      }),
+    );
     mocks.requireHostedCloudflareCallbackRequest.mockResolvedValue("member_routes_1");
     mocks.readHostedMailboxConsumedSeqByLane.mockImplementation((input: {
       lanes?: readonly string[];
