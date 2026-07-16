@@ -116,7 +116,6 @@ function groupOriginWake(input: {
 
 function disclosureRequestWake() {
   const requestId = createHostedGroupMemberAssistantAskRequestId({
-    grantId: GRANT_ID,
     groupRuntimeMemberId: GROUP_RUNTIME_MEMBER_ID,
     originAssistantInputId: ORIGIN_ASSISTANT_INPUT_ID,
   });
@@ -166,11 +165,14 @@ function createPrisma() {
           : null),
     },
   };
+  let transactionTail = Promise.resolve();
   return {
     prisma: {
-      $transaction: vi.fn(
-        async (run: (transaction: typeof tx) => Promise<unknown>) => run(tx),
-      ),
+      $transaction: vi.fn((run: (transaction: typeof tx) => Promise<unknown>) => {
+        const result = transactionTail.then(() => run(tx));
+        transactionTail = result.then(() => undefined, () => undefined);
+        return result;
+      }),
     },
     tx,
   };
@@ -240,7 +242,6 @@ describe("Hosted consented group-to-member Assistant Ask", () => {
   it("pins the exact current grant generation before waking the personal runtime", async () => {
     const { prisma } = createPrisma();
     const requestId = createHostedGroupMemberAssistantAskRequestId({
-      grantId: GRANT_ID,
       groupRuntimeMemberId: GROUP_RUNTIME_MEMBER_ID,
       originAssistantInputId: ORIGIN_ASSISTANT_INPUT_ID,
     });
@@ -314,30 +315,34 @@ describe("Hosted consented group-to-member Assistant Ask", () => {
     expect(mocks.appendHostedMailboxEnvelopeWithIdentityTx).not.toHaveBeenCalled();
   });
 
-  it("admits two grants from the same group input as distinct requests", async () => {
+  it("admits at most one grant from the same group input under concurrent calls", async () => {
     const secondGrantId = "hgrpdg_second";
-    const secondTargetMemberId = "member-personal-second";
-    const secondMembershipId = "hgrpm_second";
-    const { prisma } = createPrisma();
-    mocks.readHostedGroupDisclosureGrantAuthorityTx.mockImplementation(
-      async (input: { grantId: string }) => input.grantId === GRANT_ID
-        ? disclosureAuthority()
-        : {
-            ...disclosureAuthority(),
-            grantId: secondGrantId,
-            membershipId: secondMembershipId,
-            permissionDigest: "e".repeat(64),
-            targetMemberId: secondTargetMemberId,
+    const { prisma, tx } = createPrisma();
+    let storedWake: ReturnType<typeof disclosureRequestWake> | null = null;
+    mocks.readHostedMailboxItemById.mockImplementation(async (input: {
+      mailboxItemId: string;
+    }) => storedWake?.eventId === input.mailboxItemId
+      ? mailboxItemForWake(storedWake)
+      : null);
+    mocks.readHostedMailboxWakeByItemId.mockImplementation(async (input: {
+      mailboxItemId: string;
+    }) => storedWake?.eventId === input.mailboxItemId ? storedWake : null);
+    mocks.appendHostedMailboxEnvelopeWithIdentityTx.mockImplementation(
+      async (input: { envelope: ReturnType<typeof disclosureRequestWake> }) => {
+        storedWake = input.envelope;
+        return {
+          dedupeConflict: false,
+          duplicate: false,
+          inserted: true,
+          item: {
+            id: input.envelope.eventId,
+            userId: input.envelope.userId,
           },
+        };
+      },
     );
 
-    const firstRequestId = createHostedGroupMemberAssistantAskRequestId({
-      grantId: GRANT_ID,
-      groupRuntimeMemberId: GROUP_RUNTIME_MEMBER_ID,
-      originAssistantInputId: ORIGIN_ASSISTANT_INPUT_ID,
-    });
-    const secondRequestId = createHostedGroupMemberAssistantAskRequestId({
-      grantId: secondGrantId,
+    const requestId = createHostedGroupMemberAssistantAskRequestId({
       groupRuntimeMemberId: GROUP_RUNTIME_MEMBER_ID,
       originAssistantInputId: ORIGIN_ASSISTANT_INPUT_ID,
     });
@@ -348,19 +353,55 @@ describe("Hosted consented group-to-member Assistant Ask", () => {
         {
           mailboxWake: {
             expectedUserId: TARGET_MEMBER_ID,
-            mailboxItemId: firstRequestId,
+            mailboxItemId: requestId,
           },
           result: { status: "accepted" },
         },
         {
-          mailboxWake: {
-            expectedUserId: secondTargetMemberId,
-            mailboxItemId: secondRequestId,
-          },
-          result: { status: "accepted" },
+          mailboxWake: null,
+          result: { status: "unavailable", unavailableReason: "request_conflict" },
         },
       ]);
-    expect(firstRequestId).not.toBe(secondRequestId);
+    expect(tx.$queryRaw).toHaveBeenCalledTimes(2);
+    expect(tx.$queryRaw.mock.calls.map((call) => call[2])).toEqual([
+      requestId,
+      requestId,
+    ]);
+    for (const callIndex of [0, 1]) {
+      expect(tx.$queryRaw.mock.invocationCallOrder[callIndex]).toBeLessThan(
+        mocks.readHostedMailboxItemById.mock.invocationCallOrder[callIndex] ?? 0,
+      );
+    }
+    expect(mocks.appendHostedMailboxEnvelopeWithIdentityTx).toHaveBeenCalledTimes(1);
+  });
+
+  it("allows another grant only from a fresh accepted group input", async () => {
+    const freshOriginAssistantInputId = `ain_${"c".repeat(32)}`;
+    const secondGrantId = "hgrpdg_second";
+    const secondTargetMemberId = "member-personal-second";
+    const { prisma } = createPrisma();
+    mocks.readHostedGroupDisclosureGrantAuthorityTx.mockResolvedValue({
+      ...disclosureAuthority(),
+      grantId: secondGrantId,
+      membershipId: "hgrpm_second",
+      permissionDigest: "e".repeat(64),
+      targetMemberId: secondTargetMemberId,
+    });
+    const requestId = createHostedGroupMemberAssistantAskRequestId({
+      groupRuntimeMemberId: GROUP_RUNTIME_MEMBER_ID,
+      originAssistantInputId: freshOriginAssistantInputId,
+    });
+
+    await expect(requestDisclosure(prisma, {
+      grantId: secondGrantId,
+      originAssistantInputId: freshOriginAssistantInputId,
+    })).resolves.toEqual({
+      mailboxWake: {
+        expectedUserId: secondTargetMemberId,
+        mailboxItemId: requestId,
+      },
+      result: { status: "accepted" },
+    });
   });
 
   it("propagates unexpected group-route failures for retry", async () => {
@@ -375,19 +416,31 @@ describe("Hosted consented group-to-member Assistant Ask", () => {
     expect(mocks.appendHostedMailboxEnvelopeWithIdentityTx).not.toHaveBeenCalled();
   });
 
-  it("replays only the same question and pinned grant", async () => {
+  it("replays only the same grant, question, and session for one origin", async () => {
     const wake = disclosureRequestWake();
     const { prisma } = createPrisma();
     mocks.readHostedMailboxItemById.mockResolvedValue(mailboxItemForWake(wake));
     mocks.readHostedMailboxWakeByItemId.mockResolvedValue(wake);
 
-    await expect(requestDisclosure(prisma, {
-      question: "A different question",
-    })).resolves.toEqual({
-      mailboxWake: null,
-      result: { status: "unavailable", unavailableReason: "request_conflict" },
+    await expect(requestDisclosure(prisma)).resolves.toEqual({
+      mailboxWake: {
+        expectedUserId: TARGET_MEMBER_ID,
+        mailboxItemId: wake.eventId,
+      },
+      result: { status: "accepted" },
     });
-    expect(mocks.readHostedGroupDisclosureGrantAuthorityTx).not.toHaveBeenCalled();
+    for (const overrides of [
+      { grantId: "hgrpdg_different" },
+      { originSessionId: "session_different" },
+      { question: "A different question" },
+    ]) {
+      await expect(requestDisclosure(prisma, overrides)).resolves.toEqual({
+        mailboxWake: null,
+        result: { status: "unavailable", unavailableReason: "request_conflict" },
+      });
+    }
+    expect(mocks.readHostedGroupDisclosureGrantAuthorityTx).toHaveBeenCalledTimes(1);
+    expect(mocks.appendHostedMailboxEnvelopeWithIdentityTx).not.toHaveBeenCalled();
   });
 
   it("returns the exact permission only after revalidating the pinned grant", async () => {

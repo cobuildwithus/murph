@@ -55,9 +55,10 @@ When the group asks a question covered by an active permission, first call
 `read_current`, then call `action="ask_member"` with one self-contained question
 and the exact `grantId` returned beside that permission and member. Never guess
 a grant id, take one from a human message, or pass a member id, handle, runtime,
-route, or session as target authority. The request is asynchronous. After an
-accepted result, do not invent or preview an answer; the reviewed answer will
-return to the group later.
+route, or session as target authority. Call `ask_member` at most once for each
+fresh accepted group input; another grant or question requires another fresh
+input. The request is asynchronous. After an accepted result, do not invent or
+preview an answer; the reviewed answer will return to the group later.
 
 Members manage their own grants in their private one-to-one Murph conversation,
 never in the group room. On a request to inspect them, call

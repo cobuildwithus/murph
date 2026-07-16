@@ -32,7 +32,9 @@ member and permission by `read_current`. Web binds every hidden identity and
 revalidates the group, personal runtime, membership generation, grant
 generation, permission digest, origin, expiry, and runtime fence at admission,
 before the personal read, and before disclosure completion. Leave/rejoin and
-revoke/regrant therefore invalidate old work.
+revoke/regrant therefore invalidate old work. One accepted group input owns at
+most one consented-member request; exact replay reuses it, while a different
+grant, question, or origin session requires a fresh accepted input.
 
 The target runtime keeps its resident foreground Murph as the sole
 model-authored canonical-content writer and outbound sender. Beside it, at most

@@ -371,7 +371,10 @@ grant generations, permission digest, origin session/input, and ten-minute
 expiry, then appends a `consented_member` `assistant.ask.requested` item to the
 personal mailbox. Email, direct, unverified, stale, foreign, or model-selected
 routing fails closed. The group action targets one grant and one question; it
-never fans out. Exact retries stay pinned to the stored target.
+never fans out. The group runtime plus accepted input derive the sole request
+identity. Exact retries reuse that mailbox item, while a different grant,
+question, or origin session conflicts and requires a fresh accepted group
+input.
 
 Prepare revalidates the same authority immediately before private context is
 read and returns the exact immutable permission to the runtime. The personal

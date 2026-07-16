@@ -142,7 +142,6 @@ export function createHostedAssistantAskCompletionId(requestId: string): string 
 }
 
 export function createHostedGroupMemberAssistantAskRequestId(input: {
-  grantId: string;
   groupRuntimeMemberId: string;
   originAssistantInputId: string;
 }): string {
@@ -152,8 +151,6 @@ export function createHostedGroupMemberAssistantAskRequestId(input: {
     .update(input.groupRuntimeMemberId)
     .update("\0")
     .update(input.originAssistantInputId)
-    .update("\0")
-    .update(input.grantId)
     .digest("hex")}`;
 }
 
@@ -335,7 +332,6 @@ export async function requestHostedGroupMemberAssistantAsk(input: {
     value: input.originSessionId,
   });
   const requestId = createHostedGroupMemberAssistantAskRequestId({
-    grantId,
     groupRuntimeMemberId: input.memberId,
     originAssistantInputId: input.originAssistantInputId,
   });
@@ -700,7 +696,6 @@ async function replayHostedGroupMemberAssistantAskTx(input: {
     || wake.ask.target.kind !== "consented_member"
     || wake.ask.target.grantId !== input.grantId
     || createHostedGroupMemberAssistantAskRequestId({
-      grantId: wake.ask.target.grantId,
       groupRuntimeMemberId: input.groupRuntimeMemberId,
       originAssistantInputId: wake.ask.originAssistantInputId,
     }) !== input.requestId
@@ -837,7 +832,6 @@ async function readHostedAssistantAskAuthorityTx(input: {
       tx: input.tx,
     })
     || createHostedGroupMemberAssistantAskRequestId({
-      grantId: wake.ask.target.grantId,
       groupRuntimeMemberId: disclosureAuthority.groupRuntimeMemberId,
       originAssistantInputId: wake.ask.originAssistantInputId,
     }) !== input.requestId

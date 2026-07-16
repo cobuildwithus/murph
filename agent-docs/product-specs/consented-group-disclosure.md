@@ -46,7 +46,9 @@ review the candidate disclosure inside that boundary.
 5. For a fresh accepted group input, group Murph calls
    `murph.group(action="ask_member")` with one self-contained question and the
    exact `grantId` returned by the current read. Web resolves all member,
-   membership, runtime, route, mailbox, and callback identity.
+   membership, runtime, route, mailbox, and callback identity. That accepted
+   input owns at most one request; another grant or question requires another
+   fresh group input.
 6. The member's private runtime runs one read-only candidate pass against its
    restored workspace. A separate fresh-context pass reviews only the immutable
    permission text, incoming question, and proposed answer.
@@ -89,8 +91,10 @@ group.
   completion disclosure.
 - Leave/rejoin creates a new membership generation. Revoke/regrant creates a
   new grant generation. Old requests cannot cross either boundary.
-- One request targets one grant and asks one question. There is no implicit
-  roster fan-out, label matching, fallback member, or arbitrary target id.
+- One accepted group input owns at most one request targeting one grant and one
+  question. Exact replay reuses it; a different grant, question, or session
+  conflicts. There is no implicit roster fan-out, label matching, fallback
+  member, or arbitrary target id.
 - The existing ten-minute Assistant Ask lifetime, deterministic request and
   completion ids, encrypted mailbox retry, and first-committed-completion rule
   own durability. Retried work cannot select a new target or permission.
