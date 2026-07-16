@@ -1459,17 +1459,16 @@ describe('assistant codex runtime', () => {
 
   const computerPauseFinalMessageScenarios = [
     {
-      expectedFinalMessage:
-        'Paused for confirmation.\n\nTake over here: https://web.example.test/computer/handoff/raw-token',
+      expectedFinalMessage: 'Paused for confirmation.',
       modelMessage: 'Paused for confirmation.',
-      name: 'appends an omitted handoff URL',
+      name: 'does not append an omitted handoff URL',
     },
     {
       expectedFinalMessage:
-        'Paused for confirmation. Take over here: https://web.example.test/computer/handoff/raw-token',
+        'Open the secure checkout: https://web.example.test/computer/handoff/raw-token',
       modelMessage:
-        'Paused for confirmation. Take over here: https://web.example.test/computer/handoff/raw-token',
-      name: 'preserves a model-supplied handoff URL once',
+        'Open the secure checkout: https://web.example.test/computer/handoff/raw-token',
+      name: 'preserves a model-supplied handoff URL',
     },
   ] as const
 
@@ -1801,10 +1800,12 @@ describe('assistant codex runtime', () => {
     expect(liveTurnReleased).toBe(1)
   })
 
-  it('overrides an earlier no-reply and rejects a later one when a handoff URL must be delivered', async () => {
+  it('clears an earlier no-reply and rejects overlapping and later ones after a computer pause', async () => {
     const workingDirectory = await createTempDir('assistant-codex-computer-pause-no-reply-work-')
     const progressDelivery = createProgressDeliveryMock()
     const hostedToolContext = createHostedToolContext()
+    const onFinishWithoutReplyAccepted = vi.fn()
+    const onFinishWithoutReplyRecorded = vi.fn()
     const fetchImpl = vi.fn(async (
       url: string | URL | Request,
       init?: RequestInit,
@@ -1861,7 +1862,7 @@ describe('assistant codex runtime', () => {
           )
           child.stdout.write(
             jsonLine({
-              id: 60,
+              id: 59,
               method: 'item/tool/call',
               params: {
                 namespace: 'murph',
@@ -1870,12 +1871,21 @@ describe('assistant codex runtime', () => {
               },
             }),
           )
-          await expect(waitForRpcResponse(child, 60)).resolves.toMatchObject({
-            id: 60,
+          await expect(waitForRpcResponse(child, 59)).resolves.toMatchObject({
+            id: 59,
             result: { success: true },
           })
 
-          child.stdout.write(
+          child.stdout.write([
+            jsonLine({
+              id: 60,
+              method: 'item/tool/call',
+              params: {
+                namespace: 'murph',
+                tool: 'finish_without_reply',
+                arguments: {},
+              },
+            }),
             jsonLine({
               id: 61,
               method: 'item/tool/call',
@@ -1890,7 +1900,11 @@ describe('assistant codex runtime', () => {
                 },
               },
             }),
-          )
+          ].join(''))
+          await expect(waitForRpcResponse(child, 60)).resolves.toMatchObject({
+            id: 60,
+            result: { success: false },
+          })
           await expect(waitForRpcResponse(child, 61)).resolves.toMatchObject({
             id: 61,
             result: { success: true },
@@ -1902,13 +1916,41 @@ describe('assistant codex runtime', () => {
               method: 'item/tool/call',
               params: {
                 namespace: 'murph',
-                tool: 'finish_without_reply',
-                arguments: {},
+                tool: 'computer_act',
+                arguments: {
+                  code: "await page.getByRole('button', { name: 'Place your order' }).click();",
+                  runId: 'run_123',
+                  timeoutMs: 25000,
+                },
               },
             }),
           )
           await expect(waitForRpcResponse(child, 62)).resolves.toEqual({
             id: 62,
+            result: {
+              success: false,
+              contentItems: [
+                {
+                  type: 'inputText',
+                  text: 'computer run is paused for user input; end this turn and wait for the next user reply',
+                },
+              ],
+            },
+          })
+
+          child.stdout.write(
+            jsonLine({
+              id: 63,
+              method: 'item/tool/call',
+              params: {
+                namespace: 'murph',
+                tool: 'finish_without_reply',
+                arguments: {},
+              },
+            }),
+          )
+          await expect(waitForRpcResponse(child, 63)).resolves.toEqual({
+            id: 63,
             result: {
               success: false,
               contentItems: [
@@ -1920,6 +1962,19 @@ describe('assistant codex runtime', () => {
             },
           })
 
+          child.stdout.write(
+            jsonLine({
+              method: 'item/completed',
+              params: {
+                item: {
+                  id: 'assistant-computer-pause-no-reply',
+                  type: 'assistant_message',
+                  message:
+                    'Open the secure checkout: https://web.example.test/computer/handoff/raw-token',
+                },
+              },
+            }),
+          )
           child.stdout.write(
             jsonLine({
               method: 'turn/completed',
@@ -1941,6 +1996,8 @@ describe('assistant codex runtime', () => {
       executeCodexAppServerTurn({
         fetchImpl,
         hostedToolContext,
+        onFinishWithoutReplyAccepted,
+        onFinishWithoutReplyRecorded,
         progressDelivery,
         prompt: 'pause for confirmation',
         workingDirectory,
@@ -1948,9 +2005,14 @@ describe('assistant codex runtime', () => {
     ).resolves.toMatchObject({
       acceptedNoReplyDeliveryContextOrdinals: [],
       finalAction: null,
-      finalMessage: 'Take over here: https://web.example.test/computer/handoff/raw-token',
-      transcriptMessage: null,
+      finalMessage:
+        'Open the secure checkout: https://web.example.test/computer/handoff/raw-token',
+      transcriptMessage:
+        'Open the secure checkout: https://web.example.test/computer/handoff/raw-token',
     })
+    expect(fetchImpl).toHaveBeenCalledTimes(1)
+    expect(onFinishWithoutReplyAccepted).not.toHaveBeenCalled()
+    expect(onFinishWithoutReplyRecorded).not.toHaveBeenCalled()
   })
 
   const vaultApprovalUrlScenarios = [
