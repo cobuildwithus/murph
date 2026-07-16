@@ -1,6 +1,7 @@
 import type { BeforeSendEvent as VercelAnalyticsBeforeSendEvent } from "@vercel/analytics/next";
 
 const PRIVATE_COMPUTER_HANDOFF_PATH_MARKER = "/computer/handoff/";
+const MURPH_SAFE_PATHNAME = "/search";
 const PRIVATE_COMPUTER_HANDOFF_PATH_PREFIXES = [
   {
     prefix: "/computer/handoff/",
@@ -21,13 +22,27 @@ export type VercelSpeedInsightsBeforeSendEvent = {
 
 export function redactVercelAnalyticsEvent(
   event: VercelAnalyticsBeforeSendEvent,
-): VercelAnalyticsBeforeSendEvent {
+): VercelAnalyticsBeforeSendEvent | null {
+  if (shouldSuppressVercelTelemetryUrl(event.url)) {
+    return null;
+  }
+
   return redactEventUrl(event);
 }
 
 export function redactVercelSpeedInsightsEvent(
   event: VercelSpeedInsightsBeforeSendEvent,
-): VercelSpeedInsightsBeforeSendEvent {
+): VercelSpeedInsightsBeforeSendEvent | null {
+  if (
+    shouldSuppressVercelTelemetryUrl(event.url)
+    || (
+      typeof event.route === "string"
+      && shouldSuppressVercelTelemetryUrl(event.route)
+    )
+  ) {
+    return null;
+  }
+
   const redactedUrl = redactPrivateAnalyticsUrl(event.url);
   const redactedRoute = typeof event.route === "string"
     ? redactPrivateAnalyticsUrl(event.route)
@@ -42,6 +57,22 @@ export function redactVercelSpeedInsightsEvent(
     route: redactedRoute,
     url: redactedUrl,
   };
+}
+
+export function shouldSuppressVercelTelemetryForPathname(
+  pathname: string | null | undefined,
+): boolean {
+  return pathname === MURPH_SAFE_PATHNAME
+    || pathname?.startsWith(`${MURPH_SAFE_PATHNAME}/`) === true;
+}
+
+export function shouldSuppressVercelTelemetryUrl(value: string): boolean {
+  try {
+    const parsed = new URL(value, URL_PARSE_BASE);
+    return shouldSuppressVercelTelemetryForPathname(parsed.pathname);
+  } catch {
+    return shouldSuppressVercelTelemetryForPathname(value);
+  }
 }
 
 export function redactPrivateAnalyticsUrl(value: string): string {

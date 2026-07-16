@@ -248,6 +248,17 @@ Caution-rating dots (1–5 filled sand dots) + "Who should avoid" list + "Precau
 ### Inputs / Fields
 Cream background, 1px warm border, rounded-md (10px). Focus: border shifts to sage (`#7a8c6e`), no glow. Mono labels above, body placeholder inside. Category and library filters use the `Select` dropdown, not a horizontal toggle pill row — toggle rows look broken in the active state when one pill has primary fill and the rest sit on transparent muted-surface, and they don't compress at small widths. Search inputs only appear when there are enough rows to need them (>~15 entries); below that, the dropdown alone is enough.
 
+### Murph Safe Search and Product Evidence
+The public `/search` page uses the editorial paper system without an app-shell
+dashboard. Lead with one direct question, one large explicit-submit field, and
+short privacy/evidence framing. Group results by Supplements and Branded foods;
+each flat row shows identity, source, and exact-linked test count without a
+safe/unsafe badge. Detail pages read like evidence files: identity, tests,
+ingredients, nutrition, unknowns, provenance, correction contact. Use sienna
+only for genuine warnings or failures. Evidence gaps stay neutral and explicit.
+At phone widths, metadata wraps under identity and long product/source strings
+must break without horizontal scrolling.
+
 ### Choice Cards
 Use the shared `ChoiceCard` with `RadioGroup` when a member must compare two to
 five consequential options. Each card has one short title, one brief purpose
