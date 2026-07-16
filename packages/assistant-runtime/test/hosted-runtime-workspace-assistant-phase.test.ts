@@ -3562,17 +3562,52 @@ describe("runHostedWorkspaceAssistantPhase runtime logs", () => {
           if (!saved || saved.action !== "save") {
             throw new Error("Expected saved automation.");
           }
+          const stale = await executionContext.hosted?.automationTool?.request({
+            action: "save",
+            instructions: "Archive this stale group check-in.",
+            schedule: { kind: "dailyLocal", localTime: "08:45" },
+            slug: "stale-group-check-in",
+            supportKind: "check_in",
+            supportSeriesId: "habit:group-check-in",
+            title: "Stale group check-in",
+          });
+          const paused = await executionContext.hosted?.automationTool?.request({
+            action: "save",
+            instructions: "Keep this user-paused group check-in paused.",
+            schedule: { kind: "dailyLocal", localTime: "09:00" },
+            slug: "paused-group-check-in",
+            status: "paused",
+            supportKind: "check_in",
+            supportSeriesId: "habit:group-check-in",
+            title: "Paused group check-in",
+          });
+          const otherSeries = await executionContext.hosted?.automationTool?.request({
+            action: "save",
+            instructions: "Keep this separate support series active.",
+            schedule: { kind: "dailyLocal", localTime: "09:15" },
+            slug: "other-group-check-in",
+            supportKind: "check_in",
+            supportSeriesId: "habit:other-group-check-in",
+            title: "Other group check-in",
+          });
+          if (
+            stale?.action !== "save"
+            || paused?.action !== "save"
+            || otherSeries?.action !== "save"
+          ) {
+            throw new Error("Expected support-series fixture automations.");
+          }
           await expect(executionContext.hosted?.automationTool?.request({
             action: "reconcile",
             desiredAutomationIds: [saved.automationId],
             supportSeriesId: "habit:group-check-in",
           })).resolves.toEqual({
             action: "reconcile",
-            archivedCount: 0,
-            matchedCount: 1,
+            archivedCount: 1,
+            matchedCount: 3,
             missingDesiredAutomationIds: [],
             supportSeriesId: "habit:group-check-in",
-            unchangedCount: 1,
+            unchangedCount: 2,
           });
           await expect(executionContext.hosted?.automationTool?.request({
             action: "save",
@@ -3625,6 +3660,18 @@ describe("runHostedWorkspaceAssistantPhase runtime logs", () => {
           "system:support-series:habit:group-check-in",
         ]),
       }));
+      await expect(showAutomation({
+        slug: "stale-group-check-in",
+        vaultRoot,
+      })).resolves.toEqual(expect.objectContaining({ status: "archived" }));
+      await expect(showAutomation({
+        slug: "paused-group-check-in",
+        vaultRoot,
+      })).resolves.toEqual(expect.objectContaining({ status: "paused" }));
+      await expect(showAutomation({
+        slug: "other-group-check-in",
+        vaultRoot,
+      })).resolves.toEqual(expect.objectContaining({ status: "active" }));
     } finally {
       await rm(parentRoot, { force: true, recursive: true });
     }
