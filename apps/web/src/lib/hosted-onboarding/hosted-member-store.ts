@@ -36,6 +36,7 @@ import {
   lockHostedMemberRow,
   type HostedOnboardingReadClient,
 } from "./shared";
+import { runWithHostedDomainRootUnwrapCache } from "../hosted-crypto/domain-root-unwrap-cache";
 import { readHostedMemberIdentityPhoneNumber } from "./member-private-codecs";
 
 const HOSTED_MEMBER_EMAIL_AUTH_VERIFIED_EMAIL_FIELD =
@@ -82,6 +83,14 @@ const hostedMemberEmailAuthorizationLookupSelect =
     },
   });
 
+const hostedMemberVerifiedEmailSelect =
+  Prisma.validator<Prisma.HostedMemberEmailAuthorizationSelect>()({
+    memberId: true,
+    verifiedEmailAddressEncrypted: true,
+    verifiedEmailLookupKey: true,
+    verifiedEmailVerifiedAt: true,
+  });
+
 export type HostedMemberCoreState = Prisma.HostedMemberGetPayload<{
   select: typeof hostedMemberCoreStateSelect;
 }>;
@@ -123,6 +132,11 @@ export interface HostedMemberEmailAuthorizationLookup {
 export interface HostedMemberEmailSnapshot {
   core: HostedMemberCoreState;
   emailAuthorization: HostedMemberEmailAuthorizationState | null;
+}
+
+export interface HostedMemberVerifiedEmailSnapshot {
+  memberId: string;
+  verifiedEmail: HostedMemberVerifiedEmailFact | null;
 }
 
 export interface HostedMemberEmailAuthorizationWriteInput {
@@ -246,6 +260,49 @@ export async function readHostedMemberEmailSnapshots(input: {
         )
       : null,
   })));
+}
+
+export async function readHostedMemberVerifiedEmailSnapshots(input: {
+  memberIds: readonly string[];
+  prisma: HostedOnboardingReadClient;
+}): Promise<HostedMemberVerifiedEmailSnapshot[]> {
+  const memberIds = [...new Set(input.memberIds)];
+  if (memberIds.length === 0) {
+    return [];
+  }
+
+  const records = await input.prisma.hostedMemberEmailAuthorization.findMany({
+    where: {
+      memberId: {
+        in: memberIds,
+      },
+    },
+    select: hostedMemberVerifiedEmailSelect,
+  });
+
+  return runWithHostedDomainRootUnwrapCache(async () =>
+    await Promise.all(records.map(async (record) => {
+      const address = await decryptHostedWebNullableString({
+        field: HOSTED_MEMBER_EMAIL_AUTH_VERIFIED_EMAIL_FIELD,
+        memberId: record.memberId,
+        prisma: input.prisma,
+        value: record.verifiedEmailAddressEncrypted,
+      });
+      return {
+        memberId: record.memberId,
+        verifiedEmail:
+          address
+          && record.verifiedEmailLookupKey
+          && record.verifiedEmailVerifiedAt
+            ? {
+                address,
+                lookupKey: record.verifiedEmailLookupKey,
+                verifiedAt: record.verifiedEmailVerifiedAt,
+              }
+            : null,
+      };
+    }))
+  );
 }
 
 export async function claimHostedMemberSignupWelcomeEmailAttempt(input: {

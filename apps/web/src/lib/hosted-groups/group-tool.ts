@@ -77,6 +77,7 @@ import {
   createHostedGroupJoinLinkForOwnedThreadContainerTx,
   leaveHostedGroupMemberTx,
   readHostedGroupByRuntimeMemberId,
+  readHostedGroupIdByRuntimeMemberId,
   readHostedGroupMembershipsForMember,
   recordHostedGroupJoinOfferTx,
   revokeHostedGroupMemberEmailShareTx,
@@ -307,10 +308,10 @@ async function handleHostedRuntimeGroupUpdateDisplayName(input: {
     return unavailable("display_name_unavailable");
   }
 
-  const existing = await readHostedGroupByRuntimeMemberId({
+  const existingGroupId = await readHostedGroupIdByRuntimeMemberId({
     runtimeMemberId: input.memberId,
   });
-  if (!existing) {
+  if (!existingGroupId) {
     return unavailable("group_not_found");
   }
 

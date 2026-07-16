@@ -27,6 +27,7 @@ import {
   readHostedMemberEmailSnapshots,
   readHostedMemberMessagingSetupState,
   readHostedMemberSnapshot,
+  readHostedMemberVerifiedEmailSnapshots,
   type HostedMemberCoreState,
 } from "@/src/lib/hosted-onboarding/hosted-member-store";
 import {
@@ -42,6 +43,7 @@ import {
   lookupHostedMemberIdentityByPhoneLookupKey,
   lookupHostedMemberIdentityByPhoneNumber,
   lookupHostedMemberIdentityByPrivyUserId,
+  readHostedMemberPhoneNumberSnapshots,
   type HostedMemberIdentityState,
   upsertHostedMemberIdentity,
 } from "@/src/lib/hosted-onboarding/hosted-member-identity-store";
@@ -292,6 +294,85 @@ describe("hosted-member-store", () => {
         },
       },
     }));
+  });
+
+  it("reads verified emails for a member set with one narrow query", async () => {
+    const memberId = "member_verified_email_batch";
+    const verifiedAt = new Date("2026-07-15T12:00:00.000Z");
+    const findMany = vi.fn().mockResolvedValue([{
+      memberId,
+      verifiedEmailAddressEncrypted: await encryptHostedWebNullableString({
+        field: "hosted-member-email-authorization.verified-email",
+        memberId,
+        value: "batch@example.test",
+      }),
+      verifiedEmailLookupKey: "hbidx:email:v1:batch",
+      verifiedEmailVerifiedAt: verifiedAt,
+    }]);
+    const prisma = {
+      hostedMemberEmailAuthorization: { findMany },
+    } as never;
+
+    await expect(readHostedMemberVerifiedEmailSnapshots({
+      memberIds: [memberId, memberId, "member_missing"],
+      prisma,
+    })).resolves.toEqual([{
+      memberId,
+      verifiedEmail: {
+        address: "batch@example.test",
+        lookupKey: "hbidx:email:v1:batch",
+        verifiedAt,
+      },
+    }]);
+    expect(findMany).toHaveBeenCalledTimes(1);
+    expect(findMany).toHaveBeenCalledWith({
+      where: {
+        memberId: {
+          in: [memberId, "member_missing"],
+        },
+      },
+      select: {
+        memberId: true,
+        verifiedEmailAddressEncrypted: true,
+        verifiedEmailLookupKey: true,
+        verifiedEmailVerifiedAt: true,
+      },
+    });
+  });
+
+  it("reads roster phone handles for a member set with one narrow query", async () => {
+    const memberId = "member_phone_batch";
+    const findMany = vi.fn().mockResolvedValue([{
+      memberId,
+      phoneNumberEncrypted: await encryptHostedWebNullableString({
+        field: "hosted-member-identity.phone-number",
+        memberId,
+        value: "+12125550111",
+      }),
+    }]);
+    const prisma = {
+      hostedMemberIdentity: { findMany },
+    } as never;
+
+    await expect(readHostedMemberPhoneNumberSnapshots({
+      memberIds: [memberId, memberId, "member_missing"],
+      prisma,
+    })).resolves.toEqual([{
+      memberId,
+      phoneNumber: "+12125550111",
+    }]);
+    expect(findMany).toHaveBeenCalledTimes(1);
+    expect(findMany).toHaveBeenCalledWith({
+      where: {
+        memberId: {
+          in: [memberId, "member_missing"],
+        },
+      },
+      select: {
+        memberId: true,
+        phoneNumberEncrypted: true,
+      },
+    });
   });
 
   it("fails closed when verified email read candidates match multiple members", async () => {
