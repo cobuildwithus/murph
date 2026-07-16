@@ -4599,7 +4599,7 @@ describe('assistant codex runtime', () => {
           'config/read',
           'thread/compact/start',
           'account/logout',
-        ].includes(method ?? '')),
+        ].includes(typeof method === 'string' ? method : '')),
     ).toEqual([
       'account/login/start',
       'config/read',
