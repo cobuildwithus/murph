@@ -204,14 +204,17 @@ current user explicitly asks for the loop.
    round. Correct its evidence or invocation gap and retry the same round number
    against the same pushed head.
 
-   Treat a suspiciously fast turnaround as a warning that requires checking the
-   exact-turn, completion-marker, attachment, and model evidence. Elapsed time
-   alone does not invalidate a round. If those checks show a different or
-   downgraded model, incomplete response, or missing snapshot, discard the round,
-   correct the profile or invocation, and retry the same substantive round
-   number against the same pushed head. Browser, model, capture, and attachment
-   retries never advance the round counter. If only one lane is healthy, pin it
-   with `REVIEW_GPT_BROWSER_LANE` and note the temporary override in handoff.
+   A marked concrete-model response that completes in under 10 minutes is
+   untrusted and does not count. ReviewGPT must fail the run, preserve the
+   response only as diagnostic output, and omit model-verification attestation.
+   Retry the same substantive round number against the same pushed head; browser,
+   model, capture, attachment, and too-fast-response retries never advance the
+   round counter. For responses at or above the minimum, still verify the exact
+   turn, completion marker, attachment, and model evidence. If those checks show
+   a different or downgraded model, incomplete response, or missing snapshot,
+   discard the round, correct the profile or invocation, and retry. If only one
+   lane is healthy, pin it with `REVIEW_GPT_BROWSER_LANE` and note the temporary
+   override in handoff.
 
 4. Triage every finding locally before fixing:
    - **Accepted bug/edge case**: confirm the issue through a

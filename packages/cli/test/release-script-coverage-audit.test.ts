@@ -137,6 +137,7 @@ function loadReviewGptOpenTargetHarness(
     'module.exports.__isRetryableSocketErrorTest = isRetryableSocketError;',
     'module.exports.__mainTest = main;',
     'module.exports.__mainWithRetryTest = mainWithRetry;',
+    'module.exports.__markedResponseDurationFailureTest = markedResponseDurationFailure;',
     'module.exports.__modelAttestationTurnNonceTest = modelAttestationTurnNonce;',
     'module.exports.__modelAttestationForSnapshotTest = modelAttestationForSnapshot;',
     'module.exports.__prepareRuntimeConfigTest = prepareRuntimeConfig;',
@@ -456,6 +457,7 @@ function loadReviewGptOpenTargetHarness(
   const isRetryableSocketError = moduleRecord.exports.__isRetryableSocketErrorTest
   const main = moduleRecord.exports.__mainTest
   const mainWithRetry = moduleRecord.exports.__mainWithRetryTest
+  const markedResponseDurationFailure = moduleRecord.exports.__markedResponseDurationFailureTest
   const modelAttestationTurnNonce = moduleRecord.exports.__modelAttestationTurnNonceTest
   const modelAttestationForSnapshot = moduleRecord.exports.__modelAttestationForSnapshotTest
   const modelConfirmationFailure = moduleRecord.exports.modelConfirmationFailure
@@ -473,6 +475,7 @@ function loadReviewGptOpenTargetHarness(
     typeof isRetryableSocketError !== 'function' ||
     typeof main !== 'function' ||
     typeof mainWithRetry !== 'function' ||
+    typeof markedResponseDurationFailure !== 'function' ||
     typeof modelAttestationTurnNonce !== 'string' ||
     typeof modelAttestationForSnapshot !== 'function' ||
     typeof modelConfirmationFailure !== 'function' ||
@@ -508,6 +511,15 @@ function loadReviewGptOpenTargetHarness(
     mainWithRetry: async () => {
       await Reflect.apply(mainWithRetry, undefined, [])
     },
+    markedResponseDurationFailure: (
+      targetModel: string,
+      responseMarker: string,
+      responseElapsedMs: number,
+    ) => String(Reflect.apply(markedResponseDurationFailure, undefined, [{
+      responseElapsedMs,
+      responseMarker,
+      targetModel,
+    }])),
     modelAttestationForSnapshot: (
       targetModel: string,
       snapshot: ReviewGptAssistantSnapshot,
@@ -918,8 +930,8 @@ describe('monorepo release flow coverage audit', () => {
     expect(existsSync(path.join(repoRoot, 'scripts', 'chatgpt-managed-browser.test.mjs'))).toBe(false)
     expect(existsSync(path.join(repoRoot, 'scripts', 'review-gpt.sh'))).toBe(false)
     expect(existsSync(path.join(repoRoot, 'scripts', 'review-gpt-cli.sh'))).toBe(false)
-    expect(rootPackageJson.devDependencies?.['@cobuild/review-gpt']).toBe('^0.5.108')
-    expect(pnpmWorkspace).toContain('@cobuild/review-gpt@0.5.108')
+    expect(rootPackageJson.devDependencies?.['@cobuild/review-gpt']).toBe('^0.5.109')
+    expect(pnpmWorkspace).toContain('@cobuild/review-gpt@0.5.109')
     expect(
       pnpmWorkspace
         .match(/^patchedDependencies:\n((?:  .+\n)+)/mu)?.[1]
@@ -981,8 +993,13 @@ describe('monorepo release flow coverage audit', () => {
     expect(reviewGptDriver).toContain('`CDP socket command timed out: ${method}`')
     expect(reviewGptDriver).toContain('`Nested CDP socket command timed out: ${method}`')
     expect(reviewGptDriver).toContain(
-      'const MODEL_CONFIRMATION_UNKNOWN_FALLBACK_MS = 10 * 60 * 1000;',
+      'const MIN_MARKED_CONCRETE_MODEL_RESPONSE_MS = 10 * 60 * 1000;',
     )
+    expect(reviewGptDriver).toContain(
+      'const MODEL_CONFIRMATION_UNKNOWN_FALLBACK_MS = MIN_MARKED_CONCRETE_MODEL_RESPONSE_MS;',
+    )
+    expect(reviewGptDriver).toContain("status: 'response-too-fast'")
+    expect(reviewGptDriver).toContain('markedResponseDurationFailure({')
     expect(reviewGptDriver).toContain('acceptsTimedUnknown')
     expect(reviewGptReadme).toContain(
       'require exactly one unfenced, unquoted `MODEL_CONFIRMATION` line',
@@ -990,6 +1007,9 @@ describe('monorepo release flow coverage audit', () => {
     expect(reviewGptReadme).toContain('the exact turn committed by this run')
     expect(reviewGptReadme).toContain('An ephemeral per-run nonce')
     expect(reviewGptReadme).toContain('after at least 10 minutes of observed generation')
+    expect(reviewGptReadme).toContain(
+      'A marked concrete-model response that completes in under 10 minutes fails closed as untrusted',
+    )
     expect(reviewGptDriver).toContain('REVIEW_GPT_TURN_NONCE:')
     expect(reviewGptDriver).not.toContain("value.includes('MODEL_CONFIRMATION:')")
     expect(reviewGptDriver).toContain('precedingUserMessageSignature')
@@ -1020,6 +1040,29 @@ describe('monorepo release flow coverage audit', () => {
     expect(reviewGptDriver.slice(timeoutPartialStart, timeoutPartialStart + 300)).not.toContain(
       'modelVerification',
     )
+    const responseDurationGuardStart = reviewGptDriver.indexOf(
+      'const responseDurationFailure = markedResponseDurationFailure({',
+    )
+    const responseAttestationStart = reviewGptDriver.indexOf(
+      'const modelAttestation = modelAttestationForSnapshot(',
+      responseDurationGuardStart,
+    )
+    expect(responseDurationGuardStart).toBeGreaterThan(-1)
+    expect(responseAttestationStart).toBeGreaterThan(responseDurationGuardStart)
+    const tooFastBranchStart = reviewGptDriver.indexOf(
+      "} else if (responseResult?.status === 'response-too-fast') {",
+    )
+    const tooFastBranchEnd = reviewGptDriver.indexOf('} else {', tooFastBranchStart)
+    const tooFastBranch = reviewGptDriver.slice(tooFastBranchStart, tooFastBranchEnd)
+    expect(tooFastBranchStart).toBeGreaterThan(-1)
+    expect(tooFastBranchEnd).toBeGreaterThan(tooFastBranchStart)
+    expect(tooFastBranch).toContain(
+      'writeCapturedResponseFile(responseFile, responseResult.responseText);',
+    )
+    expect(tooFastBranch).toContain('throw new Error(responseResult.responseDurationFailure')
+    expect(tooFastBranch).not.toContain('writeCompletedResponseArtifacts')
+    expect(tooFastBranch).not.toContain('modelVerification')
+    expect(reviewGptDriver).toContain('process.exit(1);')
     expect(reviewGptDriver).toContain(
       [
         '  });',
@@ -1247,7 +1290,10 @@ describe('monorepo release flow coverage audit', () => {
     expect(prReviewGptLoop).toMatch(/Keep that line and baseline\s+immutable/u)
     expect(prReviewGptLoop).toContain('ReviewGPT first-reviewed head: <full-sha>')
     expect(prReviewGptLoop).toContain('`ROUND_OUTCOME: INVALID`')
-    expect(prReviewGptLoop).toContain('Browser, model, capture, and attachment')
+    expect(prReviewGptLoop).toContain(
+      'A marked concrete-model response that completes in under 10 minutes',
+    )
+    expect(prReviewGptLoop).toContain('too-fast-response retries never advance')
     expect(prReviewGptLoop).toContain('review remediation has added at least 500')
     expect(prReviewGptLoop).toContain('source additions by at least 25 percent')
     expect(prReviewGptLoop).toContain('The retrospective is')
@@ -1815,6 +1861,34 @@ describe('monorepo release flow coverage audit', () => {
     expect(
       harness.modelAttestationForSnapshot('gpt-5.6-sol', prePromptSnapshot, true),
     ).toMatchObject({ evidence: null })
+  })
+
+  it('fails closed marked concrete-model responses below ten minutes', () => {
+    const harness = loadReviewGptOpenTargetHarness(1)
+
+    expect(
+      harness.markedResponseDurationFailure('gpt-5.6-sol', 'ROUND_OUTCOME:', 37_000),
+    ).toContain('after 37s, below the 10m minimum')
+    expect(
+      harness.markedResponseDurationFailure(
+        'gpt-5.6-sol',
+        'ROUND_OUTCOME:',
+        10 * 60 * 1000 - 1,
+      ),
+    ).toContain('The response is untrusted and was not attested.')
+    expect(
+      harness.markedResponseDurationFailure(
+        'gpt-5.6-sol',
+        'ROUND_OUTCOME:',
+        10 * 60 * 1000,
+      ),
+    ).toBe('')
+    expect(
+      harness.markedResponseDurationFailure('gpt-5.6-sol', '', 37_000),
+    ).toBe('')
+    expect(
+      harness.markedResponseDurationFailure('current', 'ROUND_OUTCOME:', 37_000),
+    ).toBe('')
   })
 
   it('writes private model evidence atomically and invalidates it before validation', () => {
