@@ -111,6 +111,9 @@
       "@murphai/hosted-execution/plan-usage": [
         "./packages/hosted-execution/src/plan-usage.ts"
       ],
+      "@murphai/hosted-execution/labs": [
+        "./packages/hosted-execution/src/labs.ts"
+      ],
       "@murphai/hosted-execution/routes": [
         "./packages/hosted-execution/src/routes.ts"
       ],

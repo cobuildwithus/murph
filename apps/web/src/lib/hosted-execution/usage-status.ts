@@ -1,9 +1,10 @@
 import type { Prisma, PrismaClient } from "@prisma/client";
-import type {
-  HostedPlanUsageAvailableStatus,
-  HostedPlanUsageRecommendedAction,
-  HostedPlanUsageStatus,
-  HostedPlanUsageSubscriptionActionQuote,
+import {
+  HOSTED_ADD_USAGE_SETTINGS_URL,
+  type HostedPlanUsageAvailableStatus,
+  type HostedPlanUsageRecommendedAction,
+  type HostedPlanUsageStatus,
+  type HostedPlanUsageSubscriptionActionQuote,
 } from "@murphai/hosted-execution/plan-usage";
 
 import { getPrisma } from "../prisma";
@@ -14,9 +15,12 @@ import {
   getHostedBillingPlanDefinition,
 } from "../hosted-onboarding/billing-plans";
 import { hasHostedMemberOwnActiveBilling } from "../hosted-onboarding/entitlement";
-import { readHostedMemberBillingEligibilityState } from "../hosted-onboarding/hosted-member-billing-store";
+import {
+  readHostedMemberBillingEligibilityState,
+} from "../hosted-onboarding/hosted-member-billing-store";
 import { readHostedMemberCoreState } from "../hosted-onboarding/hosted-member-store";
 import { sanitizeHostedOnboardingStructuredLogDetails } from "../hosted-onboarding/logging";
+import { readHostedPersonalUsageCreditOfferCodes } from "../hosted-onboarding/personal-usage-credit-eligibility";
 import {
   readHostedAiUsageGate,
   type HostedAiUsageGateDecisionWithSource,
@@ -86,7 +90,10 @@ export async function projectHostedPersonalAiUsageStatus(input: {
     };
   }
 
-  if (!decision.allowed) {
+  const usageLimitExceeded = !decision.allowed
+    && decision.reason === "ai_usage_limit_exceeded";
+
+  if (!decision.allowed && !usageLimitExceeded) {
     const trialConversionPending =
       decision.reason === "trial_expired_pending_billing";
     const shouldResolveAvailableAction = trialConversionPending
@@ -128,9 +135,11 @@ export async function projectHostedPersonalAiUsageStatus(input: {
     };
   }
 
-  const exhausted = decision.spentUsdMicros >= decision.limitUsdMicros;
+  const includedUsageExhausted =
+    decision.spentUsdMicros >= decision.limitUsdMicros;
+  const exhausted = usageLimitExceeded;
   const usedPercent = calculateUsedPercent({
-    exhausted,
+    exhausted: includedUsageExhausted,
     limit: decision.limitUsdMicros,
     spent: decision.spentUsdMicros,
   });
@@ -160,16 +169,41 @@ export async function projectHostedPersonalAiUsageStatus(input: {
   const shouldRecommendAction = exhausted
     || forecast !== null
     || usedPercent >= USAGE_ACTION_THRESHOLD_PERCENT;
-  const shouldResolveAvailableAction = includeSubscriptionActionQuote
-    || (shouldRecommendAction && actionUrl !== null);
-  const availableAction = shouldResolveAvailableAction
-    ? await resolveAvailableSubscriptionAction({
-        accessKind,
-        memberId: input.memberId,
-        planCode: decision.billingPlanCode,
-        prisma,
-      })
-    : null;
+  const shouldResolveSubscriptionAction =
+    includeSubscriptionActionQuote
+    || (
+      shouldRecommendAction
+      && accessKind === "trial"
+      && actionUrl !== null
+    );
+  const shouldResolvePersonalUsageCreditOffers =
+    shouldRecommendAction && accessKind === "paid";
+  const [availableSubscriptionAction, personalUsageCreditOfferCodes] =
+    await Promise.all([
+      shouldResolveSubscriptionAction
+        ? resolveAvailableSubscriptionAction({
+            accessKind,
+            memberId: input.memberId,
+            planCode: decision.billingPlanCode,
+            prisma,
+          })
+        : Promise.resolve(null),
+      shouldResolvePersonalUsageCreditOffers
+        ? readHostedPersonalUsageCreditOfferCodes({
+            memberId: input.memberId,
+            prisma,
+          }).catch((error: unknown) => {
+            console.warn(
+              "Hosted personal usage-credit eligibility resolution failed.",
+              sanitizeHostedOnboardingStructuredLogDetails({
+                errorName: error instanceof Error ? error.name : "UnknownError",
+                planCode: decision.billingPlanCode,
+              }),
+            );
+            return [];
+          })
+        : Promise.resolve([]),
+    ]);
 
   return {
     accessKind,
@@ -181,11 +215,18 @@ export async function projectHostedPersonalAiUsageStatus(input: {
     planCode: decision.billingPlanCode,
     planName,
     recommendedAction: shouldRecommendAction
-      ? buildRecommendedAction({ action: availableAction, actionUrl })
+      ? accessKind === "paid"
+        ? personalUsageCreditOfferCodes.length > 0
+          ? buildAddUsageRecommendedAction()
+          : null
+        : buildRecommendedAction({
+            action: availableSubscriptionAction,
+            actionUrl,
+          })
       : null,
     ...projectSubscriptionActionQuoteExpansion({
       include: includeSubscriptionActionQuote,
-      quote: availableAction,
+      quote: availableSubscriptionAction,
     }),
     remainingPercent: 100 - usedPercent,
     status: exhausted ? "exhausted" : "active",
@@ -279,10 +320,7 @@ async function resolveAvailableSubscriptionAction(input: {
   planCode: HostedPlanUsageAvailableStatus["planCode"];
   prisma: HostedPlanUsageClient;
 }): Promise<HostedPlanUsageSubscriptionActionQuote | null> {
-  if (
-    input.accessKind === "family_sponsored"
-    || input.planCode === "launch_edge_monthly"
-  ) {
+  if (input.accessKind === "family_sponsored") {
     return null;
   }
 
@@ -317,31 +355,32 @@ async function resolveAvailableSubscriptionAction(input: {
 
   if (input.accessKind === "trial") {
     return canStartHostedPulseTrialPaidPlan({
-      billingStatus: member.billingStatus,
-      currentBillingPhase: billingState.currentBillingPhase,
-      currentBillingPlanCode: billingState.currentBillingPlanCode,
-      currentCheckoutOffer: billingState.currentCheckoutOffer,
-      hasStripeCustomerId: billingState.hasStripeCustomerId,
-      hasStripeSubscriptionId: billingState.hasStripeSubscriptionId,
-      suspendedAt: member.suspendedAt,
-    })
+        billingStatus: member.billingStatus,
+        currentBillingPhase: billingState.currentBillingPhase,
+        currentBillingPlanCode: billingState.currentBillingPlanCode,
+        currentCheckoutOffer: billingState.currentCheckoutOffer,
+        hasStripeCustomerId: billingState.hasStripeCustomerId,
+        hasStripeSubscriptionId: billingState.hasStripeSubscriptionId,
+        suspendedAt: member.suspendedAt,
+      })
       ? buildSubscriptionActionQuote("start_pulse_now")
       : null;
   }
 
-  if (
-    hasHostedMemberOwnActiveBilling(member)
+  const hasOwnActiveBilling = hasHostedMemberOwnActiveBilling(member);
+  const canUpgradeToEdge = input.planCode === "launch_monthly"
+    && hasOwnActiveBilling
     && billingState.hasStripeCustomerId
     && billingState.hasStripeSubscriptionId
     && canUpgradeHostedBillingPlanToEdge({
       currentBillingPhase: billingState.currentBillingPhase,
       currentBillingPlanCode: billingState.currentBillingPlanCode,
       currentCheckoutOffer: billingState.currentCheckoutOffer,
-    })
-  ) {
-    return buildSubscriptionActionQuote("upgrade_edge");
-  }
-  return null;
+    });
+
+  return canUpgradeToEdge
+    ? buildSubscriptionActionQuote("upgrade_edge")
+    : null;
 }
 
 function buildSubscriptionActionQuote(
@@ -372,6 +411,14 @@ function buildRecommendedAction(input: {
       : "upgrade_edge",
     label: input.action.label,
     url: input.actionUrl,
+  };
+}
+
+function buildAddUsageRecommendedAction(): HostedPlanUsageRecommendedAction {
+  return {
+    kind: "add_usage",
+    label: "Add usage",
+    url: HOSTED_ADD_USAGE_SETTINGS_URL,
   };
 }
 

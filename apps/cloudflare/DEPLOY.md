@@ -274,6 +274,12 @@ Set these in the selected GitHub environment as secrets:
 - `OPENAI_API_KEY`
 
 The callback-signing key remains part of the required worker secret surface because Cloudflare reads mailbox items, side inputs, workspace checkpoints, and runtime logs through the signed hosted-web boundary. It is no longer documented as a broad lifecycle or correctness callback seam.
+The optional read-only Labs port uses that existing signed callback and adds no
+Cloudflare secret or provider credential. `JUNCTION_API_KEY` for Labs remains in
+hosted Web; the Worker and runner carry only the normalized semantic
+request/response. Deploy the compatible Web route and credential first, then
+Cloudflare/runtime. Roll back Cloudflare/runtime first so deploy skew fails
+closed as Labs unavailable instead of calling a removed Web route.
 The Cloudflare automation private JWK is only used to unwrap the `cloudflare-automation-secret` recipient on signed ingress/runtime domain-root envelopes returned by hosted web.
 `OPENAI_API_KEY` is required by the standard Worker deploy preflight because the hosted assistant provider path expects Worker-owned OpenAI egress interception. The runner container still receives only an injected-credential placeholder; the raw key stays in the Worker.
 `HOSTED_LOG_FINGERPRINT_SECRET` is required so prompt-cache diagnostics can persist stable, Worker-owned request fingerprints without logging prompts, messages, request bodies, headers, or raw identifiers. It must stay out of hosted runtime env.

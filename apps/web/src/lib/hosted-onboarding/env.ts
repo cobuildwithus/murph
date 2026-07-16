@@ -11,6 +11,11 @@ import {
   type HostedPlanCode,
 } from "./billing-plans";
 import { normalizePhoneNumber } from "./phone";
+import {
+  getHostedUsageCreditOfferDefinition,
+  HOSTED_USAGE_CREDIT_OFFER_CODES,
+  type HostedUsageCreditOfferCode,
+} from "./usage-credit-offers";
 
 const HOSTED_CONTACT_PRIVACY_VERSION_PATTERN = /^v[0-9]+$/u;
 const HOSTED_CONTACT_PRIVACY_KEY_BASE64_CANONICAL_PATTERN =
@@ -47,6 +52,9 @@ export interface HostedOnboardingEnvironment {
   publicBaseUrl: string | null;
   stripePriceIdsByPlan: Readonly<Record<HostedBillingPlanCode, string | null>>;
   stripeFamilyPriceIdsByPlan: Readonly<Record<HostedPlanCode, string | null>>;
+  stripeUsageCreditPriceIdsByOffer: Readonly<
+    Record<HostedUsageCreditOfferCode, string | null>
+  >;
   stripeSecretKey: string | null;
   stripeWebhookSecret: string | null;
   telegramBotUsername: string | null;
@@ -96,6 +104,7 @@ export function readHostedOnboardingEnvironment(
     publicBaseUrl,
     stripeFamilyPriceIdsByPlan: readHostedStripeFamilyPriceIdsByPlan(source),
     stripePriceIdsByPlan: readHostedStripePriceIdsByPlan(source),
+    stripeUsageCreditPriceIdsByOffer: readHostedStripeUsageCreditPriceIdsByOffer(source),
     stripeSecretKey: readEnv(source, "STRIPE_SECRET_KEY"),
     stripeWebhookSecret: readEnv(source, "STRIPE_WEBHOOK_SECRET"),
     telegramBotUsername: readHostedTelegramBotUsername(source),
@@ -436,6 +445,17 @@ function readHostedStripeFamilyPriceIdsByPlan(
       return [planCode, readEnv(source, offer.priceIdEnvKey)];
     }),
   ) as Record<HostedPlanCode, string | null>;
+}
+
+function readHostedStripeUsageCreditPriceIdsByOffer(
+  source: HostedOnboardingEnvSource,
+): Record<HostedUsageCreditOfferCode, string | null> {
+  return Object.fromEntries(
+    HOSTED_USAGE_CREDIT_OFFER_CODES.map((offerCode) => {
+      const offer = getHostedUsageCreditOfferDefinition(offerCode);
+      return [offerCode, readEnv(source, offer.priceIdEnvKey)];
+    }),
+  ) as Record<HostedUsageCreditOfferCode, string | null>;
 }
 
 function readHostedStripePriceIdsByEnvKey(

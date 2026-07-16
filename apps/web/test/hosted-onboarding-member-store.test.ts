@@ -4136,6 +4136,8 @@ function createHostedMember(overrides: Partial<HostedMember> = {}): HostedMember
     signupWelcomeEmailAttemptedAt: null,
     suspendedAt: null,
     updatedAt: new Date("2026-04-06T00:00:00.000Z"),
+    usageCreditBalanceUsdMicros: null,
+    usageCreditLedgerVersion: null,
     ...overrides,
   };
 }

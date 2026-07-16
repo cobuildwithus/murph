@@ -35,7 +35,7 @@ const HOSTED_TELEGRAM_USAGE_LIMIT_NOTICE_TIMEOUT_MS = 40_000;
 
 export type HostedAiUsageLimitNoticeDeliveryResult =
   | { status: "already_notified" }
-  | { status: "in_flight" }
+  | { retryAt: Date | null; status: "in_flight" }
   | { status: "not_applicable" }
   | { status: "sent" };
 
@@ -79,7 +79,10 @@ export async function sendClaimedHostedAiUsageLimitNoticeToLinqChat(input: {
     case "notice_already_claimed":
       return { status: "already_notified" };
     case "notice_in_flight":
-      return { status: "in_flight" };
+      return {
+        retryAt: usageNoticeSkip.retryAt ?? null,
+        status: "in_flight",
+      };
     default:
       return { status: "not_applicable" };
   }
@@ -94,6 +97,7 @@ export async function sendClaimedHostedAiUsageLimitNoticeToTelegramThread(input:
   sentAt: Date;
   sourceEventId: string;
   target: string;
+  usageCreditLedgerVersion: bigint;
 }): Promise<HostedAiUsageLimitNoticeDeliveryResult> {
   if (!parseTelegramThreadTarget(input.target)) {
     return { status: "not_applicable" };
@@ -128,6 +132,7 @@ export async function sendClaimedHostedAiUsageLimitNoticeToTelegramThread(input:
           source: "hosted_runtime_ai_usage_limit_notice",
           sourceRef: input.sourceEventId,
           targetKind: "telegram_thread",
+          usageCreditLedgerVersion: input.usageCreditLedgerVersion,
         });
         if (dispatch.claim.status !== "claimed") {
           throw new Error(
@@ -149,8 +154,14 @@ export async function sendClaimedHostedAiUsageLimitNoticeToTelegramThread(input:
     if (dispatch.claim?.status === "already_notified") {
       return { status: "already_notified" };
     }
-    if (dispatch.claim?.status === "in_flight" || !dispatch.claim) {
-      return { status: "in_flight" };
+    if (dispatch.claim?.status === "in_flight") {
+      return {
+        retryAt: dispatch.claim.retryAt ?? null,
+        status: "in_flight",
+      };
+    }
+    if (!dispatch.claim) {
+      throw cause;
     }
 
     const hostedControlHttpError = readCloudflareHostedControlHttpError(cause);
@@ -168,7 +179,12 @@ export async function sendClaimedHostedAiUsageLimitNoticeToTelegramThread(input:
           input.sentAt.getTime() + HOSTED_AI_USAGE_LIMIT_NOTICE_CLAIM_STALE_MS,
         ),
       });
-      return { status: "in_flight" };
+      return {
+        retryAt: new Date(
+          input.sentAt.getTime() + HOSTED_AI_USAGE_LIMIT_NOTICE_CLAIM_STALE_MS,
+        ),
+        status: "in_flight",
+      };
     }
 
     await markHostedLinqDeliverySendFailedTx({
@@ -182,23 +198,26 @@ export async function sendClaimedHostedAiUsageLimitNoticeToTelegramThread(input:
   }
 
   if (dispatch.claim?.status !== "claimed") {
-    return { status: "in_flight" };
+    throw new Error(
+      "Hosted Telegram usage-limit delivery returned without a durable claim.",
+    );
   }
 
   if (deliveryResult.status === "failed") {
     if (deliveryResult.retryable) {
+      const retryAt = readHostedTelegramUsageLimitNoticeRetryAfterAt({
+        result: deliveryResult,
+        sentAt: input.sentAt,
+      });
       await markHostedAiUsageLimitNoticeDeliveryRetryableTx({
         expectedAttemptedAt: input.sentAt,
         failedAt: input.sentAt,
         failureCode: deliveryResult.failureCode,
         idempotencyKey: dispatch.claim.idempotencyKey,
         prisma: input.prisma,
-        retryAfterAt: readHostedTelegramUsageLimitNoticeRetryAfterAt({
-          result: deliveryResult,
-          sentAt: input.sentAt,
-        }),
+        retryAfterAt: retryAt,
       });
-      return { status: "in_flight" };
+      return { retryAt, status: "in_flight" };
     }
 
     await markHostedLinqDeliverySendFailedTx({
