@@ -461,6 +461,14 @@ async function executeAssistantCodexAttempt(input: {
         onTraceEvent: executionPlan.input.onTraceEvent,
         productFeedbackRecorder: createAssistantProductFeedbackRecorder({
           acceptedInputItems: executionPlan.acceptedInputItems ?? [],
+          ...(executionPlan.hostedToolContext
+              ?.currentProductFeedbackAcceptedInputIds
+            ? {
+                getAcceptedInputIds:
+                  executionPlan.hostedToolContext
+                    .currentProductFeedbackAcceptedInputIds,
+              }
+            : {}),
           productFeedbackRecorder:
             executionPlan.executionContext?.hosted?.productFeedbackRecorder ?? null,
         }),

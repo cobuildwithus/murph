@@ -70,6 +70,7 @@ export interface AssistantHostedToolContext {
   readonly personalizationTool?: AssistantHostedPersonalizationTool | null
   readonly planUsageTool?: AssistantHostedPlanUsageTool | null
   readonly phoneCalls?: AssistantPhoneCallPort | null
+  beforeToolExecution?(): Promise<void>
   currentHostedDeliveryContext(): AssistantHostedDeliveryContext | null
   currentAssistantTarget?(): {
     model: string | null
@@ -83,6 +84,7 @@ export interface AssistantHostedToolContext {
     result: Extract<HostedRuntimeNewsletterToolResponse, { action: 'send' }>,
   ): void
   currentPhoneCallToolRequestKeyScope?(): AssistantHostedToolRequestKeyScope | null
+  currentProductFeedbackAcceptedInputIds?(): readonly string[]
   readonly computerToolsAvailable: boolean
   readonly vaultFileSendAvailable: boolean
   sendVaultFile(ref: string): Promise<AssistantHostedVaultFileSendResult>
@@ -103,9 +105,11 @@ export function createAssistantHostedToolContext(input: {
   personalizationTool?: AssistantHostedPersonalizationTool | null
   planUsageTool?: AssistantHostedPlanUsageTool | null
   computerToolsAvailable?: boolean
+  beforeToolExecution?: () => Promise<void>
   getAssistantPreferenceInputId?: () => string | null
   getDeliveryContext?: () => AssistantHostedToolDeliveryContext
   getUserActionAcceptedInputIds?: () => readonly string[]
+  getProductFeedbackAcceptedInputIds?: () => readonly string[]
   messageInput: AssistantMessageInput
   newsletterOutbox?: {
     turnId: string
@@ -155,6 +159,9 @@ export function createAssistantHostedToolContext(input: {
     personalizationTool: input.personalizationTool ?? null,
     planUsageTool: input.planUsageTool ?? null,
     phoneCalls: input.phoneCalls ?? null,
+    ...(input.beforeToolExecution
+      ? { beforeToolExecution: input.beforeToolExecution }
+      : {}),
     computerToolsAvailable: input.computerToolsAvailable === true,
     currentAssistantPreferenceInputId: () =>
       input.getAssistantPreferenceInputId?.() ?? null,
@@ -204,6 +211,8 @@ export function createAssistantHostedToolContext(input: {
         ? buildRequestKeyScope(acceptedInputIds)
         : null
     },
+    currentProductFeedbackAcceptedInputIds: () =>
+      input.getProductFeedbackAcceptedInputIds?.() ?? [],
     sendVaultFile: input.sendVaultFile ?? (async () => {
       throw new Error('Vault-file sending is unavailable for this turn.')
     }),

@@ -486,6 +486,9 @@ async function seedPreferenceReceiptRecoveryIncident(): Promise<
     userId: preferenceRecoveryUserId,
   });
   expect(checkpoint.status).toBe("updated");
+  for (const [sha256, bytes] of artifactsBySha256) {
+    await uploadHostedArtifact(preferenceRecoveryUserId, sha256, bytes);
+  }
 
   for (const [sha256, bytes] of artifactsBySha256) {
     await uploadHostedArtifact(preferenceRecoveryUserId, sha256, bytes);
