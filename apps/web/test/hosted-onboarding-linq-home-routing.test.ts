@@ -121,6 +121,30 @@ describe("materializeHostedSignupWelcomeHomeRouteTx", () => {
     expect(mocks.upsertHostedMemberHomeLinqBindingTx).toHaveBeenCalledTimes(1);
   });
 
+  it("materializes a durable home line without a historical assignment timestamp", async () => {
+    mocks.readHostedMemberRoutingState.mockResolvedValue(buildMaterializationRouting({
+      linqHomeLineAssignedAt: null,
+    }));
+    const prisma = buildMaterializationPrisma();
+
+    await expect(materializeHostedSignupWelcomeHomeRouteTx({
+      directRecipientPhoneNumber,
+      fromPhoneNumber,
+      idempotencyKey: `signup-welcome:${memberId}`,
+      linqChatId,
+      memberId,
+      prisma: prisma as never,
+    })).resolves.toEqual({ kind: "materialized" });
+
+    expect(mocks.upsertHostedMemberHomeLinqBindingTx).toHaveBeenCalledWith(
+      expect.objectContaining({
+        homeLineAssignedAt: null,
+        linqChatId,
+        memberId,
+      }),
+    );
+  });
+
   it.each([
     ["home", { linqChatId: "chat_newer", pendingLinqChatId: null }],
     ["pending", { linqChatId: null, pendingLinqChatId: "chat_inbound" }],
@@ -232,12 +256,16 @@ describe("materializeHostedSignupWelcomeHomeRouteTx", () => {
 
   function buildMaterializationRouting(overrides: {
     linqChatId?: string | null;
+    linqHomeLineAssignedAt?: Date | null;
     pendingLinqChatId?: string | null;
   } = {}) {
     return {
       hasPendingLinqRouteState: Boolean(overrides.pendingLinqChatId),
       linqChatId: overrides.linqChatId ?? null,
-      linqHomeLineAssignedAt: assignedAt,
+      linqHomeLineAssignedAt:
+        overrides.linqHomeLineAssignedAt === undefined
+          ? assignedAt
+          : overrides.linqHomeLineAssignedAt,
       linqParticipantContact: null,
       linqRecipientPhone: fromPhoneNumber,
       memberId,

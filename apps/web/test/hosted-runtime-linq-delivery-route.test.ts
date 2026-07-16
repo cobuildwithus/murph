@@ -133,7 +133,6 @@ describe("hosted runtime Linq delivery route", () => {
     ["missing provider chat", { providerThreadId: null }],
     ["missing provider message", { providerMessageId: null }],
     ["non-direct provider chat", { threadIsDirect: false }],
-    ["wrong target kind", { targetKind: "thread" }],
   ])("rejects a canonical welcome with %s evidence", async (_label, override) => {
     const response = await route.POST(buildDeliveryRequest({
       acceptedAt: "2026-04-26T00:00:04.000Z",
@@ -151,6 +150,35 @@ describe("hosted runtime Linq delivery route", () => {
     expect(response.status).toBe(403);
     expect(mocks.materializeHostedSignupWelcomeHomeRouteTx).not.toHaveBeenCalled();
     expect(mocks.recordHostedLinqRuntimeDeliveryOutcomeTx).not.toHaveBeenCalled();
+  });
+
+  it("records an accepted canonical welcome sent to an existing thread without rematerializing it", async () => {
+    const response = await route.POST(buildDeliveryRequest({
+      acceptedAt: "2026-04-26T00:00:04.000Z",
+      attemptedAt: "2026-04-26T00:00:03.000Z",
+      fromPhoneNumber: "+15550100099",
+      idempotencyKey: "signup-welcome:member_123",
+      providerMessageId: "linq_message_welcome",
+      providerThreadId: "linq_chat_existing",
+      targetKind: "thread",
+      threadIsDirect: true,
+    }));
+
+    expect(response.status).toBe(200);
+    expect(prisma.$transaction).not.toHaveBeenCalled();
+    expect(mocks.materializeHostedSignupWelcomeHomeRouteTx).not.toHaveBeenCalled();
+    expect(mocks.recordHostedLinqRuntimeDeliveryOutcomeTx).toHaveBeenCalledWith(
+      expect.objectContaining({
+        acceptedAt: new Date("2026-04-26T00:00:04.000Z"),
+        idempotencyKey: "signup-welcome:member_123",
+        linqChatId: "linq_chat_existing",
+        messageId: "linq_message_welcome",
+        prisma,
+        targetKind: "thread",
+        threadIsDirect: true,
+        userId: "member_123",
+      }),
+    );
   });
 
   it("rejects a canonical welcome claimed for another authenticated member", async () => {

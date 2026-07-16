@@ -198,7 +198,7 @@ export async function materializeHostedSignupWelcomeHomeRouteTx(input: {
     return { kind: "superseded" };
   }
 
-  if (authority.kind === "none" || !authority.assignedAt) {
+  if (authority.kind === "none") {
     throw hostedOnboardingError({
       code: "HOSTED_LINQ_SIGNUP_WELCOME_HOME_ROUTE_UNAVAILABLE",
       httpStatus: 503,

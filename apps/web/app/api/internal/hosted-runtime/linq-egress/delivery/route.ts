@@ -138,11 +138,10 @@ export const POST = withJsonError(async (request: Request) => {
     throwHostedSignupWelcomeDeliveryAuthorityInvalid();
   }
 
-  const result = acceptedSignupWelcome
+  const result = acceptedSignupWelcome && targetKind === "participant"
     ? await prisma.$transaction(async (tx) => {
         if (
-          targetKind !== "participant"
-          || threadIsDirect !== true
+          threadIsDirect !== true
           || !providerThreadId
           || !providerMessageId
           || !fromPhoneNumber
