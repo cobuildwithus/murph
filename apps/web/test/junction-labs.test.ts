@@ -200,6 +200,44 @@ describe("Junction labs provider boundary", () => {
     });
   });
 
+  it("fails closed for a malformed exact show row but keeps explicit disablement as not found", async () => {
+    const fetchImpl = vi.fn<typeof fetch>()
+      .mockResolvedValueOnce(jsonResponse({
+        data: [junctionMarker({
+          name: null,
+          provider_id: "code/alpha",
+        })],
+      }))
+      .mockResolvedValueOnce(jsonResponse({
+        data: [junctionMarker({
+          a_la_carte_enabled: false,
+          provider_id: "code/alpha",
+        })],
+      }));
+
+    const malformed = await captureHostedError(executeJunctionLabsTool({
+      action: "show",
+      labId: 7,
+      providerId: "code/alpha",
+    }, dependencies(fetchImpl)));
+    expect(malformed).toMatchObject({
+      code: "LABS_TEMPORARILY_UNAVAILABLE",
+      httpStatus: 503,
+      retryable: true,
+    });
+
+    const disabled = await captureHostedError(executeJunctionLabsTool({
+      action: "show",
+      labId: 7,
+      providerId: "code/alpha",
+    }, dependencies(fetchImpl)));
+    expect(disabled).toMatchObject({
+      code: "LABS_OFFERING_NOT_FOUND",
+      httpStatus: 404,
+      retryable: false,
+    });
+  });
+
   it("fans out to at most four eligible labs with concurrency at most three, then dedupes and sorts", async () => {
     const pscCalls: number[] = [];
     let inFlight = 0;
@@ -288,6 +326,91 @@ describe("Junction labs provider boundary", () => {
       status: "not_served",
     });
     expect(fetchImpl).toHaveBeenCalledTimes(1);
+  });
+
+  it.each([
+    {
+      central_labs: {},
+    },
+    {
+      central_labs: {},
+      phlebotomy: { is_served: "yes" },
+    },
+    {
+      central_labs: {
+        labcorp: {
+          lab_id: 7,
+          patient_service_centers: { within_radius: "1" },
+        },
+      },
+      phlebotomy: { is_served: false },
+    },
+  ])("fails closed when a negative area result depends on malformed provider data", async (area) => {
+    const fetchImpl = vi.fn<typeof fetch>(async () => jsonResponse(area));
+
+    const error = await captureHostedError(executeJunctionLabsTool({
+      action: "locations",
+      zipCode: "10001",
+    }, dependencies(fetchImpl)));
+
+    expect(error).toMatchObject({
+      code: "LABS_TEMPORARILY_UNAVAILABLE",
+      httpStatus: 503,
+      retryable: true,
+    });
+    expect(fetchImpl).toHaveBeenCalledTimes(1);
+  });
+
+  it("fails closed for an all-malformed PSC result but preserves a valid mixed result", async () => {
+    const area = {
+      central_labs: {
+        labcorp: {
+          lab_id: 7,
+          patient_service_centers: { within_radius: 1 },
+        },
+      },
+      phlebotomy: { is_served: false },
+    };
+    const fetchImpl = vi.fn<typeof fetch>()
+      .mockResolvedValueOnce(jsonResponse(area))
+      .mockResolvedValueOnce(jsonResponse({
+        lab_id: 7,
+        patient_service_centers: [{ metadata: {} }],
+        slug: "labcorp",
+      }))
+      .mockResolvedValueOnce(jsonResponse(area))
+      .mockResolvedValueOnce(jsonResponse({
+        lab_id: 7,
+        patient_service_centers: [
+          { metadata: {} },
+          pscLocation(),
+        ],
+        slug: "labcorp",
+      }));
+
+    const malformed = await captureHostedError(executeJunctionLabsTool({
+      action: "locations",
+      zipCode: "10001",
+    }, dependencies(fetchImpl)));
+    expect(malformed).toMatchObject({
+      code: "LABS_TEMPORARILY_UNAVAILABLE",
+      httpStatus: 503,
+      retryable: true,
+    });
+
+    const mixed = await executeJunctionLabsTool({
+      action: "locations",
+      zipCode: "10001",
+    }, dependencies(fetchImpl));
+    expect(mixed).toMatchObject({
+      action: "locations",
+      homeCollectionAvailable: false,
+      status: "available",
+    });
+    if (mixed.action !== "locations") {
+      throw new Error("Expected a labs locations result.");
+    }
+    expect(mixed.locations).toHaveLength(1);
   });
 
   it.each([429, 500])("keeps a provider %i failure generic and secret-safe", async (status) => {

@@ -8,7 +8,6 @@ import type {
   HostedRuntimeLabsLocationsResponse,
   HostedRuntimeLabsOffering,
   HostedRuntimeLabsSearchResponse,
-  HostedRuntimeLabsShowResponse,
 } from "@murphai/hosted-execution/labs";
 
 import { renderClientComponent } from "./render-client-component";
@@ -204,14 +203,12 @@ describe("LabsPageClient", () => {
     expect(rendered.container.textContent).not.toContain("Older result");
   });
 
-  it("loads one accessible inline detail, retries an error, and clears it on a new search", async () => {
+  it("expands search details without refetching and clears them on a new search", async () => {
     fetchMock
-      .mockResolvedValueOnce(jsonResponse(searchResponse([panelOffering])))
-      .mockResolvedValueOnce(jsonResponse({}, 503))
-      .mockResolvedValueOnce(jsonResponse(showResponse({
+      .mockResolvedValueOnce(jsonResponse(searchResponse([{
         ...panelOffering,
         description: "A provider-authored cardiovascular panel description.",
-      })))
+      }])))
       .mockResolvedValueOnce(jsonResponse(searchResponse([biomarkerOffering])));
     const rendered = await renderLabsPage();
 
@@ -224,17 +221,15 @@ describe("LabsPageClient", () => {
     await clickButtonElement(rendered, detailsButton);
     expect(detailsButton.getAttribute("aria-expanded")).toBe("true");
     expect(detailsButton.getAttribute("aria-controls")).toBeTruthy();
-    expect(rendered.container.textContent).toContain("Details temporarily unavailable");
-
-    await clickButton(rendered, "Retry");
     expect(rendered.container.textContent).toContain(
       "A provider-authored cardiovascular panel description.",
     );
-    expect(readRequestBody(1)).toEqual({
-      action: "show",
-      labId: panelOffering.labId,
-      providerId: panelOffering.providerId,
-    });
+    expect(fetchMock).toHaveBeenCalledTimes(1);
+
+    await clickButtonElement(rendered, detailsButton);
+    expect(detailsButton.getAttribute("aria-expanded")).toBe("false");
+    await clickButtonElement(rendered, detailsButton);
+    expect(fetchMock).toHaveBeenCalledTimes(1);
 
     await changeInput(rendered, "#labs-catalog-query", "apob");
     await submitForm(rendered, 0);
@@ -416,17 +411,6 @@ function searchResponse(
       pages: 1,
       total,
     },
-    source: "junction",
-  };
-}
-
-function showResponse(offering: HostedRuntimeLabsOffering): HostedRuntimeLabsShowResponse {
-  return {
-    action: "show",
-    checkedAt: "2026-07-16T15:01:00.000Z",
-    offering,
-    orderableThroughMurph: false,
-    orderingStatus: "discovery_only",
     source: "junction",
   };
 }

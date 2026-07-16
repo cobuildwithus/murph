@@ -8,10 +8,6 @@ import {
   type HostedRuntimeLabsOffering,
   type HostedRuntimeLabsSearchRequest,
   type HostedRuntimeLabsSearchResponse,
-  type HostedRuntimeLabsShowRequest,
-  type HostedRuntimeLabsShowResponse,
-  type HostedRuntimeLabsToolRequest,
-  type HostedRuntimeLabsToolResponse,
 } from "@murphai/hosted-execution/labs";
 import { ChevronDownIcon, InfoIcon, SearchIcon } from "lucide-react";
 import {
@@ -77,20 +73,6 @@ type SearchState =
       status: "error";
     };
 
-type DetailState =
-  | { status: "idle" }
-  | { item: HostedRuntimeLabsOffering; status: "loading" }
-  | {
-      data: HostedRuntimeLabsShowResponse;
-      item: HostedRuntimeLabsOffering;
-      status: "success";
-    }
-  | {
-      failure: LabsRequestFailure;
-      item: HostedRuntimeLabsOffering;
-      status: "error";
-    };
-
 type LocationsState =
   | { status: "idle" }
   | { request: HostedRuntimeLabsLocationsRequest; status: "loading" }
@@ -105,7 +87,7 @@ type LocationsState =
       status: "error";
     };
 
-type LabsRequestFailure = "auth" | "not_found" | "unavailable";
+type LabsRequestFailure = "auth" | "unavailable";
 
 interface RequestTracker {
   controller: AbortController | null;
@@ -118,31 +100,25 @@ export function LabsPageClient() {
   const [searchValidationError, setSearchValidationError] = useState<string | null>(null);
   const [searchState, setSearchState] = useState<SearchState>({ status: "idle" });
   const [expandedOfferingId, setExpandedOfferingId] = useState<string | null>(null);
-  const [detailState, setDetailState] = useState<DetailState>({ status: "idle" });
   const [zipCode, setZipCode] = useState("");
   const [zipValidationError, setZipValidationError] = useState<string | null>(null);
   const [locationsState, setLocationsState] = useState<LocationsState>({ status: "idle" });
 
   const searchTracker = useRef<RequestTracker>({ controller: null, id: 0 });
-  const detailTracker = useRef<RequestTracker>({ controller: null, id: 0 });
   const locationsTracker = useRef<RequestTracker>({ controller: null, id: 0 });
 
   useEffect(() => {
     const activeSearchTracker = searchTracker.current;
-    const activeDetailTracker = detailTracker.current;
     const activeLocationsTracker = locationsTracker.current;
 
     return () => {
       activeSearchTracker.controller?.abort();
-      activeDetailTracker.controller?.abort();
       activeLocationsTracker.controller?.abort();
     };
   }, []);
 
   async function runSearch(request: HostedRuntimeLabsSearchRequest) {
-    invalidateTracker(detailTracker.current);
     setExpandedOfferingId(null);
-    setDetailState({ status: "idle" });
     setSearchState({ request, status: "loading" });
 
     const tracked = startTrackedRequest(searchTracker.current);
@@ -190,53 +166,10 @@ export function LabsPageClient() {
     });
   }
 
-  async function runShow(item: HostedRuntimeLabsOffering) {
-    setDetailState({ item, status: "loading" });
-    const tracked = startTrackedRequest(detailTracker.current);
-
-    try {
-      const data = await requestLabs(
-        {
-          action: "show",
-          labId: item.labId,
-          providerId: item.providerId,
-        },
-        tracked.controller.signal,
-      );
-      if (
-        !isCurrentRequest(detailTracker.current, tracked)
-        || data.offering.offeringId !== item.offeringId
-      ) {
-        if (isCurrentRequest(detailTracker.current, tracked)) {
-          setDetailState({ failure: "unavailable", item, status: "error" });
-        }
-        return;
-      }
-
-      setDetailState({ data, item, status: "success" });
-    } catch (error) {
-      if (isAbortError(error) || !isCurrentRequest(detailTracker.current, tracked)) {
-        return;
-      }
-
-      setDetailState({
-        failure: classifyLabsRequestFailure(error),
-        item,
-        status: "error",
-      });
-    }
-  }
-
   function toggleDetails(item: HostedRuntimeLabsOffering) {
-    if (expandedOfferingId === item.offeringId) {
-      invalidateTracker(detailTracker.current);
-      setExpandedOfferingId(null);
-      setDetailState({ status: "idle" });
-      return;
-    }
-
-    setExpandedOfferingId(item.offeringId);
-    void runShow(item);
+    setExpandedOfferingId((current) =>
+      current === item.offeringId ? null : item.offeringId,
+    );
   }
 
   async function runLocations(request: HostedRuntimeLabsLocationsRequest) {
@@ -379,9 +312,7 @@ export function LabsPageClient() {
         </p>
 
         <CatalogResults
-          detailState={detailState}
           expandedOfferingId={expandedOfferingId}
-          onRetryDetails={(item) => void runShow(item)}
           onRetrySearch={(request) => void runSearch(request)}
           onToggleDetails={toggleDetails}
           state={searchState}
@@ -491,16 +422,12 @@ function SectionHeading({
 }
 
 function CatalogResults({
-  detailState,
   expandedOfferingId,
-  onRetryDetails,
   onRetrySearch,
   onToggleDetails,
   state,
 }: {
-  detailState: DetailState;
   expandedOfferingId: string | null;
-  onRetryDetails: (item: HostedRuntimeLabsOffering) => void;
   onRetrySearch: (request: HostedRuntimeLabsSearchRequest) => void;
   onToggleDetails: (item: HostedRuntimeLabsOffering) => void;
   state: SearchState;
@@ -601,12 +528,11 @@ function CatalogResults({
 
               return (
                 <CatalogOfferingRows
+                  checkedAt={state.data.checkedAt}
                   detailId={detailId}
-                  detailState={detailState}
                   expanded={expanded}
                   item={item}
                   key={item.offeringId}
-                  onRetryDetails={onRetryDetails}
                   onToggleDetails={onToggleDetails}
                 />
               );
@@ -623,18 +549,16 @@ function CatalogResults({
 }
 
 function CatalogOfferingRows({
+  checkedAt,
   detailId,
-  detailState,
   expanded,
   item,
-  onRetryDetails,
   onToggleDetails,
 }: {
+  checkedAt: string;
   detailId: string;
-  detailState: DetailState;
   expanded: boolean;
   item: HostedRuntimeLabsOffering;
-  onRetryDetails: (item: HostedRuntimeLabsOffering) => void;
   onToggleDetails: (item: HostedRuntimeLabsOffering) => void;
 }) {
   return (
@@ -683,11 +607,7 @@ function CatalogOfferingRows({
         <TableRow>
           <TableCell className="whitespace-normal p-0" colSpan={6}>
             <div className="flex flex-col gap-4 border-t border-border bg-background/50 p-4 sm:p-6" id={detailId}>
-              <OfferingDetail
-                detailState={detailState}
-                item={item}
-                onRetry={() => onRetryDetails(item)}
-              />
+              <OfferingDetail checkedAt={checkedAt} item={item} />
             </div>
           </TableCell>
         </TableRow>
@@ -697,109 +617,53 @@ function CatalogOfferingRows({
 }
 
 function OfferingDetail({
-  detailState,
+  checkedAt,
   item,
-  onRetry,
 }: {
-  detailState: DetailState;
+  checkedAt: string;
   item: HostedRuntimeLabsOffering;
-  onRetry: () => void;
 }) {
-  if (detailState.status === "loading" && detailState.item.offeringId === item.offeringId) {
-    return (
-      <div aria-busy="true" className="flex flex-col gap-3">
-        <p className="flex items-center gap-2 text-sm text-muted-foreground">
-          <Spinner /> Loading current catalog details
-        </p>
-        <Skeleton className="h-4 w-full max-w-xl" />
-        <Skeleton className="h-4 w-full max-w-md" />
-      </div>
-    );
-  }
-
-  if (detailState.status === "error" && detailState.item.offeringId === item.offeringId) {
-    if (detailState.failure === "auth") {
-      return (
-        <LabsAuthAlert>
-          Refresh this page, then sign in again if prompted. The catalog result remains visible above.
-        </LabsAuthAlert>
-      );
-    }
-
-    if (detailState.failure === "not_found") {
-      return (
-        <Alert>
-          <AlertTitle>This catalog item changed</AlertTitle>
-          <AlertDescription>
-            Junction no longer returned this exact listing. Search the catalog again for current options.
-          </AlertDescription>
-        </Alert>
-      );
-    }
-
-    return (
-      <Alert variant="destructive">
-        <AlertTitle>Details temporarily unavailable</AlertTitle>
-        <AlertDescription>The catalog result remains visible above.</AlertDescription>
-        <AlertAction>
-          <Button onClick={onRetry} size="sm" type="button" variant="outline">
-            Retry
-          </Button>
-        </AlertAction>
-      </Alert>
-    );
-  }
-
-  const offering =
-    detailState.status === "success" && detailState.item.offeringId === item.offeringId
-      ? detailState.data.offering
-      : item;
-  const checkedAt =
-    detailState.status === "success" && detailState.item.offeringId === item.offeringId
-      ? detailState.data.checkedAt
-      : null;
-
   return (
     <>
       <div className="flex flex-col gap-2">
         <div className="flex flex-wrap items-center gap-2">
-          <Badge variant={offering.kind === "panel" ? "secondary" : "outline"}>
-            {formatOfferingKind(offering.kind)}
+          <Badge variant={item.kind === "panel" ? "secondary" : "outline"}>
+            {formatOfferingKind(item.kind)}
           </Badge>
           <span className="font-mono text-[10px] uppercase tracking-widest text-muted-foreground">
             Listed in Junction&apos;s catalog
           </span>
         </div>
         <p className="max-w-3xl text-sm leading-relaxed text-foreground">
-          {offering.description ?? "Junction does not provide a description for this catalog item."}
+          {item.description ?? "Junction does not provide a description for this catalog item."}
         </p>
       </div>
 
       <dl className="grid gap-x-8 gap-y-4 sm:grid-cols-2 lg:grid-cols-4">
-        <DetailFact label="Catalog price" value={formatCatalogPrice(offering)} serif />
-        <DetailFact label="Turnaround" value={formatTurnaround(offering)} />
+        <DetailFact label="Catalog price" value={formatCatalogPrice(item)} serif />
+        <DetailFact label="Turnaround" value={formatTurnaround(item)} />
         <DetailFact
           label="Included markers"
-          value={offering.includedMarkerCount > 0 ? String(offering.includedMarkerCount) : "Not provided"}
-          serif={offering.includedMarkerCount > 0}
+          value={item.includedMarkerCount > 0 ? String(item.includedMarkerCount) : "Not provided"}
+          serif={item.includedMarkerCount > 0}
         />
         <DetailFact
           label="Catalog checked"
-          value={checkedAt ? formatCheckedAt(checkedAt) : "With search result"}
+          value={formatCheckedAt(checkedAt)}
         />
       </dl>
 
-      {offering.includedMarkers.length > 0 ? (
+      {item.includedMarkers.length > 0 ? (
         <div className="flex flex-col gap-1.5">
           <h3 className="font-mono text-[10px] uppercase tracking-widest text-muted-foreground">
             Included marker preview
           </h3>
           <p className="max-w-3xl text-sm leading-relaxed text-foreground">
-            {offering.includedMarkers.map((marker) => marker.name).join(", ")}
+            {item.includedMarkers.map((marker) => marker.name).join(", ")}
           </p>
-          {offering.includedMarkerCount > offering.includedMarkers.length ? (
+          {item.includedMarkerCount > item.includedMarkers.length ? (
             <p className="text-xs text-muted-foreground">
-              Showing {offering.includedMarkers.length} of {offering.includedMarkerCount} markers.
+              Showing {item.includedMarkers.length} of {item.includedMarkerCount} markers.
             </p>
           ) : null}
         </div>
@@ -1019,12 +883,6 @@ function startTrackedRequest(tracker: RequestTracker): {
   return { controller, id: tracker.id };
 }
 
-function invalidateTracker(tracker: RequestTracker) {
-  tracker.controller?.abort();
-  tracker.controller = null;
-  tracker.id += 1;
-}
-
 function isCurrentRequest(
   tracker: RequestTracker,
   request: { controller: AbortController; id: number },
@@ -1189,7 +1047,7 @@ function classifyLabsRequestFailure(error: unknown): LabsRequestFailure {
   if (error.status === 401 || error.status === 403) {
     return "auth";
   }
-  return error.status === 404 ? "not_found" : "unavailable";
+  return "unavailable";
 }
 
 async function requestLabs(
@@ -1197,17 +1055,13 @@ async function requestLabs(
   signal: AbortSignal,
 ): Promise<HostedRuntimeLabsSearchResponse>;
 async function requestLabs(
-  request: HostedRuntimeLabsShowRequest,
-  signal: AbortSignal,
-): Promise<HostedRuntimeLabsShowResponse>;
-async function requestLabs(
   request: HostedRuntimeLabsLocationsRequest,
   signal: AbortSignal,
 ): Promise<HostedRuntimeLabsLocationsResponse>;
 async function requestLabs(
-  request: HostedRuntimeLabsToolRequest,
+  request: HostedRuntimeLabsSearchRequest | HostedRuntimeLabsLocationsRequest,
   signal: AbortSignal,
-): Promise<HostedRuntimeLabsToolResponse> {
+): Promise<HostedRuntimeLabsSearchResponse | HostedRuntimeLabsLocationsResponse> {
   const response = await fetch("/api/labs", {
     body: JSON.stringify(request),
     cache: "no-store",

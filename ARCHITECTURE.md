@@ -57,7 +57,10 @@ strict `@murphai/hosted-execution/labs` contract. The authenticated Labs
 browser API at `POST /api/labs` and the signed hosted-runtime callback at
 `POST /api/internal/hosted-execution/labs/tool` call the same stateless service;
 neither path introduces a database, cache, sync job, search index, search
-history, or ZIP persistence.
+history, or ZIP persistence. Junction's catalog and location read APIs require
+GET query parameters, so the Web owner sends the bounded catalog term or ZIP
+only to the fixed Junction origin and never records or logs the full outbound
+URL. The browser and Cloudflare boundaries remain semantic POST bodies.
 
 Cloudflare carries only an optional semantic Labs port over the existing signed
 `web-control.worker` boundary. `packages/assistant-runtime` passes that port

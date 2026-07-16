@@ -70,8 +70,21 @@ projection, search history, or ZIP persistence. Queries, ZIP codes, provider
 payloads, and tool results remain transient apart from normal encrypted
 provider-thread continuity. The API key, authorization headers, raw provider
 bodies, and raw provider errors must not enter logs, diagnostics, fixtures, or
-client responses. Queries and ZIP codes must not enter logs, diagnostics,
-analytics, fixtures, URLs, or persisted state.
+client responses. Queries and ZIP codes must not enter Murph logs, diagnostics,
+analytics, fixtures, or persisted state.
+
+The browser and hosted-runtime boundaries accept those values only in POST
+bodies. Junction's documented read APIs for [catalog
+markers](https://docs.junction.com/api-reference/lab-testing/biomarkers), [area
+coverage](https://docs.junction.com/api-reference/lab-testing/area-info), and
+[patient service centers](https://docs.junction.com/api-reference/lab-testing/psc-info)
+are GET-only and require the catalog term or ZIP as a query parameter. The Web
+owner therefore sends the bounded value in a TLS-protected URL only to the fixed
+Junction origin and exact allowlisted paths. Murph must never log or persist the
+full outbound URL; controlled HTTP telemetry may include method, origin, path,
+status, timing, and size only. Junction receives the value, and provider-side
+URL handling or retention is governed by the Junction account and contract,
+not Murph's no-persistence guarantee.
 
 ## Failure and freshness semantics
 

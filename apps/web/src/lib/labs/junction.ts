@@ -49,6 +49,16 @@ interface JunctionRequestOptions {
   maxResponseBytes: number;
 }
 
+interface JunctionAreaLabsProjection {
+  hadMalformedEntries: boolean;
+  labIds: number[];
+}
+
+interface JunctionPscProjection {
+  hadMalformedEntries: boolean;
+  locations: HostedRuntimeLabsLocation[];
+}
+
 const RESPONSE_BASE = {
   orderableThroughMurph: false,
   orderingStatus: "discovery_only",
@@ -133,22 +143,29 @@ async function showJunctionLabOffering(
   const payload = await requestJunctionJson(runtime, url, {
     maxResponseBytes: JUNCTION_SHOW_RESPONSE_MAX_BYTES,
   });
-  const offering = readMarkerArray(payload)
+  const exactRows = readMarkerArray(payload)
+    .filter((candidate) => matchesJunctionOfferingIdentity(candidate, request));
+  const offering = exactRows
     .map(normalizeJunctionOffering)
-    .find((candidate) =>
-      candidate?.labId === request.labId
-      && candidate.providerId === request.providerId) ?? null;
+    .find((candidate): candidate is HostedRuntimeLabsOffering => candidate !== null) ?? null;
 
-  if (!offering) {
+  if (offering) {
+    return {
+      action: "show",
+      ...RESPONSE_BASE,
+      checkedAt: runtime.now().toISOString(),
+      offering,
+    };
+  }
+
+  if (
+    exactRows.length === 0
+    || exactRows.every(isExplicitlyDisabledJunctionOffering)
+  ) {
     throw labsOfferingNotFoundError();
   }
 
-  return {
-    action: "show",
-    ...RESPONSE_BASE,
-    checkedAt: runtime.now().toISOString(),
-    offering,
-  };
+  throw labsUnavailableError(true);
 }
 
 async function findJunctionLabLocations(
@@ -165,9 +182,10 @@ async function findJunctionLabLocations(
     maxResponseBytes: JUNCTION_AREA_RESPONSE_MAX_BYTES,
   });
   const homeCollectionAvailable = readHomeCollectionAvailable(areaPayload);
-  const eligibleLabIds = readEligibleAreaLabIds(areaPayload, request.labId)
-    .slice(0, JUNCTION_MAX_PSC_LABS);
+  const areaLabs = readEligibleAreaLabIds(areaPayload, request.labId);
+  const eligibleLabIds = areaLabs.labIds.slice(0, JUNCTION_MAX_PSC_LABS);
   const locationGroups: HostedRuntimeLabsLocation[][] = [];
+  let hadMalformedCoverageData = areaLabs.hadMalformedEntries;
 
   for (let index = 0; index < eligibleLabIds.length; index += JUNCTION_PSC_CONCURRENCY) {
     const batch = eligibleLabIds.slice(index, index + JUNCTION_PSC_CONCURRENCY);
@@ -182,13 +200,20 @@ async function findJunctionLabLocations(
       });
       return normalizeJunctionPscLocations(payload, labId);
     }));
-    locationGroups.push(...batchLocations);
+    for (const projection of batchLocations) {
+      hadMalformedCoverageData ||= projection.hadMalformedEntries;
+      locationGroups.push(projection.locations);
+    }
   }
 
   const locations = dedupeAndSortLocations(locationGroups.flat()).slice(0, limit);
   const status = homeCollectionAvailable || locations.length > 0
     ? "available"
     : "not_served";
+
+  if (status === "not_served" && hadMalformedCoverageData) {
+    throw labsUnavailableError(true);
+  }
 
   return {
     action: "locations",
@@ -411,6 +436,20 @@ function normalizeJunctionOffering(value: unknown): HostedRuntimeLabsOffering | 
   };
 }
 
+function matchesJunctionOfferingIdentity(
+  value: unknown,
+  request: HostedRuntimeLabsShowRequest,
+): boolean {
+  return isRecord(value)
+    && readPositiveInteger(value, "lab_id") === request.labId
+    && readBoundedText(value.provider_id, 120) === request.providerId;
+}
+
+function isExplicitlyDisabledJunctionOffering(value: unknown): boolean {
+  return isRecord(value)
+    && (value.a_la_carte_enabled === false || value.is_orderable === false);
+}
+
 function normalizeCatalogPrice(
   value: unknown,
 ): HostedRuntimeLabsOffering["catalogPrice"] {
@@ -463,7 +502,10 @@ function readIncludedMarkers(value: unknown): {
   };
 }
 
-function readEligibleAreaLabIds(value: unknown, requestedLabId?: number): number[] {
+function readEligibleAreaLabIds(
+  value: unknown,
+  requestedLabId?: number,
+): JunctionAreaLabsProjection {
   if (!isRecord(value)) {
     throw labsUnavailableError(true);
   }
@@ -478,8 +520,10 @@ function readEligibleAreaLabIds(value: unknown, requestedLabId?: number): number
     throw labsUnavailableError(true);
   }
 
+  let hadMalformedEntries = false;
   const labIds = Object.values(centralLabs).flatMap((candidate) => {
     if (!isRecord(candidate)) {
+      hadMalformedEntries = true;
       return [];
     }
 
@@ -489,32 +533,43 @@ function readEligibleAreaLabIds(value: unknown, requestedLabId?: number): number
       : candidate;
     const withinRadius = readNonnegativeInteger(patientServiceCenters, "within_radius");
 
-    return labId !== null && withinRadius !== null && withinRadius > 0
-      ? [labId]
-      : [];
+    if (labId === null || withinRadius === null) {
+      hadMalformedEntries = true;
+      return [];
+    }
+
+    return withinRadius > 0 ? [labId] : [];
   });
   const uniqueLabIds = [...new Set(labIds)].sort((left, right) => left - right);
 
-  if (requestedLabId === undefined) {
-    return uniqueLabIds;
-  }
-
-  return uniqueLabIds.includes(requestedLabId) ? [requestedLabId] : [];
+  return {
+    hadMalformedEntries,
+    labIds: requestedLabId === undefined
+      ? uniqueLabIds
+      : uniqueLabIds.includes(requestedLabId) ? [requestedLabId] : [],
+  };
 }
 
 function readHomeCollectionAvailable(value: unknown): boolean {
   if (!isRecord(value)) {
-    return false;
+    throw labsUnavailableError(true);
   }
 
   const root = isRecord(value.data) ? value.data : value;
-  return isRecord(root.phlebotomy) && root.phlebotomy.is_served === true;
+  if (
+    !isRecord(root.phlebotomy)
+    || typeof root.phlebotomy.is_served !== "boolean"
+  ) {
+    throw labsUnavailableError(true);
+  }
+
+  return root.phlebotomy.is_served;
 }
 
 function normalizeJunctionPscLocations(
   value: unknown,
   requestedLabId: number,
-): HostedRuntimeLabsLocation[] {
+): JunctionPscProjection {
   if (!isRecord(value)) {
     throw labsUnavailableError(true);
   }
@@ -530,10 +585,17 @@ function normalizeJunctionPscLocations(
   }
 
   const labSlug = readNullableBoundedText(root.slug, 180);
-  return root.patient_service_centers.flatMap((candidate) => {
+  let hadMalformedEntries = false;
+  const locations = root.patient_service_centers.flatMap((candidate) => {
     const location = normalizeJunctionPscLocation(candidate, requestedLabId, labSlug);
-    return location ? [location] : [];
+    if (!location) {
+      hadMalformedEntries = true;
+      return [];
+    }
+    return [location];
   });
+
+  return { hadMalformedEntries, locations };
 }
 
 function normalizeJunctionPscLocation(
