@@ -190,7 +190,6 @@ export async function createEncryptedWorkspaceSnapshotFile(input: {
       hash: encryptedObjectHash,
       maxBytes: input.maxEncryptedBytes,
     });
-    await assertHostedWorkspaceSnapshotZstdCliAvailable();
     assertHostedWorkspaceSnapshotConstructionLive(input.signal);
     const tar = spawn("tar", [
       "-C",
@@ -199,7 +198,7 @@ export async function createEncryptedWorkspaceSnapshotFile(input: {
       "--null",
       "-T",
       tarListPath,
-      "-cf",
+      "-cvvf",
       "-",
     ], {
       env: { ...process.env, COPYFILE_DISABLE: "1" },
@@ -208,6 +207,10 @@ export async function createEncryptedWorkspaceSnapshotFile(input: {
     const zstd = spawn("zstd", [...HOSTED_WORKSPACE_SNAPSHOT_ZSTD_ARGS], {
       stdio: ["pipe", "pipe", "pipe"],
     });
+    const emittedTarEntries = collectHostedWorkspaceSnapshotVerboseTarEntries(
+      tar.stderr,
+      input.signal,
+    );
     const tarExit = waitForHostedWorkspaceSnapshotProcess(tar, "tar");
     const zstdExit = waitForHostedWorkspaceSnapshotProcess(zstd, "zstd");
     const pipelineOptions = input.signal ? { signal: input.signal } : {};
@@ -223,7 +226,7 @@ export async function createEncryptedWorkspaceSnapshotFile(input: {
         pipeline(tar.stdout, zstd.stdin, pipelineOptions),
         [tarExit, zstdExit],
       );
-      await Promise.all([
+      const [, , , , tarEntries] = await Promise.all([
         archiveInputPipe,
         pipeline(
           zstd.stdout,
@@ -235,7 +238,13 @@ export async function createEncryptedWorkspaceSnapshotFile(input: {
         ),
         tarExit,
         zstdExit,
+        emittedTarEntries,
       ]);
+      assertHostedWorkspaceSnapshotArchiveMatchesState({
+        entries: tarEntries,
+        expected: preflight,
+        signal: input.signal,
+      });
     } catch (error) {
       tar.kill("SIGTERM");
       zstd.kill("SIGTERM");
@@ -266,17 +275,16 @@ export async function createEncryptedWorkspaceSnapshotFile(input: {
     if (encryptedStat.size !== encryptedByteSize) {
       throw new Error("Hosted workspace snapshot encrypted size accounting failed.");
     }
-    await assertHostedWorkspaceSnapshotEncryptedArchiveMatchesState({
-      aad: input.aad,
-      authTag,
-      dataKey,
-      encryptedByteSize,
-      encryptedFilePath,
-      expected: preflight,
-      iv,
+    const encryptedObjectSha256 = encryptedObjectHash.digest("hex");
+    const encryptedFileSha256 = await hashHostedWorkspaceSnapshotFile({
+      filePath: encryptedFilePath,
       signal: input.signal,
     });
-    assertHostedWorkspaceSnapshotConstructionLive(input.signal);
+    if (encryptedFileSha256 !== encryptedObjectSha256) {
+      throw new Error(
+        "Hosted workspace snapshot encrypted file digest does not match its output.",
+      );
+    }
     const postArchivePreflight = await readHostedWorkspaceSnapshotSelectedEntryState({
       archiveEntries: input.archiveEntries,
       durableRoot,
@@ -290,7 +298,7 @@ export async function createEncryptedWorkspaceSnapshotFile(input: {
       compression: HOSTED_WORKSPACE_SNAPSHOT_COMPRESSION,
       encryptedByteSize,
       encryptedFilePath,
-      encryptedObjectSha256: encryptedObjectHash.digest("hex"),
+      encryptedObjectSha256,
       fileCount: preflight.fileCount,
       ivBase64: input.ivBase64,
       plaintextArchiveSha256: plaintextArchiveHash.digest("hex"),
@@ -303,6 +311,20 @@ export async function createEncryptedWorkspaceSnapshotFile(input: {
       await rm(tempDir, { force: true, recursive: true });
     }
   }
+}
+
+async function hashHostedWorkspaceSnapshotFile(input: {
+  filePath: string;
+  signal?: AbortSignal | null;
+}): Promise<string> {
+  const hash = createHash("sha256");
+  const stream = createReadStream(input.filePath);
+  for await (const chunk of stream) {
+    assertHostedWorkspaceSnapshotConstructionLive(input.signal);
+    hash.update(chunk);
+  }
+  assertHostedWorkspaceSnapshotConstructionLive(input.signal);
+  return hash.digest("hex");
 }
 
 function assertHostedWorkspaceSnapshotConstructionLive(
@@ -404,7 +426,6 @@ export async function restoreEncryptedWorkspaceSnapshotFromEncryptedStream(input
   const durableRoot = path.resolve(input.durableRoot);
   const durableParent = path.dirname(durableRoot);
   await mkdir(durableParent, { mode: 0o700, recursive: true });
-  await assertHostedWorkspaceSnapshotZstdCliAvailable();
   const restoreTempDir = await mkdtemp(path.join(durableParent, ".workspace-snapshot-restore-"));
   const restoreRoot = path.join(restoreTempDir, "durable-root");
   const backupRoot = path.join(restoreTempDir, "previous-durable-root");
@@ -654,6 +675,7 @@ async function readHostedWorkspaceSnapshotSelectedEntryState(input: {
   const entries = new Map<string, "directory" | "file">();
   const files = new Map<string, HostedWorkspaceSnapshotDurableRootFileState>();
   const seen = new Set<string>();
+  const statsByPath = new Map<string, Stats>();
   const tarEntryPaths: string[] = [];
   let totalPlainBytes = 0;
 
@@ -679,6 +701,7 @@ async function readHostedWorkspaceSnapshotSelectedEntryState(input: {
       archivePath,
       root,
       signal: input.signal,
+      statsByPath,
     });
     assertHostedWorkspaceSnapshotConstructionLive(input.signal);
     if (isHostedWorkspaceSnapshotEnvPath(archivePath)) {
@@ -721,6 +744,7 @@ async function readHostedWorkspaceSnapshotSelectedEntryStats(input: {
   archivePath: string;
   root: string;
   signal?: AbortSignal | null;
+  statsByPath: Map<string, Stats>;
 }): Promise<Stats> {
   assertHostedWorkspaceSnapshotConstructionLive(input.signal);
   const segments = input.archivePath.split("/");
@@ -729,11 +753,15 @@ async function readHostedWorkspaceSnapshotSelectedEntryStats(input: {
   for (const [index, segment] of segments.entries()) {
     assertHostedWorkspaceSnapshotConstructionLive(input.signal);
     currentPath = path.join(currentPath, segment);
-    try {
-      stats = await lstat(currentPath);
-    } catch (error) {
-      assertHostedWorkspaceSnapshotConstructionLive(input.signal);
-      throw error;
+    stats = input.statsByPath.get(currentPath) ?? null;
+    if (!stats) {
+      try {
+        stats = await lstat(currentPath);
+      } catch (error) {
+        assertHostedWorkspaceSnapshotConstructionLive(input.signal);
+        throw error;
+      }
+      input.statsByPath.set(currentPath, stats);
     }
     assertHostedWorkspaceSnapshotConstructionLive(input.signal);
     if (stats.isSymbolicLink()) {
@@ -752,25 +780,19 @@ async function readHostedWorkspaceSnapshotSelectedEntryStats(input: {
   return stats;
 }
 
-async function assertHostedWorkspaceSnapshotEncryptedArchiveMatchesState(input: {
-  aad: HostedWorkspaceSnapshotV2Aad;
-  authTag: Buffer;
-  dataKey: Uint8Array;
-  encryptedByteSize: number;
-  encryptedFilePath: string;
+function assertHostedWorkspaceSnapshotArchiveMatchesState(input: {
+  entries: readonly string[];
   expected: HostedWorkspaceSnapshotDurableRootState;
-  iv: Buffer;
   signal?: AbortSignal | null;
-}): Promise<void> {
+}): void {
   assertHostedWorkspaceSnapshotConstructionLive(input.signal);
   const expected = input.expected;
   const remaining = new Map(expected.entries);
   const seenPaths = new Set<string>();
-  const entries = await listHostedWorkspaceSnapshotEncryptedVerboseTarEntries(input);
   let fileCount = 0;
   let totalPlainBytes = 0;
 
-  for (const entry of entries) {
+  for (const entry of input.entries) {
     assertHostedWorkspaceSnapshotConstructionLive(input.signal);
     const parsed = parseHostedWorkspaceSnapshotVerboseTarEntry(entry);
     const parsedArchivePath = normalizeHostedWorkspaceSnapshotTarEntryPath(parsed.path);
@@ -819,97 +841,29 @@ async function assertHostedWorkspaceSnapshotEncryptedArchiveMatchesState(input: 
   }
 }
 
-async function listHostedWorkspaceSnapshotEncryptedVerboseTarEntries(input: {
-  aad: HostedWorkspaceSnapshotV2Aad;
-  authTag: Buffer;
-  dataKey: Uint8Array;
-  encryptedByteSize: number;
-  encryptedFilePath: string;
-  iv: Buffer;
-  signal?: AbortSignal | null;
-}): Promise<string[]> {
-  assertHostedWorkspaceSnapshotConstructionLive(input.signal);
-  const decipher = createDecipheriv(
-    "aes-256-gcm",
-    Buffer.from(input.dataKey),
-    input.iv,
-  );
-  decipher.setAAD(Buffer.from(serializeHostedWorkspaceSnapshotV2Aad(input.aad)));
-  decipher.setAuthTag(input.authTag);
-  const zstd = spawn("zstd", [
-    "-d",
-    "--stdout",
-  ], {
-    stdio: ["pipe", "pipe", "pipe"],
-  });
-  const tar = spawn("tar", [
-    "-tvf",
-    "-",
-  ], {
-    stdio: ["pipe", "pipe", "pipe"],
-  });
-  if (!zstd.stdin || !zstd.stdout || !tar.stdin) {
-    throw new Error("Hosted workspace snapshot tar list streams are unavailable.");
+async function collectHostedWorkspaceSnapshotVerboseTarEntries(
+  stream: Readable | null,
+  signal: AbortSignal | null | undefined,
+): Promise<string[]> {
+  if (!stream) {
+    throw new Error("Hosted workspace snapshot tar stderr is unavailable.");
   }
-  if (!tar.stdout) {
-    throw new Error("Hosted workspace snapshot tar list stdout is unavailable.");
-  }
-  tar.stdout.setEncoding("utf8");
-  const zstdExit = waitForHostedWorkspaceSnapshotProcess(zstd, "zstd");
-  const tarExit = waitForHostedWorkspaceSnapshotProcess(tar, "tar");
-  const pipelineOptions = input.signal ? { signal: input.signal } : {};
-  const decryptPipe = waitForHostedWorkspaceSnapshotProcessPipe(
-    pipeline(
-      createReadStream(input.encryptedFilePath, {
-        end: input.encryptedByteSize - HOSTED_WORKSPACE_SNAPSHOT_AUTH_TAG_BYTES - 1,
-        start: 0,
-      }),
-      decipher,
-      zstd.stdin,
-      pipelineOptions,
-    ),
-    [zstdExit, tarExit],
-  );
-  const archivePipe = waitForHostedWorkspaceSnapshotProcessPipe(
-    pipeline(zstd.stdout, tar.stdin, pipelineOptions),
-    [zstdExit, tarExit],
-  );
   const lines = createInterface({
     crlfDelay: Number.POSITIVE_INFINITY,
-    input: tar.stdout,
+    input: stream,
   });
   const entries: string[] = [];
-  try {
-    for await (const line of lines) {
-      assertHostedWorkspaceSnapshotConstructionLive(input.signal);
-      if (line.trim().length === 0) {
-        continue;
-      }
-      entries.push(line);
-      if (entries.length > HOSTED_WORKSPACE_SNAPSHOT_MAX_TAR_ENTRIES) {
-        throw new Error("Hosted workspace snapshot tar entry count is unsafe.");
-      }
+  for await (const line of lines) {
+    assertHostedWorkspaceSnapshotConstructionLive(signal);
+    if (line.trim().length === 0) {
+      continue;
     }
-    await Promise.all([decryptPipe, archivePipe]);
-    await Promise.all([zstdExit, tarExit]);
-    assertHostedWorkspaceSnapshotConstructionLive(input.signal);
-  } catch (error) {
-    zstd.kill("SIGTERM");
-    tar.kill("SIGTERM");
-    const processFailure = await readHostedWorkspaceSnapshotProcessFailure([
-      zstdExit,
-      tarExit,
-    ]);
-    await Promise.allSettled([decryptPipe, archivePipe]);
-    assertHostedWorkspaceSnapshotConstructionLive(input.signal);
-    if (
-      processFailure
-      && shouldPreferHostedWorkspaceSnapshotProcessFailure(error)
-    ) {
-      throw processFailure;
+    entries.push(line);
+    if (entries.length > HOSTED_WORKSPACE_SNAPSHOT_MAX_TAR_ENTRIES) {
+      throw new Error("Hosted workspace snapshot tar entry count is unsafe.");
     }
-    throw error;
   }
+  assertHostedWorkspaceSnapshotConstructionLive(signal);
   return entries;
 }
 
@@ -918,11 +872,12 @@ function parseHostedWorkspaceSnapshotVerboseTarEntry(entry: string): {
   size: number;
   type: "directory" | "file";
 } {
-  const type = entry[0];
+  const normalizedEntry = entry.startsWith("a ") ? entry.slice(2) : entry;
+  const type = normalizedEntry[0];
   if (type !== "-" && type !== "d") {
     throw new Error("Hosted workspace snapshot tar entry type is unsafe.");
   }
-  const parsed = parseHostedWorkspaceSnapshotVerboseTarEntryFields(entry);
+  const parsed = parseHostedWorkspaceSnapshotVerboseTarEntryFields(normalizedEntry);
   if (!parsed) {
     throw new Error("Hosted workspace snapshot tar entry format is unsupported.");
   }
@@ -1123,13 +1078,6 @@ function createBoundedHashTransform(input: {
     get: () => byteCount,
   });
   return transform;
-}
-
-async function assertHostedWorkspaceSnapshotZstdCliAvailable(): Promise<void> {
-  const zstd = spawn("zstd", ["--version"], {
-    stdio: ["ignore", "ignore", "pipe"],
-  });
-  await waitForHostedWorkspaceSnapshotProcess(zstd, "zstd");
 }
 
 function waitForHostedWorkspaceSnapshotProcess(
