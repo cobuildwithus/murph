@@ -14,6 +14,7 @@ import {
 import type { AssistantSession } from "@murphai/operator-config/assistant-cli-contracts";
 import {
   createHostedExecutionReviewedAssistantAskCompletionDeliveryKey,
+  HOSTED_EXECUTION_ASSISTANT_ASK_CANNOT_ANSWER_RESPONSE,
   type HostedExecutionAssistantAskCompletedWake,
 } from "@murphai/hosted-execution";
 
@@ -29,7 +30,7 @@ import {
 } from "./mailbox-outcome.ts";
 
 export const HOSTED_ASSISTANT_ASK_CANNOT_ANSWER_RESPONSE =
-  "I couldn't answer that from the information available to this group.";
+  HOSTED_EXECUTION_ASSISTANT_ASK_CANNOT_ANSWER_RESPONSE;
 const HOSTED_ASSISTANT_ASK_REVIEWED_EXACT_INSTRUCTIONS =
   "Queue the already-reviewed exact response for the bound group conversation.";
 

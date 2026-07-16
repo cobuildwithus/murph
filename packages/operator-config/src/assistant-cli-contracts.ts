@@ -849,6 +849,13 @@ export const assistantOutboxIntentSchema = z
     attemptCount: z.number().int().nonnegative(),
     status: z.enum(assistantOutboxIntentStatusValues),
     message: z.string(),
+    messageSupersession: z
+      .object({
+        at: isoTimestampSchema,
+        code: z.string().trim().min(1),
+      })
+      .strict()
+      .optional(),
     emailHtml: z.string().max(500_000).nullable().optional(),
     media: z.array(assistantResponseMediaSchema).max(40).default([]),
     subject: z.string().trim().min(1).nullable().default(null),

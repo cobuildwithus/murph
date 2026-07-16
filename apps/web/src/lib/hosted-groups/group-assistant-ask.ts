@@ -32,6 +32,7 @@ import {
   appendHostedMailboxEnvelopeWithIdentityTx,
   readHostedMailboxConversationWakeByAssistantInputId,
   readHostedMailboxItemById,
+  readHostedMailboxWakeByDedupeKey,
   readHostedMailboxWakeByItemId,
 } from "../hosted-mailbox/store";
 import {
@@ -593,12 +594,13 @@ export async function handleHostedRuntimeAssistantAskControl(input: {
 export async function assertHostedAssistantAskCompletionDeliveryAuthorityTx(
   input: {
     answeredMailboxItemIds: readonly string[];
+    assistantAskFallback?: boolean;
     boundRuntimeMemberId: string;
     idempotencyKey: string | null;
     now?: Date;
     tx: Prisma.TransactionClient;
   },
-): Promise<void> {
+): Promise<{ assistantAskFallbackRequired: true } | void> {
   const isCompletionDelivery = input.idempotencyKey?.startsWith(
     HOSTED_EXECUTION_REVIEWED_ASSISTANT_ASK_COMPLETION_DELIVERY_KEY_PREFIX,
   ) === true;
@@ -619,13 +621,13 @@ export async function assertHostedAssistantAskCompletionDeliveryAuthorityTx(
   }
 
   const now = input.now ?? new Date();
+  const supportsSafeFallback = input.assistantAskFallback !== undefined;
   const completionItem = await readHostedMailboxItemById({
     mailboxItemId: completionId,
     prisma: input.tx,
   });
   if (
     !completionItem
-    || isHostedAssistantAskExpired(completionItem.expiresAt ?? null, now)
     || completionItem.dedupeKey !== completionId
     || completionItem.kind !== "assistant.ask.completed"
     || completionItem.userId !== input.boundRuntimeMemberId
@@ -633,11 +635,24 @@ export async function assertHostedAssistantAskCompletionDeliveryAuthorityTx(
     throwHostedAssistantAskDeliveryAuthorityMismatch();
   }
 
-  const completionWake = await readHostedMailboxWakeByItemId({
-    availableAt: now,
-    mailboxItemId: completionId,
-    prisma: input.tx,
-  });
+  if (
+    !supportsSafeFallback
+    && isHostedAssistantAskExpired(completionItem.expiresAt ?? null, now)
+  ) {
+    throwHostedAssistantAskDeliveryAuthorityMismatch();
+  }
+
+  const completionWake = supportsSafeFallback
+    ? await readHostedMailboxWakeByDedupeKey({
+      dedupeKey: completionId,
+      prisma: input.tx,
+      userId: input.boundRuntimeMemberId,
+    })
+    : await readHostedMailboxWakeByItemId({
+      availableAt: now,
+      mailboxItemId: completionId,
+      prisma: input.tx,
+    });
   if (
     !completionWake
     || !isHostedExecutionAssistantAskCompletedWake(completionWake)
@@ -651,11 +666,24 @@ export async function assertHostedAssistantAskCompletionDeliveryAuthorityTx(
     throwHostedAssistantAskDeliveryAuthorityMismatch();
   }
 
+  if (input.assistantAskFallback === true) {
+    return;
+  }
+  if (
+    supportsSafeFallback
+    && isHostedAssistantAskExpired(completionItem.expiresAt ?? null, now)
+  ) {
+    return { assistantAskFallbackRequired: true };
+  }
+
   const requestItem = await readHostedMailboxItemById({
     mailboxItemId: completionWake.ask.requestId,
     prisma: input.tx,
   });
   if (!requestItem) {
+    if (supportsSafeFallback) {
+      return { assistantAskFallbackRequired: true };
+    }
     throwHostedAssistantAskDeliveryAuthorityMismatch();
   }
   const requestRead = await readHostedAssistantAskAuthorityTx({
@@ -675,6 +703,9 @@ export async function assertHostedAssistantAskCompletionDeliveryAuthorityTx(
     || authority.originSessionId !== completionWake.ask.originSessionId
     || authority.question !== completionWake.ask.question
   ) {
+    if (supportsSafeFallback) {
+      return { assistantAskFallbackRequired: true };
+    }
     throwHostedAssistantAskDeliveryAuthorityMismatch();
   }
 }

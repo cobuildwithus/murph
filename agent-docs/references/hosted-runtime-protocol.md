@@ -430,7 +430,20 @@ continuation and delivers the reviewed answer byte-for-byte on the revalidated
 original group route; cannot-answer uses fixed non-disclosing copy. Missing
 `deliveryMode` retains the original private-to-group continuation behavior.
 Leave/rejoin and revoke/regrant produce new generations, so old work cannot
-cross either lifecycle boundary.
+cross either lifecycle boundary. If live authority disappears after an exact
+answer is queued, the runner rewrites that same outbox intent to the fixed
+cannot-answer copy with durable supersession metadata before provider entry;
+the final egress claim permits the structurally bound fixed fallback without
+reviving the private grant.
+
+Web caps retained permission history at 25 rows per group and retained grant
+generations at 25 per group and 25 per member. Counts run under the canonical
+group/member locks after deterministic request/reaction replay checks. Thus an
+exact replay still succeeds at the cap while only a fresh append receives the
+typed limit disposition. Group summaries returned by `create_join_link`,
+`post_join_offer`, and `update_display_name` include decrypted active disclosure
+grants. Display-name handling opens that summary before the Linq rename so a
+secure-box failure cannot be introduced after the provider mutation.
 
 An unfinished child leaves the request pending. Before invocation return,
 checkpoint, shutdown, fence loss, or workspace replacement, the runtime
@@ -451,9 +464,9 @@ consumers that tolerate `consented_member`, prepare disclosure context, and the
 optional `reviewed_exact` completion while
 `HOSTED_GROUP_DISCLOSURE_PRODUCER_ENABLED` is unset or `0`. After Web and the
 immediate runner fleet converge and confinement/fingerprint smoke passes,
-keep the gate disabled until historical permission and revoke/regrant
-cardinality has a numeric cap or an equally explicit bounded-retention rule.
-Enable exact `1` only after both prerequisites hold. Rollback turns that gate
+the synchronous 25-row permission and per-group/per-member grant-generation
+caps satisfy the cardinality prerequisite. Enable exact `1` only after that
+convergence proof. Rollback turns that gate
 off first and keeps compatible consumers until new requests and completions
 have drained or expired from both Web mailboxes and imported runtime state.
 

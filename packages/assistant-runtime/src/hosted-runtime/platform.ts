@@ -261,6 +261,7 @@ export interface HostedRuntimeLinqSendResponse {
 
 export interface HostedRuntimeLinqRecentInboundEngagementRequest {
   answeredMailboxItemIds?: readonly string[] | null;
+  assistantAskFallback?: boolean | null;
   authorityCheckOnly: boolean;
   directRecipientPhoneNumber?: string | null;
   fromPhoneNumber?: string | null;
@@ -278,6 +279,7 @@ export interface HostedRuntimeLinqTargetOverride {
 }
 
 export interface HostedRuntimeLinqRecentInboundEngagementResult {
+  assistantAskFallbackRequired?: boolean | null;
   providerDispatchClaimed?: boolean | null;
   targetOverride?: HostedRuntimeLinqTargetOverride | null;
   threadIsDirect?: boolean | null;

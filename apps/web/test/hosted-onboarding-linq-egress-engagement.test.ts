@@ -984,6 +984,7 @@ describe("hosted Linq egress authority", () => {
       mocks.assertHostedAssistantAskCompletionDeliveryAuthorityTx,
     ).toHaveBeenCalledWith({
       answeredMailboxItemIds: [completionId],
+      assistantAskFallback: false,
       boundRuntimeMemberId: "member-1",
       idempotencyKey,
       tx: expect.objectContaining({
@@ -1027,6 +1028,7 @@ describe("hosted Linq egress authority", () => {
       mocks.assertHostedAssistantAskCompletionDeliveryAuthorityTx,
     ).toHaveBeenCalledWith({
       answeredMailboxItemIds: [],
+      assistantAskFallback: false,
       boundRuntimeMemberId: "member-1",
       idempotencyKey: "assistant-ask-completion:legacy",
       tx: expect.objectContaining({
@@ -1043,12 +1045,7 @@ describe("hosted Linq egress authority", () => {
         threadRouteContainerMemberId: "member-1",
       });
       mocks.assertHostedAssistantAskCompletionDeliveryAuthorityTx
-        .mockRejectedValueOnce(hostedOnboardingError({
-          code: "HOSTED_ASSISTANT_ASK_DELIVERY_AUTHORITY_MISMATCH",
-          httpStatus: 403,
-          message: "Hosted Assistant Ask delivery authority is no longer valid.",
-          retryable: false,
-        }));
+        .mockResolvedValueOnce({ assistantAskFallbackRequired: true });
       mocks.getPrisma.mockReturnValue(prisma);
 
       const response = await postHostedLinqEgressEngagement(
@@ -1067,16 +1064,52 @@ describe("hosted Linq egress authority", () => {
         }),
       );
 
-      expect(response.status).toBe(403);
-      await expect(response.json()).resolves.toMatchObject({
-        error: {
-          code: "HOSTED_ASSISTANT_ASK_DELIVERY_AUTHORITY_MISMATCH",
-          retryable: false,
-        },
+      expect(response.status).toBe(200);
+      await expect(response.json()).resolves.toEqual({
+        assistantAskFallbackRequired: true,
+        ok: true,
+        threadIsDirect: false,
       });
       expect(prisma.hostedLinqDelivery.createMany).not.toHaveBeenCalled();
     },
   );
+
+  it("claims provider dispatch for an already-fixed Assistant Ask fallback", async () => {
+    const prisma = createPrismaStub({
+      threadRouteContainerMemberId: "member-1",
+    });
+    mocks.getPrisma.mockReturnValue(prisma);
+
+    const response = await postHostedLinqEgressEngagement(
+      new Request("https://internal.example.test/engagement", {
+        body: JSON.stringify({
+          answeredMailboxItemIds: ["aask_done_safe"],
+          assistantAskFallback: true,
+          authorityCheckOnly: false,
+          idempotencyKey: "reviewed-assistant-ask-completion:safe",
+          target: "chat-authorized-group",
+          targetKind: "thread",
+        }),
+        headers: {
+          "content-type": "application/json",
+        },
+        method: "POST",
+      }),
+    );
+
+    expect(response.status).toBe(200);
+    await expect(response.json()).resolves.toEqual({
+      ok: true,
+      providerDispatchClaimed: true,
+      threadIsDirect: false,
+    });
+    expect(
+      mocks.assertHostedAssistantAskCompletionDeliveryAuthorityTx,
+    ).toHaveBeenCalledWith(expect.objectContaining({
+      assistantAskFallback: true,
+    }));
+    expect(prisma.hostedLinqDelivery.createMany).toHaveBeenCalledTimes(1);
+  });
 
   it("does not claim provider dispatch when the completion anchor is missing", async () => {
     const prisma = createPrismaStub({

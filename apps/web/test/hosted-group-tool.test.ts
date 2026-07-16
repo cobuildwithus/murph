@@ -1,6 +1,7 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
 const mocks = vi.hoisted(() => ({
+  admitHostedGroupDisclosurePermissionAppendTx: vi.fn(),
   assertHostedLinqRouteEgressAuthority: vi.fn(),
   buildMurphHostedLinqContactCardVcf: vi.fn(),
   canonicalizeHostedGroupDisclosurePermissionText: vi.fn(),
@@ -126,6 +127,8 @@ vi.mock("@/src/lib/hosted-groups/group-assistant-ask", () => ({
 }));
 
 vi.mock("@/src/lib/hosted-groups/group-disclosure-store", () => ({
+  admitHostedGroupDisclosurePermissionAppendTx:
+    mocks.admitHostedGroupDisclosurePermissionAppendTx,
   canonicalizeHostedGroupDisclosurePermissionText:
     mocks.canonicalizeHostedGroupDisclosurePermissionText,
   createHostedGroupDisclosurePermissionProviderIdempotencyKey:
@@ -324,7 +327,12 @@ describe("handleHostedRuntimeGroupTool", () => {
       messageLookupKey: "hbidx:linq-message:v1:offer",
       projectionKinds: ["sleep-times.v0"],
     });
-    mocks.recordHostedGroupDisclosurePermissionTx.mockResolvedValue(undefined);
+    mocks.admitHostedGroupDisclosurePermissionAppendTx.mockResolvedValue({
+      kind: "accepted",
+    });
+    mocks.recordHostedGroupDisclosurePermissionTx.mockResolvedValue({
+      kind: "recorded",
+    });
     mocks.readActiveHostedGroupDisclosureGrantsForMember.mockResolvedValue([]);
     mocks.readActiveHostedGroupDisclosureGrantsForGroup.mockResolvedValue([]);
     mocks.revokeHostedGroupDisclosureGrantForMemberTx.mockResolvedValue({
@@ -805,8 +813,13 @@ describe("handleHostedRuntimeGroupTool", () => {
       }));
     expect(mocks.readActiveHostedGroupDisclosureGrantsForGroup).toHaveBeenCalledWith({
       groupId: GROUP_SUMMARY.id,
-      prisma: fakeTx,
+      prisma: expect.objectContaining({ $transaction: expect.any(Function) }),
     });
+    expect(
+      mocks.readActiveHostedGroupDisclosureGrantsForGroup.mock.invocationCallOrder[0],
+    ).toBeLessThan(
+      mocks.updateHostedLinqChatDisplayName.mock.invocationCallOrder[0],
+    );
     expect(
       mocks.updateHostedLinqChatDisplayName.mock.invocationCallOrder[0],
     ).toBeLessThan(
@@ -885,6 +898,31 @@ describe("handleHostedRuntimeGroupTool", () => {
     expect(mocks.updateHostedGroupDisplayNameByRuntimeMemberIdTx).not.toHaveBeenCalled();
   });
 
+  it("does not rename the provider chat when disclosure-summary decryption fails", async () => {
+    mocks.readActiveHostedGroupDisclosureGrantsForGroup.mockRejectedValueOnce(
+      new Error("secure box unavailable"),
+    );
+
+    await expect(handleHostedRuntimeGroupTool({
+      memberId: "member_group_runtime",
+      request: {
+        action: "update_display_name",
+        linqThread: GROUP_RUNTIME_LINQ_THREAD,
+        updateDisplayName: { displayName: "Unreadable summary" },
+      },
+    })).resolves.toEqual({
+      action: "update_display_name",
+      result: {
+        group: null,
+        status: "unavailable",
+        unavailableReason: "group_summary_unavailable",
+      },
+    });
+
+    expect(mocks.updateHostedLinqChatDisplayName).not.toHaveBeenCalled();
+    expect(mocks.updateHostedGroupDisplayNameByRuntimeMemberIdTx).not.toHaveBeenCalled();
+  });
+
   it("creates a join link bound to the runtime member's thread container owner", async () => {
     mocks.createHostedGroupJoinLinkForOwnedThreadContainerTx.mockResolvedValueOnce({
       group: groupSummaryWithOwnerEmailGrant(),
@@ -947,6 +985,28 @@ describe("handleHostedRuntimeGroupTool", () => {
         memberId: "member_owner",
         prisma: expect.any(Object),
       });
+  });
+
+  it("aborts join-link creation when disclosure-summary decryption fails", async () => {
+    mocks.createHostedGroupJoinLinkForOwnedThreadContainerTx.mockResolvedValueOnce({
+      group: groupSummaryWithOwnerEmailGrant(),
+      joinCode: "abc123",
+    });
+    mocks.readActiveHostedGroupDisclosureGrantsForGroup.mockRejectedValueOnce(
+      new Error("secure box unavailable"),
+    );
+
+    await expect(handleHostedRuntimeGroupTool({
+      memberId: "member_group_runtime",
+      request: { action: "create_join_link" },
+    })).rejects.toThrow("secure box unavailable");
+
+    expect(mocks.readActiveHostedGroupDisclosureGrantsForGroup).toHaveBeenCalledWith({
+      groupId: GROUP_SUMMARY.id,
+      prisma: fakeTx,
+    });
+    expect(mocks.enqueueHostedGroupNewsletterEmailNeededNudgeIfNeededBestEffort)
+      .not.toHaveBeenCalled();
   });
 
   it("does not mint a join link when the owner lacks active access even if participant-aware access is active", async () => {
@@ -1454,7 +1514,12 @@ describe("handleHostedRuntimeGroupTool chat-scoped actions", () => {
     });
     mocks.readActiveHostedMemberAccess.mockResolvedValue(true);
     mocks.readHostedGroupIdByRuntimeMemberId.mockResolvedValue(GROUP_SUMMARY.id);
-    mocks.recordHostedGroupDisclosurePermissionTx.mockResolvedValue(undefined);
+    mocks.admitHostedGroupDisclosurePermissionAppendTx.mockResolvedValue({
+      kind: "accepted",
+    });
+    mocks.recordHostedGroupDisclosurePermissionTx.mockResolvedValue({
+      kind: "recorded",
+    });
     mocks.lookupHostedMemberByVerifiedEmailAddress.mockResolvedValue(null);
     mocks.releaseHostedLinqContactCardShareAttempt.mockResolvedValue(undefined);
     mocks.reserveHostedLinqContactCardShareAttempt.mockResolvedValue({
@@ -1616,6 +1681,56 @@ describe("handleHostedRuntimeGroupTool chat-scoped actions", () => {
     expect(mocks.recordHostedGroupDisclosurePermissionTx).not.toHaveBeenCalled();
   });
 
+  it("does not send a fresh disclosure request when permission history is full", async () => {
+    mocks.admitHostedGroupDisclosurePermissionAppendTx.mockResolvedValueOnce({
+      kind: "limit_reached",
+    });
+
+    await expect(handleHostedRuntimeGroupTool({
+      memberId: "member_container",
+      request: {
+        action: "post_disclosure_request",
+        linqThread: LINQ_THREAD,
+        originAssistantInputId: DISCLOSURE_ORIGIN_ASSISTANT_INPUT_ID,
+        permissionText: "Recent sleep timing and duration",
+      },
+    })).resolves.toEqual({
+      action: "post_disclosure_request",
+      result: {
+        status: "unavailable",
+        unavailableReason: "permission_history_limit_reached",
+      },
+    });
+
+    expect(mocks.sendHostedLinqChatMessage).not.toHaveBeenCalled();
+    expect(mocks.recordHostedGroupDisclosurePermissionTx).not.toHaveBeenCalled();
+  });
+
+  it("reports a binding-time permission history race after the inert provider send", async () => {
+    mocks.recordHostedGroupDisclosurePermissionTx.mockResolvedValueOnce({
+      kind: "limit_reached",
+    });
+
+    await expect(handleHostedRuntimeGroupTool({
+      memberId: "member_container",
+      request: {
+        action: "post_disclosure_request",
+        linqThread: LINQ_THREAD,
+        originAssistantInputId: DISCLOSURE_ORIGIN_ASSISTANT_INPUT_ID,
+        permissionText: "Recent sleep timing and duration",
+      },
+    })).resolves.toEqual({
+      action: "post_disclosure_request",
+      result: {
+        status: "unavailable",
+        unavailableReason: "permission_history_limit_reached",
+      },
+    });
+
+    expect(mocks.sendHostedLinqChatMessage).toHaveBeenCalledTimes(1);
+    expect(mocks.recordHostedGroupDisclosurePermissionTx).toHaveBeenCalledTimes(1);
+  });
+
   it("posts and binds fixed exact-permission disclosure consent copy", async () => {
     const request = {
       memberId: "member_container",
@@ -1760,6 +1875,38 @@ describe("handleHostedRuntimeGroupTool chat-scoped actions", () => {
         prisma: expect.any(Object),
       });
     expect(mocks.sendHostedLinqAttachmentMessage).not.toHaveBeenCalled();
+  });
+
+  it("does not send or bind a join offer when disclosure-summary decryption fails", async () => {
+    mocks.createHostedGroupJoinLinkForOwnedThreadContainerTx.mockResolvedValueOnce({
+      group: groupSummaryWithOwnerEmailGrant(),
+      joinCode: "abc123",
+    });
+    mocks.readActiveHostedGroupDisclosureGrantsForGroup.mockRejectedValueOnce(
+      new Error("secure box unavailable"),
+    );
+
+    await expect(handleHostedRuntimeGroupTool({
+      memberId: "member_container",
+      request: {
+        action: "post_join_offer",
+        joinOffer: {
+          messageTemplate:
+            "React here and you're in. Reacting shares {{share_scope}} with this group; customize at {{join_url}}.",
+          projectionKinds: ["group-email.v0"],
+        },
+        linqThread: LINQ_THREAD,
+      },
+    })).rejects.toThrow("secure box unavailable");
+
+    expect(mocks.readActiveHostedGroupDisclosureGrantsForGroup).toHaveBeenCalledWith({
+      groupId: GROUP_SUMMARY.id,
+      prisma: fakeTx,
+    });
+    expect(mocks.sendHostedLinqChatMessage).not.toHaveBeenCalled();
+    expect(mocks.recordHostedGroupJoinOfferTx).not.toHaveBeenCalled();
+    expect(mocks.enqueueHostedGroupNewsletterEmailNeededNudgeIfNeededBestEffort)
+      .not.toHaveBeenCalled();
   });
 
   it("renders profile-only share scope when no optional kinds are requested", async () => {

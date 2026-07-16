@@ -126,10 +126,10 @@ producer gate is distinct from the original private-to-group Ask gate.
    and preserve the existing `murph-group-read` confinement proof. Verify the
    outgoing reviewer starts with an empty runtime root and no personal
    workspace, application tools, delivery route, inherited secrets, or network.
-4. After Web and the immediate runner fleet converge, keep the gate off until
-   historical permission and revoke/regrant cardinality has a numeric cap or an
-   equally explicit bounded-retention rule. Only after both prerequisites hold,
-   set the gate to exact `1` and redeploy Web. Smoke one exact
+4. Confirm the deployed Web build enforces the synchronous 25-per-group
+   permission-history cap and 25-per-group/per-member grant-generation caps.
+   After Web and the immediate runner fleet converge, set the gate to exact `1`
+   and redeploy Web. Smoke one exact
    permission-message Like by a current member, one allowed ask whose bytes
    reach the originating group unchanged, one out-of-permission denial, and one
    revoke followed by a rejected ask.

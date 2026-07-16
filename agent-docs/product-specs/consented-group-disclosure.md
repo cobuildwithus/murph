@@ -110,8 +110,11 @@ group.
   completion append. Reviewed exact delivery carries that completion mailbox id
   into the existing outbox, and the final Linq egress transaction repeats the
   paired request and grant authority check before claiming provider dispatch.
-  Missing anchors and revoked, expired, stale, or mismatched authority are
-  terminal before provider entry.
+  Missing or malformed anchors are terminal before provider entry. When a
+  structurally bound completion loses live grant/expiry authority after its
+  reviewed answer was queued, the existing outbox intent durably supersedes
+  that answer with the fixed cannot-answer copy and retries before provider
+  entry. An intent that already contains that fixed copy remains deliverable.
 - Leave/rejoin creates a new membership generation. Revoke/regrant creates a
   new grant generation. Old requests cannot cross either boundary.
 - One accepted group input owns at most one request targeting one grant and one
@@ -132,16 +135,26 @@ The permission and grant rows are queryable product truth owned by
 state. The personal vault, group vault, runner, and assistant session do not
 gain another permission store.
 
-Permission text is bounded to 1,000 code points before encryption, and live
-group/member projections return at most 25 active grants. Authority and replay
-use the existing indexed permission id, provider-message lookup, membership,
-and permission/grant relations; immutable history is not copied into hosted
-workspace snapshots or mailbox payloads. Permission and grant rows are retained
-for the owning group's lifetime and cascade with group/account deletion. Total
-historical permission and revoke/regrant cardinality is nevertheless currently
-unbounded within that lifetime. A numeric history cap or equally explicit
-bounded-retention rule must land before the producer flag is enabled; this PR
-does not invent a retention scheduler.
+Permission text is bounded to 1,000 code points. Each group may retain at most
+25 permission rows, and grant-generation history is capped at 25 per group and
+25 per member under the existing group/member locks. Exact request and reaction
+replays resolve before the history counts, so they remain idempotent at the
+cap; only a fresh row returns `limit_reached`. Live group/member projections
+also return at most 25 active grants. Authority and replay use the existing
+indexed permission id, provider-message lookup, membership, and
+permission/grant relations; immutable history is not copied into hosted
+workspace snapshots or mailbox payloads. Rows remain retained for the owning
+group's lifetime and cascade with group/account deletion; no retention
+scheduler is introduced.
+
+Complete group summaries include active disclosure grants on `read_current`,
+`create_join_link`, `post_join_offer`, and `update_display_name`. Those actions
+therefore depend on opening permission text through the group secure-box. Join
+link/offer creation reads the summary inside its existing transaction before
+provider send. Display-name mutation opens the summary before renaming the Linq
+chat, then performs the existing provider-first name update and database write
+using that operation-start snapshot; a missing decrypt key cannot rename the
+provider chat and then fail solely while building the disclosure summary.
 
 ## Disclosure review
 
@@ -190,9 +203,9 @@ Deploy consumers first. Cloudflare/runner and Web must tolerate the new
 `consented_member` request target, prepare disclosure context, and optional
 `deliveryMode: "reviewed_exact"` completion before Web may emit new work.
 Keep `HOSTED_GROUP_DISCLOSURE_PRODUCER_ENABLED` unset or `0` through that
-deployment and the runner fingerprint/confinement smoke. Do not enable exact
-`1` until both planes have converged and the declared historical-cardinality
-blocker above has been resolved.
+deployment and the runner fingerprint/confinement smoke. The synchronous
+history caps satisfy the cardinality prerequisite; enable exact `1` only after
+both planes have converged and smoke has passed.
 
 Rollback disables and redeploys the Web producer first. Keep compatible
 consumers deployed until every consented request and reviewed-exact completion

@@ -248,10 +248,14 @@ function parseHostedRuntimeLinqRecentInboundEngagementResult(
 
   const result: HostedRuntimeLinqRecentInboundEngagementResult = {};
   const response = value as {
+    assistantAskFallbackRequired?: unknown;
     providerDispatchClaimed?: unknown;
     targetOverride?: unknown;
     threadIsDirect?: unknown;
   };
+  if (typeof response.assistantAskFallbackRequired === "boolean") {
+    result.assistantAskFallbackRequired = response.assistantAskFallbackRequired;
+  }
   if (typeof response.providerDispatchClaimed === "boolean") {
     result.providerDispatchClaimed = response.providerDispatchClaimed;
   }

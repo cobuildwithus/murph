@@ -77,6 +77,7 @@ import {
   requestHostedGroupMemberAssistantAsk,
 } from "./group-assistant-ask";
 import {
+  admitHostedGroupDisclosurePermissionAppendTx,
   canonicalizeHostedGroupDisclosurePermissionText,
   createHostedGroupDisclosurePermissionProviderIdempotencyKey,
   readActiveHostedGroupDisclosureGrantsForGroup,
@@ -504,6 +505,19 @@ async function handleHostedRuntimeGroupUpdateDisplayName(input: {
     return unavailable("group_not_found");
   }
 
+  const prisma = getPrisma();
+  let disclosureGrants: Awaited<
+    ReturnType<typeof readActiveHostedGroupDisclosureGrantsForGroup>
+  >;
+  try {
+    disclosureGrants = await readActiveHostedGroupDisclosureGrantsForGroup({
+      groupId: existingGroupId,
+      prisma,
+    });
+  } catch {
+    return unavailable("group_summary_unavailable");
+  }
+
   try {
     await updateHostedLinqChatDisplayName({
       chatId: access.chatId,
@@ -513,30 +527,24 @@ async function handleHostedRuntimeGroupUpdateDisplayName(input: {
     return unavailable("provider_unavailable");
   }
 
-  const prisma = getPrisma();
-  const updated = await prisma.$transaction(async (tx) => {
-    const group = await updateHostedGroupDisplayNameByRuntimeMemberIdTx({
-      displayName,
-      runtimeMemberId: input.memberId,
-      tx,
-    });
-    if (!group) {
-      return null;
-    }
-    const disclosureGrants = await readActiveHostedGroupDisclosureGrantsForGroup({
-      groupId: group.id,
-      prisma: tx,
-    });
-    return { disclosureGrants, group };
-  }, HOSTED_ONBOARDING_TRANSACTION_OPTIONS);
+  const updated = await prisma.$transaction(
+    async (tx) => {
+      return updateHostedGroupDisplayNameByRuntimeMemberIdTx({
+        displayName,
+        runtimeMemberId: input.memberId,
+        tx,
+      });
+    },
+    HOSTED_ONBOARDING_TRANSACTION_OPTIONS,
+  );
 
   return {
     action: "update_display_name",
     result: updated
       ? {
           group: toHostedRuntimeGroupSummary(
-            updated.group,
-            updated.disclosureGrants,
+            updated,
+            disclosureGrants,
           ),
           status: "ok",
         }
@@ -813,9 +821,18 @@ async function handleHostedRuntimeGroupPostDisclosureRequest(input: {
       prisma: tx,
       runtimeMemberId: input.memberId,
     });
-    return groupId
-      ? { groupId, kind: "ok" as const }
-      : { kind: "group_not_found" as const };
+    if (!groupId) {
+      return { kind: "group_not_found" as const };
+    }
+    const admission = await admitHostedGroupDisclosurePermissionAppendTx({
+      groupId,
+      originAssistantInputId: input.originAssistantInputId,
+      permissionText,
+      tx,
+    });
+    return admission.kind === "limit_reached"
+      ? { kind: "permission_history_limit_reached" as const }
+      : { groupId, kind: "ok" as const };
   }, HOSTED_ONBOARDING_TRANSACTION_OPTIONS);
   if (authority.kind !== "ok") {
     return unavailable(authority.kind);
@@ -843,19 +860,26 @@ async function handleHostedRuntimeGroupPostDisclosureRequest(input: {
     return unavailable("provider_message_unavailable");
   }
 
+  let binding: Awaited<ReturnType<typeof recordHostedGroupDisclosurePermissionTx>>;
   try {
-    await prisma.$transaction(async (tx) => {
-      await recordHostedGroupDisclosurePermissionTx({
-        groupId: authority.groupId,
-        messageId: sent.messageId,
-        originAssistantInputId: input.originAssistantInputId,
-        permissionText,
-        postedAt,
-        tx,
-      });
-    }, HOSTED_ONBOARDING_TRANSACTION_OPTIONS);
+    binding = await prisma.$transaction(
+      async (tx) => {
+        return recordHostedGroupDisclosurePermissionTx({
+          groupId: authority.groupId,
+          messageId: sent.messageId,
+          originAssistantInputId: input.originAssistantInputId,
+          permissionText,
+          postedAt,
+          tx,
+        });
+      },
+      HOSTED_ONBOARDING_TRANSACTION_OPTIONS,
+    );
   } catch {
     return unavailable("permission_binding_failed");
+  }
+  if (binding.kind === "limit_reached") {
+    return unavailable("permission_history_limit_reached");
   }
 
   return {

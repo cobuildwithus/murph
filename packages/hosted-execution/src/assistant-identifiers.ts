@@ -15,6 +15,8 @@ const HOSTED_ASSISTANT_IDENTIFIER_BLIND_NAMESPACE =
   "murph.hosted-assistant-input.identifier-blind.v1";
 export const HOSTED_EXECUTION_REVIEWED_ASSISTANT_ASK_COMPLETION_DELIVERY_KEY_PREFIX =
   "reviewed-assistant-ask-completion:";
+export const HOSTED_EXECUTION_ASSISTANT_ASK_CANNOT_ANSWER_RESPONSE =
+  "I couldn't answer that from the information available to this group.";
 
 export type HostedMailboxAssistantInputLane = "conversation" | "system";
 

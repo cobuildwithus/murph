@@ -37,6 +37,9 @@ export const POST = withJsonError(async (request: Request) => {
   const answeredMailboxItemIds = parseAnsweredMailboxItemIds(
     body.answeredMailboxItemIds,
   );
+  const assistantAskFallback = parseOptionalAssistantAskFallback(
+    body.assistantAskFallback,
+  );
   const authorityCheckOnly = parseRequiredAuthorityCheckOnly(
     body.authorityCheckOnly,
   );
@@ -104,15 +107,20 @@ export const POST = withJsonError(async (request: Request) => {
       });
     }
 
-    await assertHostedAssistantAskCompletionDeliveryAuthorityTx({
-      answeredMailboxItemIds,
-      boundRuntimeMemberId: userId,
-      idempotencyKey,
-      tx,
-    });
+    const assistantAskAuthority =
+      await assertHostedAssistantAskCompletionDeliveryAuthorityTx({
+        answeredMailboxItemIds,
+        assistantAskFallback,
+        boundRuntimeMemberId: userId,
+        idempotencyKey,
+        tx,
+      });
 
     let providerDispatchClaimed: boolean | null = null;
-    if (!authorityCheckOnly) {
+    if (
+      !authorityCheckOnly
+      && assistantAskAuthority?.assistantAskFallbackRequired !== true
+    ) {
       if (!idempotencyKey) {
         throw hostedOnboardingError({
           code: "HOSTED_LINQ_PROVIDER_DISPATCH_IDEMPOTENCY_REQUIRED",
@@ -140,6 +148,8 @@ export const POST = withJsonError(async (request: Request) => {
       providerDispatchClaimed = claim.claimed;
     }
     return {
+      assistantAskFallbackRequired:
+        assistantAskAuthority?.assistantAskFallbackRequired === true,
       asserted,
       providerDispatchClaimed,
     };
@@ -147,6 +157,9 @@ export const POST = withJsonError(async (request: Request) => {
 
   return jsonOk({
     ok: true,
+    ...(assertion.assistantAskFallbackRequired
+      ? { assistantAskFallbackRequired: true }
+      : {}),
     threadIsDirect: assertion.asserted.threadIsDirect,
     ...(assertion.asserted.targetOverride
       ? { targetOverride: assertion.asserted.targetOverride }
@@ -170,6 +183,21 @@ function parseRequiredAuthorityCheckOnly(value: unknown): boolean {
     code: "HOSTED_LINQ_EGRESS_AUTHORITY_CHECK_ONLY_INVALID",
     httpStatus: 400,
     message: "Hosted Linq egress authorityCheckOnly must be a boolean.",
+    retryable: false,
+  });
+}
+
+function parseOptionalAssistantAskFallback(value: unknown): boolean {
+  if (value === undefined || value === null) {
+    return false;
+  }
+  if (typeof value === "boolean") {
+    return value;
+  }
+  throw hostedOnboardingError({
+    code: "HOSTED_LINQ_EGRESS_ASSISTANT_ASK_FALLBACK_INVALID",
+    httpStatus: 400,
+    message: "Hosted Linq egress Assistant Ask fallback must be a boolean.",
     retryable: false,
   });
 }

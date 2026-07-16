@@ -6,6 +6,7 @@ const mocks = vi.hoisted(() => ({
   readHostedGroupDisclosureGrantAuthorityTx: vi.fn(),
   readHostedMailboxConversationWakeByAssistantInputId: vi.fn(),
   readHostedMailboxItemById: vi.fn(),
+  readHostedMailboxWakeByDedupeKey: vi.fn(),
   readHostedMailboxWakeByItemId: vi.fn(),
   requireHostedRuntimeActiveAccess: vi.fn(),
   requireHostedRuntimeActiveAccessForUpdateTx: vi.fn(),
@@ -17,6 +18,7 @@ vi.mock("@/src/lib/hosted-mailbox/store", () => ({
   readHostedMailboxConversationWakeByAssistantInputId:
     mocks.readHostedMailboxConversationWakeByAssistantInputId,
   readHostedMailboxItemById: mocks.readHostedMailboxItemById,
+  readHostedMailboxWakeByDedupeKey: mocks.readHostedMailboxWakeByDedupeKey,
   readHostedMailboxWakeByItemId: mocks.readHostedMailboxWakeByItemId,
 }));
 
@@ -637,6 +639,73 @@ describe("Hosted consented group-to-member Assistant Ask", () => {
       httpStatus: 403,
       retryable: false,
     });
+  });
+
+  it("requests the fixed fallback after revocation and then authorizes that exact copy", async () => {
+    const requestWake = disclosureRequestWake();
+    const completionWake = reviewedCompletionWake(requestWake);
+    const { tx } = createPrisma();
+    mocks.readHostedMailboxItemById.mockImplementation(async (input: {
+      mailboxItemId: string;
+    }) => input.mailboxItemId === completionWake.eventId
+      ? mailboxItemForWake(completionWake)
+      : input.mailboxItemId === requestWake.eventId
+        ? mailboxItemForWake(requestWake)
+        : null);
+    mocks.readHostedMailboxWakeByDedupeKey.mockResolvedValue(completionWake);
+    mocks.readHostedGroupDisclosureGrantAuthorityTx.mockResolvedValue(null);
+    const deliveryInput = {
+      answeredMailboxItemIds: [completionWake.eventId],
+      boundRuntimeMemberId: GROUP_RUNTIME_MEMBER_ID,
+      idempotencyKey:
+        createHostedExecutionReviewedAssistantAskCompletionDeliveryKey(
+          completionWake.eventId,
+        ),
+      now: NOW,
+      tx: tx as never,
+    };
+
+    await expect(assertHostedAssistantAskCompletionDeliveryAuthorityTx({
+      ...deliveryInput,
+      assistantAskFallback: false,
+    })).resolves.toEqual({ assistantAskFallbackRequired: true });
+    await expect(assertHostedAssistantAskCompletionDeliveryAuthorityTx({
+      ...deliveryInput,
+      assistantAskFallback: true,
+    })).resolves.toBeUndefined();
+    expect(mocks.readHostedGroupDisclosureGrantAuthorityTx).toHaveBeenCalledTimes(1);
+  });
+
+  it("recovers an expired structurally bound completion with only the fixed fallback", async () => {
+    const requestWake = disclosureRequestWake();
+    const completionWake = reviewedCompletionWake(requestWake);
+    const { tx } = createPrisma();
+    mocks.readHostedMailboxItemById.mockImplementation(async (input: {
+      mailboxItemId: string;
+    }) => input.mailboxItemId === completionWake.eventId
+      ? mailboxItemForWake(completionWake)
+      : null);
+    mocks.readHostedMailboxWakeByDedupeKey.mockResolvedValue(completionWake);
+    const deliveryInput = {
+      answeredMailboxItemIds: [completionWake.eventId],
+      boundRuntimeMemberId: GROUP_RUNTIME_MEMBER_ID,
+      idempotencyKey:
+        createHostedExecutionReviewedAssistantAskCompletionDeliveryKey(
+          completionWake.eventId,
+        ),
+      now: new Date(requestWake.ask.expiresAt),
+      tx: tx as never,
+    };
+
+    await expect(assertHostedAssistantAskCompletionDeliveryAuthorityTx({
+      ...deliveryInput,
+      assistantAskFallback: false,
+    })).resolves.toEqual({ assistantAskFallbackRequired: true });
+    await expect(assertHostedAssistantAskCompletionDeliveryAuthorityTx({
+      ...deliveryInput,
+      assistantAskFallback: true,
+    })).resolves.toBeUndefined();
+    expect(mocks.readHostedMailboxWakeByItemId).not.toHaveBeenCalled();
   });
 
   it("rejects provider dispatch when the request expired after completion", async () => {

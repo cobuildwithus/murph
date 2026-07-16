@@ -5,6 +5,8 @@ import { beforeEach, describe, expect, it, vi } from "vitest";
 import {
   buildHostedExecutionLinqConversationMessageWake,
   buildHostedExecutionRuntimeTimerWake,
+  createHostedExecutionReviewedAssistantAskCompletionDeliveryKey,
+  HOSTED_EXECUTION_ASSISTANT_ASK_CANNOT_ANSWER_RESPONSE,
 } from "@murphai/hosted-execution";
 import type {
   AssistantOutboxPreparedDispatchState,
@@ -7979,6 +7981,163 @@ describe("hosted runtime callbacks", () => {
     ]);
 
     expect(mocks.sendLinqMessage).toHaveBeenCalledTimes(1);
+  });
+
+  it("durably supersedes a revoked reviewed answer and sends the fixed fallback once after retry", async () => {
+    const completionId = "aask_done_revoked_before_dispatch";
+    const idempotencyKey =
+      createHostedExecutionReviewedAssistantAskCompletionDeliveryKey(
+        completionId,
+      );
+    const privateAnswer = "Private answer that must never reach the provider.";
+    const effect = createEffect({
+      answeredMailboxItemIds: [completionId],
+      bindingDeliveryKind: "thread",
+      bindingDeliveryTarget: "linq_chat_123",
+      channel: "linq",
+      idempotencyKey,
+      message: privateAnswer,
+      transportIdempotent: true,
+    });
+    let storedIntent = createPendingHostedDeliveryIntent({
+      answeredMailboxItemIds: [completionId],
+      attemptCount: 0,
+      bindingDelivery: { kind: "thread", target: "linq_chat_123" },
+      channel: "linq",
+      createdAt: "2026-04-08T00:00:00.000Z",
+      deliveryIdempotencyKey: idempotencyKey,
+      deliveryTransportIdempotent: true,
+      explicitTarget: null,
+      intentId: effect.effectId,
+      lastAttemptAt: null,
+      message: privateAnswer,
+      operation: null,
+      preparedDispatchToken: null,
+      updatedAt: "2026-04-08T00:00:00.000Z",
+    }) as AssistantOutboxIntent;
+    mocks.readAssistantOutboxIntent.mockImplementation(async () => storedIntent);
+    mocks.saveAssistantOutboxIntentIfUnchanged.mockImplementation(
+      async ({ intent }) => {
+        storedIntent = intent;
+        return intent;
+      },
+    );
+    const assertRecentInbound = vi.fn(async (request: {
+      assistantAskFallback?: boolean | null;
+      authorityCheckOnly: boolean;
+    }) => {
+      if (request.authorityCheckOnly) {
+        return {};
+      }
+      return request.assistantAskFallback === true
+        ? { providerDispatchClaimed: true }
+        : { assistantAskFallbackRequired: true };
+    });
+    mocks.sendLinqMessage.mockResolvedValue({
+      providerMessageId: "linq_message_safe_fallback",
+      providerThreadId: "linq_chat_123",
+      target: "linq_chat_123",
+      targetKind: "thread" as const,
+    });
+    const dispatchAttempt = async ({ dependencies, dispatchHooks }: {
+      dependencies: {
+        sendLinq: (request: {
+          answeredMailboxItemIds: string[];
+          idempotencyKey: string;
+          message: string;
+          target: string;
+          targetKind: "thread";
+        }) => Promise<{ providerMessageId?: string | null }>;
+      };
+      dispatchHooks?: {
+        preflightDispatchIntent?: (input: {
+          intent: AssistantOutboxIntent;
+          now: Date;
+          vault: string;
+        }) => Promise<unknown>;
+      };
+    }) => {
+      await dispatchHooks?.preflightDispatchIntent?.({
+        intent: storedIntent,
+        now: new Date("2026-04-08T00:00:30.000Z"),
+        vault: HOSTED_WAKE.vaultRoot,
+      });
+      const delivery = await dependencies.sendLinq({
+        answeredMailboxItemIds: [completionId],
+        idempotencyKey,
+        message: storedIntent.message,
+        target: "linq_chat_123",
+        targetKind: "thread",
+      });
+      return createDispatchResult({
+        delivery: createDelivery({
+          channel: "linq",
+          idempotencyKey,
+          messageLength: storedIntent.message.length,
+          providerMessageId: delivery.providerMessageId,
+          target: "linq_chat_123",
+          targetKind: "thread",
+        }),
+        status: "sent",
+      });
+    };
+    mocks.dispatchAssistantOutboxIntent
+      .mockImplementationOnce(dispatchAttempt)
+      .mockImplementationOnce(dispatchAttempt);
+    const drain = () => drainHostedPreparedAssistantDeliveries({
+      assistantDeliveryEffects: [effect],
+      effectsPort: createHostedRuntimeEffectsPortStub({
+        assertLinqRecentInboundEngagement: assertRecentInbound,
+      }),
+      forwardedEnv: { LINQ_API_TOKEN: "linq-token" },
+      platformEnv: {},
+      providerFetch: vi.fn<typeof fetch>(async () =>
+        new Response(null, { status: 204 })
+      ),
+      vaultRoot: HOSTED_WAKE.vaultRoot,
+      wake: HOSTED_WAKE.wake,
+    });
+
+    await expect(drain()).rejects.toMatchObject({
+      code: "ASSISTANT_ASK_COMPLETION_FALLBACK_RETRY",
+    });
+    expect(mocks.sendLinqMessage).not.toHaveBeenCalled();
+    expect(storedIntent).toMatchObject({
+      message: HOSTED_EXECUTION_ASSISTANT_ASK_CANNOT_ANSWER_RESPONSE,
+      messageSupersession: {
+        code: "ASSISTANT_ASK_COMPLETION_AUTHORITY_SUPERSEDED",
+      },
+    });
+    storedIntent = {
+      ...storedIntent,
+      status: "retryable",
+      updatedAt: "2026-04-08T00:00:45.000Z",
+    };
+
+    await expect(drain()).resolves.toEqual([
+      expect.objectContaining({ deliveryStatus: "sent" }),
+    ]);
+    expect(mocks.sendLinqMessage).toHaveBeenCalledTimes(1);
+    expect(mocks.sendLinqMessage).toHaveBeenCalledWith(
+      expect.objectContaining({
+        message: HOSTED_EXECUTION_ASSISTANT_ASK_CANNOT_ANSWER_RESPONSE,
+      }),
+      expect.any(Object),
+    );
+    expect(assertRecentInbound.mock.calls.map(([request]) => ({
+      assistantAskFallback: request.assistantAskFallback,
+      authorityCheckOnly: request.authorityCheckOnly,
+    }))).toEqual([
+      { assistantAskFallback: false, authorityCheckOnly: true },
+      { assistantAskFallback: false, authorityCheckOnly: false },
+      { assistantAskFallback: true, authorityCheckOnly: true },
+      { assistantAskFallback: true, authorityCheckOnly: false },
+    ]);
+    expect(
+      assertRecentInbound.mock.calls.some(([request]) =>
+        "message" in request && request.message === privateAnswer
+      ),
+    ).toBe(false);
   });
 
   it.each(["reaction", "voice"] as const)(

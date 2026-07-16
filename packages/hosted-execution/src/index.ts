@@ -3,6 +3,7 @@ export * from "./assistant-usage.ts";
 export * from "./assistant-personalization.ts";
 export {
   createHostedExecutionReviewedAssistantAskCompletionDeliveryKey,
+  HOSTED_EXECUTION_ASSISTANT_ASK_CANNOT_ANSWER_RESPONSE,
   HOSTED_EXECUTION_REVIEWED_ASSISTANT_ASK_COMPLETION_DELIVERY_KEY_PREFIX,
 } from "./assistant-identifiers.ts";
 export * from "./builders.ts";

@@ -5,6 +5,7 @@ import { createHash } from "node:crypto";
 import { Prisma, type PrismaClient } from "@prisma/client";
 import {
   HOSTED_RUNTIME_GROUP_DISCLOSURE_GRANTS_MAX,
+  HOSTED_RUNTIME_GROUP_DISCLOSURE_HISTORY_MAX,
   HOSTED_RUNTIME_GROUP_DISCLOSURE_PERMISSION_TEXT_MAX_CODE_POINTS,
 } from "@murphai/hosted-execution/runtime-control";
 
@@ -50,6 +51,14 @@ export type HostedGroupDisclosurePermissionReactionTxResult =
   | {
       kind: "limit_reached" | "not_found" | "not_group_member" | "wrong_thread";
     };
+
+export type HostedGroupDisclosurePermissionAppendTxResult =
+  | { kind: "accepted" }
+  | { kind: "limit_reached" };
+
+export type HostedGroupDisclosurePermissionRecordTxResult =
+  | { kind: "recorded" }
+  | { kind: "limit_reached" };
 
 export interface HostedGroupDisclosureGrantSummary {
   grantId: string;
@@ -154,6 +163,32 @@ export function createHostedGroupDisclosurePermissionProviderIdempotencyKey(inpu
   return `group-disclosure:${digest}`;
 }
 
+export async function admitHostedGroupDisclosurePermissionAppendTx(input: {
+  groupId: string;
+  originAssistantInputId: string;
+  permissionText: string;
+  tx: Prisma.TransactionClient;
+}): Promise<HostedGroupDisclosurePermissionAppendTxResult> {
+  const permissionText = canonicalizeHostedGroupDisclosurePermissionText(
+    input.permissionText,
+  );
+  const permissionId = createHostedGroupDisclosurePermissionRequestId({
+    groupId: input.groupId,
+    originAssistantInputId: input.originAssistantInputId,
+  });
+  await lockHostedGroupRow(input.tx, input.groupId);
+  const admission = await readHostedGroupDisclosurePermissionAppendAdmissionAfterLock({
+    groupId: input.groupId,
+    messageLookupKeyReadCandidates: null,
+    permissionId,
+    permissionText,
+    tx: input.tx,
+  });
+  return admission.kind === "limit_reached"
+    ? { kind: "limit_reached" }
+    : { kind: "accepted" };
+}
+
 export async function recordHostedGroupDisclosurePermissionTx(input: {
   groupId: string;
   messageId: string | null;
@@ -161,7 +196,7 @@ export async function recordHostedGroupDisclosurePermissionTx(input: {
   permissionText: string;
   postedAt: Date;
   tx: Prisma.TransactionClient;
-}): Promise<void> {
+}): Promise<HostedGroupDisclosurePermissionRecordTxResult> {
   const permissionText = canonicalizeHostedGroupDisclosurePermissionText(input.permissionText);
   const permissionDigest = digestCanonicalHostedGroupDisclosurePermissionText({
     groupId: input.groupId,
@@ -184,6 +219,48 @@ export async function recordHostedGroupDisclosurePermissionTx(input: {
   }
 
   await lockHostedGroupRow(input.tx, input.groupId);
+  const admission = await readHostedGroupDisclosurePermissionAppendAdmissionAfterLock({
+    groupId: input.groupId,
+    messageLookupKeyReadCandidates,
+    permissionId,
+    permissionText,
+    tx: input.tx,
+  });
+  if (admission.kind === "limit_reached") {
+    return { kind: "limit_reached" };
+  }
+  if (admission.existing) {
+    return { kind: "recorded" };
+  }
+  const permissionTextEncrypted = await sealHostedGroupDisclosurePermissionText({
+    permissionId,
+    permissionText,
+    prisma: input.tx,
+    runtimeMemberId: admission.runtimeMemberId,
+  });
+  await input.tx.hostedGroupDisclosurePermission.create({
+    data: {
+      groupId: input.groupId,
+      id: permissionId,
+      messageLookupKey,
+      permissionDigest,
+      permissionTextEncrypted,
+      postedAt: input.postedAt,
+    },
+  });
+  return { kind: "recorded" };
+}
+
+async function readHostedGroupDisclosurePermissionAppendAdmissionAfterLock(input: {
+  groupId: string;
+  messageLookupKeyReadCandidates: readonly string[] | null;
+  permissionId: string;
+  permissionText: string;
+  tx: Prisma.TransactionClient;
+}): Promise<
+  | { existing: boolean; kind: "accepted"; runtimeMemberId: string }
+  | { kind: "limit_reached" }
+> {
   const group = await input.tx.hostedGroup.findUnique({
     where: { id: input.groupId },
     select: { runtimeMemberId: true },
@@ -198,7 +275,7 @@ export async function recordHostedGroupDisclosurePermissionTx(input: {
   }
 
   const existing = await input.tx.hostedGroupDisclosurePermission.findUnique({
-    where: { id: permissionId },
+    where: { id: input.permissionId },
     select: {
       groupId: true,
       messageLookupKey: true,
@@ -207,20 +284,25 @@ export async function recordHostedGroupDisclosurePermissionTx(input: {
     },
   });
   if (existing) {
-    if (
-      existing.groupId === input.groupId
-      && messageLookupKeyReadCandidates.includes(existing.messageLookupKey)
-    ) {
+    const messageMatches = input.messageLookupKeyReadCandidates === null
+      || input.messageLookupKeyReadCandidates.includes(existing.messageLookupKey);
+    if (existing.groupId === input.groupId && messageMatches) {
       const existingPermissionText = await openHostedGroupDisclosurePermissionText({
         groupId: input.groupId,
         permissionDigest: existing.permissionDigest,
-        permissionId,
+        permissionId: input.permissionId,
         permissionTextEncrypted: existing.permissionTextEncrypted,
         prisma: input.tx,
         runtimeMemberId: group.runtimeMemberId,
       });
-      if (existingPermissionText === permissionText) {
-        return;
+      if (
+        existingPermissionText === input.permissionText
+      ) {
+        return {
+          existing: true,
+          kind: "accepted",
+          runtimeMemberId: group.runtimeMemberId,
+        };
       }
     }
     throw hostedOnboardingError({
@@ -230,22 +312,19 @@ export async function recordHostedGroupDisclosurePermissionTx(input: {
       retryable: false,
     });
   }
-  const permissionTextEncrypted = await sealHostedGroupDisclosurePermissionText({
-    permissionId,
-    permissionText,
-    prisma: input.tx,
+
+  const permissionHistoryCount =
+    await input.tx.hostedGroupDisclosurePermission.count({
+      where: { groupId: input.groupId },
+    });
+  if (permissionHistoryCount >= HOSTED_RUNTIME_GROUP_DISCLOSURE_HISTORY_MAX) {
+    return { kind: "limit_reached" };
+  }
+  return {
+    existing: false,
+    kind: "accepted",
     runtimeMemberId: group.runtimeMemberId,
-  });
-  await input.tx.hostedGroupDisclosurePermission.create({
-    data: {
-      groupId: input.groupId,
-      id: permissionId,
-      messageLookupKey,
-      permissionDigest,
-      permissionTextEncrypted,
-      postedAt: input.postedAt,
-    },
-  });
+  };
 }
 
 export async function acceptHostedGroupDisclosurePermissionReactionTx(input: {
@@ -377,24 +456,22 @@ export async function acceptHostedGroupDisclosurePermissionReactionTx(input: {
     return { kind: "accepted" };
   }
 
-  const [activeGroupGrantCount, activeMemberGrantCount] = await Promise.all([
+  const [groupGrantHistoryCount, memberGrantHistoryCount] = await Promise.all([
     input.tx.hostedGroupDisclosureGrant.count({
       where: {
         membership: { groupId: permission.group.id },
         permission: { groupId: permission.group.id },
-        revokedAt: null,
       },
     }),
     input.tx.hostedGroupDisclosureGrant.count({
       where: {
         membership: { memberId: input.memberId },
-        revokedAt: null,
       },
     }),
   ]);
   if (
-    activeGroupGrantCount >= HOSTED_RUNTIME_GROUP_DISCLOSURE_GRANTS_MAX
-    || activeMemberGrantCount >= HOSTED_RUNTIME_GROUP_DISCLOSURE_GRANTS_MAX
+    groupGrantHistoryCount >= HOSTED_RUNTIME_GROUP_DISCLOSURE_HISTORY_MAX
+    || memberGrantHistoryCount >= HOSTED_RUNTIME_GROUP_DISCLOSURE_HISTORY_MAX
   ) {
     return { kind: "limit_reached" };
   }

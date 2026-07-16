@@ -11,6 +11,7 @@ import {
 import {
   HOSTED_RUNTIME_ASSISTANT_ASK_REQUEST_ID_MAX_CODE_POINTS,
   HOSTED_RUNTIME_GROUP_DISCLOSURE_GRANTS_MAX,
+  HOSTED_RUNTIME_GROUP_DISCLOSURE_HISTORY_MAX,
   HOSTED_RUNTIME_GROUP_DISCLOSURE_PERMISSION_TEXT_MAX_CODE_POINTS,
 } from "../src/runtime-control.ts";
 import {
@@ -121,6 +122,10 @@ describe("consented member Assistant Ask contracts", () => {
 });
 
 describe("group disclosure tool contracts", () => {
+  it("keeps disclosure history bounded by the documented per-scope cap", () => {
+    expect(HOSTED_RUNTIME_GROUP_DISCLOSURE_HISTORY_MAX).toBe(25);
+  });
+
   it.each([
     [{
       action: "ask_member",
