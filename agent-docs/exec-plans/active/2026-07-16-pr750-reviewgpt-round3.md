@@ -60,3 +60,5 @@ Updated: 2026-07-16
 - Isolated CLI canonical-write-lock file with one worker — 6 tests passed.
 - Required `coverage-write` audit — added focused lock-before-count and summary-decrypt fail-closed proof in the existing Web tests; 4 files / 152 tests passed, Web prepared typecheck passed, and `git diff --check` passed. Residual concurrency proof is mock call ordering rather than a real PostgreSQL fixture.
 - Parent post-audit rerun — focused Web 152 tests, assistant-runtime 194 tests, hosted-execution 361 tests, operator-config 195 tests, focused Cloudflare assertion, and changed-Web-file ESLint all passed.
+- Current `main` reconciliation — additive conflicts in the docs index plus contact-privacy, account-deletion, and migration-inventory tests retained both disclosure and usage-credit behavior. Conflict-specific Web tests passed 64 tests, Web typecheck passed with the merged Prisma schema, and doc gardening passed.
+- Post-merge remediation rerun — focused Web 152 tests, assistant-runtime 194 tests, hosted-execution 362 tests, operator-config 195 tests, and the focused Cloudflare assertion all passed.
