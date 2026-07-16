@@ -103,4 +103,3 @@ Updated: 2026-07-15
   payment link is Stripe-hosted; no unresolved accepted audit or ReviewGPT
   finding remains.
 Completed: 2026-07-15
-Completed: 2026-07-15
