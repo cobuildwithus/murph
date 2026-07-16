@@ -652,6 +652,7 @@ export async function executeClaimedAssistantCronJob(
             occurrenceAt,
             trigger: input.trigger,
           }),
+          scheduledOccurrenceAt: occurrenceAt,
           serviceTier,
           signal: yieldCancellation.signal,
           turnEnvironment: input.turnEnvironment ?? null,

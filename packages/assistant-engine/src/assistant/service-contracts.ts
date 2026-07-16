@@ -157,6 +157,9 @@ export interface AssistantMessageInput extends AssistantSessionResolutionFields 
   userMessageContent?: AssistantUserMessageContentPart[] | null
   receiptMetadata?: Record<string, string> | null
   scheduledAutomationAuthority?: HostedRuntimeNewsletterScheduledAuthority | null
+  // Exact engine-owned occurrence for this scheduled turn. This is ephemeral
+  // decision context, not persisted automation or session state.
+  scheduledOccurrenceAt?: string | null
   // Per-turn provider processing tier; never part of session/route identity.
   serviceTier?: AssistantProviderServiceTier | null
   showThinkingTraces?: boolean
