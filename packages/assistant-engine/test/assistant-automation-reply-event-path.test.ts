@@ -1962,9 +1962,10 @@ function createOutboxMessage(input: {
     delivery:
       status === 'sent'
         ? {
+            // Production message deliveries omit the optional discriminator;
+            // only reaction deliveries require an explicit `kind`.
             channel,
             idempotencyKey: null,
-            kind: 'message',
             messageLength: input.message.length,
             providerMessageId: input.providerMessageId ?? null,
             ...(input.providerMessageIds
