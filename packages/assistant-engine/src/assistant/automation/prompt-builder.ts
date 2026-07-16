@@ -22,6 +22,7 @@ import {
   type AssistantDerivedEvidenceReadBudget,
 } from '../attachment-evidence-model.js'
 import { normalizeAssistantRawAttachmentArtifactPath } from '../attachment-artifact-paths.js'
+import { readAssistantInputMessageRef } from '../message-target-selection.js'
 import { normalizeNullableString } from '../shared.js'
 
 const MAX_INLINE_ATTACHMENT_TEXT_CHARS = 2000
@@ -121,6 +122,7 @@ export function buildAssistantAutoReplyPrompt(
         inputText: normalizeNullableString(entry.text),
         index,
         groupContext: renderAssistantInputGroupContextPrompt(entry),
+        messageRef: readAssistantInputMessageRef(entry),
         promptUnavailableNote: renderAssistantInputPromptUnavailableNote(entry),
         projectionReasonCode: entry.projection?.reasonCode ?? null,
         projectionStatus: entry.projection?.status ?? null,
@@ -190,6 +192,7 @@ export async function prepareAssistantAutoReplyInput(
         inputText: normalizeNullableString(entry.text),
         index,
         groupContext: renderAssistantInputGroupContextPrompt(entry),
+        messageRef: readAssistantInputMessageRef(entry),
         promptUnavailableNote: renderAssistantInputPromptUnavailableNote(entry),
         projectionReasonCode: entry.projection?.reasonCode ?? null,
         projectionStatus: entry.projection?.status ?? null,
@@ -362,6 +365,7 @@ function renderAssistantAutoReplyInputSection(input: {
   hasAttachmentContext: boolean
   inputText: string | null
   index: number
+  messageRef: string | null
   promptUnavailableNote: string | null
   projectionReasonCode?: string | null
   projectionStatus?: AssistantInputProjectionStatus | null
@@ -402,6 +406,10 @@ function renderAssistantAutoReplyInputSection(input: {
 
   if (sections.length === 0) {
     return null
+  }
+
+  if (input.messageRef) {
+    sections.unshift(`Message ref: ${input.messageRef}`)
   }
 
   if (input.totalInputs === 1) {

@@ -412,7 +412,21 @@ const LINQ_CHANNEL_ADAPTER = createAssistantChannelAdapter({
       target: candidate.target,
     })) ?? null
   },
-  async sendMessage({ actorId, answeredMailboxItemIds, bindingDelivery, candidate, deliverySource, dependencies, explicitTarget, idempotencyKey, media, message, replyToMessageId, threadIsDirect }) {
+  async sendMessage({
+    actorId,
+    answeredMailboxItemIds,
+    bindingDelivery,
+    candidate,
+    deliverySource,
+    dependencies,
+    explicitTarget,
+    idempotencyKey,
+    media,
+    message,
+    nativeReplyRequested,
+    replyToMessageId,
+    threadIsDirect,
+  }) {
     if (hasVoiceMemoMedia(media)) {
       return await sendLinqVoiceMemoDelivery({
         actorId,
@@ -425,6 +439,7 @@ const LINQ_CHANNEL_ADAPTER = createAssistantChannelAdapter({
         idempotencyKey,
         media,
         message,
+        ...(nativeReplyRequested === true ? { nativeReplyRequested: true } : {}),
         replyToMessageId,
         threadIsDirect,
       })
@@ -432,12 +447,15 @@ const LINQ_CHANNEL_ADAPTER = createAssistantChannelAdapter({
 
     let delivered
     const mediaInput = media.length > 0 ? media : undefined
-    const request = {
+    const request: Parameters<
+      NonNullable<AssistantChannelDependencies['sendLinq']>
+    >[0] = {
       fromPhoneNumber: deliverySource?.kind === 'linq' ? deliverySource.fromPhoneNumber : null,
       idempotencyKey: idempotencyKey ?? null,
       target: candidate.target,
       targetKind: candidate.kind,
       message,
+      ...(nativeReplyRequested === true ? { nativeReplyRequested: true } : {}),
       ...(mediaInput ? { media: mediaInput } : {}),
       replyToMessageId: replyToMessageId ?? null,
       ...(dependencies.signal ? { signal: dependencies.signal } : {}),
@@ -470,6 +488,7 @@ const LINQ_CHANNEL_ADAPTER = createAssistantChannelAdapter({
         idempotencyKey,
         media,
         message,
+        ...(nativeReplyRequested === true ? { nativeReplyRequested: true } : {}),
         replyToMessageId,
       })
       if (!recovered) {
@@ -523,6 +542,7 @@ async function sendLinqVoiceMemoDelivery(input: {
   idempotencyKey?: string | null
   media: readonly AssistantResponseMedia[]
   message: string
+  nativeReplyRequested?: true
   replyToMessageId?: string | null
   threadIsDirect: boolean | null
 }): Promise<{
@@ -557,6 +577,12 @@ async function sendLinqVoiceMemoDelivery(input: {
 
   const providerMessageIds: string[] = []
   const text = messageTextOrNull(input.message)
+  if (input.nativeReplyRequested === true && !text) {
+    throw new VaultCliError(
+      'ASSISTANT_LINQ_NATIVE_REPLY_TEXT_REQUIRED',
+      'A native iMessage voice-memo response requires a text message to carry the reply target.',
+    )
+  }
   const homeRouteFallbackAllowed = shouldAllowLinqHomeRouteFallback({
     bindingDelivery: input.bindingDelivery,
     candidate: input.candidate,
@@ -594,6 +620,7 @@ async function sendLinqVoiceMemoDelivery(input: {
             target: input.candidate.target,
             targetKind: input.candidate.kind,
             message: text,
+            ...(input.nativeReplyRequested === true ? { nativeReplyRequested: true } : {}),
             replyToMessageId: input.replyToMessageId ?? null,
             ...(input.dependencies.signal ? { signal: input.dependencies.signal } : {}),
           })
@@ -607,6 +634,7 @@ async function sendLinqVoiceMemoDelivery(input: {
               target: input.candidate.target,
               targetKind: input.candidate.kind,
               message: text,
+              ...(input.nativeReplyRequested === true ? { nativeReplyRequested: true } : {}),
               replyToMessageId: input.replyToMessageId ?? null,
             },
             input.dependencies.signal ? { signal: input.dependencies.signal } : {},
@@ -624,6 +652,7 @@ async function sendLinqVoiceMemoDelivery(input: {
         idempotencyKey: input.idempotencyKey,
         media: [],
         message: text,
+        ...(input.nativeReplyRequested === true ? { nativeReplyRequested: true } : {}),
         replyToMessageId: input.replyToMessageId,
       })
       if (!recovered) {
@@ -1007,6 +1036,7 @@ async function maybeRecoverMissingLinqDirectThread(input: {
   idempotencyKey?: string | null
   media?: readonly AssistantResponseMedia[] | null
   message: string
+  nativeReplyRequested?: true
   replyToMessageId?: string | null
 }): Promise<
   | {
@@ -1017,8 +1047,8 @@ async function maybeRecoverMissingLinqDirectThread(input: {
   | null
 > {
   if (
-    input.dependencies.sendLinq
-    ||
+    input.dependencies.sendLinq ||
+    input.nativeReplyRequested === true ||
     !looksLikeMissingLinqChatError(input.error)
     || (input.candidate.kind !== 'thread' && input.candidate.kind !== 'explicit')
   ) {

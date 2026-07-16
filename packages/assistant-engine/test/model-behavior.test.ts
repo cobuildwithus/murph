@@ -1197,19 +1197,29 @@ describe('assistant user-facing wording guidance', () => {
     expect(prompt).toContain('Message reactions:')
     expect(prompt).toContain('Use reactions sparingly')
     expect(prompt).toContain(
+      'Message refs label accepted messages visible now',
+    )
+    expect(prompt).toContain(
+      '`murph.select_reply_target` annotates the eventual response, including every `---` bubble',
+    )
+    expect(prompt).toContain(
+      '`murph.react_to_message` reacts independently',
+    )
+    expect(prompt).toContain('never invent or force one')
+    expect(prompt).toContain(
       'A reaction can stand alone only when it fully satisfies the turn',
     )
     expect(prompt).toContain(
-      'if no text reply should be sent after reacting, also use `finish_without_reply`',
+      'then also use `finish_without_reply`',
     )
     expect(prompt).toContain(
-      'Use `heart` when Murph genuinely loves what the user said or finds it really funny',
+      '`heart`: genuine love or very funny',
     )
     expect(prompt).toContain(
-      'Use `laugh` for a dry or mildly funny joke',
+      '`laugh`: a dry or mild joke',
     )
     expect(prompt).toContain(
-      'Use `thumbs_up` as quiet acknowledgement when the user does not need a text reply',
+      '`thumbs_up`: quiet acknowledgement needing no text',
     )
     expect(prompt).not.toContain('`question_mark`')
     expect(prompt).not.toContain('`exclamation`')

@@ -352,6 +352,70 @@ test('linq runtime normalizes happy-path payloads and retries retryable GET fail
   })
 })
 
+test('linq runtime serializes reply targets only for marked native replies', async () => {
+  const env = {
+    LINQ_API_BASE_URL: 'https://linq.example.test',
+    LINQ_API_TOKEN: 'linq-token',
+  } satisfies NodeJS.ProcessEnv
+  const bodies: Record<string, unknown>[] = []
+  const fetchImplementation = vi.fn(async (_url: string, init: RequestInit) => {
+    if (typeof init.body !== 'string' && !(init.body instanceof Blob)) {
+      throw new TypeError('Expected a JSON request body.')
+    }
+    bodies.push(parseJsonRequestBody(init.body))
+    return createJsonResponse({
+      chat_id: 'chat-123',
+      id: 'message-1',
+    })
+  })
+
+  await sendLinqChatMessage(
+    {
+      chatId: 'chat-123',
+      message: 'ordinary automatic reply',
+      replyToMessageId: 'context-message-1',
+    },
+    { env, fetchImplementation },
+  )
+  await sendLinqChatMessage(
+    {
+      chatId: 'chat-123',
+      message: 'selected native reply',
+      nativeReplyRequested: true,
+      replyToMessageId: 'selected-message-1',
+    },
+    { env, fetchImplementation },
+  )
+
+  assert.deepEqual(bodies, [
+    {
+      message: {
+        parts: [{ type: 'text', value: 'ordinary automatic reply' }],
+      },
+    },
+    {
+      message: {
+        parts: [{ type: 'text', value: 'selected native reply' }],
+        reply_to: {
+          message_id: 'selected-message-1',
+        },
+      },
+    },
+  ])
+  await assert.rejects(
+    () => sendLinqChatMessage(
+      {
+        chatId: 'chat-123',
+        message: 'missing target',
+        nativeReplyRequested: true,
+      },
+      { env, fetchImplementation },
+    ),
+    (error) => error instanceof VaultCliError && error.code === 'LINQ_INVALID_INPUT',
+  )
+  expect(fetchImplementation).toHaveBeenCalledTimes(2)
+})
+
 test('linq runtime converts supported text styles to iMessage text decorations', async () => {
   const env = {
     LINQ_API_BASE_URL: 'https://linq.example.test/custom',

@@ -143,7 +143,6 @@ export async function executeReadOnlyAssistantAsk(
     const result = await executeCodexAppServerTurn({
       abortSignal: input.abortSignal,
       allowFinishWithoutReply: false,
-      allowMessageReactions: false,
       approvalPolicy: 'never',
       baseInstructions: [
         READ_ONLY_ASSISTANT_ASK_BASE_INSTRUCTIONS,

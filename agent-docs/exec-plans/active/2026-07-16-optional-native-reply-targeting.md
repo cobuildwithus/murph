@@ -545,51 +545,49 @@ Rules:
 
 ## Rollout sequence
 
-Use two PRs and releases because the persisted outbox schema is strict. Phase B
-starts from deployed Phase A. Do not let a Phase B writer reach a Phase A-old
-reader.
-
-### Phase A: expand readers and make message delivery backward-safe
+Ship one PR. The production Cloudflare deploy carrying this runner bundle must
+use `container_rollout=immediate`; existing production deploy preflight already
+rejects gradual container rollout. The strict `nativeReplyRequested` reader and
+writer live in the same runner artifact, every admitted invocation checks exact
+bundle and source fingerprints, and one write fence owns each invocation. This
+needs no feature flag, second writer, migration, second PR, or compatibility
+service.
 
 1. Add optional `nativeReplyRequested?: true` parsing, persistence,
    fingerprinting, equality, dedupe, dispatch, hosted payload, and replay
    plumbing. Omit it when absent.
-2. Make Telegram auto-reply suppression marker-aware before outbox creation,
-   while preserving current flat behavior for every unmarked response.
-3. Restore marker-gated assistant Linq `reply_to` serialization.
-4. Harden local and hosted missing-chat recovery and enforce the Linq
-   voice-only send preflight without adding a separate provider probe.
-5. Add marked-intent and unmarked-legacy regressions. Do not expose the new
-   selector or let normal response delivery write the marker.
-6. Merge and deploy Phase A. Confirm its exact runner fingerprint across the
-   fleet before Phase B can write the field.
-
-Phase A changes no production automatic reply behavior. No producer can set
-the marker, and every legacy intent remains flat. It is the rollback floor for
-Phase B.
-
-### Phase B: enable shared message targeting
-
-1. Render shared opaque refs and update failed-prompt extraction.
-2. Add the reply-selector schema and make `message_ref` required on the
+2. Make Telegram auto-reply suppression marker-aware while preserving current
+   flat behavior for every unmarked response.
+3. Restore marker-gated assistant Linq `reply_to` serialization; marked sends
+   fail closed instead of using the missing-chat flat fallback.
+4. Render shared opaque refs and update failed-prompt extraction.
+5. Add the reply-selector schema and make `message_ref` required on the
    reaction schema. Let the existing contract fingerprint rotate incompatible
    Codex threads.
-3. Add one shared resolver, two capability predicates, and serialized
+6. Add one shared resolver, two capability predicates, and serialized
    context-scoped reply and reaction patches.
-4. Add target input metadata to final, preceding, and reaction provider
+7. Add target input metadata to final, preceding, and reaction provider
    results.
-5. Re-resolve targets in local service, create effect-local input clones with
+8. Re-resolve targets in local service, create effect-local input clones with
    the existing override helper, and route both actions through existing
    delivery owners.
-6. Pass the reply marker to every intentional bubble. Keep reactions on their
+9. Pass the reply marker to every intentional bubble. Keep reactions on their
    existing outbox operation.
-7. Add direct/group, steering, no-reply, negative capability, media, outbox,
+10. Add direct/group, steering, no-reply, negative capability, media, outbox,
    hosted authority, and end-to-end coverage.
-8. Merge and deploy only after Phase A's exact fingerprint is proven live.
 
-Rollback from Phase B to Phase A preserves marked intent parsing and delivery.
-Do not roll below Phase A while a marked intent can remain in any workspace.
-No migration or cleanup job is otherwise required.
+Deploy with `container_rollout=immediate`. Managed-container smoke proves the
+exact bundle/source fingerprints and assistant CLI surface; focused owner tests
+prove that unmarked legacy intents remain flat and marked target/marker state
+survives reload and retry. After production convergence, verify one unselected
+automatic response remains flat, every bubble in one selected `---` response
+uses the same anchor, and one selected reaction reaches its intended accepted
+message.
+
+Before the first marked intent is written, the prior bundle remains a safe
+rollback. After that write, the first compatible reader bundle is the hard
+rollback floor. Forward-fix on that bundle or newer; never restore a pre-marker
+reader. No drain or cleanup job is required.
 
 ## Expected source ownership
 
@@ -633,10 +631,9 @@ logic as the shared resolver replaces it.
   - `packages/assistant-runtime/src/hosted-runtime/linq-delivery-context.ts`
   - `packages/assistant-runtime/src/hosted-runtime/platform.ts`
 - Hosted-local scenario proof:
-  - `packages/hosted-local-harness/src/e2e.ts`
-  - `apps/cloudflare/test/hosted-local-optional-native-reply-compatibility-e2e.test.ts`
-  - `apps/cloudflare/test/hosted-local-message-targeting-e2e.test.ts`
-  - `.github/workflows/cloudflare-hosted-e2e.yml`
+  - existing Telegram first-contact, Linq group route-drift, and Linq
+    same-wake batching scenarios only when narrower owner tests cannot prove
+    the full-stack contract.
 
 Do not edit `input-store.ts` merely to add another identity. Reuse
 `AssistantInputEvent.inputId` and `readAssistantInputEvent`. Do not change the
@@ -689,8 +686,8 @@ web Linq client's production serializer.
 ### Reply bubbles, outbox, and replay
 
 - Unselected Telegram and Linq automatic responses remain flat.
-- A selected one-, two-, and four-bubble response writes the same target and
-  marker on every bubble intent.
+- A selected multi-bubble response writes the same target and marker on every
+  bubble intent.
 - Bubble ordering, media placement, answered-mailbox ownership, and existing
   per-bubble idempotency keys are unchanged.
 - The selected target survives queue-only creation, snapshot reload, prepared
@@ -730,50 +727,59 @@ web Linq client's production serializer.
   image/media, and ambiguous-send behavior remains adapter-owned.
 - The web-owned Linq client remains flat.
 
-### Hosted-local scenarios
+### Direct proof and hosted-local regressions
 
-- Phase A compatibility: a synthetic marked Linq intent anchors after reload
-  and retry, while an unmarked legacy intent with a contextual id stays flat
-  and still passes hosted authority matching.
-- Phase B iMessage direct: two accepted messages; reply targets the older one,
-  reaction targets the newer one, and provider bodies prove both effects.
-- Phase B iMessage group: interleaved visible messages; selected refs resolve
-  to the correct senders' messages, while an unselected control stays flat.
-- Phase B dash split: all intentional response bubbles carry the same native
-  reply target.
-- Phase B Telegram direct: reply and reaction independently target selected
-  messages; unselected reply and progress stay flat.
-- Negative Linq service: SMS/RCS exposes no selectable ref and cannot produce a
-  provider effect through either tool.
+Narrow owner tests are authoritative for the feature contract:
+
+- Shared-resolver tests prove direct and route-authorized group membership,
+  selected-event capability, Telegram numeric ids, Linq iMessage-only behavior,
+  and private-placeholder rejection.
+- Local-service and provider-result tests prove independent reply/reaction
+  targets, steering, second-pass revalidation, reaction-only no-reply fencing,
+  and fail-closed delivery.
+- Reply-delivery and outbox tests prove every `---` bubble copies one target and
+  marker, legacy Linq intents remain flat, and marked state survives
+  persistence, dedupe, reload, retry, and hosted projection.
+- Adapter tests prove guarded Linq `reply_to`, missing-chat and voice-only
+  failures, Telegram targeting, and SMS/RCS/unknown-service negatives.
+
+Reuse `pnpm hosted-local e2e telegram-first-contact linq-group-route-drift
+linq-same-wake-batching` as full-stack regression proof:
+
+- `telegram-first-contact` exercises the existing hosted reaction path with a
+  valid opaque `message_ref` and confirms both targeting tools are advertised.
+- `linq-group-route-drift` protects existing hosted group route authority.
+- `linq-same-wake-batching` protects accepted-input batching and steering.
+
+Those hosted-local scenarios do not themselves claim to prove selected
+iMessage reply/reaction behavior or dash-bubble targeting; the narrower owner
+tests above prove those contracts directly.
 
 ## Verification
-
-For each implementation phase and its separate PR:
 
 - Run focused Vitest files for every touched owner and regression above.
 - Run `pnpm test:diff <all touched paths>` after focused iteration. It owns
   touched-package and reverse-dependent typechecks.
-- Run `pnpm verify:acceptance`; both phases change cross-package persisted
-  state or behavior.
-- Phase A: register and run
-  `pnpm hosted-local e2e optional-native-reply-compatibility`.
-- Phase B: register and run
-  `pnpm hosted-local e2e message-targeting` for iMessage direct/group,
-  Telegram direct, dash bubbles, reaction targeting, and negative Linq
-  service behavior.
-- Add both scenarios to the hosted E2E registry and required CI matrix.
-- Run required completion audits and exactly one cross-cutting PR gate:
-  ReviewGPT on each PR's exact pushed head, concurrently with CI.
-- Run `git diff --check` and a privacy scan that rejects personal identifiers,
-  provider ids, raw message data, and local paths in committed artifacts.
+- Run `pnpm verify:acceptance`; the change crosses persisted-state and runtime
+  package boundaries.
+- Reuse and run `pnpm hosted-local e2e telegram-first-contact
+  linq-group-route-drift linq-same-wake-batching`; extend those existing
+  scenarios only where a full-stack targeting assertion adds coverage that
+  cannot be proved at the narrower owner seam.
+- Run required completion audits.
+- After local plan closure and PR creation, run ReviewGPT on the exact pushed
+  head concurrently with CI. These are downstream publication gates and are
+  not claimed complete by the archived local implementation plan.
+- Run `git diff --check` and scan committed artifacts for personal identifiers,
+  absolute local paths, real provider/message data, or other private content.
 
 ## Durable documentation to update during implementation
 
 - `ARCHITECTURE.md`: shared accepted-message resolution, effect-local
   overrides, and the outbox as sole effect owner.
-- `agent-docs/product-specs/optional-native-message-replies.md`: rename or
-  broaden to document shared message targeting, supported actions, flat
-  default, dash behavior, and failure behavior.
+- `agent-docs/product-specs/shared-message-targeting.md`: document shared
+  message targeting, supported actions, flat default, dash behavior, and
+  failure behavior.
 - `agent-docs/product-specs/index.md` and `agent-docs/index.md`: route the
   durable product spec.
 - `agent-docs/SECURITY.md`: opaque refs and the provider-id privacy boundary.
@@ -781,13 +787,12 @@ For each implementation phase and its separate PR:
   retry, and rollback floor.
 - `agent-docs/operations/imessage-deliverability.md`: both actions remain
   limited to reciprocal accepted conversations.
-- `agent-docs/references/hosted-runtime-protocol.md`: additive reader rollout
-  and provider-effect projection.
-- `apps/cloudflare/DEPLOY.md`: Phase A rollout, exact fingerprint proof,
-  rollback floor, and Phase B deploy checks.
-- `agent-docs/references/testing-ci-map.md`: both hosted-local scenarios,
-  commands, and CI ownership.
-- Relevant package READMEs when public package contracts change.
+- `agent-docs/references/hosted-runtime-protocol.md`: provider-effect
+  projection and the single-writer compatibility boundary.
+- `apps/cloudflare/DEPLOY.md`: immediate rollout, exact fingerprint proof, and
+  the post-write rollback floor.
+- `agent-docs/references/testing-ci-map.md`: only if hosted-local scenario or
+  CI ownership actually changes.
 
 ## Explicit non-goals
 
@@ -844,5 +849,5 @@ For each implementation phase and its separate PR:
   default Linq native anchors.
 - Cross-checked current Linq protocol-selection, message-send, and voice-memo
   contracts on 2026-07-16.
-- This planning branch changes no production code. Implementation remains
-  pending in Phase A and Phase B.
+- This implementation branch carries the plan and production change together;
+  completion evidence is recorded here before archival.
