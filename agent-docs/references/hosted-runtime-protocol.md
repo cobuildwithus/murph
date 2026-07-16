@@ -525,16 +525,39 @@ conversation controls, not a second queue or a generic mailbox-lag scheduler.
 Other missed post-commit signals still have no web cron backstop.
 
 Hosted reply-latency telemetry records only boundaries observed by their owning
-process. The web-owned `provider_started` field means the runtime observed a
-local Codex `turn/start`; it is not evidence of an upstream OpenAI request or
-first token. The runtime may also emit metadata-only `assistant_milestone`
-events for Linq typing request start/acceptance and the first locally observed
-Codex output/text. Web accepts those milestones only for the exact staged
-runtime attempt and merges them into the existing phase document under a row
-lock. Emission is queued off the reply path and may retry only the bounded
-staging/trace-row race; it carries no message, prompt, response, reasoning, or
-provider payload. Post-generation delivery guards must never create or
-overwrite the local Codex start milestone.
+process. Its ingress `acceptedAt` value copies the mailbox row's PostgreSQL
+`created_at`; because that default uses transaction-start time, the interval
+from `acceptedAt` includes the remainder of the append transaction and must not
+be labeled row-insert or commit latency. The web-owned `provider_started` field
+means the runtime observed a local Codex `turn/start`; it is not evidence of an
+upstream OpenAI request or first token. The runtime may also emit metadata-only
+`assistant_milestone` events for Linq typing request start/acceptance and the
+first locally observed Codex output/text. Web accepts those milestones only for
+the exact staged runtime attempt and merges them into the existing phase
+document under a row lock. Emission is queued off the reply path and may retry
+only the bounded staging/trace-row race; it carries no message, prompt,
+response, reasoning, or provider payload. Post-generation delivery guards must
+never create or overwrite the local Codex start milestone.
+
+The existing App Server `turn-completed` diagnostic additionally carries
+cumulative, assign-once local offsets from that `turn/start` write to the local
+RPC acknowledgement, the `turn/started` notification that proves Codex core
+began the turn task, the completion notification, and completion-trace emission
+after local drains. The RPC acknowledgement and `turn/started` notification are
+independent deliveries and have no guaranteed arrival order. Its provider
+request ordinal joins those offsets to the existing provider-result and
+reply-dispatched timing entries for the same wake; the existing assistant
+milestones remain the source of truth for first local output/text. The total
+completion offset ends after local dynamic-tool/progress drains; the outer
+provider-result boundary remains the separate assistant turn-timing entry. None
+of these fields is an upstream request-start, response-header, or first-token
+boundary. The offsets retain the existing same-process `Date.now()` clock
+semantics, clamp negative values to zero, and must not be used for strict
+ordering assertions if the wall clock moves during a turn. The existing
+Cloudflare provider-egress GET/101 durations end at the Responses WebSocket
+upgrade handshake; per-turn metadata and generation events live inside frames
+that the interceptor deliberately does not inspect, so those egress logs must
+not be interpreted as model latency or a durable attempt/turn join.
 
 Runner-to-Worker legacy artifact reads carry one fixed-vocabulary purpose and
 one UUID correlation id per logical fetch; retries retain that same id. Both
