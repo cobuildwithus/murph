@@ -44,6 +44,9 @@ describe('release workflow guards', () => {
 
   it('runs root release checks and packs all publishable tarballs with pnpm', () => {
     const workflow = readFileSync(releaseWorkflowPath, 'utf8')
+    const releaseChecksStart = workflow.indexOf('      - name: Run release checks')
+    const releaseChecksEnd = workflow.indexOf('      - name: Pack publishable packages')
+    const releaseChecksStep = workflow.slice(releaseChecksStart, releaseChecksEnd)
 
     expect(workflow).toContain('DATABASE_URL: postgresql://postgres:postgres@127.0.0.1:1/murph_test')
     expect(workflow).toContain('HOSTED_DEVICE_ROUTING_INDEX_KEY: 0101010101010101010101010101010101010101010101010101010101010101')
@@ -51,13 +54,14 @@ describe('release workflow guards', () => {
     expect(workflow).toContain('HOSTED_CONTACT_PRIVACY_KEYS: v1:BwcHBwcHBwcHBwcHBwcHBwcHBwcHBwcHBwcHBwcHBwc')
     expect(workflow).toContain('NEXT_PUBLIC_PRIVY_APP_ID: ${{ vars.HOSTED_WEB_VERIFY_PRIVY_APP_ID }}')
     expect(workflow).toContain('PRIVY_VERIFICATION_KEY: ci-hosted-web-verification-key')
-    expect(workflow).toContain('- name: Run release checks')
-    expect(workflow).toContain('NODE_OPTIONS: --max-old-space-size=6144')
+    expect(releaseChecksStart).toBeGreaterThanOrEqual(0)
+    expect(releaseChecksEnd).toBeGreaterThan(releaseChecksStart)
+    expect(releaseChecksStep).toContain('NODE_OPTIONS: --max-old-space-size=6144')
+    expect(releaseChecksStep).toContain('run: pnpm release:check')
     expect(workflow.match(/NODE_OPTIONS: --max-old-space-size=6144/gu) ?? []).toHaveLength(1)
     expect(workflow).toContain('MURPH_TEST_LANES_PARALLEL: "1"')
     expect(workflow).toContain('MURPH_APP_VERIFY_PARALLEL: "1"')
     expect(workflow).toContain('MURPH_VERIFY_STEP_PARALLEL: "1"')
-    expect(workflow).toContain('run: pnpm release:check')
     expect(workflow).toContain('node scripts/pack-publishables.mjs --expect-version "${{ needs.tag-check.outputs.version }}" --clean --out-dir dist/npm --pack-output dist/npm/pack-output.json')
     expect(workflow).toContain('name: npm-tarballs')
     expect(workflow).not.toContain('cache: pnpm')
