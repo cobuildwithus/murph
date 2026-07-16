@@ -67,7 +67,10 @@ RUN apt-get update \
 # only coordinate the mailbox/runtime around this pinned CLI.
 RUN npm install --global --omit=dev --no-audit --no-fund --ignore-scripts "@openai/codex@${CODEX_CLI_VERSION}" \
   && native_codex="$(find "$(npm root -g)/@openai" -path '*/vendor/*/bin/codex' -type f -perm /111 -print -quit)" \
+  && native_bwrap="$(find "$(npm root -g)/@openai" -path '*/vendor/*/codex-resources/bwrap' -type f -perm /111 -print -quit)" \
   && test -n "${native_codex}" \
+  && test -n "${native_bwrap}" \
+  && "${native_bwrap}" --help | grep -Fq -- '--argv0' \
   && ln -sfn "${native_codex}" /usr/local/bin/codex \
   && npm cache clean --force
 

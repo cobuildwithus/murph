@@ -20,6 +20,7 @@ import type {
   HostedAssistantReasoningEffortOverride,
 } from "./assistant-model.ts";
 import type {
+  HostedExecutionAssistantAskResult,
   HostedBrowserVaultReplicaCursorRef,
   HostedBrowserVaultReplicaRef,
   HostedExecutionLinqExternalThreadRouteAuthority,
@@ -48,6 +49,8 @@ export const HOSTED_MAILBOX_KINDS = [
   "member.channels.updated",
   "member.preferences.updated",
   "assistant.notification.requested",
+  "assistant.ask.requested",
+  "assistant.ask.completed",
   "clinical-records.sync-requested",
   "device-sync.wake",
   "group-newsletter.email-needed",
@@ -839,7 +842,42 @@ export interface HostedRuntimeProductFeedbackRecordResponse {
   recorded: boolean;
 }
 
+export const HOSTED_RUNTIME_ASSISTANT_ASK_REQUEST_ID_MAX_CODE_POINTS = 200;
+
+export type HostedRuntimeAssistantAskControlRequest =
+  | {
+      action: "prepare";
+      requestId: string;
+    }
+  | {
+      action: "complete";
+      requestId: string;
+      result: HostedExecutionAssistantAskResult;
+    };
+
+export type HostedRuntimeAssistantAskTerminalReason =
+  | "expired"
+  | "unavailable";
+
+export type HostedRuntimeAssistantAskControlResponse =
+  | {
+      action: "prepare";
+      question: string;
+      status: "ready";
+      targetLabel: string | null;
+    }
+  | {
+      action: "prepare" | "complete";
+      status: "terminal";
+      terminalReason: HostedRuntimeAssistantAskTerminalReason;
+    }
+  | {
+      action: "complete";
+      status: "completed" | "already_completed";
+    };
+
 export type HostedRuntimeGroupToolAction =
+  | "ask"
   | "read_current"
   | "list_memberships"
   | "leave_membership"
@@ -954,6 +992,13 @@ export interface HostedRuntimeGroupChatParticipant {
 }
 
 export type HostedRuntimeGroupToolRequest =
+  | {
+      action: "ask";
+      groupLabel?: string | null;
+      originAssistantInputId: string;
+      originSessionId: string;
+      question: string;
+    }
   | { action: "read_current" }
   | { action: "list_memberships" }
   | { action: "leave_membership"; membershipId: string }
@@ -984,7 +1029,17 @@ export type HostedRuntimeGroupToolRequest =
       selfOptOut?: HostedRuntimeGroupToolSelfOptOutContext | null;
     };
 
+export type HostedRuntimeGroupAskResult =
+  | { status: "accepted"; targetLabel: string | null }
+  | { groupLabels: string[]; status: "clarification_required" }
+  | { status: "no_groups" }
+  | { status: "unavailable"; unavailableReason: string };
+
 export type HostedRuntimeGroupToolResponse =
+  | {
+      action: "ask";
+      result: HostedRuntimeGroupAskResult;
+    }
   | {
       action: "read_current";
       result:

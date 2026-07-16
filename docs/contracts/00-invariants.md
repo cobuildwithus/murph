@@ -82,6 +82,17 @@ it has been explicitly elevated to a cross-cutting invariant.
 - Background work runs in finite abortable units, checks for fresh input before
   each unit, and derives continuation from durable owner state. Preemption
   defers work; it never drops it.
+- A cross-context assistant ask uses paired encrypted mailbox items as its only
+  durable work state. Trusted owners derive and revalidate the target,
+  membership generation, origin, and return route; model-supplied labels or
+  questions never confer authority or select an internal runtime id.
+- A detached assistant read may overlap foreground work only in a separate
+  one-shot process with OS-enforced read-only roots and no write, tool-network,
+  route, delivery, or recursion authority. The resident foreground assistant
+  remains the sole model-authored canonical-content writer and sender. The
+  runtime must abort, await, and prove exit of the exact owned child before
+  checkpoint release, workspace replacement, fence loss, shutdown, or
+  invocation return.
 - A foreground prerequisite is a named current fact, not a generic lane or
   backlog. Bound unavoidable pre-provider and pre-delivery collections and
   waits, but never let background, replay, maintenance, or diagnostic budgets

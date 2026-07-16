@@ -214,7 +214,7 @@ describe("assistant phone calls", () => {
       env: {},
       fetchImpl: fetch,
       hostedToolContext: createHostedToolContext({
-        currentPhoneCallToolRequestKeyScope: () => null,
+        currentUserActionScope: () => null,
         phoneCalls: { start },
       }),
       nextUsageOrdinal: () => 1,
@@ -262,7 +262,11 @@ describe("assistant phone calls", () => {
       env: {},
       fetchImpl: fetch,
       hostedToolContext: createHostedToolContext({
-        currentPhoneCallToolRequestKeyScope: () => phoneCallScope,
+        currentUserActionScope: () => ({
+          ...phoneCallScope,
+          conversationScope: "direct",
+          originSessionId: "session_phone_call",
+        }),
         phoneCalls: { start },
       }),
       nextUsageOrdinal: () => 1,
@@ -296,9 +300,11 @@ describe("assistant phone calls", () => {
       env: {},
       fetchImpl: fetch,
       hostedToolContext: createHostedToolContext({
-        currentPhoneCallToolRequestKeyScope: () => ({
+        currentUserActionScope: () => ({
           ...BASE_SCOPE,
           acceptedInputIds: ["manual_phone_call_input"],
+          conversationScope: "direct",
+          originSessionId: "session_phone_call",
         }),
         phoneCalls: {
           start: vi.fn().mockResolvedValue({
@@ -333,14 +339,14 @@ function dynamicToolCall(input: {
 }
 
 function createHostedToolContext(input: {
-  currentPhoneCallToolRequestKeyScope?: () => AssistantHostedToolRequestKeyScope | null;
+  currentUserActionScope?: AssistantHostedToolContext["currentUserActionScope"];
   phoneCalls?: AssistantHostedToolContext["phoneCalls"];
 }): AssistantHostedToolContext {
   return {
     computerToolsAvailable: false,
     currentHostedDeliveryContext: () => null,
     currentHostedMailboxItemIds: () => [],
-    currentPhoneCallToolRequestKeyScope: input.currentPhoneCallToolRequestKeyScope,
+    currentUserActionScope: input.currentUserActionScope,
     phoneCalls: input.phoneCalls ?? null,
     sendVaultFile: vi.fn(async () => {
       throw new Error("Vault-file sending is unavailable for this turn.");

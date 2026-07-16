@@ -203,6 +203,7 @@ export async function executeCodexAssistantTurnAttempt(
     approvalPolicy,
     developerInstructions,
     dynamicTools: input.dynamicTools,
+    environments: input.environments ?? undefined,
     codexCommand: providerConfig.target.codexCommand ?? undefined,
     codexHome: providerConfig.target.codexHome ?? undefined,
     configOverrides:

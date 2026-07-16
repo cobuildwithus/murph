@@ -142,6 +142,80 @@ describe('assistant Codex turn planning', () => {
     })
   })
 
+  it('plans ask continuations as isolated output-only turns with committed private context', async () => {
+    planningMocks.readAssistantCliSurfaceBootstrapContext.mockResolvedValue(
+      'CLI bootstrap must stay unavailable.',
+    )
+    planningMocks.readAssistantContextSnapshotPrompt.mockResolvedValue(
+      'Private context: use the member\'s current mobility prescription.',
+    )
+    planningMocks.resolveCodexAssistantTargetCapabilities.mockReturnValue({
+      supportsNativeResume: true,
+    })
+    const vault = await mkdtemp(
+      path.join(os.tmpdir(), 'assistant-ask-continuation-plan-'),
+    )
+    const session = createSession({
+      resumeState: {
+        assistantContractFingerprint: 'f'.repeat(64),
+        routeFingerprint: 'route-test',
+        threadId: 'stale-private-thread',
+      },
+      turnCount: 1,
+    })
+
+    try {
+      await appendAssistantTranscriptEntries(vault, session.sessionId, [
+        { kind: 'user', text: 'Build this around my existing prescription.' },
+        { kind: 'assistant', text: 'I will check the joined group.' },
+      ])
+      const plan = await resolveAssistantRouteTurnPlan({
+        executionContext: {
+          hosted: {
+            dynamicContextPrompts: ['Hosted tool guidance must stay unavailable.'],
+            memberId: 'member-ask-continuation',
+            userEnvKeys: [],
+          },
+        },
+        input: {
+          ...createMessageInput(),
+          deliverResponse: true,
+          prompt: '<untrusted_group_answer>quoted data</untrusted_group_answer>',
+          vault,
+        },
+        profile: {
+          promptProfile: 'assistant-ask-continuation',
+          threadScope: 'isolated-thread',
+          toolProfile: 'output-only-turn',
+        },
+        promptTimeContext: {
+          currentLocalDate: '2026-07-15',
+          currentTimeZone: 'America/New_York',
+        },
+        route: createRoute(),
+        session,
+        sharedPlan: createPrivateSharedPlan(),
+      })
+
+      expect(plan.resume).toBeNull()
+      expect(plan.dynamicTools).toEqual([])
+      expect(plan.environments).toEqual([])
+      expect(plan.assistantCliContract).toBeNull()
+      expect(plan.sessionContext).toBeUndefined()
+      expect(plan.conversationHistoryMessages).toEqual([
+        { content: 'Build this around my existing prescription.', role: 'user' },
+        { content: 'I will check the joined group.', role: 'assistant' },
+      ])
+      expect(plan.systemPrompt).toContain('output-only turn')
+      expect(plan.systemPrompt).not.toContain('CLI bootstrap')
+      expect(plan.systemPrompt).not.toContain('Hosted tool guidance')
+      expect(plan.turnContextPrompt).toContain('current mobility prescription')
+      expect(planningMocks.readAssistantCliSurfaceBootstrapContext).not.toHaveBeenCalled()
+    } finally {
+      await rm(vault, { force: true, recursive: true })
+    }
+  })
+
   it('resolves no dynamic tools and no non-evidence prompt context for maintenance turns', async () => {
     planningMocks.readAssistantCliSurfaceBootstrapContext.mockResolvedValue('bootstrap contract')
     planningMocks.readAssistantContextSnapshotPrompt.mockResolvedValue(
