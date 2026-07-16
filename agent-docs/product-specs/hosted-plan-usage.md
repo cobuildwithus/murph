@@ -1,6 +1,7 @@
 # Hosted Plan Usage And Subscription Actions
 
-Last verified: 2026-07-15
+Last verified: 2026-07-16
+Status: Checked-out source snapshot with a known product-contract discrepancy
 
 ## Goal
 
@@ -8,7 +9,10 @@ Give a member one honest view of their current included AI usage, then let a
 private Murph conversation carry out the smallest billing action the member
 clearly chooses. Settings and Murph's read-only plan-usage tool consume the same
 web-owned projection. Stripe and the existing web billing services remain the
-only billing system.
+only billing system. This document records the current checked-out projection
+and subscription-action implementation; it is not product authority for whether
+exhaustion blocks. The confirmed enforced contract and required source
+reconciliation live in `agent-docs/product-specs/hosted-usage-topups.md`.
 
 ## Ownership
 
@@ -171,6 +175,12 @@ Sol; name a model only if they ask. Never switch models automatically.
 
 ## Runtime Access And Notices
 
+The following advisory behavior describes the checked-out source and tests,
+not the confirmed product contract. That contract blocks subsequent
+usage-bearing work at exhaustion. The discrepancy must be reconciled at the
+single admission owner before top-ups ship; adding a second gate is not a valid
+correction.
+
 Included usage is advisory. Reaching 100% does not deny otherwise-authorized
 assistant or system work, and the plan-usage projection is never model-work
 admission. Admission reads only the hosted member-access owner, where inactive,
@@ -230,6 +240,12 @@ trial-ending webhook, automatic nudge, group balance, top-up flow, automatic
 model switch, custom checkout page, App Clip, or mini app. It does not add a
 general Stripe API tool: the action contract exposes only the three current
 web-owned billing operations above, and every payment handoff is Stripe-hosted.
+
+The separately proposed target-state extension lives in
+`agent-docs/product-specs/hosted-usage-topups.md`. That specification treats
+usage-limit blocking as the confirmed product behavior and supersedes this
+snapshot's advisory statements as product policy. It also records the
+checked-out source discrepancy that must be reconciled before implementation.
 
 ## Deployment
 
