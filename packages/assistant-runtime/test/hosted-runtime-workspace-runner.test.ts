@@ -3188,6 +3188,91 @@ describe("runHostedWorkspaceUntilIdleOrBudget", () => {
     }
   });
 
+  test("rolls back a canonical write without checkpointing when artifact upload fails", async () => {
+    const vaultRoot = await mkdtemp(path.join(tmpdir(), "murph-workspace-runner-"));
+    await initializeVault({
+      createdAt: new Date(TEST_NOW),
+      timezone: "UTC",
+      title: "Hosted Workspace Runner Failed Artifact Upload Test Vault",
+      vaultRoot,
+    });
+    const artifactPutCalls: string[] = [];
+    const checkpointRequests: HostedWorkspaceCheckpointRequest[] = [];
+    const { mailboxPort } = createMailboxPort({ items: [] });
+    let checkpointAttempted = false;
+
+    try {
+      await assert.rejects(
+        runHostedWorkspaceUntilIdleOrBudget({
+          async checkpointRuntimeRedactedStatus() {
+            checkpointAttempted = true;
+            throw new Error("Artifact upload failure must prevent checkpointing.");
+          },
+          checkpointRequestBuilder: createHostedWorkspaceCheckpointRequestBuilder({
+            attemptId: "attempt_synthetic_runner_failed_artifact_upload",
+            expectedWorkspaceVersion: "0",
+            leaseGeneration: "1",
+            nextWakeAt: null,
+            nextWakeReason: null,
+            snapshotRef: null,
+          }),
+          expectedUserId: TEST_USER_ID,
+          async importItem() {
+            throw new Error("Initial mailbox import was already provided.");
+          },
+          initialMailboxImport: createDeferredMailboxImportResult(),
+          limitPerLane: 10,
+          platform: createPlatform({
+            async artifactPut() {
+              throw new Error("Synthetic canonical artifact upload failure.");
+            },
+            artifactPutCalls,
+            mailboxPort,
+            workspacePort: createWorkspacePort({ checkpointRequests }),
+          }),
+          requestId: "request_synthetic_runner_failed_artifact_upload",
+          async runAssistantPhase() {
+            await applyCanonicalWriteBatch({
+              audit: {
+                action: "experiment_update",
+                commandName: "test.failedArtifactUpload",
+                summary: "Synthetic canonical write with failed artifact upload.",
+              },
+              operationType: "failed_artifact_upload_test",
+              summary: "Synthetic canonical write with failed artifact upload",
+              textWrites: [
+                {
+                  content: "must roll back\n",
+                  overwrite: true,
+                  relativePath: "bank/failed-artifact-upload.md",
+                },
+              ],
+              vaultRoot,
+            });
+            return {
+              checkpointReason: "canonical_runtime_commit",
+              progressed: true,
+            };
+          },
+          vaultRoot,
+          workspace: createWorkspaceState({ version: "0" }),
+          now: () => TEST_NOW,
+        }),
+        /Synthetic canonical artifact upload failure/u,
+      );
+
+      assert.equal(artifactPutCalls.length >= 3, true);
+      assert.equal(checkpointAttempted, false);
+      assert.deepEqual(checkpointRequests, []);
+      await assert.rejects(readFile(path.join(vaultRoot, "bank", "failed-artifact-upload.md")));
+    } finally {
+      await rm(vaultRoot, {
+        force: true,
+        recursive: true,
+      });
+    }
+  });
+
   test("checkpoints canonical writes performed while importing mailbox items", async () => {
     const vaultRoot = await mkdtemp(path.join(tmpdir(), "murph-workspace-runner-"));
     await initializeVault({
@@ -8464,6 +8549,7 @@ describe("runHostedWorkspaceUntilIdleOrBudget", () => {
 function createPlatform(input: {
   artifactBytesByHash?: ReadonlyMap<string, Uint8Array>;
   artifactGetCalls?: string[];
+  artifactPut?: (artifact: { bytes: Uint8Array; sha256: string }) => Promise<void>;
   artifactPutCalls?: string[];
   effectsPort?: Partial<HostedRuntimeEffectsPort>;
   logRequests?: HostedRuntimeLogRequest[];
@@ -8478,9 +8564,9 @@ function createPlatform(input: {
         input.artifactGetCalls?.push(sha256);
         return input.artifactBytesByHash?.get(sha256) ?? null;
       },
-      async put(artifact: { sha256: string }) {
+      async put(artifact: { bytes: Uint8Array; sha256: string }) {
         input.artifactPutCalls?.push(artifact.sha256);
-        return undefined;
+        await input.artifactPut?.(artifact);
       },
     },
     effectsPort: {
