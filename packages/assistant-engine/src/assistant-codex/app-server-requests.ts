@@ -111,6 +111,7 @@ export function buildCodexTurnStartParams(input: {
       imagePaths: input.imagePaths,
       prompt: input.input.prompt,
     }),
+    model: normalizeNullableString(input.input.model),
     threadId: input.codexThreadId,
   })
 

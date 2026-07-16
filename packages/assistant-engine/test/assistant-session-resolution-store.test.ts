@@ -18,6 +18,10 @@ import { resolveLegacyAssistantConversationKey } from '../src/assistant/bindings
 import {
   resolveAssistantSessionForMessage,
 } from '../src/assistant/session-resolution.ts'
+import { resolveAssistantExecutionPlan } from '../src/assistant/execution-plan.ts'
+import {
+  readCodexThreadRouteFingerprint,
+} from '../src/assistant/codex-thread-route.ts'
 import { createTempVaultContext } from './test-helpers.ts'
 
 const cleanupPaths: string[] = []
@@ -58,7 +62,12 @@ describe('assistant session resolution store integration', () => {
     await saveAssistantSession(vaultRoot, {
       ...created.session,
       resumeState: {
-        routeFingerprint: created.session.providerOptions.continuityFingerprint,
+        routeFingerprint: readCodexThreadRouteFingerprint(
+          resolveAssistantExecutionPlan({
+            defaults: null,
+            sessionTarget,
+          }).codexRoute,
+        ),
         threadId: 'thread_low',
       },
     })
@@ -90,7 +99,10 @@ describe('assistant session resolution store integration', () => {
       profile: 'session-profile',
       reasoningEffort: 'high',
     }))
-    expect(resolved.session.resumeState).toBeNull()
+    expect(resolved.session.resumeState).toMatchObject({
+      threadId: 'thread_low',
+      threadCompatibilityFingerprint: expect.any(String),
+    })
 
     const sessions = await listAssistantSessions(vaultRoot)
     expect(sessions.map((session) => session.sessionId)).toEqual([

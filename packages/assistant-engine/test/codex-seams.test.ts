@@ -29,6 +29,7 @@ import {
   resolveAssistantResumeStateFromProviderTurn,
 } from '../src/assistant/turn-finalizer.ts'
 import {
+  bindAssistantResumeStateToThreadCompatibility,
   doesAssistantResumeBindingMatchRoute,
   resolveAssistantCodexResumeThreadId,
   resolveAssistantRouteResumeBinding,
@@ -39,6 +40,8 @@ import {
 } from '../src/assistant/conversation-persistence.ts'
 import {
   buildCodexThreadIdentity,
+  readCodexThreadCompatibilityFingerprint,
+  readCodexThreadRouteFingerprint,
   type CodexThreadIdentity,
 } from '../src/assistant/codex-thread-route.ts'
 import { createAssistantRuntimeStateService } from '../src/assistant/runtime-state-service.ts'
@@ -200,6 +203,133 @@ describe('assistant Codex seam helpers', () => {
         sessionResumeState: previousResumeState,
       }),
     ).toBeNull()
+  })
+
+  it('migrates an exact legacy binding so model changes keep the same thread', () => {
+    const initialRoute = buildCodexThreadIdentity(
+      normalizeAssistantProviderConfig({
+        model: 'gpt-5.5',
+        modelProvider: 'openai',
+        reasoningEffort: 'low',
+      }),
+    )
+    const switchedRoute = buildCodexThreadIdentity(
+      normalizeAssistantProviderConfig({
+        model: 'gpt-5.6-sol',
+        modelProvider: 'openai',
+        reasoningEffort: 'high',
+      }),
+    )
+    const legacyResumeState = {
+      routeFingerprint: readCodexThreadRouteFingerprint(initialRoute),
+      threadId: 'provider_session_alpha',
+    }
+    const migrated = bindAssistantResumeStateToThreadCompatibility({
+      resumeState: legacyResumeState,
+      route: initialRoute,
+    })
+
+    expect(readCodexThreadRouteFingerprint(switchedRoute)).not.toBe(
+      readCodexThreadRouteFingerprint(initialRoute),
+    )
+    expect(readCodexThreadCompatibilityFingerprint(switchedRoute)).toBe(
+      readCodexThreadCompatibilityFingerprint(initialRoute),
+    )
+    expect(migrated).toMatchObject({
+      routeFingerprint: readCodexThreadRouteFingerprint(initialRoute),
+      threadCompatibilityFingerprint:
+        readCodexThreadCompatibilityFingerprint(initialRoute),
+      threadId: 'provider_session_alpha',
+    })
+    expect(
+      doesAssistantResumeBindingMatchRoute({
+        resumeState: migrated,
+        route: switchedRoute,
+      }),
+    ).toBe(true)
+  })
+
+  it('keeps execution-boundary changes incompatible and does not enrich an unproved legacy binding', () => {
+    const initialRoute = buildCodexThreadIdentity(
+      normalizeAssistantProviderConfig({
+        approvalPolicy: 'never',
+        codexCommand: 'codex',
+        codexHome: '/tmp/codex-home-primary',
+        model: 'gpt-5.5',
+        modelProvider: 'openai',
+        oss: false,
+        profile: 'primary',
+        reasoningEffort: 'low',
+        sandbox: 'danger-full-access',
+      }),
+    )
+    const legacyResumeState = {
+      routeFingerprint: readCodexThreadRouteFingerprint(initialRoute),
+      threadId: 'provider_session_alpha',
+    }
+    const incompatibleRoutes = [
+      ['model provider', { modelProvider: 'vercel-ai-gateway' }],
+      ['Codex home', { codexHome: '/tmp/codex-home-secondary' }],
+      ['Codex command', { codexCommand: 'codex-next' }],
+      ['sandbox', { sandbox: 'workspace-write' as const }],
+      ['profile', { profile: 'secondary' }],
+      ['OSS mode', { oss: true }],
+    ] as const
+
+    for (const [label, overrides] of incompatibleRoutes) {
+      const incompatibleRoute = buildCodexThreadIdentity(
+        normalizeAssistantProviderConfig({
+          approvalPolicy: 'never',
+          codexCommand: 'codex',
+          codexHome: '/tmp/codex-home-primary',
+          model: 'gpt-5.5',
+          modelProvider: 'openai',
+          oss: false,
+          profile: 'primary',
+          reasoningEffort: 'low',
+          sandbox: 'danger-full-access',
+          ...overrides,
+        }),
+      )
+
+      expect(
+        readCodexThreadCompatibilityFingerprint(incompatibleRoute),
+        label,
+      ).not.toBe(readCodexThreadCompatibilityFingerprint(initialRoute))
+      expect(
+        doesAssistantResumeBindingMatchRoute({
+          resumeState: {
+            ...legacyResumeState,
+            threadCompatibilityFingerprint:
+              readCodexThreadCompatibilityFingerprint(initialRoute),
+          },
+          route: incompatibleRoute,
+        }),
+        label,
+      ).toBe(false)
+    }
+
+    const unprovedMigration = bindAssistantResumeStateToThreadCompatibility({
+      resumeState: legacyResumeState,
+      route: buildCodexThreadIdentity(
+        normalizeAssistantProviderConfig({
+          approvalPolicy: 'never',
+          codexCommand: 'codex-next',
+          codexHome: '/tmp/codex-home-primary',
+          model: 'gpt-5.5',
+          modelProvider: 'openai',
+          oss: false,
+          profile: 'primary',
+          reasoningEffort: 'low',
+          sandbox: 'danger-full-access',
+        }),
+      ),
+    })
+
+    expect(unprovedMigration).toEqual(legacyResumeState)
+    expect(unprovedMigration).not.toHaveProperty(
+      'threadCompatibilityFingerprint',
+    )
   })
 
   it('records recovered Codex thread ids without persisting failed-turn resume state', async () => {
@@ -423,10 +553,12 @@ describe('assistant Codex seam helpers', () => {
         codexRolloutRelativePath,
         codexThreadId: codexThreadId,
         routeFingerprint: 'route-resume',
+        threadCompatibilityFingerprint: 'thread-compatible-route',
       }),
     ).toEqual({
       rolloutRelativePath: codexRolloutRelativePath,
       routeFingerprint: 'route-resume',
+      threadCompatibilityFingerprint: 'thread-compatible-route',
       threadId: codexThreadId,
     })
 

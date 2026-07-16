@@ -243,6 +243,7 @@ type CodexAppServerActiveTurnBinding = {
 // current thread context size without any extra RPC or model call.
 export interface CodexWarmThreadTokenUsage {
   lastInputTokens: number
+  model: string | null
   serviceTier: AssistantProviderServiceTier | null
   threadId: string
 }
@@ -739,6 +740,7 @@ class CodexAppServerProcess {
 
   private activeTurn: CodexAppServerActiveTurnBinding | null = null
   private boundThreadId: string | null = null
+  private boundThreadModel: string | null = null
   private boundThreadServiceTier: AssistantProviderServiceTier | null = null
   private cleanupProcessExitListener: () => void
   private lastThreadTokenUsage: CodexWarmThreadTokenUsage | null = null
@@ -1241,6 +1243,7 @@ class CodexAppServerProcess {
 
     this.lastThreadTokenUsage = {
       lastInputTokens,
+      model: this.boundThreadModel,
       serviceTier: this.boundThreadServiceTier,
       threadId: update.threadId,
     }
@@ -1256,6 +1259,10 @@ class CodexAppServerProcess {
 
   noteBoundThreadServiceTier(serviceTier: AssistantProviderServiceTier | null): void {
     this.boundThreadServiceTier = serviceTier
+  }
+
+  noteBoundThreadModel(model: string | null): void {
+    this.boundThreadModel = normalizeNullableString(model)
   }
 
   // Exposed so a freshly bound turn can route foreign-thread events before
@@ -1946,6 +1953,7 @@ export type CodexWarmThreadCompactionOutcome =
   | {
       kind: 'compacted'
       durationMs: number
+      model: string | null
       threadContextTokensBefore: number
       threadId: string
       serviceTier: AssistantProviderServiceTier | null
@@ -1959,7 +1967,13 @@ export type CodexWarmThreadCompactionOutcome =
     }
   | {
       kind: 'skipped'
-      reason: 'below_threshold' | 'no_thread_vitals' | 'no_warm_process' | 'turn_in_flight'
+      reason:
+        | 'below_threshold'
+        | 'model_not_accountable'
+        | 'no_thread_vitals'
+        | 'no_warm_process'
+        | 'turn_in_flight'
+      model?: string | null
       threadContextTokensBefore: number | null
     }
 
@@ -1972,6 +1986,7 @@ export type CodexWarmThreadCompactionOutcome =
 // because the idle checkpoint that follows snapshots the Codex home,
 // including rollout files, and must never capture a rollout mid-teardown.
 export async function compactWarmCodexThread(input: {
+  canAccountForModel?: ((model: string | null) => boolean) | null
   minThreadTokens: number
   signal?: AbortSignal | null
   timeoutMs: number
@@ -1987,6 +2002,14 @@ export async function compactWarmCodexThread(input: {
     const vitals = processInstance.warmThreadTokenUsage
     if (!vitals) {
       return { kind: 'skipped', reason: 'no_thread_vitals', threadContextTokensBefore: null } as const
+    }
+    if (input.canAccountForModel && !input.canAccountForModel(vitals.model)) {
+      return {
+        kind: 'skipped',
+        model: vitals.model,
+        reason: 'model_not_accountable',
+        threadContextTokensBefore: vitals.lastInputTokens,
+      } as const
     }
     if (vitals.lastInputTokens < input.minThreadTokens) {
       return {
@@ -2155,6 +2178,7 @@ export async function compactWarmCodexThread(input: {
       return {
         kind: 'compacted',
         durationMs: Date.now() - startedAt,
+        model: vitals.model,
         threadContextTokensBefore: vitals.lastInputTokens,
         threadId: vitals.threadId,
         serviceTier: vitals.serviceTier,
@@ -2997,8 +3021,8 @@ async function runCodexAppServerTurnOnProcess(
   }
 
   // Stateful dynamic tools run serialized in request order so response media,
-  // final-action patches, and computer pause barriers apply deterministically
-  // even if Codex issues overlapping tool requests.
+  // preference writes, final-action patches, and computer pause barriers apply
+  // deterministically even if Codex issues overlapping tool requests.
   const trackDynamicToolExecution = (run: () => Promise<unknown>): void => {
     dynamicToolExecutionChain = dynamicToolExecutionChain
       .then(run)
@@ -4065,6 +4089,7 @@ async function runCodexAppServerTurnOnProcess(
     }
 
     lifecycleStage = 'turn_start'
+    codexProcess.noteBoundThreadModel(input.model ?? null)
     codexProcess.noteBoundThreadServiceTier(input.serviceTier ?? null)
     const turnStartRequest = sendRequest(
       'turn/start',
@@ -4384,6 +4409,7 @@ function isSerializedDynamicToolRequest(
     request.kind === 'generate-voice-memo' ||
     request.kind === 'generate-song' ||
     request.kind === 'attach-response-media' ||
+    request.kind === 'assistant-configuration' ||
     request.kind === 'personalization' ||
     request.kind === 'submit-product-feedback' ||
     isComputerDynamicToolRequest(request)
@@ -4478,7 +4504,9 @@ function resolveCodexRolloutRelativePath(input: {
 // remain attached (codex-rs `thread_processor.rs` `resume_running_thread`).
 // The thread/resume response echoes the effective execution context, so this
 // echo check is the only client-visible stale-rejoin signal before turn/start.
-// Fields with no requested value are skipped; requested fields must echo back.
+// Fields with no requested value are skipped; requested immutable execution
+// fields must echo back. Model is intentionally excluded because turn/start
+// applies its sticky model override atomically with the next user input.
 function assertCodexResumeContextMatches(input: {
   input: CodexAppServerPreparedTurnInput
   requestedThreadId: string
@@ -4498,11 +4526,6 @@ function assertCodexResumeContextMatches(input: {
       asCodexString(result?.approvalPolicy),
     ],
     ['cwd', input.input.workingDirectory, actualCwd ? path.resolve(actualCwd) : null],
-    [
-      'model',
-      normalizeNullableString(input.input.model),
-      normalizeNullableString(asCodexString(result?.model)),
-    ],
     [
       'modelProvider',
       normalizeNullableString(input.input.modelProvider),

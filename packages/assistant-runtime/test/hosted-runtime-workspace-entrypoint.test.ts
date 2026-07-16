@@ -59,6 +59,8 @@ import {
   type HostedRuntimeRedactedJson,
   type HostedRuntimeLatencyTraceRequest,
   type HostedRuntimeLogRequest,
+  type HostedRuntimeAssistantConfigurationControlRequest,
+  type HostedRuntimeAssistantConfigurationToolResponse,
   type HostedWorkspaceCheckpointRequest,
   type HostedWorkspaceCheckpointResponse,
   type HostedWorkspaceReadResponse,
@@ -100,6 +102,7 @@ const mocks = vi.hoisted(() => ({
   prepareHostedCodexRuntimeEnvironment: vi.fn(),
   refreshHostedBrowserVaultReplicaFromRuntime: vi.fn(),
   runAssistantAutomationPass: vi.fn(),
+  runHostedIdleCheckpointMaintenance: vi.fn(),
   summarizeWearableSleepRuntime: vi.fn(),
   snapshotHostedPortableWorkspaceDelta: vi.fn(),
 }));
@@ -160,6 +163,20 @@ vi.mock("../src/hosted-runtime/codex-config.ts", async (importOriginal) => {
     prepareHostedCodexRuntimeEnvironment:
       mocks.prepareHostedCodexRuntimeEnvironment.mockImplementation(
         actual.prepareHostedCodexRuntimeEnvironment,
+      ),
+  };
+});
+
+vi.mock("../src/hosted-runtime/idle-maintenance.ts", async (importOriginal) => {
+  const actual = await importOriginal<
+    typeof import("../src/hosted-runtime/idle-maintenance.ts")
+  >();
+
+  return {
+    ...actual,
+    runHostedIdleCheckpointMaintenance:
+      mocks.runHostedIdleCheckpointMaintenance.mockImplementation(
+        actual.runHostedIdleCheckpointMaintenance,
       ),
   };
 });
@@ -6654,6 +6671,339 @@ describe("hosted workspace runtime entrypoint", () => {
       ]);
       assert.equal(result.status, "idle");
       assert.equal(result.nextWakeAt, null);
+    } finally {
+      vi.useRealTimers();
+      await removeTempRoot(vaultRoot);
+    }
+  });
+
+  test("confirmed assistant configuration updates apply to the next hot foreground phase", async () => {
+    const vaultRoot = await mkdtemp(path.join(tmpdir(), "murph-assistant-target-refresh-"));
+    const events: string[] = [];
+    const checkpointRequests: HostedWorkspaceCheckpointRequest[] = [];
+    const mailboxItems: HostedMailboxItem[] = [];
+    const runtimeWakeSignal = createCoalescingRuntimeWakeSignal();
+    const idleCheckpointDelayMs = 180_000;
+    const phaseObserved = [
+      createDeferred<void>(),
+      createDeferred<void>(),
+      createDeferred<void>(),
+      createDeferred<void>(),
+      createDeferred<void>(),
+    ];
+    const configurationRequests: HostedRuntimeAssistantConfigurationControlRequest[] = [];
+    const configurationResponses: HostedRuntimeAssistantConfigurationToolResponse[] = [
+      {
+        action: "update",
+        result: {
+          appliesAt: "next_turn",
+          availableModels: ["gpt-5.6-terra", "gpt-5.6-sol"],
+          availableReasoningEfforts: ["low", "high"],
+          configurationAvailable: true,
+          dormantSolPreference: false,
+          model: "gpt-5.6-sol",
+          reasoningEffort: "high",
+          requiredPlan: null,
+          solAvailable: true,
+          status: "updated",
+        },
+      },
+      {
+        action: "read",
+        result: {
+          availableModels: ["gpt-5.6-terra", "gpt-5.6-sol"],
+          availableReasoningEfforts: ["low", "high"],
+          configurationAvailable: true,
+          dormantSolPreference: false,
+          model: "gpt-5.6-terra",
+          reasoningEffort: "low",
+          solAvailable: true,
+        },
+      },
+      {
+        action: "update",
+        result: {
+          appliesAt: "next_turn",
+          availableModels: [],
+          availableReasoningEfforts: [],
+          configurationAvailable: false,
+          dormantSolPreference: false,
+          model: "gpt-5.6-terra",
+          reasoningEffort: "low",
+          requiredPlan: null,
+          solAvailable: false,
+          status: "unavailable",
+        },
+      },
+      {
+        action: "update",
+        result: {
+          appliesAt: "next_turn",
+          availableModels: ["gpt-5.6-terra", "gpt-5.6-sol"],
+          availableReasoningEfforts: ["low", "high"],
+          configurationAvailable: true,
+          dormantSolPreference: false,
+          model: "gpt-5.6-terra",
+          reasoningEffort: "low",
+          requiredPlan: null,
+          solAvailable: true,
+          status: "unchanged",
+        },
+      },
+      {
+        action: "update",
+        result: {
+          appliesAt: "next_turn",
+          availableModels: ["gpt-5.6-terra", "gpt-5.6-sol"],
+          availableReasoningEfforts: ["low", "high"],
+          configurationAvailable: true,
+          dormantSolPreference: false,
+          model: "gpt-5.6-sol",
+          reasoningEffort: "high",
+          requiredPlan: null,
+          solAvailable: true,
+          status: "updated",
+        },
+      },
+      {
+        action: "update",
+        result: {
+          appliesAt: "next_turn",
+          availableModels: ["gpt-5.6-terra", "gpt-5.6-sol"],
+          availableReasoningEfforts: ["low", "high"],
+          configurationAvailable: true,
+          dormantSolPreference: false,
+          model: "gpt-5.6-sol",
+          reasoningEffort: "high",
+          requiredPlan: null,
+          solAvailable: true,
+          status: "unchanged",
+        },
+      },
+    ];
+    const observedTargets: Array<{
+      forwardedEffort: string | undefined;
+      forwardedModel: string | undefined;
+      runtimeEffort: string | undefined;
+      runtimeModel: string | undefined;
+    }> = [];
+    let assistantPhaseCalls = 0;
+
+    vi.useFakeTimers({ toFake: ["Date", "setTimeout", "clearTimeout"] });
+    try {
+      mocks.runHostedIdleCheckpointMaintenance.mockClear();
+      vi.setSystemTime(new Date(TEST_NOW));
+      await initializeVault({ createdAt: TEST_NOW, vaultRoot });
+
+      const resultPromise = withRealTimeout(
+        runHostedWorkspaceRuntimeJobInProcess(
+          createWorkspaceRuntimeJobInput({
+            forwardedEnv: {
+              HOSTED_ASSISTANT_MODEL: "gpt-5.6-terra",
+              HOSTED_ASSISTANT_REASONING_EFFORT: "low",
+            },
+            request: {
+              attemptId: "attempt_assistant_target_refresh",
+              idleCheckpointDelayMs,
+              leaseGeneration: "9",
+              userId: TEST_USER_ID,
+              workspaceVersion: "4",
+            },
+          }),
+          {
+            async createCheckpointSnapshot(snapshotInput) {
+              events.push(`snapshot:${snapshotInput.reason}`);
+              return {
+                snapshotRef: createBundleRef({
+                  hash: "9".repeat(64),
+                  key: "users/bundles/member-synthetic/assistant-target-refresh.bundle.json",
+                  size: 640,
+                }),
+              };
+            },
+            async importItem(item) {
+              events.push(`mailbox.importItem:${item.item.id}`);
+              return { status: "imported" };
+            },
+            platform: createPlatform({
+              assistantConfigurationToolPort: {
+                async request(request) {
+                  configurationRequests.push(request);
+                  const response = configurationResponses.shift();
+                  assert.ok(response, "Unexpected assistant configuration request.");
+                  return response;
+                },
+              },
+              mailboxPort: createMailboxPort({ events, items: mailboxItems }),
+              workspacePort: createWorkspacePort({
+                checkpointRequests,
+                events,
+                workspace: createWorkspaceState({
+                  nextWakeAt: TEST_NOW,
+                  nextWakeReason: "assistant",
+                  version: "4",
+                }),
+              }),
+            }),
+            runtimeWakeSignal,
+            async runAssistantPhase(input) {
+              assistantPhaseCalls += 1;
+              const observedTarget = {
+                forwardedEffort:
+                  input.runtime.forwardedEnv.HOSTED_ASSISTANT_REASONING_EFFORT,
+                forwardedModel: input.runtime.forwardedEnv.HOSTED_ASSISTANT_MODEL,
+                runtimeEffort: input.runtimeEnv.HOSTED_ASSISTANT_REASONING_EFFORT,
+                runtimeModel: input.runtimeEnv.HOSTED_ASSISTANT_MODEL,
+              };
+              observedTargets.push(observedTarget);
+              events.push(`assistant.phase:${assistantPhaseCalls}:${observedTarget.runtimeModel}`);
+
+              const configurationTool =
+                input.runtime.platform.assistantConfigurationToolPort;
+              assert.ok(configurationTool);
+              if (assistantPhaseCalls === 1) {
+                await configurationTool.request({
+                  action: "update",
+                  assistantInputId: `ain_${"1".repeat(32)}`,
+                  model: "gpt-5.6-sol",
+                  reasoningEffort: "high",
+                });
+                assert.deepEqual(
+                  {
+                    forwardedEffort:
+                      input.runtime.forwardedEnv.HOSTED_ASSISTANT_REASONING_EFFORT,
+                    forwardedModel: input.runtime.forwardedEnv.HOSTED_ASSISTANT_MODEL,
+                    runtimeEffort:
+                      input.runtimeEnv.HOSTED_ASSISTANT_REASONING_EFFORT,
+                    runtimeModel: input.runtimeEnv.HOSTED_ASSISTANT_MODEL,
+                  },
+                  observedTarget,
+                  "The running phase must retain its starting target.",
+                );
+              } else if (assistantPhaseCalls === 2) {
+                await configurationTool.request({ action: "read" });
+                await configurationTool.request({
+                  action: "update",
+                  assistantInputId: `ain_${"2".repeat(32)}`,
+                  model: "gpt-5.6-terra",
+                  reasoningEffort: "low",
+                });
+              } else if (assistantPhaseCalls === 3) {
+                await configurationTool.request({
+                  action: "update",
+                  assistantInputId: `ain_${"3".repeat(32)}`,
+                  model: "gpt-5.6-terra",
+                  reasoningEffort: "low",
+                });
+              } else if (assistantPhaseCalls === 4) {
+                await configurationTool.request({
+                  action: "update",
+                  assistantInputId: `ain_${"4".repeat(32)}`,
+                  model: "gpt-5.6-sol",
+                  reasoningEffort: "high",
+                });
+              } else if (assistantPhaseCalls === 5) {
+                await configurationTool.request({
+                  action: "update",
+                  assistantInputId: `ain_${"5".repeat(32)}`,
+                  model: "gpt-5.6-sol",
+                  reasoningEffort: "high",
+                });
+              }
+
+              phaseObserved[assistantPhaseCalls - 1]?.resolve();
+              return assistantPhaseCalls < 5
+                ? {
+                    checkpointReason: "assistant_runtime_commit" as const,
+                    nextWakeAt: null,
+                    nextWakeReason: null,
+                    progressed: true,
+                    redactedStatus: { hostedAssistantProgressed: true },
+                  }
+                : {
+                    progressed: false,
+                    redactedStatus: { hostedAssistantProgressed: false },
+                  };
+            },
+            vaultRoot,
+          },
+        ),
+        15_000,
+        () => events.join(","),
+      );
+
+      await withRealTimeout(phaseObserved[0]!.promise, 15_000, () => events.join(","));
+      for (let nextPhase = 2; nextPhase <= 5; nextPhase += 1) {
+        await waitForFakeTimerScheduled(() => events.join(","));
+        assert.equal(checkpointRequests.length, 0);
+        mailboxItems.push(createMailboxItem({
+          id: `mailbox_item_assistant_target_refresh_${nextPhase}`,
+          laneSeq: String(nextPhase - 1),
+          occurredAt: `2026-04-27T00:00:0${nextPhase - 1}.000Z`,
+        }));
+        runtimeWakeSignal.notify(Date.parse(TEST_NOW) + nextPhase - 1);
+        await withRealTimeout(
+          phaseObserved[nextPhase - 1]!.promise,
+          15_000,
+          () => events.join(","),
+        );
+      }
+
+      assert.deepEqual(observedTargets, [
+        {
+          forwardedEffort: "low",
+          forwardedModel: "gpt-5.6-terra",
+          runtimeEffort: "low",
+          runtimeModel: "gpt-5.6-terra",
+        },
+        {
+          forwardedEffort: "high",
+          forwardedModel: "gpt-5.6-sol",
+          runtimeEffort: "high",
+          runtimeModel: "gpt-5.6-sol",
+        },
+        {
+          forwardedEffort: "high",
+          forwardedModel: "gpt-5.6-sol",
+          runtimeEffort: "high",
+          runtimeModel: "gpt-5.6-sol",
+        },
+        {
+          forwardedEffort: "low",
+          forwardedModel: "gpt-5.6-terra",
+          runtimeEffort: "low",
+          runtimeModel: "gpt-5.6-terra",
+        },
+        {
+          forwardedEffort: "high",
+          forwardedModel: "gpt-5.6-sol",
+          runtimeEffort: "high",
+          runtimeModel: "gpt-5.6-sol",
+        },
+      ]);
+      assert.deepEqual(configurationRequests.map((request) => request.action), [
+        "update",
+        "read",
+        "update",
+        "update",
+        "update",
+        "update",
+      ]);
+      assert.equal(configurationResponses.length, 0);
+      assert.equal(checkpointRequests.length, 0);
+
+      await vi.advanceTimersByTimeAsync(idleCheckpointDelayMs);
+      const result = await resultPromise;
+      assert.equal(result.status, "idle");
+      assert.equal(checkpointRequests.length, 1);
+      expect(mocks.runHostedIdleCheckpointMaintenance).toHaveBeenCalledOnce();
+      // Idle maintenance can still check runtime configuration, while usage
+      // attribution comes from the model actually bound to the warm thread.
+      expect(mocks.runHostedIdleCheckpointMaintenance).toHaveBeenCalledWith(
+        expect.objectContaining({
+          model: "gpt-5.6-sol",
+        }),
+      );
     } finally {
       vi.useRealTimers();
       await removeTempRoot(vaultRoot);
@@ -23968,6 +24318,7 @@ request.end(JSON.stringify({
 `;
 
 function createPlatform(input: {
+  assistantConfigurationToolPort?: HostedRuntimePlatform["assistantConfigurationToolPort"] | null;
   artifactBytesByHash?: ReadonlyMap<string, Uint8Array>;
   artifactGetCalls?: string[];
   artifactLabelsByHash?: ReadonlyMap<string, string>;
@@ -23988,6 +24339,9 @@ function createPlatform(input: {
 }): HostedRuntimePlatform {
   const uploadedArtifactBytesByHash = new Map<string, Uint8Array>();
   return {
+    ...(input.assistantConfigurationToolPort
+      ? { assistantConfigurationToolPort: input.assistantConfigurationToolPort }
+      : {}),
     artifactStore: {
       async get(sha256) {
         return await measureStage(input.stageSamples, "artifact.get", async () => {

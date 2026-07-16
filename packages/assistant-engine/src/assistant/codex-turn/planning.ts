@@ -26,6 +26,7 @@ import {
   type AssistantHostedDeviceConnectProvider,
 } from '../execution-context.js'
 import {
+  readCodexThreadCompatibilityFingerprint,
   readCodexThreadRouteFingerprint,
   type CodexThreadIdentity,
 } from '../codex-thread-route.js'
@@ -650,16 +651,28 @@ export async function resolveAssistantRouteTurnPlan(input: {
   const assistantContractFingerprint = buildAssistantCodexContractFingerprint({
     developerInstructions: threadStartDeveloperInstructions,
     dynamicTools,
-    routeFingerprint,
+    routeFingerprint: readCodexThreadCompatibilityFingerprint(input.route),
   })
+  const storedAssistantContractFingerprint = normalizeNullableString(
+    resumeBinding?.assistantContractFingerprint,
+  )
+  const assistantContractMatches =
+    storedAssistantContractFingerprint === assistantContractFingerprint ||
+    (
+      resumeBinding !== null &&
+      storedAssistantContractFingerprint === buildAssistantCodexContractFingerprint({
+        developerInstructions: threadStartDeveloperInstructions,
+        dynamicTools,
+        routeFingerprint: resumeBinding.routeFingerprint,
+      })
+    )
   const nativeResumeEnabled =
     input.profile.threadScope === 'session-thread'
   const candidateResumeCodexThreadId =
     nativeResumeEnabled &&
     routeProviderCapabilities.supportsNativeResume &&
     resumeBinding !== null &&
-    normalizeNullableString(resumeBinding.assistantContractFingerprint) ===
-      assistantContractFingerprint
+    assistantContractMatches
       ? resolveAssistantEffectiveCodexResumeThreadId({
           resumeCodexThreadId: resolveAssistantCodexResumeThreadId({
             resumeState: resumeBinding,

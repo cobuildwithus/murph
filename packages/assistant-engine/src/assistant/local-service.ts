@@ -63,6 +63,9 @@ import {
   resolveAssistantProviderResumeStateAction,
 } from './turn-finalizer.js'
 import {
+  bindAssistantResumeStateToThreadCompatibility,
+} from './codex-resume-binding.js'
+import {
   readAssistantCodexResume,
 } from './conversation-persistence.js'
 import {
@@ -86,7 +89,11 @@ import {
   executeCodexTurnWithRecovery,
   resolveAssistantCodexThreadScope,
 } from './codex-turn-runner.js'
-import { readCodexThreadRouteFingerprint } from './codex-thread-route.js'
+import {
+  readCodexThreadCompatibilityFingerprint,
+  readCodexThreadRouteFingerprint,
+} from './codex-thread-route.js'
+import { resolveAssistantExecutionPlan } from './execution-plan.js'
 import {
   normalizeAssistantAskResultForReturn,
   serializeAssistantSessionForResult,
@@ -1251,6 +1258,8 @@ export async function sendAssistantMessageLocal(
             codexThreadId: providerOutcome.codexThreadId,
             routeFingerprint:
               readCodexThreadRouteFingerprint(providerOutcome.route),
+            threadCompatibilityFingerprint:
+              readCodexThreadCompatibilityFingerprint(providerOutcome.route),
             session: currentSession,
             vault: input.vault,
           })
@@ -1985,7 +1994,13 @@ export async function updateAssistantSessionOptionsLocal(input: {
   const continuityChanged =
     session.session.providerOptions.continuityFingerprint !==
     nextProviderOptions.continuityFingerprint
-  const currentResumeState = readAssistantCodexResume(session.session)
+  const currentResumeState = bindAssistantResumeStateToThreadCompatibility({
+    resumeState: readAssistantCodexResume(session.session),
+    route: resolveAssistantExecutionPlan({
+      defaults: null,
+      sessionTarget: session.session.target,
+    }).codexRoute,
+  })
 
   return saveAssistantSession(input.vault, {
     ...session.session,
