@@ -21,37 +21,57 @@ describe('Codex lifecycle facade', () => {
   })
 
   it('stops without loading or registering the Codex implementation', async () => {
-    const { stopWarmCodexAppServer } = await import('../src/codex-lifecycle.ts')
+    const {
+      stopWarmCodexAppServer,
+      waitForWarmCodexBackgroundWork,
+    } = await import('../src/codex-lifecycle.ts')
 
     await expect(stopWarmCodexAppServer('cli-exit')).resolves.toBeUndefined()
+    await expect(waitForWarmCodexBackgroundWork()).resolves.toBeUndefined()
   })
 
-  it('delegates shutdown after an implementation registers', async () => {
+  it('delegates lifecycle boundaries after implementations register', async () => {
     const {
       registerStopWarmCodexAppServer,
+      registerWaitForWarmCodexBackgroundWork,
       stopWarmCodexAppServer,
+      waitForWarmCodexBackgroundWork,
     } = await import('../src/codex-lifecycle.ts')
     const stopImplementation = vi.fn(async () => undefined)
+    const waitImplementation = vi.fn(async () => undefined)
+    const abortController = new AbortController()
 
     registerStopWarmCodexAppServer(stopImplementation)
+    registerWaitForWarmCodexBackgroundWork(waitImplementation)
     await stopWarmCodexAppServer('cli-exit')
     await stopWarmCodexAppServer()
+    await waitForWarmCodexBackgroundWork({ signal: abortController.signal })
 
     expect(stopImplementation.mock.calls).toEqual([
       ['cli-exit'],
       ['external-stop'],
     ])
+    expect(waitImplementation).toHaveBeenCalledExactlyOnceWith({
+      signal: abortController.signal,
+    })
   })
 
   it('registers the existing implementation when assistant Codex loads', async () => {
     const registerStopWarmCodexAppServer = vi.fn()
+    const registerWaitForWarmCodexBackgroundWork = vi.fn()
     vi.doMock('../src/codex-lifecycle.ts', () => ({
       registerStopWarmCodexAppServer,
+      registerWaitForWarmCodexBackgroundWork,
     }))
 
-    const { stopWarmCodexAppServer } = await import('../src/assistant-codex.ts')
+    const {
+      stopWarmCodexAppServer,
+      waitForWarmCodexBackgroundWork,
+    } = await import('../src/assistant-codex.ts')
 
     expect(registerStopWarmCodexAppServer)
       .toHaveBeenCalledExactlyOnceWith(stopWarmCodexAppServer)
+    expect(registerWaitForWarmCodexBackgroundWork)
+      .toHaveBeenCalledExactlyOnceWith(waitForWarmCodexBackgroundWork)
   })
 })

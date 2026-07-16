@@ -864,6 +864,84 @@ describe("executeHostedMailboxEvent", () => {
     }
   });
 
+  it("captures local Codex turn-completion boundaries without raw provider metadata", () => {
+    const wake = buildHostedExecutionAssistantNotificationRequestedWake({
+      eventId: "evt_codex_turn_completion_timing",
+      memberId: "member_123",
+      notification: {
+        instructions: "Reply in chat.",
+        route: {
+          actorId: "actor_codex_turn_completion_timing",
+          channel: "linq",
+          delivery: {
+            kind: "thread",
+            target: "thread_123",
+          },
+          identityId: "hbidx:phone:v1:test",
+          threadId: "thread_123",
+          threadIsDirect: true,
+        },
+      },
+      occurredAt: "2026-07-16T00:00:00.000Z",
+    });
+    const completionBoundaries = {
+      codexTimingProviderRequestOrdinal: 2,
+      codexTimingTurnStartAckElapsedMs: 14,
+      codexTimingTurnStartedNotificationElapsedMs: 16,
+      codexTimingTurnCompletedNotificationElapsedMs: 5_610,
+      codexTimingTurnCompleteElapsedMs: 5_622,
+    } as const;
+
+    const entry = emitHostedAssistantProviderTraceLog({
+      details: { requestId: "req_123" },
+      event: {
+        rawEvent: {
+          schema: "murph.assistant-codex-app-server-timing.v1",
+          type: "assistant.codex.app_server_timing",
+          codexTimingStage: "turn-completed",
+          ...completionBoundaries,
+          rawTurnId: "raw-turn-id",
+          rawProviderUrl: "https://api.openai.com/v1/responses",
+        },
+      },
+      wake,
+    });
+
+    expect(entry?.redacted).toEqual(expect.objectContaining({
+      codexTimingProviderRequestOrdinal: 2,
+      codexTimingTurnCompleteElapsedMs: 5_622,
+      codexTimingTurnCompletedNotificationElapsedMs: 5_610,
+      codexTimingTurnStartAckElapsedMs: 14,
+      codexTimingTurnStartedNotificationElapsedMs: 16,
+      codexTimingTraceType: "app-server",
+      providerTraceKind: "codex.app_server_timing",
+    }));
+    expect(JSON.stringify(entry?.redacted)).not.toContain("raw-turn-id");
+    expect(JSON.stringify(entry?.redacted)).not.toContain("api.openai.com");
+
+    const nonCompletionEntry = emitHostedAssistantProviderTraceLog({
+      details: { requestId: "req_123" },
+      event: {
+        rawEvent: {
+          schema: "murph.assistant-codex-app-server-timing.v1",
+          type: "assistant.codex.app_server_timing",
+          codexTimingStage: "turn-started",
+          ...completionBoundaries,
+        },
+      },
+      wake,
+    });
+
+    expect(nonCompletionEntry?.redacted).toEqual(expect.objectContaining({
+      codexTimingStage: "turn-started",
+      codexTimingTraceType: "app-server",
+      providerTraceKind: "codex.app_server_timing",
+    }));
+    for (const key of Object.keys(completionBoundaries)) {
+      expect(nonCompletionEntry?.redacted).not.toHaveProperty(key);
+    }
+  });
+
   it("captures hosted Codex action diagnostics without raw payloads", () => {
     const wake = buildHostedExecutionAssistantNotificationRequestedWake({
       eventId: "evt_codex_action_diagnostics",
@@ -1524,6 +1602,48 @@ describe("executeHostedMailboxEvent", () => {
       vault: "/tmp/assistant-runtime-events",
     });
     const seedInput = mocks.upsertAssistantCronAutomation.mock.calls.at(0)?.[0];
+    const scheduledContinuationScenarios = [
+      {
+        clause: "If `onboarding.status` is `completed`, return skip.",
+        state: "completed",
+      },
+      {
+        clause:
+          "If the onboarding skill says the visible and saved evidence satisfies answered completion, or shows an overall decline, run its required completion command.",
+        state: "overall decline",
+      },
+      {
+        clause:
+          "If that step is only a reflection or parking transition, combine it with the next skill-approved question when the skill permits; otherwise return skip.",
+        state: "reflection-only next step",
+      },
+      {
+        clause:
+          "If the latest onboarding question is unanswered, do not rotate to another setup question or repeat it through this daily automation; return skip.",
+        state: "latest question unanswered",
+      },
+      {
+        clause:
+          "Before sending, triple-check the snapshot and recent messages for an answer, skip, defer, or decline. Do not re-ask known or resolved context.",
+        state: "checkpoint answered or category skipped",
+      },
+      {
+        clause:
+          "Honor requested timing, and return skip whenever there is no timely, useful onboarding continuation.",
+        state: "deferred until later",
+      },
+      {
+        clause:
+          "Every user-facing scheduled continuation must include exactly one easy, reply-oriented question; otherwise return skip.",
+        state: "eligible continuation",
+      },
+    ] as const;
+    for (const scenario of scheduledContinuationScenarios) {
+      expect(
+        seedInput?.instructions,
+        `scheduled onboarding state: ${scenario.state}`,
+      ).toContain(scenario.clause);
+    }
     expect(seedInput?.instructions).toContain(
       "The managed-automation owner archives this follow-up deterministically.",
     );
@@ -1531,15 +1651,11 @@ describe("executeHostedMailboxEvent", () => {
       "Goal: advance Murph onboarding through an anchored health aspiration, a finite health-context foundation, and a contextual return without turning it into a drip questionnaire or unsolicited plan.",
     );
     expect(seedInput?.instructions).toContain("Success criteria:");
-    expect(seedInput?.instructions).toContain("If `onboarding.status` is `completed`");
     expect(seedInput?.instructions).toContain(
       "$MURPH_ASSISTANT_SKILLS_ROOT/murph-onboarding/SKILL.md",
     );
     expect(seedInput?.instructions).toContain(
       "The skill is the single owner of conversation order, checkpoint meaning, persistence, and completion; do not create a second state machine in this automation.",
-    );
-    expect(seedInput?.instructions).toContain(
-      "If the onboarding skill says the visible and saved evidence satisfies answered completion, or shows an overall decline, run its required completion command.",
     );
     expect(seedInput?.instructions).toContain(
       "Whether completion succeeds or fails, return skip without messaging",
@@ -1551,25 +1667,13 @@ describe("executeHostedMailboxEvent", () => {
       "Otherwise use exactly the next unresolved step from the onboarding skill, including aspiration capture, explicit parking, foundation questions, contextual return, and its targeted-read rules for omitted, truncated, or errored evidence.",
     );
     expect(seedInput?.instructions).toContain(
-      "If that step is only a reflection or parking transition, combine it with the next skill-approved question when the skill permits; otherwise return skip.",
-    );
-    expect(seedInput?.instructions).toContain(
       "This automation never owns a promised check-in, reminder, or proactive support action.",
     );
     expect(seedInput?.instructions).toContain(
       "Those use the canonical plan and dedicated automation required by `behavior-followthrough`, which owns timing, due evaluation, delivery, retry, and skip behavior.",
     );
     expect(seedInput?.instructions).toContain(
-      "If the latest onboarding question is unanswered, do not rotate to another setup question or repeat it through this daily automation; return skip.",
-    );
-    expect(seedInput?.instructions).toContain(
-      "Honor requested timing, and return skip whenever there is no timely, useful onboarding continuation.",
-    );
-    expect(seedInput?.instructions).toContain(
       "Output: send one brief, natural, low-pressure in-chat continuation only when it advances unfinished onboarding.",
-    );
-    expect(seedInput?.instructions).toContain(
-      "Every user-facing scheduled continuation must include exactly one easy, reply-oriented question; otherwise return skip.",
     );
     expect(seedInput?.instructions).toContain(
       "The user's reply will be handled by the next normal Murph onboarding turn",

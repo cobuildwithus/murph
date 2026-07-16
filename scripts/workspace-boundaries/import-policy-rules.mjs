@@ -819,6 +819,7 @@ function isAllowedCloudflareAssistantEngineOwnerImport({
     && specifier === "@murphai/assistant-engine/codex-lifecycle"
     && importsOnlyNamedBindingsFromSpecifier(source, specifier, [
       "stopWarmCodexAppServer",
+      "waitForWarmCodexBackgroundWork",
     ])
   );
 }

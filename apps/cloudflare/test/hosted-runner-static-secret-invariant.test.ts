@@ -44,7 +44,6 @@ const REASONABLY_AVAILABLE_HOSTED_SECRET_KEYS = [
   "LINQ_API_TOKEN",
   "MAPBOX_ACCESS_TOKEN",
   "MURPH_DATA_API_KEY",
-  "MURPH_HOSTED_CLI_BRIDGE_TOKEN",
   "HOSTED_CRYPTO_CLOUDFLARE_AUTOMATION_PRIVATE_JWK",
   "HOSTED_CRYPTO_CLOUDFLARE_AUTOMATION_PRIVATE_KEYRING_JSON",
   "HOSTED_WEB_CALLBACK_SIGNING_PRIVATE_JWK",
@@ -145,9 +144,6 @@ it("guards hosted runner job JSON and direct invocation surfaces against unrevie
   expect([...TEMPORARY_REVIEWED_HOSTED_SECRET_KEYS].sort()).toEqual(
     [...REASONABLY_AVAILABLE_HOSTED_SECRET_KEYS].sort(),
   );
-  expect([...TEMPORARY_HOSTED_JOB_SECRET_PATH_ALLOWLIST].join("\n")).not.toContain(
-    "MURPH_HOSTED_CLI_BRIDGE_TOKEN",
-  );
   const configSource = createReasonablyAvailableHostedConfigSource();
   const runnerSecrets = createReasonablyAvailableRunnerSecrets();
   const seedKeys = new Set([
@@ -205,11 +201,6 @@ it("guards hosted runner job JSON and direct invocation surfaces against unrevie
   for (const [surface, value] of Object.entries(scannedSurfaces)) {
     assertNoUnreviewedStaticSecretKeys(surface, value);
   }
-
-  for (const [surface, value] of Object.entries(scannedSurfaces)) {
-    expect(collectExactKeyPaths(value, "MURPH_HOSTED_CLI_BRIDGE_TOKEN")).toEqual([]);
-    expect(surface.length).toBeGreaterThan(0);
-  }
 });
 
 function createReasonablyAvailableHostedConfigSource(): Record<string, string> {
@@ -241,7 +232,6 @@ function createReasonablyAvailableHostedConfigSource(): Record<string, string> {
     LINQ_API_TOKEN: "fixture-linq-token",
     MAPBOX_ACCESS_TOKEN: "fixture-mapbox-token",
     MURPH_DATA_API_KEY: "fixture-data-api-key",
-    MURPH_HOSTED_CLI_BRIDGE_TOKEN: "fixture-runtime-bridge-token",
     NODE_ENV: "production",
     OURA_CLIENT_ID: "fixture-oura-client-id",
     OURA_CLIENT_SECRET: "fixture-oura-client-secret",
@@ -409,38 +399,6 @@ function isTemporarilyAllowlistedHostedSecretKey(
 ): boolean {
   void key;
   return TEMPORARY_HOSTED_JOB_SECRET_PATH_ALLOWLIST.has(path);
-}
-
-function collectExactKeyPaths(value: unknown, targetKey: string): string[] {
-  const paths: string[] = [];
-  collectExactKeyPathFindings(value, targetKey, "", paths);
-  return paths;
-}
-
-function collectExactKeyPathFindings(
-  value: unknown,
-  targetKey: string,
-  path: string,
-  paths: string[],
-): void {
-  if (Array.isArray(value)) {
-    value.forEach((entry, index) => {
-      collectExactKeyPathFindings(entry, targetKey, `${path}[${index}]`, paths);
-    });
-    return;
-  }
-
-  if (!isRecord(value)) {
-    return;
-  }
-
-  for (const [key, nested] of Object.entries(value)) {
-    const keyPath = path.length === 0 ? key : `${path}.${key}`;
-    if (key === targetKey) {
-      paths.push(keyPath);
-    }
-    collectExactKeyPathFindings(nested, targetKey, keyPath, paths);
-  }
 }
 
 function normalizeSecretKey(key: string): string {

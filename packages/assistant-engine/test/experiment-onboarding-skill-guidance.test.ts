@@ -238,7 +238,10 @@ describe('experiment onboarding skill guidance', () => {
 
     expect(raw).toContain('### 3. Capture the reason')
     expect(raw).toContain(
-      "For a new goal or behavior, get the user's reason in their own words by default.",
+      "For a new goal or behavior, get the user's reason in their own words.",
+    )
+    expect(raw).toContain(
+      'already clear from visible or saved user evidence, use it without asking.',
     )
     expect(raw).toContain(
       'The reason shapes the plan, the support style, and later reminders; save it into the loop.',
@@ -319,15 +322,15 @@ describe('experiment onboarding skill guidance', () => {
     expect(raw).toContain(
       'Device sensing changes what happens after a session, not before it.',
     )
-    expect(raw).toContain('--trigger-kind deviceActivity')
+    expect(raw).toContain('`schedule: { "kind": "deviceActivity", "after": "<current ISO timestamp>", "activityKind": "<activity-kind>" }`')
     expect(raw).toContain(
-      'If `progress.adherence.evidence.activityKind` is present, pass `--activity-kind <progress.adherence.evidence.activityKind>`',
+      'Use `progress.adherence.evidence.activityKind` when present',
     )
     expect(raw).toContain(
-      'If it is absent for a generic any-activity target, pass `--activity-kind activity`',
+      'for a generic any-activity target use `activity`',
     )
-    expect(raw).toContain('the deviceActivity scanner treats `activity` as any workout session')
-    expect(raw).toContain('Do not pass `--device-source`')
+    expect(raw).toContain('which the deviceActivity scanner treats as any workout session')
+    expect(raw).toContain('Omit `source`; the trigger is provider-agnostic')
     expect(raw).toContain('experiment-activity-nudge-<experiment-slug>')
     expect(raw).toContain('activity_nudge_automation_slug')
     expect(raw).toContain(

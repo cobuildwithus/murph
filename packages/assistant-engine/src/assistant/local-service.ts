@@ -701,12 +701,14 @@ export async function sendAssistantMessageLocal(
         const hostedToolContext = hostedExecutionContext
           ? createAssistantHostedToolContext({
               actionApprovalPort,
+              automationTool: hostedExecutionContext.automationTool ?? null,
               assistantConfigurationTool:
                 hostedExecutionContext.assistantConfigurationTool ?? null,
               connectedApps: hostedExecutionContext.connectedApps ?? null,
               computerToolsAvailable: hostedComputerToolsAvailable,
               beforeToolExecution: () => beforeHostedToolExecution(),
               familyPlanTool: hostedExecutionContext.familyPlanTool ?? null,
+              deviceTool: hostedExecutionContext.deviceTool ?? null,
               groupTool: hostedExecutionContext.groupTool ?? null,
               newsletterTool: hostedExecutionContext.newsletterTool ?? null,
               personalizationTool: hostedExecutionContext.personalizationTool ?? null,

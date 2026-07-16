@@ -67,7 +67,6 @@ vi.mock("@/src/lib/hosted-orchestration/runtime-usage-decision", () => ({
 }));
 
 import {
-  prepareHostedMailboxAppendRuntimeSignal,
   signalHostedBrowserVaultRefreshRuntime,
   signalHostedDeviceSyncMailboxRuntime,
   signalHostedMailboxAppendRuntime,
@@ -198,7 +197,7 @@ describe("hosted runtime Temporal signaling", () => {
     );
   });
 
-  it("prepares planner lane facts for participant-authorized thread containers without signaling", async () => {
+  it("signals planner lane facts for participant-authorized thread containers", async () => {
     mocks.hostedMemberFindUnique.mockResolvedValue(buildActiveMemberRecord({
       billingStatus: "canceled",
       threadContainer: {
@@ -213,7 +212,8 @@ describe("hosted runtime Temporal signaling", () => {
       participantMemberId: "member_active_participant",
     });
 
-    await expect(prepareHostedMailboxAppendRuntimeSignal({
+    await expect(signalHostedMailboxAppendRuntime({
+      client: buildClient(),
       expectedUserId: "member_123",
       knownCheckpoint: {
         lane: "conversation",
@@ -222,21 +222,27 @@ describe("hosted runtime Temporal signaling", () => {
       },
       mailboxItemId: "mailbox_123",
     })).resolves.toEqual({
-      signal: {
-        kind: "mailbox_appended",
-        lane: "conversation",
-        laneSeq: "42",
-        mailboxItemId: "mailbox_123",
-      },
-      userId: "member_123",
+      signalAccepted: true,
+      workflowId: "hosted-user-runtime:member_123",
     });
 
     expectHostedRuntimeActiveAccessRead(mocks.hostedMemberFindUnique, "member_123");
     expect(mocks.hostedThreadContainerParticipantFindFirst).toHaveBeenCalledTimes(1);
-    expect(mocks.signalWithStart).not.toHaveBeenCalled();
+    expect(mocks.signalWithStart).toHaveBeenCalledWith(
+      HOSTED_USER_RUNTIME_WORKFLOW_TYPE,
+      expect.objectContaining({
+        signalArgs: [{
+          kind: "mailbox_appended",
+          lane: "conversation",
+          laneSeq: "42",
+          mailboxItemId: "mailbox_123",
+        }],
+        workflowId: "hosted-user-runtime:member_123",
+      }),
+    );
   });
 
-  it("does not prepare planner lane facts without active owner or participant access", async () => {
+  it("does not signal planner lane facts without active owner or participant access", async () => {
     mocks.hostedMemberFindUnique.mockResolvedValue(buildActiveMemberRecord({
       billingStatus: "canceled",
       threadContainer: {
@@ -248,7 +254,8 @@ describe("hosted runtime Temporal signaling", () => {
       },
     }));
 
-    await expect(prepareHostedMailboxAppendRuntimeSignal({
+    await expect(signalHostedMailboxAppendRuntime({
+      client: buildClient(),
       expectedUserId: "member_123",
       knownCheckpoint: {
         lane: "conversation",

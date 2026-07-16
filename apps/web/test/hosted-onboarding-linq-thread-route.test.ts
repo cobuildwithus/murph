@@ -138,26 +138,11 @@ vi.mock("../src/lib/hosted-orchestration/signal-runtime", async (importOriginal)
   const actual = await importOriginal<typeof import("../src/lib/hosted-orchestration/signal-runtime")>();
   return {
     ...actual,
-    prepareHostedMailboxAppendRuntimeSignal: vi.fn(async (
-      input: Parameters<typeof actual.prepareHostedMailboxAppendRuntimeSignal>[0],
-    ) => ({
-      signal: {
-        kind: "mailbox_appended" as const,
-        lane: input.knownCheckpoint.lane,
-        laneSeq: input.knownCheckpoint.laneSeq,
-        mailboxItemId: input.mailboxItemId,
-      },
-      userId: input.knownCheckpoint.userId,
-    })),
     signalHostedMailboxAppendRuntime: vi.fn().mockResolvedValue({
       signalAccepted: true,
       workflowId: "workflow_group_123",
     }),
     signalHostedRuntimeMaintenanceRuntime: vi.fn(),
-    signalHostedUserRuntimeWorkflow: vi.fn().mockResolvedValue({
-      signalAccepted: true,
-      workflowId: "workflow_group_123",
-    }),
   };
 });
 
@@ -2982,7 +2967,8 @@ describe("Linq group chat auto-provision", () => {
         removedAt: null,
       },
     });
-    expect(signalRuntime.prepareHostedMailboxAppendRuntimeSignal).toHaveBeenCalledWith({
+    expect(signalRuntime.signalHostedMailboxAppendRuntime).toHaveBeenCalledWith({
+      abortSignal: expect.any(AbortSignal),
       expectedUserId: containerCreate.data.memberId,
       knownCheckpoint: {
         lane: "conversation",
@@ -2990,17 +2976,6 @@ describe("Linq group chat auto-provision", () => {
         userId: containerCreate.data.memberId,
       },
       mailboxItemId: "mailbox_group_123",
-    });
-    expect(signalRuntime.signalHostedUserRuntimeWorkflow).toHaveBeenCalledWith({
-      abortSignal: expect.any(AbortSignal),
-      ensureWorkspace: false,
-      signal: {
-        kind: "mailbox_appended",
-        lane: "conversation",
-        laneSeq: "1",
-        mailboxItemId: "mailbox_group_123",
-      },
-      userId: containerCreate.data.memberId,
     });
   });
 
@@ -3042,7 +3017,8 @@ describe("Linq group chat auto-provision", () => {
         reason: "wake-appended-thread-route",
       });
       expect(prisma.hostedThreadContainerParticipant.upsert).not.toHaveBeenCalled();
-      expect(signalRuntime.prepareHostedMailboxAppendRuntimeSignal).toHaveBeenCalledWith({
+      expect(signalRuntime.signalHostedMailboxAppendRuntime).toHaveBeenCalledWith({
+        abortSignal: expect.any(AbortSignal),
         expectedUserId: containerCreate.data.memberId,
         knownCheckpoint: {
           lane: "conversation",
@@ -3050,17 +3026,6 @@ describe("Linq group chat auto-provision", () => {
           userId: containerCreate.data.memberId,
         },
         mailboxItemId: "mailbox_group_123",
-      });
-      expect(signalRuntime.signalHostedUserRuntimeWorkflow).toHaveBeenCalledWith({
-        abortSignal: expect.any(AbortSignal),
-        ensureWorkspace: false,
-        signal: {
-          kind: "mailbox_appended",
-          lane: "conversation",
-          laneSeq: "1",
-          mailboxItemId: "mailbox_group_123",
-        },
-        userId: containerCreate.data.memberId,
       });
       expect(warn).toHaveBeenCalledWith(
         "Hosted thread-container participant reconcile skipped.",

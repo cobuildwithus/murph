@@ -6,7 +6,7 @@ import {
 } from "@murphai/device-syncd/config";
 import {
   HOSTED_RUNTIME_CODEX_MODEL_CATALOG_JSON_ENV,
-} from "@murphai/hosted-execution/cli-runtime-bridge";
+} from "@murphai/hosted-execution/env";
 import {
   HOSTED_ASSISTANT_FORWARDED_CONFIG_ENV_NAMES,
   HOSTED_ASSISTANT_WORKER_SECRET_ENV_NAMES,

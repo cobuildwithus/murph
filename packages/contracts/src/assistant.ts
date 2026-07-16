@@ -1,6 +1,6 @@
 export const MURPH_ASSISTANT_SIGNUP_WELCOME_MESSAGE = `Hey, I'm Murph, your private personal health assistant.
 
-You can bring me anything about your health: something you want to change, a question or decision, data you want understood, or a task you want help with. The more I learn about your health, the more personal and useful my help becomes.
+I'm here to help across your health—to understand what's happening, build healthier habits, and make progress toward outcomes you genuinely care about. You can also bring me questions, decisions, data, or tasks. The more I learn about you, the better my help can fit.
 
 Ready to get started?`;
 

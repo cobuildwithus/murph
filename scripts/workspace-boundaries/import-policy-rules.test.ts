@@ -251,7 +251,7 @@ import /* keep */ {
     expect(failure).toContain("explicit hosted invocation capabilities");
   });
 
-  it("allows Cloudflare to import the Codex lifecycle stop hook from the assistant-engine owner", () => {
+  it("allows Cloudflare to import the Codex boundary hooks from the assistant-engine owner", () => {
     const filePath = path.join(repoRoot, "apps/cloudflare/src/container-entrypoint.ts");
     const failure = verifyWorkspaceImportPolicy({
       filePath,
@@ -259,6 +259,7 @@ import /* keep */ {
 import path from "node:path";
 import {
   stopWarmCodexAppServer,
+  waitForWarmCodexBackgroundWork,
 } from "@murphai/assistant-engine/codex-lifecycle";
       `,
       sourceMember: "apps/cloudflare",
