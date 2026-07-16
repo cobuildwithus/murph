@@ -108,7 +108,7 @@ describe("maybeHandoffHostedExecutionWebhookWake direct ensure fast path", () =>
     });
   });
 
-  it("starts neither wake while preparation is pending, then overlaps direct and Temporal wakes", async () => {
+  it("lets direct ensure finish before delayed Temporal acceptance after preparation", async () => {
     const afterResponseTasks: Array<() => Promise<void>> = [];
     const wakeOrder: string[] = [];
     let resolvePreparation!: (value: typeof preparedMailboxSignal) => void;
@@ -178,6 +178,14 @@ describe("maybeHandoffHostedExecutionWebhookWake direct ensure fast path", () =>
     expect(handoffSettled).toBe(false);
     expect(wakeOrder).toEqual(["temporal", "direct"]);
 
+    // Recreate the ordering that exposed the historical duplicate-reply
+    // window: direct processing may finish while Temporal acceptance is still
+    // pending. The durable signal must remain mandatory, but it must not hold
+    // the latency-only direct request behind it.
+    await Promise.all(afterResponseTasks.map((task) => task()));
+    expect(mocks.recordHostedIngressDirectEnsureTiming).toHaveBeenCalledTimes(1);
+    expect(handoffSettled).toBe(false);
+
     resolveTemporalSignal({
       signalAccepted: true,
       workflowId: "hosted-user-runtime:member_123",
@@ -210,7 +218,6 @@ describe("maybeHandoffHostedExecutionWebhookWake direct ensure fast path", () =>
       signal: preparedMailboxSignal.signal,
       userId: "member_123",
     });
-    await Promise.all(afterResponseTasks.map((task) => task()));
     expect(mocks.recordHostedIngressDirectEnsureTiming).toHaveBeenCalledWith({
       expectedUserId: "member_123",
       mailboxItemId: "mailbox_123",
