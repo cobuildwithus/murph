@@ -1,9 +1,13 @@
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
 
+import { listHostedRuntimeLogsForTest } from "#hosted-web-testing";
+
 import {
   startHostedLocalLinqEgressScenario,
   type HostedLocalEgressScenario,
 } from "./helpers/hosted-local-egress-scenario.js";
+
+const runtimeLogLimit = 2_000;
 
 let egress: HostedLocalEgressScenario | null = null;
 
@@ -34,11 +38,30 @@ describe("hosted local warm-reuse egress e2e", () => {
       expectedReplyText: "First warm-reuse turn completed.",
       text: "This is the first warm-reuse egress turn.",
     });
+    const secondTurnStartedAt = new Date().toISOString();
+
     await harness.sendInboundTurn({
       eventSuffix: "warm_reuse_second",
       expectedReplyText: "Second warm-reuse turn completed.",
       text: "This is the second warm-reuse egress turn.",
     });
+    const runtimeLogsAfterSecondTurn = await listHostedRuntimeLogsForTest({
+      environment: harness.scenario.runtimeEnv,
+      limit: runtimeLogLimit,
+      userId: harness.userId,
+    });
+    expect(runtimeLogsAfterSecondTurn.length).toBeLessThan(runtimeLogLimit);
+    const secondTurnTimingLogs = runtimeLogsAfterSecondTurn
+      .filter((entry) =>
+        entry.at > secondTurnStartedAt
+        && entry.eventCode === "assistant.automation_detail"
+        && entry.redactedJson?.providerTraceKind === "codex.app_server_timing"
+      );
+    expect(secondTurnTimingLogs.map((entry) => entry.redactedJson?.codexTimingStage))
+      .toContain("warm-reused");
+    expect(secondTurnTimingLogs.map((entry) =>
+      entry.redactedJson?.codexTimingColdStartReason
+    )).not.toContain("previous-launch-identity-change");
 
     expect(harness.countProviderRequests("/v1/responses")).toBeGreaterThanOrEqual(
       baselineResponses + 2,

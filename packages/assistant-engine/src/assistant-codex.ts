@@ -2796,6 +2796,10 @@ async function runCodexAppServerTurnOnProcess(
   let lastTimingAt = Date.now()
   const codexAppServerTurnStartedAt = lastTimingAt
   const codexAppServerProviderStartTiming: AssistantProviderRequestStartTiming = {}
+  let codexProviderRequestStartedAtMs: number | null = null
+  let codexTimingTurnStartAckElapsedMs: number | null = null
+  let codexTimingTurnStartedNotificationElapsedMs: number | null = null
+  let codexTimingTurnCompletedNotificationElapsedMs: number | null = null
   let liveInterruptRequested = false
 
   let completeTurn: (() => void) | null = null
@@ -3007,6 +3011,34 @@ async function runCodexAppServerTurnOnProcess(
           codexTimingStage: stage,
           codexTimingTotalElapsedMs: codexProcess.processLifetimeMs,
           codexTimingTurnIdPresent: turnId !== null,
+          ...(stage === 'turn-completed' && codexProviderRequestStartedAtMs !== null
+            ? {
+                // Every cumulative field below is measured from the local
+                // turn/start request write. These are App Server/runtime
+                // boundaries, not upstream provider request or SSE timing.
+                ...(typeof input.providerRequestOrdinal === 'number'
+                  ? { codexTimingProviderRequestOrdinal: input.providerRequestOrdinal }
+                  : {}),
+                // This ends when the completion trace is emitted after local
+                // dynamic-tool/progress drains. The outer provider-result
+                // boundary is recorded separately by assistant.turn.timing.
+                codexTimingTurnCompleteElapsedMs: Math.max(
+                  0,
+                  now - codexProviderRequestStartedAtMs,
+                ),
+                ...(codexTimingTurnStartAckElapsedMs === null
+                  ? {}
+                  : { codexTimingTurnStartAckElapsedMs }),
+                ...(codexTimingTurnStartedNotificationElapsedMs === null
+                  ? {}
+                  : { codexTimingTurnStartedNotificationElapsedMs }),
+                ...(codexTimingTurnCompletedNotificationElapsedMs === null
+                  ? {}
+                  : {
+                      codexTimingTurnCompletedNotificationElapsedMs,
+                    }),
+              }
+            : {}),
         },
         updates: [],
       })
@@ -3244,6 +3276,7 @@ async function runCodexAppServerTurnOnProcess(
     }
     providerRequestStartedNotified = true
     const startedAtMs = Date.now()
+    codexProviderRequestStartedAtMs = startedAtMs
     notifyCodexAppServerProviderRequestStartedBestEffort({
       hook: input.onProviderRequestStarted ?? null,
       startedAt: new Date(startedAtMs).toISOString(),
@@ -3892,6 +3925,36 @@ async function runCodexAppServerTurnOnProcess(
     method: string | null,
   ): void => {
     acceptJsonEvent(message)
+    const providerRequestStartedAtMs = codexProviderRequestStartedAtMs
+    const isTurnStartedNotification = isCodexTurnStartedMethod(method)
+    const isTurnCompletedNotification = isCodexTurnCompletedMethod(method)
+    const shouldCaptureTurnStartedNotification =
+      providerRequestStartedAtMs !== null &&
+      isTurnStartedNotification &&
+      codexTimingTurnStartedNotificationElapsedMs === null
+    const shouldCaptureTurnCompletedNotification =
+      providerRequestStartedAtMs !== null &&
+      isTurnCompletedNotification &&
+      codexTimingTurnCompletedNotificationElapsedMs === null
+    if (
+      providerRequestStartedAtMs !== null &&
+      (shouldCaptureTurnStartedNotification ||
+        shouldCaptureTurnCompletedNotification)
+    ) {
+      const observedAtMs = Date.now()
+      if (shouldCaptureTurnStartedNotification) {
+        codexTimingTurnStartedNotificationElapsedMs = Math.max(
+          0,
+          observedAtMs - providerRequestStartedAtMs,
+        )
+      }
+      if (shouldCaptureTurnCompletedNotification) {
+        codexTimingTurnCompletedNotificationElapsedMs = Math.max(
+          0,
+          observedAtMs - providerRequestStartedAtMs,
+        )
+      }
+    }
     for (const receiverThreadId of readCodexCollabReceiverThreadIds(message)) {
       collabReceiverThreadIds.add(receiverThreadId)
     }
@@ -4024,12 +4087,12 @@ async function runCodexAppServerTurnOnProcess(
       }
     }
 
-    if (isCodexTurnStartedMethod(method)) {
+    if (isTurnStartedNotification) {
       notifyProviderRequestStarted()
       registerLiveTurn()
     }
 
-    if (!isCodexTurnCompletedMethod(method)) {
+    if (!isTurnCompletedNotification) {
       return
     }
 
@@ -4169,6 +4232,15 @@ async function runCodexAppServerTurnOnProcess(
         return
       }
       if (pending?.method === 'turn/start') {
+        if (
+          codexProviderRequestStartedAtMs !== null &&
+          codexTimingTurnStartAckElapsedMs === null
+        ) {
+          codexTimingTurnStartAckElapsedMs = Math.max(
+            0,
+            Date.now() - codexProviderRequestStartedAtMs,
+          )
+        }
         const resultTurnId = extractCodexTurnIdFromResult(message.result)
         acceptTurnStartResultTurnId(resultTurnId)
       }
