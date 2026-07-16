@@ -25,6 +25,8 @@ Updated: 2026-07-15
 
 - Replace the ambiguous shell expression with an explicit single-value resolver.
 - Add focused regression coverage for all default-selection branches.
+- Make the existing Clinical Records resume test preempt deterministically after its first
+  provider page is checkpointed; the official release gate exposed its call-count/timer race.
 - Leave the failed immutable `v1.2.1` tag as historical evidence and cut the corrected release as `v1.2.2`.
 
 ## Verification and completion
