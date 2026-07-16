@@ -165,9 +165,25 @@ landing; record the chosen posture here so the decision is reviewable.
   incomplete, or unexpected entries are retained and counted.
 
 - The repo-owned portable ZIP omits explicit directory entries and continues to
-  exclude `.runtime/**`, including rebuildable projections. This changes only
-  download packaging, not live vault state or the separate hosted tar snapshot
-  classifier.
+  exclude `.runtime/**`, including rebuildable projections, plus transient
+  assistant delivery staging under `exports/assistant-deliveries/**`. This
+  changes only download packaging, not live vault state or the separate hosted
+  tar snapshot classifier.
+
+- `exports/assistant-deliveries/**` is assistant-owned, non-canonical staging
+  for newly generated one-time outbound files. One generated send should create
+  one regular file with no sidecars. The prefix remains included in encrypted
+  hosted snapshots while ref, filename/content type, size, and SHA-256 match an
+  active vault-file outbox descriptor, so approval, retry, and
+  delivery-confirmation recovery survive a cold restore. After assistant work
+  is quiescent and before archive planning, the trusted outbox inventory protects
+  every exact active file and cleanup removes all other regular files plus empty
+  directories in the exact prefix. An untrusted
+  inventory, symlink, special entry, path escape, or unreadable tree causes zero
+  generated-file deletions. Generic vault files are never candidates. Steady
+  state after successful reconciliation is therefore one staged file per exact
+  active generated-file descriptor and zero terminal, changed, or unclaimed
+  staged files.
 
 - `ledger/inbox-attachment-retention/YYYY/YYYY-MM.jsonl`
   (`murph.inbox-attachment-retention.v1`) is append-only and monthly-sharded,

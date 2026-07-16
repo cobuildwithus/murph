@@ -536,29 +536,32 @@ describe('assistant execution prompt contract', () => {
 
     expect(prompt).toContain('Vault file sends:')
     expect(prompt).toContain(
-      'explain naturally that approval is required',
+      'One-time generated files: use `exports/assistant-deliveries/`',
     )
     expect(prompt).toContain(
-      'The file is not attached yet.',
+      'never move existing, user, or durable files there.',
     )
     expect(prompt).toContain(
-      'The runtime appends the exact approval link outside model context',
-    )
-    expect(prompt).toContain('do not invent, request, or print an approval URL')
-    expect(prompt).toContain(
-      'When `murph.send_vault_file` returns `status: "approved"`',
+      'say approval is required and the file is not attached',
     )
     expect(prompt).toContain(
-      'write a concise, natural reply using the returned filename when useful',
+      'the runtime adds the exact approval link outside model context',
+    )
+    expect(prompt).toContain('Never invent or print a link')
+    expect(prompt).toContain(
+      'On `status: "approved"`',
     )
     expect(prompt).toContain(
-      'such as "Here it is: report.pdf."',
+      'reply naturally with the filename',
     )
     expect(prompt).toContain(
-      'Do not quote or paraphrase `deliveryStatus`, approval metadata, queue mechanics, or "delivery is not confirmed" as stock user-facing copy.',
+      'for example, "Here it is: report.pdf."',
     )
     expect(prompt).toContain(
-      'Do not claim the file was delivered or sent successfully unless a later delivery result explicitly confirms `sent`.',
+      'Never expose `deliveryStatus`, approval/queue mechanics, or stock "delivery is not confirmed" copy',
+    )
+    expect(prompt).toContain(
+      'claim success only after later evidence says `sent`.',
     )
   })
 

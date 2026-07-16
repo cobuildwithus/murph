@@ -35,6 +35,8 @@ import {
   HOSTED_WORKSPACE_SNAPSHOT_V2_ENCRYPTION_SCHEME,
 } from "@murphai/hosted-execution/workspace-snapshot-v2";
 import {
+  createAssistantOutboxIntent,
+  resolveAssistantVaultFileResponseMedia,
   upsertAssistantInputEvent,
 } from "@murphai/assistant-engine";
 import {
@@ -945,6 +947,70 @@ describe("createHostedWorkspaceRuntimeBridgeJobOptions", () => {
     expect(archiveEntries.some((entry) => entry.relativePath === residuePaths.evidence)).toBe(false);
     await expectMissing(path.join(vaultRoot, residuePaths.inputEvent));
     await expectMissing(path.join(vaultRoot, residuePaths.evidence));
+  });
+
+  it("reconciles quiescent generated deliveries before archive planning", async () => {
+    const vaultRoot = await createVaultRoot();
+    const { calls, platform } = createRuntimePlatform();
+    const snapshotArchiveBuilder = createSnapshotArchiveBuilder();
+    const generatedRelativePath = "exports/assistant-deliveries/orphan.pdf";
+    const generatedPath = path.join(vaultRoot, generatedRelativePath);
+    const activeRelativePath = "exports/assistant-deliveries/active.pdf";
+    const activePath = path.join(vaultRoot, activeRelativePath);
+    const genericRelativePath = "exports/user-files/keep.pdf";
+    const genericPath = path.join(vaultRoot, genericRelativePath);
+    const generatedContents = "terminal generated delivery";
+    await mkdir(path.dirname(generatedPath), { recursive: true });
+    await mkdir(path.dirname(genericPath), { recursive: true });
+    await writeFile(generatedPath, generatedContents, "utf8");
+    await writeFile(activePath, "active generated delivery", "utf8");
+    await writeFile(genericPath, "generic user file", "utf8");
+    await createAssistantOutboxIntent({
+      channel: "linq",
+      createdAt: "2026-06-10T00:00:00.000Z",
+      identityId: "participant_generated_delivery_bridge",
+      media: [await resolveAssistantVaultFileResponseMedia({
+        ref: activeRelativePath,
+        vaultRoot,
+      })],
+      message: "active generated delivery",
+      sessionId: "session_generated_delivery_bridge",
+      threadId: "thread_generated_delivery_bridge",
+      threadIsDirect: true,
+      turnId: "turn_generated_delivery_bridge",
+      vault: vaultRoot,
+    });
+    const options = createBridgeOptions({
+      platform,
+      request: createInvocationRequestWithWorkspaceCheckpoint("2026-06-10T00:00:00.000Z"),
+      snapshotArchiveBuilder,
+      vaultRoot,
+    });
+
+    await options.createCheckpointSnapshot(createCheckpointInput("idle_shutdown"));
+
+    const archiveEntries =
+      vi.mocked(snapshotArchiveBuilder.buildEncryptedSnapshot).mock.calls[0]?.[0]
+        .archiveEntries ?? [];
+    expect(archiveEntries.some(
+      (entry) => entry.relativePath === generatedRelativePath,
+    )).toBe(false);
+    expect(archiveEntries.some(
+      (entry) => entry.relativePath === activeRelativePath,
+    )).toBe(true);
+    expect(archiveEntries.some(
+      (entry) => entry.relativePath === genericRelativePath,
+    )).toBe(true);
+    await expectMissing(generatedPath);
+    await expectPresent(activePath);
+    await expectPresent(genericPath);
+
+    const entries = calls.logWrite.mock.calls.flatMap(([request]) => request.entries);
+    expect(entries.some((entry) =>
+      entry.redactedJson?.prunedAssistantRuntimeGeneratedDeliveryFileCount === 1
+      && entry.redactedJson?.prunedAssistantRuntimeGeneratedDeliveryBytes
+        === Buffer.byteLength(generatedContents)
+    )).toBe(true);
   });
 
   it("continues checkpoint publication when assistant runtime residue pruning fails", async () => {

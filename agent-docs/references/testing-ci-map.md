@@ -1,6 +1,6 @@
 # Testing And CI Map
 
-Last verified: 2026-07-15
+Last verified: 2026-07-16
 
 ## Current Repo Checks
 
@@ -143,6 +143,13 @@ tests prove the signed web-control adapter and POST-only outbound allowlist.
   consumed authorization remaining approved in member-facing presentation while
   replay reads fail closed, and approval-link retry wakes taking precedence over
   a later parked fallback.
+- Generated-delivery lifecycle coverage proves that quiescent pre-checkpoint
+  reconciliation retains only files under `exports/assistant-deliveries/**`
+  whose ref, filename/content type, size, and SHA-256 match an active vault-file
+  descriptor; terminal, changed, and unclaimed staged files are absent from the
+  archive; malformed outbox inventory and symlinked trees retain everything;
+  generic vault paths remain untouched; and portable support bundles explicitly
+  exclude the transient prefix without broadening the exclusion to `exports/**`.
 
 ## Current Gaps
 

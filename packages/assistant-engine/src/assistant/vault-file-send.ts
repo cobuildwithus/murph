@@ -33,28 +33,13 @@ import {
 import {
   resolveAssistantHostedReturnContactKind,
 } from './return-contact-kind.js'
+import {
+  resolveSupportedAssistantVaultFileContentType,
+} from './generated-delivery-files.js'
 
 export const ASSISTANT_VAULT_FILE_SEND_ACTION_KIND = 'vault.file.send.v1'
 
 const ASSISTANT_VAULT_FILE_APPROVAL_FALLBACK_LEAD_MS = 10 * 60 * 1_000
-
-const ASSISTANT_VAULT_FILE_CONTENT_TYPES = new Map<string, string>([
-  ['.csv', 'text/csv'],
-  ['.doc', 'application/msword'],
-  ['.docx', 'application/vnd.openxmlformats-officedocument.wordprocessingml.document'],
-  ['.ics', 'text/calendar'],
-  ['.json', 'application/json'],
-  ['.md', 'text/markdown'],
-  ['.pdf', 'application/pdf'],
-  ['.ppt', 'application/vnd.ms-powerpoint'],
-  ['.pptx', 'application/vnd.openxmlformats-officedocument.presentationml.presentation'],
-  ['.rtf', 'text/rtf'],
-  ['.txt', 'text/plain'],
-  ['.vcf', 'text/vcard'],
-  ['.xls', 'application/vnd.ms-excel'],
-  ['.xlsx', 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet'],
-  ['.zip', 'application/zip'],
-])
 
 export interface AssistantActionApprovalPort {
   request(input: HostedActionApprovalRequest): Promise<HostedActionApprovalResult>
@@ -585,8 +570,7 @@ function normalizeVaultFileRef(value: string): string {
 }
 
 function resolveAssistantVaultFileContentType(filename: string): string {
-  const extension = path.posix.extname(filename).toLowerCase()
-  const contentType = ASSISTANT_VAULT_FILE_CONTENT_TYPES.get(extension)
+  const contentType = resolveSupportedAssistantVaultFileContentType(filename)
   if (!contentType) {
     throw new VaultCliError(
       'ASSISTANT_VAULT_FILE_TYPE_UNSUPPORTED',

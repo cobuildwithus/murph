@@ -3564,7 +3564,11 @@ exit 1
       recursive: true,
     })
     mkdirSync(path.join(vaultRoot, '.runtime', 'projections'), { recursive: true })
+    mkdirSync(path.join(vaultRoot, 'exports', 'assistant-deliveries'), {
+      recursive: true,
+    })
     mkdirSync(path.join(vaultRoot, 'exports', 'packs', 'existing-pack'), { recursive: true })
+    mkdirSync(path.join(vaultRoot, 'exports', 'user-files'), { recursive: true })
     writeFileSync(path.join(vaultRoot, 'vault.json'), '{ "id": "vault_test" }\n', 'utf8')
     writeFileSync(path.join(vaultRoot, 'CORE.md'), '# Vault\n', 'utf8')
     writeFileSync(path.join(vaultRoot, 'journal', '2026', '2026-03-18.md'), '# Journal\n', 'utf8')
@@ -3585,8 +3589,18 @@ exit 1
       'utf8',
     )
     writeFileSync(
+      path.join(vaultRoot, 'exports', 'assistant-deliveries', 'transient.pdf'),
+      'transient generated delivery\n',
+      'utf8',
+    )
+    writeFileSync(
       path.join(vaultRoot, 'exports', 'packs', 'existing-pack', 'manifest.json'),
       '{"packId":"existing-pack"}\n',
+      'utf8',
+    )
+    writeFileSync(
+      path.join(vaultRoot, 'exports', 'user-files', 'keep.pdf'),
+      'generic user file\n',
       'utf8',
     )
 
@@ -3610,7 +3624,7 @@ exit 1
       )
 
       expect(output).toContain('Data package created.')
-      expect(output).toContain('Vault files: 3')
+      expect(output).toContain('Vault files: 4')
       expect(output).not.toContain(vaultRoot)
 
       const zipMatch = output.match(/^ZIP: ([^ ]+) \(/m)
@@ -3632,12 +3646,16 @@ exit 1
       expect(entries).toContain(`${bundleDir}/vault/vault.json`)
       expect(entries).toContain(`${bundleDir}/vault/CORE.md`)
       expect(entries).toContain(`${bundleDir}/vault/journal/2026/2026-03-18.md`)
+      expect(entries).toContain(`${bundleDir}/vault/exports/user-files/keep.pdf`)
       expect(entries).not.toContain(`${bundleDir}/vault/.runtime/operations/assistant/MEMORY.md`)
       expect(entries).not.toContain(
         `${bundleDir}/vault/.runtime/operations/assistant/sessions/session.json`,
       )
       expect(entries).not.toContain(`${bundleDir}/vault/.runtime/secret.json`)
       expect(entries).not.toContain(`${bundleDir}/vault/.runtime/projections/query.sqlite`)
+      expect(entries).not.toContain(
+        `${bundleDir}/vault/exports/assistant-deliveries/transient.pdf`,
+      )
       expect(entries).not.toContain(
         `${bundleDir}/vault/exports/packs/existing-pack/manifest.json`,
       )

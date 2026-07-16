@@ -106,6 +106,9 @@ import type {
   AssistantProgressDelivery,
   AssistantTurnProductFeedbackRecorder,
 } from '../assistant/turn-progress.js'
+import {
+  ASSISTANT_GENERATED_DELIVERY_DIRECTORY,
+} from '../assistant/generated-delivery-files.js'
 import type {
   CodexRpcMessage,
 } from './app-server-rpc.js'
@@ -798,7 +801,7 @@ export const MURPH_SEND_VAULT_FILE_TOOL = {
   namespace: 'murph',
   name: 'send_vault_file',
   description:
-    "Securely prepare one existing file from the user's vault for the current iMessage conversation. Use a normalized vault-relative file path. When approval is pending, explain that approval is required; the runtime adds the exact link outside model context. When approval is approved, attach the file through your normal reply path and write a natural acknowledgment instead of reciting internal queue or delivery-status wording. Do not claim final iMessage delivery unless later delivery evidence confirms it. It does not reveal file bytes to the model and does not support arbitrary recipients.",
+    `Securely prepare one existing file from the user's vault for the current iMessage conversation. Use a normalized vault-relative file path. Create files intended solely for one-time delivery under ${ASSISTANT_GENERATED_DELIVERY_DIRECTORY}/; never move or copy canonical, durable, or existing user files there. When approval is pending, explain that approval is required; the runtime adds the exact link outside model context. When approval is approved, attach the file through your normal reply path and write a natural acknowledgment instead of reciting internal queue or delivery-status wording. Do not claim final iMessage delivery unless later delivery evidence confirms it. It does not reveal file bytes to the model and does not support arbitrary recipients.`,
   inputSchema: {
     type: 'object',
     additionalProperties: false,

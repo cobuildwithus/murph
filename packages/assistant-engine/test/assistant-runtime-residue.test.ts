@@ -4,6 +4,11 @@ import path from 'node:path'
 
 import { afterEach, describe, expect, it } from 'vitest'
 
+import type {
+  AssistantOutboxIntent,
+  AssistantVaultFileResponseMedia,
+} from '@murphai/operator-config/assistant-cli-contracts'
+
 import {
   appendAssistantAcceptedTurnInputItems,
 } from '../src/assistant/active-turn-input-journal.ts'
@@ -23,8 +28,15 @@ import {
 } from '../src/assistant/hosted-mailbox-input-items.ts'
 import {
   createAssistantOutboxIntent,
+  saveAssistantOutboxIntent,
 } from '../src/assistant/outbox.ts'
+import {
+  ASSISTANT_GENERATED_DELIVERY_DIRECTORY,
+} from '../src/assistant/generated-delivery-files.ts'
 import { pruneAssistantRuntimeResidue } from '../src/assistant/runtime-residue.ts'
+import {
+  resolveAssistantVaultFileResponseMedia,
+} from '../src/assistant/vault-file-send.ts'
 import {
   resolveAssistantInputEventPath,
   resolveAssistantInputEventsDirectory,
@@ -54,6 +66,248 @@ afterEach(async () => {
 })
 
 describe('assistant runtime residue pruning', () => {
+  it('prunes terminal and orphan generated deliveries while retaining exact active media and generic files', async () => {
+    const { vaultRoot } = await createAssistantVault(
+      'assistant-runtime-residue-generated-deliveries-',
+    )
+    const active = await writeGeneratedDeliveryFile({
+      contents: 'active delivery',
+      refSuffix: 'active.zip',
+      vaultRoot,
+    })
+    await createGeneratedDeliveryIntent({
+      media: active.media,
+      seed: 'a',
+      status: 'pending',
+      vaultRoot,
+    })
+    const terminal = await writeGeneratedDeliveryFile({
+      contents: 'terminal delivery',
+      refSuffix: 'terminal.zip',
+      vaultRoot,
+    })
+    await createGeneratedDeliveryIntent({
+      media: terminal.media,
+      seed: 'b',
+      status: 'sent',
+      vaultRoot,
+    })
+    const orphan = await writeGeneratedDeliveryFile({
+      contents: 'orphan delivery',
+      refSuffix: 'nested/orphan.pdf',
+      vaultRoot,
+    })
+    const genericFilePath = path.join(
+      vaultRoot,
+      'exports',
+      'user-files',
+      'keep.pdf',
+    )
+    const prefixSiblingPath = path.join(
+      vaultRoot,
+      'exports',
+      'assistant-deliveries-backup',
+      'keep.zip',
+    )
+    await mkdir(path.dirname(genericFilePath), { recursive: true })
+    await mkdir(path.dirname(prefixSiblingPath), { recursive: true })
+    await writeFile(genericFilePath, 'generic user file', 'utf8')
+    await writeFile(prefixSiblingPath, 'prefix sibling', 'utf8')
+
+    const result = await pruneAssistantRuntimeResidue({
+      generatedDeliveryFilesQuiescent: true,
+      now: PRUNE_NOW,
+      pendingInputIds: [],
+      vault: vaultRoot,
+    })
+
+    expect(result.generatedDeliveryFilesPruned).toBe(2)
+    expect(result.generatedDeliveryBytesPruned).toBe(
+      Buffer.byteLength('terminal delivery') +
+      Buffer.byteLength('orphan delivery'),
+    )
+    await expectPathExists(active.filePath)
+    await expectPathMissing(terminal.filePath)
+    await expectPathMissing(orphan.filePath)
+    await expectPathMissing(path.dirname(orphan.filePath))
+    await expectPathExists(genericFilePath)
+    await expectPathExists(prefixSiblingPath)
+  })
+
+  it('retains exact generated delivery media for every active lifecycle state', async () => {
+    const { vaultRoot } = await createAssistantVault(
+      'assistant-runtime-residue-generated-active-',
+    )
+    const cases: Array<{
+      deliveryConfirmationPending?: boolean
+      seed: string
+      status: AssistantOutboxIntent['status']
+    }> = [
+      { seed: 'c', status: 'awaiting_approval' },
+      { seed: 'd', status: 'pending' },
+      { seed: 'e', status: 'sending' },
+      { seed: 'f', status: 'retryable' },
+      {
+        deliveryConfirmationPending: true,
+        seed: 'g',
+        status: 'failed',
+      },
+    ]
+    const filePaths: string[] = []
+    for (const entry of cases) {
+      const file = await writeGeneratedDeliveryFile({
+        contents: `active ${entry.status}`,
+        refSuffix: `${entry.status}-${entry.seed}.zip`,
+        vaultRoot,
+      })
+      filePaths.push(file.filePath)
+      await createGeneratedDeliveryIntent({
+        deliveryConfirmationPending:
+          entry.deliveryConfirmationPending ?? false,
+        media: file.media,
+        seed: entry.seed,
+        status: entry.status,
+        vaultRoot,
+      })
+    }
+
+    const result = await pruneAssistantRuntimeResidue({
+      generatedDeliveryFilesQuiescent: true,
+      now: PRUNE_NOW,
+      pendingInputIds: [],
+      vault: vaultRoot,
+    })
+
+    expect(result.generatedDeliveryFilesPruned).toBe(0)
+    expect(result.generatedDeliveryBytesPruned).toBe(0)
+    for (const filePath of filePaths) {
+      await expectPathExists(filePath)
+    }
+  })
+
+  it('reclaims an active ref whose bytes no longer match its approved delivery snapshot', async () => {
+    const { vaultRoot } = await createAssistantVault(
+      'assistant-runtime-residue-generated-overwrite-',
+    )
+    const file = await writeGeneratedDeliveryFile({
+      contents: 'payload-a',
+      refSuffix: 'overwritten.zip',
+      vaultRoot,
+    })
+    await createGeneratedDeliveryIntent({
+      media: file.media,
+      seed: 'h',
+      status: 'pending',
+      vaultRoot,
+    })
+    await writeFile(file.filePath, 'payload-b', 'utf8')
+
+    const result = await pruneAssistantRuntimeResidue({
+      generatedDeliveryFilesQuiescent: true,
+      now: PRUNE_NOW,
+      pendingInputIds: [],
+      vault: vaultRoot,
+    })
+
+    expect(result.generatedDeliveryFilesPruned).toBe(1)
+    expect(result.generatedDeliveryBytesPruned).toBe(
+      Buffer.byteLength('payload-b'),
+    )
+    await expectPathMissing(file.filePath)
+  })
+
+  it('retains the entire generated-delivery prefix when outbox inventory is untrusted', async () => {
+    const { paths, vaultRoot } = await createAssistantVault(
+      'assistant-runtime-residue-generated-untrusted-',
+    )
+    const file = await writeGeneratedDeliveryFile({
+      contents: 'retain on uncertainty',
+      refSuffix: 'orphan.zip',
+      vaultRoot,
+    })
+    await writeFile(
+      path.join(paths.outboxDirectory, 'malformed.json'),
+      '{ malformed',
+      'utf8',
+    )
+
+    const firstResult = await pruneAssistantRuntimeResidue({
+      generatedDeliveryFilesQuiescent: true,
+      now: PRUNE_NOW,
+      pendingInputIds: [],
+      vault: vaultRoot,
+    })
+
+    expect(firstResult.generatedDeliveryFilesPruned).toBe(0)
+    expect(
+      firstResult.generatedDeliveryCleanupSkippedUntrustedOutbox,
+    ).toBe(true)
+    await expectPathExists(file.filePath)
+
+    const secondResult = await pruneAssistantRuntimeResidue({
+      generatedDeliveryFilesQuiescent: true,
+      now: PRUNE_NOW,
+      pendingInputIds: [],
+      vault: vaultRoot,
+    })
+    expect(secondResult.generatedDeliveryFilesPruned).toBe(1)
+    expect(
+      secondResult.generatedDeliveryCleanupSkippedUntrustedOutbox,
+    ).toBe(false)
+    await expectPathMissing(file.filePath)
+  })
+
+  it('does not reconcile generated deliveries without an explicit quiescent boundary', async () => {
+    const { vaultRoot } = await createAssistantVault(
+      'assistant-runtime-residue-generated-not-quiescent-',
+    )
+    const file = await writeGeneratedDeliveryFile({
+      contents: 'in-flight creation',
+      refSuffix: 'in-flight.zip',
+      vaultRoot,
+    })
+
+    const result = await pruneAssistantRuntimeResidue({
+      now: PRUNE_NOW,
+      pendingInputIds: [],
+      vault: vaultRoot,
+    })
+
+    expect(result.generatedDeliveryFilesPruned).toBe(0)
+    await expectPathExists(file.filePath)
+  })
+
+  it('rejects generated-delivery symlinks before deleting regular files', async () => {
+    const { vaultRoot } = await createAssistantVault(
+      'assistant-runtime-residue-generated-symlink-',
+    )
+    const targetPath = path.join(vaultRoot, 'outside-target.zip')
+    await writeFile(targetPath, 'outside target', 'utf8')
+    const regular = await writeGeneratedDeliveryFile({
+      contents: 'must remain',
+      refSuffix: 'regular.zip',
+      vaultRoot,
+    })
+    const symlinkPath = path.join(
+      vaultRoot,
+      ASSISTANT_GENERATED_DELIVERY_DIRECTORY,
+      'linked.zip',
+    )
+    await symlink(targetPath, symlinkPath)
+
+    await expect(pruneAssistantRuntimeResidue({
+      generatedDeliveryFilesQuiescent: true,
+      now: PRUNE_NOW,
+      pendingInputIds: [],
+      vault: vaultRoot,
+    })).rejects.toThrow(
+      /generated-delivery paths must not contain symlinks|resolves outside the vault root/u,
+    )
+    await expectPathExists(regular.filePath)
+    await expectPathExists(symlinkPath)
+    await expectPathExists(targetPath)
+  })
+
   it('retains pending input events and their terminal evidence', async () => {
     const { paths, vaultRoot } = await createAssistantVault(
       'assistant-runtime-residue-pending-',
@@ -719,6 +973,70 @@ async function createAssistantVault(prefix: string) {
     paths,
     vaultRoot: context.vaultRoot,
   }
+}
+
+async function writeGeneratedDeliveryFile(input: {
+  contents: string
+  refSuffix: string
+  vaultRoot: string
+}): Promise<{
+  filePath: string
+  media: AssistantVaultFileResponseMedia
+}> {
+  const ref = `${ASSISTANT_GENERATED_DELIVERY_DIRECTORY}/${input.refSuffix}`
+  const filePath = path.join(input.vaultRoot, ...ref.split('/'))
+  await mkdir(path.dirname(filePath), { recursive: true })
+  await writeFile(filePath, input.contents, 'utf8')
+  return {
+    filePath,
+    media: await resolveAssistantVaultFileResponseMedia({
+      ref,
+      vaultRoot: input.vaultRoot,
+    }),
+  }
+}
+
+async function createGeneratedDeliveryIntent(input: {
+  deliveryConfirmationPending?: boolean
+  media: AssistantVaultFileResponseMedia
+  seed: string
+  status: AssistantOutboxIntent['status']
+  vaultRoot: string
+}): Promise<AssistantOutboxIntent> {
+  const intent = await createAssistantOutboxIntent({
+    channel: 'linq',
+    createdAt: OLD_RECORD_AT,
+    identityId: `participant-generated-${input.seed}`,
+    initialState: input.status === 'awaiting_approval'
+      ? {
+          nextAttemptAt: RECENT_RECORD_AT,
+          status: 'awaiting_approval',
+        }
+      : { status: 'pending' },
+    media: [input.media],
+    message: 'generated delivery',
+    replyToMessageId: `message-generated-${input.seed}`,
+    sessionId: createSessionId(input.seed),
+    threadId: `thread-generated-${input.seed}`,
+    threadIsDirect: true,
+    turnId: createTurnId(input.seed),
+    vault: input.vaultRoot,
+  })
+  if (
+    input.status === intent.status &&
+    (input.deliveryConfirmationPending ?? false) ===
+      intent.deliveryConfirmationPending
+  ) {
+    return intent
+  }
+  return await saveAssistantOutboxIntent(input.vaultRoot, {
+    ...intent,
+    deliveryConfirmationPending:
+      input.deliveryConfirmationPending ?? false,
+    sentAt: input.status === 'sent' ? OLD_RECORD_AT : null,
+    status: input.status,
+    updatedAt: RECENT_RECORD_AT,
+  })
 }
 
 async function createHostedInputEvent(input: {

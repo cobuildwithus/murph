@@ -735,6 +735,18 @@ queue, poller, or second handoff owner. Within a delivery boundary, that parked
 fallback is transparent to later outbound work: the next wake is the earlier of
 the approval fallback and the first ordinary predecessor wake, so an approval-link
 reply retry is never hidden behind authorization reconciliation.
+Newly generated files that exist solely for one-time delivery use the reserved
+`exports/assistant-deliveries/**` staging prefix. Existing user files and
+canonical or durable vault data remain at their owning refs. Idle snapshot
+publication already waits for resident foreground and background assistant work
+to become quiescent; only at that boundary does pre-checkpoint reconciliation
+read the complete outbox inventory and owned staging tree. Files whose ref,
+filename/content type, size, and SHA-256 match an active vault-file descriptor
+remain in the normal encrypted snapshot for approval, retry, and delivery
+recovery. Terminal, changed, or unclaimed regular files are removed before archive
+planning. Malformed or untrusted inventory, symlinks, special entries, and path
+anomalies retain the whole prefix, and generic vault paths are never scanned or
+deleted by this lifecycle.
 External outcomes that require generated user-facing prose, such as phone-call
 results, continue to use `assistant.notification.requested` instead.
 
