@@ -3521,6 +3521,7 @@ describe('assistant codex runtime', () => {
   it('rejects overlapping local turns without replacing the warm Codex app-server', async () => {
     const workingDirectory = await createTempDir('assistant-codex-local-busy-work-')
     const codexHome = await createTempDir('assistant-codex-local-busy-home-')
+    const firstTurnStarted = createDeferred<void>()
     let child: MockChildProcess | null = null
 
     codexMocks.spawn.mockImplementation(() => {
@@ -3530,15 +3531,20 @@ describe('assistant codex runtime', () => {
 
       queueMicrotask(() => {
         void (async () => {
-          const initialize = await waitForRpcMethod(spawnedChild, 'initialize')
-          spawnedChild.stdout.write(jsonLine({ id: initialize.id, result: {} }))
+          try {
+            const initialize = await waitForRpcMethod(spawnedChild, 'initialize')
+            spawnedChild.stdout.write(jsonLine({ id: initialize.id, result: {} }))
 
-          await writeWarmTurnStarted({
-            child: spawnedChild,
-            requestCount: 1,
-            threadId: 'thread-local-busy-1',
-            turnId: 'turn-local-busy-1',
-          })
+            await writeWarmTurnStarted({
+              child: spawnedChild,
+              requestCount: 1,
+              threadId: 'thread-local-busy-1',
+              turnId: 'turn-local-busy-1',
+            })
+            firstTurnStarted.resolve(undefined)
+          } catch (error) {
+            firstTurnStarted.reject(error)
+          }
         })()
       })
 
@@ -3564,6 +3570,7 @@ describe('assistant codex runtime', () => {
     }
     const spawnedChild = requireMockChildProcess(child)
     await waitForRpcMethod(spawnedChild, 'turn/start')
+    await firstTurnStarted.promise
 
     await expect(
       executeCodexAppServerTurn({
