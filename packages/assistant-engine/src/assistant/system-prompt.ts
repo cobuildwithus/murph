@@ -11,6 +11,7 @@ import {
   MURPH_PRODUCT_ORIGIN,
   type AssistantPersonalityPreferences,
   defaultAssistantTonePreference,
+  toLocalDayKey,
   type AssistantTonePreference,
 } from "@murphai/contracts";
 import {
@@ -68,6 +69,7 @@ export interface AssistantNotificationDecisionSystemPromptInput {
   conversationScope?: AssistantConversationScope;
   hostedRuntime?: boolean;
   maintenanceTurn?: boolean;
+  scheduledOccurrenceAt?: string | null;
 }
 
 export interface AssistantAskContinuationSystemPromptInput {
@@ -771,6 +773,12 @@ export function buildAssistantNotificationDecisionSystemPromptLayers(
             currentMurphProductBaseUrl: null,
             currentTimeZone: input.currentTimeZone,
           }),
+      conversationScope === "unverified-external"
+        ? null
+        : buildAssistantScheduledOccurrenceContextText({
+            occurrenceAt: input.scheduledOccurrenceAt ?? null,
+            timeZone: input.currentTimeZone,
+          }),
       ...(conversationScope === "unverified-external"
         ? []
         : normalizeAssistantDynamicContextPrompts(
@@ -1268,6 +1276,8 @@ function buildAssistantGroupNotificationDecisionGuidanceText(
     `Group notification execution rules:
 - Decide whether this room-owned reminder still earns one short message. Default to staying silent.
 - Ground the decision only in the automation, recent room conversation, public sources, group-owned state, and server-approved shared projections. Never read or write a participant's personal records, memory, settings, accounts, devices, or preferences from the room container.
+- Before treating a room report as completion, convert its timestamp to the scheduled occurrence timezone and verify that it belongs to this occurrence's relevant local action window. Evidence from another local action window cannot complete this occurrence; unclear attribution is unknown, not complete.
+- For an explicitly authorized accountability check-in, when completion is still unknown after that attribution check, send one neutral outcome question; never state or imply that anyone missed the activity.
 - Scheduled room turns do not own automation lifecycle. Do not create, update, archive, or reroute automations; use the current evidence only to decide whether this occurrence should send or skip.
 - Skip when the room already completed the activity, the reminder was declined or moved, the support window ended, or the message would expose or infer personal health data. The platform delivers the structured output; do not deliver it yourself.`,
     channelText,
@@ -1279,6 +1289,26 @@ function buildAssistantGroupNotificationDecisionGuidanceText(
 - Text is the single final room message. Subject applies only to a new outbound email.
 - Never include personal settings, billing, device, account, authorization, or browser-handoff URLs, except when an owning group workflow explicitly provides a clearly labeled per-person enrollment link. Describe that exception as changing only that participant's account, never the room settings. Other URLs are allowed only for group-owned deliverables.`
   );
+}
+
+function buildAssistantScheduledOccurrenceContextText(input: {
+  occurrenceAt: string | null;
+  timeZone: string;
+}): string | null {
+  if (!input.occurrenceAt) {
+    return null;
+  }
+
+  const occurrence = new Date(input.occurrenceAt);
+  if (!Number.isFinite(occurrence.getTime())) {
+    return null;
+  }
+
+  return `Scheduled occurrence context:
+- Occurrence instant: ${code(occurrence.toISOString())}.
+- Occurrence timezone: ${code(input.timeZone)}.
+- Occurrence local date: ${code(toLocalDayKey(occurrence, input.timeZone))}.
+- Use the local date as the anchor for this automation's relevant action window. Treat message and record timestamps as instants and convert them to the occurrence timezone before assigning evidence to a local date.`;
 }
 
 function buildAssistantNotificationDecisionGuidanceText(

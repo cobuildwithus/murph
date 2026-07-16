@@ -1,4 +1,4 @@
-import { MURPH_PRODUCT_ORIGIN } from '@murphai/contracts'
+import { MURPH_PRODUCT_ORIGIN, toLocalDayKey } from '@murphai/contracts'
 import { describe, expect, it } from 'vitest'
 
 import {
@@ -1910,11 +1910,30 @@ describe('assistant notification decision guidance', () => {
           { label: 'Garmin', provider: 'garmin' },
         ],
         conversationScope: 'group',
+        currentLocalDate: '2026-07-15',
+        currentTimeZone: 'America/New_York',
+        scheduledOccurrenceAt: '2026-07-16T01:00:00.000Z',
       }),
     ).prompt
 
     expect(prompt).toContain('Group notification execution rules:')
     expect(prompt).toContain('Scheduled room turns do not own automation lifecycle.')
+    expect(prompt).toContain('Occurrence instant: `2026-07-16T01:00:00.000Z`.')
+    expect(prompt).toContain('Occurrence timezone: `America/New_York`.')
+    expect(prompt).toContain('Occurrence local date: `2026-07-15`.')
+    expect(
+      toLocalDayKey(new Date('2026-07-15T02:07:00.000Z'), 'America/New_York'),
+    ).toBe('2026-07-14')
+    expect(
+      toLocalDayKey(new Date('2026-07-16T01:00:00.000Z'), 'America/New_York'),
+    ).toBe('2026-07-15')
+    expect(prompt).toContain('convert its timestamp to the scheduled occurrence timezone')
+    expect(prompt).toContain('Evidence from another local action window cannot complete this occurrence')
+    expect(prompt).toContain('unclear attribution is unknown, not complete')
+    expect(prompt).toContain(
+      'when completion is still unknown after that attribution check, send one neutral outcome question',
+    )
+    expect(prompt).toContain('never state or imply that anyone missed the activity')
     expect(prompt).toContain('Do not create, update, archive, or reroute automations')
     expect(prompt).not.toContain('PRIVATE_GROUP_NOTIFICATION_CONTEXT')
     expect(prompt).not.toContain('same full read and write tools')
@@ -1947,6 +1966,20 @@ describe('assistant notification decision guidance', () => {
       }),
     ).prompt
     expect(nonHostedPrompt).not.toContain('Assistant tone preference:')
+  })
+
+  it('keeps scheduled occurrence context out of unverified external prompts', () => {
+    const prompt = buildAssistantNotificationDecisionSystemPromptWithCacheMetadata(
+      createCommonNotificationPromptInput({
+        conversationScope: 'unverified-external',
+        currentTimeZone: 'America/New_York',
+        scheduledOccurrenceAt: '2026-07-16T01:00:00.000Z',
+      }),
+    ).prompt
+
+    expect(prompt).not.toContain('Scheduled occurrence context:')
+    expect(prompt).not.toContain('2026-07-16T01:00:00.000Z')
+    expect(prompt).not.toContain('America/New_York')
   })
 
   it('renders only a fail-closed skip contract for an unverified external audience', () => {
