@@ -49,7 +49,8 @@ Pass the set as `requestedVaultShareProjectionScopes` on `create_join_link`, or
 as `projectionScopes` when creation uses `post_join_offer`. This is a permission
 request, not automatic sharing. On the join page, every item stays individually
 selectable. On a like-to-consent offer, liking grants exactly the disclosed
-snapshot and `{{join_url}}` remains the secondary path to share more or less.
+snapshot, and Web's first-party customize link remains the secondary path to
+share more or less.
 
 Follow an explicit request from the group creator for narrower or different
 health scopes. `group-email.v0` remains the server's standard new-group request,

@@ -202,7 +202,7 @@ loses a reminder; it must never lose the challenge.
    or heart gestures, and first-party customize link. Never author or pass
    offer text. Liking or hearting grants only those Murph group shares; it does
    not grant HealthKit access, connect a wearable, or prove that data has
-   synced. Post this additive offer once and do not retry or nag when someone
+   synced. Post an additive offer once and do not retry or nag when someone
    declines or ignores it. Use
    `action="create_join_link"` only when the group explicitly asks for a
    standalone link. Never use data a member has not granted to this group.
