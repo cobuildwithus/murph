@@ -248,11 +248,10 @@ export type RunnerWorkspaceInvocationAbortStatus =
   | "failed"
   | "inactive"
   | "queued"
-  | "requested"
   | "stale";
 
 type RunnerWorkspaceInvocationAbortPostStatus =
-  Exclude<RunnerWorkspaceInvocationAbortStatus, "inactive" | "requested">;
+  Exclude<RunnerWorkspaceInvocationAbortStatus, "inactive">;
 
 type RunnerContainerDestroyReason =
   | "activity-expired"

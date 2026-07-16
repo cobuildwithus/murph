@@ -390,9 +390,6 @@ importers:
       '@murphai/gateway-core':
         specifier: workspace:*
         version: link:../gateway-core
-      '@murphai/health-commons':
-        specifier: workspace:*
-        version: link:../health-commons
       '@murphai/hosted-execution':
         specifier: workspace:*
         version: link:../hosted-execution

@@ -8485,7 +8485,7 @@ function createPlatform(input: {
     },
     effectsPort: {
       async assertLinqRecentInboundEngagement(request: {
-        authorityCheckOnly?: boolean | null;
+        authorityCheckOnly: boolean;
       }) {
         return request.authorityCheckOnly === true
           ? {}

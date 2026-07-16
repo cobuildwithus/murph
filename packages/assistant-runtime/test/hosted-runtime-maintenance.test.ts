@@ -4001,19 +4001,40 @@ describe("runHostedAssistantAutomationLane", () => {
     });
   });
 
-  it("sizes a background scan to the selected causal batch", async () => {
+  it("selects a background causal batch once after readiness and sizes the scan to it", async () => {
+    const callOrder: string[] = [];
     const selectedInputIds = [
       "ain_background_batch_000000000000000001",
       "ain_background_batch_000000000000000002",
     ];
-    mocks.selectHostedAssistantInputIds.mockResolvedValueOnce({
-      inputIds: selectedInputIds,
-      mode: "background",
-      pendingInputIds: selectedInputIds,
+    mocks.readHostedAssistantRuntimeState.mockImplementationOnce(async () => {
+      callOrder.push("readiness");
+      return {
+        assistantActiveProfileId: null,
+        assistantActiveProfileManagedBy: null,
+        assistantActiveProfileReady: false,
+        assistantConfigInvalid: false,
+        assistantConfigPresent: true,
+        assistantConfigStatus: "saved",
+        assistantConfigured: true,
+        assistantProvider: "codex-cli",
+      };
     });
-    mocks.runAssistantAutomationPass.mockResolvedValueOnce({
-      nextWakeAt: null,
-      progressed: true,
+    mocks.selectHostedAssistantInputIds.mockImplementationOnce(async () => {
+      callOrder.push("selection");
+      return {
+        inputIds: selectedInputIds,
+        mode: "background",
+        pendingInputIds: selectedInputIds,
+      };
+    });
+    mocks.runAssistantAutomationPass.mockImplementationOnce(async (input) => {
+      callOrder.push("automation");
+      expect(input.shouldDeferCron?.()).toBe(true);
+      return {
+        nextWakeAt: null,
+        progressed: true,
+      };
     });
 
     await runHostedAssistantAutomationLane({
@@ -4041,6 +4062,8 @@ describe("runHostedAssistantAutomationLane", () => {
         maxPerScan: selectedInputIds.length,
       }),
     );
+    expect(callOrder).toEqual(["readiness", "selection", "automation"]);
+    expect(mocks.selectHostedAssistantInputIds).toHaveBeenCalledOnce();
   });
 
   it("does not synthesize a wake when assistant work progressed without a due time", async () => {
@@ -4430,6 +4453,7 @@ describe("runHostedAssistantAutomationLane", () => {
     expect(result).not.toHaveProperty("postCheckpointRecord");
     assert.equal(typeof result.totalElapsedMs, "number");
     expect(mocks.runAssistantAutomationPass).not.toHaveBeenCalled();
+    expect(mocks.selectHostedAssistantInputIds).not.toHaveBeenCalled();
     expect(mocks.emitHostedExecutionStructuredLog).not.toHaveBeenCalled();
   });
 
@@ -4507,6 +4531,7 @@ describe("runHostedAssistantAutomationLane", () => {
       ],
     });
     expect(mocks.runAssistantAutomationPass).not.toHaveBeenCalled();
+    expect(mocks.selectHostedAssistantInputIds).not.toHaveBeenCalled();
     expect(mocks.emitHostedExecutionStructuredLog).toHaveBeenCalledWith(
       expect.objectContaining({
         level: "warn",
