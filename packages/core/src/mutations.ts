@@ -2443,7 +2443,7 @@ function eventSpineRevisionsAreComplete(
     && revisions.size === maxRevision;
 }
 
-function legacyWhoopSleepTypeBaselineRevision(
+function whoopSleepTypeProviderBaselineRevision(
   index: EventExternalRefIndex,
   refKey: string,
   eventId: string,
@@ -2458,20 +2458,31 @@ function legacyWhoopSleepTypeBaselineRevision(
     return null;
   }
 
-  const { sleepType: _sleepType, ...withoutSleepType } = incoming;
-  const baselineFingerprint = deviceEventContentFingerprint(withoutSleepType);
-  const revisions = index.deviceOwnerRevisionsByRefKeyAndFingerprint
-    .get(refKey)
-    ?.get(baselineFingerprint)
-    ?.get(eventId);
-  // Exact device replays do not append revisions. Use the earliest match as
-  // the provider baseline because later matching revisions may be supported
-  // user edits that retained source=device.
-  let baselineRevision: number | null = null;
-  for (const revision of revisions ?? []) {
-    baselineRevision = Math.min(baselineRevision ?? revision, revision);
+  const ownersByFingerprint = index.deviceOwnerRevisionsByRefKeyAndFingerprint.get(refKey);
+  const earliestRevisionFor = (record: EventRecord): number | null => {
+    const revisions = ownersByFingerprint
+      ?.get(deviceEventContentFingerprint(record))
+      ?.get(eventId);
+    // Exact device replays do not append revisions. Use the earliest match as
+    // the provider baseline because later matching revisions may be supported
+    // user edits that retained source=device.
+    let baselineRevision: number | null = null;
+    for (const revision of revisions ?? []) {
+      baselineRevision = Math.min(baselineRevision ?? revision, revision);
+    }
+    return baselineRevision;
+  };
+
+  const typedBaselineRevision = earliestRevisionFor(incoming);
+  if (typedBaselineRevision !== null) {
+    return typedBaselineRevision;
   }
-  return baselineRevision;
+
+  // Before sleepType normalization shipped, the provider-authored row had the
+  // same content without this field. Keep that one-time legacy fallback only
+  // after complete typed history fails to match.
+  const { sleepType: _sleepType, ...withoutSleepType } = incoming;
+  return earliestRevisionFor(withoutSleepType);
 }
 
 function resolveDeviceEventIdentity(
@@ -2812,12 +2823,12 @@ async function reconcileDeviceEventEntriesByExternalRef(
         continue;
       }
       const sleepTypeBaselineRevision = sourceVersionComparison === 0
-        ? legacyWhoopSleepTypeBaselineRevision(index, refKey, latest.id, entry.record)
+        ? whoopSleepTypeProviderBaselineRevision(index, refKey, latest.id, entry.record)
         : null;
-      const legacySleepTypeEnrichment = sleepTypeBaselineRevision !== null;
+      const hasSleepTypeProviderBaseline = sleepTypeBaselineRevision !== null;
       if (
         sourceVersionComparison === 0
-        && !legacySleepTypeEnrichment
+        && !hasSleepTypeProviderBaseline
       ) {
         throw new VaultError(
           "EVENT_SOURCE_REVISION_CONFLICT",
@@ -2827,7 +2838,7 @@ async function reconcileDeviceEventEntriesByExternalRef(
         );
       }
       if (
-        legacySleepTypeEnrichment
+        hasSleepTypeProviderBaseline
         && (
           isDeletedEventSpineRecord(latest)
           || eventSpineRevision(latest)

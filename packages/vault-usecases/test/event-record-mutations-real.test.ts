@@ -191,7 +191,7 @@ test("WHOOP sleep-type enrichment preserves a newer edit from the real event mut
   }
 });
 
-test("WHOOP sleep-type enrichment preserves an explicitly cleared type", async () => {
+test("WHOOP typed-sleep replay preserves an explicitly cleared type", async () => {
   const vaultRoot = await mkdtemp(path.join(os.tmpdir(), "murph-event-edit-whoop-sleep-clear-"));
 
   try {
@@ -201,28 +201,19 @@ test("WHOOP sleep-type enrichment preserves an explicitly cleared type", async (
       timezone: "UTC",
     });
 
-    const resourceId = "legacy-cleared-main-sleep";
-    const legacy = await importDeviceBatch({
+    const resourceId = "typed-cleared-main-sleep";
+    const typedSleep = buildWhoopSleep(resourceId, "main_sleep");
+    const initial = await importDeviceBatch({
       vaultRoot,
       provider: "whoop",
       accountId: "whoop-account",
       importedAt: "2026-06-03T16:00:00.000Z",
-      events: [buildWhoopSleep(resourceId)],
+      events: [typedSleep],
     });
-    const eventId = legacy.events[0]?.id;
+    const eventId = initial.events[0]?.id;
     assert.ok(eventId);
-
-    const enrichedSnapshotEvents = [buildWhoopSleep(resourceId, "main_sleep")];
-    const enriched = await importDeviceBatch({
-      vaultRoot,
-      provider: "whoop",
-      accountId: "whoop-account",
-      importedAt: "2026-06-04T16:00:00.000Z",
-      events: enrichedSnapshotEvents,
-    });
-    assert.equal(enriched.events[0]?.lifecycle?.revision, 2);
     assert.equal(
-      enriched.events[0]?.kind === "sleep_session" ? enriched.events[0].sleepType : undefined,
+      initial.events[0]?.kind === "sleep_session" ? initial.events[0].sleepType : undefined,
       "main_sleep",
     );
 
@@ -234,19 +225,15 @@ test("WHOOP sleep-type enrichment preserves an explicitly cleared type", async (
     });
     assert.equal(cleared.eventId, eventId);
 
-    const eventShardPaths = [
-      ...legacy.eventShardPaths,
-      ...enriched.eventShardPaths,
-      cleared.ledgerFile,
-    ];
-    const beforeReplay = await readEventShards(vaultRoot, eventShardPaths);
-    await importDeviceBatch({
+    const mixedSnapshotEvents = [typedSleep, buildWhoopRecovery()];
+    const replayed = await importDeviceBatch({
       vaultRoot,
       provider: "whoop",
       accountId: "whoop-account",
-      importedAt: "2026-06-05T16:00:00.000Z",
-      events: enrichedSnapshotEvents,
+      importedAt: "2026-06-04T16:00:00.000Z",
+      events: mixedSnapshotEvents,
     });
+    assert.equal(replayed.applied, true);
 
     const preservedClear = await findEventByExternalRef({
       vaultRoot,
@@ -255,13 +242,120 @@ test("WHOOP sleep-type enrichment preserves an explicitly cleared type", async (
       resourceId,
     });
     assert.equal(preservedClear?.id, eventId);
-    assert.equal(preservedClear?.lifecycle?.revision, 3);
+    assert.equal(preservedClear?.lifecycle?.revision, 2);
     assert.equal(preservedClear?.source, "device");
     assert.equal(
       preservedClear?.kind === "sleep_session" ? preservedClear.sleepType : undefined,
       undefined,
     );
-    assert.deepEqual(await readEventShards(vaultRoot, eventShardPaths), beforeReplay);
+    assert.ok(await findEventByExternalRef({
+      vaultRoot,
+      system: "whoop",
+      resourceType: "recovery",
+      resourceId: "sleep-enrichment-recovery",
+      facet: "recovery-score",
+    }));
+
+    const eventShardPaths = [
+      ...initial.eventShardPaths,
+      cleared.ledgerFile,
+      ...replayed.eventShardPaths,
+    ];
+    const beforeExactReplay = await readEventShards(vaultRoot, eventShardPaths);
+    await importDeviceBatch({
+      vaultRoot,
+      provider: "whoop",
+      accountId: "whoop-account",
+      importedAt: "2026-06-05T16:00:00.000Z",
+      events: mixedSnapshotEvents,
+    });
+    assert.deepEqual(await readEventShards(vaultRoot, eventShardPaths), beforeExactReplay);
+  } finally {
+    await rm(vaultRoot, { recursive: true, force: true });
+  }
+});
+
+test("WHOOP typed-sleep replay preserves a source-retaining edit", async () => {
+  const vaultRoot = await mkdtemp(path.join(os.tmpdir(), "murph-event-edit-whoop-typed-sleep-"));
+
+  try {
+    await initializeVault({
+      vaultRoot,
+      createdAt: "2026-06-01T12:00:00.000Z",
+      timezone: "UTC",
+    });
+
+    const editedResourceId = "typed-edited-main-sleep";
+    const typedSleep = buildWhoopSleep(editedResourceId, "main_sleep");
+    const initial = await importDeviceBatch({
+      vaultRoot,
+      provider: "whoop",
+      accountId: "whoop-account",
+      importedAt: "2026-06-03T16:00:00.000Z",
+      events: [typedSleep],
+    });
+    const editedEventId = initial.events[0]?.id;
+    assert.ok(editedEventId);
+
+    const edit = await editEventRecord({
+      vault: vaultRoot,
+      lookup: editedEventId,
+      entityLabel: "event",
+      set: [
+        "title=Corrected typed overnight sleep",
+        "timeZone=America/Los_Angeles",
+        "dayKey=2026-06-02",
+      ],
+    });
+    const mixedSnapshotEvents = [typedSleep, buildWhoopRecovery()];
+    const replayed = await importDeviceBatch({
+      vaultRoot,
+      provider: "whoop",
+      accountId: "whoop-account",
+      importedAt: "2026-06-04T16:00:00.000Z",
+      events: mixedSnapshotEvents,
+    });
+    assert.equal(replayed.applied, true);
+
+    const preservedEdit = await findEventByExternalRef({
+      vaultRoot,
+      system: "whoop",
+      resourceType: "sleep",
+      resourceId: editedResourceId,
+    });
+    assert.equal(preservedEdit?.id, editedEventId);
+    assert.equal(preservedEdit?.lifecycle?.revision, 2);
+    assert.equal(preservedEdit?.source, "device");
+    assert.equal(preservedEdit?.title, "Corrected typed overnight sleep");
+    assert.equal(preservedEdit?.timeZone, "America/Los_Angeles");
+    assert.equal(preservedEdit?.dayKey, "2026-06-02");
+    assert.equal(
+      preservedEdit?.kind === "sleep_session" ? preservedEdit.sleepType : undefined,
+      "main_sleep",
+    );
+
+    assert.ok(await findEventByExternalRef({
+      vaultRoot,
+      system: "whoop",
+      resourceType: "recovery",
+      resourceId: "sleep-enrichment-recovery",
+      facet: "recovery-score",
+    }));
+
+    const eventShardPaths = [
+      ...initial.eventShardPaths,
+      edit.ledgerFile,
+      ...replayed.eventShardPaths,
+    ];
+    const beforeExactReplay = await readEventShards(vaultRoot, eventShardPaths);
+    await importDeviceBatch({
+      vaultRoot,
+      provider: "whoop",
+      accountId: "whoop-account",
+      importedAt: "2026-06-05T16:00:00.000Z",
+      events: mixedSnapshotEvents,
+    });
+    assert.deepEqual(await readEventShards(vaultRoot, eventShardPaths), beforeExactReplay);
   } finally {
     await rm(vaultRoot, { recursive: true, force: true });
   }
