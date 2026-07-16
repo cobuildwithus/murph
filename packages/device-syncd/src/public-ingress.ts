@@ -438,6 +438,15 @@ function shouldRunSdkConnectionEstablishedHook(existingAccount: PublicDeviceSync
   return !existingAccount || !isEstablishedDeviceSyncConnection(existingAccount);
 }
 
+function sdkSignInReconnectRequired(): ReturnType<typeof deviceSyncError> {
+  return deviceSyncError({
+    code: "SDK_SIGN_IN_RECONNECT_REQUIRED",
+    message: "Reconnect the device-sync provider before resuming SDK sign-in.",
+    retryable: false,
+    httpStatus: 409,
+  });
+}
+
 function assertSeededConnectionExternalAccountMatches(input: {
   provider: DeviceSyncProvider;
   seededExternalAccountId: string | null;
@@ -648,6 +657,86 @@ export class DeviceSyncPublicIngress {
     );
   }
 
+  /**
+   * Mints an SDK sign-in token for one exact established account without
+   * ensuring, creating, or reactivating provider lifecycle state.
+   */
+  async resumeSdkSignInSession(input: {
+    accountId: string;
+    provider: string;
+    ownerId: string;
+  }): Promise<SdkSignInSessionResult> {
+    const provider = this.requireProvider(input.provider);
+    return await this.runConnectionMutation(provider.provider, () =>
+      this.resumeSdkSignInSessionForProvider(provider, input)
+    );
+  }
+
+  private async resumeSdkSignInSessionForProvider(
+    provider: DeviceSyncProvider,
+    input: {
+      accountId: string;
+      provider: string;
+      ownerId: string;
+    },
+  ): Promise<SdkSignInSessionResult> {
+    const handler = provider.sdkConnectionHandler;
+    if (!handler) {
+      throw deviceSyncError({
+        code: "SDK_SIGN_IN_NOT_SUPPORTED",
+        message: `Device sync provider ${provider.provider} does not support SDK sign-in sessions.`,
+        retryable: false,
+        httpStatus: 500,
+      });
+    }
+
+    const ownerId = normalizeString(input.ownerId);
+    if (!ownerId) {
+      throw deviceSyncError({
+        code: "CONNECTION_OWNER_REQUIRED",
+        message: "SDK sign-in sessions must be initiated by an authenticated user.",
+        retryable: false,
+        httpStatus: 400,
+      });
+    }
+
+    const accountId = normalizeString(input.accountId);
+    const account = accountId
+      ? await this.store.getConnectionById(accountId)
+      : null;
+    if (
+      !account
+      || account.provider !== provider.provider
+      || !isEstablishedDeviceSyncConnection(account)
+      || !(await this.connectionBelongsToOwner(account.id, ownerId))
+    ) {
+      throw sdkSignInReconnectRequired();
+    }
+
+    const token = await handler.createSignInToken({
+      externalAccountId: account.externalAccountId,
+    });
+
+    // A disconnect can race a provider token mint. Re-read before returning
+    // so a token minted during that race is never handed to the companion.
+    const currentAccount = await this.store.getConnectionById(account.id);
+    if (
+      !currentAccount
+      || currentAccount.provider !== provider.provider
+      || currentAccount.externalAccountId !== account.externalAccountId
+      || !isEstablishedDeviceSyncConnection(currentAccount)
+      || !(await this.connectionBelongsToOwner(currentAccount.id, ownerId))
+    ) {
+      throw sdkSignInReconnectRequired();
+    }
+
+    return {
+      account: currentAccount,
+      signInToken: token.signInToken,
+      environment: token.environment,
+    };
+  }
+
   private async createSdkSignInSessionForProvider(
     provider: DeviceSyncProvider,
     input: {
@@ -787,12 +876,17 @@ export class DeviceSyncPublicIngress {
       return false;
     }
 
-    const getConnectionOwnerId = this.store.getConnectionOwnerId;
-    if (!getConnectionOwnerId) {
-      return false;
-    }
+    return await this.connectionBelongsToOwner(account.id, ownerId);
+  }
 
-    return await getConnectionOwnerId.call(this.store, account.id) === ownerId;
+  private async connectionBelongsToOwner(
+    accountId: string,
+    ownerId: string,
+  ): Promise<boolean> {
+    const getConnectionOwnerId = this.store.getConnectionOwnerId;
+    return getConnectionOwnerId
+      ? await getConnectionOwnerId.call(this.store, accountId) === ownerId
+      : false;
   }
 
   private async runSdkConnectionEstablishedHook(

@@ -13,6 +13,7 @@ export type DatabaseSync = import("node:sqlite").DatabaseSync;
 export type SqliteRow = Record<string, unknown>;
 
 export const QUERY_PROJECTION_SCHEMA_ID = "murph.query-projection";
+// 16: Make recovery the sole daily HRV MetricPoint owner.
 // 17: bounded sleep-window support evidence and range-indexed sleep reads.
 export const QUERY_PROJECTION_SQLITE_VERSION = 17;
 

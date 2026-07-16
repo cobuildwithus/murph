@@ -15,6 +15,7 @@ import {
   accountHostedAiUsageForAllowanceTx,
   type HostedAiUsageLimitNoticeCandidate,
 } from "./usage-allowance";
+import { buildHostedRetellPhoneCallUsageRecord } from "./usage-retell";
 import {
   sendClaimedHostedAiUsageLimitNoticeToLinqChat,
   sendClaimedHostedAiUsageLimitNoticeToTelegramThread,
@@ -120,6 +121,27 @@ export async function recordHostedAiUsageRecordsAndSendLimitNotices(input: {
   return {
     recordedIds: result.recordedIds,
   };
+}
+
+export async function recordHostedRetellPhoneCallUsageTx(input: {
+  combinedCostUsdMicros: number;
+  memberId: string;
+  occurredAt: Date;
+  phoneCallId: string;
+  providerCallId: string;
+  tx: Prisma.TransactionClient;
+}): Promise<void> {
+  const record = buildHostedRetellPhoneCallUsageRecord(input);
+  await persistHostedAiUsageRecordTx({
+    memberId: input.memberId,
+    record,
+    tx: input.tx,
+  });
+  await accountHostedAiUsageForAllowanceTx({
+    memberId: input.memberId,
+    record,
+    tx: input.tx,
+  });
 }
 
 async function recordHostedAiUsageRecordsForAccounting(input: {

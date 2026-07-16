@@ -4120,6 +4120,197 @@ test("public ingress SDK sign-in session intentionally reconnects a disconnected
   assert.equal(connectionEstablishedEvents, 2);
 });
 
+test("public ingress SDK sign-in resume mints against the exact active account without lifecycle writes", async () => {
+  const store = new InMemoryPublicIngressStore();
+  let connectionEstablishedEvents = 0;
+  let ensureConnectionCalls = 0;
+  let mintedTokens = 0;
+  const ingress = createDeviceSyncPublicIngress({
+    publicBaseUrl: "https://sync.example.test/device-sync",
+    registry: createDeviceSyncRegistry([
+      createFakeProvider({
+        sdkConnectionHandler: {
+          async ensureConnection() {
+            ensureConnectionCalls += 1;
+            return {
+              externalAccountId: "demo-sdk-user-1",
+              tokens: {
+                accessToken: "<REDACTED_ACCESS_TOKEN>",
+              } satisfies ProviderAuthTokens,
+              setupPhase: "source_confirmed",
+            };
+          },
+          async createSignInToken() {
+            mintedTokens += 1;
+            return {
+              signInToken: `sdk-sign-in-token-${mintedTokens}`,
+              environment: "sandbox",
+            };
+          },
+        },
+      }),
+    ]),
+    store,
+    hooks: {
+      onConnectionEstablished() {
+        connectionEstablishedEvents += 1;
+      },
+    },
+  });
+
+  const connected = await ingress.createSdkSignInSession({
+    provider: "demo",
+    ownerId: "member-1",
+  });
+  const resumed = await ingress.resumeSdkSignInSession({
+    accountId: connected.account.id,
+    provider: "demo",
+    ownerId: "member-1",
+  });
+
+  assert.equal(resumed.account.id, connected.account.id);
+  assert.equal(resumed.signInToken, "sdk-sign-in-token-2");
+  assert.equal(ensureConnectionCalls, 1);
+  assert.equal(store.upsertConnectionCalls, 1);
+  assert.equal(connectionEstablishedEvents, 1);
+});
+
+test("public ingress SDK sign-in resume rejects terminal, missing, mismatched, and foreign accounts", async () => {
+  const store = new InMemoryPublicIngressStore();
+  let ensureConnectionCalls = 0;
+  let mintedTokens = 0;
+  const sdkConnectionHandler = {
+    async ensureConnection() {
+      ensureConnectionCalls += 1;
+      return {
+        externalAccountId: "demo-sdk-user-1",
+        tokens: {
+          accessToken: "<REDACTED_ACCESS_TOKEN>",
+        } satisfies ProviderAuthTokens,
+        setupPhase: "source_confirmed" as const,
+      };
+    },
+    async createSignInToken() {
+      mintedTokens += 1;
+      return {
+        signInToken: `sdk-sign-in-token-${mintedTokens}`,
+        environment: "sandbox" as const,
+      };
+    },
+  };
+  const ingress = createDeviceSyncPublicIngress({
+    publicBaseUrl: "https://sync.example.test/device-sync",
+    registry: createDeviceSyncRegistry([
+      createFakeProvider({ sdkConnectionHandler }),
+      createFakeProvider({ provider: "other", sdkConnectionHandler }),
+    ]),
+    store,
+  });
+  const connected = await ingress.createSdkSignInSession({
+    provider: "demo",
+    ownerId: "member-1",
+  });
+  const expectResumeRejected = async (input: {
+    accountId: string;
+    provider: string;
+    ownerId: string;
+  }) => {
+    await assert.rejects(
+      () => ingress.resumeSdkSignInSession(input),
+      (error: unknown) =>
+        error instanceof DeviceSyncError
+        && error.code === "SDK_SIGN_IN_RECONNECT_REQUIRED"
+        && error.httpStatus === 409,
+    );
+  };
+
+  store.patchAccountStatus(connected.account.id, "disconnected");
+  await expectResumeRejected({
+    accountId: connected.account.id,
+    provider: "demo",
+    ownerId: "member-1",
+  });
+  store.patchAccountStatus(connected.account.id, "reauthorization_required");
+  await expectResumeRejected({
+    accountId: connected.account.id,
+    provider: "demo",
+    ownerId: "member-1",
+  });
+  store.patchAccountStatus(connected.account.id, "active");
+  await expectResumeRejected({
+    accountId: connected.account.id,
+    provider: "demo",
+    ownerId: "member-2",
+  });
+  await expectResumeRejected({
+    accountId: connected.account.id,
+    provider: "other",
+    ownerId: "member-1",
+  });
+  await expectResumeRejected({
+    accountId: "missing-account",
+    provider: "demo",
+    ownerId: "member-1",
+  });
+
+  assert.equal(ensureConnectionCalls, 1);
+  assert.equal(store.upsertConnectionCalls, 1);
+  assert.equal(mintedTokens, 1);
+});
+
+test("public ingress SDK sign-in resume withholds a token when disconnect wins during mint", async () => {
+  const store = new InMemoryPublicIngressStore();
+  let accountId = "";
+  let mintedTokens = 0;
+  const ingress = createDeviceSyncPublicIngress({
+    publicBaseUrl: "https://sync.example.test/device-sync",
+    registry: createDeviceSyncRegistry([
+      createFakeProvider({
+        sdkConnectionHandler: {
+          async ensureConnection() {
+            return {
+              externalAccountId: "demo-sdk-user-1",
+              tokens: {
+                accessToken: "<REDACTED_ACCESS_TOKEN>",
+              } satisfies ProviderAuthTokens,
+              setupPhase: "source_confirmed",
+            };
+          },
+          async createSignInToken() {
+            mintedTokens += 1;
+            if (mintedTokens === 2) {
+              store.patchAccountStatus(accountId, "disconnected");
+            }
+            return {
+              signInToken: `sdk-sign-in-token-${mintedTokens}`,
+              environment: "sandbox",
+            };
+          },
+        },
+      }),
+    ]),
+    store,
+  });
+  const connected = await ingress.createSdkSignInSession({
+    provider: "demo",
+    ownerId: "member-1",
+  });
+  accountId = connected.account.id;
+
+  await assert.rejects(
+    () => ingress.resumeSdkSignInSession({
+      accountId,
+      provider: "demo",
+      ownerId: "member-1",
+    }),
+    (error: unknown) =>
+      error instanceof DeviceSyncError
+      && error.code === "SDK_SIGN_IN_RECONNECT_REQUIRED",
+  );
+  assert.equal(mintedTokens, 2);
+  assert.equal(store.upsertConnectionCalls, 1);
+});
+
 test("public ingress SDK sign-in session refuses to reuse an established account for a different owner", async () => {
   const store = new InMemoryPublicIngressStore();
   let mintedTokens = 0;

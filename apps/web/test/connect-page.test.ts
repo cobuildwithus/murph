@@ -2214,6 +2214,148 @@ test("ConnectSourcesGrid shows a recovery dialog when a device connect intent is
   await rendered.cleanup();
 });
 
+test("ConnectSourcesGrid shows the WHOOP Apple Health fallback when an intent reaches capacity", async () => {
+  const claim = "dc_12345678901234567890123456789012";
+  const fetch = vi.fn(async (
+    _input: RequestInfo | URL,
+    _init?: RequestInit,
+  ) => {
+    void _input;
+    void _init;
+    return Response.json({
+      error: {
+        code: "WHOOP_DIRECT_CONNECT_CAP_REACHED",
+        message:
+          "Direct WHOOP connections are full right now. You can keep WHOOP syncing through Apple Health in the Murph app.",
+        retryable: false,
+      },
+    }, { status: 409 });
+  });
+  vi.stubGlobal("fetch", fetch);
+
+  const { ConnectSourcesGrid } = await import("../app/(dashboard)/connect/connect-page-client");
+  const rendered = await renderClientComponent(createElement(ConnectSourcesGrid, {
+    initialConnectIntent: {
+      claim,
+      connectSource: "whoop",
+    },
+    sources: [
+      {
+        description: "Recovery, strain, sleep, and heart rate.",
+        id: "whoop",
+        logo: {
+          className: "h-auto max-h-7 w-auto max-w-[8rem] object-contain",
+          height: 15,
+          src: "/brand-logos/connect/whoop.svg",
+          width: 96,
+        },
+        name: "Whoop",
+      },
+    ],
+  }));
+
+  await vi.waitFor(() => {
+    assert.equal(fetch.mock.calls.length, 1);
+    assert.match(rendered.container.textContent ?? "", /Keep WHOOP syncing through Apple Health/);
+  });
+
+  assert.equal(fetch.mock.calls[0]?.[0], `/device/connect/${claim}`);
+  assert.doesNotMatch(rendered.container.textContent ?? "", /Connecting Whoop/);
+  assert.doesNotMatch(rendered.container.textContent ?? "", /Connection link unavailable/);
+  assert.equal(
+    rendered.container.querySelector("input[aria-label='Search sources']"),
+    null,
+  );
+  assert.match(
+    rendered.container.textContent ?? "",
+    /More → App Settings → Integrations → Apple Health/,
+  );
+  assert.match(
+    rendered.container.textContent ?? "",
+    /Tap Connect, choose the categories you want to share, then tap Allow/,
+  );
+  assert.match(
+    rendered.container.textContent ?? "",
+    /Download or open Murph, sign in, and connect Apple Health/,
+  );
+
+  const appStoreLink = rendered.container.querySelector(
+    "a[href='https://apps.apple.com/us/app/murph-ai/id6786145859']",
+  );
+  assert.ok(appStoreLink instanceof rendered.window.HTMLAnchorElement);
+  assert.equal(appStoreLink.target, "_blank");
+  assert.equal(appStoreLink.rel, "noopener noreferrer");
+  assert.equal(
+    appStoreLink.getAttribute("aria-label"),
+    "Download Murph for iPhone (opens in a new tab)",
+  );
+  assert.equal(rendered.assign.mock.calls.length, 0);
+
+  const viewOtherSourcesButton = [...rendered.container.querySelectorAll("button")]
+    .find((button) => button.textContent === "View other sources");
+  assert.ok(viewOtherSourcesButton instanceof rendered.window.HTMLButtonElement);
+
+  await act(async () => {
+    viewOtherSourcesButton.dispatchEvent(new rendered.window.Event("click", { bubbles: true }));
+  });
+
+  assert.ok(rendered.container.querySelector("input[aria-label='Search sources']"));
+  assert.doesNotMatch(rendered.container.textContent ?? "", /Keep WHOOP syncing through Apple Health/);
+
+  await rendered.cleanup();
+});
+
+test("ConnectSourcesGrid shows the WHOOP Apple Health fallback for a manual start", async () => {
+  const fetch = vi.fn(async (
+    _input: RequestInfo | URL,
+    _init?: RequestInit,
+  ) => {
+    void _input;
+    void _init;
+    return Response.json({
+      error: {
+        code: "WHOOP_DIRECT_CONNECT_CAP_REACHED",
+        message:
+          "Direct WHOOP connections are full right now. You can keep WHOOP syncing through Apple Health in the Murph app.",
+        retryable: false,
+      },
+    }, { status: 409 });
+  });
+  vi.stubGlobal("fetch", fetch);
+
+  const { ConnectSourcesGrid } = await import("../app/(dashboard)/connect/connect-page-client");
+  const rendered = await renderClientComponent(createElement(ConnectSourcesGrid, {
+    sources: [
+      {
+        connectTarget: "whoop",
+        description: "Recovery, strain, sleep, and heart rate.",
+        id: "whoop",
+        logo: {
+          className: "h-auto max-h-7 w-auto max-w-[8rem] object-contain",
+          height: 15,
+          src: "/brand-logos/connect/whoop.svg",
+          width: 96,
+        },
+        name: "Whoop",
+      },
+    ],
+  }));
+
+  await act(async () => {
+    rendered.button.dispatchEvent(new rendered.window.Event("click", { bubbles: true }));
+  });
+
+  await vi.waitFor(() => {
+    assert.match(rendered.container.textContent ?? "", /Keep WHOOP syncing through Apple Health/);
+  });
+
+  assert.equal(fetch.mock.calls[0]?.[0], "/api/connect-sources/whoop/start");
+  assert.equal(rendered.assign.mock.calls.length, 0);
+  assert.doesNotMatch(rendered.container.textContent ?? "", /Connection could not be started/);
+
+  await rendered.cleanup();
+});
+
 test("ConnectSourcesGrid labels Telegram recovery as texting Murph", async () => {
   const claim = "dc_12345678901234567890123456789012";
   const fetch = vi.fn(async () =>

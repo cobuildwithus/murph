@@ -1,6 +1,6 @@
 # iOS Companion App — MVP Build Spec
 
-Last verified: 2026-07-13
+Last verified: 2026-07-14
 
 Parent spec: `agent-docs/product-specs/companion-app.md` (strategy, phases,
 review posture). This doc is the concrete build plan for the first shippable
@@ -13,9 +13,10 @@ narrow native exception reads WHOOP's `WHOOP Recovery` and `WHOOP Strain`
 custom metadata because Junction and normal HealthKit quantity/category
 mapping omit those values. The exception is closed to those two keys and does
 not create a general native HealthKit ingestion engine. A separately gated
-internal path also supports a direct WHOOP spot-RMSSD reading; it does not
-change the source-agnostic Apple Health sync or claim parity with WHOOP's
-proprietary overnight metrics.
+internal beta path derives one overnight PRV RMSSD estimate from a WHOOP 5/MG
+BLE pulse-interval stream; it does not change the source-agnostic Apple Health
+sync or claim parity with clinical ECG HRV, WHOOP's proprietary overnight HRV,
+or WHOOP Recovery.
 
 Growth framing: the nearest payoff is not WHOOP — it is **Apple Watch and
 iPhone-health members**. Apple Health remains a native-only authorization flow;
@@ -35,6 +36,16 @@ growth beyond this doc is a signal to stop and re-justify.
 Nothing else. No settings, no data browsing, no chat, no vault. The app is now
 approved for public App Store distribution at
 `https://apps.apple.com/us/app/murph-ai/id6786145859`.
+
+The separately gated direct-WHOOP beta adds one control to the existing Connect
+screen, not another workflow: **Connect WHOOP** explicitly enrolls only the
+local CoreBluetooth band and requests local-notification permission once. It
+does not send hosted Junction `connectionIntent: "connect"`. After that, the
+app continuously subscribes and measures the fixed local `00:00–08:00` window
+automatically. There is no nightly Start/Finish action. The member may
+background Murph or lock the phone, but force-quitting prevents iOS from
+relaunching the BLE app until the member opens it again; one local watchdog
+reminder handles that exception.
 
 For WHOOP members, the relay handoff uses WHOOP's documented menu path: **More
 → App Settings → Integrations → Apple Health → Connect**, then enable all
@@ -108,11 +119,11 @@ add Telegram or Google, we must add Sign in with Apple in the same release.
 | Piece | Detail |
 | --- | --- |
 | UI | SwiftUI, `@main App` + `UIApplicationDelegateAdaptor` (Junction requires an AppDelegate hook) |
-| Health | `vital-ios` 1.8.8 via SPM (`https://github.com/tryvital/vital-ios`), products **`VitalCore` + `VitalHealthKit` only** — never `VitalDevices` in v1 (separate enterprise license; BLE is out of scope anyway) |
+| Health | `vital-ios` 1.8.8 via SPM (`https://github.com/tryvital/vital-ios`), products **`VitalCore` + `VitalHealthKit` only** — never `VitalDevices` in v1 (separate enterprise license); the gated WHOOP beta uses its own narrow CoreBluetooth transport |
 | Auth | `privy-ios` via SPM (`https://github.com/privy-io/privy-ios`, binary XCFramework) |
 | Deployment target | **iOS 17** (Privy Swift SDK floor is iOS 17+ / Xcode 16+, verified; vital-ios floor is iOS 14) |
 | Bundle ID | `ai.withmurph.app` |
-| Repo placement | separate native iOS repository; no local database, no general HealthKit reader, no challenge/scoring logic in the app; one bounded reader exists for the two approved WHOOP metadata keys |
+| Repo placement | separate native iOS repository; no local database, no general HealthKit reader, no challenge/scoring logic in the app; one bounded reader exists for the two approved WHOOP metadata keys, and the WHOOP BLE beta uses one OS-protected versioned state file for its scalar checkpoint, three-envelope outbox, and exact app-scoped CoreBluetooth peripheral UUID |
 
 ### Licensing gate (ship/no-ship)
 
@@ -142,8 +153,12 @@ Login screen
 Token exchange (on demand, immediately before SDK exchange; retry = new token)
   └─ app sends Privy auth token to Murph web API
   └─ backend verifies Privy identity (@privy-io/node, already a dependency)
-  └─ backend resolves/creates the member's Junction user (existing
-     junction-client) and calls POST /v2/user/{user_id}/sign_in_token
+  └─ backend applies intent against durable Junction state: known same-member
+     passive repair sends resume and requires exactly one established row;
+     fresh/unproven install omits intent, resuming exactly one established row
+     or establishing only when zero provider rows exist; terminal or ambiguous
+     state rejects; only a future visible hosted reconnect may send connect
+  └─ backend calls POST /v2/user/{user_id}/sign_in_token for the selected lane
   └─ app: try await VitalClient.signIn(withRawToken: token)
        // SDK exchanges the short-lived token for on-device credentials,
        // then discards it — backend never stores or logs it
@@ -164,8 +179,16 @@ Connect screen
           It hashes the HealthKit sync identifier (UUID fallback) on-device,
           uploads at most 200 closed records per request, and never uploads a
           raw sample identifier or arbitrary metadata.
+  └─ [Connect WHOOP] internal-beta control:
+       1. enroll exactly one local band and request local-notification permission
+          without sending hosted `connectionIntent: "connect"`
+       2. keep the BLE subscription active and automatically reduce only the
+          fixed local `00:00–08:00` window
   └─ status states (below), driven by backend evidence
 ```
+
+Passive Junction SDK sign-in repair is a separate lifecycle path, not an effect
+of the Connect WHOOP control. Its authority rules are defined under Backend Work.
 
 ### Sync-status states (backend evidence is the truth)
 
@@ -231,15 +254,26 @@ Apple HealthKit with an explicit unverified WHOOP-metadata hint. Therefore:
 
 ## Backend Work
 
-Three small endpoints in `apps/web`, all authenticated via Privy token
+Four small endpoints in `apps/web`, all authenticated via Privy token
 verification (existing `@privy-io/node`):
 
 1. `POST /api/device-sync/companion/sign-in-token`
-   — resolve member → resolve/create Junction user (existing
-   `junction-client`) → **ensure an active junction `device_connection`
-   account bound to that Junction user id** → `POST
-   /v2/user/{user_id}/sign_in_token` (small junction-client addition) →
-   return once. Never persist or log the token (redaction test required).
+   — resolve member → apply lifecycle intent against durable connection state →
+   resume the established Junction user or conditionally establish the first
+   one through the existing `junction-client` → `POST
+   /v2/user/{user_id}/sign_in_token` → return once. Never persist or log the
+   token (redaction test required).
+   The local direct-BLE Connect WHOOP action sends no hosted lifecycle intent;
+   it only enrolls the CoreBluetooth band. A known same-member passive SDK
+   repair sends `connectionIntent: "resume"` and requires exactly one
+   already-established member-owned Junction connection. A fresh or unproven
+   installation omits intent so durable server state decides: exactly one
+   established row resumes, zero provider rows establish the first lane, and
+   terminal or ambiguous state rejects without mutation. Only a future visible
+   hosted-health/Junction Reconnect action may send
+   `connectionIntent: "connect"` and ensure/reactivate the Junction
+   `device_connection`. Neither resume nor omitted intent may reverse a durable
+   disconnect.
    Sandbox/prod must be impossible to mix (the junction client validates the
    API key prefix against the configured environment and returns the active
    environment in the response). Request body carries `appInstallationId`,
@@ -263,8 +297,9 @@ verification (existing `@privy-io/node`):
    payload on the member's active Junction runtime lane. That active
    member-owned connection is the ingestion authority; projected source rows
    are optional evidence used only to disambiguate multiple active Junction
-   lanes, never a prerequisite for the fresh SDK-created lane. At most 16
-   payloads may remain queued per connection; a full backlog returns retryable `429`.
+   lanes, never a prerequisite for the zero-provider-row omitted-intent
+   bootstrap. At most 16 payloads may remain queued per connection; a full
+   backlog returns retryable `429`.
    The mailbox wake contains no health values. `device-syncd` maps the closed
    batch to Junction sleep/activity summaries under Apple HealthKit provenance
    with an unverified WHOOP-metadata source hint, and `packages/importers` plus
@@ -280,75 +315,105 @@ release paths, verify both, and release the iOS app last. After the iOS release,
 keep both backend surfaces on feature-aware versions while supported clients
 can upload companion metadata.
 4. `POST /api/device-sync/companion/hrv-rmssd`
-   — validate a strict, sub-512-byte `murph.companion.hrv-rmssd.v1`
-   observation for exactly 60,000 milliseconds, reuse the single active
-   member-owned Junction device
-   connection established by the explicit sign-in-token flow, stage one
-   encrypted compact dirty job, and wake the existing hosted device-sync
-   runtime. Missing, terminal, or ambiguous connection state fails closed;
-   data upload never establishes or reconnects a Junction account. The
-   established-lane requirement is rechecked under the connection mutation
-   lock. Disconnect commits a durable fail-closed intent before provider
-   revocation, so companion uploads and reconnect writes cannot enter the lane
-   until disconnect finalizes or a retry completes the interrupted operation.
-   Ordinary companion metadata continues to require the active member-owned
-   lane described above; it does not inherit HRV's source-confirmation gate. The
-   contract has no field for raw R-R
-   intervals, BLE packets, device identity, heart-rate samples, or Apple
-   Health values; unknown fields are rejected. Structural parsing happens at
-   the route, while the replay-aware service checks retained receipt identity
-   before applying freshness or connection-liveness gates to first admission.
-   The first accepted envelope owns its client capture id during the retained
-   replay window: a web-owned Postgres receipt containing only connection-scoped
-   capture-key and strict-envelope hashes plus `created_at` keeps exact replay
-   idempotent after pending work is acknowledged or the connection disconnects;
-   changed content conflicts. Receipts are excluded from hosted workspace
-   snapshots, lazily expire after 30 days through the indexed
-   `(user_id, connection_id, created_at)` path, and are capped at 1,024 retained
-   rows per connection. After expiry, a replay is new admission and must pass
-   the normal freshness and live-connection gates. Each accepted canonical
-   observation receives a verified SHA-256 admission identity over the strict
-   derived envelope. That identity owns the dirty payload, local job, and
-   canonical external reference, so separate changed admissions that reuse a
-   client capture id after receipt expiry remain distinct. The accepted
-   companion RMSSD encrypted dirty payload remains the durable retry authority
-   until its mapped local job completes the canonical importer write. A
-   revision-only checkpoint may advance while the payload remains pending, but
-   the payload id is acknowledged only after import success; yield, retryable failure, or loss of
-   the machine-local queue therefore causes a safe refetch instead of data loss.
-   A later disconnect does not cancel an already accepted credential-free local
-   import. Runtime hydration keys the local account by
-   the opaque hosted connection id before provider identity, so terminal
-   privacy scrubbing cannot fork the lane into a stale runnable account. An
-   unbound legacy row with unsanitized identity may be adopted through its
-   unique provider-plus-external-account match. Once a terminal scrub leaves
-   only opaque identity, fallback adoption requires a unique candidate with the
-   same provider and connection epoch. A recognized original-plus-opaque fork
-   from an older runtime is consolidated transactionally with its jobs and
-   sources preserved on the hosted-bound row; additional or opaque siblings
-   fail closed.
-   Runtime import writes canonical `hrv-rmssd` milliseconds with direct-WHOOP
-   provenance. Apple HealthKit HRV is canonical `hrv-sdnn`; it never aliases to
-   or aggregates with the direct WHOOP RMSSD series.
+   — accept only the strict, sub-512-byte
+   `murph.companion.overnight-prv-rmssd.v1` summary. After explicit enrollment,
+   the phone continuously subscribes to the WHOOP 5/MG pulse-interval stream
+   and automatically evaluates a fixed `00:00–08:00` local civil-time window.
+   The schedule freezes that night's timezone rules, so a timezone change does
+   not move an in-progress or retained occurrence. A fully traversed occurrence
+   is bounded to 84...108 completed five-minute windows: typically 84, 96, or
+   108, with intermediate counts such as 90 or 102 for half-hour transitions.
+   The phone requires 240–300 seconds of
+   pair-supported interval coverage inside each accepted window and computes
+   the equal-weight mean of accepted window RMSSDs. It uploads exactly `schema`,
+   `methodVersion`, `nightDate`, `rmssdMs`, `completedWindowCount`, and
+   `acceptedWindowCount`; the completed count covers full attempted five-minute
+   windows. The sole accepted method is
+   `prv-rmssd-5m-mean-scheduled-0000-0800-local-v1`. At least 48 windows must be
+   accepted and at least half of completed windows must qualify; completed
+   windows must remain within the schedule-derived 84...108 bound. Per-window
+   duration is phone algorithm policy; the backend does not reconstruct or falsely
+   revalidate it. A BLE disconnect hard-breaks interval adjacency and the
+   current window segment. Reconnect may continue the same scheduled night,
+   but no interval or window crosses the gap;
+   the final coverage gates decide whether the night qualifies. The only
+   process-restorable health-derived state is one schema-versioned,
+   OS-protected scalar checkpoint limited to frozen schedule/night identity,
+   next window position, completed/accepted counts, and accepted-RMSSD sum,
+   plus at most three already-derived strict-envelope outbox entries. The
+   exact app-scoped CoreBluetooth peripheral UUID may persist in the same
+   protected file solely to restore the enrolled band; it never uploads or
+   enters logs. The incomplete current window is discarded across a process
+   gap; intervals, partial-window state, per-window values, WHOOP account
+   identity, and every other band identifier remain memory-only. One local
+   watchdog notification is continually postponed while BLE callbacks are
+   healthy and may remind the member to reopen Murph when they stop. Normal
+   backgrounding or phone locking requires no action; force-quit prevents BLE
+   relaunch until the app is opened again. The backend owns no capture scheduler.
 
-### Direct spot-HRV deployment order and rollback floor
+   The contract has no exact capture timestamp, capture duration, timezone
+   offset, coverage milliseconds, raw R-R interval, BLE packet, packet
+   timestamp, heart-rate sample, per-window value, device identity, Apple
+   Health value, or WHOOP account field; unknown fields fail. Reuse the one
+   active member-owned Junction connection selected by the sign-in authority
+   rules above,
+   stage one compact encrypted dirty payload, and wake the existing hosted runtime.
+   Missing, terminal, disconnecting, or ambiguous connection state fails
+   closed; data ingress and outbox retry never establish or reactivate an
+   account. Local band disconnect or sign-out disables BLE resume and clears
+   local enrollment, checkpoint, peripheral UUID, and unsent outbox state after
+   band cleanup without silently changing hosted connection state.
+
+   The first accepted strict envelope owns `(connection, nightDate)` for 30
+   days. A sparse web receipt containing only member/connection binding, hashed
+   receipt id, strict-envelope hash, and creation time makes exact replay a
+   no-op before first-admission freshness and connection gates; changed content
+   conflicts. Receipts are excluded from workspace snapshots, lazily expire
+   through the indexed owner/connection/time path, and are capped at 64 per
+   connection. Each accepted envelope carries a verified SHA-256 admission
+   identity through encrypted staging, the same local retry row, Junction
+   normalization, and canonical external identity. Yield, lease expiry,
+   retryable failure, hosted refetch, cold restore, or later disconnect retains
+   that payload and row. Only canonical success or the exact structurally
+   invalid terminal result acknowledges the hosted payload.
+
+   Receipt cardinality is connection plus `nightDate`; canonical cardinality is
+   vault plus source (`whoop`) plus `nightDate`. Runtime import writes one
+   immutable summary-grain `whoop-ble-overnight-prv-rmssd` observation with a
+   synthetic 12:00Z `occurredAt`, no event `timeZone`, and no fabricated
+   capture timestamp. It has no generic `hrv` or biomarker alias. This beta
+   wellness PRV estimate remains distinct from Apple HealthKit `hrv-sdnn` and
+   the existing selected daily provider `hrv-rmssd` series containing WHOOP
+   Recovery, Oura, or other provider evidence.
+
+### Direct overnight PRV deployment order and rollback floor
 
 Deploy the Cloudflare runtime first with `container_rollout=immediate`, require
 managed-container smoke to report the new runner-bundle fingerprint, and pass a
 functional compact-observation import smoke. Then deploy web acceptance and
-release iOS last. Do not probe runtime availability on each request for this
-low-volume, release-gated lane. Roll back web acceptance first, let
-already-staged jobs drain, and only then remove runtime support. This explicit
-order does not change the metadata lane's iOS-last rollout above.
+resume/omitted-intent/future-connect lifecycle authority and release iOS last.
+The local direct-BLE enrollment control sends no hosted `connect`. Before iOS
+distribution, a signed physical iPhone must pass a continuous-subscription and
+overnight WHOOP 5/MG capture-to-query test, including background, reconnect,
+force-quit-watchdog, DST, and timezone-change cases. Network/log inspection must
+prove the forbidden raw data is absent, and paired-ECG validation must support
+the beta method. Do not probe runtime availability on each request. Once an iOS
+client emits the scheduled method, runtime and web support are the rollback
+floor until those clients and all staged envelopes drain. Roll back in reverse
+order: stop iOS distribution, drain staged work before removing web acceptance,
+then remove runtime support. This explicit order does not change the metadata
+lane's iOS-last rollout above.
 
-### Why the account-ensure step is load-bearing (verified in repo)
+### Why conditional account ensure is load-bearing (verified in repo)
 
 Webhook ingestion resolves the account via
 `getConnectionByExternalAccount`; **webhooks for a Junction user with no
 matching `device_connection` record are delayed as orphans**
 (`public-ingress.ts` "Delaying webhook for unknown device sync account").
 The SDK flow has no Link callback to create that record, so the
-sign-in-token endpoint must do it. Rules:
+sign-in-token endpoint must establish it only for zero-row omitted-intent
+bootstrap or a future explicit hosted reconnect. `resume`, terminal state, and
+ambiguous state must never create a replacement. Rules:
 
 - Idempotent: resolve any existing junction account for the member first
   (a member with a prior Junction Link device shares the same Junction
@@ -399,6 +464,21 @@ are existing-pipeline concerns to confirm during the spike.
     sends no raw identifiers, and lands Recovery plus workout Strain through
     the canonical importer path. Denied read permission must behave as an
     empty best-effort enrichment without downgrading Junction sync state.
+11. Internal WHOOP beta proof: one explicit Connect WHOOP action survives
+    ordinary relaunch/background restoration without re-enrollment; a signed
+    device completes the fixed-window capture across ordinary, one-hour DST,
+    and half-hour transition shapes; timezone change preserves the frozen night;
+    disconnect gaps break adjacency; force-quit allows the already-scheduled
+    watchdog reminder but no false claim of continued capture; and reopen
+    restores only the locally enrolled band. The test must separately prove
+    known-member `resume`, fresh-install omitted-intent inference, and rejection
+    of terminal/ambiguous hosted state without sending `connect`.
+12. Crash/relaunch proof reads back only the protected scalar checkpoint and
+    at most three strict six-field envelopes, plus the exact app-scoped
+    CoreBluetooth peripheral UUID. The UUID never leaves protected local state;
+    network and logs contain no band identifier, while persisted state, network,
+    and logs contain no raw BLE packet, interval, per-window value, exact capture
+    timestamp, or timezone detail.
 
 ## No-Go Conditions
 
@@ -427,8 +507,9 @@ licensing unresolved.
   description, 5.1.3(i) specific-data disclosure, privacy nutrition labels,
   and explicit consent for third-party AI processing of synced health data
   (Apple's Nov 2025 guideline) before public submission.
-- Android, `VitalDevices`, widgets, Live Activities, watchOS, background WHOOP
-  capture, and WHOOP historical offload (parent spec roadmap).
+- Android, `VitalDevices`, widgets, Live Activities, watchOS, and WHOOP
+  historical offload (parent spec roadmap). The narrow CoreBluetooth automatic
+  overnight beta above does not make a generic wearable background service.
 - No analytics events containing health payloads.
 
 ## Open Items

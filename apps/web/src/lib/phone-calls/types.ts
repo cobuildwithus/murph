@@ -29,6 +29,19 @@ export type PhoneCallRuntimeReconciliationResult =
       state: "not_found";
     };
 
+export type HostedPhoneCallProviderUsage = {
+  combinedCostUsdMicros: number;
+  occurredAt: Date;
+  providerCallId: string;
+};
+
+export type HostedPhoneCallProviderUsageResolution =
+  | { state: "pending" }
+  | {
+      state: "ready";
+      usage: HostedPhoneCallProviderUsage;
+    };
+
 const phoneCallRuntimeNoActiveEffectErrors = new WeakSet<object>();
 
 export function markPhoneCallRuntimeNoActiveEffect<TError>(error: TError): TError {
@@ -44,6 +57,10 @@ export function hasPhoneCallRuntimeNoActiveEffect(error: unknown): boolean {
 }
 
 export interface PhoneCallRuntime {
+  resolveTerminalUsage?(
+    providerCallId: string,
+    options?: { signal?: AbortSignal },
+  ): Promise<HostedPhoneCallProviderUsageResolution>;
   resolveProviderCall(
     murphPhoneCallId: string,
     options?: { signal?: AbortSignal },

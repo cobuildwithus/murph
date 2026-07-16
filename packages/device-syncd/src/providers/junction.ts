@@ -1285,7 +1285,7 @@ export function createJunctionDeviceSyncProvider(
         accountId: buildJunctionImportAccountId(context.account.externalAccountId),
         connectionId: context.account.id,
         importedAt: context.now,
-        companionHrvRmssd: [{ admissionId, observation }],
+        companionHrvRmssd: { admissionId, observation },
       });
       return {};
     }

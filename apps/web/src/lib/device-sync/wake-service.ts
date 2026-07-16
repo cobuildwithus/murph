@@ -642,7 +642,7 @@ export async function acceptHostedCompanionHrvRmssdObservation(input: {
     connectionId: input.account.id,
     eventType: "companion.hrv-rmssd.created",
     // Dirty-state and mailbox freshness describe server acceptance. The
-    // physiological observation time remains inside the encrypted payload.
+    // source night remains inside the encrypted payload.
     occurredAt: input.acceptedAt,
     resource: input.resource,
     resourceCategory: "derived",

@@ -561,6 +561,20 @@ describe('assistant execution prompt contract', () => {
     expect(text).not.toContain('GPT-5 execution bias:')
   })
 
+  it('cleans up temporary files without breaking pending delivery work', () => {
+    const prompt = buildAssistantSystemPrompt(createCommonCodexPromptInput())
+
+    expect(prompt).toContain(
+      'Delete temporary files before the turn ends.',
+    )
+    expect(prompt).toContain(
+      'Keep one only while a pending action needs it, then delete it.',
+    )
+    expect(prompt).toContain(
+      'Never delete user files or durable vault records.',
+    )
+  })
+
   it('always includes the progress update contract', () => {
     const prompt = buildAssistantSystemPrompt(createCommonCodexPromptInput())
 
@@ -1238,7 +1252,7 @@ describe('assistant system prompt cache stability', () => {
     )
 
     expect(layers.staticCacheableCorePrompt.length).toBeLessThanOrEqual(8_000)
-    expect(layers.stableRouteCapabilityPrompt.length).toBeLessThanOrEqual(62_000)
+    expect(layers.stableRouteCapabilityPrompt.length).toBeLessThanOrEqual(63_000)
   })
 
   it('passes the injected CLI contract through byte-for-byte at the stable-route tail', () => {
@@ -1915,6 +1929,7 @@ describe('assistant notification decision guidance', () => {
   it('keeps group notification decisions on room-owned context and actions', () => {
     const prompt = buildAssistantNotificationDecisionSystemPromptWithCacheMetadata(
       createCommonNotificationPromptInput({
+        assistantTone: 'casual',
         assistantContextSnapshotPrompt: 'PRIVATE_GROUP_NOTIFICATION_CONTEXT',
         assistantHostedDeviceConnectAvailable: true,
         assistantHostedDeviceConnectProviders: [
@@ -1933,6 +1948,31 @@ describe('assistant notification decision guidance', () => {
     expect(prompt).not.toContain('apps.apple.com/us/app/murph-ai')
     expect(prompt).not.toContain('WHOOP: More > App Settings')
     expect(prompt).not.toContain('ground yourself in what the user has actually done in the relevant local action window')
+    expect(prompt).not.toContain('Assistant tone preference:')
+  })
+
+  it('applies the room tone only to hosted group notification decisions', () => {
+    const hostedPrompt = buildAssistantNotificationDecisionSystemPromptWithCacheMetadata(
+      createCommonNotificationPromptInput({
+        assistantTone: 'casual',
+        conversationScope: 'group',
+        hostedRuntime: true,
+      }),
+    ).prompt
+
+    expect(hostedPrompt).toContain('Assistant tone preference:')
+    expect(hostedPrompt).toContain(
+      'Casual is a persistent user-facing writing invariant.',
+    )
+
+    const nonHostedPrompt = buildAssistantNotificationDecisionSystemPromptWithCacheMetadata(
+      createCommonNotificationPromptInput({
+        assistantTone: 'casual',
+        conversationScope: 'group',
+        hostedRuntime: false,
+      }),
+    ).prompt
+    expect(nonHostedPrompt).not.toContain('Assistant tone preference:')
   })
 
   it('renders only a fail-closed skip contract for an unverified external audience', () => {
@@ -2206,7 +2246,7 @@ describe('assistant Murph onboarding guidance', () => {
 })
 
 describe('assistant conversation scope', () => {
-  it('allows only server-bound current-sender style settings in group prompts', () => {
+  it('keeps personal settings and authorization surfaces out of group prompts', () => {
     const prompt = buildAssistantSystemPrompt(createCommonCodexPromptInput({
       assistantCliContract: [
         'vault-cli device connect <provider> --format json',
@@ -2222,7 +2262,7 @@ describe('assistant conversation scope', () => {
     expect(prompt).not.toContain('Assistant style settings')
     expect(prompt).toContain('Use only accountless built-in service tools')
     expect(prompt).toContain('A group container cannot own a Family plan')
-    expect(prompt).not.toContain('Assistant tone preference:')
+    expect(prompt).toContain('Assistant tone preference:')
     expect(prompt).not.toContain('Murph onboarding:')
     expect(prompt).not.toContain('/settings?voice=true')
     expect(prompt).not.toContain('vault-cli assistant style set')
@@ -2250,11 +2290,6 @@ describe('assistant conversation scope', () => {
     expect(prompt).toContain('The room container is not a person')
     expect(prompt).toContain('Do not log medications, symptoms, meals, measurements')
     expect(prompt).not.toContain('murph.assistant_style')
-    expect(prompt).toContain('`read_own_assistant_style` and `update_own_assistant_style`')
-    expect(prompt).toContain("only the current sender's private tone, voice, Humor, Push, and Detail")
-    expect(prompt).toContain('never supply, infer, or ask for a member id or handle')
-    expect(prompt).toContain('not this shared room')
-    expect(prompt).toContain('do not fall back to a settings URL from the group')
 
     // This is a private, explicitly per-person enrollment reminder owned by
     // the group newsletter workflow, not a room-settings destination.
@@ -2262,6 +2297,47 @@ describe('assistant conversation scope', () => {
       `${MURPH_PRODUCT_ORIGIN}/settings?addEmail=true`,
     )
     expect(prompt).not.toContain('`/settings?addEmail=true`')
+  })
+
+  it('presents hosted Linq style controls as room-owned settings', () => {
+    const prompt = buildAssistantSystemPrompt(createCommonCodexPromptInput({
+      assistantPersonality: {
+        detail: 7,
+        humor: 9,
+        push: 8,
+      },
+      assistantStyleSettingsAvailable: true,
+      assistantTone: 'casual',
+      channel: 'linq',
+      conversationScope: 'group',
+      hostedRuntime: true,
+    }))
+
+    expect(prompt).toContain(
+      "Tone, Voice, Humor, Push, and Detail belong to this room's synthetic Murph runtime",
+    )
+    expect(prompt).toContain(
+      "They never read or change any participant's private Murph settings",
+    )
+    expect(prompt).toContain('`murph.personalization`')
+    expect(prompt).toContain('`murph.assistant_style`')
+    expect(prompt).toContain(
+      'Assistant personality preferences for this group room:',
+    )
+    expect(prompt).toContain('Humor 9/10')
+    expect(prompt).toContain('Push 8/10')
+    expect(prompt).toContain('Detail 7/10')
+    expect(prompt).toContain(
+      'Casual is a persistent user-facing writing invariant',
+    )
+    expect(prompt).toContain(
+      'Model and reasoning controls remain unavailable in a group',
+    )
+    expect(prompt).toContain(
+      'Saved room-style changes begin on a later group turn',
+    )
+    expect(prompt).not.toContain('/settings?voice=true')
+    expect(prompt).not.toContain('Use `/settings` for tone')
   })
 
   it('preserves personal capabilities in a direct conversation', () => {
@@ -2309,6 +2385,7 @@ describe('assistant conversation scope', () => {
 
     expect(prompt).toContain('Email replies can converse about this group')
     expect(prompt).toContain('Group-email replies cannot create, edit, import, pause')
+    expect(prompt).toContain("change this room's Murph style")
     expect(prompt).not.toContain('existing automation in this bound runtime vault')
     expect(prompt).not.toContain('`vault-cli automation set-status`')
     expect(prompt).not.toContain('Group automation writes are current-room-only')

@@ -122,6 +122,8 @@ Recommended durable tables remain:
 - `device_webhook_trace`
 - `device_sync_signal`
 - `device_sync_dirty_connection`
+- `device_sync_dirty_payload`
+- `device_sync_companion_capture_receipt`
 - `device_agent_session`
 - optional `device_webhook_subscription`
 
@@ -130,6 +132,38 @@ Postgres should keep only opaque ids, blind indexes, typed summaries, sparse sig
 `device_connect_intent` stores short-lived first-party Murph connect claims for hosted assistant-initiated wearable linking. The signed internal connect-link route returns only the first-party `/device/connect/:claim` URL to the runner. Opening that URL requires the authenticated Murph app session for the same member before provider OAuth starts. The provider callback then consumes OAuth state only for that same member. Intent rows must not store raw provider or Junction authorization URLs.
 
 `device_sync_dirty_connection` is the coalescing point for high-cardinality device webhook backfills. It is keyed by hosted connection ID and tracks `dirty_revision`, `processed_revision`, first/latest dirty timestamps, widened safe windows, compact resource/source counters, and a compact `dirty_resources_json` map. It must not store raw provider request bodies, provider tokens, raw samples, or user-visible health facts. Provider-owned durable webhook work, such as Junction direct data or exact resource/delete/deauthorization jobs needed for later import, is event-triggered work and is stored in `device_sync_dirty_payload` as bounded encrypted/compressed payload rows until the runtime consumes and explicitly acknowledges those row ids.
+
+The companion overnight PRV lane reuses that encrypted payload owner. Its only
+public health payload contains `schema`, `methodVersion`, `nightDate`,
+`rmssdMs`, `completedWindowCount`, and `acceptedWindowCount`, with method
+`prv-rmssd-5m-mean-scheduled-0000-0800-local-v1`. iOS owns the continuous BLE
+subscription and fixed local `00:00–08:00` schedule. A fully traversed frozen
+occurrence is bounded to 84...108 five-minute bins, typically 84/96/108 with
+intermediate counts such as 90/102 for half-hour shifts. The hosted control
+plane owns no capture scheduler, sleep detector, per-window rows, or phone checkpoint.
+`device_sync_companion_capture_receipt` owns one accepted strict envelope per
+`(connection, nightDate)` for exact replay; it retains only
+the member/connection binding, hashed receipt id, envelope hash, and creation
+time. Receipts expire after 30 days, are capped at 64 per connection, and are
+excluded from workspace snapshots. They never contain exact capture timestamps,
+capture duration, timezone offset, coverage milliseconds, raw BLE packets,
+R-R intervals, packet timestamps, device identifiers, or per-window values.
+This receipt cardinality is operational only; canonical import independently
+owns one immutable summary per vault, `whoop` source, and `nightDate`.
+
+The companion sign-in route separates local band enrollment from hosted
+lifecycle authority. The direct-BLE Connect WHOOP control enrolls only the
+CoreBluetooth band and sends no hosted `connectionIntent: "connect"`. A known
+same-member passive SDK repair sends `connectionIntent: "resume"`. A fresh or
+unproven installation omits intent and lets durable server state decide:
+exactly one established row resumes, zero provider rows may establish the first
+lane, and terminal or ambiguous state rejects without mutation. Only a future
+visible hosted-health/Junction Reconnect action may send `connect` and create or
+reactivate the lane. Omitted intent can never reverse a durable disconnect.
+The iOS-only protected checkpoint, exact app-scoped CoreBluetooth peripheral
+UUID, and outbox bookkeeping never enter Postgres or the hosted workspace; only
+an individual strict six-field envelope is uploaded through the derived-data
+route. The UUID never uploads or enters logs.
 
 ### Cloudflare execution state
 
@@ -199,6 +233,17 @@ These are read/manage wearable routes for the hosted settings page. Ordinary rea
 
 These are browser-initiated but lower-level than the settings surface. They must use short-lived signed assertions with replay protection.
 
+### Hosted companion routes
+
+- `POST /api/device-sync/companion/sign-in-token`
+- `POST /api/device-sync/companion/hrv-rmssd`
+
+Both are Privy-bearer-authenticated and consent-gated. Sign-in honors the
+resume, omitted-intent inference, and future explicit-connect authority split
+above. The derived route accepts only the closed overnight summary contract,
+reuses one active member-owned Junction connection, and never establishes or
+reactivates a lane from data ingress.
+
 ### Hosted local-agent routes
 
 - `POST /api/device-sync/agent/connections/:connectionId/export-token-bundle`
@@ -236,7 +281,7 @@ The current hosted runtime strategy is:
 2. A hosted job running through `apps/cloudflare` requests the current runtime snapshot from the signed internal web route only when execution needs device-sync access.
 3. The hosted runner fetches pending dirty device-sync rows from web-owned Postgres as a normal work source; webhook freshness does not depend on immutable per-webhook mailbox payloads.
 4. The hosted job sends narrow runtime updates back through the signed internal web apply route.
-5. Dirty revisions are acknowledged through the dirty-ack route only after the dirty state has been converted into local runtime work and that local work has crossed the checkpoint boundary. Exact payload rows stay hosted while their machine-local jobs are queued so a cold restore can reconstruct them, but the checkpoint result carries the local scheduler's future wake instead of immediately replaying retained work. Generic rows acknowledge on executed local success or terminal failure. Work marked complete only because of a machine-local disconnect remains hosted until the next authoritative control-plane snapshot either restores the active account and replays it or explicitly terminally dispositions it. A verified companion RMSSD row acknowledges only after canonical import success; canonical-owner failures and expired worker leases retain that same job beyond the ordinary attempt fence and follow the local scheduler's bounded future retry instead of creating dead replacement rows. A structurally invalid companion payload is different: its exact terminal code promotes the hosted payload acknowledgement after one dead local job so it cannot replay into unbounded replacement rows.
+5. Dirty revisions are acknowledged through the dirty-ack route only after the dirty state has been converted into local runtime work and that local work has crossed the checkpoint boundary. Exact payload rows stay hosted while their machine-local jobs are queued so a cold restore can reconstruct them, but the checkpoint result carries the local scheduler's future wake instead of immediately replaying retained work. Generic rows acknowledge on executed local success or terminal failure. Work marked complete only because of a machine-local disconnect remains hosted until the next authoritative control-plane snapshot either restores the active account and replays it or explicitly terminally dispositions it. A verified companion overnight PRV row acknowledges only after canonical import success; canonical-owner failures and expired worker leases retain that same job beyond the ordinary attempt fence and follow the local scheduler's bounded future retry instead of creating dead replacement rows. A structurally invalid companion payload is different: its exact terminal code promotes the hosted payload acknowledgement after one dead local job so it cannot replay into unbounded replacement rows.
 6. Local-agent token export and refresh flows stay on the hosted web boundary.
 7. Cloudflare does not keep a second durable token-escrow source of truth for device sync.
 
@@ -250,13 +295,31 @@ receive the same retryable conflict without persisting sync timestamps. Dirty-pa
 remains a separate path, so a companion import that already reached canonical
 success may still acknowledge its exact hosted payload.
 
+### Companion overnight deployment compatibility
+
+Deploy runtime/Cloudflare first with immediate container rollout, verify its
+runner-bundle fingerprint, and pass a compact import smoke. Deploy web second
+with scheduled-method admission plus resume/omitted-intent/future-connect
+authority, and distribute iOS last. The direct-BLE enrollment control sends no
+hosted `connect`; web owns
+known-member `resume`, fresh-install omitted-intent inference, and the future
+visible reconnect authority. Before distribution, require a signed physical
+iPhone WHOOP 5/MG continuous-subscription and overnight capture-to-query test
+covering
+background, reconnect, force-quit watchdog behavior, DST, and timezone changes;
+network/log proof that forbidden raw data is absent; and paired-ECG validation
+of the beta PRV method. Once scheduled-method clients ship, web and runtime
+support are the rollback floor until those clients and staged envelopes drain.
+Roll back in reverse order and let already-staged work drain before removing
+runtime support.
+
 ## Webhook Dirty Coalescing
 
 Webhook ingress separates level-triggered dirty hints from event-triggered durable webhook work. Provider parsers declare each webhook as either `level_dirty_hint` or `durable_webhook_work`; hosted dirty state must not infer that exact webhook work can be dropped. Level webhooks may be coalesced only after committed dirty state exists. Durable webhook work must be persisted or retried; it is never satisfied by dirty state alone.
 
 Provider webhook traces remain exact for side-effect-bearing accepted deliveries. Accepted level dirty hints write sparse audit signals and upsert `device_sync_dirty_connection` only when they create fresh dirty work; later level hints for an already-pending connection can be accepted before trace claim. Durable webhook work still passes through exact trace claim and durable acceptance so provider-owned event work is not lost. The steady-state architecture does not use per-webhook hosted mailbox items or Vercel Workflows for freshness.
 
-When a connection transitions from clean to dirty, webhook ingress commits the dirty state, appends one deterministic `device-sync.wake` mailbox handoff, and completes the trace in the same transaction. Additional level hints while already dirty are coalesced without another ingress wake. Durable webhook work appends independent encrypted payload rows under exact trace claim and is acknowledged by explicit payload row id, so concurrent durable deliveries do not need a connection-scoped acceptance lock. A retained generic payload follows the local job's retry wake and is removed after executed success or terminal failure, preventing both tight replay loops and dead-job recreation while preserving cold-restore reconstruction. A machine-local disconnect cannot release it; the next authoritative hosted snapshot decides active replay versus terminal disposition. A companion RMSSD row stays pending through canonical local import so a yielded or restored runtime can refetch the authoritative encrypted observation. Dirty rows and remaining payload rows drain through dirty-pending and dirty-ack callbacks; there is no dirty-row recovery sweep. Exact missed-wake recovery would need a future explicit pending-handoff ledger, not a dirty sweeper. Webhook and app paths do not send runner nudges directly to Cloudflare.
+When a connection transitions from clean to dirty, webhook ingress commits the dirty state, appends one deterministic `device-sync.wake` mailbox handoff, and completes the trace in the same transaction. Additional level hints while already dirty are coalesced without another ingress wake. Durable webhook work appends independent encrypted payload rows under exact trace claim and is acknowledged by explicit payload row id, so concurrent durable deliveries do not need a connection-scoped acceptance lock. A retained generic payload follows the local job's retry wake and is removed after executed success or terminal failure, preventing both tight replay loops and dead-job recreation while preserving cold-restore reconstruction. A machine-local disconnect cannot release it; the next authoritative hosted snapshot decides active replay versus terminal disposition. A companion overnight PRV row stays pending through canonical local import so a yielded or restored runtime can refetch the authoritative encrypted observation. Dirty rows and remaining payload rows drain through dirty-pending and dirty-ack callbacks; there is no dirty-row recovery sweep. Exact missed-wake recovery would need a future explicit pending-handoff ledger, not a dirty sweeper. Webhook and app paths do not send runner nudges directly to Cloudflare.
 
 Temporal is the only normal wake orchestrator. When mailbox signals or reconciliation facts show durable work, it calls Cloudflare's signed `ensure-processing` adapter; Cloudflare returns `runtime_processing_accepted` or `retry_later` and owns runner start, wake, active-fence alarm cleanup, and execution cleanup.
 

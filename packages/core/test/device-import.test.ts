@@ -2043,129 +2043,6 @@ test("importDeviceBatch rejects changed content for immutable externalRefs while
   assert.equal(eventRecords.length, 1);
 });
 
-test("immutable WHOOP RMSSD admission replay preserves its first vault-timezone placement", async () => {
-  const vaultRoot = await makeTempDirectory("murph-device-import-whoop-rmssd-timezone-replay");
-  await initializeVault({ vaultRoot, createdAt: "2026-07-10T01:00:00.000Z" });
-
-  const admissionId = "a".repeat(64);
-  const immutableEvent = {
-    kind: "observation" as const,
-    occurredAt: "2026-07-10T02:30:00.000Z",
-    recordedAt: "2026-07-10T02:31:00.000Z",
-    dayKey: "2026-07-09",
-    timeZone: "America/New_York",
-    source: "device" as const,
-    title: "WHOOP BLE spot RMSSD",
-    externalRef: {
-      system: "whoop",
-      resourceType: "ble-hrv-rmssd",
-      resourceId: admissionId,
-      version: `rmssd-pulse-interval-v1:${admissionId}`,
-      facet: "hrv-rmssd",
-    },
-    externalRefUpdatePolicy: "immutable" as const,
-    dataOrigin: {
-      version: 1 as const,
-      aggregatorProvider: "murph-companion",
-      sourceProviderSlug: "whoop",
-      sourceType: "ble-pulse-interval",
-      observedAtRaw: "2026-07-10T02:30:00.000Z",
-      timestampSemantics: "utc" as const,
-      originConfidence: "medium" as const,
-      normalizerVersion: "companion-hrv-rmssd-normalizer.v1",
-    },
-    fields: {
-      metric: "hrv-rmssd",
-      observationGrain: "derived_fact",
-      value: 48.25,
-      unit: "ms",
-    },
-  };
-  const first = await importDeviceBatch({
-    vaultRoot,
-    provider: "junction",
-    importedAt: "2026-07-10T02:31:00.000Z",
-    events: [immutableEvent],
-  });
-  const replay = await importDeviceBatch({
-    vaultRoot,
-    provider: "junction",
-    importedAt: "2026-07-10T03:00:00.000Z",
-    events: [{
-      ...immutableEvent,
-      dayKey: "2026-07-10",
-      timeZone: "UTC",
-    }],
-  });
-
-  assert.equal(replay.applied, false);
-  assert.deepEqual(replay.events, []);
-  const storedAfterReplay = (await readJsonlRecords({
-    vaultRoot,
-    relativePath: first.eventShardPaths[0] as string,
-  })) as EventRecord[];
-  assert.equal(storedAfterReplay.length, 1);
-  const storedOriginal = storedAfterReplay[0];
-  assert.ok(storedOriginal);
-  assert.equal(storedOriginal.id, first.events[0]?.id);
-  assert.equal(storedOriginal.dayKey, "2026-07-09");
-  assert.equal(storedOriginal.timeZone, "America/New_York");
-
-  const userEdited = {
-    ...storedOriginal,
-    source: "manual",
-    note: "user-added context",
-    lifecycle: { revision: 2 },
-  } satisfies EventRecord;
-  await fs.appendFile(
-    path.join(vaultRoot, first.eventShardPaths[0] as string),
-    `${JSON.stringify(userEdited)}\n`,
-  );
-
-  const replayAfterUserEdit = await importDeviceBatch({
-    vaultRoot,
-    provider: "junction",
-    importedAt: "2026-07-10T03:02:00.000Z",
-    events: [{
-      ...immutableEvent,
-      dayKey: "2026-07-10",
-      timeZone: "UTC",
-    }],
-  });
-  assert.equal(replayAfterUserEdit.applied, false);
-  assert.deepEqual(replayAfterUserEdit.events, []);
-  const storedAfterUserEditReplay = (await readJsonlRecords({
-    vaultRoot,
-    relativePath: first.eventShardPaths[0] as string,
-  })) as EventRecord[];
-  assert.deepEqual(storedAfterUserEditReplay, [storedOriginal, userEdited]);
-
-  await assert.rejects(
-    () => importDeviceBatch({
-      vaultRoot,
-      provider: "junction",
-      importedAt: "2026-07-10T03:05:00.000Z",
-      events: [{
-        ...immutableEvent,
-        dayKey: "2026-07-10",
-        timeZone: "UTC",
-        fields: {
-          ...immutableEvent.fields,
-          value: 49,
-        },
-      }],
-    }),
-    (error: unknown) =>
-      error instanceof VaultError && error.code === "EVENT_IMMUTABLE_EXTERNAL_REF_CONFLICT",
-  );
-
-  const storedAfterConflict = (await readJsonlRecords({
-    vaultRoot,
-    relativePath: first.eventShardPaths[0] as string,
-  })) as EventRecord[];
-  assert.deepEqual(storedAfterConflict, storedAfterUserEditReplay);
-});
-
 test("importDeviceBatch makes byte-identical overlap a storage no-op for one provider account", async () => {
   const vaultRoot = await makeTempDirectory("murph-device-import-storage-idempotency");
   await initializeVault({ vaultRoot, createdAt: "2026-06-01T12:00:00.000Z" });
@@ -7288,6 +7165,101 @@ test("importDeviceBatch preserves explicit device dayKey without vault timezone 
   assert.equal(replay.events[0]?.id, initial.events[0]?.id);
   assert.equal(replay.events[0]?.timeZone, undefined);
   assert.equal(records.length, 1, "vault timezone changes should not rewrite explicit provider dayKey events");
+});
+
+test("importDeviceBatch keeps immutable date-only floating provider days timezone-free", async () => {
+  const vaultRoot = await makeTempDirectory("murph-device-import-floating-day-no-timezone");
+  await initializeVault({
+    vaultRoot,
+    createdAt: "2026-06-01T12:00:00.000Z",
+    timezone: "America/New_York",
+  });
+
+  const dateOnlyEvent = {
+    kind: "observation" as const,
+    occurredAt: "2026-06-25T03:00:00.000Z",
+    recordedAt: "2026-06-25T03:01:00.000Z",
+    dayKey: "2026-06-24",
+    title: "Wearable daily summary",
+    externalRef: {
+      system: "wearable-provider",
+      resourceType: "daily-summary",
+      resourceId: "2026-06-24",
+      facet: "recovery-score",
+    },
+    externalRefUpdatePolicy: "immutable" as const,
+    dataOrigin: {
+      version: 1 as const,
+      aggregatorProvider: "wearable-aggregator",
+      sourceProviderSlug: "wearable-provider",
+      sourceType: "watch",
+      observedAtRaw: "2026-06-24",
+      timestampSemantics: "floating" as const,
+      normalizerVersion: "daily-summary.v1",
+    },
+    fields: {
+      metric: "recovery-score",
+      observationGrain: "summary" as const,
+      value: 72,
+      unit: "score",
+    },
+  };
+  const timestampedEvent = {
+    ...dateOnlyEvent,
+    dayKey: "2026-06-25",
+    title: "Wearable timestamped observation",
+    externalRef: {
+      ...dateOnlyEvent.externalRef,
+      resourceType: "timestamped-observation",
+      resourceId: "timestamped-1",
+    },
+    externalRefUpdatePolicy: undefined,
+    dataOrigin: {
+      ...dateOnlyEvent.dataOrigin,
+      observedAtRaw: "2026-06-25T03:00:00.000Z",
+      timestampSemantics: "utc" as const,
+      normalizerVersion: "timestamped-observation.v1",
+    },
+  };
+
+  const initial = await importDeviceBatch({
+    vaultRoot,
+    provider: "wearable-aggregator",
+    importedAt: "2026-06-25T12:00:00.000Z",
+    events: [dateOnlyEvent, timestampedEvent],
+  });
+  const initialDateOnly = initial.events.find((event) =>
+    event.externalRef?.resourceType === "daily-summary"
+  );
+  const initialTimestamped = initial.events.find((event) =>
+    event.externalRef?.resourceType === "timestamped-observation"
+  );
+
+  assert.equal(initialDateOnly?.dayKey, "2026-06-24");
+  assert.equal(initialDateOnly?.timeZone, undefined);
+  assert.equal(initialTimestamped?.timeZone, "America/New_York");
+
+  await updateVaultSummary({ vaultRoot, timezone: "UTC" });
+  const replay = await importDeviceBatch({
+    vaultRoot,
+    provider: "wearable-aggregator",
+    importedAt: "2026-06-25T12:05:00.000Z",
+    events: [dateOnlyEvent],
+  });
+  const replayedDateOnly = replay.events[0];
+
+  assert.equal(replayedDateOnly?.id, initialDateOnly?.id);
+  assert.equal(replayedDateOnly?.dayKey, "2026-06-24");
+  assert.equal(replayedDateOnly?.timeZone, undefined);
+
+  const records = (await readJsonlRecords({
+    vaultRoot,
+    relativePath: initial.eventShardPaths[0] as string,
+  })) as EventRecord[];
+  assert.equal(
+    records.filter((record) => record.externalRef?.resourceType === "daily-summary").length,
+    1,
+  );
 });
 
 test("importDeviceBatch migrates rescored Junction sleep summary legacy refs across day drift", async () => {

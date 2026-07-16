@@ -6,9 +6,9 @@ import type { HostedLinqThreadRouteEgressAuthority } from "../hosted-routing/thr
 
 // Lane facts from the planner's own mailbox append/dedupe row. Presence means
 // the planning transaction already proved the active member, admission, and
-// workspace row for this wake, so Linq handoff can include them in its
-// Temporal signal and, after that signal is accepted, fire the direct runtime
-// ensure fast path.
+// workspace row for this wake. After commit, Linq handoff owner-checks these
+// facts and rechecks live active access before starting the Temporal signal and
+// direct runtime ensure concurrently.
 export type HostedWebhookWakeMailboxCheckpoint = {
   lane: HostedMailboxLane;
   laneSeq: string;

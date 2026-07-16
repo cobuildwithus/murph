@@ -3,6 +3,7 @@ import "server-only";
 import type { DeviceSyncConnectTarget } from "@murphai/device-syncd/connect-config";
 
 import { createHostedDeviceSyncPublicIngressService } from "./public-ingress-service";
+import { assertHostedWhoopConnectCapacityAvailable } from "./whoop-connect-capacity";
 import { requireActiveHostedAppSessionFromRequest } from "../hosted-onboarding/app-session";
 import { assertHostedOnboardingMutationOrigin } from "../hosted-onboarding/csrf";
 import {
@@ -25,6 +26,11 @@ export async function startHostedDeviceSyncConnection(input: {
   await assertHostedLaunchRequiredConsentGranted({
     memberId: auth.member.id,
     prisma,
+  });
+  await assertHostedWhoopConnectCapacityAvailable({
+    memberId: auth.member.id,
+    prisma,
+    target: input.target,
   });
   const publicIngress = createHostedDeviceSyncPublicIngressService(input.request);
   const started = await publicIngress.startConnection(
