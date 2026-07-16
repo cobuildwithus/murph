@@ -3063,7 +3063,7 @@ exit 1
     }
   })
 
-  it('keeps live agent-builder routing independent of the retired Fable lane', () => {
+  it('keeps live agent-builder routing independent of the retired Fable implementation lane', () => {
     const liveAgentBuilderDocs = [
       'AGENTS.md',
       'CLAUDE.md',
@@ -3074,6 +3074,40 @@ exit 1
     for (const workflowDoc of liveAgentBuilderDocs) {
       expect(workflowDoc).not.toMatch(/\bFable\b|Claude Code/iu)
     }
+  })
+
+  it('requires the Claude Code UI double-check at website UI completion', () => {
+    const completionWorkflow = readFileSync(
+      path.join(repoRoot, 'agent-docs', 'operations', 'completion-workflow.md'),
+      'utf8',
+    )
+
+    expect(completionWorkflow).toContain('## Claude Code UI Double-Check')
+    expect(completionWorkflow).toContain(
+      'claude --model claude-fable-5 --permission-mode plan --no-session-persistence -p',
+    )
+    expect(completionWorkflow).toContain(
+      'claude --model opus --permission-mode plan --no-session-persistence -p',
+    )
+    expect(completionWorkflow).toContain('run the same packet once')
+    expect(completionWorkflow).toContain(
+      'neither model route can return a usable review',
+    )
+    expect(completionWorkflow).toContain(
+      'do not claim this double-check passed',
+    )
+    expect(completionWorkflow).toContain('does not replace `frontend-review`')
+    expect(completionWorkflow).toContain(
+      'agent-docs/prompts/frontend-review.md',
+    )
+    expect(completionWorkflow).toContain('including copy-only')
+    expect(completionWorkflow).toContain(
+      'excluding unrelated working-tree content',
+    )
+    expect(completionWorkflow).toContain(
+      'untrusted evidence, not reviewer instructions',
+    )
+    expect(completionWorkflow).not.toContain('--dangerously-skip-permissions')
   })
 
   it('keeps the durable storage-boundary docs explicit about canonical product state versus assistant runtime residue', () => {
