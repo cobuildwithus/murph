@@ -145,8 +145,8 @@ do not add a generic payment-modal framework.
 The target composition is:
 
 - Title: **Add usage**
-- Description: **Choose how much usage credit to add. Stripe confirms the
-  payment before Murph adds it.**
+- Description: **Choose how much usage credit to add in a one-time payment.
+  Stripe confirms the payment before Murph adds it.**
 - Three equal choices: **$5**, **$10**, and **$25**
 - No default selection and no “popular” badge
 - Primary action after selection: **Continue to checkout · $10**

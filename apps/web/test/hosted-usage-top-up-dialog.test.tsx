@@ -3,6 +3,7 @@ import assert from "node:assert/strict";
 import {
   act,
   createElement,
+  forwardRef,
   type ButtonHTMLAttributes,
   type FieldsetHTMLAttributes,
   type HTMLAttributes,
@@ -99,8 +100,12 @@ vi.mock("@/src/components/ui/dialog", async () => {
       createElement("p", props),
     DialogHeader: (props: HTMLAttributes<HTMLDivElement>) =>
       createElement("div", props),
-    DialogTitle: (props: HTMLAttributes<HTMLHeadingElement>) =>
-      createElement("h2", props),
+    DialogTitle: React.forwardRef<
+      HTMLHeadingElement,
+      HTMLAttributes<HTMLHeadingElement>
+    >(function DialogTitle(props, ref) {
+      return createElement("h2", { ...props, ref });
+    }),
     DialogTrigger: ({
       children,
       render,
@@ -157,33 +162,34 @@ vi.mock("@/src/components/ui/radio-group", () => ({
 }));
 
 vi.mock("@/src/components/ui/choice-card", () => ({
-  ChoiceCard: ({
-    description,
-    disabled,
-    id,
-    meta,
-    title,
-    value,
-  }: InputHTMLAttributes<HTMLInputElement> & {
-    description: ReactNode;
-    id: string;
-    meta?: ReactNode;
-    title: ReactNode;
-  }) =>
-    createElement(
+  ChoiceCard: forwardRef<
+    HTMLInputElement,
+    InputHTMLAttributes<HTMLInputElement> & {
+      description: ReactNode;
+      id: string;
+      meta?: ReactNode;
+      title: ReactNode;
+    }
+  >(function ChoiceCard(
+    { description, disabled, id, meta, title, value },
+    ref,
+  ) {
+    return createElement(
       "label",
       { htmlFor: id },
       createElement("input", {
         disabled,
         id,
         name: "usage-credit-offer",
+        ref,
         type: "radio",
         value,
       }),
       title,
       createElement("span", null, description),
       meta ? createElement("span", null, meta) : null,
-    ),
+    );
+  }),
 }));
 
 beforeEach(() => {
@@ -212,12 +218,36 @@ test("opens from the settings deep link without preselecting a top-up", async ()
 
   try {
     assert.match(rendered.container.textContent ?? "", /Add usage/);
+    const dialog = rendered.container.querySelector('[role="dialog"]');
+    assert.ok(dialog);
+    assert.equal(dialog.classList.contains("overflow-y-auto"), true);
+    assert.equal(dialog.classList.contains("sm:max-w-lg"), true);
     const radioInputs = Array.from(
       rendered.container.querySelectorAll<HTMLInputElement>('input[type="radio"]'),
     );
     assert.equal(radioInputs.length, 3);
     assert.ok(radioInputs.every((input) => input.checked === false));
     assert.equal(buttonByText(rendered.container, "Choose an amount").disabled, true);
+    assert.match(
+      rendered.container.textContent ?? "",
+      /one-time payment\. Stripe confirms the payment before Murph adds it\./,
+    );
+    assert.equal(
+      rendered.container.querySelector("h2")?.classList.contains("text-xl"),
+      true,
+    );
+    assert.equal(rendered.container.querySelector("h2")?.tabIndex, -1);
+    assert.equal(
+      rendered.container
+        .querySelector('[role="radiogroup"]')
+        ?.classList.contains("sm:grid-cols-3"),
+      true,
+    );
+    assert.equal(
+      rendered.container.querySelector("legend")?.textContent,
+      "Usage credit amount",
+    );
+    assert.match(rendered.container.textContent ?? "", /Choose one usage credit amount\./);
     expect(rendered.replaceState).toHaveBeenCalledWith(
       {},
       "",
@@ -254,6 +284,10 @@ test("opens an honest unavailable state when a deep link has no current offers",
     assert.match(
       rendered.container.textContent ?? "",
       /There isn’t a usage-credit offer available for this account right now/,
+    );
+    assert.doesNotMatch(
+      rendered.container.textContent ?? "",
+      /No purchase is available/,
     );
     assert.equal(rendered.container.querySelectorAll('input[type="radio"]').length, 0);
     assert.equal(buttonByText(rendered.container, "Close").disabled, false);
@@ -296,6 +330,7 @@ test("keeps a frozen open Checkout resumable and cancelable without current offe
 
     assert.equal(buttonByText(rendered.container, "Resume checkout").disabled, false);
     assert.equal(buttonByText(rendered.container, "Cancel checkout").disabled, false);
+    assert.equal(hasButton(rendered.container, "Check again"), false);
   } finally {
     await rendered.cleanup();
   }
@@ -326,7 +361,7 @@ test("withholds Resume but keeps Cancel for a suspended payer's open Checkout", 
   );
 
   try {
-    await clickButton(rendered.container, rendered.window, "Continue checkout");
+    await clickButton(rendered.container, rendered.window, "Review checkout");
 
     assert.equal(
       Array.from(rendered.container.querySelectorAll("button")).some(
@@ -375,7 +410,7 @@ test("does not advertise Retry for a suspended reconciling purchase", async () =
   );
 
   try {
-    await clickButton(rendered.container, rendered.window, "Continue checkout");
+    await clickButton(rendered.container, rendered.window, "Check payment");
 
     assert.match(
       rendered.container.textContent ?? "",
@@ -424,7 +459,7 @@ test("refreshes an open recovery dialog at the exact frozen expiry", async () =>
   );
 
   try {
-    await clickButton(rendered.container, rendered.window, "Continue checkout");
+    await clickButton(rendered.container, rendered.window, "Check payment");
 
     await act(async () => {
       vi.advanceTimersByTime(59_999);
@@ -432,7 +467,7 @@ test("refreshes an open recovery dialog at the exact frozen expiry", async () =>
     });
     expect(mocks.routerRefresh).not.toHaveBeenCalled();
     assert.equal(
-      buttonByText(rendered.container, "Continue checkout").disabled,
+      buttonByText(rendered.container, "Check payment").disabled,
       false,
     );
 
@@ -528,6 +563,9 @@ test("retries a frozen reconciling purchase through the existing checkout route"
   try {
     expect(mocks.requestHostedOnboardingJson).not.toHaveBeenCalled();
     await clickButton(rendered.container, rendered.window, "Continue checkout");
+    const title = rendered.container.querySelector("h2");
+    assert.ok(title);
+    const focus = vi.spyOn(title, "focus");
     await clickButton(rendered.container, rendered.window, "Retry checkout");
 
     expect(mocks.requestHostedOnboardingJson).toHaveBeenCalledWith({
@@ -540,6 +578,8 @@ test("retries a frozen reconciling purchase through the existing checkout route"
       url: "/api/settings/billing/usage-credit/checkout",
     });
     assert.equal(buttonByText(rendered.container, "Resume checkout").disabled, false);
+    expect(focus).toHaveBeenCalledWith({ preventScroll: true });
+    assert.equal(hasButton(rendered.container, "Check again"), false);
   } finally {
     await rendered.cleanup();
   }
@@ -588,14 +628,14 @@ test("restarts polling when a frozen retry advances the same purchase", async ()
     await clickButton(rendered.container, rendered.window, "Retry checkout");
 
     assert.equal(statusReadCount, 2);
-    assert.match(rendered.container.textContent ?? "", /Usage added\./);
+    assert.match(rendered.container.textContent ?? "", /Usage added/);
     expect(mocks.routerRefresh).toHaveBeenCalledTimes(1);
   } finally {
     await rendered.cleanup();
   }
 });
 
-test("resumes polling when a frozen retry request fails", async () => {
+test("preserves a frozen retry key across status-only recovery", async () => {
   let statusReadCount = 0;
   mocks.requestHostedOnboardingJson.mockImplementation(async (request: {
     method: string;
@@ -607,7 +647,7 @@ test("resumes polling when a frozen retry request fails", async () => {
     statusReadCount += 1;
     return {
       purchaseId: "hucp_frozen_retry_failure",
-      status: statusReadCount === 1 ? "reconciling" : "fulfilled",
+      status: statusReadCount === 1 ? "reconciling" : "checkout_open",
     };
   });
   const { HostedUsageTopUpDialog } = await import(
@@ -634,8 +674,20 @@ test("resumes polling when a frozen retry request fails", async () => {
     await clickButton(rendered.container, rendered.window, "Retry checkout");
 
     assert.equal(statusReadCount, 2);
-    assert.match(rendered.container.textContent ?? "", /Usage added\./);
-    expect(mocks.routerRefresh).toHaveBeenCalledTimes(1);
+    assert.equal(buttonByText(rendered.container, "Retry checkout").disabled, false);
+    assert.equal(hasButton(rendered.container, "Check again"), false);
+    const firstPayload = mocks.requestHostedOnboardingJson.mock.calls.find(
+      ([request]) => request.method === "POST",
+    )?.[0]?.payload;
+
+    await clickButton(rendered.container, rendered.window, "Retry checkout");
+    const postPayloads = mocks.requestHostedOnboardingJson.mock.calls
+      .map(([request]) => request)
+      .filter((request) => request.method === "POST")
+      .map((request) => request.payload);
+    assert.deepEqual(postPayloads, [firstPayload, firstPayload]);
+    expect(mocks.randomUUID).toHaveBeenCalledTimes(1);
+    expect(mocks.routerRefresh).not.toHaveBeenCalled();
   } finally {
     await rendered.cleanup();
   }
@@ -664,6 +716,10 @@ test("posts the exact offer payload, shows pending text, and redirects to Stripe
     await clickButton(rendered.container, rendered.window, "Continue to checkout · $5");
 
     assert.match(rendered.container.textContent ?? "", /Opening Stripe…/);
+    assert.equal(
+      buttonByText(rendered.container, "Opening Stripe…").getAttribute("aria-busy"),
+      "true",
+    );
     expect(mocks.requestHostedOnboardingJson).toHaveBeenCalledWith({
       method: "POST",
       payload: {
@@ -690,6 +746,26 @@ test("posts the exact offer payload, shows pending text, and redirects to Stripe
     expect(rendered.assign).toHaveBeenCalledWith(
       "https://checkout.stripe.test/session",
     );
+    assert.equal(buttonByText(rendered.container, "Opening Stripe…").disabled, true);
+
+    const pageShowEvent = new rendered.window.Event("pageshow");
+    Object.defineProperty(pageShowEvent, "persisted", { value: true });
+    await act(async () => {
+      rendered.window.dispatchEvent(pageShowEvent);
+      await Promise.resolve();
+    });
+    assert.match(
+      rendered.container.textContent ?? "",
+      /Checkout was interrupted\. Retry to recover it\./,
+    );
+    assert.equal(
+      buttonByText(rendered.container, "Continue to checkout · $5").disabled,
+      false,
+    );
+    assert.equal(
+      buttonByText(rendered.container, "Choose a different amount").disabled,
+      false,
+    );
   } finally {
     await rendered.cleanup();
     vi.useRealTimers();
@@ -697,13 +773,32 @@ test("posts the exact offer payload, shows pending text, and redirects to Stripe
 });
 
 test("asks before resuming a recovered Checkout from a fresh browser request", async () => {
-  vi.useFakeTimers();
-  mocks.requestHostedOnboardingJson.mockResolvedValue({
-    purchaseId: "hucp_recovered",
-    recovered: true,
-    status: "checkout_open",
-    url: "https://checkout.stripe.test/existing-session",
-  });
+  mocks.requestHostedOnboardingJson.mockImplementation(
+    ({ method, signal, url }: {
+      method: string;
+      signal: AbortSignal;
+      url: string;
+    }) => {
+      if (
+        method === "POST" &&
+        url === "/api/settings/billing/usage-credit/checkout"
+      ) {
+        return Promise.resolve({
+          purchaseId: "hucp_recovered",
+          recovered: true,
+          status: "checkout_open",
+          url: "HTTPS://CHECKOUT.STRIPE.TEST",
+        });
+      }
+      return new Promise((_resolve, reject) => {
+        signal.addEventListener(
+          "abort",
+          () => reject(new DOMException("Aborted", "AbortError")),
+          { once: true },
+        );
+      });
+    },
+  );
   const { HostedUsageTopUpDialog } = await import(
     "@/src/components/settings/hosted-usage-top-up-dialog"
   );
@@ -719,6 +814,10 @@ test("asks before resuming a recovered Checkout from a fresh browser request", a
   );
 
   try {
+    const title = rendered.container.querySelector("h2");
+    assert.ok(title);
+    const focus = vi.spyOn(title, "focus");
+
     await clickRadio(rendered.container, rendered.window, "usage_500");
     await clickButton(rendered.container, rendered.window, "Continue to checkout · $5");
 
@@ -729,15 +828,21 @@ test("asks before resuming a recovered Checkout from a fresh browser request", a
     );
     assert.equal(buttonByText(rendered.container, "Resume checkout").disabled, false);
     assert.equal(buttonByText(rendered.container, "Cancel checkout").disabled, false);
+    assert.equal(hasButton(rendered.container, "Retry checkout"), false);
+    const status = rendered.container.querySelector('[role="status"]');
+    assert.ok(status);
+    assert.equal(status.getAttribute("aria-live"), "polite");
     expect(rendered.assign).not.toHaveBeenCalled();
+    expect(focus).toHaveBeenCalledWith({ preventScroll: true });
 
-    await clickButton(rendered.container, rendered.window, "Resume checkout");
+    buttonByText(rendered.container, "Resume checkout").dispatchEvent(
+      new rendered.window.Event("click", { bubbles: true }),
+    );
     expect(rendered.assign).toHaveBeenCalledWith(
-      "https://checkout.stripe.test/existing-session",
+      "https://checkout.stripe.test/",
     );
   } finally {
     await rendered.cleanup();
-    vi.useRealTimers();
   }
 });
 
@@ -787,6 +892,9 @@ test("cancels a recovered open Checkout through the existing expire route", asyn
   try {
     await clickRadio(rendered.container, rendered.window, "usage_2500");
     await clickButton(rendered.container, rendered.window, "Continue to checkout · $25");
+    const title = rendered.container.querySelector("h2");
+    assert.ok(title);
+    const focus = vi.spyOn(title, "focus");
     await clickButton(rendered.container, rendered.window, "Cancel checkout");
 
     expect(mocks.requestHostedOnboardingJson).toHaveBeenCalledWith({
@@ -802,16 +910,74 @@ test("cancels a recovered open Checkout through the existing expire route", asyn
       rendered.container.textContent ?? "",
       /Checkout canceled\. No usage was added\./,
     );
+    expect(focus).toHaveBeenCalledWith({ preventScroll: true });
     assert.equal(
       Array.from(rendered.container.querySelectorAll("button")).some(
         (button) => button.textContent?.includes("Resume checkout"),
       ),
       false,
     );
+    await clickButton(rendered.container, rendered.window, "Close");
+    assert.equal(buttonByText(rendered.container, "Add usage").disabled, false);
     expect(rendered.assign).not.toHaveBeenCalled();
   } finally {
     await rendered.cleanup();
     vi.useRealTimers();
+  }
+});
+
+test("uses cancel-specific copy when the expire response is malformed", async () => {
+  mocks.requestHostedOnboardingJson.mockImplementation(
+    ({ method, signal, url }: {
+      method: string;
+      signal: AbortSignal;
+      url: string;
+    }) => {
+      if (method === "POST" && url.endsWith("/expire")) {
+        return Promise.resolve({ malformed: true });
+      }
+      return new Promise((_resolve, reject) => {
+        signal.addEventListener(
+          "abort",
+          () => reject(new DOMException("Aborted", "AbortError")),
+          { once: true },
+        );
+      });
+    },
+  );
+  const { HostedUsageTopUpDialog } = await import(
+    "@/src/components/settings/hosted-usage-top-up-dialog"
+  );
+  const rendered = await renderClientComponent(
+    createElement(HostedUsageTopUpDialog, {
+      activePurchase: {
+        offerCode: "usage_10_usd",
+        purchaseId: "hucp_malformed_cancel",
+        retryAllowed: false,
+        status: "checkout_open",
+      },
+      offers: [],
+    }),
+    {
+      location: { href: "https://example.test/settings" },
+      requireButton: false,
+    },
+  );
+
+  try {
+    await clickButton(rendered.container, rendered.window, "Review checkout");
+    await clickButton(rendered.container, rendered.window, "Cancel checkout");
+
+    assert.match(
+      rendered.container.textContent ?? "",
+      /Could not cancel this checkout right now\. Try again\./,
+    );
+    assert.doesNotMatch(
+      rendered.container.textContent ?? "",
+      /Could not open Stripe/,
+    );
+  } finally {
+    await rendered.cleanup();
   }
 });
 
@@ -885,7 +1051,7 @@ test("bounds checkout creation and restores retry and dismiss controls", async (
     await clickRadio(rendered.container, rendered.window, "usage_500");
     await clickButton(rendered.container, rendered.window, "Continue to checkout · $5");
 
-    assert.equal(buttonByText(rendered.container, "Cancel").disabled, true);
+    assert.equal(buttonByText(rendered.container, "Cancel").disabled, false);
     await act(async () => {
       vi.advanceTimersByTime(20_000);
       await Promise.resolve();
@@ -903,6 +1069,68 @@ test("bounds checkout creation and restores retry and dismiss controls", async (
   } finally {
     await rendered.cleanup();
     vi.useRealTimers();
+  }
+});
+
+test("aborts an owned checkout on close and preserves its retry key", async () => {
+  const checkout = deferred<unknown>();
+  mocks.requestHostedOnboardingJson
+    .mockImplementationOnce(() => checkout.promise)
+    .mockResolvedValueOnce({
+      purchaseId: "hucp_retry_after_close",
+      status: "checkout_open",
+      url: "https://checkout.stripe.test/retry-after-close",
+    });
+  const { HostedUsageTopUpDialog } = await import(
+    "@/src/components/settings/hosted-usage-top-up-dialog"
+  );
+  const rendered = await renderClientComponent(
+    createElement(HostedUsageTopUpDialog, {
+      initialOpen: true,
+      offers: usageCreditOffers(),
+    }),
+    {
+      location: { href: "https://example.test/settings?addUsage=true" },
+      requireButton: false,
+    },
+  );
+
+  try {
+    await clickRadio(rendered.container, rendered.window, "usage_500");
+    await clickButton(rendered.container, rendered.window, "Continue to checkout · $5");
+    const firstPayload = mocks.requestHostedOnboardingJson.mock.calls[0]?.[0]?.payload;
+
+    await clickButton(rendered.container, rendered.window, "Cancel");
+    await act(async () => {
+      await Promise.resolve();
+    });
+    const firstSignal = mocks.requestHostedOnboardingJson.mock.calls[0]?.[0]?.signal;
+    assert.equal(firstSignal?.aborted, true);
+    assert.equal(rendered.container.querySelector('[role="dialog"]'), null);
+    await act(async () => {
+      checkout.resolve({
+        purchaseId: "hucp_late_checkout",
+        status: "checkout_open",
+        url: "https://checkout.stripe.test/late",
+      });
+      await Promise.resolve();
+    });
+    expect(rendered.assign).not.toHaveBeenCalled();
+
+    await clickButton(rendered.container, rendered.window, "Add usage");
+    assert.match(
+      rendered.container.textContent ?? "",
+      /Checkout was interrupted\. Retry to recover it\./,
+    );
+    await clickButton(rendered.container, rendered.window, "Continue to checkout · $5");
+
+    assert.deepEqual(
+      mocks.requestHostedOnboardingJson.mock.calls[1]?.[0]?.payload,
+      firstPayload,
+    );
+    expect(mocks.randomUUID).toHaveBeenCalledTimes(1);
+  } finally {
+    await rendered.cleanup();
   }
 });
 
@@ -987,6 +1215,87 @@ test("retries a failed checkout with the same client request key", async () => {
   }
 });
 
+test("lets the member choose a different amount with a fresh request key", async () => {
+  mocks.randomUUID
+    .mockImplementationOnce(() => "00000000-0000-4000-8000-000000000101")
+    .mockImplementationOnce(() => "00000000-0000-4000-8000-000000000102");
+  let checkoutAttempt = 0;
+  mocks.requestHostedOnboardingJson.mockImplementation(async (request: {
+    method: string;
+  }) => {
+    if (request.method === "GET") {
+      return {
+        purchaseId: "hucp_changed_amount",
+        status: "checkout_open",
+      };
+    }
+    checkoutAttempt += 1;
+    if (checkoutAttempt === 1) {
+      throw new Error("Stripe is unavailable.");
+    }
+    return {
+      purchaseId: "hucp_changed_amount",
+      recovered: true,
+      status: "checkout_open",
+      url: "https://checkout.stripe.test/changed-amount",
+    };
+  });
+  const { HostedUsageTopUpDialog } = await import(
+    "@/src/components/settings/hosted-usage-top-up-dialog"
+  );
+  const rendered = await renderClientComponent(
+    createElement(HostedUsageTopUpDialog, {
+      initialOpen: true,
+      offers: usageCreditOffers(),
+    }),
+    {
+      location: { href: "https://example.test/settings?addUsage=true" },
+      requireButton: false,
+    },
+  );
+
+  try {
+    await clickRadio(rendered.container, rendered.window, "usage_500");
+    await clickButton(rendered.container, rendered.window, "Continue to checkout · $5");
+    const firstAmount = rendered.container.querySelector<HTMLInputElement>(
+      "#usage-top-up-0",
+    );
+    assert.ok(firstAmount);
+    const focus = vi.spyOn(firstAmount, "focus");
+    await clickButton(rendered.container, rendered.window, "Choose a different amount");
+
+    assert.equal(buttonByText(rendered.container, "Choose an amount").disabled, true);
+    expect(focus).toHaveBeenCalledWith({ preventScroll: true });
+    assert.equal(
+      Array.from(
+        rendered.container.querySelectorAll<HTMLInputElement>('input[type="radio"]'),
+      ).every((input) => !input.disabled),
+      true,
+    );
+
+    await clickRadio(rendered.container, rendered.window, "usage_2500");
+    await clickButton(rendered.container, rendered.window, "Continue to checkout · $25");
+    const postPayloads = mocks.requestHostedOnboardingJson.mock.calls
+      .map(([request]) => request)
+      .filter((request) => request.method === "POST")
+      .map((request) => request.payload);
+    assert.deepEqual(postPayloads, [
+      {
+        clientRequestKey: "00000000-0000-4000-8000-000000000101",
+        offerCode: "usage_500",
+      },
+      {
+        clientRequestKey: "00000000-0000-4000-8000-000000000102",
+        offerCode: "usage_2500",
+      },
+    ]);
+    assert.equal(buttonByText(rendered.container, "Resume checkout").disabled, false);
+    expect(rendered.assign).not.toHaveBeenCalled();
+  } finally {
+    await rendered.cleanup();
+  }
+});
+
 test("treats a Stripe return as a status lookup, not proof of fulfillment", async () => {
   vi.useFakeTimers();
   mocks.requestHostedOnboardingJson
@@ -1026,7 +1335,7 @@ test("treats a Stripe return as a status lookup, not proof of fulfillment", asyn
       rendered.container.textContent ?? "",
       /Payment submitted\. Stripe is confirming it\./,
     );
-    assert.doesNotMatch(rendered.container.textContent ?? "", /Usage added\./);
+    assert.doesNotMatch(rendered.container.textContent ?? "", /Usage added/);
     expect(mocks.routerRefresh).not.toHaveBeenCalled();
     expect(rendered.replaceState).toHaveBeenCalledWith(
       {},
@@ -1039,7 +1348,7 @@ test("treats a Stripe return as a status lookup, not proof of fulfillment", asyn
       await Promise.resolve();
     });
 
-    assert.match(rendered.container.textContent ?? "", /Usage added\./);
+    assert.match(rendered.container.textContent ?? "", /Usage added/);
     expect(mocks.routerRefresh).toHaveBeenCalledTimes(1);
     expect(mocks.requestHostedOnboardingJson).toHaveBeenNthCalledWith(1, {
       method: "GET",
@@ -1051,7 +1360,7 @@ test("treats a Stripe return as a status lookup, not proof of fulfillment", asyn
       vi.advanceTimersByTime(30_000);
       await Promise.resolve();
     });
-    assert.match(rendered.container.textContent ?? "", /Usage added\./);
+    assert.match(rendered.container.textContent ?? "", /Usage added/);
     assert.doesNotMatch(rendered.container.textContent ?? "", /couldn't check/);
   } finally {
     await rendered.cleanup();
@@ -1094,7 +1403,7 @@ test("checks an owned return even when the account no longer has top-up offers",
       signal: expect.any(AbortSignal),
       url: "/api/settings/billing/usage-credit/purchases/hucp_inactive_return",
     });
-    assert.match(rendered.container.textContent ?? "", /Usage added\./);
+    assert.match(rendered.container.textContent ?? "", /Usage added/);
     assert.equal(
       Array.from(rendered.container.querySelectorAll("button")).some(
         (button) => button.textContent?.includes("Add usage"),
@@ -1211,7 +1520,7 @@ test("keeps polling when cancel reconciliation reports payment pending", async (
       await Promise.resolve();
     });
 
-    assert.match(rendered.container.textContent ?? "", /Usage added\./);
+    assert.match(rendered.container.textContent ?? "", /Usage added/);
     expect(mocks.routerRefresh).toHaveBeenCalledTimes(1);
   } finally {
     await rendered.cleanup();
@@ -1319,13 +1628,23 @@ test("distinguishes a failed status lookup and lets the member check again", asy
       purchaseId: "hucp_missing",
       status: "fulfilled",
     });
+    const checkAgainButton = buttonByText(rendered.container, "Check again");
+    const title = rendered.container.querySelector("h2");
+    assert.ok(title);
+    const focus = vi.spyOn(title, "focus");
+    checkAgainButton.focus();
     await clickButton(rendered.container, rendered.window, "Check again");
     await act(async () => {
       await Promise.resolve();
     });
 
     assert.equal(mocks.requestHostedOnboardingJson.mock.calls.length, 11);
-    assert.match(rendered.container.textContent ?? "", /Usage added\./);
+    assert.match(rendered.container.textContent ?? "", /Usage added/);
+    expect(focus).toHaveBeenCalledWith({ preventScroll: true });
+    assert.match(
+      rendered.container.textContent ?? "",
+      /Your available usage has been updated\./,
+    );
     expect(mocks.routerRefresh).toHaveBeenCalledTimes(1);
   } finally {
     await rendered.cleanup();
@@ -1413,6 +1732,12 @@ function buttonByText(container: HTMLElement, label: string): HTMLButtonElement 
   );
   assert.ok(button);
   return button;
+}
+
+function hasButton(container: HTMLElement, label: string): boolean {
+  return Array.from(container.querySelectorAll("button")).some((button) =>
+    button.textContent?.includes(label),
+  );
 }
 
 function deferred<T>() {

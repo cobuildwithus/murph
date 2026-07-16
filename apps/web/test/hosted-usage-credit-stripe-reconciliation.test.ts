@@ -82,7 +82,7 @@ vi.mock("@/src/lib/hosted-onboarding/runtime", () => ({
   requireHostedStripeApiMode: mocks.stripeApiMode,
 }));
 
-vi.mock("@/src/lib/hosted-onboarding/usage-credit-purchase-service", () => ({
+vi.mock("@/src/lib/hosted-onboarding/usage-credit-purchase-stripe", () => ({
   decryptHostedUsageCreditPurchaseStripeField: mocks.decryptStripeField,
   encryptHostedUsageCreditPurchaseStripeField: mocks.encryptStripeField,
   HOSTED_USAGE_CREDIT_PURCHASE_STRIPE_PRIVATE_FIELDS: {
