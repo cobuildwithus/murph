@@ -378,31 +378,34 @@ describe('assistant execution prompt contract', () => {
       '`show`: scores/sources only',
     )
     expect(layers.stableRouteCapabilityPrompt).toContain(
-      'returned `settings` governs',
+      'trust `settings`',
     )
     expect(layers.stableRouteCapabilityPrompt).toContain(
-      'state exact score/source',
+      'State score/source',
     )
     expect(layers.stableRouteCapabilityPrompt).toContain(
-      'false `updated` = already requested',
+      '`superseded` newer intent won',
+    )
+    expect(layers.stableRouteCapabilityPrompt).toContain(
+      '`updated` means effective change',
+    )
+    expect(layers.stableRouteCapabilityPrompt).toContain(
+      'never echo superseded',
     )
     expect(layers.stableRouteCapabilityPrompt).toContain(
       'Error/no `settings`: unconfirmed',
     )
     expect(layers.stableRouteCapabilityPrompt).toContain(
-      'never changed/unchanged',
+      'Show states values, not cause',
     )
     expect(layers.stableRouteCapabilityPrompt).toContain(
-      'One `show` may state values, not cause',
+      'Saved Humor change only: >0, at most one earned joke',
     )
     expect(layers.stableRouteCapabilityPrompt).toContain(
-      'for Humor >0, at most one earned safe joke',
+      'none otherwise',
     )
     expect(layers.stableRouteCapabilityPrompt).toContain(
-      'none for 0/query/Push/Detail',
-    )
-    expect(layers.stableRouteCapabilityPrompt).toContain(
-      'Persist only explicit ongoing setting requests',
+      'Explicit ongoing requests only',
     )
     expect(layers.stableRouteCapabilityPrompt).toContain(
       'never shame, coerce, invent urgency',

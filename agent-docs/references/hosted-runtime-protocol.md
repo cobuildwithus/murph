@@ -316,15 +316,23 @@ this compatibility invariant first, and only introduce heavier machinery when a
 specific protocol change cannot be made safe with the sequence above.
 The preference sparse-delta plus cross-lane causal-sequence rollout uses the
 same compatibility rule behind one gate. Vercel predeploy first adds nullable
-`causal_seq` storage and the new web build starts producing sequences while
-personality writes remain gated off; the old Cloudflare parser ignores that
+`causal_seq` storage, the keyed assistant-input lookup, and nullable Humor,
+Push, and Detail projection watermarks. The new web build starts producing
+sequences and supports the signed input-bound personality transaction while
+personality writes remain gated off; the old Cloudflare parser ignores the
 optional field. The normal post-deploy contract lane waits for old Vercel
 functions to drain and requires sequences only when no unconsumed legacy
-preference row remains, failing closed for a later retry otherwise. Deploy the
-sequence-aware Cloudflare consumer with immediate runner rollout and its gate
-off, prove fleet convergence, then enable Cloudflare before Vercel. Once the
-gates are enabled or positive preference watermarks can exist, neither plane
-may roll back independently.
+preference row remains, failing closed for a later retry otherwise. It then
+seeds all three personality watermarks to each member's current causal barrier,
+including null projection values, because the pre-fix projection may differ
+from canonical vault state and cannot be backfilled safely. Deploy the
+sequence-aware Cloudflare consumer with immediate runner rollout, prove fleet
+convergence, then enable the Vercel gate. The hard-cut Web build rejects the
+retired direct-vault causal-sequence action after old Vercel functions drain;
+legacy runners keep ordinary replies but style writes fail closed. Web must not
+roll back below that hard-cut while personality watermarks exist. Set the gate
+to `0` and redeploy Web before a runner rollback when unavailable controls must
+be hidden.
 For the `conversationInputAhead` checkpoint and owner-release callback rollout,
 deploy Cloudflare Worker plus runner first with immediate container rollout,
 wait for the managed-container smoke to prove the new bundle, then deploy web.
@@ -522,10 +530,17 @@ user-scoped transaction lock, shared by the conversation and system lanes.
 That acceptance sequence, not lane import order or wall-clock time, orders
 Settings deltas against conversational preference commands. System pending
 items and durable conversation input records carry it to the canonical
-preference owner, which stores only a per-field applied watermark. An older or
-equal event is terminal for stale fields, while a fresh sibling still applies.
-Tokenless v1 pending items map to sequence zero and drain; they cannot overwrite
-a field whose zero-or-newer watermark is already established.
+preference owner, which stores only a per-field applied watermark. Web keeps
+matching nullable per-field projection watermarks for tone, voice, Humor, Push,
+and Detail. The four-case equality-aware rule applies at the canonical owner
+and to Web's Humor, Push, and Detail projection: a newer sequence applies even
+when the visible value is unchanged, an older sequence is a field-local stale
+no-op while a fresh sibling still applies, the same sequence and value is an
+idempotent retry, and the same sequence with a different value is a later
+command in the same accepted turn. Web tone and voice retain their existing
+watermark ordering. Tokenless v1 pending items map to sequence zero and drain;
+they cannot overwrite a field whose zero-or-newer watermark is already
+established.
 Those watermarks live in the bounded canonical companion document
 `bank/assistant-preference-mutations.json`, separate from the strict preference
 value document. The canonical selector admits a bounded, cursor-ordered compound
@@ -534,11 +549,23 @@ considers only later fresh siblings; background begins with the oldest replyable
 pending input. The batch continues only across the same canonical conversation,
 the same provider-native reply anchor, and exact-successor positive per-member
 causal sequences. A gap, missing or legacy sequence, boundary change, or the
-50-input bound ends the batch and leaves the remainder pending. During that turn,
-the accepted-input boundary passes the terminal sequence directly to the private
-hosted style operation as the compound turn frontier. Exact-successor proof
-prevents that frontier from crossing an intervening Settings row. The model
-cannot supply the number, and the turn-local value is cleared at turn completion.
+50-input bound ends the batch and leaves the remainder pending. During that
+turn, the accepted-input boundary passes the terminal provider input id to the
+private hosted style operation. The signed Web transaction binds that id to the
+member's live conversation row and derives the compound turn frontier; the
+model supplies neither the id nor a numeric sequence. Exact-successor proof
+prevents that frontier from crossing an intervening Settings row.
+
+Hosted style set/reset atomically updates the Web projection and requested
+per-dial watermarks in that transaction and, when at least one requested dial
+applies, appends a sparse
+`member.preferences.updated` event with `causalOrigin: "turn"` and the derived
+frontier as `preferenceCausalSeq`. The new mailbox row's own transport sequence
+does not become a second intent time. Runtime handling remains the only durable
+vault mutation path. Until that event is imported, the invocation keeps only
+Web's accepted effective dials as a turn-scoped overlay; `show` reads canonical
+vault state first and overlays those accepted current-turn results. The overlay
+is cleared when the invocation completes.
 
 `runtime.pending-effects-reconcile-requested` is the pointer-only continuation
 for a trusted owner-state change that may unblock an already-persisted runtime
