@@ -77,6 +77,9 @@ describe("hosted Assistant Ask contracts", () => {
       memberId: "member_group_runtime",
       occurredAt: REQUESTED_AT,
     });
+    if (requestedAsk.target.kind !== "joined_group") {
+      throw new Error("Expected the legacy joined-group target.");
+    }
     requestedAsk.target.membershipId = "hgrpm_mutated";
     requestedAsk.target.requestedLabel = "Mutated";
 

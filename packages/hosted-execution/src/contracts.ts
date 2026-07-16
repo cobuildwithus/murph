@@ -238,6 +238,17 @@ export interface HostedExecutionAssistantAskJoinedGroupTarget {
   requestedLabel: string | null;
 }
 
+export interface HostedExecutionAssistantAskConsentedMemberTarget {
+  grantId: string;
+  kind: "consented_member";
+  membershipId: string;
+  permissionDigest: string;
+}
+
+export type HostedExecutionAssistantAskTarget =
+  | HostedExecutionAssistantAskJoinedGroupTarget
+  | HostedExecutionAssistantAskConsentedMemberTarget;
+
 export type HostedExecutionAssistantAskResult =
   | {
       answer: string;
@@ -253,10 +264,11 @@ export interface HostedExecutionAssistantAskRequestedPayload {
   originAssistantInputId: string;
   originSessionId: string;
   question: string;
-  target: HostedExecutionAssistantAskJoinedGroupTarget;
+  target: HostedExecutionAssistantAskTarget;
 }
 
 export interface HostedExecutionAssistantAskCompletedPayload {
+  deliveryMode?: "reviewed_exact";
   expiresAt: string;
   originAssistantInputId: string;
   originSessionId: string;

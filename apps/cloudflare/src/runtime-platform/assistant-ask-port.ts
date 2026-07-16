@@ -11,7 +11,7 @@ import {
   type HostedWebControlTransport,
 } from "./web-control-transport.ts";
 
-const HOSTED_RUNTIME_ASSISTANT_ASK_RESPONSE_MAX_BYTES = 8_192;
+const HOSTED_RUNTIME_ASSISTANT_ASK_RESPONSE_MAX_BYTES = 16_384;
 
 export function createHostedRuntimeAssistantAskPort(input: {
   boundUserId: string;

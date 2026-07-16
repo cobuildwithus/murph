@@ -50,6 +50,7 @@ describe("Hosted Assistant Ask control-plane port", () => {
     const signal = new AbortController().signal;
     mocks.fetchHostedWebControlPlaneJson.mockResolvedValue({
       action: "prepare",
+      disclosure: { permissionText: "Share calendar availability." },
       question: "What is today's workout?",
       status: "ready",
       targetLabel: "100 Club",
@@ -66,6 +67,7 @@ describe("Hosted Assistant Ask control-plane port", () => {
       requestId: "aask_req_one",
     }, { signal })).resolves.toEqual({
       action: "prepare",
+      disclosure: { permissionText: "Share calendar availability." },
       question: "What is today's workout?",
       status: "ready",
       targetLabel: "100 Club",
@@ -77,7 +79,7 @@ describe("Hosted Assistant Ask control-plane port", () => {
       description: "Hosted Assistant Ask control",
       fetchImpl: expect.any(Function),
       path: HOSTED_RUNTIME_ASSISTANT_ASK_CONTROL_PATH,
-      sensitiveResponseBody: { maxBytes: 8_192 },
+      sensitiveResponseBody: { maxBytes: 16_384 },
       signal,
       timeoutMs: 5_000,
       transport: { mode: "proxy" },

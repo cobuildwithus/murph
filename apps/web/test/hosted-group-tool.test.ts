@@ -3,7 +3,10 @@ import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 const mocks = vi.hoisted(() => ({
   assertHostedLinqRouteEgressAuthority: vi.fn(),
   buildMurphHostedLinqContactCardVcf: vi.fn(),
+  canonicalizeHostedGroupDisclosurePermissionText: vi.fn(),
+  createHostedGroupDisclosurePermissionRequestId: vi.fn(),
   createHostedGroupJoinLinkForOwnedThreadContainerTx: vi.fn(),
+  digestHostedGroupDisclosurePermissionText: vi.fn(),
   enqueueHostedGroupNewsletterEmailNeededNudgeIfNeededBestEffort: vi.fn(),
   fetchMurphHostedLinqContactCardVcfPhoto: vi.fn(),
   getHostedLinqChatHandles: vi.fn(),
@@ -17,15 +20,20 @@ const mocks = vi.hoisted(() => ({
   lookupHostedMemberByVerifiedEmailAddress: vi.fn(),
   lookupHostedMemberIdentityByPhoneNumber: vi.fn(),
   readActiveHostedMemberAccess: vi.fn(),
+  readActiveHostedGroupDisclosureGrantsForGroup: vi.fn(),
+  readActiveHostedGroupDisclosureGrantsForMember: vi.fn(),
   requestHostedGroupAssistantAsk: vi.fn(),
+  requestHostedGroupMemberAssistantAsk: vi.fn(),
   readHostedGroupByRuntimeMemberId: vi.fn(),
   readHostedGroupIdByRuntimeMemberId: vi.fn(),
   readHostedGroupMembershipsForMember: vi.fn(),
   readHostedMemberAssistantPreferences: vi.fn(),
   recordHostedGroupJoinOfferTx: vi.fn(),
+  recordHostedGroupDisclosurePermissionTx: vi.fn(),
   releaseHostedLinqContactCardShareAttempt: vi.fn(),
   reserveHostedLinqContactCardShareAttempt: vi.fn(),
   revokeHostedGroupMemberEmailShareTx: vi.fn(),
+  revokeHostedGroupDisclosureGrantForMemberTx: vi.fn(),
   resolveMurphHostedLinqContactCardBackupPhoneNumber: vi.fn(),
   resolveHostedPublicBaseUrl: vi.fn(),
   sendHostedLinqAttachmentMessage: vi.fn(),
@@ -119,6 +127,24 @@ vi.mock("@/src/lib/hosted-groups/group-newsletter", () => ({
 
 vi.mock("@/src/lib/hosted-groups/group-assistant-ask", () => ({
   requestHostedGroupAssistantAsk: mocks.requestHostedGroupAssistantAsk,
+  requestHostedGroupMemberAssistantAsk: mocks.requestHostedGroupMemberAssistantAsk,
+}));
+
+vi.mock("@/src/lib/hosted-groups/group-disclosure-store", () => ({
+  canonicalizeHostedGroupDisclosurePermissionText:
+    mocks.canonicalizeHostedGroupDisclosurePermissionText,
+  createHostedGroupDisclosurePermissionRequestId:
+    mocks.createHostedGroupDisclosurePermissionRequestId,
+  digestHostedGroupDisclosurePermissionText:
+    mocks.digestHostedGroupDisclosurePermissionText,
+  readActiveHostedGroupDisclosureGrantsForGroup:
+    mocks.readActiveHostedGroupDisclosureGrantsForGroup,
+  readActiveHostedGroupDisclosureGrantsForMember:
+    mocks.readActiveHostedGroupDisclosureGrantsForMember,
+  recordHostedGroupDisclosurePermissionTx:
+    mocks.recordHostedGroupDisclosurePermissionTx,
+  revokeHostedGroupDisclosureGrantForMemberTx:
+    mocks.revokeHostedGroupDisclosureGrantForMemberTx,
 }));
 
 vi.mock("@/src/lib/hosted-orchestration/signal-runtime", () => ({
@@ -212,11 +238,13 @@ const NEWSLETTER_DEFAULT_SCOPES = [
   { projectionKind: "resting-heart-rate-days.v0" },
   { projectionKind: "hrv-days.v0" },
 ] as const;
+const DISCLOSURE_ORIGIN_ASSISTANT_INPUT_ID = `ain_${"d".repeat(32)}`;
 
 function groupSummaryWithOwnerEmailGrant() {
   return {
     ...GROUP_SUMMARY,
     members: [{
+      disclosureGrants: [],
       grantedVaultShareProjectionKinds: ["profile-name.v0" as const, "group-email.v0" as const],
       handle: "+15551110000",
       memberId: "member_owner",
@@ -229,6 +257,15 @@ describe("handleHostedRuntimeGroupTool", () => {
   beforeEach(() => {
     vi.stubEnv("MURPH_ASSISTANT_PERSONALITY_CAUSAL_WRITES_ENABLED", "1");
     vi.clearAllMocks();
+    mocks.canonicalizeHostedGroupDisclosurePermissionText.mockImplementation(
+      (value: string) => value.replaceAll("\r\n", "\n").trim(),
+    );
+    mocks.digestHostedGroupDisclosurePermissionText.mockReturnValue(
+      "permission_digest_1",
+    );
+    mocks.createHostedGroupDisclosurePermissionRequestId.mockReturnValue(
+      "hgrpdp_request_1",
+    );
     mocks.hasHostedRuntimeActiveAccess.mockResolvedValue(true);
     mocks.leaveHostedGroupMemberTx.mockResolvedValue({
       kind: "left",
@@ -298,7 +335,18 @@ describe("handleHostedRuntimeGroupTool", () => {
       messageLookupKey: "hbidx:linq-message:v1:offer",
       projectionKinds: ["sleep-times.v0"],
     });
+    mocks.recordHostedGroupDisclosurePermissionTx.mockResolvedValue(undefined);
+    mocks.readActiveHostedGroupDisclosureGrantsForMember.mockResolvedValue([]);
+    mocks.readActiveHostedGroupDisclosureGrantsForGroup.mockResolvedValue([]);
+    mocks.revokeHostedGroupDisclosureGrantForMemberTx.mockResolvedValue({
+      kind: "revoked",
+      revokedAt: new Date("2026-07-16T12:00:00Z"),
+    });
     mocks.requestHostedGroupAssistantAsk.mockResolvedValue({
+      mailboxWake: null,
+      result: { status: "unavailable", unavailableReason: "not_configured" },
+    });
+    mocks.requestHostedGroupMemberAssistantAsk.mockResolvedValue({
       mailboxWake: null,
       result: { status: "unavailable", unavailableReason: "not_configured" },
     });
@@ -311,14 +359,17 @@ describe("handleHostedRuntimeGroupTool", () => {
   it("classifies group-tool actions by access authority", () => {
     expect(HOSTED_RUNTIME_GROUP_TOOL_ACCESS_CLASSIFICATION).toEqual({
       ask: "personal_active",
+      ask_member: "participant_aware",
       create_join_link: "owner_active",
       leave_membership: "participant_aware",
-      list_memberships: "participant_aware",
+      list_memberships: "personal_active",
+      post_disclosure_request: "owner_active",
       post_join_offer: "owner_active",
       preflight_set_chat_avatar: "owner_active",
       read_chat_participants: "participant_aware",
       read_current: "participant_aware",
       read_own_assistant_style: "participant_aware",
+      revoke_disclosure_grant: "personal_active",
       revoke_own_email_share: "participant_aware",
       set_chat_avatar: "owner_active",
       share_contact_card: "owner_active",
@@ -363,6 +414,84 @@ it("dispatches a personal ask and schedules only its committed mailbox wake", as
       expectedUserId: "member_group_runtime",
       mailboxItemId: "aask_req_one",
     });
+  });
+
+  it("dispatches a grant-bound group ask and schedules only its committed private wake", async () => {
+    const scheduleMailboxWake = vi.fn();
+    mocks.requestHostedGroupMemberAssistantAsk.mockResolvedValue({
+      mailboxWake: {
+        expectedUserId: "member_grantor",
+        mailboxItemId: "aask_req_disclosure_one",
+      },
+      result: { status: "accepted" },
+    });
+
+    await expect(handleHostedRuntimeGroupTool({
+      memberId: "member_group_runtime",
+      request: {
+        action: "ask_member",
+        grantId: "grant_sleep",
+        originAssistantInputId: `ain_${"b".repeat(32)}`,
+        originSessionId: "session_group",
+        question: "How has the grantor been sleeping lately?",
+      },
+      scheduleMailboxWake,
+    })).resolves.toEqual({
+      action: "ask_member",
+      result: { status: "accepted" },
+    });
+
+    expect(mocks.requestHostedGroupMemberAssistantAsk).toHaveBeenCalledWith({
+      grantId: "grant_sleep",
+      memberId: "member_group_runtime",
+      originAssistantInputId: `ain_${"b".repeat(32)}`,
+      originSessionId: "session_group",
+      question: "How has the grantor been sleeping lately?",
+    });
+    expect(scheduleMailboxWake).toHaveBeenCalledWith({
+      expectedUserId: "member_grantor",
+      mailboxItemId: "aask_req_disclosure_one",
+    });
+  });
+
+  it("revokes grants only for the signed personal member", async () => {
+    mocks.hostedThreadContainerFindUnique.mockResolvedValue(null);
+
+    await expect(handleHostedRuntimeGroupTool({
+      memberId: "member_self",
+      request: {
+        action: "revoke_disclosure_grant",
+        grantId: "grant_sleep",
+      },
+    })).resolves.toEqual({
+      action: "revoke_disclosure_grant",
+      result: { status: "revoked" },
+    });
+
+    expect(mocks.revokeHostedGroupDisclosureGrantForMemberTx).toHaveBeenCalledWith({
+      grantId: "grant_sleep",
+      memberId: "member_self",
+      now: expect.any(Date),
+      tx: fakeTx,
+    });
+  });
+
+  it("keeps grant management unavailable to group runtimes", async () => {
+    for (const request of [
+      { action: "list_memberships" as const },
+      { action: "revoke_disclosure_grant" as const, grantId: "grant_sleep" },
+    ]) {
+      const response = await handleHostedRuntimeGroupTool({
+        memberId: "member_group_runtime",
+        request,
+      });
+      expect(response.result).toMatchObject({
+        status: "unavailable",
+        unavailableReason: "personal_runtime_required",
+      });
+    }
+    expect(mocks.readActiveHostedGroupDisclosureGrantsForMember).not.toHaveBeenCalled();
+    expect(mocks.revokeHostedGroupDisclosureGrantForMemberTx).not.toHaveBeenCalled();
   });
 
 it("reads only the authenticated Linq sender's private assistant style", async () => {
@@ -567,12 +696,23 @@ it("reads only the authenticated Linq sender's private assistant style", async (
     expect(mocks.upsertHostedMemberAssistantPreferencesTx).not.toHaveBeenCalled();
   });
   it("lists the current member's group grants without exposing a member-held invite link", async () => {
+    mocks.hostedThreadContainerFindUnique.mockResolvedValue(null);
+    mocks.readActiveHostedGroupDisclosureGrantsForMember.mockResolvedValue([{
+      grantId: "grant_sleep",
+      groupLabel: "Fun-loving runners",
+      permissionText: "Recent sleep timing and duration",
+    }]);
     await expect(handleHostedRuntimeGroupTool({
       memberId: "member_self",
       request: { action: "list_memberships" },
     })).resolves.toEqual({
       action: "list_memberships",
       result: {
+        disclosureGrants: [{
+          grantId: "grant_sleep",
+          groupLabel: "Fun-loving runners",
+          permissionText: "Recent sleep timing and duration",
+        }],
         memberships: [{
           displayName: "Fun-loving runners",
           grantedVaultShareProjectionScopes: [
@@ -594,12 +734,16 @@ it("reads only the authenticated Linq sender's private assistant style", async (
       },
     });
 
-    expect(mocks.readHostedGroupMembershipsForMember).toHaveBeenCalledWith({
-      memberId: "member_self",
-    });
+    expect(mocks.readHostedGroupMembershipsForMember).toHaveBeenCalledWith(
+      expect.objectContaining({ memberId: "member_self" }),
+    );
+    expect(mocks.readActiveHostedGroupDisclosureGrantsForMember).toHaveBeenCalledWith(
+      expect.objectContaining({ memberId: "member_self" }),
+    );
   });
 
   it("returns an existing join link as a permissions URL only to the group owner", async () => {
+    mocks.hostedThreadContainerFindUnique.mockResolvedValue(null);
     mocks.readHostedGroupMembershipsForMember.mockResolvedValue({
       memberships: [{
         displayName: "Fun-loving runners",
@@ -737,20 +881,59 @@ it("reads only the authenticated Linq sender's private assistant style", async (
     },
   );
 
-  it("reads the current group for the runtime member", async () => {
+  it("attaches active grants only to their current roster member", async () => {
+    const currentGroup = {
+      ...GROUP_SUMMARY,
+      members: [{
+        grantedVaultShareProjectionKinds: [],
+        grantedVaultShareProjectionScopes: [],
+        handle: "+15550000001",
+        memberId: "member_grantor",
+        role: "member",
+      }, {
+        grantedVaultShareProjectionKinds: [],
+        grantedVaultShareProjectionScopes: [],
+        handle: "+15550000002",
+        memberId: "member_without_grant",
+        role: "member",
+      }],
+    };
+    mocks.readHostedGroupByRuntimeMemberId.mockResolvedValue(currentGroup);
+    mocks.readActiveHostedGroupDisclosureGrantsForGroup.mockResolvedValue([{
+      grantId: "grant_calendar",
+      groupLabel: "Sunday sleep crew",
+      memberId: "member_grantor",
+      permissionText: "Calendar availability for coordinating a call",
+    }]);
+
     await expect(handleHostedRuntimeGroupTool({
       memberId: "member_group_runtime",
       request: { action: "read_current" },
     })).resolves.toEqual({
       action: "read_current",
       result: {
-        group: GROUP_SUMMARY,
+        group: {
+          ...currentGroup,
+          members: [{
+            ...currentGroup.members[0],
+            disclosureGrants: [{
+              grantId: "grant_calendar",
+              permissionText: "Calendar availability for coordinating a call",
+            }],
+          }, {
+            ...currentGroup.members[1],
+            disclosureGrants: [],
+          }],
+        },
         status: "ok",
       },
     });
 
     expect(mocks.readHostedGroupByRuntimeMemberId).toHaveBeenCalledWith({
       runtimeMemberId: "member_group_runtime",
+    });
+    expect(mocks.readActiveHostedGroupDisclosureGrantsForGroup).toHaveBeenCalledWith({
+      groupId: GROUP_SUMMARY.id,
     });
   });
 
@@ -1197,6 +1380,7 @@ describe("filterHostedRuntimeGroupToolResponseProjectionScopes", () => {
   const groupWithSelectorScopes = {
     ...GROUP_SUMMARY,
     members: [{
+      disclosureGrants: [],
       grantedVaultShareProjectionKinds: [
         "sleep-times.v0" as const,
         RUNNING_DISTANCE_SCOPE.projectionKind,
@@ -1244,6 +1428,7 @@ describe("filterHostedRuntimeGroupToolResponseProjectionScopes", () => {
     const filtered = filterHostedRuntimeGroupToolResponseProjectionScopes({
       action: "list_memberships",
       result: {
+        disclosureGrants: [],
         memberships: [{
           displayName: "Sunday runners",
           grantedVaultShareProjectionScopes: [
@@ -1268,6 +1453,7 @@ describe("filterHostedRuntimeGroupToolResponseProjectionScopes", () => {
     expect(filtered).toEqual({
       action: "list_memberships",
       result: {
+        disclosureGrants: [],
         memberships: [{
           displayName: "Sunday runners",
           grantedVaultShareProjectionScopes: [{ projectionKind: "profile-name.v0" }],
@@ -1435,6 +1621,12 @@ describe("handleHostedRuntimeGroupTool chat-scoped actions", () => {
   beforeEach(() => {
     vi.clearAllMocks();
     mocks.assertHostedLinqRouteEgressAuthority.mockResolvedValue({});
+    mocks.canonicalizeHostedGroupDisclosurePermissionText.mockImplementation(
+      (value: string) => value.replaceAll("\r\n", "\n").trim(),
+    );
+    mocks.digestHostedGroupDisclosurePermissionText.mockReturnValue(
+      "permission_digest_1",
+    );
     mocks.buildMurphHostedLinqContactCardVcf.mockReturnValue("BEGIN:VCARD\r\nEND:VCARD\r\n");
     mocks.fetchMurphHostedLinqContactCardVcfPhoto.mockResolvedValue(null);
     mocks.getHostedLinqChatHandles.mockResolvedValue([
@@ -1452,6 +1644,8 @@ describe("handleHostedRuntimeGroupTool chat-scoped actions", () => {
       core: { id: "member_participant", suspendedAt: null },
     });
     mocks.readActiveHostedMemberAccess.mockResolvedValue(true);
+    mocks.readHostedGroupIdByRuntimeMemberId.mockResolvedValue(GROUP_SUMMARY.id);
+    mocks.recordHostedGroupDisclosurePermissionTx.mockResolvedValue(undefined);
     mocks.lookupHostedMemberByVerifiedEmailAddress.mockResolvedValue(null);
     mocks.releaseHostedLinqContactCardShareAttempt.mockResolvedValue(undefined);
     mocks.reserveHostedLinqContactCardShareAttempt.mockResolvedValue({
@@ -1584,6 +1778,53 @@ describe("handleHostedRuntimeGroupTool chat-scoped actions", () => {
         status: "unavailable",
         unavailableReason: "provider_unavailable",
       },
+    });
+  });
+
+  it("posts and binds fixed exact-permission disclosure consent copy", async () => {
+    const request = {
+      memberId: "member_container",
+      request: {
+        action: "post_disclosure_request",
+        linqThread: LINQ_THREAD,
+        originAssistantInputId: DISCLOSURE_ORIGIN_ASSISTANT_INPUT_ID,
+        permissionText: "  Recent sleep timing and duration  ",
+      },
+    } as const;
+    await expect(handleHostedRuntimeGroupTool(request)).resolves.toEqual({
+      action: "post_disclosure_request",
+      result: { status: "sent" },
+    });
+    await expect(handleHostedRuntimeGroupTool(request)).resolves.toEqual({
+      action: "post_disclosure_request",
+      result: { status: "sent" },
+    });
+
+    expect(mocks.assertHostedLinqRouteEgressAuthority).toHaveBeenCalledWith(
+      expect.objectContaining({ authority: LINQ_THREAD.authority }),
+    );
+    expect(mocks.readActiveHostedMemberAccess).toHaveBeenCalledWith(
+      expect.objectContaining({ memberId: "member_owner" }),
+    );
+    expect(mocks.sendHostedLinqChatMessage).toHaveBeenCalledWith({
+      chatId: "chat_group_1",
+      idempotencyKey: "group-disclosure:hgrpdp_request_1",
+      message: [
+        "Like this message to let this group ask your Murph for:",
+        "",
+        "Recent sleep timing and duration",
+        "",
+        "Only this exact permission is granted. Before an answer from your Murph is shared here, a separate outgoing reviewer checks it against this permission. Incoming questions do not go through a separate reviewer. You can revoke this permission at any time.",
+      ].join("\n"),
+    });
+    expect(mocks.sendHostedLinqChatMessage).toHaveBeenCalledTimes(2);
+    expect(mocks.recordHostedGroupDisclosurePermissionTx).toHaveBeenCalledWith({
+      groupId: GROUP_SUMMARY.id,
+      messageId: "msg_offer_1",
+      originAssistantInputId: DISCLOSURE_ORIGIN_ASSISTANT_INPUT_ID,
+      permissionText: "Recent sleep timing and duration",
+      postedAt: expect.any(Date),
+      tx: fakeTx,
     });
   });
 

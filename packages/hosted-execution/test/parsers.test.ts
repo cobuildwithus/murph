@@ -1115,6 +1115,11 @@ describe("parseHostedRuntimeGroupTool", () => {
     const response = {
       action: "list_memberships",
       result: {
+        disclosureGrants: [{
+          grantId: "grant_sleep",
+          groupLabel: "Fun-loving runners",
+          permissionText: "Recent sleep timing and duration",
+        }],
         memberships: [{
           displayName: "Fun-loving runners",
           grantedVaultShareProjectionScopes: [
@@ -1478,6 +1483,7 @@ describe("parseHostedRuntimeGroupTool", () => {
           ...GROUP_SUMMARY,
           members: [
             {
+              disclosureGrants: [],
               grantedVaultShareProjectionKinds: ["profile-name.v0", "sleep-times.v0"],
               grantedVaultShareProjectionScopes: [
                 { projectionKind: "profile-name.v0" },
@@ -1488,6 +1494,7 @@ describe("parseHostedRuntimeGroupTool", () => {
               role: "owner",
             },
             {
+              disclosureGrants: [],
               grantedVaultShareProjectionKinds: [],
               grantedVaultShareProjectionScopes: [],
               handle: null,
@@ -1505,6 +1512,7 @@ describe("parseHostedRuntimeGroupTool", () => {
           ...GROUP_SUMMARY,
           members: [
             {
+              disclosureGrants: [],
               grantedVaultShareProjectionKinds: ["profile-name.v0", "sleep-times.v0"],
               grantedVaultShareProjectionScopes: [
                 { projectionKind: "profile-name.v0" },
@@ -1515,6 +1523,7 @@ describe("parseHostedRuntimeGroupTool", () => {
               role: "owner",
             },
             {
+              disclosureGrants: [],
               grantedVaultShareProjectionKinds: [],
               grantedVaultShareProjectionScopes: [],
               handle: null,

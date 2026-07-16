@@ -25,6 +25,9 @@ import {
   materializePendingHostedGroupJoinConfirmationsBestEffort,
   signalHostedGroupJoinConfirmationRuntimeBestEffort,
 } from "./group-join-confirmation";
+import {
+  acceptHostedGroupDisclosurePermissionReactionTx,
+} from "./group-disclosure-store";
 import { acceptHostedGroupJoinOfferTx } from "./group-store";
 import {
   createHostedPostCommitDeadline,
@@ -33,6 +36,7 @@ import {
 } from "../hosted-onboarding/bounded-post-commit";
 
 type HostedGroupJoinOfferReactionSkipReason =
+  | "disclosure_grant_limit_reached"
   | "launch_consent_missing"
   | "member_inactive"
   | "missing_reaction_context"
@@ -56,6 +60,14 @@ export async function handleHostedGroupJoinOfferReaction(input: {
       reason: "reaction_removed",
     });
   }
+  if (input.event.reactionIsFromMe === true) {
+    return skipHostedGroupJoinOfferReaction({
+      reason: "unsupported_reaction",
+    });
+  }
+  const isDisclosureConsentReaction = isExactHostedGroupDisclosureLikeReaction(
+    input.event,
+  );
   if (
     !isHostedLinqAffirmativeReaction({
       customEmoji: input.event.reactionCustomEmoji,
@@ -105,6 +117,32 @@ export async function handleHostedGroupJoinOfferReaction(input: {
     channel: "linq",
     threadId: input.event.linqChatId,
   });
+
+  if (isDisclosureConsentReaction) {
+    const disclosureResult = await input.prisma.$transaction(async (tx) =>
+      acceptHostedGroupDisclosurePermissionReactionTx({
+        memberId: member.id,
+        messageLookupKeyReadCandidates,
+        now: input.event.providerCreatedAt,
+        reactionEventId: input.event.eventId,
+        threadIdentityLookupKeyReadCandidates,
+        tx,
+      }), HOSTED_ONBOARDING_TRANSACTION_OPTIONS);
+    if (disclosureResult.kind === "accepted") {
+      return { status: "accepted", reason: "accepted" };
+    }
+    if (disclosureResult.kind === "not_group_member") {
+      return skipHostedGroupJoinOfferReaction({ reason: "not_a_member" });
+    }
+    if (disclosureResult.kind === "wrong_thread") {
+      return skipHostedGroupJoinOfferReaction({ reason: "no_offer_match" });
+    }
+    if (disclosureResult.kind === "limit_reached") {
+      return skipHostedGroupJoinOfferReaction({
+        reason: "disclosure_grant_limit_reached",
+      });
+    }
+  }
 
   let result: Awaited<ReturnType<typeof acceptHostedGroupJoinOfferTx>>;
   try {
@@ -173,6 +211,13 @@ export async function handleHostedGroupJoinOfferReaction(input: {
   });
 
   return { status: "accepted", reason: "accepted" };
+}
+
+function isExactHostedGroupDisclosureLikeReaction(
+  event: ParsedHostedLinqProviderEvent,
+): boolean {
+  return event.eventType === "reaction.added"
+    && event.reactionType?.trim().toLowerCase() === "like";
 }
 
 async function signalMailboxAppendRuntimesBestEffort(input: {

@@ -8,6 +8,10 @@ import {
   HOSTED_EXECUTION_ASSISTANT_ASK_TARGET_LABEL_MAX_CODE_POINTS,
 } from "@murphai/hosted-execution/contracts";
 import {
+  HOSTED_RUNTIME_ASSISTANT_ASK_REQUEST_ID_MAX_CODE_POINTS,
+  HOSTED_RUNTIME_GROUP_DISCLOSURE_PERMISSION_TEXT_MAX_CODE_POINTS,
+} from "@murphai/hosted-execution/runtime-control";
+import {
   HOSTED_VAULT_SHARE_ACTIVITY_DISTANCE_PROJECTION_KIND,
   HOSTED_VAULT_SHARE_ACTIVITY_DISTANCE_SELECTOR_ACTIVITY_KINDS,
   HOSTED_VAULT_SHARE_ACTIVITY_MINUTES_PROJECTION_KIND,
@@ -72,6 +76,9 @@ describe("murph.group dynamic tool", () => {
   it("advertises the supported actions", () => {
     expect(MURPH_GROUP_TOOL.inputSchema.properties.action.enum).toEqual([
       "ask",
+      "ask_member",
+      "post_disclosure_request",
+      "revoke_disclosure_grant",
       "read_current",
       "list_memberships",
       "leave_membership",
@@ -89,6 +96,8 @@ describe("murph.group dynamic tool", () => {
       .toBe(HOSTED_EXECUTION_ASSISTANT_ASK_QUESTION_MAX_CODE_POINTS);
     expect(MURPH_GROUP_TOOL.inputSchema.properties.groupLabel.maxLength)
       .toBe(HOSTED_EXECUTION_ASSISTANT_ASK_TARGET_LABEL_MAX_CODE_POINTS);
+    expect(MURPH_GROUP_TOOL.inputSchema.properties.permissionText.maxLength)
+      .toBe(HOSTED_RUNTIME_GROUP_DISCLOSURE_PERMISSION_TEXT_MAX_CODE_POINTS);
     expect(MURPH_GROUP_TOOL.inputSchema.properties.requestedVaultShareProjectionScopes.maxItems)
       .toBe(HOSTED_VAULT_SHARE_SELECTABLE_PROJECTION_SCOPES.length);
     expect(MURPH_GROUP_TOOL.inputSchema.properties.projectionScopes.maxItems)
@@ -136,6 +145,7 @@ describe("murph.group dynamic tool", () => {
     expect(MURPH_GROUP_TOOL.inputSchema.properties.projectionScopes.description)
       .toContain("Existing membership and other grants remain unchanged");
     expect(MURPH_GROUP_TOOL.description).toContain('action="list_memberships"');
+    expect(MURPH_GROUP_TOOL.description).toContain("top-level disclosureGrants");
     expect(MURPH_GROUP_TOOL.description).toContain('action="leave_membership"');
     expect(MURPH_GROUP_TOOL.description).toContain("call list_memberships first");
     expect(MURPH_GROUP_TOOL.description).toContain("exact nonempty membershipId");
@@ -156,7 +166,7 @@ describe("murph.group dynamic tool", () => {
     expect(MURPH_GROUP_TOOL.description)
       .toContain("instead of claiming that an external workspace-linking step is required");
     expect(MURPH_GROUP_TOOL.description)
-      .toContain("When an existing group adds a permission, default to post_join_offer");
+      .toContain("When an existing group adds a projection permission, default to post_join_offer");
     expect(MURPH_GROUP_TOOL.description)
       .toContain("do not tell members to join again or make the link the primary action");
     expect(MURPH_GROUP_TOOL.description)
@@ -515,6 +525,174 @@ describe("murph.group dynamic tool", () => {
     expect(groupRequest).not.toHaveBeenCalled();
   });
 
+  it("parses bounded disclosure actions without model-supplied authority", () => {
+    const valid = [
+      [{ action: "ask_member", grantId: " grant ", question: " Question? " },
+        { action: "ask_member", grantId: "grant", question: "Question?" }],
+      [{ action: "post_disclosure_request", permissionText: " Permission " },
+        { action: "post_disclosure_request", permissionText: "Permission" }],
+      [{ action: "revoke_disclosure_grant", grantId: " grant " },
+        { action: "revoke_disclosure_grant", grantId: "grant" }],
+    ] as const;
+    for (const [input, expected] of valid) {
+      expect(readMurphDynamicToolRequest(groupToolCall(input))).toMatchObject({
+        kind: "group",
+        request: expected,
+      });
+    }
+
+    for (const invalid of [
+      { action: "ask_member", grantId: "grant", memberId: "model", question: "Question?" },
+      {
+        action: "ask_member",
+        grantId: "g".repeat(HOSTED_RUNTIME_ASSISTANT_ASK_REQUEST_ID_MAX_CODE_POINTS + 1),
+        question: "Question?",
+      },
+      { action: "post_disclosure_request", linqThread: "model", permissionText: "Permission" },
+      {
+        action: "post_disclosure_request",
+        originAssistantInputId: "model",
+        permissionText: "Permission",
+      },
+      { action: "post_disclosure_request", permissionText: "x".repeat(
+        HOSTED_RUNTIME_GROUP_DISCLOSURE_PERMISSION_TEXT_MAX_CODE_POINTS + 1,
+      ) },
+      {
+        action: "revoke_disclosure_grant",
+        grantId: "g".repeat(HOSTED_RUNTIME_ASSISTANT_ASK_REQUEST_ID_MAX_CODE_POINTS + 1),
+      },
+    ]) {
+      expect(readMurphDynamicToolRequest(groupToolCall(invalid))?.kind)
+        .toBe("invalid-group-arguments");
+    }
+  });
+
+  it("injects fresh group authority and rejects direct member asks", async () => {
+    const request = readMurphDynamicToolRequest(groupToolCall({
+      action: "ask_member",
+      grantId: "hdg_member_sleep",
+      question: "How much sleep did they get last night?",
+    }));
+    if (!request || request.kind !== "group") {
+      throw new Error("Expected group request.");
+    }
+
+    const groupRequest = vi.fn<GroupToolRequest>(async () => ({
+      action: "ask_member",
+      result: { status: "accepted" },
+    }));
+    const run = async (conversationScope: "direct" | "group") =>
+      await executeMurphDynamicToolRequest({
+        env: {},
+        fetchImpl: fetch,
+        hostedToolContext: createGroupHostedToolContext({
+          currentUserActionScope: () => ({
+            acceptedInputIds: [EARLIER_ASSISTANT_INPUT_ID, FRESH_ASSISTANT_INPUT_ID],
+            conversationId: `conversation_${conversationScope}`,
+            conversationScope,
+            inboundMailboxItemIds: ["mailbox_group"],
+            originSessionId: "session_group",
+            recipientKey: "recipient_group",
+          }),
+          groupRequest,
+        }),
+        nextUsageOrdinal: () => 1,
+        progressDelivery: null,
+        request,
+        vaultRoot: null,
+      });
+
+    expect((await run("group")).rpcResult.success).toBe(true);
+    expect(groupRequest).toHaveBeenCalledWith({
+      action: "ask_member",
+      grantId: "hdg_member_sleep",
+      originAssistantInputId: FRESH_ASSISTANT_INPUT_ID,
+      originSessionId: "session_group",
+      question: "How much sleep did they get last night?",
+    });
+    groupRequest.mockClear();
+    expect((await run("direct")).rpcResult.success).toBe(false);
+    expect(groupRequest).not.toHaveBeenCalled();
+  });
+
+  it("keeps posting group-only and revocation direct-only", async () => {
+    const groupScope = () => ({
+      acceptedInputIds: [FRESH_ASSISTANT_INPUT_ID],
+      conversationId: "conversation_group",
+      conversationScope: "group" as const,
+      inboundMailboxItemIds: ["mailbox_group"],
+      originSessionId: "session_group",
+      recipientKey: "recipient_group",
+    });
+    const directScope = () => ({
+      acceptedInputIds: [FRESH_ASSISTANT_INPUT_ID],
+      conversationId: "conversation_private",
+      conversationScope: "direct" as const,
+      inboundMailboxItemIds: ["mailbox_private"],
+      originSessionId: "session_private",
+      recipientKey: "recipient_private",
+    });
+    const postRequest = readMurphDynamicToolRequest(groupToolCall({
+      action: "post_disclosure_request",
+      permissionText: "Sleep duration from the previous night.",
+    }));
+    const revokeRequest = readMurphDynamicToolRequest(groupToolCall({
+      action: "revoke_disclosure_grant",
+      grantId: "hdg_member_sleep",
+    }));
+    if (
+      !postRequest || postRequest.kind !== "group"
+      || !revokeRequest || revokeRequest.kind !== "group"
+    ) {
+      throw new Error("Expected disclosure group requests.");
+    }
+
+    const groupRequest = vi.fn<GroupToolRequest>(async (request) => {
+      if (request.action === "post_disclosure_request") {
+        return { action: "post_disclosure_request", result: { status: "sent" } };
+      }
+      return { action: "revoke_disclosure_grant", result: { status: "revoked" } };
+    });
+    const run = async (
+      request: typeof postRequest | typeof revokeRequest,
+      currentUserActionScope: typeof groupScope | typeof directScope,
+      requestHandler: GroupToolRequest,
+    ) => await executeMurphDynamicToolRequest({
+      env: {},
+      fetchImpl: fetch,
+      hostedToolContext: createGroupHostedToolContext({
+        currentUserActionScope,
+        groupRequest: requestHandler,
+      }),
+      nextUsageOrdinal: () => 1,
+      progressDelivery: null,
+      request,
+      vaultRoot: null,
+    });
+    for (const [request, currentUserActionScope] of [
+      [postRequest, groupScope],
+      [revokeRequest, directScope],
+    ] as const) {
+      const result = await run(request, currentUserActionScope, groupRequest);
+      expect(result.rpcResult.success).toBe(true);
+    }
+    expect(groupRequest).toHaveBeenCalledWith({
+      action: 'post_disclosure_request',
+      originAssistantInputId: FRESH_ASSISTANT_INPUT_ID,
+      permissionText: 'Sleep duration from the previous night.',
+    })
+
+    const rejectedGroupRequest = vi.fn<GroupToolRequest>();
+    for (const [request, currentUserActionScope] of [
+      [postRequest, directScope],
+      [revokeRequest, groupScope],
+    ] as const) {
+      const result = await run(request, currentUserActionScope, rejectedGroupRequest);
+      expect(result.rpcResult.success).toBe(false);
+    }
+    expect(rejectedGroupRequest).not.toHaveBeenCalled();
+  });
+
   it("parses and executes an opaque private-membership leave", async () => {
     const request = readMurphDynamicToolRequest(groupToolCall({
       action: "leave_membership",
@@ -579,6 +757,7 @@ describe("murph.group dynamic tool", () => {
     const response = {
       action: "list_memberships" as const,
       result: {
+        disclosureGrants: [],
         memberships: [{
           displayName: "Fun-loving runners",
           grantedVaultShareProjectionScopes: [{ projectionKind: "profile-name.v0" as const }],

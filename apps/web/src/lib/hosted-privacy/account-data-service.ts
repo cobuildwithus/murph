@@ -156,6 +156,18 @@ export const HOSTED_ACCOUNT_DATA_STORE_COVERAGE = [
     note: "Deletes the member's generic group memberships and memberships in groups they own. Export reports role/status metadata only.",
   },
   {
+    slug: "prisma.hosted_group_disclosure_permission",
+    label: "Hosted group disclosure permissions",
+    deletion: "live-delete",
+    note: "Deletes exact group-visible permission policies for generic groups owned by the member or backed by one of the member's runtimes. The Settings export remains vault-only; members can inspect the exact policy text through the private list_memberships response.",
+  },
+  {
+    slug: "prisma.hosted_group_disclosure_grant",
+    label: "Hosted group disclosure grants",
+    deletion: "live-delete",
+    note: "Deletes the member's disclosure grants and every grant in generic groups they own or back. The Settings export remains vault-only; the private list_memberships response exposes the exact granted policy text without exposing other members' grants.",
+  },
+  {
     slug: "prisma.hosted_mailbox_item",
     label: "Hosted mailbox envelopes",
     deletion: "live-delete",
@@ -1172,6 +1184,8 @@ async function countHostedAccountData(input: {
     hostedAccountGroupPlanCapacity,
     hostedGroup,
     hostedGroupMember,
+    hostedGroupDisclosurePermission,
+    hostedGroupDisclosureGrant,
     hostedMemberEmailAuthorization,
     hostedConnectedAppsSession,
     hostedConnectedAppConnectIntent,
@@ -1260,6 +1274,25 @@ async function countHostedAccountData(input: {
           { memberId: memberIdFilter },
           { group: { ownerMemberId: memberIdFilter } },
           { group: { runtimeMemberId: memberIdFilter } },
+        ],
+      },
+    }),
+    input.prisma.hostedGroupDisclosurePermission.count({
+      where: {
+        group: {
+          OR: [
+            { ownerMemberId: memberIdFilter },
+            { runtimeMemberId: memberIdFilter },
+          ],
+        },
+      },
+    }),
+    input.prisma.hostedGroupDisclosureGrant.count({
+      where: {
+        OR: [
+          { membership: { memberId: memberIdFilter } },
+          { membership: { group: { ownerMemberId: memberIdFilter } } },
+          { membership: { group: { runtimeMemberId: memberIdFilter } } },
         ],
       },
     }),
@@ -1370,6 +1403,8 @@ async function countHostedAccountData(input: {
     "prisma.hosted_account_group_plan_capacity": hostedAccountGroupPlanCapacity,
     "prisma.hosted_group": hostedGroup,
     "prisma.hosted_group_member": hostedGroupMember,
+    "prisma.hosted_group_disclosure_permission": hostedGroupDisclosurePermission,
+    "prisma.hosted_group_disclosure_grant": hostedGroupDisclosureGrant,
     "prisma.hosted_member_billing_ref": hostedMemberBillingRef,
     "prisma.hosted_member_email_authorization": hostedMemberEmailAuthorization,
     "prisma.hosted_member_identity": hostedMemberIdentity,
@@ -1458,6 +1493,25 @@ async function deleteHostedAccountPrismaRows(input: {
     where: { group: { ownerMemberId: memberIdFilter } },
   }));
   record("prisma.hosted_account_group", await input.prisma.hostedAccountGroup.deleteMany({ where: { ownerMemberId: memberIdFilter } }));
+  record("prisma.hosted_group_disclosure_grant", await input.prisma.hostedGroupDisclosureGrant.deleteMany({
+    where: {
+      OR: [
+        { membership: { memberId: memberIdFilter } },
+        { membership: { group: { ownerMemberId: memberIdFilter } } },
+        { membership: { group: { runtimeMemberId: memberIdFilter } } },
+      ],
+    },
+  }));
+  record("prisma.hosted_group_disclosure_permission", await input.prisma.hostedGroupDisclosurePermission.deleteMany({
+    where: {
+      group: {
+        OR: [
+          { ownerMemberId: memberIdFilter },
+          { runtimeMemberId: memberIdFilter },
+        ],
+      },
+    },
+  }));
   record("prisma.hosted_group_member", await input.prisma.hostedGroupMember.deleteMany({
     where: {
       OR: [

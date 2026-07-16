@@ -28,12 +28,51 @@ export function parseHostedExecutionAssistantAskRequestedPayload(
   ], label);
   const targetLabel = `${label}.target`;
   const target = requireObject(record.target, targetLabel);
-  assertExactHostedExecutionAssistantAskKeys(
-    target,
-    ["kind", "membershipId", "requestedLabel"],
-    targetLabel,
-  );
-  if (target.kind !== "joined_group") {
+  const targetKind = requireString(target.kind, `${targetLabel}.kind`);
+
+  let parsedTarget: HostedExecutionAssistantAskRequestedPayload["target"];
+  if (targetKind === "joined_group") {
+    assertExactHostedExecutionAssistantAskKeys(
+      target,
+      ["kind", "membershipId", "requestedLabel"],
+      targetLabel,
+    );
+    parsedTarget = {
+      kind: targetKind,
+      membershipId: parseHostedExecutionAssistantAskOpaqueId(
+        target.membershipId,
+        `${targetLabel}.membershipId`,
+      ),
+      requestedLabel: target.requestedLabel === null
+        ? null
+        : parseHostedExecutionAssistantAskBoundedText({
+            label: `${targetLabel}.requestedLabel`,
+            maxCodePoints: HOSTED_EXECUTION_ASSISTANT_ASK_TARGET_LABEL_MAX_CODE_POINTS,
+            value: target.requestedLabel,
+          }),
+    };
+  } else if (targetKind === "consented_member") {
+    assertExactHostedExecutionAssistantAskKeys(
+      target,
+      ["grantId", "kind", "membershipId", "permissionDigest"],
+      targetLabel,
+    );
+    parsedTarget = {
+      grantId: parseHostedExecutionAssistantAskOpaqueId(
+        target.grantId,
+        `${targetLabel}.grantId`,
+      ),
+      kind: targetKind,
+      membershipId: parseHostedExecutionAssistantAskOpaqueId(
+        target.membershipId,
+        `${targetLabel}.membershipId`,
+      ),
+      permissionDigest: parseHostedExecutionAssistantAskOpaqueId(
+        target.permissionDigest,
+        `${targetLabel}.permissionDigest`,
+      ),
+    };
+  } else {
     throw new TypeError(`${targetLabel}.kind is invalid.`);
   }
 
@@ -55,20 +94,7 @@ export function parseHostedExecutionAssistantAskRequestedPayload(
       maxCodePoints: HOSTED_EXECUTION_ASSISTANT_ASK_QUESTION_MAX_CODE_POINTS,
       value: record.question,
     }),
-    target: {
-      kind: "joined_group",
-      membershipId: parseHostedExecutionAssistantAskOpaqueId(
-        target.membershipId,
-        `${targetLabel}.membershipId`,
-      ),
-      requestedLabel: target.requestedLabel === null
-        ? null
-        : parseHostedExecutionAssistantAskBoundedText({
-            label: `${targetLabel}.requestedLabel`,
-            maxCodePoints: HOSTED_EXECUTION_ASSISTANT_ASK_TARGET_LABEL_MAX_CODE_POINTS,
-            value: target.requestedLabel,
-          }),
-    },
+    target: parsedTarget,
   };
 }
 
@@ -78,6 +104,7 @@ export function parseHostedExecutionAssistantAskCompletedPayload(
 ): HostedExecutionAssistantAskCompletedPayload {
   const record = requireObject(value, label);
   assertExactHostedExecutionAssistantAskKeys(record, [
+    "deliveryMode",
     "expiresAt",
     "originAssistantInputId",
     "originSessionId",
@@ -88,6 +115,14 @@ export function parseHostedExecutionAssistantAskCompletedPayload(
   ], label);
 
   return {
+    ...(record.deliveryMode === undefined
+      ? {}
+      : {
+          deliveryMode: parseHostedExecutionAssistantAskDeliveryMode(
+            record.deliveryMode,
+            `${label}.deliveryMode`,
+          ),
+        }),
     expiresAt: parseHostedExecutionAssistantAskTimestamp(
       record.expiresAt,
       `${label}.expiresAt`,
@@ -118,6 +153,16 @@ export function parseHostedExecutionAssistantAskCompletedPayload(
           value: record.targetLabel,
         }),
   };
+}
+
+function parseHostedExecutionAssistantAskDeliveryMode(
+  value: unknown,
+  label: string,
+): "reviewed_exact" {
+  if (value !== "reviewed_exact") {
+    throw new TypeError(`${label} is invalid.`);
+  }
+  return value;
 }
 
 export function parseHostedExecutionAssistantAskResult(

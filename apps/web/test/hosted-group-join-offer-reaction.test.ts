@@ -12,6 +12,7 @@ import {
 } from "@/src/lib/hosted-onboarding/contact-privacy";
 
 const mocks = vi.hoisted(() => ({
+  acceptHostedGroupDisclosurePermissionReactionTx: vi.fn(),
   acceptHostedGroupJoinOfferTx: vi.fn(),
   enqueueHostedGroupNewsletterEmailNeededNudgeIfNeededBestEffort: vi.fn(),
   lookupHostedMemberIdentityByPhoneNumber: vi.fn(),
@@ -30,6 +31,11 @@ vi.mock("@/src/lib/hosted-groups/group-newsletter", () => ({
 
 vi.mock("@/src/lib/hosted-groups/group-store", () => ({
   acceptHostedGroupJoinOfferTx: mocks.acceptHostedGroupJoinOfferTx,
+}));
+
+vi.mock("@/src/lib/hosted-groups/group-disclosure-store", () => ({
+  acceptHostedGroupDisclosurePermissionReactionTx:
+    mocks.acceptHostedGroupDisclosurePermissionReactionTx,
 }));
 
 vi.mock("@/src/lib/hosted-groups/group-join-confirmation", () => ({
@@ -73,6 +79,9 @@ let restoreKeyring: (() => void) | null = null;
 describe("handleHostedGroupJoinOfferReaction", () => {
   beforeEach(() => {
     vi.clearAllMocks();
+    mocks.acceptHostedGroupDisclosurePermissionReactionTx.mockResolvedValue({
+      kind: "not_found",
+    });
     mocks.acceptHostedGroupJoinOfferTx.mockResolvedValue({
       alreadyMember: false,
       grantedVaultShareProjectionKinds: ["profile-name.v0", "sleep-times.v0"],
@@ -133,6 +142,17 @@ describe("handleHostedGroupJoinOfferReaction", () => {
         ]),
       }),
     );
+    expect(mocks.acceptHostedGroupDisclosurePermissionReactionTx).toHaveBeenCalledWith(
+      expect.objectContaining({
+        memberId: "member_reactor",
+        messageLookupKeyReadCandidates: expect.arrayContaining([
+          expect.stringMatching(/^hbidx:linq-message:/u),
+        ]),
+        threadIdentityLookupKeyReadCandidates: expect.arrayContaining([
+          expect.stringMatching(/^hbidx:external-thread-identity:/u),
+        ]),
+      }),
+    );
     expect(mocks.enqueueHostedGroupNewsletterEmailNeededNudgeIfNeededBestEffort)
       .not.toHaveBeenCalled();
     expect(mocks.signalHostedRuntimeMaintenanceRuntime).toHaveBeenCalledTimes(1);
@@ -152,6 +172,64 @@ describe("handleHostedGroupJoinOfferReaction", () => {
       prisma,
       timeoutMs: expect.any(Number),
     });
+  });
+
+  it("grants only the exact permission bound to an exact Like and existing membership", async () => {
+    mocks.acceptHostedGroupDisclosurePermissionReactionTx.mockResolvedValueOnce({
+      kind: "accepted",
+    });
+    const prisma = createPrismaStub();
+
+    await expect(handleHostedGroupJoinOfferReaction({
+      event: parseReactionEvent({ reactionType: "like" }),
+      prisma,
+    })).resolves.toEqual({
+      reason: "accepted",
+      status: "accepted",
+    });
+
+    expect(mocks.acceptHostedGroupJoinOfferTx).not.toHaveBeenCalled();
+    expect(mocks.signalHostedRuntimeMaintenanceRuntime).not.toHaveBeenCalled();
+    expect(mocks.materializePendingHostedGroupJoinConfirmationsBestEffort)
+      .not.toHaveBeenCalled();
+  });
+
+  it("keeps non-Like reactions on the legacy join path", async () => {
+    const prisma = createPrismaStub();
+
+    await expect(handleHostedGroupJoinOfferReaction({
+      event: parseReactionEvent({ reactionType: "love" }),
+      prisma,
+    })).resolves.toEqual({ reason: "accepted", status: "accepted" });
+
+    expect(mocks.acceptHostedGroupDisclosurePermissionReactionTx).not.toHaveBeenCalled();
+    expect(mocks.acceptHostedGroupJoinOfferTx).toHaveBeenCalledTimes(1);
+  });
+
+  it("does not turn a nonmember's disclosure Like into a join", async () => {
+    mocks.acceptHostedGroupDisclosurePermissionReactionTx.mockResolvedValueOnce({
+      kind: "not_group_member",
+    });
+    const prisma = createPrismaStub();
+
+    await expect(handleHostedGroupJoinOfferReaction({
+      event: parseReactionEvent({ reactionType: "like" }),
+      prisma,
+    })).resolves.toEqual({ status: "ignored", reason: "not_a_member" });
+
+    expect(mocks.acceptHostedGroupJoinOfferTx).not.toHaveBeenCalled();
+  });
+
+  it("does not treat a reaction from the hosted line as member consent", async () => {
+    const prisma = createPrismaStub();
+
+    await expect(handleHostedGroupJoinOfferReaction({
+      event: parseReactionEvent({ isFromMe: true, reactionType: "like" }),
+      prisma,
+    })).resolves.toEqual({ status: "ignored", reason: "unsupported_reaction" });
+
+    expect(mocks.acceptHostedGroupDisclosurePermissionReactionTx).not.toHaveBeenCalled();
+    expect(mocks.acceptHostedGroupJoinOfferTx).not.toHaveBeenCalled();
   });
 
   it("enqueues private missing-email nudge candidates after accepting an email-sharing offer", async () => {
@@ -399,6 +477,7 @@ describe("handleHostedGroupJoinOfferReaction", () => {
 
 function parseReactionEvent(input: {
   customEmoji?: string | null;
+  isFromMe?: boolean;
   reactionType: string;
 }) {
   const parsed = parseHostedLinqProviderEvent({
@@ -409,6 +488,7 @@ function parseReactionEvent(input: {
         chat_id: "chat_group_1",
         custom_emoji: input.customEmoji ?? undefined,
         from_handle: { handle: "+15551234567", service: "iMessage" },
+        is_from_me: input.isFromMe,
         line: { phone_number: "+15550000000" },
         message_id: "msg_offer_123",
         reacted_at: "2026-03-26T12:01:00.000Z",

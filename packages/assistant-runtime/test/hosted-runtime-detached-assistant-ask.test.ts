@@ -3,6 +3,10 @@ import { mkdtemp, rm } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import path from "node:path";
 
+import type {
+  ConsentedReadOnlyAssistantAskInput,
+  ReadOnlyAssistantAskResult,
+} from "@murphai/assistant-engine/assistant-ask";
 import { initializeVault } from "@murphai/core";
 import { buildHostedExecutionAssistantAskCompletedWake } from "@murphai/hosted-execution";
 import { describe, test, vi } from "vitest";
@@ -11,6 +15,7 @@ vi.mock("@murphai/assistant-engine", () => ({
   scheduleDeviceActivityTriggeredAutomations: vi.fn(),
 }));
 vi.mock("@murphai/assistant-engine/assistant-ask", () => ({
+  executeConsentedReadOnlyAssistantAsk: vi.fn(),
   executeReadOnlyAssistantAsk: vi.fn(),
 }));
 
@@ -150,59 +155,138 @@ describe("hosted detached assistant ask controller", () => {
     }
   });
 
-  test("redacts a detached ask failure before durable requeue", async () => {
+  test("routes disclosure requests only through the consented executor before completion", async () => {
     const vaultRoot = await createVaultRoot();
+    const executeAsk = vi.fn();
+    let completedResult: unknown;
+    const executeConsentedAsk = vi.fn(async (
+      _input: ConsentedReadOnlyAssistantAskInput,
+    ): Promise<ReadOnlyAssistantAskResult> => ({
+      answer: "draft text that must not escape",
+      outcome: "cannot_answer",
+    }));
 
     try {
       await writePending(vaultRoot, [
-        createPendingAsk({ eventId: "ask_event_failure", itemId: "item_failure" }),
+        createPendingAsk({
+          consented: true,
+          eventId: "ask_event_disclosure",
+          itemId: "item_disclosure",
+        }),
       ]);
       const controller = createHostedDetachedAssistantAskController({
         assistantAskPort: {
           async request(request) {
-            assert.equal(request.action, "prepare");
-            return {
-              action: "prepare",
-              question: "question whose execution will fail",
-              status: "ready",
-              targetLabel: "100 Club",
-            };
+            if (request.action === "prepare") {
+              return {
+                action: "prepare",
+                disclosure: {
+                  permissionText: "Share only calendar availability for this call.",
+                },
+                question: "Are you free Tuesday afternoon?",
+                status: "ready",
+                targetLabel: "Call Circle",
+              };
+            }
+            completedResult = request.result;
+            return { action: "complete", status: "completed" };
           },
         },
-        codexHome: null,
-        env: {},
-        async executeAsk() {
-          throw new Error(
-            "assistant ask failed for "
-              + "https://r2.example.test/private?X-Amz-Signature=fixture-secret "
-              + "with TOKEN=fixture-token and member_123",
-            {
-              cause: new TypeError(
-                "local scratch /tmp/hosted-runtime/assistant-ask.json",
-              ),
-            },
-          );
-        },
+        codexHome: "/codex-home",
+        env: { LANG: "en_US.UTF-8" },
+        executeAsk,
+        executeConsentedAsk,
         now: () => TEST_NOW,
         onStateMutation() {},
         vaultRoot,
       });
 
       controller.kick();
-      const safeErrorMessage =
-        "assistant ask failed for <redacted-url> with TOKEN=<redacted>"
-        + " and <redacted-user-id> | local scratch <redacted-path>";
       await waitUntil(async () => {
-        const failed = (await readHostedSystemMailboxState(vaultRoot)).pending[0];
-        assert.equal(failed?.status, "pending");
-        assert.equal(failed?.lastErrorMessage, safeErrorMessage);
-        assert.equal(failed?.nextAttemptAt, "2026-07-15T12:01:00.000Z");
+        assert.equal((await readHostedSystemMailboxState(vaultRoot)).pending.length, 0);
+      });
+      await controller.closeAndRequeue();
+
+      assert.equal(executeAsk.mock.calls.length, 0);
+      const consentedInput = executeConsentedAsk.mock.calls[0]?.[0];
+      assert.ok(consentedInput);
+      assert.equal(
+        consentedInput.permissionText,
+        "Share only calendar availability for this call.",
+      );
+      assert.equal(consentedInput.question, "Are you free Tuesday afternoon?");
+      assert.equal(consentedInput.workspaceRoot, vaultRoot);
+      assert.deepEqual(completedResult, { answer: null, outcome: "cannot_answer" });
+    } finally {
+      await removeVaultRoot(vaultRoot);
+    }
+  });
+
+  test.each([
+    ["failed disclosure", true, true, 1],
+    ["consented member without disclosure", true, false, 0],
+    ["joined group with disclosure", false, true, 0],
+  ])("requeues %s without completing or falling back", async (
+    _label,
+    consented,
+    includeDisclosure,
+    consentedCalls,
+  ) => {
+    const vaultRoot = await createVaultRoot();
+    const executeAsk = vi.fn();
+    const executeConsentedAsk = vi.fn(async () => {
+      throw new Error(
+        "assistant ask failed for https://r2.example.test/private?X-Amz-Signature=fixture-secret"
+          + " with TOKEN=fixture-token and member_123",
+        { cause: new TypeError("local scratch /tmp/hosted-runtime/assistant-ask.json") },
+      );
+    });
+    let completionCalls = 0;
+    try {
+      await writePending(vaultRoot, [
+        createPendingAsk({ consented, eventId: "ask_failure", itemId: "item_failure" }),
+      ]);
+      const controller = createHostedDetachedAssistantAskController({
+        assistantAskPort: {
+          async request(request) {
+            if (request.action === "complete") {
+              completionCalls += 1;
+              return { action: "complete", status: "completed" };
+            }
+            return {
+              action: "prepare",
+              ...(includeDisclosure
+                ? { disclosure: { permissionText: "Share calendar availability only." } }
+                : {}),
+              question: "Are you free?",
+              status: "ready",
+              targetLabel: "Call Circle",
+            };
+          },
+        },
+        codexHome: null,
+        env: {},
+        executeAsk,
+        executeConsentedAsk,
+        now: () => TEST_NOW,
+        onStateMutation() {},
+        vaultRoot,
+      });
+
+      controller.kick();
+      await waitUntil(async () => {
+        const item = (await readHostedSystemMailboxState(vaultRoot)).pending[0];
+        assert.equal(item?.status, "pending");
+        assert.equal(item?.nextAttemptAt, "2026-07-15T12:01:00.000Z");
         assert.doesNotMatch(
-          failed?.lastErrorMessage ?? "",
+          item?.lastErrorMessage ?? "",
           /fixture-secret|fixture-token|member_123|\/tmp\//u,
         );
       });
       await controller.closeAndRequeue();
+      assert.equal(executeAsk.mock.calls.length, 0);
+      assert.equal(executeConsentedAsk.mock.calls.length, consentedCalls);
+      assert.equal(completionCalls, 0);
     } finally {
       await removeVaultRoot(vaultRoot);
     }
@@ -213,6 +297,19 @@ describe("hosted detached assistant ask controller", () => {
     const askStarted = createDeferred<void>();
     const childExited = createDeferred<void>();
     const events: string[] = [];
+    const executeAsk = vi.fn(async (input) => {
+      events.push("child.started");
+      askStarted.resolve();
+      await new Promise<void>((_resolve, reject) => {
+        input.abortSignal?.addEventListener("abort", async () => {
+          events.push("child.aborted");
+          await childExited.promise;
+          events.push("child.exited");
+          reject(input.abortSignal?.reason);
+        }, { once: true });
+      });
+      throw new Error("Interrupted ask unexpectedly returned.");
+    });
     let stopSettled = false;
 
     try {
@@ -234,19 +331,7 @@ describe("hosted detached assistant ask controller", () => {
         },
         codexHome: null,
         env: {},
-        async executeAsk(input) {
-          events.push("child.started");
-          askStarted.resolve();
-          await new Promise<void>((_resolve, reject) => {
-            input.abortSignal?.addEventListener("abort", async () => {
-              events.push("child.aborted");
-              await childExited.promise;
-              events.push("child.exited");
-              reject(input.abortSignal?.reason);
-            }, { once: true });
-          });
-          throw new Error("Interrupted ask unexpectedly returned.");
-        },
+        executeAsk,
         now: () => TEST_NOW,
         onStateMutation() {
           events.push("state.mutated");
@@ -290,6 +375,7 @@ describe("hosted detached assistant ask controller", () => {
         ["item_abort", "pending", null],
         ["item_later", "pending", null],
       ]);
+      assert.equal(executeAsk.mock.calls.length, 1);
     } finally {
       childExited.resolve();
       await removeVaultRoot(vaultRoot);
@@ -398,6 +484,7 @@ describe("hosted detached assistant ask controller", () => {
 });
 
 function createPendingAsk(input: {
+  consented?: boolean;
   eventId: string;
   itemId: string;
 }): HostedSystemMailboxPendingItem {
@@ -422,11 +509,18 @@ function createPendingAsk(input: {
         originAssistantInputId: `ain_${"a".repeat(32)}`,
         originSessionId: "session_private",
         question: "private question",
-        target: {
-          kind: "joined_group",
-          membershipId: "membership_synthetic_ask",
-          requestedLabel: "100 Club",
-        },
+        target: input.consented
+          ? {
+              grantId: "grant_calendar",
+              kind: "consented_member",
+              membershipId: "membership_synthetic_ask",
+              permissionDigest: "d".repeat(64),
+            }
+          : {
+              kind: "joined_group",
+              membershipId: "membership_synthetic_ask",
+              requestedLabel: "100 Club",
+            },
       },
       eventId: input.eventId,
       kind: "assistant.ask.requested",

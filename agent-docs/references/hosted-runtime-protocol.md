@@ -1,6 +1,6 @@
 # Hosted Mailbox Runtime Protocol
 
-Last verified: 2026-07-15
+Last verified: 2026-07-16
 
 ## Decision
 
@@ -346,6 +346,54 @@ runtime treats it as correlated untrusted data and may run one output-only
 follow-up after current route validation; it cannot recurse into Assistant Ask
 or invoke side-effecting tools.
 
+The reverse `consented_member` adapter uses the same mailbox lifecycle but a
+different admission and delivery policy. An authenticated group turn first
+posts a server-authored permission request through
+`murph.group(action="post_disclosure_request")`. Web stores its exact
+canonical natural-language permission and digest. It derives a stable request
+id and provider idempotency key from the exact group, trusted accepted-input id,
+and permission digest. Replay succeeds only when the stored group,
+provider-message lookup, text, and digest still match. Only an already-current
+member's verified added Like reaction to that exact message creates a new
+append-only grant generation for that membership; the reaction does not create
+membership. Each verified provider reaction event derives one grant id, so
+duplicate delivery cannot recreate a revoked grant. `read_current` exposes an active opaque `grantId` with that member
+and exact permission. The model cannot supply or recover any hidden target id.
+In a private runtime, the existing `list_memberships` response also exposes
+that member's active grants as a top-level additive `disclosureGrants` array;
+older Web responses without the field normalize to an empty array. Revocation
+may select only an exact id from that private read.
+
+For `murph.group(action="ask_member")`, the current accepted non-direct group
+input and signed route are origin authority. Web resolves the supplied current
+grant selector, binds the group runtime, personal runtime, exact membership and
+grant generations, permission digest, origin session/input, and ten-minute
+expiry, then appends a `consented_member` `assistant.ask.requested` item to the
+personal mailbox. Email, direct, unverified, stale, foreign, or model-selected
+routing fails closed. The group action targets one grant and one question; it
+never fans out. Exact retries stay pinned to the stored target.
+
+Prepare revalidates the same authority immediately before private context is
+read and returns the exact immutable permission to the runtime. The personal
+read-only child proposes one candidate under that permission. There is no
+incoming model reviewer. One separate fresh one-shot outgoing reviewer has no
+personal workspace, history, application tools, network, or delivery route and
+receives only the permission, question, and candidate. It returns only `allow`
+or `deny`; it cannot rewrite or redact. Invalid output, refusal, timeout, provider
+failure, or ambiguity fails closed, and denied candidate bytes do not enter a
+Murph mailbox, vault, assistant state, operational log, or error.
+
+On an allow, the completion control path revalidates the group, personal
+runtime, membership generation, grant generation, permission digest, origin,
+expiry, and active fences again. It appends one deterministic
+`assistant.ask.completed` item to the bound group runtime with additive
+`deliveryMode: "reviewed_exact"`. That group completion bypasses the provider
+continuation and delivers the reviewed answer byte-for-byte on the revalidated
+original group route; cannot-answer uses fixed non-disclosing copy. Missing
+`deliveryMode` retains the original private-to-group continuation behavior.
+Leave/rejoin and revoke/regrant produce new generations, so old work cannot
+cross either lifecycle boundary.
+
 An unfinished child leaves the request pending. Before invocation return,
 checkpoint, shutdown, fence loss, or workspace replacement, the runtime
 interrupts the exact child, waits a bounded grace period, terminates only that
@@ -359,6 +407,15 @@ new bundle fingerprint, deploy Web with
 after convergence. Rollback disables and redeploys the Web producer first,
 waits at least the full ten-minute request lifetime, and rolls consumers back
 only after pending request and completion items have drained or expired.
+
+The consented reverse adapter has a distinct producer gate. First deploy
+consumers that tolerate `consented_member`, prepare disclosure context, and the
+optional `reviewed_exact` completion while
+`HOSTED_GROUP_DISCLOSURE_PRODUCER_ENABLED` is unset or `0`. After Web and the
+immediate runner fleet converge and confinement/fingerprint smoke passes,
+enable exact `1`. Rollback turns that gate off first and keeps compatible
+consumers until new requests and completions have drained or expired from both
+Web mailboxes and imported runtime state.
 
 ### Deploy Compatibility Rule
 
@@ -1313,7 +1370,10 @@ Without the fingerprint secret, checkpoint diagnostics omit relative-name hashes
 - anonymized assistant-runtime issue sink
 - Assistant Ask target resolution, membership-generation and origin binding,
   deterministic request/completion identity, expiry checks, and private return
-  route authority; encrypted mailbox rows remain the only durable ask state
+  route authority; immutable consented-disclosure permissions, per-membership
+  grant generations, exact-reaction consent, group return authority, and
+  completion revalidation; encrypted mailbox rows remain the only durable ask
+  operation state
 
 The runtime may attach one bounded usage-notice delivery target to an assistant
 usage record only when every accepted input for that provider request resolves
@@ -1333,8 +1393,9 @@ routing.
 - runtime timers, assistant next wake projection, and inbox media retention wake
   projection
 - checkpoint timing
-- the invocation-local one-child Assistant Ask controller, sealed group context
-  builder, and exact-child abort/await lifecycle; none is durable queue state
+- the invocation-local one-child Assistant Ask controller, sealed target
+  context builder, consented personal candidate pass, fresh outgoing reviewer,
+  and exact-child abort/await lifecycle; none is durable queue state
 - checkpoint snapshot policy and metrics (`direct-r2-presigned-put`, the
   512 MiB encrypted single-object and 1 GiB total plain-byte limits, encrypted byte
   size, and warning threshold)

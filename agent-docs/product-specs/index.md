@@ -1,6 +1,6 @@
 # Product Specs Index
 
-Last verified: 2026-07-15
+Last verified: 2026-07-16
 
 | Path | Purpose | Status |
 | --- | --- | --- |
@@ -26,6 +26,7 @@ Last verified: 2026-07-15
 | `agent-docs/product-specs/murph-tone-and-voice.md` | Five controls for how Murph talks: hosted tone and voice plus private conversation-first Humor, Push, and Detail dials. | Implemented |
 | `agent-docs/product-specs/group-health-newsletter.md` | Recurring group health newsletter emailed from a group chat: cron automation in the group vault, tone flavors, a reusable default-at-join email-sharing grant, and Cloudflare `HOSTED_EMAIL` delivery with web-side address resolution. | Specified |
 | `agent-docs/product-specs/personal-group-awareness.md` | Personal Murph read access to the member's hosted-group memberships, requested permissions, active self grants, and owner-authorized permission links. | Implemented |
+| `agent-docs/product-specs/consented-group-disclosure.md` | Exact per-member group disclosure consent with one private read-only candidate and one fresh outgoing reviewer. | Implemented |
 | `agent-docs/product-specs/private-group-consultation.md` | Proposed on-demand private-to-group Murph consultation with automatic membership resolution, a stateless encrypted mailbox request/reply, and a temporary read-only group turn. | Proposed |
 | `agent-docs/product-specs/hosted-group-join-confirmation.md` | First-join private Murph confirmation with a sanitized group name, deterministic web or reaction copy, and first-party sharing-editor link. | Implemented |
 

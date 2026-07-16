@@ -1,5 +1,7 @@
 import {
+  executeConsentedReadOnlyAssistantAsk,
   executeReadOnlyAssistantAsk,
+  type ConsentedReadOnlyAssistantAskInput,
   type ReadOnlyAssistantAskInput,
   type ReadOnlyAssistantAskResult,
 } from "@murphai/assistant-engine/assistant-ask";
@@ -40,6 +42,9 @@ export interface HostedDetachedAssistantAskControllerInput {
   executeAsk?: (
     input: ReadOnlyAssistantAskInput,
   ) => Promise<ReadOnlyAssistantAskResult>;
+  executeConsentedAsk?: (
+    input: ConsentedReadOnlyAssistantAskInput,
+  ) => Promise<ReadOnlyAssistantAskResult>;
   now?: () => string;
   onStateMutation(): void;
   vaultRoot: string;
@@ -49,6 +54,8 @@ export function createHostedDetachedAssistantAskController(
   input: HostedDetachedAssistantAskControllerInput,
 ): HostedDetachedAssistantAskController {
   const executeAsk = input.executeAsk ?? executeReadOnlyAssistantAsk;
+  const executeConsentedAsk =
+    input.executeConsentedAsk ?? executeConsentedReadOnlyAssistantAsk;
   const now = input.now ?? (() => new Date().toISOString());
   let activeAbortController: AbortController | null = null;
   let activePromise: Promise<HostedDetachedAssistantAskRunResult> | null = null;
@@ -76,6 +83,7 @@ export function createHostedDetachedAssistantAskController(
       codexHome: input.codexHome,
       env: input.env,
       executeAsk,
+      executeConsentedAsk,
       now,
       onStateMutation: input.onStateMutation,
       vaultRoot: input.vaultRoot,
@@ -163,6 +171,9 @@ async function runOneHostedDetachedAssistantAsk(input: {
   executeAsk: (
     input: ReadOnlyAssistantAskInput,
   ) => Promise<ReadOnlyAssistantAskResult>;
+  executeConsentedAsk: (
+    input: ConsentedReadOnlyAssistantAskInput,
+  ) => Promise<ReadOnlyAssistantAskResult>;
   now: () => string;
   onStateMutation(): void;
   vaultRoot: string;
@@ -210,14 +221,33 @@ async function runOneHostedDetachedAssistantAsk(input: {
       await removeHostedDetachedAssistantAsk({ claimed, input });
       return "settled";
     }
-    const answer = await input.executeAsk({
+    const executionInput = {
       abortSignal: input.abortSignal,
       codexHome: input.codexHome,
       env: { ...input.env },
       now: new Date(input.now()),
       question: prepared.question,
       workspaceRoot: input.vaultRoot,
-    });
+    };
+    let answer: ReadOnlyAssistantAskResult;
+    if (claimed.wake.ask.target.kind === "consented_member") {
+      if (prepared.disclosure === undefined) {
+        throw new TypeError(
+          "Consented member ask prepare omitted its disclosure context.",
+        );
+      }
+      answer = await input.executeConsentedAsk({
+        ...executionInput,
+        permissionText: prepared.disclosure.permissionText,
+      });
+    } else {
+      if (prepared.disclosure !== undefined) {
+        throw new TypeError(
+          "Joined group ask prepare returned unexpected disclosure context.",
+        );
+      }
+      answer = await input.executeAsk(executionInput);
+    }
     const result = normalizeHostedDetachedAssistantAskResult(answer);
     const completed = await input.assistantAskPort.request(
       {
@@ -288,7 +318,7 @@ function normalizeHostedDetachedAssistantAskResult(
     return result;
   }
   return {
-    answer: result.answer ?? null,
+    answer: null,
     outcome: "cannot_answer",
   };
 }

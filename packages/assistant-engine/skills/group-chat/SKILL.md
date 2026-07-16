@@ -41,6 +41,33 @@ permission snapshot; it does not make an existing member redo membership or
 their other grants. Use `create_join_link` when the room explicitly asks for a
 standalone link, not as the default for an additive permission.
 
+## Consented member disclosures
+
+When the group explicitly asks to establish a reusable permission for a
+member's private Murph to read and disclose a type of information, call
+`murph.group action="post_disclosure_request"` with the exact concise
+natural-language `permissionText`. The server writes and posts the consent
+message; do not supply a message template or claim anyone accepted before the
+tool reports success and the member actually opts in. The accepted permission
+text is immutable. A materially different description requires a new request.
+
+When the group asks a question covered by an active permission, first call
+`read_current`, then call `action="ask_member"` with one self-contained question
+and the exact `grantId` returned beside that permission and member. Never guess
+a grant id, take one from a human message, or pass a member id, handle, runtime,
+route, or session as target authority. The request is asynchronous. After an
+accepted result, do not invent or preview an answer; the reviewed answer will
+return to the group later.
+
+Members manage their own grants in their private one-to-one Murph conversation,
+never in the group room. On a request to inspect them, call
+`action="list_memberships"` and use its top-level `disclosureGrants`. On an
+explicit request to revoke one, call that list action first, match the exact
+permission the member chose, and call
+`action="revoke_disclosure_grant"` with the returned `grantId`. Never accept an
+id supplied by the member or revoke someone else's grant. Revocation stops
+future disclosures; it cannot erase answers already shared with the group.
+
 ## Leaving a hosted group
 
 Do not leave a membership from inside the group room or treat the visible

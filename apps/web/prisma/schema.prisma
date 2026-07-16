@@ -1268,6 +1268,7 @@ model HostedGroup {
   runtimeMember     HostedMember?       @relation("HostedGroupRuntimeMember", fields: [runtimeMemberId], references: [id], onDelete: SetNull)
   members           HostedGroupMember[]
   joinOffers        HostedGroupJoinOffer[]
+  disclosurePermissions HostedGroupDisclosurePermission[]
 
   @@index([ownerMemberId])
   @@index([kind])
@@ -1300,11 +1301,40 @@ model HostedGroupMember {
   updatedAt DateTime     @updatedAt @map("updated_at")
   group     HostedGroup  @relation(fields: [groupId], references: [id], onDelete: Cascade)
   member    HostedMember @relation("HostedGroupMember", fields: [memberId], references: [id], onDelete: Cascade)
+  disclosureGrants HostedGroupDisclosureGrant[]
 
   @@unique([groupId, memberId])
   @@index([memberId])
   @@index([groupId])
   @@map("hosted_group_member")
+}
+
+model HostedGroupDisclosurePermission {
+  id               String                           @id
+  groupId          String                           @map("group_id")
+  permissionText   String                           @map("permission_text")
+  permissionDigest String                           @map("permission_digest")
+  messageLookupKey String                           @unique @map("message_lookup_key")
+  postedAt         DateTime                         @map("posted_at")
+  group            HostedGroup                      @relation(fields: [groupId], references: [id], onDelete: Cascade)
+  grants           HostedGroupDisclosureGrant[]
+
+  @@index([groupId])
+  @@map("hosted_group_disclosure_permission")
+}
+
+model HostedGroupDisclosureGrant {
+  id           String                          @id
+  permissionId String                          @map("permission_id")
+  membershipId String                          @map("membership_id")
+  grantedAt    DateTime                        @map("granted_at")
+  revokedAt    DateTime?                       @map("revoked_at")
+  permission   HostedGroupDisclosurePermission @relation(fields: [permissionId], references: [id], onDelete: Cascade)
+  membership   HostedGroupMember               @relation(fields: [membershipId], references: [id], onDelete: Cascade)
+
+  @@index([membershipId, revokedAt, grantedAt])
+  @@index([permissionId])
+  @@map("hosted_group_disclosure_grant")
 }
 
 model HostedVaultShare {

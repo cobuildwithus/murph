@@ -15,6 +15,7 @@ import {
   type HostedRuntimeGroupToolLinqThreadContext,
   type HostedRuntimeGroupToolRequest,
   type HostedRuntimeGroupToolResponse,
+  type HostedRuntimeGroupSummary,
   type HostedRuntimeGroupToolSelfOptOutContext,
 } from "@murphai/hosted-execution/runtime-control";
 import {
@@ -86,7 +87,19 @@ import { assertHostedLinqRouteEgressAuthority } from "../hosted-routing/thread-r
 import { resolveHostedPublicBaseUrl } from "../hosted-web/public-url";
 import { getPrisma } from "../prisma";
 import { buildHostedGroupJoinUrl } from "./group-links";
-import { requestHostedGroupAssistantAsk } from "./group-assistant-ask";
+import {
+  requestHostedGroupAssistantAsk,
+  requestHostedGroupMemberAssistantAsk,
+} from "./group-assistant-ask";
+import {
+  canonicalizeHostedGroupDisclosurePermissionText,
+  createHostedGroupDisclosurePermissionRequestId,
+  digestHostedGroupDisclosurePermissionText,
+  readActiveHostedGroupDisclosureGrantsForGroup,
+  readActiveHostedGroupDisclosureGrantsForMember,
+  recordHostedGroupDisclosurePermissionTx,
+  revokeHostedGroupDisclosureGrantForMemberTx,
+} from "./group-disclosure-store";
 import {
   enqueueHostedGroupNewsletterEmailNeededNudgeIfNeededBestEffort,
 } from "./group-newsletter";
@@ -98,6 +111,7 @@ import {
   readHostedGroupMembershipsForMember,
   recordHostedGroupJoinOfferTx,
   revokeHostedGroupMemberEmailShareTx,
+  type HostedGroupSummary,
   updateHostedGroupDisplayNameByRuntimeMemberIdTx,
 } from "./group-store";
 import {
@@ -118,14 +132,17 @@ export type HostedRuntimeGroupToolAccessClassification =
 
 export const HOSTED_RUNTIME_GROUP_TOOL_ACCESS_CLASSIFICATION = {
   ask: "personal_active",
+  ask_member: "participant_aware",
   create_join_link: "owner_active",
   leave_membership: "participant_aware",
-  list_memberships: "participant_aware",
+  list_memberships: "personal_active",
+  post_disclosure_request: "owner_active",
   post_join_offer: "owner_active",
   preflight_set_chat_avatar: "owner_active",
   read_chat_participants: "participant_aware",
   read_current: "participant_aware",
   read_own_assistant_style: "participant_aware",
+  revoke_disclosure_grant: "personal_active",
   revoke_own_email_share: "participant_aware",
   set_chat_avatar: "owner_active",
   share_contact_card: "owner_active",
@@ -156,6 +173,36 @@ export async function handleHostedRuntimeGroupTool(input: {
       input.scheduleMailboxWake?.(admission.mailboxWake);
     }
     return { action: "ask", result: admission.result };
+  }
+
+  if (input.request.action === "ask_member") {
+    const admission = await requestHostedGroupMemberAssistantAsk({
+      grantId: input.request.grantId,
+      memberId: input.memberId,
+      originAssistantInputId: input.request.originAssistantInputId,
+      originSessionId: input.request.originSessionId,
+      question: input.request.question,
+    });
+    if (admission.mailboxWake) {
+      input.scheduleMailboxWake?.(admission.mailboxWake);
+    }
+    return { action: "ask_member", result: admission.result };
+  }
+
+  if (input.request.action === "post_disclosure_request") {
+    return handleHostedRuntimeGroupPostDisclosureRequest({
+      linqThread: input.request.linqThread ?? null,
+      memberId: input.memberId,
+      originAssistantInputId: input.request.originAssistantInputId,
+      permissionText: input.request.permissionText,
+    });
+  }
+
+  if (input.request.action === "revoke_disclosure_grant") {
+    return handleHostedRuntimeGroupRevokeDisclosureGrant({
+      grantId: input.request.grantId,
+      memberId: input.memberId,
+    });
   }
 
   if (input.request.action === "list_memberships") {
@@ -257,11 +304,40 @@ export async function handleHostedRuntimeGroupTool(input: {
   const group = await readHostedGroupByRuntimeMemberId({
     runtimeMemberId: input.memberId,
   });
+  const disclosureGrants = group
+    ? await readActiveHostedGroupDisclosureGrantsForGroup({
+        groupId: group.id,
+      })
+    : [];
+  const disclosureGrantsByMemberId = new Map<
+    string,
+    typeof disclosureGrants
+  >();
+  for (const grant of disclosureGrants) {
+    disclosureGrantsByMemberId.set(
+      grant.memberId,
+      [...(disclosureGrantsByMemberId.get(grant.memberId) ?? []), grant],
+    );
+  }
 
   return {
     action: "read_current",
     result: group
-      ? { status: "ok", group }
+      ? {
+          status: "ok",
+          group: {
+            ...group,
+            members: group.members.map((member) => ({
+              ...member,
+              disclosureGrants: (
+                disclosureGrantsByMemberId.get(member.memberId) ?? []
+              ).map((grant) => ({
+                grantId: grant.grantId,
+                permissionText: grant.permissionText,
+              })),
+            })),
+          },
+        }
       : { status: "none", group: null },
   };
 }
@@ -307,24 +383,47 @@ async function handleHostedRuntimeGroupLeaveMembership(input: {
 async function handleHostedRuntimeGroupListMemberships(input: {
   memberId: string;
 }): Promise<HostedRuntimeGroupToolResponse> {
-  if (!await hasHostedRuntimeActiveAccess(input.memberId)) {
+  const access = await readHostedRuntimePersonalActiveAccess(input.memberId);
+  if (access.status !== "ok") {
     return {
       action: "list_memberships",
       result: {
         memberships: null,
         status: "unavailable",
-        unavailableReason: "runtime_inactive",
+        unavailableReason: access.unavailableReason,
       },
     };
   }
 
   const { memberships, truncated } = await readHostedGroupMembershipsForMember({
     memberId: input.memberId,
+    prisma: access.prisma,
   });
+  let grants: Awaited<ReturnType<typeof readActiveHostedGroupDisclosureGrantsForMember>>;
+  try {
+    grants = await readActiveHostedGroupDisclosureGrantsForMember({
+      memberId: input.memberId,
+      prisma: access.prisma,
+    });
+  } catch {
+    return {
+      action: "list_memberships",
+      result: {
+        memberships: null,
+        status: "unavailable",
+        unavailableReason: "grants_unavailable",
+      },
+    };
+  }
   const publicBaseUrl = resolveHostedPublicBaseUrl();
   return {
     action: "list_memberships",
     result: {
+      disclosureGrants: grants.map(({ grantId, groupLabel, permissionText }) => ({
+        grantId,
+        groupLabel,
+        permissionText,
+      })),
       memberships: memberships.map(({ ownerJoinCode, ...membership }) => ({
         ...membership,
         permissionsUrl: ownerJoinCode
@@ -334,6 +433,77 @@ async function handleHostedRuntimeGroupListMemberships(input: {
       status: "ok",
       truncated,
     },
+  };
+}
+
+async function handleHostedRuntimeGroupRevokeDisclosureGrant(input: {
+  grantId: string;
+  memberId: string;
+}): Promise<HostedRuntimeGroupToolResponse> {
+  const unavailable = (unavailableReason: string): HostedRuntimeGroupToolResponse => ({
+    action: "revoke_disclosure_grant",
+    result: { status: "unavailable", unavailableReason },
+  });
+  const access = await readHostedRuntimePersonalActiveAccess(input.memberId);
+  if (access.status !== "ok") {
+    return unavailable(access.unavailableReason);
+  }
+
+  const grantId = input.grantId.trim();
+  if (!grantId) {
+    return unavailable("grant_unavailable");
+  }
+  let result: Awaited<ReturnType<typeof revokeHostedGroupDisclosureGrantForMemberTx>>;
+  try {
+    result = await access.prisma.$transaction(async (tx) =>
+      revokeHostedGroupDisclosureGrantForMemberTx({
+        grantId,
+        memberId: input.memberId,
+        now: new Date(),
+        tx,
+      }), HOSTED_ONBOARDING_TRANSACTION_OPTIONS);
+  } catch {
+    return unavailable("grant_unavailable");
+  }
+
+  if (result.kind === "not_found") {
+    return unavailable("grant_unavailable");
+  }
+  return {
+    action: "revoke_disclosure_grant",
+    result: { status: result.kind },
+  };
+}
+
+type HostedRuntimePersonalActiveAccess =
+  | { status: "ok"; prisma: PrismaClient }
+  | { status: "unavailable"; unavailableReason: string };
+
+async function readHostedRuntimePersonalActiveAccess(
+  memberId: string,
+): Promise<HostedRuntimePersonalActiveAccess> {
+  const prisma = getPrisma();
+  if (!await hasHostedRuntimeActiveAccess(memberId, { prisma })) {
+    return { status: "unavailable", unavailableReason: "runtime_inactive" };
+  }
+  const threadContainer = await prisma.hostedThreadContainer.findUnique({
+    where: { memberId },
+    select: { memberId: true },
+  });
+  return threadContainer
+    ? { status: "unavailable", unavailableReason: "personal_runtime_required" }
+    : { status: "ok", prisma };
+}
+
+function toHostedRuntimeGroupSummary(
+  group: HostedGroupSummary,
+): HostedRuntimeGroupSummary {
+  return {
+    ...group,
+    members: group.members.map((member) => ({
+      ...member,
+      disclosureGrants: [],
+    })),
   };
 }
 
@@ -389,7 +559,7 @@ async function handleHostedRuntimeGroupUpdateDisplayName(input: {
   return {
     action: "update_display_name",
     result: updated
-      ? { group: updated, status: "ok" }
+      ? { group: toHostedRuntimeGroupSummary(updated), status: "ok" }
       : { group: null, status: "unavailable", unavailableReason: "group_not_found" },
   };
 }
@@ -762,8 +932,114 @@ async function handleHostedRuntimeGroupCreateJoinLink(input: {
 
   return {
     action: "create_join_link",
-    result: { group: created.group, joinUrl, status: "ok" },
+    result: {
+      group: toHostedRuntimeGroupSummary(created.group),
+      joinUrl,
+      status: "ok",
+    },
   };
+}
+
+async function handleHostedRuntimeGroupPostDisclosureRequest(input: {
+  linqThread: HostedRuntimeGroupToolLinqThreadContext | null;
+  memberId: string;
+  originAssistantInputId: string;
+  permissionText: string;
+}): Promise<HostedRuntimeGroupToolResponse> {
+  const unavailable = (unavailableReason: string): HostedRuntimeGroupToolResponse => ({
+    action: "post_disclosure_request",
+    result: { status: "unavailable", unavailableReason },
+  });
+
+  let permissionText: string;
+  let permissionDigest: string;
+  try {
+    permissionText = canonicalizeHostedGroupDisclosurePermissionText(
+      input.permissionText,
+    );
+    permissionDigest = digestHostedGroupDisclosurePermissionText(permissionText);
+  } catch {
+    return unavailable("permission_text_unavailable");
+  }
+
+  const authorized = await authorizeHostedRuntimeGroupLinqThread({
+    linqThread: input.linqThread,
+    memberId: input.memberId,
+  });
+  if ("unavailableReason" in authorized) {
+    return unavailable(authorized.unavailableReason);
+  }
+
+  const prisma = getPrisma();
+  const authority = await prisma.$transaction(async (tx) => {
+    const ownerAccess = await readHostedRuntimeGroupOwnerActiveAccess({
+      memberId: input.memberId,
+      prisma: tx,
+    });
+    if (ownerAccess.status !== "ok") {
+      return { kind: ownerAccess.unavailableReason };
+    }
+    const groupId = await readHostedGroupIdByRuntimeMemberId({
+      prisma: tx,
+      runtimeMemberId: input.memberId,
+    });
+    return groupId
+      ? { groupId, kind: "ok" as const }
+      : { kind: "group_not_found" as const };
+  }, HOSTED_ONBOARDING_TRANSACTION_OPTIONS);
+  if (authority.kind !== "ok") {
+    return unavailable(authority.kind);
+  }
+
+  const permissionRequestId = createHostedGroupDisclosurePermissionRequestId({
+    groupId: authority.groupId,
+    originAssistantInputId: input.originAssistantInputId,
+    permissionDigest,
+  });
+  const postedAt = new Date();
+  let sent: Awaited<ReturnType<typeof sendHostedLinqChatMessage>>;
+  try {
+    sent = await sendHostedLinqChatMessage({
+      chatId: authorized.chatId,
+      idempotencyKey: `group-disclosure:${permissionRequestId}`,
+      message: buildHostedGroupDisclosureConsentMessage(permissionText),
+    });
+  } catch {
+    return unavailable("send_failed");
+  }
+  if (!sent.messageId) {
+    return unavailable("provider_message_unavailable");
+  }
+
+  try {
+    await prisma.$transaction(async (tx) => {
+      await recordHostedGroupDisclosurePermissionTx({
+        groupId: authority.groupId,
+        messageId: sent.messageId,
+        originAssistantInputId: input.originAssistantInputId,
+        permissionText,
+        postedAt,
+        tx,
+      });
+    }, HOSTED_ONBOARDING_TRANSACTION_OPTIONS);
+  } catch {
+    return unavailable("permission_binding_failed");
+  }
+
+  return {
+    action: "post_disclosure_request",
+    result: { status: "sent" },
+  };
+}
+
+function buildHostedGroupDisclosureConsentMessage(permissionText: string): string {
+  return [
+    "Like this message to let this group ask your Murph for:",
+    "",
+    permissionText,
+    "",
+    "Only this exact permission is granted. Before an answer from your Murph is shared here, a separate outgoing reviewer checks it against this permission. Incoming questions do not go through a separate reviewer. You can revoke this permission at any time.",
+  ].join("\n");
 }
 
 async function handleHostedRuntimeGroupPostJoinOffer(input: {
@@ -881,7 +1157,11 @@ async function handleHostedRuntimeGroupPostJoinOffer(input: {
 
   return {
     action: "post_join_offer",
-    result: { group: created.group, joinUrl, status: "sent" },
+    result: {
+      group: toHostedRuntimeGroupSummary(created.group),
+      joinUrl,
+      status: "sent",
+    },
   };
 }
 

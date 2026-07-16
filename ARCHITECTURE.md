@@ -1,6 +1,6 @@
 # Murph Architecture
 
-Last verified: 2026-07-15
+Last verified: 2026-07-16
 
 ## Hosted Group Self-Awareness
 
@@ -21,6 +21,19 @@ group label. Web rechecks membership before the group read and completion
 append. The paired mailbox rows are the only durable operation state, and the
 answer remains untrusted data when the private runtime composes its follow-up.
 
+The reverse `consented_member` adapter lets an authenticated group Murph ask
+one current member's private Murph under a separate exact grant. Web/Postgres
+owns an immutable, group-visible natural-language permission plus an append-only
+per-membership grant generation. A current member creates that grant only by
+adding the exact Like reaction to the exact server-authored consent message;
+membership never implies the grant, and the Like cannot create membership. The
+group model may select only a current opaque `grantId` returned beside that
+member and permission by `read_current`. Web binds every hidden identity and
+revalidates the group, personal runtime, membership generation, grant
+generation, permission digest, origin, expiry, and runtime fence at admission,
+before the personal read, and before disclosure completion. Leave/rejoin and
+revoke/regrant therefore invalidate old work.
+
 The target runtime keeps its resident foreground Murph as the sole
 model-authored canonical-content writer and outbound sender. Beside it, at most
 one `executeReadOnlyAssistantAsk` call may start a separate one-shot Codex App
@@ -38,6 +51,19 @@ workspace replacement, or shutdown, the runtime aborts and awaits the exact
 owned child before releasing the workspace. Further asks remain pending in the
 same mailbox; there is no second queue, projection, table, workflow, container,
 or general agent registry.
+
+For a consented member target, the private read-only child receives the exact
+permission context and produces a candidate from the member workspace. One
+separate fresh-context outgoing reviewer then receives only that immutable
+permission, the question, and the candidate; it has no member workspace,
+history, application tools, network, or delivery authority and returns only `allow` or
+`deny`. There is no incoming reviewer and no rewrite loop. An allowed answer is
+placed on the bound group completion and delivered as the exact reviewed bytes
+without another model turn. Denial or a candidate-declared cannot-answer yields
+fixed non-disclosing copy. Invalid review output, provider failure, or stale
+authority discloses nothing and follows the existing retry, expiry, or terminal
+lifecycle. A denied candidate never becomes durable operation state. This adds no
+fan-out, scheduler, policy engine, result table, or second service.
 
 ## Hosted Connected Apps
 

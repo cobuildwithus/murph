@@ -123,6 +123,8 @@ import {
   type HostedRuntimeAssistantConfigurationToolResponse,
   type HostedRuntimeAssistantConfigurationUpdateStatus,
   HOSTED_RUNTIME_GROUP_CHAT_ICON_URL_MAX_LENGTH,
+  HOSTED_RUNTIME_GROUP_DISCLOSURE_GRANTS_MAX,
+  HOSTED_RUNTIME_GROUP_DISCLOSURE_PERMISSION_TEXT_MAX_CODE_POINTS,
   HOSTED_RUNTIME_GROUP_DISPLAY_NAME_MAX_LENGTH,
   HOSTED_RUNTIME_GROUP_JOIN_OFFER_MESSAGE_TEMPLATE_MAX_LENGTH,
   HOSTED_RUNTIME_GROUP_KINDS,
@@ -136,6 +138,8 @@ import {
   HOSTED_RUNTIME_NEWSLETTER_TEXT_MAX_LENGTH,
   type HostedRuntimeGroupChatParticipant,
   type HostedRuntimeGroupCreateJoinLinkRequest,
+  type HostedRuntimeGroupDisclosureGrantListEntry,
+  type HostedRuntimeGroupDisclosureGrantSummary,
   type HostedRuntimeGroupKind,
   type HostedRuntimeGroupPostJoinOfferRequest,
   type HostedRuntimeGroupUpdateDisplayNameRequest,
@@ -877,26 +881,52 @@ export function parseHostedRuntimeAssistantAskControlResponse(
     "Hosted runtime assistant ask control response status",
   );
   if (action === "prepare" && status === "ready") {
+    const label = "Hosted runtime assistant ask prepare ready control response";
+    const question = parseHostedRuntimeGroupAskBoundedText({
+      label: "Hosted runtime assistant ask prepare response question",
+      maxCodePoints: HOSTED_EXECUTION_ASSISTANT_ASK_QUESTION_MAX_CODE_POINTS,
+      value: record.question,
+    });
+    const targetLabel = record.targetLabel === null
+      ? null
+      : parseHostedRuntimeGroupAskBoundedText({
+          label: "Hosted runtime assistant ask prepare response targetLabel",
+          maxCodePoints: HOSTED_EXECUTION_ASSISTANT_ASK_TARGET_LABEL_MAX_CODE_POINTS,
+          value: record.targetLabel,
+        });
+    if (record.disclosure === undefined) {
+      assertAllowedObjectKeys(
+        record,
+        new Set(["action", "question", "status", "targetLabel"]),
+        label,
+      );
+      return { action, question, status, targetLabel };
+    }
     assertAllowedObjectKeys(
       record,
-      new Set(["action", "question", "status", "targetLabel"]),
-      "Hosted runtime assistant ask prepare ready control response",
+      new Set(["action", "disclosure", "question", "status", "targetLabel"]),
+      label,
+    );
+    const disclosure = requireObject(
+      record.disclosure,
+      "Hosted runtime assistant ask prepare response disclosure",
+    );
+    assertAllowedObjectKeys(
+      disclosure,
+      new Set(["permissionText"]),
+      "Hosted runtime assistant ask prepare response disclosure",
     );
     return {
       action,
-      question: parseHostedRuntimeGroupAskBoundedText({
-        label: "Hosted runtime assistant ask prepare response question",
-        maxCodePoints: HOSTED_EXECUTION_ASSISTANT_ASK_QUESTION_MAX_CODE_POINTS,
-        value: record.question,
-      }),
+      disclosure: {
+        permissionText: parseHostedRuntimeGroupDisclosurePermissionText(
+          disclosure.permissionText,
+          "Hosted runtime assistant ask prepare response disclosure permissionText",
+        ),
+      },
+      question,
       status,
-      targetLabel: record.targetLabel === null
-        ? null
-        : parseHostedRuntimeGroupAskBoundedText({
-            label: "Hosted runtime assistant ask prepare response targetLabel",
-            maxCodePoints: HOSTED_EXECUTION_ASSISTANT_ASK_TARGET_LABEL_MAX_CODE_POINTS,
-            value: record.targetLabel,
-          }),
+      targetLabel,
     };
   }
   if ((action === "prepare" || action === "complete") && status === "terminal") {
@@ -934,6 +964,7 @@ export function parseHostedRuntimeGroupToolRequest(
   const record = requireObject(value, "Hosted runtime group tool request");
   const action = requireString(record.action, "Hosted runtime group tool request action");
   if (action === "ask") {
+    const label = "Hosted runtime group tool ask request";
     assertAllowedObjectKeys(
       record,
       new Set([
@@ -943,7 +974,7 @@ export function parseHostedRuntimeGroupToolRequest(
         "originSessionId",
         "question",
       ]),
-      "Hosted runtime group tool ask request",
+      label,
     );
     return {
       action,
@@ -959,23 +990,80 @@ export function parseHostedRuntimeGroupToolRequest(
                   value: record.groupLabel,
                 }),
           }),
-      originAssistantInputId: parseHostedExecutionAssistantAskOriginInputId(
-        record.originAssistantInputId,
-        "Hosted runtime group tool ask request originAssistantInputId",
-      ),
-      originSessionId: parseHostedRuntimeGroupAskBoundedText({
-        label: "Hosted runtime group tool ask request originSessionId",
-        maxCodePoints: HOSTED_RUNTIME_ASSISTANT_ASK_REQUEST_ID_MAX_CODE_POINTS,
-        value: record.originSessionId,
-      }),
-      question: parseHostedRuntimeGroupAskBoundedText({
-        label: "Hosted runtime group tool ask request question",
-        maxCodePoints: HOSTED_EXECUTION_ASSISTANT_ASK_QUESTION_MAX_CODE_POINTS,
-        value: record.question,
-      }),
+      ...parseHostedRuntimeGroupAssistantAskFields(record, label),
     };
   }
-  if (action === "read_current" || action === "list_memberships") {
+  if (action === "ask_member") {
+    const label = "Hosted runtime group tool ask_member request";
+    assertAllowedObjectKeys(
+      record,
+      new Set([
+        "action",
+        "grantId",
+        "originAssistantInputId",
+        "originSessionId",
+        "question",
+      ]),
+      label,
+    );
+    return {
+      action,
+      grantId: parseHostedRuntimeGroupDisclosureGrantId(
+        record.grantId,
+        `${label} grantId`,
+      ),
+      ...parseHostedRuntimeGroupAssistantAskFields(record, label),
+    };
+  }
+  if (action === "post_disclosure_request") {
+    assertAllowedObjectKeys(
+      record,
+      new Set([
+        "action",
+        "linqThread",
+        "originAssistantInputId",
+        "permissionText",
+      ]),
+      "Hosted runtime group tool post_disclosure_request request",
+    );
+    return {
+      action,
+      ...(record.linqThread === undefined || record.linqThread === null
+        ? {}
+        : {
+            linqThread: parseHostedRuntimeGroupToolLinqThreadContext(
+              record.linqThread,
+              "Hosted runtime group tool post_disclosure_request request linqThread",
+            ),
+          }),
+      originAssistantInputId: parseHostedExecutionAssistantAskOriginInputId(
+        record.originAssistantInputId,
+        "Hosted runtime group tool post_disclosure_request request originAssistantInputId",
+      ),
+      permissionText: parseHostedRuntimeGroupDisclosurePermissionText(
+        record.permissionText,
+        "Hosted runtime group tool post_disclosure_request request permissionText",
+      ),
+    };
+  }
+  if (action === "revoke_disclosure_grant") {
+    assertAllowedObjectKeys(
+      record,
+      new Set(["action", "grantId"]),
+      "Hosted runtime group tool revoke_disclosure_grant request",
+    );
+    return {
+      action,
+      grantId: parseHostedRuntimeGroupDisclosureGrantId(
+        record.grantId,
+        "Hosted runtime group tool revoke_disclosure_grant request grantId",
+      ),
+    };
+  }
+  if (
+    action === "read_current"
+    || action === "list_memberships"
+  ) {
     assertAllowedObjectKeys(
       record,
       new Set(["action"]),
@@ -1437,7 +1525,7 @@ export function parseHostedRuntimeGroupToolResponse(
   const action = requireString(record.action, "Hosted runtime group tool response action");
   assertAllowedObjectKeys(record, new Set(["action", "result"]), "Hosted runtime group tool response");
 
-  if (action === "ask") {
+  if (action === "ask" || action === "ask_member") {
     const result = requireObject(
       record.result,
       "Hosted runtime group tool ask response result",
@@ -1447,6 +1535,14 @@ export function parseHostedRuntimeGroupToolResponse(
       "Hosted runtime group tool ask response status",
     );
     if (status === "accepted") {
+      if (action === "ask_member") {
+        assertAllowedObjectKeys(
+          result,
+          new Set(["status"]),
+          "Hosted runtime group tool ask_member accepted response result",
+        );
+        return { action, result: { status } };
+      }
       assertAllowedObjectKeys(
         result,
         new Set(["status", "targetLabel"]),
@@ -1467,7 +1563,7 @@ export function parseHostedRuntimeGroupToolResponse(
         },
       };
     }
-    if (status === "clarification_required") {
+    if (action === "ask" && status === "clarification_required") {
       assertAllowedObjectKeys(
         result,
         new Set(["groupLabels", "status"]),
@@ -1500,7 +1596,7 @@ export function parseHostedRuntimeGroupToolResponse(
         },
       };
     }
-    if (status === "no_groups") {
+    if (action === "ask" && status === "no_groups") {
       assertAllowedObjectKeys(
         result,
         new Set(["status"]),
@@ -1518,11 +1614,82 @@ export function parseHostedRuntimeGroupToolResponse(
         action,
         result: {
           status,
-          unavailableReason: parseHostedRuntimeGroupAskBoundedText({
-            label: "Hosted runtime group tool ask unavailableReason",
-            maxCodePoints: 500,
-            value: result.unavailableReason,
-          }),
+          unavailableReason: parseHostedRuntimeGroupUnavailableReason(
+            result,
+            "Hosted runtime group tool ask unavailableReason",
+          ),
+        },
+      };
+    }
+  }
+
+  if (action === "post_disclosure_request") {
+    const result = requireObject(
+      record.result,
+      "Hosted runtime group tool post_disclosure_request response result",
+    );
+    const status = requireString(
+      result.status,
+      "Hosted runtime group tool post_disclosure_request response status",
+    );
+    if (status === "sent") {
+      assertAllowedObjectKeys(
+        result,
+        new Set(["status"]),
+        "Hosted runtime group tool post_disclosure_request sent response result",
+      );
+      return { action, result: { status } };
+    }
+    if (status === "unavailable") {
+      assertAllowedObjectKeys(
+        result,
+        new Set(["status", "unavailableReason"]),
+        "Hosted runtime group tool post_disclosure_request unavailable response result",
+      );
+      return {
+        action,
+        result: {
+          status,
+          unavailableReason: parseHostedRuntimeGroupUnavailableReason(
+            result,
+            "Hosted runtime group tool post_disclosure_request unavailableReason",
+          ),
+        },
+      };
+    }
+  }
+
+  if (action === "revoke_disclosure_grant") {
+    const result = requireObject(
+      record.result,
+      "Hosted runtime group tool revoke_disclosure_grant response result",
+    );
+    const status = requireString(
+      result.status,
+      "Hosted runtime group tool revoke_disclosure_grant response status",
+    );
+    if (status === "revoked" || status === "already_revoked") {
+      assertAllowedObjectKeys(
+        result,
+        new Set(["status"]),
+        "Hosted runtime group tool revoke_disclosure_grant response result",
+      );
+      return { action, result: { status } };
+    }
+    if (status === "unavailable") {
+      assertAllowedObjectKeys(
+        result,
+        new Set(["status", "unavailableReason"]),
+        "Hosted runtime group tool revoke_disclosure_grant unavailable response result",
+      );
+      return {
+        action,
+        result: {
+          status,
+          unavailableReason: parseHostedRuntimeGroupUnavailableReason(
+            result,
+            "Hosted runtime group tool revoke_disclosure_grant unavailableReason",
+          ),
         },
       };
     }
@@ -1564,12 +1731,18 @@ export function parseHostedRuntimeGroupToolResponse(
     if (status === "ok") {
       assertAllowedObjectKeys(
         result,
-        new Set(["status", "memberships", "truncated"]),
+        new Set(["disclosureGrants", "status", "memberships", "truncated"]),
         "Hosted runtime group tool list_memberships ok response result",
       );
       return {
         action,
         result: {
+          disclosureGrants: result.disclosureGrants === undefined
+            ? []
+            : parseHostedRuntimeGroupDisclosureGrantListEntries(
+                result.disclosureGrants,
+                "Hosted runtime group tool list_memberships disclosureGrants",
+              ),
           status,
           memberships: parseHostedRuntimeGroupMembershipSummaries(result.memberships),
           truncated: requireBoolean(
@@ -2468,6 +2641,135 @@ function legacyProjectionKindsToScopes(
   );
 }
 
+function parseHostedRuntimeGroupAssistantAskFields(
+  record: Record<string, unknown>,
+  label: string,
+): {
+  originAssistantInputId: string;
+  originSessionId: string;
+  question: string;
+} {
+  return {
+    originAssistantInputId: parseHostedExecutionAssistantAskOriginInputId(
+      record.originAssistantInputId,
+      `${label} originAssistantInputId`,
+    ),
+    originSessionId: parseHostedRuntimeGroupAskBoundedText({
+      label: `${label} originSessionId`,
+      maxCodePoints: HOSTED_RUNTIME_ASSISTANT_ASK_REQUEST_ID_MAX_CODE_POINTS,
+      value: record.originSessionId,
+    }),
+    question: parseHostedRuntimeGroupAskBoundedText({
+      label: `${label} question`,
+      maxCodePoints: HOSTED_EXECUTION_ASSISTANT_ASK_QUESTION_MAX_CODE_POINTS,
+      value: record.question,
+    }),
+  };
+}
+
+function parseHostedRuntimeGroupUnavailableReason(
+  record: Record<string, unknown>,
+  label: string,
+): string {
+  return parseHostedRuntimeGroupAskBoundedText({
+    label,
+    maxCodePoints: 500,
+    value: record.unavailableReason,
+  });
+}
+
+function parseHostedRuntimeGroupDisclosurePermissionText(
+  value: unknown,
+  label: string,
+): string {
+  return parseHostedRuntimeGroupAskBoundedText({
+    label,
+    maxCodePoints:
+      HOSTED_RUNTIME_GROUP_DISCLOSURE_PERMISSION_TEXT_MAX_CODE_POINTS,
+    value,
+  });
+}
+
+function parseHostedRuntimeGroupDisclosureGrantId(
+  value: unknown,
+  label: string,
+): string {
+  return parseHostedRuntimeGroupAskBoundedText({
+    label,
+    maxCodePoints: HOSTED_RUNTIME_ASSISTANT_ASK_REQUEST_ID_MAX_CODE_POINTS,
+    value,
+  });
+}
+
+function parseHostedRuntimeGroupDisclosureGrantSummaries(
+  value: unknown,
+  label: string,
+): HostedRuntimeGroupDisclosureGrantSummary[] {
+  return parseHostedRuntimeGroupDisclosureGrantEntries(value, label).map((entry) => {
+    const record = requireObject(entry, `${label} entry`);
+    assertAllowedObjectKeys(
+      record,
+      new Set(["grantId", "permissionText"]),
+      `${label} entry`,
+    );
+    return parseHostedRuntimeGroupDisclosureGrantFields(record, `${label} entry`);
+  });
+}
+
+function parseHostedRuntimeGroupDisclosureGrantListEntries(
+  value: unknown,
+  label: string,
+): HostedRuntimeGroupDisclosureGrantListEntry[] {
+  return parseHostedRuntimeGroupDisclosureGrantEntries(value, label).map((entry) => {
+    const record = requireObject(entry, `${label} entry`);
+    assertAllowedObjectKeys(
+      record,
+      new Set(["grantId", "groupLabel", "permissionText"]),
+      `${label} entry`,
+    );
+    return {
+      ...parseHostedRuntimeGroupDisclosureGrantFields(record, `${label} entry`),
+      groupLabel: record.groupLabel === null
+        ? null
+        : parseHostedRuntimeGroupAskBoundedText({
+            label: `${label} entry groupLabel`,
+            maxCodePoints:
+              HOSTED_EXECUTION_ASSISTANT_ASK_TARGET_LABEL_MAX_CODE_POINTS,
+            value: record.groupLabel,
+          }),
+    };
+  });
+}
+
+function parseHostedRuntimeGroupDisclosureGrantEntries(
+  value: unknown,
+  label: string,
+): unknown[] {
+  const entries = requireArray(value, label);
+  if (entries.length > HOSTED_RUNTIME_GROUP_DISCLOSURE_GRANTS_MAX) {
+    throw new TypeError(
+      `${label} must contain at most ${HOSTED_RUNTIME_GROUP_DISCLOSURE_GRANTS_MAX} entries.`,
+    );
+  }
+  return entries;
+}
+
+function parseHostedRuntimeGroupDisclosureGrantFields(
+  record: Record<string, unknown>,
+  label: string,
+): HostedRuntimeGroupDisclosureGrantSummary {
+  return {
+    grantId: parseHostedRuntimeGroupDisclosureGrantId(
+      record.grantId,
+      `${label} grantId`,
+    ),
+    permissionText: parseHostedRuntimeGroupDisclosurePermissionText(
+      record.permissionText,
+      `${label} permissionText`,
+    ),
+  };
+}
+
 function parseHostedRuntimeGroupSummary(value: unknown) {
   const record = requireObject(value, "Hosted runtime group summary");
   assertAllowedObjectKeys(
@@ -2531,6 +2833,7 @@ function parseHostedRuntimeGroupMemberSummaries(
     assertAllowedObjectKeys(
       record,
       new Set([
+        "disclosureGrants",
         "grantedVaultShareProjectionKinds",
         "grantedVaultShareProjectionScopes",
         "handle",
@@ -2553,8 +2856,14 @@ function parseHostedRuntimeGroupMemberSummaries(
       ) ?? legacyProjectionKindsToScopes(
         grantedVaultShareProjectionKinds,
         "Hosted runtime group summary member grantedVaultShareProjectionKinds",
-      );
+    );
     return {
+      disclosureGrants: record.disclosureGrants === undefined
+        ? []
+        : parseHostedRuntimeGroupDisclosureGrantSummaries(
+            record.disclosureGrants,
+            "Hosted runtime group summary member disclosureGrants",
+          ),
       grantedVaultShareProjectionKinds,
       grantedVaultShareProjectionScopes,
       handle: readNullableString(record.handle, "Hosted runtime group summary member handle"),
