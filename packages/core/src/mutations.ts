@@ -2818,14 +2818,17 @@ async function reconcileDeviceEventEntriesByExternalRef(
         legacySleepTypeEnrichment
         && (
           isDeletedEventSpineRecord(latest)
+          || eventSpineRevision(latest)
+            !== eventSpineRevision(indexedProviderMatch.indexedRecord)
           || matchedEntries.some((match) =>
             hasHistoricalExternalRefUserAuthoredChanges(match.indexedMatch)
           )
         )
       ) {
         // sleepType is provider normalization metadata. Never resurrect a
-        // deleted event or replace user-authored state merely to backfill it;
-        // preserving this row also lets unrelated snapshot resources commit.
+        // deleted event or replace a newer canonical revision merely to
+        // backfill it; preserving this row also lets unrelated snapshot
+        // resources commit.
         skippedDuplicateCount += 1;
         if (eventSpineRevisionsAreComplete(index, latest.id)) {
           retainedPreparedIds.add(entry.record.id);
