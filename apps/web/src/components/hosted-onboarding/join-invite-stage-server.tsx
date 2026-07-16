@@ -17,6 +17,7 @@ import { ConsentSkeleton } from "@/src/components/legal/hosted-legal-consent-car
 import { MurphAddToContactsButton } from "@/src/components/murph/murph-contact-card-picker";
 import { ContactSupportAction } from "@/src/components/support/contact-support-action";
 import {
+  HOSTED_PULSE_TRIAL_DAYS,
   isHostedAutoPulseTrialEnabled,
   isHostedPulseTrialCheckoutEnabled,
 } from "@/src/lib/hosted-onboarding/billing-plans";
@@ -43,7 +44,7 @@ import {
 const MURPH_GITHUB_URL = "https://github.com/cobuildwithus/murph";
 
 const PULSE_TRIAL_FEATURES = [
-  "Full Pulse access for 10 days",
+  `Full Pulse access for ${HOSTED_PULSE_TRIAL_DAYS} days`,
   "Card required. Then $8/month unless canceled.",
   "Cancel anytime",
 ];
@@ -280,9 +281,9 @@ function JoinInviteCheckoutPanel({
         <PricingTierCard
           tier="free"
           name="Pulse Trial"
-          description="Try Murph for 10 days, no charge."
+          description={`Try Murph for ${HOSTED_PULSE_TRIAL_DAYS} days, no charge.`}
           price="$0"
-          priceUnit="for 10 days"
+          priceUnit={`for ${HOSTED_PULSE_TRIAL_DAYS} days`}
           features={PULSE_TRIAL_FEATURES}
           cta={
             <JoinInviteCheckoutPlanButtonIsland
@@ -290,7 +291,7 @@ function JoinInviteCheckoutPanel({
               checkoutOffer="pulse_trial_7d"
               className={buttonClassName}
               disabledLabel="Trial unavailable"
-              idleLabel="Start 10-day trial"
+              idleLabel={`Start ${HOSTED_PULSE_TRIAL_DAYS}-day trial`}
               inviteCode={inviteCode}
               planCode={pulsePlan?.code ?? null}
             />
