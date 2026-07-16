@@ -1,11 +1,15 @@
 import { describe, expect, it, vi, beforeEach } from "vitest";
 
 const mocks = vi.hoisted(() => ({
-  readHostedRuntimeAiAccessDecision: vi.fn(),
+  checkHostedAiUsageGate: vi.fn(),
+  readHostedAiUsageGate: vi.fn(),
+  resolveHostedAiUsageGate: vi.fn(),
 }));
 
-vi.mock("@/src/lib/hosted-onboarding/member-access", () => ({
-  readHostedRuntimeAiAccessDecision: mocks.readHostedRuntimeAiAccessDecision,
+vi.mock("@/src/lib/hosted-execution/usage-allowance", () => ({
+  checkHostedAiUsageGate: mocks.checkHostedAiUsageGate,
+  readHostedAiUsageGate: mocks.readHostedAiUsageGate,
+  resolveHostedAiUsageGate: mocks.resolveHostedAiUsageGate,
 }));
 
 import {
@@ -18,13 +22,19 @@ import {
 
 describe("resolveHostedRuntimeAiUsageGate", () => {
   beforeEach(() => {
-    mocks.readHostedRuntimeAiAccessDecision.mockReset();
+    mocks.checkHostedAiUsageGate.mockReset();
+    mocks.readHostedAiUsageGate.mockReset();
+    mocks.resolveHostedAiUsageGate.mockReset();
   });
 
-  it.each(["mutating", "read_first", "read_only"] as const)(
-    "uses the write-free access owner in %s mode",
-    async (mode) => {
-      mocks.readHostedRuntimeAiAccessDecision.mockResolvedValue({ allowed: true });
+  it.each([
+    ["mutating", "resolveHostedAiUsageGate"],
+    ["read_first", "checkHostedAiUsageGate"],
+    ["read_only", "readHostedAiUsageGate"],
+  ] as const)(
+    "routes %s mode to %s",
+    async (mode, owner) => {
+      mocks[owner].mockResolvedValue({ allowed: true });
 
       await expect(resolveHostedRuntimeAiUsageGate({
         mode,
@@ -32,67 +42,62 @@ describe("resolveHostedRuntimeAiUsageGate", () => {
         userId: "member_123",
       })).resolves.toEqual({ status: "allowed" });
 
-      expect(mocks.readHostedRuntimeAiAccessDecision).toHaveBeenCalledWith({
+      expect(mocks[owner]).toHaveBeenCalledWith({
         memberId: "member_123",
         now: new Date("2026-06-12T12:00:00.000Z"),
         prisma: undefined,
       });
+      expect(mocks[owner]).toHaveBeenCalledTimes(1);
+      for (const [otherOwner, otherMock] of Object.entries(mocks)) {
+        if (otherOwner !== owner) {
+          expect(otherMock).not.toHaveBeenCalled();
+        }
+      }
     },
   );
 
-  it("does not import or consult monthly allowance bookkeeping", async () => {
-    mocks.readHostedRuntimeAiAccessDecision.mockResolvedValue({ allowed: true });
+  it("returns the canonical denial after included and purchased usage are exhausted", async () => {
+    const decision = buildMonthlyUsageExhaustedGateDecision();
+    mocks.resolveHostedAiUsageGate.mockResolvedValue(decision);
+
+    await expect(resolveHostedRuntimeAiUsageGate({
+      mode: "mutating",
+      userId: "member_123",
+    })).resolves.toEqual({
+      decision,
+      status: "denied",
+    });
+  });
+
+  it("preserves usage-gate failures for the caller", async () => {
+    const error = new Error("usage gate unavailable");
+    mocks.checkHostedAiUsageGate.mockRejectedValue(error);
 
     await expect(resolveHostedRuntimeAiUsageGate({
       mode: "read_first",
       userId: "member_123",
-    })).resolves.toEqual({ status: "allowed" });
-  });
-
-  it("keeps inactive hosted access denied", async () => {
-    const decision = buildHostedAccessInactiveUsageGateDecision();
-    mocks.readHostedRuntimeAiAccessDecision.mockResolvedValue(decision);
-
-    await expect(resolveHostedRuntimeAiUsageGate({
-      mode: "mutating",
-      userId: "member_123",
-    })).resolves.toEqual({
-      decision,
-      status: "denied",
-    });
-  });
-
-  it("keeps trial-expired pending-billing access denied", async () => {
-    const decision = buildTrialExpiredPendingBillingUsageGateDecision();
-    mocks.readHostedRuntimeAiAccessDecision.mockResolvedValue(decision);
-
-    await expect(resolveHostedRuntimeAiUsageGate({
-      mode: "mutating",
-      userId: "member_123",
-    })).resolves.toEqual({
-      decision,
-      status: "denied",
-    });
+    })).rejects.toBe(error);
   });
 });
 
-function buildHostedAccessInactiveUsageGateDecision() {
+function buildMonthlyUsageExhaustedGateDecision() {
   return {
     allowed: false,
-    reason: "hosted_access_inactive",
-    retryAfter: new Date("2026-06-12T12:05:00.000Z"),
-    userNotice: null,
-  };
-}
-
-function buildTrialExpiredPendingBillingUsageGateDecision() {
-  return {
-    allowed: false,
-    reason: "trial_expired_pending_billing",
-    retryAfter: new Date("2026-06-12T12:15:00.000Z"),
+    allowanceSource: "direct_paid_member_plan",
+    billingPlanCode: "launch_monthly",
+    limitUsdMicros: 10_000_000n,
+    memberId: "member_123",
+    periodEnd: new Date("2026-07-01T00:00:00.000Z"),
+    periodStart: new Date("2026-06-01T00:00:00.000Z"),
+    reason: "ai_usage_limit_exceeded",
+    remainingUsdMicros: 0n,
+    retryAfter: new Date("2026-07-01T00:00:00.000Z"),
+    spentUsdMicros: 10_000_000n,
+    usageCreditBalanceUsdMicros: 0n,
+    usageCreditLedgerVersion: 3n,
     userNotice: {
-      code: "trial_conversion_pending",
-      message: "Your Murph trial needs billing before I can keep going.",
+      code: "pulse_upgrade_edge",
+      message: "You've used this month's Murph allowance. Add usage to keep going.",
     },
   };
 }

@@ -33,6 +33,7 @@ export type HostedBlindIndexKind =
   | "stripe-billing-event"
   | "stripe-checkout-session"
   | "stripe-customer"
+  | "stripe-price"
   | "stripe-subscription"
   | "stripe-subscription-item"
   | "stripe-subscription-schedule"
@@ -224,6 +225,10 @@ export function createHostedStripeCustomerLookupKey(value: string | null | undef
   return createHostedLookupKey("stripe-customer", normalizeHostedOpaqueInput(value));
 }
 
+export function createHostedStripePriceLookupKey(value: string | null | undefined): string | null {
+  return createHostedLookupKey("stripe-price", normalizeHostedOpaqueInput(value));
+}
+
 export function createHostedStripeCustomerLookupKeyReadCandidates(
   value: string | null | undefined,
 ): string[] {
@@ -279,6 +284,15 @@ export function createHostedStripeCheckoutSessionLookupKey(value: string | null 
 
 export function createHostedStripeBillingEventLookupKey(value: string | null | undefined): string | null {
   return createHostedLookupKey("stripe-billing-event", normalizeHostedOpaqueInput(value));
+}
+
+export function createHostedStripeBillingEventLookupKeyReadCandidates(
+  value: string | null | undefined,
+): string[] {
+  return createHostedLookupKeyReadCandidates(
+    "stripe-billing-event",
+    normalizeHostedOpaqueInput(value),
+  );
 }
 
 export function hostedLookupKeyMatchesValue(input: {

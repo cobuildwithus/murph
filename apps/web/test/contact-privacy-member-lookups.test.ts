@@ -10,8 +10,10 @@ import {
   createHostedPhoneLookupKeyReadCandidates,
   createHostedPrivyUserLookupKey,
   createHostedStripeBillingEventLookupKey,
+  createHostedStripeBillingEventLookupKeyReadCandidates,
   createHostedStripeCheckoutSessionLookupKey,
   createHostedStripeCustomerLookupKey,
+  createHostedStripePriceLookupKey,
   createHostedStripeSubscriptionLookupKey,
   createHostedStripeSubscriptionScheduleLookupKey,
   createHostedTelegramUsernameLookupKeyReadCandidates,
@@ -52,6 +54,7 @@ describe("hosted member lookup keys", () => {
         "Recent sleep timing and duration",
       );
     const customer = createHostedStripeCustomerLookupKey("cus_123");
+    const price = createHostedStripePriceLookupKey("price_123");
     const subscription = createHostedStripeSubscriptionLookupKey("sub_123");
     const subscriptionSchedule = createHostedStripeSubscriptionScheduleLookupKey("sched_123");
     const checkout = createHostedStripeCheckoutSessionLookupKey("cs_123");
@@ -64,6 +67,7 @@ describe("hosted member lookup keys", () => {
       /^hbidx:group-disclosure-permission:v1:/u,
     );
     expect(customer).toMatch(/^hbidx:stripe-customer:v1:/u);
+    expect(price).toMatch(/^hbidx:stripe-price:v1:/u);
     expect(subscription).toMatch(/^hbidx:stripe-subscription:v1:/u);
     expect(subscriptionSchedule).toMatch(/^hbidx:stripe-subscription-schedule:v1:/u);
     expect(checkout).toMatch(/^hbidx:stripe-checkout-session:v1:/u);
@@ -78,6 +82,7 @@ describe("hosted member lookup keys", () => {
       "Recent sleep timing and duration",
     );
     expect(customer).not.toContain("cus_123");
+    expect(price).not.toContain("price_123");
     expect(subscription).not.toContain("sub_123");
     expect(subscriptionSchedule).not.toContain("sched_123");
     expect(checkout).not.toContain("cs_123");
@@ -112,6 +117,8 @@ describe("hosted member lookup keys", () => {
         createHostedGroupDisclosurePermissionLookupKeyReadCandidates(
           "Recent sleep timing and duration",
         );
+      const billingEventCandidates =
+        createHostedStripeBillingEventLookupKeyReadCandidates("evt_123");
 
       expect(readHostedContactPrivacyCurrentVersion()).toBe("v2");
       expect(candidates).toHaveLength(2);
@@ -125,6 +132,9 @@ describe("hosted member lookup keys", () => {
       expect(
         parseHostedBlindIndex(groupDisclosurePermissionCandidates[1])?.version,
       ).toBe("v1");
+      expect(billingEventCandidates).toHaveLength(2);
+      expect(parseHostedBlindIndex(billingEventCandidates[0])?.version).toBe("v2");
+      expect(parseHostedBlindIndex(billingEventCandidates[1])?.version).toBe("v1");
       expect(parseHostedBlindIndex(candidates[0])?.version).toBe("v2");
       expect(parseHostedBlindIndex(candidates[1])?.version).toBe("v1");
     } finally {

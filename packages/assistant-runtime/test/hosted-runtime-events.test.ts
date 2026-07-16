@@ -864,6 +864,84 @@ describe("executeHostedMailboxEvent", () => {
     }
   });
 
+  it("captures local Codex turn-completion boundaries without raw provider metadata", () => {
+    const wake = buildHostedExecutionAssistantNotificationRequestedWake({
+      eventId: "evt_codex_turn_completion_timing",
+      memberId: "member_123",
+      notification: {
+        instructions: "Reply in chat.",
+        route: {
+          actorId: "actor_codex_turn_completion_timing",
+          channel: "linq",
+          delivery: {
+            kind: "thread",
+            target: "thread_123",
+          },
+          identityId: "hbidx:phone:v1:test",
+          threadId: "thread_123",
+          threadIsDirect: true,
+        },
+      },
+      occurredAt: "2026-07-16T00:00:00.000Z",
+    });
+    const completionBoundaries = {
+      codexTimingProviderRequestOrdinal: 2,
+      codexTimingTurnStartAckElapsedMs: 14,
+      codexTimingTurnStartedNotificationElapsedMs: 16,
+      codexTimingTurnCompletedNotificationElapsedMs: 5_610,
+      codexTimingTurnCompleteElapsedMs: 5_622,
+    } as const;
+
+    const entry = emitHostedAssistantProviderTraceLog({
+      details: { requestId: "req_123" },
+      event: {
+        rawEvent: {
+          schema: "murph.assistant-codex-app-server-timing.v1",
+          type: "assistant.codex.app_server_timing",
+          codexTimingStage: "turn-completed",
+          ...completionBoundaries,
+          rawTurnId: "raw-turn-id",
+          rawProviderUrl: "https://api.openai.com/v1/responses",
+        },
+      },
+      wake,
+    });
+
+    expect(entry?.redacted).toEqual(expect.objectContaining({
+      codexTimingProviderRequestOrdinal: 2,
+      codexTimingTurnCompleteElapsedMs: 5_622,
+      codexTimingTurnCompletedNotificationElapsedMs: 5_610,
+      codexTimingTurnStartAckElapsedMs: 14,
+      codexTimingTurnStartedNotificationElapsedMs: 16,
+      codexTimingTraceType: "app-server",
+      providerTraceKind: "codex.app_server_timing",
+    }));
+    expect(JSON.stringify(entry?.redacted)).not.toContain("raw-turn-id");
+    expect(JSON.stringify(entry?.redacted)).not.toContain("api.openai.com");
+
+    const nonCompletionEntry = emitHostedAssistantProviderTraceLog({
+      details: { requestId: "req_123" },
+      event: {
+        rawEvent: {
+          schema: "murph.assistant-codex-app-server-timing.v1",
+          type: "assistant.codex.app_server_timing",
+          codexTimingStage: "turn-started",
+          ...completionBoundaries,
+        },
+      },
+      wake,
+    });
+
+    expect(nonCompletionEntry?.redacted).toEqual(expect.objectContaining({
+      codexTimingStage: "turn-started",
+      codexTimingTraceType: "app-server",
+      providerTraceKind: "codex.app_server_timing",
+    }));
+    for (const key of Object.keys(completionBoundaries)) {
+      expect(nonCompletionEntry?.redacted).not.toHaveProperty(key);
+    }
+  });
+
   it("captures hosted Codex action diagnostics without raw payloads", () => {
     const wake = buildHostedExecutionAssistantNotificationRequestedWake({
       eventId: "evt_codex_action_diagnostics",

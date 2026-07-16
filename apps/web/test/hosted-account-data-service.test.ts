@@ -15,6 +15,8 @@ const serviceMocks = vi.hoisted(() => ({
   readHostedConnectedAppsConfig: vi.fn(),
   revokeOutgoingHostedVaultSharesForMemberDeletionTx: vi.fn(),
   signalHostedMailboxAppendRuntime: vi.fn(),
+  assertHostedUsageCreditPurchasesReadyForAccountDeletionTx: vi.fn(),
+  closeHostedUsageCreditPurchasesForAccountDeletion: vi.fn(),
   assertHostedPhoneCallsReadyForAccountDeletionTx: vi.fn(),
   deleteHostedPhoneCallsForAccountDeletion: vi.fn(),
   terminateHostedUserRuntimeWorkflowBestEffort: vi.fn(),
@@ -46,6 +48,13 @@ vi.mock("@/src/lib/hosted-onboarding/privy", async (importOriginal) => ({
 vi.mock("@/src/lib/hosted-onboarding/runtime", async (importOriginal) => ({
   ...(await importOriginal<typeof import("@/src/lib/hosted-onboarding/runtime")>()),
   getHostedOnboardingStripe: serviceMocks.getHostedOnboardingStripe,
+}));
+
+vi.mock("@/src/lib/hosted-onboarding/usage-credit-purchase-service", () => ({
+  assertHostedUsageCreditPurchasesReadyForAccountDeletionTx:
+    serviceMocks.assertHostedUsageCreditPurchasesReadyForAccountDeletionTx,
+  closeHostedUsageCreditPurchasesForAccountDeletion:
+    serviceMocks.closeHostedUsageCreditPurchasesForAccountDeletion,
 }));
 
 vi.mock("@/src/lib/hosted-execution/user-data-delete", () => ({
@@ -125,6 +134,8 @@ const REQUIRED_STORE_SLUGS = [
   "prisma.hosted_user_crypto_audit",
   "prisma.hosted_ai_usage",
   "prisma.hosted_ai_usage_period",
+  "prisma.hosted_usage_credit_entry",
+  "prisma.hosted_usage_credit_purchase",
   "prisma.hosted_product_feedback",
   "prisma.hosted_linq_daily_state",
   "prisma.hosted_linq_invite_delivery",
@@ -195,6 +206,12 @@ beforeEach(() => {
   });
   serviceMocks.signalHostedMailboxAppendRuntime.mockReset();
   serviceMocks.signalHostedMailboxAppendRuntime.mockResolvedValue(undefined);
+  serviceMocks.assertHostedUsageCreditPurchasesReadyForAccountDeletionTx.mockReset();
+  serviceMocks.assertHostedUsageCreditPurchasesReadyForAccountDeletionTx.mockResolvedValue(
+    undefined,
+  );
+  serviceMocks.closeHostedUsageCreditPurchasesForAccountDeletion.mockReset();
+  serviceMocks.closeHostedUsageCreditPurchasesForAccountDeletion.mockResolvedValue(undefined);
   serviceMocks.assertHostedPhoneCallsReadyForAccountDeletionTx.mockReset();
   serviceMocks.assertHostedPhoneCallsReadyForAccountDeletionTx.mockResolvedValue(undefined);
   serviceMocks.deleteHostedPhoneCallsForAccountDeletion.mockReset();
@@ -284,6 +301,18 @@ describe("HOSTED_ACCOUNT_DATA_STORE_COVERAGE", () => {
     expect(dirtyState?.note).toContain("does not rely on cascades");
     expect(dirtyPayload?.note).toContain("before dirty-state and connection rows");
     expect(dirtyPayload?.note).toContain("raw provider payload retention is bounded");
+  });
+
+  it("keeps usage-credit payment and ledger internals out of browser-vault export", () => {
+    const bySlug = new Map(HOSTED_ACCOUNT_DATA_STORE_COVERAGE.map((entry) => [entry.slug, entry]));
+    const entry = bySlug.get("prisma.hosted_usage_credit_entry");
+    const purchase = bySlug.get("prisma.hosted_usage_credit_purchase");
+
+    expect(entry?.note).toContain("browser-vault export omits");
+    expect(entry?.note).toContain("semantic source keys");
+    expect(purchase?.note).toContain("browser-vault export omits");
+    expect(purchase?.note).toContain("payment identifiers");
+    expect(purchase?.note).toContain("Stripe retains records it is legally required to keep");
   });
 });
 
@@ -415,6 +444,148 @@ describe("deleteHostedAccountData", () => {
       "prisma.hosted_group_disclosure_grant": 1,
       "prisma.hosted_group_disclosure_permission": 1,
     });
+  });
+
+  it("deletes usage-credit entries before purchases and member rows", async () => {
+    const deleteCalls: HostedAccountDeletionPrismaDeleteCall[] = [];
+    const operationOrder: string[] = [];
+    const prisma = createHostedAccountDeletionPrismaForTest({
+      deleteCalls,
+      onTransaction: () => operationOrder.push("transaction"),
+      operationOrder,
+    });
+
+    const result = await deleteHostedAccountData({
+      memberId: "member_123",
+      prisma,
+      request: new Request("https://join.example.test/settings"),
+    });
+
+    expect(result.deletedCounts).toMatchObject({
+      "prisma.hosted_usage_credit_entry": 1,
+      "prisma.hosted_usage_credit_purchase": 1,
+    });
+    expect(deleteCalls).toEqual(expect.arrayContaining([
+      {
+        model: "hostedUsageCreditEntry",
+        where: {
+          OR: [
+            { beneficiaryMemberId: "member_123" },
+            { purchase: { beneficiaryMemberId: "member_123" } },
+            { purchase: { payerMemberId: "member_123" } },
+          ],
+        },
+      },
+      {
+        model: "hostedUsageCreditPurchase",
+        where: {
+          OR: [
+            { beneficiaryMemberId: "member_123" },
+            { payerMemberId: "member_123" },
+          ],
+        },
+      },
+    ]));
+    expect(operationOrder.indexOf("delete:hostedUsageCreditEntry")).toBeLessThan(
+      operationOrder.indexOf("delete:hostedUsageCreditPurchase"),
+    );
+    expect(operationOrder.indexOf("delete:hostedUsageCreditPurchase")).toBeLessThan(
+      operationOrder.indexOf("delete:hostedMember"),
+    );
+  });
+
+  it("closes usage-credit provider attempts after suspension and rechecks them before local deletion", async () => {
+    const operationOrder: string[] = [];
+    serviceMocks.closeHostedUsageCreditPurchasesForAccountDeletion.mockImplementation(
+      async () => {
+        operationOrder.push("usage-credit:close");
+      },
+    );
+    serviceMocks.assertHostedUsageCreditPurchasesReadyForAccountDeletionTx.mockImplementation(
+      async () => {
+        operationOrder.push("usage-credit:assert");
+      },
+    );
+    const prisma = createHostedAccountDeletionPrismaForTest({
+      onTransaction: () => operationOrder.push("transaction"),
+      operationOrder,
+    });
+
+    await deleteHostedAccountData({
+      memberId: "member_123",
+      prisma,
+      request: new Request("https://join.example.test/settings"),
+    });
+
+    expect(operationOrder.indexOf("usage-credit:close")).toBeGreaterThan(
+      operationOrder.indexOf("update:hostedMember"),
+    );
+    expect(operationOrder.indexOf("usage-credit:assert")).toBeGreaterThan(
+      operationOrder.lastIndexOf("update:hostedMember"),
+    );
+    expect(operationOrder.indexOf("usage-credit:assert")).toBeLessThan(
+      operationOrder.indexOf("delete:hostedUsageCreditEntry"),
+    );
+    expect(operationOrder.indexOf("usage-credit:assert")).toBeLessThan(
+      operationOrder.indexOf("delete:hostedUsageCreditPurchase"),
+    );
+  });
+
+  it("keeps local purchase ownership when provider convergence cannot be proven", async () => {
+    const deleteCalls: HostedAccountDeletionPrismaDeleteCall[] = [];
+    const onTransaction = vi.fn();
+    serviceMocks.closeHostedUsageCreditPurchasesForAccountDeletion.mockRejectedValue(
+      Object.assign(new Error("Stripe checkout could not be verified"), {
+        code: "HOSTED_USAGE_CREDIT_STRIPE_UNAVAILABLE",
+        retryable: true,
+      }),
+    );
+    const prisma = createHostedAccountDeletionPrismaForTest({
+      deleteCalls,
+      onTransaction,
+    });
+
+    await expect(deleteHostedAccountData({
+      memberId: "member_123",
+      prisma,
+      request: new Request("https://join.example.test/settings"),
+    })).rejects.toMatchObject({
+      code: "HOSTED_USAGE_CREDIT_STRIPE_UNAVAILABLE",
+      retryable: true,
+    });
+
+    expect(onTransaction).toHaveBeenCalledTimes(1);
+    expect(deleteCalls).toEqual([]);
+    expect(
+      serviceMocks.assertHostedUsageCreditPurchasesReadyForAccountDeletionTx,
+    ).not.toHaveBeenCalled();
+  });
+
+  it("keeps local purchase ownership when the final locked readiness fence fails", async () => {
+    const deleteCalls: HostedAccountDeletionPrismaDeleteCall[] = [];
+    const onTransaction = vi.fn();
+    serviceMocks.assertHostedUsageCreditPurchasesReadyForAccountDeletionTx.mockRejectedValue(
+      Object.assign(new Error("Usage-credit purchase remained unresolved"), {
+        code: "ACCOUNT_DELETION_USAGE_CREDIT_UNRESOLVED",
+        retryable: true,
+      }),
+    );
+    const prisma = createHostedAccountDeletionPrismaForTest({
+      deleteCalls,
+      onTransaction,
+    });
+
+    await expect(deleteHostedAccountData({
+      memberId: "member_123",
+      prisma,
+      request: new Request("https://join.example.test/settings"),
+    })).rejects.toMatchObject({
+      code: "ACCOUNT_DELETION_USAGE_CREDIT_UNRESOLVED",
+      retryable: true,
+    });
+
+    expect(onTransaction).toHaveBeenCalledTimes(2);
+    expect(deleteCalls).toEqual([]);
   });
 
   it("deletes owned external-thread container runtimes with the account owner", async () => {
@@ -607,6 +778,11 @@ describe("deleteHostedAccountData", () => {
       },
     };
     serviceMocks.getHostedOnboardingStripe.mockReturnValue(stripe);
+    serviceMocks.closeHostedUsageCreditPurchasesForAccountDeletion.mockImplementation(
+      async () => {
+        order.push("usage-credit:close");
+      },
+    );
     serviceMocks.deleteHostedPrivyUser.mockImplementation(async () => {
       order.push("privy:user-delete");
       return true;
@@ -626,6 +802,7 @@ describe("deleteHostedAccountData", () => {
     expect(order).toEqual([
       "prisma",
       "stripe:subscription-cancel",
+      "usage-credit:close",
       "prisma",
       "stripe:customer-delete",
       "privy:user-delete",
@@ -714,6 +891,9 @@ describe("deleteHostedAccountData", () => {
     expect(error).toBeInstanceOf(HostedOnboardingError);
     expect((error as HostedOnboardingError).code).toBe("ACCOUNT_DELETION_STRIPE_SUBSCRIPTION_CANCEL_FAILED");
     expect(onTransaction).toHaveBeenCalledTimes(1);
+    expect(
+      serviceMocks.closeHostedUsageCreditPurchasesForAccountDeletion,
+    ).not.toHaveBeenCalled();
     expect(stripe.customers.del).not.toHaveBeenCalled();
     expect(serviceMocks.deleteHostedPrivyUser).not.toHaveBeenCalled();
   });

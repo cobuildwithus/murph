@@ -666,6 +666,110 @@ describe("workspace snapshot local restore", () => {
     }
   });
 
+  it("creates and restores with only the archive and compression processes", async () => {
+    const tempRoot = await mkdtemp(path.join(tmpdir(), "workspace-snapshot-local-test-"));
+    const durableRoot = path.join(tempRoot, "durable");
+    const vaultRoot = path.join(durableRoot, "vault");
+    const notePath = path.join(vaultRoot, "note.md");
+    const wrapperDir = path.join(tempRoot, "bin");
+    const processMarkerPath = path.join(tempRoot, "snapshot-processes");
+    const originalPath = process.env.PATH;
+    const realTarPath = (await execFileAsync("which", ["tar"])).stdout.trim();
+    const realZstdPath = (await execFileAsync("which", ["zstd"])).stdout.trim();
+    const dataKey = Uint8Array.from({ length: 32 }, (_, index) => index + 1);
+    const objectKey = "users/hsn_test/workspace-snapshots/snapshot_processes.snapshot.enc";
+    const snapshotId = "snapshot_processes";
+    const userId = "member_123";
+
+    try {
+      await mkdir(vaultRoot, { recursive: true });
+      await mkdir(wrapperDir, { recursive: true });
+      await writeFile(notePath, "note\n", "utf8");
+      await writeFile(
+        path.join(wrapperDir, "tar"),
+        `#!/bin/sh
+case " $* " in
+  *" -xf "*) operation=tar-extract ;;
+  *) operation=tar-create ;;
+esac
+printf '%s\\n' "$operation" >> "\${MURPH_TEST_SNAPSHOT_PROCESS_MARKER:?}"
+exec "\${MURPH_TEST_REAL_TAR:?}" "$@"
+`,
+        { mode: 0o700 },
+      );
+      await writeFile(
+        path.join(wrapperDir, "zstd"),
+        `#!/bin/sh
+case "\${1:-}" in
+  --version) operation=zstd-version ;;
+  -d) operation=zstd-decompress ;;
+  *) operation=zstd-compress ;;
+esac
+printf '%s\\n' "$operation" >> "\${MURPH_TEST_SNAPSHOT_PROCESS_MARKER:?}"
+exec "\${MURPH_TEST_REAL_ZSTD:?}" "$@"
+`,
+        { mode: 0o700 },
+      );
+
+      process.env.MURPH_TEST_REAL_TAR = realTarPath;
+      process.env.MURPH_TEST_REAL_ZSTD = realZstdPath;
+      process.env.MURPH_TEST_SNAPSHOT_PROCESS_MARKER = processMarkerPath;
+      process.env.PATH = `${wrapperDir}${path.delimiter}${originalPath ?? ""}`;
+
+      const aad = buildHostedWorkspaceSnapshotV2Aad({ objectKey, snapshotId, userId });
+      const encrypted = await createEncryptedWorkspaceSnapshotFile({
+        aad,
+        archiveEntries: [
+          {
+            absolutePath: vaultRoot,
+            archivePath: "vault",
+            kind: "directory",
+          },
+          {
+            absolutePath: notePath,
+            archivePath: "vault/note.md",
+            kind: "file",
+          },
+        ],
+        dataKey: encodeHostedWorkspaceSnapshotV2DataKey(dataKey),
+        durableRoot,
+        ivBase64: Buffer.alloc(12, 9).toString("base64url"),
+        maxEncryptedBytes: 16 * 1024 * 1024,
+        outputDir: path.join(tempRoot, "scratch"),
+      });
+      await restoreEncryptedWorkspaceSnapshot({
+        dataKey: encodeHostedWorkspaceSnapshotV2DataKey(dataKey),
+        durableRoot: path.join(tempRoot, "restored", "durable"),
+        encryptedFilePath: encrypted.encryptedFilePath,
+        ref: createHostedWorkspaceSnapshotTestRef({
+          aad,
+          encrypted,
+          objectKey,
+          snapshotId,
+          userId,
+        }),
+      });
+
+      const operations = (await readFile(processMarkerPath, "utf8"))
+        .trim()
+        .split("\n")
+        .sort();
+      expect(operations).toEqual([
+        "tar-create",
+        "tar-extract",
+        "zstd-compress",
+        "zstd-decompress",
+      ]);
+    } finally {
+      process.env.PATH = originalPath;
+      delete process.env.MURPH_TEST_REAL_TAR;
+      delete process.env.MURPH_TEST_REAL_ZSTD;
+      delete process.env.MURPH_TEST_SNAPSHOT_PROCESS_MARKER;
+      await rm(tempRoot, { force: true, recursive: true });
+      dataKey.fill(0);
+    }
+  });
+
   it("rejects emitted tar members that differ from the planned entry state", async () => {
     const tempRoot = await mkdtemp(path.join(tmpdir(), "workspace-snapshot-local-test-"));
     const durableRoot = path.join(tempRoot, "durable");

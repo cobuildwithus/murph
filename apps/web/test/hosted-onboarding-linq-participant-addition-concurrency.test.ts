@@ -340,9 +340,11 @@ describe.skipIf(!runPostgresConcurrencyProof)(
       const fixture = await createRouteFixture();
       const attemptedAt = new Date("2026-07-13T12:00:00.000Z");
       const periodStart = new Date("2026-07-01T00:00:00.000Z");
+      const usageSourceRef = `usage-lock-proof:${fixture.containerMemberId}`;
       const usageIdempotencyKey = buildHostedAiUsageGateNoticeIdempotencyKey({
         memberId: fixture.containerMemberId,
         periodStart,
+        usageCreditLedgerVersion: 0n,
       });
       const usageDeliveryLookupKey =
         createHostedLinqDeliveryIdempotencyLookupKey(usageIdempotencyKey);
@@ -369,7 +371,7 @@ describe.skipIf(!runPostgresConcurrencyProof)(
         },
       });
 
-      const usageAdvisoryLocked = createDeferred();
+      const usageOwnerLocked = createDeferred();
       const releaseUsageAuthorityCheck = createDeferred();
       const consumerPid = createDeferred<number>();
       let consumerTransaction: Promise<boolean> | null = null;
@@ -381,7 +383,7 @@ describe.skipIf(!runPostgresConcurrencyProof)(
         usageTransaction = fixture.participantClient.$transaction(async (tx) => {
           return startHostedAiUsageLimitNoticeDispatchTx({
             assertDispatchAuthority: async (claimTx) => {
-              usageAdvisoryLocked.resolve();
+              usageOwnerLocked.resolve();
               await releaseUsageAuthorityCheck.promise;
               await lockHostedThreadRouteByThreadIdentityTx({
                 authority: {
@@ -398,12 +400,13 @@ describe.skipIf(!runPostgresConcurrencyProof)(
             periodStart,
             prisma: tx,
             source: "hosted_webhook_side_effect",
-            sourceRef: `usage-lock-proof:${fixture.containerMemberId}`,
+            sourceRef: usageSourceRef,
             targetKind: "thread",
+            usageCreditLedgerVersion: 0n,
           });
         });
 
-        await usageAdvisoryLocked.promise;
+        await usageOwnerLocked.promise;
         consumerTransaction = fixture.messageClient.$transaction(async (tx) => {
           consumerPid.resolve(await readBackendPid(tx));
           return consumeHostedLinqThreadRouteParticipantAdditionPendingTx({
@@ -458,7 +461,7 @@ describe.skipIf(!runPostgresConcurrencyProof)(
       }
     });
 
-    it("rejects ineligible usage-limit candidates without mutating the reusable delivery row", async () => {
+    it("rejects stale candidates and gives a re-exhaustion crossing a fresh delivery identity", async () => {
       const fixture = await createRouteFixture();
       const attemptedAt = new Date("2026-07-13T12:00:00.000Z");
       const retryableAttemptedAt = new Date("2026-07-13T12:05:00.000Z");
@@ -467,9 +470,17 @@ describe.skipIf(!runPostgresConcurrencyProof)(
       const currentAttemptedAt = new Date("2026-07-13T12:20:00.000Z");
       const periodStart = new Date("2026-07-01T00:00:00.000Z");
       const periodEnd = new Date("2026-08-01T00:00:00.000Z");
+      const retryableSourceRef = `retryable-usage:${fixture.containerMemberId}`;
       const usageIdempotencyKey = buildHostedAiUsageGateNoticeIdempotencyKey({
         memberId: fixture.containerMemberId,
         periodStart,
+        usageCreditLedgerVersion: 0n,
+      });
+      const reexhaustionSourceRef = `usage-after-plan-change:${fixture.containerMemberId}`;
+      const reexhaustionIdempotencyKey = buildHostedAiUsageGateNoticeIdempotencyKey({
+        memberId: fixture.containerMemberId,
+        periodStart,
+        usageCreditLedgerVersion: 2n,
       });
       const usageDeliveryLookupKey =
         createHostedLinqDeliveryIdempotencyLookupKey(usageIdempotencyKey);
@@ -480,6 +491,7 @@ describe.skipIf(!runPostgresConcurrencyProof)(
         attemptedAt: Date;
         prisma?: PrismaClient;
         sourceRef: string;
+        usageCreditLedgerVersion?: bigint;
       }) => startAuthorizedHostedAiUsageLimitNoticeDispatchTx({
         attemptedAt: input.attemptedAt,
         memberId: fixture.containerMemberId,
@@ -498,6 +510,7 @@ describe.skipIf(!runPostgresConcurrencyProof)(
         source: "hosted_webhook_side_effect",
         sourceRef: input.sourceRef,
         targetKind: "thread",
+        usageCreditLedgerVersion: input.usageCreditLedgerVersion ?? 0n,
       });
       const setBlockedAt = (blockedAt: Date | null) =>
         fixture.observer.hostedAiUsagePeriod.update({
@@ -587,8 +600,9 @@ describe.skipIf(!runPostgresConcurrencyProof)(
           periodStart,
           prisma: fixture.messageClient,
           source: "hosted_runtime_ai_usage_limit_notice",
-          sourceRef: `retryable-usage:${fixture.containerMemberId}`,
+          sourceRef: retryableSourceRef,
           targetKind: "telegram_thread",
+          usageCreditLedgerVersion: 0n,
         })).resolves.toEqual({
           idempotencyKey: usageIdempotencyKey,
           status: "claimed",
@@ -604,7 +618,7 @@ describe.skipIf(!runPostgresConcurrencyProof)(
 
         await expect(claimUsageNotice({
           attemptedAt: staleRetryAttemptedAt,
-          sourceRef: `stale-retry:${fixture.containerMemberId}`,
+          sourceRef: retryableSourceRef,
         })).resolves.toEqual({ status: "already_notified" });
         await expect(fixture.observer.hostedLinqDelivery.findUnique({
           select: {
@@ -619,20 +633,45 @@ describe.skipIf(!runPostgresConcurrencyProof)(
           status: "failed",
         });
         await setBlockedAt(currentAttemptedAt);
+        await fixture.observer.hostedMember.update({
+          data: {
+            usageCreditBalanceUsdMicros: 0n,
+            usageCreditLedgerVersion: 2n,
+          },
+          where: { id: fixture.containerMemberId },
+        });
 
         await expect(claimUsageNotice({
           attemptedAt: currentAttemptedAt,
           prisma: fixture.messageClient,
-          sourceRef: `usage-after-plan-change:${fixture.containerMemberId}`,
+          sourceRef: retryableSourceRef,
+          usageCreditLedgerVersion: 0n,
+        })).resolves.toEqual({ status: "already_notified" });
+
+        await expect(claimUsageNotice({
+          attemptedAt: currentAttemptedAt,
+          prisma: fixture.messageClient,
+          sourceRef: reexhaustionSourceRef,
+          usageCreditLedgerVersion: 2n,
         })).resolves.toEqual({
-          idempotencyKey: usageIdempotencyKey,
+          idempotencyKey: reexhaustionIdempotencyKey,
           status: "claimed",
         });
+        expect(reexhaustionIdempotencyKey).not.toBe(usageIdempotencyKey);
       } finally {
         releaseClaim.resolve();
         await Promise.allSettled(staleClaim ? [staleClaim] : []);
         await fixture.observer.hostedLinqDelivery.deleteMany({
-          where: { idempotencyKey: usageDeliveryLookupKey },
+          where: {
+            idempotencyKey: {
+              in: [
+                usageDeliveryLookupKey,
+                createHostedLinqDeliveryIdempotencyLookupKey(
+                  reexhaustionIdempotencyKey,
+                ),
+              ].filter((value): value is string => value !== null),
+            },
+          },
         });
         await fixture.observer.hostedAiUsagePeriod.deleteMany({
           where: {

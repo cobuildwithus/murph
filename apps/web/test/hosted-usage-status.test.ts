@@ -4,6 +4,7 @@ const mocks = vi.hoisted(() => ({
   readHostedAiUsageGate: vi.fn(),
   readHostedMemberBillingEligibilityState: vi.fn(),
   readHostedMemberCoreState: vi.fn(),
+  readHostedPersonalUsageCreditOfferCodes: vi.fn(),
 }));
 
 vi.mock("@/src/lib/hosted-execution/usage-allowance", () => ({
@@ -22,6 +23,11 @@ vi.mock("@/src/lib/hosted-onboarding/hosted-member-store", () => ({
   readHostedMemberCoreState: mocks.readHostedMemberCoreState,
 }));
 
+vi.mock("@/src/lib/hosted-onboarding/personal-usage-credit-eligibility", () => ({
+  readHostedPersonalUsageCreditOfferCodes:
+    mocks.readHostedPersonalUsageCreditOfferCodes,
+}));
+
 import {
   projectHostedPersonalAiUsageStatus,
   readHostedPersonalAiUsageStatus,
@@ -37,6 +43,9 @@ const PERIOD_END = new Date("2026-07-11T00:00:00.000Z");
 describe("readHostedPersonalAiUsageStatus", () => {
   beforeEach(() => {
     vi.clearAllMocks();
+    mocks.readHostedPersonalUsageCreditOfferCodes.mockResolvedValue([
+      "usage_10_usd",
+    ]);
     mocks.readHostedMemberCoreState.mockResolvedValue({
       billingStatus: "active",
       suspendedAt: null,
@@ -94,7 +103,7 @@ describe("readHostedPersonalAiUsageStatus", () => {
     });
   });
 
-  it("recommends Edge for a paid Pulse member only after the usage threshold", async () => {
+  it("recommends adding usage for an eligible paid Pulse member after the usage threshold", async () => {
     mocks.readHostedAiUsageGate.mockResolvedValue(buildDecision({
       allowanceSource: "direct_paid_member_plan",
       limitUsdMicros: 10_000_000n,
@@ -113,13 +122,44 @@ describe("readHostedPersonalAiUsageStatus", () => {
       accessKind: "paid",
       planName: "Pulse",
       recommendedAction: {
-        kind: "upgrade_edge",
+        kind: "add_usage",
+        label: "Add usage",
+        url: "/settings?addUsage=true#subscription",
       },
       remainingPercent: 15,
       status: "active",
       usedPercent: 85,
     });
     expect(JSON.stringify(result)).not.toMatch(/UsdMicros|token|dollar/iu);
+    expect(JSON.stringify(result)).not.toContain("price_usage_10");
+    expect(mocks.readHostedPersonalUsageCreditOfferCodes).toHaveBeenCalledWith({
+      memberId: "member_usage_2",
+      prisma: expect.any(Object),
+    });
+  });
+
+  it("does not recommend adding usage when no canonical offer is configured", async () => {
+    mocks.readHostedPersonalUsageCreditOfferCodes.mockResolvedValue([]);
+    mocks.readHostedAiUsageGate.mockResolvedValue(buildDecision({
+      allowanceSource: "direct_paid_member_plan",
+      limitUsdMicros: 10_000_000n,
+      remainingUsdMicros: 1_500_000n,
+      spentUsdMicros: 8_500_000n,
+    }));
+
+    await expect(readHostedPersonalAiUsageStatus({
+      memberId: "member_usage_no_top_up_offers",
+      now: NOW,
+      prisma: buildPrisma(null) as never,
+      publicBaseUrl: "https://example.test",
+    })).resolves.toMatchObject({
+      recommendedAction: null,
+      status: "active",
+      usedPercent: 85,
+    });
+    expect(mocks.readHostedMemberCoreState).not.toHaveBeenCalled();
+    expect(mocks.readHostedMemberBillingEligibilityState).not.toHaveBeenCalled();
+    expect(mocks.readHostedPersonalUsageCreditOfferCodes).toHaveBeenCalledTimes(1);
   });
 
   it("returns current Edge terms for an explicit request below the recommendation threshold", async () => {
@@ -146,6 +186,7 @@ describe("readHostedPersonalAiUsageStatus", () => {
     });
     expect(mocks.readHostedMemberCoreState).toHaveBeenCalledTimes(1);
     expect(mocks.readHostedMemberBillingEligibilityState).toHaveBeenCalledTimes(1);
+    expect(mocks.readHostedPersonalUsageCreditOfferCodes).not.toHaveBeenCalled();
   });
 
   it("returns current Pulse terms for an explicit trial request below the recommendation threshold", async () => {
@@ -203,55 +244,62 @@ describe("readHostedPersonalAiUsageStatus", () => {
     expect(mocks.readHostedMemberBillingEligibilityState).not.toHaveBeenCalled();
   });
 
-  it.each([
-    [
-      "thresholded paid usage",
-      buildDecision({
-        allowanceSource: "direct_paid_member_plan",
-        limitUsdMicros: 10_000_000n,
-        remainingUsdMicros: 1_500_000n,
-        spentUsdMicros: 8_500_000n,
-      }),
-      {
-        recommendedAction: null,
-        status: "active",
-        usedPercent: 85,
+  it("keeps paid add-usage actions available without a public base URL", async () => {
+    mocks.readHostedAiUsageGate.mockResolvedValue(buildDecision({
+      allowanceSource: "direct_paid_member_plan",
+      limitUsdMicros: 10_000_000n,
+      remainingUsdMicros: 1_500_000n,
+      spentUsdMicros: 8_500_000n,
+    }));
+
+    const result = await readHostedPersonalAiUsageStatus({
+      memberId: "member_usage_no_public_url",
+      now: NOW,
+      prisma: buildPrisma(null) as never,
+      publicBaseUrl: null,
+    });
+
+    expect(result).toMatchObject({
+      recommendedAction: {
+        kind: "add_usage",
+        url: "/settings?addUsage=true#subscription",
       },
-    ],
-    [
-      "trial conversion",
-      buildDecision({
-        allowed: false,
-        allowanceSource: "direct_trial",
-        reason: "trial_expired_pending_billing",
-        spentUsdMicros: 0n,
-      }),
-      {
-        reason: "trial_conversion_pending",
-        recommendedAction: null,
-        status: "unavailable",
-      },
-    ],
-  ] as const)(
-    "avoids action-state fanout for legacy %s without an action URL",
-    async (_caseName, decision, expected) => {
-      mocks.readHostedAiUsageGate.mockResolvedValue(decision);
+      status: "active",
+      usedPercent: 85,
+    });
+    expect(result).not.toHaveProperty("subscriptionActionQuote");
+    expect(mocks.readHostedMemberCoreState).not.toHaveBeenCalled();
+    expect(mocks.readHostedMemberBillingEligibilityState).not.toHaveBeenCalled();
+    expect(mocks.readHostedPersonalUsageCreditOfferCodes).toHaveBeenCalledTimes(1);
+  });
 
-      const result = await readHostedPersonalAiUsageStatus({
-        memberId: "member_usage_legacy_no_url",
-        now: NOW,
-        prisma: buildPrisma(null) as never,
-        publicBaseUrl: null,
-      });
+  it("avoids trial action-state fanout without a public action URL", async () => {
+    mocks.readHostedAiUsageGate.mockResolvedValue(buildDecision({
+      allowed: false,
+      allowanceSource: "direct_trial",
+      reason: "trial_expired_pending_billing",
+      spentUsdMicros: 0n,
+    }));
 
-      expect(result).toMatchObject(expected);
-      expect(result).not.toHaveProperty("subscriptionActionQuote");
-      expect(mocks.readHostedMemberCoreState).not.toHaveBeenCalled();
-      expect(mocks.readHostedMemberBillingEligibilityState).not.toHaveBeenCalled();
-    },
-  );
+    const result = await readHostedPersonalAiUsageStatus({
+      memberId: "member_trial_no_public_url",
+      now: NOW,
+      prisma: buildPrisma(null) as never,
+      publicBaseUrl: null,
+    });
 
-  it("does not recommend an upgrade when the billing action is ineligible", async () => {
+    expect(result).toMatchObject({
+      reason: "trial_conversion_pending",
+      recommendedAction: null,
+      status: "unavailable",
+    });
+    expect(result).not.toHaveProperty("subscriptionActionQuote");
+    expect(mocks.readHostedMemberCoreState).not.toHaveBeenCalled();
+    expect(mocks.readHostedMemberBillingEligibilityState).not.toHaveBeenCalled();
+  });
+
+  it("does not recommend adding usage when the paid billing state is ineligible", async () => {
+    mocks.readHostedPersonalUsageCreditOfferCodes.mockResolvedValue([]);
     mocks.readHostedMemberBillingEligibilityState.mockResolvedValue({
       currentBillingPhase: null,
       currentBillingPlanCode: "launch_monthly",
@@ -281,8 +329,9 @@ describe("readHostedPersonalAiUsageStatus", () => {
     [false, true],
     [true, false],
   ])(
-    "does not recommend an upgrade with incomplete Stripe billing references",
+    "does not recommend adding usage with incomplete Stripe billing references",
     async (hasStripeCustomerId, hasStripeSubscriptionId) => {
+      mocks.readHostedPersonalUsageCreditOfferCodes.mockResolvedValue([]);
       mocks.readHostedMemberBillingEligibilityState.mockResolvedValue({
         currentBillingPhase: "paid",
         currentBillingPlanCode: "launch_monthly",
@@ -311,16 +360,18 @@ describe("readHostedPersonalAiUsageStatus", () => {
     },
   );
 
-  it("keeps exhausted paid usage available when billing action state cannot be read", async () => {
+  it("keeps exhausted paid usage available when top-up eligibility cannot be read", async () => {
     const warn = vi.spyOn(console, "warn").mockImplementation(() => {});
-    mocks.readHostedMemberBillingEligibilityState.mockRejectedValueOnce(
-      new Error("private billing read failed"),
+    mocks.readHostedPersonalUsageCreditOfferCodes.mockRejectedValueOnce(
+      new Error("private eligibility read failed"),
     );
     const prisma = buildPrisma(null);
 
     try {
       await expect(projectHostedPersonalAiUsageStatus({
         decision: buildDecision({
+          allowed: false,
+          reason: "ai_usage_limit_exceeded",
           remainingUsdMicros: 0n,
           spentUsdMicros: 10_000_000n,
         }),
@@ -335,23 +386,29 @@ describe("readHostedPersonalAiUsageStatus", () => {
         usedPercent: 100,
       });
       expect(warn).toHaveBeenCalledWith(
-        "Hosted plan usage action resolution failed.",
+        "Hosted personal usage-credit eligibility resolution failed.",
         {
-          accessKind: "paid",
           errorName: "Error",
           planCode: "launch_monthly",
         },
       );
       expect(JSON.stringify(warn.mock.calls)).not.toMatch(
-        /member_usage_action_failure|private billing read failed/u,
+        /member_usage_action_failure|private eligibility read failed/u,
       );
     } finally {
       warn.mockRestore();
     }
   });
 
-  it("does not invent a higher-plan action for Edge or a personal action for Family", async () => {
+  it("offers Edge add-usage without inventing a subscription quote or a Family action", async () => {
     const prisma = buildPrisma(null);
+    mocks.readHostedMemberBillingEligibilityState.mockResolvedValueOnce({
+      currentBillingPhase: "paid",
+      currentBillingPlanCode: "launch_edge_monthly",
+      currentCheckoutOffer: "standard",
+      hasStripeCustomerId: true,
+      hasStripeSubscriptionId: true,
+    });
     mocks.readHostedAiUsageGate.mockResolvedValue(buildDecision({
       allowanceSource: "direct_paid_member_plan",
       billingPlanCode: "launch_edge_monthly",
@@ -369,7 +426,11 @@ describe("readHostedPersonalAiUsageStatus", () => {
     })).resolves.toMatchObject({
       accessKind: "paid",
       planName: "Edge",
-      recommendedAction: null,
+      recommendedAction: {
+        kind: "add_usage",
+        label: "Add usage",
+        url: "/settings?addUsage=true#subscription",
+      },
       subscriptionActionQuote: null,
     });
 
@@ -413,6 +474,8 @@ describe("readHostedPersonalAiUsageStatus", () => {
     });
 
     mocks.readHostedAiUsageGate.mockResolvedValue(buildDecision({
+      allowed: false,
+      reason: "ai_usage_limit_exceeded",
       remainingUsdMicros: 0n,
       spentUsdMicros: 12_000_000n,
     }));
@@ -627,6 +690,8 @@ describe("readHostedPersonalAiUsageStatus", () => {
 
   it("projects an already-resolved exhausted allowance without re-reading it", async () => {
     const decision = buildDecision({
+      allowed: false,
+      reason: "ai_usage_limit_exceeded",
       remainingUsdMicros: 0n,
       spentUsdMicros: 10_000_000n,
     });
@@ -639,15 +704,40 @@ describe("readHostedPersonalAiUsageStatus", () => {
       publicBaseUrl: "https://example.test",
     })).resolves.toMatchObject({
       recommendedAction: {
-        kind: "upgrade_edge",
-        label: "Upgrade to Edge ($20/month)",
-        url: "https://example.test/settings#subscription",
+        kind: "add_usage",
+        label: "Add usage",
+        url: "/settings?addUsage=true#subscription",
       },
       remainingPercent: 0,
       status: "exhausted",
       usedPercent: 100,
     });
     expect(mocks.readHostedAiUsageGate).not.toHaveBeenCalled();
+  });
+
+  it("keeps an allowed credit-backed account active after included usage reaches 100%", async () => {
+    mocks.readHostedAiUsageGate.mockResolvedValue(buildDecision({
+      limitUsdMicros: 10_000_000n,
+      remainingUsdMicros: 3_000_000n,
+      spentUsdMicros: 10_000_000n,
+      usageCreditBalanceUsdMicros: 3_000_000n,
+      usageCreditLedgerVersion: 4n,
+    }));
+
+    await expect(readHostedPersonalAiUsageStatus({
+      memberId: "member_credit_backed",
+      now: NOW,
+      prisma: buildPrisma(null) as never,
+      publicBaseUrl: null,
+    })).resolves.toMatchObject({
+      recommendedAction: {
+        kind: "add_usage",
+        url: "/settings?addUsage=true#subscription",
+      },
+      remainingPercent: 0,
+      status: "active",
+      usedPercent: 100,
+    });
   });
 
 });
@@ -672,10 +762,13 @@ function buildDecision(input: {
   billingPlanCode?: "launch_edge_monthly" | "launch_monthly";
   limitUsdMicros?: bigint;
   reason?:
+    | "ai_usage_limit_exceeded"
     | "hosted_access_inactive"
     | "trial_expired_pending_billing";
   remainingUsdMicros?: bigint;
   spentUsdMicros?: bigint;
+  usageCreditBalanceUsdMicros?: bigint;
+  usageCreditLedgerVersion?: bigint;
 } = {}): HostedAiUsageGateDecisionWithSource {
   const allowed = input.allowed ?? true;
   const common = {
@@ -687,17 +780,39 @@ function buildDecision(input: {
     periodStart: PERIOD_START,
     remainingUsdMicros: input.remainingUsdMicros ?? 5_000_000n,
     spentUsdMicros: input.spentUsdMicros ?? 5_000_000n,
+    usageCreditBalanceUsdMicros: input.usageCreditBalanceUsdMicros ?? 0n,
+    usageCreditLedgerVersion: input.usageCreditLedgerVersion ?? 0n,
   };
-  return allowed
-    ? {
-        ...common,
-        allowed: true,
-      }
-    : {
-        ...common,
-        allowed: false,
-        reason: input.reason ?? "hosted_access_inactive",
-        retryAfter: PERIOD_END,
-        userNotice: null,
-      };
+  if (allowed) {
+    return {
+      ...common,
+      allowed: true,
+    };
+  }
+
+  const reason = input.reason ?? "hosted_access_inactive";
+  if (reason === "ai_usage_limit_exceeded") {
+    return {
+      ...common,
+      allowed: false,
+      reason,
+      retryAfter: PERIOD_END,
+      userNotice: {
+        code: common.allowanceSource === "direct_trial"
+          ? "trial_usage_limit_reached"
+          : common.billingPlanCode === "launch_edge_monthly"
+            ? "edge_usage_limit_reached"
+            : "pulse_upgrade_edge",
+        message: "Included usage is exhausted.",
+      },
+    };
+  }
+
+  return {
+    ...common,
+    allowed: false,
+    reason,
+    retryAfter: PERIOD_END,
+    userNotice: null,
+  };
 }

@@ -75,6 +75,11 @@ const HOSTED_MEMBER_SCHEMA_GUARD = {
     'signupWelcomeEmailAttemptedAt DateTime? @map("signup_welcome_email_attempted_at")',
     'suspendedAt DateTime? @map("suspended_at")',
     'threadContainerParticipations HostedThreadContainerParticipant[] @relation("HostedThreadContainerParticipantMember")',
+    'usageCreditBalanceUsdMicros BigInt? @default(0) @map("usage_credit_balance_usd_micros")',
+    "usageCreditEntries HostedUsageCreditEntry[]",
+    'usageCreditLedgerVersion BigInt? @default(0) @map("usage_credit_ledger_version")',
+    'usageCreditPurchasesPaid HostedUsageCreditPurchase[] @relation("HostedUsageCreditPurchasePayer")',
+    'usageCreditPurchasesReceived HostedUsageCreditPurchase[] @relation("HostedUsageCreditPurchaseBeneficiary")',
     'createdAt DateTime @default(now()) @map("created_at")',
     'updatedAt DateTime @updatedAt @map("updated_at")',
   ],
@@ -846,6 +851,7 @@ describe("hosted Prisma baseline migration", () => {
       "20260715190000_hosted_assistant_personality_projection_watermarks",
       "20260715230000_hosted_mailbox_subscription_action_claim",
       "20260716120000_hosted_group_disclosure_permission",
+      "20260716160000_hosted_usage_credits",
       "migration_lock.toml",
     ]);
     expect(hostedMailboxSubscriptionActionClaimMigrationSql).toContain(
