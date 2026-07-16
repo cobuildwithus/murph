@@ -348,8 +348,8 @@ describe("createHostedBillingCheckout", () => {
           billingPlanCode: "launch_monthly",
           checkoutOffer: "pulse_trial_7d",
           memberId: "member_123",
-          trialDurationDays: "10",
-          trialPolicyVersion: "pulse-trial-2026-06-30-v2",
+          trialDurationDays: "14",
+          trialPolicyVersion: "pulse-trial-2026-07-15-v3",
           trialUsageLimitUsdMicros: "4500000",
         },
         subscription_data: {
@@ -357,15 +357,15 @@ describe("createHostedBillingCheckout", () => {
             billingPlanCode: "launch_monthly",
             checkoutOffer: "pulse_trial_7d",
             memberId: "member_123",
-            trialDurationDays: "10",
-            trialPolicyVersion: "pulse-trial-2026-06-30-v2",
+            trialDurationDays: "14",
+            trialPolicyVersion: "pulse-trial-2026-07-15-v3",
             trialUsageLimitUsdMicros: "4500000",
           },
-          trial_period_days: 10,
+          trial_period_days: 14,
         },
       }),
       {
-        idempotencyKey: "hosted-billing-checkout:member_123:invite-code:launch_monthly:offer:45d2016f2f12:items:a071a65166f8:customer:cus_pulse_trial_123",
+        idempotencyKey: "hosted-billing-checkout:member_123:invite-code:launch_monthly:offer:99b7f81b491e:items:a071a65166f8:customer:cus_pulse_trial_123",
       },
     );
     expect(mocks.stripe.customers.create).toHaveBeenCalledWith({

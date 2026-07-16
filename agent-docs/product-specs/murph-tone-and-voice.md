@@ -64,6 +64,12 @@ The effective defaults are:
 
 `hosted_member.assistant_tone` and `hosted_member.assistant_voice` capture the latest web-side choices for settings display and mailbox handoff. The session-authenticated route `POST /api/settings/assistant-style` and the member-bound signed assistant personalization callback use the same mutation owner. That owner validates the request, updates changed columns, appends a `member.preferences.updated` hosted mailbox event, and best-effort signals the runtime.
 
+For hosted conversational personality writes, Web also owns accepted-input
+admission and the Settings projection transaction. It updates only the requested
+Humor, Push, or Detail columns and their per-dial causal watermarks atomically
+with the sparse canonical mutation event carrying the accepted turn's original
+causal sequence. Canonical personality values still live only in the vault.
+
 The `murph.assistant_style` `show` action resolves missing dial values to these defaults and labels them `source: "default"`. A successful explicit set remains `source: "custom"` even when the chosen score equals the product default. Reset removes the override and restores the effective default. Resetting the last override removes the empty personality object.
 
 No prompt text, inferred psychological profile, or conversation excerpt is stored. Prompt behavior stays code-owned.
@@ -157,11 +163,26 @@ reset, it treats the returned `settings` snapshot as authoritative for the rest
 of that reply:
 
 - Confirm the exact effective score and whether it is custom or default.
-- If `updated` is false, say the setting was already in that state.
+- Interpret each requested dial's outcome directly: `saved` means Web accepted
+  that intent, `unchanged` means it was already current, and `superseded` means
+  newer intent won. Report the returned effective setting instead of echoing a
+  superseded request. `updated` is true only when a saved requested dial changes
+  the effective same-turn snapshot.
 - If the operation errors or returns no `settings` snapshot, say the result is unconfirmed. Do not claim that it changed or stayed unchanged. One `show` may report current canonical state without claiming whether the original action caused it.
 - When Humor changes above 0 and the context is safe, the acknowledgement may include at most one earned joke; no strong beat means no joke.
 - When Humor changes to 0, confirm it plainly without a joke.
 - Do not hard-code a recurring acknowledgement joke.
+
+In local mode, `set` and `reset` continue to write the canonical vault directly.
+In hosted mode, they send one strict `update_personality` request through the
+member-bound signed personalization callback, carrying invocation-owned
+assistant-input authority rather than a model-supplied sequence. Web returns the
+effective projection and a per-requested-dial outcome of `saved`, `unchanged`,
+or `superseded`. Accepted results form an invocation-only overlay so a later
+style operation in the same turn sees what Web accepted before the mailbox
+event reaches the vault. `show` always starts from canonical vault state and
+applies only that turn-scoped overlay; the overlay is not persisted and cannot
+replace mailbox convergence.
 
 ## Behavior Bands
 
@@ -280,8 +301,9 @@ Settings-side display/write projection, not canonical preference truth;
 `bank/preferences.json` remains canonical.
 
 `POST /api/settings/assistant-style` validates the authenticated member's
-values, updates requested columns, appends one `member.preferences.updated`
-event, and best-effort signals the runtime. While the web rollout gate is off,
+values, updates requested columns, and, when at least one requested field
+applies, appends one `member.preferences.updated` event and best-effort signals
+the runtime. While the web rollout gate is off,
 tone/voice events retain the legacy complete tone/voice snapshot required by
 the old coalescing consumer. Once the gate is enabled, events contain only the
 request delta. Personality payloads are strict,
@@ -290,15 +312,25 @@ scores, and mixed tone-or-voice plus personality requests before persistence.
 The response returns the full web projection so the Settings row can update
 without inventing a second readback service.
 
-Conversation-written personality values do not reverse-sync into the web
-projection. Settings therefore resolves missing columns to the shared defaults
-for display but submits only dials deliberately touched in that dialog, even
-when a touched dial returns to its displayed value. Projection equality must
-not suppress that explicit canonical intent. The dialog must never submit all
-three displayed defaults automatically. Personality events always carry only
-fields touched by the request. Tone/voice events gain that same sparse contract
-when the web gate is enabled, so a steady-state web save cannot overwrite an
-unseen canonical sibling preference.
+Hosted conversation `set` and `reset` now converge the web projection before
+the tool reports success. Inside one signed, accepted-input-bound transaction,
+Web resolves the turn's canonical sequence, atomically updates each applicable
+requested dial and its watermark, and, when at least one dial applies, appends one sparse
+`member.preferences.updated` event with `causalOrigin: "turn"` and that original
+sequence. The mailbox event then converges the same sparse intent into canonical
+vault state. Settings
+continues to submit only dials deliberately touched in its dialog, even when a
+touched dial returns to its displayed value. Projection equality must not
+suppress that explicit canonical intent, and the dialog must never submit all
+three displayed defaults automatically.
+
+There is no push channel into an already open Settings page, so a page that was
+open during a conversational change needs a reload before it shows the new
+projection. Values written in conversation before this convergence path shipped
+cannot be reconstructed safely from the web database; an affected member may
+see one stale dial until that dial's next conversational set/reset or Settings
+save. Sparse writes do not repair untouched siblings. That historical one-time
+gap is not an ongoing source-of-truth exception.
 
 After the web gate is enabled, `member.preferences.updated` is a delta contract,
 not a replaceable snapshot. The hosted system mailbox applies every preference
@@ -319,13 +351,16 @@ system pending item or conversation input record, and passed into the canonical
 preference mutation. `bank/preferences.json` retains only each sparse field's
 value. The canonical companion document
 `bank/assistant-preference-mutations.json` retains each sparse field's
-last-applied sequence. An older or equal Settings event terminally ignores only
-stale fields, still applies a newer sibling, and advances `updatedAt` whenever
-a sibling value really changes. Conversational commands from one accepted turn
-may apply at the same sequence in command order. Replaying a Settings event
-after the canonical commit is therefore an idempotent no-op without an event
-receipt, reservation lifecycle, cap, or mailbox-removal acknowledgment.
-Ordering never uses the web projection or wall-clock comparison.
+last-applied sequence. Ordering is field-local: a newer sequence applies and
+advances its dial's watermark even if the visible projection value is
+unchanged; an older sequence is a stale no-op for that dial while a fresh
+sibling may still apply; the same sequence and value is an exact idempotent
+retry; and the same sequence with a different value is a later command from the
+same accepted turn and applies in command order. The same rules govern Web's
+per-dial projection watermarks and the canonical companion watermarks. Ordering
+never uses
+wall-clock comparison, and replay needs no separate receipt, reservation,
+lifecycle cap, or mailbox-removal acknowledgment.
 
 New `conversation.message` mailbox rows also store a nullable server-keyed
 lookup of the existing deterministic assistant input id. The raw id is not
@@ -338,13 +373,14 @@ web derives the configured lookup-key candidates and resolves the callback
 member and one matching key to one live conversation-lane
 `conversation.message` row and reads its canonical causal sequence. Missing,
 legacy, mismatched, or ambiguous identity fails closed without a numeric
-sequence fallback. The web projection stores nullable per-field tone and voice
-watermarks and stale-no-ops only requested fields whose later Settings or
-conversation intent already has a higher sequence. A conversation wake keeps
-its origin sequence and `turn` origin for canonical application even though
-the mailbox row receives a newer transport sequence; Settings wakes continue
-to use their row sequence. This keeps the display projection and canonical
-vault on the same field-local order without making callback time a new intent.
+sequence fallback. The web projection stores nullable per-field tone, voice,
+Humor, Push, and Detail watermarks and stale-no-ops only requested fields whose
+later Settings or conversation intent already has a higher sequence. A
+conversation wake keeps its origin sequence and `turn` origin for canonical
+application even though the mailbox row receives a newer transport sequence;
+Settings wakes continue to use their row sequence. This keeps the display
+projection and canonical vault on the same field-local order without making
+callback time a new intent.
 During the legacy complete-snapshot rollout, additive `requestedFields`
 metadata preserves the caller's exact tone/voice field set for new runtimes;
 the web projection still advances every field visible to an old snapshot
@@ -403,49 +439,74 @@ so adding them does not alter the strict `bank/preferences.json` shape.
 
 The rollback floor is therefore the first deployed runtime and CLI version that understands the optional personality field. Rollback below that floor requires removing the new field with a current compatible binary or forward-deploying a compatible reader. Do not hand-edit canonical preferences files.
 
-The sparse-delta, shared-causal-sequence, and personalization-authority
-transition uses one additive expansion followed by a hard cut:
+The sparse-delta, shared-causal-sequence, personalization-authority, and
+conversation-to-Settings convergence transition uses additive expansion
+followed by a hard cut:
 
 1. Vercel predeploy applies the nullable `causal_seq` expansion and the
-   nullable keyed assistant-input lookup projection. Deploy the new web build
-   with
+   nullable keyed assistant-input lookup projection, plus nullable Humor,
+   Push, and Detail projection-watermark columns. Deploy the new web build with
    `MURPH_ASSISTANT_PERSONALITY_CAUSAL_WRITES_ENABLED=0`; the Settings
-   personality controls remain unavailable while old functions drain. That
-   build writes a server-keyed lookup of the existing deterministic assistant
-   input id for new conversation messages and hard-rejects personalization callbacks that do
-   not resolve it. It does not change the mailbox wire, `sourceRef`, or event
-   id. This web build is the rollback floor.
+   personality controls and hosted personality mutation action remain
+   unavailable while old functions drain. That build writes a server-keyed
+   lookup of the existing deterministic assistant input id for new conversation
+   messages, supports the signed input-bound personality transaction, and
+   hard-rejects callbacks that do not resolve it. It also rejects the retired
+   direct-vault `resolve_preference_causal_seq` action; old Vercel functions may
+   still serve that action only during their bounded pre-contract drain. It does
+   not change the mailbox wire, `sourceRef`, or event id. This web build is the
+   rollback floor.
 2. The normal post-deploy contract-migration lane waits for the old Vercel
    function window, then fails closed only if a legacy preference row remains
    above the authoritative system-lane `consumed_seq`. It installs the
    new-write check `NOT VALID`, so handled retained history does not block the
    rollout and new null-sequence preference writes are rejected. After that
-   same drain, it advances each populated web projection field to the member's
-   current mailbox causal counter. That one-time cutover barrier makes every
-   pre-cutover conversational turn stale at the projection without inventing
-   ordering for an absent field.
+   same drain, it seeds all three personality projection watermarks to each
+   member's current causal barrier, including dials whose projection value is
+   null. This is an intentional exception to the populated-field rule used for
+   tone and voice: before reverse convergence, a null personality projection
+   could still disagree with a custom canonical vault value. The barrier makes
+   older pre-cutover turns stale without pretending the unavailable historical
+   value can be backfilled. The boundary row at the barrier keeps the normal
+   equal-sequence command semantics; every message accepted after the committed
+   seed is strictly newer. A direct-vault write completed through an old Vercel
+   function before the drain ends joins the bounded historical non-backfill
+   caveat; after the drain, the hard-cut route cannot create another one.
 3. Deploy the new Cloudflare worker and runner with
    `container_rollout=immediate`; prove the managed fleet has converged. The
-   runtime forwards the sole input id only when the provider accepted exactly
-   one input, and web derives its causal sequence from the live member-owned
-   mailbox row inside the write transaction. There is no sequence fallback.
-4. Enable the Vercel gate. Settings switches tone/voice to sparse deltas and
-   exposes personality controls only after the FIFO consumer fleet is present.
-   Existing reply styling, ordinary conversation, and current-inbound replies
-   stay available throughout.
+   runtime forwards the terminal input id only from a locally revalidated
+   same-conversation, same-anchor, exact-successor accepted-input batch, and Web
+   derives its causal sequence from the live member-owned mailbox row inside
+   the write transaction. There is no sequence fallback.
+4. Set `MURPH_ASSISTANT_PERSONALITY_CAUSAL_WRITES_ENABLED=1` and redeploy Web.
+   Settings switches tone/voice to sparse deltas and
+   exposes personality controls and hosted conversation convergence only after
+   the FIFO consumer fleet is present. Existing reply styling, ordinary
+   conversation, and current-inbound replies stay available throughout.
 
 The new consumer accepts already-imported tokenless v1 local pending items
 through the explicit sequence-zero path. The pre-switch drain ensures that
 compatibility path is not asked to reconstruct unavailable cross-lane order.
 
-During the web-first mixed-version window, legacy runtimes continue ordinary
-replies while conversational preference writes fail closed. Deploying web and
-Cloudflare/runtime in tandem minimizes that temporary unavailable-write window.
-Keep web at or above the hard-cut build during any runtime rollback; an older
-runtime may continue replies but cannot write preferences through the rejected
-legacy numeric-sequence callback. Post-deploy, save one dial, run a
+During the old-Vercel-function drain, a legacy runtime may still complete the
+old direct-vault path through an old function. After that drain, hard-cut Web
+rejects the retired resolver: legacy runtimes continue ordinary replies, but
+style writes fail closed as unconfirmed until the input-bound fleet converges.
+Deploying Web and Cloudflare/runtime in tandem minimizes both windows. Keep Web
+at or above the hard-cut build during any runtime rollback; an older runtime
+continues ordinary replies but its style writes remain unavailable. Do not
+enable the gate until the converged fleet uses the input-bound personality
+transaction. Post-deploy, save one dial, run a
 conversational change to the same dial, confirm the later accepted intent wins
-canonically, and confirm no preference item remains rejected or stuck.
+in both the refreshed Settings projection and canonical vault, exercise a
+reset, and confirm no preference item remains rejected or stuck. An already
+open Settings page needs a reload; do not mistake that client snapshot for
+failed server convergence.
+
+After the gate is enabled, set it to `0` and redeploy Web before a runtime
+rollback if unavailable controls must be hidden. Keep Web at or above the
+hard-cut transaction rollback floor while personality watermarks exist; never
+restore a Web build that serves the retired direct-vault resolver.
 
 ## Preview Clips
 

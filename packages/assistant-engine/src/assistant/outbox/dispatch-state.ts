@@ -18,6 +18,8 @@ import { repairAssistantOutboxReceiptForIntent } from './receipt-repair.js'
 import {
   createAssistantDeliveryAmbiguousError,
   createAssistantDeliveryConfirmationPendingError,
+  createAssistantDeliveryRetryExhaustedError,
+  isAssistantOutboxRetryBudgetExhausted,
   isAssistantOutboxRetryableError,
   normalizeAssistantDeliveryError,
   resolveAssistantOutboxRetryDelayMs,
@@ -272,7 +274,7 @@ export async function updateAssistantOutboxAfterDispatchFailure(input: {
       error: input.error,
       sending: input.sending,
     })
-  const deliveryError = abandonedAmbiguousDelivery
+  const classifiedDeliveryError = abandonedAmbiguousDelivery
     ? sanitizeAssistantDeliveryErrorForPersistence(
         createAssistantDeliveryAmbiguousError(input.error),
       )!
@@ -283,7 +285,7 @@ export async function updateAssistantOutboxAfterDispatchFailure(input: {
       : sanitizeAssistantDeliveryErrorForPersistence(
           normalizeAssistantDeliveryError(input.error),
         )!
-  const retryable = abandonedDelivery
+  const retryRequested = abandonedDelivery
     ? false
     : input.deliveryMayHaveSucceeded || isAssistantOutboxRetryableError(input.error)
 
@@ -300,16 +302,26 @@ export async function updateAssistantOutboxAfterDispatchFailure(input: {
       })
       return current
     }
-    const attemptCount = current?.attemptCount ?? input.sending.attemptCount
+    const baseIntent = current ?? input.sending
+    const attemptCount = baseIntent.attemptCount
     const failedAt = input.failedAt.toISOString()
+    const retryExhausted = retryRequested &&
+      !input.deliveryMayHaveSucceeded &&
+      isAssistantOutboxRetryBudgetExhausted(baseIntent)
+    const retryable = retryRequested && !retryExhausted
+    const deliveryError = retryExhausted
+      ? sanitizeAssistantDeliveryErrorForPersistence(
+          createAssistantDeliveryRetryExhaustedError(input.error),
+        )!
+      : classifiedDeliveryError
     const nextAttemptAt = retryable
       ? buildAssistantOutboxRetryTimestamp(input.failedAt, attemptCount)
       : null
     const failedIntent = assistantOutboxIntentSchema.parse(
       sanitizeAssistantOutboxIntentForPersistence({
-        ...(current ?? input.sending),
+        ...baseIntent,
         delivery: ambiguousDelivery ?? current?.delivery ?? input.sending.delivery,
-        deliveryConfirmationPending: abandonedDelivery
+        deliveryConfirmationPending: abandonedDelivery || retryExhausted
           ? false
           : input.deliveryMayHaveSucceeded
             ? input.deliveryTransportIdempotent
@@ -870,7 +882,8 @@ export async function markAssistantOutboxIntentMirrorSendingPrepared(input: {
   startedAt: string
   vault: string
 }): Promise<AssistantOutboxPreparedMirrorDispatch> {
-  return withAssistantRuntimeWriteLock(input.vault, async (paths) => {
+  let retryExhausted = false
+  const result = await withAssistantRuntimeWriteLock(input.vault, async (paths) => {
     await ensureAssistantState(paths)
     const current = await readAssistantOutboxIntentAtPath(input.intentPath, {
       vault: input.vault,
@@ -920,6 +933,45 @@ export async function markAssistantOutboxIntentMirrorSendingPrepared(input: {
         intent: baseIntent,
         ownsDispatch: true,
         preparedDispatchToken,
+        previousDispatchState,
+      }
+    }
+    if (
+      baseIntent.status === 'retryable' &&
+      !baseIntent.delivery &&
+      (
+        !baseIntent.deliveryConfirmationPending ||
+        input.deliveryTransportIdempotent
+      ) &&
+      isAssistantOutboxRetryBudgetExhausted(baseIntent)
+    ) {
+      const deliveryError = sanitizeAssistantDeliveryErrorForPersistence(
+        createAssistantDeliveryRetryExhaustedError(baseIntent.lastError),
+      )!
+      const failedIntent = assistantOutboxIntentSchema.parse(
+        sanitizeAssistantOutboxIntentForPersistence({
+          ...baseIntent,
+          updatedAt: input.startedAt,
+          nextAttemptAt: null,
+          preparedDispatchToken: null,
+          status: 'failed',
+          lastError: deliveryError,
+        }),
+      )
+      await writeJsonFileAtomic(
+        input.intentPath,
+        sanitizeAssistantOutboxIntentForPersistence(failedIntent),
+      )
+      await repairAssistantOutboxReceiptForIntent({
+        at: failedIntent.updatedAt,
+        intent: failedIntent,
+        vault: input.vault,
+      })
+      retryExhausted = true
+      return {
+        intent: failedIntent,
+        ownsDispatch: false,
+        preparedDispatchToken: null,
         previousDispatchState,
       }
     }
@@ -975,6 +1027,32 @@ export async function markAssistantOutboxIntentMirrorSendingPrepared(input: {
       previousDispatchState,
     }
   })
+
+  if (retryExhausted) {
+    await recordAssistantDiagnosticEvent({
+      vault: input.vault,
+      component: 'delivery',
+      kind: 'delivery.failed',
+      message: result.intent.lastError?.message ??
+        'Assistant outbound delivery exhausted its automatic retries.',
+      level: 'error',
+      code: result.intent.lastError?.code ??
+        'ASSISTANT_DELIVERY_RETRY_EXHAUSTED',
+      sessionId: result.intent.sessionId,
+      turnId: result.intent.turnId,
+      intentId: result.intent.intentId,
+      counterDeltas: {
+        deliveriesFailed: 1,
+      },
+      at: result.intent.updatedAt,
+    })
+    await attemptAssistantCronDeliveryReconciliation({
+      intent: result.intent,
+      vault: input.vault,
+    })
+  }
+
+  return result
 }
 
 function shouldPrepareClaimAssistantOutboxIntent(
@@ -1199,7 +1277,7 @@ async function persistAssistantOutboxIntentMirrorFailure(input: {
   status: 'abandoned' | 'failed' | 'retryable'
   vault: string
 }): Promise<AssistantOutboxIntent> {
-  const deliveryError = sanitizeAssistantDeliveryErrorForPersistence(
+  const classifiedDeliveryError = sanitizeAssistantDeliveryErrorForPersistence(
     normalizeAssistantDeliveryError(input.error),
   )!
 
@@ -1237,7 +1315,15 @@ async function persistAssistantOutboxIntentMirrorFailure(input: {
     }
     const baseIntent = current ?? input.intent
     const failedAt = input.failedAt.toISOString()
-    const nextAttemptAt = input.retryable
+    const retryExhausted = input.retryable &&
+      isAssistantOutboxRetryBudgetExhausted(baseIntent)
+    const retryable = input.retryable && !retryExhausted
+    const deliveryError = retryExhausted
+      ? sanitizeAssistantDeliveryErrorForPersistence(
+          createAssistantDeliveryRetryExhaustedError(input.error),
+        )!
+      : classifiedDeliveryError
+    const nextAttemptAt = retryable
       ? buildAssistantOutboxRetryTimestamp(input.failedAt, baseIntent.attemptCount)
       : null
     const updatedIntent = assistantOutboxIntentSchema.parse(
@@ -1246,7 +1332,7 @@ async function persistAssistantOutboxIntentMirrorFailure(input: {
         deliveryConfirmationPending: false,
         updatedAt: failedAt,
         nextAttemptAt,
-        status: input.status,
+        status: retryExhausted ? 'failed' : input.status,
         lastError: deliveryError,
       }),
     )
@@ -1260,15 +1346,15 @@ async function persistAssistantOutboxIntentMirrorFailure(input: {
     })
     await recordAssistantDiagnosticEvent({
       vault: input.vault,
-      component: input.retryable ? 'outbox' : 'delivery',
-      kind: input.retryable ? 'delivery.retry-scheduled' : 'delivery.failed',
+      component: retryable ? 'outbox' : 'delivery',
+      kind: retryable ? 'delivery.retry-scheduled' : 'delivery.failed',
       message: deliveryError.message,
-      level: input.retryable ? 'warn' : 'error',
+      level: retryable ? 'warn' : 'error',
       code: deliveryError.code,
       sessionId: updatedIntent.sessionId,
       turnId: updatedIntent.turnId,
       intentId: updatedIntent.intentId,
-      counterDeltas: input.retryable
+      counterDeltas: retryable
         ? {
             deliveriesRetryable: 1,
             outboxRetries: 1,

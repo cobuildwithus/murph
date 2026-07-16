@@ -43,7 +43,6 @@ import type {
 import {
   createHostedAssistantInputSource,
   selectHostedAssistantInputIds,
-  type HostedAssistantInputSelection,
 } from "./turn-input.ts";
 import {
   createHostedAssistantTurnEnvironment,
@@ -157,15 +156,6 @@ export async function runHostedAssistantAutomationLane(input: {
 }): Promise<HostedAssistantAutomationLaneMetrics> {
   const startedAt = Date.now();
   const freshAssistantInputIds = input.freshAssistantInputIds ?? [];
-  const initialBackgroundSelection = freshAssistantInputIds.length === 0
-    ? await selectHostedAssistantInputIds({
-        limit: DEFAULT_ASSISTANT_AUTOMATION_SCAN_LIMIT,
-        mode: "background",
-        vaultRoot: input.vaultRoot,
-      })
-    : null;
-  const hasRecoveredReplyableInput =
-    (initialBackgroundSelection?.inputIds.length ?? 0) > 0;
   const resolveReadiness = async () => {
     const readinessStartedAt = Date.now();
     const readiness = await resolveHostedAssistantAutomationReadiness({
@@ -210,9 +200,6 @@ export async function runHostedAssistantAutomationLane(input: {
           buildBackgroundDynamicContextPrompt:
             input.buildBackgroundDynamicContextPrompt,
           latencyTracePort: input.runtime.platform.latencyTracePort ?? null,
-          ...(hasRecoveredReplyableInput && initialBackgroundSelection
-            ? { initialInputSelection: initialBackgroundSelection }
-            : {}),
           now: input.now ?? null,
           preProviderPhase: input.preProviderPhase ?? null,
           runtimeAttemptId: input.runtimeAttemptId ?? null,
@@ -286,7 +273,6 @@ export async function runHostedAssistantAutomation(
     operationScope?: AssistantAutomationOperationScope | null;
     buildBackgroundDynamicContextPrompt?: HostedBackgroundDynamicContextPromptBuilder;
     latencyTracePort?: HostedRuntimePlatform["latencyTracePort"] | null;
-    initialInputSelection?: HostedAssistantInputSelection;
     now?: Date | null;
     preProviderPhase?: HostedRuntimeLatencyPhaseBreakdown["preProvider"] | null;
     runtimeAttemptId?: string | null;
@@ -328,20 +314,19 @@ export async function runHostedAssistantAutomation(
   let activeProviderMilestoneTraceContext: HostedAssistantMilestoneTraceContext | null = null;
   const recordedProviderMilestones = new Set<string>();
   const freshAssistantInputIdCount = new Set(freshAssistantInputIds).size;
-  const selectedInputIds = options?.initialInputSelection
-    ?? await selectHostedAssistantInputIds(
-      freshAssistantInputIdCount > 0
-        ? {
-            freshAssistantInputIds,
-            mode: "foreground",
-            vaultRoot,
-          }
-        : {
-            limit: DEFAULT_ASSISTANT_AUTOMATION_SCAN_LIMIT,
-            mode: "background",
-            vaultRoot,
-          },
-    );
+  const selectedInputIds = await selectHostedAssistantInputIds(
+    freshAssistantInputIdCount > 0
+      ? {
+          freshAssistantInputIds,
+          mode: "foreground",
+          vaultRoot,
+        }
+      : {
+          limit: DEFAULT_ASSISTANT_AUTOMATION_SCAN_LIMIT,
+          mode: "background",
+          vaultRoot,
+        },
+  );
   const baseInputSource = createHostedAssistantInputSource({
     initialPendingInputIds: selectedInputIds.pendingInputIds,
     pendingInputRefreshMode:

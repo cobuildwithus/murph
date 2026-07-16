@@ -30,6 +30,7 @@ import {
   resolveAssistantHostedReturnContactKind,
 } from './return-contact-kind.js'
 import { createAssistantNewsletterOutboxTool } from './newsletter-outbox.js'
+import type { AssistantConversationScope } from './conversation-policy.js'
 
 export interface AssistantHostedDeliveryContext {
   conversationId: string | null
@@ -42,6 +43,12 @@ export interface AssistantHostedToolRequestKeyScope {
   conversationId: string | null
   inboundMailboxItemIds: readonly string[]
   recipientKey: string | null
+}
+
+export interface AssistantHostedUserActionScope
+  extends AssistantHostedToolRequestKeyScope {
+  conversationScope: AssistantConversationScope
+  originSessionId: string
 }
 
 export type AssistantHostedVaultFileSendResult =
@@ -70,6 +77,7 @@ export interface AssistantHostedToolContext {
   readonly personalizationTool?: AssistantHostedPersonalizationTool | null
   readonly planUsageTool?: AssistantHostedPlanUsageTool | null
   readonly phoneCalls?: AssistantPhoneCallPort | null
+  beforeToolExecution?(): Promise<void>
   currentHostedDeliveryContext(): AssistantHostedDeliveryContext | null
   currentAssistantTarget?(): {
     model: string | null
@@ -82,7 +90,8 @@ export interface AssistantHostedToolContext {
   recordNewsletterSendResult?(
     result: Extract<HostedRuntimeNewsletterToolResponse, { action: 'send' }>,
   ): void
-  currentPhoneCallToolRequestKeyScope?(): AssistantHostedToolRequestKeyScope | null
+  currentUserActionScope?(): AssistantHostedUserActionScope | null
+  currentProductFeedbackAcceptedInputIds?(): readonly string[]
   readonly computerToolsAvailable: boolean
   readonly vaultFileSendAvailable: boolean
   sendVaultFile(ref: string): Promise<AssistantHostedVaultFileSendResult>
@@ -103,9 +112,12 @@ export function createAssistantHostedToolContext(input: {
   personalizationTool?: AssistantHostedPersonalizationTool | null
   planUsageTool?: AssistantHostedPlanUsageTool | null
   computerToolsAvailable?: boolean
+  beforeToolExecution?: () => Promise<void>
   getAssistantPreferenceInputId?: () => string | null
+  getConversationScope?: () => AssistantConversationScope
   getDeliveryContext?: () => AssistantHostedToolDeliveryContext
   getUserActionAcceptedInputIds?: () => readonly string[]
+  getProductFeedbackAcceptedInputIds?: () => readonly string[]
   messageInput: AssistantMessageInput
   newsletterOutbox?: {
     turnId: string
@@ -155,6 +167,9 @@ export function createAssistantHostedToolContext(input: {
     personalizationTool: input.personalizationTool ?? null,
     planUsageTool: input.planUsageTool ?? null,
     phoneCalls: input.phoneCalls ?? null,
+    ...(input.beforeToolExecution
+      ? { beforeToolExecution: input.beforeToolExecution }
+      : {}),
     computerToolsAvailable: input.computerToolsAvailable === true,
     currentAssistantPreferenceInputId: () =>
       input.getAssistantPreferenceInputId?.() ?? null,
@@ -198,12 +213,21 @@ export function createAssistantHostedToolContext(input: {
     },
     closeNewsletterCapability: newsletterOutboxTool?.closeCapability,
     recordNewsletterSendResult: input.recordNewsletterSendResult,
-    currentPhoneCallToolRequestKeyScope: () => {
+    currentUserActionScope: () => {
       const acceptedInputIds = input.getUserActionAcceptedInputIds?.() ?? []
-      return acceptedInputIds.length > 0
-        ? buildRequestKeyScope(acceptedInputIds)
-        : null
+      if (acceptedInputIds.length === 0) {
+        return null
+      }
+      const deliveryContext = readDeliveryContext()
+      return {
+        ...buildRequestKeyScope(acceptedInputIds),
+        conversationScope:
+          input.getConversationScope?.() ?? 'unverified-external',
+        originSessionId: deliveryContext.session.sessionId,
+      }
     },
+    currentProductFeedbackAcceptedInputIds: () =>
+      input.getProductFeedbackAcceptedInputIds?.() ?? [],
     sendVaultFile: input.sendVaultFile ?? (async () => {
       throw new Error('Vault-file sending is unavailable for this turn.')
     }),

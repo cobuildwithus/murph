@@ -209,7 +209,10 @@ type AssistantAutoReplyDecision =
 type AssistantActiveTurnInputSource = Pick<
   AssistantInputSource,
   'checkpointAcceptedInput' | 'listNewConversationInputs' | 'refresh'
-> & Partial<Pick<AssistantInputSource, 'listInputCandidates'>>
+> & Partial<Pick<
+  AssistantInputSource,
+  'listInputCandidates' | 'listInputCandidatesByIds'
+>>
 
 type AssistantAutoReplySendResult = Awaited<
   ReturnType<typeof sendAssistantMessage>
@@ -1506,8 +1509,8 @@ function createHostedAutoReplyDeliveryIdempotency(input: {
     }
   }
 
-  const deliveryKeyMailboxItemIds: string[] = []
   const hostedMailboxItemIds: string[] = []
+  let effectAnchorMailboxItemId: string | null = null
   for (const candidate of candidates) {
     if (candidate.event.sourceRef.kind !== 'hosted-mailbox') {
       return {
@@ -1516,7 +1519,7 @@ function createHostedAutoReplyDeliveryIdempotency(input: {
         hostedDeliveryIdempotency: null,
       }
     }
-    deliveryKeyMailboxItemIds.push(candidate.event.sourceRef.itemId)
+    effectAnchorMailboxItemId = candidate.event.sourceRef.itemId
     const hostedMailboxItemId = normalizeNullableString(
       candidate.event.hostedMailboxItemId ?? null,
     )
@@ -1524,7 +1527,13 @@ function createHostedAutoReplyDeliveryIdempotency(input: {
       hostedMailboxItemIds.push(hostedMailboxItemId)
     }
   }
-
+  if (!effectAnchorMailboxItemId) {
+    return {
+      answeredMailboxItemIds: [],
+      deliveryIdempotencyKey: null,
+      hostedDeliveryIdempotency: null,
+    }
+  }
   const channel = normalizeNullableString(input.context.firstItem.summary.source)
   if (!channel) {
     return {
@@ -1564,7 +1573,9 @@ function createHostedAutoReplyDeliveryIdempotency(input: {
       assistantTurnOrdinal,
       channel,
       conversationId,
-      inboundMailboxItemIds: deliveryKeyMailboxItemIds,
+      // The full mailbox set records what this reply answered. The newest item
+      // is the stable effect anchor when replay batches messages differently.
+      inboundMailboxItemIds: [effectAnchorMailboxItemId],
       recipientKey,
       userId,
     }),
@@ -1812,13 +1823,19 @@ function createAssistantAutoReplyActiveTurnInputHooks(input: {
   const pendingAcceptances: AssistantAutoReplyActiveTurnPendingAcceptance[] = []
 
   const admit: AssistantActiveTurnInputAdmissionHook = async (admissionInput) => {
-    const refreshResult = await input.inputSource.refresh({
-      signal: admissionInput.signal,
-    })
-    if (refreshResult.reason === 'source_unavailable') {
-      throw new AssistantActiveTurnInputUnavailableError(
-        'same-conversation input source is temporarily unavailable during the active turn; will retry later.',
-      )
+    const availableInputIds = admissionInput.availableInputIds ?? []
+    if (
+      availableInputIds.length === 0 ||
+      !input.inputSource.listInputCandidatesByIds
+    ) {
+      const refreshResult = await input.inputSource.refresh({
+        signal: admissionInput.signal,
+      })
+      if (refreshResult.reason === 'source_unavailable') {
+        throw new AssistantActiveTurnInputUnavailableError(
+          'same-conversation input source is temporarily unavailable during the active turn; will retry later.',
+        )
+      }
     }
 
     const knownProjectionCaptureIds = [
@@ -1832,9 +1849,11 @@ function createAssistantAutoReplyActiveTurnInputHooks(input: {
       ...(admissionInput.knownInputIds ?? []),
     ]
     const lateInputs = await listAutoReplyActiveTurnInputs({
-      afterCursor: context.lastInputCursor,
+      afterCursor:
+        pendingAcceptances.at(-1)?.lastInputCursor ?? context.lastInputCursor,
       conversation,
       context,
+      inputIds: availableInputIds,
       inputSource: input.inputSource,
       knownProjectionCaptureIds,
       knownInputIds,
@@ -2082,6 +2101,7 @@ async function listAutoReplyActiveTurnInputs(input: {
   afterCursor: AssistantInputCandidate['event']['cursor']
   context: AssistantAutoReplyGroupContext
   conversation: AssistantInputConversationRef
+  inputIds: readonly string[]
   inputSource: AssistantActiveTurnInputSource
   knownProjectionCaptureIds: readonly string[]
   knownInputIds: readonly string[]
@@ -2089,6 +2109,30 @@ async function listAutoReplyActiveTurnInputs(input: {
 }): Promise<AssistantInputCandidateBatch> {
   const expectedChannel = normalizeNullableString(input.context.firstItem.summary.source)
   const deliveryTarget = readAutoReplyDeliveryTarget(input.context)
+  if (
+    input.inputIds.length > 0 &&
+    input.inputSource.listInputCandidatesByIds &&
+    expectedChannel &&
+    deliveryTarget
+  ) {
+    const exact = await input.inputSource.listInputCandidatesByIds({
+      afterCursor: input.afterCursor,
+      inputIds: input.inputIds,
+      knownInputIds: input.knownInputIds,
+      limit: 100,
+      signal: input.signal,
+      sourceId: expectedChannel,
+    })
+    return selectAutoReplyRouteInput({
+      afterCursor: input.afterCursor,
+      candidates: exact.inputs,
+      conversation: input.conversation,
+      deliveryTarget,
+      expectedChannel,
+      knownProjectionCaptureIds: input.knownProjectionCaptureIds,
+    })
+  }
+
   const strict = await input.inputSource.listNewConversationInputs({
     afterCursor: input.afterCursor,
     conversation: input.conversation,

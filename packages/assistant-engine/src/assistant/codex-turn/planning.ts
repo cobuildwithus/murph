@@ -12,9 +12,6 @@ import {
 } from '@murphai/contracts'
 import { loadVault, readPreferencesDocument } from '@murphai/core'
 import {
-  listGeneratedAssistantProtocolIndexEntries,
-} from '@murphai/health-commons/runtime'
-import {
   resolveCodexAssistantTargetCapabilities,
 } from '../codex-runtime.js'
 import {
@@ -29,6 +26,7 @@ import {
   type AssistantHostedDeviceConnectProvider,
 } from '../execution-context.js'
 import {
+  readCodexThreadCompatibilityFingerprint,
   readCodexThreadRouteFingerprint,
   type CodexThreadIdentity,
 } from '../codex-thread-route.js'
@@ -69,6 +67,7 @@ import type {
   AssistantHostedToolContext,
 } from '../hosted-tool-context.js'
 import {
+  buildAssistantAskContinuationSystemPromptWithCacheMetadata,
   buildAssistantNotificationDecisionSystemPromptWithCacheMetadata,
   buildAssistantSystemPromptWithCacheMetadata,
   resolveAssistantMurphProductBaseUrl,
@@ -104,6 +103,7 @@ export interface AssistantRouteTurnPlan {
   cliEnv: NodeJS.ProcessEnv
   developerInstructions: string | null
   dynamicTools: readonly MurphDynamicTool[]
+  environments?: readonly Readonly<Record<string, unknown>>[]
   conversationHistoryMessages?: readonly AssistantProviderConversationMessage[]
   diagnosticsPolicy: AssistantDiagnosticsPolicy
   onboardingGuidanceInjected: boolean
@@ -136,7 +136,6 @@ export interface AssistantRoutePlanningDiagnostics {
   routeResumeBindingElapsedMs: number | null
   routeTargetCapabilitiesElapsedMs: number | null
   shouldPrepareBootstrapContext: boolean
-  supportedExperimentProtocolsElapsedMs: number | null
 }
 
 type AssistantRoutePlanningSpanKey =
@@ -145,7 +144,6 @@ type AssistantRoutePlanningSpanKey =
   | 'primarySystemPromptElapsedMs'
   | 'routeResumeBindingElapsedMs'
   | 'routeTargetCapabilitiesElapsedMs'
-  | 'supportedExperimentProtocolsElapsedMs'
 
 type AssistantRoutePlanningSpanMetrics = Partial<
   Record<AssistantRoutePlanningSpanKey, number>
@@ -156,7 +154,6 @@ export type AssistantRoutePlanningStage =
   | 'cli_bootstrap'
   | 'primary_instructions'
   | 'resume_binding'
-  | 'supported_experiment_protocols'
   | 'target_capabilities'
 
 const ASSISTANT_ROUTE_PLANNING_SPAN_STAGES: readonly {
@@ -183,10 +180,6 @@ const ASSISTANT_ROUTE_PLANNING_SPAN_STAGES: readonly {
     key: 'routeTargetCapabilitiesElapsedMs',
     stage: 'target_capabilities',
   },
-  {
-    key: 'supportedExperimentProtocolsElapsedMs',
-    stage: 'supported_experiment_protocols',
-  },
 ]
 const ASSISTANT_ROUTE_COMMITTED_TRANSCRIPT_HISTORY_LIMIT = 24
 const ASSISTANT_ROUTE_COMMITTED_TRANSCRIPT_HISTORY_MESSAGE_BYTES = 4_000
@@ -211,11 +204,13 @@ export interface AssistantPromptTimeContext {
 export type AssistantCodexTurnPromptProfile =
   | 'conversation'
   | 'notification-decision'
+  | 'assistant-ask-continuation'
 
 export type AssistantCodexTurnToolProfile =
   | 'provider-turn'
   | 'notification-turn'
   | 'maintenance-turn'
+  | 'output-only-turn'
 
 export type AssistantCodexThreadScope =
   | 'session-thread'
@@ -444,8 +439,9 @@ export async function resolveAssistantRouteTurnPlan(input: {
     )
   }
   const privateInteractiveAudience = conversationScope === 'direct'
+  const outputOnlyTurn = input.profile.toolProfile === 'output-only-turn'
   const shouldUseCommittedTranscriptHistory =
-    input.profile.threadScope === 'session-thread'
+    input.profile.threadScope === 'session-thread' || outputOnlyTurn
   const resolveCommittedTranscriptHistoryMessages = async () =>
     shouldUseCommittedTranscriptHistory
       ? await resolveAssistantCommittedTranscriptHistoryMessages({
@@ -474,17 +470,19 @@ export async function resolveAssistantRouteTurnPlan(input: {
   // domains) and hosted dynamic context prompts must not reach their system
   // prompt, or the prompt itself would hand the model forbidden sources.
   const maintenanceTurn = input.profile.toolProfile === 'maintenance-turn'
-  const hostedDynamicContextPrompts = maintenanceTurn
+  const hostedDynamicContextPrompts = maintenanceTurn || outputOnlyTurn
     ? []
     : input.executionContext?.hosted?.dynamicContextPrompts ?? []
   const promptCapabilityAvailability = resolveAssistantPromptCapabilityAvailability({
     executionContext: input.executionContext,
   })
-  const voiceMemoDeliveryChannel = resolveAssistantVoiceMemoDeliveryChannel({
-    messageInput: input.input,
-    session: input.session,
-    sharedPlan: input.sharedPlan,
-  })
+  const voiceMemoDeliveryChannel = outputOnlyTurn
+    ? null
+    : resolveAssistantVoiceMemoDeliveryChannel({
+        messageInput: input.input,
+        session: input.session,
+        sharedPlan: input.sharedPlan,
+      })
   const shouldPrepareConversationThreadInstructions =
     input.profile.promptProfile === 'conversation' && privateInteractiveAudience
   let cliBootstrapElapsedMs: number | null = null
@@ -501,14 +499,6 @@ export async function resolveAssistantRouteTurnPlan(input: {
   const bootstrapAssistantCliContract = scopeAssistantCliSurfaceContractForAssistant({
     contract: unscopedAssistantCliContract,
   })
-  const assistantSupportedExperimentProtocols =
-    input.profile.promptProfile === 'conversation'
-      ? measureRoutePlanningSync(
-          routePlanningSpans,
-          'supportedExperimentProtocolsElapsedMs',
-          () => resolveAssistantSupportedExperimentProtocols(),
-        )
-      : []
   let assistantContextSnapshotElapsedMs: number | null = null
   const assistantContextSnapshotPrompt = maintenanceTurn || !privateInteractiveAudience
     ? null
@@ -529,8 +519,16 @@ export async function resolveAssistantRouteTurnPlan(input: {
   const buildRouteSystemPromptResult = (options: {
     assistantCliContract: string | null
     injectOnboardingGuidance: boolean
-  }) =>
-    input.profile.promptProfile === 'notification-decision'
+  }) => {
+    if (input.profile.promptProfile === 'assistant-ask-continuation') {
+      return buildAssistantAskContinuationSystemPromptWithCacheMetadata({
+        assistantContextSnapshotPrompt,
+      }, {
+        toolSchemaHash,
+      })
+    }
+
+    return input.profile.promptProfile === 'notification-decision'
       ? buildAssistantNotificationDecisionSystemPromptWithCacheMetadata({
             assistantContextSnapshotPrompt,
             assistantDynamicContextPrompts: hostedDynamicContextPrompts,
@@ -560,7 +558,6 @@ export async function resolveAssistantRouteTurnPlan(input: {
               promptCapabilityAvailability.assistantHostedDeviceConnectProviders,
             assistantKnowledgeToolsAvailable:
               promptCapabilityAvailability.assistantKnowledgeToolsAvailable,
-            assistantSupportedExperimentProtocols,
             assistantToolNameAliases,
             assistantPersonality:
               assistantStyleSettingsAvailable
@@ -583,6 +580,7 @@ export async function resolveAssistantRouteTurnPlan(input: {
           }, {
             toolSchemaHash,
           })
+  }
   const buildDeveloperInstructions = (
     promptResult: ReturnType<typeof buildAssistantSystemPromptWithCacheMetadata>,
   ) =>
@@ -622,7 +620,7 @@ export async function resolveAssistantRouteTurnPlan(input: {
   // Maintenance turns run without a delivery target and must not expose any
   // external-capable or delivery-facing tool surface, so the gate is the
   // resolved tool set itself rather than prompt text.
-  const dynamicTools = maintenanceTurn
+  const dynamicTools = maintenanceTurn || outputOnlyTurn
     ? []
     : resolveMurphDynamicTools({
         assistantStyleSettingsAvailable,
@@ -669,16 +667,28 @@ export async function resolveAssistantRouteTurnPlan(input: {
   const assistantContractFingerprint = buildAssistantCodexContractFingerprint({
     developerInstructions: threadStartDeveloperInstructions,
     dynamicTools,
-    routeFingerprint,
+    routeFingerprint: readCodexThreadCompatibilityFingerprint(input.route),
   })
+  const storedAssistantContractFingerprint = normalizeNullableString(
+    resumeBinding?.assistantContractFingerprint,
+  )
+  const assistantContractMatches =
+    storedAssistantContractFingerprint === assistantContractFingerprint ||
+    (
+      resumeBinding !== null &&
+      storedAssistantContractFingerprint === buildAssistantCodexContractFingerprint({
+        developerInstructions: threadStartDeveloperInstructions,
+        dynamicTools,
+        routeFingerprint: resumeBinding.routeFingerprint,
+      })
+    )
   const nativeResumeEnabled =
     input.profile.threadScope === 'session-thread'
   const candidateResumeCodexThreadId =
     nativeResumeEnabled &&
     routeProviderCapabilities.supportsNativeResume &&
     resumeBinding !== null &&
-    normalizeNullableString(resumeBinding.assistantContractFingerprint) ===
-      assistantContractFingerprint
+    assistantContractMatches
       ? resolveAssistantEffectiveCodexResumeThreadId({
           resumeCodexThreadId: resolveAssistantCodexResumeThreadId({
             resumeState: resumeBinding,
@@ -732,6 +742,7 @@ export async function resolveAssistantRouteTurnPlan(input: {
     },
     developerInstructions: normalizeNullableString(developerInstructions),
     dynamicTools,
+    environments: outputOnlyTurn ? [] : undefined,
     conversationHistoryMessages:
       conversationHistoryMessages.length > 0
         ? conversationHistoryMessages
@@ -760,13 +771,12 @@ export async function resolveAssistantRouteTurnPlan(input: {
       routeTargetCapabilitiesElapsedMs:
         routePlanningSpans.routeTargetCapabilitiesElapsedMs ?? null,
       shouldPrepareBootstrapContext,
-      supportedExperimentProtocolsElapsedMs:
-        routePlanningSpans.supportedExperimentProtocolsElapsedMs ?? null,
     },
     resume,
     sessionContext:
       shouldPrepareBootstrapContext &&
-      !maintenanceTurn
+      !maintenanceTurn &&
+      !outputOnlyTurn
       ? {
           binding: input.session.binding,
         }
@@ -1015,14 +1025,6 @@ function resolveRoutePlanningSlowestSpan(
 
 function elapsedSince(startedAt: number): number {
   return Math.max(0, Date.now() - startedAt)
-}
-
-function resolveAssistantSupportedExperimentProtocols() {
-  try {
-    return listGeneratedAssistantProtocolIndexEntries()
-  } catch {
-    return []
-  }
 }
 
 export async function resolveAssistantPromptTimeContext(

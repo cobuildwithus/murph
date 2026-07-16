@@ -174,10 +174,133 @@ export async function openHostedUserSecureBoxString(input: {
       expectedScope: input.scope,
       rootKey,
     });
-    return new TextDecoder().decode(plaintext);
+    try {
+      return new TextDecoder().decode(plaintext);
+    } finally {
+      plaintext.fill(0);
+    }
   } finally {
     rootKey.fill(0);
   }
+}
+
+export async function openHostedUserSecureBoxStrings(input: {
+  entries: ReadonlyArray<{
+    aad: Omit<HostedSecureBoxAadFields, "domain" | "lane" | "scope" | "tenant" | "userId">;
+    scope: string;
+    userId: string;
+    value: string | null | undefined;
+  }>;
+  lane: HostedCryptoLane;
+  prisma?: HostedSecureBoxPrismaClient;
+  signal?: AbortSignal;
+}): Promise<Array<string | null>> {
+  if (!WEB_SEAL_LANES.has(input.lane)) {
+    throw new Error(`Web is not allowed to decrypt hosted ${input.lane} values.`);
+  }
+  const testCodec = getHostedSecureBoxStringTestCodecForTests();
+  if (testCodec) {
+    return input.entries.map((entry) =>
+      entry.value === null
+      || entry.value === undefined
+      || entry.value.trim().length === 0
+        ? null
+        : testCodec.decrypt({
+            aad: entry.aad,
+            lane: input.lane,
+            scope: entry.scope,
+            userId: entry.userId,
+            value: entry.value,
+          })
+    );
+  }
+
+  const domain = getHostedCryptoDomainForLane(input.lane);
+  const parsedEntries = input.entries.map((entry) => {
+    if (entry.value === null || entry.value === undefined || entry.value.trim().length === 0) {
+      return null;
+    }
+    const envelope = parseSerializedHostedSecureBoxEnvelope(entry.value);
+    if (envelope.domain !== domain) {
+      throw new Error(`Hosted secure-box envelope domain mismatch for lane ${input.lane}.`);
+    }
+    return { entry, envelope };
+  });
+  const { unwrapHostedDomainRootsForWebByRootKeyIds } = await import("./domain-root-store");
+  const roots = await unwrapHostedDomainRootsForWebByRootKeyIds({
+    prisma: input.prisma,
+    references: parsedEntries.flatMap((parsed) =>
+      parsed
+        ? [{
+            domain,
+            rootKeyId: parsed.envelope.rootKeyId,
+            userId: parsed.entry.userId,
+          }]
+        : []
+    ),
+    signal: input.signal,
+  });
+  const rootsByKey = new Map(
+    roots.map((root) => [
+      createHostedSecureBoxRootReferenceKey(root),
+      root,
+    ] as const),
+  );
+
+  try {
+    return await Promise.all(parsedEntries.map(async (parsed) => {
+      if (!parsed) {
+        return null;
+      }
+      const root = rootsByKey.get(createHostedSecureBoxRootReferenceKey({
+        domain,
+        rootKeyId: parsed.envelope.rootKeyId,
+        userId: parsed.entry.userId,
+      }));
+      if (!root) {
+        throw new Error("Hosted secure-box root was not returned by the batch unwrap.");
+      }
+      const rootKey = Uint8Array.from(root.rootKey);
+      try {
+        const aad = buildHostedSecureBoxAad({
+          ...parsed.entry.aad,
+          domain,
+          lane: input.lane,
+          scope: parsed.entry.scope,
+          tenant: "murph-hosted",
+          userId: parsed.entry.userId,
+        });
+        const plaintext = await openHostedSecureBox({
+          aad,
+          envelope: parsed.envelope,
+          expectedDomain: domain,
+          expectedLane: input.lane,
+          expectedRootKeyId: parsed.envelope.rootKeyId,
+          expectedScope: parsed.entry.scope,
+          rootKey,
+        });
+        try {
+          return new TextDecoder().decode(plaintext);
+        } finally {
+          plaintext.fill(0);
+        }
+      } finally {
+        rootKey.fill(0);
+      }
+    }));
+  } finally {
+    for (const root of roots) {
+      root.rootKey.fill(0);
+    }
+  }
+}
+
+function createHostedSecureBoxRootReferenceKey(input: {
+  domain: string;
+  rootKeyId: string;
+  userId: string;
+}): string {
+  return `${input.userId}|${input.domain}|${input.rootKeyId}`;
 }
 
 function getHostedSecureBoxStringTestCodecForTests(): HostedSecureBoxStringTestCodec | null {

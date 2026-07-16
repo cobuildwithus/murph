@@ -10,6 +10,7 @@ import {
 
 import {
   decryptHostedWebNullableString,
+  decryptHostedWebNullableStrings,
   encryptHostedWebNullableString,
   type HostedWebEncryptionPrismaClient,
 } from "../hosted-web/encryption";
@@ -167,6 +168,20 @@ export async function readHostedMemberIdentityPhoneNumber(
     memberId: identity.memberId,
     prisma,
     value: identity.phoneNumberEncrypted,
+  });
+}
+
+export async function readHostedMemberIdentityPhoneNumbers(
+  identities: readonly Pick<HostedMemberIdentity, "memberId" | "phoneNumberEncrypted">[],
+  prisma?: HostedWebEncryptionPrismaClient,
+): Promise<Array<string | null>> {
+  return decryptHostedWebNullableStrings({
+    field: HOSTED_MEMBER_IDENTITY_PHONE_NUMBER_FIELD,
+    prisma,
+    values: identities.map((identity) => ({
+      memberId: identity.memberId,
+      value: identity.phoneNumberEncrypted,
+    })),
   });
 }
 

@@ -19,6 +19,7 @@ type LinqWebhookSubscriptionResult = {
 };
 
 const HOSTED_LOCAL_LINQ_WEBHOOK_EVENTS = [
+  "message.sent",
   "message.received",
   "participant.added",
   "participant.removed",

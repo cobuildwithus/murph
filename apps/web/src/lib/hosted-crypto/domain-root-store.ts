@@ -35,6 +35,7 @@ type HostedCryptoTransactionRoot = {
 
 const ALL_DOMAINS: readonly HostedCryptoDomain[] = ["control", "device", "ingress", "runtime"];
 const WEB_UNWRAP_DOMAINS = new Set<HostedCryptoDomain>(["control", "device", "ingress"]);
+const WEB_BATCH_UNWRAP_CONCURRENCY = 4;
 const HOSTED_RUNTIME_CRYPTO_CONTEXT_CACHE_MAX_AGE_MS = 5 * 60 * 1000;
 const HOSTED_RUNTIME_CRYPTO_CONTEXT_POLICY_VERSION = "hosted-runtime-crypto-context-policy:v1";
 
@@ -72,6 +73,15 @@ export interface UnwrappedHostedDomainRoot {
   envelope: HostedDomainRootKeyEnvelopeV1;
   rootKey: Uint8Array;
 }
+
+export interface HostedDomainRootReference {
+  domain: HostedCryptoDomain;
+  rootKeyId: string;
+  userId: string;
+}
+
+export interface UnwrappedHostedDomainRootReference
+  extends HostedDomainRootReference, UnwrappedHostedDomainRoot {}
 
 async function unwrapWithScopedCache(
   cacheKey: string,
@@ -223,6 +233,83 @@ export async function unwrapHostedDomainRootForWebByRootKeyId(input: {
       return { envelope, rootKey };
     },
   );
+}
+
+export async function unwrapHostedDomainRootsForWebByRootKeyIds(input: {
+  prisma?: HostedCryptoClient;
+  references: readonly HostedDomainRootReference[];
+  signal?: AbortSignal;
+}): Promise<UnwrappedHostedDomainRootReference[]> {
+  const referencesByKey = new Map<string, HostedDomainRootReference>();
+  for (const reference of input.references) {
+    if (!WEB_UNWRAP_DOMAINS.has(reference.domain)) {
+      throw new Error(`Web is not allowed to unwrap hosted ${reference.domain} domain roots.`);
+    }
+    referencesByKey.set(createHostedDomainRootReferenceKey(reference), reference);
+  }
+  const references = [...referencesByKey.values()];
+  if (references.length === 0) {
+    return [];
+  }
+
+  const prisma = input.prisma ?? getPrisma();
+  const rows = await readDecryptableHostedDomainRootEnvelopeRows({
+    prisma,
+    references,
+  });
+  const rowsByKey = new Map(
+    rows.map((row) => [createHostedDomainRootReferenceKey(row), row] as const),
+  );
+  const verified = [] as Array<{
+    envelope: HostedDomainRootKeyEnvelopeV1;
+    reference: HostedDomainRootReference;
+  }>;
+  for (const reference of references) {
+    const row = rowsByKey.get(createHostedDomainRootReferenceKey(reference));
+    if (!row) {
+      throw new HostedDomainRootEnvelopeUnavailableError({
+        domain: reference.domain,
+      });
+    }
+    verified.push({
+      envelope: await parseAssertAndVerifyEnvelope(row, reference),
+      reference,
+    });
+  }
+
+  const unwrapped: UnwrappedHostedDomainRootReference[] = [];
+  try {
+    for (let offset = 0; offset < verified.length; offset += WEB_BATCH_UNWRAP_CONCURRENCY) {
+      const chunk = verified.slice(offset, offset + WEB_BATCH_UNWRAP_CONCURRENCY);
+      const results = await Promise.allSettled(chunk.map(async ({ envelope, reference }) => ({
+        ...reference,
+        envelope,
+        rootKey: await unwrapEnvelopeForWeb({
+          envelope,
+          signal: input.signal,
+        }),
+      })));
+      let hasError = false;
+      let firstError: unknown;
+      for (const result of results) {
+        if (result.status === "fulfilled") {
+          unwrapped.push(result.value);
+        } else if (!hasError) {
+          hasError = true;
+          firstError = result.reason;
+        }
+      }
+      if (hasError) {
+        throw firstError;
+      }
+    }
+    return unwrapped;
+  } catch (error) {
+    for (const root of unwrapped) {
+      root.rootKey.fill(0);
+    }
+    throw error;
+  }
 }
 
 export async function readHostedRuntimeCryptoContextForWorker(input: {
@@ -481,6 +568,7 @@ async function unwrapEnvelopeForWeb(input: {
     signal: input.signal,
   });
   if (decrypted.plaintext.byteLength !== 32) {
+    decrypted.plaintext.fill(0);
     throw new Error(`Hosted ${input.envelope.domain} root GCP KMS decrypt returned invalid root length.`);
   }
   return decrypted.plaintext;
@@ -579,6 +667,33 @@ async function readDecryptableHostedDomainRootEnvelopeRow(input: {
   return rows[0] ?? null;
 }
 
+async function readDecryptableHostedDomainRootEnvelopeRows(input: {
+  prisma: HostedCryptoClient;
+  references: readonly HostedDomainRootReference[];
+}): Promise<HostedUserCryptoEnvelopeRow[]> {
+  return input.prisma.hostedUserCryptoEnvelope.findMany({
+    where: {
+      OR: input.references.map((reference) => ({
+        domain: reference.domain,
+        rootKeyId: reference.rootKeyId,
+        userId: reference.userId,
+      })),
+      status: {
+        in: ["active", "decrypt_only"],
+      },
+    },
+    select: {
+      domain: true,
+      id: true,
+      rootKeyId: true,
+      signedEnvelopeJson: true,
+      status: true,
+      updatedAt: true,
+      userId: true,
+    },
+  });
+}
+
 export async function readActiveHostedDomainRootEnvelopeOrThrow(input: {
   domain: HostedCryptoDomain;
   prisma?: HostedCryptoClient;
@@ -646,6 +761,12 @@ async function parseAssertAndVerifyEnvelope(
   }
   await verifyEnvelopeAuthoritySignature(envelope);
   return envelope;
+}
+
+function createHostedDomainRootReferenceKey(
+  reference: Pick<HostedDomainRootReference, "domain" | "rootKeyId" | "userId">,
+): string {
+  return `${reference.userId}|${reference.domain}|${reference.rootKeyId}`;
 }
 
 async function recordHostedCryptoAuditTx(input: {

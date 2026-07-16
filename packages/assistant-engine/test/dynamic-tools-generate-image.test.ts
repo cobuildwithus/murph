@@ -5,8 +5,32 @@ import {
   MURPH_GROUP_TOOL,
   readMurphDynamicToolRequest,
 } from '../src/assistant-codex/dynamic-tools.js'
+import {
+  MURPH_GENERATE_SONG_TOOL,
+} from '../src/assistant-codex/dynamic-tools/generate-song.js'
+import {
+  MURPH_GENERATE_VOICE_MEMO_TOOL,
+} from '../src/assistant-codex/dynamic-tools/generate-voice-memo.js'
 
 describe('murph.generate_image dynamic tool schema', () => {
+  it('requires a request, known preference, or owning flow for richer media', () => {
+    expect(MURPH_GENERATE_IMAGE_TOOL.description).toContain(
+      'a known preference supports visual help',
+    )
+    expect(MURPH_GENERATE_IMAGE_TOOL.description).toContain(
+      'explicitly marks images welcome and privacy-safe',
+    )
+    expect(MURPH_GENERATE_VOICE_MEMO_TOOL.description).toContain(
+      'a known preference supports voice',
+    )
+    expect(MURPH_GENERATE_VOICE_MEMO_TOOL.description).toContain(
+      'explicitly asks for a voice memo and marks voice welcome and privacy-safe',
+    )
+    expect(MURPH_GENERATE_SONG_TOOL.description).toContain(
+      'a known preference or the automation instructions mark music welcome and privacy-safe',
+    )
+  })
+
   it('keeps the minimal legacy prompt-only call valid', () => {
     const request = readMurphDynamicToolRequest({
       method: 'item/tool/call',

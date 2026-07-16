@@ -70,6 +70,7 @@ import { assertHostedLinqRouteEgressAuthority } from "../hosted-routing/thread-r
 import { resolveHostedPublicBaseUrl } from "../hosted-web/public-url";
 import { getPrisma } from "../prisma";
 import { buildHostedGroupJoinUrl } from "./group-links";
+import { requestHostedGroupAssistantAsk } from "./group-assistant-ask";
 import {
   enqueueHostedGroupNewsletterEmailNeededNudgeIfNeededBestEffort,
 } from "./group-newsletter";
@@ -77,6 +78,7 @@ import {
   createHostedGroupJoinLinkForOwnedThreadContainerTx,
   leaveHostedGroupMemberTx,
   readHostedGroupByRuntimeMemberId,
+  readHostedGroupIdByRuntimeMemberId,
   readHostedGroupMembershipsForMember,
   recordHostedGroupJoinOfferTx,
   revokeHostedGroupMemberEmailShareTx,
@@ -95,9 +97,11 @@ const HOSTED_GROUP_JOIN_OFFER_SHARE_SCOPE_PLACEHOLDER = "{{share_scope}}";
 
 export type HostedRuntimeGroupToolAccessClassification =
   | "owner_active"
+  | "personal_active"
   | "participant_aware";
 
 export const HOSTED_RUNTIME_GROUP_TOOL_ACCESS_CLASSIFICATION = {
+  ask: "personal_active",
   create_join_link: "owner_active",
   leave_membership: "participant_aware",
   list_memberships: "participant_aware",
@@ -117,7 +121,25 @@ export const HOSTED_RUNTIME_GROUP_TOOL_ACCESS_CLASSIFICATION = {
 export async function handleHostedRuntimeGroupTool(input: {
   memberId: string;
   request: HostedRuntimeGroupToolRequest;
+  scheduleMailboxWake?: (input: {
+    expectedUserId: string;
+    mailboxItemId: string;
+  }) => void;
 }): Promise<HostedRuntimeGroupToolResponse> {
+  if (input.request.action === "ask") {
+    const admission = await requestHostedGroupAssistantAsk({
+      groupLabel: input.request.groupLabel,
+      memberId: input.memberId,
+      originAssistantInputId: input.request.originAssistantInputId,
+      originSessionId: input.request.originSessionId,
+      question: input.request.question,
+    });
+    if (admission.mailboxWake) {
+      input.scheduleMailboxWake?.(admission.mailboxWake);
+    }
+    return { action: "ask", result: admission.result };
+  }
+
   if (input.request.action === "list_memberships") {
     return handleHostedRuntimeGroupListMemberships({ memberId: input.memberId });
   }
@@ -307,10 +329,10 @@ async function handleHostedRuntimeGroupUpdateDisplayName(input: {
     return unavailable("display_name_unavailable");
   }
 
-  const existing = await readHostedGroupByRuntimeMemberId({
+  const existingGroupId = await readHostedGroupIdByRuntimeMemberId({
     runtimeMemberId: input.memberId,
   });
-  if (!existing) {
+  if (!existingGroupId) {
     return unavailable("group_not_found");
   }
 

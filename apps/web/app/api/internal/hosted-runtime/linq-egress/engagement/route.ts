@@ -34,21 +34,18 @@ export const POST = withJsonError(async (request: Request) => {
   const answeredMailboxItemIds = parseAnsweredMailboxItemIds(
     body.answeredMailboxItemIds,
   );
-  const currentInbound = parseHostedLinqLegacyCurrentInboundProof(body.currentInbound);
+  const authorityCheckOnly = parseRequiredAuthorityCheckOnly(
+    body.authorityCheckOnly,
+  );
   const directRecipientPhoneNumber = readOptionalBodyString(
     body.directRecipientPhoneNumber,
   );
   const fromPhoneNumber = readOptionalBodyString(body.fromPhoneNumber);
   const idempotencyKey = readOptionalBodyString(body.idempotencyKey);
-  const authorityCheckOnly = body.authorityCheckOnly === true;
   const intentId = readOptionalBodyString(body.intentId);
   const replyToMessageId = readOptionalBodyString(body.replyToMessageId);
   const target = readOptionalBodyString(body.target);
   const targetKind = readOptionalBodyString(body.targetKind);
-  const providerDispatchIdempotencyKey = idempotencyKey
-    ?? (currentInbound
-      ? `legacy-current-inbound:${currentInbound.dedupeKey}`
-      : null);
   const prisma = getPrisma();
 
   const assertion = await prisma.$transaction(async (tx) => {
@@ -68,7 +65,6 @@ export const POST = withJsonError(async (request: Request) => {
     const asserted = await assertHostedLinqRecentInboundEngagementForRuntime({
       answeredMailboxItemIds,
       authorityCheckOnly,
-      currentInbound,
       directRecipientPhoneNumber,
       fromPhoneNumber,
       homeRouteFallbackAllowed: body.homeRouteFallbackAllowed === true,
@@ -92,7 +88,7 @@ export const POST = withJsonError(async (request: Request) => {
       });
       await assertHostedLinqRecentInboundEngagementForRuntime({
         answeredMailboxItemIds,
-        currentInbound,
+        authorityCheckOnly,
         directRecipientPhoneNumber,
         fromPhoneNumber,
         homeRouteFallbackAllowed: false,
@@ -107,7 +103,7 @@ export const POST = withJsonError(async (request: Request) => {
 
     let providerDispatchClaimed: boolean | null = null;
     if (!authorityCheckOnly) {
-      if (!providerDispatchIdempotencyKey) {
+      if (!idempotencyKey) {
         throw hostedOnboardingError({
           code: "HOSTED_LINQ_PROVIDER_DISPATCH_IDEMPOTENCY_REQUIRED",
           httpStatus: 400,
@@ -116,11 +112,11 @@ export const POST = withJsonError(async (request: Request) => {
         });
       }
       const claim = await recordHostedLinqRuntimeProviderDispatchFenceTx({
-        idempotencyKey: providerDispatchIdempotencyKey,
+        idempotencyKey,
         linqChatId: providerTargetKind === "participant" ? null : providerTarget,
         phoneNumber: fromPhoneNumber,
         prisma: tx,
-        sourceRef: intentId ?? providerDispatchIdempotencyKey,
+        sourceRef: intentId ?? idempotencyKey,
         targetKind: providerTargetKind,
       });
       if (!claim.claimed) {
@@ -154,6 +150,18 @@ export const POST = withJsonError(async (request: Request) => {
 function readOptionalBodyString(value: unknown): string | null {
   const normalized = typeof value === "string" ? value.trim() : "";
   return normalized.length > 0 ? normalized : null;
+}
+
+function parseRequiredAuthorityCheckOnly(value: unknown): boolean {
+  if (typeof value === "boolean") {
+    return value;
+  }
+  throw hostedOnboardingError({
+    code: "HOSTED_LINQ_EGRESS_AUTHORITY_CHECK_ONLY_INVALID",
+    httpStatus: 400,
+    message: "Hosted Linq egress authorityCheckOnly must be a boolean.",
+    retryable: false,
+  });
 }
 
 function parseAnsweredMailboxItemIds(value: unknown): string[] {
@@ -197,56 +205,4 @@ function parseAnsweredMailboxItemIds(value: unknown): string[] {
   }
 
   return itemIds;
-}
-
-function parseHostedLinqLegacyCurrentInboundProof(value: unknown): {
-  dedupeKey: string;
-  eventId: string;
-  mailboxItemId: string;
-  occurredAt: string;
-  replyToMessageId: string;
-  target: string;
-} | null {
-  if (value === undefined || value === null) {
-    return null;
-  }
-  if (!value || typeof value !== "object" || Array.isArray(value)) {
-    throwHostedLinqCurrentInboundInvalid();
-  }
-
-  const record = value as Record<string, unknown>;
-  const dedupeKey = readOptionalBodyString(record.dedupeKey);
-  const eventId = readOptionalBodyString(record.eventId);
-  const mailboxItemId = readOptionalBodyString(record.mailboxItemId);
-  const occurredAt = readOptionalBodyString(record.occurredAt);
-  const replyToMessageId = readOptionalBodyString(record.replyToMessageId);
-  const target = readOptionalBodyString(record.target);
-  if (
-    !dedupeKey
-    || !eventId
-    || !mailboxItemId
-    || !occurredAt
-    || !replyToMessageId
-    || !target
-  ) {
-    throwHostedLinqCurrentInboundInvalid();
-  }
-
-  return {
-    dedupeKey,
-    eventId,
-    mailboxItemId,
-    occurredAt,
-    replyToMessageId,
-    target,
-  };
-}
-
-function throwHostedLinqCurrentInboundInvalid(): never {
-  throw hostedOnboardingError({
-    code: "HOSTED_LINQ_EGRESS_CURRENT_INBOUND_INVALID",
-    httpStatus: 400,
-    message: "Hosted Linq egress current inbound proof is invalid.",
-    retryable: false,
-  });
 }
