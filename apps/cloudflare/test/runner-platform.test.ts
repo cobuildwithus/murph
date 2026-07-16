@@ -4121,6 +4121,7 @@ describe("buildHostedExecutionRuntimePlatform", () => {
     expect(platform.issueExportPort).toBeDefined();
     expect(platform.usageRecordPort).toBeDefined();
     expect(platform.productFeedbackPort).toBeDefined();
+    expect(platform.assistantAskPort).toBeDefined();
     expect(platform.assistantPersonalizationToolPort).toBeDefined();
     expect(platform.groupToolPort).toBeDefined();
     expect(platform.vaultSharePort).toBeDefined();

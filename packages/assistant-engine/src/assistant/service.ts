@@ -10,6 +10,7 @@ import {
   updateAssistantSessionOptionsLocal,
 } from './local-service.js'
 import { sendAssistantNotificationLocal as sendAssistantNotificationTurnLocal } from './notification-turn.js'
+import { sendAssistantAskContinuationLocal as sendAssistantAskContinuationTurnLocal } from './ask-continuation.js'
 
 export { buildResolveAssistantSessionInput } from './session-resolution.js'
 export {
@@ -18,6 +19,12 @@ export {
   updateAssistantSessionOptionsLocal,
 } from './local-service.js'
 export { sendAssistantNotificationLocal } from './notification-turn.js'
+export {
+  ASSISTANT_ASK_CONTINUATION_TURN_PROFILE,
+  buildAssistantAskContinuationMessageInput,
+  readAssistantAskOriginSession,
+  sendAssistantAskContinuationLocal,
+} from './ask-continuation.js'
 export type {
   AssistantChatInput,
   AssistantBeforeProviderAcceptedInputsHook,
@@ -45,6 +52,10 @@ export type {
   AssistantNotificationResult,
   AssistantNotificationTurnPolicy,
 } from './notification-turn.js'
+export type {
+  AssistantAskContinuationInput,
+  AssistantAskContinuationResult,
+} from './ask-continuation.js'
 
 export type AssistantSessionOptionsPatch = Pick<
   AssistantSession['providerOptions'],
@@ -68,6 +79,12 @@ export async function sendAssistantNotification(
   input: import('./notification-turn.js').AssistantNotificationInput,
 ) {
   return sendAssistantNotificationTurnLocal(input)
+}
+
+export async function sendAssistantAskContinuation(
+  input: import('./ask-continuation.js').AssistantAskContinuationInput,
+) {
+  return sendAssistantAskContinuationTurnLocal(input)
 }
 
 export async function updateAssistantSessionOptions(input: {

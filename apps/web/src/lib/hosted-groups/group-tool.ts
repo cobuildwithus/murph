@@ -10,11 +10,22 @@ import {
   type HostedRuntimeGroupCreateJoinLinkRequest,
   type HostedRuntimeGroupPostJoinOfferRequest,
   type HostedRuntimeGroupToolAction,
+  type HostedRuntimeGroupToolCurrentSenderContext,
+  type HostedRuntimeGroupOwnAssistantStyleSnapshot,
   type HostedRuntimeGroupToolLinqThreadContext,
   type HostedRuntimeGroupToolRequest,
   type HostedRuntimeGroupToolResponse,
   type HostedRuntimeGroupToolSelfOptOutContext,
 } from "@murphai/hosted-execution/runtime-control";
+import {
+  assistantPersonalityCausalWritesEnabled,
+  assistantPersonalitySettingIds,
+  defaultAssistantPersonalityScores,
+  defaultAssistantTonePreference,
+  defaultAssistantVoiceOptionId,
+  type AssistantTonePreference,
+  type AssistantVoiceOptionId,
+} from "@murphai/contracts";
 import type {
   HostedVaultShareProjectionKind,
   HostedVaultShareProjectionScope,
@@ -28,6 +39,11 @@ import {
 import {
   assertHostedMemberNotSuspended,
 } from "../hosted-onboarding/entitlement";
+import {
+  readHostedMemberAssistantPreferences,
+  upsertHostedMemberAssistantPreferencesTx,
+  type HostedMemberAssistantPersonalitySnapshot,
+} from "../hosted-onboarding/member-preferences";
 import { readActiveHostedMemberAccess } from "../hosted-onboarding/member-access";
 import { lookupHostedMemberIdentityByPhoneNumber } from "../hosted-onboarding/hosted-member-identity-store";
 import { lookupHostedMemberByVerifiedEmailAddress } from "../hosted-onboarding/hosted-member-store";
@@ -70,6 +86,7 @@ import { assertHostedLinqRouteEgressAuthority } from "../hosted-routing/thread-r
 import { resolveHostedPublicBaseUrl } from "../hosted-web/public-url";
 import { getPrisma } from "../prisma";
 import { buildHostedGroupJoinUrl } from "./group-links";
+import { requestHostedGroupAssistantAsk } from "./group-assistant-ask";
 import {
   enqueueHostedGroupNewsletterEmailNeededNudgeIfNeededBestEffort,
 } from "./group-newsletter";
@@ -77,6 +94,7 @@ import {
   createHostedGroupJoinLinkForOwnedThreadContainerTx,
   leaveHostedGroupMemberTx,
   readHostedGroupByRuntimeMemberId,
+  readHostedGroupIdByRuntimeMemberId,
   readHostedGroupMembershipsForMember,
   recordHostedGroupJoinOfferTx,
   revokeHostedGroupMemberEmailShareTx,
@@ -95,9 +113,11 @@ const HOSTED_GROUP_JOIN_OFFER_SHARE_SCOPE_PLACEHOLDER = "{{share_scope}}";
 
 export type HostedRuntimeGroupToolAccessClassification =
   | "owner_active"
+  | "personal_active"
   | "participant_aware";
 
 export const HOSTED_RUNTIME_GROUP_TOOL_ACCESS_CLASSIFICATION = {
+  ask: "personal_active",
   create_join_link: "owner_active",
   leave_membership: "participant_aware",
   list_memberships: "participant_aware",
@@ -105,10 +125,12 @@ export const HOSTED_RUNTIME_GROUP_TOOL_ACCESS_CLASSIFICATION = {
   preflight_set_chat_avatar: "owner_active",
   read_chat_participants: "participant_aware",
   read_current: "participant_aware",
+  read_own_assistant_style: "participant_aware",
   revoke_own_email_share: "participant_aware",
   set_chat_avatar: "owner_active",
   share_contact_card: "owner_active",
   update_display_name: "owner_active",
+  update_own_assistant_style: "participant_aware",
 } as const satisfies Record<
   HostedRuntimeGroupToolAction,
   HostedRuntimeGroupToolAccessClassification
@@ -117,7 +139,25 @@ export const HOSTED_RUNTIME_GROUP_TOOL_ACCESS_CLASSIFICATION = {
 export async function handleHostedRuntimeGroupTool(input: {
   memberId: string;
   request: HostedRuntimeGroupToolRequest;
+  scheduleMailboxWake?: (input: {
+    expectedUserId: string;
+    mailboxItemId: string;
+  }) => void;
 }): Promise<HostedRuntimeGroupToolResponse> {
+  if (input.request.action === "ask") {
+    const admission = await requestHostedGroupAssistantAsk({
+      groupLabel: input.request.groupLabel,
+      memberId: input.memberId,
+      originAssistantInputId: input.request.originAssistantInputId,
+      originSessionId: input.request.originSessionId,
+      question: input.request.question,
+    });
+    if (admission.mailboxWake) {
+      input.scheduleMailboxWake?.(admission.mailboxWake);
+    }
+    return { action: "ask", result: admission.result };
+  }
+
   if (input.request.action === "list_memberships") {
     return handleHostedRuntimeGroupListMemberships({ memberId: input.memberId });
   }
@@ -185,6 +225,21 @@ export async function handleHostedRuntimeGroupTool(input: {
     return handleHostedRuntimeGroupRevokeOwnEmailShare({
       memberId: input.memberId,
       selfOptOut: input.request.selfOptOut ?? null,
+    });
+  }
+
+  if (input.request.action === "read_own_assistant_style") {
+    return handleHostedRuntimeGroupReadOwnAssistantStyle({
+      currentSender: input.request.currentSender ?? null,
+      memberId: input.memberId,
+    });
+  }
+
+  if (input.request.action === "update_own_assistant_style") {
+    return handleHostedRuntimeGroupUpdateOwnAssistantStyle({
+      currentSender: input.request.currentSender ?? null,
+      memberId: input.memberId,
+      style: input.request.style,
     });
   }
 
@@ -307,10 +362,10 @@ async function handleHostedRuntimeGroupUpdateDisplayName(input: {
     return unavailable("display_name_unavailable");
   }
 
-  const existing = await readHostedGroupByRuntimeMemberId({
+  const existingGroupId = await readHostedGroupIdByRuntimeMemberId({
     runtimeMemberId: input.memberId,
   });
-  if (!existing) {
+  if (!existingGroupId) {
     return unavailable("group_not_found");
   }
 
@@ -438,6 +493,169 @@ async function handleHostedRuntimeGroupRevokeOwnEmailShare(input: {
       ? { revokedCount: 1, status: "revoked" }
       : { revokedCount: 0, status: "already_removed" },
   };
+}
+
+async function handleHostedRuntimeGroupReadOwnAssistantStyle(input: {
+  currentSender: HostedRuntimeGroupToolCurrentSenderContext | null;
+  memberId: string;
+}): Promise<HostedRuntimeGroupToolResponse> {
+  const unavailable = (unavailableReason: string): HostedRuntimeGroupToolResponse => ({
+    action: "read_own_assistant_style",
+    result: { status: "unavailable", style: null, unavailableReason },
+  });
+  const access = await resolveHostedRuntimeGroupOwnAssistantStyleAccess(input);
+  if (access.status !== "ok") {
+    return unavailable(access.unavailableReason);
+  }
+  const preferences = await readHostedMemberAssistantPreferences({
+    memberId: access.memberId,
+    prisma: getPrisma(),
+  });
+  return {
+    action: "read_own_assistant_style",
+    result: { status: "ok", style: buildHostedRuntimeGroupOwnAssistantStyleSnapshot(preferences) },
+  };
+}
+
+async function handleHostedRuntimeGroupUpdateOwnAssistantStyle(input: {
+  currentSender: HostedRuntimeGroupToolCurrentSenderContext | null;
+  memberId: string;
+  style: Extract<
+    HostedRuntimeGroupToolRequest,
+    { action: "update_own_assistant_style" }
+  >["style"];
+}): Promise<HostedRuntimeGroupToolResponse> {
+  const unavailable = (unavailableReason: string): HostedRuntimeGroupToolResponse => ({
+    action: "update_own_assistant_style",
+    result: { status: "unavailable", style: null, unavailableReason },
+  });
+  if (
+    input.style.personality !== undefined
+    && !assistantPersonalityCausalWritesEnabled(process.env)
+  ) {
+    return unavailable("personality_rollout_pending");
+  }
+  const access = await resolveHostedRuntimeGroupOwnAssistantStyleAccess(input);
+  if (access.status !== "ok") {
+    return unavailable(access.unavailableReason);
+  }
+  const prisma = getPrisma();
+  const result = await prisma.$transaction(async (tx) => (
+    upsertHostedMemberAssistantPreferencesTx({
+      causalOrigin: "turn",
+      mailboxPayloadMode: assistantPersonalityCausalWritesEnabled(process.env)
+        ? "sparse_delta"
+        : "legacy_snapshot",
+      memberId: access.memberId,
+      occurredAt: new Date().toISOString(),
+      preferences: input.style,
+      prisma: tx,
+    })
+  ), HOSTED_ONBOARDING_TRANSACTION_OPTIONS);
+
+  if (result.dispatch) {
+    await signalAssistantStyleRuntimeBestEffort({
+      mailboxItemId: result.dispatch.mailboxItemId,
+      memberId: access.memberId,
+    });
+  }
+  return {
+    action: "update_own_assistant_style",
+    result: {
+      status: result.updated ? "saved" : "unchanged",
+      style: buildHostedRuntimeGroupOwnAssistantStyleSnapshot({
+        personality: result.assistantPersonality,
+        tone: result.assistantTone,
+        voice: result.assistantVoice,
+      }),
+    },
+  };
+}
+
+type HostedRuntimeGroupOwnAssistantStyleAccess =
+  | { status: "ok"; memberId: string }
+  | { status: "unavailable"; unavailableReason: string };
+
+async function resolveHostedRuntimeGroupOwnAssistantStyleAccess(input: {
+  currentSender: HostedRuntimeGroupToolCurrentSenderContext | null;
+  memberId: string;
+}): Promise<HostedRuntimeGroupOwnAssistantStyleAccess> {
+  if (!await hasHostedRuntimeActiveAccess(input.memberId)) {
+    return { status: "unavailable", unavailableReason: "runtime_inactive" };
+  }
+  if (!input.currentSender || input.currentSender.source !== "linq") {
+    return { status: "unavailable", unavailableReason: "sender_unavailable" };
+  }
+  const prisma = getPrisma();
+  let participant: Awaited<ReturnType<typeof lookupParticipantMemberByHandle>> | null;
+  try {
+    participant = await lookupParticipantMemberByHandle({
+      handle: input.currentSender.senderHandle,
+      prisma,
+    });
+  } catch {
+    return { status: "unavailable", unavailableReason: "member_lookup_unavailable" };
+  }
+  if (!participant) {
+    return { status: "unavailable", unavailableReason: "member_unresolved" };
+  }
+  try {
+    assertHostedMemberNotSuspended(participant.core);
+  } catch {
+    return { status: "unavailable", unavailableReason: "member_unavailable" };
+  }
+  if (!await readActiveHostedMemberAccess({ memberId: participant.core.id, prisma })) {
+    return { status: "unavailable", unavailableReason: "member_unavailable" };
+  }
+  return { status: "ok", memberId: participant.core.id };
+}
+
+function buildHostedRuntimeGroupOwnAssistantStyleSnapshot(input: {
+  personality: HostedMemberAssistantPersonalitySnapshot;
+  tone: AssistantTonePreference | null;
+  voice: AssistantVoiceOptionId | null;
+}): HostedRuntimeGroupOwnAssistantStyleSnapshot {
+  return {
+    personality: {
+      detail: buildHostedRuntimeGroupAssistantPersonalitySetting(
+        "detail",
+        input.personality.detail,
+      ),
+      humor: buildHostedRuntimeGroupAssistantPersonalitySetting(
+        "humor",
+        input.personality.humor,
+      ),
+      push: buildHostedRuntimeGroupAssistantPersonalitySetting(
+        "push",
+        input.personality.push,
+      ),
+    },
+    tone: input.tone ?? defaultAssistantTonePreference,
+    voice: input.voice ?? defaultAssistantVoiceOptionId,
+  };
+}
+
+function buildHostedRuntimeGroupAssistantPersonalitySetting(
+  settingId: (typeof assistantPersonalitySettingIds)[number],
+  value: number | null,
+) {
+  return value === null
+    ? { source: "default" as const, value: defaultAssistantPersonalityScores[settingId] }
+    : { source: "custom" as const, value };
+}
+
+async function signalAssistantStyleRuntimeBestEffort(input: {
+  mailboxItemId: string;
+  memberId: string;
+}): Promise<void> {
+  try {
+    await signalHostedMailboxAppendRuntime({
+      expectedUserId: input.memberId,
+      mailboxItemId: input.mailboxItemId,
+    });
+  } catch {
+    // The durable mailbox item will be observed on the next member runtime wake.
+  }
 }
 
 async function lookupSelfOptOutParticipantMember(input: {

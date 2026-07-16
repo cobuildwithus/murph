@@ -31,6 +31,7 @@ import {
   resolveAssistantHostedReturnContactKind,
 } from './return-contact-kind.js'
 import { createAssistantNewsletterOutboxTool } from './newsletter-outbox.js'
+import type { AssistantConversationScope } from './conversation-policy.js'
 
 export interface AssistantHostedDeliveryContext {
   conversationId: string | null
@@ -43,6 +44,12 @@ export interface AssistantHostedToolRequestKeyScope {
   conversationId: string | null
   inboundMailboxItemIds: readonly string[]
   recipientKey: string | null
+}
+
+export interface AssistantHostedUserActionScope
+  extends AssistantHostedToolRequestKeyScope {
+  conversationScope: AssistantConversationScope
+  originSessionId: string
 }
 
 export type AssistantHostedVaultFileSendResult =
@@ -86,7 +93,7 @@ export interface AssistantHostedToolContext {
   recordNewsletterSendResult?(
     result: Extract<HostedRuntimeNewsletterToolResponse, { action: 'send' }>,
   ): void
-  currentPhoneCallToolRequestKeyScope?(): AssistantHostedToolRequestKeyScope | null
+  currentUserActionScope?(): AssistantHostedUserActionScope | null
   currentProductFeedbackAcceptedInputIds?(): readonly string[]
   readonly computerToolsAvailable: boolean
   readonly vaultFileSendAvailable: boolean
@@ -111,6 +118,7 @@ export function createAssistantHostedToolContext(input: {
   computerToolsAvailable?: boolean
   beforeToolExecution?: () => Promise<void>
   getAssistantInputId?: () => string | null
+  getConversationScope?: () => AssistantConversationScope
   getDeliveryContext?: () => AssistantHostedToolDeliveryContext
   getUserActionAcceptedInputIds?: () => readonly string[]
   getProductFeedbackAcceptedInputIds?: () => readonly string[]
@@ -230,11 +238,18 @@ export function createAssistantHostedToolContext(input: {
     },
     closeNewsletterCapability: newsletterOutboxTool?.closeCapability,
     recordNewsletterSendResult: input.recordNewsletterSendResult,
-    currentPhoneCallToolRequestKeyScope: () => {
+    currentUserActionScope: () => {
       const acceptedInputIds = input.getUserActionAcceptedInputIds?.() ?? []
-      return acceptedInputIds.length > 0
-        ? buildRequestKeyScope(acceptedInputIds)
-        : null
+      if (acceptedInputIds.length === 0) {
+        return null
+      }
+      const deliveryContext = readDeliveryContext()
+      return {
+        ...buildRequestKeyScope(acceptedInputIds),
+        conversationScope:
+          input.getConversationScope?.() ?? 'unverified-external',
+        originSessionId: deliveryContext.session.sessionId,
+      }
     },
     currentProductFeedbackAcceptedInputIds: () =>
       input.getProductFeedbackAcceptedInputIds?.() ?? [],

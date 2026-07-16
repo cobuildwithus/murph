@@ -1,6 +1,6 @@
 {
   "name": "@murphai/hosted-execution",
-  "version": "1.2.1",
+  "version": "1.2.3",
   "private": false,
   "type": "module",
   "license": "Apache-2.0",
@@ -29,6 +29,10 @@
     "./assistant-identifiers": {
       "types": "./dist/assistant-identifiers.d.ts",
       "default": "./dist/assistant-identifiers.js"
+    },
+    "./assistant-permissions": {
+      "types": "./dist/assistant-permissions.d.ts",
+      "default": "./dist/assistant-permissions.js"
     },
     "./assistant-model": {
       "types": "./dist/assistant-model.d.ts",

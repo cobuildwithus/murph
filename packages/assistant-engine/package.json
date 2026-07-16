@@ -19,6 +19,10 @@
       "types": "./dist/assistant-automation.d.ts",
       "default": "./dist/assistant-automation.js"
     },
+    "./assistant-ask": {
+      "types": "./dist/assistant-ask.d.ts",
+      "default": "./dist/assistant-ask.js"
+    },
     "./assistant-codex": {
       "types": "./dist/assistant-codex.d.ts",
       "default": "./dist/assistant-codex.js"

@@ -306,7 +306,11 @@ test('sendAssistantMessageLocal gives hosted manual phone-call turns a real acce
     'assistant-local-service-phone-call-input-',
   )
   tempRoots.push(parentRoot)
+  const plan = createSharedPlan()
+  plan.conversationPolicy.audience.effectiveThreadIsDirect = true
+  plan.conversationPolicy.audience.threadIsDirect = true
   const { mocks, sendAssistantMessageLocal, session } = await loadLocalServiceModule({
+    plan,
     realAcceptedInputPersistence: true,
   })
   let phoneCallScope: unknown = null
@@ -322,7 +326,7 @@ test('sendAssistantMessageLocal gives hosted manual phone-call turns a real acce
       }),
     ])
     phoneCallScope =
-      providerInput.hostedToolContext?.currentPhoneCallToolRequestKeyScope?.() ?? null
+      providerInput.hostedToolContext?.currentUserActionScope?.() ?? null
     return {
       kind: 'succeeded',
       providerTurn: {
@@ -363,6 +367,7 @@ test('sendAssistantMessageLocal gives hosted manual phone-call turns a real acce
 
   expect(phoneCallScope).toMatchObject({
     acceptedInputIds: ['manual-phone-call:turn-1'],
+    conversationScope: 'direct',
   })
 })
 

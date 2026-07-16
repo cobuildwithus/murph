@@ -24,7 +24,7 @@ import {
   generateHostedGroupMemberId,
   generateHostedGroupJoinCode,
 } from "../hosted-onboarding/shared";
-import { readHostedMemberIdentity } from "../hosted-onboarding/hosted-member-identity-store";
+import { readHostedMemberPhoneNumberSnapshots } from "../hosted-onboarding/hosted-member-identity-store";
 import { toHostedOnboardingLogIdSuffix } from "../hosted-onboarding/logging";
 import { normalizeNullableString } from "../primitives";
 import { getPrisma } from "../prisma";
@@ -298,11 +298,23 @@ export async function readHostedGroupByRuntimeMemberId(input: {
   runtimeMemberId: string;
 }): Promise<HostedGroupSummary | null> {
   const prisma = input.prisma ?? getPrisma();
+  const groupId = await readHostedGroupIdByRuntimeMemberId({
+    prisma,
+    runtimeMemberId: input.runtimeMemberId,
+  });
+  return groupId ? readHostedGroupSummaryById(prisma, groupId) : null;
+}
+
+export async function readHostedGroupIdByRuntimeMemberId(input: {
+  prisma?: HostedGroupsReadClient;
+  runtimeMemberId: string;
+}): Promise<string | null> {
+  const prisma = input.prisma ?? getPrisma();
   const group = await prisma.hostedGroup.findUnique({
     where: { runtimeMemberId: input.runtimeMemberId },
     select: { id: true },
   });
-  return group ? readHostedGroupSummaryById(prisma, group.id) : null;
+  return group?.id ?? null;
 }
 
 export async function readHostedGroupMembershipsForMember(input: {
@@ -1363,37 +1375,42 @@ async function readHostedGroupMemberRoster(
     return [];
   }
 
+  const memberIds = input.members.map((member) => member.memberId);
+  const [grants, phoneNumberSnapshots] = await Promise.all([
+    input.runtimeMemberId
+      ? prisma.hostedVaultShare.findMany({
+        where: {
+          destinationMemberId: input.runtimeMemberId,
+          grantorMemberId: { in: memberIds },
+          status: "granted",
+        },
+        select: {
+          grantorMemberId: true,
+          projectionKind: true,
+          projectionScopeJson: true,
+          projectionScopeKey: true,
+        },
+      })
+      : Promise.resolve([]),
+    readHostedMemberPhoneNumberSnapshots({ memberIds, prisma }),
+  ]);
   const grantsByMemberId = new Map<string, HostedVaultShareProjectionScope[]>();
-  if (input.runtimeMemberId) {
-    const grants = await prisma.hostedVaultShare.findMany({
-      where: {
-        destinationMemberId: input.runtimeMemberId,
-        grantorMemberId: { in: input.members.map((member) => member.memberId) },
-        status: "granted",
-      },
-      select: {
-        grantorMemberId: true,
-        projectionKind: true,
-        projectionScopeJson: true,
-        projectionScopeKey: true,
-      },
-    });
-    for (const grant of grants) {
-      const scope = parseHostedGroupVaultShareRowProjectionScope(grant);
-      if (!scope) {
-        continue;
-      }
-      const scopes = grantsByMemberId.get(grant.grantorMemberId) ?? [];
-      scopes.push(scope);
-      grantsByMemberId.set(grant.grantorMemberId, scopes);
+  for (const grant of grants) {
+    const scope = parseHostedGroupVaultShareRowProjectionScope(grant);
+    if (!scope) {
+      continue;
     }
+    const scopes = grantsByMemberId.get(grant.grantorMemberId) ?? [];
+    scopes.push(scope);
+    grantsByMemberId.set(grant.grantorMemberId, scopes);
   }
+  const phoneNumberByMemberId = new Map(
+    phoneNumberSnapshots.map((snapshot) =>
+      [snapshot.memberId, snapshot.phoneNumber] as const
+    ),
+  );
 
-  return await Promise.all(input.members.map(async (member) => {
-    const identity = await readHostedMemberIdentity({
-      memberId: member.memberId,
-      prisma,
-    });
+  return input.members.map((member) => {
     const grantedVaultShareProjectionScopes =
       grantsByMemberId.get(member.memberId) ?? [];
     return {
@@ -1401,11 +1418,11 @@ async function readHostedGroupMemberRoster(
         ...new Set(grantedVaultShareProjectionScopes.map((scope) => scope.projectionKind)),
       ],
       grantedVaultShareProjectionScopes,
-      handle: identity?.phoneNumber ?? null,
+      handle: phoneNumberByMemberId.get(member.memberId) ?? null,
       memberId: member.memberId,
       role: member.role,
     };
-  }));
+  });
 }
 
 async function assertHostedGroupRuntimeDestinationTx(

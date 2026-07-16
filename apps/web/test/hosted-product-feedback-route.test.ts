@@ -2,12 +2,12 @@ import { beforeAll, beforeEach, describe, expect, it, vi } from "vitest";
 
 const mocks = vi.hoisted(() => ({
   recordHostedProductFeedback: vi.fn(),
-  requireHostedCloudflareCallbackRequest: vi.fn(),
+  requireHostedCloudflareCallbackJsonRequest: vi.fn(),
 }));
 
 vi.mock("@/src/lib/hosted-execution/cloudflare-callback-auth", () => ({
-  requireHostedCloudflareCallbackRequest:
-    mocks.requireHostedCloudflareCallbackRequest,
+  requireHostedCloudflareCallbackJsonRequest:
+    mocks.requireHostedCloudflareCallbackJsonRequest,
 }));
 
 vi.mock("@/src/lib/hosted-execution/product-feedback", () => ({
@@ -29,7 +29,12 @@ describe("hosted product feedback record route", () => {
 
   beforeEach(() => {
     vi.clearAllMocks();
-    mocks.requireHostedCloudflareCallbackRequest.mockResolvedValue("member_123");
+    mocks.requireHostedCloudflareCallbackJsonRequest.mockImplementation(
+      async (request: Request) => ({
+        payload: await request.json(),
+        userId: "member_123",
+      }),
+    );
     mocks.recordHostedProductFeedback.mockResolvedValue({
       feedbackId: "product_feedback_123",
       recorded: true,
@@ -55,9 +60,9 @@ describe("hosted product feedback record route", () => {
     );
 
     expect(response.status).toBe(200);
-    expect(mocks.requireHostedCloudflareCallbackRequest).toHaveBeenCalledWith(
+    expect(mocks.requireHostedCloudflareCallbackJsonRequest).toHaveBeenCalledWith(
       expect.any(Request),
-      expect.objectContaining({ payloadText: expect.any(String) }),
+      { maxBodyBytes: 16_384 },
     );
     expect(mocks.recordHostedProductFeedback).toHaveBeenCalledWith({
       feedback,

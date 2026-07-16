@@ -166,6 +166,10 @@ import {
   resolveHostedSystemMailboxNextWakeCandidate,
 } from "./hosted-runtime/system-mailbox.ts";
 import {
+  createHostedDetachedAssistantAskController,
+  type HostedDetachedAssistantAskController,
+} from "./hosted-runtime/detached-assistant-ask.ts";
+import {
   readHostedSystemMailboxHandledThroughSeq,
 } from "./hosted-runtime/system-mailbox-state.ts";
 import {
@@ -882,9 +886,14 @@ export async function runHostedWorkspaceRuntimeJobInProcess(
   };
   const guardedMailboxPort = guardedRuntime.platform.mailboxPort ?? mailboxPort;
   const guardedWorkspacePort = guardedRuntime.platform.workspacePort ?? workspacePort;
+  let detachedAssistantAskController: HostedDetachedAssistantAskController | null = null;
+  let pauseDetachedAssistantAskBeforeWorkspaceBoundary = async (): Promise<void> => undefined;
+  let resumeDetachedAssistantAskAfterWorkspaceBoundary = (): void => undefined;
+  let closeDetachedAssistantAskBeforeWorkspaceRelease = async (): Promise<void> => undefined;
   let latestCheckpointSnapshotCleanForWarmReuse = false;
   const createAbortGuardedCheckpointSnapshot: HostedWorkspaceSnapshotCheckpointBuilder =
     async (snapshotInput, context) => {
+      await pauseDetachedAssistantAskBeforeWorkspaceBoundary();
       assertRuntimeNotAborted();
       const snapshot = await options.createCheckpointSnapshot(snapshotInput, context);
       assertRuntimeNotAborted();
@@ -1002,6 +1011,17 @@ export async function runHostedWorkspaceRuntimeJobInProcess(
       runtimeAttemptId: input.request.attemptId,
       signal: context?.signal ?? runtimeAbortController.signal,
     });
+    const kickDetachedAssistantAskAfterImport = (
+      item: HostedMailboxResolvedImportItem,
+      outcome: HostedMailboxItemImportOutcome,
+    ): void => {
+      if (
+        item.route.action === "run-assistant-ask"
+        && (outcome.status === "imported" || outcome.status === "skipped")
+      ) {
+        detachedAssistantAskController?.kick();
+      }
+    };
     const importMailboxItem: HostedWorkspaceRunnerInput["importItem"] = (item, context) =>
       mailboxBudget.importItem(
         item,
@@ -1009,6 +1029,7 @@ export async function runHostedWorkspaceRuntimeJobInProcess(
           assertRuntimeNotAborted();
           const outcome = await options.importItem(importItem, context);
           assertRuntimeNotAborted();
+          kickDetachedAssistantAskAfterImport(importItem, outcome);
           return outcome;
         },
         createMailboxImportContext(context),
@@ -1020,6 +1041,7 @@ export async function runHostedWorkspaceRuntimeJobInProcess(
       assertRuntimeNotAborted();
       const outcome = await options.importItem(item, createMailboxImportContext(context));
       assertRuntimeNotAborted();
+      kickDetachedAssistantAskAfterImport(item, outcome);
       return outcome;
     };
     emitPhaseLog({
@@ -1127,44 +1149,66 @@ export async function runHostedWorkspaceRuntimeJobInProcess(
         throw new TypeError("Hosted runtime redacted status checkpoint requires workspace port support.");
       }
 
-      assertRuntimeNotAborted();
-      const workspace = checkpointInput.workspace;
-      const checkpointNextWakeAt = Object.hasOwn(checkpointInput, "nextWakeAt")
-        ? checkpointInput.nextWakeAt ?? null
-        : workspace?.nextWakeAt ?? null;
-      const checkpointNextWakeReason = Object.hasOwn(checkpointInput, "nextWakeReason")
-        ? checkpointInput.nextWakeReason ?? null
-        : workspace?.nextWakeReason ?? null;
-      const canonicalRuntimeCommit = checkpointInput.reason === "canonical_runtime_commit";
-      const checkpointWorkspacePort = canonicalRuntimeCommit
-        ? workspacePort
-        : foregroundWorkspacePort;
-      const redactedStatus = await withHostedSystemMailboxHandledThroughStatus({
-        redactedStatus: checkpointInput.redactedStatus,
-        vaultRoot: restored.vaultRoot,
-      });
-      const checkpointOperation = checkpointWorkspacePort.checkpoint({
-        attemptId: checkpointMetadata.attemptId,
-        expectedWorkspaceVersion: checkpointMetadata.expectedWorkspaceVersion,
-        inboxMediaRetentionWakeAt: workspace?.inboxMediaRetentionWakeAt ?? null,
-        leaseGeneration: checkpointMetadata.leaseGeneration,
-        nextWakeAt: checkpointNextWakeAt,
-        nextWakeReason: checkpointNextWakeReason,
-        reason: checkpointInput.reason,
-        redactedStatus,
-        snapshotRef: workspace?.snapshotRef ?? null,
-      });
-      const checkpoint = canonicalRuntimeCommit
-        ? await checkpointOperation
-        : await raceHostedRuntimeCancellation(
-            checkpointOperation,
-            runtimeAbortController.signal,
-          );
-      if (!canonicalRuntimeCommit) {
+      await pauseDetachedAssistantAskBeforeWorkspaceBoundary();
+      try {
         assertRuntimeNotAborted();
+        const workspace = checkpointInput.workspace;
+        const requestedCheckpointNextWakeAt = Object.hasOwn(checkpointInput, "nextWakeAt")
+          ? checkpointInput.nextWakeAt ?? null
+          : workspace?.nextWakeAt ?? null;
+        const requestedCheckpointNextWakeReason = Object.hasOwn(
+          checkpointInput,
+          "nextWakeReason",
+        )
+          ? checkpointInput.nextWakeReason ?? null
+          : workspace?.nextWakeReason ?? null;
+        const systemMailboxWake = await resolveHostedSystemMailboxNextWakeCandidate({
+          allowedRouteActions: ["run-assistant-ask"],
+          vaultRoot: restored.vaultRoot,
+        });
+        const checkpointWake = selectEarliestHostedRuntimeWake([
+          {
+            at: requestedCheckpointNextWakeAt,
+            reason: requestedCheckpointNextWakeReason,
+          },
+          {
+            at: systemMailboxWake.at,
+            reason: systemMailboxWake.reason,
+          },
+        ]);
+        const canonicalRuntimeCommit = checkpointInput.reason === "canonical_runtime_commit";
+        const checkpointWorkspacePort = canonicalRuntimeCommit
+          ? workspacePort
+          : foregroundWorkspacePort;
+        const redactedStatus = await withHostedSystemMailboxHandledThroughStatus({
+          redactedStatus: checkpointInput.redactedStatus,
+          vaultRoot: restored.vaultRoot,
+        });
+        const checkpointOperation = checkpointWorkspacePort.checkpoint({
+          attemptId: checkpointMetadata.attemptId,
+          expectedWorkspaceVersion: checkpointMetadata.expectedWorkspaceVersion,
+          inboxMediaRetentionWakeAt: workspace?.inboxMediaRetentionWakeAt ?? null,
+          leaseGeneration: checkpointMetadata.leaseGeneration,
+          nextWakeAt: checkpointWake.nextWakeAt,
+          nextWakeReason: checkpointWake.nextWakeReason,
+          reason: checkpointInput.reason,
+          redactedStatus,
+          snapshotRef: workspace?.snapshotRef ?? null,
+        });
+        const checkpoint = canonicalRuntimeCommit
+          ? await checkpointOperation
+          : await raceHostedRuntimeCancellation(
+              checkpointOperation,
+              runtimeAbortController.signal,
+            );
+        if (!canonicalRuntimeCommit) {
+          assertRuntimeNotAborted();
+        }
+        assertHostedWorkspaceCheckpointAccepted(checkpoint, input.request.userId);
+        return checkpoint;
+      } finally {
+        resumeDetachedAssistantAskAfterWorkspaceBoundary();
       }
-      assertHostedWorkspaceCheckpointAccepted(checkpoint, input.request.userId);
-      return checkpoint;
     };
     if (
       input.request.processingMode !== "inbox_media_retention"
@@ -1914,6 +1958,33 @@ export async function runHostedWorkspaceRuntimeJobInProcess(
     const markIdleCheckpointTimerAfterDirtyWork = () => {
       idleCheckpointStartByMs = Date.now() + idleCheckpointDelayMs;
     };
+    detachedAssistantAskController = createHostedDetachedAssistantAskController({
+      assistantAskPort: runtime.platform.assistantAskPort ?? null,
+      codexHome: hostedCodexRuntime.codexHome,
+      env: hostedCodexRuntime.runtimeEnv,
+      onStateMutation() {
+        runtimeStateDirty = true;
+        markIdleCheckpointTimerAfterDirtyWork();
+      },
+      vaultRoot: restored.vaultRoot,
+    });
+    pauseDetachedAssistantAskBeforeWorkspaceBoundary = async () => {
+      await detachedAssistantAskController?.pauseAndRequeue();
+    };
+    resumeDetachedAssistantAskAfterWorkspaceBoundary = () => {
+      if (
+        !runtimeAbortController.signal.aborted
+        && options.shutdownSignal?.aborted !== true
+      ) {
+        detachedAssistantAskController?.resume();
+      }
+    };
+    closeDetachedAssistantAskBeforeWorkspaceRelease = async () => {
+      await detachedAssistantAskController?.closeAndRequeue();
+    };
+    // Resume an exact request retained by an interrupted earlier invocation.
+    // kick() only owns the invocation-local promise; it never awaits the ask.
+    detachedAssistantAskController.kick();
     const runDurableCheckpointEffectsBestEffort = async (): Promise<{
       requiresFollowUpCheckpoint: boolean;
       wake: HostedRuntimePendingWake;
@@ -2831,6 +2902,12 @@ export async function runHostedWorkspaceRuntimeJobInProcess(
         await drainCleanDurableCheckpointEffects();
       }
       let pendingCheckpointWakeLatencySeed: HostedRuntimeWakeLatencySeed | null = null;
+      if (!runtimeStateDirty) {
+        // Closing is terminal for this invocation. Do it at the clean-return
+        // decision point so a just-claimed request is requeued and included in
+        // the same checkpoint loop before the restored workspace is released.
+        await closeDetachedAssistantAskBeforeWorkspaceRelease();
+      }
       while (runtimeStateDirty) {
         let checkpointWakeLatencySeed: HostedRuntimeWakeLatencySeed | null =
           pendingCheckpointWakeLatencySeed;
@@ -2991,6 +3068,22 @@ export async function runHostedWorkspaceRuntimeJobInProcess(
           }
           checkpointWakeLatencySeed ??= idleMaintenanceWakeLatencySeed;
         }
+        await pauseDetachedAssistantAskBeforeWorkspaceBoundary();
+        const boundarySystemMailboxWake =
+          await resolveHostedSystemMailboxNextWakeCandidate({
+            allowedRouteActions: ["run-assistant-ask"],
+            vaultRoot: restored.vaultRoot,
+          });
+        pendingWake = selectEarliestHostedRuntimeWake([
+          {
+            at: pendingWake.nextWakeAt,
+            reason: pendingWake.nextWakeReason,
+          },
+          {
+            at: boundarySystemMailboxWake.at,
+            reason: boundarySystemMailboxWake.reason,
+          },
+        ]);
         idleCheckpointWake = selectHostedIdleCheckpointWake({
           idleMaintenance,
           previousInboxMediaRetentionWakeAt:
@@ -3051,6 +3144,7 @@ export async function runHostedWorkspaceRuntimeJobInProcess(
               checkpointWakeInterruption.takeNotification();
           }
         } catch (error) {
+          resumeDetachedAssistantAskAfterWorkspaceBoundary();
           if (error instanceof HostedRuntimeCheckpointInterruptedByWakeError) {
             const shutdownWasSignaled = () => options.shutdownSignal?.aborted === true;
             if (
@@ -3103,6 +3197,7 @@ export async function runHostedWorkspaceRuntimeJobInProcess(
           }
           throw error;
         }
+        resumeDetachedAssistantAskAfterWorkspaceBoundary();
         if (checkpointWakeNotificationAfterCommit) {
           checkpointWakeLatencySeed ??= createHostedRuntimeWakeLatencySeed(
             checkpointWakeNotificationAfterCommit,
@@ -3279,6 +3374,10 @@ export async function runHostedWorkspaceRuntimeJobInProcess(
         );
         const refreshRequestedImmediateWake =
           browserVaultRefresh?.status === "deferred_runtime_wake";
+        await closeDetachedAssistantAskBeforeWorkspaceRelease();
+        if (runtimeStateDirty) {
+          continue;
+        }
         const committedDefaultWakeKey = buildHostedRuntimeWakeKey({
           nextWakeAt: committedWorkspace?.nextWakeAt ?? null,
           nextWakeReason: committedWorkspace?.nextWakeReason ?? null,
@@ -3441,6 +3540,7 @@ export async function runHostedWorkspaceRuntimeJobInProcess(
     await drainDeferredUsageBestEffort();
     throw error;
   } finally {
+    await closeDetachedAssistantAskBeforeWorkspaceRelease();
     hostAbortSignal?.removeEventListener("abort", abortFromHost);
   }
 }

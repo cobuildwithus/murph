@@ -96,6 +96,15 @@ describe("runHostedRunnerSmokeDetailed", () => {
             childCwdIsIsolated: options.cwd.includes("hosted-runner-smoke-launch-"),
             codexAppServerHelpBytes: 2048,
             codexCommandDiscovered: true,
+            codexGroupReadAuthorizedFileRead: true,
+            codexGroupReadDeepEnvReadDenied: true,
+            codexGroupReadGroupWriteDenied: true,
+            codexGroupReadNetworkDenied: true,
+            codexGroupReadOutsideRootReadDenied: true,
+            codexGroupReadPermissionProfileAttested: true,
+            codexGroupReadRuntimeReadDenied: true,
+            codexGroupReadSecretEnvironmentDenied: true,
+            codexGroupReadSiblingRootReadDenied: true,
             codexHostedCliSurfaceContractBytes: 37282,
             codexHostedCliSurfaceHotPathProofCount:
               HOSTED_RUNNER_SMOKE_CLI_SURFACE_HOT_PATH_PROOF_COUNT,
@@ -148,6 +157,15 @@ describe("runHostedRunnerSmokeDetailed", () => {
       expect(result.childCwdIsIsolated).toBe(true);
       expect(result.codexAppServerHelpBytes).toBe(2048);
       expect(result.codexCommandDiscovered).toBe(true);
+      expect(result.codexGroupReadAuthorizedFileRead).toBe(true);
+      expect(result.codexGroupReadDeepEnvReadDenied).toBe(true);
+      expect(result.codexGroupReadGroupWriteDenied).toBe(true);
+      expect(result.codexGroupReadNetworkDenied).toBe(true);
+      expect(result.codexGroupReadOutsideRootReadDenied).toBe(true);
+      expect(result.codexGroupReadPermissionProfileAttested).toBe(true);
+      expect(result.codexGroupReadRuntimeReadDenied).toBe(true);
+      expect(result.codexGroupReadSecretEnvironmentDenied).toBe(true);
+      expect(result.codexGroupReadSiblingRootReadDenied).toBe(true);
       expect(result.codexHostedCliSurfaceContractBytes).toBe(37282);
       expect(result.codexHostedCliSurfaceHotPathProofCount).toBe(
         HOSTED_RUNNER_SMOKE_CLI_SURFACE_HOT_PATH_PROOF_COUNT,

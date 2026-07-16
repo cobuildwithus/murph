@@ -55,7 +55,8 @@ export function renderMarkdownMessageText(value: string): DecoratedMessageText {
     if (openDecoration) {
       if (
         value.startsWith(openDecoration.marker, index) &&
-        isMarkdownClosingBoundary(value, index, openDecoration.marker)
+        (openDecoration.marker === '**' ||
+          isMarkdownClosingBoundary(value, index, openDecoration.marker))
       ) {
         const rangeStart = text.length
         const content = openDecoration.content
@@ -78,6 +79,15 @@ export function renderMarkdownMessageText(value: string): DecoratedMessageText {
 
       openDecoration.content += value[index]
       index += 1
+      continue
+    }
+
+    if (
+      value.startsWith('**', index) &&
+      !value.includes('**', index + 2)
+    ) {
+      text += '**'
+      index += 2
       continue
     }
 
@@ -368,7 +378,10 @@ function readOpeningMarkdownDecorationToken(
       continue
     }
 
-    if (!isMarkdownOpeningBoundary(value, index, token.marker)) {
+    if (
+      token.marker !== '**' &&
+      !isMarkdownOpeningBoundary(value, index, token.marker)
+    ) {
       continue
     }
 
@@ -382,6 +395,10 @@ function isValidDecorationContent(
   content: string,
   marker: string,
 ): boolean {
+  if (marker === '**') {
+    return content.length > 0
+  }
+
   if (!content || content !== content.trim() || content.includes('\n')) {
     return false
   }

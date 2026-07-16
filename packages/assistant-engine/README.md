@@ -54,6 +54,37 @@ abort cleanup, malformed output, off-turn output, process failure, or idle
 explicit shutdown stops or poisons the warm process before a later turn can
 reuse it.
 
+## Read-only Assistant Ask
+
+`executeReadOnlyAssistantAsk`, exported from
+`@murphai/assistant-engine/assistant-ask`, is the one deliberate exception to
+the warm single-process path. It starts a separate one-shot Codex App Server
+child for a target-owned Assistant Ask, so its provider latency, failure, and
+interruption domain cannot block or poison the resident foreground process. The
+trusted caller supplies the authorized target workspace root plus one untrusted
+question; the executor owns no membership, routing, mailbox, retry, or delivery
+state and returns only one schema-checked bounded answer.
+
+The child reuses the trusted hosted Codex home for minimum provider auth and
+configuration, but starts from a fresh empty working directory and removes that
+directory after the exact child exits. It uses process lifetime `one-shot`; its
+`thread/start` request sets `permissions = "murph-group-read"`, exact
+`runtimeWorkspaceRoots`, `ephemeral = true`, and approval policy `never` without
+legacy `sandbox`. The pinned App Server must attest the effective profile,
+roots, working directory, empty instruction sources, and approval policy before
+the turn starts. The profile permits read-only access to the exact target roots
+while denying `.runtime/**`, `.codex/**`, environment files, writes, other
+workspaces, and tool network. Model-run shell commands inherit no provider
+credential or hosted secret. The child receives no dynamic tools, CLI bridge,
+delivery route, MCP, web search, memory, plugin, app, or multi-agent authority.
+
+The runtime may keep one such child beside foreground work. It owns the exact
+process handle and must interrupt, await with bounded grace, terminate only
+that proven-owned child if needed, and prove exit before its workspace can be
+checkpointed, replaced, or released. Further asks remain pending in the
+existing hosted mailbox; assistant-engine does not add a process pool or
+scheduler.
+
 ## Dynamic tool contracts
 
 Route planning is the single owner of the dynamic tool contract. It resolves the

@@ -297,6 +297,19 @@ export async function readHostedMemberAssistantPreferences(input: {
     },
   });
 
+  return projectHostedMemberAssistantPreferences(member);
+}
+
+export function projectHostedMemberAssistantPreferences(
+  member: (HostedMemberPersonalityColumns & {
+    assistantTone: string | null;
+    assistantVoice: string | null;
+  }) | null,
+): {
+  personality: HostedMemberAssistantPersonalitySnapshot;
+  tone: AssistantTonePreference | null;
+  voice: AssistantVoiceOptionId | null;
+} {
   return {
     personality: normalizeStoredAssistantPersonality(member),
     tone: normalizeStoredAssistantTone(member?.assistantTone ?? null),

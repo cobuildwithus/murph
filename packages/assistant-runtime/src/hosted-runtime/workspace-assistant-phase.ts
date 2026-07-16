@@ -14,9 +14,9 @@ import {
 } from "@murphai/hosted-execution";
 import {
   type HostedRuntimeGroupToolLinqThreadContext,
+  type HostedRuntimeGroupToolCurrentSenderContext,
   type HostedRuntimeGroupToolRequest,
   type HostedRuntimeGroupToolResponse,
-  type HostedRuntimeGroupToolSelfOptOutContext,
   type HostedWorkspaceCheckpointReason,
   type HostedRuntimeRedactedJson,
   type HostedRuntimeRedactedObject,
@@ -266,11 +266,22 @@ export function createHostedGroupToolWithLinqThreadContext(input: {
         if (emailIngressPresent) {
           return await input.groupToolPort.request({ action: request.action });
         }
-        const selfOptOut = resolveHostedGroupToolSelfOptOutContext({
+        const selfOptOut = resolveHostedGroupToolCurrentSenderContext({
           linqDeliveryContexts: input.linqDeliveryContexts,
         });
         return await input.groupToolPort.request(
           selfOptOut ? { action: request.action, selfOptOut } : { action: request.action },
+        );
+      }
+      if (
+        request.action === "read_own_assistant_style"
+        || request.action === "update_own_assistant_style"
+      ) {
+        const currentSender = resolveHostedGroupToolCurrentSenderContext({
+          linqDeliveryContexts: input.linqDeliveryContexts,
+        });
+        return await input.groupToolPort.request(
+          currentSender ? { ...request, currentSender } : request,
         );
       }
       if (
@@ -301,6 +312,11 @@ function buildHostedGroupEmailRestrictedActionUnavailable(
 ): HostedRuntimeGroupToolResponse {
   const unavailableReason = "authenticated_sender_required";
   switch (request.action) {
+    case "ask":
+      return {
+        action: request.action,
+        result: { status: "unavailable", unavailableReason },
+      };
     case "list_memberships":
       return {
         action: request.action,
@@ -318,6 +334,12 @@ function buildHostedGroupEmailRestrictedActionUnavailable(
         action: request.action,
         result: { participants: null, status: "unavailable", unavailableReason },
       };
+    case "read_own_assistant_style":
+    case "update_own_assistant_style":
+      return {
+        action: request.action,
+        result: { style: null, status: "unavailable", unavailableReason },
+      };
     case "preflight_set_chat_avatar":
     case "set_chat_avatar":
     case "share_contact_card":
@@ -329,12 +351,13 @@ function buildHostedGroupEmailRestrictedActionUnavailable(
   }
 }
 
-function resolveHostedGroupToolSelfOptOutContext(input: {
+function resolveHostedGroupToolCurrentSenderContext(input: {
   linqDeliveryContexts: readonly HostedAssistantLinqDeliveryContext[];
-}): HostedRuntimeGroupToolSelfOptOutContext | null {
-  const eligible = new Map<string, HostedRuntimeGroupToolSelfOptOutContext>();
+}): HostedRuntimeGroupToolCurrentSenderContext | null {
+  const eligible = new Map<string, HostedRuntimeGroupToolCurrentSenderContext>();
   // Hosted email reply aliases authenticate the route, not the human From
-  // header. Do not turn parsed From into self-opt-out authority.
+  // header. Only the accepted Linq sender can become participant-self
+  // authority for opt-out or personal style actions.
   for (const context of input.linqDeliveryContexts) {
     if (context.threadIsDirect !== false) {
       continue;
@@ -3581,7 +3604,11 @@ async function runSystemMailboxMaintenancePhase(input: {
           nextWakeAt,
           outboxTerminalizedSendingCount: 0,
           progressed: true,
-          systemMailboxPrepared: systemMailboxPreparation.status === "retryable_failed" ? 0 : 1,
+          systemMailboxPrepared:
+            systemMailboxPreparation.status === "retryable_failed"
+              || systemMailboxPreparation.status === "preempted"
+              ? 0
+              : 1,
           systemMailboxRetryableFailed:
             systemMailboxPreparation.status === "retryable_failed" ? 1 : 0,
         }),
@@ -5369,7 +5396,7 @@ async function writeHostedSystemMailboxRuntimeLog(input: {
   recorded: number | null;
   recordFailed: number | null;
   routeAction: string | null;
-  status: "processed" | "recorded" | "recording" | "retryable_failed";
+  status: "preempted" | "processed" | "recorded" | "recording" | "retryable_failed";
   wakeKind: string | null;
 }): Promise<void> {
   const errorCode = toHostedRuntimeLogCode(input.errorCode);
@@ -6506,7 +6533,10 @@ function shouldCollectSystemMailboxDeliveryEffects(input: {
   }
 
   const item = input.preparation.item;
-  if (item.routeAction === "dispatch-assistant-notification") {
+  if (
+    item.routeAction === "dispatch-assistant-notification"
+    || item.routeAction === "continue-assistant-ask"
+  ) {
     return true;
   }
 

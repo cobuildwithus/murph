@@ -194,6 +194,8 @@ type CodexAppServerProcessState =
   | 'stopped'
   | 'stopping'
 
+export type CodexAppServerProcessLifetime = 'one-shot' | 'warm'
+
 type CodexAppServerColdStartReason =
   | 'node-process-first-use'
   | 'previous-explicit-stop'
@@ -426,6 +428,7 @@ export interface CodexAppServerTurnInput {
   excludeResumeTurns?: boolean
   model?: string | null
   modelProvider?: string | null
+  outputSchema?: Readonly<Record<string, unknown>> | null
   onLiveTurn?: ((turn: CodexAppServerLiveTurn) => void | (() => void)) | null
   onProgress?: ((event: CodexProgressEvent) => void) | null
   onFinishWithoutReplyAccepted?: ((event: {
@@ -441,11 +444,17 @@ export interface CodexAppServerTurnInput {
   productFeedbackRecorder?: AssistantTurnProductFeedbackRecorder | null
   oss?: boolean
   profile?: string | null
+  permissions?: string | null
+  processLifetime?: CodexAppServerProcessLifetime
   prompt: string
   images?: readonly CodexAppServerImageInput[] | null
   reasoningEffort?: string | null
   resumeSessionId?: string | null
   sandbox?: AssistantSandbox
+  ephemeral?: boolean | null
+  environments?: readonly Readonly<Record<string, unknown>>[] | null
+  runtimeWorkspaceRoots?: readonly string[] | null
+  threadConfig?: Readonly<Record<string, unknown>> | null
   // Sent on every turn/start: a value selects the tier, null explicitly
   // resets a sticky thread-level override back to the default tier.
   serviceTier?: AssistantProviderServiceTier | null
@@ -597,6 +606,7 @@ function appendRequiredVaultFileApprovalUrls(
 export async function executeCodexAppServerTurn(
   input: CodexAppServerTurnInput,
 ): Promise<CodexAppServerTurnResult> {
+  assertCodexAppServerPermissionRequest(input)
   const approvalPolicy = resolveSupportedCodexAppServerApprovalPolicy(input.approvalPolicy)
   const workingDirectory = path.resolve(input.workingDirectory)
   await assertCodexAppServerWorkingDirectory(workingDirectory)
@@ -617,6 +627,9 @@ export async function executeCodexAppServerTurn(
       configOverrides: input.configOverrides,
       env: input.env,
     }),
+    runtimeWorkspaceRoots: input.runtimeWorkspaceRoots?.map((root) =>
+      path.resolve(root),
+    ),
   }
   const args = buildCodexAppServerArgs(normalizedInput)
   const launchKey = buildCodexAppServerLaunchKey({
@@ -641,14 +654,68 @@ export async function executeCodexAppServerTurn(
     workingDirectory,
   }
 
+  let oneShotProcess: CodexAppServerProcess | null = null
   try {
+    if (preparedInput.processLifetime === 'one-shot') {
+      oneShotProcess = new CodexAppServerProcess({
+        args: preparedInput.args,
+        codexCommand: preparedInput.codexCommand,
+        coldStartReason: 'node-process-first-use',
+        env: preparedInput.env,
+        launchKey: preparedInput.launchKey,
+      })
+      oneShotProcess.reserveTurn()
+      return await runCodexAppServerTurnOnProcess(oneShotProcess, preparedInput)
+    }
+
     const processInstance = await getOrStartWarmCodexProcess(preparedInput)
     return await runCodexAppServerTurnOnProcess(processInstance, preparedInput)
   } finally {
-    await rm(tempRoot, {
-      recursive: true,
-      force: true,
-    })
+    try {
+      await oneShotProcess?.stop('one-shot-complete')
+    } finally {
+      await rm(tempRoot, {
+        recursive: true,
+        force: true,
+      })
+    }
+  }
+}
+
+function assertCodexAppServerPermissionRequest(
+  input: CodexAppServerTurnInput,
+): void {
+  const permissions = normalizeNullableString(input.permissions)
+  if (!permissions) {
+    return
+  }
+
+  const invalidFields = [
+    ...(input.sandbox ? ['sandbox'] : []),
+    ...(normalizeNullableString(input.resumeSessionId) ? ['resumeSessionId'] : []),
+    ...(input.ephemeral === true ? [] : ['ephemeral']),
+    ...(input.processLifetime === 'one-shot' ? [] : ['processLifetime']),
+  ]
+  if (invalidFields.length > 0) {
+    throw new VaultCliError(
+      'ASSISTANT_CODEX_APP_SERVER_REQUEST_INVALID',
+      'Named Codex permissions require a fresh ephemeral thread in a one-shot process without a legacy sandbox.',
+      {
+        invalidFields,
+        retryable: false,
+      },
+    )
+  }
+
+  if (!input.runtimeWorkspaceRoots || input.runtimeWorkspaceRoots.length === 0) {
+    throw new VaultCliError(
+      'ASSISTANT_CODEX_APP_SERVER_REQUEST_INVALID',
+      'Named Codex permissions require at least one explicit runtime workspace root.',
+      {
+        invalidFields: ['runtimeWorkspaceRoots'],
+        retryable: false,
+      },
+    )
   }
 }
 
@@ -4076,6 +4143,11 @@ async function runCodexAppServerTurnOnProcess(
         requestedThreadId: resumeThreadId,
         threadResult,
       })
+    } else if (normalizeNullableString(input.permissions)) {
+      assertCodexThreadStartPermissionAttestation({
+        input,
+        threadResult,
+      })
     }
     codexThreadId = extractCodexThreadIdFromResult(threadResult) ?? codexThreadId
     codexProcess.noteBoundThreadId(codexThreadId)
@@ -4137,9 +4209,17 @@ async function runCodexAppServerTurnOnProcess(
       lifecycleStage = 'abort_cleanup'
       await codexProcess.poison('turn-completed-after-abort')
       lifecycleStage = 'shutdown_complete'
-      emitAppServerTimingTrace('warm-abort-poisoned')
+      emitAppServerTimingTrace(
+        input.processLifetime === 'one-shot'
+          ? 'one-shot-abort-stopped'
+          : 'warm-abort-poisoned',
+      )
     } else {
-      if (codexThreadId && normalizeNullableString(input.env[HOSTED_CLI_BRIDGE_TOKEN_ENV])) {
+      if (
+        input.processLifetime !== 'one-shot' &&
+        codexThreadId &&
+        normalizeNullableString(input.env[HOSTED_CLI_BRIDGE_TOKEN_ENV])
+      ) {
         lifecycleStage = 'background_terminal_cleanup'
         const cleanup = codexProcess.beginHostedBackgroundTerminalCleanup({
           binding: activeTurnBinding,
@@ -4157,7 +4237,11 @@ async function runCodexAppServerTurnOnProcess(
       if (!normalShutdown && !codexProcess.pendingPostTurnCleanup) {
         lifecycleStage = 'idle'
         codexProcess.releaseTurn(activeTurnBinding)
-        emitAppServerTimingTrace('warm-idle')
+        emitAppServerTimingTrace(
+          input.processLifetime === 'one-shot'
+            ? 'one-shot-complete'
+            : 'warm-idle',
+        )
       }
     }
   } catch (error) {
@@ -4328,6 +4412,60 @@ async function runCodexAppServerTurnOnProcess(
     threadId: codexThreadId,
     turnId,
   }
+}
+
+function assertCodexThreadStartPermissionAttestation(input: {
+  input: CodexAppServerPreparedTurnInput
+  threadResult: unknown
+}): void {
+  const result = asCodexRecord(input.threadResult)
+  const activePermissionProfile = asCodexRecord(result?.activePermissionProfile)
+  const actualCwd = normalizeNullableString(asCodexString(result?.cwd))
+  const actualRoots = asCodexStringArray(result?.runtimeWorkspaceRoots)
+  const instructionSources = Array.isArray(result?.instructionSources)
+    ? result.instructionSources
+    : null
+  const expectedRoots = input.input.runtimeWorkspaceRoots ?? []
+  const mismatchedFields: string[] = []
+
+  const permissionProfileMismatch =
+    normalizeNullableString(asCodexString(activePermissionProfile?.id)) !==
+      normalizeNullableString(input.input.permissions) ||
+    normalizeNullableString(asCodexString(activePermissionProfile?.extends)) !== null
+  if (permissionProfileMismatch) {
+    mismatchedFields.push('activePermissionProfile')
+  }
+  if (
+    !actualRoots ||
+    actualRoots.length !== expectedRoots.length ||
+    actualRoots.some((root, index) => path.resolve(root) !== path.resolve(expectedRoots[index] ?? ''))
+  ) {
+    mismatchedFields.push('runtimeWorkspaceRoots')
+  }
+  if (!actualCwd || path.resolve(actualCwd) !== input.input.workingDirectory) {
+    mismatchedFields.push('cwd')
+  }
+  if (instructionSources === null || instructionSources.length !== 0) {
+    mismatchedFields.push('instructionSources')
+  }
+  if (
+    asCodexString(result?.approvalPolicy) !==
+    mapCodexAppServerApprovalPolicy(input.input.approvalPolicy)
+  ) {
+    mismatchedFields.push('approvalPolicy')
+  }
+  if (mismatchedFields.length === 0) {
+    return
+  }
+
+  throw new VaultCliError(
+    'ASSISTANT_CODEX_APP_SERVER_PERMISSION_ATTESTATION_FAILED',
+    'Codex app-server did not attest the requested read-only execution context.',
+    {
+      mismatchedFields,
+      retryable: false,
+    },
+  )
 }
 
 function emitCodexSuppressedFinalMessageTrace(input: {
@@ -4590,6 +4728,12 @@ function asCodexRecord(value: unknown): Record<string, unknown> | null {
 
 function asCodexString(value: unknown): string | null {
   return typeof value === 'string' ? value : null
+}
+
+function asCodexStringArray(value: unknown): string[] | null {
+  return Array.isArray(value) && value.every((entry) => typeof entry === 'string')
+    ? value
+    : null
 }
 
 const codexRolloutRelativePathPattern =

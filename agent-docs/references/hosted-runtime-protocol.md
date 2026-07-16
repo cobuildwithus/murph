@@ -65,6 +65,14 @@ The live ownership split is:
   rows, stages assistant input, runs assistant/device work, and checkpoints the
   resulting workspace.
 
+Assistant Ask reuses that same ownership split. Web resolves the target and
+return authority, then appends paired encrypted `assistant.ask.requested` and
+`assistant.ask.completed` mailbox items. The group runtime may answer one
+request in a separate read-only one-shot Codex child while its resident
+foreground assistant continues to own writes and sends. The mailbox remains the
+only durable queue and operation state; Cloudflare gains no second container,
+Durable Object state, scheduler, or workflow for this lane.
+
 The final seam is:
 
 ```text
@@ -299,6 +307,58 @@ The foreground-priority rule does not weaken correctness checks. Wrong-user
 authority, invalid auth, undecryptable mailbox payloads, stale leases, and
 workspace checkpoint compare-and-swap conflicts still fail closed rather than
 publishing partial or corrupt state.
+
+### Assistant Ask Read Side Lane
+
+`murph.group(action="ask")` is admitted only from a fresh authenticated private
+input. The runtime calls `assistantAskPort.request`; the signed
+`POST /api/internal/hosted-execution/assistant-asks/runtime` Web control owner
+resolves the current `HostedGroupMember` row and synthetic group runtime from
+the caller plus an optional exact visible label. Models never supply member,
+membership, runtime, mailbox, callback, session, or return-route ids. Web
+derives one stable request identity, pins the origin, destination, membership
+generation, and ten-minute expiry, appends one encrypted
+`assistant.ask.requested` item, then signals the existing group runtime. Exact
+retry reuses that item and cannot resolve a different target.
+
+The target runtime rechecks expiry, membership generation, runtime identity,
+and the active write fence before context assembly. It snapshots bounded
+committed conversation evidence in memory and seals it with the live restored
+group workspace; this is not a second durable snapshot or projection. A
+dedicated router keeps the request out of ordinary serial
+system-message execution and starts at most one `executeReadOnlyAssistantAsk`
+promise. That call launches a separate one-shot App Server process with the
+native `murph-group-read` profile, exact runtime workspace roots, `.runtime/**`,
+`.codex/**`, and environment-file denial, no tool network or inherited shell
+secrets, and no dynamic tools or delivery authority. Thread-start attestation
+must confirm the exact profile, roots, sealed empty working directory, empty
+instruction sources, and approval policy before model work. Further asks stay
+pending in the mailbox. The resident process remains the sole model-authored
+canonical-content writer and sender, and foreground start, steering, and
+delivery never await the child.
+
+The group runtime returns only the request id and schema-checked bounded answer
+through the signed completion control path. Web reloads the request, rechecks
+the exact membership generation, runtime fence, expiry, and original private
+route, then appends one deterministic encrypted `assistant.ask.completed` item
+to the bound private runtime. The first committed completion wins. The private
+runtime treats it as correlated untrusted data and may run one output-only
+follow-up after current route validation; it cannot recurse into Assistant Ask
+or invoke side-effecting tools.
+
+An unfinished child leaves the request pending. Before invocation return,
+checkpoint, shutdown, fence loss, or workspace replacement, the runtime
+interrupts the exact child, waits a bounded grace period, terminates only that
+proven-owned process if needed, proves exit, and only then releases the
+workspace. Child failure cannot interrupt or poison the resident App Server.
+
+The first rollout is consumer-first. Deploy the runtime and runner consumers
+with immediate container rollout, prove `murph-group-read` confinement and the
+new bundle fingerprint, deploy Web with
+`HOSTED_ASSISTANT_ASK_PRODUCER_ENABLED` unset or `0`, and enable exact `1` only
+after convergence. Rollback disables and redeploys the Web producer first,
+waits at least the full ten-minute request lifetime, and rolls consumers back
+only after pending request and completion items have drained or expired.
 
 ### Deploy Compatibility Rule
 
@@ -1023,8 +1083,11 @@ or artifact-sidecar v2 producers. `idle_shutdown` is the only new checkpoint
 snapshot producer. `canonical_runtime_commit` instead uploads exact canonical
 write receipts and publishes a receipt-log ref, bounded to 64 pending entries
 and 64 KiB, through a status-only workspace checkpoint that retains the prior
-snapshot ref. Capacity and log shape are validated before referenced payloads
-are uploaded. If that checkpoint has an ambiguous transport outcome, the
+snapshot ref. Capacity, log shape, and payload lengths are validated before
+upload. The complete immutable payload, receipt, and log artifact set then
+uploads in small fixed concurrent waves; every started wave settles before a
+failure returns, and the checkpoint publishes the log ref only after the whole
+set succeeds. If that checkpoint has an ambiguous transport outcome, the
 Cloudflare workspace port retries the identical expected-version CAS once. It
 accepts a version-conflict response only when the active invocation fence still
 matches and the returned workspace is the exact requested successor, including
@@ -1248,6 +1311,9 @@ Without the fingerprint secret, checkpoint diagnostics omit relative-name hashes
 - hosted device-sync authority
 - hosted AI usage ledger, pricing/accounting projection, and monthly allowance aggregate
 - anonymized assistant-runtime issue sink
+- Assistant Ask target resolution, membership-generation and origin binding,
+  deterministic request/completion identity, expiry checks, and private return
+  route authority; encrypted mailbox rows remain the only durable ask state
 
 The runtime may attach one bounded usage-notice delivery target to an assistant
 usage record only when every accepted input for that provider request resolves
@@ -1267,6 +1333,8 @@ routing.
 - runtime timers, assistant next wake projection, and inbox media retention wake
   projection
 - checkpoint timing
+- the invocation-local one-child Assistant Ask controller, sealed group context
+  builder, and exact-child abort/await lifecycle; none is durable queue state
 - checkpoint snapshot policy and metrics (`direct-r2-presigned-put`, the
   512 MiB encrypted single-object and 1 GiB total plain-byte limits, encrypted byte
   size, and warning threshold)
@@ -1286,6 +1354,8 @@ routing.
 - worker-to-web callback signing
 - verification of signed ingress/runtime root envelopes plus Cloudflare P-256
   recipient unwrap; Cloudflare must not hold GCP KMS decrypt authority
+- signed Assistant Ask Web-control transport and normal runner-container process
+  hosting; Cloudflare does not own ask routing, membership, queueing, or results
 
 Cloudflare does not own product facts, mailbox state, mailbox import progress,
 hosted AI usage spend, assistant channel enablement state, outbox truth, or

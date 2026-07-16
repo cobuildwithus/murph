@@ -12,6 +12,7 @@ import { createCloudflareArtifactStore } from "./artifact-store.ts";
 import { createHostedWebActionApprovalPort } from "./action-approval-port.ts";
 import { createHostedRuntimeAssistantPersonalizationToolPort } from "./assistant-personalization-tool-port.ts";
 import { createHostedRuntimeAssistantConfigurationToolPort } from "./assistant-configuration-tool-port.ts";
+import { createHostedRuntimeAssistantAskPort } from "./assistant-ask-port.ts";
 import { createCloudflareBrowserVaultReplicaPort } from "./browser-vault-replica-port.ts";
 import { createHostedWebClinicalRecordsPort } from "./clinical-records-port.ts";
 import { createHostedRuntimeCodexAuthPort } from "./codex-auth-port.ts";
@@ -227,6 +228,12 @@ export function buildHostedExecutionRuntimePlatform(input: {
     ...(transport
       ? {
           issueExportPort: createHostedRuntimeIssueExportPort({
+            boundUserId: input.boundUserId,
+            fetchImpl,
+            timeoutMs,
+            transport,
+          }),
+          assistantAskPort: createHostedRuntimeAssistantAskPort({
             boundUserId: input.boundUserId,
             fetchImpl,
             timeoutMs,

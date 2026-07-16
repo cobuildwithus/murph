@@ -21,14 +21,11 @@ import type {
 const mocks = vi.hoisted(() => ({
   experimentHeader: vi.fn(() => createElement("div", null, "header")),
   experimentHero: vi.fn(() => createElement("div", null, "hero")),
-  getHostedPageAuthSnapshot: vi.fn(),
-  getPrisma: vi.fn(() => ({ prisma: true })),
   notFound: vi.fn(() => {
     throw new Error("not found");
   }),
   protocolTab: vi.fn(() => createElement("div", null, "protocol tab")),
-  readHostedAccountSettingsSnapshot: vi.fn(),
-  readHostedMemberRoutingState: vi.fn(),
+  readHostedMurphContactContext: vi.fn(),
   refresh: vi.fn(),
   resolveBrowserVaultExperimentRun: vi.fn<() => ExperimentRunProjection | null>(() => null),
   resultsTab: vi.fn(() => createElement("div", null, "results tab")),
@@ -103,21 +100,9 @@ vi.mock("@/src/lib/browser-vault/experiment-run", () => ({
   resolveBrowserVaultExperimentRun: mocks.resolveBrowserVaultExperimentRun,
 }));
 
-vi.mock("@/src/lib/hosted-onboarding/hosted-member-routing-store", () => ({
-  readHostedMemberRoutingState: mocks.readHostedMemberRoutingState,
-}));
-
-vi.mock("@/src/lib/hosted-onboarding/account-settings-snapshot", () => ({
-  readHostedAccountSettingsSnapshot: mocks.readHostedAccountSettingsSnapshot,
-}));
-
-vi.mock("@/src/lib/hosted-onboarding/page-auth", () => ({
-  getHostedPageAuthSnapshot: mocks.getHostedPageAuthSnapshot,
-  getHostedDashboardPageAuthSnapshot: mocks.getHostedPageAuthSnapshot,
-}));
-
-vi.mock("@/src/lib/prisma", () => ({
-  getPrisma: mocks.getPrisma,
+vi.mock("@/src/lib/hosted-onboarding/hosted-contact-context", () => ({
+  getHostedMurphContactContext: mocks.readHostedMurphContactContext,
+  readHostedMurphContactContext: mocks.readHostedMurphContactContext,
 }));
 
 import { ExperimentLayoutClient } from "../app/(dashboard)/experiments/[experimentId]/experiment-layout-client";
@@ -129,13 +114,16 @@ const { parseHTML } = loadLinkedom();
 beforeEach(() => {
   vi.clearAllMocks();
   vi.unstubAllGlobals();
-  mocks.getHostedPageAuthSnapshot.mockResolvedValue({
-    authenticated: false,
-    authenticatedMember: null,
-    linkedAccounts: [],
+  mocks.readHostedMurphContactContext.mockResolvedValue({
+    initialContactChannels: {
+      email: false,
+      telegram: false,
+      text: false,
+    },
+    murphEmailAddress: null,
+    murphPhoneNumber: null,
+    userEmailAddress: null,
   });
-  mocks.readHostedAccountSettingsSnapshot.mockResolvedValue(null);
-  mocks.readHostedMemberRoutingState.mockResolvedValue(null);
   mocks.useBrowserVault.mockReturnValue({
     client: null,
     dataVersion: null,
@@ -206,49 +194,15 @@ test("passes the hosted start action slot into the experiment header", async () 
 });
 
 test("hosted experiment start context resolves the assigned member phone", async () => {
-  mocks.getHostedPageAuthSnapshot.mockResolvedValue({
-    authenticated: true,
-    authenticatedMember: {
-      id: "member_123",
+  mocks.readHostedMurphContactContext.mockResolvedValue({
+    initialContactChannels: {
+      email: true,
+      telegram: false,
+      text: true,
     },
-    linkedAccounts: [
-      {
-        latest_verified_at: 1771977600,
-        phone_number: "+14045550123",
-        type: "phone",
-      },
-      {
-        address: "member@example.test",
-        latest_verified_at: 1771977600,
-        type: "email",
-      },
-    ],
-    memberLookup: null,
-    session: null,
-  });
-  const prisma = { prisma: true };
-  mocks.getPrisma.mockReturnValue(prisma);
-  mocks.readHostedMemberRoutingState.mockResolvedValue({
-    linqChatId: null,
-    linqRecipientPhone: "+15550100001",
-    memberId: "member_123",
-    pendingLinqChatId: null,
-    pendingLinqRecipientPhone: null,
-    telegramThreadId: null,
-    telegramUserId: null,
-    telegramUserLookupKey: null,
-  });
-  mocks.readHostedAccountSettingsSnapshot.mockResolvedValue({
-    email: {
-      address: "member@example.test",
-      murphEmailAddress: "murph+alias123@mail.withmurph.ai",
-      verifiedAt: new Date("2026-02-26T00:00:00.000Z"),
-    },
-    phone: {
-      number: "+14045550123",
-      verifiedAt: new Date("2026-02-26T00:00:00.000Z"),
-    },
-    telegram: null,
+    murphEmailAddress: "murph+alias123@mail.withmurph.ai",
+    murphPhoneNumber: "+15550100001",
+    userEmailAddress: "member@example.test",
   });
 
   const { readHostedExperimentStartContactContext } = await import(
@@ -256,12 +210,7 @@ test("hosted experiment start context resolves the assigned member phone", async
   );
   const context = await readHostedExperimentStartContactContext();
 
-  expect(mocks.getHostedPageAuthSnapshot).toHaveBeenCalledTimes(1);
-  expect(mocks.getPrisma).toHaveBeenCalledTimes(1);
-  expect(mocks.readHostedMemberRoutingState).toHaveBeenCalledWith({
-    memberId: "member_123",
-    prisma,
-  });
+  expect(mocks.readHostedMurphContactContext).toHaveBeenCalledTimes(1);
   expect(context.initialContactChannels).toEqual({
     email: true,
     telegram: false,
@@ -271,15 +220,13 @@ test("hosted experiment start context resolves the assigned member phone", async
   expect(context.murphPhoneNumber).toBe("+15550100001");
 });
 
-test("hosted experiment start context avoids member routing reads for anonymous visitors", async () => {
+test("hosted experiment start context preserves anonymous contact defaults", async () => {
   const { readHostedExperimentStartContactContext } = await import(
     "../app/(dashboard)/experiments/[experimentId]/experiment-start-button-server"
   );
   const context = await readHostedExperimentStartContactContext();
 
-  expect(mocks.getHostedPageAuthSnapshot).toHaveBeenCalledTimes(1);
-  expect(mocks.getPrisma).not.toHaveBeenCalled();
-  expect(mocks.readHostedMemberRoutingState).not.toHaveBeenCalled();
+  expect(mocks.readHostedMurphContactContext).toHaveBeenCalledTimes(1);
   expect(context.initialContactChannels).toEqual({
     email: false,
     telegram: false,
@@ -397,7 +344,7 @@ test("paused browser-vault runs get the muted status chip, not the live dot", as
   await view.cleanup();
 });
 
-test("server layout keeps routing reads inside the deferred start action slot", async () => {
+test("server layout keeps contact reads inside the deferred start action slot", async () => {
   const { default: ExperimentDetailLayout } = await import(
     "../app/(dashboard)/experiments/[experimentId]/layout"
   );
@@ -408,9 +355,7 @@ test("server layout keeps routing reads inside the deferred start action slot", 
     }),
   );
 
-  expect(mocks.getHostedPageAuthSnapshot).not.toHaveBeenCalled();
-  expect(mocks.getPrisma).not.toHaveBeenCalled();
-  expect(mocks.readHostedMemberRoutingState).not.toHaveBeenCalled();
+  expect(mocks.readHostedMurphContactContext).not.toHaveBeenCalled();
   const headerProps = (mocks.experimentHeader.mock.calls.at(-1) as
     | [{
         startAction?: ReactNode;
