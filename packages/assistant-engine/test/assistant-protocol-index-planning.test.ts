@@ -418,7 +418,10 @@ describe('assistant protocol index planning', () => {
       `Read and follow \`${skillRef}\` before advancing, declining, or completing onboarding`,
     )
     expect(plan.developerInstructions).toContain(
-      'That skill is the single owner of resume behavior, conversation order, first-value proof, support-loop setup, foundation checkpoints, persistence, defer and skip meaning, and completion.',
+      'That skill is the single owner of resume behavior, aspiration capture and parking, foundation checkpoints, the contextual return, persistence, defer and skip meaning, and completion.',
+    )
+    expect(plan.developerInstructions).toContain(
+      'During discovery, a stated health goal is context, not an action request.',
     )
     expect(plan.developerInstructions).not.toContain(
       'roughly 5-6 short assistant messages',

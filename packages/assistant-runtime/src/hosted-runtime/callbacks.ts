@@ -35,6 +35,7 @@ import {
   dispatchAssistantOutboxIntent,
   findAssistantAutoReplyDeliveryIntentIds,
   hasAssistantAutoReplyChannel,
+  isAssistantOutboxReplyBubbleSuccessor,
   listAssistantOutboxIntents,
   markAssistantOutboxIntentMirrorTerminalById,
   normalizeAssistantDeliveryError,
@@ -118,6 +119,7 @@ const HOSTED_ASSISTANT_DELIVERY_BOUNDARY = "hosted_runtime_outbox";
 const HOSTED_NON_IDEMPOTENT_CONFIRMATION_GRACE_MS = 2 * 60 * 1000;
 const HOSTED_SENDING_STALE_RECONCILIATION_MS = 10 * 60 * 1000;
 const HOSTED_LINQ_DELIVERY_OUTCOME_WRITE_TIMEOUT_MS = 2_000;
+const HOSTED_LINQ_REPLY_BUBBLE_PAUSE_MS = 1_500;
 const HOSTED_TELEGRAM_VOICE_MEMO_DELIVERY_OPERATION =
   "Hosted assistant Telegram voice memo delivery";
 
@@ -289,9 +291,11 @@ export async function collectHostedAssistantDeliverySideEffects(
         .sort(compareHostedAssistantDeliveryCandidateIntents)
     : [];
   const filteredBackgroundCandidates =
-    await abandonStaleSignupWelcomeBackgroundCandidatesAfterForegroundReply({
+    await abandonStaleSignupWelcomeCandidatesAfterReplyEvidence({
       backgroundCandidates,
+      causalOnly,
       foregroundCandidates,
+      intents,
       vaultRoot: request.vaultRoot,
     });
   const cappedBackgroundCandidates = filteredBackgroundCandidates.slice(
@@ -657,44 +661,141 @@ async function persistHostedAssistantVaultFileApprovalState(input: {
   });
 }
 
-async function abandonStaleSignupWelcomeBackgroundCandidatesAfterForegroundReply(input: {
+async function abandonStaleSignupWelcomeCandidatesAfterReplyEvidence(input: {
   backgroundCandidates: readonly AssistantOutboxIntent[];
+  causalOnly: boolean;
   foregroundCandidates: readonly AssistantOutboxIntent[];
+  intents: readonly AssistantOutboxIntent[];
   vaultRoot: string;
 }): Promise<AssistantOutboxIntent[]> {
-  const foregroundRecipientKeys = new Set<string>();
-  for (const intent of input.foregroundCandidates) {
-    const payload = buildHostedAssistantDeliveryPayloadFromIntent(intent);
-    for (const key of buildHostedAssistantDeliveryRecipientKeys(payload)) {
-      foregroundRecipientKeys.add(key);
-    }
-  }
-
-  if (foregroundRecipientKeys.size === 0) {
+  const welcomeCandidates = (
+    input.causalOnly ? input.backgroundCandidates : input.intents
+  ).filter(isHostedSignupWelcomeSupersessionCandidate);
+  if (welcomeCandidates.length === 0) {
     return [...input.backgroundCandidates];
   }
 
-  const retained: AssistantOutboxIntent[] = [];
-  for (const intent of input.backgroundCandidates) {
-    const payload = buildHostedAssistantDeliveryPayloadFromIntent(intent);
+  const possibleHistoricalReplies = input.intents.filter((intent) =>
+    isHostedAssistantAcceptedReplyEvidenceStatus(intent.status)
+    && !isHostedSignupWelcomeIntent(intent)
+    && welcomeCandidates.some((welcome) =>
+      hostedAssistantReplySupersedesSignupWelcome({ reply: intent, welcome })
+    )
+  );
+  const autoReplyIntentIds = possibleHistoricalReplies.length > 0
+    ? await findAssistantAutoReplyDeliveryIntentIds({
+        intents: possibleHistoricalReplies,
+        vault: input.vaultRoot,
+      })
+    : new Set<string>();
+  const replyEvidenceByIntentId = new Map<string, AssistantOutboxIntent>();
+  for (const intent of input.foregroundCandidates) {
     if (
-      isHostedSignupWelcomeDeliveryPayload(payload)
-      && hostedAssistantDeliveryRecipientKeysOverlap(payload, foregroundRecipientKeys)
+      isHostedAssistantAcceptedReplyEvidenceStatus(intent.status)
+      && !isHostedSignupWelcomeIntent(intent)
     ) {
-      await markAssistantOutboxIntentMirrorTerminalById({
+      replyEvidenceByIntentId.set(intent.intentId, intent);
+    }
+  }
+  for (const intent of possibleHistoricalReplies) {
+    if (autoReplyIntentIds.has(intent.intentId)) {
+      replyEvidenceByIntentId.set(intent.intentId, intent);
+    }
+  }
+
+  const abandonedWelcomeIntentIds = new Set<string>();
+  for (const welcome of welcomeCandidates) {
+    if (
+      [...replyEvidenceByIntentId.values()].some((reply) =>
+        hostedAssistantReplySupersedesSignupWelcome({ reply, welcome })
+      )
+    ) {
+      const terminalIntent = await markAssistantOutboxIntentMirrorTerminalById({
         error: new VaultCliError(
           "ASSISTANT_STALE_SIGNUP_WELCOME_SUPPRESSED",
-          "Stale signup welcome suppressed after a foreground reply for the same route.",
+          "Stale signup welcome suppressed after a newer reply for the same route.",
         ),
-        intentId: intent.intentId,
+        intentId: welcome.intentId,
+        onlyCurrentStatuses: ["pending", "retryable"],
         status: "abandoned",
         vault: input.vaultRoot,
       });
-      continue;
+      if (terminalIntent?.status === "abandoned") {
+        abandonedWelcomeIntentIds.add(welcome.intentId);
+      }
     }
-    retained.push(intent);
   }
-  return retained;
+  return input.backgroundCandidates.filter(
+    (intent) => !abandonedWelcomeIntentIds.has(intent.intentId),
+  );
+}
+
+function isHostedSignupWelcomeSupersessionCandidate(
+  intent: AssistantOutboxIntent,
+): boolean {
+  return (intent.status === "pending" || intent.status === "retryable")
+    && isHostedSignupWelcomeIntent(intent);
+}
+
+function isHostedSignupWelcomeIntent(intent: AssistantOutboxIntent): boolean {
+  return isHostedSignupWelcomeDeliveryPayload(
+    buildHostedAssistantDeliveryPayloadFromIntent(intent),
+  );
+}
+
+function isHostedAssistantAcceptedReplyEvidenceStatus(
+  status: AssistantOutboxIntent["status"],
+): boolean {
+  return status === "pending"
+    || status === "sending"
+    || status === "retryable"
+    || status === "sent";
+}
+
+function hostedAssistantReplySupersedesSignupWelcome(input: {
+  reply: AssistantOutboxIntent;
+  welcome: AssistantOutboxIntent;
+}): boolean {
+  if (
+    input.reply.intentId === input.welcome.intentId
+    || compareHostedIsoTimestampsAscending(
+      input.reply.createdAt,
+      input.welcome.createdAt,
+    ) < 0
+  ) {
+    return false;
+  }
+
+  return hostedAssistantReplyTargetsSignupWelcomeRecipient(
+    buildHostedAssistantDeliveryPayloadFromIntent(input.reply),
+    buildHostedAssistantDeliveryPayloadFromIntent(input.welcome),
+  );
+}
+
+function hostedAssistantReplyTargetsSignupWelcomeRecipient(
+  reply: HostedAssistantDeliveryPayload,
+  welcome: HostedAssistantDeliveryPayload,
+): boolean {
+  const welcomeRouteKeys = new Set(
+    buildHostedAssistantDeliveryRouteKeys(welcome),
+  );
+  if (
+    buildHostedAssistantDeliveryRouteKeys(reply).some((key) =>
+      welcomeRouteKeys.has(key)
+    )
+  ) {
+    return true;
+  }
+
+  const replyActorId = reply.actorId?.trim() || null;
+  const welcomeActorId = welcome.actorId?.trim() || null;
+  return reply.channel?.trim() === "linq"
+    && welcome.channel?.trim() === "linq"
+    && welcome.bindingDeliveryKind === "participant"
+    && reply.threadIsDirect === true
+    && welcome.threadIsDirect === true
+    && replyActorId !== null
+    && replyActorId === welcomeActorId;
 }
 
 function isHostedSignupWelcomeDeliveryPayload(
@@ -731,6 +832,20 @@ function buildHostedAssistantDeliveryRecipientKeys(
   }
 
   return [
+    ...buildHostedAssistantDeliveryRouteKeys(payload),
+    payload.actorId ? `${channel}:actor:${payload.actorId}` : null,
+  ].filter((key): key is string => key !== null);
+}
+
+function buildHostedAssistantDeliveryRouteKeys(
+  payload: HostedAssistantDeliveryPayload,
+): string[] {
+  const channel = payload.channel?.trim() || null;
+  if (!channel) {
+    return [];
+  }
+
+  return [
     payload.threadId ? `${channel}:thread:${payload.threadId}` : null,
     payload.explicitTarget ? `${channel}:explicit:${payload.explicitTarget}` : null,
     payload.bindingDeliveryTarget
@@ -738,7 +853,6 @@ function buildHostedAssistantDeliveryRecipientKeys(
           payload.bindingDeliveryTarget
         }`
       : null,
-    payload.actorId ? `${channel}:actor:${payload.actorId}` : null,
   ].filter((key): key is string => key !== null);
 }
 
@@ -1687,6 +1801,23 @@ export async function drainHostedPreparedAssistantDeliveries(input: {
           vaultRoot: input.vaultRoot,
         });
       }
+      const nextEffect = input.assistantDeliveryEffects[index + 1] ?? null;
+      if (shouldPauseBeforeNextHostedAssistantReplyBubble({
+        currentEffect: assistantDeliveryEffect,
+        nextEffect,
+        outcome,
+      })) {
+        try {
+          await waitForHostedAssistantReplyBubblePause(input.signal ?? null);
+        } catch (error) {
+          await resetHostedPreparedAssistantDeliveryEffects({
+            effects: input.assistantDeliveryEffects.slice(index + 1),
+            preparedDispatchByIntentId,
+            vaultRoot: input.vaultRoot,
+          });
+          throw error;
+        }
+      }
     }
   } catch (error) {
     recordHostedLinqTypingStopStillPendingEffects({
@@ -1705,6 +1836,74 @@ export async function drainHostedPreparedAssistantDeliveries(input: {
   }
 
   return outcomes;
+}
+
+function shouldPauseBeforeNextHostedAssistantReplyBubble(input: {
+  currentEffect: HostedAssistantDeliveryEffect;
+  nextEffect: HostedAssistantDeliveryEffect | null;
+  outcome: HostedAssistantDeliveryOutcome;
+}): boolean {
+  if (input.outcome.deliveryStatus !== "sent" || !input.nextEffect) {
+    return false;
+  }
+  if (
+    input.currentEffect.deliveryPhase !== "foreground_current_turn"
+    || input.nextEffect.deliveryPhase !== "foreground_current_turn"
+    || isHostedAssistantReactionOnlyEffect(input.currentEffect)
+    || isHostedAssistantReactionOnlyEffect(input.nextEffect)
+  ) {
+    return false;
+  }
+  const currentChannel = normalizeHostedAssistantDeliveryChannel(
+    input.currentEffect.payload.channel,
+  )?.toLowerCase();
+  const nextChannel = normalizeHostedAssistantDeliveryChannel(
+    input.nextEffect.payload.channel,
+  )?.toLowerCase();
+  if (currentChannel !== "linq" || nextChannel !== "linq") {
+    return false;
+  }
+  if (
+    readHostedAssistantDeliveryEffectBoundaryKey(input.currentEffect)
+    !== readHostedAssistantDeliveryEffectBoundaryKey(input.nextEffect)
+  ) {
+    return false;
+  }
+  return isAssistantOutboxReplyBubbleSuccessor(
+    {
+      deliveryIdempotencyKey: input.currentEffect.payload.idempotencyKey,
+      turnId: input.currentEffect.payload.turnId,
+    },
+    {
+      deliveryIdempotencyKey: input.nextEffect.payload.idempotencyKey,
+      turnId: input.nextEffect.payload.turnId,
+    },
+  );
+}
+
+function waitForHostedAssistantReplyBubblePause(
+  signal: AbortSignal | null,
+): Promise<void> {
+  assertHostedDeliveryLiveness(signal);
+  return new Promise((resolve, reject) => {
+    const onAbort = () => {
+      clearTimeout(timer);
+      signal?.removeEventListener("abort", onAbort);
+      try {
+        assertHostedDeliveryLiveness(signal);
+      } catch (error) {
+        reject(error);
+      }
+    };
+    const timer = setTimeout(() => {
+      signal?.removeEventListener("abort", onAbort);
+      resolve();
+    }, HOSTED_LINQ_REPLY_BUBBLE_PAUSE_MS);
+    signal?.addEventListener("abort", onAbort, { once: true });
+    if (signal?.aborted) {
+      onAbort();
+    }
+  });
 }
 
 async function maybeYieldHostedPreparedAssistantDeliveryDrain(input: {
@@ -2594,14 +2793,17 @@ function hasNonReplayableHostedNewsletterRecipientIntent(input: {
     if (intent.deliveryIdempotencyKey !== input.deliveryIdempotencyKey) {
       return false;
     }
+    const target = parseHostedEmailThreadTarget(intent.explicitTarget);
+    if (target?.recipientMemberId !== input.memberId) {
+      return false;
+    }
+    if (intent.lastError?.code === "ASSISTANT_DELIVERY_RETRY_EXHAUSTED") {
+      return true;
+    }
     if (
       input.deliveryIdempotencyKey.startsWith("group-newsletter:")
       && intent.turnId !== input.turnId
     ) {
-      return false;
-    }
-    const target = parseHostedEmailThreadTarget(intent.explicitTarget);
-    if (target?.recipientMemberId !== input.memberId) {
       return false;
     }
     if (

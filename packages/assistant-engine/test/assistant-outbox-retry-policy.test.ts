@@ -5,8 +5,11 @@ import {
 } from '@murphai/operator-config/assistant-cli-contracts'
 
 import {
+  ASSISTANT_OUTBOX_MAX_RETRY_ATTEMPTS,
   createAssistantDeliveryAmbiguousError,
   createAssistantDeliveryConfirmationPendingError,
+  createAssistantDeliveryRetryExhaustedError,
+  isAssistantOutboxRetryBudgetExhausted,
   isAssistantOutboxRetryableError,
   normalizeAssistantDeliveryError,
   resolveAssistantOutboxRetryDelayMs,
@@ -185,6 +188,20 @@ describe('assistant outbox retry policy', () => {
       message:
         'Assistant outbound delivery could not be confirmed safely and will not be resent automatically. hosted journal stale',
       retryable: false,
+    })
+  })
+
+  it('bounds automatic retries by persisted dispatch attempts', () => {
+    expect(isAssistantOutboxRetryBudgetExhausted(createIntent({
+      attemptCount: ASSISTANT_OUTBOX_MAX_RETRY_ATTEMPTS - 1,
+    }))).toBe(false)
+    expect(isAssistantOutboxRetryBudgetExhausted(createIntent({
+      attemptCount: ASSISTANT_OUTBOX_MAX_RETRY_ATTEMPTS,
+    }))).toBe(true)
+    expect(createAssistantDeliveryRetryExhaustedError()).toEqual({
+      code: 'ASSISTANT_DELIVERY_RETRY_EXHAUSTED',
+      message:
+        'Assistant outbound delivery reached its automatic retry limit and will not be retried automatically.',
     })
   })
 

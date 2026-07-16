@@ -13,8 +13,6 @@ type EnvSource = Readonly<Record<string, string | undefined>>;
 
 const HOSTED_ASSISTANT_MODEL_PRICING_ERROR =
   "HOSTED_ASSISTANT_MODEL must be one of gpt-5.5, gpt-5.6-sol, gpt-5.6-terra, gpt-5.6-luna for hosted AI usage allowance pricing.";
-const HOSTED_ASSISTANT_GPT_56_ROLLOUT_ERROR =
-  "production hosted assistant GPT-5.6 deploys must set HOSTED_EXECUTION_CONTAINER_ROLLOUT=immediate; rollback floor is HOSTED_ASSISTANT_MODEL=gpt-5.5.";
 const HOSTED_STATE_ISOLATION_ROLLOUT_ERROR =
   "production state-isolation deploys must use HOSTED_EXECUTION_CONTAINER_ROLLOUT=immediate; rollback floor is the audience-key and selector-scope runner bundle.";
 
@@ -412,7 +410,7 @@ describe("deploy preflight helpers", () => {
         }),
         { deployWorker: true },
       ),
-    ).toContain(HOSTED_ASSISTANT_GPT_56_ROLLOUT_ERROR);
+    ).toContain(HOSTED_STATE_ISOLATION_ROLLOUT_ERROR);
 
     expect(
       listHostedDeployEnvironmentInvariantErrors(
@@ -422,7 +420,7 @@ describe("deploy preflight helpers", () => {
         }),
         { deployWorker: true },
       ),
-    ).not.toContain(HOSTED_ASSISTANT_GPT_56_ROLLOUT_ERROR);
+    ).not.toContain(HOSTED_STATE_ISOLATION_ROLLOUT_ERROR);
 
     expect(
       listHostedDeployEnvironmentInvariantErrors(

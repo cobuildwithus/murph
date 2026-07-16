@@ -140,6 +140,86 @@ describe("hosted Linq observability stores", () => {
     },
   );
 
+  it("persists message.sent correlation without advancing delivery or line health", async () => {
+    const fixture = createObservabilityPrismaFixture();
+    const messageId = "provider_message_sent_sms";
+    fixture.hostedLinqLineFindUnique.mockResolvedValueOnce({
+      phoneNumberHint: "+0000",
+      phoneNumberLookupKey: "hbidx:phone:runtime-line",
+    });
+
+    await expect(recordHostedLinqRuntimeDeliveryOutcomeTx({
+      acceptedAt: new Date("2026-03-26T12:00:01.000Z"),
+      attemptedAt: new Date("2026-03-26T12:00:00.000Z"),
+      idempotencyKey: "assistant-outbox:intent_sent_sms",
+      linqChatId: "chat_sent_sms",
+      messageId,
+      phoneNumber: "+15550000000",
+      prisma: fixture.prisma as never,
+      sourceRef: "intent_sent_sms",
+      targetKind: "participant",
+      userId: "member_123",
+    })).resolves.toMatchObject({
+      recorded: true,
+    });
+
+    const acceptedDelivery = fixture.hostedLinqDeliveryCreate.mock.calls[0]?.[0]?.data;
+    expect(acceptedDelivery).toMatchObject({
+      messageLookupKey: expect.stringMatching(/^hbidx:linq-message:/u),
+      status: "accepted",
+    });
+    const deliveryUpdateCount = fixture.hostedLinqDeliveryUpdateMany.mock.calls.length;
+    const lineUpdateCount = fixture.hostedLinqLineUpdate.mock.calls.length;
+    const lineUpdateManyCount = fixture.hostedLinqLineUpdateMany.mock.calls.length;
+
+    const event = requireParsedProviderEvent(buildProviderEvent({
+      createdAt: "2026-03-26T12:00:03.000Z",
+      data: {
+        chat: {
+          id: "chat_sent_sms",
+          owner_handle: {
+            handle: "+15550000000",
+            is_me: true,
+            service: "SMS",
+          },
+        },
+        direction: "outbound",
+        id: messageId,
+        sent_at: "2026-03-26T12:00:02.000Z",
+        service: "SMS",
+      },
+      eventId: "evt_sent_sms",
+      eventType: "message.sent",
+    }));
+
+    await expect(ingestHostedLinqProviderEventTx({
+      event,
+      prisma: fixture.prisma as never,
+      receivedAt: new Date("2026-03-26T12:00:04.000Z"),
+    })).resolves.toEqual({
+      alertIds: [],
+      duplicate: false,
+    });
+
+    expect(fixture.hostedLinqProviderEventCreateMany).toHaveBeenCalledWith(
+      expect.objectContaining({
+        data: expect.objectContaining({
+          deliveryStatus: null,
+          direction: "outbound",
+          eventType: "message.sent",
+          messageLookupKey: acceptedDelivery?.messageLookupKey,
+          providerCreatedAt: new Date("2026-03-26T12:00:02.000Z"),
+          service: "SMS",
+        }),
+        skipDuplicates: true,
+      }),
+    );
+    expect(fixture.hostedLinqDeliveryUpdateMany).toHaveBeenCalledTimes(deliveryUpdateCount);
+    expect(fixture.hostedLinqLineUpdate).toHaveBeenCalledTimes(lineUpdateCount);
+    expect(fixture.hostedLinqLineUpdateMany).toHaveBeenCalledTimes(lineUpdateManyCount);
+    expect(fixture.hostedLinqAlertCreateMany).not.toHaveBeenCalled();
+  });
+
   it("records failed provider events, updates projections, and claims one event-scoped alert", async () => {
     const fixture = createObservabilityPrismaFixture();
     fixture.hostedLinqDeliveryFindFirst.mockResolvedValue({

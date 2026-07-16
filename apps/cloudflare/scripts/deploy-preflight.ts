@@ -37,9 +37,7 @@ const HOSTED_DEPLOY_CONTEXTS = [
   "production",
 ] as const;
 const REQUIRED_HOSTED_ASSISTANT_PROVIDER = "openai";
-const PRODUCTION_HOSTED_ASSISTANT_ROLLBACK_MODEL = "gpt-5.5";
 const PRODUCTION_HOSTED_ASSISTANT_REASONING_EFFORT = "low";
-const GPT_56_HOSTED_ASSISTANT_MODEL_CONTAINER_ROLLOUT = "immediate";
 const STATE_ISOLATION_CONTAINER_ROLLOUT = "immediate";
 const HOSTED_DEPLOY_CONTEXT_SET = new Set<string>(HOSTED_DEPLOY_CONTEXTS);
 
@@ -304,18 +302,6 @@ export function listHostedDeployEnvironmentInvariantErrors(
   if (hostedExecutionContainerRollout !== STATE_ISOLATION_CONTAINER_ROLLOUT) {
     errors.push(
       `production state-isolation deploys must use HOSTED_EXECUTION_CONTAINER_ROLLOUT=${STATE_ISOLATION_CONTAINER_ROLLOUT}; rollback floor is the audience-key and selector-scope runner bundle.`,
-    );
-  }
-
-  if (
-    hostedAssistantModelIsPriced
-    && hostedAssistantModel
-    && hostedAssistantModel !== PRODUCTION_HOSTED_ASSISTANT_ROLLBACK_MODEL
-    && hostedExecutionContainerRollout
-      !== GPT_56_HOSTED_ASSISTANT_MODEL_CONTAINER_ROLLOUT
-  ) {
-    errors.push(
-      `production hosted assistant GPT-5.6 deploys must set HOSTED_EXECUTION_CONTAINER_ROLLOUT=${GPT_56_HOSTED_ASSISTANT_MODEL_CONTAINER_ROLLOUT}; rollback floor is HOSTED_ASSISTANT_MODEL=${PRODUCTION_HOSTED_ASSISTANT_ROLLBACK_MODEL}.`,
     );
   }
 
