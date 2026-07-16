@@ -1698,27 +1698,6 @@ function deviceEventContentKey(record: EventRecord): string {
   return stableStringify(content);
 }
 
-function isLegacyWhoopSleepTypeEnrichment(
-  existing: EventRecord,
-  incoming: EventRecord,
-): boolean {
-  if (
-    existing.kind !== "sleep_session"
-    || incoming.kind !== "sleep_session"
-    || existing.externalRef?.system !== "whoop"
-    || existing.externalRef.resourceType !== "sleep"
-    || incoming.externalRef?.system !== "whoop"
-    || incoming.externalRef.resourceType !== "sleep"
-    || existing.sleepType !== undefined
-    || (incoming.sleepType !== "main_sleep" && incoming.sleepType !== "nap")
-  ) {
-    return false;
-  }
-
-  return deviceEventContentKey({ ...existing, sleepType: incoming.sleepType })
-    === deviceEventContentKey(incoming);
-}
-
 function deviceEventContentFingerprint(record: EventRecord): string {
   return createHash("sha256").update(deviceEventContentKey(record)).digest("hex");
 }
@@ -2464,6 +2443,37 @@ function eventSpineRevisionsAreComplete(
     && revisions.size === maxRevision;
 }
 
+function legacyWhoopSleepTypeBaselineRevision(
+  index: EventExternalRefIndex,
+  refKey: string,
+  eventId: string,
+  incoming: EventRecord,
+): number | null {
+  if (
+    incoming.kind !== "sleep_session"
+    || incoming.externalRef?.system !== "whoop"
+    || incoming.externalRef.resourceType !== "sleep"
+    || (incoming.sleepType !== "main_sleep" && incoming.sleepType !== "nap")
+  ) {
+    return null;
+  }
+
+  const { sleepType: _sleepType, ...withoutSleepType } = incoming;
+  const baselineFingerprint = deviceEventContentFingerprint(withoutSleepType);
+  const revisions = index.deviceOwnerRevisionsByRefKeyAndFingerprint
+    .get(refKey)
+    ?.get(baselineFingerprint)
+    ?.get(eventId);
+  // Exact device replays do not append revisions. Use the earliest match as
+  // the provider baseline because later matching revisions may be supported
+  // user edits that retained source=device.
+  let baselineRevision: number | null = null;
+  for (const revision of revisions ?? []) {
+    baselineRevision = Math.min(baselineRevision ?? revision, revision);
+  }
+  return baselineRevision;
+}
+
 function resolveDeviceEventIdentity(
   entry: PreparedDeviceEventEntry,
   context: DeviceEventIdentityContext,
@@ -2801,8 +2811,10 @@ async function reconcileDeviceEventEntriesByExternalRef(
         records.push(latest);
         continue;
       }
-      const legacySleepTypeEnrichment = sourceVersionComparison === 0
-        && isLegacyWhoopSleepTypeEnrichment(indexedProviderMatch.indexedRecord, entry.record);
+      const sleepTypeBaselineRevision = sourceVersionComparison === 0
+        ? legacyWhoopSleepTypeBaselineRevision(index, refKey, latest.id, entry.record)
+        : null;
+      const legacySleepTypeEnrichment = sleepTypeBaselineRevision !== null;
       if (
         sourceVersionComparison === 0
         && !legacySleepTypeEnrichment
@@ -2819,7 +2831,7 @@ async function reconcileDeviceEventEntriesByExternalRef(
         && (
           isDeletedEventSpineRecord(latest)
           || eventSpineRevision(latest)
-            !== eventSpineRevision(indexedProviderMatch.indexedRecord)
+            !== sleepTypeBaselineRevision
           || matchedEntries.some((match) =>
             hasHistoricalExternalRefUserAuthoredChanges(match.indexedMatch)
           )
