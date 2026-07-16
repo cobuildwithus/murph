@@ -61,6 +61,12 @@ export interface SignalHostedUserRuntimeWorkflowInput {
   userId: string;
 }
 
+export interface HostedMailboxAppendKnownCheckpoint {
+  lane: HostedMailboxLane;
+  laneSeq: string;
+  userId: string;
+}
+
 export interface SignalHostedMailboxAppendInput {
   abortSignal?: AbortSignal;
   client?: HostedRuntimeTemporalSignalClient | null;
@@ -72,13 +78,21 @@ export interface SignalHostedMailboxAppendInput {
   // and workspace upsert. Active access is still rechecked before signaling
   // because legacy Temporal histories may execute mailbox pointers without
   // the reconciliation gate.
-  knownCheckpoint?: {
-    lane: HostedMailboxLane;
-    laneSeq: string;
-    userId: string;
-  };
+  knownCheckpoint?: HostedMailboxAppendKnownCheckpoint;
   mailboxItemId: string;
   prisma?: PrismaClient;
+}
+
+export interface PrepareHostedMailboxAppendRuntimeSignalInput {
+  expectedUserId?: string | null;
+  knownCheckpoint: HostedMailboxAppendKnownCheckpoint;
+  mailboxItemId: string;
+  prisma?: PrismaClient;
+}
+
+export interface PreparedHostedMailboxAppendRuntimeSignal {
+  signal: HostedRuntimeSignal;
+  userId: string;
 }
 
 export interface SignalHostedBrowserVaultRefreshInput {
@@ -129,7 +143,25 @@ export function hostedUserRuntimeWorkflowId(userId: string): string {
 export async function signalHostedMailboxAppendRuntime(
   input: SignalHostedMailboxAppendInput,
 ): Promise<HostedRuntimeSignalResult> {
-  const mailboxItem = input.knownCheckpoint ?? await readHostedMailboxItemCheckpointById({
+  if (input.knownCheckpoint) {
+    const prepared = await prepareHostedMailboxAppendRuntimeSignal({
+      expectedUserId: input.expectedUserId,
+      knownCheckpoint: input.knownCheckpoint,
+      mailboxItemId: input.mailboxItemId,
+      prisma: input.prisma,
+    });
+    return signalHostedUserRuntimeWorkflow({
+      abortSignal: input.abortSignal,
+      client: input.client,
+      environment: input.environment,
+      ensureWorkspace: false,
+      prisma: input.prisma,
+      signal: prepared.signal,
+      userId: prepared.userId,
+    });
+  }
+
+  const mailboxItem = await readHostedMailboxItemCheckpointById({
     mailboxItemId: input.mailboxItemId,
     prisma: input.prisma,
   });
@@ -141,19 +173,12 @@ export async function signalHostedMailboxAppendRuntime(
     expectedUserId: input.expectedUserId ?? null,
     mailboxItemUserId: mailboxItem.userId,
   });
-  if (input.knownCheckpoint) {
-    await requireHostedRuntimeActiveAccess(mailboxItem.userId, {
-      code: "HOSTED_RUNTIME_USER_INACTIVE",
-      message: "Hosted runtime user is not active.",
-      prisma: input.prisma ?? getPrisma(),
-    });
-  }
 
   return signalHostedUserRuntimeWorkflow({
     abortSignal: input.abortSignal,
     client: input.client,
     environment: input.environment,
-    ensureWorkspace: input.knownCheckpoint === undefined,
+    ensureWorkspace: true,
     prisma: input.prisma,
     signal: parseHostedRuntimeSignal({
       kind: "mailbox_appended",
@@ -163,6 +188,30 @@ export async function signalHostedMailboxAppendRuntime(
     }),
     userId: mailboxItem.userId,
   });
+}
+
+export async function prepareHostedMailboxAppendRuntimeSignal(
+  input: PrepareHostedMailboxAppendRuntimeSignalInput,
+): Promise<PreparedHostedMailboxAppendRuntimeSignal> {
+  assertExpectedHostedMailboxOwner({
+    expectedUserId: input.expectedUserId ?? null,
+    mailboxItemUserId: input.knownCheckpoint.userId,
+  });
+  await requireHostedRuntimeActiveAccess(input.knownCheckpoint.userId, {
+    code: "HOSTED_RUNTIME_USER_INACTIVE",
+    message: "Hosted runtime user is not active.",
+    prisma: input.prisma ?? getPrisma(),
+  });
+
+  return {
+    signal: parseHostedRuntimeSignal({
+      kind: "mailbox_appended",
+      lane: input.knownCheckpoint.lane,
+      laneSeq: input.knownCheckpoint.laneSeq,
+      mailboxItemId: input.mailboxItemId,
+    }),
+    userId: input.knownCheckpoint.userId,
+  };
 }
 
 export async function signalHostedBrowserVaultRefreshRuntime(

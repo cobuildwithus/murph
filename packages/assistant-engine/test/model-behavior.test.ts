@@ -86,6 +86,7 @@ describe('assistant execution prompt contract', () => {
       'trim introductions, repetition, reassurance, and optional background first',
     )
     expect(prompt).not.toContain('Final replies should briefly state')
+    expect(prompt).not.toContain('extra nudges')
     expect(
       buildAssistantExecutionBehaviorText({ profile: 'gpt5-agentic' }),
     ).toContain('Prefer direct tool use over telling the user')
@@ -1250,7 +1251,7 @@ describe('assistant system prompt cache stability', () => {
       createCommonCodexPromptInput({ assistantCliContract: null }),
     )
 
-    expect(layers.staticCacheableCorePrompt.length).toBeLessThanOrEqual(7_500)
+    expect(layers.staticCacheableCorePrompt.length).toBeLessThanOrEqual(8_000)
     expect(layers.stableRouteCapabilityPrompt.length).toBeLessThanOrEqual(62_000)
   })
 
@@ -1501,7 +1502,7 @@ Execution context:
       'Current Murph product base URL for user-facing app links: http://localhost:3000',
     )
     expect(promptA.cacheMetadata.staticPromptHash).toBe(
-      '78e8502b85d5a35629dc24db70f6c6a429b489d6240464f9d12cf0fa497f5ef7',
+      '47fdddb1886c2f567d1f23ba944b3db3b1deec61f385ac7a161a5289c75ca0b7',
     )
     expect(promptA.cacheMetadata.toolSchemaHash).toBe(
       'assistant-tool-schema-common-codex-test',
@@ -1697,12 +1698,25 @@ describe('assistant experiment onboarding guidance', () => {
     )
   })
 
-  it('preserves the PR #480 context-first recommendation contract', () => {
+  it('keeps context-first advice while expanding longitudinal discovery and proactive support', () => {
     const prompt = buildAssistantSystemPrompt(createCommonCodexPromptInput())
 
+    expect(prompt).toContain(
+      'You are Murph, the user\'s durable, long-term personal health assistant.',
+    )
+    expect(prompt).toContain(
+      'Returning between messages is a core edge over stateless chatbots.',
+    )
+    expect(prompt).toContain(
+      'Offer specific reminders, check-ins, monitoring, or follow-ups; once authorized, initiate them when useful.',
+    )
+    expect(prompt).toContain('Delight is care.')
+    expect(prompt).toContain(
+      'use an image, voice memo, or song only when requested or known to be preferred',
+    )
     expect(prompt).toContain('Understand before recommending:')
     expect(prompt).toContain(
-      'Murph\'s advantage is accumulated personal context. Do not replace that advantage with a generic tip list.',
+      'Murph\'s edge is durable context: a progressively complete picture.',
     )
 
     // Data-first grounding opens with evidence rather than generic advice.
@@ -1710,15 +1724,18 @@ describe('assistant experiment onboarding guidance', () => {
       'Before personal improvement or new-goal advice, or whether to take, keep, reorder, or drop a supplement or other intervention, read personal evidence that could change the answer. Open with what it shows (such as the latest panel date and markers), not goals alone; if none exists, say so.',
     )
 
-    // Discovery stays bounded across turns: one concrete question per message.
+    // Discovery has no arbitrary question cap, but stays paced and useful.
     expect(prompt).toContain(
-      'ask the single most useful concrete, textable question.',
+      'Health problems have interacting variables the user may not mention.',
     )
     expect(prompt).toContain(
-      'Continue only as a bounded discovery loop, one question per message, until the picture supports personal advice.',
+      'then ask every needed concrete question—one at a time on texting routes, or a short related set elsewhere.',
     )
     expect(prompt).toContain(
-      'If answers get short or the user pushes back, recommend from what is known and name the uncertainty instead of continuing an intake.',
+      'Continue only while answers could materially change safety, interpretation, action, or follow-through; otherwise name uncertainty and help now.',
+    )
+    expect(prompt).toContain(
+      'If the user declines, wants an answer now, or has low capacity, help from what is known and name uncertainty.',
     )
 
     // Motivation is captured once, in the user's own words.
@@ -1731,10 +1748,10 @@ describe('assistant experiment onboarding guidance', () => {
 
     // Context questions earn their place and durable discoveries remain controllable.
     expect(prompt).toContain(
-      'Ask proactive context only to improve help, unlock action, resolve safety, personalize near-term follow-up, or meet a finite skill contract.',
+      'Across useful conversations, deepen longitudinal understanding when context could improve current or future help, unlock action, resolve safety, personalize follow-through, or meet a finite skill contract.',
     )
     expect(prompt).toContain(
-      'otherwise do not build generic profiles.',
+      'do not build generic profiles or re-ask known facts.',
     )
     expect(prompt).toContain(
       'Save durable context to its owner in the same turn.',
@@ -1760,7 +1777,7 @@ describe('assistant experiment onboarding guidance', () => {
       'do not force a heavier flow.',
     )
     expect(prompt).toContain(
-      'after grounding in available sources, a discovery question under the understand-before-recommending rules is a valid complete turn.',
+      'For personal health, ground in available sources, then follow the understand-before-recommending rules; a context-building question is a valid complete turn.',
     )
 
     // Quick/general/safety and low-capacity asks bypass discovery when it would delay help.
@@ -1776,6 +1793,14 @@ describe('assistant experiment onboarding guidance', () => {
     expect(prompt.indexOf('Follow-through and authorization:')).toBeGreaterThan(
       prompt.indexOf('Understand before recommending:'),
     )
+
+    const groupPrompt = buildAssistantSystemPrompt(
+      createCommonCodexPromptInput({ conversationScope: 'group' }),
+    )
+    expect(groupPrompt).not.toContain(
+      'Returning between messages is a core edge over stateless chatbots.',
+    )
+    expect(groupPrompt).not.toContain('Deepen longitudinal understanding when')
   })
 
   it('routes running and cardio through the compact movement overlap rules', () => {
@@ -1892,6 +1917,7 @@ describe('assistant notification decision guidance', () => {
   it('keeps group notification decisions on room-owned context and actions', () => {
     const prompt = buildAssistantNotificationDecisionSystemPromptWithCacheMetadata(
       createCommonNotificationPromptInput({
+        assistantTone: 'casual',
         assistantContextSnapshotPrompt: 'PRIVATE_GROUP_NOTIFICATION_CONTEXT',
         assistantHostedDeviceConnectAvailable: true,
         assistantHostedDeviceConnectProviders: [
@@ -1909,7 +1935,32 @@ describe('assistant notification decision guidance', () => {
     expect(prompt).not.toContain('Hosted wearable connection links are available')
     expect(prompt).not.toContain('apps.apple.com/us/app/murph-ai')
     expect(prompt).not.toContain('WHOOP: More > App Settings')
-    expect(prompt).not.toContain('ground yourself in what the user has actually done today')
+    expect(prompt).not.toContain('ground yourself in what the user has actually done in the relevant action window')
+    expect(prompt).not.toContain('Assistant tone preference:')
+  })
+
+  it('applies the room tone only to hosted group notification decisions', () => {
+    const hostedPrompt = buildAssistantNotificationDecisionSystemPromptWithCacheMetadata(
+      createCommonNotificationPromptInput({
+        assistantTone: 'casual',
+        conversationScope: 'group',
+        hostedRuntime: true,
+      }),
+    ).prompt
+
+    expect(hostedPrompt).toContain('Assistant tone preference:')
+    expect(hostedPrompt).toContain(
+      'Casual is a persistent user-facing writing invariant.',
+    )
+
+    const nonHostedPrompt = buildAssistantNotificationDecisionSystemPromptWithCacheMetadata(
+      createCommonNotificationPromptInput({
+        assistantTone: 'casual',
+        conversationScope: 'group',
+        hostedRuntime: false,
+      }),
+    ).prompt
+    expect(nonHostedPrompt).not.toContain('Assistant tone preference:')
   })
 
   it('renders only a fail-closed skip contract for an unverified external audience', () => {
@@ -1965,18 +2016,27 @@ describe('assistant notification decision guidance', () => {
       }),
     ).prompt
 
-    // Outcome-first framing: decide whether to send, default to silence.
+    // The automation is authorized support: send when its purpose still holds.
     expect(prompt).toContain(
-      'decide whether this reminder still earns a send',
+      'This automation is authorized support.',
     )
-    expect(prompt).toContain('Default to staying silent.')
+    expect(prompt).toContain(
+      'Prefer a timely send; skip only for a concrete current reason.',
+    )
+    expect(prompt).toContain(
+      'richer media only when the automation marks that modality welcome and privacy-safe',
+    )
+    expect(prompt).toContain(
+      'Otherwise use text; always use plain text for urgent, sensitive, private, or time-critical messages.',
+    )
+    expect(prompt).not.toContain('Default to staying silent.')
 
-    // Canonical task capability + ground in what the user actually did today.
+    // Canonical task capability + ground in the relevant action window.
     expect(prompt).toContain(
       'You have the same vault read and write tools as an interactive Murph turn for the task\'s canonical data.',
     )
     expect(prompt).toContain(
-      'ground yourself in what the user has actually done today',
+      'ground yourself in what the user has actually done in the relevant action window',
     )
 
     // Retrieval budget as a stopping rule, plus the deterministic skip signal.
@@ -1990,10 +2050,10 @@ describe('assistant notification decision guidance', () => {
 
     // Consolidated skip / send conditions (no per-type triplication).
     expect(prompt).toContain(
-      'Skip when the run is inactive, reminders were declined or moved, the day\'s session or log is already complete, the plan no longer matches, the support window ended, or the user already did the thing.',
+      'Skip when the run is inactive, reminders were declined or moved, the relevant session, log, or behavior occurrence is already complete, the plan no longer matches, the support window ended, or the user already did the thing.',
     )
     expect(prompt).toContain(
-      'Send only when the reminder\'s purpose still holds: the due check says notify for checks it governs, scheduled prep or support is still ahead, missing data blocks interpretation, a review is due, or safety needs outreach.',
+      'The reminder\'s purpose still holds when the due check says notify for checks it governs, scheduled prep or support is still ahead, missing data blocks interpretation, a review is due, or safety needs outreach.',
     )
 
     // Good-message guidance as outcome, not an enumerated per-type list.
@@ -2012,6 +2072,15 @@ describe('assistant notification decision guidance', () => {
       'For behavior-support, routine, habit, or adherence automations, choose `skip` or `send_message`;',
     )
     expect(prompt).toContain(
+      'normal cue, explicitly authorized accountability check-in, or repair question/proposal',
+    )
+    expect(prompt).toContain(
+      'Completion or an already reported outcome means skip.',
+    )
+    expect(prompt).toContain(
+      'Unavailable, delayed, stale, or missing evidence means unknown, never missed; only an unknown outcome may receive one neutral outcome question.',
+    )
+    expect(prompt).toContain(
       'ask one narrow repair question in the message or skip instead of repeating stale reminder copy',
     )
     expect(prompt).toContain('Scheduled turns do not own automation lifecycle')
@@ -2021,7 +2090,7 @@ describe('assistant notification decision guidance', () => {
 
     // The two true invariants from the incident.
     expect(prompt).toContain(
-      'Never send a reminder that contradicts what the user already did today',
+      'Never send a reminder that contradicts what the user already did in the relevant action window',
     )
     expect(prompt).toContain(
       'ask one plain question they can answer in their own words, and derive the structured values like grams or totals yourself',
@@ -2157,7 +2226,7 @@ describe('assistant conversation scope', () => {
     expect(prompt).not.toContain('Assistant style settings')
     expect(prompt).toContain('Use only accountless built-in service tools')
     expect(prompt).toContain('A group container cannot own a Family plan')
-    expect(prompt).not.toContain('Assistant tone preference:')
+    expect(prompt).toContain('Assistant tone preference:')
     expect(prompt).not.toContain('Murph onboarding:')
     expect(prompt).not.toContain('/settings?voice=true')
     expect(prompt).not.toContain('vault-cli assistant style set')
@@ -2192,6 +2261,47 @@ describe('assistant conversation scope', () => {
       `${MURPH_PRODUCT_ORIGIN}/settings?addEmail=true`,
     )
     expect(prompt).not.toContain('`/settings?addEmail=true`')
+  })
+
+  it('presents hosted Linq style controls as room-owned settings', () => {
+    const prompt = buildAssistantSystemPrompt(createCommonCodexPromptInput({
+      assistantPersonality: {
+        detail: 7,
+        humor: 9,
+        push: 8,
+      },
+      assistantStyleSettingsAvailable: true,
+      assistantTone: 'casual',
+      channel: 'linq',
+      conversationScope: 'group',
+      hostedRuntime: true,
+    }))
+
+    expect(prompt).toContain(
+      "Tone, Voice, Humor, Push, and Detail belong to this room's synthetic Murph runtime",
+    )
+    expect(prompt).toContain(
+      "They never read or change any participant's private Murph settings",
+    )
+    expect(prompt).toContain('`murph.personalization`')
+    expect(prompt).toContain('`murph.assistant_style`')
+    expect(prompt).toContain(
+      'Assistant personality preferences for this group room:',
+    )
+    expect(prompt).toContain('Humor 9/10')
+    expect(prompt).toContain('Push 8/10')
+    expect(prompt).toContain('Detail 7/10')
+    expect(prompt).toContain(
+      'Casual is a persistent user-facing writing invariant',
+    )
+    expect(prompt).toContain(
+      'Model and reasoning controls remain unavailable in a group',
+    )
+    expect(prompt).toContain(
+      'Saved room-style changes begin on a later group turn',
+    )
+    expect(prompt).not.toContain('/settings?voice=true')
+    expect(prompt).not.toContain('Use `/settings` for tone')
   })
 
   it('preserves personal capabilities in a direct conversation', () => {
@@ -2239,6 +2349,7 @@ describe('assistant conversation scope', () => {
 
     expect(prompt).toContain('Email replies can converse about this group')
     expect(prompt).toContain('Group-email replies cannot create, edit, import, pause')
+    expect(prompt).toContain("change this room's Murph style")
     expect(prompt).not.toContain('existing automation in this bound runtime vault')
     expect(prompt).not.toContain('`vault-cli automation set-status`')
     expect(prompt).not.toContain('Group automation writes are current-room-only')

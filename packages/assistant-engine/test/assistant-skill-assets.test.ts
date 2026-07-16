@@ -708,6 +708,13 @@ describe('assistant skill assets', () => {
     expect(raw).not.toContain('temporarily unavailable')
     expect(raw).toContain('does not remove them from the iMessage chat')
     expect(raw).toContain('owner_cannot_leave')
+    expect(raw).toContain('## Room style settings')
+    expect(raw).toContain('shared room settings, not the visible sender\'s personal')
+    expect(raw).toContain('`murph.personalization`')
+    expect(raw).toContain('`murph.assistant_style`')
+    expect(raw).toMatch(/does not restyle the\s+reply already running/u)
+    expect(raw).toContain('Group email may')
+    expect(raw).toContain('cannot change that style')
     expect(raw).toContain('group-email.v0')
     expect(raw).toContain('https://www.withmurph.ai/settings?addEmail=true')
     expect(raw).not.toContain('`/settings?addEmail=true`')
@@ -1332,6 +1339,49 @@ describe('assistant skill assets', () => {
     expect(raw).toContain(
       'A future notification turn may not read this skill, so include the compact support loop directly in the automation instructions.',
     )
+    expect(compact).toContain(
+      'A reminder is a cue. An accountability check-in is a separate, later action whose job is to learn the outcome, not repeat the cue.',
+    )
+    expect(compact).toContain(
+      'A direct request to check back later authorizes that exact check-in.',
+    )
+    expect(compact).toContain(
+      'A request such as "remind me" or "remind me every other day" authorizes the cue only.',
+    )
+    expect(compact).toContain(
+      'Otherwise create the check-in only after a clear yes to that exact bounded offer.',
+    )
+    expect(compact).toContain(
+      'Unavailable, delayed, stale, or missing data is `unknown`, not `missed`.',
+    )
+    expect(compact).toContain(
+      'A plan, reminder, automation record, statement of intent, or unrelated recent activity is not completion evidence.',
+    )
+    expect(compact).toContain(
+      'Create both only when the user requested or accepted both; a check-in-only request does not authorize an extra cue.',
+    )
+    expect(compact).toContain(
+      'Scheduled turns can skip or send their own occurrence; they do not create or mutate future automations.',
+    )
+    expect(compact).toContain(
+      'Read the latest relevant conversation for a completion report, correction, cancellation, reschedule, or changed plan.',
+    )
+    expect(compact).toContain(
+      "Match the behavior and action window using event time in the user's timezone; an ingestion or sync timestamp does not prove when the behavior happened.",
+    )
+    expect(compact).toContain(
+      'Return `skip`; do not ask the user to confirm it again.',
+    )
+    expect(compact).toContain(
+      'Return `skip`; do not ask whether it happened or piggyback a repair onto this check-in.',
+    )
+    expect(compact).toContain(
+      'Ask one neutral, easy-to-answer question. Never state or imply that the user failed',
+    )
+    expect(compact).toContain(
+      'Silence after that check-in does not authorize another same-occurrence follow-up.',
+    )
+    expect(compact).toContain('Prefer bounded support. Never create open-ended nag loops.')
     expect(raw).toContain('Count an ignored support attempt only when')
     expect(raw).toContain('When support is working, fade it instead of adding more.')
     expect(raw).toContain('Use `completed`, `partial`, `missed`, or `skipped` session status')

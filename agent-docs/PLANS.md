@@ -13,6 +13,7 @@ Execution plans are first-class artifacts in this repository.
 - Create a plan: `bash scripts/open-exec-plan.sh <slug> "<title>"`
 - Complete a plan: `bash scripts/close-exec-plan.sh <active-plan-path>`
 - Finish a plan-bearing task and commit it: `bash scripts/finish-task <active-plan-path> "brief summary" <path> [path ...]`
+- After its PR is merged or closed, retire the task worktree from another checkout: `scripts/retire-worktree <path>`
 
 ## When To Create A Plan
 

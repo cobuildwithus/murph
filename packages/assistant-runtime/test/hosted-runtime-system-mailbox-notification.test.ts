@@ -1520,9 +1520,21 @@ describe("hosted system mailbox notification execution context", () => {
       });
 
       mocks.executeHostedMailboxEvent.mockRejectedValueOnce(
-        Object.assign(new Error("transient device sync failure"), {
-          code: "HOSTED_DEVICE_SYNC_TRANSIENT",
-        }),
+        Object.assign(
+          new Error(
+            "transient device sync failure for "
+              + "https://r2.example.test/private?X-Amz-Signature=fixture-secret "
+              + "with TOKEN=fixture-token",
+            {
+              cause: new TypeError(
+                "local scratch /tmp/hosted-runtime/snapshot.enc for member_123",
+              ),
+            },
+          ),
+          {
+            code: "HOSTED_DEVICE_SYNC_TRANSIENT",
+          },
+        ),
       );
       const first = await prepareHostedSystemMailboxItemForCheckpoint({
         executionContext: null,
@@ -1533,6 +1545,20 @@ describe("hosted system mailbox notification execution context", () => {
       });
       assert.equal(first?.status, "retryable_failed");
       assert.equal(first.itemId, "mailbox_item_system_device_sync_backoff");
+      const safeErrorMessage =
+        "transient device sync failure for <redacted-url> with TOKEN=<redacted>"
+        + " | local scratch <redacted-path> for <redacted-user-id>";
+      assert.equal(first.errorCode, "HOSTED_DEVICE_SYNC_TRANSIENT");
+      assert.equal(first.errorMessage, safeErrorMessage);
+      const persistedFailure = (
+        await readHostedSystemMailboxState(workspace.vaultRoot)
+      ).pending.find((item) => item.itemId === first.itemId);
+      assert.equal(persistedFailure?.lastErrorCode, "HOSTED_DEVICE_SYNC_TRANSIENT");
+      assert.equal(persistedFailure?.lastErrorMessage, safeErrorMessage);
+      assert.doesNotMatch(
+        first.errorMessage ?? "",
+        /fixture-secret|fixture-token|member_123|\/tmp\//u,
+      );
 
       const second = await prepareHostedSystemMailboxItemForCheckpoint({
         executionContext: null,

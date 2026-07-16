@@ -1,5 +1,7 @@
 import { afterEach, beforeAll, beforeEach, describe, expect, it, vi } from "vitest";
 
+import { deviceSyncError } from "@murphai/device-syncd/errors";
+
 import { hostedOnboardingError } from "@/src/lib/hosted-onboarding/errors";
 
 import { createRouteContext } from "./route-test-helpers";
@@ -267,6 +269,40 @@ describe("hosted device connect intent route", () => {
     );
 
     expect(response.status).toBe(500);
+    expect(mocks.releaseHostedDeviceConnectIntentStart).toHaveBeenCalledWith({
+      claim: "dc_opaque",
+      memberId: "member_123",
+    });
+  });
+
+  it("returns the WHOOP capacity error to the connect page and releases the claim", async () => {
+    mocks.startHostedDeviceSyncConnection.mockRejectedValueOnce(deviceSyncError({
+      code: "WHOOP_DIRECT_CONNECT_CAP_REACHED",
+      httpStatus: 409,
+      message:
+        "Direct WHOOP connections are full right now. You can keep WHOOP syncing through Apple Health in the Murph app.",
+      retryable: false,
+    }));
+
+    const response = await deviceConnectIntentRoute.POST(
+      new Request("https://join.example.test/device/connect/dc_opaque", {
+        headers: {
+          accept: "application/json",
+        },
+        method: "POST",
+      }),
+      createRouteContext({ claim: "dc_opaque" }),
+    );
+
+    expect(response.status).toBe(409);
+    await expect(response.json()).resolves.toEqual({
+      error: {
+        code: "WHOOP_DIRECT_CONNECT_CAP_REACHED",
+        message:
+          "Direct WHOOP connections are full right now. You can keep WHOOP syncing through Apple Health in the Murph app.",
+        retryable: false,
+      },
+    });
     expect(mocks.releaseHostedDeviceConnectIntentStart).toHaveBeenCalledWith({
       claim: "dc_opaque",
       memberId: "member_123",

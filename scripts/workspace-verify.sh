@@ -43,6 +43,7 @@ readonly shell_syntax_check_scripts=(
   "scripts/open-exec-plan.sh"
   "scripts/close-exec-plan.sh"
   "scripts/finish-task"
+  "scripts/retire-worktree"
   "scripts/committer"
   "scripts/package-audit-context.sh"
   "scripts/package-audit-context-full.sh"

@@ -529,7 +529,7 @@ describe('assistant Codex turn planning', () => {
           push: 8,
         },
         assistantTone: null,
-        assistantVoice: null,
+        assistantVoice: 'warm',
       },
       profile: executionProfile,
       promptTimeContext: {
@@ -568,6 +568,7 @@ describe('assistant Codex turn planning', () => {
     expect(plan.developerInstructions).not.toContain('Humor 9/10')
     expect(plan.developerInstructions).not.toContain('Push 8/10')
     expect(plan.developerInstructions).not.toContain('Detail 7/10')
+    expect(plan.assistantPreferredElevenLabsVoiceId).toBeNull()
   })
 
   it('resolves assistant voice preferences into ElevenLabs planning ids', async () => {
@@ -1227,8 +1228,10 @@ describe('assistant Codex turn planning', () => {
       familyPlanTool: { request: vi.fn() },
       groupTool: { request: vi.fn() },
       newsletterTool: { request: vi.fn() },
+      personalizationTool: { request: vi.fn() },
       planUsageTool: { read: vi.fn() },
       phoneCalls: { start: vi.fn() },
+      subscriptionTool: { request: vi.fn() },
     }
     const plan = await resolveAssistantRouteTurnPlan({
       acceptedInputItems: [{ id: 'group-phone-request', source: 'manual' }],
@@ -1245,6 +1248,15 @@ describe('assistant Codex turn planning', () => {
         ...createMessageInput(),
         channel: 'linq',
         deliverResponse: true,
+      },
+      preferenceContext: {
+        assistantPersonality: {
+          detail: 7,
+          humor: 9,
+          push: 8,
+        },
+        assistantTone: 'casual',
+        assistantVoice: 'warm',
       },
       profile: {
         promptProfile: 'conversation',
@@ -1270,6 +1282,24 @@ describe('assistant Codex turn planning', () => {
     expect(plan.developerInstructions).not.toContain('PERSONAL_GROUP_CONTEXT_SNAPSHOT')
     expect(planningMocks.readAssistantContextSnapshotPrompt).not.toHaveBeenCalled()
     expect(plan.developerInstructions).not.toContain('/settings?voice=true')
+    expect(plan.developerInstructions).toContain(
+      'Tone, Voice, Humor, Push, and Detail belong to this room',
+    )
+    expect(plan.developerInstructions).toContain(
+      'Assistant personality preferences for this group room:',
+    )
+    expect(plan.developerInstructions).toContain('Humor 9/10')
+    expect(plan.developerInstructions).toContain('Push 8/10')
+    expect(plan.developerInstructions).toContain('Detail 7/10')
+    expect(plan.developerInstructions).toContain(
+      'Casual is a persistent user-facing writing invariant',
+    )
+    expect(plan.developerInstructions).toContain(
+      'never read or change any participant\'s private Murph settings',
+    )
+    expect(plan.assistantPreferredElevenLabsVoiceId).toBe(
+      resolveAssistantVoiceOptionElevenLabsVoiceId('warm'),
+    )
     expect(plan.developerInstructions).not.toContain('Hosted wearable connection links are available')
     expect(plan.developerInstructions).toContain(
       'existing automation in this bound runtime vault',
@@ -1301,6 +1331,8 @@ describe('assistant Codex turn planning', () => {
         'connected_apps_execute',
         'group',
         'newsletter',
+        'assistant_style',
+        'personalization',
       ]),
     )
     for (const personalTool of [
@@ -1311,9 +1343,212 @@ describe('assistant Codex turn planning', () => {
       'family_plan',
       'plan_usage',
       'send_vault_file',
+      'subscription',
     ]) {
       expect(plan.dynamicTools.map((tool) => tool.name)).not.toContain(personalTool)
     }
+  })
+
+  it.each([
+    ['assistant-input', true],
+    ['manual', true],
+    ['initial', false],
+    ['system', false],
+  ] as const)(
+    'gates subscription actions on eligible current-turn %s input',
+    async (source, expectedAvailable) => {
+      planningMocks.readAssistantCliSurfaceBootstrapContext.mockResolvedValue(
+        'bootstrap contract',
+      )
+      planningMocks.readAssistantContextSnapshotPrompt.mockResolvedValue(null)
+      planningMocks.resolveCodexAssistantTargetCapabilities.mockReturnValue({
+        supportsNativeResume: false,
+      })
+      const hostedToolContext: AssistantHostedToolContext = {
+        ...createHostedToolContext(),
+        subscriptionTool: { request: vi.fn() },
+      }
+
+      const plan = await resolveAssistantRouteTurnPlan({
+        acceptedInputItems: [{
+          id: `ain_${'a'.repeat(32)}`,
+          source,
+        }],
+        executionContext: {
+          hosted: {
+            memberId: 'member-subscription-tool',
+            userEnvKeys: [],
+          },
+        },
+        hostedToolContext,
+        input: createMessageInput(),
+        profile: {
+          promptProfile: 'conversation',
+          threadScope: 'session-thread',
+          toolProfile: 'provider-turn',
+        },
+        promptTimeContext: {
+          currentLocalDate: '2026-07-15',
+          currentTimeZone: 'America/New_York',
+        },
+        route: createRoute(),
+        session: createSession(),
+        sharedPlan: createPrivateSharedPlan(),
+      })
+
+      expect(plan.dynamicTools.some((tool) => tool.name === 'subscription'))
+        .toBe(expectedAvailable)
+    },
+  )
+
+  it('applies hosted room tone and voice to group notification planning only', async () => {
+    planningMocks.readAssistantCliSurfaceBootstrapContext.mockResolvedValue(null)
+    planningMocks.readAssistantContextSnapshotPrompt.mockResolvedValue(null)
+    planningMocks.resolveCodexAssistantTargetCapabilities.mockReturnValue({
+      supportsNativeResume: false,
+    })
+    const sharedPlan = createSharedPlan({}, {
+      channel: 'linq',
+      effectiveThreadIsDirect: false,
+      threadId: 'group-notification-thread',
+      threadIsDirect: false,
+    })
+    const common = {
+      input: {
+        ...createMessageInput(),
+        channel: 'linq',
+        threadIsDirect: false,
+      },
+      preferenceContext: {
+        assistantPersonality: null,
+        assistantTone: 'casual' as const,
+        assistantVoice: 'warm' as const,
+      },
+      profile: {
+        promptProfile: 'notification-decision' as const,
+        threadScope: 'session-thread' as const,
+        toolProfile: 'notification-turn' as const,
+      },
+      promptTimeContext: {
+        currentLocalDate: '2026-07-16',
+        currentTimeZone: 'America/New_York',
+      },
+      route: createRoute(),
+      session: createSession(),
+      sharedPlan,
+    }
+
+    const hostedPlan = await resolveAssistantRouteTurnPlan({
+      ...common,
+      executionContext: {
+        hosted: {
+          memberId: 'member-group-container',
+          progressDeliveryDependencies: {},
+          providerFetch: null,
+          userEnvKeys: [],
+        },
+      },
+    })
+    expect(hostedPlan.systemPrompt).toContain('Assistant tone preference:')
+    expect(hostedPlan.systemPrompt).toContain(
+      'Casual is a persistent user-facing writing invariant.',
+    )
+    expect(hostedPlan.assistantPreferredElevenLabsVoiceId).toBe(
+      resolveAssistantVoiceOptionElevenLabsVoiceId('warm'),
+    )
+
+    const nonHostedPlan = await resolveAssistantRouteTurnPlan({
+      ...common,
+      executionContext: null,
+    })
+    expect(nonHostedPlan.systemPrompt).not.toContain('Assistant tone preference:')
+    expect(nonHostedPlan.assistantPreferredElevenLabsVoiceId).toBeNull()
+  })
+
+  it('applies room style without exposing mutation tools to group email', async () => {
+    planningMocks.readAssistantCliSurfaceBootstrapContext.mockResolvedValue(
+      'PERSONAL_CLI_CONTRACT',
+    )
+    planningMocks.readAssistantContextSnapshotPrompt.mockResolvedValue(
+      'PERSONAL_CONTEXT_SNAPSHOT',
+    )
+    planningMocks.resolveCodexAssistantTargetCapabilities.mockReturnValue({
+      supportsNativeResume: false,
+    })
+    const plan = await resolveAssistantRouteTurnPlan({
+      executionContext: {
+        hosted: {
+          memberId: 'member-group-container',
+          progressDeliveryDependencies: {},
+          providerFetch: null,
+          userEnvKeys: [],
+        },
+      },
+      hostedToolContext: {
+        ...createHostedToolContext(),
+        assistantConfigurationTool: { request: vi.fn() },
+        personalizationTool: { request: vi.fn() },
+      },
+      input: {
+        ...createMessageInput(),
+        assistantStyleSettingsAuthorized: true,
+        channel: 'email',
+        threadIsDirect: false,
+      },
+      preferenceContext: {
+        assistantPersonality: {
+          detail: 2,
+          humor: 6,
+          push: 4,
+        },
+        assistantTone: 'casual',
+        assistantVoice: 'warm',
+      },
+      profile: {
+        promptProfile: 'conversation',
+        threadScope: 'session-thread',
+        toolProfile: 'provider-turn',
+      },
+      promptTimeContext: {
+        currentLocalDate: '2026-07-16',
+        currentTimeZone: 'America/New_York',
+      },
+      route: createRoute(),
+      session: createSession(),
+      sharedPlan: createSharedPlan({}, {
+        channel: 'email',
+        effectiveThreadIsDirect: false,
+        threadId: 'group-email-thread',
+        threadIsDirect: false,
+      }),
+    })
+
+    expect(plan.dynamicTools.map((tool) => tool.name)).not.toContain(
+      'assistant_style',
+    )
+    expect(plan.dynamicTools.map((tool) => tool.name)).not.toContain(
+      'personalization',
+    )
+    expect(plan.dynamicTools.map((tool) => tool.name)).not.toContain(
+      'assistant_configuration',
+    )
+    expect(plan.developerInstructions).toContain(
+      'Assistant personality preferences for this group room:',
+    )
+    expect(plan.developerInstructions).toContain('Humor 6/10')
+    expect(plan.developerInstructions).toContain(
+      'Casual is a persistent user-facing writing invariant',
+    )
+    expect(plan.developerInstructions).toContain(
+      "change this room's Murph style",
+    )
+    expect(plan.developerInstructions).not.toContain(
+      'Tone, Voice, Humor, Push, and Detail belong to this room',
+    )
+    expect(plan.developerInstructions).not.toContain('PERSONAL_CLI_CONTRACT')
+    expect(plan.developerInstructions).not.toContain('PERSONAL_CONTEXT_SNAPSHOT')
+    expect(planningMocks.readAssistantCliSurfaceBootstrapContext).not.toHaveBeenCalled()
+    expect(planningMocks.readAssistantContextSnapshotPrompt).not.toHaveBeenCalled()
   })
 
   it('fails closed on personal prompt context and tools for an unverified external audience', async () => {

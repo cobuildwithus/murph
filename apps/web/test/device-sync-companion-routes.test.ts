@@ -4,6 +4,7 @@ import { afterEach, beforeAll, beforeEach, describe, expect, it, vi } from "vite
 import {
   serializeHostedExecutionDeviceSyncDirtyPayloadIdentity,
 } from "@murphai/device-syncd/hosted-runtime";
+import { deviceSyncError } from "@murphai/device-syncd/errors";
 
 import { hostedOnboardingError } from "../src/lib/hosted-onboarding/errors";
 import { createBearerRequest, createJsonPostRequest } from "./route-test-helpers";
@@ -164,16 +165,12 @@ function healthMetadataRecord(overrides: Record<string, unknown> = {}) {
 }
 
 const validHrvObservation = {
-  schema: "murph.companion.hrv-rmssd.v1",
-  captureId: "123e4567-e89b-42d3-a456-426614174000",
-  observedAt: "2026-07-10T13:45:00.000Z",
-  durationMs: 60_000,
-  rmssdMs: 48.25,
-  intervalCount: 72,
-  acceptedIntervalCount: 68,
-  successivePairCount: 63,
-  quality: "good",
-  methodVersion: "rmssd-pulse-interval-v1",
+  schema: "murph.companion.overnight-prv-rmssd.v1",
+  methodVersion: "prv-rmssd-5m-mean-scheduled-0000-0800-local-v1",
+  nightDate: "2026-07-10",
+  rmssdMs: 52.75,
+  completedWindowCount: 96,
+  acceptedWindowCount: 72,
 };
 
 function hrvRmssdRequest(
@@ -677,6 +674,23 @@ describe("device sync companion routes", () => {
       expect(mocks.createSdkSignInSession).not.toHaveBeenCalled();
     });
 
+    it.each([null, 17, "automatic", "connect "])(
+      "rejects invalid connection intent %j before reaching Junction",
+      async (connectionIntent) => {
+        mockVerifiedPrivyUser();
+
+        const response = await signInTokenRoute.POST(signInTokenRequest({
+          connectionIntent,
+        }));
+
+        expect(response.status).toBe(400);
+        expect(await response.json()).toMatchObject({
+          error: { code: "COMPANION_REQUEST_INVALID" },
+        });
+        expect(mocks.createSdkSignInSession).not.toHaveBeenCalled();
+      },
+    );
+
     it("rejects requests with an invalid bearer token", async () => {
       mocks.verifyIdentityToken.mockRejectedValue(new Error("invalid token"));
 
@@ -745,6 +759,7 @@ describe("device sync companion routes", () => {
       const response = await signInTokenRoute.POST(signInTokenRequest({
         appInstallationId: "install-1",
         appVersion: "1.0.0",
+        connectionIntent: "connect",
         platform: "ios",
         sdkVersions: { vital: "1.8.8" },
       }));
@@ -754,11 +769,56 @@ describe("device sync companion routes", () => {
         environment: "sandbox",
         signInToken: SIGN_IN_TOKEN,
       });
-      expect(mocks.createSdkSignInSession).toHaveBeenCalledWith("member_1", "junction");
+      expect(mocks.createSdkSignInSession).toHaveBeenCalledWith(
+        "member_1",
+        "junction",
+        "connect",
+      );
       expect(mocks.assertHostedLaunchRequiredConsentGranted).toHaveBeenCalledWith({
         memberId: "member_1",
         prisma: mocks.prismaClient,
       });
+    });
+
+    it("forwards passive session repair as resume intent", async () => {
+      mockVerifiedPrivyUser();
+
+      const response = await signInTokenRoute.POST(signInTokenRequest({
+        connectionIntent: "resume",
+        platform: "ios",
+      }));
+
+      expect(response.status).toBe(200);
+      expect(mocks.createSdkSignInSession).toHaveBeenCalledWith(
+        "member_1",
+        "junction",
+        "resume",
+      );
+    });
+
+    it("returns a typed reconnect requirement for terminal server state", async () => {
+      mockVerifiedPrivyUser();
+      const warn = vi.spyOn(console, "warn").mockImplementation(() => {});
+      mocks.createSdkSignInSession.mockRejectedValueOnce(deviceSyncError({
+        code: "SDK_SIGN_IN_RECONNECT_REQUIRED",
+        message: "Reconnect the device-sync provider before resuming SDK sign-in.",
+        retryable: false,
+        httpStatus: 409,
+      }));
+
+      const response = await signInTokenRoute.POST(signInTokenRequest({
+        connectionIntent: "resume",
+      }));
+
+      expect(response.status).toBe(409);
+      expect(await response.json()).toEqual({
+        error: {
+          code: "SDK_SIGN_IN_RECONNECT_REQUIRED",
+          message: "Reconnect the device-sync provider before resuming SDK sign-in.",
+          retryable: false,
+        },
+      });
+      warn.mockRestore();
     });
 
     it("accepts an empty request body", async () => {
@@ -771,6 +831,11 @@ describe("device sync companion routes", () => {
         environment: "sandbox",
         signInToken: SIGN_IN_TOKEN,
       });
+      expect(mocks.createSdkSignInSession).toHaveBeenCalledWith(
+        "member_1",
+        "junction",
+        null,
+      );
     });
 
     it("never passes the sign-in token to any logger call", async () => {
@@ -851,7 +916,7 @@ describe("device sync companion routes", () => {
       expect(response.status).toBe(202);
       expect(responseBody).toEqual({
         acceptedAt: expect.any(String),
-        captureId: validHrvObservation.captureId,
+        nightDate: validHrvObservation.nightDate,
         status: "accepted",
       });
       expect(JSON.stringify(responseBody)).not.toContain(String(validHrvObservation.rmssdMs));
@@ -863,16 +928,16 @@ describe("device sync companion routes", () => {
     });
 
     it.each([
-      ["an implausible interval count", {
+      ["more accepted windows than completed windows", {
         ...validHrvObservation,
-        intervalCount: 206,
-        quality: "limited",
+        acceptedWindowCount: 97,
       }],
-      ["quality inconsistent with the interval counts", {
+      ["fewer than half of completed windows accepted", {
         ...validHrvObservation,
-        quality: "limited",
+        acceptedWindowCount: 48,
+        completedWindowCount: 97,
       }],
-      ["an identifier-shaped capture id", {
+      ["a removed capture identifier", {
         ...validHrvObservation,
         captureId: "wearable_serial_1234567890",
       }],
@@ -892,13 +957,13 @@ describe("device sync companion routes", () => {
     it.each([
       ["a stale observation", {
         ...validHrvObservation,
-        observedAt: "2026-07-09T13:45:59.000Z",
+        nightDate: "2026-07-07",
       }],
       ["a future observation", {
         ...validHrvObservation,
-        observedAt: "2026-07-10T13:50:01.000Z",
+        nightDate: "2026-07-12",
       }],
-    ])("defers the first-admission clock gate for %s to the replay-aware service", async (
+    ])("defers the first-admission night-date gate for %s to the replay-aware service", async (
       _label,
       observation,
     ) => {
@@ -919,6 +984,11 @@ describe("device sync companion routes", () => {
       ["BLE bytes", { rawBleBytes: "001122" }],
       ["device identity", { deviceIdentifier: "wearable-identifier" }],
       ["packet timestamps", { packetTimestamps: [1, 2] }],
+      ["per-window RMSSD values", { windowRmssdMs: [48.25] }],
+      ["capture timestamp", { captureStartedAt: "2026-07-10T03:00:00.000Z" }],
+      ["capture duration", { captureDurationMs: 8 * 60 * 60 * 1_000 }],
+      ["capture end offset", { captureEndUtcOffsetMinutes: -4 * 60 }],
+      ["aggregate interval coverage", { acceptedCoverageMs: 72 * 280_000 }],
     ])("rejects raw %s fields before staging", async (_label, rawField) => {
       mockVerifiedPrivyUser();
 
@@ -939,7 +1009,7 @@ describe("device sync companion routes", () => {
 
       const response = await hrvRmssdRoute.POST(hrvRmssdRequest({
         ...validHrvObservation,
-        padding: "x".repeat(2_100),
+        padding: "x".repeat(600),
       }));
 
       expect(response.status).toBe(413);

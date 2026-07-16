@@ -25,12 +25,15 @@ export const POST = withJsonError(async (request: Request) => {
 
   // Installation metadata is validated and discarded; the spec's
   // `companion_installations` record is deferred until operationally needed.
-  validateCompanionSignInRequestBody(await readOptionalJsonObject(request));
+  const connectionIntent = validateCompanionSignInRequestBody(
+    await readOptionalJsonObject(request),
+  );
 
   const publicIngress = createHostedDeviceSyncPublicIngressService(request);
   const session = await publicIngress.createSdkSignInSession(
     auth.member.id,
     COMPANION_DEVICE_SYNC_PROVIDER,
+    connectionIntent,
   );
 
   return jsonOk({

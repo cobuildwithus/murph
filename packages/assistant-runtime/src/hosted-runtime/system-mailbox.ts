@@ -2,6 +2,9 @@ import { rm } from "node:fs/promises";
 import path from "node:path";
 
 import {
+  readHostedRuntimeSafeErrorText,
+} from "@murphai/hosted-execution";
+import {
   type HostedExecutionSystemWake,
 } from "@murphai/hosted-execution/contracts";
 import type {
@@ -20,9 +23,6 @@ import {
 import {
   isHostedAssistantAskCompletionPreemptedError,
 } from "./events/assistant-ask-completion.ts";
-import {
-  readHostedRuntimeSafeErrorText,
-} from "./diagnostic-redaction.ts";
 import type {
   HostedMailboxItemImportOutcome,
   HostedMailboxResolvedImportItem,

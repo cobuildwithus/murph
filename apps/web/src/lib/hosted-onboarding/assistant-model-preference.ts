@@ -145,27 +145,6 @@ export async function readHostedMemberAssistantModelPreference(input: {
   return resolveHostedMemberAssistantModel(member);
 }
 
-export async function assertHostedMemberAssistantPersonalizationEligible(input: {
-  memberId: string;
-  prisma: HostedMemberAssistantModelReadClient;
-}): Promise<void> {
-  const member = await readHostedMemberAssistantModelState(input);
-  if (!member) {
-    throw hostedOnboardingError({
-      code: "HOSTED_MEMBER_NOT_FOUND",
-      httpStatus: 403,
-      message: "Finish signup from your latest Murph link before continuing.",
-    });
-  }
-  if (member.threadContainer !== null) {
-    throw hostedOnboardingError({
-      code: "ASSISTANT_PERSONALIZATION_PRIVATE_MEMBER_REQUIRED",
-      httpStatus: 403,
-      message: "Assistant personalization is available only in a private conversation.",
-    });
-  }
-}
-
 export async function updateHostedMemberAssistantModelPreferenceTx(input: {
   memberId: string;
   model: HostedAssistantProductModel;

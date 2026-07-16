@@ -1,7 +1,7 @@
 # How Murph Talks
 
-Last verified: 2026-07-15
-Status: Implemented for onboarding, settings, hosted mailbox handoff, prompt tone, voice memo default resolution, supervisor-run preview generation, and private Humor, Push, and Detail controls in conversation and Settings
+Last verified: 2026-07-16
+Status: Implemented for onboarding, personal Settings, hosted mailbox handoff, prompt tone, voice memo default resolution, supervisor-run preview generation, private conversational controls, and room-owned hosted Linq group controls for all five settings
 
 ## Product Contract
 
@@ -13,7 +13,7 @@ Murph's speaking style has five controls:
 4. Push: an integer from 0 through 10.
 5. Detail: an integer from 0 through 10.
 
-Tone and voice appear during the hosted first visit and under **How Murph talks** in Settings. Humor, Push, and Detail are available through explicit conversational requests and under **Personality** in Settings. Settings shows all three effective 0–10 values in one dialog on desktop and one drawer on mobile; it does not add onboarding steps.
+Tone and voice appear during the hosted first visit and under **How Murph talks** in personal Settings. Humor, Push, and Detail are available through explicit private conversational requests and under **Personality** in personal Settings. Settings shows all three effective 0–10 values in one dialog on desktop and one drawer on mobile; it does not add onboarding steps. An authenticated hosted Linq group may change all five controls conversationally, but those choices belong to that room's Murph runtime and have no separate web UI.
 
 The first-visit sequence remains:
 
@@ -62,10 +62,10 @@ The effective defaults are:
 | Push | 3 |
 | Detail | 5 |
 
-`hosted_member.assistant_tone` and `hosted_member.assistant_voice` capture the latest web-side choices for settings display and mailbox handoff. The session-authenticated route `POST /api/settings/assistant-style` and the member-bound signed assistant personalization callback use the same mutation owner. That owner validates the request, updates changed columns, appends a `member.preferences.updated` hosted mailbox event, and best-effort signals the runtime.
+`hosted_member.assistant_tone` and `hosted_member.assistant_voice` capture the latest web projection for mailbox handoff. A person member's row also backs personal Settings display; a synthetic thread-container member's row backs only that room runtime. The session-authenticated route `POST /api/settings/assistant-style` and the runtime-bound signed assistant personalization callback use the same mutation owner. That owner validates the request, updates changed columns, appends a `member.preferences.updated` hosted mailbox event, and best-effort signals the same runtime.
 
 For hosted conversational personality writes, Web also owns accepted-input
-admission and the Settings projection transaction. It updates only the requested
+admission and the hosted projection transaction. It updates only the requested
 Humor, Push, or Detail columns and their per-dial causal watermarks atomically
 with the sparse canonical mutation event carrying the accepted turn's original
 causal sequence. Canonical personality values still live only in the vault.
@@ -77,14 +77,17 @@ No prompt text, inferred psychological profile, or conversation excerpt is store
 ## Hosted Conversation Control
 
 Hosted conversations expose one typed `murph.personalization` operation when
-the runtime has its web-owned port:
+the runtime has its web-owned port and turn planning grants the current
+conversation authority. The callback target is fixed by the runtime: a person
+member in direct conversation or the synthetic room member in an authenticated
+hosted Linq group. It never accepts a participant target:
 
 - `action: "read"` returns the effective tone and voice plus read-only model and
   Sol-availability context. Nullable hosted storage is presentation-only
   normalized to the canonical `formal` tone and `upbeat` ("Classic Murph")
   voice defaults; a read does not persist those defaults.
 - `action: "update"` accepts at least one validated tone or voice field and
-  saves only the fields the member asked to change. It cannot mutate model or
+  saves only the fields explicitly requested for the current runtime. It cannot mutate model or
   reasoning configuration.
 - The result distinguishes `saved` and `unchanged` and returns the effective
   values after the operation. Its retained model fields are read-only context;
@@ -96,9 +99,17 @@ the runtime has its web-owned port:
   canonical web-control timeout. Once the owner request starts, the CLI waits
   for that request to settle instead of reporting a shorter local timeout while
   the preference write can still complete.
+- A synthetic room update additionally binds the accepted input to a current
+  non-direct Linq wake and route for that same container. A group email, direct
+  Linq message, missing route, stale route, or cross-room route cannot mutate
+  room style.
+- A person-runtime update positively requires that same input to be direct.
+  Linq must be explicitly direct, email must be explicitly direct and
+  style-authorized, and hosted Telegram remains a person-direct route. A
+  mislabeled or retained group input cannot fall through to private settings.
 
-Model and reasoning mutations belong exclusively to
-`murph.assistant_configuration`. That operation reads the current-turn and
+Model and reasoning mutations belong exclusively to the private-direct
+`murph.assistant_configuration` surface. That operation reads the current-turn and
 saved next-turn configuration, requires user-sourced intent for an exact update,
 and saves only when web binds the terminal input id from the locally revalidated
 bounded exact-successor provider batch to the callback member and one live
@@ -118,14 +129,18 @@ and voice still flow from the hosted-member capture through
 `member.preferences.updated` to `core.updateAssistantPreferences`, preserving
 Settings/runtime convergence. Model and reasoning remain web-owned nullable
 intents with no vault peer. When the typed operations are unavailable,
-`/settings?voice=true` is the narrow voice/sound fallback, while `/settings` is
-the fallback for tone, model, or reasoning changes.
+`/settings?voice=true` is the narrow voice/sound fallback for a person's direct
+Murph, while `/settings` is the personal fallback for tone, model, or reasoning
+changes. A personal Settings URL is never a fallback for configuring a room.
 
 ## Personality Dial Conversation Control
 
 The assistant uses the headless `murph.assistant_style` operation. Turn
-planning registers it only for the exact current private direct conversation;
-other audiences receive no style operation or style prompt surface. Its closed
+planning registers it only for the exact current private direct conversation
+or an authenticated hosted Linq group turn. The direct surface targets that
+person's Murph; the group surface targets only the synthetic room Murph. Group
+email, non-hosted groups, and indeterminate audiences receive no style mutation
+operation. Its closed
 actions are `show`, `set` with one exact integer score, and `reset` for one dial
 or all dials. Raw CLI style commands are intentionally absent so no registered
 general command advertises an audience-independent path around the turn-level
@@ -175,7 +190,7 @@ of that reply:
 
 In local mode, `set` and `reset` continue to write the canonical vault directly.
 In hosted mode, they send one strict `update_personality` request through the
-member-bound signed personalization callback, carrying invocation-owned
+runtime-bound signed personalization callback, carrying invocation-owned
 assistant-input authority rather than a model-supplied sequence. Web returns the
 effective projection and a per-requested-dial outcome of `saved`, `unchanged`,
 or `superseded`. Accepted results form an invocation-only overlay so a later
@@ -278,7 +293,9 @@ The dials never change notification eligibility or frequency, quiet hours, tool 
 
 ## Audience Scope
 
-Personality dials apply only to the member's private interactive conversation. Group behavior remains owned by the current group context and the group-chat and group-comedy rules. Turn planning may read the shared preferences document for existing tone and voice behavior, but a group prompt never receives, advertises, exposes, or applies a member's private dials, and Murph does not mutate them from a group. Assistant turns receive a headless style operation only when the exact current route is private and direct; group and indeterminate routes omit both that operation and all prompt or assistant CLI contract references to the style surface.
+Style preferences always belong to the active conversation runtime. A person runtime's Tone, Voice, Humor, Push, and Detail remain private to that person's Murph. A synthetic hosted group runtime has its own five settings in its own `HostedMember` projection and canonical room vault. Interactive group prompts apply those room values, hosted room notification decisions apply Tone, and generated group voice output resolves the room voice; none of those paths reads or inherits a participant's private settings.
+
+Authenticated hosted Linq group turns receive `murph.personalization` and `murph.assistant_style` bound to the room member. The request has no member selector, and Web accepts a container mutation only when the accepted input proves the same current non-direct Linq room. Group email may use the room's already saved style for expression but cannot mutate it. Non-hosted groups and indeterminate routes receive neither personal preferences nor the style operations. `murph.assistant_configuration` remains private-only; group model and reasoning stay relation-derived.
 
 The raw style CLI hard cut is effective only after every old assistant runner
 bundle has drained or restarted. A gradual rollout that leaves warm older
@@ -287,7 +304,7 @@ runner/CLI change as an immediate convergence and verify the live fleet reports
 the new bundle before treating the audience boundary as active. The first
 personality-aware reader/writer release remains the rollback floor.
 
-A future group-level style control needs separate group-scoped authority and storage. It must not reuse a member's private preference as room-wide truth.
+Deploy the Web eligibility and accepted-input route validation before the runner exposes the room tools and prompt. Old runner plus new Web is inert; new runner plus old Web rejects container mutations. Roll the runner immediately after Web so warm group runtimes converge on one contract. No schema migration or preference copy is required.
 
 ## Hosted Settings Projection
 
@@ -295,7 +312,9 @@ The web surfaces use the same tone ids and shared voice roster defined above.
 
 `hosted_member.assistant_tone`, `hosted_member.assistant_voice`, and the nullable
 `assistant_humor`, `assistant_push`, and `assistant_detail` columns capture the
-latest web-side choices for display and mailbox handoff. The three numeric
+latest web projection for mailbox handoff. For person members, they also drive
+personal Settings display. For synthetic room members, they belong only to the
+room runtime and have no personal Settings surface. The three numeric
 columns have database range constraints from 0 through 10. They are a
 Settings-side display/write projection, not canonical preference truth;
 `bank/preferences.json` remains canonical.
@@ -340,9 +359,13 @@ gate-off complete snapshot is deployment compatibility for the old consumer,
 not a second steady-state contract.
 
 The scheduled handoff backstop selects retained unconsumed preference rows for
-active person members before applying its bounded batch limit, then rechecks
-the canonical async access gate before signaling. It drains oldest candidates
-first so inactive or newer rows cannot permanently hide older valid work.
+active person members and active synthetic room runtimes before applying its
+bounded batch limit. A room is eligible through the same active-owner or
+current-active-participant access derivation as the canonical runtime gate.
+The sweeper rechecks that async gate before signaling and drains oldest
+candidates first so inactive or newer rows cannot permanently hide older valid
+work. This is recovery transport for the existing durable mailbox event, not a
+second preference or room-settings owner.
 
 Every newly appended mailbox row receives one immutable per-member causal
 sequence serialized across conversation and system lanes. The sequence is

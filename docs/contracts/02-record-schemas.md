@@ -67,7 +67,7 @@ Missing personality values resolve through the shared contract defaults: Humor 3
 
 `bank/assistant-preference-mutations.json` is a strict versioned companion record containing only the latest mailbox causal sequence applied to each assistant preference field. It is bounded by the fixed field catalog and is committed in the same canonical write batch as an affected `bank/preferences.json` change. Keeping these watermarks out of the user-facing preferences schema preserves reader compatibility while making stale cross-lane replays field-local no-ops.
 
-Personality stores expression preferences only. It never stores prompt text, conversation excerpts, inferred psychological traits, notification policy, tool authority, or group-wide settings. Member personality is private-conversation state; a future group setting needs separate group-scoped authority.
+Personality stores expression preferences only. It never stores prompt text, conversation excerpts, inferred psychological traits, notification policy, or tool authority. In a person member's vault it configures that private Murph; in a synthetic thread-container vault it configures that group room's Murph. A room value is owned by the container and must never be copied from, resolved through, or written to a participant's private preferences.
 
 The preferences schema is strict. Although `assistant.personality` is additive, a binary that predates the field can reject a document after the first personality write. Roll out compatible readers before writers. After a personality override is stored, the first compatible reader/writer version is the rollback floor unless a current compatible binary removes the field through the canonical mutation path.
 

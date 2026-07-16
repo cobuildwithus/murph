@@ -366,6 +366,7 @@ test('interactive onboard uses wizard defaults, runtime env hints, and setupHost
             })
 
             return {
+              assistantOss: null,
               assistantPreset: 'skip',
               channels: [],
               scheduledUpdates: ['weekly-health-snapshot'],
