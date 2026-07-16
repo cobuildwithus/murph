@@ -686,8 +686,11 @@ describe("PrismaHostedDirtyConnectionStore dirty pending state", () => {
 
       expect(rootFindUnique).toHaveBeenCalledTimes(2);
       expect(prisma.$transaction).toHaveBeenCalledTimes(2);
-      expect(tx.deviceSyncDirtyConnection.updateMany).toHaveBeenCalledTimes(2);
+      expect(tx.deviceSyncDirtyConnection.updateMany).toHaveBeenCalledTimes(1);
       expect(tx.deviceSyncDirtyPayload.createMany).toHaveBeenCalledTimes(1);
+      expect(tx.deviceSyncDirtyPayload.createMany.mock.invocationCallOrder[0]).toBeLessThan(
+        tx.deviceSyncDirtyConnection.updateMany.mock.invocationCallOrder[0] ?? 0,
+      );
       expect(setTimeoutSpy).toHaveBeenCalledTimes(1);
       const payloadRow = expectFirstPayloadCreateRow(payloadCreateData);
       expect(payloadRow.dirtyRevision).toBe(4n);

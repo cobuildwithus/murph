@@ -357,6 +357,19 @@ export class PrismaHostedDirtyConnectionStore {
     const dirtyWindowStart = resolveDirtyWindowStart(resourceBatch.allResources);
     const dirtyWindowEnd = resolveDirtyWindowEnd(resourceBatch.allResources);
     const nextDirtyRevision = existing.dirtyRevision + 1n;
+    // Prepare exact durable work before taking the dirty-marker row lock. Both
+    // writes share this transaction, so a lost compare-and-swap rolls the
+    // payload insert back with the marker update.
+    const payloadCreateResult = await createDirtyPayloadRows({
+      connectionId: input.connectionId,
+      dirtyRevision: nextDirtyRevision,
+      provider: input.provider,
+      precomputed: precomputedDirtyPayloadRows,
+      resources: resourceBatch.payloadResources,
+      traceId: input.traceId,
+      tx: prisma,
+      userId: input.userId,
+    });
     const updated = await prisma.deviceSyncDirtyConnection.updateMany({
       where: {
         connectionId: input.connectionId,
@@ -384,17 +397,6 @@ export class PrismaHostedDirtyConnectionStore {
     if (updated.count === 0) {
       throw createDirtyStateContentionError("update");
     }
-
-    const payloadCreateResult = await createDirtyPayloadRows({
-      connectionId: input.connectionId,
-      dirtyRevision: nextDirtyRevision,
-      provider: input.provider,
-      precomputed: precomputedDirtyPayloadRows,
-      resources: resourceBatch.payloadResources,
-      traceId: input.traceId,
-      tx: prisma,
-      userId: input.userId,
-    });
 
     const record = await prisma.deviceSyncDirtyConnection.findUnique({
       where: {
