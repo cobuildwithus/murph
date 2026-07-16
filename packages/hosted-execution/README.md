@@ -31,6 +31,10 @@ plan-usage status codec. The empty request preserves the original response
 shape; a caller may opt into the optional nullable `subscriptionActionQuote`
 for current explicit-request terms. The thresholded `recommendedAction` stays
 separate, and neither field is consent.
+Use `@murphai/hosted-execution/labs` for the strict read-only `search`, `show`,
+and `locations` request/response codecs. These contracts carry bounded
+normalized provider facts and never carry the Junction credential, raw provider
+body, or a member identity.
 Use `@murphai/hosted-execution/subscription` for the input-bound conversational
 subscription-action request and response codecs. The response carries current
 server-owned plan terms and exposes a payment URL only when payment is required.
@@ -53,8 +57,9 @@ mention the deleted generic state.
 - vendor-neutral env naming stays canonical so hosted web and Cloudflare do not drift
 - this package owns only the shared hosted-execution transport seam: mailbox,
   workspace checkpoint, runtime log/status codecs, hosted usage record codecs,
-  plan-usage and subscription-action codecs, route builders, auth header names, and
-  canonicalization helpers; projection logic stays in `apps/web`
+  plan-usage, Labs-discovery, and subscription-action codecs, route builders,
+  auth header names, and canonicalization helpers; projection logic stays in
+  `apps/web`
 - deployment topology stays app-local: shared packages must not own worker hostnames, callback base-url defaults, or proxy-vs-server inference
 - app-local auth adapters still own deployment-specific bearer token acquisition plus callback signing and verification
 - operator-facing hosted public-origin fallback and Cloudflare callback-key config stay app-local and are intentionally documented in `apps/web/README.md`, not here

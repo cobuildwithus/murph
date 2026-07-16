@@ -118,6 +118,13 @@ use plain language rather than internal model codenames, “should we part ways?
 is only an optional trial off-ramp, and an active trial already set to continue
 needs no unsolicited explanation.
 
+`murph.labs` follows the same default-off shape. It is advertised only for a
+verified private direct turn with a hosted Labs service and exposes bounded
+live `search`, `show`, and ZIP `locations` reads. Broad health interests should
+compare returned panels and included marker coverage; a named analyte should
+use an exact search. The tool is discovery-only and must not claim medical
+necessity, eligibility, a final quote, booking, ordering, or a launch date.
+
 `murph.subscription` is also private and default-off. It is advertised only
 when a hosted subscription service exists and the current private turn has
 eligible accepted member input. Assistant policy requires one explicit,

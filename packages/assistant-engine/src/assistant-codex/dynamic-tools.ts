@@ -148,6 +148,13 @@ import {
 } from './dynamic-tools/device.js'
 export { MURPH_DEVICE_TOOL } from './dynamic-tools/device.js'
 import {
+  executeLabsDynamicTool,
+  MURPH_LABS_TOOL,
+  readLabsDynamicToolRequest,
+  type LabsDynamicToolRequest,
+} from './dynamic-tools/labs.js'
+export { MURPH_LABS_TOOL } from './dynamic-tools/labs.js'
+import {
   executeConnectedAppsDynamicTool,
   MURPH_CONNECTED_APPS_EXECUTE_TOOL,
   MURPH_CONNECTED_APPS_DYNAMIC_TOOLS,
@@ -1014,6 +1021,7 @@ const MURPH_BASE_DYNAMIC_TOOLS = [
   MURPH_FINISH_WITHOUT_REPLY_TOOL,
   MURPH_REACT_TO_MESSAGE_TOOL,
   MURPH_CREATE_PHONE_CALL_TOOL,
+  MURPH_LABS_TOOL,
 ] as const
 
 const MURPH_COMPUTER_DYNAMIC_TOOLS = [
@@ -1044,6 +1052,7 @@ export interface MurphDynamicToolAvailability {
   connectedAppsManageAvailable?: boolean | null
   deviceAvailable?: boolean | null
   familyPlanAvailable?: boolean | null
+  labsAvailable?: boolean | null
   planUsageAvailable?: boolean | null
   subscriptionAvailable?: boolean | null
   groupAvailable?: boolean | null
@@ -1082,6 +1091,7 @@ const TOOL_AVAILABILITY: ReadonlyMap<MurphDynamicTool, AvailabilityPredicate> =
     [MURPH_SUBMIT_PRODUCT_FEEDBACK_TOOL, defaultOff((a) => a.productFeedbackAvailable)],
     [MURPH_ASSISTANT_CONFIGURATION_TOOL, defaultOff((a) => a.assistantConfigurationAvailable)],
     [MURPH_FAMILY_PLAN_TOOL, defaultOff((a) => a.familyPlanAvailable)],
+    [MURPH_LABS_TOOL, defaultOff((a) => a.labsAvailable)],
     [MURPH_PLAN_USAGE_TOOL, defaultOff((a) => a.planUsageAvailable)],
     [MURPH_SUBSCRIPTION_TOOL, defaultOff((a) => a.subscriptionAvailable)],
     [MURPH_GROUP_TOOL, defaultOff((a) => a.groupAvailable)],
@@ -1643,6 +1653,7 @@ export type MurphDynamicToolRequest =
   | ConnectedAppsDynamicToolRequest
   | AutomationDynamicToolRequest
   | DeviceDynamicToolRequest
+  | LabsDynamicToolRequest
   | AssistantStyleDynamicToolRequest
   | {
       kind: 'attach-response-media'
@@ -1837,6 +1848,14 @@ export function readMurphDynamicToolRequest(
   })
   if (deviceRequest) {
     return deviceRequest
+  }
+
+  const labsRequest = readLabsDynamicToolRequest({
+    arguments: request.arguments,
+    tool: request.tool,
+  })
+  if (labsRequest) {
+    return labsRequest
   }
 
   const connectedAppsRequest = readConnectedAppsDynamicToolRequest({
@@ -2254,6 +2273,8 @@ export async function executeMurphDynamicToolRequest(input: {
       return toolTextResult(false, 'invalid automation arguments')
     case 'invalid-device-arguments':
       return toolTextResult(false, 'invalid device arguments')
+    case 'invalid-labs-arguments':
+      return toolTextResult(false, 'invalid labs arguments')
     case 'invalid-connected-apps-arguments':
       return toolTextResult(false, 'invalid connected-app arguments')
     case 'invalid-assistant-style-arguments':
@@ -2346,6 +2367,20 @@ export async function executeMurphDynamicToolRequest(input: {
       return await executeDeviceDynamicTool({
         abortSignal: input.abortSignal ?? null,
         deviceTool,
+        request: input.request,
+      })
+    }
+    case 'labs': {
+      const labsTool = input.hostedToolContext?.labsTool ?? null
+      if (!labsTool) {
+        return toolTextResult(
+          false,
+          'lab catalog discovery is unavailable for this turn',
+        )
+      }
+      return await executeLabsDynamicTool({
+        abortSignal: input.abortSignal ?? null,
+        labsTool,
         request: input.request,
       })
     }
