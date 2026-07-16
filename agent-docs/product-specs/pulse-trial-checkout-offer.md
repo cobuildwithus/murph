@@ -34,7 +34,7 @@ Success means:
 - The hosted billing ref records the current billing phase and trial boundaries.
 - The existing hosted AI usage allowance resolver records a 4.50 USD trial-period accounting and notice threshold during the trial and the normal Pulse allowance after Stripe converts the subscription to a paid cycle; neither amount is a provider-start gate.
 - A stale trial phase never falls back to the normal monthly Pulse allowance.
-- Runtime admission reads the hosted member-access decision, not `HostedAiUsagePeriod`. The signed legacy usage-gate callback is an access-only compatibility adapter for old runtime consumers.
+- Runtime admission reads the hosted member-access decision, not `HostedAiUsagePeriod`; there is no separate runtime usage-gate callback.
 - No-card auto Pulse Trial enrollment is the default hosted signup path when billing is configured and messaging setup is complete. Set `HOSTED_AUTO_PULSE_TRIAL_ENABLED=0` only to force card checkout fallback.
 - The card-based trial CTA is release-gated by `HOSTED_PULSE_TRIAL_CHECKOUT_ENABLED=1`; the checkout backend remains safe with the flag off.
 
@@ -81,7 +81,7 @@ The current local checkout now has the Pulse Trial shape implemented on that fou
 - `apps/web/src/lib/hosted-onboarding/stripe-billing-status.ts` deliberately keeps subscription webhook writes conservative: Stripe `trialing` maps to hosted `active`, but subscription events that would make an inactive Murph member active are written as `incomplete` unless the member was already active.
 - `apps/web/prisma/schema.prisma` has `HostedMemberBillingRef` with Stripe customer/subscription refs, current plan code, current period start/end, current billing phase, current checkout offer, immutable trial redemption metadata, trial start/end markers, and last Stripe event freshness.
 - `apps/web/src/lib/hosted-execution/usage-allowance.ts` prices imported platform AI usage, skips member-provided credentials for allowance spend, maintains `HostedAiUsagePeriod`, and resolves trial accounting from persisted trial state without becoming runtime admission authority.
-- `apps/web/src/lib/hosted-onboarding/member-access.ts` owns model-work access, including stale or malformed trial denial. `apps/web/app/api/internal/hosted-execution/usage/gate/route.ts` exposes that access decision only as a signed compatibility callback for old consumers.
+- `apps/web/src/lib/hosted-onboarding/member-access.ts` owns model-work access, including stale or malformed trial denial, and Temporal reconciliation consumes that decision without a separate callback route.
 - `apps/web/src/components/hosted-onboarding/join-invite-stage-server.tsx` renders Pulse Trial, Pulse, and Edge as the pricing grid; the self-hosting GitHub link is secondary below the grid.
 
 ## External Stripe Constraints
@@ -723,8 +723,8 @@ Focused tests to add or update:
   - phase missing/malformed for `pulse_trial_7d` denies instead of using calendar Pulse
   - paid conversion uses the normal Pulse allowance in a distinct paid period
   - trial usage is not migrated into the paid period
-- web route and runtime access tests
-  - `/api/internal/hosted-execution/usage/gate` serializes the stale-trial reason, notice, and future retry time without reading an allowance period
+- runtime access tests
+  - stale-trial member access retains its reason, notice, and future retry time without reading an allowance period
   - active paid and in-window trial model work remains independent of allowance-period availability
 - hosted privacy/account-data tests
   - new billing-ref fields are included or intentionally omitted according to the existing export/delete contract
@@ -742,7 +742,7 @@ Expected verification for the implementation change:
 1. Apply the nullable Prisma migration first.
 2. Deploy web support for offer parsing, metadata, shared trial activation, phase writes, immutable redemption, invoice/subscription reconciliation, and phase-aware allowance with the trial CTA still hidden or disabled.
 3. Verify standard Pulse and Edge checkout still work after the web deploy.
-4. Verify the signed compatibility gate mirrors member access: it allows an active paid member and denies a synthetic stale-trial member with a future `retryAfter`, without touching allowance periods.
+4. Verify runtime admission allows an active paid member and denies a synthetic stale-trial member with a future `retryAfter`, without touching allowance periods.
 5. Enable the Pulse Trial CTA only after the backend support is live.
 6. Keep the standard Pulse checkout path available throughout rollout.
 7. Run one test-mode checkout against the production-like Stripe account with test keys or a staging environment.
@@ -753,7 +753,7 @@ Expected verification for the implementation change:
 12. Confirm the initial trial invoice does not activate paid access.
 13. Confirm the first real paid invoice updates phase to `paid` and resolves the normal Pulse allowance.
 
-The legacy signed gate response remains access-compatible for old runtime consumers, but current runtime admission no longer calls an allowance gate. Coordinate deployments whenever removing that compatibility route or response shape.
+Current runtime admission has no allowance callback. Cloudflare/runner #587 or newer is the permanent rollback floor before deploying or rolling back a Web build that omits the retired route; an older runtime could still request it and receive a 404.
 
 ## Stress Test And Simplifications
 

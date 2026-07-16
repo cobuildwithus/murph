@@ -385,11 +385,14 @@ Hosted assistant provider and channel secrets:
 Hosted usage-reporting secrets:
 
 - `HOSTED_AI_USAGE_REPORTING_SECRET` when stable anonymized usage attribution should be added by the Worker/web-control proxy before records reach hosted web. This secret must stay Worker-owned and must not be forwarded into the hosted runtime env.
-- Cloudflare runner start authority does not accept signed usage-allowance
-  decisions and does not fall back to a live web usage-gate call. Web preserves
-  conversation mailbox input before usage gating, Temporal/runtime admission gates
-  model-capable work, and runtime/provider spend enforcement still happens before
-  model calls.
+- Cloudflare runner start authority accepts neither signed usage-allowance
+  decisions nor a live Web usage-gate callback. Web preserves conversation
+  mailbox input before admission, Temporal/runtime admission gates model-capable
+  work, and runtime/provider spend enforcement still happens before model calls.
+- Cloudflare/runner #587 or newer is the permanent rollback floor before
+  deploying or rolling back a Web build that omits the retired callback route.
+  A Web rollback that restores the unused route is safe; rolling Cloudflare
+  below that floor while the route is absent is not.
 
 Hosted web data API secrets:
 
