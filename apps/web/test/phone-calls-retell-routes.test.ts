@@ -5,6 +5,7 @@ import { beforeAll, beforeEach, describe, expect, it, vi } from "vitest";
 import { hostedOnboardingError } from "@/src/lib/hosted-onboarding/errors";
 
 const mocks = vi.hoisted(() => ({
+  accountRetellPhoneCallUsage: vi.fn(),
   consultPhoneCall: vi.fn(),
   getHostedPhoneCallForConsultation: vi.fn(),
   handleRetellCallAnalyzed: vi.fn(),
@@ -20,6 +21,10 @@ vi.mock("@/src/lib/phone-calls/consult", () => ({
 vi.mock("@/src/lib/phone-calls/result", () => ({
   handleRetellCallAnalyzed: mocks.handleRetellCallAnalyzed,
   handleRetellCallEnded: mocks.handleRetellCallEnded,
+}));
+
+vi.mock("@/src/lib/phone-calls/usage", () => ({
+  accountRetellPhoneCallUsage: mocks.accountRetellPhoneCallUsage,
 }));
 
 vi.mock("@/src/lib/hosted-orchestration/signal-runtime", () => ({
@@ -54,6 +59,7 @@ describe("Retell ask_murph route", () => {
       answer: "Choose the 3:45 PM slot.",
       directive: "continue",
     });
+    mocks.accountRetellPhoneCallUsage.mockResolvedValue("accounted");
     mocks.handleRetellCallAnalyzed.mockResolvedValue({
       notificationMailboxItemId: "mailbox_item_123",
       notificationUserId: "member_123",
@@ -185,6 +191,17 @@ describe("Retell ask_murph route", () => {
       },
       event: "call_started",
     };
+    const transferEndedPayload = {
+      call: {
+        call_cost: {
+          combined_cost: 12.5,
+        },
+        call_id: "retell_call_123",
+        disconnection_reason: "call_transfer",
+        transfer_end_timestamp: 1_782_408_600_000,
+      },
+      event: "transfer_ended",
+    };
 
     await expect(retellWebhookRoute.POST(signedRetellRequest({
       payload: endedPayload,
@@ -196,6 +213,10 @@ describe("Retell ask_murph route", () => {
     }))).resolves.toMatchObject({ status: 204 });
     await expect(retellWebhookRoute.POST(signedRetellRequest({
       payload: ignoredPayload,
+      url: "https://join.example.test/api/retell/webhook",
+    }))).resolves.toMatchObject({ status: 204 });
+    await expect(retellWebhookRoute.POST(signedRetellRequest({
+      payload: transferEndedPayload,
       url: "https://join.example.test/api/retell/webhook",
     }))).resolves.toMatchObject({ status: 204 });
 
@@ -211,6 +232,13 @@ describe("Retell ask_murph route", () => {
     });
     expect(mocks.handleRetellCallEnded).toHaveBeenCalledTimes(1);
     expect(mocks.handleRetellCallAnalyzed).toHaveBeenCalledTimes(1);
+    expect(mocks.accountRetellPhoneCallUsage).toHaveBeenCalledTimes(3);
+    expect(mocks.accountRetellPhoneCallUsage).toHaveBeenLastCalledWith({
+      call: expect.objectContaining({
+        call_id: "retell_call_123",
+        transfer_end_timestamp: 1_782_408_600_000,
+      }),
+    });
     expect(mocks.signalHostedMailboxAppendRuntime).toHaveBeenCalledTimes(1);
     expect(mocks.signalHostedMailboxAppendRuntime).toHaveBeenCalledWith({
       expectedUserId: "member_123",
@@ -285,6 +313,68 @@ describe("Retell ask_murph route", () => {
       expectedUserId: "member_123",
       mailboxItemId: "mailbox_item_123",
     });
+  });
+
+  it("keeps result handling available when Retell cost telemetry is malformed", async () => {
+    const response = await retellWebhookRoute.POST(signedRetellRequest({
+      payload: {
+        call: {
+          call_analysis: {
+            custom_analysis_data: {
+              outcome: "completed",
+              result: "Booked.",
+            },
+          },
+          call_cost: {
+            combined_cost: "invalid",
+          },
+          call_id: "retell_call_123",
+          data_storage_setting: "basic_attributes_only",
+          duration_ms: -1,
+        },
+        event: "call_analyzed",
+      },
+      url: "https://join.example.test/api/retell/webhook",
+    }));
+
+    expect(response.status).toBe(204);
+    expect(mocks.accountRetellPhoneCallUsage).toHaveBeenCalledWith({
+      call: expect.objectContaining({
+        call_cost: null,
+        duration_ms: null,
+      }),
+    });
+    expect(mocks.handleRetellCallAnalyzed).toHaveBeenCalledOnce();
+  });
+
+  it("keeps result handling available when Retell cost telemetry exceeds supported micros", async () => {
+    const response = await retellWebhookRoute.POST(signedRetellRequest({
+      payload: {
+        call: {
+          call_analysis: {
+            custom_analysis_data: {
+              outcome: "completed",
+              result: "Booked.",
+            },
+          },
+          call_cost: {
+            combined_cost: Number.MAX_VALUE,
+          },
+          call_id: "retell_call_123",
+          data_storage_setting: "basic_attributes_only",
+        },
+        event: "call_analyzed",
+      },
+      url: "https://join.example.test/api/retell/webhook",
+    }));
+
+    expect(response.status).toBe(204);
+    expect(mocks.accountRetellPhoneCallUsage).toHaveBeenCalledWith({
+      call: expect.objectContaining({
+        call_cost: null,
+      }),
+    });
+    expect(mocks.handleRetellCallAnalyzed).toHaveBeenCalledOnce();
   });
 
   it("does not wake the runtime when call_analyzed did not append a notification", async () => {

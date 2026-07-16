@@ -4,6 +4,7 @@ import {
 } from "@murphai/hosted-execution/runtime-control";
 import {
   buildHostedTranscriptionUsageRecord,
+  parseAssistantUsageRecord,
   ASSISTANT_IDLE_COMPACTION_USAGE_ESTIMATE_SOURCE_PATH,
   ASSISTANT_IDLE_COMPACTION_USAGE_ESTIMATE_VERSION,
   type AssistantUsageRecord,
@@ -18,6 +19,7 @@ import {
   reconcileHostedAiUsageAllowancePeriodForMemberTx,
   resolveHostedAiUsageGate,
 } from "@/src/lib/hosted-execution/usage-allowance";
+import { buildHostedRetellPhoneCallUsageRecord } from "@/src/lib/hosted-execution/usage-retell";
 
 const BASE_USAGE_RECORD = {
   apiKeyEnv: "OPENAI_API_KEY",
@@ -876,6 +878,56 @@ describe("hosted AI usage allowance pricing", () => {
         "pricing is missing",
       );
     }
+  });
+
+  it("prices web-owned Retell usage from the final provider-reported cost", () => {
+    const usage = buildHostedRetellPhoneCallUsageRecord({
+      combinedCostUsdMicros: 187_500,
+      memberId: "member_123",
+      occurredAt: new Date("2026-06-25T12:00:00.000Z"),
+      phoneCallId: "hpc_123",
+      providerCallId: "retell_call_123",
+    });
+
+    expect(usage).toMatchObject({
+      rawUsageJson: {
+        combinedCostUsdMicros: 187_500,
+      },
+      turnId: "turn_phone_call_hpc_123",
+      usageId: "turn_phone_call_hpc_123.attempt-1",
+    });
+    expect(priceHostedAiUsageForAllowance(usage)).toEqual({
+      costUsdMicros: 187_500n,
+      counted: true,
+      pricingSnapshot: {
+        credentialSource: "platform",
+        providerCost: {
+          combinedCostUsdMicros: "187500",
+        },
+        pricingSource: "https://docs.retellai.com/api-references/get-call",
+        schema: "murph.hosted-ai-usage-allowance-pricing.v1",
+        tokenPricingBasis: "standard",
+      },
+      pricingVersion: "retell-reported-call-cost-2026-07-16",
+    });
+    expect(() => parseAssistantUsageRecord(usage)).toThrow(
+      "rawUsageJson.combinedCostUsdMicros is not allowed",
+    );
+
+    expect(() => priceHostedAiUsageForAllowance({
+      ...usage,
+      rawUsageJson: {
+        combinedCostUsdMicros: 187_500,
+        durationMs: 72_500,
+      },
+    })).toThrow("pricing is missing");
+
+    expect(() => priceHostedAiUsageForAllowance({
+      ...usage,
+      rawUsageJson: {
+        combinedCostUsdMicros: -1,
+      },
+    })).toThrow("pricing is missing");
   });
 
   it("prices ElevenLabs TTS by character count for allowance accounting", () => {
