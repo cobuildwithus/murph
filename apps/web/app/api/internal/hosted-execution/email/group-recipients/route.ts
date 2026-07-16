@@ -3,14 +3,13 @@ import {
 } from "@murphai/hosted-execution/hosted-email";
 
 import {
-  requireHostedCloudflareCallbackRequest,
+  requireHostedCloudflareCallbackJsonRequest,
 } from "@/src/lib/hosted-execution/cloudflare-callback-auth";
 import {
   readHostedGroupNewsletterEmailRecipients,
 } from "@/src/lib/hosted-groups/group-newsletter";
 import { hostedOnboardingError } from "@/src/lib/hosted-onboarding/errors";
 import { jsonOk, withJsonError } from "@/src/lib/hosted-onboarding/http";
-import { readRawBodyBuffer } from "@/src/lib/http";
 
 export const dynamic = "force-dynamic";
 export const fetchCache = "force-no-store";
@@ -19,16 +18,10 @@ export const revalidate = 0;
 const BODY_LIMIT_BYTES = 8 * 1024;
 
 export const POST = withJsonError(async (request: Request) => {
-  const payloadText = (await readRawBodyBuffer(request, {
-    limitBytes: BODY_LIMIT_BYTES,
-  })).toString("utf8");
-  const memberId = await requireHostedCloudflareCallbackRequest(request, {
+  const { payload, userId: memberId } = await requireHostedCloudflareCallbackJsonRequest(request, {
     maxBodyBytes: BODY_LIMIT_BYTES,
-    payloadText,
   });
-  const body = parseHostedEmailGroupRecipientsCallbackRequest(
-    payloadText.trim() ? JSON.parse(payloadText) : {},
-  );
+  const body = parseHostedEmailGroupRecipientsCallbackRequest(payload);
   const resolved = await readHostedGroupNewsletterEmailRecipients({
     ...(body.expectedNewsletterAuthorizationProof
       ? {

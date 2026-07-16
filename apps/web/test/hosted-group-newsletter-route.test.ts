@@ -2,12 +2,12 @@ import { beforeAll, beforeEach, describe, expect, it, vi } from "vitest";
 
 const mocks = vi.hoisted(() => ({
   prepareHostedGroupNewsletterParticipants: vi.fn(),
-  requireHostedCloudflareCallbackRequest: vi.fn(),
+  requireHostedCloudflareCallbackJsonRequest: vi.fn(),
 }));
 
 vi.mock("@/src/lib/hosted-execution/cloudflare-callback-auth", () => ({
-  requireHostedCloudflareCallbackRequest:
-    mocks.requireHostedCloudflareCallbackRequest,
+  requireHostedCloudflareCallbackJsonRequest:
+    mocks.requireHostedCloudflareCallbackJsonRequest,
 }));
 
 vi.mock("@/src/lib/hosted-groups/group-newsletter", () => ({
@@ -30,7 +30,12 @@ describe("hosted group newsletter route", () => {
 
   beforeEach(() => {
     vi.clearAllMocks();
-    mocks.requireHostedCloudflareCallbackRequest.mockResolvedValue("member_runtime");
+    mocks.requireHostedCloudflareCallbackJsonRequest.mockImplementation(
+      async (request: Request) => ({
+        payload: await request.json(),
+        userId: "member_runtime",
+      }),
+    );
     mocks.prepareHostedGroupNewsletterParticipants.mockResolvedValue({
       authorizationProof: "a".repeat(64),
       groupId: "group_123",
