@@ -108,6 +108,7 @@ import {
 } from './channel-typing.js'
 import {
   createAssistantProgressDelivery,
+  resolveAssistantProductFeedbackAcceptedInputIds,
   shouldCreateAssistantProgressDelivery,
 } from './turn-progress.js'
 import {
@@ -614,6 +615,7 @@ export async function sendAssistantMessageLocal(
           initialAcceptedInputJournal.inputIds
         let acceptedInputItemsForProviderRequest: readonly AssistantAcceptedTurnInputItemInput[] =
           initialAcceptedInputJournal.inputs
+        let beforeHostedToolExecution = async (): Promise<void> => {}
         const refreshTypingIndicatorAfterProgress = () => {
           void runAssistantTurnBestEffort(async () => {
             await typingIndicator?.refreshAfterMessage?.()
@@ -696,6 +698,7 @@ export async function sendAssistantMessageLocal(
                 hostedExecutionContext.assistantConfigurationTool ?? null,
               connectedApps: hostedExecutionContext.connectedApps ?? null,
               computerToolsAvailable: hostedComputerToolsAvailable,
+              beforeToolExecution: () => beforeHostedToolExecution(),
               familyPlanTool: hostedExecutionContext.familyPlanTool ?? null,
               groupTool: hostedExecutionContext.groupTool ?? null,
               newsletterTool: hostedExecutionContext.newsletterTool ?? null,
@@ -721,6 +724,10 @@ export async function sendAssistantMessageLocal(
                   acceptedInputItems: acceptedInputItemsForProviderRequest,
                   turnTrigger: currentInput.turnTrigger ?? null,
                 }),
+              getProductFeedbackAcceptedInputIds: () =>
+                resolveAssistantProductFeedbackAcceptedInputIds(
+                  acceptedInputItemsForProviderRequest,
+                ),
               messageInput: input,
               ...(vaultFileSendAvailable && actionApprovalPort
                 ? {
@@ -1030,6 +1037,12 @@ export async function sendAssistantMessageLocal(
             acceptedInputIdsForProviderRequest = providerRequestAcceptedInputIds
             acceptedInputItemsForProviderRequest = providerRequestAcceptedInputItems
           }
+        }
+        beforeHostedToolExecution = async () => {
+          await drainLiveSteeredActiveTurnInputs({
+            continuation: providerRequestContinuation,
+            sessionId: currentSession.sessionId,
+          })
         }
         const providerOutcome = await executeCodexTurnWithRecovery({
           acceptedInputItems: providerRequestAcceptedInputItems,

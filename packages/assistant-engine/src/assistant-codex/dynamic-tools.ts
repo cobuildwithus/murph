@@ -1550,10 +1550,8 @@ type HostedComputerToolPayloadSanitizer =
   | 'open'
 
 export interface MurphDynamicToolExecutionResult {
-  computerRunPausedForUser?: boolean
   finalActionPatch?: MurphDynamicToolFinalActionPatch
   reactionPatch?: MurphDynamicToolReactionPatch
-  requiredComputerHandoffUrl?: string
   requiredVaultFileApprovalUrl?: string
   responseMediaPatch?: MurphDynamicToolResponseMediaPatch
   rpcResult: MurphDynamicToolRpcResult
@@ -3394,26 +3392,13 @@ async function executeHostedComputerPauseForUserTool(input: {
   })
   if (!apiResult.ok) {
     if (apiResult.unknownOutcome) {
-      return toolTextResult(false, apiResult.errorText, {
-        computerRunPausedForUser: true,
-      })
+      return toolTextResult(false, apiResult.errorText)
     }
     return toolTextResult(false, apiResult.errorText)
   }
 
   const payload = readSanitizedComputerPausePayload(apiResult.payload)
-  const handoffUrl = typeof payload.handoffUrl === 'string'
-    ? payload.handoffUrl
-    : null
-
-  return toolTextResult(
-    true,
-    safeToolPayloadText(payload),
-    {
-      computerRunPausedForUser: true,
-      ...(handoffUrl ? { requiredComputerHandoffUrl: handoffUrl } : {}),
-    },
-  )
+  return toolTextResult(true, safeToolPayloadText(payload))
 }
 
 async function executeHostedComputerOpenTool(input: {
@@ -3814,13 +3799,8 @@ function safeToolPayloadText(payload: unknown): string {
 function toolTextResult(
   success: boolean,
   text: string,
-  extra?: Pick<
-    MurphDynamicToolExecutionResult,
-    'computerRunPausedForUser' | 'requiredComputerHandoffUrl'
-  >,
 ): MurphDynamicToolExecutionResult {
   return {
-    ...extra,
     rpcResult: {
       success,
       contentItems: [{ type: 'inputText', text }],

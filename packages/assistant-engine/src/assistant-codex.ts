@@ -591,19 +591,6 @@ export function buildCodexAppServerSteerRequest(
   }
 }
 
-function appendRequiredComputerHandoffUrl(
-  message: string,
-  handoffUrl: string,
-): string {
-  const normalizedMessage = normalizeNullableString(message)
-  if (normalizedMessage?.includes(handoffUrl)) {
-    return normalizedMessage
-  }
-  return normalizedMessage
-    ? `${normalizedMessage}\n\nTake over here: ${handoffUrl}`
-    : `Take over here: ${handoffUrl}`
-}
-
 function appendRequiredVaultFileApprovalUrls(
   message: string,
   approvalUrls: readonly string[],
@@ -2521,7 +2508,6 @@ async function runCodexAppServerTurnOnProcess(
   const jsonEvents: unknown[] = []
   const runtimeIssueInputs: AssistantRuntimeIssueInput[] = []
   let computerToolsLockedAfterUserPause = false
-  let requiredComputerHandoffUrl: string | null = null
   const requiredVaultFileApprovalUrls: string[] = []
   const actionDiagnostics = input.onTraceEvent
     ? createCodexActionDiagnosticsReducer()
@@ -2623,11 +2609,11 @@ async function runCodexAppServerTurnOnProcess(
         .map((entry) => entry.deliveryContextOrdinal),
     )].sort((left, right) => left - right)
 
-  const hasRequiredUserVisibleLink = (): boolean =>
-    requiredComputerHandoffUrl !== null || requiredVaultFileApprovalUrls.length > 0
+  const hasRequiredUserVisibleOutput = (): boolean =>
+    computerToolsLockedAfterUserPause || requiredVaultFileApprovalUrls.length > 0
 
   const settleNoReplyFinalActions = async (): Promise<void> => {
-    if (hasRequiredUserVisibleLink() || noReplySettlementStarted) {
+    if (hasRequiredUserVisibleOutput() || noReplySettlementStarted) {
       return
     }
     noReplySettlementStarted = true
@@ -3180,7 +3166,11 @@ async function runCodexAppServerTurnOnProcess(
     patch: MurphDynamicToolFinalActionPatch,
     deliveryContextOrdinal: number,
   ): Promise<boolean> => {
-    if (patch.kind === 'none' && !canApplyNoReplyPatch(deliveryContextOrdinal)) {
+    if (
+      patch.kind === 'none' &&
+      (computerToolsLockedAfterUserPause ||
+        !canApplyNoReplyPatch(deliveryContextOrdinal))
+    ) {
       return false
     }
 
@@ -3412,57 +3402,64 @@ async function runCodexAppServerTurnOnProcess(
         : null
 
     if (dynamicToolRequest.kind === 'computer-pause-for-user') {
+      finalActionPatches = finalActionPatches.filter(
+        (entry) =>
+          entry.patch.kind !== 'none' ||
+          entry.deliveryContextOrdinal !==
+            dynamicToolRequestDeliveryContextOrdinal,
+      )
+      reservedNoReplyDeliveryContextOrdinals.delete(
+        dynamicToolRequestDeliveryContextOrdinal,
+      )
       computerToolsLockedAfterUserPause = true
       closeLiveTurn()
     }
 
     const runDynamicTool = () => withHostedCanonicalWritePort(
       hostedCanonicalWritePort,
-      async () => await executeMurphDynamicToolRequest({
-        assistantStyleSettingsAvailable: input.dynamicTools.some(
-          (tool) =>
-            tool.namespace === MURPH_ASSISTANT_STYLE_TOOL.namespace &&
-            tool.name === MURPH_ASSISTANT_STYLE_TOOL.name,
-        ),
-        abortSignal: input.abortSignal
-          ? AbortSignal.any([input.abortSignal, dynamicToolAbortController.signal])
-          : dynamicToolAbortController.signal,
-        codexHome: input.codexHome ?? input.env.CODEX_HOME ?? null,
-        env: input.env,
-        fetchImpl: input.fetchImpl,
-        hostedGeneratedImageUploader: input.hostedGeneratedImageUploader,
-        hostedToolContext: resolveCodexAppServerHostedToolContext(input),
-        materializeWorkspaceArtifacts: input.materializeWorkspaceArtifacts ?? null,
-        currentResponseMedia: responseMedia,
-        nextUsageOrdinal: () => nextDynamicToolUsageOrdinal++,
-        productFeedbackRecorder: input.productFeedbackRecorder ?? null,
-        progressDelivery:
-          dynamicToolRequest.kind === 'send-progress-update'
-            ? dynamicToolProgressDelivery
-            : null,
-        publicFetchImpl: input.publicInternetFetch ?? null,
-        request: dynamicToolRequest,
-        requireHostedGeneratedImageUploader:
-          input.requireHostedGeneratedImageUploader ?? false,
-        vaultRoot: input.vaultRoot ?? null,
-        voiceMemoRuntime:
-          dynamicToolRequest.kind === 'generate-voice-memo' ||
-          dynamicToolRequest.kind === 'generate-song'
-            ? input.voiceMemoRuntime ?? null
-            : null,
-      }),
+      async () => {
+        const hostedToolContext = resolveCodexAppServerHostedToolContext(input)
+        await hostedToolContext?.beforeToolExecution?.()
+        return await executeMurphDynamicToolRequest({
+          assistantStyleSettingsAvailable: input.dynamicTools.some(
+            (tool) =>
+              tool.namespace === MURPH_ASSISTANT_STYLE_TOOL.namespace &&
+              tool.name === MURPH_ASSISTANT_STYLE_TOOL.name,
+          ),
+          abortSignal: input.abortSignal
+            ? AbortSignal.any([input.abortSignal, dynamicToolAbortController.signal])
+            : dynamicToolAbortController.signal,
+          codexHome: input.codexHome ?? input.env.CODEX_HOME ?? null,
+          env: input.env,
+          fetchImpl: input.fetchImpl,
+          hostedGeneratedImageUploader: input.hostedGeneratedImageUploader,
+          hostedToolContext,
+          materializeWorkspaceArtifacts: input.materializeWorkspaceArtifacts ?? null,
+          currentResponseMedia: responseMedia,
+          nextUsageOrdinal: () => nextDynamicToolUsageOrdinal++,
+          productFeedbackRecorder: input.productFeedbackRecorder ?? null,
+          progressDelivery:
+            dynamicToolRequest.kind === 'send-progress-update'
+              ? dynamicToolProgressDelivery
+              : null,
+          publicFetchImpl: input.publicInternetFetch ?? null,
+          request: dynamicToolRequest,
+          requireHostedGeneratedImageUploader:
+            input.requireHostedGeneratedImageUploader ?? false,
+          vaultRoot: input.vaultRoot ?? null,
+          voiceMemoRuntime:
+            dynamicToolRequest.kind === 'generate-voice-memo' ||
+            dynamicToolRequest.kind === 'generate-song'
+              ? input.voiceMemoRuntime ?? null
+              : null,
+        })
+      },
     ).then(async (result) => {
       if (dynamicToolRequest.kind === 'send-progress-update') {
         releaseDynamicProgressPending?.()
       }
       if (result.usageDraft) {
         additionalUsages.push(result.usageDraft)
-      }
-      if (result.computerRunPausedForUser) {
-        computerToolsLockedAfterUserPause = true
-      }
-      if (result.requiredComputerHandoffUrl) {
-        requiredComputerHandoffUrl = result.requiredComputerHandoffUrl
       }
       if (
         result.requiredVaultFileApprovalUrl &&
@@ -4321,9 +4318,9 @@ async function runCodexAppServerTurnOnProcess(
         : finalTrailingSteerCandidate?.deliveryContextOrdinal ??
           latestDeliveryContextOrdinal
   const finalActionPatch = resolveFinalActionPatch(finalDeliveryContextOrdinal)
-  const requiredUserVisibleLink = hasRequiredUserVisibleLink()
+  const requiredUserVisibleOutput = hasRequiredUserVisibleOutput()
   const noReplySelected =
-    finalActionPatch?.kind === 'none' && !requiredUserVisibleLink
+    finalActionPatch?.kind === 'none' && !requiredUserVisibleOutput
   const finalAction: AssistantNoReplyDisposition | null = noReplySelected
     ? { kind: 'none' }
     : null
@@ -4331,14 +4328,8 @@ async function runCodexAppServerTurnOnProcess(
     noReplySelected || suppressTrailingSteerCandidateForEarlierNoReply
       ? ''
       : selectedFinalMessage
-  let finalMessage = requiredComputerHandoffUrl
-    ? appendRequiredComputerHandoffUrl(
-        modelFinalMessage,
-        requiredComputerHandoffUrl,
-      )
-    : modelFinalMessage
-  finalMessage = appendRequiredVaultFileApprovalUrls(
-    finalMessage,
+  const finalMessage = appendRequiredVaultFileApprovalUrls(
+    modelFinalMessage,
     requiredVaultFileApprovalUrls,
   )
   if (
@@ -4365,7 +4356,7 @@ async function runCodexAppServerTurnOnProcess(
       acceptedNoReplyDeliveryContextOrdinals,
     finalAction,
     finalActionExplicit:
-      finalActionPatch !== null && !requiredUserVisibleLink,
+      finalActionPatch !== null && !requiredUserVisibleOutput,
     finalMessage,
     transcriptMessage:
       normalizeNullableString(modelFinalMessage) ??

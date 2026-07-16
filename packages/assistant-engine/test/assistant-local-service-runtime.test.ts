@@ -2260,7 +2260,7 @@ test('sendAssistantMessageLocal updates provider request metadata when final con
   )
 })
 
-test('sendAssistantMessageLocal live-steers event-backed input without provider replay', async () => {
+test('sendAssistantMessageLocal checkpoints event-backed live steering before hosted tool effects', async () => {
   const context = await createTempVaultContext(
     'assistant-local-service-active-turn-event-steer-',
   )
@@ -2310,6 +2310,8 @@ test('sendAssistantMessageLocal live-steers event-backed input without provider 
   })
   const providerStarted = createDeferred<void>()
   const providerRelease = createDeferred<void>()
+  const toolExecutionRequested = createDeferred<void>()
+  const toolExecutionCheckpointed = createDeferred<void>()
   const liveSteeredPrompts: string[] = []
   const activeTurnInput = vi.fn<AssistantActiveTurnInputAdmissionHook>(
     async (input) => {
@@ -2323,6 +2325,7 @@ test('sendAssistantMessageLocal live-steers event-backed input without provider 
           kind: 'no-new-input',
         }
       }
+      expect(input.availableInputIds).toEqual([hostedInput.inputId])
       return {
         acceptedInputs: [
           {
@@ -2378,6 +2381,9 @@ test('sendAssistantMessageLocal live-steers event-backed input without provider 
       turnId: 'turn-1',
     })
     providerStarted.resolve()
+    await toolExecutionRequested.promise
+    await providerInput.hostedToolContext?.beforeToolExecution?.()
+    toolExecutionCheckpointed.resolve()
     await providerRelease.promise
     releaseLiveTurn?.()
     return {
@@ -2395,6 +2401,12 @@ test('sendAssistantMessageLocal live-steers event-backed input without provider 
 
   const resultPromise = sendAssistantMessageLocal({
     activeTurnInput,
+    executionContext: {
+      hosted: {
+        memberId: 'member-hosted',
+        userEnvKeys: [],
+      },
+    },
     prompt: 'Initial prompt',
     vault: context.vaultRoot,
   })
@@ -2407,11 +2419,23 @@ test('sendAssistantMessageLocal live-steers event-backed input without provider 
       threadId: 'thread-1',
       directness: 'group',
     },
+    inputIds: [hostedInput.inputId],
     vault: context.vaultRoot,
   })
   await vi.waitFor(() => {
     expect(liveSteeredPrompts).toEqual(['Event-backed follow up'])
   })
+  toolExecutionRequested.resolve()
+  await toolExecutionCheckpointed.promise
+
+  const journalBeforeToolEffect = await readAssistantAcceptedTurnInputJournal(
+    context.vaultRoot,
+    'turn-1',
+  )
+  expect(journalBeforeToolEffect?.providerRequests[0]?.acceptedInputIds).toEqual([
+    'initial',
+    hostedInput.inputId,
+  ])
   providerRelease.resolve()
 
   await expect(resultPromise).resolves.toMatchObject({

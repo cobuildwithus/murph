@@ -955,15 +955,24 @@ source-less wake preempts those drains only after the resumed import proves new
 conversation work; a no-progress or system-only nudge must not starve bounded
 maintenance or the idle checkpoint.
 The assistant engine admits the frozen same-wake compound batch before provider
-start without using hosted-specific mailbox refresh/checkpoint ports. While a
-Codex turn is live, later mailbox input may still be imported and staged, but it
-does not join that provider batch; it remains pending for a normal later
+start without broad hosted mailbox rediscovery. While a Codex turn is live,
+later mailbox input may still be imported and staged. Its exact staged input ID
+may join through the generic live-steering path only when the stored event is
+the next positive causal-sequence successor and preserves the conversation,
+delivery route, native reply anchor, account/audience, and group actor. A
+projection-pending input is a causal barrier until the existing
+projection-completion notification retries it; terminal projection failure is
+still replyable through the normal fallback. Duplicate staging and
+projection-completion notifications at or behind the newest queued or committed
+frontier are ignored before exact-successor proof. After the provider
+acknowledges `turn/steer`, Murph journals and checkpoints the accepted input
+before any hosted tool effect or final delivery may proceed. Missing input, a
+causal gap, a boundary change, or a missed live window remains pending for a normal later
 assistant turn. Strict active-turn-targeted input still fails closed instead of
 falling through, and the assistant engine does not synthesize another provider
-request inside the same assistant turn.
-Other assistant input owners may still use the generic pre-provider admission or
-live-steering paths when they prove the input shares the active turn's causal
-anchor; this mailbox-specific freeze does not change those owners.
+request inside the same assistant turn. Final-delivery and hosted-tool effect
+keys use the newest accepted causal input as the stable replay anchor while the
+full answered-mailbox set remains attached as evidence.
 When mailbox import produces or reuses a canonical write receipt, the runner
 publishes the receipt-log fingerprint and the advanced imported watermark in
 the same status checkpoint. That progress checkpoint is still required when

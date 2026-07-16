@@ -150,6 +150,22 @@ describe("assistant phone calls", () => {
         acceptedInputIds: ["assistant_input_2"],
       },
     });
+    const liveSteeredInput = createPhoneCallRequestKey({
+      brief: BASE_BRIEF,
+      scope: {
+        ...BASE_SCOPE,
+        acceptedInputIds: ["assistant_input_1", "assistant_input_2"],
+        inboundMailboxItemIds: ["mailbox_item_1", "mailbox_item_2"],
+      },
+    });
+    const replayedInput = createPhoneCallRequestKey({
+      brief: BASE_BRIEF,
+      scope: {
+        ...BASE_SCOPE,
+        acceptedInputIds: ["assistant_input_2"],
+        inboundMailboxItemIds: ["mailbox_item_2"],
+      },
+    });
     const runtimeTurnOnlyScope: AssistantHostedToolRequestKeyScope & { turnId: string } = {
       ...BASE_SCOPE,
       turnId: "runtime_turn_retry",
@@ -166,6 +182,7 @@ describe("assistant phone calls", () => {
     expect(differentDisclosure).not.toBe(first);
     expect(differentCallerName).not.toBe(first);
     expect(differentInput).not.toBe(first);
+    expect(liveSteeredInput).toBe(replayedInput);
     expect(createPhoneCallRequestKey({
       brief: BASE_BRIEF,
       scope: runtimeTurnOnlyScope,

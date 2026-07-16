@@ -90,19 +90,21 @@ export { shouldCreateAssistantProgressDelivery } from './progress-constants.js'
 
 export function createAssistantProductFeedbackRecorder(input: {
   acceptedInputItems?: readonly AssistantAcceptedTurnInputItemInput[] | null
+  getAcceptedInputIds?: (() => readonly string[]) | null
   productFeedbackRecorder?: AssistantHostedProductFeedbackRecorder | null
 }): AssistantTurnProductFeedbackRecorder | null {
   const productFeedbackRecorder = input.productFeedbackRecorder ?? null
-  const acceptedInputIds = resolveAssistantProductFeedbackAcceptedInputIds(
+  const initialAcceptedInputIds = resolveAssistantProductFeedbackAcceptedInputIds(
     input.acceptedInputItems ?? [],
   )
-  if (!productFeedbackRecorder || acceptedInputIds.length === 0) {
+  if (!productFeedbackRecorder || initialAcceptedInputIds.length === 0) {
     return null
   }
 
   return {
     async recordProductFeedback(feedback) {
       const normalized = normalizeAssistantProductFeedback(feedback)
+      const acceptedInputIds = input.getAcceptedInputIds?.() ?? initialAcceptedInputIds
       return await productFeedbackRecorder.recordProductFeedback({
         ...normalized,
         idempotencyKey: buildAssistantProductFeedbackIdempotencyKey({
@@ -242,9 +244,10 @@ export function buildAssistantProductFeedbackIdempotencyKey(input: {
   acceptedInputIds: readonly string[]
   feedback: Omit<HostedRuntimeProductFeedbackRecord, 'idempotencyKey'>
 }): string {
+  const effectAnchorInputId = input.acceptedInputIds.at(-1)
   return createHash('sha256')
     .update(JSON.stringify({
-      acceptedInputIds: [...input.acceptedInputIds],
+      acceptedInputIds: effectAnchorInputId ? [effectAnchorInputId] : [],
       kind: input.feedback.kind,
       relatedChangelogItemIds: [...new Set(input.feedback.relatedChangelogItemIds)].sort(),
     }))
