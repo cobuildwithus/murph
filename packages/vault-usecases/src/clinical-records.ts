@@ -1,36 +1,22 @@
 import { createHash } from "node:crypto";
-import type { Dir } from "node:fs";
-import { chmod, mkdir, open, opendir, readFile, rm, stat } from "node:fs/promises";
+import { chmod, mkdir, readFile, rm } from "node:fs/promises";
 import path from "node:path";
 
 import {
-  CLINICAL_FHIR_RESOURCE_TYPES,
-  CLINICAL_RECORD_COVERAGE_FILE_NAME,
-  CLINICAL_RECORD_COVERAGE_MAX_BYTES,
-  CLINICAL_RECORD_FAMILY_COVERAGE_STATUSES,
   CLINICAL_RAW_MANIFEST_MAX_RESOURCE_FILES,
-  CLINICAL_RAW_MANIFEST_MAX_BYTES,
   CLINICAL_RAW_MANIFEST_MAX_TOTAL_RESOURCES,
   CLINICAL_RAW_RESOURCE_FILES_MAX_TOTAL_BYTES,
   CLINICAL_RAW_RESOURCE_FILE_MAX_BYTES,
-  buildClinicalRecordCoverageSnapshot,
-  clinicalFhirManifestPathSchema,
   clinicalFhirRetrievalScopeSchema,
   clinicalFhirRetrievalScopesSchema,
   clinicalFhirResourceTypeSchema,
   clinicalIsoDateTimeSchema,
-  clinicalRecordCoveragePathForManifestPath,
-  clinicalRecordCoveragePathSchema,
-  clinicalRecordCoverageSnapshotSchema,
   clinicalSourceSystemSchema,
   clinicalRawManifestSchema,
   clinicalRawPathSchema,
   countClinicalFhirPageResources,
   type ClinicalFhirRetrievalScope,
   type ClinicalImportPlan,
-  type ClinicalRecordCoverageSnapshot,
-  type ClinicalRecordFamilyCoverage,
-  type ClinicalRecordFamilyCoverageStatus,
   type ClinicalRawManifest,
   type ClinicalSourceSystem,
 } from "@murphai/clinical-records";
@@ -39,7 +25,6 @@ import {
   applyCanonicalWriteBatch,
   importEventBatch,
   isVaultError,
-  resolveVaultPathOnDisk,
 } from "@murphai/core";
 import {
   resolveRuntimePaths,
@@ -154,29 +139,6 @@ export interface ClinicalFhirSnapshotImportResult {
   rawFileCount: number;
   reviewDecisionCount: number;
 }
-
-export interface ClinicalRecordFamilyCoverageSummary {
-  executableDecisionCount: number;
-  resourceType: ClinicalRecordFamilyCoverage["resourceType"];
-  retrievalCoverages: Array<NonNullable<ClinicalRecordFamilyCoverage["retrievalCoverage"]>>;
-  returnedResourceCount: number;
-  reviewDecisionCount: number;
-  sourceCount: number;
-  statuses: ClinicalRecordFamilyCoverageStatus[];
-}
-
-export interface ClinicalRecordCoverageReadResult {
-  complete: boolean;
-  families: ClinicalRecordFamilyCoverageSummary[];
-  invalidSnapshotCount: number;
-  latestFetchedAt: string | null;
-  snapshotCount: number;
-  truncated: boolean;
-}
-
-export const CLINICAL_RECORD_COVERAGE_MAX_SNAPSHOTS = 100;
-const CLINICAL_RECORD_COVERAGE_MAX_DIRECTORY_ENTRIES = 1_000;
-const CLINICAL_RECORD_COVERAGE_DIRECTORY_BUFFER_SIZE = 16;
 
 export class ClinicalFhirSnapshotRejectedError extends Error {
   readonly code = "CLINICAL_FHIR_SNAPSHOT_REJECTED" as const;
@@ -332,83 +294,6 @@ export async function clearClinicalFhirRetrievalCheckpoint(input: {
   await rm(resolveClinicalFhirRetrievalCheckpointPath(input), { force: true });
 }
 
-export async function readClinicalRecordCoverage(input: {
-  maxSnapshots?: number;
-  shouldYield?: (() => boolean) | null;
-  signal?: AbortSignal | null;
-  vaultRoot: string;
-}): Promise<ClinicalRecordCoverageReadResult> {
-  const maxSnapshots = z.number().int().min(1)
-    .max(CLINICAL_RECORD_COVERAGE_MAX_SNAPSHOTS)
-    .parse(input.maxSnapshots ?? CLINICAL_RECORD_COVERAGE_MAX_SNAPSHOTS);
-  const shouldYield = input.shouldYield ?? null;
-  const signal = input.signal ?? null;
-  assertClinicalRecordCoverageCanContinue({ shouldYield, signal });
-
-  const listed = await listClinicalFhirManifestPaths({
-    maxSnapshots,
-    shouldYield,
-    signal,
-    vaultRoot: input.vaultRoot,
-  });
-  if (listed.manifestPaths.length === 0) {
-    return buildClinicalRecordCoverageReadResult({
-      invalidSnapshotCount: listed.invalidManifestPathCount,
-      snapshots: [],
-      truncated: listed.truncated,
-    });
-  }
-
-  const snapshots: ClinicalRecordCoverageSnapshot[] = [];
-  let invalidSnapshotCount = listed.invalidManifestPathCount;
-  for (const manifestPath of listed.manifestPaths) {
-    assertClinicalRecordCoverageCanContinue({ shouldYield, signal });
-    try {
-      const manifest = await readClinicalRawManifest({
-        manifestPath,
-        shouldYield,
-        signal,
-        vaultRoot: input.vaultRoot,
-      });
-      const persistedCoverage = await readPersistedClinicalRecordCoverage({
-        manifest,
-        manifestPath,
-        shouldYield,
-        signal,
-        vaultRoot: input.vaultRoot,
-      });
-      snapshots.push(
-        persistedCoverage ?? buildClinicalRecordCoverageSnapshot({
-          manifest,
-          plan: {
-            schemaVersion: "murph.clinical-import-plan.v1",
-            source: {
-              kind: "fhir",
-              rawManifestPath: manifestPath,
-              sourceSystem: manifest.sourceSystem,
-              connectionId: manifest.connectionId,
-              retrievalJobId: manifest.retrievalJobId,
-            },
-            decisions: [],
-          },
-        }),
-      );
-    } catch (error) {
-      if (isAbortError(error)) {
-        throw error;
-      }
-      assertClinicalRecordCoverageCanContinue({ shouldYield, signal });
-      invalidSnapshotCount += 1;
-    }
-  }
-
-  return buildClinicalRecordCoverageReadResult({
-    invalidSnapshotCount,
-    snapshots: selectLatestClinicalCoverageSnapshotsByConnection(snapshots),
-    truncated: listed.truncated,
-  });
-}
-
 export async function importClinicalFhirSnapshot(
   input: ClinicalFhirSnapshotImportInput,
 ): Promise<ClinicalFhirSnapshotImportResult> {
@@ -445,13 +330,6 @@ export async function importClinicalFhirSnapshot(
   const reviewDecisionCount = plan.decisions.filter(
     (decision) => decision.action === "review",
   ).length;
-  const coverageSnapshot = buildClinicalRecordCoverageSnapshot({
-    manifest: prepared.manifest,
-    plan,
-  });
-  const coveragePath = clinicalRecordCoveragePathForManifestPath(
-    prepared.manifestPath,
-  );
   const rawContents = [
     ...prepared.pages.map((page) => ({
       allowExistingMatch: true,
@@ -466,13 +344,6 @@ export async function importClinicalFhirSnapshot(
       mediaType: "application/json",
       originalFileName: "manifest.json",
       targetRelativePath: prepared.manifestPath,
-    },
-    {
-      allowExistingMatch: true,
-      content: `${JSON.stringify(coverageSnapshot, null, 2)}\n`,
-      mediaType: "application/json",
-      originalFileName: CLINICAL_RECORD_COVERAGE_FILE_NAME,
-      targetRelativePath: coveragePath,
     },
   ];
 
@@ -524,355 +395,6 @@ export async function importClinicalFhirSnapshot(
     manifestPath: prepared.manifestPath,
     rawFileCount: rawContents.length,
     reviewDecisionCount,
-  };
-}
-
-async function listClinicalFhirManifestPaths(input: {
-  maxSnapshots: number;
-  shouldYield: (() => boolean) | null;
-  signal: AbortSignal | null;
-  vaultRoot: string;
-}): Promise<{
-  invalidManifestPathCount: number;
-  manifestPaths: string[];
-  truncated: boolean;
-}> {
-  const { absolutePath: clinicalRoot } = await resolveVaultPathOnDisk(
-    input.vaultRoot,
-    "raw/clinical/fhir",
-  );
-  assertClinicalRecordCoverageCanContinue(input);
-  const connectionDirectory = await openClinicalCoverageDirectoryOrNull(
-    clinicalRoot,
-  );
-  assertClinicalRecordCoverageCanContinue(input);
-  if (!connectionDirectory) {
-    return {
-      invalidManifestPathCount: 0,
-      manifestPaths: [],
-      truncated: false,
-    };
-  }
-
-  const manifestPaths: string[] = [];
-  let invalidManifestPathCount = 0;
-  let visitedDirectoryEntryCount = 0;
-  let truncated = false;
-  let stop = false;
-
-  for await (const connectionEntry of connectionDirectory) {
-    assertClinicalRecordCoverageCanContinue(input);
-    if (
-      visitedDirectoryEntryCount
-      >= CLINICAL_RECORD_COVERAGE_MAX_DIRECTORY_ENTRIES
-    ) {
-      truncated = true;
-      break;
-    }
-    visitedDirectoryEntryCount += 1;
-    if (!connectionEntry.isDirectory()) {
-      continue;
-    }
-    const connectionId = connectionEntry.name;
-    const connectionPath = clinicalFhirManifestPathSchema.safeParse(
-      `raw/clinical/fhir/${connectionId}/placeholder/manifest.json`,
-    );
-    if (!connectionPath.success) {
-      invalidManifestPathCount += 1;
-      continue;
-    }
-    const connectionRoot = path.join(clinicalRoot, connectionEntry.name);
-    const retrievalDirectory = await openClinicalCoverageDirectoryOrNull(
-      connectionRoot,
-    );
-    assertClinicalRecordCoverageCanContinue(input);
-    if (!retrievalDirectory) {
-      invalidManifestPathCount += 1;
-      continue;
-    }
-
-    for await (const retrievalEntry of retrievalDirectory) {
-      assertClinicalRecordCoverageCanContinue(input);
-      if (
-        visitedDirectoryEntryCount
-        >= CLINICAL_RECORD_COVERAGE_MAX_DIRECTORY_ENTRIES
-      ) {
-        truncated = true;
-        stop = true;
-        break;
-      }
-      visitedDirectoryEntryCount += 1;
-      if (!retrievalEntry.isDirectory()) {
-        continue;
-      }
-      const manifestPath = clinicalFhirManifestPathSchema.safeParse(
-        `raw/clinical/fhir/${connectionEntry.name}/${retrievalEntry.name}/manifest.json`,
-      );
-      if (!manifestPath.success) {
-        invalidManifestPathCount += 1;
-        continue;
-      }
-      if (!await isClinicalCoverageRegularFile({
-        relativePath: manifestPath.data,
-        vaultRoot: input.vaultRoot,
-      })) {
-        invalidManifestPathCount += 1;
-        continue;
-      }
-      assertClinicalRecordCoverageCanContinue(input);
-      if (manifestPaths.length >= input.maxSnapshots) {
-        truncated = true;
-        stop = true;
-        break;
-      }
-      manifestPaths.push(manifestPath.data);
-    }
-    if (stop) {
-      break;
-    }
-  }
-
-  return {
-    invalidManifestPathCount,
-    manifestPaths: manifestPaths.sort((left, right) => left.localeCompare(right)),
-    truncated,
-  };
-}
-
-async function openClinicalCoverageDirectoryOrNull(
-  directory: string,
-): Promise<Dir | null> {
-  try {
-    return await opendir(directory, {
-      bufferSize: CLINICAL_RECORD_COVERAGE_DIRECTORY_BUFFER_SIZE,
-    });
-  } catch (error) {
-    if (isMissingFileError(error)) {
-      return null;
-    }
-    throw error;
-  }
-}
-
-async function isClinicalCoverageRegularFile(input: {
-  relativePath: string;
-  vaultRoot: string;
-}): Promise<boolean> {
-  try {
-    const { absolutePath } = await resolveVaultPathOnDisk(
-      input.vaultRoot,
-      input.relativePath,
-    );
-    return (await stat(absolutePath)).isFile();
-  } catch {
-    return false;
-  }
-}
-
-async function readClinicalRawManifest(input: {
-  manifestPath: string;
-  shouldYield: (() => boolean) | null;
-  signal: AbortSignal | null;
-  vaultRoot: string;
-}): Promise<ClinicalRawManifest> {
-  const manifestPath = clinicalFhirManifestPathSchema.parse(input.manifestPath);
-  assertClinicalRecordCoverageCanContinue(input);
-  const { absolutePath } = await resolveVaultPathOnDisk(input.vaultRoot, manifestPath);
-  assertClinicalRecordCoverageCanContinue(input);
-  const raw = await readBoundedClinicalCoverageTextFile({
-    absolutePath,
-    label: "Clinical FHIR raw manifest",
-    maxBytes: CLINICAL_RAW_MANIFEST_MAX_BYTES,
-    shouldYield: input.shouldYield,
-    signal: input.signal,
-  });
-  return clinicalRawManifestSchema.parse(JSON.parse(raw));
-}
-
-async function readPersistedClinicalRecordCoverage(input: {
-  manifest: ClinicalRawManifest;
-  manifestPath: string;
-  shouldYield: (() => boolean) | null;
-  signal: AbortSignal | null;
-  vaultRoot: string;
-}): Promise<ClinicalRecordCoverageSnapshot | null> {
-  const coveragePath = clinicalRecordCoveragePathForManifestPath(
-    input.manifestPath,
-  );
-  const { absolutePath } = await resolveVaultPathOnDisk(
-    input.vaultRoot,
-    clinicalRecordCoveragePathSchema.parse(coveragePath),
-  );
-  assertClinicalRecordCoverageCanContinue(input);
-
-  let raw: string;
-  try {
-    raw = await readBoundedClinicalCoverageTextFile({
-      absolutePath,
-      label: "Clinical FHIR coverage artifact",
-      maxBytes: CLINICAL_RECORD_COVERAGE_MAX_BYTES,
-      shouldYield: input.shouldYield,
-      signal: input.signal,
-    });
-  } catch (error) {
-    if (isMissingFileError(error)) {
-      return null;
-    }
-    throw error;
-  }
-  const coverage = clinicalRecordCoverageSnapshotSchema.parse(JSON.parse(raw));
-  assertClinicalRecordCoverageMatchesManifest({
-    coverage,
-    manifest: input.manifest,
-  });
-  return coverage;
-}
-
-async function readBoundedClinicalCoverageTextFile(input: {
-  absolutePath: string;
-  label: string;
-  maxBytes: number;
-  shouldYield: (() => boolean) | null;
-  signal: AbortSignal | null;
-}): Promise<string> {
-  assertClinicalRecordCoverageCanContinue(input);
-  const handle = await open(input.absolutePath, "r");
-  try {
-    assertClinicalRecordCoverageCanContinue(input);
-    const fileStat = await handle.stat();
-    if (!fileStat.isFile() || fileStat.size > input.maxBytes) {
-      throw new TypeError(`${input.label} exceeds its supported bounds.`);
-    }
-
-    const bytes = Buffer.alloc(input.maxBytes + 1);
-    let offset = 0;
-    while (offset < bytes.byteLength) {
-      assertClinicalRecordCoverageCanContinue(input);
-      const result = await handle.read(
-        bytes,
-        offset,
-        bytes.byteLength - offset,
-        offset,
-      );
-      if (result.bytesRead === 0) {
-        break;
-      }
-      offset += result.bytesRead;
-    }
-    assertClinicalRecordCoverageCanContinue(input);
-    if (offset > input.maxBytes) {
-      throw new TypeError(`${input.label} exceeds its supported bounds.`);
-    }
-    return bytes.subarray(0, offset).toString("utf8");
-  } finally {
-    await handle.close();
-  }
-}
-
-function assertClinicalRecordCoverageMatchesManifest(input: {
-  coverage: ClinicalRecordCoverageSnapshot;
-  manifest: ClinicalRawManifest;
-}): void {
-  if (
-    input.coverage.connectionId !== input.manifest.connectionId
-    || input.coverage.retrievalJobId !== input.manifest.retrievalJobId
-    || input.coverage.fetchedAt !== input.manifest.fetchedAt
-  ) {
-    throw new TypeError("Clinical FHIR coverage artifact does not match its manifest identity.");
-  }
-
-  for (const family of input.coverage.families) {
-    const expectedReturnedResourceCount = input.manifest.resourceFiles
-      .filter((resourceFile) => resourceFile.resourceType === family.resourceType)
-      .reduce((sum, resourceFile) => sum + resourceFile.count, 0);
-    const expectedRetrievalCoverage = input.manifest.retrievalScopes.find(
-      (scope) => scope.resourceType === family.resourceType,
-    )?.coverage ?? null;
-    if (
-      family.returnedResourceCount !== expectedReturnedResourceCount
-      || family.retrievalCoverage !== expectedRetrievalCoverage
-    ) {
-      throw new TypeError("Clinical FHIR coverage artifact does not match its manifest evidence.");
-    }
-  }
-}
-
-function selectLatestClinicalCoverageSnapshotsByConnection(
-  snapshots: readonly ClinicalRecordCoverageSnapshot[],
-): ClinicalRecordCoverageSnapshot[] {
-  const latestByConnection = new Map<string, ClinicalRecordCoverageSnapshot>();
-  for (const snapshot of snapshots) {
-    const current = latestByConnection.get(snapshot.connectionId);
-    if (
-      !current
-      || snapshot.fetchedAt > current.fetchedAt
-      || (
-        snapshot.fetchedAt === current.fetchedAt
-        && snapshot.retrievalJobId > current.retrievalJobId
-      )
-    ) {
-      latestByConnection.set(snapshot.connectionId, snapshot);
-    }
-  }
-  return [...latestByConnection.values()].sort((left, right) =>
-    left.connectionId.localeCompare(right.connectionId)
-  );
-}
-
-function buildClinicalRecordCoverageReadResult(input: {
-  invalidSnapshotCount: number;
-  snapshots: readonly ClinicalRecordCoverageSnapshot[];
-  truncated: boolean;
-}): ClinicalRecordCoverageReadResult {
-  let latestFetchedAt: string | null = null;
-  for (const snapshot of input.snapshots) {
-    if (latestFetchedAt === null || snapshot.fetchedAt > latestFetchedAt) {
-      latestFetchedAt = snapshot.fetchedAt;
-    }
-  }
-
-  return {
-    complete: input.invalidSnapshotCount === 0 && !input.truncated,
-    families: CLINICAL_FHIR_RESOURCE_TYPES.map((resourceType) => {
-      const familyCoverage = input.snapshots.flatMap((snapshot) =>
-        snapshot.families.filter((family) => family.resourceType === resourceType)
-      );
-      const statusSet = new Set(
-        familyCoverage.map((family) => family.status),
-      );
-      const statuses = CLINICAL_RECORD_FAMILY_COVERAGE_STATUSES.filter((status) =>
-        statusSet.has(status)
-      );
-      const retrievalCoverageSet = new Set(
-        familyCoverage.flatMap((family) =>
-          family.retrievalCoverage === null ? [] : [family.retrievalCoverage]
-        ),
-      );
-      const retrievalCoverages = (["whole-family", "bounded-window"] as const)
-        .filter((coverage) => retrievalCoverageSet.has(coverage));
-      return {
-        executableDecisionCount: familyCoverage.reduce(
-          (sum, family) => sum + family.executableDecisionCount,
-          0,
-        ),
-        resourceType,
-        retrievalCoverages,
-        returnedResourceCount: familyCoverage.reduce(
-          (sum, family) => sum + family.returnedResourceCount,
-          0,
-        ),
-        reviewDecisionCount: familyCoverage.reduce(
-          (sum, family) => sum + family.reviewDecisionCount,
-          0,
-        ),
-        sourceCount: familyCoverage.length,
-        statuses: statuses.length > 0 ? [...statuses] : ["unknown"],
-      };
-    }),
-    invalidSnapshotCount: input.invalidSnapshotCount,
-    latestFetchedAt,
-    snapshotCount: input.snapshots.length,
-    truncated: input.truncated,
   };
 }
 
@@ -946,27 +468,6 @@ function isMissingFileError(error: unknown): boolean {
   return error instanceof Error
     && "code" in error
     && error.code === "ENOENT";
-}
-
-function isAbortError(error: unknown): boolean {
-  return error instanceof Error && error.name === "AbortError";
-}
-
-function assertClinicalRecordCoverageCanContinue(input: {
-  shouldYield: (() => boolean) | null;
-  signal: AbortSignal | null;
-}): void {
-  if (input.signal?.aborted) {
-    throw input.signal.reason instanceof Error
-      ? input.signal.reason
-      : new DOMException("Clinical coverage read aborted.", "AbortError");
-  }
-  if (input.shouldYield?.() === true) {
-    throw new DOMException(
-      "Clinical coverage read yielded to foreground work.",
-      "AbortError",
-    );
-  }
 }
 
 async function importClinicalEventDecisions(input: {

@@ -1,5 +1,3 @@
-import { isRunnableProtocolStatus } from "@murphai/health-commons/runtime";
-
 import {
   CURRENT_EXPERIMENT_PROTOCOL_CONTRACT_VERSION,
 } from "@/src/lib/experiments/experiment-detail";
@@ -28,7 +26,9 @@ export function listHealthCommonsExperimentRouteParams(): { experimentId: string
 }
 
 function isPublicExperimentIndexEntry(entry: GeneratedExperimentIndexEntry): boolean {
-  return isRunnableProtocolStatus(entry.status) && entry.hidden !== true;
+  return entry.status !== "draft"
+    && entry.status !== "deprecated"
+    && entry.hidden !== true;
 }
 
 function toExperimentProtocolIndexEntry(entry: GeneratedExperimentIndexEntry): ExperimentProtocol {

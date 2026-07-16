@@ -25,88 +25,10 @@ import {
   readAssistantContextSnapshotState,
   refreshAssistantContextSnapshotBestEffort,
   refreshAssistantContextSnapshot,
-  renderAssistantClinicalCoverageLine,
   resolveAssistantContextSnapshotPath,
 } from '../src/assistant/context-snapshot.js'
 
 describe('assistant context snapshot', () => {
-  it('renders clinical connector coverage as mapping navigation, never canonical absence', () => {
-    const line = renderAssistantClinicalCoverageLine({
-      complete: false,
-      families: [
-        {
-          executableDecisionCount: 1,
-          resourceType: 'Observation',
-          retrievalCoverages: ['bounded-window'],
-          returnedResourceCount: 1,
-          reviewDecisionCount: 0,
-          sourceCount: 1,
-          statuses: ['mapped-for-import'],
-        },
-        {
-          executableDecisionCount: 1,
-          resourceType: 'Condition',
-          retrievalCoverages: ['whole-family'],
-          returnedResourceCount: 2,
-          reviewDecisionCount: 1,
-          sourceCount: 1,
-          statuses: ['mapped-for-import-with-review'],
-        },
-        {
-          executableDecisionCount: 0,
-          resourceType: 'MedicationRequest',
-          retrievalCoverages: ['whole-family'],
-          returnedResourceCount: 1,
-          reviewDecisionCount: 1,
-          sourceCount: 1,
-          statuses: ['review-only'],
-        },
-        {
-          executableDecisionCount: 0,
-          resourceType: 'AllergyIntolerance',
-          retrievalCoverages: ['whole-family'],
-          returnedResourceCount: 0,
-          reviewDecisionCount: 0,
-          sourceCount: 1,
-          statuses: ['no-records-returned'],
-        },
-        {
-          executableDecisionCount: 0,
-          resourceType: 'Encounter',
-          retrievalCoverages: [],
-          returnedResourceCount: 0,
-          reviewDecisionCount: 0,
-          sourceCount: 1,
-          statuses: ['not-authorized'],
-        },
-        {
-          executableDecisionCount: 0,
-          resourceType: 'Procedure',
-          retrievalCoverages: [],
-          returnedResourceCount: 0,
-          reviewDecisionCount: 0,
-          sourceCount: 0,
-          statuses: ['unknown'],
-        },
-      ],
-      invalidSnapshotCount: 1,
-      latestFetchedAt: '2026-05-31T08:00:00.000Z',
-      snapshotCount: 2,
-      truncated: true,
-    })
-
-    expect(line).toContain('manifest scan incomplete, 1 invalid snapshot, snapshot scan truncated')
-    expect(line).toContain('latest scanned fetch 2026-05-31T08:00:00.000Z')
-    expect(line).toContain('mapped for canonical import: Observation, Condition')
-    expect(line).toContain('unresolved review: Condition, MedicationRequest')
-    expect(line).toContain('bounded-window only: Observation')
-    expect(line).toContain('mapped does not mean the canonical write succeeded')
-    expect(line).toContain('never proof that a health fact is absent')
-    expect(line).toContain(
-      'Read live canonical records and the relevant clinical source before safety-sensitive guidance.',
-    )
-  })
-
   it('classifies only prompt-snapshot source domains as dirty', () => {
     expect(
       listAssistantContextSnapshotDirtyDomainsForPath(
@@ -128,16 +50,6 @@ describe('assistant context snapshot', () => {
         'bank/goals/sleep.md',
       ),
     ).toEqual(['health_context'])
-    expect(
-      listAssistantContextSnapshotDirtyDomainsForPath(
-        'raw/clinical/fhir/clinical-connection-1/retrieval-job-1/coverage.json',
-      ),
-    ).toEqual(['health_context'])
-    expect(
-      listAssistantContextSnapshotDirtyDomainsForPath(
-        'raw/clinical/fhir/clinical-connection-1/retrieval-job-1/manifest.json',
-      ),
-    ).toEqual([])
     expect(
       listAssistantContextSnapshotDirtyDomainsForPath(
         'ledger/events/2026-06.jsonl',

@@ -1677,6 +1677,27 @@ function deviceEventContentKey(record: EventRecord): string {
   return stableStringify(content);
 }
 
+function isLegacyWhoopSleepTypeEnrichment(
+  existing: EventRecord,
+  incoming: EventRecord,
+): boolean {
+  if (
+    existing.kind !== "sleep_session"
+    || incoming.kind !== "sleep_session"
+    || existing.externalRef?.system !== "whoop"
+    || existing.externalRef.resourceType !== "sleep"
+    || incoming.externalRef?.system !== "whoop"
+    || incoming.externalRef.resourceType !== "sleep"
+    || existing.sleepType !== undefined
+    || (incoming.sleepType !== "main_sleep" && incoming.sleepType !== "nap")
+  ) {
+    return false;
+  }
+
+  return deviceEventContentKey({ ...existing, sleepType: incoming.sleepType })
+    === deviceEventContentKey(incoming);
+}
+
 function isWhoopCompanionHrvRmssdAdmissionEvent(record: EventRecord): boolean {
   const externalRef = record.externalRef;
   const admissionId = externalRef?.resourceId;
@@ -2825,13 +2846,37 @@ async function reconcileDeviceEventEntriesByExternalRef(
         records.push(latest);
         continue;
       }
-      if (sourceVersionComparison === 0) {
+      const legacySleepTypeEnrichment = sourceVersionComparison === 0
+        && isLegacyWhoopSleepTypeEnrichment(indexedProviderMatch.indexedRecord, entry.record);
+      if (
+        sourceVersionComparison === 0
+        && !legacySleepTypeEnrichment
+      ) {
         throw new VaultError(
           "EVENT_SOURCE_REVISION_CONFLICT",
           `Event externalRef "${externalRef.system}/${externalRef.resourceType}/${externalRef.resourceId}` +
             `${externalRef.facet ? `#${externalRef.facet}` : ""}" has conflicting content for source revision ` +
             `"${externalRef.version}"; nothing was imported.`,
         );
+      }
+      if (
+        legacySleepTypeEnrichment
+        && (
+          isDeletedEventSpineRecord(latest)
+          || matchedEntries.some((match) =>
+            hasHistoricalExternalRefUserAuthoredChanges(match.indexedMatch)
+          )
+        )
+      ) {
+        // sleepType is provider normalization metadata. Never resurrect a
+        // deleted event or replace user-authored state merely to backfill it;
+        // preserving this row also lets unrelated snapshot resources commit.
+        skippedDuplicateCount += 1;
+        if (eventSpineRevisionsAreComplete(index, latest.id)) {
+          retainedPreparedIds.add(entry.record.id);
+        }
+        records.push(latest);
+        continue;
       }
     }
 
