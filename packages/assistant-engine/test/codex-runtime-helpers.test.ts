@@ -29,6 +29,9 @@ import {
   ASSISTANT_USAGE_SCHEMA,
   parseAssistantUsageRecord,
 } from '@murphai/hosted-execution/assistant-usage'
+import {
+  HOSTED_CLI_BRIDGE_TOKEN_ENV,
+} from '@murphai/hosted-execution/cli-runtime-bridge'
 import { normalizeAssistantProviderConfig } from '@murphai/operator-config/assistant/provider-config'
 import { serializeAssistantProviderSessionOptions } from '@murphai/operator-config/assistant/provider-config'
 import { VaultCliError } from '@murphai/operator-config/vault-cli-errors'
@@ -2454,7 +2457,7 @@ describe('Codex assistant registry helpers', () => {
     )
   })
 
-  it('never passes a multi_agent_v2 CLI override on hosted turns', async () => {
+  it('keeps hosted feature ownership while forwarding the provider credential key', async () => {
     // Hosted config.toml owns [features.multi_agent_v2] (including
     // root_agent_usage_hint_text); a CLI boolean override would take
     // precedence and silently reset that table to feature defaults.
@@ -2474,6 +2477,7 @@ describe('Codex assistant registry helpers', () => {
 
     const attempt = await executeCodexAssistantTurnAttempt({
       env: {
+        [HOSTED_CLI_BRIDGE_TOKEN_ENV]: 'test-bridge-token',
         [HOSTED_RUNTIME_PROCESS_ENV_MARKER]: '1',
         OPENAI_API_KEY: 'test-key',
         PATH: '/usr/bin',
@@ -2490,6 +2494,9 @@ describe('Codex assistant registry helpers', () => {
     expect(attempt.ok).toBe(true)
     const appServerInput = codexAppServerMocks.executeCodexAppServerTurn.mock
       .calls[0]?.[0]
+    expect(appServerInput).toMatchObject({
+      hostedProviderCredentialEnvKey: 'OPENAI_API_KEY',
+    })
     expect(
       appServerInput?.configOverrides?.some(
         (override: string) => override.includes('multi_agent'),

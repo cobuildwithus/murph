@@ -7,7 +7,6 @@ import path from 'node:path'
 import type {
   HostedCodexAuthAction,
 } from '@murphai/hosted-execution/contracts'
-import { HOSTED_CLI_BRIDGE_TOKEN_ENV } from '@murphai/hosted-execution/cli-runtime-bridge'
 import { normalizeNullableString } from '@murphai/operator-config/text/shared'
 import { VaultCliError } from '@murphai/operator-config/vault-cli-errors'
 import {
@@ -87,6 +86,7 @@ import {
   type PendingCodexRpcRequest,
 } from './assistant-codex/app-server-rpc.js'
 import {
+  resolveHostedCodexTurnBoundary,
   resolveCodexChildEnv,
   withHostedCodexModelCatalogConfigOverride,
 } from './assistant-codex/config.js'
@@ -220,8 +220,10 @@ type CodexAppServerSpawnInput = CodexAppServerProcessInput & {
 type CodexAppServerPreparedTurnInput = CodexAppServerTurnInput & {
   args: readonly string[]
   codexCommand: string
+  ephemeralApiKey: string | null
   env: NodeJS.ProcessEnv
   fetchImpl: typeof fetch
+  hostedTurn: boolean
   hostedGeneratedImageUploader: AssistantHostedGeneratedImageUploader | null
   imagePaths: readonly string[]
   launchKey: string
@@ -422,6 +424,7 @@ export interface CodexAppServerTurnInput {
   codexHome?: string | null
   env?: NodeJS.ProcessEnv
   fetchImpl?: typeof fetch | null
+  hostedProviderCredentialEnvKey?: string | null
   baseInstructions?: string | null
   developerInstructions?: string | null
   dynamicTools: readonly AssistantProviderDynamicTool[]
@@ -610,9 +613,13 @@ export async function executeCodexAppServerTurn(
   const approvalPolicy = resolveSupportedCodexAppServerApprovalPolicy(input.approvalPolicy)
   const workingDirectory = path.resolve(input.workingDirectory)
   await assertCodexAppServerWorkingDirectory(workingDirectory)
+  const hostedTurnBoundary = resolveHostedCodexTurnBoundary({
+    env: input.env,
+    providerCredentialEnvKey: input.hostedProviderCredentialEnvKey,
+  })
   const childEnv = await resolveCodexChildEnv({
     codexHome: input.codexHome,
-    env: input.env,
+    env: hostedTurnBoundary?.residentEnv ?? input.env,
   })
   const codexCommand = resolveCodexAppServerCommand(input.codexCommand)
   const tempRoot = await mkdtemp(path.join(tmpdir(), 'murph-codex-'))
@@ -630,6 +637,12 @@ export async function executeCodexAppServerTurn(
     runtimeWorkspaceRoots: input.runtimeWorkspaceRoots?.map((root) =>
       path.resolve(root),
     ),
+    threadConfig: hostedTurnBoundary
+      ? {
+          ...(input.threadConfig ?? {}),
+          ...hostedTurnBoundary.threadConfig,
+        }
+      : input.threadConfig,
   }
   const args = buildCodexAppServerArgs(normalizedInput)
   const launchKey = buildCodexAppServerLaunchKey({
@@ -642,11 +655,13 @@ export async function executeCodexAppServerTurn(
     ...normalizedInput,
     args,
     codexCommand,
+    ephemeralApiKey: hostedTurnBoundary?.ephemeralApiKey ?? null,
     env: childEnv,
     fetchImpl: input.fetchImpl ?? fetch,
     hostedGeneratedImageUploader: input.hostedGeneratedImageUploader ?? null,
     materializeWorkspaceArtifacts: input.materializeWorkspaceArtifacts ?? null,
     imagePaths,
+    hostedTurn: hostedTurnBoundary !== null,
     launchKey,
     publicInternetFetch: input.publicInternetFetch ?? null,
     tempRoot,
@@ -953,6 +968,7 @@ class CodexAppServerProcess {
 
   beginHostedBackgroundTerminalCleanup(input: {
     binding: CodexAppServerActiveTurnBinding
+    revokeEphemeralApiKeyAuth: boolean
     threadId: string
   }): Promise<void> {
     if (this.activeTurn !== input.binding || this.state !== 'running') {
@@ -965,13 +981,22 @@ class CodexAppServerProcess {
     // turn so its provider result can proceed to durable reply delivery.
     this.activeTurn = null
     this.state = 'cleanup'
-    const cleanup = withCodexRpcTimeout(
-      this.sendRequest('thread/backgroundTerminals/clean', {
-        threadId: input.threadId,
-      }),
-      HOSTED_CODEX_BACKGROUND_TERMINAL_CLEANUP_TIMEOUT_MS,
-      'thread/backgroundTerminals/clean',
-    ).then(
+    const cleanup = (async () => {
+      await withCodexRpcTimeout(
+        this.sendRequest('thread/backgroundTerminals/clean', {
+          threadId: input.threadId,
+        }),
+        HOSTED_CODEX_BACKGROUND_TERMINAL_CLEANUP_TIMEOUT_MS,
+        'thread/backgroundTerminals/clean',
+      )
+      if (input.revokeEphemeralApiKeyAuth) {
+        await withCodexRpcTimeout(
+          this.sendRequest('account/logout', {}),
+          HOSTED_CODEX_BACKGROUND_TERMINAL_CLEANUP_TIMEOUT_MS,
+          'account/logout',
+        )
+      }
+    })().then(
       () => undefined,
       async (error: unknown) => {
         // Clear the timed-out RPC before stopping the exact owned process
@@ -4121,6 +4146,26 @@ async function runCodexAppServerTurnOnProcess(
       emitAppServerTimingTrace('warm-reused')
     }
 
+    if (input.ephemeralApiKey) {
+      lifecycleStage = 'provider_auth_bind'
+      try {
+        await withCodexRpcTimeout(
+          sendRequest('account/login/start', {
+            apiKey: input.ephemeralApiKey,
+            type: 'apiKey',
+          }),
+          HOSTED_CODEX_BACKGROUND_TERMINAL_CLEANUP_TIMEOUT_MS,
+          'account/login/start',
+        )
+      } catch {
+        throw new VaultCliError(
+          'ASSISTANT_CODEX_AUTH_FAILED',
+          'Codex app-server could not bind hosted provider authentication.',
+          { retryable: true },
+        )
+      }
+    }
+
     const resumeThreadId = requestedResumeThreadId
     const threadTimingStage = resumeThreadId ? 'thread-resumed' : 'thread-started'
     lifecycleStage = resumeThreadId ? 'thread_resume' : 'thread_start'
@@ -4218,11 +4263,12 @@ async function runCodexAppServerTurnOnProcess(
       if (
         input.processLifetime !== 'one-shot' &&
         codexThreadId &&
-        normalizeNullableString(input.env[HOSTED_CLI_BRIDGE_TOKEN_ENV])
+        input.hostedTurn
       ) {
         lifecycleStage = 'background_terminal_cleanup'
         const cleanup = codexProcess.beginHostedBackgroundTerminalCleanup({
           binding: activeTurnBinding,
+          revokeEphemeralApiKeyAuth: input.ephemeralApiKey !== null,
           threadId: codexThreadId,
         })
         trackHostedCodexPostTurnCleanup(cleanup)

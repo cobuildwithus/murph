@@ -4,6 +4,8 @@ import { homedir } from 'node:os'
 import path from 'node:path'
 
 import {
+  HOSTED_CLI_BRIDGE_ROUTE_GRANT_ENV,
+  HOSTED_CLI_BRIDGE_TOKEN_ENV,
   HOSTED_RUNTIME_CODEX_MODEL_CATALOG_JSON_ENV,
 } from '@murphai/hosted-execution/cli-runtime-bridge'
 import { normalizeNullableString } from '@murphai/operator-config/text/shared'
@@ -26,6 +28,76 @@ interface CodexDisplayConfig {
 export interface CodexDisplayOptions {
   model: string | null
   reasoningEffort: string | null
+}
+
+export interface HostedCodexTurnBoundary {
+  ephemeralApiKey: string | null
+  residentEnv: NodeJS.ProcessEnv
+  threadConfig: Readonly<Record<string, unknown>>
+}
+
+export function resolveHostedCodexTurnBoundary(input: {
+  env?: NodeJS.ProcessEnv
+  providerCredentialEnvKey?: string | null
+}): HostedCodexTurnBoundary | null {
+  const env = input.env ?? process.env
+  const bridgeToken = normalizeNullableString(
+    env[HOSTED_CLI_BRIDGE_TOKEN_ENV],
+  )
+  if (!bridgeToken) {
+    return null
+  }
+
+  const routeGrant = normalizeNullableString(
+    env[HOSTED_CLI_BRIDGE_ROUTE_GRANT_ENV],
+  )
+  if (!routeGrant) {
+    throw new VaultCliError(
+      'ASSISTANT_CODEX_HOSTED_AUTH_INVALID',
+      'Hosted Codex turns require a current CLI bridge route grant.',
+      { retryable: false },
+    )
+  }
+
+  const turnScopedEnv = new Map<string, string>([
+    [HOSTED_CLI_BRIDGE_TOKEN_ENV, bridgeToken],
+    [HOSTED_CLI_BRIDGE_ROUTE_GRANT_ENV, routeGrant],
+  ])
+  const providerCredentialEnvKey = normalizeNullableString(
+    input.providerCredentialEnvKey,
+  )
+  let ephemeralApiKey: string | null = null
+  if (providerCredentialEnvKey) {
+    if (!/^[A-Za-z_][A-Za-z0-9_]*$/u.test(providerCredentialEnvKey)) {
+      throw new VaultCliError(
+        'ASSISTANT_CODEX_HOSTED_AUTH_INVALID',
+        'Hosted Codex provider credential environment key is invalid.',
+        { retryable: false },
+      )
+    }
+    ephemeralApiKey = normalizeNullableString(env[providerCredentialEnvKey])
+    if (!ephemeralApiKey) {
+      throw new VaultCliError(
+        'ASSISTANT_CODEX_HOSTED_AUTH_INVALID',
+        'Hosted Codex provider authentication is unavailable for this turn.',
+        { retryable: true },
+      )
+    }
+    turnScopedEnv.set(providerCredentialEnvKey, ephemeralApiKey)
+  }
+
+  const residentEnv = { ...env }
+  const threadConfig: Record<string, unknown> = {}
+  for (const [name, value] of turnScopedEnv) {
+    delete residentEnv[name]
+    threadConfig[`shell_environment_policy.set.${name}`] = value
+  }
+
+  return {
+    ephemeralApiKey,
+    residentEnv,
+    threadConfig,
+  }
 }
 
 export async function resolveCodexChildEnv(input: {

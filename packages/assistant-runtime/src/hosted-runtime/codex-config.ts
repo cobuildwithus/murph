@@ -521,14 +521,13 @@ export function buildHostedCodexConfigToml(input: {
       ? []
       : [
           `base_url = ${tomlString(input.provider.baseUrl)}`,
-          `env_key = ${tomlString(input.provider.envKey)}`,
         ]),
     `wire_api = ${tomlString(input.provider.wireApi)}`,
     ...(input.provider.supportsWebSockets
       ? ["supports_websockets = true"]
       : []),
     `stream_idle_timeout_ms = ${HOSTED_CODEX_PROVIDER_STREAM_IDLE_TIMEOUT_MS}`,
-    `requires_openai_auth = ${input.chatGptAuth ? "true" : "false"}`,
+    "requires_openai_auth = true",
     `request_max_retries = ${HOSTED_CODEX_PROVIDER_REQUEST_MAX_RETRIES}`,
     `stream_max_retries = ${HOSTED_CODEX_PROVIDER_STREAM_MAX_RETRIES}`,
     "",
@@ -536,7 +535,7 @@ export function buildHostedCodexConfigToml(input: {
 
   return [
     ...(input.model ? [`model = ${tomlString(input.model)}`] : []),
-    ...(input.chatGptAuth ? ['cli_auth_credentials_store = "file"'] : []),
+    `cli_auth_credentials_store = ${tomlString(input.chatGptAuth ? "file" : "ephemeral")}`,
     `model_provider = ${tomlString(modelProviderId)}`,
     `model_reasoning_effort = ${tomlString(input.reasoningEffort)}`,
     `model_auto_compact_token_limit = ${DEFAULT_HOSTED_CODEX_AUTO_COMPACT_TOKEN_LIMIT}`,

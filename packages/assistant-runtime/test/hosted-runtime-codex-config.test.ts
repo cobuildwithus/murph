@@ -23,7 +23,10 @@ import {
   HostedAssistantConfigurationError,
 } from "@murphai/operator-config/hosted-assistant-config";
 import {
+  HOSTED_CLI_BRIDGE_ROUTE_GRANT_ENV,
   HOSTED_CLI_BRIDGE_TIMEOUT_MS_ENV,
+  HOSTED_CLI_BRIDGE_TOKEN_ENV,
+  HOSTED_CLI_BRIDGE_URL_ENV,
   HOSTED_RUNTIME_CODEX_APP_SERVER_COMMAND_ENV,
   HOSTED_RUNTIME_CODEX_MODEL_CATALOG_JSON_ENV,
   HOSTED_RUNTIME_PROCESS_ENV,
@@ -192,14 +195,14 @@ test("hosted Codex runtime config writes OpenAI Responses config without secret 
   assert.doesNotMatch(config, /\[model_providers\."openai"\]/u);
   assert.match(config, /\[model_providers\."hosted-openai"\]/u);
   assert.match(config, /base_url = "https:\/\/api\.openai\.com\/v1"/u);
-  assert.match(config, /env_key = "OPENAI_API_KEY"/u);
+  assert.match(config, /^cli_auth_credentials_store = "ephemeral"$/mu);
+  assert.doesNotMatch(config, /^env_key = /mu);
   assert.match(config, /wire_api = "responses"/u);
   assert.match(config, /^supports_websockets = true$/mu);
   assert.match(config, /^stream_idle_timeout_ms = 90000$/mu);
-  assert.match(config, /^requires_openai_auth = false$/mu);
+  assert.match(config, /^requires_openai_auth = true$/mu);
   assert.match(config, /^request_max_retries = 4$/mu);
   assert.match(config, /^stream_max_retries = 0$/mu);
-  assert.doesNotMatch(config, /^requires_openai_auth = true$/mu);
   assert.match(
     config,
     new RegExp(
@@ -448,8 +451,9 @@ test("hosted Codex runtime config accepts a local test-only model provider base 
   assert.match(config, /model_provider = "hosted-openai"/u);
   assert.match(config, /\[model_providers\."hosted-openai"\]/u);
   assert.match(config, /base_url = "http:\/\/host\.docker\.internal:4567\/v1"/u);
-  assert.match(config, /env_key = "OPENAI_API_KEY"/u);
-  assert.match(config, /requires_openai_auth = false/u);
+  assert.doesNotMatch(config, /env_key/u);
+  assert.match(config, /^cli_auth_credentials_store = "ephemeral"$/mu);
+  assert.match(config, /requires_openai_auth = true/u);
   assert.doesNotMatch(config, /^supports_websockets = true$/mu);
   assert.match(config, /stream_idle_timeout_ms = 90000/u);
   assert.match(config, /request_max_retries = 4/u);
@@ -735,7 +739,7 @@ test("hosted Codex runtime config removes invalid persistent ChatGPT auth", asyn
     );
 
     const config = await readFile(result.codexConfigPath, "utf8");
-    assert.doesNotMatch(config, /^cli_auth_credentials_store = "file"$/mu);
+    assert.match(config, /^cli_auth_credentials_store = "ephemeral"$/mu);
     assert.match(config, /^model_provider = "hosted-openai"$/mu);
     assert.doesNotMatch(config, /chatgpt-access-token/u);
   }
@@ -835,8 +839,9 @@ testHostedCodexAuthE2e(
 
       assert.match(config, /^model_provider = "hosted-openai"$/mu);
       assert.match(config, /\[model_providers\."hosted-openai"\]/u);
-      assert.match(config, /^env_key = "OPENAI_API_KEY"$/mu);
-      assert.match(config, /^requires_openai_auth = false$/mu);
+      assert.match(config, /^cli_auth_credentials_store = "ephemeral"$/mu);
+      assert.doesNotMatch(config, /^env_key = /mu);
+      assert.match(config, /^requires_openai_auth = true$/mu);
       assert.doesNotMatch(config, /^model_provider = "openai"$/mu);
 
       const fixedResult = await executeCodexAppServerTurn({
@@ -845,9 +850,13 @@ testHostedCodexAuthE2e(
         env: {
           CODEX_HOME: result.runtimeEnv.CODEX_HOME,
           HOME: operatorHomeRoot,
+          [HOSTED_CLI_BRIDGE_ROUTE_GRANT_ENV]: "hosted-auth-e2e-route-grant",
+          [HOSTED_CLI_BRIDGE_TOKEN_ENV]: "hosted-auth-e2e-bridge-token",
+          [HOSTED_CLI_BRIDGE_URL_ENV]: "http://127.0.0.1:43123",
           OPENAI_API_KEY: result.runtimeEnv.OPENAI_API_KEY,
           PATH: result.runtimeEnv.PATH ?? process.env.PATH ?? "",
         },
+        hostedProviderCredentialEnvKey: "OPENAI_API_KEY",
         prompt: "hello hosted auth regression",
         sandbox: "danger-full-access",
         workingDirectory: operatorHomeRoot,
@@ -1349,6 +1358,7 @@ test("hosted Codex config TOML omits credential values and runtime authority hea
   assert.equal(
     config,
     [
+      'cli_auth_credentials_store = "ephemeral"',
       'model_provider = "openai"',
       'model_reasoning_effort = "medium"',
       `model_auto_compact_token_limit = ${HOSTED_CODEX_EXPECTED_AUTO_COMPACT_TOKEN_LIMIT}`,
@@ -1361,10 +1371,9 @@ test("hosted Codex config TOML omits credential values and runtime authority hea
       '[model_providers."openai"]',
       'name = "OpenAI"',
       'base_url = "https://api.openai.com/v1"',
-      'env_key = "OPENAI_API_KEY"',
       'wire_api = "responses"',
       "stream_idle_timeout_ms = 90000",
-      "requires_openai_auth = false",
+      "requires_openai_auth = true",
       "request_max_retries = 4",
       "stream_max_retries = 0",
       "",

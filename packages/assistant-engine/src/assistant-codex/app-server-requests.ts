@@ -114,13 +114,16 @@ function buildCodexThreadResumeContextParams(
     workingDirectory: string
   },
 ): Record<string, unknown> {
-  return {
+  return stripUndefinedRpcParams({
     approvalPolicy: mapCodexAppServerApprovalPolicy(input.approvalPolicy),
+    config: input.threadConfig
+      ? { ...input.threadConfig }
+      : undefined,
     cwd: input.workingDirectory,
     model: normalizeNullableString(input.model),
     modelProvider: normalizeNullableString(input.modelProvider),
     sandbox: mapCodexAppServerSandboxMode(input.sandbox),
-  }
+  })
 }
 
 export function buildCodexTurnStartParams(input: {

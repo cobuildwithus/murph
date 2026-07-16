@@ -96,7 +96,8 @@ test("hosted Codex cannot permanently brick later wakes by corrupting its writab
   assert.match(nextConfig, /wire_api = "responses"/u);
   assert.doesNotMatch(nextConfig, /env_http_headers/u);
   assert.doesNotMatch(nextConfig, /MURPH_HOSTED_CODEX_/u);
-  assert.match(nextConfig, /requires_openai_auth = false/u);
+  assert.match(nextConfig, /^cli_auth_credentials_store = "ephemeral"$/mu);
+  assert.match(nextConfig, /requires_openai_auth = true/u);
   assert.doesNotMatch(nextConfig, /not valid hosted codex config/u);
   await assert.rejects(
     () => access(path.join(restored.operatorHomeRoot, ".murph", "config.json")),

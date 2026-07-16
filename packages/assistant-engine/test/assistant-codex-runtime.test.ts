@@ -5,6 +5,7 @@ import path from 'node:path'
 import { PassThrough } from 'node:stream'
 
 import {
+  HOSTED_CLI_BRIDGE_ROUTE_GRANT_ENV,
   HOSTED_CLI_BRIDGE_TOKEN_ENV,
   HOSTED_CLI_BRIDGE_URL_ENV,
   HOSTED_RUNTIME_CODEX_APP_SERVER_COMMAND_ENV,
@@ -3297,6 +3298,345 @@ describe('assistant codex runtime', () => {
       .filter((message) => message.method === 'initialize'),
     ).toHaveLength(1)
   })
+
+  it('reuses the warm Codex app-server across rotating hosted turn authority', async () => {
+    const workingDirectory = await createTempDir('assistant-codex-hosted-warm-work-')
+    const codexHome = await createTempDir('assistant-codex-hosted-warm-home-')
+    const spawnedChildren: MockChildProcess[] = []
+    const providerCredentialEnvKey = 'OPENAI_API_KEY'
+    const bridgeUrl = 'http://127.0.0.1:43123'
+    const startSecondTurn = createDeferred<void>()
+
+    codexMocks.spawn.mockImplementation((_command, args, options) => {
+      const child = new MockChildProcess()
+      spawnedChildren.push(child)
+
+      expect(args).toEqual(['app-server'])
+      expect(options).toMatchObject({
+        cwd: tmpdir(),
+        env: {
+          CODEX_HOME: codexHome,
+          [HOSTED_CLI_BRIDGE_URL_ENV]: bridgeUrl,
+          PATH: '/custom/bin',
+        },
+      })
+      expect(options.env).not.toHaveProperty(HOSTED_CLI_BRIDGE_TOKEN_ENV)
+      expect(options.env).not.toHaveProperty(HOSTED_CLI_BRIDGE_ROUTE_GRANT_ENV)
+      expect(options.env).not.toHaveProperty(providerCredentialEnvKey)
+      expect(JSON.stringify(args)).not.toContain('bridge-token-')
+      expect(JSON.stringify(args)).not.toContain('route-grant-')
+      expect(JSON.stringify(args)).not.toContain('provider-credential-')
+
+      queueMicrotask(() => {
+        void (async () => {
+          const initialize = await waitForRpcMethod(child, 'initialize')
+          child.stdout.write(jsonLine({ id: initialize.id, result: {} }))
+
+          const completeHostedTurn = async (input: {
+            index: number
+            suffix: 'a' | 'b'
+            threadMethod: 'thread/resume' | 'thread/start'
+          }) => {
+            const login = await waitForRpcMethodCount(
+              child,
+              'account/login/start',
+              input.index,
+            )
+            expect(login.params).toEqual({
+              apiKey: `provider-credential-${input.suffix}`,
+              type: 'apiKey',
+            })
+            child.stdout.write(jsonLine({ id: login.id, result: { type: 'apiKey' } }))
+
+            const thread = await waitForRpcMethodCount(
+              child,
+              input.threadMethod,
+              1,
+            )
+            expect(thread.params).toMatchObject({
+              config: {
+                [`shell_environment_policy.set.${HOSTED_CLI_BRIDGE_ROUTE_GRANT_ENV}`]:
+                  `route-grant-${input.suffix}`,
+                [`shell_environment_policy.set.${HOSTED_CLI_BRIDGE_TOKEN_ENV}`]:
+                  `bridge-token-${input.suffix}`,
+                [`shell_environment_policy.set.${providerCredentialEnvKey}`]:
+                  `provider-credential-${input.suffix}`,
+                'test.static': true,
+              },
+            })
+            const threadParams = asRecord(thread.params)
+            child.stdout.write(jsonLine({
+              id: thread.id,
+              result: {
+                approvalPolicy: threadParams.approvalPolicy,
+                cwd: threadParams.cwd,
+                model: threadParams.model,
+                modelProvider: threadParams.modelProvider,
+                sandbox: { type: 'workspaceWrite' },
+                thread: {
+                  id: 'thread-hosted-warm',
+                },
+              },
+            }))
+
+            const turn = await waitForRpcMethodCount(child, 'turn/start', input.index)
+            child.stdout.write(jsonLine({
+              id: turn.id,
+              result: {
+                turn: {
+                  id: `turn-hosted-warm-${input.suffix}`,
+                },
+              },
+            }))
+            child.stdout.write(jsonLine({
+              method: 'assistant.message.delta',
+              params: {
+                delta: `Answer ${input.suffix}`,
+                item: {
+                  id: `assistant-hosted-warm-${input.suffix}`,
+                  type: 'assistant_message',
+                },
+                threadId: 'thread-hosted-warm',
+                turnId: `turn-hosted-warm-${input.suffix}`,
+              },
+            }))
+            child.stdout.write(jsonLine({
+              method: 'turn/completed',
+              params: {
+                threadId: 'thread-hosted-warm',
+                turn: {
+                  id: `turn-hosted-warm-${input.suffix}`,
+                  status: 'completed',
+                },
+              },
+            }))
+
+            const terminalCleanup = await waitForRpcMethodCount(
+              child,
+              'thread/backgroundTerminals/clean',
+              input.index,
+            )
+            child.stdout.write(jsonLine({ id: terminalCleanup.id, result: {} }))
+            const logout = await waitForRpcMethodCount(
+              child,
+              'account/logout',
+              input.index,
+            )
+            child.stdout.write(jsonLine({ id: logout.id, result: {} }))
+          }
+
+          await completeHostedTurn({
+            index: 1,
+            suffix: 'a',
+            threadMethod: 'thread/start',
+          })
+          await startSecondTurn.promise
+          await completeHostedTurn({
+            index: 2,
+            suffix: 'b',
+            threadMethod: 'thread/resume',
+          })
+        })()
+      })
+
+      return child
+    })
+
+    const buildHostedEnv = (suffix: 'a' | 'b') => ({
+      [HOSTED_CLI_BRIDGE_ROUTE_GRANT_ENV]: `route-grant-${suffix}`,
+      [HOSTED_CLI_BRIDGE_TOKEN_ENV]: `bridge-token-${suffix}`,
+      [HOSTED_CLI_BRIDGE_URL_ENV]: bridgeUrl,
+      [providerCredentialEnvKey]: `provider-credential-${suffix}`,
+      PATH: '/custom/bin',
+    })
+    const baseInput = {
+      approvalPolicy: 'never',
+      codexHome,
+      hostedProviderCredentialEnvKey: providerCredentialEnvKey,
+      sandbox: 'workspace-write' as const,
+      threadConfig: {
+        'test.static': true,
+      },
+      workingDirectory,
+    }
+
+    await expect(executeCodexAppServerTurn({
+      ...baseInput,
+      env: buildHostedEnv('a'),
+      prompt: 'First hosted warm turn',
+    })).resolves.toMatchObject({
+      finalMessage: 'Answer a',
+      sessionId: 'thread-hosted-warm',
+    })
+    startSecondTurn.resolve()
+    await expect(executeCodexAppServerTurn({
+      ...baseInput,
+      env: buildHostedEnv('b'),
+      prompt: 'Second hosted warm turn',
+      resumeSessionId: 'thread-hosted-warm',
+    })).resolves.toMatchObject({
+      finalMessage: 'Answer b',
+      sessionId: 'thread-hosted-warm',
+    })
+    await drainHostedCodexPostTurnCleanups()
+
+    expect(codexMocks.spawn).toHaveBeenCalledTimes(1)
+    const messages = readWrittenRpcMessages(
+      requireMockChildProcess(spawnedChildren[0] ?? null),
+    )
+    expect(messages.filter((message) => message.method === 'initialize'))
+      .toHaveLength(1)
+    expect(messages.filter((message) => message.method === 'account/logout'))
+      .toHaveLength(2)
+    const hostedLifecycleMethods = [
+      'account/login/start',
+      'thread/start',
+      'thread/resume',
+      'turn/start',
+      'thread/backgroundTerminals/clean',
+      'account/logout',
+    ]
+    expect(
+      messages
+        .map((message) => message.method)
+        .filter(
+          (method): method is string =>
+            typeof method === 'string' && hostedLifecycleMethods.includes(method),
+        ),
+    ).toEqual([
+      'account/login/start',
+      'thread/start',
+      'turn/start',
+      'thread/backgroundTerminals/clean',
+      'account/logout',
+      'account/login/start',
+      'thread/resume',
+      'turn/start',
+      'thread/backgroundTerminals/clean',
+      'account/logout',
+    ])
+  })
+
+  it.each([
+    'account/login/start',
+    'account/logout',
+  ] as const)(
+    'replaces hosted Codex when %s fails',
+    async (failureMethod) => {
+      const workingDirectory = await createTempDir('assistant-codex-hosted-auth-failure-work-')
+      const codexHome = await createTempDir('assistant-codex-hosted-auth-failure-home-')
+      const spawnedChildren: MockChildProcess[] = []
+      const providerCredentialEnvKey = 'OPENAI_API_KEY'
+      mockProcessGroupSignalsForChildren(spawnedChildren)
+
+      codexMocks.spawn.mockImplementation(() => {
+        const child = new MockChildProcess()
+        const processNumber = spawnedChildren.length + 1
+        child.pid = 34_000 + spawnedChildren.length
+        spawnedChildren.push(child)
+
+        child.stdin.onWrite = (write) => {
+          for (const line of write.split('\n')) {
+            if (!line.trim()) {
+              continue
+            }
+            const message = asRecord(JSON.parse(line))
+            queueMicrotask(() => {
+              const shouldFail = processNumber === 1 && message.method === failureMethod
+              switch (message.method) {
+                case 'initialize':
+                  child.stdout.write(jsonLine({ id: message.id, result: {} }))
+                  break
+                case 'account/login/start':
+                  child.stdout.write(jsonLine(
+                    shouldFail
+                      ? { error: { message: 'hosted auth bind unavailable' }, id: message.id }
+                      : { id: message.id, result: { type: 'apiKey' } },
+                  ))
+                  break
+                case 'thread/start':
+                  child.stdout.write(jsonLine({
+                    id: message.id,
+                    result: {
+                      thread: { id: `thread-hosted-auth-failure-${processNumber}` },
+                    },
+                  }))
+                  break
+                case 'turn/start':
+                  child.stdout.write(jsonLine({
+                    id: message.id,
+                    result: {
+                      turn: { id: `turn-hosted-auth-failure-${processNumber}` },
+                    },
+                  }))
+                  child.stdout.write(jsonLine({
+                    method: 'turn/completed',
+                    params: {
+                      threadId: `thread-hosted-auth-failure-${processNumber}`,
+                      turn: {
+                        id: `turn-hosted-auth-failure-${processNumber}`,
+                        status: 'completed',
+                      },
+                    },
+                  }))
+                  break
+                case 'thread/backgroundTerminals/clean':
+                  child.stdout.write(jsonLine({ id: message.id, result: {} }))
+                  break
+                case 'account/logout':
+                  child.stdout.write(jsonLine(
+                    shouldFail
+                      ? { error: { message: 'hosted auth revoke unavailable' }, id: message.id }
+                      : { id: message.id, result: {} },
+                  ))
+                  break
+              }
+            })
+          }
+        }
+
+        return child
+      })
+
+      const executeHostedTurn = (prompt: string) => executeCodexAppServerTurn({
+        approvalPolicy: 'never',
+        codexHome,
+        env: {
+          [HOSTED_CLI_BRIDGE_ROUTE_GRANT_ENV]: 'stable-route-grant',
+          [HOSTED_CLI_BRIDGE_TOKEN_ENV]: 'stable-bridge-token',
+          [HOSTED_CLI_BRIDGE_URL_ENV]: 'http://127.0.0.1:43123',
+          [providerCredentialEnvKey]: 'stable-provider-credential',
+          PATH: '/custom/bin',
+        },
+        hostedProviderCredentialEnvKey: providerCredentialEnvKey,
+        prompt,
+        sandbox: 'workspace-write',
+        workingDirectory,
+      })
+
+      const firstTurn = executeHostedTurn('first hosted auth failure turn')
+      if (failureMethod === 'account/login/start') {
+        await expect(firstTurn).rejects.toMatchObject({
+          code: 'ASSISTANT_CODEX_AUTH_FAILED',
+        })
+      } else {
+        await expect(firstTurn).resolves.toMatchObject({
+          sessionId: 'thread-hosted-auth-failure-1',
+          turnId: 'turn-hosted-auth-failure-1',
+        })
+        await drainHostedCodexPostTurnCleanups()
+      }
+
+      await expect(executeHostedTurn('replacement hosted auth turn')).resolves.toMatchObject({
+        sessionId: 'thread-hosted-auth-failure-2',
+        turnId: 'turn-hosted-auth-failure-2',
+      })
+      await drainHostedCodexPostTurnCleanups()
+
+      expect(codexMocks.spawn).toHaveBeenCalledTimes(2)
+      expect(process.kill).toHaveBeenCalledWith(-34_000, 'SIGTERM')
+    },
+  )
 
   it('reuses the warm Codex app-server when resolved local child env is unchanged', async () => {
     const workingDirectory = await createTempDir('assistant-codex-local-warm-stable-env-work-')
@@ -8299,6 +8639,7 @@ describe('assistant codex runtime', () => {
     })
 
     const hostedEnv = {
+      [HOSTED_CLI_BRIDGE_ROUTE_GRANT_ENV]: 'route-grant-stable',
       [HOSTED_CLI_BRIDGE_TOKEN_ENV]: 'bridge-token-stable',
       [HOSTED_CLI_BRIDGE_URL_ENV]: 'http://127.0.0.1:9174/',
       CODEX_HOME: hostedCodexHome,
@@ -8660,13 +9001,6 @@ describe('assistant codex runtime', () => {
 
   it.each([
     {
-      name: 'CLI bridge token',
-      secondEnv: {
-        [HOSTED_CLI_BRIDGE_TOKEN_ENV]: 'bridge-token-two',
-      },
-      useSecondCodexHome: false,
-    },
-    {
       name: 'stable bridge URL',
       secondEnv: {
         [HOSTED_CLI_BRIDGE_URL_ENV]: 'http://127.0.0.1:9175/',
@@ -8761,6 +9095,7 @@ describe('assistant codex runtime', () => {
       })
 
       const baseEnv = {
+        [HOSTED_CLI_BRIDGE_ROUTE_GRANT_ENV]: 'route-grant-one',
         [HOSTED_CLI_BRIDGE_TOKEN_ENV]: 'bridge-token-one',
         [HOSTED_CLI_BRIDGE_URL_ENV]: 'http://127.0.0.1:9174/',
         CODEX_HOME: firstCodexHome,
@@ -8870,6 +9205,7 @@ describe('assistant codex runtime', () => {
 
     const stableInput = {
       env: {
+        [HOSTED_CLI_BRIDGE_ROUTE_GRANT_ENV]: 'stable-route-grant',
         [HOSTED_CLI_BRIDGE_TOKEN_ENV]: 'stable-bridge-token',
         CODEX_HOME: codexHome,
         PATH: '/usr/bin',
@@ -9007,6 +9343,7 @@ describe('assistant codex runtime', () => {
 
     const stableInput = {
       env: {
+        [HOSTED_CLI_BRIDGE_ROUTE_GRANT_ENV]: 'stable-route-grant',
         [HOSTED_CLI_BRIDGE_TOKEN_ENV]: 'stable-bridge-token',
         CODEX_HOME: codexHome,
         PATH: '/usr/bin',
@@ -9114,6 +9451,7 @@ describe('assistant codex runtime', () => {
 
       await expect(executeCodexAppServerTurn({
         env: {
+          [HOSTED_CLI_BRIDGE_ROUTE_GRANT_ENV]: 'stable-route-grant',
           [HOSTED_CLI_BRIDGE_TOKEN_ENV]: 'stable-bridge-token',
           CODEX_HOME: codexHome,
           PATH: '/usr/bin',
@@ -9594,6 +9932,7 @@ describe('assistant codex runtime', () => {
     })
 
     const hostedEnv = {
+      [HOSTED_CLI_BRIDGE_ROUTE_GRANT_ENV]: 'route-grant-stable',
       [HOSTED_CLI_BRIDGE_TOKEN_ENV]: 'bridge-token-stable',
       [HOSTED_CLI_BRIDGE_URL_ENV]: 'http://127.0.0.1:9174/',
       CODEX_HOME: hostedCodexHome,

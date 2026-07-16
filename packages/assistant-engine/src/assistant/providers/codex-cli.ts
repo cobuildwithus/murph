@@ -12,10 +12,15 @@ import {
   resolveSupportedCodexAppServerApprovalPolicy,
 } from '../../assistant-codex/app-server-requests.js'
 import {
+  HOSTED_CLI_BRIDGE_TOKEN_ENV,
+} from '@murphai/hosted-execution/cli-runtime-bridge'
+import {
   isAssistantCodexTargetConfig,
   resolveAssistantChatProviderFromConfig,
 } from '@murphai/operator-config/assistant/provider-config'
 import {
+  HOSTED_OPENAI_CODEX_MODEL_PROVIDER_ID,
+  OPENAI_CODEX_MODEL_PROVIDER_CONFIG,
   resolveStrictAssistantCodexModelProvider,
 } from '@murphai/operator-config/assistant/target-runtime'
 import { VaultCliError } from '@murphai/operator-config/vault-cli-errors'
@@ -167,12 +172,16 @@ export async function executeCodexAssistantTurnAttempt(
     providerConfig.target.modelProvider,
   )
   const modelProviderConfig = modelProviderResolution.config
+  const providerCredentialEnvKey =
+    modelProviderResolution.id === HOSTED_OPENAI_CODEX_MODEL_PROVIDER_ID
+      ? OPENAI_CODEX_MODEL_PROVIDER_CONFIG.envKey
+      : modelProviderConfig?.envKey ?? null
   const providerFailureHint = modelProviderConfig?.failureHint ?? null
   const providerSecretValue =
-    modelProviderConfig?.envKey
+    providerCredentialEnvKey
       ? normalizeNullableString(
-          input.env?.[modelProviderConfig.envKey] ??
-            process.env[modelProviderConfig.envKey],
+          input.env?.[providerCredentialEnvKey] ??
+            process.env[providerCredentialEnvKey],
         )
       : null
   const approvalPolicy = resolveSupportedCodexAppServerApprovalPolicy(
@@ -188,6 +197,11 @@ export async function executeCodexAssistantTurnAttempt(
     voiceMemoDeliveryChannel: input.voiceMemoDeliveryChannel ?? null,
   })
   const codexProcessEnv = prepareAssistantDirectCliEnv(input.env)
+  const hostedProviderCredentialEnvKey =
+    normalizeNullableString(codexProcessEnv[HOSTED_CLI_BRIDGE_TOKEN_ENV]) &&
+      providerCredentialEnvKey
+      ? providerCredentialEnvKey
+      : undefined
   const codexConfigOverrides = [
     ...(mergeCodexConfigOverrides({
       modelProvider: providerConfig.target.modelProvider,
@@ -209,6 +223,7 @@ export async function executeCodexAssistantTurnAttempt(
     configOverrides:
       codexConfigOverrides.length > 0 ? codexConfigOverrides : undefined,
     env: codexProcessEnv,
+    hostedProviderCredentialEnvKey,
     fetchImpl: input.providerFetch ?? undefined,
     hostedGeneratedImageUploader: input.generatedImageUploader ?? null,
     hostedToolContext: input.hostedToolContext ?? null,
