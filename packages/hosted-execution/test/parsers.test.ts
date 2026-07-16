@@ -878,6 +878,67 @@ describe("parseHostedRuntimeGroupTool", () => {
         source: "email",
       },
     });
+    expect(parseHostedRuntimeGroupToolRequest({
+      action: "read_own_assistant_style",
+      currentSender: {
+        senderHandle: "+15550000001",
+        source: "linq",
+      },
+    })).toEqual({
+      action: "read_own_assistant_style",
+      currentSender: {
+        senderHandle: "+15550000001",
+        source: "linq",
+      },
+    });
+    expect(parseHostedRuntimeGroupToolRequest({
+      action: "read_own_assistant_style",
+    })).toEqual({
+      action: "read_own_assistant_style",
+    });
+    expect(parseHostedRuntimeGroupToolRequest({
+      action: "update_own_assistant_style",
+      currentSender: {
+        senderHandle: "+15550000001",
+        source: "linq",
+      },
+      style: {
+        personality: { detail: 8, humor: 10, push: null },
+        tone: "casual",
+        voice: "warm",
+      },
+    })).toEqual({
+      action: "update_own_assistant_style",
+      currentSender: {
+        senderHandle: "+15550000001",
+        source: "linq",
+      },
+      style: {
+        personality: { detail: 8, humor: 10, push: null },
+        tone: "casual",
+        voice: "warm",
+      },
+    });
+    expect(() => parseHostedRuntimeGroupToolRequest({
+      action: "update_own_assistant_style",
+      style: {},
+    })).toThrow(/must not be empty/u);
+    expect(() => parseHostedRuntimeGroupToolRequest({
+      action: "update_own_assistant_style",
+      style: { personality: { humor: 11 } },
+    })).toThrow(/humor is invalid/u);
+    expect(() => parseHostedRuntimeGroupToolRequest({
+      action: "update_own_assistant_style",
+      style: { personality: {} },
+    })).toThrow(/personality must not be empty/u);
+    expect(() => parseHostedRuntimeGroupToolRequest({
+      action: "update_own_assistant_style",
+      style: { tone: "chatty" },
+    })).toThrow(/tone is not supported/u);
+    expect(() => parseHostedRuntimeGroupToolRequest({
+      action: "update_own_assistant_style",
+      style: { voice: "booming" },
+    })).toThrow(/voice is not supported/u);
 
     expect(() =>
       parseHostedRuntimeGroupToolRequest({
@@ -1692,6 +1753,87 @@ describe("parseHostedRuntimeGroupTool", () => {
         result: { revokedCount: 2, status: "revoked" },
       })
     ).toThrow(/must be 1/u);
+  });
+
+  it("parses current-sender assistant-style responses", () => {
+    const style = {
+      personality: {
+        detail: { source: "default", value: 5 },
+        humor: { source: "custom", value: 10 },
+        push: { source: "default", value: 3 },
+      },
+      tone: "casual",
+      voice: "warm",
+    } as const;
+    expect(parseHostedRuntimeGroupToolResponse({
+      action: "read_own_assistant_style",
+      result: { status: "ok", style },
+    })).toEqual({
+      action: "read_own_assistant_style",
+      result: { status: "ok", style },
+    });
+    expect(parseHostedRuntimeGroupToolResponse({
+      action: "update_own_assistant_style",
+      result: { status: "saved", style },
+    })).toEqual({
+      action: "update_own_assistant_style",
+      result: { status: "saved", style },
+    });
+    expect(parseHostedRuntimeGroupToolResponse({
+      action: "read_own_assistant_style",
+      result: {
+        status: "unavailable",
+        style: null,
+        unavailableReason: "sender_unavailable",
+      },
+    })).toEqual({
+      action: "read_own_assistant_style",
+      result: {
+        status: "unavailable",
+        style: null,
+        unavailableReason: "sender_unavailable",
+      },
+    });
+    expect(parseHostedRuntimeGroupToolResponse({
+      action: "update_own_assistant_style",
+      result: {
+        status: "unavailable",
+        style: null,
+        unavailableReason: "member_unavailable",
+      },
+    })).toEqual({
+      action: "update_own_assistant_style",
+      result: {
+        status: "unavailable",
+        style: null,
+        unavailableReason: "member_unavailable",
+      },
+    });
+    expect(() => parseHostedRuntimeGroupToolResponse({
+      action: "read_own_assistant_style",
+      result: { status: "ok", style: { ...style, tone: "chatty" } },
+    })).toThrow(/snapshot is invalid/u);
+    expect(() => parseHostedRuntimeGroupToolResponse({
+      action: "read_own_assistant_style",
+      result: {
+        status: "ok",
+        style: {
+          ...style,
+          personality: {
+            ...style.personality,
+            humor: { source: "inherited", value: 10 },
+          },
+        },
+      },
+    })).toThrow(/humor source is invalid/u);
+    expect(() => parseHostedRuntimeGroupToolResponse({
+      action: "read_own_assistant_style",
+      result: {
+        status: "unavailable",
+        style,
+        unavailableReason: "sender_unavailable",
+      },
+    })).toThrow(/unavailable style must be null/u);
   });
 
   it("parses leave_membership responses without accepting extra state", () => {

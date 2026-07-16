@@ -1,7 +1,7 @@
 # How Murph Talks
 
 Last verified: 2026-07-15
-Status: Implemented for onboarding, settings, hosted mailbox handoff, prompt tone, voice memo default resolution, supervisor-run preview generation, and private Humor, Push, and Detail controls in conversation and Settings
+Status: Implemented for onboarding, settings, hosted mailbox handoff, prompt tone, voice memo default resolution, supervisor-run preview generation, private Humor, Push, and Detail controls, and authenticated group-sender self-service
 
 ## Product Contract
 
@@ -97,6 +97,26 @@ the runtime has its web-owned port:
   for that request to settle instead of reporting a shorter local timeout while
   the preference write can still complete.
 
+Authenticated non-direct Linq group turns expose the same five member-owned
+settings through `murph.group` rather than the direct-only personalization and
+style tools:
+
+- `read_own_assistant_style` returns the current sender's effective tone,
+  voice, Humor, Push, and Detail, including default/custom source labels for
+  the three numeric dials.
+- `update_own_assistant_style` accepts a non-empty sparse combination of tone,
+  voice, and dial changes. A null dial removes that override and restores its
+  default.
+- The model supplies settings only. The runtime derives exactly one sender
+  handle from the accepted Linq inbound and injects it after parsing; Web
+  resolves that handle to one active member and uses the existing preference
+  mutation and mailbox owner. The model cannot name a member or reuse a visible
+  sender string as authority.
+- Group email, direct, missing, ambiguous, unknown, suspended, and inactive
+  sender contexts fail closed. A successful update applies on that member's
+  future private turn and generated voice, not to the group room or the reply
+  already running.
+
 Model and reasoning mutations belong exclusively to
 `murph.assistant_configuration`. That operation reads the current-turn and
 saved next-turn configuration, requires user-sourced intent for an exact update,
@@ -123,11 +143,13 @@ the fallback for tone, model, or reasoning changes.
 
 ## Personality Dial Conversation Control
 
-The assistant uses the headless `murph.assistant_style` operation. Turn
-planning registers it only for the exact current private direct conversation;
-other audiences receive no style operation or style prompt surface. Its closed
-actions are `show`, `set` with one exact integer score, and `reset` for one dial
-or all dials. Raw CLI style commands are intentionally absent so no registered
+The assistant uses the headless `murph.assistant_style` operation in an exact
+current private direct conversation. Its closed actions are `show`, `set` with
+one exact integer score, and `reset` for one dial or all dials. An authenticated
+Linq group turn uses only the self-bound `murph.group` actions documented above;
+it never receives the direct style tool or applies a member's settings to the
+room prompt. Other audiences receive no style operation or style prompt
+surface. Raw CLI style commands are intentionally absent so no registered
 general command advertises an audience-independent path around the turn-level
 gate. This is a tool-registration and prompt-surface policy, not a filesystem
 sandbox around the privileged Codex runtime.
@@ -278,7 +300,7 @@ The dials never change notification eligibility or frequency, quiet hours, tool 
 
 ## Audience Scope
 
-Personality dials apply only to the member's private interactive conversation. Group behavior remains owned by the current group context and the group-chat and group-comedy rules. Turn planning may read the shared preferences document for existing tone and voice behavior, but a group prompt never receives, advertises, exposes, or applies a member's private dials, and Murph does not mutate them from a group. Assistant turns receive a headless style operation only when the exact current route is private and direct; group and indeterminate routes omit both that operation and all prompt or assistant CLI contract references to the style surface.
+Personality dials apply only to the member's private interactive conversation. Group behavior remains owned by the current group context and the group-chat and group-comedy rules. A group prompt never receives or applies a member's private tone, voice, or dials as room style. An authenticated non-direct Linq sender may nevertheless inspect or mutate their own member-owned settings through the hidden current-sender `murph.group` actions; the saved result affects later private conversations and generated voice. The group model sees no identity selector, and email, ambiguous, unknown, or inactive senders fail closed. Private direct turns receive the headless style and personalization operations; group turns omit those direct tools, and indeterminate routes omit every style surface.
 
 The raw style CLI hard cut is effective only after every old assistant runner
 bundle has drained or restarted. A gradual rollout that leaves warm older
@@ -287,7 +309,7 @@ runner/CLI change as an immediate convergence and verify the live fleet reports
 the new bundle before treating the audience boundary as active. The first
 personality-aware reader/writer release remains the rollback floor.
 
-A future group-level style control needs separate group-scoped authority and storage. It must not reuse a member's private preference as room-wide truth.
+A future room-level style control still needs separate group-scoped authority and storage. It must not reuse any participant's private preference as room-wide truth.
 
 ## Hosted Settings Projection
 
@@ -323,6 +345,14 @@ continues to submit only dials deliberately touched in its dialog, even when a
 touched dial returns to its displayed value. Projection equality must not
 suppress that explicit canonical intent, and the dialog must never submit all
 three displayed defaults automatically.
+
+Group-origin self-service writes use that same transaction without borrowing
+the synthetic room's mailbox sequence. The transaction appends a fresh
+member-owned preference event, whose member mailbox sequence becomes the
+field-local watermark. This keeps ordering inside the existing preference
+owner and avoids comparing a group-container causal sequence with a member's
+private sequence. The resulting projection and canonical state remain the
+member's; no group preference record is created.
 
 There is no push channel into an already open Settings page, so a page that was
 open during a conversational change needs a reload before it shows the new
