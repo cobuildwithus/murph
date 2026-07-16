@@ -175,6 +175,7 @@ export interface HostedConversationWakeMetrics {
 }
 
 export type HostedMailboxLane =
+  | "assistant-ask-completion"
   | "assistant-notification"
   | "conversation-message"
   | "clinical-records"

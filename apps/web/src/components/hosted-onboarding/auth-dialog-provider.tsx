@@ -11,6 +11,10 @@ import {
 } from "react";
 
 import { AuthDialog } from "@/src/components/hosted-onboarding/auth-dialog";
+import {
+  HOSTED_APP_HOME_PATH,
+  HOSTED_APP_INITIAL_VISIT_HOME_PATH,
+} from "@/src/lib/hosted-onboarding/app-routes";
 import { isHostedOnboardingAccessibleStage } from "@/src/lib/hosted-onboarding/stage";
 import type { HostedPrivyCompletionPayload } from "@/src/lib/hosted-onboarding/types";
 import { subscribeBrowserVaultSessionInvalidation } from "@/src/lib/browser-vault/session-invalidation";
@@ -72,7 +76,11 @@ export function AuthProvider({
     }
 
     if (isHostedOnboardingAccessibleStage(payload.stage)) {
-      navigateHostedAuthRedirect("/home");
+      navigateHostedAuthRedirect(
+        payload.initialVisitEligible === true
+          ? HOSTED_APP_INITIAL_VISIT_HOME_PATH
+          : HOSTED_APP_HOME_PATH,
+      );
       return;
     }
 

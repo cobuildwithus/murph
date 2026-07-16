@@ -15,6 +15,8 @@ export const HOSTED_MAILBOX_IMPORT_ACTIONS = [
   "apply-member-channels-update",
   "apply-member-preferences",
   "dispatch-assistant-notification",
+  "run-assistant-ask",
+  "continue-assistant-ask",
   "run-clinical-records-sync",
   "run-device-sync-wake",
   "import-group-newsletter-email-needed",
@@ -62,6 +64,8 @@ const SUPPORTED_MAILBOX_KINDS: readonly string[] = HOSTED_MAILBOX_KINDS;
 const SUPPORTED_MAILBOX_LANES: readonly string[] = HOSTED_MAILBOX_LANES;
 
 const ACTION_BY_KIND = {
+  "assistant.ask.completed": "continue-assistant-ask",
+  "assistant.ask.requested": "run-assistant-ask",
   "assistant.notification.requested": "dispatch-assistant-notification",
   "clinical-records.sync-requested": "run-clinical-records-sync",
   "conversation.message": "import-conversation-message",

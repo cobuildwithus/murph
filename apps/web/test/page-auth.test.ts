@@ -276,10 +276,13 @@ describe("hosted dashboard page auth", () => {
 function createHostedMember(overrides: Partial<HostedMember> = {}): HostedMember {
   return {
     assistantDetail: null,
+    assistantDetailCausalSeq: null,
     assistantHumor: null,
+    assistantHumorCausalSeq: null,
     assistantModelPreference: null,
     assistantReasoningEffortPreference: null,
     assistantPush: null,
+    assistantPushCausalSeq: null,
     assistantTone: null,
     assistantToneCausalSeq: null,
     assistantVoice: null,

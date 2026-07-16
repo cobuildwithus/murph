@@ -6,6 +6,9 @@ import {
   resolveAssistantSkillsRoot,
 } from "@murphai/assistant-engine/assistant-skill-assets";
 import {
+  buildMurphGroupReadPermissionProfileTomlLines,
+} from "@murphai/hosted-execution/assistant-permissions";
+import {
   HOSTED_RUNTIME_CODEX_APP_SERVER_COMMAND_ENV,
   HOSTED_RUNTIME_PROCESS_ENV,
 } from "@murphai/hosted-execution/cli-runtime-bridge";
@@ -25,6 +28,7 @@ import {
 } from "@murphai/operator-config/hosted-assistant-config";
 import {
   type AssistantCodexModelProviderConfig,
+  HOSTED_CHATGPT_OPENAI_CODEX_MODEL_PROVIDER_ID,
   OPENAI_CODEX_MODEL_PROVIDER_CONFIG,
   resolveAssistantCodexModelProviderConfig,
 } from "@murphai/operator-config/assistant/target-runtime";
@@ -49,10 +53,6 @@ import {
 const HOSTED_CODEX_CONFIG_DIR_NAME = ".codex-hosted";
 const HOSTED_CODEX_CONFIG_FILE_NAME = "config.toml";
 const HOSTED_CODEX_AUTH_FILE_NAME = "auth.json";
-// Custom provider id for ChatGPT-auth OpenAI. The provider intentionally omits
-// base_url/env_key: Codex routes auth-backed providers with no base_url to the
-// ChatGPT backend while still honoring provider-level transport settings.
-const HOSTED_CODEX_CHATGPT_MODEL_PROVIDER_ID = "hosted-chatgpt-openai";
 const DEFAULT_HOSTED_CODEX_REASONING_EFFORT = "low";
 const DEFAULT_HOSTED_CODEX_APPROVAL_POLICY = "never";
 const DEFAULT_HOSTED_CODEX_SANDBOX = "danger-full-access";
@@ -226,7 +226,7 @@ export async function prepareHostedCodexRuntimeEnvironment(
       normalizeHostedCodexEnvString(input.runtimeEnv.HOSTED_ASSISTANT_SANDBOX)
       ?? DEFAULT_HOSTED_CODEX_SANDBOX,
     [HOSTED_CODEX_EFFECTIVE_MODEL_PROVIDER_ID_ENV]: chatGptAuth
-      ? HOSTED_CODEX_CHATGPT_MODEL_PROVIDER_ID
+      ? HOSTED_CHATGPT_OPENAI_CODEX_MODEL_PROVIDER_ID
       : providerConfig.id,
   });
   await writeFile(
@@ -512,7 +512,7 @@ export function buildHostedCodexConfigToml(input: {
   reasoningEffort: string;
 }): string {
   const modelProviderId = input.chatGptAuth
-    ? HOSTED_CODEX_CHATGPT_MODEL_PROVIDER_ID
+    ? HOSTED_CHATGPT_OPENAI_CODEX_MODEL_PROVIDER_ID
     : input.provider.id;
   const providerConfigLines = [
     `[model_providers.${tomlQuotedKey(modelProviderId)}]`,
@@ -551,6 +551,7 @@ export function buildHostedCodexConfigToml(input: {
     "allow_login_shell = false",
     "",
     ...providerConfigLines,
+    ...buildMurphGroupReadPermissionProfileTomlLines(),
     "# Hosted runs should not perform Codex plugin marketplace or remote plugin",
     "# sync work on cold wake; Murph owns the hosted runtime tool surface.",
     "# Multi-agent V2 spawn tools back Murph's skill-directed delegation for",

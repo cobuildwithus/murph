@@ -287,13 +287,13 @@ test('executeCodexAppServerTurn runs the JSON-RPC lifecycle and returns streamed
                 path: assertLocalImagePath(readTurnStartInputItems(turnStart)[1]),
               },
             ],
+            model: 'gpt-5',
             serviceTier: null,
             threadId: 'thread-public-1',
           },
         })
         assert.equal(asRecord(turnStart.params).approvalPolicy, undefined)
         assert.equal(asRecord(turnStart.params).cwd, undefined)
-        assert.equal(asRecord(turnStart.params).model, undefined)
         assert.equal(asRecord(turnStart.params).sandboxPolicy, undefined)
         const imagePath = assertLocalImagePath(readTurnStartInputItems(turnStart)[1])
         assert.equal(path.extname(imagePath), '.jpg')

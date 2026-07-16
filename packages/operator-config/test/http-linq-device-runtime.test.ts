@@ -466,7 +466,7 @@ test('linq runtime preserves exact underscore-delimited message text', async () 
   })
 })
 
-test('linq runtime accepts punctuation inside text decoration spans', async () => {
+test('linq runtime emits iMessage bold decoration before an em dash', async () => {
   const env = {
     LINQ_API_BASE_URL: 'https://linq.example.test/custom',
     LINQ_API_TOKEN: 'linq-token',
@@ -493,7 +493,7 @@ test('linq runtime accepts punctuation inside text decoration spans', async () =
   await sendLinqChatMessage(
     {
       chatId: 'chat-123',
-      message: 'Scheduled time: **8:30 a.m. America/New_York**.',
+      message: 'humor is set to **10/10**—the regulator has been removed entirely.',
     },
     { env, fetchImplementation },
   )
@@ -505,12 +505,12 @@ test('linq runtime accepts punctuation inside text decoration spans', async () =
         {
           text_decorations: [
             {
-              range: [16, 42],
+              range: [16, 21],
               style: 'bold',
             },
           ],
           type: 'text',
-          value: 'Scheduled time: 8:30 a.m. America/New_York.',
+          value: 'humor is set to 10/10—the regulator has been removed entirely.',
         },
       ],
     },

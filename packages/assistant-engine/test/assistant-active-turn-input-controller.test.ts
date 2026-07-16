@@ -1178,7 +1178,7 @@ test('active-turn controller reruns input-available admission for in-flight noti
   }
 })
 
-test('active-turn notifier coalesces A-B-A staged ids into one generic group wake', async () => {
+test('active-turn notifier preserves A-B-A staged ids for one shared group route', async () => {
   const actorByInputId = new Map([
     ['ain_61616161616161616161616161616161', 'actor-a'],
     ['ain_62626262626262626262626262626262', 'actor-b'],
@@ -1200,10 +1200,10 @@ test('active-turn notifier coalesces A-B-A staged ids into one generic group wak
     createAssistantActiveTurnInputController,
     notifyAssistantActiveTurnInputAvailableForInputIds,
   } = await import('../src/assistant/active-turn-input-controller.ts')
-  let admissionCount = 0
+  const admittedInputIds: Array<readonly string[] | undefined> = []
   const controller = createAssistantActiveTurnInputController({
-    admissionHook: async () => {
-      admissionCount += 1
+    admissionHook: async (input) => {
+      admittedInputIds.push(input.availableInputIds)
       return { kind: 'no-new-input' }
     },
     conversationKeys: [
@@ -1220,10 +1220,86 @@ test('active-turn notifier coalesces A-B-A staged ids into one generic group wak
       inputIds,
       vault: '/vaults/test',
     })
-    assert.equal(admissionCount, 1)
+    const laterInputId = 'ain_64646464646464646464646464646464'
+    actorByInputId.set(laterInputId, 'actor-a')
+    await notifyAssistantActiveTurnInputAvailableForInputIds({
+      inputIds: [laterInputId],
+      vault: '/vaults/test',
+    })
+    assert.deepEqual(admittedInputIds, [
+      inputIds,
+      [...inputIds, laterInputId],
+    ])
   } finally {
     controller.close()
     vi.doUnmock('../src/assistant/input-store.js')
+  }
+})
+
+test('active-turn controller admits an exact notified batch one successor at a time', async () => {
+  const {
+    createAssistantActiveTurnInputController,
+  } = await import('../src/assistant/active-turn-input-controller.ts')
+  const firstInputId = 'ain_71717171717171717171717171717171'
+  const secondInputId = 'ain_72727272727272727272727272727272'
+  const admittedInputIds: Array<readonly string[] | undefined> = []
+  const steer = vi.fn(async () => undefined)
+  const controller = createAssistantActiveTurnInputController({
+    admissionHook: async (input) => {
+      admittedInputIds.push(input.availableInputIds)
+      const inputId = input.availableInputIds?.[0]
+      return inputId
+        ? {
+            acceptedInputs: [{
+              id: inputId,
+              promptFallbackReason: 'missing-content-ref' as const,
+              promptFallbackText: inputId,
+              source: 'assistant-input' as const,
+            }],
+            kind: 'accepted' as const,
+            prompt: inputId,
+            transcriptText: inputId,
+          }
+        : { kind: 'no-new-input' as const }
+    },
+    conversationKeys: [
+      'channel:linq|identity:account-batch|audience:direct|thread:thread-batch',
+    ],
+    sessionId: 'session-exact-batch',
+    turnId: 'turn-exact-batch',
+    vault: '/vaults/test',
+  })
+  const releaseLiveTurn = controller.registerLiveProviderTurn({
+    interrupt: async () => undefined,
+    codexThreadId: 'provider-session-exact-batch',
+    providerTurnId: 'provider-turn-exact-batch',
+    sessionId: 'session-exact-batch',
+    steer,
+    turnId: 'turn-exact-batch',
+  })
+
+  try {
+    await controller.notifyInputAvailable({
+      inputIds: [firstInputId, secondInputId],
+    })
+    await vi.waitFor(() => {
+      expect(steer).toHaveBeenCalledTimes(2)
+    })
+    assert.deepEqual(admittedInputIds, [
+      [firstInputId, secondInputId],
+      [secondInputId],
+    ])
+    const firstAdmission = await controller.admitLiveSteered()
+    const secondAdmission = await controller.admitLiveSteered()
+    assert.equal(firstAdmission?.kind, 'accepted')
+    assert.equal(secondAdmission?.kind, 'accepted')
+    if (firstAdmission?.kind === 'accepted' && secondAdmission?.kind === 'accepted') {
+      assert.equal(firstAdmission.acceptedInputs[0]?.id, firstInputId)
+      assert.equal(secondAdmission.acceptedInputs[0]?.id, secondInputId)
+    }
+  } finally {
+    releaseLiveTurn()
+    controller.close()
   }
 })
 

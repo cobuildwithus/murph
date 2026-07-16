@@ -426,170 +426,65 @@ export async function startHostedAiUsageLimitNoticeDispatchTx(input: {
   sourceRef: string;
   targetKind: string;
 }): Promise<HostedAiUsageLimitNoticeDeliveryClaim> {
-  const markerConflict = new Error(
-    "Hosted AI usage-limit notice marker was not claimable after delivery ownership.",
-  );
-
-  try {
-    return await runHostedLinqDeliveryTransaction(input.prisma, async (prisma) => {
-      if (input.linqChatId) {
-        await acquireHostedLinqChatOwnershipLockTx({
-          chatId: input.linqChatId,
-          tx: prisma,
-        });
-      }
-      await input.assertDispatchAuthority?.(prisma);
-      const candidates = buildHostedLinqDeliveryClaimCandidates({
-        currentIdempotencyKey: buildHostedAiUsageGateNoticeIdempotencyKey(input),
-        legacyIdempotencyKeys: buildHostedAiUsageGateLegacyNoticeIdempotencyKeys(input),
+  return runHostedLinqDeliveryTransaction(input.prisma, async (prisma) => {
+    if (input.linqChatId) {
+      await acquireHostedLinqChatOwnershipLockTx({
+        chatId: input.linqChatId,
+        tx: prisma,
       });
-      const deliveries = candidates.length === 0
-        ? []
-        : await prisma.hostedLinqDelivery.findMany({
-            where: {
-              idempotencyKey: {
-                in: candidates.map((candidate) => candidate.lookupKey),
-              },
-            },
-            select: hostedLinqDeliveryClaimResolutionSelect,
-          });
-      const deliveriesByLookupKey = new Map(
-        deliveries.map((delivery) => [delivery.idempotencyKey, delivery]),
-      );
-      const existingCandidates = candidates
-        .map((candidate) => ({
-          ...candidate,
-          delivery: deliveriesByLookupKey.get(candidate.lookupKey),
-        }))
-        .filter((candidate): candidate is typeof candidate & {
-          delivery: NonNullable<typeof candidate.delivery>;
-        } => Boolean(candidate.delivery));
-
-      if (
-        existingCandidates.some((candidate) =>
-          isHostedLinqDeliveryProviderCorrelated(candidate.delivery)
-          || isHostedLinqTerminalTelegramUsageLimitFailure(candidate.delivery)
-        )
-      ) {
-        return { status: "already_notified" };
-      }
-
-      const currentCandidate = existingCandidates.find((candidate) => !candidate.legacy);
-      const legacyCandidates = existingCandidates.filter((candidate) => candidate.legacy);
-      if (currentCandidate && legacyCandidates.length > 0) {
-        return { status: "already_notified" };
-      }
-
-      let selectedCandidate = candidates.find((candidate) => !candidate.legacy);
-      let selectedDelivery = currentCandidate?.delivery;
-      if (legacyCandidates.length > 0) {
-        if (
-          legacyCandidates.length !== 1
-          || input.source !== HOSTED_AI_USAGE_LINQ_NOTICE_DELIVERY_SOURCE
-          || legacyCandidates[0].delivery.source
-            !== HOSTED_AI_USAGE_LINQ_NOTICE_DELIVERY_SOURCE
-        ) {
-          return { status: "already_notified" };
-        }
-        selectedCandidate = legacyCandidates[0];
-        selectedDelivery = legacyCandidates[0].delivery;
-      }
-      if (!selectedCandidate) {
-        return { status: "already_notified" };
-      }
-
-      if (selectedDelivery) {
-        const inFlight = resolveHostedLinqDeliveryInFlightState({
-          attemptedAt: input.attemptedAt,
-          delivery: selectedDelivery,
-        });
-        if (inFlight.inFlight) {
-          return inFlight.retryAt
-            ? { retryAt: inFlight.retryAt, status: "in_flight" }
-            : { status: "in_flight" };
-        }
-      }
-
-      const claim = await claimHostedLinqDeliveryProviderDispatchTx({
-        attemptedAt: input.attemptedAt,
-        idempotencyKey: selectedCandidate.idempotencyKey,
-        linqChatId: input.linqChatId,
-        phoneNumber: input.phoneNumber,
-        prisma,
-        reclaimStalePreProviderAttempt: true,
-        source: input.source,
-        sourceRef: selectedCandidate.legacy
-          ? selectedCandidate.idempotencyKey
-          : input.sourceRef,
-        status: HOSTED_LINQ_DELIVERY_PROVIDER_DISPATCH_STARTED_STATUS,
-        targetKind: input.targetKind,
-        template: "ai_usage_quota",
-      });
-      if (claim.claimed) {
-        const markerClaim = await prisma.hostedAiUsagePeriod.updateMany({
-          where: {
-            AND: [
-              { periodStart: { lte: input.attemptedAt } },
-              { periodEnd: { gt: input.attemptedAt } },
-            ],
-            blockedAt: { not: null },
-            ...(selectedDelivery
-              ? {
-                  OR: [
-                    { limitNoticeSentAt: null },
-                    { limitNoticeSentAt: selectedDelivery.attemptedAt },
-                  ],
-                }
-              : { limitNoticeSentAt: null }),
-            memberId: input.memberId,
-            periodStart: input.periodStart,
-          },
-          data: {
-            limitNoticeSentAt: input.attemptedAt,
-          },
-        });
-        if (markerClaim.count !== 1) {
-          throw markerConflict;
-        }
-        return {
-          idempotencyKey: selectedCandidate.idempotencyKey,
-          status: "claimed",
-        };
-      }
-      if (claim.retryAt) {
-        return { retryAt: claim.retryAt, status: "in_flight" };
-      }
-
-      const delivery = await prisma.hostedLinqDelivery.findUnique({
-        where: {
-          idempotencyKey: selectedCandidate.lookupKey,
-        },
-        select: hostedLinqDeliveryClaimResolutionSelect,
-      });
-      if (
-        !delivery
-        || isHostedLinqDeliveryProviderCorrelated(delivery)
-        || isHostedLinqTerminalTelegramUsageLimitFailure(delivery)
-      ) {
-        return { status: "already_notified" };
-      }
-      const inFlight = resolveHostedLinqDeliveryInFlightState({
-        attemptedAt: input.attemptedAt,
-        delivery,
-      });
-      if (inFlight.inFlight) {
-        return inFlight.retryAt
-          ? { retryAt: inFlight.retryAt, status: "in_flight" }
-          : { status: "in_flight" };
-      }
-      return { status: "already_notified" };
-    });
-  } catch (error) {
-    if (error === markerConflict) {
+    }
+    await input.assertDispatchAuthority?.(prisma);
+    const idempotencyKey = buildHostedAiUsageGateNoticeIdempotencyKey(input);
+    const lookupKey = createHostedLinqDeliveryIdempotencyLookupKey(idempotencyKey);
+    if (!lookupKey) {
       return { status: "already_notified" };
     }
-    throw error;
-  }
+
+    const claim = await claimHostedLinqDeliveryProviderDispatchTx({
+      attemptedAt: input.attemptedAt,
+      idempotencyKey,
+      linqChatId: input.linqChatId,
+      phoneNumber: input.phoneNumber,
+      prisma,
+      reclaimStalePreProviderAttempt: true,
+      source: input.source,
+      sourceRef: input.sourceRef,
+      status: HOSTED_LINQ_DELIVERY_PROVIDER_DISPATCH_STARTED_STATUS,
+      targetKind: input.targetKind,
+      template: "ai_usage_quota",
+    });
+    if (claim.claimed) {
+      return {
+        idempotencyKey,
+        status: "claimed",
+      };
+    }
+    if (claim.retryAt) {
+      return { retryAt: claim.retryAt, status: "in_flight" };
+    }
+
+    const delivery = await prisma.hostedLinqDelivery.findUnique({
+      where: { idempotencyKey: lookupKey },
+      select: hostedLinqDeliveryLifecycleSelect,
+    });
+    if (
+      !delivery
+      || isHostedLinqDeliveryProviderCorrelated(delivery)
+      || isHostedLinqTerminalTelegramUsageLimitFailure(delivery)
+    ) {
+      return { status: "already_notified" };
+    }
+    const inFlight = resolveHostedLinqDeliveryInFlightState({
+      attemptedAt: input.attemptedAt,
+      delivery,
+    });
+    if (inFlight.inFlight) {
+      return inFlight.retryAt
+        ? { retryAt: inFlight.retryAt, status: "in_flight" }
+        : { status: "in_flight" };
+    }
+    return { status: "already_notified" };
+  });
 }
 
 async function runHostedLinqDeliveryTransaction<T>(
@@ -612,23 +507,6 @@ export function buildHostedAiUsageGateNoticeIdempotencyKey(input: {
     memberId: input.memberId,
     periodStart: periodStart.toISOString(),
   })).slice(0, 32)}`;
-}
-
-function buildHostedAiUsageGateLegacyNoticeIdempotencyKeys(input: {
-  memberId: string;
-  periodStart: Date | string;
-}): string[] {
-  const periodStart = normalizeHostedAiUsageNoticePeriodStart(input.periodStart);
-  return [
-    "edge_usage_limit_reached",
-    "family_usage_limit_reached",
-    "pulse_upgrade_edge",
-    "trial_usage_limit_reached",
-  ].map((noticeCode) => `ai-usage-gate:${sha256Hex(JSON.stringify({
-    memberId: input.memberId,
-    noticeCode,
-    periodStart: periodStart.toISOString(),
-  })).slice(0, 32)}`);
 }
 
 function normalizeHostedAiUsageNoticePeriodStart(value: Date | string): Date {
@@ -1139,8 +1017,6 @@ export async function markHostedAiUsageLimitNoticeDeliveryRetryableTx(input: {
   failureCode?: string | null;
   failureReason?: string | null;
   idempotencyKey: string;
-  memberId: string;
-  periodStart: Date;
   prisma: PrismaClient;
   retryAfterAt: Date;
 }): Promise<boolean> {
@@ -1149,50 +1025,33 @@ export async function markHostedAiUsageLimitNoticeDeliveryRetryableTx(input: {
     return false;
   }
 
-  return input.prisma.$transaction(async (prisma) => {
-    const delivery = await prisma.hostedLinqDelivery.updateMany({
-      where: {
-        acceptedAt: null,
-        attemptedAt: input.expectedAttemptedAt,
-        deliveredAt: null,
-        failedAt: null,
-        idempotencyKey,
-        lastReceiptAt: null,
-        messageLookupKey: null,
-        skippedAt: null,
-        source: HOSTED_AI_USAGE_TELEGRAM_NOTICE_DELIVERY_SOURCE,
-        status: HOSTED_LINQ_DELIVERY_PROVIDER_DISPATCH_STARTED_STATUS,
-        template: "ai_usage_quota",
-      },
-      data: {
-        failedAt: input.failedAt ?? new Date(),
-        failureCode: sanitizeHostedOnboardingPersistedErrorCode(
-          normalizeNullable(input.failureCode),
-        ),
-        failureReason: sanitizeHostedOnboardingPersistedErrorMessage(
-          normalizeNullable(input.failureReason),
-        ),
-        retryAfterAt: input.retryAfterAt,
-        status: "failed",
-      },
-    });
-    if (delivery.count !== 1) {
-      return false;
-    }
-
-    await prisma.hostedAiUsagePeriod.updateMany({
-      where: {
-        blockedAt: { not: null },
-        limitNoticeSentAt: input.expectedAttemptedAt,
-        memberId: input.memberId,
-        periodStart: input.periodStart,
-      },
-      data: {
-        limitNoticeSentAt: null,
-      },
-    });
-    return true;
+  const delivery = await input.prisma.hostedLinqDelivery.updateMany({
+    where: {
+      acceptedAt: null,
+      attemptedAt: input.expectedAttemptedAt,
+      deliveredAt: null,
+      failedAt: null,
+      idempotencyKey,
+      lastReceiptAt: null,
+      messageLookupKey: null,
+      skippedAt: null,
+      source: HOSTED_AI_USAGE_TELEGRAM_NOTICE_DELIVERY_SOURCE,
+      status: HOSTED_LINQ_DELIVERY_PROVIDER_DISPATCH_STARTED_STATUS,
+      template: "ai_usage_quota",
+    },
+    data: {
+      failedAt: input.failedAt ?? new Date(),
+      failureCode: sanitizeHostedOnboardingPersistedErrorCode(
+        normalizeNullable(input.failureCode),
+      ),
+      failureReason: sanitizeHostedOnboardingPersistedErrorMessage(
+        normalizeNullable(input.failureReason),
+      ),
+      retryAfterAt: input.retryAfterAt,
+      status: "failed",
+    },
   });
+  return delivery.count === 1;
 }
 
 export async function markHostedLinqDeliverySkippedTx(input: {
@@ -1672,53 +1531,6 @@ const hostedLinqDeliveryLifecycleSelect = {
   source: true,
   status: true,
 } satisfies Prisma.HostedLinqDeliverySelect;
-
-const hostedLinqDeliveryClaimResolutionSelect = {
-  ...hostedLinqDeliveryLifecycleSelect,
-  idempotencyKey: true,
-} satisfies Prisma.HostedLinqDeliverySelect;
-
-function buildHostedLinqDeliveryClaimCandidates(input: {
-  currentIdempotencyKey: string;
-  legacyIdempotencyKeys: readonly string[];
-}): {
-  idempotencyKey: string;
-  legacy: boolean;
-  lookupKey: string;
-}[] {
-  const candidates: {
-    idempotencyKey: string;
-    legacy: boolean;
-    lookupKey: string;
-  }[] = [];
-  const seen = new Set<string>();
-
-  for (const legacyIdempotencyKey of input.legacyIdempotencyKeys) {
-    const lookupKey = createHostedLinqDeliveryIdempotencyLookupKey(legacyIdempotencyKey);
-    if (!lookupKey || seen.has(lookupKey)) {
-      continue;
-    }
-    seen.add(lookupKey);
-    candidates.push({
-      idempotencyKey: legacyIdempotencyKey,
-      legacy: true,
-      lookupKey,
-    });
-  }
-
-  const currentLookupKey = createHostedLinqDeliveryIdempotencyLookupKey(
-    input.currentIdempotencyKey,
-  );
-  if (currentLookupKey && !seen.has(currentLookupKey)) {
-    candidates.push({
-      idempotencyKey: input.currentIdempotencyKey,
-      legacy: false,
-      lookupKey: currentLookupKey,
-    });
-  }
-
-  return candidates;
-}
 
 function isHostedLinqTerminalTelegramUsageLimitFailure(input: {
   failedAt: Date | null;

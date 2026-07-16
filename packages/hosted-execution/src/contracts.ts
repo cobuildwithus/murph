@@ -59,6 +59,8 @@ export const HOSTED_EXECUTION_EVENT_KINDS = [
   "member.channels.updated",
   "member.preferences.updated",
   "assistant.notification.requested",
+  "assistant.ask.requested",
+  "assistant.ask.completed",
   "clinical-records.sync-requested",
   "device-sync.wake",
   "group-newsletter.email-needed",
@@ -79,6 +81,8 @@ export const HOSTED_EXECUTION_WAKE_KINDS = [
   "member.channels.updated",
   "member.preferences.updated",
   "assistant.notification.requested",
+  "assistant.ask.requested",
+  "assistant.ask.completed",
   "clinical-records.sync-requested",
   "device-sync.wake",
   "group-newsletter.email-needed",
@@ -223,6 +227,57 @@ export interface HostedExecutionAssistantNotificationRequestedEvent
   notification: HostedExecutionAssistantNotificationRequestedPayload;
 }
 
+export const HOSTED_EXECUTION_ASSISTANT_ASK_QUESTION_MAX_CODE_POINTS = 1_200;
+export const HOSTED_EXECUTION_ASSISTANT_ASK_ANSWER_MAX_CODE_POINTS = 4_000;
+export const HOSTED_EXECUTION_ASSISTANT_ASK_TARGET_LABEL_MAX_CODE_POINTS = 120;
+export const HOSTED_EXECUTION_ASSISTANT_ASK_REQUEST_TTL_MS = 10 * 60 * 1_000;
+
+export interface HostedExecutionAssistantAskJoinedGroupTarget {
+  kind: "joined_group";
+  membershipId: string;
+  requestedLabel: string | null;
+}
+
+export type HostedExecutionAssistantAskResult =
+  | {
+      answer: string;
+      outcome: "answered";
+    }
+  | {
+      answer: string | null;
+      outcome: "cannot_answer";
+    };
+
+export interface HostedExecutionAssistantAskRequestedPayload {
+  expiresAt: string;
+  originAssistantInputId: string;
+  originSessionId: string;
+  question: string;
+  target: HostedExecutionAssistantAskJoinedGroupTarget;
+}
+
+export interface HostedExecutionAssistantAskCompletedPayload {
+  expiresAt: string;
+  originAssistantInputId: string;
+  originSessionId: string;
+  question: string;
+  requestId: string;
+  result: HostedExecutionAssistantAskResult;
+  targetLabel: string | null;
+}
+
+export interface HostedExecutionAssistantAskRequestedEvent
+  extends HostedExecutionBaseEvent {
+  ask: HostedExecutionAssistantAskRequestedPayload;
+  kind: "assistant.ask.requested";
+}
+
+export interface HostedExecutionAssistantAskCompletedEvent
+  extends HostedExecutionBaseEvent {
+  ask: HostedExecutionAssistantAskCompletedPayload;
+  kind: "assistant.ask.completed";
+}
+
 export const HOSTED_EXECUTION_TELEGRAM_MESSAGE_SCHEMA =
   "murph.hosted-telegram-message.v1";
 
@@ -311,6 +366,8 @@ export type HostedExecutionEvent =
   | HostedExecutionMemberChannelsUpdatedEvent
   | HostedExecutionMemberPreferencesUpdatedEvent
   | HostedExecutionAssistantNotificationRequestedEvent
+  | HostedExecutionAssistantAskRequestedEvent
+  | HostedExecutionAssistantAskCompletedEvent
   | HostedExecutionClinicalRecordsSyncRequestedEvent
   | HostedExecutionDeviceSyncWakeEvent
   | HostedExecutionGroupNewsletterEmailNeededEvent
@@ -487,6 +544,18 @@ export interface HostedExecutionAssistantNotificationRequestedWake
   notification: HostedExecutionAssistantNotificationRequestedPayload;
 }
 
+export interface HostedExecutionAssistantAskRequestedWake
+  extends HostedExecutionBaseWake {
+  ask: HostedExecutionAssistantAskRequestedPayload;
+  kind: "assistant.ask.requested";
+}
+
+export interface HostedExecutionAssistantAskCompletedWake
+  extends HostedExecutionBaseWake {
+  ask: HostedExecutionAssistantAskCompletedPayload;
+  kind: "assistant.ask.completed";
+}
+
 export interface HostedExecutionMemberChannelsUpdatedWake extends HostedExecutionBaseWake {
   kind: "member.channels.updated";
   memberChannels: HostedExecutionMemberChannels;
@@ -580,6 +649,8 @@ export type HostedExecutionWake =
   | HostedExecutionMemberChannelsUpdatedWake
   | HostedExecutionMemberPreferencesUpdatedWake
   | HostedExecutionAssistantNotificationRequestedWake
+  | HostedExecutionAssistantAskRequestedWake
+  | HostedExecutionAssistantAskCompletedWake
   | HostedExecutionClinicalRecordsSyncRequestedWake
   | HostedExecutionDeviceSyncWake
   | HostedExecutionGroupNewsletterEmailNeededWake
@@ -712,6 +783,18 @@ export function isHostedConversationMessageWake(
   wake: HostedExecutionWake,
 ): wake is HostedExecutionConversationMessageWake {
   return wake.kind === "conversation.message";
+}
+
+export function isHostedExecutionAssistantAskRequestedWake(
+  wake: HostedExecutionWake,
+): wake is HostedExecutionAssistantAskRequestedWake {
+  return wake.kind === "assistant.ask.requested";
+}
+
+export function isHostedExecutionAssistantAskCompletedWake(
+  wake: HostedExecutionWake,
+): wake is HostedExecutionAssistantAskCompletedWake {
+  return wake.kind === "assistant.ask.completed";
 }
 
 export function isHostedRuntimeTimerWake(

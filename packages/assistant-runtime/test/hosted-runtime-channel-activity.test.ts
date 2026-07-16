@@ -84,7 +84,7 @@ function buildLinqRouteAuthority(threadId: string) {
 }
 
 function buildClaimedLinqEngagementResult(request: {
-  authorityCheckOnly?: boolean | null;
+  authorityCheckOnly: boolean;
 }) {
   return request.authorityCheckOnly === true
     ? {}

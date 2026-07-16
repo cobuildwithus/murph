@@ -423,6 +423,10 @@ describe("hosted runner container image contract", () => {
       new URL("../../../.github/workflows/cloudflare-runner-base-image.yml", import.meta.url),
       "utf8",
     );
+    const runnerPermissionSandboxWorkflow = await readFile(
+      new URL("../../../.github/workflows/cloudflare-runner-permission-sandbox.yml", import.meta.url),
+      "utf8",
+    );
 
     expect(baseDockerfile).toContain("ARG CODEX_CLI_VERSION=0.144.0");
     expect(baseDockerfile).toContain("ARG NODE_VERSION=24.14.1");
@@ -446,6 +450,15 @@ describe("hosted runner container image contract", () => {
     expect(runnerBasePublishWorkflow).toContain(
       "run: pnpm --dir apps/cloudflare runner:docker:base -- --push",
     );
+    expect(runnerPermissionSandboxWorkflow).toContain(
+      "sudo sysctl --write kernel.apparmor_restrict_unprivileged_userns=0",
+    );
+    expect(runnerPermissionSandboxWorkflow).toContain(
+      'test "$(sysctl --values kernel.apparmor_restrict_unprivileged_userns)" = "0"',
+    );
+    expect(runnerPermissionSandboxWorkflow).toContain(
+      "run: pnpm --dir apps/cloudflare runner:docker:smoke:prepared-base",
+    );
     await expect(
       access(new URL("../../../Dockerfile.cloudflare-whisper-model", import.meta.url)),
     ).rejects.toThrow();
@@ -462,6 +475,13 @@ describe("hosted runner container image contract", () => {
     expect(baseDockerfile).toContain(
       'native_codex="$(find "$(npm root -g)/@openai" -path \'*/vendor/*/bin/codex\' -type f -perm /111 -print -quit)"',
     );
+    expect(baseDockerfile).toContain(
+      'native_bwrap="$(find "$(npm root -g)/@openai" -path \'*/vendor/*/codex-resources/bwrap\' -type f -perm /111 -print -quit)"',
+    );
+    expect(baseDockerfile).toContain('test -n "${native_bwrap}"');
+    expect(baseDockerfile).toContain(
+      '"${native_bwrap}" --help | grep -Fq -- \'--argv0\'',
+    );
     expect(baseDockerfile).toContain('ln -sfn "${native_codex}" /usr/local/bin/codex');
     expect(baseDockerfile).toContain("npm cache clean --force");
     expect(baseDockerfile).toContain("PATH=/app/node_modules/.bin:/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin");
@@ -469,6 +489,7 @@ describe("hosted runner container image contract", () => {
     expect(baseDockerfile).not.toContain("export PATH=");
     expect(baseDockerfile).not.toContain("FFMPEG_COMMAND=");
     expect(baseDockerfile).not.toContain("PDFTOTEXT_COMMAND=");
+    expect(baseDockerfile).not.toContain("bubblewrap \\");
     expect(baseDockerfile).toContain("file \\");
     expect(baseDockerfile).toContain("jq \\");
     expect(baseDockerfile).toContain("mupdf-tools \\");
@@ -775,6 +796,12 @@ describe("hosted runner container image contract", () => {
       "docker build --platform linux/amd64 -f ../../Dockerfile.cloudflare-hosted-runner --build-arg HOSTED_RUNNER_BUNDLE_DIR=.deploy/runner-smoke-bundle -t murph-cloudflare-runner .",
     );
     expect(runnerDockerSmokeScript).toContain('"--platform",\n      "linux/amd64"');
+    expect(runnerDockerSmokeScript).toContain(
+      '"--security-opt",\n      "seccomp=unconfined"',
+    );
+    expect(runnerDockerSmokeScript).toContain(
+      '"--security-opt",\n      "apparmor=unconfined"',
+    );
     expect(runnerDockerSmokeScript).toContain("codexHostedShellVaultCliLlmsBytes=");
     expect(runnerDockerSmokeScript).toContain("codexHostedShellMurphPathBytes=");
     expect(runnerDockerSmokeScript).toContain("codexHostedShellPythonVersion=");

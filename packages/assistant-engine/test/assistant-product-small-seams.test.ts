@@ -1701,9 +1701,22 @@ describe('assistant product small seams', () => {
     })
 
     const localService = await import('../src/assistant/local-service.ts')
-    const session = createAssistantSession({
+    const sessionWithoutResume = createAssistantSession({
       sessionId: 'session-service',
     })
+    const currentRoute = resolveAssistantExecutionPlan({
+      defaults: null,
+      sessionTarget: sessionWithoutResume.target,
+    }).codexRoute
+    const resumeState = {
+      routeFingerprint: currentRoute.routeFingerprint ?? currentRoute.routeId,
+      threadId: 'thread-service',
+    }
+    const session = {
+      ...sessionWithoutResume,
+      codexResume: resumeState,
+      resumeState,
+    }
 
     resolveAssistantSessionMock.mockResolvedValueOnce({
       session,
@@ -1742,6 +1755,10 @@ describe('assistant product small seams', () => {
       expect.objectContaining({
         providerOptions: expect.objectContaining({
           model: 'gpt-4.1-mini',
+        }),
+        resumeState: expect.objectContaining({
+          threadCompatibilityFingerprint: expect.any(String),
+          threadId: 'thread-service',
         }),
         sessionId: 'session-service',
       }),

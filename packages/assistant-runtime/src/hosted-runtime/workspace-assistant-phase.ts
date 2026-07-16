@@ -301,6 +301,11 @@ function buildHostedGroupEmailRestrictedActionUnavailable(
 ): HostedRuntimeGroupToolResponse {
   const unavailableReason = "authenticated_sender_required";
   switch (request.action) {
+    case "ask":
+      return {
+        action: request.action,
+        result: { status: "unavailable", unavailableReason },
+      };
     case "list_memberships":
       return {
         action: request.action,
@@ -3579,7 +3584,11 @@ async function runSystemMailboxMaintenancePhase(input: {
           nextWakeAt,
           outboxTerminalizedSendingCount: 0,
           progressed: true,
-          systemMailboxPrepared: systemMailboxPreparation.status === "retryable_failed" ? 0 : 1,
+          systemMailboxPrepared:
+            systemMailboxPreparation.status === "retryable_failed"
+              || systemMailboxPreparation.status === "preempted"
+              ? 0
+              : 1,
           systemMailboxRetryableFailed:
             systemMailboxPreparation.status === "retryable_failed" ? 1 : 0,
         }),
@@ -5367,7 +5376,7 @@ async function writeHostedSystemMailboxRuntimeLog(input: {
   recorded: number | null;
   recordFailed: number | null;
   routeAction: string | null;
-  status: "processed" | "recorded" | "recording" | "retryable_failed";
+  status: "preempted" | "processed" | "recorded" | "recording" | "retryable_failed";
   wakeKind: string | null;
 }): Promise<void> {
   const errorCode = toHostedRuntimeLogCode(input.errorCode);
@@ -6504,7 +6513,10 @@ function shouldCollectSystemMailboxDeliveryEffects(input: {
   }
 
   const item = input.preparation.item;
-  if (item.routeAction === "dispatch-assistant-notification") {
+  if (
+    item.routeAction === "dispatch-assistant-notification"
+    || item.routeAction === "continue-assistant-ask"
+  ) {
     return true;
   }
 
