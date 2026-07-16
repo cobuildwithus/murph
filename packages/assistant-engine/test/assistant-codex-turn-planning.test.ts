@@ -487,9 +487,17 @@ describe('assistant Codex turn planning', () => {
     expect(plan.developerInstructions).toContain(
       'That skill is the single owner of resume behavior, aspiration capture and parking, foundation checkpoints, the contextual return, persistence, defer and skip meaning, and completion.',
     )
-    expect(plan.developerInstructions).toContain(
+    const onboardingDecisionContract = [
       'During discovery, a stated health goal is context, not an action request.',
-    )
+      'Only an immediate request or safety need moves problem-solving ahead of the park.',
+      'On return, suggest a thread only as an option and ask which thread, if any, the user wants before deeper behavior questions; a generic “continue” before that choice is not selection.',
+      'Honor pause, defer, skip, and decline.',
+      'A pause, defer, or overall decline stops advancement; a category skip resolves only that checkpoint and may advance onboarding, but never selects a thread or authorizes behavior work.',
+    ] as const
+    for (const clause of onboardingDecisionContract) {
+      expect(plan.developerInstructions).toContain(clause)
+      expect(plan.turnContextPrompt).not.toContain(clause)
+    }
     expect(plan.developerInstructions).not.toContain(
       'roughly 5-6 short assistant messages',
     )
@@ -1223,6 +1231,7 @@ describe('assistant Codex turn planning', () => {
     const hostedToolContext: AssistantHostedToolContext = {
       ...createHostedToolContext(),
       assistantConfigurationTool: { request: vi.fn() },
+      automationTool: { request: vi.fn() },
       connectedApps: { request: vi.fn() },
       familyPlanTool: { request: vi.fn() },
       groupTool: { request: vi.fn() },
@@ -1273,33 +1282,38 @@ describe('assistant Codex turn planning', () => {
     expect(plan.developerInstructions).not.toContain('/settings?voice=true')
     expect(plan.developerInstructions).not.toContain('Hosted wearable connection links are available')
     expect(plan.developerInstructions).toContain(
-      'existing automation in this bound runtime vault',
+      'Scheduled automation changes for this group room are available through `murph.automation`.',
     )
     expect(plan.developerInstructions).toContain(
-      '`vault-cli automation edit` for non-route changes',
+      'Use `murph.automation` with `action: save` to create an ordinary automation and `action: patch` to change one.',
     )
     expect(plan.developerInstructions).toContain(
-      '`vault-cli automation set-status`',
+      'Patch `status` to pause, reactivate, or archive an existing automation.',
     )
     expect(plan.developerInstructions).toContain(
-      'stored route remains unchanged',
+      'Ordinary patches preserve its stored route.',
     )
     expect(plan.developerInstructions).toContain(
-      'bind to the trusted current group room',
+      'A save always binds to the trusted current group room.',
+    )
+    expect(plan.developerInstructions).toContain(
+      'A patch retargets only when `retargetToCurrentConversation: true` is explicit.',
     )
     expect(plan.developerInstructions).toContain(
       'Never use saved personal/self targets',
     )
     expect(plan.developerInstructions).toContain(
-      'explicit route options',
+      'The tool accepts no arbitrary route locator',
     )
     expect(plan.developerInstructions).toContain(
       'do not target another route',
     )
+    expect(plan.developerInstructions).not.toContain('vault-cli automation')
     expect(plan.dynamicTools.map((tool) => tool.name)).toEqual(
       expect.arrayContaining([
         'connected_apps_search',
         'connected_apps_execute',
+        'automation',
         'group',
         'newsletter',
       ]),

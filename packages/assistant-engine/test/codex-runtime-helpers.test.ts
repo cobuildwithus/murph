@@ -2456,7 +2456,7 @@ describe('Codex assistant registry helpers', () => {
 
   it('never passes a multi_agent_v2 CLI override on hosted turns', async () => {
     // Hosted config.toml owns [features.multi_agent_v2] (including
-    // root_agent_usage_hint_text); a CLI boolean override would take
+    // Murph's tool and mode hints); a CLI boolean override would take
     // precedence and silently reset that table to feature defaults.
     codexAppServerMocks.executeCodexAppServerTurn.mockResolvedValueOnce({
       finalMessage: 'Completed hosted turn.',

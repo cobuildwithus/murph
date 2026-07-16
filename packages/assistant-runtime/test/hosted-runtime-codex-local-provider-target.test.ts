@@ -7,7 +7,7 @@ import { test } from "vitest";
 
 import {
   HOSTED_RUNTIME_CODEX_APP_SERVER_COMMAND_ENV,
-} from "@murphai/hosted-execution/cli-runtime-bridge";
+} from "@murphai/hosted-execution/env";
 import {
   normalizeAssistantBackendTarget,
 } from "@murphai/operator-config/assistant-backend";

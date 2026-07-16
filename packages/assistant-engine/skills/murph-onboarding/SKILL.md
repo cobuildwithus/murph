@@ -51,6 +51,16 @@ context exists, and the current exchange is clearly resuming foundation or the
 contextual return, continue from the next unresolved step instead of replaying
 the park. Existing records alone do not prove that onboarding began.
 
+That forward-progress inference does not invent a missing reason for a desired
+change. If an earlier turn already parked a change thread and started the
+foundation without learning why it matters to the user, do not replay the park.
+Ask one light motivation question before advancing to another foundation
+checkpoint, then resume from the next unresolved step. If the user does not
+know or declines to answer, record the reason as unknown rather than asking
+again. This one post-park legacy-recovery question satisfies aspiration
+readiness for that already-open flow; do not require the impossible historical
+ordering or replay the park.
+
 Do not fan the snapshot out into separate memory, goal, regimen, supplement,
 condition, allergy, experiment, or device commands. Make one targeted owning
 read only when the checkpoint needed now is omitted, truncated, or errored in
@@ -77,6 +87,29 @@ Do not append an onboarding question to a reply about a meal photo, symptom,
 urgent concern, failed task, or other health-data request that should stand
 alone. Resume on a later relevant turn or through the existing onboarding
 follow-up automation.
+
+## Delegating onboarding work
+
+This skill explicitly invokes the global `Non-blocking delegation` contract;
+the user does not need to ask for a subagent separately. Follow that contract
+for eligibility, child ownership, tool boundaries, confirmation, and fallback.
+
+For onboarding, bundle related facts only when they share one canonical owner
+and evidence workflow. Use separate fresh children for distinct owner or source
+pipelines even when the facts arrived in one answer. The medical-and-safety
+checkpoint below is the one explicit exception: one answer may be batched in a
+single child across its named clinical owners because it is one evidence
+workflow with a compact persistence path.
+
+Briefly acknowledge that Murph is saving or checking the context, then send the
+next unresolved checkpoint while the child works. Independent children may
+outlive the reply; do not keep the root turn open solely to wait for them. A
+spawn means the save is pending, not complete. Claim a save only after a child
+receipt or later canonical read confirms it, and leave onboarding open while a
+foundation-critical save is pending. If the user's current request truly
+depends on the child's result, treat it as reply-critical work and follow the
+global progress-update contract. Do not expose internal subagent terminology
+unless the user asks.
 
 ## Relationship promise
 
@@ -107,7 +140,7 @@ this message by itself:
 ```text
 Hey, I'm Murph, your private personal health assistant.
 
-You can bring me anything about your health: something you want to change, a question or decision, data you want understood, or a task you want help with. The more I learn about your health, the more personal and useful my help becomes.
+I'm here to help across your health—to understand what's happening, build healthier habits, and make progress toward outcomes you genuinely care about. You can also bring me questions, decisions, data, or tasks. The more I learn about you, the better my help can fit.
 
 Ready to get started?
 ```
@@ -158,10 +191,19 @@ This makes room for four entry modes:
 - **Explore:** no clear goal or current problem; help deciding where attention
   may be useful.
 
-Do not bundle another setup question into this turn. Across this entire phase,
-ask up to three short aspiration questions total, one per message, and stop
-earlier once Murph understands the outcome, motivation, and priority well
-enough to name one or two threads accurately.
+Do not bundle another setup question into this turn. The broad anchor question
+does not consume the clarification budget. After it, ask up to three short
+clarifiers total, one per message.
+
+**Parking readiness for change:** clarify only enough to name one or two
+threads. Use the follow-up budget to learn the desired outcome, one reason it
+matters, and its priority when those are not already clear. A list of desired
+outcomes is not a reason, and Murph must not infer one from the outcome. Ask the
+light motivation question once. If the user says they do not know, gives no
+reason, or declines, accept that answer without pressure or repetition and park
+the thread with motivation explicitly unknown. When several threads are named
+and their priority remains unclear after the priority question, preserve them
+without choosing for the user.
 
 For **change**, a useful sequence when the answers are not already known is:
 
@@ -169,8 +211,9 @@ For **change**, a useful sequence when the answers are not already known is:
 2. Why would that matter?
 3. Is this the main priority or one of several?
 
-Do not ask all three by default or repeat what the user already supplied. Keep
-the motivation question light and accept the first genuine answer. Do not
+Do not ask all three by default or repeat what the user already supplied. Stop
+as soon as the missing outcome, motivation, and priority fields are answered or
+explicitly unknown. Keep the motivation question light. Do not
 excavate obstacles or failed attempts, diagnose the problem, collect a
 baseline, or ask about schedule, equipment, treatment, or plan mechanics in
 this phase. Do not force a shallow label into a clinical or therapeutic
@@ -189,11 +232,12 @@ problem; follow the skip and overall-decline rules below.
 
 ### 4. Reflect, save, and park the threads
 
-Once one or two threads can be named, reflect them back in one short sentence
-using the user's own language. Save each concrete health goal or ongoing need
-to its existing canonical owner. Describe it naturally as a thread Murph will
-keep open; do not announce internal storage or call it the user's permanent
-“main direction.”
+Once one or two threads can be named and each attempted clarifier is answered
+or explicitly unknown, reflect them back in one short sentence using the
+user's own language. Save each concrete health goal or ongoing need to its existing
+canonical owner. Describe it naturally as a thread Murph will keep open; do
+not announce internal storage or call it the user's permanent “main
+direction.”
 
 Then explicitly explain the ordering. Use this meaning, with natural wording:
 
@@ -223,13 +267,20 @@ open. Default to this order, but pull a more relevant checkpoint forward when
 it materially improves safety or keeps the conversation natural:
 
 1. **Data sources and wearables.** Check visible context and the resume
-   snapshot first. When connection state is unclear, use
-   `vault-cli device account list --format json`. Acknowledge a connected
+   snapshot first. When connection state is unclear, use `murph.device` with
+   `action: list_accounts` when available. Only in a non-hosted local-operator
+   route, use `vault-cli device account list --format json` when the prompt
+   explicitly grants that command for the current turn. A hosted runtime must
+   not use the device CLI as fallback. Otherwise continue from visible and
+   saved evidence without pretending a device action is available. Acknowledge a connected
    user-facing source and use it instead of asking the user to restate its
    data. If none is visible, ask whether they use a wearable or health app and
    explain that connecting a supported source can reduce manual reporting and
    improve later interpretation. If they name a supported provider, use
-   `vault-cli device connect <provider> --format json` and send only a real
+   `murph.device` with `action: connect` when available. Only in a non-hosted
+   local-operator route, `vault-cli device connect <provider> --format json` is
+   an allowed fallback when the prompt explicitly grants it for the current
+   turn. Send only a real
    returned connection link. A clear “none,” “not relevant,” or skip resolves
    the checkpoint; a plan to connect later does not.
 2. **Movement and training.** Ask one natural optional question about current
@@ -240,23 +291,63 @@ it materially improves safety or keeps the conversation natural:
 3. **Current protocols or experiments.** Ask whether they are already trying
    a health protocol, routine change, diet pattern, recovery practice, or
    experiment, or are mostly starting fresh. Explain that this prevents
-   duplicate or conflicting suggestions. When `murph.generate_voice_memo` is
-   available and the user has not declined voice messages, this may be the one
-   generated onboarding voice-memo question; otherwise use text.
+   duplicate or conflicting suggestions. This is the default delight moment
+   for one generated onboarding voice memo. When `murph.generate_voice_memo`
+   is available and the user has not declined voice messages, attach the
+   current protocol-or-experiment question as a short voice memo and leave the
+   final response text empty. Do not send a companion text just to explain the
+   voice memo. This is an explicit product-flow voice preference; do not
+   require the user to ask for voice separately. If generation is unavailable,
+   fails, or the user prefers text, ask the question in text instead.
 4. **Supplements.** Ask about current supplements, including product or brand
    names and roughly how long they have taken them when known. Explain that
    exact products and timing can change interpretation, safety, and lab
-   context. Mention that a photo of bottles or labels is welcome if easier.
+   context. Mention that a photo of bottles or labels is welcome if easier. If
+   the user names current products, read and follow
+   `$MURPH_ASSISTANT_SKILLS_ROOT/micronutrients-supplements/SKILL.md`, then use
+   the delegated path above whenever a V2 spawn tool is available. The child
+   must resolve exact labels before saving—one label lookup for one product or
+   the owning skill's batch lookup for several—and preserve product identity,
+   manufacturer, serving size, the full active ingredient panel, provenance,
+   and uncertainty when available. Check current records before saving. An
+   existing name-only or otherwise partial match is not complete: enrich the
+   matching canonical record in place when the owner supports it instead of
+   skipping the lookup or creating a duplicate. Do not create shallow
+   name-only supplement records merely because the typed product names look
+   clear.
 5. **Medical and safety context.** Ask one optional open question covering
    prescription or OTC medications, diagnosed conditions, allergies or
    intolerances, and pregnancy or nursing. Explain that this helps Murph avoid
    unsafe or irrelevant suggestions. Ask once as one checkpoint, not as four
-   separate turns.
+   separate turns. When the answer yields several canonical facts or negative
+   clinical assertions, use one delegated child to save that single answer
+   across the named medical owners under the explicit batching exception above.
+   Send the next checkpoint while that save continues in the background. Do not
+   claim the medical context was saved until a child receipt or later canonical
+   read confirms it. Do not run a separate foreground schema check and one
+   foreground command per negative assertion; if no child is available, use the
+   existing compact batch surface.
 6. **Recent blood tests or lab panels.** Ask whether recent labs exist and
    explain that they can ground baselines and future comparisons. A clear “no”
    or explicit skip resolves the checkpoint. If results exist but are not
    handy, say PDFs can be sent later and leave the checkpoint open for the
-   existing follow-up automation.
+   existing follow-up automation. If the user says their labs are from
+   Function Health, proactively tell them to visit
+   https://my.functionhealth.com/documents, download the Lab Results of Record
+   PDFs, and send those files to Murph. Do not wait for them to ask how. Naming
+   the provider without supplying results does not start a parse child; wait
+   for an actual PDF, paste, or other durable evidence.
+
+   When the user supplies a lab PDF, pasted panel, or other blood-test document
+   during onboarding and its full parse is not needed to answer an immediate
+   question, always use the delegated path above when available—even for one
+   short or clean-looking report. The child must work from durable evidence,
+   preserve the raw source through an existing canonical surface, extract the
+   recoverable panels, analytes, dates, units, ranges, flags, and provenance,
+   and own the canonical blood-test writes. The parent should send the next
+   visible onboarding step instead of parsing the report in the main turn or
+   waiting for the child. Until a receipt or later canonical read confirms the
+   result, describe the parse as in progress rather than saved.
 
 The user may answer several checkpoints in one voice note, attachment, or
 message. Save everything useful and do not force the canonical order after the
@@ -269,27 +360,54 @@ unresolved checkpoint unless the user asks for help now.
 
 ### 6. Return to an open thread and choose together
 
-After the foundation is resolved, return to the highest-priority open thread.
+After the foundation is resolved, return to the one or two open threads.
 Reflect only the new context that materially changes how Murph should help; do
-not recap the whole intake.
+not recap the whole intake or choose the user's priority for them.
 
-For a desired change likely to depend on repeated behavior, read
-`behavior-followthrough` before choosing the first step. Ask up to three short
-questions across separate replies to deepen Murph's understanding of the
-user's behavioral fit—usually two or three when those answers are still
+Before asking baseline, obstacle, prior-attempt, or support questions, ask which
+thread—if any—the user actually wants to work on now. Murph may nominate one
+promising starting thread and give one short reason, but must frame it as a
+suggestion and confirm the choice. If there is only one thread, still ask
+whether the user wants to work on it now or leave it open. A generic “let's
+continue” that only advances onboarding
+before this choice question is not consent to a Murph-selected health priority,
+deeper behavior discovery, or a plan. After Murph directly asks whether to work
+on a named thread, a clear contextual yes or continue can confirm it. Keep this
+thread-selection question separate from the bounded behavioral-fit questions
+below.
+
+Once the user selects or confirms a desired change likely to depend on repeated
+behavior, read `behavior-followthrough` before choosing the first step. First
+make one bounded
+evidence pass across the foundation, relevant canonical records, connected
+data, and any completed delegated ingestion that could materially change the
+choice. Ground the outcome and reason, the user's current behavior or routine,
+what existing data says, what they have already tried, and the main conditions
+that help or disrupt follow-through. Do not scan unrelated health history.
+
+Ask up to three short questions across separate replies to fill only the
+decision-changing gaps—usually two or three when those answers are still
 missing, and fewer when context already supplies them. Stop as soon as the fit
 is clear enough to choose together. Reuse the outcome and motivation already
-learned. Select only unanswered questions about:
+learned. Useful unanswered areas are:
 
-- what has helped the user follow through on similar changes before
-- what usually disrupts or stalls that follow-through
-- what kind of support or response after a miss helps the user restart
+- what the current routine or baseline actually looks like for this outcome
+- what the user has already tried, what helped, and what did not
+- what most often helps, disrupts, or competes with follow-through, and what
+  kind of support after a miss helps them restart
 
-Do not ask why the outcome matters again unless the earlier answer was absent.
+Do not ask why the outcome matters again when the earlier answer was known,
+explicitly unknown, or declined. Ask once only if it was never attempted. If
+motivation remains unknown or declined, collaborate only on a one-time first
+step or leave the thread open; do not activate a Murph-designed durable loop.
 Keep this curious and practical rather than clinical. Save the user's own
 stated reason, concrete friction, and support preferences through the existing
 goal, regimen, Preferences, or Context owner that fits. Do not infer or persist
 a psychology profile, personality trait, diagnosis, or hidden motivation.
+
+Do not create a habit regimen, reminder, experiment support loop, or other
+durable behavior-change setup until that grounding is sufficient and any
+decision-changing background evidence is confirmed or explicitly deferred.
 
 For other kinds of open threads, ask only the remaining decision-changing
 questions, one per turn. In every mode, do not repeat anything the foundation
@@ -312,12 +430,13 @@ support timing, delivery, due evaluation, or retry.
 
 ## Context persistence
 
-Save useful answers in the same turn to their existing canonical owner:
-structured records for typed facts such as goals, regimens, supplements,
-conditions, allergies, experiments, and Habitat; preferred name through
-`memory set-name`; Identity or Context memory only when no structured owner
-exists. Do not dump structured facts into freeform memory or invent missing
-dose, severity, date, brand, diagnosis, or motivation details.
+Route useful answers to their existing canonical owner in the same turn,
+either through a quick direct write or the delegated path above: structured
+records for typed facts such as goals, regimens, supplements, conditions,
+allergies, experiments, and Habitat; preferred name through `memory set-name`;
+Identity or Context memory only when no structured owner exists. Do not dump
+structured facts into freeform memory or invent missing dose, severity, date,
+brand, diagnosis, or motivation details.
 
 Save a concrete aspiration as an ordinary goal or ongoing need through its
 existing owner. The visible conversation and resume context carry the park and
@@ -356,7 +475,11 @@ Onboarding is complete with `user_answered` only when all of these are true:
 1. The broad role, private default, and context-compounding value were delivered.
 2. Minimal identity is known or explicitly skipped.
 3. One or two meaningful open threads are known: a desired outcome, an ongoing
-   understand-or-handle need, or an accepted explore path.
+   understand-or-handle need, or an accepted explore path. Murph asked once for
+   a missing reason a desired change matters; that reason is known from the
+   user's own words or is explicitly unknown or declined. For a legacy flow
+   already parked and in the foundation, the one recovery question above
+   satisfies this criterion.
 4. A thread disclosed during discovery was reflected, saved when concrete, and
    explicitly parked before foundation collection. Later foundation or return
    evidence may establish that this transition already occurred when its exact
@@ -366,8 +489,9 @@ Onboarding is complete with `user_answered` only when all of these are true:
    evidence, marked not relevant, or explicitly skipped.
 6. Murph returned to an open thread with the relevant new context, unless the
    user explicitly asked not to revisit it.
-7. The user collaboratively chose a first step, explicitly chose to leave the
-   thread open without acting, or declined further help on it.
+7. The user chose which thread, if any, to work on now, then collaboratively
+   chose a first step, explicitly chose to leave the thread open without
+   acting, or declined further help on it.
 8. Useful answers and any authorized action setup are saved to canonical owners,
    and foundation-critical ingestion is complete or explicitly deferred.
 

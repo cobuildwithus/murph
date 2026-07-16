@@ -119,7 +119,10 @@ describe('assistant capability-offers prompt contract', () => {
 
   it('names newsletter mechanics inside hosted-group guidance', () => {
     const section = getPromptSection(
-      buildAssistantSystemPromptLayers(createCommonCodexPromptInput())
+      buildAssistantSystemPromptLayers(createCommonCodexPromptInput({
+        assistantHostedAutomationAvailable: true,
+        hostedRuntime: true,
+      }))
         .stableRouteCapabilityPrompt,
       HOSTED_GROUPS_HEADER,
     )
@@ -131,7 +134,7 @@ describe('assistant capability-offers prompt contract', () => {
     expect(section).toContain('`send` rechecks authorization')
     expect(section).toContain('never returns raw email addresses')
     expect(section).toContain('never send the first edition immediately')
-    expect(section).toContain('normal `vault-cli automation` surface')
+    expect(section).toContain('Create the newsletter cron through `murph.automation`')
     expect(section).toContain('start with "Like this message" and say what it does')
     expect(section).not.toContain('lead with reacting to this message')
     expect(section).toContain('when the current group is adding a sharing permission')

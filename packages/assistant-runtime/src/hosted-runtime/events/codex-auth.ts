@@ -15,7 +15,7 @@ import {
 } from "@murphai/hosted-execution";
 import {
   HOSTED_RUNTIME_CODEX_APP_SERVER_COMMAND_ENV,
-} from "@murphai/hosted-execution/cli-runtime-bridge";
+} from "@murphai/hosted-execution/env";
 
 import type { HostedRuntimePlatform } from "../platform.ts";
 import {

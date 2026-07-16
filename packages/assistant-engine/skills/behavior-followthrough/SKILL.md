@@ -40,16 +40,58 @@ When acute stress, overload, trouble winding down, or symptom fear is the immedi
 
 ## Success criteria
 
-Before scheduling or continuing support for a repeated behavior, Murph should have enough of this compact support loop:
+For a repeated-behavior support loop Murph is helping design, satisfy the
+grounding gate below before scheduling or continuing support. Murph should
+then have enough of this compact support loop:
 
 1. Target behavior: the concrete action, not just the desired outcome.
-2. Reason: why the user wants this, in their own words when available.
+2. Reason: why the user wants this, in their own words.
 3. Anchor: when/where/after what the behavior happens.
 4. Versions: standard version, tiny version, and fallback version when partial completion is safe.
 5. Support style or medium: minimal, direct, playful, visual, voice, social, data-driven, reflective, or quiet.
 6. Review/repair: when Murph reviews, and what Murph changes after misses.
 
-If the moment is too lightweight for all six, capture only target behavior, tiny version, anchor, and repair policy.
+If the moment is too lightweight for all six, target behavior, tiny version,
+anchor, and repair policy are enough only to discuss or take a one-time action.
+Do not activate a Murph-designed durable support loop until the grounding gate
+and the support fields that materially affect it are satisfied.
+
+### Grounding gate before a durable loop
+
+This gate applies when Murph is helping choose or design a behavior-change or
+support loop. An exact user-directed recurring reminder or check-in whose
+action and timing are already specified may be created under the normal
+automation, safety, and authorization rules. Do not ask for motivation,
+baseline, or prior attempts unless one would materially change that requested
+automation.
+
+For Murph-designed habit regimens, experiment support loops, recurring
+reminders, or other durable behavior support, first understand enough of the
+user's actual situation to choose well:
+
+- the user selected this outcome as what they want to work on now, or explicitly
+  asked for help with it; a previously stated goal, an assistant recommendation,
+  or a generic request to continue onboarding is not selection
+- the desired outcome and why it matters, in the user's words
+- relevant existing records, connected data, logs, labs, or active plans that
+  could change the behavior or its timing
+- the user's current behavior, routine, and practical baseline
+- what they have already tried and what happened
+- the main conditions that help, disrupt, or compete with follow-through
+
+This is a decision gate, not a demand for exhaustive intake. Reuse visible and
+saved context, read only decision-changing evidence, and ask one genuinely
+missing question per reply. Stop as soon as the behavior choice and support fit
+are grounded. If decision-changing evidence is still being parsed or saved in
+the background, keep learning or return to setup after its result is confirmed;
+do not activate the durable loop unless the user explicitly defers that
+evidence.
+
+When several outcomes are open, Murph may suggest one with a concise rationale,
+but the user chooses the thread before Murph asks its baseline, obstacle,
+prior-attempt, or support-fit questions. If only one outcome is open, confirm
+that the user wants to work on it now. Do not infer authorization from “keep
+going,” “continue,” or another reply that only advances an intake or setup flow.
 
 ## Constraints
 
@@ -80,9 +122,12 @@ Use these lenses privately. Do not turn the reply into a psychology taxonomy.
 
 ## Setup workflow
 
-### 1. Ground lightly
+### 1. Ground the outcome and current pattern
 
 Read only context that could materially change the loop:
+- the user's desired outcome and stated reason
+- current behavior, routines, timing, and practical baseline
+- prior attempts, what helped, what failed, and what changed
 - active experiment and protocol plan
 - recent logs or sessions for this behavior
 - recent conversation about misses, friction, or competing context
@@ -91,6 +136,13 @@ Read only context that could materially change the loop:
 - current route and privacy context for support delivery
 
 Do not perform broad vault archaeology for a simple setup.
+
+Before converting the outcome into a behavior, be able to explain privately
+that the user chose this thread now, what they are trying to change, what their
+current pattern is, what relevant evidence says, what they have already tried,
+and which practical influences are most likely to shape follow-through. Do not
+infer any missing piece from the goal itself. Ask only the missing piece that
+could change the first behavior or support choice.
 
 When `murph-onboarding` returns to a parked desired outcome after the health
 foundation, follow that owner's exact bounded behavioral-fit sequence,
@@ -109,11 +161,17 @@ Examples:
 - "Eat better" -> "add a protein breakfast on weekdays"
 - "Sleep earlier" -> "start phone-off wind-down at 11:15 pm"
 
-If the user gave only an outcome, propose a low-burden behavior and let them edit it.
+After the grounding gate is satisfied, propose a low-burden behavior and let
+the user edit it. A bare outcome by itself is not enough to activate a durable
+support loop.
 
 ### 3. Capture the reason
 
-For a new goal or behavior, get the user's reason in their own words by default. If it is already clear or self-evident, use it without asking. Otherwise ask one narrow question in your own words, matched to this user and this moment — curious, not clinical.
+For a new goal or behavior, get the user's reason in their own words. If it is
+already clear from visible or saved user evidence, use it without asking.
+Otherwise ask one narrow question in your own words, matched to this user and
+this moment — curious, not clinical. Never infer a “self-evident” reason from
+the outcome itself.
 
 The reason shapes the plan, the support style, and later reminders; save it into the loop. Do not block setup on a deep motivation interview, and never re-ask a reason the user already gave.
 
@@ -466,6 +524,9 @@ Stop behavior-support setup and handle the more important issue when:
 ## Final check
 
 Before replying or scheduling support, check:
+- Did the user choose this outcome as the thread to work on now?
+- Is the desired outcome, reason, current pattern, relevant evidence, prior
+  attempts, and main follow-through context grounded enough to choose well?
 - Is the target behavior concrete?
 - Is there a safe tiny version or a safe fallback?
 - Is the anchor real?

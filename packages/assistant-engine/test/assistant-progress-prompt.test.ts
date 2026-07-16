@@ -23,28 +23,34 @@ describe('assistant progress prompt contract', () => {
       'It is not a final answer, so continue immediately with the first needed action',
     )
     expect(prompt).toContain(
-      'Use it sparingly for genuinely long, multi-step, research, long parsing/scans, or substantial non-audio content-inspection work',
+      'For reply-critical long research, multiple substantive tool calls, long parsing/scans, or content inspection, send an update before slow work',
     )
     expect(prompt).toContain(
-      'For work likely to finish in about a minute or less, send at most one progress update',
+      'If the requested answer depends on a child and the wait may exceed ordinary latency, send it after spawning',
     )
     expect(prompt).toContain(
-      'never send a fourth',
+      'Background work does not delay the reply or trigger progress by itself',
     )
     expect(prompt).toContain(
-      'Prefer skipping progress updates on quota-sensitive messaging surfaces such as Linq/iMessage',
+      'Do not leave the member silent during reply-critical work; Linq/iMessage quota is not a reason to withhold a useful update',
     )
     expect(prompt).toContain(
-      'never send progress updates for individual tool loops, searches, reads, page checks, clicks, or status churn',
+      'For work likely to finish within about a minute, send at most one update',
     )
     expect(prompt).toContain(
-      'Keep the text to one or two short conversational sentences, specific to the immediate next step',
+      'never a fourth',
     )
     expect(prompt).toContain(
-      'avoid stiff plan-recitation wording like "I\'m going to..."',
+      'If it runs unusually long, send up to two more at real milestones; never a fourth',
     )
     expect(prompt).toContain(
-      'Skip it for skill-file reads, setup checks, routine single-command vault reads, quick replies, straightforward one-shot logging/capture/memory saves, and automatically transcribed voice memo or audio content',
+      'Do not narrate individual tool loops, searches, reads, clicks, or status churn',
+    )
+    expect(prompt).toContain(
+      'Use one or two natural sentences about what the member cares about and the next step; never narrate internal mechanics',
+    )
+    expect(prompt).toContain(
+      'Skip skill reads, setup checks, routine single-command reads, quick replies, one-shot logging/capture/memory saves, and auto-transcribed audio unless broader work is long-running',
     )
     expect(prompt).not.toContain('saving recovered data')
     expect(prompt).not.toContain('before the first non-progress tool call')
@@ -53,19 +59,25 @@ describe('assistant progress prompt contract', () => {
   it('keeps the dynamic tool description aligned with the progress prompt rule', () => {
     expect(MURPH_SEND_PROGRESS_UPDATE_TOOL.name).toBe('send_progress_update')
     expect(MURPH_SEND_PROGRESS_UPDATE_TOOL.description).toContain(
-      'only when longer, tool-heavy, or substantial user-content-inspection work would otherwise leave the user waiting',
+      'when genuinely reply-critical work would otherwise leave the user waiting',
     )
     expect(MURPH_SEND_PROGRESS_UPDATE_TOOL.description).toContain(
-      'For work likely to finish in about a minute or less, send at most one progress update',
+      'For work likely to finish in about a minute or less, send at most one update',
     )
     expect(MURPH_SEND_PROGRESS_UPDATE_TOOL.description).toContain(
-      'never send a fourth',
+      'never a fourth',
     )
     expect(MURPH_SEND_PROGRESS_UPDATE_TOOL.description).toContain(
-      'Prefer skipping progress updates on quota-sensitive messaging surfaces such as Linq/iMessage',
+      'Linq/iMessage quota is not a reason to withhold a useful update',
     )
     expect(MURPH_SEND_PROGRESS_UPDATE_TOOL.description).toContain(
-      'Use as the first assistant action',
+      'Use it before long tasks',
+    )
+    expect(MURPH_SEND_PROGRESS_UPDATE_TOOL.description).toContain(
+      'If the requested answer depends on a child and the wait may exceed ordinary latency, send it after spawning',
+    )
+    expect(MURPH_SEND_PROGRESS_UPDATE_TOOL.description).toContain(
+      'Background work does not delay the reply or trigger an update by itself',
     )
     expect(MURPH_SEND_PROGRESS_UPDATE_TOOL.description).toContain(
       'Do not use for individual tool loops, searches, reads, page checks, clicks, status churn',

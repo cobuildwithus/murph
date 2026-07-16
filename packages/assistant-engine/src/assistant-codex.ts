@@ -7,7 +7,6 @@ import path from 'node:path'
 import type {
   HostedCodexAuthAction,
 } from '@murphai/hosted-execution/contracts'
-import { HOSTED_CLI_BRIDGE_TOKEN_ENV } from '@murphai/hosted-execution/cli-runtime-bridge'
 import { normalizeNullableString } from '@murphai/operator-config/text/shared'
 import { VaultCliError } from '@murphai/operator-config/vault-cli-errors'
 import {
@@ -163,7 +162,6 @@ const CODEX_RPC_CLIENT_NAME = 'murph'
 const CODEX_RPC_CLIENT_TITLE = 'Murph'
 const CODEX_RPC_CLIENT_VERSION = '1.0.0'
 const CODEX_RPC_DEFAULT_TIMEOUT_MS = 120_000
-const HOSTED_CODEX_BACKGROUND_TERMINAL_CLEANUP_TIMEOUT_MS = 5_000
 const CODEX_RPC_STEER_TIMEOUT_MS = 15_000
 const CODEX_APP_SERVER_INTERRUPT_CLEANUP_TIMEOUT_MS = 15_000
 const CODEX_MANAGED_ACCOUNT_LOGIN_TIMEOUT_MS = 10 * 60 * 1000
@@ -187,7 +185,6 @@ const CODEX_APP_SERVER_STARTUP_STDERR_MAX_LENGTH = 16_384
 const MAX_CODEX_SUBAGENT_USAGE_THREADS = 32
 
 type CodexAppServerProcessState =
-  | 'cleanup'
   | 'idle'
   | 'reserved'
   | 'running'
@@ -827,7 +824,6 @@ class CodexAppServerProcess {
   private stdinFailure: VaultCliError | null = null
   private stdoutBuffer = ''
   private stopPromise: Promise<void> | null = null
-  private postTurnCleanupPromise: Promise<void> | null = null
 
   constructor(input: CodexAppServerSpawnInput) {
     this.codexCommand = input.codexCommand
@@ -900,10 +896,6 @@ class CodexAppServerProcess {
     return this.state === 'reserved' || this.state === 'running'
   }
 
-  get pendingPostTurnCleanup(): Promise<void> | null {
-    return this.postTurnCleanupPromise
-  }
-
   reserveTurn(): void {
     if (
       this.state !== 'idle' ||
@@ -949,47 +941,6 @@ class CodexAppServerProcess {
     if (this.state === 'reserved' && !this.activeTurn) {
       this.state = 'idle'
     }
-  }
-
-  beginHostedBackgroundTerminalCleanup(input: {
-    binding: CodexAppServerActiveTurnBinding
-    threadId: string
-  }): Promise<void> {
-    if (this.activeTurn !== input.binding || this.state !== 'running') {
-      throw this.buildBusyError(
-        'Codex app-server cannot start post-turn cleanup outside its completed turn.',
-      )
-    }
-
-    // Keep the process unavailable while cleanup runs, but detach the completed
-    // turn so its provider result can proceed to durable reply delivery.
-    this.activeTurn = null
-    this.state = 'cleanup'
-    const cleanup = withCodexRpcTimeout(
-      this.sendRequest('thread/backgroundTerminals/clean', {
-        threadId: input.threadId,
-      }),
-      HOSTED_CODEX_BACKGROUND_TERMINAL_CLEANUP_TIMEOUT_MS,
-      'thread/backgroundTerminals/clean',
-    ).then(
-      () => undefined,
-      async (error: unknown) => {
-        // Clear the timed-out RPC before stopping the exact owned process
-        // group. A cleanup failure never turns a completed reply into a
-        // provider failure, but the process must not become reusable.
-        this.rejectPending(error)
-        await this.poison('background-terminal-cleanup-failed')
-      },
-    ).finally(() => {
-      if (this.state === 'cleanup') {
-        this.state = 'idle'
-      }
-      if (this.postTurnCleanupPromise === cleanup) {
-        this.postTurnCleanupPromise = null
-      }
-    })
-    this.postTurnCleanupPromise = cleanup
-    return cleanup
   }
 
   buildBusyError(
@@ -1124,15 +1075,6 @@ class CodexAppServerProcess {
 
   private async runStop(reason: string): Promise<void> {
     this.endReason ??= resolveCodexAppServerEndReason(reason)
-    if (this.state === 'cleanup') {
-      this.rejectPending(
-        new VaultCliError(
-          'ASSISTANT_CODEX_APP_SERVER_STOPPED_DURING_CLEANUP',
-          'Codex app-server stopped during post-turn cleanup.',
-          { retryable: true },
-        ),
-      )
-    }
     this.normalShutdown = true
     this.state = 'stopping'
     let stopped = false
@@ -1512,18 +1454,6 @@ function resolveCodexAppServerEndReason(
 
 let warmCodexProcess: CodexAppServerProcess | null = null
 let warmCodexSlotLock: Promise<void> = Promise.resolve()
-const hostedCodexPostTurnCleanupBarriers = new Set<Promise<void>>()
-
-function trackHostedCodexPostTurnCleanup(cleanup: Promise<void>): void {
-  hostedCodexPostTurnCleanupBarriers.add(cleanup)
-  void cleanup.finally(() => {
-    hostedCodexPostTurnCleanupBarriers.delete(cleanup)
-  })
-}
-
-export async function drainHostedCodexPostTurnCleanups(): Promise<void> {
-  await Promise.all([...hostedCodexPostTurnCleanupBarriers])
-}
 
 async function withWarmCodexSlotLock<T>(
   operation: () => Promise<T>,
@@ -1546,7 +1476,6 @@ async function getOrStartWarmCodexProcess(
 ): Promise<CodexAppServerProcess> {
   const launchKey = input.launchKey
   return await withWarmCodexSlotLock(async () => {
-    await warmCodexProcess?.pendingPostTurnCleanup
     if (warmCodexProcess?.isReusableFor(launchKey)) {
       warmCodexProcess.reserveTurn()
       return warmCodexProcess
@@ -2478,6 +2407,13 @@ function readCodexBooleanField(
   return typeof fieldValue === 'boolean' ? fieldValue : null
 }
 
+function readCodexDynamicToolKey(message: CodexRpcMessage): string | null {
+  const params = readCodexRecordField(message, 'params')
+  const namespace = readCodexStringField(params, 'namespace')
+  const tool = readCodexStringField(params, 'tool')
+  return namespace && tool ? `${namespace}.${tool}` : null
+}
+
 async function runCodexAppServerTurnOnProcess(
   codexProcess: CodexAppServerProcess,
   input: CodexAppServerPreparedTurnInput,
@@ -2492,6 +2428,9 @@ async function runCodexAppServerTurnOnProcess(
   let terminationSignalSent: NodeJS.Signals | null = null
   const requestedResumeThreadId =
     normalizeNullableString(input.resumeSessionId) ?? null
+  const offeredDynamicToolKeys = new Set(
+    input.dynamicTools.map((tool) => `${tool.namespace}.${tool.name}`),
+  )
   let codexThreadId: string | null = null
   let turnId: string | null = null
   const isReusedWarmProcess = codexProcess.initializedForRpc
@@ -3279,6 +3218,25 @@ async function runCodexAppServerTurnOnProcess(
       return
     }
 
+    if (
+      isInvocationScopedRootToolRequest(dynamicToolRequest) &&
+      (turnId === null || extractCodexTurnIdFromMessage(message) !== turnId)
+    ) {
+      void tryWriteRpcMessage({
+        id: requestId,
+        result: {
+          success: false,
+          contentItems: [
+            {
+              type: 'inputText',
+              text: 'tool is unavailable outside the active root turn',
+            },
+          ],
+        },
+      })
+      return
+    }
+
     if (dynamicToolRequest.kind === 'unsupported-dynamic-tool') {
       pushRuntimeIssueInput(createDynamicToolRuntimeIssueInput({
         request: dynamicToolRequest,
@@ -3289,6 +3247,23 @@ async function runCodexAppServerTurnOnProcess(
         error: {
           code: -32000,
           message: `Unsupported dynamic tool ${dynamicToolRequest.namespace ?? ''}.${dynamicToolRequest.tool ?? 'unknown'}`,
+        },
+      })
+      return
+    }
+
+    const dynamicToolKey = readCodexDynamicToolKey(message)
+    if (!dynamicToolKey || !offeredDynamicToolKeys.has(dynamicToolKey)) {
+      void tryWriteRpcMessage({
+        id: requestId,
+        result: {
+          success: false,
+          contentItems: [
+            {
+              type: 'inputText',
+              text: 'tool was not offered for this turn',
+            },
+          ],
         },
       })
       return
@@ -3915,10 +3890,10 @@ async function runCodexAppServerTurnOnProcess(
     const requestId = readCodexRpcServerRequestId(message)
     if (messageTurnId !== null) {
       if (turnId === null) {
-        // A reused warm process adopts the turn id only from turn/started (or
-        // the turn/start response); a fresh process cannot carry stale turns,
-        // so any tagged message may bind it.
-        if (isCodexTurnStartedMethod(method) || !isReusedWarmProcess) {
+        // Only the turn/start response or turn/started may establish the
+        // active turn. A server request must never authenticate itself by
+        // supplying the first turn id seen on the process.
+        if (isCodexTurnStartedMethod(method)) {
           turnId = messageTurnId
         } else {
           if (requestId !== null) {
@@ -3935,6 +3910,10 @@ async function runCodexAppServerTurnOnProcess(
     if (requestId !== null) {
       if (isReusedWarmProcess && messageTurnId === null) {
         rejectUnscopedParentTurnRequest(requestId)
+        return
+      }
+      if (turnId === null) {
+        rejectPreStartParentTurnRequest(requestId)
         return
       }
       handleAcceptedServerRequest(message, requestId)
@@ -4215,34 +4194,13 @@ async function runCodexAppServerTurnOnProcess(
           : 'warm-abort-poisoned',
       )
     } else {
-      if (
-        input.processLifetime !== 'one-shot' &&
-        codexThreadId &&
-        normalizeNullableString(input.env[HOSTED_CLI_BRIDGE_TOKEN_ENV])
-      ) {
-        lifecycleStage = 'background_terminal_cleanup'
-        const cleanup = codexProcess.beginHostedBackgroundTerminalCleanup({
-          binding: activeTurnBinding,
-          threadId: codexThreadId,
-        })
-        trackHostedCodexPostTurnCleanup(cleanup)
-        void cleanup.then(() => {
-          emitAppServerTimingTrace(
-            codexProcess.isReusableFor(input.launchKey)
-              ? 'background-terminals-cleaned'
-              : 'warm-background-terminal-cleanup-failed',
-          )
-        })
-      }
-      if (!normalShutdown && !codexProcess.pendingPostTurnCleanup) {
-        lifecycleStage = 'idle'
-        codexProcess.releaseTurn(activeTurnBinding)
-        emitAppServerTimingTrace(
-          input.processLifetime === 'one-shot'
-            ? 'one-shot-complete'
-            : 'warm-idle',
-        )
-      }
+      lifecycleStage = 'idle'
+      codexProcess.releaseTurn(activeTurnBinding)
+      emitAppServerTimingTrace(
+        input.processLifetime === 'one-shot'
+          ? 'one-shot-complete'
+          : 'warm-idle',
+      )
     }
   } catch (error) {
     const recordedEndReason = codexProcess.recordedEndReason
@@ -4522,8 +4480,10 @@ function isInvalidDynamicToolRequest(
   {
     kind:
       | 'invalid-generate-image-arguments'
+      | 'invalid-automation-arguments'
       | 'invalid-assistant-style-arguments'
       | 'invalid-computer-arguments'
+      | 'invalid-device-arguments'
       | 'invalid-generate-voice-memo-arguments'
       | 'invalid-finish-without-reply-arguments'
       | 'invalid-progress-arguments'
@@ -4534,8 +4494,10 @@ function isInvalidDynamicToolRequest(
 > {
   return (
     request.kind === 'invalid-generate-image-arguments' ||
+    request.kind === 'invalid-automation-arguments' ||
     request.kind === 'invalid-assistant-style-arguments' ||
     request.kind === 'invalid-computer-arguments' ||
+    request.kind === 'invalid-device-arguments' ||
     request.kind === 'invalid-generate-voice-memo-arguments' ||
     request.kind === 'invalid-finish-without-reply-arguments' ||
     request.kind === 'invalid-progress-arguments' ||
@@ -4548,7 +4510,9 @@ function isInvalidDynamicToolRequest(
 function isSerializedDynamicToolRequest(
   request: MurphDynamicToolRequest,
 ): boolean {
-  return request.kind === 'generate-image' ||
+  return request.kind === 'automation' ||
+    request.kind === 'device' ||
+    request.kind === 'generate-image' ||
     request.kind === 'generate-voice-memo' ||
     request.kind === 'generate-song' ||
     request.kind === 'attach-response-media' ||
@@ -4558,6 +4522,15 @@ function isSerializedDynamicToolRequest(
     request.kind === 'subscription' ||
     request.kind === 'submit-product-feedback' ||
     isComputerDynamicToolRequest(request)
+}
+
+function isInvocationScopedRootToolRequest(
+  request: MurphDynamicToolRequest,
+): boolean {
+  return request.kind === 'automation' ||
+    request.kind === 'invalid-automation-arguments' ||
+    request.kind === 'device' ||
+    request.kind === 'invalid-device-arguments'
 }
 
 function createDynamicToolRuntimeIssueInput(input: {

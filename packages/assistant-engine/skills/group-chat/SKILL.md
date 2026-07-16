@@ -215,10 +215,12 @@ messages are expected; send them on schedule with confidence. Etiquette:
   sustained silence, reduce frequency rather than escalating.
 - Automations do not override the ladder: between scheduled sends, the normal
   reply rules above still apply.
-- Do not say an update is saved, scheduled, changed, or active until its
-  `vault-cli automation` command succeeds. If it fails, correct the command or
-  tell the group plainly that the requested change did not complete; never
-  turn a failed command into a confirmation.
+- Do not say an update is saved, scheduled, changed, or active until
+  `murph.automation` returns success. In a privileged local route where the
+  prompt explicitly grants `vault-cli automation`, a successful canonical
+  command is equivalent. If the available owning action fails, correct the
+  request or tell the group plainly that the change did not complete; never
+  turn a failed action into a confirmation.
 
 ## Group health newsletter
 
@@ -263,19 +265,19 @@ shared vault projections and needs no email grant.
 Create a new newsletter under the developer prompt's shared automation action
 rules using:
 
-- the group's chosen name as the positional `<title>`
-- Use exactly `--slug group-health-newsletter`. Any other slug will not be able to send
+- `title`: the group's chosen name
+- `slug`: exactly `group-health-newsletter`. Any other slug will not be able to send
   because scheduled newsletter send authority resolves only this automation slug.
-- `--schedule-kind cron`
-- `--schedule-cron "0 9 * * 0"` unless the group chose another schedule
-- `--continuity-policy fresh`
-- instructions that say this is the group health newsletter, include the
+- `schedule`: `{ "kind": "cron", "expression": "0 9 * * 0" }` unless the
+  group chose another schedule
+- `continuityPolicy`: `fresh`
+- `instructions`: say this is the group health newsletter, include the
   exact chosen name, chosen tone, and any optional custom note, and explicitly
   require the scheduled run to read and follow
   `$MURPH_ASSISTANT_SKILLS_ROOT/group-newsletter/SKILL.md` before composing, and
   require every email subject to start with that exact name instead of a generic
   newsletter label. Future notification turns may not read this skill, so keep
-  that complete naming rule in the saved instructions.
+  that complete naming rule in the saved instructions
 
 For changes or stopping, follow the developer prompt's shared automation
 action rules and apply only the requested fields to `group-health-newsletter`.

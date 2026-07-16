@@ -1,9 +1,6 @@
 import { createHash } from "node:crypto";
 
 import {
-  HOSTED_CLI_BRIDGE_ROUTE_GRANT_ENV,
-} from "@murphai/hosted-execution/cli-runtime-bridge";
-import {
   buildHostedExecutionSafeErrorDiagnostics,
   buildHostedExecutionRuntimeTimerWake,
   deriveHostedExecutionErrorCode,
@@ -43,7 +40,15 @@ import {
   type HostedAssistantTurnTimingStage,
 } from "@murphai/assistant-engine";
 import { VaultCliError } from "@murphai/operator-config/vault-cli-errors";
-import type { AutomationRoute } from "@murphai/contracts";
+import {
+  automationRouteSchema,
+  type AutomationRoute,
+} from "@murphai/contracts";
+import {
+  patchAutomation,
+  showAutomation,
+  upsertAutomation,
+} from "@murphai/core";
 import {
   findAssistantAutoReplyDeliveryIntentIds,
 } from "@murphai/assistant-engine/assistant-automation";
@@ -56,7 +61,9 @@ import {
 } from "@murphai/device-syncd/connect-config";
 import {
   type AssistantCurrentDeliveryRoute,
+  getAssistantAutomationRouteDeliverabilityIssue,
   normalizeAssistantRouteString,
+  resolveAssistantDeliveryRouteWithCurrentRoute,
 } from "@murphai/operator-config/assistant/current-delivery-route";
 
 import {
@@ -130,6 +137,7 @@ import type {
 } from "./email-delivery-context.ts";
 import type {
   HostedRuntimePlatform,
+  HostedRuntimeDeviceSyncMessagingReturnTarget,
 } from "./platform.ts";
 import type {
   HostedAssistantDeliveryOutcome,
@@ -213,7 +221,7 @@ const HOSTED_MEMBER_PREFERENCE_PRE_PLANNING_MAX_ITEMS = 10;
 
 export interface HostedWorkspaceRuntimeAssistantPhaseInput
   extends HostedWorkspaceRunnerAssistantPhaseInput {
-  currentDeliveryRouteScope?: HostedAssistantCurrentDeliveryRouteScope | null;
+  deviceSyncMessagingReturnTarget?: HostedRuntimeDeviceSyncMessagingReturnTarget | null;
   request: HostedAssistantWorkspaceRuntimeJobInput["request"];
   restored: HostedRestoredExecutionContext;
   runtime: Pick<
@@ -226,13 +234,6 @@ export interface HostedWorkspaceRuntimeAssistantPhaseInput
   stagedDirtyAcks?: readonly HostedDeviceSyncDirtyProcessedPostCheckpointRecord[] | null;
   suppressDirtyPendingFetch?: boolean;
   signal?: AbortSignal | null;
-}
-
-export interface HostedAssistantCurrentDeliveryRouteScope {
-  run<T>(
-    route: AssistantCurrentDeliveryRoute | null,
-    operation: (routeGrant: string) => Promise<T>,
-  ): Promise<T>;
 }
 
 export type HostedWorkspaceRuntimeAssistantPhase = (
@@ -444,23 +445,6 @@ function readHostedInitialAssistantInputIds(
 function createHostedAssistantAutomationOperationScope(
   input: HostedWorkspaceRuntimeAssistantPhaseInput,
 ): AssistantAutomationOperationScope {
-  const runWithRoute = async <T>(
-    route: AssistantCurrentDeliveryRoute | null,
-    turnEnvironment: AssistantTurnEnvironment | null,
-    operation: (turnEnvironment: AssistantTurnEnvironment | null) => Promise<T>,
-  ): Promise<T> => input.currentDeliveryRouteScope
-    ? await input.currentDeliveryRouteScope.run(
-        route,
-        async (routeGrant) => await operation({
-          ...turnEnvironment,
-          env: {
-            ...turnEnvironment?.env,
-            [HOSTED_CLI_BRIDGE_ROUTE_GRANT_ENV]: routeGrant,
-          },
-        }),
-      )
-    : await operation(turnEnvironment);
-
   return {
     async runAutoReplyGroup<T>(scopeInput: {
       executionContext: AssistantExecutionContext;
@@ -477,21 +461,23 @@ function createHostedAssistantAutomationOperationScope(
         vaultRoot: input.restored.vaultRoot,
       });
       const route = durableContext.route;
-      const scopedExecutionContext = scopeHostedGroupToolToAssistantOperation({
+      const groupScopedExecutionContext = scopeHostedGroupToolToAssistantOperation({
         emailDeliveryContexts: [],
         executionContext: scopeInput.executionContext,
         groupEmailIngress:
-          route?.channel === "email" && route.threadIsDirect === false,
+          normalizeAssistantRouteString(route?.channel)?.toLowerCase() === "email"
+          && route?.threadIsDirect === false,
         groupToolPort: input.runtime.platform.groupToolPort ?? null,
         linqDeliveryContexts: durableContext.linqDeliveryContexts,
       });
-      return await runWithRoute(
+      const scopedExecutionContext = scopeHostedAutomationToolToAssistantOperation({
+        executionContext: groupScopedExecutionContext,
         route,
+        vaultRoot: input.restored.vaultRoot,
+      });
+      return await scopeInput.operation(
+        scopedExecutionContext,
         scopeInput.turnEnvironment,
-        async (turnEnvironment) => await scopeInput.operation(
-          scopedExecutionContext,
-          turnEnvironment,
-        ),
       );
     },
   };
@@ -507,6 +493,9 @@ async function resolveHostedAssistantInputIdsOperationContext(input: {
 }> {
   const routes: AssistantCurrentDeliveryRoute[] = [];
   const linqDeliveryContexts: HostedAssistantLinqDeliveryContext[] = [];
+  if (input.inputIds.length === 0) {
+    return { linqDeliveryContexts, route: null };
+  }
   for (const inputId of input.inputIds) {
     try {
       const event = await readAssistantInputEvent({
@@ -517,9 +506,10 @@ async function resolveHostedAssistantInputIdsOperationContext(input: {
         conversation: event?.conversation ?? null,
         replyTarget: event?.replyTarget ?? null,
       });
-      if (route) {
-        routes.push(route);
+      if (!route || typeof route.threadIsDirect !== "boolean") {
+        return { linqDeliveryContexts: [], route: null };
       }
+      routes.push(route);
       const linqDeliveryContext = readHostedAssistantInputLinqDeliveryContext({
         event,
         memberId: input.memberId,
@@ -532,8 +522,11 @@ async function resolveHostedAssistantInputIdsOperationContext(input: {
     }
   }
   const route = resolveUnambiguousCurrentDeliveryRoute(routes);
+  if (!route || typeof route.threadIsDirect !== "boolean") {
+    return { linqDeliveryContexts: [], route: null };
+  }
   return {
-    linqDeliveryContexts: route ? linqDeliveryContexts : [],
+    linqDeliveryContexts,
     route,
   };
 }
@@ -597,6 +590,164 @@ function scopeHostedGroupToolToAssistantOperation(input: {
   };
 }
 
+type HostedAssistantAutomationTool = NonNullable<
+  NonNullable<AssistantExecutionContext["hosted"]>["automationTool"]
+>;
+
+function scopeHostedAutomationToolToAssistantOperation(input: {
+  executionContext: AssistantExecutionContext;
+  route: AssistantCurrentDeliveryRoute | null;
+  vaultRoot: string;
+}): AssistantExecutionContext {
+  const hosted = input.executionContext.hosted;
+  if (!hosted) {
+    return input.executionContext;
+  }
+
+  const { automationTool: _unscopedAutomationTool, ...hostedWithoutAutomation } = hosted;
+  void _unscopedAutomationTool;
+  const automationTool = input.route
+    && typeof input.route.threadIsDirect === "boolean"
+    && !(
+      normalizeAssistantRouteString(input.route.channel)?.toLowerCase() === "email"
+      && input.route.threadIsDirect === false
+    )
+    ? createHostedAssistantAutomationTool({
+        route: input.route,
+        vaultRoot: input.vaultRoot,
+      })
+    : null;
+
+  return {
+    hosted: {
+      ...hostedWithoutAutomation,
+      ...(automationTool ? { automationTool } : {}),
+    },
+  };
+}
+
+function createHostedAssistantAutomationTool(input: {
+  route: AssistantCurrentDeliveryRoute;
+  vaultRoot: string;
+}): HostedAssistantAutomationTool {
+  const currentRoute = automationRouteSchema.parse(
+    resolveAssistantDeliveryRouteWithCurrentRoute({}, input.route),
+  );
+
+  return {
+    async request(request, context) {
+      context?.signal?.throwIfAborted();
+      if (request.action === "save") {
+        assertActiveHostedAutomationRoute({
+          route: currentRoute,
+          status: request.status ?? "active",
+        });
+        const result = await upsertAutomation({
+          ...(request.assistantTargetOverride === undefined
+            ? {}
+            : { assistantTargetOverride: request.assistantTargetOverride }),
+          ...(request.automationId ? { automationId: request.automationId } : {}),
+          continuityPolicy: request.continuityPolicy ?? "preserve",
+          instructions: request.instructions,
+          route: currentRoute,
+          schedule: request.schedule,
+          ...(request.slug ? { slug: request.slug } : {}),
+          status: request.status ?? "active",
+          ...(request.summary === undefined ? {} : { summary: request.summary }),
+          ...(request.tags === undefined ? {} : { tags: [...request.tags] }),
+          title: request.title,
+          vaultRoot: input.vaultRoot,
+        });
+        return buildHostedAutomationToolResponse({
+          action: "save",
+          result,
+          routeBinding: "current_conversation",
+        });
+      }
+
+      const existing = await showAutomation({
+        automationId: request.lookup,
+        slug: request.lookup,
+        vaultRoot: input.vaultRoot,
+      });
+      if (!existing) {
+        throw new VaultCliError(
+          "automation_not_found",
+          "Automation was not found.",
+        );
+      }
+      context?.signal?.throwIfAborted();
+      const route = request.retargetToCurrentConversation === true
+        ? currentRoute
+        : existing.route;
+      assertActiveHostedAutomationRoute({
+        route,
+        status: request.status ?? existing.status,
+      });
+      const result = await patchAutomation({
+        ...(request.assistantTargetOverride === undefined
+          ? {}
+          : { assistantTargetOverride: request.assistantTargetOverride }),
+        ...(request.continuityPolicy === undefined
+          ? {}
+          : { continuityPolicy: request.continuityPolicy }),
+        ...(request.instructions === undefined
+          ? {}
+          : { instructions: request.instructions }),
+        lookup: request.lookup,
+        ...(request.retargetToCurrentConversation === true
+          ? { route: currentRoute }
+          : {}),
+        ...(request.schedule === undefined ? {} : { schedule: request.schedule }),
+        ...(request.slug === undefined ? {} : { slug: request.slug }),
+        ...(request.status === undefined ? {} : { status: request.status }),
+        ...(request.summary === undefined ? {} : { summary: request.summary }),
+        ...(request.tags === undefined ? {} : { tags: [...request.tags] }),
+        ...(request.title === undefined ? {} : { title: request.title }),
+        vaultRoot: input.vaultRoot,
+      });
+      return buildHostedAutomationToolResponse({
+        action: "patch",
+        result,
+        routeBinding: request.retargetToCurrentConversation === true
+          ? "current_conversation"
+          : "preserved",
+      });
+    },
+  };
+}
+
+function assertActiveHostedAutomationRoute(input: {
+  route: AutomationRoute;
+  status: "active" | "archived" | "paused";
+}): void {
+  if (input.status !== "active") {
+    return;
+  }
+  const issue = getAssistantAutomationRouteDeliverabilityIssue(
+    input.route,
+    "hosted",
+  );
+  if (issue) {
+    throw new VaultCliError("invalid_option", issue.message);
+  }
+}
+
+function buildHostedAutomationToolResponse(input: {
+  action: "patch" | "save";
+  result: Awaited<ReturnType<typeof upsertAutomation>>;
+  routeBinding: "current_conversation" | "preserved";
+}): Awaited<ReturnType<HostedAssistantAutomationTool["request"]>> {
+  return {
+    action: input.action,
+    automationId: input.result.record.automationId,
+    created: input.result.created,
+    lookupId: input.result.record.slug,
+    routeBinding: input.routeBinding,
+    status: input.result.record.status,
+  };
+}
+
 export async function runHostedWorkspaceAssistantPhase(
   input: HostedWorkspaceRuntimeAssistantPhaseInput,
 ): Promise<HostedWorkspaceRunnerAssistantPhaseResult> {
@@ -613,7 +764,7 @@ export async function runHostedWorkspaceAssistantPhase(
     userId: input.request.userId,
   });
   const deviceConnectProviders = resolveHostedWorkspaceDeviceConnectProviders(input.runtime);
-  const issueDeviceConnectLink = resolveHostedWorkspaceIssueDeviceConnectLink({
+  const deviceTool = resolveHostedWorkspaceDeviceTool({
     deviceConnectProviders,
     input,
   });
@@ -633,9 +784,9 @@ export async function runHostedWorkspaceAssistantPhase(
     void writeHostedDeviceConnectRuntimeLog({
       deviceConnectProviders,
       input,
-      issueLinkAvailable: issueDeviceConnectLink !== undefined,
+      issueLinkAvailable: deviceTool !== undefined && deviceConnectProviders.length > 0,
       stage: "context",
-      status: issueDeviceConnectLink ? "available" : "unavailable",
+      status: deviceTool ? "available" : "unavailable",
     }).catch(() => undefined);
   }
   const executionTargetHydrateStartedAt = Date.now();
@@ -678,6 +829,7 @@ export async function runHostedWorkspaceAssistantPhase(
           userEnv: input.runtime.userEnv,
         }),
         deviceConnectProviders,
+        ...(deviceTool ? { deviceTool } : {}),
         ...(input.runtime.platform.familyPlanToolPort
           ? { familyPlanTool: input.runtime.platform.familyPlanToolPort }
           : {}),
@@ -698,7 +850,6 @@ export async function runHostedWorkspaceAssistantPhase(
         ...(input.runtime.platform.subscriptionToolPort
           ? { subscriptionTool: input.runtime.platform.subscriptionToolPort }
           : {}),
-        ...(issueDeviceConnectLink ? { issueDeviceConnectLink } : {}),
         ...(input.materializeWorkspaceArtifacts
           ? { materializeWorkspaceArtifacts: input.materializeWorkspaceArtifacts }
           : {}),
@@ -6264,56 +6415,134 @@ function buildHostedAssistantCronStatusOptions(
   };
 }
 
-function resolveHostedWorkspaceIssueDeviceConnectLink(input: {
+type HostedAssistantDeviceTool = NonNullable<
+  NonNullable<AssistantExecutionContext["hosted"]>["deviceTool"]
+>;
+
+function resolveHostedWorkspaceDeviceTool(input: {
   deviceConnectProviders: readonly { label: string; provider: string }[];
   input: HostedWorkspaceRuntimeAssistantPhaseInput;
-}): NonNullable<AssistantExecutionContext["hosted"]>["issueDeviceConnectLink"] | undefined {
+}): HostedAssistantDeviceTool | undefined {
   const deviceSyncPort = input.input.runtime.platform.deviceSyncPort ?? null;
-  if (!deviceSyncPort || input.deviceConnectProviders.length === 0) {
+  if (!deviceSyncPort) {
     return undefined;
   }
 
-  return async ({ messagingReturnTarget, provider }) => {
-    await writeHostedDeviceConnectRuntimeLog({
-      deviceConnectProviders: input.deviceConnectProviders,
-      input: input.input,
-      issueLinkAvailable: true,
-      messagingReturnTarget,
-      provider,
-      stage: "request",
-      status: "requested",
-    });
+  return {
+    async request(request, context) {
+      context?.signal?.throwIfAborted();
+      if (request.action === "list_accounts") {
+        const provider = normalizeAssistantRouteString(request.provider);
+        const sourceProvider = normalizeAssistantRouteString(request.sourceProvider);
+        const snapshot = await deviceSyncPort.fetchSnapshot({
+          includeCredentialMaterial: false,
+          ...(provider ? { provider } : {}),
+          signal: context?.signal ?? null,
+          ...(sourceProvider ? { sourceProviderSlug: sourceProvider } : {}),
+        });
+        return {
+          accounts: snapshot.connections.map(({ connection, localState }) => ({
+            accountId: connection.id,
+            displayName: connection.displayName,
+            lastErrorCode: localState.lastErrorCode,
+            lastSyncCompletedAt: localState.lastSyncCompletedAt,
+            provider: connection.provider,
+            status: connection.status,
+          })),
+          action: request.action,
+          provider,
+          sourceProvider,
+        };
+      }
 
-    try {
-      const result = await deviceSyncPort.createConnectLink({
-        connectTarget: provider,
-        ...(messagingReturnTarget ? { messagingReturnTarget } : {}),
+      if (request.action === "reconcile") {
+        if (!deviceSyncPort.reconcileAccount) {
+          throw new VaultCliError(
+            "device_reconcile_unavailable",
+            "Device account reconciliation is not available right now.",
+          );
+        }
+        const result = await deviceSyncPort.reconcileAccount({
+          connectionId: request.accountId,
+          signal: context?.signal ?? null,
+        });
+        return {
+          accountId: result.connectionId,
+          action: request.action,
+          occurredAt: result.occurredAt,
+          status: result.status,
+        };
+      }
+
+      const provider = resolveHostedDeviceToolConnectProvider({
+        configuredProviders: input.deviceConnectProviders,
+        requestedProvider: request.provider,
       });
+      const messagingReturnTarget = input.input.deviceSyncMessagingReturnTarget ?? null;
       await writeHostedDeviceConnectRuntimeLog({
         deviceConnectProviders: input.deviceConnectProviders,
-        expiresAtPresent: Boolean(result.expiresAt),
-        input: input.input,
-        issueLinkAvailable: true,
-        messagingReturnTarget,
-        provider: result.provider,
-        stage: "request",
-        status: "issued",
-      });
-      return result;
-    } catch (error) {
-      await writeHostedDeviceConnectRuntimeLog({
-        deviceConnectProviders: input.deviceConnectProviders,
-        error,
         input: input.input,
         issueLinkAvailable: true,
         messagingReturnTarget,
         provider,
         stage: "request",
-        status: "failed",
+        status: "requested",
       });
-      throw error;
-    }
+
+      try {
+        const result = await deviceSyncPort.createConnectLink({
+          connectTarget: provider,
+          ...(messagingReturnTarget ? { messagingReturnTarget } : {}),
+        });
+        await writeHostedDeviceConnectRuntimeLog({
+          deviceConnectProviders: input.deviceConnectProviders,
+          expiresAtPresent: Boolean(result.expiresAt),
+          input: input.input,
+          issueLinkAvailable: true,
+          messagingReturnTarget,
+          provider: result.provider,
+          stage: "request",
+          status: "issued",
+        });
+        return {
+          action: request.action,
+          link: result,
+        };
+      } catch (error) {
+        await writeHostedDeviceConnectRuntimeLog({
+          deviceConnectProviders: input.deviceConnectProviders,
+          error,
+          input: input.input,
+          issueLinkAvailable: true,
+          messagingReturnTarget,
+          provider,
+          stage: "request",
+          status: "failed",
+        });
+        throw error;
+      }
+    },
   };
+}
+
+function resolveHostedDeviceToolConnectProvider(input: {
+  configuredProviders: readonly { provider: string }[];
+  requestedProvider: string;
+}): string {
+  const requestedKey = normalizeHostedDeviceSyncConnectTargetKey(
+    input.requestedProvider,
+  );
+  const target = input.configuredProviders.find(
+    ({ provider }) =>
+      normalizeHostedDeviceSyncConnectTargetKey(provider) === requestedKey,
+  );
+  if (!target) {
+    throw new VaultCliError(
+      "device_connect_provider_unavailable",
+      "That device provider is not available to connect.",
+    );
+  }
+  return target.provider;
 }
 
 function shouldWriteHostedDeviceConnectContextLog(input: {

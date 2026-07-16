@@ -7,11 +7,13 @@ Last verified: 2026-07-15
 New-member onboarding is aspiration-anchored and foundation-complete.
 
 Murph first establishes a private relationship with a broad personal health
-assistant. It briefly learns what the member most wants from their health,
-understands the outcome, motivation, and priority well enough to name one or
-two open threads, then reflects, saves, and explicitly parks those threads.
-Murph gathers a finite health-context foundation over separate turns, returns
-to the earlier thread with that context, and collaborates on the first step.
+assistant. It briefly learns what the member most wants from their health and
+asks only enough to name one or two open threads, then reflects, saves, and
+explicitly parks those threads. Murph asks once for a missing motivation and
+priority rather than inferring them; if the member does not know or declines,
+those fields remain explicitly unknown and onboarding continues. Murph gathers a
+finite health-context foundation over separate turns, returns to the earlier
+thread with that context, and collaborates on the first step.
 
 The first health topic is an anchor, not a launch button. Answering Murph's
 discovery question is not a request for a plan, diagnosis, or intervention. An
@@ -58,8 +60,16 @@ privacy, authorization, or provider boundaries.
   regimens, supplements, conditions, allergies, records, devices, Habitat,
   experiments, automations, and group state. Assistant runtime state is not
   product truth.
-- Save useful facts in the same turn they are learned. Use the resume snapshot
-  to avoid repeating known facts.
+- Route useful facts to their canonical owner in the same turn they are
+  learned. A quick deterministic write may stay in the parent; independent
+  lookup, parsing, enrichment, or several related writes should use one fresh
+  non-blocking V2 child when available. Use the resume snapshot to avoid
+  repeating known facts.
+- A delegated child owns canonical writes from durable evidence, not merely a
+  draft. Independent children may outlive the reply while onboarding continues.
+  A spawn means the write is pending, not complete; claim the save only after a
+  child receipt or later canonical read confirms it. Do not add a queue or
+  second state owner.
 - The onboarding skill owns conversation policy. The system-prompt overlay
   routes the open lifecycle into that skill, and the managed automation resumes
   it when a useful continuation exists.
@@ -113,10 +123,13 @@ A useful default is:
 > What would you most like from your health—something you want to change,
 > understand, handle, or be able to do?
 
-Do not bundle this with additional intake questions. Ask no more than three
-short aspiration questions across this phase, one per message, and stop early
-when the outcome, motivation, and priority are already clear enough to name one
-or two threads. The available clarifiers are:
+Do not bundle this with additional intake questions. The broad anchor does not
+consume the clarification budget. After it, ask no more than three short
+clarifiers, one per message. Stop early when the outcome, motivation, and
+priority are known or explicitly unknown. Ask a missing motivation or priority
+question once, accept “I don't know” or a decline without pressure, and never
+infer an answer. The available
+clarifiers are:
 
 1. What would success look or feel like?
 2. Why would that matter?
@@ -139,10 +152,11 @@ who already feels healthy and has no goal is not a failed onboarding case.
 
 ### 4. Reflect, save, and park the threads
 
-Once one or two threads can be named, reflect them in the member's words and
-save each concrete goal or ongoing need to its existing canonical owner. Say
-naturally that Murph will keep the thread open. Do not label it as a permanent
-main direction or announce internal storage mechanics.
+Once one or two threads can be named and each attempted clarifier is answered
+or explicitly unknown, reflect them in the member's words and save each concrete goal or
+ongoing need to its existing canonical owner. Say naturally that Murph will
+keep the thread open. Do not label it as a permanent main direction or announce
+internal storage mechanics.
 
 Then explain the ordering explicitly. The default meaning is:
 
@@ -168,14 +182,31 @@ not relevant, or explicitly skipped before answered completion:
 2. **Movement and training:** current activity, exercise, training, capacity,
    injuries, or relevant limitations.
 3. **Current protocols or experiments:** health changes, routines, diets,
-   recovery practices, or tests already underway.
+   recovery practices, or tests already underway. This is the default generated
+   onboarding voice-memo question when the tool is available and the member has
+   not declined voice; it does not require the member to request voice first.
 4. **Supplements:** current products, brands, and rough duration when known;
-   bottle or label photos are an easier input option.
+   bottle or label photos are an easier input option. Named products trigger
+   the supplement owner's exact-label workflow and one delegated child that
+   performs canonical lookup and enrichment rather than shallow name-only
+   saves. Existing partial records should be enriched, not skipped or
+   duplicated. Continue with the next independent onboarding question while
+   the child works; leave the supplement save pending until its result is
+   confirmed.
 5. **Medical and safety context:** prescription or OTC medications, diagnosed
    conditions, allergies or intolerances, and pregnancy or nursing, asked once
-   as one optional open question.
+   as one optional open question. When one answer yields several canonical
+   facts or negative assertions, one child saves the whole answer in a compact
+   batch across the named clinical owners. This is an explicit exception to
+   owner-based child splitting because one answer shares a medical evidence
+   workflow and compact persistence path.
 6. **Recent blood tests or lab panels:** whether they exist and can be shared
-   now or later.
+   now or later. If the member names Function Health, proactively send
+   https://my.functionhealth.com/documents and ask for the Lab Results of Record
+   PDFs. Naming the provider alone does not start a child. Once a PDF or paste
+   exists, use one delegated child for the full canonical parse during
+   onboarding, then send the next useful onboarding reply without waiting for
+   the parse.
 
 Use this order by default, but pull a checkpoint forward when it materially
 improves safety or keeps the conversation natural. One message, attachment, or
@@ -197,25 +228,67 @@ For example, “not lifting right now” resolves useful movement context; it do
 not authorize a workout routine. Murph should acknowledge it briefly and keep
 learning unless the member asks for help now.
 
+For eligible delegated work, spawn one fresh child with no forked transcript
+and a self-contained task containing durable source paths or exact member facts,
+the owner or skill, duplicate avoidance, and the expected private completion
+result. Bundle facts only when they share one canonical owner and evidence
+workflow; distinct owner or source pipelines use separate fresh children even
+when supplied together, except for the medical-checkpoint batching rule above.
+A child may use bounded read-only primary-source lookup when the owning
+enrichment skill requires it. Do not delegate urgent or safety-sensitive
+judgment, reply-critical synthesis, user-facing messages,
+approvals, voice generation, other dynamic tools, browser or phone work, or
+external actions. If spawning is unavailable, use the smallest synchronous
+path and batch related bounded CLI calls. Hosted Codex config must preserve
+Murph's custom V2 tool and mode hints; a boolean override must not replace that
+config table. Independent children may outlive the reply and continue while
+later turns proceed. Do not keep the root turn open solely to wait for them.
+A spawn is accepted work in progress, not proof of a save, parse, or enrichment.
+Claim completion only after a terminal child receipt or later canonical read.
+Pending foundation ingestion leaves onboarding open but does not block the next
+independent question. If the user's requested answer truly depends on a child,
+that work is reply-critical: follow the progress-update contract and answer
+only from the confirmed result or an honest blocker.
+
 ### 6. Return to the open thread and choose together
 
-After the foundation is resolved, return to the highest-priority open thread.
-Use only the new context that materially changes the help; do not recap the
-whole intake. Ask any remaining decision-changing questions one per turn and
-do not repeat what the member or saved context already answered.
+After the foundation is resolved, return to the one or two open threads. Use
+only the new context that materially changes the help; do not recap the whole
+intake or choose the member's priority for them.
 
-For a desired change likely to depend on repeated behavior, read the
-behavior-followthrough owner and ask up to three short questions across
-separate turns before selecting the first behavior—usually two or three when
-those answers remain unknown, and fewer when context already supplies them.
-Stop when the behavior fit is clear enough to choose together. Reuse the
-outcome and reason already learned instead of asking why it matters again.
-Learn, in the member's own words, what has helped them follow through on similar
-changes, what usually disrupts or stalls them, and what kind of support or
-response after a miss helps them restart. Save grounded reasons, concrete
-friction, and support preferences through existing owners; do not infer or
-persist a psychology profile, diagnosis, personality trait, or hidden
-motivation.
+Before asking deeper baseline, obstacle, prior-attempt, or support questions,
+ask which thread—if any—the member actually wants to work on now. Murph may
+nominate one promising starting thread with one short contextual reason, but
+must frame it as a suggestion and confirm the member's choice. If only one
+thread is open, still confirm whether the member wants to work on it now or
+leave it open. A generic “let's continue” that only advances onboarding before
+this choice question is not consent to a Murph-selected priority, deeper
+behavior discovery, or a plan. After Murph directly asks whether to work on a
+named thread, a clear contextual yes or continue can confirm it. The
+thread-selection question is separate from the bounded behavioral-fit
+questions below.
+
+Once the member selects or confirms a desired change likely to depend on
+repeated behavior, read the behavior-followthrough owner and make one bounded
+evidence pass across the
+foundation, relevant canonical records, connected data, and completed
+delegated ingestion. Before selecting a first behavior, ground the member's
+outcome and reason, current routine or baseline, relevant data, prior attempts,
+and the main conditions that help or disrupt follow-through. Ask up to three
+short questions across separate turns to fill only decision-changing gaps—
+usually two or three when those answers remain unknown, and fewer when context
+already supplies them. Reuse the outcome and reason already learned. Never
+re-ask a motivation that the member explicitly did not know or declined; ask
+once only if it was never attempted. If motivation remains unknown, collaborate
+only on a one-time first step or leave the thread open rather than activating a
+Murph-designed durable loop. Save grounded reasons, concrete friction, and
+support preferences through existing owners; do not infer or persist a
+psychology profile, diagnosis, personality trait, or hidden motivation.
+
+Do not activate a habit regimen, reminder, experiment support loop, or other
+durable behavior-change setup while that grounding is insufficient or
+decision-changing background evidence remains unconfirmed, unless the member
+explicitly defers that evidence.
 
 Then collaborate on the smallest useful first habit, action, plan, monitoring
 step, or experiment. Murph may recommend a best-fit option and explain why, but
@@ -237,6 +310,9 @@ writes; the onboarding follow-up automation never owns that support.
 - Save concrete aspirations as ordinary goals or ongoing needs. Use the visible
   conversation and resume context for the park-and-return sequence; do not add
   persisted parked-thread or onboarding-step state.
+- A delegated save remains pending until a child result or canonical read
+  confirms it. The parent may reply and continue onboarding, but must not report
+  it as saved or use it to satisfy completion merely because the child spawned.
 - Do not invent dose, severity, date, brand, diagnosis, motivation, or other
   missing details.
 - Treat negative allergy statements as clinical assertions through the owning
@@ -261,15 +337,21 @@ Use `user_answered` only when all of the following are true:
 1. The broad role, private default, and context-compounding value were delivered.
 2. Minimal identity is known or explicitly skipped.
 3. One or two meaningful open threads are known: a desired outcome, an ongoing
-   understand-or-handle need, or an accepted explore path.
+   understand-or-handle need, or an accepted explore path. Murph asked once for
+   a missing reason a desired change matters; the member's reason is known or
+   explicitly unknown or declined. If a legacy flow already parked the thread
+   and began foundation collection without it, one light post-park recovery
+   question satisfies this criterion before foundation advances further; do
+   not replay the park.
 4. A discovery thread was reflected, saved when concrete, and explicitly
    parked before foundation collection. An actual immediate request may be
    handled first instead.
 5. All six foundation checkpoints are resolved.
 6. Murph returned to an open thread with the relevant new context, unless the
    member explicitly asked not to revisit it.
-7. The member collaboratively chose a first step, explicitly chose to leave the
-   thread open without acting, or declined further help on it.
+7. The member chose which thread, if any, to work on now, then collaboratively
+   chose a first step, explicitly chose to leave the thread open without acting,
+   or declined further help on it.
 8. Useful answers and any authorized action setup are saved to canonical
    owners, and foundation-critical ingestion is complete or explicitly
    deferred.
@@ -313,9 +395,9 @@ reflection-only scheduled message returns skip.
    an experiment product or group challenge.
 2. A member with a desired change feels understood, sees it saved as an open
    thread, and does not receive an unsolicited diagnosis, routine, or plan.
-3. A member who says “I want to get stronger” in response to discovery reaches
-   the park-and-foundation flow; a member who asks for a strength plan gets
-   immediate help.
+3. A member who says “I want to get stronger” in response to discovery gets one
+   light motivation question before the park-and-foundation flow; a member who
+   asks for a strength plan gets immediate help.
 4. A member with no goal can begin with a baseline review without inventing a
    problem.
 5. The useful foundation from the prior onboarding flow is still gathered,
@@ -323,9 +405,15 @@ reflection-only scheduled message returns skip.
 6. Murph respects member control over remembered context and explains the
    available controls when asked.
 7. Every onboarding question has a visible or defensible context dividend.
-8. Murph returns to the open thread with relevant context and chooses the first
-   habit, action, or experiment with the member rather than prescribing it. For
-   repeated behavior, the choice reflects a bounded, early-stopping motivation
-   and support-fit pass of up to three questions.
+8. Murph returns to the open threads with relevant context, confirms which one
+   the member wants to work on, then chooses the first habit, action, or
+   experiment with the member rather than prescribing it. For repeated
+   behavior, the choice reflects a bounded, early-stopping pass over the
+   member's reason, current routine, relevant data, prior attempts, practical
+   influences, and support fit, with up to three missing-context questions.
 9. Context continues compounding after onboarding without a second profile
    system, automation, or completion score.
+10. Supplement enrichment, onboarding lab parsing, and bundled medical-context
+    persistence run in delegated children when useful without delaying the next
+    independent onboarding reply. Pending work leaves onboarding open, and
+    Murph claims a save only after a child receipt or canonical read proves it.

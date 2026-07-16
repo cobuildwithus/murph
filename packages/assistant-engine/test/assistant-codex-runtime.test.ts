@@ -5,11 +5,9 @@ import path from 'node:path'
 import { PassThrough } from 'node:stream'
 
 import {
-  HOSTED_CLI_BRIDGE_TOKEN_ENV,
-  HOSTED_CLI_BRIDGE_URL_ENV,
   HOSTED_RUNTIME_CODEX_APP_SERVER_COMMAND_ENV,
   HOSTED_RUNTIME_CODEX_MODEL_CATALOG_JSON_ENV,
-} from '@murphai/hosted-execution/cli-runtime-bridge'
+} from '@murphai/hosted-execution/env'
 import {
   HOSTED_ASSISTANT_PRODUCT_MODELS,
   HOSTED_ASSISTANT_REASONING_EFFORTS,
@@ -47,7 +45,6 @@ import {
   buildCodexAppServerSteerRequest,
   buildCodexAppServerArgs,
   compactWarmCodexThread,
-  drainHostedCodexPostTurnCleanups,
   executeCodexAppServerTurn as executeCodexAppServerTurnUnchecked,
   executeCodexManagedAccountOperation,
   readCodexAppServerTurnFailureContext,
@@ -132,11 +129,15 @@ function executeCodexAppServerTurn(
     dynamicTools: input.dynamicTools ?? resolveMurphDynamicTools({
       allowFinishWithoutReply: input.allowFinishWithoutReply,
       allowMessageReactions: input.allowMessageReactions,
+      automationAvailable:
+        input.hostedToolContext?.automationTool != null,
       assistantConfigurationAvailable:
         input.hostedToolContext?.assistantConfigurationTool != null,
       computerToolsAvailable:
         input.hostedToolContext?.computerToolsAvailable === true,
       connectedAppsAvailable: input.hostedToolContext?.connectedApps != null,
+      deviceAvailable:
+        input.hostedToolContext?.deviceTool != null,
       productFeedbackAvailable:
         typeof input.productFeedbackRecorder?.recordProductFeedback === 'function',
       progressUpdatesAvailable: input.progressDelivery != null,
@@ -6373,7 +6374,7 @@ describe('assistant codex runtime', () => {
             },
           }))
           child.stdout.write(jsonLine({
-            id: 101,
+            id: 103,
             method: 'item/tool/call',
             params: {
               arguments: {
@@ -8242,115 +8243,6 @@ describe('assistant codex runtime', () => {
     )
   })
 
-  it('does not reuse warm Codex after a CLI bridge off-invocation stop', async () => {
-    const hostedCodexHome = await createTempDir('assistant-codex-warm-cli-bridge-stop-home-')
-    const workingDirectory = await createTempDir('assistant-codex-warm-cli-bridge-stop-work-')
-    const spawnedChildren: MockChildProcess[] = []
-    mockProcessGroupSignalsForChildren(spawnedChildren)
-
-    codexMocks.spawn.mockImplementation(() => {
-      const spawnedChild = new MockChildProcess()
-      const processNumber = spawnedChildren.length + 1
-      spawnedChild.pid = 34_000 + spawnedChildren.length
-      spawnedChildren.push(spawnedChild)
-
-      queueMicrotask(() => {
-        void (async () => {
-          const initialize = await waitForRpcMethod(spawnedChild, 'initialize')
-          spawnedChild.stdout.write(jsonLine({ id: initialize.id, result: {} }))
-
-          const thread = await waitForRpcMethod(spawnedChild, 'thread/start')
-          spawnedChild.stdout.write(jsonLine({
-            id: thread.id,
-            result: {
-              thread: {
-                id: `thread-warm-cli-bridge-stop-${processNumber}`,
-              },
-            },
-          }))
-
-          const turn = await waitForRpcMethod(spawnedChild, 'turn/start')
-          spawnedChild.stdout.write(jsonLine({
-            id: turn.id,
-            result: {
-              turn: {
-                id: `turn-warm-cli-bridge-stop-${processNumber}`,
-              },
-            },
-          }))
-          spawnedChild.stdout.write(jsonLine({
-            method: 'turn/completed',
-            params: {
-              turn: {
-                id: `turn-warm-cli-bridge-stop-${processNumber}`,
-                status: 'completed',
-              },
-            },
-          }))
-          const cleanup = await waitForRpcMethod(
-            spawnedChild,
-            'thread/backgroundTerminals/clean',
-          )
-          spawnedChild.stdout.write(jsonLine({ id: cleanup.id, result: {} }))
-        })()
-      })
-
-      return spawnedChild
-    })
-
-    const hostedEnv = {
-      [HOSTED_CLI_BRIDGE_TOKEN_ENV]: 'bridge-token-stable',
-      [HOSTED_CLI_BRIDGE_URL_ENV]: 'http://127.0.0.1:9174/',
-      CODEX_HOME: hostedCodexHome,
-      HOSTED_ASSISTANT_MODEL: 'gpt-warm-stop',
-      MURPH_HOSTED_CODEX_MODEL_PROVIDER_ID: 'hosted-provider',
-      MURPH_HOSTED_RUNTIME_PROCESS: '1',
-      NODE_ENV: 'test',
-      PATH: '/usr/bin',
-    }
-
-    await expect(
-      executeCodexAppServerTurn({
-        env: hostedEnv,
-        prompt: 'first warm stop turn',
-        workingDirectory,
-      }),
-    ).resolves.toMatchObject({
-      sessionId: 'thread-warm-cli-bridge-stop-1',
-      turnId: 'turn-warm-cli-bridge-stop-1',
-    })
-
-    const firstChild = requireMockChildProcess(spawnedChildren[0] ?? null)
-    await stopWarmCodexAppServer('cli-bridge-off-invocation-request')
-    expect(process.kill).toHaveBeenCalledWith(-34_000, 'SIGTERM')
-
-    const replacementTrace = vi.fn()
-
-    await expect(
-      executeCodexAppServerTurn({
-        env: hostedEnv,
-        onTraceEvent: replacementTrace,
-        prompt: 'second warm stop turn',
-        workingDirectory,
-      }),
-    ).resolves.toMatchObject({
-      sessionId: 'thread-warm-cli-bridge-stop-2',
-      turnId: 'turn-warm-cli-bridge-stop-2',
-    })
-
-    const secondChild = requireMockChildProcess(spawnedChildren[1] ?? null)
-    expect(codexMocks.spawn).toHaveBeenCalledTimes(2)
-    expect(replacementTrace).toHaveBeenCalledWith(
-      expect.objectContaining({
-        rawEvent: expect.objectContaining({
-          codexTimingColdStartReason: 'previous-explicit-stop',
-          codexTimingStage: 'initialized',
-        }),
-      }),
-    )
-    expect(secondChild.pid).not.toBe(firstChild.pid)
-  })
-
   it('keeps the stopped process reason when replacement construction throws', async () => {
     const codexHome = await createTempDir('assistant-codex-constructor-retry-home-')
     const workingDirectory = await createTempDir('assistant-codex-constructor-retry-work-')
@@ -8660,20 +8552,6 @@ describe('assistant codex runtime', () => {
 
   it.each([
     {
-      name: 'CLI bridge token',
-      secondEnv: {
-        [HOSTED_CLI_BRIDGE_TOKEN_ENV]: 'bridge-token-two',
-      },
-      useSecondCodexHome: false,
-    },
-    {
-      name: 'stable bridge URL',
-      secondEnv: {
-        [HOSTED_CLI_BRIDGE_URL_ENV]: 'http://127.0.0.1:9175/',
-      },
-      useSecondCodexHome: false,
-    },
-    {
       name: 'PATH',
       secondEnv: {
         PATH: '/custom/hosted/bin',
@@ -8749,11 +8627,6 @@ describe('assistant codex runtime', () => {
                 },
               },
             }))
-            const cleanup = await waitForRpcMethod(
-              spawnedChild,
-              'thread/backgroundTerminals/clean',
-            )
-            spawnedChild.stdout.write(jsonLine({ id: cleanup.id, result: {} }))
           })()
         })
 
@@ -8761,8 +8634,6 @@ describe('assistant codex runtime', () => {
       })
 
       const baseEnv = {
-        [HOSTED_CLI_BRIDGE_TOKEN_ENV]: 'bridge-token-one',
-        [HOSTED_CLI_BRIDGE_URL_ENV]: 'http://127.0.0.1:9174/',
         CODEX_HOME: firstCodexHome,
         CUSTOM_TOOL_SECRET: 'custom-tool-secret-one',
         HOSTED_ASSISTANT_MODEL: 'gpt-identity-one',
@@ -8817,323 +8688,6 @@ describe('assistant codex runtime', () => {
     },
   )
 
-  it('replaces hosted Codex when background-terminal cleanup fails', async () => {
-    const codexHome = await createTempDir('assistant-codex-cleanup-failure-home-')
-    const workingDirectory = await createTempDir('assistant-codex-cleanup-failure-work-')
-    const spawnedChildren: MockChildProcess[] = []
-    mockProcessGroupSignalsForChildren(spawnedChildren)
-
-    codexMocks.spawn.mockImplementation(() => {
-      const spawnedChild = new MockChildProcess()
-      const processNumber = spawnedChildren.length + 1
-      spawnedChild.pid = 33_000 + spawnedChildren.length
-      spawnedChildren.push(spawnedChild)
-
-      queueMicrotask(() => {
-        void (async () => {
-          const initialize = await waitForRpcMethod(spawnedChild, 'initialize')
-          spawnedChild.stdout.write(jsonLine({ id: initialize.id, result: {} }))
-
-          await writeWarmTurnStarted({
-            child: spawnedChild,
-            requestCount: 1,
-            threadId: `thread-cleanup-failure-${processNumber}`,
-            turnId: `turn-cleanup-failure-${processNumber}`,
-          })
-          spawnedChild.stdout.write(jsonLine({
-            method: 'turn/completed',
-            params: {
-              turn: {
-                id: `turn-cleanup-failure-${processNumber}`,
-                status: 'completed',
-              },
-            },
-          }))
-
-          const cleanup = await waitForRpcMethod(
-            spawnedChild,
-            'thread/backgroundTerminals/clean',
-          )
-          spawnedChild.stdout.write(jsonLine(
-            processNumber === 1
-              ? {
-                  error: { message: 'background cleanup unavailable' },
-                  id: cleanup.id,
-                }
-              : { id: cleanup.id, result: {} },
-          ))
-        })()
-      })
-
-      return spawnedChild
-    })
-
-    const stableInput = {
-      env: {
-        [HOSTED_CLI_BRIDGE_TOKEN_ENV]: 'stable-bridge-token',
-        CODEX_HOME: codexHome,
-        PATH: '/usr/bin',
-      },
-      workingDirectory,
-    }
-
-    await expect(executeCodexAppServerTurn({
-      ...stableInput,
-      prompt: 'first hosted cleanup turn',
-    })).resolves.toMatchObject({
-      sessionId: 'thread-cleanup-failure-1',
-      turnId: 'turn-cleanup-failure-1',
-    })
-
-    const replacementTrace = vi.fn()
-    await expect(executeCodexAppServerTurn({
-      ...stableInput,
-      onTraceEvent: replacementTrace,
-      prompt: 'replacement after cleanup failure',
-    })).resolves.toMatchObject({
-      sessionId: 'thread-cleanup-failure-2',
-      turnId: 'turn-cleanup-failure-2',
-    })
-
-    expect(codexMocks.spawn).toHaveBeenCalledTimes(2)
-    expect(process.kill).toHaveBeenCalledWith(-33_000, 'SIGTERM')
-    expect(replacementTrace).toHaveBeenCalledWith(
-      expect.objectContaining({
-        rawEvent: expect.objectContaining({
-          codexTimingColdStartReason: 'previous-explicit-stop',
-          codexTimingStage: 'initialized',
-        }),
-      }),
-    )
-  })
-
-  it('returns completed hosted output before an unanswered background-terminal cleanup', async () => {
-    const codexHome = await createTempDir('assistant-codex-cleanup-deferred-home-')
-    const workingDirectory = await createTempDir('assistant-codex-cleanup-deferred-work-')
-    const spawnedChildren: MockChildProcess[] = []
-    const firstCleanupRequest = createDeferred<Record<string, unknown>>()
-    mockProcessGroupSignalsForChildren(spawnedChildren)
-
-    codexMocks.spawn.mockImplementation(() => {
-      const child = new MockChildProcess()
-      child.pid = 33_100
-      spawnedChildren.push(child)
-
-      queueMicrotask(() => {
-        void (async () => {
-          const initialize = await waitForRpcMethod(child, 'initialize')
-          child.stdout.write(jsonLine({ id: initialize.id, result: {} }))
-
-          await writeWarmTurnStarted({
-            child,
-            requestCount: 1,
-            threadId: 'thread-cleanup-deferred',
-            turnId: 'turn-cleanup-deferred-1',
-          })
-          child.stdout.write(jsonLine({
-            method: 'assistant.message.delta',
-            params: {
-              delta: 'Reply ready before cleanup',
-              item: {
-                id: 'assistant-cleanup-deferred-1',
-                type: 'assistant_message',
-              },
-              threadId: 'thread-cleanup-deferred',
-              turnId: 'turn-cleanup-deferred-1',
-            },
-          }))
-          child.stdout.write(jsonLine({
-            method: 'turn/completed',
-            params: {
-              threadId: 'thread-cleanup-deferred',
-              turn: {
-                id: 'turn-cleanup-deferred-1',
-                status: 'completed',
-              },
-            },
-          }))
-          firstCleanupRequest.resolve(
-            await waitForRpcMethod(child, 'thread/backgroundTerminals/clean'),
-          )
-
-          const resumedThread = await waitForRpcMethod(child, 'thread/resume')
-          const resumedParams = asRecord(resumedThread.params)
-          child.stdout.write(jsonLine({
-            id: resumedThread.id,
-            result: {
-              approvalPolicy: resumedParams.approvalPolicy,
-              cwd: resumedParams.cwd,
-              thread: { id: 'thread-cleanup-deferred' },
-            },
-          }))
-          const secondTurnStart = await waitForRpcMethodCount(child, 'turn/start', 2)
-          child.stdout.write(jsonLine({
-            id: secondTurnStart.id,
-            result: { turn: { id: 'turn-cleanup-deferred-2' } },
-          }))
-          child.stdout.write(jsonLine({
-            method: 'assistant.message.delta',
-            params: {
-              delta: 'Second reply after cleanup',
-              item: {
-                id: 'assistant-cleanup-deferred-2',
-                type: 'assistant_message',
-              },
-              threadId: 'thread-cleanup-deferred',
-              turnId: 'turn-cleanup-deferred-2',
-            },
-          }))
-          child.stdout.write(jsonLine({
-            method: 'turn/completed',
-            params: {
-              threadId: 'thread-cleanup-deferred',
-              turn: {
-                id: 'turn-cleanup-deferred-2',
-                status: 'completed',
-              },
-            },
-          }))
-          const secondCleanup = await waitForRpcMethodCount(
-            child,
-            'thread/backgroundTerminals/clean',
-            2,
-          )
-          child.stdout.write(jsonLine({ id: secondCleanup.id, result: {} }))
-        })()
-      })
-
-      return child
-    })
-
-    const stableInput = {
-      env: {
-        [HOSTED_CLI_BRIDGE_TOKEN_ENV]: 'stable-bridge-token',
-        CODEX_HOME: codexHome,
-        PATH: '/usr/bin',
-      },
-      workingDirectory,
-    }
-    await expect(executeCodexAppServerTurn({
-      ...stableInput,
-      prompt: 'complete before cleanup',
-    })).resolves.toMatchObject({
-      finalMessage: 'Reply ready before cleanup',
-      sessionId: 'thread-cleanup-deferred',
-      turnId: 'turn-cleanup-deferred-1',
-    })
-
-    const cleanupRequest = await firstCleanupRequest.promise
-    const drain = drainHostedCodexPostTurnCleanups()
-    const secondTurn = executeCodexAppServerTurn({
-      ...stableInput,
-      prompt: 'wait for first cleanup',
-      resumeSessionId: 'thread-cleanup-deferred',
-    })
-    await Promise.resolve()
-    const child = requireMockChildProcess(spawnedChildren[0] ?? null)
-    expect(readWrittenRpcMessages(child).filter(
-      (message) => message.method === 'thread/resume',
-    )).toHaveLength(0)
-
-    child.stdout.write(jsonLine({ id: cleanupRequest.id, result: {} }))
-    await drain
-    await expect(secondTurn).resolves.toMatchObject({
-      finalMessage: 'Second reply after cleanup',
-      sessionId: 'thread-cleanup-deferred',
-      turnId: 'turn-cleanup-deferred-2',
-    })
-
-    expect(codexMocks.spawn).toHaveBeenCalledTimes(1)
-    expect(process.kill).not.toHaveBeenCalledWith(-33_100, 'SIGTERM')
-  })
-
-  it('poisons hosted Codex when post-turn cleanup exceeds its bounded deadline', async () => {
-    vi.useFakeTimers()
-    try {
-      const codexHome = await createTempDir('assistant-codex-cleanup-deadline-home-')
-      const workingDirectory = await createTempDir('assistant-codex-cleanup-deadline-work-')
-      const spawnedChildren: MockChildProcess[] = []
-      mockProcessGroupSignalsForChildren(spawnedChildren)
-
-      codexMocks.spawn.mockImplementation(() => {
-        const child = new MockChildProcess()
-        child.pid = 33_200
-        spawnedChildren.push(child)
-        child.stdin.onWrite = (write) => {
-          for (const line of write.split('\n')) {
-            if (!line.trim()) {
-              continue
-            }
-            const message = asRecord(JSON.parse(line))
-            queueMicrotask(() => {
-              if (message.method === 'initialize') {
-                child.stdout.write(jsonLine({ id: message.id, result: {} }))
-                return
-              }
-              if (message.method === 'thread/start') {
-                child.stdout.write(jsonLine({
-                  id: message.id,
-                  result: { thread: { id: 'thread-cleanup-deadline' } },
-                }))
-                return
-              }
-              if (message.method === 'turn/start') {
-                child.stdout.write(jsonLine({
-                  id: message.id,
-                  result: { turn: { id: 'turn-cleanup-deadline' } },
-                }))
-                child.stdout.write(jsonLine({
-                  method: 'assistant.message.delta',
-                  params: {
-                    delta: 'Reply survives cleanup timeout',
-                    item: {
-                      id: 'assistant-cleanup-deadline',
-                      type: 'assistant_message',
-                    },
-                    threadId: 'thread-cleanup-deadline',
-                    turnId: 'turn-cleanup-deadline',
-                  },
-                }))
-                child.stdout.write(jsonLine({
-                  method: 'turn/completed',
-                  params: {
-                    threadId: 'thread-cleanup-deadline',
-                    turn: {
-                      id: 'turn-cleanup-deadline',
-                      status: 'completed',
-                    },
-                  },
-                }))
-              }
-              // Deliberately leave background-terminal cleanup unanswered.
-            })
-          }
-        }
-        return child
-      })
-
-      await expect(executeCodexAppServerTurn({
-        env: {
-          [HOSTED_CLI_BRIDGE_TOKEN_ENV]: 'stable-bridge-token',
-          CODEX_HOME: codexHome,
-          PATH: '/usr/bin',
-        },
-        prompt: 'complete before cleanup deadline',
-        workingDirectory,
-      })).resolves.toMatchObject({
-        finalMessage: 'Reply survives cleanup timeout',
-      })
-
-      const drain = drainHostedCodexPostTurnCleanups()
-      await vi.advanceTimersByTimeAsync(5_000)
-      await drain
-
-      expect(process.kill).toHaveBeenCalledWith(-33_200, 'SIGTERM')
-    } finally {
-      vi.useRealTimers()
-    }
-  })
-
   it('handles current Codex v2 turn-tagged assistant events across warm turns', async () => {
     const hostedCodexHome = await createTempDir('assistant-codex-warm-v2-events-home-')
     const workingDirectory = await createTempDir('assistant-codex-warm-v2-events-work-')
@@ -9161,7 +8715,6 @@ describe('assistant codex runtime', () => {
             threadId: 'thread-v2-events-one',
             turnId: 'turn-v2-events-one',
           })
-
           await writeWarmTurnStarted({
             child: spawnedChild,
             requestCount: 2,
@@ -9315,7 +8868,6 @@ describe('assistant codex runtime', () => {
               turnId: 'turn-off-turn-one',
             },
           }))
-
           await writeWarmTurnStarted({
             child: spawnedChild,
             requestCount: 2,
@@ -9430,7 +8982,6 @@ describe('assistant codex runtime', () => {
               },
             },
           }))
-
           const secondThread = await waitForRpcMethodCount(spawnedChild, 'thread/start', 2)
           spawnedChild.stdout.write(jsonLine({
             id: secondThread.id,
@@ -9551,12 +9102,6 @@ describe('assistant codex runtime', () => {
               },
             },
           }))
-          const firstCleanup = await waitForRpcMethod(
-            child,
-            'thread/backgroundTerminals/clean',
-          )
-          child.stdout.write(jsonLine({ id: firstCleanup.id, result: {} }))
-
           const resumedThread = await waitForRpcMethod(child, 'thread/resume')
           const resumedThreadParams = asRecord(resumedThread.params)
           child.stdout.write(jsonLine({
@@ -9581,12 +9126,6 @@ describe('assistant codex runtime', () => {
               },
             },
           }))
-          const secondCleanup = await waitForRpcMethodCount(
-            child,
-            'thread/backgroundTerminals/clean',
-            2,
-          )
-          child.stdout.write(jsonLine({ id: secondCleanup.id, result: {} }))
         })()
       })
 
@@ -9594,8 +9133,6 @@ describe('assistant codex runtime', () => {
     })
 
     const hostedEnv = {
-      [HOSTED_CLI_BRIDGE_TOKEN_ENV]: 'bridge-token-stable',
-      [HOSTED_CLI_BRIDGE_URL_ENV]: 'http://127.0.0.1:9174/',
       CODEX_HOME: hostedCodexHome,
       MURPH_HOSTED_RUNTIME_PROCESS: '1',
       NODE_ENV: 'test',
@@ -9629,9 +9166,9 @@ describe('assistant codex runtime', () => {
     )
     expect(messages.filter((message) => message.method === 'thread/resume'))
       .toHaveLength(1)
-    expect(messages.filter(
+    expect(messages.some(
       (message) => message.method === 'thread/backgroundTerminals/clean',
-    )).toHaveLength(2)
+    )).toBe(false)
     expect(asRecord(messages.find((message) => message.method === 'thread/start')?.params))
       .toMatchObject({
         dynamicTools: expect.arrayContaining([
@@ -13009,6 +12546,203 @@ describe('assistant codex runtime', () => {
       sessionId: 'thread-progress-unsupported',
     })
     expect(progressDelivery.send).not.toHaveBeenCalled()
+  })
+
+  it('requires exact active-turn identity for invocation-scoped root tools', async () => {
+    const workingDirectory = await createTempDir('assistant-codex-root-tool-scope-')
+    const deviceTool: NonNullable<AssistantHostedToolContext['deviceTool']> = {
+      request: vi.fn(async () => ({
+        accounts: [],
+        action: 'list_accounts' as const,
+        provider: null,
+        sourceProvider: null,
+      })),
+    }
+    const automationTool: NonNullable<AssistantHostedToolContext['automationTool']> = {
+      request: vi.fn(async () => ({
+        action: 'patch' as const,
+        automationId: 'automation-hidden',
+        created: false,
+        lookupId: 'hidden',
+        routeBinding: 'preserved' as const,
+        status: 'paused' as const,
+      })),
+    }
+
+    codexMocks.spawn.mockImplementation(() => {
+      const child = new MockChildProcess()
+
+      queueMicrotask(() => {
+        void (async () => {
+          await waitForRpcMethod(child, 'initialize')
+          child.stdout.write(jsonLine({ id: 1, result: {} }))
+          await waitForRpcMethod(child, 'thread/start')
+          child.stdout.write(jsonLine({
+            id: 2,
+            result: { thread: { id: 'thread-root-tool-scope' } },
+          }))
+          await waitForRpcMethod(child, 'turn/start')
+
+          child.stdout.write(jsonLine({
+            id: 98,
+            method: 'item/tool/call',
+            params: {
+              arguments: { action: 'list_accounts' },
+              namespace: 'murph',
+              threadId: 'thread-root-tool-scope',
+              tool: 'device',
+              turnId: 'turn-root-tool-scope',
+            },
+          }))
+          await expect(waitForRpcResponse(child, 98)).resolves.toEqual({
+            error: {
+              code: -32000,
+              message: 'Codex parent-thread request arrived before the active turn id was known.',
+            },
+            id: 98,
+          })
+
+          child.stdout.write(jsonLine({
+            id: 3,
+            result: { turn: { id: 'turn-root-tool-scope' } },
+          }))
+
+          child.stdout.write(jsonLine({
+            id: 99,
+            method: 'item/tool/call',
+            params: {
+              namespace: 'murph',
+              tool: 'device',
+              arguments: { action: 'list_accounts' },
+            },
+          }))
+          await expect(waitForRpcResponse(child, 99)).resolves.toEqual({
+            id: 99,
+            result: {
+              success: false,
+              contentItems: [{
+                type: 'inputText',
+                text: 'tool is unavailable outside the active root turn',
+              }],
+            },
+          })
+
+          child.stdout.write(jsonLine({
+            id: 100,
+            method: 'item/tool/call',
+            params: {
+              arguments: { action: 'list_accounts' },
+              namespace: 'murph',
+              threadId: 'thread-root-tool-scope',
+              tool: 'device',
+              turnId: 'turn-stale-root-tool-scope',
+            },
+          }))
+          await expect(waitForRpcResponse(child, 100)).resolves.toEqual({
+            error: {
+              code: -32000,
+              message: 'Codex message turn id does not match the active turn.',
+            },
+            id: 100,
+          })
+
+          child.stdout.write(jsonLine({
+            id: 101,
+            method: 'item/tool/call',
+            params: {
+              arguments: { action: 'list_accounts' },
+              namespace: 'murph',
+              threadId: 'thread-foreign-root-tool-scope',
+              tool: 'device',
+              turnId: 'turn-root-tool-scope',
+            },
+          }))
+          await expect(waitForRpcResponse(child, 101)).resolves.toEqual({
+            error: {
+              code: -32000,
+              message: 'Server requests from codex subagent threads are not supported.',
+            },
+            id: 101,
+          })
+
+          child.stdout.write(jsonLine({
+            id: 102,
+            method: 'item/tool/call',
+            params: {
+              arguments: { action: 'list_accounts' },
+              namespace: 'murph',
+              threadId: 'thread-root-tool-scope',
+              tool: 'device',
+              turnId: 'turn-root-tool-scope',
+            },
+          }))
+          await expect(waitForRpcResponse(child, 102)).resolves.toEqual({
+            id: 102,
+            result: {
+              success: true,
+              contentItems: [{
+                type: 'inputText',
+                text: '{"accounts":[],"action":"list_accounts","provider":null,"sourceProvider":null}',
+              }],
+            },
+          })
+
+          child.stdout.write(jsonLine({
+            id: 103,
+            method: 'item/tool/call',
+            params: {
+              arguments: {
+                action: 'patch',
+                lookup: 'hidden',
+                status: 'paused',
+              },
+              namespace: 'murph',
+              threadId: 'thread-root-tool-scope',
+              tool: 'automation',
+              turnId: 'turn-root-tool-scope',
+            },
+          }))
+          await expect(waitForRpcResponse(child, 103)).resolves.toEqual({
+            id: 103,
+            result: {
+              success: false,
+              contentItems: [{
+                type: 'inputText',
+                text: 'tool was not offered for this turn',
+              }],
+            },
+          })
+
+          child.stdout.write(jsonLine({
+            method: 'turn/completed',
+            params: {
+              turn: {
+                id: 'turn-root-tool-scope',
+                status: 'completed',
+              },
+            },
+          }))
+        })()
+      })
+
+      return child
+    })
+
+    await expect(executeCodexAppServerTurn({
+      hostedToolContext: {
+        ...createHostedToolContext(),
+        automationTool,
+        deviceTool,
+      },
+      dynamicTools: resolveMurphDynamicTools({ deviceAvailable: true }),
+      prompt: 'inspect connected devices',
+      workingDirectory,
+    })).resolves.toMatchObject({
+      sessionId: 'thread-root-tool-scope',
+      turnId: 'turn-root-tool-scope',
+    })
+    expect(deviceTool.request).toHaveBeenCalledTimes(1)
+    expect(automationTool.request).not.toHaveBeenCalled()
   })
 
   it('returns a tool failure for invalid progress arguments without sending progress', async () => {

@@ -2,7 +2,7 @@ import { randomUUID } from 'node:crypto'
 import { setScheduledLogStatus, upsertAutomation } from '@murphai/core'
 import {
   isHostedRuntimeProcessEnv,
-} from '@murphai/hosted-execution/cli-runtime-bridge'
+} from '@murphai/hosted-execution/env'
 import type {
   HostedRuntimeNewsletterScheduledAuthority,
 } from '@murphai/hosted-execution/runtime-control'

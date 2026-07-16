@@ -5,11 +5,6 @@ import path from "node:path";
 
 import { initializeVault } from "@murphai/core";
 import {
-  HOSTED_CLI_BRIDGE_DEVICE_ACCOUNT_RECONCILE_PATH,
-  HOSTED_CLI_BRIDGE_TOKEN_ENV,
-  HOSTED_CLI_BRIDGE_URL_ENV,
-} from "@murphai/hosted-execution/cli-runtime-bridge";
-import {
   HOSTED_MAILBOX_ITEM_PAYLOAD_SCHEMA,
   HOSTED_MAILBOX_PAYLOAD_SCHEMA,
 } from "@murphai/hosted-execution/runtime-control";
@@ -29,7 +24,6 @@ import {
   runHostedWorkspaceRuntimeJobInProcess,
 } from "../src/hosted-runtime.ts";
 import type {
-  HostedRuntimeDeviceSyncPort,
   HostedRuntimeEffectsPort,
   HostedRuntimeMailboxPort,
   HostedRuntimePlatform,
@@ -214,34 +208,6 @@ describe("hosted runtime abort guard", () => {
         recursive: true,
       });
     }
-  });
-
-  test("preserves optional device reconcile through the production abort guard", async () => {
-    const reconcileAccount = vi.fn(async () => ({
-      connectionId: "dsc_synthetic_abort_guard",
-      occurredAt: TEST_NOW,
-      status: "queued" as const,
-    }));
-
-    const supported = await runDeviceAccountReconcileThroughHostedRuntime({
-      caseId: "supported",
-      deviceSyncPort: createDeviceSyncPort(reconcileAccount),
-    });
-
-    assert.equal(supported.status, 200);
-    assert.match(supported.body, /"status":"queued"/u);
-    expect(reconcileAccount).toHaveBeenCalledWith({
-      connectionId: "dsc_synthetic_abort_guard",
-      signal: expect.any(AbortSignal),
-    });
-
-    const unsupported = await runDeviceAccountReconcileThroughHostedRuntime({
-      caseId: "unsupported",
-      deviceSyncPort: createDeviceSyncPort(),
-    });
-
-    assert.equal(unsupported.status, 503);
-    assert.match(unsupported.body, /HOSTED_DEVICE_ACCOUNT_RECONCILE_UNAVAILABLE/u);
   });
 
   test("forwards clinical request cancellation through the runtime abort guard", async () => {
@@ -605,126 +571,6 @@ function createDefaultMailboxPort(): HostedRuntimeMailboxPort {
       throw new Error("Abort guard test should not fetch mailbox payloads.");
     },
   };
-}
-
-function createDeviceSyncPort(
-  reconcileAccount?: HostedRuntimeDeviceSyncPort["reconcileAccount"],
-): HostedRuntimeDeviceSyncPort {
-  return {
-    async ackDirtyStateProcessed() {
-      throw new Error("Abort guard reconcile test should not acknowledge dirty state.");
-    },
-    async applyUpdates(request) {
-      return {
-        appliedAt: request.occurredAt ?? TEST_NOW,
-        updates: [],
-        userId: TEST_USER_ID,
-      };
-    },
-    async createConnectLink() {
-      throw new Error("Abort guard reconcile test should not create a connect link.");
-    },
-    async fetchDirtyStates() {
-      return {
-        hasMore: false,
-        items: [],
-        nextWakeAt: null,
-        userId: TEST_USER_ID,
-      };
-    },
-    async fetchSnapshot() {
-      return {
-        connections: [],
-        generatedAt: TEST_NOW,
-        userId: TEST_USER_ID,
-      };
-    },
-    ...(reconcileAccount ? { reconcileAccount } : {}),
-  };
-}
-
-async function runDeviceAccountReconcileThroughHostedRuntime(input: {
-  caseId: string;
-  deviceSyncPort: HostedRuntimeDeviceSyncPort;
-}): Promise<{ body: string; status: number }> {
-  const vaultRoot = await mkdtemp(path.join(tmpdir(), `murph-runtime-device-reconcile-${input.caseId}-`));
-  let bridgeResponse: { body: string; status: number } | null = null;
-
-  try {
-    await initializeVault({
-      createdAt: new Date(TEST_NOW),
-      timezone: "UTC",
-      title: "Hosted Runtime Device Reconcile Guard Test Vault",
-      vaultRoot,
-    });
-
-    await runHostedWorkspaceRuntimeJobInProcess({
-      request: {
-        attemptId: `attempt_synthetic_device_reconcile_${input.caseId}`,
-        idleCheckpointDelayMs: 1,
-        leaseGeneration: "1",
-        userId: TEST_USER_ID,
-        workspace: createWorkspaceState(),
-        workspaceVersion: "0",
-      },
-      runtime: {
-        forwardedEnv: {
-          HOSTED_ASSISTANT_MODEL: "gpt-synthetic",
-          HOSTED_ASSISTANT_PROVIDER: "openai",
-          OPENAI_API_KEY: "test-api-key",
-        },
-      },
-    }, {
-      async createCheckpointSnapshot() {
-        return {
-          snapshotRef: {
-            hash: "f".repeat(64),
-            key: `users/bundles/member-synthetic/device-reconcile-${input.caseId}.bundle.json`,
-            size: 512,
-            updatedAt: TEST_NOW,
-          },
-        };
-      },
-      async importItem() {
-        throw new Error("Abort guard reconcile test should not import mailbox items.");
-      },
-      platform: {
-        ...createPlatform(vi.fn<typeof fetch>()),
-        deviceSyncPort: input.deviceSyncPort,
-      },
-      async runAssistantPhase(phaseInput) {
-        const bridgeUrl = phaseInput.runtimeEnv[HOSTED_CLI_BRIDGE_URL_ENV];
-        const bridgeToken = phaseInput.runtimeEnv[HOSTED_CLI_BRIDGE_TOKEN_ENV];
-        assert.ok(bridgeUrl);
-        assert.ok(bridgeToken);
-        const response = await fetch(
-          new URL(HOSTED_CLI_BRIDGE_DEVICE_ACCOUNT_RECONCILE_PATH, bridgeUrl),
-          {
-            body: JSON.stringify({ accountId: "dsc_synthetic_abort_guard" }),
-            headers: {
-              authorization: `Bearer ${bridgeToken}`,
-              "content-type": "application/json",
-            },
-            method: "POST",
-          },
-        );
-        bridgeResponse = {
-          body: await response.text(),
-          status: response.status,
-        };
-        return { progressed: false };
-      },
-      vaultRoot,
-    });
-
-    assert.ok(bridgeResponse);
-    return bridgeResponse;
-  } finally {
-    await rm(vaultRoot, {
-      force: true,
-      recursive: true,
-    });
-  }
 }
 
 function createMailboxItem(overrides: Partial<HostedMailboxItem> = {}): HostedMailboxItem {

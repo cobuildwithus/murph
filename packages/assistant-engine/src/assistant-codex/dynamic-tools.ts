@@ -135,6 +135,20 @@ export type {
   AssistantStyleTurnSettingsOverlay,
 } from './dynamic-tools/assistant-style.js'
 import {
+  executeAutomationDynamicTool,
+  MURPH_AUTOMATION_TOOL,
+  readAutomationDynamicToolRequest,
+  type AutomationDynamicToolRequest,
+} from './dynamic-tools/automation.js'
+export { MURPH_AUTOMATION_TOOL } from './dynamic-tools/automation.js'
+import {
+  executeDeviceDynamicTool,
+  MURPH_DEVICE_TOOL,
+  readDeviceDynamicToolRequest,
+  type DeviceDynamicToolRequest,
+} from './dynamic-tools/device.js'
+export { MURPH_DEVICE_TOOL } from './dynamic-tools/device.js'
+import {
   executeConnectedAppsDynamicTool,
   MURPH_CONNECTED_APPS_EXECUTE_TOOL,
   MURPH_CONNECTED_APPS_DYNAMIC_TOOLS,
@@ -173,7 +187,7 @@ export const MURPH_SEND_PROGRESS_UPDATE_TOOL = {
   namespace: 'murph',
   name: 'send_progress_update',
   description:
-    'Send a brief, natural user-visible progress update to the current conversation only when longer, tool-heavy, or substantial user-content-inspection work would otherwise leave the user waiting. Use as the first assistant action for genuinely long tasks that require multiple tool steps, involve research or long vault scans, or recover substantial data from PDFs, lab reports, images, screenshots, CSVs, large pasted text, meal/product/supplement labels, workout exports, wearable exports, or health documents. For work likely to finish in about a minute or less, send at most one progress update. If the turn becomes unusually long-running after substantial tool work, you may send up to two more brief updates so the user is not left hanging; never send a fourth. Prefer skipping progress updates on quota-sensitive messaging surfaces such as Linq/iMessage unless the update materially improves UX. Skip automatically transcribed voice memo or audio content unless manual media tools or broader long-running work are needed. Do not use for individual tool loops, searches, reads, page checks, clicks, status churn, skill-file reads alone, setup checks, routine single-command vault reads, quick single-step replies, one-shot logging/capture/memory saves that only need a straightforward write, or final conclusions.',
+    'Send a brief, natural user-visible progress update to the current conversation when genuinely reply-critical work would otherwise leave the user waiting. Use it before long tasks with multiple substantive tool steps, research, long vault scans, or substantial recovery from PDFs, lab reports, images, screenshots, CSVs, large pasted text, meal/product/supplement labels, workout exports, wearable exports, or health documents. If the requested answer depends on a child and the wait may exceed ordinary latency, send it after spawning. Background work does not delay the reply or trigger an update by itself. Do not leave the user silent during reply-critical work; Linq/iMessage quota is not a reason to withhold a useful update. For work likely to finish in about a minute or less, send at most one update. If the turn runs unusually long after substantial tool work, send up to two more at real milestones; never a fourth. Report only real progress. Skip automatically transcribed voice memo or audio content unless manual media tools or broader long-running work are needed. Do not use for individual tool loops, searches, reads, page checks, clicks, status churn, skill-file reads alone, setup checks, routine single-command vault reads, quick single-step replies, one-shot logging/capture/memory saves that only need a straightforward write, or final conclusions.',
   inputSchema: {
     type: 'object',
     additionalProperties: false,
@@ -1006,6 +1020,8 @@ export const MURPH_COMPUTER_FINISH_RUN_TOOL = {
 
 const MURPH_BASE_DYNAMIC_TOOLS = [
   MURPH_SEND_PROGRESS_UPDATE_TOOL,
+  MURPH_AUTOMATION_TOOL,
+  MURPH_DEVICE_TOOL,
   MURPH_ASSISTANT_STYLE_TOOL,
   MURPH_ATTACH_RESPONSE_MEDIA_TOOL,
   MURPH_GENERATE_IMAGE_TOOL,
@@ -1046,10 +1062,12 @@ export interface MurphDynamicToolAvailability {
   assistantConfigurationAvailable?: boolean | null
   allowFinishWithoutReply?: boolean | null
   allowMessageReactions?: boolean | null
+  automationAvailable?: boolean | null
   computerToolsAvailable?: boolean | null
   progressUpdatesAvailable?: boolean | null
   connectedAppsAvailable?: boolean | null
   connectedAppsManageAvailable?: boolean | null
+  deviceAvailable?: boolean | null
   familyPlanAvailable?: boolean | null
   planUsageAvailable?: boolean | null
   subscriptionAvailable?: boolean | null
@@ -1081,6 +1099,8 @@ const defaultOff = (
 const TOOL_AVAILABILITY: ReadonlyMap<MurphDynamicTool, AvailabilityPredicate> =
   new Map<MurphDynamicTool, AvailabilityPredicate>([
     [MURPH_SEND_PROGRESS_UPDATE_TOOL, defaultOn((a) => a.progressUpdatesAvailable)],
+    [MURPH_AUTOMATION_TOOL, defaultOff((a) => a.automationAvailable)],
+    [MURPH_DEVICE_TOOL, defaultOff((a) => a.deviceAvailable)],
     [MURPH_ASSISTANT_STYLE_TOOL, defaultOff((a) => a.assistantStyleSettingsAvailable)],
     [MURPH_FINISH_WITHOUT_REPLY_TOOL, defaultOn((a) => a.allowFinishWithoutReply)],
     [MURPH_REACT_TO_MESSAGE_TOOL, defaultOff((a) => a.allowMessageReactions)],
@@ -1661,6 +1681,8 @@ type MurphGroupToolRequest =
 
 export type MurphDynamicToolRequest =
   | ConnectedAppsDynamicToolRequest
+  | AutomationDynamicToolRequest
+  | DeviceDynamicToolRequest
   | AssistantStyleDynamicToolRequest
   | {
       kind: 'attach-response-media'
@@ -1839,6 +1861,22 @@ export function readMurphDynamicToolRequest(
       namespace: request.namespace,
       tool: request.tool,
     }
+  }
+
+  const automationRequest = readAutomationDynamicToolRequest({
+    arguments: request.arguments,
+    tool: request.tool,
+  })
+  if (automationRequest) {
+    return automationRequest
+  }
+
+  const deviceRequest = readDeviceDynamicToolRequest({
+    arguments: request.arguments,
+    tool: request.tool,
+  })
+  if (deviceRequest) {
+    return deviceRequest
   }
 
   const connectedAppsRequest = readConnectedAppsDynamicToolRequest({
@@ -2252,6 +2290,10 @@ export async function executeMurphDynamicToolRequest(input: {
   }
 
   switch (input.request.kind) {
+    case 'invalid-automation-arguments':
+      return toolTextResult(false, 'invalid automation arguments')
+    case 'invalid-device-arguments':
+      return toolTextResult(false, 'invalid device arguments')
     case 'invalid-connected-apps-arguments':
       return toolTextResult(false, 'invalid connected-app arguments')
     case 'invalid-assistant-style-arguments':
@@ -2319,6 +2361,34 @@ export async function executeMurphDynamicToolRequest(input: {
         progressDelivery: input.progressDelivery,
         text: input.request.text,
       })
+    case 'automation': {
+      const automationTool = input.hostedToolContext?.automationTool ?? null
+      if (!automationTool) {
+        return toolTextResult(
+          false,
+          'automation management is unavailable for this turn',
+        )
+      }
+      return await executeAutomationDynamicTool({
+        abortSignal: input.abortSignal ?? null,
+        automationTool,
+        request: input.request,
+      })
+    }
+    case 'device': {
+      const deviceTool = input.hostedToolContext?.deviceTool ?? null
+      if (!deviceTool) {
+        return toolTextResult(
+          false,
+          'device management is unavailable for this turn',
+        )
+      }
+      return await executeDeviceDynamicTool({
+        abortSignal: input.abortSignal ?? null,
+        deviceTool,
+        request: input.request,
+      })
+    }
     case 'assistant-style': {
       const hostedToolContext = input.hostedToolContext ?? null
       return await executeAssistantStyleDynamicTool({

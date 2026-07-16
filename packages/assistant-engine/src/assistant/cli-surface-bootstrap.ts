@@ -65,6 +65,20 @@ const assistantCliSurfaceRetiredCommandNames = new Set([
   'assistant style set',
   'assistant style show',
 ])
+const assistantCliSurfaceHostedUnavailableCommandNames = new Set([
+  'automation edit',
+  'automation import-json',
+  'automation save',
+  'automation set-status',
+  'device account disconnect',
+  'device account list',
+  'device account reconcile',
+  'device account show',
+  'device connect',
+  'device daemon start',
+  'device daemon status',
+  'device daemon stop',
+])
 
 let cachedPrebuiltAssistantCliSurfaceContractPromise:
   | Promise<string | null>
@@ -125,6 +139,7 @@ export function buildAssistantCliSurfaceContract(
 
 export function scopeAssistantCliSurfaceContractForAssistant(input: {
   contract: string | null
+  hostedRuntime?: boolean
 }): string | null {
   if (input.contract === null) {
     return input.contract
@@ -132,19 +147,25 @@ export function scopeAssistantCliSurfaceContractForAssistant(input: {
 
   const contract = input.contract
     .split('\n')
-    .flatMap(scopeAssistantCliSurfaceContractLine)
+    .flatMap((line) => scopeAssistantCliSurfaceContractLine(
+      line,
+      input.hostedRuntime ?? false,
+    ))
     .join('\n')
     .trim()
 
   return contract || null
 }
 
-function scopeAssistantCliSurfaceContractLine(line: string): string[] {
+function scopeAssistantCliSurfaceContractLine(
+  line: string,
+  hostedRuntime: boolean,
+): string[] {
   const normalizedLine = line.trim()
   const commandMatch = /^- `([^`]+)`/u.exec(normalizedLine)
   if (
     commandMatch !== null
-    && assistantCliSurfaceRetiredCommandNames.has(commandMatch[1])
+    && shouldOmitAssistantCliSurfaceCommand(commandMatch[1], hostedRuntime)
   ) {
     return []
   }
@@ -162,7 +183,7 @@ function scopeAssistantCliSurfaceContractLine(line: string): string[] {
   const retainedLeaves = leaves.filter((leaf) => {
     const leafName = leaf.slice(1, -1)
     const commandName = family === 'root' ? leafName : `${family} ${leafName}`
-    return !assistantCliSurfaceRetiredCommandNames.has(commandName)
+    return !shouldOmitAssistantCliSurfaceCommand(commandName, hostedRuntime)
   })
   if (retainedLeaves.length === leaves.length) {
     return [line]
@@ -172,6 +193,15 @@ function scopeAssistantCliSurfaceContractLine(line: string): string[] {
   }
 
   return [`- \`${family}\`: ${retainedLeaves.join(', ')}.`]
+}
+
+function shouldOmitAssistantCliSurfaceCommand(
+  commandName: string,
+  hostedRuntime: boolean,
+): boolean {
+  return assistantCliSurfaceRetiredCommandNames.has(commandName)
+    || (hostedRuntime
+      && assistantCliSurfaceHostedUnavailableCommandNames.has(commandName))
 }
 
 async function readPrebuiltAssistantCliSurfaceContractFromPath(

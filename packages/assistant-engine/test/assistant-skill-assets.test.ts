@@ -682,15 +682,15 @@ describe('assistant skill assets', () => {
       "For changes or stopping, follow the developer prompt's shared automation",
     )
     expect(raw).not.toContain('the current group channel')
-    expect(raw).toContain("the group's chosen name as the positional `<title>`")
+    expect(raw).toContain('`title`: the group\'s chosen name')
     expect(raw).toContain('require every email subject to start with that exact name')
     expect(raw).toContain('Future notification turns may not read this skill')
-    expect(raw).toContain('Use exactly `--slug group-health-newsletter`')
+    expect(raw).toContain('`slug`: exactly `group-health-newsletter`')
     expect(raw).toContain('Any other slug will not be able to send')
-    expect(raw).toContain('--schedule-cron "0 9 * * 0"')
-    expect(raw).toContain('--continuity-policy fresh')
+    expect(raw).toContain('`schedule`: `{ "kind": "cron", "expression": "0 9 * * 0" }`')
+    expect(raw).toContain('`continuityPolicy`: `fresh`')
     expect(raw).toMatch(
-      /until its\s+`vault-cli automation` command succeeds[\s\S]*never\s+turn a failed command into a confirmation/u,
+      /until\s+`murph\.automation` returns success[\s\S]*never\s+turn a failed action into a confirmation/u,
     )
     expect(raw).toContain('next natural cron occurrence')
     expect(raw).toContain('Never create an')
@@ -1320,6 +1320,53 @@ describe('assistant skill assets', () => {
     expect(raw).toContain(
       'It should not create a new habit engine, psychology profile, scoring model, or persistence system.',
     )
+    expect(raw).toContain('### Grounding gate before a durable loop')
+    expect(compact).toContain(
+      'For a repeated-behavior support loop Murph is helping design, satisfy the grounding gate below before scheduling or continuing support.',
+    )
+    expect(compact).toContain(
+      'target behavior, tiny version, anchor, and repair policy are enough only to discuss or take a one-time action.',
+    )
+    expect(compact).toContain(
+      'An exact user-directed recurring reminder or check-in whose action and timing are already specified may be created under the normal automation, safety, and authorization rules.',
+    )
+    expect(compact).toContain(
+      'Do not ask for motivation, baseline, or prior attempts unless one would materially change that requested automation.',
+    )
+    expect(compact).toContain(
+      'For Murph-designed habit regimens, experiment support loops, recurring reminders, or other durable behavior support, first understand enough of the user\'s actual situation to choose well',
+    )
+    expect(compact).toContain(
+      'the desired outcome and why it matters, in the user\'s words',
+    )
+    expect(compact).toContain(
+      'Never infer a “self-evident” reason from the outcome itself.',
+    )
+    expect(compact).toContain(
+      'the user selected this outcome as what they want to work on now, or explicitly asked for help with it',
+    )
+    expect(compact).toContain(
+      'a generic request to continue onboarding is not selection',
+    )
+    expect(compact).toContain(
+      'the user chooses the thread before Murph asks its baseline, obstacle, prior-attempt, or support-fit questions',
+    )
+    expect(compact).toContain(
+      'relevant existing records, connected data, logs, labs, or active plans that could change the behavior or its timing',
+    )
+    expect(compact).toContain(
+      'the user\'s current behavior, routine, and practical baseline',
+    )
+    expect(compact).toContain(
+      'what they have already tried and what happened',
+    )
+    expect(compact).toContain(
+      'If decision-changing evidence is still being parsed or saved in the background',
+    )
+    expect(raw).toContain('### 1. Ground the outcome and current pattern')
+    expect(compact).toContain(
+      'A bare outcome by itself is not enough to activate a durable support loop.',
+    )
     expect(compact).toContain(
       'When `murph-onboarding` returns to a parked desired outcome after the health foundation, follow that owner\'s exact bounded behavioral-fit sequence, question budget, early-stop rule, and persistence policy.',
     )
@@ -1580,6 +1627,15 @@ describe('assistant skill assets', () => {
 
     expect(raw).toContain(ASSISTANT_FIRST_CONTACT_WELCOME_MESSAGE)
     expect(raw).toContain('private personal health assistant')
+    expect(ASSISTANT_FIRST_CONTACT_WELCOME_MESSAGE).toContain(
+      'help across your health',
+    )
+    expect(ASSISTANT_FIRST_CONTACT_WELCOME_MESSAGE).toContain(
+      'build healthier habits',
+    )
+    expect(ASSISTANT_FIRST_CONTACT_WELCOME_MESSAGE).toContain(
+      'make progress toward outcomes you genuinely care about',
+    )
     expect(compact).toContain(
       'Do not turn memory controls into opening copy or a required onboarding talking point.',
     )
@@ -1598,11 +1654,30 @@ describe('assistant skill assets', () => {
     expect(compact).toContain(
       'That request may answer one or more onboarding checkpoints, but it does not complete onboarding by itself.',
     )
+    expect(raw).toContain('## Delegating onboarding work')
     expect(compact).toContain(
-      '“I want to get stronger” after Murph asks what the user wants from their health is an aspiration to save and park.',
+      'This skill explicitly invokes the global `Non-blocking delegation` contract; the user does not need to ask for a subagent separately.',
     )
     expect(compact).toContain(
-      '“Can you make me a strength plan?” is an immediate request to handle.',
+      'Follow that contract for eligibility, child ownership, tool boundaries, confirmation, and fallback.',
+    )
+    expect(compact).toContain(
+      'For onboarding, bundle related facts only when they share one canonical owner and evidence workflow',
+    )
+    expect(compact).toContain(
+      'Use separate fresh children for distinct owner or source pipelines even when the facts arrived in one answer.',
+    )
+    expect(compact).toContain(
+      'The medical-and-safety checkpoint below is the one explicit exception: one answer may be batched in a single child across its named clinical owners',
+    )
+    expect(compact).toContain(
+      'Independent children may outlive the reply; do not keep the root turn open solely to wait for them.',
+    )
+    expect(compact).toContain(
+      'A spawn means the save is pending, not complete.',
+    )
+    expect(compact).toContain(
+      'Claim a save only after a child receipt or later canonical read confirms it',
     )
     expect(raw).toContain('### 2. Minimal identity')
     expect(raw).toContain(
@@ -1633,8 +1708,12 @@ describe('assistant skill assets', () => {
     expect(raw).toContain('**Explore:**')
     expect(raw).toContain('### 3. Find one or two aspiration anchors')
     expect(compact).toContain(
-      'ask up to three short aspiration questions total, one per message',
+      'The broad anchor question does not consume the clarification budget. After it, ask up to three short clarifiers total, one per message.',
     )
+    expect(compact).toContain(
+      'If the user says they do not know, gives no reason, or declines, accept that answer without pressure or repetition and park the thread with motivation explicitly unknown.',
+    )
+    expect(compact).toContain('A list of desired outcomes is not a reason')
     expect(raw).toContain('1. What would success look or feel like?')
     expect(raw).toContain('2. Why would that matter?')
     expect(raw).toContain('3. Is this the main priority or one of several?')
@@ -1666,10 +1745,56 @@ describe('assistant skill assets', () => {
     expect(raw).toContain('6. **Recent blood tests or lab panels.**')
     expect(compact).toContain('Feel free to send me a voice memo.')
     expect(compact).toContain(
+      'This is the default delight moment for one generated onboarding voice memo.',
+    )
+    expect(compact).toContain(
+      'attach the current protocol-or-experiment question as a short voice memo and leave the final response text empty',
+    )
+    expect(compact).toContain(
+      'This is an explicit product-flow voice preference; do not require the user to ask for voice separately.',
+    )
+    expect(compact).toContain(
       'a photo of bottles or labels is welcome if easier',
     )
+    expect(compact).toContain(
+      '$MURPH_ASSISTANT_SKILLS_ROOT/micronutrients-supplements/SKILL.md',
+    )
+    expect(compact).toContain(
+      'The child must resolve exact labels before saving—one label lookup for one product or the owning skill\'s batch lookup for several',
+    )
+    expect(compact).toContain(
+      'An existing name-only or otherwise partial match is not complete',
+    )
+    expect(compact).toContain(
+      'Do not create shallow name-only supplement records merely because the typed product names look clear.',
+    )
+    expect(compact).toContain(
+      'use one delegated child to save that single answer across the named medical owners under the explicit batching exception above',
+    )
+    expect(compact).toContain(
+      'Send the next checkpoint while that save continues in the background.',
+    )
+    expect(compact).toContain(
+      'Do not run a separate foreground schema check and one foreground command per negative assertion',
+    )
+    expect(raw).toContain('https://my.functionhealth.com/documents')
+    expect(compact).toContain(
+      'download the Lab Results of Record PDFs, and send those files to Murph. Do not wait for them to ask how.',
+    )
+    expect(compact).toContain(
+      'Naming the provider without supplying results does not start a parse child; wait for an actual PDF, paste, or other durable evidence.',
+    )
+    expect(compact).toContain(
+      'always use the delegated path above when available—even for one short or clean-looking report',
+    )
+    expect(compact).toContain(
+      'The parent should send the next visible onboarding step instead of parsing the report in the main turn or waiting for the child.',
+    )
+    expect(compact).toContain(
+      'Until a receipt or later canonical read confirms the result, describe the parse as in progress rather than saved.',
+    )
     expect(raw).toContain(
-      'Save useful answers in the same turn to their existing canonical owner',
+      'Route useful answers to their existing canonical owner in the same turn',
     )
     expect(compact).toContain(
       'Save a durable request not to discuss a category as a Preferences memory in the user\'s words.',
@@ -1681,11 +1806,129 @@ describe('assistant skill assets', () => {
       '“not lifting right now” can resolve movement context; it does not authorize a workout routine.',
     )
     expect(raw).toContain('### 6. Return to an open thread and choose together')
+    const aspirationIndex = raw.indexOf('### 3. Find one or two aspiration anchors')
+    const parkIndex = raw.indexOf('### 4. Reflect, save, and park the threads')
+    const foundationIndex = raw.indexOf('### 5. Resolve the foundation checkpoints')
+    const returnIndex = raw.indexOf('### 6. Return to an open thread and choose together')
+    const completionIndex = raw.indexOf('## Completion')
+    const replyRulesIndex = raw.indexOf('## Reply and follow-up rules')
+    expect(aspirationIndex).toBeGreaterThan(-1)
+    expect(parkIndex).toBeGreaterThan(aspirationIndex)
+    expect(foundationIndex).toBeGreaterThan(parkIndex)
+    expect(returnIndex).toBeGreaterThan(foundationIndex)
+    expect(completionIndex).toBeGreaterThan(returnIndex)
+    expect(replyRulesIndex).toBeGreaterThan(completionIndex)
+
+    const aspirationSection = raw.slice(aspirationIndex, parkIndex)
+    const returnSection = raw.slice(returnIndex, completionIndex)
+    const completionSection = raw.slice(completionIndex, replyRulesIndex)
+    expect(
+      [...aspirationSection.matchAll(/^\d+\. (.+\?)$/gmu)]
+        .map((match) => match[1]),
+    ).toEqual([
+      'What would success look or feel like?',
+      'Why would that matter?',
+      'Is this the main priority or one of several?',
+    ])
+
+    const behavioralFitQuestionList = returnSection
+      .slice(
+        returnSection.indexOf('Useful unanswered areas are:'),
+        returnSection.indexOf('Do not ask why the outcome matters again'),
+      )
+    expect(behavioralFitQuestionList.match(/^- /gmu)).toHaveLength(3)
+    expect(returnSection).toContain(
+      'Ask up to three short questions across separate replies to fill only the\n' +
+      'decision-changing gaps',
+    )
+    expect(returnSection).toContain(
+      'If\nmotivation remains unknown or declined, collaborate only on a one-time first\nstep or leave the thread open; do not activate a Murph-designed durable loop.',
+    )
+    expect(completionSection.match(/^\d+\. /gmu)).toHaveLength(8)
+
+    const immediateNeedSection = raw
+      .slice(
+        raw.indexOf('## The immediate need wins'),
+        raw.indexOf('## Delegating onboarding work'),
+      )
+      .replace(/\s+/gu, ' ')
+    const parkSection = raw
+      .slice(parkIndex, foundationIndex)
+      .replace(/\s+/gu, ' ')
+    const persistenceSection = raw
+      .slice(raw.indexOf('## Context persistence'), completionIndex)
+      .replace(/\s+/gu, ' ')
+    const compactCompletionSection = completionSection.replace(/\s+/gu, ' ')
+    const onboardingDecisionScenarios = [
+      {
+        contract:
+          '“I want to get stronger” after Murph asks what the user wants from their health is an aspiration to save and park.',
+        section: immediateNeedSection,
+        userMessage: 'I want to get stronger',
+      },
+      {
+        contract:
+          '“Can you make me a strength plan?” is an immediate request to handle.',
+        section: immediateNeedSection,
+        userMessage: 'Can you make me a strength plan?',
+      },
+      {
+        contract:
+          'If they ask to pause, leave onboarding open and let the existing managed onboarding follow-up automation own continuation.',
+        section: parkSection,
+        userMessage: 'Pause for now',
+      },
+      {
+        contract: 'A simple “later” remains unresolved.',
+        section: persistenceSection,
+        userMessage: 'I can answer that later',
+      },
+      {
+        contract:
+          'Do not use `user_declined` for one skipped category',
+        section: compactCompletionSection,
+        userMessage: 'Skip supplements',
+      },
+      {
+        contract:
+          'If the user clearly declines onboarding or further setup as a whole, use `--reason user_declined`, verify completion, and do not ask another onboarding question.',
+        section: compactCompletionSection,
+        userMessage: 'I do not want to do onboarding',
+      },
+    ] as const
+
+    for (const scenario of onboardingDecisionScenarios) {
+      expect(
+        scenario.section,
+        `onboarding decision for: ${scenario.userMessage}`,
+      ).toContain(scenario.contract)
+    }
     expect(compact).toContain(
-      'Ask up to three short questions across separate replies to deepen Murph\'s understanding of the user\'s behavioral fit—usually two or three when those answers are still missing, and fewer when context already supplies them.',
+      'First make one bounded evidence pass across the foundation, relevant canonical records, connected data, and any completed delegated ingestion that could materially change the choice.',
+    )
+    expect(compact).toContain(
+      'Before asking baseline, obstacle, prior-attempt, or support questions, ask which thread—if any—the user actually wants to work on now.',
+    )
+    expect(compact).toContain(
+      'A generic “let\'s continue” that only advances onboarding before this choice question is not consent to a Murph-selected health priority, deeper behavior discovery, or a plan.',
+    )
+    expect(compact).toContain(
+      'Keep this thread-selection question separate from the bounded behavioral-fit questions below.',
+    )
+    expect(compact).toContain(
+      'Ground the outcome and reason, the user\'s current behavior or routine, what existing data says, what they have already tried, and the main conditions that help or disrupt follow-through.',
+    )
+    expect(compact).toContain(
+      'Ask up to three short questions across separate replies to fill only the decision-changing gaps',
+    )
+    expect(compact).toContain(
+      'Do not create a habit regimen, reminder, experiment support loop, or other durable behavior-change setup until that grounding is sufficient',
     )
     expect(compact).toContain(
       'If the visible conversation shows a foundation question or answer after an aspiration, treat the reflect-and-park transition as already done.',
+    )
+    expect(compact).toContain(
+      'This one post-park legacy-recovery question satisfies aspiration readiness for that already-open flow',
     )
     expect(compact).toContain(
       'Offer the foundation as an optional way to see where attention may be useful.',
@@ -1707,10 +1950,13 @@ describe('assistant skill assets', () => {
       'A thread disclosed during discovery was reflected, saved when concrete, and explicitly parked before foundation collection.',
     )
     expect(compact).toContain(
+      'Murph asked once for a missing reason a desired change matters; that reason is known from the user\'s own words or is explicitly unknown or declined.',
+    )
+    expect(compact).toContain(
       'Murph returned to an open thread with the relevant new context',
     )
     expect(compact).toContain(
-      'The user collaboratively chose a first step, explicitly chose to leave the thread open without acting, or declined further help on it.',
+      'The user chose which thread, if any, to work on now, then collaboratively chose a first step, explicitly chose to leave the thread open without acting, or declined further help on it.',
     )
     expect(compact).toContain(
       'An experiment, plan, support loop, wearable connection, lab upload, group, or specific positive health fact is not required.',
@@ -1746,7 +1992,6 @@ describe('assistant skill assets', () => {
     expect(raw).not.toContain(
       'two or three lightweight, bounded first-experiment options',
     )
-    expect(raw).not.toContain('## Delegating slow onboarding saves')
     expect(raw).not.toContain('/tmp/')
     expect(raw).not.toContain('.codex-hosted')
   })
