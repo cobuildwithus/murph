@@ -431,6 +431,93 @@ describe("hosted workspace runtime entrypoint", () => {
     }
   });
 
+  test("links host abort into active idle-checkpoint construction", async () => {
+    const vaultRoot = await mkdtemp(path.join(tmpdir(), "murph-workspace-entrypoint-"));
+    const hostAbortController = new AbortController();
+    const hostAbortReason = new Error("host aborted during checkpoint construction");
+    const snapshotStarted = createDeferred<void>();
+    const snapshotAborted = createDeferred<unknown>();
+    const checkpointRequests: HostedWorkspaceCheckpointRequest[] = [];
+    let resultPromise: ReturnType<typeof runHostedWorkspaceRuntimeJobInProcess> | null = null;
+
+    try {
+      await initializeVault({ createdAt: TEST_NOW, vaultRoot });
+      resultPromise = runHostedWorkspaceRuntimeJobInProcess(
+        createWorkspaceRuntimeJobInput({
+          request: {
+            attemptId: "attempt_synthetic_host_abort_during_checkpoint",
+            idleCheckpointDelayMs: 1,
+            leaseGeneration: "7",
+            userId: TEST_USER_ID,
+            workspaceVersion: "0",
+          },
+        }),
+        {
+          async createCheckpointSnapshot(_snapshotInput, context) {
+            const signal = context?.signal;
+            assert.ok(signal, "Checkpoint construction must receive a linked abort signal.");
+            snapshotStarted.resolve();
+            return await new Promise<never>((_resolve, reject) => {
+              const rejectForAbort = () => {
+                snapshotAborted.resolve(signal.reason);
+                reject(signal.reason);
+              };
+              if (signal.aborted) {
+                rejectForAbort();
+                return;
+              }
+              signal.addEventListener("abort", rejectForAbort, { once: true });
+            });
+          },
+          async importItem() {
+            return { status: "imported" };
+          },
+          platform: createPlatform({
+            mailboxPort: createMailboxPort({
+              events: [],
+              items: [createMailboxItem({ laneSeq: "1" })],
+            }),
+            workspacePort: createWorkspacePort({
+              checkpointRequests,
+              events: [],
+              workspace: createWorkspaceState({ version: "0" }),
+            }),
+          }),
+          async runAssistantPhase() {
+            return {
+              checkpointReason: "assistant_runtime_commit" as const,
+              progressed: true,
+            };
+          },
+          signal: hostAbortController.signal,
+          vaultRoot,
+        },
+      );
+
+      await withRealTimeout(
+        snapshotStarted.promise,
+        10_000,
+        () => "Idle checkpoint construction did not start.",
+      );
+      hostAbortController.abort(hostAbortReason);
+
+      assert.equal(
+        await withRealTimeout(
+          snapshotAborted.promise,
+          10_000,
+          () => "Host abort did not reach checkpoint construction.",
+        ),
+        hostAbortReason,
+      );
+      assert.equal(await resultPromise.catch((error: unknown) => error), hostAbortReason);
+      assert.equal(checkpointRequests.length, 0);
+    } finally {
+      hostAbortController.abort(hostAbortReason);
+      await resultPromise?.catch(() => undefined);
+      await removeTempRoot(vaultRoot);
+    }
+  });
+
   test("keeps runner ownership until an aborted initial mailbox import settles", async () => {
     const vaultRoot = await mkdtemp(path.join(tmpdir(), "murph-workspace-entrypoint-"));
     const hostAbortController = new AbortController();

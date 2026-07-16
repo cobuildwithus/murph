@@ -92,24 +92,31 @@ follow-up automation.
 
 This skill explicitly invokes the global `Non-blocking delegation` contract;
 the user does not need to ask for a subagent separately. Follow that contract
-for eligibility, child ownership, tool boundaries, confirmation, and fallback.
+for eligibility, durable parent ownership, tool boundaries, confirmation, and
+fallback.
 
-For onboarding, bundle related facts only when they share one canonical owner
-and evidence workflow. Use separate fresh children for distinct owner or source
-pipelines even when the facts arrived in one answer. The medical-and-safety
-checkpoint below is the one explicit exception: one answer may be batched in a
-single child across its named clinical owners because it is one evidence
-workflow with a compact persistence path.
+Before any child starts, the parent must save the smallest truthful canonical
+fact or raw source and verify the receipt. Batch related quick writes in one
+compact parent call. A child may enrich only the exact durable record ids or
+source refs returned by that save; it never owns a promised save or parse. The
+medical-and-safety checkpoint stays entirely in one compact parent batch.
 
-Briefly acknowledge that Murph is saving or checking the context, then send the
-next unresolved checkpoint while the child works. Independent children may
-outlive the reply; do not keep the root turn open solely to wait for them. A
-spawn means the save is pending, not complete. Claim a save only after a child
-receipt or later canonical read confirms it, and leave onboarding open while a
-foundation-critical save is pending. If the user's current request truly
-depends on the child's result, treat it as reply-critical work and follow the
-global progress-update contract. Do not expose internal subagent terminology
-unless the user asks.
+Every onboarding child is a one-shot leaf worker, and only one may be active.
+After spawning one, do not message, follow up with, resume, reuse, close, or
+interrupt it; do not ask it to spawn another child; and do not permit an
+unawaited/background terminal. If the bounded task cannot complete directly in
+one child turn, keep it in the parent, use progress updates when needed, and do
+not spawn a child.
+
+After the parent save succeeds, briefly acknowledge only what its receipt
+proves, then send the next unresolved checkpoint. An optional child may outlive
+the reply; do not keep the root turn open solely to wait for it. Its spawn is
+not durable operation state: do not say enrichment is pending, processing, or
+in progress, and do not promise it will finish. Claim exact-label or structured
+child enrichment only after canonical readback confirms it. If the user's
+current request depends on the result, keep the work in the parent and follow
+the global progress-update contract. Do not expose internal subagent
+terminology unless the user asks.
 
 ## Relationship promise
 
@@ -304,29 +311,30 @@ it materially improves safety or keeps the conversation natural:
    exact products and timing can change interpretation, safety, and lab
    context. Mention that a photo of bottles or labels is welcome if easier. If
    the user names current products, read and follow
-   `$MURPH_ASSISTANT_SKILLS_ROOT/micronutrients-supplements/SKILL.md`, then use
-   the delegated path above whenever a V2 spawn tool is available. The child
-   must resolve exact labels before saving—one label lookup for one product or
-   the owning skill's batch lookup for several—and preserve product identity,
-   manufacturer, serving size, the full active ingredient panel, provenance,
-   and uncertainty when available. Check current records before saving. An
-   existing name-only or otherwise partial match is not complete: enrich the
-   matching canonical record in place when the owner supports it instead of
-   skipping the lookup or creating a duplicate. Do not create shallow
-   name-only supplement records merely because the typed product names look
-   clear.
+   `$MURPH_ASSISTANT_SKILLS_ROOT/micronutrients-supplements/SKILL.md`. First use
+   one compact parent batch to save each user-reported product identity, brand
+   when supplied, and active status, and capture the returned canonical ids.
+   This intentionally minimal record is durable reported context, not a claim
+   that the exact label or ingredient panel is known. Check current records and
+   update a matching partial record instead of creating a duplicate. When a V2
+   spawn tool is available and no child is active, spawn one by default from
+   those exact ids when a record is incomplete and exact-label enrichment can
+   materially improve later help. Skip it when the record is already complete
+   or enrichment cannot change later help. Use one label lookup per product or
+   the owning skill's batch lookup for several, then enrich the matching records
+   with manufacturer, serving size, full active ingredient panel, provenance,
+   and uncertainty when available. Until
+   canonical readback proves that enrichment, say only that exact
+   label details are unconfirmed.
 5. **Medical and safety context.** Ask one optional open question covering
    prescription or OTC medications, diagnosed conditions, allergies or
    intolerances, and pregnancy or nursing. Explain that this helps Murph avoid
    unsafe or irrelevant suggestions. Ask once as one checkpoint, not as four
-   separate turns. When the answer yields several canonical facts or negative
-   clinical assertions, use one delegated child to save that single answer
-   across the named medical owners under the explicit batching exception above.
-   Send the next checkpoint while that save continues in the background. Do not
-   claim the medical context was saved until a child receipt or later canonical
-   read confirms it. Do not run a separate foreground schema check and one
-   foreground command per negative assertion; if no child is available, use the
-   existing compact batch surface.
+   separate turns. Save every supported fact or negative clinical assertion in
+   one compact parent batch across the named medical owners and verify its
+   receipts before the next visible checkpoint. Do not spawn a child for this
+   bounded persistence work. Do not run a separate foreground schema check and
+   one command per negative assertion.
 6. **Recent blood tests or lab panels.** Ask whether recent labs exist and
    explain that they can ground baselines and future comparisons. A clear “no”
    or explicit skip resolves the checkpoint. If results exist but are not
@@ -339,15 +347,20 @@ it materially improves safety or keeps the conversation natural:
    for an actual PDF, paste, or other durable evidence.
 
    When the user supplies a lab PDF, pasted panel, or other blood-test document
-   during onboarding and its full parse is not needed to answer an immediate
-   question, always use the delegated path above when available—even for one
-   short or clean-looking report. The child must work from durable evidence,
-   preserve the raw source through an existing canonical surface, extract the
-   recoverable panels, analytes, dates, units, ranges, flags, and provenance,
-   and own the canonical blood-test writes. The parent should send the next
-   visible onboarding step instead of parsing the report in the main turn or
-   waiting for the child. Until a receipt or later canonical read confirms the
-   result, describe the parse as in progress rather than saved.
+   during onboarding and its full parse is not needed for an immediate answer,
+   the parent must first verify that the raw source already has a durable
+   attachment, document, or import ref, or import it through an existing
+   canonical surface before replying. When a V2 spawn tool is available and no
+   child is active, spawn one by default from that exact source when structured
+   extraction can materially improve later help. Skip it when the source is
+   already structured or extraction cannot change later help. The child may
+   extract panels, analytes, dates, units, ranges, flags, and provenance and
+   write idempotently against the source. Send the next visible
+   onboarding step after the durable-source receipt instead of waiting for
+   optional extraction. Do not describe extraction as pending or in progress;
+   until canonical readback proves it, say structured lab details are
+   unconfirmed. If an immediate answer depends on the parse, keep it in the
+   parent and use progress updates.
 
 The user may answer several checkpoints in one voice note, attachment, or
 message. Save everything useful and do not force the canonical order after the
@@ -378,10 +391,9 @@ below.
 
 Once the user selects or confirms a desired change likely to depend on repeated
 behavior, read `behavior-followthrough` before choosing the first step. First
-make one bounded
-evidence pass across the foundation, relevant canonical records, connected
-data, and any completed delegated ingestion that could materially change the
-choice. Ground the outcome and reason, the user's current behavior or routine,
+make one bounded evidence pass across the foundation, relevant canonical
+records, connected data, and any confirmed enrichment that could materially
+change the choice. Ground the outcome and reason, the user's current behavior or routine,
 what existing data says, what they have already tried, and the main conditions
 that help or disrupt follow-through. Do not scan unrelated health history.
 
@@ -430,13 +442,14 @@ support timing, delivery, due evaluation, or retry.
 
 ## Context persistence
 
-Route useful answers to their existing canonical owner in the same turn,
-either through a quick direct write or the delegated path above: structured
-records for typed facts such as goals, regimens, supplements, conditions,
-allergies, experiments, and Habitat; preferred name through `memory set-name`;
-Identity or Context memory only when no structured owner exists. Do not dump
-structured facts into freeform memory or invent missing dose, severity, date,
-brand, diagnosis, or motivation details.
+Route useful answers to their existing canonical owner in the same turn. The
+parent saves the smallest truthful canonical fact or durable source before its
+visible reply; optional children may only enrich exact returned ids or refs.
+Use structured records for typed facts such as goals, regimens, supplements,
+conditions, allergies, experiments, and Habitat; preferred name through
+`memory set-name`; Identity or Context memory only when no structured owner
+exists. Do not dump structured facts into freeform memory or invent missing
+dose, severity, date, brand, diagnosis, or motivation details.
 
 Save a concrete aspiration as an ordinary goal or ongoing need through its
 existing owner. The visible conversation and resume context carry the park and
@@ -459,8 +472,10 @@ of leaving contradictory instructions.
 
 Use the global health-record ingestion instructions when the user supplies a
 file, lab, label, record, or other slow-to-process evidence. Do not mark
-onboarding complete while a foundation-critical save is still pending unless
-the user explicitly defers that evidence.
+onboarding complete until each foundation-critical minimum fact or raw source
+has a verified durable receipt or the user explicitly defers it. Optional
+enrichment does not block completion unless its result would change the next
+decision; keep reply-critical parsing in the parent.
 
 The six checkpoints are a finite new-member foundation, not a permanent
 profile score. Outside this foundation, every proactive context question must
@@ -492,8 +507,10 @@ Onboarding is complete with `user_answered` only when all of these are true:
 7. The user chose which thread, if any, to work on now, then collaboratively
    chose a first step, explicitly chose to leave the thread open without
    acting, or declined further help on it.
-8. Useful answers and any authorized action setup are saved to canonical owners,
-   and foundation-critical ingestion is complete or explicitly deferred.
+8. Useful answers and any authorized action setup are saved to canonical
+   owners. Each foundation-critical minimum fact or raw source has a verified
+   durable receipt or is explicitly deferred; optional enrichment is either
+   confirmed, not decision-changing, or handled in the parent before use.
 
 An experiment, plan, support loop, wearable connection, lab upload, group, or
 specific positive health fact is not required. The checkpoint is required; the

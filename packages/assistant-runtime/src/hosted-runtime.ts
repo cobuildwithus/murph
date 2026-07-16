@@ -882,7 +882,12 @@ export async function runHostedWorkspaceRuntimeJobInProcess(
     async (snapshotInput, context) => {
       await pauseDetachedAssistantAskBeforeWorkspaceBoundary();
       assertRuntimeNotAborted();
-      const snapshot = await options.createCheckpointSnapshot(snapshotInput, context);
+      const checkpointSignal = context?.signal
+        ? AbortSignal.any([context.signal, runtimeAbortController.signal])
+        : runtimeAbortController.signal;
+      const snapshot = await options.createCheckpointSnapshot(snapshotInput, {
+        signal: checkpointSignal,
+      });
       assertRuntimeNotAborted();
       latestCheckpointSnapshotCleanForWarmReuse =
         snapshot.localWorkspaceCleanForWarmReuse === true;

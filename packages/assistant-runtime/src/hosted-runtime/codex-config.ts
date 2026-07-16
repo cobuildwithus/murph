@@ -582,6 +582,8 @@ export function buildHostedCodexConfigToml(input: {
     "# CLI boolean override would replace the table and silently drop them.",
     "[features.multi_agent_v2]",
     "enabled = true",
+    "# V2 counts the root in this limit: two means root plus one child.",
+    "max_concurrent_threads_per_session = 2",
     `usage_hint_text = ${tomlString(HOSTED_CODEX_MULTI_AGENT_USAGE_HINT_TEXT)}`,
     `multi_agent_mode_hint_text = ${tomlString(HOSTED_CODEX_MULTI_AGENT_MODE_HINT_TEXT)}`,
     `subagent_usage_hint_text = ${tomlString(HOSTED_CODEX_SUBAGENT_USAGE_HINT_TEXT)}`,
@@ -615,7 +617,7 @@ export function buildHostedCodexConfigToml(input: {
     `inherit = ${tomlString(HOSTED_CODEX_SHELL_ENVIRONMENT_INHERITANCE)}`,
     // include_only is the single gate for shell env. Codex's default
     // *KEY*/*TOKEN*/*SECRET* excludes run before include_only and can only
-    // subtract deliberately allowlisted vars (bridge token, provider keys),
+    // subtract deliberately allowlisted vars (App Server proxy token, provider keys),
     // so they add no protection here and must stay off.
     "ignore_default_excludes = true",
     `include_only = ${tomlStringArray(HOSTED_CODEX_SHELL_ENVIRONMENT_INCLUDE_ONLY)}`,

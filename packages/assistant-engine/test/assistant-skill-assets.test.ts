@@ -1659,25 +1659,30 @@ describe('assistant skill assets', () => {
       'This skill explicitly invokes the global `Non-blocking delegation` contract; the user does not need to ask for a subagent separately.',
     )
     expect(compact).toContain(
-      'Follow that contract for eligibility, child ownership, tool boundaries, confirmation, and fallback.',
+      'Follow that contract for eligibility, durable parent ownership, tool boundaries, confirmation, and fallback.',
     )
     expect(compact).toContain(
-      'For onboarding, bundle related facts only when they share one canonical owner and evidence workflow',
+      'Before any child starts, the parent must save the smallest truthful canonical fact or raw source and verify the receipt.',
     )
     expect(compact).toContain(
-      'Use separate fresh children for distinct owner or source pipelines even when the facts arrived in one answer.',
+      'A child may enrich only the exact durable record ids or source refs returned by that save; it never owns a promised save or parse.',
     )
     expect(compact).toContain(
-      'The medical-and-safety checkpoint below is the one explicit exception: one answer may be batched in a single child across its named clinical owners',
+      'The medical-and-safety checkpoint stays entirely in one compact parent batch.',
     )
     expect(compact).toContain(
-      'Independent children may outlive the reply; do not keep the root turn open solely to wait for them.',
+      'An optional child may outlive the reply; do not keep the root turn open solely to wait for it.',
     )
     expect(compact).toContain(
-      'A spawn means the save is pending, not complete.',
+      'Its spawn is not durable operation state: do not say enrichment is pending, processing, or in progress',
     )
     expect(compact).toContain(
-      'Claim a save only after a child receipt or later canonical read confirms it',
+      'Claim exact-label or structured child enrichment only after canonical readback confirms it.',
+    )
+    expect(compact).not.toContain('A spawn means the save is pending')
+    expect(compact).not.toContain('describe the parse as in progress')
+    expect(compact).not.toContain(
+      'use one delegated child to save that single answer',
     )
     expect(raw).toContain('### 2. Minimal identity')
     expect(raw).toContain(
@@ -1760,22 +1765,22 @@ describe('assistant skill assets', () => {
       '$MURPH_ASSISTANT_SKILLS_ROOT/micronutrients-supplements/SKILL.md',
     )
     expect(compact).toContain(
-      'The child must resolve exact labels before saving—one label lookup for one product or the owning skill\'s batch lookup for several',
+      'First use one compact parent batch to save each user-reported product identity, brand when supplied, and active status, and capture the returned canonical ids.',
     )
     expect(compact).toContain(
-      'An existing name-only or otherwise partial match is not complete',
+      'This intentionally minimal record is durable reported context, not a claim that the exact label or ingredient panel is known.',
     )
     expect(compact).toContain(
-      'Do not create shallow name-only supplement records merely because the typed product names look clear.',
+      'spawn one by default from those exact ids when a record is incomplete and exact-label enrichment can materially improve later help',
     )
     expect(compact).toContain(
-      'use one delegated child to save that single answer across the named medical owners under the explicit batching exception above',
+      'Save every supported fact or negative clinical assertion in one compact parent batch across the named medical owners and verify its receipts before the next visible checkpoint.',
     )
     expect(compact).toContain(
-      'Send the next checkpoint while that save continues in the background.',
+      'Do not spawn a child for this bounded persistence work.',
     )
     expect(compact).toContain(
-      'Do not run a separate foreground schema check and one foreground command per negative assertion',
+      'Do not run a separate foreground schema check and one command per negative assertion.',
     )
     expect(raw).toContain('https://my.functionhealth.com/documents')
     expect(compact).toContain(
@@ -1785,13 +1790,16 @@ describe('assistant skill assets', () => {
       'Naming the provider without supplying results does not start a parse child; wait for an actual PDF, paste, or other durable evidence.',
     )
     expect(compact).toContain(
-      'always use the delegated path above when available—even for one short or clean-looking report',
+      'the parent must first verify that the raw source already has a durable attachment, document, or import ref, or import it through an existing canonical surface before replying.',
     )
     expect(compact).toContain(
-      'The parent should send the next visible onboarding step instead of parsing the report in the main turn or waiting for the child.',
+      'spawn one by default from that exact source when structured extraction can materially improve later help',
     )
     expect(compact).toContain(
-      'Until a receipt or later canonical read confirms the result, describe the parse as in progress rather than saved.',
+      'Send the next visible onboarding step after the durable-source receipt instead of waiting for optional extraction.',
+    )
+    expect(compact).toContain(
+      'Do not describe extraction as pending or in progress; until canonical readback proves it, say structured lab details are unconfirmed.',
     )
     expect(raw).toContain(
       'Route useful answers to their existing canonical owner in the same turn',
@@ -1904,7 +1912,7 @@ describe('assistant skill assets', () => {
       ).toContain(scenario.contract)
     }
     expect(compact).toContain(
-      'First make one bounded evidence pass across the foundation, relevant canonical records, connected data, and any completed delegated ingestion that could materially change the choice.',
+      'First make one bounded evidence pass across the foundation, relevant canonical records, connected data, and any confirmed enrichment that could materially change the choice.',
     )
     expect(compact).toContain(
       'Before asking baseline, obstacle, prior-attempt, or support questions, ask which thread—if any—the user actually wants to work on now.',

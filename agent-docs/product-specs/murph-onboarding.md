@@ -61,15 +61,14 @@ privacy, authorization, or provider boundaries.
   experiments, automations, and group state. Assistant runtime state is not
   product truth.
 - Route useful facts to their canonical owner in the same turn they are
-  learned. A quick deterministic write may stay in the parent; independent
-  lookup, parsing, enrichment, or several related writes should use one fresh
-  non-blocking V2 child when available. Use the resume snapshot to avoid
-  repeating known facts.
-- A delegated child owns canonical writes from durable evidence, not merely a
-  draft. Independent children may outlive the reply while onboarding continues.
-  A spawn means the write is pending, not complete; claim the save only after a
-  child receipt or later canonical read confirms it. Do not add a queue or
-  second state owner.
+  learned. Before a visible reply, the parent saves the smallest truthful fact
+  or raw source and verifies its receipt. Batch related quick writes. Use the
+  resume snapshot to avoid repeating known facts.
+- A fresh non-blocking V2 child may optionally enrich exact durable record ids
+  or source refs. It is not the owner of a promised save, parse, or result, and
+  its spawn is not durable operation state. Do not describe its work as pending
+  or in progress or promise completion. Claim child enrichment only after
+  canonical readback confirms it. Do not add a queue or second state owner.
 - The onboarding skill owns conversation policy. The system-prompt overlay
   routes the open lifecycle into that skill, and the managed automation resumes
   it when a useful continuation exists.
@@ -186,27 +185,30 @@ not relevant, or explicitly skipped before answered completion:
    onboarding voice-memo question when the tool is available and the member has
    not declined voice; it does not require the member to request voice first.
 4. **Supplements:** current products, brands, and rough duration when known;
-   bottle or label photos are an easier input option. Named products trigger
-   the supplement owner's exact-label workflow and one delegated child that
-   performs canonical lookup and enrichment rather than shallow name-only
-   saves. Existing partial records should be enriched, not skipped or
-   duplicated. Continue with the next independent onboarding question while
-   the child works; leave the supplement save pending until its result is
-   confirmed.
+   bottle or label photos are an easier input option. The parent first saves
+   the user-reported product identity, supplied brand, and active status in one
+   compact batch and captures the returned ids. That minimum is truthful
+   reported context, not a complete label. When V2 is available, no child is
+   active, a record is incomplete, and exact-label enrichment can materially
+   improve later help, spawn one child by default against those ids. Skip it
+   when the record is complete or enrichment cannot change later help. Existing
+   partial records are enriched rather than skipped or duplicated. Until
+   canonical readback proves enrichment, exact label details remain unconfirmed.
 5. **Medical and safety context:** prescription or OTC medications, diagnosed
    conditions, allergies or intolerances, and pregnancy or nursing, asked once
-   as one optional open question. When one answer yields several canonical
-   facts or negative assertions, one child saves the whole answer in a compact
-   batch across the named clinical owners. This is an explicit exception to
-   owner-based child splitting because one answer shares a medical evidence
-   workflow and compact persistence path.
+   as one optional open question. The parent saves all supported facts and
+   negative assertions in one compact batch across the named clinical owners,
+   verifies its receipts, and does not spawn a child for this bounded write.
 6. **Recent blood tests or lab panels:** whether they exist and can be shared
    now or later. If the member names Function Health, proactively send
    https://my.functionhealth.com/documents and ask for the Lab Results of Record
    PDFs. Naming the provider alone does not start a child. Once a PDF or paste
-   exists, use one delegated child for the full canonical parse during
-   onboarding, then send the next useful onboarding reply without waiting for
-   the parse.
+   exists, the parent verifies or creates its durable attachment, document, or
+   import ref before replying. When V2 is available, no child is active, and
+   structured extraction can materially improve later help, spawn one child by
+   default from that exact source. Skip it when the source is already structured
+   or extraction cannot change later help. If the current answer needs the
+   parse, the parent keeps it reply-critical and uses progress updates.
 
 Use this order by default, but pull a checkpoint forward when it materially
 improves safety or keeps the conversation natural. One message, attachment, or
@@ -228,26 +230,23 @@ For example, “not lifting right now” resolves useful movement context; it do
 not authorize a workout routine. Murph should acknowledge it briefly and keep
 learning unless the member asks for help now.
 
-For eligible delegated work, spawn one fresh child with no forked transcript
-and a self-contained task containing durable source paths or exact member facts,
-the owner or skill, duplicate avoidance, and the expected private completion
-result. Bundle facts only when they share one canonical owner and evidence
-workflow; distinct owner or source pipelines use separate fresh children even
-when supplied together, except for the medical-checkpoint batching rule above.
-A child may use bounded read-only primary-source lookup when the owning
-enrichment skill requires it. Do not delegate urgent or safety-sensitive
-judgment, reply-critical synthesis, user-facing messages,
-approvals, voice generation, other dynamic tools, browser or phone work, or
-external actions. If spawning is unavailable, use the smallest synchronous
-path and batch related bounded CLI calls. Hosted Codex config must preserve
-Murph's custom V2 tool and mode hints; a boolean override must not replace that
-config table. Independent children may outlive the reply and continue while
-later turns proceed. Do not keep the root turn open solely to wait for them.
-A spawn is accepted work in progress, not proof of a save, parse, or enrichment.
-Claim completion only after a terminal child receipt or later canonical read.
-Pending foundation ingestion leaves onboarding open but does not block the next
-independent question. If the user's requested answer truly depends on a child,
-that work is reply-critical: follow the progress-update contract and answer
+For optional enrichment, spawn one fresh child with no forked transcript and a
+self-contained task containing exact durable record ids or source refs, the
+owner or skill, duplicate avoidance, and the bounded enrichment result. A child
+may use bounded read-only primary-source lookup when the owning enrichment skill
+requires it. Every create or update must be idempotently attributable to those
+exact ids or refs. Do not
+delegate urgent or safety-sensitive judgment, reply-critical synthesis,
+user-facing messages, approvals, voice generation, other dynamic tools,
+browser or phone work, or external actions. If spawning is unavailable, use
+the smallest synchronous path for required work and leave optional details
+unconfirmed. Hosted Codex config must preserve Murph's custom V2 tool and mode
+hints; a boolean override must not replace that config table. A one-shot leaf
+child may outlive the reply, but only one may be active. Do not message, resume,
+reuse, close, interrupt, nest, or leave a background terminal from that child.
+Do not keep the root turn open solely to wait for optional enrichment. A spawn
+proves nothing durable. If the user's requested answer depends on the result,
+keep the work in the parent, follow the progress-update contract, and answer
 only from the confirmed result or an honest blocker.
 
 ### 6. Return to the open thread and choose together
@@ -270,12 +269,11 @@ questions below.
 
 Once the member selects or confirms a desired change likely to depend on
 repeated behavior, read the behavior-followthrough owner and make one bounded
-evidence pass across the
-foundation, relevant canonical records, connected data, and completed
-delegated ingestion. Before selecting a first behavior, ground the member's
-outcome and reason, current routine or baseline, relevant data, prior attempts,
-and the main conditions that help or disrupt follow-through. Ask up to three
-short questions across separate turns to fill only decision-changing gaps—
+evidence pass across the foundation, relevant canonical records, connected
+data, and confirmed enrichment. Before selecting a first behavior, ground the
+member's outcome and reason, current routine or baseline, relevant data, prior
+attempts, and the main conditions that help or disrupt follow-through. Ask up
+to three short questions across separate turns to fill only decision-changing gaps—
 usually two or three when those answers remain unknown, and fewer when context
 already supplies them. Reuse the outcome and reason already learned. Never
 re-ask a motivation that the member explicitly did not know or declined; ask
@@ -310,9 +308,10 @@ writes; the onboarding follow-up automation never owns that support.
 - Save concrete aspirations as ordinary goals or ongoing needs. Use the visible
   conversation and resume context for the park-and-return sequence; do not add
   persisted parked-thread or onboarding-step state.
-- A delegated save remains pending until a child result or canonical read
-  confirms it. The parent may reply and continue onboarding, but must not report
-  it as saved or use it to satisfy completion merely because the child spawned.
+- The parent must verify the minimum canonical save or durable source before
+  replying. A child may only enrich exact returned ids or refs. Its spawn does
+  not prove or promise an enrichment result; claim child enrichment only after
+  canonical readback confirms it.
 - Do not invent dose, severity, date, brand, diagnosis, motivation, or other
   missing details.
 - Treat negative allergy statements as clinical assertions through the owning
@@ -326,8 +325,10 @@ writes; the onboarding follow-up automation never owns that support.
   it is durable enough to outlive the current thread, and update or forget that
   memory when the preference changes.
 - Use the global health-record ingestion path for files, labs, labels, and
-  other slow evidence. Do not complete onboarding while a foundation-critical
-  save is pending unless the member explicitly defers that evidence.
+  other slow evidence. Do not complete onboarding until each
+  foundation-critical minimum fact or raw source has a verified durable receipt
+  or the member explicitly defers it. Optional enrichment does not block
+  completion unless it would change the next decision.
 - Do not create fake records merely to remember that a category was skipped.
 
 ## Completion
@@ -353,8 +354,9 @@ Use `user_answered` only when all of the following are true:
    chose a first step, explicitly chose to leave the thread open without acting,
    or declined further help on it.
 8. Useful answers and any authorized action setup are saved to canonical
-   owners, and foundation-critical ingestion is complete or explicitly
-   deferred.
+   owners. Each foundation-critical minimum fact or raw source has a verified
+   durable receipt or is explicitly deferred; optional enrichment is confirmed,
+   not decision-changing, or handled in the parent before use.
 
 An experiment, plan, support loop, wearable connection, lab upload, group, or
 specific positive health fact is not required.
@@ -413,7 +415,8 @@ reflection-only scheduled message returns skip.
    influences, and support fit, with up to three missing-context questions.
 9. Context continues compounding after onboarding without a second profile
    system, automation, or completion score.
-10. Supplement enrichment, onboarding lab parsing, and bundled medical-context
-    persistence run in delegated children when useful without delaying the next
-    independent onboarding reply. Pending work leaves onboarding open, and
-    Murph claims a save only after a child receipt or canonical read proves it.
+10. Supplement identity and medical context are durably saved in compact parent
+    batches, and onboarding lab evidence is durably preserved before the next
+    reply. Optional children enrich exact supplement ids or lab source refs
+    without owning promised work. Murph claims child enrichment only after
+    canonical readback confirms it.

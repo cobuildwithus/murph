@@ -58,6 +58,7 @@ export interface HostedWorkspaceInvocationInput {
   snapshotArchiveBuilder: HostedWorkspaceSnapshotArchiveBuilder;
   snapshotDiagnosticsHashSecret?: string | null;
   vaultRoot: string;
+  waitForBackgroundAssistantWork(signal: AbortSignal | null): Promise<void>;
 }
 
 export async function runHostedWorkspaceInvocation(
@@ -75,6 +76,7 @@ export async function runHostedWorkspaceInvocation(
     snapshotArchiveBuilder: input.snapshotArchiveBuilder,
     snapshotDiagnosticsHashSecret: input.snapshotDiagnosticsHashSecret ?? null,
     vaultRoot: input.vaultRoot,
+    waitForBackgroundAssistantWork: input.waitForBackgroundAssistantWork,
   });
 
   try {

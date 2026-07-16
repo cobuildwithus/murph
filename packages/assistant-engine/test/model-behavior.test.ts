@@ -92,7 +92,7 @@ describe('assistant execution prompt contract', () => {
     ).toContain('Prefer direct tool use over telling the user')
   })
 
-  it('lets bounded background work continue beyond the direct reply', () => {
+  it('allows only optional enrichment after the parent creates durable state', () => {
     const prompt = buildAssistantSystemPrompt(createCommonCodexPromptInput())
     const groupPrompt = buildAssistantSystemPrompt(createCommonCodexPromptInput({
       conversationScope: 'group',
@@ -105,29 +105,37 @@ describe('assistant execution prompt contract', () => {
     expect(groupPrompt).not.toContain('Non-blocking delegation:')
     expect(unverifiedPrompt).not.toContain('Non-blocking delegation:')
     expect(prompt).toContain(
-      'Spawn a fresh V2 child for independent writes, enrichment, parsing, or research that would delay a reply; the user need not ask.',
+      'Before detaching enrichment, the parent batch-saves the smallest truthful canonical fact or raw source and verifies its receipt.',
+    )
+    expect(prompt).toContain(
+      'Spawn one fresh V2 child only for optional enrichment that may remain unconfirmed.',
     )
     expect(prompt).toContain('`fork_turns: "none"`')
     expect(prompt).toContain(
       'Use one task with',
     )
     expect(prompt).toContain(
-      'Keep safety judgment, user messages, approvals, voice, dynamic/server tools, browser, phone, and external actions in the parent.',
+      'Keep safety, user messages, approvals, voice, dynamic/server tools, browser, phone, external actions, and reply-critical work in the parent.',
     )
     expect(prompt).toContain(
-      'Reply immediately to independent work; the child may outlive the reply.',
+      'If the answer depends on the result, use progress updates and finish it there.',
     )
     expect(prompt).toContain(
-      'A spawn means pending, not complete.',
+      'The child may outlive the reply.',
     )
     expect(prompt).toContain(
-      'Claim a result only after a terminal receipt or later canonical read.',
+      'Never call it pending, processing, or in progress',
     )
+    expect(prompt).toContain(
+      'Claim child enrichment only after canonical readback confirms it',
+    )
+    expect(prompt).not.toContain('The child owns canonical writes')
+    expect(prompt).not.toContain('A spawn means pending, not complete.')
     expect(prompt).toContain(
       'required primary-source reads',
     )
     expect(prompt).toContain(
-      'Reply while background children continue, and claim results only after a receipt or later canonical read',
+      'Before detaching optional enrichment, the parent saves and verifies the smallest truthful fact or raw source.',
     )
     expect(prompt).not.toContain('Keep the root open until')
     expect(prompt).not.toContain('No child outlives the final reply')
@@ -1536,7 +1544,7 @@ Execution context:
       'Current Murph product base URL for user-facing app links: http://localhost:3000',
     )
     expect(promptA.cacheMetadata.staticPromptHash).toBe(
-      '47fdddb1886c2f567d1f23ba944b3db3b1deec61f385ac7a161a5289c75ca0b7',
+      'd00d4b4e5832258ae3c4eb7f984484b359696e9d20a60d354a61a1fcefbac33d',
     )
     expect(promptA.cacheMetadata.toolSchemaHash).toBe(
       'assistant-tool-schema-common-codex-test',
@@ -1746,7 +1754,7 @@ describe('assistant experiment onboarding guidance', () => {
     )
     expect(prompt).toContain('Delight is care.')
     expect(prompt).toContain(
-      'use an image, voice memo, or song only when requested or known to be preferred',
+      'use an image, voice memo, or song only when requested, preferred, or required by a skill',
     )
     expect(prompt).toContain('Understand before recommending:')
     expect(prompt).toContain(

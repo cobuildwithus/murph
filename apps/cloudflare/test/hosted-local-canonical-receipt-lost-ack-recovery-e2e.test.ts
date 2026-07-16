@@ -35,8 +35,8 @@ import {
 import { createIntegratedVaultServices } from "@murphai/vault-usecases/vault-services";
 
 import {
+  buildAssistantProviderMurphToolCall,
   buildAssistantProviderShellCommandCall,
-  buildAssistantProviderVaultCliCall,
 } from "./helpers/hosted-local-e2e-support.js";
 import {
   startHostedLocalFullStackScenario,
@@ -145,33 +145,16 @@ describe("hosted local canonical receipt lost-ack recovery e2e", () => {
     const providerBaseline = countResponsesApiRequests();
     const dueAt = new Date(Date.now() + 24 * 60 * 60 * 1_000).toISOString();
     requireScenario().queueAssistantResponses([
-      buildAssistantProviderVaultCliCall([
-        "automation",
-        "save",
-        "Canonical receipt recovery probe",
-        "--request-id",
-        `canonical-receipt-probe-${userId}`,
-        "--slug",
-        automationSlug,
-        "--instructions",
-        "Record the hosted canonical checkpoint recovery probe.",
-        "--summary",
-        "Hosted canonical checkpoint recovery probe.",
-        "--tags",
-        "assistant",
-        "--continuity-policy",
-        "fresh",
-        "--channel",
-        "linq",
-        "--delivery-target",
-        chatId,
-        "--schedule-kind",
-        "at",
-        "--schedule-at",
-        dueAt,
-        "--format",
-        "json",
-      ]),
+      buildAssistantProviderMurphToolCall("automation", {
+        action: "save",
+        continuityPolicy: "fresh",
+        instructions: "Record the hosted canonical checkpoint recovery probe.",
+        schedule: { at: dueAt, kind: "at" },
+        slug: automationSlug,
+        summary: "Hosted canonical checkpoint recovery probe.",
+        tags: ["assistant"],
+        title: "Canonical receipt recovery probe",
+      }),
       replyText,
     ], {
       matchInputContains: inboundText,

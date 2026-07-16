@@ -37,6 +37,7 @@ import {
 } from "@murphai/assistant-runtime/hosted-invocation";
 import {
   stopWarmCodexAppServer,
+  waitForWarmCodexBackgroundWork,
 } from "@murphai/assistant-engine/codex-lifecycle";
 import {
   HOSTED_CLOUDFLARE_INJECTED_CREDENTIAL,
@@ -172,6 +173,7 @@ interface HostedContainerRuntimeOptions {
     options: { model: string; signal: AbortSignal },
   ) => Promise<HostedContainerLiveModelTurnSmokeResult>;
   stopWarmCodex?: (reason: string) => Promise<void>;
+  waitForBackgroundAssistantWork?: (signal: AbortSignal | null) => Promise<void>;
 }
 
 interface HostedContainerRuntimeDependencies {
@@ -193,6 +195,7 @@ interface HostedContainerRuntimeDependencies {
   runLiveModelTurnSmoke:
     (options: { model: string; signal: AbortSignal }) => Promise<HostedContainerLiveModelTurnSmokeResult>;
   stopWarmCodex: (reason: string) => Promise<void>;
+  waitForBackgroundAssistantWork: (signal: AbortSignal | null) => Promise<void>;
 }
 
 interface HostedContainerCodexShellSmokeResult {
@@ -884,6 +887,7 @@ export async function startHostedContainerEntrypoint(input: {
         shutdownSignal: containerShutdownController.signal,
         signal: invocationAbort.signal,
         supervisorEnv: runtime.startupConfig.supervisorEnv,
+        waitForBackgroundAssistantWork: runtime.waitForBackgroundAssistantWork,
       });
 
       if (requestAbort.signal.aborted || response.destroyed) {
@@ -922,6 +926,18 @@ export async function startHostedContainerEntrypoint(input: {
       writeJsonResponse(response, classified.statusCode, classified.payload);
     } finally {
       stopActiveJobDiagnostics?.();
+      if (claimedRunnerSlot && invocationAbort.signal.aborted) {
+        try {
+          await stopWarmCodexWithLifecycleLog(runtime, {
+            failureMessage:
+              "Hosted container entrypoint failed to stop warm Codex after invocation abort.",
+            reason: "workspace-invocation-abort",
+          });
+        } catch {
+          hostedContainerProcessFatalObserved = true;
+          runtime.exitScheduler();
+        }
+      }
       if (runtimeWakeForRequest && activeRuntimeWake === runtimeWakeForRequest) {
         activeRuntimeWake = null;
         activeRuntimeWakeAttemptId = null;
@@ -1476,6 +1492,9 @@ function resolveHostedContainerRuntimeDependencies(
       runtime?.runLiveModelTurnSmoke ?? runHostedContainerLiveModelTurnSmoke,
     stopWarmCodex:
       runtime?.stopWarmCodex ?? stopWarmCodexAppServer,
+    waitForBackgroundAssistantWork:
+      runtime?.waitForBackgroundAssistantWork
+      ?? ((signal) => waitForWarmCodexBackgroundWork({ signal })),
   };
 }
 
@@ -2668,7 +2687,7 @@ async function stopWarmCodexWithLifecycleLog(
   runtime: HostedContainerRuntimeDependencies,
   input: {
     failureMessage?: string;
-    reason: "container-server-close";
+    reason: "container-server-close" | "workspace-invocation-abort";
   },
 ): Promise<void> {
   try {

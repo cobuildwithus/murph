@@ -109,6 +109,7 @@ describe("direct-R2 hard-cut guards", () => {
       } satisfies HostedWorkspaceInvocationRequest,
       runtime: {},
       vaultRoot,
+      waitForBackgroundAssistantWork: async () => {},
     });
 
     const result = await options.createCheckpointSnapshot(createIdleCheckpointInput());

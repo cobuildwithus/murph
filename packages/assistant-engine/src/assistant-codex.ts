@@ -22,7 +22,11 @@ import type {
   CodexNormalizedEvent,
   CodexProgressEvent,
 } from './assistant-codex-events.js'
-import { registerStopWarmCodexAppServer } from './codex-lifecycle.js'
+import {
+  registerStopWarmCodexAppServer,
+  registerWaitForWarmCodexBackgroundWork,
+  type WaitForWarmCodexBackgroundWorkInput,
+} from './codex-lifecycle.js'
 import {
   extractAssistantMessageFallback,
   extractCodexErrorInfo,
@@ -162,6 +166,9 @@ const CODEX_RPC_CLIENT_NAME = 'murph'
 const CODEX_RPC_CLIENT_TITLE = 'Murph'
 const CODEX_RPC_CLIENT_VERSION = '1.0.0'
 const CODEX_RPC_DEFAULT_TIMEOUT_MS = 120_000
+const CODEX_BACKGROUND_WORK_RPC_TIMEOUT_MS = 5_000
+const CODEX_BACKGROUND_WORK_WAIT_TIMEOUT_MS = 120_000
+const CODEX_BACKGROUND_WORK_POLL_INTERVAL_MS = 50
 const CODEX_RPC_STEER_TIMEOUT_MS = 15_000
 const CODEX_APP_SERVER_INTERRUPT_CLEANUP_TIMEOUT_MS = 15_000
 const CODEX_MANAGED_ACCOUNT_LOGIN_TIMEOUT_MS = 10 * 60 * 1000
@@ -816,6 +823,10 @@ class CodexAppServerProcess {
   private nextRequestId = 1
   private normalShutdown = false
   private poisoned = false
+  private detachedChildThreadId: string | null = null
+  private readonly detachedCompletedChildThreadIds = new Set<string>()
+  private detachedChildViolation: string | null = null
+  private readonly detachedRootThreadIds = new Set<string>()
   private stopCompleted = false
   private state: CodexAppServerProcessState = 'idle'
   private stderrBuffer = ''
@@ -894,6 +905,10 @@ class CodexAppServerProcess {
 
   get hasInFlightTurn(): boolean {
     return this.state === 'reserved' || this.state === 'running'
+  }
+
+  get isStopped(): boolean {
+    return this.state === 'stopped'
   }
 
   reserveTurn(): void {
@@ -1041,6 +1056,167 @@ class CodexAppServerProcess {
       method,
       params: prepareCodexRpcParams(method, params),
     })
+  }
+
+  async waitForBackgroundWork(
+    input: WaitForWarmCodexBackgroundWorkInput = {},
+  ): Promise<void> {
+    const signal = input.signal ?? null
+
+    try {
+      throwIfCodexBackgroundWorkWaitAborted(signal)
+      this.assertBackgroundWorkProcessAvailable()
+      await this.waitForDetachedChildren(signal)
+      this.assertDetachedChildrenQuiescent()
+      await this.assertNoBackgroundTerminals(signal)
+      throwIfCodexBackgroundWorkWaitAborted(signal)
+      this.assertBackgroundWorkProcessAvailable()
+      this.assertDetachedChildrenQuiescent()
+      this.clearDetachedChildBoundary()
+    } catch (error) {
+      if (signal?.aborted) {
+        throw readCodexBackgroundWorkAbortReason(signal)
+      }
+      this.poisoned = true
+      await this.stop('background-work-boundary-failure')
+      throw error
+    }
+  }
+
+  private assertBackgroundWorkProcessAvailable(): void {
+    if (
+      this.initialized &&
+      !this.poisoned &&
+      this.child.exitCode === null &&
+      this.child.signalCode === null &&
+      this.state === 'idle'
+    ) {
+      return
+    }
+
+    throw new VaultCliError(
+      'ASSISTANT_CODEX_BACKGROUND_WORK_UNAVAILABLE',
+      'Codex app-server background work could not be verified before the workspace boundary.',
+      { retryable: true },
+    )
+  }
+
+  private hasPendingDetachedChild(): boolean {
+    return this.detachedChildThreadId !== null &&
+      !this.detachedCompletedChildThreadIds.has(this.detachedChildThreadId)
+  }
+
+  private async waitForDetachedChildren(signal: AbortSignal | null): Promise<void> {
+    const deadline = Date.now() + CODEX_BACKGROUND_WORK_WAIT_TIMEOUT_MS
+    while (this.hasPendingDetachedChild()) {
+      throwIfCodexBackgroundWorkWaitAborted(signal)
+      this.assertBackgroundWorkProcessAvailable()
+      this.assertDetachedChildContractSupported()
+      if (Date.now() >= deadline) {
+        throw new VaultCliError(
+          'ASSISTANT_CODEX_BACKGROUND_WORK_TIMEOUT',
+          `Codex background work did not finish within ${CODEX_BACKGROUND_WORK_WAIT_TIMEOUT_MS}ms.`,
+          { retryable: true },
+        )
+      }
+      await waitForCodexBackgroundWorkPoll(signal)
+    }
+  }
+
+  private assertDetachedChildContractSupported(): void {
+    if (this.detachedChildViolation) {
+      throw new VaultCliError(
+        'ASSISTANT_CODEX_BACKGROUND_WORK_UNSUPPORTED',
+        this.detachedChildViolation,
+        { retryable: true },
+      )
+    }
+  }
+
+  private assertDetachedChildrenQuiescent(): void {
+    this.assertDetachedChildContractSupported()
+    if (this.hasPendingDetachedChild()) {
+      throw new VaultCliError(
+        'ASSISTANT_CODEX_BACKGROUND_WORK_FAILED',
+        'Detached Codex work was still active at the workspace boundary.',
+        { retryable: true },
+      )
+    }
+  }
+
+  private async assertNoBackgroundTerminals(
+    signal: AbortSignal | null,
+  ): Promise<void> {
+    const threadIds = new Set([
+      ...this.detachedRootThreadIds,
+      ...(this.detachedChildThreadId ? [this.detachedChildThreadId] : []),
+    ])
+    for (const threadId of threadIds) {
+      throwIfCodexBackgroundWorkWaitAborted(signal)
+      const result = await waitForCodexBackgroundWorkOperation(
+        withCodexRpcTimeout(
+          this.sendRequest('thread/backgroundTerminals/list', {
+            threadId,
+            limit: 1,
+          }),
+          CODEX_BACKGROUND_WORK_RPC_TIMEOUT_MS,
+          'thread/backgroundTerminals/list',
+        ),
+        signal,
+      )
+      if (readCodexBackgroundTerminalPresence(result)) {
+        throw new VaultCliError(
+          'ASSISTANT_CODEX_BACKGROUND_TERMINAL_UNSUPPORTED',
+          'Detached Codex work left a background terminal running at the workspace boundary.',
+          { retryable: true },
+        )
+      }
+    }
+  }
+
+  private clearDetachedChildBoundary(): void {
+    this.detachedChildThreadId = null
+    this.detachedCompletedChildThreadIds.clear()
+    this.detachedChildViolation = null
+    this.detachedRootThreadIds.clear()
+  }
+
+  private recordDetachedChildViolation(message: string): void {
+    this.detachedChildViolation ??= message
+  }
+
+  private observeDetachedChildLifecycle(message: CodexRpcMessage): void {
+    const activity = readCodexSubagentActivity(message)
+    if (activity) {
+      const senderThreadId = extractCodexThreadIdFromMessage(message)
+      if (activity.kind === 'malformed' || !activity.agentThreadId) {
+        this.recordDetachedChildViolation(
+          'Codex emitted a malformed detached-child lifecycle.',
+        )
+      } else if (activity.kind === 'started') {
+        if (!senderThreadId || !this.detachedRootThreadIds.has(senderThreadId)) {
+          this.recordDetachedChildViolation(
+            'Detached Codex children may not spawn nested children.',
+          )
+        } else {
+          this.detachedChildThreadId = activity.agentThreadId
+        }
+      } else {
+        this.recordDetachedChildViolation(
+          'Detached Codex children may not be messaged, reused, or interrupted.',
+        )
+      }
+    }
+
+    const method = typeof message.method === 'string' ? message.method : null
+    if (!isCodexTurnCompletedMethod(method)) {
+      return
+    }
+    const threadId = extractCodexThreadIdFromMessage(message)
+    if (!threadId || this.detachedRootThreadIds.has(threadId)) {
+      return
+    }
+    this.detachedCompletedChildThreadIds.add(threadId)
   }
 
   consumeIgnoredResponseId(id: CodexRpcId): boolean {
@@ -1264,6 +1440,7 @@ class CodexAppServerProcess {
   noteBoundThreadId(threadId: string | null): void {
     if (threadId) {
       this.boundThreadId = threadId
+      this.detachedRootThreadIds.add(threadId)
     }
   }
 
@@ -1310,6 +1487,7 @@ class CodexAppServerProcess {
   private handleStdoutLine(line: string): void {
     const parsed = tryParseJsonLine(line)
     if (parsed.ok) {
+      this.observeDetachedChildLifecycle(parsed.value)
       this.observeThreadTokenUsage(parsed.value)
       if (this.activeTurn) {
         this.activeTurn.onParsedMessage(parsed.value)
@@ -1431,6 +1609,113 @@ class CodexAppServerProcess {
   }
 }
 
+function readCodexBackgroundTerminalPresence(value: unknown): boolean {
+  const result = asCodexRecord(value)
+  const data = result?.data
+  if (!Array.isArray(data)) {
+    throw new VaultCliError(
+      'ASSISTANT_CODEX_BACKGROUND_WORK_PROTOCOL_ERROR',
+      'Codex app-server returned an invalid background-terminal page at the workspace boundary.',
+      { retryable: true },
+    )
+  }
+
+  return data.length > 0
+}
+
+function readCodexSubagentActivity(message: CodexRpcMessage): {
+  agentThreadId: string | null
+  kind: 'interacted' | 'interrupted' | 'malformed' | 'started'
+} | null {
+  const method = typeof message.method === 'string' ? message.method : null
+  if (method !== 'item/completed' && method !== 'item.completed') {
+    return null
+  }
+  const item = asCodexRecord(asCodexRecord(message.params)?.item)
+  if (asCodexString(item?.type) !== 'subAgentActivity') {
+    return null
+  }
+  const agentThreadId = asCodexString(item?.agentThreadId)
+  const kind = asCodexString(item?.kind)
+  if (!agentThreadId || (kind !== 'started' && kind !== 'interacted' && kind !== 'interrupted')) {
+    return { agentThreadId: agentThreadId ?? null, kind: 'malformed' }
+  }
+  return { agentThreadId, kind }
+}
+
+function throwIfCodexBackgroundWorkWaitAborted(
+  signal: AbortSignal | null,
+): void {
+  if (signal?.aborted) {
+    throw readCodexBackgroundWorkAbortReason(signal)
+  }
+}
+
+async function waitForCodexBackgroundWorkPoll(
+  signal: AbortSignal | null,
+): Promise<void> {
+  if (!signal) {
+    await new Promise<void>((resolve) => {
+      setTimeout(resolve, CODEX_BACKGROUND_WORK_POLL_INTERVAL_MS)
+    })
+    return
+  }
+
+  await new Promise<void>((resolve, reject) => {
+    const onAbort = () => {
+      clearTimeout(timeout)
+      signal.removeEventListener('abort', onAbort)
+      reject(readCodexBackgroundWorkAbortReason(signal))
+    }
+    const timeout = setTimeout(() => {
+      signal.removeEventListener('abort', onAbort)
+      resolve()
+    }, CODEX_BACKGROUND_WORK_POLL_INTERVAL_MS)
+    signal.addEventListener('abort', onAbort, { once: true })
+    if (signal.aborted) {
+      onAbort()
+    }
+  })
+}
+
+async function waitForCodexBackgroundWorkOperation<T>(
+  operation: Promise<T>,
+  signal: AbortSignal | null,
+): Promise<T> {
+  if (!signal) {
+    return await operation
+  }
+  throwIfCodexBackgroundWorkWaitAborted(signal)
+
+  return await new Promise<T>((resolve, reject) => {
+    const cleanup = () => signal.removeEventListener('abort', onAbort)
+    const onAbort = () => {
+      cleanup()
+      reject(readCodexBackgroundWorkAbortReason(signal))
+    }
+    signal.addEventListener('abort', onAbort, { once: true })
+    if (signal.aborted) {
+      onAbort()
+    }
+    operation.then(
+      (value) => {
+        cleanup()
+        resolve(value)
+      },
+      (error: unknown) => {
+        cleanup()
+        reject(error)
+      },
+    )
+  })
+}
+
+function readCodexBackgroundWorkAbortReason(signal: AbortSignal): Error {
+  return signal.reason instanceof Error
+    ? signal.reason
+    : new DOMException('Codex background-work wait was interrupted.', 'AbortError')
+}
+
 function resolveCodexAppServerEndReason(
   reason: string,
 ): CodexAppServerColdStartReason {
@@ -1530,7 +1815,20 @@ export async function stopWarmCodexAppServer(
   })
 }
 
+export async function waitForWarmCodexBackgroundWork(
+  input: WaitForWarmCodexBackgroundWorkInput = {},
+): Promise<void> {
+  await withWarmCodexSlotLock(async () => {
+    const processInstance = warmCodexProcess
+    if (!processInstance || processInstance.isStopped) {
+      return
+    }
+    await processInstance.waitForBackgroundWork(input)
+  })
+}
+
 registerStopWarmCodexAppServer(stopWarmCodexAppServer)
+registerWaitForWarmCodexBackgroundWork(waitForWarmCodexBackgroundWork)
 
 export interface CodexManagedAccountDeviceCode {
   userCode: string

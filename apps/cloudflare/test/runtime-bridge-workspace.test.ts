@@ -72,11 +72,12 @@ const workspaceSnapshotEncryptionScheme:
     HOSTED_WORKSPACE_SNAPSHOT_V2_ENCRYPTION_SCHEME;
 type TestHostedWorkspaceRuntimeBridgeOptionsInput = Omit<
   HostedWorkspaceRuntimeBridgeOptionsInput,
-  "decodeMailboxPayload" | "snapshotArchiveBuilder"
+  "decodeMailboxPayload" | "snapshotArchiveBuilder" | "waitForBackgroundAssistantWork"
 > & {
   decodeMailboxPayload?: HostedWorkspaceMailboxPayloadDecoder;
   requireMailboxPayloadDecoder?: boolean;
   snapshotArchiveBuilder?: HostedWorkspaceRuntimeBridgeOptionsInput["snapshotArchiveBuilder"];
+  waitForBackgroundAssistantWork?: HostedWorkspaceRuntimeBridgeOptionsInput["waitForBackgroundAssistantWork"];
 };
 
 const blockedMailboxPayloadDecoder: HostedWorkspaceMailboxPayloadDecoder = {
@@ -99,6 +100,8 @@ function createHostedWorkspaceRuntimeBridgeJobOptions(
       : input.decodeMailboxPayload ?? blockedMailboxPayloadDecoder,
     snapshotArchiveBuilder:
       input.snapshotArchiveBuilder ?? createCloudflareHostedWorkspaceSnapshotArchiveBuilder(),
+    waitForBackgroundAssistantWork:
+      input.waitForBackgroundAssistantWork ?? (async () => {}),
   });
 }
 

@@ -30,29 +30,28 @@ describe('assistant system prompt health record ingestion invariant', () => {
     expect(prompt).toContain('blood-test for labs and panels')
   })
 
-  it('makes large record bundles responsive while background children own canonical writes', () => {
+  it('makes large record bundles responsive without making a child the durable owner', () => {
     const prompt = buildPrompt()
 
     expect(prompt).toContain('For a large or mixed bundle')
-    expect(prompt).toContain('Preserve the raw evidence, save the high-value structure needed now')
-    expect(prompt).toContain('do not make the user wait for exhaustive extraction')
-    expect(prompt).toContain('Then delegate the remaining bounded parse or write work when useful')
-    expect(prompt).toContain('A delegated parser may outlive the reply')
-    expect(prompt).toContain('It uses durable paths, idempotent provenance-aware writes, and dedupe')
-    expect(prompt).toContain('reports saved ids or the blocker privately')
-    expect(prompt).toContain('A spawn means parsing is pending, not saved')
-    expect(prompt).toContain('If background parsing is unavailable, preserve the source and state that full extraction is incomplete')
+    expect(prompt).toContain('preserve raw evidence durably and save needed high-value structure before replying')
+    expect(prompt).toContain('An optional child may enrich only exact source refs or record ids')
+    expect(prompt).toContain('idempotent, provenance-aware writes and dedupe')
+    expect(prompt).toContain('A spawn is not durable parse state')
+    expect(prompt).toContain('otherwise say which details remain unconfirmed')
+    expect(prompt).not.toContain('A delegated parser may outlive the reply')
+    expect(prompt).not.toContain('A spawn means parsing is pending, not saved')
     expect(prompt).not.toContain('keep the root turn open until the child is terminal')
   })
 
-  it('lets a specific flow delegate a small independent record without waiting', () => {
+  it('keeps the durable minimum in the parent before optional enrichment', () => {
     const prompt = buildPrompt()
 
     expect(prompt).toContain(
-      'For a small item needed for the current answer',
+      'Finish small, reply-needed extraction and saves in the parent.',
     )
     expect(prompt).toContain(
-      'When one clean report or product list can be parsed or persisted independently of the visible answer, delegate it and reply without waiting.',
+      'For product lists, parent-batch the reported identity, brand, and status and capture ids before optional label enrichment.',
     )
   })
 })

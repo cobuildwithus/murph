@@ -50,6 +50,7 @@ import {
   readCodexAppServerTurnFailureContext,
   resolveCodexDisplayOptions,
   stopWarmCodexAppServer,
+  waitForWarmCodexBackgroundWork,
 } from '../src/assistant-codex.ts'
 import type {
   CodexAppServerLiveTurn,
@@ -138,9 +139,12 @@ function executeCodexAppServerTurn(
       connectedAppsAvailable: input.hostedToolContext?.connectedApps != null,
       deviceAvailable:
         input.hostedToolContext?.deviceTool != null,
+      groupAvailable:
+        input.hostedToolContext?.groupTool != null,
       productFeedbackAvailable:
         typeof input.productFeedbackRecorder?.recordProductFeedback === 'function',
       progressUpdatesAvailable: input.progressDelivery != null,
+      voiceMemoGenerationAvailable: input.voiceMemoRuntime != null,
       vaultFileSendAvailable:
         input.hostedToolContext?.vaultFileSendAvailable === true,
     }),
@@ -6389,8 +6393,8 @@ describe('assistant codex runtime', () => {
             },
           }))
 
-          await expect(waitForRpcResponse(child, 101)).resolves.toMatchObject({
-            id: 101,
+          await expect(waitForRpcResponse(child, 103)).resolves.toMatchObject({
+            id: 103,
             result: {
               success: true,
             },
@@ -12271,7 +12275,7 @@ describe('assistant codex runtime', () => {
               contentItems: [
                 {
                   type: 'inputText',
-                  text: 'progress updates are not available for this turn',
+                  text: 'tool was not offered for this turn',
                 },
               ],
             },
@@ -13513,6 +13517,7 @@ describe('assistant codex runtime', () => {
 
     const spawnedChild = requireMockChildProcess(child)
     await stopWarmCodexAppServer('explicit-test-shutdown')
+    await expect(waitForWarmCodexBackgroundWork()).resolves.toBeUndefined()
     expect(process.kill).toHaveBeenCalledWith(-spawnedChild.pid, 'SIGTERM')
     expect(process.kill).toHaveBeenCalledWith(-spawnedChild.pid, 'SIGKILL')
   })
@@ -15158,6 +15163,7 @@ describe('assistant codex event shaping', () => {
         },
         onFinishWithoutReplyAccepted,
         onFinishWithoutReplyRecorded,
+        allowMessageReactions: true,
         prompt: 'react and then finish without reply',
         sandbox: 'workspace-write',
         workingDirectory,
@@ -15726,6 +15732,367 @@ describe('assistant codex event shaping', () => {
       // The idle child usage is tolerated, never billed.
       expect(second.additionalUsages).toEqual([])
       expect(spawnedChildren).toHaveLength(1)
+    })
+
+    it('keeps the root reply nonblocking while the workspace boundary waits for descendants', async () => {
+      const workingDirectory = await createTempDir('assistant-codex-background-boundary-work-')
+      const codexHome = await createTempDir('assistant-codex-background-boundary-home-')
+      const spawnedChildren: MockChildProcess[] = []
+      const startChild = createDeferred<void>()
+      const childStarted = createDeferred<void>()
+      const completeChild = createDeferred<void>()
+      const terminalScanObserved = createDeferred<void>()
+      mockWarmCodexProcess(spawnedChildren, 31_850, async (child) => {
+        await initializeWarmTurn(
+          child,
+          'thread-background-boundary-parent',
+          'turn-background-boundary-parent',
+        )
+        writeSubAgentActivity(
+          child,
+          'thread-background-boundary-parent',
+          'thread-background-boundary-child',
+          'started',
+          {
+            agentPath: '/root/onboarding-import',
+            id: 'spawn-background-boundary-child',
+            turnId: 'turn-background-boundary-parent',
+          },
+        )
+        writeCompletedTurn(
+          child,
+          'thread-background-boundary-parent',
+          'turn-background-boundary-parent',
+        )
+        await startChild.promise
+        writeStartedTurn(
+          child,
+          'thread-background-boundary-child',
+          'turn-background-boundary-child',
+        )
+        childStarted.resolve(undefined)
+        await completeChild.promise
+        writeCompletedTurn(
+          child,
+          'thread-background-boundary-child',
+          'turn-background-boundary-child',
+        )
+
+        for (let requestCount = 1; requestCount <= 2; requestCount += 1) {
+          await respondToBackgroundTerminals(child, requestCount)
+        }
+        terminalScanObserved.resolve(undefined)
+      })
+
+      const result = await executeBackgroundBoundaryTurn(
+        codexHome,
+        workingDirectory,
+        'delegate ingestion and reply now',
+      )
+      expect(result.turnId).toBe('turn-background-boundary-parent')
+
+      let boundaryResolved = false
+      const boundary = waitForWarmCodexBackgroundWork().then(() => {
+        boundaryResolved = true
+      })
+      expect(boundaryResolved).toBe(false)
+
+      startChild.resolve(undefined)
+      await childStarted.promise
+      expect(boundaryResolved).toBe(false)
+
+      completeChild.resolve(undefined)
+      await terminalScanObserved.promise
+      await expect(boundary).resolves.toBeUndefined()
+      expect(boundaryResolved).toBe(true)
+      expect(spawnedChildren).toHaveLength(1)
+    })
+
+    it('preserves the warm process and child boundary when a checkpoint wait is interrupted', async () => {
+      const workingDirectory = await createTempDir('assistant-codex-interrupted-boundary-work-')
+      const codexHome = await createTempDir('assistant-codex-interrupted-boundary-home-')
+      const spawnedChildren: MockChildProcess[] = []
+      const firstScanObserved = createDeferred<void>()
+      const releaseFirstScanResponse = createDeferred<void>()
+      const firstScanResponseWritten = createDeferred<void>()
+      mockWarmCodexProcess(spawnedChildren, 31_860, async (child) => {
+        await initializeWarmTurn(
+          child,
+          'thread-interrupted-boundary-parent',
+          'turn-interrupted-boundary-parent',
+        )
+        writeSubAgentActivity(
+          child,
+          'thread-interrupted-boundary-parent',
+          'thread-interrupted-boundary-child',
+        )
+        writeStartedTurn(
+          child,
+          'thread-interrupted-boundary-child',
+          'turn-interrupted-boundary-child',
+        )
+        writeCompletedTurn(
+          child,
+          'thread-interrupted-boundary-child',
+          'turn-interrupted-boundary-child',
+        )
+        writeCompletedTurn(
+          child,
+          'thread-interrupted-boundary-parent',
+          'turn-interrupted-boundary-parent',
+        )
+
+        const firstScan = await waitForRpcMethodCount(
+          child,
+          'thread/backgroundTerminals/list',
+          1,
+        )
+        firstScanObserved.resolve(undefined)
+        await releaseFirstScanResponse.promise
+        child.stdout.write(jsonLine({
+          id: firstScan.id,
+          result: {
+            data: [],
+            nextCursor: null,
+          },
+        }))
+        firstScanResponseWritten.resolve(undefined)
+        await respondToBackgroundTerminals(child, 2)
+        await respondToBackgroundTerminals(child, 3)
+      })
+
+      await executeBackgroundBoundaryTurn(
+        codexHome,
+        workingDirectory,
+        'delegate one bounded import before checkpointing',
+      )
+
+      const controller = new AbortController()
+      const interruptedBoundary = waitForWarmCodexBackgroundWork({
+        signal: controller.signal,
+      })
+      await firstScanObserved.promise
+      const interruption = new Error('checkpoint interrupted')
+      controller.abort(interruption)
+      await expect(interruptedBoundary).rejects.toBe(interruption)
+      expect(spawnedChildren[0]?.signalCode).toBeNull()
+
+      releaseFirstScanResponse.resolve(undefined)
+      await firstScanResponseWritten.promise
+      await expect(waitForWarmCodexBackgroundWork()).resolves.toBeUndefined()
+      expect(spawnedChildren[0]?.signalCode).toBeNull()
+      expect(spawnedChildren).toHaveLength(1)
+    })
+
+    it('treats a failed optional child as quiescent without stopping the warm process', async () => {
+      const workingDirectory = await createTempDir('assistant-codex-failed-child-work-')
+      const codexHome = await createTempDir('assistant-codex-failed-child-home-')
+      const spawnedChildren: MockChildProcess[] = []
+      mockWarmCodexProcess(spawnedChildren, 31_870, async (child) => {
+        await initializeWarmTurn(
+          child,
+          'thread-failed-child-parent',
+          'turn-failed-child-parent',
+        )
+        writeSubAgentActivity(
+          child,
+          'thread-failed-child-parent',
+          'thread-failed-child-child',
+        )
+        writeStartedTurn(
+          child,
+          'thread-failed-child-child',
+          'turn-failed-child-child',
+        )
+        writeCompletedTurn(
+          child,
+          'thread-failed-child-child',
+          'turn-failed-child-child',
+          'failed',
+        )
+        writeCompletedTurn(
+          child,
+          'thread-failed-child-parent',
+          'turn-failed-child-parent',
+        )
+        await respondToBackgroundTerminals(child, 1)
+        await respondToBackgroundTerminals(child, 2)
+      })
+
+      await executeBackgroundBoundaryTurn(
+        codexHome,
+        workingDirectory,
+        'persist the minimum, then try optional enrichment',
+      )
+      await expect(waitForWarmCodexBackgroundWork()).resolves.toBeUndefined()
+
+      expect(spawnedChildren[0]?.signalCode).toBeNull()
+      expect(spawnedChildren).toHaveLength(1)
+    })
+
+    it('tracks the latest sequential child resident at the boundary', async () => {
+      const workingDirectory = await createTempDir('assistant-codex-sequential-child-work-')
+      const codexHome = await createTempDir('assistant-codex-sequential-child-home-')
+      const spawnedChildren: MockChildProcess[] = []
+      const scannedThreadIds: string[] = []
+      mockWarmCodexProcess(spawnedChildren, 31_875, async (child) => {
+        await initializeWarmTurn(
+          child,
+          'thread-sequential-parent',
+          'turn-sequential-parent',
+        )
+        writeSubAgentActivity(
+          child,
+          'thread-sequential-parent',
+          'thread-sequential-child-a',
+        )
+        writeStartedTurn(
+          child,
+          'thread-sequential-child-a',
+          'turn-sequential-child-a',
+        )
+        writeCompletedTurn(
+          child,
+          'thread-sequential-child-a',
+          'turn-sequential-child-a',
+        )
+
+        // Native child completion may beat the parent-side Started item.
+        writeStartedTurn(
+          child,
+          'thread-sequential-child-b',
+          'turn-sequential-child-b',
+        )
+        writeCompletedTurn(
+          child,
+          'thread-sequential-child-b',
+          'turn-sequential-child-b',
+        )
+        writeSubAgentActivity(
+          child,
+          'thread-sequential-parent',
+          'thread-sequential-child-b',
+        )
+        writeCompletedTurn(
+          child,
+          'thread-sequential-parent',
+          'turn-sequential-parent',
+        )
+
+        for (let requestCount = 1; requestCount <= 2; requestCount += 1) {
+          const request = await respondToBackgroundTerminals(child, requestCount)
+          scannedThreadIds.push(String(asRecord(request.params).threadId))
+        }
+      })
+
+      await executeBackgroundBoundaryTurn(
+        codexHome,
+        workingDirectory,
+        'run two sequential bounded imports',
+      )
+      await expect(waitForWarmCodexBackgroundWork()).resolves.toBeUndefined()
+
+      expect(scannedThreadIds).toEqual([
+        'thread-sequential-parent',
+        'thread-sequential-child-b',
+      ])
+      expect(spawnedChildren).toHaveLength(1)
+    })
+
+    it('fails closed on child interaction and stops the exact warm process', async () => {
+      const workingDirectory = await createTempDir('assistant-codex-child-interaction-work-')
+      const codexHome = await createTempDir('assistant-codex-child-interaction-home-')
+      const spawnedChildren: MockChildProcess[] = []
+      mockWarmCodexProcess(spawnedChildren, 31_880, async (child) => {
+        await initializeWarmTurn(
+          child,
+          'thread-child-interaction-parent',
+          'turn-child-interaction-parent',
+        )
+        writeStartedTurn(
+          child,
+          'thread-child-interaction-child',
+          'turn-child-interaction-child',
+        )
+        // This child-to-root message can arrive before the parent-side
+        // Started item; it still violates the one-shot leaf contract.
+        writeSubAgentActivity(
+          child,
+          'thread-child-interaction-child',
+          'thread-child-interaction-parent',
+          'interacted',
+        )
+        writeSubAgentActivity(
+          child,
+          'thread-child-interaction-parent',
+          'thread-child-interaction-child',
+        )
+        writeCompletedTurn(
+          child,
+          'thread-child-interaction-parent',
+          'turn-child-interaction-parent',
+        )
+      })
+
+      await executeBackgroundBoundaryTurn(
+        codexHome,
+        workingDirectory,
+        'attempt an unsupported interactive child',
+      )
+      await expect(waitForWarmCodexBackgroundWork()).rejects.toMatchObject({
+        code: 'ASSISTANT_CODEX_BACKGROUND_WORK_UNSUPPORTED',
+      })
+      expect(spawnedChildren[0]?.signalCode).toBe('SIGTERM')
+    })
+
+    it('rejects a child background terminal before snapshotting', async () => {
+      const workingDirectory = await createTempDir('assistant-codex-child-terminal-work-')
+      const codexHome = await createTempDir('assistant-codex-child-terminal-home-')
+      const spawnedChildren: MockChildProcess[] = []
+      mockWarmCodexProcess(spawnedChildren, 31_885, async (child) => {
+        await initializeWarmTurn(
+          child,
+          'thread-child-terminal-parent',
+          'turn-child-terminal-parent',
+        )
+        writeSubAgentActivity(
+          child,
+          'thread-child-terminal-parent',
+          'thread-child-terminal-child',
+        )
+        writeStartedTurn(
+          child,
+          'thread-child-terminal-child',
+          'turn-child-terminal-child',
+        )
+        writeCompletedTurn(
+          child,
+          'thread-child-terminal-child',
+          'turn-child-terminal-child',
+        )
+        writeCompletedTurn(
+          child,
+          'thread-child-terminal-parent',
+          'turn-child-terminal-parent',
+        )
+
+        await respondToBackgroundTerminals(child, 1)
+        await respondToBackgroundTerminals(
+          child,
+          2,
+          [{ id: 'terminal-still-running' }],
+        )
+      })
+
+      await executeBackgroundBoundaryTurn(
+        codexHome,
+        workingDirectory,
+        'run one bounded child without background terminals',
+      )
+      await expect(waitForWarmCodexBackgroundWork()).rejects.toMatchObject({
+        code: 'ASSISTANT_CODEX_BACKGROUND_TERMINAL_UNSUPPORTED',
+      })
+      expect(spawnedChildren[0]?.signalCode).toBe('SIGTERM')
     })
 
     it('routes late child events arriving before the next thread/start response resolves', async () => {
@@ -17372,6 +17739,23 @@ function mockProcessGroupSignalsForChildren(children: readonly MockChildProcess[
   })
 }
 
+function mockWarmCodexProcess(
+  children: MockChildProcess[],
+  pidBase: number,
+  run: (child: MockChildProcess) => Promise<void>,
+): void {
+  mockProcessGroupSignalsForChildren(children)
+  codexMocks.spawn.mockImplementation(() => {
+    const child = new MockChildProcess()
+    child.pid = pidBase + children.length
+    children.push(child)
+    queueMicrotask(() => {
+      void run(child)
+    })
+    return child
+  })
+}
+
 function mockHostedCodexIdentityServer(children: MockChildProcess[]): void {
   mockProcessGroupSignalsForChildren(children)
   codexMocks.spawn.mockImplementation(() => {
@@ -17468,6 +17852,113 @@ async function writeWarmTurnStarted(input: {
       },
     },
   }))
+}
+
+async function initializeWarmTurn(
+  child: MockChildProcess,
+  threadId: string,
+  turnId: string,
+): Promise<void> {
+  const initialize = await waitForRpcMethod(child, 'initialize')
+  child.stdout.write(jsonLine({ id: initialize.id, result: {} }))
+  await writeWarmTurnStarted({
+    child,
+    requestCount: 1,
+    threadId,
+    turnId,
+  })
+}
+
+function writeSubAgentActivity(
+  child: MockChildProcess,
+  threadId: string,
+  agentThreadId: string,
+  kind: 'interacted' | 'started' = 'started',
+  metadata: {
+    agentPath?: string
+    id?: string
+    turnId?: string
+  } = {},
+): void {
+  child.stdout.write(jsonLine({
+    method: 'item/completed',
+    params: {
+      item: {
+        ...(metadata.agentPath ? { agentPath: metadata.agentPath } : {}),
+        agentThreadId,
+        ...(metadata.id ? { id: metadata.id } : {}),
+        kind,
+        type: 'subAgentActivity',
+      },
+      threadId,
+      ...(metadata.turnId ? { turnId: metadata.turnId } : {}),
+    },
+  }))
+}
+
+function writeStartedTurn(
+  child: MockChildProcess,
+  threadId: string,
+  turnId: string,
+): void {
+  child.stdout.write(jsonLine({
+    method: 'turn/started',
+    params: {
+      threadId,
+      turn: { id: turnId },
+    },
+  }))
+}
+
+function writeCompletedTurn(
+  child: MockChildProcess,
+  threadId: string,
+  turnId: string,
+  status: 'completed' | 'failed' | 'interrupted' = 'completed',
+): void {
+  child.stdout.write(jsonLine({
+    method: 'turn/completed',
+    params: {
+      status,
+      threadId,
+      turnId,
+    },
+  }))
+}
+
+async function respondToBackgroundTerminals(
+  child: MockChildProcess,
+  requestCount: number,
+  data: readonly Record<string, unknown>[] = [],
+): Promise<Record<string, unknown>> {
+  const request = await waitForRpcMethodCount(
+    child,
+    'thread/backgroundTerminals/list',
+    requestCount,
+  )
+  child.stdout.write(jsonLine({
+    id: request.id,
+    result: {
+      data,
+      nextCursor: null,
+    },
+  }))
+  return request
+}
+
+async function executeBackgroundBoundaryTurn(
+  codexHome: string,
+  workingDirectory: string,
+  prompt: string,
+) {
+  return await executeCodexAppServerTurn({
+    approvalPolicy: 'never',
+    codexHome,
+    env: { PATH: '/custom/bin' },
+    prompt,
+    sandbox: 'workspace-write',
+    workingDirectory,
+  })
 }
 
 function writeCodexV2AssistantEventTurn(input: {

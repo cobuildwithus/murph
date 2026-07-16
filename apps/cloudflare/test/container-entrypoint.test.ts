@@ -32,9 +32,11 @@ const mocks = vi.hoisted(() => ({
   drainHostedRuntimeDeferredUsageCompletionsBestEffort: vi.fn(async () => undefined),
   emitHostedExecutionStructuredLog: vi.fn(),
   registerStopWarmCodexAppServer: vi.fn(),
+  registerWaitForWarmCodexBackgroundWork: vi.fn(),
   runHostedWorkspaceInvocation: vi.fn(),
   spawn: vi.fn<SpawnMock>(),
   stopWarmCodexAppServer: vi.fn(),
+  waitForWarmCodexBackgroundWork: vi.fn(),
 }));
 
 vi.mock("node:child_process", async () => {
@@ -67,7 +69,10 @@ vi.mock("../src/hosted-workspace-invocation.js", async () => {
 
 vi.mock("@murphai/assistant-engine/codex-lifecycle", () => ({
   registerStopWarmCodexAppServer: mocks.registerStopWarmCodexAppServer,
+  registerWaitForWarmCodexBackgroundWork:
+    mocks.registerWaitForWarmCodexBackgroundWork,
   stopWarmCodexAppServer: mocks.stopWarmCodexAppServer,
+  waitForWarmCodexBackgroundWork: mocks.waitForWarmCodexBackgroundWork,
 }));
 
 vi.mock("@murphai/assistant-runtime/hosted-invocation", async () => {
@@ -108,6 +113,7 @@ beforeEach(() => {
   mocks.runHostedWorkspaceInvocation.mockResolvedValue(buildWorkspaceRunnerResult());
   mocks.spawn.mockReset();
   mocks.stopWarmCodexAppServer.mockResolvedValue(undefined);
+  mocks.waitForWarmCodexBackgroundWork.mockResolvedValue(undefined);
 });
 
 afterEach(async () => {
