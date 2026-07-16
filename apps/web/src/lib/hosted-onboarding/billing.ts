@@ -37,6 +37,40 @@ export function coerceStripeObjectId(value: { id?: unknown } | string | null | u
   return null;
 }
 
+export function readStripeShouldRetryDirective(error: unknown): boolean | null {
+  if (
+    !error ||
+    typeof error !== "object" ||
+    !("headers" in error) ||
+    !error.headers ||
+    typeof error.headers !== "object" ||
+    Array.isArray(error.headers)
+  ) {
+    return null;
+  }
+
+  let directive: boolean | null = null;
+  for (const [name, value] of Object.entries(error.headers)) {
+    if (name.toLowerCase() !== "stripe-should-retry") {
+      continue;
+    }
+    if (typeof value !== "string") {
+      return null;
+    }
+    const normalized = value.trim().toLowerCase();
+    if (normalized !== "true" && normalized !== "false") {
+      return null;
+    }
+    const nextDirective = normalized === "true";
+    if (directive !== null && directive !== nextDirective) {
+      return null;
+    }
+    directive = nextDirective;
+  }
+
+  return directive;
+}
+
 export function coerceStripeSubscriptionId(value: string | Stripe.Subscription | null | undefined): string | null {
   if (typeof value === "string") {
     return value;

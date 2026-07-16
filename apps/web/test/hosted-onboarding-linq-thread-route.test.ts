@@ -1212,6 +1212,8 @@ describe("Linq explicit external-thread routing", () => {
       periodStart: new Date("2026-06-01T00:00:00.000Z"),
       remainingUsdMicros: 4_500_000n,
       spentUsdMicros: 0n,
+      usageCreditBalanceUsdMicros: 0n,
+      usageCreditLedgerVersion: 0n,
     });
     vi.mocked(mailboxStore.appendHostedMailboxEnvelopeTx).mockResolvedValueOnce({
       dedupeConflict: false,
@@ -1278,6 +1280,8 @@ describe("Linq explicit external-thread routing", () => {
       periodStart: new Date("2026-06-01T00:00:00.000Z"),
       remainingUsdMicros: 4_500_000n,
       spentUsdMicros: 0n,
+      usageCreditBalanceUsdMicros: 0n,
+      usageCreditLedgerVersion: 0n,
     });
     vi.mocked(mailboxStore.appendHostedMailboxEnvelopeTx).mockResolvedValueOnce({
       dedupeConflict: false,
@@ -1718,6 +1722,8 @@ describe("Linq explicit external-thread routing", () => {
       periodStart: new Date("2026-06-01T00:00:00.000Z"),
       remainingUsdMicros: 4_500_000n,
       spentUsdMicros: 0n,
+      usageCreditBalanceUsdMicros: 0n,
+      usageCreditLedgerVersion: 0n,
     });
     vi.mocked(mailboxStore.appendHostedMailboxEnvelopeTx).mockResolvedValueOnce({
       dedupeConflict: false,
@@ -1770,6 +1776,8 @@ describe("Linq explicit external-thread routing", () => {
       periodStart: new Date("2026-06-01T00:00:00.000Z"),
       remainingUsdMicros: 4_500_000n,
       spentUsdMicros: 0n,
+      usageCreditBalanceUsdMicros: 0n,
+      usageCreditLedgerVersion: 0n,
     });
     vi.mocked(mailboxStore.appendHostedMailboxEnvelopeTx).mockResolvedValueOnce({
       dedupeConflict: false,
@@ -1848,6 +1856,8 @@ describe("Linq explicit external-thread routing", () => {
       periodStart: new Date("2026-06-01T00:00:00.000Z"),
       remainingUsdMicros: 4_500_000n,
       spentUsdMicros: 0n,
+      usageCreditBalanceUsdMicros: 0n,
+      usageCreditLedgerVersion: 0n,
     });
     vi.mocked(mailboxStore.appendHostedMailboxEnvelopeTx).mockResolvedValueOnce({
       dedupeConflict: false,
@@ -1928,6 +1938,8 @@ describe("Linq explicit external-thread routing", () => {
       periodStart: new Date("2026-06-01T00:00:00.000Z"),
       remainingUsdMicros: 4_500_000n,
       spentUsdMicros: 0n,
+      usageCreditBalanceUsdMicros: 0n,
+      usageCreditLedgerVersion: 0n,
     });
 
     const plan = await planHostedOnboardingLinqWebhook({
@@ -2119,6 +2131,8 @@ describe("Linq explicit external-thread routing", () => {
       periodStart: new Date("2026-06-01T00:00:00.000Z"),
       remainingUsdMicros: 4_500_000n,
       spentUsdMicros: 0n,
+      usageCreditBalanceUsdMicros: 0n,
+      usageCreditLedgerVersion: 0n,
     });
     vi.mocked(mailboxStore.appendHostedMailboxEnvelopeTx).mockResolvedValueOnce({
       dedupeConflict: false,
@@ -2400,6 +2414,8 @@ describe("Linq group chat auto-provision", () => {
       periodStart: new Date("2026-06-01T00:00:00.000Z"),
       remainingUsdMicros: 4_500_000n,
       spentUsdMicros: 0n,
+      usageCreditBalanceUsdMicros: 0n,
+      usageCreditLedgerVersion: 0n,
     });
   }
 
@@ -2795,6 +2811,8 @@ describe("Linq group chat auto-provision", () => {
       periodStart: new Date("2026-06-01T00:00:00.000Z"),
       remainingUsdMicros: 4_500_000n,
       spentUsdMicros: 0n,
+      usageCreditBalanceUsdMicros: 0n,
+      usageCreditLedgerVersion: 0n,
     });
 
     const plan = await planHostedOnboardingLinqWebhook({
@@ -3253,6 +3271,8 @@ describe("Linq group chat concurrent provisioning race", () => {
       periodStart: new Date("2026-06-01T00:00:00.000Z"),
       remainingUsdMicros: 4_500_000n,
       spentUsdMicros: 0n,
+      usageCreditBalanceUsdMicros: 0n,
+      usageCreditLedgerVersion: 0n,
     });
 
     const plan = await planHostedOnboardingLinqWebhook({

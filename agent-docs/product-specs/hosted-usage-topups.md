@@ -1,6 +1,6 @@
 # Hosted Usage Top-Ups
 
-Status: Proposed target state
+Status: Implemented personal v1; group funding remains future scope
 Last verified: 2026-07-16
 
 ## Decision
@@ -23,17 +23,15 @@ one dollar of capacity under Murph's existing cost-weighted AI usage meter. It
 is not a token count, bank balance, Stripe customer balance, subscription
 invoice credit, transferable asset, or promise of cash redemption.
 
-Stripe proves money movement. `apps/web` remains authoritative for the payer,
-beneficiary, offer, grant, available usage credit, consumption, refund
-adjustments, and future group authorization.
+Stripe proves money movement. `apps/web` is authoritative for the payer,
+beneficiary, offer, grant, available usage credit, consumption, refund and
+dispute adjustments, and any future group authorization.
 
 ## Enforced Usage Contract
 
-Hosted included-usage exhaustion blocks subsequent usage-bearing work. This is
-the confirmed product contract and matches the historical gate behavior, even
-though the checked-out source currently conflicts with it. Top-ups extend the
-capacity evaluated by that one enforced boundary; they do not introduce a
-second admission owner or a second exhaustion policy.
+Hosted included-usage exhaustion blocks subsequent usage-bearing work. Top-ups
+extend the capacity evaluated by that one enforced boundary; they do not add a
+second admission owner or exhaustion policy.
 
 1. Active subscription or sponsored entitlement remains the prerequisite for
    service. Credit never creates or extends entitlement.
@@ -46,24 +44,21 @@ second admission owner or a second exhaustion policy.
 5. A request admitted before its usage crosses the boundary may finish. Later
    usage-bearing work observes the settled exhausted state, so the product must
    not promise an exact token-level cutoff.
-6. A fulfilled top-up makes effective capacity positive and must trigger the
-   same retry/recheck path that reopens pending accepted work after an allowance
-   reset, once source reconciliation has identified and proven that owner.
+6. A fulfilled top-up makes effective capacity positive and uses the existing
+   retry-owned runtime recheck path to reopen pending accepted work.
 
 No Stripe request belongs on the model-start or reply critical path. The
-reconciled single gate must read only Murph's local durable effective-capacity
+single gate reads only Murph's local durable effective-capacity
 projection: included capacity remaining plus eligible purchased credit
 remaining.
 
-### Source-State Reconciliation
+### Implemented Boundary
 
-The checked-out source currently contains an advisory allowance branch, tests,
-and copy that conflict with the enforced product behavior confirmed for this
-spec. Before implementing top-ups, reconcile that source-state discrepancy and
-identify the single deployed usage-gate owner, blocked-input disposition,
-reset/retry behavior, and route-specific notice. Restore or extend that one
-owner; do not preserve the discrepancy by adding a second gate. This is a
-current-source correction, not a new product-policy prerequisite for top-ups.
+`apps/web` owns one composed access-and-usage decision. It blocks provider work
+when included allowance and purchased credit are both exhausted, preserves
+accepted input for retry, and keeps route-specific notice behavior in the
+existing allowance owner. Cloudflare, Temporal, and the assistant runtime own
+no Stripe, purchase, ledger, or credit-balance state.
 
 ## Product Outcome
 
@@ -173,10 +168,10 @@ The browser renders only server-read status:
 | Payment failed | **The payment did not complete. No usage was added.** |
 | Reconciliation delayed | **Your payment is still being confirmed. You can safely leave this page.** |
 
-A success query parameter is never proof of payment. Settings may poll a
-bounded authenticated purchase-status endpoint or request the same idempotent
-reconciliation used by the webhook, then refresh its server projection. It
-must not say **Usage added** until the grant entry is committed.
+A success query parameter is never proof of payment. Settings polls a bounded
+authenticated purchase-status endpoint and refreshes its server projection. It
+does not invoke payment reconciliation and must not say **Usage added** until
+the webhook-owned grant entry is committed.
 
 Likewise, Stripe's `cancel_url` does not itself cancel an open Session. The
 authenticated cancel-return handler re-fetches the bound Session and
@@ -204,6 +199,13 @@ later exhausted again, at most one new reply-anchored notice is eligible for
 the new capacity epoch derived from the newest grant entry. Multiple grants
 before exhaustion collapse into one epoch. The delivery claim must re-read
 current effective capacity immediately before sending.
+
+The crossing send and a later mutating gate denial reuse one capacity-epoch
+delivery identity. Epoch zero preserves the pre-credit member-and-period key,
+so deploy-skew retries cannot duplicate a legacy notice. A failed or in-flight
+Linq or Telegram claim returns its durable retry time to runtime
+reconciliation; Temporal owns that recheck while the accepted input remains
+pending. Read-only status reconciliation never invokes a notice provider.
 
 ## Ownership And Data Flow
 
@@ -243,30 +245,42 @@ One row represents one intentional attempt to purchase one offer.
 | `offerCode` | Immutable internal catalog code. |
 | `cashCurrency` / `cashAmountMinor` | Expected Checkout subtotal, initially USD cents. |
 | `grantUsdMicros` | Usage capacity promised by the offer. |
+| `remainingCreditUsdMicros` | Rebuildable per-purchase unused-credit projection for settlement and financial reversals. |
 | `conversionPolicyVersion` | Freezes cash-to-usage semantics for audit and future pricing changes. |
 | `clientRequestKey` | Payer-scoped unique key that makes a lost browser response safely retryable. |
 | `requestFingerprint` | Immutable digest of offer and target semantics; reusing a client key with a different request conflicts. |
-| `checkoutRequestPolicyVersion` | Version plus explicit frozen Checkout fields used to reconstruct the exact Stripe request after ambiguity. |
+| `checkoutRequestPolicyVersion` | Version of the fixed Checkout builder used with the stored request fields and digest. |
 | `checkoutCreateState` | `not_started`, `claimed`, `attached`, or `closed`; `claimed` is the durable ambiguity fence from before provider I/O until one Session is attached or absence is proven. |
-| `status` | `created`, `checkout_open`, `payment_pending`, `fulfilled`, `expired`, `payment_failed`, or future-group `paid_unfulfillable`. Refund/dispute projections are separate. |
+| `status` | `created`, `checkout_open`, `payment_pending`, `fulfilled`, `expired`, or `payment_failed`. Refund/dispute adjustments remain ledger entries. |
 | Stripe references | Checkout Session, PaymentIntent, Charge, and Customer lookup/encrypted references using the existing hosted billing-ref pattern. |
 | timestamps | Creation, Checkout-create retry cutoff, Checkout expiry, paid, fulfilled, and terminal timestamps. |
 
 Cash amount, grant amount, and conversion version are copied from the
 server-owned offer catalog when the purchase is created. They are never
 re-derived from the mutable current catalog or from Stripe's final amount.
-Before provider I/O, also freeze the exact reusable Price reference, Customer
-reference, mode, quantity, tax and payment-method settings, exact success and
-cancel URLs, metadata, client reference, and expiration. Retries reconstruct
-the same normalized request from those explicit fields; a later catalog,
-environment, domain, or payment-policy
-change cannot alter it. Store a request digest for verification, not as a
-substitute for the reconstructible fields.
+Before provider I/O, also freeze the exact reusable Price and Customer
+references, success and cancel URLs, metadata, client reference, expiration,
+policy version, and normalized request digest. V1 mode, quantity, and
+PaymentIntent metadata are fixed by that policy's code. Retries reconstruct the
+request from the stored fields and reject a digest mismatch. Catalog, domain,
+and environment changes do not alter stored values; a behavior-changing
+Checkout builder must retain the old policy reader or drain claimed purchases.
 
-Financial records must not blindly cascade with member or group deletion.
-Implementation must extend the account export/deletion workflow with the
-minimum legally required payment record, identity detachment, and retention
-policy before launch.
+The initial authenticated transaction authorizes and freezes one purchase
+attempt. Replaying an identical `claimed` attempt is not a new purchase
+authorization: it reconciles that already-authorized provider write from the
+frozen request with the same purchase-derived Stripe idempotency key. The replay
+must not reinterpret the attempt as a fresh checkout against mutable catalog or
+eligibility state, mint a replacement attempt, or require a second browser
+authorization. A lifecycle change such as account deletion instead suspends new
+checkout creation and explicitly resolves or expires the outstanding claimed
+attempt before deleting its local owner state.
+
+Financial records do not cascade blindly through the Prisma relations. The
+account deletion owner removes local ledger entries before purchases and the
+member, while Stripe retains payment records under its required retention.
+Browser-vault export omits payment identifiers, Checkout URLs, semantic source
+keys, usage references, and allocation history.
 
 ### `HostedUsageCreditEntry`
 
@@ -278,19 +292,18 @@ The source of truth for usage credit is an append-only set of signed entries.
 | `usage_debit` | negative | canonical `HostedAiUsage.id` plus the grant entry it consumes |
 | `refund_reversal` | negative | Stripe Refund, grant entry, and cumulative refund state |
 | `dispute_reversal` | negative | Stripe Dispute funds-withdrawn state plus grant entry |
-| `reversal_restoration` | positive | failed refund or reinstated dispute funds plus original reversal |
+| `reversal_restoration` | positive | reinstated dispute funds plus original reversal |
 
 Each entry contains beneficiary member, signed USD micros, effective time,
 source type and opaque source identity, purchase and parent grant when
-applicable, a beneficiary-monotonic sequence, and creation time. The existing
-beneficiary `HostedMember` also holds a compact, rebuildable available-credit
-projection and credit-version counter. While holding the beneficiary row lock,
-every entry append increments the version and updates the projected balance in
-the same transaction. Admission reads only those bounded fields under that
-lock, so it never aggregates an indefinitely growing ledger and rollback or
-commit order cannot make a later grant eligible to earlier work. The ledger
-remains canonical; a bounded operator repair can rebuild both projection fields
-from its entries.
+applicable, a beneficiary-monotonic sequence, and creation time. The beneficiary
+`HostedMember` holds a compact, rebuildable available-credit projection and
+credit-version counter, while each purchase holds its own rebuildable
+unused-credit projection. While holding the beneficiary row lock, every entry
+append increments the version and updates the affected projections in the same
+transaction. Admission and settlement read bounded fields instead of
+aggregating an indefinitely growing ledger. The ledger remains canonical; a
+bounded repair can rebuild the projections from its entries.
 
 One usage event may allocate across multiple grants, so its debit uniqueness
 is `(usage event, grant entry)` rather than the usage event alone. A uniqueness
@@ -304,10 +317,8 @@ nonnegative before commit.
 
 Available credit is the sum of effective entries and has a nonnegative
 invariant. A refund or dispute can revoke only unused credit attributable to
-that purchase. Any already-consumed amount whose payment is forcibly reversed
-is recorded as a private purchase loss/risk fact, not negative usage credit,
-not a deduction from a later purchase, and not a reason to silently suspend an
-otherwise valid plan.
+that purchase. Already-consumed value is not turned into negative usage credit,
+deducted from a later purchase, or used to suspend an otherwise valid plan.
 
 ## Usage Settlement
 
@@ -316,11 +327,10 @@ thread container's configured monthly limit. Current allowance reconciliation
 derives the base limit and repairs a mismatched stored period value, so either
 shortcut would be overwritten.
 
-The allowance resolver instead derives two independent quantities:
+The allowance resolver derives two independent quantities:
 
 - base included capacity for the usage event's plan and period; and
-- purchased credit still available from positive entries that were eligible
-  when the counted platform operation was admitted.
+- purchased credit still available when the canonical usage event settles.
 
 Every purchase grant, usage debit, refund reversal, dispute reversal,
 restoration, and effective-capacity recomputation must acquire the same
@@ -328,8 +338,8 @@ beneficiary-scoped database lock before any purchase, period, or grant lock.
 Period-row locking alone is insufficient because carryover credit can be
 consumed concurrently by late prior-period and current-period usage. Use one
 fixed lock order across all paths and revalidate rows after acquiring it.
-Credit-aware admission briefly acquires that same lock to read the compact
-balance/version projection and issue its cutoff.
+Credit-aware admission reads the compact balance/version projection from the
+same durable owner.
 
 For each newly canonical usage event, under that beneficiary-wide lock:
 
@@ -338,36 +348,23 @@ For each newly canonical usage event, under that beneficiary-wide lock:
 2. Apply the event to the period's monotonic total spend as today.
 3. Compute the portion of this event covered by remaining included capacity.
 4. For only the excess portion, consume still-available positive entries at or
-   before the event's trusted credit-eligibility sequence, oldest grant first,
-   and append one allocation debit per grant used by the canonical usage event.
-5. Cap the debit at credit actually available for that event. Any amount by
-   which a crossing operation exceeds the capacity visible at admission is
-   absorbed by Murph; it is not debt and is never collected from a later
-   purchase.
+   before the ledger version re-read under the beneficiary lock, oldest grant
+   first, and append one allocation debit per grant used by the canonical usage
+   event.
+5. Cap the debit at credit actually available in that serialized settlement.
+   Any excess from the crossing operation is absorbed by Murph; it is not debt
+   and is never collected from a later purchase.
 6. Recompute effective exhaustion from base remaining plus available purchased
    credit.
 
-Every counted platform operation receives a web-authoritative
-`creditEligibilitySequence` with its local admission decision: the latest
-credit-ledger sequence visible before provider work starts, or explicit
-absence. The transport carries an opaque web-issued token bound to member,
-operation identity, and cutoff rather than exposing the numeric sequence.
-Web validates the token and persists the resolved value with the usage record.
-Runtime and model cannot select it. Positive grants or restorations created
-after the cutoff are never eligible for that operation, while all intervening
-debits and reversals still reduce current availability. A missing, legacy, or
-invalid cutoff fails closed to no purchased-credit debit; it must never infer
-eligibility from callback arrival time.
-
-This makes a provider operation started before checkout unable to consume the
-new purchase even if its usage callback arrives afterward. The existing
-`occurredAt` is captured after provider result and is insufficient for this
-boundary. Base included capacity still settles in beneficiary-serialized
-accounting order rather than rewriting immutable events chronologically. If a
-late pre-grant event would have changed which earlier event used included
-capacity, Murph absorbs the conservative difference instead of retroactively
-charging purchased credit. Semantic-source uniqueness makes replay idempotent,
-and the beneficiary lock makes the original allocation order singular.
+The current runtime does not transport an admission-bound credit cutoff. V1
+re-reads the beneficiary ledger version while holding the settlement lock and
+uses that version as the eligibility boundary. This gives concurrent grants,
+debits, reversals, and usage callbacks one deterministic order, but it does not
+distinguish an operation that started before a grant and settled afterward.
+Adding an admission-bound token would be a separate hardening change, not a
+claim of the current implementation. Semantic-source uniqueness keeps replay
+idempotent, and the beneficiary lock makes the allocation order singular.
 
 Fulfillment reads the purchase's beneficiary, acquires the beneficiary lock,
 then locks and revalidates the purchase, appends the grant, marks the purchase
@@ -378,23 +375,19 @@ allowance period merely because an eligible member bought credit before their
 first counted usage. Notice claim and model-admission readers must derive the
 same effective state whether or not a period row exists.
 
-After commit, if the beneficiary still has active entitlement and runnable
-usage-blocked work, fulfillment must send one idempotent recheck through the
-existing Stripe-event retry owner or another already-durable owner proven by
-source reconciliation. Top-ups must not add a second wake queue. The event path
-is not operationally complete until the grant is durable and the required
-handoff is accepted or the proven owner supplies an equivalent wake. A delayed
-payment that settles after cancellation or suspension still grants the
-purchased credit but does not require a runtime wake; entitlement reactivation
-must perform the later recheck. The browser return is never the wake or
-fulfillment authority.
+After commit, the existing Stripe-event retry owner sends an idempotent runtime
+recheck for an active beneficiary. A signal failure keeps the Stripe event
+retryable; no second wake queue exists. A delayed payment that settles after
+cancellation or suspension still grants the purchased credit, but an inactive
+beneficiary does not require a runtime wake. Entitlement reactivation performs
+the later recheck. The browser return is never the wake or fulfillment
+authority.
 
 ## Checkout Creation
 
-Add a dedicated usage-credit service beside, not inside, subscription
-onboarding checkout. The current subscription service rejects active members
-and creates `mode=subscription` Sessions; top-ups are repeatable one-time
-payments.
+The dedicated usage-credit service sits beside, not inside, subscription
+onboarding checkout. Subscription onboarding creates `mode=subscription`
+Sessions; top-ups are repeatable one-time payments.
 
 The authenticated Settings route performs this sequence:
 
@@ -413,11 +406,14 @@ The authenticated Settings route performs this sequence:
 9. Freeze the reconstructible Checkout request fields and request digest.
 10. Atomically move its one Checkout-create attempt from `not_started` to
     `claimed` before provider I/O.
-11. Recheck that the frozen create-retry cutoff has not passed, then create one
-    Stripe Checkout Session with an idempotency key derived from the purchase
-    ID. A passed cutoff enters adoption-only reconciliation without calling the
-    create API.
-12. Persist the returned references and redirect URL before returning it.
+11. Recheck that the frozen create-retry cutoff has not passed, retrieve the
+    configured Stripe Price, and verify its live/test mode, active state,
+    one-time per-unit shape, currency, exact amount, and absence of custom,
+    transformed, or multi-currency amount semantics.
+12. Create one Stripe Checkout Session with an idempotency key derived from the
+    purchase ID. After the cutoff, return the durable reconciling state without
+    Stripe I/O.
+13. Persist the returned references and redirect URL before returning it.
 
 The Stripe Session uses:
 
@@ -430,6 +426,8 @@ The Stripe Session uses:
   refund/dispute correlation;
 - a frozen `expires_at` 90 minutes after purchase creation plus a frozen
   Checkout-create retry cutoff 30 minutes after purchase creation;
+- Adaptive Pricing explicitly disabled so Dashboard defaults cannot change the
+  frozen USD catalog contract;
 - no adjustable quantity, promotion codes, or caller-selected Price; and
 - server-generated Settings success/cancel URLs.
 
@@ -442,21 +440,17 @@ it; no stale-owner timeout reopens creation. Never send the purchase with a new
 Stripe idempotency key, create a replacement purchase for that payer while it
 is claimed, or tell the browser to retry as a fresh purchase.
 
-Reconciliation reconstructs the frozen request and verifies its digest. It may
-make any initial or retry create call with that same key only before the frozen
+The service reconstructs the frozen request and verifies its digest for every
+create retry. It may call Stripe with the same key only before the frozen
 30-minute retry cutoff. The frozen 90-minute `expires_at` therefore remains at
-least 60 minutes after any permitted create call, satisfying Stripe's
-create-time expiration window without mutating the request. After the retry
-cutoff, reconciliation
-only consumes matching webhooks or boundedly lists Sessions for the expected
-Customer and creation window to adopt exactly one Session with the purchase's
-client reference and metadata. Zero matches remain claimed until the frozen
-Session expiry and event-reconciliation window prove no payable Session
-remains; multiple matches are an incident and fail closed. Only then may the
-attempt close and the payer start another purchase. Stripe's temporary
-idempotency window protects the external call; the request key, request
-fingerprint, attempt fence, and unique grant sources provide permanent
-Murph-side convergence.
+least 60 minutes after any permitted create call and never needs mutation.
+After the retry cutoff, the service does not list or search for Sessions; it
+returns `reconciling` without provider I/O and keeps the payer fenced until the
+frozen expiry. If no webhook attached or fulfilled the purchase by then, the
+next locked read closes the unattached attempt and permits a new purchase. A
+matching verified webhook may still reconcile the original purchase. Stripe's
+idempotency window protects the external call; the request key, fingerprint,
+attempt fence, and unique grant sources provide Murph-side convergence.
 
 ## Stripe Catalog And Payment Configuration
 
@@ -470,16 +464,23 @@ they remain governed and searchable in Stripe's catalog. Inline prices remain
 a possible later implementation for genuinely arbitrary server-calculated
 amounts, not this MVP.
 
+Checkout creation re-fetches the configured Price and fails closed unless it
+is the exact active one-time, per-unit, single-currency amount frozen on the
+purchase. Do not use custom unit amounts, transformed quantity, or extra
+currency options for v1.
+
 Use Dashboard-managed dynamic payment methods unless a reviewed requirement
 limits the top-up configuration to immediately confirmed methods. Delayed
 methods are safe only because the UI and fulfillment model include
 `payment_pending`; Checkout completion alone never grants credit.
 
-Before live launch, finance/counsel must classify the prepaid service credit,
-configure the Product tax code and Price tax behavior, and decide where Stripe
-Tax is enabled. If tax is charged in addition to the pack subtotal, the member
-still receives the catalog's exact usage grant. Never derive credit from
-`amount_total`, which can include tax, discounts, or other adjustments.
+Before live launch, finance/counsel must classify the prepaid service credit
+and confirm the Product tax code and Price tax behavior. V1 does not enable
+Stripe Tax or support tax added above the catalog amount: reconciliation
+requires both the live Checkout subtotal and total to equal the purchase's
+fixed cash amount. Supporting tax-inclusive or tax-added Checkout later needs
+an explicit request and reconciliation policy change; the usage grant must
+still come from the frozen catalog conversion, not a client-supplied amount.
 
 ## Webhook Fulfillment
 
@@ -494,6 +495,7 @@ Relevant events include:
 - `checkout.session.async_payment_succeeded`;
 - `checkout.session.async_payment_failed`;
 - `checkout.session.expired`;
+- `charge.refunded`;
 - `refund.created`, `refund.updated`, and `refund.failed`; and
 - `charge.dispute.created`, `charge.dispute.updated`,
   `charge.dispute.funds_withdrawn`, `charge.dispute.funds_reinstated`, and
@@ -515,11 +517,12 @@ An unpaid `checkout.session.completed` becomes `payment_pending`.
 `checkout.session.async_payment_succeeded` can later fulfill it. A failed or
 expired Session never grants credit.
 
-The webhook is authoritative. The Settings return endpoint may call the same
-reconciler for latency, but concurrent calls must converge on the same purchase
-and unique grant entry. A fast `2xx`, signature verification, existing event
-dedupe, semantic source uniqueness, bounded retries, and poison-event handling
-remain mandatory because Stripe delivery can be duplicated and out of order.
+The webhook is authoritative. Settings return handlers read durable status
+only; the cancel-return path may re-fetch and idempotently expire an open bound
+Session, while a paid or processing state wins. A fast `2xx`, signature
+verification, existing event dedupe, semantic source uniqueness, bounded
+retries, and poison-event handling remain mandatory because Stripe delivery
+can be duplicated and out of order.
 
 ## Refunds And Disputes
 
@@ -528,26 +531,28 @@ refund; another group participant or beneficiary cannot refund someone else's
 purchase.
 
 For ordinary refunds, return only the unused attributable portion of a
-purchase. A partial successful refund produces a proportional cumulative grant
-reversal, with the final reversal receiving any integer-rounding remainder. A
-full refund is permitted only while the full grant remains unused, and then
-reverses the full grant. Store each Stripe Refund's latest authoritative state
-and recompute the desired cumulative reversal rather than assuming event order.
+purchase. Reconciliation re-fetches the relevant Refund when available, its
+Charge and PaymentIntent, and the Charge's bounded canonical Refund list.
+`pending`, `requires_action`, and `succeeded` Refund amounts are active cash
+exposure, so they reserve the proportional unused credit immediately rather
+than waiting for settlement. The live Charge's cumulative refunded amount may
+lag a pending refund: it must be at least the sum of succeeded Refunds and no
+greater than the active Refund total. A failed or canceled Refund removes that
+exposure and appends a restoration for credit that was actually reversed. A
+full active refund can revoke the full grant only while it remains unused. The
+original grant and canonical usage are never edited.
 
-Never delete the original grant or rewrite usage. Apply no reversal for a
-failed refund. If Stripe later changes an already-applied refund to a failed
-state, append a restoration rather than rewriting history.
+Disputes are keyed by Stripe Dispute ID. Created or updated disputes establish
+correlation but do not revoke credit until funds are withdrawn or the dispute
+is lost. Withdrawn funds revoke the unused remainder attributable to that
+purchase; reinstated funds append a restoration of what was actually revoked.
+Multiple disputes or refunds for one payment must never reverse more than its
+unused grant.
 
-Disputes are keyed by Stripe Dispute ID. A created dispute flags the associated
-purchase for review. Withdrawn funds revoke the unused remainder attributable
-to that purchase; reinstated funds append a restoration of what was actually
-revoked. Multiple disputes or refunds for one payment must never reverse more
-than its unused grant.
-
-If forcibly reversed cash exceeds unused credit, record the consumed portion
-as a private payment loss/risk fact. Do not make a later top-up repay it,
-silently disable current entitlement, erase canonical usage, expose debt in a
-group chat, or charge another participant.
+If forcibly reversed cash exceeds unused credit, the ledger revokes only the
+unused remainder and never creates a negative balance. It does not make a later
+top-up repay the rest, disable current entitlement, erase canonical usage,
+expose debt in a group chat, or charge another participant.
 
 ## Security And Privacy
 
@@ -587,12 +592,10 @@ The group handoff must be a new opaque, short-lived funding intent bound to the
 exact originating container and route. It must not reuse a personal Settings
 URL, group join code, or vault-sharing capability. Browser authentication and a
 fresh relationship check precede purchase creation. After a paid Checkout, the
-bound beneficiary remains fixed even if the payer later leaves; if the group
-was deleted or made ineligible before fulfillment, reconciliation atomically
-records the purchase as `paid_unfulfillable` without a grant and the existing
-Stripe-event retry owner requests an idempotent full refund. That durable state
-remains visible to private payer support/status reads until Stripe confirms the
-refund; value is never redirected elsewhere.
+bound beneficiary remains fixed even if the payer later leaves. The later group
+implementation must define its beneficiary-deletion and idempotent-refund state
+machine together; value must never be redirected when the bound group no longer
+exists or is no longer eligible.
 
 Group chat may show only aggregate included usage and aggregate usage credit.
 It must not reveal who paid, contribution history, email, Customer ID, card,
@@ -600,70 +603,53 @@ personal plan, refund request, dispute, or private receipt. Receipt and refund
 control stay in the payer's private billing surface. Delivery stays on the
 exact originating group route with no personal-home fallback.
 
+Payer and beneficiary deletion semantics must be separated before enabling
+group funding. Deleting a payer removes or detaches that payer's private
+billing references, receipt/status access, and refund-control data according to
+the payment-retention policy, but it must not erase the beneficiary's purchase
+provenance, ledger entries, or balance projection. Deleting the beneficiary or
+group owns the distinct credit-revocation and purchase-resolution path. A
+`payerMemberId OR beneficiaryMemberId` bulk delete is therefore valid only for
+personal v1, where those identities are required to be equal, and is not a
+group-compatible deletion design.
+
 Future group offers may use reusable $1, $2, $5, $10, and $20 USD Prices. The
 $1 amount is above Stripe's general $0.50 USD minimum, but its processing-fee,
 tax, fraud, and support economics require explicit launch approval. Offer
 denominations remain catalog policy rather than ledger schema.
 
-## Observability And Reconciliation
+## Operations And Reconciliation
 
-Track secret-safe counts and latency for:
+The existing `HostedStripeEvent` receipt is the retry owner and records attempt
+state, next-attempt time, and a bounded error code. Purchases record their
+Checkout state, payment state, and last reconciliation time. Identity,
+catalog, payment, duplicate-grant, negative-balance, and projection invariants
+fail closed and leave the Stripe event retryable.
 
-- purchase created and Checkout creation failed;
-- Checkout creation claimed and time spent awaiting attachment or proven
-  absence;
-- Checkout open, payment pending, fulfilled, expired, and failed;
-- future-group paid-unfulfillable purchases and refund resolution;
-- paid-to-grant reconciliation latency;
-- refund/dispute reversal and restoration;
-- available-credit exhaustion; and
-- status-route polling and terminal reconciliation failures.
-
-Alert on invariant violations:
-
-- verified paid eligible purchase without a grant after the retry window,
-  excluding a recorded `paid_unfulfillable` purchase under refund recovery;
-- grant without a verified paid purchase;
-- more than one grant for one semantic payment source;
-- more than one Stripe Session for one purchase or a claimed create past its
-  reconciliation window;
-- Stripe subtotal/Price/currency/Customer mismatch;
-- purchase routed into subscription entitlement handling;
-- stale exhaustion notice after positive effective capacity;
-- ledger projection drift; and
-- a ledger projection below zero or an unreconciled forced-payment loss.
-
-Provide an operator reconciliation command or bounded job that reads purchase
-IDs, re-fetches Stripe, and runs the same idempotent state transition. Do not
-make a second queue or second fulfillment implementation.
+V1 does not add a second queue or a separate operator reconciliation service.
+Operational checks should watch for paid purchases without grants, claimed
+Checkout creation past its reconciliation window, Stripe identity/catalog
+mismatches, subscription dispatch of a one-time purchase, projection drift,
+and negative-balance attempts. Any future operator command must re-fetch Stripe
+and call the same idempotent reconciler by purchase ID.
 
 ## Rollout And Rollback
 
-1. Finalize tax classification, catalog semantics, and refund policy. Resolve
-   the checked-out source discrepancy and prove the single enforced usage gate
-   that this primitive will extend.
-2. Add the database schema, deletion/export coverage, ledger invariants, and
-   read-only projection with the feature disabled.
-3. Deploy webhook/event consumers and refund/dispute reconciliation before any
-   producer can create a top-up Checkout.
-4. Create and verify the Stripe Product, Prices, payment-method configuration,
-   tax settings, event subscriptions, Radar rules, and environment mappings in
-   test mode, then live mode.
-5. Exercise duplicate, concurrent, delayed-payment, refund, dispute, and stale
-   notice paths in test mode. Run shadow effective-capacity calculations
-   against canonical usage without changing admission.
-6. Expand the signed usage contract and storage to accept an optional
-   web-issued credit-eligibility cutoff, then deploy every paid-credit-consuming
-   producer. Legacy omission means no purchased-credit debit. Do not let
-   purchased credit authorize usage until every admitted counted operation
-   either carries a valid cutoff or is explicitly excluded.
-7. If assistant/runtime receives a new `add_usage` action, deploy the tolerant
-   consumer contract before web can emit it. Web-only Settings/Home UI can ship
-   independently behind the flag.
-8. Activate the purchased-credit extension and paid Checkout together only
-   after production smoke proof shows that no-credit exhaustion remains
-   blocked and a fulfilled grant wakes pending work and restores service.
-9. Observe reconciliation lag and invariant alerts before widening exposure.
+1. Configure and verify the one-time Product and three Prices, keep Stripe Tax
+   disabled for this flow, confirm equal subtotal/total behavior, and verify
+   payment settings, webhook event subscriptions, Radar rules, and environment
+   mappings in Stripe test mode, then live mode.
+2. Apply the database migration before deploying the web release.
+3. Deploy the Cloudflare/runner bundle that accepts the new `add_usage`
+   plan-usage action, then wait for the tolerant consumer to be current. It owns
+   no billing, Stripe, purchase, or credit state and remains compatible with the
+   old web response.
+4. Deploy the web release containing the enforced gate, ledger, webhook branch,
+   refund/dispute reconciliation, Settings routes, and `add_usage` projection
+   together.
+5. Before widening exposure, smoke a blocked no-credit member, a paid webhook
+   grant, runtime recheck, subsequent usage debit, refund reversal, and dispute
+   restoration in Stripe test mode.
 
 Rollback disables new Checkout creation and the Add usage actions first. It
 does not delete purchases or grants and must not disable the existing usage
@@ -671,52 +657,41 @@ limit. A rollback must keep already-purchased credit effective or preserve a
 compatible reader until it is consumed or refunded; it cannot strand paid
 capacity behind an older gate.
 
+The first durable purchase row establishes a rollback floor for every Web,
+runtime, and account-deletion path that reads, enforces, settles, or removes
+usage state. After that point, do not deploy an older path that ignores purchase
+rows or cannot preserve their invariants. Disable the producer and Price offers
+while compatible consumers remain deployed before any rollback, then stay at
+that floor or forward-fix. Rolling a consumer below the floor requires an
+explicit migration or proof that no purchase state remains; merely hiding the
+Settings action is insufficient.
+
 ## Verification
 
-Implementation requires focused tests for:
+Current focused unit and component coverage exercises:
 
-- offer allowlisting, CSRF/session auth, eligibility, and missing billing refs;
-- same-pack intentional repurchase, lost-response retry, and client-key reuse
-  with a different offer;
-- process loss before/after Checkout creation, same-key adoption, zero/multiple
-  Session reconciliation, and no second payable Session after Stripe's
-  idempotency window;
-- exact Checkout request reconstruction after catalog, domain, tax, or
-  payment-policy configuration changes;
-- Checkout request shape and one-time/subscription dispatch separation;
-- spoofed Price, subtotal, currency, Customer, metadata, environment, and
-  beneficiary rejection;
-- duplicate and concurrent webhook/success reconciliation;
-- completed-but-unpaid, async success, async failure, and expiry;
-- cancel-return expiry versus concurrent payment completion;
-- atomic grant plus effective-exhaustion recomputation;
-- fulfillment before any allowance-period row exists, without creating one;
-- delayed-payment fulfillment after cancellation or suspension, without a
-  poisoned runtime-recheck retry;
-- included-first settlement, crossing-event partial debit, carryover, monthly
-  reset, serialized late-callback behavior, and no debit of usage already
-  committed before the grant;
-- pre-grant in-flight work, post-grant work, later grant/restoration exclusion,
-  cutoff replay/binding, and missing/invalid cutoff behavior;
-- grant commit versus admission-cutoff ordering, rollback, and concurrent
-  counter allocation under the beneficiary lock;
-- concurrent prior-period/current-period usage, grant, refund, and dispute
-  mutations under the beneficiary-wide lock;
-- canceled/suspended/trial/Family access behavior;
-- partial/full refunds, failed refunds, multiple disputes, and reinstatement;
-- notice invalidation and one notice per capacity epoch;
-- purchase export/deletion and financial retention behavior;
-- Settings dialog accessibility, selection, redirect, pending, success,
-  cancellation, error, and one-shot deep-link cleanup;
-- shared Settings/Home/assistant projections and low-pressure copy;
-- no-credit exhaustion blocking, crossing-operation behavior, pending-input
-  preservation, route-correct notice delivery, grant-triggered runtime recheck,
-  re-exhaustion after credit consumption, and deploy-skew behavior; and
-- future payer-not-beneficiary and group privacy/route fixtures.
+- the exact fixed offers, request parsing, direct-paid eligibility, durable
+  create claim, stable idempotency key, retry cutoff, and active-purchase fence;
+- payer-bound status and cancel-expiry routes, CSRF rejection, and paid-state
+  precedence over cancellation;
+- grant/debit replay, included-first FIFO settlement, crossing overrun, capped
+  refund/dispute reversals, and dispute restoration through fake Prisma
+  transaction clients;
+- real PostgreSQL grant replay, beneficiary-before-purchase lock ordering,
+  grant/debit serialization, and deletion-first cleanup against a guarded
+  isolated database;
+- live-state Stripe reconciliation through mocks, including paid, delayed,
+  failed, expired, spoofed-Price, `charge.refunded` provenance, and
+  one-time-versus-subscription dispatch cases;
+- composed usage blocking, carryover credit, trial and group behavior, and
+  current-period block clearing; and
+- the Settings dialog's no-default selection, exact offer post, stable-key
+  retry, redirect, read-only return polling, cancel expiry, and delayed state.
 
-Required implementation verification includes the relevant web tests,
-workspace typecheck, schema/migration checks, Stripe webhook test fixtures, and
-browser proof for desktop and mobile Settings flows.
+These suites do not prove a real Stripe test-mode webhook or deployed browser
+behavior. Release verification therefore still needs the scoped web tests and
+typecheck, desktop/mobile browser proof, and a Stripe test-mode paid Checkout
+plus webhook smoke.
 
 ## Non-Goals
 
@@ -759,6 +734,10 @@ second usage/accounting service.
 - [Checkout success-page guidance](https://docs.stripe.com/payments/checkout/custom-success-page)
 - [Products and Prices](https://docs.stripe.com/products-prices/how-products-and-prices-work)
 - [Manage Prices](https://docs.stripe.com/products-prices/manage-prices)
+- [Billing credits](https://docs.stripe.com/billing/subscriptions/usage-based/billing-credits)
+- [Billing for LLM tokens](https://docs.stripe.com/billing/token-billing)
+- [Advanced usage-based billing](https://docs.stripe.com/billing/subscriptions/usage-based/advanced/compare)
+- [Adaptive Pricing per Checkout Session](https://docs.stripe.com/changelog/acacia/2024-11-20/adaptive-pricing-param)
 - [Webhooks](https://docs.stripe.com/webhooks)
 - [Idempotent requests](https://docs.stripe.com/api/idempotent_requests)
 - [Metadata](https://docs.stripe.com/metadata)

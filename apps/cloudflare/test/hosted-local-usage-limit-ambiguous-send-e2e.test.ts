@@ -7,8 +7,12 @@ import type {
   HostedRunnerStatusResponse,
 } from "@murphai/hosted-execution/runtime-control";
 import {
+  grantHostedUsageCreditForTest,
   listHostedLinqDeliveriesForTest,
+  readHostedAiUsageLimitPeriodForTest,
+  readHostedMailboxItemForTest,
   seedHostedAiUsageLimitPeriodForTest,
+  signalHostedRuntimeRecheckRuntimeForTest,
 } from "#hosted-web-testing";
 import { afterAll, beforeAll, describe, expect, it, vi } from "vitest";
 
@@ -35,7 +39,8 @@ const firstInboundText = "Can you help me plan tomorrow's workout?";
 const secondInboundText = "Can you also update the plan for Saturday?";
 const firstAssistantReply = "Absolutely — here's a focused plan for tomorrow.";
 const secondAssistantReply = "I've updated the Saturday plan too.";
-const usageLimitNoticeUrl = "https://withmurph.ai/home";
+const usageLimitNoticeUrl =
+  "https://withmurph.ai/settings?addUsage=true#subscription";
 
 const streamDevLogs = process.env.MURPH_E2E_STREAM_DEV_LOGS === "1";
 const workerPersistDirOverride = process.env.MURPH_E2E_CF_PERSIST_DIR?.trim() || null;
@@ -80,7 +85,7 @@ describe("hosted local usage-limit ambiguous send e2e", () => {
     });
   }, 300_000);
 
-  it("keeps one durable usage-limit notice claim while over-limit member work continues", async () => {
+  it("keeps one durable crossing notice while later over-limit work remains blocked", async () => {
     const memberPhone = buildLinqRecipientPhoneNumber(userId);
     await requireScenario().seedActiveHostedLinqMember({
       homePhone: buildLinqHomePhoneNumber(userId),
@@ -102,6 +107,7 @@ describe("hosted local usage-limit ambiguous send e2e", () => {
       memberId: userId,
       periodEnd,
       periodStart,
+      remainingUsdMicros: 1n,
     });
 
     const replyPath = `/chats/${encodeURIComponent(chatId)}/messages`;
@@ -197,12 +203,25 @@ describe("hosted local usage-limit ambiguous send e2e", () => {
     expect(deliveriesAfterAmbiguousSend).toHaveLength(1);
     expect(deliveriesAfterAmbiguousSend[0]).toMatchObject({
       acceptedAt: null,
-      failedAt: null,
-      failureCode: null,
-      status: "provider_dispatch_started",
+      failedAt: expect.any(Date),
+      failureCode: "linq_usage_limit_dispatch_retryable",
+      status: "failed",
       template: "ai_usage_quota",
     });
     expect(deliveriesAfterAmbiguousSend[0]?.idempotencyKey).toEqual(expect.any(String));
+
+    const exhaustedPeriod = await readHostedAiUsageLimitPeriodForTest({
+      environment: requireScenario().runtimeEnv,
+      memberId: userId,
+      periodStart,
+    });
+    expect(exhaustedPeriod).toMatchObject({
+      blockedAt: expect.any(Date),
+      limitUsdMicros: 10_000_000n,
+    });
+    expect(exhaustedPeriod?.spentUsdMicros ?? 0n).toBeGreaterThanOrEqual(
+      exhaustedPeriod?.limitUsdMicros ?? 1n,
+    );
 
     const secondReplyBaseline = requireLinqStub().countObservedSends(
       replyPath,
@@ -226,6 +245,91 @@ describe("hosted local usage-limit ambiguous send e2e", () => {
       ok: true,
       reason: "wake-appended-active-member",
     });
+    const blockedStatus = await requireScenario().waitForLatestPendingWake(userId);
+    expect(readConversationMailboxLag(blockedStatus)).not.toBe("0");
+    expect(compareMailboxSeq(
+      readConversationMailboxMaxSeq(blockedStatus),
+      readConversationMailboxMaxSeq(firstCompletedStatus),
+    )).toBeGreaterThan(0);
+
+    const finalStatus = await vi.waitFor(async () => {
+      const status = await requireScenario().harness.readUserStatus(userId);
+      expect(status.inFlight).toBe(false);
+      expect(readConversationMailboxLag(status)).not.toBe("0");
+      return status;
+    }, {
+      interval: 250,
+      timeout: 30_000,
+    });
+    const blockedMailboxItem = await readHostedMailboxItemForTest({
+      dedupeKey: `evt_usage_limit_ambiguous_second_${runId}`,
+      environment: requireScenario().runtimeEnv,
+      userId,
+    });
+
+    expect(finalStatus.lastErrorCode ?? null).toBeNull();
+    expect(finalStatus.inFlight).toBe(false);
+    expect(readConversationMailboxLag(finalStatus)).not.toBe("0");
+    expect(compareMailboxSeq(
+      readConversationMailboxMaxSeq(finalStatus),
+      readConversationMailboxMaxSeq(firstCompletedStatus),
+    )).toBeGreaterThan(0);
+    expect(blockedMailboxItem.consumedAt).toBeNull();
+    expect(requireLinqStub().countObservedSends(replyPath, secondReplyMatcher)).toBe(
+      secondReplyBaseline,
+    );
+    await requireLinqStub().waitForMatchingSendCount({
+      expectedCount: observedBaseline + 2,
+      expectedPath: replyPath,
+      matchRequest: usageNoticeMatcher,
+      scenario: requireScenario(),
+      userId,
+    });
+    expect(requireLinqStub().countAcceptedSends(replyPath, usageNoticeMatcher)).toBe(
+      acceptedBaseline + 1,
+    );
+    expect(countAssistantResponseRequests()).toBe(providerBaseline + 1);
+
+    const blockedDeliveries = await vi.waitFor(async () => {
+      const deliveries = await listHostedLinqDeliveriesForTest({
+        environment: requireScenario().runtimeEnv,
+        template: "ai_usage_quota",
+      });
+      expect(deliveries).toHaveLength(1);
+      expect(deliveries[0]).toMatchObject({
+        acceptedAt: expect.any(Date),
+        failedAt: null,
+        failureCode: null,
+        idempotencyKey: deliveriesAfterAmbiguousSend[0]?.idempotencyKey,
+        status: "accepted",
+        template: "ai_usage_quota",
+      });
+      return deliveries;
+    }, {
+      interval: 250,
+      timeout: 30_000,
+    });
+
+    const grant = await grantHostedUsageCreditForTest({
+      environment: requireScenario().runtimeEnv,
+      memberId: userId,
+      purchaseId: `hucp_local_usage_limit_resume_${runId}`,
+    });
+    expect(grant).toMatchObject({
+      balanceUsdMicros: 5_000_000n,
+      granted: true,
+      ledgerVersion: 1n,
+    });
+    await expect(readHostedAiUsageLimitPeriodForTest({
+      environment: requireScenario().runtimeEnv,
+      memberId: userId,
+      periodStart,
+    })).resolves.toMatchObject({ blockedAt: null });
+    await expect(signalHostedRuntimeRecheckRuntimeForTest({
+      environment: requireScenario().runtimeEnv,
+      userId,
+    })).resolves.toMatchObject({ signalAccepted: true });
+
     await requireLinqStub().waitForMatchingSendCount({
       expectedCount: secondReplyBaseline + 1,
       expectedPath: replyPath,
@@ -233,28 +337,31 @@ describe("hosted local usage-limit ambiguous send e2e", () => {
       scenario: requireScenario(),
       userId,
     });
-    const finalStatus = await requireScenario().waitForHostedCompletion(userId);
+    const resumedStatus = await requireScenario().waitForHostedCompletion(userId);
+    const resumedMailboxItem = await readHostedMailboxItemForTest({
+      dedupeKey: `evt_usage_limit_ambiguous_second_${runId}`,
+      environment: requireScenario().runtimeEnv,
+      userId,
+    });
 
-    expect(finalStatus.lastErrorCode ?? null).toBeNull();
-    expect(finalStatus.inFlight).toBe(false);
-    expect(readConversationMailboxLag(finalStatus)).toBe("0");
-    expect(compareMailboxSeq(
-      readConversationMailboxMaxSeq(finalStatus),
-      readConversationMailboxMaxSeq(firstCompletedStatus),
-    )).toBeGreaterThan(0);
+    expect(resumedStatus.lastErrorCode ?? null).toBeNull();
+    expect(readConversationMailboxLag(resumedStatus)).toBe("0");
+    expect(resumedMailboxItem.id).toBe(blockedMailboxItem.id);
+    expect(resumedMailboxItem.consumedAt).toEqual(expect.any(String));
+    expect(requireLinqStub().countObservedSends(replyPath, secondReplyMatcher)).toBe(
+      secondReplyBaseline + 1,
+    );
+    expect(countAssistantResponseRequests()).toBe(providerBaseline + 2);
     expect(requireLinqStub().countObservedSends(replyPath, usageNoticeMatcher)).toBe(
-      observedBaseline + 1,
+      observedBaseline + 2,
     );
     expect(requireLinqStub().countAcceptedSends(replyPath, usageNoticeMatcher)).toBe(
       acceptedBaseline + 1,
     );
-    expect(countAssistantResponseRequests()).toBe(providerBaseline + 2);
-
-    const finalDeliveries = await listHostedLinqDeliveriesForTest({
+    await expect(listHostedLinqDeliveriesForTest({
       environment: requireScenario().runtimeEnv,
       template: "ai_usage_quota",
-    });
-    expect(finalDeliveries).toEqual(deliveriesAfterAmbiguousSend);
+    })).resolves.toEqual(blockedDeliveries);
   }, 420_000);
 });
 

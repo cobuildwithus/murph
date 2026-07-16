@@ -1,6 +1,6 @@
 # Hosted Plan Downgrades
 
-Last verified: 2026-07-15
+Last verified: 2026-07-16
 
 ## Goal
 
@@ -104,47 +104,32 @@ delivery.
 
 ## Included Usage Behavior
 
-Source-state note: this section records the checked-out implementation and is
-not product authority for exhaustion. The confirmed product contract blocks
-subsequent usage-bearing work at the limit. The correction and the requirement
-to reconcile one admission owner before top-ups ship are defined in
-`agent-docs/product-specs/hosted-plan-usage.md` and
-`agent-docs/product-specs/hosted-usage-topups.md`.
+The web-owned access-and-usage decision is the single provider-start gate.
+Usage-bearing work is blocked after the member exhausts both the current
+period's included allowance and any purchased usage credit. The operation that
+crosses the remaining allowance may finish; later accepted input stays pending
+until capacity is restored instead of being discarded.
 
-Monthly included AI allowance remains a measured billing and product signal,
-not a runtime access gate for an otherwise active member. Murph continues to
-record usage, attribute the requested and served model reported by Codex App
-Server, and send the existing period-scoped usage notice, while conversation
-and eligible system work continue after the allowance is exhausted. This also
-applies to the in-window Pulse Trial allowance: its 4.50 USD amount remains the
-trial-period accounting and notice threshold, not a provider-start gate.
-Foreground model-work admission uses the hosted member-access owner only;
-usage-period reads, creation, locks, and spend are post-usage work. Inactive,
-suspended, and malformed or expired trial entitlement still fail closed.
-Message-triggered usage carries its originating Linq or Telegram reply target
-only through the current invocation and signed usage-record seam so the notice
-returns to that conversation. Before claiming delivery, web re-authorizes a
-personal Linq or Telegram target against the member's current routing binding
-and an external Linq target against its persisted thread authority. Automation
-and system work without an originating conversation retain the personal
-Linq-home fallback; the delivery target is not persisted as a second routing
-authority. The optional callback field is intentionally tri-state: omission
-means there was no accepted conversation and permits that legacy home fallback;
-explicit `null` means accepted input had no single safe route and must perform
-no route lookup, claim, or send; an object requests only that exact originating
-route. Producers and consumers must preserve omission versus `null`.
-If a notice attempt fails, later counted usage in the same over-limit period may
-retry the same period-scoped claim; the existing delivery idempotency boundary
-still permits at most one completed notice.
+Settlement consumes included allowance first and then purchased credit through
+the append-only usage-credit ledger and its bounded member projection. Credit
+carries forward, but it never creates or restores plan entitlement. Trials are
+also usage-enforced and cannot buy credit. Inactive, suspended, canceled,
+malformed, or expired entitlement still fails closed, and the separate daily
+Linq anti-abuse quota remains independently enforceable.
 
-This advisory policy does not weaken other access or abuse controls. The
-member-access owner validates trial phase, offer, policy, and time bounds on
-model-capable admission; active Family sponsorship still overrides stale own
-billing, and synthetic thread containers retain owner-or-participant access.
-The separate daily Linq anti-abuse quota remains enforceable. Temporal consumes
-the member-access decision directly, with no separate runtime usage-gate
-callback. Cloudflare/runner #587 or newer is the permanent rollback floor for a
-Web build that omits the retired route.
+Message-triggered usage preserves the existing tri-state originating-route
+contract for the period-scoped limit notice: omission permits the personal
+Linq-home fallback, explicit `null` permits no route lookup or send, and an
+object requests only the re-authorized originating route. If delivery fails,
+later counted usage in the same exhausted period may retry the claim, while the
+delivery idempotency boundary permits at most one completed notice.
+
+Synthetic thread containers remain subject to the same web-owned usage block,
+but group funding is not implemented. Group notices must not expose a personal
+member's billing, plan, purchase, or receipt details. Temporal and the runner
+receive no billing or credit decision. Web blocks runtime reconciliation and
+mailbox fetch before exhausted usage-bearing work reaches the runner; Temporal
+owns only the resulting orchestration state.
 
 ### Deployment And Compatibility
 
@@ -159,14 +144,6 @@ Deploy this additive path in the following order:
 3. Deploy Cloudflare. The new runtime consumes the optional workspace model
    and reasoning fields, advertises the conversational configuration and style
    tools, and begins producing originating usage-notice targets.
-4. After both deployments are current, run the count-only dry run and then the
-   fixed-campaign apply form of
-   `pnpm --dir apps/web runtime:recheck-usage-advisory`. This sends the existing
-   `runtime_recheck_requested` signal to every active hosted workspace so a
-   workflow that entered a durable monthly-allowance wait before rollout
-   immediately re-reads the now-advisory gate. A nonzero failed-signal count is
-   a failed rollout step; rerun the idempotent operation until it reports zero.
-
 An old Cloudflare consumer already accepts the optional model override and
 ignores an unknown optional reasoning override, so the web-first compatibility
 phase preserves saved intent without breaking invocation. A reasoning change

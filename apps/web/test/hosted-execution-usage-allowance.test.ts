@@ -8,7 +8,16 @@ import {
   ASSISTANT_IDLE_COMPACTION_USAGE_ESTIMATE_VERSION,
   type AssistantUsageRecord,
 } from "@murphai/hosted-execution/assistant-usage";
-import { describe, expect, it, vi } from "vitest";
+import { beforeEach, describe, expect, it, vi } from "vitest";
+
+const usageCreditMocks = vi.hoisted(() => ({
+  settleHostedUsageCreditForUsageTx: vi.fn(),
+}));
+
+vi.mock("@/src/lib/hosted-execution/usage-credits", () => ({
+  settleHostedUsageCreditForUsageTx:
+    usageCreditMocks.settleHostedUsageCreditForUsageTx,
+}));
 
 import {
   accountHostedAiUsageForAllowanceTx,
@@ -18,6 +27,18 @@ import {
   reconcileHostedAiUsageAllowancePeriodForMemberTx,
   resolveHostedAiUsageGate,
 } from "@/src/lib/hosted-execution/usage-allowance";
+
+beforeEach(() => {
+  usageCreditMocks.settleHostedUsageCreditForUsageTx.mockReset();
+  usageCreditMocks.settleHostedUsageCreditForUsageTx.mockImplementation(
+    async (input: { debitUsdMicros: bigint }) => ({
+      absorbedUsdMicros: input.debitUsdMicros,
+      balanceUsdMicros: 0n,
+      debitedUsdMicros: 0n,
+      ledgerVersion: 0n,
+    }),
+  );
+});
 
 const BASE_USAGE_RECORD = {
   apiKeyEnv: "OPENAI_API_KEY",
@@ -60,6 +81,10 @@ const BASE_USAGE_RECORD = {
 
 type AllowanceExecuteRaw = (sql: TemplateStringsArray, ...params: unknown[]) => Promise<number>;
 type AllowanceExecuteRawMock = ReturnType<typeof vi.fn<AllowanceExecuteRaw>>;
+type AllowanceQueryRaw = (
+  sql: TemplateStringsArray,
+  ...params: unknown[]
+) => Promise<unknown[]>;
 
 function buildMalformedOpenAiImageUsageRecords(input: {
   occurredAt?: AssistantUsageRecord["occurredAt"];
@@ -1004,17 +1029,143 @@ describe("accountHostedAiUsageForAllowanceTx", () => {
     expect(sqlText).toContain('"spent_usd_micros" = "spent_usd_micros" +');
     expect(sqlText).toContain('"last_usage_at" = GREATEST');
     expect(sqlText).toContain('"blocked_at" = CASE');
+    expect(sqlText).toContain("AND");
     expect(sqlText).toContain('OR "blocked_at" IS NULL');
     expect(params).toEqual([
       1896n,
       new Date("2026-03-29T12:00:00.000Z"),
       new Date("2026-03-29T12:00:00.000Z"),
       1896n,
+      0n,
       new Date("2026-03-29T12:00:05.000Z"),
       new Date("2026-03-29T12:00:05.000Z"),
       "member_123",
       new Date("2026-03-01T00:00:00.000Z"),
     ]);
+    expect(usageCreditMocks.settleHostedUsageCreditForUsageTx).not.toHaveBeenCalled();
+
+    const memberLockOrder = tx.$queryRaw.mock.invocationCallOrder[0];
+    const periodLockOrder = tx.$queryRaw.mock.invocationCallOrder[1];
+    const periodCreateOrder = tx.hostedAiUsagePeriod.createMany.mock.invocationCallOrder[0];
+    expect(memberLockOrder).toBeDefined();
+    expect(periodCreateOrder).toBeDefined();
+    expect(periodLockOrder).toBeDefined();
+    expect(Number(memberLockOrder)).toBeLessThan(Number(periodCreateOrder));
+    expect(Number(periodCreateOrder)).toBeLessThan(Number(periodLockOrder));
+    const lockSql = tx.$queryRaw.mock.calls.map(([lockStatement]) =>
+      Array.isArray(lockStatement) ? lockStatement.join("") : String(lockStatement)
+    );
+    expect(lockSql[0]).toContain('FROM "hosted_member"');
+    expect(lockSql[1]).toContain('FROM "hosted_ai_usage_period"');
+  });
+
+  it("uses included capacity first and settles only the excess against purchased credit", async () => {
+    const executeRaw = vi.fn<AllowanceExecuteRaw>(async () => 1);
+    const tx = createAllowanceTx({
+      executeRaw,
+      hostedAiUsageUpdateMany: vi.fn(async () => ({ count: 1 })),
+      spentUsdMicros: 9_999_000n,
+      usageCreditBalanceUsdMicros: 5_000n,
+      usageCreditLedgerVersion: 7n,
+    });
+    usageCreditMocks.settleHostedUsageCreditForUsageTx.mockResolvedValueOnce({
+      absorbedUsdMicros: 0n,
+      balanceUsdMicros: 4_104n,
+      debitedUsdMicros: 896n,
+      ledgerVersion: 8n,
+    });
+
+    await expect(accountHostedAiUsageForAllowanceTx({
+      memberId: "member_123",
+      now: new Date("2026-03-29T12:00:05.000Z"),
+      record: BASE_USAGE_RECORD,
+      tx: tx as never,
+    })).resolves.toBeNull();
+
+    expect(usageCreditMocks.settleHostedUsageCreditForUsageTx).toHaveBeenCalledWith({
+      beneficiaryMemberId: "member_123",
+      creditEligibilitySequence: 7n,
+      debitUsdMicros: 896n,
+      effectiveAt: new Date("2026-03-29T12:00:00.000Z"),
+      sourceUsageId: "turn_123.attempt-1",
+      tx,
+    });
+    expect(tx.hostedMember.findUniqueOrThrow).toHaveBeenCalledWith({
+      select: {
+        usageCreditLedgerVersion: true,
+      },
+      where: {
+        id: "member_123",
+      },
+    });
+    const [, ...params] = executeRaw.mock.calls[0] ?? [];
+    expect(params).toContain(4_104n);
+  });
+
+  it("throws after a credit debit when the locked period spend row is lost", async () => {
+    const tx = createAllowanceTx({
+      executeRaw: vi.fn<AllowanceExecuteRaw>(async () => 0),
+      hostedAiUsageUpdateMany: vi.fn(async () => ({ count: 1 })),
+      spentUsdMicros: 9_999_000n,
+      usageCreditBalanceUsdMicros: 5_000n,
+      usageCreditLedgerVersion: 7n,
+    });
+    usageCreditMocks.settleHostedUsageCreditForUsageTx.mockResolvedValueOnce({
+      absorbedUsdMicros: 0n,
+      balanceUsdMicros: 4_104n,
+      debitedUsdMicros: 896n,
+      ledgerVersion: 8n,
+    });
+
+    await expect(accountHostedAiUsageForAllowanceTx({
+      memberId: "member_123",
+      now: new Date("2026-03-29T12:00:05.000Z"),
+      record: BASE_USAGE_RECORD,
+      tx: tx as never,
+    })).rejects.toThrow(
+      "Hosted AI usage allowance period spend lost its locked row.",
+    );
+
+    expect(usageCreditMocks.settleHostedUsageCreditForUsageTx)
+      .toHaveBeenCalledExactlyOnceWith(expect.objectContaining({
+        debitUsdMicros: 896n,
+        sourceUsageId: "turn_123.attempt-1",
+      }));
+  });
+
+  it("absorbs provider crossing overshoot after consuming available purchased credit", async () => {
+    const tx = createAllowanceTx({
+      executeRaw: vi.fn<AllowanceExecuteRaw>(async () => 1),
+      hostedAiUsageUpdateMany: vi.fn(async () => ({ count: 1 })),
+      spentUsdMicros: 9_999_000n,
+      usageCreditBalanceUsdMicros: 500n,
+      usageCreditLedgerVersion: 4n,
+    });
+    usageCreditMocks.settleHostedUsageCreditForUsageTx.mockResolvedValueOnce({
+      absorbedUsdMicros: 396n,
+      balanceUsdMicros: 0n,
+      debitedUsdMicros: 500n,
+      ledgerVersion: 5n,
+    });
+    const now = new Date("2026-03-29T12:00:05.000Z");
+
+    await expect(accountHostedAiUsageForAllowanceTx({
+      memberId: "member_123",
+      now,
+      record: BASE_USAGE_RECORD,
+      tx: tx as never,
+    })).resolves.toMatchObject({
+      crossedAt: now,
+      sourceUsageId: "turn_123.attempt-1",
+      usageCreditLedgerVersion: 5n,
+    });
+
+    expect(usageCreditMocks.settleHostedUsageCreditForUsageTx).toHaveBeenCalledWith(
+      expect.objectContaining({
+        creditEligibilitySequence: 4n,
+        debitUsdMicros: 896n,
+      }),
+    );
   });
 
   it("accounts usage against the record's allowance period without returning notice data before crossing", async () => {
@@ -1052,6 +1203,7 @@ describe("accountHostedAiUsageForAllowanceTx", () => {
       periodEnd: new Date("2026-04-01T00:00:00.000Z"),
       periodStart: new Date("2026-03-01T00:00:00.000Z"),
       sourceUsageId: "turn_123.attempt-1",
+      usageCreditLedgerVersion: 0n,
       userNotice: expect.objectContaining({
         code: "pulse_upgrade_edge",
         message: expect.any(String),
@@ -1059,30 +1211,66 @@ describe("accountHostedAiUsageForAllowanceTx", () => {
     });
   });
 
-  it("returns a retry candidate after the period was already blocked", async () => {
+  it("does not return new notice candidates for concurrent spend after capacity is already zero", async () => {
     const blockedAt = new Date("2026-03-29T11:59:00.000Z");
+    const records = [
+      BASE_USAGE_RECORD,
+      {
+        ...BASE_USAGE_RECORD,
+        providerRequestId: "req_124",
+        turnId: "turn_124",
+        usageId: "turn_124.attempt-1",
+      },
+    ] satisfies AssistantUsageRecord[];
+
+    await expect(Promise.all(records.map(async (record) => {
+      const tx = createAllowanceTx({
+        blockedAt,
+        executeRaw: vi.fn<AllowanceExecuteRaw>(async () => 1),
+        hostedAiUsageUpdateMany: vi.fn(async () => ({ count: 1 })),
+        spentUsdMicros: 10_000_000n,
+      });
+      return await accountHostedAiUsageForAllowanceTx({
+        memberId: "member_123",
+        now: new Date("2026-03-29T12:00:05.000Z"),
+        record,
+        tx: tx as never,
+      });
+    }))).resolves.toEqual([null, null]);
+  });
+
+  it("returns a fresh notice candidate when replenished credit is consumed", async () => {
     const tx = createAllowanceTx({
-      blockedAt,
+      blockedAt: null,
       executeRaw: vi.fn<AllowanceExecuteRaw>(async () => 1),
       hostedAiUsageUpdateMany: vi.fn(async () => ({ count: 1 })),
       spentUsdMicros: 10_000_000n,
+      usageCreditBalanceUsdMicros: 500n,
+      usageCreditLedgerVersion: 8n,
     });
+    usageCreditMocks.settleHostedUsageCreditForUsageTx.mockResolvedValueOnce({
+      absorbedUsdMicros: 1_396n,
+      balanceUsdMicros: 0n,
+      debitedUsdMicros: 500n,
+      ledgerVersion: 9n,
+    });
+    const record = {
+      ...BASE_USAGE_RECORD,
+      providerRequestId: "req_post_topup",
+      turnId: "turn_post_topup",
+      usageId: "turn_post_topup.attempt-1",
+    } satisfies AssistantUsageRecord;
+    const now = new Date("2026-03-29T12:30:05.000Z");
 
     await expect(accountHostedAiUsageForAllowanceTx({
       memberId: "member_123",
-      now: new Date("2026-03-29T12:00:05.000Z"),
-      record: BASE_USAGE_RECORD,
+      now,
+      record,
       tx: tx as never,
-    })).resolves.toEqual({
-      crossedAt: blockedAt,
-      memberId: "member_123",
-      periodEnd: new Date("2026-04-01T00:00:00.000Z"),
-      periodStart: new Date("2026-03-01T00:00:00.000Z"),
-      sourceUsageId: "turn_123.attempt-1",
-      userNotice: expect.objectContaining({
-        code: "pulse_upgrade_edge",
-        message: expect.any(String),
-      }),
+    })).resolves.toMatchObject({
+      crossedAt: now,
+      sourceUsageId: "turn_post_topup.attempt-1",
+      usageCreditLedgerVersion: 9n,
     });
   });
 
@@ -1651,7 +1839,7 @@ describe("resolveHostedAiUsageGate", () => {
     });
   });
 
-  it("returns an advisory when active members reach the period limit", async () => {
+  it("blocks active members when the combined allowance reaches zero", async () => {
     const prisma = createGatePrisma({
       spentUsdMicros: 10_000_000n,
     });
@@ -1661,14 +1849,76 @@ describe("resolveHostedAiUsageGate", () => {
       now: "2026-03-29T12:00:00.000Z",
       prisma: prisma as never,
     })).resolves.toMatchObject({
-      allowed: true,
+      allowed: false,
       userNotice: {
         code: "pulse_upgrade_edge",
-        message: expect.stringContaining("https://withmurph.ai/home"),
+        message: expect.stringContaining(
+          "https://withmurph.ai/settings?addUsage=true#subscription",
+        ),
       },
       reason: "ai_usage_limit_exceeded",
       retryAfter: new Date("2026-04-01T00:00:00.000Z"),
       spentUsdMicros: 10_000_000n,
+      usageCreditBalanceUsdMicros: 0n,
+      usageCreditLedgerVersion: 0n,
+    });
+  });
+
+  it("allows base-exhausted members while purchased credit remains", async () => {
+    const blockedAt = new Date("2026-03-29T11:00:00.000Z");
+    const update = vi.fn(async (args?: unknown) => {
+      void args;
+      return undefined;
+    });
+    const prisma = createGatePrisma({
+      findUniquePeriod: {
+        billingPlanCode: "launch_monthly",
+        blockedAt,
+        limitUsdMicros: 10_000_000n,
+        periodEnd: new Date("2026-04-01T00:00:00.000Z"),
+        periodStart: new Date("2026-03-01T00:00:00.000Z"),
+        spentUsdMicros: 10_000_000n,
+      },
+      spentUsdMicros: 10_000_000n,
+      update,
+      usageCreditBalanceUsdMicros: 2_500_000n,
+      usageCreditLedgerVersion: 9n,
+    });
+
+    await expect(resolveHostedAiUsageGate({
+      memberId: "member_123",
+      now: "2026-03-29T12:00:00.000Z",
+      prisma: prisma as never,
+    })).resolves.toMatchObject({
+      allowed: true,
+      remainingUsdMicros: 2_500_000n,
+      spentUsdMicros: 10_000_000n,
+      usageCreditBalanceUsdMicros: 2_500_000n,
+      usageCreditLedgerVersion: 9n,
+    });
+    expect(update).toHaveBeenCalledWith(expect.objectContaining({
+      data: expect.objectContaining({
+        blockedAt: null,
+      }),
+    }));
+  });
+
+  it("adds purchased credit to remaining included capacity", async () => {
+    const prisma = createGatePrisma({
+      spentUsdMicros: 9_000_000n,
+      usageCreditBalanceUsdMicros: 3_000_000n,
+      usageCreditLedgerVersion: 6n,
+    });
+
+    await expect(resolveHostedAiUsageGate({
+      memberId: "member_123",
+      now: "2026-03-29T12:00:00.000Z",
+      prisma: prisma as never,
+    })).resolves.toMatchObject({
+      allowed: true,
+      remainingUsdMicros: 4_000_000n,
+      usageCreditBalanceUsdMicros: 3_000_000n,
+      usageCreditLedgerVersion: 6n,
     });
   });
 
@@ -1733,10 +1983,12 @@ describe("resolveHostedAiUsageGate", () => {
       now: "2026-03-29T12:00:00.000Z",
       prisma: prisma as never,
     })).resolves.toMatchObject({
-      allowed: true,
+      allowed: false,
       userNotice: {
         code: "edge_usage_limit_reached",
-        message: expect.stringContaining("https://withmurph.ai/home"),
+        message: expect.stringContaining(
+          "https://withmurph.ai/settings?addUsage=true#subscription",
+        ),
       },
     });
   });
@@ -1827,7 +2079,7 @@ describe("resolveHostedAiUsageGate", () => {
       now: "2026-04-03T12:00:00.000Z",
       prisma: prisma as never,
     })).resolves.toMatchObject({
-      allowed: true,
+      allowed: false,
       reason: "ai_usage_limit_exceeded",
       retryAfter: new Date("2026-04-08T12:00:00.000Z"),
       userNotice: {
@@ -1875,7 +2127,7 @@ describe("resolveHostedAiUsageGate", () => {
       now: "2026-04-03T13:05:00.000Z",
       prisma: prisma as never,
     })).resolves.toMatchObject({
-      allowed: true,
+      allowed: false,
       reason: "ai_usage_limit_exceeded",
       spentUsdMicros: 4_500_000n,
       userNotice: {
@@ -2302,18 +2554,20 @@ describe("resolveHostedAiUsageGate", () => {
       now: "2026-04-20T12:00:00.000Z",
       prisma: prisma as never,
     })).resolves.toMatchObject({
-      allowed: true,
+      allowed: false,
       periodEnd: new Date("2026-05-15T00:00:00.000Z"),
       periodStart: new Date("2026-04-15T00:00:00.000Z"),
       reason: "ai_usage_limit_exceeded",
       spentUsdMicros: 11_000_000n,
     });
-    expect(queryRaw).toHaveBeenCalledTimes(1);
+    expect(queryRaw).toHaveBeenCalledTimes(2);
     const queryRawSql = queryRaw.mock.calls.map(([sql]) =>
       Array.isArray(sql) ? sql.join("") : String(sql)
     );
-    expect(queryRawSql[0]).toContain('FROM "hosted_ai_usage_period"');
+    expect(queryRawSql[0]).toContain('FROM "hosted_member"');
     expect(queryRawSql[0]).toContain("FOR UPDATE");
+    expect(queryRawSql[1]).toContain('FROM "hosted_ai_usage_period"');
+    expect(queryRawSql[1]).toContain("FOR UPDATE");
     expect(queryRawSql.join("\n")).not.toContain('WITH "candidates"');
     expect(prisma.$executeRaw).not.toHaveBeenCalled();
     expect(aggregate).not.toHaveBeenCalled();
@@ -2574,7 +2828,7 @@ describe("readHostedAiUsageGate", () => {
     expect(prisma.hostedAiUsagePeriod.update).not.toHaveBeenCalled();
   });
 
-  it("keeps exhausted thread-container usage advisory and its notice neutral", async () => {
+  it("blocks exhausted thread-container usage with a neutral notice", async () => {
     const prisma = createGatePrisma({
       spentUsdMicros: 4_500_000n,
       threadContainerLimitUsdMicros: 4_500_000n,
@@ -2585,7 +2839,7 @@ describe("readHostedAiUsageGate", () => {
       now: "2026-03-29T12:00:00.000Z",
       prisma: prisma as never,
     })).resolves.toMatchObject({
-      allowed: true,
+      allowed: false,
       allowanceSource: "thread_container",
       reason: "ai_usage_limit_exceeded",
       userNotice: {
@@ -2810,7 +3064,7 @@ describe("checkHostedAiUsageGate", () => {
     expect(prisma.$queryRaw).not.toHaveBeenCalled();
   });
 
-  it("serves read advisories without escalating to the mutating gate", async () => {
+  it("confirms exhausted read decisions through the mutating gate", async () => {
     const prisma = createGatePrisma({
       spentUsdMicros: 10_000_000n,
     });
@@ -2832,6 +3086,8 @@ describe("checkHostedAiUsageGate", () => {
       id: "member_123",
       suspendedAt: null,
       threadContainer: null,
+      usageCreditBalanceUsdMicros: 0n,
+      usageCreditLedgerVersion: 0n,
     }));
 
     await expect(checkHostedAiUsageGate({
@@ -2839,17 +3095,24 @@ describe("checkHostedAiUsageGate", () => {
       now: "2026-03-29T12:00:00.000Z",
       prisma: prisma as never,
     })).resolves.toMatchObject({
-      allowed: true,
+      allowed: false,
       reason: "ai_usage_limit_exceeded",
       spentUsdMicros: 10_000_000n,
     });
 
-    expect(prisma.hostedMember.findUnique).toHaveBeenCalledTimes(1);
-    expect(prisma.hostedAiUsagePeriod.createMany).not.toHaveBeenCalled();
-    expect(prisma.hostedAiUsagePeriod.update).not.toHaveBeenCalled();
+    expect(prisma.hostedMember.findUnique).toHaveBeenCalledTimes(2);
+    expect(prisma.hostedAiUsagePeriod.createMany).toHaveBeenCalledTimes(1);
+    expect(prisma.hostedAiUsagePeriod.update).toHaveBeenCalledWith(
+      expect.objectContaining({
+        data: expect.objectContaining({
+          blockedAt: new Date("2026-03-29T12:00:00.000Z"),
+        }),
+      }),
+    );
+    expect(prisma.$queryRaw).toHaveBeenCalledTimes(2);
   });
 
-  it("does not record blocked metadata for read advisories", async () => {
+  it("records blocked metadata when the mutating gate confirms exhaustion", async () => {
     const update = vi.fn(async (args?: unknown) => {
       void args;
       return undefined;
@@ -2876,19 +3139,26 @@ describe("checkHostedAiUsageGate", () => {
       id: "member_123",
       suspendedAt: null,
       threadContainer: null,
+      usageCreditBalanceUsdMicros: 0n,
+      usageCreditLedgerVersion: 0n,
     }));
     await expect(checkHostedAiUsageGate({
       memberId: "member_123",
       now: "2026-03-29T12:00:00.000Z",
       prisma: prisma as never,
     })).resolves.toMatchObject({
-      allowed: true,
+      allowed: false,
       reason: "ai_usage_limit_exceeded",
       spentUsdMicros: 10_000_000n,
     });
 
-    expect(prisma.hostedAiUsagePeriod.createMany).not.toHaveBeenCalled();
-    expect(update).not.toHaveBeenCalled();
+    expect(prisma.hostedAiUsagePeriod.createMany).toHaveBeenCalledTimes(1);
+    expect(update).toHaveBeenCalledWith(expect.objectContaining({
+      data: expect.objectContaining({
+        blockedAt: new Date("2026-03-29T12:00:00.000Z"),
+      }),
+    }));
+    expect(prisma.$queryRaw).toHaveBeenCalledTimes(2);
   });
 });
 
@@ -2914,6 +3184,8 @@ function createAllowanceTx(input: {
   threadContainerLimitUsdMicros?: bigint | null;
   trialEndsAt?: Date | null;
   trialStartedAt?: Date | null;
+  usageCreditBalanceUsdMicros?: bigint;
+  usageCreditLedgerVersion?: bigint;
 }) {
   const familyPeriodStart = input.familyPeriodStart === undefined
     ? input.periodStart ?? new Date("2026-03-01T00:00:00.000Z")
@@ -2941,7 +3213,7 @@ function createAllowanceTx(input: {
 
   return {
     $executeRaw: input.executeRaw,
-    $queryRaw: vi.fn(async () => []),
+    $queryRaw: vi.fn<AllowanceQueryRaw>(async () => []),
     hostedAiUsage: {
       aggregate: input.hostedAiUsageAggregate ?? defaultAggregate,
       updateMany: input.hostedAiUsageUpdateMany,
@@ -3031,6 +3303,11 @@ function createAllowanceTx(input: {
                 suspendedAt: null,
               },
             },
+        usageCreditBalanceUsdMicros: input.usageCreditBalanceUsdMicros ?? 0n,
+        usageCreditLedgerVersion: input.usageCreditLedgerVersion ?? 0n,
+      })),
+      findUniqueOrThrow: vi.fn(async () => ({
+        usageCreditLedgerVersion: input.usageCreditLedgerVersion ?? 0n,
       })),
     },
   };
@@ -3075,6 +3352,8 @@ function createGatePrisma(input: {
   trialStartedAt?: Date | null;
   suspendedAt?: Date | null;
   update?: ReturnType<typeof vi.fn>;
+  usageCreditBalanceUsdMicros?: bigint;
+  usageCreditLedgerVersion?: bigint;
 }) {
   const periodStart = input.periodStart ?? new Date("2026-03-01T00:00:00.000Z");
   const periodEnd = input.periodEnd ?? new Date("2026-04-01T00:00:00.000Z");
@@ -3206,6 +3485,8 @@ function createGatePrisma(input: {
         id: "member_123",
         suspendedAt: input.suspendedAt ?? null,
         threadContainer,
+        usageCreditBalanceUsdMicros: input.usageCreditBalanceUsdMicros ?? 0n,
+        usageCreditLedgerVersion: input.usageCreditLedgerVersion ?? 0n,
       })),
     },
     hostedThreadContainerParticipant: {

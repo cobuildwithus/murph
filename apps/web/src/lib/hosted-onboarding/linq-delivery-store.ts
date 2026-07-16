@@ -425,6 +425,7 @@ export async function startHostedAiUsageLimitNoticeDispatchTx(input: {
   source: HostedAiUsageLimitNoticeDeliverySource;
   sourceRef: string;
   targetKind: string;
+  usageCreditLedgerVersion: bigint;
 }): Promise<HostedAiUsageLimitNoticeDeliveryClaim> {
   return runHostedLinqDeliveryTransaction(input.prisma, async (prisma) => {
     if (input.linqChatId) {
@@ -501,12 +502,25 @@ async function runHostedLinqDeliveryTransaction<T>(
 export function buildHostedAiUsageGateNoticeIdempotencyKey(input: {
   memberId: string;
   periodStart: Date | string;
+  usageCreditLedgerVersion: bigint;
 }): string {
   const periodStart = normalizeHostedAiUsageNoticePeriodStart(input.periodStart);
-  return `ai-usage-gate:${sha256Hex(JSON.stringify({
-    memberId: input.memberId,
-    periodStart: periodStart.toISOString(),
-  })).slice(0, 32)}`;
+  if (input.usageCreditLedgerVersion < 0n) {
+    throw new TypeError(
+      "Hosted AI usage notice ledger version must be a non-negative integer.",
+    );
+  }
+  const capacityEpoch = input.usageCreditLedgerVersion === 0n
+    ? {
+        memberId: input.memberId,
+        periodStart: periodStart.toISOString(),
+      }
+    : {
+        memberId: input.memberId,
+        periodStart: periodStart.toISOString(),
+        usageCreditLedgerVersion: input.usageCreditLedgerVersion.toString(),
+      };
+  return `ai-usage-gate:${sha256Hex(JSON.stringify(capacityEpoch)).slice(0, 32)}`;
 }
 
 function normalizeHostedAiUsageNoticePeriodStart(value: Date | string): Date {
@@ -1570,7 +1584,16 @@ function resolveHostedLinqDeliveryInFlightState(input: {
     return { inFlight: false };
   }
 
-  return { inFlight: input.delivery.attemptedAt > staleAttemptBefore };
+  const inFlight = input.delivery.attemptedAt > staleAttemptBefore;
+  return inFlight
+    ? {
+        inFlight,
+        retryAt: new Date(
+          input.delivery.attemptedAt.getTime()
+            + HOSTED_AI_USAGE_LIMIT_NOTICE_CLAIM_STALE_MS,
+        ),
+      }
+    : { inFlight };
 }
 
 function isHostedLinqDeliveryPreProvider(input: {
@@ -1662,6 +1685,11 @@ async function claimExistingHostedLinqDeliveryProviderDispatchTx(input: {
   };
   const terminalPreProviderReclaimPredicates =
     input.delivery.source !== HOSTED_AI_USAGE_TELEGRAM_NOTICE_DELIVERY_SOURCE
+      && !(
+        input.data.template === "ai_usage_quota"
+        && input.delivery.source === HOSTED_AI_USAGE_LINQ_NOTICE_DELIVERY_SOURCE
+        && input.source !== HOSTED_AI_USAGE_LINQ_NOTICE_DELIVERY_SOURCE
+      )
       ? [
           { failedAt: { not: null } },
           { skippedAt: { not: null } },

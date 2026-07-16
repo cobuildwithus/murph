@@ -1,0 +1,319 @@
+import { beforeEach, describe, expect, it, vi } from "vitest";
+
+import { hostedOnboardingError } from "../src/lib/hosted-onboarding/errors";
+import { createRouteContext } from "./route-test-helpers";
+
+const mocks = vi.hoisted(() => ({
+  assertHostedOnboardingMutationOrigin: vi.fn(),
+  createHostedUsageCreditCheckout: vi.fn(),
+  expireHostedUsageCreditCheckout: vi.fn(),
+  getPrisma: vi.fn(),
+  readHostedUsageCreditPurchaseStatus: vi.fn(),
+  requireHostedAppSessionFromRequest: vi.fn(),
+}));
+
+vi.mock("@/src/lib/hosted-onboarding/csrf", () => ({
+  assertHostedOnboardingMutationOrigin: mocks.assertHostedOnboardingMutationOrigin,
+}));
+
+vi.mock("@/src/lib/hosted-onboarding/app-session", () => ({
+  requireHostedAppSessionFromRequest: mocks.requireHostedAppSessionFromRequest,
+}));
+
+vi.mock("@/src/lib/prisma", () => ({
+  getPrisma: mocks.getPrisma,
+}));
+
+vi.mock("@/src/lib/hosted-onboarding/usage-credit-purchase-service", async (importOriginal) => {
+  const original = await importOriginal<
+    typeof import("../src/lib/hosted-onboarding/usage-credit-purchase-service")
+  >();
+  return {
+    ...original,
+    createHostedUsageCreditCheckout: mocks.createHostedUsageCreditCheckout,
+    expireHostedUsageCreditCheckout: mocks.expireHostedUsageCreditCheckout,
+    readHostedUsageCreditPurchaseStatus: mocks.readHostedUsageCreditPurchaseStatus,
+  };
+});
+
+type CheckoutRoute = typeof import(
+  "../app/api/settings/billing/usage-credit/checkout/route"
+);
+type StatusRoute = typeof import(
+  "../app/api/settings/billing/usage-credit/purchases/[purchaseId]/route"
+);
+type ExpireRoute = typeof import(
+  "../app/api/settings/billing/usage-credit/purchases/[purchaseId]/expire/route"
+);
+
+let checkoutRoute: CheckoutRoute;
+let expireRoute: ExpireRoute;
+let statusRoute: StatusRoute;
+
+beforeEach(async () => {
+  vi.clearAllMocks();
+  mocks.assertHostedOnboardingMutationOrigin.mockImplementation(() => {});
+  mocks.getPrisma.mockReturnValue({ label: "test-prisma" });
+  mocks.requireHostedAppSessionFromRequest.mockResolvedValue({
+    member: {
+      billingStatus: "active",
+      id: "hbm_member123",
+      suspendedAt: null,
+    },
+  });
+  mocks.createHostedUsageCreditCheckout.mockResolvedValue({
+    purchaseId: "hucp_abcdefghijklmnop",
+    status: "checkout_open",
+    url: "https://checkout.stripe.test/session",
+  });
+  mocks.expireHostedUsageCreditCheckout.mockResolvedValue({
+    checkoutExpiresAt: "2026-07-16T18:30:00.000Z",
+    fulfilledAt: null,
+    purchaseId: "hucp_abcdefghijklmnop",
+    status: "expired",
+    updatedAt: "2026-07-16T17:06:00.000Z",
+  });
+  mocks.readHostedUsageCreditPurchaseStatus.mockResolvedValue({
+    checkoutExpiresAt: "2026-07-16T18:30:00.000Z",
+    fulfilledAt: null,
+    purchaseId: "hucp_abcdefghijklmnop",
+    status: "payment_pending",
+    updatedAt: "2026-07-16T17:05:00.000Z",
+  });
+
+  checkoutRoute = await import(
+    "../app/api/settings/billing/usage-credit/checkout/route"
+  );
+  expireRoute = await import(
+    "../app/api/settings/billing/usage-credit/purchases/[purchaseId]/expire/route"
+  );
+  statusRoute = await import(
+    "../app/api/settings/billing/usage-credit/purchases/[purchaseId]/route"
+  );
+});
+
+describe("usage-credit checkout route", () => {
+  it("creates an exact server-authorized checkout for the signed-in member", async () => {
+    const request = createCheckoutRequest({
+      clientRequestKey: "request_key_123456",
+      offerCode: "usage_10_usd",
+    });
+    const response = await checkoutRoute.POST(request);
+
+    expect(response.status).toBe(200);
+    expect(response.headers.get("cache-control")).toBe("no-store");
+    await expect(response.json()).resolves.toEqual({
+      purchaseId: "hucp_abcdefghijklmnop",
+      status: "checkout_open",
+      url: "https://checkout.stripe.test/session",
+    });
+    expect(mocks.assertHostedOnboardingMutationOrigin).toHaveBeenCalledWith(request);
+    expect(mocks.createHostedUsageCreditCheckout).toHaveBeenCalledWith({
+      clientRequestKey: "request_key_123456",
+      memberId: "hbm_member123",
+      offerCode: "usage_10_usd",
+      prisma: { label: "test-prisma" },
+    });
+  });
+
+  it.each([
+    [{ clientRequestKey: "request_key_123456", offerCode: "usage_10_usd", amount: 10 }],
+    [{ clientRequestKey: "short", offerCode: "usage_10_usd" }],
+    [{ clientRequestKey: "request_key_123456", offerCode: "usage_100_usd" }],
+  ])("rejects browser authority or malformed checkout input", async (body) => {
+    const response = await checkoutRoute.POST(createCheckoutRequest(body));
+
+    expect(response.status).toBe(400);
+    expect(mocks.createHostedUsageCreditCheckout).not.toHaveBeenCalled();
+  });
+
+  it("rejects oversized bodies with the route-specific error", async () => {
+    const response = await checkoutRoute.POST(createCheckoutRequest({
+      clientRequestKey: "request_key_123456",
+      offerCode: "usage_10_usd",
+      padding: "x".repeat(1_024),
+    }));
+
+    expect(response.status).toBe(413);
+    await expect(response.json()).resolves.toMatchObject({
+      error: { code: "HOSTED_USAGE_CREDIT_CHECKOUT_BODY_TOO_LARGE" },
+    });
+    expect(mocks.createHostedUsageCreditCheckout).not.toHaveBeenCalled();
+  });
+
+  it("rejects cross-origin requests before authentication", async () => {
+    mocks.assertHostedOnboardingMutationOrigin.mockImplementationOnce(() => {
+      throw hostedOnboardingError({
+        code: "HOSTED_ONBOARDING_ORIGIN_INVALID",
+        httpStatus: 403,
+        message: "Invalid request origin.",
+      });
+    });
+
+    const response = await checkoutRoute.POST(createCheckoutRequest({
+      clientRequestKey: "request_key_123456",
+      offerCode: "usage_10_usd",
+    }));
+
+    expect(response.status).toBe(403);
+    expect(mocks.requireHostedAppSessionFromRequest).not.toHaveBeenCalled();
+    expect(mocks.createHostedUsageCreditCheckout).not.toHaveBeenCalled();
+  });
+
+  it("rejects suspended members before creating checkout", async () => {
+    mocks.requireHostedAppSessionFromRequest.mockResolvedValueOnce({
+      member: {
+        billingStatus: "active",
+        id: "hbm_member123",
+        suspendedAt: new Date("2026-07-16T16:00:00.000Z"),
+      },
+    });
+
+    const response = await checkoutRoute.POST(createCheckoutRequest({
+      clientRequestKey: "request_key_123456",
+      offerCode: "usage_10_usd",
+    }));
+
+    expect(response.status).toBe(403);
+    expect(mocks.createHostedUsageCreditCheckout).not.toHaveBeenCalled();
+  });
+});
+
+describe("usage-credit purchase status route", () => {
+  it("returns only the authenticated payer's durable status", async () => {
+    const request = new Request(
+      "https://join.example.test/api/settings/billing/usage-credit/purchases/hucp_abcdefghijklmnop",
+    );
+    const response = await statusRoute.GET(
+      request,
+      createRouteContext({ purchaseId: "hucp_abcdefghijklmnop" }),
+    );
+
+    expect(response.status).toBe(200);
+    expect(response.headers.get("cache-control")).toBe("no-store");
+    expect(mocks.assertHostedOnboardingMutationOrigin).not.toHaveBeenCalled();
+    expect(mocks.readHostedUsageCreditPurchaseStatus).toHaveBeenCalledWith({
+      payerMemberId: "hbm_member123",
+      prisma: { label: "test-prisma" },
+      purchaseId: "hucp_abcdefghijklmnop",
+    });
+  });
+
+  it("allows a suspended payer to inspect an existing payment", async () => {
+    mocks.requireHostedAppSessionFromRequest.mockResolvedValueOnce({
+      member: {
+        billingStatus: "canceled",
+        id: "hbm_member123",
+        suspendedAt: new Date("2026-07-16T16:00:00.000Z"),
+      },
+    });
+
+    const response = await statusRoute.GET(
+      new Request("https://join.example.test/api/settings/billing/usage-credit/purchases/id"),
+      createRouteContext({ purchaseId: "hucp_abcdefghijklmnop" }),
+    );
+
+    expect(response.status).toBe(200);
+    expect(mocks.readHostedUsageCreditPurchaseStatus).toHaveBeenCalledTimes(1);
+  });
+
+  it("rejects unauthenticated status reads before querying a purchase", async () => {
+    mocks.requireHostedAppSessionFromRequest.mockRejectedValueOnce(hostedOnboardingError({
+      code: "AUTH_REQUIRED",
+      httpStatus: 401,
+      message: "Sign in to continue.",
+    }));
+
+    const response = await statusRoute.GET(
+      new Request("https://join.example.test/api/settings/billing/usage-credit/purchases/id"),
+      createRouteContext({ purchaseId: "hucp_abcdefghijklmnop" }),
+    );
+
+    expect(response.status).toBe(401);
+    expect(mocks.readHostedUsageCreditPurchaseStatus).not.toHaveBeenCalled();
+  });
+});
+
+describe("usage-credit purchase expiration route", () => {
+  it("asks Stripe to expire only the authenticated payer's purchase", async () => {
+    const request = createExpireRequest("hucp_abcdefghijklmnop");
+    const response = await expireRoute.POST(
+      request,
+      createRouteContext({ purchaseId: "hucp_abcdefghijklmnop" }),
+    );
+
+    expect(response.status).toBe(200);
+    expect(response.headers.get("cache-control")).toBe("no-store");
+    await expect(response.json()).resolves.toMatchObject({
+      purchaseId: "hucp_abcdefghijklmnop",
+      status: "expired",
+    });
+    expect(mocks.assertHostedOnboardingMutationOrigin).toHaveBeenCalledWith(request);
+    expect(mocks.expireHostedUsageCreditCheckout).toHaveBeenCalledWith({
+      payerMemberId: "hbm_member123",
+      prisma: { label: "test-prisma" },
+      purchaseId: "hucp_abcdefghijklmnop",
+    });
+  });
+
+  it("rejects cross-origin expiration before authentication", async () => {
+    mocks.assertHostedOnboardingMutationOrigin.mockImplementationOnce(() => {
+      throw hostedOnboardingError({
+        code: "HOSTED_ONBOARDING_ORIGIN_INVALID",
+        httpStatus: 403,
+        message: "Invalid request origin.",
+      });
+    });
+
+    const response = await expireRoute.POST(
+      createExpireRequest("hucp_abcdefghijklmnop"),
+      createRouteContext({ purchaseId: "hucp_abcdefghijklmnop" }),
+    );
+
+    expect(response.status).toBe(403);
+    expect(mocks.requireHostedAppSessionFromRequest).not.toHaveBeenCalled();
+    expect(mocks.expireHostedUsageCreditCheckout).not.toHaveBeenCalled();
+  });
+
+  it("lets a suspended payer close an existing unpaid Checkout", async () => {
+    mocks.requireHostedAppSessionFromRequest.mockResolvedValueOnce({
+      member: {
+        billingStatus: "canceled",
+        id: "hbm_member123",
+        suspendedAt: new Date("2026-07-16T16:00:00.000Z"),
+      },
+    });
+
+    const response = await expireRoute.POST(
+      createExpireRequest("hucp_abcdefghijklmnop"),
+      createRouteContext({ purchaseId: "hucp_abcdefghijklmnop" }),
+    );
+
+    expect(response.status).toBe(200);
+    expect(mocks.expireHostedUsageCreditCheckout).toHaveBeenCalledTimes(1);
+  });
+});
+
+function createCheckoutRequest(body: Record<string, unknown>): Request {
+  return new Request(
+    "https://join.example.test/api/settings/billing/usage-credit/checkout",
+    {
+      body: JSON.stringify(body),
+      headers: {
+        "content-type": "application/json",
+        origin: "https://join.example.test",
+      },
+      method: "POST",
+    },
+  );
+}
+
+function createExpireRequest(purchaseId: string): Request {
+  return new Request(
+    `https://join.example.test/api/settings/billing/usage-credit/purchases/${purchaseId}/expire`,
+    {
+      headers: { origin: "https://join.example.test" },
+      method: "POST",
+    },
+  );
+}

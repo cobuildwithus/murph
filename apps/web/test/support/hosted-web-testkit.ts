@@ -47,6 +47,10 @@ const hostedSignalRuntimeModuleSpecifier = new URL(
   "../../src/lib/hosted-orchestration/signal-runtime.ts",
   import.meta.url,
 ).href;
+const hostedUsageCreditModuleSpecifier = new URL(
+  "../../src/lib/hosted-execution/usage-credits.ts",
+  import.meta.url,
+).href;
 const hostedComputerUseServiceModuleSpecifier = new URL(
   "../../src/lib/computer-use/service.ts",
   import.meta.url,
@@ -66,6 +70,7 @@ type HostedTestPrismaClient =
   & HostedActionApprovalForTestPrismaClient
   & HostedPhoneCallForTestPrismaClient
   & HostedUsageLimitForTestPrismaClient
+  & HostedUsageCreditForTestPrismaClient
   & HostedComputerUseForTestPrismaClient
   & HostedLinqWorkspaceIsolationForTestPrismaClient
   & HostedWorkspaceSeedForTestPrismaClient
@@ -179,6 +184,12 @@ interface HostedUsageLimitForTestPrismaClient {
   };
   hostedLinqDelivery: {
     findMany(args: unknown): Promise<HostedLinqDeliveryForTest[]>;
+  };
+}
+
+interface HostedUsageCreditForTestPrismaClient {
+  hostedUsageCreditPurchase: {
+    create(args: unknown): Promise<{ id: string }>;
   };
 }
 
@@ -432,6 +443,24 @@ interface HostedRuntimeSignalModule {
     signalAccepted: true;
     workflowId: string;
   }>;
+  signalHostedRuntimeRecheckRuntime(input: {
+    client?: HostedRuntimeTemporalSignalClient | null;
+    environment?: NodeJS.ProcessEnv;
+    prisma?: HostedTestPrismaClient;
+    userId: string;
+  }): Promise<{
+    signalAccepted: true;
+    workflowId: string;
+  }>;
+}
+
+interface HostedUsageCreditModule {
+  grantHostedUsageCreditForPurchaseTx(input: {
+    effectiveAt: Date;
+    paidAt: Date;
+    purchaseId: string;
+    tx: unknown;
+  }): Promise<HostedUsageCreditGrantForTest>;
 }
 
 interface HostedThreadRouteForTestModule {
@@ -455,6 +484,13 @@ export interface HostedMailboxAppendForTestResponse {
     id: string;
     seq: string;
   };
+}
+
+export interface HostedUsageCreditGrantForTest {
+  balanceUsdMicros: bigint;
+  entryId: string;
+  granted: boolean;
+  ledgerVersion: bigint;
 }
 
 export interface HostedMailboxItemForTest {
@@ -879,27 +915,34 @@ export async function seedHostedAiUsageLimitPeriodForTest(input: {
   memberId: string;
   periodEnd: Date;
   periodStart: Date;
+  remainingUsdMicros?: bigint;
 }): Promise<HostedAiUsagePeriodForTest> {
   const limitUsdMicros = 10_000_000n;
+  const remainingUsdMicros = input.remainingUsdMicros ?? 0n;
+  if (remainingUsdMicros < 0n || remainingUsdMicros > limitUsdMicros) {
+    throw new RangeError("Hosted AI usage test balance must be within the period limit.");
+  }
+  const spentUsdMicros = limitUsdMicros - remainingUsdMicros;
+  const blockedAt = remainingUsdMicros === 0n ? input.periodStart : null;
   return withHostedWebTestkitDeps(input.environment, async (deps) =>
     await deps.prisma.hostedAiUsagePeriod.upsert({
       create: {
         billingPlanCode: "launch_monthly",
-        blockedAt: input.periodStart,
+        blockedAt,
         lastUsageAt: input.periodStart,
         limitUsdMicros,
         memberId: input.memberId,
         periodEnd: input.periodEnd,
         periodStart: input.periodStart,
-        spentUsdMicros: limitUsdMicros,
+        spentUsdMicros,
       },
       update: {
         billingPlanCode: "launch_monthly",
-        blockedAt: input.periodStart,
+        blockedAt,
         lastUsageAt: input.periodStart,
         limitUsdMicros,
         periodEnd: input.periodEnd,
-        spentUsdMicros: limitUsdMicros,
+        spentUsdMicros,
       },
       where: {
         memberId_periodStart: {
@@ -926,6 +969,57 @@ export async function readHostedAiUsageLimitPeriodForTest(input: {
       },
     })
   );
+}
+
+export async function grantHostedUsageCreditForTest(input: {
+  effectiveAt?: Date;
+  environment?: NodeJS.ProcessEnv;
+  memberId: string;
+  purchaseId: string;
+}): Promise<HostedUsageCreditGrantForTest> {
+  return withHostedWebTestkitDeps(input.environment, async (deps) => {
+    const effectiveAt = input.effectiveAt ?? new Date();
+    await deps.prisma.hostedUsageCreditPurchase.create({
+      data: {
+        authorizationContext: "personal_self_v1",
+        beneficiaryMemberId: input.memberId,
+        cashAmountMinor: 500,
+        cashCurrency: "usd",
+        checkoutCancelUrl: "https://example.test/settings?usage=cancelled",
+        checkoutClientReferenceId: input.purchaseId,
+        checkoutCreateRetryCutoffAt: new Date(effectiveAt.getTime() + 15 * 60_000),
+        checkoutExpiresAt: new Date(effectiveAt.getTime() + 30 * 60_000),
+        checkoutMetadataJson: {
+          purpose: "hosted_usage_credit",
+          purchaseId: input.purchaseId,
+        },
+        checkoutRequestDigest: `digest:${input.purchaseId}`,
+        checkoutRequestPolicyVersion: "hosted-usage-credit-checkout-v1",
+        checkoutSuccessUrl: "https://example.test/settings?usage=return",
+        clientRequestKey: `request:${input.purchaseId}`,
+        conversionPolicyVersion: "hosted-usage-credit-v1",
+        grantUsdMicros: 5_000_000n,
+        id: input.purchaseId,
+        offerCode: "usage_5_usd",
+        payerMemberId: input.memberId,
+        requestFingerprint: `fingerprint:${input.purchaseId}`,
+        stripeCustomerIdEncrypted: `encrypted-customer:${input.purchaseId}`,
+        stripeCustomerLookupKey: `customer-lookup:${input.purchaseId}`,
+        stripeLiveMode: false,
+        stripePriceIdEncrypted: `encrypted-price:${input.purchaseId}`,
+        stripePriceLookupKey: `price-lookup:${input.purchaseId}`,
+      },
+    });
+    const usageCreditModule = await loadHostedUsageCreditModule();
+    return deps.prisma.$transaction(async (tx) =>
+      await usageCreditModule.grantHostedUsageCreditForPurchaseTx({
+        effectiveAt,
+        paidAt: effectiveAt,
+        purchaseId: input.purchaseId,
+        tx,
+      })
+    );
+  });
 }
 
 export async function listHostedLinqDeliveriesForTest(input: {
@@ -1120,6 +1214,24 @@ export async function signalHostedMailboxAppendRuntimeForTest(input: {
   });
 }
 
+export async function signalHostedRuntimeRecheckRuntimeForTest(input: {
+  environment?: NodeJS.ProcessEnv;
+  userId: string;
+}): Promise<{
+  signalAccepted: true;
+  workflowId: string;
+}> {
+  return withHostedWebSignalTestkitDeps(input.environment, async (deps) => {
+    const signalModule = await loadHostedRuntimeSignalModule();
+    return await signalModule.signalHostedRuntimeRecheckRuntime({
+      client: deps.temporalSignalClient,
+      environment: deps.environment,
+      prisma: deps.prisma,
+      userId: input.userId,
+    });
+  });
+}
+
 export async function createHostedWebTestkitDeps(
   source: NodeJS.ProcessEnv = process.env,
 ): Promise<HostedWebTestkitDeps> {
@@ -1234,6 +1346,10 @@ async function loadHostedTemporalClientModule(): Promise<HostedTemporalClientMod
 
 async function loadHostedRuntimeSignalModule(): Promise<HostedRuntimeSignalModule> {
   return await import(hostedSignalRuntimeModuleSpecifier) as HostedRuntimeSignalModule;
+}
+
+async function loadHostedUsageCreditModule(): Promise<HostedUsageCreditModule> {
+  return await import(hostedUsageCreditModuleSpecifier) as HostedUsageCreditModule;
 }
 
 async function createHostedComputerUseStoreForTest(

@@ -7,6 +7,7 @@ import { beforeEach, expect, test, vi } from "vitest";
 
 const mocks = vi.hoisted(() => ({
   getHostedPageAuthSnapshot: vi.fn(),
+  getHostedOnboardingEnvironment: vi.fn(),
   getHostedPrivySession: vi.fn(),
   getPrisma: vi.fn(),
   CustomizeMurphSettings: vi.fn((props: {
@@ -56,7 +57,11 @@ const mocks = vi.hoisted(() => ({
     currentCheckoutOffer?: unknown;
     currentBillingPlanCode?: unknown;
     familyState?: "none" | "owner" | "sponsored";
+    usageCreditBalanceUsdMicros?: string | null;
     usageStatus?: unknown;
+    usageTopUpInitialOpen?: boolean;
+    usageTopUpOffers?: readonly unknown[];
+    usageTopUpPurchaseReturn?: unknown;
   }) =>
     React.createElement(
       "div",
@@ -86,6 +91,7 @@ const mocks = vi.hoisted(() => ({
   },
   readHostedAccountSettingsPageSnapshot: vi.fn(),
   readHostedPersonalAiUsageStatus: vi.fn(),
+  readHostedUsageCreditProjection: vi.fn(),
   readHostedSecureApprovalStatus: vi.fn(),
   withServerApprovedPrivyAccountHints: vi.fn((input: {
     serverApprovedPrivyLinkedAccounts?: unknown;
@@ -119,6 +125,10 @@ vi.mock("@/src/lib/hosted-execution/usage-status", () => ({
   readHostedPersonalAiUsageStatus: mocks.readHostedPersonalAiUsageStatus,
 }));
 
+vi.mock("@/src/lib/hosted-execution/usage-credits", () => ({
+  readHostedUsageCreditProjection: mocks.readHostedUsageCreditProjection,
+}));
+
 vi.mock("@/src/lib/hosted-onboarding/account-settings-snapshot", () => ({
   readHostedAccountSettingsPageSnapshot:
     mocks.readHostedAccountSettingsPageSnapshot,
@@ -127,6 +137,10 @@ vi.mock("@/src/lib/hosted-onboarding/account-settings-snapshot", () => ({
 
 vi.mock("@/src/lib/hosted-onboarding/hosted-session", () => ({
   getHostedPrivySession: mocks.getHostedPrivySession,
+}));
+
+vi.mock("@/src/lib/hosted-onboarding/runtime", () => ({
+  getHostedOnboardingEnvironment: mocks.getHostedOnboardingEnvironment,
 }));
 
 vi.mock("@/src/components/hosted-onboarding/phone-country-code-provider", () => ({
@@ -217,6 +231,13 @@ function mockSettingsPageSnapshot(input: {
 beforeEach(() => {
   vi.clearAllMocks();
   mockSettingsPageSnapshot();
+  mocks.getHostedOnboardingEnvironment.mockReturnValue({
+    stripeUsageCreditPriceIdsByOffer: {
+      usage_10_usd: null,
+      usage_25_usd: null,
+      usage_5_usd: null,
+    },
+  });
   mocks.readHostedFamilyAccessForMember.mockResolvedValue(null);
   mocks.readHostedFamilyOwnerSnapshotForMember.mockResolvedValue(null);
   mocks.readHostedPersonalAiUsageStatus.mockResolvedValue({
@@ -224,6 +245,10 @@ beforeEach(() => {
     reason: "hosted_access_inactive",
     recommendedAction: null,
     status: "unavailable",
+  });
+  mocks.readHostedUsageCreditProjection.mockResolvedValue({
+    balanceUsdMicros: 0n,
+    ledgerVersion: 0n,
   });
   mocks.readHostedSecureApprovalStatus.mockResolvedValue({ status: "unavailable" });
 });
@@ -307,6 +332,7 @@ test("SettingsPage redirects signed-out visitors before reading member settings"
   expect(mocks.readHostedFamilyAccessForMember).not.toHaveBeenCalled();
   expect(mocks.readHostedFamilyOwnerSnapshotForMember).not.toHaveBeenCalled();
   expect(mocks.readHostedPersonalAiUsageStatus).not.toHaveBeenCalled();
+  expect(mocks.readHostedUsageCreditProjection).not.toHaveBeenCalled();
   expect(mocks.readHostedSecureApprovalStatus).not.toHaveBeenCalled();
   expect(mocks.getHostedPrivySession).not.toHaveBeenCalled();
 });
@@ -314,6 +340,13 @@ test("SettingsPage redirects signed-out visitors before reading member settings"
 test("SettingsPage reads the app session and persisted account settings into the settings tree", async () => {
   const originalPrivyAppId = process.env.NEXT_PUBLIC_PRIVY_APP_ID;
   process.env.NEXT_PUBLIC_PRIVY_APP_ID = "cm_app_settings_test";
+  mocks.getHostedOnboardingEnvironment.mockReturnValue({
+    stripeUsageCreditPriceIdsByOffer: {
+      usage_10_usd: "price_usage_10",
+      usage_25_usd: "price_usage_25",
+      usage_5_usd: "price_usage_5",
+    },
+  });
   mocks.getPrisma.mockReturnValue(mocks.prisma);
   mocks.getHostedPrivySession.mockResolvedValue({
     identity: {
@@ -402,12 +435,22 @@ test("SettingsPage reads the app session and persisted account settings into the
     usedPercent: 32,
   } as const;
   mocks.readHostedPersonalAiUsageStatus.mockResolvedValue(usageStatus);
+  mocks.readHostedUsageCreditProjection.mockResolvedValue({
+    balanceUsdMicros: 8_429_999n,
+    ledgerVersion: 4n,
+  });
 
   try {
     const { default: SettingsPage } = await import("../app/(dashboard)/settings/page");
 
     const markup = renderToStaticMarkup(await SettingsPage({
-      searchParams: Promise.resolve({ addEmail: "true", voice: "true" }),
+      searchParams: Promise.resolve({
+        addEmail: "true",
+        addUsage: "true",
+        usageCheckout: "success",
+        usagePurchase: "hucp_abcdefghijklmnop",
+        voice: "true",
+      }),
     }));
 
     assert.match(markup, /Hosted billing settings/);
@@ -439,7 +482,30 @@ test("SettingsPage reads the app session and persisted account settings into the
       currentBillingPhase: "paid",
       currentCheckoutOffer: "standard",
       currentBillingPlanCode: "launch_monthly",
+      usageCreditBalanceUsdMicros: "8429999",
       usageStatus,
+      usageTopUpInitialOpen: true,
+      usageTopUpOffers: [
+        {
+          amountLabel: "$5",
+          amountUsdCents: 500,
+          offerCode: "usage_5_usd",
+        },
+        {
+          amountLabel: "$10",
+          amountUsdCents: 1_000,
+          offerCode: "usage_10_usd",
+        },
+        {
+          amountLabel: "$25",
+          amountUsdCents: 2_500,
+          offerCode: "usage_25_usd",
+        },
+      ],
+      usageTopUpPurchaseReturn: {
+        kind: "success",
+        purchaseId: "hucp_abcdefghijklmnop",
+      },
     }), undefined);
     expect(mocks.HostedAssistantModelSettings).toHaveBeenCalledWith({
       canUpgradeToEdge: true,
@@ -455,6 +521,10 @@ test("SettingsPage reads the app session and persisted account settings into the
     expect(mocks.prisma.$transaction).not.toHaveBeenCalled();
     expect(mocks.readHostedPersonalAiUsageStatus).toHaveBeenCalledWith({
       memberId: "member_123",
+      prisma: mocks.prisma,
+    });
+    expect(mocks.readHostedUsageCreditProjection).toHaveBeenCalledWith({
+      beneficiaryMemberId: "member_123",
       prisma: mocks.prisma,
     });
     expect(mocks.readHostedSecureApprovalStatus).toHaveBeenCalledWith({
@@ -515,7 +585,48 @@ test("SettingsPage reads the app session and persisted account settings into the
   }
 });
 
+test("SettingsPage rejects repeated or malformed usage top-up query state", async () => {
+  mocks.getPrisma.mockReturnValue(mocks.prisma);
+  mocks.getHostedPrivySession.mockResolvedValue(null);
+  mocks.getHostedPageAuthSnapshot.mockResolvedValue({
+    authenticated: true,
+    authenticatedMember: {
+      billingStatus: "active",
+      id: "member_123",
+      suspendedAt: null,
+    },
+    linkedAccounts: [],
+    memberLookup: null,
+    session: {
+      privyUserId: "did:privy:user_123",
+    },
+  });
+
+  const { default: SettingsPage } = await import("../app/(dashboard)/settings/page");
+
+  renderToStaticMarkup(await SettingsPage({
+    searchParams: Promise.resolve({
+      addUsage: ["true", "true"],
+      usageCheckout: "success",
+      usagePurchase: "hucp_not-valid",
+    }),
+  }));
+
+  expect(mocks.HostedBillingSettings).toHaveBeenCalledWith(
+    expect.objectContaining({
+      usageTopUpInitialOpen: false,
+      usageTopUpPurchaseReturn: null,
+    }),
+    undefined,
+  );
+});
+
 test.each([
+  {
+    billingStatus: HostedBillingStatus.canceled,
+    label: "canceled",
+    suspendedAt: null,
+  },
   {
     billingStatus: HostedBillingStatus.past_due,
     label: "inactive",
@@ -558,10 +669,22 @@ test.each([
 
   const { default: SettingsPage } = await import("../app/(dashboard)/settings/page");
 
-  renderToStaticMarkup(await SettingsPage());
+  renderToStaticMarkup(await SettingsPage({
+    searchParams: Promise.resolve({
+      usageCheckout: "cancel",
+      usagePurchase: "hucp_abcdefghijklmnop",
+    }),
+  }));
 
   expect(mocks.HostedBillingSettings).toHaveBeenCalledWith(
-    expect.objectContaining({ canUpgradeToEdge: false }),
+    expect.objectContaining({
+      canUpgradeToEdge: false,
+      usageTopUpOffers: [],
+      usageTopUpPurchaseReturn: {
+        kind: "cancel",
+        purchaseId: "hucp_abcdefghijklmnop",
+      },
+    }),
     undefined,
   );
   expect(mocks.HostedAssistantModelSettings).toHaveBeenCalledWith(

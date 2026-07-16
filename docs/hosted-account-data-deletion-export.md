@@ -1,6 +1,6 @@
 # Hosted account data deletion and vault export
 
-Last verified: 2026-07-15
+Last verified: 2026-07-16
 
 ## Purpose
 
@@ -51,6 +51,7 @@ The Settings vault export does not include:
 - Active invite codes.
 - Hosted R2 object keys for workspace snapshots, browser-vault replicas, artifacts, runner secrets, or raw email.
 - API key environment variable names, gateway tag JSON, AI base URLs, session IDs, turn IDs, and Stripe metering identifiers/errors.
+- Usage-credit Checkout URLs, Stripe payment identifiers, request fingerprints, provider metadata, semantic source keys, source usage references, or per-grant allocation history.
 
 ## Deletion workflow
 
@@ -62,7 +63,7 @@ The Settings vault export does not include:
 4. Revoke wearable/device provider access with the existing device-sync provider `revokeAccess` hook before local device rows are deleted. Junction-routed Garmin and other Junction sources are deregistered through Junction when configured; providers without a revocation hook remain local-reference deletion only.
 5. Cancel the Stripe subscription fail-closed: a cancel failure or a missing Stripe client while a subscription reference exists aborts deletion with a structured error. An already-canceled or missing subscription counts as done.
 6. Cancel any Family plan Stripe subscriptions owned by the member before local Family group rows are removed. A family cancel failure also aborts deletion fail-closed.
-7. Delete Kernel browser sessions, every Managed Auth connection for the member's profile, and the profile before deleting Prisma-hosted account rows in a transaction.
+7. Delete Kernel browser sessions, every Managed Auth connection for the member's profile, and the profile before deleting Prisma-hosted account rows in a transaction. Inside that transaction, delete usage-credit ledger entries before their purchase rows and delete both before the hosted member row so the financial-record foreign keys fail closed instead of relying on cascades.
 8. Best-effort terminate the per-user hosted Temporal runtime workflow again after the Prisma transaction commits.
 9. Best-effort call hosted execution control to delete Cloudflare Durable Object state and R2 user artifacts.
 10. Best-effort terminate the per-user hosted Temporal runtime workflow again after Cloudflare cleanup, so any sleeping workflow state that survived a concurrent wake attempt is neutralized.
@@ -94,6 +95,8 @@ The Settings vault export does not include:
 | `prisma.hosted_user_crypto_audit` | Live delete | Metadata/counts | Deletes hosted crypto provisioning audit rows. Export reports counts only. |
 | `prisma.hosted_ai_usage` | Live delete | Metadata/counts | Deletes local AI usage rows. Already-submitted vendor metering may remain externally. |
 | `prisma.hosted_ai_usage_period` | Live delete | Metadata/counts | Deletes local allowance-period snapshots. Export includes period windows, allowance totals, and billing-state metadata while omitting internal reconciliation identifiers. |
+| `prisma.hosted_usage_credit_entry` | Live delete | Not included in vault export | Deletes append-only usage-credit ledger rows before purchase and member rows. The deletion result reports row counts; browser-vault export omits semantic source keys, source usage references, and per-grant allocation history. |
+| `prisma.hosted_usage_credit_purchase` | Live delete | Not included in vault export | Deletes local purchase state and encrypted Stripe references after its ledger entries. The deletion result reports row counts; browser-vault export omits Checkout URLs, payment identifiers, request fingerprints, and provider metadata. Stripe retains legally required payment records under its own processes. |
 | `prisma.hosted_product_feedback` | Live delete | Confirmed data export | Deletes assistant-captured product feedback rows. Confirmed export includes safe kind/summary metadata and optional published changelog item ids while omitting internal feedback ids. |
 | `prisma.hosted_linq_daily_state` | Live delete | Metadata/counts | Deletes Linq daily inbound/outbound quota counters. |
 | `prisma.hosted_linq_invite_delivery` | Live delete | Metadata/counts | Deletes signup-link delivery records whose delivery identity contains the member id; unrelated operational delivery records remain under their normal retention policy. Historical orphan cleanup is finalized after production promotion and the prior-function drain. |
@@ -154,7 +157,7 @@ Deletion cannot guarantee immediate erasure in systems Murph does not control. T
 - Linq, Telegram, carrier, and email-provider copies of messages or routing events already delivered to those external systems;
 - infrastructure backups and restore media that age out under documented retention.
 
-Stripe and Privy vendor accounts are actively deleted by the deletion workflow itself: the subscription is canceled fail-closed before the local wipe, and the customer and Privy user are deleted best-effort afterward. Stripe retains records it is legally required to keep (for example invoices) under its own documented processes after the customer object is deleted.
+Stripe and Privy vendor accounts are actively deleted by the deletion workflow itself: the subscription is canceled fail-closed before the local wipe, and the customer and Privy user are deleted best-effort afterward. Local usage-credit purchase rows and their encrypted Stripe references are deleted with the account. Stripe retains records it is legally required to keep (for example invoices and payment records) under its own documented processes after the customer object is deleted.
 
 Retell call objects are actively deleted before the local wipe. The local phone-call row remains available for retry until Retell confirms deletion or confirms that the object is already absent; account deletion does not report success while a Retell provider id remains.
 
@@ -171,5 +174,6 @@ Retell call objects are actively deleted before the local wipe. The local phone-
 - vendor account deletion: Stripe subscription cancel before the local wipe (and abort on failure), Stripe customer and Privy user deletion after it, already-canceled/missing-record skips, not-configured skips, and best-effort failure reporting.
 - Family account cleanup: owned Family subscriptions cancel fail-closed, Family memberships/invites/billing refs are deleted with account rows, and Family Stripe customer references are deduped with direct billing customer cleanup.
 - Retell cleanup: terminal and active provider objects are deleted, active calls stop first, confirmed absence is retry-safe, ambiguous failures retain local provider ids, bounded extra batches require retry, and the final transaction rejects any remaining provider id or active reservation.
+- usage-credit cleanup: store coverage includes purchase and ledger rows, deletion counts both stores, and ledger entries are deleted before purchases and hosted member rows.
 
 Any future account data store should update `HOSTED_ACCOUNT_DATA_STORE_COVERAGE`, the deletion/export implementation, this document, and the coverage test in the same change.
