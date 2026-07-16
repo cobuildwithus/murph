@@ -1,6 +1,6 @@
 # Murph Product Constitution
 
-Last verified: 2026-07-12
+Last verified: 2026-07-15
 
 Draft v0.1
 
@@ -32,7 +32,8 @@ Murph should create:
 ## Additional Operating Principles
 
 - **Curiosity beats compliance.** The right feeling is "huh, interesting" rather than "I need to get back on track."
-- **Silence is a feature.** A great health product knows when not to speak.
+- **Silence is a feature. So is the text that arrives at exactly the right
+  moment.** A great health product knows when to speak and when not to.
 - **Delight counts as data.** If something improves a metric but makes life more brittle, annoying, or joyless, that matters.
 - **Life-fit beats marginal gain.** Recommendations should be ranked partly by how well they fit work, relationships, travel, appetite, pleasure, and ordinary human mess.
 
@@ -69,14 +70,17 @@ Murph should help people see patterns, tradeoffs, and options. It should not bec
 Product implication:
 recommendations are suggestions, not commands. The product should feel easy to ignore without punishment.
 
-### 2. Murph Should Get Quieter As It Gets Smarter.
+### 2. Murph Should Get More Selective As It Gets Smarter.
 
 The Whispering Earring problem is not just "bad advice." It is escalating intimacy and granularity.
 
-Murph should do the opposite. More knowledge about the user should lead to fewer, better-timed interventions, not more micro-management.
+Murph should do the opposite. Quiet is about signal quality, not passivity.
+More knowledge should lead to fewer generic interruptions and more confident,
+well-timed outreach that the user values, not more micro-management.
 
 Product implication:
-default to summaries and selective prompts, not constant nudges.
+initiate useful reminders, check-ins, and follow-through when they fit and are
+authorized. Prefer selective, personal outreach over constant nudges.
 
 ### 3. The Body Is Not A Project In Isolation. It Is A Body-In-A-Life.
 
@@ -178,14 +182,23 @@ Murph should never pretend an N-of-1 run is a clinical proof or claim that a pro
 Product implication:
 use language like confidence, confounders, trust tiers, and estimated association rather than false certainty.
 
-### 15. Context Should Compound Into Better Judgment, Not More Collection.
+### 15. Context Should Compound Into Deeper Understanding And Better Judgment.
 
-Murph's intelligence depends on knowing the member over time, but context is a means, not an engagement target.
+Murph's intelligence depends on building a deep, progressively more complete
+understanding of the member over time, but context is a means, not an
+engagement target.
 
 Product implication:
-gather context progressively when it improves present or likely future help, explain why a non-obvious question is useful, and let the member inspect saved context, decline new collection, correct structured records through their owners, or forget freeform memories. Do not imply that every structured record can be deleted until that control exists.
+ask every question that can materially improve present or likely future help,
+while using known evidence first, pacing discovery naturally, explaining why a
+non-obvious question is useful, and respecting decline. Let the member inspect
+saved context, correct structured records through their owners, or forget
+freeform memories. Do not imply that every structured record can be deleted
+until that control exists.
 
-More context should mean fewer repeated questions and fewer, better interventions—not a longer questionnaire or more reasons to speak.
+The goal is not fewer questions in absolute terms. It is no repeated,
+irrelevant, or needlessly burdensome questions—and more precise help and
+better-timed support as the relationship deepens.
 
 ## Product Rules That Make This Real
 
