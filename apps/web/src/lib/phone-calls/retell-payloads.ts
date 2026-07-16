@@ -4,14 +4,21 @@ export interface RetellCallAnalysisPayload {
   [key: string]: unknown;
 }
 
+export interface RetellCallCostPayload {
+  combined_cost: number;
+}
+
 export interface RetellCallPayload {
   call_analysis?: RetellCallAnalysisPayload | null;
+  call_cost?: RetellCallCostPayload | null;
   call_id: string;
   data_storage_setting?: string | null;
   disconnection_reason?: string | null;
+  duration_ms?: number | null;
   end_timestamp?: number | string | null;
   metadata?: Record<string, unknown> | null;
   transcript?: string | null;
+  transfer_end_timestamp?: number | string | null;
   [key: string]: unknown;
 }
 
@@ -30,6 +37,9 @@ export interface RetellWebhookPayload {
   event: string;
   [key: string]: unknown;
 }
+
+const USD_MICROS_PER_CENT = 10_000;
+const MAX_RETELL_COMBINED_COST_CENTS = Number.MAX_SAFE_INTEGER / USD_MICROS_PER_CENT;
 
 export const retellCallPayloadSchema = {
   parse: parseRetellCallPayload,
@@ -50,6 +60,14 @@ export function readRetellMurphPhoneCallId(call: RetellCallPayload): string | nu
 
 export function hasRetellBasicAttributesOnlyStorage(call: RetellCallPayload): boolean {
   return call.data_storage_setting?.trim().toLowerCase() === "basic_attributes_only";
+}
+
+export function readRetellCallEndAt(call: RetellCallPayload): Date | null {
+  return readRetellTimestamp(call.end_timestamp);
+}
+
+export function readRetellTransferEndAt(call: RetellCallPayload): Date | null {
+  return readRetellTimestamp(call.transfer_end_timestamp);
 }
 
 function parseRetellAskMurphPayload(value: unknown): RetellAskMurphPayload {
@@ -83,11 +101,13 @@ function parseRetellWebhookPayload(value: unknown): RetellWebhookPayload {
 function parseRetellCallPayload(value: unknown): RetellCallPayload {
   const record = requireRecord(value, "Retell call payload");
   const callAnalysis = readOptionalCallAnalysis(record.call_analysis);
+  const callCost = readOptionalCallCost(record.call_cost);
 
   return {
     ...record,
     call_id: requireTrimmedString(record.call_id, "Retell call id", 200),
     ...(callAnalysis === undefined ? {} : { call_analysis: callAnalysis }),
+    ...(callCost === undefined ? {} : { call_cost: callCost }),
     data_storage_setting: readOptionalString(
       record.data_storage_setting,
       "Retell data storage setting",
@@ -96,9 +116,30 @@ function parseRetellCallPayload(value: unknown): RetellCallPayload {
       record.disconnection_reason,
       "Retell disconnection reason",
     ),
+    duration_ms: readOptionalNonNegativeInteger(record.duration_ms),
     end_timestamp: readOptionalTimestamp(record.end_timestamp),
     metadata: readOptionalRecord(record.metadata, "Retell call metadata"),
     transcript: readOptionalString(record.transcript, "Retell transcript"),
+    transfer_end_timestamp: readOptionalTimestamp(record.transfer_end_timestamp),
+  };
+}
+
+function readOptionalCallCost(value: unknown): RetellCallCostPayload | null | undefined {
+  if (value === undefined || value === null) {
+    return value;
+  }
+  if (!isRecord(value)) {
+    return null;
+  }
+  const combinedCost = readNonNegativeFiniteNumber(value.combined_cost);
+  if (combinedCost === null) {
+    return null;
+  }
+  if (combinedCost > MAX_RETELL_COMBINED_COST_CENTS) {
+    return null;
+  }
+  return {
+    combined_cost: combinedCost,
   };
 }
 
@@ -173,6 +214,45 @@ function readOptionalTimestamp(value: unknown): number | string | null | undefin
     return value;
   }
   throw new TypeError("Retell end timestamp must be a string or finite number.");
+}
+
+function readOptionalNonNegativeInteger(value: unknown): number | null | undefined {
+  if (value === undefined || value === null) {
+    return value;
+  }
+  if (typeof value !== "number" || !Number.isSafeInteger(value) || value < 0) {
+    return null;
+  }
+  return value;
+}
+
+function readNonNegativeFiniteNumber(value: unknown): number | null {
+  if (typeof value !== "number" || !Number.isFinite(value) || value < 0) {
+    return null;
+  }
+  return value;
+}
+
+function readRetellTimestamp(value: number | string | null | undefined): Date | null {
+  if (typeof value === "number" && Number.isFinite(value)) {
+    return validRetellDate(value < 1_000_000_000_000 ? value * 1_000 : value);
+  }
+  if (typeof value !== "string" || !value.trim()) {
+    return null;
+  }
+
+  const text = value.trim();
+  if (/^\d+$/u.test(text)) {
+    const numeric = Number.parseInt(text, 10);
+    return validRetellDate(numeric < 1_000_000_000_000 ? numeric * 1_000 : numeric);
+  }
+
+  return validRetellDate(text);
+}
+
+function validRetellDate(value: number | string): Date | null {
+  const date = new Date(value);
+  return Number.isNaN(date.getTime()) ? null : date;
 }
 
 function isRecord(value: unknown): value is Record<string, unknown> {

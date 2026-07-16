@@ -302,7 +302,7 @@ describe("createHostedPhoneCall", () => {
     });
     const store = createPhoneCallStore({ existing });
     let stopUnavailable = true;
-    const runtime = createPhoneCallRuntime({
+    const runtimeHarness = createPhoneCallRuntime({
       onStop: () => {
         if (stopUnavailable) {
           throw new Error("provider stop unavailable");
@@ -310,11 +310,28 @@ describe("createHostedPhoneCall", () => {
       },
       providerCallId: "retell_unused",
     });
+    const terminalUsage = {
+      combinedCostUsdMicros: 25_000,
+      occurredAt: new Date("2026-06-25T01:00:00.000Z"),
+      providerCallId: "retell_unsafe",
+    };
+    const recordTerminalUsage = vi.fn(async () => undefined);
+    const runtime = {
+      ...runtimeHarness.runtime,
+      resolveTerminalUsage: vi.fn(async () => ({
+        state: "ready" as const,
+        usage: terminalUsage,
+      })),
+    };
+    const prisma = {
+      ...store.prisma,
+      recordTerminalUsage,
+    };
 
     await expect(processHostedPhoneCallRecoveryById({
       phoneCallId: existing.id,
-      prisma: store.prisma,
-      runtime: runtime.runtime,
+      prisma,
+      runtime,
       signal: new AbortController().signal,
     })).resolves.toBe("pending");
     expect(store.currentCall().endedAt).toBeNull();
@@ -322,16 +339,71 @@ describe("createHostedPhoneCall", () => {
     stopUnavailable = false;
     await expect(processHostedPhoneCallRecoveryById({
       phoneCallId: existing.id,
-      prisma: store.prisma,
-      runtime: runtime.runtime,
+      prisma,
+      runtime,
       signal: new AbortController().signal,
     })).resolves.toBe("complete");
-    expect(runtime.startCalls).toEqual([]);
-    expect(runtime.stopCalls).toEqual(["retell_unsafe", "retell_unsafe"]);
+    expect(runtimeHarness.startCalls).toEqual([]);
+    expect(runtimeHarness.stopCalls).toEqual(["retell_unsafe", "retell_unsafe"]);
+    expect(recordTerminalUsage).toHaveBeenCalledWith({
+      call: existing,
+      usage: terminalUsage,
+    });
     expect(store.currentCall()).toMatchObject({
       endedAt: expect.any(Date),
       providerCallId: "retell_unsafe",
       status: "failed",
+    });
+  });
+
+  it("keeps recovery pending until terminal Retell usage is durably recorded", async () => {
+    const existing = buildHostedPhoneCall({
+      id: "hpc_existing",
+      providerCallId: "retell_call_123",
+      status: "calling",
+    });
+    const store = createPhoneCallStore({ existing });
+    const recordTerminalUsage = vi.fn(async () => undefined);
+    const resolveTerminalUsage = vi.fn()
+      .mockResolvedValueOnce({ state: "pending" })
+      .mockResolvedValueOnce({
+        state: "ready",
+        usage: {
+          combinedCostUsdMicros: 125_000,
+          occurredAt: new Date("2026-06-25T01:00:00.000Z"),
+          providerCallId: "retell_call_123",
+        },
+      });
+    const runtime = {
+      ...createPhoneCallRuntime({ providerCallId: "retell_unused" }).runtime,
+      resolveTerminalUsage,
+    };
+    const prisma = {
+      ...store.prisma,
+      recordTerminalUsage,
+    };
+
+    await expect(processHostedPhoneCallRecoveryById({
+      phoneCallId: existing.id,
+      prisma,
+      runtime,
+      signal: new AbortController().signal,
+    })).resolves.toBe("pending");
+    expect(recordTerminalUsage).not.toHaveBeenCalled();
+
+    await expect(processHostedPhoneCallRecoveryById({
+      phoneCallId: existing.id,
+      prisma,
+      runtime,
+      signal: new AbortController().signal,
+    })).resolves.toBe("complete");
+    expect(recordTerminalUsage).toHaveBeenCalledWith({
+      call: existing,
+      usage: {
+        combinedCostUsdMicros: 125_000,
+        occurredAt: new Date("2026-06-25T01:00:00.000Z"),
+        providerCallId: "retell_call_123",
+      },
     });
   });
 

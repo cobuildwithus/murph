@@ -510,11 +510,13 @@ does not make provider ingress fail; direct Linq ensure is not fired without
 the accepted Temporal signal. The existing Temporal scheduled-reconcile
 command also runs one bounded preference-handoff sweep. Web selects live
 `member.preferences.updated` rows above the authoritative system-lane
-`consumed_seq` and reissues their pointer-only `signalWithStart`; the mailbox
-row remains the only work record and repeated sweeps are idempotent. This is a
-narrow backstop for the Settings outcome, not a second queue or a generic
-mailbox-lag scheduler. Other missed post-commit signals still have no web cron
-backstop.
+`consumed_seq` for active person runtimes or synthetic room runtimes with an
+active owner or current participant, then rechecks canonical runtime access and
+reissues their pointer-only `signalWithStart`; the mailbox row remains the only
+work record and repeated sweeps are idempotent. This is a narrow backstop for
+already-committed hosted style writes from personal Settings or runtime-bound
+conversation controls, not a second queue or a generic mailbox-lag scheduler.
+Other missed post-commit signals still have no web cron backstop.
 
 Hosted reply-latency telemetry records only boundaries observed by their owning
 process. The web-owned `provider_started` field means the runtime observed a

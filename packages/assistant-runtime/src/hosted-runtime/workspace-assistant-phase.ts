@@ -11,9 +11,9 @@ import {
 } from "@murphai/hosted-execution";
 import {
   type HostedRuntimeGroupToolLinqThreadContext,
-  type HostedRuntimeGroupToolCurrentSenderContext,
   type HostedRuntimeGroupToolRequest,
   type HostedRuntimeGroupToolResponse,
+  type HostedRuntimeGroupToolSelfOptOutContext,
   type HostedWorkspaceCheckpointReason,
   type HostedRuntimeRedactedJson,
   type HostedRuntimeRedactedObject,
@@ -267,22 +267,11 @@ export function createHostedGroupToolWithLinqThreadContext(input: {
         if (emailIngressPresent) {
           return await input.groupToolPort.request({ action: request.action });
         }
-        const selfOptOut = resolveHostedGroupToolCurrentSenderContext({
+        const selfOptOut = resolveHostedGroupToolSelfOptOutContext({
           linqDeliveryContexts: input.linqDeliveryContexts,
         });
         return await input.groupToolPort.request(
           selfOptOut ? { action: request.action, selfOptOut } : { action: request.action },
-        );
-      }
-      if (
-        request.action === "read_own_assistant_style"
-        || request.action === "update_own_assistant_style"
-      ) {
-        const currentSender = resolveHostedGroupToolCurrentSenderContext({
-          linqDeliveryContexts: input.linqDeliveryContexts,
-        });
-        return await input.groupToolPort.request(
-          currentSender ? { ...request, currentSender } : request,
         );
       }
       if (
@@ -335,12 +324,6 @@ function buildHostedGroupEmailRestrictedActionUnavailable(
         action: request.action,
         result: { participants: null, status: "unavailable", unavailableReason },
       };
-    case "read_own_assistant_style":
-    case "update_own_assistant_style":
-      return {
-        action: request.action,
-        result: { style: null, status: "unavailable", unavailableReason },
-      };
     case "preflight_set_chat_avatar":
     case "set_chat_avatar":
     case "share_contact_card":
@@ -352,13 +335,12 @@ function buildHostedGroupEmailRestrictedActionUnavailable(
   }
 }
 
-function resolveHostedGroupToolCurrentSenderContext(input: {
+function resolveHostedGroupToolSelfOptOutContext(input: {
   linqDeliveryContexts: readonly HostedAssistantLinqDeliveryContext[];
-}): HostedRuntimeGroupToolCurrentSenderContext | null {
-  const eligible = new Map<string, HostedRuntimeGroupToolCurrentSenderContext>();
+}): HostedRuntimeGroupToolSelfOptOutContext | null {
+  const eligible = new Map<string, HostedRuntimeGroupToolSelfOptOutContext>();
   // Hosted email reply aliases authenticate the route, not the human From
-  // header. Only the accepted Linq sender can become participant-self
-  // authority for opt-out or personal style actions.
+  // header. Do not turn parsed From into self-opt-out authority.
   for (const context of input.linqDeliveryContexts) {
     if (context.threadIsDirect !== false) {
       continue;

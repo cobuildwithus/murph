@@ -11,11 +11,13 @@ import type {
 } from "retell-sdk/resources/call";
 
 import type {
+  HostedPhoneCallProviderUsageResolution,
   HostedPhoneCallRuntimeRecord,
   PhoneCallRuntime,
   PhoneCallRuntimeReconciliationResult,
   PhoneCallRuntimeStartResult,
 } from "./types";
+import { readRetellTerminalProviderUsage } from "./usage";
 import { markPhoneCallRuntimeNoActiveEffect } from "./types";
 import { hostedOnboardingError } from "../hosted-onboarding/errors";
 
@@ -24,7 +26,7 @@ const RETELL_START_TIMEOUT_MS = 15_000;
 const RETELL_BASIC_ATTRIBUTES_ONLY_STORAGE_SETTING = "basic_attributes_only";
 const RETELL_WEBHOOK_PATH = "/api/retell/webhook";
 const RETELL_PUBLIC_BASE_DYNAMIC_VARIABLE = "murph_public_base_url";
-const RETELL_WEBHOOK_EVENTS = ["call_ended", "call_analyzed"] as const;
+const RETELL_WEBHOOK_EVENTS = ["call_ended", "call_analyzed", "transfer_ended"] as const;
 const RETELL_MISSING_ASSET_MESSAGE =
   "Cannot find requested asset under given api key.";
 
@@ -145,6 +147,34 @@ class RetellPhoneCallRuntime implements PhoneCallRuntime, RetellPhoneCallAccount
       providerCallId,
       state: "cleanup_required",
     };
+  }
+
+  async resolveTerminalUsage(
+    providerCallId: string,
+    options: { signal?: AbortSignal } = {},
+  ): Promise<HostedPhoneCallProviderUsageResolution> {
+    const client = this.buildClient();
+    const call = await client.call.retrieve(providerCallId, {
+      signal: options.signal,
+    });
+    if (call.call_status === "registered" || call.call_status === "ongoing") {
+      return { state: "pending" };
+    }
+
+    return readRetellTerminalProviderUsage({
+      call_id: call.call_id,
+      ...(call.call_cost
+        ? { call_cost: { combined_cost: call.call_cost.combined_cost } }
+        : {}),
+      ...(call.disconnection_reason
+        ? { disconnection_reason: call.disconnection_reason }
+        : {}),
+      ...(call.duration_ms === undefined ? {} : { duration_ms: call.duration_ms }),
+      ...(call.end_timestamp === undefined ? {} : { end_timestamp: call.end_timestamp }),
+      ...(call.transfer_end_timestamp === undefined
+        ? {}
+        : { transfer_end_timestamp: call.transfer_end_timestamp }),
+    });
   }
 
   async deleteProviderCall(

@@ -140,10 +140,10 @@ function createHostedPreferenceHandoffCandidateStore(
   return {
     async listCandidates(input) {
       const retainedAt = new Date(input.now.getTime() - HOSTED_MAILBOX_RETENTION_MS);
-      // Settings writes are authenticated person-member mutations. Mirror the
-      // person branch of member-access.ts here so inactive rows are excluded
-      // before LIMIT; the async access gate above remains the canonical race
-      // check after this set-based selection.
+      // Style writes target either a person member or a synthetic thread
+      // container. Mirror the person branch of member-access.ts once, then let
+      // containers inherit active owner or current-participant access before
+      // LIMIT; the async access gate above remains the canonical race check.
       return await prisma.$queryRaw<Array<HostedPreferenceHandoffCandidate>>(Prisma.sql`
         WITH "pending_preference_users" AS (
           SELECT DISTINCT ON ("item"."user_id")
@@ -159,6 +159,27 @@ function createHostedPreferenceHandoffCandidateStore(
             AND ("item"."expires_at" IS NULL OR "item"."expires_at" > ${input.now})
             AND "item"."created_at" >= ${retainedAt}
           ORDER BY "item"."user_id", "item"."lane_seq" ASC
+        ),
+        "active_person_members" AS (
+          SELECT "person"."id"
+          FROM "hosted_member" AS "person"
+          LEFT JOIN "hosted_thread_container" AS "person_container"
+            ON "person_container"."member_id" = "person"."id"
+          WHERE "person_container"."member_id" IS NULL
+            AND "person"."suspended_at" IS NULL
+            AND (
+              "person"."billing_status" = 'active'
+              OR EXISTS (
+                SELECT 1
+                FROM "hosted_account_group_membership" AS "membership"
+                JOIN "hosted_account_group" AS "account_group"
+                  ON "account_group"."id" = "membership"."group_id"
+                WHERE "membership"."member_id" = "person"."id"
+                  AND "membership"."status" = 'active'
+                  AND "account_group"."billing_status" = 'active'
+                  AND "account_group"."suspended_at" IS NULL
+              )
+            )
         )
         SELECT "mailboxItemId", "userId"
         FROM "pending_preference_users" AS "pending"
@@ -166,19 +187,29 @@ function createHostedPreferenceHandoffCandidateStore(
           ON "member"."id" = "pending"."userId"
         LEFT JOIN "hosted_thread_container" AS "thread_container"
           ON "thread_container"."member_id" = "member"."id"
-        WHERE "thread_container"."member_id" IS NULL
-          AND "member"."suspended_at" IS NULL
+        LEFT JOIN "active_person_members" AS "active_member"
+          ON "active_member"."id" = "member"."id"
+        LEFT JOIN "active_person_members" AS "active_owner"
+          ON "active_owner"."id" = "thread_container"."owner_member_id"
+        WHERE "member"."suspended_at" IS NULL
           AND (
-            "member"."billing_status" = 'active'
-            OR EXISTS (
-              SELECT 1
-              FROM "hosted_account_group_membership" AS "membership"
-              JOIN "hosted_account_group" AS "account_group"
-                ON "account_group"."id" = "membership"."group_id"
-              WHERE "membership"."member_id" = "member"."id"
-                AND "membership"."status" = 'active'
-                AND "account_group"."billing_status" = 'active'
-                AND "account_group"."suspended_at" IS NULL
+            (
+              "thread_container"."member_id" IS NULL
+              AND "active_member"."id" IS NOT NULL
+            )
+            OR (
+              "thread_container"."member_id" IS NOT NULL
+              AND (
+                "active_owner"."id" IS NOT NULL
+                OR EXISTS (
+                  SELECT 1
+                  FROM "hosted_thread_container_participant" AS "participant"
+                  JOIN "active_person_members" AS "active_participant"
+                    ON "active_participant"."id" = "participant"."participant_member_id"
+                  WHERE "participant"."container_member_id" = "member"."id"
+                    AND "participant"."removed_at" IS NULL
+                )
+              )
             )
           )
         ORDER BY "createdAt" ASC, "mailboxItemId" ASC

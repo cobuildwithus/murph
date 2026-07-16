@@ -4031,6 +4031,11 @@ type AssistantAutoReplyOutboxDelivery = NonNullable<
   AssistantAutoReplyOutboxIntent['delivery']
 >
 
+type AssistantAutoReplyOutboxMessageDelivery = Extract<
+  AssistantAutoReplyOutboxDelivery,
+  { kind?: 'message' }
+>
+
 async function listAssistantAutoReplyMatchingOutboxDeliveries(input: {
   deliveryTarget: string | null
   historyReader: AssistantAutoReplyHistoryReader
@@ -4105,14 +4110,10 @@ async function resolveAssistantAutoReplyExistingSession(input: {
 
 function assistantAutoReplyOutboxMatchesInput(input: {
   conversation: AssistantInputConversationRef
-  delivery: AssistantAutoReplyOutboxDelivery
+  delivery: AssistantAutoReplyOutboxMessageDelivery
   deliveryTarget: string
   intent: AssistantAutoReplyOutboxIntent
 }): boolean {
-  if (input.delivery.kind !== 'message') {
-    return false
-  }
-
   const exactTargetMatch = assistantAutoReplyOutboxDeliveryMatchesExactTarget({
     delivery: input.delivery,
     deliveryTarget: input.deliveryTarget,
@@ -4160,13 +4161,9 @@ function assistantAutoReplyOutboxIntentMatchesConversation(input: {
 }
 
 function assistantAutoReplyOutboxDeliveryMatchesExactTarget(input: {
-  delivery: AssistantAutoReplyOutboxDelivery
+  delivery: AssistantAutoReplyOutboxMessageDelivery
   deliveryTarget: string
 }): boolean {
-  if (input.delivery.kind !== 'message') {
-    return false
-  }
-
   return [input.delivery.target, input.delivery.providerThreadId].some(
     (candidate) => normalizeNullableString(candidate) === input.deliveryTarget,
   )
@@ -4174,7 +4171,7 @@ function assistantAutoReplyOutboxDeliveryMatchesExactTarget(input: {
 
 function assistantAutoReplyOutboxDeliveryMatchesStableConversationFallback(input: {
   conversation: AssistantInputConversationRef
-  delivery: AssistantAutoReplyOutboxDelivery
+  delivery: AssistantAutoReplyOutboxMessageDelivery
   intent: AssistantAutoReplyOutboxIntent
 }): boolean {
   const conversation = conversationRefFromAssistantInputConversation(
@@ -4190,12 +4187,8 @@ function assistantAutoReplyOutboxDeliveryMatchesStableConversationFallback(input
 }
 
 function readAssistantAutoReplyOutboxDeliveryProviderMessageIds(
-  delivery: AssistantAutoReplyOutboxDelivery,
+  delivery: AssistantAutoReplyOutboxMessageDelivery,
 ): string[] {
-  if (delivery.kind !== 'message') {
-    return []
-  }
-
   const ids = [
     readProviderRouteScalar(delivery.providerMessageId),
     ...(Array.isArray(delivery.providerMessageIds)
