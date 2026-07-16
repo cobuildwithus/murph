@@ -293,9 +293,7 @@ proof owns the container lifecycle while it delivers the identity-checked abort.
 A stale result preserves the fence and retries. An accepted or queued result, or
 an ambiguous delivery failure, recycles the old shell fail-closed before the
 container returns `accepted`; only that settled stop allows the controller to
-clear the exact fence and start a replacement. A deploy-skewed request-only
-`requested` result remains non-authoritative without inactive proof and
-preserves the fence for retry.
+clear the exact fence and start a replacement.
 
 The foreground-priority rule does not weaken correctness checks. Wrong-user
 authority, invalid auth, undecryptable mailbox payloads, stale leases, and
@@ -924,15 +922,24 @@ source-less wake preempts those drains only after the resumed import proves new
 conversation work; a no-progress or system-only nudge must not starve bounded
 maintenance or the idle checkpoint.
 The assistant engine admits the frozen same-wake compound batch before provider
-start without using hosted-specific mailbox refresh/checkpoint ports. While a
-Codex turn is live, later mailbox input may still be imported and staged, but it
-does not join that provider batch; it remains pending for a normal later
+start without broad hosted mailbox rediscovery. While a Codex turn is live,
+later mailbox input may still be imported and staged. Its exact staged input ID
+may join through the generic live-steering path only when the stored event is
+the next positive causal-sequence successor and preserves the conversation,
+delivery route, native reply anchor, account/audience, and group actor. A
+projection-pending input is a causal barrier until the existing
+projection-completion notification retries it; terminal projection failure is
+still replyable through the normal fallback. Duplicate staging and
+projection-completion notifications at or behind the newest queued or committed
+frontier are ignored before exact-successor proof. After the provider
+acknowledges `turn/steer`, Murph journals and checkpoints the accepted input
+before any hosted tool effect or final delivery may proceed. Missing input, a
+causal gap, a boundary change, or a missed live window remains pending for a normal later
 assistant turn. Strict active-turn-targeted input still fails closed instead of
 falling through, and the assistant engine does not synthesize another provider
-request inside the same assistant turn.
-Other assistant input owners may still use the generic pre-provider admission or
-live-steering paths when they prove the input shares the active turn's causal
-anchor; this mailbox-specific freeze does not change those owners.
+request inside the same assistant turn. Final-delivery and hosted-tool effect
+keys use the newest accepted causal input as the stable replay anchor while the
+full answered-mailbox set remains attached as evidence.
 When mailbox import produces or reuses a canonical write receipt, the runner
 publishes the receipt-log fingerprint and the advanced imported watermark in
 the same status checkpoint. That progress checkpoint is still required when
@@ -1270,10 +1277,10 @@ routing.
 - lease/fencing generation
 - alarm/fence coordination
 - container invocation
-- optional signed web allow-decision payload compatibility on legacy foreground
-  requests; Cloudflare does not validate it as runner-start authority and
-  missing, stale, mismatched, or invalid decisions never trigger a live web
-  usage-gate callback before the hot reply path starts
+- no signed usage-allow decision or live Web usage-gate callback in runner-start
+  authority; Temporal consumes the web-owned member-access decision, and
+  Cloudflare/runner #587 or newer is the permanent rollback floor while Web
+  omits the retired callback route
 - direct-R2 snapshot upload-session plumbing plus legacy encrypted
   bundle/artifact/env/journal object plumbing
 - worker-to-web callback signing

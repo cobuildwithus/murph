@@ -20,6 +20,7 @@ export interface CodexThreadIdentity {
   providerOptions: AssistantProviderSessionOptions
   routeFingerprint?: string
   routeId: string
+  threadCompatibilityFingerprint?: string
 }
 
 export function buildCodexThreadIdentity(
@@ -36,9 +37,15 @@ export function buildCodexThreadIdentity(
     provider,
     providerOptions,
   })
+  const threadCompatibilityFingerprint = hashCodexThreadCompatibilityIdentity({
+    codexCommand,
+    provider,
+    providerOptions,
+  })
   return {
     routeFingerprint,
     routeId: routeFingerprint,
+    threadCompatibilityFingerprint,
     label: buildCodexThreadIdentityLabel(providerConfig),
     provider,
     providerOptions,
@@ -50,6 +57,12 @@ export function readCodexThreadRouteFingerprint(
   route: Pick<CodexThreadIdentity, 'routeId' | 'routeFingerprint'> | null | undefined,
 ): string {
   return route?.routeFingerprint ?? route?.routeId ?? ''
+}
+
+export function readCodexThreadCompatibilityFingerprint(
+  route: CodexThreadIdentity,
+): string {
+  return route.threadCompatibilityFingerprint ?? readCodexThreadRouteFingerprint(route)
 }
 
 function buildCodexThreadIdentityLabel(
@@ -79,6 +92,30 @@ function hashCodexThreadIdentity(input: {
   return createHash('sha1')
     .update(
       JSON.stringify(buildCodexThreadIdentityFingerprint(input)),
+    )
+    .digest('hex')
+    .slice(0, 16)
+}
+
+function hashCodexThreadCompatibilityIdentity(input: {
+  codexCommand: string | null
+  provider: 'codex-cli'
+  providerOptions: AssistantProviderSessionOptions
+}): string {
+  return createHash('sha1')
+    .update(
+      JSON.stringify({
+        provider: input.provider,
+        executionDriver: input.providerOptions.executionDriver,
+        modelProvider: input.providerOptions.modelProvider ?? null,
+        sandbox: input.providerOptions.sandbox,
+        approvalPolicy: input.providerOptions.approvalPolicy,
+        profile: input.providerOptions.profile,
+        oss: input.providerOptions.oss,
+        codexHome: normalizeCodexThreadIdentityCodexHome(input.providerOptions.codexHome),
+        codexCommand: normalizeCodexThreadIdentityCodexCommand(input.codexCommand),
+        resumeKind: input.providerOptions.resumeKind,
+      }),
     )
     .digest('hex')
     .slice(0, 16)

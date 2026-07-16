@@ -8206,10 +8206,12 @@ describe('assistant auto-reply runtime', () => {
         }
       },
     )
-    const listInputCandidates = vi.fn(async (input: {
+    const listInputCandidatesByIds = vi.fn(async (input: {
+      inputIds: readonly string[]
       sourceId?: string | null
     }) => {
       expect(input.sourceId).toBe('linq')
+      expect(input.inputIds).toEqual([hostedInput.event.inputId])
       return {
         inputs: [hostedInput],
         nextCursor: hostedInput.event.cursor,
@@ -8222,19 +8224,21 @@ describe('assistant auto-reply runtime', () => {
     }))
     const inputSource = {
       checkpointAcceptedInput,
-      listInputCandidates,
+      listInputCandidatesByIds,
       listNewConversationInputs,
       refresh,
     }
     replyMocks.sendAssistantMessage.mockImplementation(async (input: {
       activeTurnCheckpoint?: (checkpoint: AssistantActiveTurnInputCheckpointInput) => Promise<void>
       activeTurnInput?: (admission: {
+        availableInputIds?: readonly string[]
         sessionId: string
         turnId: string
         vault: string
       }) => Promise<unknown>
     }) => {
       const admitted = await input.activeTurnInput?.({
+        availableInputIds: [hostedInput.event.inputId],
         sessionId: 'session-1',
         turnId: 'turn-1',
         vault: '/tmp/assistant-automation-vault',
@@ -8309,9 +8313,9 @@ describe('assistant auto-reply runtime', () => {
       replied: 1,
       skipped: 0,
     })
-    expect(listNewConversationInputs).toHaveBeenCalledTimes(1)
-    expect(listInputCandidates).toHaveBeenCalledTimes(1)
-    expect(refresh).toHaveBeenCalledTimes(1)
+    expect(listNewConversationInputs).not.toHaveBeenCalled()
+    expect(listInputCandidatesByIds).toHaveBeenCalledTimes(1)
+    expect(refresh).not.toHaveBeenCalled()
     expect(checkpointAcceptedInput).toHaveBeenCalledWith(
       expect.objectContaining({
         acceptedInputIds: [hostedInput.event.inputId],
@@ -8326,6 +8330,185 @@ describe('assistant auto-reply runtime', () => {
           outcome: 'result',
         }),
       )
+  })
+
+  it('uses the newest queued exact input as the frontier before checkpoint', async () => {
+    const initialInput = createCapturelessAssistantInputCandidate({
+      accountId: 'safe_acct_queued_frontier',
+      actorId: 'safe_actor_queued_frontier',
+      conversationThreadId: 'hidden_queued_frontier_thread',
+      inputId: 'ain_81818181818181818181818181818181',
+      occurredAt: '2026-04-08T00:03:00.000Z',
+      receivedAt: '2026-04-08T00:03:01.000Z',
+      replyTarget: {
+        channel: 'linq',
+        messageId: 'real_queued_frontier_initial',
+        threadId: 'real_queued_frontier_thread',
+      },
+      source: 'linq',
+      text: 'start the clinic call',
+    })
+    const firstFollowUp = createCapturelessAssistantInputCandidate({
+      accountId: 'safe_acct_queued_frontier',
+      actorId: 'safe_actor_queued_frontier',
+      conversationThreadId: 'hidden_queued_frontier_thread',
+      inputId: 'ain_82828282828282828282828282828282',
+      occurredAt: '2026-04-08T00:04:00.000Z',
+      receivedAt: '2026-04-08T00:04:01.000Z',
+      replyTarget: {
+        channel: 'linq',
+        messageId: 'real_queued_frontier_first',
+        threadId: 'real_queued_frontier_thread',
+      },
+      source: 'linq',
+      text: 'use my full name',
+    })
+    const cancellation = createCapturelessAssistantInputCandidate({
+      accountId: 'safe_acct_queued_frontier',
+      actorId: 'safe_actor_queued_frontier',
+      conversationThreadId: 'hidden_queued_frontier_thread',
+      inputId: 'ain_83838383838383838383838383838383',
+      occurredAt: '2026-04-08T00:05:00.000Z',
+      receivedAt: '2026-04-08T00:05:01.000Z',
+      replyTarget: {
+        channel: 'linq',
+        messageId: 'real_queued_frontier_cancel',
+        threadId: 'real_queued_frontier_thread',
+      },
+      source: 'linq',
+      text: 'stop and do not make the call',
+    })
+    const queriedFrontierInputIds: Array<string | null> = []
+    const listInputCandidatesByIds = vi.fn(async (input: {
+      afterCursor?: AssistantInputCandidate['event']['cursor'] | null
+      inputIds: readonly string[]
+    }) => {
+      queriedFrontierInputIds.push(input.afterCursor?.inputId ?? null)
+      if (input.inputIds[0] === firstFollowUp.event.inputId) {
+        return {
+          inputs: [firstFollowUp],
+          nextCursor: firstFollowUp.event.cursor,
+        }
+      }
+      if (
+        input.inputIds[0] === cancellation.event.inputId &&
+        input.afterCursor?.inputId === firstFollowUp.event.inputId
+      ) {
+        return {
+          inputs: [cancellation],
+          nextCursor: cancellation.event.cursor,
+        }
+      }
+      return {
+        inputs: [],
+        nextCursor: input.afterCursor ?? null,
+      }
+    })
+    const checkpointAcceptedInput = vi.fn(async () => undefined)
+    const inputSource = {
+      checkpointAcceptedInput,
+      listInputCandidatesByIds,
+      listNewConversationInputs: vi.fn(async () => ({
+        inputs: [],
+        nextCursor: initialInput.event.cursor,
+      })),
+      refresh: vi.fn(async () => ({
+        progressed: false,
+        reason: 'no_new_input' as const,
+      })),
+    }
+    replyMocks.sendAssistantMessage.mockImplementation(async (input: {
+      activeTurnCheckpoint?: (
+        checkpoint: AssistantActiveTurnInputCheckpointInput,
+      ) => Promise<void>
+      activeTurnInput?: (admission: {
+        availableInputIds?: readonly string[]
+        sessionId: string
+        turnId: string
+        vault: string
+      }) => Promise<unknown>
+    }) => {
+      await expect(input.activeTurnInput?.({
+        availableInputIds: [firstFollowUp.event.inputId],
+        sessionId: 'session-queued-frontier',
+        turnId: 'turn-queued-frontier',
+        vault: '/tmp/assistant-automation-vault',
+      })).resolves.toMatchObject({
+        acceptedInputs: [
+          expect.objectContaining({ id: firstFollowUp.event.inputId }),
+        ],
+        kind: 'accepted',
+      })
+      await expect(input.activeTurnInput?.({
+        availableInputIds: [cancellation.event.inputId],
+        sessionId: 'session-queued-frontier',
+        turnId: 'turn-queued-frontier',
+        vault: '/tmp/assistant-automation-vault',
+      })).resolves.toMatchObject({
+        acceptedInputs: [
+          expect.objectContaining({ id: cancellation.event.inputId }),
+        ],
+        kind: 'accepted',
+      })
+      await input.activeTurnCheckpoint?.({
+        acceptedInputIds: [
+          initialInput.event.inputId,
+          firstFollowUp.event.inputId,
+          cancellation.event.inputId,
+        ],
+        providerRequestOrdinal: 0,
+        sessionId: 'session-queued-frontier',
+        turnId: 'turn-queued-frontier',
+        vault: '/tmp/assistant-automation-vault',
+      })
+      return {
+        delivery: {
+          channel: 'linq',
+          target: 'real_queued_frontier_thread',
+          sentAt: '2026-04-08T00:10:00.000Z',
+        },
+        deliveryDeferred: false,
+        deliveryError: null,
+        deliveryIntentId: 'intent-queued-frontier',
+        response: 'call cancelled',
+        session: { sessionId: 'session-queued-frontier' },
+      }
+    })
+    const reply = await vi.importActual<typeof import('../src/assistant/automation/reply.ts')>(
+      '../src/assistant/automation/reply.ts',
+    )
+    const context = reply.createAssistantAutoReplyGroupContext([
+      createCapturelessReplyGroupItem(initialInput),
+    ])
+    if (!context) {
+      throw new Error('expected queued-frontier context')
+    }
+
+    const result = await reply.processAssistantAutoReplyGroup({
+      allowSelfAuthored: false,
+      context,
+      enabledChannels: ['linq'],
+      inboxServices: createInboxServices({ show: vi.fn() }),
+      inputSource,
+      requestId: null,
+      sessionMaxAgeMs: null,
+      vault: '/tmp/assistant-automation-vault',
+    })
+
+    expect(result.replied).toBe(1)
+    expect(queriedFrontierInputIds).toEqual([
+      initialInput.event.inputId,
+      firstFollowUp.event.inputId,
+    ])
+    expect(checkpointAcceptedInput).toHaveBeenCalledWith(
+      expect.objectContaining({
+        acceptedInputIds: [
+          initialInput.event.inputId,
+          firstFollowUp.event.inputId,
+          cancellation.event.inputId,
+        ],
+      }),
+    )
   })
 
   it('keeps a foreign group actor and later same-actor input pending on the account route', async () => {
@@ -8403,10 +8586,12 @@ describe('assistant auto-reply runtime', () => {
       threadIsDirect: false,
     })
     const routeCandidates = [otherAccount, actorB, laterActorA]
-    const listInputCandidates = vi.fn(async (input: {
+    const listInputCandidatesByIds = vi.fn(async (input: {
+      inputIds: readonly string[]
       sourceId?: string | null
     }) => {
       expect(input.sourceId).toBe('linq')
+      expect(input.inputIds).toEqual(routeCandidates.map((candidate) => candidate.event.inputId))
       return {
         inputs: routeCandidates,
         nextCursor: laterActorA.event.cursor,
@@ -8423,18 +8608,22 @@ describe('assistant auto-reply runtime', () => {
     }))
     const inputSource = {
       checkpointAcceptedInput,
-      listInputCandidates,
+      listInputCandidatesByIds,
       listNewConversationInputs,
       refresh,
     }
     replyMocks.sendAssistantMessage.mockImplementation(async (input: {
       activeTurnInput?: (admission: {
+        availableInputIds?: readonly string[]
         sessionId: string
         turnId: string
         vault: string
       }) => Promise<unknown>
     }) => {
       await expect(input.activeTurnInput?.({
+        availableInputIds: routeCandidates.map(
+          (candidate) => candidate.event.inputId,
+        ),
         sessionId: 'session-group-order-a',
         turnId: 'turn-group-order-a',
         vault: '/tmp/assistant-automation-vault',
@@ -8476,9 +8665,9 @@ describe('assistant auto-reply runtime', () => {
     })
 
     expect(result.replied).toBe(1)
-    expect(listInputCandidates).toHaveBeenCalledTimes(1)
-    expect(listNewConversationInputs).toHaveBeenCalledTimes(1)
-    expect(refresh).toHaveBeenCalledTimes(1)
+    expect(listInputCandidatesByIds).toHaveBeenCalledTimes(1)
+    expect(listNewConversationInputs).not.toHaveBeenCalled()
+    expect(refresh).not.toHaveBeenCalled()
     expect(checkpointAcceptedInput).not.toHaveBeenCalled()
     expect(evidenceMocks.writeAssistantAutoReplyReplyIntentEvidence)
       .toHaveBeenCalledWith(expect.objectContaining({
@@ -9251,6 +9440,7 @@ describe('assistant auto-reply runtime', () => {
       async (input: {
         activeTurnInput?: (
           value: {
+            availableInputIds?: readonly string[]
             sessionId: string
             turnId: string
             vault: string
@@ -9276,6 +9466,7 @@ describe('assistant auto-reply runtime', () => {
           'raw_mailbox_item_active_initial',
         ])
         const admitted = await input.activeTurnInput?.({
+          availableInputIds: [lateInput.event.inputId],
           sessionId: 'session-1',
           turnId: 'turn-1',
           vault: '/tmp/assistant-automation-vault',
@@ -9310,19 +9501,31 @@ describe('assistant auto-reply runtime', () => {
     if (!initialContext) {
       throw new Error('expected initial context')
     }
-    const inputSource = {
-      async refresh() {
+    const refresh = vi.fn(async () => {
         return {
           progressed: true,
           reason: 'ingested_input' as const,
         }
-      },
-      async listNewConversationInputs() {
+      })
+    const listNewConversationInputs = vi.fn(async () => {
         return {
           inputs: [lateInput],
           nextCursor: lateInput.event.cursor,
         }
-      },
+      })
+    const listInputCandidatesByIds = vi.fn(async (input: {
+      inputIds: readonly string[]
+    }) => {
+      expect(input.inputIds).toEqual([lateInput.event.inputId])
+      return {
+        inputs: [lateInput],
+        nextCursor: lateInput.event.cursor,
+      }
+    })
+    const inputSource = {
+      listInputCandidatesByIds,
+      listNewConversationInputs,
+      refresh,
     }
 
     await reply.processAssistantAutoReplyGroup({
@@ -9336,6 +9539,9 @@ describe('assistant auto-reply runtime', () => {
       sessionMaxAgeMs: null,
       vault: '/tmp/assistant-automation-vault',
     })
+    expect(listInputCandidatesByIds).toHaveBeenCalledTimes(1)
+    expect(listNewConversationInputs).not.toHaveBeenCalled()
+    expect(refresh).not.toHaveBeenCalled()
   })
 
   it.each([

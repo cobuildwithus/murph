@@ -39,6 +39,22 @@ workspace-runtime pass, and checkpoints through the web-owned workspace CAS. It 
 opaque encrypted runtime blobs and explicit execution-time callback data, but it is not the
 canonical owner of hosted product facts.
 
+## Browser-vault member-proof rollback floor
+
+Successful browser-vault session responses in the `empty` and `not_modified`
+states carry the authenticated member's non-empty `memberId`. Ready responses
+bind that identity through the encrypted replica AAD's `userId` instead of a
+redundant top-level field. The browser client fails closed when either
+non-ready success response omits its member proof; only the local synthetic
+401/403 empty result intentionally uses `memberId: null`.
+
+PR #586 is the permanent hosted-web rollback floor for this contract. The
+production alias and retained ready deployments were proved to descend that
+producer before the omitted-field reader was removed. Do not roll the Web
+alias below #586: a browser loaded from a current deployment can outlive an
+alias change and reject an older producer's unproved response. For an incident,
+deploy a forward fix or roll forward to #586 or newer.
+
 ## Approval-outcome deployment compatibility
 
 Deploy the gate-disabled web bundle that serves the internal action-approval
@@ -763,6 +779,21 @@ backfill or dual-write as needed, switch application reads/writes in a later
 deploy, then add validating constraints or clean up the old shape only after
 the replacement deployment is live and the prior production function window
 has drained.
+
+Production `DATABASE_URL` must use PlanetScale's transaction-mode PgBouncer
+endpoint (normally port `6432`); `DIRECT_DATABASE_URL` remains the direct
+Postgres endpoint for migrations and other session-scoped administration. The
+hosted web Prisma module creates one `pg.Pool` per module runtime, immediately
+registers it with Vercel Fluid Compute, and passes that same pool to
+`PrismaPg`. The adapter owns external-pool disposal so `$disconnect()` retains
+its existing cleanup contract. Keep session-persistent setup such as connection
+`SET` hooks out of this path because transaction pooling can move consecutive
+transactions between backend connections. Pool limits remain five clients,
+five seconds for connection acquisition, and 30 seconds for idle retirement;
+tune those values only from measured pool and database pressure. Connection
+failure logs expose only a fixed failure category and numeric total, idle, and
+waiting counts.
+
 Destructive contract cleanup belongs under
 `apps/web/prisma/contract-migrations` and runs through the
 `Hosted Web Contract Migrations` GitHub workflow after Vercel reports a

@@ -81,7 +81,7 @@ export type DeviceSyncEnvSource = Readonly<Record<string, string | undefined>>;
 export interface SerializableConfiguredDeviceSyncProviderConfigByKey {
   junction: Omit<
     JunctionDeviceSyncProviderConfig,
-    "fetchImpl" | "webhookSecret" | "apiKey" | "clientUserIdSecret"
+    "fetchImpl" | "webhookSecret" | "apiKey" | "clientUserIdSecret" | "timeseriesResources"
   >;
   oura: Omit<OuraDeviceSyncProviderConfig, "fetchImpl" | "webhookVerificationToken">;
   whoop: Omit<WhoopDeviceSyncProviderConfig, "fetchImpl">;

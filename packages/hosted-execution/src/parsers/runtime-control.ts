@@ -1488,46 +1488,8 @@ export function parseHostedRuntimeNewsletterToolRequest(
   if (action === "prepare") {
     assertAllowedObjectKeys(
       record,
-      new Set([
-        "action",
-        "groupId",
-        "includeAuthorizationProof",
-        "includeAuthorizationSnapshot",
-      ]),
-      "Hosted runtime newsletter tool prepare request",
-    );
-    if (
-      record.includeAuthorizationProof !== undefined
-      && record.includeAuthorizationProof !== true
-    ) {
-      throw new TypeError(
-        "Hosted runtime newsletter tool includeAuthorizationProof must be true when present.",
-      );
-    }
-    if (
-      record.includeAuthorizationSnapshot !== undefined
-      && record.includeAuthorizationSnapshot !== true
-    ) {
-      throw new TypeError(
-        "Hosted runtime newsletter tool includeAuthorizationSnapshot must be true when present.",
-      );
-    }
-    return {
-      action,
-      groupId: requireString(record.groupId, "Hosted runtime newsletter tool groupId"),
-      ...(record.includeAuthorizationProof === true
-        ? { includeAuthorizationProof: true as const }
-        : {}),
-      ...(record.includeAuthorizationSnapshot === true
-        ? { includeAuthorizationSnapshot: true as const }
-        : {}),
-    };
-  }
-  if (action === "read_stats") {
-    assertAllowedObjectKeys(
-      record,
       new Set(["action", "groupId"]),
-      "Hosted runtime newsletter tool read_stats request",
+      "Hosted runtime newsletter tool prepare request",
     );
     return {
       action,
@@ -1619,28 +1581,6 @@ export function parseHostedRuntimeNewsletterToolResponse(
         result,
         new Set(["status", "unavailableReason"]),
         "Hosted runtime newsletter tool prepare unavailable response result",
-      );
-      return {
-        action,
-        result: {
-          status,
-          unavailableReason: requireString(
-            result.unavailableReason,
-            "Hosted runtime newsletter tool unavailableReason",
-          ),
-        },
-      };
-    }
-  }
-
-  if (action === "read_stats") {
-    const result = requireObject(record.result, "Hosted runtime newsletter tool read_stats response result");
-    const status = requireString(result.status, "Hosted runtime newsletter tool read_stats response status");
-    if (status === "unavailable") {
-      assertAllowedObjectKeys(
-        result,
-        new Set(["status", "unavailableReason"]),
-        "Hosted runtime newsletter tool read_stats unavailable response result",
       );
       return {
         action,
@@ -1910,15 +1850,19 @@ function parseHostedRuntimeGroupMembershipSummaries(
     if (!Number.isInteger(memberCount) || memberCount < 0) {
       throw new TypeError(`${label} entry memberCount must be a non-negative integer.`);
     }
+    const membershipId = requireString(
+      record.membershipId,
+      `${label} entry membershipId`,
+    ).trim();
+    if (!membershipId) {
+      throw new TypeError(`${label} entry membershipId must not be blank.`);
+    }
     return {
       displayName: readNullableString(record.displayName, `${label} entry displayName`),
       grantedVaultShareProjectionScopes,
       kind: requireString(record.kind, `${label} entry kind`),
       memberCount,
-      membershipId: parseHostedRuntimeGroupMembershipId(
-        record.membershipId,
-        `${label} entry membershipId`,
-      ),
+      membershipId,
       permissionsUrl: readNullableString(
         record.permissionsUrl,
         `${label} entry permissionsUrl`,
@@ -1927,21 +1871,6 @@ function parseHostedRuntimeGroupMembershipSummaries(
       role: requireString(record.role, `${label} entry role`),
     };
   });
-}
-
-function parseHostedRuntimeGroupMembershipId(
-  value: unknown,
-  label: string,
-): string | null {
-  const membershipId = readNullableString(value, label);
-  if (membershipId === null) {
-    return null;
-  }
-  const normalized = membershipId.trim();
-  if (!normalized) {
-    throw new TypeError(`${label} must not be blank.`);
-  }
-  return normalized;
 }
 
 function parseHostedRuntimeGroupProjectionKindArray<

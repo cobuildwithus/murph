@@ -1600,7 +1600,6 @@ model HostedAiUsagePeriod {
   limitUsdMicros    BigInt       @map("limit_usd_micros")
   spentUsdMicros    BigInt       @default(0) @map("spent_usd_micros")
   blockedAt         DateTime?    @map("blocked_at")
-  limitNoticeSentAt DateTime?    @map("limit_notice_sent_at")
   lastUsageAt       DateTime?    @map("last_usage_at")
   createdAt         DateTime     @default(now()) @map("created_at")
   updatedAt         DateTime     @updatedAt @map("updated_at")
@@ -1609,7 +1608,6 @@ model HostedAiUsagePeriod {
   @@id([memberId, periodStart])
   @@index([memberId, periodEnd])
   @@index([blockedAt])
-  @@index([limitNoticeSentAt])
   @@index([periodEnd])
   @@map("hosted_ai_usage_period")
 }

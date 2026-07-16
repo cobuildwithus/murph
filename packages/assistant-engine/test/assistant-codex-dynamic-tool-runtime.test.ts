@@ -12,6 +12,7 @@ const codexMocks = vi.hoisted(() => ({
     kind: string
     voiceMemoRuntime: unknown
   }>,
+  executionOrder: [] as string[],
   onDynamicToolCall: null as null | ((input: {
     kind: string
     styleValue: number | null
@@ -43,6 +44,7 @@ vi.mock('../src/assistant-codex/dynamic-tools.ts', async (importOriginal) => {
           kind: input.request.kind,
           voiceMemoRuntime: input.voiceMemoRuntime ?? null,
         })
+        codexMocks.executionOrder.push(`tool:${input.request.kind}`)
         await codexMocks.onDynamicToolCall?.({
           kind: input.request.kind,
           styleValue:
@@ -103,6 +105,7 @@ function executeCodexAppServerTurn(
 afterEach(async () => {
   await stopWarmCodexAppServer('dynamic-tool-runtime-test-cleanup')
   codexMocks.dynamicToolCalls.splice(0)
+  codexMocks.executionOrder.splice(0)
   codexMocks.onDynamicToolCall = null
   codexMocks.spawn.mockReset()
   vi.restoreAllMocks()
@@ -128,6 +131,9 @@ describe('Codex dynamic tool runtime routing', () => {
       },
       kind: 'telegram',
     }
+    const beforeToolExecution = vi.fn(async () => {
+      codexMocks.executionOrder.push('checkpoint')
+    })
 
     codexMocks.spawn.mockImplementation(() => {
       const child = new MockChildProcess()
@@ -148,6 +154,16 @@ describe('Codex dynamic tool runtime routing', () => {
         },
         prompt: 'Use three tools.',
         sandbox: 'workspace-write',
+        hostedToolContext: {
+          beforeToolExecution,
+          computerToolsAvailable: false,
+          currentHostedDeliveryContext: () => null,
+          currentHostedMailboxItemIds: () => [],
+          sendVaultFile: vi.fn(async () => {
+            throw new Error('Vault-file sending is unavailable for this turn.')
+          }),
+          vaultFileSendAvailable: false,
+        },
         dynamicTools: resolveMurphDynamicTools({
           assistantStyleSettingsAvailable: true,
           progressUpdatesAvailable: true,
@@ -176,6 +192,15 @@ describe('Codex dynamic tool runtime routing', () => {
         kind: 'assistant-style',
         voiceMemoRuntime: null,
       },
+    ])
+    expect(beforeToolExecution).toHaveBeenCalledTimes(3)
+    expect(codexMocks.executionOrder).toEqual([
+      'checkpoint',
+      'tool:send-progress-update',
+      'checkpoint',
+      'tool:generate-voice-memo',
+      'checkpoint',
+      'tool:assistant-style',
     ])
   })
 

@@ -4419,9 +4419,13 @@ describe("buildHostedExecutionRuntimePlatform", () => {
       const request = input instanceof Request ? input : new Request(input, init);
       expect(new URL(request.url).pathname).toBe(HOSTED_RUNTIME_LINQ_EGRESS_ENGAGEMENT_PATH);
       responseCount += 1;
+      const body = await request.json() as { authorityCheckOnly?: unknown };
+      expect(body.authorityCheckOnly).toBe(responseCount === 1 ? false : true);
       return new Response(JSON.stringify({
         ok: true,
-        providerDispatchClaimed: true,
+        ...(body.authorityCheckOnly === false
+          ? { providerDispatchClaimed: true }
+          : {}),
         threadIsDirect: responseCount === 1 ? false : "false",
       }), {
         headers: { "content-type": "application/json; charset=utf-8" },
@@ -4445,6 +4449,7 @@ describe("buildHostedExecutionRuntimePlatform", () => {
     }
 
     await expect(assertLinqRecentInboundEngagement({
+      authorityCheckOnly: false,
       target: "chat_123",
       targetKind: "thread",
     })).resolves.toEqual({
@@ -4452,11 +4457,10 @@ describe("buildHostedExecutionRuntimePlatform", () => {
       threadIsDirect: false,
     });
     await expect(assertLinqRecentInboundEngagement({
+      authorityCheckOnly: true,
       target: "chat_456",
       targetKind: "thread",
-    })).resolves.toEqual({
-      providerDispatchClaimed: true,
-    });
+    })).resolves.toEqual({});
 
     expect(fetchMock).toHaveBeenCalledTimes(2);
     for (const [index, call] of fetchMock.mock.calls.entries()) {

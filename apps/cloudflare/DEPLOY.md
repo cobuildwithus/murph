@@ -132,31 +132,25 @@ delivery, where Web may resolve or validate the concrete target before media
 work. Anchored replies, reactions, and voice memos do not make that redundant
 round trip.
 
-The original provider-claim rollout used this order:
+Every engagement request must state `authorityCheckOnly` explicitly. `true`
+performs only the bounded preflight and never claims provider dispatch. `false`
+is the final provider boundary, requires an explicit idempotency key, and must
+return the additive `providerDispatchClaimed` marker before the runner enters
+the provider. Web no longer derives authority or provider-dispatch identity
+from the retired `currentInbound` request proof.
 
-1. Deploy `apps/web` first. An old runner may omit `authorityCheckOnly`; Web
-   keeps treating that legacy call as its provider-start claim for the bounded
-   rollout window.
-2. Deploy the Cloudflare Worker and runner bundle with
-   `container_rollout=immediate`, then require managed-container smoke to report
-   the new runner-bundle fingerprint.
-3. After convergence, send one Linq group-thread test turn and confirm the
-   thread container owns both model execution and provider delivery.
+The Cloudflare Worker and runner rollback floor for this protocol is #627 or
+newer. Do not deploy or restore an older runner after the Web hard cut; there is
+no supported old-runner/new-Web compatibility window. Immediate rollout is not
+required for ordinary later deploys because current runners already use this
+shape and per-invocation fingerprint admission replaces stale warm shells.
+After deployment, smoke one authority-only current-home resolution, one final
+provider claim, and one Linq group-thread turn, then confirm the thread
+container owns model execution and provider delivery.
 
-A new runner requires the additive `providerDispatchClaimed` response marker at
-its final provider boundary, so it fails closed against an old Web deployment.
-Do not roll Web back while that runner protocol is active. To roll the pair
-back, first roll the runner bundle back with an immediate rollout and confirm
-the old fingerprint, then roll Web back. The old-runner/new-Web interval is
-supported only during the Web-first rollout: old runners ignore the additive
-response marker and retain their existing early-claim behavior.
-
-After that rollout has converged, removing obsolete runner authority hints from
-the engagement and post-send outcome payloads is independently deployable: Web
-ignores unknown legacy JSON fields, and both old and new runners use the same
-final provider claim. New runners may send an optional `lineLookupKey` solely
-for post-send line-health attribution; old Web ignores it, and new Web retains
-its existing fallback when an old runner omits it.
+New runners may send an optional `lineLookupKey` solely for post-send
+line-health attribution; old Web ignores it, and new Web retains its existing
+fallback when an older supported runner omits it.
 
 ## Thread Usage Crossing Notice Rollout
 
@@ -311,7 +305,7 @@ Hosted crypto authority metadata:
 Hosted assistant config:
 
 - `HOSTED_ASSISTANT_PROVIDER`
-- `HOSTED_ASSISTANT_MODEL`; worker deploy preflight requires an explicit allowance-priced direct OpenAI model slug. Supported slugs are `gpt-5.5`, `gpt-5.6-sol`, `gpt-5.6-terra`, and `gpt-5.6-luna`; the target production slug for this rollout is `gpt-5.6-terra`, with `HOSTED_ASSISTANT_REASONING_EFFORT=low`.
+- `HOSTED_ASSISTANT_MODEL`; worker deploy preflight requires an explicit allowance-priced direct OpenAI model slug. Supported slugs are `gpt-5.5`, `gpt-5.6-sol`, `gpt-5.6-terra`, and `gpt-5.6-luna`. Production deploys require `HOSTED_ASSISTANT_REASONING_EFFORT=low`.
 - `HOSTED_ASSISTANT_APPROVAL_POLICY`
 - `HOSTED_ASSISTANT_REASONING_EFFORT`
 - `HOSTED_ASSISTANT_SANDBOX`
@@ -319,19 +313,6 @@ Hosted assistant config:
 When changing hosted assistant model pricing or allowance enforcement, deploy the
 Cloudflare Worker/runner model config before or atomically with the hosted web
 allowance logic so runtime usage callbacks keep using an allowance-priced model.
-For the GPT-5.6 rollout, first merge and deploy the web allowance logic plus
-Worker/runner catalog patch while production remains on
-`HOSTED_ASSISTANT_MODEL=gpt-5.5`. Use `container_rollout=immediate`, leave the
-default live-model smoke enabled, and require that preparatory deploy to report
-`gpt-5.6-terra` and `OK`; this proves the production OpenAI project and deployed
-runner before user turns move. Then set
-`HOSTED_ASSISTANT_MODEL=gpt-5.6-terra` and redeploy Cloudflare with
-`container_rollout=immediate` and the live-model smoke still enabled. Immediate
-rollout is required because a gradual rollout can leave warm old-bundle
-containers without the GPT-5.6 catalog. The rollback floor is
-`HOSTED_ASSISTANT_MODEL=gpt-5.5`; when Terra itself is the reason for rollback,
-set `live_model_turn=false` on that rollback deploy so the Terra-specific smoke
-does not block restoring the floor.
 
 Vault-share selector-scope production deploys must also use
 `container_rollout=immediate` until the distance/count selector-scope runner
@@ -355,7 +336,6 @@ Opt-in runtime integrations:
 - `JUNCTION_REGION`
 - `JUNCTION_PROVIDER_FILTER`
 - `JUNCTION_SUMMARY_RESOURCES`
-- `JUNCTION_TIMESERIES_RESOURCES`
 - `JUNCTION_SUMMARY_BACKFILL_DAYS`
 - `JUNCTION_TIMESERIES_BACKFILL_DAYS`
 - `JUNCTION_RECONCILE_DAYS`
@@ -405,11 +385,14 @@ Hosted assistant provider and channel secrets:
 Hosted usage-reporting secrets:
 
 - `HOSTED_AI_USAGE_REPORTING_SECRET` when stable anonymized usage attribution should be added by the Worker/web-control proxy before records reach hosted web. This secret must stay Worker-owned and must not be forwarded into the hosted runtime env.
-- Cloudflare runner start authority does not accept signed usage-allowance
-  decisions and does not fall back to a live web usage-gate call. Web preserves
-  conversation mailbox input before usage gating, Temporal/runtime admission gates
-  model-capable work, and runtime/provider spend enforcement still happens before
-  model calls.
+- Cloudflare runner start authority accepts neither signed usage-allowance
+  decisions nor a live Web usage-gate callback. Web preserves conversation
+  mailbox input before admission, Temporal/runtime admission gates model-capable
+  work, and runtime/provider spend enforcement still happens before model calls.
+- Cloudflare/runner #587 or newer is the permanent rollback floor before
+  deploying or rolling back a Web build that omits the retired callback route.
+  A Web rollback that restores the unused route is safe; rolling Cloudflare
+  below that floor while the route is absent is not.
 
 Hosted web data API secrets:
 

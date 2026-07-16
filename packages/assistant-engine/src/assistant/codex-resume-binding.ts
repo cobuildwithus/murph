@@ -6,6 +6,7 @@ import {
 } from '@murphai/operator-config/assistant/codex-resume-state'
 import { normalizeNullableString } from './shared.js'
 import {
+  readCodexThreadCompatibilityFingerprint,
   readCodexThreadRouteFingerprint,
   type CodexThreadIdentity,
 } from './codex-thread-route.js'
@@ -50,9 +51,41 @@ export function doesAssistantResumeBindingMatchRoute(input: {
     return false
   }
 
-  // Minimal resume state stores only the Codex thread id plus the exact route
-  // fingerprint that minted it. Cross-route guesses can resume the wrong
-  // upstream thread after target changes, so exact matches are the only safe
-  // contract.
+  const storedCompatibilityFingerprint = normalizeNullableString(
+    resumeState?.threadCompatibilityFingerprint,
+  )
+  if (
+    storedCompatibilityFingerprint !== null &&
+    storedCompatibilityFingerprint ===
+      readCodexThreadCompatibilityFingerprint(input.route)
+  ) {
+    return true
+  }
+
+  // Legacy resume state stores only the exact route that minted the thread.
+  // Accept that proof once, then enrich the state before a model-only switch.
   return storedRouteId === readCodexThreadRouteFingerprint(input.route)
+}
+
+export function bindAssistantResumeStateToThreadCompatibility(input: {
+  resumeState: unknown
+  route: CodexThreadIdentity
+}): AssistantSessionResumeState | null {
+  const resumeState = normalizeCodexResumeState(input.resumeState)
+  if (!resumeState) {
+    return null
+  }
+  if (
+    normalizeNullableString(resumeState.threadCompatibilityFingerprint) !== null ||
+    normalizeNullableString(resumeState.routeFingerprint) !==
+      readCodexThreadRouteFingerprint(input.route)
+  ) {
+    return resumeState
+  }
+
+  return {
+    ...resumeState,
+    threadCompatibilityFingerprint:
+      readCodexThreadCompatibilityFingerprint(input.route),
+  }
 }

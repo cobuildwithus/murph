@@ -1,6 +1,6 @@
 # Product Sense
 
-Last verified: 2026-07-12
+Last verified: 2026-07-15
 
 ## Current Posture
 
@@ -19,11 +19,12 @@ Last verified: 2026-07-12
   inspected, updated, or forgotten; structured health records are corrected
   or statused through their canonical owners. Do not claim universal deletion
   until every structured owner supports it.
-- New-member onboarding begins with one useful thread: something the member
-  wants to change, understand, handle, or explore. Focus makes first value
-  legible; the first thread starts the relationship but does not bound Murph's
-  future help. First value is followed by a finite health-context foundation
-  over separate turns, not by immediate completion or an upfront profile.
+- New-member onboarding begins by briefly naming one or two aspiration threads:
+  something the member wants to change, understand, handle, or explore. Murph
+  reflects and parks those threads, gathers a finite health-context foundation,
+  then returns with better context and chooses the first step with the member.
+  A discovery answer is an anchor, not permission to prescribe; an actual
+  immediate request or safety need still wins.
 - Direct signups begin in a private relationship. Murph may suggest involving
   a friend or group only when social support fits the current thread and the
   member explicitly chooses it.
@@ -43,18 +44,22 @@ Last verified: 2026-07-12
 
 ### Value now
 
-The member brings a health question, decision, task, data point, or desired
-change. Murph uses the context it already has and provides the smallest useful
-answer, interpretation, action, plan, support, or next question.
+The member brings a health question, decision, task, data point, or explicit
+request to work on a desired change. Murph uses the context it already has and
+provides the smallest useful answer, interpretation, action, plan, support, or
+next question. During new-member discovery, accurately capturing and parking an
+aspiration can be the useful next step; it does not automatically trigger a
+solution.
 
 ### Context over time
 
 Useful interactions and connected sources add canonical member context. Murph
 retrieves that context in a later moment, gives more personal help, and earns
 the trust required for the member to share more. The finite new-member
-foundation can be gathered progressively after first value; beyond it, context
-collection is not a separate chore or an engagement target. Each request for
-context should have a clear dividend in present or likely future help.
+foundation is gathered progressively after an aspiration is parked and before
+Murph returns to choose the first step; beyond it, context collection is not a
+separate chore or an engagement target. Each request for context should have a
+clear dividend in present or likely future help.
 
 Do not turn the target depth of this loop into a data-point counter, profile
 completion score, or onboarding quota. Measure whether Murph delivered

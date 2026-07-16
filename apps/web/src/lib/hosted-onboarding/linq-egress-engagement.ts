@@ -29,14 +29,6 @@ import {
 } from "../hosted-mailbox/store";
 
 type HostedLinqEngagementClient = PrismaClient | Prisma.TransactionClient;
-type HostedLinqLegacyCurrentInboundProof = {
-  dedupeKey: string;
-  eventId: string;
-  mailboxItemId: string;
-  occurredAt: string;
-  replyToMessageId: string;
-  target: string;
-};
 export type HostedLinqRuntimeEgressTargetOverride = {
   target: string;
   targetKind: "thread";
@@ -80,8 +72,7 @@ export function assertHostedLinqRouteAuthorityMatchesTarget(input: {
 
 export async function assertHostedLinqRecentInboundEngagementForRuntime(input: {
   answeredMailboxItemIds?: readonly string[] | null;
-  authorityCheckOnly?: boolean | null;
-  currentInbound?: HostedLinqLegacyCurrentInboundProof | null;
+  authorityCheckOnly: boolean;
   directRecipientPhoneNumber?: string | null;
   fromPhoneNumber?: string | null;
   homeRouteFallbackAllowed?: boolean | null;
@@ -128,7 +119,6 @@ export async function assertHostedLinqRecentInboundEngagementForRuntime(input: {
 
   if (await matchesPersistedHostedLinqDirectInbound({
     answeredMailboxItemIds: input.answeredMailboxItemIds ?? [],
-    currentInbound: input.currentInbound ?? null,
     memberId: input.memberId,
     prisma: input.prisma,
     replyToMessageId: input.replyToMessageId,
@@ -161,40 +151,14 @@ function isHostedLinqCurrentHomeOnlyAssertion(input: {
 
 async function matchesPersistedHostedLinqDirectInbound(input: {
   answeredMailboxItemIds: readonly string[];
-  currentInbound: HostedLinqLegacyCurrentInboundProof | null;
   memberId: string;
   prisma: HostedLinqEngagementClient;
   replyToMessageId?: string | null;
   target: string | null;
 }): Promise<boolean> {
-  const proof = input.currentInbound;
   const target = normalizeNullable(input.target);
   const requestReplyToMessageId = normalizeNullable(input.replyToMessageId);
-  if (!target) {
-    return false;
-  }
-
-  if (
-    proof
-    && normalizeNullable(proof.target) === target
-    && normalizeNullable(proof.eventId) === normalizeNullable(proof.dedupeKey)
-    && (
-      requestReplyToMessageId === null
-      || normalizeNullable(proof.replyToMessageId) === requestReplyToMessageId
-    )
-    && await matchesPersistedHostedLinqDirectInboundMailboxItem({
-      legacyProof: proof,
-      mailboxItemId: proof.mailboxItemId,
-      memberId: input.memberId,
-      prisma: input.prisma,
-      replyToMessageId: proof.replyToMessageId,
-      target,
-    })
-  ) {
-    return true;
-  }
-
-  if (!requestReplyToMessageId) {
+  if (!target || !requestReplyToMessageId) {
     return false;
   }
   for (let index = input.answeredMailboxItemIds.length - 1; index >= 0; index -= 1) {
@@ -202,7 +166,6 @@ async function matchesPersistedHostedLinqDirectInbound(input: {
     if (
       mailboxItemId
       && await matchesPersistedHostedLinqDirectInboundMailboxItem({
-        legacyProof: null,
         mailboxItemId,
         memberId: input.memberId,
         prisma: input.prisma,
@@ -225,7 +188,6 @@ async function matchesPersistedHostedLinqDirectInbound(input: {
     if (
       !answeredMailboxItemIds.has(mailboxItemId)
       && await matchesPersistedHostedLinqDirectInboundMailboxItem({
-        legacyProof: null,
         mailboxItemId,
         memberId: input.memberId,
         prisma: input.prisma,
@@ -241,7 +203,6 @@ async function matchesPersistedHostedLinqDirectInbound(input: {
 }
 
 async function matchesPersistedHostedLinqDirectInboundMailboxItem(input: {
-  legacyProof: HostedLinqLegacyCurrentInboundProof | null;
   mailboxItemId: string;
   memberId: string;
   prisma: HostedLinqEngagementClient;
@@ -258,13 +219,6 @@ async function matchesPersistedHostedLinqDirectInboundMailboxItem(input: {
     || item.userId !== input.memberId
     || item.kind !== "conversation.message"
     || item.lane !== "conversation"
-    || (
-      input.legacyProof !== null
-      && (
-        item.dedupeKey !== input.legacyProof.dedupeKey
-        || item.occurredAt !== input.legacyProof.occurredAt
-      )
-    )
   ) {
     return false;
   }
@@ -301,13 +255,6 @@ async function matchesPersistedHostedLinqDirectInboundMailboxItem(input: {
     && wake.userId === input.memberId
     && wake.eventId === item.dedupeKey
     && wake.occurredAt === item.occurredAt
-    && (
-      input.legacyProof === null
-      || (
-        wake.eventId === input.legacyProof.eventId
-        && wake.occurredAt === input.legacyProof.occurredAt
-      )
-    )
     && wake.message.channel === "linq"
     && wake.message.linqMessage.isFromMe === false
     && wake.message.linqMessage.threadIsDirect === true
