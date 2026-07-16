@@ -15,6 +15,15 @@ export interface HostedRunnerSmokeResult {
   childCwdIsIsolated: boolean;
   codexAppServerHelpBytes: number;
   codexCommandDiscovered: boolean;
+  codexGroupReadAuthorizedFileRead: boolean;
+  codexGroupReadDeepEnvReadDenied: boolean;
+  codexGroupReadGroupWriteDenied: boolean;
+  codexGroupReadNetworkDenied: boolean;
+  codexGroupReadOutsideRootReadDenied: boolean;
+  codexGroupReadPermissionProfileAttested: boolean;
+  codexGroupReadRuntimeReadDenied: boolean;
+  codexGroupReadSecretEnvironmentDenied: boolean;
+  codexGroupReadSiblingRootReadDenied: boolean;
   codexHostedCliSurfaceContractBytes: number;
   codexHostedCliSurfaceHotPathProofCount: number;
   codexHostedConfigShellEnvironmentPolicyAllowlisted: boolean;
@@ -50,6 +59,15 @@ const HOSTED_RUNNER_SMOKE_RESULT_KEYS = new Set([
   "childCwdIsIsolated",
   "codexAppServerHelpBytes",
   "codexCommandDiscovered",
+  "codexGroupReadAuthorizedFileRead",
+  "codexGroupReadDeepEnvReadDenied",
+  "codexGroupReadGroupWriteDenied",
+  "codexGroupReadNetworkDenied",
+  "codexGroupReadOutsideRootReadDenied",
+  "codexGroupReadPermissionProfileAttested",
+  "codexGroupReadRuntimeReadDenied",
+  "codexGroupReadSecretEnvironmentDenied",
+  "codexGroupReadSiblingRootReadDenied",
   "codexHostedCliSurfaceContractBytes",
   "codexHostedCliSurfaceHotPathProofCount",
   "codexHostedConfigShellEnvironmentPolicyAllowlisted",
@@ -125,6 +143,42 @@ export function parseHostedRunnerSmokeResult(value: unknown): HostedRunnerSmokeR
     codexCommandDiscovered: readTrue(
       record.codexCommandDiscovered,
       "Hosted runner smoke result.codexCommandDiscovered",
+    ),
+    codexGroupReadAuthorizedFileRead: readTrue(
+      record.codexGroupReadAuthorizedFileRead,
+      "Hosted runner smoke result.codexGroupReadAuthorizedFileRead",
+    ),
+    codexGroupReadDeepEnvReadDenied: readTrue(
+      record.codexGroupReadDeepEnvReadDenied,
+      "Hosted runner smoke result.codexGroupReadDeepEnvReadDenied",
+    ),
+    codexGroupReadGroupWriteDenied: readTrue(
+      record.codexGroupReadGroupWriteDenied,
+      "Hosted runner smoke result.codexGroupReadGroupWriteDenied",
+    ),
+    codexGroupReadNetworkDenied: readTrue(
+      record.codexGroupReadNetworkDenied,
+      "Hosted runner smoke result.codexGroupReadNetworkDenied",
+    ),
+    codexGroupReadOutsideRootReadDenied: readTrue(
+      record.codexGroupReadOutsideRootReadDenied,
+      "Hosted runner smoke result.codexGroupReadOutsideRootReadDenied",
+    ),
+    codexGroupReadPermissionProfileAttested: readTrue(
+      record.codexGroupReadPermissionProfileAttested,
+      "Hosted runner smoke result.codexGroupReadPermissionProfileAttested",
+    ),
+    codexGroupReadRuntimeReadDenied: readTrue(
+      record.codexGroupReadRuntimeReadDenied,
+      "Hosted runner smoke result.codexGroupReadRuntimeReadDenied",
+    ),
+    codexGroupReadSecretEnvironmentDenied: readTrue(
+      record.codexGroupReadSecretEnvironmentDenied,
+      "Hosted runner smoke result.codexGroupReadSecretEnvironmentDenied",
+    ),
+    codexGroupReadSiblingRootReadDenied: readTrue(
+      record.codexGroupReadSiblingRootReadDenied,
+      "Hosted runner smoke result.codexGroupReadSiblingRootReadDenied",
     ),
     codexHostedCliSurfaceContractBytes: readPositiveFiniteNumber(
       record.codexHostedCliSurfaceContractBytes,
@@ -399,4 +453,3 @@ function readSha256HexString(value: unknown, label: string): string {
 
   return normalized;
 }
-

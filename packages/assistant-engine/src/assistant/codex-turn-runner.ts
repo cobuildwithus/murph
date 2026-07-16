@@ -438,6 +438,7 @@ async function executeAssistantCodexAttempt(input: {
           attemptPlan.routePlan.conversationHistoryMessages,
         developerInstructions: attemptPlan.routePlan.developerInstructions,
         dynamicTools: attemptPlan.routePlan.dynamicTools,
+        environments: attemptPlan.routePlan.environments,
         env: attemptEnv,
         generatedImageUploader:
           executionPlan.executionContext?.hosted?.generatedImageUploader ?? null,

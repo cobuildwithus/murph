@@ -67,6 +67,7 @@ import type {
   AssistantHostedToolContext,
 } from '../hosted-tool-context.js'
 import {
+  buildAssistantAskContinuationSystemPromptWithCacheMetadata,
   buildAssistantNotificationDecisionSystemPromptWithCacheMetadata,
   buildAssistantSystemPromptWithCacheMetadata,
   resolveAssistantMurphProductBaseUrl,
@@ -102,6 +103,7 @@ export interface AssistantRouteTurnPlan {
   cliEnv: NodeJS.ProcessEnv
   developerInstructions: string | null
   dynamicTools: readonly MurphDynamicTool[]
+  environments?: readonly Readonly<Record<string, unknown>>[]
   conversationHistoryMessages?: readonly AssistantProviderConversationMessage[]
   diagnosticsPolicy: AssistantDiagnosticsPolicy
   onboardingGuidanceInjected: boolean
@@ -202,11 +204,13 @@ export interface AssistantPromptTimeContext {
 export type AssistantCodexTurnPromptProfile =
   | 'conversation'
   | 'notification-decision'
+  | 'assistant-ask-continuation'
 
 export type AssistantCodexTurnToolProfile =
   | 'provider-turn'
   | 'notification-turn'
   | 'maintenance-turn'
+  | 'output-only-turn'
 
 export type AssistantCodexThreadScope =
   | 'session-thread'
@@ -435,8 +439,9 @@ export async function resolveAssistantRouteTurnPlan(input: {
     )
   }
   const privateInteractiveAudience = conversationScope === 'direct'
+  const outputOnlyTurn = input.profile.toolProfile === 'output-only-turn'
   const shouldUseCommittedTranscriptHistory =
-    input.profile.threadScope === 'session-thread'
+    input.profile.threadScope === 'session-thread' || outputOnlyTurn
   const resolveCommittedTranscriptHistoryMessages = async () =>
     shouldUseCommittedTranscriptHistory
       ? await resolveAssistantCommittedTranscriptHistoryMessages({
@@ -465,17 +470,19 @@ export async function resolveAssistantRouteTurnPlan(input: {
   // domains) and hosted dynamic context prompts must not reach their system
   // prompt, or the prompt itself would hand the model forbidden sources.
   const maintenanceTurn = input.profile.toolProfile === 'maintenance-turn'
-  const hostedDynamicContextPrompts = maintenanceTurn
+  const hostedDynamicContextPrompts = maintenanceTurn || outputOnlyTurn
     ? []
     : input.executionContext?.hosted?.dynamicContextPrompts ?? []
   const promptCapabilityAvailability = resolveAssistantPromptCapabilityAvailability({
     executionContext: input.executionContext,
   })
-  const voiceMemoDeliveryChannel = resolveAssistantVoiceMemoDeliveryChannel({
-    messageInput: input.input,
-    session: input.session,
-    sharedPlan: input.sharedPlan,
-  })
+  const voiceMemoDeliveryChannel = outputOnlyTurn
+    ? null
+    : resolveAssistantVoiceMemoDeliveryChannel({
+        messageInput: input.input,
+        session: input.session,
+        sharedPlan: input.sharedPlan,
+      })
   const shouldPrepareConversationThreadInstructions =
     input.profile.promptProfile === 'conversation' && privateInteractiveAudience
   let cliBootstrapElapsedMs: number | null = null
@@ -512,8 +519,16 @@ export async function resolveAssistantRouteTurnPlan(input: {
   const buildRouteSystemPromptResult = (options: {
     assistantCliContract: string | null
     injectOnboardingGuidance: boolean
-  }) =>
-    input.profile.promptProfile === 'notification-decision'
+  }) => {
+    if (input.profile.promptProfile === 'assistant-ask-continuation') {
+      return buildAssistantAskContinuationSystemPromptWithCacheMetadata({
+        assistantContextSnapshotPrompt,
+      }, {
+        toolSchemaHash,
+      })
+    }
+
+    return input.profile.promptProfile === 'notification-decision'
       ? buildAssistantNotificationDecisionSystemPromptWithCacheMetadata({
             assistantContextSnapshotPrompt,
             assistantDynamicContextPrompts: hostedDynamicContextPrompts,
@@ -565,6 +580,7 @@ export async function resolveAssistantRouteTurnPlan(input: {
           }, {
             toolSchemaHash,
           })
+  }
   const buildDeveloperInstructions = (
     promptResult: ReturnType<typeof buildAssistantSystemPromptWithCacheMetadata>,
   ) =>
@@ -604,7 +620,7 @@ export async function resolveAssistantRouteTurnPlan(input: {
   // Maintenance turns run without a delivery target and must not expose any
   // external-capable or delivery-facing tool surface, so the gate is the
   // resolved tool set itself rather than prompt text.
-  const dynamicTools = maintenanceTurn
+  const dynamicTools = maintenanceTurn || outputOnlyTurn
     ? []
     : resolveMurphDynamicTools({
         assistantStyleSettingsAvailable,
@@ -726,6 +742,7 @@ export async function resolveAssistantRouteTurnPlan(input: {
     },
     developerInstructions: normalizeNullableString(developerInstructions),
     dynamicTools,
+    environments: outputOnlyTurn ? [] : undefined,
     conversationHistoryMessages:
       conversationHistoryMessages.length > 0
         ? conversationHistoryMessages
@@ -758,7 +775,8 @@ export async function resolveAssistantRouteTurnPlan(input: {
     resume,
     sessionContext:
       shouldPrepareBootstrapContext &&
-      !maintenanceTurn
+      !maintenanceTurn &&
+      !outputOnlyTurn
       ? {
           binding: input.session.binding,
         }

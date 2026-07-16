@@ -77,6 +77,37 @@ After both deploys, confirm there is no extra metadata-only handoff checkpoint
 for the same shutdown and actionable late input causes the existing Temporal
 recheck after owner release.
 
+## Assistant Ask Rollout
+
+Assistant Ask adds paired mailbox kinds and a one-shot process inside the
+existing runner container. It adds no Cloudflare binding, secret, Durable
+Object state, second container, scheduler, or workflow. Roll out the first
+release in this order:
+
+1. Deploy the Assistant Ask consumers, isolated executor, and
+   `murph-group-read` profile in the Cloudflare Worker and runner bundle with
+   `container_rollout=immediate`. Keep the Web producer gate off.
+2. Require managed-container smoke to report the new runner-bundle fingerprint
+   and prove the named profile can read the intended committed group context
+   while writes, `.runtime/**`, `.codex/**`, environment files, other roots,
+   inherited shell secrets, and tool network fail closed. The thread-start
+   attestation must confirm the effective profile, exact roots, empty working
+   directory, empty instruction sources, and approval policy.
+3. Deploy the Web producer and completion control path with
+   `HOSTED_ASSISTANT_ASK_PRODUCER_ENABLED` unset or `0`.
+4. After the consumer fleet and sandbox proof converge, set the Web gate to
+   exact `1` and redeploy Web. Smoke one private-to-group ask while the group
+   runtime is idle and one while its foreground Murph is replying; neither may
+   create group-visible activity or delay the foreground reply.
+
+An old runner cannot parse the new mailbox kinds, so the producer must not be
+enabled before immediate runner convergence. After enablement, the first
+compatible runner bundle is the rollback floor while an Ask request or
+completion can remain in a mailbox or restored workspace. To roll back, set the
+Web producer gate to `0` and redeploy Web first, wait at least the full ten-minute
+request lifetime, verify pending Ask work has drained or expired, then roll back
+the consumers. A forward fix is preferred if any imported item remains.
+
 ## Linq Participant-Context Rollout
 
 The participant-addition hint uses an additive database column, an additive
@@ -502,11 +533,11 @@ That image is prepared in the local Docker cache under the stable GHCR tag
 which is also the final app-layer Dockerfile default. Using the pullable GHCR
 name avoids BuildKit treating the prepared base as a Docker Hub `library/*`
 image during local Wrangler container builds.
-It contains Node, Python 3 exposed as both `python3` and `python`, pinned `@openai/codex`, `jq`, `ripgrep`, `ffmpeg`, and PDF tooling from Poppler plus `file`, `qpdf`, and MuPDF tools, but no app bundle, worker secrets, or local speech models.
+It contains Node, Python 3 exposed as both `python3` and `python`, pinned `@openai/codex` with its bundled Linux sandbox resources, `jq`, `ripgrep`, `ffmpeg`, and PDF tooling from Poppler plus `file`, `qpdf`, and MuPDF tools, but no app bundle, worker secrets, or local speech models.
 The final app-layer image generates a patched Codex model catalog from `codex debug models --bundled`, adds OpenAI flex service-tier support for `gpt-5.5`, `gpt-5.6-sol`, `gpt-5.6-terra`, and `gpt-5.6-luna`, validates those entries with `jq`, and exposes it through `MURPH_HOSTED_CODEX_MODEL_CATALOG_JSON` so hosted app-server cron turns can send OpenAI `service_tier: flex` and the deploy smoke can exercise Terra through the same model catalog. Hosted Codex MultiAgent V2 is enabled by default in generated hosted Codex config, and hosted app-server launches also pass `--config features.multi_agent_v2=true` so warm app-server processes restart after the default changes.
 `runner:docker:base` first reuses a GHCR-published base image when its source-fingerprint label matches the checked-out `Dockerfile.cloudflare-hosted-runner-base`; otherwise it rebuilds locally. Pass `-- --force` to rebuild from the checked-out Dockerfile without adopting a GHCR base image; deploy-capable production paths use that forced path so GHCR stays a CI/local cache instead of production image authority. Pull-request hosted-local E2E does not authenticate to GHCR before running PR-controlled code, so the GHCR runner base package must be public for fast anonymous PR cache pulls. The protected-main `.github/workflows/cloudflare-runner-base-image.yml` workflow publishes the base image with `GITHUB_TOKEN`.
 The base image build runs `python3 --version`, `python --version`, `jq --version`, `rg --version`, `zstd --version`, `codex --version`, `codex app-server --help`, and `codex doctor --help` under the runner user, and the Docker smoke repeats the Python and ripgrep checks inside the final image before deploy while also proving `file`, `pdfinfo`, `pdftotext`, `pdftoppm`, `qpdf`, and `mutool` against the restored smoke PDF fixture.
-Run `pnpm --dir apps/cloudflare test:e2e:runner-python:local` when you specifically want the actual final hosted-runner app image `PATH` proof for Python. It assembles the runner bundle, builds the same `linux/amd64` app-layer Dockerfile used by the Cloudflare container, starts the image with its normal entrypoint, waits for `/health`, then checks Python as the non-root `runner` user from immutable `/app` with the baked runner env. Run `pnpm --dir apps/cloudflare runner:docker:smoke` when you want the broader final-image native smoke.
+Run `pnpm --dir apps/cloudflare test:e2e:runner-python:local` when you specifically want the actual final hosted-runner app image `PATH` proof for Python. It assembles the runner bundle, builds the same `linux/amd64` app-layer Dockerfile used by the Cloudflare container, starts the image with its normal entrypoint, waits for `/health`, then checks Python as the non-root `runner` user from immutable `/app` with the baked runner env. Run `pnpm --dir apps/cloudflare runner:docker:smoke` when you want the broader final-image native smoke. That disposable, networkless smoke relaxes the outer Docker seccomp profile so Codex can create its inner user namespace, matching the namespace capability available in Cloudflare's dedicated Linux VM. The nested Codex seccomp proof requires a native `linux/amd64` Docker host; AMD64 emulation on an ARM64 Docker daemon does not support that inner seccomp layer.
 
 After first publish, make the GHCR runner base package public so PR CI can use
 anonymous pulls without exposing package credentials to PR-controlled commands.
@@ -625,6 +656,10 @@ Gradual deploys run managed-container smoke with a longer retry window so Cloudf
 - `GET /`
 - `GET /health`
 - if `HOSTED_EXECUTION_SMOKE_RUNNER_CONTAINER=true`, one signed `POST /internal/deploy/container-smoke` that waits until the Cloudflare-managed runner container reports the expected runner-bundle fingerprint and assistant CLI surface hot-path schema proof
+- the managed-container runner smoke also proves the native
+  `murph-group-read` profile and thread-start attestation used by Assistant Ask:
+  intended root reads succeed while writes, `.runtime/**`, `.codex/**`, environment
+  files, other roots, inherited shell secrets, and tool network are denied
 - if `HOSTED_EXECUTION_SMOKE_DIRECT_R2_PRESIGNED_PUT=true`, a managed-container smoke uploads a deterministic payload through a direct R2 presigned `PUT`, verifies it through the Worker R2 binding, and deletes the object
 - if `HOSTED_EXECUTION_SMOKE_LIVE_MODEL_TURN=true`, the managed-container smoke runs one real `gpt-5.6-terra` turn via `codex exec` inside the deployed container through the Worker OpenAI egress intercept
 - if `HOSTED_EXECUTION_SMOKE_USER_ID` is configured, one authenticated `GET /internal/users/:userId/status`

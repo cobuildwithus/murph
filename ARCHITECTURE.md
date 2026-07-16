@@ -5,6 +5,38 @@ Last verified: 2026-07-15
 ## Hosted Group Self-Awareness
 
 `apps/web` owns hosted groups, memberships, join policies, and vault-share grants. A personal hosted runtime may read its callback-authenticated member's current group memberships through the existing signed group-tool control route. The read derives group labels, the member's role, requested scopes, active self-granted scopes, and an existing owner-authorized first-party permission URL directly from web-owned rows; ordinary members never receive the reusable group invite through this read. It does not return another member's identity or sharing state and does not persist a copy in the personal vault, runner, or assistant runtime. Active grants prove permission, not source-data availability or completed projection delivery. Private self-leave is the one membership mutation on this surface: the read returns the member's own opaque membership selector, the signed callback remains actor authority, and Web atomically deletes only that non-owner membership while revoking its shares and appending existing cleanup work. The authenticated join page offers the same self-leave through its session-bound member and current join-code group selector. Its accept path carries the viewer's rendered membership id or explicit absence and compares that state under the same group/member locks before creating membership or changing grants, so stale sharing saves cannot undo a later leave. Other permission mutations remain on the authenticated group join page or the existing route-bound group-chat offer flow.
+
+## Hosted Assistant Ask
+
+Assistant Ask is one typed request/reply primitive over the existing encrypted
+hosted mailbox. `assistant.ask.requested` carries one bounded question to an
+authorized target runtime, and `assistant.ask.completed` returns one bounded
+answer to the bound caller runtime. The first adapter is a private member asking
+a joined group Murph. `apps/web` derives the exact group runtime, membership
+generation, origin, expiry, and private return route from the signed caller and
+web-owned rows; the model supplies only the question and an optional visible
+group label. Web rechecks membership before the group read and completion
+append. The paired mailbox rows are the only durable operation state, and the
+answer remains untrusted data when the private runtime composes its follow-up.
+
+The target runtime keeps its resident foreground Murph as the sole
+model-authored canonical-content writer and outbound sender. Beside it, at most
+one `executeReadOnlyAssistantAsk` call may start a separate one-shot Codex App
+Server process. The trusted group target adapter supplies the authorized root
+and bounded committed conversation evidence; the model cannot choose either.
+The native `murph-group-read` permission profile then exposes the live group
+read: exact workspace roots are read-only, `.runtime/**`, `.codex/**`, and
+environment files are denied, tool network is off, shell commands inherit no
+secrets, and the child receives no dynamic tools or delivery authority.
+Thread-start attestation must confirm the exact profile, roots, empty working
+directory, empty instruction sources, and approval policy before model work.
+The child never shares the resident process, provider thread, interruption
+domain, or route grant. Before checkpoint, invocation return, fence loss,
+workspace replacement, or shutdown, the runtime aborts and awaits the exact
+owned child before releasing the workspace. Further asks remain pending in the
+same mailbox; there is no second queue, projection, table, workflow, container,
+or general agent registry.
+
 ## Hosted Connected Apps
 
 Connected apps expose exactly three assistant tools: account management, semantic tool search, and execution. `apps/web` owns the Composio API key, durable per-member Tool Router session id, short-lived member-bound connect intents, account verification, server-owned built-in service tool allowlist, server-held OpenWeather custom auth for the allowlisted weather tools, agent-approved calendar-create write allowlist, and branded OAuth completion UX. The hosted runner reaches that authority only through the existing signed `web-control.worker` boundary; Composio credentials, session ids, OAuth state, OpenWeather credentials, and connected-account provider tokens never enter Codex env or prompts. Composio owns provider schemas and raw execution results, while Murph applies a session-level read-only/non-destructive policy, explicit multi-account selection for connected-account tools, accountless execution only for server-allowlisted built-in service tools, one generic result-size bound rather than provider-specific tool or result adapters, direct custom-auth execution only for allowlisted OpenWeather read tools, and a separate direct-execute path only for agent-approved primary-calendar event creation with unsupported write arguments rejected before provider execution and failed or ambiguous provider outcomes marked non-retryable.
