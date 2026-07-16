@@ -623,6 +623,19 @@ permanently dropped. Active members, explicit thread routes, own messages, group
 chats, local guard rejects, deterministic URL/STOP-style spam, and other
 non-invite paths bypass the classifier.
 
+Hosted signup-welcome admission is a separate line-owned outbound guard. Under
+the existing transaction-scoped home-line pool advisory lock, web reads each
+healthy assignable `HostedLinqLine`'s UTC-day proactive-conversation counter,
+selects the preferred line or a lower-volume fallback, and conditionally claims
+one slot before appending activation work. The effective limit is the lower of
+the hard 50-conversation ceiling and the line's configured
+`maxNewConversationsPerDay`; the line row lazily rolls its counter to the new
+UTC day. If no line has welcome capacity, web still assigns a healthy home line
+but omits the participant-target welcome, preserving the member-initiated Text
+Murph path. Inbound first binds and existing-thread replies do not consume this
+proactive budget, and member deletion cannot erase line-level capacity already
+claimed that day.
+
 Hosted runner progress reconciliation treats a runtime-kind write fence as the active
 owner of execution and commit authority rather than mailbox-work truth. Exact
 accepted wakes may coalesce under Cloudflare's active owner; durable mailbox lag

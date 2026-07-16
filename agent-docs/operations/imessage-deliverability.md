@@ -88,6 +88,9 @@ Murph pauses model-capable automation wakes for Linq members with no inbound day
 Linq egress should stay small and obvious:
 
 - Participant-target sends are signup-welcome only, tied to `signup-welcome:<memberId>`, the member's verified phone, and the assigned home line.
+- Web reserves signup-welcome capacity while choosing the home line under the existing transaction-scoped line-pool lock. `HostedLinqLine` owns the current UTC day and proactive-conversation count; the effective per-line limit is the lower of 50 and any configured `maxNewConversationsPerDay` warmup limit.
+- A capped preferred line falls through to another healthy assignable line. If every healthy line is at its proactive limit, activation still assigns a home line but omits the signup welcome. This preserves the onboarding “Text Murph” path without exceeding the line cap.
+- Member-initiated first texts and existing-thread replies do not claim proactive capacity. They continue to use line health and active-member limits, so suppressing automated outreach never suppresses a real inbound conversation.
 - Thread sends use same-user route authority as target context when it matches the requested thread, otherwise they fall back to the member's durable home or pending Linq route.
 - The Web Linq egress owner resolves the canonical delivery target and direct/group audience at send time. Stored automation routes are bounded authority evidence, not a second route-ownership system.
 - Proactive current-home fallback sends do not inherit replay-scoped route authority or inbound context; reply-anchored sends keep their matching inbound context.

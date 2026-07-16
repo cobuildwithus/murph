@@ -306,6 +306,90 @@ export async function listHostedLinqAssignableHomeLines(input: {
   return mapHostedLinqAssignableHomeLineRows(rows);
 }
 
+export async function readHostedLinqProactiveConversationCounts(input: {
+  dayUtc: Date;
+  lines: readonly HostedLinqAssignableHomeLine[];
+  prisma: HostedLinqLineClient;
+}): Promise<Map<string, number>> {
+  const counts = new Map(input.lines.map((line) => [line.phoneNumber, 0]));
+  if (input.lines.length === 0) {
+    return counts;
+  }
+
+  const phoneNumberByLookupKey = new Map(
+    input.lines.map((line) => [line.phoneNumberLookupKey, line.phoneNumber] as const),
+  );
+  const rows = await input.prisma.hostedLinqLine.findMany({
+    where: {
+      phoneNumberLookupKey: {
+        in: input.lines.map((line) => line.phoneNumberLookupKey),
+      },
+    },
+    select: {
+      phoneNumberLookupKey: true,
+      proactiveConversationCount: true,
+      proactiveConversationDayUtc: true,
+    },
+  });
+
+  for (const row of rows) {
+    const phoneNumber = phoneNumberByLookupKey.get(row.phoneNumberLookupKey);
+    if (
+      phoneNumber
+      && row.proactiveConversationDayUtc?.getTime() === input.dayUtc.getTime()
+    ) {
+      counts.set(phoneNumber, row.proactiveConversationCount ?? 0);
+    }
+  }
+
+  return counts;
+}
+
+export async function claimHostedLinqProactiveConversationCapacityTx(input: {
+  dayUtc: Date;
+  limit: number;
+  phoneNumberLookupKey: string;
+  prisma: Prisma.TransactionClient;
+}): Promise<boolean> {
+  if (!Number.isInteger(input.limit) || input.limit <= 0) {
+    return false;
+  }
+
+  const incremented = await input.prisma.hostedLinqLine.updateMany({
+    where: {
+      phoneNumberLookupKey: input.phoneNumberLookupKey,
+      proactiveConversationCount: {
+        lt: input.limit,
+      },
+      proactiveConversationDayUtc: input.dayUtc,
+    },
+    data: {
+      proactiveConversationCount: {
+        increment: 1,
+      },
+    },
+  });
+  if (incremented.count === 1) {
+    return true;
+  }
+
+  const started = await input.prisma.hostedLinqLine.updateMany({
+    where: {
+      phoneNumberLookupKey: input.phoneNumberLookupKey,
+      OR: [
+        { proactiveConversationDayUtc: null },
+        { proactiveConversationDayUtc: { not: input.dayUtc } },
+      ],
+    },
+    data: {
+      proactiveConversationCount: 1,
+      proactiveConversationDayUtc: input.dayUtc,
+    },
+  });
+
+  return started.count === 1;
+}
+
 export async function assertHostedLinqAssignableHomeLinePoolReady(input: {
   prisma: HostedLinqLineClient;
 }): Promise<void> {

@@ -2,6 +2,8 @@ import { describe, expect, it } from "vitest";
 
 import {
   chooseHostedLinqHomeLine,
+  chooseHostedLinqSignupWelcomeLine,
+  HOSTED_LINQ_SIGNUP_WELCOME_HARD_CAP_PER_UTC_DAY,
   resolveHostedLinqActiveRouteDecision,
   resolveHostedLinqHomeBindingRecipientPhone,
 } from "@/src/lib/hosted-onboarding/linq-routing-policy";
@@ -71,6 +73,73 @@ describe("chooseHostedLinqHomeLine", () => {
         preferredRecipientPhone: "+15550100001",
       }),
     ).toBeNull();
+  });
+});
+
+describe("chooseHostedLinqSignupWelcomeLine", () => {
+  it("applies the hard 50-conversation cap when a line has no lower override", () => {
+    const preferred = buildLine("+15550100001");
+    const fallback = buildLine("+15550100002");
+
+    expect(
+      chooseHostedLinqSignupWelcomeLine({
+        activeMembersByRecipientPhone: new Map(),
+        lines: [preferred, fallback],
+        newAssignmentsByRecipientPhone: new Map([
+          [preferred.phoneNumber, HOSTED_LINQ_SIGNUP_WELCOME_HARD_CAP_PER_UTC_DAY],
+          [fallback.phoneNumber, 0],
+        ]),
+        preferredRecipientPhone: preferred.phoneNumber,
+      }),
+    ).toBe(fallback);
+  });
+
+  it("does not allow a per-line override to raise the hard cap", () => {
+    const line = buildLine("+15550100001", {
+      maxNewConversationsPerDay: 500,
+    });
+
+    expect(
+      chooseHostedLinqSignupWelcomeLine({
+        activeMembersByRecipientPhone: new Map(),
+        lines: [line],
+        newAssignmentsByRecipientPhone: new Map([
+          [line.phoneNumber, HOSTED_LINQ_SIGNUP_WELCOME_HARD_CAP_PER_UTC_DAY],
+        ]),
+        preferredRecipientPhone: line.phoneNumber,
+      }),
+    ).toBeNull();
+  });
+
+  it("preserves a lower per-line warmup limit", () => {
+    const line = buildLine("+15550100001", {
+      maxNewConversationsPerDay: 10,
+    });
+
+    expect(
+      chooseHostedLinqSignupWelcomeLine({
+        activeMembersByRecipientPhone: new Map(),
+        lines: [line],
+        newAssignmentsByRecipientPhone: new Map([[line.phoneNumber, 10]]),
+        preferredRecipientPhone: line.phoneNumber,
+      }),
+    ).toBeNull();
+  });
+
+  it("lets member-initiated routing ignore proactive welcome capacity", () => {
+    const line = buildLine("+15550100001", {
+      maxNewConversationsPerDay: 1,
+    });
+
+    expect(
+      chooseHostedLinqHomeLine({
+        activeMembersByRecipientPhone: new Map(),
+        ignoreDailyNewConversationLimit: true,
+        lines: [line],
+        newAssignmentsByRecipientPhone: new Map([[line.phoneNumber, 1]]),
+        preferredRecipientPhone: line.phoneNumber,
+      }),
+    ).toBe(line);
   });
 });
 

@@ -1405,6 +1405,8 @@ model HostedLinqLine {
   totalInboundCount          Int       @default(0) @map("total_inbound_count")
   activeMemberLimit          Int?      @map("active_member_limit")
   maxNewConversationsPerDay  Int?      @map("max_new_conversations_per_day")
+  proactiveConversationDayUtc DateTime? @db.Date @map("proactive_conversation_day_utc")
+  proactiveConversationCount  Int?      @map("proactive_conversation_count")
   maxOutboundPerDay          Int?      @map("max_outbound_per_day")
   warmupStartedAt            DateTime? @map("warmup_started_at")
   warmupEndsAt               DateTime? @map("warmup_ends_at")

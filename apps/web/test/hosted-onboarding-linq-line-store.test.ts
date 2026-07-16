@@ -7,9 +7,11 @@ import {
 } from "@/src/lib/hosted-onboarding/contact-privacy";
 import {
   assertHostedLinqAssignableHomeLinePoolReady,
+  claimHostedLinqProactiveConversationCapacityTx,
   HOSTED_LINQ_ASSIGNABLE_HOME_LINE_LIMIT,
   listHostedLinqAssignableHomeLines,
   listHostedLinqContactCardLines,
+  readHostedLinqProactiveConversationCounts,
   upsertHostedLinqLineForPhoneTx,
 } from "@/src/lib/hosted-onboarding/linq-line-store";
 import {
@@ -174,6 +176,130 @@ describe("assertHostedLinqAssignableHomeLinePoolReady", () => {
       code: "HOSTED_LINQ_ASSIGNABLE_LINE_POOL_REQUIRED",
       httpStatus: 500,
     });
+  });
+});
+
+describe("hosted Linq proactive-conversation capacity", () => {
+  const dayUtc = new Date("2026-07-16T00:00:00.000Z");
+  const lines = [
+    {
+      activeMemberLimit: null,
+      assignmentWeight: 100,
+      maxNewConversationsPerDay: null,
+      phoneNumber: "+15550100001",
+      phoneNumberHint: "*** 0001",
+      phoneNumberLookupKey: "lookup:line-1",
+    },
+    {
+      activeMemberLimit: null,
+      assignmentWeight: 100,
+      maxNewConversationsPerDay: null,
+      phoneNumber: "+15550100002",
+      phoneNumberHint: "*** 0002",
+      phoneNumberLookupKey: "lookup:line-2",
+    },
+  ];
+
+  it("reads only the current UTC day's line-owned counts", async () => {
+    const findMany = vi.fn().mockResolvedValue([
+      {
+        phoneNumberLookupKey: lines[0]?.phoneNumberLookupKey,
+        proactiveConversationCount: 50,
+        proactiveConversationDayUtc: dayUtc,
+      },
+      {
+        phoneNumberLookupKey: lines[1]?.phoneNumberLookupKey,
+        proactiveConversationCount: 49,
+        proactiveConversationDayUtc: new Date("2026-07-15T00:00:00.000Z"),
+      },
+    ]);
+
+    await expect(
+      readHostedLinqProactiveConversationCounts({
+        dayUtc,
+        lines,
+        prisma: {
+          hostedLinqLine: { findMany },
+        } as never,
+      }),
+    ).resolves.toEqual(new Map([
+      [lines[0]?.phoneNumber, 50],
+      [lines[1]?.phoneNumber, 0],
+    ]));
+  });
+
+  it("increments the current day only while the hard limit has room", async () => {
+    const updateMany = vi.fn().mockResolvedValue({ count: 1 });
+
+    await expect(
+      claimHostedLinqProactiveConversationCapacityTx({
+        dayUtc,
+        limit: 50,
+        phoneNumberLookupKey: "lookup:line-1",
+        prisma: {
+          hostedLinqLine: { updateMany },
+        } as never,
+      }),
+    ).resolves.toBe(true);
+
+    expect(updateMany).toHaveBeenCalledWith({
+      where: {
+        phoneNumberLookupKey: "lookup:line-1",
+        proactiveConversationCount: { lt: 50 },
+        proactiveConversationDayUtc: dayUtc,
+      },
+      data: {
+        proactiveConversationCount: { increment: 1 },
+      },
+    });
+  });
+
+  it("lazily starts a new UTC day without carrying yesterday's count", async () => {
+    const updateMany = vi.fn()
+      .mockResolvedValueOnce({ count: 0 })
+      .mockResolvedValueOnce({ count: 1 });
+
+    await expect(
+      claimHostedLinqProactiveConversationCapacityTx({
+        dayUtc,
+        limit: 50,
+        phoneNumberLookupKey: "lookup:line-1",
+        prisma: {
+          hostedLinqLine: { updateMany },
+        } as never,
+      }),
+    ).resolves.toBe(true);
+
+    expect(updateMany).toHaveBeenNthCalledWith(2, {
+      where: {
+        phoneNumberLookupKey: "lookup:line-1",
+        OR: [
+          { proactiveConversationDayUtc: null },
+          { proactiveConversationDayUtc: { not: dayUtc } },
+        ],
+      },
+      data: {
+        proactiveConversationCount: 1,
+        proactiveConversationDayUtc: dayUtc,
+      },
+    });
+  });
+
+  it("fails closed when the selected line reached its limit", async () => {
+    const updateMany = vi.fn().mockResolvedValue({ count: 0 });
+
+    await expect(
+      claimHostedLinqProactiveConversationCapacityTx({
+        dayUtc,
+        limit: 50,
+        phoneNumberLookupKey: "lookup:line-1",
+        prisma: {
+          hostedLinqLine: { updateMany },
+        } as never,
+      }),
+    ).resolves.toBe(false);
+
+    expect(updateMany).toHaveBeenCalledTimes(2);
   });
 });
 

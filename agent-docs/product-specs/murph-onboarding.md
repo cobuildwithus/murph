@@ -72,6 +72,13 @@ privacy, authorization, or provider boundaries.
 - The onboarding skill owns conversation policy. The system-prompt overlay
   routes the open lifecycle into that skill, and the managed automation resumes
   it when a useful continuation exists.
+- Hosted activation may start the first Linq conversation only after atomically
+  reserving that line's proactive-conversation capacity for the current UTC
+  day. A full preferred line falls through to another healthy line; when every
+  line is full, activation still assigns a home line and omits the welcome so
+  the member can use the existing “Text Murph” button to begin the conversation.
+  This admission decision is line-owned operational state, not onboarding step
+  state, and member-initiated first texts do not consume proactive capacity.
 
 The six foundation checkpoints are a finite onboarding contract, not a proxy
 for Murph knowing the member completely. Longitudinal context should continue
