@@ -77,6 +77,7 @@ export type {
   BrowserVaultExperimentMetricSource,
   BrowserVaultExperimentMetricWindowSummary,
   BrowserVaultExperimentOutcomeResult,
+  BrowserVaultExperimentSavedOutcomeStatus,
   BrowserVaultExperimentOutcomeStatus,
   BrowserVaultExperimentProgressPhase,
   BrowserVaultExperimentProgressResult,

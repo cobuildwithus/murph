@@ -57,6 +57,7 @@ function createRun(
     dateRange: "May 1 to May 14",
     day: 14,
     id: "run:red-light-glasses",
+    outcomeStatus: "available",
     signals: [{
       baseline: "70 min",
       delta: "+13 min",

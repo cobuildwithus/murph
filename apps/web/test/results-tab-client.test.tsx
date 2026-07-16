@@ -95,6 +95,7 @@ test("keeps a completed run and its context visible instead of applying the acti
 
   const privateRun: ExperimentRunProjection = {
     id: "run_completed",
+    outcomeStatus: "available",
     source: "browser-vault",
     snapshotGeneratedAt: "2026-06-30T12:00:00.000Z",
     slug: "finnish-sauna",

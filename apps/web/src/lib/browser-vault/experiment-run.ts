@@ -79,10 +79,15 @@ function mapExperimentResultsProjection(
   const status = normalizePrivateRunStatus(results);
   const startedOn = experiment.windows.baselineStart ?? experiment.startedOn;
   const referenceDate = resolveResultsReferenceDate(results, client);
-  const analysisAvailableOn = experiment.windows.interventionEnd ?? experiment.completedAt ?? undefined;
+  const analysisAvailableOn = status === "stopped"
+    ? experiment.completedAt ?? experiment.windows.interventionEnd ?? undefined
+    : results.persistedOutcome?.windows.interventionEnd ??
+      experiment.windows.interventionEnd ??
+      experiment.completedAt ??
+      undefined;
   const fallbackDurationDays = normalizeDayCount(protocol.durationDays, 1);
   const durationDays =
-    startedOn && analysisAvailableOn
+    status !== "stopped" && startedOn && analysisAvailableOn
       ? Math.max(1, daysBetweenInclusive(startedOn, analysisAvailableOn))
       : fallbackDurationDays;
   const day = results.progress?.dayInRun ?? experiment.dayInRun ?? (startedOn
@@ -136,9 +141,10 @@ function mapExperimentResultsProjection(
           status,
         })
       : undefined,
+    outcomeStatus: results.savedOutcomeStatus,
     summary,
     summaryDetail,
-    conclusions: status === "finished"
+    conclusions: status === "finished" && results.persistedOutcome
       ? buildConclusions(results)
       : undefined,
   };
@@ -740,11 +746,17 @@ function buildRunSummary(
   const primary = firstRenderableBiomarker(results.biomarkers);
 
   if (status === "finished") {
-    if (!primary || primary.deltaAbs === null || primary.completeness !== "good") {
-      return "Private run recorded";
+    if (results.persistedOutcome) {
+      return results.persistedOutcome.conclusion.headline;
     }
 
-    return `${primary.label} changed by ${formatDelta(primary.deltaAbs, primary.unit ?? undefined)}.`;
+    if (results.savedOutcomeStatus === "pending") {
+      return "Your run is complete";
+    }
+    if (results.savedOutcomeStatus === "unavailable") {
+      return "Saved analysis unavailable";
+    }
+    return "Private run recorded";
   }
 
   if (status === "stopped") {
@@ -770,16 +782,27 @@ function buildRunSummaryDetail(
   const caveats = buildBiomarkerCaveats(results.biomarkers);
   const coverage = results.progress?.dataCoverage;
   const adherence = results.progress?.adherence;
-  const outcome = results.outcome;
   const details: string[] = [];
 
   if (status === "finished") {
-    if (outcome) {
-      details.push(`Outcome confidence is ${outcome.confidence.level}.`);
-      details.push(...outcome.confidence.reasons);
-    } else {
-      details.push("The run is finished, but a full before-and-after window isn't ready yet.");
+    const persistedOutcome = results.persistedOutcome;
+    if (persistedOutcome) {
+      return [
+        persistedOutcome.conclusion.plainLanguage,
+        `Outcome confidence is ${persistedOutcome.confidence.level}.`,
+        ...persistedOutcome.confidence.reasons,
+        ...persistedOutcome.conclusion.caveats,
+      ].join(" ");
     }
+
+    const outcomeState = results.savedOutcomeStatus === "pending"
+      ? "The run is safely recorded in your vault. Its saved outcome analysis is still pending."
+      : results.savedOutcomeStatus === "unavailable"
+        ? "The run is safely recorded in your vault, but its referenced saved outcome is unavailable in this private snapshot."
+        : "The private run is recorded, but it does not have a canonical saved outcome to render.";
+    return adherence
+      ? `${outcomeState} ${formatAdherenceDetail(adherence)}`
+      : outcomeState;
   } else if (coverage) {
     details.push(`Coverage is ${coverage.status.replaceAll("_", " ")} for the primary signal.`);
   }
@@ -796,25 +819,26 @@ function buildRunSummaryDetail(
 function buildConclusions(
   results: BrowserVaultExperimentResultsView,
 ): ExperimentRunProjection["conclusions"] {
-  const primary = firstRenderableBiomarker(results.biomarkers);
-  const outcome = results.outcome;
-  const caveats = buildBiomarkerCaveats(results.biomarkers);
-  const sections: NonNullable<ExperimentRunProjection["conclusions"]> = [];
-
-  if (primary && primary.deltaAbs !== null && primary.completeness === "good") {
-    sections.push({
-      title: "What changed",
-      variant: primary.movedAsExpected === false ? "neutral" : "positive",
-      items: [{
-        icon: primary.movedAsExpected === false ? "→" : "check",
-        text: `${primary.label} moved ${formatDelta(primary.deltaAbs, primary.unit ?? undefined)} from the baseline window.`,
-      }],
-    });
+  const persistedOutcome = results.persistedOutcome;
+  if (!persistedOutcome) {
+    return undefined;
   }
 
+  const sections: NonNullable<ExperimentRunProjection["conclusions"]> = [];
+
+  sections.push({
+    title: "What the saved analysis says",
+    variant: "positive",
+    items: [{
+      icon: "check",
+      text: persistedOutcome.conclusion.plainLanguage,
+    }],
+  });
+
   const limits = [
-    ...(outcome?.confidence.reasons ?? []),
-    ...caveats,
+    ...persistedOutcome.confidence.reasons,
+    ...persistedOutcome.conclusion.caveats,
+    ...persistedOutcome.confounders,
   ];
   if (limits.length > 0) {
     sections.push({
@@ -824,25 +848,12 @@ function buildConclusions(
     });
   }
 
-  if (sections.length === 0) {
-    sections.push({
-      title: "What we can say right now",
-      variant: "insight",
-      items: [{
-        icon: "→",
-        text: "This run doesn't have enough measured data for a before-and-after conclusion yet.",
-      }],
-    });
-  }
-
   sections.push({
-    title: "What to do with this",
-    variant: "recommendation",
+    title: "Confidence",
+    variant: "insight",
     items: [{
-      icon: "arrow",
-      text: outcome?.status === "enough_data"
-        ? "Use this as an N-of-1 result tied to this protocol revision; repeat or extend only if the burden still fits ordinary life."
-        : "Treat this run as context, not a conclusion; repeat with steadier measurement if this protocol still seems worth testing.",
+      icon: "→",
+      text: `The saved outcome confidence is ${persistedOutcome.confidence.level}.`,
     }],
   });
 
@@ -1057,6 +1068,10 @@ function formatStatusLabel(
   phase: BrowserVaultExperimentResultsView["experiment"]["phase"],
 ): string {
   const normalizedLabel = formatNormalizedStatusLabel(normalizedStatus, phase);
+
+  if (normalizedStatus === "stopped") {
+    return normalizedLabel;
+  }
 
   if (!sourceStatus) {
     return normalizedLabel;

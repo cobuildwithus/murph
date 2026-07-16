@@ -308,6 +308,7 @@ test("experiment start action becomes a quiet status chip for a running browser-
   const protocol = createResultsPublicProjection();
   const activeRun: ExperimentRunProjection = {
     id: "run_1",
+    outcomeStatus: "not_expected",
     source: "browser-vault",
     snapshotGeneratedAt: "2026-04-15T00:00:00.000Z",
     slug: null,
@@ -363,6 +364,7 @@ test("paused browser-vault runs get the muted status chip, not the live dot", as
   const protocol = createResultsPublicProjection();
   const pausedRun: ExperimentRunProjection = {
     id: "run_1",
+    outcomeStatus: "not_expected",
     source: "browser-vault",
     snapshotGeneratedAt: "2026-04-15T00:00:00.000Z",
     slug: null,

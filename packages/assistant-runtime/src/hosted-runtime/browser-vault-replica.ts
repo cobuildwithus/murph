@@ -1,10 +1,22 @@
 import {
+  createHash,
+} from "node:crypto";
+import {
   mkdir,
   readFile,
   rm,
   writeFile,
 } from "node:fs/promises";
 import path from "node:path";
+import { isDeepStrictEqual } from "node:util";
+
+import {
+  experimentFrontmatterSchema,
+  experimentOutcomeSchema,
+  VAULT_LAYOUT,
+  type ExperimentOutcome,
+  type ExperimentFrontmatter,
+} from "@murphai/contracts";
 
 import {
   hashCanonicalQuerySources,
@@ -13,6 +25,7 @@ import {
 } from "@murphai/query";
 import type {
   CanonicalQuerySourceHash,
+  VaultReadModel,
 } from "@murphai/query";
 import {
   createBrowserVaultReplica,
@@ -125,9 +138,13 @@ export async function createHostedBrowserVaultReplicaForSourceState(input: {
   vaultRoot: string;
 }): Promise<BrowserVaultReplica> {
   const vault = await readVault(input.vaultRoot);
-  const metricPoints = await listMetricPoints(input.vaultRoot, { limit: null });
+  const [metricPoints, outcomeProjection] = await Promise.all([
+    listMetricPoints(input.vaultRoot, { limit: null }),
+    readHostedBrowserVaultExperimentOutcomes(input.vaultRoot, vault),
+  ]);
 
   return await createBrowserVaultReplica({
+    experimentOutcomes: outcomeProjection.outcomes,
     generatedAt: input.generatedAt,
     metricPoints,
     sourceBundleHash: input.sourceStateHash,
@@ -152,7 +169,7 @@ export async function createHostedBrowserVaultReplicaRefreshFromWorkspace(input:
         restoreWasCold: false,
         vaultRoot: path.resolve(input.vaultRoot),
       };
-  const sourceHash = await hashCanonicalQuerySources(restored.vaultRoot);
+  const sourceHash = await hashHostedBrowserVaultReplicaSources(restored.vaultRoot);
   const replica = await createHostedBrowserVaultReplicaForSourceState({
     generatedAt: input.generatedAt,
     sourceStateHash: sourceHash.hash,
@@ -198,7 +215,7 @@ export async function refreshHostedBrowserVaultReplicaFromRuntime(input: {
 
   try {
     const sourceBefore = await cancellation.race(
-      hashCanonicalQuerySources(input.vaultRoot),
+      hashHostedBrowserVaultReplicaSources(input.vaultRoot),
     );
     const source = summarizeHostedBrowserVaultReplicaSource(sourceBefore);
     const freshness = assessBrowserVaultReplicaFreshness({
@@ -236,7 +253,7 @@ export async function refreshHostedBrowserVaultReplicaFromRuntime(input: {
     }
 
     const sourceAfter = await cancellation.race(
-      hashCanonicalQuerySources(input.vaultRoot),
+      hashHostedBrowserVaultReplicaSources(input.vaultRoot),
     );
     if (sourceAfter.hash !== sourceBefore.hash) {
       return {
@@ -395,6 +412,190 @@ function summarizeHostedBrowserVaultReplicaSource(
     fileCount: source.fileCount,
     totalBytes: source.totalBytes,
   };
+}
+
+interface HostedBrowserVaultOutcomeSource {
+  byteLength: number;
+  hash: string;
+  relativePath: string;
+}
+
+interface HostedBrowserVaultOutcomeProjection {
+  outcomes: ExperimentOutcome[];
+  sources: HostedBrowserVaultOutcomeSource[];
+}
+
+export async function hashHostedBrowserVaultReplicaSources(
+  vaultRoot: string,
+): Promise<CanonicalQuerySourceHash> {
+  const [canonicalSource, vault] = await Promise.all([
+    hashCanonicalQuerySources(vaultRoot),
+    readVault(vaultRoot),
+  ]);
+  const outcomeProjection = await readHostedBrowserVaultExperimentOutcomes(
+    vaultRoot,
+    vault,
+  );
+  const digest = createHash("sha256");
+  digest.update("murph.hosted-browser-vault-source.v1\0");
+  digest.update(canonicalSource.hash);
+  digest.update("\0");
+
+  for (const source of outcomeProjection.sources) {
+    digest.update(source.relativePath);
+    digest.update("\0");
+    digest.update(String(source.byteLength));
+    digest.update("\0");
+    digest.update(source.hash);
+    digest.update("\0");
+  }
+
+  return {
+    fileCount: canonicalSource.fileCount + outcomeProjection.sources.length,
+    hash: digest.digest("hex"),
+    totalBytes:
+      canonicalSource.totalBytes +
+      outcomeProjection.sources.reduce((total, source) => total + source.byteLength, 0),
+  };
+}
+
+async function readHostedBrowserVaultExperimentOutcomes(
+  vaultRoot: string,
+  vault: VaultReadModel,
+): Promise<HostedBrowserVaultOutcomeProjection> {
+  const outcomes: ExperimentOutcome[] = [];
+  const sources: HostedBrowserVaultOutcomeSource[] = [];
+
+  for (const entity of vault.entities) {
+    if (entity.family !== "experiment") {
+      continue;
+    }
+
+    const parsedFrontmatter = experimentFrontmatterSchema.safeParse(
+      entity.frontmatter ?? entity.attributes,
+    );
+    if (!parsedFrontmatter.success || !parsedFrontmatter.data.outcomeRef) {
+      continue;
+    }
+
+    const relativePath = resolveBrowserVaultOutcomeRelativePath(
+      parsedFrontmatter.data.outcomeRef.relativePath,
+    );
+    if (!relativePath) {
+      continue;
+    }
+
+    const contents = await readOptionalBrowserVaultOutcomeFile(
+      path.join(vaultRoot, relativePath),
+    );
+    if (contents === null) {
+      continue;
+    }
+
+    sources.push({
+      byteLength: Buffer.byteLength(contents, "utf8"),
+      hash: createHash("sha256").update(contents).digest("hex"),
+      relativePath,
+    });
+
+    const outcome = parseBrowserVaultOutcome(contents);
+    if (
+      outcome &&
+      browserVaultOutcomeMatchesExperiment(
+        outcome,
+        parsedFrontmatter.data,
+      )
+    ) {
+      outcomes.push(outcome);
+    }
+  }
+
+  return {
+    outcomes,
+    sources: sources.sort((left, right) =>
+      left.relativePath.localeCompare(right.relativePath)
+    ),
+  };
+}
+
+function resolveBrowserVaultOutcomeRelativePath(
+  value: string | undefined,
+): string | null {
+  if (!value || value.includes("\\") || path.posix.isAbsolute(value)) {
+    return null;
+  }
+
+  const normalized = path.posix.normalize(value);
+  if (
+    normalized !== value ||
+    path.posix.dirname(normalized) !== VAULT_LAYOUT.experimentOutcomesDirectory ||
+    path.posix.extname(normalized) !== ".json"
+  ) {
+    return null;
+  }
+
+  return normalized;
+}
+
+async function readOptionalBrowserVaultOutcomeFile(
+  filePath: string,
+): Promise<string | null> {
+  try {
+    return await readFile(filePath, "utf8");
+  } catch (error) {
+    if (
+      error &&
+      typeof error === "object" &&
+      "code" in error &&
+      error.code === "ENOENT"
+    ) {
+      return null;
+    }
+    throw error;
+  }
+}
+
+function parseBrowserVaultOutcome(contents: string): ExperimentOutcome | null {
+  try {
+    return experimentOutcomeSchema.parse(JSON.parse(contents));
+  } catch {
+    return null;
+  }
+}
+
+function browserVaultOutcomeMatchesExperiment(
+  outcome: ExperimentOutcome,
+  frontmatter: ExperimentFrontmatter,
+): boolean {
+  const outcomeRef = frontmatter.outcomeRef;
+  if (
+    !outcomeRef ||
+    outcome.outcomeId !== outcomeRef.outcomeId ||
+    (outcomeRef.generatedAt !== undefined &&
+      outcome.generatedAt !== outcomeRef.generatedAt) ||
+    outcome.experiment.id !== frontmatter.experimentId ||
+    outcome.experiment.slug !== frontmatter.slug ||
+    outcome.experiment.status !== frontmatter.status ||
+    outcome.experiment.title !== frontmatter.title ||
+    !isDeepStrictEqual(
+      outcome.commonsProtocolRef,
+      frontmatter.commonsProtocolRef ?? null,
+    ) ||
+    !isDeepStrictEqual(outcome.protocolRef ?? null, frontmatter.protocolRef ?? null) ||
+    !isDeepStrictEqual(
+      outcome.effectiveProtocolSnapshot ?? null,
+      frontmatter.effectiveProtocolSnapshot ?? null,
+    )
+  ) {
+    return false;
+  }
+
+  return isDeepStrictEqual(outcome.windows, {
+    baselineEnd: frontmatter.runPlan?.baselineEnd ?? null,
+    baselineStart: frontmatter.runPlan?.baselineStart ?? null,
+    interventionEnd: frontmatter.runPlan?.interventionEnd ?? null,
+    interventionStart: frontmatter.runPlan?.interventionStart ?? null,
+  });
 }
 
 function measureHostedBrowserVaultReplicaBytes(replica: unknown): number {

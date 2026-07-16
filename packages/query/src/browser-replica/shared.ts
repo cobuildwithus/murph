@@ -1,4 +1,5 @@
 import type { CanonicalRecordClass } from "../canonical-entities.ts";
+import type { ExperimentOutcome } from "@murphai/contracts";
 import type {
   OverviewExperiment,
   OverviewExperimentSummary,
@@ -205,6 +206,8 @@ export interface BrowserVaultMetricGoalProgressRow {
 export interface BrowserVaultReplica {
   assistantSummary: BrowserVaultAssistantSummary;
   entities: BrowserVaultEntity[];
+  /** Absent only on replicas produced before canonical outcome projection shipped. */
+  experimentOutcomes?: ExperimentOutcome[];
   generatedAt: string;
   metricGoalProgressRows: BrowserVaultMetricGoalProgressRow[];
   metricRows: BrowserVaultMetricRow[];
@@ -219,6 +222,7 @@ export interface BrowserVaultReplica {
 }
 
 export interface CreateBrowserVaultReplicaInput {
+  experimentOutcomes?: readonly ExperimentOutcome[];
   generatedAt?: string;
   metricPoints: readonly MetricPoint[];
   sourceBundleHash: string;

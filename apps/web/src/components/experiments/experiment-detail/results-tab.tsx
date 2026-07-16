@@ -65,6 +65,7 @@ export function ResultsTab({
   const isRunnable = isActive || isPaused;
   const hasPrivateRun = Boolean(experiment.privateRun);
   const hasPersonalOutcomeData = experiment.signals.length > 0 || experiment.trends.length > 0;
+  const savedOutcomeStatus = experiment.privateRun?.outcomeStatus;
 
   return (
     <div className="flex flex-col gap-10">
@@ -136,12 +137,22 @@ export function ResultsTab({
       {hasPrivateRun && !hasPersonalOutcomeData && !isStopped && (
         <ResultsEmptyState
           title={isFinished
-            ? "Run complete, but there isn't enough data for a clear comparison"
+            ? savedOutcomeStatus === "pending"
+              ? "Your saved analysis is still pending"
+              : savedOutcomeStatus === "unavailable"
+                ? "Your saved analysis isn't available in this snapshot"
+                : "Run complete, but there isn't enough data for a clear comparison"
             : isPaused
               ? "Your experiment is paused"
               : "You're running this experiment"}
           body={isFinished
-            ? "Your run is saved privately in your vault. The primary signal did not cover enough of the baseline and experiment windows for a dependable before-and-after read."
+            ? savedOutcomeStatus === "pending"
+              ? "Your completed run is safely recorded in your vault. Its canonical outcome analysis has not been saved yet."
+              : savedOutcomeStatus === "unavailable"
+                ? "Your completed run is safely recorded, but its referenced canonical outcome could not be loaded from this private snapshot."
+                : savedOutcomeStatus === "available"
+                  ? "Your canonical saved analysis is shown below, but it did not include comparable metric windows to chart."
+                  : "Your run is saved privately in your vault, but it does not have a canonical saved outcome to render."
             : isPaused
               ? "Your run is saved privately in your vault. Resume it to keep following the protocol and see outcomes here later."
               : "Outcome cards will appear here once there's enough measured data to compare."}

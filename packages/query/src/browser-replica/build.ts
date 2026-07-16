@@ -1,4 +1,5 @@
 import type { CanonicalEntity } from "../canonical-entities.ts";
+import { experimentOutcomeSchema } from "@murphai/contracts";
 import { metricPointRecordIds } from "../metrics/index.ts";
 import { isDefaultProjectedQueryEntity } from "../query-visibility.ts";
 import type { OverviewWeeklySampleSummary } from "../overview.ts";
@@ -90,6 +91,9 @@ export async function createBrowserVaultReplica(
   const replicaWithoutVersion: BrowserVaultReplica = {
     assistantSummary: projectWearableAssistantSummary(buildWearableAssistantSummary(defaultProjectedVault)),
     entities,
+    experimentOutcomes: (input.experimentOutcomes ?? []).map((outcome) =>
+      experimentOutcomeSchema.parse(outcome)
+    ),
     generatedAt,
     metricGoalProgressRows: buildMetricGoalProgressRows(defaultProjectedVault.entities, allMetricPoints, generatedAt),
     metricRows,

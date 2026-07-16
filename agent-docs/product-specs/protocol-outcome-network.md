@@ -26,8 +26,10 @@ The assistant is the interface into this loop, not the full category by itself.
 
 ## Implemented Now
 
-- Private browser-vault outcome analysis can summarize one user's run, biomarker deltas, confidence, and confounders.
-- Experiment detail keeps a stable **Your results** route for the matching active run or newest completed run, including honest low-confidence and insufficient-data states.
+- The canonical experiment outcome writer saves one version-bound outcome with biomarker deltas, confidence, caveats, confounders, protocol references, and analysis windows.
+- The encrypted browser-vault replica dereferences only the validated `outcomeRef` on a canonical experiment. Experiment detail renders that saved outcome verbatim instead of rebuilding a second conclusion from its rolling metric rows.
+- Experiment detail keeps a stable **Your results** route for the matching active run or newest completed run. A completed run with no saved outcome is shown as pending; an invalid, missing, or mismatched reference is unavailable and fails closed without hiding the run.
+- Canonical early stops are stored as `status: completed` with an `endedOn` before the planned intervention end. Browser Results presents those runs as stopped, clamps evidence to `endedOn`, and never shows a completed conclusion.
 - CLI and web surfaces keep those results private by default.
 - Consent scopes reserve space for future Health Commons contribution, but there is not yet a shipped share/contribute/cohort pipeline.
 
