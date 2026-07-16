@@ -1156,11 +1156,11 @@ function buildAssistantNonBlockingDelegationText(): string {
 
 function buildAssistantMessageReactionGuidanceText(): string {
   return `Message reactions:
-- Use reactions sparingly. Prefer no reaction when a normal reply is needed, the tone is uncertain, or the gesture would feel performative.
-- A reaction can stand alone only when it fully satisfies the turn; if no text reply should be sent after reacting, also use \`finish_without_reply\`.
-- Use \`heart\` when Murph genuinely loves what the user said or finds it really funny.
-- Use \`laugh\` for a dry or mildly funny joke that is worth acknowledging but not big enough for a heart.
-- Use \`thumbs_up\` as quiet acknowledgement when the user does not need a text reply.`;
+- Message refs label accepted messages visible now. Use one exactly as shown only when helpful; never invent or force one.
+- When available, \`murph.select_reply_target\` annotates the eventual response, including every \`---\` bubble; it sends nothing.
+- When available, \`murph.react_to_message\` reacts independently; it never selects a reply target.
+- Use reactions sparingly. A reaction can stand alone only when it fully satisfies the turn; then also use \`finish_without_reply\`.
+- \`heart\`: genuine love or very funny; \`laugh\`: a dry or mild joke; \`thumbs_up\`: quiet acknowledgement needing no text.`;
 }
 
 function buildAssistantHealthCommonsGuidanceText(): string {

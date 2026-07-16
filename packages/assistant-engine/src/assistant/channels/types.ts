@@ -146,6 +146,7 @@ export interface AssistantChannelDependencies {
     idempotencyKey?: string | null
     media?: readonly AssistantResponseMedia[] | null
     message: string
+    nativeReplyRequested?: true
     replyToMessageId?: string | null
     signal?: AbortSignal
     target: string
@@ -241,6 +242,7 @@ export interface AssistantChannelAdapter {
       identityId: string | null
       media?: readonly AssistantResponseMedia[] | null
       message: string
+      nativeReplyRequested?: true
       replyToMessageId?: string | null
       subject?: string | null
       threadIsDirect?: boolean | null
@@ -294,6 +296,7 @@ export interface AssistantChannelAdapterSpec {
     identityId: string | null
     media: readonly AssistantResponseMedia[]
     message: string
+    nativeReplyRequested?: true
     replyToMessageId?: string | null
     subject?: string | null
     threadIsDirect: boolean | null

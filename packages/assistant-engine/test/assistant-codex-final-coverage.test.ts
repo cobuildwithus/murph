@@ -173,9 +173,9 @@ function createRoutePlanningDiagnostics(): AssistantRouteTurnPlan['planningDiagn
     assistantContextSnapshotElapsedMs: null,
     cliBootstrapElapsedMs: null,
     dynamicToolCount: 0,
-    messageReactionsAvailable: false,
+    messageTargetingAvailable: false,
+    messageTargetDynamicToolsAvailable: false,
     primarySystemPromptElapsedMs: null,
-    reactionDynamicToolAvailable: false,
     routePlanningElapsedMs: 0,
     routePlanningMeasuredElapsedMs: 0,
     routePlanningSlowestStage: null,
@@ -832,157 +832,93 @@ describe('Codex model catalog', () => {
     }
   })
 
-  it('forwards message reaction availability from auto-reply targets to Codex', async () => {
+  it('forwards the accepted-message target authorizer to Codex', async () => {
     const route = createRoute()
     const session = createAssistantSession({
       providerOptions: route.providerOptions,
     })
-    const scenarios = [
-      {
-        channel: 'linq',
-        deliveryMessageReactionsAvailable: true,
-        deliveryReplyToMessageId: 'linq-message-1',
-        expected: true,
-        name: 'iMessage Linq reply target',
-        target: 'linq-chat-1',
-      },
-      {
-        channel: 'linq',
-        deliveryMessageReactionsAvailable: false,
-        deliveryReplyToMessageId: 'linq-message-1',
-        expected: false,
-        name: 'non-iMessage Linq reply target',
-        target: 'linq-chat-1',
-      },
-      {
-        channel: 'linq',
-        deliveryMessageReactionsAvailable: true,
-        deliveryReplyToMessageId: null,
-        expected: false,
-        name: 'Linq target without message id',
-        target: 'linq-chat-1',
-      },
-      {
-        channel: 'telegram',
-        deliveryReplyToMessageId: 'telegram-message-1',
-        expected: true,
-        name: 'ordinary Telegram reply target',
-        target: 'telegram-thread-1',
-      },
-      {
-        channel: 'telegram',
-        deliveryReplyToMessageId: null,
-        expected: false,
-        name: 'Telegram target without message id',
-        target: 'telegram-thread-1',
-      },
-      {
-        channel: 'telegram',
-        deliveryReplyToMessageId: 'telegram-business-message-1',
-        expected: false,
-        name: 'Telegram Business reply target',
-        target: 'telegram-thread-1:business:biz-42',
-      },
-    ] as const
+    const input = {
+      channel: 'telegram',
+      deliverResponse: true,
+      prompt: 'Run the turn.',
+      vault: '/vaults/test',
+    } satisfies Parameters<typeof executeCodexTurnWithRecovery>[0]['input']
+    const sharedPlan = createSharedPlan()
+    const authorizeAcceptedMessageTarget = vi.fn(async () => null)
 
     providerMocks.resolveCodexAssistantTargetCapabilities.mockReturnValue({
       supportedUserMessageContentTypes: ['text'],
       supportsReasoningEffort: true,
     })
-
-    for (const scenario of scenarios) {
-      const input = {
-        channel: scenario.channel,
-        deliverResponse: true,
-        ...(scenario.channel === 'linq'
-          ? {
-              deliveryMessageReactionsAvailable:
-                scenario.deliveryMessageReactionsAvailable,
-            }
-          : {}),
-        ...(scenario.deliveryReplyToMessageId === null
-          ? {}
-          : { deliveryReplyToMessageId: scenario.deliveryReplyToMessageId }),
-        prompt: `Run ${scenario.name}.`,
-        turnTrigger: 'automation-auto-reply',
-        vault: '/vaults/test',
-      } satisfies Parameters<typeof executeCodexTurnWithRecovery>[0]['input']
-      const sharedPlan = createSharedPlan()
-      sharedPlan.conversationPolicy.audience.channel = scenario.channel
-      sharedPlan.conversationPolicy.audience.explicitTarget = scenario.target
-      sharedPlan.conversationPolicy.audience.threadId = scenario.target
-
-      providerMocks.executeCodexAssistantTurnAttemptFromInput.mockResolvedValueOnce(
-        createProviderAttemptResult(),
-      )
-      providerTurnRunnerMocks.buildCodexTurnExecutionPlan.mockResolvedValueOnce({
-        activeTurnSteering: null,
-        executionContext: {
-          hosted: null,
+    providerMocks.executeCodexAssistantTurnAttemptFromInput.mockResolvedValueOnce(
+      createProviderAttemptResult(),
+    )
+    providerTurnRunnerMocks.buildCodexTurnExecutionPlan.mockResolvedValueOnce({
+      activeTurnSteering: null,
+      authorizeAcceptedMessageTarget,
+      executionContext: {
+        hosted: null,
+      },
+      input,
+      profile: {
+        promptProfile: 'conversation',
+        toolProfile: 'provider-turn',
+        threadScope: 'session-thread',
+      },
+      promptTimeContext: {
+        currentLocalDate: '2026-04-29',
+        currentTimeZone: 'UTC',
+      },
+      route,
+      sharedPlan,
+      turnId: 'turn-message-targeting',
+    } satisfies AssistantCodexTurnExecutionPlan)
+    providerTurnRunnerMocks.buildCodexTurnAttemptPlan.mockResolvedValueOnce({
+      attemptCount: 1,
+      route,
+      routePlan: {
+        assistantContractFingerprint:
+          'aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa',
+        assistantCliContract: null,
+        cliEnv: {},
+        developerInstructions: null,
+        dynamicTools: [],
+        diagnosticsPolicy: {
+          environment: 'local',
+          privateIssueCaptureEnabled: false,
+          surface: null,
         },
-        input,
-        profile: {
-          promptProfile: 'conversation',
-          toolProfile: 'provider-turn',
-          threadScope: 'session-thread',
-        },
-        promptTimeContext: {
-          currentLocalDate: '2026-04-29',
-          currentTimeZone: 'UTC',
-        },
-        route,
-        sharedPlan,
-        turnId: `turn-reaction-${scenario.name.replaceAll(' ', '-')}`,
-      } satisfies AssistantCodexTurnExecutionPlan)
-      providerTurnRunnerMocks.buildCodexTurnAttemptPlan.mockResolvedValueOnce({
-        attemptCount: 1,
-        route,
-        routePlan: {
-          assistantContractFingerprint:
-            'aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa',
-          assistantCliContract: null,
-          cliEnv: {},
-          developerInstructions: null,
-          dynamicTools: [],
-          diagnosticsPolicy: {
-            environment: 'local',
-            privateIssueCaptureEnabled: false,
-            surface: null,
-          },
-          onboardingGuidanceInjected: false,
-          codexContinuation: {
-            kind: 'explicit-structured-history',
-          } satisfies AssistantCodexContinuation,
-          planningDiagnostics: {
-            ...createRoutePlanningDiagnostics(),
-            dynamicToolCount: scenario.expected ? 6 : 5,
-            messageReactionsAvailable: scenario.expected,
-            reactionDynamicToolAvailable: scenario.expected,
-          },
-          promptCacheMetadata: null,
-          resume: null,
-          sessionContext: undefined,
-          systemPrompt: null,
-          turnContextPrompt: null,
-          workingDirectory: '/work',
-        } satisfies AssistantRouteTurnPlan,
-        session,
-      } satisfies AssistantCodexAttemptPlan)
+        onboardingGuidanceInjected: false,
+        codexContinuation: {
+          kind: 'explicit-structured-history',
+        } satisfies AssistantCodexContinuation,
+        planningDiagnostics: createRoutePlanningDiagnostics(),
+        promptCacheMetadata: null,
+        resume: null,
+        sessionContext: undefined,
+        systemPrompt: null,
+        turnContextPrompt: null,
+        workingDirectory: '/work',
+      } satisfies AssistantRouteTurnPlan,
+      session,
+    } satisfies AssistantCodexAttemptPlan)
 
-      const outcome = await executeCodexTurnWithRecovery({
-        input,
-        plan: sharedPlan,
-        resolvedSession: session,
-        route,
-        turnCreatedAt: '2026-04-29T00:00:00.000Z',
-        turnId: `turn-reaction-${scenario.name.replaceAll(' ', '-')}`,
-      })
+    const outcome = await executeCodexTurnWithRecovery({
+      authorizeAcceptedMessageTarget,
+      input,
+      plan: sharedPlan,
+      resolvedSession: session,
+      route,
+      turnCreatedAt: '2026-04-29T00:00:00.000Z',
+      turnId: 'turn-message-targeting',
+    })
 
-      expect(outcome.kind).toBe('succeeded')
-      const providerInput =
-        providerMocks.executeCodexAssistantTurnAttemptFromInput.mock.calls.at(-1)?.[0]
-      expect(providerInput?.allowMessageReactions).toBe(scenario.expected)
-    }
+    expect(outcome.kind).toBe('succeeded')
+    const providerInput =
+      providerMocks.executeCodexAssistantTurnAttemptFromInput.mock.calls.at(-1)?.[0]
+    expect(providerInput?.authorizeAcceptedMessageTarget).toBe(
+      authorizeAcceptedMessageTarget,
+    )
   })
 
   it('does not wait for runtime issue recording on a successful turn', async () => {

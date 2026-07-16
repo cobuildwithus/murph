@@ -468,6 +468,7 @@ describe("expectAdvertisedMurphDynamicTools", () => {
       !name.startsWith("murph.computer_")
       && !name.startsWith("murph.connected_apps_")
       && name !== "murph.react_to_message"
+      && name !== "murph.select_reply_target"
       && name !== "murph.create_phone_call"
       && name !== "murph.send_vault_file"
     );
@@ -475,6 +476,7 @@ describe("expectAdvertisedMurphDynamicTools", () => {
       name !== "murph.send_progress_update"
     );
     expect(allToolNames).toContain("murph.react_to_message");
+    expect(allToolNames).toContain("murph.select_reply_target");
     expect(allToolNames).toContain("murph.computer_open");
     expect(allToolNames).toContain("murph.connected_apps_manage");
     expect(allToolNames).toContain("murph.create_phone_call");
@@ -495,7 +497,7 @@ describe("expectAdvertisedMurphDynamicTools", () => {
       {
         connectedAppsAvailable: true,
         computerToolsAvailable: true,
-        messageReactionsAvailable: true,
+        messageTargetingAvailable: true,
         phoneCallsAvailable: true,
         progressUpdatesAvailable: true,
         vaultFileSendAvailable: true,

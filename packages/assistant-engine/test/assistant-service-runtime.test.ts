@@ -1435,6 +1435,74 @@ describe("assistant delivery orchestration seam", () => {
     );
   });
 
+  it("keeps one selected Telegram target and marker on every reply bubble", async () => {
+    const session = createAssistantSession({
+      binding: {
+        actorId: "binding-actor",
+        channel: "telegram",
+        conversationKey: "binding-key",
+        delivery: {
+          kind: "thread",
+          target: "binding-thread",
+        },
+        identityId: "binding-identity",
+        threadId: "binding-thread",
+        threadIsDirect: true,
+      },
+    });
+    runtimeState.outbox.deliverMessage.mockResolvedValue({
+      delivery: {
+        channel: "telegram",
+        idempotencyKey: "delivery-telegram-selected",
+        messageLength: 5,
+        providerMessageId: "provider-telegram-selected",
+        providerThreadId: null,
+        sentAt: "2026-07-16T12:00:00.000Z",
+        target: "binding-thread",
+        targetKind: "thread",
+      },
+      intent: {
+        intentId: "intent-telegram-selected",
+      },
+      kind: "sent",
+      session: null,
+    });
+
+    await deliverAssistantReply({
+      input: {
+        deliverResponse: true,
+        deliveryNativeReplyRequested: true,
+        deliveryReplyToMessageId: "4242",
+        prompt: "hello",
+        turnTrigger: "automation-auto-reply",
+        vault: "/vault",
+      },
+      response: "First.\n---\nSecond.",
+      session,
+      sharedPlan: createSharedPlan(),
+      turnId: "turn-telegram-selected-bubbles",
+    });
+
+    expect(
+      runtimeState.outbox.deliverMessage.mock.calls.map(([call]) => ({
+        message: call?.message,
+        nativeReplyRequested: call?.nativeReplyRequested,
+        replyToMessageId: call?.replyToMessageId,
+      })),
+    ).toEqual([
+      {
+        message: "First.",
+        nativeReplyRequested: true,
+        replyToMessageId: "4242",
+      },
+      {
+        message: "Second.",
+        nativeReplyRequested: true,
+        replyToMessageId: "4242",
+      },
+    ]);
+  });
+
   it("keeps explicit Telegram native reply anchors for manual final text delivery", async () => {
     const session = createAssistantSession({
       binding: {

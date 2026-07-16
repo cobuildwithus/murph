@@ -546,7 +546,8 @@ async function executeRealCodexAppServerTurn(
       ...input,
       dynamicTools: input.dynamicTools ?? resolveMurphDynamicTools({
         allowFinishWithoutReply: input.allowFinishWithoutReply,
-        allowMessageReactions: input.allowMessageReactions,
+        messageTargetingAvailable:
+          input.authorizeAcceptedMessageTarget != null,
         computerToolsAvailable:
           input.hostedToolContext?.computerToolsAvailable === true,
         connectedAppsAvailable: input.hostedToolContext?.connectedApps != null,

@@ -610,6 +610,7 @@ describe('assistant product small seams', () => {
       extractAssistantAutoReplyFailedPromptText(
         [
           'Input 1:',
+          'Message ref: ain_11111111111111111111111111111111',
           'Reply context:',
           'quoted',
           '',
@@ -617,11 +618,32 @@ describe('assistant product small seams', () => {
           'first message',
           '',
           'Input 2:',
+          'Message ref: ain_22222222222222222222222222222222',
           'Message text:',
           'second message',
         ].join('\n'),
       ),
     ).toBe('first message\n\nsecond message')
+    expect(
+      extractAssistantAutoReplyFailedPromptText(
+        [
+          'Source: telegram',
+          '',
+          'Message ref: ain_33333333333333333333333333333333',
+          '',
+          'Attachment context:',
+          'content: unavailable',
+        ].join('\n'),
+      ),
+    ).toBe('Source: telegram\n\nAttachment context:\ncontent: unavailable')
+    expect(
+      extractAssistantAutoReplyFailedPromptText(
+        [
+          'Message text:',
+          'Message ref: ain_44444444444444444444444444444444',
+        ].join('\n'),
+      ),
+    ).toBe('Message ref: ain_44444444444444444444444444444444')
     expect(
       buildFailedAssistantPromptAttemptText({
         prompt: 'plain prompt',

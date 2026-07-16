@@ -88,7 +88,6 @@ describe('executeReadOnlyAssistantAsk', () => {
     const turnInput = askMocks.executeTurn.mock.calls[0]?.[0]
     expect(turnInput).toMatchObject({
       allowFinishWithoutReply: false,
-      allowMessageReactions: false,
       approvalPolicy: 'never',
       codexCommand: '/runtime/codex',
       codexHome: '/runtime/codex-home',

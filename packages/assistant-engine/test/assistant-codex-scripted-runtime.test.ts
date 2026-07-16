@@ -76,7 +76,8 @@ function executeCodexAppServerTurn(
     ...input,
     dynamicTools: input.dynamicTools ?? resolveMurphDynamicTools({
       allowFinishWithoutReply: input.allowFinishWithoutReply,
-      allowMessageReactions: input.allowMessageReactions,
+      messageTargetingAvailable:
+        input.authorizeAcceptedMessageTarget != null,
       computerToolsAvailable:
         input.hostedToolContext?.computerToolsAvailable === true,
       connectedAppsAvailable: input.hostedToolContext?.connectedApps != null,
@@ -550,10 +551,15 @@ describe('real codex app-server with scripted provider', () => {
     timeout: TURN_TIMEOUT_MS,
   }, async () => {
     const scenario = await prepareScriptedTurnScenario()
+    const messageRef = `ain_${'c'.repeat(32)}`
+    const authorizations: unknown[] = []
     scenario.stub.queue(
       {
         functionCall: {
-          arguments: { reaction: 'heart' },
+          arguments: {
+            message_ref: messageRef,
+            reaction: 'heart',
+          },
           name: 'react_to_message',
           namespace: 'murph',
         },
@@ -563,7 +569,14 @@ describe('real codex app-server with scripted provider', () => {
 
     const result = await executeCodexAppServerTurn({
       ...scenario.turnInput,
-      allowMessageReactions: true,
+      authorizeAcceptedMessageTarget: async (input) => {
+        authorizations.push(input)
+        return { targetInputId: messageRef }
+      },
+      dynamicTools: resolveMurphDynamicTools({
+        messageTargetingAvailable: true,
+        progressUpdatesAvailable: false,
+      }),
       prompt: 'React with a heart, then reply exactly REACTION_TOOL_OK.',
     })
 
@@ -572,8 +585,14 @@ describe('real codex app-server with scripted provider', () => {
       {
         deliveryContextOrdinal: 0,
         reaction: 'heart',
+        targetInputId: messageRef,
       },
     ])
+    expect(authorizations).toEqual([{
+      action: 'reaction',
+      deliveryContextOrdinal: 0,
+      messageRef,
+    }])
     expect(scenario.stub.requestCountSinceBaseline()).toBe(2)
   })
 

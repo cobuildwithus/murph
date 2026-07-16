@@ -62,6 +62,7 @@ import {
   type AssistantStyleTurnSettingsOverlay,
   type MurphDynamicToolFinalActionPatch,
   type MurphDynamicToolReactionPatch,
+  type MurphDynamicToolReplyTargetPatch,
   type MurphDynamicToolRequest,
   readMurphDynamicToolRequest,
 } from './assistant-codex/dynamic-tools.js'
@@ -126,8 +127,12 @@ import type {
   AssistantHostedToolContext,
 } from './assistant/hosted-tool-context.js'
 import type {
+  AssistantAcceptedMessageTargetAuthorizer,
+} from './assistant/message-target-selection.js'
+import type {
   AssistantNoReplyDisposition,
   AssistantProviderDynamicTool,
+  AssistantProviderFinishWithoutReplyAcceptedEvent,
   AssistantProviderRequestStartedEvent,
   AssistantProviderRequestStartTiming,
   AssistantProviderServiceTier,
@@ -418,7 +423,7 @@ async function waitForCodexProgressDrain(
 
 export interface CodexAppServerTurnInput {
   allowFinishWithoutReply?: boolean | null
-  allowMessageReactions?: boolean | null
+  authorizeAcceptedMessageTarget?: AssistantAcceptedMessageTargetAuthorizer | null
   abortSignal?: AbortSignal
   approvalPolicy?: string
   configOverrides?: readonly string[]
@@ -435,9 +440,9 @@ export interface CodexAppServerTurnInput {
   outputSchema?: Readonly<Record<string, unknown>> | null
   onLiveTurn?: ((turn: CodexAppServerLiveTurn) => void | (() => void)) | null
   onProgress?: ((event: CodexProgressEvent) => void) | null
-  onFinishWithoutReplyAccepted?: ((event: {
-    deliveryContextOrdinal: number
-  }) => Promise<void> | void) | null
+  onFinishWithoutReplyAccepted?: ((
+    event: AssistantProviderFinishWithoutReplyAcceptedEvent
+  ) => Promise<void> | void) | null
   onFinishWithoutReplyRecorded?: ((event: {
     deliveryContextOrdinal: number
   }) => Promise<void> | void) | null
@@ -481,6 +486,7 @@ export interface CodexAppServerTurnFailureContext {
   reactions: readonly {
     deliveryContextOrdinal: number
     reaction: MurphDynamicToolReactionPatch['reaction']
+    targetInputId: string
   }[]
   codexThreadId: string | null
   providerTurnId: string | null
@@ -535,6 +541,7 @@ export interface CodexAppServerTurnResult {
   reactions: readonly {
     deliveryContextOrdinal: number
     reaction: MurphDynamicToolReactionPatch['reaction']
+    targetInputId: string
   }[]
   // Completed final-phase agent messages that were followed by a steered user
   // message and later superseded by another response segment in the same turn,
@@ -543,6 +550,8 @@ export interface CodexAppServerTurnResult {
   precedingAgentMessageSegments: readonly CodexAppServerResponseSegment[]
   /** Accepted-input ordinal whose delivery context owns the selected final reply. */
   responseDeliveryContextOrdinal: number
+  /** Accepted input selected as the native target for the final reply, if any. */
+  targetInputId: string | null
   additionalUsages: AssistantProviderUsageDraft[]
   responseMedia: AssistantResponseMedia[]
   jsonEvents: unknown[]
@@ -560,6 +569,7 @@ export interface CodexAppServerResponseSegment {
   deliveryContextOrdinal: number
   media: AssistantResponseMedia[]
   response: string
+  targetInputId?: string
 }
 
 export type CodexAppServerSteerInput = {
@@ -2766,6 +2776,10 @@ async function runCodexAppServerTurnOnProcess(
     deliveryContextOrdinal: number
     patch: MurphDynamicToolReactionPatch
   }> = []
+  let replyTargetPatches: Array<{
+    deliveryContextOrdinal: number
+    patch: MurphDynamicToolReplyTargetPatch
+  }> = []
   const reservedNoReplyDeliveryContextOrdinals = new Set<number>()
   const additionalUsages: AssistantProviderUsageDraft[] = []
   let nextDynamicToolUsageOrdinal = (input.providerRequestOrdinal ?? 0) + 1
@@ -2898,6 +2912,9 @@ async function runCodexAppServerTurnOnProcess(
     for (const deliveryContextOrdinal of listNoReplyFinalActionPatchOrdinals()) {
       await input.onFinishWithoutReplyAccepted?.({
         deliveryContextOrdinal,
+        messageReactionPending: reactionPatches.some(
+          (entry) => entry.deliveryContextOrdinal === deliveryContextOrdinal,
+        ),
       })
       acceptedNoReplyDeliveryContextOrdinals.push(deliveryContextOrdinal)
       await input.onFinishWithoutReplyRecorded?.({
@@ -2921,6 +2938,7 @@ async function runCodexAppServerTurnOnProcess(
       reactions: reactionPatches.map((entry) => ({
         deliveryContextOrdinal: entry.deliveryContextOrdinal,
         reaction: entry.patch.reaction,
+        targetInputId: entry.patch.targetInputId,
       })),
       codexThreadId,
       providerTurnId: turnId,
@@ -3496,6 +3514,9 @@ async function runCodexAppServerTurnOnProcess(
       },
     ]
     if (patch.kind === 'none') {
+      replyTargetPatches = replyTargetPatches.filter(
+        (entry) => entry.deliveryContextOrdinal !== deliveryContextOrdinal,
+      )
       reservedNoReplyDeliveryContextOrdinals.delete(deliveryContextOrdinal)
     }
     return true
@@ -3506,6 +3527,13 @@ async function runCodexAppServerTurnOnProcess(
   ): MurphDynamicToolFinalActionPatch | null =>
     finalActionPatches.find(
       (action) => action.deliveryContextOrdinal === deliveryContextOrdinal,
+    )?.patch ?? null
+
+  const resolveReplyTargetPatch = (
+    deliveryContextOrdinal: number,
+  ): MurphDynamicToolReplyTargetPatch | null =>
+    replyTargetPatches.find(
+      (entry) => entry.deliveryContextOrdinal === deliveryContextOrdinal,
     )?.patch ?? null
 
   const shouldSuppressDeliveryContext = (
@@ -3698,6 +3726,7 @@ async function runCodexAppServerTurnOnProcess(
     const dynamicToolDeliveryContextOrdinal =
       dynamicToolRequest.kind === 'finish-without-reply' ||
       dynamicToolRequest.kind === 'react-to-message' ||
+      dynamicToolRequest.kind === 'select-reply-target' ||
       dynamicToolRequest.kind === 'send-progress-update'
         ? dynamicToolRequestDeliveryContextOrdinal
         : null
@@ -3735,6 +3764,25 @@ async function runCodexAppServerTurnOnProcess(
       return
     }
 
+    if (
+      dynamicToolRequest.kind === 'select-reply-target' &&
+      shouldSuppressDeliveryContext(dynamicToolDeliveryContextOrdinal ?? 0)
+    ) {
+      void tryWriteRpcMessage({
+        id: requestId,
+        result: {
+          success: false,
+          contentItems: [
+            {
+              type: 'inputText',
+              text: 'reply target unavailable after finish_without_reply',
+            },
+          ],
+        },
+      })
+      return
+    }
+
     const releaseDynamicProgressPending =
       dynamicToolRequest.kind === 'send-progress-update' &&
       dynamicToolProgressDelivery
@@ -3763,6 +3811,8 @@ async function runCodexAppServerTurnOnProcess(
         const hostedToolContext = resolveCodexAppServerHostedToolContext(input)
         await hostedToolContext?.beforeToolExecution?.()
         return await executeMurphDynamicToolRequest({
+          authorizeAcceptedMessageTarget:
+            input.authorizeAcceptedMessageTarget ?? null,
           assistantStyleSettingsOverlay,
           assistantStyleSettingsAvailable: input.dynamicTools.some(
             (tool) =>
@@ -3779,6 +3829,7 @@ async function runCodexAppServerTurnOnProcess(
           hostedToolContext,
           materializeWorkspaceArtifacts: input.materializeWorkspaceArtifacts ?? null,
           currentResponseMedia: responseMedia,
+          deliveryContextOrdinal: dynamicToolDeliveryContextOrdinal,
           nextUsageOrdinal: () => nextDynamicToolUsageOrdinal++,
           productFeedbackRecorder: input.productFeedbackRecorder ?? null,
           progressDelivery:
@@ -3866,6 +3917,18 @@ async function runCodexAppServerTurnOnProcess(
           {
             deliveryContextOrdinal: dynamicToolDeliveryContextOrdinal,
             patch: result.reactionPatch,
+          },
+        ]
+      }
+      if (result.replyTargetPatch && dynamicToolDeliveryContextOrdinal !== null) {
+        replyTargetPatches = [
+          ...replyTargetPatches.filter(
+            (entry) =>
+              entry.deliveryContextOrdinal !== dynamicToolDeliveryContextOrdinal,
+          ),
+          {
+            deliveryContextOrdinal: dynamicToolDeliveryContextOrdinal,
+            patch: result.replyTargetPatch,
           },
         ]
       }
@@ -4057,10 +4120,20 @@ async function runCodexAppServerTurnOnProcess(
       completedFinalAgentMessage = completedFinalAgentMessageText
     } else if (isCodexCompletedUserMessageItemFromNormalized(normalizedEvent)) {
       if (completedFinalAgentMessage !== null) {
+        const completedResponseDeliveryContextOrdinal = Math.max(
+          0,
+          completedUserMessageOrdinal,
+        )
+        const completedResponseTargetInputId = resolveReplyTargetPatch(
+          completedResponseDeliveryContextOrdinal,
+        )?.targetInputId ?? null
         trailingSteerCandidate = {
-          deliveryContextOrdinal: Math.max(0, completedUserMessageOrdinal),
+          deliveryContextOrdinal: completedResponseDeliveryContextOrdinal,
           response: completedFinalAgentMessage,
           media: [...responseMedia],
+          ...(completedResponseTargetInputId
+            ? { targetInputId: completedResponseTargetInputId }
+            : {}),
         }
         completedFinalAgentMessage = null
         assistantStreams.clear()
@@ -4730,13 +4803,19 @@ async function runCodexAppServerTurnOnProcess(
     reactions: reactionPatches.map((entry) => ({
       deliveryContextOrdinal: entry.deliveryContextOrdinal,
       reaction: entry.patch.reaction,
+      targetInputId: entry.patch.targetInputId,
     })),
     precedingAgentMessageSegments: filteredPrecedingAgentMessageSegments.map((segment) => ({
       deliveryContextOrdinal: segment.deliveryContextOrdinal,
       response: segment.response,
       media: [...segment.media],
+      ...(segment.targetInputId
+        ? { targetInputId: segment.targetInputId }
+        : {}),
     })),
     responseDeliveryContextOrdinal: finalDeliveryContextOrdinal,
+    targetInputId:
+      resolveReplyTargetPatch(finalDeliveryContextOrdinal)?.targetInputId ?? null,
     additionalUsages: [...additionalUsages, ...buildSubagentUsageDrafts()],
     responseMedia: finalHasDeliverableOutput ? [...finalResponseMedia] : [],
     jsonEvents,
@@ -4867,6 +4946,7 @@ function isInvalidDynamicToolRequest(
       | 'invalid-finish-without-reply-arguments'
       | 'invalid-progress-arguments'
       | 'invalid-reaction-arguments'
+      | 'invalid-reply-target-arguments'
       | 'invalid-product-feedback-arguments'
       | 'invalid-response-media-arguments'
   }
@@ -4881,6 +4961,7 @@ function isInvalidDynamicToolRequest(
     request.kind === 'invalid-finish-without-reply-arguments' ||
     request.kind === 'invalid-progress-arguments' ||
     request.kind === 'invalid-reaction-arguments' ||
+    request.kind === 'invalid-reply-target-arguments' ||
     request.kind === 'invalid-product-feedback-arguments' ||
     request.kind === 'invalid-response-media-arguments'
   )
@@ -4900,6 +4981,8 @@ function isSerializedDynamicToolRequest(
     request.kind === 'personalization' ||
     request.kind === 'subscription' ||
     request.kind === 'submit-product-feedback' ||
+    request.kind === 'react-to-message' ||
+    request.kind === 'select-reply-target' ||
     isComputerDynamicToolRequest(request)
 }
 
@@ -4909,7 +4992,11 @@ function isInvocationScopedRootToolRequest(
   return request.kind === 'automation' ||
     request.kind === 'invalid-automation-arguments' ||
     request.kind === 'device' ||
-    request.kind === 'invalid-device-arguments'
+    request.kind === 'invalid-device-arguments' ||
+    request.kind === 'react-to-message' ||
+    request.kind === 'select-reply-target' ||
+    request.kind === 'invalid-reaction-arguments' ||
+    request.kind === 'invalid-reply-target-arguments'
 }
 
 function createDynamicToolRuntimeIssueInput(input: {
