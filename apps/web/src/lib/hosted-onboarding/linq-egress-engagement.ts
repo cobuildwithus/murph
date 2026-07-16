@@ -25,7 +25,9 @@ import {
   runWithHostedDomainRootUnwrapCache,
 } from "../hosted-crypto/domain-root-unwrap-cache";
 import {
+  buildHostedMailboxLiveItemWhere,
   decodeHostedMailboxStoredPayload,
+  resolveHostedMailboxPayloadRef,
 } from "../hosted-mailbox/store";
 
 type HostedLinqEngagementClient = PrismaClient | Prisma.TransactionClient;
@@ -40,8 +42,6 @@ export type HostedLinqRuntimeEgressAssertionResult = {
 
 const HOSTED_LINQ_SIGNUP_WELCOME_IDEMPOTENCY_PREFIX = "signup-welcome:";
 const HOSTED_LINQ_RECENT_DIRECT_INBOUND_SCAN_LIMIT = 100;
-const HOSTED_LINQ_DIRECT_INBOUND_RETENTION_MS = 30 * 24 * 60 * 60 * 1000;
-const HOSTED_MAILBOX_PAYLOAD_REF_PREFIX = "hosted-mailbox-payload:";
 
 const HOSTED_LINQ_DIRECT_INBOUND_MAILBOX_ITEM_SELECT = {
   createdAt: true,
@@ -280,7 +280,7 @@ async function readHostedLinqDirectInboundCandidates(input: {
         select: HOSTED_LINQ_DIRECT_INBOUND_MAILBOX_ITEM_SELECT,
         where: {
           id: { in: [...new Set(answeredMailboxItemIds)] },
-          ...buildHostedLinqDirectInboundLiveMailboxWhere(input.availableAt),
+          ...buildHostedMailboxLiveItemWhere(input.availableAt),
         },
       })
     : [];
@@ -289,7 +289,7 @@ async function readHostedLinqDirectInboundCandidates(input: {
     select: HOSTED_LINQ_DIRECT_INBOUND_MAILBOX_ITEM_SELECT,
     take: HOSTED_LINQ_RECENT_DIRECT_INBOUND_SCAN_LIMIT,
     where: {
-      ...buildHostedLinqDirectInboundLiveMailboxWhere(input.availableAt),
+      ...buildHostedMailboxLiveItemWhere(input.availableAt),
       kind: "conversation.message",
       lane: "conversation",
       userId: input.memberId,
@@ -322,12 +322,14 @@ async function readHostedLinqDirectInboundPayloads(input: {
   prisma: HostedLinqEngagementClient;
 }) {
   const mailboxItemIds = [...new Set(input.candidates
-    .filter((item) => (
-      item.userId === input.memberId
-      && item.kind === "conversation.message"
-      && item.lane === "conversation"
-      && resolvesHostedMailboxPayloadRefToItem(item.payloadRef, item.id)
-    ))
+    .filter((item) => {
+      const payloadRef = normalizeNullable(item.payloadRef);
+      return item.userId === input.memberId
+        && item.kind === "conversation.message"
+        && item.lane === "conversation"
+        && payloadRef !== null
+        && resolveHostedMailboxPayloadRef(payloadRef) === item.id;
+    })
     .map((item) => item.id))];
   if (mailboxItemIds.length === 0) {
     return new Map<string, { payloadCiphertext: string }>();
@@ -339,43 +341,12 @@ async function readHostedLinqDirectInboundPayloads(input: {
       payloadCiphertext: true,
     },
     where: {
-      mailboxItem: buildHostedLinqDirectInboundLiveMailboxWhere(input.availableAt),
+      mailboxItem: buildHostedMailboxLiveItemWhere(input.availableAt),
       mailboxItemId: { in: mailboxItemIds },
       userId: input.memberId,
     },
   });
   return new Map(payloads.map((payload) => [payload.mailboxItemId, payload]));
-}
-
-function resolvesHostedMailboxPayloadRefToItem(
-  payloadRef: string | null,
-  mailboxItemId: string,
-): boolean {
-  const normalizedPayloadRef = normalizeNullable(payloadRef);
-  if (!normalizedPayloadRef) {
-    return false;
-  }
-  const resolvedMailboxItemId = normalizedPayloadRef.startsWith(
-    HOSTED_MAILBOX_PAYLOAD_REF_PREFIX,
-  )
-    ? normalizedPayloadRef.slice(HOSTED_MAILBOX_PAYLOAD_REF_PREFIX.length)
-    : normalizedPayloadRef;
-  return resolvedMailboxItemId === mailboxItemId;
-}
-
-function buildHostedLinqDirectInboundLiveMailboxWhere(at: Date): {
-  createdAt: { gte: Date };
-  OR: [{ expiresAt: null }, { expiresAt: { gt: Date } }];
-} {
-  return {
-    createdAt: {
-      gte: new Date(at.getTime() - HOSTED_LINQ_DIRECT_INBOUND_RETENTION_MS),
-    },
-    OR: [
-      { expiresAt: null },
-      { expiresAt: { gt: at } },
-    ],
-  };
 }
 
 async function assertHostedMemberLinqRouteMatchesEgressTarget(input: {

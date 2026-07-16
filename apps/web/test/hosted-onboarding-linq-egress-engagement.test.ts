@@ -29,7 +29,8 @@ vi.mock("@/src/lib/prisma", () => ({
   getPrisma: mocks.getPrisma,
 }));
 
-vi.mock("@/src/lib/hosted-mailbox/store", () => ({
+vi.mock("@/src/lib/hosted-mailbox/store", async (importOriginal) => ({
+  ...await importOriginal<typeof import("@/src/lib/hosted-mailbox/store")>(),
   decodeHostedMailboxStoredPayload: mocks.decodeHostedMailboxStoredPayload,
 }));
 
