@@ -8,6 +8,7 @@ const mocks = vi.hoisted(() => ({
   after: vi.fn(),
   getPrisma: vi.fn(),
   linkHostedIngressLatencyTracesToAcceptedLinqDelivery: vi.fn(),
+  materializeHostedSignupWelcomeHomeRouteTx: vi.fn(),
   recordHostedLinqRuntimeDeliveryOutcomeTx: vi.fn(),
   requireHostedCloudflareCallbackRequest: vi.fn(),
 }));
@@ -25,6 +26,11 @@ vi.mock("@/src/lib/hosted-onboarding/linq-delivery-store", () => ({
   recordHostedLinqRuntimeDeliveryOutcomeTx: mocks.recordHostedLinqRuntimeDeliveryOutcomeTx,
 }));
 
+vi.mock("@/src/lib/hosted-onboarding/linq-home-routing", () => ({
+  materializeHostedSignupWelcomeHomeRouteTx:
+    mocks.materializeHostedSignupWelcomeHomeRouteTx,
+}));
+
 vi.mock("@/src/lib/hosted-runtime-latency/store", () => ({
   linkHostedIngressLatencyTracesToAcceptedLinqDelivery:
     mocks.linkHostedIngressLatencyTracesToAcceptedLinqDelivery,
@@ -40,6 +46,7 @@ type RouteModule = typeof import(
 
 let route: RouteModule;
 let prisma: {
+  $transaction: ReturnType<typeof vi.fn>;
   hostedMemberRouting: {
     findUnique: ReturnType<typeof vi.fn>;
   };
@@ -55,6 +62,7 @@ describe("hosted runtime Linq delivery route", () => {
   beforeEach(() => {
     vi.clearAllMocks();
     prisma = {
+      $transaction: vi.fn(async (operation) => operation(prisma)),
       hostedMemberRouting: {
         findUnique: vi.fn().mockResolvedValue(null),
       },
@@ -69,6 +77,116 @@ describe("hosted runtime Linq delivery route", () => {
       deliveryId: "hld_123",
       recorded: true,
     });
+    mocks.materializeHostedSignupWelcomeHomeRouteTx.mockResolvedValue({
+      kind: "materialized",
+    });
+  });
+
+  it("atomically materializes an accepted canonical participant welcome before recording it", async () => {
+    const response = await route.POST(buildDeliveryRequest({
+      acceptedAt: "2026-04-26T00:00:04.000Z",
+      attemptedAt: "2026-04-26T00:00:03.000Z",
+      directRecipientPhoneNumber: "+15550100001",
+      fromPhoneNumber: "+15550100099",
+      idempotencyKey: "signup-welcome:member_123",
+      intentId: "intent_signup_welcome",
+      lineLookupKey: "hbidx:phone:v1:untrusted-echo",
+      providerMessageId: "linq_message_welcome",
+      providerThreadId: "linq_chat_welcome",
+      targetKind: "participant",
+      threadIsDirect: true,
+    }));
+
+    expect(response.status).toBe(200);
+    expect(prisma.$transaction).toHaveBeenCalledTimes(1);
+    expect(mocks.materializeHostedSignupWelcomeHomeRouteTx).toHaveBeenCalledWith({
+      directRecipientPhoneNumber: "+15550100001",
+      fromPhoneNumber: "+15550100099",
+      idempotencyKey: "signup-welcome:member_123",
+      linqChatId: "linq_chat_welcome",
+      memberId: "member_123",
+      prisma,
+    });
+    expect(mocks.recordHostedLinqRuntimeDeliveryOutcomeTx).toHaveBeenCalledWith(
+      expect.objectContaining({
+        acceptedAt: new Date("2026-04-26T00:00:04.000Z"),
+        idempotencyKey: "signup-welcome:member_123",
+        linqChatId: "linq_chat_welcome",
+        messageId: "linq_message_welcome",
+        phoneNumber: "+15550100099",
+        phoneNumberLookupKey: null,
+        prisma,
+        targetKind: "participant",
+        threadIsDirect: true,
+        userId: "member_123",
+      }),
+    );
+    expect(
+      mocks.materializeHostedSignupWelcomeHomeRouteTx.mock.invocationCallOrder[0],
+    ).toBeLessThan(
+      mocks.recordHostedLinqRuntimeDeliveryOutcomeTx.mock.invocationCallOrder[0],
+    );
+  });
+
+  it.each([
+    ["missing original participant", { directRecipientPhoneNumber: null }],
+    ["missing provider chat", { providerThreadId: null }],
+    ["missing provider message", { providerMessageId: null }],
+    ["non-direct provider chat", { threadIsDirect: false }],
+    ["wrong target kind", { targetKind: "thread" }],
+  ])("rejects a canonical welcome with %s evidence", async (_label, override) => {
+    const response = await route.POST(buildDeliveryRequest({
+      acceptedAt: "2026-04-26T00:00:04.000Z",
+      attemptedAt: "2026-04-26T00:00:03.000Z",
+      directRecipientPhoneNumber: "+15550100001",
+      fromPhoneNumber: "+15550100099",
+      idempotencyKey: "signup-welcome:member_123",
+      providerMessageId: "linq_message_welcome",
+      providerThreadId: "linq_chat_welcome",
+      targetKind: "participant",
+      threadIsDirect: true,
+      ...override,
+    }));
+
+    expect(response.status).toBe(403);
+    expect(mocks.materializeHostedSignupWelcomeHomeRouteTx).not.toHaveBeenCalled();
+    expect(mocks.recordHostedLinqRuntimeDeliveryOutcomeTx).not.toHaveBeenCalled();
+  });
+
+  it("rejects a canonical welcome claimed for another authenticated member", async () => {
+    const response = await route.POST(buildDeliveryRequest({
+      acceptedAt: "2026-04-26T00:00:04.000Z",
+      attemptedAt: "2026-04-26T00:00:03.000Z",
+      directRecipientPhoneNumber: "+15550100001",
+      fromPhoneNumber: "+15550100099",
+      idempotencyKey: "signup-welcome:member_other",
+      providerMessageId: "linq_message_welcome",
+      providerThreadId: "linq_chat_welcome",
+      targetKind: "participant",
+      threadIsDirect: true,
+    }));
+
+    expect(response.status).toBe(403);
+    expect(prisma.$transaction).not.toHaveBeenCalled();
+    expect(mocks.recordHostedLinqRuntimeDeliveryOutcomeTx).not.toHaveBeenCalled();
+  });
+
+  it("rejects malformed participant keys inside the signup-welcome namespace", async () => {
+    const response = await route.POST(buildDeliveryRequest({
+      acceptedAt: "2026-04-26T00:00:04.000Z",
+      attemptedAt: "2026-04-26T00:00:03.000Z",
+      directRecipientPhoneNumber: "+15550100001",
+      fromPhoneNumber: "+15550100099",
+      idempotencyKey: "signup-welcome:member_123:retry",
+      providerMessageId: "linq_message_welcome",
+      providerThreadId: "linq_chat_welcome",
+      targetKind: "participant",
+      threadIsDirect: true,
+    }));
+
+    expect(response.status).toBe(403);
+    expect(prisma.$transaction).not.toHaveBeenCalled();
+    expect(mocks.recordHostedLinqRuntimeDeliveryOutcomeTx).not.toHaveBeenCalled();
   });
 
   it("records an accepted runtime delivery outcome without raw recipient fallback for participant sends", async () => {

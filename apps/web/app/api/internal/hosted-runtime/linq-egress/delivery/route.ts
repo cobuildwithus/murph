@@ -16,9 +16,15 @@ import {
   hostedOnboardingError,
 } from "@/src/lib/hosted-onboarding/errors";
 import {
+  materializeHostedSignupWelcomeHomeRouteTx,
+} from "@/src/lib/hosted-onboarding/linq-home-routing";
+import {
   jsonOk,
   withJsonError,
 } from "@/src/lib/hosted-onboarding/http";
+import {
+  HOSTED_ONBOARDING_TRANSACTION_OPTIONS,
+} from "@/src/lib/hosted-onboarding/shared";
 import {
   linkHostedIngressLatencyTracesToAcceptedLinqDelivery,
 } from "@/src/lib/hosted-runtime-latency/store";
@@ -27,6 +33,7 @@ import { getPrisma } from "@/src/lib/prisma";
 
 const HOSTED_LINQ_EGRESS_DELIVERY_BODY_LIMIT_BYTES = 8 * 1024;
 const HOSTED_RUNTIME_ATTEMPT_ID_HEADER = "x-hosted-runtime-attempt-id";
+const HOSTED_LINQ_SIGNUP_WELCOME_IDEMPOTENCY_PREFIX = "signup-welcome:";
 // Must stay >= the hosted mailbox run import limit so one grouped auto-reply
 // can stamp every answered conversation item.
 const HOSTED_LINQ_DELIVERY_ANSWERED_MAILBOX_ITEM_ID_LIMIT = 100;
@@ -75,8 +82,14 @@ export const POST = withJsonError(async (request: Request) => {
     : [];
   const providerTarget = readOptionalBodyString(body.providerTarget);
   const providerThreadId = readOptionalBodyString(body.providerThreadId);
+  const providerMessageId = readOptionalBodyString(body.providerMessageId);
   const target = readOptionalBodyString(body.target);
   const fromPhoneNumber = readOptionalBodyString(body.fromPhoneNumber);
+  const directRecipientPhoneNumber = readOptionalBodyString(
+    body.directRecipientPhoneNumber,
+  );
+  const idempotencyKey = readOptionalBodyString(body.idempotencyKey);
+  const sourceRef = readOptionalBodyString(body.intentId) ?? idempotencyKey;
   const lineLookupKey = readOptionalBodyString(body.lineLookupKey);
   const linqChatId = providerThreadId
     ?? (targetKind === "participant" ? null : providerTarget ?? target);
@@ -88,25 +101,84 @@ export const POST = withJsonError(async (request: Request) => {
         memberId: userId,
         prisma,
       }));
-  const result = await recordHostedLinqRuntimeDeliveryOutcomeTx({
+  const outcomeInput = {
     acceptedAt,
     answeredMailboxItemIds,
     attemptedAt,
     failedAt,
     failureCode: readOptionalBodyString(body.failureCode),
     failureReason: readOptionalBodyString(body.failureReason),
-    idempotencyKey: readOptionalBodyString(body.idempotencyKey),
+    idempotencyKey,
     linqChatId,
-    messageId: readOptionalBodyString(body.providerMessageId),
+    messageId: providerMessageId,
     phoneNumber: routeLineLookupKey ? null : fromPhoneNumber,
     phoneNumberLookupKey: routeLineLookupKey,
-    prisma,
-    sourceRef: readOptionalBodyString(body.intentId)
-      ?? readOptionalBodyString(body.idempotencyKey),
+    sourceRef,
     targetKind,
     threadIsDirect,
     userId,
-  });
+  } as const;
+  const acceptedSignupWelcome = acceptedAt
+    ? parseHostedSignupWelcomeIdempotencyKey(idempotencyKey)
+    : null;
+  const claimsParticipantSignupWelcomeNamespace = Boolean(
+    acceptedAt
+    && targetKind === "participant"
+    && idempotencyKey?.startsWith(
+      HOSTED_LINQ_SIGNUP_WELCOME_IDEMPOTENCY_PREFIX,
+    ),
+  );
+  if (
+    (acceptedSignupWelcome && acceptedSignupWelcome !== userId)
+    || (
+      claimsParticipantSignupWelcomeNamespace
+      && acceptedSignupWelcome !== userId
+    )
+  ) {
+    throwHostedSignupWelcomeDeliveryAuthorityInvalid();
+  }
+
+  const result = acceptedSignupWelcome
+    ? await prisma.$transaction(async (tx) => {
+        if (
+          targetKind !== "participant"
+          || threadIsDirect !== true
+          || !providerThreadId
+          || !providerMessageId
+          || !fromPhoneNumber
+          || !directRecipientPhoneNumber
+        ) {
+          throwHostedSignupWelcomeDeliveryAuthorityInvalid();
+        }
+
+        await materializeHostedSignupWelcomeHomeRouteTx({
+          directRecipientPhoneNumber,
+          fromPhoneNumber,
+          idempotencyKey: idempotencyKey ?? "",
+          linqChatId: providerThreadId,
+          memberId: userId,
+          prisma: tx,
+        });
+        const recorded = await recordHostedLinqRuntimeDeliveryOutcomeTx({
+          ...outcomeInput,
+          phoneNumber: fromPhoneNumber,
+          phoneNumberLookupKey: null,
+          prisma: tx,
+        });
+        if (!recorded.recorded || !recorded.deliveryId) {
+          throw hostedOnboardingError({
+            code: "HOSTED_LINQ_SIGNUP_WELCOME_DELIVERY_NOT_RECORDED",
+            httpStatus: 503,
+            message: "Hosted signup welcome delivery outcome was not recorded.",
+            retryable: true,
+          });
+        }
+        return recorded;
+      }, HOSTED_ONBOARDING_TRANSACTION_OPTIONS)
+    : await recordHostedLinqRuntimeDeliveryOutcomeTx({
+        ...outcomeInput,
+        prisma,
+      });
 
   if (
     acceptedAt
@@ -129,6 +201,25 @@ export const POST = withJsonError(async (request: Request) => {
     recorded: result.recorded,
   });
 });
+
+function parseHostedSignupWelcomeIdempotencyKey(
+  value: string | null,
+): string | null {
+  if (!value?.startsWith(HOSTED_LINQ_SIGNUP_WELCOME_IDEMPOTENCY_PREFIX)) {
+    return null;
+  }
+  const memberId = value.slice(HOSTED_LINQ_SIGNUP_WELCOME_IDEMPOTENCY_PREFIX.length);
+  return memberId && !memberId.includes(":") ? memberId : null;
+}
+
+function throwHostedSignupWelcomeDeliveryAuthorityInvalid(): never {
+  throw hostedOnboardingError({
+    code: "HOSTED_LINQ_SIGNUP_WELCOME_DELIVERY_AUTHORITY_INVALID",
+    httpStatus: 403,
+    message: "Hosted signup welcome delivery authority is invalid.",
+    retryable: false,
+  });
+}
 
 function scheduleHostedIngressLatencyDeliveryLinkAfterResponse(input: {
   answeredMailboxItemIds: readonly string[];

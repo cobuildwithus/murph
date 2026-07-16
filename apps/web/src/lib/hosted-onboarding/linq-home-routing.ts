@@ -1,5 +1,9 @@
 import { type HostedMemberSnapshot } from "./hosted-member-store";
 import {
+  createHostedLinqChatLookupKeyReadCandidates,
+  createHostedPhoneLookupKeyReadCandidates,
+} from "./contact-privacy";
+import {
   acquireHostedMemberHomeLinqRouteLockTx,
   acquireHostedMemberHomeLinqRecipientAssignmentLockTx,
   countHostedMemberHomeLinqAssignmentsByRecipientPhoneSince,
@@ -24,10 +28,16 @@ import {
   type HostedLinqAssignableHomeLine,
   listHostedLinqAssignableHomeLines,
 } from "./linq-line-store";
+import {
+  createHostedLinqDeliveryIdempotencyLookupKey,
+} from "./linq-observability-identifiers";
 import { normalizePhoneNumber } from "./phone";
 import { hostedOnboardingError } from "./errors";
 import type { HostedLinqParticipantContact } from "./linq-participant-contact";
+import { lockHostedMemberRow } from "./shared";
 import type { Prisma } from "@prisma/client";
+
+const HOSTED_LINQ_SIGNUP_WELCOME_IDEMPOTENCY_PREFIX = "signup-welcome:";
 
 export interface HostedMemberActivationLinqRouteResolution {
   welcomeRoute: HostedMemberAssistantNotificationRoute;
@@ -75,6 +85,169 @@ export type HostedLinqHomeLineRouteBindingAuthority =
   | {
       kind: "member-identity";
     };
+
+export type HostedSignupWelcomeHomeRouteMaterializationResult =
+  | {
+      kind: "materialized" | "already_materialized";
+    }
+  | {
+      kind: "superseded";
+    };
+
+/**
+ * Promotes the provider chat returned by Murph's canonical participant welcome
+ * into the existing Web-owned home route. Provider/dashboard telemetry is not
+ * sufficient authority for this transition; the signed runtime callback must
+ * agree with the verified member, assigned line, and pre-provider dispatch
+ * fence while the current route is locked.
+ */
+export async function materializeHostedSignupWelcomeHomeRouteTx(input: {
+  directRecipientPhoneNumber: string;
+  fromPhoneNumber: string;
+  idempotencyKey: string;
+  linqChatId: string;
+  memberId: string;
+  prisma: Prisma.TransactionClient;
+}): Promise<HostedSignupWelcomeHomeRouteMaterializationResult> {
+  const idempotencyKey = input.idempotencyKey.trim();
+  const linqChatId = input.linqChatId.trim();
+  const directRecipientPhoneNumber = normalizePhoneNumber(
+    input.directRecipientPhoneNumber,
+  );
+  const fromPhoneNumber = normalizePhoneNumber(input.fromPhoneNumber);
+  const expectedIdempotencyKey =
+    `${HOSTED_LINQ_SIGNUP_WELCOME_IDEMPOTENCY_PREFIX}${input.memberId}`;
+  const deliveryIdempotencyLookupKey =
+    createHostedLinqDeliveryIdempotencyLookupKey(idempotencyKey);
+  const directRecipientLookupKeys =
+    createHostedPhoneLookupKeyReadCandidates(directRecipientPhoneNumber);
+  const fromPhoneLookupKeys =
+    createHostedPhoneLookupKeyReadCandidates(fromPhoneNumber);
+  const linqChatLookupKeys =
+    createHostedLinqChatLookupKeyReadCandidates(linqChatId);
+
+  if (
+    idempotencyKey !== expectedIdempotencyKey
+    || !deliveryIdempotencyLookupKey
+    || !directRecipientPhoneNumber
+    || directRecipientLookupKeys.length === 0
+    || !fromPhoneNumber
+    || fromPhoneLookupKeys.length === 0
+    || !linqChatId
+    || linqChatLookupKeys.length === 0
+  ) {
+    throwHostedSignupWelcomeRouteAuthorityInvalid();
+  }
+
+  // Identity reconciliation locks the member row before mutating verified
+  // identity. Taking the same lock closes the send-to-callback phone-change
+  // race without persisting the raw participant target.
+  await lockHostedMemberRow(input.prisma, input.memberId);
+  await acquireHostedMemberHomeLinqRouteLockTx({
+    memberId: input.memberId,
+    prisma: input.prisma,
+  });
+
+  const delivery = await input.prisma.hostedLinqDelivery.findUnique({
+    where: { idempotencyKey: deliveryIdempotencyLookupKey },
+    select: {
+      acceptedAt: true,
+      linqChatLookupKey: true,
+      phoneNumberLookupKey: true,
+      source: true,
+      targetKind: true,
+    },
+  });
+
+  if (
+    !delivery
+    || delivery.source !== "hosted_runtime_linq_delivery"
+    || delivery.targetKind !== "participant"
+    || !delivery.phoneNumberLookupKey
+    || !fromPhoneLookupKeys.includes(delivery.phoneNumberLookupKey)
+    || (
+      delivery.linqChatLookupKey !== null
+      && !linqChatLookupKeys.includes(delivery.linqChatLookupKey)
+    )
+    || (delivery.acceptedAt !== null && delivery.linqChatLookupKey === null)
+  ) {
+    throw hostedOnboardingError({
+      code: "HOSTED_LINQ_SIGNUP_WELCOME_DELIVERY_PROVENANCE_MISMATCH",
+      httpStatus: 409,
+      message: "Hosted signup welcome delivery does not match its provider dispatch claim.",
+      retryable: true,
+    });
+  }
+
+  const identity = await input.prisma.hostedMemberIdentity.findUnique({
+    where: { memberId: input.memberId },
+    select: {
+      phoneLookupKey: true,
+      phoneNumberVerifiedAt: true,
+    },
+  });
+  const routing = await readHostedMemberRoutingState({
+    memberId: input.memberId,
+    prisma: input.prisma,
+  });
+  const authority = readHostedLinqHomeLineAuthority(routing);
+  if (
+    (authority.kind === "home" || authority.kind === "pending")
+    && authority.chatId !== linqChatId
+  ) {
+    return { kind: "superseded" };
+  }
+
+  if (authority.kind === "none" || !authority.assignedAt) {
+    throw hostedOnboardingError({
+      code: "HOSTED_LINQ_SIGNUP_WELCOME_HOME_ROUTE_UNAVAILABLE",
+      httpStatus: 503,
+      message: "Hosted signup welcome home-line authority is unavailable.",
+      retryable: true,
+    });
+  }
+
+  if (
+    normalizePhoneNumber(authority.recipientPhone) !== fromPhoneNumber
+    || !identity?.phoneNumberVerifiedAt
+    || !identity.phoneLookupKey
+    || !directRecipientLookupKeys.includes(identity.phoneLookupKey)
+  ) {
+    // The send was valid when it crossed the provider fence, but current member
+    // identity or routing has since changed. Preserve the newer authority while
+    // still allowing the factual delivery outcome to be recorded.
+    return { kind: "superseded" };
+  }
+
+  await upsertHostedMemberHomeLinqBindingTx({
+    clearPending: true,
+    homeLineAssignedAt: authority.assignedAt,
+    linqChatId,
+    memberId: input.memberId,
+    participantContact: {
+      kind: "phone",
+      lookupKey: identity.phoneLookupKey,
+    },
+    prisma: input.prisma,
+    recipientPhone: fromPhoneNumber,
+  });
+
+  return {
+    kind:
+      authority.kind === "home"
+        ? "already_materialized"
+        : "materialized",
+  };
+}
+
+function throwHostedSignupWelcomeRouteAuthorityInvalid(): never {
+  throw hostedOnboardingError({
+    code: "HOSTED_LINQ_SIGNUP_WELCOME_ROUTE_AUTHORITY_INVALID",
+    httpStatus: 400,
+    message: "Hosted signup welcome route materialization authority is invalid.",
+    retryable: false,
+  });
+}
 
 export async function reserveHostedLinqHomeLineFromPoolTx(input: {
   preferredRecipientPhone: string | null;
