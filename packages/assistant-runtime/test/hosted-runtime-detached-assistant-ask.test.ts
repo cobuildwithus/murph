@@ -150,6 +150,64 @@ describe("hosted detached assistant ask controller", () => {
     }
   });
 
+  test("redacts a detached ask failure before durable requeue", async () => {
+    const vaultRoot = await createVaultRoot();
+
+    try {
+      await writePending(vaultRoot, [
+        createPendingAsk({ eventId: "ask_event_failure", itemId: "item_failure" }),
+      ]);
+      const controller = createHostedDetachedAssistantAskController({
+        assistantAskPort: {
+          async request(request) {
+            assert.equal(request.action, "prepare");
+            return {
+              action: "prepare",
+              question: "question whose execution will fail",
+              status: "ready",
+              targetLabel: "100 Club",
+            };
+          },
+        },
+        codexHome: null,
+        env: {},
+        async executeAsk() {
+          throw new Error(
+            "assistant ask failed for "
+              + "https://r2.example.test/private?X-Amz-Signature=fixture-secret "
+              + "with TOKEN=fixture-token and member_123",
+            {
+              cause: new TypeError(
+                "local scratch /tmp/hosted-runtime/assistant-ask.json",
+              ),
+            },
+          );
+        },
+        now: () => TEST_NOW,
+        onStateMutation() {},
+        vaultRoot,
+      });
+
+      controller.kick();
+      const safeErrorMessage =
+        "assistant ask failed for <redacted-url> with TOKEN=<redacted>"
+        + " and <redacted-user-id> | local scratch <redacted-path>";
+      await waitUntil(async () => {
+        const failed = (await readHostedSystemMailboxState(vaultRoot)).pending[0];
+        assert.equal(failed?.status, "pending");
+        assert.equal(failed?.lastErrorMessage, safeErrorMessage);
+        assert.equal(failed?.nextAttemptAt, "2026-07-15T12:01:00.000Z");
+        assert.doesNotMatch(
+          failed?.lastErrorMessage ?? "",
+          /fixture-secret|fixture-token|member_123|\/tmp\//u,
+        );
+      });
+      await controller.closeAndRequeue();
+    } finally {
+      await removeVaultRoot(vaultRoot);
+    }
+  });
+
   test("suppresses a sending wake and aborts, awaits, then requeues the exact ask", async () => {
     const vaultRoot = await createVaultRoot();
     const askStarted = createDeferred<void>();
