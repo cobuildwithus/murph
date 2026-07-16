@@ -29,6 +29,13 @@ const hostedPlanUsageRecommendedActionSchema = z
   })
   .strict();
 
+const hostedPlanUsageSubscriptionActionQuoteSchema = z
+  .object({
+    action: z.enum(["start_pulse_now", "upgrade_edge"]),
+    label: z.string().trim().min(1).max(80),
+  })
+  .strict();
+
 const hostedPlanUsageForecastSchema = z
   .object({
     estimatedDaysRemaining: z.number().int().positive(),
@@ -47,6 +54,8 @@ const hostedPlanUsageAvailableSchema = z
     planCode: z.enum(["launch_edge_monthly", "launch_monthly"]),
     planName: z.enum(HOSTED_PLAN_USAGE_PLAN_NAMES),
     recommendedAction: hostedPlanUsageRecommendedActionSchema.nullable(),
+    subscriptionActionQuote:
+      hostedPlanUsageSubscriptionActionQuoteSchema.nullable().optional(),
     remainingPercent: z.number().int().min(0).max(100),
     status: z.enum(["active", "exhausted"]),
     usedPercent: z.number().int().min(0).max(100),
@@ -58,6 +67,8 @@ const hostedPlanUsageUnavailableSchema = z
     generatedAt: hostedPlanUsageGeneratedAtSchema,
     reason: z.enum(HOSTED_PLAN_USAGE_UNAVAILABLE_REASONS),
     recommendedAction: hostedPlanUsageRecommendedActionSchema.nullable(),
+    subscriptionActionQuote:
+      hostedPlanUsageSubscriptionActionQuoteSchema.nullable().optional(),
     status: z.literal("unavailable"),
   })
   .strict();
@@ -67,7 +78,11 @@ export const hostedPlanUsageStatusSchema = z.union([
   hostedPlanUsageUnavailableSchema,
 ]);
 
-export const hostedPlanUsageToolRequestSchema = z.object({}).strict();
+export const hostedPlanUsageToolRequestSchema = z
+  .object({
+    includeSubscriptionActionQuote: z.literal(true).optional(),
+  })
+  .strict();
 
 export type HostedPlanUsageStatus = z.infer<typeof hostedPlanUsageStatusSchema>;
 export type HostedPlanUsageAvailableStatus = z.infer<
@@ -75,6 +90,9 @@ export type HostedPlanUsageAvailableStatus = z.infer<
 >;
 export type HostedPlanUsageRecommendedAction = z.infer<
   typeof hostedPlanUsageRecommendedActionSchema
+>;
+export type HostedPlanUsageSubscriptionActionQuote = z.infer<
+  typeof hostedPlanUsageSubscriptionActionQuoteSchema
 >;
 export type HostedPlanUsageToolRequest = z.infer<
   typeof hostedPlanUsageToolRequestSchema

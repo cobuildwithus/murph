@@ -1229,6 +1229,7 @@ describe('assistant Codex turn planning', () => {
       newsletterTool: { request: vi.fn() },
       planUsageTool: { read: vi.fn() },
       phoneCalls: { start: vi.fn() },
+      subscriptionTool: { request: vi.fn() },
     }
     const plan = await resolveAssistantRouteTurnPlan({
       acceptedInputItems: [{ id: 'group-phone-request', source: 'manual' }],
@@ -1311,10 +1312,63 @@ describe('assistant Codex turn planning', () => {
       'family_plan',
       'plan_usage',
       'send_vault_file',
+      'subscription',
     ]) {
       expect(plan.dynamicTools.map((tool) => tool.name)).not.toContain(personalTool)
     }
   })
+
+  it.each([
+    ['assistant-input', true],
+    ['manual', true],
+    ['initial', false],
+    ['system', false],
+  ] as const)(
+    'gates subscription actions on eligible current-turn %s input',
+    async (source, expectedAvailable) => {
+      planningMocks.readAssistantCliSurfaceBootstrapContext.mockResolvedValue(
+        'bootstrap contract',
+      )
+      planningMocks.readAssistantContextSnapshotPrompt.mockResolvedValue(null)
+      planningMocks.resolveCodexAssistantTargetCapabilities.mockReturnValue({
+        supportsNativeResume: false,
+      })
+      const hostedToolContext: AssistantHostedToolContext = {
+        ...createHostedToolContext(),
+        subscriptionTool: { request: vi.fn() },
+      }
+
+      const plan = await resolveAssistantRouteTurnPlan({
+        acceptedInputItems: [{
+          id: `ain_${'a'.repeat(32)}`,
+          source,
+        }],
+        executionContext: {
+          hosted: {
+            memberId: 'member-subscription-tool',
+            userEnvKeys: [],
+          },
+        },
+        hostedToolContext,
+        input: createMessageInput(),
+        profile: {
+          promptProfile: 'conversation',
+          threadScope: 'session-thread',
+          toolProfile: 'provider-turn',
+        },
+        promptTimeContext: {
+          currentLocalDate: '2026-07-15',
+          currentTimeZone: 'America/New_York',
+        },
+        route: createRoute(),
+        session: createSession(),
+        sharedPlan: createPrivateSharedPlan(),
+      })
+
+      expect(plan.dynamicTools.some((tool) => tool.name === 'subscription'))
+        .toBe(expectedAvailable)
+    },
+  )
 
   it('fails closed on personal prompt context and tools for an unverified external audience', async () => {
     planningMocks.readAssistantCliSurfaceBootstrapContext.mockResolvedValue('PERSONAL_CLI_CONTRACT')

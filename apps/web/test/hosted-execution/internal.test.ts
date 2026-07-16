@@ -12,6 +12,7 @@ import { afterEach, beforeEach, describe, expect, it } from "vitest";
 
 import { HostedOnboardingError } from "../../src/lib/hosted-onboarding/errors";
 import {
+  requireHostedCloudflareCallbackJsonRequest,
   requireHostedCloudflareCallbackRequest,
 } from "../../src/lib/hosted-execution/cloudflare-callback-auth";
 import type { HostedCallbackRequestNonceStore } from "../../src/lib/hosted-execution/internal-request-nonces";
@@ -201,6 +202,85 @@ describe("requireHostedCloudflareCallbackRequest", () => {
         payloadText: JSON.stringify({ eventId: "evt_123" }),
       }),
     ).rejects.toThrow(/Request body exceeded 8 bytes/u);
+  });
+
+  it("authenticates the exact body before decoding JSON", async () => {
+    const nonceStore = new MemoryNonceStore();
+    const request = await createSignedCallbackRequest({
+      body: JSON.stringify({ eventId: "evt_123" }),
+      nonce: "123456789abcdef0123456789abcdef0",
+      path: "/api/internal/hosted-runtime/log",
+      privateJwkJson: currentPrivateJwkJson,
+      userId: "member_123",
+    });
+
+    await expect(
+      requireHostedCloudflareCallbackJsonRequest(request, {
+        maxBodyBytes: 256 * 1024,
+        nonceStore,
+        nowMs: FIXED_NOW_MS,
+      }),
+    ).resolves.toEqual({
+      payload: { eventId: "evt_123" },
+      userId: "member_123",
+    });
+  });
+
+  it("decodes an authenticated whitespace body as an empty object", async () => {
+    const request = await createSignedCallbackRequest({
+      body: "  \n",
+      nonce: "23456789abcdef0123456789abcdef01",
+      path: "/api/internal/hosted-runtime/log",
+      privateJwkJson: currentPrivateJwkJson,
+      userId: "member_123",
+    });
+
+    await expect(
+      requireHostedCloudflareCallbackJsonRequest(request, {
+        maxBodyBytes: 256 * 1024,
+        nonceStore: new MemoryNonceStore(),
+        nowMs: FIXED_NOW_MS,
+      }),
+    ).resolves.toEqual({
+      payload: {},
+      userId: "member_123",
+    });
+  });
+
+  it("consumes the authenticated nonce before malformed JSON is rejected", async () => {
+    const nonceStore = new MemoryNonceStore();
+    const input = {
+      body: "{",
+      nonce: "3456789abcdef0123456789abcdef012",
+      path: "/api/internal/hosted-runtime/log",
+      privateJwkJson: currentPrivateJwkJson,
+      userId: "member_123",
+    };
+
+    await expect(
+      requireHostedCloudflareCallbackJsonRequest(
+        await createSignedCallbackRequest(input),
+        {
+          maxBodyBytes: 256 * 1024,
+          nonceStore,
+          nowMs: FIXED_NOW_MS,
+        },
+      ),
+    ).rejects.toBeInstanceOf(SyntaxError);
+
+    await expect(
+      requireHostedCloudflareCallbackJsonRequest(
+        await createSignedCallbackRequest(input),
+        {
+          maxBodyBytes: 256 * 1024,
+          nonceStore,
+          nowMs: FIXED_NOW_MS,
+        },
+      ),
+    ).rejects.toMatchObject({
+      code: "HOSTED_CLOUDFLARE_CALLBACK_REPLAYED",
+      httpStatus: 401,
+    } satisfies Partial<HostedOnboardingError>);
   });
 
   it("rejects requests whose bound user header was changed after signing", async () => {

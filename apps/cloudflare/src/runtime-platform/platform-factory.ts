@@ -23,6 +23,7 @@ import { createHostedRuntimeFamilyPlanToolPort } from "./family-plan-tool-port.t
 import { createHostedRuntimeGroupToolPort } from "./group-tool-port.ts";
 import { createHostedRuntimeNewsletterToolPort } from "./newsletter-tool-port.ts";
 import { createHostedRuntimePlanUsageToolPort } from "./plan-usage-tool-port.ts";
+import { createHostedRuntimeSubscriptionToolPort } from "./subscription-tool-port.ts";
 import { createCloudflareGeneratedImageUploader } from "./generated-image-uploader.ts";
 import { createHostedRuntimeIssueExportPort } from "./issue-export-port.ts";
 import { createHostedWebRuntimeLatencyTracePort } from "./latency-trace-port.ts";
@@ -264,6 +265,12 @@ export function buildHostedExecutionRuntimePlatform(input: {
             transport,
           }),
           planUsageToolPort: createHostedRuntimePlanUsageToolPort({
+            boundUserId: input.boundUserId,
+            fetchImpl,
+            timeoutMs,
+            transport,
+          }),
+          subscriptionToolPort: createHostedRuntimeSubscriptionToolPort({
             boundUserId: input.boundUserId,
             fetchImpl,
             timeoutMs,

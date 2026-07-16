@@ -851,6 +851,7 @@ model HostedMailboxItem {
   id                      String                @id
   userId                  String                @map("user_id")
   assistantInputLookupKey String?               @map("assistant_input_lookup_key")
+  subscriptionActionClaim String?               @map("subscription_action_claim")
   causalSeq               BigInt?               @map("causal_seq")
   lane                    String
   laneSeq                 BigInt                @map("lane_seq")

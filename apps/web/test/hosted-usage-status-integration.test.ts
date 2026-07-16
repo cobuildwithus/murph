@@ -51,7 +51,7 @@ describe("hosted plan usage production gate integration", () => {
       reason: "trial_conversion_pending",
       recommendedAction: {
         kind: "start_pulse",
-        label: "Start Pulse",
+        label: "Start Pulse now ($8/month)",
         url: "https://example.test/settings#subscription",
       },
       status: "unavailable",

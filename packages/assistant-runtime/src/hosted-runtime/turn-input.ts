@@ -52,7 +52,7 @@ export interface HostedAssistantInputSource extends AssistantInputSource {
   readSelectedInputIds(): string[];
 }
 
-export async function resolveHostedPersonalizationInputIdForAcceptedInputs(input: {
+export async function resolveHostedCurrentInputIdForAcceptedInputs(input: {
   assistantInputIds: readonly string[];
   vaultRoot: string;
 }): Promise<string | null> {

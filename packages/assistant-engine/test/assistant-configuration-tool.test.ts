@@ -493,7 +493,7 @@ function createHostedToolContext(input: {
     actionApprovalPort: null,
     assistantConfigurationTool: input.assistantConfigurationTool,
     computerToolsAvailable: false,
-    currentAssistantPreferenceInputId: () => input.assistantInputId ?? null,
+    currentAssistantInputId: () => input.assistantInputId ?? null,
     currentAssistantTarget: () => ({
       model: input.currentModel,
       reasoningEffort: input.currentReasoningEffort,

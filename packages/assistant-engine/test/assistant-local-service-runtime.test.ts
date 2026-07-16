@@ -4146,19 +4146,19 @@ test('sendAssistantMessageLocal probes active-turn input once before provider st
   ])
 })
 
-test('sendAssistantMessageLocal exposes hosted personalization input authority to dynamic tools', async () => {
+test('sendAssistantMessageLocal exposes hosted current-input authority to dynamic tools', async () => {
   const assistantInputId = 'ain_44444444444444444444444444444444'
   const { mocks, sendAssistantMessageLocal } = await loadLocalServiceModule()
 
   await sendAssistantMessageLocal({
     executionContext: {
       hosted: {
-        currentAssistantPreferenceInputId: () => assistantInputId,
+        currentAssistantInputId: () => assistantInputId,
         memberId: 'member-hosted',
         userEnvKeys: [],
       },
     },
-    prompt: 'Use the current hosted personalization authority.',
+    prompt: 'Use the current hosted input authority.',
     vault: '/vaults/test',
   })
 
@@ -4166,7 +4166,7 @@ test('sendAssistantMessageLocal exposes hosted personalization input authority t
     mocks.executeCodexTurnWithRecovery.mock.calls[0]?.[0]?.hostedToolContext
   assert.ok(hostedToolContext)
   assert.equal(
-    hostedToolContext.currentAssistantPreferenceInputId?.(),
+    hostedToolContext.currentAssistantInputId?.(),
     assistantInputId,
   )
 })

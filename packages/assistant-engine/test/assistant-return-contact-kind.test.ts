@@ -63,6 +63,39 @@ describe('assistant return contact kind', () => {
       returnContactKind: 'telegram',
     })
   })
+
+  it('lets one subscription action claim only the terminal eligible input', () => {
+    const firstInputId = `ain_${'a'.repeat(32)}`
+    const currentInputId = `ain_${'b'.repeat(32)}`
+    let acceptedInputIds = [firstInputId, currentInputId]
+    const hostedToolContext = createAssistantHostedToolContext({
+      getAssistantInputId: () => currentInputId,
+      getUserActionAcceptedInputIds: () => acceptedInputIds,
+      messageInput: createMessageInput({
+        channel: 'linq',
+        hostedDeliveryIdempotency: null,
+      }),
+      session: createAssistantSession(),
+    })
+
+    expect(hostedToolContext.claimSubscriptionAssistantInputId?.())
+      .toBe(currentInputId)
+    expect(hostedToolContext.claimSubscriptionAssistantInputId?.()).toBeNull()
+
+    acceptedInputIds = [currentInputId, firstInputId]
+    expect(hostedToolContext.currentAssistantInputId?.()).toBe(currentInputId)
+    const nextHostedToolContext = createAssistantHostedToolContext({
+      getAssistantInputId: () => currentInputId,
+      getUserActionAcceptedInputIds: () => acceptedInputIds,
+      messageInput: createMessageInput({
+        channel: 'linq',
+        hostedDeliveryIdempotency: null,
+      }),
+      session: createAssistantSession(),
+    })
+    expect(nextHostedToolContext.claimSubscriptionAssistantInputId?.())
+      .toBeNull()
+  })
 })
 
 function createMessageInput(input: {

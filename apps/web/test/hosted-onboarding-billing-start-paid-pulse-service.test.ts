@@ -62,6 +62,7 @@ vi.mock("@/src/lib/hosted-onboarding/stripe-billing-events", () => ({
 }));
 
 import {
+  continueHostedPulseTrialPaidPlan,
   startHostedPulseTrialPaidPlan,
 } from "@/src/lib/hosted-onboarding/billing-start-paid-pulse-service";
 
@@ -149,6 +150,117 @@ describe("startHostedPulseTrialPaidPlan", () => {
     });
     expect(mocks.applyStripeInvoicePaid).not.toHaveBeenCalled();
     expect(mocks.signalHostedRuntimeManualWakeBestEffort).not.toHaveBeenCalled();
+  });
+
+  test("keeps a card-backed active Pulse trial running until its natural end", async () => {
+    await expect(continueHostedPulseTrialPaidPlan({
+      memberId: "member_123",
+      now: new Date("2026-05-06T00:00:00.000Z"),
+    })).resolves.toEqual({
+      billingPlanCode: "launch_monthly",
+      status: "continuing",
+    });
+
+    expect(mocks.stripe.subscriptions.retrieve).toHaveBeenCalledWith("sub_123", {
+      expand: ["customer", "items.data.price", "latest_invoice", "latest_invoice.payment_intent"],
+    });
+    expect(mocks.stripe.billingPortal.sessions.create).not.toHaveBeenCalled();
+    expect(mocks.stripe.subscriptions.update).not.toHaveBeenCalled();
+    expect(mocks.stripe.subscriptions.resume).not.toHaveBeenCalled();
+    expect(mocks.withHostedMemberStripeMutationLock).not.toHaveBeenCalled();
+  });
+
+  test("collects a default payment method without ending an active trial", async () => {
+    mocks.stripe.subscriptions.retrieve.mockResolvedValueOnce(makeSubscription({
+      customer: makeCustomer({
+        defaultPaymentMethod: null,
+        defaultSource: null,
+      }),
+      defaultPaymentMethod: null,
+      defaultSource: null,
+    }));
+
+    await expect(continueHostedPulseTrialPaidPlan({
+      memberId: "member_123",
+      now: new Date("2026-05-06T00:00:00.000Z"),
+    })).resolves.toEqual({
+      billingPlanCode: "launch_monthly",
+      paymentUrl: "https://billing.stripe.test/session_123",
+      status: "payment_required",
+    });
+
+    expect(mocks.stripe.billingPortal.sessions.create).toHaveBeenCalledWith({
+      customer: "cus_123",
+      flow_data: {
+        after_completion: {
+          redirect: {
+            return_url: "https://join.example.test/settings",
+          },
+          type: "redirect",
+        },
+        type: "payment_method_update",
+      },
+      return_url: "https://join.example.test/settings",
+    });
+    expect(mocks.stripe.subscriptions.update).not.toHaveBeenCalled();
+    expect(mocks.stripe.subscriptions.resume).not.toHaveBeenCalled();
+  });
+
+  test("rejects continuation after the local Pulse trial has ended without contacting Stripe", async () => {
+    mocks.readHostedMemberCoreState.mockResolvedValueOnce({
+      billingStatus: HostedBillingStatus.paused,
+      createdAt: new Date("2026-05-01T00:00:00.000Z"),
+      id: "member_123",
+      suspendedAt: null,
+      updatedAt: new Date("2026-05-01T00:00:00.000Z"),
+    });
+    mocks.readHostedMemberStripeBillingRef.mockResolvedValueOnce(makeBillingRef({
+      currentBillingPhase: null,
+    }));
+    await expect(continueHostedPulseTrialPaidPlan({
+      memberId: "member_123",
+      now: new Date("2026-05-06T00:00:00.000Z"),
+    })).rejects.toMatchObject({
+      code: "HOSTED_PULSE_TRIAL_START_PAID_UNSUPPORTED",
+      httpStatus: 409,
+    });
+
+    expect(mocks.requireHostedStripeBillingPlanConfig).not.toHaveBeenCalled();
+    expect(mocks.stripe.subscriptions.retrieve).not.toHaveBeenCalled();
+    expect(mocks.stripe.billingPortal.sessions.create).not.toHaveBeenCalled();
+    expect(mocks.stripe.subscriptions.update).not.toHaveBeenCalled();
+    expect(mocks.stripe.subscriptions.resume).not.toHaveBeenCalled();
+    expect(mocks.withHostedMemberStripeMutationLock).not.toHaveBeenCalled();
+  });
+
+  test("resumes when the local Pulse trial is active but Stripe has just paused it", async () => {
+    mocks.readHostedMemberStripeBillingRef.mockResolvedValueOnce(makeBillingRef({
+      currentBillingPhase: "trial",
+    }));
+    mocks.stripe.subscriptions.retrieve.mockResolvedValueOnce(makeSubscription({
+      customer: makeCustomer({
+        defaultPaymentMethod: "pm_customer_123",
+        defaultSource: null,
+      }),
+      defaultPaymentMethod: null,
+      defaultSource: null,
+      status: "paused",
+      trialEnd: null,
+    }));
+
+    await expect(continueHostedPulseTrialPaidPlan({
+      memberId: "member_123",
+      now: new Date("2026-05-06T00:00:00.000Z"),
+    })).resolves.toEqual({
+      billingPlanCode: "launch_monthly",
+      status: "billing_pending",
+    });
+
+    expect(mocks.stripe.subscriptions.retrieve).toHaveBeenCalledTimes(1);
+    expect(mocks.stripe.billingPortal.sessions.create).not.toHaveBeenCalled();
+    expect(mocks.withHostedMemberStripeMutationLock).toHaveBeenCalledTimes(1);
+    expect(mocks.stripe.subscriptions.update).toHaveBeenCalledTimes(1);
+    expect(mocks.stripe.subscriptions.resume).toHaveBeenCalledTimes(1);
   });
 
   test("routes no-card trials through Stripe payment-method setup before ending the trial", async () => {
