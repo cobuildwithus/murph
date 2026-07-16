@@ -45,6 +45,7 @@ export async function startAuthorizedHostedAiUsageLimitNoticeDispatchTx(input: {
   source: HostedAiUsageLimitNoticeDeliverySource;
   sourceRef: string;
   targetKind: string;
+  usageCreditLedgerVersion: bigint;
 }): Promise<HostedAiUsageLimitNoticeAuthorizedDeliveryClaim> {
   const targetNotAuthorized = new Error(
     "Hosted AI usage-limit notice target is no longer authorized.",
@@ -57,6 +58,13 @@ export async function startAuthorizedHostedAiUsageLimitNoticeDispatchTx(input: {
     return await input.prisma.$transaction(async (prisma) => {
       return await startHostedAiUsageLimitNoticeDispatchTx({
         assertDispatchAuthority: async (claimPrisma) => {
+          if (!await lockHostedAiUsageLimitNoticeCapacityEpochTx({
+            memberId: input.memberId,
+            tx: claimPrisma,
+            usageCreditLedgerVersion: input.usageCreditLedgerVersion,
+          })) {
+            throw noticeNotEligible;
+          }
           if (!await isHostedAiUsageLimitNoticeTargetAuthorizedTx({
             memberId: input.memberId,
             noticeDeliveryTarget: input.noticeDeliveryTarget,
@@ -84,6 +92,7 @@ export async function startAuthorizedHostedAiUsageLimitNoticeDispatchTx(input: {
         source: input.source,
         sourceRef: input.sourceRef,
         targetKind: input.targetKind,
+        usageCreditLedgerVersion: input.usageCreditLedgerVersion,
       });
     }, {
       ...HOSTED_ONBOARDING_TRANSACTION_OPTIONS,
@@ -101,6 +110,22 @@ export async function startAuthorizedHostedAiUsageLimitNoticeDispatchTx(input: {
     }
     throw error;
   }
+}
+
+async function lockHostedAiUsageLimitNoticeCapacityEpochTx(input: {
+  memberId: string;
+  tx: Prisma.TransactionClient;
+  usageCreditLedgerVersion: bigint;
+}): Promise<boolean> {
+  const rows = await input.tx.$queryRaw<Array<{ eligible: boolean }>>`
+    SELECT TRUE AS "eligible"
+    FROM "hosted_member"
+    WHERE "id" = ${input.memberId}
+      AND COALESCE("usage_credit_ledger_version", 0) = ${input.usageCreditLedgerVersion}
+    FOR UPDATE
+  `;
+
+  return rows[0]?.eligible === true;
 }
 
 async function lockHostedAiUsageLimitNoticeEligibilityTx(input: {

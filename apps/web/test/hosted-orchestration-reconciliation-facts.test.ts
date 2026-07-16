@@ -15,6 +15,7 @@ const mocks = vi.hoisted(() => ({
   hasHostedMemberEstablishedLinqHomeRoute: vi.fn(),
   hostedThreadContainerParticipantFindFirst: vi.fn(),
   hostedMemberFindUnique: vi.fn(),
+  projectHostedAiUsageLimitNoticeForDelivery: vi.fn(),
   readHostedMailboxConsumedSeqByLane: vi.fn(),
   readHostedMailboxLatestPendingConversationItem: vi.fn(),
   readHostedMailboxMaxSeqByLane: vi.fn(),
@@ -24,6 +25,8 @@ const mocks = vi.hoisted(() => ({
   readHostedWorkspace: vi.fn(),
   requireHostedCloudflareCallbackRequest: vi.fn(),
   resolveHostedRuntimeAiUsageGate: vi.fn(),
+  sendClaimedHostedAiUsageLimitNoticeToLinqChat: vi.fn(),
+  sendClaimedHostedAiUsageLimitNoticeToTelegramThread: vi.fn(),
   sendHostedTrialConversionNoticeToLinqChat: vi.fn(),
 }));
 
@@ -43,7 +46,16 @@ vi.mock("@/src/lib/hosted-mailbox/store", () => ({
 }));
 
 vi.mock("@/src/lib/hosted-execution/usage-limit-notice", () => ({
+  sendClaimedHostedAiUsageLimitNoticeToLinqChat:
+    mocks.sendClaimedHostedAiUsageLimitNoticeToLinqChat,
+  sendClaimedHostedAiUsageLimitNoticeToTelegramThread:
+    mocks.sendClaimedHostedAiUsageLimitNoticeToTelegramThread,
   sendHostedTrialConversionNoticeToLinqChat: mocks.sendHostedTrialConversionNoticeToLinqChat,
+}));
+
+vi.mock("@/src/lib/hosted-execution/usage-limit-notice-message", () => ({
+  projectHostedAiUsageLimitNoticeForDelivery:
+    mocks.projectHostedAiUsageLimitNoticeForDelivery,
 }));
 
 vi.mock("@/src/lib/hosted-onboarding/hosted-member-store", () => ({
@@ -126,6 +138,9 @@ describe("hosted orchestration reconciliation facts", () => {
       throw new Error("Configure Linq inbound evidence explicitly for engagement tests.");
     });
     mocks.hostedThreadContainerParticipantFindFirst.mockResolvedValue(null);
+    mocks.projectHostedAiUsageLimitNoticeForDelivery.mockImplementation(
+      async (input: { message: string }) => input.message,
+    );
     mocks.readHostedWorkspace.mockResolvedValue(buildWorkspaceRecord());
     mocks.readHostedMailboxMaxSeqByLane.mockResolvedValue(noMailboxBacklog());
     mocks.readHostedMailboxConsumedSeqByLane.mockResolvedValue([
@@ -658,6 +673,161 @@ describe("hosted orchestration reconciliation facts", () => {
     });
   });
 
+  it("retries the current capacity-epoch Linq usage-limit notice from the denied gate", async () => {
+    const deniedDecision = buildUsageLimitExceededGateDecision();
+    mocks.projectHostedAiUsageLimitNoticeForDelivery.mockImplementation(
+      async (input: { message: string }) =>
+        `${input.message}\n\nAdd usage: ` +
+        "https://www.withmurph.ai/settings?addUsage=true#subscription",
+    );
+    mocks.readHostedWorkspace.mockResolvedValue(buildWorkspaceRecord({
+      redactedStatusJson: {
+        conversationImportedSeq: "2",
+        systemImportedSeq: "0",
+      },
+    }));
+    mocks.readHostedMailboxMaxSeqByLane.mockResolvedValue([
+      { lane: "conversation", maxSeq: "3" },
+      { lane: "system", maxSeq: "0" },
+    ]);
+    mocks.resolveHostedRuntimeAiUsageGate.mockResolvedValue({
+      decision: deniedDecision,
+      status: "denied",
+    });
+    mocks.readHostedMailboxLatestPendingConversationItem.mockResolvedValue(
+      buildPendingConversationItem(),
+    );
+    const routeAuthority = {
+      accountLookupKey: "hbidx:phone:v1:line_runtime_denied",
+      channel: "linq" as const,
+      containerMemberId: MEMBER_ID,
+      threadId: "chat_runtime_denied",
+    };
+    mocks.decodeHostedMailboxStoredPayload.mockResolvedValue(buildLinqConversationWake({
+      routeAuthority,
+    }));
+    mocks.sendClaimedHostedAiUsageLimitNoticeToLinqChat
+      .mockRejectedValueOnce(new Error("provider unavailable"))
+      .mockResolvedValueOnce({ status: "sent" });
+
+    const firstResponse = await reconciliationRoute.GET(
+      requestForFacts(),
+      routeContext(),
+    );
+    const retryResponse = await reconciliationRoute.GET(
+      requestForFacts(),
+      routeContext(),
+    );
+
+    expect(firstResponse.status).toBe(500);
+    expect(retryResponse.status).toBe(200);
+    expect(mocks.sendClaimedHostedAiUsageLimitNoticeToLinqChat).toHaveBeenCalledTimes(2);
+    expect(mocks.sendClaimedHostedAiUsageLimitNoticeToLinqChat).toHaveBeenLastCalledWith({
+      chatId: "chat_runtime_denied",
+      claimToken: {
+        periodStart: deniedDecision.periodStart.toISOString(),
+        sentAt: FIXED_NOW,
+        usageCreditLedgerVersion: "3",
+      },
+      memberId: MEMBER_ID,
+      message:
+        `${deniedDecision.userNotice.message}\n\nAdd usage: ` +
+        "https://www.withmurph.ai/settings?addUsage=true#subscription",
+      noticeCode: deniedDecision.userNotice.code,
+      occurredAt: FIXED_NOW,
+      prisma: expect.objectContaining({ kind: "prisma" }),
+      replyToMessageId: "msg_runtime_denied",
+      routeAuthority,
+      sourceEventId: "linq_event_runtime_denied",
+    });
+    expect(mocks.projectHostedAiUsageLimitNoticeForDelivery).toHaveBeenCalledWith({
+      memberId: MEMBER_ID,
+      message: deniedDecision.userNotice.message,
+      prisma: expect.objectContaining({ kind: "prisma" }),
+    });
+  });
+
+  it("retries the current capacity-epoch Telegram usage-limit notice from the denied gate", async () => {
+    const deniedDecision = buildUsageLimitExceededGateDecision();
+    mocks.readHostedWorkspace.mockResolvedValue(buildWorkspaceRecord({
+      redactedStatusJson: {
+        conversationImportedSeq: "2",
+        systemImportedSeq: "0",
+      },
+    }));
+    mocks.readHostedMailboxMaxSeqByLane.mockResolvedValue([
+      { lane: "conversation", maxSeq: "3" },
+      { lane: "system", maxSeq: "0" },
+    ]);
+    mocks.resolveHostedRuntimeAiUsageGate.mockResolvedValue({
+      decision: deniedDecision,
+      status: "denied",
+    });
+    mocks.readHostedMailboxLatestPendingConversationItem.mockResolvedValue(
+      buildPendingConversationItem(),
+    );
+    mocks.decodeHostedMailboxStoredPayload.mockResolvedValue(buildTelegramConversationWake());
+    mocks.sendClaimedHostedAiUsageLimitNoticeToTelegramThread.mockResolvedValue({
+      status: "sent",
+    });
+
+    const response = await reconciliationRoute.GET(
+      requestForFacts(),
+      routeContext(),
+    );
+
+    expect(response.status).toBe(200);
+    expect(mocks.sendClaimedHostedAiUsageLimitNoticeToTelegramThread).toHaveBeenCalledWith({
+      memberId: MEMBER_ID,
+      message: deniedDecision.userNotice.message,
+      periodStart: deniedDecision.periodStart,
+      prisma: expect.objectContaining({ kind: "prisma" }),
+      replyToMessageId: "7000",
+      sentAt: new Date(FIXED_NOW),
+      sourceEventId: "telegram_event_runtime_denied",
+      target: "telegram_chat_runtime_denied:business:biz-42:dm-topic:9",
+      usageCreditLedgerVersion: 3n,
+    });
+  });
+
+  it("schedules the Telegram notice retry returned by the durable claim", async () => {
+    const deniedDecision = buildUsageLimitExceededGateDecision();
+    const retryAt = new Date("2026-05-20T12:05:00.000Z");
+    mocks.readHostedWorkspace.mockResolvedValue(buildWorkspaceRecord({
+      redactedStatusJson: {
+        conversationImportedSeq: "2",
+        systemImportedSeq: "0",
+      },
+    }));
+    mocks.readHostedMailboxMaxSeqByLane.mockResolvedValue([
+      { lane: "conversation", maxSeq: "3" },
+      { lane: "system", maxSeq: "0" },
+    ]);
+    mocks.resolveHostedRuntimeAiUsageGate.mockResolvedValue({
+      decision: deniedDecision,
+      status: "denied",
+    });
+    mocks.readHostedMailboxLatestPendingConversationItem.mockResolvedValue(
+      buildPendingConversationItem(),
+    );
+    mocks.decodeHostedMailboxStoredPayload.mockResolvedValue(buildTelegramConversationWake());
+    mocks.sendClaimedHostedAiUsageLimitNoticeToTelegramThread.mockResolvedValue({
+      retryAt,
+      status: "in_flight",
+    });
+
+    const response = await reconciliationRoute.GET(
+      requestForFacts(),
+      routeContext(),
+    );
+    const facts = parseHostedRuntimeReconciliationFacts(await response.json());
+
+    expect(facts.blocked).toEqual({
+      reason: "ai_usage_denied",
+      retryAt: retryAt.toISOString(),
+    });
+  });
+
   it("selects the latest pending conversation row for the current Linq notice", async () => {
     const deniedDecision = buildTrialConversionPendingUsageGateDecision();
     mocks.readHostedWorkspace.mockResolvedValue(buildWorkspaceRecord({
@@ -986,6 +1156,37 @@ describe("hosted orchestration reconciliation facts", () => {
     });
     expect(mocks.readHostedMailboxLatestPendingConversationItem).not.toHaveBeenCalled();
     expect(mocks.sendHostedTrialConversionNoticeToLinqChat).not.toHaveBeenCalled();
+  });
+
+  it("does not retry usage-limit delivery for read-only status checks", async () => {
+    mocks.readHostedWorkspace.mockResolvedValue(buildWorkspaceRecord({
+      redactedStatusJson: {
+        conversationImportedSeq: "2",
+        systemImportedSeq: "0",
+      },
+    }));
+    mocks.readHostedMailboxMaxSeqByLane.mockResolvedValue([
+      { lane: "conversation", maxSeq: "3" },
+      { lane: "system", maxSeq: "0" },
+    ]);
+    mocks.resolveHostedRuntimeAiUsageGate.mockResolvedValue({
+      decision: buildUsageLimitExceededGateDecision(),
+      status: "denied",
+    });
+
+    const {
+      readHostedRuntimeReconciliationFacts,
+    } = await import("../src/lib/hosted-orchestration/runtime-reconciliation-facts");
+    const facts = await readHostedRuntimeReconciliationFacts({
+      decisionSource: "status",
+      usageGateMode: "read_only",
+      userId: MEMBER_ID,
+    });
+
+    expect(facts.blocked?.reason).toBe("ai_usage_denied");
+    expect(mocks.readHostedMailboxLatestPendingConversationItem).not.toHaveBeenCalled();
+    expect(mocks.sendClaimedHostedAiUsageLimitNoticeToLinqChat).not.toHaveBeenCalled();
+    expect(mocks.sendClaimedHostedAiUsageLimitNoticeToTelegramThread).not.toHaveBeenCalled();
   });
 
   it("does not gate future model-capable workspace wakes", async () => {
@@ -1332,6 +1533,28 @@ function buildTrialConversionPendingUsageGateDecision() {
     userNotice: {
       code: "trial_conversion_pending",
       message: "Your Murph trial needs billing before I can keep going.",
+    },
+  };
+}
+
+function buildUsageLimitExceededGateDecision() {
+  return {
+    allowed: false,
+    allowanceSource: "direct_paid_member_plan" as const,
+    billingPlanCode: "launch_monthly",
+    limitUsdMicros: 10_000_000n,
+    memberId: MEMBER_ID,
+    periodEnd: new Date("2026-06-01T00:00:00.000Z"),
+    periodStart: new Date("2026-05-01T00:00:00.000Z"),
+    reason: "ai_usage_limit_exceeded" as const,
+    remainingUsdMicros: 0n,
+    retryAfter: new Date("2026-06-01T00:00:00.000Z"),
+    spentUsdMicros: 10_000_000n,
+    usageCreditBalanceUsdMicros: 0n,
+    usageCreditLedgerVersion: 3n,
+    userNotice: {
+      code: "pulse_upgrade_edge" as const,
+      message: "You've reached your Murph usage limit. Add more usage in Settings.",
     },
   };
 }

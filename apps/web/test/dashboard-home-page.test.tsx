@@ -165,6 +165,7 @@ beforeEach(() => {
   });
   mocks.resolveHostedAiUsageGate.mockResolvedValue({
     allowed: true,
+    allowanceSource: "direct_paid_member_plan",
     billingPlanCode: "launch_monthly",
     limitUsdMicros: 10_000_000n,
     memberId: MEMBER.id,
@@ -172,6 +173,8 @@ beforeEach(() => {
     periodStart: new Date("2026-05-01T00:00:00.000Z"),
     remainingUsdMicros: 4_000_000n,
     spentUsdMicros: 6_000_000n,
+    usageCreditBalanceUsdMicros: 0n,
+    usageCreditLedgerVersion: 0n,
   });
   mocks.projectHostedPersonalAiUsageStatus.mockResolvedValue({
     generatedAt: "2026-05-26T12:00:00.000Z",
@@ -253,9 +256,34 @@ test("HomePage shows the resume billing banner for paused Pulse Trial users", as
   assert.equal(mocks.readHostedMemberBillingEligibilityState.mock.calls.length, 1);
 });
 
-test("HomePage shows an advisory while Pulse replies continue after included usage is exhausted", async () => {
+test("HomePage does not show a blocked banner while purchased usage remains", async () => {
   mocks.resolveHostedAiUsageGate.mockResolvedValueOnce({
     allowed: true,
+    allowanceSource: "direct_paid_member_plan",
+    billingPlanCode: "launch_monthly",
+    limitUsdMicros: 10_000_000n,
+    memberId: MEMBER.id,
+    periodEnd: new Date("2026-06-01T00:00:00.000Z"),
+    periodStart: new Date("2026-05-01T00:00:00.000Z"),
+    remainingUsdMicros: 2_000_000n,
+    spentUsdMicros: 10_000_000n,
+    usageCreditBalanceUsdMicros: 2_000_000n,
+    usageCreditLedgerVersion: 3n,
+  });
+
+  const { default: HomePage } = await import("../app/(dashboard)/home/page");
+  const markup = renderToStaticMarkup(await HomePage());
+
+  assert.doesNotMatch(markup, /Account notice/);
+  assert.doesNotMatch(markup, /New replies and other AI work are blocked/);
+  assert.doesNotMatch(markup, />Add usage</);
+  assert.equal(mocks.projectHostedPersonalAiUsageStatus.mock.calls.length, 0);
+});
+
+test("HomePage shows blocked Pulse usage with an add-usage action", async () => {
+  mocks.resolveHostedAiUsageGate.mockResolvedValueOnce({
+    allowed: false,
+    allowanceSource: "direct_paid_member_plan",
     billingPlanCode: "launch_monthly",
     limitUsdMicros: 10_000_000n,
     memberId: MEMBER.id,
@@ -265,18 +293,20 @@ test("HomePage shows an advisory while Pulse replies continue after included usa
     remainingUsdMicros: 0n,
     retryAfter: new Date("2026-06-01T00:00:00.000Z"),
     spentUsdMicros: 10_000_000n,
+    usageCreditBalanceUsdMicros: 0n,
+    usageCreditLedgerVersion: 0n,
     userNotice: {
       code: "pulse_upgrade_edge",
       message:
-        "You've used 100% of this month's included Pulse usage. Murph keeps replying.",
+        "You've used 100% of this month's included Pulse usage. New usage is blocked.",
     },
   });
   mocks.projectHostedPersonalAiUsageStatus.mockResolvedValueOnce({
     generatedAt: "2026-05-26T12:00:00.000Z",
     recommendedAction: {
-      kind: "upgrade_edge",
-      label: "Upgrade from usage projection",
-      url: "https://example.test/settings#subscription",
+      kind: "add_usage",
+      label: "Add usage",
+      url: "/settings?addUsage=true#subscription",
     },
     status: "unavailable",
   });
@@ -286,11 +316,11 @@ test("HomePage shows an advisory while Pulse replies continue after included usa
 
   assert.match(markup, /used 100% of this month(?:&#x27;|')s included Pulse usage/u);
   assert.match(markup, /Resets in 6 days/);
-  assert.match(markup, /Murph keeps replying/);
-  assert.match(markup, /less capable model that uses less of your included usage/);
-  assert.match(markup, /Edge offers more included usage/);
-  assert.match(markup, /Upgrade from usage projection/);
-  assert.match(markup, /href="https:\/\/example\.test\/settings#subscription"/);
+  assert.match(markup, /New replies and other AI work are blocked/);
+  assert.match(markup, /until you add usage or your included usage resets/);
+  assert.match(markup, /You can add more usage now/);
+  assert.match(markup, />Add usage</);
+  assert.match(markup, /href="\/settings\?addUsage=true#subscription"/);
   assert.equal(mocks.resolveHostedAiUsageGate.mock.calls.length, 1);
   assert.equal(mocks.projectHostedPersonalAiUsageStatus.mock.calls.length, 1);
   assert.equal(
@@ -299,12 +329,13 @@ test("HomePage shows an advisory while Pulse replies continue after included usa
   );
 });
 
-test("HomePage keeps the exhausted Pulse advisory when action resolution fails closed", async () => {
+test("HomePage keeps the exhausted Pulse block notice when action resolution fails closed", async () => {
   mocks.readHostedMemberBillingEligibilityState.mockRejectedValue(
     new Error("billing eligibility unavailable"),
   );
   mocks.resolveHostedAiUsageGate.mockResolvedValueOnce({
-    allowed: true,
+    allowed: false,
+    allowanceSource: "direct_paid_member_plan",
     billingPlanCode: "launch_monthly",
     limitUsdMicros: 10_000_000n,
     memberId: MEMBER.id,
@@ -314,10 +345,12 @@ test("HomePage keeps the exhausted Pulse advisory when action resolution fails c
     remainingUsdMicros: 0n,
     retryAfter: new Date("2026-06-01T00:00:00.000Z"),
     spentUsdMicros: 10_000_000n,
+    usageCreditBalanceUsdMicros: 0n,
+    usageCreditLedgerVersion: 0n,
     userNotice: {
       code: "pulse_upgrade_edge",
       message:
-        "You've used 100% of this month's included Pulse usage. Murph keeps replying.",
+        "You've used 100% of this month's included Pulse usage. New usage is blocked.",
     },
   });
   mocks.projectHostedPersonalAiUsageStatus.mockResolvedValueOnce({
@@ -339,11 +372,11 @@ test("HomePage keeps the exhausted Pulse advisory when action resolution fails c
   const markup = renderToStaticMarkup(await HomePage());
 
   assert.match(markup, /used 100% of this month(?:&#x27;|')s included Pulse usage/u);
-  assert.match(markup, /Murph keeps replying/);
-  assert.match(markup, /less capable model that uses less of your included usage/);
-  assert.doesNotMatch(markup, /Edge offers more included usage/);
-  assert.doesNotMatch(markup, /Upgrade from usage projection/);
-  assert.doesNotMatch(markup, /settings#subscription/);
+  assert.match(markup, /New replies and other AI work are blocked/);
+  assert.match(markup, /until your included usage resets/);
+  assert.doesNotMatch(markup, /You can add more usage now/);
+  assert.doesNotMatch(markup, />Add usage</);
+  assert.doesNotMatch(markup, /addUsage=true/);
   assert.equal(mocks.readHostedMemberBillingEligibilityState.mock.calls.length, 0);
 });
 
@@ -359,9 +392,10 @@ test("UsageLimitBanner omits thread-container notices from the personal dashboar
   assert.equal(markup, "");
 });
 
-test("HomePage shows a monthly reset advisory while Edge replies continue", async () => {
+test("HomePage shows blocked Edge usage with an add-usage action", async () => {
   mocks.resolveHostedAiUsageGate.mockResolvedValueOnce({
-    allowed: true,
+    allowed: false,
+    allowanceSource: "direct_paid_member_plan",
     billingPlanCode: "launch_edge_monthly",
     limitUsdMicros: 25_000_000n,
     memberId: MEMBER.id,
@@ -371,11 +405,22 @@ test("HomePage shows a monthly reset advisory while Edge replies continue", asyn
     remainingUsdMicros: 0n,
     retryAfter: new Date("2026-06-01T00:00:00.000Z"),
     spentUsdMicros: 25_000_000n,
+    usageCreditBalanceUsdMicros: 0n,
+    usageCreditLedgerVersion: 0n,
     userNotice: {
       code: "edge_usage_limit_reached",
       message:
-        "You've used 100% of this month's included Edge usage. Murph keeps replying.",
+        "You've used 100% of this month's included Edge usage. New usage is blocked.",
     },
+  });
+  mocks.projectHostedPersonalAiUsageStatus.mockResolvedValueOnce({
+    generatedAt: "2026-05-26T12:00:00.000Z",
+    recommendedAction: {
+      kind: "add_usage",
+      label: "Add usage",
+      url: "/settings?addUsage=true#subscription",
+    },
+    status: "unavailable",
   });
 
   const { default: HomePage } = await import("../app/(dashboard)/home/page");
@@ -383,13 +428,16 @@ test("HomePage shows a monthly reset advisory while Edge replies continue", asyn
 
   assert.match(markup, /used 100% of this month(?:&#x27;|')s included Edge usage/u);
   assert.match(markup, /Resets in 6 days/);
-  assert.match(markup, /Murph keeps replying/);
-  assert.match(markup, /less capable model that uses less of your included usage/);
+  assert.match(markup, /New replies and other AI work are blocked/);
+  assert.match(markup, /until you add usage or your included usage resets/);
+  assert.match(markup, />Add usage</);
+  assert.match(markup, /href="\/settings\?addUsage=true#subscription"/);
 });
 
-test("HomePage shows an advisory while Family replies continue", async () => {
+test("HomePage shows a blocked Family usage notice without a personal action", async () => {
   mocks.resolveHostedAiUsageGate.mockResolvedValueOnce({
-    allowed: true,
+    allowed: false,
+    allowanceSource: "family_sponsored_plan",
     billingPlanCode: "launch_monthly",
     limitUsdMicros: 10_000_000n,
     memberId: MEMBER.id,
@@ -399,9 +447,11 @@ test("HomePage shows an advisory while Family replies continue", async () => {
     remainingUsdMicros: 0n,
     retryAfter: new Date("2026-06-01T00:00:00.000Z"),
     spentUsdMicros: 10_000_000n,
+    usageCreditBalanceUsdMicros: 0n,
+    usageCreditLedgerVersion: 0n,
     userNotice: {
       code: "family_usage_limit_reached",
-      message: "Your Family has used 100% of this month's included usage. Murph keeps replying.",
+      message: "Your Family has used 100% of this month's included usage. New usage is blocked.",
     },
   });
 
@@ -409,14 +459,16 @@ test("HomePage shows an advisory while Family replies continue", async () => {
   const markup = renderToStaticMarkup(await HomePage());
 
   assert.match(markup, /Family has used 100% of this month(?:&#x27;|')s included usage/u);
-  assert.match(markup, /Murph keeps replying/);
-  assert.match(markup, /less capable model that uses less of your included usage/);
+  assert.match(markup, /New replies and other AI work are blocked/);
+  assert.match(markup, /Family(?:&#x27;|')s included usage resets/u);
   assert.match(markup, /Resets in 6 days/);
+  assert.doesNotMatch(markup, />Add usage</);
 });
 
-test("HomePage shows an advisory while trial replies continue after included usage is exhausted", async () => {
+test("HomePage shows blocked trial usage with the existing Start Pulse action", async () => {
   mocks.resolveHostedAiUsageGate.mockResolvedValueOnce({
-    allowed: true,
+    allowed: false,
+    allowanceSource: "direct_trial",
     billingPlanCode: "launch_monthly",
     limitUsdMicros: 4_500_000n,
     memberId: MEMBER.id,
@@ -426,9 +478,11 @@ test("HomePage shows an advisory while trial replies continue after included usa
     remainingUsdMicros: 0n,
     retryAfter: new Date("2026-05-08T00:00:00.000Z"),
     spentUsdMicros: 4_500_000n,
+    usageCreditBalanceUsdMicros: 0n,
+    usageCreditLedgerVersion: 0n,
     userNotice: {
       code: "trial_usage_limit_reached",
-      message: "You've used 100% of your included trial usage. Murph keeps replying.",
+      message: "You've used 100% of your included trial usage. New usage is blocked.",
     },
   });
   mocks.projectHostedPersonalAiUsageStatus.mockResolvedValueOnce({
@@ -446,9 +500,9 @@ test("HomePage shows an advisory while trial replies continue after included usa
   const markup = renderToStaticMarkup(await HomePage());
 
   assert.match(markup, /used 100% of your included trial usage/u);
-  assert.match(markup, /Murph keeps replying/);
-  assert.match(markup, /less capable model that uses less of your included usage/);
-  assert.match(markup, /start Pulse when you(?:&#x27;|')re ready/iu);
+  assert.match(markup, /New replies and other AI work are blocked/);
+  assert.match(markup, /included trial usage is exhausted/);
+  assert.match(markup, /Start Pulse to continue/iu);
   assert.match(markup, /Start from usage projection/);
   assert.match(markup, /href="https:\/\/example\.test\/settings#subscription"/);
   assert.doesNotMatch(markup, /Resets in/u);

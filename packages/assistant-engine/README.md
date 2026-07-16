@@ -109,6 +109,8 @@ hosted plan-usage service exists, accepts no arguments, and returns only the
 web-authorized read projection. Assistant policy limits it to explicit member
 questions or one trusted manual private check; it is not an onboarding or
 recurring usage watcher. A thresholded `recommendedAction` is a suggestion;
+personal `add_usage` recommendations may provide only the fixed first-party
+Settings handoff, never choose an amount, initiate Checkout, or claim payment;
 the separate `subscriptionActionQuote` is current terms for an explicit request
 and is neither a recommendation nor consent. Start-now and Edge actions require
 a matching current quote before exact confirmation. Usage-saving model options

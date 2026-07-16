@@ -89,6 +89,7 @@ describe("hosted usage-limit notice claim authority", () => {
       source: "hosted_webhook_side_effect",
       sourceRef: "usage_event_1",
       targetKind: "thread",
+      usageCreditLedgerVersion: 4n,
     })).resolves.toEqual({
       idempotencyKey: "usage_notice_claim_1",
       status: "claimed",
@@ -108,6 +109,7 @@ describe("hosted usage-limit notice claim authority", () => {
       source: "hosted_webhook_side_effect",
       sourceRef: "usage_event_1",
       targetKind: "thread",
+      usageCreditLedgerVersion: 4n,
     });
   });
 
@@ -130,6 +132,7 @@ describe("hosted usage-limit notice claim authority", () => {
       source: "hosted_webhook_side_effect",
       sourceRef: "usage_event_1",
       targetKind: "thread",
+      usageCreditLedgerVersion: 4n,
     })).resolves.toEqual({ status: "not_authorized" });
 
     expect(claimMocks.startHostedAiUsageLimitNoticeDispatchTx).toHaveBeenCalledWith(
@@ -159,6 +162,7 @@ describe("hosted usage-limit notice claim authority", () => {
       source: "hosted_runtime_ai_usage_limit_notice",
       sourceRef: "usage_event_1",
       targetKind: "telegram_thread",
+      usageCreditLedgerVersion: 4n,
     })).resolves.toEqual({ status: "not_authorized" });
 
     expect(claimMocks.startHostedAiUsageLimitNoticeDispatchTx).toHaveBeenCalledWith(
@@ -173,7 +177,9 @@ describe("hosted usage-limit notice claim authority", () => {
     claimMocks.readHostedMemberRoutingState.mockResolvedValue({
       linqChatId: "linq_chat_current",
     });
-    transaction.$queryRaw.mockResolvedValue([]);
+    transaction.$queryRaw
+      .mockResolvedValueOnce([{ eligible: true }])
+      .mockResolvedValueOnce([]);
 
     await expect(startAuthorizedHostedAiUsageLimitNoticeDispatchTx({
       attemptedAt,
@@ -189,9 +195,57 @@ describe("hosted usage-limit notice claim authority", () => {
       source: "hosted_webhook_side_effect",
       sourceRef: "usage_event_1",
       targetKind: "thread",
+      usageCreditLedgerVersion: 4n,
     })).resolves.toEqual({ status: "already_notified" });
 
-    expect(transaction.$queryRaw).toHaveBeenCalledOnce();
+    expect(transaction.$queryRaw).toHaveBeenCalledTimes(2);
+  });
+
+  it("rejects a pre-top-up capacity epoch and accepts the re-exhaustion epoch", async () => {
+    claimMocks.readHostedMemberRoutingState.mockResolvedValue({
+      linqChatId: "linq_chat_current",
+    });
+    transaction.$queryRaw.mockResolvedValueOnce([]);
+
+    await expect(startAuthorizedHostedAiUsageLimitNoticeDispatchTx({
+      attemptedAt,
+      memberId: "member_usage_notice_1",
+      noticeDeliveryTarget: {
+        channel: "linq",
+        replyToMessageId: "linq_message_old_crossing",
+        routeAuthority: null,
+        target: "linq_chat_current",
+      },
+      periodStart,
+      prisma: prisma as never,
+      source: "hosted_webhook_side_effect",
+      sourceRef: "usage_event_before_top_up",
+      targetKind: "thread",
+      usageCreditLedgerVersion: 4n,
+    })).resolves.toEqual({ status: "already_notified" });
+
+    expect(claimMocks.readHostedMemberRoutingState).not.toHaveBeenCalled();
+
+    transaction.$queryRaw.mockResolvedValue([{ eligible: true }]);
+    await expect(startAuthorizedHostedAiUsageLimitNoticeDispatchTx({
+      attemptedAt,
+      memberId: "member_usage_notice_1",
+      noticeDeliveryTarget: {
+        channel: "linq",
+        replyToMessageId: "linq_message_reexhaustion",
+        routeAuthority: null,
+        target: "linq_chat_current",
+      },
+      periodStart,
+      prisma: prisma as never,
+      source: "hosted_webhook_side_effect",
+      sourceRef: "usage_event_after_top_up",
+      targetKind: "thread",
+      usageCreditLedgerVersion: 6n,
+    })).resolves.toEqual({
+      idempotencyKey: "usage_notice_claim_1",
+      status: "claimed",
+    });
   });
 
   it("locks and reasserts external Linq authority before declining a stale route", async () => {
@@ -225,6 +279,7 @@ describe("hosted usage-limit notice claim authority", () => {
       source: "hosted_webhook_side_effect",
       sourceRef: "usage_event_1",
       targetKind: "thread",
+      usageCreditLedgerVersion: 4n,
     })).resolves.toEqual({ status: "not_authorized" });
 
     expect(claimMocks.lockHostedThreadRouteByThreadIdentityTx).toHaveBeenCalledWith({

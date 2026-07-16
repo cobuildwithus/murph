@@ -1,7 +1,7 @@
 import {
   isHostedLinqConversationMessageWake,
+  isHostedTelegramConversationMessageWake,
   type HostedExecutionConversationMessageWake,
-  type HostedExecutionLinqConversationMessagePayload,
   type HostedExecutionWake,
 } from "@murphai/hosted-execution";
 import {
@@ -34,8 +34,11 @@ import {
   readHostedMailboxPayload,
 } from "../hosted-mailbox/store";
 import {
+  sendClaimedHostedAiUsageLimitNoticeToLinqChat,
+  sendClaimedHostedAiUsageLimitNoticeToTelegramThread,
   sendHostedTrialConversionNoticeToLinqChat,
 } from "../hosted-execution/usage-limit-notice";
+import { projectHostedAiUsageLimitNoticeForDelivery } from "../hosted-execution/usage-limit-notice-message";
 import { readActiveHostedMemberAccess } from "../hosted-onboarding/member-access";
 import {
   readHostedMemberCoreState,
@@ -244,8 +247,9 @@ export async function readHostedRuntimeReconciliationFacts(
     });
 
     if (gate.status === "denied") {
+      let noticeRetryAt: Date | null = null;
       if ((input.usageGateMode ?? "mutating") === "mutating") {
-        await sendHostedRuntimeTrialConversionNoticeForPendingConversation({
+        noticeRetryAt = await sendHostedRuntimeUsageDeniedNoticeForPendingConversation({
           consumedSeqByLane,
           decision: gate.decision,
           mailboxLag,
@@ -258,6 +262,7 @@ export async function readHostedRuntimeReconciliationFacts(
         reason: "ai_usage_denied",
         retryAt: resolveHostedRuntimeAiBlockedRetryAt({
           aiRetryAt: gate.decision.retryAfter.toISOString(),
+          noticeRetryAt,
           now,
           workspace: projectedWorkspace,
         }),
@@ -368,65 +373,126 @@ async function hasHostedMemberEstablishedLinqRoute(input: {
 
 function resolveHostedRuntimeAiBlockedRetryAt(input: {
   aiRetryAt: string | null;
+  noticeRetryAt: Date | null;
   now: Date;
   workspace: HostedRuntimeReconciliationFactsWorkspace;
 }): string | null {
   return earliestHostedRuntimeReconciliationTimestamp([
+    input.noticeRetryAt?.toISOString() ?? null,
     input.aiRetryAt,
     readHostedRuntimeFutureTimestamp(input.workspace.inboxMediaRetentionWakeAt, input.now),
   ]);
 }
 
-async function sendHostedRuntimeTrialConversionNoticeForPendingConversation(input: {
+async function sendHostedRuntimeUsageDeniedNoticeForPendingConversation(input: {
   consumedSeqByLane: readonly HostedMailboxLaneConsumed[];
   decision: HostedRuntimeDeniedAiUsageDecision;
   mailboxLag: readonly HostedMailboxLaneLag[];
   prisma: PrismaClient;
   userId: string;
-}): Promise<void> {
+}): Promise<Date | null> {
   const decision = input.decision;
   if (
-    decision.reason !== "trial_expired_pending_billing"
-    || decision.userNotice?.code !== "trial_conversion_pending"
+    (
+      decision.reason !== "ai_usage_limit_exceeded"
+      && decision.reason !== "trial_expired_pending_billing"
+    )
+    || !decision.userNotice
     || !hasHostedFreshConversationMailboxLag({
       consumedSeqByLane: input.consumedSeqByLane,
       mailboxLag: input.mailboxLag,
     })
   ) {
-    return;
+    return null;
   }
 
-  const wake = await readHostedRuntimePendingTrialConversionWake({
+  const wake = await readHostedRuntimePendingUsageDeniedNoticeWake({
     consumedSeqByLane: input.consumedSeqByLane,
     mailboxLag: input.mailboxLag,
     prisma: input.prisma,
     userId: input.userId,
   });
   if (!wake) {
-    return;
+    return null;
   }
 
-  await sendHostedTrialConversionNoticeToLinqChat({
-    chatId: wake.message.linqMessage.chatId,
-    memberId: input.userId,
-    message: decision.userNotice.message,
-    occurredAt: wake.occurredAt,
-    prisma: input.prisma,
-    replyToMessageId: wake.message.linqMessage.messageId,
-    routeAuthority: wake.message.routeAuthority ?? null,
-    sourceEventId: wake.eventId,
-  });
+  if (decision.reason === "trial_expired_pending_billing") {
+    if (
+      decision.userNotice.code !== "trial_conversion_pending"
+      || !isHostedLinqConversationMessageWake(wake)
+    ) {
+      return null;
+    }
+    await sendHostedTrialConversionNoticeToLinqChat({
+      chatId: wake.message.linqMessage.chatId,
+      memberId: input.userId,
+      message: decision.userNotice.message,
+      occurredAt: wake.occurredAt,
+      prisma: input.prisma,
+      replyToMessageId: wake.message.linqMessage.messageId,
+      routeAuthority: wake.message.routeAuthority ?? null,
+      sourceEventId: wake.eventId,
+    });
+    return null;
+  }
+
+  if (decision.userNotice.code === "trial_conversion_pending") {
+    return null;
+  }
+  const attemptedAt = new Date();
+  if (isHostedLinqConversationMessageWake(wake)) {
+    const result = await sendClaimedHostedAiUsageLimitNoticeToLinqChat({
+      chatId: wake.message.linqMessage.chatId,
+      claimToken: {
+        periodStart: decision.periodStart.toISOString(),
+        sentAt: attemptedAt.toISOString(),
+        usageCreditLedgerVersion: decision.usageCreditLedgerVersion.toString(),
+      },
+      memberId: input.userId,
+      message: await projectHostedAiUsageLimitNoticeForDelivery({
+        memberId: input.userId,
+        message: decision.userNotice.message,
+        prisma: input.prisma,
+      }),
+      noticeCode: decision.userNotice.code,
+      occurredAt: wake.occurredAt,
+      prisma: input.prisma,
+      replyToMessageId: wake.message.linqMessage.messageId,
+      routeAuthority: wake.message.routeAuthority ?? null,
+      sourceEventId: wake.eventId,
+    });
+    return result.status === "in_flight" ? result.retryAt : null;
+  }
+
+  if (isHostedTelegramConversationMessageWake(wake)) {
+    const result = await sendClaimedHostedAiUsageLimitNoticeToTelegramThread({
+      memberId: input.userId,
+      message: await projectHostedAiUsageLimitNoticeForDelivery({
+        memberId: input.userId,
+        message: decision.userNotice.message,
+        prisma: input.prisma,
+      }),
+      periodStart: decision.periodStart,
+      prisma: input.prisma,
+      replyToMessageId: wake.message.telegramMessage.messageId,
+      sentAt: attemptedAt,
+      sourceEventId: wake.eventId,
+      target: wake.message.telegramMessage.threadId,
+      usageCreditLedgerVersion: decision.usageCreditLedgerVersion,
+    });
+    return result.status === "in_flight" ? result.retryAt : null;
+  }
+
+  return null;
 }
 
-async function readHostedRuntimePendingTrialConversionWake(input: {
+async function readHostedRuntimePendingUsageDeniedNoticeWake(input: {
   consumedSeqByLane: readonly HostedMailboxLaneConsumed[];
   mailboxLag: readonly HostedMailboxLaneLag[];
   prisma: NonNullable<Parameters<typeof readHostedMailboxPayload>[0]["prisma"]>;
   userId: string;
 }): Promise<
-  | (HostedExecutionConversationMessageWake & {
-      message: HostedExecutionLinqConversationMessagePayload;
-    })
+  | HostedExecutionConversationMessageWake
   | null
 > {
   const afterSeq = readHostedConversationFreshWorkFloor({
@@ -434,7 +500,7 @@ async function readHostedRuntimePendingTrialConversionWake(input: {
     mailboxLag: input.mailboxLag,
   }).toString();
 
-  // Trial-conversion notices are best-effort for the current pending input.
+  // Usage-denial notices target only the current pending input.
   // Do not decode an unbounded conversation backlog here.
   const pendingItem = await readHostedMailboxLatestPendingConversationItem({
     afterSeq,
@@ -454,7 +520,7 @@ async function readHostedRuntimePendingTrialConversionWake(input: {
     item: pendingItem,
     prisma: input.prisma,
   });
-  if (wake && isHostedLinqConversationMessageWake(wake)) {
+  if (wake?.kind === "conversation.message") {
     return wake;
   }
   return null;

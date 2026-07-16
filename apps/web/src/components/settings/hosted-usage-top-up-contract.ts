@@ -1,0 +1,233 @@
+const PURCHASE_STATUSES = [
+  "checkout_open",
+  "payment_pending",
+  "fulfilled",
+  "expired",
+  "payment_failed",
+  "reconciling",
+] as const;
+
+type HostedUsageTopUpPurchaseStatus = (typeof PURCHASE_STATUSES)[number];
+
+interface HostedUsageTopUpOffer {
+  offerCode: string;
+  amountLabel: string;
+}
+
+interface HostedUsageTopUpActivePurchase {
+  offerCode: string;
+  purchaseId: string;
+  restartAt?: string;
+  retryAllowed: boolean;
+  status: HostedUsageTopUpPurchaseStatus;
+  url?: string;
+}
+
+interface HostedUsageTopUpReturn {
+  purchaseId: string;
+  kind: "success" | "cancel";
+}
+
+interface HostedUsageTopUpDialogProps {
+  activePurchase?: HostedUsageTopUpActivePurchase | null;
+  initialOpen?: boolean;
+  offers: readonly HostedUsageTopUpOffer[];
+  purchaseReturn?: HostedUsageTopUpReturn | null;
+}
+
+interface HostedUsageTopUpPurchaseResponse {
+  purchaseId: string;
+  recovered: boolean;
+  restartAt: string | null;
+  retryAllowed: boolean;
+  status: HostedUsageTopUpPurchaseStatus;
+  url: string | null;
+}
+
+function readPurchaseResponse(value: unknown): HostedUsageTopUpPurchaseResponse {
+  if (
+    !isRecord(value) ||
+    typeof value.purchaseId !== "string" ||
+    value.purchaseId.trim().length === 0 ||
+    value.purchaseId.length > 200 ||
+    !isPurchaseStatus(value.status) ||
+    (value.recovered !== undefined && value.recovered !== true) ||
+    (value.restartAt !== undefined &&
+      (value.status !== "reconciling" ||
+        !isCanonicalIsoTimestamp(value.restartAt))) ||
+    (value.retryAllowed !== undefined && value.retryAllowed !== true) ||
+    (value.url !== undefined &&
+      value.url !== null &&
+      typeof value.url !== "string")
+  ) {
+    throw new Error("Could not open Stripe right now. Try again.");
+  }
+
+  return {
+    purchaseId: value.purchaseId,
+    recovered: value.recovered === true,
+    restartAt: typeof value.restartAt === "string" ? value.restartAt : null,
+    retryAllowed: value.retryAllowed === true,
+    status: value.status,
+    url:
+      typeof value.url === "string" && value.url.length > 0 ? value.url : null,
+  };
+}
+
+function readCheckoutUrl(value: string): string {
+  try {
+    const url = new URL(value);
+    if (url.protocol !== "https:") {
+      throw new Error("Checkout must use HTTPS.");
+    }
+    return url.toString();
+  } catch {
+    throw new Error("Could not open Stripe right now. Try again.");
+  }
+}
+
+function readOptionalCheckoutUrl(value: string): string | null {
+  try {
+    return readCheckoutUrl(value);
+  } catch {
+    return null;
+  }
+}
+
+function readOptionalRestartAt(value: string | undefined): string | null {
+  return isCanonicalIsoTimestamp(value) ? value : null;
+}
+
+function isCanonicalIsoTimestamp(value: unknown): value is string {
+  if (typeof value !== "string") {
+    return false;
+  }
+  const parsed = new Date(value);
+  return Number.isFinite(parsed.getTime()) && parsed.toISOString() === value;
+}
+
+function readStatusContent(input: {
+  canResumeCheckout: boolean;
+  canRetryCheckout: boolean;
+  pollKind: "dormant" | "checking" | "exhausted" | "failed";
+  returnedFromSuccessfulCheckout: boolean;
+  status: HostedUsageTopUpPurchaseStatus | null;
+}): { message: string; title: string } {
+  if (input.pollKind === "failed") {
+    return content(
+      "Couldn't check payment",
+      "We couldn't check this payment right now. Try again.",
+    );
+  }
+
+  if (input.status === "checkout_open") {
+    return content(
+      "Checkout already open",
+      input.canResumeCheckout
+        ? "You already have a usage-credit checkout in progress. Resume it or cancel it before starting a new one."
+        : input.canRetryCheckout
+          ? "Checkout is open, but its Stripe link isn’t available here. Retry to recover it or cancel the checkout."
+          : "An existing usage-credit checkout is open, but it can’t be resumed from this account right now. You can cancel it.",
+    );
+  }
+
+  if (
+    input.status === "reconciling" &&
+    !input.returnedFromSuccessfulCheckout
+  ) {
+    return content(
+      "Checkout not open yet",
+      input.canRetryCheckout
+        ? `Stripe checkout ${input.pollKind === "exhausted" ? "still " : ""}hasn’t opened. You can safely retry with the same purchase.`
+        : "This purchase is still being reconciled. Checkout is not available right now.",
+    );
+  }
+
+  if (
+    input.pollKind === "exhausted" &&
+    (!input.status || shouldPollPurchaseStatus(input.status))
+  ) {
+    return content(
+      "Payment confirmation pending",
+      "Your payment is still being confirmed. You can safely leave this page.",
+    );
+  }
+
+  switch (input.status) {
+    case "fulfilled":
+      return content("Usage added", "Your available usage has been updated.");
+    case "expired":
+      return content("Checkout canceled", "Checkout canceled. No usage was added.");
+    case "payment_failed":
+      return content(
+        "Payment not completed",
+        "The payment did not complete. No usage was added.",
+      );
+    case "payment_pending":
+      return content("Confirming payment", "Payment submitted. Stripe is confirming it.");
+    case null:
+    case "reconciling":
+      return content("Confirming payment", "Confirming your payment with Stripe…");
+  }
+}
+
+function content(title: string, message: string) {
+  return { message, title };
+}
+
+function shouldPollPurchaseStatus(
+  status: HostedUsageTopUpPurchaseStatus,
+): boolean {
+  return (
+    status === "checkout_open" ||
+    status === "payment_pending" ||
+    status === "reconciling"
+  );
+}
+
+function isPurchaseStatus(
+  value: unknown,
+): value is HostedUsageTopUpPurchaseStatus {
+  return (
+    typeof value === "string" &&
+    PURCHASE_STATUSES.some((status) => status === value)
+  );
+}
+
+function readReturnKey(
+  purchaseReturn: HostedUsageTopUpReturn | null,
+): string | null {
+  return purchaseReturn
+    ? `${purchaseReturn.purchaseId}:${purchaseReturn.kind}`
+    : null;
+}
+
+function createClientRequestKey(): string {
+  if (!globalThis.crypto?.randomUUID) {
+    throw new Error("Could not open Stripe right now. Try again.");
+  }
+  return globalThis.crypto.randomUUID();
+}
+
+function isRecord(value: unknown): value is Record<string, unknown> {
+  return typeof value === "object" && value !== null && !Array.isArray(value);
+}
+
+export {
+  createClientRequestKey,
+  readCheckoutUrl,
+  readOptionalCheckoutUrl,
+  readOptionalRestartAt,
+  readPurchaseResponse,
+  readReturnKey,
+  readStatusContent,
+  shouldPollPurchaseStatus,
+};
+export type {
+  HostedUsageTopUpActivePurchase,
+  HostedUsageTopUpDialogProps,
+  HostedUsageTopUpOffer,
+  HostedUsageTopUpPurchaseResponse,
+  HostedUsageTopUpPurchaseStatus,
+  HostedUsageTopUpReturn,
+};

@@ -299,9 +299,9 @@ export async function readActiveHostedFamilySponsorship(input: {
 }
 
 /**
- * Runtime model-work admission owned by hosted access, not usage accounting.
- * Monthly and in-window trial allowances are advisory; only inactive access
- * and invalid or expired trial entitlement deny model-capable work.
+ * Runtime entitlement guard. Usage accounting is a separate mandatory gate,
+ * so model-capable work proceeds only when both access and usage allow it.
+ * This function denies inactive access and invalid or expired trial entitlement.
  */
 export async function readHostedRuntimeAiAccessDecision(input: {
   memberId: string;
