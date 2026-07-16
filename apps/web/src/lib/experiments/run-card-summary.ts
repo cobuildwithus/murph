@@ -18,6 +18,7 @@ export interface ExperimentRunCardSummary {
   dateRange?: string;
   day?: number;
   metric?: ExperimentRunCardMetric;
+  metrics: ExperimentRunCardMetric[];
 }
 
 export function buildExperimentRunCardSummary(
@@ -32,18 +33,33 @@ export function buildExperimentRunCardSummary(
     completionPercent: run.completionPercent,
     dateRange: run.dateRange,
     day: run.day,
-    metric: buildMetric(primarySignal, primaryTrend),
+    metric: primarySignal || primaryTrend
+      ? buildMetric(primarySignal, primaryTrend)
+      : undefined,
+    metrics: buildMetrics(run.signals, run.trends),
   };
+}
+
+function buildMetrics(
+  signals: ExperimentRunProjection["signals"],
+  trends: ExperimentRunProjection["trends"],
+): ExperimentRunCardMetric[] {
+  const usableTrends = trends.filter(hasTrendPoints);
+  const trendsByLabel = new Map(usableTrends.map((trend) => [trend.label, trend]));
+  const signalLabels = new Set(signals.map((signal) => signal.label));
+
+  return [
+    ...signals.map((signal) => buildMetric(signal, trendsByLabel.get(signal.label))),
+    ...usableTrends
+      .filter((trend) => !signalLabels.has(trend.label))
+      .map((trend) => buildMetric(undefined, trend)),
+  ];
 }
 
 function buildMetric(
   signal: ExperimentSignal | undefined,
   trend: TrendData | undefined,
-): ExperimentRunCardMetric | undefined {
-  if (!signal && !trend) {
-    return undefined;
-  }
-
+): ExperimentRunCardMetric {
   return {
     baseline: signal?.baseline ?? (trend
       ? formatValueWithUnit(trend.baselineAvg, trend.unit)

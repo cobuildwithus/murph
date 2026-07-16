@@ -6,6 +6,7 @@ import { ArrowRight } from "lucide-react";
 import { HomeExperimentCard } from "./home-experiment-card";
 
 import type { ExperimentLibraryCard } from "@/src/lib/experiments/library-cards";
+import { cn } from "@/src/lib/utils";
 
 const HISTORY_CARD_LIMIT = 6;
 
@@ -36,6 +37,7 @@ export function HomeExperiments({ inProgress, history }: HomeExperimentsProps) {
           label="In progress"
           cards={inProgress}
           action={browseAction}
+          variant="progress"
         />
       ) : null}
       {history.length > 0 ? (
@@ -43,6 +45,7 @@ export function HomeExperiments({ inProgress, history }: HomeExperimentsProps) {
           label="Your history"
           cards={history.slice(0, HISTORY_CARD_LIMIT)}
           action={inProgress.length === 0 ? browseAction : undefined}
+          variant="history"
         />
       ) : null}
     </div>
@@ -53,10 +56,12 @@ function HomeExperimentsSection({
   label,
   cards,
   action,
+  variant,
 }: {
   label: string;
   cards: ExperimentLibraryCard[];
   action?: React.ReactNode;
+  variant: "history" | "progress";
 }) {
   return (
     <section className="flex flex-col gap-4">
@@ -66,9 +71,14 @@ function HomeExperimentsSection({
         </span>
         {action ?? null}
       </div>
-      <div className="grid gap-5 sm:grid-cols-2">
+      <div className={cn(
+        "grid sm:grid-cols-2",
+        variant === "history"
+          ? "gap-3 md:grid-cols-1 lg:grid-cols-2 xl:grid-cols-3"
+          : "gap-5",
+      )}>
         {cards.map((card) => (
-          <HomeExperimentCard key={card.id} card={card} />
+          <HomeExperimentCard key={card.id} card={card} variant={variant} />
         ))}
       </div>
     </section>
