@@ -122,16 +122,20 @@ completion proof. If the member was promised the result and no separate durable
 owner exists, the root turn retains the work and uses normal progress updates
 instead of detaching it.
 
-The resident App Server admits at most one detached child at a time. It must be
-a one-shot leaf: no root/child interaction, child reuse, nested child, parallel
-child, or background terminal is supported. At the workspace snapshot boundary,
-the runtime waits for the exact admitted resident child and checks every touched
-root plus that current resident for background terminals before archive
-construction may proceed. Codex admission of a successor is the native fence
-that its completed predecessor was flushed and unloaded. A routine checkpoint
-wake cancels only that wait and keeps the process and child lifecycle state warm
-for the later boundary. Explicit invocation abort/preemption cancels the wait
-and enters the synchronous exact-process stop path above.
+Each root session may admit at most one detached child under Codex's native
+root-plus-one residency cap. Independent roots may retain children concurrently
+inside the same resident App Server. Every child must be a one-shot leaf: no
+root/child interaction, child reuse, nested child, same-root parallel child, or
+background terminal is supported. At the workspace snapshot boundary, the
+runtime waits for every exact resident child and checks every touched root and
+resident child for background terminals before archive construction may
+proceed. Codex admission of a per-session successor is the native fence that
+its completed predecessor was flushed and unloaded, leaving the successor as
+that root's resident child. A routine checkpoint wake cancels only that wait
+and keeps the process plus all resident lifecycle evidence warm for the later
+boundary. A timeout or unsupported lifecycle stops the exact process and fails
+the boundary closed. Explicit invocation abort/preemption cancels the wait and
+enters the synchronous exact-process stop path above.
 
 The hosted adapter is the mailbox importer. It decodes a conversation mailbox
 row into a bounded `AssistantInputEvent`, stages it in local runtime state,

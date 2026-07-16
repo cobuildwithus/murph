@@ -15884,6 +15884,121 @@ describe('assistant codex event shaping', () => {
       expect(spawnedChildren).toHaveLength(1)
     })
 
+    it('retains every resident child across an interrupted checkpoint and a later root', async () => {
+      const workingDirectory = await createTempDir('assistant-codex-multi-root-boundary-work-')
+      const codexHome = await createTempDir('assistant-codex-multi-root-boundary-home-')
+      const spawnedChildren: MockChildProcess[] = []
+      const startSecondRoot = createDeferred<void>()
+      const completeFirstChild = createDeferred<void>()
+      const scannedThreadIds: string[] = []
+      mockWarmCodexProcess(spawnedChildren, 31_865, async (child) => {
+        await initializeWarmTurn(
+          child,
+          'thread-multi-root-boundary-parent-a',
+          'turn-multi-root-boundary-parent-a',
+        )
+        writeSubAgentActivity(
+          child,
+          'thread-multi-root-boundary-parent-a',
+          'thread-multi-root-boundary-child-a',
+        )
+        writeStartedTurn(
+          child,
+          'thread-multi-root-boundary-child-a',
+          'turn-multi-root-boundary-child-a',
+        )
+        writeCompletedTurn(
+          child,
+          'thread-multi-root-boundary-parent-a',
+          'turn-multi-root-boundary-parent-a',
+        )
+
+        await startSecondRoot.promise
+        await writeWarmTurnStarted({
+          child,
+          requestCount: 2,
+          threadId: 'thread-multi-root-boundary-parent-b',
+          turnId: 'turn-multi-root-boundary-parent-b',
+        })
+        writeSubAgentActivity(
+          child,
+          'thread-multi-root-boundary-parent-b',
+          'thread-multi-root-boundary-child-b',
+        )
+        writeStartedTurn(
+          child,
+          'thread-multi-root-boundary-child-b',
+          'turn-multi-root-boundary-child-b',
+        )
+        writeCompletedTurn(
+          child,
+          'thread-multi-root-boundary-child-b',
+          'turn-multi-root-boundary-child-b',
+        )
+        writeCompletedTurn(
+          child,
+          'thread-multi-root-boundary-parent-b',
+          'turn-multi-root-boundary-parent-b',
+        )
+
+        const terminalResponses = (async () => {
+          for (let requestCount = 1; requestCount <= 4; requestCount += 1) {
+            const request = await respondToBackgroundTerminals(child, requestCount)
+            scannedThreadIds.push(String(asRecord(request.params).threadId))
+          }
+        })()
+
+        await completeFirstChild.promise
+        writeCompletedTurn(
+          child,
+          'thread-multi-root-boundary-child-a',
+          'turn-multi-root-boundary-child-a',
+        )
+        await terminalResponses
+      })
+
+      await executeBackgroundBoundaryTurn(
+        codexHome,
+        workingDirectory,
+        'start the first bounded import and reply',
+      )
+
+      const controller = new AbortController()
+      const interruptedBoundary = waitForWarmCodexBackgroundWork({
+        signal: controller.signal,
+      })
+      const interruption = new Error('checkpoint interrupted for foreground work')
+      controller.abort(interruption)
+      await expect(interruptedBoundary).rejects.toBe(interruption)
+      expect(spawnedChildren[0]?.signalCode).toBeNull()
+
+      startSecondRoot.resolve(undefined)
+      await executeBackgroundBoundaryTurn(
+        codexHome,
+        workingDirectory,
+        'start a second bounded import while the first child remains active',
+      )
+
+      const publishCheckpoint = vi.fn()
+      const retriedBoundary = waitForWarmCodexBackgroundWork().then(
+        publishCheckpoint,
+      )
+      await new Promise((resolve) => setTimeout(resolve, 75))
+      expect(publishCheckpoint).not.toHaveBeenCalled()
+
+      completeFirstChild.resolve(undefined)
+      await expect(retriedBoundary).resolves.toBeUndefined()
+      expect(publishCheckpoint).toHaveBeenCalledOnce()
+      expect(scannedThreadIds).toEqual([
+        'thread-multi-root-boundary-parent-a',
+        'thread-multi-root-boundary-parent-b',
+        'thread-multi-root-boundary-child-a',
+        'thread-multi-root-boundary-child-b',
+      ])
+      expect(spawnedChildren[0]?.signalCode).toBeNull()
+      expect(spawnedChildren).toHaveLength(1)
+    })
+
     it('treats a failed optional child as quiescent without stopping the warm process', async () => {
       const workingDirectory = await createTempDir('assistant-codex-failed-child-work-')
       const codexHome = await createTempDir('assistant-codex-failed-child-home-')

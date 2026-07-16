@@ -79,20 +79,24 @@ it has been explicitly elevated to a cross-cutting invariant.
   idempotently. Its terminal lifecycle receipt is advisory; a canonical read
   confirms the write before Murph says the enrichment finished.
 - A detached Codex MultiAgent V2 child admitted before a root reply may continue
-  after that reply only as a one-shot leaf. At most one child may be active; it
-  may not interact with the root or another child, be reused for another turn,
-  spawn a nested child, or leave a background terminal. It never inherits the
-  root turn's invocation-scoped automation or device capability. Root
-  completion or a later ordinary turn does not terminate valid optional
-  enrichment merely to rotate request authority.
-- Before a hosted workspace snapshot, Murph waits for the exact admitted
-  resident child and checks every touched root plus that current resident for
-  background terminals. A subsequently admitted resident is Codex's native
-  fence that its completed predecessor was flushed and unloaded. An ordinary
-  checkpoint wake interrupts only the boundary wait and preserves the warm App
-  Server. Explicit workspace invocation abort/preemption interrupts the wait
-  and synchronously tears down that exact process before workspace or
-  invocation ownership is released.
+  after that reply only as a one-shot leaf. Each root session may have at most
+  one active child under Codex's native root-plus-one cap; independent roots in
+  one warm App Server may each retain a child. A child may not interact with the
+  root or another child, be reused for another turn, spawn a nested child, or
+  leave a background terminal. It never inherits the root turn's
+  invocation-scoped automation or device capability. Root completion or a
+  later ordinary turn does not terminate valid optional enrichment merely to
+  rotate request authority.
+- Before a hosted workspace snapshot, Murph waits for every exact resident child
+  and checks every touched root and resident child for background terminals. A
+  per-session successor is Codex's native fence that its completed predecessor
+  was flushed and unloaded, leaving the successor as that root's resident
+  child. An ordinary checkpoint wake interrupts only the boundary wait and
+  preserves the warm App Server plus all resident evidence. A timeout or
+  unsupported lifecycle stops the exact process and fails closed. Explicit
+  workspace invocation abort/preemption interrupts the wait and synchronously
+  tears down that exact process before workspace or invocation ownership is
+  released.
 
 ## Foreground Reply Critical Path
 

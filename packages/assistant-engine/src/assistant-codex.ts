@@ -823,7 +823,9 @@ class CodexAppServerProcess {
   private nextRequestId = 1
   private normalShutdown = false
   private poisoned = false
-  private detachedChildThreadId: string | null = null
+  // A same-root successor evicts its completed predecessor, so retain only the
+  // current resident child for each independent root.
+  private readonly detachedChildThreadIdsByRootThreadId = new Map<string, string>()
   private readonly detachedCompletedChildThreadIds = new Set<string>()
   private detachedChildViolation: string | null = null
   private readonly detachedRootThreadIds = new Set<string>()
@@ -1101,14 +1103,18 @@ class CodexAppServerProcess {
     )
   }
 
-  private hasPendingDetachedChild(): boolean {
-    return this.detachedChildThreadId !== null &&
-      !this.detachedCompletedChildThreadIds.has(this.detachedChildThreadId)
+  private hasPendingDetachedChildren(): boolean {
+    for (const threadId of this.detachedChildThreadIdsByRootThreadId.values()) {
+      if (!this.detachedCompletedChildThreadIds.has(threadId)) {
+        return true
+      }
+    }
+    return false
   }
 
   private async waitForDetachedChildren(signal: AbortSignal | null): Promise<void> {
     const deadline = Date.now() + CODEX_BACKGROUND_WORK_WAIT_TIMEOUT_MS
-    while (this.hasPendingDetachedChild()) {
+    while (this.hasPendingDetachedChildren()) {
       throwIfCodexBackgroundWorkWaitAborted(signal)
       this.assertBackgroundWorkProcessAvailable()
       this.assertDetachedChildContractSupported()
@@ -1135,7 +1141,7 @@ class CodexAppServerProcess {
 
   private assertDetachedChildrenQuiescent(): void {
     this.assertDetachedChildContractSupported()
-    if (this.hasPendingDetachedChild()) {
+    if (this.hasPendingDetachedChildren()) {
       throw new VaultCliError(
         'ASSISTANT_CODEX_BACKGROUND_WORK_FAILED',
         'Detached Codex work was still active at the workspace boundary.',
@@ -1149,7 +1155,7 @@ class CodexAppServerProcess {
   ): Promise<void> {
     const threadIds = new Set([
       ...this.detachedRootThreadIds,
-      ...(this.detachedChildThreadId ? [this.detachedChildThreadId] : []),
+      ...this.detachedChildThreadIdsByRootThreadId.values(),
     ])
     for (const threadId of threadIds) {
       throwIfCodexBackgroundWorkWaitAborted(signal)
@@ -1175,7 +1181,7 @@ class CodexAppServerProcess {
   }
 
   private clearDetachedChildBoundary(): void {
-    this.detachedChildThreadId = null
+    this.detachedChildThreadIdsByRootThreadId.clear()
     this.detachedCompletedChildThreadIds.clear()
     this.detachedChildViolation = null
     this.detachedRootThreadIds.clear()
@@ -1199,7 +1205,10 @@ class CodexAppServerProcess {
             'Detached Codex children may not spawn nested children.',
           )
         } else {
-          this.detachedChildThreadId = activity.agentThreadId
+          this.detachedChildThreadIdsByRootThreadId.set(
+            senderThreadId,
+            activity.agentThreadId,
+          )
         }
       } else {
         this.recordDetachedChildViolation(

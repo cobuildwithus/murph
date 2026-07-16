@@ -354,17 +354,22 @@ owner already exists. A child terminal event is only an advisory lifecycle
 receipt, so a canonical read confirms the enrichment before Murph reports it as
 finished.
 
-The resident App Server admits at most one detached child at a time. That child
-is a one-shot leaf: no interaction with the root or another child, reuse,
-nested spawn, or background terminal is allowed. Root completion and later
-ordinary turns leave valid optional enrichment alone. Before publishing a
-workspace snapshot, the runtime waits for the exact admitted resident child and
-checks every touched root plus that current resident for background terminals.
-Codex admission of a successor is the native fence that its completed
-predecessor was flushed and unloaded. A routine checkpoint wake only interrupts
-that boundary wait and leaves the App Server warm. Explicit workspace
-invocation abort/preemption instead interrupts the wait and synchronously stops
-the exact process before workspace or job-slot ownership can be reused.
+Each root session may admit at most one detached child under Codex's native
+root-plus-one residency cap. Children from independent roots can overlap in the
+same App Server process. Each child is a one-shot leaf: no interaction with the
+root or another child, reuse, nested spawn, or background terminal is allowed.
+Root completion and later ordinary turns leave valid optional enrichment alone.
+Before publishing a workspace snapshot, the runtime waits for every exact
+resident child and checks every touched root and resident child for background
+terminals.
+Codex admission of a per-session successor is the native fence that its
+completed predecessor was flushed and unloaded, leaving the successor as that
+root's resident child. A routine checkpoint wake only interrupts that boundary
+wait and leaves the App Server plus all resident evidence warm. A timeout or
+unsupported lifecycle stops the exact process and fails the boundary closed.
+Explicit workspace invocation abort/preemption also interrupts the wait and
+synchronously stops the exact process before workspace or job-slot ownership
+can be reused.
 
 - Proactive hosted usage-limit notice targets are derived after the foreground checkpoint from durable provider-accepted assistant input events. Direct Linq and Telegram inputs retain their exact origin; group Linq inputs additionally require exact external-thread route authority. Every accepted input must resolve to the same route, the newest accepted message supplies the reply target, and missing, mixed, or invalid provenance fails closed. The runtime does not keep a parallel mailbox route projection, and a thread-container crossing never falls back to a member home route.
 
