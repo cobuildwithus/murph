@@ -24,17 +24,28 @@ If a provider adapter returns a non-empty snapshot without any provider-owned ra
 
 Built-in providers now share one descriptor surface in `device-providers/provider-descriptors.ts`. That descriptor is the single source for provider key, transport modes, OAuth paths/scopes, webhook support, default sync windows, metric families, and source-priority hints, so importers and `device-syncd` no longer drift on provider metadata.
 
-The iOS companion's direct WHOOP spot-HRV path is a deliberately narrower
+The iOS companion's direct WHOOP overnight-HRV path is a deliberately narrower
 Junction-account ingress rather than a fourth transport provider. It accepts
-only the strict `murph.companion.hrv-rmssd.v1` derived observation, maps it to
-one canonical `hrv-rmssd` millisecond fact with direct-WHOOP provenance, and
-derives stable replay identity from the client capture id. Raw R-R intervals, BLE
-frames, device identity, and Apple Health comparison values are outside this
-package's contract. Apple HealthKit's generic HRV input maps separately to
-canonical `hrv-sdnn`; the importer never combines SDNN with the companion RMSSD
-series. Its provider external identity remains stable across that metric
-correction so a re-import supersedes an older generic Apple HRV event instead
-of duplicating it.
+only the strict `murph.companion.overnight-prv-rmssd.v1` derived observation
+and maps it to one immutable `whoop-ble-overnight-prv-rmssd` millisecond
+summary per phone-scheduled local `00:00–08:00` occurrence. The accepted method
+is `prv-rmssd-5m-mean-scheduled-0000-0800-local-v1`; frozen timezone rules keep
+each scheduled occurrence stable. A fully traversed occurrence is bounded to
+84...108 five-minute windows, typically 84/96/108 with intermediate counts such
+as 90/102 for half-hour shifts. The canonical
+identity is the night date; the verified admission digest and versioned
+calculation method remain provenance, so retry cannot mint another nightly
+fact. Raw R-R intervals, BLE frames, exact capture timestamps, per-window
+values, WHOOP account identity, every band identifier, and Apple
+Health comparison values are outside this package's contract. iOS may retain
+one protected scalar night checkpoint, at most three strict-envelope outbox
+entries, and the exact app-scoped CoreBluetooth peripheral UUID needed to
+restore the enrolled band. That UUID never uploads or enters logs; none of this
+local state is an importer or backend scheduler concern. Apple HealthKit's generic HRV input maps
+separately to canonical `hrv-sdnn`; the importer never combines SDNN or generic
+provider `hrv-rmssd` with the companion PRV series. Its provider external
+identity remains stable across that metric correction so a re-import supersedes
+an older generic Apple HRV event instead of duplicating it.
 
 For the next provider, importers should only need:
 - one shared descriptor entry

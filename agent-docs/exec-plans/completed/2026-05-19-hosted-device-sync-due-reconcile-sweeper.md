@@ -60,5 +60,5 @@ Updated: 2026-05-19
   - `bash scripts/workspace-verify.sh test:diff <touched paths>`
   - `pnpm typecheck`
 - Direct proof:
-  - Confirm dbhub/log evidence before the change showed due WHOOP active rows with no `reconcile_due` signals.
+  - Confirm production database/log evidence before the change showed due WHOOP active rows with no `reconcile_due` signals.
 Completed: 2026-05-19

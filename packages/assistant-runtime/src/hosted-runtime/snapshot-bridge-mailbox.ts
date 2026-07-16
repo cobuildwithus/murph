@@ -126,7 +126,7 @@ export function createHostedWorkspaceBridgeMailboxImporter(input: {
       },
       onDecodedConversationWake: (wake) => {
         context?.recordMessagingReturnTarget?.(
-          resolveHostedCliBridgeMessagingReturnTarget(wake),
+          resolveHostedDeviceSyncMessagingReturnTarget(wake),
         );
       },
       runtime: input.runtime,
@@ -291,7 +291,7 @@ async function importHostedWorkspaceBridgeMailboxItem(input: {
   });
 }
 
-function resolveHostedCliBridgeMessagingReturnTarget(
+function resolveHostedDeviceSyncMessagingReturnTarget(
   wake: HostedExecutionConversationMessageWake,
 ): HostedRuntimeDeviceSyncMessagingReturnTarget | null {
   if (isHostedTelegramConversationMessageWake(wake)) {

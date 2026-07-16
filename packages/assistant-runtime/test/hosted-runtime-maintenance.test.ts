@@ -369,7 +369,6 @@ describe("runHostedAssistantAutomation", () => {
       "req_failure_log",
       {
         hosted: {
-          issueDeviceConnectLink: vi.fn(),
           memberId: "member_123",
           userEnvKeys: [],
         },
@@ -443,7 +442,6 @@ describe("runHostedAssistantAutomation", () => {
       "req_failure_cap",
       {
         hosted: {
-          issueDeviceConnectLink: vi.fn(),
           memberId: "member_123",
           userEnvKeys: [],
         },
@@ -494,7 +492,6 @@ describe("runHostedAssistantAutomation", () => {
         "req_route_authority_failure",
         {
           hosted: {
-            issueDeviceConnectLink: vi.fn(),
             memberId: "member_123",
             userEnvKeys: [],
           },
@@ -556,7 +553,6 @@ describe("runHostedAssistantAutomation", () => {
       "req_cron_error_code",
       {
         hosted: {
-          issueDeviceConnectLink: vi.fn(),
           memberId: "member_123",
           userEnvKeys: [],
         },
@@ -645,7 +641,6 @@ describe("runHostedAssistantAutomation", () => {
       "req_turn_input",
       {
         hosted: {
-          issueDeviceConnectLink: vi.fn(),
           memberId: "member_123",
           userEnvKeys: [],
         },
@@ -759,7 +754,6 @@ describe("runHostedAssistantAutomation", () => {
       "req_provider_bound_input",
       {
         hosted: {
-          issueDeviceConnectLink: vi.fn(),
           memberId: "member_123",
           userEnvKeys: [],
         },
@@ -813,7 +807,6 @@ describe("runHostedAssistantAutomation", () => {
       "req_background_dynamic_context",
       {
         hosted: {
-          issueDeviceConnectLink: vi.fn(),
           memberId: "member_123",
           userEnvKeys: [],
         },
@@ -863,7 +856,6 @@ describe("runHostedAssistantAutomation", () => {
       "req_dynamic_context_existing_pending_input",
       {
         hosted: {
-          issueDeviceConnectLink: vi.fn(),
           memberId: "member_123",
           userEnvKeys: [],
         },
@@ -981,7 +973,6 @@ describe("runHostedAssistantAutomation", () => {
       "req_candidate_query",
       {
         hosted: {
-          issueDeviceConnectLink: vi.fn(),
           memberId: "member_123",
           userEnvKeys: [],
         },
@@ -1035,7 +1026,6 @@ describe("runHostedAssistantAutomation", () => {
       "req_queue_only_scanner",
       {
         hosted: {
-          issueDeviceConnectLink: vi.fn(),
           memberId: "member_123",
           userEnvKeys: [],
         },
@@ -1069,7 +1059,6 @@ describe("runHostedAssistantAutomation", () => {
         "req_bootstrap",
         {
           hosted: {
-            issueDeviceConnectLink: vi.fn(),
             memberId: "member_123",
             userEnvKeys: [],
           },
@@ -1167,7 +1156,6 @@ describe("runHostedAssistantAutomation", () => {
         "req_projection_show",
         {
           hosted: {
-            issueDeviceConnectLink: vi.fn(),
             memberId: "member_123",
             userEnvKeys: [],
           },
@@ -1212,7 +1200,6 @@ describe("runHostedAssistantAutomation", () => {
       "req_123",
       {
         hosted: {
-          issueDeviceConnectLink: vi.fn(),
           memberId: "member_123",
           userEnvKeys: [],
         },
@@ -1291,7 +1278,6 @@ describe("runHostedAssistantAutomation", () => {
         "req_123",
         {
           hosted: {
-            issueDeviceConnectLink: vi.fn(),
             memberId: "member_123",
             userEnvKeys: [],
           },
@@ -1355,7 +1341,6 @@ describe("runHostedAssistantAutomation", () => {
         "req_123",
         {
           hosted: {
-            issueDeviceConnectLink: vi.fn(),
             memberId: "member_123",
             userEnvKeys: [],
           },
@@ -3295,7 +3280,6 @@ describe("runHostedAssistantAutomationLane", () => {
       },
       executionContext: {
         hosted: {
-          issueDeviceConnectLink: vi.fn(),
           memberId: "member_123",
           userEnvKeys: [],
         },
@@ -3345,7 +3329,6 @@ describe("runHostedAssistantAutomationLane", () => {
       drainOutbox: false,
       executionContext: {
         hosted: {
-          issueDeviceConnectLink: expect.any(Function),
           memberId: "member_123",
           userEnvKeys: [],
         },
@@ -3550,7 +3533,6 @@ describe("runHostedAssistantAutomationLane", () => {
       beforeProviderAcceptedInputs,
       executionContext: {
         hosted: {
-          issueDeviceConnectLink: vi.fn(),
           memberId: "member_123",
           userEnvKeys: [],
         },
@@ -3697,7 +3679,6 @@ describe("runHostedAssistantAutomationLane", () => {
       },
       executionContext: {
         hosted: {
-          issueDeviceConnectLink: vi.fn(),
           memberId: "member_123",
           userEnvKeys: [],
         },
@@ -3767,7 +3748,6 @@ describe("runHostedAssistantAutomationLane", () => {
       },
       executionContext: {
         hosted: {
-          issueDeviceConnectLink: vi.fn(),
           memberId: "member_123",
           userEnvKeys: [],
         },
@@ -3795,7 +3775,6 @@ describe("runHostedAssistantAutomationLane", () => {
       },
       executionContext: {
         hosted: {
-          issueDeviceConnectLink: vi.fn(),
           memberId: "member_123",
           userEnvKeys: [],
         },
@@ -3839,7 +3818,6 @@ describe("runHostedAssistantAutomationLane", () => {
       },
       executionContext: {
         hosted: {
-          issueDeviceConnectLink: vi.fn(),
           memberId: "member_123",
           userEnvKeys: [],
         },
@@ -3908,7 +3886,6 @@ describe("runHostedAssistantAutomationLane", () => {
       },
       executionContext: {
         hosted: {
-          issueDeviceConnectLink: vi.fn(),
           memberId: "member_123",
           userEnvKeys: [],
         },
@@ -3978,7 +3955,6 @@ describe("runHostedAssistantAutomationLane", () => {
       },
       executionContext: {
         hosted: {
-          issueDeviceConnectLink: vi.fn(),
           memberId: "member_123",
           userEnvKeys: [],
         },
@@ -4047,7 +4023,6 @@ describe("runHostedAssistantAutomationLane", () => {
       },
       executionContext: {
         hosted: {
-          issueDeviceConnectLink: vi.fn(),
           memberId: "member_123",
           userEnvKeys: [],
         },
@@ -4086,7 +4061,6 @@ describe("runHostedAssistantAutomationLane", () => {
         },
         executionContext: {
           hosted: {
-            issueDeviceConnectLink: vi.fn(),
             memberId: "member_123",
             userEnvKeys: [],
           },
@@ -4151,7 +4125,6 @@ describe("runHostedAssistantAutomationLane", () => {
         },
         executionContext: {
           hosted: {
-            issueDeviceConnectLink: vi.fn(),
             memberId: "member_123",
             userEnvKeys: [],
           },
@@ -4198,7 +4171,6 @@ describe("runHostedAssistantAutomationLane", () => {
       },
       executionContext: {
         hosted: {
-          issueDeviceConnectLink: vi.fn(),
           memberId: "member_123",
           userEnvKeys: [],
         },
@@ -4250,7 +4222,6 @@ describe("runHostedAssistantAutomationLane", () => {
       },
       executionContext: {
         hosted: {
-          issueDeviceConnectLink: vi.fn(),
           memberId: "member_123",
           userEnvKeys: [],
         },
@@ -4300,7 +4271,6 @@ describe("runHostedAssistantAutomationLane", () => {
       },
       executionContext: {
         hosted: {
-          issueDeviceConnectLink: vi.fn(),
           memberId: "member_123",
           userEnvKeys: [],
         },
@@ -4352,7 +4322,6 @@ describe("runHostedAssistantAutomationLane", () => {
         },
         executionContext: {
           hosted: {
-            issueDeviceConnectLink: vi.fn(),
             memberId: "member_123",
             userEnvKeys: [],
           },
@@ -4408,7 +4377,6 @@ describe("runHostedAssistantAutomationLane", () => {
         },
         executionContext: {
           hosted: {
-            issueDeviceConnectLink: vi.fn(),
             memberId: "member_123",
             userEnvKeys: [],
           },
@@ -4435,7 +4403,6 @@ describe("runHostedAssistantAutomationLane", () => {
       },
       executionContext: {
         hosted: {
-          issueDeviceConnectLink: vi.fn(),
           memberId: "member_123",
           userEnvKeys: [],
         },
@@ -4476,7 +4443,6 @@ describe("runHostedAssistantAutomationLane", () => {
       },
       executionContext: {
         hosted: {
-          issueDeviceConnectLink: vi.fn(),
           memberId: "member_123",
           userEnvKeys: [],
         },
@@ -4511,7 +4477,6 @@ describe("runHostedAssistantAutomationLane", () => {
       },
       executionContext: {
         hosted: {
-          issueDeviceConnectLink: vi.fn(),
           memberId: "member_123",
           userEnvKeys: [],
         },
@@ -4563,7 +4528,6 @@ describe("runHostedAssistantAutomationLane", () => {
       },
       executionContext: {
         hosted: {
-          issueDeviceConnectLink: vi.fn(),
           memberId: "member_123",
           userEnvKeys: [],
         },
@@ -4604,7 +4568,6 @@ describe("runHostedAssistantAutomationLane", () => {
       },
       executionContext: {
         hosted: {
-          issueDeviceConnectLink: vi.fn(),
           memberId: "member_123",
           userEnvKeys: [],
         },

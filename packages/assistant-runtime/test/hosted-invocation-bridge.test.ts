@@ -94,7 +94,152 @@ describe("createHostedWorkspaceRuntimeBridgeJobOptions", () => {
       runtime: {},
       snapshotArchiveBuilder: createSnapshotArchiveBuilder(),
       vaultRoot: path.join(tmpdir(), "hosted-invocation-bridge-unused"),
+      waitForBackgroundAssistantWork: async () => undefined,
     })).toThrow("Hosted mailbox payload decoder is required for this invocation.");
+  });
+
+  it("waits for assistant background work before snapshot publication", async () => {
+    const vaultRoot = await createVaultRoot();
+    const { calls, platform } = createRuntimePlatform();
+    let releaseBackgroundWork!: () => void;
+    const backgroundWorkFinished = new Promise<void>((resolve) => {
+      releaseBackgroundWork = resolve;
+    });
+    const waitForBackgroundAssistantWork = vi.fn(
+      async () => await backgroundWorkFinished,
+    );
+    const options = createBridgeOptions({
+      platform,
+      vaultRoot,
+      waitForBackgroundAssistantWork,
+    });
+
+    const checkpoint = options.createCheckpointSnapshot(
+      createCheckpointInput("idle_shutdown"),
+    );
+    await vi.waitFor(() => {
+      expect(waitForBackgroundAssistantWork).toHaveBeenCalledExactlyOnceWith(null);
+    });
+    expect(calls.startSnapshotSession).not.toHaveBeenCalled();
+
+    releaseBackgroundWork();
+    await expect(checkpoint).resolves.toMatchObject({
+      snapshotRef: {
+        snapshotId: "snapshot_bridge",
+      },
+    });
+    expect(calls.startSnapshotSession).toHaveBeenCalledOnce();
+  });
+
+  it("forwards checkpoint interruption without opening a snapshot session", async () => {
+    const vaultRoot = await createVaultRoot();
+    const { calls, platform } = createRuntimePlatform();
+    const checkpointAbort = new AbortController();
+    const interruption = new Error("checkpoint interrupted");
+    const waitForBackgroundAssistantWork = vi.fn(
+      async (signal: AbortSignal | null) => {
+        expect(signal).toBe(checkpointAbort.signal);
+        await new Promise<void>((_resolve, reject) => {
+          signal?.addEventListener("abort", () => reject(signal.reason), {
+            once: true,
+          });
+        });
+      },
+    );
+    const options = createBridgeOptions({
+      platform,
+      vaultRoot,
+      waitForBackgroundAssistantWork,
+    });
+
+    const checkpoint = options.createCheckpointSnapshot(
+      createCheckpointInput("idle_shutdown"),
+      { signal: checkpointAbort.signal },
+    );
+    await vi.waitFor(() => {
+      expect(waitForBackgroundAssistantWork).toHaveBeenCalledExactlyOnceWith(
+        checkpointAbort.signal,
+      );
+    });
+
+    checkpointAbort.abort(interruption);
+    await expect(checkpoint).rejects.toBe(interruption);
+    expect(calls.startSnapshotSession).not.toHaveBeenCalled();
+    expect(calls.putSnapshotObjectDirect).not.toHaveBeenCalled();
+    expect(calls.completeSnapshotSession).not.toHaveBeenCalled();
+  });
+
+  it("retains background work across checkpoint interruption before publishing the retry", async () => {
+    const vaultRoot = await createVaultRoot();
+    const { calls, platform } = createRuntimePlatform();
+    const snapshotArchiveBuilder = createSnapshotArchiveBuilder();
+    let releaseBackgroundWork!: () => void;
+    const retainedBackgroundWork = new Promise<void>((resolve) => {
+      releaseBackgroundWork = resolve;
+    });
+    const waitForBackgroundAssistantWork = vi.fn(
+      async (signal: AbortSignal | null) => {
+        if (!signal) {
+          await retainedBackgroundWork;
+          return;
+        }
+        await Promise.race([
+          retainedBackgroundWork,
+          new Promise<void>((_resolve, reject) => {
+            if (signal.aborted) {
+              reject(signal.reason);
+              return;
+            }
+            signal.addEventListener("abort", () => reject(signal.reason), {
+              once: true,
+            });
+          }),
+        ]);
+      },
+    );
+    const options = createBridgeOptions({
+      platform,
+      snapshotArchiveBuilder,
+      vaultRoot,
+      waitForBackgroundAssistantWork,
+    });
+    const firstCheckpointAbort = new AbortController();
+    const interruption = new Error("checkpoint interrupted");
+
+    const firstCheckpoint = options.createCheckpointSnapshot(
+      createCheckpointInput("idle_shutdown"),
+      { signal: firstCheckpointAbort.signal },
+    );
+    await vi.waitFor(() => {
+      expect(waitForBackgroundAssistantWork).toHaveBeenCalledExactlyOnceWith(
+        firstCheckpointAbort.signal,
+      );
+    });
+    firstCheckpointAbort.abort(interruption);
+    await expect(firstCheckpoint).rejects.toBe(interruption);
+
+    const retryCheckpoint = options.createCheckpointSnapshot(
+      createCheckpointInput("idle_shutdown"),
+    );
+    await vi.waitFor(() => {
+      expect(waitForBackgroundAssistantWork).toHaveBeenCalledTimes(2);
+    });
+    expect(waitForBackgroundAssistantWork).toHaveBeenLastCalledWith(null);
+    expect(snapshotArchiveBuilder.buildEncryptedSnapshot).not.toHaveBeenCalled();
+    expect(calls.startSnapshotSession).not.toHaveBeenCalled();
+    expect(calls.putSnapshotObjectDirect).not.toHaveBeenCalled();
+    expect(calls.completeSnapshotSession).not.toHaveBeenCalled();
+
+    releaseBackgroundWork();
+    await expect(retryCheckpoint).resolves.toMatchObject({
+      snapshotRef: {
+        snapshotId: "snapshot_bridge",
+      },
+    });
+    expect(snapshotArchiveBuilder.buildEncryptedSnapshot).toHaveBeenCalledOnce();
+    expect(calls.startSnapshotSession).toHaveBeenCalledOnce();
+    expect(calls.putSnapshotObjectDirect).toHaveBeenCalledOnce();
+    expect(calls.completeSnapshotSession).toHaveBeenCalledOnce();
   });
 
   it("rejects non-idle checkpoints before opening a snapshot session", async () => {
@@ -946,6 +1091,7 @@ function createBridgeOptions(input: {
   request?: HostedWorkspaceInvocationRequest;
   snapshotArchiveBuilder?: HostedWorkspaceSnapshotArchiveBuilder;
   vaultRoot: string;
+  waitForBackgroundAssistantWork?: (signal: AbortSignal | null) => Promise<void>;
 }): HostedWorkspaceRuntimeJobOptions {
   const request = input.request ?? TEST_REQUEST;
   return createHostedWorkspaceRuntimeBridgeJobOptions({
@@ -960,6 +1106,8 @@ function createBridgeOptions(input: {
     snapshotArchiveBuilder: input.snapshotArchiveBuilder ?? createSnapshotArchiveBuilder(),
     snapshotDiagnosticsHashSecret: "f".repeat(64),
     vaultRoot: input.vaultRoot,
+    waitForBackgroundAssistantWork:
+      input.waitForBackgroundAssistantWork ?? (async () => undefined),
   });
 }
 

@@ -7,10 +7,20 @@ const HOSTED_EXECUTION_LOOPBACK_HOSTS = new Set([
   "[::1]",
 ]);
 
+export const HOSTED_RUNTIME_PROCESS_ENV = "MURPH_HOSTED_RUNTIME_PROCESS";
+export const HOSTED_RUNTIME_CODEX_APP_SERVER_COMMAND_ENV =
+  "MURPH_HOSTED_CODEX_APP_SERVER_COMMAND";
+export const HOSTED_RUNTIME_CODEX_MODEL_CATALOG_JSON_ENV =
+  "MURPH_HOSTED_CODEX_MODEL_CATALOG_JSON";
+
 export interface HostedExecutionBaseUrlNormalizationOptions {
   allowHttpHosts?: readonly string[];
   allowHttpLocalhost?: boolean;
   requireOriginOnly?: boolean;
+}
+
+export function isHostedRuntimeProcessEnv(env: EnvSource): boolean {
+  return env[HOSTED_RUNTIME_PROCESS_ENV]?.trim() === "1";
 }
 
 export function normalizeHostedExecutionBaseUrl(

@@ -2,10 +2,6 @@ import { mkdtemp, realpath, rm, stat } from 'node:fs/promises'
 import { tmpdir } from 'node:os'
 import path from 'node:path'
 
-import {
-  HOSTED_CLI_BRIDGE_TOKEN_ENV,
-  HOSTED_CLI_BRIDGE_URL_ENV,
-} from '@murphai/hosted-execution/cli-runtime-bridge'
 import { afterEach, describe, expect, it, vi } from 'vitest'
 
 const askMocks = vi.hoisted(() => ({
@@ -72,8 +68,6 @@ describe('executeReadOnlyAssistantAsk', () => {
         developerInstructions: 'Use Murph voice.',
         env: {
           ELEVENLABS_API_KEY: 'must-be-removed',
-          [HOSTED_CLI_BRIDGE_TOKEN_ENV]: 'must-be-removed',
-          [HOSTED_CLI_BRIDGE_URL_ENV]: 'http://127.0.0.1/private',
           MURPH_ASSISTANT_SKILLS_ROOT: '/private/skills',
           OPENAI_API_KEY: 'provider-auth-stays-on-supervisor',
           PATH: '/runtime/bin',
@@ -130,8 +124,6 @@ describe('executeReadOnlyAssistantAsk', () => {
       OPENAI_API_KEY: 'provider-auth-stays-on-supervisor',
       PATH: '/runtime/bin',
     })
-    expect(turnInput.env[HOSTED_CLI_BRIDGE_TOKEN_ENV]).toBeUndefined()
-    expect(turnInput.env[HOSTED_CLI_BRIDGE_URL_ENV]).toBeUndefined()
     expect(turnInput.env.ELEVENLABS_API_KEY).toBeUndefined()
     expect(turnInput.env.MURPH_ASSISTANT_SKILLS_ROOT).toBeUndefined()
     expect(observedWorkingDirectory).not.toBeNull()
@@ -326,7 +318,6 @@ describe('executeReadOnlyAssistantAsk', () => {
 
   it('strips ambient hosted capabilities when no explicit child env is supplied', async () => {
     const workspaceRoot = await createTempRoot('murph-assistant-ask-ambient-')
-    vi.stubEnv(HOSTED_CLI_BRIDGE_TOKEN_ENV, 'ambient-bridge-secret')
     vi.stubEnv('EXA_API_KEY', 'ambient-search-secret')
     askMocks.buildEvidence.mockResolvedValue('No committed evidence.')
     askMocks.executeTurn.mockResolvedValue({
@@ -342,7 +333,6 @@ describe('executeReadOnlyAssistantAsk', () => {
     })
 
     const childEnv = askMocks.executeTurn.mock.calls[0]?.[0].env
-    expect(childEnv[HOSTED_CLI_BRIDGE_TOKEN_ENV]).toBeUndefined()
     expect(childEnv.EXA_API_KEY).toBeUndefined()
   })
 
@@ -416,7 +406,7 @@ describe('executeConsentedReadOnlyAssistantAsk', () => {
         codexCommand: '/runtime/codex',
         codexHome: '/runtime/codex-home',
         env: {
-          [HOSTED_CLI_BRIDGE_TOKEN_ENV]: 'must-be-removed',
+          ELEVENLABS_API_KEY: 'must-be-removed',
           OPENAI_API_KEY: 'provider-auth-stays-on-supervisor',
           PATH: '/runtime/bin',
         },
@@ -447,7 +437,7 @@ describe('executeConsentedReadOnlyAssistantAsk', () => {
         processLifetime: 'one-shot',
         threadConfig: READ_ONLY_ASSISTANT_ASK_THREAD_CONFIG,
       })
-      expect(turnInput.env[HOSTED_CLI_BRIDGE_TOKEN_ENV]).toBeUndefined()
+      expect(turnInput.env.ELEVENLABS_API_KEY).toBeUndefined()
     }
     expect(answerInput.runtimeWorkspaceRoots).toEqual([workspaceRoot])
     expect(answerInput.baseInstructions).toContain(

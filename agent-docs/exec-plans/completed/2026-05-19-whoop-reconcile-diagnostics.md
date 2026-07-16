@@ -4,7 +4,7 @@
 
 Fix scheduled device-sync jobs so successful provider results that omit `nextReconcileAt` preserve the scheduler-owned future reconcile cursor, and add redacted diagnostics that make WHOOP token/API failures actionable without logging provider payloads, tokens, account ids, or request bodies.
 
-Diagnose live WHOOP out-of-sync state with DBHub, Cloudflare observability, and Vercel API/CLI evidence before fixing.
+Diagnose live WHOOP out-of-sync state with production database inspection, Cloudflare observability, and Vercel API/CLI evidence before fixing.
 
 ## Scope
 
@@ -26,9 +26,9 @@ Diagnose live WHOOP out-of-sync state with DBHub, Cloudflare observability, and 
 
 ## Findings
 
-- DBHub shows all WHOOP dirty rows have `dirty_revision = processed_revision`; dirty recovery is not blocked.
-- DBHub shows repeated `reconcile_due` signals for two healthy WHOOP connections while their `next_reconcile_at` remains stuck in early May after fresh successful syncs.
-- DBHub hosted logs show two active WHOOP attention rows: one `WHOOP_TOKEN_REQUEST_FAILED`, one `SYNC_JOB_FAILED` with `fetch failed`; existing logs do not include provider HTTP/OAuth details or transport cause details.
+- Production database inspection shows all WHOOP dirty rows have `dirty_revision = processed_revision`; dirty recovery is not blocked.
+- Production database inspection shows repeated `reconcile_due` signals for two healthy WHOOP connections while their `next_reconcile_at` remains stuck in early May after fresh successful syncs.
+- Hosted database/log inspection shows two active WHOOP attention rows: one `WHOOP_TOKEN_REQUEST_FAILED`, one `SYNC_JOB_FAILED` with `fetch failed`; existing logs do not include provider HTTP/OAuth details or transport cause details.
 - Cloudflare observability shows the hosted worker and runtime wake path were active during the incident window; this is not a dead cron/runtime-wake issue.
 - Vercel API/CLI confirmed the web project deployment and cron config; queried deployment runtime logs did not add a more specific device-sync error than the DB-hosted runtime logs.
 

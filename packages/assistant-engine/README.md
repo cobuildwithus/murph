@@ -8,12 +8,16 @@ Neutral vault services live in `@murphai/vault-usecases/vault-services`, and inb
 
 ## Codex Warmth
 
-Codex app-server turns reuse one warm process per Node runtime/container when
-the process launch key matches, including command, args, working directory,
-Codex home, and the exact sanitized child env passed to the Codex process.
-A turn is an RPC into that process rather than a per-turn app-server
-subprocess. Overlapping turns fail busy instead of spawning parallel app-server
-processes.
+Codex app-server turns use one warm process for the full lifetime of a warm Node
+runtime/container. A turn is an RPC into that process rather than a per-turn
+app-server subprocess. Overlapping turns fail busy instead of spawning parallel
+app-server processes.
+
+Process launch identity contains only process-stable settings such as the
+command, args, stable working directory, Codex home, and sanitized stable env.
+Prompts, session/thread/turn ids, delivery routes, invocation credentials, and
+route or device grants are request facts. They do not enter launch identity or
+the App Server child env, so an ordinary later turn cannot replace the process.
 
 Per-thread settings such as model, model provider, approval policy, sandbox,
 and cwd are sent through thread RPC. Native resume validates Codex's returned
@@ -24,35 +28,32 @@ by the provider path; those args are already part of launch identity.
 
 Codex accepts dynamic tools on `thread/start`, persists them in rollout session
 metadata, and restores them when a cold `thread/resume` does not provide a new
-tool list. Murph therefore keeps native thread continuity across app-server
-replacement instead of reconstructing a bounded transcript as a new thread.
-This applies to every registered dynamic tool, including the private
+tool list. Murph therefore keeps native thread continuity across a genuine cold
+restart instead of reconstructing a bounded transcript as a new thread. This
+applies to every registered dynamic tool, including the private
 `murph.assistant_style` surface; no tool-specific stale-resume fallback is
 needed.
 
-The hosted CLI bridge keeps one process-lifetime loopback server but rotates its
-bearer for every active invocation. Because the bearer is part of the sanitized
-child env and launch identity, a later hosted invocation replaces the resident
-app-server and resumes its native thread instead of letting a stale terminal
-inherit later route or device-sync authority. At the end of each hosted turn,
-assistant-engine asks Codex to clean the thread's background terminals; Codex
-owns those terminals and terminates their process groups. A cleanup RPC failure
-poisons and replaces the resident app-server. A prior invocation's bearer is
-unauthorized; the container still consumes authenticated requests that cross
-the current invocation's closing boundary and stops warm Codex fail-closed.
+Hosted invocation-scoped automation and device authority enters only the
+current root turn through narrow typed dynamic tools backed by existing domain
+ports. The App Server and its descendant shell environments never receive that
+authority. Dynamic-tool dispatch requires the exact active root turn and
+rejects descendant, stale-turn, or foreign-thread calls; closing the invocation
+withdraws the tools without replacing the App Server.
 
-Turn prompts, session ids, turn ids, and delivery routes are request data, not
-child process env. If a value should not affect warm reuse, keep it out of the
-Codex process env and pass it through RPC or a runtime-owned request seam.
-Hosted turns read the current delivery route through the CLI bridge when a
-command needs that invocation-scoped context; local assistant commands must pass
-explicit route flags instead of relying on ambient env.
+MultiAgent V2 descendants admitted before the root final reply may keep working
+through Codex's native lifecycle after that reply. Root completion and the next
+ordinary turn do not terminate them. They retain normal local canonical
+vault CLI/filesystem authority, but never inherit the root turn's
+invocation-scoped automation or device capability.
 
 Hosted runtime env projection remains owned by the hosted runtime before it
-calls assistant-engine. The app-server lifecycle is shared: launch-key mismatch,
-abort cleanup, malformed output, off-turn output, process failure, or idle
-explicit shutdown stops or poisons the warm process before a later turn can
-reuse it.
+calls assistant-engine. The resident App Server is replaced only when its Node
+runtime/container shuts down, the process exits, provider-protocol evidence
+proves it unhealthy or poisoned, an operator explicitly shuts it down, or a
+genuine process-level setting changes that Codex cannot accept through thread
+or turn RPC. Abort cleanup applies to the affected turn; routine turn completion
+is not process cleanup.
 
 ## Read-only Assistant Ask
 
@@ -75,8 +76,8 @@ roots, working directory, empty instruction sources, and approval policy before
 the turn starts. The profile permits read-only access to the exact target roots
 while denying `.runtime/**`, `.codex/**`, environment files, writes, other
 workspaces, and tool network. Model-run shell commands inherit no provider
-credential or hosted secret. The child receives no dynamic tools, CLI bridge,
-delivery route, MCP, web search, memory, plugin, app, or multi-agent authority.
+credential or hosted secret. The child receives no dynamic tools, delivery
+route, MCP, web search, memory, plugin, app, or multi-agent authority.
 
 The runtime may keep one such child beside foreground work. It owns the exact
 process handle and must interrupt, await with bounded grace, terminate only

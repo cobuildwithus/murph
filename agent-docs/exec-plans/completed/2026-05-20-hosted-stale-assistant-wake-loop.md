@@ -33,7 +33,7 @@ Updated: 2026-05-20
   - Preserve fresh-input hot path behavior where device sync is deferred behind user-visible work.
   - Avoid broad scheduling rewrites or new runtime state.
 - Product/process constraints:
-  - Use local DB evidence only; DBHub is production-only.
+  - Use local database evidence only; hosted production database inspection tooling is not for local work.
   - Do not expose identifiers, local paths, raw log payloads, or secrets.
   - Preserve unrelated dirty working-tree changes.
 

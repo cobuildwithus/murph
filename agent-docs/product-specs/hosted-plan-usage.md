@@ -1,6 +1,6 @@
 # Hosted Plan Usage And Subscription Actions
 
-Last verified: 2026-07-15
+Last verified: 2026-07-16
 
 ## Goal
 
@@ -230,6 +230,11 @@ trial-ending webhook, automatic nudge, group balance, top-up flow, automatic
 model switch, custom checkout page, App Clip, or mini app. It does not add a
 general Stripe API tool: the action contract exposes only the three current
 web-owned billing operations above, and every payment handoff is Stripe-hosted.
+
+The separately proposed target-state extension lives in
+`agent-docs/product-specs/hosted-usage-topups.md`. That specification treats
+usage-limit blocking as existing product behavior and records the checked-out
+source discrepancy that must be reconciled before implementation.
 
 ## Deployment
 

@@ -101,7 +101,7 @@ The Settings vault export does not include:
 | `prisma.hosted_consent_event` | Live delete | Confirmed data export | Deletes member-scoped consent event history. Confirmed export includes event scope/source/action and document metadata. |
 | `prisma.hosted_consent_grant` | Live delete | Confirmed data export | Deletes member-scoped consent grant state. Confirmed export includes grant scope/source/status and document metadata. |
 | `prisma.device_connection` | Live delete | Metadata/counts | Revokes providers where possible, then deletes connection rows and encrypted token bundles. |
-| `prisma.device_sync_companion_capture_receipt` | Live delete | Metadata/counts | Deletes bounded operational replay receipts, including capture-key and envelope hashes, before connection rows. Receipts expire after 30 days and are capped at 1,024 per connection. |
+| `prisma.device_sync_companion_capture_receipt` | Live delete | Metadata/counts | Deletes bounded operational replay receipts, identified by connection and source night with an envelope hash, before connection rows. Receipts expire after 30 days and are capped at 64 per connection. |
 | `prisma.device_token_audit` | Live delete | Metadata/counts | Deletes token audit history. |
 | `prisma.device_sync_signal` | Live delete | Metadata/counts | Deletes pre-existing wake/sync signals. Deletion-time provider revocation does not enqueue new disconnect or wake work. |
 | `prisma.device_connect_intent` | Live delete | Metadata/counts | Deletes short-lived hosted device connect intents. Export reports safe metadata only and omits assertion/nonces and routing internals. |

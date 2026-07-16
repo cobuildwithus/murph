@@ -519,6 +519,7 @@ export async function resolveAssistantRouteTurnPlan(input: {
     : null
   const bootstrapAssistantCliContract = scopeAssistantCliSurfaceContractForAssistant({
     contract: unscopedAssistantCliContract,
+    hostedRuntime: input.executionContext?.hosted != null,
   })
   let assistantContextSnapshotElapsedMs: number | null = null
   const assistantContextSnapshotPrompt = maintenanceTurn || !privateInteractiveAudience
@@ -566,6 +567,7 @@ export async function resolveAssistantRouteTurnPlan(input: {
             currentTimeZone: input.promptTimeContext.currentTimeZone,
             conversationScope,
             hostedRuntime: input.executionContext?.hosted != null,
+            scheduledOccurrenceAt: input.input.scheduledOccurrenceAt ?? null,
           }, {
             toolSchemaHash,
           })
@@ -573,6 +575,8 @@ export async function resolveAssistantRouteTurnPlan(input: {
             assistantCliContract: options.assistantCliContract,
             assistantContextSnapshotPrompt,
             assistantDynamicContextPrompts: hostedDynamicContextPrompts,
+            assistantHostedAutomationAvailable:
+              input.hostedToolContext?.automationTool != null,
             assistantHostedDeviceConnectAvailable:
               privateInteractiveAudience &&
               promptCapabilityAvailability.assistantHostedDeviceConnectAvailable,
@@ -651,6 +655,8 @@ export async function resolveAssistantRouteTurnPlan(input: {
         assistantConfigurationAvailable:
           privateInteractiveAudience &&
           input.hostedToolContext?.assistantConfigurationTool != null,
+        automationAvailable:
+          input.hostedToolContext?.automationTool != null,
         computerToolsAvailable:
           privateInteractiveAudience &&
           input.hostedToolContext?.computerToolsAvailable === true,
@@ -658,6 +664,9 @@ export async function resolveAssistantRouteTurnPlan(input: {
         connectedAppsAvailable:
           input.hostedToolContext?.connectedApps != null,
         connectedAppsManageAvailable: privateInteractiveAudience,
+        deviceAvailable:
+          privateInteractiveAudience &&
+          input.hostedToolContext?.deviceTool != null,
         familyPlanAvailable:
           privateInteractiveAudience &&
           input.hostedToolContext?.familyPlanTool != null,
@@ -1103,7 +1112,7 @@ export function resolveAssistantPromptCapabilityAvailability(input: {
     input.executionContext?.hosted?.deviceConnectProviders ?? []
   const assistantHostedDeviceConnectAvailable =
     assistantHostedDeviceConnectProviders.length > 0 &&
-    typeof input.executionContext?.hosted?.issueDeviceConnectLink === 'function'
+    input.executionContext?.hosted?.deviceTool != null
 
   return {
     assistantHostedDeviceConnectAvailable,

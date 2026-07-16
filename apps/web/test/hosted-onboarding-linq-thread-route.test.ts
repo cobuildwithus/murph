@@ -2999,12 +2999,16 @@ describe("Linq group chat auto-provision", () => {
         reason: "wake-appended-thread-route",
       });
       expect(prisma.hostedThreadContainerParticipant.upsert).not.toHaveBeenCalled();
-      expect(signalRuntime.signalHostedMailboxAppendRuntime).toHaveBeenCalledWith(
-        expect.objectContaining({
-          expectedUserId: containerCreate.data.memberId,
-          mailboxItemId: "mailbox_group_123",
-        }),
-      );
+      expect(signalRuntime.signalHostedMailboxAppendRuntime).toHaveBeenCalledWith({
+        abortSignal: expect.any(AbortSignal),
+        expectedUserId: containerCreate.data.memberId,
+        knownCheckpoint: {
+          lane: "conversation",
+          laneSeq: "1",
+          userId: containerCreate.data.memberId,
+        },
+        mailboxItemId: "mailbox_group_123",
+      });
       expect(warn).toHaveBeenCalledWith(
         "Hosted thread-container participant reconcile skipped.",
         expect.objectContaining({

@@ -13,7 +13,7 @@ import {
 import { afterAll, beforeAll, describe, expect, it, vi } from "vitest";
 
 import {
-  buildAssistantProviderVaultCliCall,
+  buildAssistantProviderMurphToolCall,
   buildHostedAssistantNotificationDecisionResponse,
   type HostedLocalAssistantProviderStubRequest,
   type HostedLocalAssistantProviderScriptedResponse,
@@ -111,7 +111,6 @@ describe("hosted local Linq scheduled reminder e2e", () => {
     requireScenario().queueAssistantResponses(
       buildHostedAssistantAutomationSaveResponses({
         dueAtIso: scheduledReminderTimes.dueAtIso,
-        deliveryTarget: scheduledChatId,
         text: setupReplyText,
       }),
       { matchInputContains: setupRequestText },
@@ -192,8 +191,6 @@ describe("hosted local Linq scheduled reminder e2e", () => {
     requireScenario().queueAssistantResponses(
       buildHostedAssistantAutomationSaveResponses({
         dueAtIso: overlapSetupTimes.dueAtIso,
-        deliveryTarget: scheduledChatId,
-        requestId: `hosted-local-overlap-reminder-${userId}`,
         text: setupReplyText,
       }),
       { matchInputContains: setupRequestText },
@@ -562,37 +559,19 @@ async function startScenario(): Promise<void> {
 }
 
 function buildHostedAssistantAutomationSaveResponses(input: {
-  deliveryTarget: string;
   dueAtIso: string;
-  requestId?: string;
   text: string;
 }): readonly HostedLocalAssistantProviderScriptedResponse[] {
   return [
-    buildAssistantProviderVaultCliCall([
-      "automation",
-      "save",
-      "Sleep reminder",
-      "--request-id",
-      input.requestId ?? `hosted-local-reminder-${userId}`,
-      "--instructions",
-      scheduledReminderInstructions,
-      "--summary",
-      "One-shot sleep reminder.",
-      "--tags",
-      "assistant",
-      "--tags",
-      "scheduled",
-      "--continuity-policy",
-      "preserve",
-      "--channel",
-      "linq",
-      "--delivery-target",
-      input.deliveryTarget,
-      "--schedule-kind",
-      "at",
-      "--schedule-at",
-      input.dueAtIso,
-    ]),
+    buildAssistantProviderMurphToolCall("automation", {
+      action: "save",
+      continuityPolicy: "preserve",
+      instructions: scheduledReminderInstructions,
+      schedule: { at: input.dueAtIso, kind: "at" },
+      summary: "One-shot sleep reminder.",
+      tags: ["assistant", "scheduled"],
+      title: "Sleep reminder",
+    }),
     input.text,
   ];
 }

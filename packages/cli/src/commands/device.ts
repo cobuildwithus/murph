@@ -160,7 +160,7 @@ export function registerDeviceCommands(
 
   account.command('list', {
     description:
-      'List hosted runtime device accounts, or local daemon accounts when an explicit/local control plane is available.',
+      'List local daemon device accounts when an explicit/local control plane is available.',
     args: emptyArgsSchema,
     options: deviceControlOptionsSchema.extend({
       provider: providerNameSchema.optional(),

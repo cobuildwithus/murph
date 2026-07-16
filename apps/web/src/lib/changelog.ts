@@ -63,6 +63,99 @@ export interface ChangelogPage {
 
 const RAW_CHANGELOG_EDITIONS = [
   {
+    id: "2026-07-16",
+    publishedOn: "2026-07-16",
+    title: "More follow-through, less friction",
+    summary:
+      "Make supported Pulse and Edge changes in private chat, give each group its own Murph style, and opt into check-ins that verify before they ask. Replies keep their context, WHOOP setup has a clear fallback, phone calls count toward plan usage, and everyday screens and saves avoid repeated work.",
+    items: [
+      {
+        id: "conversation-subscription-actions",
+        kind: "feature",
+        priority: 5,
+        title: "Change your subscription in conversation",
+        summary:
+          "In a private chat, review the current terms, then clearly choose to continue Pulse when your trial ends, start Pulse now, or upgrade an eligible paid Pulse plan to Edge.",
+        details:
+          "Murph confirms only the result returned by the billing system. Any required payment or payment-method step stays on Stripe. Cancellations, Family changes, usage top-ups, and direct trial-to-Edge changes remain outside this chat flow.",
+        relevanceTags: ["billing", "assistant", "subscriptions"],
+        sourcePullRequests: [736],
+      },
+      {
+        id: "group-owned-murph-style",
+        kind: "feature",
+        priority: 5,
+        title: "Give each group its own Murph style",
+        summary:
+          "In an authenticated group iMessage conversation, ask to change Tone, Voice, Humor, Push, or Detail and the room now saves those choices for its own Murph.",
+        details:
+          "The group choices begin with the next reply and never read or overwrite any participant's private Murph settings. Group email remains read-only.",
+        relevanceTags: ["groups", "personalization", "privacy"],
+        sourcePullRequests: [738, 745],
+      },
+      {
+        id: "context-aware-follow-through",
+        kind: "feature",
+        priority: 5,
+        title: "Follow-through checks the context first",
+        summary:
+          "Your private Murph now checks what you have already shared, asks the questions that could change the answer, and can offer reminders or check-ins when they would help.",
+        details:
+          "Accountability check-ins require your explicit agreement; a simple reminder remains a cue. Before asking, Murph checks the relevant conversation and connected evidence, skips known outcomes, treats missing or stale evidence as unknown, and anchors group evidence to the right local occurrence.",
+        relevanceTags: ["assistant", "follow-through", "reminders"],
+        sourcePullRequests: [733, 737, 753],
+      },
+      {
+        id: "scheduled-replies-keep-context",
+        kind: "improvement",
+        priority: 5,
+        title: "Replies keep their place",
+        summary:
+          "Replying to a scheduled message now carries the notification context you are answering, so Murph can understand a short yes or follow-up without making you restate it.",
+        details:
+          "For established iMessage conversations, Murph also starts waking after a safely stored message while the durable handoff finishes, removing one serial wait without weakening duplicate-reply protection.",
+        relevanceTags: ["assistant", "messaging", "reliability"],
+        sourcePullRequests: [742, 749],
+      },
+      {
+        id: "whoop-apple-health-fallback",
+        kind: "improvement",
+        priority: 4,
+        title: "WHOOP setup keeps moving through Apple Health",
+        summary:
+          "When direct WHOOP capacity is full, setup now switches to a clear Apple Health path instead of ending in a generic error, with the exact WHOOP menu steps and the Murph iPhone app link.",
+        details:
+          "Members who already have a direct WHOOP connection can still reconnect. The fallback appears only when direct capacity is full.",
+        relevanceTags: ["whoop", "apple-health", "wearables"],
+        sourcePullRequests: [741],
+      },
+      {
+        id: "phone-calls-in-plan-usage",
+        kind: "improvement",
+        priority: 4,
+        title: "Phone calls now count toward plan usage",
+        summary:
+          "The included-usage percentage now reflects outbound phone calls once they finish, including transferred calls, so Settings and chat show a more complete total.",
+        details:
+          "Each finished call is counted once. Earlier calls are not added retroactively, and this does not create per-call billing or overage charges.",
+        relevanceTags: ["phone-calls", "plans", "usage"],
+        sourcePullRequests: [743],
+      },
+      {
+        id: "less-repeated-work-behind-everyday-screens",
+        kind: "improvement",
+        priority: 4,
+        title: "Less repeated work behind everyday screens",
+        summary:
+          "Settings, connected-device status, and growing group views now avoid repeated lookups, as do fresh sign-in checks and the safety checks behind iMessage replies.",
+        details:
+          "Multi-part saves also upload their required pieces together instead of one by one, while still waiting for every piece before confirming success. Permissions and privacy checks remain intact.",
+        relevanceTags: ["dashboard", "performance", "reliability"],
+        sourcePullRequests: [727, 728, 729, 730, 731, 732, 735],
+      },
+    ],
+  },
+  {
     id: "2026-07-15",
     publishedOn: "2026-07-15",
     title: "A lighter way to say yes",

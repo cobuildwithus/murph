@@ -94,10 +94,6 @@
       "types": "./dist/browser-vault.d.ts",
       "default": "./dist/browser-vault.js"
     },
-    "./cli-runtime-bridge": {
-      "types": "./dist/cli-runtime-bridge.d.ts",
-      "default": "./dist/cli-runtime-bridge.js"
-    },
     "./env": {
       "types": "./dist/env.d.ts",
       "default": "./dist/env.js"

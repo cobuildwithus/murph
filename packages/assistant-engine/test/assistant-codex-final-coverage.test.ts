@@ -5,7 +5,7 @@ import path from 'node:path'
 import { afterEach, describe, expect, it, vi } from 'vitest'
 import {
   HOSTED_RUNTIME_CODEX_MODEL_CATALOG_JSON_ENV,
-} from '@murphai/hosted-execution/cli-runtime-bridge'
+} from '@murphai/hosted-execution/env'
 
 const providerMocks = vi.hoisted(() => ({
   executeCodexAssistantTurnAttemptFromInput: vi.fn(),
@@ -1575,15 +1575,18 @@ describe('Codex model catalog', () => {
     const session = createAssistantSession({
       sessionId: 'session-hosted-device-connect',
     })
-    const issueDeviceConnectLink = vi.fn(
-      async () => ({
-        authorizationUrl: 'https://connect.example.test/whoop',
-        connectUrl: 'https://connect.example.test/whoop',
-        expiresAt: '2026-04-30T00:05:00.000Z',
-        provider: 'whoop' as const,
-        providerLabel: 'WHOOP',
-      }),
-    )
+    const deviceTool = {
+      request: vi.fn(async () => ({
+        action: 'connect' as const,
+        link: {
+          authorizationUrl: 'https://connect.example.test/whoop',
+          connectUrl: 'https://connect.example.test/whoop',
+          expiresAt: '2026-04-30T00:05:00.000Z',
+          provider: 'whoop',
+          providerLabel: 'WHOOP',
+        },
+      })),
+    }
     const input = {
       channel: 'linq',
       executionContext: {
@@ -1591,7 +1594,7 @@ describe('Codex model catalog', () => {
           deviceConnectProviders: [
             { label: 'WHOOP', provider: 'whoop' },
           ],
-          issueDeviceConnectLink,
+          deviceTool,
           memberId: 'member_synthetic',
           userEnvKeys: [],
         },
@@ -1663,7 +1666,7 @@ describe('Codex model catalog', () => {
       throw new Error('Expected Codex provider handling to succeed.')
     }
     expect(outcome.providerTurn.response).toBe('provider response')
-    expect(issueDeviceConnectLink).not.toHaveBeenCalled()
+    expect(deviceTool.request).not.toHaveBeenCalled()
     expect(providerMocks.executeCodexAssistantTurnAttemptFromInput).toHaveBeenCalledWith(
       expect.objectContaining({
         userPrompt: 'Please connect my WHOOP',

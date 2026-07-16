@@ -8,7 +8,7 @@ import { promisify } from 'node:util'
 
 import {
   HOSTED_RUNTIME_CODEX_MODEL_CATALOG_JSON_ENV,
-} from '@murphai/hosted-execution/cli-runtime-bridge'
+} from '@murphai/hosted-execution/env'
 import { afterAll, afterEach, describe, expect, it } from 'vitest'
 
 import {

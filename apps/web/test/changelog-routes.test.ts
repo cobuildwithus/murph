@@ -24,7 +24,7 @@ describe("changelog routes", () => {
   it("publishes every item from the two newest editions with canonical links", async () => {
     const response = await getChangelogFeed(
       new Request(
-        "https://join.example.test/api/changelog?from=2026-07-14&to=2026-07-16",
+        "https://join.example.test/api/changelog?from=2026-07-15&to=2026-07-17",
       ),
     );
     const body = await response.json();
@@ -35,31 +35,37 @@ describe("changelog routes", () => {
     }>;
 
     expect(response.status).toBe(200);
-    expect(items).toHaveLength(10);
+    expect(items).toHaveLength(13);
     expect(items.map((item) => item.publishedOn)).toEqual([
+      "2026-07-16",
+      "2026-07-16",
+      "2026-07-16",
+      "2026-07-16",
+      "2026-07-16",
+      "2026-07-16",
+      "2026-07-16",
       "2026-07-15",
       "2026-07-15",
       "2026-07-15",
       "2026-07-15",
       "2026-07-15",
       "2026-07-15",
-      "2026-07-14",
-      "2026-07-14",
-      "2026-07-14",
-      "2026-07-14",
     ]);
     expect(items.map((item) => item.id)).toEqual(
       expect.arrayContaining([
+        "conversation-subscription-actions",
+        "group-owned-murph-style",
+        "context-aware-follow-through",
+        "scheduled-replies-keep-context",
+        "whoop-apple-health-fallback",
+        "phone-calls-in-plan-usage",
+        "less-repeated-work-behind-everyday-screens",
         "affirmative-reactions-as-replies",
         "reaction-first-group-permissions",
         "exercise-library-250-more-visual-guides",
         "fresh-messages-stay-foreground",
         "pulse-trial-two-weeks",
         "billing-settings-handoff",
-        "plan-usage-percentage",
-        "personal-group-awareness",
-        "appointment-scheduling-brief",
-        "apple-health-chat-handoff",
       ]),
     );
     for (const item of items) {

@@ -12,7 +12,7 @@ quietly completed without importing or fetching anything.
 
 The ingestion model is now additive: push and pull are complementary, neither
 gates the other, and no branch can complete without import-or-fetch. Treat the
-six invariants below as constraints that any change to webhook construction,
+seven invariants below as constraints that any change to webhook construction,
 resource-job execution, or scheduled reconcile must preserve.
 
 These are durable behavioral invariants. The current owning code lives in
@@ -208,39 +208,76 @@ drain/batch service seam in `packages/device-syncd/src/service.ts`.
    collisions with a second account fail closed.
 
 7. **HRV method semantics survive import and reprojection.** HealthKit's
-   standard HRV quantity is SDNN (`hrv-sdnn`); direct WHOOP spot RMSSD is
-   `hrv-rmssd`. Every accepted direct-WHOOP canonical observation carries a
-   verified SHA-256 admission identity from web staging through local dedupe and
-   importer external identity. The admission identity, not the reusable client
-   capture id, owns canonical idempotency after receipt retention expires.
-   Its encrypted hosted payload remains authoritative until canonical import
-   succeeds, including across runtime yield or cold restore. That success gate
-   is companion-specific. Generic provider payload rows remain available to
-   reconstruct a lost machine-local queue while work is queued, but the
-   checkpoint handoff carries the local scheduler's future wake instead of
-   immediately replaying the hosted row. Generic execution success or terminal
-   failure acknowledges the row. Work skipped after a machine-local disconnect
-   remains hosted until the next control-plane snapshot either restores the
-   active account and replays it or explicitly terminally dispositions it;
-   companion RMSSD acknowledges only canonical success. Canonical-owner
-   failures retain the same local job row, extend its attempt fence, and use
-   the existing bounded retry delay even after ordinary job attempts are
-   exhausted. An expired worker lease on that fenced row is reclaimed on the
-   same row rather than dead-lettered, and a hosted refetch dedupes to that row
-   before reclaim; these paths never create replacement dead rows or an immediate hosted
-   replay loop. A structurally invalid companion payload terminalizes its one
-   local job and acknowledges the exact encrypted hosted payload so it cannot
-   replay into replacement dead rows. While provider revocation is in flight, the web-owned
-   `DISCONNECT_IN_PROGRESS` sentinel rejects every runtime connection, local
-   state, credential, source, and local-heartbeat mutation under the connection lock.
-   A replay after mutable vault-timezone metadata changes preserves the first
-   canonical `dayKey` and `timeZone`; that placement drift alone is duplicate
-   content, while every other same-admission content difference remains an
-   immutable conflict.
-   Re-import preserves the provider external identity while correcting the
-   metric, and query reprojection classifies unreimported generic Apple HRV
-   facts from source provenance as SDNN without promoting them into RMSSD
-   summaries.
+   standard HRV quantity is SDNN (`hrv-sdnn`); the direct WHOOP 5/MG BLE result
+   is a beta overnight pulse-rate-variability RMSSD estimate
+   (`whoop-ble-overnight-prv-rmssd`) with no generic `hrv` or biomarker alias.
+   The existing provider resolver continues to select at most one daily
+   `hrv-rmssd` point across WHOOP Recovery, Oura, and other provider evidence.
+   The beta companion series does not compete or aggregate with either series.
+
+   After one explicit enrollment, the phone continuously subscribes to the
+   WHOOP 5/MG pulse-interval stream and owns a fixed `00:00–08:00` local
+   civil-time schedule. It freezes the timezone rules for each night, so later
+   timezone changes cannot move a retained occurrence. A fully traversed night
+   is bounded to 84...108 completed five-minute windows: typically 84, 96, or
+   108, with intermediate counts such as 90 or 102 for half-hour transitions.
+   It reduces intervals into non-overlapping windows with
+   method `prv-rmssd-5m-mean-scheduled-0000-0800-local-v1` and uploads only the
+   strict six-field nightly envelope: `schema`, `methodVersion`, `nightDate`,
+   `rmssdMs`, `completedWindowCount`, and `acceptedWindowCount`. Exact capture
+   timestamps, duration, timezone details, coverage milliseconds, raw packets,
+   intervals, packet timestamps, device identifiers, and per-window values
+   never enter ingestion. The phone owns the per-window accepted-duration
+   policy; web verifies the closed summary shape, at least 48 accepted windows,
+   and at least 50% accepted completed windows.
+
+   The backend owns no capture scheduler. iOS may persist only one protected,
+   schema-versioned scalar checkpoint containing the frozen night/schedule
+   identity, next window position, completed/accepted counts, and accepted
+   RMSSD sum, plus an outbox of at most three already-derived strict envelopes.
+   First admission accepts night dates from three UTC dates behind through one
+   UTC date ahead, so all three outbox entries remain admissible when the
+   member's local date trails UTC without uploading a timezone.
+   The exact app-scoped CoreBluetooth peripheral UUID may persist in that
+   protected state solely to restore the enrolled band; it never enters
+   ingestion or logs. An incomplete window is discarded across a process gap;
+   raw intervals, partial-window state, per-window values, WHOOP account
+   identity, and every other band identifier remain memory-only. One continually
+   postponed local watchdog notification may remind the member to reopen Murph
+   when callbacks stop. Normal backgrounding needs no nightly action, but
+   force-quit prevents BLE relaunch until the app is opened again.
+
+   Local direct-BLE enrollment and hosted Junction authority are separate. The
+   Connect WHOOP control enrolls only the CoreBluetooth band and does not send
+   hosted `connect`. Known same-member passive SDK repair sends `resume`; a
+   fresh or unproven installation omits intent and lets durable server state
+   decide. Exactly one established provider row resumes, zero provider rows may
+   establish the first lane, and terminal or ambiguous state rejects without
+   mutation. Only a future visible hosted-health/Junction Reconnect action may
+   send `connect` and create/reactivate the lane. Data ingress and retry-outbox
+   drain likewise carry no connection lifecycle authority.
+
+   The first strict envelope owns `(connection, nightDate)` in a 30-day,
+   64-row-per-connection receipt window. Exact replay is a no-op and changed
+   content conflicts. Every accepted envelope carries a verified SHA-256
+   admission identity from encrypted web staging through local dedupe and
+   importer external identity. Receipt cardinality is connection plus
+   `nightDate`; canonical cardinality is vault plus source (`whoop`) plus
+   `nightDate`. That produces one immutable summary-grain event with a
+   synthetic 12:00Z `occurredAt`, no event `timeZone`, and no reconstructed
+   capture time.
+
+   The encrypted hosted payload remains authoritative until canonical import
+   succeeds, including across runtime yield, cold restore, lease expiry,
+   disconnect, and hosted refetch. Canonical-owner failures retain and reclaim
+   the same local retry row beyond the ordinary attempt fence; they never mint
+   replacement dead rows or a tight hosted replay loop. Only canonical success
+   or the exact structurally invalid terminal result acknowledges the hosted
+   payload. Generic provider rows keep their existing executed-success or
+   terminal-failure acknowledgement policy. While provider revocation is in
+   flight, `DISCONNECT_IN_PROGRESS` still rejects runtime connection, local
+   state, credential, source, and heartbeat mutations under the connection
+   lock, without cancelling already accepted credential-free import work.
 
 ## Consequences for changes
 

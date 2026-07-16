@@ -18,6 +18,7 @@ export type AssistantAutomationTurnEnvelope = Pick<
   | 'deliveryDispatchMode'
   | 'executionContext'
   | 'scheduledAutomationAuthority'
+  | 'scheduledOccurrenceAt'
   | 'serviceTier'
   | 'turnEnvironment'
   | 'turnTrigger'
@@ -28,6 +29,7 @@ export function buildAssistantAutomationTurnEnvelope(input: {
   deliveryDispatchMode?: AssistantOutboxDispatchMode
   executionContext?: AssistantExecutionContext | null
   scheduledAutomationAuthority?: AssistantMessageInput['scheduledAutomationAuthority']
+  scheduledOccurrenceAt?: string | null
   serviceTier?: AssistantProviderServiceTier | null
   signal?: AbortSignal
   turnEnvironment?: AssistantTurnEnvironment | null
@@ -43,6 +45,7 @@ export function buildAssistantAutomationTurnEnvelope(input: {
     deliveryDispatchMode: input.deliveryDispatchMode,
     executionContext: input.executionContext,
     scheduledAutomationAuthority: input.scheduledAutomationAuthority ?? null,
+    scheduledOccurrenceAt: input.scheduledOccurrenceAt ?? null,
     serviceTier: input.serviceTier ?? null,
     turnEnvironment: input.turnEnvironment ?? null,
     turnTrigger: input.turnTrigger,
