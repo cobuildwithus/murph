@@ -1,6 +1,5 @@
 import {
-  HOSTED_RUNTIME_ASSISTANT_PREFERENCE_CAUSAL_SEQ_ACTION,
-  parseHostedRuntimeAssistantPreferenceCausalSeqRequest,
+  HOSTED_RUNTIME_ASSISTANT_PERSONALITY_UPDATE_ACTION,
   parseHostedRuntimeAssistantPersonalizationToolAuthority,
   parseHostedRuntimeAssistantPersonalizationToolRequest,
 } from "@murphai/hosted-execution/assistant-personalization";
@@ -11,12 +10,12 @@ import {
 } from "@/src/lib/hosted-execution/cloudflare-callback-auth";
 import {
   handleHostedRuntimeAssistantPersonalizationTool,
-  resolveHostedRuntimeAssistantPreferenceCausalSeq,
 } from "@/src/lib/hosted-execution/assistant-personalization-tool";
 import { jsonOk, withJsonError } from "@/src/lib/hosted-onboarding/http";
 import { signalHostedMailboxAppendRuntime } from "@/src/lib/hosted-orchestration/signal-runtime";
 
 const BODY_LIMIT_BYTES = 2_048;
+const RETIRED_PREFERENCE_CAUSAL_SEQ_ACTION = "resolve_preference_causal_seq";
 
 export const POST = withJsonError(async (request: Request) => {
   const { payload, userId: memberId } = await requireHostedCloudflareCallbackJsonRequest(request, {
@@ -24,20 +23,18 @@ export const POST = withJsonError(async (request: Request) => {
   });
   const authority = readAssistantInputAuthority(request);
   if (isAssistantPreferenceCausalSeqRequest(payload)) {
-    parseHostedRuntimeAssistantPreferenceCausalSeqRequest(payload);
-    if (authority === null) {
-      throw new TypeError(
-        "Assistant preference causal sequence requires assistant input authority.",
-      );
-    }
-    return jsonOk(await resolveHostedRuntimeAssistantPreferenceCausalSeq({
-      ...authority,
-      memberId,
-    }));
+    throw new TypeError(
+      "Direct-vault assistant preference sequence resolution is retired.",
+    );
   }
-
   const body = parseHostedRuntimeAssistantPersonalizationToolRequest(payload);
-  if (body.action === "update" && authority === null) {
+  if (
+    (
+      body.action === "update"
+      || body.action === HOSTED_RUNTIME_ASSISTANT_PERSONALITY_UPDATE_ACTION
+    )
+    && authority === null
+  ) {
     throw new TypeError(
       "Assistant personalization update requires assistant input authority.",
     );
@@ -55,7 +52,7 @@ function isAssistantPreferenceCausalSeqRequest(value: unknown): boolean {
   return typeof value === "object"
     && value !== null
     && "action" in value
-    && value.action === HOSTED_RUNTIME_ASSISTANT_PREFERENCE_CAUSAL_SEQ_ACTION;
+    && value.action === RETIRED_PREFERENCE_CAUSAL_SEQ_ACTION;
 }
 
 function readAssistantInputAuthority(request: Request): {

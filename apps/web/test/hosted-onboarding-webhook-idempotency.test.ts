@@ -353,6 +353,46 @@ describe("hosted onboarding Linq webhook hard-cut flows", () => {
     expect(mocks.claimHostedLinqOnboardingLinkNotice).not.toHaveBeenCalled();
   });
 
+  it("records message.sent without treating it as delivery or inbound work", async () => {
+    const prisma = createPrismaStub();
+    mocks.getPrisma.mockReturnValue(prisma);
+
+    await expect(
+      handleHostedOnboardingLinqWebhook({
+        rawBody: buildLinqMessageWebhookBody({
+          eventType: "message.sent",
+          isFromMe: true,
+          service: "SMS",
+        }),
+        signature: null,
+        timestamp: null,
+      }),
+    ).resolves.toMatchObject({
+      ignored: true,
+      ok: true,
+      reason: "recorded-linq-provider-event:message.sent",
+    });
+
+    expect(prisma.hostedLinqProviderEvent.createMany).toHaveBeenCalledWith(
+      expect.objectContaining({
+        data: expect.objectContaining({
+          deliveryStatus: null,
+          direction: "outbound",
+          eventType: "message.sent",
+          messageLookupKey: expect.stringMatching(/^hbidx:linq-message:/u),
+          service: "SMS",
+        }),
+        skipDuplicates: true,
+      }),
+    );
+    expect(prisma.hostedLinqAlert.createMany).not.toHaveBeenCalled();
+    expect(prisma.hostedLinqDelivery.updateMany).not.toHaveBeenCalled();
+    expect(mocks.sendHostedLinqChatMessage).not.toHaveBeenCalled();
+    expect(mocks.appendHostedMailboxEnvelopeTx).not.toHaveBeenCalled();
+    expect(mocks.nudgeHostedRunnerUserBestEffort).not.toHaveBeenCalled();
+    expect(mocks.claimHostedLinqOnboardingLinkNotice).not.toHaveBeenCalled();
+  });
+
   it("coalesces routed participant additions without scheduling, sending, or waking", async () => {
     const prisma = createPrismaStub();
     const scheduleAfterResponse = vi.fn();

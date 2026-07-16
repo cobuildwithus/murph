@@ -205,6 +205,70 @@ describe('newsletter durable outbox capability', () => {
     expect(await listAssistantOutboxIntents(vault)).toHaveLength(2)
   })
 
+  it('does not restart an exhausted newsletter parent attempt', async () => {
+    const vault = await createVault('newsletter-outbox-exhausted-parent-')
+    const firstTool = createTool({
+      request: vi.fn(async () => preparationResponse()),
+      turnId: 'turn_first',
+      vault,
+    })
+    await prepare(firstTool)
+    await send(firstTool)
+    await markOnlyIntentFailed(vault, 'ASSISTANT_DELIVERY_RETRY_EXHAUSTED')
+
+    const retryTool = createTool({
+      request: vi.fn(async () => preparationResponse()),
+      turnId: 'turn_retry',
+      vault,
+    })
+    await prepare(retryTool)
+    await expect(send(retryTool)).resolves.toEqual({
+      action: 'send',
+      result: {
+        failedRecipientCount: 2,
+        participantCount: 2,
+        sentRecipientCount: 0,
+        skippedNoEmailMemberIds: ['member_no_email'],
+        status: 'partial_failure',
+      },
+    })
+    expect(await listAssistantOutboxIntents(vault)).toHaveLength(1)
+  })
+
+  it('does not replay a recipient that exhausted its automatic retries', async () => {
+    const vault = await createVault('newsletter-outbox-exhausted-recipient-')
+    const firstTool = createTool({
+      request: vi.fn(async () => preparationResponse({ participantIds: ['member_one'] })),
+      turnId: 'turn_first',
+      vault,
+    })
+    await prepare(firstTool)
+    await send(firstTool)
+    await markOnlyIntentSent(vault)
+    await createRecipientIntent({
+      errorCode: 'ASSISTANT_DELIVERY_RETRY_EXHAUSTED',
+      memberId: 'member_one',
+      status: 'failed',
+      vault,
+    })
+
+    const retryTool = createTool({
+      request: vi.fn(async () => preparationResponse({ participantIds: ['member_one'] })),
+      turnId: 'turn_retry',
+      vault,
+    })
+    await prepare(retryTool)
+    await expect(send(retryTool)).resolves.toMatchObject({
+      action: 'send',
+      result: {
+        failedRecipientCount: 1,
+        sentRecipientCount: 0,
+        status: 'partial_failure',
+      },
+    })
+    expect(await listAssistantOutboxIntents(vault)).toHaveLength(2)
+  })
+
   it('retries a proven pre-provider recipient failure from the sent parent payload', async () => {
     const vault = await createVault('newsletter-outbox-safe-retry-')
     const firstTool = createTool({
@@ -401,13 +465,30 @@ async function markOnlyIntentSent(vault: string): Promise<void> {
   })
 }
 
+async function markOnlyIntentFailed(vault: string, errorCode: string): Promise<void> {
+  const [intent] = await listAssistantOutboxIntents(vault)
+  if (!intent) {
+    throw new Error('Expected a newsletter parent intent.')
+  }
+  await saveAssistantOutboxIntent(vault, {
+    ...intent,
+    lastError: {
+      code: errorCode,
+      message: 'terminal delivery state',
+    },
+    nextAttemptAt: null,
+    status: 'failed',
+    updatedAt: '2026-07-12T13:01:00.000Z',
+  })
+}
+
 async function createRecipientIntent(input: {
   authorizationProof?: string
   emailHtml?: string
   errorCode?: string
   memberId: string
   message?: string
-  status: 'abandoned' | 'sent'
+  status: 'abandoned' | 'failed' | 'sent'
   vault: string
 }): Promise<void> {
   const created = await createAssistantOutboxIntent({

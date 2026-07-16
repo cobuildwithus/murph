@@ -1,6 +1,6 @@
 # Product Sense
 
-Last verified: 2026-07-12
+Last verified: 2026-07-15
 
 ## Current Posture
 
@@ -11,19 +11,25 @@ Last verified: 2026-07-12
   longitudinal member context: relevant history, evidence, preferences,
   constraints, goals, actions, and outcomes that it can retrieve when they
   improve the help.
+- Murph's ability to initiate timely, personal conversation is a core product
+  advantage. It should actively offer reminders, check-ins, and follow-through
+  when they fit, then reliably provide authorized support without waiting for
+  another inbound request.
 - Context is useful only when it is attributable, current enough for the
   decision, retrievable at the moment of use, correctable, and controlled by
   the member. More context should reduce repetition and improve judgment and
-  timing, not create more prompts.
+  timing. Murph should keep asking new, high-value questions while material
+  gaps remain; it should not ask merely to increase coverage.
 - Current member controls are surface-specific: freeform memories can be
   inspected, updated, or forgotten; structured health records are corrected
   or statused through their canonical owners. Do not claim universal deletion
   until every structured owner supports it.
-- New-member onboarding begins with one useful thread: something the member
-  wants to change, understand, handle, or explore. Focus makes first value
-  legible; the first thread starts the relationship but does not bound Murph's
-  future help. First value is followed by a finite health-context foundation
-  over separate turns, not by immediate completion or an upfront profile.
+- New-member onboarding begins by briefly naming one or two aspiration threads:
+  something the member wants to change, understand, handle, or explore. Murph
+  reflects and parks those threads, gathers a finite health-context foundation,
+  then returns with better context and chooses the first step with the member.
+  A discovery answer is an anchor, not permission to prescribe; an actual
+  immediate request or safety need still wins.
 - Direct signups begin in a private relationship. Murph may suggest involving
   a friend or group only when social support fits the current thread and the
   member explicitly chooses it.
@@ -43,18 +49,24 @@ Last verified: 2026-07-12
 
 ### Value now
 
-The member brings a health question, decision, task, data point, or desired
-change. Murph uses the context it already has and provides the smallest useful
-answer, interpretation, action, plan, support, or next question.
+The member brings a health question, decision, task, data point, or explicit
+request to work on a desired change. Murph uses the context it already has and
+provides the smallest useful answer, interpretation, action, plan, support, or
+next question. During new-member discovery, accurately capturing and parking an
+aspiration can be the useful next step; it does not automatically trigger a
+solution.
 
 ### Context over time
 
 Useful interactions and connected sources add canonical member context. Murph
 retrieves that context in a later moment, gives more personal help, and earns
 the trust required for the member to share more. The finite new-member
-foundation can be gathered progressively after first value; beyond it, context
-collection is not a separate chore or an engagement target. Each request for
-context should have a clear dividend in present or likely future help.
+foundation is gathered progressively after an aspiration is parked and before
+Murph returns to choose the first step; beyond it, context collection is not a
+separate chore or an engagement target. Murph should continue resolving
+consequential unknowns across later conversations whenever they could improve
+present or likely future help. Each request for context should have a clear
+dividend.
 
 Do not turn the target depth of this loop into a data-point counter, profile
 completion score, or onboarding quota. Measure whether Murph delivered
@@ -69,7 +81,8 @@ Murph chooses the lightest primitive that fits the member's current need:
 - an action or logistical task
 - private accountability and follow-through
 - friend or group support with explicit consent
-- monitoring, reminders, or review when they are useful and authorized
+- proactive monitoring, reminders, check-ins, or review when they are useful
+  and authorized
 - a bounded experiment when uncertainty about what works is the bottleneck
 
 Primitives can compose, but Murph should not make a simple need pass through a
@@ -125,9 +138,10 @@ Assistant runtime state is never the source of truth for these objects.
 - Compare interventions, not bodies.
 - Keep member context and private results private by default; sharing is
   explicit, scoped, and permissioned.
-- Ask for context progressively, use what is already known, explain the value
-  of a non-obvious question, and make decline and owner-supported correction,
-  status changes, or deletion easy.
+- Ask as many consequential questions as the problem requires, paced
+  progressively. Use what is already known, explain the value of a non-obvious
+  question, and make decline and owner-supported correction, status changes,
+  or deletion easy.
 - Prefer the lowest-burden useful response. Silence and “leave it alone” are
   valid outcomes.
 - Rank learning, confidence, and life fit before engagement or protocol volume.

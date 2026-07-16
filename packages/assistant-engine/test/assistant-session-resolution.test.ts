@@ -32,6 +32,10 @@ import {
   resolveAssistantSessionTarget,
 } from '../src/assistant/session-resolution.ts'
 import { resolveAssistantExecutionPlan } from '../src/assistant/execution-plan.ts'
+import {
+  readCodexThreadCompatibilityFingerprint,
+  readCodexThreadRouteFingerprint,
+} from '../src/assistant/codex-thread-route.ts'
 import type {
   AssistantMessageInput,
   AssistantSessionResolutionFields,
@@ -143,6 +147,20 @@ function createResolvedAssistantSessionForTest(input: {
       transcriptsDirectory: '/tmp/transcripts',
     },
     session: createTestAssistantSession(input),
+  }
+}
+
+function createResumeStateForTarget(
+  target: AssistantModelTarget,
+  threadId: string,
+): AssistantSessionResumeState {
+  const route = resolveAssistantExecutionPlan({
+    defaults: null,
+    sessionTarget: target,
+  }).codexRoute
+  return {
+    routeFingerprint: readCodexThreadRouteFingerprint(route),
+    threadId,
   }
 }
 
@@ -481,7 +499,7 @@ describe('assistant session resolution', () => {
     )
   })
 
-  it('projects hosted message sessions onto the hosted default target and clears stale resume state', async () => {
+  it('projects a hosted model change while preserving native thread continuity', async () => {
     const previousTarget = createCodexTarget({
       model: 'gpt-5.4',
       modelProvider: 'vercel-ai-gateway',
@@ -494,10 +512,7 @@ describe('assistant session resolution', () => {
     })
     const resolvedSession = createResolvedAssistantSessionForTest({
       target: previousTarget,
-      resumeState: {
-        routeFingerprint: 'route-old',
-        threadId: 'thread_old',
-      },
+      resumeState: createResumeStateForTarget(previousTarget, 'thread_old'),
     })
     sessionResolutionMocks.resolveAssistantSession.mockResolvedValue(resolvedSession)
 
@@ -525,9 +540,60 @@ describe('assistant session resolution', () => {
     expect(result.session.providerOptions.model).toBe('gpt-5.5')
     expect(result.session.providerOptions.modelProvider).toBe('vercel-ai-gateway')
     expect(result.session.providerOptions.reasoningEffort).toBe('high')
-    expect(result.session.resumeState).toBeNull()
+    expect(result.session.resumeState).toMatchObject({
+      routeFingerprint: readCodexThreadRouteFingerprint(
+        resolveAssistantExecutionPlan({
+          defaults: null,
+          sessionTarget: previousTarget,
+        }).codexRoute,
+      ),
+      threadCompatibilityFingerprint: readCodexThreadCompatibilityFingerprint(
+        resolveAssistantExecutionPlan({
+          defaults: null,
+          sessionTarget: hostedDefaultTarget,
+        }).codexRoute,
+      ),
+      threadId: 'thread_old',
+    })
     expect(resolvedSession.session.target).toEqual(previousTarget)
     expect(resolvedSession.session.resumeState?.threadId).toBe('thread_old')
+  })
+
+  it('clears native resume when the model provider changes', async () => {
+    const previousTarget = createCodexTarget({
+      model: 'gpt-5.5',
+      modelProvider: 'vercel-ai-gateway',
+      reasoningEffort: 'low',
+    })
+    const nextTarget = createCodexTarget({
+      model: 'gpt-5.5',
+      modelProvider: 'openai',
+      reasoningEffort: 'low',
+    })
+    const resolvedSession = createResolvedAssistantSessionForTest({
+      target: previousTarget,
+      resumeState: createResumeStateForTarget(previousTarget, 'thread_old'),
+    })
+    sessionResolutionMocks.resolveAssistantSession.mockResolvedValue(resolvedSession)
+
+    const result = await resolveAssistantSessionForMessage({
+      boundaryDefaultTarget: nextTarget,
+      defaults: createOperatorDefaults({
+        backend: nextTarget,
+      }),
+      message: createMessageInput({
+        executionContext: {
+          hosted: {
+            defaultTarget: nextTarget,
+            memberId: 'member-123',
+            userEnvKeys: [],
+          },
+        },
+      }),
+    })
+
+    expect(result.session.target).toEqual(nextTarget)
+    expect(result.session.resumeState).toBeNull()
   })
 
   it('projects explicit message target overrides into hosted sessions before turn routing', async () => {
@@ -538,10 +604,7 @@ describe('assistant session resolution', () => {
     })
     const resolvedSession = createResolvedAssistantSessionForTest({
       target: hostedDefaultTarget,
-      resumeState: {
-        routeFingerprint: 'route-low',
-        threadId: 'thread_low',
-      },
+      resumeState: createResumeStateForTarget(hostedDefaultTarget, 'thread_low'),
     })
     sessionResolutionMocks.resolveAssistantSession.mockResolvedValue(resolvedSession)
 
@@ -568,7 +631,15 @@ describe('assistant session resolution', () => {
       reasoningEffort: 'high',
     }))
     expect(result.session.providerOptions.reasoningEffort).toBe('high')
-    expect(result.session.resumeState).toBeNull()
+    expect(result.session.resumeState?.threadId).toBe('thread_low')
+    expect(result.session.resumeState?.threadCompatibilityFingerprint).toEqual(
+      readCodexThreadCompatibilityFingerprint(
+        resolveAssistantExecutionPlan({
+          defaults: null,
+          sessionTarget: hostedDefaultTarget,
+        }).codexRoute,
+      ),
+    )
     expect(resolvedSession.session.providerOptions.reasoningEffort).toBe('low')
   })
 
@@ -583,10 +654,7 @@ describe('assistant session resolution', () => {
     })
     const resolvedSession = createResolvedAssistantSessionForTest({
       target: sessionTarget,
-      resumeState: {
-        routeFingerprint: 'route-low',
-        threadId: 'thread_low',
-      },
+      resumeState: createResumeStateForTarget(sessionTarget, 'thread_low'),
     })
     sessionResolutionMocks.resolveAssistantSession.mockResolvedValue(resolvedSession)
 
@@ -613,7 +681,7 @@ describe('assistant session resolution', () => {
       reasoningEffort: 'high',
       sandbox: 'workspace-write',
     })
-    expect(result.session.resumeState).toBeNull()
+    expect(result.session.resumeState?.threadId).toBe('thread_low')
     expect(resolvedSession.session.target).toEqual(sessionTarget)
     expect(resolvedSession.session.resumeState?.threadId).toBe('thread_low')
   })

@@ -21,6 +21,9 @@ import {
   executeHostedMemberActivatedWake,
 } from "./events/assistant-notification.ts";
 import {
+  executeHostedAssistantAskCompletedWake,
+} from "./events/assistant-ask-completion.ts";
+import {
   createNoopMailboxEffect,
   type HostedMailboxOutcome,
 } from "./events/mailbox-outcome.ts";
@@ -55,6 +58,7 @@ export async function executeHostedMailboxEvent(input: {
   operatorHomeRoot?: string | null;
   preferenceAppliedAt?: string;
   preferenceCausalSeq?: string;
+  shouldYieldAssistantAskCompletion?: (() => boolean) | null;
   shouldYieldClinicalRecords?: (() => boolean) | null;
   shouldYieldDeviceSync?: (() => boolean) | null;
   sourceMailboxItemId?: string | null;
@@ -99,6 +103,9 @@ export async function executeHostedMailboxEvent(input: {
     ...(input.shouldYieldClinicalRecords
       ? { shouldYieldClinicalRecords: input.shouldYieldClinicalRecords }
       : {}),
+    ...(input.shouldYieldAssistantAskCompletion
+      ? { shouldYieldAssistantAskCompletion: input.shouldYieldAssistantAskCompletion }
+      : {}),
     ...(input.shouldYieldDeviceSync
       ? { shouldYieldDeviceSync: input.shouldYieldDeviceSync }
       : {}),
@@ -132,6 +139,7 @@ async function handleHostedMailboxEvent(input: {
   >;
   runtimeEnv: Readonly<Record<string, string>>;
   signal: AbortSignal | null;
+  shouldYieldAssistantAskCompletion?: (() => boolean) | null;
   shouldYieldClinicalRecords?: (() => boolean) | null;
   shouldYieldDeviceSync?: (() => boolean) | null;
   sourceMailboxItemId: string | null;
@@ -154,6 +162,9 @@ async function handleHostedMailboxEvent(input: {
     ...(input.shouldYieldClinicalRecords
       ? { shouldYieldClinicalRecords: input.shouldYieldClinicalRecords }
       : {}),
+    ...(input.shouldYieldAssistantAskCompletion
+      ? { shouldYieldAssistantAskCompletion: input.shouldYieldAssistantAskCompletion }
+      : {}),
     ...(input.shouldYieldDeviceSync
       ? { shouldYieldDeviceSync: input.shouldYieldDeviceSync }
       : {}),
@@ -175,6 +186,7 @@ async function executeHostedSystemWake(input: {
   >;
   runtimeEnv: Readonly<Record<string, string>>;
   signal: AbortSignal | null;
+  shouldYieldAssistantAskCompletion?: (() => boolean) | null;
   shouldYieldClinicalRecords?: (() => boolean) | null;
   shouldYieldDeviceSync?: (() => boolean) | null;
   sourceMailboxItemId: string | null;
@@ -214,6 +226,20 @@ async function executeHostedSystemWake(input: {
         wake: input.wake,
         executionContext: input.executionContext,
         forceQueueOnly: input.forceQueueOnlyAssistantNotification,
+        sourceMailboxItemId: input.sourceMailboxItemId,
+        turnEnvironment: createHostedAssistantTurnEnvironment({
+          operatorHomeRoot: input.operatorHomeRoot,
+          runtimeEnv: input.runtimeEnv,
+          vaultRoot: input.vaultRoot,
+        }),
+        vaultRoot: input.vaultRoot,
+      });
+    case "assistant.ask.completed":
+      return executeHostedAssistantAskCompletedWake({
+        wake: input.wake,
+        executionContext: input.executionContext,
+        shouldYield: input.shouldYieldAssistantAskCompletion ?? null,
+        signal: input.signal,
         sourceMailboxItemId: input.sourceMailboxItemId,
         turnEnvironment: createHostedAssistantTurnEnvironment({
           operatorHomeRoot: input.operatorHomeRoot,
@@ -316,6 +342,13 @@ async function executeHostedSystemWake(input: {
         vaultRoot: input.vaultRoot,
         wake: input.wake,
       });
+    case "assistant.ask.requested":
+      // The detached controller is the only owner of requested asks. Running
+      // one through serial foreground maintenance would grant reply authority
+      // to a background read and violate the single-writer boundary.
+      throw new TypeError(
+        "Hosted assistant ask request wakes must run through the detached read-only controller.",
+      );
     case "vault-share.delivery":
       // Vault-share deliveries are landed deterministically at mailbox import
       // (vault-share-import.ts) and never enter the system wake execution path.

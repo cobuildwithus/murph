@@ -28,6 +28,8 @@ import type {
   HostedRuntimeFamilyPlanToolResponse,
   HostedRuntimeAssistantConfigurationControlRequest,
   HostedRuntimeAssistantConfigurationToolResponse,
+  HostedRuntimeAssistantAskControlRequest,
+  HostedRuntimeAssistantAskControlResponse,
   HostedRuntimeGroupToolRequest,
   HostedRuntimeGroupToolResponse,
   HostedRuntimeNewsletterToolRequest,
@@ -142,6 +144,13 @@ export interface HostedRuntimeAssistantConfigurationToolPort {
   ): Promise<HostedRuntimeAssistantConfigurationToolResponse>;
 }
 
+export interface HostedRuntimeAssistantAskPort {
+  request(
+    request: HostedRuntimeAssistantAskControlRequest,
+    context?: { signal?: AbortSignal | null },
+  ): Promise<HostedRuntimeAssistantAskControlResponse>;
+}
+
 export interface HostedRuntimeArtifactWriter {
   put(input: {
     bytes: Uint8Array;
@@ -248,7 +257,7 @@ export interface HostedRuntimeLinqSendResponse {
 
 export interface HostedRuntimeLinqRecentInboundEngagementRequest {
   answeredMailboxItemIds?: readonly string[] | null;
-  authorityCheckOnly?: boolean | null;
+  authorityCheckOnly: boolean;
   directRecipientPhoneNumber?: string | null;
   fromPhoneNumber?: string | null;
   homeRouteFallbackAllowed?: boolean | null;
@@ -411,9 +420,6 @@ export interface HostedRuntimePlanUsageToolPort {
 }
 
 export interface HostedRuntimeAssistantPersonalizationToolPort {
-  resolvePreferenceCausalSeq(
-    authority: HostedRuntimeAssistantPersonalizationToolAuthority,
-  ): Promise<string>;
   request(
     request: HostedRuntimeAssistantPersonalizationToolRequest,
     authority?: HostedRuntimeAssistantPersonalizationToolAuthority,
@@ -566,6 +572,7 @@ export interface HostedRuntimeVaultSharePort {
 
 export interface HostedRuntimePlatform {
   actionApprovalPort?: HostedRuntimeActionApprovalPort | null;
+  assistantAskPort?: HostedRuntimeAssistantAskPort | null;
   assistantPersonalizationToolPort?: HostedRuntimeAssistantPersonalizationToolPort | null;
   assistantConfigurationToolPort?: HostedRuntimeAssistantConfigurationToolPort | null;
   artifactStore: HostedRuntimeArtifactStore;

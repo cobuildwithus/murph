@@ -22,25 +22,6 @@ export const POST = withJsonError(async (request: Request) => {
   });
   const body = parseHostedRuntimeNewsletterToolRequest(payload);
 
-  if (
-    body.action === "read_stats"
-    || (
-      body.action === "prepare"
-      && (
-        body.includeAuthorizationProof !== true
-        || body.includeAuthorizationSnapshot !== true
-      )
-    )
-  ) {
-    return jsonOk({
-      action: body.action,
-      result: {
-        status: "unavailable",
-        unavailableReason: "newsletter_runner_upgrade_required",
-      },
-    });
-  }
-
   if (body.action === "prepare") {
     const result = await prepareHostedGroupNewsletterParticipants({
       groupId: body.groupId,

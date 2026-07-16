@@ -1,6 +1,6 @@
 # Private-to-Group Murph Ask
 
-Status: Proposed
+Status: Implemented
 
 Last verified: 2026-07-15
 
@@ -23,7 +23,7 @@ Use three small layers:
 1. `murph.group(action="ask")` is the product action.
 2. `assistant.ask.requested` and `assistant.ask.completed` are the generic
    encrypted mailbox protocol.
-3. `runIsolatedAssistantAsk` is the target-owned, one-shot, read-only Codex
+3. `executeReadOnlyAssistantAsk` is the target-owned, one-shot, read-only Codex
    execution primitive.
 
 Keep the protocol generic but admission typed. The first target adapter is
@@ -60,22 +60,23 @@ authenticated caller and stored request.
 The target execution surface is:
 
 ```ts
-runIsolatedAssistantAsk({
-  targetContext,
+executeReadOnlyAssistantAsk({
+  workspaceRoot,
   question,
-  signal,
-}): Promise<AssistantAskAnswer>
+  abortSignal,
+}): Promise<ReadOnlyAssistantAskResult>
 
-type AssistantAskAnswer =
+type ReadOnlyAssistantAskResult =
   | { outcome: "answered"; answer: string }
   | { outcome: "cannot_answer"; answer?: string };
 ```
 
-`targetContext` is a sealed value built by an authorized target adapter. It
-fixes the workspace roots, system contract, untrusted context, and read-only
-permission profile; ordinary callers cannot choose them. The executor owns no
-routing, persistence, membership, retry, or delivery state. Those remain with
-their existing owners.
+The target runtime supplies its already restored workspace root after Web has
+revalidated the request. The wrapper fixes the system contract, committed
+conversation evidence, empty working directory, read-only permission profile,
+and capability-free child configuration. The executor owns no routing,
+persistence, membership, retry, or delivery state. Those remain with their
+existing owners.
 
 ```text
 private message
@@ -129,7 +130,8 @@ Web owns target resolution because it owns current `HostedGroupMember` truth.
    direct turn, once per accepted input.
 2. With one current membership and no label, select it.
 3. With a label, normalize it and current display labels using Unicode NFC,
-   trimming, whitespace collapse, and full case folding. Preserve punctuation
+   trimming, whitespace collapse, and locale-independent lowercase matching.
+   Preserve punctuation
    and emoji; select only one exact match.
 4. Otherwise return a bounded set of visible labels for clarification.
 5. Require a valid current synthetic group-runtime identity before accepting
@@ -178,7 +180,7 @@ The request and completion mailbox items are the only durable operation state.
    same value.
 5. Hidden server fields bind origin, membership generation, destination, and
    expiry. The target model sees only the bounded question and normal
-   group-visible requester presentation.
+  group-visible question.
 6. Web signals the existing group runtime after commit. `accepted` means
    durable, not answered.
 
@@ -257,18 +259,20 @@ permission-profile fields. Do not build a Murph sandbox.
 
 The one-shot thread uses:
 
-- a named `detached-read` permission profile;
+- the named `murph-group-read` permission profile;
 - the exact group root in `runtimeWorkspaceRoots`;
 - a fresh supervisor-owned empty working directory, not the group root;
-- `ephemeral: true` and a fresh temporary Codex home; and
+- `ephemeral: true` using the trusted hosted Codex home; and
 - native schema-constrained output on `turn/start`.
 
-The temporary home contains only the named profile and minimum auth/config
-needed by the App Server. No loaded config layer may contain legacy
-`sandbox_mode` or `[sandbox_workspace_write]` keys, and no request may pass
-legacy `sandbox`; those paths do not compose with native permissions. Assert
-the effective profile, roots, working directory, instruction sources, and
-approval policy before model work, and fail closed on any mismatch.
+The hosted home contains the named profile and the minimum auth/config needed
+by the App Server. On the pinned Codex version, request-level `permissions`
+becomes the session `default_permissions` override even when the lower hosted
+config retains its ordinary legacy sandbox default. The isolated request never
+passes legacy `sandbox`, because request-level `permissions` and `sandbox` do
+not compose. Assert the effective profile, roots, working directory,
+instruction sources, and approval policy before model work, and fail closed on
+any mismatch.
 
 The named profile must OS-enforce read access only to Codex's `:minimal`
 runtime and the exact `:workspace_roots`, no writes, explicit denial of
@@ -313,14 +317,14 @@ transient unreadable input retries through the mailbox rather than adding
 coordination machinery.
 
 If evidence later proves an immutable view necessary, it can replace the read
-implementation behind `runIsolatedAssistantAsk` without changing the product
+implementation behind `executeReadOnlyAssistantAsk` without changing the product
 action or mailbox protocol.
 
 ## Bounds and retention
 
 - group label: 120 Unicode code points
 - question: 1,200 Unicode code points
-- answer: 4,000 Unicode code points and 1,500 output tokens
+- answer: 4,000 Unicode code points
 - request lifetime: ten minutes
 - asks per accepted private input: one
 - ask depth: one
@@ -352,8 +356,8 @@ Existing mailbox, workspace, and account rules remain authoritative.
   with `permissions`,
   `runtimeWorkspaceRoots`, `ephemeral`, and `outputSchema`.
 - Reject native `permissions` plus legacy `sandbox`.
-- Add `runIsolatedAssistantAsk` with exact child cleanup.
-- `packages/assistant-runtime`: own the `detached-read` profile and minimal
+- Add `executeReadOnlyAssistantAsk` with exact child cleanup.
+- `packages/assistant-runtime`: own the `murph-group-read` profile and minimal
   child environment.
 - `apps/cloudflare`: add no coordinator; change only the existing runner
   bundle/image contract if the native sandbox proof requires it.

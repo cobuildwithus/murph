@@ -64,58 +64,21 @@ describe("hosted group newsletter route", () => {
     });
   });
 
-  it("rejects snapshot-less prepare requests without reading participant state", async () => {
+  it("rejects unsupported actions without reading participant state", async () => {
+    const response = await route.POST(buildRequest("retired_action"));
+
+    expect(response.status).toBe(400);
+    await expect(response.json()).resolves.toEqual({
+      error: {
+        code: "INVALID_REQUEST",
+        message: "Invalid request.",
+      },
+    });
+    expect(mocks.prepareHostedGroupNewsletterParticipants).not.toHaveBeenCalled();
+  });
+
+  it("returns the address-free current grant snapshot", async () => {
     const response = await route.POST(buildRequest("prepare"));
-
-    expect(response.status).toBe(200);
-    await expect(response.json()).resolves.toEqual({
-      action: "prepare",
-      result: {
-        status: "unavailable",
-        unavailableReason: "newsletter_runner_upgrade_required",
-      },
-    });
-    expect(mocks.prepareHostedGroupNewsletterParticipants).not.toHaveBeenCalled();
-  });
-
-  it.each([
-    { includeAuthorizationSnapshot: true as const },
-    { includeAuthorizationProof: true as const },
-  ])("rejects one-sided authorization opt-ins without reading participant state", async (
-    authorization,
-  ) => {
-    const response = await route.POST(buildRequest("prepare", authorization));
-
-    expect(response.status).toBe(200);
-    await expect(response.json()).resolves.toEqual({
-      action: "prepare",
-      result: {
-        status: "unavailable",
-        unavailableReason: "newsletter_runner_upgrade_required",
-      },
-    });
-    expect(mocks.prepareHostedGroupNewsletterParticipants).not.toHaveBeenCalled();
-  });
-
-  it("rejects legacy read_stats without reading participant state", async () => {
-    const response = await route.POST(buildRequest("read_stats"));
-
-    expect(response.status).toBe(200);
-    await expect(response.json()).resolves.toEqual({
-      action: "read_stats",
-      result: {
-        status: "unavailable",
-        unavailableReason: "newsletter_runner_upgrade_required",
-      },
-    });
-    expect(mocks.prepareHostedGroupNewsletterParticipants).not.toHaveBeenCalled();
-  });
-
-  it("returns the address-free current grant snapshot only when requested", async () => {
-    const response = await route.POST(buildRequest("prepare", {
-      includeAuthorizationProof: true,
-      includeAuthorizationSnapshot: true,
-    }));
 
     expect(response.status).toBe(200);
     await expect(response.json()).resolves.toEqual({
@@ -154,20 +117,13 @@ describe("hosted group newsletter route", () => {
   });
 });
 
-function buildRequest(
-  action: "prepare" | "read_stats",
-  authorization: {
-    includeAuthorizationProof?: true;
-    includeAuthorizationSnapshot?: true;
-  } = {},
-): Request {
+function buildRequest(action: string): Request {
   return new Request(
     "https://web.test/api/internal/hosted-execution/groups/newsletter-tool",
     {
       body: JSON.stringify({
         action,
         groupId: "group_123",
-        ...authorization,
       }),
       headers: { "content-type": "application/json" },
       method: "POST",

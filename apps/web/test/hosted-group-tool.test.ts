@@ -17,7 +17,9 @@ const mocks = vi.hoisted(() => ({
   lookupHostedMemberByVerifiedEmailAddress: vi.fn(),
   lookupHostedMemberIdentityByPhoneNumber: vi.fn(),
   readActiveHostedMemberAccess: vi.fn(),
+  requestHostedGroupAssistantAsk: vi.fn(),
   readHostedGroupByRuntimeMemberId: vi.fn(),
+  readHostedGroupIdByRuntimeMemberId: vi.fn(),
   readHostedGroupMembershipsForMember: vi.fn(),
   recordHostedGroupJoinOfferTx: vi.fn(),
   releaseHostedLinqContactCardShareAttempt: vi.fn(),
@@ -95,6 +97,7 @@ vi.mock("@/src/lib/hosted-groups/group-store", () => ({
     mocks.createHostedGroupJoinLinkForOwnedThreadContainerTx,
   leaveHostedGroupMemberTx: mocks.leaveHostedGroupMemberTx,
   readHostedGroupByRuntimeMemberId: mocks.readHostedGroupByRuntimeMemberId,
+  readHostedGroupIdByRuntimeMemberId: mocks.readHostedGroupIdByRuntimeMemberId,
   readHostedGroupMembershipsForMember: mocks.readHostedGroupMembershipsForMember,
   recordHostedGroupJoinOfferTx: mocks.recordHostedGroupJoinOfferTx,
   revokeHostedGroupMemberEmailShareTx: mocks.revokeHostedGroupMemberEmailShareTx,
@@ -105,6 +108,10 @@ vi.mock("@/src/lib/hosted-groups/group-store", () => ({
 vi.mock("@/src/lib/hosted-groups/group-newsletter", () => ({
   enqueueHostedGroupNewsletterEmailNeededNudgeIfNeededBestEffort:
     mocks.enqueueHostedGroupNewsletterEmailNeededNudgeIfNeededBestEffort,
+}));
+
+vi.mock("@/src/lib/hosted-groups/group-assistant-ask", () => ({
+  requestHostedGroupAssistantAsk: mocks.requestHostedGroupAssistantAsk,
 }));
 
 vi.mock("@/src/lib/hosted-orchestration/signal-runtime", () => ({
@@ -221,6 +228,7 @@ describe("handleHostedRuntimeGroupTool", () => {
     });
     mocks.readActiveHostedMemberAccess.mockResolvedValue(true);
     mocks.readHostedGroupByRuntimeMemberId.mockResolvedValue(GROUP_SUMMARY);
+    mocks.readHostedGroupIdByRuntimeMemberId.mockResolvedValue("hgrp_123");
     mocks.readHostedGroupMembershipsForMember.mockResolvedValue({
       memberships: [{
         displayName: "Fun-loving runners",
@@ -270,10 +278,15 @@ describe("handleHostedRuntimeGroupTool", () => {
       messageLookupKey: "hbidx:linq-message:v1:offer",
       projectionKinds: ["sleep-times.v0"],
     });
+    mocks.requestHostedGroupAssistantAsk.mockResolvedValue({
+      mailboxWake: null,
+      result: { status: "unavailable", unavailableReason: "not_configured" },
+    });
   });
 
   it("classifies group-tool actions by access authority", () => {
     expect(HOSTED_RUNTIME_GROUP_TOOL_ACCESS_CLASSIFICATION).toEqual({
+      ask: "personal_active",
       create_join_link: "owner_active",
       leave_membership: "participant_aware",
       list_memberships: "participant_aware",
@@ -285,6 +298,44 @@ describe("handleHostedRuntimeGroupTool", () => {
       set_chat_avatar: "owner_active",
       share_contact_card: "owner_active",
       update_display_name: "owner_active",
+    });
+  });
+
+  it("dispatches a personal ask and schedules only its committed mailbox wake", async () => {
+    const scheduleMailboxWake = vi.fn();
+    mocks.requestHostedGroupAssistantAsk.mockResolvedValue({
+      mailboxWake: {
+        expectedUserId: "member_group_runtime",
+        mailboxItemId: "aask_req_one",
+      },
+      result: { status: "accepted", targetLabel: "100 Club" },
+    });
+
+    await expect(handleHostedRuntimeGroupTool({
+      memberId: "member_self",
+      request: {
+        action: "ask",
+        groupLabel: "100 Club",
+        originAssistantInputId: `ain_${"a".repeat(32)}`,
+        originSessionId: "session_private",
+        question: "What is today's workout?",
+      },
+      scheduleMailboxWake,
+    })).resolves.toEqual({
+      action: "ask",
+      result: { status: "accepted", targetLabel: "100 Club" },
+    });
+
+    expect(mocks.requestHostedGroupAssistantAsk).toHaveBeenCalledWith({
+      groupLabel: "100 Club",
+      memberId: "member_self",
+      originAssistantInputId: `ain_${"a".repeat(32)}`,
+      originSessionId: "session_private",
+      question: "What is today's workout?",
+    });
+    expect(scheduleMailboxWake).toHaveBeenCalledWith({
+      expectedUserId: "member_group_runtime",
+      mailboxItemId: "aask_req_one",
     });
   });
 
@@ -533,6 +584,10 @@ describe("handleHostedRuntimeGroupTool", () => {
     expect(mocks.readActiveHostedMemberAccess).toHaveBeenCalledWith(expect.objectContaining({
       memberId: "member_owner",
     }));
+    expect(mocks.readHostedGroupIdByRuntimeMemberId).toHaveBeenCalledWith({
+      runtimeMemberId: "member_group_runtime",
+    });
+    expect(mocks.readHostedGroupByRuntimeMemberId).not.toHaveBeenCalled();
     expect(mocks.updateHostedLinqChatDisplayName).toHaveBeenCalledWith({
       chatId: "chat_group_runtime",
       displayName: "Weekly Health Crew",
@@ -577,7 +632,7 @@ describe("handleHostedRuntimeGroupTool", () => {
   });
 
   it("reports group_not_found when the active runtime has no hosted group to rename", async () => {
-    mocks.readHostedGroupByRuntimeMemberId.mockResolvedValue(null);
+    mocks.readHostedGroupIdByRuntimeMemberId.mockResolvedValue(null);
 
     await expect(handleHostedRuntimeGroupTool({
       memberId: "member_group_runtime",

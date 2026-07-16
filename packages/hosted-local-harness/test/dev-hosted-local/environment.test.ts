@@ -1295,6 +1295,7 @@ describe("buildWranglerVarArgs", () => {
         MURPH_HOSTED_LOCAL_PROFILE: "dev",
         NODE_ENV: "test",
         HOSTED_EXECUTION_RUNNER_READY_TIMEOUT_MS: "60000",
+        JUNCTION_TIMESERIES_RESOURCES: "steps,heartrate,weight",
         IGNORED_SECRET: "secret",
       }),
     ).toEqual([
@@ -1386,6 +1387,17 @@ describe("buildWranglerVarArgs", () => {
 });
 
 describe("buildWranglerEnvFileText", () => {
+  it("does not serialize the retired Junction timeseries resource override", () => {
+    const source = {
+      JUNCTION_TIMESERIES_RESOURCES: "steps,heartrate,weight",
+    };
+
+    expect(buildWranglerVarArgs(source)).toEqual([]);
+    expect(buildWranglerEnvFileText(source)).not.toContain(
+      "JUNCTION_TIMESERIES_RESOURCES",
+    );
+  });
+
   it("includes worker secrets and defaults the runner env profiles", () => {
     expect(
       buildWranglerEnvFileText({

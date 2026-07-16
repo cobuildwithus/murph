@@ -150,6 +150,22 @@ describe("assistant phone calls", () => {
         acceptedInputIds: ["assistant_input_2"],
       },
     });
+    const liveSteeredInput = createPhoneCallRequestKey({
+      brief: BASE_BRIEF,
+      scope: {
+        ...BASE_SCOPE,
+        acceptedInputIds: ["assistant_input_1", "assistant_input_2"],
+        inboundMailboxItemIds: ["mailbox_item_1", "mailbox_item_2"],
+      },
+    });
+    const replayedInput = createPhoneCallRequestKey({
+      brief: BASE_BRIEF,
+      scope: {
+        ...BASE_SCOPE,
+        acceptedInputIds: ["assistant_input_2"],
+        inboundMailboxItemIds: ["mailbox_item_2"],
+      },
+    });
     const runtimeTurnOnlyScope: AssistantHostedToolRequestKeyScope & { turnId: string } = {
       ...BASE_SCOPE,
       turnId: "runtime_turn_retry",
@@ -166,6 +182,7 @@ describe("assistant phone calls", () => {
     expect(differentDisclosure).not.toBe(first);
     expect(differentCallerName).not.toBe(first);
     expect(differentInput).not.toBe(first);
+    expect(liveSteeredInput).toBe(replayedInput);
     expect(createPhoneCallRequestKey({
       brief: BASE_BRIEF,
       scope: runtimeTurnOnlyScope,
@@ -197,7 +214,7 @@ describe("assistant phone calls", () => {
       env: {},
       fetchImpl: fetch,
       hostedToolContext: createHostedToolContext({
-        currentPhoneCallToolRequestKeyScope: () => null,
+        currentUserActionScope: () => null,
         phoneCalls: { start },
       }),
       nextUsageOrdinal: () => 1,
@@ -245,7 +262,11 @@ describe("assistant phone calls", () => {
       env: {},
       fetchImpl: fetch,
       hostedToolContext: createHostedToolContext({
-        currentPhoneCallToolRequestKeyScope: () => phoneCallScope,
+        currentUserActionScope: () => ({
+          ...phoneCallScope,
+          conversationScope: "direct",
+          originSessionId: "session_phone_call",
+        }),
         phoneCalls: { start },
       }),
       nextUsageOrdinal: () => 1,
@@ -279,9 +300,11 @@ describe("assistant phone calls", () => {
       env: {},
       fetchImpl: fetch,
       hostedToolContext: createHostedToolContext({
-        currentPhoneCallToolRequestKeyScope: () => ({
+        currentUserActionScope: () => ({
           ...BASE_SCOPE,
           acceptedInputIds: ["manual_phone_call_input"],
+          conversationScope: "direct",
+          originSessionId: "session_phone_call",
         }),
         phoneCalls: {
           start: vi.fn().mockResolvedValue({
@@ -316,14 +339,14 @@ function dynamicToolCall(input: {
 }
 
 function createHostedToolContext(input: {
-  currentPhoneCallToolRequestKeyScope?: () => AssistantHostedToolRequestKeyScope | null;
+  currentUserActionScope?: AssistantHostedToolContext["currentUserActionScope"];
   phoneCalls?: AssistantHostedToolContext["phoneCalls"];
 }): AssistantHostedToolContext {
   return {
     computerToolsAvailable: false,
     currentHostedDeliveryContext: () => null,
     currentHostedMailboxItemIds: () => [],
-    currentPhoneCallToolRequestKeyScope: input.currentPhoneCallToolRequestKeyScope,
+    currentUserActionScope: input.currentUserActionScope,
     phoneCalls: input.phoneCalls ?? null,
     sendVaultFile: vi.fn(async () => {
       throw new Error("Vault-file sending is unavailable for this turn.");

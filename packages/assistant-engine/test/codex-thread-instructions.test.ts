@@ -28,6 +28,9 @@ describe('Codex thread instructions', () => {
   it('passes Murph system instructions at thread level and keeps turn input user-scoped', async () => {
     codexAppServerMocks.executeCodexAppServerTurn.mockResolvedValue({
       finalMessage: 'done',
+      precedingAgentMessageSegments: [],
+      responseDeliveryContextOrdinal: 0,
+      transcriptMessage: 'done',
       jsonEvents: [],
       providerActionCount: 0,
       sessionId: 'thread-1',
@@ -71,6 +74,9 @@ describe('Codex thread instructions', () => {
   it('can skip thread-instruction refresh when using provider-native resume', async () => {
     codexAppServerMocks.executeCodexAppServerTurn.mockResolvedValue({
       finalMessage: 'done',
+      precedingAgentMessageSegments: [],
+      responseDeliveryContextOrdinal: 0,
+      transcriptMessage: 'done',
       jsonEvents: [],
       providerActionCount: 0,
       sessionId: 'thread-resume',
@@ -112,6 +118,9 @@ describe('Codex thread instructions', () => {
   it('runs native resume without a second provider request when primary succeeds', async () => {
     codexAppServerMocks.executeCodexAppServerTurn.mockResolvedValue({
       finalMessage: 'done',
+      precedingAgentMessageSegments: [],
+      responseDeliveryContextOrdinal: 0,
+      transcriptMessage: 'done',
       jsonEvents: [],
       providerActionCount: 0,
       sessionId: 'thread-resume',
@@ -149,6 +158,9 @@ describe('Codex thread instructions', () => {
   it('keeps personalized resumes on the native Codex thread', async () => {
     codexAppServerMocks.executeCodexAppServerTurn.mockResolvedValueOnce({
       finalMessage: 'done',
+      precedingAgentMessageSegments: [],
+      responseDeliveryContextOrdinal: 0,
+      transcriptMessage: 'done',
       jsonEvents: [],
       providerActionCount: 0,
       sessionId: 'thread-cold-old',
@@ -232,6 +244,9 @@ describe('Codex thread instructions', () => {
   it('does not promote or replay legacy system prompts', async () => {
     codexAppServerMocks.executeCodexAppServerTurn.mockResolvedValue({
       finalMessage: 'done',
+      precedingAgentMessageSegments: [],
+      responseDeliveryContextOrdinal: 0,
+      transcriptMessage: 'done',
       jsonEvents: [],
       providerActionCount: 0,
       sessionId: 'thread-legacy',

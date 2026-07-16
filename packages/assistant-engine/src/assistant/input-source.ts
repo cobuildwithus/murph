@@ -71,6 +71,11 @@ export interface AssistantInputCandidateQuery {
   sourceId?: string | null
 }
 
+export interface AssistantInputCandidateByIdQuery
+  extends AssistantInputCandidateQuery {
+  inputIds: readonly string[]
+}
+
 export interface AssistantTurnConversationInputQuery {
   afterCursor?: AssistantInputCursor | null
   conversation: AssistantInputConversationRef
@@ -91,6 +96,9 @@ export interface AssistantInputSource {
   ): Promise<void>
   listInputCandidates(
     input: AssistantInputCandidateQuery,
+  ): Promise<AssistantInputCandidateBatch>
+  listInputCandidatesByIds?(
+    input: AssistantInputCandidateByIdQuery,
   ): Promise<AssistantInputCandidateBatch>
   listNewConversationInputs(
     input: AssistantTurnConversationInputQuery,

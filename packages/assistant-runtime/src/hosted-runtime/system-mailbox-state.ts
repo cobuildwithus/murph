@@ -51,6 +51,8 @@ export type HostedSystemMailboxRouteAction =
   | "apply-member-channels-update"
   | "apply-member-preferences"
   | "dispatch-assistant-notification"
+  | "run-assistant-ask"
+  | "continue-assistant-ask"
   | "run-clinical-records-sync"
   | "run-device-sync-wake"
   | "apply-runtime-control-request";
@@ -185,12 +187,22 @@ export async function removeHostedSystemMailboxPendingItem(input: {
 export async function removeHostedSystemMailboxPendingItemIfCurrent(input: {
   item: HostedSystemMailboxPendingItem;
   vaultRoot: string;
-}): Promise<void> {
-  await updateHostedSystemMailboxState(input.vaultRoot, (state) => ({
-    pending: state.pending.filter((item) =>
-      item.itemId !== input.item.itemId || !hostedSystemMailboxPendingItemsMatch(item, input.item)
-    ),
-  }));
+}): Promise<boolean> {
+  return await updateHostedSystemMailboxState(input.vaultRoot, (state) => {
+    const current = state.pending.find((item) => item.itemId === input.item.itemId) ?? null;
+    if (!current || !hostedSystemMailboxPendingItemsMatch(current, input.item)) {
+      return {
+        result: false,
+        state,
+      };
+    }
+    return {
+      result: true,
+      state: {
+        pending: state.pending.filter((item) => item.itemId !== input.item.itemId),
+      },
+    };
+  });
 }
 
 export async function removeHostedSystemMailboxPendingItems(input: {
@@ -468,6 +480,8 @@ function parseHostedSystemMailboxRouteAction(value: unknown): HostedSystemMailbo
     || value === "apply-member-channels-update"
     || value === "apply-member-preferences"
     || value === "dispatch-assistant-notification"
+    || value === "run-assistant-ask"
+    || value === "continue-assistant-ask"
     || value === "run-clinical-records-sync"
     || value === "run-device-sync-wake"
     || value === "apply-runtime-control-request"
@@ -659,6 +673,13 @@ function resolveSystemMailboxItemNextWakeAt(
   item: HostedSystemMailboxPendingItem,
   now: string,
 ): string | null {
+  // A detached assistant ask owns its own in-process completion signal while
+  // it is sending. Re-projecting that claimed item as an immediate runtime
+  // wake would spin the foreground runner without making mailbox progress.
+  if (item.routeAction === "run-assistant-ask" && item.status === "sending") {
+    return null;
+  }
+
   if (!item.nextAttemptAt) {
     return now;
   }
