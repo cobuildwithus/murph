@@ -1,6 +1,6 @@
 # Fix interactive setup skip and release
 
-Status: active
+Status: completed
 Created: 2026-07-16
 Updated: 2026-07-16
 
@@ -69,3 +69,21 @@ Updated: 2026-07-16
   and wearables, initialized the vault, passed the runtime doctor, installed
   shims and the default-vault selection, opened interactive chat, and exited
   cleanly against disposable local state.
+- PR #739 merged the focused source correction after all required CI checks,
+  the no-edit coverage-write audit, parent final review, and a zero-finding
+  ReviewGPT round.
+- The maintenance-line local release gate completed its build and package/app
+  typechecks before hitting an unrelated, reproducible pre-existing 60-second
+  timeout in `packages/cli/test/health-tail.test.ts`. The trusted Linux tag
+  workflow then passed the canonical release checks, packed the artifacts,
+  created the GitHub release, and published all five packages as `1.2.4`.
+- Each exact `1.2.4` package resolved from the public npm registry. A fresh
+  detached `v1.2.4` worktree installed `@murphai/murph@1.2.4` from npm and the
+  installed CLI reported `1.2.4`.
+- The registry-installed CLI completed the real TTY onboarding flow with
+  `Skip for now` and no optional integrations, provisioned the `base.en`
+  Whisper model, initialized the vault, passed doctor, installed both command
+  shims, persisted the default vault, opened interactive chat, and exited with
+  status 0. The final assertions confirmed the config, vault, model, shims,
+  and absence of setup-created `.env.local` files.
+Completed: 2026-07-16
