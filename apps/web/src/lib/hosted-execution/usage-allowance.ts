@@ -51,6 +51,13 @@ import {
 import { getPrisma } from "../prisma";
 import { renderUserFacingMessage } from "../hosted-messages/user-facing-messages";
 import { settleHostedUsageCreditForUsageTx } from "./usage-credits";
+import {
+  HOSTED_RETELL_USAGE_COST_KEY,
+  HOSTED_RETELL_USAGE_PRICING_SOURCE,
+  HOSTED_RETELL_USAGE_PRICING_VERSION,
+  HOSTED_RETELL_USAGE_SOURCE_PATH,
+  HOSTED_RETELL_USAGE_VERSION,
+} from "./usage-retell";
 
 type HostedAiUsageAllowanceClient = PrismaClient | Prisma.TransactionClient;
 export type HostedAiUsageGateDeniedReason =
@@ -560,6 +567,28 @@ function resolveHostedAiUsageAllowancePricingDecision(
   const tokenPricingBasis =
     normalizeAssistantUsageTokenPricingBasis(record.tokenPricingBasis);
 
+  const retellMatch = matchHostedAiUsageRetellPhoneCallRecord(record);
+  if (retellMatch !== null) {
+    assertHostedAiUsageRetellTokenPricingBasis(tokenPricingBasis);
+    return {
+      kind: "priced",
+      priced: {
+        costUsdMicros: counted ? retellMatch.combinedCostUsdMicros : 0n,
+        counted,
+        pricingSnapshot: {
+          credentialSource,
+          providerCost: {
+            combinedCostUsdMicros: retellMatch.combinedCostUsdMicros.toString(),
+          },
+          pricingSource: HOSTED_RETELL_USAGE_PRICING_SOURCE,
+          schema: "murph.hosted-ai-usage-allowance-pricing.v1",
+          tokenPricingBasis,
+        },
+        pricingVersion: HOSTED_RETELL_USAGE_PRICING_VERSION,
+      },
+    };
+  }
+
   if (isHostedAiUsageAllowanceAudioModelRecord(record)) {
     assertHostedAiUsageAllowanceAudioTokenPricingBasis(tokenPricingBasis);
     return {
@@ -735,6 +764,11 @@ function validateHostedAiUsageAllowanceDeniedTokenPricingBasis(
 ): AssistantUsageTokenPricingBasis {
   const tokenPricingBasis =
     normalizeAssistantUsageTokenPricingBasis(record.tokenPricingBasis);
+
+  if (matchHostedAiUsageRetellPhoneCallRecord(record) !== null) {
+    assertHostedAiUsageRetellTokenPricingBasis(tokenPricingBasis);
+    return tokenPricingBasis;
+  }
 
   if (isHostedAiUsageAllowanceAudioModelRecord(record)) {
     assertHostedAiUsageAllowanceAudioTokenPricingBasis(tokenPricingBasis);
@@ -2342,6 +2376,64 @@ function resolveHostedAiUsageAllowanceOpenAiImageModel(
     model: null,
     source: null,
   };
+}
+
+function matchHostedAiUsageRetellPhoneCallRecord(record: AssistantUsageRecord): {
+  combinedCostUsdMicros: bigint;
+} | null {
+  const rawUsageJson = record.rawUsageJson;
+  if (
+    record.provider !== "retell"
+    || record.providerName !== "Retell AI"
+    || record.apiKeyEnv !== "RETELL_API_KEY"
+    || record.baseUrl !== "https://api.retellai.com"
+    || record.credentialSource !== "platform"
+    || record.featureKey !== "phone-call"
+    || record.surface !== "hosted-web"
+    || record.triggerKind !== "phone-call"
+    || record.usageExtractionSourcePath !== HOSTED_RETELL_USAGE_SOURCE_PATH
+    || record.usageExtractionVersion !== HOSTED_RETELL_USAGE_VERSION
+    || record.requestedModel !== null
+    || record.servedModel !== null
+    || record.inputTokens !== null
+    || record.outputTokens !== null
+    || record.reasoningTokens !== null
+    || record.cachedInputTokens !== null
+    || record.cacheWriteTokens !== null
+    || record.totalTokens !== null
+    || rawUsageJson === null
+    || !Object.keys(rawUsageJson).every((key) => key === HOSTED_RETELL_USAGE_COST_KEY)
+  ) {
+    return null;
+  }
+
+  const combinedCostUsdMicros = readHostedAiUsageNonNegativeInteger(
+    rawUsageJson[HOSTED_RETELL_USAGE_COST_KEY],
+  );
+  if (combinedCostUsdMicros === null) {
+    return null;
+  }
+  return {
+    combinedCostUsdMicros,
+  };
+}
+
+function assertHostedAiUsageRetellTokenPricingBasis(
+  tokenPricingBasis: AssistantUsageTokenPricingBasis,
+): void {
+  if (tokenPricingBasis !== "standard") {
+    throw new TypeError(
+      "Retell phone-call hosted usage must use standard token pricing basis.",
+    );
+  }
+}
+
+function readHostedAiUsageNonNegativeInteger(value: unknown): bigint | null {
+  return typeof value === "number"
+      && Number.isSafeInteger(value)
+      && value >= 0
+    ? BigInt(value)
+    : null;
 }
 
 // Only Worker-recorded Workers AI transcription rows take the audio-priced

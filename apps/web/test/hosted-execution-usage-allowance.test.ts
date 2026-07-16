@@ -4,6 +4,7 @@ import {
 } from "@murphai/hosted-execution/runtime-control";
 import {
   buildHostedTranscriptionUsageRecord,
+  parseAssistantUsageRecord,
   ASSISTANT_IDLE_COMPACTION_USAGE_ESTIMATE_SOURCE_PATH,
   ASSISTANT_IDLE_COMPACTION_USAGE_ESTIMATE_VERSION,
   type AssistantUsageRecord,
@@ -27,6 +28,7 @@ import {
   reconcileHostedAiUsageAllowancePeriodForMemberTx,
   resolveHostedAiUsageGate,
 } from "@/src/lib/hosted-execution/usage-allowance";
+import { buildHostedRetellPhoneCallUsageRecord } from "@/src/lib/hosted-execution/usage-retell";
 
 beforeEach(() => {
   usageCreditMocks.settleHostedUsageCreditForUsageTx.mockReset();
@@ -903,6 +905,56 @@ describe("hosted AI usage allowance pricing", () => {
     }
   });
 
+  it("prices web-owned Retell usage from the final provider-reported cost", () => {
+    const usage = buildHostedRetellPhoneCallUsageRecord({
+      combinedCostUsdMicros: 187_500,
+      memberId: "member_123",
+      occurredAt: new Date("2026-06-25T12:00:00.000Z"),
+      phoneCallId: "hpc_123",
+      providerCallId: "retell_call_123",
+    });
+
+    expect(usage).toMatchObject({
+      rawUsageJson: {
+        combinedCostUsdMicros: 187_500,
+      },
+      turnId: "turn_phone_call_hpc_123",
+      usageId: "turn_phone_call_hpc_123.attempt-1",
+    });
+    expect(priceHostedAiUsageForAllowance(usage)).toEqual({
+      costUsdMicros: 187_500n,
+      counted: true,
+      pricingSnapshot: {
+        credentialSource: "platform",
+        providerCost: {
+          combinedCostUsdMicros: "187500",
+        },
+        pricingSource: "https://docs.retellai.com/api-references/get-call",
+        schema: "murph.hosted-ai-usage-allowance-pricing.v1",
+        tokenPricingBasis: "standard",
+      },
+      pricingVersion: "retell-reported-call-cost-2026-07-16",
+    });
+    expect(() => parseAssistantUsageRecord(usage)).toThrow(
+      "rawUsageJson.combinedCostUsdMicros is not allowed",
+    );
+
+    expect(() => priceHostedAiUsageForAllowance({
+      ...usage,
+      rawUsageJson: {
+        combinedCostUsdMicros: 187_500,
+        durationMs: 72_500,
+      },
+    })).toThrow("pricing is missing");
+
+    expect(() => priceHostedAiUsageForAllowance({
+      ...usage,
+      rawUsageJson: {
+        combinedCostUsdMicros: -1,
+      },
+    })).toThrow("pricing is missing");
+  });
+
   it("prices ElevenLabs TTS by character count for allowance accounting", () => {
     const voiceMemo = {
       ...BASE_USAGE_RECORD,
@@ -1091,6 +1143,48 @@ describe("accountHostedAiUsageForAllowanceTx", () => {
     });
     const [, ...params] = executeRaw.mock.calls[0] ?? [];
     expect(params).toContain(4_104n);
+  });
+
+  it("settles Retell cost against included capacity before purchased credit", async () => {
+    const tx = createAllowanceTx({
+      executeRaw: vi.fn<AllowanceExecuteRaw>(async () => 1),
+      hostedAiUsageUpdateMany: vi.fn(async () => ({ count: 1 })),
+      spentUsdMicros: 9_900_000n,
+      usageCreditBalanceUsdMicros: 87_500n,
+      usageCreditLedgerVersion: 7n,
+    });
+    usageCreditMocks.settleHostedUsageCreditForUsageTx.mockResolvedValueOnce({
+      absorbedUsdMicros: 0n,
+      balanceUsdMicros: 0n,
+      debitedUsdMicros: 87_500n,
+      ledgerVersion: 8n,
+    });
+    const occurredAt = new Date("2026-03-29T12:00:00.000Z");
+    const usage = buildHostedRetellPhoneCallUsageRecord({
+      combinedCostUsdMicros: 187_500,
+      memberId: "member_123",
+      occurredAt,
+      phoneCallId: "hpc_credit_boundary",
+      providerCallId: "retell_call_credit_boundary",
+    });
+
+    await expect(accountHostedAiUsageForAllowanceTx({
+      memberId: "member_123",
+      now: new Date("2026-03-29T12:00:05.000Z"),
+      record: usage,
+      tx: tx as never,
+    })).resolves.toMatchObject({
+      sourceUsageId: "turn_phone_call_hpc_credit_boundary.attempt-1",
+      usageCreditLedgerVersion: 8n,
+    });
+
+    expect(usageCreditMocks.settleHostedUsageCreditForUsageTx).toHaveBeenCalledWith({
+      beneficiaryMemberId: "member_123",
+      debitUsdMicros: 87_500n,
+      effectiveAt: occurredAt,
+      sourceUsageId: "turn_phone_call_hpc_credit_boundary.attempt-1",
+      tx,
+    });
   });
 
   it("throws after a credit debit when the locked period spend row is lost", async () => {

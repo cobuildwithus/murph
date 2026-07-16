@@ -163,12 +163,54 @@ describe("Retell phone-call runtime", () => {
     const body = JSON.parse(String(fetchCalls[0]!.init?.body));
     expect(body.agent_override).toEqual({
       agent: {
-        webhook_events: ["call_ended", "call_analyzed"],
+        webhook_events: ["call_ended", "call_analyzed", "transfer_ended"],
         webhook_url: "https://local-tunnel.example.test/api/retell/webhook",
       },
     });
     expect(body.retell_llm_dynamic_variables).toMatchObject({
       murph_public_base_url: "https://local-tunnel.example.test",
+    });
+  });
+
+  it("retrieves terminal usage and waits for a transferred call's final cost", async () => {
+    vi.stubEnv("RETELL_API_KEY", "retell-api-key");
+    let transferEnded = false;
+    const fetchImpl: typeof fetch = async () => new Response(JSON.stringify({
+      call_cost: {
+        combined_cost: transferEnded ? 18.75 : 12,
+        product_costs: [],
+        total_duration_seconds: 60,
+        total_duration_unit_price: 0.2,
+      },
+      call_id: "retell_call_123",
+      call_status: "ended",
+      disconnection_reason: "call_transfer",
+      duration_ms: 60_000,
+      end_timestamp: 1_782_386_400_000,
+      ...(transferEnded ? { transfer_end_timestamp: 1_782_408_600_000 } : {}),
+    }), {
+      headers: {
+        "content-type": "application/json",
+      },
+      status: 200,
+    });
+    const runtime = createRetellPhoneCallRuntime({ fetchImpl });
+    if (!runtime.resolveTerminalUsage) {
+      throw new Error("Retell runtime must support terminal usage retrieval.");
+    }
+
+    await expect(runtime.resolveTerminalUsage("retell_call_123")).resolves.toEqual({
+      state: "pending",
+    });
+
+    transferEnded = true;
+    await expect(runtime.resolveTerminalUsage("retell_call_123")).resolves.toEqual({
+      state: "ready",
+      usage: {
+        combinedCostUsdMicros: 187_500,
+        occurredAt: new Date(1_782_408_600_000),
+        providerCallId: "retell_call_123",
+      },
     });
   });
 
