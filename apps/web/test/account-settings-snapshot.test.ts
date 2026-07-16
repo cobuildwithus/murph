@@ -30,7 +30,9 @@ vi.mock("@/src/lib/hosted-onboarding/assistant-model-preference", () => ({
     mocks.readHostedMemberAssistantModelPreference,
 }));
 
+import { getPrisma } from "@/src/lib/prisma";
 import {
+  readHostedAccountSettingsPageSnapshot,
   readHostedAccountSettingsSnapshot,
   withServerApprovedPrivyAccountHints,
   type HostedAccountSettingsSnapshot,
@@ -91,6 +93,111 @@ describe("hosted account settings snapshot", () => {
         verifiedAt: null,
       },
     });
+  });
+
+  it("reuses the member aggregate for the Settings page billing and routing slices", async () => {
+    const billingRef = {
+      currentBillingPhase: "paid",
+      currentBillingPlanCode: "launch_monthly",
+      memberId: "member_123",
+      stripeCustomerId: "cus_123",
+      stripeSubscriptionId: "sub_123",
+    };
+    const routing = {
+      linqRecipientPhone: "+15550100001",
+      memberId: "member_123",
+      pendingLinqRecipientPhone: null,
+      telegramUserId: "456",
+    };
+    mocks.readHostedMemberSnapshot.mockResolvedValue({
+      billingRef,
+      core: {
+        billingStatus: "active",
+        id: "member_123",
+        suspendedAt: null,
+      },
+      emailAuthorization: null,
+      identity: {
+        memberId: "member_123",
+        phoneLookupKey: "phone_lookup",
+        phoneNumber: "+15550100002",
+        phoneNumberVerifiedAt: new Date("2026-07-15T12:00:00.000Z"),
+        privyUserId: "did:privy:user_123",
+      },
+      routing,
+    });
+    const prisma = getPrisma();
+    mocks.getPrisma.mockClear();
+
+    const result = await readHostedAccountSettingsPageSnapshot({
+      memberId: "member_123",
+      prisma,
+    });
+
+    expect(result.billingRef).toBe(billingRef);
+    expect(result.routing).toBe(routing);
+    expect(result.account).toMatchObject({
+      assistant: {
+        model: "gpt-5.6-terra",
+      },
+      phone: {
+        number: "+15550100002",
+        verifiedAt: "2026-07-15T12:00:00.000Z",
+      },
+      telegram: {
+        telegramUserId: "456",
+      },
+    });
+    expect(mocks.readHostedMemberSnapshot).toHaveBeenCalledTimes(1);
+    expect(mocks.readHostedMemberSnapshot).toHaveBeenCalledWith({
+      memberId: "member_123",
+      prisma,
+    });
+    expect(mocks.readHostedMemberAssistantModelPreference).toHaveBeenCalledWith({
+      memberId: "member_123",
+      prisma,
+    });
+    expect(mocks.findUniqueHostedMember).toHaveBeenCalledTimes(1);
+    expect(mocks.getPrisma).not.toHaveBeenCalled();
+  });
+
+  it("returns explicit null Settings slices when the member aggregate is absent", async () => {
+    mocks.readHostedMemberSnapshot.mockResolvedValue(null);
+    const prisma = getPrisma();
+    mocks.getPrisma.mockClear();
+
+    const result = await readHostedAccountSettingsPageSnapshot({
+      memberId: "member_missing",
+      prisma,
+    });
+
+    expect(result).toMatchObject({
+      account: {
+        assistant: {
+          model: "gpt-5.6-terra",
+        },
+        email: {
+          address: null,
+          murphEmailAddress: null,
+          verifiedAt: null,
+        },
+        phone: {
+          number: null,
+          verifiedAt: null,
+        },
+        telegram: {
+          telegramUserId: null,
+        },
+      },
+      billingRef: null,
+      routing: null,
+    });
+    expect(mocks.readHostedMemberSnapshot).toHaveBeenCalledOnce();
+    expect(mocks.readHostedMemberSnapshot).toHaveBeenCalledWith({
+      memberId: "member_missing",
+      prisma,
+    });
+    expect(mocks.getPrisma).not.toHaveBeenCalled();
   });
 
   it("prefers the verified email over the Stripe checkout email", async () => {
