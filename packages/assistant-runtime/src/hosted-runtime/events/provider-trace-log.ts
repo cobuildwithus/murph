@@ -992,6 +992,21 @@ function readHostedAssistantCodexAppServerTimingTrace(
     "codexTimingProviderActionCount",
     readHostedAssistantProviderDiagnosticNonnegativeNumber(record, "codexTimingProviderActionCount"),
   );
+  if (stage === "turn-completed") {
+    for (const key of [
+      "codexTimingProviderRequestOrdinal",
+      "codexTimingTurnStartAckElapsedMs",
+      "codexTimingTurnStartedNotificationElapsedMs",
+      "codexTimingTurnCompletedNotificationElapsedMs",
+      "codexTimingTurnCompleteElapsedMs",
+    ] as const) {
+      maybeSetHostedAssistantProviderDiagnosticDetail(
+        details,
+        key,
+        readHostedAssistantProviderDiagnosticNonnegativeNumber(record, key),
+      );
+    }
+  }
   maybeSetHostedAssistantProviderDiagnosticDetail(
     details,
     "codexTimingThreadIdPresent",
