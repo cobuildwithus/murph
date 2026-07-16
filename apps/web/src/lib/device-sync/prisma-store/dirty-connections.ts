@@ -223,11 +223,59 @@ export class PrismaHostedDirtyConnectionStore {
     const prisma = input.tx;
     const dirtyAt = new Date(input.dirtyAt);
 
-    const existing = await prisma.deviceSyncDirtyConnection.findUnique({
+    let existing = await prisma.deviceSyncDirtyConnection.findUnique({
       where: {
         connectionId: input.connectionId,
       },
     });
+    const hasCompanionNightResource = input.resourceBatch.payloadResources.some(
+      (resource) => readCompanionHrvDirtyResourceNightDate(resource) !== null,
+    );
+    let preparedDirtyPayloadRows = input.precomputedDirtyPayloadRows;
+    if (
+      hasCompanionNightResource
+      && input.resourceBatch.payloadResources.length > 0
+      && !preparedDirtyPayloadRows
+    ) {
+      preparedDirtyPayloadRows = await prepareDirtyPayloadRows({
+        connectionId: input.connectionId,
+        dirtyRevision: resolveDirtyPayloadRevision({
+          existing,
+          resourceBatch: input.resourceBatch,
+        }),
+        provider: input.provider,
+        resources: input.resourceBatch.payloadResources,
+        traceId: input.traceId,
+        userId: input.userId,
+        prisma,
+      });
+    }
+    if (hasCompanionNightResource && existing) {
+      // Companion replay receipts reference the parent connection. Lock the
+      // dirty marker first so account deletion and ingress retain one lock
+      // order without holding that lock during payload encryption.
+      const locked = await lockDirtyConnectionForCompanionReceipt({
+        connectionId: input.connectionId,
+        tx: prisma,
+      });
+      if (!locked) {
+        throw createDirtyStateContentionError("update");
+      }
+      existing = await prisma.deviceSyncDirtyConnection.findUnique({
+        where: {
+          connectionId: input.connectionId,
+        },
+      });
+      if (
+        !existing
+        || preparedDirtyPayloadRows?.dirtyRevision !== resolveDirtyPayloadRevision({
+          existing,
+          resourceBatch: input.resourceBatch,
+        })
+      ) {
+        throw createDirtyStateContentionError("update");
+      }
+    }
     const companionNightClaims = await claimCompanionHrvNightReceipts({
       claimedAt: dirtyAt,
       connectionId: input.connectionId,
@@ -240,7 +288,7 @@ export class PrismaHostedDirtyConnectionStore {
       companionNightClaims,
     );
     const precomputedDirtyPayloadRows = filterPreparedDirtyPayloadRows(
-      input.precomputedDirtyPayloadRows,
+      preparedDirtyPayloadRows,
       companionNightClaims,
     );
 
@@ -357,19 +405,27 @@ export class PrismaHostedDirtyConnectionStore {
     const dirtyWindowStart = resolveDirtyWindowStart(resourceBatch.allResources);
     const dirtyWindowEnd = resolveDirtyWindowEnd(resourceBatch.allResources);
     const nextDirtyRevision = existing.dirtyRevision + 1n;
-    // Prepare exact durable work before taking the dirty-marker row lock. Both
-    // writes share this transaction, so a lost compare-and-swap rolls the
-    // payload insert back with the marker update.
-    const payloadCreateResult = await createDirtyPayloadRows({
-      connectionId: input.connectionId,
-      dirtyRevision: nextDirtyRevision,
-      provider: input.provider,
-      precomputed: precomputedDirtyPayloadRows,
-      resources: resourceBatch.payloadResources,
-      traceId: input.traceId,
-      tx: prisma,
-      userId: input.userId,
-    });
+    // Compression and encryption are the expensive preparation. Complete them
+    // before taking the dirty-marker row lock, but keep the foreign-key-backed
+    // payload insert after the compare-and-swap to preserve account-deletion
+    // lock order.
+    const payloadRowsForCreate = resourceBatch.payloadResources.length === 0
+      ? undefined
+      : precomputedDirtyPayloadRows ?? (await prepareDirtyPayloadRows({
+          connectionId: input.connectionId,
+          dirtyRevision: nextDirtyRevision,
+          provider: input.provider,
+          resources: resourceBatch.payloadResources,
+          traceId: input.traceId,
+          userId: input.userId,
+          prisma,
+        }));
+    if (
+      payloadRowsForCreate
+      && payloadRowsForCreate.dirtyRevision !== nextDirtyRevision
+    ) {
+      throw createDirtyStateContentionError("update");
+    }
     const updated = await prisma.deviceSyncDirtyConnection.updateMany({
       where: {
         connectionId: input.connectionId,
@@ -397,6 +453,17 @@ export class PrismaHostedDirtyConnectionStore {
     if (updated.count === 0) {
       throw createDirtyStateContentionError("update");
     }
+
+    const payloadCreateResult = await createDirtyPayloadRows({
+      connectionId: input.connectionId,
+      dirtyRevision: nextDirtyRevision,
+      provider: input.provider,
+      precomputed: payloadRowsForCreate,
+      resources: resourceBatch.payloadResources,
+      traceId: input.traceId,
+      tx: prisma,
+      userId: input.userId,
+    });
 
     const record = await prisma.deviceSyncDirtyConnection.findUnique({
       where: {
@@ -930,6 +997,19 @@ function createDirtyPayloadId(input: {
   ].join("\0");
 
   return `dsp_${sha256Hex(identity).slice(0, 40)}`;
+}
+
+async function lockDirtyConnectionForCompanionReceipt(input: {
+  connectionId: string;
+  tx: HostedPrismaTransactionClient;
+}): Promise<boolean> {
+  const rows = await input.tx.$queryRaw<Array<{ connectionId: string }>>(Prisma.sql`
+    SELECT connection_id AS "connectionId"
+    FROM device_sync_dirty_connection
+    WHERE connection_id = ${input.connectionId}
+    FOR UPDATE
+  `);
+  return rows.length === 1;
 }
 
 async function claimCompanionHrvNightReceipts(input: {
