@@ -40,7 +40,9 @@ import {
 
 const attemptedAt = new Date("2026-07-12T15:00:00.000Z");
 const periodStart = new Date("2026-07-01T00:00:00.000Z");
-const transaction = {};
+const transaction = {
+  $queryRaw: vi.fn(),
+};
 const prisma = {
   $transaction: vi.fn(async (
     operation: (tx: typeof transaction) => Promise<unknown>,
@@ -53,6 +55,7 @@ describe("hosted usage-limit notice claim authority", () => {
     claimMocks.lockHostedMemberRoutingStateTx.mockResolvedValue(undefined);
     claimMocks.lockHostedThreadRouteByThreadIdentityTx.mockResolvedValue(undefined);
     claimMocks.assertHostedThreadRouteEgressAuthority.mockResolvedValue({});
+    transaction.$queryRaw.mockResolvedValue([{ eligible: true }]);
     claimMocks.startHostedAiUsageLimitNoticeDispatchTx.mockImplementation(
       async (input: {
         assertDispatchAuthority?: (prisma: typeof transaction) => Promise<void>;
@@ -164,6 +167,31 @@ describe("hosted usage-limit notice claim authority", () => {
         prisma: transaction,
       }),
     );
+  });
+
+  it("declines a notice when its allowance period is no longer blocked", async () => {
+    claimMocks.readHostedMemberRoutingState.mockResolvedValue({
+      linqChatId: "linq_chat_current",
+    });
+    transaction.$queryRaw.mockResolvedValue([]);
+
+    await expect(startAuthorizedHostedAiUsageLimitNoticeDispatchTx({
+      attemptedAt,
+      memberId: "member_usage_notice_1",
+      noticeDeliveryTarget: {
+        channel: "linq",
+        replyToMessageId: "linq_message_1",
+        routeAuthority: null,
+        target: "linq_chat_current",
+      },
+      periodStart,
+      prisma: prisma as never,
+      source: "hosted_webhook_side_effect",
+      sourceRef: "usage_event_1",
+      targetKind: "thread",
+    })).resolves.toEqual({ status: "already_notified" });
+
+    expect(transaction.$queryRaw).toHaveBeenCalledOnce();
   });
 
   it("locks and reasserts external Linq authority before declining a stale route", async () => {

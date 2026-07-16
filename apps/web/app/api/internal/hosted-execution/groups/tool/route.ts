@@ -1,6 +1,7 @@
 import {
   parseHostedRuntimeGroupToolRequest,
 } from "@murphai/hosted-execution/parsers";
+import { after } from "next/server";
 
 import {
   handleHostedRuntimeGroupTool,
@@ -12,6 +13,7 @@ import {
   requireHostedCloudflareCallbackRequest,
 } from "@/src/lib/hosted-execution/cloudflare-callback-auth";
 import { jsonOk, withJsonError } from "@/src/lib/hosted-onboarding/http";
+import { signalHostedMailboxAppendRuntime } from "@/src/lib/hosted-orchestration/signal-runtime";
 import {
   readHostedVaultShareSupportedProjectionScopeKeysFromRequest,
 } from "@/src/lib/hosted-vault-share/supported-projection-scopes";
@@ -41,7 +43,27 @@ export const POST = withJsonError(async (request: Request) => {
     await handleHostedRuntimeGroupTool({
       memberId,
       request: body,
+      scheduleMailboxWake: scheduleMailboxWakeAfterResponse,
     }),
     supportedProjectionScopeKeys,
   ));
 });
+
+function scheduleMailboxWakeAfterResponse(input: {
+  expectedUserId: string;
+  mailboxItemId: string;
+}): void {
+  const task = async () => {
+    try {
+      await signalHostedMailboxAppendRuntime(input);
+    } catch {
+      // The durable mailbox item remains reconciliation truth when a wake is unavailable.
+    }
+  };
+
+  try {
+    after(task);
+  } catch {
+    void task();
+  }
+}

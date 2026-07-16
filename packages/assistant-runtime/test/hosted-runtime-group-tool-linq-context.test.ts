@@ -12,6 +12,7 @@ const ROUTE_AUTHORITY = {
   containerMemberId: "member_container",
   threadId: "chat_group_1",
 };
+const PRIVATE_ASSISTANT_INPUT_ID = `ain_${"3".repeat(32)}`;
 
 function buildLinqDeliveryContext(
   overrides: Partial<HostedAssistantLinqDeliveryContext>,
@@ -127,6 +128,21 @@ describe("createHostedGroupToolWithLinqThreadContext", () => {
 
     await groupTool.request({ action: "read_current" });
     expect(request).toHaveBeenLastCalledWith({ action: "read_current" });
+
+    await groupTool.request({
+      action: "ask",
+      groupLabel: "Morning Movers",
+      originAssistantInputId: PRIVATE_ASSISTANT_INPUT_ID,
+      originSessionId: "session_private",
+      question: "What exercises are assigned today?",
+    });
+    expect(request).toHaveBeenLastCalledWith({
+      action: "ask",
+      groupLabel: "Morning Movers",
+      originAssistantInputId: PRIVATE_ASSISTANT_INPUT_ID,
+      originSessionId: "session_private",
+      question: "What exercises are assigned today?",
+    });
 
     await groupTool.request({
       action: "leave_membership",
@@ -301,6 +317,20 @@ describe("createHostedGroupToolWithLinqThreadContext", () => {
       action: "list_memberships",
       result: {
         memberships: null,
+        status: "unavailable",
+        unavailableReason: "authenticated_sender_required",
+      },
+    });
+    expect(request).not.toHaveBeenCalled();
+
+    await expect(groupTool.request({
+      action: "ask",
+      originAssistantInputId: PRIVATE_ASSISTANT_INPUT_ID,
+      originSessionId: "session_private",
+      question: "What exercises are assigned today?",
+    })).resolves.toEqual({
+      action: "ask",
+      result: {
         status: "unavailable",
         unavailableReason: "authenticated_sender_required",
       },

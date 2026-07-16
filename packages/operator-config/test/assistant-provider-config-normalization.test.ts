@@ -5,6 +5,9 @@ import {
   serializeAssistantProviderSessionOptions,
   type AssistantProviderConfig,
 } from '../src/assistant/provider-config.ts'
+import {
+  HOSTED_CHATGPT_OPENAI_CODEX_MODEL_PROVIDER_ID,
+} from '../src/assistant/target-runtime.ts'
 
 describe('assistant provider config normalization', () => {
   it('re-sanitizes normalized Codex targets without carrying registry metadata', () => {
@@ -62,5 +65,17 @@ describe('assistant provider config normalization', () => {
         modelProvider: 'custom-provider',
       }),
     ).toThrow(/Unknown Codex model provider: custom-provider/u)
+  })
+
+  it('serializes the internal hosted ChatGPT provider', () => {
+    expect(
+      serializeAssistantProviderSessionOptions({
+        provider: 'codex-cli',
+        modelProvider: HOSTED_CHATGPT_OPENAI_CODEX_MODEL_PROVIDER_ID,
+      }),
+    ).toMatchObject({
+      modelProvider: HOSTED_CHATGPT_OPENAI_CODEX_MODEL_PROVIDER_ID,
+      provider: 'codex-cli',
+    })
   })
 })

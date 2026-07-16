@@ -15,7 +15,13 @@ import path from "node:path";
 
 import { afterEach, describe, expect, it, vi } from "vitest";
 
+import {
+  buildHostedExecutionAssistantAskCompletedWake,
+  buildHostedExecutionAssistantAskRequestedWake,
+} from "@murphai/hosted-execution";
 import type {
+  HostedExecutionAssistantAskCompletedWake,
+  HostedExecutionAssistantAskRequestedWake,
   HostedExecutionSystemWake,
 } from "@murphai/hosted-execution/contracts";
 import type {
@@ -889,6 +895,48 @@ describe("createHostedWorkspaceRuntimeBridgeJobOptions", () => {
       status: "deferred",
     });
   });
+
+  it("binds paired Assistant Ask payloads to the mailbox row id and expiry", async () => {
+    const vaultRoot = await createVaultRoot();
+    const { platform } = createRuntimePlatform();
+    const wakes = [
+      createAssistantAskRequestedWake(),
+      createAssistantAskCompletedWake(),
+    ];
+
+    for (const wake of wakes) {
+      const options = createBridgeOptions({
+        mailboxPayloadDecoder: createMailboxPayloadDecoder({
+          status: "decoded",
+          wake,
+        }),
+        platform,
+        vaultRoot,
+      });
+
+      await expect(options.importItem(createAssistantAskMailboxImportItem(wake, {
+        id: `${wake.eventId}_different_row`,
+      }))).resolves.toEqual({
+        reasonCode: "payload.decode_mismatch",
+        retryable: false,
+        status: "blocked",
+      });
+      await expect(options.importItem(createAssistantAskMailboxImportItem(wake, {
+        expiresAt: "2026-07-15T12:11:00.000Z",
+      }))).resolves.toEqual({
+        reasonCode: "payload.decode_mismatch",
+        retryable: false,
+        status: "blocked",
+      });
+
+      const matchingResult = await options.importItem(
+        createAssistantAskMailboxImportItem(wake),
+      );
+      expect(matchingResult).not.toMatchObject({
+        reasonCode: "payload.decode_mismatch",
+      });
+    }
+  });
 });
 
 function createBridgeOptions(input: {
@@ -1249,6 +1297,81 @@ function createMemberChannelsWake(input: {
     },
     occurredAt: input.occurredAt ?? "2026-05-01T00:00:00.000Z",
     userId: input.userId ?? TEST_REQUEST.userId,
+  };
+}
+
+function createAssistantAskRequestedWake(): HostedExecutionAssistantAskRequestedWake {
+  return buildHostedExecutionAssistantAskRequestedWake({
+    ask: {
+      expiresAt: "2026-07-15T12:10:00.000Z",
+      originAssistantInputId: "ain_0123456789abcdef0123456789abcdef",
+      originSessionId: "session_private",
+      question: "What exercises are assigned today?",
+      target: {
+        kind: "joined_group",
+        membershipId: "hgrpm_generation_bridge",
+        requestedLabel: "100 Club",
+      },
+    },
+    eventId: "haask_request_bridge",
+    memberId: TEST_REQUEST.userId,
+    occurredAt: "2026-07-15T12:00:00.000Z",
+  });
+}
+
+function createAssistantAskCompletedWake(): HostedExecutionAssistantAskCompletedWake {
+  return buildHostedExecutionAssistantAskCompletedWake({
+    ask: {
+      expiresAt: "2026-07-15T12:10:00.000Z",
+      originAssistantInputId: "ain_0123456789abcdef0123456789abcdef",
+      originSessionId: "session_private",
+      question: "What exercises are assigned today?",
+      requestId: "haask_request_bridge",
+      result: {
+        answer: "Squats plus the pelvic sequence.",
+        outcome: "answered",
+      },
+      targetLabel: "100 Club",
+    },
+    eventId: "haask_completion_bridge",
+    memberId: TEST_REQUEST.userId,
+    occurredAt: "2026-07-15T12:05:00.000Z",
+  });
+}
+
+function createAssistantAskMailboxImportItem(
+  wake: HostedExecutionAssistantAskRequestedWake | HostedExecutionAssistantAskCompletedWake,
+  overrides: {
+    expiresAt?: string;
+    id?: string;
+  } = {},
+): Parameters<HostedWorkspaceRuntimeJobOptions["importItem"]>[0] {
+  const routeAction = wake.kind === "assistant.ask.requested"
+    ? "run-assistant-ask"
+    : "continue-assistant-ask";
+  const base = createSystemMailboxImportItem();
+  return {
+    ...base,
+    item: {
+      ...base.item,
+      dedupeKey: wake.eventId,
+      expiresAt: overrides.expiresAt ?? wake.ask.expiresAt,
+      id: overrides.id ?? wake.eventId,
+      kind: wake.kind,
+      occurredAt: wake.occurredAt,
+      userId: wake.userId,
+    },
+    route: {
+      action: routeAction,
+      advanceProgress: true,
+      itemRef: {
+        id: overrides.id ?? wake.eventId,
+        kind: wake.kind,
+        lane: "system",
+        laneSeq: base.item.laneSeq,
+      },
+      state: "route",
+    },
   };
 }
 

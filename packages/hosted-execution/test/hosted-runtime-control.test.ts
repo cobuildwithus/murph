@@ -189,6 +189,8 @@ describe("hosted runtime control contracts", () => {
       "member.channels.updated",
       "member.preferences.updated",
       "assistant.notification.requested",
+      "assistant.ask.requested",
+      "assistant.ask.completed",
       "clinical-records.sync-requested",
       "device-sync.wake",
       "group-newsletter.email-needed",

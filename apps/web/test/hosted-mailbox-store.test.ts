@@ -1,6 +1,9 @@
 import { Buffer } from "node:buffer";
 
 import {
+  buildHostedExecutionAssistantAskRequestedWake,
+} from "@murphai/hosted-execution";
+import {
   createHostedMailboxAssistantInputId,
   readHostedConversationAssistantIdentifierSecret,
 } from "@murphai/hosted-execution/assistant-identifiers";
@@ -10,6 +13,7 @@ import { describe, expect, it, vi } from "vitest";
 import {
   advanceHostedMailboxConsumedSeqByLane,
   appendHostedMailboxEnvelopeTx,
+  appendHostedMailboxEnvelopeWithIdentityTx,
   appendHostedMealPhotoMailboxEnvelopeTx,
   appendHostedMailboxItemTx,
   decodeHostedMailboxStoredPayload,
@@ -22,6 +26,7 @@ import {
   readHostedMailboxConsumedSeqByLane,
   readHostedMailboxLiveItemById,
   readHostedMailboxRecentLiveConversationItemIds,
+  readHostedMailboxWakeByItemId,
   readHostedMailboxLatestPendingConversationItem,
   readHostedMailboxItemCheckpointById,
   readHostedMailboxMaxSeqByLane,
@@ -766,6 +771,73 @@ describe("appendHostedMailboxItemTx", () => {
 });
 
 describe("appendHostedMailboxEnvelopeTx", () => {
+  it("uses an explicit request identity and expiry without changing ordinary appends", async () => {
+    let insertedRow: HostedMailboxItemRow | null = null;
+    const hostedMailboxItem = createHostedMailboxItemDelegate({
+      create: vi.fn<HostedMailboxCreate>(async (args) => {
+        insertedRow = buildHostedMailboxItemRow(args.data);
+        return insertedRow;
+      }),
+      findFirst: vi.fn<HostedMailboxItemFindFirst>(async () => insertedRow),
+    });
+    const tx = createHostedMailboxTx({
+      hostedMailboxItem,
+      hostedMailboxPayload: createHostedMailboxPayloadDelegate(),
+    });
+    const itemId = `aask_req_${"a".repeat(64)}`;
+    const expiresAt = new Date(FIXED_NOW.getTime() + 10 * 60 * 1_000).toISOString();
+    const envelope = buildHostedExecutionAssistantAskRequestedWake({
+      ask: {
+        expiresAt,
+        originAssistantInputId: `ain_${"b".repeat(32)}`,
+        originSessionId: "session_private",
+        question: "What is today's workout?",
+        target: {
+          kind: "joined_group",
+          membershipId: "membership-one",
+          requestedLabel: null,
+        },
+      },
+      eventId: itemId,
+      memberId: "member-group-runtime",
+      occurredAt: FIXED_NOW.toISOString(),
+    });
+
+    await expect(appendHostedMailboxEnvelopeWithIdentityTx({
+      envelope,
+      expiresAt,
+      itemId,
+      tx,
+    })).resolves.toMatchObject({
+      inserted: true,
+      item: {
+        expiresAt,
+        id: itemId,
+      },
+    });
+
+    expect(hostedMailboxItem.create).toHaveBeenCalledWith({
+      data: expect.objectContaining({
+        expiresAt: new Date(expiresAt),
+        id: itemId,
+      }),
+    });
+    await expect(readHostedMailboxWakeByItemId({
+      availableAt: FIXED_NOW,
+      mailboxItemId: itemId,
+      prisma: tx,
+    })).resolves.toEqual(envelope);
+    await expect(appendHostedMailboxEnvelopeWithIdentityTx({
+      envelope,
+      expiresAt,
+      itemId: `${itemId}_different`,
+      tx,
+    })).rejects.toThrow(
+      "Hosted mailbox item identity must equal the envelope event id.",
+    );
+    expect(hostedMailboxItem.create).toHaveBeenCalledTimes(1);
+  });
+
   it("serializes post-append reconciliation before reading the mailbox claim", async () => {
     const findUnique = vi.fn<HostedMailboxFindUnique>(async () => null);
     const tx = createHostedMailboxTx({

@@ -43,6 +43,40 @@ test("VoiceMemoPlayer pauses sibling players in the same exclusive group", async
   }
 });
 
+test("VoiceMemoPlayer starts playback when the waveform is clicked", async () => {
+  const rendered = await renderClientComponent(
+    createElement(VoiceMemoPlayer, {
+      src: "/audio/grandpa.mp3",
+    }),
+    {
+      requireButton: false,
+    },
+  );
+
+  try {
+    const audio = rendered.container.querySelector("audio");
+    assert.ok(audio);
+    const play = vi.fn(() => Promise.resolve());
+    Object.defineProperty(audio, "play", {
+      configurable: true,
+      value: play,
+    });
+
+    const waveform = rendered.container.querySelector(
+      "button[data-voice-memo-waveform]",
+    );
+    assert.ok(waveform instanceof rendered.window.HTMLButtonElement);
+
+    await act(async () => {
+      waveform.click();
+    });
+
+    assert.equal(play.mock.calls.length, 1);
+  } finally {
+    await rendered.cleanup();
+  }
+});
+
 test("VoiceMemoPlayer disables playback and shows the unavailable label after an audio error", async () => {
   const rendered = await renderClientComponent(
     createElement(VoiceMemoPlayer, {

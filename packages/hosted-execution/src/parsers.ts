@@ -27,6 +27,8 @@ import {
 } from "./clinical-records-boundary.ts";
 
 import type {
+  HostedExecutionAssistantAskCompletedEvent,
+  HostedExecutionAssistantAskRequestedEvent,
   HostedExecutionAssistantNotificationDelivery,
   HostedExecutionAssistantNotificationDeliveryDispatchMode,
   HostedExecutionAssistantNotificationDeliverySource,
@@ -56,6 +58,10 @@ import type {
   HostedExecutionPlainRuntimeControlWakeKind,
   HostedCodexAuthAction,
 } from "./contracts.ts";
+import {
+  parseHostedExecutionAssistantAskCompletedPayload,
+  parseHostedExecutionAssistantAskRequestedPayload,
+} from "./assistant-ask-payload.ts";
 import type {
   HostedExecutionLogLevel,
 } from "./observability.ts";
@@ -63,6 +69,8 @@ import {
   isHostedExecutionLogLevel,
 } from "./observability.ts";
 import {
+  buildHostedExecutionAssistantAskCompletedWake,
+  buildHostedExecutionAssistantAskRequestedWake,
   buildHostedExecutionAssistantNotificationRequestedWake,
   buildHostedExecutionEmailConversationMessageWake,
   buildHostedExecutionLinqConversationMessageWake,
@@ -112,6 +120,10 @@ import {
 import { parseHostedExecutionTelegramMessage } from "./parsers/telegram.ts";
 
 export {
+  parseHostedExecutionAssistantAskCompletedPayload,
+  parseHostedExecutionAssistantAskRequestedPayload,
+} from "./assistant-ask-payload.ts";
+export {
   buildHostedExecutionLayeredSnapshotRef,
   buildHostedExecutionWorkingSnapshotRef,
   isHostedExecutionLayeredSnapshotRef,
@@ -157,6 +169,8 @@ export {
   parseHostedRuntimeLogResponse,
   parseHostedRuntimeUsageRecordRequest,
   parseHostedRuntimeUsageRecordResponse,
+  parseHostedRuntimeAssistantAskControlRequest,
+  parseHostedRuntimeAssistantAskControlResponse,
   parseHostedRuntimeGroupToolRequest,
   parseHostedRuntimeGroupToolResponse,
   parseHostedRuntimeNewsletterToolRequest,
@@ -269,6 +283,40 @@ export function parseHostedExecutionWake(value: unknown): HostedExecutionWake {
           record.notification,
           "Hosted execution wake assistant.notification.requested notification",
         ),
+        occurredAt,
+      });
+    case "assistant.ask.requested":
+      assertExactHostedExecutionKeys(record, [
+        "ask",
+        "eventId",
+        "kind",
+        "occurredAt",
+        "userId",
+      ], "Hosted execution assistant.ask.requested wake");
+      return buildHostedExecutionAssistantAskRequestedWake({
+        ask: parseHostedExecutionAssistantAskRequestedPayload(
+          record.ask,
+          "Hosted execution assistant.ask.requested wake ask",
+        ),
+        eventId,
+        memberId: wireUserId,
+        occurredAt,
+      });
+    case "assistant.ask.completed":
+      assertExactHostedExecutionKeys(record, [
+        "ask",
+        "eventId",
+        "kind",
+        "occurredAt",
+        "userId",
+      ], "Hosted execution assistant.ask.completed wake");
+      return buildHostedExecutionAssistantAskCompletedWake({
+        ask: parseHostedExecutionAssistantAskCompletedPayload(
+          record.ask,
+          "Hosted execution assistant.ask.completed wake ask",
+        ),
+        eventId,
+        memberId: wireUserId,
         occurredAt,
       });
     case "clinical-records.sync-requested":
@@ -1052,6 +1100,34 @@ export function parseHostedExecutionEvent(value: unknown): HostedExecutionEvent 
         ),
         userId,
       };
+    case "assistant.ask.requested":
+      assertExactHostedExecutionKeys(record, [
+        "ask",
+        "kind",
+        "userId",
+      ], "Hosted execution assistant.ask.requested event");
+      return {
+        ask: parseHostedExecutionAssistantAskRequestedPayload(
+          record.ask,
+          "Hosted execution assistant.ask.requested event ask",
+        ),
+        kind,
+        userId,
+      } satisfies HostedExecutionAssistantAskRequestedEvent;
+    case "assistant.ask.completed":
+      assertExactHostedExecutionKeys(record, [
+        "ask",
+        "kind",
+        "userId",
+      ], "Hosted execution assistant.ask.completed event");
+      return {
+        ask: parseHostedExecutionAssistantAskCompletedPayload(
+          record.ask,
+          "Hosted execution assistant.ask.completed event ask",
+        ),
+        kind,
+        userId,
+      } satisfies HostedExecutionAssistantAskCompletedEvent;
     case "clinical-records.sync-requested":
       assertExactHostedClinicalRecordsKeys(
         record,

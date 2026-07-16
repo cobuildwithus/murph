@@ -49,6 +49,35 @@ function runShellHarness(source: string) {
 }
 
 describe("workspace verification orchestration", () => {
+  it("resolves package coverage concurrency to one value in every environment", () => {
+    const resolveConcurrencyDefault = extractWorkspaceVerifyFunction(
+      "resolve_package_coverage_concurrency_default",
+    );
+    const result = runShellHarness(`#!/usr/bin/env bash
+set -euo pipefail
+
+local_concurrency_default() {
+  printf '6\\n'
+}
+
+${resolveConcurrencyDefault}
+
+CI=1
+shared_host_mode=0
+resolve_package_coverage_concurrency_default
+
+CI=
+shared_host_mode=1
+resolve_package_coverage_concurrency_default
+
+shared_host_mode=0
+resolve_package_coverage_concurrency_default
+`);
+
+    expect(result.status, result.stderr).toBe(0);
+    expect(result.stdout).toBe("1\n2\n6\n");
+  });
+
   it("holds the parent artifact lock for commands that write or concurrently consume shared outputs", () => {
     const lockRouting = workspaceVerify.match(
       /command_requires_workspace_artifact_lock\(\) \{[\s\S]*?^\}/m,

@@ -2,6 +2,1285 @@
 
 All notable changes to `@murphai/murph` will be documented in this file.
 
+## [1.2.2] - 2026-07-16
+
+### Added
+- extend new Pulse trials to 14 days (#726)
+
+### Fixed
+- resolve release coverage concurrency once
+- register Prisma pool lifecycle (#715)
+
+### Changed
+- make clinical preemption resume deterministic
+- Converge conversational personality settings with dashboard (#716)
+- Apply hosted model changes on the same Codex thread (#697)
+- require complete provider results (#703)
+- Restore hosted live turn steering (#705)
+- Delete usage-notice compatibility fence (#698)
+- Stop appending computer handoff links (#688)
+
+## [1.2.1] - 2026-07-16
+
+### Added
+- anchor onboarding before problem solving
+- anchor onboarding before problem solving
+- add minimal hosted account reconcile (#685)
+- add celestial model choice cards
+- redesign assistant model choices
+- add batch 6 image carousels
+- add member email composer
+- manage family tiers per member
+- add fifth inventory image batch
+- recover mixed-tier family plans
+- treat affirmative reactions as replies
+- recover mixed-tier family plans
+- add fourth inventory image batch
+- add appointment scheduling preflight (#646)
+- activate clinical records runtime retrieval (#610)
+- add third 50-movement image batch
+- add second 50-movement image batch
+- add one-shot Linq participant context
+- add images for 50 more movements
+- add WHOOP Apple Health handoff
+- enable Apple Health app handoff
+- add private meal photo ingress
+- keep onboarding open through health foundation
+- make Murph onboarding context-first
+- add general eye health assistant skill (#574)
+- add crash-safe clinical records control-plane contracts (#581)
+- add Murph personality sliders
+- add group newsletter editorial skill
+- play voice preview on voice-card tap
+- paginate and refresh changelog (#569)
+- ingest companion WHOOP spot HRV
+- add usage-aware hosted billing
+- update homepage positioning copy
+- resume approved pending effects automatically
+- restyle share OG cards to the cream editorial style
+- tighten tagline line 2 to "Nobody gets there alone."
+- update brand tagline to "Everyone has a health goal. Almost nobody gets there alone."
+- add authenticated iMessage mini app backend
+- test browser capability before stopping
+- surface Edge model upgrade in settings (#539)
+- add one-time Pulse Trial extension
+- creative challenge stakes, peer posture on group-chosen frames, and group intro songs
+- add Edge assistant model opt-in
+- split texting-channel replies into message bubbles (#447)
+- assumed adherence, confidence ladder, and category-scoped evidence (#441)
+- usage-limit notice at crossing + engagement guard collapse (#437)
+- homepage group-chat morph + social features reframe (#420)
+- add music-generation skill for generate_song prompts (#440)
+- device-aware experiment setup and support guidance (#416)
+- weekly group health newsletter from group chat (#400)
+- founder-gated ops growth dashboard with daily revenue snapshots (#419)
+- stop native contact-card pushes at members, name-only provider card, settings customize surface
+- like-to-join with scoped health sharing via Linq reactions (#412)
+- founder-gated Linq home-line rehome primitive (#413)
+- group-challenge referee skills + prefix image-reference authority (#410)
+- dedicated Open Graph preview images for high-value shareable routes (#392)
+- vary reminder approach to reduce habituation (#395)
+- add group shared reader for consented member data (#390)
+- avatar roster polish: Coach rename, drop Cool, friendlier Rancher/Disco/Sleepy, logos and no-photo to bottom row
+- classic default avatar, reordered grid, inline vCard disposition for iOS
+- working Add-Murph-to-Contacts flow with member-chosen avatar
+- wire contact-card picker to real vCard download and simplify avatars
+- let onboarding design custom first experiments when protocols don't fit
+- add Murph contact-card avatar picker components and spec
+- bump Codex to 0.143.0-alpha.32 for skill-authorized delegation
+- stemmed supplement search with brand-scope fallback (#368)
+- send orientation as progress update before experiment discovery
+- mobile burger drawer nav and hero CTA restyle
+- add ops onboarding activation
+- rotate Murph phone headshots
+- remember handoff viewport session size (#340)
+
+### Fixed
+- bound stale welcome retries (#719)
+- preserve first-visit auth redirect (#717)
+- play voice previews from waveform (#718)
+- keep provider runtime out of boot closure
+- route visible progress through tool
+- select voice from audio preview (#695)
+- remove weight framing from tone samples
+- double native style span limit
+- unlock Sol for Family Edge seats (#686)
+- add safe browser OS fallback
+- remove Family privacy copy
+- requeue aborted jobs
+- move family removal into manage dialog
+- source selected-input wake before aggregation
+- prove foreground wake ownership
+- preserve phase retry across boundary tails
+- keep approval capabilities out of model history
+- keep vault approvals out of model context
+- preserve precomputed retry tail
+- preserve deferred wakes
+- surface deterministic trial resume errors
+- preempt post-delivery maintenance
+- bound hosted prefix repair retries
+- reject family-sponsored trial extensions
+- simplify assistant configuration approval
+- finalize Linq invite cleanup after drain
+- retry canonical email sync inline
+- complete trial extension metadata lifecycle
+- preserve hosted recovery input order
+- recover pending Family tier updates
+- make settings email sync canonical
+- reconcile hosted audit receipt replay
+- delete Retell calls before account removal
+- preserve accepted batching recovery boundaries
+- finish batching rebase adaptation
+- preserve web-owned batch authority
+- close batching recovery gaps
+- resolve batching review findings
+- restore rapid message batching
+- recover paused trial extensions
+- persist safe hosted runtime failure diagnostics
+- bind reactions to exact targets
+- attest affirmative reaction targets
+- clarify challenge participation safety
+- finish batching rebase adaptation
+- preserve web-owned batch authority
+- close batching recovery gaps
+- resolve batching review findings
+- restore rapid message batching
+- reduce group chat emoji use
+- improve challenge stakes and buy-in
+- serialize family capacity updates
+- keep family guidance within budget
+- harden mixed-tier family reconciliation
+- finish batching rebase adaptation
+- make group permission additions reaction-first
+- admit only reply-eligible fresh input
+- follow deterministic onboarding archive owner
+- preserve web-owned batch authority
+- close batching recovery gaps
+- resolve batching review findings
+- restore rapid message batching
+- preserve group offer contract
+- clarify group contact handoff
+- schedule exact mailbox continuation
+- isolate foreground replies from recovery state (#643)
+- preserve fenced completion tails
+- include hosted runtime protocol in audit bundles
+- defer snapshot cleanup after checkpoint
+- keep snapshot version as CAS guard
+- fence snapshot session mutations
+- bind runner private routes to active lease
+- account for runner bundle host variance
+- follow deterministic onboarding archive owner
+- keep family guidance within budget
+- harden mixed-tier family reconciliation
+- finish deterministic automation cleanup (#657)
+- ratchet current-main hosted budgets
+- keep late group input in its own turn
+- preserve wake args during mailbox import
+- interrupt checkpoint cleanup for foreground work
+- keep late hosted input on next turn
+- keep imported mailbox work scheduled
+- receipt late mailbox imports in runner (#641)
+- delete cron route reverification (#652)
+- say like this message in group offers
+- restore simple Telegram signup welcome (#649)
+- remove shared host admission deadline (#647)
+- align hosted runtime CI proof
+- remove cold reply latency (#635)
+- include hosted runtime protocol in audit bundles
+- defer snapshot cleanup after checkpoint
+- keep snapshot version as CAS guard
+- fence snapshot session mutations
+- bind runner private routes to active lease
+- preserve foreground priority before checkpoints
+- keep newsletter guidance within budget
+- preserve assistant context and gate delivery
+- reject unproven tail reconstruction
+- preserve accepted repair revisions
+- restore Next contract validation
+- bound Messages credential rotation
+- resolve batching review findings
+- restore rapid message batching
+- consolidate device repair proof
+- terminally close stale newsletter work
+- fail closed on conflicting repair proof
+- close device repair authority gaps
+- replan device repair from full history
+- bound device replay revision proof
+- prove durable device replay retention
+- unify device replay reconciliation
+- preserve shared device replay decisions
+- fail closed on unprovable device repair
+- harden device replay repair proof
+- make newsletter delivery durable
+- close companion recovery gaps
+- drain invalid companion payloads
+- reclaim retained companion leases
+- retain audited legacy route repair
+- fence Messages enrollment against deletion
+- skip unused billing read on usage notices
+- avoid drift checker pipefail false negative
+- terminalize invalid companion jobs
+- preserve companion recovery guards
+- keep participant context rollback-safe
+- fail closed on usage action lookup
+- restore rapid message batching
+- order usage notice replies by durable cursor
+- fail closed unsupported usage notice origins
+- resolve Telegram usage notice routes
+- resolve usage notice routes durably
+- inventory companion replay receipts
+- unify projected usage actions
+- finalize Messages rollback isolation
+- split dense replies by section
+- scope Messages bearer lookup hashes
+- keep system notes behind fresh messages
+- prioritize fresh foreground input
+- preserve Linq line attribution
+- simplify Linq route authority
+- bind newsletter delivery to coherent authority
+- isolate newsletter turns from native memory
+- keep newsletter prompt within cache budget
+- checkpoint assistant wakes on time
+- make meal photo staging ownership-safe
+- harden meal photo ingestion
+- recover past revoked Linq inputs
+- authorize replies at delivery boundary
+- verify Linq input from canonical mailbox
+- remove redundant Linq input authority
+- restore timely Linq replies
+- send absolute add-email links
+- preserve recovered reply priority
+- preserve live Codex rollouts during snapshots
+- keep group membership reads out of Codex history
+- authorize exact persisted Linq replies
+- preserve checkpoint liveness across wake nudges
+- preserve replies across route repair
+- reach hosted Codex HTTPS fallback
+- show usage as percentages
+- preserve hosted runtime failure log codes
+- derive Linq egress authority from live routes
+- restore legacy Linq route authority
+- redact delivery diagnostics before export
+- prove historical device repairs
+- retain route proof until repair
+- unify device replay decisions
+- close final PR 555 review findings
+- fence completed fallback resume
+- address group join review findings
+- close final PR 555 recovery gaps
+- preserve replay for shared event spines
+- map vault share node store
+- harden managed auth fallback boundary
+- preserve inactive response progress
+- shorten homepage phone demo
+- classify inactive device sync wakes
+- serialize managed auth reply boundary
+- make join confirmations contextual
+- bind stored ingest outputs to exact owners
+- expand Pulse Trial cohort through July 13
+- pace durable payload retries
+- preserve managed auth recovery checkpoint
+- revalidate usage reply provider authority
+- preserve bodyless email metadata
+- fence managed auth lifecycle effects
+- close compatibility gaps
+- preserve WHOOP replay timezone placement
+- classify group email response loss
+- fence usage replies at provider entry
+- separate durable delivery acceptance
+- retain route proof after foreground replies
+- recover confirmation handoffs
+- preserve WHOOP HRV admission identity
+- preserve durable group email fanout
+- preserve usage reply reclaim wake
+- enforce managed auth provider ownership
+- enforce device output ownership
+- acknowledge recovered preference work
+- bound deferred confirmation recovery
+- fence usage-denial provider dispatch
+- close WHOOP HRV retry gaps
+- preserve usage-denial delivery uncertainty
+- repair legacy routes before cron processing
+- harden preference rollout recovery
+- preserve deferred join confirmations
+- keep allowance off runtime admission
+- close usage notice audit findings
+- bind usage notices to authorized inputs
+- map clinical record entrypoints
+- close model-control audit findings
+- fence phone call reconciliation
+- refresh merged command artifacts
+- harden managed auth recovery
+- scope session recovery leases
+- close final audit reliability gaps
+- drain deferred pending input
+- verify migration evidence and bound reads
+- harden WHOOP HRV ingestion
+- separate vault authority from cached data
+- bind preference causality per provider
+- preserve replies when AI usage is denied
+- keep trial apply proofs and cleanup bounded
+- require physical device event owners
+- resolve final PR review findings
+- close final confirmation authority gaps
+- preserve phone call start authority
+- unify canonical result boundary
+- rearm deferred assistant input
+- restore durable group route authority
+- fence browser vault identity transitions
+- revalidate trial authority under lock
+- close phone call authority gaps
+- restore exact device output owners
+- close preference causal audit gaps
+- close Linq route authority gaps
+- unify cron route authority
+- preserve concurrent compaction results
+- preserve accepted companion HRV work
+- preserve Linq recovery authority
+- fail closed on incomplete group email fanout
+- preserve vault state across dashboard routes
+- preserve paused trial usage handoff
+- make managed auth handoff terminal writes atomic
+- preserve phone call status contract
+- honor device legacy reservations
+- close pulse trial cleanup races
+- keep phone call guidance bounded
+- harden phone call reconciliation
+- keep scoped prompt within budget
+- close remaining vault authority races
+- bound canonical text storage
+- preserve hosted email rollout boundaries
+- preserve moved device replay owners
+- preserve missing Codex startup errors
+- close preference causal gaps
+- lock Linq home route decisions
+- restore generated group share schema
+- preserve managed onboarding route materialization
+- revalidate warm vault across authority transitions
+- normalize legacy approval waits
+- fence companion disconnect authority
+- authenticate hosted email audience authority
+- preserve bounded direct prompt after merge
+- refresh reconciled generated surface
+- preserve reconciled generated surface
+- bind hosted authority to each operation
+- make trial loser cleanup retry safe
+- keep stale device evidence raw-only
+- arbitrate failures at turn boundary
+- keep reconciled acceptance gates stable
+- serialize home routing authority
+- gate warm vault on current member authority
+- preserve Linq dispatch isolation
+- refresh generated skill hash
+- retain Retell cleanup authority
+- keep Vercel proof in operator boundary
+- preserve device replay ownership per output
+- share canonical sleep duration
+- refresh CLI skill hash
+- centralize termination settlement ownership
+- align generated skill hash with main
+- preserve hosted conversation audience boundaries
+- keep proactive follow-through with its canonical owner
+- preserve onboarding prompt invariants after rebase
+- validate long inbox migrations
+- retire superseded approval cycles
+- preserve newsletter statistics in reader release
+- correct EX647 opposite-limb images (#591)
+- require established companion lanes
+- clear vault before session-ending mutations
+- preserve explicit routing authority
+- harden group container capability scope
+- refresh generated skill hash
+- bind trial extension to exact provider state
+- keep exit ownership across settlement paths
+- improve iOS phone auth inputs
+- preserve exact device replay state
+- bind vault cache to current dashboard auth
+- preserve hosted automation conversation authority
+- resolve hosted execution subpaths from source
+- preserve hosted route across tool continuations
+- preserve process exit precedence
+- request sleep duration for newsletters
+- clear absent causal sequence
+- harden exact device delivery replay
+- close group isolation audit gaps
+- enforce hosted conversation automation authority
+- preserve assistant preference causal order
+- preserve touched personality intent
+- preserve foreground replies at preference page limit
+- share actual sleep duration
+- share actual sleep duration
+- close pulse trial extension gaps
+- refresh vault command skill hash
+- keep Privy mobile modal clear of the home indicator
+- rebind vault after session authority changes
+- preserve approval delivery authority
+- preserve canonical capture evidence
+- close device ingest idempotency gaps
+- preserve group name in newsletter subjects
+- isolate routing by audience
+- close final reminder route findings
+- trim AI model settings copy (#584)
+- harden group audience capability boundaries
+- scope personal capabilities out of group chats
+- close trial extension review gaps
+- rewrite assistant model copy for Murph
+- preserve private join delivery
+- preserve companion disconnect state
+- finish group thread workspace isolation
+- close trial campaign recovery gaps
+- expose parser result owner facade
+- fence group thread workspace transitions
+- keep parser result reads off boot path
+- stabilize trial campaign cohort
+- bind trial apply to preview proof
+- harden hosted production session cutover
+- ship assistant CLI surface artifact
+- resolve cost reduction review findings
+- stack coming-soon connect cards on phone widths (#577)
+- fit "just you and Murph" cards on small phones (#576)
+- handle uncreated group state
+- fence phone-call deletion authority
+- preserve snapshot archive boundaries
+- enforce launch authority boundaries
+- preserve phone call start authority
+- resolve plan usage from source in web builds
+- enforce snapshot restore ownership
+- protect strict session cutover
+- retry lost call analysis authority
+- harden snapshot owner parsing
+- narrow app-session key flow
+- close private-content audit gaps
+- isolate app-session signer environment
+- close private-content rollout gaps
+- keep private-content migration expand-only
+- bind deferred join authority
+- close style tool authority gaps
+- defer join confirmations until activation
+- bind style settings to private turns
+- close reminder route review findings
+- simplify Codex lifecycle handoff
+- show intended homepage headline
+- gate private style controls by audience
+- keep plan usage guidance within prompt budget
+- keep private style dials out of groups
+- preserve exact approval continuations
+- bind vault approvals to delivery targets
+- isolate approval outcome completion
+- close approval outcome review gaps
+- gate approval wake activation
+- keep approval continuation reachable
+- persist approval-gated vault file effects
+- clarify assistant style prompt outcomes
+- observe approval outcomes without reopening denial
+- keep approval handoff optional after decision
+- decouple shared testkit from generated Prisma types
+- halve product note cadence
+- recycle pointerless aborted runners (#540)
+- reconcile clinical snapshot freshness
+- prefer signed-in marketplace for retail (#536)
+- harden clinical record intake
+- harden reply path against observability and maintenance stalls (#534)
+- reconcile ambiguous receipt checkpoints (#532)
+- make legacy route migration resumable and cover concrete-locator snapshots
+- complete source revision protocol
+- eliminate synthetic shutdown resnapshot
+- close Pulse trial extension edge cases
+- harden paused Pulse conversion rollout
+- close Pulse trial extension races
+- harden one-time Pulse trial extension
+- close companion diagnostics review findings
+- make device replay storage idempotent
+- remove edge model rollback coupling
+- harden companion auth diagnostics
+- tighten companion diagnostics WAF proof
+- prove companion auth diagnostics safeguards
+- gate companion auth diagnostic prose
+- redact auth diagnostic credentials
+- preserve model fallback diagnostics
+- wait for connected approval wallet (#507)
+- log assistant model preference fallback
+- harden intake trust boundaries
+- fail closed on incomplete clinical evidence
+- relax style settings prompt (#505)
+- enforce manifest completeness
+- close clinical intake gaps
+- preserve usage notice markers for rollout (#495)
+- classify laboratory observations first
+- enforce clinical intake boundaries
+- improve expired approval recovery
+- reject mixed vital panels
+- improve expired approval recovery
+- collapse vital panel candidates
+- reject clinical vault symlinks
+- tighten Retell opening prompt
+- reject ambiguous clinical concepts
+- keep foreground cron reconciliation off delivery path
+- reject ambiguous allergy statuses
+- block unsafe no-known allergy assertions
+- defer snapshot cleanup after upload-session retirement (#488)
+- preserve foreground automation cron wakes
+- gate settings auth buttons
+- require client auth before email linking
+- block allergy assertions on incomplete evidence
+- send Linq messages without reply anchors
+- reject malformed fhir note attachments
+- wait for approval wallet readiness
+- fail closed on ambiguous clinical FHIR evidence
+- derive lab status from emitted results
+- prevent parent normal lab status override
+- fail closed on partial lab component status
+- source-map clinical records for hosted web
+- tune reply bubble prompt
+- harden contract migration dispatch
+- make latency trace creation idempotent
+- raise OpenAI image timeout
+- preserve clinical lab interpretation semantics
+- reduce vault file send status copy
+- simplify connect disconnect copy
+- fail closed lossy clinical FHIR labels
+- keep clinical FHIR candidates lossless
+- resolve clinical records package in web build
+- fail closed ambiguous clinical FHIR imports
+- keep unsupported clinical FHIR resources visible
+- bound clinical FHIR import planning
+- require trusted clinical FHIR coding systems
+- deliver vault-file attachments over Linq and surface terminal send failures (#451)
+- avoid unsafe clinical note and allergy imports
+- enforce clinical FHIR raw import safety
+- fail closed unsafe clinical FHIR imports
+- harden clinical FHIR import identity
+- escape changelog apostrophes for lint (#448)
+- compose group join offers with templates
+- remove group join reaction replies
+- vary family invite accepted notifications
+- user messages preempt background automation + import timing spans (#431)
+- keep iMessage typing alive until the queued reply actually sends (#421)
+- require an established direct route before spending the once-ever email nudge (#438)
+- retry unverified device-connect completion once + log silent anonymous page-auth downgrade (#430)
+- make Linq inbound engagement stamp an invariant (#429)
+- steer Murph contact refresh to delete-then-save-fresh (#433)
+- keep nav text/logo visible over dark heroes
+- Linq egress guard denies only on affirmative staleness
+- precise retry reasons for fence preserve and budget exhaustion
+- await invocation before workspace teardown in collapse-2b test (#414)
+- allowlist legacy contact-card share POST for warm bundles, gate settings row on Murph text line
+- scope assistant stub responses to their triggering input (#407)
+- count device-observed sessions toward experiment adherence (#399)
+- accept phone invites via Messages, gate Telegram to bound invites (#401)
+- harden boot-guard markers + distinct conversation module-load failure reason (#406)
+- truthful cron telemetry and de-mislabeled egress errors (#394)
+- fix Device Sync next-start regression + chmod TOCTOU flake (#396)
+- suppress summaries for stale backfilled device activity (#391)
+- rebind session on conversation-key audience drift (#388)
+- classify linq group delivery receipts
+- rancher avatar eyes back on model
+- deep-review fixes for contact-card route auth, pending line, and inline vCard
+- pin contact-picker drawer actions and raise drawer height
+- humanize progress updates, drop spacing gate, raise cap to 3
+- deliver progress updates in queue-only hosted auto-replies (#372)
+- stop forcing responses-lite on the nano deploy smoke catalog entry
+- asks-section bubble overlap on mobile and authenticated CTA arrow
+- animate the hero phone demo on mobile again
+- move mobile hero CTA below the phone mock
+- drop multi_agent_v2 CLI override that shadowed hosted config
+- tighten homepage hero layout on mobile
+- let the shell env allowlist own hosted codex exec secrets
+- prefer signed-in retailer in computer-use storefront choice
+- keep Codex default root-agent hint when adding delegation authorization
+- authorize skill-directed Codex sub-agent delegation
+- add account deletion handoff route
+- wake runtime after call analysis
+- wire retell local webhook override
+- allow phone calls from inbound chat turns
+- keep family accounts on dashboard
+- restore linq typing fallback for hot replies
+- allow paid members to start Family billing
+- accept linq-hosted contact card images
+- correlate runtime Linq deliveries to lines
+- keep assistant admission refresh authoritative
+- include changed files in review package
+- refresh after device context prompt
+- merge device sync status sources
+- bound device sync snapshot sources
+- verify Linq webhook secret on worktrees
+- remove headshot hydration bootstrap
+- loosen Murph headshot crops
+- reuse pulse mark for join phone loading
+- order Linq provider event progress
+- verify Linq webhook secret despite cache
+- restore Linq participant automation routes
+- fail invite Linq delivery claims before retry
+- add Linq egress guard latency diagnostics
+- commit admission decisions with budget claims
+- claim first-contact budget before classifier
+- fence engagement and mark signup after send
+- preserve current mailbox reply egress
+- make provider progress monotonic
+- authorize participant followups by line
+- scope signup welcome first contact
+- collapse runtime egress authority
+- tighten egress and line privacy
+- allow worktree browser origins
+- guard Linq typing egress authority
+- isolate worktree public origins
+- keep line-stale delivery failure alerts
+- bind Linq signup welcome first contact
+- restore linq typing indicators
+- dedup hosted Linq home-redirect notices per wrong chat + home line (#325)
+- keep Family seat reconciliation single-owner
+- allow Family-sponsored connected app access
+- harden Family billing review edges
+- require paid Family seats before invites
+- require Family source for sponsored usage
+- align family invite sign-in copy
+- allow email-bound family invite acceptance
+- align family allowance and seat invariants
+- honor family access across hosted gates
+- address family plan review edge cases
+- close family invite membership edge cases
+- verify WhatsApp family invite phone binding
+- stop hosted runtime before account deletion
+- keep phone-bound family invites off telegram links
+- route family invite WhatsApp confirmations
+- harden hosted family plan review fixes
+
+### Changed
+- allow release tarball audit runtime
+- remove rollout compatibility (#704)
+- remove recovered input preselection (#706)
+- remove Linq current-inbound compatibility (#711)
+- remove protocol index preload (#714)
+- Remove redundant GPT rollout preflight (#694)
+- remove Junction resource override (#722)
+- Record Linq message.sent provider evidence (#721)
+- Complete exercise image inventory
+- seed recovery context before artifacts (#720)
+- Pace Linq reply bubbles (#713)
+- Trim onboarding identity question
+- Naturalize onboarding identity question
+- Fix experiment card biomarker sentiment (#699)
+- refine assistant personality prompts
+- cover preference receipt cold recovery
+- Fix Cloudflare deploy smoke version race (#691)
+- delete proven duplicate code (#689)
+- Collapse lookup ID families into contracts (#692)
+- Collapse Vitest aliases onto root paths (#693)
+- reuse canonical runtime config (#690)
+- Shorten homepage auth copy
+- define the assistant ask primitive
+- Update homepage auth copy
+- Preserve foreground reply authority during receipt recovery (#677)
+- specify private group consultations
+- Remove legacy assistant configuration approvals
+- align automation replacement discovery
+- centralize automation command guidance
+- align assistant automation guidance
+- reconcile runner bundle ratchet
+- fix hosted automation vault authority
+- accept hosted checkpoint cleanup boundaries
+- Fence stale hosted group membership saves
+- expect exact vault approval capability
+- pin Linq cleanup rollback floor
+- Allow members to leave hosted groups
+- publish July 14 and 15 updates
+- Bound hosted device-sync apply fan-out
+- fix Family usage projection fallback
+- Delete Linq invite delivery identifiers on account removal
+- Route conversational billing management to Settings
+- ratchet reviewed runner bundle
+- include same-wake hosted scenario
+- close same-wake batching verification
+- preserve group actor batching boundary
+- close disclosure-only verification loop
+- start fifth exercise image batch
+- add safe trial extension Stripe diagnostics
+- preserve trial extension retry identity
+- include same-wake hosted scenario
+- close same-wake batching verification
+- preserve group actor batching boundary
+- close disclosure-only verification loop
+- preserve verified tree across review lineage merge
+- close hosted checkpoint foreground preemption
+- replace campaign trial extension flow
+- close disclosure-only verification loop
+- Fix Junction historical coverage (#654)
+- Improve new-member group join handoff
+- Tighten proactive Linq route authority (#637)
+- Keep the latest ten group reactions as context (#651)
+- resolve web-control merge syntax
+- Clinical Records: add SMART producer control plane (#642)
+- Add hosted conversation personalization controls (#550)
+- lock current runner bundle ratchet
+- assert coalesced active-turn delivery
+- fix exact active-turn group input ordering
+- Remove WhatsApp support (#650)
+- update fourth exercise image batch progress
+- checkpoint fourth exercise image batch
+- resolve web-control merge syntax
+- Clean up inactive legacy Family subscriptions exactly (#645)
+- Simplify deferred Linq group reaction context (#644)
+- record hosted CI remediation
+- coordinate TypeScript verification budgets
+- simplify completion audits
+- fix exact active-turn group input ordering
+- prevent ReviewGPT complexity ratchets
+- Fix hosted checkpoint foreground preemption
+- Update pr-deep-review.md
+- cap ReviewGPT rounds at five
+- record hosted reply-liveness recommendations
+- Apply failed notification resume state
+- decouple repo source analysis
+- Fix newsletter occurrence manifest retries
+- Confirm Codex resume identity before persistence
+- track PR 547 credential rotation
+- Remove flaky hosted retry clock assertion
+- pin device repair rejection paths
+- Delete Codex fresh-thread replay fallback
+- Fence provider-action fallback replay
+- prove terminal companion ack boundary
+- restore hosted write rollback import
+- close narrow Linq participant-context plan
+- isolate usage notice billing failure mock
+- allow pinned repo-tools patch
+- Fence accepted no-reply fallback replay
+- normalize drift checker patch
+- close PR 559 recovery audit
+- consume ReviewGPT focus release
+- upgrade workspace compiler to 7
+- Add secret-safe Linq upstream diagnostics
+- use balanced ReviewGPT browser scheduling
+- Preserve accepted no-reply recovery
+- keep one mailbox sidecar reader
+- delete retired route authority machinery
+- harden durable usage notice route proof
+- fix hosted thread usage crossing notices
+- Remove Codex history unsafe resets
+- cover legacy Messages hash fail-closed
+- carry newsletter proof through ingress coverage
+- disable Vercel PR preview deployments
+- preserve newsletter opt-in literals
+- ratchet newsletter runner bundle
+- secure generic group newsletter data
+- align maintenance fixture with Linq authority
+- keep authority at delivery boundary
+- preserve device sync retry across assistant rerun
+- cover yielded retry after foreground rerun
+- stabilize yielded retry shutdown
+- restore prompt review routing rule
+- complete PR 570 percentage follow-up
+- align release audit with workflow wording
+- align proportional review gate
+- close iMessage credential proof gaps
+- clarify Messages credential revocation
+- default PR review to radical simplicity
+- track PR 570 percentage follow-up
+- keep deleted pulse trial script removed
+- resolve PR 542 merge conflicts
+- complete WHOOP HRV conflict recovery
+- register PR 547 reconciliation
+- Make ReviewGPT a proportional risk gate
+- Allow changelog cards to shrink on mobile
+- Fix changelog mobile overflow
+- Update public changelog with seven-day visual archive
+- prove bounded route repair
+- calibrate deploy skew findings
+- assert abortable Temporal handoffs
+- await restored cleanup pass
+- await natural idle checkpoint
+- stop cleanup runs until quiescent
+- remove stale route-proof flag note
+- track PR 559 conflict resolution
+- speed up onboarding follow-up E2E gate
+- close PR 528 conflict resolution
+- simplify invite sidebar messaging
+- generalize group weekly data reads
+- close group join confirmation UX
+- exempt prompt PRs from ReviewGPT
+- ratchet reviewed runner bundle baselines
+- raise ReviewGPT round cap to 15
+- Match FAQ and security-teaser headers to canonical section scale
+- refresh runner bundle baselines
+- Align agent workflows with GPT-5.6 guidance
+- Close PR 586 conflict resolution plan
+- keep cleanup query probe lint-clean
+- track PR 586 conflict resolution
+- type cleanup lock query probe
+- prefer composable primitives
+- preserve ReviewGPT evidence across base-only updates
+- narrow Linq routing fixture
+- align usage-limit e2e with advisory gate
+- Add dynamic hosted model controls
+- refresh merged CLI artifacts
+- fix assistant Codex exit group cleanup
+- cover large legacy compaction
+- correct phone call cleanup state
+- allow deferred local-day onboarding wake
+- model Linq provider claim in fallback
+- Fix hosted reminder route recovery
+- align Linq authority expectations
+- cover onboarding route directness
+- attach ready-PR checks
+- retrigger PR checks
+- Harden Managed Auth fallback arbitration
+- refresh generated skill hash
+- Fix Managed Auth handoff recovery
+- cover hosted route grant projection
+- refresh generated skill hash
+- simplify the signup welcome
+- declare safe Retell storage fixtures
+- Adopt ReviewGPT 0.5.106
+- refresh built skill hash
+- follow canonical onboarding automation prompt
+- remove speculative restore validation
+- close value-first onboarding plan
+- leave homepage unchanged
+- fix durable reminder route repair proof
+- stage sleep duration reader first
+- satisfy provider children contract
+- run ReviewGPT in parallel with CI (#590)
+- advance vault-share rollback floor
+- Add instructional images for 250 exercises and stretches (#561)
+- type causal mailbox fixture
+- benchmark encrypted warning boundary
+- refresh generated skill hash
+- fix preference retry causal ordering
+- Audit supplement data and harden search (#565)
+- cover unverified Stripe email newsletter nudge
+- refresh generated skill hash
+- benchmark snapshot restore boundary
+- expect forced app-server cleanup
+- seed Linq participant authority
+- Speed up browser vault dashboard navigation
+- reduce Vault CLI startup imports (#575)
+- deterministic viewport-overflow gate for marketing pages (#578)
+- Ground supplement advice in saved health context (#538)
+- remove redundant completion wait
+- Align hosted model ownership documentation
+- close PR 548 lifecycle fixes
+- checkpoint group isolation follow-up
+- benchmark snapshot validation
+- retire merged task worktrees safely (#525)
+- Default group chat containers to GPT-5.6 Sol
+- use published ReviewGPT 0.5.104 (#580)
+- Consolidate vault storage ownership
+- Fix ReviewGPT managed-target memory leak (#557)
+- cover production cutover boundaries
+- remove no-op CLI surface fingerprint
+- prepare OpenClaw pack fixture
+- Reduce assistant context and tool-loop cost
+- validate snapshots before restore
+- close app-session integrity plan
+- bind app sessions to server HMAC
+- complete private-content security coverage
+- encrypt phone-call private content
+- preserve Junction labs research proposal
+- increase homepage hero type scale
+- establish approval wake rollback floor
+- Keep group join confirmations on coherent Linq routes
+- cover approval wake rollout drain
+- drain legacy approvals before wake rollout
+- Reword homepage tagline to "Nobody does it alone."
+- gate recurring hosted regressions (#556)
+- Soften homepage tagline to "Almost no one gets there alone."
+- Send private group join confirmations
+- type approval rollout transaction
+- type mailbox wake fixture fields
+- Preserve ambiguous checkpoint response failures (#533)
+- Restore typing after Linq progress updates (#537)
+- add Fable ↔ Sol model complementarity routing guidance (#552)
+- Add conversational Humor, Push, and Detail dials (#529)
+- Ingest WHOOP recovery and strain from HealthKit (#502)
+- speed up hosted e2e (#551)
+- Fix Junction historical evidence integrity (#545)
+- Fix Kernel handoff recovery and viewport ownership (#544)
+- Make hosted E2E production-path waiters passive (#541)
+- Attribute Codex app-server cold starts
+- Trace hosted reply latency end to end (#497)
+- Finish ops Pulse Trial extension workflow
+- Add ops-page Pulse Trial extension tool
+- ratchet runner boot closure budget
+- Remove hosted inbox history rebuild from foreground path (#496)
+- Add personal Murph group awareness
+- Keep Codex commentary out of member messages (#508)
+- Add conversation-first product control invariant
+- Enable Kernel kiosk live view
+- Fix Junction historical sync recovery (#516)
+- Fix group chat onboarding routing (#522)
+- Deduplicate cold inbox rebuild and retain abort ownership (#494)
+- ratchet runner bundle baseline
+- Repair legacy experiment media into canonical captures (#524)
+- pin GPT-5.6 Sol delegation
+- Make assistant tone preferences strict
+- remove dead compatibility surfaces (#530)
+- retire proven hosted deploy skew (#531)
+- Align homepage and product copy with the tagline thesis
+- Replace OG goal pills with a channel icon row
+- Balance the OG card's left column
+- Strengthen OG supporting line and add dot-grid texture
+- Draw the OG card chat as the homepage phone mock
+- Quiet the default OG card
+- Redraw default OG card with real logo and group-chat panel
+- Refresh site tagline, metadata, and default OG image
+- Add integration ingest archive support (#475)
+- Reduce hosted reply hot-path latency (#519)
+- fix hosted reminder route repair
+- update ReviewGPT PR review contract
+- Remove verified vestigial repository artifacts
+- adopt ReviewGPT 0.5.102
+- stabilize assistant coverage heap
+- stabilize acceptance timing
+- remove obsolete ReviewGPT round plans
+- Fence disconnects by connection generation
+- Fix ReviewGPT connection lifecycle findings
+- Fix device-sync retry state races
+- clarify ReviewGPT round artifacts
+- merge main into edge model choice
+- remove completed ReviewGPT round plans
+- Fix durable usage-limit notices (#465)
+- Rewrite baseline invariants around simplicity and fast replies (#518)
+- Keep the voice grid the dialog's only scroller on short viewports
+- Default Murph to upbeat voice
+- preserve Privy auth error codes and tighten WAF proof
+- Harden companion auth diagnostics
+- Redact Privy user identifiers
+- Add companion auth diagnostics
+- Freeze picker selection during saves and keep the design showcase non-persisting
+- Optimize hosted reply startup latency (#510)
+- define edge model deploy skew
+- Let the successful voice save own the chat handoff and block mid-save dismissal
+- Fix product notes for connected wearable users (#506)
+- remove immediate deploy artifact handoff (#509)
+- use GPT-5.6 Sol (#514)
+- Upgrade group-challenge skill with comic-strip playbook from family challenge (#503)
+- Add Customize-your-Murph settings section and redesign the assistant style picker
+- speed up local verification
+- Compress GPT-5.6 assistant prompt (#504)
+- Retain ambiguous Telegram usage-notice claims (#501)
+- Route frontend implementation to Fable via Claude Code CLI (#500)
+- Compress GPT-5.6 assistant prompt
+- Prepare GPT-5.6 Terra rollout (#493)
+- Refresh assistant and audit prompts for GPT-5.6
+- Upgrade hosted Codex CLI to 0.144 (#492)
+- Fix runner smoke list proofs
+- Add health topic assistant skills (#490)
+- cover Linq scheduled runner regression
+- Habitat life-context: spec, foundation, assistant behavior, and environment page mock (#357)
+- fix hosted system mailbox wake after import-only checkpoint (#491)
+- Disable personal managed automations for group chats
+- Improve Retell phone call opening
+- Let members choose Murph's tone and voice during onboarding (#485)
+- Keep Junction compact daily vitals enabled (#489)
+- Make Murph proactively offer its latent capabilities (#487)
+- Add hosted shutdown checkpoint observability (#450)
+- Simplify hosted runner alarm ownership (#486)
+- publish July 8 edition, backfill July 7
+- bump review-gpt to 0.5.98
+- Persist generated images as vault captures (#477)
+- Preserve Health Commons package root in hosted Codex env (#484)
+- Fix Linq scheduled delivery retries and stale home routes (#476)
+- Raise the send bar on managed weekly digest and research scout (#482)
+- Fix Linq usage notice selection
+- Inline health-commons into runner bundles via env-pinned package root (#483)
+- Ground personal health recommendations in user context before advising (#480)
+- Move display name storage into memory (#478)
+- Add weekly improvement coach managed automation (#481)
+- Preserve Linq usage-gated inputs
+- Fit generated-song lyrics to the requested duration (#479)
+- make auth button support stronger gates
+- Add selector challenge projection scopes (#459)
+- bump review-gpt to 0.5.97
+- Harden ReviewGPT lane selection
+- Polish group join consent gate
+- Fix group join legal consent gate
+- Route ReviewGPT across browser lanes
+- Bound CLI list output defaults (#474)
+- Shorten group join screen copy
+- Fix device activity cron skip retries
+- Prepare future GPT hosted runtime models (#469)
+- Fix Junction sleep zero selection (#471)
+- Fix hosted generated-image usage pricing (#473)
+- Add integration ingest archive reads
+- Compact automation output and add hosted latency trace split (#470)
+- cover clinical records contracts
+- Fix hosted Linq typing context
+- Fix Vercel alias SHA proof for contract migrations (#464)
+- Remove hosted foreground mailbox cap (#453)
+- Show Apple Health on device connect page (#449)
+- Add group newsletter missing-email nudges on join (#454)
+- Fix hosted Codex auth guard request count (#468)
+- Update Temporal SDK advisory dependencies (#467)
+- Enable Linq group chat title rename (#460)
+- Update Codex CLI to 0.143.0 (#463)
+- Add hosted web contract migration smoke (#462)
+- flag suspiciously fast ReviewGPT rounds as bugged/downgraded (#461)
+- Split hosted web contract migrations (#456)
+- Newsletter setup flow, disclosed react-join scope, plain share copy, 7-day window (#455)
+- Add hosted group chat avatar tool (#457)
+- Add challenge Vault Share projections (#445)
+- Add clinical records intake foundation
+- Add hosted group rename tool (#452)
+- Add Codex stream observability
+- fix web passkey settings auth state
+- Retry Codex stream failures after provider actions
+- Simplify hosted Linq egress guard (#446)
+- Enable hosted Codex stream retries
+- Add hosted shutdown checkpoint observability
+- Route PR completion review through ReviewGPT
+- publish July 7 edition
+- Simplify hosted Linq egress guard
+- Reduce hosted reply delivery tail latency
+- add goals-and-motivation preamble to CLAUDE.md
+- raise auto compaction threshold
+- pin codex cli stable
+- Reduce hosted Codex stream idle stalls (#442)
+- require deterministic multi-recipient sends to use the seeded variant bank (#443)
+- Alternate changelog and feature-discovery product notes with an evergreen feature catalog (#436)
+- Simplify the family invite dialog: name first, one contact input, less copy (#439)
+- Simplify family privacy copy and add seeded welcome variants (#428)
+- cap the verify-lane next build at a Vercel Standard-machine memory budget (#409)
+- fold Murph contact customize into Phone row, trim family seat copy, opaque secondary hover (#434)
+- expect onDarkSurface on the SecurityPage dark-hero nav (#435)
+- single source of truth for the prod-web-start gate
+- ratchet the static boot closure + fix guard traversal blind spot (#424)
+- unwire Murph Age from the runner bundle via barrel narrowing (#418)
+- notify the active turn as soon as a conversation input is staged
+- ack direct ensure before runtime wake + widen keep-alive window (#417)
+- Isolate foreground conversation mailbox imports
+- publish July 1-6 editions (#415)
+- Fix foreground mailbox budget starvation
+- defer device-sync maintenance off the cold boot path (#411)
+- fix codex exec stdin redirect in PR deep-review loop (#403)
+- collapse hosted Linq thread routing + egress authority onto the stable chat id (#393)
+- boot probe also evaluates lazy bundle chunks (#405)
+- instrument + cut the web->Cloudflare direct-wake control hop (#404)
+- group container membership roster + any-active-member access (#398)
+- ratchet entry-chunk bundle budget to its measured baseline (#402)
+- defer conversation connectors off the cold boot path (#397)
+- land changes from a new worktree, keep root checkout on main
+- retire ReviewGPT for completion review, route deep-review + audits through Codex
+- serve web from a production build to fix codex CPU starvation (#387)
+- add User Reply Primacy invariant
+- rewrite baseline invariants as principle-first rulebook
+- cover linq group receipt audit gaps
+- idle-linger wake/checkpoint via pendingWake model (#380)
+- retire reconciliation-before-mailbox patch via deprecatePatch (step 2) (#385)
+- collapse webhook wake fields to a single handoff shape (#384)
+- durable delivery-time consume (consumed_at) + direct Linq wake (#383)
+- Derive Junction historical backfill work from connection metadata (#379)
+- [codex] Expand vault-share challenge projections (#382)
+- Mask unsafe spans in diagnostic text instead of dropping the whole string (#376)
+- Revert "fix(web): rancher avatar eyes back on model"
+- Fable supervises, Codex (xhigh) implements
+- Resolve replayed OAuth callback deliveries instead of failing them (#378)
+- Unify hosted member access on one resolver; fix family-blind group-chat gates (#375)
+- Supersede the canned signup welcome once conversation has started (#377)
+- Rewrite user-facing web copy in plain language
+- Restructure the mailbox-wake collapse plan into two PRs
+- Harden the mailbox-wake collapse plan from adversarial review
+- mailbox wake latency + complexity collapse series
+- route all Claude-parent completion audits through Codex CLI
+- Clarify family invite sharing
+- Collapse duplicate crypto unwraps and no-op rebinds on the webhook hot path (#371)
+- clear completed codex-bump and progress-delivery ledger rows
+- update hosted e2e contracts for delivered progress updates
+- Record per-operation DB timings for hosted webhook plan transactions (#370)
+- Group chats: typed profile-name projection + member roster on murph.group read_current (#369)
+- bump Codex to 0.143.0-alpha.35
+- Add DB-backed hosted Linq home lines (#349)
+- bump Codex to 0.143.0-alpha.34
+- Trim hosted webhook pre-signal reads via planner lane facts (#362)
+- Family plan: merge seat management into Invite, fix stale count, add seat removal (#359)
+- Group chats: murph.group contact-card share + participant membership read (#367)
+- Skip ambiguous Junction optional-resource 422s instead of failing sync jobs (#366)
+- Disable login shells for hosted codex execs (vault-cli PATH fix) (#365)
+- Auto-provision Linq group thread containers from member group messages (#363)
+- Short-circuit hosted wake probe on verifiably stopped container shells (#364)
+- clear PR 350 coordination ledger row
+- Simplify Codex subagent routing (#350)
+- [codex] fix hosted provider cleanup wake timing (#348)
+- Add hosted overnight memory consolidation (#355)
+- Remove onboarding-invites, onboarding-activation, and pulse-trial-reset ops tools (#361)
+- Add murph.group create_join_link and bind group joins to runtime authority (#360)
+- Narrow Junction direct sleep_cycle provider load to source-referenced records (#358)
+- add app review member ops route
+- Add hosted groups join flow (#356)
+- Fix Junction sleep-cycle compact import
+- Land weekly health research scout insight patch
+- consume released review-gpt staging fix
+- patch review-gpt attachment staging
+- Fix hosted cron foreground preemption (#354)
+- clarify Retell live transfer prompts
+- [codex] Recover committed runtime fences after ambiguous wake (#344)
+- Reduce hosted web build memory (#345)
+- Fix Linq webhook subscription convergence
+- Narrow Family billing period fix
+- Harden Family repair reconciliation
+- Log Family billing repair failures
+- Repair existing Family billing periods
+- Scope red light seed irradiance modes
+- Fix Family billing period fallback
+- Add red light device seed coverage
+- Update pr-deep-review.md
+- Add red light therapy guidance and PBM sources
+- prove pending linq typing fallback e2e
+- publish 2026-06-30 edition and expand 2026-06-29
+- Add hosted Codex lifecycle diagnostics
+- Always delegate onboarding lab ingestion to a V2 child
+- Always delegate onboarding supplement saves to a V2 child
+- Normalize Pulse Trial reset timestamps
+- legal dates
+- Redesign trust pillars and strip Murph mark chrome on homepage
+- Restructure homepage asks-section into editorial spread
+- Reset Pulse Trial usage periods from ops
+- shorten scheduled reminder e2e waits
+- Show consent skeleton instead of pulse loader on join verify
+- Add Pulse Trial reset ops page
+- Make Pulse Trial ten days
+- Allow generic feature-interest feedback
+- Fix Family assistant test fixture
+- align privacy policy legal index version
+- Merge main into hosted Family plan
+- [codex] Add hosted ops onboarding invite sender (#342)
+- mock homepage request headers
+- centralize dynamic context admission
+- simplify device context admission
+- collapse device sync context boundary
+- lazy-build device sync context
+- Keep device context cancellation off assistant pass
+- use shared completion wait for Linq reminder E2E
+- Defer refresh-ingested input before device context
+- Rerun foreground input without device context
+- Validate device reconnect command targets
+- Fix hosted snapshot write fence version drift
+- Defer foreground input before dynamic context delivery
+- simplify integrations logo
+- Simplify dynamic device context foreground handling
+- remove homepage experiment footers
+- tighten homepage copy
+- minor ui
+- tune weekly managed automations
+- Harden dynamic device context foreground boundary
+- Fix consumed Linq reminder wake replay
+- Keep active-turn input visible in device context lanes
+- migrate webhook middleware to proxy
+- Restore Linq read receipts for active-member inbound
+- Keep dynamic device context on background lanes
+- fix hosted-local Linq webhook secret bootstrap
+- Bound device sync context prompt latency
+- cover codex v2 subagent usage tracking
+- Use fresh subagent threads for onboarding saves
+- Abort device sync context on foreground preemption
+- Teach onboarding to delegate slow saves
+- Keep device sync context off preempted foreground paths
+- use hosted completion timeout for linq reminders
+- Bound device sync context snapshot reads
+- Enable hosted Codex MultiAgent V2 by default
+- show region-aware messenger logo on hero CTA
+- Keep device sync context off foreground turns
+- [codex] Add automation assistant target overrides (#339)
+- Support Telegram hosted ingress latency traces
+- Support Telegram hosted ingress latency traces
+- delay first hero floater 3s before firing
+- Add hosted device sync dynamic context
+- new hero homepage
+- [codex] defer hosted usage recording (#335)
+- Preserve Linq rejected-message migration history
+- Add ReviewGPT large PR diff fallback
+- Gate Linq signup provider dispatch
+- Fix Linq signup idempotency identity
+- Fix Linq review round 35 findings
+- Fix consumed Linq scheduled reminder wake
+- Fix computer handoff focus selector after main merge
+- Fix computer_open handoff reclaim
+- Fix hosted cron delivery wake completion
+- Fix computer handoff focus test selector
+- Fix hosted Linq delivery observability
+- reuse shared linq tunnel config for worktrees
+- fix hosted worktree linq tunnel defaults
+- seed inbound proof for synthetic chat
+- Close PR 337 stack plan
+- Simplify PR 337 Linq authority path
+- Simplify Linq contact-card rotation throttle
+- Address PR 337 round 12 finding
+- Address PR 337 round 11 findings
+- Restore hosted Linq typing indicators
+- Address PR 337 round 9 findings
+- Address PR 337 round 8 findings
+- Address PR 337 round 7 findings
+- Address PR 337 round 6 findings
+- Address PR 337 round 5 findings
+- Address PR 337 round 4 findings
+- keep review fixes architecturally simple
+- preserve product-critical flows in reviews
+- Address PR 337 round 3 findings
+- Address PR 337 contact card review findings
+- Add Linq contact card sharing after first outbound
+- Harden hosted Linq provider egress
+- Fix Linq egress freshness guard
+- update hosted migration guard
+- bump linqFirstContactAdmissionModel default to gpt-5.5
+- Restore Linq participant delivery for signup welcome
+- Reject bare ISO timestamps without time zone in webhook parser
+- Allow first contact in Linq egress guard
+- Reopen skipped Linq deliveries on retry
+- Require authority for Linq read receipts
+- Preserve Linq usage-limit notice authority
+- Preserve Linq delivery contexts per message
+- Harden Linq skipped delivery idempotency
+- Bind Linq webhook egress authority to target
+- Disable ambient Linq typing fallback
+- Tighten Linq egress authority guards
+- Stabilize Linq observability dedupe ids
+- Fix Linq same-wake routing authority
+- Scope Linq freshness to route rewrites
+- Harden Linq observability identity storage
+- Harden Linq freshness and delivery retries
+- Validate Linq route authority before side effects
+- Suppress no-chat Linq welcome routes
+- Harden Linq callback ordering
+- Fail closed for legacy Linq egress freshness
+- Use Murph headshot for Linq contact cards
+- Bind Linq egress authorization to provider target
+- Fix Linq egress guard migration review findings
+- Allow Family web accept retries
+- Handle Telegram family invite misses
+- Preflight Telegram family invite username
+- Handle WhatsApp family invite misses
+- Fix Family plan test mock typing
+- Fix Linq family invite retry handling
+- Handle Linq family invite acceptance
+- Fix Linq review round 13 findings
+- Fix Linq review round 12 findings
+- Fix Linq review round 11 findings
+- Fix Linq egress guard fixture freshness
+- Fix Linq conversation projection ordering
+- Fix Linq round 9 review findings
+- Fix Linq round 8 review findings
+- Fix Linq observability review findings
+- Add hosted Linq conversation state
+- Tighten Linq runtime egress recovery
+- Bound Linq contact card reconciliation
+- Decouple Linq inbound observability
+- Guard Linq delivery receipt ordering
+- Fix Linq observability review findings
+- Fix Linq status projection
+- Add Linq contact card cron
+- Guard Linq alert email claims
+- Add Linq 28-day egress guard
+- Add hosted Linq observability primitives
+- Fix Family seat reconciliation and email invites
+- Fix Family owner invite billing routes
+- Harden family checkout authority
+- Harden family seat authority
+- Refactor Family billing to reserved seats
+- Keep runner diagnostics metadata-only
+- close PR 222 conflict plan
+- Add hosted family plan management
+- route family plan chat questions
+- fix hosted privy billing status import
+- Implement hosted Family plan MVP
+
 ## [1.2.0] - 2026-06-29
 
 ### Added

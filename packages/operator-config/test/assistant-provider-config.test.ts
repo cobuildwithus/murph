@@ -13,6 +13,38 @@ import {
 } from '../src/assistant/target-runtime.ts'
 
 describe('assistant provider config runtime resolution', () => {
+  it('keeps continuity stable across model and reasoning changes', () => {
+    const first = resolveAssistantProviderRuntimeTarget({
+      approvalPolicy: 'never',
+      model: 'gpt-5.5',
+      modelProvider: 'vercel-ai-gateway',
+      provider: 'codex-cli',
+      reasoningEffort: 'low',
+      sandbox: 'workspace-write',
+    })
+    const switched = resolveAssistantProviderRuntimeTarget({
+      approvalPolicy: 'never',
+      model: 'gpt-5.6-sol',
+      modelProvider: 'vercel-ai-gateway',
+      provider: 'codex-cli',
+      reasoningEffort: 'high',
+      sandbox: 'workspace-write',
+    })
+    const incompatible = resolveAssistantProviderRuntimeTarget({
+      approvalPolicy: 'never',
+      model: 'gpt-5.6-sol',
+      modelProvider: 'openai',
+      provider: 'codex-cli',
+      reasoningEffort: 'high',
+      sandbox: 'workspace-write',
+    })
+
+    expect(switched.continuityFingerprint).toBe(first.continuityFingerprint)
+    expect(incompatible.continuityFingerprint).not.toBe(
+      first.continuityFingerprint,
+    )
+  })
+
   it('normalizes Vercel AI Gateway as a Codex model provider', () => {
     const input = {
       provider: 'codex-cli',

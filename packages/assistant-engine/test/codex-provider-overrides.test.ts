@@ -1,6 +1,10 @@
 import { describe, expect, it } from 'vitest'
 
 import {
+  HOSTED_CHATGPT_OPENAI_CODEX_MODEL_PROVIDER_ID,
+} from '@murphai/operator-config/assistant/target-runtime'
+
+import {
   mergeCodexConfigOverrides,
 } from '../src/assistant/providers/helpers.ts'
 
@@ -69,6 +73,15 @@ describe('Codex provider config overrides', () => {
   it('allows hosted-local test provider ids to use the prewritten Codex config', () => {
     const overrides = mergeCodexConfigOverrides({
       modelProvider: 'openai-local-test',
+      showThinkingTraces: false,
+    })
+
+    expect(overrides).toBeUndefined()
+  })
+
+  it('allows hosted ChatGPT auth to use the prewritten Codex config', () => {
+    const overrides = mergeCodexConfigOverrides({
+      modelProvider: HOSTED_CHATGPT_OPENAI_CODEX_MODEL_PROVIDER_ID,
       showThinkingTraces: false,
     })
 

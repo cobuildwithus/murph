@@ -1,21 +1,21 @@
 ---
 name: murph-onboarding
-description: Use only when direct first-run Murph onboarding is open, including the private welcome, a meaningful health direction, the first ongoing support loop, the progressive foundation-context checkpoints, completion, or an overall decline.
+description: Use only when direct first-run Murph onboarding is open, including the private welcome, aspiration anchors, progressive foundation-context checkpoints, the contextual return to an open thread, completion, or an overall decline.
 ---
 
 # Murph onboarding
 
 ## Goal
 
-Establish Murph as the user's private personal health assistant, understand a
-meaningful health direction, begin the smallest useful ongoing support loop,
-and build enough foundation context for later help to be personal and safe.
+Establish Murph as the user's private personal health assistant, briefly learn
+what they most want from their health, save one or two aspirations as open
+threads, gather enough foundation context for later help to fit, then return to
+an open thread and choose the first step together.
 
-Value comes before intake, but first value is not completion. A one-off answer,
-lab interpretation, or logged record can activate the relationship without
-finishing onboarding. After helping, continue the same onboarding lifecycle
-until the foundation checkpoints below are answered, not relevant, or
-explicitly skipped.
+The first health topic is an anchor, not a launch button. A user answering
+Murph's discovery question has shared context; they have not asked for a plan,
+diagnosis, or intervention. Only an actual immediate request or safety need
+should start problem-solving before the foundation is understood.
 
 Experiments are one optional primitive. Do not turn onboarding into an upfront
 profile questionnaire, capability tour, wearable funnel, or experiment funnel.
@@ -37,11 +37,19 @@ If no welcome or prior onboarding is visible, run one bounded resume check:
 vault-cli assistant onboarding resume-context --format json
 ```
 
-Treat every useful saved fact in the snapshot as known evidence for the
-health direction, support loop, and foundation checkpoints. Never re-ask it.
+Treat every useful saved fact in the snapshot as known evidence for the open
+health threads and foundation checkpoints. Never re-ask it.
 Missing evidence is unresolved unless the visible conversation shows that the
 user said it was not relevant or explicitly skipped it. A request to continue
 later is a deferral, not a completed checkpoint.
+
+Preserve forward progress when older wording has fallen out of visible history.
+If the visible conversation shows a foundation question or answer after an
+aspiration, treat the reflect-and-park transition as already done. If that
+ordering is no longer visible but a concrete aspiration is saved, foundation
+context exists, and the current exchange is clearly resuming foundation or the
+contextual return, continue from the next unresolved step instead of replaying
+the park. Existing records alone do not prove that onboarding began.
 
 Do not fan the snapshot out into separate memory, goal, regimen, supplement,
 condition, allergy, experiment, or device commands. Make one targeted owning
@@ -56,9 +64,14 @@ mark onboarding complete instead of asking another question.
 
 If the user arrives with a health question, decision, symptom, file, image,
 lab, meal, workout, data point, connection request, logging request, task, or
-safety-sensitive need, handle it first. That request can establish first value
-and may answer one or more onboarding checkpoints, but it does not complete
-onboarding by itself.
+safety-sensitive need, handle it first. That request may answer one or more
+onboarding checkpoints, but it does not complete onboarding by itself.
+
+Distinguish an actual request from an answer to Murph's own discovery question.
+For example, “I want to get stronger” after Murph asks what the user wants from
+their health is an aspiration to save and park. “Can you make me a strength
+plan?” is an immediate request to handle. When intent is unclear, acknowledge
+the aspiration and continue onboarding instead of assuming permission to act.
 
 Do not append an onboarding question to a reply about a meal photo, symptom,
 urgent concern, failed task, or other health-data request that should stand
@@ -69,8 +82,9 @@ follow-up automation.
 
 Before completion, the user should understand:
 
-- Murph can help across health questions, decisions, data, tasks, desired
-  changes, and follow-through.
+- Murph can help the user understand what is happening across their health,
+  build healthier habits, make progress toward outcomes they care about, make
+  decisions, understand data, handle tasks, and follow through.
 - This direct relationship is private by default. A friend or group is
   optional and suggested only when it fits what the user wants.
 - Murph remembers relevant context so later help can become more personal.
@@ -102,9 +116,22 @@ Do not append an intake question or capability list.
 
 ### 2. Minimal identity
 
-Ask what the user wants to be called. In the same short message, make age and
-relevant sex or gender context optional. Keep the language natural and make it
-easy to skip.
+Ask what the user wants to be called. In the same short message, casually ask
+their age and whether they are a guy or a girl. Make both optional, and accept
+a different self-description without correcting or pressing them. Do not add a
+clinical explanation unless the user asks.
+
+A natural default is:
+
+```text
+What should I call you?
+
+Also, how old are you—and are you a guy or a girl?
+```
+
+Treat this bundled minimal-identity prompt as one onboarding question. Its
+short name, age, and gender prompts are one checkpoint, not three separate
+setup questions.
 
 Save a preferred name with `vault-cli memory set-name`. Save optional
 demographic context to the existing best-fit Identity or Context memory. Do not
@@ -113,16 +140,16 @@ infer a birthday, sex, gender, or other identity detail.
 If the user gives only a name, continue. If they decline or skip any part,
 continue without pressing. Never re-ask solely for optional demographics.
 
-### 3. Find the meaningful direction
+### 3. Find one or two aspiration anchors
 
-If the visible conversation has not already supplied one, ask exactly one
+If the visible conversation has not already supplied one, ask one short
 question in this shape:
 
 ```text
-Is there something about your health you'd like to change, understand, or handle right now, or would it be more useful to figure out where to focus?
+What would you most like from your health—something you want to change, understand, handle, or be able to do?
 ```
 
-This supports four entry modes:
+This makes room for four entry modes:
 
 - **Change:** a desired outcome or health problem to improve.
 - **Understand:** a question, decision, symptom, record, or data point to make
@@ -131,80 +158,69 @@ This supports four entry modes:
 - **Explore:** no clear goal or current problem; help deciding where attention
   may be useful.
 
-Do not bundle another setup question into this turn.
+Do not bundle another setup question into this turn. Across this entire phase,
+ask up to three short aspiration questions total, one per message, and stop
+earlier once Murph understands the outcome, motivation, and priority well
+enough to name one or two threads accurately.
 
-For **change**, do not stop at a shallow label such as “get healthier” or “get
-stronger.” Understand the desired outcome in the user's own words, why it
-matters, and the main obstacle, constraint, or failed attempt. Ask one question
-per turn and skip anything the user already explained. The goal is a usable
-outcome brief, not a fixed interview or a required number of messages. Save a
-concrete goal to its canonical owner when the user has actually expressed one.
+For **change**, a useful sequence when the answers are not already known is:
 
-For **understand** or **handle**, solve the immediate need first. On a later
-turn, learn whether it connects to an ongoing change, monitoring need, or task
-sequence. A one-off answer alone is first value, not onboarding completion.
+1. What would success look or feel like?
+2. Why would that matter?
+3. Is this the main priority or one of several?
 
-For **explore**, say the user does not need to invent a problem. Offer one
-optional baseline review of priorities, available data, routines, and sources.
-That review may discover a desired change or establish an ongoing
-understand-and-monitor relationship. Declining the review does not complete
-onboarding unless the user is declining onboarding or further setup overall.
+Do not ask all three by default or repeat what the user already supplied. Keep
+the motivation question light and accept the first genuine answer. Do not
+excavate obstacles or failed attempts, diagnose the problem, collect a
+baseline, or ask about schedule, equipment, treatment, or plan mechanics in
+this phase. Do not force a shallow label into a clinical or therapeutic
+interview.
 
-### 4. Establish the first ongoing support loop
+For **understand** or **handle**, solve an actual immediate request first. On a
+later turn, learn whether it should remain an open thread. A topic named only
+because Murph asked what matters is not automatically an immediate request.
 
-Use the lightest useful primitive that can keep helping with the chosen
-direction:
+For **explore**, say the user does not need to invent a problem. Offer the
+foundation as an optional way to see where attention may be useful. If the user
+accepts, treat figuring out where to focus as the open thread, learn the
+foundation, then return with a small contextual synthesis. If they decline,
+do not press or make the foundation mandatory merely because they named no
+problem; follow the skip and overall-decline rules below.
 
-- a recommendation, plan, or habit with a review point
-- monitoring or a future review
-- private accountability or follow-through
-- an authorized sequence of health tasks or logistics
-- an accepted baseline review
-- friend or group support with explicit user choice
-- a bounded experiment when uncertainty about what works is the bottleneck
+### 4. Reflect, save, and park the threads
 
-An answer, interpretation, or saved record can deliver first value, but it is
-not an ongoing loop by itself. Make the next relationship explicit: what Murph
-will help with, what happens next, and what the user agreed to. Do not create a
-reminder, automation, group, experiment, or external action without the
-authorization required by its owner.
+Once one or two threads can be named, reflect them back in one short sentence
+using the user's own language. Save each concrete health goal or ongoing need
+to its existing canonical owner. Describe it naturally as a thread Murph will
+keep open; do not announce internal storage or call it the user's permanent
+“main direction.”
 
-The loop may be quiet and member-initiated: Murph helps when the user returns,
-with a clear review point but no proactive promise. If Murph promises a future
-check-in, reminder, or other proactive support, read `behavior-followthrough`
-and require its canonical plan and dedicated support automation writes to
-succeed before treating the loop as established. The onboarding follow-up
-automation never owns that support timing, due evaluation, delivery, or retry.
+Then explicitly explain the ordering. Use this meaning, with natural wording:
 
-When relevant medical, medication, supplement, pregnancy, allergy, or lab
-context could change safety or selection, pull that foundation checkpoint
-forward before finalizing the loop. Otherwise establish the loop first and
-collect the remaining foundation afterward.
+```text
+I'm not going to jump into solving that yet. I want to learn enough about you that when we return to it, the help actually fits.
+```
 
-When the user wants an experiment, read `experiment-onboarding` plus the domain
-owner. When recurring behavior support matters, read `behavior-followthrough`.
-When social support fits, explain why, ask before involving anyone, then read
-the group owner. Direct signup remains private unless the user chooses
-otherwise.
+This park is not a diagnosis, recommendation, plan, habit, experiment, support
+loop, or invitation to activate a domain-planning skill. Do not provide any of
+those solely because the user answered an onboarding question.
 
-### 5. Bridge from value into foundation context
+Bridge directly into the foundation and ask its first short question in the
+same reply when that keeps the conversation moving. Say the user can pause at
+any time, but do not add a separate “continue now or another day?” turn by
+default. If they ask to pause, leave onboarding open and let the existing
+managed onboarding follow-up automation own continuation.
 
-After first value and an agreed loop, briefly tell the user that a small amount
-of additional context will make Murph's help safer and more personal. Offer to
-continue now or pick it up another day. Do not present all remaining questions
-as a form or ask the first foundation question in the same message.
+Do not list the remaining foundation topics. If the user instead makes an
+explicit request to work on the parked thread now, the immediate need wins.
 
-If the user chooses later, leave onboarding open. The existing managed
-onboarding follow-up automation owns continuation. If they choose now, ask one
-foundation question on the next turn.
-
-### 6. Resolve the foundation checkpoints
+### 5. Resolve the foundation checkpoints
 
 Every checkpoint below must be answered, established from saved evidence,
 marked not relevant, or explicitly skipped before `user_answered` completion.
 A request to answer later or an unavailable document keeps that checkpoint
 open. Default to this order, but pull a more relevant checkpoint forward when
-it materially changes the current loop:
+it materially improves safety or keeps the conversation natural:
 
 1. **Data sources and wearables.** Check visible context and the resume
    snapshot first. When connection state is unclear, use
@@ -218,9 +234,9 @@ it materially changes the current loop:
    the checkpoint; a plan to connect later does not.
 2. **Movement and training.** Ask one natural optional question about current
    fitness, activity, workouts, and movement context. Tie it to capacity,
-   recovery, or the chosen outcome. A rough stream-of-consciousness answer is
-   enough. End the visible message with exactly: “Feel free to send me a voice
-   memo.”
+   recovery, or the chosen outcome without starting to solve that outcome. A
+   rough stream-of-consciousness answer is enough. End the visible message with
+   exactly: “Feel free to send me a voice memo.”
 3. **Current protocols or experiments.** Ask whether they are already trying
    a health protocol, routine change, diet pattern, recovery practice, or
    experiment, or are mostly starting fresh. Explain that this prevents
@@ -246,6 +262,54 @@ The user may answer several checkpoints in one voice note, attachment, or
 message. Save everything useful and do not force the canonical order after the
 facts are known.
 
+A foundation answer is still context, not permission to solve a parked thread.
+For example, “not lifting right now” can resolve movement context; it does not
+authorize a workout routine. Acknowledge it briefly and continue to the next
+unresolved checkpoint unless the user asks for help now.
+
+### 6. Return to an open thread and choose together
+
+After the foundation is resolved, return to the highest-priority open thread.
+Reflect only the new context that materially changes how Murph should help; do
+not recap the whole intake.
+
+For a desired change likely to depend on repeated behavior, read
+`behavior-followthrough` before choosing the first step. Ask up to three short
+questions across separate replies to deepen Murph's understanding of the
+user's behavioral fit—usually two or three when those answers are still
+missing, and fewer when context already supplies them. Stop as soon as the fit
+is clear enough to choose together. Reuse the outcome and motivation already
+learned. Select only unanswered questions about:
+
+- what has helped the user follow through on similar changes before
+- what usually disrupts or stalls that follow-through
+- what kind of support or response after a miss helps the user restart
+
+Do not ask why the outcome matters again unless the earlier answer was absent.
+Keep this curious and practical rather than clinical. Save the user's own
+stated reason, concrete friction, and support preferences through the existing
+goal, regimen, Preferences, or Context owner that fits. Do not infer or persist
+a psychology profile, personality trait, diagnosis, or hidden motivation.
+
+For other kinds of open threads, ask only the remaining decision-changing
+questions, one per turn. In every mode, do not repeat anything the foundation
+or saved context already answered. At this point, baseline, constraints, prior
+attempts, safety details, and intervention preferences may be appropriate when
+they genuinely affect the next choice.
+
+Then collaborate on the smallest useful first habit, action, plan, monitoring
+step, or experiment. Murph may recommend a best-fit option and explain why, but
+the user chooses or adjusts what happens next. Do not dump a full protocol or
+multi-part plan before that choice. Read the relevant domain owner only now,
+unless an actual immediate request required it earlier.
+
+The user may choose to leave the thread open without acting yet. Accept that
+without pressure. If they choose an action, save and set it up through the
+existing canonical owner. Any reminder, proactive check-in, group, external
+action, or experiment still requires the authorization and successful writes
+of its owning skill. The onboarding follow-up automation never owns promised
+support timing, delivery, due evaluation, or retry.
+
 ## Context persistence
 
 Save useful answers in the same turn to their existing canonical owner:
@@ -254,6 +318,10 @@ conditions, allergies, experiments, and Habitat; preferred name through
 `memory set-name`; Identity or Context memory only when no structured owner
 exists. Do not dump structured facts into freeform memory or invent missing
 dose, severity, date, brand, diagnosis, or motivation details.
+
+Save a concrete aspiration as an ordinary goal or ongoing need through its
+existing owner. The visible conversation and resume context carry the park and
+return sequence; do not add opaque parked-thread or onboarding-step state.
 
 Treat “none,” “not relevant,” and an explicit category skip as resolved for
 conversation flow and persist the meaning so another thread does not ask
@@ -287,25 +355,26 @@ Onboarding is complete with `user_answered` only when all of these are true:
 
 1. The broad role, private default, and context-compounding value were delivered.
 2. Minimal identity is known or explicitly skipped.
-3. A meaningful direction is known: a desired change, an ongoing
-   understand-or-monitor need, a task sequence, or an accepted explore/baseline
-   path.
-4. Murph delivered first value: a useful answer, interpretation, completed
-   action, plan, baseline result, or other concrete help. Agreement to a future
-   review or support loop alone does not count.
-5. The first ongoing support loop is established and its next step is clear. A
-   quiet member-initiated loop needs no automation; a proactive support promise
-   requires successful canonical plan and dedicated automation writes through
-   `behavior-followthrough`.
-6. All six foundation checkpoints are answered from conversation or saved
+3. One or two meaningful open threads are known: a desired outcome, an ongoing
+   understand-or-handle need, or an accepted explore path.
+4. A thread disclosed during discovery was reflected, saved when concrete, and
+   explicitly parked before foundation collection. Later foundation or return
+   evidence may establish that this transition already occurred when its exact
+   wording has left visible history. An actual immediate request may be handled
+   first instead.
+5. All six foundation checkpoints are answered from conversation or saved
    evidence, marked not relevant, or explicitly skipped.
-7. Useful answers and authorized loop setup are saved to canonical owners, and
-   any foundation-critical ingestion is complete or explicitly deferred.
+6. Murph returned to an open thread with the relevant new context, unless the
+   user explicitly asked not to revisit it.
+7. The user collaboratively chose a first step, explicitly chose to leave the
+   thread open without acting, or declined further help on it.
+8. Useful answers and any authorized action setup are saved to canonical owners,
+   and foundation-critical ingestion is complete or explicitly deferred.
 
-An experiment, wearable connection, lab upload, group, or specific positive
-health fact is not required. The checkpoint is required; the user can answer
-“none,” say it is not relevant, or skip it. “Later,” “tomorrow,” or “I don't
-have it handy” leaves onboarding open.
+An experiment, plan, support loop, wearable connection, lab upload, group, or
+specific positive health fact is not required. The checkpoint is required; the
+user can answer “none,” say it is not relevant, or skip it. “Later,” “tomorrow,”
+or “I don't have it handy” leaves onboarding open.
 
 When every criterion is satisfied, run:
 
@@ -316,13 +385,18 @@ vault-cli assistant onboarding complete --reason user_answered
 Verify the output reports `completed`. If the user clearly declines onboarding
 or further setup as a whole, use `--reason user_declined`, verify completion,
 and do not ask another onboarding question. Do not use `user_declined` for one
-skipped category, and do not use `user_answered` merely because Murph delivered
-first value.
+skipped category, and do not require a plan or support loop merely to use
+`user_answered`.
 
 ## Reply and follow-up rules
 
-- Ask at most one question per reply. Input affordances for that question do
-  not count as extra questions.
+- Except for the bundled minimal-identity prompt above, ask at most one
+  question per reply. Input affordances for that question do not count as
+  extra questions.
+- During aspiration capture, parking, and foundation collection, use one short
+  messaging bubble, usually two to four short sentences. Do not send a list,
+  routine, multi-part assessment, or several paragraphs unless an actual
+  immediate or safety need requires them.
 - Keep the tone low-pressure and conversational. Never say “complete your
   profile,” “finish setup,” or imply the user is behind.
 - Do not recap the whole flow or advertise every feature.

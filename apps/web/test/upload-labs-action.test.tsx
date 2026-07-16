@@ -10,14 +10,9 @@ import { renderToStaticMarkup } from "react-dom/server";
 import { beforeEach, test, vi } from "vitest";
 
 const mocks = vi.hoisted(() => {
-  const prisma = { prisma: true };
-
   return {
     getHostedPageAuthSnapshot: vi.fn(),
-    getPrisma: vi.fn(() => prisma),
-    prisma,
-    readHostedAccountSettingsSnapshot: vi.fn(),
-    readHostedMemberRoutingState: vi.fn(),
+    getHostedMurphContactContext: vi.fn(),
   };
 });
 
@@ -75,16 +70,8 @@ vi.mock("@/src/lib/hosted-onboarding/page-auth", () => ({
   getHostedDashboardPageAuthSnapshot: mocks.getHostedPageAuthSnapshot,
 }));
 
-vi.mock("@/src/lib/hosted-onboarding/account-settings-snapshot", () => ({
-  readHostedAccountSettingsSnapshot: mocks.readHostedAccountSettingsSnapshot,
-}));
-
-vi.mock("@/src/lib/hosted-onboarding/hosted-member-routing-store", () => ({
-  readHostedMemberRoutingState: mocks.readHostedMemberRoutingState,
-}));
-
-vi.mock("@/src/lib/prisma", () => ({
-  getPrisma: mocks.getPrisma,
+vi.mock("@/src/lib/hosted-onboarding/hosted-contact-context", () => ({
+  getHostedMurphContactContext: mocks.getHostedMurphContactContext,
 }));
 
 beforeEach(() => {
@@ -96,8 +83,16 @@ beforeEach(() => {
     memberLookup: null,
     session: null,
   });
-  mocks.readHostedAccountSettingsSnapshot.mockResolvedValue(null);
-  mocks.readHostedMemberRoutingState.mockResolvedValue(null);
+  mocks.getHostedMurphContactContext.mockResolvedValue({
+    initialContactChannels: {
+      email: false,
+      telegram: false,
+      text: false,
+    },
+    murphEmailAddress: null,
+    murphPhoneNumber: null,
+    userEmailAddress: null,
+  });
 });
 
 test("UploadLabsMurphContactAction opens auth before login", async () => {
@@ -111,8 +106,7 @@ test("UploadLabsMurphContactAction opens auth before login", async () => {
   assert.match(markup, />Sync<svg/u);
   assert.doesNotMatch(markup, /disabled=""/);
   assert.doesNotMatch(markup, /href=/);
-  assert.equal(mocks.readHostedAccountSettingsSnapshot.mock.calls.length, 0);
-  assert.equal(mocks.readHostedMemberRoutingState.mock.calls.length, 0);
+  assert.equal(mocks.getHostedMurphContactContext.mock.calls.length, 1);
 });
 
 test("UploadLabsMurphContactAction opens assigned SMS with the lab-report message", async () => {
@@ -136,26 +130,15 @@ test("UploadLabsMurphContactAction opens assigned SMS with the lab-report messag
     memberLookup: null,
     session: null,
   });
-  mocks.readHostedMemberRoutingState.mockResolvedValue({
-    linqChatId: null,
-    linqRecipientPhone: "+15550100001",
-    memberId: "member_labs",
-    pendingLinqChatId: null,
-    pendingLinqRecipientPhone: null,
-    telegramThreadId: null,
-    telegramUserId: null,
-    telegramUserLookupKey: null,
-  });
-  mocks.readHostedAccountSettingsSnapshot.mockResolvedValue({
-    email: {
-      address: "member@example.test",
-      verifiedAt: new Date("2026-02-26T00:00:00.000Z"),
+  mocks.getHostedMurphContactContext.mockResolvedValue({
+    initialContactChannels: {
+      email: false,
+      telegram: false,
+      text: true,
     },
-    phone: {
-      number: "+14045550123",
-      verifiedAt: new Date("2026-02-26T00:00:00.000Z"),
-    },
-    telegram: null,
+    murphEmailAddress: null,
+    murphPhoneNumber: "+15550100001",
+    userEmailAddress: "member@example.test",
   });
 
   const { UploadLabsMurphContactAction } = await import(
@@ -170,10 +153,7 @@ test("UploadLabsMurphContactAction opens assigned SMS with the lab-report messag
   assert.match(markup, /aria-label="Sync labs with Murph in Messages"/);
   assert.doesNotMatch(markup, /\+14045550123/);
   assert.doesNotMatch(markup, /member@example\.test/);
-  assert.deepEqual(mocks.readHostedMemberRoutingState.mock.calls[0]?.[0], {
-    memberId: "member_labs",
-    prisma: mocks.prisma,
-  });
+  assert.equal(mocks.getHostedMurphContactContext.mock.calls.length, 1);
 });
 
 test("UploadLabsMurphContactAction falls back to a prefilled email when SMS is not eligible", async () => {
@@ -192,24 +172,15 @@ test("UploadLabsMurphContactAction falls back to a prefilled email when SMS is n
     memberLookup: null,
     session: null,
   });
-  mocks.readHostedMemberRoutingState.mockResolvedValue({
-    linqChatId: null,
-    linqRecipientPhone: "+15550100001",
-    memberId: "member_labs_email",
-    pendingLinqChatId: null,
-    pendingLinqRecipientPhone: null,
-    telegramThreadId: null,
-    telegramUserId: null,
-    telegramUserLookupKey: null,
-  });
-  mocks.readHostedAccountSettingsSnapshot.mockResolvedValue({
-    email: {
-      address: "member@example.test",
-      murphEmailAddress: "murph+alias123@mail.withmurph.ai",
-      verifiedAt: new Date("2026-02-26T00:00:00.000Z"),
+  mocks.getHostedMurphContactContext.mockResolvedValue({
+    initialContactChannels: {
+      email: true,
+      telegram: false,
+      text: false,
     },
-    phone: null,
-    telegram: null,
+    murphEmailAddress: "murph+alias123@mail.withmurph.ai",
+    murphPhoneNumber: "+15550100001",
+    userEmailAddress: "member@example.test",
   });
 
   const { UploadLabsMurphContactAction } = await import(
@@ -243,24 +214,15 @@ test("UploadLabsMurphContactAction skips verified email without a reply alias", 
     memberLookup: null,
     session: null,
   });
-  mocks.readHostedMemberRoutingState.mockResolvedValue({
-    linqChatId: null,
-    linqRecipientPhone: null,
-    memberId: "member_labs_email_without_alias",
-    pendingLinqChatId: null,
-    pendingLinqRecipientPhone: null,
-    telegramThreadId: null,
-    telegramUserId: null,
-    telegramUserLookupKey: null,
-  });
-  mocks.readHostedAccountSettingsSnapshot.mockResolvedValue({
-    email: {
-      address: "member@example.test",
-      murphEmailAddress: null,
-      verifiedAt: new Date("2026-02-26T00:00:00.000Z"),
+  mocks.getHostedMurphContactContext.mockResolvedValue({
+    initialContactChannels: {
+      email: false,
+      telegram: false,
+      text: false,
     },
-    phone: null,
-    telegram: null,
+    murphEmailAddress: null,
+    murphPhoneNumber: null,
+    userEmailAddress: "member@example.test",
   });
 
   const { UploadLabsMurphContactAction } = await import(
@@ -295,18 +257,15 @@ test("UploadLabsMurphContactAction prefers Telegram over email with the lab-repo
     memberLookup: null,
     session: null,
   });
-  mocks.readHostedMemberRoutingState.mockResolvedValue(null);
-  mocks.readHostedAccountSettingsSnapshot.mockResolvedValue({
-    email: {
-      address: "member@example.test",
-      murphEmailAddress: "murph+alias123@mail.withmurph.ai",
-      verifiedAt: new Date("2026-02-26T00:00:00.000Z"),
+  mocks.getHostedMurphContactContext.mockResolvedValue({
+    initialContactChannels: {
+      email: true,
+      telegram: true,
+      text: false,
     },
-    phone: null,
-    telegram: {
-      telegramUserId: "tg_user_123",
-      username: "member_handle",
-    },
+    murphEmailAddress: "murph+alias123@mail.withmurph.ai",
+    murphPhoneNumber: null,
+    userEmailAddress: "member@example.test",
   });
 
   const { UploadLabsMurphContactAction } = await import(
@@ -344,14 +303,15 @@ test("UploadLabsMurphContactAction opens Telegram with the lab-report draft when
     memberLookup: null,
     session: null,
   });
-  mocks.readHostedMemberRoutingState.mockResolvedValue(null);
-  mocks.readHostedAccountSettingsSnapshot.mockResolvedValue({
-    email: null,
-    phone: null,
-    telegram: {
-      telegramUserId: "tg_user_123",
-      username: "member_handle",
+  mocks.getHostedMurphContactContext.mockResolvedValue({
+    initialContactChannels: {
+      email: false,
+      telegram: true,
+      text: false,
     },
+    murphEmailAddress: null,
+    murphPhoneNumber: null,
+    userEmailAddress: null,
   });
 
   const { UploadLabsMurphContactAction } = await import(

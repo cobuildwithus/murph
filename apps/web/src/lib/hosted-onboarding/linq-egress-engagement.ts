@@ -22,21 +22,15 @@ import {
   readHostedThreadRouteByThreadIdentity,
 } from "../hosted-routing/thread-route-store";
 import {
+  runWithHostedDomainRootUnwrapCache,
+} from "../hosted-crypto/domain-root-unwrap-cache";
+import {
+  buildHostedMailboxLiveItemWhere,
   decodeHostedMailboxStoredPayload,
-  readHostedMailboxLiveItemById,
-  readHostedMailboxPayload,
-  readHostedMailboxRecentLiveConversationItemIds,
+  resolveHostedMailboxPayloadRef,
 } from "../hosted-mailbox/store";
 
 type HostedLinqEngagementClient = PrismaClient | Prisma.TransactionClient;
-type HostedLinqLegacyCurrentInboundProof = {
-  dedupeKey: string;
-  eventId: string;
-  mailboxItemId: string;
-  occurredAt: string;
-  replyToMessageId: string;
-  target: string;
-};
 export type HostedLinqRuntimeEgressTargetOverride = {
   target: string;
   targetKind: "thread";
@@ -48,6 +42,25 @@ export type HostedLinqRuntimeEgressAssertionResult = {
 
 const HOSTED_LINQ_SIGNUP_WELCOME_IDEMPOTENCY_PREFIX = "signup-welcome:";
 const HOSTED_LINQ_RECENT_DIRECT_INBOUND_SCAN_LIMIT = 100;
+
+const HOSTED_LINQ_DIRECT_INBOUND_MAILBOX_ITEM_SELECT = {
+  createdAt: true,
+  dedupeKey: true,
+  expiresAt: true,
+  id: true,
+  kind: true,
+  lane: true,
+  laneSeq: true,
+  occurredAt: true,
+  payloadInlineCiphertext: true,
+  payloadRef: true,
+  payloadSchema: true,
+  userId: true,
+} satisfies Prisma.HostedMailboxItemSelect;
+
+type HostedLinqDirectInboundMailboxItem = Prisma.HostedMailboxItemGetPayload<{
+  select: typeof HOSTED_LINQ_DIRECT_INBOUND_MAILBOX_ITEM_SELECT;
+}>;
 
 export function assertHostedLinqRouteAuthorityMatchesTarget(input: {
   chatId: string | null | undefined;
@@ -80,8 +93,7 @@ export function assertHostedLinqRouteAuthorityMatchesTarget(input: {
 
 export async function assertHostedLinqRecentInboundEngagementForRuntime(input: {
   answeredMailboxItemIds?: readonly string[] | null;
-  authorityCheckOnly?: boolean | null;
-  currentInbound?: HostedLinqLegacyCurrentInboundProof | null;
+  authorityCheckOnly: boolean;
   directRecipientPhoneNumber?: string | null;
   fromPhoneNumber?: string | null;
   homeRouteFallbackAllowed?: boolean | null;
@@ -128,7 +140,6 @@ export async function assertHostedLinqRecentInboundEngagementForRuntime(input: {
 
   if (await matchesPersistedHostedLinqDirectInbound({
     answeredMailboxItemIds: input.answeredMailboxItemIds ?? [],
-    currentInbound: input.currentInbound ?? null,
     memberId: input.memberId,
     prisma: input.prisma,
     replyToMessageId: input.replyToMessageId,
@@ -161,131 +172,77 @@ function isHostedLinqCurrentHomeOnlyAssertion(input: {
 
 async function matchesPersistedHostedLinqDirectInbound(input: {
   answeredMailboxItemIds: readonly string[];
-  currentInbound: HostedLinqLegacyCurrentInboundProof | null;
   memberId: string;
   prisma: HostedLinqEngagementClient;
   replyToMessageId?: string | null;
   target: string | null;
 }): Promise<boolean> {
-  const proof = input.currentInbound;
   const target = normalizeNullable(input.target);
   const requestReplyToMessageId = normalizeNullable(input.replyToMessageId);
-  if (!target) {
+  if (!target || !requestReplyToMessageId) {
     return false;
   }
 
-  if (
-    proof
-    && normalizeNullable(proof.target) === target
-    && normalizeNullable(proof.eventId) === normalizeNullable(proof.dedupeKey)
-    && (
-      requestReplyToMessageId === null
-      || normalizeNullable(proof.replyToMessageId) === requestReplyToMessageId
-    )
-    && await matchesPersistedHostedLinqDirectInboundMailboxItem({
-      legacyProof: proof,
-      mailboxItemId: proof.mailboxItemId,
+  return runWithHostedDomainRootUnwrapCache(async () => {
+    const availableAt = new Date();
+    const candidates = await readHostedLinqDirectInboundCandidates({
+      answeredMailboxItemIds: input.answeredMailboxItemIds,
+      availableAt,
       memberId: input.memberId,
       prisma: input.prisma,
-      replyToMessageId: proof.replyToMessageId,
-      target,
-    })
-  ) {
-    return true;
-  }
+    });
+    const payloadsByMailboxItemId = await readHostedLinqDirectInboundPayloads({
+      availableAt,
+      candidates,
+      memberId: input.memberId,
+      prisma: input.prisma,
+    });
 
-  if (!requestReplyToMessageId) {
+    for (const item of candidates) {
+      if (
+        await matchesPersistedHostedLinqDirectInboundMailboxItem({
+          item,
+          memberId: input.memberId,
+          payloadCiphertext:
+            payloadsByMailboxItemId.get(item.id)?.payloadCiphertext ?? null,
+          prisma: input.prisma,
+          replyToMessageId: requestReplyToMessageId,
+          target,
+        })
+      ) {
+        return true;
+      }
+    }
+
     return false;
-  }
-  for (let index = input.answeredMailboxItemIds.length - 1; index >= 0; index -= 1) {
-    const mailboxItemId = input.answeredMailboxItemIds[index];
-    if (
-      mailboxItemId
-      && await matchesPersistedHostedLinqDirectInboundMailboxItem({
-        legacyProof: null,
-        mailboxItemId,
-        memberId: input.memberId,
-        prisma: input.prisma,
-        replyToMessageId: requestReplyToMessageId,
-        target,
-      })
-    ) {
-      return true;
-    }
-  }
-
-  const answeredMailboxItemIds = new Set(input.answeredMailboxItemIds);
-  const recentMailboxItemIds = await readHostedMailboxRecentLiveConversationItemIds({
-    availableAt: new Date(),
-    limit: HOSTED_LINQ_RECENT_DIRECT_INBOUND_SCAN_LIMIT,
-    prisma: input.prisma,
-    userId: input.memberId,
   });
-  for (const mailboxItemId of recentMailboxItemIds) {
-    if (
-      !answeredMailboxItemIds.has(mailboxItemId)
-      && await matchesPersistedHostedLinqDirectInboundMailboxItem({
-        legacyProof: null,
-        mailboxItemId,
-        memberId: input.memberId,
-        prisma: input.prisma,
-        replyToMessageId: requestReplyToMessageId,
-        target,
-      })
-    ) {
-      return true;
-    }
-  }
-
-  return false;
 }
 
 async function matchesPersistedHostedLinqDirectInboundMailboxItem(input: {
-  legacyProof: HostedLinqLegacyCurrentInboundProof | null;
-  mailboxItemId: string;
+  item: HostedLinqDirectInboundMailboxItem;
   memberId: string;
+  payloadCiphertext: string | null;
   prisma: HostedLinqEngagementClient;
   replyToMessageId: string;
   target: string;
 }): Promise<boolean> {
-  const item = await readHostedMailboxLiveItemById({
-    availableAt: new Date(),
-    mailboxItemId: input.mailboxItemId,
-    prisma: input.prisma,
-  });
+  const item = input.item;
   if (
-    !item
-    || item.userId !== input.memberId
+    item.userId !== input.memberId
     || item.kind !== "conversation.message"
     || item.lane !== "conversation"
-    || (
-      input.legacyProof !== null
-      && (
-        item.dedupeKey !== input.legacyProof.dedupeKey
-        || item.occurredAt !== input.legacyProof.occurredAt
-      )
-    )
   ) {
     return false;
   }
 
-  const payload = item.payloadRef
-    ? await readHostedMailboxPayload({
-        dedupeKey: item.dedupeKey,
-        mailboxItemId: item.id,
-        payloadRef: item.payloadRef,
-        prisma: input.prisma,
-        userId: item.userId,
-      })
-    : null;
   const decoded = await decodeHostedMailboxStoredPayload({
     dedupeKey: item.dedupeKey,
     kind: item.kind,
     lane: item.lane,
-    laneSeq: item.laneSeq,
+    laneSeq: item.laneSeq.toString(),
     mailboxItemId: item.id,
-    occurredAt: item.occurredAt,
-    payloadCiphertext: payload?.payloadCiphertext ?? null,
+    occurredAt: item.occurredAt.toISOString(),
+    payloadCiphertext: input.payloadCiphertext,
     payloadInlineCiphertext: item.payloadInlineCiphertext,
     payloadSchema: item.payloadSchema,
     prisma: input.prisma,
@@ -300,20 +257,96 @@ async function matchesPersistedHostedLinqDirectInboundMailboxItem(input: {
     wake.kind === "conversation.message"
     && wake.userId === input.memberId
     && wake.eventId === item.dedupeKey
-    && wake.occurredAt === item.occurredAt
-    && (
-      input.legacyProof === null
-      || (
-        wake.eventId === input.legacyProof.eventId
-        && wake.occurredAt === input.legacyProof.occurredAt
-      )
-    )
+    && wake.occurredAt === item.occurredAt.toISOString()
     && wake.message.channel === "linq"
     && wake.message.linqMessage.isFromMe === false
     && wake.message.linqMessage.threadIsDirect === true
     && wake.message.linqMessage.chatId === input.target
     && wake.message.linqMessage.messageId === input.replyToMessageId
   );
+}
+
+async function readHostedLinqDirectInboundCandidates(input: {
+  answeredMailboxItemIds: readonly string[];
+  availableAt: Date;
+  memberId: string;
+  prisma: HostedLinqEngagementClient;
+}): Promise<HostedLinqDirectInboundMailboxItem[]> {
+  const answeredMailboxItemIds = input.answeredMailboxItemIds.filter(
+    (mailboxItemId) => mailboxItemId.length > 0,
+  );
+  const answeredRows = answeredMailboxItemIds.length > 0
+    ? await input.prisma.hostedMailboxItem.findMany({
+        select: HOSTED_LINQ_DIRECT_INBOUND_MAILBOX_ITEM_SELECT,
+        where: {
+          id: { in: [...new Set(answeredMailboxItemIds)] },
+          ...buildHostedMailboxLiveItemWhere(input.availableAt),
+        },
+      })
+    : [];
+  const recentRows = await input.prisma.hostedMailboxItem.findMany({
+    orderBy: { laneSeq: "desc" },
+    select: HOSTED_LINQ_DIRECT_INBOUND_MAILBOX_ITEM_SELECT,
+    take: HOSTED_LINQ_RECENT_DIRECT_INBOUND_SCAN_LIMIT,
+    where: {
+      ...buildHostedMailboxLiveItemWhere(input.availableAt),
+      kind: "conversation.message",
+      lane: "conversation",
+      userId: input.memberId,
+    },
+  });
+
+  const answeredRowsById = new Map(answeredRows.map((item) => [item.id, item]));
+  const candidates: HostedLinqDirectInboundMailboxItem[] = [];
+  for (let index = input.answeredMailboxItemIds.length - 1; index >= 0; index -= 1) {
+    const mailboxItemId = input.answeredMailboxItemIds[index];
+    const item = mailboxItemId ? answeredRowsById.get(mailboxItemId) : null;
+    if (item) {
+      candidates.push(item);
+    }
+  }
+
+  const answeredMailboxItemIdSet = new Set(input.answeredMailboxItemIds);
+  for (const item of recentRows) {
+    if (!answeredMailboxItemIdSet.has(item.id)) {
+      candidates.push(item);
+    }
+  }
+  return candidates;
+}
+
+async function readHostedLinqDirectInboundPayloads(input: {
+  availableAt: Date;
+  candidates: readonly HostedLinqDirectInboundMailboxItem[];
+  memberId: string;
+  prisma: HostedLinqEngagementClient;
+}) {
+  const mailboxItemIds = [...new Set(input.candidates
+    .filter((item) => {
+      const payloadRef = normalizeNullable(item.payloadRef);
+      return item.userId === input.memberId
+        && item.kind === "conversation.message"
+        && item.lane === "conversation"
+        && payloadRef !== null
+        && resolveHostedMailboxPayloadRef(payloadRef) === item.id;
+    })
+    .map((item) => item.id))];
+  if (mailboxItemIds.length === 0) {
+    return new Map<string, { payloadCiphertext: string }>();
+  }
+
+  const payloads = await input.prisma.hostedMailboxPayload.findMany({
+    select: {
+      mailboxItemId: true,
+      payloadCiphertext: true,
+    },
+    where: {
+      mailboxItem: buildHostedMailboxLiveItemWhere(input.availableAt),
+      mailboxItemId: { in: mailboxItemIds },
+      userId: input.memberId,
+    },
+  });
+  return new Map(payloads.map((payload) => [payload.mailboxItemId, payload]));
 }
 
 async function assertHostedMemberLinqRouteMatchesEgressTarget(input: {
