@@ -1,6 +1,6 @@
 # Product Specs Index
 
-Last verified: 2026-07-15
+Last verified: 2026-07-16
 
 | Path | Purpose | Status |
 | --- | --- | --- |
@@ -8,7 +8,8 @@ Last verified: 2026-07-15
 | `agent-docs/product-specs/pulse-trial-checkout-offer.md` | Implemented Pulse Trial checkout-offer architecture over the existing hosted billing and AI usage allowance system. | Active |
 | `agent-docs/product-specs/pulse-trial-start-paid-pulse.md` | Implemented exhausted Pulse Trial conversion to paid Pulse through Stripe trial-end billing. | Active |
 | `agent-docs/product-specs/hosted-plan-downgrades.md` | Edge-to-Pulse renewal switches plus the billing-gated Edge assistant-model choice, downgrade behavior, and deployment compatibility contract. | Active |
-| `agent-docs/product-specs/hosted-plan-usage.md` | Web-owned advisory included-usage projection shared by Settings and the read-only assistant tool, including forecast, server-selected action, and group privacy boundaries. | Active |
+| `agent-docs/product-specs/hosted-plan-usage.md` | Checked-out advisory projection snapshot with a known discrepancy from the confirmed enforced usage contract. | Source snapshot |
+| `agent-docs/product-specs/hosted-usage-topups.md` | Proposed one-time Stripe Checkout plus Murph-owned usage-credit ledger that extends the enforced limit for paid Pulse/Edge plans, with a payer/beneficiary seam for future group funding. | Proposed |
 | `agent-docs/product-specs/hosted-family-plan.md` | Hosted Family plan MVP: fixed four-person sponsored access, private member accounts, chat-first invites, and privacy boundaries. | Active |
 | `agent-docs/product-specs/health-commons.md` | Health Commons page graph, catalog, versioning, future aggregate outcome summaries, and artifact-storage product boundary. | Active |
 | `agent-docs/product-specs/protocol-summary-copy.md` | Source-of-truth copy rules for Health Commons protocol `summary:` fields shown on `/experiments` cards. | Active |

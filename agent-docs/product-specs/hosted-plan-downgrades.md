@@ -104,6 +104,13 @@ delivery.
 
 ## Included Usage Behavior
 
+Source-state note: this section records the checked-out implementation and is
+not product authority for exhaustion. The confirmed product contract blocks
+subsequent usage-bearing work at the limit. The correction and the requirement
+to reconcile one admission owner before top-ups ship are defined in
+`agent-docs/product-specs/hosted-plan-usage.md` and
+`agent-docs/product-specs/hosted-usage-topups.md`.
+
 Monthly included AI allowance remains a measured billing and product signal,
 not a runtime access gate for an otherwise active member. Murph continues to
 record usage, attribute the requested and served model reported by Codex App
