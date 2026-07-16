@@ -419,6 +419,15 @@ describe("buildHostedExecutionRuntimePlatform", () => {
     );
   });
 
+  it("attaches the hosted subscription port to the Cloudflare platform", () => {
+    const platform = buildTestHostedExecutionRuntimePlatform({
+      boundUserId: "member_123",
+    });
+
+    expect(platform.subscriptionToolPort).toBeDefined();
+    expect(platform.subscriptionToolPort?.request).toEqual(expect.any(Function));
+  });
+
   it("rejects oversized workspace snapshot restores before unwrap or fetch", async () => {
     const fetchMock = vi.fn();
     const platform = buildTestHostedExecutionRuntimePlatform({

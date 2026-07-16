@@ -35,6 +35,10 @@ import {
   HOSTED_ASSISTANT_SOL_MODEL,
 } from '@murphai/hosted-execution/assistant-model'
 import {
+  hostedRuntimeSubscriptionToolRequestSchema,
+  type HostedRuntimeSubscriptionToolRequest,
+} from '@murphai/hosted-execution/subscription'
+import {
   HOSTED_VAULT_SHARE_ACTIVITY_DISTANCE_PROJECTION_KIND,
   HOSTED_VAULT_SHARE_ACTIVITY_DISTANCE_SELECTOR_ACTIVITY_KINDS,
   HOSTED_VAULT_SHARE_ACTIVITY_MINUTES_PROJECTION_KIND,
@@ -384,15 +388,38 @@ export const MURPH_FAMILY_PLAN_TOOL = {
   },
 } as const
 
+const MURPH_CONVERSATIONAL_COMMERCIAL_MENTION_POLICY =
+  'On an assistant-initiated first commercial mention, ask one short reply-oriented question and include no URL. For a trial decision, wording may naturally include “should we part ways?” as an optional off-ramp; never use it as fixed copy or pressure. If a manual plan check finds no action is needed and the member did not ask about billing, say nothing.'
+const MURPH_USAGE_SAVING_MODEL_COPY_POLICY =
+  'When offering a usage-saving option, describe it as “a less capable model that uses less of your included usage.” Do not assume the member knows Luna, Terra, or Sol; name a model only if they ask. Never switch models automatically.'
+
 export const MURPH_PLAN_USAGE_TOOL = {
   namespace: 'murph',
   name: 'plan_usage',
   description:
-    `Read the current hosted member's cost-weighted included usage, reset or trial-end date, and any server-authorized plan action. Use only for an explicit plan/included-usage question, an explicit request to manage billing or an unsupported Family account change, or a manual 1:1 check. Never call it automatically during onboarding or as a watcher. Cost-weighted included usage is not a literal token count or cash balance. Communicate usage only through usedPercent and remainingPercent; never expose, infer, or format internal currency amounts as usage progress. Percentages, dates, and forecasts are approximate; if forecast is null, invent no estimate, precision, scarcity, or urgency. Never plead, imply Murph will die, use existential guilt, shame, or pressure. Mention server-authorized start or upgrade actions only when recommendedAction is non-null and relevant to the member's request; use its label and URL. For an explicit billing-management or unsupported Family-management request, direct the member to ${MURPH_PRODUCT_ORIGIN}/settings#subscription only after a private result whose status is active or exhausted, or whose reason is trial_conversion_pending; make clear that the tool only read status and made no billing or Family change. Describe this as a neutral Settings browser handoff, not a plan recommendation or billing action. Do not provide that private account-management link for group_not_supported or hosted_access_inactive. This read-only tool does not change billing. It is not a group balance or top-up surface. Never ask a group for money, claim a shared balance, or name a payer.`,
+    `Read the current hosted member's cost-weighted included usage, reset or trial-end date, and any server-authorized plan action. Use only for an explicit plan/included-usage question, an explicit request to manage billing or an unsupported Family account change, or a manual 1:1 check. Never call it automatically during onboarding or as a watcher. Cost-weighted included usage is not a literal token count or cash balance. Communicate usage only through usedPercent and remainingPercent; never expose, infer, or format internal currency amounts as usage progress. Percentages, dates, and forecasts are approximate; if forecast is null, invent no estimate, precision, scarcity, or urgency. Never plead, imply Murph will die, use existential guilt, shame, or pressure. Mention a server-authorized start or upgrade option only when recommendedAction is non-null and relevant to the member's request. Before seeking confirmation for start_pulse_now or upgrade_edge, state the exact current label and terms returned by recommendedAction; never invent or cache plan terms. Treat continue_pulse as non-charging continuation only when this current read confirms an active trial. If the read reports trial_conversion_pending or an ended trial, treat recovery as start-now: state the current terms and get explicit confirmation, normally for start_pulse_now. ${MURPH_CONVERSATIONAL_COMMERCIAL_MENTION_POLICY} ${MURPH_USAGE_SAVING_MODEL_COPY_POLICY} Use murph.subscription only after the current user explicitly and unambiguously chooses an exact supported action; a bare “yes” after multiple choices is insufficient. For an explicit billing-management or unsupported Family-management request, direct the member to ${MURPH_PRODUCT_ORIGIN}/settings#subscription only after a private result whose status is active or exhausted, or whose reason is trial_conversion_pending; make clear that this tool only read status and made no billing or Family change. Describe this as a neutral Settings browser handoff, not a plan recommendation or billing action. Do not provide that private account-management link for group_not_supported or hosted_access_inactive. This read-only tool does not change billing. It is not a group balance or top-up surface. Never ask a group for money, claim a shared balance, or name a payer.`,
   inputSchema: {
     type: 'object',
     additionalProperties: false,
     properties: {},
+  },
+} as const
+
+export const MURPH_SUBSCRIPTION_TOOL = {
+  namespace: 'murph',
+  name: 'subscription',
+  description:
+    `Apply exactly one private hosted subscription choice that the current user made in the current turn. Use only when the user explicitly and unambiguously chose continue_pulse, start_pulse_now, or upgrade_edge. Before start_pulse_now or upgrade_edge, state the current server-authorized action label and terms returned by murph.plan_usage, then receive an explicit current-turn confirmation of that exact action. Never use post-action response facts as the first disclosure. A bare “yes” is not consent when the preceding message offered multiple choices; ask which option they mean instead. Use continue_pulse only when the current murph.plan_usage result confirms an active trial; it keeps that trial scheduled to become Pulse at trial end without charging now. If plan usage reports trial_conversion_pending or an ended trial, do not use continue_pulse: treat recovery as start-now, state the current terms, and get explicit confirmation, normally for start_pulse_now. start_pulse_now ends an eligible active trial or recovers an ended trial and begins Pulse immediately; upgrade_edge upgrades an eligible paid Pulse subscription to Edge. Never infer consent from usage pressure, an earlier turn, an automated event, or your own recommendation. ${MURPH_CONVERSATIONAL_COMMERCIAL_MENTION_POLICY} ${MURPH_USAGE_SAVING_MODEL_COPY_POLICY} Do not hardcode or guess prices; use current server-returned terms before an action and the returned plan facts only to acknowledge its result. Send the returned paymentUrl only when status is payment_required. For no_action_required, stay silent unless answering the member's explicit request; when directly acknowledging continue_pulse, keep it brief and include no explanation or link. Never call a payment method verified or guarantee a future charge. completed and pending do not carry a payment link.`,
+  inputSchema: {
+    type: 'object',
+    additionalProperties: false,
+    properties: {
+      action: {
+        type: 'string',
+        enum: ['continue_pulse', 'start_pulse_now', 'upgrade_edge'],
+      },
+    },
+    required: ['action'],
   },
 } as const
 
@@ -448,7 +475,7 @@ export const MURPH_ASSISTANT_CONFIGURATION_TOOL = {
   namespace: 'murph',
   name: 'assistant_configuration',
   description:
-    'Read the current hosted turn model and reasoning effort plus the models and reasoning efforts available for the next turn, or directly save an explicit user-requested change. Luna is the most usage-efficient model, Terra is the default, and Sol requires an active paid Edge plan. The lowest supported reasoning effort is low; these hosted models do not support none. Use action="read" whenever configuration facts are needed. Use action="update" only when the current user-sourced turn explicitly asks for the exact change. Never switch models or reasoning automatically because usage is low. Do not claim a change is saved unless the result says updated or unchanged. A saved update does not change the running turn and takes effect on the next turn.',
+    'Read the current hosted turn model and reasoning effort plus the models and reasoning efforts available for the next turn, or directly save an explicit user-requested change. Internally, Luna is the most usage-efficient model, Terra is the default, and Sol requires an active paid Edge plan. Do not assume the member knows those names or introduce them unless the member asks; otherwise describe the usage-saving option as “a less capable model that uses less of your included usage.” The lowest supported reasoning effort is low; these hosted models do not support none. Use action="read" whenever configuration facts are needed. Use action="update" only when the current user-sourced turn explicitly asks for the exact change. Never switch models or reasoning automatically because usage is low. Do not claim a change is saved unless the result says updated or unchanged. A saved update does not change the running turn and takes effect on the next turn.',
   inputSchema: {
     type: 'object',
     additionalProperties: false,
@@ -942,6 +969,7 @@ const MURPH_BASE_DYNAMIC_TOOLS = [
   MURPH_PERSONALIZATION_TOOL,
   MURPH_FAMILY_PLAN_TOOL,
   MURPH_PLAN_USAGE_TOOL,
+  MURPH_SUBSCRIPTION_TOOL,
   MURPH_GROUP_TOOL,
   MURPH_NEWSLETTER_TOOL,
   MURPH_GENERATE_SONG_TOOL,
@@ -979,6 +1007,7 @@ export interface MurphDynamicToolAvailability {
   connectedAppsManageAvailable?: boolean | null
   familyPlanAvailable?: boolean | null
   planUsageAvailable?: boolean | null
+  subscriptionAvailable?: boolean | null
   groupAvailable?: boolean | null
   newsletterAvailable?: boolean | null
   personalizationAvailable?: boolean | null
@@ -1014,6 +1043,7 @@ const TOOL_AVAILABILITY: ReadonlyMap<MurphDynamicTool, AvailabilityPredicate> =
     [MURPH_ASSISTANT_CONFIGURATION_TOOL, defaultOff((a) => a.assistantConfigurationAvailable)],
     [MURPH_FAMILY_PLAN_TOOL, defaultOff((a) => a.familyPlanAvailable)],
     [MURPH_PLAN_USAGE_TOOL, defaultOff((a) => a.planUsageAvailable)],
+    [MURPH_SUBSCRIPTION_TOOL, defaultOff((a) => a.subscriptionAvailable)],
     [MURPH_GROUP_TOOL, defaultOff((a) => a.groupAvailable)],
     [MURPH_NEWSLETTER_TOOL, defaultOff((a) => a.newsletterAvailable)],
     [MURPH_PERSONALIZATION_TOOL, defaultOff((a) => a.personalizationAvailable)],
@@ -1636,6 +1666,10 @@ export type MurphDynamicToolRequest =
       validationDigest: SafeToolCallValidationDigest
     }
   | {
+      kind: 'invalid-subscription-arguments'
+      validationDigest: SafeToolCallValidationDigest
+    }
+  | {
       kind: 'invalid-assistant-configuration-arguments'
       validationDigest: SafeToolCallValidationDigest
     }
@@ -1657,6 +1691,10 @@ export type MurphDynamicToolRequest =
     }
   | {
       kind: 'plan-usage'
+    }
+  | {
+      kind: 'subscription'
+      request: HostedRuntimeSubscriptionToolRequest
     }
   | {
       kind: 'assistant-configuration'
@@ -1857,6 +1895,19 @@ export function readMurphDynamicToolRequest(
       }
       return {
         kind: 'plan-usage',
+      }
+    }
+    case MURPH_SUBSCRIPTION_TOOL.name: {
+      const parsed = parseSubscriptionArguments(request.arguments)
+      if (!parsed.ok) {
+        return {
+          kind: 'invalid-subscription-arguments',
+          validationDigest: parsed.validationDigest,
+        }
+      }
+      return {
+        kind: 'subscription',
+        request: parsed.request,
       }
     }
     case MURPH_PERSONALIZATION_TOOL.name: {
@@ -2134,6 +2185,8 @@ export async function executeMurphDynamicToolRequest(input: {
       return toolTextResult(false, 'invalid personalization arguments')
     case 'invalid-plan-usage-arguments':
       return toolTextResult(false, 'invalid plan usage arguments')
+    case 'invalid-subscription-arguments':
+      return toolTextResult(false, 'invalid subscription arguments')
     case 'invalid-assistant-configuration-arguments':
       return toolTextResult(false, 'invalid assistant configuration arguments')
     case 'invalid-group-arguments':
@@ -2179,7 +2232,7 @@ export async function executeMurphDynamicToolRequest(input: {
       const hostedToolContext = input.hostedToolContext ?? null
       return await executeAssistantStyleDynamicTool({
         assistantInputId:
-          hostedToolContext?.currentAssistantPreferenceInputId?.() ?? null,
+          hostedToolContext?.currentAssistantInputId?.() ?? null,
         available: input.assistantStyleSettingsAvailable === true,
         hosted: hostedToolContext != null,
         hostedPersonalizationTool:
@@ -2302,6 +2355,11 @@ export async function executeMurphDynamicToolRequest(input: {
     case 'plan-usage':
       return await executePlanUsageTool({
         hostedToolContext: input.hostedToolContext ?? null,
+      })
+    case 'subscription':
+      return await executeSubscriptionTool({
+        hostedToolContext: input.hostedToolContext ?? null,
+        request: input.request.request,
       })
     case 'personalization':
       return await executePersonalizationTool({
@@ -2566,6 +2624,32 @@ async function executePlanUsageTool(input: {
   }
 }
 
+async function executeSubscriptionTool(input: {
+  hostedToolContext: AssistantHostedToolContext | null
+  request: HostedRuntimeSubscriptionToolRequest
+}): Promise<MurphDynamicToolExecutionResult> {
+  const subscriptionTool = input.hostedToolContext?.subscriptionTool ?? null
+  const assistantInputId = subscriptionTool
+    ? input.hostedToolContext?.claimSubscriptionAssistantInputId?.() ?? null
+    : null
+  if (!subscriptionTool || !assistantInputId) {
+    return toolTextResult(
+      false,
+      'subscription actions require one unused current user-sourced input',
+    )
+  }
+
+  try {
+    const result = await subscriptionTool.request({
+      action: input.request.action,
+      assistantInputId,
+    })
+    return toolTextResult(true, safeToolPayloadText(result))
+  } catch {
+    return toolTextResult(false, 'subscription action could not be completed')
+  }
+}
+
 async function executePersonalizationTool(input: {
   hostedToolContext: AssistantHostedToolContext | null
   request: HostedRuntimeAssistantPersonalizationModelToolRequest
@@ -2576,7 +2660,7 @@ async function executePersonalizationTool(input: {
   }
 
   const assistantInputId = input.request.action === 'update'
-    ? input.hostedToolContext?.currentAssistantPreferenceInputId?.() ?? null
+    ? input.hostedToolContext?.currentAssistantInputId?.() ?? null
     : null
   if (input.request.action === 'update' && assistantInputId === null) {
     return toolTextResult(false, 'personalization is unavailable for this turn')
@@ -2623,7 +2707,7 @@ async function executeAssistantConfigurationTool(input: {
     }
 
     const assistantInputId =
-      input.hostedToolContext?.currentAssistantPreferenceInputId?.() ?? null
+      input.hostedToolContext?.currentAssistantInputId?.() ?? null
     if (!assistantInputId) {
       return toolTextResult(
         false,
@@ -3917,6 +4001,33 @@ function parsePlanUsageArguments(
     }
   }
   return { ok: true }
+}
+
+function parseSubscriptionArguments(
+  value: unknown,
+):
+  | {
+      ok: true
+      request: HostedRuntimeSubscriptionToolRequest
+    }
+  | { ok: false; validationDigest: SafeToolCallValidationDigest } {
+  const parsed = hostedRuntimeSubscriptionToolRequestSchema.safeParse(value)
+  if (!parsed.success) {
+    return {
+      ok: false,
+      validationDigest: buildDynamicToolValidationDigest({
+        error: parsed.error,
+        rawInput: value,
+        schemaName: 'murph.subscription.input',
+        schemaRootKeys: ['action'],
+        toolName: 'murph.subscription',
+      }),
+    }
+  }
+  return {
+    ok: true,
+    request: parsed.data,
+  }
 }
 
 function parsePersonalizationArguments(

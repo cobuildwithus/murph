@@ -1599,11 +1599,15 @@ export async function findHostedMailboxItemByDedupeKeyTx(input: {
   });
 }
 
-export async function readHostedMailboxPreferenceCausalSeqByAssistantInputIdTx(input: {
+export interface HostedMailboxConversationInputAuthority {
+  causalSeq: string;
+}
+
+export async function readHostedMailboxConversationInputAuthorityByAssistantInputIdTx(input: {
   assistantInputId: string;
   memberId: string;
   prisma: HostedMailboxStoreClient;
-}): Promise<string | null> {
+}): Promise<HostedMailboxConversationInputAuthority | null> {
   const assistantInputId = normalizeNullableString(input.assistantInputId);
   const memberId = normalizeNullableString(input.memberId);
   const assistantInputLookupKeys = assistantInputId
@@ -1633,9 +1637,25 @@ export async function readHostedMailboxPreferenceCausalSeqByAssistantInputIdTx(i
     },
   });
 
-  return rows.length === 1
-    ? rows[0]?.causalSeq?.toString() ?? null
-    : null;
+  const causalSeq = rows[0]?.causalSeq;
+  if (rows.length !== 1 || causalSeq === undefined || causalSeq === null) {
+    return null;
+  }
+
+  return {
+    causalSeq: causalSeq.toString(),
+  };
+}
+
+export async function readHostedMailboxPreferenceCausalSeqByAssistantInputIdTx(input: {
+  assistantInputId: string;
+  memberId: string;
+  prisma: HostedMailboxStoreClient;
+}): Promise<string | null> {
+  const authority =
+    await readHostedMailboxConversationInputAuthorityByAssistantInputIdTx(input);
+
+  return authority?.causalSeq ?? null;
 }
 
 export async function allocateHostedMailboxLaneSeqTx(input: {

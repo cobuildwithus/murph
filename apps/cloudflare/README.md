@@ -48,6 +48,11 @@ The phone-call start port is one bounded `web-control.worker` callback into `app
 `murph.plan_usage` uses one allowlisted signed `web-control.worker` callback.
 Cloudflare transports and validates the strict result but owns no billing or
 usage truth and has no billing mutation authority.
+`murph.subscription` uses the same write-fenced, allowlisted callback boundary
+for one input-bound subscription action. Cloudflare validates and transports the
+strict result but owns no plan facts, payment URL, or billing mutation logic.
+Deploy the Web route before the Cloudflare runner that advertises this optional
+port. Older runners simply omit the tool, so that Web-first order is compatible.
 The usage-record callback may also transport one bounded Linq group delivery
 target captured from the accepted mailbox input. The target includes the
 existing thread-route authority and is advisory to web-owned accounting; the

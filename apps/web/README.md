@@ -512,6 +512,7 @@ Hosted AI usage metering:
 - Hosted AI usage rows are recorded locally for allowance, audit, and future billing analysis. The hosted app no longer attaches Stripe usage prices at checkout or posts Stripe meter events.
 - Hosted AI included-allowance accounting is app-owned: web prices recorded `HostedAiUsage` rows into allowance columns and maintains `HostedAiUsagePeriod` spend snapshots from current hosted billing state. The allowance is an advisory product and billing signal, not a runtime gate for an otherwise active member.
 - Web derives one read-only member plan-usage projection from that same allowance resolver and usage ledger for Settings and `murph.plan_usage`. It persists no forecast, performs no Stripe read, and returns only bounded percentages, period facts, an optional conservative forecast, and a server-selected action.
+- Web owns the separate `murph.subscription` callback for an explicit private member choice to continue Pulse at trial end, start Pulse now, or upgrade Pulse to Edge. It binds the runtime-supplied accepted input id to the callback member, re-derives current eligibility, and delegates to the existing billing services. It returns a Stripe-hosted invoice or Customer Portal URL only when payment is required; no custom checkout or new billing state is introduced.
 - Homepage period facts come from the same allowance owner. Spend accounting ensure-creates a fresh billing or calendar period inside the spend transaction, with no reset cron.
 - Temporal does not fetch or forward signed usage decisions to Cloudflare ensure-processing, and webhook wake handoff signals Temporal by mailbox pointer only. Model-work admission reads the hosted member-access owner; runtime usage is recorded through the hosted platform after it exists.
 - Assistant usage recording may carry the exact authority-bound originating Linq group route for a proactive thread-cap crossing notice. Web reuses the existing claimed Linq delivery path, never derives a group target from personal home routing, and keeps the next-inbound gate notice as the backstop when the target is missing or ambiguous.
@@ -1089,6 +1090,7 @@ Internal hosted maintenance and Cloudflare callback routes:
 - `POST /api/internal/device-sync/reconcile`
 - `POST /api/internal/hosted-execution/usage/record`
 - `POST /api/internal/hosted-execution/plan-usage/tool`
+- `POST /api/internal/hosted-execution/subscription/tool`
 - `POST /api/internal/hosted-mailbox/fetch`
 - `POST /api/internal/hosted-mailbox/payload/fetch`
 - `POST /api/internal/hosted-mailbox/email-ingress`

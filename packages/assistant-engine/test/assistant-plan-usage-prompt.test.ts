@@ -19,6 +19,26 @@ describe("assistant plan usage guidance", () => {
     expect(guidance).toContain("Never plead, imply Murph will die, use existential guilt");
     expect(guidance).toContain("only when recommendedAction is non-null");
     expect(guidance).toContain("and relevant to the member's request");
+    expect(guidance).toContain(
+      "state the exact current label and terms returned by recommendedAction",
+    );
+    expect(guidance).toContain(
+      "one short reply-oriented question and include no URL",
+    );
+    expect(guidance).toContain("should we part ways?");
+    expect(guidance).toContain("say nothing");
+    expect(guidance).toContain(
+      "a less capable model that uses less of your included usage",
+    );
+    expect(guidance).toContain("Do not assume the member knows Luna, Terra, or Sol");
+    expect(guidance).toContain("Never switch models automatically");
+    expect(guidance).toContain("a bare “yes” after multiple choices is insufficient");
+    expect(guidance).toContain(
+      "continue_pulse as non-charging continuation only when this current read confirms an active trial",
+    );
+    expect(guidance).toContain(
+      "trial_conversion_pending or an ended trial, treat recovery as start-now",
+    );
     expect(guidance).toContain("explicit request to manage billing");
     expect(guidance).toContain(
       `${MURPH_PRODUCT_ORIGIN}/settings#subscription`,

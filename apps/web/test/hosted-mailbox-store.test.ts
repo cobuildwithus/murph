@@ -26,6 +26,7 @@ import {
   readHostedMailboxItemCheckpointById,
   readHostedMailboxMaxSeqByLane,
   readHostedMailboxPendingSystemItemsNeedAiUsageGate,
+  readHostedMailboxConversationInputAuthorityByAssistantInputIdTx,
   readHostedMailboxPreferenceCausalSeqByAssistantInputIdTx,
   readHostedMailboxWakeAfterDedupeLockTx,
   resolveHostedMailboxRuntimeFetchLaneCursors,
@@ -153,6 +154,25 @@ describe("readHostedMailboxRecentLiveConversationItemIds", () => {
 });
 
 describe("readHostedMailboxPreferenceCausalSeqByAssistantInputIdTx", () => {
+  it("projects the preference sequence from neutral live conversation input authority", async () => {
+    const findMany = vi.fn().mockResolvedValue([{ causalSeq: 7n }]);
+    const prisma = {
+      hostedMailboxItem: { findMany },
+    } as never;
+    const input = {
+      assistantInputId: "ain_valid",
+      memberId: "member_mailbox_1",
+      prisma,
+    };
+
+    await expect(
+      readHostedMailboxConversationInputAuthorityByAssistantInputIdTx(input),
+    ).resolves.toEqual({ causalSeq: "7" });
+    await expect(
+      readHostedMailboxPreferenceCausalSeqByAssistantInputIdTx(input),
+    ).resolves.toBe("7");
+  });
+
   it("returns only a live canonical conversation sequence owned by the member", async () => {
     const now = new Date();
     const rows = [

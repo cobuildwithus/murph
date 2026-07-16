@@ -77,6 +77,10 @@ import type {
   HostedPlanUsageStatus,
 } from "@murphai/hosted-execution/plan-usage";
 import type {
+  HostedRuntimeSubscriptionControlRequest,
+  HostedRuntimeSubscriptionToolResponse,
+} from "@murphai/hosted-execution/subscription";
+import type {
   HostedExecutionDeviceSyncConnectLinkResponse,
   HostedExecutionDeviceSyncDirtyAckRequest,
   HostedExecutionDeviceSyncDirtyAckResponse,
@@ -410,6 +414,12 @@ export interface HostedRuntimePlanUsageToolPort {
   read(): Promise<HostedPlanUsageStatus>;
 }
 
+export interface HostedRuntimeSubscriptionToolPort {
+  request(
+    request: HostedRuntimeSubscriptionControlRequest,
+  ): Promise<HostedRuntimeSubscriptionToolResponse>;
+}
+
 export interface HostedRuntimeAssistantPersonalizationToolPort {
   request(
     request: HostedRuntimeAssistantPersonalizationToolRequest,
@@ -583,6 +593,7 @@ export interface HostedRuntimePlatform {
   mailboxPort?: HostedRuntimeMailboxPort | null;
   newsletterToolPort?: HostedRuntimeNewsletterToolPort | null;
   planUsageToolPort?: HostedRuntimePlanUsageToolPort | null;
+  subscriptionToolPort?: HostedRuntimeSubscriptionToolPort | null;
   phoneCalls?: HostedRuntimePhoneCallPort | null;
   productFeedbackPort?: HostedRuntimeProductFeedbackPort | null;
   runtimeLivenessIntervalMs?: number | null;

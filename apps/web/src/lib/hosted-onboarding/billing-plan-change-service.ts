@@ -5,7 +5,10 @@ import { resolveHostedAiUsageGate } from "../hosted-execution/usage-allowance";
 import { signalHostedRuntimeManualWakeBestEffort } from "../hosted-orchestration/manual-wake";
 import { sha256Hex } from "../primitives";
 import { getPrisma } from "../prisma";
-import { coerceStripeObjectId } from "./billing";
+import {
+  coerceStripeInvoiceSubscriptionId,
+  coerceStripeObjectId,
+} from "./billing";
 import {
   canUpgradeHostedBillingPlanToEdge,
   HOSTED_STANDARD_CHECKOUT_OFFER,
@@ -40,7 +43,7 @@ export type HostedBillingPlanUpgradeResult =
   }
   | {
     billingPlanCode: "launch_monthly";
-    billingPortalUrl: string;
+    paymentUrl: string;
     status: "pending_payment";
   };
 
@@ -172,12 +175,20 @@ export async function upgradeHostedBillingPlan(input: {
     subscription: updatedSubscription,
     targetPriceId: targetConfig.priceId,
   })) {
+    const invoicePaymentUrl = await readHostedBillingPlanUpgradeInvoicePaymentUrl({
+      stripe,
+      stripeCustomerId,
+      stripeSubscriptionId,
+      subscription: updatedSubscription,
+    });
+    const paymentUrl = invoicePaymentUrl ?? await createHostedBillingPlanUpgradePortalUrl({
+      stripe,
+      stripeCustomerId,
+    });
+
     return {
       billingPlanCode: transition.currentPlanCode,
-      billingPortalUrl: await createHostedBillingPlanUpgradePortalUrl({
-        stripe,
-        stripeCustomerId,
-      }),
+      paymentUrl,
       status: "pending_payment",
     };
   }
@@ -520,6 +531,51 @@ function assertHostedStripeSubscriptionMatchesCustomer(input: {
     httpStatus: 409,
     message: "Your subscription could not be matched to this hosted account.",
   });
+}
+
+async function readHostedBillingPlanUpgradeInvoicePaymentUrl(input: {
+  stripe: Stripe;
+  stripeCustomerId: string;
+  stripeSubscriptionId: string;
+  subscription: Stripe.Subscription;
+}): Promise<string | null> {
+  const latestInvoice = input.subscription.latest_invoice;
+  if (!latestInvoice) {
+    return null;
+  }
+
+  const invoice = typeof latestInvoice === "string"
+    ? await retrieveHostedBillingPlanUpgradeInvoice({
+        invoiceId: latestInvoice,
+        stripe: input.stripe,
+      })
+    : latestInvoice;
+
+  if (
+    !invoice ||
+    invoice.status !== "open" ||
+    invoice.amount_remaining <= 0 ||
+    coerceStripeObjectId(invoice.customer) !== input.stripeCustomerId ||
+    coerceStripeInvoiceSubscriptionId(invoice) !== input.stripeSubscriptionId
+  ) {
+    return null;
+  }
+
+  const paymentUrl = invoice.hosted_invoice_url;
+  return typeof paymentUrl === "string" && paymentUrl.startsWith("https://")
+    ? paymentUrl
+    : null;
+}
+
+async function retrieveHostedBillingPlanUpgradeInvoice(input: {
+  invoiceId: string;
+  stripe: Stripe;
+}): Promise<Stripe.Invoice | null> {
+  const invoice = await callHostedStripePlanUpgradeOperation(
+    "invoice.retrieve.pending-plan-update",
+    () => input.stripe.invoices.retrieve(input.invoiceId),
+  );
+  return invoice.id === input.invoiceId ? invoice : null;
 }
 
 function findHostedStripeSubscriptionItemByPriceId(

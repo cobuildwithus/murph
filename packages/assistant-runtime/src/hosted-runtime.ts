@@ -81,7 +81,7 @@ import {
   createHostedAssistantChannelTypingDependencies,
 } from "./hosted-runtime/channel-activity.ts";
 import {
-  resolveHostedPersonalizationInputIdForAcceptedInputs,
+  resolveHostedCurrentInputIdForAcceptedInputs,
 } from "./hosted-runtime/turn-input.ts";
 import type {
   HostedAssistantWorkspaceRuntimeJobResult,
@@ -1699,7 +1699,7 @@ export async function runHostedWorkspaceRuntimeJobInProcess(
         status: "start",
       });
       try {
-        let currentAssistantPreferenceInputId: string | null = null;
+        let currentAssistantInputId: string | null = null;
         const passResult = await hostedCliBridge.runWithInvocation(
           {
             currentDeliveryRoute: () => currentOperationDeliveryRoute,
@@ -1729,7 +1729,7 @@ export async function runHostedWorkspaceRuntimeJobInProcess(
                 startedAtEpochMs: passStartedAtEpochMs,
               },
               runAssistantPhase: async (phaseInput) => {
-                currentAssistantPreferenceInputId = null;
+                currentAssistantInputId = null;
                 try {
                   const phaseAssistantTarget = readConfirmedAssistantTarget();
                   const confirmedAssistantTargetEnv = phaseAssistantTarget
@@ -1752,8 +1752,7 @@ export async function runHostedWorkspaceRuntimeJobInProcess(
                     options.runAssistantPhase ?? runHostedWorkspaceAssistantPhase
                   )({
                     ...phaseInput,
-                    currentAssistantPreferenceInputId: () =>
-                      currentAssistantPreferenceInputId,
+                    currentAssistantInputId: () => currentAssistantInputId,
                     currentDeliveryRouteScope,
                     deviceSyncWorkspaceWakeHandled: deviceSyncWorkspaceWakeHandledUntilCheckpoint,
                     request: input.request,
@@ -1769,15 +1768,14 @@ export async function runHostedWorkspaceRuntimeJobInProcess(
                       )
                         ? acceptedInputs.map((acceptedInput) => acceptedInput.id)
                         : [];
-                      const assistantPreferenceInputId =
-                        await resolveHostedPersonalizationInputIdForAcceptedInputs({
+                      const assistantInputId =
+                        await resolveHostedCurrentInputIdForAcceptedInputs({
                           assistantInputIds,
                           vaultRoot: restored.vaultRoot,
                         });
-                      currentAssistantPreferenceInputId =
-                        assistantPreferenceInputId;
+                      currentAssistantInputId = assistantInputId;
                       return () => {
-                        currentAssistantPreferenceInputId = null;
+                        currentAssistantInputId = null;
                       };
                     },
                     stagedDirtyAcks: stagedDeviceSyncDirtyAcks,
@@ -1786,7 +1784,7 @@ export async function runHostedWorkspaceRuntimeJobInProcess(
                   });
                   return phaseResult;
                 } finally {
-                  currentAssistantPreferenceInputId = null;
+                  currentAssistantInputId = null;
                 }
               },
               signal: passSignal,

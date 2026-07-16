@@ -10,6 +10,7 @@ import { resolveHostedPublicBaseUrl } from "../hosted-web/public-url";
 import {
   canStartHostedPulseTrialPaidPlan,
   canUpgradeHostedBillingPlanToEdge,
+  getHostedBillingPlanDefinition,
 } from "../hosted-onboarding/billing-plans";
 import { hasHostedMemberOwnActiveBilling } from "../hosted-onboarding/entitlement";
 import { readHostedMemberBillingEligibilityState } from "../hosted-onboarding/hosted-member-billing-store";
@@ -321,15 +322,19 @@ function buildRecommendedAction(
   if (!actionUrl) {
     return null;
   }
+  const billingPlan = getHostedBillingPlanDefinition(
+    kind === "start_pulse" ? "launch_monthly" : "launch_edge_monthly",
+  );
+  const recurringAmount = `$${billingPlan.recurringAmountUsdCents / 100}`;
   return kind === "start_pulse"
     ? {
         kind,
-        label: "Start Pulse",
+        label: `Start Pulse now (${recurringAmount}/month)`,
         url: actionUrl,
       }
     : {
         kind,
-        label: "Upgrade to Edge",
+        label: `Upgrade to Edge (${recurringAmount}/month)`,
         url: actionUrl,
       };
 }

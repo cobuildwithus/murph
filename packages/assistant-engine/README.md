@@ -77,3 +77,14 @@ hosted plan-usage service exists, accepts no arguments, and returns only the
 web-authorized read projection. Assistant policy limits it to explicit member
 questions or one trusted manual private check; it is not an onboarding or
 recurring usage watcher.
+
+`murph.subscription` is also private and default-off. It is advertised only
+when a hosted subscription service exists and the current private turn has
+eligible accepted member input. Assistant policy requires one explicit,
+unambiguous current-turn choice before calling it. The model supplies only the
+bounded action; assistant-engine injects the current accepted input id before
+the host call and consumes the ephemeral subscription capability on its first
+use. A second action requires new eligible member input. That binding proves
+current authority, not the meaning of the message. The result exposes a
+Stripe-hosted URL only when payment is required, and the tool never exposes a
+general billing or Stripe client.

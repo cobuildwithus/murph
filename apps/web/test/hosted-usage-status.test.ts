@@ -85,7 +85,7 @@ describe("readHostedPersonalAiUsageStatus", () => {
       planName: "Pulse Trial",
       recommendedAction: {
         kind: "start_pulse",
-        label: "Start Pulse",
+        label: "Start Pulse now ($8/month)",
         url: "https://example.test/settings#subscription",
       },
       remainingPercent: 50,
@@ -376,7 +376,7 @@ describe("readHostedPersonalAiUsageStatus", () => {
       reason: "trial_conversion_pending",
       recommendedAction: {
         kind: "start_pulse",
-        label: "Start Pulse",
+        label: "Start Pulse now ($8/month)",
         url: "https://example.test/settings#subscription",
       },
       status: "unavailable",
@@ -474,7 +474,7 @@ describe("readHostedPersonalAiUsageStatus", () => {
     })).resolves.toMatchObject({
       recommendedAction: {
         kind: "upgrade_edge",
-        label: "Upgrade to Edge",
+        label: "Upgrade to Edge ($20/month)",
         url: "https://example.test/settings#subscription",
       },
       remainingPercent: 0,

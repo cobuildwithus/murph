@@ -100,11 +100,46 @@ export type HostedPulseTrialStartPaidResult =
     status: "payment_required";
   };
 
-export async function startHostedPulseTrialPaidPlan(input: {
+export type HostedPulseTrialContinueResult =
+  | HostedPulseTrialStartPaidResult
+  | {
+    billingPlanCode: "launch_monthly";
+    status: "continuing";
+  };
+
+interface HostedPulseTrialPaidPlanInput {
   memberId: string;
   now?: Date;
   prisma?: PrismaClient;
-}): Promise<HostedPulseTrialStartPaidResult> {
+}
+
+export async function startHostedPulseTrialPaidPlan(
+  input: HostedPulseTrialPaidPlanInput,
+): Promise<HostedPulseTrialStartPaidResult> {
+  return transitionHostedPulseTrialPaidPlan({
+    ...input,
+    timing: "now",
+  });
+}
+
+export async function continueHostedPulseTrialPaidPlan(
+  input: HostedPulseTrialPaidPlanInput,
+): Promise<HostedPulseTrialContinueResult> {
+  return transitionHostedPulseTrialPaidPlan({
+    ...input,
+    timing: "at_trial_end",
+  });
+}
+
+async function transitionHostedPulseTrialPaidPlan(
+  input: HostedPulseTrialPaidPlanInput & { timing: "now" },
+): Promise<HostedPulseTrialStartPaidResult>;
+async function transitionHostedPulseTrialPaidPlan(
+  input: HostedPulseTrialPaidPlanInput & { timing: "at_trial_end" },
+): Promise<HostedPulseTrialContinueResult>;
+async function transitionHostedPulseTrialPaidPlan(
+  input: HostedPulseTrialPaidPlanInput & { timing: "at_trial_end" | "now" },
+): Promise<HostedPulseTrialContinueResult> {
   const prisma = input.prisma ?? getPrisma();
   const now = input.now ?? new Date();
   const member = await readHostedMemberCoreState({
@@ -244,6 +279,13 @@ export async function startHostedPulseTrialPaidPlan(input: {
         stripeCustomerId,
       }),
       status: "payment_required",
+    };
+  }
+
+  if (input.timing === "at_trial_end") {
+    return {
+      billingPlanCode: START_PAID_PULSE_PLAN,
+      status: "continuing",
     };
   }
 

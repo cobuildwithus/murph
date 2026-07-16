@@ -74,6 +74,10 @@
       "types": "./dist/plan-usage.d.ts",
       "default": "./dist/plan-usage.js"
     },
+    "./subscription": {
+      "types": "./dist/subscription.d.ts",
+      "default": "./dist/subscription.js"
+    },
     "./dashboard-replica": {
       "types": "./dist/dashboard-replica.d.ts",
       "default": "./dist/dashboard-replica.js"

@@ -26,6 +26,9 @@ const mocks = vi.hoisted(() => ({
         create: vi.fn(),
       },
     },
+    invoices: {
+      retrieve: vi.fn(),
+    },
     subscriptions: {
       retrieve: vi.fn(),
       update: vi.fn(),
@@ -123,6 +126,7 @@ describe("upgradeHostedBillingPlan", () => {
     mocks.stripe.billingPortal.sessions.create.mockResolvedValue({
       url: "https://stripe.example.test/portal/session_123",
     });
+    mocks.stripe.invoices.retrieve.mockResolvedValue(makeInvoice());
     mocks.requireHostedOnboardingPublicBaseUrl.mockReturnValue("https://join.example.test");
     mocks.resolveHostedAiUsageGate.mockResolvedValue({
       allowed: true,
@@ -867,7 +871,42 @@ describe("upgradeHostedBillingPlan", () => {
     }), expect.any(Object));
   });
 
-  test("returns a Billing Portal fallback when the Stripe update stays pending", async () => {
+  test("returns the hosted invoice when the Stripe update stays pending", async () => {
+    mocks.stripe.subscriptions.update.mockResolvedValueOnce(makeSubscription({
+      customer: "cus_123",
+      items: [
+        ["si_recurring", "price_pulse_recurring"],
+        ["si_usage", "price_pulse_usage"],
+      ],
+      latestInvoice: "in_upgrade",
+      metadata: {
+        billingPlanCode: "launch_monthly",
+      },
+      pendingUpdate: true,
+      status: "active",
+    }));
+    mocks.stripe.invoices.retrieve.mockResolvedValueOnce(makeInvoice({
+      hostedInvoiceUrl: "https://invoice.stripe.test/in_upgrade",
+      id: "in_upgrade",
+    }));
+
+    await expect(upgradeHostedBillingPlan({
+      memberId: "member_123",
+      targetPlanCode: "launch_edge_monthly",
+    })).resolves.toEqual({
+      billingPlanCode: "launch_monthly",
+      paymentUrl: "https://invoice.stripe.test/in_upgrade",
+      status: "pending_payment",
+    });
+
+    expect(mocks.stripe.billingPortal.sessions.create).not.toHaveBeenCalled();
+    expect(mocks.stripe.invoices.retrieve).toHaveBeenCalledWith("in_upgrade");
+    expect(mocks.applyStripeSubscriptionUpdated).not.toHaveBeenCalled();
+    expect(mocks.resolveHostedAiUsageGate).not.toHaveBeenCalled();
+    expect(mocks.signalHostedRuntimeManualWakeBestEffort).not.toHaveBeenCalled();
+  });
+
+  test("returns a Billing Portal fallback when a pending update has no hosted invoice", async () => {
     mocks.stripe.subscriptions.update.mockResolvedValueOnce(makeSubscription({
       customer: "cus_123",
       items: [
@@ -886,7 +925,7 @@ describe("upgradeHostedBillingPlan", () => {
       targetPlanCode: "launch_edge_monthly",
     })).resolves.toEqual({
       billingPlanCode: "launch_monthly",
-      billingPortalUrl: "https://stripe.example.test/portal/session_123",
+      paymentUrl: "https://stripe.example.test/portal/session_123",
       status: "pending_payment",
     });
 
@@ -897,6 +936,64 @@ describe("upgradeHostedBillingPlan", () => {
     expect(mocks.applyStripeSubscriptionUpdated).not.toHaveBeenCalled();
     expect(mocks.resolveHostedAiUsageGate).not.toHaveBeenCalled();
     expect(mocks.signalHostedRuntimeManualWakeBestEffort).not.toHaveBeenCalled();
+  });
+
+  test("does not expose a pending invoice that belongs to another customer", async () => {
+    mocks.stripe.subscriptions.update.mockResolvedValueOnce(makeSubscription({
+      customer: "cus_123",
+      items: [
+        ["si_recurring", "price_pulse_recurring"],
+      ],
+      latestInvoice: makeInvoice({
+        customer: "cus_other",
+        hostedInvoiceUrl: "https://invoice.stripe.test/in_other",
+      }),
+      metadata: {
+        billingPlanCode: "launch_monthly",
+      },
+      pendingUpdate: true,
+      status: "active",
+    }));
+
+    await expect(upgradeHostedBillingPlan({
+      memberId: "member_123",
+      targetPlanCode: "launch_edge_monthly",
+    })).resolves.toEqual({
+      billingPlanCode: "launch_monthly",
+      paymentUrl: "https://stripe.example.test/portal/session_123",
+      status: "pending_payment",
+    });
+
+    expect(mocks.stripe.billingPortal.sessions.create).toHaveBeenCalledTimes(1);
+  });
+
+  test("does not expose a pending invoice for another subscription on the same customer", async () => {
+    mocks.stripe.subscriptions.update.mockResolvedValueOnce(makeSubscription({
+      customer: "cus_123",
+      items: [
+        ["si_recurring", "price_pulse_recurring"],
+      ],
+      latestInvoice: makeInvoice({
+        hostedInvoiceUrl: "https://invoice.stripe.test/in_other_subscription",
+        subscriptionId: "sub_other",
+      }),
+      metadata: {
+        billingPlanCode: "launch_monthly",
+      },
+      pendingUpdate: true,
+      status: "active",
+    }));
+
+    await expect(upgradeHostedBillingPlan({
+      memberId: "member_123",
+      targetPlanCode: "launch_edge_monthly",
+    })).resolves.toEqual({
+      billingPlanCode: "launch_monthly",
+      paymentUrl: "https://stripe.example.test/portal/session_123",
+      status: "pending_payment",
+    });
+
+    expect(mocks.stripe.billingPortal.sessions.create).toHaveBeenCalledTimes(1);
   });
 
   test("does not report upgraded when local reconciliation has not reached Edge", async () => {
@@ -922,6 +1019,7 @@ describe("upgradeHostedBillingPlan", () => {
 function makeSubscription(input: {
   customer: string;
   items: Array<[id: string, priceId: string, quantity?: number | null]>;
+  latestInvoice?: Stripe.Invoice | string | null;
   metadata: Record<string, string>;
   pendingUpdate?: boolean;
   status: Stripe.Subscription.Status;
@@ -948,11 +1046,35 @@ function makeSubscription(input: {
         ...(quantity === undefined ? {} : { quantity }),
       })),
     },
+    latest_invoice: input.latestInvoice === undefined ? null : input.latestInvoice,
     metadata: input.metadata,
     object: "subscription",
     pending_update: input.pendingUpdate ? {} : null,
     status: input.status,
   } as Stripe.Subscription;
+}
+
+function makeInvoice(input: {
+  customer?: string;
+  hostedInvoiceUrl?: string | null;
+  id?: string;
+  subscriptionId?: string;
+} = {}): Stripe.Invoice {
+  return {
+    amount_remaining: 1_200,
+    customer: input.customer ?? "cus_123",
+    hosted_invoice_url: input.hostedInvoiceUrl === undefined
+      ? "https://invoice.stripe.test/in_123"
+      : input.hostedInvoiceUrl,
+    id: input.id ?? "in_123",
+    object: "invoice",
+    parent: {
+      subscription_details: {
+        subscription: input.subscriptionId ?? "sub_123",
+      },
+    },
+    status: "open",
+  } as Stripe.Invoice;
 }
 
 function isLegacyUsagePriceId(priceId: string): boolean {
