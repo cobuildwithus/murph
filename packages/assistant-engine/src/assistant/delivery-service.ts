@@ -952,7 +952,9 @@ function createHostedDeliveryIdempotencyKeyFromContext(input: {
         threadId,
         threadIsDirect,
       ]),
-    inboundMailboxItemIds,
+    // Keep the key stable if replay groups previously steered inputs into one
+    // turn: the latest inbound item is the causal anchor for this delivery.
+    inboundMailboxItemIds: [inboundMailboxItemIds.at(-1)!],
     recipientKey:
       normalizeNullableString(context?.recipientKey) ??
       stringifyHostedDeliveryIdempotencyKeyParts([

@@ -211,7 +211,18 @@ export const VoiceMemoPlayer = forwardRef<
           )}
         </button>
 
-        <div className="flex h-7 flex-1 items-center justify-between">
+        <button
+          type="button"
+          onClick={toggle}
+          disabled={unavailable}
+          aria-label={
+            playing
+              ? "Pause voice memo from waveform"
+              : "Play voice memo from waveform"
+          }
+          data-voice-memo-waveform
+          className="flex h-7 flex-1 cursor-pointer items-center justify-between rounded-sm focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2 disabled:cursor-not-allowed"
+        >
           {barHeightsFor(bars).map((h, i) => {
             const filled = (i + 1) / bars <= progress;
             return (
@@ -225,7 +236,7 @@ export const VoiceMemoPlayer = forwardRef<
               />
             );
           })}
-        </div>
+        </button>
 
         <span className="shrink-0 font-mono text-[11px] tabular-nums text-[#736a58]">
           {unavailable ? unavailableLabel : formatTime(displayTime)}

@@ -451,6 +451,8 @@ export async function projectHostedLinqLineForProviderEventTx(input: {
       return projectMessageDelivered(input.prisma, lineLookupKey, input.event);
     case "message.failed":
       return projectMessageFailed(input.prisma, lineLookupKey, input.event);
+    case "message.sent":
+      return false;
     case "phone_number.status_updated":
       return projectPhoneNumberStatusUpdated(input.prisma, lineLookupKey, input.event);
     case "participant.added":

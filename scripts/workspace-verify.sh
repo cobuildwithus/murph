@@ -171,6 +171,20 @@ local_worker_budget_default() {
   normalize_positive_integer "$worker_budget" "$fallback"
 }
 
+resolve_package_coverage_concurrency_default() {
+  if [[ -n "${CI:-}" ]]; then
+    printf '1\n'
+    return
+  fi
+
+  if [[ "$shared_host_mode" == "1" ]]; then
+    printf '2\n'
+    return
+  fi
+
+  local_concurrency_default 6 4
+}
+
 readonly app_verify_parallel_default="$([[ -n "${CI:-}" || "$shared_host_mode" == "1" ]] && echo 0 || echo 1)"
 readonly app_verify_parallel="${MURPH_APP_VERIFY_PARALLEL:-$app_verify_parallel_default}"
 readonly acceptance_app_verify_with_coverage_default="$([[ -n "${CI:-}" || "$shared_host_mode" == "1" ]] && echo 0 || echo 1)"
@@ -183,7 +197,7 @@ readonly acceptance_app_verify_delay_seconds="$(normalize_non_negative_integer "
 readonly acceptance_early_cloudflare_verify="${MURPH_ACCEPTANCE_EARLY_CLOUDFLARE_VERIFY:-0}"
 readonly test_lane_parallel_default="$([[ -n "${CI:-}" || "$shared_host_mode" == "1" ]] && echo 0 || echo 1)"
 readonly test_lane_parallel="${MURPH_TEST_LANES_PARALLEL:-$test_lane_parallel_default}"
-readonly package_coverage_concurrency_default="$([[ -n "${CI:-}" ]] && echo 1 || [[ "$shared_host_mode" == "1" ]] && echo 2 || local_concurrency_default 6 4)"
+readonly package_coverage_concurrency_default="$(resolve_package_coverage_concurrency_default)"
 readonly package_coverage_concurrency_limit="$(normalize_positive_integer "${MURPH_PACKAGE_COVERAGE_CONCURRENCY:-$package_coverage_concurrency_default}" "$package_coverage_concurrency_default")"
 readonly package_coverage_cli_active_concurrency_default="$([[ -n "${CI:-}" || "$shared_host_mode" == "1" ]] && echo 1 || echo 4)"
 readonly package_coverage_cli_active_concurrency_limit="$(normalize_positive_integer "${MURPH_PACKAGE_COVERAGE_CLI_ACTIVE_CONCURRENCY:-$package_coverage_cli_active_concurrency_default}" "$package_coverage_cli_active_concurrency_default")"

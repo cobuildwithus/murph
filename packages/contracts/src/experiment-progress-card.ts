@@ -73,7 +73,10 @@ const cardMoverSchema = z
     delta: z.string().trim().min(1).max(20),
     /** Sign of the change, used for the directional glyph. */
     direction: z.enum(["up", "down", "neutral"]),
-    /** Whether the change is good ("positive"), bad ("negative"), or neutral. */
+    /**
+     * Canonical biomarker interpretation: favorable ("positive"), unfavorable
+     * ("negative"), or neutral when direction alone is not meaningful.
+     */
     sentiment: z.enum(["positive", "negative", "neutral"]),
   })
   .strict();

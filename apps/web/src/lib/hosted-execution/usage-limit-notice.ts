@@ -163,8 +163,6 @@ export async function sendClaimedHostedAiUsageLimitNoticeToTelegramThread(input:
         failedAt: input.sentAt,
         failureCode: hostedControlHttpError?.code ?? "hosted_control_unavailable",
         idempotencyKey: dispatch.claim.idempotencyKey,
-        memberId: input.memberId,
-        periodStart: input.periodStart,
         prisma: input.prisma,
         retryAfterAt: new Date(
           input.sentAt.getTime() + HOSTED_AI_USAGE_LIMIT_NOTICE_CLAIM_STALE_MS,
@@ -194,8 +192,6 @@ export async function sendClaimedHostedAiUsageLimitNoticeToTelegramThread(input:
         failedAt: input.sentAt,
         failureCode: deliveryResult.failureCode,
         idempotencyKey: dispatch.claim.idempotencyKey,
-        memberId: input.memberId,
-        periodStart: input.periodStart,
         prisma: input.prisma,
         retryAfterAt: readHostedTelegramUsageLimitNoticeRetryAfterAt({
           result: deliveryResult,

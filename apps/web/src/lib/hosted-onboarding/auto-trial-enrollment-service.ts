@@ -10,6 +10,7 @@ import {
   HOSTED_PULSE_TRIAL_OFFER,
   HOSTED_PULSE_TRIAL_POLICY_VERSION,
   isHostedAutoPulseTrialEnabled,
+  parseHostedPulseTrialPolicyVersion,
 } from "./billing-plans";
 import { isHostedMemberSuspended } from "./entitlement";
 import { hostedOnboardingError, isHostedOnboardingError } from "./errors";
@@ -498,7 +499,6 @@ function assertHostedAutoPulseTrialCampaignSubscriptionEligible(input: {
     subscription.cancel_at_period_end ||
     subscription.cancel_at !== null ||
     customerId !== input.stripeCustomerId ||
-    subscription.metadata.trialPolicyVersion !== HOSTED_PULSE_TRIAL_POLICY_VERSION ||
     !isHostedPulseTrialSubscriptionForKnownPolicy({
       memberId: input.memberId,
       priceId: input.priceId,
@@ -621,8 +621,6 @@ function assertHostedAutoPulseTrialFinalizationSubscriptionEligible(input: {
     input.subscription.cancel_at_period_end ||
     input.subscription.cancel_at !== null ||
     customerId !== input.stripeCustomerId ||
-    input.subscription.metadata.trialPolicyVersion !==
-      HOSTED_PULSE_TRIAL_POLICY_VERSION ||
     !isHostedPulseTrialSubscriptionForKnownPolicy({
       memberId: input.memberId,
       priceId: input.priceId,
@@ -647,6 +645,17 @@ async function finalizeHostedAutoPulseTrialEnrollmentTx(input: {
   trialSnapshot: ReturnType<typeof readHostedAutoPulseTrialSubscriptionSnapshot>;
   tx: Prisma.TransactionClient;
 }): Promise<HostedAutoPulseTrialFinalizationOutcome> {
+  const trialPolicyVersion = parseHostedPulseTrialPolicyVersion(
+    input.subscription.metadata.trialPolicyVersion,
+  );
+  if (!trialPolicyVersion) {
+    throw hostedOnboardingError({
+      code: "HOSTED_AUTO_PULSE_TRIAL_SUBSCRIPTION_CHANGED",
+      httpStatus: 409,
+      message: "Stripe trial state changed before activation. Try again.",
+      retryable: true,
+    });
+  }
   const currentStatus = resolveHostedAutoPulseTrialExistingStatus(input.currentMember);
   const isIncompleteSameTrial = currentStatus === "already_enrolled" &&
     input.currentMember.billingRef?.pulseTrialRedeemedAt === null &&
@@ -713,7 +722,7 @@ async function finalizeHostedAutoPulseTrialEnrollmentTx(input: {
     dispatchContext,
     freshnessPolicy: "auto-pulse-trial-entitlement",
     member: input.currentMember,
-    pulseTrialPolicyVersion: HOSTED_PULSE_TRIAL_POLICY_VERSION,
+    pulseTrialPolicyVersion: trialPolicyVersion,
     pulseTrialRedeemedAt: input.trialSnapshot.trialStartedAt,
     stripeCustomerId: input.stripeCustomerId,
     stripeSubscriptionId: input.subscription.id,
@@ -915,9 +924,6 @@ async function cleanupHostedAutoPulseTrialLosersForExistingEnrollment(input: {
     stripeCustomerId,
   });
   const loserSubscriptionIds = subscriptions.data
-    .filter((subscription) =>
-      subscription.metadata.trialPolicyVersion === HOSTED_PULSE_TRIAL_POLICY_VERSION
-    )
     .filter((subscription) => isHostedPulseTrialSubscriptionForKnownPolicy({
       memberId: input.memberId,
       priceId: input.priceId,
@@ -1110,8 +1116,6 @@ function isHostedAutoPulseTrialStripeSubscriptionForMember(input: {
     (
       !input.trialStartedBefore ||
       (
-        input.subscription.metadata.trialPolicyVersion ===
-          HOSTED_PULSE_TRIAL_POLICY_VERSION &&
         isHostedPulseTrialSubscriptionForKnownPolicy(input) &&
         trialStart !== null &&
         trialStart < input.trialStartedBefore
@@ -1125,8 +1129,6 @@ function isReusableHostedAutoPulseTrialStripeSubscription(input: {
   subscription: HostedAutoPulseTrialCampaignSubscription;
 }): boolean {
   return input.subscription.status === "trialing" &&
-    input.subscription.metadata?.trialPolicyVersion ===
-      HOSTED_PULSE_TRIAL_POLICY_VERSION &&
     isHostedPulseTrialSubscriptionForKnownPolicy(input);
 }
 

@@ -1,6 +1,6 @@
 # Complete exercise image inventory reconciliation
 
-Status: active
+Status: completed
 Created: 2026-07-12
 Updated: 2026-07-15
 
@@ -92,16 +92,16 @@ Updated: 2026-07-15
 - Completed checkpoint batch 3: generated and independently reviewed 50 movements with 155 unique images. Independent original-resolution review caught and corrected side/limb sequencing, subject and equipment continuity, camera locks, movement phases, and false annotation leaders before upload. All 155 accepted images passed checksum promotion, identity preflight, hosted-original byte verification, and public delivery checks; only the 50 owning seed `Images` fields changed.
 - Completed checkpoint batch 5: generated and independently reviewed 50 movements at sequences 271–320 with 171 unique images after reducing `ST556` to three truthful phases. Final targeted remediation replaced `ST625`'s transition and endpoint so the away-from-wall pelvis shift is visibly progressive while its palm and feet stay fixed. All 171 accepted images passed checksum promotion, identity preflight, hosted-original byte verification, and public delivery checks; only the 50 owning seed `Images` fields changed.
 - Completed checkpoint batch 6: generated and independently reviewed 50 movements at sequences 321–370 with 167 unique images. Original-resolution review caught and corrected movement-phase, limb-side, foot-contact, camera-axis, annotation-terminal, authoritative-identity, and metadata-truth defects before upload. The controller promoted exactly 50 accepted handoffs, reconciled 11 heuristic slide-count changes plus movement-specific count reasons, uploaded every accepted source through idempotent identity preflight, and verified hosted-original bytes and public delivery. Only the 50 owning seed `Images` fields changed.
+- Completed the final 43-movement checkpoint at sequences 371–413 with 141 unique images. Independent original-resolution review cleared all three final visual lanes after targeted replacement of the last ambiguous ankle-mobility endpoint. Every accepted image passed identity preflight, hosted-original byte verification, and public delivery; direct CSV proof shows exactly 43 formerly empty `Images` fields changed and zero non-image-field drift.
 
 ## Now
 
-- Batch 5 is landed on `main` at 1,655 imaged movements, 93 image-less movements, and 5,032 unique public images.
-- Batch 6 is complete at 1,705 imaged movements, 43 image-less movements, and 5,199 unique public images. Its five generation lanes produced 167 accepted square images; all 50 carousels are independently reviewed, uploaded, byte-verified, publicly delivered, cataloged, regenerated, and package-verified with exact seed-drift proof.
+- The complete catalog has 1,748 imaged movements, zero image-less movements, and 5,340 unique public images.
+- Local completion is green: image-specific QA, hosted-byte/public-delivery reconciliation, seed-drift proof, package verification, privacy scan, deterministic generation, and the serialized canonical repository acceptance gate all passed.
 
 ## Next
 
-- Land Batch 6, then generate, independently review, upload, and catalog the final 43 still-empty movements at manifest sequences 371–413.
-- Reach 1,748 imaged / zero image-less, run aggregate completion verification, and close the active plan with `scripts/finish-task`.
+- Close the active plan with `scripts/finish-task`, reconcile the resulting commit with current `main`, push the authorized fast-forward update, and require final-head CI to pass.
 
 ## Verification
 
@@ -119,6 +119,7 @@ Updated: 2026-07-15
 - Batch-6 regenerated catalog proof: 1,748 total movements; 1,705 with images; 43 without images; 5,199 ordered images; 5,199 unique public URLs. Direct controller/CSV/catalog reconciliation proves exactly 50 formerly empty `Images` cells changed, exactly 167 unique new URLs, zero non-`Images`-field drift, and agreement across accepted source hashes, upload identities, hosted receipts, ordered seed mappings, and generated records. `pnpm --dir packages/exercise-library verify` passes without coverage: typecheck, all six tests, and deterministic generated-artifact verification are green. Diff and privacy scans pass.
 - The latest handoff batch passes `pnpm --dir packages/exercise-library verify`: typecheck, all 6 tests, and deterministic generated-artifact checks are green; seed drift is limited to the 14 intended `Images` fields.
 - The subsequent 175/200-range batch also passes `pnpm --dir packages/exercise-library verify`; seed drift is limited to nine intended `Images` fields across two owning seed files, and 4,172 public URLs are unique.
-- The final 43-movement checkpoint, aggregate completion verification, and final-head CI are pending.
+- Final checkpoint proof: 1,748 total movements; 1,748 with images; zero without images; 5,340 ordered images; 5,340 unique public URLs. The final diff changes exactly 43 formerly empty `Images` cells, adds 141 URLs, and has zero non-`Images`-field drift. `pnpm --dir packages/exercise-library verify`, coverage at 81.35% statements / 73.44% branches, deterministic generation, privacy scanning, and `pnpm verify:acceptance` all pass. Final-head CI remains the post-push gate.
 - The controller-ready handoff batch passes `pnpm --dir packages/exercise-library verify`: typecheck, all 6 tests, and deterministic generated-artifact checks are green.
 - Sequence 6 also passes `pnpm --dir packages/exercise-library verify`; direct drift proof shows only `EX654.images` changed, with 4,105 unique valid public URLs and no invalid alt records.
+Completed: 2026-07-15

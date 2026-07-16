@@ -6,6 +6,7 @@ import { afterEach, describe, expect, it, vi } from 'vitest'
 import type { AssistantChannelDelivery } from '@murphai/operator-config/assistant-cli-contracts'
 import { ensureAssistantState } from '../src/assistant/store/persistence.ts'
 import { resolveAssistantStatePaths } from '../src/assistant/store/paths.ts'
+import { ASSISTANT_OUTBOX_MAX_RETRY_ATTEMPTS } from '../src/assistant/outbox/retry-policy.ts'
 import { createTempVaultContext } from './test-helpers.ts'
 
 const tempRoots: string[] = []
@@ -78,6 +79,335 @@ describe('assistant outbox thresholds', () => {
       session: null,
     })
     expect(deliverAssistantMessageOverBinding).not.toHaveBeenCalled()
+  })
+
+  it('terminalizes an exhausted idempotent confirmation retry before another provider call', async () => {
+    const deliverAssistantMessageOverBinding = vi.fn()
+    const { outbox } = await loadOutboxModule({
+      deliverAssistantMessageOverBinding,
+    })
+    const { vaultRoot } = await createAssistantVault(
+      'assistant-outbox-thresholds-retry-exhausted-',
+    )
+    const seeded = await createIntent(outbox, vaultRoot, {
+      createdAt: '2026-04-08T10:00:00.000Z',
+      message: 'stop after the bounded retry attempts',
+      sessionId: 'session-retry-exhausted',
+      turnId: 'turn-retry-exhausted',
+    })
+    await outbox.saveAssistantOutboxIntent(vaultRoot, {
+      ...seeded,
+      attemptCount: ASSISTANT_OUTBOX_MAX_RETRY_ATTEMPTS,
+      deliveryConfirmationPending: true,
+      deliveryTransportIdempotent: true,
+      lastAttemptAt: '2026-04-08T10:01:00.000Z',
+      lastError: {
+        code: 'ASSISTANT_DELIVERY_CONFIRMATION_PENDING',
+        message: 'provider acceptance remains unconfirmed',
+      },
+      nextAttemptAt: '2026-04-08T10:30:00.000Z',
+      status: 'retryable',
+      updatedAt: '2026-04-08T10:01:00.000Z',
+    })
+
+    const first = await outbox.dispatchAssistantOutboxIntent({
+      intentId: seeded.intentId,
+      now: new Date('2026-04-08T10:30:00.000Z'),
+      vault: vaultRoot,
+    })
+    const second = await outbox.dispatchAssistantOutboxIntent({
+      force: true,
+      intentId: seeded.intentId,
+      now: new Date('2026-04-08T11:00:00.000Z'),
+      vault: vaultRoot,
+    })
+
+    expect(first).toMatchObject({
+      deliveryError: {
+        code: 'ASSISTANT_DELIVERY_RETRY_EXHAUSTED',
+      },
+      intent: {
+        attemptCount: ASSISTANT_OUTBOX_MAX_RETRY_ATTEMPTS,
+        nextAttemptAt: null,
+        status: 'failed',
+      },
+      session: null,
+    })
+    expect(second.intent).toMatchObject({
+      intentId: seeded.intentId,
+      status: 'failed',
+    })
+    expect(deliverAssistantMessageOverBinding).not.toHaveBeenCalled()
+  })
+
+  it('terminalizes an exhausted hosted prepared claim without taking ownership', async () => {
+    const { outbox } = await loadOutboxModule()
+    const { vaultRoot } = await createAssistantVault(
+      'assistant-outbox-thresholds-prepared-exhausted-',
+    )
+    const seeded = await createIntent(outbox, vaultRoot, {
+      createdAt: '2026-04-08T10:00:00.000Z',
+      message: 'do not pre-claim another retry',
+      sessionId: 'session-prepared-exhausted',
+      turnId: 'turn-prepared-exhausted',
+    })
+    await outbox.saveAssistantOutboxIntent(vaultRoot, {
+      ...seeded,
+      attemptCount: ASSISTANT_OUTBOX_MAX_RETRY_ATTEMPTS,
+      deliveryConfirmationPending: true,
+      deliveryTransportIdempotent: true,
+      lastAttemptAt: '2026-04-08T10:01:00.000Z',
+      lastError: {
+        code: 'ASSISTANT_DELIVERY_CONFIRMATION_PENDING',
+        message: 'provider acceptance remains unconfirmed',
+      },
+      nextAttemptAt: '2026-04-08T10:30:00.000Z',
+      status: 'retryable',
+      updatedAt: '2026-04-08T10:01:00.000Z',
+    })
+
+    await expect(outbox.beginAssistantOutboxIntentMirrorPreparedDispatch({
+      deliveryIdempotencyKey: 'prepared-retry-key',
+      deliveryTransportIdempotent: true,
+      intentId: seeded.intentId,
+      startedAt: '2026-04-08T10:30:00.000Z',
+      vault: vaultRoot,
+    })).resolves.toMatchObject({
+      intent: {
+        attemptCount: ASSISTANT_OUTBOX_MAX_RETRY_ATTEMPTS,
+        lastError: {
+          code: 'ASSISTANT_DELIVERY_RETRY_EXHAUSTED',
+        },
+        nextAttemptAt: null,
+        status: 'failed',
+      },
+      ownsDispatch: false,
+      preparedDispatchToken: null,
+      previousDispatchState: {
+        attemptCount: ASSISTANT_OUTBOX_MAX_RETRY_ATTEMPTS,
+        deliveryConfirmationPending: true,
+        status: 'retryable',
+      },
+    })
+  })
+
+  it('terminalizes the final hosted prepared claim after a definite failure', async () => {
+    const { outbox } = await loadOutboxModule()
+    const { vaultRoot } = await createAssistantVault(
+      'assistant-outbox-thresholds-prepared-final-failure-',
+    )
+    const seeded = await createIntent(outbox, vaultRoot, {
+      createdAt: '2026-04-08T10:00:00.000Z',
+      message: 'terminalize the final hosted attempt',
+      sessionId: 'session-prepared-final-failure',
+      turnId: 'turn-prepared-final-failure',
+    })
+    await outbox.saveAssistantOutboxIntent(vaultRoot, {
+      ...seeded,
+      attemptCount: ASSISTANT_OUTBOX_MAX_RETRY_ATTEMPTS - 1,
+      lastAttemptAt: '2026-04-08T10:01:00.000Z',
+      lastError: {
+        code: 'REQUEST_FAILED',
+        message: 'try the final hosted attempt',
+      },
+      nextAttemptAt: '2026-04-08T10:30:00.000Z',
+      status: 'retryable',
+      updatedAt: '2026-04-08T10:01:00.000Z',
+    })
+
+    const prepared = await outbox.beginAssistantOutboxIntentMirrorPreparedDispatch({
+      deliveryIdempotencyKey: 'prepared-final-failure-key',
+      deliveryTransportIdempotent: true,
+      intentId: seeded.intentId,
+      startedAt: '2026-04-08T10:30:00.000Z',
+      vault: vaultRoot,
+    })
+    expect(prepared).toMatchObject({
+      intent: {
+        attemptCount: ASSISTANT_OUTBOX_MAX_RETRY_ATTEMPTS,
+        status: 'sending',
+      },
+      ownsDispatch: true,
+    })
+
+    await expect(outbox.markAssistantOutboxIntentMirrorRetryableById({
+      error: Object.assign(new Error('provider remained unavailable'), {
+        retryable: true,
+      }),
+      failedAt: new Date('2026-04-08T10:31:00.000Z'),
+      intentId: seeded.intentId,
+      vault: vaultRoot,
+    })).resolves.toMatchObject({
+      attemptCount: ASSISTANT_OUTBOX_MAX_RETRY_ATTEMPTS,
+      lastError: {
+        code: 'ASSISTANT_DELIVERY_RETRY_EXHAUSTED',
+      },
+      nextAttemptAt: null,
+      status: 'failed',
+    })
+
+    await expect(outbox.beginAssistantOutboxIntentMirrorPreparedDispatch({
+      deliveryIdempotencyKey: 'prepared-final-failure-key',
+      deliveryTransportIdempotent: true,
+      intentId: seeded.intentId,
+      startedAt: '2026-04-08T11:00:00.000Z',
+      vault: vaultRoot,
+    })).resolves.toMatchObject({
+      intent: {
+        attemptCount: ASSISTANT_OUTBOX_MAX_RETRY_ATTEMPTS,
+        status: 'failed',
+      },
+      ownsDispatch: false,
+    })
+  })
+
+  it('terminalizes a stale exhausted idempotent send before replaying it', async () => {
+    const deliverAssistantMessageOverBinding = vi.fn()
+    const { outbox } = await loadOutboxModule({
+      deliverAssistantMessageOverBinding,
+    })
+    const { vaultRoot } = await createAssistantVault(
+      'assistant-outbox-thresholds-stale-idempotent-exhausted-',
+    )
+    const seeded = await createIntent(outbox, vaultRoot, {
+      createdAt: '2026-04-08T10:00:00.000Z',
+      message: 'do not replay a stale exhausted send',
+      sessionId: 'session-stale-idempotent-exhausted',
+      turnId: 'turn-stale-idempotent-exhausted',
+    })
+    await outbox.saveAssistantOutboxIntent(vaultRoot, {
+      ...seeded,
+      attemptCount: ASSISTANT_OUTBOX_MAX_RETRY_ATTEMPTS,
+      deliveryIdempotencyKey: 'stale-idempotent-key',
+      deliveryTransportIdempotent: true,
+      lastAttemptAt: '2026-04-08T10:00:00.000Z',
+      lastError: {
+        code: 'REQUEST_FAILED',
+        message: 'runtime stopped during the final attempt',
+      },
+      nextAttemptAt: null,
+      status: 'sending',
+      updatedAt: '2026-04-08T10:00:00.000Z',
+    })
+
+    await expect(outbox.dispatchAssistantOutboxIntent({
+      intentId: seeded.intentId,
+      now: new Date('2026-04-08T10:11:00.000Z'),
+      vault: vaultRoot,
+    })).resolves.toMatchObject({
+      deliveryError: {
+        code: 'ASSISTANT_DELIVERY_RETRY_EXHAUSTED',
+      },
+      intent: {
+        attemptCount: ASSISTANT_OUTBOX_MAX_RETRY_ATTEMPTS,
+        nextAttemptAt: null,
+        status: 'failed',
+      },
+      session: null,
+    })
+    expect(deliverAssistantMessageOverBinding).not.toHaveBeenCalled()
+  })
+
+  it('reconciles proof for a stale exhausted idempotent send before terminalizing it', async () => {
+    const deliverAssistantMessageOverBinding = vi.fn()
+    const { outbox } = await loadOutboxModule({
+      deliverAssistantMessageOverBinding,
+    })
+    const { vaultRoot } = await createAssistantVault(
+      'assistant-outbox-thresholds-stale-idempotent-reconciled-',
+    )
+    const seeded = await createIntent(outbox, vaultRoot, {
+      createdAt: '2026-04-08T10:00:00.000Z',
+      message: 'reconcile a stale exhausted send',
+      sessionId: 'session-stale-idempotent-reconciled',
+      turnId: 'turn-stale-idempotent-reconciled',
+    })
+    await outbox.saveAssistantOutboxIntent(vaultRoot, {
+      ...seeded,
+      attemptCount: ASSISTANT_OUTBOX_MAX_RETRY_ATTEMPTS,
+      deliveryIdempotencyKey: 'stale-idempotent-key',
+      deliveryTransportIdempotent: true,
+      lastAttemptAt: '2026-04-08T10:00:00.000Z',
+      lastError: {
+        code: 'REQUEST_FAILED',
+        message: 'runtime stopped during the final attempt',
+      },
+      nextAttemptAt: null,
+      status: 'sending',
+      updatedAt: '2026-04-08T10:00:00.000Z',
+    })
+    const recoveredDelivery = createDelivery({
+      idempotencyKey: 'stale-idempotent-key',
+      providerMessageId: 'provider-reconciled-final-attempt',
+      sentAt: '2026-04-08T10:00:01.000Z',
+    })
+
+    await expect(outbox.dispatchAssistantOutboxIntent({
+      dispatchHooks: {
+        resolveDeliveredIntent: async () => recoveredDelivery,
+      },
+      intentId: seeded.intentId,
+      now: new Date('2026-04-08T10:11:00.000Z'),
+      vault: vaultRoot,
+    })).resolves.toMatchObject({
+      deliveryError: null,
+      intent: {
+        attemptCount: ASSISTANT_OUTBOX_MAX_RETRY_ATTEMPTS,
+        delivery: recoveredDelivery,
+        status: 'sent',
+      },
+      session: null,
+    })
+    expect(deliverAssistantMessageOverBinding).not.toHaveBeenCalled()
+  })
+
+  it('allows the final bounded attempt and terminalizes its definite failure', async () => {
+    const deliverAssistantMessageOverBinding = vi.fn(async () => {
+      throw Object.assign(new Error('provider remained unavailable'), {
+        retryable: true,
+      })
+    })
+    const { outbox } = await loadOutboxModule({
+      deliverAssistantMessageOverBinding,
+    })
+    const { vaultRoot } = await createAssistantVault(
+      'assistant-outbox-thresholds-final-retry-',
+    )
+    const seeded = await createIntent(outbox, vaultRoot, {
+      createdAt: '2026-04-08T10:00:00.000Z',
+      message: 'use the final bounded attempt',
+      sessionId: 'session-final-retry',
+      turnId: 'turn-final-retry',
+    })
+    await outbox.saveAssistantOutboxIntent(vaultRoot, {
+      ...seeded,
+      attemptCount: ASSISTANT_OUTBOX_MAX_RETRY_ATTEMPTS - 1,
+      lastAttemptAt: '2026-04-08T10:01:00.000Z',
+      lastError: {
+        code: 'REQUEST_FAILED',
+        message: 'try again',
+      },
+      nextAttemptAt: '2026-04-08T10:30:00.000Z',
+      status: 'retryable',
+      updatedAt: '2026-04-08T10:01:00.000Z',
+    })
+
+    await expect(outbox.dispatchAssistantOutboxIntent({
+      intentId: seeded.intentId,
+      now: new Date('2026-04-08T10:30:00.000Z'),
+      vault: vaultRoot,
+    })).resolves.toMatchObject({
+      deliveryError: {
+        code: 'ASSISTANT_DELIVERY_RETRY_EXHAUSTED',
+      },
+      intent: {
+        attemptCount: ASSISTANT_OUTBOX_MAX_RETRY_ATTEMPTS,
+        nextAttemptAt: null,
+        status: 'failed',
+      },
+      session: null,
+    })
+    expect(deliverAssistantMessageOverBinding).toHaveBeenCalledOnce()
   })
 
   it('keeps idempotent confirmation-pending intents dispatchable without rescheduling them', async () => {
@@ -632,24 +962,51 @@ describe('assistant outbox thresholds', () => {
       sessionId: 'session-confirmation',
       turnId: 'turn-confirmation',
     })
+    await outbox.saveAssistantOutboxIntent(vaultRoot, {
+      ...seeded,
+      attemptCount: ASSISTANT_OUTBOX_MAX_RETRY_ATTEMPTS - 1,
+      lastAttemptAt: '2026-04-08T14:01:00.000Z',
+      nextAttemptAt: '2026-04-08T14:05:00.000Z',
+      status: 'retryable',
+      updatedAt: '2026-04-08T14:01:00.000Z',
+    })
 
-    await expect(
-      outbox.dispatchAssistantOutboxIntent({
-        force: true,
-        intentId: seeded.intentId,
-        now: new Date('2026-04-08T14:05:00.000Z'),
-        vault: vaultRoot,
-      }),
-    ).resolves.toMatchObject({
+    const ambiguous = await outbox.dispatchAssistantOutboxIntent({
+      force: true,
+      intentId: seeded.intentId,
+      now: new Date('2026-04-08T14:05:00.000Z'),
+      vault: vaultRoot,
+    })
+    expect(ambiguous).toMatchObject({
       deliveryError: {
         code: 'ASSISTANT_DELIVERY_CONFIRMATION_PENDING',
       },
       intent: {
+        attemptCount: ASSISTANT_OUTBOX_MAX_RETRY_ATTEMPTS,
         deliveryConfirmationPending: false,
         status: 'retryable',
       },
       session: null,
     })
+
+    const exhausted = await outbox.dispatchAssistantOutboxIntent({
+      force: true,
+      intentId: seeded.intentId,
+      now: new Date('2026-04-08T14:35:00.000Z'),
+      vault: vaultRoot,
+    })
+    expect(exhausted).toMatchObject({
+      deliveryError: {
+        code: 'ASSISTANT_DELIVERY_RETRY_EXHAUSTED',
+      },
+      intent: {
+        attemptCount: ASSISTANT_OUTBOX_MAX_RETRY_ATTEMPTS,
+        nextAttemptAt: null,
+        status: 'failed',
+      },
+      session: null,
+    })
+    expect(deliverAssistantMessageOverBinding).toHaveBeenCalledOnce()
   })
 })
 

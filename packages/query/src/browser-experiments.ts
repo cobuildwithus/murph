@@ -1,6 +1,12 @@
 export {
   resolveExperimentAdherenceRollupTarget,
 } from "./experiment-adherence.ts";
+export { resolveBiomarkerChangeSentiment } from "./biomarker-change-sentiment.ts";
+export type {
+  BiomarkerChangeDirection,
+  BiomarkerChangeSentiment,
+} from "./biomarker-change-sentiment.ts";
+export { resolveExperimentMetricIdentity } from "./experiment-metrics.ts";
 export { selectBrowserVaultExperimentResults } from "./browser-replica/experiments.ts";
 export { isActiveOverviewExperimentStatus } from "./overview-status.ts";
 export type { BrowserVaultQueryClient } from "./browser-replica/shared.ts";

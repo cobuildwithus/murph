@@ -13,6 +13,7 @@ import type { HostedLocalDevConfig } from "./types.ts";
 export const HOSTED_LOCAL_LINQ_WEBHOOK_PATH =
   "/api/hosted-onboarding/linq/webhook";
 const HOSTED_LOCAL_LINQ_WEBHOOK_EVENTS = [
+  "message.sent",
   "message.received",
   "participant.added",
   "participant.removed",

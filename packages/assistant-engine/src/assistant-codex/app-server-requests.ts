@@ -67,6 +67,18 @@ export function buildCodexThreadContextParams(input: {
     workingDirectory: string
   }
 }): Record<string, unknown> {
+  const permissions = normalizeNullableString(input.input.permissions)
+  if (permissions && input.input.sandbox) {
+    throw new VaultCliError(
+      'ASSISTANT_CODEX_APP_SERVER_REQUEST_INVALID',
+      'Codex app-server requests cannot combine named permissions with a legacy sandbox.',
+      {
+        invalidFields: ['permissions', 'sandbox'],
+        retryable: false,
+      },
+    )
+  }
+
   return stripUndefinedRpcParams({
     approvalPolicy: mapCodexAppServerApprovalPolicy(input.input.approvalPolicy),
     baseInstructions: input.includeInstructions
@@ -77,9 +89,22 @@ export function buildCodexThreadContextParams(input: {
       ? normalizeNullableString(input.input.developerInstructions)
       : undefined,
     dynamicTools: input.input.dynamicTools,
+    ephemeral: input.input.ephemeral ?? undefined,
+    environments: input.input.environments
+      ? input.input.environments.map((environment) => ({ ...environment }))
+      : undefined,
     model: normalizeNullableString(input.input.model),
     modelProvider: normalizeNullableString(input.input.modelProvider),
-    sandbox: mapCodexAppServerSandboxMode(input.input.sandbox),
+    permissions,
+    runtimeWorkspaceRoots: input.input.runtimeWorkspaceRoots
+      ? [...input.input.runtimeWorkspaceRoots]
+      : undefined,
+    config: input.input.threadConfig
+      ? { ...input.input.threadConfig }
+      : undefined,
+    sandbox: permissions
+      ? undefined
+      : mapCodexAppServerSandboxMode(input.input.sandbox),
     serviceName: input.includeServiceName ? CODEX_RPC_CLIENT_NAME : undefined,
   })
 }
@@ -111,6 +136,10 @@ export function buildCodexTurnStartParams(input: {
       imagePaths: input.imagePaths,
       prompt: input.input.prompt,
     }),
+    outputSchema: input.input.outputSchema
+      ? { ...input.input.outputSchema }
+      : undefined,
+    model: normalizeNullableString(input.input.model),
     threadId: input.codexThreadId,
   })
 

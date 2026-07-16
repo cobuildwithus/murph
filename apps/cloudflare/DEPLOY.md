@@ -24,6 +24,7 @@ The rendered deploy helper path is the canonical direct Wrangler deploy contract
 The deploy helper also rejects generated config or secrets that no longer match the current environment, and rejects runner bundles assembled with `runner:bundle:assemble-only` so smoke-only build shortcuts cannot be uploaded as production artifacts.
 Docker runner smoke derives a separate `.deploy/runner-smoke-bundle/` from the validated production bundle and overlays smoke-only entrypoints there, so the production `.deploy/runner-bundle/` remains the deploy artifact after smoke.
 Runner bundle assembly esbuild-bundles two boot-critical surfaces with byte budgets and assembly-time probes: the in-container `vault-cli` binary (`scripts/runner-bundle/bundle-cli.ts`) and the container entrypoint itself (`scripts/runner-bundle/bundle-entrypoint.ts`, output `dist-bundled/`, run by the image CMD). The bundled entrypoint cuts cold-boot module loading from ~960 file reads to ~27 chunk reads on lazily pulled image layers; package resolvers that derive asset paths from their own module location are pinned to the installed package copies via Dockerfile ENV (`MURPH_ASSISTANT_SKILLS_ROOT`, `MURPH_ASSISTANT_CLI_SURFACE_PREBUILT_ARTIFACT_PATH`, `MURPH_HEALTH_COMMONS_PACKAGE_ROOT`). Health Commons stays installed in the runner bundle for its generated catalog payload, while its JS is inlined and assembly probes set the same package-root pin for bundled and unbundled parity.
+The device-sync package boundary suite also walks the static source graph from the runner's runtime-config entrypoint and rejects provider runtime modules, importer modules, and the Junction SDK. This focused gate catches boot-closure ownership regressions before the packed-bundle guard validates the final esbuild metafile.
 Hosted assistant delivery recovery now relies on committed side-effect state inside the encrypted workspace and the web-owned hosted workspace checkpoint.
 
 ## Audience-Key Rollout
@@ -75,6 +76,37 @@ available. Roll back Web before Cloudflare/runner if the pair must be reverted.
 After both deploys, confirm there is no extra metadata-only handoff checkpoint
 for the same shutdown and actionable late input causes the existing Temporal
 recheck after owner release.
+
+## Assistant Ask Rollout
+
+Assistant Ask adds paired mailbox kinds and a one-shot process inside the
+existing runner container. It adds no Cloudflare binding, secret, Durable
+Object state, second container, scheduler, or workflow. Roll out the first
+release in this order:
+
+1. Deploy the Assistant Ask consumers, isolated executor, and
+   `murph-group-read` profile in the Cloudflare Worker and runner bundle with
+   `container_rollout=immediate`. Keep the Web producer gate off.
+2. Require managed-container smoke to report the new runner-bundle fingerprint
+   and prove the named profile can read the intended committed group context
+   while writes, `.runtime/**`, `.codex/**`, environment files, other roots,
+   inherited shell secrets, and tool network fail closed. The thread-start
+   attestation must confirm the effective profile, exact roots, empty working
+   directory, empty instruction sources, and approval policy.
+3. Deploy the Web producer and completion control path with
+   `HOSTED_ASSISTANT_ASK_PRODUCER_ENABLED` unset or `0`.
+4. After the consumer fleet and sandbox proof converge, set the Web gate to
+   exact `1` and redeploy Web. Smoke one private-to-group ask while the group
+   runtime is idle and one while its foreground Murph is replying; neither may
+   create group-visible activity or delay the foreground reply.
+
+An old runner cannot parse the new mailbox kinds, so the producer must not be
+enabled before immediate runner convergence. After enablement, the first
+compatible runner bundle is the rollback floor while an Ask request or
+completion can remain in a mailbox or restored workspace. To roll back, set the
+Web producer gate to `0` and redeploy Web first, wait at least the full ten-minute
+request lifetime, verify pending Ask work has drained or expired, then roll back
+the consumers. A forward fix is preferred if any imported item remains.
 
 ## Linq Participant-Context Rollout
 
@@ -131,31 +163,25 @@ delivery, where Web may resolve or validate the concrete target before media
 work. Anchored replies, reactions, and voice memos do not make that redundant
 round trip.
 
-The original provider-claim rollout used this order:
+Every engagement request must state `authorityCheckOnly` explicitly. `true`
+performs only the bounded preflight and never claims provider dispatch. `false`
+is the final provider boundary, requires an explicit idempotency key, and must
+return the additive `providerDispatchClaimed` marker before the runner enters
+the provider. Web no longer derives authority or provider-dispatch identity
+from the retired `currentInbound` request proof.
 
-1. Deploy `apps/web` first. An old runner may omit `authorityCheckOnly`; Web
-   keeps treating that legacy call as its provider-start claim for the bounded
-   rollout window.
-2. Deploy the Cloudflare Worker and runner bundle with
-   `container_rollout=immediate`, then require managed-container smoke to report
-   the new runner-bundle fingerprint.
-3. After convergence, send one Linq group-thread test turn and confirm the
-   thread container owns both model execution and provider delivery.
+The Cloudflare Worker and runner rollback floor for this protocol is #627 or
+newer. Do not deploy or restore an older runner after the Web hard cut; there is
+no supported old-runner/new-Web compatibility window. Immediate rollout is not
+required for ordinary later deploys because current runners already use this
+shape and per-invocation fingerprint admission replaces stale warm shells.
+After deployment, smoke one authority-only current-home resolution, one final
+provider claim, and one Linq group-thread turn, then confirm the thread
+container owns model execution and provider delivery.
 
-A new runner requires the additive `providerDispatchClaimed` response marker at
-its final provider boundary, so it fails closed against an old Web deployment.
-Do not roll Web back while that runner protocol is active. To roll the pair
-back, first roll the runner bundle back with an immediate rollout and confirm
-the old fingerprint, then roll Web back. The old-runner/new-Web interval is
-supported only during the Web-first rollout: old runners ignore the additive
-response marker and retain their existing early-claim behavior.
-
-After that rollout has converged, removing obsolete runner authority hints from
-the engagement and post-send outcome payloads is independently deployable: Web
-ignores unknown legacy JSON fields, and both old and new runners use the same
-final provider claim. New runners may send an optional `lineLookupKey` solely
-for post-send line-health attribution; old Web ignores it, and new Web retains
-its existing fallback when an old runner omits it.
+New runners may send an optional `lineLookupKey` solely for post-send
+line-health attribution; old Web ignores it, and new Web retains its existing
+fallback when an older supported runner omits it.
 
 ## Thread Usage Crossing Notice Rollout
 
@@ -310,7 +336,7 @@ Hosted crypto authority metadata:
 Hosted assistant config:
 
 - `HOSTED_ASSISTANT_PROVIDER`
-- `HOSTED_ASSISTANT_MODEL`; worker deploy preflight requires an explicit allowance-priced direct OpenAI model slug. Supported slugs are `gpt-5.5`, `gpt-5.6-sol`, `gpt-5.6-terra`, and `gpt-5.6-luna`; the target production slug for this rollout is `gpt-5.6-terra`, with `HOSTED_ASSISTANT_REASONING_EFFORT=low`.
+- `HOSTED_ASSISTANT_MODEL`; worker deploy preflight requires an explicit allowance-priced direct OpenAI model slug. Supported slugs are `gpt-5.5`, `gpt-5.6-sol`, `gpt-5.6-terra`, and `gpt-5.6-luna`. Production deploys require `HOSTED_ASSISTANT_REASONING_EFFORT=low`.
 - `HOSTED_ASSISTANT_APPROVAL_POLICY`
 - `HOSTED_ASSISTANT_REASONING_EFFORT`
 - `HOSTED_ASSISTANT_SANDBOX`
@@ -318,19 +344,6 @@ Hosted assistant config:
 When changing hosted assistant model pricing or allowance enforcement, deploy the
 Cloudflare Worker/runner model config before or atomically with the hosted web
 allowance logic so runtime usage callbacks keep using an allowance-priced model.
-For the GPT-5.6 rollout, first merge and deploy the web allowance logic plus
-Worker/runner catalog patch while production remains on
-`HOSTED_ASSISTANT_MODEL=gpt-5.5`. Use `container_rollout=immediate`, leave the
-default live-model smoke enabled, and require that preparatory deploy to report
-`gpt-5.6-terra` and `OK`; this proves the production OpenAI project and deployed
-runner before user turns move. Then set
-`HOSTED_ASSISTANT_MODEL=gpt-5.6-terra` and redeploy Cloudflare with
-`container_rollout=immediate` and the live-model smoke still enabled. Immediate
-rollout is required because a gradual rollout can leave warm old-bundle
-containers without the GPT-5.6 catalog. The rollback floor is
-`HOSTED_ASSISTANT_MODEL=gpt-5.5`; when Terra itself is the reason for rollback,
-set `live_model_turn=false` on that rollback deploy so the Terra-specific smoke
-does not block restoring the floor.
 
 Vault-share selector-scope production deploys must also use
 `container_rollout=immediate` until the distance/count selector-scope runner
@@ -354,7 +367,6 @@ Opt-in runtime integrations:
 - `JUNCTION_REGION`
 - `JUNCTION_PROVIDER_FILTER`
 - `JUNCTION_SUMMARY_RESOURCES`
-- `JUNCTION_TIMESERIES_RESOURCES`
 - `JUNCTION_SUMMARY_BACKFILL_DAYS`
 - `JUNCTION_TIMESERIES_BACKFILL_DAYS`
 - `JUNCTION_RECONCILE_DAYS`
@@ -404,11 +416,14 @@ Hosted assistant provider and channel secrets:
 Hosted usage-reporting secrets:
 
 - `HOSTED_AI_USAGE_REPORTING_SECRET` when stable anonymized usage attribution should be added by the Worker/web-control proxy before records reach hosted web. This secret must stay Worker-owned and must not be forwarded into the hosted runtime env.
-- Cloudflare runner start authority does not accept signed usage-allowance
-  decisions and does not fall back to a live web usage-gate call. Web preserves
-  conversation mailbox input before usage gating, Temporal/runtime admission gates
-  model-capable work, and runtime/provider spend enforcement still happens before
-  model calls.
+- Cloudflare runner start authority accepts neither signed usage-allowance
+  decisions nor a live Web usage-gate callback. Web preserves conversation
+  mailbox input before admission, Temporal/runtime admission gates model-capable
+  work, and runtime/provider spend enforcement still happens before model calls.
+- Cloudflare/runner #587 or newer is the permanent rollback floor before
+  deploying or rolling back a Web build that omits the retired callback route.
+  A Web rollback that restores the unused route is safe; rolling Cloudflare
+  below that floor while the route is absent is not.
 
 Hosted web data API secrets:
 
@@ -518,11 +533,11 @@ That image is prepared in the local Docker cache under the stable GHCR tag
 which is also the final app-layer Dockerfile default. Using the pullable GHCR
 name avoids BuildKit treating the prepared base as a Docker Hub `library/*`
 image during local Wrangler container builds.
-It contains Node, Python 3 exposed as both `python3` and `python`, pinned `@openai/codex`, `jq`, `ripgrep`, `ffmpeg`, and PDF tooling from Poppler plus `file`, `qpdf`, and MuPDF tools, but no app bundle, worker secrets, or local speech models.
+It contains Node, Python 3 exposed as both `python3` and `python`, pinned `@openai/codex` with its bundled Linux sandbox resources, `jq`, `ripgrep`, `ffmpeg`, and PDF tooling from Poppler plus `file`, `qpdf`, and MuPDF tools, but no app bundle, worker secrets, or local speech models.
 The final app-layer image generates a patched Codex model catalog from `codex debug models --bundled`, adds OpenAI flex service-tier support for `gpt-5.5`, `gpt-5.6-sol`, `gpt-5.6-terra`, and `gpt-5.6-luna`, validates those entries with `jq`, and exposes it through `MURPH_HOSTED_CODEX_MODEL_CATALOG_JSON` so hosted app-server cron turns can send OpenAI `service_tier: flex` and the deploy smoke can exercise Terra through the same model catalog. Hosted Codex MultiAgent V2 is enabled by default in generated hosted Codex config, and hosted app-server launches also pass `--config features.multi_agent_v2=true` so warm app-server processes restart after the default changes.
 `runner:docker:base` first reuses a GHCR-published base image when its source-fingerprint label matches the checked-out `Dockerfile.cloudflare-hosted-runner-base`; otherwise it rebuilds locally. Pass `-- --force` to rebuild from the checked-out Dockerfile without adopting a GHCR base image; deploy-capable production paths use that forced path so GHCR stays a CI/local cache instead of production image authority. Pull-request hosted-local E2E does not authenticate to GHCR before running PR-controlled code, so the GHCR runner base package must be public for fast anonymous PR cache pulls. The protected-main `.github/workflows/cloudflare-runner-base-image.yml` workflow publishes the base image with `GITHUB_TOKEN`.
 The base image build runs `python3 --version`, `python --version`, `jq --version`, `rg --version`, `zstd --version`, `codex --version`, `codex app-server --help`, and `codex doctor --help` under the runner user, and the Docker smoke repeats the Python and ripgrep checks inside the final image before deploy while also proving `file`, `pdfinfo`, `pdftotext`, `pdftoppm`, `qpdf`, and `mutool` against the restored smoke PDF fixture.
-Run `pnpm --dir apps/cloudflare test:e2e:runner-python:local` when you specifically want the actual final hosted-runner app image `PATH` proof for Python. It assembles the runner bundle, builds the same `linux/amd64` app-layer Dockerfile used by the Cloudflare container, starts the image with its normal entrypoint, waits for `/health`, then checks Python as the non-root `runner` user from immutable `/app` with the baked runner env. Run `pnpm --dir apps/cloudflare runner:docker:smoke` when you want the broader final-image native smoke.
+Run `pnpm --dir apps/cloudflare test:e2e:runner-python:local` when you specifically want the actual final hosted-runner app image `PATH` proof for Python. It assembles the runner bundle, builds the same `linux/amd64` app-layer Dockerfile used by the Cloudflare container, starts the image with its normal entrypoint, waits for `/health`, then checks Python as the non-root `runner` user from immutable `/app` with the baked runner env. Run `pnpm --dir apps/cloudflare runner:docker:smoke` when you want the broader final-image native smoke. That disposable, networkless smoke relaxes the outer Docker seccomp profile so Codex can create its inner user namespace, matching the namespace capability available in Cloudflare's dedicated Linux VM. The nested Codex seccomp proof requires a native `linux/amd64` Docker host; AMD64 emulation on an ARM64 Docker daemon does not support that inner seccomp layer.
 
 After first publish, make the GHCR runner base package public so PR CI can use
 anonymous pulls without exposing package credentials to PR-controlled commands.
@@ -572,7 +587,32 @@ group automation, and confirm there are no new
 
 The first automatic meal-photo release must deploy Cloudflare Worker and runner support with `container_rollout=immediate` and pass managed-container smoke before enabling or deploying the web producer that appends `meal-photo.captured`. The first runner bundle that parses and imports that mailbox kind is the rollback floor while any meal-photo item can remain retained; do not roll below it independently. The web-to-Worker staging/deletion routes are additive, so the new Worker may safely precede web. After deployment, verify the runner-bundle fingerprint and absence of hosted mailbox parse failures before exercising the physical-device opt-in/upload smoke.
 
-The first shared preference-causal-sequence release uses a web-first hard cut. Vercel predeploy adds the nullable `causal_seq` state and nullable keyed assistant-input lookup projection, then deploys the web build with `MURPH_ASSISTANT_PERSONALITY_CAUSAL_WRITES_ENABLED=0`. New conversation rows store a server-keyed lookup of their existing deterministic assistant input id, never the raw id, without changing the mailbox wire, `sourceRef`, or event id. The web callback accepts no numeric sequence fallback: inside the mutation transaction it derives every configured lookup-key candidate from the callback id, resolves the callback member plus one matching key to one live conversation-lane `conversation.message` row, and derives that row's canonical sequence. This web build is the rollback floor. The post-deploy contract lane checks legacy work against the system-lane `consumed_seq` and adds the new-write constraint `NOT VALID`, allowing handled retained history. Deploy this Cloudflare worker and runner bundle next with `container_rollout=immediate` and prove fleet convergence; for an update, it forwards only the terminal input id from a locally revalidated bounded exact-successor provider batch. Then enable the Vercel gate to switch Settings to sparse deltas and expose personality controls. Legacy or mixed-version runtimes continue ordinary replies while incompatible preference writes fail closed. Deploy web and Cloudflare/runtime in tandem to minimize that temporary unavailable-write window.
+The first shared preference-causal-sequence release uses a Web-first hard cut.
+Vercel predeploy adds nullable `causal_seq` state, the nullable keyed
+assistant-input lookup projection, and nullable Humor, Push, and Detail
+projection watermarks, then deploys Web with
+`MURPH_ASSISTANT_PERSONALITY_CAUSAL_WRITES_ENABLED=0`. New conversation rows
+store a server-keyed lookup of their existing deterministic assistant input id,
+never the raw id, without changing the mailbox wire, `sourceRef`, or event id.
+The Web callback accepts no numeric sequence fallback: inside the mutation
+transaction it derives every configured lookup-key candidate from the callback
+id, resolves the callback member plus one matching key to one live
+conversation-lane `conversation.message` row, and derives that row's canonical
+sequence. The hard-cut route also rejects the retired direct-vault
+causal-sequence action after old Vercel functions drain. This Web build is the
+rollback floor. The post-deploy contract lane checks legacy work against the
+system-lane `consumed_seq`, adds the new-write constraint `NOT VALID`, and seeds
+all three personality watermarks to each member's current causal barrier,
+including null projection values because historical Web values may differ from
+canonical vault values and cannot be backfilled safely. Deploy this Cloudflare
+worker and runner bundle next with `container_rollout=immediate` and prove fleet
+convergence; for an update, it forwards only the terminal input id from a
+locally revalidated bounded exact-successor provider batch. Then set the Vercel
+gate to `1` and redeploy Web to switch Settings to sparse deltas and expose
+personality controls plus hosted conversation convergence. Legacy runtimes
+continue ordinary replies while style writes fail closed. Deploy Web and
+Cloudflare/runtime in tandem to minimize that temporary unavailable-write
+window, and keep Web at the hard-cut floor during any runner rollback.
 
 The first production release that writes `murph.inbox-capture.v2` records or
 `parser-result` assistant-input evidence must use
@@ -616,6 +656,10 @@ Gradual deploys run managed-container smoke with a longer retry window so Cloudf
 - `GET /`
 - `GET /health`
 - if `HOSTED_EXECUTION_SMOKE_RUNNER_CONTAINER=true`, one signed `POST /internal/deploy/container-smoke` that waits until the Cloudflare-managed runner container reports the expected runner-bundle fingerprint and assistant CLI surface hot-path schema proof
+- the managed-container runner smoke also proves the native
+  `murph-group-read` profile and thread-start attestation used by Assistant Ask:
+  intended root reads succeed while writes, `.runtime/**`, `.codex/**`, environment
+  files, other roots, inherited shell secrets, and tool network are denied
 - if `HOSTED_EXECUTION_SMOKE_DIRECT_R2_PRESIGNED_PUT=true`, a managed-container smoke uploads a deterministic payload through a direct R2 presigned `PUT`, verifies it through the Worker R2 binding, and deletes the object
 - if `HOSTED_EXECUTION_SMOKE_LIVE_MODEL_TURN=true`, the managed-container smoke runs one real `gpt-5.6-terra` turn via `codex exec` inside the deployed container through the Worker OpenAI egress intercept
 - if `HOSTED_EXECUTION_SMOKE_USER_ID` is configured, one authenticated `GET /internal/users/:userId/status`

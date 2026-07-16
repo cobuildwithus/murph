@@ -1,9 +1,8 @@
 import { describe, expect, it } from "vitest";
 
 import {
-  HOSTED_RUNTIME_ASSISTANT_PREFERENCE_CAUSAL_SEQ_ACTION,
-  parseHostedRuntimeAssistantPreferenceCausalSeqRequest,
-  parseHostedRuntimeAssistantPreferenceCausalSeqResponse,
+  HOSTED_RUNTIME_ASSISTANT_PERSONALITY_UPDATE_ACTION,
+  hostedRuntimeAssistantPersonalizationModelToolRequestSchema,
   parseHostedRuntimeAssistantPersonalizationToolAuthority,
   parseHostedRuntimeAssistantPersonalizationToolRequest,
   parseHostedRuntimeAssistantPersonalizationToolResponse,
@@ -47,29 +46,25 @@ describe("hosted assistant personalization contract", () => {
     });
   });
 
-  it("keeps causal-sequence resolution private to its strict transport contract", () => {
-    const request = {
-      action: HOSTED_RUNTIME_ASSISTANT_PREFERENCE_CAUSAL_SEQ_ACTION,
+  it("keeps sparse personality set/reset updates internal to transport", () => {
+    const updateRequest = {
+      action: HOSTED_RUNTIME_ASSISTANT_PERSONALITY_UPDATE_ACTION,
+      personality: {
+        detail: null,
+        humor: 8,
+      },
     } as const;
-    expect(parseHostedRuntimeAssistantPreferenceCausalSeqRequest(request))
-      .toEqual(request);
-    expect(() => parseHostedRuntimeAssistantPersonalizationToolRequest(request))
-      .toThrow();
-    expect(() => parseHostedRuntimeAssistantPreferenceCausalSeqRequest({
-      ...request,
-      causalSeq: "42",
-    })).toThrow();
 
-    expect(parseHostedRuntimeAssistantPreferenceCausalSeqResponse({
-      action: HOSTED_RUNTIME_ASSISTANT_PREFERENCE_CAUSAL_SEQ_ACTION,
-      result: { causalSeq: "42" },
-    })).toEqual({
-      action: HOSTED_RUNTIME_ASSISTANT_PREFERENCE_CAUSAL_SEQ_ACTION,
-      result: { causalSeq: "42" },
-    });
-    expect(() => parseHostedRuntimeAssistantPreferenceCausalSeqResponse({
-      action: HOSTED_RUNTIME_ASSISTANT_PREFERENCE_CAUSAL_SEQ_ACTION,
-      result: { causalSeq: "not-a-sequence" },
+    expect(parseHostedRuntimeAssistantPersonalizationToolRequest(updateRequest))
+      .toEqual(updateRequest);
+    expect(hostedRuntimeAssistantPersonalizationModelToolRequestSchema.safeParse(
+      updateRequest,
+    ).success).toBe(false);
+  });
+
+  it("rejects the retired direct-vault causal-sequence action", () => {
+    expect(() => parseHostedRuntimeAssistantPersonalizationToolRequest({
+      action: "resolve_preference_causal_seq",
     })).toThrow();
   });
 
@@ -84,6 +79,27 @@ describe("hosted assistant personalization contract", () => {
     expect(() => parseHostedRuntimeAssistantPersonalizationToolRequest({
       action: "update",
       model: "gpt-5.6-sol",
+    })).toThrow();
+    expect(() => parseHostedRuntimeAssistantPersonalizationToolRequest({
+      action: HOSTED_RUNTIME_ASSISTANT_PERSONALITY_UPDATE_ACTION,
+      personality: {},
+    })).toThrow("requires at least one setting");
+    expect(() => parseHostedRuntimeAssistantPersonalizationToolRequest({
+      action: HOSTED_RUNTIME_ASSISTANT_PERSONALITY_UPDATE_ACTION,
+      personality: { humor: 11 },
+    })).toThrow();
+    expect(() => parseHostedRuntimeAssistantPersonalizationToolRequest({
+      action: HOSTED_RUNTIME_ASSISTANT_PERSONALITY_UPDATE_ACTION,
+      personality: { humor: 2.5 },
+    })).toThrow();
+    expect(() => parseHostedRuntimeAssistantPersonalizationToolRequest({
+      action: HOSTED_RUNTIME_ASSISTANT_PERSONALITY_UPDATE_ACTION,
+      personality: { surprise: 4 },
+    })).toThrow();
+    expect(() => parseHostedRuntimeAssistantPersonalizationToolRequest({
+      action: HOSTED_RUNTIME_ASSISTANT_PERSONALITY_UPDATE_ACTION,
+      personality: { humor: 4 },
+      tone: "casual",
     })).toThrow();
   });
 
@@ -148,6 +164,85 @@ describe("hosted assistant personalization contract", () => {
         voice: null,
       },
     })).toThrow();
+  });
+
+  it("parses full effective personality settings and field-local update outcomes", () => {
+    const settings = {
+      detail: { source: "default", value: 5 },
+      humor: { source: "custom", value: 8 },
+      push: { source: "default", value: 3 },
+    } as const;
+
+    expect(parseHostedRuntimeAssistantPersonalizationToolResponse({
+      action: HOSTED_RUNTIME_ASSISTANT_PERSONALITY_UPDATE_ACTION,
+      result: {
+        outcomes: {
+          detail: "unchanged",
+          humor: "superseded",
+          push: "saved",
+        },
+        settings,
+      },
+    })).toEqual({
+      action: HOSTED_RUNTIME_ASSISTANT_PERSONALITY_UPDATE_ACTION,
+      result: {
+        outcomes: {
+          detail: "unchanged",
+          humor: "superseded",
+          push: "saved",
+        },
+        settings,
+      },
+    });
+  });
+
+  it("rejects incomplete personality snapshots, empty outcomes, and extra fields", () => {
+    const settings = {
+      detail: { source: "default", value: 5 },
+      humor: { source: "custom", value: 8 },
+      push: { source: "default", value: 3 },
+    } as const;
+
+    for (const response of [
+      {
+        action: HOSTED_RUNTIME_ASSISTANT_PERSONALITY_UPDATE_ACTION,
+        result: {
+          outcomes: { humor: "superseded" },
+          settings: {
+            humor: settings.humor,
+            push: settings.push,
+          },
+        },
+      },
+      {
+        action: HOSTED_RUNTIME_ASSISTANT_PERSONALITY_UPDATE_ACTION,
+        result: {
+          outcomes: {},
+          settings,
+        },
+      },
+      {
+        action: HOSTED_RUNTIME_ASSISTANT_PERSONALITY_UPDATE_ACTION,
+        result: {
+          outcomes: { humor: "superseded" },
+          settings: {
+            ...settings,
+            humor: { source: "default", value: 8 },
+          },
+        },
+      },
+      {
+        action: HOSTED_RUNTIME_ASSISTANT_PERSONALITY_UPDATE_ACTION,
+        result: {
+          outcomes: { humor: "saved" },
+          settings,
+          updated: true,
+        },
+      },
+    ]) {
+      expect(() => parseHostedRuntimeAssistantPersonalizationToolResponse(response))
+        .toThrow();
+    }
   });
 
   it("rejects impossible model, rejection, and duplicate update states", () => {

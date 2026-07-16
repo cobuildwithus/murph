@@ -9,6 +9,12 @@ import {
   HOSTED_RUNTIME_CODEX_APP_SERVER_COMMAND_ENV,
 } from "@murphai/hosted-execution/cli-runtime-bridge";
 import {
+  normalizeAssistantBackendTarget,
+} from "@murphai/operator-config/assistant-backend";
+import {
+  HOSTED_CHATGPT_OPENAI_CODEX_MODEL_PROVIDER_ID,
+} from "@murphai/operator-config/assistant/target-runtime";
+import {
   ensureHostedAssistantOperatorDefaults,
 } from "@murphai/operator-config/hosted-assistant-config";
 
@@ -46,6 +52,14 @@ test("hosted assistant default target follows the effective Codex provider id", 
       "openai-local-test";
     const localTarget = await readHostedAssistantExecutionDefaultTarget();
     assert.equal(localTarget?.modelProvider, "openai-local-test");
+
+    process.env[HOSTED_CODEX_EFFECTIVE_MODEL_PROVIDER_ID_ENV] =
+      HOSTED_CHATGPT_OPENAI_CODEX_MODEL_PROVIDER_ID;
+    const chatGptTarget = await readHostedAssistantExecutionDefaultTarget();
+    assert.equal(
+      normalizeAssistantBackendTarget(chatGptTarget)?.modelProvider,
+      HOSTED_CHATGPT_OPENAI_CODEX_MODEL_PROVIDER_ID,
+    );
   });
 });
 

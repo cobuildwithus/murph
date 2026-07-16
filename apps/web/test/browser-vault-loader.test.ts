@@ -23,49 +23,20 @@ test("browser vault session parser rejects encrypted payloads on not_modified re
   );
 });
 
-test("browser vault session parser preserves missing legacy not_modified member proof as null", () => {
-  const response = parseBrowserVaultSessionResponse({
-    encryptedReplica: null,
-    replicaAad: null,
-    replicaKeyEnvelope: null,
-    replicaRef: createReplicaRef(),
-    state: "not_modified",
-  });
-
-  assert.equal(response.state, "not_modified");
-  assert.equal(response.memberId, null);
-});
-
-test("browser vault session parser accepts legacy empty responses without member authority", () => {
-  const response = parseBrowserVaultSessionResponse({
-    encryptedReplica: null,
-    replicaAad: null,
-    replicaKeyEnvelope: null,
-    replicaRef: null,
-    state: "empty",
-  });
-
-  assert.equal(response.state, "empty");
-  assert.equal(response.memberId, null);
-});
-
 test.each(["empty", "not_modified"] as const)(
-  "legacy %s responses cannot authorize a cached member",
-  async (state) => {
+  "browser vault session parser rejects %s responses without member proof",
+  (state) => {
     const replicaRef = state === "not_modified" ? createReplicaRef() : null;
-    const result = await loadBrowserVaultReplica({
-      expectedMemberId: "member_123",
-      fetchImpl: vi.fn<typeof fetch>().mockResolvedValue(new Response(JSON.stringify({
+    assert.throws(
+      () => parseBrowserVaultSessionResponse({
         encryptedReplica: null,
         replicaAad: null,
         replicaKeyEnvelope: null,
         replicaRef,
         state,
-      }), { status: 200 })),
-      knownReplicaRef: replicaRef,
-    });
-
-    assert.deepEqual(result, { state: "identity_changed" });
+      }),
+      /Browser vault session response\.memberId must be a non-empty string\./u,
+    );
   },
 );
 

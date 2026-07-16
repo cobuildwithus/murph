@@ -214,6 +214,36 @@ export class PrismaHostedConnectionSourceStore {
     return records.map(mapHostedConnectionSourceRecord);
   }
 
+  async listConnectionSourcesForConnections(
+    connectionIds: readonly string[],
+    tx?: HostedPrismaTransactionClient,
+  ): Promise<HostedDeviceConnectionSource[]> {
+    const prisma = tx ?? this.prisma;
+    const normalizedConnectionIds = [...new Set(connectionIds.map(requireConnectionId))];
+
+    if (normalizedConnectionIds.length === 0) {
+      return [];
+    }
+
+    const records = await prisma.deviceConnectionSource.findMany({
+      where: {
+        connectionId: {
+          in: normalizedConnectionIds,
+        },
+      },
+      orderBy: [
+        { connectionId: "asc" },
+        { lastSeenAt: "desc" },
+        { sourceProviderSlug: "asc" },
+        { sourceInstanceKey: "asc" },
+        { id: "asc" },
+      ],
+      ...hostedConnectionSourceRecordArgs,
+    });
+
+    return records.map(mapHostedConnectionSourceRecord);
+  }
+
   async listRuntimeSnapshotConnectionSources(
     input: ListHostedRuntimeSnapshotConnectionSourcesInput,
   ): Promise<HostedDeviceConnectionSource[]> {

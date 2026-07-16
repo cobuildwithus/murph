@@ -11,6 +11,7 @@ export const codexResumeStateSchema = z
     assistantContractFingerprint: assistantContractFingerprintSchema.optional(),
     rolloutRelativePath: z.string().min(1).nullable().optional(),
     routeFingerprint: z.string().min(1),
+    threadCompatibilityFingerprint: z.string().min(1).optional(),
     threadId: z.string().min(1),
   })
   .strict()
@@ -78,12 +79,16 @@ export function normalizeCodexResumeState(value: unknown): CodexResumeState | nu
   const assistantContractFingerprint = normalizeAssistantContractFingerprint(
     record.assistantContractFingerprint,
   )
+  const threadCompatibilityFingerprint = normalizeUnknownString(
+    record.threadCompatibilityFingerprint,
+  )
 
   return codexResumeStateSchema.parse({
     threadId,
     routeFingerprint,
     ...(rolloutRelativePath ? { rolloutRelativePath } : {}),
     ...(assistantContractFingerprint ? { assistantContractFingerprint } : {}),
+    ...(threadCompatibilityFingerprint ? { threadCompatibilityFingerprint } : {}),
   })
 }
 
@@ -91,6 +96,7 @@ export function buildCodexResumeState(input: {
   assistantContractFingerprint?: string | null
   rolloutRelativePath?: string | null
   routeFingerprint: string | null | undefined
+  threadCompatibilityFingerprint?: string | null
   threadId: string | null | undefined
 }): CodexResumeState | null {
   const threadId = normalizeNullableString(input.threadId)
@@ -108,12 +114,16 @@ export function buildCodexResumeState(input: {
   const assistantContractFingerprint = normalizeNullableString(
     input.assistantContractFingerprint,
   )
+  const threadCompatibilityFingerprint = normalizeNullableString(
+    input.threadCompatibilityFingerprint,
+  )
 
   return codexResumeStateSchema.parse({
     threadId,
     routeFingerprint,
     ...(rolloutRelativePath ? { rolloutRelativePath } : {}),
     ...(assistantContractFingerprint ? { assistantContractFingerprint } : {}),
+    ...(threadCompatibilityFingerprint ? { threadCompatibilityFingerprint } : {}),
   })
 }
 

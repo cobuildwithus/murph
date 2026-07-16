@@ -161,5 +161,17 @@ describe('assistant personalization tool', () => {
         tool: 'personalization',
       },
     })?.kind).toBe('invalid-personalization-arguments')
+
+    expect(readMurphDynamicToolRequest({
+      method: 'item/tool/call',
+      params: {
+        arguments: {
+          action: 'update_personality',
+          personality: { humor: 8 },
+        },
+        namespace: 'murph',
+        tool: 'personalization',
+      },
+    })?.kind).toBe('invalid-personalization-arguments')
   })
 })

@@ -1,4 +1,8 @@
 import type {
+  HostedExecutionAssistantAskCompletedPayload,
+  HostedExecutionAssistantAskCompletedWake,
+  HostedExecutionAssistantAskRequestedPayload,
+  HostedExecutionAssistantAskRequestedWake,
   HostedExecutionConversationMessagePayload,
   HostedExecutionConversationMessageWake,
   HostedExecutionAssistantNotificationRequestedPayload,
@@ -33,8 +37,14 @@ import type {
   HostedRuntimeTimerTriggerKind,
 } from "./contracts.ts";
 import {
+  HOSTED_EXECUTION_ASSISTANT_ASK_REQUEST_TTL_MS,
   HOSTED_EXECUTION_LINQ_GROUP_REACTION_CONTEXT_MAX_CHARS,
 } from "./contracts.ts";
+import {
+  parseHostedExecutionAssistantAskCompletedPayload,
+  parseHostedExecutionAssistantAskRequestedPayload,
+  parseHostedExecutionAssistantAskTimestamp,
+} from "./assistant-ask-payload.ts";
 import {
   parseHostedVaultShareDeliveryPayload,
   parseHostedVaultShareRevokePayload,
@@ -127,6 +137,8 @@ function cloneConversationMessagePayload(
 }
 
 type HostedExecutionMemberOwnedWake =
+  | HostedExecutionAssistantAskCompletedWake
+  | HostedExecutionAssistantAskRequestedWake
   | HostedExecutionAssistantNotificationRequestedWake
   | HostedExecutionMemberActivatedWake
   | HostedExecutionMemberChannelsUpdatedWake
@@ -444,6 +456,65 @@ export function buildHostedExecutionAssistantNotificationRequestedWake(input: {
       occurredAt: input.occurredAt,
     }),
     notification: cloneAssistantNotificationPayload(input.notification),
+  };
+}
+
+export function buildHostedExecutionAssistantAskRequestedWake(input: {
+  ask: HostedExecutionAssistantAskRequestedPayload;
+  eventId: string;
+  memberId: string;
+  occurredAt: string;
+}): HostedExecutionAssistantAskRequestedWake {
+  const ask = parseHostedExecutionAssistantAskRequestedPayload(input.ask);
+  const occurredAt = parseHostedExecutionAssistantAskTimestamp(
+    input.occurredAt,
+    "Hosted execution assistant ask requested occurredAt",
+  );
+  if (
+    Date.parse(ask.expiresAt)
+    !== Date.parse(occurredAt) + HOSTED_EXECUTION_ASSISTANT_ASK_REQUEST_TTL_MS
+  ) {
+    throw new TypeError(
+      "Hosted execution assistant ask requested expiry must equal occurredAt plus the request TTL.",
+    );
+  }
+
+  return {
+    ...buildHostedExecutionMemberOwnedWakeBase({
+      eventId: input.eventId,
+      kind: "assistant.ask.requested",
+      memberId: input.memberId,
+      occurredAt,
+    }),
+    ask,
+  };
+}
+
+export function buildHostedExecutionAssistantAskCompletedWake(input: {
+  ask: HostedExecutionAssistantAskCompletedPayload;
+  eventId: string;
+  memberId: string;
+  occurredAt: string;
+}): HostedExecutionAssistantAskCompletedWake {
+  const ask = parseHostedExecutionAssistantAskCompletedPayload(input.ask);
+  const occurredAt = parseHostedExecutionAssistantAskTimestamp(
+    input.occurredAt,
+    "Hosted execution assistant ask completed occurredAt",
+  );
+  if (Date.parse(ask.expiresAt) <= Date.parse(occurredAt)) {
+    throw new TypeError(
+      "Hosted execution assistant ask completion must occur before request expiry.",
+    );
+  }
+
+  return {
+    ...buildHostedExecutionMemberOwnedWakeBase({
+      eventId: input.eventId,
+      kind: "assistant.ask.completed",
+      memberId: input.memberId,
+      occurredAt,
+    }),
+    ask,
   };
 }
 

@@ -6,7 +6,6 @@ function buildPrompt(): string {
   return buildAssistantSystemPrompt({
     assistantCliContract: null,
     assistantKnowledgeToolsAvailable: false,
-    assistantSupportedExperimentProtocols: [],
     channel: 'local',
     cliAccess: {
       rawCommand: 'vault-cli',

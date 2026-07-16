@@ -1,3 +1,7 @@
+import { JUNCTION_DEFAULT_TIMESERIES_RESOURCES } from "@murphai/contracts";
+
+export { JUNCTION_DEFAULT_TIMESERIES_RESOURCES };
+
 // Every default summary resource is sparse event/daily-grain data: profile is
 // a single current snapshot per source, menstrual_cycle is ~13 cycles per
 // member-year with small dated sub-arrays, and electrocardiogram is
@@ -57,25 +61,6 @@ export type JunctionTimeseriesResource =
 // not accumulate giant raw timeseries dumps. Sleep-grain heart rate and
 // hypnogram detail already arrive through the `sleep`/`sleep_cycle` summary
 // resources.
-export const JUNCTION_DEFAULT_TIMESERIES_RESOURCES = Object.freeze([
-  "blood_oxygen",
-  "stress_level",
-  "hrv",
-  "respiratory_rate",
-  "vo2_max",
-  "body_temperature_delta",
-  "body_temperature",
-  "basal_body_temperature",
-  "caffeine",
-  "water",
-  "mindfulness_minutes",
-  "heart_rate_recovery_one_minute",
-  "sleep_breathing_disturbance",
-  "afib_burden",
-  "glucose",
-  "blood_pressure",
-] as const);
-
 export const JUNCTION_OPT_IN_TIMESERIES_RESOURCES = Object.freeze([] as const);
 
 export const JUNCTION_OPT_IN_SUMMARY_RESOURCES = Object.freeze([] as const);

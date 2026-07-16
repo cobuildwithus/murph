@@ -140,7 +140,6 @@ export async function bundleRunnerContainerEntrypoint(
     splitting: true,
     tsconfigRaw: "{}",
   });
-
   assertRunnerEntrypointBundleInputsStayExternal(
     Object.keys(buildResult.metafile.inputs),
   );
