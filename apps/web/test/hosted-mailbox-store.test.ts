@@ -33,6 +33,7 @@ import {
   readHostedMailboxMaxSeqByLane,
   readHostedMailboxPendingSystemItemsNeedAiUsageGate,
   readHostedMailboxConversationInputAuthorityByAssistantInputIdTx,
+  readHostedMailboxConversationWakeByAssistantInputId,
   readHostedMailboxPreferenceCausalSeqByAssistantInputIdTx,
   readHostedMailboxWakeAfterDedupeLockTx,
   resolveHostedMailboxRuntimeFetchLaneCursors,
@@ -536,6 +537,107 @@ describe("claimHostedMailboxConversationSubscriptionAction", () => {
     expect(new Set(results)).toEqual(new Set(["claimed", "conflict"]));
     expect(updateMany).toHaveBeenCalledTimes(2);
     expect(findFirst).toHaveBeenCalledTimes(1);
+  });
+});
+
+describe("readHostedMailboxConversationWakeByAssistantInputId", () => {
+  it("fails closed for another member and for expired input authority", async () => {
+    const rows = [
+      {
+        assistantInputLookupKey: requireAssistantInputLookupKey("ain_live"),
+        createdAt: FIXED_NOW,
+        expiresAt: null,
+        id: "mailbox_live_input",
+        kind: "conversation.message",
+        lane: "conversation",
+        userId: "member_mailbox_1",
+      },
+      {
+        assistantInputLookupKey: requireAssistantInputLookupKey("ain_expired"),
+        createdAt: FIXED_NOW,
+        expiresAt: new Date(FIXED_NOW.getTime() - 1),
+        id: "mailbox_expired_input",
+        kind: "conversation.message",
+        lane: "conversation",
+        userId: "member_mailbox_1",
+      },
+    ];
+    const findMany = vi.fn(async (args: {
+      select: { id: true };
+      take: number;
+      where: {
+        assistantInputLookupKey: { in: string[] };
+        createdAt: { gte: Date };
+        kind: string;
+        lane: string;
+        OR: [{ expiresAt: null }, { expiresAt: { gt: Date } }];
+        userId: string;
+      };
+    }) => rows
+      .filter((candidate) => (
+        args.where.assistantInputLookupKey.in.includes(
+          candidate.assistantInputLookupKey,
+        )
+        && candidate.createdAt >= args.where.createdAt.gte
+        && candidate.kind === args.where.kind
+        && candidate.lane === args.where.lane
+        && candidate.userId === args.where.userId
+        && (
+          candidate.expiresAt === null
+          || candidate.expiresAt > args.where.OR[1].expiresAt.gt
+        )
+      ))
+      .slice(0, args.take)
+      .map(({ id }) => ({ id })));
+    const prisma = {
+      hostedMailboxItem: { findMany },
+    } as never;
+
+    await expect(readHostedMailboxConversationWakeByAssistantInputId({
+      assistantInputId: "ain_live",
+      availableAt: FIXED_NOW,
+      memberId: "member_other",
+      prisma,
+    })).resolves.toBeNull();
+    await expect(readHostedMailboxConversationWakeByAssistantInputId({
+      assistantInputId: "ain_expired",
+      availableAt: FIXED_NOW,
+      memberId: "member_mailbox_1",
+      prisma,
+    })).resolves.toBeNull();
+
+    expect(findMany).toHaveBeenNthCalledWith(1, {
+      select: { id: true },
+      take: 2,
+      where: expectLiveHostedMailboxWhere({
+        assistantInputLookupKey: {
+          in: createHostedAssistantInputLookupKeyReadCandidates("ain_live"),
+        },
+        kind: "conversation.message",
+        lane: "conversation",
+        userId: "member_other",
+      }),
+    });
+  });
+
+  it("fails closed when more than one lookup-key version matches", async () => {
+    const findMany = vi.fn().mockResolvedValue([
+      { id: "mailbox_current_lookup" },
+      { id: "mailbox_legacy_lookup" },
+    ]);
+
+    await expect(readHostedMailboxConversationWakeByAssistantInputId({
+      assistantInputId: "ain_ambiguous_wake",
+      availableAt: FIXED_NOW,
+      memberId: "member_mailbox_1",
+      prisma: {
+        hostedMailboxItem: { findMany },
+      } as never,
+    })).resolves.toBeNull();
+
+    expect(findMany).toHaveBeenCalledWith(
+      expect.objectContaining({ take: 2 }),
+    );
   });
 });
 
