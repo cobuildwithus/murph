@@ -2,11 +2,11 @@ import { beforeAll, beforeEach, describe, expect, it, vi } from "vitest";
 
 const mocks = vi.hoisted(() => ({
   handleTool: vi.fn(),
-  requireCallback: vi.fn(),
+  requireJsonCallback: vi.fn(),
 }));
 
 vi.mock("@/src/lib/hosted-execution/cloudflare-callback-auth", () => ({
-  requireHostedCloudflareCallbackRequest: mocks.requireCallback,
+  requireHostedCloudflareCallbackJsonRequest: mocks.requireJsonCallback,
 }));
 
 vi.mock("@/src/lib/hosted-execution/assistant-configuration-tool", () => ({
@@ -28,7 +28,10 @@ describe("hosted assistant configuration tool route", () => {
 
   beforeEach(() => {
     vi.clearAllMocks();
-    mocks.requireCallback.mockResolvedValue("member_123");
+    mocks.requireJsonCallback.mockImplementation(async (request: Request) => ({
+      payload: await request.json(),
+      userId: "member_123",
+    }));
     mocks.handleTool.mockResolvedValue({
       action: "read",
       result: {
@@ -53,12 +56,9 @@ describe("hosted assistant configuration tool route", () => {
     ));
 
     expect(response.status).toBe(200);
-    expect(mocks.requireCallback).toHaveBeenCalledWith(
+    expect(mocks.requireJsonCallback).toHaveBeenCalledWith(
       expect.any(Request),
-      expect.objectContaining({
-        maxBodyBytes: 8 * 1_024,
-        payloadText: JSON.stringify({ action: "read" }),
-      }),
+      { maxBodyBytes: 8 * 1_024 },
     );
     expect(mocks.handleTool).toHaveBeenCalledWith({
       memberId: "member_123",
