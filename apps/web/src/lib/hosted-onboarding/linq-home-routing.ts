@@ -25,7 +25,6 @@ import {
   claimHostedLinqProactiveConversationCapacityTx,
   type HostedLinqAssignableHomeLine,
   listHostedLinqAssignableHomeLines,
-  readHostedLinqProactiveConversationCounts,
 } from "./linq-line-store";
 import { normalizePhoneNumber } from "./phone";
 import { hostedOnboardingError } from "./errors";
@@ -39,7 +38,7 @@ export interface HostedMemberActivationLinqRouteResolution {
 export interface HostedLinqHomeLineAssignmentReservation {
   assignedAt: Date;
   line: HostedLinqAssignableHomeLine;
-  signupWelcomeReserved: boolean;
+  proactiveConversationReserved: boolean;
 }
 
 export type HostedLinqHomeLinePhoneReservationResult =
@@ -91,6 +90,7 @@ export async function reserveHostedLinqHomeLineFromPoolTx(input: {
   return reserveHostedLinqHomeLineFromPoolAfterLockTx({
     preferredRecipientPhone: input.preferredRecipientPhone,
     prisma: input.prisma,
+    reservationKind: "inbound",
   });
 }
 
@@ -162,12 +162,13 @@ async function reserveHostedMemberLinqHomeLineRouteBindingAfterLocksTx(input: {
   prisma: Prisma.TransactionClient;
 }): Promise<HostedLinqHomeLineRouteBindingResult> {
   // Reserve from the whole assignable pool, preferring the line the member
-  // contacted. Member-initiated first contact bypasses proactive welcome
-  // capacity but still respects line health and active-member capacity.
+  // contacted. A same-line reply uses the member-created thread; switching to
+  // another line starts a proactive conversation and must reserve capacity.
   const reservationResult = await reserveHostedLinqHomeLineFromPoolAfterLockTx({
     preferredRecipientPhone: input.decision.preferredRecipientPhone,
     now: new Date(),
     prisma: input.prisma,
+    reservationKind: "inbound",
   });
 
   if (reservationResult.kind !== "reserved") {
@@ -413,7 +414,7 @@ async function resolveHostedMemberActivationLinqRouteAttempt(input: {
     recipientPhone: targetRecipientPhone,
   });
 
-  if (!target.signupWelcomeReserved) {
+  if (!target.proactiveConversationReserved) {
     return {
       welcomeRoute: null,
     };
@@ -436,7 +437,7 @@ async function reserveHostedLinqHomeLineFromCandidatesTx(input: {
   now?: Date;
   preferredRecipientPhone?: string | null;
   prisma: Prisma.TransactionClient;
-  reserveSignupWelcome?: boolean;
+  reservationKind: "inbound" | "signup_welcome";
 }): Promise<HostedLinqHomeLineAssignmentReservation | null> {
   const recipientPhones = input.lines.map((line) => line.phoneNumber);
 
@@ -454,42 +455,66 @@ async function reserveHostedLinqHomeLineFromCandidatesTx(input: {
     recipientPhones,
   });
   const dayUtc = startOfUtcDay(now);
-  const proactiveConversationCounts = input.reserveSignupWelcome
-    ? await readHostedLinqProactiveConversationCounts({
-        dayUtc,
-        lines: input.lines,
-        prisma: input.prisma,
-      })
-    : new Map<string, number>();
-  const welcomeLine = input.reserveSignupWelcome
-    ? chooseHostedLinqSignupWelcomeLine({
-        activeMembersByRecipientPhone,
-        lines: input.lines,
-        newAssignmentsByRecipientPhone: proactiveConversationCounts,
-        preferredRecipientPhone: input.preferredRecipientPhone ?? null,
-      })
-    : null;
-  const signupWelcomeReserved = welcomeLine
-    ? await claimHostedLinqProactiveConversationCapacityTx({
-        dayUtc,
-        limit: resolveHostedLinqSignupWelcomeDailyLimit(welcomeLine),
-        phoneNumberLookupKey: welcomeLine.phoneNumberLookupKey,
-        prisma: input.prisma,
-      })
-    : false;
-  const chosen = welcomeLine ?? chooseHostedLinqHomeLine({
+  const proactiveConversationCounts = new Map(
+    input.lines.map((line) => [
+      line.phoneNumber,
+      line.proactiveConversationDayUtc?.getTime() === dayUtc.getTime()
+        ? line.proactiveConversationCount ?? 0
+        : 0,
+    ]),
+  );
+  const preferredOrFallbackLine = chooseHostedLinqHomeLine({
     activeMembersByRecipientPhone,
     ignoreDailyNewConversationLimit: true,
     lines: input.lines,
     newAssignmentsByRecipientPhone: proactiveConversationCounts,
     preferredRecipientPhone: input.preferredRecipientPhone ?? null,
   });
+  const preferredRecipientPhone = normalizePhoneNumber(input.preferredRecipientPhone);
 
-  return chosen
+  if (
+    input.reservationKind === "inbound"
+    && preferredOrFallbackLine?.phoneNumber === preferredRecipientPhone
+  ) {
+    return {
+      assignedAt: now,
+      line: preferredOrFallbackLine,
+      proactiveConversationReserved: false,
+    };
+  }
+
+  const proactiveLine = chooseHostedLinqSignupWelcomeLine({
+    activeMembersByRecipientPhone,
+    lines: input.lines,
+    newAssignmentsByRecipientPhone: proactiveConversationCounts,
+    preferredRecipientPhone: input.preferredRecipientPhone ?? null,
+  });
+  const proactiveConversationReserved = proactiveLine
+    ? await claimHostedLinqProactiveConversationCapacityTx({
+        dayUtc,
+        limit: resolveHostedLinqSignupWelcomeDailyLimit(proactiveLine),
+        phoneNumberLookupKey: proactiveLine.phoneNumberLookupKey,
+        prisma: input.prisma,
+      })
+    : false;
+
+  if (proactiveLine && proactiveConversationReserved) {
+    return {
+      assignedAt: now,
+      line: proactiveLine,
+      proactiveConversationReserved: true,
+    };
+  }
+
+  if (input.reservationKind === "inbound") {
+    return null;
+  }
+
+  return preferredOrFallbackLine
     ? {
         assignedAt: now,
-        line: chosen,
-        signupWelcomeReserved,
+        line: proactiveLine ?? preferredOrFallbackLine,
+        proactiveConversationReserved: false,
       }
     : null;
 }
@@ -501,8 +526,8 @@ async function resolveHostedMemberActivationTargetRecipientPhone(input: {
   routing: HostedMemberRoutingStateSnapshot | null;
 }): Promise<{
   homeLineAssignedAt?: Date;
+  proactiveConversationReserved?: boolean;
   recipientPhone: string | null;
-  signupWelcomeReserved?: boolean;
 } | "needs_claim"> {
   const routing = input.routing;
   const existingRecipientPhone = normalizePhoneNumber(routing?.linqRecipientPhone);
@@ -521,7 +546,7 @@ async function resolveHostedMemberActivationTargetRecipientPhone(input: {
       ?? routing?.pendingLinqRecipientPhone
       ?? null,
     prisma: input.prisma,
-    reserveSignupWelcome: true,
+    reservationKind: "signup_welcome",
   });
 
   if (reservationResult.kind !== "reserved") {
@@ -534,7 +559,7 @@ async function resolveHostedMemberActivationTargetRecipientPhone(input: {
         ? routing?.linqHomeLineAssignedAt ?? reservationResult.reservation.assignedAt
         : reservationResult.reservation.assignedAt,
     recipientPhone: reservationResult.reservation.line.phoneNumber,
-    signupWelcomeReserved: reservationResult.reservation.signupWelcomeReserved,
+    proactiveConversationReserved: reservationResult.reservation.proactiveConversationReserved,
   };
 }
 
@@ -543,7 +568,7 @@ async function reserveHostedLinqHomeLineFromPoolAfterLockTx(input: {
   now?: Date;
   preferredRecipientPhone: string | null;
   prisma: Prisma.TransactionClient;
-  reserveSignupWelcome?: boolean;
+  reservationKind: "inbound" | "signup_welcome";
 }): Promise<HostedLinqHomeLinePhoneReservationResult> {
   const lines = await listHostedLinqAssignableHomeLines({ prisma: input.prisma });
   const reservation = await reserveHostedLinqHomeLineFromCandidatesTx({
@@ -554,7 +579,7 @@ async function reserveHostedLinqHomeLineFromPoolAfterLockTx(input: {
     ...(input.now ? { now: input.now } : {}),
     preferredRecipientPhone: input.preferredRecipientPhone,
     prisma: input.prisma,
-    reserveSignupWelcome: input.reserveSignupWelcome ?? false,
+    reservationKind: input.reservationKind,
   });
 
   if (!reservation) {

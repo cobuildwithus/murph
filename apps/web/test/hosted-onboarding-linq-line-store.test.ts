@@ -11,7 +11,6 @@ import {
   HOSTED_LINQ_ASSIGNABLE_HOME_LINE_LIMIT,
   listHostedLinqAssignableHomeLines,
   listHostedLinqContactCardLines,
-  readHostedLinqProactiveConversationCounts,
   upsertHostedLinqLineForPhoneTx,
 } from "@/src/lib/hosted-onboarding/linq-line-store";
 import {
@@ -87,8 +86,12 @@ describe("listHostedLinqContactCardLines", () => {
 
 describe("listHostedLinqAssignableHomeLines", () => {
   it("bounds the assignable pool read before decrypting line phones", async () => {
+    const proactiveConversationDayUtc = new Date("2026-07-16T00:00:00.000Z");
     const findMany = vi.fn().mockResolvedValue([
-      buildAssignableLineRow("+15550100001"),
+      buildAssignableLineRow("+15550100001", {
+        proactiveConversationCount: 12,
+        proactiveConversationDayUtc,
+      }),
     ]);
     const prisma = {
       hostedLinqLine: {
@@ -104,6 +107,8 @@ describe("listHostedLinqAssignableHomeLines", () => {
       {
         phoneNumber: "+15550100001",
         phoneNumberHint: "*** 0001",
+        proactiveConversationCount: 12,
+        proactiveConversationDayUtc,
       },
     ]);
 
@@ -116,6 +121,7 @@ describe("listHostedLinqAssignableHomeLines", () => {
         phoneNumberEncrypted: { not: null },
       },
     }));
+    expect(findMany).toHaveBeenCalledTimes(1);
   });
 
   it("fails closed when the configured assignable pool exceeds the reviewed cap", async () => {
@@ -181,52 +187,6 @@ describe("assertHostedLinqAssignableHomeLinePoolReady", () => {
 
 describe("hosted Linq proactive-conversation capacity", () => {
   const dayUtc = new Date("2026-07-16T00:00:00.000Z");
-  const lines = [
-    {
-      activeMemberLimit: null,
-      assignmentWeight: 100,
-      maxNewConversationsPerDay: null,
-      phoneNumber: "+15550100001",
-      phoneNumberHint: "*** 0001",
-      phoneNumberLookupKey: "lookup:line-1",
-    },
-    {
-      activeMemberLimit: null,
-      assignmentWeight: 100,
-      maxNewConversationsPerDay: null,
-      phoneNumber: "+15550100002",
-      phoneNumberHint: "*** 0002",
-      phoneNumberLookupKey: "lookup:line-2",
-    },
-  ];
-
-  it("reads only the current UTC day's line-owned counts", async () => {
-    const findMany = vi.fn().mockResolvedValue([
-      {
-        phoneNumberLookupKey: lines[0]?.phoneNumberLookupKey,
-        proactiveConversationCount: 50,
-        proactiveConversationDayUtc: dayUtc,
-      },
-      {
-        phoneNumberLookupKey: lines[1]?.phoneNumberLookupKey,
-        proactiveConversationCount: 49,
-        proactiveConversationDayUtc: new Date("2026-07-15T00:00:00.000Z"),
-      },
-    ]);
-
-    await expect(
-      readHostedLinqProactiveConversationCounts({
-        dayUtc,
-        lines,
-        prisma: {
-          hostedLinqLine: { findMany },
-        } as never,
-      }),
-    ).resolves.toEqual(new Map([
-      [lines[0]?.phoneNumber, 50],
-      [lines[1]?.phoneNumber, 0],
-    ]));
-  });
 
   it("increments the current day only while the hard limit has room", async () => {
     const updateMany = vi.fn().mockResolvedValue({ count: 1 });
@@ -458,7 +418,13 @@ function buildLineRow(
   };
 }
 
-function buildAssignableLineRow(phoneNumber: string) {
+function buildAssignableLineRow(
+  phoneNumber: string,
+  overrides: Partial<{
+    proactiveConversationCount: number | null;
+    proactiveConversationDayUtc: Date | null;
+  }> = {},
+) {
   return {
     activeMemberLimit: null,
     assignmentWeight: 100,
@@ -466,6 +432,8 @@ function buildAssignableLineRow(phoneNumber: string) {
     phoneNumberEncrypted: encryptHostedLinqLinePhoneNumber(phoneNumber),
     phoneNumberHint: `*** ${phoneNumber.slice(-4)}`,
     phoneNumberLookupKey: createHostedPhoneLookupKey(phoneNumber) ?? `lookup:${phoneNumber}`,
+    proactiveConversationCount: overrides.proactiveConversationCount ?? null,
+    proactiveConversationDayUtc: overrides.proactiveConversationDayUtc ?? null,
   };
 }
 

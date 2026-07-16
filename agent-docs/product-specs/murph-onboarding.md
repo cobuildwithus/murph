@@ -78,7 +78,9 @@ privacy, authorization, or provider boundaries.
   line is full, activation still assigns a home line and omits the welcome so
   the member can use the existing “Text Murph” button to begin the conversation.
   This admission decision is line-owned operational state, not onboarding step
-  state, and member-initiated first texts do not consume proactive capacity.
+  state. A member-initiated first text on its incoming line does not consume
+  proactive capacity; a degraded-line fallback that must open a new outbound
+  chat reserves capacity on the fallback line or sends nothing.
 
 The six foundation checkpoints are a finite onboarding contract, not a proxy
 for Murph knowing the member completely. Longitudinal context should continue

@@ -6109,7 +6109,10 @@ describe("handleHostedOnboardingLinqWebhook", () => {
       hostedLinqLine: buildHostedLinqLinePoolFixture({
         lines: [
           {
+            maxNewConversationsPerDay: 10,
             phoneNumber: fallbackLinePhone,
+            proactiveConversationCount: 9,
+            proactiveConversationDayUtc: startOfUtcDayForTest(new Date()),
           },
         ],
       }),
@@ -6168,6 +6171,84 @@ describe("handleHostedOnboardingLinqWebhook", () => {
       signal: undefined,
       to: ["+15551234567"],
     });
+    expect(mocks.sendHostedLinqChatMessage).not.toHaveBeenCalled();
+    expect(prismaMocks.hostedLinqLine.updateMany).toHaveBeenCalledWith({
+      data: {
+        proactiveConversationCount: { increment: 1 },
+      },
+      where: {
+        phoneNumberLookupKey: createHostedPhoneLookupKey(fallbackLinePhone),
+        proactiveConversationCount: { lt: 10 },
+        proactiveConversationDayUtc: startOfUtcDayForTest(new Date()),
+      },
+    });
+  });
+
+  it("does not open a fallback chat when every healthy line is at its proactive limit", async () => {
+    const incomingLinePhone = "+15550000000";
+    const fallbackLinePhone = "+15550100001";
+    const hostedMemberRouting = createStatefulHostedMemberRoutingMock();
+    const prismaMocks = {
+      $queryRaw: vi.fn().mockResolvedValue([]),
+      hostedWebhookReceipt: {
+        create: vi.fn().mockResolvedValue({}),
+        findUnique: vi.fn().mockResolvedValue({
+          payloadJson: {
+            eventType: "message.received",
+            receiptAttemptCount: 1,
+            receiptStatus: "processing",
+          },
+        }),
+        updateMany: vi.fn().mockResolvedValue({ count: 1 }),
+      },
+      hostedLinqLine: buildHostedLinqLinePoolFixture({
+        lines: [
+          {
+            maxNewConversationsPerDay: 10,
+            phoneNumber: fallbackLinePhone,
+            proactiveConversationCount: 10,
+            proactiveConversationDayUtc: startOfUtcDayForTest(new Date()),
+          },
+        ],
+      }),
+      hostedMember: {
+        create: vi.fn(),
+        findUnique: vi.fn().mockResolvedValue(null),
+        update: vi.fn(),
+      },
+      hostedMemberRouting,
+    };
+    const prisma = asPrismaTransactionClient(prismaMocks);
+
+    const response = await handleHostedOnboardingLinqWebhook({
+      prisma,
+      rawBody: buildHostedLinqWebhookBody({
+        data: {
+          chat: {
+            id: "chat_degraded_capped",
+            owner_handle: {
+              handle: incomingLinePhone,
+              id: "handle_owner_degraded_capped",
+              is_me: true,
+              service: "iMessage",
+            },
+          },
+        },
+        eventId: "evt_fallback_degraded_capped",
+        service: "iMessage",
+      }),
+      signature: null,
+      timestamp: null,
+    });
+
+    expect(response).toMatchObject({
+      ignored: true,
+      ok: true,
+      reason: "home-line-capacity-exhausted",
+    });
+    expect(prismaMocks.hostedLinqLine.updateMany).not.toHaveBeenCalled();
+    expect(hostedMemberRouting.upsert).not.toHaveBeenCalled();
+    expect(mocks.createHostedLinqChat).not.toHaveBeenCalled();
     expect(mocks.sendHostedLinqChatMessage).not.toHaveBeenCalled();
   });
 
@@ -8346,6 +8427,8 @@ function buildHostedLinqLinePoolFixture(input: {
     activeMemberLimit?: number | null;
     maxNewConversationsPerDay?: number | null;
     phoneNumber: string;
+    proactiveConversationCount?: number | null;
+    proactiveConversationDayUtc?: Date | null;
   }>;
 }): HostedLinqLineFixture {
   const rows = input.lines.map((line) => ({
@@ -8356,6 +8439,8 @@ function buildHostedLinqLinePoolFixture(input: {
     phoneNumberEncrypted: encryptHostedLinqLinePhoneNumber(line.phoneNumber),
     phoneNumberHint: `*** ${line.phoneNumber.slice(-4)}`,
     phoneNumberLookupKey: createHostedPhoneLookupKey(line.phoneNumber),
+    proactiveConversationCount: line.proactiveConversationCount ?? null,
+    proactiveConversationDayUtc: line.proactiveConversationDayUtc ?? null,
   }));
 
   return {
@@ -8376,6 +8461,8 @@ function buildHostedLinqLinePoolFixture(input: {
         phoneNumberEncrypted: row.phoneNumberEncrypted,
         phoneNumberHint: row.phoneNumberHint,
         phoneNumberLookupKey: row.phoneNumberLookupKey,
+        proactiveConversationCount: row.proactiveConversationCount,
+        proactiveConversationDayUtc: row.proactiveConversationDayUtc,
       }));
     }),
     findUnique: vi.fn().mockResolvedValue(null),
@@ -8387,6 +8474,14 @@ function buildHostedLinqLinePoolFixture(input: {
       phoneNumberLookupKey: createHostedPhoneLookupKey(input.lines[0]?.phoneNumber ?? "+15550000000"),
     }),
   };
+}
+
+function startOfUtcDayForTest(value: Date): Date {
+  return new Date(Date.UTC(
+    value.getUTCFullYear(),
+    value.getUTCMonth(),
+    value.getUTCDate(),
+  ));
 }
 
 function asPrismaTransactionClient<T extends PrismaFixtureBase>(

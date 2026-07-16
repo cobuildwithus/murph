@@ -29,6 +29,8 @@ export type HostedLinqAssignableHomeLine = {
   phoneNumber: string;
   phoneNumberHint: string;
   phoneNumberLookupKey: string;
+  proactiveConversationCount: number | null;
+  proactiveConversationDayUtc: Date | null;
 };
 
 export type HostedLinqContactCardLine = {
@@ -45,6 +47,8 @@ type HostedLinqAssignableHomeLineRow = {
   phoneNumberEncrypted: string | null;
   phoneNumberHint: string;
   phoneNumberLookupKey: string;
+  proactiveConversationCount: number | null;
+  proactiveConversationDayUtc: Date | null;
 };
 
 export async function upsertHostedLinqLineForPhoneTx(input: {
@@ -291,6 +295,8 @@ export async function listHostedLinqAssignableHomeLines(input: {
       phoneNumberEncrypted: true,
       phoneNumberHint: true,
       phoneNumberLookupKey: true,
+      proactiveConversationCount: true,
+      proactiveConversationDayUtc: true,
     },
   });
 
@@ -304,45 +310,6 @@ export async function listHostedLinqAssignableHomeLines(input: {
   }
 
   return mapHostedLinqAssignableHomeLineRows(rows);
-}
-
-export async function readHostedLinqProactiveConversationCounts(input: {
-  dayUtc: Date;
-  lines: readonly HostedLinqAssignableHomeLine[];
-  prisma: HostedLinqLineClient;
-}): Promise<Map<string, number>> {
-  const counts = new Map(input.lines.map((line) => [line.phoneNumber, 0]));
-  if (input.lines.length === 0) {
-    return counts;
-  }
-
-  const phoneNumberByLookupKey = new Map(
-    input.lines.map((line) => [line.phoneNumberLookupKey, line.phoneNumber] as const),
-  );
-  const rows = await input.prisma.hostedLinqLine.findMany({
-    where: {
-      phoneNumberLookupKey: {
-        in: input.lines.map((line) => line.phoneNumberLookupKey),
-      },
-    },
-    select: {
-      phoneNumberLookupKey: true,
-      proactiveConversationCount: true,
-      proactiveConversationDayUtc: true,
-    },
-  });
-
-  for (const row of rows) {
-    const phoneNumber = phoneNumberByLookupKey.get(row.phoneNumberLookupKey);
-    if (
-      phoneNumber
-      && row.proactiveConversationDayUtc?.getTime() === input.dayUtc.getTime()
-    ) {
-      counts.set(phoneNumber, row.proactiveConversationCount ?? 0);
-    }
-  }
-
-  return counts;
 }
 
 export async function claimHostedLinqProactiveConversationCapacityTx(input: {
@@ -432,6 +399,8 @@ function mapHostedLinqAssignableHomeLineRows(
       phoneNumber,
       phoneNumberHint: row.phoneNumberHint,
       phoneNumberLookupKey: row.phoneNumberLookupKey,
+      proactiveConversationCount: row.proactiveConversationCount,
+      proactiveConversationDayUtc: row.proactiveConversationDayUtc,
     }];
   });
 }

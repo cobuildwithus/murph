@@ -267,6 +267,8 @@ function buildLine(
     activeMemberLimit: number | null;
     assignmentWeight: number;
     maxNewConversationsPerDay: number | null;
+    proactiveConversationCount: number | null;
+    proactiveConversationDayUtc: Date | null;
   }> = {},
 ) {
   return {
@@ -276,6 +278,8 @@ function buildLine(
     phoneNumber,
     phoneNumberHint: `*** ${phoneNumber.slice(-4)}`,
     phoneNumberLookupKey: `lookup:${phoneNumber}`,
+    proactiveConversationCount: overrides.proactiveConversationCount ?? null,
+    proactiveConversationDayUtc: overrides.proactiveConversationDayUtc ?? null,
   };
 }
 
