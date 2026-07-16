@@ -54,7 +54,6 @@ const HOSTED_ASSISTANT_ROUTE_PLANNING_STAGE_VALUES = new Set([
   "memory_overview",
   "primary_instructions",
   "resume_binding",
-  "supported_experiment_protocols",
   "target_capabilities",
 ]);
 const HOSTED_ASSISTANT_PROVIDER_PROMPT_DIAGNOSTIC_KIND_VALUES = new Set([
@@ -564,7 +563,6 @@ function readHostedAssistantProviderPlanDiagnosticTrace(
     "routePlanningPrimarySystemPromptElapsedMs",
     "routePlanningResumeBindingElapsedMs",
     "routePlanningSlowestStageElapsedMs",
-    "routePlanningSupportedExperimentProtocolsElapsedMs",
     "routePlanningTargetCapabilitiesElapsedMs",
     "routePlanningUnaccountedElapsedMs",
     "routePlanningVaultOverviewElapsedMs",

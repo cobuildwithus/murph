@@ -582,19 +582,6 @@ export function buildCodexAppServerSteerRequest(
   }
 }
 
-function appendRequiredComputerHandoffUrl(
-  message: string,
-  handoffUrl: string,
-): string {
-  const normalizedMessage = normalizeNullableString(message)
-  if (normalizedMessage?.includes(handoffUrl)) {
-    return normalizedMessage
-  }
-  return normalizedMessage
-    ? `${normalizedMessage}\n\nTake over here: ${handoffUrl}`
-    : `Take over here: ${handoffUrl}`
-}
-
 function appendRequiredVaultFileApprovalUrls(
   message: string,
   approvalUrls: readonly string[],
@@ -2454,7 +2441,6 @@ async function runCodexAppServerTurnOnProcess(
   const jsonEvents: unknown[] = []
   const runtimeIssueInputs: AssistantRuntimeIssueInput[] = []
   let computerToolsLockedAfterUserPause = false
-  let requiredComputerHandoffUrl: string | null = null
   const requiredVaultFileApprovalUrls: string[] = []
   const actionDiagnostics = input.onTraceEvent
     ? createCodexActionDiagnosticsReducer()
@@ -2556,11 +2542,11 @@ async function runCodexAppServerTurnOnProcess(
         .map((entry) => entry.deliveryContextOrdinal),
     )].sort((left, right) => left - right)
 
-  const hasRequiredUserVisibleLink = (): boolean =>
-    requiredComputerHandoffUrl !== null || requiredVaultFileApprovalUrls.length > 0
+  const hasRequiredUserVisibleOutput = (): boolean =>
+    computerToolsLockedAfterUserPause || requiredVaultFileApprovalUrls.length > 0
 
   const settleNoReplyFinalActions = async (): Promise<void> => {
-    if (hasRequiredUserVisibleLink() || noReplySettlementStarted) {
+    if (hasRequiredUserVisibleOutput() || noReplySettlementStarted) {
       return
     }
     noReplySettlementStarted = true
@@ -3112,7 +3098,11 @@ async function runCodexAppServerTurnOnProcess(
     patch: MurphDynamicToolFinalActionPatch,
     deliveryContextOrdinal: number,
   ): Promise<boolean> => {
-    if (patch.kind === 'none' && !canApplyNoReplyPatch(deliveryContextOrdinal)) {
+    if (
+      patch.kind === 'none' &&
+      (computerToolsLockedAfterUserPause ||
+        !canApplyNoReplyPatch(deliveryContextOrdinal))
+    ) {
       return false
     }
 
@@ -3344,6 +3334,15 @@ async function runCodexAppServerTurnOnProcess(
         : null
 
     if (dynamicToolRequest.kind === 'computer-pause-for-user') {
+      finalActionPatches = finalActionPatches.filter(
+        (entry) =>
+          entry.patch.kind !== 'none' ||
+          entry.deliveryContextOrdinal !==
+            dynamicToolRequestDeliveryContextOrdinal,
+      )
+      reservedNoReplyDeliveryContextOrdinals.delete(
+        dynamicToolRequestDeliveryContextOrdinal,
+      )
       computerToolsLockedAfterUserPause = true
       closeLiveTurn()
     }
@@ -3389,12 +3388,6 @@ async function runCodexAppServerTurnOnProcess(
       }
       if (result.usageDraft) {
         additionalUsages.push(result.usageDraft)
-      }
-      if (result.computerRunPausedForUser) {
-        computerToolsLockedAfterUserPause = true
-      }
-      if (result.requiredComputerHandoffUrl) {
-        requiredComputerHandoffUrl = result.requiredComputerHandoffUrl
       }
       if (
         result.requiredVaultFileApprovalUrl &&
@@ -4236,9 +4229,9 @@ async function runCodexAppServerTurnOnProcess(
         : finalTrailingSteerCandidate?.deliveryContextOrdinal ??
           latestDeliveryContextOrdinal
   const finalActionPatch = resolveFinalActionPatch(finalDeliveryContextOrdinal)
-  const requiredUserVisibleLink = hasRequiredUserVisibleLink()
+  const requiredUserVisibleOutput = hasRequiredUserVisibleOutput()
   const noReplySelected =
-    finalActionPatch?.kind === 'none' && !requiredUserVisibleLink
+    finalActionPatch?.kind === 'none' && !requiredUserVisibleOutput
   const finalAction: AssistantNoReplyDisposition | null = noReplySelected
     ? { kind: 'none' }
     : null
@@ -4246,14 +4239,8 @@ async function runCodexAppServerTurnOnProcess(
     noReplySelected || suppressTrailingSteerCandidateForEarlierNoReply
       ? ''
       : selectedFinalMessage
-  let finalMessage = requiredComputerHandoffUrl
-    ? appendRequiredComputerHandoffUrl(
-        modelFinalMessage,
-        requiredComputerHandoffUrl,
-      )
-    : modelFinalMessage
-  finalMessage = appendRequiredVaultFileApprovalUrls(
-    finalMessage,
+  const finalMessage = appendRequiredVaultFileApprovalUrls(
+    modelFinalMessage,
     requiredVaultFileApprovalUrls,
   )
   if (
@@ -4280,7 +4267,7 @@ async function runCodexAppServerTurnOnProcess(
       acceptedNoReplyDeliveryContextOrdinals,
     finalAction,
     finalActionExplicit:
-      finalActionPatch !== null && !requiredUserVisibleLink,
+      finalActionPatch !== null && !requiredUserVisibleOutput,
     finalMessage,
     transcriptMessage:
       normalizeNullableString(modelFinalMessage) ??

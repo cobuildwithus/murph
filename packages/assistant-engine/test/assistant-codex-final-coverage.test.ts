@@ -184,7 +184,6 @@ function createRoutePlanningDiagnostics(): AssistantRouteTurnPlan['planningDiagn
     routeResumeBindingElapsedMs: null,
     routeTargetCapabilitiesElapsedMs: null,
     shouldPrepareBootstrapContext: false,
-    supportedExperimentProtocolsElapsedMs: null,
   }
 }
 

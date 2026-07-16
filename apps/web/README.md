@@ -39,6 +39,22 @@ workspace-runtime pass, and checkpoints through the web-owned workspace CAS. It 
 opaque encrypted runtime blobs and explicit execution-time callback data, but it is not the
 canonical owner of hosted product facts.
 
+## Browser-vault member-proof rollback floor
+
+Successful browser-vault session responses in the `empty` and `not_modified`
+states carry the authenticated member's non-empty `memberId`. Ready responses
+bind that identity through the encrypted replica AAD's `userId` instead of a
+redundant top-level field. The browser client fails closed when either
+non-ready success response omits its member proof; only the local synthetic
+401/403 empty result intentionally uses `memberId: null`.
+
+PR #586 is the permanent hosted-web rollback floor for this contract. The
+production alias and retained ready deployments were proved to descend that
+producer before the omitted-field reader was removed. Do not roll the Web
+alias below #586: a browser loaded from a current deployment can outlive an
+alias change and reject an older producer's unproved response. For an incident,
+deploy a forward fix or roll forward to #586 or newer.
+
 ## Approval-outcome deployment compatibility
 
 Deploy the gate-disabled web bundle that serves the internal action-approval

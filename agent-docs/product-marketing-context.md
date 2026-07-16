@@ -1,6 +1,6 @@
 # Product Marketing Context
 
-*Last updated: 2026-07-12*
+*Last updated: 2026-07-15*
 
 This doc separates **facts** (true today), **strategy decisions** (chosen
 product direction), **hypotheses** (beliefs still to validate), and **target
@@ -25,11 +25,14 @@ mobile app is required for the main relationship.
 context, connected health data, research and interpretation, plans and
 actions, follow-through support, experiments, and group conversations.
 
-**Strategy decision:** Direct signups begin privately. Onboarding finds one
-useful first thread without narrowing Murph to that thread, establishes an
-ongoing support loop, then gathers a finite health-context foundation over
-separate turns. Friend or group support is suggested only when it fits and the
-member chooses it.
+**Strategy decision:** Direct signups begin privately. Onboarding briefly names
+one or two important aspiration threads—a desired change, something to
+understand, a task to handle, or help exploring where to focus—reflects and
+parks them, then gathers a finite health-context foundation over separate
+turns. Murph returns with that context and collaborates on the next useful step
+when the member wants one; the member may also leave the thread open. A
+discovery answer is not permission to prescribe. Friend or group support is
+suggested only when it fits and the member chooses it.
 
 **Differentiation hypothesis:** Persistent, well-retrieved personal context
 will make Murph materially more useful than a general-purpose model and create
@@ -67,11 +70,13 @@ can start with whatever matters today—a question, a task, data, a decision, a
 goal, or uncertainty about where to focus—and Murph becomes more personal as
 relevant context accumulates.
 
-The first useful thread makes the value concrete. It does not turn Murph into
-a single-goal coach, and onboarding should not make a member complete a health
-profile before receiving help. First value also should not end the relationship:
-Murph establishes a useful next step, then progressively gathers the finite
-foundation context that makes broad future help safer and more personal.
+The first useful thread makes the relationship concrete without turning Murph
+into a single-goal coach. During onboarding, Murph briefly understands and
+parks that thread, progressively gathers the finite foundation context that
+makes help safer and more personal, then returns to choose a useful next step
+with the member. An actual immediate request still gets immediate help; a goal
+disclosed in response to Murph's discovery question is context, not a plan
+request.
 
 ### Context advantage
 
@@ -244,7 +249,7 @@ No external metric currently proves the strategy. The next useful evidence is:
 | Question | Status |
 | --- | --- |
 | Do new members understand Murph's broad role after the first conversation? | Unproven |
-| Does a focused first thread create useful value without narrowing the product? | Unproven |
+| Does briefly parking an aspiration before foundation context make onboarding feel more personal and less prescriptive? | Unproven |
 | Does Murph reuse prior context in a way members notice and value? | Unproven |
 | Do members trust the current surface-specific context controls? | Unproven |
 | Do members need universal structured-record deletion beyond correction and status changes? | Unproven and not currently shipped |

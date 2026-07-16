@@ -92,17 +92,18 @@ deliberately excluded from this minimal behavior.
 
 ## Deployment compatibility
 
-This change widens the existing `list_memberships` response and group-tool
-action contract across the hosted runner and Web control plane. Deploy the
-updated Cloudflare worker and runner bundle first, with immediate container
-rollout and convergence proof. Its parser accepts legacy membership summaries
-without an id, and private Murph calls leave only when the selected summary
-includes one. Then deploy Web, which adds ids, the tool handler, and the
-join-page path together. An already-open join page from the previous Web build
-has no membership precondition and receives a reload conflict instead of
-mutating membership. Roll Web back before rolling the runner below the
-widened parser. No persisted wire shape changes, so no compatibility floor
-remains after both planes converge.
+Every successful `list_memberships` summary now requires a nonblank
+`membershipId`. Web derives it directly from the required
+`HostedGroupMember.id` primary key, and the hosted runner rejects an omitted or
+null value instead of treating it as a temporarily unavailable leave selector.
+
+Web #676 or newer is therefore the rollback floor while the strict runner is
+active. Deploy the strict Cloudflare runner only after confirming Web remains
+at or above that floor. A tolerant runner rollback is safe; if both planes must
+roll back below the floor, roll Cloudflare back first and then Web. The hard cut
+does not require immediate container rollout because both old and new runners
+accept the current Web response, but post-deploy proof must exercise one private
+`list_memberships` read and check for group-tool response parse failures.
 
 ## Direct proof
 

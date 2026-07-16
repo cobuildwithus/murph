@@ -49,6 +49,9 @@ export async function startAuthorizedHostedAiUsageLimitNoticeDispatchTx(input: {
   const targetNotAuthorized = new Error(
     "Hosted AI usage-limit notice target is no longer authorized.",
   );
+  const noticeNotEligible = new Error(
+    "Hosted AI usage-limit notice allowance period is no longer blocked.",
+  );
 
   try {
     return await input.prisma.$transaction(async (prisma) => {
@@ -62,6 +65,14 @@ export async function startAuthorizedHostedAiUsageLimitNoticeDispatchTx(input: {
             throw targetNotAuthorized;
           }
           await input.assertDispatchAuthority?.(claimPrisma);
+          if (!await lockHostedAiUsageLimitNoticeEligibilityTx({
+            attemptedAt: input.attemptedAt,
+            memberId: input.memberId,
+            periodStart: input.periodStart,
+            tx: claimPrisma,
+          })) {
+            throw noticeNotEligible;
+          }
         },
         attemptedAt: input.attemptedAt,
         ...(input.noticeDeliveryTarget.channel === "linq"
@@ -79,6 +90,9 @@ export async function startAuthorizedHostedAiUsageLimitNoticeDispatchTx(input: {
       isolationLevel: Prisma.TransactionIsolationLevel.Serializable,
     });
   } catch (error) {
+    if (error === noticeNotEligible) {
+      return { status: "already_notified" };
+    }
     if (
       error === targetNotAuthorized
       || (isHostedOnboardingError(error) && error.httpStatus === 403)
@@ -87,6 +101,26 @@ export async function startAuthorizedHostedAiUsageLimitNoticeDispatchTx(input: {
     }
     throw error;
   }
+}
+
+async function lockHostedAiUsageLimitNoticeEligibilityTx(input: {
+  attemptedAt: Date;
+  memberId: string;
+  periodStart: Date;
+  tx: Prisma.TransactionClient;
+}): Promise<boolean> {
+  const rows = await input.tx.$queryRaw<Array<{ eligible: boolean }>>`
+    SELECT TRUE AS "eligible"
+    FROM "hosted_ai_usage_period"
+    WHERE "member_id" = ${input.memberId}
+      AND "period_start" = ${input.periodStart}
+      AND "period_start" <= ${input.attemptedAt}
+      AND "period_end" > ${input.attemptedAt}
+      AND "blocked_at" IS NOT NULL
+    FOR UPDATE
+  `;
+
+  return rows[0]?.eligible === true;
 }
 
 async function isHostedAiUsageLimitNoticeTargetAuthorizedTx(input: {

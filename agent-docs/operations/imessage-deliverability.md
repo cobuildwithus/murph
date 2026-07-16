@@ -55,6 +55,7 @@ Read and apply this guide when touching any of these surfaces:
 
 7. Monitor and fail closed on line health.
    - Watch delivery receipts. "Sent" without "delivered" can indicate silent dropping.
+   - Persist and correlate `message.sent` as provider-sent evidence, never as handset delivery. SMS/MMS normally emit `message.sent` or `message.failed` but no delivered/read receipt, so the absence of `message.delivered` is expected on those protocols.
    - If delivery failures spike on a line, immediately reduce or stop automated volume on that line.
    - If a line is suspected or known flagged, stop all automated sending from it until line health is investigated.
    - Do not retry through a flagged line in a way that increases volume or repeats the same content.
@@ -168,7 +169,7 @@ Design your messaging flows to get a reply within the first 3 messages. Apple's 
 
 #### Monitoring Your Line Health
 
-- Watch your delivery receipts. If messages show as "sent" but never "delivered," Apple may be silently dropping them. This is the first sign of trouble.
+- Watch delivery receipts on receipt-capable protocols. If iMessage messages show as "sent" but never "delivered," Apple may be silently dropping them. SMS/MMS do not produce delivered/read receipts, so `message.sent` is their highest positive provider signal and must not be presented as handset delivery.
 - If you see delivery failures spike on a line, reduce volume immediately. Do not keep sending; you are making it worse.
 - If a line gets flagged, stop all automated sending on it immediately. Continued sending on a flagged line can escalate from temporary throttle to permanent block.
 - Contact the provider if you suspect a line is flagged. They can check the line health status and help with recovery before it becomes permanent.
