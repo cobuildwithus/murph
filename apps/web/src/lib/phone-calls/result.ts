@@ -30,10 +30,13 @@ import {
 } from "./notification-route";
 import {
   hasRetellBasicAttributesOnlyStorage,
-  readRetellMurphPhoneCallId,
+  readRetellCallEndAt,
   type RetellCallPayload,
 } from "./retell-payloads";
 import { isHostedPhoneCallProviderCleanupPending } from "./authority";
+import {
+  readRetellWebhookCallTarget,
+} from "./webhook-target";
 
 interface HostedPhoneCallWebhookTx {
   appendResultNotification(
@@ -83,13 +86,6 @@ interface HostedPhoneCallWebhookStore {
   $transaction<T>(
     callback: (tx: HostedPhoneCallWebhookTx) => Promise<T>,
   ): Promise<T>;
-}
-
-interface RetellWebhookCallTarget {
-  call: HostedPhoneCall;
-  providerCallIdData: {
-    providerCallId?: string;
-  };
 }
 
 export interface RetellCallAnalyzedHandlingResult {
@@ -143,7 +139,7 @@ export async function handleRetellCallEnded(input: {
     await tx.hostedPhoneCall.updateMany({
       data: {
         ...target.providerCallIdData,
-        endedAt: readRetellEndedAt(input.call) ?? new Date(),
+        endedAt: readRetellCallEndAt(input.call) ?? new Date(),
         status: preserveFailedStatus
           ? "failed"
           : classifyEndedStatus(input.call.disconnection_reason),
@@ -203,7 +199,7 @@ export async function handleRetellCallAnalyzed(input: {
       data: {
         ...target.providerCallIdData,
         analyzedAt: new Date(),
-        endedAt: readRetellEndedAt(input.call) ?? undefined,
+        endedAt: readRetellCallEndAt(input.call) ?? undefined,
         resultEncrypted,
         resultJson: Prisma.DbNull,
         status: mapPhoneCallStatus(result.outcome),
@@ -332,34 +328,6 @@ function hostedPhoneCallResultNotificationError(
     message,
     retryable: true,
   });
-}
-
-async function readRetellWebhookCallTarget(input: {
-  call: RetellCallPayload;
-  prisma: HostedPhoneCallWebhookTx;
-}): Promise<RetellWebhookCallTarget | null> {
-  const murphCallId = readRetellMurphPhoneCallId(input.call);
-  const call = murphCallId
-    ? await input.prisma.hostedPhoneCall.findUnique({
-      where: { id: murphCallId },
-    })
-    : await input.prisma.hostedPhoneCall.findUnique({
-      where: { providerCallId: input.call.call_id },
-    });
-
-  if (!call || call.provider !== "retell") {
-    return null;
-  }
-  if (call.providerCallId && call.providerCallId !== input.call.call_id) {
-    return null;
-  }
-
-  return {
-    call,
-    providerCallIdData: call.providerCallId
-      ? {}
-      : { providerCallId: input.call.call_id },
-  };
 }
 
 function resolveHostedPhoneCallWebhookStore(
@@ -525,25 +493,6 @@ function classifyEndedStatus(reason: string | null | undefined): HostedPhoneCall
     return "failed";
   }
   return "ended";
-}
-
-function readRetellEndedAt(call: RetellCallPayload): Date | null {
-  const value = call.end_timestamp;
-  if (typeof value === "number" && Number.isFinite(value)) {
-    return new Date(value < 1_000_000_000_000 ? value * 1_000 : value);
-  }
-  if (typeof value !== "string" || !value.trim()) {
-    return null;
-  }
-
-  const text = value.trim();
-  if (/^\d+$/u.test(text)) {
-    const numeric = Number.parseInt(text, 10);
-    return new Date(numeric < 1_000_000_000_000 ? numeric * 1_000 : numeric);
-  }
-
-  const parsed = new Date(text);
-  return Number.isNaN(parsed.getTime()) ? null : parsed;
 }
 
 function readOutcome(value: unknown): HostedPhoneCallResult["outcome"] {

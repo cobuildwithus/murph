@@ -439,6 +439,13 @@ export async function resolveAssistantRouteTurnPlan(input: {
     )
   }
   const privateInteractiveAudience = conversationScope === 'direct'
+  const hostedGroupRuntime =
+    conversationScope === 'group' && input.executionContext?.hosted != null
+  const hostedGroupStyleSettingsAvailable =
+    hostedGroupRuntime &&
+    resolvedChannel?.trim().toLowerCase() === 'linq' &&
+    input.hostedToolContext?.personalizationTool != null &&
+    input.input.assistantStyleSettingsAuthorized !== false
   const outputOnlyTurn = input.profile.toolProfile === 'output-only-turn'
   const shouldUseCommittedTranscriptHistory =
     input.profile.threadScope === 'session-thread' || outputOnlyTurn
@@ -451,11 +458,25 @@ export async function resolveAssistantRouteTurnPlan(input: {
         })
       : []
   const assistantStyleSettingsAvailable =
-    privateInteractiveAudience &&
-    input.input.assistantStyleSettingsAuthorized !== false &&
-    (resolvedChannel !== 'email' || input.input.assistantStyleSettingsAuthorized === true) &&
+    (
+      (
+        privateInteractiveAudience &&
+        input.input.assistantStyleSettingsAuthorized !== false &&
+        (
+          resolvedChannel !== 'email'
+          || input.input.assistantStyleSettingsAuthorized === true
+        )
+      )
+      || hostedGroupStyleSettingsAvailable
+    ) &&
     input.profile.promptProfile === 'conversation' &&
     input.profile.toolProfile === 'provider-turn'
+  const groupAssistantStylePreferencesApply =
+    hostedGroupRuntime &&
+    input.profile.promptProfile === 'conversation' &&
+    input.profile.toolProfile === 'provider-turn'
+  const assistantVoicePreferenceApplies =
+    privateInteractiveAudience || hostedGroupRuntime
   const diagnosticsPolicy = resolveAssistantDiagnosticsPolicy({
     channel: resolvedChannel,
     executionContext: input.input.executionContext,
@@ -544,6 +565,7 @@ export async function resolveAssistantRouteTurnPlan(input: {
             currentLocalDate: input.promptTimeContext.currentLocalDate,
             currentTimeZone: input.promptTimeContext.currentTimeZone,
             conversationScope,
+            hostedRuntime: input.executionContext?.hosted != null,
           }, {
             toolSchemaHash,
           })
@@ -560,7 +582,7 @@ export async function resolveAssistantRouteTurnPlan(input: {
               promptCapabilityAvailability.assistantKnowledgeToolsAvailable,
             assistantToolNameAliases,
             assistantPersonality:
-              assistantStyleSettingsAvailable
+              assistantStyleSettingsAvailable || groupAssistantStylePreferencesApply
                 ? preferenceContext.assistantPersonality
                 : null,
             assistantStyleSettingsAvailable,
@@ -787,9 +809,11 @@ export async function resolveAssistantRouteTurnPlan(input: {
       : undefined,
     promptCacheMetadata: systemPromptResult.cacheMetadata,
     assistantPreferredElevenLabsVoiceId:
-      resolveAssistantVoiceOptionElevenLabsVoiceId(
-        preferenceContext.assistantVoice,
-      ),
+      assistantVoicePreferenceApplies
+        ? resolveAssistantVoiceOptionElevenLabsVoiceId(
+            preferenceContext.assistantVoice,
+          )
+        : null,
     voiceMemoDeliveryChannel,
     workingDirectory,
     systemPrompt,

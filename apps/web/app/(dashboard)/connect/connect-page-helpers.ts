@@ -48,6 +48,10 @@ export function isHostedDeviceConnectIntentUnavailableError(
   return code?.startsWith("HOSTED_DEVICE_CONNECT_INTENT_") === true;
 }
 
+export function isHostedWhoopDirectConnectCapReachedError(error: unknown): boolean {
+  return readHostedOnboardingErrorCode(error) === "WHOOP_DIRECT_CONNECT_CAP_REACHED";
+}
+
 export function resolveCallbackSourceId(
   input: ConnectCallbackInput,
   sources: readonly ConnectSource[],
