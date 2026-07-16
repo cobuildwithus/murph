@@ -2,6 +2,10 @@ import { createHash, randomBytes } from "node:crypto";
 
 import { clinicalRecordsError } from "./errors";
 import {
+  buildEpicBetaSmartResourceScope,
+  readGrantedEpicBetaResourceTypes,
+} from "./epic-beta-policy";
+import {
   ClinicalResponseBodyLimitError,
   decodeClinicalResponseUtf8,
   readClinicalResponseBytes,
@@ -103,12 +107,12 @@ export function selectSmartRequestedScopes(input: {
       "The provider does not advertise standalone patient launch support.",
     );
   }
-  const permissionSuffix = capabilities.has("permission-v2")
-    ? "rs"
+  const permissionVersion = capabilities.has("permission-v2")
+    ? "v2"
     : capabilities.has("permission-v1")
-      ? "read"
+      ? "v1"
       : null;
-  if (!permissionSuffix) {
+  if (!permissionVersion) {
     throw providerUnavailable(
       "CLINICAL_RECORD_SMART_SCOPES_UNSUPPORTED",
       "The provider does not advertise supported SMART patient permissions.",
@@ -116,7 +120,7 @@ export function selectSmartRequestedScopes(input: {
   }
   const selected = input.resourceTypes.map((resourceType) => ({
     resourceType,
-    scope: `patient/${resourceType}.${permissionSuffix}`,
+    scope: buildEpicBetaSmartResourceScope({ permissionVersion, resourceType }),
   }));
   const resourceTypes = selected.map((selection) => selection.resourceType);
   if (!resourceTypes.includes("Patient") || resourceTypes.length < 2) {
@@ -130,7 +134,6 @@ export function selectSmartRequestedScopes(input: {
     scopes: [
       ...input.requestedBaseScopes,
       ...selected.map((selection) => selection.scope),
-      ...(capabilities.has("permission-offline") ? ["offline_access"] : []),
     ],
   };
 }
@@ -337,19 +340,13 @@ export function readGrantedSmartResourceTypes(
   scopes: readonly string[],
   candidateResourceTypes: readonly string[] = [],
 ): string[] {
-  const resources: string[] = [];
-  for (const scope of scopes) {
-    if (/^patient\/\*\.(?:rs|read)$/u.test(scope)) {
-      for (const resourceType of candidateResourceTypes) {
-        if (!resources.includes(resourceType)) resources.push(resourceType);
-      }
-      continue;
-    }
-    const match = /^patient\/([A-Z][A-Za-z0-9]+)\.(?:rs|read)$/u.exec(scope);
-    const resourceType = match?.[1];
-    if (resourceType && !resources.includes(resourceType)) resources.push(resourceType);
-  }
-  return resources;
+  const candidates = candidateResourceTypes.length > 0
+    ? candidateResourceTypes
+    : scopes.flatMap((scope) => {
+        const resourceType = /^patient\/([A-Z][A-Za-z0-9]+)\.[a-z]+$/u.exec(scope)?.[1];
+        return resourceType ? [resourceType] : [];
+      });
+  return readGrantedEpicBetaResourceTypes(scopes, candidates);
 }
 
 function requirePinnedEndpoint(value: unknown, fhirBase: URL, label: string): string {

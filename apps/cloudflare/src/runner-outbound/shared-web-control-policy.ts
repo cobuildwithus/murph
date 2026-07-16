@@ -2,6 +2,7 @@ import {
   HOSTED_CONNECTED_APPS_PATH,
 } from "@murphai/hosted-execution/connected-apps";
 import {
+  HOSTED_CLINICAL_RECORDS_CONNECT_LINK_PATH,
   HOSTED_CLINICAL_RECORDS_RUNTIME_FETCH_PAGE_PATH,
   HOSTED_CLINICAL_RECORDS_RUNTIME_READ_RUN_PATH,
   HOSTED_CLINICAL_RECORDS_RUNTIME_RECORD_OUTCOME_PATH,
@@ -76,6 +77,7 @@ export type HostedRunnerWebControlOperation =
   | "codex_auth_update"
   | "computer_use"
   | "connected_apps"
+  | "clinical_records_connect_link"
   | "clinical_records_fetch_page"
   | "clinical_records_read_run"
   | "clinical_records_record_outcome"
@@ -119,6 +121,7 @@ const HOSTED_RUNNER_WEB_CONTROL_POST_POLICY = new Map<string, HostedRunnerWebCon
   [HOSTED_RUNTIME_ASSISTANT_PERSONALIZATION_TOOL_PATH, "assistant_personalization_tool"],
   [HOSTED_RUNTIME_ASSISTANT_CONFIGURATION_TOOL_PATH, "assistant_configuration_tool"],
   [HOSTED_CONNECTED_APPS_PATH, "connected_apps"],
+  [HOSTED_CLINICAL_RECORDS_CONNECT_LINK_PATH, "clinical_records_connect_link"],
   [HOSTED_CLINICAL_RECORDS_RUNTIME_FETCH_PAGE_PATH, "clinical_records_fetch_page"],
   [HOSTED_CLINICAL_RECORDS_RUNTIME_READ_RUN_PATH, "clinical_records_read_run"],
   [HOSTED_CLINICAL_RECORDS_RUNTIME_RECORD_OUTCOME_PATH, "clinical_records_record_outcome"],

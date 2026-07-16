@@ -63,21 +63,25 @@ import {
 const MEMBER_ID = "member_clinical_1";
 const PROVIDER_ID = "epic-example";
 const CONNECT_CLAIM = `cr_${"a".repeat(32)}`;
-const provider = {
+const productionProvider = {
   aliases: [],
   brandName: "Example Health",
-  clientIdEnvironmentKey: "EPIC_SMART_CLIENT_ID" as const,
+  clientIdEnvironmentKey: "EPIC_SMART_CLIENT_ID" as
+    | "EPIC_SMART_CLIENT_ID"
+    | "EPIC_SMART_NON_PRODUCTION_CLIENT_ID",
   fhirBaseUrl: "https://fhir.example.test/FHIR/R4",
   id: PROVIDER_ID,
   locations: [],
   requestedBaseScopes: ["openid", "fhirUser", "launch/patient"],
-  resourceTypes: ["Patient", "Observation"],
+  resourceTypes: ["Patient", "Observation", "DiagnosticReport"],
   sourceSystem: "epic-fhir" as const,
 };
+let provider = productionProvider;
 
 describe("Clinical Records authorization persistence", () => {
   beforeEach(() => {
     vi.clearAllMocks();
+    provider = productionProvider;
     mocks.requireActiveHostedAppSessionFromRequest.mockResolvedValue({
       member: { id: MEMBER_ID },
       sessionId: "hws_clinical_1",
@@ -96,8 +100,9 @@ describe("Clinical Records authorization persistence", () => {
         "openid",
         "fhirUser",
         "launch/patient",
-        "patient/Patient.rs",
-        "patient/Observation.rs",
+        "patient/Patient.r",
+        "patient/Observation.s",
+        "patient/DiagnosticReport.s",
       ],
       tokenEndpoint: "https://fhir.example.test/oauth2/token",
     });
@@ -146,6 +151,60 @@ describe("Clinical Records authorization persistence", () => {
       createHash("sha256").update(provider.fhirBaseUrl).digest("hex"),
     );
     expect(created).not.toHaveProperty("fhirBaseUrl");
+  });
+
+  it("uses only the non-production client id for the curated Epic sandbox", async () => {
+    provider = {
+      ...productionProvider,
+      brandName: "Epic Sandbox (test data only)",
+      clientIdEnvironmentKey: "EPIC_SMART_NON_PRODUCTION_CLIENT_ID",
+      fhirBaseUrl: "https://fhir.epic.com/interconnect-fhir-oauth/api/FHIR/R4",
+      id: "epic-sandbox",
+    };
+    vi.stubEnv("EPIC_SMART_CLIENT_ID", "production-client-id");
+    vi.stubEnv("EPIC_SMART_NON_PRODUCTION_CLIENT_ID", "sandbox-client-id");
+    const harness = createHarness(null);
+    mocks.getPrisma.mockReturnValue(harness.prisma);
+
+    await startClinicalRecordConnection({
+      claim: CONNECT_CLAIM,
+      providerDirectoryEntryId: "epic-sandbox",
+      request: new Request(
+        "https://join.example.test/api/clinical-records/connect-intents/start",
+        { headers: { origin: "https://join.example.test" }, method: "POST" },
+      ),
+    });
+
+    expect(harness.oauthSessionCreate.mock.calls[0]?.[0]?.data).toMatchObject({
+      clientId: "sandbox-client-id",
+    });
+    expect(mocks.discoverSmartConfiguration).toHaveBeenCalledWith(expect.objectContaining({
+      fhirBaseUrl: "https://fhir.epic.com/interconnect-fhir-oauth/api/FHIR/R4",
+    }));
+  });
+
+  it("does not fall back to the production client id for the Epic sandbox", async () => {
+    provider = {
+      ...productionProvider,
+      brandName: "Epic Sandbox (test data only)",
+      clientIdEnvironmentKey: "EPIC_SMART_NON_PRODUCTION_CLIENT_ID",
+      fhirBaseUrl: "https://fhir.epic.com/interconnect-fhir-oauth/api/FHIR/R4",
+      id: "epic-sandbox",
+    };
+    vi.stubEnv("EPIC_SMART_CLIENT_ID", "production-client-id");
+    vi.stubEnv("EPIC_SMART_NON_PRODUCTION_CLIENT_ID", "");
+    const harness = createHarness(null);
+    mocks.getPrisma.mockReturnValue(harness.prisma);
+
+    await expect(startClinicalRecordConnection({
+      claim: CONNECT_CLAIM,
+      providerDirectoryEntryId: "epic-sandbox",
+      request: new Request(
+        "https://join.example.test/api/clinical-records/connect-intents/start",
+        { headers: { origin: "https://join.example.test" }, method: "POST" },
+      ),
+    })).rejects.toMatchObject({ code: "CLINICAL_RECORD_PROVIDER_NOT_CONFIGURED" });
+    expect(mocks.discoverSmartConfiguration).not.toHaveBeenCalled();
   });
 
   it("persists only encrypted patient context, not a patient-id derivative", async () => {

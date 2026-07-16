@@ -43,6 +43,10 @@ import {
   clinicalRecordsError,
   isClinicalRecordsControlPlaneError,
 } from "./errors";
+import {
+  buildEpicBetaInitialFhirPageUrl,
+  buildEpicBetaRetrievalQueryFingerprintInput,
+} from "./epic-beta-policy";
 import { refreshSmartAccessToken } from "./smart";
 import {
   ClinicalResponseBodyLimitError,
@@ -511,9 +515,10 @@ function buildRetrievalScopes(
   return resourceTypes.map((resourceType) => ({
     coverage: "whole-family",
     queryFingerprint: sha256Hex(
-      resourceType === "Patient"
-        ? "fhir-r4:Patient:read-by-launch-patient:v1"
-        : `fhir-r4:${resourceType}:search:patient:_count=${FHIR_PAGE_COUNT}:v1`,
+      buildEpicBetaRetrievalQueryFingerprintInput({
+        pageCount: FHIR_PAGE_COUNT,
+        resourceType,
+      }),
     ),
     resourceType,
   }));
@@ -591,14 +596,12 @@ function buildInitialFhirPageUrl(input: {
   patientId: string;
   resourceType: string;
 }): URL {
-  const base = input.fhirBaseUrl.replace(/\/+$/u, "");
-  if (input.resourceType === "Patient") {
-    return new URL(`${base}/Patient/${encodeURIComponent(input.patientId)}`);
-  }
-  const url = new URL(`${base}/${input.resourceType}`);
-  url.searchParams.set("_count", FHIR_PAGE_COUNT);
-  url.searchParams.set("patient", input.patientId);
-  return url;
+  return buildEpicBetaInitialFhirPageUrl({
+    fhirBaseUrl: input.fhirBaseUrl,
+    pageCount: FHIR_PAGE_COUNT,
+    patientId: input.patientId,
+    resourceType: input.resourceType,
+  });
 }
 
 function parsePageCursor(plaintext: string): ValidatedFhirPageUrl {

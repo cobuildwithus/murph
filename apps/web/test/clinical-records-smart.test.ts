@@ -9,7 +9,7 @@ import {
 } from "@/src/lib/clinical-records/smart";
 
 const baseScopes = ["openid", "fhirUser", "launch/patient"];
-const resourceTypes = ["Patient", "Observation", "Goal"];
+const resourceTypes = ["Patient", "Observation", "DiagnosticReport"];
 
 describe("Clinical Records SMART negotiation", () => {
   it("uses Epic permission capabilities instead of requiring exact scopes_supported entries", async () => {
@@ -35,10 +35,9 @@ describe("Clinical Records SMART negotiation", () => {
 
     expect(configuration.requestedScopes).toEqual([
       ...baseScopes,
-      "patient/Patient.rs",
-      "patient/Observation.rs",
-      "patient/Goal.rs",
-      "offline_access",
+      "patient/Patient.r",
+      "patient/Observation.s",
+      "patient/DiagnosticReport.s",
     ]);
     expect(configuration.requestedResourceTypes).toEqual(resourceTypes);
   });
@@ -52,7 +51,7 @@ describe("Clinical Records SMART negotiation", () => {
       ...baseScopes,
       "patient/Patient.read",
       "patient/Observation.read",
-      "patient/Goal.read",
+      "patient/DiagnosticReport.read",
     ]);
 
     expect(() => selectSmartRequestedScopes({
@@ -65,9 +64,9 @@ describe("Clinical Records SMART negotiation", () => {
   it("accepts partial useful grants and derives only exact or wildcard-granted families", async () => {
     const requestedScopes = [
       ...baseScopes,
-      "patient/Patient.rs",
-      "patient/Observation.rs",
-      "patient/Goal.rs",
+      "patient/Patient.r",
+      "patient/Observation.s",
+      "patient/DiagnosticReport.s",
     ];
     const token = await exchangeSmartAuthorizationCode({
       clientId: "client-id",
@@ -76,7 +75,7 @@ describe("Clinical Records SMART negotiation", () => {
         access_token: "access-token",
         expires_in: 3600,
         patient: "patient-1",
-        scope: [...baseScopes, "patient/Patient.rs", "patient/Observation.rs"].join(" "),
+        scope: [...baseScopes, "patient/Patient.r", "patient/Observation.s"].join(" "),
         token_type: "Bearer",
       })),
       redirectUri: "https://app.example.test/api/clinical-records/oauth/callback",
@@ -90,6 +89,15 @@ describe("Clinical Records SMART negotiation", () => {
       "Observation",
     ]);
     expect(readGrantedSmartResourceTypes(["patient/*.read"], resourceTypes)).toEqual(resourceTypes);
+    expect(readGrantedSmartResourceTypes(
+      [
+        "patient/Patient.s",
+        "patient/Observation.r",
+        "patient/DiagnosticReport.rs",
+        "patient/Observation.horse",
+      ],
+      resourceTypes,
+    )).toEqual(["DiagnosticReport"]);
   });
 
   it("rejects a token grant without Patient plus one clinical family", async () => {
@@ -99,11 +107,11 @@ describe("Clinical Records SMART negotiation", () => {
       fetchImpl: vi.fn<typeof fetch>().mockResolvedValue(jsonResponse({
         access_token: "access-token",
         patient: "patient-1",
-        scope: [...baseScopes, "patient/Observation.rs"].join(" "),
+        scope: [...baseScopes, "patient/Observation.s"].join(" "),
         token_type: "Bearer",
       })),
       redirectUri: "https://app.example.test/api/clinical-records/oauth/callback",
-      requestedScopes: [...baseScopes, "patient/Patient.rs", "patient/Observation.rs"],
+      requestedScopes: [...baseScopes, "patient/Patient.r", "patient/Observation.s"],
       tokenEndpoint: "https://fhir.example.test/oauth2/token",
       verifier: "verifier",
     })).rejects.toMatchObject({ code: "CLINICAL_RECORD_SMART_SCOPES_INSUFFICIENT" });

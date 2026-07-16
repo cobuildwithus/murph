@@ -3,31 +3,48 @@ import "server-only";
 import { assertHostedOnboardingMutationOrigin } from "../hosted-onboarding/csrf";
 import { requireActiveHostedAppSessionFromRequest } from "../hosted-onboarding/app-session";
 import { getPrisma } from "../prisma";
+import {
+  CLINICAL_RECORD_CONNECTION_STATUSES,
+  CLINICAL_RECORD_RUN_STATUSES,
+  type ClinicalRecordConnectionContract,
+} from "./client-contracts";
 import { clinicalRecordsError } from "./errors";
 
-const CONNECTION_STATUSES = new Set(["active", "disconnected", "needs_reauth", "error"]);
-const RUN_STATUSES = new Set([
-  "queued",
-  "retrieving",
-  "importing",
-  "complete",
-  "partial",
-  "needs_reauth",
-  "failed",
-  "canceled",
-]);
-
-export async function listClinicalRecordConnections(request: Request) {
+export async function listClinicalRecordConnections(
+  request: Request,
+): Promise<ClinicalRecordConnectionContract[]> {
   const auth = await requireActiveHostedAppSessionFromRequest(request);
+  return listClinicalRecordConnectionsForMember(auth.member.id);
+}
+
+export async function listClinicalRecordConnectionsForMember(
+  memberId: string,
+): Promise<ClinicalRecordConnectionContract[]> {
   const connections = await getPrisma().clinicalRecordConnection.findMany({
-    include: {
+    orderBy: [{ updatedAt: "desc" }, { id: "asc" }],
+    select: {
+      connectedAt: true,
+      displayName: true,
+      id: true,
+      lastErrorCode: true,
+      lastSyncCompletedAt: true,
+      providerDirectoryEntryId: true,
       retrievalRuns: {
         orderBy: [{ generation: "desc" }],
+        select: {
+          completedAt: true,
+          id: true,
+          importedCount: true,
+          reviewCount: true,
+          status: true,
+        },
         take: 1,
       },
+      sourceSystem: true,
+      status: true,
     },
-    orderBy: [{ updatedAt: "desc" }, { id: "asc" }],
-    where: { memberId: auth.member.id, status: { not: "disconnected" } },
+    take: 100,
+    where: { memberId, status: { not: "disconnected" } },
   });
   return connections.map((connection) => {
     const latestRun = connection.retrievalRuns[0] ?? null;
@@ -42,11 +59,19 @@ export async function listClinicalRecordConnections(request: Request) {
         importedCount: latestRun.importedCount,
         reviewCount: latestRun.reviewCount,
         runId: latestRun.id,
-        status: requireKnownStatus(latestRun.status, RUN_STATUSES, "run"),
+        status: requireKnownStatus(
+          latestRun.status,
+          CLINICAL_RECORD_RUN_STATUSES,
+          "run",
+        ),
       } : null,
       providerDirectoryEntryId: connection.providerDirectoryEntryId,
-      sourceSystem: connection.sourceSystem,
-      status: requireKnownStatus(connection.status, CONNECTION_STATUSES, "connection"),
+      sourceSystem: requireEpicSourceSystem(connection.sourceSystem),
+      status: requireKnownStatus(
+        connection.status,
+        CLINICAL_RECORD_CONNECTION_STATUSES,
+        "connection",
+      ),
     };
   });
 }
@@ -105,8 +130,20 @@ function sanitizeErrorCode(value: string | null): string | null {
     : null;
 }
 
-function requireKnownStatus(value: string, allowed: ReadonlySet<string>, label: string): string {
-  if (!allowed.has(value)) throw new TypeError(`Stored Clinical Records ${label} status is invalid.`);
+function requireKnownStatus<Status extends string>(
+  value: string,
+  allowed: readonly Status[],
+  label: string,
+): Status {
+  const match = allowed.find((candidate) => candidate === value);
+  if (!match) throw new TypeError(`Stored Clinical Records ${label} status is invalid.`);
+  return match;
+}
+
+function requireEpicSourceSystem(value: string): "epic-fhir" {
+  if (value !== "epic-fhir") {
+    throw new TypeError("Stored Clinical Records source system is invalid.");
+  }
   return value;
 }
 

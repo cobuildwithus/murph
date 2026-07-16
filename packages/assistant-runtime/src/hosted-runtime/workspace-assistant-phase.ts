@@ -750,6 +750,8 @@ export async function runHostedWorkspaceAssistantPhase(
     deviceConnectProviders,
     input,
   });
+  const clinicalRecordsConnectLinkTool =
+    resolveHostedClinicalRecordsConnectLinkTool(input.runtime.platform.clinicalRecordsPort);
   const initialLinqDeliveryContexts = resolveHostedInitialLinqDeliveryContexts(input);
   const initialAssistantInputIds = readHostedInitialAssistantInputIds(input);
   const recordDeferredUsage = (
@@ -784,6 +786,7 @@ export async function runHostedWorkspaceAssistantPhase(
         assistantConfigurationTool:
           input.runtime.platform.assistantConfigurationToolPort ?? null,
         connectedApps: input.runtime.platform.connectedApps ?? null,
+        ...(clinicalRecordsConnectLinkTool ? { clinicalRecordsConnectLinkTool } : {}),
         phoneCalls: input.runtime.platform.phoneCalls ?? null,
         progressDeliveryDependencies: createHostedAssistantProgressDeliveryDependencies({
           effectsPort: input.runtime.platform.effectsPort,
@@ -6525,6 +6528,17 @@ function resolveHostedDeviceToolConnectProvider(input: {
     );
   }
   return target.provider;
+}
+
+function resolveHostedClinicalRecordsConnectLinkTool(
+  port: HostedWorkspaceRuntimeAssistantPhaseInput["runtime"]["platform"]["clinicalRecordsPort"],
+): NonNullable<AssistantExecutionContext["hosted"]>["clinicalRecordsConnectLinkTool"] | undefined {
+  const createConnectLink = port?.createConnectLink?.bind(port);
+  if (!createConnectLink) {
+    return undefined;
+  }
+
+  return { createConnectLink };
 }
 
 function shouldWriteHostedDeviceConnectContextLog(input: {

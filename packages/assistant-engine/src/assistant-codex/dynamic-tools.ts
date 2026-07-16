@@ -148,6 +148,14 @@ import {
 } from './dynamic-tools/device.js'
 export { MURPH_DEVICE_TOOL } from './dynamic-tools/device.js'
 import {
+  MURPH_CREATE_CLINICAL_RECORDS_CONNECT_LINK_TOOL,
+  readClinicalRecordsConnectLinkDynamicToolRequest,
+  type ClinicalRecordsConnectLinkDynamicToolRequest,
+} from './dynamic-tools/clinical-records.js'
+export {
+  MURPH_CREATE_CLINICAL_RECORDS_CONNECT_LINK_TOOL,
+} from './dynamic-tools/clinical-records.js'
+import {
   executeConnectedAppsDynamicTool,
   MURPH_CONNECTED_APPS_EXECUTE_TOOL,
   MURPH_CONNECTED_APPS_DYNAMIC_TOOLS,
@@ -1013,6 +1021,7 @@ const MURPH_BASE_DYNAMIC_TOOLS = [
   MURPH_SEND_VAULT_FILE_TOOL,
   MURPH_FINISH_WITHOUT_REPLY_TOOL,
   MURPH_REACT_TO_MESSAGE_TOOL,
+  MURPH_CREATE_CLINICAL_RECORDS_CONNECT_LINK_TOOL,
   MURPH_CREATE_PHONE_CALL_TOOL,
 ] as const
 
@@ -1043,6 +1052,7 @@ export interface MurphDynamicToolAvailability {
   connectedAppsAvailable?: boolean | null
   connectedAppsManageAvailable?: boolean | null
   deviceAvailable?: boolean | null
+  clinicalRecordsConnectLinkAvailable?: boolean | null
   familyPlanAvailable?: boolean | null
   planUsageAvailable?: boolean | null
   subscriptionAvailable?: boolean | null
@@ -1099,6 +1109,8 @@ const TOOL_AVAILABILITY: ReadonlyMap<MurphDynamicTool, AvailabilityPredicate> =
       a.connectedAppsAvailable && a.connectedAppsManageAvailable !== false)],
     [MURPH_CONNECTED_APPS_SEARCH_TOOL, defaultOff((a) => a.connectedAppsAvailable)],
     [MURPH_CONNECTED_APPS_EXECUTE_TOOL, defaultOff((a) => a.connectedAppsAvailable)],
+    [MURPH_CREATE_CLINICAL_RECORDS_CONNECT_LINK_TOOL, defaultOff((a) =>
+      a.clinicalRecordsConnectLinkAvailable)],
   ])
 
 export function resolveMurphDynamicTools(
@@ -1682,6 +1694,7 @@ export type MurphDynamicToolRequest =
       args: HostedComputerFinishRunRequest & { runId: string }
     }
   | PhoneCallDynamicToolRequest
+  | ClinicalRecordsConnectLinkDynamicToolRequest
   | {
       kind: 'send-vault-file'
       ref: string
@@ -1861,6 +1874,15 @@ export function readMurphDynamicToolRequest(
   })
   if (phoneCallRequest) {
     return phoneCallRequest
+  }
+
+  const clinicalRecordsConnectLinkRequest =
+    readClinicalRecordsConnectLinkDynamicToolRequest({
+      arguments: request.arguments,
+      tool: request.tool,
+    })
+  if (clinicalRecordsConnectLinkRequest) {
+    return clinicalRecordsConnectLinkRequest
   }
 
   switch (request.tool) {
@@ -2294,6 +2316,8 @@ export async function executeMurphDynamicToolRequest(input: {
       return toolTextResult(false, 'invalid vault file arguments')
     case 'invalid-phone-call-arguments':
       return toolTextResult(false, 'invalid phone-call arguments')
+    case 'invalid-clinical-records-connect-link-arguments':
+      return toolTextResult(false, 'invalid Clinical Records connect-link arguments')
     case 'unsupported-dynamic-tool':
       return toolTextResult(false, 'unsupported dynamic tool')
     case 'attach-response-media': {
@@ -2461,6 +2485,40 @@ export async function executeMurphDynamicToolRequest(input: {
         )
       } catch {
         return toolTextResult(false, 'phone call could not be started')
+      }
+    }
+    case 'create-clinical-records-connect-link': {
+      const hostedToolContext = input.hostedToolContext ?? null
+      const connectLinkTool = hostedToolContext?.clinicalRecordsConnectLinkTool ?? null
+      if (!hostedToolContext || !connectLinkTool) {
+        return toolTextResult(
+          false,
+          'Clinical Records connection links are unavailable without hosted transport',
+        )
+      }
+
+      const userActionScope = hostedToolContext.currentUserActionScope?.() ?? null
+      if (
+        !userActionScope
+        || userActionScope.conversationScope !== 'direct'
+        || userActionScope.acceptedInputIds.length === 0
+      ) {
+        return toolTextResult(
+          false,
+          'Clinical Records connection links require current user input in a private conversation',
+        )
+      }
+
+      try {
+        const result = await connectLinkTool.createConnectLink({
+          signal: input.abortSignal ?? null,
+        })
+        return toolTextResult(true, safeToolPayloadText({
+          connectUrl: result.connectUrl,
+          expiresAt: result.expiresAt,
+        }))
+      } catch {
+        return toolTextResult(false, 'Clinical Records connection link could not be created')
       }
     }
     case 'submit-product-feedback':

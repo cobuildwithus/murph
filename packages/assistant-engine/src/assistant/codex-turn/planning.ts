@@ -667,6 +667,10 @@ export async function resolveAssistantRouteTurnPlan(input: {
         deviceAvailable:
           privateInteractiveAudience &&
           input.hostedToolContext?.deviceTool != null,
+        clinicalRecordsConnectLinkAvailable:
+          privateInteractiveAudience &&
+          userActionAcceptedInputIds.length > 0 &&
+          input.hostedToolContext?.clinicalRecordsConnectLinkTool != null,
         familyPlanAvailable:
           privateInteractiveAudience &&
           input.hostedToolContext?.familyPlanTool != null,

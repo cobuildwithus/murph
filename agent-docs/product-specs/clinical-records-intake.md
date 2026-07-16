@@ -10,6 +10,10 @@ the provider's own SMART-on-FHIR sign-in, and import the authorized record
 families into the member's encrypted vault. The common path asks for no portal
 password inside Murph and no manual file download.
 
+The Epic beta imports the launch Patient binding, laboratory Observations, and
+DiagnosticReport result summaries. It intentionally does not claim a complete
+medical record.
+
 This first release is an Epic SMART foundation, not a TEFCA/QHIN replacement.
 It does not claim nationwide identity matching, discover every organization a
 person has visited, connect email, or retrieve records from a provider that
@@ -35,8 +39,8 @@ does not expose a compatible patient-facing SMART endpoint.
    Murph never receives the portal password.
 4. The callback consumes the hashed state once, verifies the same Murph app
    session and pinned provider endpoint, exchanges the code, and accepts the
-   actual partial grant only when it includes Patient plus at least one useful
-   clinical family.
+   actual partial grant only when it includes Patient read plus at least one
+   granted Epic beta search family.
 5. A successful member/provider connection atomically creates its one queued
    retrieval generation and durable system-mailbox wake. A second authorization
    for that member/provider pair fails closed before provider discovery when
@@ -107,17 +111,27 @@ bundle. The parser rejects duplicate ids, unsupported resource families,
 non-HTTPS URLs, credentials/query/fragment components, and private, loopback,
 link-local, or mapped-private IP literals.
 
+The artifact also carries one curated `Epic Sandbox (test data only)` entry for
+Epic's official R4 sandbox. It uses only
+`EPIC_SMART_NON_PRODUCTION_CLIENT_ID`; production brands use only
+`EPIC_SMART_CLIENT_ID`. There is no fallback between those credentials.
+
 ## Retrieval contract and limits
 
-The runtime uses three signed POST operations:
+Assistant link creation reuses the same signed Web control boundary through
+`/api/internal/clinical-records/connect-link`. It accepts only an empty object,
+derives the member from the active runtime fence, and returns the existing
+short-lived first-party connect URL. Once an import is queued, the retrieval
+runtime uses three signed POST operations:
 
 - `/api/internal/clinical-records/runtime/read-run`
 - `/api/internal/clinical-records/runtime/fetch-page`
 - `/api/internal/clinical-records/runtime/record-outcome`
 
 The web control plane fetches only the exact configured FHIR origin and exact
-resource-family path. Patient uses a direct patient read; other families use a
-patient-scoped search with `_count=100`. Provider redirects are disabled. A
+resource-family path. Patient uses a direct patient read, Observation uses
+`patient=<launch-patient>&category=laboratory&_count=100`, and DiagnosticReport
+uses `patient=<launch-patient>&_count=100`. Provider redirects are disabled. A
 continuation must remain on the same origin and family path; only its query may
 change. Root pages omit `pageUrlHash`; continuation pages include it, while the
 raw Bundle retains its provider `next` link for the importer to prove a
@@ -127,7 +141,9 @@ fetching, and randomized cursor ciphertext never defines page identity. Cursors
 remain valid only while their member-bound run and generation remain active.
 
 Limits are 5 MiB per page, 500 provider fetch attempts, 32 MiB of charged
-provider egress per run, 500 Bundle entries per page, and 14 resource families.
+provider egress per run, 500 Bundle entries per page, and three Epic beta
+resource families. The shared FHIR schema retains its broader 14-family
+superset for future integrations; the Epic directory does not request it.
 Each fetch reserves the full page allowance atomically before provider egress,
 then settles to the actual bytes after a valid response. A provider-side or
 ambiguous failure keeps the full reservation charged; a failure before FHIR
@@ -146,9 +162,11 @@ vault-usecases atomically records each accepted page and the next unfinished
 cursor in one private, portable `.runtime/operations/clinical-records/**`
 checkpoint before yielding, and removes it after terminal import or rejection.
 The checkpoint is non-canonical; full snapshot validation still happens before
-any final raw page or manifest is persisted. Token refresh uses a
-credential-version CAS so a stale
-invalid-grant response cannot erase a concurrently rotated token.
+any final raw page or manifest is persisted. The beta requests no
+`offline_access` scope, expects no refresh token, and starts its one-shot
+retrieval immediately after authorization. On the normal path, an expired
+one-shot access token transitions to authorization-required instead of creating
+a background refresh lifecycle.
 Preemption requeues the same run without discarding or replaying completed page
 progress. Web current-run authority is checked immediately before raw evidence
 persistence and immediately before canonical mutation. Final
@@ -173,20 +191,35 @@ control-plane credentials, OAuth state, page fingerprints, or raw provider pages
 
 ## Deployment
 
-Deploy the additive Prisma migration and web control plane before enabling the
-UI/runtime path. The old web build ignores the new tables. Web, Cloudflare, and
-the hosted runner must then deploy as a compatible set because the runtime
-routes require the new three-header write fence and strict response contracts.
-During mixed-version rollout, callers without the complete port fail closed;
-do not fall back to direct unfenced provider access.
+Deploy the additive Prisma migration and Web control plane before enabling the
+UI/runtime path. The old Web build ignores the new tables. Then deploy
+Cloudflare and the hosted runner so their exact allowlist and optional Clinical
+Records capability converge. An old runner simply omits assistant link
+creation; a new runner against an old Cloudflare or Web deployment fails closed
+without creating an intent. Browser connection remains available once Web is
+current. Never fall back to direct unfenced provider access. After all three
+surfaces converge, smoke-test both browser-started and assistant-started links.
 
-Before enabling provider authorization in production, register the patient
-SMART app with Epic, include the exact HTTPS redirect URI
-`https://<production-host>/api/clinical-records/oauth/callback`, mark the app
-ready for production, and set `EPIC_SMART_CLIENT_ID` to Epic's production
-client id. Epic issues separate production and non-production client ids;
-preview or test hosts require their own registered redirect URI and the matching
-non-production configuration. A missing client id fails closed before redirect.
+Register an incoming OAuth 2.0 app for the patient consumer with a
+non-confidential client and S256 PKCE in
+[Epic's app portal](https://fhir.epic.com/Developer/Apps). Select R4, USCDI v3,
+use the Murph product name without adding `Epic` to the app name, and select only
+[Patient.Read](https://fhir.epic.com/Specifications?api=931),
+[Observation.Search (Labs)](https://fhir.epic.com/Specifications?api=999), and
+[DiagnosticReport.Search (Results)](https://fhir.epic.com/Specifications?api=989).
+Do not request refresh tokens. Epic recommends a separate localhost-only test
+app that is never activated. Register the callback with the actual local port,
+for example `http://localhost:3000/api/clinical-records/oauth/callback`, and set
+`EPIC_SMART_NON_PRODUCTION_CLIENT_ID` to Epic's non-production client id. The
+curated sandbox FHIR base is
+`https://fhir.epic.com/interconnect-fhir-oauth/api/FHIR/R4`.
+
+Before production authorization, add the exact HTTPS callback
+`https://<production-host>/api/clinical-records/oauth/callback`, enable
+Auto-download, complete Epic's Data Use Questionnaire, mark the app ready for
+production, and set `EPIC_SMART_CLIENT_ID` to Epic's production client id.
+Preview hosts need their own registered callback and the non-production client
+id. A missing exact client id fails closed before redirect.
 
 ## Deliberately deferred
 
@@ -195,6 +228,10 @@ non-production configuration. A missing client id fails closed before redirect.
 - Email scanning for portal/provider inference.
 - Cerner/Oracle and provider-specific adapters beyond Epic SMART.
 - Background scheduled refresh and provider-directory network refresh jobs.
+- Vital-sign Observations. The raw manifest and resumable checkpoint currently
+  preserve one scope identity per resource type, so the beta uses the single
+  laboratory query. Adding a second Observation query requires a deliberate
+  scope-key contract evolution rather than overloading the existing checkpoint.
 - Retry, reconnect, and reauthorization after the initial retrieval; these
   require a bounded raw-evidence retention lifecycle before they can create
   another retrieval job.

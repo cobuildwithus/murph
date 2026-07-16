@@ -14,6 +14,9 @@ export const HOSTED_CLINICAL_RECORDS_ERROR_CODE_PATTERN =
   /^[a-z0-9]+(?:[._-][a-z0-9]+)*$/u;
 export const HOSTED_CLINICAL_RECORDS_AUTHORIZATION_REQUIRED_ERROR_CODE =
   "authorization-required";
+export const HOSTED_CLINICAL_RECORDS_CONNECT_LINK_PATH =
+  "/api/internal/clinical-records/connect-link";
+export const HOSTED_CLINICAL_RECORDS_CONNECT_LINK_RESPONSE_MAX_BYTES = 4 * 1024;
 export const HOSTED_CLINICAL_RECORDS_RUNTIME_READ_RUN_PATH =
   "/api/internal/clinical-records/runtime/read-run";
 export const HOSTED_CLINICAL_RECORDS_RUNTIME_FETCH_PAGE_PATH =

@@ -12,6 +12,9 @@ import type {
   AutomationStatus,
 } from '@murphai/contracts'
 import type {
+  HostedClinicalRecordsConnectLinkResponse,
+} from '@murphai/hosted-execution/clinical-records'
+import type {
   HostedRuntimeAssistantPersonalizationToolAuthority,
   HostedRuntimeAssistantPersonalizationToolRequest,
   HostedRuntimeAssistantPersonalizationToolResponse,
@@ -197,6 +200,12 @@ export interface AssistantHostedSubscriptionTool {
   ): Promise<HostedRuntimeSubscriptionToolResponse>
 }
 
+export interface AssistantHostedClinicalRecordsConnectLinkTool {
+  createConnectLink(
+    options?: { signal?: AbortSignal | null },
+  ): Promise<HostedClinicalRecordsConnectLinkResponse>
+}
+
 export interface AssistantHostedPersonalizationTool {
   request(
     request: HostedRuntimeAssistantPersonalizationToolRequest,
@@ -272,6 +281,7 @@ export interface AssistantHostedExecutionContext {
   assistantConfigurationTool?: AssistantHostedAssistantConfigurationTool | null
   channelTypingDependencies?: AssistantChannelTypingDependencies
   connectedApps?: AssistantConnectedAppsPort | null
+  clinicalRecordsConnectLinkTool?: AssistantHostedClinicalRecordsConnectLinkTool | null
   defaultTarget?: AssistantModelTarget | null
   deviceConnectProviders?: readonly AssistantHostedDeviceConnectProvider[]
   deviceTool?: AssistantHostedDeviceTool | null
@@ -321,6 +331,9 @@ export function normalizeAssistantExecutionContext(
     hosted?.assistantConfigurationTool,
   )
   const connectedApps = normalizeAssistantConnectedAppsPort(hosted?.connectedApps)
+  const clinicalRecordsConnectLinkTool = normalizeAssistantClinicalRecordsConnectLinkTool(
+    hosted?.clinicalRecordsConnectLinkTool,
+  )
   const defaultTarget = normalizeAssistantBackendTarget(hosted?.defaultTarget ?? null)
   const channelTypingDependencies = normalizeAssistantChannelTypingDependencies(
     hosted?.channelTypingDependencies,
@@ -370,6 +383,7 @@ export function normalizeAssistantExecutionContext(
         : {}),
       ...(assistantConfigurationTool ? { assistantConfigurationTool } : {}),
       ...(connectedApps ? { connectedApps } : {}),
+      ...(clinicalRecordsConnectLinkTool ? { clinicalRecordsConnectLinkTool } : {}),
       ...(generatedImageUploader ? { generatedImageUploader } : {}),
       ...(familyPlanTool ? { familyPlanTool } : {}),
       ...(personalizationTool ? { personalizationTool } : {}),
@@ -485,6 +499,18 @@ function normalizeAssistantConnectedAppsPort(
 
   return {
     request: input.request.bind(input),
+  }
+}
+
+function normalizeAssistantClinicalRecordsConnectLinkTool(
+  input: AssistantHostedExecutionContext['clinicalRecordsConnectLinkTool'] | undefined,
+): AssistantHostedClinicalRecordsConnectLinkTool | undefined {
+  if (!input || typeof input.createConnectLink !== 'function') {
+    return undefined
+  }
+
+  return {
+    createConnectLink: input.createConnectLink.bind(input),
   }
 }
 

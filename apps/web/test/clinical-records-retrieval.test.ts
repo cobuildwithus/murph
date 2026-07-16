@@ -69,6 +69,40 @@ describe("Clinical Records retrieval control plane", () => {
     expect(result.run.patientIdHash).toBe(hashClinicalFhirPatientId("patient-1"));
   });
 
+  it("declares exact Epic beta acquisition fingerprints", async () => {
+    createHarness(["Patient", "Observation", "DiagnosticReport"]);
+
+    const result = await readClinicalRetrievalRun({
+      generation: 1,
+      memberId: MEMBER_ID,
+      runId: RUN_ID,
+    });
+
+    expect(result.status).toBe("ready");
+    if (result.status !== "ready") throw new Error("Expected a ready Clinical Records run.");
+    expect(result.run.retrievalScopes).toEqual([
+      {
+        coverage: "whole-family",
+        queryFingerprint: sha256Hex("epic-fhir-r4:Patient:read-by-launch-patient:v1"),
+        resourceType: "Patient",
+      },
+      {
+        coverage: "whole-family",
+        queryFingerprint: sha256Hex(
+          "epic-fhir-r4:Observation:search:patient:category=laboratory:_count=100:v1",
+        ),
+        resourceType: "Observation",
+      },
+      {
+        coverage: "whole-family",
+        queryFingerprint: sha256Hex(
+          "epic-fhir-r4:DiagnosticReport:search:patient:_count=100:v1",
+        ),
+        resourceType: "DiagnosticReport",
+      },
+    ]);
+  });
+
   it("lets transient patient-context decryption failures remain retryable", async () => {
     createHarness(["Patient", "Observation"]);
     mocks.openClinicalConnectionSecret.mockRejectedValueOnce(
@@ -321,6 +355,39 @@ describe("Clinical Records retrieval control plane", () => {
     expect(JSON.parse(result.body)).toEqual({ id: "patient-1", resourceType: "Patient" });
     expect(fetchImpl).toHaveBeenCalledWith(
       new URL("https://fhir.example.test/FHIR/R4/Patient/patient-1"),
+      expect.objectContaining({ method: "GET", redirect: "manual" }),
+    );
+  });
+
+  it.each([
+    [
+      "Observation",
+      "https://fhir.example.test/FHIR/R4/Observation?patient=patient-1&category=laboratory&_count=100",
+    ],
+    [
+      "DiagnosticReport",
+      "https://fhir.example.test/FHIR/R4/DiagnosticReport?patient=patient-1&_count=100",
+    ],
+  ] as const)("uses the exact Epic beta root query for %s", async (resourceType, expectedUrl) => {
+    createHarness(["Patient", resourceType]);
+    const fetchImpl = vi.fn().mockResolvedValue(fhirResponse({
+      entry: [],
+      resourceType: "Bundle",
+      type: "searchset",
+    }));
+
+    const result = await fetchClinicalRetrievalPage({
+      fetchImpl,
+      memberId: MEMBER_ID,
+      request: pageRequest({
+        requestId: `request_${resourceType.toLowerCase()}`,
+        resourceType,
+      }),
+    });
+
+    expect(result.status).toBe("page");
+    expect(fetchImpl).toHaveBeenCalledWith(
+      new URL(expectedUrl),
       expect.objectContaining({ method: "GET", redirect: "manual" }),
     );
   });

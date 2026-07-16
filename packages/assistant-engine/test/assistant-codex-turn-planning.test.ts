@@ -1233,6 +1233,7 @@ describe('assistant Codex turn planning', () => {
       ...createHostedToolContext(),
       assistantConfigurationTool: { request: vi.fn() },
       automationTool: { request: vi.fn() },
+      clinicalRecordsConnectLinkTool: { createConnectLink: vi.fn() },
       connectedApps: { request: vi.fn() },
       familyPlanTool: { request: vi.fn() },
       groupTool: { request: vi.fn() },
@@ -1353,6 +1354,7 @@ describe('assistant Codex turn planning', () => {
       'computer_open',
       'assistant_configuration',
       'connected_apps_manage',
+      'create_clinical_records_connect_link',
       'create_phone_call',
       'family_plan',
       'plan_usage',
@@ -1412,6 +1414,59 @@ describe('assistant Codex turn planning', () => {
 
       expect(plan.dynamicTools.some((tool) => tool.name === 'subscription'))
         .toBe(expectedAvailable)
+    },
+  )
+
+  it.each([
+    ['assistant-input', true],
+    ['manual', true],
+    ['initial', false],
+    ['system', false],
+  ] as const)(
+    'gates Clinical Records connect links on eligible current-turn %s input',
+    async (source, expectedAvailable) => {
+      planningMocks.readAssistantCliSurfaceBootstrapContext.mockResolvedValue(
+        'bootstrap contract',
+      )
+      planningMocks.readAssistantContextSnapshotPrompt.mockResolvedValue(null)
+      planningMocks.resolveCodexAssistantTargetCapabilities.mockReturnValue({
+        supportsNativeResume: false,
+      })
+      const hostedToolContext: AssistantHostedToolContext = {
+        ...createHostedToolContext(),
+        clinicalRecordsConnectLinkTool: { createConnectLink: vi.fn() },
+      }
+
+      const plan = await resolveAssistantRouteTurnPlan({
+        acceptedInputItems: [{
+          id: `ain_${'c'.repeat(32)}`,
+          source,
+        }],
+        executionContext: {
+          hosted: {
+            memberId: 'member-clinical-records-link-tool',
+            userEnvKeys: [],
+          },
+        },
+        hostedToolContext,
+        input: createMessageInput(),
+        profile: {
+          promptProfile: 'conversation',
+          threadScope: 'session-thread',
+          toolProfile: 'provider-turn',
+        },
+        promptTimeContext: {
+          currentLocalDate: '2026-07-16',
+          currentTimeZone: 'America/New_York',
+        },
+        route: createRoute(),
+        session: createSession(),
+        sharedPlan: createPrivateSharedPlan(),
+      })
+
+      expect(plan.dynamicTools.some((tool) =>
+        tool.name === 'create_clinical_records_connect_link'
+      )).toBe(expectedAvailable)
     },
   )
 

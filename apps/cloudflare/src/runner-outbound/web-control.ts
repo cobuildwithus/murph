@@ -124,7 +124,8 @@ export async function handleRunnerWebControlRequest(input: {
     input.url.pathname === HOSTED_EXECUTION_DEVICE_SYNC_RUNTIME_SNAPSHOT_PATH
     && input.request.method === "POST";
   const isClinicalRecordsRequest = (
-    policy.operation === "clinical_records_fetch_page"
+    policy.operation === "clinical_records_connect_link"
+    || policy.operation === "clinical_records_fetch_page"
     || policy.operation === "clinical_records_read_run"
     || policy.operation === "clinical_records_record_outcome"
   ) && input.request.method === "POST";

@@ -52,11 +52,21 @@ Hosted automation writes use a narrow root-turn tool backed by an invocation-sco
 `apps/web` is the Clinical Records credential and provider-egress control plane.
 It owns the versioned Epic directory, short-lived connect intent, single-use
 SMART state/PKCE session, encrypted patient/token authority, retrieval
-generation, and operational status. The initial lane permits one retrieval
+generation, and operational status. `/records/connect` keeps the member-bound
+claim in the URL fragment, removes it from the visible URL before interaction,
+and sends it only in the fixed provider-start body; `/records` projects the
+safe connection and latest-run status and owns disconnect UX. A private
+current-user assistant turn can create the same short-lived first-party link
+through the existing Clinical Records runtime port and signed Web control
+boundary. That tool accepts no member, provider, patient, recipient, URL, or
+scope argument, so provider selection and SMART consent remain browser-owned.
+The initial lane permits one retrieval
 generation per unique member/provider connection; later retry, reconnect, or
-refresh requires a bounded raw-evidence retention lifecycle. The hosted runner receives only a
-credential-free descriptor and bounded raw FHIR pages through three signed
-runtime operations; Cloudflare proves and forwards the active attempt, lease
+refresh requires a bounded raw-evidence retention lifecycle. The Epic beta
+requests only Patient read, laboratory Observation search, and DiagnosticReport
+search, with no offline-access scope. The hosted runner receives only a
+credential-free descriptor and bounded raw FHIR pages through the three signed
+retrieval operations; Cloudflare proves and forwards the active attempt, lease
 generation, and workspace version before web revalidates the fence shape and
 bound member. Postgres stores no raw FHIR body. Raw-first page integrity and
 FHIR import decisions remain with `packages/clinical-records` and

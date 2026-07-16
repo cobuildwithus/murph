@@ -9,6 +9,7 @@ import {
   buildHostedExecutionClinicalRecordsSyncRequestedWake,
   hostedClinicalRecordsRetrievalScopeSchema,
   parseHostedClinicalRecordsFetchPageResponse,
+  parseHostedClinicalRecordsConnectLinkResponse,
   parseHostedClinicalRecordsReadRunResponse,
   parseHostedClinicalRecordsRecordOutcomeRequest,
   parseHostedClinicalRecordsRunDescriptor,
@@ -29,6 +30,40 @@ import {
 const HASH = "a".repeat(64);
 
 describe("clinical records hosted execution contracts", () => {
+  it("accepts only the bounded first-party connect-link shape", () => {
+    const claim = `cr_${"a".repeat(32)}`;
+    const response = {
+      connectUrl: `https://app.example.test/records/connect#clinicalRecordsIntent=${claim}`,
+      expiresAt: "2026-07-10T12:15:00.000Z",
+      ok: true,
+    };
+
+    expect(parseHostedClinicalRecordsConnectLinkResponse(response)).toEqual(response);
+    expect(parseHostedClinicalRecordsConnectLinkResponse({
+      ...response,
+      connectUrl: `http://127.0.0.1:3000/records/connect#clinicalRecordsIntent=${claim}`,
+    })).toMatchObject({ ok: true });
+
+    for (const connectUrl of [
+      `ftp://app.example.test/records/connect#clinicalRecordsIntent=${claim}`,
+      `http://app.example.test/records/connect#clinicalRecordsIntent=${claim}`,
+      `https://app.example.test/settings#clinicalRecordsIntent=${claim}`,
+      `https://app.example.test/records/connect?claim=${claim}#clinicalRecordsIntent=${claim}`,
+      "https://app.example.test/records/connect#clinicalRecordsIntent=invalid",
+      `https://app.example.test/records/connect#clinicalRecords%49ntent=${claim}`,
+      `https://app.example.test/records/connect#clinicalRecordsIntent=${claim}&memberId=other`,
+    ]) {
+      expect(() => parseHostedClinicalRecordsConnectLinkResponse({
+        ...response,
+        connectUrl,
+      })).toThrow("Hosted clinical records connect URL is invalid");
+    }
+    expect(() => parseHostedClinicalRecordsConnectLinkResponse({
+      ...response,
+      accessToken: "not-allowed",
+    })).toThrow();
+  });
+
   it("round-trips the pointer-only system wake through active runtime routing", () => {
     const wake = buildHostedExecutionClinicalRecordsSyncRequestedWake({
       eventId: "clinical-sync-1",
