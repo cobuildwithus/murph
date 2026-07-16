@@ -40,7 +40,7 @@ export type HostedBillingPlanUpgradeResult =
   }
   | {
     billingPlanCode: "launch_monthly";
-    billingPortalUrl: string;
+    paymentUrl: string;
     status: "pending_payment";
   };
 
@@ -148,10 +148,12 @@ export async function upgradeHostedBillingPlan(input: {
     subscription,
     targetPriceId: targetConfig.priceId,
   });
-  const updatedSubscription = await callHostedStripePlanUpgradeOperation(
-    "subscription.update.plan-items",
-    () =>
-      stripe.subscriptions.update(stripeSubscriptionId, {
+  let updateFailure: { error: unknown } | null = null;
+  let updatedSubscription = subscription;
+
+  if (!subscription.pending_update) {
+    try {
+      updatedSubscription = await stripe.subscriptions.update(stripeSubscriptionId, {
         expand: ["items.data.price"],
         items: updateItems,
         payment_behavior: "pending_if_incomplete",
@@ -165,16 +167,43 @@ export async function upgradeHostedBillingPlan(input: {
           targetPlanCode,
           targetPriceId: targetConfig.priceId,
         }),
-      })
-  );
+      });
+    } catch (error) {
+      updateFailure = { error };
+      updatedSubscription = await callHostedStripePlanUpgradeOperation(
+        "subscription.retrieve.after-plan-items-error",
+        () =>
+          stripe.subscriptions.retrieve(stripeSubscriptionId, {
+            expand: ["items.data.price"],
+          }),
+      );
+      assertHostedStripeSubscriptionMatchesCustomer({
+        stripeCustomerId,
+        subscription: updatedSubscription,
+      });
+    }
+  }
 
   if (!isHostedStripeSubscriptionAppliedPlan({
     subscription: updatedSubscription,
     targetPriceId: targetConfig.priceId,
   })) {
+    if (updateFailure && !updatedSubscription.pending_update) {
+      throw buildHostedStripePlanUpgradeOperationError(
+        "subscription.update.plan-items",
+        updateFailure.error,
+      );
+    }
+
+    assertHostedBillingPlanUpgradePendingUpdateMatches({
+      currentPriceId: currentConfig.priceId,
+      subscription: updatedSubscription,
+      targetPriceId: targetConfig.priceId,
+    });
+
     return {
       billingPlanCode: transition.currentPlanCode,
-      billingPortalUrl: await createHostedBillingPlanUpgradePortalUrl({
+      paymentUrl: await createHostedBillingPlanUpgradePortalUrl({
         stripe,
         stripeCustomerId,
       }),
@@ -529,6 +558,52 @@ function findHostedStripeSubscriptionItemByPriceId(
   return subscription.items.data.find((item) => item.price?.id === priceId) ?? null;
 }
 
+function assertHostedBillingPlanUpgradePendingUpdateMatches(input: {
+  currentPriceId: string;
+  subscription: Stripe.Subscription;
+  targetPriceId: string;
+}): void {
+  const currentItem = findHostedStripeSubscriptionItemByPriceId(
+    input.subscription,
+    input.currentPriceId,
+  );
+  const pendingUpdate = input.subscription.pending_update;
+  const pendingItems = pendingUpdate?.subscription_items;
+
+  if (
+    !currentItem ||
+    !pendingUpdate ||
+    !Array.isArray(pendingItems) ||
+    pendingItems.length !== 1 ||
+    typeof pendingUpdate.expires_at !== "number" ||
+    !Number.isFinite(pendingUpdate.expires_at) ||
+    pendingUpdate.expires_at <= 0 ||
+    pendingUpdate.billing_cycle_anchor != null ||
+    pendingUpdate.trial_end != null ||
+    pendingUpdate.trial_from_plan === true
+  ) {
+    throw buildHostedBillingPlanUpgradePendingUpdateConflictError();
+  }
+
+  const [pendingItem] = pendingItems;
+  if (
+    !pendingItem ||
+    pendingItem.id !== currentItem.id ||
+    coerceStripeObjectId(pendingItem.price) !== input.targetPriceId ||
+    (pendingItem.quantity !== undefined && pendingItem.quantity !== 1)
+  ) {
+    throw buildHostedBillingPlanUpgradePendingUpdateConflictError();
+  }
+}
+
+function buildHostedBillingPlanUpgradePendingUpdateConflictError(): Error {
+  return hostedOnboardingError({
+    code: "HOSTED_BILLING_PLAN_UPGRADE_PENDING_UPDATE_CONFLICT",
+    httpStatus: 409,
+    message: "Your subscription already has a different pending billing update.",
+  });
+}
+
 function isHostedStripeLicensedMonthlyItem(item: Stripe.SubscriptionItem): boolean {
   const recurring = item.price?.recurring;
   return recurring?.interval === "month" &&
@@ -676,17 +751,24 @@ async function callHostedStripePlanUpgradeOperation<T>(
   try {
     return await operation();
   } catch (error) {
-    throw hostedOnboardingError({
-      code: "HOSTED_BILLING_STRIPE_PLAN_CHANGE_UNAVAILABLE",
-      details: {
-        operationName,
-        ...describeSafeStripePlanChangeError(error),
-      },
-      httpStatus: 502,
-      message: "Stripe billing is unavailable for plan changes right now. Try again shortly.",
-      retryable: true,
-    });
+    throw buildHostedStripePlanUpgradeOperationError(operationName, error);
   }
+}
+
+function buildHostedStripePlanUpgradeOperationError(
+  operationName: string,
+  error: unknown,
+): Error {
+  return hostedOnboardingError({
+    code: "HOSTED_BILLING_STRIPE_PLAN_CHANGE_UNAVAILABLE",
+    details: {
+      operationName,
+      ...describeSafeStripePlanChangeError(error),
+    },
+    httpStatus: 502,
+    message: "Stripe billing is unavailable for plan changes right now. Try again shortly.",
+    retryable: true,
+  });
 }
 
 function describeSafeStripePlanChangeError(error: unknown): Record<string, unknown> {

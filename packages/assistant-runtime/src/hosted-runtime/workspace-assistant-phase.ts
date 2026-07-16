@@ -14,9 +14,9 @@ import {
 } from "@murphai/hosted-execution";
 import {
   type HostedRuntimeGroupToolLinqThreadContext,
+  type HostedRuntimeGroupToolCurrentSenderContext,
   type HostedRuntimeGroupToolRequest,
   type HostedRuntimeGroupToolResponse,
-  type HostedRuntimeGroupToolSelfOptOutContext,
   type HostedWorkspaceCheckpointReason,
   type HostedRuntimeRedactedJson,
   type HostedRuntimeRedactedObject,
@@ -222,7 +222,7 @@ export interface HostedWorkspaceRuntimeAssistantPhaseInput
   >;
   runtimeEnv: Readonly<Record<string, string>>;
   beforeProviderAcceptedInputs?: AssistantBeforeProviderAcceptedInputsHook | null;
-  currentAssistantPreferenceInputId?: () => string | null;
+  currentAssistantInputId?: () => string | null;
   stagedDirtyAcks?: readonly HostedDeviceSyncDirtyProcessedPostCheckpointRecord[] | null;
   suppressDirtyPendingFetch?: boolean;
   signal?: AbortSignal | null;
@@ -266,11 +266,22 @@ export function createHostedGroupToolWithLinqThreadContext(input: {
         if (emailIngressPresent) {
           return await input.groupToolPort.request({ action: request.action });
         }
-        const selfOptOut = resolveHostedGroupToolSelfOptOutContext({
+        const selfOptOut = resolveHostedGroupToolCurrentSenderContext({
           linqDeliveryContexts: input.linqDeliveryContexts,
         });
         return await input.groupToolPort.request(
           selfOptOut ? { action: request.action, selfOptOut } : { action: request.action },
+        );
+      }
+      if (
+        request.action === "read_own_assistant_style"
+        || request.action === "update_own_assistant_style"
+      ) {
+        const currentSender = resolveHostedGroupToolCurrentSenderContext({
+          linqDeliveryContexts: input.linqDeliveryContexts,
+        });
+        return await input.groupToolPort.request(
+          currentSender ? { ...request, currentSender } : request,
         );
       }
       if (
@@ -323,6 +334,12 @@ function buildHostedGroupEmailRestrictedActionUnavailable(
         action: request.action,
         result: { participants: null, status: "unavailable", unavailableReason },
       };
+    case "read_own_assistant_style":
+    case "update_own_assistant_style":
+      return {
+        action: request.action,
+        result: { style: null, status: "unavailable", unavailableReason },
+      };
     case "preflight_set_chat_avatar":
     case "set_chat_avatar":
     case "share_contact_card":
@@ -334,12 +351,13 @@ function buildHostedGroupEmailRestrictedActionUnavailable(
   }
 }
 
-function resolveHostedGroupToolSelfOptOutContext(input: {
+function resolveHostedGroupToolCurrentSenderContext(input: {
   linqDeliveryContexts: readonly HostedAssistantLinqDeliveryContext[];
-}): HostedRuntimeGroupToolSelfOptOutContext | null {
-  const eligible = new Map<string, HostedRuntimeGroupToolSelfOptOutContext>();
+}): HostedRuntimeGroupToolCurrentSenderContext | null {
+  const eligible = new Map<string, HostedRuntimeGroupToolCurrentSenderContext>();
   // Hosted email reply aliases authenticate the route, not the human From
-  // header. Do not turn parsed From into self-opt-out authority.
+  // header. Only the accepted Linq sender can become participant-self
+  // authority for opt-out or personal style actions.
   for (const context of input.linqDeliveryContexts) {
     if (context.threadIsDirect !== false) {
       continue;
@@ -625,10 +643,9 @@ export async function runHostedWorkspaceAssistantPhase(
     {
       hosted: {
         actionApprovalPort: input.runtime.platform.actionApprovalPort ?? null,
-        ...(input.currentAssistantPreferenceInputId
+        ...(input.currentAssistantInputId
           ? {
-              currentAssistantPreferenceInputId:
-                input.currentAssistantPreferenceInputId,
+              currentAssistantInputId: input.currentAssistantInputId,
             }
           : {}),
         assistantConfigurationTool:
@@ -677,6 +694,9 @@ export async function runHostedWorkspaceAssistantPhase(
           : {}),
         ...(input.runtime.platform.planUsageToolPort
           ? { planUsageTool: input.runtime.platform.planUsageToolPort }
+          : {}),
+        ...(input.runtime.platform.subscriptionToolPort
+          ? { subscriptionTool: input.runtime.platform.subscriptionToolPort }
           : {}),
         ...(issueDeviceConnectLink ? { issueDeviceConnectLink } : {}),
         ...(input.materializeWorkspaceArtifacts

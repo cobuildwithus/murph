@@ -107,4 +107,23 @@ Do not add per-tool availability booleans to provider or app-server inputs.
 hosted plan-usage service exists, accepts no arguments, and returns only the
 web-authorized read projection. Assistant policy limits it to explicit member
 questions or one trusted manual private check; it is not an onboarding or
-recurring usage watcher.
+recurring usage watcher. A thresholded `recommendedAction` is a suggestion;
+the separate `subscriptionActionQuote` is current terms for an explicit request
+and is neither a recommendation nor consent. Start-now and Edge actions require
+a matching current quote before exact confirmation. Usage-saving model options
+use plain language rather than internal model codenames, “should we part ways?”
+is only an optional trial off-ramp, and an active trial already set to continue
+needs no unsolicited explanation.
+
+`murph.subscription` is also private and default-off. It is advertised only
+when a hosted subscription service exists and the current private turn has
+eligible accepted member input. Assistant policy requires one explicit,
+unambiguous current-turn choice before calling it. The model supplies only the
+bounded action; assistant-engine injects the current accepted input id before
+the host call and consumes the ephemeral subscription capability on its first
+use. Web separately claims the first action on the existing accepted-input
+mailbox row, so restart or replay cannot use that input for a different action.
+An exact action retry may continue; a conflicting action requires new eligible
+member input. That binding proves current authority, not the meaning of the
+message. The result exposes a Stripe-hosted URL only when payment is required,
+and the tool never exposes a general billing or Stripe client.

@@ -1592,7 +1592,7 @@ describe('assistant codex runtime', () => {
     const hostedToolContext: AssistantHostedToolContext = {
       ...createHostedToolContext(),
       assistantConfigurationTool,
-      currentAssistantPreferenceInputId: () => `ain_${'a'.repeat(32)}`,
+      currentAssistantInputId: () => `ain_${'a'.repeat(32)}`,
       currentAssistantTarget: () => ({
         model: HOSTED_ASSISTANT_TERRA_MODEL,
         reasoningEffort: 'low',
@@ -1701,6 +1701,152 @@ describe('assistant codex runtime', () => {
       finalMessage: 'Configuration updates complete',
     })
     expect(savedModel).toBe(HOSTED_ASSISTANT_TERRA_MODEL)
+  })
+
+  it('allows only the first overlapping subscription action in a provider turn', async () => {
+    const workingDirectory = await createTempDir(
+      'assistant-codex-subscription-order-work-',
+    )
+    const firstRequestStarted = createDeferred<void>()
+    const releaseFirstRequest = createDeferred<void>()
+    const subscriptionCalls: string[] = []
+    const subscriptionTool: NonNullable<
+      AssistantHostedToolContext['subscriptionTool']
+    > = {
+      async request(request) {
+        subscriptionCalls.push(request.action)
+        if (subscriptionCalls.length === 1) {
+          firstRequestStarted.resolve()
+          await releaseFirstRequest.promise
+        }
+
+        return request.action === 'upgrade_edge'
+          ? {
+              action: request.action,
+              plan: {
+                code: 'launch_edge_monthly',
+                displayName: 'Edge',
+                interval: 'month',
+                recurringAmountUsdCents: 2_000,
+              },
+              status: 'completed',
+            }
+          : {
+              action: request.action,
+              plan: {
+                code: 'launch_monthly',
+                displayName: 'Pulse',
+                interval: 'month',
+                recurringAmountUsdCents: 800,
+              },
+              status: 'completed',
+            }
+      },
+    }
+    let subscriptionActionClaimed = false
+    const hostedToolContext: AssistantHostedToolContext = {
+      ...createHostedToolContext(),
+      claimSubscriptionAssistantInputId: () => {
+        if (subscriptionActionClaimed) {
+          return null
+        }
+        subscriptionActionClaimed = true
+        return `ain_${'b'.repeat(32)}`
+      },
+      subscriptionTool,
+    }
+
+    codexMocks.spawn.mockImplementation(() => {
+      const child = new MockChildProcess()
+
+      queueMicrotask(() => {
+        void (async () => {
+          await waitForRpcMethod(child, 'initialize')
+          child.stdout.write(jsonLine({ id: 1, result: {} }))
+          await waitForRpcMethod(child, 'thread/start')
+          child.stdout.write(jsonLine({
+            id: 2,
+            result: { thread: { id: 'thread-subscription-order' } },
+          }))
+          await waitForRpcMethod(child, 'turn/start')
+          child.stdout.write(jsonLine({
+            id: 3,
+            result: { turn: { id: 'turn-subscription-order' } },
+          }))
+          child.stdout.write(jsonLine({
+            id: 73,
+            method: 'item/tool/call',
+            params: {
+              arguments: { action: 'start_pulse_now' },
+              namespace: 'murph',
+              tool: 'subscription',
+            },
+          }))
+          child.stdout.write(jsonLine({
+            id: 74,
+            method: 'item/tool/call',
+            params: {
+              arguments: { action: 'upgrade_edge' },
+              namespace: 'murph',
+              tool: 'subscription',
+            },
+          }))
+
+          await firstRequestStarted.promise
+          try {
+            expect(subscriptionCalls).toEqual(['start_pulse_now'])
+          } finally {
+            releaseFirstRequest.resolve()
+          }
+
+          const messages = await waitForRpcMessages(child, 6)
+          expect(messages[4]).toMatchObject({
+            id: 73,
+            result: { success: true },
+          })
+          expect(messages[5]).toMatchObject({
+            id: 74,
+            result: { success: false },
+          })
+          expect(subscriptionCalls).toEqual(['start_pulse_now'])
+
+          child.stdout.write(jsonLine({
+            method: 'item/completed',
+            params: {
+              item: {
+                id: 'assistant-subscription-order',
+                message: 'Subscription actions complete',
+                type: 'assistant_message',
+              },
+            },
+          }))
+          child.stdout.write(jsonLine({
+            method: 'turn/completed',
+            params: {
+              turn: {
+                id: 'turn-subscription-order',
+                status: 'completed',
+              },
+            },
+          }))
+        })()
+      })
+
+      return child
+    })
+
+    await expect(executeCodexAppServerTurn({
+      dynamicTools: resolveMurphDynamicTools({
+        progressUpdatesAvailable: false,
+        subscriptionAvailable: true,
+      }),
+      env: { OPENAI_API_KEY: 'openai-test-key' },
+      hostedToolContext,
+      prompt: 'start Pulse, then upgrade to Edge',
+      workingDirectory,
+    })).resolves.toMatchObject({
+      finalMessage: 'Subscription actions complete',
+    })
   })
 
   const computerPauseFinalMessageScenarios = [

@@ -24,6 +24,7 @@ import type {
   AssistantHostedNewsletterTool,
   AssistantHostedPersonalizationTool,
   AssistantHostedPlanUsageTool,
+  AssistantHostedSubscriptionTool,
   AssistantPhoneCallPort,
 } from './execution-context.js'
 import {
@@ -76,6 +77,7 @@ export interface AssistantHostedToolContext {
   readonly newsletterTool?: AssistantHostedNewsletterTool | null
   readonly personalizationTool?: AssistantHostedPersonalizationTool | null
   readonly planUsageTool?: AssistantHostedPlanUsageTool | null
+  readonly subscriptionTool?: AssistantHostedSubscriptionTool | null
   readonly phoneCalls?: AssistantPhoneCallPort | null
   beforeToolExecution?(): Promise<void>
   currentHostedDeliveryContext(): AssistantHostedDeliveryContext | null
@@ -84,7 +86,8 @@ export interface AssistantHostedToolContext {
     reasoningEffort: string | null
   }
   currentHostedMailboxItemIds(): readonly string[]
-  currentAssistantPreferenceInputId?(): string | null
+  currentAssistantInputId?(): string | null
+  claimSubscriptionAssistantInputId?(): string | null
   currentScheduledAutomationAuthority?(): HostedRuntimeNewsletterScheduledAuthority | null
   closeNewsletterCapability?(): void
   recordNewsletterSendResult?(
@@ -111,9 +114,10 @@ export function createAssistantHostedToolContext(input: {
   newsletterTool?: AssistantHostedNewsletterTool | null
   personalizationTool?: AssistantHostedPersonalizationTool | null
   planUsageTool?: AssistantHostedPlanUsageTool | null
+  subscriptionTool?: AssistantHostedSubscriptionTool | null
   computerToolsAvailable?: boolean
   beforeToolExecution?: () => Promise<void>
-  getAssistantPreferenceInputId?: () => string | null
+  getAssistantInputId?: () => string | null
   getConversationScope?: () => AssistantConversationScope
   getDeliveryContext?: () => AssistantHostedToolDeliveryContext
   getUserActionAcceptedInputIds?: () => readonly string[]
@@ -156,6 +160,16 @@ export function createAssistantHostedToolContext(input: {
       })
     : null
   const newsletterTool = newsletterOutboxTool ?? input.newsletterTool ?? null
+  const readCurrentUserActionAssistantInputId = () => {
+    const currentAssistantInputId = input.getAssistantInputId?.() ?? null
+    const userActionAcceptedInputIds =
+      input.getUserActionAcceptedInputIds?.() ?? []
+    return currentAssistantInputId !== null &&
+      userActionAcceptedInputIds.at(-1) === currentAssistantInputId
+      ? currentAssistantInputId
+      : null
+  }
+  let subscriptionActionClaimed = false
 
   return {
     actionApprovalPort: input.actionApprovalPort ?? null,
@@ -166,13 +180,24 @@ export function createAssistantHostedToolContext(input: {
     newsletterTool,
     personalizationTool: input.personalizationTool ?? null,
     planUsageTool: input.planUsageTool ?? null,
+    subscriptionTool: input.subscriptionTool ?? null,
     phoneCalls: input.phoneCalls ?? null,
     ...(input.beforeToolExecution
       ? { beforeToolExecution: input.beforeToolExecution }
       : {}),
     computerToolsAvailable: input.computerToolsAvailable === true,
-    currentAssistantPreferenceInputId: () =>
-      input.getAssistantPreferenceInputId?.() ?? null,
+    currentAssistantInputId: () => input.getAssistantInputId?.() ?? null,
+    claimSubscriptionAssistantInputId: () => {
+      if (subscriptionActionClaimed) {
+        return null
+      }
+      const assistantInputId = readCurrentUserActionAssistantInputId()
+      if (assistantInputId === null) {
+        return null
+      }
+      subscriptionActionClaimed = true
+      return assistantInputId
+    },
     currentAssistantTarget: () => {
       const session = readDeliveryContext().session
       return {

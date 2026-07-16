@@ -1,6 +1,6 @@
 {
   "name": "@murphai/hosted-execution",
-  "version": "1.2.2",
+  "version": "1.2.3",
   "private": false,
   "type": "module",
   "license": "Apache-2.0",
@@ -77,6 +77,10 @@
     "./plan-usage": {
       "types": "./dist/plan-usage.d.ts",
       "default": "./dist/plan-usage.js"
+    },
+    "./subscription": {
+      "types": "./dist/subscription.d.ts",
+      "default": "./dist/subscription.js"
     },
     "./dashboard-replica": {
       "types": "./dist/dashboard-replica.d.ts",

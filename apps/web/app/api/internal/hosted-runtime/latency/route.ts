@@ -7,7 +7,7 @@ import {
 } from "@murphai/hosted-execution/runtime-control";
 
 import {
-  requireHostedCloudflareCallbackRequest,
+  requireHostedCloudflareCallbackJsonRequest,
 } from "@/src/lib/hosted-execution/cloudflare-callback-auth";
 import { hostedOnboardingError } from "@/src/lib/hosted-onboarding/errors";
 import {
@@ -16,22 +16,15 @@ import {
   recordHostedIngressProviderStarted,
   recordHostedIngressRuntimeMilestone,
 } from "@/src/lib/hosted-runtime-latency/store";
-import { readRawBodyBuffer } from "@/src/lib/http";
 import { jsonOk, withJsonError } from "@/src/lib/hosted-onboarding/http";
 
 const HOSTED_RUNTIME_ATTEMPT_ID_HEADER = "x-hosted-runtime-attempt-id";
 
 export const POST = withJsonError(async (request: Request) => {
-  const payloadText = (await readRawBodyBuffer(request, {
-    limitBytes: HOSTED_RUNTIME_LATENCY_TRACE_BODY_LIMIT_BYTES,
-  })).toString("utf8");
-  const authenticatedUserId = await requireHostedCloudflareCallbackRequest(request, {
+  const { payload, userId: authenticatedUserId } = await requireHostedCloudflareCallbackJsonRequest(request, {
     maxBodyBytes: HOSTED_RUNTIME_LATENCY_TRACE_BODY_LIMIT_BYTES,
-    payloadText,
   });
-  const traceRequest = parseHostedRuntimeLatencyTraceRequest(
-    payloadText.trim() ? JSON.parse(payloadText) : {},
-  );
+  const traceRequest = parseHostedRuntimeLatencyTraceRequest(payload);
   const runtimeAttemptId = requireMatchingRuntimeAttemptId(request, traceRequest.event.runtimeAttemptId);
 
   const result = traceRequest.event.type === "assistant_input_staged"
