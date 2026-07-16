@@ -1,6 +1,6 @@
 # Resolve PR 712 merge conflict
 
-Status: active
+Status: completed
 Created: 2026-07-16
 Updated: 2026-07-16
 
@@ -53,15 +53,39 @@ Updated: 2026-07-16
 
 ## Tasks
 
-1. Merge latest `origin/main` and resolve the conflict from code-path evidence.
-2. Run focused and diff-aware verification plus the required coverage audit.
-3. Close the plan in a scoped merge-resolution commit, push the PR branch, and
-   start ReviewGPT concurrently with CI.
-4. Resolve only proven review/CI findings, then mark ready and merge once green.
+1. [x] Merge latest `origin/main` and resolve the conflict from code-path evidence.
+2. [x] Run focused and diff-aware verification plus the required coverage audit.
+3. [x] Prepare the scoped merge-resolution commit and exact-head PR review
+   payload.
+
+After this implementation plan is archived, continue the PR-lane gate in the
+same task: push, start ReviewGPT concurrently with CI, resolve only proven
+findings, then mark ready and merge once green.
 
 ## Verification
 
-- Focused hosted-execution, assistant-runtime, and Cloudflare redaction tests.
-- Truthful `pnpm test:diff` for the touched owner and consumers.
-- Stale-reference, conflict-marker, privacy-identifier, and `git diff --check` scans.
+- Passed focused hosted-execution and assistant-runtime tests: 51 tests.
+- Passed focused Cloudflare runner-platform tests: 130 tests.
+- Passed hosted-execution, assistant-runtime, and Cloudflare typechecks.
+- Passed `pnpm build:workspace:clean`.
+- Passed serialized `pnpm test:diff` for the touched owner and consumers,
+  including all affected package suites, both affected app verifies, the web
+  production build, and Cloudflare verification.
+- Coverage-write found one consumer-boundary gap and added assertions proving
+  retry failure text is redacted in both the returned outcome and persisted
+  mailbox state. Its focused assistant-runtime file passed all 24 tests; the
+  post-edit diff guards and affected typechecks also passed.
+- Passed stale-reference, conflict-marker, privacy-identifier, and
+  `git diff --check` scans. The shared hosted-execution module is the only
+  remaining function owner.
 - Exact-head ReviewGPT, required GitHub checks, and clean mergeability proof.
+
+## Decisions
+
+- The manual conflict resolution preserves current `main` mailbox claim,
+  preemption, and retry behavior, changing only the redaction-helper import to
+  the shared hosted-execution owner.
+- The coverage-write change is assertion-only and does not alter runtime
+  behavior or require another substantive ReviewGPT baseline beyond the manual
+  conflict-resolution round already required by policy.
+Completed: 2026-07-16
