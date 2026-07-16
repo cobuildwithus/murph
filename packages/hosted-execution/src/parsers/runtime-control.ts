@@ -1850,15 +1850,19 @@ function parseHostedRuntimeGroupMembershipSummaries(
     if (!Number.isInteger(memberCount) || memberCount < 0) {
       throw new TypeError(`${label} entry memberCount must be a non-negative integer.`);
     }
+    const membershipId = requireString(
+      record.membershipId,
+      `${label} entry membershipId`,
+    ).trim();
+    if (!membershipId) {
+      throw new TypeError(`${label} entry membershipId must not be blank.`);
+    }
     return {
       displayName: readNullableString(record.displayName, `${label} entry displayName`),
       grantedVaultShareProjectionScopes,
       kind: requireString(record.kind, `${label} entry kind`),
       memberCount,
-      membershipId: parseHostedRuntimeGroupMembershipId(
-        record.membershipId,
-        `${label} entry membershipId`,
-      ),
+      membershipId,
       permissionsUrl: readNullableString(
         record.permissionsUrl,
         `${label} entry permissionsUrl`,
@@ -1867,21 +1871,6 @@ function parseHostedRuntimeGroupMembershipSummaries(
       role: requireString(record.role, `${label} entry role`),
     };
   });
-}
-
-function parseHostedRuntimeGroupMembershipId(
-  value: unknown,
-  label: string,
-): string | null {
-  const membershipId = readNullableString(value, label);
-  if (membershipId === null) {
-    return null;
-  }
-  const normalized = membershipId.trim();
-  if (!normalized) {
-    throw new TypeError(`${label} must not be blank.`);
-  }
-  return normalized;
 }
 
 function parseHostedRuntimeGroupProjectionKindArray<
