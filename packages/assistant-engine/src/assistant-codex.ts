@@ -3349,39 +3349,43 @@ async function runCodexAppServerTurnOnProcess(
 
     const runDynamicTool = () => withHostedCanonicalWritePort(
       hostedCanonicalWritePort,
-      async () => await executeMurphDynamicToolRequest({
-        assistantStyleSettingsAvailable: input.dynamicTools.some(
-          (tool) =>
-            tool.namespace === MURPH_ASSISTANT_STYLE_TOOL.namespace &&
-            tool.name === MURPH_ASSISTANT_STYLE_TOOL.name,
-        ),
-        abortSignal: input.abortSignal
-          ? AbortSignal.any([input.abortSignal, dynamicToolAbortController.signal])
-          : dynamicToolAbortController.signal,
-        codexHome: input.codexHome ?? input.env.CODEX_HOME ?? null,
-        env: input.env,
-        fetchImpl: input.fetchImpl,
-        hostedGeneratedImageUploader: input.hostedGeneratedImageUploader,
-        hostedToolContext: resolveCodexAppServerHostedToolContext(input),
-        materializeWorkspaceArtifacts: input.materializeWorkspaceArtifacts ?? null,
-        currentResponseMedia: responseMedia,
-        nextUsageOrdinal: () => nextDynamicToolUsageOrdinal++,
-        productFeedbackRecorder: input.productFeedbackRecorder ?? null,
-        progressDelivery:
-          dynamicToolRequest.kind === 'send-progress-update'
-            ? dynamicToolProgressDelivery
-            : null,
-        publicFetchImpl: input.publicInternetFetch ?? null,
-        request: dynamicToolRequest,
-        requireHostedGeneratedImageUploader:
-          input.requireHostedGeneratedImageUploader ?? false,
-        vaultRoot: input.vaultRoot ?? null,
-        voiceMemoRuntime:
-          dynamicToolRequest.kind === 'generate-voice-memo' ||
-          dynamicToolRequest.kind === 'generate-song'
-            ? input.voiceMemoRuntime ?? null
-            : null,
-      }),
+      async () => {
+        const hostedToolContext = resolveCodexAppServerHostedToolContext(input)
+        await hostedToolContext?.beforeToolExecution?.()
+        return await executeMurphDynamicToolRequest({
+          assistantStyleSettingsAvailable: input.dynamicTools.some(
+            (tool) =>
+              tool.namespace === MURPH_ASSISTANT_STYLE_TOOL.namespace &&
+              tool.name === MURPH_ASSISTANT_STYLE_TOOL.name,
+          ),
+          abortSignal: input.abortSignal
+            ? AbortSignal.any([input.abortSignal, dynamicToolAbortController.signal])
+            : dynamicToolAbortController.signal,
+          codexHome: input.codexHome ?? input.env.CODEX_HOME ?? null,
+          env: input.env,
+          fetchImpl: input.fetchImpl,
+          hostedGeneratedImageUploader: input.hostedGeneratedImageUploader,
+          hostedToolContext,
+          materializeWorkspaceArtifacts: input.materializeWorkspaceArtifacts ?? null,
+          currentResponseMedia: responseMedia,
+          nextUsageOrdinal: () => nextDynamicToolUsageOrdinal++,
+          productFeedbackRecorder: input.productFeedbackRecorder ?? null,
+          progressDelivery:
+            dynamicToolRequest.kind === 'send-progress-update'
+              ? dynamicToolProgressDelivery
+              : null,
+          publicFetchImpl: input.publicInternetFetch ?? null,
+          request: dynamicToolRequest,
+          requireHostedGeneratedImageUploader:
+            input.requireHostedGeneratedImageUploader ?? false,
+          vaultRoot: input.vaultRoot ?? null,
+          voiceMemoRuntime:
+            dynamicToolRequest.kind === 'generate-voice-memo' ||
+            dynamicToolRequest.kind === 'generate-song'
+              ? input.voiceMemoRuntime ?? null
+              : null,
+        })
+      },
     ).then(async (result) => {
       if (dynamicToolRequest.kind === 'send-progress-update') {
         releaseDynamicProgressPending?.()

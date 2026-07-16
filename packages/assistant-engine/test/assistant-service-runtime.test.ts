@@ -2610,6 +2610,39 @@ describe("assistant delivery orchestration seam", () => {
         deliveryIdempotencyKey: firstDerivedLinqKey,
       }));
 
+    await deliverAssistantReply({
+      input: {
+        deliverResponse: true,
+        executionContext: {
+          hosted: {
+            memberId: "member-hosted",
+            userEnvKeys: [],
+          },
+        },
+        hostedDeliveryIdempotency: {
+          assistantTurnOrdinal: "assistant-reply:1",
+          inboundMailboxItemIds: ["mailbox_item_older", "mailbox_item_123"],
+        },
+        prompt: "hello",
+        vault: "/vault",
+      },
+      response: "reply body",
+      session: {
+        ...session,
+        binding: {
+          ...session.binding,
+          channel: "linq",
+        },
+      },
+      sharedPlan: createSharedPlan(),
+      turnId: "turn-hosted-linq-replayed-batch",
+    });
+
+    expect(runtimeState.outbox.deliverMessage.mock.lastCall?.[0])
+      .toEqual(expect.objectContaining({
+        deliveryIdempotencyKey: firstDerivedLinqKey,
+      }));
+
     await expect(
       deliverAssistantReply({
         input: {
