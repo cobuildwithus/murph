@@ -4,7 +4,7 @@ import { tmpdir } from "node:os";
 import path from "node:path";
 import { promisify } from "node:util";
 
-import { describe, expect, it, vi } from "vitest";
+import { describe, expect, it } from "vitest";
 
 import {
   buildHostedWorkspaceSnapshotV2Aad,
@@ -840,66 +840,6 @@ exec "$REAL_TAR" "$@"
       delete process.env.MURPH_TEST_DURABLE_ROOT;
       delete process.env.MURPH_TEST_REAL_TAR;
       delete process.env.MURPH_TEST_TAR_MARKER;
-      await rm(tempRoot, { force: true, recursive: true });
-      dataKey.fill(0);
-    }
-  });
-
-  it("rejects an encrypted output that changes before its upload digest proof", async () => {
-    const tempRoot = await mkdtemp(path.join(tmpdir(), "workspace-snapshot-local-test-"));
-    const durableRoot = path.join(tempRoot, "durable");
-    const notePath = path.join(durableRoot, "vault", "note.md");
-    const outputDir = path.join(tempRoot, "scratch");
-    const dataKey = Uint8Array.from({ length: 32 }, (_, index) => index + 1);
-
-    try {
-      await mkdir(path.dirname(notePath), { recursive: true });
-      await writeFile(notePath, "note\n", "utf8");
-      vi.doMock("node:fs", async () => {
-        const actual = await vi.importActual<typeof import("node:fs")>("node:fs");
-        let intercepted = false;
-        return {
-          ...actual,
-          createReadStream: (
-            filePath: Parameters<typeof actual.createReadStream>[0],
-            options?: Parameters<typeof actual.createReadStream>[1],
-          ) => {
-            if (!intercepted) {
-              intercepted = true;
-              actual.appendFileSync(filePath, "tampered");
-            }
-            return actual.createReadStream(filePath, options);
-          },
-        };
-      });
-      vi.resetModules();
-      const { createEncryptedWorkspaceSnapshotFile: createSnapshot } = await import(
-        "../src/workspace-snapshot-local.ts"
-      );
-
-      await expect(createSnapshot({
-        aad: buildHostedWorkspaceSnapshotV2Aad({
-          objectKey: "users/hsn_test/workspace-snapshots/output_digest.snapshot.enc",
-          snapshotId: "snapshot_output_digest",
-          userId: "member_123",
-        }),
-        archiveEntries: [{
-          absolutePath: notePath,
-          archivePath: "vault/note.md",
-          kind: "file",
-        }],
-        dataKey: encodeHostedWorkspaceSnapshotV2DataKey(dataKey),
-        durableRoot,
-        ivBase64: Buffer.alloc(12, 7).toString("base64url"),
-        maxEncryptedBytes: 16 * 1024 * 1024,
-        outputDir,
-      })).rejects.toThrow(
-        "Hosted workspace snapshot encrypted file digest does not match its output.",
-      );
-      await expect(readdir(outputDir)).resolves.toEqual([]);
-    } finally {
-      vi.doUnmock("node:fs");
-      vi.resetModules();
       await rm(tempRoot, { force: true, recursive: true });
       dataKey.fill(0);
     }

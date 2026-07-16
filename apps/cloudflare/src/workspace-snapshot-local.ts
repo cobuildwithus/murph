@@ -276,15 +276,6 @@ export async function createEncryptedWorkspaceSnapshotFile(input: {
       throw new Error("Hosted workspace snapshot encrypted size accounting failed.");
     }
     const encryptedObjectSha256 = encryptedObjectHash.digest("hex");
-    const encryptedFileSha256 = await hashHostedWorkspaceSnapshotFile({
-      filePath: encryptedFilePath,
-      signal: input.signal,
-    });
-    if (encryptedFileSha256 !== encryptedObjectSha256) {
-      throw new Error(
-        "Hosted workspace snapshot encrypted file digest does not match its output.",
-      );
-    }
     const postArchivePreflight = await readHostedWorkspaceSnapshotSelectedEntryState({
       archiveEntries: input.archiveEntries,
       durableRoot,
@@ -311,20 +302,6 @@ export async function createEncryptedWorkspaceSnapshotFile(input: {
       await rm(tempDir, { force: true, recursive: true });
     }
   }
-}
-
-async function hashHostedWorkspaceSnapshotFile(input: {
-  filePath: string;
-  signal?: AbortSignal | null;
-}): Promise<string> {
-  const hash = createHash("sha256");
-  const stream = createReadStream(input.filePath);
-  for await (const chunk of stream) {
-    assertHostedWorkspaceSnapshotConstructionLive(input.signal);
-    hash.update(chunk);
-  }
-  assertHostedWorkspaceSnapshotConstructionLive(input.signal);
-  return hash.digest("hex");
 }
 
 function assertHostedWorkspaceSnapshotConstructionLive(
