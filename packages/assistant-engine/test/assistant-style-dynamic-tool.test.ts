@@ -32,7 +32,7 @@ beforeEach(() => {
 })
 
 describe('assistant style dynamic tool', () => {
-  it('is available only when the exact turn is private and direct', () => {
+  it('is available only when the planner grants current-conversation authority', () => {
     expect(resolveMurphDynamicTools({
       assistantStyleSettingsAvailable: true,
     })).toContain(MURPH_ASSISTANT_STYLE_TOOL)
@@ -67,6 +67,16 @@ describe('assistant style dynamic tool', () => {
       setting: 'humor',
       value: 11,
     })?.kind).toBe('invalid-assistant-style-arguments')
+    expect(readStyleRequest({
+      action: 'set',
+      memberId: 'member_other',
+      setting: 'humor',
+      value: 8,
+    })?.kind).toBe('invalid-assistant-style-arguments')
+    expect(readStyleRequest({
+      action: 'show',
+      participantMemberId: 'participant_other',
+    })?.kind).toBe('invalid-assistant-style-arguments')
   })
 
   it('fails closed without exact-turn authority before reading preferences', async () => {
@@ -74,9 +84,24 @@ describe('assistant style dynamic tool', () => {
 
     expect(result.rpcResult.success).toBe(false)
     expect(result.rpcResult.contentItems[0]?.text).toContain(
-      'unavailable outside a private direct conversation',
+      'unavailable for this conversation',
     )
     expect(preferenceMocks.showAssistantPersonality).not.toHaveBeenCalled()
+  })
+
+  it('describes direct-member and synthetic-room ownership without a target selector', () => {
+    expect(MURPH_ASSISTANT_STYLE_TOOL.description).toContain(
+      'current conversation runtime',
+    )
+    expect(MURPH_ASSISTANT_STYLE_TOOL.description).toContain(
+      'synthetic room Murph',
+    )
+    expect(MURPH_ASSISTANT_STYLE_TOOL.description).toContain(
+      'never to a participant',
+    )
+    expect(MURPH_ASSISTANT_STYLE_TOOL.inputSchema).not.toHaveProperty(
+      'properties.memberId',
+    )
   })
 
   it('reads hosted show canonically and routes mutations through the Web owner', async () => {

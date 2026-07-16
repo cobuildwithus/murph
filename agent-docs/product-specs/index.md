@@ -1,6 +1,6 @@
 # Product Specs Index
 
-Last verified: 2026-07-15
+Last verified: 2026-07-16
 
 | Path | Purpose | Status |
 | --- | --- | --- |
@@ -23,7 +23,7 @@ Last verified: 2026-07-15
 | `agent-docs/product-specs/companion-app-mvp.md` | Two-screen companion build spec plus bounded WHOOP metadata enrichment and strict six-field overnight-PRV ingress over one active member-owned Junction connection. | Active |
 | `agent-docs/product-specs/habitat.md` | Habitat: progressive member life-context — domains, `habitat` bank family, domain catalog, coverage derivation, context-dividend collection rules, and environment/workspace v1 indicators. | Specified |
 | `agent-docs/product-specs/murph-contact-card-picker.md` | Post-signup add-Murph-to-contacts step where the member picks the avatar on Murph's vCard; picker components live on `/design`. | Implemented |
-| `agent-docs/product-specs/murph-tone-and-voice.md` | Five controls for how Murph talks: hosted tone and voice plus private conversation-first Humor, Push, and Detail dials. | Implemented |
+| `agent-docs/product-specs/murph-tone-and-voice.md` | Five controls for how Murph talks, owned independently by a person's private Murph or a hosted group's synthetic room runtime. | Implemented |
 | `agent-docs/product-specs/group-health-newsletter.md` | Recurring group health newsletter emailed from a group chat: cron automation in the group vault, tone flavors, a reusable default-at-join email-sharing grant, and Cloudflare `HOSTED_EMAIL` delivery with web-side address resolution. | Specified |
 | `agent-docs/product-specs/personal-group-awareness.md` | Personal Murph read access to the member's hosted-group memberships, requested permissions, active self grants, and owner-authorized permission links. | Implemented |
 | `agent-docs/product-specs/private-group-consultation.md` | Proposed on-demand private-to-group Murph consultation with automatic membership resolution, a stateless encrypted mailbox request/reply, and a temporary read-only group turn. | Proposed |

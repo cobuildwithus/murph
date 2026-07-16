@@ -11,6 +11,12 @@ import {
   type HostedRuntimeAssistantPersonalizationToolResponse,
 } from "@murphai/hosted-execution/assistant-personalization";
 import {
+  isHostedEmailConversationMessageWake,
+  isHostedLinqConversationMessageWake,
+  isHostedTelegramConversationMessageWake,
+  type HostedExecutionConversationMessageWake,
+} from "@murphai/hosted-execution";
+import {
   assistantPersonalitySettingIds,
   assistantPersonalityCausalWritesEnabled,
   defaultAssistantPersonalityScores,
@@ -21,10 +27,8 @@ import {
 
 import { getPrisma } from "@/src/lib/prisma";
 import {
-  assertHostedMemberAssistantPersonalizationEligible,
   readHostedMemberAssistantModelPreference,
 } from "@/src/lib/hosted-onboarding/assistant-model-preference";
-import { assertActiveHostedMemberAccessAllowed } from "@/src/lib/hosted-onboarding/member-access";
 import { hostedOnboardingError } from "@/src/lib/hosted-onboarding/errors";
 import {
   readHostedMemberAssistantPreferences,
@@ -33,13 +37,17 @@ import {
 } from "@/src/lib/hosted-onboarding/member-preferences";
 import {
   HOSTED_ONBOARDING_TRANSACTION_OPTIONS,
-  lockHostedMemberRow,
-  lockHostedMemberSponsoredAccessRows,
 } from "@/src/lib/hosted-onboarding/shared";
 import {
+  requireHostedRuntimeActiveAccess,
+  requireHostedRuntimeActiveAccessForUpdateTx,
+} from "@/src/lib/hosted-mailbox/runtime-access";
+import {
+  readHostedMailboxConversationWakeByAssistantInputId,
   readHostedMailboxPreferenceCausalSeqByAssistantInputIdTx,
   type HostedMailboxStoreClient,
 } from "@/src/lib/hosted-mailbox/store";
+import { assertHostedLinqRouteEgressAuthority } from "@/src/lib/hosted-routing/thread-route-store";
 
 type HostedRuntimeAssistantPersonalityUpdateResponse = Extract<
   HostedRuntimeAssistantPersonalizationToolResponse,
@@ -61,12 +69,7 @@ export async function handleHostedRuntimeAssistantPersonalizationTool(input: {
   }) => void;
 }): Promise<HostedRuntimeAssistantPersonalizationToolResponse> {
   if (input.request.action === "read") {
-    await assertActiveHostedMemberAccessAllowed({
-      memberId: input.memberId,
-      prisma: getPrisma(),
-    });
-    await assertHostedMemberAssistantPersonalizationEligible({
-      memberId: input.memberId,
+    await requireHostedRuntimeActiveAccess(input.memberId, {
       prisma: getPrisma(),
     });
     return {
@@ -280,13 +283,11 @@ async function requireHostedRuntimeAssistantPreferenceCausalSeq(input: {
   memberId: string;
   prisma: HostedMailboxStoreClient;
 }): Promise<string> {
-  await lockHostedMemberRow(input.prisma, input.memberId);
-  await lockHostedMemberSponsoredAccessRows(input.prisma, input.memberId);
-  await assertActiveHostedMemberAccessAllowed({
-    memberId: input.memberId,
+  await requireHostedRuntimeActiveAccessForUpdateTx(input.memberId, {
     prisma: input.prisma,
   });
-  await assertHostedMemberAssistantPersonalizationEligible({
+  await requireHostedAssistantStyleInputAuthority({
+    assistantInputId: input.assistantInputId,
     memberId: input.memberId,
     prisma: input.prisma,
   });
@@ -299,6 +300,66 @@ async function requireHostedRuntimeAssistantPreferenceCausalSeq(input: {
     throw new TypeError("Assistant personalization input authority is invalid.");
   }
   return causalSeq;
+}
+
+async function requireHostedAssistantStyleInputAuthority(input: {
+  assistantInputId: string;
+  memberId: string;
+  prisma: HostedMailboxStoreClient;
+}): Promise<void> {
+  const container = await input.prisma.hostedThreadContainer.findUnique({
+    select: { memberId: true },
+    where: { memberId: input.memberId },
+  });
+  const wake = await readHostedMailboxConversationWakeByAssistantInputId({
+    assistantInputId: input.assistantInputId,
+    memberId: input.memberId,
+    prisma: input.prisma,
+  });
+  if (!wake) {
+    throw new TypeError("Assistant personalization input authority is invalid.");
+  }
+
+  if (!container) {
+    if (!isHostedDirectAssistantStyleWake(wake)) {
+      throw new TypeError("Assistant personalization input authority is invalid.");
+    }
+    return;
+  }
+
+  const authority = isHostedLinqConversationMessageWake(wake)
+    ? wake.message.routeAuthority
+    : null;
+  if (
+    !isHostedLinqConversationMessageWake(wake)
+    || wake.message.linqMessage.threadIsDirect !== false
+    || !authority
+    || authority.containerMemberId !== input.memberId
+    || authority.threadId !== wake.message.linqMessage.chatId
+  ) {
+    throw new TypeError("Assistant personalization input authority is invalid.");
+  }
+
+  const route = await assertHostedLinqRouteEgressAuthority({
+    authority,
+    prisma: input.prisma,
+  });
+  if (route.containerMemberId !== input.memberId) {
+    throw new TypeError("Assistant personalization input authority is invalid.");
+  }
+}
+
+function isHostedDirectAssistantStyleWake(
+  wake: HostedExecutionConversationMessageWake,
+): boolean {
+  if (isHostedLinqConversationMessageWake(wake)) {
+    return wake.message.linqMessage.threadIsDirect === true;
+  }
+  if (isHostedEmailConversationMessageWake(wake)) {
+    return wake.message.threadIsDirect === true
+      && wake.message.assistantStyleSettingsAuthorized === true;
+  }
+  return isHostedTelegramConversationMessageWake(wake);
 }
 
 async function readHostedAssistantPersonalization(

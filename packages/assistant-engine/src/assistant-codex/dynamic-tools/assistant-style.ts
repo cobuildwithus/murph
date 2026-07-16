@@ -42,7 +42,7 @@ export const MURPH_ASSISTANT_STYLE_TOOL = {
   namespace: 'murph',
   name: 'assistant_style',
   description:
-    'Read or update the current member\'s private conversation-style settings. Use show to read Humor, Push, and Detail scores and sources; set only for an explicit ongoing preference; reset one setting or all settings to product defaults. Never guess or clamp a score. This tool is available only in a private direct conversation.',
+    'Read or update the current conversation runtime\'s Humor, Push, and Detail settings. In a private chat these belong to the member; in a group chat they belong to the synthetic room Murph and never to a participant. Use show to read scores and sources; set only for an explicit ongoing preference; reset one setting or all settings to product defaults. Never guess or clamp a score.',
   inputSchema: z.toJSONSchema(assistantStyleArgumentsSchema, { io: 'input' }),
 } as const
 
@@ -107,7 +107,7 @@ export async function executeAssistantStyleDynamicTool(input: {
   if (!input.available) {
     return assistantStyleTextResult(
       false,
-      'assistant style settings are unavailable outside a private direct conversation',
+      'assistant style settings are unavailable for this conversation',
     )
   }
 

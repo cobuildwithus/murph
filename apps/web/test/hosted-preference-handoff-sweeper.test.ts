@@ -1,5 +1,16 @@
 import { describe, expect, it, vi } from "vitest";
 
+const mocks = vi.hoisted(() => ({
+  queryRaw: vi.fn((..._args: unknown[]): Promise<Array<{
+    mailboxItemId: string;
+    userId: string;
+  }>> => Promise.resolve([])),
+}));
+
+vi.mock("@/src/lib/prisma", () => ({
+  getPrisma: () => ({ $queryRaw: mocks.queryRaw }),
+}));
+
 import {
   runHostedPreferenceHandoffSweeper,
 } from "@/src/lib/hosted-orchestration/preference-handoff-sweeper";
@@ -137,6 +148,43 @@ describe("hosted preference handoff sweeper", () => {
       handoffAccepted: 1,
       handoffAttempted: 1,
       handoffSkippedInactive: 25,
+    });
+  });
+
+  it("selects active synthetic room runtimes before applying the handoff limit", async () => {
+    mocks.queryRaw.mockResolvedValueOnce([{
+      mailboxItemId: "mailbox_group_preference",
+      userId: "member_group_runtime",
+    }]);
+    const requestHandoff = vi.fn(async () => ({
+      signalAccepted: true as const,
+      workflowId: "hosted-user-runtime:synthetic",
+    }));
+    const hasActiveAccess = vi.fn(async () => true);
+
+    await runHostedPreferenceHandoffSweeper({
+      hasActiveAccess,
+      logger: buildLogger(),
+      requestHandoff,
+    });
+
+    const query = mocks.queryRaw.mock.calls[0]?.[0] as {
+      strings?: readonly string[];
+    } | undefined;
+    const sql = query?.strings?.join("?") ?? "";
+    expect(sql).toContain('"active_person_members"');
+    expect(sql).toContain('"active_member"."id" IS NOT NULL');
+    expect(sql).toContain('"active_owner"."id" IS NOT NULL');
+    expect(sql).toContain('"hosted_thread_container_participant"');
+    expect(sql).toContain('JOIN "active_person_members" AS "active_participant"');
+    expect(sql).toContain('"participant"."removed_at" IS NULL');
+    expect(hasActiveAccess).toHaveBeenCalledWith("member_group_runtime");
+    expect(hasActiveAccess.mock.invocationCallOrder[0]).toBeLessThan(
+      requestHandoff.mock.invocationCallOrder[0]!,
+    );
+    expect(requestHandoff).toHaveBeenCalledWith({
+      expectedUserId: "member_group_runtime",
+      mailboxItemId: "mailbox_group_preference",
     });
   });
 });

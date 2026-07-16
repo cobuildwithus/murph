@@ -20,6 +20,21 @@ describe('assistant personalization tool', () => {
     })).not.toContain(MURPH_PERSONALIZATION_TOOL)
   })
 
+  it('describes callback-bound direct or room ownership without a member target', () => {
+    expect(MURPH_PERSONALIZATION_TOOL.description).toContain(
+      'current hosted conversation runtime',
+    )
+    expect(MURPH_PERSONALIZATION_TOOL.description).toContain(
+      'synthetic room Murph',
+    )
+    expect(MURPH_PERSONALIZATION_TOOL.description).toContain(
+      'never a participant',
+    )
+    expect(JSON.stringify(MURPH_PERSONALIZATION_TOOL.inputSchema)).not.toContain(
+      'memberId',
+    )
+  })
+
   it('parses and executes an atomic personalization update', async () => {
     const request = readMurphDynamicToolRequest({
       method: 'item/tool/call',
@@ -173,5 +188,23 @@ describe('assistant personalization tool', () => {
         tool: 'personalization',
       },
     })?.kind).toBe('invalid-personalization-arguments')
+
+    for (const selector of [
+      { memberId: 'member_other' },
+      { participantMemberId: 'participant_other' },
+    ]) {
+      expect(readMurphDynamicToolRequest({
+        method: 'item/tool/call',
+        params: {
+          arguments: {
+            action: 'update',
+            tone: 'casual',
+            ...selector,
+          },
+          namespace: 'murph',
+          tool: 'personalization',
+        },
+      })?.kind).toBe('invalid-personalization-arguments')
+    }
   })
 })
