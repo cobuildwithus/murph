@@ -277,6 +277,72 @@ describe("Retell ask_murph route", () => {
       },
     });
     expect(mocks.signalHostedMailboxAppendRuntime).not.toHaveBeenCalled();
+    expect(mocks.accountRetellPhoneCallUsage).toHaveBeenCalledOnce();
+  });
+
+  it("keeps call-ended lifecycle handling available when accounting fails", async () => {
+    mocks.accountRetellPhoneCallUsage.mockRejectedValueOnce(
+      new Error("usage storage unavailable"),
+    );
+
+    const response = await retellWebhookRoute.POST(signedRetellRequest({
+      payload: {
+        call: {
+          call_cost: { combined_cost: 4.5 },
+          call_id: "retell_call_123",
+          end_timestamp: 1_782_386_400_000,
+        },
+        event: "call_ended",
+      },
+      url: "https://join.example.test/api/retell/webhook",
+    }));
+
+    expect(response.status).toBe(500);
+    expect(mocks.handleRetellCallEnded).toHaveBeenCalledOnce();
+  });
+
+  it("delivers analyzed results when accounting fails and converges on replay", async () => {
+    mocks.accountRetellPhoneCallUsage
+      .mockRejectedValueOnce(new Error("usage storage unavailable"))
+      .mockResolvedValueOnce("accounted");
+    mocks.handleRetellCallAnalyzed
+      .mockResolvedValueOnce({
+        notificationMailboxItemId: "mailbox_item_123",
+        notificationUserId: "member_123",
+      })
+      .mockResolvedValueOnce({
+        notificationMailboxItemId: null,
+        notificationUserId: null,
+      });
+    const request = () => signedRetellRequest({
+      payload: {
+        call: {
+          call_analysis: {
+            custom_analysis_data: {
+              outcome: "completed",
+              result: "Booked.",
+            },
+          },
+          call_cost: { combined_cost: 4.5 },
+          call_id: "retell_call_123",
+          data_storage_setting: "basic_attributes_only",
+          end_timestamp: 1_782_386_400_000,
+        },
+        event: "call_analyzed",
+      },
+      url: "https://join.example.test/api/retell/webhook",
+    });
+
+    await expect(retellWebhookRoute.POST(request())).resolves.toMatchObject({
+      status: 500,
+    });
+    await expect(retellWebhookRoute.POST(request())).resolves.toMatchObject({
+      status: 204,
+    });
+
+    expect(mocks.accountRetellPhoneCallUsage).toHaveBeenCalledTimes(2);
+    expect(mocks.handleRetellCallAnalyzed).toHaveBeenCalledTimes(2);
+    expect(mocks.signalHostedMailboxAppendRuntime).toHaveBeenCalledOnce();
   });
 
   it("accepts signed call_analyzed webhooks with long Retell transcripts", async () => {

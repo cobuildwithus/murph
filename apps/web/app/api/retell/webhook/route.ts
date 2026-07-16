@@ -24,18 +24,24 @@ export const POST = withJsonError(async (request: Request) => {
   const payload = retellWebhookPayloadSchema.parse(JSON.parse(rawBody));
   switch (payload.event) {
     case "call_ended":
-      await accountRetellPhoneCallUsage({ call: payload.call });
-      await handleRetellCallEnded({ call: payload.call });
+      await settleRetellWebhookBranches([
+        () => accountRetellPhoneCallUsage({ call: payload.call }),
+        () => handleRetellCallEnded({ call: payload.call }),
+      ]);
       break;
     case "call_analyzed": {
-      await accountRetellPhoneCallUsage({ call: payload.call });
-      const result = await handleRetellCallAnalyzed({ call: payload.call });
-      if (result.notificationMailboxItemId) {
-        await signalHostedMailboxAppendRuntime({
-          expectedUserId: result.notificationUserId,
-          mailboxItemId: result.notificationMailboxItemId,
-        });
-      }
+      await settleRetellWebhookBranches([
+        () => accountRetellPhoneCallUsage({ call: payload.call }),
+        async () => {
+          const result = await handleRetellCallAnalyzed({ call: payload.call });
+          if (result.notificationMailboxItemId) {
+            await signalHostedMailboxAppendRuntime({
+              expectedUserId: result.notificationUserId,
+              mailboxItemId: result.notificationMailboxItemId,
+            });
+          }
+        },
+      ]);
       break;
     }
     case "transfer_ended":
@@ -45,3 +51,17 @@ export const POST = withJsonError(async (request: Request) => {
 
   return new Response(null, { status: 204 });
 });
+
+async function settleRetellWebhookBranches(
+  branches: ReadonlyArray<() => Promise<unknown>>,
+): Promise<void> {
+  const results = await Promise.allSettled(
+    branches.map((run) => Promise.resolve().then(run)),
+  );
+  const failure = results.find(
+    (result): result is PromiseRejectedResult => result.status === "rejected",
+  );
+  if (failure) {
+    throw failure.reason;
+  }
+}
