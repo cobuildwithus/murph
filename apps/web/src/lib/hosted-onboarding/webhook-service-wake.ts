@@ -96,8 +96,9 @@ export async function maybeHandoffHostedExecutionWebhookWake(input: {
 
   let signal: Awaited<ReturnType<typeof signalHostedMailboxAppendRuntime>>;
   let temporalSignalAcceptedAt: Date | null = null;
+  let directEnsureWake: Promise<void> | null = null;
   try {
-    signal = await waitForHostedPostCommitOperation({
+    const temporalSignal = waitForHostedPostCommitOperation({
       deadlineMs: createHostedPostCommitDeadline(input.timeoutMs),
       operation: (abortSignal) => signalHostedMailboxAppendRuntime({
         abortSignal,
@@ -107,6 +108,31 @@ export async function maybeHandoffHostedExecutionWebhookWake(input: {
       }),
       signal: input.signal,
     });
+
+    // Linq-only latency fast path, started alongside the required Temporal
+    // signal after the planner's mailbox transaction has committed. With
+    // consumed_at live, a racing ensure is harmless: consumed mailbox items
+    // restage with a null reply target, and a gap invocation that imports only
+    // already-consumed work finds nothing replyable and exits.
+    directEnsureWake = directEnsureEligible
+      ? startHostedDirectEnsureWakeBestEffort({
+          mailboxItemId,
+          source: "linq",
+          userId,
+        })
+      : null;
+    const scheduledDirectEnsureWake = directEnsureWake;
+    if (scheduledDirectEnsureWake) {
+      if (input.scheduleAfterResponse) {
+        // Keep the in-flight request alive past the response without ever
+        // putting its latency on the provider success path.
+        input.scheduleAfterResponse(() => scheduledDirectEnsureWake);
+      } else {
+        void scheduledDirectEnsureWake;
+      }
+    }
+
+    signal = await temporalSignal;
     temporalSignalAcceptedAt = new Date();
   } catch (error) {
     scheduleHostedWebhookIngressLatencyTraceWritesAfterResponse({
@@ -118,31 +144,10 @@ export async function maybeHandoffHostedExecutionWebhookWake(input: {
     });
     const errorName = deriveHostedOnboardingTimingErrorName(error);
     finishHostedOnboardingTiming(handoffTiming, "failed", {
-      directEnsureWakeStarted: false,
+      directEnsureWakeStarted: Boolean(directEnsureWake),
       errorName,
     });
     throw error;
-  }
-
-  // Linq-only latency fast path, after Temporal has accepted the durable wake.
-  // With consumed_at live, a racing ensure is harmless: consumed mailbox items
-  // restage with a null reply target, and a gap invocation that imports only
-  // already-consumed work finds nothing replyable and exits.
-  const directEnsureWake = directEnsureEligible
-    ? startHostedDirectEnsureWakeBestEffort({
-        mailboxItemId,
-        source: "linq",
-        userId,
-      })
-    : null;
-  if (directEnsureWake) {
-    if (input.scheduleAfterResponse) {
-      // Keep the in-flight request alive past the response without ever
-      // putting its latency on the provider success path.
-      input.scheduleAfterResponse(() => directEnsureWake);
-    } else {
-      void directEnsureWake;
-    }
   }
 
   scheduleHostedWebhookIngressLatencyTraceWritesAfterResponse({

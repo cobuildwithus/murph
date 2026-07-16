@@ -86,15 +86,18 @@ describe("maybeHandoffHostedExecutionWebhookWake direct ensure fast path", () =>
     });
   });
 
-  it("fires the direct Cloudflare ensure after the unconditional Temporal signal", async () => {
+  it("starts the direct Cloudflare ensure while the unconditional Temporal signal is pending", async () => {
     const afterResponseTasks: Array<() => Promise<void>> = [];
     const wakeOrder: string[] = [];
-    mocks.signalHostedMailboxAppendRuntime.mockImplementationOnce(async () => {
+    let resolveTemporalSignal!: (value: {
+      signalAccepted: true;
+      workflowId: string;
+    }) => void;
+    mocks.signalHostedMailboxAppendRuntime.mockImplementationOnce(() => {
       wakeOrder.push("temporal");
-      return {
-        signalAccepted: true,
-        workflowId: "hosted-user-runtime:member_123",
-      };
+      return new Promise((resolve) => {
+        resolveTemporalSignal = resolve;
+      });
     });
     mocks.ensureRuntimeProcessing.mockImplementationOnce(async (input: DirectEnsureInput) => {
       wakeOrder.push("direct");
@@ -112,13 +115,36 @@ describe("maybeHandoffHostedExecutionWebhookWake direct ensure fast path", () =>
       };
     });
 
-    await expect(maybeHandoffHostedExecutionWebhookWake({
+    let handoffSettled = false;
+    const handoff = maybeHandoffHostedExecutionWebhookWake({
       response,
       scheduleAfterResponse: (task) => {
         afterResponseTasks.push(task);
       },
       wakeHandoff: buildWakeHandoff(),
-    })).resolves.toEqual({
+    });
+    void handoff.then(
+      () => {
+        handoffSettled = true;
+      },
+      () => {
+        handoffSettled = true;
+      },
+    );
+
+    await vi.waitFor(() => {
+      expect(mocks.signalHostedMailboxAppendRuntime).toHaveBeenCalledTimes(1);
+      expect(mocks.ensureRuntimeProcessing).toHaveBeenCalledTimes(1);
+      expect(afterResponseTasks).toHaveLength(1);
+    });
+    expect(handoffSettled).toBe(false);
+    expect(wakeOrder).toEqual(["temporal", "direct"]);
+
+    resolveTemporalSignal({
+      signalAccepted: true,
+      workflowId: "hosted-user-runtime:member_123",
+    });
+    await expect(handoff).resolves.toEqual({
       reason: "temporal-signaled",
       signalAccepted: true,
       started: true,
@@ -141,7 +167,6 @@ describe("maybeHandoffHostedExecutionWebhookWake direct ensure fast path", () =>
       },
       mailboxItemId: "mailbox_123",
     });
-    expect(wakeOrder).toEqual(["temporal", "direct"]);
     await Promise.all(afterResponseTasks.map((task) => task()));
     expect(mocks.recordHostedIngressDirectEnsureTiming).toHaveBeenCalledWith({
       expectedUserId: "member_123",
@@ -232,6 +257,28 @@ describe("maybeHandoffHostedExecutionWebhookWake direct ensure fast path", () =>
     consoleWarn.mockRestore();
   });
 
+  it("keeps the Temporal signal authoritative when the direct ensure throws synchronously", async () => {
+    const consoleWarn = vi.spyOn(console, "warn").mockImplementation(() => undefined);
+    mocks.ensureRuntimeProcessing.mockImplementationOnce(() => {
+      throw new Error("control client failed before returning a promise");
+    });
+
+    await expect(maybeHandoffHostedExecutionWebhookWake({
+      response,
+      wakeHandoff: buildWakeHandoff(),
+    })).resolves.toMatchObject({
+      reason: "temporal-signaled",
+      signalAccepted: true,
+    });
+
+    expect(mocks.signalHostedMailboxAppendRuntime).toHaveBeenCalledTimes(1);
+    expect(consoleWarn).toHaveBeenCalledWith(
+      "Hosted direct ensure wake failed.",
+      expect.objectContaining({ source: "linq" }),
+    );
+    consoleWarn.mockRestore();
+  });
+
   it("never puts the direct ensure on the webhook response path, even with no scheduler", async () => {
     // A control endpoint that never responds must not delay the handoff.
     mocks.ensureRuntimeProcessing.mockReturnValue(new Promise(() => undefined));
@@ -263,7 +310,7 @@ describe("maybeHandoffHostedExecutionWebhookWake direct ensure fast path", () =>
     expect(mocks.signalHostedMailboxAppendRuntime).toHaveBeenCalledTimes(1);
   });
 
-  it("does not start the direct ensure when the Temporal signal throws", async () => {
+  it("starts the direct ensure but still rejects when the Temporal signal throws", async () => {
     mocks.ensureRuntimeProcessing.mockReturnValue(new Promise(() => undefined));
     mocks.signalHostedMailboxAppendRuntime.mockRejectedValue(new Error("temporal down"));
 
@@ -272,7 +319,7 @@ describe("maybeHandoffHostedExecutionWebhookWake direct ensure fast path", () =>
       wakeHandoff: buildWakeHandoff(),
     })).rejects.toThrow("temporal down");
 
-    expect(mocks.ensureRuntimeProcessing).not.toHaveBeenCalled();
+    expect(mocks.ensureRuntimeProcessing).toHaveBeenCalledTimes(1);
   });
 
   it("proceeds to the Temporal signal when the control client setup throws synchronously", async () => {
@@ -357,7 +404,7 @@ describe("maybeHandoffHostedExecutionWebhookWake direct ensure fast path", () =>
       await vi.advanceTimersByTimeAsync(5_000);
 
       await rejected;
-      expect(mocks.ensureRuntimeProcessing).not.toHaveBeenCalled();
+      expect(mocks.ensureRuntimeProcessing).toHaveBeenCalledTimes(1);
     } finally {
       vi.useRealTimers();
     }
