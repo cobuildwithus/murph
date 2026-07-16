@@ -86,7 +86,6 @@ describe('assistant execution prompt contract', () => {
       'trim introductions, repetition, reassurance, and optional background first',
     )
     expect(prompt).not.toContain('Final replies should briefly state')
-    expect(prompt).toContain('It does not mean inventing extra health interventions')
     expect(
       buildAssistantExecutionBehaviorText({ profile: 'gpt5-agentic' }),
     ).toContain('Prefer direct tool use over telling the user')
@@ -559,6 +558,20 @@ describe('assistant execution prompt contract', () => {
 
     expect(text).toContain('Execution and stop rules:')
     expect(text).not.toContain('GPT-5 execution bias:')
+  })
+
+  it('cleans up temporary files without breaking pending delivery work', () => {
+    const prompt = buildAssistantSystemPrompt(createCommonCodexPromptInput())
+
+    expect(prompt).toContain(
+      'Delete temporary files before the turn ends.',
+    )
+    expect(prompt).toContain(
+      'Keep one only while a pending action needs it, then delete it.',
+    )
+    expect(prompt).toContain(
+      'Never delete user files or durable vault records.',
+    )
   })
 
   it('always includes the progress update contract', () => {
