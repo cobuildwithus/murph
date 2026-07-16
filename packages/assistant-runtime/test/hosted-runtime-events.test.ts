@@ -1079,7 +1079,6 @@ describe("executeHostedMailboxEvent", () => {
           routePlanningResumeBindingElapsedMs: 3,
           routePlanningSlowestStage: "memory_overview",
           routePlanningSlowestStageElapsedMs: 900,
-          routePlanningSupportedExperimentProtocolsElapsedMs: 50,
           routePlanningTargetCapabilitiesElapsedMs: 5,
           routePlanningUnaccountedElapsedMs: 12,
           routePlanningVaultOverviewElapsedMs: 900,
@@ -1115,7 +1114,6 @@ describe("executeHostedMailboxEvent", () => {
         routePlanningResumeBindingElapsedMs: 3,
         routePlanningSlowestStage: "memory_overview",
         routePlanningSlowestStageElapsedMs: 900,
-        routePlanningSupportedExperimentProtocolsElapsedMs: 50,
         routePlanningTargetCapabilitiesElapsedMs: 5,
         routePlanningUnaccountedElapsedMs: 12,
         routePlanningVaultOverviewElapsedMs: 900,
@@ -1205,6 +1203,60 @@ describe("executeHostedMailboxEvent", () => {
         phase: "wake.running",
         wake,
       }),
+    );
+  });
+
+  it("drops retired protocol-preload timing diagnostics from hosted projection", () => {
+    const wake = buildHostedExecutionAssistantNotificationRequestedWake({
+      eventId: "evt_provider_plan_retired_protocol_preload",
+      memberId: "member_123",
+      notification: {
+        instructions: "Reply in chat.",
+        route: {
+          actorId: "actor_provider_plan_retired_protocol_preload",
+          channel: "linq",
+          delivery: {
+            kind: "thread",
+            target: "thread_123",
+          },
+          identityId: "hbidx:phone:v1:test",
+          threadId: "thread_123",
+          threadIsDirect: true,
+        },
+      },
+      occurredAt: "2026-04-08T00:00:00.000Z",
+    });
+
+    const entry = emitHostedAssistantProviderTraceLog({
+      details: {
+        requestId: "req_retired_protocol_preload",
+      },
+      event: {
+        rawEvent: {
+          schema: "murph.assistant-provider-plan-diagnostics.v1",
+          type: "assistant.provider.plan",
+          codexContinuation: "provider-state-optimization",
+          routePlanningElapsedMs: 50,
+          routePlanningSlowestStage: "supported_experiment_protocols",
+          routePlanningSupportedExperimentProtocolsElapsedMs: 50,
+          workingDirectoryKind: "hosted-stable-proc-cwd",
+        },
+        updates: [],
+      },
+      wake,
+    });
+
+    expect(entry?.redacted).toEqual(expect.objectContaining({
+      requestId: "req_retired_protocol_preload",
+      routePlanningElapsedMs: 50,
+      workingDirectoryKind: "hosted-stable-proc-cwd",
+    }));
+    expect(entry?.redacted).not.toHaveProperty(
+      "routePlanningSupportedExperimentProtocolsElapsedMs",
+    );
+    expect(entry?.redacted).not.toHaveProperty("routePlanningSlowestStage");
+    expect(JSON.stringify(entry?.redacted)).not.toContain(
+      "supported_experiment_protocols",
     );
   });
 

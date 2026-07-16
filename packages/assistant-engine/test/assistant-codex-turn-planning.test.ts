@@ -14,12 +14,6 @@ import {
   serializeAssistantProviderSessionOptions,
 } from '@murphai/operator-config/assistant/provider-config'
 
-const runtimeMocks = vi.hoisted(() => ({
-  listGeneratedAssistantProtocolIndexEntries: vi.fn(() => {
-    throw new Error('generated artifacts unavailable')
-  }),
-}))
-
 const planningMocks = vi.hoisted(() => ({
   readAssistantCliSurfaceBootstrapContext:
     vi.fn(async (): Promise<string | null> => 'bootstrap contract'),
@@ -28,11 +22,6 @@ const planningMocks = vi.hoisted(() => ({
   resolveCodexAssistantTargetCapabilities: vi.fn(() => ({
     supportsNativeResume: false,
   })),
-}))
-
-vi.mock('@murphai/health-commons/runtime', () => ({
-  listGeneratedAssistantProtocolIndexEntries:
-    runtimeMocks.listGeneratedAssistantProtocolIndexEntries,
 }))
 
 vi.mock('../src/assistant/cli-surface-bootstrap.js', () => ({
@@ -85,13 +74,12 @@ import type { AssistantSession } from '@murphai/operator-config/assistant-cli-co
 import type { CodexThreadIdentity } from '../src/assistant/codex-thread-route.js'
 
 afterEach(() => {
-  runtimeMocks.listGeneratedAssistantProtocolIndexEntries.mockReset()
   planningMocks.readAssistantCliSurfaceBootstrapContext.mockReset()
   planningMocks.readAssistantContextSnapshotPrompt.mockReset()
   planningMocks.resolveCodexAssistantTargetCapabilities.mockReset()
 })
 
-describe('assistant protocol index planning', () => {
+describe('assistant Codex turn planning', () => {
   it('does not expose per-turn route env in Codex execution plans', async () => {
     const plan = await buildCodexTurnExecutionPlan({
       input: {
@@ -340,24 +328,23 @@ describe('assistant protocol index planning', () => {
     )
   })
 
-  it('soft-fails to an empty assistant protocol index when generated artifacts are unavailable', async () => {
-    planningMocks.readAssistantCliSurfaceBootstrapContext.mockResolvedValue('bootstrap contract')
-    planningMocks.readAssistantContextSnapshotPrompt.mockResolvedValue(
-      'PERSONAL_GROUP_CONTEXT_SNAPSHOT',
+  it('plans conversation turns without a resident protocol preload', async () => {
+    planningMocks.readAssistantCliSurfaceBootstrapContext.mockResolvedValue(
+      'bootstrap contract',
     )
+    planningMocks.readAssistantContextSnapshotPrompt.mockResolvedValue(null)
     planningMocks.resolveCodexAssistantTargetCapabilities.mockReturnValue({
       supportsNativeResume: false,
     })
-    const executionProfile: AssistantCodexTurnResolvedExecutionProfile = {
-      promptProfile: 'conversation',
-      threadScope: 'session-thread',
-      toolProfile: 'provider-turn',
-    }
 
     const plan = await resolveAssistantRouteTurnPlan({
       executionContext: null,
       input: createMessageInput(),
-      profile: executionProfile,
+      profile: {
+        promptProfile: 'conversation',
+        threadScope: 'session-thread',
+        toolProfile: 'provider-turn',
+      },
       promptTimeContext: {
         currentLocalDate: '2026-05-04',
         currentTimeZone: 'Asia/Kuala_Lumpur',
@@ -367,10 +354,16 @@ describe('assistant protocol index planning', () => {
       sharedPlan: createSharedPlan(),
     })
 
-    expect(runtimeMocks.listGeneratedAssistantProtocolIndexEntries).toHaveBeenCalledTimes(1)
-    expect(plan.assistantCliContract).toBe('bootstrap contract')
-    expect(plan.systemPrompt).toContain('Execution and stop rules:')
     expect(plan.systemPrompt).not.toContain('Supported experiment protocols:')
+    expect(plan.systemPrompt).toContain(
+      '`vault-cli commons protocol explore <query> --format json` for broad or ambiguous discovery',
+    )
+    expect(plan.planningDiagnostics).not.toHaveProperty(
+      'supportedExperimentProtocolsElapsedMs',
+    )
+    expect(plan.planningDiagnostics.routePlanningSlowestStage).not.toBe(
+      'supported_experiment_protocols',
+    )
   })
 
   it.each([{

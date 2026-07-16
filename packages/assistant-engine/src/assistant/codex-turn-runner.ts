@@ -325,8 +325,6 @@ function emitCodexPlanTraceEvent(input: {
           input.routePlanningDiagnostics.routePlanningSlowestStage,
         routePlanningSlowestStageElapsedMs:
           input.routePlanningDiagnostics.routePlanningSlowestStageElapsedMs,
-        routePlanningSupportedExperimentProtocolsElapsedMs:
-          input.routePlanningDiagnostics.supportedExperimentProtocolsElapsedMs,
         routePlanningTargetCapabilitiesElapsedMs:
           input.routePlanningDiagnostics.routeTargetCapabilitiesElapsedMs,
         routePlanningUnaccountedElapsedMs:

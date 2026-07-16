@@ -39,8 +39,6 @@ export interface AssistantSystemPromptInput {
   assistantHostedDeviceConnectAvailable?: boolean;
   assistantHostedDeviceConnectProviders?: readonly AssistantHostedDeviceConnectProvider[];
   assistantKnowledgeToolsAvailable?: boolean;
-  /** Preloaded for runtime compatibility; protocol discovery is rendered task-time. */
-  assistantSupportedExperimentProtocols?: readonly AssistantSupportedExperimentProtocol[];
   assistantToolNameAliases?: Readonly<Record<string, string>> | null;
   assistantPersonality?: AssistantPersonalityPreferences | null;
   assistantStyleSettingsAvailable?: boolean | null;
@@ -55,12 +53,6 @@ export interface AssistantSystemPromptInput {
   onboardingGuidance: boolean;
   modelBehaviorProfile: AssistantModelBehaviorProfile;
   turnTrigger?: AssistantTurnTrigger | null;
-}
-
-export interface AssistantSupportedExperimentProtocol {
-  category: string;
-  routeId: string;
-  title: string;
 }
 
 export interface AssistantNotificationDecisionSystemPromptInput {
