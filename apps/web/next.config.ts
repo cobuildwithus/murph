@@ -307,13 +307,6 @@ export function buildHostedWebNextConfig(phase: string): NextConfig {
       ],
       "/biomarkers": [
         "../../packages/health-commons/generated/web/browse/biomarkers.json",
-      ],
-      "/biomarkers/[biomarkerId]": [
-        "../../packages/health-commons/generated/web/routes/index.json",
-        "../../packages/health-commons/generated/web/shell/biomarkers/**/*.json",
-        "../../packages/health-commons/generated/web/pages/biomarkers/**/*.json",
-      ],
-      "/biomarkers/[biomarkerId]/research": [
         "../../packages/health-commons/generated/web/routes/index.json",
         "../../packages/health-commons/generated/web/shell/biomarkers/**/*.json",
         "../../packages/health-commons/generated/web/pages/biomarkers/**/*.json",
