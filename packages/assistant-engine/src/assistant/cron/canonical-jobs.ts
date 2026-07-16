@@ -1,4 +1,7 @@
-import { resolveSystemTimeZone } from '@murphai/contracts'
+import {
+  resolveSystemTimeZone,
+  type AutomationSupportKind,
+} from '@murphai/contracts'
 import { loadVault, upsertAutomation } from '@murphai/core'
 import {
   listAutomations as listCanonicalAutomations,
@@ -35,6 +38,7 @@ export const ASSISTANT_CRON_JOB_SCHEMA = 'murph.assistant-cron-job.v1'
 
 export interface CanonicalAutomationAssistantCronJobRecord {
   kind: 'automation'
+  activeUntil: string | null
   automationId: string
   continuityPolicy: 'fresh' | 'preserve'
   createdAt: string
@@ -45,6 +49,7 @@ export interface CanonicalAutomationAssistantCronJobRecord {
   slug: string
   status: 'active' | 'paused'
   summary: string | null
+  supportKind: AutomationSupportKind | null
   tags: string[]
   timeZone: string | null
   title: string
@@ -277,12 +282,15 @@ export function resolveCanonicalAssistantCronOccurrenceAt(
     return null
   }
 
-  return computeAssistantCronNextRunAt(
-    resolveAssistantCronResolvedSchedule({
-      schedule: source.schedule,
-      timeZone: source.timeZone,
-    }),
-    new Date(anchorAt),
+  return boundCanonicalAssistantCronOccurrenceByActiveUntil(
+    source,
+    computeAssistantCronNextRunAt(
+      resolveAssistantCronResolvedSchedule({
+        schedule: source.schedule,
+        timeZone: source.timeZone,
+      }),
+      new Date(anchorAt),
+    ),
   )
 }
 
@@ -316,8 +324,14 @@ export function buildCanonicalAutomationUpsertInput(input: {
   automationId?: string
   automation?: Pick<
     CanonicalAutomationAssistantCronJobRecord,
-    'assistantTargetOverride' | 'continuityPolicy' | 'slug' | 'summary' | 'tags'
+    | 'activeUntil'
+    | 'assistantTargetOverride'
+    | 'continuityPolicy'
+    | 'slug'
+    | 'summary'
+    | 'tags'
   > | null
+  activeUntil?: string | null
   assistantTargetOverride?: CanonicalAutomationAssistantCronJobRecord['assistantTargetOverride']
   continuityPolicy?: CanonicalAutomationAssistantCronJobRecord['continuityPolicy']
   instructions: string
@@ -345,6 +359,10 @@ export function buildCanonicalAutomationUpsertInput(input: {
         : input.assistantTargetOverride,
     continuityPolicy:
       input.continuityPolicy ?? input.automation?.continuityPolicy ?? 'preserve',
+    activeUntil:
+      input.activeUntil === undefined
+        ? input.automation?.activeUntil ?? undefined
+        : input.activeUntil,
     tags: input.tags ?? input.automation?.tags ?? ['assistant', 'scheduled'],
     instructions: input.instructions,
   }
@@ -395,6 +413,7 @@ function normalizeCanonicalAssistantCronRecord(
 
   return {
     kind: 'automation',
+    activeUntil: record.activeUntil ?? null,
     automationId: record.automationId,
     continuityPolicy: record.continuityPolicy,
     createdAt: record.createdAt,
@@ -405,6 +424,7 @@ function normalizeCanonicalAssistantCronRecord(
     slug: record.slug,
     status: record.status,
     summary: record.summary,
+    supportKind: record.supportKind ?? null,
     tags: [...record.tags],
     timeZone:
       record.schedule.kind === 'cron' || record.schedule.kind === 'dailyLocal'
@@ -530,7 +550,10 @@ function resolveCanonicalAssistantCronNextRunAt(input: {
 
   const pendingOccurrenceAt = resolveCurrentCanonicalPendingOccurrenceAt(input)
   if (pendingOccurrenceAt) {
-    return input.state.retryAfterAt ?? pendingOccurrenceAt
+    return boundCanonicalAssistantCronOccurrenceByActiveUntil(
+      input.source,
+      input.state.retryAfterAt ?? pendingOccurrenceAt,
+    )
   }
 
   if (input.source.schedule.kind === 'at') {
@@ -545,13 +568,32 @@ function resolveCanonicalAssistantCronNextRunAt(input: {
     return null
   }
 
-  return computeAssistantCronNextRunAt(
-    resolveAssistantCronResolvedSchedule({
-      schedule: input.source.schedule,
-      timeZone: input.source.timeZone,
-    }),
-    new Date(anchorAt),
+  return boundCanonicalAssistantCronOccurrenceByActiveUntil(
+    input.source,
+    computeAssistantCronNextRunAt(
+      resolveAssistantCronResolvedSchedule({
+        schedule: input.source.schedule,
+        timeZone: input.source.timeZone,
+      }),
+      new Date(anchorAt),
+    ),
   )
+}
+
+function boundCanonicalAssistantCronOccurrenceByActiveUntil(
+  source: CanonicalAssistantCronJobRecord,
+  occurrenceAt: string | null,
+): string | null {
+  if (source.kind !== 'automation' || !source.activeUntil) {
+    return occurrenceAt
+  }
+  if (!occurrenceAt) {
+    return source.activeUntil
+  }
+
+  return Date.parse(source.activeUntil) <= Date.parse(occurrenceAt)
+    ? source.activeUntil
+    : occurrenceAt
 }
 
 function resolveCurrentCanonicalPendingOccurrenceAt(input: {

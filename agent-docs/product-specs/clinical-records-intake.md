@@ -1,6 +1,6 @@
 # Clinical Records Intake
 
-Last verified: 2026-07-13
+Last verified: 2026-07-16
 
 ## Product outcome
 
@@ -157,6 +157,26 @@ connection plus its single generation bound the retained raw-evidence family;
 no retry, reconnect, or refresh surface may create another retrieval job until
 the vault owns a lifecycle that preserves every canonical raw reference while
 bounding retained evidence over time.
+
+Each immutable raw snapshot keeps the strict v2 manifest bytes unchanged and
+may add a bounded, schema-validated `coverage.json` sibling for every supported
+FHIR family. Keeping coverage in a sibling lets an older runtime retry or roll
+back against the same strict manifest while a newer runtime can add coverage to
+an already-persisted legacy snapshot without rewriting raw evidence. The sibling
+distinguishes `mapped-for-import`, `mapped-for-import-with-review`, `review-only`,
+`no-records-returned`, `unavailable`, `not-authorized`, and `unknown` retrieval
+states and retains whether retrieval covered the whole family or only a bounded
+window. This summary describes retrieval and importer
+decisions, not successful canonical mutation: raw persistence intentionally
+precedes canonical writes, so even a mapped-for-import state is never proof
+that the corresponding canonical event exists. The assistant's reader streams
+the clinical directory tree with fixed snapshot and directory-entry limits and
+checks foreground-yield and abort signals throughout traversal and bounded file
+reads. An empty, unavailable, unauthorized, unknown, invalid, or truncated read
+is never proof that a person has no such clinical record. Legacy snapshots
+without the sibling are read from
+bounded manifest metadata only; a nonempty family remains `unknown` rather than
+reparsing large raw FHIR pages during assistant navigation.
 
 HTTP 401 or refresh invalid-grant transitions the current credential version
 and run to authorization-required. HTTP 403 marks only that family unavailable.

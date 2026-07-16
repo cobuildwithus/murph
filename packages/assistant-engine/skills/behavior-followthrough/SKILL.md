@@ -34,7 +34,7 @@ Strong triggers:
 
 Do not use this skill for one-time facts, one-time logs, one-time reminders with user-dictated wording, urgent safety-sensitive answers, medical diagnosis, or protocol selection before the protocol/experiment shape is clear.
 
-For protocol-linked experiments, use `experiment-onboarding` for protocol resolution, safety, run creation, session fields, and outcome mechanics. Use this skill for the follow-through layer: reason, anchor, tiny version, fallback, support style, privacy boundary, repair policy, and review.
+For any multi-day or repeated comparison intended as an experiment, use `experiment-onboarding` for safety, canonical run creation, session fields, and outcome mechanics, whether or not it uses a Commons protocol. Use this skill only for the follow-through layer: reason, anchor, tiny version, fallback, support style, privacy boundary, repair policy, and review. Do not use a habit regimen as a substitute for an experiment run.
 
 When acute stress, overload, trouble winding down, or symptom fear is the immediate bottleneck, read `stress-regulation` first and use its brief state- or load-shifting action before building a recurring loop. Return here only if ongoing support is still useful. When pain, injury, neurological symptoms, loss of function, or return-to-activity determines what movement is safe, `physical-therapy` owns the assessment and movement plan; this skill owns only the adherence/support layer around that plan.
 
@@ -194,11 +194,19 @@ For accepted non-experiment habit, routine, or ramp plans, do not leave the only
 
 Memory is for durable user preferences or broad context, not the source of truth for the active plan. Knowledge is for synthesized patterns, not the operational state of a short habit plan.
 
-When the user asks about a current plan, today's target, a ramp, routine, or habit, read the relevant active goal/regimen/automation records before reconstructing details. If the baseline, ladder, or target date was not saved, say what is missing and update the plan once confirmed instead of inventing it.
+When the user asks about a current plan, today's target, a ramp, routine, or habit, read the relevant active goal/regimen/automation records before reconstructing details. A compact snapshot or truncated regimen list is navigation only: read the full current regimen note and any linked records before advising, repairing, or closing the plan. If the baseline, ladder, or target date was not saved, say what is missing and update the plan once confirmed instead of inventing it.
 
 When creating automations, make instructions context-aware. A future notification turn may not read this skill, so include the compact support loop directly in the automation instructions.
 
 Automation instructions may duplicate the compact support loop so scheduled turns have local context, but the habit regimen remains the source of truth.
+
+Every automation owned by a non-experiment habit plan must use `--support-series-id habit:<regimenId>` and persist the exact accepted purpose with `--support-kind reminder`, `--support-kind check_in`, or `--support-kind review` when the automation is saved or edited, where `<regimenId>` is the canonical habit-regimen id. The active canonical automation is the exact persisted support-consent record for that purpose; pausing or archiving it withdraws scheduled delivery. The CLI owns the reserved support-series tag; never pass a raw `system:support-series:*` value through `--tag`. Use repeated `--tag` only for ordinary descriptive tags. Keep the support-series id stable, and do not key lifecycle cleanup only by a mutable slug, title, or reminder text.
+
+Support kind also bounds the user-facing message shape. `reminder` authorizes a cue or skip, never a proactive repair/accountability question. `check_in` authorizes one narrow current-state or repair question. `review` authorizes the bounded review and next-decision question. Put that exact authorized shape in the automation instructions; do not let a scheduled turn widen consent because the generic notification policy can generate questions.
+
+Keep the habit support series finite. Prefer bounded one-shot automations. If the user explicitly accepts a recurring automation, give it a finite `--active-until <ISO timestamp>` no later than the accepted review or support-window end; do not create an evergreen recurrence.
+
+When support is replaced or repaired, keep only the intended active automation ids with `vault-cli automation reconcile-support-series habit:<regimenId> --desired-automation-id <id> ...`. Use `vault-cli automation list --support-series-id habit:<regimenId>` when the plan does not already store the ids needed to reconcile safely. Never infer membership from text or a title.
 
 Automation instructions should include:
 - target behavior
@@ -219,7 +227,7 @@ Automation instructions should not include:
 - sensitive details for shared channels
 - instructions to nag harder after non-response
 
-Prefer bounded support. Never create open-ended nag loops.
+Prefer bounded support. Never create open-ended nag loops. If the user wants ongoing support, agree on a finite window and review point; continuing beyond that window requires fresh consent.
 
 ## Opt-in accountability check-ins
 
@@ -281,7 +289,12 @@ message.
 
 ## Notification decision policy
 
-When a scheduled support automation fires, choose one structured outcome: `skip` or `send_message`. If sending, choose whether the message should be a normal cue, an explicitly authorized accountability check-in, or a repair question/proposal.
+When a scheduled support automation fires, choose one structured outcome: `skip` or `send_message`.
+If sending, stay within the engine-supplied persisted
+support kind: a `reminder` is a normal cue only; a separately consented
+`check_in` may ask the authorized accountability or narrow repair question;
+and a `review` may ask the bounded review or next-decision question. Never
+widen the saved purpose at fire time.
 
 Send a normal cue when:
 - the behavior is still relevant
@@ -291,12 +304,13 @@ Send a normal cue when:
 - the message can be short and grounded
 
 Send an accountability check-in when:
+- the persisted support kind is `check_in`
 - the user explicitly authorized it
 - the relevant action window has ended
 - the completion reconciliation above leaves this occurrence `unknown`
 - one short outcome question is still useful and within the support plan
 
-Send a repair question/proposal when:
+For a consented `check_in` or `review`, send a repair question/proposal when:
 - the same support has been ignored twice
 - multiple planned sessions were missed
 - recent context shows a recurring conflict
@@ -330,7 +344,11 @@ Three or more misses means do not continue by inertia. Offer pause, restart smal
 
 Repeated "later" usually means the window is wrong or the behavior is too large. Convert it into a tiny now, a specific later cue, or a pause.
 
-Count an ignored support attempt only when a message was sent, the action window passed, and available delivery, reply, or context evidence still suggests no action or engagement. Do not treat silence alone as a miss when passive evidence or later logs show the behavior happened, delivery may have failed, the action window is still open, or the user asked for quiet support. For assumed-mode non-sensable experiments, silence means adherence; sauna, tretinoin, red-light, supplement, and similar cadence sessions are not misses unless the user explicitly corrects a date or says the routine broke. Repair policy starts from that correction or routine-break signal, not from absent per-session replies; when correcting a date, edit an existing explicit intervention session with `vault-cli intervention edit <eventId> --session-status skipped|missed` instead of adding a contradictory log, and only use `vault-cli experiment session log <id> --date <date> --status skipped|missed` for assumed dates with no explicit session. For device-observable experiment sessions with activity coverage (`progress.adherence.evidence.eventKind` is `activity_session` and `progress.dataCoverage.activityProviders` is non-empty), check sensed evidence first with `vault-cli experiment progress <id> --format json` before any missed-session repair message; a sensed workout means the session happened, so celebrate or stay quiet and never ask whether they did it. If `progress.adherence.evidence.eventKind` is `activity_session` but `progress.dataCoverage.activityProviders` is empty, treat the experiment like a manual experiment.
+Count an ignored support attempt only when the action window passed and a channel delivery/read receipt or a later reply referring to the message proves receipt, while reply, log, and passive evidence still show no action or engagement. Evidence levels are strict: an enqueue, generated transcript, provider transcript, or delivery attempt shows intent; provider acceptance or `sent` shows dispatch only; neither proves handset delivery or reading. Silence without a receipt remains ambiguous and cannot count as ignored. Do not treat silence alone as a miss when delivery is failed or ambiguous, passive evidence or later logs show the behavior happened, the action window is still open, or the user asked for quiet support. For assumed-mode non-sensable experiments, silence means adherence; sauna, tretinoin, red-light, supplement, and similar cadence sessions are not misses unless the user explicitly corrects a date or says the routine broke. Repair policy starts from that correction or routine-break signal, not from absent per-session replies; when correcting a date, edit an existing explicit intervention session with `vault-cli intervention edit <eventId> --session-status skipped|missed` instead of adding a contradictory log, and only use `vault-cli experiment session log <id> --date <date> --status skipped|missed` for assumed dates with no explicit session. For device-observable experiment sessions with activity coverage (`progress.adherence.evidence.eventKind` is `activity_session` and `progress.dataCoverage.activityProviders` is non-empty), check sensed evidence first with `vault-cli experiment progress <id> --format json` before any missed-session repair message; a sensed workout means the session happened, so celebrate or stay quiet and never ask whether they did it. If `progress.adherence.evidence.eventKind` is `activity_session` but `progress.dataCoverage.activityProviders` is empty, treat the experiment like a manual experiment.
+
+## Non-Experiment Closeout
+
+At the bounded review for a habit, routine, or ramp, compare the saved baseline and intended outcome with current user-reported function and reliable passive evidence. Choose one explicit disposition: adopt, modify, pause, complete, stop, or escalate. Update the full canonical habit regimen with the outcome, decision, and date. Keep it active only when the adopted or modified behavior continues; otherwise use the matching `paused`, `completed`, or `stopped` status and save `stoppedOn` when stopped. End linked support rather than leaving a stale active plan or open-ended reminder loop: reconcile `habit:<regimenId>` with the exact desired active automation ids for an adopted or modified plan, or run `vault-cli automation reconcile-support-series habit:<regimenId>` with no `--desired-automation-id` flags to archive the whole series for pause, completion, stop, or an unsupported escalation. Do not claim the behavior caused the result when the evidence only shows an association.
 
 ## Support fit over time
 

@@ -1,16 +1,22 @@
 import {
   AUTOMATION_DOC_TYPE,
   AUTOMATION_SCHEMA_VERSION,
+  AUTOMATION_SUPPORT_SERIES_RECONCILED_ARCHIVE_TAG,
+  AUTOMATION_SUPPORT_SERIES_TAG_PREFIX,
   MIN_AUTOMATION_EVERY_MS,
   assistantReasoningEffortValues,
+  automationActiveUntilSchema,
   automationFrontmatterSchema,
   automationContinuityPolicyValues,
   automationDeviceActivityKindSchema,
   automationDeviceActivitySourceValues,
   automationScheduleKindValues,
   automationStatusValues,
+  automationSupportKindValues,
+  buildAutomationSupportSeriesTag,
   compareDeviceActivityCoverageKeys,
   isValidAutomationCronExpression,
+  parseAutomationSupportSeriesTag,
   resolveNextDeviceActivityCoverageCursor,
   type AutomationAssistantTargetOverride,
   type AutomationContinuityPolicy,
@@ -21,11 +27,13 @@ import {
   type AutomationScheduleKind,
   type AutomationScaffoldPayload as ContractAutomationScaffoldPayload,
   type AutomationStatus,
+  type AutomationSupportKind,
 } from "@murphai/contracts";
 
 import { VAULT_LAYOUT } from "./constants.ts";
 import { generateRecordId } from "./ids.ts";
 import { VaultError } from "./errors.ts";
+import { readUtf8File, walkVaultFilesInterruptible } from "./fs.ts";
 import {
   loadMarkdownRegistryDocuments,
   readRegistryRecord,
@@ -46,14 +54,24 @@ import {
   canonicalLogicalResource,
   withCanonicalResourceLocks,
 } from "./operations/index.ts";
+import { commitAuditedCanonicalWrite } from "./audited-write.ts";
+import { stageMarkdownDocumentWrite } from "./markdown-documents.ts";
 import type { FrontmatterObject } from "./types.ts";
 
 const AUTOMATIONS_DIRECTORY = VAULT_LAYOUT.automationsDirectory;
+const MAX_AUTOMATION_SUPPORT_SERIES_RECONCILIATION_RECORDS = 4_096;
 const automationRegistryResource = canonicalLogicalResource(
   "bank/automations",
   AUTOMATIONS_DIRECTORY,
 );
 const dailyLocalTimePattern = /^(?:[01]\d|2[0-3]):[0-5]\d$/u;
+
+class AutomationSupportSeriesReconciliationYieldError extends Error {
+  constructor() {
+    super("Automation support-series reconciliation yielded to foreground work.");
+    this.name = "AutomationSupportSeriesReconciliationYieldError";
+  }
+}
 
 function rejectRecurringScheduleTimeZone(object: Record<string, unknown>): void {
   if (Object.hasOwn(object, "timeZone")) {
@@ -70,6 +88,7 @@ export type {
   AutomationRoute,
   AutomationSchedule,
   AutomationStatus,
+  AutomationSupportKind,
 };
 
 export interface AutomationRecord {
@@ -80,9 +99,11 @@ export interface AutomationRecord {
   title: string;
   status: AutomationStatus;
   summary: string | null;
+  activeUntil: string | null;
   schedule: AutomationSchedule;
   route: AutomationRoute;
   assistantTargetOverride: AutomationAssistantTargetOverride | null;
+  supportKind: AutomationSupportKind | null;
   continuityPolicy: AutomationContinuityPolicy;
   tags: string[];
   createdAt: string;
@@ -119,12 +140,14 @@ export interface UpsertAutomationResult {
 }
 
 export interface PatchAutomationInput {
+  activeUntil?: string | null;
   continuityPolicy?: AutomationContinuityPolicy;
   instructions?: string;
   lookup: string;
   now?: Date;
   route?: AutomationRoute;
   assistantTargetOverride?: AutomationAssistantTargetOverride | null;
+  supportKind?: AutomationSupportKind | null;
   schedule?: AutomationSchedule;
   slug?: string;
   status?: AutomationStatus;
@@ -160,6 +183,7 @@ export interface ReadAutomationInput {
 }
 
 export interface ListAutomationInput {
+  exactTag?: string;
   limit?: number;
   status?: string | string[];
   text?: string;
@@ -169,6 +193,48 @@ export interface ListAutomationInput {
 export interface ListAutomationResult {
   items: AutomationRecord[];
   count: number;
+}
+
+export interface ArchiveAutomationIfActiveUntilElapsedInput {
+  expectedUpdatedAt?: string;
+  lookup: string;
+  now?: Date;
+  vaultRoot: string;
+}
+
+export interface ArchiveAutomationIfActiveUntilElapsedResult {
+  archived: boolean;
+  record: AutomationRecord;
+}
+
+export interface ReconcileAutomationSupportSeriesInput {
+  desiredAutomationIds: readonly string[];
+  now?: Date;
+  shouldYield?: (() => boolean) | null;
+  supportSeriesTag: string;
+  vaultRoot: string;
+}
+
+export interface AutomationSupportSeriesDesiredState {
+  desiredAutomationIds: readonly string[];
+  supportSeriesTag: string;
+}
+
+export interface ReconcileAutomationSupportSeriesNamespaceInput {
+  desiredSeries: readonly AutomationSupportSeriesDesiredState[];
+  now?: Date;
+  seriesIdPrefix: string;
+  shouldYield?: (() => boolean) | null;
+  vaultRoot: string;
+}
+
+export interface ReconcileAutomationSupportSeriesResult {
+  archivedCount: number;
+  auditPath: string | null;
+  matchedCount: number;
+  missingDesiredAutomationIds: string[];
+  unchangedCount: number;
+  yielded?: true;
 }
 
 function normalizeNullableString(value: string | null | undefined): string | null {
@@ -208,6 +274,12 @@ function normalizeAutomationContinuityPolicy(
   value: unknown,
 ): AutomationContinuityPolicy {
   return optionalEnum(value, automationContinuityPolicyValues, "continuityPolicy") ?? "preserve";
+}
+
+function normalizeAutomationSupportKind(
+  value: unknown,
+): AutomationSupportKind | null {
+  return optionalEnum(value, automationSupportKindValues, "supportKind") ?? null;
 }
 
 function normalizeAutomationDeviceActivitySource(value: unknown): AutomationDeviceActivitySource | undefined {
@@ -264,6 +336,38 @@ function normalizeAutomationIsoTimestamp(value: unknown, fieldName: string): str
     throw new VaultError("VAULT_INVALID_INPUT", `${fieldName} must be a valid ISO timestamp.`);
   }
   return timestamp;
+}
+
+function normalizeAutomationActiveUntil(value: unknown): string | null {
+  if (value === undefined || value === null) {
+    return null;
+  }
+
+  const parsed = automationActiveUntilSchema.safeParse(value);
+  if (!parsed.success) {
+    throw new VaultError(
+      "VAULT_INVALID_INPUT",
+      "activeUntil must be a valid ISO 8601 timestamp with an explicit offset.",
+    );
+  }
+
+  return parsed.data;
+}
+
+function assertAutomationActiveUntilMatchesSchedule(input: {
+  activeUntil: string | null;
+  schedule: AutomationSchedule;
+}): void {
+  if (
+    input.activeUntil !== null &&
+    input.schedule.kind === "at" &&
+    Date.parse(input.activeUntil) <= Date.parse(input.schedule.at)
+  ) {
+    throw new VaultError(
+      "VAULT_INVALID_INPUT",
+      "activeUntil must be after schedule.at for a one-shot automation.",
+    );
+  }
 }
 
 function normalizeAutomationSchedule(
@@ -485,7 +589,65 @@ function normalizeAutomationTags(value: unknown): string[] {
     }),
   )];
 
+  const supportSeriesTags = tags.filter((tag) =>
+    tag.startsWith(AUTOMATION_SUPPORT_SERIES_TAG_PREFIX)
+  );
+  if (supportSeriesTags.some((tag) => parseAutomationSupportSeriesTag(tag) === null)) {
+    throw new VaultError(
+      "VAULT_INVALID_INPUT",
+      "Support series tags must use a valid canonical support series id.",
+    );
+  }
+  if (supportSeriesTags.length > 1) {
+    throw new VaultError(
+      "VAULT_INVALID_INPUT",
+      "An automation may belong to at most one support series.",
+    );
+  }
+
   return tags;
+}
+
+function resolveAutomationSupportSeriesTag(tags: readonly string[]): string | null {
+  return tags.find((tag) => parseAutomationSupportSeriesTag(tag) !== null) ?? null;
+}
+
+function assertAutomationSupportSeriesOwnershipPreserved(input: {
+  existingRecord: AutomationRecord | null;
+  nextTags: readonly string[];
+}): void {
+  if (!input.existingRecord) {
+    return;
+  }
+
+  const existingTag = resolveAutomationSupportSeriesTag(input.existingRecord.tags);
+  const nextTag = resolveAutomationSupportSeriesTag(input.nextTags);
+  // A legacy managed automation may be assigned to its first support series.
+  // Once assigned, ownership is immutable across ordinary upserts and patches.
+  if (existingTag !== null && existingTag !== nextTag) {
+    throw new VaultError(
+      "VAULT_AUTOMATION_SUPPORT_SERIES_IMMUTABLE",
+      "Automation support series ownership cannot be removed or replaced.",
+    );
+  }
+}
+
+function assertAutomationReconciledArchiveMarkerNotForged(input: {
+  existingRecord: AutomationRecord | null;
+  requestedTags: readonly string[];
+}): void {
+  const markerWasPersisted = input.existingRecord?.tags.includes(
+    AUTOMATION_SUPPORT_SERIES_RECONCILED_ARCHIVE_TAG,
+  ) === true;
+  if (
+    !markerWasPersisted &&
+    input.requestedTags.includes(AUTOMATION_SUPPORT_SERIES_RECONCILED_ARCHIVE_TAG)
+  ) {
+    throw new VaultError(
+      "VAULT_AUTOMATION_RECONCILIATION_MARKER_RESERVED",
+      "The automation reconciliation archive marker is reserved for internal reconciliation.",
+    );
+  }
 }
 
 function normalizeAutomationTitle(value: unknown): string {
@@ -562,6 +724,7 @@ function buildAutomationFrontmatter(record: AutomationRecord): FrontmatterObject
     title: record.title,
     status: record.status,
     ...(record.summary === null ? {} : { summary: record.summary }),
+    ...(record.activeUntil === null ? {} : { activeUntil: record.activeUntil }),
     schedule: buildAutomationScheduleFrontmatter(record.schedule),
     route: buildAutomationRouteFrontmatter(record.route),
     ...(record.assistantTargetOverride === null
@@ -571,6 +734,7 @@ function buildAutomationFrontmatter(record: AutomationRecord): FrontmatterObject
             record.assistantTargetOverride,
           ),
         }),
+    ...(record.supportKind === null ? {} : { supportKind: record.supportKind }),
     continuityPolicy: record.continuityPolicy,
     tags: record.tags,
     createdAt: record.createdAt,
@@ -595,6 +759,10 @@ function parseAutomationRecord(
 
   const parsedDocument = parseFrontmatterDocument(markdown);
 
+  const schedule = normalizeAutomationSchedule(attributes.schedule);
+  const activeUntil = normalizeAutomationActiveUntil(attributes.activeUntil);
+  assertAutomationActiveUntilMatchesSchedule({ activeUntil, schedule });
+
   return {
     schemaVersion: AUTOMATION_SCHEMA_VERSION,
     docType: AUTOMATION_DOC_TYPE,
@@ -603,11 +771,13 @@ function parseAutomationRecord(
     title: normalizeAutomationTitle(attributes.title),
     status: normalizeAutomationStatus(attributes.status),
     summary: normalizeAutomationSummary(attributes.summary),
-    schedule: normalizeAutomationSchedule(attributes.schedule),
+    activeUntil,
+    schedule,
     route: normalizeAutomationRoute(attributes.route),
     assistantTargetOverride: normalizeAutomationAssistantTargetOverride(
       attributes.assistantTargetOverride,
     ),
+    supportKind: normalizeAutomationSupportKind(attributes.supportKind),
     continuityPolicy: normalizeAutomationContinuityPolicy(attributes.continuityPolicy),
     tags: normalizeAutomationTags(attributes.tags),
     createdAt: requireString(attributes.createdAt, "createdAt", 64),
@@ -629,11 +799,61 @@ async function loadAutomationRecords(vaultRoot: string): Promise<AutomationRecor
     invalidMessage: "Automation registry document has an unexpected shape.",
   });
 
+  return sortAutomationRecords(records);
+}
+
+function sortAutomationRecords(records: AutomationRecord[]): AutomationRecord[] {
   return records.sort((left, right) =>
     left.title.localeCompare(right.title) ||
     left.slug.localeCompare(right.slug) ||
     left.automationId.localeCompare(right.automationId),
   );
+}
+
+async function loadAutomationRecordsForSupportSeriesReconciliation(input: {
+  shouldYield: (() => boolean) | null;
+  vaultRoot: string;
+}): Promise<{ records: AutomationRecord[]; yielded: boolean }> {
+  if (input.shouldYield?.() === true) {
+    return { records: [], yielded: true };
+  }
+  const walked = await walkVaultFilesInterruptible(
+    input.vaultRoot,
+    AUTOMATIONS_DIRECTORY,
+    {
+      extension: ".md",
+      maxMatches: MAX_AUTOMATION_SUPPORT_SERIES_RECONCILIATION_RECORDS + 1,
+      shouldContinue: () => input.shouldYield?.() !== true,
+    },
+  );
+  if (walked.interrupted || input.shouldYield?.() === true) {
+    return { records: [], yielded: true };
+  }
+  if (walked.relativePaths.length > MAX_AUTOMATION_SUPPORT_SERIES_RECONCILIATION_RECORDS) {
+    throw new VaultError(
+      "VAULT_AUTOMATION_RECONCILIATION_LIMIT_EXCEEDED",
+      "Automation support-series reconciliation exceeded its bounded registry limit.",
+      { maxRecords: MAX_AUTOMATION_SUPPORT_SERIES_RECONCILIATION_RECORDS },
+    );
+  }
+
+  const records: AutomationRecord[] = [];
+  for (const relativePath of walked.relativePaths) {
+    if (input.shouldYield?.() === true) {
+      return { records: [], yielded: true };
+    }
+    const markdown = await readUtf8File(input.vaultRoot, relativePath);
+    if (input.shouldYield?.() === true) {
+      return { records: [], yielded: true };
+    }
+    const document = parseFrontmatterDocument(markdown);
+    records.push(parseAutomationRecord(document.attributes, relativePath, markdown));
+  }
+
+  if (input.shouldYield?.() === true) {
+    return { records: [], yielded: true };
+  }
+  return { records: sortAutomationRecords(records), yielded: false };
 }
 
 function matchesAutomationText(record: AutomationRecord, text: string | undefined): boolean {
@@ -648,10 +868,12 @@ function matchesAutomationText(record: AutomationRecord, text: string | undefine
     record.title,
     record.status,
     record.summary,
+    record.activeUntil,
     record.instructions,
     JSON.stringify(record.schedule),
     JSON.stringify(record.route),
     JSON.stringify(record.assistantTargetOverride),
+    record.supportKind,
     record.continuityPolicy,
     ...(record.tags ?? []),
   ]
@@ -682,6 +904,14 @@ function matchesAutomationStatus(
   return value ? normalized.includes(value.toLowerCase()) : false;
 }
 
+function matchesAutomationExactTag(
+  record: AutomationRecord,
+  exactTag: string | undefined,
+): boolean {
+  const normalized = normalizeNullableString(exactTag);
+  return normalized === null || record.tags.includes(normalized);
+}
+
 export function scaffoldAutomationPayload(): AutomationScaffoldPayload {
   return {
     title: "Weekly check-in",
@@ -701,6 +931,7 @@ export function scaffoldAutomationPayload(): AutomationScaffoldPayload {
       threadId: null,
     },
     assistantTargetOverride: null,
+    supportKind: null,
     instructions: "Write the scheduled assistant instructions here.",
     summary: "Weekly scheduled assistant notification instructions.",
     tags: ["assistant", "scheduled"],
@@ -713,6 +944,7 @@ export async function listAutomations(
   const records = await loadAutomationRecords(input.vaultRoot);
   const filtered = records.filter((record) =>
     matchesAutomationStatus(record.status, input.status) &&
+    matchesAutomationExactTag(record, input.exactTag) &&
     matchesAutomationText(record, input.text),
   );
 
@@ -786,6 +1018,10 @@ export async function patchAutomation(
       throw new VaultError("VAULT_AUTOMATION_MISSING", "Automation was not found.");
     }
     return upsertAutomationWithLatestRegistry({
+      activeUntil:
+        input.activeUntil === undefined
+          ? existingRecord.activeUntil
+          : input.activeUntil,
       automationId: existingRecord.automationId,
       continuityPolicy: input.continuityPolicy ?? existingRecord.continuityPolicy,
       instructions: input.instructions ?? existingRecord.instructions,
@@ -795,6 +1031,10 @@ export async function patchAutomation(
         input.assistantTargetOverride === undefined
           ? existingRecord.assistantTargetOverride
           : normalizeAutomationAssistantTargetOverride(input.assistantTargetOverride),
+      supportKind:
+        input.supportKind === undefined
+          ? existingRecord.supportKind
+          : normalizeAutomationSupportKind(input.supportKind),
       schedule: input.schedule ?? existingRecord.schedule,
       slug: input.slug ?? existingRecord.slug,
       status: input.status ?? existingRecord.status,
@@ -805,6 +1045,344 @@ export async function patchAutomation(
       allowSlugRename: input.slug !== undefined,
     }, records);
   });
+}
+
+export async function archiveAutomationIfActiveUntilElapsed(
+  input: ArchiveAutomationIfActiveUntilElapsedInput,
+): Promise<ArchiveAutomationIfActiveUntilElapsedResult> {
+  return withAutomationRegistryLock(input.vaultRoot, async () => {
+    const records = await loadAutomationRecords(input.vaultRoot);
+    const existingRecord = selectAutomationRecord(records, {
+      automationId: input.lookup,
+      slug: input.lookup,
+    });
+    if (!existingRecord) {
+      throw new VaultError("VAULT_AUTOMATION_MISSING", "Automation was not found.");
+    }
+
+    const now = input.now ?? new Date();
+    const nowMs = now.getTime();
+    if (!Number.isFinite(nowMs)) {
+      throw new VaultError("VAULT_INVALID_INPUT", "now must be a valid Date.");
+    }
+    const activeUntilMs = existingRecord.activeUntil === null
+      ? Number.NaN
+      : Date.parse(existingRecord.activeUntil);
+    const expectedUpdatedAtMatches = input.expectedUpdatedAt === undefined ||
+      input.expectedUpdatedAt === existingRecord.updatedAt;
+    if (
+      !expectedUpdatedAtMatches ||
+      existingRecord.status !== "active" ||
+      !Number.isFinite(activeUntilMs) ||
+      nowMs < activeUntilMs
+    ) {
+      return {
+        archived: false,
+        record: existingRecord,
+      };
+    }
+
+    const archived = await upsertAutomationWithLatestRegistry({
+      activeUntil: existingRecord.activeUntil,
+      automationId: existingRecord.automationId,
+      assistantTargetOverride: existingRecord.assistantTargetOverride,
+      continuityPolicy: existingRecord.continuityPolicy,
+      instructions: existingRecord.instructions,
+      now,
+      route: existingRecord.route,
+      schedule: existingRecord.schedule,
+      slug: existingRecord.slug,
+      status: "archived",
+      summary: existingRecord.summary,
+      tags: existingRecord.tags,
+      title: existingRecord.title,
+      vaultRoot: input.vaultRoot,
+    }, records);
+
+    return {
+      archived: true,
+      record: archived.record,
+    };
+  });
+}
+
+function yieldedAutomationSupportSeriesReconciliationResult(): ReconcileAutomationSupportSeriesResult {
+  return {
+    archivedCount: 0,
+    auditPath: null,
+    matchedCount: 0,
+    missingDesiredAutomationIds: [],
+    unchangedCount: 0,
+    yielded: true,
+  };
+}
+
+function assertAutomationSupportSeriesReconciliationCanContinue(
+  shouldYield: (() => boolean) | null,
+): void {
+  if (shouldYield?.() === true) {
+    throw new AutomationSupportSeriesReconciliationYieldError();
+  }
+}
+
+export async function reconcileAutomationSupportSeries(
+  input: ReconcileAutomationSupportSeriesInput,
+): Promise<ReconcileAutomationSupportSeriesResult> {
+  if (input.shouldYield?.() === true) {
+    return yieldedAutomationSupportSeriesReconciliationResult();
+  }
+  const supportSeriesTag = requireAutomationSupportSeriesTag(input.supportSeriesTag);
+  return withAutomationRegistryLock(input.vaultRoot, async () => {
+    const loaded = await loadAutomationRecordsForSupportSeriesReconciliation({
+      shouldYield: input.shouldYield ?? null,
+      vaultRoot: input.vaultRoot,
+    });
+    if (loaded.yielded) {
+      return yieldedAutomationSupportSeriesReconciliationResult();
+    }
+    return reconcileAutomationSupportSeriesRecords({
+      desiredBySupportSeriesTag: new Map([
+        [supportSeriesTag, normalizeAutomationIdSet(input.desiredAutomationIds)],
+      ]),
+      matchesScope: (tag) => tag === supportSeriesTag,
+      now: input.now ?? new Date(),
+      records: loaded.records,
+      shouldYield: input.shouldYield ?? null,
+      scopeLabel: supportSeriesTag,
+      vaultRoot: input.vaultRoot,
+    });
+  });
+}
+
+export async function reconcileAutomationSupportSeriesNamespace(
+  input: ReconcileAutomationSupportSeriesNamespaceInput,
+): Promise<ReconcileAutomationSupportSeriesResult> {
+  if (input.shouldYield?.() === true) {
+    return yieldedAutomationSupportSeriesReconciliationResult();
+  }
+  const seriesIdPrefix = normalizeAutomationSupportSeriesIdPrefix(input.seriesIdPrefix);
+  const desiredBySupportSeriesTag = new Map<string, Set<string>>();
+  const desiredOwnerByAutomationId = new Map<string, string>();
+  for (const desired of input.desiredSeries) {
+    if (input.shouldYield?.() === true) {
+      return yieldedAutomationSupportSeriesReconciliationResult();
+    }
+    const tag = requireAutomationSupportSeriesTag(desired.supportSeriesTag);
+    const parsed = parseAutomationSupportSeriesTag(tag);
+    if (!parsed || !parsed.seriesId.startsWith(seriesIdPrefix)) {
+      throw new VaultError(
+        "VAULT_INVALID_INPUT",
+        `Support series tag must be inside the ${seriesIdPrefix} namespace.`,
+      );
+    }
+    if (desiredBySupportSeriesTag.has(tag)) {
+      throw new VaultError(
+        "VAULT_INVALID_INPUT",
+        `Support series desired state contains duplicate tag ${tag}.`,
+      );
+    }
+    const desiredAutomationIds = normalizeAutomationIdSet(desired.desiredAutomationIds);
+    for (const automationId of desiredAutomationIds) {
+      if (input.shouldYield?.() === true) {
+        return yieldedAutomationSupportSeriesReconciliationResult();
+      }
+      const existingOwner = desiredOwnerByAutomationId.get(automationId);
+      if (existingOwner && existingOwner !== tag) {
+        throw new VaultError(
+          "VAULT_INVALID_INPUT",
+          `Automation ${automationId} cannot be desired by multiple support series.`,
+        );
+      }
+      desiredOwnerByAutomationId.set(automationId, tag);
+    }
+    desiredBySupportSeriesTag.set(tag, desiredAutomationIds);
+  }
+
+  return withAutomationRegistryLock(input.vaultRoot, async () => {
+    const loaded = await loadAutomationRecordsForSupportSeriesReconciliation({
+      shouldYield: input.shouldYield ?? null,
+      vaultRoot: input.vaultRoot,
+    });
+    if (loaded.yielded) {
+      return yieldedAutomationSupportSeriesReconciliationResult();
+    }
+    return reconcileAutomationSupportSeriesRecords({
+      desiredBySupportSeriesTag,
+      matchesScope: (tag) => {
+        const parsed = parseAutomationSupportSeriesTag(tag);
+        return parsed !== null && parsed.seriesId.startsWith(seriesIdPrefix);
+      },
+      now: input.now ?? new Date(),
+      records: loaded.records,
+      shouldYield: input.shouldYield ?? null,
+      scopeLabel: `${AUTOMATION_SUPPORT_SERIES_TAG_PREFIX}${seriesIdPrefix}*`,
+      vaultRoot: input.vaultRoot,
+    });
+  });
+}
+
+async function reconcileAutomationSupportSeriesRecords(input: {
+  desiredBySupportSeriesTag: ReadonlyMap<string, ReadonlySet<string>>;
+  matchesScope: (tag: string) => boolean;
+  now: Date;
+  records: readonly AutomationRecord[];
+  shouldYield: (() => boolean) | null;
+  scopeLabel: string;
+  vaultRoot: string;
+}): Promise<ReconcileAutomationSupportSeriesResult> {
+  if (input.shouldYield?.() === true) {
+    return yieldedAutomationSupportSeriesReconciliationResult();
+  }
+  const matched: Array<{ record: AutomationRecord; tag: string }> = [];
+  for (const record of input.records) {
+    if (input.shouldYield?.() === true) {
+      return yieldedAutomationSupportSeriesReconciliationResult();
+    }
+    const tag = resolveAutomationSupportSeriesTag(record.tags);
+    if (tag !== null && input.matchesScope(tag)) {
+      matched.push({ record, tag });
+    }
+  }
+  const matchedDesiredKeys = new Set<string>();
+  const stale: Array<{ record: AutomationRecord; tag: string }> = [];
+  for (const { record, tag } of matched) {
+    if (input.shouldYield?.() === true) {
+      return yieldedAutomationSupportSeriesReconciliationResult();
+    }
+    const desiredIds = input.desiredBySupportSeriesTag.get(tag);
+    if (desiredIds?.has(record.automationId)) {
+      matchedDesiredKeys.add(`${tag}\0${record.automationId}`);
+      continue;
+    }
+    // A user-paused automation stays paused until the user explicitly resumes
+    // it. Only active records are owned by desired-state cleanup.
+    if (record.status === "active") {
+      stale.push({ record, tag });
+    }
+  }
+  const missingDesiredAutomationIds: string[] = [];
+  for (const [tag, ids] of input.desiredBySupportSeriesTag.entries()) {
+    for (const automationId of ids) {
+      if (input.shouldYield?.() === true) {
+        return yieldedAutomationSupportSeriesReconciliationResult();
+      }
+      if (!matchedDesiredKeys.has(`${tag}\0${automationId}`)) {
+        missingDesiredAutomationIds.push(automationId);
+      }
+    }
+  }
+  missingDesiredAutomationIds.sort((left, right) => left.localeCompare(right));
+
+  if (stale.length === 0) {
+    if (input.shouldYield?.() === true) {
+      return yieldedAutomationSupportSeriesReconciliationResult();
+    }
+    return {
+      archivedCount: 0,
+      auditPath: null,
+      matchedCount: matched.length,
+      missingDesiredAutomationIds,
+      unchangedCount: matched.length,
+    };
+  }
+
+  const now = input.now.toISOString();
+  const targetIds = stale.map(({ record }) => record.automationId);
+  const assertCanContinue = () =>
+    assertAutomationSupportSeriesReconciliationCanContinue(input.shouldYield);
+  let committed: Awaited<ReturnType<typeof commitAuditedCanonicalWrite>>;
+  try {
+    committed = await commitAuditedCanonicalWrite({
+      vaultRoot: input.vaultRoot,
+      operationType: "automation_support_series_reconcile",
+      summary: `Reconcile automation support series ${input.scopeLabel}`,
+      occurredAt: now,
+      assertCanContinue,
+      audit: {
+        action: "automation_upsert",
+        commandName: "core.reconcileAutomationSupportSeries",
+        summary: `Archived ${stale.length} stale support-series automation(s).`,
+        targetIds,
+        occurredAt: now,
+      },
+      mutate: async ({ batch }) => {
+        const changes = [];
+        const files: string[] = [];
+        for (const { record } of stale) {
+          assertCanContinue();
+          const archivedRecord: AutomationRecord = {
+            ...record,
+            status: "archived",
+            tags: record.tags.includes(AUTOMATION_SUPPORT_SERIES_RECONCILED_ARCHIVE_TAG)
+              ? record.tags
+              : [...record.tags, AUTOMATION_SUPPORT_SERIES_RECONCILED_ARCHIVE_TAG],
+            updatedAt: now,
+            markdown: "",
+          };
+          const write = await stageMarkdownDocumentWrite(
+            batch,
+            {
+              created: false,
+              relativePath: record.relativePath,
+            },
+            buildAutomationMarkdown(archivedRecord),
+          );
+          assertCanContinue();
+          changes.push(...write.changes);
+          files.push(write.relativePath);
+        }
+
+        return {
+          result: undefined,
+          changes,
+          files,
+          targetIds,
+        };
+      },
+    });
+  } catch (error) {
+    if (error instanceof AutomationSupportSeriesReconciliationYieldError) {
+      return yieldedAutomationSupportSeriesReconciliationResult();
+    }
+    throw error;
+  }
+
+  return {
+    archivedCount: stale.length,
+    auditPath: committed.auditPath,
+    matchedCount: matched.length,
+    missingDesiredAutomationIds,
+    unchangedCount: matched.length - stale.length,
+  };
+}
+
+function requireAutomationSupportSeriesTag(value: string): string {
+  const normalized = value.trim();
+  const parsed = parseAutomationSupportSeriesTag(normalized);
+  if (!parsed || parsed.tag !== normalized) {
+    throw new VaultError(
+      "VAULT_INVALID_INPUT",
+      `supportSeriesTag must use the ${AUTOMATION_SUPPORT_SERIES_TAG_PREFIX}<series-id> format.`,
+    );
+  }
+  return parsed.tag;
+}
+
+function normalizeAutomationSupportSeriesIdPrefix(value: string): string {
+  const normalized = value.trim();
+  try {
+    buildAutomationSupportSeriesTag(normalized);
+  } catch {
+    throw new VaultError(
+      "VAULT_INVALID_INPUT",
+      "seriesIdPrefix must use letters, numbers, colon, period, underscore, or hyphen.",
+    );
+  }
+  return normalized;
+}
+
+function normalizeAutomationIdSet(values: readonly string[]): Set<string> {
+  return new Set(values.map((value) => requireString(value, "desiredAutomationIds", 240)));
 }
 
 export async function advanceAutomationDeviceActivityCursor(
@@ -854,6 +1432,7 @@ export async function advanceAutomationDeviceActivityCursor(
     }
 
     const updated = await upsertAutomationWithLatestRegistry({
+      activeUntil: existingRecord.activeUntil,
       automationId: existingRecord.automationId,
       continuityPolicy: existingRecord.continuityPolicy,
       instructions: existingRecord.instructions,
@@ -961,6 +1540,30 @@ async function upsertAutomationWithLatestRegistry(
     getRecordRelativePath: (record: AutomationRecord) => record.relativePath,
     createRecordId: () => generateRecordId("automation"),
   });
+  const schedule = input.schedule !== undefined
+    ? normalizeAutomationSchedule(input.schedule)
+    : existingRecord?.schedule ?? scaffoldAutomationPayload().schedule;
+  const activeUntil = input.activeUntil === undefined
+    ? existingRecord?.activeUntil ?? null
+    : normalizeAutomationActiveUntil(input.activeUntil);
+  assertAutomationActiveUntilMatchesSchedule({ activeUntil, schedule });
+  const status = normalizeAutomationStatus(input.status ?? existingRecord?.status);
+  const requestedTags = input.tags === undefined
+    ? existingRecord?.tags ?? []
+    : normalizeAutomationTags(input.tags);
+  assertAutomationReconciledArchiveMarkerNotForged({
+    existingRecord,
+    requestedTags,
+  });
+  const tags = status === "archived"
+    ? requestedTags
+    : requestedTags.filter(
+      (tag) => tag !== AUTOMATION_SUPPORT_SERIES_RECONCILED_ARCHIVE_TAG,
+    );
+  assertAutomationSupportSeriesOwnershipPreserved({
+    existingRecord,
+    nextTags: tags,
+  });
 
   const record: AutomationRecord = {
     schemaVersion: AUTOMATION_SCHEMA_VERSION,
@@ -968,15 +1571,13 @@ async function upsertAutomationWithLatestRegistry(
     automationId: target.recordId,
     slug: target.slug,
     title,
-    status: normalizeAutomationStatus(input.status ?? existingRecord?.status),
+    status,
     summary:
       input.summary === undefined
         ? existingRecord?.summary ?? null
         : normalizeAutomationSummary(input.summary),
-    schedule:
-      input.schedule !== undefined
-        ? normalizeAutomationSchedule(input.schedule)
-        : existingRecord?.schedule ?? scaffoldAutomationPayload().schedule,
+    activeUntil,
+    schedule,
     route:
       input.route !== undefined
         ? normalizeAutomationRoute(input.route)
@@ -985,12 +1586,13 @@ async function upsertAutomationWithLatestRegistry(
       input.assistantTargetOverride === undefined
         ? existingRecord?.assistantTargetOverride ?? null
         : normalizeAutomationAssistantTargetOverride(input.assistantTargetOverride),
+    supportKind:
+      input.supportKind === undefined
+        ? existingRecord?.supportKind ?? null
+        : normalizeAutomationSupportKind(input.supportKind),
     continuityPolicy:
       normalizeAutomationContinuityPolicy(input.continuityPolicy ?? existingRecord?.continuityPolicy),
-    tags:
-      input.tags === undefined
-        ? existingRecord?.tags ?? []
-        : normalizeAutomationTags(input.tags),
+    tags,
     createdAt,
     updatedAt,
     instructions: normalizeAutomationInstructions(input.instructions),
@@ -1037,6 +1639,9 @@ export function buildAutomationMarkdownPreview(
   input: AutomationScaffoldPayload,
 ): string {
   const slug = input.slug ?? normalizeSlug(undefined, "slug", input.title);
+  const schedule = normalizeAutomationSchedule(input.schedule);
+  const activeUntil = normalizeAutomationActiveUntil(input.activeUntil);
+  assertAutomationActiveUntilMatchesSchedule({ activeUntil, schedule });
   const normalized: AutomationRecord = {
     schemaVersion: AUTOMATION_SCHEMA_VERSION,
     docType: AUTOMATION_DOC_TYPE,
@@ -1045,11 +1650,13 @@ export function buildAutomationMarkdownPreview(
     title: normalizeAutomationTitle(input.title),
     status: normalizeAutomationStatus(input.status),
     summary: normalizeAutomationSummary(input.summary),
-    schedule: normalizeAutomationSchedule(input.schedule),
+    activeUntil,
+    schedule,
     route: normalizeAutomationRoute(input.route),
     assistantTargetOverride: normalizeAutomationAssistantTargetOverride(
       input.assistantTargetOverride,
     ),
+    supportKind: normalizeAutomationSupportKind(input.supportKind),
     continuityPolicy: normalizeAutomationContinuityPolicy(input.continuityPolicy),
     tags: normalizeAutomationTags(input.tags),
     createdAt: new Date().toISOString(),

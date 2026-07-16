@@ -3235,7 +3235,16 @@ function mergeDeferredPostCheckpointWake(input: {
     return;
   }
 
+  const invocationLocalAssistantWakeAt =
+    input.assistantPhaseResult.invocationLocalAssistantWakeAt ?? null;
+  const previousWakeIsInvocationLocal =
+    invocationLocalAssistantWakeAt !== null
+    && input.assistantPhaseResult.nextWakeAt === invocationLocalAssistantWakeAt
+    && (input.assistantPhaseResult.nextWakeReason ?? "assistant") === "assistant";
   if (input.postCheckpoint.nextWakeAt === null || input.postCheckpoint.nextWakeAt === undefined) {
+    if (previousWakeIsInvocationLocal) {
+      return;
+    }
     input.assistantPhaseResult.nextWakeAt = null;
     input.assistantPhaseResult.nextWakeReason = null;
     return;
@@ -3249,6 +3258,20 @@ function mergeDeferredPostCheckpointWake(input: {
     input.assistantPhaseResult.nextWakeAt ?? null,
     input.assistantPhaseResult.nextWakeReason ?? null,
   );
+  if (previousWakeIsInvocationLocal) {
+    const selectedWake = selectHostedRuntimeWakeCandidate([
+      previousWake,
+      postCheckpointWake,
+    ]);
+    if (
+      selectedWake.at === previousWake.at
+      && selectedWake.reason === previousWake.reason
+    ) {
+      input.assistantPhaseResult.nextWakeAt = previousWake.at;
+      input.assistantPhaseResult.nextWakeReason = previousWake.reason;
+      return;
+    }
+  }
   if (
     previousWake.at !== null
     && previousWake.reason === "assistant"

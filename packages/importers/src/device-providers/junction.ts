@@ -2138,6 +2138,7 @@ function pushSleepSummary(
     resourceContext.sourceProviderSlug,
   );
   const durationMinutes = resolveSleepSummaryDurationMinutes(entry, startAt, endAt);
+  const sleepType = resolveJunctionSleepType(firstStringFromPaths(entry, ["type"]));
   const sleepTimestamp = withTimestampOverride(timestamp, {
     occurredAt: endAt ?? startAt ?? timestamp.occurredAt,
   });
@@ -2156,11 +2157,12 @@ function pushSleepSummary(
       evidenceRoles: resourceContext.evidenceRoles,
       externalRef: makeJunctionExternalRef(resourceContext, entry, sleepTimestamp, "session"),
       dataOrigin: buildDataOrigin(entry, resourceContext, sleepTimestamp),
-      fields: {
+      fields: stripUndefined({
         startAt,
         endAt,
         durationMinutes,
-      },
+        sleepType,
+      }),
     }));
   }
 
@@ -2175,6 +2177,19 @@ function pushSleepSummary(
   );
   pushSleepSummaryStageMetrics(entry, resourceContext, context, sleepTimestamp, startAt, endAt, zeroedSummary);
   pushJunctionRecoveryReadinessScore(entry, resourceContext, context, sleepTimestamp);
+}
+
+function resolveJunctionSleepType(value: string | undefined): "main_sleep" | "nap" | undefined {
+  const normalized = value?.trim().toLowerCase().replace(/[\s-]+/gu, "_");
+  if (!normalized) {
+    return undefined;
+  }
+
+  if (normalized.includes("nap")) {
+    return "nap";
+  }
+
+  return normalized === "sleep" || normalized === "long_sleep" ? "main_sleep" : undefined;
 }
 
 function resolveSleepSummaryDurationMinutes(

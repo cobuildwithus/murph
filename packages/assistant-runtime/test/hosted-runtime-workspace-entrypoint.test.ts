@@ -25198,7 +25198,17 @@ async function ensureHostedBootstrapMetadataForSystemMailboxTest(
   try {
     await stat(metadataPath);
   } catch {
-    await writeFile(metadataPath, "{}\n", "utf8");
+    await writeFile(
+      metadataPath,
+      `${JSON.stringify({
+        createdAt: TEST_NOW,
+        formatVersion: CURRENT_VAULT_FORMAT_VERSION,
+        timezone: "UTC",
+        title: "Synthetic hosted workspace",
+        vaultId: `vault_${"0".repeat(26)}`,
+      }, null, 2)}\n`,
+      "utf8",
+    );
   }
 }
 

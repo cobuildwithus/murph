@@ -333,6 +333,13 @@ export const assistantExternalThreadRouteAuthoritySchema = z
   })
   .strict()
 
+export const assistantOutboxAutomationAuthoritySchema = z
+  .object({
+    automationId: z.string().trim().min(1),
+    expectedUpdatedAt: isoTimestampSchema,
+  })
+  .strict()
+
 export const assistantSessionBindingSchema = z.object({
   conversationKey: z.string().min(1).nullable(),
   channel: z.string().min(1).nullable(),
@@ -863,6 +870,9 @@ export const assistantOutboxIntentSchema = z
     replyToMessageId: z.string().min(1).nullable().default(null),
     bindingDelivery: assistantBindingDeliverySchema.nullable(),
     deliverySource: assistantDeliverySourceSchema.nullable().default(null),
+    automationAuthority: assistantOutboxAutomationAuthoritySchema
+      .nullable()
+      .optional(),
     externalThreadRouteAuthority: assistantExternalThreadRouteAuthoritySchema
       .nullable()
       .optional(),
@@ -1661,6 +1671,9 @@ export type AssistantTurnReceiptSummary = z.infer<
   typeof assistantTurnReceiptSummarySchema
 >
 export type AssistantOutboxIntent = z.infer<typeof assistantOutboxIntentSchema>
+export type AssistantOutboxAutomationAuthority = z.infer<
+  typeof assistantOutboxAutomationAuthoritySchema
+>
 export type AssistantDiagnosticEvent = z.infer<
   typeof assistantDiagnosticEventSchema
 >

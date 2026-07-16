@@ -806,10 +806,10 @@ describe('assistant execution prompt contract', () => {
     const prompt = buildAssistantSystemPrompt(createCommonCodexPromptInput())
 
     expect(prompt).toContain(
-      'Prefer bounded, context-aware automations over nagging coaching.',
+      'Prefer bounded, context-aware automations.',
     )
     expect(prompt).toContain(
-      'For repeated behavior support, include skip/repair rules and a review point, and avoid open-ended reminders unless the user explicitly asks.',
+      'Repeated support needs skip/repair rules and a review point. Never create open-ended reminders; renewal needs fresh consent.',
     )
     expect(prompt).toContain('When creating automations, choose continuity deliberately.')
     expect(prompt).toContain(
@@ -1349,6 +1349,9 @@ Execution context:
     )
     expect(layers.dynamicTurnContextPrompt).toContain('Notification execution rules:')
     expect(layers.dynamicTurnContextPrompt).toContain(
+      'If a support loop keeps failing, skip; only an engine-supplied check-in or review purpose may propose one repair in the message. Never change the plan in a scheduled turn.',
+    )
+    expect(layers.dynamicTurnContextPrompt).toContain(
       'Before sending any user-facing reply, quickly scan the visible answer for forbidden link and source formatting',
     )
     expect(layers.prompt).toBe(
@@ -1675,6 +1678,12 @@ describe('assistant experiment onboarding guidance', () => {
     expect(prompt).toContain(
       'For a chosen health intervention, use its domain owner. Add experiment-onboarding only when the user wants to test or compare the intervention, and add behavior-followthrough only when recurring support matters.',
     )
+    expect(prompt).toContain(
+      'Sleep safety outranks fatigue/clock routing:',
+    )
+    expect(prompt).toContain(
+      'If driving/work safety is affected, give immediate safety guidance before coaching.',
+    )
     expect(prompt).not.toContain('Behavior-change collaboration:')
     expect(prompt).not.toContain(
       'This skill is a lightweight policy layer over existing Murph surfaces.',
@@ -1815,7 +1824,7 @@ describe('assistant experiment onboarding guidance', () => {
       'Stress-regulation owns the immediate downshift when acute stress or overload blocks action;',
     )
     expect(prompt).toContain(
-      'Specialized workflows live at `$MURPH_ASSISTANT_SKILLS_ROOT/<slug>/SKILL.md`.',
+      'Specialized skills live at `$MURPH_ASSISTANT_SKILLS_ROOT/<slug>/SKILL.md`.',
     )
   })
 
@@ -1826,13 +1835,16 @@ describe('assistant experiment onboarding guidance', () => {
 
     expect(prompt).toContain('Murph skill router:')
     expect(prompt).toContain(
-      'Specialized workflows live at `$MURPH_ASSISTANT_SKILLS_ROOT/<slug>/SKILL.md`.',
+      'Specialized skills live at `$MURPH_ASSISTANT_SKILLS_ROOT/<slug>/SKILL.md`.',
     )
     expect(prompt).toContain(
-      'Route by the user\'s visible outcome and read the primary skill before acting.',
+      'Route by the user\'s visible outcome and read the primary owner.',
     )
     expect(prompt).toContain(
-      'If the route is materially ambiguous, inspect at most two likely skill files, choose the owner, then load a secondary skill only when it owns a distinct part of the task.',
+      'If routing is ambiguous, inspect at most two candidates; this cap is discovery-only.',
+    )
+    expect(prompt).toContain(
+      'Then follow explicit handoffs and load every distinct safety or execution owner.',
     )
     expect(prompt).toContain(
       'Do not preload skills or call a discovery CLI just to route.',
@@ -1920,7 +1932,7 @@ describe('assistant notification decision guidance', () => {
     expect(prompt).not.toContain('Hosted wearable connection links are available')
     expect(prompt).not.toContain('apps.apple.com/us/app/murph-ai')
     expect(prompt).not.toContain('WHOOP: More > App Settings')
-    expect(prompt).not.toContain('ground yourself in what the user has actually done in the relevant action window')
+    expect(prompt).not.toContain('ground yourself in what the user has actually done in the relevant local action window')
   })
 
   it('renders only a fail-closed skip contract for an unverified external audience', () => {
@@ -1996,7 +2008,7 @@ describe('assistant notification decision guidance', () => {
       'You have the same vault read and write tools as an interactive Murph turn for the task\'s canonical data.',
     )
     expect(prompt).toContain(
-      'ground yourself in what the user has actually done in the relevant action window',
+      'ground yourself in what the user has actually done in the relevant local action window',
     )
 
     // Retrieval budget as a stopping rule, plus the deterministic skip signal.
@@ -2007,10 +2019,16 @@ describe('assistant notification decision guidance', () => {
     expect(prompt).toContain(
       'for pre-bed sessions, the session date is the prior local day',
     )
+    expect(prompt).toContain(
+      "distinguish the sleep episode that ended today from tonight's upcoming wind-down or bedtime target",
+    )
+    expect(prompt).toContain(
+      'calendar date alone does not establish that the upcoming action is complete',
+    )
 
     // Consolidated skip / send conditions (no per-type triplication).
     expect(prompt).toContain(
-      'Skip when the run is inactive, reminders were declined or moved, the relevant session, log, or behavior occurrence is already complete, the plan no longer matches, the support window ended, or the user already did the thing.',
+      'Skip when the run is inactive, reminders were declined or moved, the relevant session, log, or behavior occurrence is already complete, the plan no longer matches, the support window ended, or the user already did the thing in that action window.',
     )
     expect(prompt).toContain(
       'The reminder\'s purpose still holds when the due check says notify for checks it governs, scheduled prep or support is still ahead, missing data blocks interpretation, a review is due, or safety needs outreach.',
@@ -2029,10 +2047,16 @@ describe('assistant notification decision guidance', () => {
       'compose fresh from current state unless the user dictated the exact wording, and never assign the user a reporting chore',
     )
     expect(prompt).toContain(
-      'For behavior-support, routine, habit, or adherence automations, choose `skip` or `send_message`;',
+      'For behavior-support, routine, habit, or adherence automations, choose `skip` or `send_message` within the engine-supplied persisted support purpose.',
     )
     expect(prompt).toContain(
       'normal cue, explicitly authorized accountability check-in, or repair question/proposal',
+    )
+    expect(prompt).toContain(
+      'A reminder authorizes a normal cue or skip, never a proactive repair/accountability question.',
+    )
+    expect(prompt).toContain(
+      'Only a consented check-in or review may ask one narrow repair or decision question.',
     )
     expect(prompt).toContain(
       'Completion or an already reported outcome means skip.',
@@ -2041,16 +2065,28 @@ describe('assistant notification decision guidance', () => {
       'Unavailable, delayed, stale, or missing evidence means unknown, never missed; only an unknown outcome may receive one neutral outcome question.',
     )
     expect(prompt).toContain(
-      'ask one narrow repair question in the message or skip instead of repeating stale reminder copy',
+      'If the plan looks stale but the purpose does not authorize a question, skip instead of widening consent.',
     )
     expect(prompt).toContain('Scheduled turns do not own automation lifecycle')
     expect(prompt).toContain(
       'Respect any tiny/fallback version, support style, privacy boundary, and review/repair policy embedded in the automation instructions.',
     )
 
-    // The two true invariants from the incident.
+    // Action-window and delivery-evidence invariants.
     expect(prompt).toContain(
       'Never send a reminder that contradicts what the user already did in the relevant action window',
+    )
+    expect(prompt).toContain(
+      'an enqueue, generated transcript, provider transcript, or delivery attempt as intent, not proof that the user received the message',
+    )
+    expect(prompt).toContain(
+      'Provider acceptance or `sent` proves dispatch only, not handset delivery or reading.',
+    )
+    expect(prompt).toContain(
+      'a channel delivery/read receipt or a later reply referring to the message proves receipt; silence without that evidence remains ambiguous and is not nonadherence or refusal',
+    )
+    expect(prompt).toContain(
+      'delivery failed or remains unconfirmed, do not count that occurrence toward repair or escalation',
     )
     expect(prompt).toContain(
       'ask one plain question they can answer in their own words, and derive the structured values like grams or totals yourself',

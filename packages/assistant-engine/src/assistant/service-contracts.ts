@@ -150,6 +150,7 @@ export interface AssistantMessageInput extends AssistantSessionResolutionFields 
   onProviderRequestStarted?: AssistantProviderRequestStartHook | null
   onTraceEvent?: (event: AssistantProviderTraceEvent) => void
   operatorAuthority?: AssistantOperatorAuthority
+  outboxAutomationAuthority?: AssistantOutboxIntent['automationAuthority']
   persistUserPromptOnFailure?: boolean
   prompt: string
   suppressProviderFailureTranscriptAudit?: boolean

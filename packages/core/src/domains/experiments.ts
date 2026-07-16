@@ -1,9 +1,13 @@
+import { createHash } from "node:crypto";
+import { isDeepStrictEqual } from "node:util";
+
 import type {
   CommonsProtocolRef,
   ExperimentAnalysisPlan,
   ExperimentAssistantSupport,
   EffectiveProtocolSnapshot,
   ExperimentFrontmatter,
+  ExperimentOutcome,
   ExperimentOnboardingCapture,
   ExperimentOutcomeRef,
   ExperimentOutcomeTracking,
@@ -14,6 +18,7 @@ import {
   EXPERIMENT_STATUSES,
   experimentDocumentRelativePath,
   experimentFrontmatterSchema,
+  experimentOutcomeSchema,
   safeParseContract,
 } from "@murphai/contracts";
 
@@ -21,7 +26,10 @@ import { FRONTMATTER_SCHEMA_VERSIONS, ID_PREFIXES, VAULT_LAYOUT } from "../const
 import { emitAuditRecord } from "../audit.ts";
 import { commitAuditedCanonicalWrite } from "../audited-write.ts";
 import { VaultError } from "../errors.ts";
-import { assertExperimentDocumentRelativePath } from "../experiment-storage.ts";
+import {
+  assertExperimentDocumentRelativePath,
+  listCanonicalExperimentDocumentPathsInterruptible,
+} from "../experiment-storage.ts";
 import { parseFrontmatterDocument, stringifyFrontmatterDocument } from "../frontmatter.ts";
 import { stageMarkdownDocumentWrite } from "../markdown-documents.ts";
 import { readUtf8File } from "../fs.ts";
@@ -52,6 +60,15 @@ export interface CreateExperimentInput {
   hypothesis?: string;
   startedOn?: DateInput;
   status?: string;
+  body?: string;
+  tags?: string[];
+  commonsProtocolRef?: CommonsProtocolRef;
+  protocolRef?: ProtocolRef;
+  effectiveProtocolSnapshot?: EffectiveProtocolSnapshot;
+  runPlan?: ExperimentRunPlan;
+  analysisPlan?: ExperimentAnalysisPlan;
+  onboarding?: ExperimentOnboardingCapture;
+  assistantSupport?: ExperimentAssistantSupport;
 }
 
 export interface CreateExperimentResult {
@@ -64,6 +81,13 @@ export interface CreateExperimentResult {
   event: ExperimentEventRecord | null;
   auditPath: string | null;
 }
+
+export interface ReadExperimentLifecycleFrontmatterResult {
+  items: ExperimentFrontmatter[];
+  yielded: boolean;
+}
+
+export const MAX_EXPERIMENT_LIFECYCLE_DOCUMENTS = 1_024;
 
 export interface UpdateExperimentInput {
   vaultRoot: string;
@@ -83,6 +107,7 @@ export interface UpdateExperimentInput {
   assistantSupport?: ExperimentAssistantSupport | null;
   outcome?: ExperimentOutcomeTracking | null;
   outcomeRef?: ExperimentOutcomeRef | null;
+  expectedDocumentSha256?: string;
 }
 
 export interface UpdateExperimentResult {
@@ -91,6 +116,23 @@ export interface UpdateExperimentResult {
   relativePath: string;
   status: ExperimentStatus;
   updated: true;
+}
+
+export interface WriteExperimentOutcomeInput {
+  vaultRoot: string;
+  relativePath: string;
+  expectedFrontmatter: ExperimentFrontmatter;
+  outcome: ExperimentOutcome;
+}
+
+export interface WriteExperimentOutcomeResult {
+  experimentId: string;
+  slug: string;
+  relativePath: string;
+  status: ExperimentStatus;
+  outcome: ExperimentOutcome;
+  outcomePath: string;
+  updatedExperiment: boolean;
 }
 
 interface AppendExperimentLifecycleEventInput {
@@ -162,6 +204,24 @@ function toExperimentComparableAttributes(
   }) as UnknownRecord;
 }
 
+function sha256Text(value: string): string {
+  return createHash("sha256").update(value).digest("hex");
+}
+
+function hasCompleteExperimentCreateInput(input: CreateExperimentInput): boolean {
+  return (
+    input.body !== undefined ||
+    input.tags !== undefined ||
+    input.commonsProtocolRef !== undefined ||
+    input.protocolRef !== undefined ||
+    input.effectiveProtocolSnapshot !== undefined ||
+    input.runPlan !== undefined ||
+    input.analysisPlan !== undefined ||
+    input.onboarding !== undefined ||
+    input.assistantSupport !== undefined
+  );
+}
+
 function validateExperimentFrontmatter(
   value: unknown,
   relativePath = "experiment",
@@ -212,6 +272,42 @@ export async function readExperimentFrontmatterDocument(
   };
 }
 
+/**
+ * Reads the validated experiment snapshot used by managed lifecycle work.
+ * Partial snapshots are discarded when foreground work asks maintenance to
+ * yield, and the storage boundary enforces a hard document-count ceiling.
+ */
+export async function readExperimentLifecycleFrontmatterDocuments(input: {
+  vaultRoot: string;
+  shouldYield?: (() => boolean) | null;
+}): Promise<ReadExperimentLifecycleFrontmatterResult> {
+  const listed = await listCanonicalExperimentDocumentPathsInterruptible({
+    vaultRoot: input.vaultRoot,
+    maxDocuments: MAX_EXPERIMENT_LIFECYCLE_DOCUMENTS,
+    shouldYield: input.shouldYield ?? null,
+  });
+  if (listed.yielded) {
+    return { items: [], yielded: true };
+  }
+
+  const items: ExperimentFrontmatter[] = [];
+  for (const relativePath of listed.relativePaths) {
+    if (input.shouldYield?.() === true) {
+      return { items: [], yielded: true };
+    }
+    const { document } = await readExperimentFrontmatterDocument(
+      input.vaultRoot,
+      relativePath,
+    );
+    items.push(document.attributes);
+  }
+
+  if (input.shouldYield?.() === true) {
+    return { items: [], yielded: true };
+  }
+  return { items, yielded: false };
+}
+
 function appendExperimentNoteBlock(
   body: string,
   input: {
@@ -240,14 +336,15 @@ function appendExperimentNoteBlock(
   return `${trimmedBody}\n\n## Notes\n\n${block}`;
 }
 
-export async function createExperiment({
-  vaultRoot,
-  slug,
-  title,
-  hypothesis,
-  startedOn = new Date(),
-  status = "active",
-}: CreateExperimentInput): Promise<CreateExperimentResult> {
+export async function createExperiment(input: CreateExperimentInput): Promise<CreateExperimentResult> {
+  const {
+    vaultRoot,
+    slug,
+    title,
+    hypothesis,
+    startedOn = new Date(),
+    status = "active",
+  } = input;
   const vault = await loadVault({ vaultRoot });
   const safeSlug = sanitizePathSegment(slug, "experiment");
   const startedTimestamp = toIsoTimestamp(startedOn, "startedOn");
@@ -263,6 +360,31 @@ export async function createExperiment({
     startedOn: startedDay,
     hypothesis: normalizedHypothesis,
   });
+  const experimentId = generateRecordId(ID_PREFIXES.experiment);
+  const attributes = validateContract(
+    experimentFrontmatterSchema,
+    compactObject({
+      schemaVersion: FRONTMATTER_SCHEMA_VERSIONS.experiment,
+      docType: "experiment",
+      experimentId,
+      slug: safeSlug,
+      status: normalizedStatus,
+      title: normalizedTitle,
+      startedOn: startedDay,
+      hypothesis: normalizedHypothesis,
+      tags: uniqueTrimmedStringList(input.tags) ?? undefined,
+      commonsProtocolRef: input.commonsProtocolRef,
+      protocolRef: input.protocolRef,
+      effectiveProtocolSnapshot: input.effectiveProtocolSnapshot,
+      runPlan: input.runPlan,
+      analysisPlan: input.analysisPlan,
+      onboarding: input.onboarding,
+      assistantSupport: input.assistantSupport,
+    }),
+    "FRONTMATTER_INVALID",
+    "Experiment frontmatter failed contract validation before write.",
+  );
+  const body = input.body ?? `# ${normalizedTitle}\n\n## Plan\n\n## Notes\n\n`;
 
   try {
     const existingDocument = parseFrontmatterDocument(await readUtf8File(vaultRoot, relativePath));
@@ -297,6 +419,26 @@ export async function createExperiment({
       );
     }
 
+    if (hasCompleteExperimentCreateInput(input)) {
+      const expectedAttributes = {
+        ...attributes,
+        experimentId: existingAttributes.experimentId,
+      };
+      if (
+        !isDeepStrictEqual(existingAttributes, expectedAttributes) ||
+        existingDocument.body !== body
+      ) {
+        throw new VaultError(
+          "VAULT_EXPERIMENT_CONFLICT",
+          `Experiment "${safeSlug}" already exists with different canonical plan data.`,
+          {
+            relativePath,
+            experimentId: existingAttributes.experimentId,
+          },
+        );
+      }
+    }
+
     return {
       created: false,
       experiment: {
@@ -313,25 +455,9 @@ export async function createExperiment({
     }
   }
 
-  const experimentId = generateRecordId(ID_PREFIXES.experiment);
-  const attributes = validateContract(
-    experimentFrontmatterSchema,
-    compactObject({
-      schemaVersion: FRONTMATTER_SCHEMA_VERSIONS.experiment,
-      docType: "experiment",
-      experimentId,
-      slug: safeSlug,
-      status: normalizedStatus,
-      title: normalizedTitle,
-      startedOn: startedDay,
-      hypothesis: normalizedHypothesis,
-    }),
-    "FRONTMATTER_INVALID",
-    "Experiment frontmatter failed contract validation before write.",
-  );
   const markdown = stringifyFrontmatterDocument({
     attributes: experimentFrontmatterObject(attributes),
-    body: `# ${normalizedTitle}\n\n## Plan\n\n## Notes\n\n`,
+    body,
   });
   const event = buildExperimentEventRecord({
     occurredAt: startedTimestamp,
@@ -392,10 +518,32 @@ export async function createExperiment({
 export async function updateExperiment(
   input: UpdateExperimentInput,
 ): Promise<UpdateExperimentResult> {
-  const { document } = await readExperimentFrontmatterDocument(
+  const { rawDocument, document } = await readExperimentFrontmatterDocument(
     input.vaultRoot,
     input.relativePath,
   );
+  if (input.expectedDocumentSha256 !== undefined) {
+    const expectedDocumentSha256 = input.expectedDocumentSha256.trim();
+    if (!/^[a-f0-9]{64}$/u.test(expectedDocumentSha256)) {
+      throw new VaultError(
+        "INVALID_INPUT",
+        "Expected experiment document SHA-256 must be a 64-character lowercase hexadecimal digest.",
+        { relativePath: input.relativePath },
+      );
+    }
+    const actualDocumentSha256 = sha256Text(rawDocument);
+    if (actualDocumentSha256 !== expectedDocumentSha256) {
+      throw new VaultError(
+        "VAULT_EXPERIMENT_CONFLICT",
+        "Experiment changed after it was read; refresh it before applying this update.",
+        {
+          relativePath: input.relativePath,
+          expectedDocumentSha256,
+          actualDocumentSha256,
+        },
+      );
+    }
+  }
   const nextAttributes = validateExperimentFrontmatter(
     compactObject({
       ...document.attributes,
@@ -440,6 +588,32 @@ export async function updateExperiment(
     }),
     input.relativePath,
   );
+  if (
+    document.attributes.status !== "planned" &&
+    (
+      !isDeepStrictEqual(
+        nextAttributes.commonsProtocolRef,
+        document.attributes.commonsProtocolRef,
+      ) ||
+      !isDeepStrictEqual(
+        nextAttributes.protocolRef,
+        document.attributes.protocolRef,
+      ) ||
+      !isDeepStrictEqual(
+        nextAttributes.effectiveProtocolSnapshot,
+        document.attributes.effectiveProtocolSnapshot,
+      )
+    )
+  ) {
+    throw new VaultError(
+      "EXPERIMENT_LINEAGE_IMMUTABLE",
+      "Only a planned experiment may change its protocol lineage or effective snapshot.",
+      {
+        experimentId: document.attributes.experimentId,
+        relativePath: input.relativePath,
+      },
+    );
+  }
   const nextMarkdown = stringifyFrontmatterDocument({
     attributes: experimentFrontmatterObject(nextAttributes),
     body: input.body ?? document.body,
@@ -483,6 +657,267 @@ export async function updateExperiment(
   });
 
   return result.result;
+}
+
+export async function writeExperimentOutcome(
+  input: WriteExperimentOutcomeInput,
+): Promise<WriteExperimentOutcomeResult> {
+  const { document } = await readExperimentFrontmatterDocument(
+    input.vaultRoot,
+    input.relativePath,
+  );
+  const expectedFrontmatter = validateExperimentFrontmatter(
+    input.expectedFrontmatter,
+    input.relativePath,
+  );
+  if (!isDeepStrictEqual(document.attributes, expectedFrontmatter)) {
+    throw new VaultError(
+      "EXPERIMENT_REVISION_CONFLICT",
+      "Experiment changed while its outcome was being analyzed. Retry the closeout against the current experiment revision.",
+      {
+        experimentId: document.attributes.experimentId,
+        relativePath: input.relativePath,
+      },
+    );
+  }
+
+  const requestedOutcome = validateContract(
+    experimentOutcomeSchema,
+    input.outcome,
+    "EXPERIMENT_OUTCOME_INVALID",
+    "Experiment outcome failed contract validation before write.",
+  );
+  const attributes = document.attributes;
+  if (
+    requestedOutcome.experiment.id !== attributes.experimentId ||
+    requestedOutcome.experiment.slug !== attributes.slug ||
+    requestedOutcome.experiment.title !== attributes.title
+  ) {
+    throw new VaultError(
+      "EXPERIMENT_OUTCOME_MISMATCH",
+      "Experiment outcome identity does not match the current experiment.",
+      {
+        experimentId: attributes.experimentId,
+        relativePath: input.relativePath,
+      },
+    );
+  }
+  if (
+    !isDeepStrictEqual(
+      requestedOutcome.commonsProtocolRef ?? null,
+      attributes.commonsProtocolRef ?? null,
+    ) ||
+    !isDeepStrictEqual(
+      requestedOutcome.protocolRef ?? null,
+      attributes.protocolRef ?? null,
+    ) ||
+    !isDeepStrictEqual(
+      requestedOutcome.effectiveProtocolSnapshot ?? null,
+      attributes.effectiveProtocolSnapshot ?? null,
+    )
+  ) {
+    throw new VaultError(
+      "EXPERIMENT_OUTCOME_LINEAGE_MISMATCH",
+      "Experiment outcome protocol lineage does not match the current experiment snapshot.",
+      {
+        experimentId: attributes.experimentId,
+        relativePath: input.relativePath,
+      },
+    );
+  }
+
+  const outcomeId = `${attributes.experimentId}-outcome-${requestedOutcome.asOf}`;
+  if (requestedOutcome.outcomeId && requestedOutcome.outcomeId !== outcomeId) {
+    throw new VaultError(
+      "EXPERIMENT_OUTCOME_MISMATCH",
+      "Experiment outcome id does not match its experiment and analysis date.",
+      {
+        experimentId: attributes.experimentId,
+        outcomeId: requestedOutcome.outcomeId,
+      },
+    );
+  }
+  const outcomePath = `${VAULT_LAYOUT.experimentsDirectory}/outcomes/${attributes.slug}-${requestedOutcome.asOf}.json`;
+  const shouldCompleteRun =
+    attributes.status === "active" &&
+    attributes.runPlan?.interventionEnd !== undefined &&
+    requestedOutcome.asOf >= attributes.runPlan.interventionEnd;
+  const nextStatus = shouldCompleteRun ? "completed" as const : attributes.status;
+  const nextEndedOn = shouldCompleteRun
+    ? attributes.runPlan?.interventionEnd
+    : attributes.endedOn;
+  const {
+    generatedAt: _requestedGeneratedAt,
+    ...requestedComparable
+  } = requestedOutcome;
+  void _requestedGeneratedAt;
+  const candidateOutcome = validateContract(
+    experimentOutcomeSchema,
+    {
+      ...requestedComparable,
+      experiment: {
+        ...requestedOutcome.experiment,
+        status: nextStatus,
+      },
+      outcomeId,
+    },
+    "EXPERIMENT_OUTCOME_INVALID",
+    "Experiment outcome failed contract validation before write.",
+  );
+  const existingOutcome = await readExistingExperimentOutcome(
+    input.vaultRoot,
+    outcomePath,
+  );
+  if (
+    existingOutcome?.outcomeId === outcomeId &&
+    existingOutcome.asOf === requestedOutcome.asOf &&
+    existingOutcome.generatedAt === attributes.outcomeRef?.generatedAt &&
+    existingOutcome.experiment.status === nextStatus &&
+    attributes.status === nextStatus &&
+    attributes.endedOn === nextEndedOn &&
+    attributes.outcome?.finalAnalysisStatus === "generated" &&
+    attributes.outcomeRef?.outcomeId === outcomeId &&
+    attributes.outcomeRef.relativePath === outcomePath &&
+    experimentOutcomesAreEquivalent(existingOutcome, candidateOutcome)
+  ) {
+    return {
+      experimentId: attributes.experimentId,
+      slug: attributes.slug,
+      relativePath: input.relativePath,
+      status: attributes.status,
+      outcome: existingOutcome,
+      outcomePath,
+      updatedExperiment: false,
+    };
+  }
+
+  const generatedAt = nextExperimentOutcomeGeneratedAt(existingOutcome?.generatedAt);
+  const validatedOutcome = validateContract(
+    experimentOutcomeSchema,
+    {
+      ...candidateOutcome,
+      generatedAt,
+    },
+    "EXPERIMENT_OUTCOME_INVALID",
+    "Experiment outcome failed contract validation before write.",
+  );
+  const nextAttributes = validateExperimentFrontmatter(
+    {
+      ...attributes,
+      status: nextStatus,
+      endedOn: nextEndedOn,
+      outcome: {
+        ...attributes.outcome,
+        latestOutcomeId: outcomeId,
+        readyForReviewAt: attributes.outcome?.readyForReviewAt ?? generatedAt,
+        finalAnalysisStatus: "generated",
+      },
+      outcomeRef: {
+        outcomeId,
+        generatedAt,
+        relativePath: outcomePath,
+      },
+    },
+    input.relativePath,
+  );
+  const nextMarkdown = stringifyFrontmatterDocument({
+    attributes: experimentFrontmatterObject(nextAttributes),
+    body: document.body,
+  });
+
+  const result = await commitAuditedCanonicalWrite<WriteExperimentOutcomeResult>({
+    vaultRoot: input.vaultRoot,
+    operationType: "experiment_outcome_write",
+    summary: `Write experiment outcome ${outcomeId}`,
+    occurredAt: generatedAt,
+    audit: {
+      action: "experiment_update",
+      commandName: "core.writeExperimentOutcome",
+      summary: `Wrote outcome analysis for experiment ${attributes.experimentId}.`,
+      targetIds: [attributes.experimentId],
+    },
+    mutate: async ({ batch }) => {
+      await batch.stageTextWrite(
+        outcomePath,
+        `${JSON.stringify(validatedOutcome, null, 2)}\n`,
+        { overwrite: true },
+      );
+      const experimentWrite = await stageMarkdownDocumentWrite(
+        batch,
+        {
+          relativePath: input.relativePath,
+          created: false,
+        },
+        nextMarkdown,
+        { overwrite: true },
+      );
+
+      return {
+        result: {
+          experimentId: nextAttributes.experimentId,
+          slug: nextAttributes.slug,
+          relativePath: input.relativePath,
+          status: nextAttributes.status,
+          outcome: validatedOutcome,
+          outcomePath,
+          updatedExperiment: true,
+        },
+        files: [outcomePath],
+        changes: experimentWrite.changes,
+      };
+    },
+  });
+
+  return result.result;
+}
+
+async function readExistingExperimentOutcome(
+  vaultRoot: string,
+  outcomePath: string,
+): Promise<ExperimentOutcome | null> {
+  try {
+    const value: unknown = JSON.parse(await readUtf8File(vaultRoot, outcomePath));
+    const parsed = experimentOutcomeSchema.safeParse(value);
+    return parsed.success ? parsed.data : null;
+  } catch (error) {
+    if (
+      error instanceof SyntaxError ||
+      (error instanceof VaultError && error.code === "VAULT_FILE_MISSING")
+    ) {
+      return null;
+    }
+    throw error;
+  }
+}
+
+function experimentOutcomesAreEquivalent(
+  left: ExperimentOutcome,
+  right: ExperimentOutcome,
+): boolean {
+  const {
+    generatedAt: leftGeneratedAt,
+    schema: leftSchema,
+    ...leftComparable
+  } = left;
+  const {
+    generatedAt: rightGeneratedAt,
+    schema: rightSchema,
+    ...rightComparable
+  } = right;
+  void leftGeneratedAt;
+  void leftSchema;
+  void rightGeneratedAt;
+  void rightSchema;
+  return isDeepStrictEqual(leftComparable, rightComparable);
+}
+
+function nextExperimentOutcomeGeneratedAt(previous: string | undefined): string {
+  const now = new Date().toISOString();
+  if (!previous || now > previous) {
+    return now;
+  }
+
+  return new Date(Date.parse(previous) + 1).toISOString();
 }
 
 async function appendExperimentLifecycleEvent(

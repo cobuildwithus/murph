@@ -226,6 +226,25 @@ describe('assistant skill assets', () => {
     )
   })
 
+  it('routes bedtime transition, external disruption, and sleep-breathing concerns before skill loading', () => {
+    const sleepSkill = ASSISTANT_SKILLS.find(
+      (skill) => skill.slug === 'sleep-improvement',
+    )
+    expect(sleepSkill).toBeTruthy()
+    if (!sleepSkill) {
+      return
+    }
+
+    expect(sleepSkill.triggerHint).toContain('bedtime procrastination or getting-to-bed transition friction')
+    expect(sleepSkill.triggerHint).toContain('sleep-environment disruption such as noise or vibration')
+    expect(sleepSkill.triggerHint).toContain('high-altitude sleep disruption')
+    expect(sleepSkill.triggerHint).toContain('dangerous daytime sleepiness')
+    expect(sleepSkill.triggerHint).toContain('sleep-disordered breathing')
+    expect(sleepSkill.triggerHint).toContain(
+      'circadian-rhythm for body-clock, light-timing, jet-lag, shift-work, or clock-shifting plans',
+    )
+  })
+
   it('routes red light dose ownership to the dedicated red-light skill', async () => {
     const recoverySkill = ASSISTANT_SKILLS.find(
       (skill) => skill.slug === 'recovery-modalities',

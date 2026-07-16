@@ -736,6 +736,18 @@ test('sendAssistantNotificationLocal sends required exact text without a provide
   )
 
   const result = await sendAssistantNotificationLocal({
+    beforeDelivery: (context) => {
+      expect(context).toEqual({
+        decision: {
+          kind: 'send_message',
+          privateSummary: 'Sent required exact notification text.',
+          text: 'Fixed welcome text',
+        },
+        deliveryOutcome: null,
+        response: 'Fixed welcome text',
+      })
+      order.push('authority')
+    },
     deliveryDedupeToken: 'signup-welcome:member_exact',
     deliveryIdempotencyKey: 'signup-welcome:member_exact',
     executionContext: {
@@ -759,7 +771,12 @@ test('sendAssistantNotificationLocal sends required exact text without a provide
   expect(mocks.resolveAssistantTurnRoute).not.toHaveBeenCalled()
   expect(mocks.recordAssistantUsageEvent).not.toHaveBeenCalled()
   expect(mocks.persistAssistantTurnAndSession).not.toHaveBeenCalled()
-  expect(order).toEqual(['deliver:Fixed welcome text', 'transcript', 'session'])
+  expect(order).toEqual([
+    'authority',
+    'deliver:Fixed welcome text',
+    'transcript',
+    'session',
+  ])
   expect(runtimeState.turns.createReceipt).toHaveBeenCalledWith(
     expect.objectContaining({
       deliveryRequested: true,
@@ -2437,15 +2454,67 @@ test('sendAssistantNotificationLocal defers queue-only notification commit until
         hosted: null,
       },
       instructions: 'Queue this scheduled reminder.',
+      outboxAutomationAuthority: {
+        automationId: 'automation_sleep_reminder',
+        expectedUpdatedAt: '2026-07-16T12:00:00.000Z',
+      },
       vault: '/vaults/deferred-queue',
     }),
   ).rejects.toBe(commitError)
 
   expect(events).toEqual(['deliver', 'beforeCommit'])
+  expect(deliverMessage).toHaveBeenCalledWith(expect.objectContaining({
+    automationAuthority: {
+      automationId: 'automation_sleep_reminder',
+      expectedUpdatedAt: '2026-07-16T12:00:00.000Z',
+    },
+  }))
   expect(mocks.persistAssistantTurnAndSession).not.toHaveBeenCalled()
   const runtimeState = mocks.createAssistantRuntimeStateService.mock.results[0]?.value
   expect(runtimeState?.turns.createReceipt).not.toHaveBeenCalled()
   expect(runtimeState?.turns.finalizeReceipt).not.toHaveBeenCalled()
+})
+
+test('sendAssistantNotificationLocal rechecks notification authority before outbound delivery', async () => {
+  const providerSession = createAssistantSession()
+  const providerResult = createProviderResult({
+    response: JSON.stringify({
+      kind: 'send_message',
+      privateSummary: 'Prepared scheduled reminder.',
+      text: 'Remember to sleep.',
+    }),
+    session: providerSession,
+  })
+  const { deliverMessage, mocks, sendAssistantNotificationLocal } =
+    await loadNotificationTurnHarness({
+      providerResult,
+      turnId: 'turn-notification-before-delivery-authority',
+    })
+  const authorityError = new VaultCliError(
+    'ASSISTANT_CRON_AUTHORITY_STALE',
+    'Scheduled notification authority changed during provider work.',
+  )
+
+  await expect(
+    sendAssistantNotificationLocal({
+      beforeDelivery: (context) => {
+        expect(context).toEqual(expect.objectContaining({
+          deliveryOutcome: null,
+          response: 'Remember to sleep.',
+        }))
+        throw authorityError
+      },
+      executionContext: {
+        hosted: null,
+      },
+      instructions: 'Prepare this scheduled reminder.',
+      vault: '/vaults/before-delivery-authority',
+    }),
+  ).rejects.toBe(authorityError)
+
+  expect(deliverMessage).not.toHaveBeenCalled()
+  expect(mocks.persistAssistantTurnAndSession).not.toHaveBeenCalled()
+  expect(mocks.createAssistantRuntimeStateService).not.toHaveBeenCalled()
 })
 
 test('sendAssistantNotificationLocal abandons queued delivery when deferred commit fails', async () => {

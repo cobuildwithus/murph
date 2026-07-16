@@ -1,9 +1,16 @@
-import { access, mkdtemp, readFile, readdir, rm, stat, writeFile } from "node:fs/promises";
+import { createHash } from "node:crypto";
+import { access, mkdir, mkdtemp, readFile, readdir, rm, stat, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import path from "node:path";
 
 import {
+  CLINICAL_RAW_MANIFEST_MAX_BYTES,
+  CLINICAL_RECORD_COVERAGE_MAX_BYTES,
   type ClinicalFhirRetrievalScope,
+  clinicalRawManifestSchema,
+  clinicalRecordCoveragePathForManifestPath,
+  clinicalRecordCoverageSnapshotSchema,
+  countClinicalFhirPageResources,
   hashClinicalFhirBaseUrl,
   hashClinicalFhirPageUrl,
   hashClinicalFhirPatientId,
@@ -17,6 +24,7 @@ import {
   ClinicalFhirRetrievalCheckpointError,
   ClinicalFhirSnapshotRejectedError,
   importClinicalFhirSnapshot,
+  readClinicalRecordCoverage,
   readClinicalFhirRetrievalCheckpoint,
   readClinicalFhirRetrievalCheckpointForRun,
   type ClinicalFhirSnapshotImportInput,
@@ -147,7 +155,7 @@ describe("importClinicalFhirSnapshot", () => {
     expect(first).toEqual(expect.objectContaining({
       canonical: expect.objectContaining({ applied: true, createdCount: 1 }),
       executableDecisionCount: 1,
-      rawFileCount: 2,
+      rawFileCount: 3,
       reviewDecisionCount: 0,
     }));
     expect(replay.canonical).toEqual(expect.objectContaining({
@@ -155,8 +163,23 @@ describe("importClinicalFhirSnapshot", () => {
       createdCount: 0,
       skippedExistingCount: 1,
     }));
-    expect(await readFile(path.join(input.vaultRoot, first.manifestPath), "utf8"))
-      .toContain('"schemaVersion": "murph.clinical-raw-manifest.v2"');
+    const persistedManifest = await readFile(
+      path.join(input.vaultRoot, first.manifestPath),
+      "utf8",
+    );
+    expect(persistedManifest).toContain('"schemaVersion": "murph.clinical-raw-manifest.v2"');
+    expect(persistedManifest).not.toContain('"resourceFamilyCoverage"');
+    expect(() => clinicalRawManifestSchema.parse(JSON.parse(persistedManifest)))
+      .not.toThrow();
+    const coverageArtifact = await readFile(path.join(
+      input.vaultRoot,
+      clinicalRecordCoveragePathForManifestPath(first.manifestPath),
+    ), "utf8");
+    expect(coverageArtifact).toContain(
+      '"schemaVersion": "murph.clinical-record-coverage-snapshot.v1"',
+    );
+    expect(coverageArtifact).not.toContain(FHIR_BASE_URL_HASH);
+    expect(coverageArtifact).not.toContain(PATIENT_ID_HASH);
 
     const event = await findEventByExternalRef({
       vaultRoot: input.vaultRoot,
@@ -165,6 +188,327 @@ describe("importClinicalFhirSnapshot", () => {
       resourceId: "heart-rate-1",
     });
     expect(event?.kind).toBe("measurement");
+  });
+
+  it("adds sibling coverage on retry without changing an old runtime's manifest bytes", async () => {
+    const input = await createSnapshotInput({
+      pages: [{
+        content: fhirBundle([heartRateObservation("legacy-runtime-heart-rate")]),
+        resourceType: "Observation",
+      }],
+      resourceTypes: ["Observation"],
+    });
+    const legacy = await writeLegacyClinicalRawSnapshot(input);
+
+    const result = await importClinicalFhirSnapshot(input);
+
+    expect(result.canonical).toEqual(expect.objectContaining({
+      applied: true,
+      createdCount: 1,
+    }));
+    await expect(readFile(
+      path.join(input.vaultRoot, legacy.manifestPath),
+      "utf8",
+    )).resolves.toBe(legacy.manifestContent);
+    await expect(access(path.join(
+      input.vaultRoot,
+      clinicalRecordCoveragePathForManifestPath(legacy.manifestPath),
+    ))).resolves.toBeUndefined();
+    const coverage = await readClinicalRecordCoverage({ vaultRoot: input.vaultRoot });
+    expect(coverage.families.find((family) => family.resourceType === "Observation"))
+      .toEqual(expect.objectContaining({ statuses: ["mapped-for-import"] }));
+  });
+
+  it("keeps import-mapped labs distinct from unresolved medication, condition, and allergy evidence", async () => {
+    const input = await createSnapshotInput({
+      pages: [
+        {
+          content: fhirBundle([heartRateObservation("heart-rate-covered")]),
+          resourceType: "Observation",
+        },
+        {
+          content: fhirBundle([reviewOnlyClinicalResource("Condition", "condition-review")]),
+          resourceType: "Condition",
+        },
+        {
+          content: fhirBundle([
+            reviewOnlyClinicalResource("MedicationRequest", "medication-review"),
+          ]),
+          resourceType: "MedicationRequest",
+        },
+        {
+          content: fhirBundle([unresolvedAllergyResource()]),
+          resourceType: "AllergyIntolerance",
+        },
+      ],
+      resourceTypes: [
+        "Observation",
+        "Condition",
+        "MedicationRequest",
+        "AllergyIntolerance",
+      ],
+    });
+
+    await importClinicalFhirSnapshot(input);
+    const coverage = await readClinicalRecordCoverage({ vaultRoot: input.vaultRoot });
+
+    expect(coverage).toEqual(expect.objectContaining({
+      complete: true,
+      invalidSnapshotCount: 0,
+      snapshotCount: 1,
+      truncated: false,
+    }));
+    expect(coverage.families.find((family) => family.resourceType === "Observation"))
+      .toEqual(expect.objectContaining({ statuses: ["mapped-for-import"] }));
+    for (const resourceType of ["Condition", "MedicationRequest"] as const) {
+      expect(coverage.families.find((family) => family.resourceType === resourceType))
+        .toEqual(expect.objectContaining({ statuses: ["review-only"] }));
+    }
+    expect(coverage.families.find((family) => family.resourceType === "AllergyIntolerance"))
+      .toEqual(expect.objectContaining({ statuses: ["mapped-for-import-with-review"] }));
+  });
+
+  it("keeps a complete empty allergy snapshot's executable retraction distinct from no records", async () => {
+    const input = await createSnapshotInput({
+      pages: [
+        { content: fhirBundle([]), resourceType: "AllergyIntolerance" },
+        { content: fhirBundle([]), resourceType: "Condition" },
+      ],
+      resourceTypes: ["AllergyIntolerance", "Condition"],
+    });
+
+    await importClinicalFhirSnapshot(input);
+    const coverage = await readClinicalRecordCoverage({ vaultRoot: input.vaultRoot });
+
+    expect(coverage.families.find((family) => family.resourceType === "AllergyIntolerance"))
+      .toEqual(expect.objectContaining({
+        executableDecisionCount: 1,
+        returnedResourceCount: 0,
+        statuses: ["mapped-for-import"],
+      }));
+    expect(coverage.families.find((family) => family.resourceType === "Condition"))
+      .toEqual(expect.objectContaining({ statuses: ["no-records-returned"] }));
+  });
+
+  it("distinguishes partial grants, an empty returned family, and an unknown family", async () => {
+    const input = await createSnapshotInput({
+      pages: [{ content: fhirBundle([]), resourceType: "Observation" }],
+      resourceTypes: ["Observation"],
+    });
+    input.requestedScopes.push("patient/Condition.read");
+
+    await importClinicalFhirSnapshot(input);
+    const coverage = await readClinicalRecordCoverage({ vaultRoot: input.vaultRoot });
+
+    expect(coverage.families.find((family) => family.resourceType === "Observation"))
+      .toEqual(expect.objectContaining({
+        returnedResourceCount: 0,
+        statuses: ["no-records-returned"],
+      }));
+    expect(coverage.families.find((family) => family.resourceType === "Condition"))
+      .toEqual(expect.objectContaining({ statuses: ["not-authorized"] }));
+    expect(coverage.families.find((family) => family.resourceType === "MedicationStatement"))
+      .toEqual(expect.objectContaining({ statuses: ["unknown"] }));
+  });
+
+  it("reports a provider-denied resource family as unavailable", async () => {
+    const input = await createSnapshotInput({
+      pages: [{ content: fhirBundle([]), resourceType: "Condition" }],
+      resourceTypes: ["Condition"],
+    });
+    input.completedResourceTypes = [];
+    input.errors = [{
+      code: "family-unavailable",
+      message: "Provider did not return this FHIR resource family.",
+    }];
+
+    await importClinicalFhirSnapshot(input);
+    const coverage = await readClinicalRecordCoverage({ vaultRoot: input.vaultRoot });
+
+    expect(coverage.families.find((family) => family.resourceType === "Condition"))
+      .toEqual(expect.objectContaining({ statuses: ["unavailable"] }));
+  });
+
+  it("reports a previously granted family blocked by reauthorization as not authorized", async () => {
+    const input = await createSnapshotInput({ pages: [], resourceTypes: ["Condition"] });
+    input.completedResourceTypes = [];
+    input.errors = [{
+      code: "authorization-required",
+      message: "Provider authorization ended before this family was returned.",
+      resourceType: "Condition",
+    }];
+
+    await importClinicalFhirSnapshot(input);
+    const coverage = await readClinicalRecordCoverage({ vaultRoot: input.vaultRoot });
+
+    expect(coverage.families.find((family) => family.resourceType === "Condition"))
+      .toEqual(expect.objectContaining({ statuses: ["not-authorized"] }));
+  });
+
+  it("reports an incomplete raw snapshot directory instead of inferring record absence", async () => {
+    const input = await createSnapshotInput({ pages: [], resourceTypes: [] });
+    await mkdir(path.join(
+      input.vaultRoot,
+      "raw/clinical/fhir/incomplete-connection/incomplete-retrieval",
+    ), { recursive: true });
+
+    const coverage = await readClinicalRecordCoverage({ vaultRoot: input.vaultRoot });
+
+    expect(coverage).toEqual(expect.objectContaining({
+      complete: false,
+      invalidSnapshotCount: 1,
+      snapshotCount: 0,
+    }));
+    expect(coverage.families.every((family) =>
+      family.statuses.length === 1 && family.statuses[0] === "unknown"
+    )).toBe(true);
+  });
+
+  it("reads a legacy manifest conservatively without reparsing raw FHIR pages", async () => {
+    const input = await createSnapshotInput({
+      pages: [{
+        content: fhirBundle([reviewOnlyClinicalResource("Condition", "legacy-condition")]),
+        resourceType: "Condition",
+      }],
+      resourceTypes: ["Condition"],
+    });
+    const result = await importClinicalFhirSnapshot(input);
+    await rm(path.join(
+      input.vaultRoot,
+      clinicalRecordCoveragePathForManifestPath(result.manifestPath),
+    ));
+
+    const coverage = await readClinicalRecordCoverage({ vaultRoot: input.vaultRoot });
+
+    expect(coverage).toEqual(expect.objectContaining({
+      complete: true,
+      invalidSnapshotCount: 0,
+      snapshotCount: 1,
+    }));
+    expect(coverage.families.find((family) => family.resourceType === "Condition"))
+      .toEqual(expect.objectContaining({ statuses: ["unknown"] }));
+  });
+
+  it("fails closed when a coverage artifact does not match its immutable manifest", async () => {
+    const input = await createSnapshotInput({
+      pages: [{
+        content: fhirBundle([heartRateObservation("mismatched-coverage")]),
+        resourceType: "Observation",
+      }],
+      resourceTypes: ["Observation"],
+    });
+    const result = await importClinicalFhirSnapshot(input);
+    const coveragePath = path.join(
+      input.vaultRoot,
+      clinicalRecordCoveragePathForManifestPath(result.manifestPath),
+    );
+    const persistedCoverage = clinicalRecordCoverageSnapshotSchema.parse(
+      JSON.parse(await readFile(coveragePath, "utf8")),
+    );
+    await writeFile(
+      coveragePath,
+      `${JSON.stringify({
+        ...persistedCoverage,
+        fetchedAt: "2026-07-10T12:05:00.000Z",
+      }, null, 2)}\n`,
+      "utf8",
+    );
+
+    const coverage = await readClinicalRecordCoverage({ vaultRoot: input.vaultRoot });
+
+    expect(coverage).toEqual(expect.objectContaining({
+      complete: false,
+      invalidSnapshotCount: 1,
+      snapshotCount: 0,
+    }));
+    expect(coverage.families.every((family) =>
+      family.statuses.length === 1 && family.statuses[0] === "unknown"
+    )).toBe(true);
+  });
+
+  it("truncates and yields preemptibly while scanning a large clinical snapshot tree", async () => {
+    const input = await createSnapshotInput({
+      pages: [{ content: fhirBundle([]), resourceType: "Observation" }],
+      resourceTypes: ["Observation"],
+    });
+    await Promise.all(Array.from({ length: 40 }, async (_, index) => {
+      const suffix = String(index).padStart(3, "0");
+      await writeLegacyClinicalRawSnapshot({
+        ...input,
+        connectionId: `clinical-connection-${suffix}`,
+        retrievalJobId: `retrieval-job-${suffix}`,
+      });
+    }));
+
+    const truncated = await readClinicalRecordCoverage({
+      maxSnapshots: 32,
+      vaultRoot: input.vaultRoot,
+    });
+    expect(truncated).toEqual(expect.objectContaining({
+      complete: false,
+      invalidSnapshotCount: 0,
+      snapshotCount: 32,
+      truncated: true,
+    }));
+
+    let continuationChecks = 0;
+    await expect(readClinicalRecordCoverage({
+      shouldYield: () => {
+        continuationChecks += 1;
+        return continuationChecks >= 8;
+      },
+      vaultRoot: input.vaultRoot,
+    })).rejects.toMatchObject({ name: "AbortError" });
+    expect(continuationChecks).toBe(8);
+  });
+
+  it("honors an already-aborted signal before scanning clinical coverage", async () => {
+    const input = await createSnapshotInput({
+      pages: [{ content: fhirBundle([]), resourceType: "Observation" }],
+      resourceTypes: ["Observation"],
+    });
+    const controller = new AbortController();
+    controller.abort(new DOMException("Foreground work arrived.", "AbortError"));
+
+    await expect(readClinicalRecordCoverage({
+      signal: controller.signal,
+      vaultRoot: input.vaultRoot,
+    })).rejects.toMatchObject({ name: "AbortError" });
+  });
+
+  it.each([
+    {
+      label: "manifest",
+      maxBytes: CLINICAL_RAW_MANIFEST_MAX_BYTES,
+      selectRelativePath: (manifestPath: string) => manifestPath,
+    },
+    {
+      label: "coverage",
+      maxBytes: CLINICAL_RECORD_COVERAGE_MAX_BYTES,
+      selectRelativePath: clinicalRecordCoveragePathForManifestPath,
+    },
+  ])("fails closed on an oversized $label artifact", async ({
+    maxBytes,
+    selectRelativePath,
+  }) => {
+    const input = await createSnapshotInput({
+      pages: [{ content: fhirBundle([]), resourceType: "Observation" }],
+      resourceTypes: ["Observation"],
+    });
+    const result = await importClinicalFhirSnapshot(input);
+    const artifactPath = path.join(
+      input.vaultRoot,
+      selectRelativePath(result.manifestPath),
+    );
+    const validArtifact = await readFile(artifactPath, "utf8");
+    await writeFile(artifactPath, `${validArtifact}${" ".repeat(maxBytes)}`, "utf8");
+
+    await expect(readClinicalRecordCoverage({ vaultRoot: input.vaultRoot }))
+      .resolves.toEqual(expect.objectContaining({
+        complete: false,
+        invalidSnapshotCount: 1,
+        snapshotCount: 0,
+      }));
   });
 
   it("yields to cancellation before persisting a planned snapshot", async () => {
@@ -246,6 +590,11 @@ describe("importClinicalFhirSnapshot", () => {
       resourceType: "observation",
       resourceId,
     })).toBeNull();
+    const coverage = await readClinicalRecordCoverage({ vaultRoot: input.vaultRoot });
+    expect(coverage.families.find((family) => family.resourceType === "Observation"))
+      .toEqual(expect.objectContaining({
+        statuses: ["mapped-for-import"],
+      }));
 
     const resumed = await importClinicalFhirSnapshot({
       ...input,
@@ -724,6 +1073,7 @@ async function expectClinicalRawSnapshotAbsent(
     input.retrievalJobId,
   );
   await expect(access(path.join(snapshotRoot, "manifest.json"))).rejects.toMatchObject({ code: "ENOENT" });
+  await expect(access(path.join(snapshotRoot, "coverage.json"))).rejects.toMatchObject({ code: "ENOENT" });
 
   const ordinalsByResourceType = new Map<string, number>();
   for (const page of input.pages) {
@@ -735,6 +1085,68 @@ async function expectClinicalRawSnapshotAbsent(
       `page-${String(ordinal).padStart(4, "0")}.json`,
     ))).rejects.toMatchObject({ code: "ENOENT" });
   }
+}
+
+async function writeLegacyClinicalRawSnapshot(
+  input: ClinicalFhirSnapshotImportInput,
+): Promise<{
+  manifestContent: string;
+  manifestPath: string;
+}> {
+  const manifestPath = `raw/clinical/fhir/${input.connectionId}/${input.retrievalJobId}/manifest.json`;
+  const ordinalsByResourceType = new Map<string, number>();
+  const resourceFiles = input.pages.map((page) => {
+    const ordinal = (ordinalsByResourceType.get(page.resourceType) ?? 0) + 1;
+    ordinalsByResourceType.set(page.resourceType, ordinal);
+    const relativePath = `${page.resourceType}/page-${String(ordinal).padStart(4, "0")}.json`;
+    return {
+      content: page.content,
+      resourceFile: {
+        resourceType: page.resourceType,
+        relativePath,
+        count: countClinicalFhirPageResources(page.content),
+        sha256: createHash("sha256").update(page.content, "utf8").digest("hex"),
+        ...(page.pageUrlHash ? { pageUrlHash: page.pageUrlHash } : {}),
+        ...(page.nextPageUrlHash ? { nextPageUrlHash: page.nextPageUrlHash } : {}),
+      },
+    };
+  });
+  const manifest = clinicalRawManifestSchema.parse({
+    schemaVersion: "murph.clinical-raw-manifest.v2",
+    kind: "clinical_fhir_retrieval",
+    connectionId: input.connectionId,
+    retrievalJobId: input.retrievalJobId,
+    ...(input.providerDirectoryEntryId
+      ? { providerDirectoryEntryId: input.providerDirectoryEntryId }
+      : {}),
+    sourceSystem: input.sourceSystem,
+    fhirBaseUrlHash: input.fhirBaseUrlHash,
+    patientIdHash: input.patientIdHash,
+    fetchedAt: input.fetchedAt,
+    resourceFiles: resourceFiles.map((page) => page.resourceFile),
+    retrievalScopes: input.retrievalScopes,
+    completedResourceTypes: input.completedResourceTypes,
+    requestedScopes: input.requestedScopes,
+    grantedScopes: input.grantedScopes,
+    ...(input.errors ? { errors: input.errors } : {}),
+  });
+  const manifestContent = `${JSON.stringify(manifest, null, 2)}\n`;
+  const snapshotRoot = path.join(
+    input.vaultRoot,
+    "raw",
+    "clinical",
+    "fhir",
+    input.connectionId,
+    input.retrievalJobId,
+  );
+  for (const page of resourceFiles) {
+    const pagePath = path.join(snapshotRoot, page.resourceFile.relativePath);
+    await mkdir(path.dirname(pagePath), { recursive: true });
+    await writeFile(pagePath, page.content, "utf8");
+  }
+  await mkdir(snapshotRoot, { recursive: true });
+  await writeFile(path.join(snapshotRoot, "manifest.json"), manifestContent, "utf8");
+  return { manifestContent, manifestPath };
 }
 
 function fhirBundle(
@@ -770,6 +1182,41 @@ function heartRateObservation(
       }],
     },
     valueQuantity: { value, unit: "bpm" },
+  };
+}
+
+function reviewOnlyClinicalResource(
+  resourceType: "Condition" | "MedicationRequest",
+  id: string,
+) {
+  return {
+    resourceType,
+    id,
+    meta: { lastUpdated: "2026-07-10T12:00:00.000Z" },
+    subject: { reference: `Patient/${PATIENT_ID}` },
+  };
+}
+
+function unresolvedAllergyResource() {
+  return {
+    resourceType: "AllergyIntolerance",
+    id: "allergy-review",
+    meta: { lastUpdated: "2026-07-10T12:00:00.000Z" },
+    recordedDate: "2026-07-10T11:59:00.000Z",
+    patient: { reference: `Patient/${PATIENT_ID}` },
+    clinicalStatus: {
+      coding: [{
+        system: "http://terminology.hl7.org/CodeSystem/allergyintolerance-clinical",
+        code: "active",
+      }],
+    },
+    verificationStatus: {
+      coding: [{
+        system: "http://terminology.hl7.org/CodeSystem/allergyintolerance-verification",
+        code: "provisional",
+      }],
+    },
+    code: { text: "Allergy awaiting review" },
   };
 }
 

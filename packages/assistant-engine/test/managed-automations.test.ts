@@ -2,8 +2,10 @@ import { beforeEach, describe, expect, it, vi } from 'vitest'
 import {
   HOSTED_RUNTIME_PROCESS_ENV,
 } from '@murphai/hosted-execution/cli-runtime-bridge'
+import { AUTOMATION_SUPPORT_SERIES_RECONCILED_ARCHIVE_TAG } from '@murphai/contracts'
 
 type StoredAutomationRecord = {
+  activeUntil?: string | null
   automationId: string
   assistantTargetOverride?: {
     model?: string | null
@@ -45,6 +47,8 @@ const managedAutomationMocks = vi.hoisted(() => ({
   listAutomations: vi.fn(),
   loadVault: vi.fn(),
   patchAutomation: vi.fn(),
+  prepareExperimentLifecycleAutomations: vi.fn(),
+  reconcileAutomationSupportSeriesNamespace: vi.fn(),
   records: new Map<string, StoredAutomationRecord>(),
   showAutomation: vi.fn(),
   upsertAutomation: vi.fn(),
@@ -54,8 +58,15 @@ vi.mock('@murphai/core', () => ({
   listAutomations: managedAutomationMocks.listAutomations,
   loadVault: managedAutomationMocks.loadVault,
   patchAutomation: managedAutomationMocks.patchAutomation,
+  reconcileAutomationSupportSeriesNamespace:
+    managedAutomationMocks.reconcileAutomationSupportSeriesNamespace,
   showAutomation: managedAutomationMocks.showAutomation,
   upsertAutomation: managedAutomationMocks.upsertAutomation,
+}))
+
+vi.mock('../src/assistant/experiment-support-automations.ts', () => ({
+  prepareExperimentLifecycleAutomations:
+    managedAutomationMocks.prepareExperimentLifecycleAutomations,
 }))
 
 vi.mock('@murphai/operator-config/operator-config', () => ({
@@ -169,6 +180,9 @@ const legacyOnboardingFollowupInstructions = [
 ].join('\n')
 
 beforeEach(() => {
+  managedAutomationMocks.prepareExperimentLifecycleAutomations
+    .mockReset()
+    .mockResolvedValue({ processedCount: 0, seeds: [] })
   managedAutomationMocks.loadVault
     .mockReset()
     .mockResolvedValue({
@@ -208,6 +222,7 @@ beforeEach(() => {
   managedAutomationMocks.upsertAutomation
     .mockReset()
     .mockImplementation(async (input: {
+      activeUntil?: string | null
       automationId?: string
       assistantTargetOverride?: StoredAutomationRecord['assistantTargetOverride']
       continuityPolicy: 'fresh' | 'preserve'
@@ -223,6 +238,10 @@ beforeEach(() => {
       const automationId = input.automationId ?? `automation_${managedAutomationMocks.records.size + 1}`
       const existing = managedAutomationMocks.records.get(automationId) ?? null
       const record: StoredAutomationRecord = {
+        activeUntil:
+          input.activeUntil === undefined
+            ? existing?.activeUntil ?? null
+            : input.activeUntil,
         automationId,
         assistantTargetOverride:
           input.assistantTargetOverride === undefined
@@ -293,9 +312,483 @@ beforeEach(() => {
         record,
       }
     })
+  managedAutomationMocks.reconcileAutomationSupportSeriesNamespace
+    .mockReset()
+    .mockImplementation(async (input: {
+      desiredSeries: Array<{
+        desiredAutomationIds: string[]
+        supportSeriesTag: string
+      }>
+      seriesIdPrefix: string
+      shouldYield?: (() => boolean) | null
+    }) => {
+      const desiredIdsByTag = new Map(
+        input.desiredSeries.map((series) => [
+          series.supportSeriesTag,
+          new Set(series.desiredAutomationIds),
+        ]),
+      )
+      let archivedCount = 0
+      let matchedCount = 0
+      for (const record of managedAutomationMocks.records.values()) {
+        const supportSeriesTag = record.tags.find((tag) =>
+          tag.startsWith(`system:support-series:${input.seriesIdPrefix}`)
+        )
+        if (!supportSeriesTag) {
+          continue
+        }
+        matchedCount += 1
+        if (
+          desiredIdsByTag.get(supportSeriesTag)?.has(record.automationId) !== true &&
+          record.status === 'active'
+        ) {
+          record.status = 'archived'
+          if (!record.tags.includes(AUTOMATION_SUPPORT_SERIES_RECONCILED_ARCHIVE_TAG)) {
+            record.tags.push(AUTOMATION_SUPPORT_SERIES_RECONCILED_ARCHIVE_TAG)
+          }
+          archivedCount += 1
+        }
+      }
+      return {
+        archivedCount,
+        auditPath: archivedCount > 0 ? 'audit/mock-support-series.jsonl' : null,
+        matchedCount,
+        missingDesiredAutomationIds: [],
+        unchangedCount: matchedCount - archivedCount,
+      }
+    })
 })
 
 describe('applyMurphManagedAutomations', () => {
+  it('stops seed writes at a foreground yield boundary and resumes without duplicating partial state', async () => {
+    const seeds: MurphManagedAutomationSeed[] = [
+      {
+        automationId: 'automation_preemption_first',
+        continuityPolicy: 'fresh',
+        instructions: 'Create the first bounded maintenance record.',
+        schedule: { kind: 'at', at: '2026-06-10T13:00:00.000Z' },
+        slug: 'preemption-first',
+        title: 'Preemption first',
+      },
+      {
+        automationId: 'automation_preemption_second',
+        continuityPolicy: 'fresh',
+        instructions: 'Create the second bounded maintenance record.',
+        schedule: { kind: 'at', at: '2026-06-10T14:00:00.000Z' },
+        slug: 'preemption-second',
+        title: 'Preemption second',
+      },
+    ]
+    const shouldYield = vi.fn(
+      () => managedAutomationMocks.upsertAutomation.mock.calls.length >= 1,
+    )
+
+    await expect(applyMurphManagedAutomations({
+      defaultRoute,
+      now: new Date('2026-06-09T12:00:00.000Z'),
+      seeds,
+      shouldYield,
+      vaultRoot,
+    })).resolves.toEqual({
+      created: 1,
+      skipped: 0,
+      updated: 0,
+      yielded: true,
+    })
+    expect(managedAutomationMocks.records.has(seeds[0]!.automationId)).toBe(true)
+    expect(managedAutomationMocks.records.has(seeds[1]!.automationId)).toBe(false)
+    expect(managedAutomationMocks.reconcileAutomationSupportSeriesNamespace)
+      .not.toHaveBeenCalled()
+
+    await expect(applyMurphManagedAutomations({
+      defaultRoute,
+      now: new Date('2026-06-09T12:00:01.000Z'),
+      seeds,
+      shouldYield: () => false,
+      vaultRoot,
+    })).resolves.toEqual({
+      created: 1,
+      skipped: 1,
+      updated: 0,
+    })
+    expect(managedAutomationMocks.records.has(seeds[0]!.automationId)).toBe(true)
+    expect(managedAutomationMocks.records.has(seeds[1]!.automationId)).toBe(true)
+  })
+
+  it('threads the foreground yield hook through experiment lifecycle preparation', async () => {
+    let shouldYieldNow = false
+    const shouldYield = vi.fn(() => shouldYieldNow)
+    managedAutomationMocks.prepareExperimentLifecycleAutomations
+      .mockImplementationOnce(async (input) => {
+        expect(input.shouldYield).toBe(shouldYield)
+        shouldYieldNow = true
+        return { processedCount: 0, seeds: [], yielded: true }
+      })
+
+    await expect(applyMurphManagedAutomations({
+      defaultRoute,
+      now: new Date('2026-06-09T12:00:00.000Z'),
+      shouldYield,
+      vaultRoot,
+    })).resolves.toEqual({
+      created: 0,
+      skipped: 0,
+      updated: 0,
+      yielded: true,
+    })
+    expect(managedAutomationMocks.showAutomation).not.toHaveBeenCalled()
+    expect(managedAutomationMocks.upsertAutomation).not.toHaveBeenCalled()
+  })
+
+  it('keeps desired experiment support members and archives exact stale series members', async () => {
+    const desiredSeriesTag =
+      'system:support-series:experiment-lifecycle:exp_DESIRED_SUPPORT_SERIES'
+    const progressSeed: MurphManagedAutomationSeed = {
+      automationId: 'automation_desired_progress',
+      continuityPolicy: 'fresh',
+      instructions: 'Send the desired progress milestone.',
+      schedule: { kind: 'at', at: '2026-06-09T13:00:00.000Z' },
+      slug: 'experiment-progress-desired-day-4',
+      tags: ['experiment', 'progress-card', desiredSeriesTag],
+      title: 'First progress · Desired',
+    }
+    const finalSeed: MurphManagedAutomationSeed = {
+      automationId: 'automation_desired_final',
+      continuityPolicy: 'fresh',
+      instructions: 'Send the required final review.',
+      schedule: { kind: 'at', at: '2026-06-10T13:00:00.000Z' },
+      slug: 'experiment-final-results-desired',
+      tags: [
+        'experiment',
+        'final-results',
+        desiredSeriesTag,
+        ASSISTANT_REQUIRE_SEND_AUTOMATION_TAG,
+      ],
+      title: 'Final results · Desired',
+    }
+    managedAutomationMocks.prepareExperimentLifecycleAutomations.mockResolvedValueOnce({
+      processedCount: 0,
+      seeds: [progressSeed, finalSeed],
+    })
+
+    const staleSameSeries: StoredAutomationRecord = {
+      automationId: 'automation_stale_same_series',
+      continuityPolicy: 'fresh',
+      instructions: 'Obsolete support step.',
+      route: defaultRoute,
+      schedule: { kind: 'at', at: '2026-06-11T13:00:00.000Z' },
+      slug: 'experiment-obsolete-desired',
+      status: 'active',
+      summary: null,
+      tags: ['assistant', 'scheduled', 'murph-managed', desiredSeriesTag],
+      title: 'Obsolete support step',
+    }
+    const inactiveSeries: StoredAutomationRecord = {
+      ...staleSameSeries,
+      automationId: 'automation_inactive_series_final',
+      slug: 'experiment-final-results-inactive',
+      tags: [
+        'assistant',
+        'scheduled',
+        'murph-managed',
+        'system:support-series:experiment-lifecycle:exp_INACTIVE_SUPPORT_SERIES',
+      ],
+      title: 'Inactive final results',
+    }
+    const outsideNamespace: StoredAutomationRecord = {
+      ...staleSameSeries,
+      automationId: 'automation_outside_experiment_namespace',
+      slug: 'outside-experiment-support',
+      tags: [
+        'assistant',
+        'scheduled',
+        'murph-managed',
+        'system:support-series:experiment:exp_MANUAL_SUPPORT_SERIES',
+      ],
+      title: 'Outside experiment namespace',
+    }
+    managedAutomationMocks.records.set(staleSameSeries.automationId, staleSameSeries)
+    managedAutomationMocks.records.set(inactiveSeries.automationId, inactiveSeries)
+    managedAutomationMocks.records.set(outsideNamespace.automationId, outsideNamespace)
+
+    const result = await applyMurphManagedAutomations({
+      defaultRoute,
+      now: new Date('2026-06-09T12:00:00.000Z'),
+      vaultRoot,
+    })
+
+    expect(managedAutomationMocks.reconcileAutomationSupportSeriesNamespace)
+      .toHaveBeenCalledWith({
+        desiredSeries: [{
+          desiredAutomationIds: [
+            progressSeed.automationId,
+            finalSeed.automationId,
+          ],
+          supportSeriesTag: desiredSeriesTag,
+        }],
+        now: new Date('2026-06-09T12:00:00.000Z'),
+        seriesIdPrefix: 'experiment-lifecycle:',
+        shouldYield: null,
+        vaultRoot,
+      })
+    expect(managedAutomationMocks.records.get(progressSeed.automationId)?.status)
+      .toBe('active')
+    expect(managedAutomationMocks.records.get(finalSeed.automationId)?.tags)
+      .toContain(ASSISTANT_REQUIRE_SEND_AUTOMATION_TAG)
+    expect(managedAutomationMocks.records.get(staleSameSeries.automationId)?.status)
+      .toBe('archived')
+    expect(managedAutomationMocks.records.get(inactiveSeries.automationId)?.status)
+      .toBe('archived')
+    expect(managedAutomationMocks.records.get(outsideNamespace.automationId)?.status)
+      .toBe('active')
+    expect(result.updated).toBe(2)
+  })
+
+  it('propagates an owner-level support reconciliation yield without applying archive counts', async () => {
+    const shouldYield = vi.fn(() => false)
+    managedAutomationMocks.reconcileAutomationSupportSeriesNamespace
+      .mockImplementationOnce(async (input) => {
+        expect(input.shouldYield).toBe(shouldYield)
+        return {
+          archivedCount: 0,
+          auditPath: null,
+          matchedCount: 0,
+          missingDesiredAutomationIds: [],
+          unchangedCount: 0,
+          yielded: true as const,
+        }
+      })
+
+    await expect(applyMurphManagedAutomations({
+      defaultRoute,
+      now: new Date('2026-06-09T12:00:00.000Z'),
+      shouldYield,
+      vaultRoot,
+    })).resolves.toMatchObject({
+      yielded: true,
+      updated: 0,
+    })
+  })
+
+  it('propagates experiment support reconciliation failures after partial setup', async () => {
+    const reconciliationFailure = new Error('support series reconciliation failed')
+    managedAutomationMocks.reconcileAutomationSupportSeriesNamespace
+      .mockRejectedValueOnce(reconciliationFailure)
+
+    await expect(applyMurphManagedAutomations({
+      defaultRoute,
+      now: new Date('2026-06-09T12:00:00.000Z'),
+      vaultRoot,
+    })).rejects.toBe(reconciliationFailure)
+    expect(managedAutomationMocks.upsertAutomation).toHaveBeenCalled()
+  })
+
+  it('reactivates a future lifecycle review after consent is revoked then restored', async () => {
+    const supportSeriesTag =
+      'system:support-series:experiment-lifecycle:exp_RECONSENT'
+    const finalSeed: MurphManagedAutomationSeed = {
+      activeUntil: '2026-06-17T13:00:00.000Z',
+      automationId: 'automation_reconsent_final',
+      continuityPolicy: 'fresh',
+      instructions: 'Send the consented final review.',
+      schedule: { kind: 'at', at: '2026-06-10T13:00:00.000Z' },
+      slug: 'experiment-final-results-reconsent',
+      tags: [
+        'experiment',
+        'final-results',
+        supportSeriesTag,
+        ASSISTANT_REQUIRE_SEND_AUTOMATION_TAG,
+      ],
+      title: 'Final results · Reconsent',
+    }
+    managedAutomationMocks.records.set(finalSeed.automationId, {
+      activeUntil: finalSeed.activeUntil,
+      automationId: finalSeed.automationId,
+      continuityPolicy: 'fresh',
+      instructions: finalSeed.instructions,
+      route: defaultRoute,
+      schedule: finalSeed.schedule,
+      slug: finalSeed.slug,
+      status: 'active',
+      summary: null,
+      tags: ['assistant', 'scheduled', 'murph-managed', ...(finalSeed.tags ?? [])],
+      title: finalSeed.title,
+    })
+    managedAutomationMocks.prepareExperimentLifecycleAutomations
+      .mockResolvedValueOnce({ processedCount: 0, seeds: [] })
+      .mockResolvedValueOnce({ processedCount: 0, seeds: [finalSeed] })
+
+    await applyMurphManagedAutomations({
+      defaultRoute,
+      now: new Date('2026-06-09T10:00:00.000Z'),
+      vaultRoot,
+    })
+    expect(managedAutomationMocks.records.get(finalSeed.automationId)).toMatchObject({
+      status: 'archived',
+      tags: expect.arrayContaining([
+        AUTOMATION_SUPPORT_SERIES_RECONCILED_ARCHIVE_TAG,
+      ]),
+    })
+
+    await applyMurphManagedAutomations({
+      defaultRoute,
+      now: new Date('2026-06-09T11:00:00.000Z'),
+      vaultRoot,
+    })
+    expect(managedAutomationMocks.records.get(finalSeed.automationId)).toMatchObject({
+      status: 'active',
+      tags: expect.not.arrayContaining([
+        AUTOMATION_SUPPORT_SERIES_RECONCILED_ARCHIVE_TAG,
+      ]),
+    })
+    expect(managedAutomationMocks.upsertAutomation).toHaveBeenCalledWith(
+      expect.objectContaining({
+        automationId: finalSeed.automationId,
+        status: 'active',
+      }),
+    )
+  })
+
+  it('reactivates a future progress milestone after an experiment pauses then resumes', async () => {
+    const supportSeriesTag =
+      'system:support-series:experiment-lifecycle:exp_RESUMED'
+    const progressSeed: MurphManagedAutomationSeed = {
+      automationId: 'automation_resumed_progress',
+      continuityPolicy: 'fresh',
+      instructions: 'Send the resumed progress milestone.',
+      schedule: { kind: 'at', at: '2026-06-10T13:00:00.000Z' },
+      slug: 'experiment-progress-resumed-day-4',
+      tags: ['experiment', 'progress-card', 'milestone', supportSeriesTag],
+      title: 'First progress · Resumed',
+    }
+    managedAutomationMocks.records.set(progressSeed.automationId, {
+      automationId: progressSeed.automationId,
+      continuityPolicy: 'fresh',
+      instructions: progressSeed.instructions,
+      route: defaultRoute,
+      schedule: progressSeed.schedule,
+      slug: progressSeed.slug,
+      status: 'active',
+      summary: null,
+      tags: ['assistant', 'scheduled', 'murph-managed', ...(progressSeed.tags ?? [])],
+      title: progressSeed.title,
+    })
+    managedAutomationMocks.prepareExperimentLifecycleAutomations
+      .mockResolvedValueOnce({ processedCount: 0, seeds: [] })
+      .mockResolvedValueOnce({ processedCount: 0, seeds: [progressSeed] })
+
+    await applyMurphManagedAutomations({
+      defaultRoute,
+      now: new Date('2026-06-09T10:00:00.000Z'),
+      vaultRoot,
+    })
+    expect(managedAutomationMocks.records.get(progressSeed.automationId)?.status)
+      .toBe('archived')
+
+    await applyMurphManagedAutomations({
+      defaultRoute,
+      now: new Date('2026-06-09T11:00:00.000Z'),
+      vaultRoot,
+    })
+    expect(managedAutomationMocks.records.get(progressSeed.automationId)).toMatchObject({
+      status: 'active',
+      tags: expect.not.arrayContaining([
+        AUTOMATION_SUPPORT_SERIES_RECONCILED_ARCHIVE_TAG,
+      ]),
+    })
+  })
+
+  it('never reactivates a consumed lifecycle one-shot archived without reconcile ownership', async () => {
+    const supportSeriesTag =
+      'system:support-series:experiment-lifecycle:exp_CONSUMED'
+    const consumedSeed: MurphManagedAutomationSeed = {
+      activeUntil: '2026-06-17T13:00:00.000Z',
+      automationId: 'automation_consumed_final',
+      continuityPolicy: 'fresh',
+      instructions: 'Do not deliver this consumed review again.',
+      schedule: { kind: 'at', at: '2026-06-10T13:00:00.000Z' },
+      slug: 'experiment-final-results-consumed',
+      tags: ['experiment', 'final-results', supportSeriesTag],
+      title: 'Final results · Consumed',
+    }
+    managedAutomationMocks.records.set(consumedSeed.automationId, {
+      activeUntil: consumedSeed.activeUntil,
+      automationId: consumedSeed.automationId,
+      continuityPolicy: 'fresh',
+      instructions: consumedSeed.instructions,
+      route: defaultRoute,
+      schedule: consumedSeed.schedule,
+      slug: consumedSeed.slug,
+      status: 'archived',
+      summary: null,
+      tags: ['assistant', 'scheduled', 'murph-managed', ...(consumedSeed.tags ?? [])],
+      title: consumedSeed.title,
+    })
+    managedAutomationMocks.prepareExperimentLifecycleAutomations.mockResolvedValueOnce({
+      processedCount: 0,
+      seeds: [consumedSeed],
+    })
+
+    await applyMurphManagedAutomations({
+      defaultRoute,
+      now: new Date('2026-06-09T11:00:00.000Z'),
+      vaultRoot,
+    })
+
+    expect(managedAutomationMocks.records.get(consumedSeed.automationId)?.status)
+      .toBe('archived')
+    expect(managedAutomationMocks.upsertAutomation).not.toHaveBeenCalledWith(
+      expect.objectContaining({ automationId: consumedSeed.automationId }),
+    )
+  })
+
+  it('does not reactivate a reconcile-marked lifecycle one-shot at its fire boundary', async () => {
+    const supportSeriesTag =
+      'system:support-series:experiment-lifecycle:exp_BOUNDARY'
+    const boundarySeed: MurphManagedAutomationSeed = {
+      activeUntil: '2026-06-17T13:00:00.000Z',
+      automationId: 'automation_reactivation_boundary',
+      continuityPolicy: 'fresh',
+      instructions: 'Do not resurrect at the fire boundary.',
+      schedule: { kind: 'at', at: '2026-06-10T13:00:00.000Z' },
+      slug: 'experiment-final-results-reactivation-boundary',
+      tags: ['experiment', 'final-results', supportSeriesTag],
+      title: 'Final results · Reactivation Boundary',
+    }
+    managedAutomationMocks.records.set(boundarySeed.automationId, {
+      activeUntil: boundarySeed.activeUntil,
+      automationId: boundarySeed.automationId,
+      continuityPolicy: 'fresh',
+      instructions: boundarySeed.instructions,
+      route: defaultRoute,
+      schedule: boundarySeed.schedule,
+      slug: boundarySeed.slug,
+      status: 'archived',
+      summary: null,
+      tags: [
+        'assistant',
+        'scheduled',
+        'murph-managed',
+        ...(boundarySeed.tags ?? []),
+        AUTOMATION_SUPPORT_SERIES_RECONCILED_ARCHIVE_TAG,
+      ],
+      title: boundarySeed.title,
+    })
+    managedAutomationMocks.prepareExperimentLifecycleAutomations.mockResolvedValueOnce({
+      processedCount: 0,
+      seeds: [boundarySeed],
+    })
+
+    await applyMurphManagedAutomations({
+      defaultRoute,
+      now: new Date('2026-06-10T13:00:00.000Z'),
+      vaultRoot,
+    })
+
+    expect(managedAutomationMocks.records.get(boundarySeed.automationId)?.status)
+      .toBe('archived')
+  })
+
   it('keeps the managed weekly health insight seed as the baseline Sunday noon recurrence', () => {
     const insightSeed = MURPH_MANAGED_AUTOMATIONS.find(
       (seed) => seed.automationId === MURPH_WEEKLY_HEALTH_INSIGHT_AUTOMATION_ID,
@@ -312,6 +805,18 @@ describe('applyMurphManagedAutomations', () => {
     expect(insightSeed.instructions).not.toContain('Sunday at noon local time')
     expect(insightSeed.instructions).not.toContain('Wednesday')
     expect(insightSeed.instructions).not.toContain('Friday at 2:30 PM local time')
+    expect(insightSeed.instructions).toContain(
+      'A consumer sleep-stage estimate by itself is never a weekly finding or reason to coach.',
+    )
+    expect(insightSeed.instructions).toContain(
+      'One weekly window or a repeated correlation can support "lined up with" or "was associated with," not "caused," "explains," or "proved."',
+    )
+    expect(insightSeed.instructions).toContain(
+      'Check plausible alternatives and confounders.',
+    )
+    expect(insightSeed.instructions).not.toContain(
+      'The recovery dip looked tied to stacking hard days',
+    )
 
     const nextRunAt = findNextAssistantCronOccurrence(
       insightSeed.schedule.expression,
@@ -358,6 +863,19 @@ describe('applyMurphManagedAutomations', () => {
     expect(seed.instructions).toContain(
       'Never infer absence of a behavior from absence of data',
     )
+    expect(seed.instructions).toContain(
+      'Repeatedly short sleep opportunity, materially irregular sleep timing, or disrupted sleep paired with daytime impact.',
+    )
+    expect(seed.instructions).toContain(
+      'consumer deep/REM estimates and vendor sleep scores cannot create an opportunity on their own',
+    )
+    expect(seed.instructions).toContain(
+      'Do not use population sleep-stage targets as the rationale.',
+    )
+    expect(seed.instructions).not.toContain(
+      'Deep sleep or total sleep consistently well below typical reference ranges.',
+    )
+    expect(seed.instructions).not.toContain('most adults get 1.5 to 2 hours')
 
     const nextRunAt = findNextAssistantCronOccurrence(
       seed.schedule.expression,
@@ -594,7 +1112,7 @@ describe('applyMurphManagedAutomations', () => {
     expect(insightRecord?.instructions).toContain('plain adult language')
     expect(insightRecord?.instructions).toContain('clear claim anchored in recognizable context')
     expect(insightRecord?.instructions).toContain('Use dates for traceability, not as the story')
-    expect(insightRecord?.instructions).toContain('Name the outcome before contrasting causes')
+    expect(insightRecord?.instructions).toContain('Name the outcome before contrasting inputs')
     expect(insightRecord?.instructions).toContain('simple translation')
     expect(insightRecord?.instructions).toContain('raw biomarker names')
     expect(insightRecord?.instructions).toContain('TSH is the brain\'s signal')
@@ -1706,7 +2224,11 @@ describe('applyMurphManagedAutomations', () => {
     )
   })
 
-  it('skips creation when no deliverable route exists', async () => {
+  it('runs due-outcome maintenance even when no deliverable route exists', async () => {
+    managedAutomationMocks.prepareExperimentLifecycleAutomations.mockResolvedValueOnce({
+      processedCount: 1,
+      seeds: [],
+    })
     const result = await applyMurphManagedAutomations({
       defaultRoute: null,
       now: new Date('2026-06-09T12:00:00.000Z'),
@@ -1717,6 +2239,13 @@ describe('applyMurphManagedAutomations', () => {
       created: 0,
       skipped: 5,
       updated: 0,
+    })
+    expect(
+      managedAutomationMocks.prepareExperimentLifecycleAutomations,
+    ).toHaveBeenCalledWith({
+      now: new Date('2026-06-09T12:00:00.000Z'),
+      shouldYield: null,
+      vaultRoot,
     })
     expect(managedAutomationMocks.upsertAutomation).not.toHaveBeenCalled()
   })
@@ -2063,4 +2592,65 @@ describe('applyMurphManagedAutomations', () => {
     })
     expect(managedAutomationMocks.upsertAutomation).not.toHaveBeenCalled()
   })
+
+  it('keeps a required one-shot installable until its finite active boundary', async () => {
+    const requiredFinalSeed: MurphManagedAutomationSeed = {
+      activeUntil: '2026-06-16T12:00:00.000Z',
+      automationId: 'automation_required_final_window',
+      continuityPolicy: 'fresh',
+      instructions: 'Deliver the required final experiment review.',
+      schedule: { kind: 'at', at: '2026-06-09T12:00:00.000Z' },
+      slug: 'experiment-final-results-required-window',
+      tags: ['experiment', 'final-results', ASSISTANT_REQUIRE_SEND_AUTOMATION_TAG],
+      title: 'Final results · Required window',
+    }
+
+    await expect(applyMurphManagedAutomations({
+      defaultRoute,
+      // Six days after the fire is beyond the generic one-hour window but
+      // still inside this required review's explicit seven-day boundary.
+      now: new Date('2026-06-15T12:00:00.000Z'),
+      seeds: [requiredFinalSeed],
+      vaultRoot,
+    })).resolves.toEqual({
+      created: 1,
+      skipped: 0,
+      updated: 0,
+    })
+    expect(managedAutomationMocks.records.get(requiredFinalSeed.automationId))
+      .toMatchObject({ activeUntil: requiredFinalSeed.activeUntil })
+
+    const extendedSeed = {
+      ...requiredFinalSeed,
+      activeUntil: '2026-06-17T12:00:00.000Z',
+    }
+    await expect(applyMurphManagedAutomations({
+      defaultRoute,
+      now: new Date('2026-06-15T12:05:00.000Z'),
+      seeds: [extendedSeed],
+      vaultRoot,
+    })).resolves.toEqual({
+      created: 0,
+      skipped: 0,
+      updated: 1,
+    })
+    expect(managedAutomationMocks.records.get(requiredFinalSeed.automationId))
+      .toMatchObject({ activeUntil: extendedSeed.activeUntil })
+
+    managedAutomationMocks.records.clear()
+    managedAutomationMocks.upsertAutomation.mockClear()
+    await expect(applyMurphManagedAutomations({
+      defaultRoute,
+      // The boundary is exclusive: no new stale support is installed at it.
+      now: new Date(extendedSeed.activeUntil),
+      seeds: [extendedSeed],
+      vaultRoot,
+    })).resolves.toEqual({
+      created: 0,
+      skipped: 1,
+      updated: 0,
+    })
+    expect(managedAutomationMocks.upsertAutomation).not.toHaveBeenCalled()
+  })
+
 })

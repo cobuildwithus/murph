@@ -1,8 +1,13 @@
 import os from "node:os";
 import path from "node:path";
-import { promises as fs } from "node:fs";
+import { existsSync, promises as fs, readdirSync } from "node:fs";
 
 import { afterEach, describe, expect, it } from "vitest";
+
+import {
+  AUTOMATION_SUPPORT_SERIES_RECONCILED_ARCHIVE_TAG,
+  buildAutomationSupportSeriesTag,
+} from "@murphai/contracts";
 
 import { parseFrontmatterDocument } from "../src/frontmatter.ts";
 import {
@@ -11,15 +16,20 @@ import {
 } from "../src/markdown-documents.ts";
 import {
   advanceAutomationDeviceActivityCursor,
+  archiveAutomationIfActiveUntilElapsed,
   buildAutomationMarkdownPreview,
   listAutomations,
   patchAutomation,
   readAutomation,
   readAutomationMarkdown,
+  reconcileAutomationSupportSeriesNamespace,
   scaffoldAutomationPayload,
   showAutomation,
   upsertAutomation,
 } from "../src/automation.ts";
+import {
+  reconcileAutomationSupportSeries as reconcileAutomationSupportSeriesFromPackageRoot,
+} from "../src/index.ts";
 
 async function createTempVaultRoot(): Promise<string> {
   return fs.mkdtemp(path.join(os.tmpdir(), "murph-core-markdown-"));
@@ -55,6 +65,10 @@ afterEach(async () => {
 });
 
 describe("markdown document primitives", () => {
+  it("exports support-series reconciliation from the package root", () => {
+    expect(reconcileAutomationSupportSeriesFromPackageRoot).toBeTypeOf("function");
+  });
+
   it("rejects invalid automation assistant reasoning effort before writing", async () => {
     const vaultRoot = await makeVaultRoot();
     const invalidInput = JSON.parse(JSON.stringify({
@@ -257,6 +271,330 @@ describe("markdown document primitives", () => {
     });
 
     expect(updated.record.tags).toEqual(["sleep", "recovery"]);
+  });
+
+  it("round-trips activeUntil and archives only the current elapsed definition", async () => {
+    const vaultRoot = await makeVaultRoot();
+    const created = await upsertAutomation({
+      vaultRoot,
+      now: new Date("2026-07-01T00:00:00.000Z"),
+      ...createAutomationPayload({
+        activeUntil: "2026-07-10T00:00:00.000Z",
+      }),
+    });
+
+    expect(created.record.activeUntil).toBe("2026-07-10T00:00:00.000Z");
+    const extended = await patchAutomation({
+      vaultRoot,
+      lookup: created.record.automationId,
+      activeUntil: "2026-07-12T00:00:00.000Z",
+      now: new Date("2026-07-02T00:00:00.000Z"),
+    });
+    const stale = await archiveAutomationIfActiveUntilElapsed({
+      vaultRoot,
+      lookup: created.record.automationId,
+      expectedUpdatedAt: created.record.updatedAt,
+      now: new Date("2026-07-12T00:00:00.000Z"),
+    });
+    expect(stale.archived).toBe(false);
+    expect(stale.record.activeUntil).toBe("2026-07-12T00:00:00.000Z");
+    expect(stale.record.status).toBe("active");
+
+    const archived = await archiveAutomationIfActiveUntilElapsed({
+      vaultRoot,
+      lookup: created.record.automationId,
+      expectedUpdatedAt: extended.record.updatedAt,
+      now: new Date("2026-07-12T00:00:00.000Z"),
+    });
+    expect(archived.archived).toBe(true);
+    expect(archived.record.status).toBe("archived");
+    expect(archived.record.activeUntil).toBe("2026-07-12T00:00:00.000Z");
+
+    const repeated = await archiveAutomationIfActiveUntilElapsed({
+      vaultRoot,
+      lookup: created.record.automationId,
+      now: new Date("2026-07-13T00:00:00.000Z"),
+    });
+    expect(repeated.archived).toBe(false);
+    expect(repeated.record.status).toBe("archived");
+
+    await expect(archiveAutomationIfActiveUntilElapsed({
+      vaultRoot,
+      lookup: created.record.automationId,
+      now: new Date(Number.NaN),
+    })).rejects.toThrow(/now must be a valid Date/u);
+
+    const boundedOneShot = await upsertAutomation({
+      vaultRoot,
+      ...createAutomationPayload({
+        activeUntil: "2026-07-09T00:00:01.000Z",
+        schedule: {
+          kind: "at",
+          at: "2026-07-09T00:00:00.000Z",
+        },
+      }),
+    });
+    expect(boundedOneShot.record.activeUntil).toBe("2026-07-09T00:00:01.000Z");
+    await expect(upsertAutomation({
+      vaultRoot,
+      ...createAutomationPayload({
+        activeUntil: "2026-07-09T00:00:00.000Z",
+        schedule: {
+          kind: "at",
+          at: "2026-07-09T00:00:00.000Z",
+        },
+      }),
+    })).rejects.toThrow(/activeUntil must be after schedule\.at/u);
+  });
+
+  it("allows first support-series assignment but preserves ownership thereafter", async () => {
+    const vaultRoot = await makeVaultRoot();
+    const supportSeriesTag = buildAutomationSupportSeriesTag("experiment:exp_sleep");
+    const created = await upsertAutomation({
+      vaultRoot,
+      ...createAutomationPayload({ tags: ["assistant"] }),
+    });
+    const assigned = await patchAutomation({
+      vaultRoot,
+      lookup: created.record.automationId,
+      tags: ["assistant", supportSeriesTag],
+    });
+    expect(assigned.record.tags).toContain(supportSeriesTag);
+
+    await expect(patchAutomation({
+      vaultRoot,
+      lookup: created.record.automationId,
+      tags: ["assistant"],
+    })).rejects.toThrow(/support series ownership cannot be removed or replaced/u);
+    await expect(patchAutomation({
+      vaultRoot,
+      lookup: created.record.automationId,
+      tags: ["assistant", buildAutomationSupportSeriesTag("experiment:exp_other")],
+    })).rejects.toThrow(/support series ownership cannot be removed or replaced/u);
+  });
+
+  it("rejects a forged reconcile-owned archive marker", async () => {
+    const vaultRoot = await makeVaultRoot();
+
+    await expect(upsertAutomation({
+      vaultRoot,
+      ...createAutomationPayload({
+        tags: [AUTOMATION_SUPPORT_SERIES_RECONCILED_ARCHIVE_TAG],
+      }),
+    })).rejects.toThrow(/reserved for internal reconciliation/u);
+  });
+
+  it("reconciles every support-series member beyond 200 and is idempotent", async () => {
+    const vaultRoot = await makeVaultRoot();
+    const automationsDirectory = path.join(vaultRoot, "bank", "automations");
+    await fs.mkdir(automationsDirectory, { recursive: true });
+    const keptAutomationId = "automation_support_000";
+    const currentTag = buildAutomationSupportSeriesTag("experiment:exp_current");
+    const deletedTag = buildAutomationSupportSeriesTag("experiment:exp_deleted");
+    await Promise.all(
+      Array.from({ length: 205 }, async (_, index) => {
+        const suffix = String(index).padStart(3, "0");
+        const slug = `support-${suffix}`;
+        const markdown = buildAutomationMarkdownPreview(createAutomationPayload({
+          automationId: `automation_support_${suffix}`,
+          slug,
+          title: `Support ${suffix}`,
+          tags: [index < 201 ? currentTag : deletedTag],
+        }));
+        await fs.writeFile(path.join(automationsDirectory, `${slug}.md`), markdown, "utf8");
+      }),
+    );
+
+    let readChecks = 0;
+    const yieldedDuringRead = await reconcileAutomationSupportSeriesNamespace({
+      vaultRoot,
+      seriesIdPrefix: "experiment:",
+      desiredSeries: [{
+        supportSeriesTag: currentTag,
+        desiredAutomationIds: [keptAutomationId],
+      }],
+      now: new Date("2026-07-13T00:00:00.000Z"),
+      shouldYield: () => {
+        readChecks += 1;
+        return readChecks >= 25;
+      },
+    });
+    expect(yieldedDuringRead).toMatchObject({
+      archivedCount: 0,
+      matchedCount: 0,
+      unchangedCount: 0,
+      yielded: true,
+    });
+    expect(existsSync(path.join(vaultRoot, ".runtime", "operations"))).toBe(false);
+
+    const yielded = await reconcileAutomationSupportSeriesNamespace({
+      vaultRoot,
+      seriesIdPrefix: "experiment:",
+      desiredSeries: [{
+        supportSeriesTag: currentTag,
+        desiredAutomationIds: [keptAutomationId],
+      }],
+      now: new Date("2026-07-14T00:00:00.000Z"),
+      shouldYield: () => {
+        const operationsRoot = path.join(vaultRoot, ".runtime", "operations");
+        if (!existsSync(operationsRoot)) {
+          return false;
+        }
+        return readdirSync(operationsRoot, { withFileTypes: true }).some((entry) => {
+          if (!entry.isDirectory()) {
+            return false;
+          }
+          const payloadRoot = path.join(operationsRoot, entry.name, "payloads");
+          return existsSync(payloadRoot) && readdirSync(payloadRoot).length > 0;
+        });
+      },
+    });
+    expect(yielded).toEqual({
+      archivedCount: 0,
+      auditPath: null,
+      matchedCount: 0,
+      missingDesiredAutomationIds: [],
+      unchangedCount: 0,
+      yielded: true,
+    });
+    const unchangedAfterYield = await listAutomations({ vaultRoot });
+    expect(unchangedAfterYield.items.every((record) => record.status === "active")).toBe(true);
+    expect(unchangedAfterYield.items.some((record) =>
+      record.tags.includes(AUTOMATION_SUPPORT_SERIES_RECONCILED_ARCHIVE_TAG)
+    )).toBe(false);
+
+    const reconciled = await reconcileAutomationSupportSeriesNamespace({
+      vaultRoot,
+      seriesIdPrefix: "experiment:",
+      desiredSeries: [{
+        supportSeriesTag: currentTag,
+        desiredAutomationIds: [keptAutomationId],
+      }],
+      now: new Date("2026-07-15T00:00:00.000Z"),
+    });
+    expect(reconciled).toMatchObject({
+      archivedCount: 204,
+      matchedCount: 205,
+      missingDesiredAutomationIds: [],
+      unchangedCount: 1,
+    });
+    expect(reconciled.auditPath).toMatch(/^audit\//u);
+
+    const records = await listAutomations({ vaultRoot });
+    expect(records.count).toBe(205);
+    expect(records.items.filter((record) => record.status === "active")).toHaveLength(1);
+    expect(records.items.find((record) => record.automationId === keptAutomationId)?.status)
+      .toBe("active");
+
+    const repeated = await reconcileAutomationSupportSeriesNamespace({
+      vaultRoot,
+      seriesIdPrefix: "experiment:",
+      desiredSeries: [{
+        supportSeriesTag: currentTag,
+        desiredAutomationIds: [keptAutomationId],
+      }],
+      now: new Date("2026-07-16T00:00:00.000Z"),
+    });
+    expect(repeated).toEqual({
+      archivedCount: 0,
+      auditPath: null,
+      matchedCount: 205,
+      missingDesiredAutomationIds: [],
+      unchangedCount: 205,
+    });
+
+    await expect(reconcileAutomationSupportSeriesNamespace({
+      vaultRoot,
+      seriesIdPrefix: "experiment:",
+      desiredSeries: [
+        {
+          supportSeriesTag: currentTag,
+          desiredAutomationIds: [keptAutomationId],
+        },
+        {
+          supportSeriesTag: deletedTag,
+          desiredAutomationIds: [keptAutomationId],
+        },
+      ],
+    })).rejects.toThrow(/cannot be desired by multiple support series/u);
+  });
+
+  it("marks only active records archived by support reconciliation and is idempotent", async () => {
+    const vaultRoot = await makeVaultRoot();
+    const supportSeriesTag = buildAutomationSupportSeriesTag(
+      "experiment-lifecycle:exp_reactivation",
+    );
+    const active = await upsertAutomation({
+      vaultRoot,
+      ...createAutomationPayload({
+        automationId: "automation_01JRACT1VAT10N000000000001",
+        slug: "reconcile-active",
+        tags: [supportSeriesTag],
+      }),
+    });
+    const paused = await upsertAutomation({
+      vaultRoot,
+      ...createAutomationPayload({
+        automationId: "automation_01JRACT1VAT10N000000000002",
+        slug: "reconcile-paused",
+        status: "paused",
+        tags: [supportSeriesTag],
+      }),
+    });
+
+    const reconciled = await reconcileAutomationSupportSeriesNamespace({
+      vaultRoot,
+      seriesIdPrefix: "experiment-lifecycle:",
+      desiredSeries: [],
+      now: new Date("2026-07-15T00:00:00.000Z"),
+    });
+    expect(reconciled.archivedCount).toBe(1);
+    expect((await readAutomation({
+      automationId: active.record.automationId,
+      vaultRoot,
+    })).tags).toContain(AUTOMATION_SUPPORT_SERIES_RECONCILED_ARCHIVE_TAG);
+    expect(await readAutomation({
+      automationId: paused.record.automationId,
+      vaultRoot,
+    })).toMatchObject({
+      status: "paused",
+      tags: [supportSeriesTag],
+    });
+
+    const repeated = await reconcileAutomationSupportSeriesNamespace({
+      vaultRoot,
+      seriesIdPrefix: "experiment-lifecycle:",
+      desiredSeries: [],
+      now: new Date("2026-07-16T00:00:00.000Z"),
+    });
+    expect(repeated.archivedCount).toBe(0);
+    const archivedAgain = await readAutomation({
+      automationId: active.record.automationId,
+      vaultRoot,
+    });
+    expect(archivedAgain.tags.filter(
+      (tag) => tag === AUTOMATION_SUPPORT_SERIES_RECONCILED_ARCHIVE_TAG,
+    )).toHaveLength(1);
+
+    const reactivated = await patchAutomation({
+      vaultRoot,
+      lookup: active.record.automationId,
+      status: "active",
+      now: new Date("2026-07-17T00:00:00.000Z"),
+    });
+    expect(reactivated.record.tags).not.toContain(
+      AUTOMATION_SUPPORT_SERIES_RECONCILED_ARCHIVE_TAG,
+    );
+
+    const consumed = await patchAutomation({
+      vaultRoot,
+      lookup: active.record.automationId,
+      status: "archived",
+      now: new Date("2026-07-18T00:00:00.000Z"),
+    });
+    expect(consumed.record.tags).not.toContain(
+      AUTOMATION_SUPPORT_SERIES_RECONCILED_ARCHIVE_TAG,
+    );
   });
 
   it("patches one automation field while preserving omitted fields", async () => {

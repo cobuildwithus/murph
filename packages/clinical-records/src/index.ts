@@ -32,6 +32,7 @@ export const CLINICAL_FHIR_RESOURCE_TYPES = Object.freeze([
   "CareTeam",
   "Goal",
 ] as const);
+const CLINICAL_FHIR_RESOURCE_TYPE_SET = new Set<string>(CLINICAL_FHIR_RESOURCE_TYPES);
 
 export const CLINICAL_RAW_MANIFEST_MAX_RESOURCE_FILES = 500;
 export const CLINICAL_RAW_MANIFEST_MAX_RESOURCES_PER_FILE = 1_000;
@@ -39,8 +40,10 @@ export const CLINICAL_RAW_MANIFEST_MAX_TOTAL_RESOURCES = 5_000;
 export const CLINICAL_IMPORT_PLAN_MAX_DECISIONS =
   CLINICAL_RAW_MANIFEST_MAX_TOTAL_RESOURCES + 1;
 export const CLINICAL_RAW_MANIFEST_MAX_BYTES = 1024 * 1024;
+export const CLINICAL_RECORD_COVERAGE_MAX_BYTES = 64 * 1024;
 export const CLINICAL_RAW_RESOURCE_FILE_MAX_BYTES = 5 * 1024 * 1024;
 export const CLINICAL_RAW_RESOURCE_FILES_MAX_TOTAL_BYTES = 32 * 1024 * 1024;
+export const CLINICAL_RECORD_COVERAGE_FILE_NAME = "coverage.json";
 
 const RAW_PATH_PATTERN = /^raw\/[A-Za-z0-9._/-]+$/u;
 const RELATIVE_PATH_PATTERN = /^(?!\/)(?!.*(?:^|\/)\.\.(?:\/|$))[A-Za-z0-9._/-]+$/u;
@@ -89,6 +92,19 @@ export const clinicalFhirManifestPathSchema = clinicalRawPathSchema.refine((valu
     && parts[5] === "manifest.json"
   );
 }, "Expected raw/clinical/fhir/<connectionId>/<retrievalJobId>/manifest.json.");
+
+export const clinicalRecordCoveragePathSchema = clinicalRawPathSchema.refine((value) => {
+  const parts = value.split("/");
+  return (
+    parts.length === 6
+    && parts[0] === "raw"
+    && parts[1] === "clinical"
+    && parts[2] === "fhir"
+    && clinicalFhirPathIdSchema.safeParse(parts[3]).success
+    && clinicalFhirPathIdSchema.safeParse(parts[4]).success
+    && parts[5] === CLINICAL_RECORD_COVERAGE_FILE_NAME
+  );
+}, "Expected raw/clinical/fhir/<connectionId>/<retrievalJobId>/coverage.json.");
 
 export const fhirResourceTypeSlugSchema = z.string().regex(SLUG_PATTERN);
 
@@ -213,6 +229,84 @@ export const clinicalRawManifestErrorSchema = z
     message: z.string().min(1).max(500),
   })
   .strict();
+
+export const CLINICAL_RECORD_FAMILY_COVERAGE_STATUSES = Object.freeze([
+  "mapped-for-import",
+  "mapped-for-import-with-review",
+  "review-only",
+  "no-records-returned",
+  "unavailable",
+  "not-authorized",
+  "unknown",
+] as const);
+
+export const clinicalRecordFamilyCoverageStatusSchema = z.enum(
+  CLINICAL_RECORD_FAMILY_COVERAGE_STATUSES,
+);
+
+export const clinicalRecordFamilyCoverageSchema = z
+  .object({
+    resourceType: clinicalFhirResourceTypeSchema,
+    status: clinicalRecordFamilyCoverageStatusSchema,
+    retrievalCoverage: z.enum(["whole-family", "bounded-window"]).nullable(),
+    returnedResourceCount: z.number().int().nonnegative()
+      .max(CLINICAL_RAW_MANIFEST_MAX_TOTAL_RESOURCES),
+    executableDecisionCount: z.number().int().nonnegative()
+      .max(CLINICAL_IMPORT_PLAN_MAX_DECISIONS),
+    reviewDecisionCount: z.number().int().nonnegative()
+      .max(CLINICAL_IMPORT_PLAN_MAX_DECISIONS),
+  })
+  .strict()
+  .superRefine((family, context) => {
+    const expectedDecisionShape = (
+      (family.status === "mapped-for-import"
+        && family.executableDecisionCount > 0
+        && family.reviewDecisionCount === 0)
+      || (family.status === "mapped-for-import-with-review"
+        && family.executableDecisionCount > 0
+        && family.reviewDecisionCount > 0)
+      || (family.status === "review-only"
+        && family.executableDecisionCount === 0
+        && family.reviewDecisionCount > 0)
+      || ![
+        "mapped-for-import",
+        "mapped-for-import-with-review",
+        "review-only",
+      ].includes(family.status)
+    );
+    if (!expectedDecisionShape) {
+      context.addIssue({
+        code: z.ZodIssueCode.custom,
+        message: "Clinical family coverage status must agree with its decision counts.",
+      });
+    }
+    if (
+      family.status === "no-records-returned"
+      && (
+        family.returnedResourceCount !== 0
+        || family.executableDecisionCount !== 0
+        || family.reviewDecisionCount !== 0
+      )
+    ) {
+      context.addIssue({
+        code: z.ZodIssueCode.custom,
+        message: "No-records-returned coverage cannot carry resources or import decisions.",
+      });
+    }
+  });
+
+export const clinicalRecordFamilyCoverageListSchema = z
+  .array(clinicalRecordFamilyCoverageSchema)
+  .length(CLINICAL_FHIR_RESOURCE_TYPES.length)
+  .superRefine((families, context) => {
+    const resourceTypes = new Set(families.map((family) => family.resourceType));
+    if (resourceTypes.size !== CLINICAL_FHIR_RESOURCE_TYPES.length) {
+      context.addIssue({
+        code: z.ZodIssueCode.custom,
+        message: "Expected exactly one clinical coverage entry per supported FHIR resource family.",
+      });
+    }
+  });
 
 export const clinicalRawManifestSchema = z
   .object({
@@ -355,6 +449,16 @@ export const clinicalImportPlanSchema = z
   })
   .strict();
 
+export const clinicalRecordCoverageSnapshotSchema = z
+  .object({
+    schemaVersion: z.literal("murph.clinical-record-coverage-snapshot.v1"),
+    connectionId: clinicalFhirPathIdSchema,
+    retrievalJobId: clinicalFhirPathIdSchema,
+    fetchedAt: clinicalIsoDateTimeSchema,
+    families: clinicalRecordFamilyCoverageListSchema,
+  })
+  .strict();
+
 export type ClinicalSourceSystem = z.infer<typeof clinicalSourceSystemSchema>;
 export type ClinicalRawManifest = z.infer<typeof clinicalRawManifestSchema>;
 export type ClinicalRawManifestResourceFile = z.infer<typeof clinicalRawManifestResourceFileSchema>;
@@ -363,6 +467,190 @@ export type ClinicalFhirExternalRef = z.infer<typeof clinicalFhirExternalRefSche
 export type ClinicalImportUpsertPayload = z.infer<typeof clinicalImportUpsertPayloadSchema>;
 export type ClinicalImportDecision = z.infer<typeof clinicalImportDecisionSchema>;
 export type ClinicalImportPlan = z.infer<typeof clinicalImportPlanSchema>;
+export type ClinicalRecordFamilyCoverageStatus = z.infer<
+  typeof clinicalRecordFamilyCoverageStatusSchema
+>;
+export type ClinicalRecordFamilyCoverage = z.infer<typeof clinicalRecordFamilyCoverageSchema>;
+export type ClinicalRecordCoverageSnapshot = z.infer<typeof clinicalRecordCoverageSnapshotSchema>;
+
+export function clinicalRecordCoveragePathForManifestPath(manifestPath: string): string {
+  const parsedManifestPath = clinicalFhirManifestPathSchema.parse(manifestPath);
+  const snapshotDirectory = parsedManifestPath.slice(
+    0,
+    parsedManifestPath.lastIndexOf("/") + 1,
+  );
+  return clinicalRecordCoveragePathSchema.parse(
+    `${snapshotDirectory}${CLINICAL_RECORD_COVERAGE_FILE_NAME}`,
+  );
+}
+
+export function buildClinicalRecordCoverageSnapshot(input: {
+  manifest: ClinicalRawManifest;
+  plan: ClinicalImportPlan;
+}): ClinicalRecordCoverageSnapshot {
+  const manifest = clinicalRawManifestSchema.parse(input.manifest);
+  const plan = clinicalImportPlanSchema.parse(input.plan);
+  const expectedManifestPath = clinicalFhirManifestPathSchema.parse(
+    `raw/clinical/fhir/${manifest.connectionId}/${manifest.retrievalJobId}/manifest.json`,
+  );
+  if (
+    plan.source.connectionId !== manifest.connectionId
+    || plan.source.retrievalJobId !== manifest.retrievalJobId
+    || plan.source.sourceSystem !== manifest.sourceSystem
+    || plan.source.rawManifestPath !== expectedManifestPath
+  ) {
+    throw new TypeError("Clinical coverage plan does not match its retrieval manifest.");
+  }
+
+  const requestedResourceTypes = readClinicalFhirScopeResourceTypes(manifest.requestedScopes);
+  const grantedResourceTypes = readClinicalFhirScopeResourceTypes(manifest.grantedScopes);
+  const completedResourceTypes = new Set<string>(manifest.completedResourceTypes);
+
+  return clinicalRecordCoverageSnapshotSchema.parse({
+    schemaVersion: "murph.clinical-record-coverage-snapshot.v1",
+    connectionId: manifest.connectionId,
+    retrievalJobId: manifest.retrievalJobId,
+    fetchedAt: manifest.fetchedAt,
+    families: CLINICAL_FHIR_RESOURCE_TYPES.map((resourceType) => {
+      const retrievalScope = manifest.retrievalScopes.find((scope) =>
+        scope.resourceType === resourceType
+      );
+      const returnedResourceCount = manifest.resourceFiles
+        .filter((resourceFile) => resourceFile.resourceType === resourceType)
+        .reduce((sum, resourceFile) => sum + resourceFile.count, 0);
+      const familyDecisions = plan.decisions.filter((decision) =>
+        clinicalImportDecisionResourceType(decision) === resourceType
+      );
+      const reviewDecisionCount = familyDecisions.filter(
+        (decision) => decision.action === "review",
+      ).length;
+      const executableDecisionCount = familyDecisions.length - reviewDecisionCount;
+      const familyIsRelevant = (
+        requestedResourceTypes.has(resourceType)
+        || grantedResourceTypes.has(resourceType)
+        || completedResourceTypes.has(resourceType)
+        || retrievalScope !== undefined
+        || returnedResourceCount > 0
+      );
+      const familyErrors = manifest.errors?.filter((error) =>
+        error.resourceType === resourceType
+        || (error.resourceType === undefined && familyIsRelevant)
+      ) ?? [];
+
+      return {
+        resourceType,
+        status: resolveClinicalRecordFamilyCoverageStatus({
+          completed: completedResourceTypes.has(resourceType),
+          executableDecisionCount,
+          familyErrorCodes: familyErrors.map((error) => error.code),
+          granted: grantedResourceTypes.has(resourceType),
+          requested: requestedResourceTypes.has(resourceType),
+          returnedResourceCount,
+          reviewDecisionCount,
+          retrievalScoped: retrievalScope !== undefined,
+        }),
+        retrievalCoverage: retrievalScope?.coverage ?? null,
+        returnedResourceCount,
+        executableDecisionCount,
+        reviewDecisionCount,
+      };
+    }),
+  });
+}
+
+function readClinicalFhirScopeResourceTypes(scopes: readonly string[]): Set<string> {
+  const resourceTypes = new Set<string>();
+  for (const scopeGroup of scopes) {
+    for (const scope of scopeGroup.split(/\s+/u)) {
+      const match = /^(?:patient|system|user)\/([^\s.]+)\.(?:read|rs)$/u.exec(scope);
+      const resourceType = match?.[1];
+      if (!resourceType) {
+        continue;
+      }
+      if (resourceType === "*") {
+        for (const supportedResourceType of CLINICAL_FHIR_RESOURCE_TYPES) {
+          resourceTypes.add(supportedResourceType);
+        }
+        continue;
+      }
+      if (CLINICAL_FHIR_RESOURCE_TYPE_SET.has(resourceType)) {
+        resourceTypes.add(resourceType);
+      }
+    }
+  }
+  return resourceTypes;
+}
+
+function clinicalImportDecisionResourceType(
+  decision: ClinicalImportDecision,
+): (typeof CLINICAL_FHIR_RESOURCE_TYPES)[number] | null {
+  if (decision.action === "review") {
+    return decision.resourceType;
+  }
+  const externalRef = decision.action === "upsert"
+    ? decision.payload.externalRef
+    : decision.externalRef;
+  if (externalRef.resourceType === "allergy-evidence-summary") {
+    return "AllergyIntolerance";
+  }
+  return CLINICAL_FHIR_RESOURCE_TYPES.find((resourceType) =>
+    fhirResourceTypeToSlug(resourceType) === externalRef.resourceType
+  ) ?? null;
+}
+
+function resolveClinicalRecordFamilyCoverageStatus(input: {
+  completed: boolean;
+  executableDecisionCount: number;
+  familyErrorCodes: readonly string[];
+  granted: boolean;
+  requested: boolean;
+  returnedResourceCount: number;
+  reviewDecisionCount: number;
+  retrievalScoped: boolean;
+}): ClinicalRecordFamilyCoverageStatus {
+  if (
+    (input.requested && !input.granted)
+    || input.familyErrorCodes.some(isClinicalFhirAuthorizationUnavailableCode)
+  ) {
+    return "not-authorized";
+  }
+  if (input.familyErrorCodes.some(isClinicalFhirFamilyUnavailableCode)) {
+    return "unavailable";
+  }
+  if (
+    !input.granted
+    || !input.retrievalScoped
+    || input.familyErrorCodes.length > 0
+    || !input.completed
+  ) {
+    return "unknown";
+  }
+  if (input.executableDecisionCount > 0 && input.reviewDecisionCount > 0) {
+    return "mapped-for-import-with-review";
+  }
+  if (input.executableDecisionCount > 0) {
+    return "mapped-for-import";
+  }
+  if (input.reviewDecisionCount > 0) {
+    return "review-only";
+  }
+  if (input.returnedResourceCount === 0) {
+    return "no-records-returned";
+  }
+  return "unknown";
+}
+
+function isClinicalFhirAuthorizationUnavailableCode(code: string): boolean {
+  const normalized = code.trim().toLowerCase().replace(/_/gu, "-");
+  return normalized === "authorization-required" || normalized === "not-attempted";
+}
+
+function isClinicalFhirFamilyUnavailableCode(code: string): boolean {
+  const normalized = code.trim().toLowerCase().replace(/_/gu, "-");
+  return normalized === "family-unavailable"
+    || normalized === "clinical-record-fhir-family-unavailable"
+    || normalized === "provider-denied";
+}
 
 export function fhirResourceTypeToSlug(resourceType: string): string {
   return resourceType

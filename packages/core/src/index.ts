@@ -10,6 +10,10 @@ export {
 } from "./constants.ts";
 export { VaultError, isVaultError } from "./errors.ts";
 export { deterministicContractId } from "./ids.ts";
+export {
+  reconcileAutomationSupportSeries,
+  reconcileAutomationSupportSeriesNamespace,
+} from "./automation.ts";
 export * from "./automation.ts";
 export * from "./scheduled-logs.ts";
 export * from "./memory.ts";
@@ -96,6 +100,13 @@ export type {
   ReadLatestBloodTestHistorySummaryInput,
 } from "./history/api.ts";
 export {
+  MAX_EXPERIMENT_LIFECYCLE_DOCUMENTS,
+  readExperimentLifecycleFrontmatterDocuments,
+} from "./domains/experiments.ts";
+export type {
+  ReadExperimentLifecycleFrontmatterResult,
+} from "./domains/experiments.ts";
+export {
   addActivitySession,
   addBodyMeasurement,
   addCapture,
@@ -139,6 +150,7 @@ export {
   updateWorkoutUnitPreferences,
   updateWearablePreferences,
   updateExperiment,
+  writeExperimentOutcome,
   updateVaultSummary,
   upsertEvent,
   upsertFood,

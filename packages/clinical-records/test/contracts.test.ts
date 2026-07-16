@@ -1,5 +1,9 @@
 import {
   CLINICAL_RAW_MANIFEST_MAX_TOTAL_RESOURCES,
+  buildClinicalRecordCoverageSnapshot,
+  clinicalRecordCoveragePathForManifestPath,
+  clinicalRecordCoveragePathSchema,
+  clinicalRecordCoverageSnapshotSchema,
   clinicalFacetSlug,
   clinicalFhirManifestPathSchema,
   clinicalImportDecisionSchema,
@@ -274,6 +278,11 @@ describe("clinical records contracts", () => {
   it("validates raw and manifest paths at the contract boundary", () => {
     expect(() => clinicalRawPathSchema.parse("raw/clinical/fhir/../escape.json")).toThrow();
     expect(clinicalFhirManifestPathSchema.parse(planSource.rawManifestPath)).toBe(planSource.rawManifestPath);
+    const coveragePath = clinicalRecordCoveragePathForManifestPath(planSource.rawManifestPath);
+    expect(clinicalRecordCoveragePathSchema.parse(coveragePath)).toBe(
+      "raw/clinical/fhir/clinical-connection-1/retrieval-job-1/coverage.json",
+    );
+    expect(() => clinicalRecordCoveragePathSchema.parse(planSource.rawManifestPath)).toThrow();
     expect(() => clinicalFhirManifestPathSchema.parse("raw/tmp/manifest.json")).toThrow();
     expect(() => rawRefForClinicalManifestFile({
       manifestPath: "raw/tmp/manifest.json",
@@ -458,5 +467,156 @@ describe("clinical records contracts", () => {
         }],
       }],
     })).not.toThrow();
+  });
+
+  it("derives conservative family coverage from wildcard SMART scopes", () => {
+    const coverage = buildClinicalRecordCoverageSnapshot({
+      manifest: clinicalRawManifestSchema.parse({
+        schemaVersion: "murph.clinical-raw-manifest.v2",
+        kind: "clinical_fhir_retrieval",
+        connectionId: planSource.connectionId,
+        retrievalJobId: planSource.retrievalJobId,
+        sourceSystem: planSource.sourceSystem,
+        fhirBaseUrlHash: FHIR_BASE_URL_HASH,
+        patientIdHash: PATIENT_ID_HASH,
+        fetchedAt: "2026-07-01T12:00:00.000Z",
+        resourceFiles: [{
+          resourceType: "Observation",
+          relativePath: "Observation/page-1.json",
+          count: 0,
+          sha256: SHA256,
+        }],
+        retrievalScopes: [{
+          coverage: "whole-family",
+          queryFingerprint: SHA256,
+          resourceType: "Observation",
+        }],
+        completedResourceTypes: ["Observation"],
+        requestedScopes: ["patient/*.read"],
+        grantedScopes: ["patient/*.read"],
+      }),
+      plan: clinicalImportPlanSchema.parse({
+        schemaVersion: "murph.clinical-import-plan.v1",
+        source: planSource,
+        decisions: [],
+      }),
+    });
+
+    expect(coverage.families.find((family) => family.resourceType === "Observation"))
+      .toEqual(expect.objectContaining({
+        retrievalCoverage: "whole-family",
+        status: "no-records-returned",
+      }));
+    expect(coverage.families.find((family) => family.resourceType === "Condition"))
+      .toEqual(expect.objectContaining({
+        retrievalCoverage: null,
+        status: "unknown",
+      }));
+  });
+
+  it("applies an unscoped retrieval error only to relevant resource families", () => {
+    const manifest = clinicalRawManifestSchema.parse({
+      schemaVersion: "murph.clinical-raw-manifest.v2",
+      kind: "clinical_fhir_retrieval",
+      connectionId: planSource.connectionId,
+      retrievalJobId: planSource.retrievalJobId,
+      sourceSystem: planSource.sourceSystem,
+      fhirBaseUrlHash: FHIR_BASE_URL_HASH,
+      patientIdHash: PATIENT_ID_HASH,
+      fetchedAt: "2026-07-01T12:00:00.000Z",
+      resourceFiles: [{
+        resourceType: "Observation",
+        relativePath: "Observation/page-1.json",
+        count: 0,
+        sha256: SHA256,
+      }],
+      retrievalScopes: [{
+        coverage: "whole-family",
+        queryFingerprint: SHA256,
+        resourceType: "Observation",
+      }],
+      completedResourceTypes: [],
+      requestedScopes: ["patient/Observation.read"],
+      grantedScopes: ["patient/Observation.read"],
+      errors: [{
+        code: "family-unavailable",
+        message: "The provider stopped the retrieval before returning a family.",
+      }],
+    });
+    const coverage = buildClinicalRecordCoverageSnapshot({
+      manifest,
+      plan: clinicalImportPlanSchema.parse({
+        schemaVersion: "murph.clinical-import-plan.v1",
+        source: planSource,
+        decisions: [],
+      }),
+    });
+
+    expect(coverage.families.find((family) => family.resourceType === "Observation"))
+      .toEqual(expect.objectContaining({ status: "unavailable" }));
+    expect(coverage.families.find((family) => family.resourceType === "Condition"))
+      .toEqual(expect.objectContaining({ status: "unknown" }));
+  });
+
+  it("reports an executable family decision even when the raw family returned zero resources", () => {
+    const manifest = clinicalRawManifestSchema.parse({
+      schemaVersion: "murph.clinical-raw-manifest.v2",
+      kind: "clinical_fhir_retrieval",
+      connectionId: planSource.connectionId,
+      retrievalJobId: planSource.retrievalJobId,
+      sourceSystem: planSource.sourceSystem,
+      fhirBaseUrlHash: FHIR_BASE_URL_HASH,
+      patientIdHash: PATIENT_ID_HASH,
+      fetchedAt: "2026-07-01T12:00:00.000Z",
+      resourceFiles: [{
+        resourceType: "AllergyIntolerance",
+        relativePath: "AllergyIntolerance/page-1.json",
+        count: 0,
+        sha256: SHA256,
+      }],
+      retrievalScopes: [{
+        coverage: "whole-family",
+        queryFingerprint: SHA256,
+        resourceType: "AllergyIntolerance",
+      }],
+      completedResourceTypes: ["AllergyIntolerance"],
+      requestedScopes: ["patient/AllergyIntolerance.read"],
+      grantedScopes: ["patient/AllergyIntolerance.read"],
+    });
+    const coverage = buildClinicalRecordCoverageSnapshot({
+      manifest,
+      plan: clinicalImportPlanSchema.parse({
+        schemaVersion: "murph.clinical-import-plan.v1",
+        source: planSource,
+        decisions: [{
+          action: "retract",
+          externalRef: {
+            ...externalRef,
+            resourceType: "allergy-evidence-summary",
+            resourceId: "patient-allergy-summary",
+          },
+          reason: "Complete family evidence did not assert no known allergies.",
+          evidence: [{
+            rawRef: planSource.rawManifestPath,
+            sourceLabel: "FHIR allergy snapshot manifest",
+          }],
+        }],
+      }),
+    });
+
+    expect(coverage.families.find((family) => family.resourceType === "AllergyIntolerance"))
+      .toEqual(expect.objectContaining({
+        executableDecisionCount: 1,
+        returnedResourceCount: 0,
+        status: "mapped-for-import",
+      }));
+    expect(() => clinicalRecordCoverageSnapshotSchema.parse({
+      ...coverage,
+      families: coverage.families.map((family) =>
+        family.resourceType === "AllergyIntolerance"
+          ? { ...family, status: "no-records-returned" }
+          : family
+      ),
+    })).toThrow("No-records-returned");
   });
 });

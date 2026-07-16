@@ -637,6 +637,46 @@ test("importDeviceBatch validates only target integration ingest shards while ap
   assert.equal((targetRows[0] as { id?: string }).id, result.ingestId);
 });
 
+test("importDeviceBatch preserves explicit sleep session identity through canonical persistence", async () => {
+  const vaultRoot = await makeTempDirectory("murph-device-sleep-type");
+  await initializeVault({ vaultRoot, createdAt: "2026-03-12T12:00:00.000Z" });
+
+  const result = await importDeviceBatch({
+    vaultRoot,
+    provider: "whoop",
+    accountId: "sleep-type-test",
+    importedAt: "2026-03-16T09:30:00.000Z",
+    events: [{
+      kind: "sleep_session",
+      occurredAt: "2026-03-15T22:00:00.000Z",
+      recordedAt: "2026-03-16T07:30:00.000Z",
+      title: "Sleep session",
+      externalRef: {
+        system: "whoop",
+        resourceType: "sleep",
+        resourceId: "sleep-type-1",
+      },
+      fields: {
+        startAt: "2026-03-15T22:00:00.000Z",
+        endAt: "2026-03-16T07:00:00.000Z",
+        durationMinutes: 540,
+        sleepType: "main_sleep",
+      },
+    }],
+  });
+
+  const sleep = result.events[0];
+  assert.equal(sleep?.kind, "sleep_session");
+  assert.equal(sleep?.kind === "sleep_session" ? sleep.sleepType : undefined, "main_sleep");
+
+  const records = await readJsonlRecords({
+    vaultRoot,
+    relativePath: result.eventShardPaths[0] as string,
+  });
+  const persisted = records[0] as EventRecord | undefined;
+  assert.equal(persisted?.kind === "sleep_session" ? persisted.sleepType : undefined, "main_sleep");
+});
+
 test("importDeviceBatch streams target ingest duplicate checks without rehashing unrelated rows", async () => {
   const vaultRoot = await makeTempDirectory("murph-device-import-stream-target-ingest-shard");
   await initializeVault({ vaultRoot, createdAt: "2026-03-01T00:00:00.000Z" });

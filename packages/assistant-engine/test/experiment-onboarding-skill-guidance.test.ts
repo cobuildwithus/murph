@@ -38,6 +38,20 @@ describe('experiment onboarding skill guidance', () => {
     )
   }
 
+  it('requires every resolved safety question before any active start', async () => {
+    const raw = await readExperimentOnboardingSkill()
+
+    expect(raw).toContain(
+      'For every resolved protocol with `experimentOnboarding.safetyScreen.mustAsk`, ask every listed question',
+    )
+    expect(raw).toContain('even when the protocol is only moderate-caution')
+    expect(raw).toContain('Treat omitted question ids as unanswered, not negative')
+    expect(raw).toContain(
+      'write `--onboarding-completed-at` only after every question was answered',
+    )
+    expect(raw).toContain('Never activate a run with a blocking disposition')
+  })
+
   it('requires first-session prep to include a compact walkthrough', async () => {
     const raw = await readExperimentOnboardingSkill()
 
@@ -92,9 +106,29 @@ describe('experiment onboarding skill guidance', () => {
       'If `progress.adherence.evidence.eventKind` is `activity_session` but `progress.dataCoverage.activityProviders` is empty, keep the standard planned-session support and logging behavior until workouts start syncing.',
     )
     expect(raw).toContain(
-      'planned-session support is default-on once the user agrees to a run plan with assistant support',
+      'offer one concrete finite planned-session support pattern',
     )
-    expect(raw).toContain('Do not ask the user to choose cadence by default')
+    expect(raw).toContain(
+      'Schedule it only after the user explicitly accepts that support',
+    )
+    expect(raw).toContain(
+      'Separately offer Murph-managed lifecycle summaries when the run is eligible',
+    )
+    expect(raw).toContain('--notification-style send_scheduled_summary')
+    expect(raw).toContain('--notification-style skip_by_default')
+    expect(raw).toContain(
+      'Do not create manual progress/final automations for this choice.',
+    )
+    expect(raw).toContain(
+      'Congratulate only specific completed sessions or follow-through proven by current progress',
+    )
+    expect(raw).toContain(
+      'when adherence is zero or unknown, neutrally acknowledge the review point',
+    )
+    expect(raw).toContain(
+      'Congratulate only completion or follow-through proven by the canonical outcome',
+    )
+    expect(raw).toContain('stay neutral when adherence is zero or unknown')
     expect(raw).toContain(
       'Ask a planned-session support setup question only when cadence, timing, route, or user preference is genuinely unclear',
     )
@@ -102,22 +136,22 @@ describe('experiment onboarding skill guidance', () => {
       'Do not ask when the user already gave a clear preference, explicitly declined reminders, or reminder delivery is not possible',
     )
     expect(raw).toContain(
-      'automatically schedule bounded support around every planned intervention session in the confirmed run plan',
+      'When the user accepts planned-session support, schedule the finite pattern they accepted',
     )
     expect(raw).toContain(
       'For behavior-dependent protocols, include the compact follow-through loop in setup answers or automation instructions when available',
     )
     expect(raw).toContain(
-      'Behavior-followthrough may satisfy planned-session support with quiet or review-only support',
+      'Behavior-followthrough may satisfy consented planned-session support with quiet or review-only support',
     )
     expect(raw).toContain(
-      'do not create per-session cue messages just to satisfy default-on support',
+      'do not create per-session cue messages merely because the run exists',
     )
     expect(raw).toContain(
       'target behavior, user reason, anchor/action window, standard/tiny/fallback versions, support style, privacy boundary, repair-after policy, and review point',
     )
     expect(raw).toContain(
-      'Do not cap support at the first week or the first 3-5 planned sessions',
+      'always set a finite `--active-until <ISO timestamp>` no later than the accepted support window\'s end',
     )
     expect(raw).toContain(
       'Do not create open-ended recurring reminders for planned-session support.',
@@ -147,10 +181,10 @@ describe('experiment onboarding skill guidance', () => {
       'Skip sending if the experiment is inactive, the user declined or cancelled reminders',
     )
     expect(raw).toContain(
-      'For behavior-support automations, the scheduled instructions must include enough compact support context to choose `skip` or `send_message`',
+      'For behavior-support automations, the scheduled instructions must include enough compact support context and the exact accepted purpose to choose `skip` or `send_message`',
     )
     expect(raw).toContain(
-      'follow the occurrence\'s role: normal cue, explicitly authorized accountability check-in, or repair question/proposal.',
+      'follow the persisted occurrence role: a `reminder` is a normal cue only',
     )
     expect(raw).toContain(
       'Do not embed fixed reminder copy; embed the support policy.',
@@ -159,20 +193,28 @@ describe('experiment onboarding skill guidance', () => {
       'Bring up the stop rule only when new context makes it newly relevant',
     )
     expect(raw).toContain(
-      'end with one direct question they can answer in their own words',
+      'When separately consented `check_in` support needs the user to report, end with one direct question',
     )
     expect(raw).toContain(
       'Planned-session support automation instructions should state that this is bounded experiment-session support',
     )
     expect(raw).toContain(
-      'with skip conditions, the compact support loop when available, and a `skip`/`send_message` outcome where `send_message` follows the occurrence\'s role: normal cue, explicitly authorized accountability check-in, or repair question/proposal',
+      'with skip conditions, the compact support loop when available, and a `skip`/`send_message` outcome constrained by the persisted support kind',
+    )
+    expect(raw).toContain(
+      'For a `reminder`, `send_message` is a normal cue only; reminder-only acceptance does not authorize a repair or accountability question.',
+    )
+    expect(raw).toContain(
+      'persist that exact purpose as `--support-kind check_in` or `--support-kind review`',
     )
     expect(raw).toContain(
       'do not leave related future session-support automations blindly active',
     )
-    expect(raw).toContain('Use stored `session_support_automation_slugs` first')
     expect(raw).toContain(
-      'Update or archive only future behavior-support automations that would repeat the same stale policy',
+      'vault-cli automation list --support-series-id experiment:<experimentId>',
+    )
+    expect(raw).toContain(
+      'never infer ownership from an experiment slug, generic tag, title, or text prefix',
     )
     expect(raw).toContain(
       'Preserve adherence fidelity when logging sessions',
@@ -271,6 +313,37 @@ describe('experiment onboarding skill guidance', () => {
     )
     expect(raw).toContain(
       'recurring behavior support carries the compact follow-through loop when adherence or friction is likely to matter',
+    )
+  })
+
+  it('uses the dedicated support-series option and keeps ordinary tags separate', async () => {
+    const raw = await readExperimentOnboardingSkill()
+
+    expect(raw).toContain('--support-series-id experiment:<experimentId>')
+    expect(raw).toContain('--support-kind review')
+    expect(raw).toContain(
+      'A bounded review uses `review`, never `weekly_digest`',
+    )
+    expect(raw).toContain(
+      'never pass a raw `system:support-series:*` value through `--tag`',
+    )
+    expect(raw).toContain(
+      'never assign the engine-managed `experiment-lifecycle:<experimentId>` series id',
+    )
+    expect(raw).toContain(
+      'Use repeated `--tag` only for ordinary descriptive tags.',
+    )
+    expect(raw).toContain(
+      'vault-cli automation reconcile-support-series experiment:<experimentId> --desired-automation-id <id>',
+    )
+    expect(raw).toContain(
+      'on pause, stop, or completion, omit all `--desired-automation-id` flags to archive the series',
+    )
+    expect(raw).toContain(
+      'Use repeated `--tag` only for ordinary generic tags such as `assistant`, `scheduled`, `experiment`, and `first-session-prep`.',
+    )
+    expect(raw).toContain(
+      'use repeated `--tag` only for ordinary generic tags such as `assistant`, `scheduled`, `experiment`, and `session-support`.',
     )
   })
 
@@ -407,7 +480,7 @@ describe('experiment onboarding skill guidance', () => {
       'Use the experiment schedule plus saved context: shortly after the user\'s usual wake window for morning logs',
     )
     expect(raw).toContain(
-      'The user does not need to approve the cadence separately once they have agreed to the run plan and assistant support is available',
+      'one affirmative answer can authorize that described pattern; do not require approval for every individual cue',
     )
   })
 
