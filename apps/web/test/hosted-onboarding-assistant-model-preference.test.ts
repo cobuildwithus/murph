@@ -16,7 +16,6 @@ vi.mock("@/src/lib/hosted-onboarding/shared", () => ({
 }));
 
 import {
-  assertHostedMemberAssistantPersonalizationEligible,
   isHostedMemberSolModelEligible,
   readHostedMemberAssistantModelPreference,
   updateHostedMemberAssistantConfigurationTx,
@@ -200,6 +199,33 @@ describe("hosted member assistant model preference", () => {
       reasoningEffort: "low",
       solAvailable: false,
     });
+  });
+
+  it("rejects model and reasoning updates for a synthetic thread-container", async () => {
+    const tx = createTransactionClient();
+    mocks.findUniqueHostedMember.mockResolvedValue(buildMemberState({
+      assistantModelPreference: null,
+      billingStatus: HostedBillingStatus.not_started,
+      currentBillingPhase: null,
+      currentBillingPlanCode: null,
+      threadContainerMemberId: "member_group_chat",
+    }));
+
+    for (const update of [
+      { model: "gpt-5.6-luna" as const },
+      { reasoningEffort: "high" as const },
+    ]) {
+      await expect(updateHostedMemberAssistantConfigurationTx({
+        memberId: "member_group_chat",
+        prisma: tx,
+        ...update,
+      })).rejects.toMatchObject({
+        code: "ASSISTANT_CONFIGURATION_PERSONAL_CHAT_REQUIRED",
+        httpStatus: 403,
+      });
+    }
+
+    expect(mocks.updateHostedMember).not.toHaveBeenCalled();
   });
 
   it("falls back to Terra for stale, missing, and ineligible preferences", async () => {
@@ -497,20 +523,6 @@ describe("hosted member assistant model preference", () => {
     expect(mocks.updateHostedMember).not.toHaveBeenCalled();
   });
 
-  it("rejects synthetic thread-container members from personalization", async () => {
-    mocks.findUniqueHostedMember.mockResolvedValue(buildMemberState({
-      assistantModelPreference: null,
-      threadContainerMemberId: "member_group_chat",
-    }));
-
-    await expect(assertHostedMemberAssistantPersonalizationEligible({
-      memberId: "member_group_chat",
-      prisma: createReadClient(),
-    })).rejects.toMatchObject({
-      code: "ASSISTANT_PERSONALIZATION_PRIVATE_MEMBER_REQUIRED",
-      httpStatus: 403,
-    });
-  });
 });
 
 function buildMemberState(input: {

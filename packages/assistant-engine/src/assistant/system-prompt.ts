@@ -66,6 +66,7 @@ export interface AssistantNotificationDecisionSystemPromptInput {
   currentLocalDate: string;
   currentTimeZone: string;
   conversationScope?: AssistantConversationScope;
+  hostedRuntime?: boolean;
   maintenanceTurn?: boolean;
 }
 
@@ -307,9 +308,12 @@ function buildStableRouteCapabilityPrompt(
     buildAssistantConnectedAppsGuidanceText(conversationScope),
     buildAssistantProductFeedbackGuidanceText(),
     buildAssistantStyleSettingsGuidanceText({
-      available:
-        conversationScope === "direct"
-        && (input.assistantStyleSettingsAvailable ?? true),
+      available: conversationScope === "direct"
+        ? (input.assistantStyleSettingsAvailable ?? true)
+        : conversationScope === "group"
+          ? input.assistantStyleSettingsAvailable === true
+          : false,
+      conversationScope,
     }),
     buildAssistantFamilyPlanGuidanceText(conversationScope),
     conversationScope === "direct" ? buildAssistantHabitatGuidanceText() : null,
@@ -426,22 +430,34 @@ function buildAssistantProductFeedbackGuidanceText(): string {
 
 function buildAssistantStyleSettingsGuidanceText(input: {
   available: boolean;
+  conversationScope: AssistantConversationScope;
 }): string {
   if (!input.available) {
     return "";
   }
+  const groupConversation = input.conversationScope === "group";
   return [
     "Assistant style settings:",
-    "- Humor, Push, and Detail are member-private conversation state available only in this private direct conversation.",
-    "- Private hosted conversations: read or save explicit tone and voice fields with `murph.personalization`. Report status; `unchanged` means no save. Saved tone (formal/casual) and voice do not change the reply already running.",
-    "- Use `murph.assistant_configuration` for explicit user-requested model or reasoning changes; a saved change starts on the next turn. Never switch configuration automatically.",
+    groupConversation
+      ? "- Tone, Voice, Humor, Push, and Detail belong to this room's synthetic Murph runtime. They never read or change any participant's private Murph settings."
+      : "- Humor, Push, and Detail are member-private conversation state available only in this private direct conversation.",
+    groupConversation
+      ? "- Read or save this room's explicit tone and voice fields with `murph.personalization`. Report status; `unchanged` means no save. Saved tone (formal/casual) and voice begin on a later group turn and do not change the reply already running."
+      : "- Private hosted conversations: read or save explicit tone and voice fields with `murph.personalization`. Report status; `unchanged` means no save. Saved tone (formal/casual) and voice do not change the reply already running.",
+    groupConversation
+      ? "- Model and reasoning controls remain unavailable in a group. Do not use or offer `murph.assistant_configuration` here."
+      : "- Use `murph.assistant_configuration` for explicit user-requested model or reasoning changes; a saved change starts on the next turn. Never switch configuration automatically.",
     "- Read each tool schema; never guess voice, model, or reasoning ids; never use a same-turn voice demo as activation proof.",
-    "- If the hosted tools are unavailable, use `/settings?voice=true` only for voice or sound changes. Use `/settings` for tone, model, or reasoning changes; only mention these fallbacks when asked.",
+    groupConversation
+      ? "- Never send a personal Settings URL as a way to configure this room. If these tools are unavailable, continue from the authenticated group chat."
+      : "- If the hosted tools are unavailable, use `/settings?voice=true` only for voice or sound changes. Use `/settings` for tone, model, or reasoning changes; only mention these fallbacks when asked.",
     "- Use `murph.assistant_style` for dials.",
     "- Setting aliases: `jokes`/`funny` = Humor; `intensity`/`coach`/`strictness` = Push; `brief`/`wordy`/`thorough` = Detail.",
     "- Tool actions: `show`; `set` with `setting` and integer `value` from 0 through 10; `reset` with one setting or `all`. Never guess or clamp.",
     "- Explicit ongoing requests only. `show`: scores/sources only. Set/reset: trust `settings`; `updated` means effective change. Hosted: `saved` accepted, `unchanged` current, `superseded` newer intent won. State score/source; never echo superseded. Error/no `settings`: unconfirmed. Show states values, not cause.",
-    "- Saved Humor change only: >0, at most one earned joke; none otherwise.",
+    groupConversation
+      ? "- Saved room-style changes begin on a later group turn; the reply already running keeps the style selected at turn start."
+      : "- Saved Humor change only: >0, at most one earned joke; none otherwise.",
     "- Expression only; higher rules win. No Humor for emergencies, self-harm, serious health/medication decisions, grief/trauma/abuse/acute distress, or sensitive privacy/auth/billing/consent/irreversible actions. Push only explicit user-chosen low-risk, non-sensitive goals; never shame, coerce, invent urgency, demand unsafe exertion, or alter message cadence.",
   ].join("\n");
 }
@@ -491,15 +507,12 @@ function buildAssistantHostedGroupGuidanceText(
     "- When `action=\"read_chat_participants\"` and `action=\"share_contact_card\"` are available for the current group chat, check the participants once on your first reply. If someone does not use Murph, share the card and naturally mention that they can save your contact and text you to get set up. Use your own words, not a fixed script. Do not repeat the invitation unprompted or when someone joins later. If someone asks why they have not been added or how to get Murph, answer directly and remind them to save your contact and text you to get set up. If you are not sure whether this is your first reply in the room, skip the card and invitation. `action=\"post_join_offer\"` sends your templated offer message into the current chat after the server fills the exact share scope and join URL; liking that offer adds only the permission snapshot disclosed in that offer and grants membership only when needed. Existing members keep their membership and other grants unchanged.",
     "- `murph.newsletter` is scheduled-only. `prepare` returns authorized current-week facts in `result.members`; compose only from `result.members`. Normal context and tools remain available. One prepare/send attempt each. `send` rechecks authorization and queues durable delivery. `accepted` is pending, not delivered. It never returns raw email addresses; never send the first edition immediately after setup.",
     "- Create the newsletter cron through the normal `vault-cli automation` surface; `murph.newsletter` only prepares or sends after it fires.",
-    conversationScope === "group"
-      ? "- In an authenticated Linq group turn, `read_own_assistant_style` and `update_own_assistant_style` may read or change only the current sender's private tone, voice, Humor, Push, and Detail. The server derives the sender from the accepted inbound; never supply, infer, or ask for a member id or handle. Use these actions when that sender asks about or explicitly changes their own settings. The saved settings affect their future private Murph conversations and generated voice, not this shared room or the reply already running. Report only the returned values and status. Never use them for another participant, a room-wide style request, email ingress, or an ambiguous sender; do not fall back to a settings URL from the group."
-      : null,
     "- Hosted groups are separate from Murph Family billing/account groups. Joining a hosted group does not grant billing access, private chat access, vault access, health-data access, health sharing, or email sharing unless the join page or exact offer includes the matching projection kinds. Email sharing requires `group-email.v0`. Joining does share the member's memory-backed preferred display name with this group runtime, and `read_current` returns the member roster (member ids, chat handles, granted share kinds) so you can address participants by name and attribute shared records to the right member.",
     conversationScope === "direct"
       ? "- In the user's own (non-group) runtime, canonical memory is the home for their preferred display name; groups they join can only introduce them by name once it is saved there. When you know their preferred name from this conversation, save it once with `vault-cli memory set-name`. Never ask the user to repeat a name they already gave."
       : "- This room cannot write a participant's preferred name or personal memory. Use only names returned by the server-owned group roster; ask the person to set or change a preferred name in their private Murph conversation.",
     conversationScope === "group" && channel?.trim().toLowerCase() === "email"
-      ? "- Email replies can converse about this group and read current group context, but the sender is not authenticated strongly enough to rename the group, change its avatar, create or update join links/offers, share a contact card, or change automations. Continue those mutations from the authenticated group chat."
+      ? "- Email replies can converse about this group and read current group context, but the sender is not authenticated strongly enough to rename the group, change its avatar, create or update join links/offers, share a contact card, change this room's Murph style, or change automations. Continue those mutations from the authenticated group chat."
       : null,
     `- A private \`group-newsletter.email-needed\` note is a one-time, low-pressure reminder: the named group set up a newsletter, the user granted email sharing, and has no verified email. If appropriate, mention once that they can add an email at \`${MURPH_PRODUCT_ORIGIN}/settings?addEmail=true\`. Never shame them or expose anything beyond the group name.`,
     "- Optional group health permissions are approved only through server-owned join pages or server-owned group offer messages, and are returned through the runtime/vault-share flow. Liking an offer grants only the posted snapshot; changing what people should share requires a new offer or the join page.",
@@ -509,6 +522,8 @@ function buildAssistantHostedGroupGuidanceText(
 
 function buildThreadContextPrompt(input: AssistantSystemPromptInput): string {
   const conversationScope = input.conversationScope ?? "direct";
+  const assistantStylePreferencesApply = conversationScope === "direct"
+    || (conversationScope === "group" && input.hostedRuntime === true);
   return joinPromptSections(
     buildAssistantConversationScopeText(conversationScope),
     conversationScope === "unverified-external"
@@ -517,11 +532,14 @@ function buildThreadContextPrompt(input: AssistantSystemPromptInput): string {
           currentMurphProductBaseUrl: input.murphProductBaseUrl ?? null,
           currentTimeZone: input.currentTimeZone,
         }),
-    conversationScope === "direct"
+    assistantStylePreferencesApply
       ? buildAssistantTonePreferenceText(input.assistantTone ?? null)
       : null,
-    conversationScope === "direct"
-      ? buildAssistantPersonalityPreferenceText(input.assistantPersonality ?? null)
+    assistantStylePreferencesApply
+      ? buildAssistantPersonalityPreferenceText(
+          input.assistantPersonality ?? null,
+          conversationScope === "group" ? "group" : "direct",
+        )
       : null,
     buildAssistantEvidenceAndReplyStyleText(input.channel),
     buildAssistantOnboardingGuidanceText({
@@ -547,13 +565,14 @@ function buildAssistantConversationScopeText(
 
   return `Conversation scope: hosted group chat.
 - The runtime member is a synthetic room container, not the human speaker and not a personal Murph account. Never treat its vault, billing, settings, connected accounts, devices, or authorization state as belonging to a participant.
-- Keep personal account settings, billing, wearable connection, connected-account authorization, browser or phone handoffs, and personal reminder setup in that person's private Murph conversation, except the server-bound current-sender tone, voice, Humor, Push, and Detail actions explicitly allowed by the hosted-group guidance.
+- Keep personal account settings, billing, wearable connection, connected-account authorization, browser or phone handoffs, and personal reminder setup in that person's private Murph conversation.
 - Send a URL only for a group-owned action or requested group deliverable. A clearly labeled per-person enrollment link is allowed only when the owning group workflow explicitly provides it; never describe a personal page as configuring the room.
 - Group-owned management, join/share flows, newsletters, and explicitly room-routed automation remain available under their owning guidance. Never let a room automation inherit a participant's personal destination or let a personal reminder inherit this room.`;
 }
 
 function buildAssistantPersonalityPreferenceText(
   personality: AssistantPersonalityPreferences | null,
+  conversationScope: "direct" | "group",
 ): string | null {
   const lines = [
     renderAssistantHumorPreference(personality?.humor),
@@ -572,7 +591,9 @@ function buildAssistantPersonalityPreferenceText(
   }
 
   return [
-    "Assistant personality preferences for this private conversation:",
+    conversationScope === "group"
+      ? "Assistant personality preferences for this group room:"
+      : "Assistant personality preferences for this private conversation:",
     ...lines,
     "- Apply these dials within the saved tone and current channel style. Fit them inside the channel's pacing: Detail sets the length budget, Humor and Push fit inside it, and Humor never gets its own bubble. They change expression, not facts, authority, safety thresholds, or required warnings. When urgent action is needed, lead with the action, timeframe, and safety essentials; when the user has limited capacity, omit optional background. Stay warm, competent, respectful of the user's choices, and factually clear. Safety, truth, privacy, consent, authorization, clinical and protected-context rules, channel rules, and the user's explicit current-turn instructions take precedence.",
   ].join("\n")
@@ -759,7 +780,9 @@ export function buildAssistantNotificationDecisionSystemPromptLayers(
         ? input.assistantContextSnapshotPrompt ?? null
         : null,
       buildAssistantConversationScopeText(conversationScope),
-      conversationScope === "direct"
+      conversationScope === "direct" || (
+        conversationScope === "group" && input.hostedRuntime === true
+      )
         ? buildAssistantTonePreferenceText(input.assistantTone ?? null)
         : null,
       conversationScope === "unverified-external"
@@ -1060,7 +1083,7 @@ function buildAssistantTurnPriorityText(
 2. Handle the room's immediate request before optional coaching or setup.
 3. Resolve ambiguity only from the current conversation, public sources, group-owned state, and server-approved shared projections. Never inspect the room vault for a participant's personal evidence.
 4. Ask one narrow question only when missing detail materially changes safety, attribution, the group-owned write target, or the answer.
-5. Complete only public reads, authorized group-owned actions, and server-bound current-sender style reads or writes. Move every other personal operation to the requester's private Murph conversation without sending a personal settings URL unless an owning group workflow explicitly permits a clearly labeled per-person enrollment link.
+5. Complete only public reads and authorized group-owned actions. Move personal operations to the requester's private Murph conversation without sending a personal settings URL unless an owning group workflow explicitly permits a clearly labeled per-person enrollment link.
 6. Use \`finish_without_reply\` only when no text reply should be sent for the current inbound message.
 7. Lead the final reply with the result, state uncertainty or blockers plainly, and claim an action only when a real runtime result proves it happened.`;
   }
