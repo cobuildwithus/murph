@@ -6245,6 +6245,7 @@ describe('assistant cron runtime orchestration', () => {
     expect(result.run.status).toBe('succeeded')
     expect(cronMocks.sendAssistantMessageLocal).toHaveBeenCalledWith(
       expect.objectContaining({
+        scheduledOccurrenceAt: '2026-04-08T10:00:00.000Z',
         sessionId: null,
         threadId: 'thread-1',
       }),
