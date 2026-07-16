@@ -15,7 +15,7 @@ import {
 import { hostedOnboardingError } from "./errors";
 import {
   buildHostedMemberIdentityPrivateColumns,
-  readHostedMemberIdentityPhoneNumber,
+  readHostedMemberIdentityPhoneNumbers,
   readHostedMemberIdentityPrivateState,
 } from "./member-private-codecs";
 import {
@@ -23,7 +23,6 @@ import {
   normalizeNullableString,
 } from "./shared";
 import { provisionActiveHostedDomainRootEnvelopeForUserOnly } from "../hosted-crypto/domain-root-store";
-import { runWithHostedDomainRootUnwrapCache } from "../hosted-crypto/domain-root-unwrap-cache";
 
 export interface HostedMemberIdentityState {
   maskedPhoneNumberHint: string | null;
@@ -190,12 +189,11 @@ export async function readHostedMemberPhoneNumberSnapshots(input: {
     },
   });
 
-  return runWithHostedDomainRootUnwrapCache(async () =>
-    await Promise.all(records.map(async (record) => ({
-      memberId: record.memberId,
-      phoneNumber: await readHostedMemberIdentityPhoneNumber(record, input.prisma),
-    })))
-  );
+  const phoneNumbers = await readHostedMemberIdentityPhoneNumbers(records, input.prisma);
+  return records.map((record, index) => ({
+    memberId: record.memberId,
+    phoneNumber: phoneNumbers[index] ?? null,
+  }));
 }
 
 export async function upsertHostedMemberIdentity(

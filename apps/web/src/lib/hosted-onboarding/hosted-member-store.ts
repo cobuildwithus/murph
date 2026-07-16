@@ -17,6 +17,7 @@ import {
 import { hostedOnboardingError } from "./errors";
 import {
   decryptHostedWebNullableString,
+  decryptHostedWebNullableStrings,
   encryptHostedWebNullableString,
 } from "../hosted-web/encryption";
 import {
@@ -36,7 +37,6 @@ import {
   lockHostedMemberRow,
   type HostedOnboardingReadClient,
 } from "./shared";
-import { runWithHostedDomainRootUnwrapCache } from "../hosted-crypto/domain-root-unwrap-cache";
 import { readHostedMemberIdentityPhoneNumber } from "./member-private-codecs";
 
 const HOSTED_MEMBER_EMAIL_AUTH_VERIFIED_EMAIL_FIELD =
@@ -280,29 +280,30 @@ export async function readHostedMemberVerifiedEmailSnapshots(input: {
     select: hostedMemberVerifiedEmailSelect,
   });
 
-  return runWithHostedDomainRootUnwrapCache(async () =>
-    await Promise.all(records.map(async (record) => {
-      const address = await decryptHostedWebNullableString({
-        field: HOSTED_MEMBER_EMAIL_AUTH_VERIFIED_EMAIL_FIELD,
-        memberId: record.memberId,
-        prisma: input.prisma,
-        value: record.verifiedEmailAddressEncrypted,
-      });
-      return {
-        memberId: record.memberId,
-        verifiedEmail:
-          address
-          && record.verifiedEmailLookupKey
-          && record.verifiedEmailVerifiedAt
-            ? {
-                address,
-                lookupKey: record.verifiedEmailLookupKey,
-                verifiedAt: record.verifiedEmailVerifiedAt,
-              }
-            : null,
-      };
-    }))
-  );
+  const addresses = await decryptHostedWebNullableStrings({
+    field: HOSTED_MEMBER_EMAIL_AUTH_VERIFIED_EMAIL_FIELD,
+    prisma: input.prisma,
+    values: records.map((record) => ({
+      memberId: record.memberId,
+      value: record.verifiedEmailAddressEncrypted,
+    })),
+  });
+  return records.map((record, index) => {
+    const address = addresses[index] ?? null;
+    return {
+      memberId: record.memberId,
+      verifiedEmail:
+        address
+        && record.verifiedEmailLookupKey
+        && record.verifiedEmailVerifiedAt
+          ? {
+              address,
+              lookupKey: record.verifiedEmailLookupKey,
+              verifiedAt: record.verifiedEmailVerifiedAt,
+            }
+          : null,
+    };
+  });
 }
 
 export async function claimHostedMemberSignupWelcomeEmailAttempt(input: {
