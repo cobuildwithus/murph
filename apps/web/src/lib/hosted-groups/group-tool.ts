@@ -5,7 +5,6 @@ import {
   HOSTED_RUNTIME_GROUP_CHAT_ICON_URL_MAX_LENGTH,
   HOSTED_RUNTIME_GROUP_CHAT_PARTICIPANTS_MAX,
   HOSTED_RUNTIME_GROUP_DISPLAY_NAME_MAX_LENGTH,
-  HOSTED_RUNTIME_GROUP_JOIN_OFFER_MESSAGE_TEMPLATE_MAX_LENGTH,
   type HostedRuntimeGroupChatParticipant,
   type HostedRuntimeGroupCreateJoinLinkRequest,
   type HostedRuntimeGroupPostJoinOfferRequest,
@@ -80,6 +79,7 @@ import {
   readHostedGroupByRuntimeMemberId,
   readHostedGroupIdByRuntimeMemberId,
   readHostedGroupMembershipsForMember,
+  readHostedGroupShareAuthorityByRuntimeMemberId,
   recordHostedGroupJoinOfferTx,
   revokeHostedGroupMemberEmailShareTx,
   updateHostedGroupDisplayNameByRuntimeMemberIdTx,
@@ -91,9 +91,6 @@ import {
 
 export const HOSTED_THREAD_CONTAINER_PARTICIPANT_RECONCILE_MAX =
   HOSTED_RUNTIME_GROUP_CHAT_PARTICIPANTS_MAX;
-
-const HOSTED_GROUP_JOIN_OFFER_JOIN_URL_PLACEHOLDER = "{{join_url}}";
-const HOSTED_GROUP_JOIN_OFFER_SHARE_SCOPE_PLACEHOLDER = "{{share_scope}}";
 
 export type HostedRuntimeGroupToolAccessClassification =
   | "owner_active"
@@ -109,6 +106,7 @@ export const HOSTED_RUNTIME_GROUP_TOOL_ACCESS_CLASSIFICATION = {
   preflight_set_chat_avatar: "owner_active",
   read_chat_participants: "participant_aware",
   read_current: "participant_aware",
+  read_share_authority: "participant_aware",
   revoke_own_email_share: "participant_aware",
   set_chat_avatar: "owner_active",
   share_contact_card: "owner_active",
@@ -208,6 +206,15 @@ export async function handleHostedRuntimeGroupTool(input: {
       memberId: input.memberId,
       selfOptOut: input.request.selfOptOut ?? null,
     });
+  }
+
+  if (input.request.action === "read_share_authority") {
+    return {
+      action: "read_share_authority",
+      result: await readHostedGroupShareAuthorityByRuntimeMemberId({
+        runtimeMemberId: input.memberId,
+      }),
+    };
   }
 
   if (!await hasHostedRuntimeActiveAccess(input.memberId)) {
@@ -599,15 +606,6 @@ async function handleHostedRuntimeGroupPostJoinOffer(input: {
       ?? input.joinOffer?.projectionKinds
       ?? [],
   );
-  const messageTemplate = normalizeHostedGroupJoinOfferMessageTemplate(
-    input.joinOffer?.messageTemplate ?? null,
-  );
-  if (
-    !messageTemplate
-    || !isHostedGroupJoinOfferMessageTemplateUsable(messageTemplate)
-  ) {
-    return unavailable("join_offer_message_template_unavailable");
-  }
   const created = await prisma.$transaction(async (tx) => {
     const ownerAccess = await readHostedRuntimeGroupOwnerActiveAccess({
       memberId: input.memberId,
@@ -640,7 +638,6 @@ async function handleHostedRuntimeGroupPostJoinOffer(input: {
 
   const message = buildHostedGroupJoinOfferMessage({
     joinUrl,
-    messageTemplate,
     projectionScopes,
   });
   let sent: Awaited<ReturnType<typeof sendHostedLinqChatMessage>>;
@@ -774,15 +771,11 @@ async function checkHostedRuntimeGroupLinqChatMutationAccess(input: {
 
 function buildHostedGroupJoinOfferMessage(input: {
   joinUrl: string;
-  messageTemplate: string;
   projectionScopes: readonly HostedVaultShareProjectionScope[];
 }): string {
-  return input.messageTemplate
-    .replace(
-      HOSTED_GROUP_JOIN_OFFER_SHARE_SCOPE_PLACEHOLDER,
-      renderHostedGroupJoinOfferScopeSentence(input.projectionScopes),
-    )
-    .replace(HOSTED_GROUP_JOIN_OFFER_JOIN_URL_PLACEHOLDER, input.joinUrl);
+  return `Like or heart this message to share the following with this group: ${
+    renderHostedGroupJoinOfferScopeSentence(input.projectionScopes)
+  }. To choose different permissions, use ${input.joinUrl}.`;
 }
 
 async function enqueueGroupOwnerNewsletterEmailNeededNudgeIfGrantedBestEffort(input: {
@@ -808,20 +801,6 @@ async function enqueueGroupOwnerNewsletterEmailNeededNudgeIfGrantedBestEffort(in
     memberId: input.ownerMemberId,
     prisma: input.prisma,
   });
-}
-
-function normalizeHostedGroupJoinOfferMessageTemplate(
-  messageTemplate: string | null,
-): string | null {
-  if (messageTemplate === null) return null;
-  const normalized = messageTemplate.trim().replace(/\s+/gu, " ");
-  if (
-    normalized.length === 0
-    || normalized.length > HOSTED_RUNTIME_GROUP_JOIN_OFFER_MESSAGE_TEMPLATE_MAX_LENGTH
-  ) {
-    return null;
-  }
-  return normalized;
 }
 
 function normalizeHostedGroupChatIconUrl(value: string): string | null {
@@ -865,28 +844,14 @@ function isHostedGroupChatIconDeliveryUrl(url: URL): boolean {
   return url.pathname.split("/").filter(Boolean).length >= 3;
 }
 
-function isHostedGroupJoinOfferMessageTemplateUsable(messageTemplate: string): boolean {
-  return hasPlaceholderExactlyOnce(
-    messageTemplate,
-    HOSTED_GROUP_JOIN_OFFER_SHARE_SCOPE_PLACEHOLDER,
-  ) && hasPlaceholderExactlyOnce(
-    messageTemplate,
-    HOSTED_GROUP_JOIN_OFFER_JOIN_URL_PLACEHOLDER,
-  );
-}
-
-function hasPlaceholderExactlyOnce(messageTemplate: string, placeholder: string): boolean {
-  return (
-    messageTemplate.includes(placeholder)
-    && messageTemplate.indexOf(placeholder) === messageTemplate.lastIndexOf(placeholder)
-  );
-}
-
 function renderHostedGroupJoinOfferScopeSentence(
   projectionScopes: readonly HostedVaultShareProjectionScope[],
 ): string {
   const labels = projectHostedVaultShareProjectionDisplays(projectionScopes)
-    .map((display) => formatHostedGroupJoinOfferShareScopeLabel(display.label));
+    .map((display) =>
+      display.offerDisclosure
+      ?? formatHostedGroupJoinOfferShareScopeLabel(display.label)
+    );
   return `your ${formatHumanList(["Murph profile name", ...labels])}`;
 }
 

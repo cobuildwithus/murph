@@ -135,20 +135,40 @@ describe('assistant capability-offers prompt contract', () => {
     expect(section).toContain('never returns raw email addresses')
     expect(section).toContain('never send the first edition immediately')
     expect(section).toContain('Create the newsletter cron through `murph.automation`')
-    expect(section).toContain('start with "Like this message" and say what it does')
-    expect(section).not.toContain('lead with reacting to this message')
-    expect(section).toContain('when the current group is adding a sharing permission')
+    expect(section).toContain('`action="post_join_offer"` to add a sharing permission')
     expect(section).toContain('permission opt-in, not joining or rejoining')
-    expect(section).toContain('secondary customize link')
     expect(section).toContain(
       "After read_current, use the group-chat skill's core permissions only for `status=none`",
     )
     expect(section).toContain('existing groups use workflow scopes')
+    expect(section).toContain('pass the exact `projectionScopes`')
+    expect(section).toContain('never pass offer text')
+    expect(section).toContain('Web owns the consent sentence')
+    expect(section).toContain('scope disclosure')
+    expect(section).toContain('reaction gestures')
+    expect(section).toContain('customize link')
     expect(section).toContain('grants membership only when needed')
     expect(section).toContain(
       'Existing members keep their membership and other grants unchanged',
     )
     expect(section).not.toContain('to join by reacting')
+  })
+
+  it('keeps bounded device diagnostics inside the closed group permission contract', () => {
+    const prompt = buildAssistantSystemPromptLayers(
+      createCommonCodexPromptInput({
+        assistantHostedAutomationAvailable: true,
+        conversationScope: 'group',
+        hostedRuntime: true,
+      }),
+    ).stableRouteCapabilityPrompt
+
+    expect(prompt).toContain(HOSTED_GROUPS_HEADER)
+    expect(prompt).toContain('`device-sync-status.v0`')
+    expect(prompt).toContain('public health-source labels')
+    expect(prompt).toContain('coarse connection status')
+    expect(prompt).toContain('connection-wide sync-job times')
+    expect(prompt).toContain('raw provider or account identity')
   })
 
   it('keeps the new-group contact handoff natural and reactive', () => {

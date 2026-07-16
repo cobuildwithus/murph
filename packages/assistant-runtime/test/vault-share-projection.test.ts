@@ -11,6 +11,7 @@ import {
   getHostedVaultShareActivitySessionCountProjectionSpec,
   getHostedVaultShareDailyMetricProjectionSpec,
   HOSTED_VAULT_SHARE_DELIVER_MAX_RECORDS,
+  HOSTED_VAULT_SHARE_DEVICE_SYNC_STATUS_PROJECTION_KIND,
   hostedVaultShareProjectionKindToScope,
   parseHostedVaultShareDeliverRequest,
   type HostedVaultShareDeliverRequest,
@@ -25,10 +26,12 @@ import { describe, expect, it, vi } from "vitest";
 import {
   applyHostedVaultShareRevokeWake,
   importHostedVaultShareDeliveryWake,
+  reconcileSharedVaultShareProjectionAuthority,
 } from "../src/hosted-runtime/vault-share-import.ts";
 import {
   HOSTED_VAULT_SHARE_PROJECTION_MAX_NIGHT_AGE_DAYS,
   offerHostedVaultShareProjectionBestEffort,
+  readProjectableDeviceSyncStatus,
   readProjectableActivityDistanceDays,
   readProjectableActivityMinutesDays,
   readProjectableActivitySessionCountDays,
@@ -43,6 +46,7 @@ import {
   selectProjectableWorkoutDays,
   type ActivitySessionProjectionRow,
 } from "../src/hosted-runtime/vault-share-projection.ts";
+import type { HostedRuntimeDeviceSyncPort } from "../src/hosted-runtime/platform.ts";
 import {
   CURRENT_VAULT_FORMAT_VERSION,
   createEmptyMemoryDocument,
@@ -67,6 +71,9 @@ const RECORD = {
 const SLEEP_SCOPE = hostedVaultShareProjectionKindToScope("sleep-times.v0");
 const GROUP_EMAIL_SCOPE = hostedVaultShareProjectionKindToScope("group-email.v0");
 const PROFILE_SCOPE = hostedVaultShareProjectionKindToScope("profile-name.v0");
+const DEVICE_SYNC_STATUS_SCOPE = hostedVaultShareProjectionKindToScope(
+  HOSTED_VAULT_SHARE_DEVICE_SYNC_STATUS_PROJECTION_KIND,
+);
 const RUNNING_SCOPE = buildHostedVaultShareActivityMinutesProjectionScope({
   activityKind: "running",
 });
@@ -97,6 +104,106 @@ const ACTIVITY_RECORD = {
 };
 
 const SOURCE_REVISION_PATTERN = /^[A-Za-z0-9_-]{32}$/u;
+
+type DeviceSyncSnapshot = Awaited<
+  ReturnType<HostedRuntimeDeviceSyncPort["fetchSnapshot"]>
+>;
+
+function createDeviceSyncPort(
+  fetchSnapshot: HostedRuntimeDeviceSyncPort["fetchSnapshot"],
+): HostedRuntimeDeviceSyncPort {
+  const unused = async (): Promise<never> => {
+    throw new Error("Unused device-sync operation.");
+  };
+  return {
+    ackDirtyStateProcessed: unused,
+    applyUpdates: unused,
+    createConnectLink: unused,
+    fetchDirtyStates: unused,
+    fetchSnapshot,
+  };
+}
+
+function buildDeviceSyncSnapshot(): DeviceSyncSnapshot {
+  return {
+    connections: [
+      {
+        connection: {
+          accessTokenExpiresAt: null,
+          connectedAt: "2026-07-01T00:00:00.000Z",
+          createdAt: "2026-07-01T00:00:00.000Z",
+          displayName: "Private account label",
+          externalAccountId: "private-external-account",
+          id: "private-connection-id",
+          metadata: { privateMetadata: true },
+          provider: "junction",
+          scopes: ["private:scope"],
+          setupPhase: "source_confirmed",
+          status: "active",
+          updatedAt: "2026-07-15T10:00:00.000Z",
+        },
+        credential: {
+          credentialMetadata: { privateCredentialMetadata: true },
+          kind: "oauth_tokens_redacted",
+          tokenVersion: 7,
+        },
+        localState: {
+          lastErrorCode: "PRIVATE_ERROR_CODE",
+          lastErrorMessage: "Private provider error detail",
+          lastSyncCompletedAt: "2026-07-15T09:30:00.000Z",
+          lastSyncErrorAt: "2026-07-15T09:45:00.000Z",
+          lastSyncStartedAt: "2026-07-15T09:29:00.000Z",
+          lastWebhookAt: "2026-07-15T09:50:00.000Z",
+          nextReconcileAt: "2026-07-16T09:30:00.000Z",
+        },
+        sources: [
+          {
+            displayName: "Private WHOOP account",
+            firstSeenAt: "2026-07-01T00:00:00.000Z",
+            lastErrorCode: "PRIVATE_SOURCE_ERROR",
+            lastErrorMessage: "Private source error detail",
+            lastSeenAt: "2026-07-15T09:45:00.000Z",
+            resourceAvailabilitySummary: { privateResource: "detail" },
+            resourceCount: 42,
+            sourceInstanceKey: "private-source-instance",
+            sourceProviderSlug: "whoop_v2",
+            status: "error",
+          },
+        ],
+      },
+      {
+        connection: {
+          accessTokenExpiresAt: null,
+          connectedAt: "2026-07-02T00:00:00.000Z",
+          createdAt: "2026-07-02T00:00:00.000Z",
+          displayName: null,
+          externalAccountId: "private-direct-account",
+          id: "private-direct-connection",
+          metadata: {},
+          provider: "oura",
+          scopes: [],
+          status: "reauthorization_required",
+          updatedAt: "2026-07-15T10:30:00.000Z",
+        },
+        credential: {
+          credentialMetadata: {},
+          kind: "none",
+        },
+        localState: {
+          lastErrorCode: null,
+          lastErrorMessage: null,
+          lastSyncCompletedAt: null,
+          lastSyncErrorAt: null,
+          lastSyncStartedAt: null,
+          lastWebhookAt: null,
+          nextReconcileAt: null,
+        },
+      },
+    ],
+    generatedAt: "2026-07-16T09:12:00.000Z",
+    userId: "private-user-id",
+  };
+}
 
 type WorkoutMetricRow = Pick<
   MetricSeriesPoint,
@@ -367,6 +474,357 @@ describe("offerHostedVaultShareProjectionBestEffort", () => {
 
     expect(result.outcome).toBe("error");
     expect(deliver).not.toHaveBeenCalled();
+  });
+
+  it("fetches a credential-free device snapshot only for an active diagnostic scope", async () => {
+    const snapshot = buildDeviceSyncSnapshot();
+    const fetchSnapshot = vi.fn<HostedRuntimeDeviceSyncPort["fetchSnapshot"]>(
+      async () => snapshot,
+    );
+    const deliver = vi.fn().mockResolvedValue({ status: "delivered" });
+    const deviceSyncPort = createDeviceSyncPort(fetchSnapshot);
+
+    const inactiveResult = await offerHostedVaultShareProjectionBestEffort({
+      deviceSyncPort,
+      vaultRoot: "/unused",
+      vaultSharePort: {
+        deliver,
+        listActiveProjectionScopes: async () => [],
+      },
+    });
+    expect(inactiveResult.outcome).toBe("no-active-share");
+    expect(fetchSnapshot).not.toHaveBeenCalled();
+
+    const activeResult = await offerHostedVaultShareProjectionBestEffort({
+      deviceSyncPort,
+      vaultRoot: "/unused",
+      vaultSharePort: {
+        deliver,
+        listActiveProjectionScopes: async () => [DEVICE_SYNC_STATUS_SCOPE],
+      },
+    });
+    expect(activeResult.outcome).toBe("delivered");
+    expect(fetchSnapshot).toHaveBeenCalledOnce();
+    expect(fetchSnapshot).toHaveBeenCalledWith({
+      includeCredentialMaterial: false,
+      limit: 100,
+    });
+  });
+
+  it("fails closed when an active diagnostic scope has no usable device snapshot", async () => {
+    const deliver = vi.fn().mockResolvedValue({ status: "delivered" });
+    const vaultSharePort = {
+      deliver,
+      listActiveProjectionScopes: async () => [DEVICE_SYNC_STATUS_SCOPE],
+    };
+
+    await expect(offerHostedVaultShareProjectionBestEffort({
+      vaultRoot: "/unused",
+      vaultSharePort,
+    })).resolves.toEqual({ outcome: "no-projectable-records" });
+
+    const fetchSnapshot = vi.fn<HostedRuntimeDeviceSyncPort["fetchSnapshot"]>(
+      async () => {
+        throw new Error("private snapshot failure");
+      },
+    );
+    await expect(offerHostedVaultShareProjectionBestEffort({
+      deviceSyncPort: createDeviceSyncPort(fetchSnapshot),
+      vaultRoot: "/unused",
+      vaultSharePort,
+    })).resolves.toEqual({ outcome: "error" });
+
+    expect(fetchSnapshot).toHaveBeenCalledWith({
+      includeCredentialMaterial: false,
+      limit: 100,
+    });
+    expect(deliver).not.toHaveBeenCalled();
+  });
+});
+
+describe("readProjectableDeviceSyncStatus", () => {
+  it("projects only public labels, coarse state, and honestly named sync-job completion", async () => {
+    const snapshot = buildDeviceSyncSnapshot();
+    const records = await readProjectableDeviceSyncStatus(createDeviceSyncPort(
+      async () => snapshot,
+    ));
+
+    expect(records).toEqual([{
+      data: {
+        observedAt: "2026-07-16T00:00:00.000Z",
+        sources: [
+          {
+            connectionSyncJobCompletedAt: null,
+            label: "Oura",
+            status: "needs-reconnect",
+            statusObservedAt: "2026-07-15T10:30:00.000Z",
+          },
+          {
+            connectionSyncJobCompletedAt: "2026-07-15T09:30:00.000Z",
+            label: "WHOOP",
+            status: "needs-attention",
+            statusObservedAt: "2026-07-15T09:45:00.000Z",
+          },
+        ],
+      },
+      occurredAt: "2026-07-16T00:00:00.000Z",
+      recordKey: "device-sync-status",
+    }]);
+
+    const serialized = JSON.stringify(records);
+    for (const privateValue of [
+      "junction",
+      "whoop_v2",
+      "private-user-id",
+      "private-connection-id",
+      "private-external-account",
+      "private-source-instance",
+      "private:scope",
+      "PRIVATE_ERROR_CODE",
+      "Private provider error detail",
+      "privateCredentialMetadata",
+      "privateResource",
+    ]) {
+      expect(serialized).not.toContain(privateValue);
+    }
+  });
+
+  it("uses a connected duplicate label instead of falsely reporting a reconnect problem", async () => {
+    const snapshot = buildDeviceSyncSnapshot();
+    const firstConnection = snapshot.connections[0]!;
+    const firstSource = firstConnection.sources![0]!;
+    firstConnection.connection.status = "reauthorization_required";
+    snapshot.connections.push({
+      connection: {
+        ...firstConnection.connection,
+        id: "second-private-connection",
+        status: "active",
+        updatedAt: "2026-07-15T08:00:00.000Z",
+      },
+      credential: firstConnection.credential,
+      localState: {
+        ...firstConnection.localState,
+        lastSyncCompletedAt: "2026-07-15T11:00:00.000Z",
+      },
+      sources: [{
+        ...firstSource,
+        lastErrorCode: null,
+        lastErrorMessage: null,
+        lastSeenAt: "2026-07-15T08:00:00.000Z",
+        sourceInstanceKey: "second-private-source",
+        status: "connected",
+      }],
+    });
+
+    const records = await readProjectableDeviceSyncStatus(createDeviceSyncPort(
+      async () => snapshot,
+    ));
+    const data = records[0]?.data;
+    expect(data).toMatchObject({
+      sources: expect.arrayContaining([{
+        connectionSyncJobCompletedAt: "2026-07-15T11:00:00.000Z",
+        label: "WHOOP",
+        status: "connected",
+        statusObservedAt: "2026-07-15T08:00:00.000Z",
+      }]),
+    });
+  });
+
+  it("maps every closed connection and source problem state", async () => {
+    const directSnapshot = (
+      connection: Partial<DeviceSyncSnapshot["connections"][number]["connection"]>,
+    ): DeviceSyncSnapshot => {
+      const snapshot = buildDeviceSyncSnapshot();
+      const entry = structuredClone(snapshot.connections[1]!);
+      entry.connection = {
+        ...entry.connection,
+        setupPhase: "source_confirmed",
+        status: "active",
+        ...connection,
+      };
+      snapshot.connections = [entry];
+      return snapshot;
+    };
+    const sourceSnapshot = (
+      status: NonNullable<
+        DeviceSyncSnapshot["connections"][number]["sources"]
+      >[number]["status"],
+    ): DeviceSyncSnapshot => {
+      const snapshot = buildDeviceSyncSnapshot();
+      const entry = structuredClone(snapshot.connections[0]!);
+      entry.connection.status = "active";
+      entry.connection.setupPhase = "source_confirmed";
+      entry.sources = [{ ...entry.sources![0]!, status }];
+      snapshot.connections = [entry];
+      return snapshot;
+    };
+    const cases = [
+      {
+        expectedStatus: "disconnected",
+        snapshot: directSnapshot({ status: "disconnected" }),
+      },
+      {
+        expectedStatus: "setting-up",
+        snapshot: directSnapshot({ setupPhase: "pending_link" }),
+      },
+      {
+        expectedStatus: "setting-up",
+        snapshot: directSnapshot({ setupPhase: "link_returned" }),
+      },
+      {
+        expectedStatus: "needs-attention",
+        snapshot: directSnapshot({ setupPhase: "failed" }),
+      },
+      {
+        expectedStatus: "disconnected",
+        snapshot: sourceSnapshot("disconnected"),
+      },
+      {
+        expectedStatus: "needs-attention",
+        snapshot: sourceSnapshot("unavailable"),
+      },
+    ] as const;
+
+    for (const testCase of cases) {
+      const records = await readProjectableDeviceSyncStatus(createDeviceSyncPort(
+        async () => testCase.snapshot,
+      ));
+      const data = records[0]?.data;
+      if (!data || !("sources" in data)) {
+        throw new Error("Expected a device-sync-status projection record.");
+      }
+      expect(data.sources).toHaveLength(1);
+      expect(data.sources[0]?.status).toBe(testCase.expectedStatus);
+    }
+  });
+
+  it("sorts and caps the projected public source list at eight entries", async () => {
+    const snapshot = buildDeviceSyncSnapshot();
+    const directConnection = snapshot.connections[1]!;
+    const safeProviderSlugs = [
+      "withings",
+      "whoop_v2",
+      "strava",
+      "samsung_health",
+      "oura",
+      "google_fit",
+      "garmin",
+      "fitbit",
+      "apple_health_kit",
+    ];
+    snapshot.connections = safeProviderSlugs.map((provider, index) => ({
+      ...structuredClone(directConnection),
+      connection: {
+        ...directConnection.connection,
+        id: `private-connection-${index}`,
+        provider,
+        status: "active" as const,
+      },
+    }));
+
+    const records = await readProjectableDeviceSyncStatus(createDeviceSyncPort(
+      async () => snapshot,
+    ));
+    const data = records[0]?.data;
+    if (!data || !("sources" in data)) {
+      throw new Error("Expected a device-sync-status projection record.");
+    }
+
+    expect(data.sources.map((source) => source.label)).toEqual([
+      "Apple Health",
+      "Fitbit",
+      "Garmin",
+      "Google Fit",
+      "Oura",
+      "Samsung Health",
+      "Strava",
+      "WHOOP",
+    ]);
+  });
+
+  it("drops intermediary, unknown, and internal provider slugs", async () => {
+    const snapshot = buildDeviceSyncSnapshot();
+    const junctionConnection = snapshot.connections[0]!;
+    const directConnection = snapshot.connections[1]!;
+    const internalSource = junctionConnection.sources![0]!;
+    snapshot.connections = [
+      {
+        ...structuredClone(junctionConnection),
+        sources: [],
+      },
+      {
+        ...structuredClone(junctionConnection),
+        sources: [{
+          ...internalSource,
+          sourceProviderSlug: "private_internal_source",
+        }],
+      },
+      {
+        ...structuredClone(directConnection),
+        connection: {
+          ...directConnection.connection,
+          provider: "source_0",
+          status: "active" as const,
+        },
+      },
+      {
+        ...structuredClone(directConnection),
+        connection: {
+          ...directConnection.connection,
+          provider: "strava",
+          status: "active" as const,
+        },
+      },
+    ];
+
+    const records = await readProjectableDeviceSyncStatus(createDeviceSyncPort(
+      async () => snapshot,
+    ));
+
+    expect(records[0]?.data).toMatchObject({
+      sources: [{ label: "Strava" }],
+    });
+    expect(JSON.stringify(records)).not.toMatch(/junction|private_internal_source|source_0/u);
+  });
+
+  it("emits a day-bucketed empty record for a successful snapshot with no public source", async () => {
+    const snapshot = buildDeviceSyncSnapshot();
+    snapshot.connections = [{
+      ...snapshot.connections[0]!,
+      sources: [],
+    }];
+
+    await expect(readProjectableDeviceSyncStatus(createDeviceSyncPort(
+      async () => snapshot,
+    ))).resolves.toEqual([{
+      data: {
+        observedAt: "2026-07-16T00:00:00.000Z",
+        sources: [],
+      },
+      occurredAt: "2026-07-16T00:00:00.000Z",
+      recordKey: "device-sync-status",
+    }]);
+  });
+
+  it("keeps the daily record stable across private snapshot changes", async () => {
+    const firstSnapshot = buildDeviceSyncSnapshot();
+    const secondSnapshot = structuredClone(firstSnapshot);
+    secondSnapshot.generatedAt = "2026-07-16T20:00:00.000Z";
+    secondSnapshot.userId = "different-private-user";
+    secondSnapshot.connections[0]!.connection.externalAccountId =
+      "different-private-account";
+    secondSnapshot.connections[0]!.connection.metadata = {
+      differentPrivateMetadata: true,
+    };
+
+    const first = await readProjectableDeviceSyncStatus(createDeviceSyncPort(
+      async () => firstSnapshot,
+    ));
+    const second = await readProjectableDeviceSyncStatus(createDeviceSyncPort(
+      async () => secondSnapshot,
+    ));
+
+    expect(second).toEqual(first);
   });
 });
 
@@ -1598,6 +2056,99 @@ describe("importHostedVaultShareDeliveryWake", () => {
       join(vaultRoot, "raw", "shared", "vault-share-projections.json"),
       "utf8",
     )).rejects.toMatchObject({ code: "ENOENT" });
+  });
+
+  it("reconciles revoked, former-member, and old-generation entries before reads", async () => {
+    const vaultRoot = await mkdtemp(join(tmpdir(), "vault-share-authority-"));
+    for (const [grantorMemberId, shareId] of [
+      ["member_current", "share_current"],
+      ["member_revoked", "share_revoked"],
+      ["member_former", "share_former"],
+      ["member_regranted", "share_old_generation"],
+    ] as const) {
+      await importHostedVaultShareDeliveryWake({
+        vaultRoot,
+        wake: {
+          ...wake,
+          delivery: {
+            ...wake.delivery,
+            grantorMemberId,
+            shareId,
+          },
+          eventId: `vault-share:${shareId}:2026-06-09`,
+        },
+      });
+    }
+    const before = JSON.parse(await readFile(storePath(vaultRoot), "utf8"));
+    const currentGrantor =
+      before.projections["sleep-times.v0"].grantors.member_current;
+    currentGrantor.records.push({
+      ...currentGrantor.records[0],
+      receivedEventId: "vault-share:wrong-record-generation",
+      shareId: "share_wrong_generation",
+    });
+    await writeFile(storePath(vaultRoot), JSON.stringify(before));
+
+    await expect(reconcileSharedVaultShareProjectionAuthority({
+      readAuthority: async () => [{
+        memberId: "member_current",
+        projectionScopeKey: "sleep-times.v0",
+        shareId: "share_current",
+      }, {
+        memberId: "member_regranted",
+        projectionScopeKey: "sleep-times.v0",
+        shareId: "share_new_generation",
+      }],
+      vaultRoot,
+    })).resolves.toEqual({ status: "reconciled" });
+
+    const after = JSON.parse(await readFile(storePath(vaultRoot), "utf8"));
+    expect(Object.keys(after.projections["sleep-times.v0"].grantors))
+      .toEqual(["member_current"]);
+    expect(after.projections["sleep-times.v0"].grantors.member_current.records)
+      .toHaveLength(1);
+    expect(after.projections["sleep-times.v0"].grantors.member_current.records[0].shareId)
+      .toBe("share_current");
+  });
+
+  it("deletes the projection file when current authority retains no entries", async () => {
+    const vaultRoot = await mkdtemp(join(tmpdir(), "vault-share-authority-"));
+    await importHostedVaultShareDeliveryWake({ vaultRoot, wake });
+
+    await expect(reconcileSharedVaultShareProjectionAuthority({
+      readAuthority: async () => [],
+      vaultRoot,
+    })).resolves.toEqual({ status: "reconciled" });
+    await expect(readFile(storePath(vaultRoot), "utf8"))
+      .rejects.toMatchObject({ code: "ENOENT" });
+  });
+
+  it("leaves landed data byte-for-byte unchanged when authority is unavailable", async () => {
+    const vaultRoot = await mkdtemp(join(tmpdir(), "vault-share-authority-"));
+    await importHostedVaultShareDeliveryWake({ vaultRoot, wake });
+    const before = await readFile(storePath(vaultRoot));
+
+    await expect(reconcileSharedVaultShareProjectionAuthority({
+      readAuthority: async () => {
+        throw new Error("control unavailable");
+      },
+      vaultRoot,
+    })).resolves.toEqual({
+      reasonCode: "vault_share.authority_unavailable",
+      status: "blocked",
+    });
+    expect(await readFile(storePath(vaultRoot))).toEqual(before);
+  });
+
+  it("skips the authority control read when no landed store exists", async () => {
+    const vaultRoot = await mkdtemp(join(tmpdir(), "vault-share-authority-"));
+    const readAuthority = vi.fn(async () => []);
+
+    await expect(reconcileSharedVaultShareProjectionAuthority({
+      readAuthority,
+      vaultRoot,
+    })).resolves.toEqual({ status: "empty" });
+    expect(readAuthority).not.toHaveBeenCalled();
   });
 
   it("skips email delivery authorization imports because they carry no records", async () => {

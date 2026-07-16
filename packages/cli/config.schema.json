@@ -1784,7 +1784,8 @@
                               "activity-score-days.v0",
                               "vo2-max-days.v0",
                               "resting-heart-rate-days.v0",
-                              "hrv-days.v0"
+                              "hrv-days.v0",
+                              "device-sync-status.v0"
                             ]
                           }
                         },

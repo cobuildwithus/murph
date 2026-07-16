@@ -232,6 +232,81 @@ describe("hosted Assistant Ask contracts", () => {
 });
 
 describe("hosted Assistant Ask runtime control", () => {
+  it("strictly parses the runtime-internal current share authority", () => {
+    expect(parseHostedRuntimeGroupToolRequest({
+      action: "read_share_authority",
+    })).toEqual({ action: "read_share_authority" });
+    expect(() => parseHostedRuntimeGroupToolRequest({
+      action: "read_share_authority",
+      memberId: "member_model_selected",
+    })).toThrow(/not allowed/u);
+
+    expect(parseHostedRuntimeGroupToolResponse({
+      action: "read_share_authority",
+      result: {
+        memberIds: ["member_current"],
+        shares: [{
+          memberId: "member_current",
+          projectionScopeKey: "steps-days.v0",
+          shareId: "share_current",
+        }],
+        status: "ok",
+      },
+    })).toEqual({
+      action: "read_share_authority",
+      result: {
+        memberIds: ["member_current"],
+        shares: [{
+          memberId: "member_current",
+          projectionScopeKey: "steps-days.v0",
+          shareId: "share_current",
+        }],
+        status: "ok",
+      },
+    });
+    expect(parseHostedRuntimeGroupToolResponse({
+      action: "read_share_authority",
+      result: { memberIds: [], shares: [], status: "none" },
+    })).toMatchObject({ result: { status: "none" } });
+    expect(() => parseHostedRuntimeGroupToolResponse({
+      action: "read_share_authority",
+      result: {
+        memberIds: ["member_current"],
+        shares: [{
+          email: "private@example.test",
+          memberId: "member_current",
+          projectionScopeKey: "steps-days.v0",
+          shareId: "share_current",
+        }],
+        status: "ok",
+      },
+    })).toThrow(/not allowed/u);
+    expect(() => parseHostedRuntimeGroupToolResponse({
+      action: "read_share_authority",
+      result: {
+        memberIds: ["member_current"],
+        shares: [{
+          memberId: "member_former",
+          projectionScopeKey: "steps-days.v0",
+          shareId: "share_current",
+        }],
+        status: "ok",
+      },
+    })).toThrow(/current member/u);
+    expect(() => parseHostedRuntimeGroupToolResponse({
+      action: "read_share_authority",
+      result: {
+        memberIds: ["member_current"],
+        shares: Array.from({ length: 4_097 }, (_, index) => ({
+          memberId: "member_current",
+          projectionScopeKey: `steps-days.v0:${index}`,
+          shareId: `share_${index}`,
+        })),
+        status: "ok",
+      },
+    })).toThrow(/at most 4096/u);
+  });
+
   it("parses the trusted group-tool ask wire arm and bounded outcomes", () => {
     expect(parseHostedRuntimeGroupToolRequest({
       action: "ask",

@@ -60,6 +60,7 @@ import {
   leaveHostedGroupMemberTx,
   readHostedGroupJoinView,
   readHostedGroupMembershipsForMember,
+  readHostedGroupShareAuthorityByRuntimeMemberId,
   recordHostedGroupJoinOfferTx,
 } from "@/src/lib/hosted-groups/group-store";
 import {
@@ -1964,6 +1965,138 @@ function restoreEnvValue(key: string, value: string | undefined): void {
 
   process.env[key] = value;
 }
+
+describe("readHostedGroupShareAuthorityByRuntimeMemberId", () => {
+  it("derives current members and exact granted row generations in one snapshot", async () => {
+    mocks.hasHostedRuntimeActiveAccess.mockResolvedValue(true);
+    const hostedGroupFindUnique = vi.fn(async () => ({
+      members: [
+        { memberId: "member_current_a" },
+        { memberId: "member_current_b" },
+      ],
+    }));
+    const hostedVaultShareFindMany = vi.fn(async () => [{
+      grantorMemberId: "member_current_a",
+      id: "share_generation_current",
+      projectionScopeKey: "steps-days.v0",
+    }]);
+    const tx = createPrismaStub({
+      hostedGroup: { findUnique: hostedGroupFindUnique },
+      hostedVaultShare: { findMany: hostedVaultShareFindMany },
+    });
+    const transaction = vi.fn(async (
+      run: (client: typeof tx) => Promise<unknown>,
+    ) => await run(tx));
+    const prisma = createPrismaStub({ $transaction: transaction });
+
+    await expect(readHostedGroupShareAuthorityByRuntimeMemberId({
+      prisma,
+      runtimeMemberId: "member_group_runtime",
+    })).resolves.toEqual({
+      memberIds: ["member_current_a", "member_current_b"],
+      shares: [{
+        memberId: "member_current_a",
+        projectionScopeKey: "steps-days.v0",
+        shareId: "share_generation_current",
+      }],
+      status: "ok",
+    });
+
+    expect(transaction).toHaveBeenCalledWith(
+      expect.any(Function),
+      expect.objectContaining({
+        isolationLevel: Prisma.TransactionIsolationLevel.RepeatableRead,
+      }),
+    );
+    expect(hostedVaultShareFindMany).toHaveBeenCalledWith(expect.objectContaining({
+      take: 4_097,
+      where: {
+        destinationMemberId: "member_group_runtime",
+        grantorMemberId: {
+          in: ["member_current_a", "member_current_b"],
+        },
+        status: "granted",
+      },
+    }));
+  });
+
+  it("returns none without reading grants when the runtime has no current group", async () => {
+    const hostedVaultShareFindMany = vi.fn();
+    const tx = createPrismaStub({
+      hostedGroup: { findUnique: vi.fn(async () => null) },
+      hostedVaultShare: { findMany: hostedVaultShareFindMany },
+    });
+    const prisma = createPrismaStub({
+      $transaction: vi.fn(async (
+        run: (client: typeof tx) => Promise<unknown>,
+      ) => await run(tx)),
+    });
+
+    await expect(readHostedGroupShareAuthorityByRuntimeMemberId({
+      prisma,
+      runtimeMemberId: "member_without_group",
+    })).resolves.toEqual({ memberIds: [], shares: [], status: "none" });
+    expect(hostedVaultShareFindMany).not.toHaveBeenCalled();
+  });
+
+  it("fails closed without reading grants when the group runtime is inactive", async () => {
+    mocks.hasHostedRuntimeActiveAccess.mockResolvedValue(false);
+    const hostedVaultShareFindMany = vi.fn();
+    const tx = createPrismaStub({
+      hostedGroup: {
+        findUnique: vi.fn(async () => ({
+          members: [{ memberId: "member_current" }],
+        })),
+      },
+      hostedVaultShare: { findMany: hostedVaultShareFindMany },
+    });
+    const prisma = createPrismaStub({
+      $transaction: vi.fn(async (
+        run: (client: typeof tx) => Promise<unknown>,
+      ) => await run(tx)),
+    });
+
+    await expect(readHostedGroupShareAuthorityByRuntimeMemberId({
+      prisma,
+      runtimeMemberId: "member_group_runtime",
+    })).resolves.toEqual({
+      status: "unavailable",
+      unavailableReason: "runtime_inactive",
+    });
+    expect(hostedVaultShareFindMany).not.toHaveBeenCalled();
+  });
+
+  it("fails closed instead of truncating an oversized authority snapshot", async () => {
+    mocks.hasHostedRuntimeActiveAccess.mockResolvedValue(true);
+    const tx = createPrismaStub({
+      hostedGroup: {
+        findUnique: vi.fn(async () => ({
+          members: [{ memberId: "member_current" }],
+        })),
+      },
+      hostedVaultShare: {
+        findMany: vi.fn(async () => Array.from({ length: 4_097 }, (_, index) => ({
+          grantorMemberId: "member_current",
+          id: `share_${index}`,
+          projectionScopeKey: `scope_${index}`,
+        }))),
+      },
+    });
+    const prisma = createPrismaStub({
+      $transaction: vi.fn(async (
+        run: (client: typeof tx) => Promise<unknown>,
+      ) => await run(tx)),
+    });
+
+    await expect(readHostedGroupShareAuthorityByRuntimeMemberId({
+      prisma,
+      runtimeMemberId: "member_group_runtime",
+    })).resolves.toEqual({
+      status: "unavailable",
+      unavailableReason: "authorization_snapshot_too_large",
+    });
+  });
+});
 
 describe("readHostedGroupMembershipsForMember", () => {
   beforeEach(() => {

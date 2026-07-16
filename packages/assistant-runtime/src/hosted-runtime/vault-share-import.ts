@@ -5,6 +5,9 @@ import type {
   HostedExecutionVaultShareDeliveryWake,
   HostedExecutionVaultShareRevokeWake,
 } from "@murphai/hosted-execution/contracts";
+import type {
+  HostedRuntimeGroupShareAuthorityEntry,
+} from "@murphai/hosted-execution/runtime-control";
 import {
   compareSharedVaultShareRecords,
   createEmptySharedVaultShareProjectionStore,
@@ -25,6 +28,144 @@ import {
 import { writeJsonFileAtomic } from "@murphai/runtime-state/node";
 
 import type { HostedMailboxItemImportOutcome } from "./mailbox-import.ts";
+import type { HostedRuntimeGroupToolPort } from "./platform.ts";
+
+export type HostedVaultShareAuthorityReconciliationOutcome =
+  | { status: "empty" | "reconciled" | "unchanged" }
+  | {
+      status: "blocked";
+      reasonCode:
+        | "vault_share.authority_unavailable"
+        | "vault_share.read_failed"
+        | "vault_share.write_failed";
+    };
+
+/**
+ * Revalidates every already-landed projection against Web's current grant-row
+ * generation before a hosted model can read it. The authority callback runs
+ * only after a non-empty, valid local store is known to exist, so ordinary
+ * personal runtimes pay no control-plane request and transient authority
+ * failures never mutate the local store.
+ */
+export async function reconcileSharedVaultShareProjectionAuthority(input: {
+  readAuthority: () => Promise<readonly HostedRuntimeGroupShareAuthorityEntry[]>;
+  vaultRoot: string;
+}): Promise<HostedVaultShareAuthorityReconciliationOutcome> {
+  const read = await readSharedVaultShareProjectionStore(input.vaultRoot);
+  if (read.status === "empty") {
+    return { status: "empty" };
+  }
+  if (read.status !== "loaded") {
+    return { status: "blocked", reasonCode: "vault_share.read_failed" };
+  }
+
+  const store = read.store;
+  if (Object.keys(store.projections).length === 0) {
+    try {
+      await rm(resolveSharedVaultShareProjectionStorePath(input.vaultRoot), {
+        force: true,
+      });
+      return { status: "empty" };
+    } catch {
+      return { status: "blocked", reasonCode: "vault_share.write_failed" };
+    }
+  }
+
+  let authority: readonly HostedRuntimeGroupShareAuthorityEntry[];
+  try {
+    authority = await input.readAuthority();
+  } catch {
+    return {
+      status: "blocked",
+      reasonCode: "vault_share.authority_unavailable",
+    };
+  }
+  const authorizedTriples = new Set(authority.map((entry) =>
+    buildVaultShareAuthorityKey(entry.memberId, entry.projectionScopeKey, entry.shareId)
+  ));
+  let changed = false;
+  for (const [projectionScopeKey, projection] of Object.entries(store.projections)) {
+    for (const [grantorMemberId, grantor] of Object.entries(projection.grantors)) {
+      const authorized = authorizedTriples.has(buildVaultShareAuthorityKey(
+        grantorMemberId,
+        projectionScopeKey,
+        grantor.shareId,
+      ));
+      if (!authorized) {
+        delete projection.grantors[grantorMemberId];
+        changed = true;
+        continue;
+      }
+
+      const records = grantor.records.filter((record) =>
+        record.shareId === grantor.shareId
+      );
+      if (records.length !== grantor.records.length) {
+        changed = true;
+      }
+      if (records.length === 0) {
+        delete projection.grantors[grantorMemberId];
+        changed = true;
+      } else {
+        grantor.records = records;
+      }
+    }
+    if (Object.keys(projection.grantors).length === 0) {
+      delete store.projections[projectionScopeKey];
+      changed = true;
+    }
+  }
+  if (!changed) {
+    return { status: "unchanged" };
+  }
+
+  try {
+    if (Object.keys(store.projections).length === 0) {
+      await rm(resolveSharedVaultShareProjectionStorePath(input.vaultRoot), {
+        force: true,
+      });
+    } else {
+      await writeSharedVaultShareProjectionStore(input.vaultRoot, store);
+    }
+    return { status: "reconciled" };
+  } catch {
+    return { status: "blocked", reasonCode: "vault_share.write_failed" };
+  }
+}
+
+export async function reconcileSharedVaultShareProjectionAuthorityFromGroupTool(input: {
+  groupToolPort: HostedRuntimeGroupToolPort | null | undefined;
+  vaultRoot: string;
+}): Promise<HostedVaultShareAuthorityReconciliationOutcome> {
+  return await reconcileSharedVaultShareProjectionAuthority({
+    readAuthority: async () => {
+      if (!input.groupToolPort) {
+        throw new Error("group_tool_unavailable");
+      }
+      const response = await input.groupToolPort.request({
+        action: "read_share_authority",
+      });
+      if (response.action !== "read_share_authority") {
+        throw new Error("group_share_authority_invalid");
+      }
+      if (response.result.status === "unavailable") {
+        throw new Error("group_share_authority_unavailable");
+      }
+      return response.result.status === "none"
+        ? []
+        : response.result.shares;
+    },
+    vaultRoot: input.vaultRoot,
+  });
+}
+
+function buildVaultShareAuthorityKey(
+  memberId: string,
+  projectionScopeKey: string,
+  shareId: string,
+): string {
+  return JSON.stringify([memberId, projectionScopeKey, shareId]);
+}
 
 /**
  * Destination-side landing for consented vault-share deliveries: a deterministic,

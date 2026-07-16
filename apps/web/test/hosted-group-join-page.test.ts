@@ -111,6 +111,10 @@ test("renders the group display name on the join page when present", async () =>
   });
   expect(mocks.readHostedConsentStatus).not.toHaveBeenCalled();
   expect(markup).toContain("Join Sunday Sleep Crew");
+  expect(markup).toContain(
+    "Your chats and vault. Anything you don&#x27;t choose to share stays private.",
+  );
+  expect(markup).not.toContain("Your chats, health data, and vault. Always.");
   expect(markup).not.toContain("Join this family");
 });
 

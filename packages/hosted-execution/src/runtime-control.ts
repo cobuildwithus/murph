@@ -878,6 +878,7 @@ export type HostedRuntimeAssistantAskControlResponse =
 
 export type HostedRuntimeGroupToolAction =
   | "ask"
+  | "read_share_authority"
   | "read_current"
   | "list_memberships"
   | "leave_membership"
@@ -904,6 +905,8 @@ export type HostedRuntimeGroupKind = (typeof HOSTED_RUNTIME_GROUP_KINDS)[number]
 export const HOSTED_RUNTIME_GROUP_DISPLAY_NAME_MAX_LENGTH = 120;
 export const HOSTED_RUNTIME_GROUP_CHAT_ICON_URL_MAX_LENGTH = 2000;
 export const HOSTED_RUNTIME_GROUP_JOIN_OFFER_MESSAGE_TEMPLATE_MAX_LENGTH = 1000;
+export const HOSTED_RUNTIME_GROUP_JOIN_OFFER_LEGACY_MESSAGE_TEMPLATE =
+  "Like or heart this message to share {{share_scope}} with this group. To choose different permissions, use {{join_url}}.";
 
 export interface HostedRuntimeGroupMemberSummary {
   grantedVaultShareProjectionKinds: HostedVaultShareProjectionKind[];
@@ -950,8 +953,9 @@ export interface HostedRuntimeGroupCreateJoinLinkRequest {
 
 export interface HostedRuntimeGroupPostJoinOfferRequest {
   displayName?: string | null;
-  // Model-authored natural group-chat message with server-filled
-  // {{share_scope}} and {{join_url}} placeholders.
+  // Legacy wire compatibility only. Current Web ignores this field and owns
+  // the canonical copy. The runtime supplies one fixed value so older Web can
+  // substitute already-known scopes; model input can never set it.
   messageTemplate?: string | null;
   // Compatibility for old fixed-kind callers. Selector-only projections must
   // use projectionScopes.
@@ -985,10 +989,25 @@ export interface HostedRuntimeGroupToolSelfOptOutContext {
 }
 
 export const HOSTED_RUNTIME_GROUP_CHAT_PARTICIPANTS_MAX = 32;
+export const HOSTED_RUNTIME_GROUP_SHARE_AUTHORITY_MAX_ENTRIES = 4_096;
+export const HOSTED_RUNTIME_GROUP_SHARE_AUTHORITY_MAX_MEMBERS = 200;
+export const HOSTED_RUNTIME_GROUP_SHARE_AUTHORITY_MEMBER_ID_MAX_CODE_POINTS = 200;
+export const HOSTED_RUNTIME_GROUP_SHARE_AUTHORITY_SCOPE_KEY_MAX_CODE_POINTS = 256;
+export const HOSTED_RUNTIME_GROUP_SHARE_AUTHORITY_SHARE_ID_MAX_CODE_POINTS = 200;
 
 export interface HostedRuntimeGroupChatParticipant {
   handle: string;
   hasOwnMurph: boolean;
+}
+
+/**
+ * Runtime-internal current authority for already-landed group projections.
+ * This control-plane shape is deliberately absent from the model tool schema.
+ */
+export interface HostedRuntimeGroupShareAuthorityEntry {
+  memberId: string;
+  projectionScopeKey: string;
+  shareId: string;
 }
 
 export type HostedRuntimeGroupToolRequest =
@@ -1000,6 +1019,7 @@ export type HostedRuntimeGroupToolRequest =
       question: string;
     }
   | { action: "read_current" }
+  | { action: "read_share_authority" }
   | { action: "list_memberships" }
   | { action: "leave_membership"; membershipId: string }
   | {
@@ -1046,6 +1066,17 @@ export type HostedRuntimeGroupToolResponse =
         | { status: "ok"; group: HostedRuntimeGroupSummary }
         | { status: "none"; group: null }
         | { status: "unavailable"; unavailableReason: string; group: null };
+    }
+  | {
+      action: "read_share_authority";
+      result:
+        | {
+            status: "ok";
+            memberIds: string[];
+            shares: HostedRuntimeGroupShareAuthorityEntry[];
+          }
+        | { status: "none"; memberIds: []; shares: [] }
+        | { status: "unavailable"; unavailableReason: string };
     }
   | {
       action: "list_memberships";

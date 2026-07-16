@@ -92,6 +92,9 @@ import {
 import {
   offerHostedVaultShareProjectionBestEffort,
 } from "./hosted-runtime/vault-share-projection.ts";
+import {
+  reconcileSharedVaultShareProjectionAuthorityFromGroupTool,
+} from "./hosted-runtime/vault-share-import.ts";
 import type {
   HostedRuntimeDeviceSyncMessagingReturnTarget,
   HostedRuntimePlatform,
@@ -874,6 +877,7 @@ export async function runHostedWorkspaceRuntimeJobInProcess(
   const guardedMailboxPort = guardedRuntime.platform.mailboxPort ?? mailboxPort;
   const guardedWorkspacePort = guardedRuntime.platform.workspacePort ?? workspacePort;
   let detachedAssistantAskController: HostedDetachedAssistantAskController | null = null;
+  let detachedAssistantAskWorkspaceMutationDepth = 0;
   let pauseDetachedAssistantAskBeforeWorkspaceBoundary = async (): Promise<void> => undefined;
   let resumeDetachedAssistantAskAfterWorkspaceBoundary = (): void => undefined;
   let closeDetachedAssistantAskBeforeWorkspaceRelease = async (): Promise<void> => undefined;
@@ -898,6 +902,7 @@ export async function runHostedWorkspaceRuntimeJobInProcess(
   const pendingDeferredUsageCaptures = new Set<HostedWorkspaceRunnerDeferredUsageCapture>();
   const pendingLocalWorkspaceMutationCompletions = new Set<Promise<void>>();
   const pendingMailboxPostCheckpointEffectCompletions = new Set<Promise<void>>();
+  let hostedVaultShareProjectionOfferTail: Promise<void> = Promise.resolve();
   const trackCompletion = (
     pendingCompletions: Set<Promise<void>>,
     completion: Promise<void> | null,
@@ -1670,6 +1675,13 @@ export async function runHostedWorkspaceRuntimeJobInProcess(
       if (passSignal.aborted) {
         throw readHostedRuntimeAbortReason(passSignal);
       }
+      detachedAssistantAskWorkspaceMutationDepth += 1;
+      try {
+        await pauseDetachedAssistantAskBeforeWorkspaceBoundary();
+      } catch (error) {
+        detachedAssistantAskWorkspaceMutationDepth -= 1;
+        throw error;
+      }
       const passOrdinal = runtimePassOrdinal + 1;
       runtimePassOrdinal = passOrdinal;
       const passStartedAtEpochMs = Date.now();
@@ -1815,6 +1827,9 @@ export async function runHostedWorkspaceRuntimeJobInProcess(
           status: "fail",
         });
         throw error;
+      } finally {
+        detachedAssistantAskWorkspaceMutationDepth -= 1;
+        resumeDetachedAssistantAskAfterWorkspaceBoundary();
       }
     };
     const runBrowserVaultRefreshMaintenance = async (maintenanceInput: {
@@ -1887,6 +1902,18 @@ export async function runHostedWorkspaceRuntimeJobInProcess(
     };
     detachedAssistantAskController = createHostedDetachedAssistantAskController({
       assistantAskPort: runtime.platform.assistantAskPort ?? null,
+      async beforeExecuteAsk() {
+        const reconciliation =
+          await reconcileSharedVaultShareProjectionAuthorityFromGroupTool({
+            groupToolPort: runtime.platform.groupToolPort,
+            vaultRoot: restored.vaultRoot,
+          });
+        if (reconciliation.status === "blocked") {
+          throw new Error(
+            "Hosted shared group data authority could not be verified before detached assistant work.",
+          );
+        }
+      },
       codexHome: hostedCodexRuntime.codexHome,
       env: hostedCodexRuntime.runtimeEnv,
       onStateMutation() {
@@ -1900,6 +1927,8 @@ export async function runHostedWorkspaceRuntimeJobInProcess(
     };
     resumeDetachedAssistantAskAfterWorkspaceBoundary = () => {
       if (
+        detachedAssistantAskWorkspaceMutationDepth === 0
+        &&
         !runtimeAbortController.signal.aborted
         && options.shutdownSignal?.aborted !== true
       ) {
@@ -2176,6 +2205,25 @@ export async function runHostedWorkspaceRuntimeJobInProcess(
           userId: null,
         });
       };
+      const enqueueHostedVaultShareProjectionOffer = (
+        vaultSharePort: NonNullable<HostedRuntimePlatform["vaultSharePort"]>,
+      ): ReturnType<typeof offerHostedVaultShareProjectionBestEffort> => {
+        const runOffer = () => offerHostedVaultShareProjectionBestEffort({
+          deviceSyncPort: guardedRuntime.platform.deviceSyncPort ?? null,
+          vaultRoot: restored.vaultRoot,
+          vaultSharePort,
+        });
+        const offer = hostedVaultShareProjectionOfferTail.then(runOffer);
+
+        // A foreground wake preempts the wait below without cancelling an already-started
+        // web callback. Keep later offers behind that callback so Web appends the older
+        // snapshot before a freshly read replacement and mailbox lane order stays causal.
+        hostedVaultShareProjectionOfferTail = offer.then(
+          () => undefined,
+          () => undefined,
+        );
+        return offer;
+      };
       const offerHostedVaultShareProjectionDuringIdle = async (): Promise<
         HostedRuntimeWakeLatencySeed | null
       > => {
@@ -2192,10 +2240,7 @@ export async function runHostedWorkspaceRuntimeJobInProcess(
           return pendingWakeLatencySeed;
         }
 
-        const offer = offerHostedVaultShareProjectionBestEffort({
-          vaultRoot: restored.vaultRoot,
-          vaultSharePort,
-        });
+        const offer = enqueueHostedVaultShareProjectionOffer(vaultSharePort);
         const runtimeWakeSignal =
           options.shutdownSignal?.aborted === true
             ? null
@@ -2519,14 +2564,18 @@ export async function runHostedWorkspaceRuntimeJobInProcess(
         }
         return passResult;
       };
-      const runForegroundMailboxWakeIfWork = async (input: {
-        includeSystemMailbox: boolean;
-        latencySeed: HostedRuntimeWakeLatencySeed | null;
-        requestIdKind: "checkpoint-interrupt" | "checkpoint-wake" | "idle-wake";
-        runAssistantWithoutMailboxWork?: boolean;
-        shouldContinue?: () => boolean;
-        signal?: AbortSignal;
-      }): Promise<boolean> => {
+      const runForegroundMailboxWakeWithPrefetch = async (
+        input: {
+          includeSystemMailbox: boolean;
+          latencySeed: HostedRuntimeWakeLatencySeed | null;
+          requestIdKind: "checkpoint-interrupt" | "checkpoint-wake" | "idle-wake";
+          runAssistantWithoutMailboxWork?: boolean;
+          shouldContinue?: () => boolean;
+          signal?: AbortSignal;
+        },
+        initialMailboxPrefetch: HostedMailboxPrefixPrefetch,
+        acquireDetachedMutationGuard: () => Promise<void>,
+      ): Promise<boolean> => {
         const shouldContinue = input.shouldContinue ?? (() => true);
         const runtimeStateDirtyBeforeMailboxImport = runtimeStateDirty;
         const stageMailboxImportWake = async (
@@ -2590,12 +2639,6 @@ export async function runHostedWorkspaceRuntimeJobInProcess(
         const initialMailboxImportContext = createHostedRuntimeWakeInitialImportContext(
           input.latencySeed,
         );
-        const initialMailboxPrefetch = await createHostedForegroundMailboxPrefetch({
-          limitPerLane: mailboxBudget.fetchLimitPerLane,
-          requestId:
-            `${requestId}:${input.requestIdKind}-foreground-prefetch:${idleWakeOrdinal + 1}`,
-          runnerInput: baseRunnerInput,
-        });
         if (!shouldContinue()) {
           return false;
         }
@@ -2646,7 +2689,10 @@ export async function runHostedWorkspaceRuntimeJobInProcess(
         };
         const conversationImport = await importMailboxLanes(
           HOSTED_INITIAL_CONVERSATION_MAILBOX_IMPORT_LANES,
-          importForegroundMailboxItem,
+          async (item, context) => {
+            await acquireDetachedMutationGuard();
+            return await importForegroundMailboxItem(item, context);
+          },
         );
         const shouldRunConversationAssistant = shouldContinue() && (
           input.runAssistantWithoutMailboxWork === true
@@ -2681,7 +2727,13 @@ export async function runHostedWorkspaceRuntimeJobInProcess(
 
         await finishMailboxImportWithoutAssistant(conversationImport);
 
-        const systemImport = await importMailboxLanes(["system"], importMailboxItem);
+        const systemImport = await importMailboxLanes(
+          ["system"],
+          async (item, context) => {
+            await acquireDetachedMutationGuard();
+            return await importMailboxItem(item, context);
+          },
+        );
         if (!shouldContinue()) {
           await finishMailboxImportWithoutAssistant(systemImport);
           return false;
@@ -2708,6 +2760,53 @@ export async function runHostedWorkspaceRuntimeJobInProcess(
           throw error;
         }
         return true;
+      };
+      const runForegroundMailboxWakeIfWork = async (
+        input: Parameters<typeof runForegroundMailboxWakeWithPrefetch>[0],
+      ): Promise<boolean> => {
+        const shouldContinue = input.shouldContinue ?? (() => true);
+        if (!shouldContinue()) {
+          return false;
+        }
+        const initialMailboxPrefetch = await createHostedForegroundMailboxPrefetch({
+          limitPerLane: mailboxBudget.fetchLimitPerLane,
+          requestId:
+            `${requestId}:${input.requestIdKind}-foreground-prefetch:${idleWakeOrdinal + 1}`,
+          runnerInput: baseRunnerInput,
+        });
+        if (!shouldContinue()) {
+          return false;
+        }
+        let detachedMutationGuardAcquired = false;
+        let detachedMutationGuardPromise: Promise<void> | null = null;
+        const acquireDetachedMutationGuard = (): Promise<void> => {
+          if (detachedMutationGuardPromise) {
+            return detachedMutationGuardPromise;
+          }
+          detachedAssistantAskWorkspaceMutationDepth += 1;
+          detachedMutationGuardPromise = pauseDetachedAssistantAskBeforeWorkspaceBoundary().then(
+            () => {
+              detachedMutationGuardAcquired = true;
+            },
+            (error: unknown) => {
+              detachedAssistantAskWorkspaceMutationDepth -= 1;
+              throw error;
+            },
+          );
+          return detachedMutationGuardPromise;
+        };
+        try {
+          return await runForegroundMailboxWakeWithPrefetch(
+            input,
+            initialMailboxPrefetch,
+            acquireDetachedMutationGuard,
+          );
+        } finally {
+          if (detachedMutationGuardAcquired) {
+            detachedAssistantAskWorkspaceMutationDepth -= 1;
+            resumeDetachedAssistantAskAfterWorkspaceBoundary();
+          }
+        }
       };
       const runPreCheckpointConversationWake = async (
         latencySeed: HostedRuntimeWakeLatencySeed | null,
@@ -3467,6 +3566,10 @@ export async function runHostedWorkspaceRuntimeJobInProcess(
     await drainDeferredUsageBestEffort();
     throw error;
   } finally {
+    // The production web-control port bounds every callback with its request timeout.
+    // Keep the workspace invocation slot until any started or queued offer settles, so it
+    // cannot overlap a later invocation for the same warm container.
+    await hostedVaultShareProjectionOfferTail;
     await closeDetachedAssistantAskBeforeWorkspaceRelease();
     hostAbortSignal?.removeEventListener("abort", abortFromHost);
   }

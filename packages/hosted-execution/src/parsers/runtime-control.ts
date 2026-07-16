@@ -121,6 +121,11 @@ import {
   HOSTED_RUNTIME_GROUP_KINDS,
   HOSTED_RUNTIME_GROUP_CHAT_PARTICIPANTS_MAX,
   HOSTED_RUNTIME_GROUP_MEMBERSHIPS_MAX,
+  HOSTED_RUNTIME_GROUP_SHARE_AUTHORITY_MAX_ENTRIES,
+  HOSTED_RUNTIME_GROUP_SHARE_AUTHORITY_MAX_MEMBERS,
+  HOSTED_RUNTIME_GROUP_SHARE_AUTHORITY_MEMBER_ID_MAX_CODE_POINTS,
+  HOSTED_RUNTIME_GROUP_SHARE_AUTHORITY_SCOPE_KEY_MAX_CODE_POINTS,
+  HOSTED_RUNTIME_GROUP_SHARE_AUTHORITY_SHARE_ID_MAX_CODE_POINTS,
   HOSTED_RUNTIME_NEWSLETTER_AUTHORIZED_SHARES_PER_PARTICIPANT_MAX,
   isHostedRuntimeNewsletterAuthorizationProof,
   HOSTED_RUNTIME_NEWSLETTER_HTML_MAX_LENGTH,
@@ -965,7 +970,11 @@ export function parseHostedRuntimeGroupToolRequest(
       }),
     };
   }
-  if (action === "read_current" || action === "list_memberships") {
+  if (
+    action === "read_current"
+    || action === "read_share_authority"
+    || action === "list_memberships"
+  ) {
     assertAllowedObjectKeys(
       record,
       new Set(["action"]),
@@ -1433,6 +1442,147 @@ export function parseHostedRuntimeGroupToolResponse(
           status,
           unavailableReason: requireString(result.unavailableReason, "Hosted runtime group unavailableReason"),
           group: null,
+        },
+      };
+    }
+  }
+
+  if (action === "read_share_authority") {
+    const result = requireObject(
+      record.result,
+      "Hosted runtime group tool read_share_authority response result",
+    );
+    const status = requireString(
+      result.status,
+      "Hosted runtime group tool read_share_authority response status",
+    );
+    if (status === "ok") {
+      assertAllowedObjectKeys(
+        result,
+        new Set(["status", "memberIds", "shares"]),
+        "Hosted runtime group tool read_share_authority ok response result",
+      );
+      const rawMemberIds = requireArray(
+        result.memberIds,
+        "Hosted runtime group tool read_share_authority memberIds",
+      );
+      if (rawMemberIds.length > HOSTED_RUNTIME_GROUP_SHARE_AUTHORITY_MAX_MEMBERS) {
+        throw new TypeError(
+          `Hosted runtime group tool read_share_authority memberIds must contain at most ${HOSTED_RUNTIME_GROUP_SHARE_AUTHORITY_MAX_MEMBERS} entries.`,
+        );
+      }
+      const memberIdSet = new Set<string>();
+      const memberIds = rawMemberIds.map((rawMemberId) => {
+        const memberId = parseHostedRuntimeGroupAskBoundedText({
+          label: "Hosted runtime group tool read_share_authority memberId",
+          maxCodePoints:
+            HOSTED_RUNTIME_GROUP_SHARE_AUTHORITY_MEMBER_ID_MAX_CODE_POINTS,
+          value: rawMemberId,
+        });
+        if (memberIdSet.has(memberId)) {
+          throw new TypeError(
+            "Hosted runtime group tool read_share_authority memberIds must not contain duplicates.",
+          );
+        }
+        memberIdSet.add(memberId);
+        return memberId;
+      });
+      const rawShares = requireArray(
+        result.shares,
+        "Hosted runtime group tool read_share_authority shares",
+      );
+      if (rawShares.length > HOSTED_RUNTIME_GROUP_SHARE_AUTHORITY_MAX_ENTRIES) {
+        throw new TypeError(
+          `Hosted runtime group tool read_share_authority shares must contain at most ${HOSTED_RUNTIME_GROUP_SHARE_AUTHORITY_MAX_ENTRIES} entries.`,
+        );
+      }
+      const seen = new Set<string>();
+      const shares = rawShares.map((rawShare) => {
+        const share = requireObject(
+          rawShare,
+          "Hosted runtime group tool read_share_authority share",
+        );
+        assertAllowedObjectKeys(
+          share,
+          new Set(["memberId", "projectionScopeKey", "shareId"]),
+          "Hosted runtime group tool read_share_authority share",
+        );
+        const parsed = {
+          memberId: parseHostedRuntimeGroupAskBoundedText({
+            label: "Hosted runtime group tool read_share_authority memberId",
+            maxCodePoints:
+              HOSTED_RUNTIME_GROUP_SHARE_AUTHORITY_MEMBER_ID_MAX_CODE_POINTS,
+            value: share.memberId,
+          }),
+          projectionScopeKey: parseHostedRuntimeGroupAskBoundedText({
+            label: "Hosted runtime group tool read_share_authority projectionScopeKey",
+            maxCodePoints:
+              HOSTED_RUNTIME_GROUP_SHARE_AUTHORITY_SCOPE_KEY_MAX_CODE_POINTS,
+            value: share.projectionScopeKey,
+          }),
+          shareId: parseHostedRuntimeGroupAskBoundedText({
+            label: "Hosted runtime group tool read_share_authority shareId",
+            maxCodePoints:
+              HOSTED_RUNTIME_GROUP_SHARE_AUTHORITY_SHARE_ID_MAX_CODE_POINTS,
+            value: share.shareId,
+          }),
+        };
+        const key = JSON.stringify([
+          parsed.memberId,
+          parsed.projectionScopeKey,
+          parsed.shareId,
+        ]);
+        if (seen.has(key)) {
+          throw new TypeError(
+            "Hosted runtime group tool read_share_authority shares must not contain duplicate entries.",
+          );
+        }
+        if (!memberIdSet.has(parsed.memberId)) {
+          throw new TypeError(
+            "Hosted runtime group tool read_share_authority share memberId must be a current member.",
+          );
+        }
+        seen.add(key);
+        return parsed;
+      });
+      return { action, result: { status, memberIds, shares } };
+    }
+    if (status === "none") {
+      assertAllowedObjectKeys(
+        result,
+        new Set(["status", "memberIds", "shares"]),
+        "Hosted runtime group tool read_share_authority none response result",
+      );
+      const memberIds = requireArray(
+        result.memberIds,
+        "Hosted runtime group tool read_share_authority none memberIds",
+      );
+      const shares = requireArray(
+        result.shares,
+        "Hosted runtime group tool read_share_authority none shares",
+      );
+      if (memberIds.length !== 0 || shares.length !== 0) {
+        throw new TypeError(
+          "Hosted runtime group tool read_share_authority none response must have empty memberIds and shares.",
+        );
+      }
+      return { action, result: { status, memberIds: [], shares: [] } };
+    }
+    if (status === "unavailable") {
+      assertAllowedObjectKeys(
+        result,
+        new Set(["status", "unavailableReason"]),
+        "Hosted runtime group tool read_share_authority unavailable response result",
+      );
+      return {
+        action,
+        result: {
+          status,
+          unavailableReason: parseHostedRuntimeGroupAskBoundedText({
+            label: "Hosted runtime group tool read_share_authority unavailableReason",
+            maxCodePoints: 500,
+            value: result.unavailableReason,
+          }),
         },
       };
     }

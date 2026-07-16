@@ -13,6 +13,7 @@ import {
   HOSTED_VAULT_SHARE_ACTIVITY_SELECTOR_ACTIVITY_KINDS,
   HOSTED_VAULT_SHARE_ACTIVITY_SESSION_COUNT_SELECTOR_ACTIVITY_KINDS,
   getHostedVaultShareDailyMetricProjectionSpec,
+  HOSTED_VAULT_SHARE_CURRENT_STATE_PROJECTION_KINDS,
   HOSTED_VAULT_SHARE_DELIVER_MAX_RECORDS,
   HOSTED_VAULT_SHARE_DELIVERY_PAYLOAD_SCHEMA,
   HOSTED_VAULT_SHARE_SELECTABLE_PROJECTION_KINDS,
@@ -176,7 +177,14 @@ describe("vault-share contracts", () => {
       "vo2-max-days.v0",
       "resting-heart-rate-days.v0",
       "hrv-days.v0",
+      "device-sync-status.v0",
     ]);
+    expect(HOSTED_VAULT_SHARE_CURRENT_STATE_PROJECTION_KINDS).not.toContain(
+      "device-sync-status.v0",
+    );
+    expect(HOSTED_VAULT_SHARE_SELECTABLE_PROJECTION_SCOPES.at(-1)).toEqual({
+      projectionKind: "device-sync-status.v0",
+    });
     expect(getHostedVaultShareDailyMetricProjectionSpec("sleep-duration-days.v0")).toEqual({
       maxValue: 1_440,
       metricKey: "total-sleep-minutes",
@@ -188,7 +196,9 @@ describe("vault-share contracts", () => {
         buildHostedVaultShareProjectionScopeKey(scope)
       ),
     ).toEqual([
-      ...HOSTED_VAULT_SHARE_SELECTABLE_PROJECTION_KINDS,
+      ...HOSTED_VAULT_SHARE_SELECTABLE_PROJECTION_KINDS.filter(
+        (projectionKind) => projectionKind !== "device-sync-status.v0",
+      ),
       ...HOSTED_VAULT_SHARE_ACTIVITY_SELECTOR_ACTIVITY_KINDS.map((activityKind) =>
         `activity-minutes-days.v1.activityKind.${activityKind}`
       ),
@@ -198,6 +208,7 @@ describe("vault-share contracts", () => {
       ...HOSTED_VAULT_SHARE_ACTIVITY_SESSION_COUNT_SELECTOR_ACTIVITY_KINDS.map((activityKind) =>
         `activity-session-count-days.v1.activityKind.${activityKind}`
       ),
+      "device-sync-status.v0",
     ]);
     expect(getHostedVaultShareDailyMetricProjectionSpec("group-email.v0")).toBeNull();
   });
@@ -947,6 +958,172 @@ describe("heart-rate-zones-days.v0 delivery records", () => {
         }],
       })
     ).toThrow(/identify the zone/u);
+  });
+});
+
+describe("device-sync-status.v0 delivery records", () => {
+  const validRecord = {
+    data: {
+      observedAt: "2026-07-01T00:00:00.000Z",
+      sources: [
+        {
+          connectionSyncJobCompletedAt: "2026-06-30T23:58:00.000Z",
+          label: "Apple Health",
+          status: "connected",
+          statusObservedAt: "2026-06-30T23:59:00.000Z",
+        },
+        {
+          connectionSyncJobCompletedAt: null,
+          label: "WHOOP",
+          status: "needs-reconnect",
+          statusObservedAt: "2026-06-30T23:57:00.000Z",
+        },
+      ],
+    },
+    occurredAt: "2026-07-01T00:00:00.000Z",
+    recordKey: "device-sync-status",
+  } as const;
+
+  it("parses public, bounded source status and an empty authoritative snapshot", () => {
+    expect(parseHostedVaultShareDeliverRequest({
+      projectionKind: "device-sync-status.v0",
+      records: [validRecord],
+    })).toEqual({
+      projectionKind: "device-sync-status.v0",
+      projectionScope: { projectionKind: "device-sync-status.v0" },
+      records: [validRecord],
+    });
+
+    expect(parseHostedVaultShareDeliverRequest({
+      projectionKind: "device-sync-status.v0",
+      records: [{
+        data: {
+          observedAt: "2026-07-01T00:00:00.000Z",
+          sources: [],
+        },
+        occurredAt: "2026-07-01T00:00:00.000Z",
+        recordKey: "device-sync-status",
+      }],
+    }).records[0]?.data).toEqual({
+      observedAt: "2026-07-01T00:00:00.000Z",
+      sources: [],
+    });
+  });
+
+  it("enforces the public source count and label bounds", () => {
+    const boundedSources = Array.from({ length: 8 }, (_, index) => ({
+      ...validRecord.data.sources[0],
+      label: `Source ${index}`,
+    }));
+    expect(parseHostedVaultShareDeliverRequest({
+      projectionKind: "device-sync-status.v0",
+      records: [{
+        ...validRecord,
+        data: { ...validRecord.data, sources: boundedSources },
+      }],
+    }).records[0]?.data).toMatchObject({ sources: boundedSources });
+
+    expect(() => parseHostedVaultShareDeliverRequest({
+      projectionKind: "device-sync-status.v0",
+      records: [{
+        ...validRecord,
+        data: {
+          ...validRecord.data,
+          sources: [
+            ...boundedSources,
+            { ...validRecord.data.sources[0], label: "Source 8" },
+          ],
+        },
+      }],
+    })).toThrow(/at most 8 entries/u);
+
+    expect(() => parseHostedVaultShareDeliverRequest({
+      projectionKind: "device-sync-status.v0",
+      records: [{
+        ...validRecord,
+        data: {
+          ...validRecord.data,
+          sources: [{
+            ...validRecord.data.sources[0],
+            label: "s".repeat(81),
+          }],
+        },
+      }],
+    })).toThrow(/1-80 characters/u);
+  });
+
+  it("rejects drifting keys, day buckets, extra fields, and duplicate labels", () => {
+    const invalidRecords = [
+      { ...validRecord, recordKey: "device-status" },
+      {
+        ...validRecord,
+        data: { ...validRecord.data, observedAt: "2026-07-01T12:00:00.000Z" },
+        occurredAt: "2026-07-01T12:00:00.000Z",
+      },
+      {
+        ...validRecord,
+        data: { ...validRecord.data, privateAccountId: "must-not-land" },
+      },
+      {
+        ...validRecord,
+        data: {
+          ...validRecord.data,
+          sources: [{
+            ...validRecord.data.sources[0],
+            rawProvider: "apple_health",
+          }],
+        },
+      },
+      {
+        ...validRecord,
+        data: {
+          ...validRecord.data,
+          sources: [
+            validRecord.data.sources[0],
+            { ...validRecord.data.sources[0], label: "apple health" },
+          ],
+        },
+      },
+    ];
+
+    for (const record of invalidRecords) {
+      expect(() => parseHostedVaultShareDeliverRequest({
+        projectionKind: "device-sync-status.v0",
+        records: [record],
+      })).toThrow();
+    }
+  });
+
+  it("rejects private infrastructure labels, invalid statuses, and bad or future times", () => {
+    const invalidSources = [
+      { ...validRecord.data.sources[0], label: "Junction" },
+      { ...validRecord.data.sources[0], status: "error" },
+      { ...validRecord.data.sources[0], statusObservedAt: "not-a-time" },
+      { ...validRecord.data.sources[0], statusObservedAt: "2999-01-01T00:00:00.000Z" },
+      {
+        ...validRecord.data.sources[0],
+        connectionSyncJobCompletedAt: "2999-01-01T00:00:00.000Z",
+      },
+    ];
+
+    for (const source of invalidSources) {
+      expect(() => parseHostedVaultShareDeliverRequest({
+        projectionKind: "device-sync-status.v0",
+        records: [{
+          ...validRecord,
+          data: { ...validRecord.data, sources: [source] },
+        }],
+      })).toThrow();
+    }
+
+    expect(() => parseHostedVaultShareDeliverRequest({
+      projectionKind: "device-sync-status.v0",
+      records: [{
+        ...validRecord,
+        data: { ...validRecord.data, observedAt: "2999-01-01T00:00:00.000Z" },
+        occurredAt: "2999-01-01T00:00:00.000Z",
+      }],
+    })).toThrow(/future/u);
   });
 });
 

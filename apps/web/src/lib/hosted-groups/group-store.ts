@@ -3,6 +3,9 @@ import "server-only";
 import { Prisma, type PrismaClient } from "@prisma/client";
 import {
   HOSTED_RUNTIME_GROUP_MEMBERSHIPS_MAX,
+  HOSTED_RUNTIME_GROUP_SHARE_AUTHORITY_MAX_ENTRIES,
+  HOSTED_RUNTIME_GROUP_SHARE_AUTHORITY_MAX_MEMBERS,
+  type HostedRuntimeGroupShareAuthorityEntry,
 } from "@murphai/hosted-execution/runtime-control";
 import {
   buildHostedVaultShareProjectionScopeKey,
@@ -23,6 +26,7 @@ import {
   generateHostedGroupJoinOfferId,
   generateHostedGroupMemberId,
   generateHostedGroupJoinCode,
+  HOSTED_ONBOARDING_TRANSACTION_OPTIONS,
 } from "../hosted-onboarding/shared";
 import { readHostedMemberPhoneNumberSnapshots } from "../hosted-onboarding/hosted-member-identity-store";
 import { toHostedOnboardingLogIdSuffix } from "../hosted-onboarding/logging";
@@ -303,6 +307,91 @@ export async function readHostedGroupByRuntimeMemberId(input: {
     runtimeMemberId: input.runtimeMemberId,
   });
   return groupId ? readHostedGroupSummaryById(prisma, groupId) : null;
+}
+
+export type HostedGroupShareAuthoritySnapshot =
+  | {
+      status: "ok";
+      memberIds: string[];
+      shares: HostedRuntimeGroupShareAuthorityEntry[];
+    }
+  | { status: "none"; memberIds: []; shares: [] }
+  | { status: "unavailable"; unavailableReason: string };
+
+/**
+ * Reads the group binding, current membership and active destination grants in
+ * one repeatable-read snapshot. The row id is the grant generation (`shareId`),
+ * so a revoke/regrant cannot authorize records landed under the old row.
+ */
+export async function readHostedGroupShareAuthorityByRuntimeMemberId(input: {
+  prisma?: PrismaClient;
+  runtimeMemberId: string;
+}): Promise<HostedGroupShareAuthoritySnapshot> {
+  const prisma = input.prisma ?? getPrisma();
+  return await prisma.$transaction(async (tx) => {
+    const group = await tx.hostedGroup.findUnique({
+      where: { runtimeMemberId: input.runtimeMemberId },
+      select: {
+        members: {
+          orderBy: [{ createdAt: "asc" }, { id: "asc" }],
+          take: HOSTED_RUNTIME_GROUP_SHARE_AUTHORITY_MAX_MEMBERS + 1,
+          select: { memberId: true },
+        },
+      },
+    });
+    if (!group) {
+      return { status: "none", memberIds: [], shares: [] };
+    }
+    if (!await hasHostedRuntimeActiveAccess(input.runtimeMemberId, { prisma: tx })) {
+      return { status: "unavailable", unavailableReason: "runtime_inactive" };
+    }
+
+    const memberIds = group.members.map((member) => member.memberId);
+    if (memberIds.length > HOSTED_RUNTIME_GROUP_SHARE_AUTHORITY_MAX_MEMBERS) {
+      return {
+        status: "unavailable",
+        unavailableReason: "authorization_snapshot_too_large",
+      };
+    }
+    const grantRows = memberIds.length === 0
+      ? []
+      : await tx.hostedVaultShare.findMany({
+          where: {
+            destinationMemberId: input.runtimeMemberId,
+            grantorMemberId: { in: memberIds },
+            status: "granted",
+          },
+          orderBy: [
+            { grantorMemberId: "asc" },
+            { projectionScopeKey: "asc" },
+            { id: "asc" },
+          ],
+          take: HOSTED_RUNTIME_GROUP_SHARE_AUTHORITY_MAX_ENTRIES + 1,
+          select: {
+            grantorMemberId: true,
+            id: true,
+            projectionScopeKey: true,
+          },
+        });
+    if (grantRows.length > HOSTED_RUNTIME_GROUP_SHARE_AUTHORITY_MAX_ENTRIES) {
+      return {
+        status: "unavailable",
+        unavailableReason: "authorization_snapshot_too_large",
+      };
+    }
+    return {
+      status: "ok",
+      memberIds,
+      shares: grantRows.map((grant) => ({
+        memberId: grant.grantorMemberId,
+        projectionScopeKey: grant.projectionScopeKey,
+        shareId: grant.id,
+      })),
+    };
+  }, {
+    ...HOSTED_ONBOARDING_TRANSACTION_OPTIONS,
+    isolationLevel: Prisma.TransactionIsolationLevel.RepeatableRead,
+  });
 }
 
 export async function readHostedGroupIdByRuntimeMemberId(input: {

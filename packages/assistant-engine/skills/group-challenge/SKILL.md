@@ -32,6 +32,16 @@ Choose the narrowest Vault Share projection scope that matches the agreed
 score. Use daily aggregate records only; never ask for routes, raw workouts,
 provider traces, or private 1:1 data for a group challenge.
 
+At kickoff for an existing group, request the scoring scope and
+`device-sync-status.v0` together in the same additive permission offer. The
+device scope is diagnostic context, not scoring data: it shares only public
+health-source labels, coarse status, and bounded observation/sync-job times. A
+participant may decline it and still join the challenge. Liking the
+server-owned offer grants only the disclosed Murph group shares. Pass the exact
+`projectionScopes` only; Web owns the full canonical exact scope, Like-or-heart
+gesture, and first-party customize copy. Never author offer text. The offer
+cannot connect a source or grant Apple Health access.
+
 - Activity minutes for a specific recognized activity alias:
   `{ "projectionKind": "activity-minutes-days.v1", "selector": { "activityKind": "<alias>" } }`
   - Running minutes: `activityKind: "running"`
@@ -116,6 +126,12 @@ The page carries these sections, kept current:
   lyrics of any voice memo or song.
 - **Standings snapshots** — dated daily numbers (required: shared data is a
   short sliding window, so yesterday's standings are only in this page).
+- **Gap disclosure log** — at most one row per participant `memberId`, with the
+  `firstPublicGapDate` and one category from `metric-grant`, `diagnostic-grant`,
+  `needs-reconnect`, `disconnected`, `setting-up`, `needs-attention`,
+  `connected-metric-missing`, `no-visible-source`, or `unverified`. This is the
+  durable gate that prevents public troubleshooting from repeating after a
+  context reset.
 - **Confounders & protected notes** — declared confounders and who is having
   a rough stretch and is off-limits for jokes right now.
 
@@ -177,12 +193,19 @@ loses a reminder; it must never lose the challenge.
    `read_current` returns `status="none"`, the group-chat skill's Creating a
    hosted group core set takes precedence. For an existing group, use
    `murph.group action="post_join_offer"` with only the challenge's share
-   scopes. Existing members like the server-owned message to opt into that
-   permission snapshot; the included first-party link is only for someone who
-   wants to customize what they share. Do not tell the room to join again or
-   make the link the primary action. Use `action="create_join_link"` only when
-   the group explicitly asks for a standalone link. Never use data a member has
-   not granted to this group.
+   scopes: the exact scoring scope and `device-sync-status.v0`. Existing
+   members like the server-owned message to opt into that permission snapshot;
+   the included first-party link is only for someone who wants to customize
+   what they share. Do not tell the room to join again or make the link the
+   primary action. Pass only those exact `projectionScopes`; Web owns the
+   canonical offer copy, including the exact scope disclosure, accepted Like
+   or heart gestures, and first-party customize link. Never author or pass
+   offer text. Liking or hearting grants only those Murph group shares; it does
+   not grant HealthKit access, connect a wearable, or prove that data has
+   synced. Post this additive offer once and do not retry or nag when someone
+   declines or ignores it. Use
+   `action="create_join_link"` only when the group explicitly asks for a
+   standalone link. Never use data a member has not granted to this group.
 5. **Ask for introductions and photos.** Each participant gives a one-line
    intro or a fun fact about themselves, plus a photo if they're willing.
    Record every intro verbatim on the page — they are seed material for
@@ -230,23 +253,109 @@ automation action rules with a `dailyLocal` schedule and
 `continuityPolicy: preserve`. Each run:
 
 1. Read the challenge page.
-2. Read fresh standings with the same scope shape used for the challenge
-   share: fixed projections use `vault-cli group shared --kind steps-days.v0`;
-   selector activity projections use exact scopes such as
+2. Build the daily roster from only the challenge-page participants whose
+   participation state is `in`. Do not use group membership, current grants,
+   or landed shared records to add someone to the challenge. Score only the
+   people recorded as in; shared data does not add a pending or silent person
+   to the challenge. Read the current
+   authoritative group roster and grants with `murph.group`
+   `action="read_current"`. On a scheduled run, use the trusted current
+   roster/grant context supplied by the runtime when the route-bound group tool
+   is unavailable. Interactive turns use the exact
+   `grantedVaultShareProjectionScopes` entries returned by `read_current`;
+   scheduled turns use the exact canonical scope keys in the trusted context.
+   A projection kind alone is never grant authority for every selector. If
+   neither source provides a current authoritative roster/grant snapshot, stop
+   before reading or using shared records. Say that current permissions could
+   not be verified for this run, do not infer grants from the challenge page or
+   landed projections, and do not publish possibly unauthorized standings.
+   Otherwise, read the challenge metric and
+   `device-sync-status.v0` with `vault-cli group shared`. Fixed projections use
+   `vault-cli group shared --kind steps-days.v0`; selector activity projections
+   use exact scopes such as
    `vault-cli group shared --scope activity-minutes-days.v1.activityKind.<alias>`,
    `vault-cli group shared --scope activity-distance-days.v1.activityKind.<alias>`,
    or `vault-cli group shared --scope activity-session-count-days.v1.activityKind.<alias>`.
+   Read diagnostics with
+   `vault-cli group shared --kind device-sync-status.v0`.
    Never pass selector scopes through `--kind`.
-   Never reuse remembered numbers — wrong scores turn jokes into noise. If
-   the data is empty or missing for a member, say so plainly; never invent
-   figures. Score only the people recorded as in; shared data does not add a
-   pending or silent person to the challenge.
-3. Compose ONE dispatch in ONE format, in the `groupchat-comedy` voice.
+
+   Left join both shared-data results to that challenge roster by exact
+   `memberId`. `vault-cli group shared` reports landed projections; it is not
+   an authoritative roster. Never let a filtered or empty result hide an
+   opted-in participant. Never reuse remembered numbers — wrong scores turn
+   jokes into noise. A recorded zero is a real score; missing data is never a
+   zero.
+3. Classify each missing participant with this evidence order. Stop at the
+   first match:
+
+   - Current challenge-metric data through the reporting cutoff under a current
+     exact grant: rank the participant. Do not override current metric evidence
+     with a device status.
+   - No current grant for the exact metric scope: say that the participant has
+     not shared that metric with this group.
+   - The exact metric scope is granted but `device-sync-status.v0` is not:
+     say that Murph cannot verify the source problem because connection status
+     was not shared.
+   - A recent `device-sync-status.v0` projection: use its literal source label,
+     coarse status, and, only when useful, the accurately named connection-wide
+     sync-job completion time described below. Treat a projection whose `observedAt` is more
+     than two local calendar days old as stale and unverified. Only
+     `needs-reconnect` and `disconnected` support a direct reconnect action.
+     `needs-attention` is generic and must not be translated into a denied
+     Apple Health permission. `setting-up` means setup is not complete.
+     `connected` means only that the source is connected; it does not prove
+     that the challenge metric arrived. If Apple Health has the literal
+     `connected` status and Steps are absent, say this group does not currently
+     have recent Steps for the participant and Apple Health is visible as
+     connected. Suggest opening Murph; if Steps still do not arrive, suggest
+     checking Apple Health Steps access. For any other Apple Health status,
+     follow the status-specific rules above. If the recent projection has an empty `sources`
+     list, say that no connected health source is visible in the shared
+     snapshot. That is not proof that no compatible source exists; suggest a
+     private source check or connection step.
+   - No recent diagnostic evidence: say that the reason is unverified. Do not
+     guess about permissions, a disconnected device, source freshness, or
+     whether the participant opened the app.
+
+   Apple does not expose HealthKit read authorization, so never say that a
+   participant denied, forgot, or has not approved Apple Health Steps. The
+   `connectionSyncJobCompletedAt` field is completion time for a
+   connection-wide sync job. It may repeat across source labels and is neither
+   source-specific nor proof that any health data was received. When useful,
+   you may report it only as the time Murph last completed a connection-wide
+   sync job; never call it a source-specific sync or health-data receipt time.
+4. Lead with completeness: say whether the standings are complete or partial
+   and how many `in` participants have current metric data. Keep ranked
+   participants and people waiting on data in separate parts of the same
+   message. Name every `in` participant who is missing current data. Before
+   composing, read the challenge page's Gap disclosure log. When a missing
+   participant has no row, first append that participant's `memberId`, today's
+   local date as `firstPublicGapDate`, and the matching closed category to the
+   log. Include the evidence-backed reason and smallest useful action only
+   after the write returns a successful save receipt. If the write fails or is
+   ambiguous, send only the neutral waiting entry for that participant so a
+   later run cannot repeat a disclosure that was never durably recorded. When
+   a row already exists, list that participant
+   neutrally as waiting on data without repeating their individual reason or
+   troubleshooting step in the room. Keep at most one row per participant for
+   the challenge. Never present a partial table as the full standings.
+
+   An interactive group turn may post one additive `post_join_offer` when the
+   room asks for a missing metric or diagnostic scope. A scheduled turn has no
+   route authority to post that offer. On the first group digest that exposes
+   the gap, it should report the missing grant and invite the room to ask Murph
+   interactively for a permission card; later digests keep only the neutral
+   waiting entry; never tell someone to like an ordinary standings message. Do
+   not repost or nag after an offer. Repeated reminders and troubleshooting
+   belong in the affected participant's private thread, with no performance
+   teasing.
+5. Compose ONE dispatch in ONE format, in the `groupchat-comedy` voice.
    Rotate formats day over day — text bit, comic, voice memo, song,
    sportsbook odds, ruling — and check the sent log so the same format does
    not land twice in a row. A voice memo or song cannot share a turn with
    other media, so the day's format is a real choice.
-4. For images, follow the Comics rules below. Pass the pinned capture paths
+6. For images, follow the Comics rules below. Pass the pinned capture paths
    of everyone appearing (plus your character sheet ref when you appear) as
    `referenceImageRefs`, and record the saved vault ref that
    `generate_image` returns in the sent log. Members ask for replays: an
@@ -254,7 +363,7 @@ automation action rules with a `dailyLocal` schedule and
    the reference; an audio replay means regenerating from the full script
    or lyrics saved in the sent log (`music-generation` owns song prompt
    craft). Nothing sent is recoverable except through what the page saved.
-5. Append the day's section: format used, what was sent, standings
+7. Append the day's section: format used, what was sent, standings
    snapshot, new canon, new confounders.
 
 Between dispatches, the normal `group-chat` decision ladder applies. Answer

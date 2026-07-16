@@ -677,6 +677,51 @@ async function writeHostedPhaseExperimentSource(vaultRoot: string): Promise<void
   );
 }
 
+async function writeHostedPhaseSharedProjection(input: {
+  memberId?: string;
+  shareId?: string;
+  vaultRoot: string;
+}): Promise<void> {
+  const memberId = input.memberId ?? "member_shared_current";
+  const shareId = input.shareId ?? "share_profile_current";
+  const directory = path.join(input.vaultRoot, "derived", "vault-share");
+  await mkdir(directory, { recursive: true });
+  await writeFile(
+    path.join(directory, "projections.json"),
+    JSON.stringify({
+      projections: {
+        "profile-name.v0": {
+          grantors: {
+            [memberId]: {
+              grantorMemberId: memberId,
+              projectionKind: "profile-name.v0",
+              projectionScope: { projectionKind: "profile-name.v0" },
+              projectionScopeKey: "profile-name.v0",
+              records: [{
+                receivedEventId: "vault-share:profile-current",
+                record: {
+                  data: { displayName: "Shared member" },
+                  occurredAt: "2026-07-16T12:00:00.000Z",
+                  recordKey: "profile-name",
+                },
+                schema: "murph.vault-share.delivery.v1",
+                shareId,
+              }],
+              shareId,
+              updatedAt: "2026-07-16T12:00:00.000Z",
+            },
+          },
+          projectionScope: { projectionKind: "profile-name.v0" },
+          projectionScopeKey: "profile-name.v0",
+        },
+      },
+      schema: "murph.shared-vault-projections.v1",
+      updatedAt: "2026-07-16T12:00:00.000Z",
+    }),
+    "utf8",
+  );
+}
+
 describe("runHostedWorkspaceAssistantPhase runtime logs", () => {
   it("keeps foreground reply orchestration separate from background maintenance", async () => {
     const source = await readFile(
@@ -750,6 +795,80 @@ describe("runHostedWorkspaceAssistantPhase runtime logs", () => {
         }),
       }),
     );
+  });
+
+  it("verifies landed share authority before entering the assistant lane", async () => {
+    const vaultRoot = await mkdtemp(path.join(tmpdir(), "hosted-share-authority-"));
+    await writeHostedPhaseSharedProjection({ vaultRoot });
+    const sequence: string[] = [];
+    const request: NonNullable<
+      HostedWorkspaceRuntimeAssistantPhaseInput["runtime"]["platform"]["groupToolPort"]
+    >["request"] = vi.fn(async (request) => {
+      sequence.push("authority");
+      expect(request).toEqual({ action: "read_share_authority" });
+      return {
+        action: "read_share_authority" as const,
+        result: {
+          memberIds: ["member_shared_current"],
+          shares: [{
+            memberId: "member_shared_current",
+            projectionScopeKey: "profile-name.v0",
+            shareId: "share_profile_current",
+          }],
+          status: "ok" as const,
+        },
+      };
+    });
+    mocks.runHostedAssistantAutomationLane.mockImplementationOnce(async () => {
+      sequence.push("assistant_lane");
+      return {
+        assistantAutomationProgressed: false,
+        assistantAutomationCurrentTurnDeliveryIntentIds: [],
+        nextWakeAt: null,
+        redactedLogEntries: [],
+      };
+    });
+
+    try {
+      await runHostedWorkspaceAssistantPhase(createPhaseInput({
+        runtimeGroupToolPort: { request },
+        vaultRoot,
+      }));
+      expect(sequence).toEqual(["authority", "assistant_lane"]);
+      expect(request).toHaveBeenCalledTimes(1);
+    } finally {
+      await rm(vaultRoot, { force: true, recursive: true });
+    }
+  });
+
+  it("fails retryably before the assistant lane when share authority is unavailable", async () => {
+    const vaultRoot = await mkdtemp(path.join(tmpdir(), "hosted-share-authority-"));
+    await writeHostedPhaseSharedProjection({ vaultRoot });
+    const request: NonNullable<
+      HostedWorkspaceRuntimeAssistantPhaseInput["runtime"]["platform"]["groupToolPort"]
+    >["request"] = vi.fn(async () => ({
+      action: "read_share_authority" as const,
+      result: {
+        status: "unavailable" as const,
+        unavailableReason: "control_plane_unavailable",
+      },
+    }));
+
+    try {
+      await expect(runHostedWorkspaceAssistantPhase(createPhaseInput({
+        runtimeGroupToolPort: { request },
+        vaultRoot,
+      }))).rejects.toMatchObject({
+        code: "HOSTED_VAULT_SHARE_AUTHORITY_UNAVAILABLE",
+        context: { retryable: true },
+        message:
+          "Hosted shared group data authority could not be verified before assistant work.",
+      });
+      expect(request).toHaveBeenCalledWith({ action: "read_share_authority" });
+      expect(mocks.runHostedAssistantAutomationLane).not.toHaveBeenCalled();
+    } finally {
+      await rm(vaultRoot, { force: true, recursive: true });
+    }
   });
 
   it("exposes current-input authority with hosted personalization", async () => {
@@ -5266,6 +5385,47 @@ describe("runHostedWorkspaceAssistantPhase runtime logs", () => {
         };
       },
     } satisfies RuntimeDeviceSyncPort;
+    const groupToolRequests: Array<
+      Parameters<
+        NonNullable<
+          HostedWorkspaceRuntimeAssistantPhaseInput["runtime"]["platform"]["groupToolPort"]
+        >["request"]
+      >[0]
+    > = [];
+    const groupToolPort: NonNullable<
+      HostedWorkspaceRuntimeAssistantPhaseInput["runtime"]["platform"]["groupToolPort"]
+    > = {
+      async request(request) {
+        groupToolRequests.push(request);
+        if (request.action !== "read_share_authority") {
+          throw new Error("Scheduled context may only read current share authority.");
+        }
+        return {
+          action: "read_share_authority",
+          result: {
+            memberIds: ["member_alpha", "member_beta"],
+            shares: [
+              {
+                memberId: "member_alpha",
+                projectionScopeKey: "profile-name.v0",
+                shareId: "share_alpha_profile",
+              },
+              {
+                memberId: "member_alpha",
+                projectionScopeKey: "steps-days.v0",
+                shareId: "share_alpha_steps",
+              },
+              {
+                memberId: "member_beta",
+                projectionScopeKey: "profile-name.v0",
+                shareId: "share_beta_profile",
+              },
+            ],
+            status: "ok",
+          },
+        };
+      },
+    };
 
     mocks.getAssistantCronStatus.mockResolvedValueOnce({
       dueJobs: 1,
@@ -5274,7 +5434,20 @@ describe("runHostedWorkspaceAssistantPhase runtime logs", () => {
       runningJobs: 0,
       totalJobs: 1,
     });
+    let dynamicContextPrompt: string | null | undefined;
+    mocks.runHostedAssistantAutomationLane.mockImplementationOnce(async (laneInput) => {
+      dynamicContextPrompt =
+        await laneInput.buildBackgroundDynamicContextPrompt?.({});
+      return {
+        assistantAutomationProgressed: false,
+        assistantAutomationCurrentTurnDeliveryIntentIds: [],
+        nextWakeAt: null,
+        redactedLogEntries: [],
+      };
+    });
 
+    expect(fetchSnapshotRequests).toEqual([]);
+    expect(groupToolRequests).toEqual([]);
     await runHostedWorkspaceAssistantPhase(createPhaseInput({
       resolvedDeviceSync: {
         providerConfigs: {
@@ -5288,17 +5461,15 @@ describe("runHostedWorkspaceAssistantPhase runtime logs", () => {
         secret: "synthetic-device-sync-secret",
       },
       runtimeDeviceSyncPort: deviceSyncPort,
+      runtimeGroupToolPort: groupToolPort,
     }));
 
     const assistantLaneCall = mocks.runHostedAssistantAutomationLane.mock.calls.at(-1)?.[0];
-    expect(fetchSnapshotRequests).toEqual([]);
     expect(assistantLaneCall?.executionContext.hosted?.automationTool).toBeUndefined();
     expect(assistantLaneCall?.executionContext.hosted?.groupTool).toBeUndefined();
     expect(assistantLaneCall?.executionContext.hosted?.deviceTool).toEqual(
       expect.objectContaining({ request: expect.any(Function) }),
     );
-    const dynamicContextPrompt =
-      await assistantLaneCall?.buildBackgroundDynamicContextPrompt?.({});
     expect(fetchSnapshotRequests.map((request) => request?.sourceProviderSlug)).toEqual([
       "fitbit",
       "garmin",
@@ -5316,6 +5487,7 @@ describe("runHostedWorkspaceAssistantPhase runtime logs", () => {
         }),
       ]),
     );
+    expect(groupToolRequests).toEqual([{ action: "read_share_authority" }]);
     expect(assistantLaneCall?.signal).toBeUndefined();
     expect(assistantLaneCall).not.toHaveProperty("suppressActiveTurnInputRefresh");
     expect(assistantLaneCall?.executionContext.hosted?.dynamicContextPrompts)
@@ -5324,9 +5496,43 @@ describe("runHostedWorkspaceAssistantPhase runtime logs", () => {
     expect(dynamicContextPrompt).toContain(
       "Do not offer initial wearable connection",
     );
+    expect(dynamicContextPrompt).toContain(
+      "authoritative current group membership and grant snapshot",
+    );
+    expect(dynamicContextPrompt).toContain('"memberId": "member_alpha"');
+    expect(dynamicContextPrompt).toContain('"memberId": "member_beta"');
+    expect(dynamicContextPrompt).toContain("only participants recorded as `in`");
     expect(dynamicContextPrompt).not.toContain("needs reconnect");
     expect(dynamicContextPrompt).not.toContain("synthetic-external-account");
     expect(dynamicContextPrompt).not.toContain("refresh failed");
+    expect(dynamicContextPrompt).not.toContain("Private household label");
+    expect(dynamicContextPrompt).not.toContain("group_private_runtime_identifier");
+    expect(dynamicContextPrompt).not.toContain("<REDACTED_PHONE>");
+    expect(dynamicContextPrompt).not.toContain("<REDACTED_EMAIL>");
+  });
+
+  it("does not read the current group when no background work is due", async () => {
+    const request = vi.fn(async () => {
+      throw new Error("Group reads should remain lazy when no background work is due.");
+    });
+    let dynamicContextPrompt: string | null | undefined;
+    mocks.runHostedAssistantAutomationLane.mockImplementationOnce(async (laneInput) => {
+      dynamicContextPrompt =
+        await laneInput.buildBackgroundDynamicContextPrompt?.({});
+      return {
+        assistantAutomationProgressed: false,
+        assistantAutomationCurrentTurnDeliveryIntentIds: [],
+        nextWakeAt: null,
+        redactedLogEntries: [],
+      };
+    });
+
+    await runHostedWorkspaceAssistantPhase(createPhaseInput({
+      runtimeGroupToolPort: { request },
+    }));
+
+    expect(dynamicContextPrompt).toBeNull();
+    expect(request).not.toHaveBeenCalled();
   });
 
   it("omits Junction source commands when the public connect target resolves direct", async () => {

@@ -6,6 +6,25 @@ Last verified: 2026-07-16
 
 `apps/web` owns hosted groups, memberships, join policies, and vault-share grants. A personal hosted runtime may read its callback-authenticated member's current group memberships through the existing signed group-tool control route. The read derives group labels, the member's role, requested scopes, active self-granted scopes, and an existing owner-authorized first-party permission URL directly from web-owned rows; ordinary members never receive the reusable group invite through this read. It does not return another member's identity or sharing state and does not persist a copy in the personal vault, runner, or assistant runtime. Active grants prove permission, not source-data availability or completed projection delivery. Private self-leave is the one membership mutation on this surface: the read returns the member's own opaque membership selector, the signed callback remains actor authority, and Web atomically deletes only that non-owner membership while revoking its shares and appending existing cleanup work. The authenticated join page offers the same self-leave through its session-bound member and current join-code group selector. Its accept path carries the viewer's rendered membership id or explicit absence and compares that state under the same group/member locks before creating membership or changing grants, so stale sharing saves cannot undo a later leave. Other permission mutations remain on the authenticated group join page or the existing route-bound group-chat offer flow.
 
+Group challenge standings keep challenge participation, current Web-owned
+membership/grants, landed metric projections, and device status as separate
+facts. The assistant starts from knowledge-page participants recorded as `in`,
+left joins authorized projections by member id, and reports missing members
+instead of ranking absence as zero. The explicit `device-sync-status.v0` share
+contains only bounded public source labels, coarse connection statuses, and
+timestamps; it never turns a connection sync-job time into health-data receipt
+evidence. Before either a hosted assistant pass or a detached read-only
+Assistant Ask can read landed group projections, the runtime obtains Web's
+current share authority and atomically filters the derived store by exact
+member, scope key, and share id. A failed authority read blocks that model path.
+Scheduled challenge context uses that narrow member/scope/share authority
+snapshot rather than the broader interactive group summary.
+Foreground mailbox mutation pauses and requeues detached reads through import
+and the subsequent assistant pass, so a resumed ask revalidates the resulting
+store; delayed revoke cleanup is not an authorization boundary.
+The behavior, privacy shape, and Web-first compatibility deploy order live in
+`agent-docs/product-specs/group-challenge-data-diagnostics.md`.
+
 ## Hosted Assistant Ask
 
 Assistant Ask is one typed request/reply primitive over the existing encrypted

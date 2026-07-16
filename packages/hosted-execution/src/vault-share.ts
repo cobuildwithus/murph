@@ -92,6 +92,9 @@ export type HostedVaultShareActivitySelectorProjectionKind =
   | HostedVaultShareActivityMinutesProjectionKind
   | HostedVaultShareActivitySessionCountProjectionKind;
 
+export const HOSTED_VAULT_SHARE_DEVICE_SYNC_STATUS_PROJECTION_KIND =
+  "device-sync-status.v0" as const;
+
 const HOSTED_VAULT_SHARE_ACTIVITY_DISTANCE_SELECTOR_ALIAS_GROUPS = [
   ["walk", "walking"],
   ["run", "running"],
@@ -176,6 +179,7 @@ export interface HostedVaultShareActivitySessionCountProjectionSpec {
 }
 
 export const HOSTED_VAULT_SHARE_FIXED_PROJECTION_KINDS = [
+  HOSTED_VAULT_SHARE_DEVICE_SYNC_STATUS_PROJECTION_KIND,
   "group-email.v0",
   "profile-name.v0",
   "sleep-times.v0",
@@ -218,6 +222,7 @@ export const HOSTED_VAULT_SHARE_SELECTABLE_PROJECTION_KINDS = [
   "vo2-max-days.v0",
   "resting-heart-rate-days.v0",
   "hrv-days.v0",
+  HOSTED_VAULT_SHARE_DEVICE_SYNC_STATUS_PROJECTION_KIND,
 ] as const satisfies readonly HostedVaultShareProjectionKind[];
 
 export type HostedVaultShareSelectableProjectionKind =
@@ -278,9 +283,11 @@ export type HostedVaultShareSelectableProjectionScope =
 
 export const HOSTED_VAULT_SHARE_SELECTABLE_PROJECTION_SCOPES =
   Object.freeze([
-    ...HOSTED_VAULT_SHARE_SELECTABLE_PROJECTION_KINDS.map((projectionKind) => ({
-      projectionKind,
-    })),
+    ...HOSTED_VAULT_SHARE_SELECTABLE_PROJECTION_KINDS
+      .filter((projectionKind) =>
+        projectionKind !== HOSTED_VAULT_SHARE_DEVICE_SYNC_STATUS_PROJECTION_KIND
+      )
+      .map((projectionKind) => ({ projectionKind })),
     ...HOSTED_VAULT_SHARE_ACTIVITY_MINUTES_SELECTOR_ACTIVITY_KINDS.map((activityKind) => ({
       projectionKind: HOSTED_VAULT_SHARE_ACTIVITY_MINUTES_PROJECTION_KIND,
       selector: { activityKind },
@@ -293,6 +300,7 @@ export const HOSTED_VAULT_SHARE_SELECTABLE_PROJECTION_SCOPES =
       projectionKind: HOSTED_VAULT_SHARE_ACTIVITY_SESSION_COUNT_PROJECTION_KIND,
       selector: { activityKind },
     })),
+    { projectionKind: HOSTED_VAULT_SHARE_DEVICE_SYNC_STATUS_PROJECTION_KIND },
   ] satisfies HostedVaultShareSelectableProjectionScope[]);
 
 export const HOSTED_VAULT_SHARE_KNOWN_PROJECTION_SCOPES =
@@ -427,11 +435,31 @@ export interface HostedVaultShareProfileNameData {
   displayName: string;
 }
 
+export type HostedVaultShareDeviceSyncSourceStatus =
+  | "connected"
+  | "disconnected"
+  | "needs-attention"
+  | "needs-reconnect"
+  | "setting-up";
+
+export interface HostedVaultShareDeviceSyncSource {
+  connectionSyncJobCompletedAt: string | null;
+  label: string;
+  status: HostedVaultShareDeviceSyncSourceStatus;
+  statusObservedAt: string;
+}
+
+export interface HostedVaultShareDeviceSyncStatusData {
+  observedAt: string;
+  sources: HostedVaultShareDeviceSyncSource[];
+}
+
 export type HostedVaultShareDeliveryRecordData =
   | HostedVaultShareActivityMinutesDayData
   | HostedVaultShareActivityDistanceDayData
   | HostedVaultShareActivitySessionCountDayData
   | HostedVaultShareDailyMetricData
+  | HostedVaultShareDeviceSyncStatusData
   | HostedVaultShareHeartRateZoneDayData
   | HostedVaultShareProfileNameData
   | HostedVaultShareSleepTimesData
@@ -913,6 +941,8 @@ function parseHostedVaultShareDeliveryRecordData(
   }
 
   switch (context.projectionKind) {
+    case HOSTED_VAULT_SHARE_DEVICE_SYNC_STATUS_PROJECTION_KIND:
+      return parseHostedVaultShareDeviceSyncStatusData(value, context);
     case "heart-rate-zones-days.v0":
       return parseHostedVaultShareHeartRateZoneDayData(value, context);
     case "profile-name.v0":
@@ -930,6 +960,140 @@ function parseHostedVaultShareDeliveryRecordData(
 
 export const HOSTED_VAULT_SHARE_PROFILE_NAME_RECORD_KEY = "profile-name";
 export const HOSTED_VAULT_SHARE_PROFILE_NAME_MAX_LENGTH = 120;
+
+export const HOSTED_VAULT_SHARE_DEVICE_SYNC_STATUS_RECORD_KEY =
+  "device-sync-status";
+export const HOSTED_VAULT_SHARE_DEVICE_SYNC_STATUS_MAX_SOURCES = 8;
+export const HOSTED_VAULT_SHARE_DEVICE_SYNC_STATUS_SOURCE_LABEL_MAX_LENGTH = 80;
+const HOSTED_VAULT_SHARE_DEVICE_SYNC_STATUS_MAX_FUTURE_SKEW_MS = 5 * 60 * 1000;
+
+function parseHostedVaultShareDeviceSyncStatusData(
+  value: unknown,
+  context: { occurredAt: string; recordKey: string },
+): HostedVaultShareDeviceSyncStatusData {
+  const data = requireObject(value, "Vault share device-sync-status data");
+  assertObjectKeys(
+    data,
+    "Vault share device-sync-status data",
+    ["observedAt", "sources"],
+  );
+
+  if (context.recordKey !== HOSTED_VAULT_SHARE_DEVICE_SYNC_STATUS_RECORD_KEY) {
+    throw new TypeError(
+      'Vault share device-sync-status recordKey must be "device-sync-status".',
+    );
+  }
+
+  const observedAt = requireHostedVaultShareNonFutureTimestamp(
+    data.observedAt,
+    "Vault share device-sync-status data observedAt",
+  );
+  if (
+    observedAt !== context.occurredAt
+    || !/^\d{4}-\d{2}-\d{2}T00:00:00\.000Z$/u.test(observedAt)
+  ) {
+    throw new TypeError(
+      "Vault share device-sync-status observedAt and occurredAt must equal the UTC day bucket.",
+    );
+  }
+
+  const rawSources = requireArray(
+    data.sources,
+    "Vault share device-sync-status data sources",
+  );
+  if (rawSources.length > HOSTED_VAULT_SHARE_DEVICE_SYNC_STATUS_MAX_SOURCES) {
+    throw new TypeError(
+      `Vault share device-sync-status sources must contain at most ${HOSTED_VAULT_SHARE_DEVICE_SYNC_STATUS_MAX_SOURCES} entries.`,
+    );
+  }
+
+  const seenLabels = new Set<string>();
+  const sources = rawSources.map((source, index) => {
+    const parsed = parseHostedVaultShareDeviceSyncSource(source, index);
+    const normalizedLabel = parsed.label.toLocaleLowerCase("en-US");
+    if (seenLabels.has(normalizedLabel)) {
+      throw new TypeError(
+        "Vault share device-sync-status source labels must be unique.",
+      );
+    }
+    seenLabels.add(normalizedLabel);
+    return parsed;
+  });
+
+  return { observedAt, sources };
+}
+
+function parseHostedVaultShareDeviceSyncSource(
+  value: unknown,
+  index: number,
+): HostedVaultShareDeviceSyncSource {
+  const label = `Vault share device-sync-status sources[${index}]`;
+  const source = requireObject(value, label);
+  assertObjectKeys(
+    source,
+    label,
+    ["connectionSyncJobCompletedAt", "label", "status", "statusObservedAt"],
+  );
+  if (!Object.prototype.hasOwnProperty.call(source, "connectionSyncJobCompletedAt")) {
+    throw new TypeError(`${label} connectionSyncJobCompletedAt must be a timestamp or null.`);
+  }
+
+  const publicLabel = parseHostedVaultShareBoundedText(
+    source.label,
+    `${label} label`,
+    HOSTED_VAULT_SHARE_DEVICE_SYNC_STATUS_SOURCE_LABEL_MAX_LENGTH,
+  );
+  if (publicLabel.toLocaleLowerCase("en-US") === "junction") {
+    throw new TypeError(`${label} label must identify the public health source.`);
+  }
+
+  const status = requireString(source.status, `${label} status`);
+  if (!isHostedVaultShareDeviceSyncSourceStatus(status)) {
+    throw new TypeError(`${label} status is invalid.`);
+  }
+
+  const statusObservedAt = requireHostedVaultShareNonFutureTimestamp(
+    source.statusObservedAt,
+    `${label} statusObservedAt`,
+  );
+  const connectionSyncJobCompletedAt = source.connectionSyncJobCompletedAt === null
+    ? null
+    : requireHostedVaultShareNonFutureTimestamp(
+        source.connectionSyncJobCompletedAt,
+        `${label} connectionSyncJobCompletedAt`,
+      );
+
+  return {
+    connectionSyncJobCompletedAt,
+    label: publicLabel,
+    status,
+    statusObservedAt,
+  };
+}
+
+function isHostedVaultShareDeviceSyncSourceStatus(
+  value: string,
+): value is HostedVaultShareDeviceSyncSourceStatus {
+  return value === "connected"
+    || value === "disconnected"
+    || value === "needs-attention"
+    || value === "needs-reconnect"
+    || value === "setting-up";
+}
+
+function requireHostedVaultShareNonFutureTimestamp(
+  value: unknown,
+  label: string,
+): string {
+  const timestamp = requireIsoTimestamp(value, label);
+  if (
+    Date.parse(timestamp)
+    > Date.now() + HOSTED_VAULT_SHARE_DEVICE_SYNC_STATUS_MAX_FUTURE_SKEW_MS
+  ) {
+    throw new TypeError(`${label} must not be in the future.`);
+  }
+  return timestamp;
+}
 
 function parseHostedVaultShareProfileNameData(
   value: unknown,

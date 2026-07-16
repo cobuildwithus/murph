@@ -258,10 +258,10 @@ export async function buildGroupWeeklyResult(input: {
 }
 
 /**
- * Narrow each member's shares to the requested scopes/kinds and drop members left with
- * nothing, so `--scope activity-minutes-days.v1.activityKind.running` returns a focused
- * leaderboard. No filter returns the full view, including members who have only shared
- * their name (empty shares).
+ * Narrow each member's shares to the requested scopes/kinds while retaining every
+ * member already present in the landed view. Empty shares are meaningful: they keep a
+ * partial leaderboard from silently hiding members whose requested data has not landed.
+ * No filter returns the full view unchanged.
  */
 function applyShareFilter(
   view: readonly SharedGroupMemberView[],
@@ -279,15 +279,13 @@ function applyShareFilter(
   if (!kindSet && !scopeKeySet) {
     return [...view]
   }
-  return view
-    .map((member) => ({
-      ...member,
-      shares: member.shares.filter((share) =>
-        (kindSet ? kindSet.has(share.projectionKind) : true)
-        && (scopeKeySet ? scopeKeySet.has(share.projectionScopeKey) : true)
-      ),
-    }))
-    .filter((member) => member.shares.length > 0)
+  return view.map((member) => ({
+    ...member,
+    shares: member.shares.filter((share) =>
+      (kindSet ? kindSet.has(share.projectionKind) : true)
+      && (scopeKeySet ? scopeKeySet.has(share.projectionScopeKey) : true)
+    ),
+  }))
 }
 
 function toMemberOutput(member: SharedGroupMemberView) {

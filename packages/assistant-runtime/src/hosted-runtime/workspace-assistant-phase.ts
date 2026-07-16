@@ -105,6 +105,12 @@ import {
   type HostedDeviceSyncStatusPromptReconnectTarget,
 } from "./device-sync-status-prompt.ts";
 import {
+  buildHostedBackgroundGroupRosterPrompt,
+} from "./group-roster-prompt.ts";
+import {
+  reconcileSharedVaultShareProjectionAuthorityFromGroupTool,
+} from "./vault-share-import.ts";
+import {
   resolveHostedPendingAssistantInputWakeAt,
 } from "./pending-assistant-input.ts";
 import {
@@ -213,6 +219,7 @@ const HOSTED_MANAGED_AUTOMATION_SETUP_RETRY_DELAY_MS = 30_000;
 const HOSTED_SKIPPED_DEVICE_SYNC_RETRY_DELAY_MS = 30_000;
 const HOSTED_DEFERRED_PENDING_ASSISTANT_INPUT_RETRY_DELAY_MS = 30_000;
 const HOSTED_DEVICE_SYNC_STATUS_PROMPT_TIMEOUT_MS = 1_000;
+const HOSTED_GROUP_ROSTER_PROMPT_TIMEOUT_MS = 1_000;
 const HOSTED_MEMBER_CHANNEL_UPDATE_ROUTE_ACTIONS = ["apply-member-channels-update"] as const;
 const HOSTED_MEMBER_PREFERENCE_PRE_PLANNING_ROUTE_ACTIONS = [
   "apply-member-preferences",
@@ -259,6 +266,7 @@ export function createHostedGroupToolWithLinqThreadContext(input: {
       if (
         emailIngressPresent
         && request.action !== "read_current"
+        && request.action !== "read_share_authority"
         && request.action !== "revoke_own_email_share"
       ) {
         return buildHostedGroupEmailRestrictedActionUnavailable(request);
@@ -297,7 +305,7 @@ export function createHostedGroupToolWithLinqThreadContext(input: {
 function buildHostedGroupEmailRestrictedActionUnavailable(
   request: Exclude<
     HostedRuntimeGroupToolRequest,
-    { action: "read_current" | "revoke_own_email_share" }
+    { action: "read_current" | "read_share_authority" | "revoke_own_email_share" }
   >,
 ): HostedRuntimeGroupToolResponse {
   const unavailableReason = "authenticated_sender_required";
@@ -1000,7 +1008,7 @@ export async function runHostedWorkspaceAssistantPhase(
 
     const freshAssistantInputIds = readHostedInitialAssistantInputIds(input);
     const assistantAutomationRedactedLogEntries: HostedExecutionRedactedLogEntry[] = [];
-    const shouldReadDeviceSyncStatusPromptForBackgroundWork = async (options: {
+    const shouldReadDynamicContextForBackgroundWork = async (options: {
       managedAutomationsResult: HostedWorkspaceRunnerAssistantPhaseResult | null;
       systemMailboxMaintenance: Awaited<ReturnType<typeof runSystemMailboxMaintenancePhase>>;
     }): Promise<boolean> => {
@@ -1017,14 +1025,7 @@ export async function runHostedWorkspaceAssistantPhase(
 
       return await hasDueHostedAssistantCronJob(input);
     };
-    const buildBackgroundDeviceSyncStatusPrompt = (options: {
-      managedAutomationsResult: HostedWorkspaceRunnerAssistantPhaseResult | null;
-      systemMailboxMaintenance: Awaited<ReturnType<typeof runSystemMailboxMaintenancePhase>>;
-    }) => async (): Promise<string | null> => {
-      if (!await shouldReadDeviceSyncStatusPromptForBackgroundWork(options)) {
-        return null;
-      }
-
+    const readBackgroundDeviceSyncStatusPrompt = async (): Promise<string | null> => {
       const cancellation = createHostedBackgroundMaintenanceCancellation({
         signal: channelAbortController.signal,
         shouldYield: input.shouldYieldBackgroundMaintenance ?? null,
@@ -1049,11 +1050,48 @@ export async function runHostedWorkspaceAssistantPhase(
         cancellation.dispose();
       }
     };
+    const readBackgroundGroupRosterPrompt = async (): Promise<string | null> => {
+      const cancellation = createHostedBackgroundMaintenanceCancellation({
+        signal: channelAbortController.signal,
+        shouldYield: input.shouldYieldBackgroundMaintenance ?? null,
+        timeoutMs: HOSTED_GROUP_ROSTER_PROMPT_TIMEOUT_MS,
+      });
+
+      try {
+        return await buildHostedBackgroundGroupRosterPrompt({
+          groupToolPort: input.runtime.platform.groupToolPort ?? null,
+          signal: cancellation.signal,
+        }).catch(() => null);
+      } finally {
+        cancellation.dispose();
+      }
+    };
+    const createBackgroundDynamicContextPromptBuilder = (options: {
+      managedAutomationsResult: HostedWorkspaceRunnerAssistantPhaseResult | null;
+      systemMailboxMaintenance: Awaited<ReturnType<typeof runSystemMailboxMaintenancePhase>>;
+    }) => async (): Promise<string | null> => {
+      if (!await shouldReadDynamicContextForBackgroundWork(options)) {
+        return null;
+      }
+
+      const [deviceSyncStatusPrompt, groupRosterPrompt] = await Promise.all([
+        readBackgroundDeviceSyncStatusPrompt(),
+        readBackgroundGroupRosterPrompt(),
+      ]);
+      if (input.shouldYieldBackgroundMaintenance?.() === true) {
+        return null;
+      }
+
+      const prompts = [deviceSyncStatusPrompt, groupRosterPrompt]
+        .filter((prompt): prompt is string => Boolean(prompt));
+      return prompts.length > 0 ? prompts.join("\n\n") : null;
+    };
     const runAutomationLane = async (options: {
       managedAutomationsResult: HostedWorkspaceRunnerAssistantPhaseResult | null;
       systemMailboxMaintenance: Awaited<ReturnType<typeof runSystemMailboxMaintenancePhase>>;
     }) => {
       const automationLaneStartedAt = Date.now();
+      await assertCurrentHostedVaultShareAuthority(input);
       const automationBootstrapStartedAt = Date.now();
       const assistantRuntimeState = await prepareHostedAssistantAutomationForWake(
         input.restored.vaultRoot,
@@ -1071,7 +1109,7 @@ export async function runHostedWorkspaceAssistantPhase(
       const automationBootstrapMs = elapsedSince(automationBootstrapStartedAt);
       const buildBackgroundDynamicContextPrompt =
         assistantRuntimeState?.assistantConfigured === true
-          ? buildBackgroundDeviceSyncStatusPrompt({
+          ? createBackgroundDynamicContextPromptBuilder({
             managedAutomationsResult: options.managedAutomationsResult,
             systemMailboxMaintenance: options.systemMailboxMaintenance,
           })
@@ -1608,6 +1646,22 @@ export async function runHostedWorkspaceAssistantPhase(
   } finally {
     releaseChannelAbortRelay();
     channelAbortController.abort();
+  }
+}
+
+async function assertCurrentHostedVaultShareAuthority(
+  input: HostedWorkspaceRuntimeAssistantPhaseInput,
+): Promise<void> {
+  const reconciliation = await reconcileSharedVaultShareProjectionAuthorityFromGroupTool({
+    groupToolPort: input.runtime.platform.groupToolPort,
+    vaultRoot: input.restored.vaultRoot,
+  });
+  if (reconciliation.status === "blocked") {
+    throw new VaultCliError(
+      "HOSTED_VAULT_SHARE_AUTHORITY_UNAVAILABLE",
+      "Hosted shared group data authority could not be verified before assistant work.",
+      { retryable: true },
+    );
   }
 }
 

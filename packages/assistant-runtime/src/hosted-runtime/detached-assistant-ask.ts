@@ -35,6 +35,7 @@ export interface HostedDetachedAssistantAskController {
 
 export interface HostedDetachedAssistantAskControllerInput {
   assistantAskPort: HostedRuntimeAssistantAskPort | null;
+  beforeExecuteAsk(): Promise<void>;
   codexHome: string | null;
   env: Readonly<Record<string, string>>;
   executeAsk?: (
@@ -73,6 +74,7 @@ export function createHostedDetachedAssistantAskController(
     const completion = runOneHostedDetachedAssistantAsk({
       abortSignal: abortController.signal,
       assistantAskPort: input.assistantAskPort,
+      beforeExecuteAsk: input.beforeExecuteAsk,
       codexHome: input.codexHome,
       env: input.env,
       executeAsk,
@@ -158,6 +160,7 @@ export function createHostedDetachedAssistantAskController(
 async function runOneHostedDetachedAssistantAsk(input: {
   abortSignal: AbortSignal;
   assistantAskPort: HostedRuntimeAssistantAskPort | null;
+  beforeExecuteAsk(): Promise<void>;
   codexHome: string | null;
   env: Readonly<Record<string, string>>;
   executeAsk: (
@@ -208,6 +211,15 @@ async function runOneHostedDetachedAssistantAsk(input: {
     }
     if (prepared.status === "terminal") {
       await removeHostedDetachedAssistantAsk({ claimed, input });
+      return "settled";
+    }
+    await input.beforeExecuteAsk();
+    if (input.abortSignal.aborted) {
+      await requeueHostedDetachedAssistantAsk({
+        claimed,
+        input,
+        nextAttemptAt: null,
+      });
       return "settled";
     }
     const answer = await input.executeAsk({
