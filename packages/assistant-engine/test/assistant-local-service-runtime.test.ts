@@ -168,6 +168,7 @@ test('sendAssistantMessageLocal delivers an exact approval URL without persistin
         },
         codexThreadId: 'provider-thread-capability-split',
         response: `Approval is required.\n\n${approvalUrl}`,
+        responseDeliveryContextOrdinal: 0,
         route: {
           routeId: 'route-capability-split',
         },
@@ -335,6 +336,8 @@ test('sendAssistantMessageLocal gives hosted manual phone-call turns a real acce
         },
         codexThreadId: 'provider-thread-default',
         response: 'assistant response',
+        responseDeliveryContextOrdinal: 0,
+        transcriptResponse: 'assistant response',
         route: {
           routeId: 'route-default',
         },
@@ -445,6 +448,8 @@ test('sendAssistantMessageLocal delivers media-only provider replies', async () 
         codexContinuation: { kind: 'explicit-structured-history' },
         codexThreadId: 'provider-thread-media-only',
         response: '',
+        responseDeliveryContextOrdinal: 0,
+        transcriptResponse: '',
         responseMedia: [voiceMemoMedia],
         route: { routeId: 'route-media-only' },
         session,
@@ -520,6 +525,8 @@ test('sendAssistantMessageLocal clears resume state when the provider returns no
         codexContinuation: { kind: 'explicit-structured-history' },
         codexThreadId: null,
         response: 'Answer without a resumable provider thread.',
+        responseDeliveryContextOrdinal: 0,
+        transcriptResponse: 'Answer without a resumable provider thread.',
         route: { routeId: 'route-without-provider-thread' },
         session,
       },
@@ -605,6 +612,7 @@ test('sendAssistantMessageLocal delivers pre-steer final answers before the fina
       codexContinuation: { kind: 'explicit-structured-history' },
       precedingResponseSegments: [
         {
+          deliveryContextOrdinal: 0,
           response: 'Answer one.',
           media: [
             {
@@ -616,11 +624,14 @@ test('sendAssistantMessageLocal delivers pre-steer final answers before the fina
           ],
         },
         {
+          deliveryContextOrdinal: 0,
           response: 'Answer two.',
           media: [],
         },
       ],
       response: 'Answer three.',
+      responseDeliveryContextOrdinal: 0,
+      transcriptResponse: 'Answer three.',
       session,
     },
   }))
@@ -687,11 +698,14 @@ test('sendAssistantMessageLocal strips reply bubble delimiters from bubble-capab
         codexContinuation: { kind: 'explicit-structured-history' },
         precedingResponseSegments: [
           {
+            deliveryContextOrdinal: 0,
             response: 'Preceding one.\n---\nPreceding two.',
             media: [],
           },
         ],
         response: 'Final one.\n---\nFinal two?',
+        responseDeliveryContextOrdinal: 0,
+        transcriptResponse: 'Final one.\n---\nFinal two?',
         session,
       },
     },
@@ -735,6 +749,8 @@ test('sendAssistantMessageLocal strips reply bubble delimiters from failed recei
         onboardingGuidanceInjected: false,
         codexContinuation: { kind: 'explicit-structured-history' },
         response: 'Final one.\n---\nFinal two?',
+        responseDeliveryContextOrdinal: 0,
+        transcriptResponse: 'Final one.\n---\nFinal two?',
         session,
       },
     },
@@ -802,11 +818,14 @@ test('sendAssistantMessageLocal preserves email delimiter lines in delivery, tra
         codexContinuation: { kind: 'explicit-structured-history' },
         precedingResponseSegments: [
           {
+            deliveryContextOrdinal: 0,
             response: precedingResponse,
             media: [],
           },
         ],
         response: finalResponse,
+        responseDeliveryContextOrdinal: 0,
+        transcriptResponse: finalResponse,
         session,
       },
     },
@@ -850,11 +869,14 @@ test('sendAssistantMessageLocal preserves real same-text preceding answers', asy
       codexContinuation: { kind: 'explicit-structured-history' },
       precedingResponseSegments: [
         {
+          deliveryContextOrdinal: 0,
           response: 'Done.',
           media: [],
         },
       ],
       response: 'Done.',
+      responseDeliveryContextOrdinal: 0,
+      transcriptResponse: 'Done.',
       session,
     },
   }))
@@ -941,6 +963,7 @@ test('sendAssistantMessageLocal resolves preceding and retained final delivery c
           },
         ],
         response: 'Retained answer.',
+        transcriptResponse: 'Retained answer.',
         responseDeliveryContextOrdinal: 1,
         responseMedia: [
           {
@@ -1137,6 +1160,7 @@ test('sendAssistantMessageLocal resolves preceding and retained final delivery c
       onboardingGuidanceInjected: false,
       codexContinuation: { kind: 'explicit-structured-history' },
       response: 'Do not route this through a fallback context.',
+      transcriptResponse: 'Do not route this through a fallback context.',
       responseDeliveryContextOrdinal: 99,
       session,
     },
@@ -1168,11 +1192,14 @@ test('sendAssistantMessageLocal records a diagnostic when a preceding answer fai
       codexContinuation: { kind: 'explicit-structured-history' },
       precedingResponseSegments: [
         {
+          deliveryContextOrdinal: 0,
           response: 'Answer one.',
           media: [],
         },
       ],
       response: 'Answer two.',
+      responseDeliveryContextOrdinal: 0,
+      transcriptResponse: 'Answer two.',
       session,
     },
   }))
@@ -1226,11 +1253,14 @@ test('sendAssistantMessageLocal still sends the final reply when preceding deliv
       codexContinuation: { kind: 'explicit-structured-history' },
       precedingResponseSegments: [
         {
+          deliveryContextOrdinal: 0,
           response: 'Answer one.',
           media: [],
         },
       ],
       response: 'Answer two.',
+      responseDeliveryContextOrdinal: 0,
+      transcriptResponse: 'Answer two.',
       session,
     },
   }))
@@ -1270,6 +1300,8 @@ test('sendAssistantMessageLocal fails blank provider output without explicit no-
         onboardingGuidanceInjected: false,
         codexContinuation: { kind: 'explicit-structured-history' },
         response: '',
+        responseDeliveryContextOrdinal: 0,
+        transcriptResponse: null,
         session,
       },
     },
@@ -1312,11 +1344,14 @@ test('sendAssistantMessageLocal reports preceding delivery failure when no final
         },
         precedingResponseSegments: [
           {
+            deliveryContextOrdinal: 0,
             response: 'Answer one.',
             media: [],
           },
         ],
         response: '',
+        responseDeliveryContextOrdinal: 0,
+        transcriptResponse: null,
         session,
       },
     },
@@ -1384,11 +1419,14 @@ test('sendAssistantMessageLocal reports preceding queued delivery when no final 
         },
         precedingResponseSegments: [
           {
+            deliveryContextOrdinal: 0,
             response: 'Answer one.',
             media: [],
           },
         ],
         response: '',
+        responseDeliveryContextOrdinal: 0,
+        transcriptResponse: null,
         session,
       },
     },
@@ -1493,6 +1531,8 @@ test('sendAssistantMessageLocal stops typing when only a different-target preced
           },
         ],
         response: '',
+        responseDeliveryContextOrdinal: 1,
+        transcriptResponse: null,
         session,
       },
     }
@@ -1573,11 +1613,14 @@ test('sendAssistantMessageLocal reports thrown preceding delivery when no final 
         },
         precedingResponseSegments: [
           {
+            deliveryContextOrdinal: 0,
             response: 'Answer one.',
             media: [],
           },
         ],
         response: '',
+        responseDeliveryContextOrdinal: 0,
+        transcriptResponse: null,
         session,
       },
     },
@@ -1630,6 +1673,8 @@ test('sendAssistantMessageLocal surfaces the provider setup sub-split on onProvi
         onboardingGuidanceInjected: false,
         codexContinuation: { kind: 'explicit-structured-history' },
         response: 'done',
+        responseDeliveryContextOrdinal: 0,
+        transcriptResponse: 'done',
         session: createAssistantSession({ sessionId: 'session-split' }),
       },
     }
@@ -1894,6 +1939,8 @@ test('sendAssistantMessageLocal live-steers same-conversation input without prov
         },
         codexThreadId: 'provider-thread-active-turn',
         response: 'final after late input',
+        responseDeliveryContextOrdinal: 1,
+        transcriptResponse: 'final after late input',
         route: {
           routeId: 'route-active-turn',
         },
@@ -2130,6 +2177,8 @@ test('sendAssistantMessageLocal journals provider request before provider execut
         },
         codexThreadId: 'provider-thread-default',
         response: 'assistant response',
+        responseDeliveryContextOrdinal: 0,
+        transcriptResponse: 'assistant response',
         route: {
           routeId: 'route-default',
         },
@@ -2177,6 +2226,8 @@ test('sendAssistantMessageLocal binds accepted inputs before provider execution'
         },
         codexThreadId: 'provider-thread-default',
         response: 'assistant response',
+        responseDeliveryContextOrdinal: 0,
+        transcriptResponse: 'assistant response',
         route: {
           routeId: 'route-default',
         },
@@ -2226,6 +2277,8 @@ test('sendAssistantMessageLocal updates provider request metadata when final con
         },
         codexThreadId: 'provider-thread-default',
         response: 'assistant response',
+        responseDeliveryContextOrdinal: 0,
+        transcriptResponse: 'assistant response',
         route: {
           routeId: 'route-default',
         },
@@ -2394,6 +2447,8 @@ test('sendAssistantMessageLocal checkpoints event-backed live steering before ho
           kind: 'explicit-structured-history',
         },
         response: 'final after event input',
+        responseDeliveryContextOrdinal: 1,
+        transcriptResponse: 'final after event input',
         session,
       },
     }
@@ -2512,6 +2567,8 @@ test('sendAssistantMessageLocal persists late manual accepted-input transcript r
           kind: 'explicit-structured-history',
         },
         response: 'final after late input',
+        responseDeliveryContextOrdinal: 1,
+        transcriptResponse: 'final after late input',
         session,
       },
     }
@@ -2737,6 +2794,8 @@ test('sendAssistantMessageLocal rejects initial assistant-input refs before manu
           kind: 'explicit-structured-history',
         },
         response: 'final after attempted steer',
+        responseDeliveryContextOrdinal: 0,
+        transcriptResponse: 'final after attempted steer',
         session,
       },
     }
@@ -2806,6 +2865,8 @@ test('sendAssistantMessageLocal rejects late assistant-input refs before transcr
         kind: 'explicit-structured-history',
       },
       response: 'draft before missing late input',
+      responseDeliveryContextOrdinal: 0,
+      transcriptResponse: 'draft before missing late input',
       session,
     },
   })
@@ -2901,6 +2962,8 @@ test('sendAssistantMessageLocal steers same-conversation input into an active ma
           kind: 'explicit-structured-history',
         },
         response: 'final after steered input',
+        responseDeliveryContextOrdinal: 1,
+        transcriptResponse: 'final after steered input',
         session,
       },
     }
@@ -2993,6 +3056,8 @@ test('sendAssistantMessageLocal live-steers same-conversation input without a se
           kind: 'explicit-structured-history',
         },
         response: 'final after live-steered input',
+        responseDeliveryContextOrdinal: 1,
+        transcriptResponse: 'final after live-steered input',
         session,
       },
     }
@@ -3101,6 +3166,8 @@ test('sendAssistantMessageLocal keeps provider success when live steer misses pr
           kind: 'explicit-structured-history',
         },
         response: 'final before missed live steer',
+        responseDeliveryContextOrdinal: 0,
+        transcriptResponse: 'final before missed live steer',
         session,
       },
     }
@@ -3211,6 +3278,8 @@ test('sendAssistantMessageLocal resolves an admitted manual input and rejects a 
           kind: 'explicit-structured-history',
         },
         response: 'final after first live input',
+        responseDeliveryContextOrdinal: 1,
+        transcriptResponse: 'final after first live input',
         session,
       },
     }
@@ -3343,6 +3412,8 @@ test('sendAssistantMessageLocal rejects queued targeted input when provider neve
           kind: 'explicit-structured-history',
         },
         response: 'final without live provider',
+        responseDeliveryContextOrdinal: 0,
+        transcriptResponse: 'final without live provider',
         session,
       },
     }
@@ -3442,6 +3513,8 @@ test('sendAssistantMessageLocal fails closed when live steering fails', async ()
           kind: 'explicit-structured-history',
         },
         response: 'draft after mixed live input',
+        responseDeliveryContextOrdinal: 1,
+        transcriptResponse: 'draft after mixed live input',
         session,
       },
     }
@@ -3748,6 +3821,8 @@ test('sendAssistantMessageLocal registers manual steering before prompt persiste
         kind: 'explicit-structured-history',
       },
       response: 'final after steered input',
+      responseDeliveryContextOrdinal: 0,
+      transcriptResponse: 'final after steered input',
       session,
     },
   })
@@ -3805,6 +3880,8 @@ test('sendAssistantMessageLocal starts a new turn when same-conversation input l
           kind: 'explicit-structured-history',
         },
         response: 'new turn response',
+        responseDeliveryContextOrdinal: 0,
+        transcriptResponse: 'new turn response',
         session,
       },
     })
@@ -3861,6 +3938,8 @@ test('sendAssistantMessageLocal starts a new turn when same-conversation input l
         kind: 'explicit-structured-history',
       },
       response: 'first turn response',
+      responseDeliveryContextOrdinal: 0,
+      transcriptResponse: 'first turn response',
       session,
     },
   })
@@ -3931,6 +4010,8 @@ test('sendAssistantMessageLocal treats input after provider close as a normal ne
           kind: 'explicit-structured-history',
         },
         response: 'first response',
+        responseDeliveryContextOrdinal: 0,
+        transcriptResponse: 'first response',
         session,
       },
     })
@@ -3942,6 +4023,8 @@ test('sendAssistantMessageLocal treats input after provider close as a normal ne
           kind: 'explicit-structured-history',
         },
         response: 'second response',
+        responseDeliveryContextOrdinal: 0,
+        transcriptResponse: 'second response',
         session,
       },
     })
@@ -4189,6 +4272,8 @@ test('sendAssistantMessageLocal routes hosted Linq model progress through progre
         },
         codexThreadId: 'provider-thread-progress',
         response: 'assistant response',
+        responseDeliveryContextOrdinal: 0,
+        transcriptResponse: 'assistant response',
         route: {
           routeId: 'route-default',
         },
@@ -4309,6 +4394,8 @@ test('sendAssistantMessageLocal uses progress-materialized sessions for final re
         },
         codexThreadId: 'provider-thread-default',
         response: 'assistant response',
+        responseDeliveryContextOrdinal: 0,
+        transcriptResponse: 'assistant response',
         route: {
           routeId: 'route-default',
         },
@@ -4695,6 +4782,8 @@ test('sendAssistantMessageLocal lets the provider own hosted attachment progress
         },
         codexThreadId: 'provider-thread-default',
         response: 'assistant response',
+        responseDeliveryContextOrdinal: 0,
+        transcriptResponse: 'assistant response',
         route: {
           routeId: 'route-default',
         },
@@ -5893,6 +5982,8 @@ test('sendAssistantMessageLocal anchors hosted reply timing to the queued delive
         onboardingGuidanceInjected: false,
         codexContinuation: { kind: 'explicit-structured-history' },
         response: 'timed response',
+        responseDeliveryContextOrdinal: 0,
+        transcriptResponse: 'timed response',
         session,
       },
     }
@@ -6197,6 +6288,8 @@ test('sendAssistantMessageLocal suppresses transcript and delivery for no-reply 
         },
         rawEvents: [],
         response: 'suppressed provider text',
+        responseDeliveryContextOrdinal: 0,
+        transcriptResponse: null,
         route: {
           routeId: 'route-no-reply',
         },
@@ -6272,6 +6365,8 @@ test('sendAssistantMessageLocal traces hosted reaction-only no-reply delivery ou
           },
         ],
         response: 'suppressed provider text',
+        responseDeliveryContextOrdinal: 0,
+        transcriptResponse: null,
         route: {
           routeId: 'route-no-reply-reaction',
         },
@@ -6358,6 +6453,8 @@ test('sendAssistantMessageLocal durably records accepted no-reply markers before
         codexThreadId: 'provider-thread-no-reply-before-visible-final',
         rawEvents: [],
         response: 'Visible answer.',
+        responseDeliveryContextOrdinal: 0,
+        transcriptResponse: 'Visible answer.',
         route: {
           routeId: 'route-no-reply-before-visible-final',
         },
@@ -6626,6 +6723,8 @@ test('sendAssistantMessageLocal persists live-steered input before its no-reply 
         },
         rawEvents: [],
         response: 'suppressed text',
+        responseDeliveryContextOrdinal: 1,
+        transcriptResponse: null,
         route: {
           routeId: 'route-live-steered-no-reply',
         },
@@ -7077,7 +7176,7 @@ async function loadLocalServiceModule(input?: {
           codexThreadId?: string | null
           finalAction?: AssistantNoReplyDisposition
           precedingResponseSegments?: readonly {
-            deliveryContextOrdinal?: number
+            deliveryContextOrdinal: number
             media?: AssistantDeliveryOutcome['media']
             response: string
           }[]
@@ -7090,9 +7189,10 @@ async function loadLocalServiceModule(input?: {
             routeId?: string
           }
           response: string
+          responseDeliveryContextOrdinal: number
           responseMedia?: readonly AssistantResponseMedia[] | null
           session: AssistantSession
-          transcriptResponse?: string | null
+          transcriptResponse: string | null
         }
       }
   deliveryOutcome?: {
@@ -7141,10 +7241,12 @@ async function loadLocalServiceModule(input?: {
         },
         codexThreadId: 'provider-thread-default',
         response: 'assistant response',
+        responseDeliveryContextOrdinal: 0,
         route: {
           routeId: 'route-default',
         },
         session,
+        transcriptResponse: 'assistant response',
       },
     }
   const deliveryOutcome =

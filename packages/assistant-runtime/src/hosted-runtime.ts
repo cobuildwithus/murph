@@ -5,11 +5,12 @@ import path from "node:path";
 
 import {
   HOSTED_RUNTIME_LATENCY_PHASE_BREAKDOWN_PHASE_KEYS,
+  type HostedRuntimeAssistantConfigurationSnapshot,
   type HostedRuntimeLatencyPhaseBreakdown,
-  type HostedRuntimeRedactedJson,
-  type HostedRuntimeOrchestrationLatencyDiagnostics,
   type HostedRuntimeLatencyTraceMilestone,
   type HostedRuntimeLatencyTraceStagedMilestones,
+  type HostedRuntimeOrchestrationLatencyDiagnostics,
+  type HostedRuntimeRedactedJson,
   type HostedWorkspaceCheckpointResponse,
   type HostedWorkspaceInvocationResult,
   type HostedWorkspaceState,
@@ -1275,8 +1276,41 @@ export async function runHostedWorkspaceRuntimeJobInProcess(
         throw new TypeError("Foreground hosted runner must not checkpoint workspace.");
       },
     };
+    type InvocationAssistantTarget = Pick<
+      HostedRuntimeAssistantConfigurationSnapshot,
+      "model" | "reasoningEffort"
+    >;
+    let confirmedAssistantTarget: InvocationAssistantTarget | null = null;
+    const readConfirmedAssistantTarget = (): InvocationAssistantTarget | null =>
+      confirmedAssistantTarget;
+    const assistantConfigurationToolPort =
+      guardedRuntime.platform.assistantConfigurationToolPort ?? null;
+    const invocationAssistantConfigurationToolPort: HostedRuntimePlatform[
+      "assistantConfigurationToolPort"
+    ] = assistantConfigurationToolPort
+      ? {
+          async request(request) {
+            const response = await assistantConfigurationToolPort.request(request);
+            if (
+              request.action === "update"
+              && response.action === "update"
+              && (response.result.status === "updated"
+                || response.result.status === "unchanged")
+            ) {
+              confirmedAssistantTarget = {
+                model: response.result.model,
+                reasoningEffort: response.result.reasoningEffort,
+              };
+            }
+            return response;
+          },
+        }
+      : null;
     const runnerPlatform = {
       ...guardedRuntime.platform,
+      ...(invocationAssistantConfigurationToolPort
+        ? { assistantConfigurationToolPort: invocationAssistantConfigurationToolPort }
+        : {}),
       mailboxPort: runnerMailboxPort,
       workspacePort: foregroundRunnerWorkspacePort,
     };
@@ -1741,6 +1775,23 @@ export async function runHostedWorkspaceRuntimeJobInProcess(
               runAssistantPhase: async (phaseInput) => {
                 currentAssistantPreferenceInputId = null;
                 try {
+                  const phaseAssistantTarget = readConfirmedAssistantTarget();
+                  const confirmedAssistantTargetEnv = phaseAssistantTarget
+                    ? {
+                        HOSTED_ASSISTANT_MODEL: phaseAssistantTarget.model,
+                        HOSTED_ASSISTANT_REASONING_EFFORT:
+                          phaseAssistantTarget.reasoningEffort,
+                      }
+                    : null;
+                  const phaseRuntime = confirmedAssistantTargetEnv
+                    ? {
+                        ...foregroundRuntime,
+                        forwardedEnv: {
+                          ...foregroundRuntime.forwardedEnv,
+                          ...confirmedAssistantTargetEnv,
+                        },
+                      }
+                    : foregroundRuntime;
                   const phaseResult = await (
                     options.runAssistantPhase ?? runHostedWorkspaceAssistantPhase
                   )({
@@ -1751,8 +1802,11 @@ export async function runHostedWorkspaceRuntimeJobInProcess(
                     deviceSyncWorkspaceWakeHandled: deviceSyncWorkspaceWakeHandledUntilCheckpoint,
                     request: input.request,
                     restored,
-                    runtime: foregroundRuntime,
-                    runtimeEnv: invocationRuntimeEnv,
+                    runtime: phaseRuntime,
+                    runtimeEnv: {
+                      ...invocationRuntimeEnv,
+                      ...(confirmedAssistantTargetEnv ?? {}),
+                    },
                     beforeProviderAcceptedInputs: async ({ acceptedInputs }) => {
                       const assistantInputIds = acceptedInputs.every(
                         (acceptedInput) => acceptedInput.source === "assistant-input",
@@ -2947,6 +3001,10 @@ export async function runHostedWorkspaceRuntimeJobInProcess(
           || (pendingWake.nextWakeAt !== null
             && Date.parse(pendingWake.nextWakeAt) - Date.now()
               < HOSTED_IDLE_COMPACT_TIMEOUT_MS);
+        const idleMaintenanceModel =
+          readConfirmedAssistantTarget()?.model
+          ?? runtimeEnv.HOSTED_ASSISTANT_MODEL
+          ?? null;
         const idleMaintenance = dirtyWindowCheckpointTrigger === "shutdown_signal"
           ? buildHostedShutdownIdleMaintenanceOutcome()
           : await runHostedPendingInputProtectedIdleMaintenance({
@@ -2961,7 +3019,7 @@ export async function runHostedWorkspaceRuntimeJobInProcess(
               }),
               materializeWorkspaceArtifacts: restored.materializeWorkspaceArtifacts,
               memberId: input.request.userId,
-              model: runtimeEnv.HOSTED_ASSISTANT_MODEL ?? null,
+              model: idleMaintenanceModel,
               pendingWork: idleMaintenancePendingWork,
               providerName: runtimeEnv[HOSTED_CODEX_EFFECTIVE_MODEL_PROVIDER_ID_ENV] ?? null,
               recordUsage: guardedRuntime.platform.usageRecordPort

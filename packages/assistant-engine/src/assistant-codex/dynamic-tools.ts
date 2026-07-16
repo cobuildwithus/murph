@@ -37,7 +37,6 @@ import {
   HOSTED_ASSISTANT_PRODUCT_MODELS,
   HOSTED_ASSISTANT_REASONING_EFFORTS,
   HOSTED_ASSISTANT_SOL_MODEL,
-  HOSTED_ASSISTANT_TERRA_MODEL,
 } from '@murphai/hosted-execution/assistant-model'
 import {
   HOSTED_VAULT_SHARE_ACTIVITY_DISTANCE_PROJECTION_KIND,
@@ -2733,25 +2732,6 @@ async function executeAssistantConfigurationTool(input: {
         },
       }))
     }
-    if (
-      requestedForNextTurn.model === savedForNextTurn.model &&
-      requestedForNextTurn.reasoningEffort === savedForNextTurn.reasoningEffort &&
-      !(
-        input.request.model === HOSTED_ASSISTANT_TERRA_MODEL &&
-        savedForNextTurn.dormantSolPreference
-      )
-    ) {
-      return toolTextResult(true, safeToolPayloadText({
-        currentTurn,
-        savedForNextTurn: {
-          ...savedForNextTurn,
-          appliesAt: 'next_turn',
-          requiredPlan: null,
-          status: 'unchanged',
-        },
-      }))
-    }
-
     const result = input.request.model === undefined
       ? await assistantConfigurationTool.request({
           action: 'update',

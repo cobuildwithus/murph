@@ -63,6 +63,9 @@ import {
   resolveAssistantProviderResumeStateAction,
 } from './turn-finalizer.js'
 import {
+  bindAssistantResumeStateToThreadCompatibility,
+} from './codex-resume-binding.js'
+import {
   readAssistantCodexResume,
 } from './conversation-persistence.js'
 import {
@@ -86,7 +89,11 @@ import {
   executeCodexTurnWithRecovery,
   resolveAssistantCodexThreadScope,
 } from './codex-turn-runner.js'
-import { readCodexThreadRouteFingerprint } from './codex-thread-route.js'
+import {
+  readCodexThreadCompatibilityFingerprint,
+  readCodexThreadRouteFingerprint,
+} from './codex-thread-route.js'
+import { resolveAssistantExecutionPlan } from './execution-plan.js'
 import {
   normalizeAssistantAskResultForReturn,
   serializeAssistantSessionForResult,
@@ -1255,6 +1262,8 @@ export async function sendAssistantMessageLocal(
             codexThreadId: providerOutcome.codexThreadId,
             routeFingerprint:
               readCodexThreadRouteFingerprint(providerOutcome.route),
+            threadCompatibilityFingerprint:
+              readCodexThreadCompatibilityFingerprint(providerOutcome.route),
             session: currentSession,
             vault: input.vault,
           })
@@ -1286,11 +1295,14 @@ export async function sendAssistantMessageLocal(
               rawEvents: providerOutcome.rawEvents,
               reactions: recoveredReactions,
               response: '',
+              responseDeliveryContextOrdinal:
+                recoverableNoReplyDeliveryContextOrdinal,
               responseMedia: [],
               route: providerOutcome.route,
               session: failedNoReplySession,
               stderr: '',
               stdout: '',
+              transcriptResponse: null,
               usage: providerOutcome.usage,
               usageAttribution: providerOutcome.usageAttribution,
               workingDirectory: sharedPlan.requestedWorkingDirectory,
@@ -1464,16 +1476,11 @@ export async function sendAssistantMessageLocal(
         })
 
         const resolvedFinalReplyDeliveryContext =
-          typeof providerResult.responseDeliveryContextOrdinal === 'number'
-            ? resolveAssistantReplyDeliveryContextForSegment({
-                contexts: replyDeliveryContexts,
-                deliveryContextOrdinal:
-                  providerResult.responseDeliveryContextOrdinal,
-              })
-            : {
-                context: null,
-                invalidDeliveryContextOrdinal: null,
-              }
+          resolveAssistantReplyDeliveryContextForSegment({
+            contexts: replyDeliveryContexts,
+            deliveryContextOrdinal:
+              providerResult.responseDeliveryContextOrdinal,
+          })
         if (
           resolvedFinalReplyDeliveryContext.invalidDeliveryContextOrdinal !==
           null
@@ -1570,9 +1577,7 @@ export async function sendAssistantMessageLocal(
               })
         const rawTranscriptResponseText = noReplySelected
           ? null
-          : providerResult.transcriptResponse === undefined
-            ? rawFinalResponseText
-            : providerResult.transcriptResponse
+          : providerResult.transcriptResponse
         const transcriptResponseText =
           rawTranscriptResponseText === null
             ? null
@@ -1993,7 +1998,13 @@ export async function updateAssistantSessionOptionsLocal(input: {
   const continuityChanged =
     session.session.providerOptions.continuityFingerprint !==
     nextProviderOptions.continuityFingerprint
-  const currentResumeState = readAssistantCodexResume(session.session)
+  const currentResumeState = bindAssistantResumeStateToThreadCompatibility({
+    resumeState: readAssistantCodexResume(session.session),
+    route: resolveAssistantExecutionPlan({
+      defaults: null,
+      sessionTarget: session.session.target,
+    }).codexRoute,
+  })
 
   return saveAssistantSession(input.vault, {
     ...session.session,
@@ -2222,7 +2233,7 @@ function resolveAcceptedActiveTurnInputItems(input: {
 
 function resolveAssistantReplyDeliveryContextForSegment(input: {
   contexts: readonly AssistantReplyDeliveryContext[]
-  deliveryContextOrdinal?: number | null
+  deliveryContextOrdinal: number
 }): {
   context: AssistantReplyDeliveryContext | null
   invalidDeliveryContextOrdinal: number | null
@@ -2230,13 +2241,6 @@ function resolveAssistantReplyDeliveryContextForSegment(input: {
   if (input.contexts.length === 0) {
     return {
       context: null,
-      invalidDeliveryContextOrdinal: null,
-    }
-  }
-
-  if (input.deliveryContextOrdinal === undefined || input.deliveryContextOrdinal === null) {
-    return {
-      context: input.contexts[0] ?? null,
       invalidDeliveryContextOrdinal: null,
     }
   }

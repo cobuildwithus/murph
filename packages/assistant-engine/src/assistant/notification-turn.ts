@@ -26,6 +26,7 @@ import {
 } from './codex-turn-runner.js'
 import { normalizeCodexEvent } from '../assistant-codex-events.js'
 import {
+  readCodexThreadCompatibilityFingerprint,
   readCodexThreadRouteFingerprint,
   type CodexThreadIdentity,
 } from './codex-thread-route.js'
@@ -412,6 +413,8 @@ export async function sendAssistantNotificationLocal(
               codexThreadId: providerOutcome.codexThreadId,
               routeFingerprint:
                 readCodexThreadRouteFingerprint(providerOutcome.route),
+              threadCompatibilityFingerprint:
+                readCodexThreadCompatibilityFingerprint(providerOutcome.route),
               session: providerOutcome.session,
               vault: input.vault,
             })

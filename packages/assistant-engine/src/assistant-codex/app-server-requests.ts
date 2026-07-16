@@ -139,6 +139,7 @@ export function buildCodexTurnStartParams(input: {
     outputSchema: input.input.outputSchema
       ? { ...input.input.outputSchema }
       : undefined,
+    model: normalizeNullableString(input.input.model),
     threadId: input.codexThreadId,
   })
 

@@ -2392,6 +2392,77 @@ describe('assistant Codex turn planning', () => {
     }
   })
 
+  it('accepts a legacy contract fingerprint during a compatible model switch', async () => {
+    planningMocks.readAssistantCliSurfaceBootstrapContext.mockResolvedValue('bootstrap contract')
+    planningMocks.readAssistantContextSnapshotPrompt.mockResolvedValue(null)
+    planningMocks.resolveCodexAssistantTargetCapabilities.mockReturnValue({
+      supportsNativeResume: true,
+    })
+    const initialRoute = createRoute({
+      routeFingerprint: 'route-before-model-switch',
+      threadCompatibilityFingerprint: 'thread-compatible-route',
+    })
+    const initialPlan = await resolveAssistantRouteTurnPlan({
+      executionContext: null,
+      input: createMessageInput(),
+      profile: {
+        promptProfile: 'conversation',
+        threadScope: 'session-thread',
+        toolProfile: 'provider-turn',
+      },
+      promptTimeContext: {
+        currentLocalDate: '2026-05-04',
+        currentTimeZone: 'Asia/Kuala_Lumpur',
+      },
+      route: initialRoute,
+      session: createSession(),
+      sharedPlan: createPrivateSharedPlan(),
+    })
+    const legacyContractFingerprint = buildAssistantCodexContractFingerprint({
+      developerInstructions: initialPlan.developerInstructions,
+      dynamicTools: initialPlan.dynamicTools,
+      routeFingerprint: 'route-before-model-switch',
+    })
+    const switchedRoute = createRoute({
+      routeFingerprint: 'route-after-model-switch',
+      threadCompatibilityFingerprint: 'thread-compatible-route',
+    })
+
+    const switchedPlan = await resolveAssistantRouteTurnPlan({
+      executionContext: null,
+      input: {
+        ...createMessageInput(),
+        model: 'gpt-5.6-sol',
+        reasoningEffort: 'high',
+      },
+      profile: {
+        promptProfile: 'conversation',
+        threadScope: 'session-thread',
+        toolProfile: 'provider-turn',
+      },
+      promptTimeContext: {
+        currentLocalDate: '2026-05-04',
+        currentTimeZone: 'Asia/Kuala_Lumpur',
+      },
+      route: switchedRoute,
+      session: createSession({
+        resumeState: {
+          assistantContractFingerprint: legacyContractFingerprint,
+          routeFingerprint: 'route-before-model-switch',
+          threadCompatibilityFingerprint: 'thread-compatible-route',
+          threadId: 'thread-resume',
+        },
+      }),
+      sharedPlan: createPrivateSharedPlan(),
+    })
+
+    expect(switchedPlan.assistantContractFingerprint).not.toBe(
+      legacyContractFingerprint,
+    )
+    expect(switchedPlan.resume?.codexThreadId).toBe('thread-resume')
+    expect(switchedPlan.conversationHistoryMessages).toBeUndefined()
+  })
+
   it('does not replay committed transcript messages for notification native resume', async () => {
     planningMocks.readAssistantCliSurfaceBootstrapContext.mockResolvedValue('bootstrap contract')
     planningMocks.readAssistantContextSnapshotPrompt.mockResolvedValue(null)
@@ -2690,7 +2761,11 @@ function createMessageInput(): AssistantMessageInput {
   }
 }
 
-function createRoute(): CodexThreadIdentity {
+function createRoute(input?: {
+  routeFingerprint?: string
+  threadCompatibilityFingerprint?: string
+}): CodexThreadIdentity {
+  const routeFingerprint = input?.routeFingerprint ?? 'route-test'
   return {
     codexCommand: null,
     label: 'Primary',
@@ -2700,8 +2775,11 @@ function createRoute(): CodexThreadIdentity {
         provider: 'codex-cli',
       }),
     ),
-    routeFingerprint: 'route-test',
-    routeId: 'route-test',
+    routeFingerprint,
+    routeId: routeFingerprint,
+    ...(input?.threadCompatibilityFingerprint
+      ? { threadCompatibilityFingerprint: input.threadCompatibilityFingerprint }
+      : {}),
   }
 }
 

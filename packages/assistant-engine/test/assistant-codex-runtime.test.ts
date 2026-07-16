@@ -11,6 +11,14 @@ import {
   HOSTED_RUNTIME_CODEX_MODEL_CATALOG_JSON_ENV,
 } from '@murphai/hosted-execution/cli-runtime-bridge'
 import {
+  HOSTED_ASSISTANT_PRODUCT_MODELS,
+  HOSTED_ASSISTANT_REASONING_EFFORTS,
+  HOSTED_ASSISTANT_SOL_MODEL,
+  HOSTED_ASSISTANT_TERRA_MODEL,
+  type HostedAssistantProductModel,
+  type HostedAssistantReasoningEffort,
+} from '@murphai/hosted-execution/assistant-model'
+import {
   initializeVault,
   withHostedCanonicalWritePort,
   type HostedCanonicalWritePort,
@@ -124,6 +132,8 @@ function executeCodexAppServerTurn(
     dynamicTools: input.dynamicTools ?? resolveMurphDynamicTools({
       allowFinishWithoutReply: input.allowFinishWithoutReply,
       allowMessageReactions: input.allowMessageReactions,
+      assistantConfigurationAvailable:
+        input.hostedToolContext?.assistantConfigurationTool != null,
       computerToolsAvailable:
         input.hostedToolContext?.computerToolsAvailable === true,
       connectedAppsAvailable: input.hostedToolContext?.connectedApps != null,
@@ -704,6 +714,7 @@ describe('assistant codex runtime', () => {
           text: 'User message:\nWhat changed?',
         },
       ],
+      model: 'gpt-5',
       serviceTier: null,
       threadId: 'thread-1',
     })
@@ -912,13 +923,13 @@ describe('assistant codex runtime', () => {
             method: 'turn/start',
             params: {
               effort: 'high',
+              model: 'gpt-5',
               serviceTier: null,
               threadId,
             },
           })
           expect(asRecord(turnStart.params).approvalPolicy).toBeUndefined()
           expect(asRecord(turnStart.params).cwd).toBeUndefined()
-          expect(asRecord(turnStart.params).model).toBeUndefined()
           expect(asRecord(turnStart.params).modelProvider).toBeUndefined()
           expect(asRecord(turnStart.params).sandboxPolicy).toBeUndefined()
           const inputItems = readTurnStartInputItems(turnStart)
@@ -1156,6 +1167,7 @@ describe('assistant codex runtime', () => {
       }),
     ).resolves.toMatchObject({
       finalMessage: 'Hello world',
+      responseDeliveryContextOrdinal: 0,
       responseMedia: [
         {
           kind: 'image',
@@ -1169,6 +1181,7 @@ describe('assistant codex runtime', () => {
       sessionId: threadId,
       stderr: 'Retrying after timeout',
       threadId,
+      transcriptMessage: 'Hello world',
       turnId: 'turn-1',
     })
 
@@ -1317,6 +1330,7 @@ describe('assistant codex runtime', () => {
   it('keeps Telegram voice memo media attached to an empty final response', async () => {
     await expect(runCodexTelegramVoiceMemoOnlyTurn()).resolves.toMatchObject({
       finalMessage: '',
+      responseDeliveryContextOrdinal: 0,
       responseMedia: [
         {
           filename: expect.stringMatching(/^voice-memo-.+\.mp3$/u),
@@ -1333,6 +1347,7 @@ describe('assistant codex runtime', () => {
           },
         },
       ],
+      transcriptMessage: '',
     })
   })
 
@@ -1521,6 +1536,171 @@ describe('assistant codex runtime', () => {
       ],
     })
     expect(uploader.uploadGeneratedImage).toHaveBeenCalledOnce()
+  })
+
+  it('applies overlapping assistant configuration updates in request order', async () => {
+    const workingDirectory = await createTempDir(
+      'assistant-codex-configuration-order-work-',
+    )
+    const firstUpdateStarted = createDeferred<void>()
+    const releaseFirstUpdate = createDeferred<void>()
+    const configurationCalls: string[] = []
+    let savedModel: HostedAssistantProductModel = HOSTED_ASSISTANT_TERRA_MODEL
+    let savedReasoningEffort: HostedAssistantReasoningEffort = 'low'
+    let updateCount = 0
+
+    const configurationSnapshot = () => ({
+      availableModels: [...HOSTED_ASSISTANT_PRODUCT_MODELS],
+      availableReasoningEfforts: [...HOSTED_ASSISTANT_REASONING_EFFORTS],
+      configurationAvailable: true,
+      dormantSolPreference: false,
+      model: savedModel,
+      reasoningEffort: savedReasoningEffort,
+      solAvailable: true,
+    })
+    const assistantConfigurationTool: NonNullable<
+      AssistantHostedToolContext['assistantConfigurationTool']
+    > = {
+      async request(request) {
+        if (request.action === 'read') {
+          configurationCalls.push(`read:${savedModel}`)
+          return {
+            action: 'read',
+            result: configurationSnapshot(),
+          }
+        }
+
+        updateCount += 1
+        configurationCalls.push(`update:${request.model ?? savedModel}`)
+        if (updateCount === 1) {
+          firstUpdateStarted.resolve()
+          await releaseFirstUpdate.promise
+        }
+        savedModel = request.model ?? savedModel
+        savedReasoningEffort = request.reasoningEffort ?? savedReasoningEffort
+        return {
+          action: 'update',
+          result: {
+            ...configurationSnapshot(),
+            appliesAt: 'next_turn',
+            requiredPlan: null,
+            status: 'updated',
+          },
+        }
+      },
+    }
+    const hostedToolContext: AssistantHostedToolContext = {
+      ...createHostedToolContext(),
+      assistantConfigurationTool,
+      currentAssistantPreferenceInputId: () => `ain_${'a'.repeat(32)}`,
+      currentAssistantTarget: () => ({
+        model: HOSTED_ASSISTANT_TERRA_MODEL,
+        reasoningEffort: 'low',
+      }),
+    }
+
+    codexMocks.spawn.mockImplementation(() => {
+      const child = new MockChildProcess()
+
+      queueMicrotask(() => {
+        void (async () => {
+          await waitForRpcMethod(child, 'initialize')
+          child.stdout.write(jsonLine({ id: 1, result: {} }))
+          await waitForRpcMethod(child, 'thread/start')
+          child.stdout.write(jsonLine({
+            id: 2,
+            result: { thread: { id: 'thread-configuration-order' } },
+          }))
+          await waitForRpcMethod(child, 'turn/start')
+          child.stdout.write(jsonLine({
+            id: 3,
+            result: { turn: { id: 'turn-configuration-order' } },
+          }))
+          child.stdout.write(jsonLine({
+            id: 71,
+            method: 'item/tool/call',
+            params: {
+              arguments: {
+                action: 'update',
+                model: HOSTED_ASSISTANT_SOL_MODEL,
+              },
+              namespace: 'murph',
+              tool: 'assistant_configuration',
+            },
+          }))
+          child.stdout.write(jsonLine({
+            id: 72,
+            method: 'item/tool/call',
+            params: {
+              arguments: {
+                action: 'update',
+                model: HOSTED_ASSISTANT_TERRA_MODEL,
+              },
+              namespace: 'murph',
+              tool: 'assistant_configuration',
+            },
+          }))
+
+          await firstUpdateStarted.promise
+          try {
+            expect(configurationCalls).toEqual([
+              `read:${HOSTED_ASSISTANT_TERRA_MODEL}`,
+              `update:${HOSTED_ASSISTANT_SOL_MODEL}`,
+            ])
+          } finally {
+            releaseFirstUpdate.resolve()
+          }
+
+          const messages = await waitForRpcMessages(child, 6)
+          expect(messages[4]).toMatchObject({
+            id: 71,
+            result: { success: true },
+          })
+          expect(messages[5]).toMatchObject({
+            id: 72,
+            result: { success: true },
+          })
+          expect(configurationCalls).toEqual([
+            `read:${HOSTED_ASSISTANT_TERRA_MODEL}`,
+            `update:${HOSTED_ASSISTANT_SOL_MODEL}`,
+            `read:${HOSTED_ASSISTANT_SOL_MODEL}`,
+            `update:${HOSTED_ASSISTANT_TERRA_MODEL}`,
+          ])
+
+          child.stdout.write(jsonLine({
+            method: 'item/completed',
+            params: {
+              item: {
+                id: 'assistant-configuration-order',
+                message: 'Configuration updates complete',
+                type: 'assistant_message',
+              },
+            },
+          }))
+          child.stdout.write(jsonLine({
+            method: 'turn/completed',
+            params: {
+              turn: {
+                id: 'turn-configuration-order',
+                status: 'completed',
+              },
+            },
+          }))
+        })()
+      })
+
+      return child
+    })
+
+    await expect(executeCodexAppServerTurn({
+      env: { OPENAI_API_KEY: 'openai-test-key' },
+      hostedToolContext,
+      prompt: 'switch to Sol, then back to Terra',
+      workingDirectory,
+    })).resolves.toMatchObject({
+      finalMessage: 'Configuration updates complete',
+    })
+    expect(savedModel).toBe(HOSTED_ASSISTANT_TERRA_MODEL)
   })
 
   const computerPauseFinalMessageScenarios = [
@@ -2073,6 +2253,7 @@ describe('assistant codex runtime', () => {
       finalAction: null,
       finalMessage:
         'Open the secure checkout: https://web.example.test/computer/handoff/raw-token',
+      responseDeliveryContextOrdinal: 0,
       transcriptMessage:
         'Open the secure checkout: https://web.example.test/computer/handoff/raw-token',
     })
@@ -2255,6 +2436,7 @@ describe('assistant codex runtime', () => {
       acceptedNoReplyDeliveryContextOrdinals: [],
       finalAction: null,
       finalMessage: scenario.expectedFinalMessage,
+      responseDeliveryContextOrdinal: 0,
       transcriptMessage: scenario.expectedTranscriptMessage,
     })
     for (const exactApprovalUrl of exactApprovalUrls) {
@@ -11170,7 +11352,7 @@ describe('assistant codex runtime', () => {
     ).rejects.toMatchObject({
       code: 'ASSISTANT_CODEX_RESUME_STALE',
       context: {
-        mismatchedFields: ['cwd', 'model', 'modelProvider', 'sandbox'],
+        mismatchedFields: ['cwd', 'modelProvider', 'sandbox'],
         resumeContextMismatch: true,
         retryable: true,
         staleResume: true,
@@ -11483,11 +11665,11 @@ describe('assistant codex runtime', () => {
         const turnParams = asRecord(turnRequests[index]?.params)
         expect(turnParams).toMatchObject({
           effort: 'high',
+          model: index === 0 ? 'gpt-5' : 'gpt-5.1',
           threadId: expectedThreadId,
         })
         expect(turnParams.approvalPolicy).toBeUndefined()
         expect(turnParams.cwd).toBeUndefined()
-        expect(turnParams.model).toBeUndefined()
         expect(turnParams.modelProvider).toBeUndefined()
         expect(turnParams.sandbox).toBeUndefined()
       }
@@ -16205,6 +16387,8 @@ describe('steered final segments', () => {
     expect(progressDelivery.send).not.toHaveBeenCalled()
     expect(result.finalMessage).toBe('')
     expect(result.precedingAgentMessageSegments).toEqual([])
+    expect(result.responseDeliveryContextOrdinal).toBe(0)
+    expect(result.transcriptMessage).toBeNull()
   })
 
   it('keeps a pre-steer final when only commentary follows the steer', async () => {
@@ -16289,6 +16473,7 @@ describe('steered final segments', () => {
 
     expect(progressDelivery.send).not.toHaveBeenCalled()
     expect(result.finalMessage).toBe('Answer two.')
+    expect(result.responseDeliveryContextOrdinal).toBe(1)
     expect(result.precedingAgentMessageSegments).toEqual([
       {
         deliveryContextOrdinal: 0,
@@ -16333,6 +16518,7 @@ describe('steered final segments', () => {
     ])
 
     expect(result.finalMessage).toBe('Answer three.')
+    expect(result.responseDeliveryContextOrdinal).toBe(2)
     expect(result.precedingAgentMessageSegments.map((segment) => ({
       deliveryContextOrdinal: segment.deliveryContextOrdinal,
       response: segment.response,

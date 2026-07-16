@@ -202,6 +202,7 @@ describe('real codex app-server with scripted provider', () => {
     })
     expect(compacted).toMatchObject({
       kind: 'compacted',
+      model: SCRIPTED_MODEL,
       serviceTier: null,
       threadId: seeded.threadId,
     })
@@ -251,6 +252,45 @@ describe('real codex app-server with scripted provider', () => {
     })
     expect(resumed.finalMessage).toBe('POST_COMPACT_OK')
     expect(resumed.threadId).toBe(seeded.threadId)
+  })
+
+  it('keeps a warm thread reusable when its model cannot be accounted', {
+    timeout: TURN_TIMEOUT_MS,
+  }, async () => {
+    const scenario = await prepareScriptedTurnScenario()
+    scenario.stub.queue({ text: 'ACCOUNTABILITY_SEED_OK' })
+    const seeded = await executeCodexAppServerTurn({
+      ...scenario.turnInput,
+      prompt: 'Reply exactly ACCOUNTABILITY_SEED_OK.',
+    })
+
+    scenario.stub.markRequestBaseline()
+    await expect(
+      compactWarmCodexThread({
+        canAccountForModel: () => false,
+        minThreadTokens: 1,
+        timeoutMs: 30_000,
+      }),
+    ).resolves.toMatchObject({
+      kind: 'skipped',
+      model: SCRIPTED_MODEL,
+      reason: 'model_not_accountable',
+      threadContextTokensBefore: expect.any(Number),
+    })
+    expect(scenario.stub.requestCountSinceBaseline()).toBe(0)
+
+    scenario.stub.queue({ text: 'ACCOUNTABLE_COMPACT_SUMMARY' })
+    await expect(
+      compactWarmCodexThread({
+        canAccountForModel: (model) => model === SCRIPTED_MODEL,
+        minThreadTokens: 1,
+        timeoutMs: 30_000,
+      }),
+    ).resolves.toMatchObject({
+      kind: 'compacted',
+      model: SCRIPTED_MODEL,
+      threadId: seeded.threadId,
+    })
   })
 
   it('skips off-turn compaction while a member turn is in flight', {
@@ -391,7 +431,7 @@ describe('real codex app-server with scripted provider', () => {
     })
   })
 
-  it('resumes a scripted thread through the real turn/start contract', {
+  it('switches model and reasoning on the next turn without changing threads', {
     timeout: TURN_TIMEOUT_MS,
   }, async () => {
     const scenario = await prepareScriptedTurnScenario()
@@ -404,9 +444,12 @@ describe('real codex app-server with scripted provider', () => {
     expect(first.sessionId).toEqual(expect.any(String))
 
     scenario.stub.queue({ text: 'RESUME_SECOND_OK' })
+    scenario.stub.markRequestBaseline()
     const second = await executeCodexAppServerTurn({
       ...scenario.turnInput,
+      model: 'gpt-5.4',
       prompt: 'Reply exactly RESUME_SECOND_OK.',
+      reasoningEffort: 'high',
       resumeSessionId: first.sessionId,
     })
 
@@ -414,6 +457,12 @@ describe('real codex app-server with scripted provider', () => {
     expect(second.threadId).toBe(first.threadId)
     expect(second.rolloutRelativePath).toBe(first.rolloutRelativePath)
     expect(second.turnId).not.toBe(first.turnId)
+    expect(scenario.stub.requestSummariesSinceBaseline()).toEqual([
+      {
+        model: 'gpt-5.4',
+        serviceTier: null,
+      },
+    ])
   })
 
   it('restores persisted dynamic tools on a real cold thread resume', {
