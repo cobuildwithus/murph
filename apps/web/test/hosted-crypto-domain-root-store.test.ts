@@ -1009,6 +1009,14 @@ function createHostedMemberIdentityServiceTransaction(): HostedCryptoTestTransac
         signupWelcomeEmailAttemptedAt: null,
         suspendedAt: input.data.suspendedAt instanceof Date ? input.data.suspendedAt : null,
         updatedAt: now,
+        usageCreditBalanceUsdMicros:
+          input.data.usageCreditBalanceUsdMicros === null
+            ? null
+            : BigInt(input.data.usageCreditBalanceUsdMicros ?? 0),
+        usageCreditLedgerVersion:
+          input.data.usageCreditLedgerVersion === null
+            ? null
+            : BigInt(input.data.usageCreditLedgerVersion ?? 0),
       };
     },
   };

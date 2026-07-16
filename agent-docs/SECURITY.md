@@ -28,6 +28,34 @@ Last verified: 2026-07-16
 - Runtime trust boundaries exist for local loopback daemons, hosted web, Cloudflare-hosted execution, provider ingress, billing, device sync, and assistant runtime state. `ARCHITECTURE.md`, this file, and the relevant app/package docs must change together when those boundaries change.
 - Hosted automation record authority is scoped by the active write-fenced member or synthetic-group workspace and its restored canonical vault, not by each record's stored delivery route. A narrow automation port is captured from durable accepted input for the active authenticated root turn and binds new or explicit retarget writes to that trusted route. Invocation-scoped automation and device authority is exposed only through typed root-turn dynamic tools and must be absent from Codex App Server and descendant shell env. The dispatcher must reject descendant, stale-turn, or foreign-thread use. Tool arguments must not let the model select another route; the automation tool must be absent from scheduled notification turns and non-direct email because those turns lack authenticated conversation-mutation authority.
 - Before adding a new external API, auth surface, wallet surface, storage authority, webhook, or runtime ingress path, document the trust boundary in `ARCHITECTURE.md` and the concrete rules here.
+- Personal usage-credit Checkout is an authenticated Settings payment boundary,
+  not an assistant or browser-selected billing primitive. The route must enforce
+  the normal app-session and same-origin/CSRF protections, derive payer and
+  beneficiary as the same direct personal member, recheck active paid Pulse or
+  Edge access, and resolve the fixed $5/$10/$25 offer and reusable Price from
+  server configuration. Before Checkout creation, the service must re-fetch
+  that Price and fail closed unless its mode, active state, one-time per-unit
+  shape, single currency, and exact amount match the frozen purchase; Adaptive
+  Pricing stays disabled. The browser may submit only the offer code and a
+  single-use request key; it must never choose an amount, Price, Customer,
+  payer, beneficiary, grant, or Checkout URL. Trial, Family-sponsored,
+  suspended, thread-container, missing-billing, and malformed states fail
+  closed. The schema separates payer from beneficiary for later composition,
+  but group funding and group checkout authorization are not implemented.
+- Stripe proves payment; it does not own Murph usage capacity. A browser return
+  or client-reported Session state must never grant credit. The verified Stripe
+  receipt owner must re-fetch and bind the live one-time Session, line item,
+  PaymentIntent, Charge, Customer, currency, amount, mode, and fixed-purpose
+  metadata to the immutable purchase before appending one grant. Stripe
+  metadata contains only opaque purchase and fixed purpose/version values.
+  Provider references use the existing keyed-lookup plus encrypted-value
+  pattern and must not enter URLs, logs, prompts, assistant state, fixtures, or
+  user-visible responses. Matching usage-credit refund and dispute events must
+  be intercepted before subscription handling. Only live re-fetched payment
+  state may append capped signed `refund_adjustment` or `dispute_adjustment`
+  entries against unused attributable credit. A reconciliation failure keeps
+  the receipt retryable rather than suspending the subscription or silently
+  completing the event.
 - Automatic meal-photo capture must remain explicit opt-in. The iOS companion classifies photos locally and may upload only locally re-encoded JPEGs selected after opt-in; it must not send historical-library contents or original photo metadata. Enrollment uses a foreground Privy identity token, but the extension may persist only the dedicated renewable meal-photo bearer and idempotency secret in its shared keychain. Web stores the bearer and installation UUID only as SHA-256 hashes, encrypts the idempotency secret with member- and row-bound AAD, accepts the scoped bearer only for upload or self-revocation, rejects every JPEG application/comment segment, and rechecks each upload before commit. That final check locks the hosted member and any active sponsorship membership/group rows before rereading the same unrevoked enrollment, active access, and launch consent. Each staging attempt owns a distinct per-user object; cleanup must reconcile the mailbox claim before deleting after an ambiguous append and must derive the object path without depending on an access-controlled encryption-context lookup. The server association with an installation UUID is not hardware attestation; without App Attest or proof-of-possession, the upload token remains a bearer credential and must not be described as hardware-bound. Raw JPEGs must never enter Postgres, Temporal payloads, hosted mailbox payloads, logs, fixtures, or diagnostics. Cloudflare may hold them only as ingress-encrypted, per-user private R2 objects until post-checkpoint deletion or the lifecycle backstop makes them eligible for asynchronous deletion at 31 days, one day beyond mailbox recovery retention; that age is not a guaranteed physical-deletion deadline.
 - Prefer least-privilege defaults and explicit validation at system boundaries.
 - Hosted browser app sessions require `HOSTED_APP_SESSION_HMAC_KEY` as a dedicated web-only canonical 32-byte base64url key. The strict v2 cookie carries only its session id and random bearer; web must verify the existing row authenticator over domain/version, session id, bearer, member id, Privy identity, and expiry before trusting any row claim or reading member data. Resolution and revocation must use the authenticated id/tag pair, legacy unsigned cookies must fail closed, and the key must never be stored in Postgres, sent to Cloudflare or browsers, logged, or reused for contact privacy, mailbox fingerprints, provider credentials, or encryption. Before the strict-v2 production hard cut, the Vercel project must use Standard or All Deployment Protection so historical generated production URLs cannot expose a legacy app build; the authenticated project-setting verifier is a mandatory cutover gate.

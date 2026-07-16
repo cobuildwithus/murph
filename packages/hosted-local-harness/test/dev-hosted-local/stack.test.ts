@@ -3484,10 +3484,14 @@ describe("hosted local dev stack", () => {
       HOSTED_ONBOARDING_STRIPE_PRICE_ID_LAUNCH_EDGE_MONTHLY: "price_vercel_edge",
       HOSTED_ONBOARDING_STRIPE_PRICE_ID_LAUNCH_FAMILY_SEAT_MONTHLY: "price_vercel_family",
       HOSTED_ONBOARDING_STRIPE_PRICE_ID_LAUNCH_MONTHLY: "price_vercel_monthly",
+      HOSTED_ONBOARDING_STRIPE_PRICE_ID_USAGE_CREDIT_5_USD: "price_vercel_usage_5",
+      HOSTED_ONBOARDING_STRIPE_PRICE_ID_USAGE_CREDIT_10_USD: "price_vercel_usage_10",
+      HOSTED_ONBOARDING_STRIPE_PRICE_ID_USAGE_CREDIT_25_USD: "price_vercel_usage_25",
       STRIPE_SECRET_KEY: "sk_test_vercel",
     });
     vi.mocked(environmentModule.readHostedLocalStripeEnvFile).mockResolvedValueOnce({
       HOSTED_ONBOARDING_STRIPE_PRICE_ID_LAUNCH_MONTHLY: "price_local_monthly",
+      HOSTED_ONBOARDING_STRIPE_PRICE_ID_USAGE_CREDIT_10_USD: "price_local_usage_10",
       STRIPE_SECRET_KEY: "sk_test_local",
     });
 
@@ -3507,6 +3511,9 @@ describe("hosted local dev stack", () => {
         HOSTED_ONBOARDING_STRIPE_PRICE_ID_LAUNCH_EDGE_MONTHLY: undefined,
         HOSTED_ONBOARDING_STRIPE_PRICE_ID_LAUNCH_FAMILY_SEAT_MONTHLY: undefined,
         HOSTED_ONBOARDING_STRIPE_PRICE_ID_LAUNCH_MONTHLY: "price_local_monthly",
+        HOSTED_ONBOARDING_STRIPE_PRICE_ID_USAGE_CREDIT_5_USD: undefined,
+        HOSTED_ONBOARDING_STRIPE_PRICE_ID_USAGE_CREDIT_10_USD: "price_local_usage_10",
+        HOSTED_ONBOARDING_STRIPE_PRICE_ID_USAGE_CREDIT_25_USD: undefined,
         STRIPE_SECRET_KEY: "sk_test_local",
       }),
       expect.any(Object),
