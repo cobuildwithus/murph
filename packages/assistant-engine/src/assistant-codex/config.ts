@@ -44,25 +44,9 @@ export function resolveHostedCodexTurnBoundary(input: {
   const bridgeToken = normalizeNullableString(
     env[HOSTED_CLI_BRIDGE_TOKEN_ENV],
   )
-  if (!bridgeToken) {
-    return null
-  }
-
   const routeGrant = normalizeNullableString(
     env[HOSTED_CLI_BRIDGE_ROUTE_GRANT_ENV],
   )
-  if (!routeGrant) {
-    throw new VaultCliError(
-      'ASSISTANT_CODEX_HOSTED_AUTH_INVALID',
-      'Hosted Codex turns require a current CLI bridge route grant.',
-      { retryable: false },
-    )
-  }
-
-  const turnScopedEnv = new Map<string, string>([
-    [HOSTED_CLI_BRIDGE_TOKEN_ENV, bridgeToken],
-    [HOSTED_CLI_BRIDGE_ROUTE_GRANT_ENV, routeGrant],
-  ])
   const providerCredentialEnvKey = normalizeNullableString(
     input.providerCredentialEnvKey,
   )
@@ -83,14 +67,29 @@ export function resolveHostedCodexTurnBoundary(input: {
         { retryable: true },
       )
     }
-    turnScopedEnv.set(providerCredentialEnvKey, ephemeralApiKey)
+  }
+
+  if (!bridgeToken && !providerCredentialEnvKey) {
+    return null
   }
 
   const residentEnv = { ...env }
+  delete residentEnv[HOSTED_CLI_BRIDGE_TOKEN_ENV]
+  delete residentEnv[HOSTED_CLI_BRIDGE_ROUTE_GRANT_ENV]
+  if (providerCredentialEnvKey) {
+    delete residentEnv[providerCredentialEnvKey]
+  }
+
   const threadConfig: Record<string, unknown> = {}
-  for (const [name, value] of turnScopedEnv) {
-    delete residentEnv[name]
-    threadConfig[`shell_environment_policy.set.${name}`] = value
+  if (bridgeToken) {
+    threadConfig[
+      `shell_environment_policy.set.${HOSTED_CLI_BRIDGE_TOKEN_ENV}`
+    ] = bridgeToken
+    if (routeGrant) {
+      threadConfig[
+        `shell_environment_policy.set.${HOSTED_CLI_BRIDGE_ROUTE_GRANT_ENV}`
+      ] = routeGrant
+    }
   }
 
   return {

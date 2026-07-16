@@ -106,6 +106,7 @@ export interface ReadOnlyAssistantAskInput {
   codexHome?: string | null
   developerInstructions?: string | null
   env?: NodeJS.ProcessEnv
+  hostedProviderCredentialEnvKey?: string | null
   model?: string | null
   modelProvider?: string | null
   now?: Date
@@ -160,6 +161,7 @@ export async function executeReadOnlyAssistantAsk(
       dynamicTools: [],
       env: stripReadOnlyAssistantAskCapabilityEnv(input.env),
       ephemeral: true,
+      hostedProviderCredentialEnvKey: input.hostedProviderCredentialEnvKey,
       model: input.model,
       modelProvider: input.modelProvider,
       outputSchema: READ_ONLY_ASSISTANT_ASK_OUTPUT_SCHEMA,

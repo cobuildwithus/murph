@@ -157,6 +157,7 @@ test("hosted Codex runtime config writes OpenAI Responses config without secret 
 
   assert.equal(result.codexHome, path.join(operatorHomeRoot, ".codex-hosted"));
   assert.equal(result.codexConfigPath, path.join(operatorHomeRoot, ".codex-hosted", "config.toml"));
+  assert.equal(result.hostedProviderCredentialEnvKey, "OPENAI_API_KEY");
   assert.equal(result.runtimeEnv.CODEX_HOME, result.codexHome);
   assert.ok(result.runtimeEnv[MURPH_ASSISTANT_SKILLS_ROOT_ENV]);
   assert.match(
@@ -496,6 +497,7 @@ test("hosted Codex runtime config uses ChatGPT subscription auth in local dev", 
     result.runtimeEnv[HOSTED_CODEX_EFFECTIVE_MODEL_PROVIDER_ID_ENV],
     "hosted-chatgpt-openai",
   );
+  assert.equal(result.hostedProviderCredentialEnvKey, null);
   // Token material must not linger in the runtime env; image-gen keeps the key.
   assert.equal(result.runtimeEnv[HOSTED_RUNTIME_CODEX_CHATGPT_AUTH_JSON_ENV], undefined);
   assert.equal(result.runtimeEnv.OPENAI_API_KEY, "secret-openai-key");

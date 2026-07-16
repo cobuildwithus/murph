@@ -62,6 +62,7 @@ export type HostedIdleMaintenanceOutcome =
 // as additional plain statements.
 export async function runHostedIdleCheckpointMaintenance(input: {
   credentialSource: AssistantUsageCredentialSource;
+  ephemeralApiKey?: string | null;
   materializeRetentionCandidatePaths?: ((
     storedPaths: readonly string[]
   ) => Promise<InboxMediaRetentionMaterializeResult | void>) | null;
@@ -179,6 +180,9 @@ export async function runHostedIdleCheckpointMaintenance(input: {
         canAccountForModel: (model) =>
           model !== null &&
           normalizeHostedAiUsageAllowancePricedModelId(model) !== null,
+        ...(input.ephemeralApiKey
+          ? { ephemeralApiKey: input.ephemeralApiKey }
+          : {}),
         minThreadTokens: HOSTED_IDLE_COMPACT_MIN_THREAD_TOKENS,
         signal: abortController.signal,
         timeoutMs: HOSTED_IDLE_COMPACT_TIMEOUT_MS,

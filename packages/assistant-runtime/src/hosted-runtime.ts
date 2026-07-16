@@ -1641,6 +1641,11 @@ export async function runHostedWorkspaceRuntimeJobInProcess(
       return await returnInitialMailboxImportBeforeForeground();
     }
     const runtimeEnv = hostedCodexRuntime.runtimeEnv;
+    const hostedProviderCredentialEnvKey =
+      hostedCodexRuntime.hostedProviderCredentialEnvKey;
+    const hostedEphemeralApiKey = hostedProviderCredentialEnvKey
+      ? runtimeEnv[hostedProviderCredentialEnvKey] ?? null
+      : null;
     let stagedDeviceSyncDirtyAcks: HostedDeviceSyncDirtyProcessedPostCheckpointRecord[] = [];
     let suppressDirtyPendingFetchUntilCheckpoint = false;
     let deviceSyncWorkspaceWakeHandledUntilCheckpoint: HostedWorkspaceRunnerHandledDeviceSyncWake | null = null;
@@ -1962,6 +1967,7 @@ export async function runHostedWorkspaceRuntimeJobInProcess(
       assistantAskPort: runtime.platform.assistantAskPort ?? null,
       codexHome: hostedCodexRuntime.codexHome,
       env: hostedCodexRuntime.runtimeEnv,
+      hostedProviderCredentialEnvKey,
       onStateMutation() {
         runtimeStateDirty = true;
         markIdleCheckpointTimerAfterDirtyWork();
@@ -3015,6 +3021,7 @@ export async function runHostedWorkspaceRuntimeJobInProcess(
                 provider: "codex-cli",
                 userEnvKeys: Object.keys(guardedRuntime.userEnv),
               }),
+              ephemeralApiKey: hostedEphemeralApiKey,
               materializeWorkspaceArtifacts: restored.materializeWorkspaceArtifacts,
               memberId: input.request.userId,
               model: idleMaintenanceModel,
@@ -3725,6 +3732,7 @@ function buildHostedRuntimePhaseTraceMetadata(
 // without changing this signature.
 export async function runHostedPendingInputProtectedIdleMaintenance(input: {
   credentialSource: Parameters<typeof runHostedIdleCheckpointMaintenance>[0]["credentialSource"];
+  ephemeralApiKey?: string | null;
   materializeWorkspaceArtifacts: HostedWorkspaceArtifactMaterializer;
   memberId: string;
   model: string | null;
@@ -3742,6 +3750,7 @@ export async function runHostedPendingInputProtectedIdleMaintenance(input: {
     });
   return await runHostedIdleCheckpointMaintenance({
     credentialSource: input.credentialSource,
+    ephemeralApiKey: input.ephemeralApiKey ?? null,
     materializeRetentionCandidatePaths: async (storedPaths) => {
       const materialized = await input.materializeWorkspaceArtifacts(storedPaths);
       return {

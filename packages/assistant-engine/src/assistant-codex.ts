@@ -41,6 +41,7 @@ import {
   buildCodexTurnInterruptParams,
   buildCodexThreadResumeParams,
   buildCodexThreadStartParams,
+  buildCodexThreadUnsubscribeParams,
   buildCodexTurnSteerParams,
   buildCodexTurnStartParams,
   mapCodexAppServerApprovalPolicy,
@@ -220,6 +221,7 @@ type CodexAppServerSpawnInput = CodexAppServerProcessInput & {
 type CodexAppServerPreparedTurnInput = CodexAppServerTurnInput & {
   args: readonly string[]
   codexCommand: string
+  dynamicToolEnv: NodeJS.ProcessEnv
   ephemeralApiKey: string | null
   env: NodeJS.ProcessEnv
   fetchImpl: typeof fetch
@@ -655,6 +657,9 @@ export async function executeCodexAppServerTurn(
     ...normalizedInput,
     args,
     codexCommand,
+    dynamicToolEnv: hostedTurnBoundary
+      ? { ...(input.env ?? process.env), ...childEnv }
+      : childEnv,
     ephemeralApiKey: hostedTurnBoundary?.ephemeralApiKey ?? null,
     env: childEnv,
     fetchImpl: input.fetchImpl ?? fetch,
@@ -966,6 +971,25 @@ class CodexAppServerProcess {
     }
   }
 
+  async bindEphemeralApiKeyAuth(apiKey: string): Promise<void> {
+    await withCodexRpcTimeout(
+      this.sendRequest('account/login/start', {
+        apiKey,
+        type: 'apiKey',
+      }),
+      HOSTED_CODEX_BACKGROUND_TERMINAL_CLEANUP_TIMEOUT_MS,
+      'account/login/start',
+    )
+  }
+
+  async revokeEphemeralApiKeyAuth(): Promise<void> {
+    await withCodexRpcTimeout(
+      this.sendRequest('account/logout', {}),
+      HOSTED_CODEX_BACKGROUND_TERMINAL_CLEANUP_TIMEOUT_MS,
+      'account/logout',
+    )
+  }
+
   beginHostedBackgroundTerminalCleanup(input: {
     binding: CodexAppServerActiveTurnBinding
     revokeEphemeralApiKeyAuth: boolean
@@ -990,11 +1014,7 @@ class CodexAppServerProcess {
         'thread/backgroundTerminals/clean',
       )
       if (input.revokeEphemeralApiKeyAuth) {
-        await withCodexRpcTimeout(
-          this.sendRequest('account/logout', {}),
-          HOSTED_CODEX_BACKGROUND_TERMINAL_CLEANUP_TIMEOUT_MS,
-          'account/logout',
-        )
+        await this.revokeEphemeralApiKeyAuth()
       }
     })().then(
       () => undefined,
@@ -1364,6 +1384,25 @@ class CodexAppServerProcess {
     return this.boundThreadId
   }
 
+  async unsubscribeBoundThreadForReuse(): Promise<void> {
+    const threadId = this.boundThreadId
+    if (threadId) {
+      await withCodexRpcTimeout(
+        this.sendRequest(
+          'thread/unsubscribe',
+          buildCodexThreadUnsubscribeParams({ threadId }),
+        ),
+        HOSTED_CODEX_BACKGROUND_TERMINAL_CLEANUP_TIMEOUT_MS,
+        'thread/unsubscribe',
+      )
+    }
+
+    this.boundThreadId = null
+    this.boundThreadModel = null
+    this.boundThreadServiceTier = null
+    this.lastThreadTokenUsage = null
+  }
+
   private handleIdleServerMessage(message: CodexRpcMessage): void {
     const responseId = readCodexRpcResponseId(message)
     if (responseId !== null) {
@@ -1567,14 +1606,24 @@ async function withWarmCodexSlotLock<T>(
 }
 
 async function getOrStartWarmCodexProcess(
-  input: CodexAppServerProcessInput,
+  input: CodexAppServerProcessInput & { hostedTurn: boolean },
 ): Promise<CodexAppServerProcess> {
   const launchKey = input.launchKey
   return await withWarmCodexSlotLock(async () => {
     await warmCodexProcess?.pendingPostTurnCleanup
-    if (warmCodexProcess?.isReusableFor(launchKey)) {
-      warmCodexProcess.reserveTurn()
-      return warmCodexProcess
+    const reusableProcess = warmCodexProcess
+    if (reusableProcess?.isReusableFor(launchKey)) {
+      if (input.hostedTurn) {
+        try {
+          await reusableProcess.unsubscribeBoundThreadForReuse()
+        } catch {
+          await reusableProcess.stop('process-unhealthy')
+        }
+      }
+      if (reusableProcess.isReusableFor(launchKey)) {
+        reusableProcess.reserveTurn()
+        return reusableProcess
+      }
     }
 
     const previousProcess = warmCodexProcess
@@ -1684,6 +1733,7 @@ export async function executeCodexManagedAccountOperation(
     args,
     codexCommand,
     env,
+    hostedTurn: false,
     launchKey,
   })
 
@@ -2080,6 +2130,7 @@ export type CodexWarmThreadCompactionOutcome =
 // including rollout files, and must never capture a rollout mid-teardown.
 export async function compactWarmCodexThread(input: {
   canAccountForModel?: ((model: string | null) => boolean) | null
+  ephemeralApiKey?: string | null
   minThreadTokens: number
   signal?: AbortSignal | null
   timeoutMs: number
@@ -2241,8 +2292,20 @@ export async function compactWarmCodexThread(input: {
 
   let timeoutHandle: ReturnType<typeof setTimeout> | null = null
   const onAbort = () => settleCompaction('aborted')
+  let ephemeralApiKeyAuthBound = false
+  let shouldPoisonProcess = false
+  let outcome: CodexWarmThreadCompactionOutcome = {
+    kind: 'failed',
+    reason: 'rpc_error',
+    threadContextTokensBefore: vitals.lastInputTokens,
+    threadId: vitals.threadId,
+  }
   try {
     processInstance.bindTurn(binding)
+    if (input.ephemeralApiKey) {
+      await processInstance.bindEphemeralApiKeyAuth(input.ephemeralApiKey)
+      ephemeralApiKeyAuthBound = true
+    }
     processInstance
       .sendRequest('config/read', { includeLayers: false })
       .then(() => {
@@ -2268,7 +2331,7 @@ export async function compactWarmCodexThread(input: {
       // Vitals were cleared by the stdout observer when the compaction item
       // completed, so a repeat idle pass skips with no_thread_vitals instead
       // of re-compacting; the next turn's tokenUsage events repopulate them.
-      return {
+      outcome = {
         kind: 'compacted',
         durationMs: Date.now() - startedAt,
         model: vitals.model,
@@ -2278,31 +2341,44 @@ export async function compactWarmCodexThread(input: {
         usage: providerUsage
           ?? estimateCodexWarmThreadCompactionUsage(vitals.lastInputTokens),
       }
-    }
-
-    await processInstance.poison('idle-compaction-failed')
-    return {
-      kind: 'failed',
-      reason: settledReason,
-      threadContextTokensBefore: vitals.lastInputTokens,
-      threadId: vitals.threadId,
+    } else {
+      shouldPoisonProcess = true
+      outcome = {
+        kind: 'failed',
+        reason: settledReason,
+        threadContextTokensBefore: vitals.lastInputTokens,
+        threadId: vitals.threadId,
+      }
     }
   } catch {
-    await processInstance.poison('idle-compaction-failed')
-    return {
-      kind: 'failed',
-      reason: 'rpc_error',
-      threadContextTokensBefore: vitals.lastInputTokens,
-      threadId: vitals.threadId,
-    }
+    shouldPoisonProcess = true
   } finally {
     if (timeoutHandle) {
       clearTimeout(timeoutHandle)
     }
     input.signal?.removeEventListener('abort', onAbort)
+    if (ephemeralApiKeyAuthBound) {
+      try {
+        await processInstance.revokeEphemeralApiKeyAuth()
+      } catch {
+        shouldPoisonProcess = true
+        if (outcome.kind === 'compacted') {
+          outcome = {
+            kind: 'failed',
+            reason: 'rpc_error',
+            threadContextTokensBefore: vitals.lastInputTokens,
+            threadId: vitals.threadId,
+          }
+        }
+      }
+    }
+    if (shouldPoisonProcess) {
+      await processInstance.poison('idle-compaction-failed')
+    }
     processInstance.releaseTurn(binding)
     processInstance.releaseReservation()
   }
+  return outcome
 }
 
 function hashCodexRawString(value: string): string {
@@ -3482,8 +3558,8 @@ async function runCodexAppServerTurnOnProcess(
           abortSignal: input.abortSignal
             ? AbortSignal.any([input.abortSignal, dynamicToolAbortController.signal])
             : dynamicToolAbortController.signal,
-          codexHome: input.codexHome ?? input.env.CODEX_HOME ?? null,
-          env: input.env,
+          codexHome: input.codexHome ?? input.dynamicToolEnv.CODEX_HOME ?? null,
+          env: input.dynamicToolEnv,
           fetchImpl: input.fetchImpl,
           hostedGeneratedImageUploader: input.hostedGeneratedImageUploader,
           hostedToolContext,
@@ -4149,14 +4225,7 @@ async function runCodexAppServerTurnOnProcess(
     if (input.ephemeralApiKey) {
       lifecycleStage = 'provider_auth_bind'
       try {
-        await withCodexRpcTimeout(
-          sendRequest('account/login/start', {
-            apiKey: input.ephemeralApiKey,
-            type: 'apiKey',
-          }),
-          HOSTED_CODEX_BACKGROUND_TERMINAL_CLEANUP_TIMEOUT_MS,
-          'account/login/start',
-        )
+        await codexProcess.bindEphemeralApiKeyAuth(input.ephemeralApiKey)
       } catch {
         throw new VaultCliError(
           'ASSISTANT_CODEX_AUTH_FAILED',

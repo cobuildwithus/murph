@@ -100,6 +100,7 @@ describe("runHostedIdleCheckpointMaintenance", () => {
 
     const outcome = await runHostedIdleCheckpointMaintenance({
       credentialSource: "member",
+      ephemeralApiKey: "fixture-provider-credential",
       memberId: "member_1",
       model: "gpt-5.6-sol",
       providerName: "hosted-openai",
@@ -118,6 +119,7 @@ describe("runHostedIdleCheckpointMaintenance", () => {
     await new Promise((resolve) => setTimeout(resolve, 0));
     expect(compactWarmCodexThread).toHaveBeenCalledWith({
       canAccountForModel: expect.any(Function),
+      ephemeralApiKey: "fixture-provider-credential",
       minThreadTokens: HOSTED_IDLE_COMPACT_MIN_THREAD_TOKENS,
       signal: expect.any(AbortSignal),
       timeoutMs: HOSTED_IDLE_COMPACT_TIMEOUT_MS,

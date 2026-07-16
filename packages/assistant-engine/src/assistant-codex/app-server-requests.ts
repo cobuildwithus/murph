@@ -60,6 +60,17 @@ export function buildCodexThreadResumeParams(input: {
   })
 }
 
+export function buildCodexThreadUnsubscribeParams(input: {
+  threadId: string
+}): Record<string, unknown> {
+  return {
+    threadId: assertCodexRpcIdentifier({
+      field: 'threadId',
+      value: input.threadId,
+    }),
+  }
+}
+
 export function buildCodexThreadContextParams(input: {
   includeInstructions: boolean
   includeServiceName: boolean

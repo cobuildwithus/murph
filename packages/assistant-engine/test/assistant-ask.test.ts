@@ -3,6 +3,7 @@ import { tmpdir } from 'node:os'
 import path from 'node:path'
 
 import {
+  HOSTED_CLI_BRIDGE_ROUTE_GRANT_ENV,
   HOSTED_CLI_BRIDGE_TOKEN_ENV,
   HOSTED_CLI_BRIDGE_URL_ENV,
 } from '@murphai/hosted-execution/cli-runtime-bridge'
@@ -67,12 +68,14 @@ describe('executeReadOnlyAssistantAsk', () => {
         developerInstructions: 'Use Murph voice.',
         env: {
           ELEVENLABS_API_KEY: 'must-be-removed',
+          [HOSTED_CLI_BRIDGE_ROUTE_GRANT_ENV]: 'must-be-removed',
           [HOSTED_CLI_BRIDGE_TOKEN_ENV]: 'must-be-removed',
           [HOSTED_CLI_BRIDGE_URL_ENV]: 'http://127.0.0.1/private',
           MURPH_ASSISTANT_SKILLS_ROOT: '/private/skills',
-          OPENAI_API_KEY: 'provider-auth-stays-on-supervisor',
+          OPENAI_API_KEY: 'provider-auth-binds-natively',
           PATH: '/runtime/bin',
         },
+        hostedProviderCredentialEnvKey: 'OPENAI_API_KEY',
         model: 'gpt-5.5',
         modelProvider: 'hosted-openai',
         now,
@@ -101,6 +104,7 @@ describe('executeReadOnlyAssistantAsk', () => {
       developerInstructions: 'Use Murph voice.',
       dynamicTools: [],
       ephemeral: true,
+      hostedProviderCredentialEnvKey: 'OPENAI_API_KEY',
       model: 'gpt-5.5',
       modelProvider: 'hosted-openai',
       outputSchema: READ_ONLY_ASSISTANT_ASK_OUTPUT_SCHEMA,
@@ -122,9 +126,10 @@ describe('executeReadOnlyAssistantAsk', () => {
       'What exercise is prescribed today?',
     )
     expect(turnInput.env).toMatchObject({
-      OPENAI_API_KEY: 'provider-auth-stays-on-supervisor',
+      OPENAI_API_KEY: 'provider-auth-binds-natively',
       PATH: '/runtime/bin',
     })
+    expect(turnInput.env[HOSTED_CLI_BRIDGE_ROUTE_GRANT_ENV]).toBeUndefined()
     expect(turnInput.env[HOSTED_CLI_BRIDGE_TOKEN_ENV]).toBeUndefined()
     expect(turnInput.env[HOSTED_CLI_BRIDGE_URL_ENV]).toBeUndefined()
     expect(turnInput.env.ELEVENLABS_API_KEY).toBeUndefined()

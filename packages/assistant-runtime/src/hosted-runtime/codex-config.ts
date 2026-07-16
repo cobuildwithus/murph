@@ -155,6 +155,7 @@ export interface HostedCodexRuntimeEnvironmentInput {
 export interface HostedCodexRuntimeEnvironmentResult {
   codexConfigPath: string;
   codexHome: string;
+  hostedProviderCredentialEnvKey: string | null;
   runtimeEnv: Record<string, string>;
 }
 
@@ -247,6 +248,7 @@ export async function prepareHostedCodexRuntimeEnvironment(
   return {
     codexConfigPath,
     codexHome,
+    hostedProviderCredentialEnvKey: chatGptAuth ? null : providerConfig.envKey,
     runtimeEnv,
   };
 }

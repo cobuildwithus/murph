@@ -70,7 +70,10 @@ describe("hosted detached assistant ask controller", () => {
     const vaultRoot = await createVaultRoot();
     const firstAnswer = createDeferred<void>();
     const secondAnswer = createDeferred<void>();
-    const executeAsk = vi.fn(async (input: { question: string }) => {
+    const executeAsk = vi.fn(async (input: {
+      hostedProviderCredentialEnvKey?: string | null;
+      question: string;
+    }) => {
       if (input.question === "first question") {
         await firstAnswer.promise;
         return { answer: "first answer", outcome: "answered" as const };
@@ -110,8 +113,9 @@ describe("hosted detached assistant ask controller", () => {
       const controller = createHostedDetachedAssistantAskController({
         assistantAskPort,
         codexHome: null,
-        env: {},
+        env: { OPENAI_API_KEY: "provider-auth-binds-natively" },
         executeAsk,
+        hostedProviderCredentialEnvKey: "OPENAI_API_KEY",
         now: () => TEST_NOW,
         onStateMutation() {},
         vaultRoot,
@@ -120,6 +124,10 @@ describe("hosted detached assistant ask controller", () => {
       controller.kick();
       await waitUntil(() => assert.equal(executeAsk.mock.calls.length, 1));
       assert.equal(executeAsk.mock.calls[0]?.[0].question, "first question");
+      assert.equal(
+        executeAsk.mock.calls[0]?.[0].hostedProviderCredentialEnvKey,
+        "OPENAI_API_KEY",
+      );
       assert.deepEqual(
         (await readHostedSystemMailboxState(vaultRoot)).pending.map((item) => [
           item.itemId,
@@ -134,6 +142,10 @@ describe("hosted detached assistant ask controller", () => {
       firstAnswer.resolve();
       await waitUntil(() => assert.equal(executeAsk.mock.calls.length, 2));
       assert.equal(executeAsk.mock.calls[1]?.[0].question, "second question");
+      assert.equal(
+        executeAsk.mock.calls[1]?.[0].hostedProviderCredentialEnvKey,
+        "OPENAI_API_KEY",
+      );
       assert.deepEqual(completedRequestIds, ["ask_event_1"]);
 
       secondAnswer.resolve();

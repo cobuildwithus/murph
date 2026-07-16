@@ -37,6 +37,7 @@ export interface HostedDetachedAssistantAskControllerInput {
   assistantAskPort: HostedRuntimeAssistantAskPort | null;
   codexHome: string | null;
   env: Readonly<Record<string, string>>;
+  hostedProviderCredentialEnvKey?: string | null;
   executeAsk?: (
     input: ReadOnlyAssistantAskInput,
   ) => Promise<ReadOnlyAssistantAskResult>;
@@ -76,6 +77,7 @@ export function createHostedDetachedAssistantAskController(
       codexHome: input.codexHome,
       env: input.env,
       executeAsk,
+      hostedProviderCredentialEnvKey: input.hostedProviderCredentialEnvKey,
       now,
       onStateMutation: input.onStateMutation,
       vaultRoot: input.vaultRoot,
@@ -163,6 +165,7 @@ async function runOneHostedDetachedAssistantAsk(input: {
   executeAsk: (
     input: ReadOnlyAssistantAskInput,
   ) => Promise<ReadOnlyAssistantAskResult>;
+  hostedProviderCredentialEnvKey?: string | null;
   now: () => string;
   onStateMutation(): void;
   vaultRoot: string;
@@ -214,6 +217,12 @@ async function runOneHostedDetachedAssistantAsk(input: {
       abortSignal: input.abortSignal,
       codexHome: input.codexHome,
       env: { ...input.env },
+      ...(input.hostedProviderCredentialEnvKey
+        ? {
+            hostedProviderCredentialEnvKey:
+              input.hostedProviderCredentialEnvKey,
+          }
+        : {}),
       now: new Date(input.now()),
       question: prepared.question,
       workspaceRoot: input.vaultRoot,

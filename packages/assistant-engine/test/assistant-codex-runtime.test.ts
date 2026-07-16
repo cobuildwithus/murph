@@ -3306,6 +3306,38 @@ describe('assistant codex runtime', () => {
     const providerCredentialEnvKey = 'OPENAI_API_KEY'
     const bridgeUrl = 'http://127.0.0.1:43123'
     const startSecondTurn = createDeferred<void>()
+    const startThirdTurn = createDeferred<void>()
+    const webpBytes = new Uint8Array([
+      0x52, 0x49, 0x46, 0x46,
+      0x00, 0x00, 0x00, 0x00,
+      0x57, 0x45, 0x42, 0x50,
+    ])
+    const imageProviderAuthHeaders: Array<string | null> = []
+    const fetchImpl = vi.fn(async (
+      fetchRequest: string | URL | Request,
+      init?: RequestInit,
+    ) => {
+      imageProviderAuthHeaders.push(
+        new Request(fetchRequest, init).headers.get('authorization'),
+      )
+      return new Response(JSON.stringify({
+        data: [{ b64_json: Buffer.from(webpBytes).toString('base64') }],
+        usage: { input_tokens: 1, output_tokens: 2, total_tokens: 3 },
+      }), {
+        headers: { 'content-type': 'application/json' },
+        status: 200,
+      })
+    })
+    const uploader = {
+      uploadGeneratedImage: vi.fn(async (
+        uploadInput: { alt: string | null; source: string | null },
+      ) => ({
+        alt: uploadInput.alt,
+        kind: 'image' as const,
+        source: uploadInput.source,
+        url: 'https://imagedelivery.net/account/generated/public',
+      })),
+    }
 
     codexMocks.spawn.mockImplementation((_command, args, options) => {
       const child = new MockChildProcess()
@@ -3332,11 +3364,13 @@ describe('assistant codex runtime', () => {
           const initialize = await waitForRpcMethod(child, 'initialize')
           child.stdout.write(jsonLine({ id: initialize.id, result: {} }))
 
-          const completeHostedTurn = async (input: {
-            index: number
-            suffix: 'a' | 'b'
-            threadMethod: 'thread/resume' | 'thread/start'
-          }) => {
+            const completeHostedTurn = async (input: {
+              hasRouteGrant: boolean
+              index: number
+              suffix: 'a' | 'b' | 'c'
+              threadMethod: 'thread/resume' | 'thread/start'
+              threadRequestCount: number
+            }) => {
             const login = await waitForRpcMethodCount(
               child,
               'account/login/start',
@@ -3348,24 +3382,34 @@ describe('assistant codex runtime', () => {
             })
             child.stdout.write(jsonLine({ id: login.id, result: { type: 'apiKey' } }))
 
-            const thread = await waitForRpcMethodCount(
-              child,
-              input.threadMethod,
-              1,
-            )
-            expect(thread.params).toMatchObject({
-              config: {
-                [`shell_environment_policy.set.${HOSTED_CLI_BRIDGE_ROUTE_GRANT_ENV}`]:
-                  `route-grant-${input.suffix}`,
+              const thread = await waitForRpcMethodCount(
+                child,
+                input.threadMethod,
+                input.threadRequestCount,
+              )
+              const threadParams = asRecord(thread.params)
+              const threadConfig = asRecord(threadParams.config)
+              expect(threadConfig).toMatchObject({
                 [`shell_environment_policy.set.${HOSTED_CLI_BRIDGE_TOKEN_ENV}`]:
                   `bridge-token-${input.suffix}`,
-                [`shell_environment_policy.set.${providerCredentialEnvKey}`]:
-                  `provider-credential-${input.suffix}`,
                 'test.static': true,
-              },
-            })
-            const threadParams = asRecord(thread.params)
-            child.stdout.write(jsonLine({
+              })
+              if (input.hasRouteGrant) {
+                expect(threadConfig).toHaveProperty(
+                  `shell_environment_policy.set.${HOSTED_CLI_BRIDGE_ROUTE_GRANT_ENV}`,
+                  `route-grant-${input.suffix}`,
+                )
+              } else {
+                expect(threadConfig).not.toHaveProperty(
+                  `shell_environment_policy.set.${HOSTED_CLI_BRIDGE_ROUTE_GRANT_ENV}`,
+                )
+                expect(JSON.stringify(threadConfig)).not.toContain('route-grant-')
+              }
+              expect(threadConfig).not.toHaveProperty(
+                `shell_environment_policy.set.${providerCredentialEnvKey}`,
+              )
+              expect(JSON.stringify(threadConfig)).not.toContain('provider-credential-')
+              child.stdout.write(jsonLine({
               id: thread.id,
               result: {
                 approvalPolicy: threadParams.approvalPolicy,
@@ -3388,6 +3432,25 @@ describe('assistant codex runtime', () => {
                 },
               },
             }))
+            const toolRequestId = 80 + input.index
+            child.stdout.write(jsonLine({
+              id: toolRequestId,
+              method: 'item/tool/call',
+              params: {
+                arguments: {
+                  alt: `Generated ${input.suffix}`,
+                  prompt: `Render ${input.suffix}`,
+                },
+                namespace: 'murph',
+                threadId: 'thread-hosted-warm',
+                tool: 'generate_image',
+                turnId: `turn-hosted-warm-${input.suffix}`,
+              },
+            }))
+            await expect(waitForRpcResponse(child, toolRequestId)).resolves.toMatchObject({
+              id: toolRequestId,
+              result: { success: true },
+            })
             child.stdout.write(jsonLine({
               method: 'assistant.message.delta',
               params: {
@@ -3425,25 +3488,60 @@ describe('assistant codex runtime', () => {
             child.stdout.write(jsonLine({ id: logout.id, result: {} }))
           }
 
-          await completeHostedTurn({
-            index: 1,
-            suffix: 'a',
-            threadMethod: 'thread/start',
-          })
-          await startSecondTurn.promise
-          await completeHostedTurn({
-            index: 2,
-            suffix: 'b',
-            threadMethod: 'thread/resume',
-          })
+            await completeHostedTurn({
+              hasRouteGrant: true,
+              index: 1,
+              suffix: 'a',
+              threadMethod: 'thread/start',
+              threadRequestCount: 1,
+            })
+            await startSecondTurn.promise
+            const firstUnsubscribe = await waitForRpcMethodCount(
+              child,
+              'thread/unsubscribe',
+              1,
+            )
+            expect(firstUnsubscribe.params).toEqual({
+              threadId: 'thread-hosted-warm',
+            })
+            child.stdout.write(jsonLine({ id: firstUnsubscribe.id, result: {} }))
+            await completeHostedTurn({
+              hasRouteGrant: false,
+              index: 2,
+              suffix: 'b',
+              threadMethod: 'thread/resume',
+              threadRequestCount: 1,
+            })
+            await startThirdTurn.promise
+            const secondUnsubscribe = await waitForRpcMethodCount(
+              child,
+              'thread/unsubscribe',
+              2,
+            )
+            expect(secondUnsubscribe.params).toEqual({
+              threadId: 'thread-hosted-warm',
+            })
+            child.stdout.write(jsonLine({ id: secondUnsubscribe.id, result: {} }))
+            await completeHostedTurn({
+              hasRouteGrant: true,
+              index: 3,
+              suffix: 'c',
+              threadMethod: 'thread/resume',
+              threadRequestCount: 2,
+            })
         })()
       })
 
       return child
     })
 
-    const buildHostedEnv = (suffix: 'a' | 'b') => ({
-      [HOSTED_CLI_BRIDGE_ROUTE_GRANT_ENV]: `route-grant-${suffix}`,
+    const buildHostedEnv = (
+      suffix: 'a' | 'b' | 'c',
+      includeRouteGrant: boolean,
+    ) => ({
+      ...(includeRouteGrant
+        ? { [HOSTED_CLI_BRIDGE_ROUTE_GRANT_ENV]: `route-grant-${suffix}` }
+        : {}),
       [HOSTED_CLI_BRIDGE_TOKEN_ENV]: `bridge-token-${suffix}`,
       [HOSTED_CLI_BRIDGE_URL_ENV]: bridgeUrl,
       [providerCredentialEnvKey]: `provider-credential-${suffix}`,
@@ -3452,7 +3550,10 @@ describe('assistant codex runtime', () => {
     const baseInput = {
       approvalPolicy: 'never',
       codexHome,
+      fetchImpl,
+      hostedGeneratedImageUploader: uploader,
       hostedProviderCredentialEnvKey: providerCredentialEnvKey,
+      requireHostedGeneratedImageUploader: true,
       sandbox: 'workspace-write' as const,
       threadConfig: {
         'test.static': true,
@@ -3460,40 +3561,66 @@ describe('assistant codex runtime', () => {
       workingDirectory,
     }
 
-    await expect(executeCodexAppServerTurn({
-      ...baseInput,
-      env: buildHostedEnv('a'),
+      await expect(executeCodexAppServerTurn({
+        ...baseInput,
+        env: buildHostedEnv('a', true),
       prompt: 'First hosted warm turn',
     })).resolves.toMatchObject({
       finalMessage: 'Answer a',
       sessionId: 'thread-hosted-warm',
     })
     startSecondTurn.resolve()
-    await expect(executeCodexAppServerTurn({
-      ...baseInput,
-      env: buildHostedEnv('b'),
-      prompt: 'Second hosted warm turn',
-      resumeSessionId: 'thread-hosted-warm',
+      await expect(executeCodexAppServerTurn({
+        ...baseInput,
+        env: buildHostedEnv('b', false),
+        prompt: 'Scheduled hosted warm turn without a route grant',
+        resumeSessionId: 'thread-hosted-warm',
     })).resolves.toMatchObject({
-      finalMessage: 'Answer b',
-      sessionId: 'thread-hosted-warm',
-    })
-    await drainHostedCodexPostTurnCleanups()
+        finalMessage: 'Answer b',
+        sessionId: 'thread-hosted-warm',
+      })
+      startThirdTurn.resolve()
+      await expect(executeCodexAppServerTurn({
+        ...baseInput,
+        env: buildHostedEnv('c', true),
+        prompt: 'Third interactive hosted warm turn',
+        resumeSessionId: 'thread-hosted-warm',
+      })).resolves.toMatchObject({
+        finalMessage: 'Answer c',
+        sessionId: 'thread-hosted-warm',
+      })
+      await drainHostedCodexPostTurnCleanups()
 
     expect(codexMocks.spawn).toHaveBeenCalledTimes(1)
+    expect(imageProviderAuthHeaders).toEqual([
+        'Bearer provider-credential-a',
+        'Bearer provider-credential-b',
+        'Bearer provider-credential-c',
+      ])
+      expect(uploader.uploadGeneratedImage).toHaveBeenCalledTimes(3)
     const messages = readWrittenRpcMessages(
       requireMockChildProcess(spawnedChildren[0] ?? null),
     )
     expect(messages.filter((message) => message.method === 'initialize'))
       .toHaveLength(1)
-    expect(messages.filter((message) => message.method === 'account/logout'))
-      .toHaveLength(2)
+      expect(messages.filter((message) => message.method === 'account/logout'))
+        .toHaveLength(3)
+      expect(
+        messages
+          .filter((message) => message.method === 'account/login/start')
+          .map((message) => message.params),
+      ).toEqual([
+        { apiKey: 'provider-credential-a', type: 'apiKey' },
+        { apiKey: 'provider-credential-b', type: 'apiKey' },
+        { apiKey: 'provider-credential-c', type: 'apiKey' },
+      ])
     const hostedLifecycleMethods = [
       'account/login/start',
       'thread/start',
       'thread/resume',
       'turn/start',
       'thread/backgroundTerminals/clean',
+      'thread/unsubscribe',
       'account/logout',
     ]
     expect(
@@ -3509,17 +3636,25 @@ describe('assistant codex runtime', () => {
       'turn/start',
       'thread/backgroundTerminals/clean',
       'account/logout',
+      'thread/unsubscribe',
       'account/login/start',
       'thread/resume',
       'turn/start',
-      'thread/backgroundTerminals/clean',
-      'account/logout',
-    ])
+        'thread/backgroundTerminals/clean',
+        'account/logout',
+        'thread/unsubscribe',
+        'account/login/start',
+        'thread/resume',
+        'turn/start',
+        'thread/backgroundTerminals/clean',
+        'account/logout',
+      ])
   })
 
   it.each([
     'account/login/start',
     'account/logout',
+    'thread/unsubscribe',
   ] as const)(
     'replaces hosted Codex when %s fails',
     async (failureMethod) => {
@@ -3582,6 +3717,13 @@ describe('assistant codex runtime', () => {
                   break
                 case 'thread/backgroundTerminals/clean':
                   child.stdout.write(jsonLine({ id: message.id, result: {} }))
+                  break
+                case 'thread/unsubscribe':
+                  child.stdout.write(jsonLine(
+                    shouldFail
+                      ? { error: { message: 'hosted thread unsubscribe unavailable' }, id: message.id }
+                      : { id: message.id, result: {} },
+                  ))
                   break
                 case 'account/logout':
                   child.stdout.write(jsonLine(
@@ -4275,11 +4417,14 @@ describe('assistant codex runtime', () => {
   it('uses estimated idle compaction usage when generic token usage arrives before zero recompute updates', async () => {
     const workingDirectory = await createTempDir('assistant-codex-compact-provider-usage-work-')
     const codexHome = await createTempDir('assistant-codex-compact-provider-usage-home-')
+    const ephemeralApiKey = 'provider-credential-compact'
+    const spawnedChildren: MockChildProcess[] = []
     const threadId = 'thread-compact-provider-usage'
     const turnId = 'turn-compact-provider-usage'
 
     codexMocks.spawn.mockImplementation(() => {
       const child = new MockChildProcess()
+      spawnedChildren.push(child)
 
       queueMicrotask(() => {
         void (async () => {
@@ -4334,6 +4479,12 @@ describe('assistant codex runtime', () => {
             },
           }))
 
+          const login = await waitForRpcMethod(child, 'account/login/start')
+          expect(login.params).toEqual({
+            apiKey: ephemeralApiKey,
+            type: 'apiKey',
+          })
+          child.stdout.write(jsonLine({ id: login.id, result: { type: 'apiKey' } }))
           const barrier = await waitForRpcMethod(child, 'config/read')
           child.stdout.write(jsonLine({ id: barrier.id, result: {} }))
           const compact = await waitForRpcMethod(child, 'thread/compact/start')
@@ -4397,6 +4548,8 @@ describe('assistant codex runtime', () => {
               },
             },
           }))
+          const logout = await waitForRpcMethod(child, 'account/logout')
+          child.stdout.write(jsonLine({ id: logout.id, result: {} }))
         })()
       })
 
@@ -4422,6 +4575,7 @@ describe('assistant codex runtime', () => {
 
     await expect(
       compactWarmCodexThread({
+        ephemeralApiKey,
         minThreadTokens: 100_000,
         timeoutMs: 5_000,
       }),
@@ -4437,7 +4591,203 @@ describe('assistant codex runtime', () => {
         totalTokens: 125_000,
       },
     })
+    expect(
+      readWrittenRpcMessages(requireMockChildProcess(spawnedChildren[0] ?? null))
+        .map((message) => message.method)
+        .filter((method) => [
+          'account/login/start',
+          'config/read',
+          'thread/compact/start',
+          'account/logout',
+        ].includes(method ?? '')),
+    ).toEqual([
+      'account/login/start',
+      'config/read',
+      'thread/compact/start',
+      'account/logout',
+    ])
   })
+
+  it.each([
+    'account/login/start',
+    'account/logout',
+  ] as const)(
+    'poisons the exact warm Codex process when idle compaction %s fails',
+    async (failureMethod) => {
+      const workingDirectory = await createTempDir('assistant-codex-compact-auth-failure-work-')
+      const codexHome = await createTempDir('assistant-codex-compact-auth-failure-home-')
+      const ephemeralApiKey = 'provider-credential-compact-failure'
+      const threadId = 'thread-compact-auth-failure'
+      const turnId = 'turn-compact-auth-failure'
+      const spawnedChildren: MockChildProcess[] = []
+      mockProcessGroupSignalsForChildren(spawnedChildren)
+
+      codexMocks.spawn.mockImplementation(() => {
+        const child = new MockChildProcess()
+        const processNumber = spawnedChildren.length + 1
+        child.pid = 25_700 + spawnedChildren.length
+        spawnedChildren.push(child)
+
+        queueMicrotask(() => {
+          void (async () => {
+            const initialize = await waitForRpcMethod(child, 'initialize')
+            child.stdout.write(jsonLine({ id: initialize.id, result: {} }))
+
+            await writeWarmTurnStarted({
+              child,
+              requestCount: 1,
+              threadId,
+              turnId,
+            })
+            child.stdout.write(jsonLine({
+              method: 'thread/tokenUsage/updated',
+              params: {
+                threadId,
+                turnId,
+                tokenUsage: {
+                  last: {
+                    cachedInputTokens: 10_000,
+                    inputTokens: 125_000,
+                    outputTokens: 100,
+                    totalTokens: 125_100,
+                  },
+                },
+              },
+            }))
+            child.stdout.write(jsonLine({
+              method: 'item/completed',
+              params: {
+                item: {
+                  id: `assistant-compact-auth-failure-${processNumber}`,
+                  message: 'Seeded before compaction auth failure',
+                  type: 'assistant_message',
+                },
+              },
+            }))
+            child.stdout.write(jsonLine({
+              method: 'turn/completed',
+              params: {
+                turn: {
+                  id: turnId,
+                  status: 'completed',
+                },
+              },
+            }))
+
+            if (processNumber !== 1) {
+              return
+            }
+            const login = await waitForRpcMethod(child, 'account/login/start')
+            expect(login.params).toEqual({
+              apiKey: ephemeralApiKey,
+              type: 'apiKey',
+            })
+            if (failureMethod === 'account/login/start') {
+              child.stdout.write(jsonLine({
+                error: { message: 'compaction auth bind unavailable' },
+                id: login.id,
+              }))
+              return
+            }
+            child.stdout.write(jsonLine({ id: login.id, result: { type: 'apiKey' } }))
+
+            const barrier = await waitForRpcMethod(child, 'config/read')
+            child.stdout.write(jsonLine({ id: barrier.id, result: {} }))
+            const compact = await waitForRpcMethod(child, 'thread/compact/start')
+            expect(asRecord(compact.params)).toEqual({ threadId })
+            child.stdout.write(jsonLine({ id: compact.id, result: {} }))
+            writeContextCompactionStarted({
+              child,
+              itemId: 'context-compact-auth-failure',
+              threadId,
+            })
+            child.stdout.write(jsonLine({
+              method: 'item/completed',
+              params: {
+                item: {
+                  id: 'context-compact-auth-failure',
+                  type: 'contextCompaction',
+                },
+              },
+            }))
+            const logout = await waitForRpcMethod(child, 'account/logout')
+            child.stdout.write(jsonLine({
+              error: { message: 'compaction auth revoke unavailable' },
+              id: logout.id,
+            }))
+          })()
+        })
+
+        return child
+      })
+
+      await expect(
+        executeCodexAppServerTurn({
+          approvalPolicy: 'never',
+          codexHome,
+          env: { PATH: '/custom/bin' },
+          prompt: 'seed compact auth failure',
+          sandbox: 'workspace-write',
+          workingDirectory,
+        }),
+      ).resolves.toMatchObject({
+        finalMessage: 'Seeded before compaction auth failure',
+        sessionId: threadId,
+        turnId,
+      })
+
+      await expect(
+        compactWarmCodexThread({
+          ephemeralApiKey,
+          minThreadTokens: 100_000,
+          timeoutMs: 5_000,
+        }),
+      ).resolves.toMatchObject({
+        kind: 'failed',
+        threadId,
+      })
+
+      const firstProcessMethods = readWrittenRpcMessages(spawnedChildren[0]!)
+        .map((message) => message.method)
+      if (failureMethod === 'account/login/start') {
+        expect(firstProcessMethods).not.toContain('thread/compact/start')
+        expect(firstProcessMethods).not.toContain('account/logout')
+      } else {
+        expect(firstProcessMethods).toEqual(expect.arrayContaining([
+          'account/login/start',
+          'config/read',
+          'thread/compact/start',
+          'account/logout',
+        ]))
+      }
+      expect(process.kill).toHaveBeenCalledWith(-25_700, 'SIGTERM')
+
+      const replacementTrace = vi.fn()
+      await expect(
+        executeCodexAppServerTurn({
+          approvalPolicy: 'never',
+          codexHome,
+          env: { PATH: '/custom/bin' },
+          onTraceEvent: replacementTrace,
+          prompt: 'turn after compaction auth failure',
+          sandbox: 'workspace-write',
+          workingDirectory,
+        }),
+      ).resolves.toMatchObject({
+        sessionId: threadId,
+        turnId,
+      })
+      expect(codexMocks.spawn).toHaveBeenCalledTimes(2)
+      expect(replacementTrace).toHaveBeenCalledWith(
+        expect.objectContaining({
+          rawEvent: expect.objectContaining({
+            codexTimingColdStartReason: 'previous-idle-compaction-failure',
+            codexTimingStage: 'initialized',
+          }),
+        }),
+      )
+    },
+  )
 
   it('uses provider usage attached to the context compaction completion', async () => {
     const workingDirectory = await createTempDir('assistant-codex-compact-explicit-usage-work-')
@@ -9292,6 +9642,9 @@ describe('assistant codex runtime', () => {
             await waitForRpcMethod(child, 'thread/backgroundTerminals/clean'),
           )
 
+          const unsubscribe = await waitForRpcMethod(child, 'thread/unsubscribe')
+          child.stdout.write(jsonLine({ id: unsubscribe.id, result: {} }))
+
           const resumedThread = await waitForRpcMethod(child, 'thread/resume')
           const resumedParams = asRecord(resumedThread.params)
           child.stdout.write(jsonLine({
@@ -9895,6 +10248,9 @@ describe('assistant codex runtime', () => {
           )
           child.stdout.write(jsonLine({ id: firstCleanup.id, result: {} }))
 
+          const unsubscribe = await waitForRpcMethod(child, 'thread/unsubscribe')
+          child.stdout.write(jsonLine({ id: unsubscribe.id, result: {} }))
+
           const resumedThread = await waitForRpcMethod(child, 'thread/resume')
           const resumedThreadParams = asRecord(resumedThread.params)
           child.stdout.write(jsonLine({
@@ -9967,6 +10323,8 @@ describe('assistant codex runtime', () => {
       requireMockChildProcess(spawnedChildren[0] ?? null),
     )
     expect(messages.filter((message) => message.method === 'thread/resume'))
+      .toHaveLength(1)
+    expect(messages.filter((message) => message.method === 'thread/unsubscribe'))
       .toHaveLength(1)
     expect(messages.filter(
       (message) => message.method === 'thread/backgroundTerminals/clean',
