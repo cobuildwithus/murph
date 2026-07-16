@@ -1,6 +1,6 @@
 # PR 752 assistant coverage race
 
-Status: active
+Status: completed
 Created: 2026-07-16
 Updated: 2026-07-16
 
@@ -70,4 +70,8 @@ Updated: 2026-07-16
   passed and all 194 tests in the runtime file passed under coverage in 48.1
   seconds. The selected-file command exited nonzero only because a single file
   cannot meet the package-wide global coverage thresholds.
-- Pending current-main reconciliation and fresh exact-head CI.
+- Reconciled the then-current `main` through a clean normal merge. The
+  assistant-engine typecheck and full scripted runtime file passed afterward;
+  the final exact-head CI run will start after this plan-closing commit is
+  pushed.
+Completed: 2026-07-16
