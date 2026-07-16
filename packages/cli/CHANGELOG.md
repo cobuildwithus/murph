@@ -2,6 +2,11 @@
 
 All notable changes to `@murphai/murph` will be documented in this file.
 
+## [1.2.4] - 2026-07-16
+
+### Fixed
+- allow interactive setup to skip assistant
+
 ## [1.2.3] - 2026-07-16
 
 ### Fixed
