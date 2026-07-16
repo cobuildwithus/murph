@@ -430,6 +430,44 @@ test('scopeAssistantCliSurfaceContractForAssistant removes retired style command
   )
 })
 
+test('scopeAssistantCliSurfaceContractForAssistant removes hosted-invalid action commands only in hosted runtime', async () => {
+  const {
+    scopeAssistantCliSurfaceContractForAssistant,
+  } = await import('../src/assistant/cli-surface-bootstrap.ts')
+  const contract = [
+    'Murph CLI Contract:',
+    '- `automation save`: Save an automation.',
+    '- `automation show`: Read an automation.',
+    '- `device connect`: Connect a provider.',
+    '- `device provider list`: List supported providers.',
+    'Command index:',
+    '- `automation`: `edit`, `import-json`, `list`, `save`, `scaffold`, `set-status`, `show`.',
+    '- `device`: `account disconnect`, `account list`, `account reconcile`, `account show`, `connect`, `daemon start`, `daemon status`, `daemon stop`, `provider list`.',
+  ].join('\n')
+
+  assert.equal(
+    scopeAssistantCliSurfaceContractForAssistant({
+      contract,
+      hostedRuntime: true,
+    }),
+    [
+      'Murph CLI Contract:',
+      '- `automation show`: Read an automation.',
+      '- `device provider list`: List supported providers.',
+      'Command index:',
+      '- `automation`: `list`, `scaffold`, `show`.',
+      '- `device`: `provider list`.',
+    ].join('\n'),
+  )
+  assert.equal(
+    scopeAssistantCliSurfaceContractForAssistant({
+      contract,
+      hostedRuntime: false,
+    }),
+    contract,
+  )
+})
+
 test('buildAssistantCliProcessEnv keeps manifest subprocess env credential-free', async () => {
   const {
     buildAssistantCliProcessEnv,

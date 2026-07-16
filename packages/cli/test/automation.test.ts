@@ -1,18 +1,11 @@
 import assert from "node:assert/strict";
-import { once } from "node:events";
 import { rm, writeFile } from "node:fs/promises";
-import { createServer } from "node:http";
 import path from "node:path";
 
 import { Cli } from "incur";
 import { afterEach, test, vi } from "vitest";
 
-import {
-  HOSTED_CLI_BRIDGE_ASSISTANT_CURRENT_ROUTE_PATH,
-  HOSTED_CLI_BRIDGE_TOKEN_ENV,
-  HOSTED_CLI_BRIDGE_URL_ENV,
-  HOSTED_RUNTIME_PROCESS_ENV,
-} from "@murphai/hosted-execution/cli-runtime-bridge";
+import { HOSTED_RUNTIME_PROCESS_ENV } from "@murphai/hosted-execution/env";
 import { upsertAutomation } from "@murphai/core";
 import {
   automationRecordSchema,
@@ -83,68 +76,6 @@ function optionDescription(schema: CommandSchemaEnvelope, optionName: string): s
     assert.fail(`missing ${optionName} description`);
   }
   return description;
-}
-
-async function startAssistantCurrentRouteBridgeStub(input: {
-  channel: string;
-  deliveryTarget: string;
-  token: string;
-}): Promise<{
-  requests: string[];
-  stop(): Promise<void>;
-  url: string;
-}> {
-  const requests: string[] = [];
-  const server = createServer((request, response) => {
-    requests.push(request.url ?? "");
-    if (request.method !== "POST") {
-      response.writeHead(405);
-      response.end();
-      return;
-    }
-    if (request.url !== HOSTED_CLI_BRIDGE_ASSISTANT_CURRENT_ROUTE_PATH) {
-      response.writeHead(404);
-      response.end();
-      return;
-    }
-    if (request.headers.authorization !== `Bearer ${input.token}`) {
-      response.writeHead(401);
-      response.end();
-      return;
-    }
-    response.writeHead(200, {
-      "content-type": "application/json",
-    });
-    response.end(JSON.stringify({
-      route: {
-        channel: input.channel,
-        deliveryTarget: input.deliveryTarget,
-        threadIsDirect: true,
-      },
-    }));
-  });
-  server.listen(0, "127.0.0.1");
-  await once(server, "listening");
-  const address = server.address();
-  if (!address || typeof address === "string") {
-    throw new Error("Expected test bridge to bind a TCP port.");
-  }
-
-  return {
-    requests,
-    async stop() {
-      await new Promise<void>((resolve, reject) => {
-        server.close((error) => {
-          if (error) {
-            reject(error);
-            return;
-          }
-          resolve();
-        });
-      });
-    },
-    url: `http://127.0.0.1:${address.port}/`,
-  };
 }
 
 function hasCommandMap(value: unknown): value is { commands: Map<string, unknown> } {
@@ -594,13 +525,10 @@ test("automation save guidance keeps examples shell-copyable", async () => {
   }
 });
 
-test("automation save injects the current private iMessage delivery route", async () => {
-  const { parentRoot, vaultRoot } = await createTempVaultContext("murph-automation-route-");
-  const bridge = await startAssistantCurrentRouteBridgeStub({
-    channel: "linq",
-    deliveryTarget: "linq_chat_real",
-    token: "test-bridge-token",
-  });
+test("hosted automation CLI mutations fail closed while reads stay available", async () => {
+  const { parentRoot, vaultRoot } = await createTempVaultContext(
+    "murph-automation-hosted-root-tool-",
+  );
 
   try {
     const cli = Cli.create("vault-cli", {
@@ -608,139 +536,100 @@ test("automation save injects the current private iMessage delivery route", asyn
       version: "0.0.0-test",
     });
     registerAutomationCommands(cli);
-    vi.stubEnv(HOSTED_RUNTIME_PROCESS_ENV, "1");
-    vi.stubEnv(HOSTED_CLI_BRIDGE_TOKEN_ENV, "test-bridge-token");
-    vi.stubEnv(HOSTED_CLI_BRIDGE_URL_ENV, bridge.url);
 
-    const saved = await runInProcessJsonCli<{
-      automationId: string;
-      created: boolean;
-      lookupId: string;
-      path: string;
-      vault: string;
-    }>(
-      cli,
-      [
-        "automation",
-        "save",
-        "Current route reminder",
-        "--slug",
-        "current-route-reminder",
-        "--instructions",
-        "Send the reminder.",
-        "--schedule-kind",
-        "at",
-        "--schedule-at",
-        "2026-12-06T12:00:00.000Z",
-        "--vault",
-        vaultRoot,
-      ],
-    );
-    assert.equal(saved.exitCode, null);
-    assert.equal(saved.envelope.ok, true);
-
-    const shown = await runInProcessJsonCli<{
-      automation: {
-        route: {
-          channel: string;
-          deliveryTarget: string | null;
-          participantId: string | null;
-          threadId: string | null;
-        };
-      } | null;
-      vault: string;
-    }>(cli, [
-      "automation",
-      "show",
-      "current-route-reminder",
-      "--vault",
-      vaultRoot,
-    ]);
-    assert.equal(shown.exitCode, null);
-    assert.equal(shown.envelope.ok, true);
-    assert.equal(shown.envelope.data?.automation?.route.channel, "linq");
-    assert.equal(shown.envelope.data?.automation?.route.deliveryTarget, "linq_chat_real");
-    assert.equal(shown.envelope.data?.automation?.route.participantId, null);
-    assert.equal(shown.envelope.data?.automation?.route.threadId, null);
-    assert.deepEqual(bridge.requests, [
-      HOSTED_CLI_BRIDGE_ASSISTANT_CURRENT_ROUTE_PATH,
-    ]);
-  } finally {
-    await bridge.stop();
-    await rm(parentRoot, { recursive: true, force: true });
-  }
-});
-
-test("automation save injects a hosted current messaging route without target flags", async () => {
-  const { parentRoot, vaultRoot } = await createTempVaultContext("murph-automation-hosted-route-");
-  const bridge = await startAssistantCurrentRouteBridgeStub({
-    channel: "telegram",
-    deliveryTarget: "telegram_thread_real",
-    token: "test-bridge-token",
-  });
-
-  try {
-    const cli = Cli.create("vault-cli", {
-      description: "automation test cli",
-      version: "0.0.0-test",
-    });
-    registerAutomationCommands(cli);
-    vi.stubEnv(HOSTED_RUNTIME_PROCESS_ENV, "1");
-    vi.stubEnv(HOSTED_CLI_BRIDGE_TOKEN_ENV, "test-bridge-token");
-    vi.stubEnv(HOSTED_CLI_BRIDGE_URL_ENV, bridge.url);
-
-    const saved = await runInProcessJsonCli(cli, [
+    const seeded = await runInProcessJsonCli(cli, [
       "automation",
       "save",
-      "Hosted route reminder",
+      "Existing reminder",
       "--slug",
-      "hosted-route-reminder",
+      "existing-reminder",
+      "--status",
+      "paused",
       "--instructions",
       "Send the reminder.",
       "--schedule-kind",
-      "at",
-      "--schedule-at",
-      "2026-12-06T12:00:00.000Z",
+      "dailyLocal",
+      "--schedule-local-time",
+      "08:30",
+      "--channel",
+      "telegram",
+      "--delivery-target",
+      "telegram_thread_real",
       "--vault",
       vaultRoot,
     ]);
-    assert.equal(saved.exitCode, null);
-    assert.equal(saved.envelope.ok, true);
+    assert.equal(seeded.envelope.ok, true);
 
-    const shown = await runInProcessJsonCli<{
-      automation: {
-        route: {
-          channel: string;
-          deliveryTarget: string | null;
-          threadId: string | null;
-        };
-      } | null;
-      vault: string;
-    }>(cli, [
+    vi.stubEnv(HOSTED_RUNTIME_PROCESS_ENV, "1");
+    const mutations = [
+      [
+        "automation",
+        "save",
+        "Blocked reminder",
+        "--instructions",
+        "Send the reminder.",
+        "--vault",
+        vaultRoot,
+      ],
+      [
+        "automation",
+        "edit",
+        "existing-reminder",
+        "--summary",
+        "Blocked edit",
+        "--vault",
+        vaultRoot,
+      ],
+      [
+        "automation",
+        "set-status",
+        "existing-reminder",
+        "--status",
+        "active",
+        "--vault",
+        vaultRoot,
+      ],
+      [
+        "automation",
+        "import-json",
+        "--input",
+        `@${path.join(parentRoot, "not-read.json")}`,
+        "--vault",
+        vaultRoot,
+      ],
+    ] as const;
+
+    for (const args of mutations) {
+      const result = await runInProcessJsonCli(cli, [...args]);
+      assert.equal(result.exitCode, 1);
+      assert.equal(result.envelope.ok, false);
+      if (!result.envelope.ok) {
+        assert.match(result.envelope.error.message ?? "", /root hosted automation tool/u);
+      }
+    }
+
+    const shown = await runInProcessJsonCli(cli, [
       "automation",
       "show",
-      "hosted-route-reminder",
+      "existing-reminder",
       "--vault",
       vaultRoot,
     ]);
-    assert.equal(shown.exitCode, null);
+    const listed = await runInProcessJsonCli(cli, [
+      "automation",
+      "list",
+      "--vault",
+      vaultRoot,
+    ]);
     assert.equal(shown.envelope.ok, true);
-    assert.equal(shown.envelope.data?.automation?.route.channel, "telegram");
-    assert.equal(shown.envelope.data?.automation?.route.deliveryTarget, "telegram_thread_real");
-    assert.equal(shown.envelope.data?.automation?.route.threadId, null);
+    assert.equal(listed.envelope.ok, true);
   } finally {
-    await bridge.stop();
     await rm(parentRoot, { recursive: true, force: true });
   }
 });
 
 test("automation edit patches sparse fields without implicit route rebinding", async () => {
   const { parentRoot, vaultRoot } = await createTempVaultContext("murph-automation-edit-");
-  const bridge = await startAssistantCurrentRouteBridgeStub({
-    channel: "linq",
-    deliveryTarget: "linq_chat_real",
-    token: "test-bridge-token",
-  });
 
   try {
     const cli = Cli.create("vault-cli", {
@@ -748,9 +637,6 @@ test("automation edit patches sparse fields without implicit route rebinding", a
       version: "0.0.0-test",
     });
     registerAutomationCommands(cli);
-    vi.stubEnv(HOSTED_RUNTIME_PROCESS_ENV, "1");
-    vi.stubEnv(HOSTED_CLI_BRIDGE_TOKEN_ENV, "test-bridge-token");
-    vi.stubEnv(HOSTED_CLI_BRIDGE_URL_ENV, bridge.url);
 
     const saved = await runInProcessJsonCli<{
       automationId: string;
@@ -772,16 +658,16 @@ test("automation edit patches sparse fields without implicit route rebinding", a
       "08:30",
       "--tag",
       "assistant",
+      "--channel",
+      "linq",
+      "--delivery-target",
+      "linq_chat_real",
       "--vault",
       vaultRoot,
     ]);
     assert.equal(saved.exitCode, null);
     assert.equal(saved.envelope.ok, true);
     assert.equal(saved.envelope.data?.created, true);
-    // Save inherits the verified current hosted conversation.
-    assert.deepEqual(bridge.requests, [
-      HOSTED_CLI_BRIDGE_ASSISTANT_CURRENT_ROUTE_PATH,
-    ]);
 
     const edited = await runInProcessJsonCli<{
       automationId: string;
@@ -800,12 +686,6 @@ test("automation edit patches sparse fields without implicit route rebinding", a
     assert.equal(edited.envelope.ok, true);
     assert.equal(edited.envelope.data?.automationId, saved.envelope.data?.automationId);
     assert.equal(edited.envelope.data?.created, false);
-    // Edit consults the trusted current route so conversation authority can
-    // be enforced without changing the route during a sparse edit.
-    assert.deepEqual(bridge.requests, [
-      HOSTED_CLI_BRIDGE_ASSISTANT_CURRENT_ROUTE_PATH,
-      HOSTED_CLI_BRIDGE_ASSISTANT_CURRENT_ROUTE_PATH,
-    ]);
 
     const shown = await runInProcessJsonCli<{
       automation: {
@@ -837,46 +717,6 @@ test("automation edit patches sparse fields without implicit route rebinding", a
     assert.equal(shown.envelope.data?.automation?.schedule.kind, "dailyLocal");
     assert.equal(shown.envelope.data?.automation?.schedule.localTime, "08:30");
     assert.deepEqual(shown.envelope.data?.automation?.tags, ["assistant"]);
-
-    bridge.requests.length = 0;
-    const routePartial = await runInProcessJsonCli<{
-      automationId: string;
-      created: boolean;
-    }>(cli, [
-      "automation",
-      "edit",
-      "preserve-route-reminder",
-      "--channel",
-      "linq",
-      "--vault",
-      vaultRoot,
-    ]);
-    assert.equal(routePartial.exitCode, null);
-    assert.equal(routePartial.envelope.ok, true);
-    assert.deepEqual(bridge.requests, [
-      HOSTED_CLI_BRIDGE_ASSISTANT_CURRENT_ROUTE_PATH,
-    ]);
-
-    const routeEdited = await runInProcessJsonCli<{
-      automationId: string;
-      created: boolean;
-    }>(cli, [
-      "automation",
-      "edit",
-      "preserve-route-reminder",
-      "--channel",
-      "linq",
-      "--delivery-target",
-      "linq_chat_explicit",
-      "--vault",
-      vaultRoot,
-    ]);
-    assert.equal(routeEdited.exitCode, 1);
-    assert.equal(routeEdited.envelope.ok, false);
-    assert.deepEqual(bridge.requests, [
-      HOSTED_CLI_BRIDGE_ASSISTANT_CURRENT_ROUTE_PATH,
-      HOSTED_CLI_BRIDGE_ASSISTANT_CURRENT_ROUTE_PATH,
-    ]);
 
     const routeShown = await runInProcessJsonCli<{
       automation: {
@@ -973,7 +813,6 @@ test("automation edit patches sparse fields without implicit route rebinding", a
     assert.equal(tagShown.envelope.data?.automation?.schedule.localTime, "08:30");
     assert.deepEqual(tagShown.envelope.data?.automation?.tags, ["scheduled", "experiment"]);
   } finally {
-    await bridge.stop();
     await rm(parentRoot, { recursive: true, force: true });
   }
 });
@@ -1251,72 +1090,6 @@ test("automation active writes require a sender identity for local explicit emai
   }
 });
 
-test("automation active writes allow identity-less email targets behind the hosted bridge", async () => {
-  const { parentRoot, vaultRoot } = await createTempVaultContext(
-    "murph-automation-hosted-email-identity-",
-  );
-  const bridge = await startAssistantCurrentRouteBridgeStub({
-    channel: "email",
-    deliveryTarget: "member@example.com",
-    token: "test-bridge-token",
-  });
-
-  try {
-    const cli = Cli.create("vault-cli", {
-      description: "automation test cli",
-      version: "0.0.0-test",
-    });
-    registerAutomationCommands(cli);
-    vi.stubEnv(HOSTED_RUNTIME_PROCESS_ENV, "1");
-    vi.stubEnv(HOSTED_CLI_BRIDGE_TOKEN_ENV, "test-bridge-token");
-    vi.stubEnv(HOSTED_CLI_BRIDGE_URL_ENV, bridge.url);
-
-    const saved = await runInProcessJsonCli(cli, [
-      "automation",
-      "save",
-      "Hosted email identity reminder",
-      "--slug",
-      "hosted-email-identity-reminder",
-      "--instructions",
-      "Send the reminder.",
-      "--schedule-kind",
-      "cron",
-      "--schedule-cron",
-      "0 11 * * 5",
-      "--channel",
-      "email",
-      "--delivery-target",
-      "member@example.com",
-      "--vault",
-      vaultRoot,
-    ]);
-    assert.equal(saved.exitCode, null);
-    assert.equal(saved.envelope.ok, true);
-
-    const shown = await runInProcessJsonCli<{
-      automation: {
-        route: {
-          deliveryTarget: string | null;
-          identityId: string | null;
-        };
-      } | null;
-    }>(cli, [
-      "automation",
-      "show",
-      "hosted-email-identity-reminder",
-      "--vault",
-      vaultRoot,
-    ]);
-    assert.equal(shown.exitCode, null);
-    assert.equal(shown.envelope.ok, true);
-    assert.equal(shown.envelope.data?.automation?.route.deliveryTarget, "member@example.com");
-    assert.equal(shown.envelope.data?.automation?.route.identityId, null);
-  } finally {
-    await bridge.stop();
-    await rm(parentRoot, { recursive: true, force: true });
-  }
-});
-
 test("automation active writes allow local email participant routes with a sender identity", async () => {
   const { parentRoot, vaultRoot } = await createTempVaultContext(
     "murph-automation-email-participant-",
@@ -1376,112 +1149,6 @@ test("automation active writes allow local email participant routes with a sende
     assert.equal(shown.envelope.data?.automation?.route.participantId, "recipient@example.test");
     assert.equal(shown.envelope.data?.automation?.route.threadId, null);
   } finally {
-    await rm(parentRoot, { recursive: true, force: true });
-  }
-});
-
-test("automation active writes reject hosted email thread locators without delivery targets", async () => {
-  const { parentRoot, vaultRoot } = await createTempVaultContext(
-    "murph-automation-hosted-email-thread-",
-  );
-  const bridge = await startAssistantCurrentRouteBridgeStub({
-    channel: "email",
-    deliveryTarget: "member@example.com",
-    token: "test-bridge-token",
-  });
-
-  try {
-    const cli = Cli.create("vault-cli", {
-      description: "automation test cli",
-      version: "0.0.0-test",
-    });
-    registerAutomationCommands(cli);
-    vi.stubEnv(HOSTED_RUNTIME_PROCESS_ENV, "1");
-    vi.stubEnv(HOSTED_CLI_BRIDGE_TOKEN_ENV, "test-bridge-token");
-    vi.stubEnv(HOSTED_CLI_BRIDGE_URL_ENV, bridge.url);
-
-    const saved = await runInProcessJsonCli(cli, [
-      "automation",
-      "save",
-      "Hosted email thread route reminder",
-      "--slug",
-      "hosted-email-thread-route-reminder",
-      "--instructions",
-      "Send the reminder.",
-      "--schedule-kind",
-      "cron",
-      "--schedule-cron",
-      "0 11 * * 5",
-      "--channel",
-      "email",
-      "--identity-id",
-      "agentmail-inbox-1",
-      "--thread-id",
-      "email-thread-123",
-      "--vault",
-      vaultRoot,
-    ]);
-    assert.equal(saved.exitCode, 1);
-    assert.equal(saved.envelope.ok, false);
-    assert.match(
-      saved.envelope.error.message ?? "",
-      /current chat/i,
-    );
-  } finally {
-    await bridge.stop();
-    await rm(parentRoot, { recursive: true, force: true });
-  }
-});
-
-test("automation active writes reject hosted email participant locators without delivery targets", async () => {
-  const { parentRoot, vaultRoot } = await createTempVaultContext(
-    "murph-automation-hosted-email-participant-",
-  );
-  const bridge = await startAssistantCurrentRouteBridgeStub({
-    channel: "email",
-    deliveryTarget: "member@example.com",
-    token: "test-bridge-token",
-  });
-
-  try {
-    const cli = Cli.create("vault-cli", {
-      description: "automation test cli",
-      version: "0.0.0-test",
-    });
-    registerAutomationCommands(cli);
-    vi.stubEnv(HOSTED_RUNTIME_PROCESS_ENV, "1");
-    vi.stubEnv(HOSTED_CLI_BRIDGE_TOKEN_ENV, "test-bridge-token");
-    vi.stubEnv(HOSTED_CLI_BRIDGE_URL_ENV, bridge.url);
-
-    const saved = await runInProcessJsonCli(cli, [
-      "automation",
-      "save",
-      "Hosted email participant route reminder",
-      "--slug",
-      "hosted-email-participant-route-reminder",
-      "--instructions",
-      "Send the reminder.",
-      "--schedule-kind",
-      "cron",
-      "--schedule-cron",
-      "0 11 * * 5",
-      "--channel",
-      "email",
-      "--identity-id",
-      "agentmail-inbox-1",
-      "--participant-id",
-      "recipient@example.test",
-      "--vault",
-      vaultRoot,
-    ]);
-    assert.equal(saved.exitCode, 1);
-    assert.equal(saved.envelope.ok, false);
-    assert.match(
-      saved.envelope.error.message ?? "",
-      /current chat/i,
-    );
-  } finally {
-    await bridge.stop();
     await rm(parentRoot, { recursive: true, force: true });
   }
 });

@@ -45,6 +45,7 @@ import {
 } from "@murphai/vault-usecases/testing";
 
 import {
+  buildAssistantProviderMurphToolCall,
   buildAssistantProviderVaultCliCall,
   buildHostedAssistantNotificationDecisionResponse,
 } from "./helpers/hosted-local-e2e-support.js";
@@ -669,35 +670,21 @@ function buildExperimentAdherenceSetupResponses(
       "--setup-answer",
       `activity_nudge_automation_slug=${experimentActivityNudgeSlug}`,
     ]),
-    buildAssistantProviderVaultCliCall([
-      "automation",
-      "save",
-      "Running block activity nudge",
-      "--request-id",
-      `hosted-running-block-nudge-${runId}`,
-      "--slug",
-      experimentActivityNudgeSlug,
-      "--status",
-      "active",
-      "--summary",
-      "Sparse milestone celebrations for sensed running sessions.",
-      "--tags",
-      "experiment",
-      "--tags",
-      "activity-nudge",
-      "--continuity-policy",
-      "fresh",
-      "--trigger-kind",
-      "deviceActivity",
-      "--activity-kind",
-      "running",
-      "--instructions",
-      experimentActivityNudgeInstructions,
-      "--channel",
-      "linq",
-      "--delivery-target",
-      experimentAdherenceChatId,
-    ]),
+    buildAssistantProviderMurphToolCall("automation", {
+      action: "save",
+      continuityPolicy: "fresh",
+      instructions: experimentActivityNudgeInstructions,
+      schedule: {
+        activityKind: "running",
+        after: new Date().toISOString(),
+        kind: "deviceActivity",
+      },
+      slug: experimentActivityNudgeSlug,
+      status: "active",
+      summary: "Sparse milestone celebrations for sensed running sessions.",
+      tags: ["experiment", "activity-nudge"],
+      title: "Running block activity nudge",
+    }),
     experimentSetupReplyText,
   ] as const;
 }

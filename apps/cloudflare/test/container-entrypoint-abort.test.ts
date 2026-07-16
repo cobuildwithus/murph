@@ -273,6 +273,8 @@ describe("container entrypoint abort boundary", () => {
   it("aborts an accepted workspace invocation through the internal abort endpoint", async () => {
     const invocationStarted = createDeferred<AbortSignal>();
     const invocationAborted = createDeferred();
+    const warmCodexStopStarted = createDeferred<string>();
+    const allowWarmCodexStop = createDeferred();
     const exit = vi.fn();
     mocks.runHostedWorkspaceInvocation.mockImplementation(
       async (_job, options) => {
@@ -302,6 +304,10 @@ describe("container entrypoint abort boundary", () => {
       port: 0,
       runtime: {
         exitScheduler: exit,
+        async stopWarmCodex(reason) {
+          warmCodexStopStarted.resolve(reason);
+          await allowWarmCodexStop.promise;
+        },
       },
     });
     servers.push(server);
@@ -336,6 +342,30 @@ describe("container entrypoint abort boundary", () => {
     );
     expect(abortResponse.status).toBe(204);
     await invocationAborted.promise;
+    await expect(warmCodexStopStarted.promise).resolves.toBe("workspace-invocation-abort");
+
+    const healthWhileStopping = await sendHostedContainerGetRequest({
+      path: "/health",
+      port: address.port,
+    });
+    expect(healthWhileStopping.json).toMatchObject({
+      activeJobCount: 1,
+      poisoned: false,
+    });
+
+    const replacementWhileStopping = await fetch(
+      `http://127.0.0.1:${address.port}/internal/workspace-invocation`,
+      {
+        body: JSON.stringify(buildWorkspaceJobBody({ eventId: "evt_during_abort_stop" })),
+        headers: {
+          "content-type": "application/json; charset=utf-8",
+        },
+        method: "POST",
+      },
+    );
+    expect(replacementWhileStopping.status).toBe(409);
+
+    allowWarmCodexStop.resolve();
     await request.done;
 
     expect(signal.aborted).toBe(true);
@@ -622,5 +652,92 @@ describe("container entrypoint abort boundary", () => {
       });
     });
     expect(exit).not.toHaveBeenCalled();
+  });
+
+  it("poisons the container when exact warm Codex teardown fails after abort", async () => {
+    const invocationStarted = createDeferred<AbortSignal>();
+    const exit = vi.fn();
+    mocks.runHostedWorkspaceInvocation.mockImplementation(
+      async (_job, options) => {
+        const signal = options?.signal;
+        if (!signal) {
+          throw new Error("Expected hosted workspace invocation signal.");
+        }
+
+        invocationStarted.resolve(signal);
+        if (!signal.aborted) {
+          await new Promise<void>((resolve) => {
+            signal.addEventListener("abort", () => resolve(), { once: true });
+          });
+        }
+        throw signal.reason instanceof Error
+          ? signal.reason
+          : new Error("Request aborted.");
+      },
+    );
+
+    const server = await startHostedContainerEntrypoint({
+      port: 0,
+      runtime: {
+        exitScheduler: exit,
+        stopWarmCodex: async () => {
+          throw new Error("exact stop failed");
+        },
+      },
+    });
+    servers.push(server);
+    const address = server.address();
+
+    if (!address || typeof address === "string") {
+      throw new Error("Expected the hosted container entrypoint to expose a TCP port.");
+    }
+
+    const requestBody = buildWorkspaceJobBody({ eventId: "evt_abort_stop_failure" });
+    const request = sendHostedContainerPostRequest({
+      body: requestBody,
+      path: "/internal/workspace-invocation",
+      port: address.port,
+    });
+    await invocationStarted.promise;
+
+    const abortResponse = await fetch(
+      `http://127.0.0.1:${address.port}/internal/workspace-invocation/abort`,
+      {
+        body: JSON.stringify({
+          attemptId: requestBody.job.request.attemptId,
+          leaseGeneration: requestBody.job.request.leaseGeneration,
+          userId: requestBody.job.request.userId,
+        }),
+        headers: {
+          "content-type": "application/json; charset=utf-8",
+        },
+        method: "POST",
+      },
+    );
+    expect(abortResponse.status).toBe(204);
+    await request.done;
+
+    expect(exit).toHaveBeenCalledTimes(1);
+    const health = await sendHostedContainerGetRequest({
+      path: "/health",
+      port: address.port,
+    });
+    expect(health.json).toMatchObject({
+      activeJobCount: 0,
+      poisoned: true,
+    });
+
+    const replacement = await fetch(
+      `http://127.0.0.1:${address.port}/internal/workspace-invocation`,
+      {
+        body: JSON.stringify(buildWorkspaceJobBody({ eventId: "evt_after_stop_failure" })),
+        headers: {
+          "content-type": "application/json; charset=utf-8",
+        },
+        method: "POST",
+      },
+    );
+    expect(replacement.status).toBe(503);
+    expect(mocks.runHostedWorkspaceInvocation).toHaveBeenCalledTimes(1);
   });
 });

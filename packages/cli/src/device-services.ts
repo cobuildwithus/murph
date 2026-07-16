@@ -9,14 +9,7 @@ import {
   createDeviceSyncClient,
   DEVICE_SYNC_BASE_URL_ENV,
 } from '@murphai/operator-config/device-sync-client'
-import {
-  HostedCliBridgeRequestError,
-  isHostedRuntimeProcessEnv,
-  readHostedCliBridgeEnv,
-  requestHostedCliDeviceAccountList,
-  requestHostedCliDeviceAccountReconcile,
-  requestHostedCliDeviceConnectLink,
-} from '@murphai/hosted-execution/cli-runtime-bridge'
+import { isHostedRuntimeProcessEnv } from '@murphai/hosted-execution/env'
 import {
   VaultCliError,
 } from '@murphai/operator-config/vault-cli-errors'
@@ -94,16 +87,6 @@ export interface DeviceSyncServices {
 
 export interface CliVaultServices extends VaultServices {
   devices: DeviceSyncServices
-}
-
-interface DeviceConnectAuthority {
-  createConnectLink(input: {
-    vault?: string
-    provider: string
-    baseUrl?: string
-    returnTo?: string
-    open?: boolean
-  }): Promise<DeviceConnectResult>
 }
 
 export function createIntegratedDeviceSyncServices(): DeviceSyncServices {
@@ -188,7 +171,21 @@ export function createIntegratedDeviceSyncServices(): DeviceSyncServices {
 
   return {
     async listProviders(input) {
-      assertHostedRuntimeDoesNotUseExplicitControlPlaneTarget(input, 'provider list')
+      if (isHostedRuntimeProcessEnv(process.env)) {
+        if (hasExplicitControlPlaneTarget(input)) {
+          assertHostedDeviceRootToolRequired('provider list')
+        }
+        return {
+          providers: listDeviceSyncProviderCatalog().map((provider) => ({
+            ...provider,
+            source: 'catalog' as const,
+            callbackUrl: null,
+            webhookUrl: null,
+            localConfigured: false,
+          })),
+        }
+      }
+
       if (hasExplicitControlPlaneTarget(input)) {
         const client = await createControlPlaneClient(input)
         const result = await client.listProviders()
@@ -242,14 +239,11 @@ export function createIntegratedDeviceSyncServices(): DeviceSyncServices {
       }
     },
     async connect(input) {
-      assertHostedRuntimeDoesNotUseExplicitControlPlaneTarget(input, 'connect')
-      return resolveDeviceConnectAuthority(input).createConnectLink(input)
+      assertHostedDeviceRootToolRequired('connect')
+      return connectViaLocalDaemon(input)
     },
     async listAccounts(input) {
-      if (isHostedRuntimeProcessEnv(process.env)) {
-        assertHostedRuntimeDoesNotUseExplicitControlPlaneTarget(input, 'account list')
-        return listAccountsViaHostedBridge(input)
-      }
+      assertHostedDeviceRootToolRequired('account list')
 
       if (hasExplicitInputControlPlaneTarget(input)) {
         const client = await createControlPlaneClient(input)
@@ -320,7 +314,7 @@ export function createIntegratedDeviceSyncServices(): DeviceSyncServices {
       }
     },
     async showAccount(input) {
-      assertHostedRuntimeDoesNotUseExplicitControlPlaneTarget(input, 'account show')
+      assertHostedDeviceRootToolRequired('account show')
       const client = await createControlPlaneClient(input)
       const result = await client.showAccount(input.accountId)
 
@@ -330,35 +324,7 @@ export function createIntegratedDeviceSyncServices(): DeviceSyncServices {
       }
     },
     async reconcileAccount(input) {
-      if (isHostedRuntimeProcessEnv(process.env)) {
-        assertHostedRuntimeDoesNotUseExplicitControlPlaneTarget(input, 'account reconcile')
-        const bridge = readRequiredHostedBridge('account reconcile')
-        const result = await requestHostedCliDeviceAccountReconcile({
-          accountId: input.accountId,
-          bridge,
-        }).catch((error) => {
-          const bridgeCode = error instanceof HostedCliBridgeRequestError
-            ? error.code
-            : null
-          throw new VaultCliError(
-            bridgeCode === 'HOSTED_CLI_BRIDGE_REQUEST_TIMEOUT'
-              ? 'HOSTED_DEVICE_ACCOUNT_RECONCILE_BRIDGE_REQUEST_TIMEOUT'
-              : bridgeCode ?? 'HOSTED_DEVICE_ACCOUNT_RECONCILE_BRIDGE_REQUEST_FAILED',
-            error instanceof Error
-              ? error.message
-              : 'Hosted device account reconcile bridge request failed.',
-          )
-        })
-
-        return {
-          accountId: result.connectionId,
-          backend: 'hosted',
-          occurredAt: result.occurredAt,
-          status: result.status,
-        }
-      }
-
-      assertHostedRuntimeDoesNotUseExplicitControlPlaneTarget(input, 'account reconcile')
+      assertHostedDeviceRootToolRequired('account reconcile')
       const client = await createControlPlaneClient(input)
       const result = await client.reconcileAccount(input.accountId)
 
@@ -369,7 +335,7 @@ export function createIntegratedDeviceSyncServices(): DeviceSyncServices {
       }
     },
     async disconnectAccount(input) {
-      assertHostedRuntimeDoesNotUseExplicitControlPlaneTarget(input, 'account disconnect')
+      assertHostedDeviceRootToolRequired('account disconnect')
       const client = await createControlPlaneClient(input)
       const current = await client.showAccount(input.accountId)
       const result = await client.disconnectAccount(
@@ -383,21 +349,21 @@ export function createIntegratedDeviceSyncServices(): DeviceSyncServices {
       }
     },
     async daemonStatus(input) {
-      assertHostedRuntimeDoesNotUseExplicitControlPlaneTarget(input, 'daemon status')
+      assertHostedDeviceRootToolRequired('daemon status')
       return await getManagedDeviceSyncDaemonStatus({
         vault: input.vault,
         baseUrl: input.baseUrl,
       })
     },
     async daemonStart(input) {
-      assertHostedRuntimeDoesNotUseExplicitControlPlaneTarget(input, 'daemon start')
+      assertHostedDeviceRootToolRequired('daemon start')
       return await startManagedDeviceSyncDaemon({
         vault: input.vault,
         baseUrl: input.baseUrl,
       })
     },
     async daemonStop(input) {
-      assertHostedRuntimeDoesNotUseExplicitControlPlaneTarget(input, 'daemon stop')
+      assertHostedDeviceRootToolRequired('daemon stop')
       return await stopManagedDeviceSyncDaemon({
         vault: input.vault,
         baseUrl: input.baseUrl,
@@ -405,118 +371,15 @@ export function createIntegratedDeviceSyncServices(): DeviceSyncServices {
     },
   } satisfies DeviceSyncServices
 
-  async function listAccountsViaHostedBridge(input: {
-    provider?: string
-    sourceProvider?: string
-  }): Promise<DeviceAccountListResult> {
-    const bridge = readRequiredHostedBridge('account list')
-    const result = await requestHostedCliDeviceAccountList({
-      bridge,
-      provider: input.provider,
-      sourceProvider: input.sourceProvider,
-    }).catch((error) => {
-      const bridgeCode = error instanceof HostedCliBridgeRequestError
-        ? error.code
-        : null
-      const cliCode = bridgeCode === 'HOSTED_CLI_BRIDGE_REQUEST_TIMEOUT'
-        ? 'HOSTED_DEVICE_ACCOUNT_LIST_BRIDGE_REQUEST_TIMEOUT'
-        : 'HOSTED_DEVICE_ACCOUNT_LIST_BRIDGE_REQUEST_FAILED'
-      throw new VaultCliError(
-        cliCode,
-        error instanceof Error
-          ? error.message
-          : 'Hosted device account list bridge request failed.',
-      )
-    })
-
-    return {
-      provider: result.provider,
-      sourceProvider: result.sourceProvider,
-      accounts: result.accounts,
-    }
-  }
-
-  function resolveDeviceConnectAuthority(input: {
-    baseUrl?: string
-  }): DeviceConnectAuthority {
+  function assertHostedDeviceRootToolRequired(operation: string): void {
     if (!isHostedRuntimeProcessEnv(process.env)) {
-      return {
-        createConnectLink: connectViaLocalDaemon,
-      }
-    }
-
-    const bridge = readRequiredHostedBridge('connect')
-
-    return {
-      async createConnectLink(connectInput) {
-        return connectViaHostedBridge({
-          ...connectInput,
-          bridge,
-        })
-      },
-    }
-  }
-
-  function assertHostedRuntimeDoesNotUseExplicitControlPlaneTarget(input: {
-    baseUrl?: string
-  }, command: string): void {
-    if (
-      !isHostedRuntimeProcessEnv(process.env)
-      || !hasExplicitControlPlaneTarget(input)
-    ) {
       return
     }
 
     throw new VaultCliError(
-      'HOSTED_DEVICE_BASE_URL_UNSUPPORTED',
-      `Hosted device ${command} must use the hosted bridge and does not support --base-url or DEVICE_SYNC_BASE_URL.`,
+      'invalid_option',
+      `Hosted device ${operation} is available only through Murph's root hosted device tool.`,
     )
-  }
-
-  async function connectViaHostedBridge(input: {
-    bridge: NonNullable<ReturnType<typeof readHostedCliBridgeEnv>>
-    provider: string
-    returnTo?: string
-  }): Promise<DeviceConnectResult> {
-    assertPublicConnectTarget(input.provider)
-
-    if (input.returnTo) {
-      throw new VaultCliError(
-        'HOSTED_DEVICE_CONNECT_RETURN_TO_UNSUPPORTED',
-        'Hosted device connect does not support --return-to yet.',
-      )
-    }
-
-    const result = await requestHostedCliDeviceConnectLink({
-      bridge: input.bridge,
-      connectTarget: input.provider,
-    }).catch((error) => {
-      const bridgeCode = error instanceof HostedCliBridgeRequestError
-        ? error.code
-        : null
-      const cliCode = bridgeCode === 'HOSTED_CLI_BRIDGE_REQUEST_TIMEOUT'
-        ? 'HOSTED_DEVICE_CONNECT_BRIDGE_REQUEST_TIMEOUT'
-        : 'HOSTED_DEVICE_CONNECT_BRIDGE_REQUEST_FAILED'
-      throw new VaultCliError(
-        cliCode,
-        error instanceof Error
-          ? error.message
-          : 'Hosted device-connect bridge request failed.',
-      )
-    })
-
-    const connectUrl = result.connectUrl ?? result.authorizationUrl
-
-    return {
-      status: 'ok',
-      kind: 'device_connect_link',
-      backend: 'hosted',
-      provider: result.provider,
-      providerLabel: result.providerLabel,
-      expiresAt: result.expiresAt,
-      authorizationUrl: connectUrl,
-      connectUrl,
-    }
   }
 
   async function connectViaLocalDaemon(input: {
@@ -579,35 +442,6 @@ export function createIntegratedDeviceSyncServices(): DeviceSyncServices {
       : { provider: connectTarget }
   }
 
-  function readRequiredHostedBridge(
-    operation: 'account list' | 'account reconcile' | 'connect',
-  ): NonNullable<ReturnType<typeof readHostedCliBridgeEnv>> {
-    const errorPrefix = operation === 'connect'
-      ? 'HOSTED_DEVICE_CONNECT'
-      : operation === 'account list'
-        ? 'HOSTED_DEVICE_ACCOUNT_LIST'
-        : 'HOSTED_DEVICE_ACCOUNT_RECONCILE'
-    let bridge
-    try {
-      bridge = readHostedCliBridgeEnv(process.env)
-    } catch (error) {
-      throw new VaultCliError(
-        `${errorPrefix}_BRIDGE_INVALID`,
-        error instanceof Error
-          ? error.message
-          : `Hosted device ${operation} bridge configuration is invalid.`,
-      )
-    }
-
-    if (!bridge) {
-      throw new VaultCliError(
-        `${errorPrefix}_BRIDGE_UNAVAILABLE`,
-        `Hosted device ${operation} is unavailable in this runtime.`,
-      )
-    }
-
-    return bridge
-  }
 }
 
 function requireDeviceVault(vault: string | null | undefined): string {

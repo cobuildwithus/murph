@@ -1,12 +1,6 @@
 import { Cli, z } from "incur";
 
-import {
-  HostedCliBridgeRequestError,
-  isHostedRuntimeProcessEnv,
-  readHostedCliBridgeEnv,
-  requestHostedCliAssistantCurrentRoute,
-  type HostedCliAssistantCurrentRoute,
-} from "@murphai/hosted-execution/cli-runtime-bridge";
+import { isHostedRuntimeProcessEnv } from "@murphai/hosted-execution/env";
 import {
   assistantReasoningEffortValues,
   automationAssistantTargetOverrideSchema,
@@ -28,8 +22,6 @@ import {
   type AutomationTimeScheduleKind,
 } from "@murphai/contracts";
 import {
-  assistantDeliveryRoutesBelongToSameConversation,
-  type AssistantAutomationRouteValidationProfile,
   getAssistantAutomationRouteDeliverabilityIssue,
   resolveAssistantDeliveryRouteWithCurrentRoute,
   stripPrivateAssistantRoutePlaceholders,
@@ -90,11 +82,6 @@ interface AutomationAssistantTargetOverrideOptions {
 interface AutomationAssistantTargetOverrideEditOptions
   extends AutomationAssistantTargetOverrideOptions {
   clearAssistantTargetOverride?: boolean;
-}
-
-interface AutomationCurrentRouteContext {
-  hosted: boolean;
-  route: HostedCliAssistantCurrentRoute | null;
 }
 
 export const automationRecordSchema = z
@@ -247,12 +234,7 @@ function hasDefinedAutomationOption(options: object): boolean {
 
 function buildAutomationRouteFromOptions(
   input: AutomationRouteOptions,
-  currentRoute: HostedCliAssistantCurrentRoute | null,
 ): AutomationRoute {
-  // Strip redacted placeholders from the model-typed flags before merging:
-  // the current route comes from the hosted bridge, not model text, and its
-  // locators are trusted as-is (hosted linq locators are hid_-blinded by
-  // design, the same values session bindings persist).
   const explicit = stripPrivateAssistantRoutePlaceholders({
     channel: normalizeAutomationRouteOption(input.channel),
     deliveryTarget: normalizeAutomationRouteOption(input.deliveryTarget),
@@ -261,102 +243,26 @@ function buildAutomationRouteFromOptions(
     threadId: normalizeAutomationRouteOption(input.threadId),
   });
   return automationRouteSchema.parse(
-    resolveAssistantDeliveryRouteWithCurrentRoute(explicit, currentRoute),
+    resolveAssistantDeliveryRouteWithCurrentRoute(explicit, null),
   );
 }
 
-async function readAutomationCurrentRoute(): Promise<AutomationCurrentRouteContext> {
-  const hosted = isHostedRuntimeProcessEnv(process.env);
-  const bridge = readHostedCliBridgeEnv(process.env);
-  if (bridge) {
-    try {
-      const response = await requestHostedCliAssistantCurrentRoute({ bridge });
-      return {
-        hosted: true,
-        route: response.route,
-      };
-    } catch (error) {
-      if (error instanceof HostedCliBridgeRequestError) {
-        throw new VaultCliError(
-          "invalid_option",
-          "Unable to read the hosted assistant current delivery route.",
-        );
-      }
-      throw error;
-    }
+function assertAutomationCliMutationAllowed(): void {
+  if (!isHostedRuntimeProcessEnv(process.env)) {
+    return;
   }
 
-  return {
-    hosted,
-    route: null,
-  };
-}
-
-function authorizeAutomationRouteForCurrentContext(
-  route: AutomationRoute,
-  currentRouteContext: AutomationCurrentRouteContext,
-): AutomationRoute {
-  const currentRoute = requireHostedAutomationMutationContext(
-    currentRouteContext,
-  );
-  if (!currentRoute) {
-    return route;
-  }
-
-  if (!assistantDeliveryRoutesBelongToSameConversation(route, currentRoute)) {
-    return invalidAutomationOption(
-      "Hosted automation route changes can target only the current chat.",
-    );
-  }
-
-  return automationRouteSchema.parse(
-    resolveAssistantDeliveryRouteWithCurrentRoute({}, currentRoute),
+  throw new VaultCliError(
+    "invalid_option",
+    "Hosted automation mutations are available only through Murph's root hosted automation tool.",
   );
 }
 
-function requireHostedAutomationMutationContext(
-  currentRouteContext: AutomationCurrentRouteContext,
-): HostedCliAssistantCurrentRoute | null {
-  if (!currentRouteContext.hosted) {
-    return null;
-  }
-
-  const currentRoute = currentRouteContext.route;
-  if (!currentRoute || typeof currentRoute.threadIsDirect !== "boolean") {
-    return invalidAutomationOption(
-      "Hosted automation changes require one verified current conversation.",
-    );
-  }
-  if (currentRoute.channel === "email" && currentRoute.threadIsDirect === false) {
-    return invalidAutomationOption(
-      "Group-email replies cannot change automations because their sender is not authenticated. Continue from the authenticated group chat instead.",
-    );
-  }
-
-  return currentRoute;
-}
-
-function assertAutomationRouteCanDeliver(
-  route: AutomationRoute,
-  profile: AssistantAutomationRouteValidationProfile = "local",
-): void {
-  const issue = getAssistantAutomationRouteDeliverabilityIssue(route, profile);
+function assertAutomationRouteCanDeliver(route: AutomationRoute): void {
+  const issue = getAssistantAutomationRouteDeliverabilityIssue(route, "local");
   if (issue) {
     throw new VaultCliError("invalid_option", issue.message);
   }
-}
-
-function assertActiveAutomationRouteCanDeliver(
-  route: AutomationRoute,
-  profile: AssistantAutomationRouteValidationProfile =
-    activeAutomationRouteValidationProfile(),
-): void {
-  assertAutomationRouteCanDeliver(route, profile);
-}
-
-function activeAutomationRouteValidationProfile(): AssistantAutomationRouteValidationProfile {
-  const hasHostedBridge = readHostedCliBridgeEnv(process.env) !== null;
-  return hasHostedBridge ? "hosted" : "local";
 }
 
 function automationStatusIsActive(status: AutomationScaffoldPayload["status"] | undefined): boolean {
@@ -654,20 +560,17 @@ export function registerAutomationCommands(cli: Cli.Cli) {
     options: withBaseOptions(automationSaveOptionSchemas),
     output: automationSaveResultSchema,
     async run(context) {
+      assertAutomationCliMutationAllowed();
       const now = new Date().toISOString();
-      const currentRouteContext = await readAutomationCurrentRoute();
-      const route = authorizeAutomationRouteForCurrentContext(
-        buildAutomationRouteFromOptions({
-          channel: context.options.channel,
-          deliveryTarget: context.options.deliveryTarget,
-          identityId: context.options.identityId,
-          participantId: context.options.participantId,
-          threadId: context.options.threadId,
-        }, currentRouteContext.route),
-        currentRouteContext,
-      );
+      const route = buildAutomationRouteFromOptions({
+        channel: context.options.channel,
+        deliveryTarget: context.options.deliveryTarget,
+        identityId: context.options.identityId,
+        participantId: context.options.participantId,
+        threadId: context.options.threadId,
+      });
       if (automationStatusIsActive(context.options.status)) {
-        assertActiveAutomationRouteCanDeliver(route);
+        assertAutomationRouteCanDeliver(route);
       }
       const input: AutomationScaffoldPayload = automationScaffoldPayloadSchema.parse({
         automationId: context.options.id,
@@ -738,8 +641,8 @@ export function registerAutomationCommands(cli: Cli.Cli) {
     options: withBaseOptions(automationEditOptionSchemas),
     output: automationSaveResultSchema,
     async run(context) {
+      assertAutomationCliMutationAllowed();
       const now = new Date().toISOString();
-      const currentRouteContext = await readAutomationCurrentRoute();
       const existing = await showAutomation(context.options.vault, context.args.lookup);
       if (!existing) {
         throw new VaultCliError(
@@ -747,7 +650,6 @@ export function registerAutomationCommands(cli: Cli.Cli) {
           "Automation was not found.",
         );
       }
-      requireHostedAutomationMutationContext(currentRouteContext);
       const routeOptions = {
         channel: context.options.channel,
         deliveryTarget: context.options.deliveryTarget,
@@ -776,18 +678,12 @@ export function registerAutomationCommands(cli: Cli.Cli) {
         triggerLocalTime: context.options.triggerLocalTime,
       };
       const route = hasDefinedAutomationOption(routeOptions)
-        ? authorizeAutomationRouteForCurrentContext(
-            buildAutomationRouteFromOptions(
-              routeOptions,
-              currentRouteContext.route,
-            ),
-            currentRouteContext,
-          )
+        ? buildAutomationRouteFromOptions(routeOptions)
         : undefined;
       if (
         (context.options.status ?? existing.status) === "active"
       ) {
-        assertActiveAutomationRouteCanDeliver(route ?? existing.route);
+        assertAutomationRouteCanDeliver(route ?? existing.route);
       }
       const assistantTargetOverride = buildAutomationAssistantTargetOverridePatchFromOptions({
         ...assistantTargetOverrideOptions,
@@ -798,8 +694,7 @@ export function registerAutomationCommands(cli: Cli.Cli) {
         continuityPolicy: context.options.continuityPolicy,
         instructions: context.options.instructions,
         lookup: context.args.lookup,
-        // Route flags replace the stored route. Hosted route writes are
-        // restricted above to the trusted current conversation.
+        // Route flags replace the stored route.
         route,
         schedule: hasDefinedAutomationOption(scheduleOptions)
           ? buildAutomationScheduleFromOptions(scheduleOptions, { now })
@@ -850,7 +745,7 @@ export function registerAutomationCommands(cli: Cli.Cli) {
     }),
     output: automationSaveResultSchema,
     async run(context) {
-      const currentRouteContext = await readAutomationCurrentRoute();
+      assertAutomationCliMutationAllowed();
       const existing = await showAutomation(context.options.vault, context.args.lookup);
       if (!existing) {
         throw new VaultCliError(
@@ -858,22 +753,13 @@ export function registerAutomationCommands(cli: Cli.Cli) {
           "Automation was not found.",
         );
       }
-      requireHostedAutomationMutationContext(currentRouteContext);
       if (context.options.status === "active") {
-        assertActiveAutomationRouteCanDeliver(existing.route);
+        assertAutomationRouteCanDeliver(existing.route);
       }
 
-      const result = await upsertAutomation({
-        automationId: existing.automationId,
-        continuityPolicy: existing.continuityPolicy,
-        instructions: existing.instructions,
-        route: existing.route,
-        schedule: existing.schedule,
-        slug: existing.slug,
+      const result = await patchAutomation({
+        lookup: context.args.lookup,
         status: context.options.status,
-        summary: existing.summary ?? undefined,
-        tags: existing.tags,
-        title: existing.title,
         vaultRoot: context.options.vault,
       });
 
@@ -934,19 +820,16 @@ export function registerAutomationCommands(cli: Cli.Cli) {
     }),
     output: automationSaveResultSchema,
     async run(context) {
-      const currentRouteContext = await readAutomationCurrentRoute();
+      assertAutomationCliMutationAllowed();
       const input = automationScaffoldPayloadSchema.parse(
         await loadJsonInputObject(
           context.options.input,
           "automation payload",
         ),
       );
-      const route = authorizeAutomationRouteForCurrentContext(
-        normalizeAutomationRouteFieldsForSave(input.route),
-        currentRouteContext,
-      );
+      const route = normalizeAutomationRouteFieldsForSave(input.route);
       if (automationStatusIsActive(input.status)) {
-        assertActiveAutomationRouteCanDeliver(route);
+        assertAutomationRouteCanDeliver(route);
       }
       const result = await upsertAutomation({
         ...input,

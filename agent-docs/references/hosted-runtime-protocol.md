@@ -102,6 +102,41 @@ input spine used by local automation:
 source adapter -> AssistantInputEvent -> AssistantInputSource -> scanner / active turn -> accepted-input journal -> Codex
 ```
 
+### Resident Codex And Detached Enrichment Boundary
+
+The container owns one resident Codex App Server and keeps it warm across
+ordinary turns and ordinary workspace invocations. Turn completion, invocation
+completion, and invocation-scoped credential rotation do not replace it. An
+explicit workspace invocation abort or preemption is different: the container
+interrupts the active background-work boundary and synchronously stops the exact
+owned App Server before it releases the job slot for another invocation. A stop
+failure poisons the container rather than allowing a replacement invocation to
+reuse ambiguous process state.
+
+Detached MultiAgent V2 work does not become a process-memory queue. Before the
+root reply, the parent writes the smallest truthful canonical fact or preserves
+the durable raw source and captures the exact record ids or source references.
+The child may perform only optional, idempotent enrichment against that durable
+base. Its terminal lifecycle receipt is advisory; canonical readback is the
+completion proof. If the member was promised the result and no separate durable
+owner exists, the root turn retains the work and uses normal progress updates
+instead of detaching it.
+
+Each root session may admit at most one detached child under Codex's native
+root-plus-one residency cap. Independent roots may retain children concurrently
+inside the same resident App Server. Every child must be a one-shot leaf: no
+root/child interaction, child reuse, nested child, same-root parallel child, or
+background terminal is supported. At the workspace snapshot boundary, the
+runtime waits for every exact resident child and checks every touched root and
+resident child for background terminals before archive construction may
+proceed. Codex admission of a per-session successor is the native fence that
+its completed predecessor was flushed and unloaded, leaving the successor as
+that root's resident child. A routine checkpoint wake cancels only that wait
+and keeps the process plus all resident lifecycle evidence warm for the later
+boundary. A timeout or unsupported lifecycle stops the exact process and fails
+the boundary closed. Explicit invocation abort/preemption cancels the wait and
+enters the synchronous exact-process stop path above.
+
 The hosted adapter is the mailbox importer. It decodes a conversation mailbox
 row into a bounded `AssistantInputEvent`, stages it in local runtime state,
 marks the active invocation dirty, and checkpoints that dirty state only at the
@@ -467,19 +502,17 @@ processing is needed, calls Cloudflare's short-lived `ensure-processing`
 adapter. Linq webhook ingress may additionally fire one best-effort direct
 `ensure-processing` request (Vercel OIDC, fire and forget, no retries, no
 message payload) after the committed known checkpoint's owner matches and the
-canonical live active-access check succeeds. That participant-aware gate runs
-once; only then do the unconditional Temporal `signalWithStart` and the direct
-ensure start concurrently. An access failure starts neither operation. This is
-a latency hint only, not a second durable wake authority: it is Linq-only
-because accepted Linq reply delivery stamps `HostedMailboxItem.consumedAt`, so
-a racing ensure may import an already-consumed row but it stages with a null
-reply target and cannot be answered again. Do not add workflow-side direct-wake
-flags, derived-floor SQL, or lag netting merely to avoid harmless post-delivery
-no-op ensures. There is no direct web-to-Cloudflare message path and no second
-durable wake authority. If the Temporal signal cannot be accepted after the
-live gate, the existing post-commit handoff failure semantics remain
-authoritative even though the one-shot direct hint may already have fired.
-Temporal remains the sole durable retry and reconciliation owner. The existing
+canonical live active-access check succeeds. Web first awaits the unconditional
+Temporal `signalWithStart`; only after Temporal accepts that durable signal does
+web start the direct ensure. An access failure or Temporal acceptance failure
+starts no direct wake. This is a latency hint only, not a second durable wake
+authority: it is Linq-only because accepted Linq reply delivery stamps
+`consumedAt` on the exact `HostedMailboxItem`, so a later ensure imports an
+already-consumed row with a null reply target and cannot answer it again. Do not
+add workflow-side direct-wake flags, derived-floor SQL, or lag netting merely to
+avoid harmless post-delivery no-op ensures. There is no direct web-to-Cloudflare
+message path and no second durable wake authority. Temporal remains the sole
+durable retry and reconciliation owner. The existing
 Temporal scheduled-reconcile
 command also runs one bounded preference-handoff sweep. Web selects live
 `member.preferences.updated` rows above the authoritative system-lane
@@ -1133,10 +1166,13 @@ reference-safe owner-scoped retention primitive.
 a direct-R2 v2 snapshot from the effective restored state, runs through the
 ordinary invocation lease shortly before container sleep, and checks the lease
 during the broad snapshot walk so stale idle shutdown can abort before direct
-R2 upload. Snapshot planning, archive construction, upload, and publication hold
-the vault's canonical-write lock as one transaction. A canonical mutation may
-therefore complete with its receipt before snapshotting starts or begin after
-the published snapshot boundary, but it cannot change the local canonical base
+R2 upload. Before planning begins, the runtime completes the resident-Codex
+background boundary described above; no snapshot may race admitted optional
+enrichment or an unowned background terminal. Snapshot planning, archive
+construction, upload, and publication hold the vault's canonical-write lock as
+one transaction. A canonical mutation may therefore complete with its receipt
+before snapshotting starts or begin after the published snapshot boundary, but
+it cannot change the local canonical base
 between archive collection and publication. `packages/assistant-runtime` owns
 the hosted invocation bridge,
 snapshot planning, diagnostics, and mailbox-import policy; Cloudflare supplies

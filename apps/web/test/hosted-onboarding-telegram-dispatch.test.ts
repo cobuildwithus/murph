@@ -52,12 +52,10 @@ const mocks = vi.hoisted(() => {
         usageGateDenied: false,
       };
     }),
-    prepareHostedMailboxAppendRuntimeSignal: vi.fn(),
     signalHostedMailboxAppendRuntime: vi.fn(async () => ({
       signalAccepted: true,
       workflowId: "hosted-user-runtime:member_123",
     })),
-    signalHostedUserRuntimeWorkflow: vi.fn(),
     materializePendingHostedGroupJoinConfirmationsBestEffort: vi.fn(async () => {}),
     provisionActiveHostedDomainRootEnvelopeForUserOnly: vi.fn(async () => ({})),
     readHostedMailboxItemByDedupeKey: vi.fn(async () => null),
@@ -172,10 +170,7 @@ vi.mock("@/src/lib/hosted-runner/assistant-nudge", () => ({
 }));
 
 vi.mock("@/src/lib/hosted-orchestration/signal-runtime", () => ({
-  prepareHostedMailboxAppendRuntimeSignal:
-    mocks.prepareHostedMailboxAppendRuntimeSignal,
   signalHostedMailboxAppendRuntime: mocks.signalHostedMailboxAppendRuntime,
-  signalHostedUserRuntimeWorkflow: mocks.signalHostedUserRuntimeWorkflow,
 }));
 
 vi.mock("@/src/lib/hosted-crypto/domain-root-store", async () => {

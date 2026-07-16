@@ -479,10 +479,10 @@ reliable supply-duration evidence. Examples include a 30-day supplement supply,
 
 Create it under the developer prompt's shared automation action rules with:
 
-- `--schedule-kind at` and a single ISO timestamp near expected depletion
-- a stable slug that identifies the item and date
-- `--continuity-policy preserve`
-- instructions that ask whether the user wants Murph to reorder or adjust the
+- `schedule: { "kind": "at", "at": "<ISO timestamp near expected depletion>" }`
+- `slug`: a stable value that identifies the item and date
+- `continuityPolicy: "preserve"`
+- `instructions`: ask whether the user wants Murph to reorder or adjust the
   item
 
 Schedule around two days before the item likely runs out. For a 30-day supply,

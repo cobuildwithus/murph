@@ -57,6 +57,46 @@ it has been explicitly elevated to a cross-cutting invariant.
   authorization, and current-turn identity; stale-output rejection and explicit
   abort; privacy; canonical writes; provider credential and delivery authority;
   and irreversible effects. Warm reuse is an optimization, never authority.
+- One Codex App Server belongs to the warm container or Node process and stays
+  warm across ordinary turns for that owner's lifetime. Starting or completing
+  an ordinary turn, closing an ordinary invocation, rotating
+  invocation-scoped credentials, or starting a later turn must not replace it.
+  Process replacement is limited to owner shutdown, App Server exit or proven
+  unhealthy/poisoned state, explicit operator shutdown, explicit workspace
+  invocation abort/preemption, or a genuine process-level configuration change
+  that Codex cannot accept through thread or turn RPC. Workspace invocation
+  abort/preemption must synchronously stop the exact owned App Server before
+  the invocation slot can be reused.
+- Prompts, session/thread/turn ids, delivery routes, and invocation-scoped
+  automation or device authority are request facts, not App Server launch
+  identity or ambient child-process authority. Expose invocation-scoped
+  authority only through narrow typed tools on the current root turn; keep it
+  out of the App Server and descendant shell environments.
+- No user-promised work may be owned only by App Server or descendant process
+  memory. Before detaching optional enrichment, the parent persists the
+  smallest truthful canonical fact or durable raw source and keeps its exact
+  record ids or source references. A child may only enrich that durable base
+  idempotently. Its terminal lifecycle receipt is advisory; a canonical read
+  confirms the write before Murph says the enrichment finished.
+- A detached Codex MultiAgent V2 child admitted before a root reply may continue
+  after that reply only as a one-shot leaf. Each root session may have at most
+  one active child under Codex's native root-plus-one cap; independent roots in
+  one warm App Server may each retain a child. A child may not interact with the
+  root or another child, be reused for another turn, spawn a nested child, or
+  leave a background terminal. It never inherits the root turn's
+  invocation-scoped automation or device capability. Root completion or a
+  later ordinary turn does not terminate valid optional enrichment merely to
+  rotate request authority.
+- Before a hosted workspace snapshot, Murph waits for every exact resident child
+  and checks every touched root and resident child for background terminals. A
+  per-session successor is Codex's native fence that its completed predecessor
+  was flushed and unloaded, leaving the successor as that root's resident
+  child. An ordinary checkpoint wake interrupts only the boundary wait and
+  preserves the warm App Server plus all resident evidence. A timeout or
+  unsupported lifecycle stops the exact process and fails closed. Explicit
+  workspace invocation abort/preemption interrupts the wait and synchronously
+  tears down that exact process before workspace or invocation ownership is
+  released.
 
 ## Foreground Reply Critical Path
 
