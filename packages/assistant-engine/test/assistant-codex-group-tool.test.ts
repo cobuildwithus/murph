@@ -1438,8 +1438,6 @@ describe("murph.newsletter dynamic tool", () => {
       expect(newsletterRequest).toHaveBeenCalledWith({
         action: "prepare",
         groupId: "group_1",
-        includeAuthorizationProof: true,
-        includeAuthorizationSnapshot: true,
         scheduledAutomationAuthority: {
           automationId: "automation_newsletter",
           occurrenceAt: "2026-07-06T03:30:00.000Z",
@@ -1652,6 +1650,49 @@ describe("murph.newsletter dynamic tool", () => {
     } finally {
       await rm(vaultRoot, { force: true, recursive: true });
     }
+  });
+
+  it("records a rejected newsletter request as an unavailable send result", async () => {
+    const closeNewsletterCapability = vi.fn();
+    const recordNewsletterSendResult = vi.fn();
+    const request = readMurphDynamicToolRequest(newsletterToolCall({
+      action: "prepare",
+      groupId: "group_1",
+    }));
+    if (!request || request.kind !== "newsletter") {
+      throw new Error("Expected newsletter request.");
+    }
+
+    const result = await executeMurphDynamicToolRequest({
+      env: {},
+      fetchImpl: fetch,
+      hostedToolContext: createNewsletterHostedToolContext({
+        closeNewsletterCapability,
+        newsletterRequest: async () => {
+          throw new Error("Web callback rejected the request.");
+        },
+        recordNewsletterSendResult,
+      }),
+      nextUsageOrdinal: () => 1,
+      progressDelivery: null,
+      request,
+      vaultRoot: null,
+    });
+
+    expect(result.rpcResult).toEqual({
+      contentItems: [
+        { type: "inputText", text: "newsletter tool request failed" },
+      ],
+      success: false,
+    });
+    expect(closeNewsletterCapability).toHaveBeenCalledTimes(1);
+    expect(recordNewsletterSendResult).toHaveBeenCalledWith({
+      action: "send",
+      result: {
+        status: "unavailable",
+        unavailableReason: "newsletter_tool_failed",
+      },
+    });
   });
 
   it("returns a failed tool result and records post-turn failure for all-recipient send failure", async () => {

@@ -43,9 +43,6 @@ export function createAssistantNewsletterOutboxTool(input: {
   return {
     closeCapability,
     async request(request) {
-      if (request.action === 'read_stats') {
-        return await input.newsletterTool.request(request)
-      }
       if (request.action === 'prepare') {
         if (prepareAttempted || sendAttempted) {
           closeCapability()
@@ -55,8 +52,6 @@ export function createAssistantNewsletterOutboxTool(input: {
         const result = await input.newsletterTool.request({
           action: 'prepare',
           groupId: request.groupId,
-          includeAuthorizationProof: true,
-          includeAuthorizationSnapshot: true,
         })
         if (
           input.authority
