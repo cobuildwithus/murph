@@ -7,6 +7,11 @@ import type {
   HostedExecutionDeviceSyncWakeHint,
 } from "@murphai/device-syncd/hosted-runtime";
 import type {
+  AssistantPersonalitySettingId,
+  AssistantTonePreference,
+  AssistantVoiceOptionId,
+} from "@murphai/contracts";
+import type {
   AssistantRuntimeIssueRecord,
 } from "@murphai/runtime-state/node";
 import type {
@@ -888,7 +893,9 @@ export type HostedRuntimeGroupToolAction =
   | "read_chat_participants"
   | "set_chat_avatar"
   | "share_contact_card"
-  | "revoke_own_email_share";
+  | "revoke_own_email_share"
+  | "read_own_assistant_style"
+  | "update_own_assistant_style";
 
 export const HOSTED_RUNTIME_GROUP_KINDS = [
   "couple",
@@ -979,9 +986,32 @@ export interface HostedRuntimeGroupToolLinqThreadContext {
   chatId: string;
 }
 
-export interface HostedRuntimeGroupToolSelfOptOutContext {
+export interface HostedRuntimeGroupToolCurrentSenderContext {
+  /** Injected from the accepted Linq inbound; the model cannot select it. */
   senderHandle: string;
   source: "email" | "linq";
+}
+
+export type HostedRuntimeGroupToolSelfOptOutContext =
+  HostedRuntimeGroupToolCurrentSenderContext;
+
+export type HostedRuntimeGroupOwnAssistantPersonalityUpdate = Partial<
+  Record<AssistantPersonalitySettingId, number | null>
+>;
+
+export interface HostedRuntimeGroupOwnAssistantStyleUpdate {
+  personality?: HostedRuntimeGroupOwnAssistantPersonalityUpdate;
+  tone?: AssistantTonePreference;
+  voice?: AssistantVoiceOptionId;
+}
+
+export interface HostedRuntimeGroupOwnAssistantStyleSnapshot {
+  personality: Record<
+    AssistantPersonalitySettingId,
+    { source: "custom" | "default"; value: number }
+  >;
+  tone: AssistantTonePreference;
+  voice: AssistantVoiceOptionId;
 }
 
 export const HOSTED_RUNTIME_GROUP_CHAT_PARTICIPANTS_MAX = 32;
@@ -1027,6 +1057,15 @@ export type HostedRuntimeGroupToolRequest =
   | {
       action: "revoke_own_email_share";
       selfOptOut?: HostedRuntimeGroupToolSelfOptOutContext | null;
+    }
+  | {
+      action: "read_own_assistant_style";
+      currentSender?: HostedRuntimeGroupToolCurrentSenderContext | null;
+    }
+  | {
+      action: "update_own_assistant_style";
+      currentSender?: HostedRuntimeGroupToolCurrentSenderContext | null;
+      style: HostedRuntimeGroupOwnAssistantStyleUpdate;
     };
 
 export type HostedRuntimeGroupAskResult =
@@ -1119,6 +1158,21 @@ export type HostedRuntimeGroupToolResponse =
         | { status: "revoked"; revokedCount: number }
         | { status: "already_removed"; revokedCount: 0 }
         | { status: "unavailable"; unavailableReason: string };
+    }
+  | {
+      action: "read_own_assistant_style";
+      result:
+        | { status: "ok"; style: HostedRuntimeGroupOwnAssistantStyleSnapshot }
+        | { status: "unavailable"; unavailableReason: string; style: null };
+    }
+  | {
+      action: "update_own_assistant_style";
+      result:
+        | {
+            status: "saved" | "unchanged";
+            style: HostedRuntimeGroupOwnAssistantStyleSnapshot;
+          }
+        | { status: "unavailable"; unavailableReason: string; style: null };
     };
 
 export type HostedRuntimeNewsletterToolAction = "prepare" | "send";

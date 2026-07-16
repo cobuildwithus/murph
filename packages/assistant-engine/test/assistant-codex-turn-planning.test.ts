@@ -551,15 +551,15 @@ describe('assistant Codex turn planning', () => {
     )
     for (const privateStyleText of [
       'Assistant style settings:',
-      'Humor',
-      'Push',
-      'Detail',
       '/settings?voice=true',
       'vault-cli assistant style',
       'murph.assistant_style',
     ]) {
       expect(plan.developerInstructions).not.toContain(privateStyleText)
     }
+    expect(plan.developerInstructions).toContain(
+      '`read_own_assistant_style` and `update_own_assistant_style`',
+    )
     expect(plan.developerInstructions).not.toContain('`assistant style show`')
     expect(plan.assistantCliContract).toBeNull()
     expect(plan.dynamicTools.map((tool) => tool.name)).not.toContain(
