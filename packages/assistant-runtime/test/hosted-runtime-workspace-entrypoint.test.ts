@@ -19472,9 +19472,9 @@ describe("hosted workspace runtime entrypoint", () => {
       const putArtifact = platform.artifactStore.put;
       let artifactPutCount = 0;
       platform.artifactStore.put = async (artifact) => {
-        artifactPutCount += 1;
+        const artifactPutOrdinal = ++artifactPutCount;
         await putArtifact(artifact);
-        if (artifactPutCount === 1 && !abortController.signal.aborted) {
+        if (artifactPutOrdinal === 1 && !abortController.signal.aborted) {
           abortController.abort(abortReason);
         }
       };
