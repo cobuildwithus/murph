@@ -305,6 +305,7 @@ test('sendAssistantNotificationLocal persists the turn before outbound delivery 
     assistantTargetOverride: {
       reasoningEffort: 'high',
     },
+    scheduledOccurrenceAt: '2026-07-16T01:00:00.000Z',
     vault: '/vaults/test',
   } satisfies Parameters<typeof sendAssistantNotificationLocal>[0] & Record<string, unknown>
 
@@ -371,6 +372,10 @@ test('sendAssistantNotificationLocal persists the turn before outbound delivery 
   assert.deepEqual(firstResolvedNotificationSessionInput.message.assistantTargetOverride, {
     reasoningEffort: 'high',
   })
+  assert.equal(
+    firstResolvedNotificationSessionInput.message.scheduledOccurrenceAt,
+    '2026-07-16T01:00:00.000Z',
+  )
   assert.deepEqual(result.decision, {
     kind: 'send_message',
     privateSummary: 'summary',
